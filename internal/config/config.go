@@ -374,17 +374,36 @@ func IncludeDirProblem(dir string) string {
 }
 
 // ListenHostPort splits Listen into an IPv4 address and a port, false when it
-// is not one.
+// is not one. The port is 1 to 65535 written without leading zeros, the one
+// spelling a request carries, so the file and the request cannot disagree on
+// whether 08480 is 8480.
 func (i WebServer) ListenHostPort() (string, int, bool) {
 	host, port, err := net.SplitHostPort(i.Listen)
 	if err != nil || !isIPv4(host) {
 		return "", 0, false
 	}
 	n, err := strconv.Atoi(port)
-	if err != nil || n < 1 || n > 65535 {
+	if err != nil || n < 1 || n > 65535 || strconv.Itoa(n) != port {
 		return "", 0, false
 	}
 	return host, n, true
+}
+
+// ProxiesToThisHost reports whether listen is an address the owner's web
+// server may be handed for a site whose mesh address is address: an IPv4
+// loopback address or the site's own mesh address, in plain dotted form, with
+// a port ListenHostPort accepts. A monitor behind the owner's web server is
+// handed to that server on the same host, so nothing beyond the host is
+// needed, and Docker publishes a port with rules of its own in front of the
+// firewall, so any other address would expose the app around the web
+// server. validate and host request both hold web_server.listen to it.
+func ProxiesToThisHost(listen, address string) bool {
+	host, _, ok := WebServer{Listen: listen}.ListenHostPort()
+	if !ok {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip.String() == host && (ip.IsLoopback() || host == address)
 }
 
 // WebServerManagedBy returns the site's declared web_server.managed_by, paisans when none is
@@ -1193,14 +1212,17 @@ func (c *Config) structural(noSubnet bool) error {
 	case c.Mesh.Subnet == "":
 		add("mesh.subnet: required. Run `paisans init`, which reaches every site, picks a /24 that overlaps nothing on any of them, and writes it here with each site's address moved into it. It is what applications trust for forwarded client addresses, so once a site is deployed it never changes.")
 	default:
-		ip, network, err := net.ParseCIDR(c.Mesh.Subnet)
+		network, p := ParseMeshSubnet(c.Mesh.Subnet)
 		switch {
-		case err != nil:
-			add("mesh.subnet: %q is not a network in CIDR notation. Write it as an address and a prefix length, for example 10.44.0.0/24.", c.Mesh.Subnet)
-		case ip.To4() == nil:
-			add("mesh.subnet: %q is IPv6. The mesh is IPv4 only for now.", c.Mesh.Subnet)
-		case !ip.Equal(network.IP):
-			add("mesh.subnet: %q is a host address inside a network, not the network itself. Write %s.", c.Mesh.Subnet, network.String())
+		case p != "":
+			add("mesh.subnet: %q %s. Write it as an IPv4 network address and a prefix length, for example 10.44.0.0/24.", c.Mesh.Subnet, p)
+		default:
+			if ones, _ := network.Mask.Size(); ones < MeshMinPrefix {
+				add("mesh.subnet: %q is larger than a /%d. The mesh is what the hosts' firewalls trust, so a larger one could cover a LAN; `paisans init` picks a /24.", c.Mesh.Subnet, MeshMinPrefix)
+			}
+			for _, r := range MeshReservedOverlaps(network) {
+				add("mesh.subnet: %q overlaps %s. A host's firewall lets the deployment reach the mesh before it stops it reaching loopback, link-local and other reserved ranges, so the mesh must lie outside them; `paisans init` picks a /24 in private space.", c.Mesh.Subnet, r)
+			}
 		}
 	}
 
@@ -1227,7 +1249,7 @@ func (c *Config) structural(noSubnet bool) error {
 			}
 			if in.Listen != "" {
 				if _, _, ok := in.ListenHostPort(); !ok {
-					add("sites.%s.web_server.listen: %q is not an IPv4 address and a port. Write it as the address your web server proxies to, for example 127.0.0.1:8480.", name, in.Listen)
+					add("sites.%s.web_server.listen: %q is not an IPv4 address and a port from 1 to 65535 written without leading zeros. Write it as the address your web server proxies to, for example 127.0.0.1:8480.", name, in.Listen)
 				}
 			}
 		}
@@ -1235,6 +1257,10 @@ func (c *Config) structural(noSubnet bool) error {
 			add("sites.%s.address: required. Every site needs a mesh address, and it never changes.", name)
 		} else if !isIPv4(site.Address) {
 			add("sites.%s.address: %q is not an IPv4 address. Use the site's WireGuard address, for example 10.44.0.1.", name, site.Address)
+		} else if a := net.ParseIP(site.Address).To4().String(); a != site.Address {
+			add("sites.%s.address: %q is not written as plain dotted IPv4, %s. Write it as four dotted numbers, for example 10.44.0.1.", name, site.Address, a)
+		} else if _, mesh, err := net.ParseCIDR(c.Mesh.Subnet); err == nil && IsNetworkOrBroadcast(net.ParseIP(site.Address), mesh) {
+			add("sites.%s.address: %s is mesh.subnet %s's network or broadcast address, which no host may hold. Give the site another address inside the mesh.", name, site.Address, c.Mesh.Subnet)
 		}
 		if site.Endpoint != "" {
 			if _, err := ParseEndpointPort(site.Endpoint); err != nil {
@@ -1258,7 +1284,7 @@ func (c *Config) structural(noSubnet bool) error {
 		if site.Arch != "" && !hostarch.Supported(site.Arch) {
 			add("sites.%s.arch: unknown value %q. The toolkit supports amd64 and arm64, and writes this line itself: delete it, and the next apply records what the host reports.", name, site.Arch)
 		}
-		problems = append(problems, sshProblems(name, site, c.Operators)...)
+		problems = append(problems, sshProblems(name, site, c.ID, c.Operators)...)
 	}
 	problems = append(problems, c.operatorProblems()...)
 	for _, name := range c.AppNames() {
@@ -1275,8 +1301,8 @@ func (c *Config) structural(noSubnet bool) error {
 		}
 		if app.Hostname == "" {
 			add("apps.%s.hostname: required. It is the public name the gateway routes to.", name)
-		} else if !nameChars(app.Hostname) {
-			add("apps.%s.hostname: %q holds characters no DNS name has: a name is letters, digits, hyphens and dots. It is written into the gateway's Caddyfile and the app's env file as it is, so anything else could add to them.", name, app.Hostname)
+		} else if p := HostnameProblem(app.Hostname); p != "" {
+			add("apps.%s.hostname: %q is not a hostname: %s. It is written into the gateway's Caddyfile and the app's env file as it is, so anything else could add to them.", name, app.Hostname, p)
 		}
 		for _, service := range sortedKeys(app.Images) {
 			if r, ok := ControlRune(app.Images[service]); ok {
@@ -1293,8 +1319,8 @@ func (c *Config) structural(noSubnet bool) error {
 			}
 			if strings.TrimSpace(app.Hostnames[role]) == "" {
 				add("apps.%s.hostnames.%s: empty. Give a hostname, or remove the role.", name, keyPath(role))
-			} else if !nameChars(app.Hostnames[role]) {
-				add("apps.%s.hostnames.%s: %q holds characters no DNS name has: a name is letters, digits, hyphens and dots. It is written into the gateway's Caddyfile as it is, so anything else could add to it.", name, keyPath(role), app.Hostnames[role])
+			} else if p := HostnameProblem(app.Hostnames[role]); p != "" {
+				add("apps.%s.hostnames.%s: %q is not a hostname: %s. It is written into the gateway's Caddyfile as it is, so anything else could add to it.", name, keyPath(role), app.Hostnames[role], p)
 			}
 		}
 		for _, key := range sortedKeys(app.Settings) {

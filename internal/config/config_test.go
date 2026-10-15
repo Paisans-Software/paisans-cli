@@ -1084,3 +1084,97 @@ func TestSpiloImageIsTheRunningMajors(t *testing.T) {
 		t.Errorf("SpiloImage is %q for a major with no entry", got)
 	}
 }
+
+// A mesh larger than a /24 would let the rules that treat the mesh as
+// trusted cover an owner's LAN, so it is refused where it is declared.
+func TestMeshLargerThanA24IsRefused(t *testing.T) {
+	got := loadErr(t, strings.Replace(validConfig, "subnet: 10.44.0.0/24", "subnet: 10.44.0.0/16", 1))
+	if !strings.Contains(got, "mesh.subnet") || !strings.Contains(got, "larger than a /24") {
+		t.Errorf("got %q", got)
+	}
+}
+
+// An app's hostname is held to the strict DNS-name rule everywhere it is
+// declared, so a name validate accepts is one host request accepts too.
+func TestAppHostnamesAreHeldToTheStrictRule(t *testing.T) {
+	for _, bad := range []string{"a..example.org", strings.Repeat("a", 64) + ".example.org", "a_b.example.org", "Talk.example.org", "talk"} {
+		got := loadErr(t, strings.Replace(validConfig, "hostname: talk.example.org", "hostname: "+bad, 1))
+		if !strings.Contains(got, "apps.talk.hostname") {
+			t.Errorf("hostname %q: got %q", bad, got)
+		}
+		got = loadErr(t, strings.Replace(validConfig, "hostname: talk.example.org", "hostname: talk.example.org\n    hostnames:\n      media: "+bad, 1))
+		if !strings.Contains(got, "apps.talk.hostnames.media") {
+			t.Errorf("hostnames.media %q: got %q", bad, got)
+		}
+	}
+}
+
+// A mesh over this network, loopback, link-local or multicast is refused
+// where it is declared, by the rule a request is held to: the egress table
+// on an admitted host accepts the mesh before it drops those ranges.
+func TestMeshOverAReservedRangeIsRefused(t *testing.T) {
+	for _, c := range []struct{ subnet, address, overlaps string }{
+		{"0.0.0.0/24", "0.0.0.1", "0.0.0.0/8"},
+		{"127.44.0.0/24", "127.44.0.1", "127.0.0.0/8"},
+		{"169.254.44.0/24", "169.254.44.1", "169.254.0.0/16"},
+		{"239.1.0.0/24", "239.1.0.1", "224.0.0.0/3"},
+	} {
+		body := strings.Replace(validConfig, "subnet: 10.44.0.0/24", "subnet: "+c.subnet, 1)
+		body = strings.Replace(body, "address: 10.44.0.1", "address: "+c.address, 1)
+		got := loadErr(t, body)
+		if !strings.Contains(got, "mesh.subnet") || !strings.Contains(got, "overlaps "+c.overlaps) {
+			t.Errorf("%s: got %q", c.subnet, got)
+		}
+	}
+}
+
+// A site address that is the mesh's network or broadcast address is
+// refused, as a request refuses it.
+func TestSiteAddressIsNotTheMeshsNetworkOrBroadcast(t *testing.T) {
+	for _, a := range []string{"10.44.0.0", "10.44.0.255"} {
+		got := loadErr(t, strings.Replace(validConfig, "address: 10.44.0.1", "address: "+a, 1))
+		if !strings.Contains(got, "sites.home-a.address") || !strings.Contains(got, "network or broadcast address") {
+			t.Errorf("%s: got %q", a, got)
+		}
+	}
+}
+
+// ssh.user is held to the rule a request's user is: never root, and never
+// another deployment's paisans- user, whose authorized_keys host admit would
+// otherwise write into. The deployment's own user and a user of the
+// owner's are accepted.
+func TestSSHUserIsNotRootOrAnotherDeployments(t *testing.T) {
+	for _, c := range []struct{ user, want string }{
+		{"root", "sites.home-a.ssh.user: root is never a deployment's user"},
+		{"paisans-0a0b", "sites.home-a.ssh.user: paisans-0a0b is another deployment's name; this deployment's own user is paisans-f2a9"},
+		{"paisans-f2a9", ""},
+		{"ubuntu", ""},
+	} {
+		got := loadErr(t, strings.Replace(validConfig, "user: ubuntu", "user: "+c.user, 1))
+		if c.want == "" && got != "" || !strings.Contains(got, c.want) {
+			t.Errorf("%s: got %q", c.user, got)
+		}
+	}
+}
+
+// mesh.subnet is written in its canonical form, the one spelling a request
+// carries, so a configuration validate accepts is one host request takes.
+func TestMeshSubnetIsWrittenCanonically(t *testing.T) {
+	for _, c := range []struct{ subnet, want string }{
+		{"10.44.0.0/024", `mesh.subnet: "10.44.0.0/024" is not written in its canonical form, 10.44.0.0/24`},
+		{"::ffff:10.44.0.0/120", `mesh.subnet: "::ffff:10.44.0.0/120" is not written in its canonical form`},
+	} {
+		got := loadErr(t, strings.Replace(validConfig, "subnet: 10.44.0.0/24", "subnet: "+c.subnet, 1))
+		if !strings.Contains(got, c.want) {
+			t.Errorf("%s: got %q\nwant it to say %q", c.subnet, got, c.want)
+		}
+	}
+}
+
+// A site address is written as plain dotted IPv4, as a request carries it.
+func TestSiteAddressIsWrittenCanonically(t *testing.T) {
+	got := loadErr(t, strings.Replace(validConfig, "address: 10.44.0.1", "address: ::ffff:10.44.0.1", 1))
+	if !strings.Contains(got, `sites.home-a.address: "::ffff:10.44.0.1" is not written as plain dotted IPv4, 10.44.0.1`) {
+		t.Errorf("got %q", got)
+	}
+}

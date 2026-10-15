@@ -625,6 +625,34 @@ paisans host deployments --ssh admin@203.0.113.9   # read only
 
 See *`--id` cleans a host when `paisans-stack.yaml` is lost* in `README.md`.
 
+### `paisans host request`
+
+Writes the request a host's owner admits one site from, to stdout, and its
+digest to stderr as sixteen characters in four groups, `xxxx-xxxx-xxxx-xxxx`.
+The owner compares that digest with the one the file shows them.
+
+```sh
+paisans host request --site home-a > home-a.admit   # the digest is on stderr
+```
+
+* **Alone:** always: it is the operator's half of admission when the host's
+  owner does not have the configuration, and the message a login to a site
+  not admitted prints names this exact command.
+* **Flags:** `--site <name>` (required), `--config`.
+* **Hosts:** reaches none. Refuses a site the configuration does not
+  declare, a configuration `validate` refuses, and a request that would
+  itself be refused.
+* **`--execute`:** not taken. It writes nothing but stdout.
+* **The request:** YAML holding nothing secret: the deployment's id, the
+  site's user, its SSH and WireGuard ports (`listen_port: 0` when no site
+  dials it), its mesh address and the subnet, whether it has an endpoint,
+  the grants its roles need (`watchdog` for a data site, `public_ports` for
+  a gateway or a monitor running the toolkit's Caddy), the apps a monitor
+  behind the owner's web server hands it, and each operator's public keys,
+  without their comments. Two runs print the same bytes, so the same digest.
+
+See *A host's owner admits a site from a request* in `README.md`.
+
 ### `paisans prune`
 
 Lists one site's dangling Docker volumes, with size and top level entries, and

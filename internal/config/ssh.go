@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/rsa"
 	"fmt"
 	"net"
 	"net/mail"
@@ -160,6 +161,38 @@ type KeyList []NamedKey
 // file on the host.
 var keyName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,31}$`)
 
+// MinRSABits is the shortest RSA key an operator may list.
+const MinRSABits = 3072
+
+// KeyTypeProblem says why pub is not a key an operator may list, "" when it
+// is one: the key types a current OpenSSH generates, and RSA only at a size
+// that is still sound, counted by the modulus's own bit length since a size
+// in bytes rounds up. A key is admission to a shell, so a certificate, whose
+// trust lies with a CA the host does not know, and an obsolete type are
+// refused by name. The loader holds operators.<name>.keys to it and a
+// request holds its operators' keys to it.
+func KeyTypeProblem(pub ssh.PublicKey) string {
+	switch pub.Type() {
+	case ssh.KeyAlgoED25519, ssh.KeyAlgoECDSA256, ssh.KeyAlgoECDSA384, ssh.KeyAlgoECDSA521,
+		ssh.KeyAlgoSKED25519, ssh.KeyAlgoSKECDSA256:
+		return ""
+	case ssh.KeyAlgoRSA:
+		cp, ok := pub.(ssh.CryptoPublicKey)
+		if !ok {
+			return "an ssh-rsa key whose size cannot be read"
+		}
+		k, ok := cp.CryptoPublicKey().(*rsa.PublicKey)
+		if !ok {
+			return "an ssh-rsa key whose size cannot be read"
+		}
+		if bits := k.N.BitLen(); bits < MinRSABits {
+			return fmt.Sprintf("an ssh-rsa key of %d bits, under %d", bits, MinRSABits)
+		}
+		return ""
+	}
+	return fmt.Sprintf("%q, not a key type paisans accepts", pub.Type())
+}
+
 // AuthorizedKey is one public key, as an authorized_keys line carries it.
 type AuthorizedKey struct {
 	// Name is the operator the key belongs to; empty for a line read off a host.
@@ -257,7 +290,7 @@ func isHostname(s string) bool {
 }
 
 // sshProblems is structural's check of one site's ssh section.
-func sshProblems(name string, site Site, known map[string]Operator) []string {
+func sshProblems(name string, site Site, id string, known map[string]Operator) []string {
 	s := site.SSH
 	var problems []string
 	add := func(format string, args ...any) {
@@ -269,6 +302,8 @@ func sshProblems(name string, site Site, known map[string]Operator) []string {
 	}
 	if s.User != "" && !unixUser.MatchString(s.User) {
 		add("sites.%s.ssh.user: %q is not a user name this toolkit accepts. Use a lowercase letter or underscore, then lowercase letters, digits, underscores or hyphens, at most 32 characters, or leave it out for the deployment's own user.", name, s.User)
+	} else if p := DeploymentUserProblem(s.User, id); s.User != "" && p != "" {
+		add("sites.%s.ssh.user: %s. host admit makes this user the deployment's and writes the operators' keys into it, so leave ssh.user out for the deployment's own user, or name another user of your own.", name, p)
 	}
 	if s.Port < 0 || s.Port > 65535 {
 		add("sites.%s.ssh.port: %d is not a port. Give 1 to 65535, or leave it out for 22.", name, s.Port)
@@ -401,6 +436,12 @@ func (c *Config) operatorProblems() []string {
 			case len(options) > 0:
 				add("operators.%s.keys: line %d carries options (%s). List plain keys only; a restricted key is added to authorized_keys by hand, where host prepare leaves it alone.", id, n+1, strings.Join(options, ","))
 				continue
+			}
+			if pub, _, _, _, err := ssh.ParseAuthorizedKey([]byte(line)); err == nil {
+				if p := KeyTypeProblem(pub); p != "" {
+					add("operators.%s.keys: line %d is %s. Give an ed25519 key (ssh-keygen -t ed25519), an ECDSA or security key, or an RSA key of %d bits or more; a certificate's trust lies with a CA the host does not know.", id, n+1, p, MinRSABits)
+					continue
+				}
 			}
 			switch first, dup := owner[key.Fingerprint]; {
 			case dup && first == id:

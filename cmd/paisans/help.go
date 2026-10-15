@@ -41,7 +41,7 @@ type helpSection struct {
 // groupSummary is the line the first page gives a command with
 // subcommands. A command without any is listed by its own summary.
 var groupSummary = map[string]string{
-	"host":        "Prepare a host, or list what is on it.",
+	"host":        "Prepare a host, list what is on it, or request admission.",
 	"site":        "Add a site to the running deployment, or remove one.",
 	"mesh":        "Replace sites' WireGuard keys.",
 	"gateway":     "Move the gateway role to another site.",
@@ -174,6 +174,14 @@ var helpCommands = []helpCommand{
 		usage:   []string{"paisans host deployments --ssh <user@host[:port]> [--sudo=false]"},
 		detail: "List every deployment in the registry of the host --ssh names (id, token, domain, site, roles and root, and a Caddy kept for /srv/caddy.d), and any deployment directory or labelled compose project no registry entry names. " +
 			"Needs no " + config.FileName + "; changes nothing.",
+	},
+	{
+		name:    "host request",
+		summary: "Write the request a host's owner admits a site from.",
+		usage:   []string{"paisans host request --site <name> [--config " + config.FileName + "] > <name>.admit"},
+		detail: "Write to stdout the request the host's owner admits the site from: the deployment's id, the site's user, SSH and WireGuard ports, mesh address and subnet, whether it has an endpoint, the grants its roles need, the apps handed to the owner's web server, and each operator's public keys. " +
+			"Print its digest, sixteen characters as xxxx-xxxx-xxxx-xxxx, to stderr, for the owner to compare over a channel you both trust, since the request carries the keys that will log in to their machine. " +
+			"Reaches no host; holds nothing secret.",
 	},
 	{
 		name:    "site add",
@@ -428,7 +436,9 @@ host it writes to in /var/lib/paisans/registry.json, and refuses if another
 deployment there holds this one's token, WireGuard interface or listen port, or
 a mesh subnet overlapping this one's. apply and host prepare also refuse when
 anything else on the host overlaps the mesh subnet. dns init and dns prune reach
-no host, only the DNS provider's API, and change it only with --execute; site
+no host, only the DNS provider's API, and change it only with --execute; host
+request reaches no host and takes no --execute, writing only to stdout and
+stderr; site
 remove also deletes the removed site's records there. web-server show and
 web-server check change nothing: check looks at a monitor's public hostname as
 any visitor could, and with managed_by: external both read the monitor's web

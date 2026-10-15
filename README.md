@@ -1071,11 +1071,13 @@ configuration and into commands on the host (`web-server-include-dir-path`).
 
 `listen` belongs to `managed_by: external` alone, which cannot work without it
 (`web-server-listen-managed-by`). Docker publishes a port with its own iptables rules,
-in front of ufw, so a `listen` the internet can reach would expose the app
-around the web server whatever the firewall says: only loopback, a private LAN
-address (RFC 1918, or `100.64.0.0/10` as Tailscale uses) or the site's own
-mesh address are accepted (`web-server-listen-public`), and all but loopback warn
-that ufw does not cover them (`web-server-listen-bypasses-firewall`). One `listen` publishes one app, so an
+in front of ufw, so a `listen` anything else can reach would expose the app
+around the web server whatever the firewall says. The web server runs on the
+same host, so only an IPv4 loopback address or the site's own mesh address is
+accepted, with a port written without leading zeros, the rule `host request`
+holds the site's request to (`web-server-listen-not-this-host`); loopback is the one
+to use, and the mesh address warns that ufw does not cover it
+(`web-server-listen-bypasses-firewall`). One `listen` publishes one app, so an
 external monitor hosts the monitor alone (`web-server-external-serves-one-app`).
 
 Either way the app is rendered for a proxy in front of it:
@@ -1086,10 +1088,9 @@ trusted may claim any client address. Behind the monitor's own Caddy that is
 the site's own mesh address, `/32`, since that Caddy runs on the host and dials
 the app there. For a loopback `listen` it is the pinned network's gateway,
 `10.255.255.1/32`, because Docker hands a connection on a loopback publish to
-the container from that gateway, never from 127.0.0.1. A LAN or mesh `listen`
-is reached by the web server's own address, which Docker's forwarding keeps
-and which the toolkit knows only by its network, so it is that private block
-or the mesh subnet.
+the container from that gateway, never from 127.0.0.1. A mesh `listen` is
+reached by the web server's own address, which Docker's forwarding keeps and
+which the toolkit knows only by its network, so it is the mesh subnet.
 
 Switching an existing site between the two `managed_by` values moves that pin, and the
 network on the host has to move with it, or `TRUST_PROXY` names a gateway the
@@ -1984,7 +1985,15 @@ app trusts the mesh subnet and every service binds an address in it, so moving
 it is a rebuild of every site.
 
 `validate` refuses a file without `mesh.subnet` and says to run `init`, and
-refuses one that is not an IPv4 network or a site address outside it.
+refuses one that is not an IPv4 network, one larger than a /24, and one
+overlapping `0.0.0.0/8`, `127.0.0.0/8`, `169.254.0.0/16` or `224.0.0.0/3`.
+The hosts' firewalls trust the whole mesh, so a larger one could cover an
+owner's LAN; an admitted host's egress table accepts the mesh before it
+drops loopback and link-local, so a mesh over those would let the
+deployment reach the owner's local services and the cloud metadata address,
+and this network and multicast route nothing a mesh could use. It refuses a
+site address outside the mesh, and one that is the mesh's network or
+broadcast address.
 
 `doctor` has a `mesh` section, checked on every site it reaches: the
 interface exists and is up (`ip -j link show dev psns-<token>`), and the live
@@ -4607,7 +4616,7 @@ sites:
 | Key | Required | Refused when |
 |-----|----------|--------------|
 | `host` | only without `public_address` or `endpoint` | neither a hostname nor an IP address (so `user@host` is refused: the user has its own key) |
-| `user` | no: empty means the deployment's own user, `paisans-<token>` | not a lowercase letter or underscore followed by lowercase letters, digits, underscores or hyphens, 32 characters at most |
+| `user` | no: empty means the deployment's own user, `paisans-<token>` | not a lowercase letter or underscore followed by lowercase letters, digits, underscores or hyphens, 32 characters at most; `root`; another deployment's `paisans-<token>` |
 | `port` | no | outside 1 to 65535 |
 | `keys` | yes | not a list; empty; an operator the `operators` section does not declare; an operator listed twice |
 
@@ -4618,7 +4627,7 @@ Each entry of `operators`:
 | the entry's name | | not a lowercase letter or digit followed by lowercase letters, digits, dots, underscores or hyphens, 32 characters at most |
 | `name` | yes | not at least a first and a last name: split at its first space, either part is empty, Eg: `Alice` is refused and `Alice Example` is not |
 | `email` | yes | not an email address alone, Eg: `alice@example.org` |
-| `keys` | yes | no key; a line that is not an OpenSSH public key; a key with options (`from=`, `command=`, `restrict`); the same key twice, or under two operators, by fingerprint |
+| `keys` | yes | no key; a line that is not an OpenSSH public key; a key with options (`from=`, `command=`, `restrict`); a type other than ed25519, ECDSA, a security key's `sk-` types or RSA of 3072 bits or more, so a certificate too; the same key twice, or under two operators, by fingerprint |
 
 `host` defaults to `public_address`, and without that to the host in
 `endpoint`, because on most sites they are the same address written twice.
@@ -4654,6 +4663,45 @@ A single string in place of the section, `ssh: home-a.local`, is refused, and
 the refusal says the section to write and its keys (`host`,
 `user`, `port` and `keys`). A site's access has one way to write it (founder decision), so there is
 nothing to read twice, and the string has nowhere to put the keys.
+
+#### A host's owner admits a site from a request
+
+An owner who does not have the deployment's configuration admits a site
+from a request: `paisans host request --site <site> > <site>.admit` writes
+it, and the owner admits the site from that file. The request holds what
+admission needs and nothing secret: the deployment's id, the site's user,
+its SSH and WireGuard ports, its mesh address and the mesh subnet, whether
+it has an endpoint, the grants its roles need (the watchdog for a data site,
+ports 80 and 443 for a gateway or a monitor running the toolkit's Caddy),
+the apps a monitor behind the owner's web server hands it, and each
+operator's public keys.
+
+Those keys get a shell on the owner's machine, so the request is only as
+trustworthy as the way it travelled. `host request` prints a digest of it
+on stderr: the first 80 bits of its SHA-256 as sixteen characters of
+Crockford base32 in four groups, `xxxx-xxxx-xxxx-xxxx`. The owner is shown
+the same digest of the file they were given and compares the two over a
+channel they trust, such as a call. A digest covers what admission acts on
+only if every byte it covers is read, so a request is refused unless it is
+exactly the bytes `host request` writes for what it holds: a comment, an
+anchor, a second document or rewritten line endings cannot carry something
+the owner was not shown. Keys travel without their comments, which are free
+text a forger could vary while searching for a request with a matching
+digest.
+
+A request is read as strictly as a configuration. An unknown version, a
+field missing or unknown, a user name `ssh.user` would refuse, `root`, a
+`paisans-` name other than the deployment's own, a key that is not a plain
+public key, and an address outside the subnet are each refused, and so is a
+mesh subnet overlapping `0.0.0.0/8`, loopback, link-local or multicast: the
+egress table accepts the mesh subnet before it drops the owner's loopback
+and link-local ranges, so a subnet over them would let the deployment reach
+what the table keeps it from. `host request` applies the same checks, so it
+never writes a request the owner's side would refuse, and `validate` holds
+the configuration to each rule it can check from the file, `ssh.user`
+included, so a configuration it accepts gets a request. A refusal `host
+request` can still reach names the configuration key to change beside the
+request's field.
 
 #### Keys belong to operators, and sites name operators
 

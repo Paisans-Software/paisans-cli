@@ -785,7 +785,7 @@ func (c *checker) meshIsNotPrivate() {
 	if err != nil {
 		return // the loader has already reported this
 	}
-	if network.IP.IsPrivate() || network.IP.IsLoopback() || network.IP.IsLinkLocalUnicast() {
+	if network.IP.IsPrivate() {
 		return
 	}
 	c.warn("mesh-subnet-is-not-private", "mesh.subnet",
@@ -1418,7 +1418,7 @@ func (c *checker) mediaHostnameShape() {
 		}
 		key := fmt.Sprintf("apps.%s.hostnames.%s", name, blueprints.MediaRole)
 		derived := blueprints.MediaHostnameIsDerived(c.cfg, app)
-		if problem := hostnameProblem(media); problem != "" {
+		if problem := config.HostnameProblem(media); problem != "" {
 			if derived {
 				c.refuse("media-hostname-is-not-a-hostname", key,
 					"media hostname is not a valid hostname",
@@ -1458,7 +1458,7 @@ func (c *checker) mailDomains() {
 	for i, entry := range c.cfg.Community.MailDomains {
 		key := fmt.Sprintf("community.mail_domains[%d]", i)
 		name := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(entry)), ".")
-		if problem := hostnameProblem(name); problem != "" {
+		if problem := config.HostnameProblem(name); problem != "" {
 			c.refuse("mail-domain-is-not-a-hostname", key,
 				"mail domain is not a hostname",
 				"is %q, which is not a hostname: %s. List the name mail is addressed to, the part after the @, for example %s.",
@@ -1528,48 +1528,6 @@ func (c *checker) mediaHostnameUnderAnAppHostname() {
 			break
 		}
 	}
-}
-
-// hostnameProblem says why a name is not a usable DNS hostname, or returns
-// empty when it is one. It is the RFC 1123 shape, written lowercase: labels of
-// 1 to 63 letters, digits and hyphens, not starting or ending with a hyphen,
-// at least two of them, 253 characters in all.
-//
-// Lowercase is required rather than folded. Caddy and DNS both ignore case,
-// but the name is also written into an application's configuration and from
-// there into URLs other servers store, and two spellings of one name are two
-// URLs to anything comparing them as strings.
-func hostnameProblem(host string) string {
-	switch {
-	case host == "":
-		return "it is empty"
-	case len(host) > 253:
-		return "it is longer than 253 characters"
-	case host != strings.ToLower(host):
-		return "it contains capital letters; write it lowercase"
-	case strings.Contains(host, "://") || strings.ContainsAny(host, "/:"):
-		return "it carries a scheme, a port or a path; give the name alone"
-	}
-	labels := strings.Split(host, ".")
-	if len(labels) < 2 {
-		return "it is a single label, not a name under a domain"
-	}
-	for _, label := range labels {
-		switch {
-		case label == "":
-			return "it has an empty label"
-		case len(label) > 63:
-			return fmt.Sprintf("its label %q is longer than 63 characters", label)
-		case label[0] == '-' || label[len(label)-1] == '-':
-			return fmt.Sprintf("its label %q starts or ends with a hyphen", label)
-		}
-		for _, r := range label {
-			if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-') {
-				return fmt.Sprintf("its label %q contains %q, and only letters, digits and hyphens are allowed", label, r)
-			}
-		}
-	}
-	return ""
 }
 
 // duplicateHostname refuses the same public name claimed twice.

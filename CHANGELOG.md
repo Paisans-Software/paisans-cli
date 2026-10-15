@@ -13,16 +13,23 @@ changes share a bullet. Detailed notes are on the corresponding
 ### Added
 
 - `infra.images` and `infra.postgres.<major>.spilo` override the infrastructure stack's images without a catalog release, and `paisans images` lists each site's builds, what would move, and overrides behind their track.
+- `host request --site <s>` writes the request a host's owner admits that site from, and prints its digest on stderr for the owner to compare over a channel both trust.
 - Any run with `--execute` that logs in to a site leaving `ssh.user` out writes the deployment's user there; a run without `--execute` only says so, and a failed write is a warning.
 - `host prepare --all` prepares every site the configuration declares, one at a time in its order, each with its own review, stopping at the first failure.
 - Each release attaches static `paisans-linux-amd64` and `paisans-linux-arm64` binaries and a `SHA256SUMS` file, so a host owner can run the CLI on Linux without Go.
 
 ### Changed
 
+- `apps.*.hostname` and `apps.*.hostnames.*` must be lowercase DNS names of two labels or more, so a capital, a single label, an empty or over-long label or an underscore is refused by `validate`.
+- `sites.*.web_server.listen` must be an IPv4 loopback address or the site's own mesh address, its port written without leading zeros, as `host request` requires; `web-server-listen-not-this-host` refuses anything else.
+- `mesh.subnet` and `sites.*.address` must be written in canonical form, Eg: `10.44.0.0/24` and not `10.44.0.0/024`, as `host request` carries them.
+- `mesh.subnet` larger than a /24 or overlapping 0.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16 or 224.0.0.0/3 is refused, as is a site address on its network or broadcast address, since hosts' firewalls trust the mesh.
 - `dns init` creates `v=DMARC1; p=reject; sp=reject;` for any mail name under `community.domain` with no MX record and no DMARC policy, instead of only warning that the policy is missing.
 - Below its registrable domain, `community.domain`'s hostnames each get their own reject DMARC policy, and the registrable domain's policy is checked and warned about, never written.
 - Docker commands on a site reach the login user's rootless daemon at `/run/user/<uid>/docker.sock`, the uid read once a run, and a refused default user is reported as a site not admitted.
 - `preflight`'s ssh check asks only that each site answers as its ssh user, and `doctor` has no sudo finding, since no command they check for runs through sudo.
+- `operators.*.keys` must be ed25519, ECDSA, a security key's `sk-` type or RSA of at least 3072 bits, as `host request` requires, so a certificate or a shorter RSA key is refused.
+- `sites.<site>.ssh.user` may not be `root` or another deployment's `paisans-<token>` user, as `host request` requires.
 - `sites.<site>.ssh.user` is optional: a site that leaves it out is reached as the deployment's own user, `paisans-<token>`, which must exist on the host.
 - `paisans create` asks each machine's SSH user as optional, offering the deployment's own user, `paisans-<token>`, when left blank.
 - `init` ends with `Next: run paisans secrets set` when a secret only the operator can give is unset, shows secret counts only with `--verbose`, and the SMTP password's reason is its login and host.
