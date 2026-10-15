@@ -1303,8 +1303,8 @@ func (c *Config) structural(noSubnet bool) error {
 		}
 		if app.Hostname == "" {
 			add("apps.%s.hostname: required. It is the public name the gateway routes to.", name)
-		} else if !ValidHostname(app.Hostname) {
-			add("apps.%s.hostname: %q is not a DNS name: dot-separated labels of letters, digits and hyphens, none empty or over 63 characters. It is written into the gateway's Caddyfile and the app's env file as it is, so anything else could add to them.", name, app.Hostname)
+		} else if p := HostnameProblem(app.Hostname); p != "" {
+			add("apps.%s.hostname: %q is not a hostname: %s. It is written into the gateway's Caddyfile and the app's env file as it is, so anything else could add to them.", name, app.Hostname, p)
 		}
 		for _, service := range sortedKeys(app.Images) {
 			if r, ok := ControlRune(app.Images[service]); ok {
@@ -1321,8 +1321,8 @@ func (c *Config) structural(noSubnet bool) error {
 			}
 			if strings.TrimSpace(app.Hostnames[role]) == "" {
 				add("apps.%s.hostnames.%s: empty. Give a hostname, or remove the role.", name, keyPath(role))
-			} else if !ValidHostname(app.Hostnames[role]) {
-				add("apps.%s.hostnames.%s: %q is not a DNS name: dot-separated labels of letters, digits and hyphens, none empty or over 63 characters. It is written into the gateway's Caddyfile as it is, so anything else could add to it.", name, keyPath(role), app.Hostnames[role])
+			} else if p := HostnameProblem(app.Hostnames[role]); p != "" {
+				add("apps.%s.hostnames.%s: %q is not a hostname: %s. It is written into the gateway's Caddyfile as it is, so anything else could add to it.", name, keyPath(role), app.Hostnames[role], p)
 			}
 		}
 		for _, key := range sortedKeys(app.Settings) {

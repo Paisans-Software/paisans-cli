@@ -19,7 +19,7 @@ func TestNameChecks(t *testing.T) {
 		{config.ValidUserName, "user", []string{"paisans-f2a9", "ubuntu", "_svc"}, []string{"", "Root", "1abc", "a b", "a;b", "abcdefghijklmnopqrstuvwxyzabcdefg"}},
 		{config.ValidOperatorName, "operator", []string{"alice", "0day", "a.b_c-d"}, []string{"", "Alice", "-a", "a b", "a/b"}},
 		{config.ValidAppName, "app", []string{"talk", "status-2"}, []string{"", "Talk", "a.b", "a_b", "-a"}},
-		{config.ValidHostname, "hostname", []string{"status.example.org"}, []string{"", "a b.example.org", "a;b", "-a.example.org", "a..example.org", strings.Repeat("a", 64) + ".org"}},
+		{config.ValidHostname, "hostname", []string{"status.example.org"}, []string{"", "a b.example.org", "a;b", "-a.example.org", "a..example.org", strings.Repeat("a", 64) + ".org", "Status.example.org", "status", "status.example.org:443"}},
 	} {
 		for _, s := range c.good {
 			if !c.check(s) {

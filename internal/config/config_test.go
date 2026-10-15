@@ -1094,7 +1094,7 @@ func TestMeshLargerThanA24IsRefused(t *testing.T) {
 // An app's hostname is held to the strict DNS-name rule everywhere it is
 // declared, so a name validate accepts is one host request accepts too.
 func TestAppHostnamesAreHeldToTheStrictRule(t *testing.T) {
-	for _, bad := range []string{"a..example.org", strings.Repeat("a", 64) + ".example.org", "a_b.example.org"} {
+	for _, bad := range []string{"a..example.org", strings.Repeat("a", 64) + ".example.org", "a_b.example.org", "Talk.example.org", "talk"} {
 		got := loadErr(t, strings.Replace(validConfig, "hostname: talk.example.org", "hostname: "+bad, 1))
 		if !strings.Contains(got, "apps.talk.hostname") {
 			t.Errorf("hostname %q: got %q", bad, got)

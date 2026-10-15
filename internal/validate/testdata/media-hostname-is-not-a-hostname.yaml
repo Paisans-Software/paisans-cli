@@ -1,7 +1,8 @@
-# valid.yaml with one thing broken: blog declares a media hostname that is
-# not a hostname, because a name here is lowercase. It
-# would be a site address the gateway cannot get a certificate for, and a URL
-# WriteFreely hands every browser.
+# valid.yaml with one thing broken: blog's media hostname, derived from its
+# 60 character label, is not a hostname, since -media makes that label 66
+# characters. It would be a site address the gateway cannot get a
+# certificate for, and a URL WriteFreely hands every browser. A declared
+# name of the wrong shape is refused by the loader first.
 version: 1
 id: f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01
 
@@ -75,10 +76,8 @@ apps:
     placement: cluster
   blog:
     blueprint: writefreely
-    hostname: blog.example.org
+    hostname: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd.example.org
     placement: cluster
-    hostnames:
-      media: Blog-Media.example.org
   auth:
     blueprint: pocket-id
     hostname: id.example.org

@@ -37,8 +37,52 @@ func ValidOperatorName(s string) bool { return keyName.MatchString(s) }
 // ValidAppName reports whether s is a name an app may have under apps.
 func ValidAppName(s string) bool { return blueprintName.MatchString(s) }
 
-// ValidHostname reports whether s is a DNS name: dot-separated labels of
-// letters, digits and hyphens, none empty or over 63 characters, at most 253
-// in all. It is the one rule for an app's hostname, in the configuration and
-// in a request, and the rule ssh.host is held to.
-func ValidHostname(s string) bool { return isHostname(s) }
+// ValidHostname reports whether s is a public hostname, HostnameProblem's
+// rule: the one rule for an app's hostnames in the configuration, for a
+// request's web_server hostnames and for validate's media and mail names.
+// Each is written lowercase, its one canonical spelling, so comparing two
+// names as strings is comparing them as DNS does. ssh.host names a machine
+// to log in to, which may be a single label, and has a rule of its own.
+func ValidHostname(s string) bool { return HostnameProblem(s) == "" }
+
+// HostnameProblem says why a name is not a usable public hostname, or returns
+// empty when it is one. It is the RFC 1123 shape, written lowercase: labels of
+// 1 to 63 letters, digits and hyphens, not starting or ending with a hyphen,
+// at least two of them, 253 characters in all.
+//
+// Lowercase is required rather than folded. Caddy and DNS both ignore case,
+// but the name is also written into an application's configuration and from
+// there into URLs other servers store, and two spellings of one name are two
+// URLs to anything comparing them as strings.
+func HostnameProblem(host string) string {
+	switch {
+	case host == "":
+		return "it is empty"
+	case len(host) > 253:
+		return "it is longer than 253 characters"
+	case host != strings.ToLower(host):
+		return "it contains capital letters; write it lowercase"
+	case strings.Contains(host, "://") || strings.ContainsAny(host, "/:"):
+		return "it carries a scheme, a port or a path; give the name alone"
+	}
+	labels := strings.Split(host, ".")
+	if len(labels) < 2 {
+		return "it is a single label, not a name under a domain"
+	}
+	for _, label := range labels {
+		switch {
+		case label == "":
+			return "it has an empty label"
+		case len(label) > 63:
+			return fmt.Sprintf("its label %q is longer than 63 characters", label)
+		case label[0] == '-' || label[len(label)-1] == '-':
+			return fmt.Sprintf("its label %q starts or ends with a hyphen", label)
+		}
+		for _, r := range label {
+			if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-') {
+				return fmt.Sprintf("its label %q contains %q, and only letters, digits and hyphens are allowed", label, r)
+			}
+		}
+	}
+	return ""
+}

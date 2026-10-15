@@ -92,6 +92,9 @@ func TestCheckRefuses(t *testing.T) {
 		{"a hostname with an empty label", func(r *admission.Request) {
 			r.WebServer = []admission.WebApp{{App: "status", Hostname: "a..example.org", Listen: "127.0.0.1:8480"}}
 		}, "web_server[0].hostname"},
+		{"a hostname with capitals", func(r *admission.Request) {
+			r.WebServer = []admission.WebApp{{App: "status", Hostname: "Status.example.org", Listen: "127.0.0.1:8480"}}
+		}, `web_server[0].hostname: "Status.example.org" is not a hostname`},
 		{"an rsa key under 3072 bits", func(r *admission.Request) { r.Operators[0].Keys = []string{keyLine(t, rsaKey(t, 2048))} }, "ssh-rsa key of 2048 bits, under 3072"},
 		{"a certificate", func(r *admission.Request) { r.Operators[0].Keys = []string{certLine(t)} }, `"ssh-ed25519-cert-v01@openssh.com" is not a key type`},
 	} {
