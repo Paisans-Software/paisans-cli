@@ -317,6 +317,10 @@ func runInit(args []string) error {
 	if !filled.Changed() {
 		r.Detail("%s already has every generated secret (%d)", *secretsPath, len(filled.Kept))
 		reportOwed(r, filled)
+		if len(filled.Owed) > 0 {
+			r.Result(setOwedNext)
+			return nil
+		}
 		r.Result("Every generated secret is already present. Nothing written.")
 		return nil
 	}
@@ -332,14 +336,22 @@ func runInit(args []string) error {
 		write.Fail(failed.err)
 		return failed.err
 	}
-	write.Done(fmt.Sprintf("%d generated, %d kept", len(filled.Generated), len(filled.Kept)))
+	counts := ""
+	if r.Verbose() {
+		counts = fmt.Sprintf("%d generated, %d kept", len(filled.Generated), len(filled.Kept))
+	}
+	write.Done(counts)
 	if len(recipients) == 0 {
 		warnPlaintext(r, *secretsPath)
 	} else {
 		r.Detail("Encrypted to %d age recipient(s) from %s.", len(recipients), config.SOPSConfigName)
 	}
 	reportOwed(r, filled)
-	r.Result("Generated %s, kept %d.", plural(len(filled.Generated), "secret"), len(filled.Kept))
+	if len(filled.Owed) > 0 {
+		r.Result(setOwedNext)
+		return nil
+	}
+	r.Result("Secrets written.")
 	return nil
 }
 
@@ -373,6 +385,10 @@ type secretsWriteError struct{ err error }
 
 func (e *secretsWriteError) Error() string { return e.err.Error() }
 func (e *secretsWriteError) Unwrap() error { return e.err }
+
+// setOwedNext is init's result when a secret only the operator can provide
+// is unset: secrets set asks for each one at a terminal.
+const setOwedNext = "Next: run `paisans secrets set`."
 
 // reportOwed warns of each secret only the operator can provide. Leaving
 // these silent would let an operator believe an install is finished when
