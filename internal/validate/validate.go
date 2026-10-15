@@ -1056,21 +1056,26 @@ func (c *checker) infraImages() {
 // supportedVersion refuses ref as the image of the foundation's name when
 // its tag can leave the versions the toolkit's code is written against. A
 // reference with no tag cannot be checked, and is refused naming the form
-// that can.
+// that can. An image the toolkit's code does not speak to has no versions to
+// leave.
 func (c *checker) supportedVersion(key, name, ref string) {
-	if blueprints.ParseReference(ref).Floating() != "" {
-		return // floating-image-tag already refuses it
+	prefixes := blueprints.SupportedTags(name)
+	r := blueprints.ParseReference(ref)
+	if len(prefixes) == 0 || r.Floating() != "" {
+		return // floating-image-tag already refuses a floating one
 	}
-	err := blueprints.CheckFoundationImage(name, ref)
-	if err == nil {
+	if blueprints.CheckFoundationImage(name, ref) == nil {
 		return
 	}
-	if r := blueprints.ParseReference(ref); r.Digest != "" && blueprints.ParseReference(r.Name).Tag == "" {
-		err = fmt.Errorf("names a digest and no tag, so its version cannot be checked. Write the tag beside the digest (Eg: %s:<tag>@%s)", r.Name, r.Digest)
+	if r.Digest != "" && blueprints.ParseReference(r.Name).Tag == "" {
+		c.refuse("infra-image-unsupported-version", key,
+			"outside the versions the toolkit is written against",
+			"is %q, a digest with no tag, so its version cannot be checked. Write the tag beside the digest (Eg: %s:<tag>@%s).", ref, r.Name, r.Digest)
+		return
 	}
 	c.refuse("infra-image-unsupported-version", key,
 		"outside the versions the toolkit is written against",
-		"%v.", err)
+		"is %q, which can leave %s, the versions the toolkit's code is written against. Fix the first part of the tag.", ref, strings.Join(prefixes, " or "))
 }
 
 // imageForAbsentPostgres warns about an image for a database that is not

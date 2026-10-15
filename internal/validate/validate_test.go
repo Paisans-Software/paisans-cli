@@ -1037,3 +1037,39 @@ func TestAHeartbeatOverrideSaysItCoversPocketID(t *testing.T) {
 		t.Error("the heartbeat override did not say it replaces the operators heartbeat too")
 	}
 }
+
+// The heartbeat image is not one the toolkit's code speaks to, so a digest
+// alone names it well enough.
+func TestADigestOnlyHeartbeatOverrideIsAccepted(t *testing.T) {
+	cfg := withInfra(t, config.Infra{Images: map[string]string{"heartbeat": "docker.io/curlimages/curl@sha256:" + strings.Repeat("a", 64)}})
+	if validate.Check(cfg).Has("infra-image-unsupported-version") {
+		t.Error("a digest-only heartbeat override was refused")
+	}
+}
+
+func TestAFloatingSpiloOverrideIsNotLatest(t *testing.T) {
+	cfg := withInfra(t, config.Infra{Postgres: map[string]map[string]string{"18": {"spilo": "ghcr.io/zalando/spilo-18:latest"}}})
+	if !refusedFor(validate.Check(cfg), "floating-image-tag", "infra.postgres.18.spilo") {
+		t.Error("a floating Spilo was not refused")
+	}
+}
+
+func TestASupportedZalandoSpiloIsAccepted(t *testing.T) {
+	cfg := withInfra(t, config.Infra{Postgres: map[string]map[string]string{"18": {"spilo": "ghcr.io/zalando/spilo-18:4.1-p3"}}})
+	if validate.Check(cfg).Has("infra-image-unsupported-version") {
+		t.Error("a Zalando Spilo on a supported line was refused")
+	}
+}
+
+func TestAnUnsupportedVersionRefusalNamesTheSupportedPrefix(t *testing.T) {
+	cfg := withInfra(t, config.Infra{Images: map[string]string{"etcd": "gcr.io/etcd-development/etcd:v4.0.0"}})
+	for _, f := range validate.Check(cfg).Findings {
+		if f.Rule == "infra-image-unsupported-version" {
+			if !strings.Contains(f.Message, "v3.") {
+				t.Errorf("the message does not name the supported prefix: %s", f.Message)
+			}
+			return
+		}
+	}
+	t.Error("not refused")
+}

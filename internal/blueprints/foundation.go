@@ -139,7 +139,9 @@ func ParseFoundation(raw []byte) (*foundationSpec, error) {
 	return &s, nil
 }
 
-// CheckFoundationImage checks one image the toolkit runs in place of the foundation's named name: a track whose pattern compiles, or a reference pinned to one build, and inside the tags the toolkit supports for it.
+// CheckFoundationImage checks a reference the toolkit runs as the
+// foundation's image name: a track whose pattern compiles, or a reference
+// pinned to one build, inside the tags the toolkit supports for name.
 func CheckFoundationImage(name, ref string) error {
 	tag, err := imageTag(ref)
 	if err != nil {
@@ -278,6 +280,10 @@ func postgresImages(major string) (postgresImage, error) {
 	}
 	return images, nil
 }
+
+// SupportedTags are the tag prefixes the toolkit supports for the image name,
+// none when its code does not speak to that image.
+func SupportedTags(name string) []string { return supportedTags[name] }
 
 // PostgresMajors are the Postgres majors the toolkit runs, sorted.
 func PostgresMajors() []string { return sortedKeys(postgresMajors) }
