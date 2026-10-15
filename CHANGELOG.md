@@ -29,7 +29,7 @@ changes share a bullet. Detailed notes are on the corresponding
 - Docker commands on a site reach the login user's rootless daemon at `/run/user/<uid>/docker.sock`, the uid read once a run, and a refused default user is reported as a site not admitted.
 - `preflight`'s ssh check asks only that each site answers as its ssh user, and `doctor` has no sudo finding, since no command they check for runs through sudo.
 - `operators.*.keys` must be ed25519, ECDSA, a security key's `sk-` type or RSA of at least 3072 bits, as `host request` requires, so a certificate or a shorter RSA key is refused.
-- `sites.<site>.ssh.user` may not be `root` or another deployment's `paisans-<token>` user, and a `host request` refusal names the configuration key to change.
+- `sites.<site>.ssh.user` may not be `root` or another deployment's `paisans-<token>` user, as `host request` requires.
 - `sites.<site>.ssh.user` is optional: a site that leaves it out is reached as the deployment's own user, `paisans-<token>`, which must exist on the host.
 - `paisans create` asks each machine's SSH user as optional, offering the deployment's own user, `paisans-<token>`, when left blank.
 - `init` ends with `Next: run paisans secrets set` when a secret only the operator can give is unset, shows secret counts only with `--verbose`, and the SMTP password's reason is its login and host.
