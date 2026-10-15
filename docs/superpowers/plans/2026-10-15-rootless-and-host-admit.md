@@ -138,6 +138,10 @@ Depends on: everything.
 
 * Fresh VMs from `test-deployments/` (in the community repo), admitted with `--request` as an owner would, then `apply` as the deployment's user. Checks: a container cannot reach the host's `127.0.0.1` or LAN; `sudo -n` runs only the helper; reboot recovers; `host evict` leaves the host as the owner had it. On a second host, a system Docker with `"userland-proxy": false` publishing 443: admit `--public-ports` refuses; with the container started after admission, `apply` and `doctor` report the conflict. With one data site not yet admitted, `apply` runs degraded; admitting it, the next `apply` joins it. Stopping a joined site's host, `apply` runs degraded and keeps it as a member.
 
+## Related work
+
+`docs/specs/2026-10-15-mesh-rekey-sites-down.md` (a rekey with sites down, and each site's key generation in `paisans-stack.yaml`) gets its own phase plan once this index reaches phase 6, since it reads the classification phase 6 builds and catches a site up through phase 3's helper.
+
 ## Founder questions blocking phases
 
 | Question (spec *Open*) | Blocks |
