@@ -86,14 +86,18 @@ func Push(t apply.Transport, d deployment.Deployment, bundle []byte) error {
 // Pull gathers every version a site holds as one bundle. A site with none
 // returns a nil bundle and no error. With syncFirst the site first fetches
 // from its peers, so the answer includes what they hold; a sync that fails is
-// recorded in the report and the site's own versions are still gathered.
+// recorded in the report and the site's own versions are still gathered. A
+// site host prepare has not given a store has no sync unit and nothing to
+// sync, so none is started there: apply gathers before its host prepare
+// steps, and every deployment starts on bare hosts.
 func Pull(t apply.Transport, d deployment.Deployment, syncFirst bool) ([]byte, *SyncReport, error) {
 	if err := checkID(d); err != nil {
 		return nil, nil, err
 	}
+	repo := hostprep.ConfigRepo(d)
 	var syncErr string
 	if syncFirst {
-		if out, err := t.Run("systemctl start " + quote(d.Prefix()+"-config-sync.service")); err != nil {
+		if out, err := t.Run(fmt.Sprintf("if [ -d %s ]; then systemctl start %s; fi", quote(repo), quote(d.Prefix()+"-config-sync.service"))); err != nil {
 			syncErr = strings.TrimSpace(err.Error() + " " + out)
 		}
 	}
@@ -101,7 +105,6 @@ func Pull(t apply.Transport, d deployment.Deployment, syncFirst bool) ([]byte, *
 	// given to bundle create on its stdin, so no ref name reaches a command
 	// line. bundle create's stderr is kept for the error; the base64 line is
 	// always the last.
-	repo := hostprep.ConfigRepo(d)
 	cmd := "# bundle the versions the store holds\n" + hostprep.ConfigVersionsShell + fmt.Sprintf("set -e; r=%s; v=''; if [ -d \"$r\" ]; then v=$(paisans_versions \"$r\" refs/versions/); fi; "+
 		"if [ -z \"$v\" ]; then echo %s; exit 0; fi; "+
 		"tmp=$(mktemp); trap 'rm -f \"$tmp\"' EXIT; "+

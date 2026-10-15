@@ -17,12 +17,19 @@ type fakeSite struct {
 	answer string
 	// failSync makes the sync unit's start fail.
 	failSync bool
+	// bare is a site host prepare has not reached: no store, and no sync
+	// unit, so starting the unit fails unless the command checks first.
+	bare bool
 }
 
 func (f *fakeSite) Run(c string) (string, error) {
 	f.commands = append(f.commands, c)
 	switch {
-	case strings.HasPrefix(c, "systemctl start") && f.failSync:
+	case strings.Contains(c, "systemctl start") && f.bare && strings.Contains(c, "[ -d '"+hostprep.ConfigRepo(dep)+"' ]"):
+		return "", nil
+	case strings.Contains(c, "systemctl start") && f.bare:
+		return "Failed to start unit: Unit not found.", errors.New("exit status 5")
+	case strings.Contains(c, "systemctl start") && f.failSync:
 		return "boom", errors.New("exit 1")
 	case strings.Contains(c, "bundle create"):
 		return f.answer, nil
@@ -92,13 +99,24 @@ func TestPullSyncsFirstAndTreatsFailureAsReported(t *testing.T) {
 	if _, _, err := Pull(h, dep, true); err != nil {
 		t.Fatal(err)
 	}
-	if h.commands[0] != "systemctl start '"+dep.Prefix()+"-config-sync.service'" {
+	if !strings.Contains(h.commands[0], "systemctl start '"+dep.Prefix()+"-config-sync.service'") {
 		t.Fatalf("commands = %q", h.commands)
 	}
 	h = &fakeSite{files: map[string]string{}, answer: "__PAISANS_EMPTY__", failSync: true}
 	_, r, err := Pull(h, dep, true)
 	if err != nil || r == nil || r.SyncErr == "" {
 		t.Fatalf("got %+v %v", r, err)
+	}
+}
+
+// A site host prepare has not reached has no store and no sync unit, so it
+// has nothing to sync: apply gathers before its host prepare steps, and a
+// bare site is the start of every deployment, not a failed sync.
+func TestPullSyncsNothingOnASiteWithNoStore(t *testing.T) {
+	h := &fakeSite{files: map[string]string{}, answer: "__PAISANS_EMPTY__", bare: true}
+	b, r, err := Pull(h, dep, true)
+	if err != nil || b != nil || r != nil {
+		t.Fatalf("got %v %+v %v", b, r, err)
 	}
 }
 
