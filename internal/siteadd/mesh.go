@@ -138,12 +138,18 @@ func (p *Plan) meshGate() error {
 			// The helper prints one line per peer, its public key and a
 			// Unix time, 0 for a peer that has never completed one
 			// (wireguard-tools, wg(8), "latest-handshakes").
-			out, err := apply.WGHelper{T: p.transports[name], Iface: p.cfg.Deployment().Interface()}.Show("latest-handshakes")
+			h := apply.WGHelper{T: p.transports[name], Iface: p.cfg.Deployment().Interface()}
+			out, err := h.Show("latest-handshakes")
 			if err != nil {
 				if errors.Is(err, apply.ErrUnreachable) {
 					return fmt.Errorf("%s: could not read host state, so its handshakes are unknown: %w", name, err)
 				}
-				problems = append(problems, fmt.Sprintf("%s: reading %s's handshakes failed: %s", name, p.cfg.Deployment().Interface(), lastLines(out, 2)))
+				// sudo refusing the helper is the host's owner's to fix,
+				// and does not clear itself while the gate waits.
+				if problem := apply.HelperReadProblem(name, h, err); problem != nil {
+					return problem
+				}
+				problems = append(problems, fmt.Sprintf("%s: reading %s's handshakes failed: %s", name, h.Iface, ui.Visible(err.Error())))
 				continue
 			}
 			now, err := clock(name, p.transports[name])

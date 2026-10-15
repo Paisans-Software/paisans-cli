@@ -103,7 +103,9 @@ type world struct {
 	activePocket string
 
 	// Knobs that break one thing.
-	failOnce    string
+	failOnce string
+	// failOut is what the command failOnce fails prints, when set.
+	failOut     string
 	unreachable map[string]bool
 	caddyBroken bool
 	// neverStreams is a site whose recreated Patroni never streams again,
@@ -358,6 +360,9 @@ func (h *host) Run(command string) (string, error) {
 	}
 	if w.failOnce != "" && strings.Contains(command, w.failOnce) {
 		w.failOnce = ""
+		if w.failOut != "" {
+			return w.failOut, errors.New("exit status 1")
+		}
 		return "failed by the test", errors.New("exit status 1")
 	}
 	if out, ok, err := meshfake.ChainedRead(command, h.Run); ok {

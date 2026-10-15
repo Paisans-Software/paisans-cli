@@ -51,6 +51,8 @@ type mesh struct {
 	failOnce string
 	failSkip int
 	failHost string
+	// failOut is what the failed command prints, when set.
+	failOut string
 	// sick makes etcd answer one endpoint unhealthy.
 	sick bool
 	// patroni overrides a data site's role and state in `patronictl list`.
@@ -166,6 +168,9 @@ func (h *host) Run(command string) (string, error) {
 			m.failSkip--
 		} else {
 			m.failOnce = ""
+			if m.failOut != "" {
+				return m.failOut, errors.New("exit status 1")
+			}
 			return "failed by the test", errors.New("exit status 1")
 		}
 	}
@@ -509,6 +514,21 @@ func TestARekeyResumes(t *testing.T) {
 				t.Error("vm does not run its new key")
 			}
 		})
+	}
+}
+
+// sudo refusing the helper while a rekey reads its handshakes is the host's
+// owner's problem, said as such.
+func TestARekeySaysWhenSudoRefusesTheHelper(t *testing.T) {
+	m := newMesh(t)
+	p, err := m.build("vm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.failOnce, m.failOut = "show latest-handshakes", "sudo: a password is required\n"
+	err = run(t, p)
+	if !errors.Is(err, apply.ErrHelperRefused) || !strings.Contains(err.Error(), "could not be run on home-a") || !strings.Contains(err.Error(), "host admit") {
+		t.Fatalf("want the helper's sudo refusal as the owner's problem, got %v", err)
 	}
 }
 

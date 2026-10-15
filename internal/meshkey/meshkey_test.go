@@ -2,6 +2,7 @@ package meshkey_test
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/meshkey"
 	"github.com/paisans-software/paisans-cli/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 var dep = deployment.Deployment{ID: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}
@@ -123,5 +125,19 @@ func TestAsRunningSeesTheNextKeyBehindASudoWarning(t *testing.T) {
 	}
 	if len(swapped) != 1 || swapped[0] != "home-a" || out.Sites["home-a"].WireGuardPrivateKey != next {
 		t.Errorf("swapped = %q, key %q; want home-a rendered with its next key", swapped, out.Sites["home-a"].WireGuardPrivateKey)
+	}
+}
+
+// sudo refusing the helper is the host's owner's problem, said as such.
+func TestASudoRefusalIsTheOwnersProblem(t *testing.T) {
+	refused := host{refuse: "sudo: a password is required\n"}
+	_, err := meshkey.RunningKey("home-a", refused, dep)
+	var problem *ui.Problem
+	if !errors.As(err, &problem) || !strings.Contains(problem.Hint, "could not be run on home-a") || !strings.Contains(problem.Explain, "host admit") {
+		t.Errorf("RunningKey = %v, want the helper's sudo refusal as the owner's problem", err)
+	}
+	_, err = meshkey.Peers("home-a", refused, dep)
+	if !errors.As(err, &problem) || !strings.Contains(problem.Hint, "could not be run on home-a") {
+		t.Errorf("Peers = %v, want the helper's sudo refusal as the owner's problem", err)
 	}
 }

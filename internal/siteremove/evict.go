@@ -529,7 +529,11 @@ func (p *Plan) buildCut() (*Stage, error) {
 // that was dropped is not printed at all.
 func (p *Plan) handshakeGate(keys ...string) error {
 	for _, name := range p.liveSites() {
-		out, err := apply.WGHelper{T: p.transports[name], Iface: p.dep().Interface()}.Show("latest-handshakes")
+		h := apply.WGHelper{T: p.transports[name], Iface: p.dep().Interface()}
+		out, err := h.Show("latest-handshakes")
+		if problem := apply.HelperReadProblem(name, h, err); problem != nil {
+			return problem
+		}
 		if err != nil {
 			return fmt.Errorf("%s: reading %s's handshakes through the WireGuard helper: %w", name, p.dep().Interface(), err)
 		}

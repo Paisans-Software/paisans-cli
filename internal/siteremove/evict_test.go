@@ -2,11 +2,13 @@ package siteremove_test
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployrecord"
 	"github.com/paisans-software/paisans-cli/internal/dns"
@@ -474,6 +476,17 @@ func TestAnEvictionResumesFromEachStage(t *testing.T) {
 				t.Errorf("the evicted host was reached %d times", n)
 			}
 		})
+	}
+}
+
+// sudo refusing the helper while the cut's gate reads handshakes is the
+// host's owner's problem, said as such.
+func TestAnEvictionSaysWhenSudoRefusesTheHelper(t *testing.T) {
+	w, zone := evictWorld(t, "home-b")
+	w.failOnce, w.failOut = "show latest-handshakes", "sudo: a password is required\n"
+	err := siteremove.Execute(w.mustBuild("home-b", evictOptions(zone)))
+	if !errors.Is(err, apply.ErrHelperRefused) || !strings.Contains(err.Error(), "could not be run on home-a") || !strings.Contains(err.Error(), "host admit") {
+		t.Fatalf("want the helper's sudo refusal as the owner's problem, got %v", err)
 	}
 }
 

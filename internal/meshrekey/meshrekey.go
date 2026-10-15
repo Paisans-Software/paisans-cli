@@ -584,7 +584,11 @@ func (p *Plan) handTo(name string, sp *apply.Plan, site, newPublic string) error
 // latest-handshakes` does, each peer's public key and the time of its last
 // handshake, 0 for none (wireguard-tools, wg(8)).
 func (p *Plan) handshake(site, key string) (bool, error) {
-	out, err := apply.WGHelper{T: p.transports[site], Iface: p.dep().Interface()}.Show("latest-handshakes")
+	h := apply.WGHelper{T: p.transports[site], Iface: p.dep().Interface()}
+	out, err := h.Show("latest-handshakes")
+	if problem := apply.HelperReadProblem(site, h, err); problem != nil {
+		return false, problem
+	}
 	if err != nil {
 		return false, fmt.Errorf("%s: reading %s's handshakes through the WireGuard helper: %w", site, p.dep().Interface(), err)
 	}
@@ -827,7 +831,9 @@ func poll(wait, every time.Duration, check func() error) error {
 		if err = check(); err == nil {
 			return nil
 		}
-		if errors.Is(err, apply.ErrUnreachable) {
+		// Neither ssh failing after its retries nor sudo refusing the
+		// helper clears itself while a gate waits.
+		if errors.Is(err, apply.ErrUnreachable) || errors.Is(err, apply.ErrHelperRefused) {
 			return err
 		}
 		if i < n-1 {

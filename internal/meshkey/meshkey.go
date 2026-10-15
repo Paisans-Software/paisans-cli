@@ -31,7 +31,11 @@ import (
 // is not the key, so a host that already runs a site's next key is never
 // taken for one that does not.
 func RunningKey(site string, t apply.Transport, d deployment.Deployment) (string, error) {
-	out, err := apply.WGHelper{T: t, Iface: d.Interface()}.Show("public-key")
+	h := apply.WGHelper{T: t, Iface: d.Interface()}
+	out, err := h.Show("public-key")
+	if p := apply.HelperReadProblem(site, h, err); p != nil {
+		return "", p
+	}
 	if err != nil {
 		return "", fmt.Errorf("%s: reading %s's key through the WireGuard helper: %w", site, d.Interface(), err)
 	}
@@ -42,7 +46,11 @@ func RunningKey(site string, t apply.Transport, d deployment.Deployment) (string
 // t and the helper's show peers, one per line (wireguard-tools, wg(8)), read
 // as strictly as RunningKey.
 func Peers(site string, t apply.Transport, d deployment.Deployment) ([]string, error) {
-	out, err := apply.WGHelper{T: t, Iface: d.Interface()}.Show("peers")
+	h := apply.WGHelper{T: t, Iface: d.Interface()}
+	out, err := h.Show("peers")
+	if p := apply.HelperReadProblem(site, h, err); p != nil {
+		return nil, p
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%s: reading %s's peers through the WireGuard helper: %w", site, d.Interface(), err)
 	}

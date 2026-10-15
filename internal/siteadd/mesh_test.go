@@ -1,9 +1,11 @@
 package siteadd_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/siteadd"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -61,5 +63,43 @@ func TestTheMeshGateShowsHostOutputVisiblyAndRedacted(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "\x1b") || strings.Contains(err.Error(), secret) {
 		t.Errorf("the handshake read's output reached the error raw: %q", err)
+	}
+}
+
+// sudo refusing the helper is the host's owner's problem, said as such, and
+// it cannot clear itself while the gate waits, so the gate stops at once
+// instead of polling until meshWait runs out.
+func TestTheMeshGateStopsAtOnceWhenSudoRefusesTheHelper(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := newWorld(t)
+	refused := "sudo: a password is required\n"
+	w.handshakesFail = &refused
+	err := siteadd.Execute(build(t, w))
+	if !errors.Is(err, apply.ErrHelperRefused) || !strings.Contains(err.Error(), "could not be run on home-a") || !strings.Contains(err.Error(), "host admit") {
+		t.Fatalf("want the helper's sudo refusal as the owner's problem, got %v", err)
+	}
+	reads := 0
+	for _, h := range w.hosts {
+		for _, c := range h.commands {
+			if strings.HasSuffix(c, "show latest-handshakes") {
+				reads++
+			}
+		}
+	}
+	if reads != 1 {
+		t.Errorf("the handshakes were read %d times; a sudo refusal is not retried", reads)
+	}
+}
+
+// A failed handshake read that is not sudo's refusal keeps its error in the
+// gate's message, not only the last lines of what the host printed.
+func TestAFailedHandshakeReadKeepsItsError(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := newWorld(t)
+	failed := "wg: something went wrong\n"
+	w.handshakesFail = &failed
+	err := siteadd.Execute(build(t, w))
+	if err == nil || !strings.Contains(err.Error(), "exit status 1") {
+		t.Errorf("want the read's error kept, got %v", err)
 	}
 }

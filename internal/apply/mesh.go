@@ -124,15 +124,48 @@ func helperProblem(site string, h WGHelper, err error) error {
 // a plan starts nothing, so it says what the plan could not do instead.
 // Any other error is returned as it is.
 func helperReadProblem(site string, h WGHelper, err error) error {
+	if p := readProblem(site, h, err, "so it planned nothing for it"); p != nil {
+		return p
+	}
+	return err
+}
+
+// HelperReadProblem is the problem sudo refusing the helper is, for a
+// command that reads what site's interface runs through it (Eg: a gate
+// reading handshakes): the same problem with the same fix as apply's own
+// read, nil when err is not that refusal. The problem is
+// ErrHelperRefused, so a caller that waits on the read stops at once: a
+// host that has not admitted the deployment does not admit it while a gate
+// polls.
+func HelperReadProblem(site string, h WGHelper, err error) *ui.Problem {
+	return readProblem(site, h, err, "so it went no further")
+}
+
+// ErrHelperRefused is sudo refusing to run the WireGuard helper: not a
+// failure that clears itself, so nothing retries it.
+var ErrHelperRefused = errors.New("sudo would not run the WireGuard helper")
+
+// helperRefusal is err, sudo's refusal, as ErrHelperRefused, with err's
+// own text.
+type helperRefusal struct{ err error }
+
+func (r helperRefusal) Error() string        { return r.err.Error() }
+func (r helperRefusal) Unwrap() error        { return r.err }
+func (r helperRefusal) Is(target error) bool { return target == ErrHelperRefused }
+
+func readProblem(site string, h WGHelper, err error, then string) *ui.Problem {
+	if err == nil {
+		return nil
+	}
 	path, _ := h.Path()
 	line := sudoRefusal(err.Error(), path)
 	if line == "" {
-		return err
+		return nil
 	}
 	return &ui.Problem{
 		Hint:    "mesh: the WireGuard helper could not be run on " + site,
-		Explain: fmt.Sprintf("sudo would not run %s (%s). %s\npaisans could not read what %s runs, so it planned nothing for it.", path, ui.Visible(line), sudoAdvice(line), h.Iface),
-		Cause:   err,
+		Explain: fmt.Sprintf("sudo would not run %s (%s). %s\npaisans could not read what %s runs, %s.", path, ui.Visible(line), sudoAdvice(line), h.Iface, then),
+		Cause:   helperRefusal{err},
 	}
 }
 
