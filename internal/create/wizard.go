@@ -335,7 +335,7 @@ func (w *Wizard) customSites(prev []Site) ([]Site, error) {
 // ssh asks how the toolkit reaches site. The host defaults to the public
 // address, so it is asked only as an override when there is one. The user may
 // be left empty: the machine is then reached as the deployment's own user,
-// which host admit creates.
+// which must exist on the host.
 func (w *Wizard) ssh(site *Site, d Site) error {
 	var err error
 	if site.PublicAddress != "" {

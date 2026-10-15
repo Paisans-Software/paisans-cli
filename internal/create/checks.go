@@ -78,7 +78,7 @@ func checkSiteName(s string) error {
 
 func checkUnixUser(s string) error {
 	if !unixUser.MatchString(s) {
-		return errors.New("a user name on the machine, Eg: ubuntu")
+		return errors.New("a user name on the machine, Eg: paisans-f2a9")
 	}
 	return nil
 }
