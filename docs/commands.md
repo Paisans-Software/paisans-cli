@@ -146,6 +146,46 @@ Validates, then writes every site's artifacts under a local directory.
 * **Hosts:** none.
 * **`--execute`:** not taken. It writes under `--out` and stops.
 
+### `paisans secrets list`
+
+Prints every secret `paisans-stack.yaml` needs, and every other one the secrets
+file holds for something it still declares, one row per path, with no value:
+
+```
+PATH                                STATE  SOURCE     ROTATE
+apps.talk.oauth_private_key         set    generated  apps.talk.oauth
+backup.restic_password              set    generated  kept
+cluster.standby_password            set    generated  cluster.standby_password
+external.acme_dns_token             unset  pasted     -
+oidc_clients.talk.client_secret     unset  captured   -
+sites.home-a.wireguard_private_key  set    generated  mesh rekey
+```
+
+* **`STATE`:** `set` when the file holds a value there, `unset` when it does
+  not.
+* **`SOURCE`:** `generated` by `init`, `pasted` with `secrets set`, or
+  `captured` by `apply --execute` from a running service (see *Three kinds of
+  secret* in `README.md`).
+* **`ROTATE`:** the path `secrets rotate` takes for a set secret: its own, or
+  its unit's for one an app's blueprint rotates as a unit; `kept` for one
+  `secrets rotate` keeps; `mesh rekey` for a WireGuard key; `-` for an unset
+  secret or one nothing rotates.
+
+```sh
+paisans secrets list
+paisans secrets list | grep unset   # what is still to fill
+```
+
+* **Alone:** always. It is how to find the path `secrets set` and
+  `secrets rotate` take without opening the decrypted file.
+* **Flags:** `--config`, `--secrets`.
+* **Hosts:** none. It decrypts the local secrets file and reads it.
+* **`--execute`:** not taken. It changes nothing.
+
+A path naming something `paisans-stack.yaml` no longer declares is counted, not
+listed; `secrets prune` lists it. The table is on stdout and the report on
+stderr, so the table pipes cleanly.
+
 ### `paisans secrets set`
 
 Reads one value from stdin and writes it into the encrypted secrets file under
