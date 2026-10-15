@@ -142,6 +142,16 @@ func TestParseRecordRefuses(t *testing.T) {
 		{"a digest not as written", strings.Replace(g, `"digest": "`+digest+`"`, `"digest": "`+strings.ToUpper(digest)+`"`, 1), "f2a9", `digest: "` + strings.ToUpper(digest) + `"`},
 		{"a time that is not RFC 3339 in UTC", strings.Replace(g, `2026-10-15T10:00:00Z`, "yesterday noon", 1), "f2a9", `admitted_at:`},
 		{"a second document", g + g, "f2a9", "it is not JSON"},
+		{"root", strings.Replace(g, `"user": "paisans-f2a9"`, `"user": "root"`, 1), "f2a9", "user: root is never a deployment's user"},
+		{"another deployment's user", strings.Replace(g, `"user": "paisans-f2a9"`, `"user": "paisans-0a0b"`, 1), "f2a9", "user: paisans-0a0b is another deployment's name"},
+		{"public ports without the grant", strings.Replace(g, `"public_ports": true`, `"public_ports": false`, 1), "f2a9", "ports.public: [80 443], and public_ports was not granted, so it is []"},
+		{"80 alone", strings.Replace(g, "\"public\": [\n      80,\n      443\n    ]", "\"public\": [\n      80\n    ]", 1), "f2a9", "ports.public: [80], and public_ports was granted, so it is [80 443]"},
+		{"ssh among the public ports", strings.Replace(g, "\"public\": [\n      80,\n      443\n    ]", "\"public\": [\n      22,\n      80,\n      443\n    ]", 1), "f2a9", "ports.public: [22 80 443]"},
+		{"no public ports with the grant", strings.Replace(g, "\"public\": [\n      80,\n      443\n    ]", "\"public\": []", 1), "f2a9", "ports.public: [], and public_ports was granted"},
+		{"a relative data_dir", strings.Replace(g, `"data_dir": "/srv/data/paisans-f2a9"`, `"data_dir": "srv/data/paisans-f2a9"`, 1), "f2a9", `data_dir: "srv/data/paisans-f2a9" is not`},
+		{"a data_dir not clean", strings.Replace(g, `"data_dir": "/srv/data/paisans-f2a9"`, `"data_dir": "/srv/../data/paisans-f2a9"`, 1), "f2a9", `data_dir: "/srv/../data/paisans-f2a9" is not`},
+		{"a data_dir of another token", strings.Replace(g, `"data_dir": "/srv/data/paisans-f2a9"`, `"data_dir": "/srv/data/paisans-0a0b"`, 1), "f2a9", `data_dir: "/srv/data/paisans-0a0b" is not`},
+		{"a data_dir with a control character", strings.Replace(g, `"data_dir": "/srv/data/paisans-f2a9"`, `"data_dir": "/srv/da\nta/paisans-f2a9"`, 1), "f2a9", `data_dir: "/srv/da\nta/paisans-f2a9" is not`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if _, err := admission.ParseRecord([]byte(c.data), c.token); err == nil || !strings.Contains(err.Error(), c.want) {
@@ -214,7 +224,7 @@ func TestParseRecordByteExact(t *testing.T) {
 }
 
 // Ports are ports: the SSH port 1-65535, the WireGuard port 0 (none) to
-// 65535, each public port 1-65535 and none twice.
+// 65535, and the public ports exactly [80, 443] with public_ports.
 func TestParseRecordPorts(t *testing.T) {
 	good := admission.NewRecord(build(t, "home-a"), admission.Grants{PublicPorts: true}, "", at)
 	for _, c := range []struct {
@@ -227,9 +237,9 @@ func TestParseRecordPorts(t *testing.T) {
 		{"ssh too high", func(r *admission.Record) { r.Ports.SSH = 65536 }, "ports.ssh: 65536"},
 		{"wireguard negative", func(r *admission.Record) { r.Ports.WireGuard = -1 }, "ports.wireguard: -1"},
 		{"wireguard too high", func(r *admission.Record) { r.Ports.WireGuard = 70000 }, "ports.wireguard: 70000"},
-		{"public 0", func(r *admission.Record) { r.Ports.Public = []int{0} }, "ports.public: 0"},
-		{"public too high", func(r *admission.Record) { r.Ports.Public = []int{80, 99999} }, "ports.public: 99999"},
-		{"public twice", func(r *admission.Record) { r.Ports.Public = []int{443, 443} }, "ports.public: 443 is listed twice"},
+		{"public 0", func(r *admission.Record) { r.Ports.Public = []int{0} }, "ports.public: [0]"},
+		{"public too high", func(r *admission.Record) { r.Ports.Public = []int{80, 99999} }, "ports.public: [80 99999]"},
+		{"public twice", func(r *admission.Record) { r.Ports.Public = []int{443, 443} }, "ports.public: [443 443]"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			r := good
@@ -241,7 +251,6 @@ func TestParseRecordPorts(t *testing.T) {
 	}
 	r := good
 	r.Ports.WireGuard = 0
-	r.Ports.Public = []int{}
 	if _, err := admission.ParseRecord(encode(t, r), "f2a9"); err != nil {
 		t.Errorf("no WireGuard port: %v", err)
 	}

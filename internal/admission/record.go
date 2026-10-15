@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -138,10 +141,7 @@ type WebServer struct {
 // gave, at at. The ports follow from req and the grants; forwarding follows
 // the endpoint. Admit sets DataDir, BridgeNetfilter and WebServer itself.
 func NewRecord(req Request, granted Grants, digest string, at time.Time) Record {
-	public := []int{}
-	if granted.PublicPorts {
-		public = []int{80, 443}
-	}
+	public := publicPorts(granted)
 	return Record{
 		Version:    RecordVersion,
 		Deployment: req.Deployment,
@@ -152,6 +152,26 @@ func NewRecord(req Request, granted Grants, digest string, at time.Time) Record 
 		Digest:     digest,
 		AdmittedAt: at.UTC().Format(time.RFC3339),
 	}
+}
+
+// publicPorts is what the firewall opens for the public_ports grant: 80
+// and 443 with it, nothing without it.
+func publicPorts(g Grants) []int {
+	if g.PublicPorts {
+		return []int{80, 443}
+	}
+	return []int{}
+}
+
+// dataDirFor reports whether dir is a Docker data-root host admit sets for
+// the deployment with token: an absolute path in its clean form, with no
+// control character, ending in /paisans-<token>. The deployment's daemon is
+// started with it, so nothing else is read as one.
+func dataDirFor(dir, token string) bool {
+	if _, bad := config.ControlRune(dir); bad {
+		return false
+	}
+	return strings.HasPrefix(dir, "/") && path.Clean(dir) == dir && strings.HasSuffix(dir, "/paisans-"+token)
 }
 
 // EncodeRecord is the record's file: indented JSON with a final newline, the
@@ -173,8 +193,9 @@ func EncodeRecord(r Record) ([]byte, error) {
 var recordFields = []string{"version", "deployment", "user", "grants", "forwarding", "ports", "digest", "admitted_at", "data_dir", "bridge_netfilter", "web_server"}
 
 // ParseRecord reads a record strictly: its version, every field present and
-// none unknown, a deployment whose token is token, and a user paisans
-// accepts.
+// none unknown, a deployment whose token is token, the user a request for it
+// may name, the public ports its grant opens, and a data_dir that is empty
+// or this deployment's.
 func ParseRecord(data []byte, token string) (Record, error) {
 	refuse := func(problems ...string) (Record, error) {
 		return Record{}, &Error{What: "the admission record for " + strconv.Quote(token), Problems: problems}
@@ -215,8 +236,8 @@ func ParseRecord(data []byte, token string) (Record, error) {
 	if !deployment.ValidID(r.Deployment) || (deployment.Deployment{ID: r.Deployment}).Token() != token {
 		problems = append(problems, fmt.Sprintf("deployment: %q is not a deployment whose token is %q", r.Deployment, token))
 	}
-	if !config.ValidUserName(r.User) {
-		problems = append(problems, fmt.Sprintf("user: %q is not a user name paisans accepts", r.User))
+	if p := config.DeploymentUserProblem(r.User, r.Deployment); p != "" {
+		problems = append(problems, "user: "+p)
 	}
 	if r.Digest != "" {
 		if d, err := ParseDigest(r.Digest); err != nil || d != r.Digest {
@@ -232,15 +253,17 @@ func ParseRecord(data []byte, token string) (Record, error) {
 	if r.Ports.WireGuard < 0 || r.Ports.WireGuard > 65535 {
 		problems = append(problems, fmt.Sprintf("ports.wireguard: %d is not a port, or 0 for none", r.Ports.WireGuard))
 	}
-	seen := map[int]bool{}
-	for _, p := range r.Ports.Public {
-		switch {
-		case p < 1 || p > 65535:
-			problems = append(problems, fmt.Sprintf("ports.public: %d is not a port", p))
-		case seen[p]:
-			problems = append(problems, fmt.Sprintf("ports.public: %d is listed twice", p))
+	// The firewall opens 80 and 443 with public_ports and nothing without
+	// it, so the record holds exactly what NewRecord derives from the grant.
+	if want := publicPorts(r.Grants); !slices.Equal(r.Ports.Public, want) {
+		granted := "was granted"
+		if !r.Grants.PublicPorts {
+			granted = "was not granted"
 		}
-		seen[p] = true
+		problems = append(problems, fmt.Sprintf("ports.public: %v, and public_ports %s, so it is %v", r.Ports.Public, granted, want))
+	}
+	if r.DataDir != "" && !dataDirFor(r.DataDir, token) {
+		problems = append(problems, fmt.Sprintf("data_dir: %q is not an absolute path in its clean form ending in /paisans-%s, or empty", r.DataDir, token))
 	}
 	if len(problems) > 0 {
 		return refuse(problems...)
