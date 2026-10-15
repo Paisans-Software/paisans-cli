@@ -306,7 +306,19 @@ replica promotes, containers that are down, Pocket ID's active instance,
 clock drift, and what is left over or foreign (below). It has no `--execute` and sends only reads, which its command
 level test checks against an allow list. The judgements are pure functions in
 `internal/doctor`, tested with what live hosts answered; `cmd/paisans` runs the
-commands. It exits 1 on any `FAIL`. See *`paisans doctor` reports what is
+commands. It exits 1 on any `FAIL`.
+
+Its checks are a graph, `doctor.Checks`: each node names what it reads, the
+nodes it needs hard (all of one, or any of several), the ones it needs only to
+have ended, and its judge, the section function `Diagnose` calls given the
+node's own probes, so the graph finds what `Diagnose` finds for the same
+`Input`. `Graph.Run` starts every node whose needs are met, records each
+node's probes into one `Input` as it ends, and prunes, transitively, every
+node a failed or skipped hard need leaves unable to run. It reports through
+`ui.Stream`, a group whose lines join it as they start. `cmd/paisans` bounds
+each site's transport to eight commands at once (`doctorSiteCommands`) and
+nothing across sites; tests set `doctorAtOnce` to one, which runs the nodes
+in the graph's order. See *`paisans doctor` reports what is
 stuck and how to recover* in `README.md`.
 
 **Leftovers and foreign users of Caddy** are `internal/ownership`: `Classify`

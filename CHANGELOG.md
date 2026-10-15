@@ -19,6 +19,7 @@ changes share a bullet. Detailed notes are on the corresponding
 ### Changed
 
 - Errors refer to `paisans doctor` when its checks name the cause: a health gate TLS internal error on a hostname Caddy serves, an unreachable database or site, and `gateway move`'s token refusals.
+- `paisans doctor` runs its checks at once and prints each as it ends; a site that does not answer is one line naming what was not checked, and the failures are listed again, deepest first.
 - `paisans secrets rotate` asks at a terminal for a pasted secret's new value, the DNS token or an SMTP password, and `--all` includes them; a new DNS token is tried against the zone first.
 - The grant review lists each site's foundation images first, under `foundation images (required):`, then removals, then what needs approval under its count, so the count heads exactly the entries it counts.
 

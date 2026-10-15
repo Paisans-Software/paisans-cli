@@ -9076,13 +9076,33 @@ contradicts the gate, and changing it would change policy, so it is left for
 the operator. A file the edit leaves unloadable is restored.
 
 A site that does not answer is itself a finding, never a crash: every other
-check runs with the sites that did. Each ssh attempt gives up after ten
-seconds, as every command's does (see *How the operator's ssh uses them*). Like
+check runs with the sites that did. Nothing more is asked of that site, since
+a read over a connection that already failed only fails again, and the checks
+not made because of it are named once, on its line (`Not checked because of
+this: mesh, containers, clocks on home-b.`), rather than each failing in turn,
+because a cascade of errors buries the one line that matters. The closing
+line counts them as skipped. Each ssh attempt gives up after ten seconds, as
+every command's does (see *How the operator's ssh uses them*). Like
 `preflight` it takes no `--ssh`, since one override cannot name several hosts,
 and it runs its commands through sudo unless told `--sudo=false`.
 
-The checks, in the order they are printed, from the bottom of the stack up so
-that the first `FAIL` is usually the cause of those after it:
+The checks run at once, as many as are ready, and each prints whole, naming
+its site, as it ends, so an operator in an outage reads the first answer while
+the slow ones still run, and a deployment of several sites is read in the time
+of its slowest site rather than the sum of them. A check starts only once the
+checks it needs have answered: everything on a site needs its reach, etcd
+needs a member that answered, and the containers and Pocket ID checks wait for
+Patroni's, whose verdict their advice uses. So a cause always prints before
+what it causes. A site runs at most eight commands at once, under the ten
+sessions sshd allows on the one connection Paisans shares per destination
+(`MaxSessions`, sshd_config(5)); sites are not bounded against each other,
+since each is a machine of its own. When any check failed, the failures are
+listed once more at the end, under `failed, deepest first:`, in the order
+below, because in an interleaved run the first failure on screen is the first
+to end, not the first to fix.
+
+The checks, from the bottom of the stack up, so that the first `FAIL` of the
+closing list is usually the cause of those after it:
 
 | Check | How | FAIL when |
 |---|---|---|
