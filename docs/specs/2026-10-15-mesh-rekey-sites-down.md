@@ -44,8 +44,14 @@ sites:
       generation: 4
 ```
 
-`init` writes generation 1 with the first key. `mesh rekey` writes each
-change; nothing else does, and `validate` refuses a `public_key` that is not
+`init` writes generation 1 with the first key, and fills in the block for
+any site whose secrets file holds a private key but whose declaration has no
+`wireguard`: the public key derived from that private key, generation 1. It
+is the same job `init` does for a missing generated secret, deriving what
+the configuration lacks from what it holds, and it runs on the workstation
+only. Every command that renders refuses a site without the block, naming
+`paisans init`, as it refuses a configuration with no id. `mesh rekey`
+writes each change after that; nothing else does, and `validate` refuses a `public_key` that is not
 a WireGuard key or a `generation` below 1. Both are written by splicing, as
 `ssh.user` is, keeping every other line and comment. A secrets file whose
 private key does not derive the declared public key is refused by every
@@ -121,7 +127,9 @@ which drops its key, its generation and its next key.
 
 * `validate`: a malformed `public_key`, a `generation` of 0, and a secrets
   key that does not derive the declared public key, each refused.
-* `init` writes generation 1 and the public key, spliced.
+* `init` writes generation 1 and the public key, spliced, for a new site and
+  for a site whose private key exists without the block; a second run
+  changes nothing.
 * Rekey plans: one site down under `--all` (peers swapped, its next key
   kept, generation raised, listed behind); a relay down (its dependants
   listed); a quorum lost (refused before any swap).
@@ -131,10 +139,3 @@ which drops its key, its generation and its next key.
 * Catch up: a manifest behind the declaration plans the catch up first and
   refuses cluster steps before it.
 * `site remove --host-gone` drops the site's key, generation and next key.
-
-## Open
-
-* **Existing deployments.** A deployment from before this change has no
-  `wireguard` in its sites. Under the no-migration rule it is redeployed;
-  is that acceptable for a mesh change, or should `init` fill them in from
-  the secrets file once?
