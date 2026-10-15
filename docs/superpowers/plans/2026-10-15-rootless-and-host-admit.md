@@ -4,7 +4,7 @@
 
 **Goal:** Every deployment runs as its own unprivileged user with rootless Docker, admitted once by the host's owner with `paisans host admit`.
 
-**Architecture:** One root step (`host admit` / `host evict`, local from a request or over the owner's SSH), one narrow root helper for WireGuard, and every other command running as `paisans-<token>` with `DOCKER_HOST` pointed at that user's daemon. Phases land as separate pull requests against `develop`, each passing `go test ./...` on its own; the toolkit is not deployable rootless until phase 6 lands, and nothing is released between phase 2 and phase 6.
+**Architecture:** One root step (`host admit` / `host evict`, local from a request or over the owner's SSH), one narrow root helper for WireGuard, and every other command running as `paisans-<token>` with `DOCKER_HOST` pointed at that user's daemon. Phases land as separate pull requests against `develop`, each passing `go test ./...` on its own; the toolkit is not deployable rootless until phase 6 lands, and nothing is released from `develop` between phase 1 and phase 6: from phase 1 a site without `ssh.user` logs in as a user only `host admit` creates.
 
 **Tech Stack:** Go, the existing `apply.Transport`, `yaml.v3` splicing in `internal/config`, POSIX sh for the helper, nftables, ufw, systemd user units, GitHub Actions.
 
@@ -54,6 +54,8 @@ Depends on: phase 1.
 * Modify `cmd/paisans/main.go` `siteTransport`: user from `SSHUser`, `DockerHost` from the user's UID (read once per run with `id -u`), no sudo. Remove every `--sudo` flag listed in the inventory (`cmd/paisans/*.go`) and `settleSudo` calls outside admit and evict.
 * Create `internal/apply/helper.go`: `WGHelper{T Transport; Iface string}` with `Put(conf []byte)`, `Up()`, `Restart()`, `Sync()`, `Show(field string)`, `Log()`, each `sudo -n /usr/local/libexec/paisans/wg-<iface> <verb>`.
 * An unadmitted host (ssh auth fails for the default user and no `ssh.user` is declared) reports "not admitted" with the `host request` line.
+* Write-back: the first command that connects as the default user calls `config.SetSSHUser`; a write-back failure (eg a bare `user:` with no value, which `SetSSHUser` refuses) is a warning, never fatal to the command that connected. Add `SetSSHUser` tests for a flow `ssh` with an empty user, a quoted value with a trailing comment, CRLF, and `ssh` last with no final newline.
+* `paisans create` (`internal/create/wizard.go`): the SSH user prompt offers the deployment's default and may be left empty, instead of "SSH user (must already exist)".
 * Tests: `RemoteCommand` with `DockerHost`; no transport built with `Sudo` outside admit/evict (a test that walks `siteTransport` callers); `WGHelper` command lines.
 
 ## Phase 3: The WireGuard helper
