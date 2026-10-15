@@ -209,6 +209,7 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 		},
 		Now:         time.Now,
 		DNSProvider: rotateDNSProvider,
+		Mail:        smtpEnv(cfg, nil),
 	}
 	run, err := ui.Get(r, "read where each secret stands", func() (*secretsrotate.Run, error) {
 		if err := checkReplaced(env, replacedRs); err != nil {

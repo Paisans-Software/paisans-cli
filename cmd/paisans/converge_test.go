@@ -952,12 +952,12 @@ func TestConvergeFindingsOpenTheConfigurationSection(t *testing.T) {
 		want []string
 	}{
 		{true, nil, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "step init", "pending init", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section etcd members"}},
-		{false, nil, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section etcd members"}},
-		{false, []string{"--execute"}, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section etcd members"}},
+		{false, nil, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section mail", "step smtp.example.org:587, starttls, as robot@example.org, from home-a", "step smtp.example.org:587, starttls, as robot@example.org, from home-b", "step smtp.example.org:587, starttls, as robot@example.org, from watch", "section etcd members"}},
+		{false, []string{"--execute"}, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section mail", "step smtp.example.org:587, starttls, as robot@example.org, from home-a", "step smtp.example.org:587, starttls, as robot@example.org, from home-b", "step smtp.example.org:587, starttls, as robot@example.org, from watch", "section etcd members"}},
 		// init ran first and reported the findings and the secrets itself,
 		// under the file's path; they are not reported a second time.
 		// The deployment and the version open every run, ahead of both.
-		{true, []string{"--execute"}, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section etcd members"}},
+		{true, []string{"--execute"}, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section mail", "step smtp.example.org:587, starttls, as robot@example.org, from home-a", "step smtp.example.org:587, starttls, as robot@example.org, from home-b", "step smtp.example.org:587, starttls, as robot@example.org, from watch", "section etcd members"}},
 	} {
 		rec.Events = nil
 		needsInit = c.init
@@ -1095,7 +1095,7 @@ func statuses(rec *ui.Recorder) []string {
 			continue
 		}
 		mark := map[string]string{"done": "✓", "pending": "○", "waiting": "·", "fail": "✗"}[e.Kind]
-		if mark == "" || section == "deployment" || section == "architecture" || section == "pocket id" || section == "secrets" || section == "review" || strings.Contains(e.Text, "etcd record") || strings.HasSuffix(e.Text, "for an admin") {
+		if mark == "" || section == "deployment" || section == "architecture" || section == "pocket id" || section == "secrets" || section == "mail" || section == "review" || strings.Contains(e.Text, "etcd record") || strings.HasSuffix(e.Text, "for an admin") {
 			continue
 		}
 		title := e.Text

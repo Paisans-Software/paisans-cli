@@ -78,8 +78,13 @@ generated one, and stage 4 makes it the file's own; a resumed run takes it from
 host does not run, is not asked for: the file's value is the next one. For the
 DNS token, stage 2 looks up the community's zone at the provider with the next
 token, read only, and a pasted or set token that fails is refused before it is
-written. Nothing here logs in to a mail provider, so an SMTP password has no
-stage 2 check. `--replaced <path>` lists a pasted secret already replaced and
+written. For an SMTP password, stage 2 logs in to the mail server with the
+next password, from a site running each app that uses it; a pasted one also
+logs in and sends the operators one test message as soon as it is given, and
+one set with `secrets set`, which sent its own message, logs in when the run
+is planned, so a password that does not work is refused before it is written
+under `rotations` (README's *Mail settings are tried before they are used*).
+`--replaced <path>` lists a pasted secret already replaced and
 applied, which every host runs, as kept.
 
 **A secret checked in one place and used in one place** has a short window
@@ -94,7 +99,7 @@ restart. The plan says which kind each secret is.
 | Secret | Checked by | Used by | Cost to members |
 |---|---|---|---|
 | `external.acme_dns_token` | the provider, asked for the zone with the next token | each site running the toolkit's Caddy | none; asked for at `--execute` unless already set anew |
-| `external.smtp_password`, `apps.<app>.smtp_password` | the mail provider, not checked here | each app that logs in to send mail with it | none; asked for at `--execute` unless already set anew |
+| `external.smtp_password`, `apps.<app>.smtp_password` | the mail provider, logged in to with the next password from a site running each app | each app that logs in to send mail with it | none; asked for at `--execute` unless already set anew |
 | `apps.<app>` OIDC client secret | Pocket ID | the app | none; `oidc client create --rotate-secret`, run in order |
 | Mbin `oauth_passphrase`, `oauth_encryption_key` and keypair | Mbin | Mbin | every API client and app signs in again |
 | Mbin `app_secret`, oauth2-proxy `cookie_secret`, uptime `session_secret` | the app | the app | signed in browser sessions of that app end (to verify per app in the implementation) |

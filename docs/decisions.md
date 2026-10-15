@@ -2819,3 +2819,75 @@ and the plan says so rather than imply one.
 * **Asking for each value when its rotation is reached.** Not chosen: a run
   would pause part way with earlier secrets already changed, and an operator
   who walked away would come back to a half finished run.
+
+## 2026-10-14: SMTP credentials and settings are tested
+
+Founder decision. It replaces, for SMTP passwords, the line of *`secrets
+rotate` asks for a pasted secret's new value* above that said an SMTP password
+has no check.
+
+### What was decided
+
+* **A check** takes an app's effective SMTP settings (`config.SMTPFor`) and
+  its password (`apps.<app>.smtp_password`, else `external.smtp_password`),
+  connects, does TLS or STARTTLS as `security` declares with the certificate
+  verified (`none` stays plaintext, which `validate` allows only toward a
+  private or mesh relay), and logs in with the username and password.
+* **It connects from a site running the app**, through the toolkit's own ssh
+  (`ssh -W host:port`), so the site's real egress is tested and a mesh or
+  private relay is reachable. The SMTP conversation runs on the workstation,
+  in Go; nothing is installed on a host. Apps with the same settings share a
+  check.
+* **When:**
+  1. `secrets rotate`, for an SMTP password: the next password logs in and
+     sends one test message before any app is handed it; a pasted one is
+     tried when pasted, one set with `secrets set` when the run is planned,
+     so a bad value is never written under `rotations`.
+  2. `secrets set`, for an SMTP password, keyed or in the owed walk: logs in
+     and sends one test message before the value is written; a failure
+     writes nothing.
+  3. `apply`: logs in only, sending nothing; a failure refuses the apply
+     before any host is changed, naming the app, the setting and the
+     server's reply, never the password.
+  4. `validate`: logs in only; a failure warns.
+* **The test message** is sent only by `secrets set` and `secrets rotate`,
+  for a changed credential: to the operators' addresses the configuration
+  declares, from the app's effective from address, short and plain, naming
+  the deployment, the app and that it is a Paisans SMTP test. With no
+  recipient, it is refused with an explanation.
+* Passwords are registered with `ui.Secret` and never printed.
+
+### How it was carried out
+
+* **Recipients are every operator**, by email, in the order of their names,
+  not the one running the command: a changed mail credential concerns every
+  operator, each can confirm the message arrived, and nothing in the
+  configuration says reliably which operator is at the keyboard.
+* **One check per site and settings for `apply` and `validate`; one per
+  sender, from the first site running one of its apps, for `secrets set` and
+  `secrets rotate`.** The first tests each host's own route, which is what
+  `apply` is about to depend on; the second tests a credential, and one
+  message per sender is enough to prove the provider takes it.
+* **A password `secrets set` wrote is only logged in with by a rotation.** It
+  sent its test message when it was set, so the plan and stage 2 log in and
+  send nothing, and a run's dry run sends no mail.
+* **`validate` keeps working offline.** A site it cannot reach, or a secrets
+  file it cannot read, skips the check with a warning; `--offline` skips it
+  without trying. `apply` is the gate that refuses.
+* **`apply` checks in its dry run too**, before the host check: the plan is
+  what `--execute` would do, and a mail failure is where it would stop.
+* **Settings the site's host cannot reach are warned about, not tried**: a
+  compose service name or a loopback address is the app's own network.
+
+### What was weighed
+
+* **Dialling from the workstation.** Not chosen: it tests the operator's
+  network rather than the host's, and cannot reach a relay on the mesh or a
+  site's private network.
+* **Running a mail client on the host** (`swaks`, `openssl s_client`, a
+  container). Not chosen: it installs or runs something on a host for a
+  check, and puts the password in a remote process.
+* **Sending the test message on every `apply`.** Not chosen: it mails the
+  operators on every run against settings that already worked.
+* **Mailing only the operator running the command.** Not chosen: nothing in
+  the configuration names them reliably.

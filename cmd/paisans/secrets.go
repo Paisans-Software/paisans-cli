@@ -15,6 +15,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/deployrecord"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/secretsgen"
+	"github.com/paisans-software/paisans-cli/internal/smtpcheck"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -266,6 +267,13 @@ func runSecretsSet(args []string, stdin io.Reader) error {
 	if err := secretsgen.CheckGarageKeys(cfg, secrets); err != nil {
 		return err
 	}
+	// An SMTP password logs in and sends the operators a test message
+	// first, so one that does not work is never written.
+	if smtpcheck.IsPasswordPath(key) {
+		if err := trySMTPPassword(r, cfg, secrets, key, value, "Nothing was written"); err != nil {
+			return err
+		}
+	}
 
 	if err := config.WriteSecrets(*secretsPath, secrets, recipients); err != nil {
 		return err
@@ -309,11 +317,15 @@ func setOwedSecrets(r ui.Reporter, cfg *config.Config, secrets *config.Secrets, 
 		if len(value) > maxSecret {
 			return fmt.Errorf("secrets set: %s: more than %d bytes, which is not a credential this file holds. %s", o.Name, maxSecret, setSoFar(done))
 		}
-		s := r.Step("set " + o.Name)
 		if err := secrets.Set(o.Name, value); err != nil {
-			s.Fail(err)
 			return err
 		}
+		if smtpcheck.IsPasswordPath(o.Name) {
+			if err := trySMTPPassword(r, cfg, secrets, o.Name, value, setSoFar(done)); err != nil {
+				return err
+			}
+		}
+		s := r.Step("set " + o.Name)
 		if err := config.WriteSecrets(secretsPath, secrets, recipients); err != nil {
 			s.Fail(err)
 			return err

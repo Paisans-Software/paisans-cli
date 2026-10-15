@@ -15,6 +15,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/smtpcheck/smtptest"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -90,6 +91,8 @@ type wrapWorld struct {
 	// with by stage 3's applies.
 	presented map[string]string
 	unhealthy map[string]error
+	// mail answers the SMTP checks: any login unless its Users say.
+	mail *smtptest.Server
 }
 
 func newWrapWorld(t *testing.T) *wrapWorld {
@@ -102,7 +105,7 @@ func newWrapWorld(t *testing.T) *wrapWorld {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := &wrapWorld{t: t, cfg: cfg, store: &memStore{s: s}, hosts: map[string]*fileHost{}, presented: map[string]string{}, unhealthy: map[string]error{}}
+	w := &wrapWorld{t: t, cfg: cfg, store: &memStore{s: s}, hosts: map[string]*fileHost{}, presented: map[string]string{}, unhealthy: map[string]error{}, mail: smtptest.New()}
 	for _, site := range cfg.SiteNames() {
 		w.hosts[site] = &fileHost{t: t, site: site}
 	}
@@ -147,6 +150,7 @@ func (w *wrapWorld) env() Env {
 			w.log = append(w.log, fmt.Sprintf("healthy %s %s", site, strings.Join(stacks, ",")))
 			return w.unhealthy[site]
 		},
+		Mail: w.mail.Env(),
 	}
 }
 
@@ -705,7 +709,9 @@ func TestWrappedRotationsKeepTheirPlaceInTheOrder(t *testing.T) {
 }
 
 // An SMTP password the hosts were last applied with is asked for like the DNS
-// token, replaced at the mail provider, and nothing checks it here.
+// token, replaced at the mail provider. The pasted one logs in and sends the
+// operators one test message when pasted; stage 2 logs in again and sends
+// nothing more.
 func TestSMTPPasswordUnchangedIsAskedFor(t *testing.T) {
 	w := newWrapWorld(t)
 	e := w.env()
@@ -718,18 +724,77 @@ func TestSMTPPasswordUnchangedIsAskedFor(t *testing.T) {
 	}
 	rec := &ui.Recorder{}
 	run.Show(rec)
-	if !endedWith(rec, "nothing checks it here") {
-		t.Errorf("the plan does not say nothing checks it:\n%s", rec.Lines())
+	if !endedWith(rec, "the next password logs in to the mail server") {
+		t.Errorf("the plan does not say how it is checked:\n%s", rec.Lines())
+	}
+	if len(w.mail.Dials()) != 0 {
+		t.Error("the plan of a value to be asked for reached the mail server")
 	}
 	const next = "fixture-not-a-secret-smtp-asked"
 	if err := run.Answer(e, "external.smtp_password", next); err != nil {
 		t.Fatal(err)
 	}
+	msgs := w.mail.Messages()
+	if len(msgs) != 1 || msgs[0].From != "hello@example.org" || !slices.Equal(msgs[0].To, []string{"alice@example.org", "bob@example.org"}) {
+		t.Fatalf("messages after the answer: %+v", msgs)
+	}
+	if !strings.Contains(msgs[0].Data, "`paisans secrets rotate` is changing external.smtp_password") {
+		t.Errorf("message:\n%s", msgs[0].Data)
+	}
+	logins := len(w.mail.Logins())
 	if err := run.Execute(e, nil); err != nil {
 		t.Fatal(err)
 	}
+	if len(w.mail.Logins()) <= logins || len(w.mail.Messages()) != 1 {
+		t.Errorf("stage 2: %d logins after %d, %d messages", len(w.mail.Logins()), logins, len(w.mail.Messages()))
+	}
 	if s, _ := w.store.Load(); s.External["smtp_password"] != next || len(s.Rotations) != 0 {
 		t.Errorf("after: %v", s.Rotations)
+	}
+}
+
+// A pasted SMTP password the server refuses is refused when pasted, naming
+// the server's reply and not the password, and nothing is written.
+func TestSMTPPasswordPastedIsRefusedWhenItDoesNotLogIn(t *testing.T) {
+	w := newWrapWorld(t)
+	w.mail.Users = map[string]string{"robot@example.org": "the-right-one"}
+	e := w.env()
+	run, err := Plan(e, []Rotator{SMTPPassword("external.smtp_password")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const wrong = "fixture-not-a-secret-smtp-wrong"
+	err = run.Answer(e, "external.smtp_password", wrong)
+	if err == nil || !strings.Contains(err.Error(), "535 5.7.8") || !strings.Contains(err.Error(), "Nothing was changed") || strings.Contains(err.Error(), wrong) {
+		t.Fatalf("err = %v", err)
+	}
+	if len(w.mail.Messages()) != 0 {
+		t.Error("a message was sent")
+	}
+	if s, _ := w.store.Load(); len(s.Rotations) != 0 {
+		t.Errorf("rotations: %v", s.Rotations)
+	}
+}
+
+// One set with secrets set, which sent its own test message, logs in when
+// the run is planned and sends nothing; one the server refuses is refused
+// then.
+func TestSMTPPasswordSetAnewIsLoggedInWithAtThePlan(t *testing.T) {
+	w := newWrapWorld(t)
+	w.mail.Users = map[string]string{"robot@example.org": "fixture-not-a-secret-smtp-reissued"}
+	s, _ := w.store.Load()
+	s.External["smtp_password"] = "fixture-not-a-secret-smtp-reissued"
+	_ = w.store.Save(s)
+	if _, err := Plan(w.env(), []Rotator{SMTPPassword("external.smtp_password")}); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.mail.Logins()) == 0 || len(w.mail.Messages()) != 0 {
+		t.Errorf("the plan: %d logins, %d messages", len(w.mail.Logins()), len(w.mail.Messages()))
+	}
+	w.mail.Users = map[string]string{"robot@example.org": "the-right-one"}
+	_, err := Plan(w.env(), []Rotator{SMTPPassword("external.smtp_password")})
+	if err == nil || !strings.Contains(err.Error(), "does not pass where it is checked") || !strings.Contains(err.Error(), "535") {
+		t.Errorf("err = %v", err)
 	}
 }
 
