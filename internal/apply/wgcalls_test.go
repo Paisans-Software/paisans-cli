@@ -14,15 +14,29 @@ import (
 // meshWords are the commands that reach the mesh interface or its unit.
 const meshWords = `wg|wg-quick|journalctl|systemctl`
 
+// optArg is an option's value, joined by = or as the next word.
+const optArg = `(?:=\S*|\s+\S+)`
+
+// meshWrapper is a command that runs the command after it, with its own
+// options and arguments: sudo, env, timeout, nice, xargs, stdbuf, exec,
+// command and nohup.
+const meshWrapper = `(?:` +
+	`sudo(?:\s+(?:--(?:user|group|host|prompt|role|type|other-user|chdir|chroot|close-from|command-timeout)` + optArg + `|-[ugCDhpRrTU]\s+\S+|-\S+))*` +
+	`|env(?:\s+(?:-u\s+\S+|--unset` + optArg + `|-\S+|\S+=\S*))*` +
+	`|timeout(?:\s+(?:-[sk]\s+\S+|--(?:signal|kill-after)` + optArg + `|-\S+))*\s+\d\S*` +
+	`|nice(?:\s+(?:-n\s+\S+|--adjustment` + optArg + `|-\S+))*` +
+	`|xargs(?:\s+(?:-[IiLlnPsdEa]\s+\S+|-\S+))*` +
+	`|stdbuf(?:\s+(?:-[ioe]\s+\S+|-\S+))*` +
+	`|exec|command|nohup)`
+
 // meshCommand matches one of meshWords where a shell starts a command: at
 // the start of the string or of a line, after ;, &, |, ( (which covers &&,
 // || and $( ) or a backtick, or inside sh -c '. Before the word it allows
-// sudo with its flags, env with its assignments, exec, command or nohup, in
-// any order, and an absolute path. Group 1 is the word and group 2 the
-// argument after it, if any.
+// any number of meshWrapper, in any order, and an absolute path. Group 1 is
+// the word and group 2 the argument after it, if any.
 var meshCommand = regexp.MustCompile(
 	"(?:^|[\\n;&|(`]|\\b(?:ba)?sh\\s+-c\\s+['\"])\\s*" +
-		`(?:(?:sudo(?:\s+(?:-[ugCDhpRrTU]\s+\S+|-\S+))*|env(?:\s+\S+=\S*)*|exec|command|nohup)\s+)*` +
+		`(?:` + meshWrapper + `\s+)*` +
 		`(?:/\S*/)?(` + meshWords + ")" +
 		"(?:$|[\\s'\"`;&|)]\\s*(\\S*))")
 
@@ -151,6 +165,32 @@ func TestTheMeshGuardCatchesEachForm(t *testing.T) {
 		"systemctl --user status docker; systemctl stop x",
 		"systemctl --user restart docker && sudo systemctl restart wg-quick@x",
 		"x; systemctl",
+		"sudo --user root wg show x",
+		"sudo --user=root wg show x",
+		"sudo -g grp wg show x",
+		"sudo --group grp wg show x",
+		"sudo --group=grp -n wg show x",
+		"sudo -n --user root systemctl restart x",
+		"timeout 5 wg show x",
+		"timeout -s KILL 5s wg show x",
+		"timeout --signal=KILL -k 1 5 wg show x",
+		"sudo timeout 5 wg show x",
+		"nice wg show x",
+		"nice -n 10 wg show x",
+		"nice -10 wg show x",
+		"nice --adjustment=5 wg show x",
+		"echo x | xargs wg show",
+		"echo x | xargs -r wg show",
+		"echo x | xargs -I {} wg show {}",
+		"echo x | xargs -n 1 -P 2 wg show",
+		"nohup wg-quick up x",
+		"nohup sudo wg-quick up x",
+		"stdbuf -oL wg show x",
+		"stdbuf -o L -e 0 journalctl -u x",
+		"stdbuf --output=L wg show x",
+		"env -i wg show x",
+		"env -u HOME wg show x",
+		"timeout 5 nice -n 1 stdbuf -oL sudo -u root env A=1 wg show x",
 	}
 	for _, s := range caught {
 		if !directMeshCommand(s) {
