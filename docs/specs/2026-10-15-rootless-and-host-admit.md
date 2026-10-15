@@ -167,7 +167,16 @@ govern.
 12. **Low ports**, with `--public-ports`: `net.ipv4.ip_unprivileged_port_start=80`
     in `/etc/sysctl.d/60-paisans.conf`, applied with `sysctl --system`. The
     output says plainly that this lets every local user on the host bind
-    ports 80 to 1023.
+    ports 80 to 1023. Before granting it, admit checks, as root, that
+    nothing else answers on 80 or 443: a listener in `ss -Hltnp`, a port the
+    system Docker publishes (`docker ps` on its socket, when one is
+    running), or a DNAT rule for either port in `nft list ruleset`. A
+    Docker daemon with its userland proxy off publishes a port with a DNAT
+    rule alone and no listener, so `ss` cannot see it, and only root can
+    read the ruleset. Anything found refuses the grant, naming what holds
+    the port (process, container and compose project, or rule), and the
+    refusal names `web_server.managed_by: external` as the way to run
+    behind it.
 13. **Forwarding**, for a site with an endpoint: `net.ipv4.ip_forward=1` in
     the same file. Such a site relays mesh traffic between sites behind NAT,
     which cannot dial each other (`isRelay` in `internal/render/site.go`).
@@ -372,10 +381,21 @@ What changes in behaviour:
   `docker system df -v`.
 * **The disk checks** read `DockerRootDir` as today, which is now the user's
   data directory. Admit refuses a data directory on NFS (*Sources*).
+* **The gateway answers as itself.** The deployment's user cannot read the
+  host's ruleset or another user's sockets, so a port taken after
+  admission, and above all one taken by a DNAT rule with no listener, is
+  invisible from the host. The gateway's Caddy serves
+  `/.well-known/paisans/<token>`, answering with the deployment's token,
+  and `apply` ends the gateway's step by fetching it through the
+  community's public address on 443 (and on 80, expecting the redirect).
+  Any other answer is a conflict: the step fails with "443 on <site>
+  answers, but not as this deployment", whatever the host check saw.
 * **`paisans doctor`** loses the sudo finding and the allowlist check, and
   gains: the user is not privileged, the rootless socket answers, Engine is
   29.5 or later, linger is on, `sudo -n -l` lists the helper and nothing
-  else, and the admission record matches the declaration.
+  else, the admission record matches the declaration, and the gateway
+  answers its own `/.well-known/paisans/<token>` from outside, as `apply`
+  checks it.
 * **`host deployments`** stays an owner's command with `--ssh` and sudo, and
   lists admission records beside what it lists today.
 
@@ -411,10 +431,18 @@ What changes in behaviour:
 * The release workflow's artifacts include both Linux binaries and
   `SHA256SUMS`.
 * The Docker-tagged tests run against a rootless daemon.
+* Admit with `--public-ports`: golden plans refusing a host where 80 is a
+  process's listener, a system Docker container's published port, and a
+  DNAT rule with no listener, each naming what holds it.
+* The gateway's step fails, naming the conflict, when its fetch of
+  `/.well-known/paisans/<token>` returns another body or another server.
 * One end-to-end run on staging: admit a fresh host as its owner, apply as
   the deployment's user, then check that a container cannot connect to a
   service on the host's `127.0.0.1` or LAN, and that `sudo -n` as the user
-  runs nothing but the helper.
+  runs nothing but the helper. Then, on a second host, a system Docker with
+  `"userland-proxy": false` publishing 443: admit `--public-ports` refuses,
+  and with the container started after admission, `apply` and `doctor`
+  report the conflict.
 
 ## Sources
 
