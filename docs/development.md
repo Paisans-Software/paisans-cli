@@ -608,10 +608,15 @@ mounted file changed and whose container was left in place (`Action.Refresh`).
 
 **The mesh interface, `psns-<token>`, is up before any container moves.** Every service binds the site's
 mesh address, so the mesh comes up right after the files are written and before
-the gateway checks and stack actions below. A first apply enables and starts
-`wg-quick@psns-<token>`; a peer change is handed over with `wg syncconf` so the mesh
-stays up; a change to a line only wg-quick applies restarts it; and an
-unchanged file on a host whose interface is down starts it. A failure stops the
+the gateway checks and stack actions below. Every mesh step goes through the
+WireGuard helper (`apply.WGHelper`, `internal/apply/helper.go`), whose script
+`internal/hostprep/wghelper.go` renders from
+`internal/hostprep/snippets/wg-helper.sh.tmpl`: `handMesh` puts the rendered
+file, then a first apply runs `up`; a peer change runs `sync` so the mesh
+stays up; a change to a line only wg-quick applies runs `restart`; and an
+unchanged file on a host whose interface is down runs `up`. An unchanged file
+on an up interface is read back (`runningStep`) and synced or restarted when
+the interface runs another key, other peers or no address. A failure stops the
 apply there. `README.md` has the table under "`apply` brings the mesh
 interface up before anything binds to it".
 
@@ -1039,7 +1044,7 @@ specification. What the code relies on:
 The tests in `evict_test.go` run the same world, with a failover that
 promotes the `Sync Standby`, or the first streaming replica, once no
 remaining host's running interface lists the evicted key, and a running mesh
-file per host that only `wg syncconf` changes. They cover the order, the host
+file per host that only the helper's `sync` changes. They cover the order, the host
 never reached, a leader with and without a `Sync Standby`, objects lost at
 replication 1, a gateway replaced in the same edit, the token check, every
 refusal, a partial cut, and resuming from each stage.
@@ -1881,7 +1886,7 @@ Nor have the review of what `paisans-stack.yaml` grants and its record on each
 host: the shell they send is run against local files in the tests, not
 observed on a host. Nor `site remove --evict` and `mesh rekey`: Patroni's failover
 once its leader is cut off, `garage layout skip-dead-nodes` on a node that
-is down, a WireGuard key swapped by `wg syncconf`, and `patronictl pause
+is down, a WireGuard key swapped by the helper's `sync`, and `patronictl pause
 --wait` and `resume --wait` around a relay's swap, with the pause read back as
 `pause: true` in `patronictl show-config`, are read from upstream source
 (Patroni v4.1.0, `patroni/ctl.py`) and documentation, and have run only
