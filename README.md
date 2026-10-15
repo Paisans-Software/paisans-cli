@@ -6243,6 +6243,27 @@ other, which is also the check on the gateway's Caddy after a reload or an
 image change; Patroni's own wait for a primary still gates the database
 bootstrap, because a running Spilo container is not yet a primary.
 
+**A stop refers to `paisans doctor` only where a doctor check names its
+cause**, because a referral to a command that then reports everything ok is
+worse than none. The causes are one table in `internal/diagnosis`, which
+apply, init and doctor share. A service whose log shows `tls: internal error`
+fetching a hostname a Caddy site serves gets a line saying that Caddy has no
+certificate for it (Caddy's answer to a handshake for a hostname it holds no
+certificate for, observed on staging), and a service that cannot reach its
+database gets one pointing at doctor's Patroni check:
+
+```
+  oauth2-proxy: Caddy on vm has no certificate for id.example.org, so it refuses TLS for it. Run paisans doctor to see why it could not get one.
+```
+
+A TLS error on a hostname Paisans does not serve gets no referral. A site ssh
+cannot reach, in `apply` or in `init`'s read of every site, ends with `Run
+paisans doctor --site <site>`, whose reach check says what the deployment is
+without while it is gone. `gateway move` calls the DNS provider without the
+token check `dns init` makes, so a refusal there (Cloudflare's `9109` or
+`10502`) is worded as that check words it, with `Run paisans doctor`. Any
+other failure is reported as above, with no referral.
+
 **Failing on the first `restarting` rather than waiting it out is deliberate.**
 Every rendered service carries `restart: unless-stopped`, so `restarting` means
 the process already crashed once after its dependencies were up, and Docker will

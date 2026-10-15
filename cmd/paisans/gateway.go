@@ -38,6 +38,12 @@ func runGateway(args []string) error {
 // "Moving the gateway"). It takes no site: the new gateway is the
 // configuration's, and the old one is found from what it still runs.
 func runGatewayMove(args []string) error {
+	return referProvider(gatewayMoveCommand(args))
+}
+
+// gatewayMoveCommand is runGatewayMove before a provider's refusal of the
+// token is worded as the token check words it.
+func gatewayMoveCommand(args []string) error {
 	fs := newFlagSet("gateway move", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration")

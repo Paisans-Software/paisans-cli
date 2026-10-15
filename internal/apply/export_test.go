@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/diagnosis"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -211,3 +212,9 @@ func SetResolveWait(wait, poll time.Duration, sleeper func(time.Duration)) func(
 // ResolveProbe exposes the command that flushes the host's DNS cache and
 // asks which of names resolve.
 func ResolveProbe(names []string) string { return resolveProbe(names) }
+
+// WaitServing is WaitHealthy with the hostnames each Caddy site serves, as
+// apply's own gate has them from Plan.Served.
+func WaitServing(d deployment.Deployment, site, stack string, t Transport, stopped string, served diagnosis.Served) error {
+	return waitStack(d, site, stack, t, stopped, served)
+}

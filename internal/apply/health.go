@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/diagnosis"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -123,7 +125,7 @@ func judge(list []container) (verdict, []string) {
 // `--all` because a container that exited is exactly what this gate is for,
 // and plain `ps` lists only running ones.
 func waitHealthy(plan *Plan, stack string, t Transport) error {
-	return waitStack(plan.Deployment, plan.Site, stack, t, applyStopped)
+	return waitStack(plan.Deployment, plan.Site, stack, t, applyStopped, plan.Served)
 }
 
 // applyStopped is what a failed gate tells the operator inside an apply.
@@ -134,10 +136,13 @@ const applyStopped = "Nothing after this stack was started; the next apply recre
 // with the tail of their logs, then stopped, which says what the caller did
 // and did not do.
 func WaitHealthy(d deployment.Deployment, site, stack string, t Transport, stopped string) error {
-	return waitStack(d, site, stack, t, stopped)
+	return waitStack(d, site, stack, t, stopped, nil)
 }
 
-func waitStack(d deployment.Deployment, site, stack string, t Transport, stopped string) error {
+// waitStack is the gate. served is the hostnames each Caddy site serves, for
+// recognising a TLS failure as Caddy's (see diagnosis.FromLog); nil
+// recognises the causes that need none.
+func waitStack(d deployment.Deployment, site, stack string, t Transport, stopped string, served diagnosis.Served) error {
 	compose := d.ComposeCmd(stack)
 	attempts := int(healthWait / healthPoll)
 	if attempts < 1 {
@@ -157,7 +162,7 @@ func waitStack(d deployment.Deployment, site, stack string, t Transport, stopped
 			case healthy:
 				return nil
 			case failed:
-				return unhealthy(site, stack, compose, "is not healthy", names, stopped, t)
+				return unhealthy(site, stack, compose, "is not healthy", names, stopped, t, served)
 			}
 			named, last = names, ""
 			if len(list) == 0 {
@@ -171,15 +176,18 @@ func waitStack(d deployment.Deployment, site, stack string, t Transport, stopped
 	if last != "" && len(named) == 0 {
 		return fmt.Errorf("%s: stack %s did not come up healthy within %s (%s). %s", site, stack, healthWait, last, stopped)
 	}
-	return unhealthy(site, stack, compose, fmt.Sprintf("did not come up healthy within %s", healthWait), named, stopped, t)
+	return unhealthy(site, stack, compose, fmt.Sprintf("did not come up healthy within %s", healthWait), named, stopped, t, served)
 }
 
 // unhealthy builds the gate's error: the stack and its failing services, one
-// line of cause per service read from the tail of its log, and stopped. The
+// line of cause per service read from the tail of its log, a line referring
+// to doctor for each service whose log shows a cause doctor diagnoses (see
+// internal/diagnosis), and stopped. The referral is in the explanation, so
+// the default output carries it without --verbose. The
 // tail itself, 30 lines a service, is the Problem's cause, shown with
 // --verbose: by default it is a wall of JSON and stack traces around the one
 // line that matters.
-func unhealthy(site, stack, compose, what string, names []string, stopped string, t Transport) error {
+func unhealthy(site, stack, compose, what string, names []string, stopped string, t Transport, served diagnosis.Served) error {
 	seen := map[string]bool{}
 	var services []string
 	for _, name := range names {
@@ -190,14 +198,19 @@ func unhealthy(site, stack, compose, what string, names []string, stopped string
 		}
 	}
 	sort.Strings(services)
-	var causes []string
+	var causes, referrals []string
 	var logs strings.Builder
 	for _, service := range services {
 		out, err := t.Run(fmt.Sprintf("%s logs --no-color --tail 30 %s", compose, shellQuote(service)))
 		if err != nil && out == "" {
 			out = err.Error()
-		} else if cause := logCause(out); cause != "" {
-			causes = append(causes, service+": "+cause)
+		} else {
+			if cause := logCause(out); cause != "" {
+				causes = append(causes, service+": "+cause)
+			}
+			if r, ok := diagnosis.FromLog(out, served); ok {
+				referrals = append(referrals, service+": "+r.Sentence)
+			}
 		}
 		if logs.Len() > 0 {
 			logs.WriteString("\n\n")
@@ -206,7 +219,7 @@ func unhealthy(site, stack, compose, what string, names []string, stopped string
 	}
 	p := &ui.Problem{
 		Hint:    fmt.Sprintf("%s: stack %s %s: %s", site, stack, what, strings.Join(names, ", ")),
-		Explain: strings.Join(append(causes, stopped), "\n"),
+		Explain: strings.Join(slices.Concat(causes, referrals, []string{stopped}), "\n"),
 	}
 	if logs.Len() > 0 {
 		p.Cause = errors.New(logs.String())

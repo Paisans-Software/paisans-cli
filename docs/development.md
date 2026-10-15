@@ -1536,6 +1536,7 @@ installed, on a workstation or anywhere else.
 | `internal/preflight` | `site add`'s first stage: read only checks on the new site and every running one, as a report |
 | `internal/failover` | `failover test`: its checks, the switchover and its gates |
 | `internal/doctor` | `doctor`: the read commands it sends, and the findings and recovery advice made from their answers |
+| `internal/diagnosis` | the causes an error from `apply`, `init` or `dns` refers to `doctor` for: each a matcher over an error or a log line, the sentence, and the doctor check that names it. Its own package because `internal/doctor` imports `internal/apply` |
 | `internal/patroni` | reading a Patroni cluster through the Spilo container: `/cluster`, the leader, lag, database size |
 | `internal/configstore` | the signed copies of the configuration: a version as a git commit and the bare repository holding it, the rules that choose which versions to trust and which is newest, gathering from every site, pushing to them, and the key by key merge of the secrets |
 | `internal/hostprep` | taking a blank host to what `apply` assumes; one profile per operating system, its shell under `profiles/<id>-<version>/` |

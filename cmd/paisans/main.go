@@ -475,6 +475,12 @@ func runRender(args []string) error {
 // the identity step in clients.go: declaring the app is the approval for
 // its client, so `--execute` creates and records it like any other secret.
 func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
+	return referUnreachable(applyCommand(args, stdin, stdout))
+}
+
+// applyCommand is runApply before an unreachable site's referral to doctor
+// is added to its error.
+func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("apply", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
@@ -1062,7 +1068,7 @@ func planSiteApply(cfg *config.Config, secrets *config.Secrets, site string, tra
 	if err != nil {
 		return nil, err
 	}
-	options = append([]apply.Option{apply.DatabaseApps(apply.ClusterDatabaseApps(cfg)...), apply.ResolveImages(imageDigests), apply.Arch(cfg.Sites[site].Arch)}, options...)
+	options = append([]apply.Option{apply.DatabaseApps(apply.ClusterDatabaseApps(cfg)...), apply.ResolveImages(imageDigests), apply.Arch(cfg.Sites[site].Arch), apply.Serves(apply.ServedHostnames(cfg))}, options...)
 	plan, err := apply.Build(site, rendered, acme.Module(cfg.ACME.Provider), transport, options...)
 	if err != nil {
 		return nil, err

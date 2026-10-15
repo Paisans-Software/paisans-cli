@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/diagnosis"
 	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -163,6 +164,11 @@ type Plan struct {
 	// routing file changed. It is the narrower of the two: a new image is
 	// picked up by the recreate, not by a reload.
 	GatewayReload bool
+	// Served is each hostname a Caddy site of the deployment serves, to that
+	// site, so the health gate can tell a TLS failure on one of them for
+	// Caddy holding no certificate. Nil recognises no TLS failure. See
+	// Serves.
+	Served diagnosis.Served
 	// ACMEModule is the Caddy DNS module this deployment's gateway must have,
 	// as `caddy list-modules` prints it. Empty when this site runs no gateway.
 	ACMEModule string
@@ -435,6 +441,14 @@ type options struct {
 	// peers are the compose files of this site's apps on the sites the
 	// apply does not cover; see OtherSites.
 	peers []PeerCompose
+	// served is Plan.Served; see Serves.
+	served diagnosis.Served
+}
+
+// Serves gives the plan the hostnames each Caddy site serves, from
+// ServedHostnames, for the health gate's referral to doctor.
+func Serves(served diagnosis.Served) Option {
+	return func(o *options) { o.served = served }
 }
 
 // Report sets the plan's Report before Build reads the host, so planning
@@ -558,6 +572,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 		opt(&o)
 	}
 	out.Report = o.report
+	out.Served = o.served
 	// An earlier pass of the same apply already carried out these. See After.
 	doneOverwrite, doneStacks := map[string]bool{}, map[string]bool{}
 	for _, p := range o.after {
