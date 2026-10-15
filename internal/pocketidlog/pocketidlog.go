@@ -45,6 +45,24 @@ func EmailFailure(logs, address string) (string, bool) {
 	return "", false
 }
 
+// Brief is a Pocket ID email error cut to its cause. Pocket ID wraps the
+// cause in a "failed to ..." for each layer it passed through, and a bad SMTP
+// connection string ends with the whole format it expects, which says nothing
+// the toolkit's own smtp settings do not. Eg: "failed to configure emailer:
+// failed to init email sender 'smtp': invalid connection string: missing SMTP
+// password; required format is '...'" is "invalid connection string: missing
+// SMTP password".
+func Brief(why string) string {
+	why, _, _ = strings.Cut(why, "; required format is ")
+	for {
+		head, rest, ok := strings.Cut(why, ": ")
+		if !ok || !strings.HasPrefix(head, "failed to ") {
+			return why
+		}
+		why = rest
+	}
+}
+
 // jsonAttrs is a LOG_JSON line's string attributes, or nil for a line that is
 // not one.
 func jsonAttrs(line string) map[string]string {

@@ -2046,6 +2046,43 @@ func TestConvergeRunReportsEachEmail(t *testing.T) {
 	}
 }
 
+// When every failed email failed the same way, each operator's line says
+// failed and the cause, cut to what Pocket ID's error means, is said once.
+func TestConvergeRunSaysASharedEmailFailureOnce(t *testing.T) {
+	why := "failed to configure emailer: failed to init email sender 'smtp': invalid connection string: missing SMTP password; required format is 'smtp://<username>:<password>@<host>:<port>'"
+	fakeConverge(t, nil)
+	fakeDeclaredOperators(t, unregistered(true))
+	fakeEmailFailures(t, map[string]string{"alice@example.org": why, "bob@example.org": why}, nil)
+	recordLinks(t)
+	rec := recordConverge(t)
+	if err := converge(t, "--execute"); err != nil {
+		t.Fatal(err)
+	}
+	lines := rec.Lines()
+	for _, id := range []string{"alice", "bob"} {
+		found := false
+		for _, e := range rec.Events {
+			if e.Kind == "fail" && e.Text == "email "+id+" a login link" && e.Extra == "failed" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("no bare failed line for %s:\n%s", id, lines)
+		}
+	}
+	if n := strings.Count(lines, "missing SMTP password"); n != 1 {
+		t.Errorf("the cause is said %d times, want once:\n%s", n, lines)
+	}
+	for _, noise := range []string{"required format", "failed to configure emailer"} {
+		if strings.Contains(lines, noise) {
+			t.Errorf("output keeps %q:\n%s", noise, lines)
+		}
+	}
+	if !strings.Contains(lines, "paisans secrets list") {
+		t.Errorf("no fix for the missing password:\n%s", lines)
+	}
+}
+
 // An admin who could not be made fails the run, and a link already issued is
 // still printed.
 func TestConvergeRunFailsOnAnAdminAndStillPrintsLinks(t *testing.T) {
