@@ -2138,9 +2138,28 @@ tag and commit keeps that release until `catalog update` moves it; its images
 still follow their tracks. When the catalog's forge cannot be reached, the run
 uses the release this workstation last read.
 
-**Holding one image back** is an `images` entry, or `acme.image` for the
-gateway: an operator's own reference wins over the track, exact or a track of
-its own.
+**Holding one image back, or moving it ahead of its track,** is a
+configuration key: `apps.<name>.images` for an app's, `acme.image` for the
+gateway's Caddy, and `infra` for the infrastructure stack's:
+
+    infra:
+      images:            # etcd, haproxy, garage, heartbeat
+        haproxy: "docker.io/library/haproxy:3.2.*-alpine"
+      postgres:
+        "18":
+          spilo: "ghcr.io/zalando/spilo-18:4.1-p3"
+
+Each wins over the track, exact or a track of its own, and needs no catalog
+release. `infra.postgres` is keyed by Postgres major and applies only while
+`cluster.postgres_version` is that major. An etcd, HAProxy, Garage or Zalando
+Spilo override stays inside the versions the toolkit is written against, and
+a digest there carries a tag beside it; a Spilo from another provider is accepted
+with a warning. The heartbeat override also replaces the operators heartbeat
+in every Pocket ID stack. `paisans images` lists every image each site runs,
+the build the next apply runs, and any override behind the release it
+replaced. It exits 0, or 3 with `--check` when anything would move, for a
+schedule; it exits 1 after printing the whole table when a site could not be
+read, whose rows show `unknown`.
 
 **An app on several sites moves to a new build on all of them at once.** A
 clustered app runs one database from every site it is on, and two builds
@@ -5534,7 +5553,8 @@ these must hold:
    commit is fetched from the official URL before an installed snapshot is
    used, so an honest pin to a release keeps the exemption; with a `url`, it is
    fetched from there, and is not official.
-3. The service is the toolkit's own: one of the infrastructure stack's, the
+3. The service is the toolkit's own: one of the infrastructure stack's unless
+   `infra` declares it, the
    gateway's Caddy unless `acme.image` declares one, a pinned app's own database
    unless `apps.<name>.images` declares one, a service the toolkit adds to a
    stack (Eg: the operators heartbeat), or a service written with `foundation:` (see
@@ -5554,7 +5574,7 @@ included.
 Foundation images are still listed, apart from the rest, so the operator sees
 what moves. An image a blueprint names itself with `image:` (Eg: Wiki.js, Mbin,
 WriteFreely, or any third party catalog's) needs approval, and so does any image the
-configuration declares in `apps.<name>.images` or `acme.image`, since nobody
+configuration declares in `apps.<name>.images`, `infra` or `acme.image`, since nobody
 reviewed those choices but the operator who made them. Whether an image is the
 foundation's is decided by where the render took it, never by its name: a
 catalog blueprint whose `image:` names the foundation's own reference needs

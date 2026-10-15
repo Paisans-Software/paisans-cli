@@ -102,6 +102,12 @@ paisans validate --offline   # the file alone; no site is reached
   through it the app's mail server. Changes none. A site that cannot be
   reached, or a secrets file that cannot be read, skips the mail check with a
   warning, so it works away from the hosts.
+* **Images:** an `infra` override is refused outside the versions the
+  toolkit is written against (etcd v3, HAProxy 3, Garage v1, Zalando Spilo 3
+  and 4), and an etcd, HAProxy, Garage or Spilo override is refused with a
+  digest and no tag; warned about for a Postgres major the deployment does not
+  run, for a Spilo from another provider, and for the heartbeat, which it
+  replaces in every Pocket ID stack too.
 * **`--execute`:** not taken.
 
 ### `paisans create`
@@ -969,6 +975,28 @@ instance, clocks, and what is left over.
   recoveries it prints are for a human to run.
 
 See *`paisans doctor` reports what is stuck and how to recover* in `README.md`.
+
+### `paisans images`
+
+Lists, for every site, each image its stacks run: where the reference comes
+from (`foundation`, `blueprint`, or the configuration key that declares it),
+the build the site runs, the build the next `apply` would run, and a note
+when it moves or when an override is behind the release it replaced.
+
+```sh
+paisans images
+paisans images --check   # exit 3 when a build would move or an override lags
+```
+
+* **Alone:** to see what the next apply moves, or on a schedule with
+  `--check`.
+* **Flags:** `--config`, `--secrets`, `--check` (off: exit 0 however much
+  would move; on: exit 3 when anything would, with no error line).
+* **Hosts:** reads every site's compose files over ssh, as a dry run of
+  `apply` does, and the registries. Changes none, and asks for no sudo. A site
+  that cannot be read has `unknown` builds in the table, which is printed
+  whole, and the command exits 1, with or without `--check`.
+* **`--execute`:** not taken.
 
 ### `paisans version`
 
