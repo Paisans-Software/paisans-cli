@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/mesh"
 )
 
@@ -55,5 +56,30 @@ func TestMeshFailsOnADownInterface(t *testing.T) {
 		if len(got) == 0 || got[0].Level != Fail || !strings.Contains(got[0].Line, want) {
 			t.Errorf("link %q: Mesh = %+v, want a FAIL %q", link, got, want)
 		}
+	}
+}
+
+// A down interface's advice gives the WireGuard helper's log command to
+// type; a deployment whose interface name no helper has is told so in
+// words, with no command in backticks that could not be typed.
+func TestADownInterfaceAdvisesTheHelpersLog(t *testing.T) {
+	advice := func(cfg *config.Config) string {
+		got := Mesh(cfg, []MeshProbe{{Site: "home-b", Link: "absent\n", Probed: mesh.Probed{Routes: "[]", Addrs: "[]", Networks: "[]"}}})
+		if len(got) == 0 || got[0].Level != Fail {
+			t.Fatalf("Mesh = %+v, want a FAIL", got)
+		}
+		return strings.Join(got[0].More, "\n")
+	}
+	if got := advice(fixture(t)); !strings.Contains(got, "`sudo /usr/local/libexec/paisans/wg-psns-f2a9 log`, as the deployment's user on home-b") {
+		t.Errorf("the advice does not give the helper's log command:\n%s", got)
+	}
+	cfg := fixture(t)
+	cfg.ID = "zzzz"
+	got := advice(cfg)
+	if strings.Contains(got, "`the WireGuard helper") || strings.Contains(got, "log`") {
+		t.Errorf("the advice puts a command it cannot name in backticks:\n%s", got)
+	}
+	if !strings.Contains(got, "no WireGuard helper") || !strings.Contains(got, "psns-zzzz") {
+		t.Errorf("the advice does not say in words that the interface has no helper:\n%s", got)
 	}
 }
