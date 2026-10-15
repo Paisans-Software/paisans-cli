@@ -403,7 +403,6 @@ Caddyfile is never printed.
 This snippet is what apply writes into the include directory. With
 `include_dir: false`, copy it into your web server's configuration yourself,
 obtain the certificate if the sheet says to, and reload the server.
-`--sudo=false` reads as the ssh user alone.
 
 ## 5. Publish the name
 

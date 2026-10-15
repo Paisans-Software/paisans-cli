@@ -13,7 +13,6 @@ import (
 // the claim and the read, and records which it got.
 type registryFake struct {
 	claims, reads int
-	sudo          bool
 }
 
 func (f *registryFake) Run(command string) (string, error) {
@@ -36,8 +35,7 @@ func withRegistryFake(t *testing.T) *registryFake {
 	t.Helper()
 	fake := &registryFake{}
 	saved := registryHost
-	registryHost = func(_ string, _ config.Site, _ string, sudo bool) registry.Runner {
-		fake.sudo = sudo
+	registryHost = func(_ string, _ config.Site, _ string) registry.Runner {
 		return fake
 	}
 	t.Cleanup(func() { registryHost = saved })

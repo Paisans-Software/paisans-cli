@@ -23,7 +23,6 @@ func runFailoverTest(args []string) error {
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	execute := fs.Bool("execute", false, "actually switch the primary over and back")
-	sudo := fs.Bool("sudo", true, "run remote commands through sudo")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -34,11 +33,11 @@ func runFailoverTest(args []string) error {
 	}
 	// The switchover runs on the data sites, and the restart after it on
 	// the apps sites.
-	if err := claimSites(r, cfg, *execute, *sudo, union(cfg.Cluster.Sites, cfg.AppsSites())...); err != nil {
+	if err := claimSites(r, cfg, *execute, union(cfg.Cluster.Sites, cfg.AppsSites())...); err != nil {
 		return err
 	}
 	return failover.Run(cfg, failover.Options{
-		Transports: allSiteTransports(cfg, *sudo),
+		Transports: allSiteTransports(cfg),
 		Report:     r,
 		Execute:    *execute,
 	})

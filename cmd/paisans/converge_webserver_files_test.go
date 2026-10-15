@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"slices"
@@ -62,11 +61,12 @@ func (h *manifestHost) record(t *testing.T) []render.ManifestWebServer {
 }
 
 // filesFake is the monitor's host for writing its site file: the web
-// server on it, its manifest, and the sudo each was reached with.
+// server on it, its manifest, and each site it was reached on.
 type filesFake struct {
 	server   *webservertest.Server
 	manifest *manifestHost
-	sudo     []string
+	// reached is each site the web server was reached on.
+	reached []string
 }
 
 // fakeWebServerFiles writes the site files for real, on a fake monitor host
@@ -76,19 +76,15 @@ func fakeWebServerFiles(t *testing.T, ws webserver.WebServer, conf string) *file
 	f := &filesFake{server: webservertest.New(conf), manifest: &manifestHost{files: map[string]string{}}}
 	savedFiles, savedHost, savedConverge := convergeWebServerFiles, webServerFilesHost, convergeHost
 	convergeWebServerFiles = writeWebServerFiles
-	webServerFilesHost = func(_ *config.Config, site string, sudo bool) webserver.Host {
-		f.sudo = append(f.sudo, fmt.Sprintf("%s sudo=%v", site, sudo))
-		h := webserver.Host{Plain: f.server.Plain()}
-		if sudo {
-			h.Sudo = f.server.Sudo()
-		}
-		return h
+	webServerFilesHost = func(_ *config.Config, site string) webserver.Host {
+		f.reached = append(f.reached, site)
+		return webserver.Host{Plain: f.server.Plain()}
 	}
-	convergeHost = func(name string, site config.Site, sudo bool) apply.Transport {
+	convergeHost = func(name string, site config.Site) apply.Transport {
 		if name == "watch" {
 			return f.manifest
 		}
-		return savedConverge(name, site, sudo)
+		return savedConverge(name, site)
 	}
 	t.Cleanup(func() {
 		convergeWebServerFiles, webServerFilesHost, convergeHost = savedFiles, savedHost, savedConverge
@@ -112,7 +108,7 @@ func convergeAt(t *testing.T, path string, extra ...string) error {
 	t.Helper()
 	var err error
 	captureStdout(t, func() {
-		err = runApply(append([]string{"--config", path, "--secrets", fixtureSecretsPath(), "--sudo=false"}, extra...), strings.NewReader(""), io.Discard)
+		err = runApply(append([]string{"--config", path, "--secrets", fixtureSecretsPath()}, extra...), strings.NewReader(""), io.Discard)
 	})
 	return err
 }
@@ -308,7 +304,7 @@ func TestApplyWithIncludeDirFalseWritesNothing(t *testing.T) {
 	if err := convergeAt(t, path, "--execute"); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.server.Asked) != 0 || len(f.sudo) != 0 {
+	if len(f.server.Asked) != 0 || len(f.reached) != 0 {
 		t.Errorf("the web server was asked %v", f.server.Asked)
 	}
 	if after, _ := os.ReadFile(path); string(after) != string(before) {
@@ -671,10 +667,9 @@ func TestApplyFailsWhereTheSiteFilesRecordCannotBeRead(t *testing.T) {
 	}
 }
 
-// The site files are written with the run's sudo: the host they are
-// written through is the one webServerHost builds, which shares the answer
-// the run settled (TestWebServerHostSharesTheRunsSudo).
-func TestApplyWritesTheSiteFileWithTheRunsSudo(t *testing.T) {
+// The site files are written as the ssh user, through the host webServerHost
+// builds, which has no sudo.
+func TestApplyWritesTheSiteFileAsTheSSHUser(t *testing.T) {
 	fakeConverge(t, nil)
 	path := externalFixture(t)
 	f := fakeWebServerFiles(t, mountedCaddy, "import /etc/caddy/paisans.d/*\n")
@@ -682,14 +677,10 @@ func TestApplyWritesTheSiteFileWithTheRunsSudo(t *testing.T) {
 	if err := convergeAt(t, path, "--execute"); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(f.sudo, []string{"watch sudo=false"}) {
-		t.Errorf("reached %v", f.sudo)
+	if !slices.Equal(f.reached, []string{"watch"}) {
+		t.Errorf("reached %v", f.reached)
 	}
-	h := webServerFilesHost
-	webServerFilesHost = webServerHost
-	defer func() { webServerFilesHost = h }()
-	got := webServerFilesHost(fixture(t), "watch", true)
-	if s, ok := got.Sudo.(apply.SSHTransport); !ok || s.Auth != sudoAuthFor(s.Describe()) {
+	if got := webServerHost(fixture(t), "watch"); got.Sudo != nil {
 		t.Errorf("sudo %#v", got.Sudo)
 	}
 }

@@ -253,8 +253,7 @@ func convergePlan(cfg *config.Config, st convergeState) []convergeStep {
 }
 
 // convergeRun runs one step: the existing command, in this process, so it
-// plans, gates, claims and reports as typed by hand, and the sudo password
-// each host asked for is asked once for the whole run. Tests replace it.
+// plans, gates, claims and reports as typed by hand. Tests replace it.
 var convergeRun func(args []string) error
 
 // The step runner and the check are set here rather than where they are
@@ -374,16 +373,16 @@ func runStep(args []string) error {
 
 // convergeReadInitial reads one etcd member's infra/etcd-initial record
 // through its ssh section. Tests replace it.
-var convergeReadInitial = func(cfg *config.Config, member string, sudo bool) (render.EtcdInitial, bool, error) {
-	return apply.ReadEtcdInitial(siteTransport(member, cfg.Sites[member], "", sudo), cfg.Deployment())
+var convergeReadInitial = func(cfg *config.Config, member string) (render.EtcdInitial, bool, error) {
+	return apply.ReadEtcdInitial(siteTransport(member, cfg.Sites[member], ""), cfg.Deployment())
 }
 
 // convergeHoldsGateway reads whether a site's host holds this deployment's
 // gateway Caddy, record or move marker. On a site whose roles run Caddy for a
 // monitor, the Caddy is not evidence; the record, the marker and a Caddyfile
 // still naming the gateway's hostnames are. Tests replace it.
-var convergeHoldsGateway = func(cfg *config.Config, site string, sudo bool) (bool, error) {
-	return holdsGatewayOn(cfg, site, siteTransport(site, cfg.Sites[site], "", sudo))
+var convergeHoldsGateway = func(cfg *config.Config, site string) (bool, error) {
+	return holdsGatewayOn(cfg, site, siteTransport(site, cfg.Sites[site], ""))
 }
 
 // holdsGatewayOn is convergeHoldsGateway over a transport already made.
@@ -400,7 +399,7 @@ func holdsGatewayOn(cfg *config.Config, site string, t apply.Transport) (bool, e
 // which is what a move goes to. A site that does not answer is an error,
 // as for the etcd reads: a move left unfinished keeps an old gateway
 // running.
-func convergeGatewayMove(cfg *config.Config, sudo bool) (bool, error) {
+func convergeGatewayMove(cfg *config.Config) (bool, error) {
 	gateways := cfg.GatewaySites()
 	if len(gateways) != 1 {
 		return false, nil
@@ -409,7 +408,7 @@ func convergeGatewayMove(cfg *config.Config, sudo bool) (bool, error) {
 		if site == gateways[0] {
 			continue
 		}
-		held, err := convergeHoldsGateway(cfg, site, sudo)
+		held, err := convergeHoldsGateway(cfg, site)
 		if err != nil {
 			return false, convergeStop("apply could not read "+site, err, "A site that was the gateway keeps serving until paisans gateway move stops it, so every site is asked. Make it reachable and run again.")
 		}
@@ -424,14 +423,14 @@ func convergeGatewayMove(cfg *config.Config, sudo bool) (bool, error) {
 // a step of its own so a spinner shows while ssh works. A member that does
 // not answer is an error: whether the cluster is founded decides between
 // founding and joining.
-func convergeFounded(r ui.Reporter, cfg *config.Config, sudo bool) (map[string]render.EtcdInitial, error) {
+func convergeFounded(r ui.Reporter, cfg *config.Config) (map[string]render.EtcdInitial, error) {
 	records := map[string]render.EtcdInitial{}
 	if len(cfg.Etcd.Members) > 0 {
 		r.Section("etcd members")
 	}
 	for _, m := range cfg.Etcd.Members {
 		s := r.Step("read " + m + "'s etcd record")
-		in, recorded, err := convergeReadInitial(cfg, m, sudo)
+		in, recorded, err := convergeReadInitial(cfg, m)
 		if err != nil {
 			s.Fail(err)
 			return nil, fmt.Errorf("apply: reading whether %s's etcd member has been founded: %w. Every etcd member is read before anything runs", m, err)
@@ -452,7 +451,7 @@ func convergeFounded(r ui.Reporter, cfg *config.Config, sudo bool) (map[string]r
 // read once, and each secret and recorded name paisans-stack.yaml no longer uses
 // warned about once. The applies it runs as steps skip theirs (a
 // checkReporter). A secrets file not written yet has nothing to check.
-func convergeSecrets(r ui.Reporter, cfg *config.Config, path string, sudo bool) {
+func convergeSecrets(r ui.Reporter, cfg *config.Config, path string) {
 	secrets, err := config.LoadDeploymentSecrets(path, cfg.ID)
 	if err != nil {
 		return
@@ -461,16 +460,14 @@ func convergeSecrets(r ui.Reporter, cfg *config.Config, path string, sudo bool) 
 		return
 	}
 	r.Section("secrets")
-	warnSecrets(r, cfg, secrets, recordForWarnings(r, cfg, func(gw string, elevated bool) registry.Runner {
-		return registryHost(gw, cfg.Sites[gw], "", elevated && sudo)
-	}))
+	warnSecrets(r, cfg, secrets, recordForWarnings(r, cfg, func(gw string) registry.Runner { return registryHost(gw, cfg.Sites[gw], "") }))
 }
 
 // convergeOptions is what apply without --site hands on to its steps: the
 // flags every command takes, and apply's own that are not about one site.
 type convergeOptions struct {
 	Config, Secrets string
-	Execute, Sudo   bool
+	Execute         bool
 	// Verbose is -v, which every command takes.
 	Verbose bool
 	// KeepImages and MinFree are apply's, so each apply step takes them.
@@ -484,22 +481,18 @@ type convergeOptions struct {
 
 // convergeFlags is args with the flags o hands on, each to the commands that
 // take it: --config and -v to every one, --secrets to all but host prepare,
-// --execute to all but init, --sudo to all but dns, and --min-free and
+// --execute to all but init, and --min-free and
 // --keep-images to apply alone.
 func convergeFlags(args []string, o convergeOptions) []string {
 	out := append([]string(nil), args...)
 	out = append(out, "--config", o.Config)
 	takesSecrets := !(args[0] == "host")
 	takesExecute := args[0] != "init"
-	takesSudo := !(args[0] == "dns")
 	if takesSecrets && o.Secrets != "" {
 		out = append(out, "--secrets", o.Secrets)
 	}
 	if takesExecute && o.Execute {
 		out = append(out, "--execute")
-	}
-	if takesSudo {
-		out = append(out, fmt.Sprintf("--sudo=%t", o.Sudo))
 	}
 	if o.Verbose {
 		out = append(out, "-v")
@@ -668,38 +661,16 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	savedReview := reviewedByRun
 	reviewedByRun = &runReview{}
 	defer func() { reviewedByRun = savedReview }()
-	configPath, secretsPath, execute, sudo := o.Config, o.Secrets, o.Execute, o.Sudo
-	// The deployment and the version open the run, ahead of sudo. See
-	// apply_identity.go.
+	configPath, secretsPath, execute := o.Config, o.Secrets, o.Execute
+	// The deployment and the version open the run. See apply_identity.go.
 	identity := openIdentity(r, configPath)
 	defer identity.closeIdentity(r)
 	cfg, st, err := convergeRead(configPath, secretsPath)
 	if err != nil {
 		return err
 	}
-	// Every sudo password is asked before the first step that reaches a
-	// host, once the configuration is one a host may be reached for.
-	settled := false
-	settle := func(cfg *config.Config) error {
-		if settled {
-			return nil
-		}
-		settled = true
-		return settleSudo(r, cfg.SiteNames(), func(name string) apply.Transport {
-			return convergeHost(name, cfg.Sites[name], sudo)
-		})
-	}
 	initRan := false
 	if st.NeedsInit && execute {
-		// init reads every host for the mesh subnet, so the passwords are
-		// asked ahead of it. A file init cannot read yet, with no id, or
-		// one it would refuse, reaches no host here: init asks for them in
-		// its own first read of the hosts.
-		if pre, err := config.LoadForInit(configPath); err == nil && !validate.Check(pre).Refused() {
-			if err := settle(pre); err != nil {
-				return err
-			}
-		}
 		// init writes the id, the subnet and the secrets the rest is
 		// planned from, so the state is read again once it has run.
 		if err := convergeRun(convergeFlags([]string{"init"}, o)); err != nil {
@@ -770,17 +741,14 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 			line.End(ui.Pending, initWhy(st))
 		}
 	}
-	if err := settle(cfg); err != nil {
-		return err
-	}
 	// Every site's architecture is read before anything is planned, and a
 	// missing one is recorded before the file is gathered and published:
 	// each step of the run refuses bytes changed after the publish. See
-	// recordArchitectures. The read has a section of its own, as the sudo
-	// before it does, rather than ending whichever section came last.
+	// recordArchitectures. The read has a section of its own, rather than
+	// ending whichever section came last.
 	r.Section("architecture")
 	read, err := readArchitectures(r, cfg, cfg.SiteNames(), func(name string) hostarch.Runner {
-		return convergeHost(name, cfg.Sites[name], sudo)
+		return convergeHost(name, cfg.Sites[name])
 	})
 	if err != nil {
 		return err
@@ -808,7 +776,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	}
 	// An init that has just run warned about the secrets itself.
 	if !initRan {
-		convergeSecrets(r, cfg, convergeSecretsPath(configPath, secretsPath), sudo)
+		convergeSecrets(r, cfg, convergeSecretsPath(configPath, secretsPath))
 	}
 	// Every app's mail settings are tried from its site before the first
 	// step, so a password that does not log in refuses the run with every
@@ -819,10 +787,10 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 			return err
 		}
 	}
-	if st.Initial, err = convergeFounded(r, cfg, sudo); err != nil {
+	if st.Initial, err = convergeFounded(r, cfg); err != nil {
 		return err
 	}
-	if st.MoveGateway, err = convergeGatewayMove(cfg, sudo); err != nil {
+	if st.MoveGateway, err = convergeGatewayMove(cfg); err != nil {
 		return err
 	}
 	steps := convergePlan(cfg, st)
@@ -902,7 +870,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	}()
 	// An app the operator's own web server serves is running, but not yet
 	// known to be reachable: the run is complete only once it is.
-	end, broken := webServerStep(r, cfg, configPath, sudo, webServerScope{})
+	end, broken := webServerStep(r, cfg, configPath, webServerScope{})
 	if end == nil {
 		if err := convergeRecordWebServer(r, cfg, reviews); err != nil {
 			return err
@@ -1807,9 +1775,8 @@ func errLine(err error) string {
 	return strings.TrimRight(strings.TrimSpace(line), ":.")
 }
 
-// convergeHost is how apply without --site reaches a site to settle its
-// sudo: the transport every step builds for it, so the answer is the one
-// they find. Tests replace it.
-var convergeHost = func(name string, site config.Site, sudo bool) apply.Transport {
-	return siteTransport(name, site, "", sudo)
+// convergeHost is how apply without --site reaches a site to read it, as the
+// ssh user. Tests replace it.
+var convergeHost = func(name string, site config.Site) apply.Transport {
+	return siteTransport(name, site, "")
 }

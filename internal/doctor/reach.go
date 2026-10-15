@@ -8,8 +8,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
-// ReachCommand is the trivial command that proves a site answers: ssh
-// connected, the login worked, and, through a sudo transport, sudo did too.
+// ReachCommand is the trivial command that proves a site answers: ssh connected and the login worked.
 const ReachCommand = "true"
 
 // SiteReach is one site's answer to ReachCommand.
@@ -19,9 +18,6 @@ type SiteReach struct {
 	Destination string
 	// Err is what failed, empty when the site answered.
 	Err string
-	// Sudo is true when the site answered ssh but sudo could not be used,
-	// which leaves it unreadable: Docker and /srv are root's.
-	Sudo bool
 }
 
 // Answered reports whether the rest of the checks can ask this site.
@@ -37,10 +33,6 @@ func Reach(cfg *config.Config, list []SiteReach) []Finding {
 		switch {
 		case r.Answered():
 			out = append(out, Finding{Section: SectionReach, Level: OK, Line: fmt.Sprintf("%s: %s answers", r.Site, r.Destination)})
-		case r.Sudo:
-			out = append(out, Finding{Section: SectionReach, Level: Fail,
-				Line: fmt.Sprintf("%s: %s answers, but sudo cannot be used, so nothing on it could be read (%s)", r.Site, r.Destination, firstLine(r.Err)),
-				More: []string{"Every check reads Docker and /srv, which are root's. Fix sudo for the login user, or run doctor with --sudo=false where that user is in the docker group."}})
 		default:
 			more := []string{roleLine(cfg, r.Site)}
 			if lost := losses(cfg, r.Site); lost != "" {

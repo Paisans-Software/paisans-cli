@@ -13,9 +13,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/webserver"
 )
 
-// webServerFilesHost reaches a monitor site to write the toolkit's files for
-// its web server: as the ssh user, and through sudo with the answer the run
-// settled where the ssh user may not write. Tests replace it.
+// webServerFilesHost reaches a monitor site to write the toolkit's files for its web server, as the ssh user. Tests replace it.
 var webServerFilesHost = webServerHost
 
 // convergeWebServerFiles writes each external app's site into the include
@@ -61,7 +59,7 @@ type siteFile struct {
 // operator's web server is a warning on its step's line, with the one set
 // of instructions that fixes it; what cannot be read or written on the
 // host is a failure. Only the sites scope covers are written.
-func writeWebServerFiles(r ui.Reporter, cfg *config.Config, configPath string, sudo bool, scope webServerScope) webServerFiles {
+func writeWebServerFiles(r ui.Reporter, cfg *config.Config, configPath string, scope webServerScope) webServerFiles {
 	out := webServerFiles{apps: map[string]*siteFile{}}
 	d := cfg.Deployment()
 	head := func() {
@@ -81,7 +79,7 @@ func writeWebServerFiles(r ui.Reporter, cfg *config.Config, configPath string, s
 				apps = append(apps, app)
 			}
 		}
-		t := scope.recordHost(cfg, site, sudo)
+		t := scope.recordHost(cfg, site)
 		recorded, err := apply.ReadWebServerRecord(t, d)
 		if err != nil {
 			head()
@@ -98,7 +96,7 @@ func writeWebServerFiles(r ui.Reporter, cfg *config.Config, configPath string, s
 			continue
 		}
 		head()
-		h := scope.serverHost(cfg, site, sudo)
+		h := scope.serverHost(cfg, site)
 		if len(apps) == 0 || s.WebServer.IncludeDir.Off {
 			// Nothing is wanted here any more: what is recorded goes.
 			title := "remove site files on " + site
@@ -127,19 +125,19 @@ func (s webServerScope) covers(site string) bool { return s.site == "" || s.site
 
 // recordHost is how the step reaches site to read and write the record of
 // its site files.
-func (s webServerScope) recordHost(cfg *config.Config, site string, sudo bool) apply.Transport {
+func (s webServerScope) recordHost(cfg *config.Config, site string) apply.Transport {
 	if s.ssh != "" {
-		return siteTransport(site, cfg.Sites[site], s.ssh, sudo)
+		return siteTransport(site, cfg.Sites[site], s.ssh)
 	}
-	return convergeHost(site, cfg.Sites[site], sudo)
+	return convergeHost(site, cfg.Sites[site])
 }
 
 // serverHost is how the step reaches site's web server.
-func (s webServerScope) serverHost(cfg *config.Config, site string, sudo bool) webserver.Host {
+func (s webServerScope) serverHost(cfg *config.Config, site string) webserver.Host {
 	if s.ssh != "" {
-		return webServerHostVia(cfg, site, s.ssh, sudo)
+		return webServerHostVia(cfg, site, s.ssh)
 	}
-	return webServerFilesHost(cfg, site, sudo)
+	return webServerFilesHost(cfg, site)
 }
 
 // add counts a step that ended on m.

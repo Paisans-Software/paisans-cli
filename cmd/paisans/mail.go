@@ -20,7 +20,7 @@ import (
 // real site or mail server.
 var smtpEnv = func(cfg *config.Config, ssh map[string]string) smtpcheck.Env {
 	return smtpcheck.Env{Dial: func(site, address string) (net.Conn, error) {
-		return siteTransport(site, cfg.Sites[site], ssh[site], false).Dial(address)
+		return siteTransport(site, cfg.Sites[site], ssh[site]).Dial(address)
 	}}
 }
 

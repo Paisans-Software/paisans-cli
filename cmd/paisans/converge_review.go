@@ -11,15 +11,15 @@ import (
 // convergeGrantHost is how apply with no --site reaches a site's grant
 // record, to read it for the review and to write the web server's part.
 // Tests replace it.
-var convergeGrantHost = func(cfg *config.Config, site string, sudo bool) registry.Runner {
-	return grantRunner(site, convergeHost(site, cfg.Sites[site], sudo))
+var convergeGrantHost = func(cfg *config.Config, site string) registry.Runner {
+	return grantRunner(site, convergeHost(site, cfg.Sites[site]))
 }
 
 // convergeRecord reads a site's grant record for the run's review. g is the
 // grant it is compared with, which the real read has no use for. Tests
 // replace it.
-var convergeRecord = func(cfg *config.Config, site string, g grant.Grant, sudo bool) (grant.Record, error) {
-	rec, _, _, err := grant.Read(convergeGrantHost(cfg, site, sudo), cfg.Deployment())
+var convergeRecord = func(cfg *config.Config, site string, g grant.Grant) (grant.Record, error) {
+	rec, _, _, err := grant.Read(convergeGrantHost(cfg, site), cfg.Deployment())
 	return rec, err
 }
 
@@ -62,7 +62,7 @@ func convergeReview(r ui.Reporter, cfg *config.Config, o convergeOptions) (map[s
 		g, err := grant.For(cfg, rendered, site)
 		var rec grant.Record
 		if err == nil {
-			rec, err = convergeRecord(cfg, site, g, o.Sudo)
+			rec, err = convergeRecord(cfg, site, g)
 		}
 		if err != nil {
 			errs[i] = err
@@ -72,7 +72,7 @@ func convergeReview(r ui.Reporter, cfg *config.Config, o convergeOptions) (map[s
 			}
 			continue
 		}
-		reviews[i] = &siteReview{grant: g, scope: scope, review: grant.Compare(site, g, rec, scope), host: convergeGrantHost(cfg, site, o.Sudo), record: rec}
+		reviews[i] = &siteReview{grant: g, scope: scope, review: grant.Compare(site, g, rec, scope), host: convergeGrantHost(cfg, site), record: rec}
 		endReview(r, line, reviews[i].review, o.Execute)
 	}
 	out := map[string]*siteReview{}

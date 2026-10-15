@@ -143,7 +143,7 @@ func fakeRotateHosts(t *testing.T) (*rotateWorld, *ui.Recorder) {
 		t.Fatal(err)
 	}
 	savedHost, savedReporter := rotateHost, reporterOverride
-	rotateHost = func(name string, site config.Site, sudo bool) apply.Transport {
+	rotateHost = func(name string, site config.Site) apply.Transport {
 		return rotateFake{name: name, cfg: cfg, w: w}
 	}
 	rec := &ui.Recorder{}
@@ -156,7 +156,7 @@ func fakeRotateHosts(t *testing.T) (*rotateWorld, *ui.Recorder) {
 func noRotateHost(t *testing.T) {
 	t.Helper()
 	saved := rotateHost
-	rotateHost = func(string, config.Site, bool) apply.Transport {
+	rotateHost = func(string, config.Site) apply.Transport {
 		t.Fatal("a host was reached")
 		return nil
 	}
@@ -181,7 +181,7 @@ func terminalStdin(t *testing.T, answer string, terminal bool) *os.File {
 }
 
 func rotateArgs(configPath, secretsPath string, extra ...string) []string {
-	return append(extra, "--config", configPath, "--secrets", secretsPath, "--sudo=false")
+	return append(extra, "--config", configPath, "--secrets", secretsPath)
 }
 
 func paths(rs []secretsrotate.Rotator) []string {
@@ -351,7 +351,7 @@ func TestApplyRefusesMidRotation(t *testing.T) {
 	for _, extra := range [][]string{{"--site", "home-a"}, nil} {
 		var err error
 		captureStdout(t, func() {
-			err = runApply(append([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false"}, extra...), strings.NewReader(""), io.Discard)
+			err = runApply(append([]string{"--config", configPath, "--secrets", secretsPath}, extra...), strings.NewReader(""), io.Discard)
 		})
 		if err == nil || !strings.Contains(err.Error(), "paisans secrets rotate") || !strings.Contains(err.Error(), "apps.gate.cookie_secret") {
 			t.Errorf("apply %v: err = %v", extra, err)
@@ -1082,19 +1082,19 @@ func TestRenderingCommandsRefuseMidRotation(t *testing.T) {
 	const pending = "cluster.standby_password"
 	for name, run := range map[string]func(configPath, secretsPath string) error{
 		"site add": func(c, s string) error {
-			return runSiteAdd([]string{"home-b", "--config", c, "--secrets", s, "--sudo=false"}, strings.NewReader(""), io.Discard)
+			return runSiteAdd([]string{"home-b", "--config", c, "--secrets", s}, strings.NewReader(""), io.Discard)
 		},
 		"storage add": func(c, s string) error {
-			return runStorageAdd([]string{"--config", c, "--secrets", s, "--sudo=false"})
+			return runStorageAdd([]string{"--config", c, "--secrets", s})
 		},
 		"storage rotate-key": func(c, s string) error {
-			return runStorageRotateKey([]string{"--app", "talk", "--config", c, "--secrets", s, "--sudo=false"})
+			return runStorageRotateKey([]string{"--app", "talk", "--config", c, "--secrets", s})
 		},
 		"app remove": func(c, s string) error {
-			return runAppRemove([]string{"retired", "--config", c, "--secrets", s, "--sudo=false"}, strings.NewReader(""), &bytes.Buffer{})
+			return runAppRemove([]string{"retired", "--config", c, "--secrets", s}, strings.NewReader(""), &bytes.Buffer{})
 		},
 		"mesh rekey": func(c, s string) error {
-			return runMeshRekey([]string{"home-a", "--config", c, "--secrets", s, "--sudo=false"})
+			return runMeshRekey([]string{"home-a", "--config", c, "--secrets", s})
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -1143,7 +1143,7 @@ func TestSecretsRotatePendingWithoutRotationNamesTheWayOut(t *testing.T) {
 	}
 	var applyErr error
 	captureStdout(t, func() {
-		applyErr = runApply([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false", "--site", "home-a"}, strings.NewReader(""), io.Discard)
+		applyErr = runApply([]string{"--config", configPath, "--secrets", secretsPath, "--site", "home-a"}, strings.NewReader(""), io.Discard)
 	})
 	if applyErr == nil || !strings.Contains(applyErr.Error(), `"A rotation that cannot finish"`) {
 		t.Errorf("apply: err = %v", applyErr)

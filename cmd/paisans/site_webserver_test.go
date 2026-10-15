@@ -27,7 +27,7 @@ func siteApply(t *testing.T, path, site string, inside bool) (*ui.Recorder, erro
 	if inside {
 		r = checkReporter{rec, rec, &[]checkReport{}}
 	}
-	return rec, siteApplied(r, cfg, path, site, "", false, 4, nil)
+	return rec, siteApplied(r, cfg, path, site, "", 4, nil)
 }
 
 // apply --site on a monitor with managed_by: external writes its app's
@@ -134,7 +134,7 @@ func TestApplySiteWithoutAnExternalWebServerRunsNoWebServerStep(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(f.server.Asked) != 0 || len(f.sudo) != 0 || len(*checked) != 0 || rec.Has("section", "web server") {
+	if len(f.server.Asked) != 0 || len(f.reached) != 0 || len(*checked) != 0 || rec.Has("section", "web server") {
 		t.Errorf("asked %v, checked %v:\n%s", f.server.Asked, *checked, rec.Lines())
 	}
 	if !rec.Has("result", "Applied 4 files to home-a.") {
@@ -152,7 +152,7 @@ func TestApplySiteInsideTheFullApplyLeavesTheWebServerToIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(f.server.Asked) != 0 || len(f.sudo) != 0 || len(*checked) != 0 || rec.Has("section", "web server") {
+	if len(f.server.Asked) != 0 || len(f.reached) != 0 || len(*checked) != 0 || rec.Has("section", "web server") {
 		t.Errorf("asked %v, checked %v:\n%s", f.server.Asked, *checked, rec.Lines())
 	}
 }
@@ -172,7 +172,7 @@ func TestApplyRunsTheWebServerStepOnce(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			return siteApplied(reporterOverride, cfg, path, "watch", "", false, 4, nil)
+			return siteApplied(reporterOverride, cfg, path, "watch", "", 4, nil)
 		}
 		return fake(args)
 	}
@@ -219,7 +219,7 @@ func TestApplySiteDryRunListsTheWebServerStep(t *testing.T) {
 			reporterOverride = checkReporter{rec, rec, &[]checkReport{}}
 		}
 		captureStdout(t, func() {
-			runApply([]string{"--config", path, "--secrets", fixtureSecretsPath(), "--sudo=false", "--site", tc.site}, strings.NewReader(""), io.Discard)
+			runApply([]string{"--config", path, "--secrets", fixtureSecretsPath(), "--site", tc.site}, strings.NewReader(""), io.Discard)
 		})
 		reporterOverride = saved
 		got := lines(inSection(rec, "web server"))
@@ -232,22 +232,19 @@ func TestApplySiteDryRunListsTheWebServerStep(t *testing.T) {
 	}
 }
 
-// apply --site --ssh reaches the monitor's web server and the record of
-// its site files through the destination it was given, with the sudo
-// answer the rest of the apply uses, so the step asks for no password of
-// its own.
+// apply --site --ssh's web server step reaches the monitor to read and write
+// its site files through the destination it was given, as the ssh user.
 func TestApplySiteWebServerStepReachesTheSiteAsTheApplyDid(t *testing.T) {
 	cfg := fixture(t)
 	scope := webServerScope{site: "watch", ssh: "root@203.0.113.9"}
-	applied := siteTransport("watch", cfg.Sites["watch"], scope.ssh, true)
-	record, ok := scope.recordHost(cfg, "watch", true).(apply.SSHTransport)
-	if !ok || record.Describe() != applied.Describe() || record.Auth != applied.Auth {
+	applied := siteTransport("watch", cfg.Sites["watch"], scope.ssh)
+	record, ok := scope.recordHost(cfg, "watch").(apply.SSHTransport)
+	if !ok || record.Describe() != applied.Describe() || record.Sudo {
 		t.Errorf("record through %#v", record)
 	}
-	h := scope.serverHost(cfg, "watch", true)
+	h := scope.serverHost(cfg, "watch")
 	plain, _ := h.Plain.(apply.SSHTransport)
-	sudo, _ := h.Sudo.(apply.SSHTransport)
-	if plain.Describe() != applied.Describe() || plain.Sudo || sudo.Describe() != applied.Describe() || sudo.Auth != applied.Auth {
+	if plain.Describe() != applied.Describe() || plain.Sudo || h.Sudo != nil {
 		t.Errorf("web server through %#v, %#v", h.Plain, h.Sudo)
 	}
 }

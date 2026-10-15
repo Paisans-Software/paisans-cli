@@ -33,7 +33,7 @@ func fakeWebServerCheck(t *testing.T, failing map[string][]webserver.Result) *[]
 	// Writing the site files reaches the monitor's host; here there is
 	// nothing to write. fakeWebServerFiles says otherwise.
 	savedFiles := convergeWebServerFiles
-	convergeWebServerFiles = func(ui.Reporter, *config.Config, string, bool, webServerScope) webServerFiles {
+	convergeWebServerFiles = func(ui.Reporter, *config.Config, string, webServerScope) webServerFiles {
 		return webServerFiles{}
 	}
 	t.Cleanup(func() { convergeWebServerCheck, convergeWebServerFiles = saved, savedFiles })
@@ -46,7 +46,7 @@ func fakeWebServerCheck(t *testing.T, failing map[string][]webserver.Result) *[]
 var caddyAutomatic = webserver.WebServer{Server: webserver.ServerCaddy, Container: "caddy-1", Config: "/opt/caddy/Caddyfile", Certs: webserver.CertsAutomatic}
 
 // webServerAsks is each time fakeWebServer was asked: the app, and whether
-// through sudo.
+// it was read as the ssh user (sudo=false) or through sudo.
 type webServerAsks []string
 
 // fakeWebServer replaces reading the web server in front of an app's host:
@@ -358,10 +358,7 @@ func TestConvergeFailedWebServerNamesTheWebServer(t *testing.T) {
 	fakeWebServerCheck(t, certificateFails)
 	asked = fakeWebServer(t, caddyAutomatic)
 	rec := recordConverge(t)
-	// The run's --sudo reaches the read: here --sudo=false, as every
-	// converge test runs, since a settled sudo would reach a real host.
-	// TestWebServerHostSharesTheRunsSudo shows a read with sudo shares the
-	// run's answer.
+	// The read is the ssh user's, with no sudo.
 	converge(t, "--execute")
 	if !slices.Equal(*asked, webServerAsks{"health sudo=false"}) {
 		t.Errorf("asked %v", *asked)

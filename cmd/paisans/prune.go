@@ -29,7 +29,6 @@ func runPrune(args []string) error {
 	site := fs.String("site", "", "the site to prune, by the name it has in the configuration")
 	destination := fs.String("ssh", "", "ssh destination, used verbatim in place of the site's ssh section (its user, host, port and keys are then ignored)")
 	execute := fs.Bool("execute", false, "actually remove the volumes marked remove")
-	sudo := fs.Bool("sudo", true, "run remote commands through sudo, since Docker's volume directories are root's")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -51,7 +50,7 @@ func runPrune(args []string) error {
 		return fmt.Errorf("prune: %s declares no site %q. Declared sites are %s", *configPath, *site, strings.Join(cfg.SiteNames(), ", "))
 	}
 
-	transport := siteTransport(*site, declared, *destination, *sudo)
+	transport := siteTransport(*site, declared, *destination)
 	r.Section(fmt.Sprintf("%s (%s)", *site, transport.Describe()))
 	if _, err := hostGate(r, cfg, *site, transport); err != nil {
 		return err

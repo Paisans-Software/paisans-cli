@@ -15,7 +15,7 @@ import (
 func noHosts(t *testing.T) {
 	t.Helper()
 	saved := removeHost
-	removeHost = func(string, config.Site, bool) appremove.Host {
+	removeHost = func(string, config.Site) appremove.Host {
 		t.Fatal("a host was reached")
 		return nil
 	}

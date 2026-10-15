@@ -12,7 +12,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Added
 
-- `host prepare --all` prepares every site the configuration declares, one at a time in its order, each with its own review, asking every sudo password first and stopping at the first failure.
+- `host prepare --all` prepares every site the configuration declares, one at a time in its order, each with its own review, stopping at the first failure.
 - Each release attaches static `paisans-linux-amd64` and `paisans-linux-arm64` binaries and a `SHA256SUMS` file, so a host owner can run the CLI on Linux without Go.
 
 ### Changed
@@ -25,6 +25,7 @@ changes share a bullet. Detailed notes are on the corresponding
 ### Removed
 
 - `host allow`, `host disallow` and the key allowlist in `/etc/paisans/ssh-allow.<user>` are removed, with `host prepare`'s refusal of keys it lacked and `doctor`'s allowlist check.
+- `--sudo` is removed from every command but `host deployments`: each runs as the site's ssh user, and `apply`, `site remove`, `host prepare --all` and `config` ask no sudo password before they start.
 
 ### Fixed
 

@@ -105,16 +105,16 @@ func TestForgetInRecordsReachesEveryGatewayAndWarnsForOneDown(t *testing.T) {
 	cfg, _ := config.Load(fixtureConfig())
 	vm := &recordFake{files: map[string]string{deployrecord.Path(cfg.Deployment()): deployrecord.Encode(deployrecord.Record{Sites: []string{"vm", "monitor-a"}})}}
 	saved := registryHost
-	registryHost = func(name string, _ config.Site, _ string, _ bool) registry.Runner { return vm }
+	registryHost = func(name string, _ config.Site, _ string) registry.Runner { return vm }
 	t.Cleanup(func() { registryHost = saved })
 	rec := &ui.Recorder{}
-	forgetInRecords(rec, cfg, deployrecord.Record{Sites: []string{"monitor-a"}}, "monitor-a", true, true)
+	forgetInRecords(rec, cfg, deployrecord.Record{Sites: []string{"monitor-a"}}, "monitor-a", true)
 	if r, _, _ := readRecord(vm, cfg.Deployment()); r.Lists("sites", "monitor-a") {
 		t.Error("vm still lists monitor-a")
 	}
 	vm.down = true
 	rec = &ui.Recorder{}
-	forgetInRecords(rec, cfg, deployrecord.Record{Sites: []string{"monitor-b"}}, "monitor-b", true, true)
+	forgetInRecords(rec, cfg, deployrecord.Record{Sites: []string{"monitor-b"}}, "monitor-b", true)
 	if !strings.Contains(rec.Lines(), "vm missed this change to the deployment record") {
 		t.Errorf("no warning:\n%s", rec.Lines())
 	}
@@ -135,12 +135,12 @@ func TestForgetInRecordsDryRunSaysWhetherARecordListsIt(t *testing.T) {
 	cfg, _ := config.Load(fixtureConfig())
 	vm := &recordFake{files: map[string]string{deployrecord.Path(cfg.Deployment()): deployrecord.Encode(deployrecord.Record{Sites: []string{"vm", "monitor-a"}})}}
 	saved := registryHost
-	registryHost = func(string, config.Site, string, bool) registry.Runner { return vm }
+	registryHost = func(string, config.Site, string) registry.Runner { return vm }
 	t.Cleanup(func() { registryHost = saved })
-	if !forgetInRecords(&ui.Recorder{}, cfg, deployrecord.Record{Sites: []string{"monitor-a"}}, "monitor-a", false, true) {
+	if !forgetInRecords(&ui.Recorder{}, cfg, deployrecord.Record{Sites: []string{"monitor-a"}}, "monitor-a", false) {
 		t.Error("a listed name is not reported as left")
 	}
-	if forgetInRecords(&ui.Recorder{}, cfg, deployrecord.Record{Sites: []string{"monitor-b"}}, "monitor-b", false, true) {
+	if forgetInRecords(&ui.Recorder{}, cfg, deployrecord.Record{Sites: []string{"monitor-b"}}, "monitor-b", false) {
 		t.Error("an unlisted name is reported as left")
 	}
 	if len(vm.ran) != 0 {
@@ -154,15 +154,15 @@ func TestForgetInRecordsReachesGatewaysInAStep(t *testing.T) {
 	cfg, _ := config.Load(fixtureConfig())
 	vm := &recordFake{files: map[string]string{deployrecord.Path(cfg.Deployment()): deployrecord.Encode(deployrecord.Record{Sites: []string{"vm"}})}}
 	saved := registryHost
-	registryHost = func(string, config.Site, string, bool) registry.Runner { return vm }
+	registryHost = func(string, config.Site, string) registry.Runner { return vm }
 	t.Cleanup(func() { registryHost = saved })
 	rec := &ui.Recorder{}
-	forgetInRecords(rec, cfg, deployrecord.Record{Sites: []string{"monitor-b"}}, "monitor-b", false, true)
+	forgetInRecords(rec, cfg, deployrecord.Record{Sites: []string{"monitor-b"}}, "monitor-b", false)
 	if !rec.Has("done", "read the deployment record") {
 		t.Errorf("the dry run's read is not a step:\n%s", rec.Lines())
 	}
 	rec = &ui.Recorder{}
-	forgetInRecords(rec, cfg, deployrecord.Record{Sites: []string{"monitor-b"}}, "monitor-b", true, true)
+	forgetInRecords(rec, cfg, deployrecord.Record{Sites: []string{"monitor-b"}}, "monitor-b", true)
 	if !rec.Has("done", "forget monitor-b in the deployment record") {
 		t.Errorf("a run with nothing to forget has no step:\n%s", rec.Lines())
 	}
@@ -184,10 +184,10 @@ func TestForgetInRecordsHasItsOwnSection(t *testing.T) {
 	cfg, _ := config.Load(fixtureConfig())
 	vm := &recordFake{files: map[string]string{deployrecord.Path(cfg.Deployment()): deployrecord.Encode(deployrecord.Record{Sites: []string{"monitor-a"}})}}
 	saved := registryHost
-	registryHost = func(string, config.Site, string, bool) registry.Runner { return vm }
+	registryHost = func(string, config.Site, string) registry.Runner { return vm }
 	t.Cleanup(func() { registryHost = saved })
 	rec := &ui.Recorder{}
-	forgetInRecords(rec, cfg, deployrecord.Record{Sites: []string{"monitor-a"}}, "monitor-a", false, true)
+	forgetInRecords(rec, cfg, deployrecord.Record{Sites: []string{"monitor-a"}}, "monitor-a", false)
 	s, i := rec.Index("section", "deployment record"), rec.Index("pending", "forget monitor-a")
 	if s < 0 || i < s {
 		t.Errorf("section %d, pending %d:\n%s", s, i, rec.Lines())
@@ -282,9 +282,9 @@ func TestConfirmWordAsksOnALineOfItsOwn(t *testing.T) {
 	}
 }
 
-// deniedFake is a gateway whose record the ssh user may not read, one
-// written with other modes: the user's read is denied and only ReadFile, the
-// sudo read, gives it.
+// deniedFake is a gateway whose record the ssh user may not read with a
+// plain read, one written with other modes: the user's read is denied and
+// only ReadFile gives it.
 type deniedFake struct{ *recordFake }
 
 func (d deniedFake) Run(command string) (string, error) {
@@ -294,14 +294,17 @@ func (d deniedFake) Run(command string) (string, error) {
 	return d.recordFake.Run(command)
 }
 
-// sudoLog makes registryHost answer with gw for every site, logging whether
-// each was reached through sudo.
-func sudoLog(t *testing.T, gw registry.Runner) *[]string {
+// reachLog makes registryHost answer with gw for every site, logging each
+// site it reached and the destination it was given, if any.
+func reachLog(t *testing.T, gw registry.Runner) *[]string {
 	t.Helper()
 	log := &[]string{}
 	saved := registryHost
-	registryHost = func(name string, _ config.Site, _ string, sudo bool) registry.Runner {
-		*log = append(*log, fmt.Sprintf("%s sudo=%v", name, sudo))
+	registryHost = func(name string, _ config.Site, destination string) registry.Runner {
+		if destination != "" {
+			name += " via " + destination
+		}
+		*log = append(*log, name)
 		return gw
 	}
 	t.Cleanup(func() { registryHost = saved })
@@ -309,45 +312,46 @@ func sudoLog(t *testing.T, gw registry.Runner) *[]string {
 }
 
 // An apply of a site that is not a gateway reads the gateway's record as the
-// ssh user, so it asks for no gateway's sudo password.
-func TestApplyOfANonGatewayReadsTheRecordWithoutSudo(t *testing.T) {
+// ssh user, through the gateway's own ssh section.
+func TestApplyOfANonGatewayReadsTheRecordAsTheSSHUser(t *testing.T) {
 	cfg, _ := config.Load(fixtureConfig())
 	vm := &recordFake{files: map[string]string{deployrecord.Path(cfg.Deployment()): deployrecord.Encode(deployrecord.Record{Sites: []string{"vm", "monitor-a"}})}}
-	log := sudoLog(t, vm)
-	rec := recordForWarnings(&ui.Recorder{}, cfg, applyRecordHosts(cfg, "watch", "", &recordFake{}, true))
+	log := reachLog(t, vm)
+	rec := recordForWarnings(&ui.Recorder{}, cfg, applyRecordHosts(cfg, "watch", "admin@203.0.113.9"))
 	if rec == nil || !rec.Lists("sites", "monitor-a") {
 		t.Fatalf("record %+v", rec)
 	}
-	if strings.Join(*log, ",") != "vm sudo=false" {
+	if strings.Join(*log, ",") != "vm" {
 		t.Errorf("reached %v", *log)
 	}
 }
 
-// A record the ssh user may not read is read through sudo, as the command
-// reaches the gateway.
-func TestADeniedRecordIsReadThroughSudo(t *testing.T) {
+// A record the ssh user's plain read is denied is read through the same
+// host, reached once.
+func TestADeniedRecordIsReadThroughTheSameHost(t *testing.T) {
 	cfg, _ := config.Load(fixtureConfig())
 	vm := deniedFake{&recordFake{files: map[string]string{deployrecord.Path(cfg.Deployment()): deployrecord.Encode(deployrecord.Record{Sites: []string{"vm", "monitor-a"}})}}}
-	log := sudoLog(t, vm)
-	rec := recordForWarnings(&ui.Recorder{}, cfg, applyRecordHosts(cfg, "watch", "", &recordFake{}, true))
+	log := reachLog(t, vm)
+	rec := recordForWarnings(&ui.Recorder{}, cfg, applyRecordHosts(cfg, "watch", ""))
 	if rec == nil || !rec.Lists("sites", "monitor-a") {
 		t.Fatalf("record %+v", rec)
 	}
-	if strings.Join(*log, ",") != "vm sudo=false,vm sudo=true" {
+	if strings.Join(*log, ",") != "vm" {
 		t.Errorf("reached %v", *log)
 	}
 }
 
-// The applied gateway's own sudo read goes through the apply's transport.
-func TestApplyOfAGatewayFallsBackToItsOwnTransport(t *testing.T) {
+// The applied gateway's record is read through the destination the apply
+// was given.
+func TestApplyOfAGatewayReadsThroughItsOwnDestination(t *testing.T) {
 	cfg, _ := config.Load(fixtureConfig())
-	own := deniedFake{&recordFake{files: map[string]string{deployrecord.Path(cfg.Deployment()): deployrecord.Encode(deployrecord.Record{Sites: []string{"vm", "monitor-a"}})}}}
-	log := sudoLog(t, own)
-	rec := recordForWarnings(&ui.Recorder{}, cfg, applyRecordHosts(cfg, "vm", "", own, true))
+	own := &recordFake{files: map[string]string{deployrecord.Path(cfg.Deployment()): deployrecord.Encode(deployrecord.Record{Sites: []string{"vm", "monitor-a"}})}}
+	log := reachLog(t, own)
+	rec := recordForWarnings(&ui.Recorder{}, cfg, applyRecordHosts(cfg, "vm", "admin@203.0.113.9"))
 	if rec == nil || !rec.Lists("sites", "monitor-a") {
 		t.Fatalf("record %+v", rec)
 	}
-	if strings.Join(*log, ",") != "vm sudo=false" {
+	if strings.Join(*log, ",") != "vm via admin@203.0.113.9" {
 		t.Errorf("reached %v", *log)
 	}
 }

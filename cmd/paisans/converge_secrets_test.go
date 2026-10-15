@@ -70,7 +70,7 @@ func dryRun(t *testing.T, configPath, secretsPath string) (*ui.Recorder, string,
 	checked := fakeChecks(t, nil)
 	rec := recordConverge(t)
 	var err error
-	args := []string{"--config", configPath, "--sudo=false"}
+	args := []string{"--config", configPath}
 	if secretsPath != "" {
 		args = append(args, "--secrets", secretsPath)
 	}
@@ -347,7 +347,7 @@ func TestConvergeDryRunWithoutASubnetWritesNothing(t *testing.T) {
 	fakeConverge(t, nil)
 	var err error
 	captureStdout(t, func() {
-		err = runApply([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false"}, strings.NewReader(""), io.Discard)
+		err = runApply([]string{"--config", configPath, "--secrets", secretsPath}, strings.NewReader(""), io.Discard)
 	})
 	if err == nil || !strings.Contains(err.Error(), "paisans init") {
 		t.Errorf("err = %v, want it to point at init", err)
@@ -398,7 +398,7 @@ func TestConvergeExecuteAfterTheDryRunFillsNothingMore(t *testing.T) {
 	ran := fakeConverge(t, nil)
 	var err error
 	captureStdout(t, func() {
-		err = runApply([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false", "--execute"}, strings.NewReader(""), io.Discard)
+		err = runApply([]string{"--config", configPath, "--secrets", secretsPath, "--execute"}, strings.NewReader(""), io.Discard)
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -473,7 +473,7 @@ func TestConvergeEndsWithDeploymentComplete(t *testing.T) {
 	fakeConverge(t, nil)
 	var err error
 	out := captureStdout(t, func() {
-		err = runApply([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false", "--execute"}, strings.NewReader(""), io.Discard)
+		err = runApply([]string{"--config", configPath, "--secrets", secretsPath, "--execute"}, strings.NewReader(""), io.Discard)
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -20,13 +20,13 @@ import (
 func noSiteHosts(t *testing.T) {
 	t.Helper()
 	saved := removeSiteHost
-	removeSiteHost = func(string, config.Site, bool) apply.Transport {
+	removeSiteHost = func(string, config.Site) apply.Transport {
 		t.Fatal("a host was reached")
 		return nil
 	}
 	t.Cleanup(func() { removeSiteHost = saved })
 	savedDest := reachDestination
-	reachDestination = func(config.Destination, bool) apply.Transport {
+	reachDestination = func(config.Destination) apply.Transport {
 		t.Fatal("a host was reached")
 		return nil
 	}
@@ -154,11 +154,11 @@ func TestForcedRunReportsAGatewayItCouldNotReach(t *testing.T) {
 	savedSite, savedReg := removeSiteHost, registryHost
 	t.Cleanup(func() { removeSiteHost, registryHost = savedSite, savedReg })
 	quiet := runningHost{failingHost{match: "\x00"}}
-	removeSiteHost = func(string, config.Site, bool) apply.Transport { return quiet }
-	registryHost = func(string, config.Site, string, bool) registry.Runner { return &recordFake{down: true} }
+	removeSiteHost = func(string, config.Site) apply.Transport { return quiet }
+	registryHost = func(string, config.Site, string) registry.Runner { return &recordFake{down: true} }
 	var err error
 	out := captureStdout(t, func() {
-		err = runSiteRemove([]string{"monitor-a", "--force", "--ssh", "admin@192.0.2.1", "--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "--execute", "--sudo=false"}, strings.NewReader(""), &bytes.Buffer{})
+		err = runSiteRemove([]string{"monitor-a", "--force", "--ssh", "admin@192.0.2.1", "--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "--execute"}, strings.NewReader(""), &bytes.Buffer{})
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -231,7 +231,7 @@ func (h *cleaningHost) ReadFile(path string) (string, bool, error) {
 func TestSiteRemoveByIDWarnsThatDNSWasNotModified(t *testing.T) {
 	withHost(t, idHost{runningHost{failingHost{match: "\x00"}}, twoDeployments(t)})
 	out := plainOutput(t)
-	if err := runSiteRemove([]string{"--force", "--ssh", "admin@192.0.2.30", "--id", "f2a9", "--sudo=false"}, strings.NewReader(""), &bytes.Buffer{}); err != nil {
+	if err := runSiteRemove([]string{"--force", "--ssh", "admin@192.0.2.30", "--id", "f2a9"}, strings.NewReader(""), &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	got := out.String()
@@ -255,14 +255,14 @@ func TestSiteRemoveByIDWarnsThatDNSWasNotModified(t *testing.T) {
 func TestForcedRemovalOfAnUndeclaredSiteMakesNoProvider(t *testing.T) {
 	savedSite, savedReg, savedDNS := removeSiteHost, registryHost, dnsProviderFor
 	t.Cleanup(func() { removeSiteHost, registryHost, dnsProviderFor = savedSite, savedReg, savedDNS })
-	removeSiteHost = func(string, config.Site, bool) apply.Transport { return runningHost{failingHost{match: "\x00"}} }
-	registryHost = func(string, config.Site, string, bool) registry.Runner { return &recordFake{} }
+	removeSiteHost = func(string, config.Site) apply.Transport { return runningHost{failingHost{match: "\x00"}} }
+	registryHost = func(string, config.Site, string) registry.Runner { return &recordFake{} }
 	dnsProviderFor = func(string, string) (dns.Provider, error) {
 		t.Error("a DNS provider was made")
 		return nil, nil
 	}
 	plainOutput(t)
-	err := runSiteRemove([]string{"monitor-a", "--force", "--ssh", "admin@192.0.2.1", "--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "--sudo=false"}, strings.NewReader(""), &bytes.Buffer{})
+	err := runSiteRemove([]string{"monitor-a", "--force", "--ssh", "admin@192.0.2.1", "--config", fixtureConfig(), "--secrets", fixtureSecretsPath()}, strings.NewReader(""), &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +285,7 @@ func TestSiteRemoveByIDEndsNamingTheDeployment(t *testing.T) {
 	rec := &ui.Recorder{}
 	reporterOverride = rec
 	t.Cleanup(func() { reporterOverride = nil })
-	if err := runSiteRemove([]string{"--force", "--ssh", "admin@192.0.2.30", "--id", "f2a9", "--sudo=false", "--execute"}, r, &bytes.Buffer{}); err != nil {
+	if err := runSiteRemove([]string{"--force", "--ssh", "admin@192.0.2.30", "--id", "f2a9", "--execute"}, r, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	want := "admin@192.0.2.30:22 is cleaned of deployment " + monitorID + "."

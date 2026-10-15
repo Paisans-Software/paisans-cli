@@ -56,7 +56,7 @@ func TestInitMakesAgeKey(t *testing.T) {
 	ks := keystore.NewMemory()
 	withKeystore(t, ks)
 	path, rec := initWorld(t, nil, fakeSites(), nil)
-	err, out := runInitShowing(t, "--config", path, "--sudo=false")
+	err, out := runInitShowing(t, "--config", path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestInitMakesNoKeyWhen(t *testing.T) {
 					before[k] = v
 				}
 			}
-			err, _ = runInitShowing(t, "--config", path, "--sudo=false")
+			err, _ = runInitShowing(t, "--config", path)
 			switch {
 			case c.refusal == "" && err != nil:
 				t.Fatal(err)
@@ -183,7 +183,7 @@ func TestInitAgePrivateKeyFile(t *testing.T) {
 	withKeystore(t, ks)
 	path, rec := initWorld(t, nil, fakeSites(), nil)
 	keyFile := filepath.Join(t.TempDir(), "deployment.key")
-	err, out := runInitShowing(t, "--config", path, "--sudo=false", "--age-private-key-file", keyFile)
+	err, out := runInitShowing(t, "--config", path, "--age-private-key-file", keyFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +215,7 @@ func TestInitAgePrivateKeyFileRefusals(t *testing.T) {
 		if err := os.WriteFile(keyFile, []byte("kept\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		err, _ := runInitShowing(t, "--config", path, "--sudo=false", "--age-private-key-file", keyFile)
+		err, _ := runInitShowing(t, "--config", path, "--age-private-key-file", keyFile)
 		if err == nil || !strings.Contains(err.Error(), "already exists") {
 			t.Fatalf("init = %v, want a refusal", err)
 		}
@@ -227,7 +227,7 @@ func TestInitAgePrivateKeyFileRefusals(t *testing.T) {
 		withoutAgeKey(t)
 		path, _ := initWorld(t, nil, fakeSites(), nil)
 		t.Chdir(filepath.Dir(path))
-		err, _ := runInitShowing(t, "--config", "paisans-stack.yaml", "--sudo=false", "--age-private-key-file", filepath.Join("keys", "..", "deployment.key"))
+		err, _ := runInitShowing(t, "--config", "paisans-stack.yaml", "--age-private-key-file", filepath.Join("keys", "..", "deployment.key"))
 		if err == nil || !strings.Contains(err.Error(), "beside paisans-stack.yaml") {
 			t.Fatalf("init = %v, want a refusal", err)
 		}
@@ -241,11 +241,11 @@ func TestInitAgePrivateKeyFileRefusals(t *testing.T) {
 	t.Run("the deployment has a key", func(t *testing.T) {
 		withoutAgeKey(t)
 		path, _ := initWorld(t, nil, fakeSites(), nil)
-		if err, _ := runInitShowing(t, "--config", path, "--sudo=false"); err != nil {
+		if err, _ := runInitShowing(t, "--config", path); err != nil {
 			t.Fatal(err)
 		}
 		keyFile := filepath.Join(t.TempDir(), "deployment.key")
-		err, _ := runInitShowing(t, "--config", path, "--sudo=false", "--age-private-key-file", keyFile)
+		err, _ := runInitShowing(t, "--config", path, "--age-private-key-file", keyFile)
 		if err == nil || !strings.Contains(err.Error(), "only for a new key") {
 			t.Fatalf("init = %v, want a refusal", err)
 		}
@@ -265,7 +265,7 @@ func TestInitWithoutAgeVariableFindsTheKey(t *testing.T) {
 	withoutAgeKey(t)
 	withKeystore(t, lookupStore{keystore.NewMemory()})
 	path, rec := initWorld(t, nil, fakeSites(), nil)
-	err, out := runInitShowing(t, "--config", path, "--sudo=false")
+	err, out := runInitShowing(t, "--config", path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +295,7 @@ func TestInitSaysWhatWasLeftWhenSOPSConfigFails(t *testing.T) {
 	path, _ := initWorld(t, nil, fakeSites(), nil)
 	ks := keystore.NewMemory()
 	withKeystore(t, sopsRacingStore{Memory: ks, dir: filepath.Dir(path)})
-	err, _ := runInitShowing(t, "--config", path, "--sudo=false")
+	err, _ := runInitShowing(t, "--config", path)
 	if err == nil {
 		t.Fatal("init succeeded although .sops.yaml could not be written")
 	}
@@ -314,12 +314,12 @@ func TestInitNoKeystoreThenKeyFile(t *testing.T) {
 	withoutAgeKey(t)
 	withKeystore(t, keystore.Unavailable{})
 	path, _ := initWorld(t, nil, fakeSites(), nil)
-	err, _ := runInitShowing(t, "--config", path, "--sudo=false")
+	err, _ := runInitShowing(t, "--config", path)
 	if err == nil || !strings.Contains(err.Error(), "--age-private-key-file") {
 		t.Fatalf("init = %v, want a refusal naming --age-private-key-file", err)
 	}
 	keyFile := filepath.Join(t.TempDir(), "deployment.key")
-	if err, _ := runInitShowing(t, "--config", path, "--sudo=false", "--age-private-key-file", keyFile); err != nil {
+	if err, _ := runInitShowing(t, "--config", path, "--age-private-key-file", keyFile); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(keyFile)
@@ -357,7 +357,7 @@ func TestInitSaysWhereTheAgeKeyIs(t *testing.T) {
 		ks := keystore.NewMemory()
 		withKeystore(t, ks)
 		path, _ := initWorld(t, nil, fakeSites(), nil)
-		out := initDefaultOutput(t, "--config", path, "--sudo=false")
+		out := initDefaultOutput(t, "--config", path)
 		cfg, err := config.Load(path)
 		if err != nil {
 			t.Fatal(err)
@@ -375,7 +375,7 @@ func TestInitSaysWhereTheAgeKeyIs(t *testing.T) {
 		withKeystore(t, keystore.NewMemory())
 		path, _ := initWorld(t, nil, fakeSites(), nil)
 		keyFile := filepath.Join(t.TempDir(), "deployment.key")
-		out := initDefaultOutput(t, "--config", path, "--sudo=false", "--age-private-key-file", keyFile)
+		out := initDefaultOutput(t, "--config", path, "--age-private-key-file", keyFile)
 		want := "  ok   make age key\n  ok   save age key: " + ui.ShortPath(keyFile) + "\n"
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)

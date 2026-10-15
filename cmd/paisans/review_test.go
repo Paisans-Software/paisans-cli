@@ -234,7 +234,7 @@ func claimed(log string) bool {
 func prepare(t *testing.T, stdin io.Reader, stdout io.Writer, args ...string) (*ui.Recorder, error) {
 	t.Helper()
 	rec := &ui.Recorder{Verbose_: true}
-	o := hostPrepareOptions{config: fixtureConfig(), site: "home-a", sudo: false}
+	o := hostPrepareOptions{config: fixtureConfig(), site: "home-a"}
 	for _, a := range args {
 		if a == "--execute" {
 			o.execute = true
@@ -380,7 +380,7 @@ func TestApplySiteReviewsBeforeTheClaim(t *testing.T) {
 			rec := recordConverge(t)
 			var err error
 			captureStdout(t, func() {
-				err = runApply([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "--sudo=false", "--site", "home-a", "--execute"}, noTerminalStdin(), io.Discard)
+				err = runApply([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "--site", "home-a", "--execute"}, noTerminalStdin(), io.Discard)
 			})
 			refused := err != nil && strings.Contains(problemText(err), "stdin is not a terminal")
 			if name == "something to approve" {
@@ -459,7 +459,7 @@ func TestSiteAddReviewsBeforeTheClaim(t *testing.T) {
 	log := loggingSSH(t, "")
 	fakeGrants(t, func(string) *grant.Record { return nil })
 	rec := recordConverge(t)
-	err := runSiteAdd([]string{"home-b", "--config", path, "--secrets", mustAbs(t, fixtureSecretsPath()), "--sudo=false", "--execute"}, noTerminalStdin(), io.Discard)
+	err := runSiteAdd([]string{"home-b", "--config", path, "--secrets", mustAbs(t, fixtureSecretsPath()), "--execute"}, noTerminalStdin(), io.Discard)
 	if err == nil || !strings.Contains(problemText(err), "stdin is not a terminal") || !strings.Contains(problemText(err), "paisans site add home-b --execute") {
 		t.Fatalf("got %v\n%s", err, rec.Lines())
 	}
@@ -471,7 +471,7 @@ func TestSiteAddReviewsBeforeTheClaim(t *testing.T) {
 	}
 
 	rec = recordConverge(t)
-	_ = runSiteAdd([]string{"home-b", "--config", path, "--secrets", mustAbs(t, fixtureSecretsPath()), "--sudo=false"}, noTerminalStdin(), io.Discard)
+	_ = runSiteAdd([]string{"home-b", "--config", path, "--secrets", mustAbs(t, fixtureSecretsPath())}, noTerminalStdin(), io.Discard)
 	if !rec.Has("pending", "review what paisans-stack.yaml grants") {
 		t.Errorf("the dry run does not show the review:\n%s", rec.Lines())
 	}
@@ -488,7 +488,7 @@ func TestSiteAddChecksTheRunsApproval(t *testing.T) {
 	t.Cleanup(func() { reviewedByRun = saved })
 	reviewedByRun = &runReview{approved: map[string]grant.Review{}}
 	recordConverge(t)
-	err := runSiteAdd([]string{"home-b", "--config", path, "--secrets", mustAbs(t, fixtureSecretsPath()), "--sudo=false", "--execute"}, noTerminalStdin(), io.Discard)
+	err := runSiteAdd([]string{"home-b", "--config", path, "--secrets", mustAbs(t, fixtureSecretsPath()), "--execute"}, noTerminalStdin(), io.Discard)
 	if err == nil || !strings.Contains(problemText(err), "changed after it was approved") || claimed(logged(t, log)) {
 		t.Errorf("err %v, claimed %v", err, claimed(logged(t, log)))
 	}

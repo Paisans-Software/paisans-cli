@@ -16,23 +16,16 @@ import (
 // replace it.
 var webServerProbes = webserver.DefaultProbes
 
-// webServerHost reaches a monitor site to read its web server: as the ssh
-// user, and, with sudo, through sudo with the answer every transport to the
-// host shares (sudoAuthFor). Inside apply that is the password the run
-// settled at its start; run by hand, it is asked once, and only when a
-// command needs sudo.
-func webServerHost(cfg *config.Config, site string, sudo bool) webserver.Host {
-	return webServerHostVia(cfg, site, "", sudo)
+// webServerHost reaches a monitor site to read its web server, as the ssh
+// user.
+func webServerHost(cfg *config.Config, site string) webserver.Host {
+	return webServerHostVia(cfg, site, "")
 }
 
 // webServerHostVia is webServerHost through ssh, verbatim, in place of the
 // site's ssh section when it is set, as apply --site --ssh reaches it.
-func webServerHostVia(cfg *config.Config, site, ssh string, sudo bool) webserver.Host {
-	h := webserver.Host{Plain: siteTransport(site, cfg.Sites[site], ssh, false)}
-	if sudo {
-		h.Sudo = siteTransport(site, cfg.Sites[site], ssh, true)
-	}
-	return h
+func webServerHostVia(cfg *config.Config, site, ssh string) webserver.Host {
+	return webserver.Host{Plain: siteTransport(site, cfg.Sites[site], ssh)}
 }
 
 // findWebServer finds the web server in front of an app on its monitor
@@ -55,7 +48,6 @@ func runWebServer(args []string) error {
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	appName := fs.String("app", "", "the app pinned to a monitor site, by the name it has in the configuration")
-	sudo := fs.Bool("sudo", true, "read the monitor's web server through sudo where the ssh user cannot, as docker and ss may need")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -89,7 +81,7 @@ func runWebServer(args []string) error {
 		var ws webserver.WebServer
 		if target.External() {
 			ws, _ = ui.Get(r, "read the web server on "+target.Site, func() (webserver.WebServer, error) {
-				return findWebServer(webServerHost(cfg, target.Site, *sudo), target), nil
+				return findWebServer(webServerHost(cfg, target.Site), target), nil
 			})
 			if hint, detail, ok := webserver.ACMEDNSWarning(target, ws); ok {
 				r.Warn(hint, detail)
@@ -107,7 +99,7 @@ func runWebServer(args []string) error {
 	if webserver.Report(r, results) {
 		if target.External() {
 			ws, _ := ui.Get(r, "read the web server on "+target.Site, func() (webserver.WebServer, error) {
-				return findWebServer(webServerHost(cfg, target.Site, *sudo), target), nil
+				return findWebServer(webServerHost(cfg, target.Site), target), nil
 			})
 			r.Note(ws.Summary(), "paisans web-server show --app "+target.App+" prints what to add to it")
 		}

@@ -90,8 +90,8 @@ func operatorEmailOn(cfg *config.Config, app string) bool {
 }
 
 // convergeDeclaredOperator plans, and with execute makes, one declared
-// operator of a Pocket ID app, reaching the site Pocket ID answers on with the
-// run's sudo. Tests replace it.
+// operator of a Pocket ID app, reaching the site Pocket ID answers on as the
+// ssh user. Tests replace it.
 var convergeDeclaredOperator = func(cfg *config.Config, app, id string, o convergeOptions, execute bool) (declaredOperator, error) {
 	out := declaredOperator{App: app, ID: id, Email: cfg.Operators[id].Email}
 	where, err := pocketIDSite(ui.Discard, cfg, app, "", "apply")
@@ -104,7 +104,7 @@ var convergeDeclaredOperator = func(cfg *config.Config, app, id string, o conver
 	}
 	req := operatorRequest(cfg, app, id)
 	req.APIKey, req.APIBase, req.APINetworks = key, pocketIDBase(cfg, where), meshNetworks(cfg)
-	transport := adminTransport(siteTransport(where, cfg.Sites[where], "", o.Sudo))
+	transport := adminTransport(siteTransport(where, cfg.Sites[where], ""))
 	plan, err := appadmin.Build(cfg.Apps[app].Blueprint, transport, req)
 	if err != nil {
 		return out, err
@@ -130,7 +130,7 @@ var convergeEmailFailures = func(cfg *config.Config, app string, o convergeOptio
 	if err != nil {
 		return nil, err
 	}
-	transport := adminTransport(siteTransport(where, cfg.Sites[where], "", o.Sudo))
+	transport := adminTransport(siteTransport(where, cfg.Sites[where], ""))
 	project := cfg.Deployment().Project(app)
 	start := time.Now()
 	failed := map[string]string{}

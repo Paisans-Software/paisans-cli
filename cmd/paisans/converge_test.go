@@ -260,7 +260,7 @@ func fakeConvergeArgs(t *testing.T, fail map[string]error) (*[]string, *[][]stri
 	// The run reads each gateway's deployment record once; here none has
 	// one yet. fakeGatewayReads says otherwise.
 	savedRegistry := registryHost
-	registryHost = func(string, config.Site, string, bool) registry.Runner { return noRecord{} }
+	registryHost = func(string, config.Site, string) registry.Runner { return noRecord{} }
 	// Making each declared operator reaches a host too; here every one has
 	// registered. fakeDeclaredOperators says otherwise.
 	fakeDeclaredOperators(t, registered)
@@ -271,7 +271,7 @@ func fakeConvergeArgs(t *testing.T, fail map[string]error) (*[]string, *[][]stri
 	convergeRun = func(args []string) error {
 		full = append(full, args)
 		title := strings.Join(args, " ")
-		for _, f := range []string{" --config", " --secrets", " --execute", " --sudo"} {
+		for _, f := range []string{" --config", " --secrets", " --execute"} {
 			if i := strings.Index(title, f); i >= 0 {
 				title = title[:i]
 			}
@@ -281,17 +281,17 @@ func fakeConvergeArgs(t *testing.T, fail map[string]error) (*[]string, *[][]stri
 		delete(fail, title)
 		return err
 	}
-	convergeReadInitial = func(*config.Config, string, bool) (render.EtcdInitial, bool, error) {
+	convergeReadInitial = func(*config.Config, string) (render.EtcdInitial, bool, error) {
 		return render.EtcdInitial{}, false, nil
 	}
 	// The run's review reads each site's grant record; here each already
 	// holds what the configuration grants, so nothing asks for approval.
 	// fakeRunGrants says otherwise.
 	savedRecord, savedGrantHost := convergeRecord, convergeGrantHost
-	convergeRecord = func(_ *config.Config, _ string, g grant.Grant, _ bool) (grant.Record, error) {
+	convergeRecord = func(_ *config.Config, _ string, g grant.Grant) (grant.Record, error) {
 		return grant.Update(grant.Record{}, g, grant.AllScope, time.Unix(0, 0), ""), nil
 	}
-	convergeGrantHost = func(*config.Config, string, bool) registry.Runner { return &memGrant{} }
+	convergeGrantHost = func(*config.Config, string) registry.Runner { return &memGrant{} }
 	// The review renders what the run applies, from secrets init may have
 	// generated; here init is a fake that generates nothing, so the render
 	// is one with no files, and so no images.
@@ -301,8 +301,8 @@ func fakeConvergeArgs(t *testing.T, fail map[string]error) (*[]string, *[][]stri
 	// reach; here every host is amd64, and everything else goes on to the
 	// host the test set.
 	savedHost := convergeHost
-	convergeHost = func(name string, site config.Site, sudo bool) apply.Transport {
-		return archTransport{savedHost(name, site, sudo), "amd64"}
+	convergeHost = func(name string, site config.Site) apply.Transport {
+		return archTransport{savedHost(name, site), "amd64"}
 	}
 	t.Cleanup(func() {
 		convergeHost = savedHost
@@ -319,7 +319,7 @@ func converge(t *testing.T, extra ...string) error {
 	t.Helper()
 	var err error
 	captureStdout(t, func() {
-		err = runApply(append([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "--sudo=false"}, extra...), strings.NewReader(""), io.Discard)
+		err = runApply(append([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath()}, extra...), strings.NewReader(""), io.Discard)
 	})
 	return err
 }
@@ -454,7 +454,7 @@ func TestConvergeRefusesSSH(t *testing.T) {
 func TestConvergeRefusesBeforeReadingAHost(t *testing.T) {
 	ran := fakeConverge(t, nil)
 	read := false
-	convergeReadInitial = func(*config.Config, string, bool) (render.EtcdInitial, bool, error) {
+	convergeReadInitial = func(*config.Config, string) (render.EtcdInitial, bool, error) {
 		read = true
 		return render.EtcdInitial{}, false, errors.New("no host should be read")
 	}
@@ -472,7 +472,7 @@ func TestConvergeRefusesBeforeReadingAHost(t *testing.T) {
 	}
 	rec := recordConverge(t)
 	captureStdout(t, func() {
-		err = runApply([]string{"--config", path, "--secrets", fixtureSecretsPath(), "--sudo=false"}, strings.NewReader(""), io.Discard)
+		err = runApply([]string{"--config", path, "--secrets", fixtureSecretsPath()}, strings.NewReader(""), io.Discard)
 	})
 	if err == nil || !strings.Contains(err.Error(), "was refused") {
 		t.Errorf("err = %v, want the configuration refused", err)
@@ -522,7 +522,7 @@ func TestConvergeWithoutAnIDPlansInit(t *testing.T) {
 	fakeConverge(t, nil)
 	path := noID(t)
 	var err error
-	out := captureStdout(t, func() { err = runApply([]string{"--config", path, "--sudo=false"}, strings.NewReader(""), io.Discard) })
+	out := captureStdout(t, func() { err = runApply([]string{"--config", path}, strings.NewReader(""), io.Discard) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -543,7 +543,7 @@ func TestConvergeReplansAfterInit(t *testing.T) {
 	}
 	t.Cleanup(func() { convergeRead = saved })
 	founded := initial("home-a", "vm")
-	convergeReadInitial = func(_ *config.Config, m string, _ bool) (render.EtcdInitial, bool, error) {
+	convergeReadInitial = func(_ *config.Config, m string) (render.EtcdInitial, bool, error) {
 		if reads == 1 {
 			t.Errorf("%s's record read before init ran", m)
 		}
@@ -561,7 +561,7 @@ func TestConvergeSaysWhatIsLeft(t *testing.T) {
 	out := ""
 	captureStdout(t, func() {})
 	out = captureStdout(t, func() {
-		if err := runApply([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "--sudo=false"}, strings.NewReader(""), io.Discard); err != nil {
+		if err := runApply([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath()}, strings.NewReader(""), io.Discard); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -710,7 +710,7 @@ func TestEveryPlannedStepParses(t *testing.T) {
 	t.Cleanup(func() { flagsOnly = saved })
 	for _, o := range []convergeOptions{
 		{Config: fixtureConfig()},
-		{Config: fixtureConfig(), Secrets: fixtureSecretsPath(), Execute: true, Sudo: true, Verbose: true, KeepImages: true, MinFree: "2G"},
+		{Config: fixtureConfig(), Secrets: fixtureSecretsPath(), Execute: true, Verbose: true, KeepImages: true, MinFree: "2G"},
 	} {
 		for _, s := range steps {
 			args := convergeFlags(s.Args, o)
@@ -822,7 +822,7 @@ func TestInitWhyNamesMissingSecrets(t *testing.T) {
 // ignored for the default paisans-stack.yaml.
 func TestApplyRefusesAStrayArgument(t *testing.T) {
 	fakeConverge(t, nil)
-	err := runApply([]string{"--sudo=false", "staging/paisans-stack.yaml"}, strings.NewReader(""), io.Discard)
+	err := runApply([]string{"staging/paisans-stack.yaml"}, strings.NewReader(""), io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "--config staging/paisans-stack.yaml") {
 		t.Errorf("err = %v", err)
 	}
@@ -875,7 +875,7 @@ func TestConvergeReadsEachEtcdRecordInAStep(t *testing.T) {
 	fakeConverge(t, nil)
 	rec := recordConverge(t)
 	var read []string
-	convergeReadInitial = func(_ *config.Config, m string, _ bool) (render.EtcdInitial, bool, error) {
+	convergeReadInitial = func(_ *config.Config, m string) (render.EtcdInitial, bool, error) {
 		last := rec.Events[len(rec.Events)-1]
 		if last.Kind != "step" || last.Text != "read "+m+"'s etcd record" {
 			t.Errorf("%s read outside its step; last event %+v", m, last)
@@ -909,7 +909,7 @@ func TestEtcdReadsMarkAnUnfoundedMemberPending(t *testing.T) {
 	fakeConverge(t, nil)
 	rec := recordConverge(t)
 	founded := initial("home-a", "vm")
-	convergeReadInitial = func(_ *config.Config, m string, _ bool) (render.EtcdInitial, bool, error) {
+	convergeReadInitial = func(_ *config.Config, m string) (render.EtcdInitial, bool, error) {
 		return founded, m == "home-a", nil
 	}
 	if err := converge(t); err != nil {
@@ -1016,7 +1016,7 @@ func recordHolds(t *testing.T) holdRecorder {
 func TestAHoldDuringAnEtcdReadPausesItsSpinner(t *testing.T) {
 	fakeConverge(t, nil)
 	h := recordHolds(t)
-	convergeReadInitial = func(_ *config.Config, m string, _ bool) (render.EtcdInitial, bool, error) {
+	convergeReadInitial = func(_ *config.Config, m string) (render.EtcdInitial, bool, error) {
 		holdOutput()()
 		return render.EtcdInitial{}, false, nil
 	}
@@ -1036,7 +1036,7 @@ func TestAHoldDuringAnEtcdReadPausesItsSpinner(t *testing.T) {
 func TestAnEtcdMemberThatDoesNotAnswerStopsThePlan(t *testing.T) {
 	ran := fakeConverge(t, nil)
 	rec := recordConverge(t)
-	convergeReadInitial = func(_ *config.Config, m string, _ bool) (render.EtcdInitial, bool, error) {
+	convergeReadInitial = func(_ *config.Config, m string) (render.EtcdInitial, bool, error) {
 		return render.EtcdInitial{}, false, errors.New("ssh: connect timed out")
 	}
 	err := converge(t, "--execute")
@@ -1259,7 +1259,7 @@ func TestConvergeDryRunChecksAFoundedMemberInPassTwo(t *testing.T) {
 	ran := fakeConverge(t, nil)
 	_ = ran
 	founded := initial("home-a", "home-b", "vm")
-	convergeReadInitial = func(*config.Config, string, bool) (render.EtcdInitial, bool, error) { return founded, true, nil }
+	convergeReadInitial = func(*config.Config, string) (render.EtcdInitial, bool, error) { return founded, true, nil }
 	checked := fakeChecks(t, map[string]any{"storage add": "1 stage"})
 	rec := recordConverge(t)
 	if err := converge(t); err != nil {
@@ -1406,7 +1406,7 @@ func convergeShaped(t *testing.T, edit func(*config.Config), recorded map[string
 		return cfg, convergeState{}, err
 	}
 	t.Cleanup(func() { convergeRead = saved })
-	convergeReadInitial = func(_ *config.Config, m string, _ bool) (render.EtcdInitial, bool, error) {
+	convergeReadInitial = func(_ *config.Config, m string) (render.EtcdInitial, bool, error) {
 		in, ok := recorded[m]
 		return in, ok, nil
 	}
@@ -1645,7 +1645,7 @@ func TestHoldsReturnToTheRunAfterInit(t *testing.T) {
 		return nil
 	}
 	t.Cleanup(func() { convergeRead, convergeRun = saved, savedRun })
-	convergeReadInitial = func(*config.Config, string, bool) (render.EtcdInitial, bool, error) {
+	convergeReadInitial = func(*config.Config, string) (render.EtcdInitial, bool, error) {
 		holdOutput()()
 		return render.EtcdInitial{}, false, nil
 	}
@@ -1724,14 +1724,14 @@ func TestCheckReportsShowUnderTheStep(t *testing.T) {
 func TestConvergeStopsOnASecretsFileThatDoesNotRead(t *testing.T) {
 	fakeConverge(t, nil)
 	read := false
-	convergeReadInitial = func(*config.Config, string, bool) (render.EtcdInitial, bool, error) {
+	convergeReadInitial = func(*config.Config, string) (render.EtcdInitial, bool, error) {
 		read = true
 		return render.EtcdInitial{}, false, nil
 	}
 	unreadable := t.TempDir() // a directory: present, and not a secrets file
 	var err error
 	captureStdout(t, func() {
-		err = runApply([]string{"--config", fixtureConfig(), "--secrets", unreadable, "--sudo=false"}, strings.NewReader(""), io.Discard)
+		err = runApply([]string{"--config", fixtureConfig(), "--secrets", unreadable}, strings.NewReader(""), io.Discard)
 	})
 	if err == nil || !strings.Contains(err.Error(), unreadable) {
 		t.Errorf("err = %v, want it to name %s", err, unreadable)

@@ -321,13 +321,13 @@ stuck and how to recover* in `README.md`.
 The DNS nodes are `internal/doctor/dnschecks.go`, added when the reads answer
 `doctor.DNSReads` as well: `caddy certificates <site>` on each Caddy site,
 `secrets`, `dns token <site>`, `dns token workstation` and `dns records`. The
-token checks are `dns.TokenCheck`'s, `OnSite` over the site's sudo transport
+token checks are `dns.TokenCheck`'s, `OnSite` over the site's transport
 and `FromWorkstation` with the token `--secrets` holds, which stays in
 `cmd/paisans` and never enters `doctor.Input`. Every token node needs every
 Caddy log to have ended, and skips itself (`Node.Unless`) while one shows
-Cloudflare's lockout in the last five minutes, so nothing feeds it. A sudo
-password prompt takes `apply.AskMu`, the lock ssh's host key question takes,
-so two sites' questions never share the terminal at once.
+Cloudflare's lockout in the last five minutes, so nothing feeds it. ssh's
+host key question takes `apply.AskMu`, so two sites' questions never share the
+terminal at once.
 
 **Leftovers and foreign users of Caddy** are `internal/ownership`: `Classify`
 is a pure function of the configuration, a `hostcheck.Inventory` and the
@@ -537,7 +537,8 @@ around every ssh attempt to a host until that host has answered once, which is
 where ssh asks to accept an unknown host key. `routeHolds` in `cmd/paisans`
 points both at the reporter that draws, beside `routeRetries`. A key
 passphrase ssh asks for on every connection is not held after the first one;
-the README's sudo section tells the operator to keep keys in an agent.
+*One connection per host, shared* in the README tells the operator to keep
+keys in an agent.
 
 `apply.Report` hands the reporter to `apply.Build`, which keeps it on the
 plan for `apply.Execute`, so planning and executing speak in one voice.

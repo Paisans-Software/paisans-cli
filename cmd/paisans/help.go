@@ -134,7 +134,7 @@ var helpCommands = []helpCommand{
 	{
 		name:    "init",
 		summary: "Give the configuration an id, a mesh subnet and its secrets.",
-		usage:   []string{"paisans init [--config " + config.FileName + "] [--secrets secrets.enc.yaml] [--sudo=false]"},
+		usage:   []string{"paisans init [--config " + config.FileName + "] [--secrets secrets.enc.yaml]"},
 		detail: "Give the configuration an id if it has none; until the deployment is on any site, reach every site and keep mesh.subnet only if it overlaps nothing there, else roll a random /24 that overlaps nothing and move each site's address into it; " +
 			"then generate the secrets it needs, filling in only what is missing, and say what is still owed from elsewhere.",
 	},
@@ -191,7 +191,7 @@ var helpCommands = []helpCommand{
 			"paisans site remove <site> --evict [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n" +
 				"                    [--execute]",
 			"paisans site remove --force --ssh <user@host[:port]> --id <id or token>\n" +
-				"                    [--delete-data] [--sudo=false] [--execute]",
+				"                    [--delete-data] [--execute]",
 		},
 		detail: "Take a site out of the running deployment in gated stages: its data out (the Patroni leader switched to the Sync Standby, its Garage node out of the layout and the objects moved), out of the cluster (its etcd member, and the mesh, HAProxy and gateway routes on every remaining site, and each replica's patroni.env, one at a time; one data site out of two and a witness takes the witness out of etcd too), its host cleaned of everything provably this deployment's (a gateway's Caddy kept, reduced to the host owner's sites in /srv/caddy.d, while there are any), the A and AAAA records dns init made for its public address deleted at the DNS provider, and its entry out of " + config.FileName + ".\n\n" +
 			"Refuses the only gateway, data or apps site, a site an app is pinned to, and an unhealthy cluster. --host-gone skips the host; --delete-data deletes its data after the site's name is typed at a terminal. Writes nothing without --execute.\n\n" +
@@ -257,7 +257,7 @@ var helpCommands = []helpCommand{
 	{
 		name:    "doctor",
 		summary: "Report what is stuck on every site, and how to recover.",
-		usage:   []string{"paisans doctor [--config " + config.FileName + "] [--site <name>]... [--sudo]"},
+		usage:   []string{"paisans doctor [--config " + config.FileName + "] [--site <name>]..."},
 		detail: "Reach every site, or the ones --site names, and report what is stuck: unreachable sites, etcd quorum and version, the Patroni leader and why a replica will not promote, containers that are down, Pocket ID's active instance, and clocks. " +
 			"Prints how to recover. Reaches hosts, changes nothing; exits 1 on any FAIL.",
 	},
@@ -358,7 +358,7 @@ var helpCommands = []helpCommand{
 	{
 		name:    "secrets rotate",
 		summary: "Replace secrets, one at a time, in gated stages.",
-		usage:   []string{"paisans secrets rotate <path>... | --all [--restart] [--replaced <path>]...\n                       [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                       [--sudo=false] [--execute]"},
+		usage:   []string{"paisans secrets rotate <path>... | --all [--restart] [--replaced <path>]...\n                       [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                       [--execute]"},
 		detail: "Replace secrets, named by their paths in the secrets file (apps.<app>.<unit> for a unit of secrets an app's blueprint groups), or every one in scope with --all, one at a time in gated stages: a next value in the secrets file, the side that checks it, each site that uses it healthy before the next, then the value promoted.\n\n" +
 			"A pasted secret (the DNS token or an SMTP password) whose value every host using it runs, read line by line, is asked for at a terminal before any host is claimed: replace it at its issuer when asked and paste the new one. One already set anew with secrets set is handed on from the file. A DNS token is tried against the zone before any host gets it; an SMTP password logs in to the mail server from a site, and a pasted one sends the operators one test message. --replaced <path> lists one already replaced and applied, which every host runs, instead. Lists the secrets it keeps and why.\n\n" +
 			"--all refuses a file that lacks a secret init generates. A stopped --all resumes with what it left, and says so; --all --restart starts the full list again.\n\n" +
@@ -383,14 +383,14 @@ var helpCommands = []helpCommand{
 	{
 		name:    "web-server show",
 		summary: "Print what the web server in front of a monitor's app must do.",
-		usage:   []string{"paisans web-server show --app <name> [--config " + config.FileName + "] [--sudo=false]"},
+		usage:   []string{"paisans web-server show --app <name> [--config " + config.FileName + "]"},
 		detail: "For an app pinned to a monitor site, print what the web server in front of it must do (terminate TLS for its hostname, pass Host, set X-Forwarded-For and X-Forwarded-Proto), filled in for the web server it finds on the monitor over ssh, read only, or for Caddy, nginx and Apache when it finds none.\n\n" +
 			"Changes nothing. With managed_by: external it reads the monitor's web server over ssh.",
 	},
 	{
 		name:    "web-server check",
 		summary: "Check, from here, that a monitor's app is served correctly.",
-		usage:   []string{"paisans web-server check --app <name> [--config " + config.FileName + "] [--sudo=false]"},
+		usage:   []string{"paisans web-server check --app <name> [--config " + config.FileName + "]"},
 		detail: "From this machine, check that the hostname resolves to the monitor, that /healthz answers with a valid certificate, that sign in redirects with an https callback, and that the published port is closed from outside. " +
 			"Reads only; exits 1 on any FAIL. With the toolkit's own Caddy in front (managed_by: paisans), only the first two apply.\n\n" +
 			"It looks at the monitor's public hostname as any visitor could; with managed_by: external it also reads the monitor's web server over ssh when a check fails.",

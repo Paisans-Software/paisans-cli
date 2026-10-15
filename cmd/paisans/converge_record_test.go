@@ -61,7 +61,7 @@ func fakeGatewayReads(t *testing.T) map[string]int {
 	t.Helper()
 	reached := map[string]int{}
 	saved := registryHost
-	registryHost = func(name string, _ config.Site, _ string, _ bool) registry.Runner {
+	registryHost = func(name string, _ config.Site, _ string) registry.Runner {
 		if name != "vm" {
 			t.Errorf("%s reached as a gateway", name)
 		}
@@ -93,7 +93,7 @@ func TestConvergeWarnsAboutAnOrphanedSecretOnce(t *testing.T) {
 		rec := recordConverge(t)
 		var err error
 		captureStdout(t, func() {
-			err = runApply(append([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false"}, extra...), strings.NewReader(""), io.Discard)
+			err = runApply(append([]string{"--config", configPath, "--secrets", secretsPath}, extra...), strings.NewReader(""), io.Discard)
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -146,7 +146,7 @@ func TestConvergeInstallLinesDoNotRepeatTheSecretsCheck(t *testing.T) {
 	rec := withRecorder(t, true)
 	var err error
 	captureStdout(t, func() {
-		err = runApply([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false", "--execute", "-v"}, strings.NewReader(""), io.Discard)
+		err = runApply([]string{"--config", configPath, "--secrets", secretsPath, "--execute", "-v"}, strings.NewReader(""), io.Discard)
 	})
 	if err == nil {
 		t.Fatal("an apply through a failing ssh succeeded")
@@ -174,7 +174,7 @@ func TestApplySiteStillWarnsAboutAnOrphanedSecret(t *testing.T) {
 	rec := withRecorder(t, false)
 	var err error
 	captureStdout(t, func() {
-		err = runApply([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false", "--site", "home-a"}, strings.NewReader(""), io.Discard)
+		err = runApply([]string{"--config", configPath, "--secrets", secretsPath, "--site", "home-a"}, strings.NewReader(""), io.Discard)
 	})
 	if err == nil {
 		t.Fatal("an apply through a failing ssh succeeded")

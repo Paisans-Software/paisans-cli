@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,12 +11,9 @@ import (
 	"golang.org/x/term"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
-	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
-// sudoAuths holds one SudoAuth per destination for the whole run, so a site
-// whose transport is built several times (a map of every site, then the one
-// a stage needs) asks for its sudo password once.
+// sudoAuths holds one SudoAuth per destination for the whole run, so the owner's transport (ownerTransport), built more than once, asks for its sudo password once.
 var (
 	sudoAuthsMu sync.Mutex
 	sudoAuths   = map[string]*apply.SudoAuth{}
@@ -36,49 +32,6 @@ func sudoAuthFor(destination string) *apply.SudoAuth {
 	auth := apply.NewSudoAuth(prompt)
 	sudoAuths[destination] = auth
 	return auth
-}
-
-// settleSudo settles sudo on every host of a run that reaches several,
-// before the run reaches any of them, so each password is asked at the start
-// rather than whenever a later step first needs that host. sites is in the
-// order they are asked; host is each one's transport, the one the steps
-// build, so the answer kept is the one they find.
-//
-// Under a sudo section, each site's line is ✓ once settled, password
-// accepted or none needed. A refusal stops the run there, its line ✗ and its
-// problem returned. A host that did not answer, or would not log ssh in, is
-// not a stop: its line waits, and the first step that reaches it asks then
-// and reports it as it would have. Nothing is printed for a run whose hosts
-// have no sudo to settle.
-func settleSudo(r ui.Reporter, sites []string, host func(string) apply.Transport) error {
-	var names []string
-	hosts := map[string]apply.Transport{}
-	for _, name := range sites {
-		if t := host(name); apply.SettlesSudo(t) {
-			names = append(names, name)
-			hosts[name] = t
-		}
-	}
-	if len(names) == 0 {
-		return nil
-	}
-	r.Section("sudo")
-	for _, name := range names {
-		line := r.Step(name)
-		err := apply.PrepareSudo(hosts[name])
-		switch {
-		case err == nil:
-			// End rather than Done: Done would time the line, and the
-			// time is the operator's typing.
-			line.End(ui.OK, "")
-		case errors.Is(err, apply.ErrSudo):
-			line.Fail(err)
-			return err
-		default:
-			line.End(ui.Waiting, "not reached; asked when a step reaches it")
-		}
-	}
-	return nil
 }
 
 // openTTY opens the controlling terminal. The password is read there rather

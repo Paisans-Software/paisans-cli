@@ -144,7 +144,7 @@ func fixtureRuns(t *testing.T) map[string]string {
 	t.Run("init", func(t *testing.T) {
 		path, _ := initWorld(t, nil, fakeSites(), make([]byte, 64))
 		t.Chdir(filepath.Dir(path))
-		runs["init"] = runDefault(t, "init", func() error { return runInit([]string{"--config", "paisans-stack.yaml", "--sudo=false"}) })
+		runs["init"] = runDefault(t, "init", func() error { return runInit([]string{"--config", "paisans-stack.yaml"}) })
 	})
 
 	work := t.TempDir()
@@ -234,21 +234,21 @@ func fixtureRuns(t *testing.T) map[string]string {
 	{
 		var sent, writes []string
 		withDoctorHosts(t, stuckHosts(mustLoad(t, cfg), &sent, &writes))
-		runs["doctor"] = runDefault(t, "doctor", func() error { return runDoctor([]string{"--config", cfg, "--sudo=false"}) })
+		runs["doctor"] = runDefault(t, "doctor", func() error { return runDoctor([]string{"--config", cfg}) })
 	}
 
 	{
 		savedSite, savedApp, savedReg := removeSiteHost, removeHost, registryHost
 		t.Cleanup(func() { removeSiteHost, removeHost, registryHost = savedSite, savedApp, savedReg })
 		quiet := runningHost{failingHost{match: "\x00"}}
-		removeSiteHost = func(string, config.Site, bool) apply.Transport { return quiet }
-		removeHost = func(string, config.Site, bool) appremove.Host { return quiet }
-		registryHost = func(string, config.Site, string, bool) registry.Runner { return quiet }
+		removeSiteHost = func(string, config.Site) apply.Transport { return quiet }
+		removeHost = func(string, config.Site) appremove.Host { return quiet }
+		registryHost = func(string, config.Site, string) registry.Runner { return quiet }
 		runs["site remove dry run"] = runDefault(t, "site remove", func() error {
-			return runSiteRemove([]string{"watch", "--config", cfg, "--secrets", secrets, "--sudo=false"}, strings.NewReader(""), io.Discard)
+			return runSiteRemove([]string{"watch", "--config", cfg, "--secrets", secrets}, strings.NewReader(""), io.Discard)
 		})
 		runs["app remove dry run"] = runDefault(t, "app remove", func() error {
-			return runAppRemove([]string{"old", "--config", cfg, "--secrets", secrets, "--sudo=false"}, strings.NewReader(""), io.Discard)
+			return runAppRemove([]string{"old", "--config", cfg, "--secrets", secrets}, strings.NewReader(""), io.Discard)
 		})
 	}
 
@@ -256,10 +256,10 @@ func fixtureRuns(t *testing.T) map[string]string {
 	// as a clean, empty host.
 	quietSSH(t)
 	for name, args := range map[string][]string{
-		"host prepare dry run": {"host prepare", "--config", cfg, "--site", "home-a", "--sudo=false"},
-		"site add dry run":     {"site add", "home-b", "--config", "join.yaml", "--secrets", secrets, "--sudo=false"},
-		"storage add dry run":  {"storage add", "--config", cfg, "--secrets", secrets, "--sudo=false"},
-		"prune dry run":        {"prune", "--config", cfg, "--site", "home-a", "--sudo=false"},
+		"host prepare dry run": {"host prepare", "--config", cfg, "--site", "home-a"},
+		"site add dry run":     {"site add", "home-b", "--config", "join.yaml", "--secrets", secrets},
+		"storage add dry run":  {"storage add", "--config", cfg, "--secrets", secrets},
+		"prune dry run":        {"prune", "--config", cfg, "--site", "home-a"},
 	} {
 		run := map[string]func([]string) error{
 			"host prepare": runHostPrepare, "site add": func(a []string) error { return runSiteAdd(a, strings.NewReader(""), io.Discard) }, "storage add": runStorageAdd, "prune": runPrune,

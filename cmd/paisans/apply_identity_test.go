@@ -107,7 +107,7 @@ func TestApplyNamesWhatIsPendingWhenItStops(t *testing.T) {
 	}
 	rec := recordConverge(t)
 	captureStdout(t, func() {
-		err = runApply([]string{"--config", path, "--secrets", fixtureSecretsPath(), "--sudo=false"}, strings.NewReader(""), nil)
+		err = runApply([]string{"--config", path, "--secrets", fixtureSecretsPath()}, strings.NewReader(""), nil)
 	})
 	got := identityLines(rec)
 	if err == nil || len(got) != 2 {

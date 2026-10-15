@@ -12,7 +12,7 @@ import (
 
 // A run of apply names what it applies before anything else: the deployment
 // id and the configuration version, revision and hash. They open the output,
-// ahead of the sudo passwords, so a log of any run says which deployment and
+// so a log of any run says which deployment and
 // which version the rest of it is about, and two runs' logs can be told
 // apart.
 //
@@ -40,7 +40,7 @@ type runIdentity struct {
 func openIdentity(r ui.Reporter, configPath string) *runIdentity {
 	v := &runIdentity{id: declaredID(configPath)}
 	// A file that is not where a version is kept, or a store that cannot
-	// be read, leaves the version pending: the gather after sudo says why.
+	// be read, leaves the version pending: the gather says why.
 	if l, err := workstationOf(configPath); err == nil {
 		v.sha, v.revision, _ = l.Current()
 	}

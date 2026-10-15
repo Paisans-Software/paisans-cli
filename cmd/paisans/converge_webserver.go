@@ -57,9 +57,9 @@ func scopedApps(cfg *config.Config, scope webServerScope) []string {
 // every other step; apply --site runs it for its own site. It returns what
 // the run ends on when something is left: broken when what apply needed on
 // a host could not be done, otherwise the operator's web server.
-func webServerStep(r ui.Reporter, cfg *config.Config, configPath string, sudo bool, scope webServerScope) (end *ui.Problem, broken bool) {
-	files := convergeWebServerFiles(r, cfg, configPath, sudo, scope)
-	checked, failed := convergeWebServer(r, cfg, sudo, files, scope)
+func webServerStep(r ui.Reporter, cfg *config.Config, configPath string, scope webServerScope) (end *ui.Problem, broken bool) {
+	files := convergeWebServerFiles(r, cfg, configPath, scope)
+	checked, failed := convergeWebServer(r, cfg, files, scope)
 	// An app whose site file step warned is named once, by the app.
 	warned := slices.Clone(checked)
 	for _, title := range files.warned {
@@ -109,7 +109,7 @@ func webServerEnd(end *ui.Problem, broken bool, other error) error {
 // webServerResults says. Only the apps on the sites scope
 // covers are checked. It returns the apps that failed their check, and the
 // steps that failed outright.
-func convergeWebServer(r ui.Reporter, cfg *config.Config, sudo bool, files webServerFiles, scope webServerScope) (warned, failed []string) {
+func convergeWebServer(r ui.Reporter, cfg *config.Config, files webServerFiles, scope webServerScope) (warned, failed []string) {
 	apps := scopedApps(cfg, scope)
 	if len(apps) == 0 {
 		return nil, nil
@@ -165,11 +165,11 @@ func convergeWebServer(r ui.Reporter, cfg *config.Config, sudo bool, files webSe
 		if sf != nil && sf.ws.Server != "" {
 			ws = sf.ws
 		} else if sf == nil || sf.until == "" {
-			// What serves it is read only now, through the sudo the
-			// run settled, so a passing app costs no ssh. The line
+			// What serves it is read only now, as the ssh user, so a
+			// passing app costs no ssh. The line
 			// spins while it is read.
 			s.Progress("read the web server on " + target.Site)
-			ws = findWebServer(scope.serverHost(cfg, target.Site, sudo), target)
+			ws = findWebServer(scope.serverHost(cfg, target.Site), target)
 		}
 		s.End(ui.Warned, target.Hostname)
 		warned = append(warned, app)

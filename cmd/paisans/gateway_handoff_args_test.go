@@ -5,17 +5,17 @@ import (
 	"testing"
 )
 
-// The hand-off applies the old site with the move's own files, sudo,
+// The hand-off applies the old site with the move's own files,
 // verbosity and image options, and its dry run is the same without
 // --execute.
 func TestTheHandOffAppliesWithTheMovesOwnFlags(t *testing.T) {
-	got := handOffArgs("home-a", handOffFlags{config: "/d/paisans-stack.yaml", secrets: "/d/secrets.enc.yaml", sudo: true, verbose: true, keepImages: true, minFree: "5G"}, true)
-	want := []string{"--site", "home-a", "--only", "infra", "--config", "/d/paisans-stack.yaml", "--secrets", "/d/secrets.enc.yaml", "--sudo=true", "-v", "--keep-images", "--min-free", "5G", "--execute"}
+	got := handOffArgs("home-a", handOffFlags{config: "/d/paisans-stack.yaml", secrets: "/d/secrets.enc.yaml", verbose: true, keepImages: true, minFree: "5G"}, true)
+	want := []string{"--site", "home-a", "--only", "infra", "--config", "/d/paisans-stack.yaml", "--secrets", "/d/secrets.enc.yaml", "-v", "--keep-images", "--min-free", "5G", "--execute"}
 	if !slices.Equal(got, want) {
 		t.Errorf("executed:\n got %q\nwant %q", got, want)
 	}
-	dry := handOffArgs("home-a", handOffFlags{config: "/d/paisans-stack.yaml", sudo: false}, false)
-	if want := []string{"--site", "home-a", "--only", "infra", "--config", "/d/paisans-stack.yaml", "--sudo=false"}; !slices.Equal(dry, want) {
+	dry := handOffArgs("home-a", handOffFlags{config: "/d/paisans-stack.yaml"}, false)
+	if want := []string{"--site", "home-a", "--only", "infra", "--config", "/d/paisans-stack.yaml"}; !slices.Equal(dry, want) {
 		t.Errorf("dry run:\n got %q\nwant %q", dry, want)
 	}
 }

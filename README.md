@@ -906,8 +906,8 @@ sites:
   per app in a `web server` section, and does not call the deployment complete
   while one fails: the app's line is a warning, `!`, with the checks that
   failed under it, an error several of them share said once, then the web
-  server `web-server show` finds in front of it, read through the sudo the run
-  settled at its start, and the `web-server show` and `web-server check`
+  server `web-server show` finds in front of it, read as the site's ssh user,
+  and the `web-server show` and `web-server check`
   commands to fix it with. Where the app's site file step above already
   warned or failed with its own instructions, the check would only restate
   them, so the app has no check line; with `--verbose` it has one, which names
@@ -928,7 +928,7 @@ sites:
   only after apply reloaded its web server in a container (below). A dry run
   lists the check without running it.
   `apply --site` on such a monitor runs the whole step, the site files below
-  and then the check, reaching the monitor through the ssh and sudo the rest
+  and then the check, reaching the monitor through the ssh login the rest
   of its apply uses, and ends the same way, on the warning or the failure in
   place of `Applied <n> files to <site>.`. The applies a full apply runs as
   its steps leave the step to the full apply, which runs it once.
@@ -1122,9 +1122,9 @@ the web server must do (terminate TLS for the hostname, pass `Host`, set
 refuses, below); the snippet for the web server in front of the monitor; and
 the ufw warning when `listen` is not loopback. It finds that web server over
 ssh, reading only, through the transport `apply` uses: the container
-publishing 443 or 80 (`docker ps`, through sudo when docker refuses the ssh
-user), and its configuration from the container's mounts; failing that, the
-process listening on 443 or 80 (`sudo ss -ltnp`). For Caddy it asks the admin
+publishing 443 or 80 (`docker ps`), and its configuration from the
+container's mounts; failing that, the process listening on 443 or 80 (`ss
+-ltnp`). For Caddy it asks the admin
 API on `localhost:2019`, on the host or inside the container: a Caddy that
 obtains its own certificates gets a site level `tls { issuer acme }`, one that
 loads certificate files gets a `tls` line following their pattern for the new
@@ -1156,8 +1156,8 @@ HTTP-01. That rewrite drops Caddy's default ZeroSSL fallback issuer for the
 sites without one of their own. The site file is written either way: it is
 valid, and with `acme_dns` it changes nothing. When nothing could be read, or the server
 has no snippet, that line says why and the sheet carries the Caddy, nginx and
-Apache snippets, with Caddy's `tls` line commented out. sudo is asked for once,
-and only when a command needs it; `--sudo=false` reads as the ssh user alone. `check` reports pass or fail, with the fix, for: the hostname
+Apache snippets, with Caddy's `tls` line commented out. It reads as the ssh
+user. `check` reports pass or fail, with the fix, for: the hostname
 resolving to the monitor's `public_address` (and `public_address6`) and to
 nothing else, so a stale record still on the gateway fails;
 `https://<hostname>/healthz` answering with a certificate valid for the
@@ -4731,6 +4731,13 @@ A shared connection that has gone is not an error: ssh finds the socket dead,
 removes it and connects afresh. A command whose shared connection drops while
 it runs fails with ssh's status 255 and is not retried, since it may have run.
 
+ssh asks on the terminal itself to accept a host key it does not know, so
+every connection attempt to a host is made with the progress display held
+until that host has answered once. A key whose passphrase ssh asks for on
+every connection is the one prompt this does not cover: after the first
+connection the spinner runs while ssh asks, and can draw over the question. A
+key held by an agent (above) is never asked for.
+
 #### Commands run in sh, whatever the login shell is
 
 sshd hands the command ssh sends to the login user's shell, and every command
@@ -4819,50 +4826,34 @@ file, not from the connection.
 
 #### A sudo that wants a password is asked for once, on a terminal
 
-Commands that read or change a host run through sudo, because `/srv`, `/etc`,
-the packages and the firewall are root's (`--sudo`, on by default). Before the
-first one on a site, the toolkit asks the host `sudo -n true`. `-n` makes sudo
-fail at once instead of waiting for a password, so the answer is immediate.
+Every command that acts on a deployment logs in as the site's ssh user and
+runs nothing through sudo. `host deployments` is the owner's command: it reads
+a host's registry and every deployment's directories, which are root's, so it
+runs through sudo (`--sudo`, on by default). Before its first command, the
+toolkit asks the host `sudo -n true`. `-n` makes sudo fail at once instead of
+waiting for a password, so the answer is immediate.
 
 **A host whose sudo needs no password** runs each command as
 `sudo sh -c '<command>'`, and nobody is asked anything.
 
 **A host whose sudo wants one** (sudo answers "a password is required") gets
-it from the operator, once per site per run, on the controlling terminal:
+it from the operator, once per destination per run, on the controlling
+terminal:
 
 ```
-sudo password for site home-a (ubuntu@203.0.113.10, host home-a-01):
+sudo password for owner@203.0.113.10, host home-a-01:
 ```
 
-A command that reaches several hosts asks every one of them before it reaches
-any: `apply` without `--site` (and the `init` it runs first, when it has work)
-and `site remove`. Each host is asked on its own, in site name order, under a
-`sudo` section at the top of the run:
+It asks before its first sudo command.
 
-```
-sudo
-  ✓ home-a
-  ✓ home-b
-  · vm: not reached; asked when a step reaches it
-  ✓ watch
-```
-
-A line is ✓ once that host's sudo is settled, whether a password was accepted
-or none was needed. A password that is empty, unreadable or not accepted marks
-its line ✗ and stops the run there, before any step, with sudo's own problem.
-A host that does not answer, or that ssh cannot log in to, is not a stop: its
-line waits, and the first step that reaches it asks for its password then and
-reports what went wrong exactly as it would have. `site remove --host-gone`
-never reaches the leaving host, so it is not asked. A command about one host
-asks before its first sudo command, as above.
-
-The prompt names the site as `paisans-stack.yaml` does and the name the host gives
-itself (`uname -n`), beside the address ssh reached. An address alone is often
-one the operator does not recognise, and typing a root password needs
-certainty about which machine is asking: the site name says which site the
-toolkit meant, and the hostname says which machine answered. The hostname is
-left out when the host does not give one or gives anything beyond letters,
-digits, dots, hyphens and underscores, because it is printed on the
+The prompt names the destination ssh reached and the name the host gives
+itself (`uname -n`). An address alone is often one the operator does not
+recognise, and typing a root password needs certainty about which machine is
+asking: the hostname says which machine answered. A transport that carries a
+site's name opens the prompt with `site <name>`, as `paisans-stack.yaml` names
+it; `host deployments` reads no configuration, so its prompt names none. The
+hostname is left out when the host does not give one or gives anything beyond
+letters, digits, dots, hyphens and underscores, because it is printed on the
 operator's terminal and a host must not write terminal escapes into the prompt
 for its own password.
 
@@ -4874,12 +4865,7 @@ runs inside an open step, and that step's spinner redraws its line every tenth
 of a second, which would erase the prompt and leave the operator watching a
 spinner that waits on them without saying so. Once answered, right or wrong,
 the prompt is erased, so the report reads on without it; a wrong password is
-said by the error that follows. ssh asks on the terminal itself
-as well, to accept a host key it does not know, so every connection attempt to
-a host is made with the display held until that host has answered once. A key
-whose passphrase ssh asks for on every connection is the one prompt this does
-not cover: after the first connection the spinner runs while ssh asks, and can
-draw over the question. A key held by an agent (above) is never asked for.
+said by the error that follows.
 The password is checked once, and every command after it runs as
 `sudo -k -S -p '' sh -c '<fence>; <command>'`, with the password as the first
 line of that ssh session's stdin, a fence line after it, and then whatever
@@ -4926,20 +4912,14 @@ it was sent, so leaving the password out is not left to each of them.
 | refuses the user outright | sudo's own message; no password is asked for |
 | does not answer the probe | the host could not be reached, as for any probe (see *Never infer host state from a failed probe*); nothing about sudo is concluded or kept |
 
-An unattended run needs passwordless sudo for the ssh user, which is one line
-in a file under `/etc/sudoers.d/`, written with `visudo -f`:
-
-```
-ubuntu ALL=(ALL) NOPASSWD: ALL
-```
-
-That makes the ssh key alone enough for root on that host. It is a decision
-about the host, made once by whoever owns it, and the toolkit never makes it.
+An unattended run of an owner's command needs a NOPASSWD sudoers rule for
+the login `--ssh` names. Whether to write one is a decision about the host,
+made by whoever owns it, and the toolkit never makes it.
 
 `preflight` and `doctor` report each of these as a sudo problem
 (`apply.ErrSudo`), separately from a host that does not answer, so the finding
-points at sudoers rather than at the network. `--sudo=false` skips sudo
-entirely, and with it everything above.
+points at sudoers rather than at the network. `host deployments --sudo=false`
+skips sudo entirely, and with it everything above.
 
 ### The host check: what is already on a host decides how much is touched
 
@@ -4991,7 +4971,7 @@ The check has three parts, in `internal/hostcheck`:
 * **Inventory**, read only, one command per fact, in the C locale because
   the parsers read ufw's, dpkg's and ss's English words, and as root, which
   `ss -p` needs to name another user's process: it asks `id -u` first and
-  refuses unless it is 0, so `--sudo=false` as a normal user is refused
+  refuses unless it is 0, so a run as a normal user is refused
   rather than reading every root listener as unowned. Then Docker's
   version, the docker CLI's, the compose plugin's and Docker's package,
   every container with its compose project, PID and published ports,
@@ -5592,8 +5572,7 @@ operator to type `approve` at a terminal, through the same prompt `site remove
 --delete-data` uses, before its first change: the registry claim, which comes
 before the plan, so that an operator who does not approve leaves the host
 exactly as it was. Anything else, or end of input, stops the command with
-nothing changed. `apply` with no `--site` asks once for every site, at the
-point where it settles `sudo` passwords, before its first step; each step it
+nothing changed. `apply` with no `--site` asks once for every site, before its first step; each step it
 runs then checks that it applies what was approved, and refuses anything that
 changed since, rather than asking again. An `init` it runs comes first, since
 it changes no host and the images are rendered from the secrets it generates.
@@ -5803,9 +5782,7 @@ even if the tag moves in between. A registry that refuses an image,
 Run again, it reads live state again and carries on, so the same command is
 the first install, the resume after a failure, and every later change. Each
 step is the command an operator would type, so it plans, gates, claims and
-refuses as that command does, and the sudo password each host asks for is
-asked once for the run, every one of them before the first step (see *A sudo
-that wants a password is asked for once, on a terminal*). Then, before the
+refuses as that command does. Then, before the
 first step that changes a host, it shows one review of what `paisans-stack.yaml`
 grants on every site, and asks once when anything outside the foundation is
 added or changed (see
@@ -5832,7 +5809,7 @@ the toolkit cannot generate (`secrets set`), and a DNS record pointing
 elsewhere. `apply --site <name>` is unchanged, for one site at a time.
 `docs/specs/2026-10-09-apply-converge.md` is the approved specification.
 
-The output does not follow the phases. After `configuration`, `sudo` and
+The output does not follow the phases. After `configuration` and
 `etcd members`, which reads each member's founding record on a line of its own
 (`read <s>'s etcd record`, `founded` or `not founded yet`), because founding
 and joining are decided from them, it has four sections: `prepare`, one line
@@ -5898,7 +5875,7 @@ every failed host named. A host whose pull fails is the same: every other host
 finishes its pulls, and the run stops before `dns` with each failed host named
 and why. Without a terminal each prepare line is printed once, whole, when its
 host finishes, and with `-v` a host's own output follows its
-line, never another host's. A sudo password or an ssh host key question a
+line, never another host's. An ssh host key question a
 host asks during prepare holds the block, one question at a time.
 
 A step that fails marks its site's line `✗` with the time its steps took, the
@@ -9090,7 +9067,7 @@ because a cascade of errors buries the one line that matters. The closing
 line counts them as skipped. Each ssh attempt gives up after ten seconds, as
 every command's does (see *How the operator's ssh uses them*). Like
 `preflight` it takes no `--ssh`, since one override cannot name several hosts,
-and it runs its commands through sudo unless told `--sudo=false`.
+and it runs its commands as each site's ssh user.
 
 The checks run at once, as many as are ready, and each prints whole, naming
 its site, as it ends, so an operator in an outage reads the first answer while
@@ -9121,7 +9098,7 @@ closing list is usually the cause of those after it:
 | Settings | for each app setting `gated`, the read its kind records, run in the app's running container on each site it runs on: Mbin's environment and `MBIN_LOCKED_SETTINGS`, WriteFreely's `writefreely settings list` | a setting the gate leaves to the app (private instance mode, the allow list, authorized fetch, WriteFreely's private mode) is off or not locked. The advice is `paisans apply --site <site>`, which renders the file that writes and locks it and recreates the stack, or a newer image when the app does not honour the lock. See *The settings gating needs are checked on both sides* |
 | Pocket ID | the same question `apply` asks after acting on a Pocket ID stack on more than one site, asked once | no site, or more than one, has an active instance |
 | Clocks | `date +%s.%N` on each site, against the workstation's clock taken on either side of the call, less half the round trip | never; more than 1 s off is a `WARN` |
-| Leftovers | the host check's inventory (*The host check: what is already on a host decides how much is touched*) on every site that answered, and the manifest; skipped under `--sudo=false`, since the inventory reads as root | never. Anything of this deployment's the site no longer renders (a compose project by label and name, a manifest entry marked left over) is a `WARN`, with the note that `apply` does not remove it. On the gateway, each `*.caddy` in `/srv/caddy.d` is listed as `info`: foreign, and served by this deployment's Caddy. That directory is the only way anything foreign is served by it, since the Caddyfile is this deployment's and Caddy runs in the host's network namespace |
+| Leftovers | the host check's inventory (*The host check: what is already on a host decides how much is touched*) on every site that answered, and the manifest; skipped when the inventory cannot be read, since it reads as root | never. Anything of this deployment's the site no longer renders (a compose project by label and name, a manifest entry marked left over) is a `WARN`, with the note that `apply` does not remove it. On the gateway, each `*.caddy` in `/srv/caddy.d` is listed as `info`: foreign, and served by this deployment's Caddy. That directory is the only way anything foreign is served by it, since the Caddyfile is this deployment's and Caddy runs in the host's network namespace |
 | Caddy certificates | the caddy container's log on every site that runs Paisans' Caddy, `docker compose logs caddy` from the container's start or the last hour, whichever is later, kept to Caddy's `tls.obtain` lines; for each hostname the site serves, the newest outcome | the newest outcome is a failure. Hostnames failing for one cause are one finding naming them all: the provider refusing the token from this server (Cloudflare's `9109`, with the address it judged), its lockout (`10502`), the certificate authority's rate limit with when to retry, or the error's own last clause. It reads no secret and calls no provider, so it runs for every provider |
 | DNS token | from each Caddy site, with the `ACME_DNS_TOKEN` in its `caddy.env`, read there through sudo and never sent anywhere; and from the workstation, with `external.acme_dns_token` from `--secrets` (`secrets.enc.yaml` beside the configuration by default), opened with the age key as `apply` opens it. Each asks the provider for the zone holding `community.domain`, then verifies the token | the provider refuses the token from that place, does not answer, sees no zone holding the domain, or reports the token not `active`. Secrets that cannot be opened, Eg: no age key on this workstation, skip the workstation's check and the records with the reason, and every other check runs |
 | DNS records | the plan `dns init` builds, which reads and never writes, from the workstation once its token check passed | a hostname of the deployment holds a record pointing somewhere else (a visitor is sent there; delete it at the provider by hand, since `dns init` never updates a record and `dns prune` keeps one whose name is still wanted), or holds none (`paisans dns init --execute` creates it). A record waiting for `gateway move` is `info`, and a weak advisory record a `WARN`, as `dns init` shows them |

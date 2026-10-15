@@ -14,7 +14,7 @@ import (
 // A command line that cannot be run reaches no host.
 func TestMeshRekeyRefusesBeforeReachingAHost(t *testing.T) {
 	saved := rekeyHost
-	rekeyHost = func(string, config.Site, bool) apply.Transport {
+	rekeyHost = func(string, config.Site) apply.Transport {
 		t.Fatal("a host was reached")
 		return nil
 	}
@@ -64,7 +64,7 @@ func TestApplyRefusesMidRekey(t *testing.T) {
 	for _, extra := range [][]string{{"--site", "home-a"}, nil} {
 		var err error
 		captureStdout(t, func() {
-			err = runApply(append([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false"}, extra...), strings.NewReader(""), io.Discard)
+			err = runApply(append([]string{"--config", configPath, "--secrets", secretsPath}, extra...), strings.NewReader(""), io.Discard)
 		})
 		if err == nil || !strings.Contains(err.Error(), "mesh rekey is unfinished") {
 			t.Errorf("apply %v: err = %v", extra, err)

@@ -106,7 +106,7 @@ func (f *applyStoreFixture) applySite(t *testing.T, stdin io.Reader, extra ...st
 	t.Helper()
 	var err error
 	captureStdout(t, func() {
-		err = runApply(append([]string{"--config", f.cfgPath, "--sudo=false", "--site", "vm"}, extra...), stdin, io.Discard)
+		err = runApply(append([]string{"--config", f.cfgPath, "--site", "vm"}, extra...), stdin, io.Discard)
 	})
 	return err
 }
@@ -303,7 +303,7 @@ func TestApplyAnotherVersionAtTheSameRevisionAsks(t *testing.T) {
 	fakeGrants(t, grantedWith(t, f, part))
 	var out bytes.Buffer
 	captureStdout(t, func() {
-		_ = runApply([]string{"--config", f.cfgPath, "--sudo=false", "--site", "vm", "--execute"}, answering(t, "rollback\n"), &out)
+		_ = runApply([]string{"--config", f.cfgPath, "--site", "vm", "--execute"}, answering(t, "rollback\n"), &out)
 	})
 	if !strings.Contains(out.String(), "Type 'rollback' (no quotes) to proceed: ") || !claimed(logged(t, log)) {
 		t.Errorf("not asked, or not applied: %q", out.String())
@@ -404,7 +404,7 @@ func TestConvergePublishesAfterHostPrepare(t *testing.T) {
 	rec := recordConverge(t)
 	var err error
 	captureStdout(t, func() {
-		err = runApply([]string{"--config", f.cfgPath, "--sudo=false", "--execute"}, noTerminalStdin(), io.Discard)
+		err = runApply([]string{"--config", f.cfgPath, "--execute"}, noTerminalStdin(), io.Discard)
 	})
 	if err != nil {
 		t.Fatalf("%v\n%s", problemText(err), rec.Lines())
@@ -502,7 +502,7 @@ func TestApplyRollbackOnAHostAsks(t *testing.T) {
 	fakeGrants(t, grantedWith(t, f, part))
 	var out bytes.Buffer
 	captureStdout(t, func() {
-		_ = runApply([]string{"--config", f.cfgPath, "--sudo=false", "--site", "vm", "--execute"}, answering(t, "rollback\n"), &out)
+		_ = runApply([]string{"--config", f.cfgPath, "--site", "vm", "--execute"}, answering(t, "rollback\n"), &out)
 	})
 	if !strings.Contains(out.String(), "Type 'rollback' (no quotes) to proceed: ") || !claimed(logged(t, log)) || !f.pushed() {
 		t.Errorf("not asked, or not applied: %q", out.String())
@@ -551,7 +551,7 @@ func TestConvergeChecksTheStoreOnceBeforeItsSteps(t *testing.T) {
 	converge := func(stdin io.Reader) error {
 		var err error
 		captureStdout(t, func() {
-			err = runApply([]string{"--config", f.cfgPath, "--sudo=false", "--execute"}, stdin, io.Discard)
+			err = runApply([]string{"--config", f.cfgPath, "--execute"}, stdin, io.Discard)
 		})
 		return err
 	}
@@ -570,8 +570,8 @@ func TestConvergeChecksTheStoreOnceBeforeItsSteps(t *testing.T) {
 	}
 	saved := convergeRecord
 	t.Cleanup(func() { convergeRecord = saved })
-	convergeRecord = func(cfg *config.Config, site string, g grant.Grant, sudo bool) (grant.Record, error) {
-		rec, err := saved(cfg, site, g, sudo)
+	convergeRecord = func(cfg *config.Config, site string, g grant.Grant) (grant.Record, error) {
+		rec, err := saved(cfg, site, g)
 		if site == "vm" {
 			rec.Config = &grant.ConfigPart{Hash: strings.Repeat("c", 40), Revision: 9}
 		}
@@ -583,8 +583,8 @@ func TestConvergeChecksTheStoreOnceBeforeItsSteps(t *testing.T) {
 		t.Fatalf("witness: %v, ran %q, pushed %v\n%s", err, *ran, f.pushed(), rec.Lines())
 	}
 
-	convergeRecord = func(cfg *config.Config, site string, g grant.Grant, sudo bool) (grant.Record, error) {
-		return saved(cfg, site, g, sudo)
+	convergeRecord = func(cfg *config.Config, site string, g grant.Grant) (grant.Record, error) {
+		return saved(cfg, site, g)
 	}
 	rec = recordConverge(t)
 	if err := converge(noTerminalStdin()); err != nil {
