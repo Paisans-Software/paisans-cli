@@ -1,6 +1,7 @@
 package admission
 
 import (
+	"crypto/rsa"
 	"fmt"
 	"net"
 	"strings"
@@ -184,10 +185,18 @@ func checkKeyType(pub ssh.PublicKey) error {
 		ssh.KeyAlgoSKED25519, ssh.KeyAlgoSKECDSA256:
 		return nil
 	case ssh.KeyAlgoRSA:
-		if cp, ok := pub.(ssh.CryptoPublicKey); ok {
-			if k, ok := cp.CryptoPublicKey().(interface{ Size() int }); ok && k.Size()*8 < minRSABits {
-				return fmt.Errorf("an ssh-rsa key of %d bits, under %d", k.Size()*8, minRSABits)
-			}
+		// The modulus's own bit length: a size in bytes rounds up, and would
+		// pass a key up to seven bits short.
+		cp, ok := pub.(ssh.CryptoPublicKey)
+		if !ok {
+			return fmt.Errorf("an ssh-rsa key whose size cannot be read")
+		}
+		k, ok := cp.CryptoPublicKey().(*rsa.PublicKey)
+		if !ok {
+			return fmt.Errorf("an ssh-rsa key whose size cannot be read")
+		}
+		if bits := k.N.BitLen(); bits < minRSABits {
+			return fmt.Errorf("an ssh-rsa key of %d bits, under %d", bits, minRSABits)
 		}
 		return nil
 	}

@@ -6,6 +6,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"math/big"
 	"strings"
 	"testing"
 
@@ -96,6 +97,7 @@ func TestCheckRefuses(t *testing.T) {
 			r.WebServer = []admission.WebApp{{App: "status", Hostname: "Status.example.org", Listen: "127.0.0.1:8480"}}
 		}, `web_server[0].hostname: "Status.example.org" is not a hostname`},
 		{"an rsa key under 3072 bits", func(r *admission.Request) { r.Operators[0].Keys = []string{keyLine(t, rsaKey(t, 2048))} }, "ssh-rsa key of 2048 bits, under 3072"},
+		{"an rsa key 6 bits short of 3072", func(r *admission.Request) { r.Operators[0].Keys = []string{keyLine(t, rsaModulus(3066))} }, "ssh-rsa key of 3066 bits, under 3072"},
 		{"a certificate", func(r *admission.Request) { r.Operators[0].Keys = []string{certLine(t)} }, `"ssh-ed25519-cert-v01@openssh.com" is not a key type`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -116,6 +118,14 @@ func keyLine(t *testing.T, pub any) string {
 		t.Fatal(err)
 	}
 	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(k)))
+}
+
+// rsaModulus is an RSA public key whose modulus is exactly bits long. It is
+// no one's key, which a size check does not need.
+func rsaModulus(bits int) *rsa.PublicKey {
+	n := new(big.Int).Lsh(big.NewInt(1), uint(bits-1))
+	n.Add(n, big.NewInt(0x1234567))
+	return &rsa.PublicKey{N: n, E: 65537}
 }
 
 func rsaKey(t *testing.T, bits int) *rsa.PublicKey {
