@@ -695,6 +695,13 @@ func (t SSHTransport) ReadFile(path string) (string, bool, error) {
 // would make two writes of one path share a file. The rename onto the target
 // replaces a link at the target instead of writing through it, and the trap
 // removes the temporary file if any step before the rename fails.
+//
+// A target that is a link or a directory is refused before the rename, since
+// mv would move the temporary file into a linked directory. The check and the
+// mv are two steps, so a link planted between them is not caught. That is
+// acceptable because this transport is never used under sudo to write into a
+// directory another user can write: files in the deployment user's own tree
+// are written as that user.
 func (t SSHTransport) WriteFile(path, content string, mode uint32) error {
 	if err := t.refuseSudoDocker(); err != nil {
 		return err
@@ -702,7 +709,10 @@ func (t SSHTransport) WriteFile(path, content string, mode uint32) error {
 	dir := parentDir(path)
 	template := strings.TrimSuffix(dir, "/") + "/." + pathpkg.Base(path) + ".XXXXXX"
 	script := fmt.Sprintf(
-		`set -e; mkdir -p %s; tmp=$(mktemp %s); trap 'rm -f "$tmp"' EXIT; cat > "$tmp"; chmod %04o "$tmp"; mv -f "$tmp" %s; trap - EXIT`,
+		`set -e; mkdir -p %[1]s; tmp=$(mktemp %[2]s); trap 'rm -f "$tmp"' EXIT; cat > "$tmp"; chmod %04[3]o "$tmp"; `+
+			`if [ -L %[4]s ]; then printf '%%s is a symbolic link, not a file\n' %[4]s >&2; exit 1; fi; `+
+			`if [ -d %[4]s ]; then printf '%%s is a directory, not a file\n' %[4]s >&2; exit 1; fi; `+
+			`mv -f "$tmp" %[4]s; trap - EXIT`,
 		shellQuote(dir), shellQuote(template), mode, shellQuote(path))
 	script, stdin, err := t.sudo(script, &content)
 	if err != nil {

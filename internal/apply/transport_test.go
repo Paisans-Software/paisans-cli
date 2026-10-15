@@ -573,10 +573,6 @@ func TestWriteFileDoesNotFollowPlantedLinks(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// The target itself is a link too: the rename replaces it.
-	if err := os.Symlink(victim, target); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := writeFileScript(t, target, "A=1\n", 0o640); err != nil {
 		t.Fatal(err)
 	}
@@ -617,5 +613,56 @@ func TestWriteFileRemovesItsTempFileOnFailure(t *testing.T) {
 	left, _ := filepath.Glob(filepath.Join(dir, "*app.env*"))
 	if len(left) != 0 {
 		t.Errorf("temporary file left behind: %v", left)
+	}
+}
+
+// A target that is a link or a directory is refused before the rename, so mv
+// can never move the temporary file into a linked directory or write through
+// a linked file; the temporary file is removed.
+func TestWriteFileRefusesALinkOrDirectoryTarget(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("no sh")
+	}
+	dir := t.TempDir()
+	linkedDir := filepath.Join(dir, "linked-dir")
+	linkedFile := filepath.Join(dir, "linked-file")
+	plainDir := filepath.Join(dir, "plain-dir")
+	for _, d := range []string{linkedDir, plainDir} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(linkedFile, []byte("precious"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]struct{ link, want string }{
+		"symlink to a directory": {linkedDir, "symbolic link"},
+		"symlink to a file":      {linkedFile, "symbolic link"},
+		"directory":              {"", "directory"},
+	} {
+		target := filepath.Join(dir, "t-"+strings.ReplaceAll(name, " ", "-"))
+		if c.link != "" {
+			if err := os.Symlink(c.link, target); err != nil {
+				t.Fatal(err)
+			}
+		} else if err := os.Mkdir(target, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		err := func() error { _, err := writeFileScript(t, target, "A=1\n", 0o600); return err }()
+		if err == nil || !strings.Contains(err.Error(), target) || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: want a refusal naming the path and %q, got %v", name, c.want, err)
+		}
+	}
+	if got, _ := os.ReadFile(linkedFile); string(got) != "precious" {
+		t.Errorf("linked file changed: %q", got)
+	}
+	for _, d := range []string{linkedDir, plainDir} {
+		if e, _ := os.ReadDir(d); len(e) != 0 {
+			t.Errorf("%s gained %d entries", d, len(e))
+		}
+	}
+	left, _ := filepath.Glob(filepath.Join(dir, ".t-*"))
+	if len(left) != 0 {
+		t.Errorf("temporary files left behind: %v", left)
 	}
 }
