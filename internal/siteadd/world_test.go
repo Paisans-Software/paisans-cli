@@ -124,6 +124,15 @@ func (h *host) Run(command string) (string, error) {
 		w.failOnce = ""
 		return "failed by the test", fmt.Errorf("exit status 1")
 	}
+	if out, ok, err := chainedRead(command, h.Run); ok {
+		return out, err
+	}
+	if field, ok := strings.CutPrefix(command, wgHelper+"show "); ok && field != "latest-handshakes" {
+		// The interface runs what the helper last installed.
+		if out, ok := showRunning(field, h.files[wgInstalled]); ok {
+			return out, nil
+		}
+	}
 	if w.unreachable != "" && strings.Contains(command, w.unreachable) {
 		return "ssh: connect to host 203.0.113.10 port 22: Operation timed out\n",
 			fmt.Errorf("%s: %w after 3 attempts: exit status 255", h.name, apply.ErrUnreachable)
@@ -201,22 +210,6 @@ func (h *host) Run(command string) (string, error) {
 		return "", nil
 	case command == wgHelper+"put", command == wgHelper+"sync":
 		return "", nil
-	case command == wgHelper+"show public-key":
-		m := regexp.MustCompile(`(?m)^PrivateKey = (\S+)`).FindStringSubmatch(h.files[wgInstalled])
-		if m == nil {
-			return "", nil
-		}
-		key, err := render.PublicKey(m[1])
-		if err != nil {
-			return "", err
-		}
-		return key + "\n", nil
-	case command == wgHelper+"show peers":
-		var b strings.Builder
-		for _, m := range regexp.MustCompile(`(?m)^PublicKey = (\S+)`).FindAllStringSubmatch(h.files[wgInstalled], -1) {
-			b.WriteString(m[1] + "\n")
-		}
-		return b.String(), nil
 	case strings.HasPrefix(command, "ping "):
 		if w.noPing {
 			return "100% packet loss", fmt.Errorf("exit status 1")

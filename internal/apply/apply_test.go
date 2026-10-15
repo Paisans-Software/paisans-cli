@@ -50,6 +50,19 @@ type fakeHost struct {
 	// wgAddress, when set, is the address `ip -br addr show` prints for an
 	// up psns-f2a9 in place of the one its file declares.
 	wgAddress string
+	// wgState, when set, is the state `ip -br addr show` prints for
+	// psns-f2a9 in place of UNKNOWN, which is how an up WireGuard link
+	// reads.
+	wgState string
+	// wgMTU, when set, is the mtu `ip -o link show` prints for psns-f2a9 in
+	// place of the one its file declares, or 1420 for a file with none.
+	wgMTU string
+	// showOut, when set for a field, is what the helper's show prints for
+	// it in place of what the interface runs.
+	showOut map[string]string
+	// helperWarns makes every helper verb print sudo's warning first, as
+	// sudo does on a host whose own name does not resolve.
+	helperWarns bool
 	// journal is what the helper's log prints.
 	journal string
 	// wgRun is the mesh file psns-f2a9 runs: what the helper had installed
@@ -139,7 +152,27 @@ func (h *fakeHost) Run(command string) (string, error) {
 		return "refused by the fake host", fmt.Errorf("exit status 1")
 	}
 	if verb, ok := strings.CutPrefix(command, wgHelper); ok {
-		return h.helper(verb)
+		out, err := h.helper(verb)
+		if h.helperWarns {
+			out = sudoWarning + out
+		}
+		return out, err
+	}
+	if strings.HasPrefix(command, "echo paisans-show:") {
+		// The helper's reads, chained into one command.
+		var b strings.Builder
+		for _, part := range strings.Split(command, " && ") {
+			if mark, ok := strings.CutPrefix(part, "echo "); ok {
+				b.WriteString(mark + "\n")
+				continue
+			}
+			out, err := h.Run(part)
+			b.WriteString(out)
+			if err != nil {
+				return b.String(), err
+			}
+		}
+		return b.String(), nil
 	}
 	if strings.Contains(command, "echo paisans-sweep-end") {
 		return h.sweepRead(command), nil
@@ -246,7 +279,22 @@ func (h *fakeHost) Run(command string) (string, error) {
 				}
 			}
 		}
-		return "psns-f2a9        UNKNOWN        " + address + " \n", nil
+		state := h.wgState
+		if state == "" {
+			state = "UNKNOWN"
+		}
+		out := "psns-f2a9        " + state + "        " + address + " \n"
+		if strings.Contains(command, "ip -o link show dev psns-f2a9") {
+			mtu := h.wgMTU
+			if mtu == "" {
+				mtu = "1420"
+				if m := regexp.MustCompile(`(?m)^MTU = (\S+)`).FindStringSubmatch(h.wgRun); m != nil {
+					mtu = m[1]
+				}
+			}
+			out += "7: psns-f2a9: <POINTOPOINT,NOARP,UP,LOWER_UP> mtu " + mtu + " qdisc noqueue state " + state + " mode DEFAULT group default qlen 1000\\    link/none \n"
+		}
+		return out, nil
 	}
 	if strings.Contains(command, "ps --status running") {
 		if h.running {
@@ -264,6 +312,11 @@ func (h *fakeHost) Run(command string) (string, error) {
 // up from the installed file, sync hands it the installed file in place,
 // and show reads what it runs.
 func (h *fakeHost) helper(verb string) (string, error) {
+	if field, ok := strings.CutPrefix(verb, "show "); ok {
+		if out, ok := h.showOut[field]; ok {
+			return out, nil
+		}
+	}
 	switch verb {
 	case "put":
 		h.files[wgInstalled] = h.inputs[len(h.inputs)-1]
@@ -288,12 +341,57 @@ func (h *fakeHost) helper(verb string) (string, error) {
 			b.WriteString(m[1] + "\n")
 		}
 		return b.String(), nil
+	case "show allowed-ips":
+		var b strings.Builder
+		for _, peer := range runningPeers(h.wgRun) {
+			ips := "(none)"
+			if peer["AllowedIPs"] != "" {
+				ips = strings.ReplaceAll(peer["AllowedIPs"], ", ", " ")
+			}
+			b.WriteString(peer["PublicKey"] + "\t" + ips + "\n")
+		}
+		return b.String(), nil
+	case "show persistent-keepalive":
+		var b strings.Builder
+		for _, peer := range runningPeers(h.wgRun) {
+			keepalive := peer["PersistentKeepalive"]
+			if keepalive == "" || keepalive == "0" {
+				keepalive = "off"
+			}
+			b.WriteString(peer["PublicKey"] + "\t" + keepalive + "\n")
+		}
+		return b.String(), nil
+	case "show listen-port":
+		// The kernel picks a port for an interface whose file has none.
+		port := "40123"
+		if m := regexp.MustCompile(`(?m)^ListenPort = (\S+)`).FindStringSubmatch(h.wgRun); m != nil {
+			port = m[1]
+		}
+		return port + "\n", nil
 	case "log":
 		return h.journal, nil
 	default:
 		return "usage: wg-psns-f2a9 ...", fmt.Errorf("exit status 64")
 	}
 	return "", nil
+}
+
+// runningPeers is each [Peer] section of a mesh file, as its keys and
+// values.
+func runningPeers(conf string) []map[string]string {
+	var out []map[string]string
+	for _, line := range strings.Split(conf, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "[Peer]" {
+			out = append(out, map[string]string{})
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if ok && len(out) > 0 {
+			out[len(out)-1][strings.TrimSpace(key)] = strings.TrimSpace(value)
+		}
+	}
+	return out
 }
 
 // resolveProbe answers the loop apply sends to ask which mesh endpoint names
@@ -930,7 +1028,7 @@ func TestPlanningOnlyProbesTheMesh(t *testing.T) {
 	for _, command := range host.commands {
 		// The sweep's read of the host's images is the other probe a plan
 		// makes.
-		if !strings.Contains(command, "ip link show psns-f2a9") && !strings.Contains(command, "echo paisans-sweep-end") {
+		if !strings.HasPrefix(command, "ip -br addr show dev psns-f2a9") && !strings.Contains(command, "echo paisans-sweep-end") {
 			t.Errorf("building a plan ran %q, which is more than a probe", command)
 		}
 	}
@@ -1009,18 +1107,226 @@ func TestPlanningAnUpMeshOnlyReadsIt(t *testing.T) {
 	if _, err := apply.Build("home-a", plan(t), acmeModule(t), host); err != nil {
 		t.Fatal(err)
 	}
+	mesh := 0
 	for _, command := range host.commands {
 		switch {
-		case strings.Contains(command, "ip link show psns-f2a9"),
-			strings.Contains(command, "ip -br addr show dev psns-f2a9"),
-			command == wgHelper+"show public-key",
+		case strings.HasPrefix(command, "ip -br addr show dev psns-f2a9"):
+			mesh++
+		case strings.HasPrefix(command, "echo paisans-show:"):
+			mesh++
+			for _, part := range strings.Split(command, " && ") {
+				if !strings.HasPrefix(part, "echo paisans-show:") && !strings.HasPrefix(part, wgHelper+"show ") {
+					t.Errorf("planning's read of the mesh ran %q", part)
+				}
+			}
+		case command == wgHelper+"show public-key",
 			command == wgHelper+"show peers",
+			command == wgHelper+"show allowed-ips",
+			command == wgHelper+"show persistent-keepalive",
+			command == wgHelper+"show listen-port",
 			strings.Contains(command, "echo paisans-sweep-end"):
 		default:
 			if strings.Contains(command, "psns-f2a9") {
 				t.Errorf("planning ran %q on the mesh", command)
 			}
 		}
+	}
+	// One read of the link and one of what it runs, each a round trip.
+	if mesh != 2 {
+		t.Errorf("planning an unchanged up mesh took %d round trips, want 2: %q", mesh, host.commands)
+	}
+}
+
+// A link that exists but is down carries nothing, whatever it holds: it is
+// restarted, which a sync would not do.
+func TestAnUpMeshThatIsDownIsRestarted(t *testing.T) {
+	host := applied(t, "home-a")
+	host.wgState = "DOWN"
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.WireGuard != apply.WireGuardRestart {
+		t.Errorf("a downed psns-f2a9 with its address plans %v, want a restart", p.WireGuard)
+	}
+}
+
+// meshPlan is the fixture's plan with home-a's mesh file edited.
+func meshPlan(t *testing.T, edit func(string) string) *render.Plan {
+	t.Helper()
+	p := plan(t)
+	for i, f := range p.Files {
+		if f.Path == "home-a/"+wgFile {
+			p.Files[i].Content = edit(f.Content)
+			return p
+		}
+	}
+	t.Fatal("the fixture has no mesh file for home-a")
+	return nil
+}
+
+// appliedWith is a host that applied rendered on home-a.
+func appliedWith(t *testing.T, rendered *render.Plan) *fakeHost {
+	t.Helper()
+	host := newHost()
+	first, err := apply.Build("home-a", rendered, acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := apply.Execute(first, host); err != nil {
+		t.Fatal(err)
+	}
+	host.commands = nil
+	return host
+}
+
+// An MTU is wg-quick's too: an up interface on another MTU than its
+// unchanged file's is restarted, and on the same one is left alone.
+func TestAnUpMeshOnAnotherMTUIsRestarted(t *testing.T) {
+	rendered := meshPlan(t, func(c string) string {
+		return strings.Replace(c, "Address = 10.44.0.1/24\n", "Address = 10.44.0.1/24\nMTU = 1380\n", 1)
+	})
+	host := appliedWith(t, rendered)
+	p, err := apply.Build("home-a", rendered, acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.WireGuard != apply.WireGuardNone {
+		t.Fatalf("an interface on its file's MTU plans %v", p.WireGuard)
+	}
+	host.wgMTU = "1420"
+	p, err = apply.Build("home-a", rendered, acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.WireGuard != apply.WireGuardRestart {
+		t.Errorf("an interface on another MTU plans %v, want a restart", p.WireGuard)
+	}
+}
+
+// A ListenPort is synced: an interface listening elsewhere than its
+// unchanged file says is handed the file.
+func TestAnUpMeshOnAnotherPortIsSynced(t *testing.T) {
+	rendered := meshPlan(t, func(c string) string {
+		return strings.Replace(c, "Address = 10.44.0.1/24\n", "Address = 10.44.0.1/24\nListenPort = 51820\n", 1)
+	})
+	host := appliedWith(t, rendered)
+	p, err := apply.Build("home-a", rendered, acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.WireGuard != apply.WireGuardNone {
+		t.Fatalf("an interface on its file's port plans %v", p.WireGuard)
+	}
+	host.wgRun = strings.Replace(host.wgRun, "ListenPort = 51820", "ListenPort = 51999", 1)
+	p, err = apply.Build("home-a", rendered, acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.WireGuard != apply.WireGuardSync {
+		t.Errorf("an interface on another port plans %v, want a sync", p.WireGuard)
+	}
+}
+
+// A peer's AllowedIPs and keepalive are synced when they differ, and
+// compared as the kernel holds them: ranges as networks in any order, and
+// a keepalive of 0 the same as none.
+func TestAnUpMeshComparesAllowedIPsAndKeepalive(t *testing.T) {
+	for _, c := range []struct {
+		name, from, to string
+		want           apply.WireGuardStep
+	}{
+		{"another range", "AllowedIPs = 10.44.0.3/32", "AllowedIPs = 10.44.0.5/32", apply.WireGuardSync},
+		{"a range more", "AllowedIPs = 10.44.0.3/32", "AllowedIPs = 10.44.0.3/32, 10.44.0.9/32", apply.WireGuardSync},
+		{"no keepalive", "AllowedIPs = 10.44.0.3/32\nEndpoint = vm.example.org:51820\n# Keeps the NAT mapping open from the side that dials out.\nPersistentKeepalive = 25", "AllowedIPs = 10.44.0.3/32\nEndpoint = vm.example.org:51820\n# Keeps the NAT mapping open from the side that dials out.\nPersistentKeepalive = 0", apply.WireGuardSync},
+		{"another keepalive", "PersistentKeepalive = 25\n\n[Peer]\n# watch", "PersistentKeepalive = 30\n\n[Peer]\n# watch", apply.WireGuardSync},
+		{"host bits", "AllowedIPs = 10.44.0.0/24", "AllowedIPs = 10.44.0.7/24", apply.WireGuardNone},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			host := applied(t, "home-a")
+			if !strings.Contains(host.wgRun, c.from) {
+				t.Fatalf("the fixture's home-a lacks %q", c.from)
+			}
+			host.wgRun = strings.Replace(host.wgRun, c.from, c.to, 1)
+			p, err := apply.Build("home-a", plan(t), acmeModule(t), host)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if p.WireGuard != c.want {
+				t.Errorf("plans %v, want %v", p.WireGuard, c.want)
+			}
+		})
+	}
+}
+
+// A keepalive of 0 in the file is none, which the kernel prints as off.
+func TestAZeroKeepaliveIsOff(t *testing.T) {
+	zero := func(c string) string {
+		return strings.ReplaceAll(c, "PersistentKeepalive = 25", "PersistentKeepalive = 0")
+	}
+	rendered := meshPlan(t, zero)
+	host := appliedWith(t, rendered)
+	p, err := apply.Build("home-a", rendered, acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.WireGuard != apply.WireGuardNone {
+		t.Errorf("an interface whose file's keepalives are 0 plans %v", p.WireGuard)
+	}
+}
+
+// sudo's warning before what the helper shows is not what the interface
+// runs: an interface on its file plans nothing behind it.
+func TestASudoWarningBeforeTheHelperReadPlansNothing(t *testing.T) {
+	host := applied(t, "home-a")
+	host.helperWarns = true
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.WireGuard != apply.WireGuardNone {
+		t.Errorf("a sudo warning plans %v", p.WireGuard)
+	}
+}
+
+// What the helper shows is read strictly: a line that is not the field's
+// shape is an error quoting it, never a sync.
+func TestAnUnreadableHelperReadIsAnError(t *testing.T) {
+	for field, out := range map[string]string{
+		"public-key":           "not a key\x1b[2J\n",
+		"peers":                "ehpOcJvwhaxJSroEabmx7aCrH3ixaqu3n/7akGI+hSI=\nbogus\x1b[2J\n",
+		"allowed-ips":          "ehpOcJvwhaxJSroEabmx7aCrH3ixaqu3n/7akGI+hSI=\tbogus\x1b[2J\n",
+		"persistent-keepalive": "ehpOcJvwhaxJSroEabmx7aCrH3ixaqu3n/7akGI+hSI=\tsoon\x1b[2J\n",
+		"listen-port":          "port\x1b[2J\n",
+	} {
+		host := applied(t, "home-a")
+		host.showOut = map[string]string{field: out}
+		_, err := apply.Build("home-a", plan(t), acmeModule(t), host)
+		if err == nil {
+			t.Errorf("%s: %q was taken as what the interface runs", field, out)
+			continue
+		}
+		if !strings.Contains(err.Error(), "show "+field) || !strings.Contains(err.Error(), `\x1b[2J`) || strings.Contains(err.Error(), "\x1b") {
+			t.Errorf("%s: the error does not quote the line visibly: %v", field, err)
+		}
+	}
+}
+
+// sudo refusing the helper while a plan reads the interface is the owner's
+// to fix, and says what the plan did, not what an execute would have.
+func TestAHelperRefusedWhilePlanningIsExplained(t *testing.T) {
+	host := applied(t, "home-a")
+	host.fail, host.failOut = wgHelper+"show", "sudo: a password is required\n"
+	_, err := apply.Build("home-a", plan(t), acmeModule(t), host)
+	var problem *ui.Problem
+	if !errors.As(err, &problem) || problem.Hint != "mesh: the WireGuard helper could not be run on home-a" {
+		t.Fatalf("%v", err)
+	}
+	if !strings.Contains(problem.Explain, "paisans host admit") {
+		t.Errorf("the explanation does not name host admit:\n%s", problem.Explain)
+	}
+	if strings.Contains(problem.Explain, "Nothing that binds") || !strings.Contains(problem.Explain, "planned nothing") {
+		t.Errorf("the explanation does not say what the plan did:\n%s", problem.Explain)
 	}
 }
 
@@ -1230,8 +1536,16 @@ func TestARestartedMeshIsReadBack(t *testing.T) {
 	if err := apply.Execute(p, host); err != nil {
 		t.Fatal(err)
 	}
+	// The plan reads the link with the same probe, so the read back is the
+	// one after the restart.
 	restart := host.indexOf(wgHelper + "restart")
-	check := host.indexOf("ip -br addr show dev psns-f2a9")
+	check := -1
+	for i := restart + 1; restart >= 0 && i < len(host.commands); i++ {
+		if strings.Contains(host.commands[i], "ip -br addr show dev psns-f2a9") {
+			check = i
+			break
+		}
+	}
 	if restart < 0 || check < restart {
 		t.Errorf("the restarted mesh was not read back: %v", host.commands)
 	}

@@ -6,8 +6,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/paisans-software/paisans-cli/internal/deployment"
-	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -21,78 +19,6 @@ func wireguardAddress(content string) string {
 		}
 	}
 	return ""
-}
-
-// meshAddressProbe prints the interface's state and addresses, one line, and
-// nothing when the interface does not exist. Like wireguardProbe it prints
-// rather than exits non zero, so that an absent interface cannot be confused
-// with ssh failing.
-func meshAddressProbe(iface string) string {
-	return "ip -br addr show dev " + iface + " 2>/dev/null || true"
-}
-
-// runningStep is what an up interface whose file did not change still
-// needs. The helper's put and its sync or restart are separate commands
-// from writing the file, so a run that stopped between them leaves the file
-// as rendered and the interface on what it ran before. Read back: without
-// the file's Address it is restarted, since only wg-quick applies an
-// address; on another key or other peers it is synced; otherwise it needs
-// nothing. The address is read with ip, which needs no privilege, and the
-// key and peers through the helper's show.
-func runningStep(site string, d deployment.Deployment, content string, t Transport) (WireGuardStep, error) {
-	iface := d.Interface()
-	out, err := t.Run(meshAddressProbe(iface))
-	if err != nil {
-		return WireGuardNone, fmt.Errorf("reading %s: %w", iface, err)
-	}
-	fields := strings.Fields(out)
-	if address := wireguardAddress(content); address != "" && (len(fields) < 3 || !slices.Contains(fields[2:], address)) {
-		return WireGuardRestart, nil
-	}
-	h := WGHelper{T: t, Iface: iface}
-	key, err := h.Show("public-key")
-	if err != nil {
-		return WireGuardNone, helperProblem(site, h, err)
-	}
-	peers, err := h.Show("peers")
-	if err != nil {
-		return WireGuardNone, helperProblem(site, h, err)
-	}
-	want, err := fileKey(content)
-	if err != nil {
-		return WireGuardNone, fmt.Errorf("%s's mesh file: %w", site, err)
-	}
-	running := strings.Fields(peers)
-	listed := filePeers(content)
-	slices.Sort(running)
-	slices.Sort(listed)
-	if strings.TrimSpace(key) != want || !slices.Equal(running, listed) {
-		return WireGuardSync, nil
-	}
-	return WireGuardNone, nil
-}
-
-// fileKey is the public key of a WireGuard file's PrivateKey.
-func fileKey(content string) (string, error) {
-	for _, line := range strings.Split(content, "\n") {
-		key, value, ok := strings.Cut(line, "=")
-		if ok && strings.TrimSpace(key) == "PrivateKey" {
-			return render.PublicKey(strings.TrimSpace(value))
-		}
-	}
-	return "", fmt.Errorf("it has no PrivateKey")
-}
-
-// filePeers is every PublicKey a WireGuard file lists, in its order.
-func filePeers(content string) []string {
-	var out []string
-	for _, line := range strings.Split(content, "\n") {
-		key, value, ok := strings.Cut(line, "=")
-		if ok && strings.TrimSpace(key) == "PublicKey" {
-			out = append(out, strings.TrimSpace(value))
-		}
-	}
-	return out
 }
 
 // bringUpMesh hands the interface the plan's file through the WireGuard
@@ -184,17 +110,38 @@ func helperProblem(site string, h WGHelper, err error) error {
 		}
 	}
 	if line := sudoRefusal(text, path); line != "" {
-		advice := "`paisans host admit` installs the helper and the one sudoers line that lets this deployment's user run it: the host's owner admits the deployment, then apply again."
-		if strings.Contains(line, ttyRefusal) {
-			advice = "sudo on this host requires a terminal (requiretty), and apply has none: the host's owner removes that requirement for the helper, then apply again."
-		}
 		return &ui.Problem{
 			Hint:    "mesh: the WireGuard helper did not run on " + site,
-			Explain: fmt.Sprintf("sudo would not run %s (%s). %s\n%s", path, ui.Visible(line), advice, stopped),
+			Explain: fmt.Sprintf("sudo would not run %s (%s). %s\n%s", path, ui.Visible(line), sudoAdvice(line), stopped),
 			Cause:   err,
 		}
 	}
 	return err
+}
+
+// helperReadProblem is helperProblem for a plan reading what the interface
+// runs: sudo refusing the helper is the same problem with the same fix, but
+// a plan starts nothing, so it says what the plan could not do instead.
+// Any other error is returned as it is.
+func helperReadProblem(site string, h WGHelper, err error) error {
+	path, _ := h.Path()
+	line := sudoRefusal(err.Error(), path)
+	if line == "" {
+		return err
+	}
+	return &ui.Problem{
+		Hint:    "mesh: the WireGuard helper could not be run on " + site,
+		Explain: fmt.Sprintf("sudo would not run %s (%s). %s\npaisans could not read what %s runs, so it planned nothing for it.", path, ui.Visible(line), sudoAdvice(line), h.Iface),
+		Cause:   err,
+	}
+}
+
+// sudoAdvice is what the host's owner does about sudo's refusal line.
+func sudoAdvice(line string) string {
+	if strings.Contains(line, ttyRefusal) {
+		return "sudo on this host requires a terminal (requiretty), and apply has none: the host's owner removes that requirement for the helper, then apply again."
+	}
+	return "`paisans host admit` installs the helper and the one sudoers line that lets this deployment's user run it: the host's owner admits the deployment, then apply again."
 }
 
 // sudoRefusals are what sudo prints when it will not run a command, as
@@ -290,28 +237,25 @@ func journalTail(journal string, n int) string {
 // other error is the read itself failing.
 func meshUp(plan *Plan, t Transport) error {
 	iface := plan.Deployment.Interface()
-	out, err := t.Run(meshAddressProbe(iface))
+	link, err := probeLink(iface, t)
 	if err != nil {
-		return fmt.Errorf("reading %s: %w", iface, err)
+		return err
 	}
-	fields := strings.Fields(out)
 	down := &meshDownError{iface: iface, want: plan.meshAddress}
 	switch {
-	case len(fields) < 2:
+	case !link.exists:
 		down.absent = true
 		return down
-	case fields[1] == "DOWN":
-		down.state = fields[1]
+	case link.state == "DOWN":
+		down.state = link.state
 		return down
 	case plan.meshAddress == "":
 		return nil
 	}
-	for _, address := range fields[2:] {
-		if address == plan.meshAddress {
-			return nil
-		}
+	if slices.Contains(link.addresses, plan.meshAddress) {
+		return nil
 	}
-	down.have = fields[2:]
+	down.have = link.addresses
 	return down
 }
 

@@ -75,6 +75,24 @@ func TestAScopedApplyMovesOneFile(t *testing.T) {
 	}
 }
 
+// A scoped apply of an unchanged mesh file still reads what the interface
+// runs, so a run that stopped before the sync is completed by it too.
+func TestAScopedApplySyncsAnInterfaceOnOtherPeers(t *testing.T) {
+	host := appliedHost(t)
+	cut := strings.Index(host.wgRun, "[Peer]\n# watch")
+	if cut < 0 {
+		t.Fatalf("the fixture's home-a has no peer watch:\n%s", host.wgRun)
+	}
+	host.wgRun = host.wgRun[:cut]
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host, apply.Scope(wgFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.WireGuard != apply.WireGuardSync {
+		t.Errorf("a scoped apply of an interface missing a peer plans %v, want a sync", p.WireGuard)
+	}
+}
+
 // Rolling back restores the old file and the old record, and syncs the mesh
 // again, so the next apply sees the old file as ours.
 func TestAScopedApplyRollsBack(t *testing.T) {

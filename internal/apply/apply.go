@@ -331,7 +331,7 @@ func (w WireGuardStep) Describe(d deployment.Deployment) string {
 	case WireGuardSync:
 		return "give " + iface + " its file's key and peers in place, without taking the mesh down"
 	case WireGuardRestart:
-		return "restart " + iface + ", so it runs its file's Address and MTU, which only wg-quick applies"
+		return "restart " + iface + ", so it is up on its file's Address and MTU, which only wg-quick applies"
 	default:
 		return ""
 	}
@@ -392,17 +392,6 @@ const (
 	gatewayCaddyfile = "infra/caddy/Caddyfile"
 	gatewayCompose   = "infra/compose.yaml"
 )
-
-// wireguardProbe asks whether d's interface exists. It reads the kernel
-// rather than the unit, because an interface somebody brought up with a bare
-// `wg-quick up` is up for every service binding to it, and `systemctl enable
-// --now` on top of it would fail on an interface that already exists. It
-// prints rather than exits non zero, so that "down" cannot be confused with
-// ssh failing. The file and the unit are deployment.WireGuardConf and
-// WireGuardUnit.
-func wireguardProbe(d deployment.Deployment) string {
-	return "if ip link show " + d.Interface() + " >/dev/null 2>&1; then echo up; else echo down; fi"
-}
 
 // Option adjusts what Build plans, on the operator's word.
 type Option func(*options)
@@ -1078,15 +1067,19 @@ func wireguardStep(site string, d deployment.Deployment, change Change, before s
 		// Execute refuses before any step runs.
 		return WireGuardNone, nil
 	}
-	out, err := t.Run(wireguardProbe(d))
+	link, err := probeLink(d.Interface(), t)
 	if err != nil {
-		return WireGuardNone, fmt.Errorf("asking whether %s is up: %w", d.Interface(), err)
+		return WireGuardNone, err
 	}
-	if strings.TrimSpace(out) != "up" {
+	switch {
+	case !link.exists:
 		return WireGuardStart, nil
-	}
-	if change.Kind == Unchanged {
-		return runningStep(site, d, change.content, t)
+	case link.state == "DOWN":
+		// A link that is down carries nothing whatever it holds, and a
+		// sync would leave it down.
+		return WireGuardRestart, nil
+	case change.Kind == Unchanged:
+		return runningStep(site, d, change.content, link, t)
 	}
 	if wgQuickLines(before) != wgQuickLines(change.content) {
 		return WireGuardRestart, nil
