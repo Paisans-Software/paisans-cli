@@ -93,6 +93,7 @@ Depends on: phases 2, 4; R1, R2, R3, R4, R5, R10, R14, R15, R18, R20.
 * A data site without `--watchdog` stops admit first, before any probe, plan or digest prompt, exit 1, nothing read or changed; a re-run dropping it from an admitted data site stops the same way (golden test for both). A data site needs the `watchdog` grant whatever its `watchdog` mode, and `validate` refuses `watchdog: off` on a data site (`internal/config`, with a test and a CHANGELOG bullet).
 * A site whose configured roles include the gateway or a Caddy monitor stops admit first without `--public-ports`, as the watchdog does; any other site never stops for it (golden tests: gateway, Caddy monitor, external monitor, apps-only site).
 * `--data-dir <path>`: `<path>/paisans-<token>`, user-owned, 700, `data-root` in the user's `daemon.json`, recorded in the admission record; overlay-capable filesystem required (NFS refused) with or without it; the plan states free space and warns below 20 GB for data and Garage sites, 5 GB otherwise (golden plans with and without the flag, on NFS, and short of space).
+* `br_netfilter`: read whether loaded and the host's bridges first; already loaded says so; not loaded with only Docker's bridges loads it; not loaded with other bridges names them, quotes the FORWARD policy and stops unless `--bridge-netfilter` (recorded). Golden plans for the three cases.
 * Any boot-ordering mechanism R10 calls for lands here.
 * README: the registry claim passages ("claim through sudo, since the registry is root's", under the registry section) say the claim happens in `host admit`.
 
@@ -139,7 +140,7 @@ Depends on: phases 5 to 7.
 
 Depends on: everything.
 
-* Fresh VMs from `test-deployments/` (in the community repo), admitted with `--request` as an owner would, then `apply` as the deployment's user. Checks: a container cannot reach the host's `127.0.0.1` or LAN; `sudo -n` runs only the helper; reboot recovers; `host evict` leaves the host as the owner had it. On a second host, a system Docker with `"userland-proxy": false` publishing 443: admit `--public-ports` refuses; with the container started after admission, `apply` and `doctor` report the conflict. With one data site not yet admitted, `apply` runs degraded; admitting it, the next `apply` joins it. Stopping a joined site's host, `apply` runs degraded and keeps it as a member.
+* Fresh VMs from `test-deployments/` (in the community repo), admitted with `--request` as an owner would, then `apply` as the deployment's user. Checks: whether loading `br_netfilter` changes the host's own bridge traffic at all, since the `net.bridge.bridge-nf-call-*` settings are per network namespace on newer kernels (if it does not, `--bridge-netfilter` becomes a notice in the plan); a container cannot reach the host's `127.0.0.1` or LAN; `sudo -n` runs only the helper; reboot recovers; `host evict` leaves the host as the owner had it. On a second host, a system Docker with `"userland-proxy": false` publishing 443: admit `--public-ports` refuses; with the container started after admission, `apply` and `doctor` report the conflict. With one data site not yet admitted, `apply` runs degraded; admitting it, the next `apply` joins it. Stopping a joined site's host, `apply` runs degraded and keeps it as a member.
 
 ## Related work
 
@@ -147,4 +148,4 @@ Depends on: everything.
 
 ## Founder questions blocking phases
 
-None. The spec's one *Open* item, `br_netfilter` being host wide, blocks no phase.
+None.

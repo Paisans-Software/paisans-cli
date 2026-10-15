@@ -180,7 +180,21 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    once and never removed by `evict` while another deployment is admitted.
 6. **The rootless daemon.** First `br_netfilter`: loaded now and listed in
    `/etc/modules-load.d/paisans.conf`, because without it the daemon refuses
-   to start with the userland proxy off (*Observed*). Then, as the user,
+   to start with the userland proxy off (*Observed*). The module is host
+   wide: once loaded, traffic crossing any of the host's bridges passes the
+   firewall's FORWARD chain, which it skipped before, and that chain often
+   drops by default (a system Docker sets it to DROP, ufw denies routed
+   traffic). So admit reads first whether it is loaded and which bridges the
+   host has (`ip -d link show type bridge`), and:
+   * already loaded, as on most hosts with a system Docker: the plan says so,
+     and nothing changes;
+   * not loaded, with no bridge but Docker's: admit loads it, in one line of
+     the plan;
+   * not loaded, with other bridges (libvirt's, LXD's, the owner's own):
+     the plan names each, quotes the FORWARD chain's policy, and says their
+     traffic will be filtered by it from now on; admit stops, as it does
+     for a missing grant, unless the owner passes `--bridge-netfilter`.
+     The flag is in the admission record. Then, as the user,
    with its runtime directory: `dockerd-rootless-setuptool.sh install
    --force`. Then `~/.config/docker/daemon.json` with `"userland-proxy":
    false`, so a published port carries the client's source address
@@ -575,6 +589,9 @@ A rekey with sites down is in `docs/specs/2026-10-15-mesh-rekey-sites-down.md`.
   DNAT rule with no listener, each naming what holds it.
 * The gateway's step fails, naming the conflict, when its fetch of
   `/.well-known/paisans/<token>` returns another body or another server.
+* Admit's `br_netfilter` plans: already loaded, not loaded with only
+  Docker's bridges, and not loaded with a libvirt bridge (stopped without
+  `--bridge-netfilter`, loaded with it).
 * One end-to-end run on staging: admit a fresh host as its owner, apply as
   the deployment's user, then check that a container cannot connect to a
   service on the host's `127.0.0.1` or LAN, and that `sudo -n` as the user
@@ -656,9 +673,3 @@ its.
   IDs, without overlap, and each daemon listed only its own containers.
 * **R18, R20.** The restriction on unprivileged user namespaces was on and
   the deb's `rootlesskit` profile was loaded. Engine 29.9.1.
-
-## Open
-
-* **`br_netfilter` is host wide.** It sends bridged traffic on the owner's
-  own bridges through their iptables rules. The system Docker usually loads
-  it anyway; admit says so in the plan.
