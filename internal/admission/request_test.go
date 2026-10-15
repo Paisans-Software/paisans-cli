@@ -1,9 +1,14 @@
 package admission_test
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/ssh"
 
 	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -106,5 +111,28 @@ func TestBuildNamesTheConfigurationKey(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("got %v\nwant it to say %q", err, c.want)
 		}
+	}
+}
+
+// Build refuses a request larger than Parse reads, saying why, so host
+// request never prints one host admit would refuse unread.
+func TestBuildRefusesARequestOverMaxRequestSize(t *testing.T) {
+	cfg := fixture(t)
+	s := cfg.Sites["home-a"]
+	for i := 0; i < 800; i++ {
+		pub, _, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		k, err := ssh.NewPublicKey(pub)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.SSH.Keys = append(s.SSH.Keys, config.NamedKey{Name: "carol", Line: strings.TrimSpace(string(ssh.MarshalAuthorizedKey(k)))})
+	}
+	cfg.Sites["home-a"] = s
+	_, err := admission.Build(cfg, "home-a")
+	if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("and host admit reads a request of at most %d", admission.MaxRequestSize)) {
+		t.Errorf("got %v", err)
 	}
 }

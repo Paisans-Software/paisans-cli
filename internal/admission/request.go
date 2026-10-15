@@ -100,6 +100,9 @@ func Build(cfg *config.Config, site string) (Request, error) {
 		}
 		return Request{}, &Error{What: "the request for " + site, Problems: problems}
 	}
+	if n := len(Encode(r)); n > MaxRequestSize {
+		return Request{}, &Error{What: "the request for " + site, Problems: []string{fmt.Sprintf("sites.%s.ssh.keys: the request would be %d bytes, and host admit reads a request of at most %d. Name fewer operators in sites.%s.ssh.keys, or list fewer keys under each", site, n, MaxRequestSize, site)}}
+	}
 	return r, nil
 }
 
