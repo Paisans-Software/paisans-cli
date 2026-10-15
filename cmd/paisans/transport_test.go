@@ -12,16 +12,18 @@ import (
 )
 
 // resetLogins starts the test with no login known, so a Login from another
-// test is not shared into this one.
+// test is not shared into this one, and with no command run with --execute
+// yet, so no login is written until one is.
 func resetLogins(t *testing.T) {
 	t.Helper()
 	loginsMu.Lock()
-	saved := logins
+	saved, savedRecord := logins, recordLogins
 	logins = map[string]*apply.Login{}
+	recordLogins = false
 	loginsMu.Unlock()
 	t.Cleanup(func() {
 		loginsMu.Lock()
-		logins = saved
+		logins, recordLogins = saved, savedRecord
 		loginsMu.Unlock()
 	})
 }

@@ -1618,9 +1618,10 @@ func (l *pathList) Set(value string) error {
 // DOCKER_HOST at that user's rootless daemon. A site that names no user is
 // reached as the deployment's default, and its transport says so, so a
 // host that refuses it is reported as not admitted. Its first login as that
-// default writes the name into the site's ssh.user (recordSSHUser). name is
-// the site's name in paisans-stack.yaml, for messages and for the section
-// that write goes in; it plays no part in reaching the host.
+// default, in a run with --execute, writes the name into the site's ssh.user
+// (recordSSHUser). name is the site's name in paisans-stack.yaml, for
+// messages and for the section that write goes in; it plays no part in
+// reaching the host.
 func siteTransport(name string, site config.Site, override string) apply.SSHTransport {
 	var t apply.SSHTransport
 	if override != "" {

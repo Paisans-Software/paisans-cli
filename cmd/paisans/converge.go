@@ -680,6 +680,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		// and holds at it; the reads below draw on r.
 		routeRetries(r)
 		routeHolds(r)
+		routeLoginNotes(r)
 		if cfg, st, err = convergeRead(configPath, secretsPath); err != nil {
 			return err
 		}
@@ -856,10 +857,11 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	if err := convergeExecute(r, cfg, steps, o, publish); err != nil {
 		return err
 	}
-	// Each step pointed the retries and holds at its own reporter; the
-	// check draws on r.
+	// Each step pointed the retries, holds and login notes at its own
+	// reporter; the check draws on r.
 	routeRetries(r)
 	routeHolds(r)
+	routeLoginNotes(r)
 	links, adminErr := convergeOperators(r, cfg, o, true, func(string) bool { return true })
 	// The links are printed last, after the result, whatever it is: a run
 	// that fails after issuing them has still issued them.
@@ -1044,6 +1046,7 @@ func convergeStatus(r ui.Reporter, cfg *config.Config, steps []convergeStep, o c
 			// that is not host prepare may have: the reads after draw on r.
 			routeRetries(r)
 			routeHolds(r)
+			routeLoginNotes(r)
 			i = j
 		default:
 			title := s.Title
@@ -1335,6 +1338,7 @@ func convergePrepareAll(r ui.Reporter, cfg *config.Config, steps []convergeStep,
 	// the retries and holds elsewhere; what follows draws on r.
 	routeRetries(r)
 	routeHolds(r)
+	routeLoginNotes(r)
 	return groupStop("host prepare", steps, errs)
 }
 
@@ -1545,6 +1549,7 @@ func convergeQuiet(r ui.Reporter, line ui.Step, args []string, verbose bool) (ou
 		reporterOverride = saved
 		routeRetries(r)
 		routeHolds(r)
+		routeLoginNotes(r)
 	}()
 	err = convergeRun(args)
 	return b.String(), reports, err
@@ -1726,7 +1731,8 @@ func joinDetail(hint, detail string) string {
 
 // checkStep runs args, a step's command without --execute, through run, in
 // this process and quietly, and returns what its dry run told dryRunFound.
-// Its reports, retries and holds are routed back to r once it returns.
+// Its reports, retries, holds and login notes are routed back to r once it
+// returns.
 func checkStep(r ui.Reporter, args []string, run func([]string) error) (string, []checkReport, error) {
 	found := false
 	var summary string
@@ -1739,6 +1745,7 @@ func checkStep(r ui.Reporter, args []string, run func([]string) error) (string, 
 		dryRunFound, reporterOverride = savedFound, savedOverride
 		routeRetries(r)
 		routeHolds(r)
+		routeLoginNotes(r)
 	}()
 	if err := run(args); err != nil {
 		return "", reports, err

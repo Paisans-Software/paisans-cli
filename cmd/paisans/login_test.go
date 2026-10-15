@@ -1,11 +1,15 @@
 package main
 
 import (
+	"flag"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -24,11 +28,19 @@ func loginNotes(t *testing.T) *ui.Recorder {
 	return rec
 }
 
-// The first login as the deployment's default user writes the name into
-// the site's ssh.user, and says so, so the file names who logs in. Only
-// that site is written.
-func TestTheFirstLoginRecordsTheDefaultUser(t *testing.T) {
+// executing makes the test's logins those of a command run with --execute
+// that changes hosts, which write the user they record.
+func executing(t *testing.T) {
+	t.Helper()
 	resetLogins(t)
+	recordLogins = true
+}
+
+// The first login as the deployment's default user, in a run with
+// --execute, writes the name into the site's ssh.user, and says so, so the
+// file names who logs in. Only that site is written.
+func TestTheFirstLoginRecordsTheDefaultUser(t *testing.T) {
+	executing(t)
 	rec := loginNotes(t)
 	path, cfg := archFixture(t, twoDataSitesWithoutUsers)
 	tr := siteTransport("home-a", cfg.Sites["home-a"], "")
@@ -65,10 +77,10 @@ func TestOnlyTheDefaultUsersLoginIsRecorded(t *testing.T) {
 	}
 }
 
-// Sites logged in to at once, as doctor reaches them, each record their
+// Sites logged in to at once in a run with --execute each record their
 // user: the writes take turns, and the file loads with both.
 func TestLoginsAtOnceEachRecordTheirUser(t *testing.T) {
-	resetLogins(t)
+	executing(t)
 	loginNotes(t)
 	path, cfg := archFixture(t, twoDataSitesWithoutUsers)
 	var wg sync.WaitGroup
@@ -96,7 +108,7 @@ func TestLoginsAtOnceEachRecordTheirUser(t *testing.T) {
 // follows has worked, so the command is told and goes on, and the file is
 // left as it was.
 func TestAUserThatCannotBeRecordedIsAWarning(t *testing.T) {
-	resetLogins(t)
+	executing(t)
 	rec := loginNotes(t)
 	body := strings.Replace(twoDataSitesWithoutUsers, "ssh: {host: home-a.local, keys: [alice]}", "ssh: {host: home-a.local, user: , keys: [alice]}", 1)
 	path, cfg := archFixture(t, body)
@@ -109,5 +121,222 @@ func TestAUserThatCannotBeRecordedIsAWarning(t *testing.T) {
 	i := rec.Index("note", "home-a: ssh.user paisans-f2a9 could not be recorded in paisans-stack.yaml")
 	if i < 0 || !strings.Contains(rec.Events[i].Extra, "written with no value") {
 		t.Errorf("no warning: %+v", rec.Events)
+	}
+}
+
+// A run without --execute writes nothing: it says what --execute records,
+// as an architecture read does, and goes on as the user the file already
+// means.
+func TestALoginWithoutExecuteRecordsNothing(t *testing.T) {
+	resetLogins(t)
+	rec := loginNotes(t)
+	path, cfg := archFixture(t, twoDataSitesWithoutUsers)
+	before, _ := os.ReadFile(path)
+	siteTransport("home-a", cfg.Sites["home-a"], "").Login.Connected()
+	after, _ := os.ReadFile(path)
+	if string(after) != string(before) {
+		t.Errorf("the file changed:\n%s", after)
+	}
+	if !rec.Has("note", "home-a: ssh.user paisans-f2a9, recorded in paisans-stack.yaml by --execute") {
+		t.Errorf("no note of what --execute records: %+v", rec.Events)
+	}
+}
+
+// Only a command run with --execute that changes hosts records: doctor's
+// --execute tidies the file alone, and config pull and recover write only
+// this workstation's files.
+func TestOnlyAnExecuteThatChangesHostsRecords(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		execute bool
+		want    bool
+	}{
+		{"apply", true, true}, {"apply", false, false}, {"preflight", false, false},
+		{"doctor", true, false}, {"config pull", true, false}, {"config recover", true, false},
+	} {
+		fs := flag.NewFlagSet(c.name, flag.ContinueOnError)
+		if c.name != "preflight" {
+			fs.Bool("execute", false, "")
+		}
+		var args []string
+		if c.execute {
+			args = []string{"--execute"}
+		}
+		if err := fs.Parse(args); err != nil {
+			t.Fatal(err)
+		}
+		if got := executesOnHosts(fs); got != c.want {
+			t.Errorf("%s execute=%v records %v, want %v", c.name, c.execute, got, c.want)
+		}
+	}
+}
+
+// fixtureWithoutUsers is a copy of the fixture configuration with no site
+// naming its ssh user, so each is reached as the deployment's default.
+func fixtureWithoutUsers(t *testing.T) string {
+	t.Helper()
+	body, err := os.ReadFile(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	body = []byte(strings.ReplaceAll(string(body), "      user: ubuntu\n", ""))
+	if strings.Contains(string(body), "user:") {
+		t.Fatal("the fixture's user lines changed shape; the copy still names one")
+	}
+	path := filepath.Join(t.TempDir(), config.FileName)
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// A step that has finished leaves its reporter behind: a login first made
+// after it says its note on the run's reporter, not the finished step's.
+func TestALoginAfterAStepIsToldOnTheRunsReporter(t *testing.T) {
+	for _, how := range []string{"quiet", "check"} {
+		t.Run(how, func(t *testing.T) {
+			executing(t)
+			saved := loginReporter
+			t.Cleanup(func() { loginReporter = saved })
+			_, cfg := archFixture(t, twoDataSitesWithoutUsers)
+			// The step's command points the notes at its own reporter,
+			// as commonFlags does.
+			step := func([]string) error { routeLoginNotes(reporterOverride); return nil }
+			run := &ui.Recorder{}
+			if how == "quiet" {
+				savedRun := convergeRun
+				convergeRun = step
+				t.Cleanup(func() { convergeRun = savedRun })
+				_, _, _ = convergeQuiet(run, run.Step("a step"), []string{"apply"}, false)
+			} else {
+				_, _, _ = checkStep(run, []string{"apply"}, step)
+			}
+			siteTransport("home-a", cfg.Sites["home-a"], "").Login.Connected()
+			if !run.Has("note", "home-a: ssh.user paisans-f2a9 recorded in paisans-stack.yaml") {
+				t.Errorf("the note is not on the run's reporter:\n%s", run.Lines())
+			}
+		})
+	}
+}
+
+// archReadLogsIn makes a whole apply's architecture read reach each host as
+// the run does, so it is the site's first login, as it is outside a test.
+// fakeConverge answers it without logging in, and then the first login is
+// an apply step's, after the publish.
+func archReadLogsIn(t *testing.T) {
+	t.Helper()
+	saved := convergeHost
+	convergeHost = func(name string, site config.Site) apply.Transport { return siteTransport(name, site, "") }
+	t.Cleanup(func() { convergeHost = saved })
+}
+
+// An apply with --execute logs in to every site, and so records its user,
+// before it gathers the version it publishes: the published bytes carry
+// every user, they are the file as it ends, and no step finds it changed
+// after the publish.
+func TestAnApplyRecordsEveryUserBeforeItPublishes(t *testing.T) {
+	path := fixtureWithoutUsers(t)
+	fakeConverge(t, nil)
+	archReadLogsIn(t)
+	rec := recordConverge(t)
+	gathered := gatherFiles(t)
+	failingSSH(t)
+	loginNotes(t)
+	fake := convergeRun
+	var stepErrs []error
+	convergeRun = func(args []string) error {
+		if args[0] == "apply" {
+			if err := runStep(args); err != nil {
+				stepErrs = append(stepErrs, err)
+			}
+			return nil
+		}
+		return fake(args)
+	}
+	var err error
+	captureStdout(t, func() {
+		err = runApply([]string{"--config", path, "--secrets", fixtureSecretsPath(), "--execute"}, noTerminalStdin(), io.Discard)
+	})
+	if err != nil {
+		t.Fatalf("%v %s\n%s", err, problemText(err), rec.Lines())
+	}
+	body, _ := os.ReadFile(path)
+	if n := strings.Count(string(body), "user: paisans-"); n != 4 {
+		t.Fatalf("%d sites record their user:\n%s\n%s", n, body, rec.Lines())
+	}
+	if *gathered == nil || string((*gathered).paisans) != string(body) {
+		t.Fatalf("the version published is not the file as it ends:\n%s", rec.Lines())
+	}
+	if len(stepErrs) == 0 {
+		t.Fatal("no apply step ran")
+	}
+	for _, e := range stepErrs {
+		if strings.Contains(e.Error()+problemText(e), "changed after the run published it") {
+			t.Errorf("a step found the file changed after the publish: %v", problemText(e))
+		}
+	}
+}
+
+// apply --site without --execute leaves the file as it was, and previews
+// the version from the file on disk.
+func TestADryRunApplySiteLeavesTheFile(t *testing.T) {
+	path := fixtureWithoutUsers(t)
+	before, _ := os.ReadFile(path)
+	gathered := gatherFiles(t)
+	failingSSH(t)
+	rec := withRecorder(t, false)
+	captureStdout(t, func() {
+		_ = runApply([]string{"--config", path, "--secrets", fixtureSecretsPath(), "--site", "vm"}, noTerminalStdin(), io.Discard)
+	})
+	after, _ := os.ReadFile(path)
+	if string(after) != string(before) {
+		t.Fatalf("a dry run changed the file:\n%s", after)
+	}
+	if *gathered == nil || string((*gathered).paisans) != string(after) {
+		t.Fatal("the version previewed is not the file on disk")
+	}
+	if !rec.Has("note", ": ssh.user paisans-") {
+		t.Errorf("no note of what --execute records:\n%s", rec.Lines())
+	}
+}
+
+// A dry run of the whole apply leaves the file as it was and ends saying
+// nothing changed, which is true.
+func TestADryRunApplyLeavesTheFile(t *testing.T) {
+	path := fixtureWithoutUsers(t)
+	before, _ := os.ReadFile(path)
+	fakeConverge(t, nil)
+	archReadLogsIn(t)
+	rec := recordConverge(t)
+	failingSSH(t)
+	var err error
+	captureStdout(t, func() {
+		err = runApply([]string{"--config", path, "--secrets", fixtureSecretsPath()}, noTerminalStdin(), io.Discard)
+	})
+	if err != nil {
+		t.Fatalf("%v %s\n%s", err, problemText(err), rec.Lines())
+	}
+	after, _ := os.ReadFile(path)
+	if string(after) != string(before) {
+		t.Fatalf("a dry run changed the file:\n%s", after)
+	}
+	if i := rec.Index("result", ""); i < 0 || !strings.HasPrefix(rec.Events[i].Text, "Nothing changed. ") {
+		t.Errorf("the ending is not Nothing changed:\n%s", rec.Lines())
+	}
+}
+
+// doctor reads, with or without its --execute, which tidies the file
+// alone: it records no user.
+func TestDoctorRecordsNoUser(t *testing.T) {
+	for _, args := range [][]string{nil, {"--execute"}} {
+		path := fixtureWithoutUsers(t)
+		before, _ := os.ReadFile(path)
+		failingSSH(t)
+		withRecorder(t, false)
+		_ = runDoctor(append([]string{"--config", path, "--site", "vm"}, args...))
+		after, _ := os.ReadFile(path)
+		if string(after) != string(before) {
+			t.Errorf("doctor %v changed the file:\n%s", args, after)
+		}
 	}
 }
