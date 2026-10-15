@@ -37,10 +37,12 @@ changes share a bullet. Detailed notes are on the corresponding
 - The configuration store's daemon starts and stops with the deployment's WireGuard unit, and `host prepare` starts it only where the mesh is up, so peers can fetch from it once `apply` starts the mesh.
 - `apply --execute` starts no peer sync on a site `host prepare` has not given a store, which has nothing to sync, rather than warning on every bare host that its sync did not complete.
 - `site remove` without `--delete-data` keeps the registry entry, marked `data` kept, while data is left, so a later `--force --id ... --delete-data` finds the deployment instead of refusing.
+- `site remove` and `app remove` read every flag given after the name before they report, so `-v` there shows detail and `--execute` there records `ssh.user`.
 
 ### Security
 
 - Files written to a host are staged in a `mktemp` file beside the target, created exclusively and renamed into place, so a symlink planted at a guessable name is never written through, even under sudo.
+- Writing a file to a host refuses a target that is a symbolic link or a directory, rather than replacing the link or moving the file into the directory.
 
 ## [0.2.0] - 2026-10-15
 

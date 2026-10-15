@@ -1561,6 +1561,7 @@ installed, on a workstation or anywhere else.
 | `internal/patroni` | reading a Patroni cluster through the Spilo container: `/cluster`, the leader, lag, database size |
 | `internal/configstore` | the signed copies of the configuration: a version as a git commit and the bare repository holding it, the rules that choose which versions to trust and which is newest, gathering from every site, pushing to them, and the key by key merge of the secrets |
 | `internal/hostprep` | taking a blank host to what `apply` assumes; one profile per operating system, its shell under `profiles/<id>-<version>/` |
+| `internal/hostadmit` | what runs on a host as its owner, as root, for one deployment: the local transport `host admit` and `host evict` use with `--request`, each command through `sh -c` and each file walked by descriptor without following a link. Neither command exists yet |
 | `internal/render/templates` | the infrastructure templates, plus one directory per kind |
 
 Templating is `text/template` from the standard library. No template engine is
