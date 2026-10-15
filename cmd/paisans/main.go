@@ -1613,19 +1613,28 @@ func (l *pathList) Set(value string) error {
 //
 // Every command that acts on a deployment reaches its sites this way, as the
 // login user and without sudo: that user is the deployment's own, and the
-// most a command can reach is what that user owns. name is the site's name
+// most a command can reach is what that user owns. Its first command asks
+// the user's UID, once a run (loginFor), and every command runs with
+// DOCKER_HOST at that user's rootless daemon. A site that names no user is
+// reached as the deployment's default, and its transport says so, so a
+// host that refuses it is reported as not admitted. name is the site's name
 // in paisans-stack.yaml, for messages; it plays no part in reaching the host.
 func siteTransport(name string, site config.Site, override string) apply.SSHTransport {
+	var t apply.SSHTransport
 	if override != "" {
-		return apply.SSHTransport{Site: name, Destination: override}
+		t = apply.SSHTransport{Site: name, Destination: override}
+	} else {
+		// validate has already refused a bad key, so problems are empty here.
+		keys, _ := site.SSH.AuthorizedKeys()
+		lines := make([]string, len(keys))
+		for i, k := range keys {
+			lines[i] = k.Line
+		}
+		user := site.SSHUser()
+		t = apply.SSHTransport{Site: name, User: user, Host: site.SSHHost(), Port: site.SSH.PortOrDefault(), PublicKeys: lines, DefaultUser: site.SSH.User == "" && user != ""}
 	}
-	// validate has already refused a bad key, so problems are empty here.
-	keys, _ := site.SSH.AuthorizedKeys()
-	lines := make([]string, len(keys))
-	for i, k := range keys {
-		lines[i] = k.Line
-	}
-	return apply.SSHTransport{Site: name, User: site.SSHUser(), Host: site.SSHHost(), Port: site.SSH.PortOrDefault(), PublicKeys: lines}
+	t.Login = loginFor(t.Describe(), nil)
+	return t
 }
 
 func contains(list []string, s string) bool {

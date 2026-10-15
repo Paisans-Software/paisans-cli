@@ -65,14 +65,15 @@ func runDefault(t *testing.T, name string, fn func() error) string {
 func quietSSH(t *testing.T) { sshAnswering(t, quietHost) }
 
 // The remote command travels base64 encoded (apply.RemoteCommand), so the
-// script decodes it to answer the few probes whose silence would be read
-// as a failure: who it runs as, which OS, what volumes there are, and
-// that a file is absent.
+// script decodes it, drops the DOCKER_HOST export a site transport puts
+// first, and answers the few probes whose silence would be read as a
+// failure: who it runs as, which OS, what volumes there are, and that a
+// file is absent.
 const quietHost = `#!/bin/sh
 for last; do :; done
 b=${last#*printf %s }
 b=${b%% |*}
-cmd=$(printf %s "$b" | base64 -d 2>/dev/null)
+cmd=$(printf %s "$b" | base64 -d 2>/dev/null | sed '1{/^export DOCKER_HOST=/d;}')
 case "$cmd" in
 *"for n in "*) l=${cmd#*for n in }; l=${l%%; do*}; for n in $l; do echo "absent $(printf %s "$n" | tr -d "'")"; done;;
 *paisans-sweep-end*) l=${cmd#*for r in }; l=${l%%; do*}
@@ -96,16 +97,34 @@ exit 0
 `
 
 // sshAnswering puts an ssh on PATH that runs script for each connection.
+// The login probe a site transport sends first, a bare id -u, is answered
+// before script sees it, as a login user with UID 1000, so script answers
+// only the commands it is about, and the test starts with no Login from an
+// earlier one.
 func sshAnswering(t *testing.T, script string) {
 	t.Helper()
+	resetLogins(t)
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "ssh"), []byte(script), 0o755); err != nil {
+	host := filepath.Join(dir, "host")
+	if err := os.WriteFile(host, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ssh"), []byte(loginUID+"exec '"+host+"' \"$@\"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	// Closed while the fake is still first on PATH, as main closes them.
 	t.Cleanup(apply.CloseConnections)
 }
+
+// loginUID answers the login probe, a remote command that is exactly id -u,
+// with UID 1000, and lets every other command through.
+const loginUID = `#!/bin/sh
+for last; do :; done
+b=${last#*printf %s }
+b=${b%% |*}
+if [ "$(printf %s "$b" | base64 -d 2>/dev/null)" = "id -u" ]; then echo 1000; exit 0; fi
+`
 
 // runningHost is a host whose stacks come up: `ps` finds a running container,
 // so the gate after each stack passes and an execution carries on.

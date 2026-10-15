@@ -4614,6 +4614,16 @@ on a host already carries, so a deployment that names no user logs in as one of
 its own rather than as a user another deployment shares. The user must exist on
 the host either way.
 
+A host refuses that user until its owner has admitted the deployment, so a
+command whose login as the default user is refused says the site is not
+admitted there, with the `paisans host request --site <site>` line whose file
+the owner admits it from, rather than that a key was not accepted.
+
+Every command runs docker against the login user's own rootless daemon: its
+first command on a site asks `id -u`, once a run, and every command after it
+runs with `DOCKER_HOST=unix:///run/user/<uid>/docker.sock`, so docker never
+reaches the host's system socket.
+
 A single string in place of the section, `ssh: home-a.local`, is refused, and
 the refusal says the section to write and its keys (`host`,
 `user`, `port` and `keys`). A site's access has one way to write it (founder decision), so there is

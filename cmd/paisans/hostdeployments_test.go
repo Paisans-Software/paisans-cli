@@ -345,6 +345,12 @@ func TestReachDestinationUsesTheOperatorsSSH(t *testing.T) {
 		if owner.Destination != want || !owner.Sudo || owner.Auth == nil {
 			t.Errorf("%s: owner %+v, want destination %s with sudo", in, owner, want)
 		}
+		if tr.Login == nil {
+			t.Errorf("%s: a deployment command's transport has no Login", in)
+		}
+		if owner.Login != nil {
+			t.Errorf("%s: the owner's transport points docker at a user's daemon", in)
+		}
 		if plain := ownerTransport(dest, false); plain.Sudo || plain.Auth != nil {
 			t.Errorf("%s: owner with --sudo=false %+v", in, plain)
 		}
