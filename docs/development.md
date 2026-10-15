@@ -199,8 +199,9 @@ about it are load bearing:
 
 `secrets set <dotted.key>` writes one value read from stdin into the secrets
 file, re-encrypted to the recipients in `.sops.yaml`, and prints only `set
-<key>`. It strips one trailing newline, refuses an empty value, refuses a
-terminal on stdin, and accepts a key only if it is already set, reported by
+<key>`. It strips one trailing newline, refuses an empty value, asks
+through `readKeySecret` with echo off when stdin is a terminal (an empty
+answer writes nothing), and accepts a key only if it is already set, reported by
 `init` as owed or pending (`external.acme_dns_token`, `oidc_clients.<app>.*`,
 through `secretsgen.ExpectedNames`), or under `external`. It exists so a credential issued elsewhere never touches an echoing terminal or an
 editor: an argument is in shell history and `ps`, an echoed prompt is in

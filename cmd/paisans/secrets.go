@@ -149,8 +149,9 @@ func runSecretsPrune(args []string, stdin io.Reader, stdout io.Writer) error {
 }
 
 // runSecretsSet writes one value, read from stdin, into the encrypted secrets
-// file. Given no key at a terminal, it asks for each owed secret in turn
-// instead (see setOwedSecrets).
+// file. Given a key at a terminal, it asks for that key's value with echo off
+// instead of reading stdin. Given no key at a terminal, it asks for each owed
+// secret in turn (see setOwedSecrets).
 //
 // It exists so a pasted credential never touches a terminal or an editor. The
 // alternatives each leave a copy somewhere: an argument is in shell history
@@ -184,13 +185,12 @@ func runSecretsSet(args []string, stdin io.Reader) error {
 	}
 
 	// With no key, one value on a pipe could belong to any owed secret, so
-	// the walk needs a terminal to ask on. With a key, the value is read
-	// from stdin, and typed there it would echo.
-	if key == "" && !stdinIsTerminal(stdin) {
-		return fmt.Errorf("secrets set: name the key first, as in `paisans secrets set external.acme_dns_token < token`. Run it at a terminal with no key to be asked for each owed secret in turn")
-	}
-	if key != "" && stdinIsTerminal(stdin) {
-		return fmt.Errorf("secrets set: stdin is a terminal, so the value would be typed where it can be seen and kept in scrollback. Pipe it in, as in `security find-generic-password -s <item> -w | paisans secrets set %s`, or run `paisans secrets set` with no key to be asked for it with echo off", key)
+	// the walk needs a terminal to ask on. With a key at a terminal, the
+	// value is asked for with echo off rather than read from stdin, where
+	// typing it would echo.
+	atTerminal := stdinIsTerminal(stdin)
+	if key == "" && !atTerminal {
+		return fmt.Errorf("secrets set: name the key first, as in `paisans secrets set external.acme_dns_token < token`. Run it at a terminal with no key to be asked for each owed secret in turn, or with a key to be asked for that one")
 	}
 
 	cfg, err := config.Load(*configPath)
@@ -212,15 +212,38 @@ func runSecretsSet(args []string, stdin io.Reader) error {
 	if err := secretKeyAllowed(cfg, secrets, key); err != nil {
 		return err
 	}
-
-	data, err := io.ReadAll(io.LimitReader(stdin, maxSecret+1))
+	// Refused before the prompt, not after the operator has pasted
+	// something that cannot be written.
+	recipients, err := writableRecipients(secrets, *secretsPath)
 	if err != nil {
-		return fmt.Errorf("secrets set: reading stdin: %w", err)
+		return err
 	}
-	if len(data) > maxSecret {
-		return fmt.Errorf("secrets set: more than %d bytes on stdin, which is not a credential this file holds", maxSecret)
+
+	var value string
+	if atTerminal {
+		_, set := secrets.Get(key)
+		value, err = readKeySecret(key, set)
+		if err != nil {
+			return fmt.Errorf("secrets set: reading %s: %w. Nothing was written", key, err)
+		}
+		ui.Secret(value)
+		if value == "" {
+			r.Result("Nothing was written: %s is unchanged.", key)
+			return nil
+		}
+		if len(value) > maxSecret {
+			return fmt.Errorf("secrets set: %s: more than %d bytes, which is not a credential this file holds. Nothing was written", key, maxSecret)
+		}
+	} else {
+		data, err := io.ReadAll(io.LimitReader(stdin, maxSecret+1))
+		if err != nil {
+			return fmt.Errorf("secrets set: reading stdin: %w", err)
+		}
+		if len(data) > maxSecret {
+			return fmt.Errorf("secrets set: more than %d bytes on stdin, which is not a credential this file holds", maxSecret)
+		}
+		value = string(data)
 	}
-	value := string(data)
 	// One trailing newline, because `echo` and most password managers add
 	// exactly one and no credential ends in one. Only one: a value that ends
 	// in two kept the second on purpose.
@@ -242,10 +265,6 @@ func runSecretsSet(args []string, stdin io.Reader) error {
 		return err
 	}
 
-	recipients, err := writableRecipients(secrets, *secretsPath)
-	if err != nil {
-		return err
-	}
 	if err := config.WriteSecrets(*secretsPath, secrets, recipients); err != nil {
 		return err
 	}
@@ -330,6 +349,25 @@ var readOwedSecret = func(o secretsgen.Owed) (string, error) {
 	fd := int(tty.Fd())
 	fmt.Fprintf(tty, "\n%s is %s.\n", o.Name, o.Why)
 	return askPassword(tty, "Paste it, or press Enter to skip: ", 0, false, func() ([]byte, error) { return term.ReadPassword(fd) })
+}
+
+// readKeySecret asks for the value of one named key on the controlling
+// terminal, with echo off, saying whether it replaces a value already set.
+// The value set is never shown. An empty answer writes nothing. Tests
+// replace it, since a test has no terminal to type into.
+var readKeySecret = func(key string, set bool) (string, error) {
+	tty, err := openTTY()
+	if err != nil {
+		return "", err
+	}
+	defer tty.Close()
+	fd := int(tty.Fd())
+	if set {
+		fmt.Fprintf(tty, "\n%s is set; what you paste replaces it.\n", key)
+	} else {
+		fmt.Fprintf(tty, "\n%s is not set.\n", key)
+	}
+	return askPassword(tty, "Paste it, or press Enter to write nothing: ", 0, false, func() ([]byte, error) { return term.ReadPassword(fd) })
 }
 
 // writableRecipients is the age recipients the secrets file is written to,
