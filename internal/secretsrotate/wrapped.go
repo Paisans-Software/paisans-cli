@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/smtpcheck"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -39,9 +41,9 @@ type pasted struct {
 	path string
 	// issuer is where a human replaces the secret.
 	issuer func(cfg *config.Config) string
-	// dns is whether stage 2 tries the next value against the zone: only
-	// the DNS token has a check here.
-	dns bool
+	// dns is whether stage 2 tries the next value against the zone, and
+	// smtp whether it logs in to the mail server with it (smtpCheck).
+	dns, smtp bool
 }
 
 // DNSToken is the rotation of external.acme_dns_token, issued by the DNS
@@ -58,9 +60,12 @@ func DNSToken() Rotator {
 
 // SMTPPassword is the rotation of a password the mail provider issued:
 // external.smtp_password, the deployment's, or apps.<app>.smtp_password, an
-// app's own. Every app stack that sends mail with it renders it.
+// app's own. Every app stack that sends mail with it renders it. Stage 2
+// logs in to the mail server with the next password, from a site running
+// each app that uses it, and a pasted one also sends the operators a test
+// message before it is taken (smtpCheck).
 func SMTPPassword(path string) Rotator {
-	return pasted{path: path, issuer: func(*config.Config) string { return "the mail provider" }}
+	return pasted{path: path, issuer: func(*config.Config) string { return "the mail provider" }, smtp: true}
 }
 
 func (p pasted) Path() string { return p.path }
@@ -85,30 +90,50 @@ func (p pasted) current(e Env, s *config.Secrets) (string, error) {
 	return v, nil
 }
 
-// Checked is where a token that does not work is stopped, before any host
-// is handed it: the DNS token is tried against the zone (dnsCheck), and the
-// error says why it failed. An SMTP password has nothing to check it here.
+// Checked is where a value that does not work is stopped, before any host
+// is handed it, and the error says why it failed: the DNS token is tried
+// against the zone (dnsCheck), and an SMTP password logs in to the mail
+// server and sends the operators a test message (smtpCheck). It is what a
+// pasted value is tried with (Run.Answer).
 func (p pasted) Checked(e Env, next string) error {
-	if !p.dns {
-		return nil
+	switch {
+	case p.dns:
+		return dnsCheck(e, next)
+	case p.smtp:
+		return smtpCheck(e, p.path, next, true)
 	}
-	return dnsCheck(e, next)
+	return nil
 }
 
-// Accepts is whether the next value works where it is checked, read the way
-// Checked reads it. A token the provider refuses is not an error here but a
-// stage still ahead, so a resumed run plans it and Checked says why.
+// Accepts is whether the next value works where it is checked. A token the
+// provider refuses is not an error here but a stage still ahead, so a
+// resumed run plans it and Checked says why. An SMTP password is only logged
+// in with here: the plan reads it, and stage 2 reads it again, and neither
+// sends mail. The one test message is sent where the value was given, by
+// `secrets set` or when it was pasted. A site that could not be reached is an
+// error, since nothing was learned.
 func (p pasted) Accepts(e Env, next string) (bool, error) {
-	if !p.dns {
-		return true, nil
+	switch {
+	case p.dns:
+		return dnsCheck(e, next) == nil, nil
+	case p.smtp:
+		err := smtpCheck(e, p.path, next, false)
+		var failed *smtpcheck.Error
+		if errors.As(err, &failed) && !failed.Dialled() {
+			return false, err
+		}
+		return err == nil, nil
 	}
-	return dnsCheck(e, next) == nil, nil
+	return true, nil
 }
 
 // CheckText is what the plan says stage 2 does for the secret.
 func (p pasted) CheckText(cfg *config.Config) string {
+	if p.smtp {
+		return "the next password logs in to the mail server from a site running each app that uses it; a pasted one also sends the operators a test message when pasted, as `paisans secrets set` does"
+	}
 	if !p.dns {
-		return "nothing checks it here: " + p.issuer(cfg) + " issued it, and the toolkit does not log in with it"
+		return "nothing checks it here: " + p.issuer(cfg) + " issued it"
 	}
 	if why := dnsUnchecked(cfg); why != "" {
 		return "nothing checks it here: " + why
@@ -155,6 +180,29 @@ func dnsCheck(e Env, token string) error {
 	defer cancel()
 	if _, err := dns.FindZone(ctx, provider, dnsDomain(e.Cfg), nil); err != nil {
 		return fmt.Errorf("the DNS token does not work against %s: %v, so no host is handed it. Check its zone and permissions at %s", e.Cfg.ACME.Provider, err, e.Cfg.ACME.Provider)
+	}
+	return nil
+}
+
+// smtpCheck tries password as the SMTP password at path, from a site running
+// each app that logs in with it, with send also sending the operators the
+// test message (smtpcheck.TryPassword). A failure names the server's reply,
+// never the password. Settings nothing can be tried from, Eg: a relay only
+// the app's own network resolves, are not tried.
+func smtpCheck(e Env, path, password string, send bool) error {
+	s, err := e.Store.Load()
+	if err != nil {
+		return err
+	}
+	if _, err := smtpcheck.TryPassword(e.Mail, e.Cfg, s, path, password, "paisans secrets rotate", send); err != nil {
+		var failed *smtpcheck.Error
+		switch {
+		case errors.As(err, &failed) && failed.Dialled():
+			return fmt.Errorf("the SMTP password does not work for %s: %w, so no app is handed it. Check it at the mail provider", failed.Check.Whose(), failed)
+		case errors.As(err, &failed):
+			return fmt.Errorf("%s could not be reached to try the SMTP password for %s (%w), so no app is handed it", failed.Check.Site, failed.Check.Whose(), failed)
+		}
+		return err
 	}
 	return nil
 }

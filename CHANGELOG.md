@@ -13,6 +13,7 @@ changes share a bullet. Detailed notes are on the corresponding
 ### Added
 
 - `paisans secrets list` prints every secret path the configuration needs, whether each is set, whether it is generated, pasted or captured, and the path `secrets rotate` takes, never a value.
+- SMTP settings are tried from a site over ssh: `secrets set` and `secrets rotate` log in and email the operators before writing a password, `apply` refuses settings that do not log in, `validate` warns.
 
 ### Changed
 

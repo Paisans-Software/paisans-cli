@@ -810,6 +810,15 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	if !initRan {
 		convergeSecrets(r, cfg, convergeSecretsPath(configPath, secretsPath), sudo)
 	}
+	// Every app's mail settings are tried from its site before the first
+	// step, so a password that does not log in refuses the run with every
+	// host as it was. A dry run whose init still has work tries them once
+	// init has run, as its later steps wait on it.
+	if secrets != nil && !st.NeedsInit {
+		if err := checkMailForApply(r, cfg, secrets, nil, nil, nil); err != nil {
+			return err
+		}
+	}
 	if st.Initial, err = convergeFounded(r, cfg, sudo); err != nil {
 		return err
 	}

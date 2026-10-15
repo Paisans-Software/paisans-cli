@@ -24,8 +24,11 @@ command: what it does, when it is run on its own rather than through the whole
 `apply`, its flags and defaults, and what it changes. This section is how the
 code behind each one is laid out.
 
-validate, render and `secrets list` touch nothing outside the working
-directory, and create writes one new file there. init writes only local files, and reads every site over ssh to settle the mesh subnet.
+render and `secrets list` touch nothing outside the working directory, and
+create writes one new file there. validate reads only the files, except that
+it tries each app's mail settings from a site running it, and `secrets set`
+does the same for an SMTP password before writing it; neither changes a site,
+and `validate --offline` reaches none. init writes only local files, and reads every site over ssh to settle the mesh subnet.
 `host prepare`, `apply`, `prune`, `site add`, `site remove`, `mesh rekey`,
 `secrets rotate`, `storage init`, `storage add`, `storage rotate-key`, `app
 admin create`, `app remove` and `oidc client create` reach a machine, and each
@@ -1070,12 +1073,50 @@ file, so stage 3 presents what stage 2 taught. What is easy to undo by accident:
   the rotator's `Checked` on the answer, and the plan runs `Accepts` on a
   value `secrets set` put in the file, because once a value is under
   `rotations` a resumed run keeps it. For the DNS token both are a zone
-  lookup through `Env.DNSProvider` (`dns.For` unless a test replaces it);
-  a provider `dns.Implemented` lacks, and an SMTP password, have no check.
+  lookup through `Env.DNSProvider` (`dns.For` unless a test replaces it),
+  and a provider `dns.Implemented` lacks has no check. For an SMTP password
+  `Checked` logs in and sends the test message and `Accepts` only logs in,
+  both through `Env.Mail` (*Mail checks, from a site*), so the plan and stage
+  2 send nothing.
 * **Passwords never reach `argv` or a log, except where upstream leaves no
   other way in.** SQL goes on stdin with statement logging off, as `apply`'s
   bootstrap does; `rabbitmqctl` takes a password only as an argument, which
   `rabbitmq.go` says and accepts for the length of the call.
+
+## Mail checks, from a site
+
+`internal/smtpcheck` tries an app's mail settings: `Logins` is what `apply`
+and `validate` try (one check per site and set of settings), `ForPassword`
+what `secrets set` and `secrets rotate` try for a changed password (one per
+sender, from the first site running one of its apps), and `Login` and `Send`
+hold the conversation with `net/smtp`. Its own PLAIN and LOGIN mechanisms send
+the password only after the TLS the settings declare, since `net/smtp`'s
+`PlainAuth` refuses plaintext to anything but localhost, and `none` toward a
+private relay is a configuration `validate` already judged.
+
+The connection comes from `Env.Dial`. The command wires it to
+`apply.SSHTransport.Dial` (`internal/apply/forward.go`): a `true` run first,
+so the connection is made, retried and its host key asked about as every
+other command's is, then `ssh -W host:port` over the shared master, its stdin
+and stdout joined to one end of a `net.Pipe` so deadlines work. When ssh ends
+the forward, the connection's last read carries ssh's last line, Eg:
+`administratively prohibited` or `Connection refused`. What is easy to undo
+by accident:
+
+* **No test reaches a site or a mail server.** `cmd/paisans`'s `TestMain`
+  points `smtpEnv` at an `internal/smtpcheck/smtptest` server that takes any
+  login; `fakeSMTP` gives a test one with users, an untrusted or misnamed
+  certificate, a refused sender, or a site that cannot be reached. The
+  server issues certificates from its own authority, which `Env.Roots`
+  trusts, and listens on loopback per dial, so TLS never runs over
+  `net.Pipe`'s synchronous writes.
+* **Only a changed credential sends mail.** `TryPassword(..., send)` is
+  called with send only where a value was just given; a check that sends on
+  `apply`, `validate` or a rotation's plan would mail the operators on every
+  run.
+* **A failure says the stage and the server's reply, never the password.**
+  `smtpcheck.Error.Reply` quotes a `textproto.Error` as the server sent it, and
+  every caller registers the password with `ui.Secret` first.
 
 ## `storage add`, and what lives where
 
@@ -1472,6 +1513,7 @@ installed, on a workstation or anywhere else.
 | `internal/appadmin` | an app's first administrator: probe, plan, and the per kind API calls |
 | `internal/pocketidlog` | a deployed Pocket ID's container log, read for the failed login link email its API does not report. Pocket ID's REST API itself is `github.com/paisans-software/pocketid-go` |
 | `internal/oidcclient` | an app's client at Pocket ID: probe, plan, and record its credentials before sending its secret |
+| `internal/smtpcheck` | trying an app's mail settings from a site: which checks `apply`, `validate`, `secrets set` and `secrets rotate` make, the SMTP conversation, and the test message; `smtptest` is the in-process server the tests use |
 | `internal/webserver` | a monitor's web server: the hand-off sheet for an operator's own web server, and the read only checks run from the workstation |
 | `internal/hostarch` | a host's architecture (`dpkg --print-architecture`): which are supported, the refusal when a host contradicts the one recorded for its site, and whether an image's platforms include it |
 | `internal/hostcheck` | what a site claims on its host, what the host already runs, and whether that is clean, shared or a conflict |
@@ -1802,7 +1844,10 @@ gateway's Caddy image in front of a stub, not on a deployed gateway with the
 account service calling Pocket ID over the mesh.
 
 `secrets rotate` has never been run against a real host either, nor its DNS
-token check against a real provider. Its `ALTER
+token check against a real provider. The mail checks have run only against an
+in-process SMTP server: `ssh -W` through a shared master to a real mail
+server, from a real site, is reasoned from ssh(1) and not observed, so a first
+`paisans validate` against a deployment is the check to make. Its `ALTER
 ROLE` on the leader and the Patroni restarts and switchover around a cluster
 password, `rabbitmqctl change_password` in Mbin's broker, every Garage node
 restarted together for `rpc_secret`, and whether each app ends the sessions

@@ -2646,7 +2646,7 @@ Finishing either command first costs nothing but its resume.
 | Secret | Checked by | Used by | Cost to members |
 |---|---|---|---|
 | `external.acme_dns_token` | the provider, asked for the zone with the next token at stage 2 | each site running the toolkit's Caddy | none |
-| `external.smtp_password`, `apps.<app>.smtp_password` | the mail provider, which nothing here logs in to | each app that logs in to send mail with it, which takes a `username` | none |
+| `external.smtp_password`, `apps.<app>.smtp_password` | the mail provider, logged in to with the next password at stage 2, from a site running each app that uses it | each app that logs in to send mail with it, which takes a `username` | none |
 | `oidc_clients.<app>.client_secret` | Pocket ID | the app | none |
 | `apps.<app>.oauth` (Mbin's OAuth2 unit) | Mbin | Mbin | every API client and app signs in again |
 | Mbin `app_secret`, oauth2-proxy `cookie_secret`, uptime `session_secret`, account `session_key` | the app | the app | signed in browser sessions of that app end |
@@ -2745,9 +2745,16 @@ as it is given, and one set with `secrets set` when the run is planned, so a
 mistyped token is refused before it is written under `rotations`, where a
 resumed run would keep it. A provider whose record management is not
 implemented here (`dns init` lists those that are) is not checked, and the
-plan says so. Nothing here logs in to a mail provider, so an SMTP password has
-no stage 2 check: the plan says so, and a wrong one shows when the app next
-sends mail.
+plan says so.
+
+**An SMTP password is tried before any app gets it.** A pasted one logs in to
+the mail server, from a site running each app that uses it, and sends the
+operators one test message as soon as it is given, so a mistyped password, or
+a sender the provider refuses, is refused before it is written under
+`rotations`. One set with `secrets set` sent its message when it was set, and
+logs in when the run is planned. Stage 2 logs in with it again, and the run
+stops there, before stage 3, when it does not. No other message is sent
+(*Mail settings are tried before they are used*).
 
 **Which value a host runs is read per secret, not per file.** The lines that
 carry the secret are the ones a render with any other value changes; the host
@@ -2945,6 +2952,81 @@ them `starttls` or `tls`. The monitor and Mbin send credentials over
 plaintext. The monitor also upgrades with STARTTLS when a `none` relay offers
 it, and then checks the relay's certificate, so a relay for `none` should not
 offer STARTTLS with a certificate the monitor cannot verify.
+
+### Mail settings are tried before they are used
+
+A mail setting that is wrong, or a password the provider has revoked,
+fails silently: nothing breaks at apply, and the first sign is a sign in link
+or an account notice that never arrives. So the toolkit tries them (Founder
+decision, 2026-10-14). **A check** takes an app's effective settings, the
+`smtp:` blocks resolved as above, and its password (`apps.<app>.smtp_password`
+when set, otherwise `external.smtp_password`), connects to `host` on its port,
+does TLS from the first byte for `tls` or STARTTLS for `starttls`, verifying
+the server's certificate for that host name against this machine's trust
+store, and logs in with `AUTH` (PLAIN, or LOGIN where PLAIN is not offered).
+A server whose certificate this machine does not trust for that name fails
+the check, as it fails any client that verifies it. `none` stays plaintext,
+which `validate` allows only toward a private relay. A relay with no
+`username` takes no login, so its check connects and greets.
+
+**It connects from a site that runs the app, through ssh.** The connection is
+ssh's stdio forward from that site (`ssh -W <host>:<port>`, over the shared
+connection of *One connection per host, shared*), so the site's host resolves
+the name and its own route carries the connection: the check passes or fails
+on the egress the app itself will use, and it reaches a relay only the mesh
+or the site's private network can. The SMTP conversation runs on the
+workstation, so nothing is installed or run on a host for it, and the password
+crosses only the ssh connection and then the path the app's own mail takes. The
+forward needs the host's sshd to allow TCP forwarding, which is OpenSSH's
+default (`AllowTcpForwarding`, sshd_config(5)); a host that refuses it says
+`administratively prohibited`, and the check says so.
+
+**When, and how much:**
+
+| Command | What it tries | On failure |
+|---|---|---|
+| `secrets set` an SMTP password | logs in with the new password and sends one test message | refused; nothing is written |
+| `secrets rotate` an SMTP password | a pasted one logs in and sends one test message when pasted; one set with `secrets set` logs in when the run is planned; stage 2 logs in again | refused before anything is written under `rotations`, or stopped at stage 2 before any app is handed it |
+| `apply`, with or without `--site` | every app it would start logs in, from each site it runs on; nothing is sent | refused before any host is changed, naming the app, where its settings are declared, and the server's reply |
+| `validate` | every app logs in, from each site it runs on; nothing is sent | a warning |
+
+A changed credential is the only thing that sends mail, because a login alone
+cannot tell whether the provider accepts the sender: a provider may take the
+login and still refuse a `from_address` the account does not own. `apply` and
+`validate` run often, against settings that already worked, so they only log
+in. A password `secrets set` wrote has sent its message already, so a rotation
+of it logs in and sends no second one.
+
+Apps with the same settings and password share a check. `apply` and `validate`
+make one per site, since each site has its own route to the server; `secrets
+set` and `secrets rotate` make one per sender, from the first site running one
+of its apps, since what they test is the credential and each sender gets one
+message.
+
+**The test message goes to every operator** the configuration declares, by
+their `email`, in the order of their names: a changed mail credential is every
+operator's business, and each of them can say whether it arrived. It is plain
+text, sent from the app's `from_address` (with its `from_name`), with the
+subject `Paisans SMTP test: <path> for <domain>`, and it names the community,
+the command, the apps, the server and the site it was sent from. The password
+is not in it, and no output shows the password: each is registered as a
+secret, and a failure quotes only the stage and the server's reply. With no
+operator email to send to, `secrets set` and `secrets rotate` refuse the
+password, since a message to nobody proves nothing.
+
+**What is not tried, and why it is a warning.** A host that only the app's own
+container resolves, a compose service name or a loopback address, is not one
+the site's host reaches, so its settings are listed as not checked. So are
+settings whose password is not set yet: `init` and `apply` already name that
+secret as owed. An SMTP password no app logs in with, or whose apps run on no
+site, is written by `secrets set` with nothing to try.
+
+**`validate` works away from the hosts.** It judges the file, and a mail
+server is outside the file, so every mail failure is a warning there and
+`apply` is the gate that refuses. A site it cannot reach, or a secrets file it
+cannot read, skips the check with a warning rather than failing; `--offline`
+skips it without trying, for an editor's save hook or a machine with no route
+to the sites.
 
 ### Rendered configuration is a build artifact
 
