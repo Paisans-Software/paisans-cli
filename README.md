@@ -8927,23 +8927,22 @@ Each site goes through four stages, each ending at a gate:
 | 4. Promote | the next key becomes `wireguard_private_key`, and the old one is deleted | the file decrypts and holds only the new key |
 
 **A stopped run resumes.** A next key in the secrets file says the site is mid
-rekey, and which public key its host runs, read through the WireGuard
-helper's `show public-key`, says whether stage 2 is done. A peer whose file was written but
-whose interface was not handed it is synced again. A site left mid rekey goes
-first in the next run, whether it is named or not, and its swap is finished
-before the cluster's health is read: a swap that stopped part way leaves its
-peers disagreeing about its key, which is often exactly why the cluster is
-unhealthy, so refusing on that health would leave the run unable to repair
-what it broke. The health check refuses only before a site's rekey starts. An
-`--all` run records the sites it has left in the secrets file
+rekey, and which public key its host runs, read through the WireGuard helper's
+`show public-key`, says whether stage 2 is done. A peer whose file was written
+but whose interface was not handed it is synced again. A site left mid rekey
+goes first in the next run, whether it is named or not, and its swap is
+finished before the cluster's health is read: a swap that stopped part way
+leaves its peers disagreeing about its key, which is often exactly why the
+cluster is unhealthy, so refusing on that health would leave the run unable to
+repair what it broke. The health check refuses only before a site's rekey
+starts. An `--all` run records the sites it has left in the secrets file
 (`mesh_rekey_remaining`), each taken off as its key is promoted, so a stopped
 `--all` run resumes with the sites it had left and does not rekey again a site
-it finished. Until stage 4, render still
-reads `wireguard_private_key`, the old key, so `apply`, with or without
-`--site`, refuses while any site has a next key in the secrets file and names
-the `mesh rekey` that finishes it: an `apply` then would hand the old key back
-to every peer and cut the site's tunnels, and a refusal costs nothing but the
-rekey's resume.
+it finished. Until stage 4, render still reads `wireguard_private_key`, the
+old key, so `apply`, with or without `--site`, refuses while any site has a
+next key in the secrets file and names the `mesh rekey` that finishes it: an
+`apply` then would hand the old key back to every peer and cut the site's
+tunnels, and a refusal costs nothing but the rekey's resume.
 
 **A relay's swap pauses Patroni.** A site with no dial endpoint routes
 everything it has no peer for through the first site that has one (*`site

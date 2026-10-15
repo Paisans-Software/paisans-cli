@@ -11,12 +11,12 @@
 // until every peer knows the new key, and two sites down at once can cost
 // etcd its quorum. Each site goes through four stages, each ending at a
 // gate: the new key written to the secrets file as the site's next key; the
-// peers' mesh files and then the site's own handed the new key with `wg
-// syncconf`; the cluster's health; and the next key promoted. A run that
-// stops part way resumes: a next key in the file says a rekey is under way,
-// and which key the host runs, read through the WireGuard helper, says
-// whether its swap is done. docs/specs/2026-10-11-site-evict.md, "Rekeying the mesh", is the
-// approved design.
+// peers' mesh files and then the site's own handed the new key by the
+// WireGuard helper's sync; the cluster's health; and the next key promoted.
+// A run that stops part way resumes: a next key in the file says a rekey is
+// under way, and which key the host runs, read through the WireGuard helper,
+// says whether its swap is done. docs/specs/2026-10-11-site-evict.md,
+// "Rekeying the mesh", is the approved design.
 package meshrekey
 
 import (

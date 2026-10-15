@@ -6,8 +6,9 @@
 // promotes it, so for a while the host runs a key the file does not call
 // current. Every command that renders mesh files and writes them to a host
 // mid rekey renders that site with the key its host runs, read through the
-// WireGuard helper's show as the rekey's own resume reads it: rendering the file's current key would
-// hand the old key back to every peer and cut the site's tunnels.
+// WireGuard helper's show as the rekey's own resume reads it: rendering the
+// file's current key would hand the old key back to every peer and cut the
+// site's tunnels.
 package meshkey
 
 import (
