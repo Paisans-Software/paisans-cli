@@ -38,7 +38,7 @@ The index's own line for this phase, "A request edited after its digest was read
 
 ## Founder question, not blocking
 
-The digest is 48 bits, as the spec fixes it. A forger who intercepts a request needs a second request with the same 48-bit digest and their own key in it. The request's free fields (an operator's name, up to 32 characters; the key itself) leave them room to vary it, and 2^48 SHA-256 evaluations is hours on one current GPU, so within a window like "the owner reads their email tomorrow" the digest does not hold against a determined forger, only against a casual edit. This plan implements the spec as written: the length is one constant, `admission.DigestLength`, and `DigestGroup` the group size, so a longer digest is a one-line change with its tests. Dropping key comments (Task 2) removes the cheapest field to vary, which is all this phase can do within the spec.
+The digest is 80 bits in Crockford base32 (founder decision after this plan was written; Tasks 3 and 5 carry it). The paragraph that follows explains why 48 bits was not enough. A forger who intercepts a request needs a second request with the same 48-bit digest and their own key in it. The request's free fields (an operator's name, up to 32 characters; the key itself) leave them room to vary it, and 2^48 SHA-256 evaluations is hours on one current GPU, so within a window like "the owner reads their email tomorrow" the digest does not hold against a determined forger, only against a casual edit. This plan implements the spec as written: the length is one constant, `admission.DigestLength`, and `DigestGroup` the group size, so a longer digest is a one-line change with its tests. Dropping key comments (Task 2) removes the cheapest field to vary, which is all this phase can do within the spec.
 
 ## Rulings
 
@@ -870,6 +870,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ---
 
 ### Task 3: One byte-exact form, a strict parse and the digest
+
+> **Founder decision, after this plan was written (spec PR 353): the digest is the first 80 bits of the SHA-256 in Crockford base32, not twelve hex digits.** This overrides every digest detail in this task's code and tests: `Digest` returns sixteen lower-case characters from `0123456789abcdefghjkmnpqrstvwxyz` in four groups of four (`xxxx-xxxx-xxxx-xxxx`), encoding the first 10 bytes of the sum most significant bit first; `DigestBits = 80` and `DigestGroup = 4` replace `DigestLength`. Add `func ParseDigest(typed string) (string, error)`: drops hyphens and spaces, lower-cases, maps `i` and `l` to `1` and `o` to `0`, refuses `u` and any other character outside the alphabet and any length but sixteen, and returns the canonical grouped form, so phase 5 compares `ParseDigest(typed) == Digest(file)`. Tests: a known vector computed independently (eg with Python's `base64.b32encode` re-mapped to Crockford's alphabet, documented in the test), the shape, stability, field sensitivity, and `ParseDigest`'s acceptances and refusals. The comment explains why 80 bits and why Crockford.
+
 
 **Files:**
 - Create: `internal/admission/encode.go`
@@ -1824,6 +1827,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ---
 
 ### Task 5: `paisans host request`
+
+> **Founder decision (spec PR 353):** the digest printed on stderr is the sixteen-character Crockford base32 form from Task 3, `xxxx-xxxx-xxxx-xxxx`; every expected output, doc line and help text in this task says so, not twelve hex digits.
+
 
 **Files:**
 - Create: `cmd/paisans/hostrequest.go`
