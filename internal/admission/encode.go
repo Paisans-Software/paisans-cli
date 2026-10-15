@@ -17,8 +17,8 @@ const header = "# A request to admit one site of a paisans deployment to this ho
 	"# Compare its digest with the operator who sent it before you admit it:\n" +
 	"#   sudo paisans host admit --request <this file>\n"
 
-// Encode is r as the request's file: one form for each request, written by
-// hand rather than by a YAML library, so the bytes, and so the digest,
+// Encode is r as the request's file: one form for each request, each field
+// written in a fixed order and layout, so the bytes, and so the digest,
 // depend on the request alone. Every string is double quoted, so no value
 // reads as another type. Encode is for a request Check accepts.
 func Encode(r Request) []byte {
@@ -192,7 +192,7 @@ func shape(m *yaml.Node, path string) []string {
 // call, and cannot be longer than that, yet a forger who can change a
 // request on its way gains by searching for another that matches: at 80
 // bits that search is about 2^80 hashes for a chosen target, far beyond
-// anyone's reach, where twelve hex digits (48 bits) would not be.
+// anyone's reach.
 //
 // Crockford's alphabet because a person reads it: it has no i, l, o or u,
 // so nothing read aloud is misheard as 1, 0 or another letter,
@@ -231,7 +231,7 @@ func Digest(data []byte) string {
 }
 
 // ParseDigest reads a digest as an owner types it and returns it as Digest
-// writes it, so phase 5 compares ParseDigest(typed) == Digest(file). It
+// writes it, so host admit compares ParseDigest(typed) == Digest(file). It
 // drops hyphens and spaces, lower-cases, reads i and l as 1 and o as 0, and
 // refuses u, any other character outside the alphabet, and any length but
 // sixteen.

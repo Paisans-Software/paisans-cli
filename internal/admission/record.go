@@ -21,8 +21,8 @@ const RecordVersion = 1
 
 // Dir is where admission records live on a host: root's, mode DirMode, so
 // every deployment's user reads its own record and none can write one.
-// Phase 5's writer creates it root-owned, and refuses to write if it is a
-// link or not root's.
+// host admit creates it root-owned, and refuses to write if it is a link or
+// not root's.
 const Dir = "/etc/paisans"
 
 // DirMode is Dir's mode: the deployment's user lists and reads it, only root

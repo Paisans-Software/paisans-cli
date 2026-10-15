@@ -170,7 +170,7 @@ func TestParseRecordWithoutDigest(t *testing.T) {
 	}
 }
 
-// The path, the mode and the directory phase 5 writes to.
+// The path, the mode and the directory host admit writes to.
 func TestRecordPlace(t *testing.T) {
 	if got, err := admission.Path("f2a9"); err != nil || got != "/etc/paisans/admitted.f2a9.json" {
 		t.Errorf("Path = %s, %v", got, err)
