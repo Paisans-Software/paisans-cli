@@ -180,16 +180,20 @@ func TestAMissingOrMalformedOperatorsHeartbeatTokenIsRefused(t *testing.T) {
 }
 
 // fakePusherCurl stands in for curl in the operators heartbeat script. Asked for
-// /healthz it answers as the reconciler does, FAKE_BODY with a newline and
-// then curl's -w status, or nothing and exit 7 when FAKE_CODE is 000. Every
-// other request is a push: its arguments and whatever it was sent on stdin
-// are appended to $FAKE_LOG, one push per line. After the first cycle (see
-// fakePusherSleep) it records and answers nothing.
+// a reconciler path it answers as the reconciler does, FAKE_BODY with a
+// newline and then curl's -w status, or nothing and exit 7 when FAKE_CODE is
+// 000. It answers each path once and nothing afterwards, so a second cycle
+// pushes nothing however its curl and the sleep that ends the script are
+// ordered, which no count kept by sleep could promise, since the script
+// starts sleep in the background before it calls curl. Every other request
+// is a push: its arguments and whatever it
+// was sent on stdin are appended to $FAKE_LOG, one push per line.
 const fakePusherCurl = `#!/bin/sh
-[ "$(cat "$FAKE_CYCLES")" = 1 ] || exit 7
 for last; do :; done
 case "$last" in
 */healthz|*/healthz/*)
+	if grep -qxF "$last" "$FAKE_SERVED" 2>/dev/null; then printf '\n000'; exit 7; fi
+	echo "$last" >> "$FAKE_SERVED"
 	[ "$FAKE_CODE" = 000 ] && { printf '\n000'; exit 7; }
 	printf '%s\n\n%s' "$FAKE_BODY" "$FAKE_CODE"
 	exit 0 ;;
@@ -244,7 +248,8 @@ func runPusher(t *testing.T, cfg *config.Config, secrets *config.Secrets, env []
 	push := filepath.Join(root, "push.sh")
 	cycles := filepath.Join(root, "cycles")
 	log := filepath.Join(root, "pushes")
-	for path, content := range map[string]string{push: script, cycles: "0\n", log: ""} {
+	served := filepath.Join(root, "served")
+	for path, content := range map[string]string{push: script, cycles: "0\n", log: "", served: ""} {
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -254,7 +259,7 @@ func runPusher(t *testing.T, cfg *config.Config, secrets *config.Secrets, env []
 	cmd := exec.CommandContext(ctx, "sh", push)
 	cmd.Env = append([]string{
 		"PATH=" + bin + ":/usr/bin:/bin",
-		"FAKE_CODE=" + code, "FAKE_BODY=" + body, "FAKE_CYCLES=" + cycles, "FAKE_LOG=" + log,
+		"FAKE_CODE=" + code, "FAKE_BODY=" + body, "FAKE_CYCLES=" + cycles, "FAKE_LOG=" + log, "FAKE_SERVED=" + served,
 	}, env...)
 	out, _ := cmd.CombinedOutput()
 	if ctx.Err() != nil {

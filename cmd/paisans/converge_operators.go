@@ -251,17 +251,51 @@ func convergeEmailResults(r ui.Reporter, cfg *config.Config, app string, o conve
 	failed, err := ui.Get(r, "wait for "+app+"'s login link emails", func() (map[string]string, error) {
 		return convergeEmailFailures(cfg, app, o, addresses)
 	})
+	// One cause shared by every failure, Eg: the smtp settings Pocket ID
+	// renders, is said once below rather than on each operator's line.
+	shared := ""
+	for _, d := range emailed {
+		why, ok := failed[d.Email]
+		if !ok {
+			continue
+		}
+		why = pocketidlog.Brief(why)
+		failed[d.Email] = why
+		if shared == "" {
+			shared = why
+		} else if shared != why {
+			shared = ""
+			break
+		}
+	}
+	if len(failed) < 2 {
+		shared = ""
+	}
 	for _, d := range emailed {
 		s := r.Step("email " + d.ID + " a login link")
 		switch why, ok := failed[d.Email]; {
 		case err != nil:
 			s.End(ui.Failed, "could not read Pocket ID's log ("+errLine(err)+")")
+		case ok && shared != "":
+			s.End(ui.Failed, "failed")
 		case ok:
 			s.End(ui.Failed, "failed: "+why)
 		default:
 			s.Done("sent")
 		}
 	}
+	if shared != "" {
+		r.Note("Pocket ID "+app+" could not send those login link emails: "+shared, emailFailureFix(shared))
+	}
+}
+
+// emailFailureFix says what to do about a cause every login link email
+// failed with. The printed links are still there either way.
+func emailFailureFix(why string) string {
+	if strings.Contains(why, "missing SMTP password") {
+		return "Its smtp settings name a username and the secrets file holds no password for it. `paisans secrets list` names the unset smtp_password; set it with `paisans secrets set <path>`, then apply. Until then, pass each link below on yourself."
+	}
+	return "Pass each link below on yourself."
 }
 
 // printLoginLinks writes every link issued, after the run's result, set apart

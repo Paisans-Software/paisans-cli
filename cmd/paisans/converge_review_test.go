@@ -228,9 +228,11 @@ func TestConvergeDoesNotAskAgainForWhatWasApproved(t *testing.T) {
 	if !strings.Contains(rec.Lines(), want) || heading < 0 {
 		t.Errorf("the review, wanting %q:\n%s", want, rec.Lines())
 	}
-	for i, e := range rec.Events {
-		if e.Kind == "explain" && strings.HasPrefix(e.Text, "+ ") && i < heading {
-			t.Errorf("an approved entry is listed again: %s", e.Text)
+	// The foundation group is the only one: an approved entry listed again
+	// would come under a heading of its own.
+	for _, e := range rec.Events[heading+1:] {
+		if e.Kind == "explain" && strings.HasSuffix(e.Text, ":") {
+			t.Errorf("a group beside the foundation images: %s\n%s", e.Text, rec.Lines())
 		}
 	}
 }

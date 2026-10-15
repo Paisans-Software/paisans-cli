@@ -53,3 +53,18 @@ func TestLogCommand(t *testing.T) {
 		t.Errorf("LogCommand = %q\nwant %q", got, want)
 	}
 }
+
+// Brief cuts Pocket ID's layers of "failed to" and the connection string
+// format off an email error, and leaves any other error as it is.
+func TestBrief(t *testing.T) {
+	for in, want := range map[string]string{
+		"failed to configure emailer: failed to init email sender 'smtp': invalid connection string: missing SMTP password; required format is 'smtp://<username>:<password>@<host>:<port>?fromAddress=<address>'": "invalid connection string: missing SMTP password",
+		"dial tcp: i/o timeout":                       "dial tcp: i/o timeout",
+		"failed to send email: 535 5.7.8 auth failed": "535 5.7.8 auth failed",
+		"failed to send email":                        "failed to send email",
+	} {
+		if got := pocketidlog.Brief(in); got != want {
+			t.Errorf("pocketidlog.Brief(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

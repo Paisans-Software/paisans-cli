@@ -110,11 +110,12 @@ const garageS3Port = 3900
 // with "[UFW BLOCK] IN=br-... DST=<mesh> DPT=5000" in the kernel log.
 //
 // Matched by interface rather than by Docker's address pools, which change
-// with every network created; and narrowed to the mesh address and the two
-// ports apps use, so a container gains its database proxy and object storage
-// and not etcd, Patroni's API or Garage's admin port. Rejected: pinning
-// Docker's address pool in daemon.json and allowing that subnet, which needs a
-// daemon restart and does not cover networks that already exist.
+// with every network created; and narrowed to the mesh address and the ports
+// apps use, so a container gains its database proxy, object storage and, where
+// the account service runs, the Pocket ID API route, and not etcd, Patroni's
+// API or Garage's admin port. Rejected: pinning Docker's address pool in
+// daemon.json and allowing that subnet, which needs a daemon restart and does
+// not cover networks that already exist.
 func ContainerRules(cfg *config.Config, name string) []Rule {
 	site, ok := cfg.Sites[name]
 	if !ok {
@@ -133,7 +134,26 @@ func ContainerRules(cfg *config.Config, name string) []Rule {
 			}
 		}
 	}
+	rules = append(rules, accountRules(cfg, name, site)...)
 	return append(rules, monitorRules(cfg, name, site)...)
+}
+
+// accountRules lets the account service reach Pocket ID's API at its own
+// site's HAProxy, on the mesh address, where it sends the static API key. The
+// call arrives on a compose bridge, where the default deny drops it, and the
+// service then times out on every page that reads or changes a member.
+func accountRules(cfg *config.Config, name string, site config.Site) []Rule {
+	for app, sites := range render.AppSites(cfg) {
+		if cfg.Apps[app].Blueprint != config.BlueprintAccount {
+			continue
+		}
+		for _, s := range sites {
+			if s == name {
+				return []Rule{{Interface: containerBridges, To: site.Address, Port: render.PocketIDAPIPort, Proto: "tcp", Why: "the account service to the Pocket ID API"}}
+			}
+		}
+	}
+	return nil
 }
 
 // monitorRules lets an uptime monitor's direct checks reach the apps that run

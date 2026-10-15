@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -76,6 +77,7 @@ func readOnly(cfg *config.Config) (exact []string, prefixes []string) {
 		"read " + mesh.DaemonConfig,
 		patroni.ClusterCommand(cfg.Deployment(), "10.44.0.1:8008"),
 		patroni.ClusterCommand(cfg.Deployment(), "10.44.0.2:8008"),
+		doctor.CaddyLogCommand(cfg.Deployment()),
 	}
 	prefixes = []string{
 		"docker inspect --format '{\"State\":{{json .State}},\"RestartCount\":{{.RestartCount}}}' ",
@@ -103,7 +105,10 @@ func readOnly(cfg *config.Config) (exact []string, prefixes []string) {
 
 func withDoctorHosts(t *testing.T, hosts map[string]doctorHost) {
 	t.Helper()
-	saved, savedNow := doctorTransport, doctorNow
+	saved, savedNow, savedAtOnce := doctorTransport, doctorNow, doctorAtOnce
+	// One check at a time, in the graph's order, so the hosts' shared
+	// record of what they were sent is written by one goroutine.
+	doctorAtOnce = 1
 	doctorTransport = func(tr apply.SSHTransport) apply.Transport {
 		h, ok := hosts[tr.Host]
 		if !ok {
@@ -112,8 +117,11 @@ func withDoctorHosts(t *testing.T, hosts map[string]doctorHost) {
 		return h
 	}
 	doctorNow = func() time.Time { return time.Unix(1_760_000_000, 0) }
-	t.Cleanup(func() { doctorTransport, doctorNow = saved, savedNow })
+	t.Cleanup(func() { doctorTransport, doctorNow, doctorAtOnce = saved, savedNow, savedAtOnce })
 }
+
+// quietCaddyLog is a caddy container with no certificate line in its log.
+const quietCaddyLog = "now 1760000000\nstarted 2025-10-09T08:00:00Z\n"
 
 // stuckHosts are the four sites of the stuck case: home-b led and is down,
 // home-a is a replica /sync no longer names, and vm overlaps the mesh.
@@ -144,11 +152,13 @@ func stuckHosts(cfg *config.Config, sent, writes *[]string) map[string]doctorHos
 		doctor.ReachCommand:                        "",
 		doctor.ClockCommand:                        "1760000000.000000000\n",
 		doctor.ContainersCommand(cfg.Deployment()): `{"Names":"paisans-f2a9-infra-etcd-1","State":"running","Status":"Up 2 days","Labels":"community.paisans.deployment=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}`,
+		doctor.CaddyLogCommand(cfg.Deployment()):   quietCaddyLog,
 	}
 	watch := map[string]string{
 		doctor.ReachCommand:                        "",
 		doctor.ClockCommand:                        "1760000000.000000000\n",
 		doctor.ContainersCommand(cfg.Deployment()): `{"Names":"paisans-f2a9-health-app-1","State":"running","Status":"Up 2 days","Labels":"community.paisans.deployment=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}`,
+		doctor.CaddyLogCommand(cfg.Deployment()):   quietCaddyLog,
 	}
 	return map[string]doctorHost{
 		"home-a.local":      {name: "home-a.local", answers: homeA, sent: sent, writes: writes},
@@ -181,15 +191,17 @@ func TestDoctorDiagnosesTheStuckReplicaAndOnlyReads(t *testing.T) {
 		"detail: 4 site(s), 3 reached",
 		"done: check mesh home-a psns-f2a9 is up",
 		"done: check mesh home-a nothing on the host overlaps the mesh subnet 10.44.0.0/24",
-		"refuse: check mesh vm: the mesh subnet 10.44.0.0/24 overlaps route 10.44.0.0/16 dev wg9",
-		"refuse: check reach home-b: ssh to ubuntu@home-b.local did not answer (Operation timed out)",
-		"warn: check etcd quorum: 2 of 3 members healthy (needs 2), asked from home-a",
-		"refuse: check patroni: no primary: home-a is a replica and will not promote while home-b, which led, is gone",
-		"refuse: check containers home-a: paisans-f2a9-talk-app-1 restarting (exit 1, restarted 9 time(s))",
+		"fail: check mesh vm the mesh subnet 10.44.0.0/24 overlaps route 10.44.0.0/16 dev wg9",
+		"fail: check reach home-b ssh to ubuntu@home-b.local did not answer (Operation timed out)",
+		"warned: check etcd quorum: 2 of 3 members healthy (needs 2), asked from home-a",
+		"fail: check patroni no primary: home-a is a replica and will not promote while home-b, which led, is gone",
+		"fail: check containers home-a paisans-f2a9-talk-app-1 restarting (exit 1, restarted 9 time(s))",
 		"It cannot reach its database",
-		"refuse: check pocket-id auth: no active instance, so sign in is down",
+		"fail: check pocket-id auth no active instance, so sign in is down",
 		"home-b   unreachable did not answer ssh (see reach)",
 		"There is no database primary (see patroni)",
+		"Not checked because of this: mesh, patroni, containers, settings talk, clocks, leftovers, ssh allowlist on home-b.",
+		"section: failed, deepest first:",
 		"doctor changes nothing",
 	} {
 		if !strings.Contains(out, want) {
@@ -202,6 +214,17 @@ func TestDoctorDiagnosesTheStuckReplicaAndOnlyReads(t *testing.T) {
 	warning := strings.Index(out, "WARNING: every commit home-b made")
 	if start < 0 || !(start < force && force < command && command < warning) {
 		t.Errorf("want start home-b, the forced failover, its command, then its warning, in that order:\n%s", out)
+	}
+
+	// The failures again at the end, deepest first.
+	closing := out[strings.Index(out, "section: failed, deepest first:"):]
+	last := -1
+	for _, title := range []string{"check reach home-b", "check mesh vm", "check patroni", "check containers home-a", "check pocket-id auth"} {
+		i := strings.Index(closing, "fail: "+title)
+		if i < last {
+			t.Errorf("%s is out of order in the closing list:\n%s", title, closing)
+		}
+		last = i
 	}
 
 	exact, prefixes := readOnly(cfg)
@@ -301,14 +324,15 @@ func TestDoctorReportsLeftoversAndForeignCaddyUsers(t *testing.T) {
 {"id":"b","name":"/paisans-f2a9-old-app-1","pid":11,"labels":{"community.paisans.deployment":"` + id + `","com.docker.compose.project":"paisans-f2a9-old","com.docker.compose.service":"app"},"networks":{"paisans-f2a9-old_default":{}},"ports":{}}
 {"id":"c","name":"/blog-ghost-1","pid":12,"labels":{"com.docker.compose.project":"blog"},"networks":{"web":{}},"ports":{}}
 `,
-		probes[4]:  "",
-		probes[5]:  "",
-		probes[6]:  "",
-		probes[7]:  "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536\n",
-		probes[8]:  "[]",
-		probes[9]:  "ufw absent\n",
-		probes[10]: "inactive\n",
-		probes[11]: "/srv/caddy.d/blog.caddy\n",
+		probes[4]:                                "",
+		probes[5]:                                "",
+		probes[6]:                                "",
+		probes[7]:                                "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536\n",
+		probes[8]:                                "[]",
+		probes[9]:                                "ufw absent\n",
+		probes[10]:                               "inactive\n",
+		probes[11]:                               "/srv/caddy.d/blog.caddy\n",
+		doctor.CaddyLogCommand(cfg.Deployment()): quietCaddyLog,
 	}
 	var sent, writes []string
 	withDoctorHosts(t, map[string]doctorHost{
@@ -319,7 +343,7 @@ func TestDoctorReportsLeftoversAndForeignCaddyUsers(t *testing.T) {
 	out := rec.Lines()
 	for _, want := range []string{
 		"leftovers",
-		"warn: check leftovers vm: 1 thing(s) of this deployment left over",
+		"warned: check leftovers vm 1 thing(s) of this deployment left over",
 		"stack old (compose project paisans-f2a9-old, 1 of 1 running): paisans-f2a9-old-app-1",
 		"apply leaves them in place.",
 		"`paisans app remove old` takes old's off every site, once a whole apply has run on each; it keeps its data unless given --delete-data.",
@@ -404,5 +428,70 @@ func TestDoctorExecuteRemovesOnlyRedundantGateConfig(t *testing.T) {
 	}
 	if strings.Join(refused, ",") != "apps.talk.config.MBIN_PRIVATE_INSTANCE" {
 		t.Errorf("after doctor --execute, refused %v, want only the contradiction", refused)
+	}
+}
+
+// busyHost answers every command after a moment, and counts how many it
+// runs at once, and how many every host runs at once.
+type busyHost struct {
+	name      string
+	mu        *sync.Mutex
+	now, peak *int
+	all, top  *int
+}
+
+func (h busyHost) Describe() string { return "ubuntu@" + h.name }
+func (h busyHost) Run(string) (string, error) {
+	h.mu.Lock()
+	*h.now++
+	*h.all++
+	*h.peak = max(*h.peak, *h.now)
+	*h.top = max(*h.top, *h.all)
+	h.mu.Unlock()
+	time.Sleep(5 * time.Millisecond)
+	h.mu.Lock()
+	*h.now--
+	*h.all--
+	h.mu.Unlock()
+	return "", nil
+}
+func (h busyHost) RunInput(command, _ string) (string, error) { return h.Run(command) }
+func (h busyHost) ReadFile(string) (string, bool, error) {
+	_, err := h.Run("")
+	return "", false, err
+}
+func (h busyHost) WriteFile(string, string, uint32) error { return errors.New("doctor writes nothing") }
+
+// Checks run at once: a site never runs more commands at a time than the
+// per site bound, which keeps under sshd's sessions per connection, and
+// sites are not bounded against each other.
+func TestDoctorBoundsCommandsPerSiteOnly(t *testing.T) {
+	saved, savedBound, savedAtOnce := doctorTransport, doctorSiteCommands, doctorAtOnce
+	t.Cleanup(func() { doctorTransport, doctorSiteCommands, doctorAtOnce = saved, savedBound, savedAtOnce })
+	doctorSiteCommands, doctorAtOnce = 2, 0
+	var mu sync.Mutex
+	all, top := 0, 0
+	hosts := map[string]busyHost{}
+	for _, name := range []string{"home-a.local", "home-b.local", "vm.example.org", "watch.example.org"} {
+		hosts[name] = busyHost{name: name, mu: &mu, now: new(int), peak: new(int), all: &all, top: &top}
+	}
+	doctorTransport = func(tr apply.SSHTransport) apply.Transport {
+		h, ok := hosts[tr.Host]
+		if !ok {
+			t.Fatalf("doctor reached an unexpected host %q", tr.Host)
+		}
+		return h
+	}
+	_ = withRecorder(t, false)
+	_ = runDoctor([]string{"--config", fixtureConfig(), "--sudo=false"})
+	busiest := 0
+	for name, h := range hosts {
+		if *h.peak > 2 {
+			t.Errorf("%s ran %d commands at once, over the bound of 2", name, *h.peak)
+		}
+		busiest = max(busiest, *h.peak)
+	}
+	if busiest < 2 || top <= 2 {
+		t.Errorf("the checks did not run at once: at most %d on one site, %d in all", busiest, top)
 	}
 }

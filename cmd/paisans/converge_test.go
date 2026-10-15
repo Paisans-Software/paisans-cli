@@ -952,12 +952,12 @@ func TestConvergeFindingsOpenTheConfigurationSection(t *testing.T) {
 		want []string
 	}{
 		{true, nil, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "step init", "pending init", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section etcd members"}},
-		{false, nil, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section etcd members"}},
-		{false, []string{"--execute"}, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section etcd members"}},
+		{false, nil, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section mail", "step smtp.example.org:587, starttls, as robot@example.org, from home-a", "step smtp.example.org:587, starttls, as robot@example.org, from home-b", "step smtp.example.org:587, starttls, as robot@example.org, from watch", "section etcd members"}},
+		{false, []string{"--execute"}, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section mail", "step smtp.example.org:587, starttls, as robot@example.org, from home-a", "step smtp.example.org:587, starttls, as robot@example.org, from home-b", "step smtp.example.org:587, starttls, as robot@example.org, from watch", "section etcd members"}},
 		// init ran first and reported the findings and the secrets itself,
 		// under the file's path; they are not reported a second time.
 		// The deployment and the version open every run, ahead of both.
-		{true, []string{"--execute"}, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section etcd members"}},
+		{true, []string{"--execute"}, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section mail", "step smtp.example.org:587, starttls, as robot@example.org, from home-a", "step smtp.example.org:587, starttls, as robot@example.org, from home-b", "step smtp.example.org:587, starttls, as robot@example.org, from watch", "section etcd members"}},
 	} {
 		rec.Events = nil
 		needsInit = c.init
@@ -1095,7 +1095,7 @@ func statuses(rec *ui.Recorder) []string {
 			continue
 		}
 		mark := map[string]string{"done": "✓", "pending": "○", "waiting": "·", "fail": "✗"}[e.Kind]
-		if mark == "" || section == "deployment" || section == "architecture" || section == "pocket id" || section == "secrets" || section == "review" || strings.Contains(e.Text, "etcd record") || strings.HasSuffix(e.Text, "for an admin") {
+		if mark == "" || section == "deployment" || section == "architecture" || section == "pocket id" || section == "secrets" || section == "mail" || section == "review" || strings.Contains(e.Text, "etcd record") || strings.HasSuffix(e.Text, "for an admin") {
 			continue
 		}
 		title := e.Text
@@ -2043,6 +2043,43 @@ func TestConvergeRunReportsEachEmail(t *testing.T) {
 		if !found {
 			t.Errorf("no %s line saying %q:\n%s", tc.mark, tc.result, rec.Lines())
 		}
+	}
+}
+
+// When every failed email failed the same way, each operator's line says
+// failed and the cause, cut to what Pocket ID's error means, is said once.
+func TestConvergeRunSaysASharedEmailFailureOnce(t *testing.T) {
+	why := "failed to configure emailer: failed to init email sender 'smtp': invalid connection string: missing SMTP password; required format is 'smtp://<username>:<password>@<host>:<port>'"
+	fakeConverge(t, nil)
+	fakeDeclaredOperators(t, unregistered(true))
+	fakeEmailFailures(t, map[string]string{"alice@example.org": why, "bob@example.org": why}, nil)
+	recordLinks(t)
+	rec := recordConverge(t)
+	if err := converge(t, "--execute"); err != nil {
+		t.Fatal(err)
+	}
+	lines := rec.Lines()
+	for _, id := range []string{"alice", "bob"} {
+		found := false
+		for _, e := range rec.Events {
+			if e.Kind == "fail" && e.Text == "email "+id+" a login link" && e.Extra == "failed" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("no bare failed line for %s:\n%s", id, lines)
+		}
+	}
+	if n := strings.Count(lines, "missing SMTP password"); n != 1 {
+		t.Errorf("the cause is said %d times, want once:\n%s", n, lines)
+	}
+	for _, noise := range []string{"required format", "failed to configure emailer"} {
+		if strings.Contains(lines, noise) {
+			t.Errorf("output keeps %q:\n%s", noise, lines)
+		}
+	}
+	if !strings.Contains(lines, "paisans secrets list") {
+		t.Errorf("no fix for the missing password:\n%s", lines)
 	}
 }
 

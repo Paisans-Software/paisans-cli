@@ -1,15 +1,20 @@
 package secretsrotate
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/smtpcheck"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -17,11 +22,16 @@ import (
 const dnsTokenPath = "external.acme_dns_token"
 
 // pasted rotates a secret issued elsewhere: a DNS token or an SMTP password.
-// No next value is made here.
-// The operator replaces it at its issuer and sets it with `paisans secrets set
-// <path>`, and the rotation hands the value the file then holds to every
-// stack that renders it, one site at a time, each healthy before the next.
-// The issuer checks it, and it already accepts the new one.
+// No next value is made here: a person replaces it at its issuer, and the
+// rotation hands the new value to every stack that renders it, one site at a
+// time, each healthy before the next.
+//
+// The next value comes from one of two places. When the secrets file holds the
+// value every host using it already runs, nothing new is in it, so stage 1
+// asks the operator for the replacement at --execute (Asker), and it goes
+// under rotations like a generated secret's next value. When the file holds a
+// value some host does not run, it was replaced with `paisans secrets set`,
+// and that value is the next one.
 //
 // Which stacks render it is found by rendering: the configuration is
 // rendered with the file as it is and again with the secret replaced by a
@@ -29,8 +39,11 @@ const dnsTokenPath = "external.acme_dns_token"
 // apply does, so it cannot name a stack apply would not hand the value to.
 type pasted struct {
 	path string
-	// issuer is where a human replaces the secret, for the refusal.
+	// issuer is where a human replaces the secret.
 	issuer func(cfg *config.Config) string
+	// dns is whether stage 2 tries the next value against the zone, and
+	// smtp whether it logs in to the mail server with it (smtpCheck).
+	dns, smtp bool
 }
 
 // DNSToken is the rotation of external.acme_dns_token, issued by the DNS
@@ -39,22 +52,36 @@ type pasted struct {
 // scoped apply of the site's infrastructure stack, in which caddy.env changes
 // and so recreates Caddy behind the gateway's gates, as any apply that
 // changes it does (internal/apply/apply.go, isEnvironment and isRouting).
+// Stage 2 tries the next token against the community's zone at the provider,
+// read only, so a token that cannot see the zone reaches no Caddy.
 func DNSToken() Rotator {
-	return pasted{path: dnsTokenPath, issuer: func(cfg *config.Config) string { return cfg.ACME.Provider }}
+	return pasted{path: dnsTokenPath, issuer: func(cfg *config.Config) string { return cfg.ACME.Provider }, dns: true}
 }
 
 // SMTPPassword is the rotation of a password the mail provider issued:
 // external.smtp_password, the deployment's, or apps.<app>.smtp_password, an
-// app's own. Every app stack that sends mail with it renders it.
+// app's own. Every app stack that sends mail with it renders it. Stage 2
+// logs in to the mail server with the next password, from a site running
+// each app that uses it, and a pasted one also sends the operators a test
+// message before it is taken (smtpCheck).
 func SMTPPassword(path string) Rotator {
-	return pasted{path: path, issuer: func(*config.Config) string { return "the mail provider" }}
+	return pasted{path: path, issuer: func(*config.Config) string { return "the mail provider" }, smtp: true}
 }
 
 func (p pasted) Path() string { return p.path }
 func (p pasted) Cost() Cost   { return Cost{} }
 
-// Next is the value already in the file, which `secrets set` put there.
+// Issuer is where a person replaces the secret, Eg: the DNS provider.
+func (p pasted) Issuer(cfg *config.Config) string { return p.issuer(cfg) }
+
+// Next is the value the file holds, which `secrets set` put there. A run
+// that asks for the next value does not call it.
 func (p pasted) Next(e Env, s *config.Secrets) (string, error) {
+	return p.current(e, s)
+}
+
+// current is the value the secrets file holds, registered as a secret.
+func (p pasted) current(e Env, s *config.Secrets) (string, error) {
 	v, _ := s.Get(p.path)
 	if v == "" {
 		return "", fmt.Errorf("the secrets file holds no %s. Set the one %s issued with `paisans secrets set %s`", p.path, p.issuer(e.Cfg), p.path)
@@ -63,14 +90,141 @@ func (p pasted) Next(e Env, s *config.Secrets) (string, error) {
 	return v, nil
 }
 
-// Checked has nothing to do: the issuer checks the secret, and it issued
-// the new one before it was set.
-func (pasted) Checked(e Env, next string) error         { return nil }
-func (pasted) Accepts(e Env, next string) (bool, error) { return true, nil }
+// Checked is where a value that does not work is stopped, before any host
+// is handed it, and the error says why it failed: the DNS token is tried
+// against the zone (dnsCheck), and an SMTP password logs in to the mail
+// server and sends the operators a test message (smtpCheck). It is what a
+// pasted value is tried with (Run.Answer).
+func (p pasted) Checked(e Env, next string) error {
+	switch {
+	case p.dns:
+		return dnsCheck(e, next)
+	case p.smtp:
+		return smtpCheck(e, p.path, next, true)
+	}
+	return nil
+}
 
-// Promote leaves the file as it is: the next value is the file's own, set
-// before the rotation began.
-func (pasted) Promote(s *config.Secrets, next string) error { return nil }
+// Accepts is whether the next value works where it is checked. A token the
+// provider refuses is not an error here but a stage still ahead, so a
+// resumed run plans it and Checked says why. An SMTP password is only logged
+// in with here: the plan reads it, and stage 2 reads it again, and neither
+// sends mail. The one test message is sent where the value was given, by
+// `secrets set` or when it was pasted. A site that could not be reached is an
+// error, since nothing was learned.
+func (p pasted) Accepts(e Env, next string) (bool, error) {
+	switch {
+	case p.dns:
+		return dnsCheck(e, next) == nil, nil
+	case p.smtp:
+		err := smtpCheck(e, p.path, next, false)
+		var failed *smtpcheck.Error
+		if errors.As(err, &failed) && !failed.Dialled() {
+			return false, err
+		}
+		return err == nil, nil
+	}
+	return true, nil
+}
+
+// CheckText is what the plan says stage 2 does for the secret.
+func (p pasted) CheckText(cfg *config.Config) string {
+	if p.smtp {
+		return "the next password logs in to the mail server from a site running each app that uses it; a pasted one also sends the operators a test message when pasted, as `paisans secrets set` does"
+	}
+	if !p.dns {
+		return "nothing checks it here: " + p.issuer(cfg) + " issued it"
+	}
+	if why := dnsUnchecked(cfg); why != "" {
+		return "nothing checks it here: " + why
+	}
+	return fmt.Sprintf("the next token looks up %s's zone at %s, read only", dnsDomain(cfg), cfg.ACME.Provider)
+}
+
+// dnsTimeout bounds stage 2's lookup at the provider.
+const dnsTimeout = time.Minute
+
+// dnsUnchecked is why the DNS token cannot be tried here, or "".
+func dnsUnchecked(cfg *config.Config) string {
+	switch name := cfg.ACME.Provider; {
+	case name == "":
+		return "no DNS provider is declared"
+	case !slices.Contains(dns.Implemented(), name):
+		return name + " record management is not implemented"
+	}
+	return ""
+}
+
+func dnsDomain(cfg *config.Config) string {
+	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(cfg.Community.Domain)), ".")
+}
+
+// dnsCheck tries token against the community's zone at the provider: the
+// zone lookup dns init makes, which reads and changes nothing. A token that
+// cannot see the zone cannot answer an ACME challenge in it either. A
+// provider whose record management is not implemented is not checked.
+func dnsCheck(e Env, token string) error {
+	if dnsUnchecked(e.Cfg) != "" {
+		return nil
+	}
+	providerFor := e.DNSProvider
+	if providerFor == nil {
+		providerFor = dns.For
+	}
+	ui.Secret(token)
+	provider, err := providerFor(e.Cfg.ACME.Provider, token)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), dnsTimeout)
+	defer cancel()
+	if _, err := dns.FindZone(ctx, provider, dnsDomain(e.Cfg), nil); err != nil {
+		return fmt.Errorf("the DNS token does not work against %s: %v, so no host is handed it. Check its zone and permissions at %s", e.Cfg.ACME.Provider, err, e.Cfg.ACME.Provider)
+	}
+	return nil
+}
+
+// smtpCheck tries password as the SMTP password at path, from a site running
+// each app that logs in with it, with send also sending the operators the
+// test message (smtpcheck.TryPassword). A failure names the server's reply,
+// never the password. Settings nothing can be tried from, Eg: a relay only
+// the app's own network resolves, are not tried.
+func smtpCheck(e Env, path, password string, send bool) error {
+	s, err := e.Store.Load()
+	if err != nil {
+		return err
+	}
+	if _, err := smtpcheck.TryPassword(e.Mail, e.Cfg, s, path, password, "paisans secrets rotate", send); err != nil {
+		var failed *smtpcheck.Error
+		switch {
+		case errors.As(err, &failed) && failed.Dialled():
+			return fmt.Errorf("the SMTP password does not work for %s: %w, so no app is handed it. Check it at the mail provider", failed.Check.Whose(), failed)
+		case errors.As(err, &failed):
+			return fmt.Errorf("%s could not be reached to try the SMTP password for %s (%w), so no app is handed it", failed.Check.Site, failed.Check.Whose(), failed)
+		}
+		return err
+	}
+	return nil
+}
+
+// Asks reports whether the next value has to be asked for: every host using
+// the secret runs the value the file holds, so the file has nothing new to
+// hand out. It is read per secret, not per file (hostsRun), so a carrying
+// file that differs only elsewhere, Eg: a comment an upgrade changed, or an
+// app setting not yet applied, does not pass for a replaced secret. One file
+// whose carrying lines the host does not hold is enough to rotate from the
+// file. A site with no copy of such a file was never applied, and what it
+// holds cannot be told, so it is refused, whatever the other sites hold.
+func (p pasted) Asks(e Env) (bool, error) {
+	unchanged, _, err := p.hostsRun(e)
+	return unchanged, err
+}
+
+// Promote makes next the file's own value. When the next value came from the
+// file, it is the value already there, and this changes nothing.
+func (p pasted) Promote(s *config.Secrets, next string) error {
+	return s.Set(p.path, next)
+}
 
 // Users is every site that renders the secret, in site order, with the
 // stacks there whose files carry it. One that cannot be worked out is a
@@ -102,25 +256,6 @@ func (p pasted) Users(e Env) []Use {
 	return out
 }
 
-// Precheck refuses a secret that has not been replaced since the hosts were
-// last applied: rotating it would restart every stack using it for nothing.
-// It is read per secret, not per file (hostsRun), so a carrying file that
-// differs only elsewhere, Eg: a comment an upgrade changed, or an app setting
-// not yet applied, does not pass for a replaced secret. One file whose
-// carrying lines the host does not hold is enough to rotate. A site with no
-// copy of such a file was never applied, and what it holds cannot be told,
-// so it is refused too, whatever the other sites hold.
-func (p pasted) Precheck(e Env) error {
-	unchanged, sites, err := p.hostsRun(e)
-	if err != nil {
-		return err
-	}
-	if !unchanged {
-		return nil
-	}
-	return fmt.Errorf("%s is the value every host using it runs (%s), so rotating it would restart them for nothing. Replace it at %s, set the new one with `paisans secrets set %s`, then rotate it. When it was replaced and applied before, as an eviction does with the DNS token, pass --replaced %s instead", p.path, strings.Join(sites, ", "), p.issuer(e.Cfg), p.path, p.path)
-}
-
 // Pasted reports whether r rotates a pasted secret: the DNS token or an SMTP
 // password.
 func Pasted(r Rotator) bool {
@@ -129,7 +264,7 @@ func Pasted(r Rotator) bool {
 }
 
 // HostsRun reports whether every host using the pasted secret r rotates runs
-// the value the secrets file holds, read the way Precheck reads it: each
+// the value the secrets file holds, read the way Asks reads it: each
 // carrying line rendered here, and its hash looked for among the hashes of
 // the lines of the host's copy of its file. It is what `secrets rotate
 // --replaced` accepts a path on, since a secret replaced and applied before
@@ -156,12 +291,10 @@ func (p pasted) hostsRun(e Env) (bool, []string, error) {
 	if err != nil {
 		return false, nil, err
 	}
-	v, err := p.Next(e, s)
-	if err != nil {
+	// Registered as a secret, since an error from a host below may quote it.
+	if _, err := p.current(e, s); err != nil {
 		return false, nil, err
 	}
-	// Registered here too, since an error from a host below may quote it.
-	ui.Secret(v)
 	files, err := carriers(e.Cfg, s, p.path)
 	if err != nil {
 		return false, nil, err

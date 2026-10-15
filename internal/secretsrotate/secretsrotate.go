@@ -18,6 +18,10 @@
 // is under rotations; a resumed run does the pending ones first, asks the
 // checking side whether it already accepts the value, and hands the users the
 // same value again, which changes nothing on a user that already presents it.
+//
+// A pasted secret, issued elsewhere, has no next value to generate: it is the
+// one a person pastes when --execute asks (Asker, Run.Answer), or the one
+// `secrets set` already put in the file.
 // docs/specs/2026-10-12-secrets-rotate.md is the approved design.
 package secretsrotate
 
@@ -33,6 +37,8 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/dns"
+	"github.com/paisans-software/paisans-cli/internal/smtpcheck"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -56,6 +62,13 @@ type Env struct {
 	// healthy.
 	Healthy func(site string, stacks []string) error
 	Now     func() time.Time
+	// DNSProvider makes the DNS provider stage 2 tries a DNS token against.
+	// Nil is dns.For; tests replace it, since none may reach a provider.
+	DNSProvider func(name, token string) (dns.Provider, error)
+	// Mail is how stage 2 reaches a mail server to try an SMTP password,
+	// from a site running an app that uses it. Tests dial an in-process
+	// server, since none may reach a real one.
+	Mail smtpcheck.Env
 }
 
 // CannotFinish is what every refusal over a pending rotation that cannot
@@ -92,6 +105,9 @@ type Item struct {
 	Pending bool
 	// Whole is a rotation that keeps its own staging.
 	Whole bool
+	// Asks is a pasted secret whose next value --execute asks the operator
+	// for (Asker): every host using it runs the value the file holds.
+	Asks bool
 	// Notes are what the plan says about this rotation beyond its cost,
 	// shown under it at every verbosity, Eg: that the old client secrets are
 	// deleted at Pocket ID once every site runs the new one. The command
@@ -117,7 +133,11 @@ type Run struct {
 	Report ui.Reporter
 
 	all              bool
+	cfg              *config.Config
 	signOutConfirmed bool
+	// answers are the next values the operator gave, by path, for the
+	// items that ask (Answer).
+	answers map[string]string
 }
 
 func (r *Run) reporter() ui.Reporter {
@@ -192,7 +212,7 @@ func plan(e Env, rs []Rotator, all, restart bool) (*Run, error) {
 			}
 		}
 	}
-	run := &Run{all: all, Resumed: resume, Restarted: restart && len(s.RotateRemaining) > 0}
+	run := &Run{all: all, cfg: e.Cfg, Resumed: resume, Restarted: restart && len(s.RotateRemaining) > 0}
 	var order []Rotator
 	for _, r := range rs {
 		if slices.Contains(pending, r.Path()) {
@@ -232,15 +252,36 @@ func plan(e Env, rs []Rotator, all, restart bool) (*Run, error) {
 					return nil, fmt.Errorf("secrets rotate %s: %w. Nothing was changed", path, err)
 				}
 			}
+			if a, ok := r.(Asker); ok {
+				if it.Asks, err = a.Asks(e); err != nil {
+					return nil, fmt.Errorf("secrets rotate %s: %w. Nothing was changed", path, err)
+				}
+				// A value set with `secrets set` is the next one, and is
+				// tried where it is checked now, so one that does not work
+				// is never written under rotations, where a resumed run
+				// would keep it.
+				if !it.Asks {
+					v, _ := s.Get(path)
+					ui.Secret(v)
+					if ok, err := r.Accepts(e, v); err != nil || !ok {
+						if err == nil {
+							err = r.Checked(e, v)
+						}
+						if err == nil {
+							err = errors.New("it is not accepted")
+						}
+						return nil, fmt.Errorf("secrets rotate %s: the value `paisans secrets set` put in the secrets file does not pass where it is checked: %w. Set the right one with `paisans secrets set %s`. Nothing was changed", path, err, path)
+					}
+				}
+			}
 		} else if !it.Whole {
 			ui.Secret(next)
 			it.Pending = true
 			// A pending rotation's own refusals still say whether it can
 			// finish, Eg: its app taken out of the configuration, or an admin
-			// role found NOLOGIN after it began. A pasted secret's compares
-			// the hosts with the file, which a rotation under way changes,
-			// so it is not asked.
-			if p, ok := r.(Prechecker); ok && !Pasted(r) {
+			// role found NOLOGIN after it began. Its next value is in the
+			// file, so nothing is asked for it again.
+			if p, ok := r.(Prechecker); ok {
 				if err := p.Precheck(e); err != nil {
 					return nil, fmt.Errorf("secrets rotate %s: a rotation is under way and cannot finish: %w. %s Nothing was changed", path, err, CannotFinish)
 				}
@@ -296,6 +337,13 @@ func (r *Run) Show(w ui.Reporter) {
 	if r.SignsOut() {
 		w.Note("this run signs members out", "--execute asks for `sign out` to be typed at a terminal before anything changes, and without a terminal it is refused")
 	}
+	if asked := r.Asked(); len(asked) > 0 {
+		var paths []string
+		for _, a := range asked {
+			paths = append(paths, a.Path)
+		}
+		w.Note("this run asks for "+strings.Join(paths, ", "), "each is replaced at its issuer when --execute asks, and pasted at a terminal before anything changes; without a terminal it is refused")
+	}
 	for _, it := range r.Items {
 		path := it.Rotator.Path()
 		w.Section("rotate " + path)
@@ -307,15 +355,27 @@ func (r *Run) Show(w ui.Reporter) {
 			w.Step("rotated by its own staged command").End(ui.Pending, "")
 			continue
 		}
-		if it.Pending {
+		asker, isAsker := it.Rotator.(Asker)
+		switch {
+		case it.Pending:
 			w.Step("stage 1, next value").End(ui.OK, "already in the secrets file")
-		} else {
+		case it.Asks:
+			issuer := asker.Issuer(r.cfg)
+			w.Step("stage 1, next value").End(ui.Pending, "asked for at --execute: replace it at "+issuer+" when asked")
+			w.Detail("every host using it runs the value the secrets file holds, so the new one is pasted at a terminal before any host is claimed, and written under rotations before any host is handed it")
+		case isAsker:
+			w.Step("stage 1, next value").End(ui.Pending, "")
+			w.Detail("the value `paisans secrets set` put in the secrets file, written under rotations before any host is handed it")
+		default:
 			w.Step("stage 1, next value").End(ui.Pending, "")
 			w.Detail("generated on the workstation and written to the secrets file under rotations, before any host is handed it")
 		}
-		if it.From >= StageUsers {
+		switch {
+		case it.From >= StageUsers:
 			w.Step("stage 2, where it is checked").End(ui.OK, "accepts the next value")
-		} else {
+		case isAsker:
+			w.Step("stage 2, where it is checked").End(ui.Pending, asker.CheckText(r.cfg))
+		default:
 			w.Step("stage 2, where it is checked").End(ui.Pending, "")
 		}
 		w.Step("stage 3, where it is used").End(ui.Pending, "")
@@ -356,6 +416,11 @@ func (r *Run) ShowResume(w ui.Reporter) {
 func (r *Run) Execute(e Env, confirm func(word, what string) error) error {
 	if err := r.ConfirmSignOut(confirm); err != nil {
 		return err
+	}
+	for _, a := range r.Asked() {
+		if _, ok := r.answers[a.Path]; !ok {
+			return fmt.Errorf("secrets rotate %s: its next value is asked for at a terminal, and was not given. Nothing was changed", a.Path)
+		}
 	}
 	if r.all {
 		var paths []string
@@ -400,6 +465,58 @@ func (r *Run) ConfirmSignOut(confirm func(word, what string) error) error {
 		return fmt.Errorf("secrets rotate: %w. Nothing was changed", err)
 	}
 	r.signOutConfirmed = true
+	return nil
+}
+
+// Asking is one pasted secret --execute asks the operator for: its path, and
+// where a person replaces it.
+type Asking struct {
+	Path, Issuer string
+}
+
+// Asked is every secret in the run whose next value is asked for, in the
+// run's order.
+func (r *Run) Asked() []Asking {
+	var out []Asking
+	for _, it := range r.Items {
+		if it.Asks {
+			out = append(out, Asking{Path: it.Rotator.Path(), Issuer: it.Rotator.(Asker).Issuer(r.cfg)})
+		}
+	}
+	return out
+}
+
+// Answer takes value as the next value of path, an item that asks, and
+// writes nothing: stage 1 writes it under rotations. It refuses an empty
+// value, the value every host already runs, and one the side that checks the
+// secret does not accept, Eg: a DNS token that cannot see the zone, so a
+// mistyped paste is refused before anything changes rather than written
+// where a resumed run would keep it.
+func (r *Run) Answer(e Env, path, value string) error {
+	i := slices.IndexFunc(r.Items, func(it Item) bool { return it.Asks && it.Rotator.Path() == path })
+	if i < 0 {
+		return fmt.Errorf("secrets rotate: nothing in this run asks for %s", path)
+	}
+	rot := r.Items[i].Rotator
+	issuer := rot.(Asker).Issuer(e.Cfg)
+	ui.Secret(value)
+	if value == "" {
+		return fmt.Errorf("secrets rotate %s: nothing was pasted. Replace it at %s and run again to paste the new one; or set it first with `paisans secrets set %s`, and the run hands out the value the file holds; or, when it was replaced and applied before, pass --replaced %s. Nothing was changed", path, issuer, path, path)
+	}
+	s, err := e.Store.Load()
+	if err != nil {
+		return err
+	}
+	if current, _ := s.Get(path); value == current {
+		return fmt.Errorf("secrets rotate %s: what was pasted is the value every host using it runs, so it is unchanged. Replace it at %s, then paste the new one. Nothing was changed", path, issuer)
+	}
+	if err := rot.Checked(e, value); err != nil {
+		return fmt.Errorf("secrets rotate %s: what was pasted does not pass where it is checked: %w. Nothing was changed", path, err)
+	}
+	if r.answers == nil {
+		r.answers = map[string]string{}
+	}
+	r.answers[path] = value
 	return nil
 }
 
@@ -451,7 +568,9 @@ func (r *Run) rotate(e Env, it Item) error {
 	next, pending := s.Rotations[path]
 	if !pending {
 		step := w.Step("stage 1, next value")
-		if next, err = rot.Next(e, s); err != nil {
+		if it.Asks {
+			next = r.answers[path]
+		} else if next, err = rot.Next(e, s); err != nil {
 			step.Fail(err)
 			return err
 		}

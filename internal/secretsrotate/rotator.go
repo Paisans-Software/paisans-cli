@@ -56,10 +56,25 @@ type Rotator interface {
 }
 
 // Prechecker is a rotator with a refusal of its own, checked when the run is
-// planned, before anything changes. Eg: a pasted secret that has not been
-// replaced at its issuer.
+// planned, before anything changes. Eg: an app's database password whose app
+// runs nowhere.
 type Prechecker interface {
 	Precheck(e Env) error
+}
+
+// Asker is a rotator of a secret issued elsewhere, Eg: the DNS token, whose
+// next value a person may have to give. The plan reads Asks; when it is true,
+// --execute asks the operator for the next value before any host is claimed
+// (Run.Asked, Run.Answer), and stage 1 writes the answer under rotations
+// instead of calling Next.
+type Asker interface {
+	// Asks is whether the next value has to be asked for: the secrets file
+	// holds nothing every host using it does not already run.
+	Asks(e Env) (bool, error)
+	// Issuer is where a person replaces the secret, Eg: the DNS provider.
+	Issuer(cfg *config.Config) string
+	// CheckText is what the plan says stage 2 does for it.
+	CheckText(cfg *config.Config) string
 }
 
 // Whole is a rotation that keeps its own staging, Eg: an OIDC client secret

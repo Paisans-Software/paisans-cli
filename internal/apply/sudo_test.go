@@ -411,6 +411,24 @@ func TestPrepareSudoKeepsARefusedPassword(t *testing.T) {
 	}
 }
 
+// An unreachable host is reported once: the host and ssh's own words each
+// appear a single time, however many layers the error passes through.
+func TestAnUnreachableProbeSaysSoOnce(t *testing.T) {
+	s := &sshScript{answers: []sshAnswer{{sshTimeout, 255}, {sshTimeout, 255}, {sshTimeout, 255}}}
+	s.install(t)
+	_, err := sudoTransport(apply.NewSudoAuth(nil)).Run("true")
+	if !errors.Is(err, apply.ErrUnreachable) {
+		t.Fatalf("want ErrUnreachable, got %v", err)
+	}
+	msg := err.Error()
+	if n := strings.Count(msg, "Operation timed out"); n != 1 {
+		t.Errorf("ssh's words appear %d times, want once:\n%s", n, msg)
+	}
+	if n := strings.Count(msg, "cannot be reached over ssh"); n != 1 {
+		t.Errorf("the host is said to be unreachable %d times, want once:\n%s", n, msg)
+	}
+}
+
 // A host PrepareSudo cannot reach is ErrUnreachable and concludes nothing:
 // the first command that reaches it asks then.
 func TestPrepareSudoOnAnUnreachableHostConcludesNothing(t *testing.T) {

@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/garage"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -186,6 +188,54 @@ func TestRunDNSInitRefusesBeforeContactingAProvider(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "fixture-not-a-secret-desec") {
 		t.Fatalf("prune: the token leaked into an error: %v", err)
+	}
+}
+
+// dns init and dns prune check the token from this workstation before the
+// first records call, so a token filtered away from it is named as that,
+// with the address, rather than as a bare HTTP 403. The check is handed the
+// token from the secrets file, and nothing after it runs.
+func TestDNSCommandsCheckTheTokenFromThisWorkstation(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "internal", "render", "testdata", "deployment.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited := strings.Replace(string(data), "    endpoint: vm.example.org:51820\n",
+		"    endpoint: vm.example.org:51820\n    public_address: 203.0.113.10\n", 1)
+	edited = strings.Replace(edited, "  provider: desec\n", "  provider: cloudflare\n", 1)
+	if !strings.Contains(edited, "provider: cloudflare") || !strings.Contains(edited, "public_address") {
+		t.Fatal("the fixture no longer has the lines this test edits")
+	}
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
+	if err := os.WriteFile(path, []byte(edited), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := workstationTokenCheck
+	defer func() { workstationTokenCheck = saved }()
+	var checked []dns.TokenCheck
+	var tokens []string
+	workstationTokenCheck = func(_ context.Context, check dns.TokenCheck, token string) dns.TokenResult {
+		checked, tokens = append(checked, check), append(tokens, token)
+		return dns.TokenResult{
+			Status: dns.TokenFailed, Place: check.Place, Code: 9109, Address: "203.0.113.7",
+			Finding: "cloudflare refuses the DNS token from " + check.From + " (203.0.113.7)",
+			Advice:  "Add the address to the token's Client IP Address Filtering, or remove the filter.",
+		}
+	}
+	for name, run := range map[string]func([]string) error{"dns init": runDNSInit, "dns prune": runDNSPrune} {
+		err := run([]string{"--config", path, "--secrets", fixtureSecretsPath()})
+		if err == nil || !strings.Contains(err.Error(), "cloudflare refuses the DNS token from this workstation (203.0.113.7)") {
+			t.Errorf("%s: want the workstation's refusal, got %v", name, err)
+		}
+	}
+	if len(checked) != 2 {
+		t.Fatalf("want one check per command, got %d", len(checked))
+	}
+	for i, c := range checked {
+		if c.Provider != "cloudflare" || c.Domain != "example.org" || c.Place != dns.WorkstationPlace || tokens[i] != "fixture-not-a-secret-desec" {
+			t.Errorf("checked %+v with %q", c, tokens[i])
+		}
 	}
 }
 

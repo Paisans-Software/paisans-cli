@@ -2,14 +2,18 @@ package main
 
 import (
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/diagnosis"
 	"github.com/paisans-software/paisans-cli/internal/mesh"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -115,13 +119,28 @@ func settleMesh(r ui.Reporter, cfg *config.Config, path string, hosts map[string
 func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]registry.Runner, random io.Reader) (bool, string, error) {
 	sites := cfg.SiteNames()
 	registries := map[string]registry.Registry{}
-	var unreachable []string
+	var unreachable, advice, referrals []string
+	var failures []error
 	var claimedOn []string
 	for _, name := range sites {
 		s.Progress("read " + name)
 		reg, err := registry.Read(hosts[name])
 		if err != nil {
-			unreachable = append(unreachable, fmt.Sprintf("%s: %v", name, err))
+			// Each site is one line in the operator's words, and what to do
+			// about it follows the list. The full chain, with the file and
+			// the sudo probe it failed at, is the cause, for --verbose.
+			hint, explain := ui.Describe(err)
+			unreachable = append(unreachable, fmt.Sprintf("- %s: %s", name, hint))
+			if explain != "" {
+				advice = append(advice, explain)
+			}
+			// A site ssh did not answer is doctor's reach finding, which
+			// says what the deployment is without while it is gone. Any
+			// other failure answered ssh, and doctor would not name it.
+			if errors.Is(err, apply.ErrUnreachable) {
+				referrals = append(referrals, diagnosis.Unreachable(name).Sentence)
+			}
+			failures = append(failures, fmt.Errorf("%s: %w", name, err))
 			continue
 		}
 		registries[name] = reg
@@ -143,7 +162,12 @@ func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]reg
 		return false, "deployed, kept", nil
 	}
 	if len(unreachable) > 0 {
-		return false, "", fmt.Errorf("init reaches every site before it settles mesh.subnet, and could not read:\n  %s\nNothing was written. Every host has to be checked, since a subnet chosen without one is a subnet that may collide on it", strings.Join(unreachable, "\n  "))
+		explain := slices.Concat(unreachable, advice, referrals)
+		return false, "", &ui.Problem{
+			Hint:    "init could not read every site, so mesh.subnet is not settled",
+			Explain: strings.Join(append(explain, "Nothing was written. Every host has to be checked, since a subnet chosen without one is a subnet that may collide on it."), "\n"),
+			Cause:   errors.Join(failures...),
+		}
 	}
 
 	iface := cfg.Deployment().Interface()

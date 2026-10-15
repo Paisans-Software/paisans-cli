@@ -305,7 +305,7 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 			continue
 		}
 		for _, m := range dnsMonitors {
-			token, err := p.dnsHeartbeatToken(name, m.Secret)
+			token, err := p.appHeartbeatToken(name, m.Secret)
 			if err != nil {
 				return "", err
 			}
@@ -315,6 +315,26 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 				IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
 			})
 		}
+	}
+
+	// One heartbeat per app whose blueprint declares one (appheartbeat.go),
+	// with the app's own token and the site heartbeat's schedule, grace and
+	// threshold. Seeded by every monitor, wherever the app runs, as the
+	// operators heartbeat is.
+	for _, name := range p.cfg.AppNames() {
+		h, ok := blueprints.HeartbeatOf(p.cfg.Apps[name].Blueprint)
+		if !ok {
+			continue
+		}
+		token, err := p.appHeartbeatToken(name, blueprints.HeartbeatTokenKey)
+		if err != nil {
+			return "", err
+		}
+		monitors = append(monitors, seedMonitor{
+			Name: blueprintHeartbeatName(name, h.Name), MonitorType: "heartbeat",
+			HeartbeatToken: token, HeartbeatScheduleKind: "interval", HeartbeatGraceSeconds: heartbeatGraceSeconds,
+			IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
+		})
 	}
 
 	settings := map[string]any{"status_page_enabled": false}

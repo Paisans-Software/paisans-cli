@@ -2764,3 +2764,201 @@ sends it. The client's private address check guards against a configuration
 mistake, and the gateway rule is what holds when the code is wrong. The
 listener is on every HAProxy site, not only where the account service runs,
 so a later caller finds it there.
+
+## 2026-10-14: `secrets rotate` asks for a pasted secret's new value
+
+Founder decision. It amends `docs/specs/2026-10-12-secrets-rotate.md`, whose
+approved scope left reissuing a pasted secret out.
+
+### What was decided
+
+* `paisans secrets rotate` rotates the pasted secrets, `external.acme_dns_token`,
+  `external.smtp_password` and `apps.<app>.smtp_password`, as well as the
+  generated ones, and `--all` includes them.
+* When every host using one runs the value the secrets file holds,
+  `--execute` asks for the new value at a terminal, with echo off, naming the
+  path and its issuer, for every such secret in the run, before any host is
+  claimed. The answer is stage 1's next value under `rotations`, and stage 4
+  promotes it, as a generated secret's is. A resumed run does not ask again.
+* One already set anew with `paisans secrets set` is not asked for; the
+  file's value is handed out.
+* An empty answer refuses the run with nothing changed, naming `secrets set`
+  and `--replaced`. An unchanged answer is refused. With no terminal, the run
+  is refused with the steps: replace it at the issuer, `secrets set` it, run
+  again.
+* Stage 2 tries a DNS token against the community's zone at the provider,
+  read only, through `internal/dns`; a pasted or set token that fails is
+  refused before it is written. An SMTP password has no check.
+* `--replaced <path>` keeps its meaning: a pasted secret already replaced
+  and applied is listed, not rotated.
+
+### Why
+
+Before this, a pasted secret every host ran was refused, and `--all` refused
+the whole run until each one was replaced at its issuer and set with `secrets
+set` beforehand. That made the one command meant to replace every secret after
+an operator leaves stop on exactly the secrets an outsider is most likely to
+use, and sent the operator to a second command for each. Asking at the
+terminal keeps the run whole while the value still comes from the only place
+that can issue it. All the questions come before any host is claimed, with
+the `sign out` confirmation, so a run never waits on a person part way through
+with some hosts already changed.
+
+The DNS token is checked before it is written, not only at stage 2, because a
+value under `rotations` is what a resumed run hands out: a mistyped token
+written there could only be cleared by hand. The zone lookup is the read only
+call `dns init` already makes, so it adds no new credential use. Nothing in
+the toolkit logs in to a mail provider, so there is no SMTP check to reuse,
+and the plan says so rather than imply one.
+
+### What was weighed
+
+* **Refusing the pasted secrets until set by hand**, the approved spec's
+  scope. Not kept: it split one rotation into two commands and made `--all`
+  stop on them.
+* **Asking for each value when its rotation is reached.** Not chosen: a run
+  would pause part way with earlier secrets already changed, and an operator
+  who walked away would come back to a half finished run.
+
+## 2026-10-14: SMTP credentials and settings are tested
+
+Founder decision. It replaces, for SMTP passwords, the line of *`secrets
+rotate` asks for a pasted secret's new value* above that said an SMTP password
+has no check.
+
+### What was decided
+
+* **A check** takes an app's effective SMTP settings (`config.SMTPFor`) and
+  its password (`apps.<app>.smtp_password`, else `external.smtp_password`),
+  connects, does TLS or STARTTLS as `security` declares with the certificate
+  verified (`none` stays plaintext, which `validate` allows only toward a
+  private or mesh relay), and logs in with the username and password.
+* **It connects from a site running the app**, through the toolkit's own ssh
+  (`ssh -W host:port`), so the site's real egress is tested and a mesh or
+  private relay is reachable. The SMTP conversation runs on the workstation,
+  in Go; nothing is installed on a host. Apps with the same settings share a
+  check.
+* **When:**
+  1. `secrets rotate`, for an SMTP password: the next password logs in and
+     sends one test message before any app is handed it; a pasted one is
+     tried when pasted, one set with `secrets set` when the run is planned,
+     so a bad value is never written under `rotations`.
+  2. `secrets set`, for an SMTP password, keyed or in the owed walk: logs in
+     and sends one test message before the value is written; a failure
+     writes nothing.
+  3. `apply`: logs in only, sending nothing; a failure refuses the apply
+     before any host is changed, naming the app, the setting and the
+     server's reply, never the password.
+  4. `validate`: logs in only; a failure warns.
+* **The test message** is sent only by `secrets set` and `secrets rotate`,
+  for a changed credential: to the operators' addresses the configuration
+  declares, from the app's effective from address, short and plain, naming
+  the deployment, the app and that it is a Paisans SMTP test. With no
+  recipient, it is refused with an explanation.
+* Passwords are registered with `ui.Secret` and never printed.
+
+### How it was carried out
+
+* **Recipients are every operator**, by email, in the order of their names,
+  not the one running the command: a changed mail credential concerns every
+  operator, each can confirm the message arrived, and nothing in the
+  configuration says reliably which operator is at the keyboard.
+* **One check per site and settings for `apply` and `validate`; one per
+  sender, from the first site running one of its apps, for `secrets set` and
+  `secrets rotate`.** The first tests each host's own route, which is what
+  `apply` is about to depend on; the second tests a credential, and one
+  message per sender is enough to prove the provider takes it.
+* **A password `secrets set` wrote is only logged in with by a rotation.** It
+  sent its test message when it was set, so the plan and stage 2 log in and
+  send nothing, and a run's dry run sends no mail.
+* **`validate` keeps working offline.** A site it cannot reach, or a secrets
+  file it cannot read, skips the check with a warning; `--offline` skips it
+  without trying. `apply` is the gate that refuses.
+* **`apply` checks in its dry run too**, before the host check: the plan is
+  what `--execute` would do, and a mail failure is where it would stop.
+* **Settings the site's host cannot reach are warned about, not tried**: a
+  compose service name or a loopback address is the app's own network.
+
+### What was weighed
+
+* **Dialling from the workstation.** Not chosen: it tests the operator's
+  network rather than the host's, and cannot reach a relay on the mesh or a
+  site's private network.
+* **Running a mail client on the host** (`swaks`, `openssl s_client`, a
+  container). Not chosen: it installs or runs something on a host for a
+  check, and puts the password in a remote process.
+* **Sending the test message on every `apply`.** Not chosen: it mails the
+  operators on every run against settings that already worked.
+* **Mailing only the operator running the command.** Not chosen: nothing in
+  the configuration names them reliably.
+
+## 2026-10-14: What each Wiki.js group may do, and drift is reported
+
+Founder decision. The design is
+`docs/specs/2026-10-14-wikijs-groups-and-drift.md`; it amends the groups and
+bootstrap sections of `docs/specs/2026-10-13-wikijs-blueprint.md`.
+
+### What was decided
+
+* **The admin group gets a page rule as well as its permissions**,
+  `paisans-admin`, granting every page role everywhere, rewritten on every
+  run. Wiki.js checks a page rule after the permission, and a group created
+  through its API has a rule granting only reading and comments, so the admin
+  group could not write a page.
+* **The member group is seeded once**, in the run that creates it: members
+  read and edit pages, their source and history, assets and comments. They do
+  not move, rename or delete pages, nor write scripts or styles. After that
+  the group is the admins'.
+* **`admins/` is for admins only**, by a member rule whose regex excludes it.
+  No seeded rule is a deny, because an operator is in both groups and a deny
+  wins a tie.
+* **A guest reads only what `guest_paths` names**, read only, and only on an
+  ungated wiki. `Guests` is written on every run.
+* **The bootstrap polls every fifteen minutes** and reports drift in what it
+  writes on every run on its `/healthz` and to the monitor. It does not put
+  the configuration back until its next start, and drift does not make its
+  container unhealthy.
+* **The bootstrap pushes a heartbeat to the monitor** every minute: success,
+  or a failure carrying what drifted. A catalog blueprint may declare a
+  heartbeat, and Paisans generates its token, seeds its push monitor and
+  rotates it.
+* **`paisans doctor` fails a running container whose healthcheck reports
+  unhealthy**, for every blueprint.
+
+### Why
+
+A wiki members cannot write in is not a wiki, and an admin who cannot create
+a page has nothing to fix it with short of the break glass account. Seeding
+members once gives a new wiki a working default and leaves what members may do
+to the community. A guest's access, unlike a member's, decides what the
+internet reads, so it is the operator's, written down, and enforced. A change
+undone silently at the next restart is worse than one refused, so the
+bootstrap says when Wiki.js and the configuration disagree, and the operator
+decides which one is right.
+
+### What was weighed
+
+* **Seeding members on every run.** Not chosen: every change an admin made to
+  members in Wiki.js would be undone at the next restart.
+* **Leaving members at Wiki.js's defaults.** Not chosen: every new wiki would
+  need an admin to set up editing by hand before anyone could write.
+* **Members moving and deleting pages.** Not chosen: neither is undone from
+  history.
+* **A deny rule on `members` for `admins/`.** Not chosen: it locks out every
+  admin who is also a member, which is every operator.
+* **An ungated wiki public throughout.** Not chosen: a wiki could not then be
+  ungated and private.
+* **Putting drifted settings back at once.** Not chosen: it hides that
+  someone changed them, and fights an admin who has not yet been told why
+  their change keeps disappearing.
+* **Reporting drift in `apply`.** Not chosen: `apply` recreates the stack and
+  the bootstrap converges, so there is nothing left to report.
+* **The monitor checking the bootstrap's `/healthz` over the mesh.** Not
+  chosen: it needs a published port on every apps site, a way to choose one
+  where two wikis share a site, and a new kind of check in the blueprint
+  schema, where a push needs only a token.
+* **A curl sidecar pushing for the bootstrap**, as for the operator
+  reconciler. Not chosen: one more container per wiki, on hosts that may be
+  short of memory, for a process that already runs and holds the state.
+* **Drift making the container unhealthy.** Not chosen: `apply`'s health gate
+  would then fail an `apply` that left a drifted bootstrap running.

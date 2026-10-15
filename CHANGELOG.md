@@ -10,6 +10,32 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-15
+
+### Added
+
+- `paisans doctor` reads Caddy's certificate failures, checks the DNS token from each Caddy site and the workstation (`--secrets`), and reports deployment hostnames whose records point elsewhere or are missing, never feeding Cloudflare's lockout.
+- `apply` checks the DNS token from every Caddy site before Caddy starts or reloads, and `dns init` and `dns prune` from the workstation, stopping on a refusal or no answer rather than feeding Cloudflare's lockout.
+- `paisans secrets list` prints every secret path the configuration needs, whether each is set, whether it is generated, pasted or captured, and the path `secrets rotate` takes, never a value.
+- A catalog blueprint in `paisans.blueprint/v2` may declare a `heartbeat`: each app gets a generated `heartbeat_token`, a push monitor in every seed, `.HeartbeatURLs` in its templates, and rotation by `secrets rotate`.
+- SMTP settings are tried from a site over ssh: `secrets set` and `secrets rotate` log in and email the operators before writing a password, `apply` refuses settings that do not log in, `validate` warns.
+
+### Changed
+
+- Errors refer to `paisans doctor` when its checks name the cause: a health gate TLS internal error on a hostname Caddy serves, an unreachable database or site, and `gateway move`'s token refusals.
+- `paisans doctor` runs its checks at once and prints each as it ends; a site that does not answer is one line naming what was not checked, and the failures are listed again, deepest first.
+- `paisans secrets rotate` asks at a terminal for a pasted secret's new value, the DNS token or an SMTP password, and `--all` includes them; a new DNS token is tried against the zone first.
+- The grant review lists each site's foundation images first, under `foundation images (required):`, then removals, then what needs approval under its count, so the count heads exactly the entries it counts.
+
+### Fixed
+
+- `paisans doctor` fails a running container whose healthcheck reports unhealthy, showing the last lines its healthchecks printed, and warns while a healthcheck is still starting.
+- `host prepare` lets containers reach Pocket ID's API on their own site's mesh address, port 1413, wherever the account service runs; the default deny dropped its calls, so member pages timed out.
+- A failed login link email says Pocket ID's cause without its wrapping and connection string format, and once, not on every operator's line, when every email failed the same way.
+- `paisans secrets set <key>` at a terminal asks for that key's value with echo off instead of refusing, so a set credential can be replaced by hand.
+- A first apply with several apps reading one new Pocket ID group no longer stops on `409 Name is already in use`: a group made since the plan was read is found and used.
+- A host ssh cannot reach is named once, with ssh's own words once, instead of repeated through every layer that tried to read it, and `init` lists each unreachable site on its own line.
+
 ## [0.1.0] - 2026-10-14
 
 ### Added
@@ -41,5 +67,6 @@ changes share a bullet. Detailed notes are on the corresponding
 - The uptime monitor requires STARTTLS under `security: starttls`, so mail and SMTP credentials are never sent in plaintext when a relay does not offer it.
 - The gateway refuses any request to Pocket ID that carries an `X-API-Key` header with 403, so Pocket ID's API keys work only on the mesh.
 
-[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.1.0...develop
+[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.2.0...develop
+[0.2.0]: https://github.com/Paisans-Software/paisans-cli/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Paisans-Software/paisans-cli/tree/v0.1.0

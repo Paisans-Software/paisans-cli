@@ -332,10 +332,12 @@ var (
 	contacted   = map[string]bool{}
 )
 
-// askMu makes a first connection that may ask about a host key wait for any
-// other: ssh asks on the terminal itself, and two questions at once, from
-// commands run on several hosts together, would garble each other.
-var askMu sync.Mutex
+// AskMu is held while anything asks the operator on the terminal: ssh about
+// a host key on a first connection, here, and a sudo password prompt, in
+// cmd/paisans. ssh asks on the terminal itself, and two questions at once,
+// from commands run on several hosts together, would garble each other, so
+// every question takes this one lock rather than one of its own kind.
+var AskMu sync.Mutex
 
 func firstContact(destination string) bool {
 	contactedMu.Lock()
@@ -408,6 +410,27 @@ var blankLineOnTerminal = func() {
 // "the host said no" from "the host was never asked" with errors.Is, and must
 // never read the second as an answer.
 var ErrUnreachable = errors.New("ssh could not connect to the host")
+
+// UnreachableError is ErrUnreachable for one site, so a command that reads
+// several can say which one did not answer and refer the operator to
+// doctor for it. Site is the transport's, empty when it reaches no site.
+type UnreachableError struct {
+	Site string
+	Err  error
+}
+
+func (e *UnreachableError) Error() string { return e.Err.Error() }
+func (e *UnreachableError) Unwrap() error { return e.Err }
+
+// UnreachableSite is the site an ssh failure in err's chain names, or ""
+// when there is none or it names no site.
+func UnreachableSite(err error) string {
+	var u *UnreachableError
+	if errors.As(err, &u) {
+		return u.Site
+	}
+	return ""
+}
 
 // connectionFailures are what ssh prints when the connection itself failed,
 // before any command could run. "Connection closed by" is the pre
@@ -550,7 +573,7 @@ func (t SSHTransport) run(command string, stdin *string) (string, error) {
 			asks = !hostKeyKnown(t)
 		}
 		if asks {
-			askMu.Lock()
+			AskMu.Lock()
 		}
 		err = runSSH(cmd)
 		if asks && (err == nil || !connectionFailed(err, out.String())) {
@@ -560,7 +583,7 @@ func (t SSHTransport) run(command string, stdin *string) (string, error) {
 			blankLineOnTerminal()
 		}
 		if asks {
-			askMu.Unlock()
+			AskMu.Unlock()
 		}
 		resume()
 		cleanup()
@@ -580,7 +603,7 @@ func (t SSHTransport) run(command string, stdin *string) (string, error) {
 			return out.String(), &ui.Problem{
 				Hint:    t.Describe() + " cannot be reached over ssh",
 				Explain: fmt.Sprintf("ssh could not connect in %d attempts: %s. Check that the host is up, and that %s from this machine reaches it.", attempt, strings.TrimSuffix(lastLine(out.String()), "."), t.connectCommand()),
-				Cause:   fmt.Errorf("%w after %d attempts: %w", ErrUnreachable, attempt, err),
+				Cause:   &UnreachableError{Site: t.Site, Err: fmt.Errorf("%w after %d attempts: %w", ErrUnreachable, attempt, err)},
 			}
 		}
 		delay := sshRetryDelays[attempt-1]

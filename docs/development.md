@@ -24,8 +24,11 @@ command: what it does, when it is run on its own rather than through the whole
 `apply`, its flags and defaults, and what it changes. This section is how the
 code behind each one is laid out.
 
-validate and render touch nothing outside the working directory, and create
-writes one new file there. init writes only local files, and reads every site over ssh to settle the mesh subnet.
+render and `secrets list` touch nothing outside the working directory, and
+create writes one new file there. validate reads only the files, except that
+it tries each app's mail settings from a site running it, and `secrets set`
+does the same for an SMTP password before writing it; neither changes a site,
+and `validate --offline` reaches none. init writes only local files, and reads every site over ssh to settle the mesh subnet.
 `host prepare`, `apply`, `prune`, `site add`, `site remove`, `mesh rekey`,
 `secrets rotate`, `storage init`, `storage add`, `storage rotate-key`, `app
 admin create`, `app remove` and `oidc client create` reach a machine, and each
@@ -128,6 +131,7 @@ paisans app remove docs                   # an app out of paisans-stack.yaml, of
 paisans site remove home-b                # a site out of the deployment, staged
 paisans site remove home-b --evict        # a site nobody else can reach, cut out first
 paisans mesh rekey home-a                 # one site's WireGuard key replaced, staged
+paisans secrets list                      # every secret's path, set or unset, never a value
 paisans secrets rotate --all              # every secret's rotation, in order, with its cost
 paisans failover test                     # checks, and prints the plan
 paisans doctor                            # what is stuck, and how to recover
@@ -199,8 +203,9 @@ about it are load bearing:
 
 `secrets set <dotted.key>` writes one value read from stdin into the secrets
 file, re-encrypted to the recipients in `.sops.yaml`, and prints only `set
-<key>`. It strips one trailing newline, refuses an empty value, refuses a
-terminal on stdin, and accepts a key only if it is already set, reported by
+<key>`. It strips one trailing newline, refuses an empty value, asks
+through `readKeySecret` with echo off when stdin is a terminal (an empty
+answer writes nothing), and accepts a key only if it is already set, reported by
 `init` as owed or pending (`external.acme_dns_token`, `oidc_clients.<app>.*`,
 through `secretsgen.ExpectedNames`), or under `external`. It exists so a credential issued elsewhere never touches an echoing terminal or an
 editor: an argument is in shell history and `ps`, an echoed prompt is in
@@ -301,8 +306,31 @@ replica promotes, containers that are down, Pocket ID's active instance,
 clock drift, and what is left over or foreign (below). It has no `--execute` and sends only reads, which its command
 level test checks against an allow list. The judgements are pure functions in
 `internal/doctor`, tested with what live hosts answered; `cmd/paisans` runs the
-commands. It exits 1 on any `FAIL`. See *`paisans doctor` reports what is
+commands. It exits 1 on any `FAIL`.
+
+Its checks are a graph, `doctor.Checks`: each node names what it reads, the
+nodes it needs hard (all of one, or any of several), the ones it needs only to
+have ended, and its judge, the section function `Diagnose` calls given the
+node's own probes, so the graph finds what `Diagnose` finds for the same
+`Input`. `Graph.Run` starts every node whose needs are met, records each
+node's probes into one `Input` as it ends, and prunes, transitively, every
+node a failed or skipped hard need leaves unable to run. It reports through
+`ui.Stream`, a group whose lines join it as they start. `cmd/paisans` bounds
+each site's transport to eight commands at once (`doctorSiteCommands`) and
+nothing across sites; tests set `doctorAtOnce` to one, which runs the nodes
+in the graph's order. See *`paisans doctor` reports what is
 stuck and how to recover* in `README.md`.
+
+The DNS nodes are `internal/doctor/dnschecks.go`, added when the reads answer
+`doctor.DNSReads` as well: `caddy certificates <site>` on each Caddy site,
+`secrets`, `dns token <site>`, `dns token workstation` and `dns records`. The
+token checks are `dns.TokenCheck`'s, `OnSite` over the site's sudo transport
+and `FromWorkstation` with the token `--secrets` holds, which stays in
+`cmd/paisans` and never enters `doctor.Input`. Every token node needs every
+Caddy log to have ended, and skips itself (`Node.Unless`) while one shows
+Cloudflare's lockout in the last five minutes, so nothing feeds it. A sudo
+password prompt takes `apply.AskMu`, the lock ssh's host key question takes,
+so two sites' questions never share the terminal at once.
 
 **Leftovers and foreign users of Caddy** are `internal/ownership`: `Classify`
 is a pure function of the configuration, a `hostcheck.Inventory` and the
@@ -588,6 +616,20 @@ stays up; a change to a line only wg-quick applies restarts it; and an
 unchanged file on a host whose interface is down starts it. A failure stops the
 apply there. `README.md` has the table under "`apply` brings the mesh
 interface up before anything binds to it".
+
+**The DNS token is checked from the site before Caddy asks the provider.**
+`Plan.DNSToken` is set on a Caddy site whose Caddy changes, reloads or is
+recreated, when `acme.provider` is set (`render.Plan.ACMEProvider` and
+`Domain` carry what it checks). `checkDNSToken` (`internal/apply/dnstoken.go`)
+runs it as the step `check DNS token`, after the module check and before
+`validate gateway config`, and stops the site on any failure, a provider that
+does not answer included. The check itself is `dns.TokenCheck`
+(`internal/dns/token.go`), one piece of code with two transports: `OnSite`
+reads `ACME_DNS_TOKEN` from `dns.CaddyEnvFile` on the host and calls curl
+there with the header on stdin, and `FromWorkstation` calls over HTTPS with
+the secrets file's token, which `dnsSetup` runs before `dns init` and `dns
+prune` read the zone. Both make the zone lookup first, since only it is
+subject to the address filter, and verify only after it passed.
 
 **The infrastructure stack moves first, and app stacks only after their
 databases exist.** Sorted order alone started `blog` and `docs` before
@@ -1045,9 +1087,9 @@ file, so stage 3 presents what stage 2 taught. What is easy to undo by accident:
 * **A kept secret is a `KeptError`, not a refusal.** A precheck that finds
   nothing checks the secret (an admin role that cannot log in, a queue with no
   broker) returns one, and the engine lists it in `Run.Kept` and plans the
-  rest. A pending rotation's precheck is run too, except a pasted secret's,
-  and there any refusal, a `KeptError` included, means it cannot finish; its
-  refusal ends with `secretsrotate.CannotFinish`, as every such refusal does.
+  rest. A pending rotation's precheck is run too, and there any refusal, a
+  `KeptError` included, means it cannot finish; its refusal ends with
+  `secretsrotate.CannotFinish`, as every such refusal does.
 * **Stage 3 asks the rotator for its users again.** The plan's `Item.Uses`
   are only what it shows: a cluster role's switchover moves the leader, and
   the next cluster role in the same run restarts the new one last.
@@ -1055,10 +1097,63 @@ file, so stage 3 presents what stage 2 taught. What is easy to undo by accident:
   render with a probe value changes, and the host prints the hash of each
   line of its copy (`lineHashCommand`), so a file that differs elsewhere does
   not pass for a replaced secret.
+* **A pasted secret every host runs is asked for, never read from the file.**
+  It is an `Asker` whose `Asks` is true, so the plan marks the item `Asks`,
+  and `Run.Execute` refuses before anything changes unless `Run.Answer` took
+  a value for it. The command asks for every one (`askPasted`, through
+  `readRotateSecret`, which tests replace) after the `sign out` confirmation
+  and before any host is claimed, so a refusal leaves even the registries
+  alone. Stage 1 writes the answer under `rotations` in place of `Next`, and
+  `Promote` sets the path, which changes nothing for a value `secrets set`
+  already put there. A pending one is never asked for again.
+* **A bad pasted value is refused before it is written.** `Run.Answer` runs
+  the rotator's `Checked` on the answer, and the plan runs `Accepts` on a
+  value `secrets set` put in the file, because once a value is under
+  `rotations` a resumed run keeps it. For the DNS token both are a zone
+  lookup through `Env.DNSProvider` (`dns.For` unless a test replaces it),
+  and a provider `dns.Implemented` lacks has no check. For an SMTP password
+  `Checked` logs in and sends the test message and `Accepts` only logs in,
+  both through `Env.Mail` (*Mail checks, from a site*), so the plan and stage
+  2 send nothing.
 * **Passwords never reach `argv` or a log, except where upstream leaves no
   other way in.** SQL goes on stdin with statement logging off, as `apply`'s
   bootstrap does; `rabbitmqctl` takes a password only as an argument, which
   `rabbitmq.go` says and accepts for the length of the call.
+
+## Mail checks, from a site
+
+`internal/smtpcheck` tries an app's mail settings: `Logins` is what `apply`
+and `validate` try (one check per site and set of settings), `ForPassword`
+what `secrets set` and `secrets rotate` try for a changed password (one per
+sender, from the first site running one of its apps), and `Login` and `Send`
+hold the conversation with `net/smtp`. Its own PLAIN and LOGIN mechanisms send
+the password only after the TLS the settings declare, since `net/smtp`'s
+`PlainAuth` refuses plaintext to anything but localhost, and `none` toward a
+private relay is a configuration `validate` already judged.
+
+The connection comes from `Env.Dial`. The command wires it to
+`apply.SSHTransport.Dial` (`internal/apply/forward.go`): a `true` run first,
+so the connection is made, retried and its host key asked about as every
+other command's is, then `ssh -W host:port` over the shared master, its stdin
+and stdout joined to one end of a `net.Pipe` so deadlines work. When ssh ends
+the forward, the connection's last read carries ssh's last line, Eg:
+`administratively prohibited` or `Connection refused`. What is easy to undo
+by accident:
+
+* **No test reaches a site or a mail server.** `cmd/paisans`'s `TestMain`
+  points `smtpEnv` at an `internal/smtpcheck/smtptest` server that takes any
+  login; `fakeSMTP` gives a test one with users, an untrusted or misnamed
+  certificate, a refused sender, or a site that cannot be reached. The
+  server issues certificates from its own authority, which `Env.Roots`
+  trusts, and listens on loopback per dial, so TLS never runs over
+  `net.Pipe`'s synchronous writes.
+* **Only a changed credential sends mail.** `TryPassword(..., send)` is
+  called with send only where a value was just given; a check that sends on
+  `apply`, `validate` or a rotation's plan would mail the operators on every
+  run.
+* **A failure says the stage and the server's reply, never the password.**
+  `smtpcheck.Error.Reply` quotes a `textproto.Error` as the server sent it, and
+  every caller registers the password with `ui.Secret` first.
 
 ## `storage add`, and what lives where
 
@@ -1455,6 +1550,7 @@ installed, on a workstation or anywhere else.
 | `internal/appadmin` | an app's first administrator: probe, plan, and the per kind API calls |
 | `internal/pocketidlog` | a deployed Pocket ID's container log, read for the failed login link email its API does not report. Pocket ID's REST API itself is `github.com/paisans-software/pocketid-go` |
 | `internal/oidcclient` | an app's client at Pocket ID: probe, plan, and record its credentials before sending its secret |
+| `internal/smtpcheck` | trying an app's mail settings from a site: which checks `apply`, `validate`, `secrets set` and `secrets rotate` make, the SMTP conversation, and the test message; `smtptest` is the in-process server the tests use |
 | `internal/webserver` | a monitor's web server: the hand-off sheet for an operator's own web server, and the read only checks run from the workstation |
 | `internal/hostarch` | a host's architecture (`dpkg --print-architecture`): which are supported, the refusal when a host contradicts the one recorded for its site, and whether an image's platforms include it |
 | `internal/hostcheck` | what a site claims on its host, what the host already runs, and whether that is clean, shared or a conflict |
@@ -1463,6 +1559,7 @@ installed, on a workstation or anywhere else.
 | `internal/preflight` | `site add`'s first stage: read only checks on the new site and every running one, as a report |
 | `internal/failover` | `failover test`: its checks, the switchover and its gates |
 | `internal/doctor` | `doctor`: the read commands it sends, and the findings and recovery advice made from their answers |
+| `internal/diagnosis` | the causes an error from `apply`, `init` or `dns` refers to `doctor` for: each a matcher over an error or a log line, the sentence, and the doctor check that names it. Its own package because `internal/doctor` imports `internal/apply` |
 | `internal/patroni` | reading a Patroni cluster through the Spilo container: `/cluster`, the leader, lag, database size |
 | `internal/configstore` | the signed copies of the configuration: a version as a git commit and the bare repository holding it, the rules that choose which versions to trust and which is newest, gathering from every site, pushing to them, and the key by key merge of the secrets |
 | `internal/hostprep` | taking a blank host to what `apply` assumes; one profile per operating system, its shell under `profiles/<id>-<version>/` |
@@ -1496,7 +1593,16 @@ providing the role says of that hostname (`kinds.LinkValuesAt`).
 A change to the catalog that an older binary cannot read changes the
 `apiVersion` of what it changes, a blueprint's or the foundation's: an older
 binary then skips that release for the newest it reads. A new key counts,
-since both are decoded strictly.
+since both are decoded strictly. Blueprints are read in two formats,
+`paisans.blueprint/v1` and `paisans.blueprint/v2` (`blueprints.APIVersionV1`
+and `blueprints.APIVersion`); v2 adds `heartbeat`, and `Parse` refuses that key
+in a v1 blueprint, so a blueprint that declares one also names the format an
+older binary skips. A heartbeat adds `heartbeat_token` to the blueprint's
+generated secrets in `Parse` (`internal/blueprints/heartbeat.go`), so `init`,
+`secrets list` and the replacement generator need nothing of their own for it;
+the seed, `.HeartbeatURLs` (`internal/render/appheartbeat.go`) and its
+rotation (`secretsrotate.AppHeartbeat`) share the operators heartbeat's
+targets, token check and order.
 
 Tests never fetch. A test package that reads a core blueprint or the
 foundation carries a `core_test.go` importing `internal/blueprints/coretest`
@@ -1784,7 +1890,11 @@ standby's closed port. The gateway's refusal of `X-API-Key` has run in the
 gateway's Caddy image in front of a stub, not on a deployed gateway with the
 account service calling Pocket ID over the mesh.
 
-`secrets rotate` has never been run against a real host either. Its `ALTER
+`secrets rotate` has never been run against a real host either, nor its DNS
+token check against a real provider. The mail checks have run only against an
+in-process SMTP server: `ssh -W` through a shared master to a real mail
+server, from a real site, is reasoned from ssh(1) and not observed, so a first
+`paisans validate` against a deployment is the check to make. Its `ALTER
 ROLE` on the leader and the Patroni restarts and switchover around a cluster
 password, `rabbitmqctl change_password` in Mbin's broker, every Garage node
 restarted together for `rpc_secret`, and whether each app ends the sessions

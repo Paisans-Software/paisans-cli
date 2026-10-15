@@ -1237,6 +1237,10 @@ from this configuration and the fork reconciles it at every start:
   instance pushes to the one token; a deployment with more than one Pocket ID
   app prefixes each continuity monitor with the app key, since the seed tells
   monitors apart by name.
+* every app whose blueprint declares a **heartbeat** gets one push monitor,
+  `<app> — <name>`, fed by a service of the blueprint's own under the app's
+  `heartbeat_token`, with the site heartbeat's schedule (see *A blueprint can
+  come from a catalog*).
 * a deployment on Cloudflare that has pasted `external.dns_members_token`
   gets two more beside it, `operator continuity: dns super admins` and
   `operator continuity: dns 2fa`, fed the same way from the reconciler's DNS
@@ -2358,7 +2362,7 @@ Most of `secrets.enc.yaml` is machine-authored. Nobody invents forty passwords.
 
 | Kind | Examples | Origin |
 |------|----------|--------|
-| **Generated** | Postgres superuser/admin/replication passwords, Garage keys, WireGuard private keys and heartbeat tokens, Pocket ID's operators heartbeat token and its DNS check's hash key and two heartbeat tokens, Mercure JWT, RabbitMQ and Valkey passwords, Mbin's OAuth2 server keypair | created at `init`, never typed or seen |
+| **Generated** | Postgres superuser/admin/replication passwords, Garage keys, WireGuard private keys and heartbeat tokens, Pocket ID's operators heartbeat token and its DNS check's hash key and two heartbeat tokens, the heartbeat token of each app whose blueprint declares a heartbeat, Mercure JWT, RabbitMQ and Valkey passwords, Mbin's OAuth2 server keypair | created at `init`, never typed or seen |
 | **Pasted** | Cloudflare API token, SMTP password (`external.smtp_password`, or per app), the optional DNS members token (`external.dns_members_token`), an operator's address at the DNS provider when it is not their email (`operators.<operator>.dns_provider_email`) | issued elsewhere, supplied by a human |
 | **Captured** | OIDC client secrets | belong to a running service; recorded here, by `apply` or `oidc client create` for Pocket ID |
 
@@ -2445,8 +2449,11 @@ security find-generic-password -s acme -w | paisans secrets set external.acme_dn
 Every other way of getting a value into the file leaves a copy: an argument is
 in shell history and in `ps`, an echoed prompt is in a scrollback buffer, and
 `sops secrets.enc.yaml` opens the whole decrypted file in an editor that may
-keep swap or backup files. Given a key, it refuses a terminal on stdin for the
-same reason.
+keep swap or backup files. Given a key at a terminal, it asks for that key's
+value on the controlling terminal with echo off rather than reading what is
+typed on stdin, says whether the key is already set (never its value), and
+writes nothing on an empty answer. That is how a set credential is replaced by
+hand, Eg: a DNS token reissued before `paisans secrets rotate`.
 
 Given no key at a terminal, `paisans secrets set` asks for each secret still
 owed in turn, saying why each is owed, and reads the answer on the controlling
@@ -2465,6 +2472,16 @@ under `external`; it refuses a generated key nobody created, because `init`
 creates those with the shapes their consumers require, and it refuses an unknown
 top level section, because a value written where nothing reads it looks
 delivered and is not.
+
+**Secrets are listed by path, never by value.** `paisans secrets list` prints
+every secret the configuration needs, and every other one the file holds for
+something it still declares, by the dotted path `secrets set` and `secrets
+rotate` take: whether the file holds a value there, which of the three kinds it
+is, and the path `secrets rotate` takes for it. It prints no value, no part of
+one and no length, because an operator looking for a path has no use for the
+value, and a value on a terminal is in its scrollback. The kind says who fills
+an unset one: `init`, `secrets set`, or `apply --execute`. See *`paisans
+secrets list`* in [docs/commands.md](docs/commands.md).
 
 **Secrets nothing declares are pruned.** A site or an app taken out of
 `paisans-stack.yaml` leaves its secrets behind. A secret is orphaned when it names
@@ -2584,8 +2601,8 @@ is the approved design.
 
 | Stage | Work | Gate |
 |---|---|---|
-| 1. Next value | a new value generated on the workstation and written to the secrets file under `rotations`, beside the current one | the file decrypts and holds it |
-| 2. Where it is checked | the side that verifies the secret learns the new value: `ALTER ROLE` on the Patroni leader or in a pinned app's own Postgres, `rabbitmqctl` in Mbin's broker; nothing, where the checking side reads the secret only from what stage 3 renders | the checking side accepts the new value |
+| 1. Next value | a new value generated on the workstation, or for a pasted secret the one its issuer gave, written to the secrets file under `rotations`, beside the current one | the file decrypts and holds it |
+| 2. Where it is checked | the side that verifies the secret learns the new value: `ALTER ROLE` on the Patroni leader or in a pinned app's own Postgres, `rabbitmqctl` in Mbin's broker; for the DNS token, a read only zone lookup at the provider with the next token; nothing, where the checking side reads the secret only from what stage 3 renders | the checking side accepts the new value |
 | 3. Where it is used | every stack that presents the secret, by scoped `apply`, one site at a time | each stack healthy before the next site |
 | 4. Promote | the next value becomes the secret's own, and its entry under `rotations` is removed | the file decrypts and holds only the new value |
 
@@ -2632,8 +2649,8 @@ Finishing either command first costs nothing but its resume.
 
 | Secret | Checked by | Used by | Cost to members |
 |---|---|---|---|
-| `external.acme_dns_token` | the provider | each site running the toolkit's Caddy | none |
-| `external.smtp_password`, `apps.<app>.smtp_password` | the mail provider | each app that logs in to send mail with it, which takes a `username` | none |
+| `external.acme_dns_token` | the provider, asked for the zone with the next token at stage 2 | each site running the toolkit's Caddy | none |
+| `external.smtp_password`, `apps.<app>.smtp_password` | the mail provider, logged in to with the next password at stage 2, from a site running each app that uses it | each app that logs in to send mail with it, which takes a `username` | none |
 | `oidc_clients.<app>.client_secret` | Pocket ID | the app | none |
 | `apps.<app>.oauth` (Mbin's OAuth2 unit) | Mbin | Mbin | every API client and app signs in again |
 | Mbin `app_secret`, oauth2-proxy `cookie_secret`, uptime `session_secret`, account `session_key` | the app | the app | signed in browser sessions of that app end |
@@ -2648,6 +2665,7 @@ Finishing either command first costs nothing but its resume.
 | `storage.garage.rpc_secret` | every Garage node | every Garage node | storage unavailable while every node restarts together |
 | `sites.<site>.heartbeat_token` | the monitor | the site's heartbeat | its pushes refused while the monitors restart and the pusher switches, normally within the grace before a heartbeat counts as missed |
 | Pocket ID `operators_heartbeat_token`, `dns_super_admins_heartbeat_token`, `dns_2fa_heartbeat_token` | the monitor | the operators heartbeat on every site the app runs on | its pushes refused while the monitors restart and the pushers switch, normally within the grace before a heartbeat counts as missed |
+| `apps.<app>.heartbeat_token`, for a blueprint that declares a heartbeat | the monitor | the app, on every site it runs on | its pushes refused while the monitors restart and the app switches, normally within the grace before a heartbeat counts as missed |
 | Pocket ID `dns_email_hash_key` | the reconciler | the reconciler, with the hashed mapping rendered under it | a restart of the Pocket ID stack on each site in turn |
 
 Mbin's `app_secret` signs its four month remember me cookie, not the sessions
@@ -2678,6 +2696,12 @@ token and restarts it to adopt it. Only then is the pusher handed the token.
   Pocket ID, its reconciler and its database keep running and nobody is
   signed out. A deployment with no monitor renders no pusher, so the token is
   replaced in the file and handed to nobody.
+* **An app's own `heartbeat_token`**, for a blueprint that declares a
+  heartbeat, is checked by every monitor in the same way. The pusher is the
+  app's own stack on each of its sites in turn, whose templates render
+  `.HeartbeatURLs` with the token, so the blueprint's service that reads them
+  is recreated with it. A deployment with no monitor renders no URL, so the
+  token is replaced in the file and handed to nobody.
 
 From the first monitor learning the token until the pusher sends it, a monitor
 that already holds it answers the old one with 404. That lasts one scoped
@@ -2697,25 +2721,64 @@ runs the new one (*`oidc client create` makes an app's client at Pocket ID*,
 file that lacks a secret `init` generates, naming `paisans init`, since a run
 that skipped one would leave it as the departed operator knew it.
 
-**A pasted secret is replaced by a person first.** The DNS token and the SMTP
-passwords are issued by a provider, and nothing here can issue them. The
-operator replaces each at its issuer and sets it with `paisans secrets set
-<path>`, and `secrets rotate` hands the value the file then holds to every
-stack that renders it, one site at a time. It is refused while every host
-using it runs the value the file holds, since rotating it then would restart
-them for nothing, and `--all` refuses until each pasted secret it includes has
-been replaced so. **Which value a host runs is read per secret, not per
-file.** The lines that carry the secret are the ones a render with any other
-value changes; the host prints the SHA-256 of each line of its own copy of
-that file, so only hashes cross ssh and nothing secret is on a command line;
-and the host runs the value when every carrying line's hash is among them. A
-file that differs only elsewhere, Eg: a comment an upgrade changed in
-`caddy.env`, or an app setting not yet applied, would otherwise pass for a
-secret replaced. That refusal cannot tell a secret never replaced from one
-replaced and then applied, as an eviction does with the DNS token, so the
-operator says which: **`--replaced <path>`** names a pasted secret every host
-using it already runs from the file. It is checked the same way, and refused
-for a generated secret, for one some host does not run yet, and for one whose
+**A pasted secret is replaced at its issuer, and pasted when the run asks.**
+The DNS token and the SMTP passwords are issued by a provider, and nothing
+here can issue them. When every host using one runs the value the secrets file
+holds, the file has nothing new to hand out, so `--execute` asks for the new
+value at a terminal: it names the path and where it is replaced (the
+`acme.provider` for the DNS token, the mail provider for an SMTP password),
+the operator replaces it there, and pastes the new one with echo off. Every
+pasted secret in the run is asked for before any host is claimed, with the
+`sign out` confirmation, so a run never stops part way to wait on a person
+(Founder decision). The answer goes under `rotations` as the next value,
+exactly as a generated secret's does, and stage 4 makes it the file's own, so
+a stopped run resumes with it and asks for nothing again. An empty answer
+stops the run with nothing changed and names the two other ways: set the new
+value first with `paisans secrets set <path>`, or pass `--replaced <path>` for
+one already replaced and applied. An answer equal to the value the hosts run is
+refused as unchanged. Without a terminal the run is refused before anything
+changes, with the steps that need none: replace it at its issuer, `paisans
+secrets set <path> < file`, and run `secrets rotate` again. Where the issuer
+keeps the old value valid beside the new one, revoke the old one there once
+the rotation finishes; where it replaces the value in place, the apps that use
+it fail to authenticate until stage 3 reaches them.
+
+**A pasted secret already set anew is not asked for.** One replaced with
+`paisans secrets set`, which some host does not run yet, has its next value in
+the file already, and `secrets rotate` hands that value to every stack that
+renders it, one site at a time.
+
+**The DNS token is tried before any Caddy gets it.** Stage 2 looks up the
+community domain's zone at the provider with the next token, the read only
+call `dns init` makes, and a token that cannot see the zone stops the
+rotation there, before stage 3. A pasted token is tried the same way as soon
+as it is given, and one set with `secrets set` when the run is planned, so a
+mistyped token is refused before it is written under `rotations`, where a
+resumed run would keep it. A provider whose record management is not
+implemented here (`dns init` lists those that are) is not checked, and the
+plan says so.
+
+**An SMTP password is tried before any app gets it.** A pasted one logs in to
+the mail server, from a site running each app that uses it, and sends the
+operators one test message as soon as it is given, so a mistyped password, or
+a sender the provider refuses, is refused before it is written under
+`rotations`. One set with `secrets set` sent its message when it was set, and
+logs in when the run is planned. Stage 2 logs in with it again, and the run
+stops there, before stage 3, when it does not. No other message is sent
+(*Mail settings are tried before they are used*).
+
+**Which value a host runs is read per secret, not per file.** The lines that
+carry the secret are the ones a render with any other value changes; the host
+prints the SHA-256 of each line of its own copy of that file, so only hashes
+cross ssh and nothing secret is on a command line; and the host runs the value
+when every carrying line's hash is among them. A file that differs only
+elsewhere, Eg: a comment an upgrade changed in `caddy.env`, or an app setting
+not yet applied, would otherwise pass for a secret replaced, and its old value
+be handed out again. A secret replaced and then applied, as an eviction does
+with the DNS token, reads the same as one never replaced, so the operator says
+which: **`--replaced <path>`** names a pasted secret every host using it
+already runs from the file. It is checked the same way, and refused for a
+generated secret, for one some host does not run yet, and for one whose
 rotation is under way; a path it accepts is listed in the plan as replaced
 earlier and not rotated. No OIDC client secret is pasted: every one, the
 homeserver's and the gate's included, is minted by `oidc client create
@@ -2770,9 +2833,10 @@ includes it (Founder decision).
 **Refused before anything changes:** etcd or Patroni unhealthy, since a
 password changed on a limping cluster can leave a member unable to rejoin; a
 site that does not answer over ssh, since it would keep the old value and
-break when the old one is retired; a pasted secret not yet replaced; a pending
-rotation whose stage cannot be read from the hosts, or that cannot finish; and
-a pending `mesh rekey`.
+break when the old one is retired; a pasted secret to be asked for with no
+terminal to ask at, or whose answer is empty, unchanged, or a DNS token that
+cannot see the zone; a pending rotation whose stage cannot be read from the
+hosts, or that cannot finish; and a pending `mesh rekey`.
 
 **The signed copies.** The applies a rotation runs hand each stack its next
 value and nothing else: they neither ask for the review nor publish a version,
@@ -2899,6 +2963,81 @@ them `starttls` or `tls`. The monitor and Mbin send credentials over
 plaintext. The monitor also upgrades with STARTTLS when a `none` relay offers
 it, and then checks the relay's certificate, so a relay for `none` should not
 offer STARTTLS with a certificate the monitor cannot verify.
+
+### Mail settings are tried before they are used
+
+A mail setting that is wrong, or a password the provider has revoked,
+fails silently: nothing breaks at apply, and the first sign is a sign in link
+or an account notice that never arrives. So the toolkit tries them (Founder
+decision, 2026-10-14). **A check** takes an app's effective settings, the
+`smtp:` blocks resolved as above, and its password (`apps.<app>.smtp_password`
+when set, otherwise `external.smtp_password`), connects to `host` on its port,
+does TLS from the first byte for `tls` or STARTTLS for `starttls`, verifying
+the server's certificate for that host name against this machine's trust
+store, and logs in with `AUTH` (PLAIN, or LOGIN where PLAIN is not offered).
+A server whose certificate this machine does not trust for that name fails
+the check, as it fails any client that verifies it. `none` stays plaintext,
+which `validate` allows only toward a private relay. A relay with no
+`username` takes no login, so its check connects and greets.
+
+**It connects from a site that runs the app, through ssh.** The connection is
+ssh's stdio forward from that site (`ssh -W <host>:<port>`, over the shared
+connection of *One connection per host, shared*), so the site's host resolves
+the name and its own route carries the connection: the check passes or fails
+on the egress the app itself will use, and it reaches a relay only the mesh
+or the site's private network can. The SMTP conversation runs on the
+workstation, so nothing is installed or run on a host for it, and the password
+crosses only the ssh connection and then the path the app's own mail takes. The
+forward needs the host's sshd to allow TCP forwarding, which is OpenSSH's
+default (`AllowTcpForwarding`, sshd_config(5)); a host that refuses it says
+`administratively prohibited`, and the check says so.
+
+**When, and how much:**
+
+| Command | What it tries | On failure |
+|---|---|---|
+| `secrets set` an SMTP password | logs in with the new password and sends one test message | refused; nothing is written |
+| `secrets rotate` an SMTP password | a pasted one logs in and sends one test message when pasted; one set with `secrets set` logs in when the run is planned; stage 2 logs in again | refused before anything is written under `rotations`, or stopped at stage 2 before any app is handed it |
+| `apply`, with or without `--site` | every app it would start logs in, from each site it runs on; nothing is sent | refused before any host is changed, naming the app, where its settings are declared, and the server's reply |
+| `validate` | every app logs in, from each site it runs on; nothing is sent | a warning |
+
+A changed credential is the only thing that sends mail, because a login alone
+cannot tell whether the provider accepts the sender: a provider may take the
+login and still refuse a `from_address` the account does not own. `apply` and
+`validate` run often, against settings that already worked, so they only log
+in. A password `secrets set` wrote has sent its message already, so a rotation
+of it logs in and sends no second one.
+
+Apps with the same settings and password share a check. `apply` and `validate`
+make one per site, since each site has its own route to the server; `secrets
+set` and `secrets rotate` make one per sender, from the first site running one
+of its apps, since what they test is the credential and each sender gets one
+message.
+
+**The test message goes to every operator** the configuration declares, by
+their `email`, in the order of their names: a changed mail credential is every
+operator's business, and each of them can say whether it arrived. It is plain
+text, sent from the app's `from_address` (with its `from_name`), with the
+subject `Paisans SMTP test: <path> for <domain>`, and it names the community,
+the command, the apps, the server and the site it was sent from. The password
+is not in it, and no output shows the password: each is registered as a
+secret, and a failure quotes only the stage and the server's reply. With no
+operator email to send to, `secrets set` and `secrets rotate` refuse the
+password, since a message to nobody proves nothing.
+
+**What is not tried, and why it is a warning.** A host that only the app's own
+container resolves, a compose service name or a loopback address, is not one
+the site's host reaches, so its settings are listed as not checked. So are
+settings whose password is not set yet: `init` and `apply` already name that
+secret as owed. An SMTP password no app logs in with, or whose apps run on no
+site, is written by `secrets set` with nothing to try.
+
+**`validate` works away from the hosts.** It judges the file, and a mail
+server is outside the file, so every mail failure is a warning there and
+`apply` is the gate that refuses. A site it cannot reach, or a secrets file it
+cannot read, skips the check with a warning rather than failing; `--offline`
+skips it without trying, for an editor's save hook or a machine with no route
+to the sites.
 
 ### Rendered configuration is a build artifact
 
@@ -3077,6 +3216,37 @@ must say how to dump and restore it, or a deployment with backups refuses it
 (`blueprint-without-backup`). A gated app whose blueprint says the gate leaves
 something open past it, and enforces no setting to close it, is warned about
 (`gated-leaves-open`).
+
+**A catalog blueprint may declare a heartbeat**, for an app that knows
+something about itself no check from outside can ask, Eg: whether its
+settings still hold what the configuration says:
+
+```yaml
+apiVersion: paisans.blueprint/v2
+heartbeat:
+  name: "settings"   # the monitor is named "<app> — settings"
+```
+
+Each app of it gets a token, `apps.<app>.heartbeat_token`, generated at
+`init` (and by `apply`'s dry run, with the other generated secrets) in the
+site heartbeat token's shape, and refused by `render` when it is missing or of
+any other shape, monitor or not, so a monitor added later never meets an app
+without one. Every monitor's seed gets one push monitor per app,
+`<app> — <name>`, with the site heartbeat's interval, grace and threshold. The
+blueprint's templates read `.HeartbeatURLs`, every monitor's
+`https://<monitor hostname>/ping/<token>`, space separated, in app order, and
+empty in a deployment with no monitor, and hand it to a service of the
+blueprint's own that pushes. The URLs carry the token, so the template holding
+them is a `.secret.tmpl`. Every instance pushes to the one token and to every
+monitor, the one on its own site included, as the operators heartbeat does
+(see *The operators heartbeat is a service beside the reconciler*), so a
+cluster placed app keeps one history whichever instance pushes. `heartbeat` is
+read only from `apiVersion: paisans.blueprint/v2`, which is
+`paisans.blueprint/v1` with that one key: a toolkit that reads only v1 refuses
+the format by name and uses the newest catalog release it can read, rather
+than rendering the app without its monitor. `secrets rotate` replaces the
+token, by name or with `--all` (*A heartbeat token reaches the monitors before
+the pusher*).
 
 #### A blueprint ships a template set, not a single `.env`
 
@@ -4991,6 +5161,7 @@ which a package upgrade replaces, untouched.
 | 80/tcp, 443/tcp | sites with the gateway role, and monitor sites in `managed_by: paisans` |
 | `br-+` to the site's mesh address, cluster port | sites with the apps role |
 | `br-+` to the site's mesh address, Garage's S3 port | sites with the apps role that are also Garage sites |
+| `br-+` to the site's mesh address, 1413, HAProxy's route to Pocket ID's API | sites the account service runs on, which call that API there with the static key |
 | `br-+` to the site's mesh address, the port of each other app that runs there | sites an uptime monitor runs on, so its direct checks of those apps arrive |
 
 Nothing is listed per site. A site that gains the gateway role gains 80 and 443
@@ -5374,8 +5545,13 @@ run review everything again. `site remove` deletes it with the registry entry.
 | in the grant only | `+ key SHA256:… (bob, bob@laptop) may log in as ubuntu` | **yes** |
 | in both, different | `~ image talk/app: ghcr.io/…:1.14 → ghcr.io/…:1.15` | **yes** |
 | in the record only | `- key SHA256:… (carol, carol@desk)` | no |
-| a foundation image, in the grant only or changed | under `foundation images, reviewed in the core catalog:`, after the rest | no |
+| a foundation image, in the grant only or changed | under `foundation images (required):` | no |
 | approved on the host earlier, not applied yet | counted on the site's line: `3 approved earlier, not applied yet` | no |
+
+Each site's changes are listed in groups, each under its heading: foundation
+images first, then removals under `removed, nothing to approve:`, and last
+what needs approval under its count, Eg: `5 entries to approve:`, so the count
+heads exactly the entries it counts, just above the prompt.
 
 A removal is shown and not approved, because it only takes away.
 
@@ -6109,6 +6285,27 @@ above, recreates it outright. The infrastructure stack is checked like any
 other, which is also the check on the gateway's Caddy after a reload or an
 image change; Patroni's own wait for a primary still gates the database
 bootstrap, because a running Spilo container is not yet a primary.
+
+**A stop refers to `paisans doctor` only where a doctor check names its
+cause**, because a referral to a command that then reports everything ok is
+worse than none. The causes are one table in `internal/diagnosis`, which
+apply, init and doctor share. A service whose log shows `tls: internal error`
+fetching a hostname a Caddy site serves gets a line saying that Caddy has no
+certificate for it (Caddy's answer to a handshake for a hostname it holds no
+certificate for, observed on staging), and a service that cannot reach its
+database gets one pointing at doctor's Patroni check:
+
+```
+  oauth2-proxy: Caddy on vm has no certificate for id.example.org, so it refuses TLS for it. Run paisans doctor to see why it could not get one.
+```
+
+A TLS error on a hostname Paisans does not serve gets no referral. A site ssh
+cannot reach, in `apply` or in `init`'s read of every site, ends with `Run
+paisans doctor --site <site>`, whose reach check says what the deployment is
+without while it is gone. `gateway move` calls the DNS provider without the
+token check `dns init` makes, so a refusal there (Cloudflare's `9109` or
+`10502`) is worded as that check words it, with `Run paisans doctor`. Any
+other failure is reported as above, with no referral.
 
 **Failing on the first `restarting` rather than waiting it out is deliberate.**
 Every rendered service carries `restart: unless-stopped`, so `restarting` means
@@ -8922,13 +9119,33 @@ contradicts the gate, and changing it would change policy, so it is left for
 the operator. A file the edit leaves unloadable is restored.
 
 A site that does not answer is itself a finding, never a crash: every other
-check runs with the sites that did. Each ssh attempt gives up after ten
-seconds, as every command's does (see *How the operator's ssh uses them*). Like
+check runs with the sites that did. Nothing more is asked of that site, since
+a read over a connection that already failed only fails again, and the checks
+not made because of it are named once, on its line (`Not checked because of
+this: mesh, containers, clocks on home-b.`), rather than each failing in turn,
+because a cascade of errors buries the one line that matters. The closing
+line counts them as skipped. Each ssh attempt gives up after ten seconds, as
+every command's does (see *How the operator's ssh uses them*). Like
 `preflight` it takes no `--ssh`, since one override cannot name several hosts,
 and it runs its commands through sudo unless told `--sudo=false`.
 
-The checks, in the order they are printed, from the bottom of the stack up so
-that the first `FAIL` is usually the cause of those after it:
+The checks run at once, as many as are ready, and each prints whole, naming
+its site, as it ends, so an operator in an outage reads the first answer while
+the slow ones still run, and a deployment of several sites is read in the time
+of its slowest site rather than the sum of them. A check starts only once the
+checks it needs have answered: everything on a site needs its reach, etcd
+needs a member that answered, and the containers and Pocket ID checks wait for
+Patroni's, whose verdict their advice uses. So a cause always prints before
+what it causes. A site runs at most eight commands at once, under the ten
+sessions sshd allows on the one connection Paisans shares per destination
+(`MaxSessions`, sshd_config(5)); sites are not bounded against each other,
+since each is a machine of its own. When any check failed, the failures are
+listed once more at the end, under `failed, deepest first:`, in the order
+below, because in an interleaved run the first failure on screen is the first
+to end, not the first to fix.
+
+The checks, from the bottom of the stack up, so that the first `FAIL` of the
+closing list is usually the cause of those after it:
 
 | Check | How | FAIL when |
 |---|---|---|
@@ -8937,12 +9154,29 @@ that the first `FAIL` is usually the cause of those after it:
 | etcd quorum | `etcdctl endpoint health -w json` in the etcd container of the first member that answers, naming every member of `etcd.members` by its mesh address | fewer than half the members plus one are healthy. One member down with quorum intact is a `WARN` |
 | etcd version | `curl` on the host to `http://127.0.0.1:2379/version`; skipped, and said so, where the host has no `curl` | the cluster version is `3.0.0` under a 3.5 server |
 | Patroni | `/cluster` from every database site's Patroni, through `curl` in its container as `apply` asks it, and Patroni's `/sync` key from etcd | there is no running leader. A replica that is not `streaming`, or more than 16 MiB behind, is a `WARN`, and so is a leader with no Sync Standby while `cluster.synchronous` is true |
-| Containers | `docker ps -a --filter label=community.paisans.deployment=<id>` on every site, then `docker inspect` and the end of `docker logs` for each container not running | any container is not running |
+| Containers | `docker ps -a --filter label=community.paisans.deployment=<id>` on every site, then `docker inspect` and the end of `docker logs` for each container not running or unhealthy | any container is not running, or runs while its healthcheck reports `unhealthy`, shown with the last lines its healthchecks printed. A healthcheck still `starting` is a `WARN`, since it has not failed but the container is not yet known to work; a container with no healthcheck is judged by running alone |
 | Settings | for each app setting `gated`, the read its kind records, run in the app's running container on each site it runs on: Mbin's environment and `MBIN_LOCKED_SETTINGS`, WriteFreely's `writefreely settings list` | a setting the gate leaves to the app (private instance mode, the allow list, authorized fetch, WriteFreely's private mode) is off or not locked. The advice is `paisans apply --site <site>`, which renders the file that writes and locks it and recreates the stack, or a newer image when the app does not honour the lock. See *The settings gating needs are checked on both sides* |
 | Pocket ID | the same question `apply` asks after acting on a Pocket ID stack on more than one site, asked once | no site, or more than one, has an active instance |
 | Clocks | `date +%s.%N` on each site, against the workstation's clock taken on either side of the call, less half the round trip | never; more than 1 s off is a `WARN` |
 | Leftovers | the host check's inventory (*The host check: what is already on a host decides how much is touched*) on every site that answered, and the manifest; skipped under `--sudo=false`, since the inventory reads as root | never. Anything of this deployment's the site no longer renders (a compose project by label and name, a manifest entry marked left over) is a `WARN`, with the note that `apply` does not remove it. On the gateway, each `*.caddy` in `/srv/caddy.d` is listed as `info`: foreign, and served by this deployment's Caddy. That directory is the only way anything foreign is served by it, since the Caddyfile is this deployment's and Caddy runs in the host's network namespace |
 | SSH allowlist | `/etc/paisans/ssh-allow.<user>` on every site that answered (see *host prepare manages the login user's authorized keys*) | never. No list is `info`, since every key is then allowed; a list says how many keys it holds, and each key `ssh.keys` names that it does not hold and that is not in the login user's `authorized_keys` yet is a `WARN`, as the refusal the next `host prepare` would give when it appends that key, with the `host allow` that allows it. A key already in `authorized_keys` is never appended, so it is no warning; where `authorized_keys` could not be read, every key the list lacks is reported, as the refusal host prepare would give if it had to add it. Nothing is broken now, so it is never a `FAIL` |
+| Caddy certificates | the caddy container's log on every site that runs Paisans' Caddy, `docker compose logs caddy` from the container's start or the last hour, whichever is later, kept to Caddy's `tls.obtain` lines; for each hostname the site serves, the newest outcome | the newest outcome is a failure. Hostnames failing for one cause are one finding naming them all: the provider refusing the token from this server (Cloudflare's `9109`, with the address it judged), its lockout (`10502`), the certificate authority's rate limit with when to retry, or the error's own last clause. It reads no secret and calls no provider, so it runs for every provider |
+| DNS token | from each Caddy site, with the `ACME_DNS_TOKEN` in its `caddy.env`, read there through sudo and never sent anywhere; and from the workstation, with `external.acme_dns_token` from `--secrets` (`secrets.enc.yaml` beside the configuration by default), opened with the age key as `apply` opens it. Each asks the provider for the zone holding `community.domain`, then verifies the token | the provider refuses the token from that place, does not answer, sees no zone holding the domain, or reports the token not `active`. Secrets that cannot be opened, Eg: no age key on this workstation, skip the workstation's check and the records with the reason, and every other check runs |
+| DNS records | the plan `dns init` builds, which reads and never writes, from the workstation once its token check passed | a hostname of the deployment holds a record pointing somewhere else (a visitor is sent there; delete it at the provider by hand, since `dns init` never updates a record and `dns prune` keeps one whose name is still wanted), or holds none (`paisans dns init --execute` creates it). A record waiting for `gateway move` is `info`, and a weak advisory record a `WARN`, as `dns init` shows them |
+
+The provider judges the address a call comes from (Cloudflare's Client IP
+Address Filtering), so the token is checked from every place that uses it: a
+token allowed from the workstation and not the gateway passes `dns init` and
+fails every certificate Caddy asks for. The zone lookup comes first because
+the filter applies to it and not to verify, so a token refused from a place is
+refused by its first call there and nothing more is asked. Calls with a refused
+token are also what keep Cloudflare's lockout, `10502`, going (observed on
+staging, where it held while Caddy retried and ended once the filter admitted
+the gateway), so while any Caddy log shows a `10502` in the last five minutes
+no token check is made from anywhere, and each says so: fix the token's
+filter, and Caddy's next scheduled attempt succeeds with nothing restarted.
+For a provider doctor has no check for, the token and records checks are
+skipped and say so; Caddy's log is what tells whether it gets certificates.
 
 The health check names each member rather than using `--cluster`, because
 `--cluster` first asks the cluster for its member list (etcd v3.5.16,
@@ -9242,6 +9476,32 @@ up with the new major version. Naming the major version is the fix.
 
 Everything else is checked at `apply`, by asking the binary which modules it has
 rather than inferring it from a name.
+
+#### The token is checked from the server before Caddy uses it
+
+A DNS token can be restricted to the addresses it is used from (Cloudflare's
+Client IP Address Filtering), and the provider judges the address each call
+comes from. A token that works from the workstation can be refused from the
+gateway, and Caddy, refused, retries every hostname against every certificate
+authority until the provider locks the token out, a lockout that holds while
+the retries keep arriving.
+
+So on each site whose Caddy is about to start, reload or be recreated, `apply`
+first runs `check DNS token` there: after the gateway's files are written and
+its modules checked, before `validate gateway config`. It reads the token from
+the `caddy.env` it has just written, on the host, and hands it to curl through
+a configuration on stdin, so the token never leaves the host and is in no
+command line. It looks up the zone holding `community.domain`, which the
+address filter applies to, and then verifies that the token is `active`. A
+refusal stops that site's apply with the gateway unchanged, still serving the
+certificates it holds, and so does a provider API that does not answer,
+because then nothing can tell a token Caddy can use from one it cannot.
+Founder decision. A provider the toolkit has no check for is not gated, and
+the step says so.
+
+`dns init` and `dns prune` run the same check from the workstation before
+their first records call, so a token filtered away from it is reported as
+refused `from this workstation`, with the address the provider judged.
 
 ### Trusted proxies must be the mesh subnet — set this at `init`
 

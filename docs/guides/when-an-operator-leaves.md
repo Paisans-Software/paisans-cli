@@ -150,22 +150,27 @@ community's decision.
 5. **Rotate what the trust calls for.** On full trust, nothing more. Short of
    it, in this order:
 
-   1. Replace the pasted secrets at their issuers, and set each new one. The
-      DNS token first, since it can point the community's names anywhere:
-      revoke it at the provider, issue a new one scoped to the zone, and pipe
-      it in. Then each SMTP password the deployment sends mail with, at the
-      mail provider. Every OIDC client secret is minted by `secrets rotate`
-      itself, so none is replaced here:
+   1. Replace the pasted secrets at their issuers. The DNS token first, since
+      it can point the community's names anywhere: revoke it at the provider
+      and issue a new one scoped to the zone. Then each SMTP password the
+      deployment sends mail with, at the mail provider. Every OIDC client
+      secret is minted by `secrets rotate` itself, so none is replaced here.
+
+      `secrets rotate --all --execute` in step 3 asks for each new value at
+      the terminal before it changes anything, and hands it to the hosts.
+      Each new SMTP password logs in to the mail server from a site and sends
+      every operator one test message before it is taken, whether it is
+      pasted there or set now, so expect one per sender. To
+      put the new DNS token in the file now rather than wait for step 3, set
+      it, and step 3 hands on the value the file holds without asking:
 
       ```sh
       security find-generic-password -s acme -w | paisans secrets set external.acme_dns_token
-      security find-generic-password -s smtp -w | paisans secrets set external.smtp_password
       ```
 
-      `secrets rotate` hands each new value to the hosts in step 3. If an
-      `apply` hands one out first, name it there with `--replaced <path>`,
-      since rotate refuses a pasted secret every host already runs unless it
-      is told the secret was replaced.
+      If an `apply` hands one out first, name it in step 3 with `--replaced
+      <path>`: every host then runs it, and rotate would otherwise ask for
+      another.
 
    2. Every site's WireGuard key: `paisans mesh rekey --all --execute`, one
       site at a time. `apply` refuses until it finishes, and a run that stops
@@ -338,10 +343,10 @@ included, and refuses while one does not answer.
    certificates, for every client that checks revocation. Open: clients that
    do not check.
 
-10. **Rotate the rest.** First replace the pasted secrets at their issuers
-    and set each, as in step 5.1 of the first case: each SMTP password.
-    When `home-b` did not hold the gateway, the DNS token is the one
-    they knew: replace it the same way. Then:
+10. **Rotate the rest.** The pasted secrets are replaced at their issuers
+    as in step 5.1 of the first case, each pasted when the run asks: each
+    SMTP password, and, when `home-b` did not hold the gateway, the DNS token,
+    the one they knew. Then:
 
     ```sh
     paisans secrets rotate --all             # every secret in order, its cost, and what is kept
@@ -349,8 +354,8 @@ included, and refuses while one does not answer.
     ```
 
     When `home-b` held the gateway, steps 3 and 7 already replaced the DNS
-    token and put it on every host that uses it, and `--all` refuses it as
-    unchanged, since it cannot tell that from a token never replaced. Say so:
+    token and put it on every host that uses it, and `--all` would ask for
+    another, since it cannot tell that from a token never replaced. Say so:
 
     ```sh
     paisans secrets rotate --all --replaced external.acme_dns_token

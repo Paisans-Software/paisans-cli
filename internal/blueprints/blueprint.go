@@ -13,8 +13,14 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
-// APIVersion is the blueprint format this toolkit reads.
-const APIVersion = "paisans.blueprint/v1"
+// APIVersion is the newest blueprint format this toolkit reads, and
+// APIVersionV1 the one before it, read as well. v2 is v1 with heartbeat: a
+// blueprint that declares one names v2, so a toolkit that cannot read it
+// refuses the format by name and uses an older catalog release.
+const (
+	APIVersion   = "paisans.blueprint/v2"
+	APIVersionV1 = "paisans.blueprint/v1"
+)
 
 // spec is a blueprint.yaml as written. Parse turns it into a Def. Every key
 // is checked: one this toolkit does not know is refused by name rather than
@@ -41,6 +47,7 @@ type spec struct {
 	Settings        map[string]SettingSpec `yaml:"settings"`
 	Provides        []Provide              `yaml:"provides"`
 	Consumes        []Consume              `yaml:"consumes"`
+	Heartbeat       *heartbeatSpec         `yaml:"heartbeat"`
 }
 
 type databaseSpec struct {
@@ -170,8 +177,8 @@ func Parse(name string, content []byte, hasTemplate func(string) bool) (*Def, er
 }
 
 func (s spec) def(name string, hasTemplate func(string) bool) (*Def, error) {
-	if s.APIVersion != APIVersion {
-		return nil, fmt.Errorf("apiVersion: is %q, and this toolkit reads %s", s.APIVersion, APIVersion)
+	if s.APIVersion != APIVersion && s.APIVersion != APIVersionV1 {
+		return nil, fmt.Errorf("apiVersion: is %q, and this toolkit reads %s and %s", s.APIVersion, APIVersionV1, APIVersion)
 	}
 	if s.Name != name {
 		return nil, fmt.Errorf("name: is %q, but the blueprint's directory is %s", s.Name, name)
@@ -306,6 +313,13 @@ func (s spec) def(name string, hasTemplate func(string) bool) (*Def, error) {
 	if err != nil {
 		return nil, err
 	}
+	heartbeat, token, err := s.Heartbeat.def(s.APIVersion, secrets)
+	if err != nil {
+		return nil, err
+	}
+	if token != nil {
+		secrets = append(secrets, *token)
+	}
 	var generate []string
 	for _, sec := range secrets {
 		generate = append(generate, sec.Name)
@@ -355,6 +369,7 @@ func (s spec) def(name string, hasTemplate func(string) bool) (*Def, error) {
 		Secrets:         secrets,
 		RequiredSecrets: s.Secrets.Required,
 		SelfRotated:     s.Secrets.SelfRotated,
+		Heartbeat:       heartbeat,
 	}
 	d.FederationSetting = s.Federation.Setting
 	if s.OIDC != nil {

@@ -170,6 +170,13 @@ func (f *fakeIDP) serve(method string, u *url.URL, body string) (int, string) {
 	case method == "POST" && path == "/api/user-groups":
 		var g pocketid.Group
 		_ = json.Unmarshal([]byte(body), &g)
+		// As Pocket ID does: a group's name is unique
+		// (service/user_group_service.go:175-176 at v2.18.0).
+		for _, held := range f.groups {
+			if held.Name == g.Name {
+				return 409, `{"error":"Name is already in use"}`
+			}
+		}
 		g.ID = fmt.Sprintf("g-%d", len(f.groups)+1)
 		f.groups = append(f.groups, g)
 		return 201, marshal(g)
@@ -981,5 +988,32 @@ func TestAnExistingClientsConsentIsCorrected(t *testing.T) {
 	after.SkipConsent = before.SkipConsent
 	if a, b := marshal(after), marshal(before); a != b {
 		t.Errorf("something else changed: %s, was %s", a, b)
+	}
+}
+
+// apply plans every app's client before it runs any, so two apps that read
+// one missing group both plan to create it. The second create meets the
+// group the first made, and finds it rather than failing.
+func TestAGroupAnotherPlanMadeIsFound(t *testing.T) {
+	f := newFake()
+	wiki := Desired{App: "wiki", Name: "wiki", CallbackURL: "https://wiki.example.org/cb", PKCE: true, MemberGroup: "members", AdminGroup: "admins"}
+	gate := Desired{App: "gate", Name: "gate", CallbackURL: "https://gate.example.org/cb", PKCE: true, MemberGroup: "members", AdminGroup: "admins"}
+	first, second := plan(t, f, wiki, Recorded{}), plan(t, f, gate, Recorded{})
+	for _, p := range []*Plan{first, second} {
+		if err := Execute(context.Background(), p, api(f), &memRecorder{}, secretSource("generated-client-secret-not-real-01")); err != nil {
+			t.Fatalf("%s: %v", p.Desired.App, err)
+		}
+	}
+	if len(f.groups) != 2 {
+		t.Fatalf("groups %+v", f.groups)
+	}
+	for _, c := range f.clients {
+		var ids []string
+		for _, g := range c.AllowedUserGroups {
+			ids = append(ids, g.ID)
+		}
+		if strings.Join(ids, ",") != "g-1,g-2" {
+			t.Errorf("client %s allows %v", c.Name, ids)
+		}
 	}
 }

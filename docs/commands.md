@@ -74,11 +74,27 @@ Loads the declaration and prints every problem found, refusals and warnings
 both, rather than stopping at the first. Exits non zero when anything is
 refused.
 
+Once the file is refused nothing, it tries every app's mail settings: each
+logs in to its mail server from a site running the app, and nothing is sent
+(see *Mail settings are tried before they are used* in `README.md`). A
+failure is a warning, never a refusal, naming the app, where its settings are
+declared and the server's reply.
+
+```sh
+paisans validate
+paisans validate --offline   # the file alone; no site is reached
+```
+
 * **Alone:** while editing `paisans-stack.yaml`, before anything else reads it.
   Every command that loads the declaration runs the same checks, so this is
   the one that does nothing else.
-* **Flags:** `--config`.
-* **Hosts:** none. It reads the file and nothing else.
+* **Flags:** `--config`, `--secrets` (the SMTP passwords the mail check logs
+  in with; default `secrets.enc.yaml` beside the config), `--offline` (off:
+  check the file alone and reach no site).
+* **Hosts:** reaches each site running an app that sends mail, over ssh, and
+  through it the app's mail server. Changes none. A site that cannot be
+  reached, or a secrets file that cannot be read, skips the mail check with a
+  warning, so it works away from the hosts.
 * **`--execute`:** not taken.
 
 ### `paisans create`
@@ -146,11 +162,58 @@ Validates, then writes every site's artifacts under a local directory.
 * **Hosts:** none.
 * **`--execute`:** not taken. It writes under `--out` and stops.
 
+### `paisans secrets list`
+
+Prints every secret `paisans-stack.yaml` needs, and every other one the secrets
+file holds for something it still declares, one row per path, with no value:
+
+```
+PATH                                STATE  SOURCE     ROTATE
+apps.talk.oauth_private_key         set    generated  apps.talk.oauth
+backup.restic_password              set    generated  kept
+cluster.standby_password            set    generated  cluster.standby_password
+external.acme_dns_token             unset  pasted     -
+oidc_clients.talk.client_secret     unset  captured   -
+sites.home-a.wireguard_private_key  set    generated  mesh rekey
+```
+
+* **`STATE`:** `set` when the file holds a value there, `unset` when it does
+  not.
+* **`SOURCE`:** `generated` by `init`, `pasted` with `secrets set`, or
+  `captured` by `apply --execute` from a running service (see *Three kinds of
+  secret* in `README.md`).
+* **`ROTATE`:** the path `secrets rotate` takes for a set secret: its own, or
+  its unit's for one an app's blueprint rotates as a unit; `kept` for one
+  `secrets rotate` keeps; `mesh rekey` for a WireGuard key; `-` for an unset
+  secret or one nothing rotates.
+
+```sh
+paisans secrets list
+paisans secrets list | grep unset   # what is still to fill
+```
+
+* **Alone:** always. It is how to find the path `secrets set` and
+  `secrets rotate` take without opening the decrypted file.
+* **Flags:** `--config`, `--secrets`.
+* **Hosts:** none. It decrypts the local secrets file and reads it.
+* **`--execute`:** not taken. It changes nothing.
+
+A path naming something `paisans-stack.yaml` no longer declares is counted, not
+listed; `secrets prune` lists it. The table is on stdout and the report on
+stderr, so the table pipes cleanly.
+
 ### `paisans secrets set`
 
 Reads one value from stdin and writes it into the encrypted secrets file under
 a dotted key, printing only the key's name. For credentials issued elsewhere,
 such as the DNS provider's token.
+
+An SMTP password (`external.smtp_password`, `apps.<app>.smtp_password`) is
+tried before it is written: for each sender of the apps that log in with it,
+from a site running one of them, it logs in to the mail server and sends one
+test message to every operator's email. A failure writes nothing, and says
+the server's reply, never the password (see *Mail settings are tried before
+they are used* in `README.md`).
 
 ```
 security find-generic-password -s acme -w | paisans secrets set external.acme_dns_token
@@ -158,6 +221,14 @@ security find-generic-password -s acme -w | paisans secrets set external.acme_dn
 
 * **Alone:** always. The whole apply names it, in a note, for each credential
   still owed.
+
+Given a key at a terminal, it asks for that key's value with echo off, saying
+whether the key is already set. An empty answer writes nothing.
+
+```
+paisans secrets set external.acme_dns_token
+```
+
 Run with no key at a terminal, it asks for each secret still owed in turn,
 with echo off, writing each answer before asking for the next. An empty answer
 skips a key.
@@ -168,9 +239,10 @@ paisans secrets set
 
 * **Flags:** the key, as the first argument, or none to be asked for each owed
   secret; `--config`, `--secrets`.
-* **Hosts:** none.
-* **`--execute`:** not taken. It writes the local file at once. Given a key it
-  refuses a terminal on stdin; given none it refuses anything else.
+* **Hosts:** none, except for an SMTP password, which is tried from a site
+  running an app that uses it, over ssh, and changes nothing there.
+* **`--execute`:** not taken. It writes the local file at once. Given no key
+  it refuses anything but a terminal on stdin.
 
 See *Three kinds of secret* in `README.md`.
 
@@ -212,8 +284,9 @@ paisans secrets rotate --all                               # dry run: every secr
 paisans secrets rotate --all --execute
 paisans secrets rotate cluster.standby_password --execute
 paisans secrets rotate apps.talk.oauth --execute           # Mbin's OAuth2 keys, as one unit
+paisans secrets rotate external.acme_dns_token --execute   # asks for the new token, then hands it to every site using it
 security find-generic-password -s acme -w | paisans secrets set external.acme_dns_token
-paisans secrets rotate external.acme_dns_token --execute   # hands the new token to every site using it
+paisans secrets rotate external.acme_dns_token --execute   # without a terminal: hands on the token set above
 paisans secrets rotate --all --replaced external.acme_dns_token --execute   # the token an eviction already applied
 paisans secrets rotate --all --restart --execute           # the full list again, whatever a stopped --all left
 ```
@@ -240,14 +313,30 @@ paisans secrets rotate --all --restart --execute           # the full list again
   first gate that fails. Asks for `sign out` at a terminal first when a rotation
   in the run signs members out, and is refused without one. Refuses before
   anything changes when a `mesh rekey` is unfinished, a site does not answer
-  over ssh, etcd or Patroni is unhealthy, or a pasted secret (the DNS token or
-  an SMTP password) is the value every host using it runs: replace it at its
-  issuer and set it with `secrets set` first, or name it with `--replaced` when
-  that was done and applied already. Which value a host runs is read per secret:
-  the host prints the hash of each line of the file that carries it, and the
-  lines that carry it are compared, so another change in that file does not
-  count. `--all` also refuses a secrets file that lacks a secret `init`
-  generates, naming `paisans init`.
+  over ssh, or etcd or Patroni is unhealthy. `--all` also refuses a secrets
+  file that lacks a secret `init` generates, naming `paisans init`.
+* **A pasted secret** (the DNS token or an SMTP password) **that every host
+  using it runs:** `--execute` asks for its new value at a terminal, with echo
+  off and before any host is claimed, naming where to replace it (the DNS
+  provider, or the mail provider). The dry run lists it as asked for at
+  `--execute`. An empty answer stops the run with nothing changed, naming
+  `secrets set` and `--replaced`; an answer equal to the value the hosts run is
+  refused as unchanged; and without a terminal the run is refused, with the
+  steps to replace it, `secrets set` it, and run again. A resumed rotation is
+  not asked for again. One already set with `secrets set`, which some host does
+  not run yet, is not asked for: the file's value is handed out. Which value a
+  host runs is read per secret: the host prints the hash of each line of the
+  file that carries it, and the lines that carry it are compared, so another
+  change in that file does not count.
+* **The DNS token's check:** the next token, pasted or set, looks up the
+  community domain's zone at the provider, read only, and one that cannot see
+  it is refused before it is written or handed to any Caddy. A provider whose
+  record management is not implemented is not checked; the plan says so.
+* **An SMTP password's check:** a pasted one logs in to the mail server from
+  a site running each app that uses it and sends every operator one test
+  message as soon as it is given; one set with `secrets set` logs in when the
+  run is planned. One that fails is refused before it is written under
+  `rotations`. Stage 2 logs in again, and sends nothing.
 
 A pending rotation that cannot finish, Eg: of a secret whose app was taken
 out of `paisans-stack.yaml`, is ended by hand: *A rotation that cannot finish* in
@@ -648,6 +737,12 @@ images it superseded* in `README.md`).
   warned about once, by key, under `secrets`, dry run or not. The `apply`
   steps it runs do not read the record or warn again. An `init` it runs warns
   in its place.
+* **Mail:** before the first step, every app that sends mail logs in to its
+  mail server from each site it runs on, under `mail`, and nothing is sent;
+  a dry run whose `init` still has work tries them once `init` has run. A failure refuses the run with every host as it was,
+  naming the app, where its settings are declared and the server's reply. The
+  `apply` steps it runs do not try again. See *Mail settings are tried before
+  they are used* in `README.md`.
 * **`--execute`:** runs the steps, stopping at the first failure; run again,
   it reads live state again and carries on. It ends `Deployment complete.`, or,
   when an app failed its web server check or its site file step warned, ends
@@ -696,6 +791,11 @@ starts, restarts or recreates what changed.
   deployment record as the ssh user, without sudo, since the record holds
   only names and is world readable, so applying a site that is not a gateway
   asks for no gateway's sudo password.
+* **Mail:** before the host check, dry run or not, every app the apply
+  starts on the site (`--only` narrows it) logs in to its mail server from
+  the site, through `--ssh` when given, under `mail`; nothing is sent. A
+  failure refuses the apply before anything changes, naming the app, where
+  its settings are declared and the server's reply.
 * **Review:** the images every rendered `compose.yaml` of the site runs, and
   the web server's `include_dir`, against what the host last recorded, under
   `review what paisans-stack.yaml grants`; `--only` narrows the images to its
@@ -907,7 +1007,7 @@ See *`failover test`: a switchover on purpose* in `README.md`.
 
 Reports what is stuck and how to recover: unreachable sites, etcd quorum and
 version, the Patroni leader and why a replica will not promote, containers
-that are down, the settings a gated app must enforce, Pocket ID's active
+that are down or unhealthy, the settings a gated app must enforce, Pocket ID's active
 instance, clocks, what is left over, and each host's key allowlist, with each
 key `ssh.keys` names that it does not hold and that the next `host prepare`
 would add, since one already in `authorized_keys` is never added again.

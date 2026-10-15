@@ -50,7 +50,7 @@ var groupSummary = map[string]string{
 	"dns":         "Create the DNS records the configuration implies, or prune them.",
 	"config":      "Publish, pull, list and recover the sites' signed configuration.",
 	"operator":    "Sign the sites' configuration, or give an operator a sign-in link.",
-	"secrets":     "Set, prune and rotate secrets.",
+	"secrets":     "List, set, prune and rotate secrets.",
 	"app":         "Take a removed app off hosts.",
 	"oidc":        "Create an app's sign-in client at Pocket ID.",
 	"oidc client": "Create an app's sign-in client at Pocket ID.",
@@ -119,8 +119,10 @@ var helpCommands = []helpCommand{
 	{
 		name:    "validate",
 		summary: "Report every problem in " + config.FileName + ".",
-		usage:   []string{"paisans validate [--config " + config.FileName + "]"},
-		detail:  "Load the configuration and report every problem found.",
+		usage:   []string{"paisans validate [--config " + config.FileName + "] [--secrets secrets.enc.yaml] [--offline]"},
+		detail: "Load the configuration and report every problem found.\n\n" +
+			"Then try every app's mail settings: each logs in to its mail server from a site running it, over ssh, and nothing is sent. A failure is a warning. " +
+			"A site that cannot be reached, or a secrets file that cannot be read, skips the check with a warning; --offline checks the file alone and reaches no site.",
 	},
 	{
 		name:    "create",
@@ -155,7 +157,8 @@ var helpCommands = []helpCommand{
 		detail: "Without --site: take every site from " + config.FileName + " to a running stack, running init, host prepare, apply, site add, storage and dns init in the order the deployment needs. " +
 			"With --site: compare that site's rendered artifacts with what is on its host and show what would change.\n\n" +
 			"Changes nothing on a host without --execute; without --site, the dry run may add missing generated secrets to the local secrets file, and says so when it does.\n\n" +
-			"Both, and host prepare, review the keys and images " + config.FileName + " grants against what each host last applied; --execute asks for the word approve at a terminal when anything is added or changed, and asks nothing when nothing is.",
+			"Both, and host prepare, review the keys and images " + config.FileName + " grants against what each host last applied; --execute asks for the word approve at a terminal when anything is added or changed, and asks nothing when nothing is.\n\n" +
+			"Before anything changes, every app it starts logs in to its mail server from its site, sending nothing; one that does not log in refuses the apply.",
 	},
 	{
 		name:    "host prepare",
@@ -337,6 +340,14 @@ var helpCommands = []helpCommand{
 			"Changes only the sites' configuration stores, and nothing without --execute. With --execute it asks for the word partial at a terminal when no more than half the sites answered directly, and for rollback when the newest version is older than one seen here before.",
 	},
 	{
+		name:    "secrets list",
+		summary: "List every secret's path, whether it is set, and how rotate takes it.",
+		usage:   []string{"paisans secrets list [--config " + config.FileName + "] [--secrets secrets.enc.yaml]"},
+		detail: "List every secret " + config.FileName + " needs, and every other one the secrets file holds for something it still declares, by its path in the secrets file: set or unset; generated (by init), pasted (with secrets set) or captured (by apply); and the path secrets rotate takes for it, a unit's for a secret rotated with its unit, kept for one it keeps. " +
+			"Prints names alone, never a value or any part of one.\n\n" +
+			"The table is on stdout, the report on stderr. Reads only the local files.",
+	},
+	{
 		name:    "secrets set",
 		summary: "Write one value from stdin into the secrets file, or ask for each owed one.",
 		usage: []string{
@@ -345,8 +356,10 @@ var helpCommands = []helpCommand{
 		},
 		detail: "Read one value from stdin and write it into the encrypted secrets file, printing only its name. " +
 			"For credentials issued elsewhere, so they never touch an echoing terminal or an editor.\n\n" +
+			"With a key, at a terminal, ask for its value with echo off, saying whether it is already set; an empty answer writes nothing.\n\n" +
 			"With no key, at a terminal, ask for each secret still owed in turn, saying why it is owed, and read each with echo off. " +
-			"Each answer is written before the next is asked; an empty one skips the key, which stays owed. A sign-in client is not asked for, since apply creates it.",
+			"Each answer is written before the next is asked; an empty one skips the key, which stays owed. A sign-in client is not asked for, since apply creates it.\n\n" +
+			"An SMTP password is tried before it is written: from a site running an app that uses it, over ssh, it logs in to the mail server and sends one test message to every operator. One that fails is not written.",
 	},
 	{
 		name:    "secrets prune",
@@ -360,7 +373,7 @@ var helpCommands = []helpCommand{
 		summary: "Replace secrets, one at a time, in gated stages.",
 		usage:   []string{"paisans secrets rotate <path>... | --all [--restart] [--replaced <path>]...\n                       [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                       [--sudo=false] [--execute]"},
 		detail: "Replace secrets, named by their paths in the secrets file (apps.<app>.<unit> for a unit of secrets an app's blueprint groups), or every one in scope with --all, one at a time in gated stages: a next value in the secrets file, the side that checks it, each site that uses it healthy before the next, then the value promoted.\n\n" +
-			"A pasted secret (the DNS token or an SMTP password) is handed on once it is replaced at its issuer and set with secrets set, and refused while every host using it runs the value the file holds, read line by line; --replaced <path> lists one already replaced and applied, which every host runs, instead. Lists the secrets it keeps and why.\n\n" +
+			"A pasted secret (the DNS token or an SMTP password) whose value every host using it runs, read line by line, is asked for at a terminal before any host is claimed: replace it at its issuer when asked and paste the new one. One already set anew with secrets set is handed on from the file. A DNS token is tried against the zone before any host gets it; an SMTP password logs in to the mail server from a site, and a pasted one sends the operators one test message. --replaced <path> lists one already replaced and applied, which every host runs, instead. Lists the secrets it keeps and why.\n\n" +
 			"--all refuses a file that lacks a secret init generates. A stopped --all resumes with what it left, and says so; --all --restart starts the full list again.\n\n" +
 			"Refuses while a mesh rekey is unfinished, a site does not answer, or etcd or Patroni is unhealthy; apply and every other command that renders refuse while a rotation is unfinished. " +
 			"A run that signs members out asks for sign out at a terminal, before any host is claimed. A stopped run resumes. Writes nothing without --execute.",

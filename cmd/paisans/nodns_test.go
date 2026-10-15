@@ -12,14 +12,16 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/grant"
 	"github.com/paisans-software/paisans-cli/internal/keystore"
+	"github.com/paisans-software/paisans-cli/internal/smtpcheck"
+	"github.com/paisans-software/paisans-cli/internal/smtpcheck/smtptest"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // TestMain stands a refusal in for the DNS provider site remove builds, so
 // that no test in this package can reach a real one, whatever provider its
 // fixture names. A test that needs one replaces it with a fake. The same goes
-// for the registry apply resolves Caddy's tag against, and for the keystore
-// init keeps age keys in: every test sees the tag name one fixed build,
+// for the registry apply resolves Caddy's tag against, for the mail server
+// the SMTP checks log in to, and for the keystore init keeps age keys in: every test sees the tag name one fixed build,
 // testCaddyDigest, and keeps its age keys in memory.
 func TestMain(m *testing.M) {
 	imageDigests = fixedDigest(testCaddyDigest)
@@ -41,6 +43,11 @@ func TestMain(m *testing.M) {
 	config.AgeKeystore = keystore.NewMemory()
 	// No test waits between two web server checks.
 	fakeWebServerClock()
+	// No test reaches a site or a mail server to try mail settings: every
+	// check is answered by an in-process server that takes any login. A
+	// test about the check sets its own (fakeSMTP).
+	acceptAll := smtptest.New()
+	smtpEnv = func(*config.Config, map[string]string) smtpcheck.Env { return acceptAll.Env() }
 	for _, name := range config.AgeVariables() {
 		os.Unsetenv(name)
 	}

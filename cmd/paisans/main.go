@@ -197,6 +197,8 @@ func runValidate(args []string) error {
 	fs := newFlagSet("validate", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
+	secretsPath := fs.String("secrets", "", "path to the secrets, whose SMTP passwords the mail check logs in with (default: secrets.enc.yaml beside the config)")
+	offline := fs.Bool("offline", false, "check the file alone, reaching no site: the mail settings are not tried")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -207,11 +209,23 @@ func runValidate(args []string) error {
 	}
 	result := validate.Check(cfg)
 	reportValidation(r, *configPath, result)
-	if len(result.Findings) == 0 {
-		r.Result("%s: no problems found", *configPath)
-	}
 	if result.Refused() {
 		return refused(*configPath, len(result.Refusals()), "Nothing can be rendered or applied from it until then.")
+	}
+	// The mail settings are tried once the file is one a host may be
+	// reached for, and only warn: see checkMailForValidate.
+	warned := 0
+	if !*offline {
+		if *secretsPath == "" {
+			*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
+		}
+		warned = checkMailForValidate(r, cfg, *secretsPath)
+	}
+	switch {
+	case len(result.Findings) == 0 && warned == 0:
+		r.Result("%s: no problems found", *configPath)
+	case warned > 0:
+		r.Result("%s: %s from the mail check", *configPath, plural(warned, "warning"))
 	}
 	return nil
 }
@@ -461,6 +475,12 @@ func runRender(args []string) error {
 // the identity step in clients.go: declaring the app is the approval for
 // its client, so `--execute` creates and records it like any other secret.
 func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
+	return referUnreachable(applyCommand(args, stdin, stdout))
+}
+
+// applyCommand is runApply before an unreachable site's referral to doctor
+// is added to its error.
+func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("apply", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
@@ -586,6 +606,13 @@ func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
 	// record and the secrets to the run, which checks them once.
 	if _, step := r.(checkReporter); !step {
 		warnSecrets(r, cfg, secrets, recordForWarnings(r, cfg, applyRecordHosts(cfg, *site, *destination, transport, *sudo)))
+		// Every app this apply starts on the site logs in to its mail
+		// server from there first, and a failure refuses before anything
+		// changes. As a step of apply without --site the run tried every
+		// site's before its first step.
+		if err := checkMailForApply(r, cfg, secrets, []string{*site}, only, map[string]string{*site: *destination}); err != nil {
+			return err
+		}
 	}
 	r.Section(fmt.Sprintf("%s (%s)", *site, transport.Describe()))
 	done := r.Step("check mesh subnet")
@@ -1041,7 +1068,7 @@ func planSiteApply(cfg *config.Config, secrets *config.Secrets, site string, tra
 	if err != nil {
 		return nil, err
 	}
-	options = append([]apply.Option{apply.DatabaseApps(apply.ClusterDatabaseApps(cfg)...), apply.ResolveImages(imageDigests), apply.Arch(cfg.Sites[site].Arch)}, options...)
+	options = append([]apply.Option{apply.DatabaseApps(apply.ClusterDatabaseApps(cfg)...), apply.ResolveImages(imageDigests), apply.Arch(cfg.Sites[site].Arch), apply.Serves(apply.ServedHostnames(cfg))}, options...)
 	plan, err := apply.Build(site, rendered, acme.Module(cfg.ACME.Provider), transport, options...)
 	if err != nil {
 		return nil, err
@@ -1475,7 +1502,44 @@ func dnsSetup(name, executeHelp string, args []string, extra ...func(*flag.FlagS
 	if err != nil {
 		return nil, nil, nil, nil, false, err
 	}
+	if err := checkWorkstationToken(r, cfg, secrets.External["acme_dns_token"]); err != nil {
+		return nil, nil, nil, nil, false, err
+	}
 	return r, cfg, wants, provider, *execute, nil
+}
+
+// workstationTokenCheck is the DNS token check from this workstation. A
+// package variable so that a test can stand in for the provider, since no
+// test may reach a real one.
+var workstationTokenCheck = func(ctx context.Context, check dns.TokenCheck, token string) dns.TokenResult {
+	return check.FromWorkstation(ctx, token)
+}
+
+// checkWorkstationToken asks the provider, before the first records call,
+// whether it accepts the token from this workstation. The provider judges
+// the address a call comes from, so a token filtered to the gateway fails
+// here, and this says so in place of a bare HTTP 403 from the records call
+// after it.
+func checkWorkstationToken(r ui.Reporter, cfg *config.Config, token string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	step := r.Step("check DNS token")
+	result := workstationTokenCheck(ctx, dns.TokenCheck{
+		Provider: cfg.ACME.Provider,
+		Domain:   cfg.Community.Domain,
+		Place:    dns.WorkstationPlace,
+		From:     "this workstation",
+	}, token)
+	if result.Status != dns.TokenFailed {
+		step.Detail("%s", result.Finding)
+		step.Done("")
+		return nil
+	}
+	step.Fail(errors.New(result.Finding))
+	return &ui.Problem{
+		Hint:    result.Finding,
+		Explain: result.Advice + " No record was read or changed.\n`paisans doctor` checks the token from every place that uses it.",
+	}
 }
 
 // warnUnencrypted is the warning every command that opens the secrets gives

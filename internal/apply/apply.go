@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/diagnosis"
+	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -162,9 +164,19 @@ type Plan struct {
 	// routing file changed. It is the narrower of the two: a new image is
 	// picked up by the recreate, not by a reload.
 	GatewayReload bool
+	// Served is each hostname a Caddy site of the deployment serves, to that
+	// site, so the health gate can tell a TLS failure on one of them for
+	// Caddy holding no certificate. Nil recognises no TLS failure. See
+	// Serves.
+	Served diagnosis.Served
 	// ACMEModule is the Caddy DNS module this deployment's gateway must have,
 	// as `caddy list-modules` prints it. Empty when this site runs no gateway.
 	ACMEModule string
+	// DNSToken is the check of the DNS token this site's Caddy is about to
+	// use, from this site, nil when Caddy is left alone or the deployment
+	// names no DNS provider. Execute runs it before anything that makes Caddy
+	// ask the provider, and stops on a refusal. See checkDNSToken.
+	DNSToken *dns.TokenCheck
 	// WireGuard is what the deployment's mesh interface needs before any
 	// stack moves. Every service binds
 	// the site's mesh address, so a stack started before the interface exists
@@ -429,6 +441,14 @@ type options struct {
 	// peers are the compose files of this site's apps on the sites the
 	// apply does not cover; see OtherSites.
 	peers []PeerCompose
+	// served is Plan.Served; see Serves.
+	served diagnosis.Served
+}
+
+// Serves gives the plan the hostnames each Caddy site serves, from
+// ServedHostnames, for the health gate's referral to doctor.
+func Serves(served diagnosis.Served) Option {
+	return func(o *options) { o.served = served }
 }
 
 // Report sets the plan's Report before Build reads the host, so planning
@@ -552,6 +572,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 		opt(&o)
 	}
 	out.Report = o.report
+	out.Served = o.served
 	// An earlier pass of the same apply already carried out these. See After.
 	doneOverwrite, doneStacks := map[string]bool{}, map[string]bool{}
 	for _, p := range o.after {
@@ -1019,6 +1040,14 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 	if out.GatewayChanging {
 		out.ACMEModule = acmeModule
 	}
+	// Caddy asks the provider for certificates whenever it starts or
+	// reloads, so the token is checked whenever this apply does either: a
+	// gateway change, or a recreate of the infrastructure stack, which
+	// replaces Caddy's container with the rest of it. An apply that leaves
+	// Caddy alone makes no call.
+	if up, forced := infraRecreate(out); isGateway && plan.ACMEProvider != "" && (out.GatewayChanging || up || forced) {
+		out.DNSToken = &dns.TokenCheck{Provider: plan.ACMEProvider, Domain: plan.Domain, Place: site, From: "this server"}
+	}
 	out.HostSites = out.GatewayChanging && plan.HostSites[site]
 
 	if wireguard != nil {
@@ -1264,6 +1293,12 @@ func execute(plan *Plan, t Transport) error {
 			return fmt.Errorf(
 				"%s: the gateway's Caddy has no %s module, so it cannot serve this configuration and was not reloaded. The image it runs was built without that provider:\n%s",
 				plan.Site, plan.ACMEModule, out)
+		}
+	}
+
+	if plan.DNSToken != nil {
+		if err := checkDNSToken(plan, t); err != nil {
+			return err
 		}
 	}
 

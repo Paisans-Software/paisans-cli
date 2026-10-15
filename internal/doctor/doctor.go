@@ -9,9 +9,9 @@
 // own would be choosing which data a community keeps.
 //
 // The package holds no transport. cmd/paisans runs the commands named here on
-// each site and hands the outputs to Diagnose, so every judgement below is a
-// pure function of what the hosts said, and is tested with what real hosts
-// said.
+// each site, through Reads, and Checks' graph hands the outputs to the same
+// judgements Diagnose makes, so every judgement below is a pure function of
+// what the hosts said, and is tested with what real hosts said.
 package doctor
 
 import (
@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -71,7 +72,7 @@ const (
 	SectionAllowlist  = "ssh allowlist"
 )
 
-var sections = []string{SectionReach, SectionMesh, SectionEtcd, SectionPatroni, SectionContainers, SectionSettings, SectionPocketID, SectionClocks, SectionLeftovers, SectionAllowlist}
+var sections = []string{SectionReach, SectionMesh, SectionEtcd, SectionPatroni, SectionContainers, SectionSettings, SectionPocketID, SectionClocks, SectionLeftovers, SectionAllowlist, SectionCaddy, SectionSecrets, SectionToken, SectionRecords}
 
 // Finding is one line of the report, with any explanation, recovery advice or
 // evidence under it.
@@ -87,6 +88,10 @@ type Report struct {
 	Sites    int
 	Reached  int
 	Findings []Finding
+	// Pruned is how many checks were not made because a check they need
+	// failed or was skipped (see Graph.Run). Each is reported once, on the
+	// line of the check that stopped it, and counted as skipped.
+	Pruned int
 }
 
 // Failed reports whether any finding is a Fail.
@@ -151,6 +156,26 @@ func (r Report) show(rep ui.Reporter, f Finding) {
 	}
 }
 
+// ShowEnd closes a report whose checks were reported as they ended (see
+// Graph.Run): how many sites answered, then, when any check failed, the
+// failures once more in the graph's order, deepest first, because in a run
+// whose lines interleave the first failure on screen is the first to end,
+// not the first to fix. Then that doctor changes nothing, and the summary.
+func (r Report) ShowEnd(rep ui.Reporter) {
+	rep.Detail("%d site(s), %d reached", r.Sites, r.Reached)
+	if r.Failed() {
+		rep.Section("failed, deepest first:")
+		for _, f := range r.Findings {
+			if f.Level == Fail {
+				title, result := f.Title()
+				rep.Step(title).End(ui.Failed, result)
+			}
+		}
+	}
+	rep.Detail("doctor changes nothing")
+	rep.Result("%s", r.Summary())
+}
+
 // Title is the check's name, "check <section> <subject>" when the line
 // names a subject before its first colon (a site, "leader", "version"), and
 // the finding's text as the result. A subject is one short word: a longer
@@ -168,7 +193,7 @@ func (f Finding) Title() (title, result string) {
 func (r Report) Summary() string {
 	passed := r.Count(OK) + r.Count(Info)
 	parts := []string{fmt.Sprintf("%d %s passed", passed, plural(passed, "check"))}
-	if n := r.Count(Skip); n > 0 {
+	if n := r.Count(Skip) + r.Pruned; n > 0 {
 		parts = append(parts, fmt.Sprintf("%d skipped", n))
 	}
 	if n := r.Count(Warn); n > 0 {
@@ -202,6 +227,14 @@ type Input struct {
 	Leftovers  []LeftoverProbe
 	Allowlists []AllowlistProbe
 	Settings   []SettingsProbe
+	// Caddy is each Caddy site's certificate log, Secrets whether the
+	// secrets opened, Tokens each place's DNS token check, and Records
+	// the zone compared with what the deployment needs (see dnschecks.go).
+	// None of them holds the token.
+	Caddy   []CaddyLogProbe
+	Secrets SecretsProbe
+	Tokens  []dns.TokenResult
+	Records RecordsProbe
 }
 
 // Reached is the set of sites that answered ssh, and can be asked the rest.
@@ -250,6 +283,10 @@ func Diagnose(cfg *config.Config, in Input) Report {
 	findings = append(findings, Clocks(in.Clocks)...)
 	findings = append(findings, Leftovers(in.Leftovers)...)
 	findings = append(findings, Allowlist(cfg, in.Allowlists)...)
+	findings = append(findings, CaddyCertificates(cfg, in.Caddy)...)
+	findings = append(findings, Secrets(in.Secrets)...)
+	findings = append(findings, Tokens(in)...)
+	findings = append(findings, Records(in.Records)...)
 	return Report{Sites: len(in.Sites), Reached: len(reached), Findings: findings}
 }
 
