@@ -961,3 +961,33 @@ func TestAnOverrideBehindADigestPinnedReferenceIsBehind(t *testing.T) {
 	}
 	t.Fatal("no pin from infra.images.etcd")
 }
+
+// TolerateUnresolved plans an image the registry cannot resolve as an
+// unresolved pin, with the reason, instead of refusing, and leaves its line
+// as rendered. Without it the same plan is refused.
+func TestTolerateUnresolvedPlansAnImageItCannotResolve(t *testing.T) {
+	down := errors.New("dial tcp: lookup ghcr.io: no such host")
+	if _, err := apply.Build("home-a", plan(t), acmeModule(t), newHost(), apply.ResolveImages(&registry{err: down})); err == nil {
+		t.Fatal("without the option, an image that cannot be resolved was planned")
+	}
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), newHost(), apply.ResolveImages(&registry{err: down}), apply.TolerateUnresolved())
+	if err != nil {
+		t.Fatalf("refused: %v", err)
+	}
+	if len(p.Pins) == 0 {
+		t.Fatal("no pins")
+	}
+	for _, pin := range p.Pins {
+		if pin.Source != "unresolved" || !strings.Contains(pin.Unresolved, "no such host") {
+			t.Errorf("pin %+v", pin)
+		}
+		if pin.Moved() || pin.FirstPin() || pin.Behind {
+			t.Errorf("an unresolved pin moves or lags: %+v", pin)
+		}
+	}
+	for _, change := range p.Changes {
+		if strings.Contains(apply.ChangeContent(change), "@sha256:") {
+			t.Errorf("%s pins a build nobody resolved:\n%s", change.Path, apply.ChangeContent(change))
+		}
+	}
+}

@@ -249,8 +249,12 @@ type ImagePin struct {
 	// services, empty when the host has none, or its services disagree.
 	Deployed string
 	// Source is render.ManifestPin's: registry, deployed, held or
-	// configured.
+	// configured. Under TolerateUnresolved it is unresolved for an image
+	// the registry could not resolve, whose Reference is Image as rendered.
 	Source string
+	// Unresolved is why the registry could not resolve the image, when
+	// Source is unresolved.
+	Unresolved string
 	// Version and DeployedVersion are the version labels of Reference and
 	// Deployed, read only when the build moves and the resolver can, and
 	// empty otherwise.
@@ -277,7 +281,7 @@ type ImagePin struct {
 // same tag beside it is a first pin (see FirstPin), not a move, and only
 // another tag or another image is.
 func (p ImagePin) Moved() bool {
-	if p.Deployed == "" {
+	if p.Deployed == "" || p.Source == "unresolved" {
 		return false
 	}
 	if digestOf(p.Deployed) != "" {
@@ -292,7 +296,7 @@ func (p ImagePin) Moved() bool {
 // but the compose file changes, so the stack is recreated once, on the build
 // pinned.
 func (p ImagePin) FirstPin() bool {
-	return p.Deployed != "" && digestOf(p.Deployed) == "" && digestOf(p.Reference) != "" && nameOf(p.Reference) == strings.TrimSpace(p.Deployed)
+	return p.Source != "unresolved" && p.Deployed != "" && digestOf(p.Deployed) == "" && digestOf(p.Reference) != "" && nameOf(p.Reference) == strings.TrimSpace(p.Deployed)
 }
 
 // Describe is the pin as the dry run lists a moved image: the app (or infra),
@@ -378,7 +382,8 @@ func (p *Plan) FirstPins() []ImagePin {
 // ResolveImages and OtherSites describe. compose is the file as rendered,
 // current and found the host's copy. It returns the file to compare and
 // write, the pins for the plan and its manifest, and notes for the operator.
-func pinImages(site string, images []render.ComposeImage, compose, current string, found bool, r, fresh Resolver, peers []PeerCompose) (string, []ImagePin, []Note, error) {
+// tolerate is TolerateUnresolved.
+func pinImages(site string, images []render.ComposeImage, compose, current string, found bool, r, fresh Resolver, peers []PeerCompose, tolerate bool) (string, []ImagePin, []Note, error) {
 	rendered, err := blueprints.ComposeMounts(compose)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("reading the images its compose file names: %w", err)
@@ -400,7 +405,7 @@ func pinImages(site string, images []render.ComposeImage, compose, current strin
 				stackPeers = append(stackPeers, peer)
 			}
 		}
-		pin, imageNotes, err := pinImage(site, image, services, host, r, fresh, stackPeers)
+		pin, imageNotes, err := pinImage(site, image, services, host, r, fresh, stackPeers, tolerate)
 		if err != nil {
 			return "", nil, nil, err
 		}
@@ -408,7 +413,7 @@ func pinImages(site string, images []render.ComposeImage, compose, current strin
 		if pin == nil {
 			continue
 		}
-		if pin.Replaces != "" && r != nil {
+		if pin.Replaces != "" && r != nil && pin.Source != "unresolved" {
 			notes = append(notes, checkLag(pin, r)...)
 		}
 		if pin.Reference != image.Image {
@@ -434,8 +439,9 @@ func pinImages(site string, images []render.ComposeImage, compose, current strin
 // pinImage decides the build of one image. services are the compose
 // services that run it, host the host's compose file, nil when it has none.
 // The pin is nil when nothing was pinned: no resolver, and no build of the
-// tag on the host to keep.
-func pinImage(site string, image render.ComposeImage, services []string, host map[string]blueprints.ServiceMounts, r, fresh Resolver, peers []PeerCompose) (*ImagePin, []Note, error) {
+// tag on the host to keep. With tolerate (TolerateUnresolved), an image the
+// registry cannot resolve is an unresolved pin and a note, not a refusal.
+func pinImage(site string, image render.ComposeImage, services []string, host map[string]blueprints.ServiceMounts, r, fresh Resolver, peers []PeerCompose, tolerate bool) (*ImagePin, []Note, error) {
 	want := image.Image
 	pin := &ImagePin{Stack: image.Stack, App: image.App, Services: image.Services, Image: want, Origin: image.Origin, Replaces: image.Replaces}
 	deployed, _ := deployedRef(host, services)
@@ -465,6 +471,9 @@ func pinImage(site string, image render.ComposeImage, services []string, host ma
 			// runs nowhere here yet is resolved for a command that starts
 			// it (ResolveFresh).
 			resolved, err := resolve(want, fresh)
+			if err != nil && tolerate {
+				return unresolvedPin(pin, image, err)
+			}
 			if err != nil {
 				return nil, nil, unresolved(image, "", err, fresh)
 			}
@@ -522,7 +531,21 @@ func pinImage(site string, image render.ComposeImage, services []string, host ma
 			Text: fmt.Sprintf("Resolving %s failed (%v), so the plan %s. A newer build, if one exists, arrives with the next apply that resolves %s.", ui.Name(want), failed, kept, ui.Name(want)),
 		}}, nil
 	}
+	if tolerate {
+		return unresolvedPin(pin, image, failed)
+	}
 	return nil, nil, unresolved(image, deployed, failed, r)
+}
+
+// unresolvedPin is pin for an image the registry could not resolve, under
+// TolerateUnresolved: it names Image as rendered, so its line is left as it
+// is, and a note gives the registry's answer.
+func unresolvedPin(pin *ImagePin, image render.ComposeImage, failed error) (*ImagePin, []Note, error) {
+	pin.Reference, pin.Source, pin.Unresolved = image.Image, "unresolved", failed.Error()
+	return pin, []Note{{
+		Hint: fmt.Sprintf("could not resolve %s %s; its newest build is unknown", imageLabel(image), ui.Name(image.Image)),
+		Text: fmt.Sprintf("Resolving %s failed (%v).", ui.Name(image.Image), failed),
+	}}, nil
 }
 
 // checkLag resolves the reference an override replaced, and marks the pin

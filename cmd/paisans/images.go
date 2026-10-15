@@ -88,10 +88,7 @@ func writeImages(r ui.Reporter, cfg *config.Config, secrets *config.Secrets, std
 		return err
 	}
 	if len(unread) > 0 {
-		return &ui.Problem{
-			Hint:    "could not read " + strings.Join(unread, ", "),
-			Explain: "Their running builds are unknown; the table lists what the configuration would run there. Run again once ssh reaches them.",
-		}
+		return unreadProblem(unread)
 	}
 	if check && moves {
 		return errImagesMove
@@ -100,11 +97,12 @@ func writeImages(r ui.Reporter, cfg *config.Config, secrets *config.Secrets, std
 }
 
 // imageRows plans every site as a dry run of apply does and lists each image
-// it would run, and reports whether any override lags what it replaced. A
-// site that cannot be planned is warned about, listed from the render alone
-// and named in the third result, so one site down hides nothing about the
-// others. It writes nothing
-// to any host and asks for no sudo: a plan only reads (apply.Build).
+// it would run, and reports whether any override lags what it replaced. An
+// image the registry cannot resolve is a row with newest unknown
+// (apply.TolerateUnresolved). A site that cannot be planned is warned about,
+// listed from the render alone and named in the third result, so one site
+// down hides nothing about the others. It writes nothing to any host and
+// asks for no sudo: a plan only reads (apply.Build).
 func imageRows(r ui.Reporter, cfg *config.Config, secrets *config.Secrets) ([]imageRow, bool, []string, error) {
 	defer cacheDigests()()
 	defer planEverySite()()
@@ -114,7 +112,7 @@ func imageRows(r ui.Reporter, cfg *config.Config, secrets *config.Secrets) ([]im
 	var unread []string
 	seen := map[string]bool{}
 	for _, site := range cfg.SiteNames() {
-		plan, err := planSiteApply(cfg, secrets, site, imagesTransport(site, cfg.Sites[site]), apply.SkipSweepRead())
+		plan, err := planSiteApply(cfg, secrets, site, imagesTransport(site, cfg.Sites[site]), apply.SkipSweepRead(), apply.TolerateUnresolved())
 		if err != nil {
 			r.Warn(fmt.Sprintf("could not plan %s; its running builds are unknown", site), err.Error())
 			if rendered == nil {
@@ -123,7 +121,11 @@ func imageRows(r ui.Reporter, cfg *config.Config, secrets *config.Secrets) ([]im
 				}
 			}
 			for _, image := range rendered.Images[site] {
-				rows = append(rows, imageRow{site: site, stack: image.Stack, service: strings.Join(image.Services, ","), origin: image.Origin, running: "unknown", newest: "unknown"})
+				origin := image.Origin
+				if origin == "" {
+					origin = "-"
+				}
+				rows = append(rows, imageRow{site: site, stack: image.Stack, service: strings.Join(image.Services, ","), origin: origin, running: "unknown", newest: "unknown"})
 			}
 			unread = append(unread, site)
 			continue
@@ -144,12 +146,17 @@ func pinRow(site string, pin apply.ImagePin) imageRow {
 	if pin.Deployed != "" {
 		row.running = apply.ReferenceLabel(pin.Deployed)
 	}
-	if pin.Source == "deployed" {
+	var notes []string
+	switch pin.Source {
+	case "deployed":
 		// The registry did not answer, and the plan keeps what runs.
 		row.newest = "unknown"
+	case "unresolved":
+		// The registry did not answer, and nothing runs to keep.
+		row.newest = "unknown"
+		notes = append(notes, "unresolved: "+shortReason(pin.Unresolved))
 	}
-	var notes []string
-	if pin.Moved() || pin.FirstPin() || (pin.Deployed == "" && pin.Reference != "") {
+	if pin.Source != "unresolved" && (pin.Moved() || pin.FirstPin() || (pin.Deployed == "" && pin.Reference != "")) {
 		row.moves = true
 		notes = append(notes, "moves on next apply")
 	}
@@ -164,4 +171,25 @@ func pinRow(site string, pin apply.ImagePin) imageRow {
 		row.origin = "-"
 	}
 	return row
+}
+
+// shortReason is the last clause of a registry's error, which names what
+// went wrong (Eg: no such host; not found; rate limited).
+func shortReason(reason string) string {
+	if i := strings.LastIndex(reason, ": "); i >= 0 {
+		return reason[i+2:]
+	}
+	return reason
+}
+
+// unreadProblem is the error for the sites imageRows could not read. Past
+// three, the hint counts them and the explanation names them.
+func unreadProblem(unread []string) *ui.Problem {
+	explain := "Their running builds are unknown; the warnings above say why, and the table lists what the configuration would run there."
+	hint := "could not read " + strings.Join(unread, ", ")
+	if len(unread) > 3 {
+		hint = fmt.Sprintf("could not read %d sites", len(unread))
+		explain = "The sites are " + strings.Join(unread, ", ") + ". " + explain
+	}
+	return &ui.Problem{Hint: hint, Explain: explain}
 }

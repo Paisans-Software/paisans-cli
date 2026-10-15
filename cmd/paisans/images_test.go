@@ -141,3 +141,67 @@ func TestImagesPrintsTheTableThenFailsForASiteItCannotRead(t *testing.T) {
 		t.Errorf("the table was not written:\n%s", out.String())
 	}
 }
+
+// downRegistry is a registry this workstation cannot reach.
+type downRegistry struct{}
+
+func (downRegistry) Digest(string) (string, error) {
+	return "", errors.New("dial tcp: lookup registry: no such host")
+}
+func (downRegistry) Track(string) (string, error) {
+	return "", errors.New("dial tcp: lookup registry: no such host")
+}
+
+// A registry that cannot be reached, on a site that can, is unknown under
+// newest for each image it could not resolve. The site is read, every other
+// column prints, and the command does not fail.
+func TestImagesShowsAnImageItCannotResolveAsUnknown(t *testing.T) {
+	withImagesTransport(t, func(string, config.Site) apply.Transport { return emptyHost{} })
+	imageDigests = downRegistry{}
+	cfg, secrets := imagesFixture(t, nil)
+	rows, _, unread, err := imageRows(&ui.Recorder{}, cfg, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unread) != 0 {
+		t.Errorf("a site that answered is unread: %v", unread)
+	}
+	if len(rows) == 0 {
+		t.Fatal("no rows")
+	}
+	for _, row := range rows {
+		if row.newest != "unknown" || row.running != "-" || row.origin == "" || row.moves || !strings.HasPrefix(row.note, "unresolved: no such host") {
+			t.Errorf("row %+v", row)
+		}
+	}
+	var out strings.Builder
+	if err := writeImages(&ui.Recorder{}, cfg, secrets, &out, false); err != nil {
+		t.Errorf("a registry down failed the command: %v", err)
+	}
+}
+
+// A site that cannot be read fails the command, after the table, and says
+// where to look for why.
+func TestImagesFailsForASiteItCannotRead(t *testing.T) {
+	withImagesTransport(t, func(string, config.Site) apply.Transport { return downHost{} })
+	cfg, secrets := imagesFixture(t, nil)
+	err := writeImages(&ui.Recorder{}, cfg, secrets, &strings.Builder{}, false)
+	var problem *ui.Problem
+	if !errors.As(err, &problem) {
+		t.Fatalf("err = %v", err)
+	}
+	if problem.Hint != "could not read home-a" || !strings.Contains(problem.Explain, "the warnings above say why") || strings.Contains(problem.Explain, "ssh") {
+		t.Errorf("problem: %+v", problem)
+	}
+}
+
+// Past three sites, the hint counts them and the explanation names them.
+func TestImagesCountsManySitesItCannotRead(t *testing.T) {
+	problem := unreadProblem([]string{"a", "b", "c", "d"})
+	if problem.Hint != "could not read 4 sites" || !strings.Contains(problem.Explain, "a, b, c, d") {
+		t.Errorf("problem: %+v", problem)
+	}
+	if problem := unreadProblem([]string{"a", "b", "c"}); problem.Hint != "could not read a, b, c" {
+		t.Errorf("problem: %+v", problem)
+	}
+}
