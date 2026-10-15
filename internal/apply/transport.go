@@ -332,10 +332,12 @@ var (
 	contacted   = map[string]bool{}
 )
 
-// askMu makes a first connection that may ask about a host key wait for any
-// other: ssh asks on the terminal itself, and two questions at once, from
-// commands run on several hosts together, would garble each other.
-var askMu sync.Mutex
+// AskMu is held while anything asks the operator on the terminal: ssh about
+// a host key on a first connection, here, and a sudo password prompt, in
+// cmd/paisans. ssh asks on the terminal itself, and two questions at once,
+// from commands run on several hosts together, would garble each other, so
+// every question takes this one lock rather than one of its own kind.
+var AskMu sync.Mutex
 
 func firstContact(destination string) bool {
 	contactedMu.Lock()
@@ -571,7 +573,7 @@ func (t SSHTransport) run(command string, stdin *string) (string, error) {
 			asks = !hostKeyKnown(t)
 		}
 		if asks {
-			askMu.Lock()
+			AskMu.Lock()
 		}
 		err = runSSH(cmd)
 		if asks && (err == nil || !connectionFailed(err, out.String())) {
@@ -581,7 +583,7 @@ func (t SSHTransport) run(command string, stdin *string) (string, error) {
 			blankLineOnTerminal()
 		}
 		if asks {
-			askMu.Unlock()
+			AskMu.Unlock()
 		}
 		resume()
 		cleanup()

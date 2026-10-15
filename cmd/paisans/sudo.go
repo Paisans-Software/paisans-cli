@@ -104,19 +104,18 @@ func terminalAvailable() bool {
 // them without saying so. The prompt is erased once answered, so the
 // spinner redraws on the row it took.
 //
-// Prompts are asked one at a time: hosts prepared at the same time can each
-// reach a first sudo command at once, and two prompts sharing the terminal
-// would garble each other.
+// Prompts are asked one at a time, and never while ssh asks about a host
+// key: hosts reached at the same time, as doctor reaches them, can each
+// reach a first sudo command or a first connection at once, and two
+// questions sharing the terminal would garble each other. apply.AskMu is
+// the one lock every question takes.
 func promptOnTerminal(host string) (string, error) {
-	promptMu.Lock()
-	defer promptMu.Unlock()
+	apply.AskMu.Lock()
+	defer apply.AskMu.Unlock()
 	resume := holdOutput()
 	defer resume()
 	return readPassword(host)
 }
-
-// promptMu is held while a password is asked for on the terminal.
-var promptMu sync.Mutex
 
 // readPassword asks on the controlling terminal. Tests replace it, since a
 // test has no terminal to type into.

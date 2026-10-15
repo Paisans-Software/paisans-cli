@@ -48,6 +48,28 @@ func TestSudoPromptHoldsTheReporter(t *testing.T) {
 	}
 }
 
+// A sudo prompt holds the lock ssh's host key question takes, so a password
+// asked for one site and a host key asked about another never share the
+// terminal at once, as doctor's checks on several sites could make them.
+func TestSudoPromptTakesTheHostKeyLock(t *testing.T) {
+	savedRead := readPassword
+	t.Cleanup(func() { readPassword = savedRead })
+	readPassword = func(string) (string, error) {
+		if apply.AskMu.TryLock() {
+			apply.AskMu.Unlock()
+			t.Error("the password was asked without apply.AskMu held")
+		}
+		return "secret", nil
+	}
+	if _, err := promptOnTerminal("home-a"); err != nil {
+		t.Fatal(err)
+	}
+	if !apply.AskMu.TryLock() {
+		t.Fatal("apply.AskMu is still held after the prompt")
+	}
+	apply.AskMu.Unlock()
+}
+
 // The reporter a command moves to stderr is the one drawing, so the hold
 // moves with it.
 func TestErrReporterTakesTheHold(t *testing.T) {
