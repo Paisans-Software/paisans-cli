@@ -199,3 +199,30 @@ func TestSetMeshAddsAMissingSubnet(t *testing.T) {
 		})
 	}
 }
+
+// CheckMeshSubnet is the one subnet rule the loader, a request and the
+// WireGuard helper's renderer hold a mesh to: the network in its canonical
+// form, no larger than a /24, and clear of every reserved range.
+func TestCheckMeshSubnet(t *testing.T) {
+	for subnet, want := range map[string][]string{
+		"10.44.0.0/24":   nil,
+		"10.44.0.0/28":   nil,
+		"10.44.0.5/24":   {"is a host address inside a network, not the network itself, 10.44.0.0/24"},
+		"10.44.0.0/024":  {"is not written in its canonical form, 10.44.0.0/24"},
+		"fd00::/64":      {"is not IPv4"},
+		"10.44.0.0":      {"is not a network in CIDR notation"},
+		"10.44.0.0/16":   {"is larger than a /24"},
+		"127.0.0.0/24":   {"overlaps 127.0.0.0/8"},
+		"0.0.0.0/0":      {"is larger than a /24", "overlaps 0.0.0.0/8", "overlaps 127.0.0.0/8", "overlaps 169.254.0.0/16", "overlaps 224.0.0.0/3"},
+		"169.254.1.0/24": {"overlaps 169.254.0.0/16"},
+		"240.0.0.0/24":   {"overlaps 224.0.0.0/3"},
+	} {
+		network, problems := config.CheckMeshSubnet(subnet)
+		if strings.Join(problems, "|") != strings.Join(want, "|") {
+			t.Errorf("CheckMeshSubnet(%q) = %q, want %q", subnet, problems, want)
+		}
+		if want == nil && (network == nil || network.String() != subnet) {
+			t.Errorf("CheckMeshSubnet(%q) network = %v", subnet, network)
+		}
+	}
+}

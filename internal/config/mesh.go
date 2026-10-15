@@ -59,6 +59,28 @@ func MeshReservedOverlaps(mesh *net.IPNet) []string {
 	return out
 }
 
+// CheckMeshSubnet is the one rule a mesh subnet is held to, by the loader
+// for mesh.subnet, by a request for mesh_subnet and by the WireGuard
+// helper's renderer: subnet as a network, and what is wrong with it. A
+// subnet ParseMeshSubnet refuses gives its phrase alone and no network;
+// otherwise each problem is one phrase, "is larger than a /24" for a prefix
+// shorter than MeshMinPrefix and "overlaps 127.0.0.0/8" for each reserved
+// range it overlaps. No problems means the subnet may be a mesh.
+func CheckMeshSubnet(subnet string) (*net.IPNet, []string) {
+	network, p := ParseMeshSubnet(subnet)
+	if p != "" {
+		return nil, []string{p}
+	}
+	var problems []string
+	if ones, _ := network.Mask.Size(); ones < MeshMinPrefix {
+		problems = append(problems, fmt.Sprintf("is larger than a /%d", MeshMinPrefix))
+	}
+	for _, r := range MeshReservedOverlaps(network) {
+		problems = append(problems, "overlaps "+r)
+	}
+	return network, problems
+}
+
 // IsNetworkOrBroadcast reports whether a is mesh's network or broadcast
 // address, which no site may hold: the first names the subnet and the last
 // reaches every host on it.

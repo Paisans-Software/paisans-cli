@@ -405,7 +405,7 @@ func TestTheHelperShowsItsReadOnlyFields(t *testing.T) {
 // the deployment and what the owner admits, and nothing the caller passes
 // can change them.
 func TestTheHelperIsRenderedWithItsValuesBuiltIn(t *testing.T) {
-	text, err := hostprep.WGHelperScript(meshDeployment, 51820, "10.44.0.7/24")
+	text, err := hostprep.WGHelperScript(meshDeployment, 51820, "10.44.0.0/24")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -438,6 +438,8 @@ func TestTheHelperRefusesBadValues(t *testing.T) {
 		"a link-local subnet":     func() (string, error) { return hostprep.WGHelperScript(meshDeployment, 51820, "169.254.1.0/24") },
 		"a multicast subnet":      func() (string, error) { return hostprep.WGHelperScript(meshDeployment, 51820, "224.0.0.0/24") },
 		"a reserved subnet":       func() (string, error) { return hostprep.WGHelperScript(meshDeployment, 51820, "240.0.0.0/24") },
+		"a host address":          func() (string, error) { return hostprep.WGHelperScript(meshDeployment, 51820, "10.44.0.5/24") },
+		"a non-canonical subnet":  func() (string, error) { return hostprep.WGHelperScript(meshDeployment, 51820, "10.44.0.0/024") },
 		"a negative port":         func() (string, error) { return hostprep.WGHelperScript(meshDeployment, -1, "10.44.0.0/24") },
 		"a port over 65535":       func() (string, error) { return hostprep.WGHelperScript(meshDeployment, 65536, "10.44.0.0/24") },
 		"a relative conf directory": func() (string, error) {

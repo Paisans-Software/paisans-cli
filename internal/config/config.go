@@ -1212,17 +1212,16 @@ func (c *Config) structural(noSubnet bool) error {
 	case c.Mesh.Subnet == "":
 		add("mesh.subnet: required. Run `paisans init`, which reaches every site, picks a /24 that overlaps nothing on any of them, and writes it here with each site's address moved into it. It is what applications trust for forwarded client addresses, so once a site is deployed it never changes.")
 	default:
-		network, p := ParseMeshSubnet(c.Mesh.Subnet)
-		switch {
-		case p != "":
-			add("mesh.subnet: %q %s. Write it as an IPv4 network address and a prefix length, for example 10.44.0.0/24.", c.Mesh.Subnet, p)
-		default:
-			if ones, _ := network.Mask.Size(); ones < MeshMinPrefix {
-				add("mesh.subnet: %q is larger than a /%d. The mesh is what the hosts' firewalls trust, so a larger one could cover a LAN; `paisans init` picks a /24.", c.Mesh.Subnet, MeshMinPrefix)
+		network, problems := CheckMeshSubnet(c.Mesh.Subnet)
+		for _, p := range problems {
+			advice := "Write it as an IPv4 network address and a prefix length, for example 10.44.0.0/24."
+			switch {
+			case network != nil && strings.HasPrefix(p, "overlaps "):
+				advice = "A host's firewall lets the deployment reach the mesh before it stops it reaching loopback, link-local and other reserved ranges, so the mesh must lie outside them; `paisans init` picks a /24 in private space."
+			case network != nil:
+				advice = "The mesh is what the hosts' firewalls trust, so a larger one could cover a LAN; `paisans init` picks a /24."
 			}
-			for _, r := range MeshReservedOverlaps(network) {
-				add("mesh.subnet: %q overlaps %s. A host's firewall lets the deployment reach the mesh before it stops it reaching loopback, link-local and other reserved ranges, so the mesh must lie outside them; `paisans init` picks a /24 in private space.", c.Mesh.Subnet, r)
-			}
+			add("mesh.subnet: %q %s. %s", c.Mesh.Subnet, p, advice)
 		}
 	}
 
