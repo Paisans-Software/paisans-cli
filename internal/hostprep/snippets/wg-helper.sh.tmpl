@@ -76,18 +76,21 @@ check() {
 		for (i = 1; i <= length(s); i++) v = v * 16 + index("0123456789abcdef", substr(s, i, 1)) - 1
 		return v
 	}
-	# blocked is whether an Endpoint host is an address that is this host or
-	# its link: libc reads 127.1, 2130706433, 0177.0.0.1 and 0x7f.0.0.1 as
-	# addresses too, so a host made of digits and dots that is not a strict
-	# dotted quad, or with a 0x label, is refused with them. Private LAN
-	# addresses and names stay allowed: two sites may share a LAN. Kernel
-	# WireGuard sends its handshake from no UID, so the UID-matched egress
-	# table does not cover it; refusing these keeps it off this host and its
-	# link, and the rest is a fixed-format UDP handshake.
+	# blocked is whether an Endpoint host is a literal loopback, unspecified,
+	# link-local or multicast address, in any spelling libc or the kernel
+	# reads as one: 127.1, 2130706433, 0177.0.0.1, 0x7f.0.0.1, [::1], and
+	# localhost. It does not block names, which wg resolves as root at every
+	# up, restart and sync; the non-loopback addresses of this host; or LAN
+	# addresses, which stay allowed because two sites may share a LAN. Kernel
+	# WireGuard sends from no UID, so the UID-matched egress table does not
+	# see its packets, and after a handshake its transport packets carry
+	# content the deployment user can choose. The guard for this traffic
+	# belongs to the egress table (spec, Egress), not to this helper; this
+	# check only keeps the handshake off this host and its link.
 	function blocked(h,    l, r, a, n, i) {
 		if (substr(h, 1, 1) == "[") {
 			h = tolower(substr(h, 2, length(h) - 2))
-			if (h ~ /^[0:]+$/ || h ~ /^[0:]*:0*1$/ || h ~ /^fe[89ab]/) return 1
+			if (h ~ /^[0:]+$/ || h ~ /^[0:]*:0*1$/ || h ~ /^fe[89ab][0-9a-f]:/) return 1
 			r = h
 			if (sub(/^[0:]*:(ffff:)?/, "", r)) {
 				if (r ~ /^[0-9.]+$/) return ip4(r) < 0 || blockedval(ip4(r))

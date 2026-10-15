@@ -248,6 +248,7 @@ func TestTheHelperRefusesAnythingElse(t *testing.T) {
 		{"an Endpoint on ::1 written out", replace("Endpoint = vm.example.org:51820", "Endpoint = [0:0:0:0:0:0:0:1]:51820"), "loopback, link-local, multicast or unspecified"},
 		{"an Endpoint on fe80::", replace("Endpoint = vm.example.org:51820", "Endpoint = [fe80::1]:51820"), "loopback, link-local, multicast or unspecified"},
 		{"an Endpoint on febf::", replace("Endpoint = vm.example.org:51820", "Endpoint = [FEBF::1]:51820"), "loopback, link-local, multicast or unspecified"},
+		{"an Endpoint on lower case febf::", replace("Endpoint = vm.example.org:51820", "Endpoint = [febf::1]:51820"), "loopback, link-local, multicast or unspecified"},
 		{"an Endpoint on a mapped loopback", replace("Endpoint = vm.example.org:51820", "Endpoint = [::ffff:127.0.0.1]:51820"), "loopback, link-local, multicast or unspecified"},
 		{"an Endpoint on a short loopback", replace("Endpoint = vm.example.org:51820", "Endpoint = 127.1:51820"), "loopback, link-local, multicast or unspecified"},
 		{"an Endpoint on a decimal loopback", replace("Endpoint = vm.example.org:51820", "Endpoint = 2130706433:51820"), "loopback, link-local, multicast or unspecified"},
@@ -438,7 +439,7 @@ func TestTheHelperRefusesBadValues(t *testing.T) {
 // Endpoints on a private LAN, a documentation range or a name are the
 // ordinary case: two sites may share a LAN.
 func TestTheHelperAcceptsEndpointsOnALan(t *testing.T) {
-	for _, ep := range []string{"192.168.1.20:51820", "10.0.0.5:51820", "172.16.3.4:51820", "198.51.100.9:1", "[fd00::5]:51820", "[2001:db8::3]:51820", "[fec0::1]:51820", "vm.example.org:51820", "localhostel.example.org:51820", "0xfoo.example.org:51820"} {
+	for _, ep := range []string{"[fe8::1]:51820", "192.168.1.20:51820", "10.0.0.5:51820", "172.16.3.4:51820", "198.51.100.9:1", "[fd00::5]:51820", "[2001:db8::3]:51820", "[fec0::1]:51820", "vm.example.org:51820", "localhostel.example.org:51820", "0xfoo.example.org:51820"} {
 		conf := strings.Replace(goodConf, "Endpoint = vm.example.org:51820", "Endpoint = "+ep, 1)
 		for _, shell := range shells() {
 			script, _ := helperIn(t, 51820, "10.44.0.0/24")
