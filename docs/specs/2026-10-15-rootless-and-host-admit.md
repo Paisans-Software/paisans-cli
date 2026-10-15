@@ -91,7 +91,7 @@ owner has the CLI but not the deployment's configuration.
 
 ```sh
 sudo paisans host admit --request home-a.admit                                  # shows what it would do
-sudo paisans host admit --request home-a.admit --watchdog --public-ports --execute
+sudo paisans host admit --request home-a.admit --watchdog --public-ports --data-dir /srv/data --execute
 ```
 
 **From a workstation, from the configuration.** For an operator who is also
@@ -117,6 +117,36 @@ Like `host prepare`, it probes read only, prints the plan, and changes the
 host only with `--execute`. Every step is idempotent, so a re-run after a
 failure resumes, and a re-run with different flags changes only what they
 govern.
+
+**A data site without `--watchdog` stops admit before anything else.** The
+request's `grants` say whether the site needs the watchdog, and the check
+runs first, before any probe of the host, the plan or the digest prompt.
+Without the flag, admit exits 1 having read and changed nothing, saying the
+site is a data site, that its Patroni member needs the watchdog to fail over
+safely and that the watchdog can reboot the machine, and that the owner
+either admits it with `--watchdog` or does not admit it. A re-run that drops
+`--watchdog` from a data site already admitted stops the same way, and
+leaves the grant in place.
+
+**A gateway or a monitor without `--public-ports` stops admit the same
+way**, first, when the site's roles in the configuration include the
+gateway, or a monitor whose web server is the toolkit's own Caddy, since
+those bind 80 and 443. The message names the role and the ports. A site with
+neither role is never stopped for the grant's absence, and a monitor behind
+the owner's web server (`managed_by: external`) needs no low port.
+
+**`--data-dir <path>` puts the deployment's Docker data on a disk the owner
+chooses.** Rootless Docker keeps every image, layer and named volume under
+the user's home by default (`~/.local/share/docker`), which for a data site
+is the database and its WAL archive and for a Garage site the stored
+objects. On many hosts `/home` is on a small root disk and the room is on a
+second disk, which only the owner knows. Without the flag the data stays
+under the home. With it, admit creates `<path>/paisans-<token>`, owned by
+the user, mode 700, and sets `data-root` to it in the user's `daemon.json`;
+the home itself stays where it is. Either way admit refuses a filesystem
+Docker's overlay storage cannot use, NFS included, and its plan states the
+free space where the data will live, warning below 20 GB for a data or
+Garage site and 5 GB otherwise. The path is in the admission record.
 
 ### What it does
 
@@ -154,7 +184,8 @@ govern.
    with its runtime directory: `dockerd-rootless-setuptool.sh install
    --force`. Then `~/.config/docker/daemon.json` with `"userland-proxy":
    false`, so a published port carries the client's source address
-   (*Observed*), and the deployment's `default-address-pools`.
+   (*Observed*), the deployment's `default-address-pools`, and, with
+   `--data-dir`, `data-root`.
 7. **The deployment's directory.** `install -d -m 750 -o <user> -g <user>
    /srv/paisans/<token>`. `/srv/paisans` itself stays root's, mode 755.
 8. **The WireGuard helper and its sudoers line** (below).
@@ -631,6 +662,3 @@ its.
 * **`br_netfilter` is host wide.** It sends bridged traffic on the owner's
   own bridges through their iptables rules. The system Docker usually loads
   it anyway; admit says so in the plan.
-* **The home directory.** `/home/paisans-<token>` holds the Docker data
-  directory, so it has to be on a disk with room. Should admit take a
-  `--home`?
