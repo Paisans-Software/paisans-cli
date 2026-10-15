@@ -1496,7 +1496,44 @@ func dnsSetup(name, executeHelp string, args []string, extra ...func(*flag.FlagS
 	if err != nil {
 		return nil, nil, nil, nil, false, err
 	}
+	if err := checkWorkstationToken(r, cfg, secrets.External["acme_dns_token"]); err != nil {
+		return nil, nil, nil, nil, false, err
+	}
 	return r, cfg, wants, provider, *execute, nil
+}
+
+// workstationTokenCheck is the DNS token check from this workstation. A
+// package variable so that a test can stand in for the provider, since no
+// test may reach a real one.
+var workstationTokenCheck = func(ctx context.Context, check dns.TokenCheck, token string) dns.TokenResult {
+	return check.FromWorkstation(ctx, token)
+}
+
+// checkWorkstationToken asks the provider, before the first records call,
+// whether it accepts the token from this workstation. The provider judges
+// the address a call comes from, so a token filtered to the gateway fails
+// here, and this says so in place of a bare HTTP 403 from the records call
+// after it.
+func checkWorkstationToken(r ui.Reporter, cfg *config.Config, token string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	step := r.Step("check DNS token")
+	result := workstationTokenCheck(ctx, dns.TokenCheck{
+		Provider: cfg.ACME.Provider,
+		Domain:   cfg.Community.Domain,
+		Place:    dns.WorkstationPlace,
+		From:     "this workstation",
+	}, token)
+	if result.Status != dns.TokenFailed {
+		step.Detail("%s", result.Finding)
+		step.Done("")
+		return nil
+	}
+	step.Fail(errors.New(result.Finding))
+	return &ui.Problem{
+		Hint:    result.Finding,
+		Explain: result.Advice + " No record was read or changed.\n`paisans doctor` checks the token from every place that uses it.",
+	}
 }
 
 // warnUnencrypted is the warning every command that opens the secrets gives

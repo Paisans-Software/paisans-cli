@@ -63,6 +63,10 @@ type fakeHost struct {
 	reclaimable string
 	// images is what `docker image ls --format json` prints.
 	images string
+	// dns answers the DNS token check's command, which reads ACME_DNS_TOKEN
+	// on the host and calls the provider with curl. Nil answers nothing,
+	// which a test that never configures a provider with a check never asks.
+	dns func(command string) (string, error)
 	// containers is what the containers' images probe prints: names and IDs.
 	containers string
 	// others are other deployments' roots under /srv/paisans, by name.
@@ -110,6 +114,9 @@ func (h *fakeHost) Describe() string { return "fake" }
 
 func (h *fakeHost) Run(command string) (string, error) {
 	h.commands = append(h.commands, command)
+	if h.dns != nil && strings.Contains(command, "ACME_DNS_TOKEN") {
+		return h.dns(command)
+	}
 	if h.fail != "" && strings.Contains(command, h.fail) {
 		return "refused by the fake host", fmt.Errorf("exit status 1")
 	}

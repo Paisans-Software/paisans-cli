@@ -44,6 +44,11 @@ type Plan struct {
 	// resolves it to the build it names while it plans, and pins that digest
 	// into each line naming it with PinImages. See listImages.
 	Images map[string][]ComposeImage
+	// ACMEProvider is acme.provider and Domain community.domain: what apply
+	// checks a Caddy site's DNS token against before Caddy asks the provider
+	// for anything (see dns.TokenCheck).
+	ACMEProvider string
+	Domain       string
 }
 
 // AppPort is the port a blueprint's app listens on, which is also the port it
@@ -193,7 +198,7 @@ func Build(cfg *config.Config, secrets *config.Secrets, opts ...Option) (*Plan, 
 	if err != nil {
 		return nil, err
 	}
-	return &Plan{Files: files, Deployment: cfg.Deployment(), HostSites: hostSites, Images: images}, nil
+	return &Plan{Files: files, Deployment: cfg.Deployment(), HostSites: hostSites, Images: images, ACMEProvider: cfg.ACME.Provider, Domain: cfg.Community.Domain}, nil
 }
 
 // newPlanner is a planner with every site laid out and no app placed yet.
