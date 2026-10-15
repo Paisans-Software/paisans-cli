@@ -46,7 +46,14 @@ type world struct {
 	starting map[string]int
 
 	// Knobs that break one thing.
-	noPing          bool
+	noPing bool
+	// pingOut is what a failed ping prints, when noPing is set.
+	pingOut string
+	// clock is what date +%s prints on every host, when set.
+	clock *string
+	// handshakesFail is what the helper's show latest-handshakes prints,
+	// failing, on every host and every time, when set.
+	handshakesFail  *string
 	promoteRefusals int
 	// addRefusals is how many learner adds etcd refuses as an unhealthy
 	// cluster, as it does until every voter has been connected five seconds.
@@ -211,15 +218,24 @@ func (h *host) Run(command string) (string, error) {
 	case command == wgHelper+"put":
 		return "", nil
 	case command == "date +%s":
+		if w.clock != nil {
+			return *w.clock, nil
+		}
 		return "1000\n", nil
 	case strings.HasPrefix(command, "wg "), strings.Contains(command, "wg-quick"):
 		return "", fmt.Errorf("%s: %q reached the mesh without the WireGuard helper", h.name, command)
 	case strings.HasPrefix(command, "ping "):
 		if w.noPing {
+			if w.pingOut != "" {
+				return w.pingOut, fmt.Errorf("exit status 1")
+			}
 			return "100% packet loss", fmt.Errorf("exit status 1")
 		}
 		return "3 received", nil
 	case command == wgHelper+"show latest-handshakes":
+		if w.handshakesFail != nil {
+			return *w.handshakesFail, fmt.Errorf("exit status 1")
+		}
 		return w.handshakes(h), nil
 	case strings.Contains(command, "--quiet etcd"):
 		if !w.running[h.name] {

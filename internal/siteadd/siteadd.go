@@ -657,12 +657,15 @@ func contains(list []string, s string) bool {
 	return false
 }
 
+// lastLines is the last n lines of what a host printed, joined on one line
+// for an error or a problem: redacted whole, then made visible, since a
+// host's output is somebody else's text (see ui.Visible).
 func lastLines(s string, n int) string {
-	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	lines := strings.Split(strings.TrimRight(ui.Redact(s), "\n"), "\n")
 	if len(lines) > n {
 		lines = lines[len(lines)-n:]
 	}
-	return strings.Join(lines, " / ")
+	return ui.Visible(strings.Join(lines, " / "))
 }
 
 // runPreflight is stage 1, on the new site and every blank joiner. It is a
