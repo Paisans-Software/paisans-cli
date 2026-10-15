@@ -205,7 +205,7 @@ func endReview(r ui.Reporter, line ui.Step, rev grant.Review, execute bool) {
 // foundationHeading heads the changes to foundation images in a review, and
 // removedHeading its removals.
 const (
-	foundationHeading = "foundation images, reviewed in the core catalog:"
+	foundationHeading = "foundation images (required):"
 	removedHeading    = "removed, nothing to approve:"
 )
 
