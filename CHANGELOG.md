@@ -12,7 +12,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Changed
 
-- The grant review lists each site's foundation images first, then removals, then what needs approval under its count, so the count heads exactly the entries it counts.
+- The grant review lists each site's foundation images first, under `foundation images (required):`, then removals, then what needs approval under its count, so the count heads exactly the entries it counts.
 
 ### Fixed
 

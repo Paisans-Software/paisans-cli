@@ -5374,7 +5374,7 @@ run review everything again. `site remove` deletes it with the registry entry.
 | in the grant only | `+ key SHA256:… (bob, bob@laptop) may log in as ubuntu` | **yes** |
 | in both, different | `~ image talk/app: ghcr.io/…:1.14 → ghcr.io/…:1.15` | **yes** |
 | in the record only | `- key SHA256:… (carol, carol@desk)` | no |
-| a foundation image, in the grant only or changed | under `foundation images, reviewed in the core catalog:` | no |
+| a foundation image, in the grant only or changed | under `foundation images (required):` | no |
 | approved on the host earlier, not applied yet | counted on the site's line: `3 approved earlier, not applied yet` | no |
 
 Each site's changes are listed in groups, each under its heading: foundation

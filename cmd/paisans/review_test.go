@@ -511,7 +511,7 @@ func TestFoundationImagesAreListedApart(t *testing.T) {
 	want := []string{
 		"step: review ",
 		"pending: review 1 entry to approve",
-		"explain: foundation images, reviewed in the core catalog: ",
+		"explain: foundation images (required): ",
 		"explain: ~ image infra/etcd: etcd:v3.5.* → etcd:v3.6.* ",
 		"explain: removed, nothing to approve: ",
 		"explain: - image blog/app: writefreely:0.15 ",
