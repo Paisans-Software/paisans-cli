@@ -993,7 +993,8 @@ func pinRecord(plan *Plan) []render.ManifestPin {
 	}
 	at := now().UTC().Format(time.RFC3339)
 	for _, pin := range plan.Pins {
-		if !settled[pin.Stack] {
+		// An unresolved pin names no build; Execute refuses its plan anyway.
+		if !settled[pin.Stack] || pin.Source == "unresolved" {
 			continue
 		}
 		for _, service := range pin.Services {

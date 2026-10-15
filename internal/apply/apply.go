@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -216,6 +217,9 @@ type Plan struct {
 	// KeepImages skips pruning and the sweep for this run, as --keep-images
 	// does.
 	KeepImages bool
+	// listsImages is whether Build was given TolerateUnresolved: the plan
+	// lists images, and Execute refuses it.
+	listsImages bool
 	// Pins are the builds the images this site's compose files name are
 	// planned to run, one per image a compose file this plan read names
 	// (see render.Plan.Images). Execute records them in the manifest. See
@@ -585,6 +589,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 	}
 	out.Report = o.report
 	out.Served = o.served
+	out.listsImages = o.tolerateUnresolved
 	// An earlier pass of the same apply already carried out these. See After.
 	doneOverwrite, doneStacks := map[string]bool{}, map[string]bool{}
 	for _, p := range o.after {
@@ -1140,11 +1145,15 @@ func Execute(plan *Plan, t Transport) error {
 	return execute(plan, t)
 }
 
-// Refusal is what Execute refuses before it writes anything: a file edited on
-// the host, too little free space for the pulls, or an image volume its
-// service does not mount. A caller that runs a site in several passes asks it
-// of the whole plan first, so nothing is written when any pass would refuse.
+// Refusal is what Execute refuses before it writes anything: a plan built
+// with TolerateUnresolved, a file edited on the host, too little free space
+// for the pulls, or an image volume its service does not mount. A caller
+// that runs a site in several passes asks it of the whole plan first, so
+// nothing is written when any pass would refuse.
 func Refusal(plan *Plan) error {
+	if plan.listsImages {
+		return errors.New("this plan was built to list images, not to apply them")
+	}
 	if conflicts := plan.Conflicts(); len(conflicts) > 0 {
 		var names []string
 		for _, c := range conflicts {

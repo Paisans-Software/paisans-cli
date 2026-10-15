@@ -991,3 +991,21 @@ func TestTolerateUnresolvedPlansAnImageItCannotResolve(t *testing.T) {
 		}
 	}
 }
+
+// A plan built with TolerateUnresolved lists images and is never applied:
+// Execute refuses it before anything reaches the host.
+func TestATolerantPlanCannotBeExecuted(t *testing.T) {
+	host := newHost()
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host, apply.ResolveImages(&registry{err: errors.New("dial tcp: lookup ghcr.io: no such host")}), apply.TolerateUnresolved())
+	if err != nil {
+		t.Fatal(err)
+	}
+	host.commands = nil
+	err = apply.Execute(p, host)
+	if err == nil || !strings.Contains(err.Error(), "this plan was built to list images, not to apply them") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(host.files) != 0 || len(host.commands) != 0 {
+		t.Errorf("wrote %d files and ran %v", len(host.files), host.commands)
+	}
+}
