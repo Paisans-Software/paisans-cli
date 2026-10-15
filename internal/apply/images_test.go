@@ -933,3 +933,31 @@ func TestReferenceLabel(t *testing.T) {
 		}
 	}
 }
+
+// A replaced reference pinned by digest is compared by its tag.
+func TestAnOverrideBehindADigestPinnedReferenceIsBehind(t *testing.T) {
+	const old = "gcr.io/etcd-development/etcd:v3.4.30"
+	rendered := planWith(t, func(c *config.Config) { c.Infra.Images = map[string]string{"etcd": old} })
+	replaced := "gcr.io/etcd-development/etcd:v3.5.21@" + buildB
+	for site, images := range rendered.Images {
+		for i := range images {
+			if images[i].Origin == "infra.images.etcd" {
+				images[i].Replaces = replaced
+			}
+		}
+		rendered.Images[site] = images
+	}
+	p, err := apply.Build("home-a", rendered, acmeModule(t), newHost(), apply.ResolveImages(&registry{digest: buildA}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pin := range p.Pins {
+		if pin.Origin == "infra.images.etcd" {
+			if !pin.Behind {
+				t.Errorf("v3.4.30 is not behind %s: %+v", replaced, pin)
+			}
+			return
+		}
+	}
+	t.Fatal("no pin from infra.images.etcd")
+}

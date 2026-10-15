@@ -543,7 +543,7 @@ func checkLag(pin *ImagePin, r Resolver) []Note {
 		replaced = got
 	}
 	pin.Replaced = replaced
-	ours, theirs := blueprints.ParseReference(nameOf(pin.Reference)), blueprints.ParseReference(replaced)
+	ours, theirs := blueprints.ParseReference(nameOf(pin.Reference)), blueprints.ParseReference(nameOf(replaced))
 	if ours.Repository() != theirs.Repository() || !imagedigest.OlderTag(ours.Tag, theirs.Tag) {
 		return nil
 	}
