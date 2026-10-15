@@ -86,6 +86,7 @@ Depends on: phases 2, 4; R1, R2, R3, R4, R5, R10, R14, R15, R18, R20.
 * Create `internal/hostprep/snippets/egress.nft.tmpl` and `paisans-egress.service.tmpl`.
 * Create `cmd/paisans/hostadmit.go`: `host admit` (`--request` | `--site --ssh`, `--watchdog`, `--public-ports`, `--execute`), the typed digest, and `host evict` (`--request` | `--deployment --user` | `--site --ssh`, typed user name).
 * Golden plans: blank Ubuntu 24.04, old system Docker (refused), current system Docker, snap Docker (refused), each grant, re-run with a grant removed, a privileged existing user (refused), second watchdog holder (refused), evict of one of two deployments.
+* Files in the deployment user's home (`~/.ssh/authorized_keys`, `~/.config/docker/daemon.json`) are written as that user (`runuser -u <user> --`), never by root, so a symlink the user plants cannot redirect a root write. A test plants `~/.ssh` as a link to a root-owned directory and admit leaves that directory untouched.
 * The admission record is written mode 0644, owned by root, via temp and rename; a golden plan and a test assert the mode, and a re-run that finds it otherwise restores 0644.
 * Any boot-ordering mechanism R10 calls for lands here.
 * README: the registry claim passages ("claim through sudo, since the registry is root's", under the registry section) say the claim happens in `host admit`.
