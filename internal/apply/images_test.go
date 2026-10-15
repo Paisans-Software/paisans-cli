@@ -920,7 +920,7 @@ func TestAnOverrideInAnotherRepositoryIsNotJudged(t *testing.T) {
 	t.Fatal("no pin from infra.images.etcd")
 }
 
-func TestBuildLabel(t *testing.T) {
+func TestReferenceLabel(t *testing.T) {
 	digest := "sha256:" + strings.Repeat("1a", 32)
 	cases := map[string]string{
 		"gcr.io/etcd-development/etcd:v3.5.21@" + digest: "v3.5.21 (sha256:1a1a1a1a1a1a)",
@@ -928,8 +928,8 @@ func TestBuildLabel(t *testing.T) {
 		"gcr.io/etcd-development/etcd:v3.5.21":           "v3.5.21",
 	}
 	for ref, want := range cases {
-		if got := apply.BuildLabel(ref); got != want {
-			t.Errorf("BuildLabel(%q) = %q, want %q", ref, got, want)
+		if got := apply.ReferenceLabel(ref); got != want {
+			t.Errorf("ReferenceLabel(%q) = %q, want %q", ref, got, want)
 		}
 	}
 }

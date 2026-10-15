@@ -261,7 +261,7 @@ type ImagePin struct {
 	// the reference it replaced.
 	Origin   string
 	Replaces string
-	// Replaced is the newest tag Replaces names now, as a reference, when
+	// Replaced is the newest tag Replaces names, as a reference, when
 	// the resolver could say. Behind reports that it is a newer release of
 	// the same repository than the build the pin runs.
 	Replaced string
@@ -554,9 +554,9 @@ func checkLag(pin *ImagePin, r Resolver) []Note {
 	}}
 }
 
-// BuildLabel names one build for a table: its tag and short digest, either
+// ReferenceLabel names the build a reference names, for a table: its tag and short digest, either
 // alone when the reference names only one.
-func BuildLabel(ref string) string {
+func ReferenceLabel(ref string) string {
 	tag := blueprints.ParseReference(nameOf(ref)).Tag
 	digest := digestOf(ref)
 	if short, ok := strings.CutPrefix(digest, "sha256:"); ok && len(short) > 12 {
