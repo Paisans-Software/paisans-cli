@@ -26,6 +26,10 @@ func TestNeeds(t *testing.T) {
 		{"apps", config.Site{Roles: []config.Role{config.RoleApps}}, admission.Grants{}},
 		{"witness", config.Site{Roles: []config.Role{config.RoleWitness}}, admission.Grants{}},
 		{"storage", config.Site{Roles: []config.Role{config.RoleStorage}}, admission.Grants{}},
+		{"gateway and external monitor", config.Site{Roles: []config.Role{config.RoleGateway, config.RoleMonitor}, WebServer: external}, admission.Grants{PublicPorts: true}},
+		{"data and Caddy monitor", config.Site{Roles: []config.Role{config.RoleData, config.RoleMonitor}}, admission.Grants{Watchdog: true, PublicPorts: true}},
+		{"data and external monitor", config.Site{Roles: []config.Role{config.RoleData, config.RoleMonitor}, WebServer: external}, admission.Grants{Watchdog: true}},
+		{"no roles", config.Site{}, admission.Grants{}},
 		{"data and gateway", config.Site{Roles: []config.Role{config.RoleData, config.RoleGateway}}, admission.Grants{Watchdog: true, PublicPorts: true}},
 	} {
 		if got := admission.Needs(c.site); got != c.want {
