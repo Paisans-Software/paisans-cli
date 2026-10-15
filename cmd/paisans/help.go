@@ -50,7 +50,7 @@ var groupSummary = map[string]string{
 	"dns":         "Create the DNS records the configuration implies, or prune them.",
 	"config":      "Publish, pull, list and recover the sites' signed configuration.",
 	"operator":    "Sign the sites' configuration, or give an operator a sign-in link.",
-	"secrets":     "Set, prune and rotate secrets.",
+	"secrets":     "List, set, prune and rotate secrets.",
 	"app":         "Take a removed app off hosts.",
 	"oidc":        "Create an app's sign-in client at Pocket ID.",
 	"oidc client": "Create an app's sign-in client at Pocket ID.",
@@ -335,6 +335,14 @@ var helpCommands = []helpCommand{
 			"Signs only a version equal to your local files, or, with no files and a root pinned, the one the pin leads to, and then writes its files. " +
 			"Records the key in .paisans/signing-key, which config publish signs with from then on.\n\n" +
 			"Changes only the sites' configuration stores, and nothing without --execute. With --execute it asks for the word partial at a terminal when no more than half the sites answered directly, and for rollback when the newest version is older than one seen here before.",
+	},
+	{
+		name:    "secrets list",
+		summary: "List every secret's path, whether it is set, and how rotate takes it.",
+		usage:   []string{"paisans secrets list [--config " + config.FileName + "] [--secrets secrets.enc.yaml]"},
+		detail: "List every secret " + config.FileName + " needs, and every other one the secrets file holds for something it still declares, by its path in the secrets file: set or unset; generated (by init), pasted (with secrets set) or captured (by apply); and the path secrets rotate takes for it, a unit's for a secret rotated with its unit, kept for one it keeps. " +
+			"Prints names alone, never a value or any part of one.\n\n" +
+			"The table is on stdout, the report on stderr. Reads only the local files.",
 	},
 	{
 		name:    "secrets set",

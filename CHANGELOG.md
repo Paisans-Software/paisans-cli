@@ -10,6 +10,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Added
+
+- `paisans secrets list` prints every secret path the configuration needs, whether each is set, whether it is generated, pasted or captured, and the path `secrets rotate` takes, never a value.
+
 ### Changed
 
 - The grant review lists each site's foundation images first, under `foundation images (required):`, then removals, then what needs approval under its count, so the count heads exactly the entries it counts.
