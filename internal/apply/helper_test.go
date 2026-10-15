@@ -35,8 +35,8 @@ func (h *helperHost) Describe() string                       { return "home-a" }
 func TestWGHelperCommandLines(t *testing.T) {
 	h := &helperHost{out: "peer\n"}
 	w := apply.WGHelper{T: h, Iface: apply.Fixture.Interface()}
-	if got := w.Path(); got != "/usr/local/libexec/paisans/wg-psns-f2a9" {
-		t.Errorf("Path() = %q", got)
+	if got, err := w.Path(); err != nil || got != "/usr/local/libexec/paisans/wg-psns-f2a9" {
+		t.Errorf("Path() = %q, %v", got, err)
 	}
 	if err := w.Put([]byte("[Interface]\nListenPort = 51820\n")); err != nil {
 		t.Fatal(err)
@@ -75,5 +75,32 @@ func TestWGHelperShowRefusesAnotherField(t *testing.T) {
 	}
 	if len(h.ran) != 0 {
 		t.Errorf("ran %q", h.ran)
+	}
+}
+
+// Iface is the name the deployment package produces, psns- and its token. A
+// name that is not that is refused by every method before any command is
+// built, so the helper path cannot leave HelperDir or carry a quote.
+func TestWGHelperRefusesABadInterface(t *testing.T) {
+	for _, iface := range []string{"", "../../../tmp/x", "psns-a/b", "psns-x'y", "wg0", "psns-f2a9-0123456", "psns-F2A9", "psns-f2a"} {
+		h := &helperHost{}
+		w := apply.WGHelper{T: h, Iface: iface}
+		calls := map[string]func() error{
+			"Path":    func() error { _, err := w.Path(); return err },
+			"Put":     func() error { return w.Put([]byte("x")) },
+			"Up":      w.Up,
+			"Restart": w.Restart,
+			"Sync":    w.Sync,
+			"Show":    func() error { _, err := w.Show("peers"); return err },
+			"Log":     func() error { _, err := w.Log(); return err },
+		}
+		for name, call := range calls {
+			if call() == nil {
+				t.Errorf("%s accepted interface %q", name, iface)
+			}
+		}
+		if len(h.ran) != 0 {
+			t.Errorf("interface %q ran %q", iface, h.ran)
+		}
 	}
 }

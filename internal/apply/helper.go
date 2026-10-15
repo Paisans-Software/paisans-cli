@@ -1,6 +1,11 @@
 package apply
 
-import "fmt"
+import (
+	"fmt"
+	"regexp"
+
+	"github.com/paisans-software/paisans-cli/internal/deployment"
+)
 
 // HelperDir is where host admit installs each deployment's WireGuard helper.
 const HelperDir = "/usr/local/libexec/paisans"
@@ -18,37 +23,53 @@ type WGHelper struct {
 	Iface string
 }
 
-// Path is the helper for this interface: HelperDir/wg-<iface>.
-func (h WGHelper) Path() string { return HelperDir + "/wg-" + h.Iface }
+// ifacePattern is what deployment.Interface produces: the prefix and a token
+// of hex digits, which is also within the 15 bytes Linux allows a name.
+var ifacePattern = regexp.MustCompile("^" + regexp.QuoteMeta(deployment.InterfacePrefix) + "[0-9a-f]{" + fmt.Sprint(deployment.TokenLength) + "}$")
 
-func (h WGHelper) command(verb string) string {
-	return "sudo -n " + shellQuote(h.Path()) + " " + verb
+// Path is the helper for this interface: HelperDir/wg-<iface>. An Iface that
+// is not a deployment's interface name has no helper, so it is an error here
+// and in every method, before a command is built from it.
+func (h WGHelper) Path() (string, error) {
+	if !ifacePattern.MatchString(h.Iface) || len(h.Iface) > deployment.MaxInterfaceName {
+		return "", fmt.Errorf("%q is not a deployment's WireGuard interface name (%s followed by %d hex digits)", h.Iface, deployment.InterfacePrefix, deployment.TokenLength)
+	}
+	return HelperDir + "/wg-" + h.Iface, nil
+}
+
+func (h WGHelper) command(verb string) (string, error) {
+	path, err := h.Path()
+	if err != nil {
+		return "", err
+	}
+	return "sudo -n " + shellQuote(path) + " " + verb, nil
 }
 
 // Put sends conf on stdin, for the helper to check and install as the
 // interface's wg-quick file.
 func (h WGHelper) Put(conf []byte) error {
-	_, err := h.T.RunInput(h.command("put"), string(conf))
+	cmd, err := h.command("put")
+	if err != nil {
+		return err
+	}
+	_, err = h.T.RunInput(cmd, string(conf))
 	return err
 }
 
 // Up enables and starts the interface.
 func (h WGHelper) Up() error {
-	_, err := h.T.Run(h.command("up"))
-	return err
+	return h.run("up")
 }
 
 // Restart restarts the interface.
 func (h WGHelper) Restart() error {
-	_, err := h.T.Run(h.command("restart"))
-	return err
+	return h.run("restart")
 }
 
 // Sync applies the installed conf's peers to the running interface without
 // restarting it.
 func (h WGHelper) Sync() error {
-	_, err := h.T.Run(h.command("sync"))
-	return err
+	return h.run("sync")
 }
 
 // showFields are the fields the helper's show verb reads.
@@ -60,8 +81,27 @@ func (h WGHelper) Show(field string) (string, error) {
 	if !showFields[field] {
 		return "", fmt.Errorf("the WireGuard helper shows peers, latest-handshakes or public-key, not %q", field)
 	}
-	return h.T.Run(h.command("show " + field))
+	cmd, err := h.command("show " + field)
+	if err != nil {
+		return "", err
+	}
+	return h.T.Run(cmd)
 }
 
 // Log is the interface unit's last journal lines.
-func (h WGHelper) Log() (string, error) { return h.T.Run(h.command("log")) }
+func (h WGHelper) Log() (string, error) {
+	cmd, err := h.command("log")
+	if err != nil {
+		return "", err
+	}
+	return h.T.Run(cmd)
+}
+
+func (h WGHelper) run(verb string) error {
+	cmd, err := h.command(verb)
+	if err != nil {
+		return err
+	}
+	_, err = h.T.Run(cmd)
+	return err
+}
