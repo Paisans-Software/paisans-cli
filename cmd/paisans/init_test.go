@@ -344,7 +344,7 @@ func TestInitReportsStepsAndWhatIsOwed(t *testing.T) {
 	if !rec.Has("done", "settle mesh subnet") {
 		t.Errorf("no settled subnet step:\n%s", rec.Lines())
 	}
-	if !rec.Has("done", "write secrets") || !rec.Has("detail", "+ ") || !rec.Has("result", "Generated ") {
+	if !rec.Has("done", "write secrets") || !rec.Has("detail", "+ ") || !rec.Has("result", "Next: run `paisans secrets set`.") {
 		t.Errorf("no created secrets:\n%s", rec.Lines())
 	}
 	if !rec.Has("done", "make age key") || rec.Has("warn", "was written in plaintext") {
@@ -354,8 +354,8 @@ func TestInitReportsStepsAndWhatIsOwed(t *testing.T) {
 	if err := runInitQuietly(t, path); err != nil {
 		t.Fatal(err)
 	}
-	if !again.Has("result", "already present") {
-		t.Errorf("a second run does not say nothing was written:\n%s", again.Lines())
+	if again.Has("done", "write secrets") || !again.Has("result", "Next: run `paisans secrets set`.") {
+		t.Errorf("a second run wrote secrets, or does not name what is next:\n%s", again.Lines())
 	}
 }
 
@@ -507,7 +507,7 @@ func TestInitNamesPendingClientsWithoutWarning(t *testing.T) {
 	if !rec.Has("warn", "Secret for external.acme_dns_token needs to be set") {
 		t.Errorf("an owed secret is no longer warned about:\n%s", rec.Lines())
 	}
-	if !rec.Has("result", "Run `paisans secrets set` to set the") {
+	if !rec.Has("result", "Next: run `paisans secrets set`.") {
 		t.Errorf("init does not say how to set what is owed:\n%s", rec.Lines())
 	}
 	want := "7 sign in clients (account, blog, chat, gate, health, talk, wiki) are created by apply"
