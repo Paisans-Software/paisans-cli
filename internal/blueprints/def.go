@@ -152,6 +152,11 @@ type Def struct {
 	// re-rendering the app's own stack, because the stack that presents
 	// each is also the one that checks it.
 	SelfRotated []string
+
+	// Heartbeat is the blueprint's push monitor, nil for one that declares
+	// none. A blueprint with one also generates HeartbeatTokenKey, which is
+	// among AppSecrets and Secrets.
+	Heartbeat *Heartbeat
 }
 
 // SettingKey is one passthrough key a setting owns. Key is in the blueprint's
