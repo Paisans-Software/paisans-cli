@@ -136,6 +136,8 @@ func runHostDeployments(args []string) error {
 			line += fmt.Sprintf("; caddy kept: serves %s sites (%s)", render.HostSitesDir, strings.Join(found.sites, ", "))
 		case e.Kept == registry.KeptCaddy:
 			line += fmt.Sprintf("; caddy kept, but %s holds no site now: paisans site remove --force --ssh %s --id %s removes it", render.HostSitesDir, *sshFlag, e.Token)
+		case e.Kept == registry.KeptData:
+			line += fmt.Sprintf("; data kept: paisans site remove --force --ssh %s --id %s --delete-data deletes it", *sshFlag, e.Token)
 		}
 		r.Step(line).End(ui.OK, "")
 	}

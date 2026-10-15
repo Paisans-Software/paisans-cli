@@ -10,6 +10,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Fixed
+
+- `site remove` without `--delete-data` keeps the registry entry, marked `data` kept, while data is left, so a later `--force --id ... --delete-data` finds the deployment instead of refusing.
+
 ## [0.2.0] - 2026-10-15
 
 ### Added

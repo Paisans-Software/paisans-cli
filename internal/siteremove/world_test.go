@@ -840,17 +840,17 @@ func (h *host) Run(command string) (string, error) {
 	case strings.HasPrefix(command, "rm -f -- '"):
 		delete(h.files, strings.TrimSuffix(strings.TrimPrefix(command, "rm -f -- '"), "'"))
 		return "", nil
-	case strings.Contains(command, "awk ") && strings.Contains(command, registry.Path) && strings.Contains(command, `"kept":"caddy"`):
+	case strings.Contains(command, "awk ") && strings.Contains(command, registry.Path) && strings.Contains(command, `"kept":"`):
 		r, err := registry.Parse([]byte(h.files[registry.Path]))
 		if err != nil {
 			return "paisans-registry-unreadable", errors.New("exit status 4")
 		}
 		m := regexp.MustCompile(`'entry="` + ourID + `":(\{[^']*\})'`).FindStringSubmatch(command)
 		var e registry.Entry
-		if m == nil || json.Unmarshal([]byte(m[1]), &e) != nil || e.Kept != registry.KeptCaddy {
+		if m == nil || json.Unmarshal([]byte(m[1]), &e) != nil || (e.Kept != registry.KeptCaddy && e.Kept != registry.KeptData) {
 			return "", fmt.Errorf("not this deployment's entry marked kept: %s", command)
 		}
-		if old, ok := r.Deployments[ourID]; ok && registry.KeepCaddy(old) != e {
+		if old, ok := r.Deployments[ourID]; ok && func() registry.Entry { old.Kept = e.Kept; return old }() != e {
 			return "", fmt.Errorf("the entry marked kept is not the one there: %+v", e)
 		}
 		if want, _ := registry.ClaimCommand(ourID, e); command != want {

@@ -8518,7 +8518,7 @@ deployment's is left alone and not listed:
 | ufw rules | a comment starting with exactly `paisans-<token>:` | deleted, except the SSH allow, which is always kept so the host stays reachable, and is not listed: with incoming denied, deleting it would cut the next connection. A rule without that comment is not this deployment's, so it stays and is not listed |
 | authorized keys | nothing can prove one: a key `host prepare` added is a key the operator logs in with | never removed. A key may be the only way into the host, and nothing on it says whether another exists; the operator deletes one by hand once it is no longer needed. This deployment's record of which keys it added, `/etc/paisans/authorized_keys.<user>.paisans-<token>.owned`, is its own file, so that is deleted |
 | the deployment's directory | its path, `/srv/paisans/<token>` | empty directories removed; what apply did not write, the data in its bind mounts, is kept, and `--delete-data` deletes it all unless a file in it was edited |
-| the registry entry | this id's line in `/var/lib/paisans/registry.json` | deleted under the same lock as a claim, by the same kind of awk program |
+| the registry entry | this id's line in `/var/lib/paisans/registry.json` | deleted under the same lock as a claim, by the same kind of awk program; while data is kept, marked `"kept": "data"` instead, so a later run with `--delete-data` finds the deployment, by `--id` too |
 | the deployment record, on a gateway | `/var/lib/paisans/deployed.<token>.json`, named for the token | deleted |
 | the configuration store | `/var/lib/paisans/config/<token>.git`, its `<token>.peers` and `<token>.sync.json`, a `<token>.incoming.bundle` a cut-off push left behind, and `/usr/local/lib/paisans-<token>/`, named for the token; the units that serve and sync it are `paisans-<token>-*` and go with the units above | deleted after the units, so the daemon and the sync have stopped using them. The versions on this host go with it; every other site still holds them, which is what makes a site's removal not a loss of the configuration's history |
 | the grant record | `/var/lib/paisans/granted.<token>.json`, named for the token (see *`apply` and `host prepare` review what `paisans-stack.yaml` grants*) | deleted just before the registry entry it goes with: left behind, a later deployment with the same token would be reviewed against a baseline it never applied |
@@ -8707,7 +8707,10 @@ ssh user from `--ssh`, so it removes the same things, proven the same way:
 containers and networks by label, images by ID without `-f`, named volumes only
 with `--delete-data`, the files the manifest proves, the units, ufw rules and
 keys, `/srv/paisans/<token>` (empty directories, or everything with
-`--delete-data`), the deployment record and the registry entry.
+`--delete-data`), the deployment record and the registry entry. Without
+`--delete-data`, the entry stays, marked `"kept": "data"`, while data is
+kept, so the same command with `--delete-data` deletes it later; `host
+deployments` shows it as `data kept`.
 
 What needs the rest of `paisans-stack.yaml` is not done. Every `--id` run, dry run or not, warns
 `DNS records for this deployment, if any exist, were not modified`: there is no

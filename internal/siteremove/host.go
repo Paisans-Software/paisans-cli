@@ -61,6 +61,16 @@ type hostPlan struct {
 	// caddy is the gateway's Caddy kept for the host owner's sites, nil
 	// when it goes like everything else.
 	caddy *caddyPlan
+	// dataLeft is whether, without --delete-data, the root keeps files
+	// apply did not write.
+	dataLeft bool
+	// keepData is whether the registry entry stays, marked kept, because
+	// data is left: it is what names the deployment to a later run with
+	// --delete-data, by --id too. dataEntry is the entry it is marked in,
+	// and markData whether it is not marked yet.
+	keepData  bool
+	markData  bool
+	dataEntry registry.Entry
 	// store is what the host holds of the deployment's configuration store:
 	// the repository, the peers file, the sync log and the script directory.
 	store []storeRoot
@@ -441,11 +451,24 @@ func (p *Plan) buildHost() (*Stage, error) {
 	if err != nil {
 		return nil, err
 	}
+	if cp == nil && !p.DeleteData && (hp.dataLeft || len(hp.volumes) > 0) {
+		// The entry stays, marked kept: without it a later run with
+		// --delete-data could not name this deployment by --id, and the
+		// data would have no owner on the host.
+		hp.registry, hp.keepData, p.DataKept = false, true, true
+		hp.dataEntry, hp.markData = entry, entry.Kept != registry.KeptData
+		if !registered {
+			_, hp.dataEntry = registry.For(p.cfg, p.Site, now())
+		}
+	}
 
 	p.hostSteps(st)
 	st.Gate = "no container, network or unit of this deployment's on the host, no manifest, no ufw rule with its tag but the SSH allow, no registry entry"
-	if hp.caddy != nil {
+	switch {
+	case hp.caddy != nil:
 		st.Gate = "no container, network or unit of this deployment's on the host but its Caddy, whose Caddyfile is reduced to the host owner's sites, no ufw rule with its tag but the SSH allow, and its registry entry marked kept"
+	case hp.keepData:
+		st.Gate = "no container, network or unit of this deployment's on the host, no manifest, no ufw rule with its tag but the SSH allow, and its registry entry marked kept for its data"
 	}
 	st.run = p.runHost
 	// The run checks the host last and records that it did; a run with
@@ -486,6 +509,7 @@ func (p *Plan) planRoot(t apply.Transport, hp *hostPlan, inv *hostcheck.Inventor
 			rendered++
 		}
 		if hp.root.files > rendered {
+			hp.dataLeft = true
 			p.Kept = append(p.Kept, dataLeft(p.Site, d.Root()))
 		}
 	}
@@ -612,6 +636,9 @@ func (p *Plan) hostSteps(st *Stage) {
 	}
 	if cp != nil && cp.mark {
 		add("mark", "mark the registry entry kept", "deployment %s in %s, as %q: the kept Caddy still holds the gateway role and %s", d.ID, registry.Path, "kept: "+registry.KeptCaddy, d.Root())
+	}
+	if hp.markData {
+		add("mark", "mark the registry entry kept", "deployment %s in %s, as %q: it names the data left in %s and in its volumes, so that a later run with --delete-data finds it", d.ID, registry.Path, "kept: "+registry.KeptData, d.Root())
 	}
 }
 
@@ -789,7 +816,13 @@ func (p *Plan) runHost() error {
 	}
 	if cp != nil && cp.mark {
 		p.work("mark the registry entry kept")
-		if err := registry.Keep(t, d.ID, cp.entry); err != nil {
+		if err := registry.Keep(t, d.ID, cp.entry, registry.KeptCaddy); err != nil {
+			return err
+		}
+	}
+	if hp.markData {
+		p.work("mark the registry entry kept")
+		if err := registry.Keep(t, d.ID, hp.dataEntry, registry.KeptData); err != nil {
 			return err
 		}
 	}
@@ -872,7 +905,9 @@ func (p *Plan) verifyHost(t apply.Transport) error {
 	}
 	e, ok := reg.Deployments[d.ID]
 	switch {
-	case cp == nil && ok:
+	case cp == nil && p.host.keepData && (!ok || e.Kept != registry.KeptData):
+		left = append(left, "its registry entry, marked kept for its data")
+	case cp == nil && !p.host.keepData && ok:
 		left = append(left, "its registry entry")
 	case cp != nil && (!ok || e.Kept != registry.KeptCaddy):
 		left = append(left, "its registry entry, marked kept")
