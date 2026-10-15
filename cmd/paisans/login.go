@@ -21,21 +21,67 @@ import (
 // tests' resetLogins does, so the first command after it asks the UID again.
 var (
 	loginsMu sync.Mutex
-	logins   = map[string]*apply.Login{}
+	logins   = map[string]*destinationLogin{}
 )
 
+// destinationLogin is one destination's Login and the sites that reach it
+// as a user they leave out of their file. Several sites can share a
+// destination (two sites on one host, or one site from two loaded
+// configurations), and each of them is owed its own record of the user.
+type destinationLogin struct {
+	login *apply.Login
+	// asked is every (file, site) that registered a record, so each is
+	// recorded once however many transports it builds.
+	asked map[string]bool
+	// pending are the records registered before the first login, which
+	// that login makes.
+	pending []func()
+	// connected is set once the first login has worked: a record
+	// registered after it is made at once.
+	connected bool
+}
+
 // loginFor is the Login every transport to destination shares in this run.
-// connected is kept from the first call for a destination, which is the
-// call that made its Login.
-func loginFor(destination string, connected func()) *apply.Login {
+// record, when not nil, is what records the login user for the site and
+// file that key names: it is made once the destination's first login has
+// worked, or at once if that login already has, and once per key.
+func loginFor(destination, key string, record func()) *apply.Login {
 	loginsMu.Lock()
-	defer loginsMu.Unlock()
-	if l, ok := logins[destination]; ok {
-		return l
+	d, ok := logins[destination]
+	if !ok {
+		d = &destinationLogin{asked: map[string]bool{}}
+		d.login = apply.NewLogin(d.connect)
+		logins[destination] = d
 	}
-	l := apply.NewLogin(connected)
-	logins[destination] = l
-	return l
+	var now func()
+	if record != nil && !d.asked[key] {
+		d.asked[key] = true
+		if d.connected {
+			now = record
+		} else {
+			d.pending = append(d.pending, record)
+		}
+	}
+	loginsMu.Unlock()
+	// Outside the lock, as connect makes its records: a record takes
+	// recordMu and writes the file, and holds up no other transport.
+	if now != nil {
+		now()
+	}
+	return d.login
+}
+
+// connect is the Login's Connected: the first login to the destination has
+// worked, so each site that asked has its user recorded.
+func (d *destinationLogin) connect() {
+	loginsMu.Lock()
+	d.connected = true
+	pending := d.pending
+	d.pending = nil
+	loginsMu.Unlock()
+	for _, record := range pending {
+		record()
+	}
 }
 
 // loginReporter is the reporter a recorded login user is told through: the

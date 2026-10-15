@@ -1636,11 +1636,12 @@ func siteTransport(name string, site config.Site, override string) apply.SSHTran
 		user := site.SSHUser()
 		t = apply.SSHTransport{Site: name, User: user, Host: site.SSHHost(), Port: site.SSH.PortOrDefault(), PublicKeys: lines, DefaultUser: site.SSH.User == "" && user != ""}
 	}
-	var connected func()
+	var key string
+	var record func()
 	if path := site.SSHUserFile(); override == "" && name != "" && path != "" {
-		connected = recordSSHUser(path, name, site.SSHUser())
+		key, record = path+"\x00"+name, recordSSHUser(path, name, site.SSHUser())
 	}
-	t.Login = loginFor(t.Describe(), connected)
+	t.Login = loginFor(t.Describe(), key, record)
 	return t
 }
 

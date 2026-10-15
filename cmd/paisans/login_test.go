@@ -66,14 +66,22 @@ func TestTheFirstLoginRecordsTheDefaultUser(t *testing.T) {
 // A declared user is recorded already, and a destination typed with --ssh
 // is not the site's section, so neither writes anything.
 func TestOnlyTheDefaultUsersLoginIsRecorded(t *testing.T) {
-	resetLogins(t)
-	_, cfg := archFixture(t, twoDataSites)
-	if l := siteTransport("home-a", cfg.Sites["home-a"], "").Login; l.Connected != nil {
-		t.Error("a declared user's login records")
+	executing(t)
+	rec := loginNotes(t)
+	path, cfg := archFixture(t, twoDataSites)
+	before, _ := os.ReadFile(path)
+	siteTransport("home-a", cfg.Sites["home-a"], "").Login.Connected()
+	if after, _ := os.ReadFile(path); string(after) != string(before) {
+		t.Errorf("a declared user's login changed the file:\n%s", after)
 	}
-	_, cfg = archFixture(t, twoDataSitesWithoutUsers)
-	if l := siteTransport("home-b", cfg.Sites["home-b"], "paisans-f2a9@203.0.113.7").Login; l.Connected != nil {
-		t.Error("an --ssh login records")
+	path, cfg = archFixture(t, twoDataSitesWithoutUsers)
+	before, _ = os.ReadFile(path)
+	siteTransport("home-b", cfg.Sites["home-b"], "paisans-f2a9@203.0.113.7").Login.Connected()
+	if after, _ := os.ReadFile(path); string(after) != string(before) {
+		t.Errorf("an --ssh login changed the file:\n%s", after)
+	}
+	if len(rec.Events) != 0 {
+		t.Errorf("a login that records nothing made a note: %+v", rec.Events)
 	}
 }
 
@@ -101,6 +109,71 @@ func TestLoginsAtOnceEachRecordTheirUser(t *testing.T) {
 		if got := reread.Sites[name].SSH.User; got != "paisans-f2a9" {
 			t.Errorf("%s's ssh.user is %q", name, got)
 		}
+	}
+}
+
+// sharedDestination is twoDataSitesWithoutUsers with both sites at one
+// host, so both are reached as paisans-f2a9@home-a.local and share a Login.
+var sharedDestination = strings.Replace(twoDataSitesWithoutUsers, "host: home-b.local", "host: home-a.local", 1)
+
+// Two sites at one destination share its Login, and its first login records
+// the user of each, whether the second site's transport was built before
+// that login or after it.
+func TestSitesSharingADestinationEachRecordTheirUser(t *testing.T) {
+	for _, when := range []string{"before", "after"} {
+		t.Run(when, func(t *testing.T) {
+			executing(t)
+			loginNotes(t)
+			path, cfg := archFixture(t, sharedDestination)
+			a := siteTransport("home-a", cfg.Sites["home-a"], "")
+			if when == "before" {
+				siteTransport("home-b", cfg.Sites["home-b"], "")
+			}
+			a.Login.Connected()
+			if when == "after" {
+				if b := siteTransport("home-b", cfg.Sites["home-b"], ""); b.Login != a.Login {
+					t.Fatal("the two sites do not share a Login")
+				}
+			}
+			reread, err := config.Load(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{"home-a", "home-b"} {
+				if got := reread.Sites[name].SSH.User; got != "paisans-f2a9" {
+					t.Errorf("%s's ssh.user is %q, want paisans-f2a9", name, got)
+				}
+			}
+		})
+	}
+}
+
+// A site from a configuration loaded without a file has nowhere to record
+// its user: its login records nothing and is no error, and it does not stop
+// a file-loaded transport to the same destination from recording.
+func TestASiteWithoutAFileRecordsNothing(t *testing.T) {
+	executing(t)
+	rec := loginNotes(t)
+	path, cfg := archFixture(t, twoDataSitesWithoutUsers)
+	unfiled, err := config.LoadBytes([]byte(twoDataSitesWithoutUsers))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := siteTransport("home-a", unfiled.Sites["home-a"], "")
+	filed := siteTransport("home-a", cfg.Sites["home-a"], "")
+	if first.Login != filed.Login {
+		t.Fatal("the two transports do not share a Login")
+	}
+	first.Login.Connected()
+	reread, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reread.Sites["home-a"].SSH.User; got != "paisans-f2a9" {
+		t.Errorf("home-a's ssh.user is %q, want paisans-f2a9", got)
+	}
+	if n := len(rec.Events); n != 1 || rec.Index("note", "home-a: ssh.user paisans-f2a9 recorded in paisans-stack.yaml") != 0 {
+		t.Errorf("want one note, the file-loaded site's: %+v", rec.Events)
 	}
 }
 

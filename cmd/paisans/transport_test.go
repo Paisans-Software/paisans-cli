@@ -18,7 +18,7 @@ func resetLogins(t *testing.T) {
 	t.Helper()
 	loginsMu.Lock()
 	saved, savedRecord := logins, recordLogins
-	logins = map[string]*apply.Login{}
+	logins = map[string]*destinationLogin{}
 	recordLogins = false
 	loginsMu.Unlock()
 	t.Cleanup(func() {
