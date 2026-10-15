@@ -115,6 +115,9 @@ jobs:
           fi
           (cd dist && sha256sum -c SHA256SUMS)
 
+      # From here on a failure leaves the tag pushed, and a re-run releases
+      # nothing because the tag exists: delete the draft release if there is
+      # one, then the tag, then re-run the job.
       - name: Create and push the tag
         if: steps.decide.outputs.release == 'true'
         env:
@@ -192,9 +195,7 @@ jobs:
           echo "id=${id}" >> "$GITHUB_OUTPUT"
 
       # Uploaded by release id, because the API's lookup of a release by its
-      # tag does not return a draft. If this step or the publish fails, the
-      # tag exists and a re-run releases nothing: delete the draft release and
-      # the tag, then re-run the job.
+      # tag does not return a draft.
       - name: Attach the Linux binaries
         if: steps.decide.outputs.release == 'true'
         env:
