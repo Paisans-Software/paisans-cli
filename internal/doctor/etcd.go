@@ -85,6 +85,31 @@ type EtcdVersion struct {
 
 // Etcd reports quorum and the cluster version.
 func Etcd(cfg *config.Config, in Input) []Finding {
+	out := EtcdQuorum(cfg, in)
+	if in.Etcd.Site == "" {
+		return out
+	}
+	return append(out, EtcdVersionFindings(cfg, in)...)
+}
+
+// EtcdVersionFindings reports the cluster version the member that answered
+// read, judged with the members that are down.
+func EtcdVersionFindings(cfg *config.Config, in Input) []Finding {
+	if len(cfg.Etcd.Members) == 0 || in.Etcd.Site == "" {
+		return nil
+	}
+	list, _ := ParseEtcdHealth(in.Etcd.Health)
+	var down []string
+	for _, name := range cfg.Etcd.Members {
+		if h, found := healthFor(cfg, name, list); !found || !h.Health {
+			down = append(down, name)
+		}
+	}
+	return etcdVersion(in.Etcd, down)
+}
+
+// EtcdQuorum reports quorum, or that no member could be asked.
+func EtcdQuorum(cfg *config.Config, in Input) []Finding {
 	members := cfg.Etcd.Members
 	if len(members) == 0 {
 		return nil
@@ -128,7 +153,7 @@ func Etcd(cfg *config.Config, in Input) []Finding {
 			"Without quorum Patroni cannot renew its leader key, so the primary demotes itself and every write stops until quorum returns (Patroni v4.1.0, patroni/ha.py, _handle_dcs_error: \"demoting self because DCS is not accessible\").")
 		out = append(out, Finding{Section: SectionEtcd, Level: Fail, Line: strings.Replace(line, "quorum:", "no quorum:", 1), More: more})
 	}
-	return append(out, etcdVersion(p, down)...)
+	return out
 }
 
 // healthFor matches a member to its endpoint by the mesh address.
