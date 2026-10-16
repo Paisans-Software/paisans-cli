@@ -68,10 +68,12 @@ gathers and publishes through the same code. The commands are in
 against a host, so they are tested without one. `internal/grant` holds the
 version a host last applied in `config` of its record.
 
-Each command that changes a host first claims it in the host registry,
-`/var/lib/paisans/registry.json`, and its dry run only reads that registry;
-`cmd/paisans/claim.go` is the one place that happens, and `internal/registry`
-holds the decision and the locked shell command. Every name and path those
+Each command that changes a host first reads the admission record
+`/etc/paisans/admitted.<token>.json` as the deployment's user, and refuses a
+host that has none (`cmd/paisans/admitted.go` and `internal/admission`); its
+dry run reads the same record. The host registry,
+`/var/lib/paisans/registry.json`, is `host admit`'s: it claims the host there as
+root, and `internal/registry` holds the decision and the locked shell command. Every name and path those
 commands use comes from `internal/deployment`, derived from the `id` in
 `paisans-stack.yaml`. README.md "A deployment has an id, and a host knows every
 deployment on it" has the reasoning.
@@ -236,8 +238,8 @@ and nothing else (`appadmin.MagicLink`): it finds the account as apply does,
 by username then email, refuses one apply has not made or that is disabled,
 and prints the link once on `--execute`, emailed too when apply's are. It
 reads `apps.<app>.static_api_key` from the secrets file, so it takes
-`--secrets`. Its calls to Pocket ID need no root, and a run with `--execute`
-claims its host in the registry.
+`--secrets`. Its calls to Pocket ID need no root, and it reads its host's
+admission record first.
 See *`operator magic-link` gives a declared operator a fresh sign-in link* in
 `README.md`.
 
@@ -779,13 +781,13 @@ rendered again is written with a fresh entry, which clears the mark. Scoped
 and partial plans mark nothing and keep every entry outside what they write.
 `leftover_test.go` covers all three.
 
-**The gateway creates `/srv/caddy.d` and never touches what is in it.** The
-gateway's Caddy mounts the host's `render.HostSitesDir` read only, and the
+**The gateway creates `/srv/paisans/<token>/caddy.d` and never touches what is
+in it.** The gateway's Caddy mounts the deployment's `render.HostSitesDir` read only, and the
 Caddyfile imports `*.caddy` from it last, at the top level. `Plan.HostSites`
 is set on a gateway whose Caddy is changing, and `Execute` runs
 `HostSitesCommand` before the Caddy validation, the first container that
-mounts it: it creates the directory root's and 0755 when it is missing and
-leaves an existing one alone. Nothing under it is written or recorded.
+mounts it: it creates the directory, the deployment user's and 0755, when it is missing
+and leaves an existing one alone. Nothing under it is written or recorded.
 
 **Files are recorded as soon as they land.** The manifest is written right
 after the files, and again at the end, not only on success. A manifest written
@@ -996,11 +998,12 @@ undo:
   `paisans apply --site <monitor> --only <app> --execute` rather than a
   re-run. README.md's *Topology commands reseed the monitor* is the argument.
 * **Every host removal is selected by its proof, at the moment it runs.**
-  Docker objects by the label filter, files by `appremove.FilesCommand`
-  (hash checked on the host), units by the `paisans-<token>-` glob, ufw rules
-  by `hostprep.ParseAddedRules` read again before deleting, the registry by
-  `registry.RemoveCommand` under the claim's lock. A re-run therefore does
-  only what is left. `verifyHost`, the stage's gate, runs last.
+  Docker objects by the label filter, in the user's own daemon, files by
+  `appremove.FilesCommand` (hash checked on the host), the user's units by the
+  `paisans-<token>-` glob in its systemd directory. What is root's (the ufw
+  rules, the registry entry by `registry.RemoveCommand`, the user and the root
+  directory) is `host evict`'s, and the plan ends with its line. A re-run
+  therefore does only what is left. `verifyHost`, the stage's gate, runs last.
 * **The SSH allow is never removed, and not reported.** It is how the host
   is reached, so it is always kept: `buildHost` leaves it out of the plan and
   `runHost` skips it when it reads the rules again. The full removal,
@@ -1597,7 +1600,7 @@ installed, on a workstation or anywhere else.
 | `internal/configmerge` | placing an app's passthrough `config` keys into a file a template has already rendered, in that file's own syntax |
 | `internal/ui` | how every command reports to the operator: one line per step by default, and every detail with `--verbose` |
 | `internal/deployment` | a deployment's id and token, and every name, path and label derived from them |
-| `internal/registry` | a host's record of the deployments on it, and the locked claim every writing command makes |
+| `internal/registry` | a host's record of the deployments on it, root's, and the locked claim `host admit` makes |
 | `internal/deployrecord` | the gateway's record of the sites, apps and Pocket ID groups the deployment has deployed, which `apply` adds to and only a removal takes from |
 | `internal/mesh` | reading a host's routes, addresses and Docker networks and pools, the overlap test, and `init`'s subnet roll |
 | `internal/validate` | the rules, and nothing else |
@@ -1905,15 +1908,16 @@ before.
   reason a file configured application is the better case. A test asserts it
   against the fixture's placeholder credentials.
 * **Output is deterministic.** Sort before you iterate a map.
-* **host prepare removes only authorized keys it added**, as recorded in
-  `/etc/paisans/authorized_keys.<user>.paisans-<token>.owned`, and never rewrites a key's
-  comment to mark it. Removals run last, and a plan that would leave the user
+* **host prepare removes only authorized keys it or host admit added**, as
+  recorded in `/srv/paisans/<token>/.paisans/authorized_keys.owned`, written
+  under the deployment's own lock, and never rewrites a key's comment to mark
+  it. Removals run last, and a plan that would leave the user
   with none of the listed keys is refused. Tests in
   `internal/hostprep/hostprep_test.go` cover add, adopt, forget, remove, a
   restricted key and that refusal.
 * **No flag answers the review.** `apply`, `host prepare` and `site add` ask for
   `approve` at a terminal when what `paisans-stack.yaml` grants adds or changes
-  something, and refuse without one, before the claim. A flag that answered
+  something, and refuse without one, before the first change. A flag that answered
   it would end up in every script, and approving is the control. Tests in
   `cmd/paisans/review_test.go` and `converge_review_test.go` drive the prompt
   through a pipe.

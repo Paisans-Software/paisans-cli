@@ -164,10 +164,10 @@ var helpCommands = []helpCommand{
 	},
 	{
 		name:    "host prepare",
-		summary: "Take a blank host to the state apply assumes.",
+		summary: "Keep the deployment user's keys, configuration store and daemon settings on an admitted host.",
 		usage:   []string{"paisans host prepare --site <name> [--config " + config.FileName + "] [--ssh <destination>]\n                     [--execute]", "paisans host prepare --all [--config " + config.FileName + "] [--execute]"},
-		detail: "Take a blank host to the state apply assumes: Docker, the WireGuard tools, a firewall, and a watchdog on a data site. " +
-			"Installs only what is missing. Writes nothing without --execute. " +
+		detail: "Run as the deployment's user on a host whose owner has admitted the deployment: check the admission record against " + config.FileName + ", refusing on any difference, read the watchdog host admit set up, and keep the user's daemon.json, its configuration store with the units that serve it, and its authorized keys from ssh.keys. " +
+			"Installs nothing and writes nothing that is root's. Writes nothing without --execute. " +
 			"--all prepares every site, one at a time in the configuration's order, each with its own review, and stops at the first that fails.",
 	},
 	{

@@ -40,8 +40,9 @@ is how a site is taken out.
 **What could happen.** `paisans-stack.yaml` is one shared file. Bob adds his name to
 `home-a`'s `ssh.keys`, or replaces the key listed under `operators.alice`, and
 commits. Later Alice runs `paisans apply` with her own access, and `host
-prepare` installs Bob's key for the login user, which has `sudo` and Docker:
-root.
+prepare` installs Bob's key for the login user: a shell as the deployment's
+unprivileged user, with its rootless Docker, and nothing the host owner's
+machine has beyond it.
 
 **Protects.**
 
