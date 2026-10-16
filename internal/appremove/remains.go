@@ -3,6 +3,8 @@ package appremove
 import (
 	"fmt"
 	"strings"
+
+	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
 // Every line a removal leaves for the operator is written here. The text
@@ -59,8 +61,51 @@ func fileEdited(site, path string) string {
 	return fmt.Sprintf("%s: an edited file kept; delete it once nothing needs it, then run this again. It is %s, edited on the host since apply wrote it, so it stays with its manifest entry until it is deleted by hand", site, path)
 }
 
-func reloadLeft(site, server, command string) string {
-	return fmt.Sprintf("%s: reload %s, which runs on the host itself, so that it stops serving the removed site file: its configuration validated without it, and this command does not restart a web server it does not run. Reload it with: %s", site, server, command)
+// OwnerBlocks is, per app, what the host's owner still does once its
+// reference files are gone: remove from their web server the block they
+// copied from them, which nothing of the deployment's can touch.
+func OwnerBlocks(site string, entries []render.ManifestWebServer) []string {
+	var apps []string
+	byApp := map[string][]render.ManifestWebServer{}
+	for _, e := range entries {
+		if _, ok := byApp[e.App]; !ok {
+			apps = append(apps, e.App)
+		}
+		byApp[e.App] = append(byApp[e.App], e)
+	}
+	var out []string
+	for _, app := range apps {
+		es := byApp[app]
+		name, paths := "the app "+app, []string{}
+		for _, e := range es {
+			if e.Hostname != "" {
+				name = e.Hostname
+			}
+			paths = append(paths, e.Path)
+		}
+		gone := "the reference file apply wrote for it, " + paths[0] + ", is gone"
+		if len(paths) > 1 {
+			gone = "the reference files apply wrote for it, " + strings.Join(paths, ", ") + ", are gone"
+		}
+		out = append(out, fmt.Sprintf("%s: the host's owner removes the block for %s from their web server, or it keeps routing %s to an app that no longer runs. It is in %s; %s", site, name, name, OwnerServer(es), gone))
+	}
+	return out
+}
+
+// OwnerServer names the owner's web server the entries were written for:
+// the server and its configuration as host admit found them, or their web
+// server when admit found none it knows.
+func OwnerServer(entries []render.ManifestWebServer) string {
+	e := entries[0]
+	for _, o := range entries[1:] {
+		if o.Server != e.Server {
+			return "their web server"
+		}
+	}
+	if e.Config != "" {
+		return fmt.Sprintf("%s (%s)", e.Server, e.Config)
+	}
+	return e.Server
 }
 
 func secretsLeft(app, keys string) string {

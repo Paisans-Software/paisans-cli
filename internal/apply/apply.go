@@ -242,8 +242,8 @@ type Plan struct {
 	// and Arch the one this plan was made for, which Execute records.
 	recordedArch string
 	Arch         string
-	// recordedWebServer is what the manifest Build read recorded of the files
-	// in the operator's web server's include directory. Apply writes them
+	// recordedWebServer is what the manifest Build read recorded of the
+	// reference files for the host owner's web server. Apply writes them
 	// after every site is up, so every manifest write keeps them.
 	recordedWebServer []render.ManifestWebServer
 	// images is what each stack of this site renders, from its compose file.

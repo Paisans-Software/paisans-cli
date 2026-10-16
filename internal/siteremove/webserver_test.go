@@ -8,78 +8,67 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/siteremove"
-	"github.com/paisans-software/paisans-cli/internal/webserver/webservertest"
 )
 
-const siteFile = webDir + "paisans.d/paisans-f2a9-health.caddy"
+const referenceFile = "/srv/paisans/f2a9/web-server/health.caddy"
 
-// webOn gives the site's host a Caddy in a container whose include
-// directory holds the toolkit's site file, recorded in the manifest, and a
-// file of the host owner's beside it.
-func webOn(t *testing.T, w *world, site string) *webservertest.Server {
+// referenceOn records in the site's manifest the reference file apply wrote
+// in the deployment's root for the host owner's web server.
+func referenceOn(t *testing.T, w *world, site string) *host {
 	t.Helper()
 	h := w.hosts[site]
-	h.web = webservertest.New("import /etc/caddy/paisans.d/*\n")
 	content := "health.example.org {\n\treverse_proxy 127.0.0.1:8480\n}\n"
-	h.web.Files[siteFile] = content
-	h.web.Files[webDir+"paisans.d/blog.caddy"] = "blog.example.org {\n}\n"
+	h.files[referenceFile] = content
 	var m render.Manifest
 	if err := json.Unmarshal([]byte(h.files[dep.Manifest()]), &m); err != nil {
 		t.Fatal(err)
 	}
-	m.WebServer = []render.ManifestWebServer{{App: "health", Path: siteFile, SHA256: sum(content), Server: "caddy", Container: "caddy-1", Config: "/etc/caddy/Caddyfile"}}
+	m.WebServer = []render.ManifestWebServer{{App: "health", Hostname: "health.example.org", Path: referenceFile, SHA256: sum(content), Server: "caddy", Config: "/etc/caddy/Caddyfile"}}
 	data, _ := json.Marshal(m)
 	h.files[dep.Manifest()] = string(data)
-	return h.web
+	return h
 }
 
-// Removing a site, here an abandoned one with --force, removes the site
-// file apply wrote for the web server on its host, and only that file:
-// the directory and the host owner's file stay, and the server is
-// validated and reloaded inside its container, before the containers go.
-func TestSiteRemoveDeletesItsSiteFileOnly(t *testing.T) {
+// site remove deletes the reference file, its own, and says which block
+// the host's owner removes from their web server, which it never touches.
+func TestSiteRemoveNamesTheBlockTheOwnerRemoves(t *testing.T) {
 	w := setup(t)
-	web := webOn(t, w, "watch")
+	h := referenceOn(t, w, "watch")
 	p := forced(t, w, w.cfg, "watch", w.cfg.Sites["watch"].Destination(), siteremove.Options{})
-	if !hasStepIn(stageNamed(p, "clean the host"), "watch", "remove", siteFile) {
-		t.Fatalf("the plan does not remove the site file:\n%s", printed(p))
+	if !hasStepIn(stageNamed(p, "clean the host"), "watch", "remove", referenceFile) {
+		t.Fatalf("the plan does not remove the reference file:\n%s", printed(p))
 	}
 	if err := siteremove.Execute(p); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := web.Files[siteFile]; ok {
-		t.Error("the site file stayed")
+	ran := strings.Join(h.commands, "\n")
+	if !strings.Contains(ran, "rm -f -- '"+referenceFile+"'") {
+		t.Errorf("the reference file was not removed:\n%s", ran)
 	}
-	if _, ok := web.Files[webDir+"paisans.d/blog.caddy"]; !ok {
-		t.Error("the host owner's file went")
-	}
-	if !web.Ran("caddy validate") || !web.Ran("caddy reload") {
-		t.Errorf("asked %v", web.Asked)
-	}
-	for _, c := range web.Asked {
-		if strings.Contains(c, "rmdir") || strings.Contains(c, "rm -r") {
-			t.Errorf("removed the directory: %s", c)
+	for _, c := range h.commands {
+		for _, server := range []string{"caddy reload", "caddy validate", "nginx -", "apachectl", "docker exec", "systemctl reload", "/etc/caddy"} {
+			if strings.Contains(c, server) {
+				t.Errorf("ran against the web server: %s", c)
+			}
 		}
 	}
-	order := strings.Join(w.hosts["watch"].commands, "\n")
-	if i, j := strings.Index(order, "rm -f -- '"+siteFile), strings.Index(order, "docker stop"); i < 0 || (j >= 0 && j < i) {
-		t.Errorf("the site file did not go first:\n%s", order)
+	if !strings.Contains(strings.Join(p.Kept, "\n"), "the host's owner removes the block for health.example.org") {
+		t.Errorf("kept %q", p.Kept)
 	}
 }
 
 // A web server entry whose path is not clean is never read or deleted: the
 // manifest is the deployment user's own file. It is kept and reported, and
 // the clean entry beside it still goes.
-func TestAnUncleanSiteFileIsKept(t *testing.T) {
+func TestAnUncleanReferenceFileIsKept(t *testing.T) {
 	w := setup(t)
-	web := webOn(t, w, "watch")
-	h := w.hosts["watch"]
-	bad := webDir + "paisans.d/../../../etc/passwd"
+	h := referenceOn(t, w, "watch")
+	bad := "/srv/paisans/f2a9/web-server/../../../etc/passwd"
 	var m render.Manifest
 	if err := json.Unmarshal([]byte(h.files[dep.Manifest()]), &m); err != nil {
 		t.Fatal(err)
 	}
-	m.WebServer = append(m.WebServer, render.ManifestWebServer{App: "health", Path: bad, SHA256: sum("x"), Server: "caddy", Container: "caddy-1", Config: "/etc/caddy/Caddyfile"})
+	m.WebServer = append(m.WebServer, render.ManifestWebServer{App: "health", Path: bad, SHA256: sum("x"), Server: "caddy", Config: "/etc/caddy/Caddyfile"})
 	data, _ := json.Marshal(m)
 	h.files[dep.Manifest()] = string(data)
 	p := forced(t, w, w.cfg, "watch", w.cfg.Sites["watch"].Destination(), siteremove.Options{})
@@ -92,48 +81,22 @@ func TestAnUncleanSiteFileIsKept(t *testing.T) {
 	if err := siteremove.Execute(p); err != nil {
 		t.Fatal(err)
 	}
-	for _, c := range append(append([]string{}, h.commands...), web.Asked...) {
+	for _, c := range h.commands {
 		if strings.Contains(c, "../") {
 			t.Errorf("ran %s", c)
 		}
 	}
-	if _, ok := web.Files[siteFile]; ok {
-		t.Error("the clean site file stayed")
+	if _, ok := h.files[referenceFile]; ok {
+		t.Error("the clean reference file stayed")
 	}
 }
 
-// A removal the web server refuses puts the file back and stops the run,
-// with the manifest still proving the file this deployment's, so a run
-// again resumes.
-func TestSiteRemoveStopsWhenTheWebServerRefuses(t *testing.T) {
-	w := setup(t)
-	web := webOn(t, w, "watch")
-	web.Validate = "Error: adapting config using caddyfile: File to import not found: /etc/caddy/paisans.d/paisans-f2a9-health.caddy"
-	err := siteremove.Execute(forced(t, w, w.cfg, "watch", w.cfg.Sites["watch"].Destination(), siteremove.Options{}))
-	if err == nil || !strings.Contains(err.Error(), "File to import not found") {
-		t.Fatalf("err %v", err)
-	}
-	if _, ok := web.Files[siteFile]; !ok {
-		t.Error("the refused removal was not put back")
-	}
-	if _, ok := w.hosts["watch"].files[dep.Manifest()]; !ok {
-		t.Error("the manifest went")
-	}
-	web.Validate = ""
-	if err := siteremove.Execute(forced(t, w, w.cfg, "watch", w.cfg.Sites["watch"].Destination(), siteremove.Options{})); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := web.Files[siteFile]; ok {
-		t.Error("the run again did not remove it")
-	}
-}
-
-// --host-gone reaches nothing, and says the web server there still
-// includes the site files.
-func TestHostGoneSaysWhatTheWebServerStillIncludes(t *testing.T) {
+// --host-gone reaches nothing, and says the owner's web server may still
+// carry the blocks of this deployment's apps.
+func TestHostGoneSaysWhatTheOwnersWebServerStillCarries(t *testing.T) {
 	w := setup(t)
 	watch := w.cfg.Sites["watch"]
-	watch.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "127.0.0.1:8480", IncludeDir: config.IncludeDir{Path: "/opt/caddy/paisans.d"}}
+	watch.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "127.0.0.1:8480"}
 	w.cfg.Sites["watch"] = watch
 	// Its app was removed first, as app remove does, while the host was
 	// still there.
@@ -143,33 +106,7 @@ func TestHostGoneSaysWhatTheWebServerStillIncludes(t *testing.T) {
 		t.Fatal(err)
 	}
 	left := strings.Join(p.Remains(), "\n")
-	if !strings.Contains(left, "site files named paisans-f2a9-* in /opt/caddy/paisans.d, which apply wrote") {
-		t.Errorf("remains:\n%s", left)
-	}
-}
-
-// A web server on the host itself is validated after the removal and not
-// reloaded: what is left says the command that reloads it.
-func TestSiteRemoveLeavesTheReloadOfABareMetalServer(t *testing.T) {
-	w := setup(t)
-	web := webOn(t, w, "watch")
-	web.Units = []string{"caddy"}
-	h := w.hosts["watch"]
-	var m render.Manifest
-	if err := json.Unmarshal([]byte(h.files[dep.Manifest()]), &m); err != nil {
-		t.Fatal(err)
-	}
-	m.WebServer[0].Container = ""
-	data, _ := json.Marshal(m)
-	h.files[dep.Manifest()] = string(data)
-	p := forced(t, w, w.cfg, "watch", w.cfg.Sites["watch"].Destination(), siteremove.Options{})
-	if err := siteremove.Execute(p); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := web.Files[siteFile]; ok || !web.Ran("caddy validate") || web.Ran("caddy reload") || web.Ran("systemctl reload") {
-		t.Errorf("files %v, asked %v", web.Files, web.Asked)
-	}
-	if left := strings.Join(p.Remains(), "\n"); !strings.Contains(left, "sudo systemctl reload caddy") {
+	if !strings.Contains(left, "the host's owner removes the blocks apply's reference files in /srv/paisans/f2a9/web-server held") {
 		t.Errorf("remains:\n%s", left)
 	}
 }

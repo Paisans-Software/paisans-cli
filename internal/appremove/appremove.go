@@ -129,8 +129,8 @@ type SitePlan struct {
 	Networks   []string
 	Volumes    []string
 	Files      []File
-	// WebServer are the app's files in the include directory of the
-	// operator's web server, as the manifest records them.
+	// WebServer are the app's reference files for the host owner's web
+	// server, in the deployment's root, as the manifest records them.
 	WebServer []render.ManifestWebServer
 	Dir       Dir
 	// DataEntries are the stack directory's top level entries that hold no

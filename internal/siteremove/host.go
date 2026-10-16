@@ -41,8 +41,8 @@ type hostPlan struct {
 	// run, sorted.
 	images []string
 	files  []appremove.File
-	// webServer are the files the manifest records in the include directory
-	// of the operator's web server.
+	// webServer are the reference files for the host owner's web server
+	// the manifest records.
 	webServer []render.ManifestWebServer
 	manifest  bool
 	// home is the deployment's user's home, and userUnits the units host
@@ -300,7 +300,7 @@ func (p *Plan) buildHost() (*Stage, error) {
 		// The manifest is the user's own file: an unclean path is never
 		// read or deleted.
 		if !cleanAbs(e.Path) {
-			p.Kept = append(p.Kept, fmt.Sprintf("%s: %s: not a clean path, so site remove leaves it; the host's owner removes it from %s's include directory if it is this deployment's", p.Site, e.Path, e.Server))
+			p.Kept = append(p.Kept, fmt.Sprintf("%s: %s: not a clean path, so site remove leaves it; the host's owner removes it if it is this deployment's", p.Site, e.Path))
 			continue
 		}
 		hp.webServer = append(hp.webServer, e)
@@ -507,7 +507,7 @@ func (p *Plan) checkLogin(t apply.Transport) error {
 	return nil
 }
 
-// cleanAbs is cleanRel for an absolute path: a web server's include file.
+// cleanAbs is cleanRel for an absolute path: a reference file.
 func cleanAbs(p string) bool {
 	rel, ok := strings.CutPrefix(p, "/")
 	return ok && cleanRel(rel)
@@ -625,7 +625,7 @@ func (p *Plan) hostSteps(st *Stage) {
 		add("reduce", "reduce Caddy to the host's sites", "Caddy %s, kept because it serves the host owner's sites (%s): its Caddyfile reduced to the global options, the snippets they may import and `import %s/*.caddy`, staged where the container sees it, validated in it and loaded with caddy reload, then written over %s in place; a failure puts the original back and removes nothing else. Its compose file, Caddyfile, caddy.env, data and config stay, kept with --delete-data too", cp.container.Name, strings.Join(cp.sites, ", "), render.HostSitesMount, p.caddyfile())
 	}
 	for _, f := range hp.webServer {
-		add("remove", "remove site files", "%s, from the include directory of %s, which is then validated, and reloaded when it runs in a container; the directory and every other file in it stay", f.Path, f.Server)
+		add("remove", "remove reference files", "%s; the host's owner removes the block from %s", f.Path, appremove.OwnerServer([]render.ManifestWebServer{f}))
 	}
 	if len(hp.containers) > 0 || len(hp.networks) > 0 {
 		add("remove", "remove containers and networks", "every container and network with this deployment's label: %s", strings.Join(append(append([]string{}, hp.containers...), hp.networks...), ", "))
@@ -694,23 +694,17 @@ func (p *Plan) runHost() error {
 			return err
 		}
 	}
-	// The operator's web server next, so one in a container stops serving
-	// the app before the app goes; one on the host itself is left for the
-	// operator to reload. A removal it refuses puts the file back and stops here,
-	// with the manifest that proves the file this deployment's still there.
+	// The reference files next: apply wrote them in the deployment's root
+	// for the host's owner, who copied them into their web server. That
+	// server is theirs, so nothing here touches it; what is left names the
+	// block they remove.
 	for _, f := range hp.webServer {
-		p.work("remove site files")
-		switch o := webserver.Remove(webserver.Host{Plain: t}, f); o.Kind {
-		case webserver.Removed, webserver.Gone:
-			if o.Reload.Kind == webserver.OperatorReloads {
-				p.Kept = append(p.Kept, reloadLeft(p.Site, f.Server, o.Reload.Command))
-			}
-		case webserver.Edited:
-			p.Kept = append(p.Kept, editedFileKept(p.Site, f.Path))
-		default:
-			return fmt.Errorf("%s: removing %s: %s. The file is back, and the web server runs its previous configuration", p.Site, f.Path, o.Why)
+		p.work("remove reference files")
+		if err := run("removing "+f.Path, "rm -f -- "+quote(f.Path)); err != nil {
+			return err
 		}
 	}
+	p.Kept = append(p.Kept, appremove.OwnerBlocks(p.Site, hp.webServer)...)
 	if hp.dockerPresent {
 		p.work("remove containers and networks")
 		if err := run("removing this deployment's containers and networks", p.containersCommand()); err != nil {
@@ -894,8 +888,8 @@ func (p *Plan) verifyHost(t apply.Transport) error {
 func (p *Plan) hostGoneLeft() string {
 	d := p.dep()
 	web := ""
-	if in := p.cfg.Sites[p.Site].WebServer; in != nil && in.IncludeDir.Path != "" {
-		web = fmt.Sprintf(" Its web server may still include site files named %s-* in %s, which apply wrote: delete them and reload it, or it keeps routing this deployment's hostnames to apps that no longer run.", d.Prefix(), in.IncludeDir.Path)
+	if p.cfg.Sites[p.Site].WebServerManagedBy() == config.ManagedByExternal {
+		web = fmt.Sprintf(" Its web server is its owner's: the host's owner removes the blocks apply's reference files in %s held, or it keeps routing this deployment's hostnames to apps that no longer run.", webserver.ReferenceDir(d))
 	}
 	user := p.cfg.Sites[p.Site].SSHUser()
 	return fmt.Sprintf("%s: host not reached (--host-gone). If it ever comes back it still holds the deployment's user %s with its containers, volumes and units, %s, and its admission record; its owner removes all of it with %s. Nothing it runs can reach the cluster: no remaining site has it as a WireGuard peer, and its etcd member is gone",

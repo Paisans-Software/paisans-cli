@@ -23,10 +23,6 @@ func editedFileKept(site, path string) string {
 	return fmt.Sprintf("%s: an edited file kept; delete it by hand once nothing needs it. It is /%s, edited on the host since apply wrote it", site, path)
 }
 
-func reloadLeft(site, server, command string) string {
-	return fmt.Sprintf("%s: reload %s, which runs on the host itself, so that it stops serving the removed site file: its configuration validated without it, and this command does not restart a web server it does not run. Reload it with: %s", site, server, command)
-}
-
 func rootEditedKept(site, root string) string {
 	return fmt.Sprintf("%s: the deployment directory kept, because a file in it was edited on the host. It is %s, with everything in it", site, root)
 }

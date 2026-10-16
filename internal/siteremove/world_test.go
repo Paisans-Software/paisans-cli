@@ -34,7 +34,6 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/siteremove"
 	"github.com/paisans-software/paisans-cli/internal/ui"
-	"github.com/paisans-software/paisans-cli/internal/webserver/webservertest"
 )
 
 const (
@@ -166,26 +165,10 @@ type host struct {
 	// loginName another unprivileged user than the deployment's.
 	loginRoot bool
 	loginName string
-	// web is the operator's web server, when the host runs one: the
-	// commands writing or removing a file under webDir, those run in its
-	// container and its own on the host go to it.
-	web *webservertest.Server
 }
 
 // userUnits is the systemd directory of the world's login user, ubuntu.
 const userUnits = "/home/ubuntu/.config/systemd/user"
-
-// webDir is where the operator's web server's include directory is.
-const webDir = "/opt/caddy/"
-
-func (h *host) webCommand(command string) bool {
-	if h.web == nil {
-		return false
-	}
-	return strings.HasPrefix(command, "if [ -e '"+webDir) || strings.HasPrefix(command, "rm -f -- '"+webDir) ||
-		strings.Contains(command, "mkdir -p '"+webDir) || strings.HasPrefix(command, "docker exec 'caddy-1' sh -c") ||
-		strings.HasPrefix(command, "caddy validate") || strings.HasPrefix(command, "systemctl is-active")
-}
 
 func (h *host) Describe() string { return h.name }
 
@@ -396,9 +379,6 @@ func (h *host) Run(command string) (string, error) {
 	case "allowed-ips", "persistent-keepalive", "listen-port":
 		out, _ := meshfake.ShowRunning(field, h.runningWG())
 		return out, nil
-	}
-	if h.webCommand(command) {
-		return h.web.Plain().Run(command)
 	}
 	// the deployment's lock, which the keys take: it leaves its lock file
 	// in the state directory, as on a host, and the command after it is

@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -30,38 +29,19 @@ func fakeWebServerCheck(t *testing.T, failing map[string][]webserver.Result) *[]
 			{Name: webserver.CheckCertificate, OK: true, Detail: "https://" + target.Hostname + "/ answered 200"},
 		}
 	}
-	// Writing the site files reaches the monitor's host; here there is
-	// nothing to write. fakeWebServerFiles says otherwise.
+	// Writing the reference files reaches the monitor's host; here there
+	// is nothing to write. fakeWebServerFiles says otherwise.
 	savedFiles := convergeWebServerFiles
 	convergeWebServerFiles = func(ui.Reporter, *config.Config, string, webServerScope) webServerFiles {
 		return webServerFiles{}
 	}
 	t.Cleanup(func() { convergeWebServerCheck, convergeWebServerFiles = saved, savedFiles })
-	fakeWebServer(t, caddyAutomatic)
 	return &checked
 }
 
 // caddyAutomatic is a Caddy in a container that obtains its own
-// certificates, as Detect finds it.
+// certificates, as admit records it.
 var caddyAutomatic = webserver.WebServer{Server: webserver.ServerCaddy, Container: "caddy-1", Config: "/opt/caddy/Caddyfile", Certs: webserver.CertsAutomatic}
-
-// webServerAsks is each time fakeWebServer was asked: the app, and whether
-// it was read as the ssh user (sudo=false) or through sudo.
-type webServerAsks []string
-
-// fakeWebServer replaces reading the web server in front of an app's host:
-// it finds ws.
-func fakeWebServer(t *testing.T, ws webserver.WebServer) *webServerAsks {
-	t.Helper()
-	var asked webServerAsks
-	saved := findWebServer
-	findWebServer = func(h webserver.Host, target webserver.Target) webserver.WebServer {
-		asked = append(asked, fmt.Sprintf("%s sudo=%v", target.App, h.Sudo != nil))
-		return ws
-	}
-	t.Cleanup(func() { findWebServer = saved })
-	return &asked
-}
 
 // externalWatch makes the fixture's monitor, watch, a site with managed_by:
 // external, which serves health through the operator's own web server.
@@ -86,6 +66,15 @@ var certificateFails = map[string][]webserver.Result{"health": {
 	{Name: webserver.CheckDNS, OK: true, Detail: "health.example.org resolves to 203.0.113.20"},
 	{Name: webserver.CheckCertificate, Detail: "the certificate is not valid for health.example.org: it names watch.example.org"},
 	{Name: webserver.CheckSignIn, OK: true, Detail: "https://health.example.org/login/oidc redirects"},
+	{Name: webserver.CheckUpstream, OK: true, Detail: "203.0.113.20:8480 refused"},
+}}
+
+// tlsInternal is the health app's checks against a Caddy with no
+// certificate for its hostname: each HTTPS request fails the same way.
+var tlsInternal = map[string][]webserver.Result{"health": {
+	{Name: webserver.CheckDNS, OK: true, Detail: "health.example.org resolves to 203.0.113.20"},
+	{Name: webserver.CheckCertificate, Detail: `https://health.example.org/healthz: Get "https://health.example.org/healthz": remote error: tls: internal error`},
+	{Name: webserver.CheckSignIn, Detail: `https://health.example.org/login/oidc: Get "https://health.example.org/login/oidc": remote error: tls: internal error`},
 	{Name: webserver.CheckUpstream, OK: true, Detail: "203.0.113.20:8480 refused"},
 }}
 
@@ -339,30 +328,17 @@ func TestConvergeDryRunListsTheWebServerCheck(t *testing.T) {
 	}
 }
 
-// A failed check reads the web server in front of the app, with the run's
-// sudo, and names it in the warning, so the
-// advice says what to add the configuration to. A passing one reads nothing.
+// A failed check names the web server admit recorded, which the
+// reference step read, and reaches no host for it.
 func TestConvergeFailedWebServerNamesTheWebServer(t *testing.T) {
 	fakeConverge(t, nil)
 	externalWatch(t)
-	fakeWebServerCheck(t, nil)
-	asked := fakeWebServer(t, caddyAutomatic)
-	recordConverge(t)
-	if err := converge(t, "--execute"); err != nil {
-		t.Fatal(err)
-	}
-	if len(*asked) != 0 {
-		t.Errorf("a passing check read the web server: %v", *asked)
-	}
-
 	fakeWebServerCheck(t, certificateFails)
-	asked = fakeWebServer(t, caddyAutomatic)
-	rec := recordConverge(t)
-	// The read is the ssh user's, with no sudo.
-	converge(t, "--execute")
-	if !slices.Equal(*asked, webServerAsks{"health sudo=false"}) {
-		t.Errorf("asked %v", *asked)
+	convergeWebServerFiles = func(ui.Reporter, *config.Config, string, webServerScope) webServerFiles {
+		return webServerFiles{apps: map[string]*siteFile{"health": {ws: caddyAutomatic, path: "/srv/paisans/f2a9/web-server/health.caddy"}}}
 	}
+	rec := recordConverge(t)
+	converge(t, "--execute")
 	i := rec.Index("warned", "health")
 	if i < 0 || !strings.Contains(rec.Events[i+1].Text, caddyAutomatic.Summary()) {
 		t.Errorf("the warning does not name the web server:\n%s", rec.Lines())

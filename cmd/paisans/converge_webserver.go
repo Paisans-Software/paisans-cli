@@ -52,18 +52,18 @@ func scopedApps(cfg *config.Config, scope webServerScope) []string {
 }
 
 // webServerStep is the web server step for the sites scope covers: each
-// external app's site file written (convergeWebServerFiles), then the app
-// checked (convergeWebServer). apply without --site runs it once, after
+// external app's reference file written (convergeWebServerFiles), then the
+// app checked (convergeWebServer). apply without --site runs it once, after
 // every other step; apply --site runs it for its own site. It returns what
 // the run ends on when something is left: broken when what apply needed on
 // a host could not be done, otherwise the operator's web server.
 func webServerStep(r ui.Reporter, cfg *config.Config, configPath string, scope webServerScope) (end *ui.Problem, broken bool) {
 	files := convergeWebServerFiles(r, cfg, configPath, scope)
 	checked, failed := convergeWebServer(r, cfg, files, scope)
-	// An app whose site file step warned is named once, by the app.
+	// An app whose reference file step warned is named once, by the app.
 	warned := slices.Clone(checked)
 	for _, title := range files.warned {
-		if name := strings.TrimPrefix(title, "site file for "); !slices.Contains(warned, name) {
+		if name := strings.TrimPrefix(title, "reference file for "); !slices.Contains(warned, name) {
 			warned = append(warned, name)
 		}
 	}
@@ -71,7 +71,7 @@ func webServerStep(r ui.Reporter, cfg *config.Config, configPath string, scope w
 		return webServerBroken(failed), true
 	}
 	if len(warned) > 0 {
-		return webServerFailed(checked, warned), false
+		return webServerFailed(checked, warned, files), false
 	}
 	return nil, false
 }
@@ -94,21 +94,18 @@ func webServerEnd(end *ui.Problem, broken bool, other error) error {
 	return &ui.Warning{Problem: *end}
 }
 
-// convergeWebServer checks each app served through a web server the operator
-// runs, as `paisans web-server check --app <app>` does, a line per app in a
-// section of its own. A failed check is a warning on the app's line, with the
-// failing checks, each error said once, and one set of instructions. Where
-// the app's site file step warned or failed, the check only restates it, so
-// it is not run and the app has no line of its own but with --verbose,
-// where it gives no instructions of its own; the app counts as failing its
-// check either way. Where the site file is in
-// place and unchanged, the app is checked once and, when that fails, the
-// server's configuration is validated, and a server in a container
-// reloaded and the app checked again, which takes in an edit of the
-// operator's. Otherwise a check that may still come is waited on, as
-// webServerResults says. Only the apps on the sites scope
-// covers are checked. It returns the apps that failed their check, and the
-// steps that failed outright.
+// convergeWebServer checks each app served through the web server the host's
+// owner runs, as `paisans web-server check --app <app>` does, a line per app
+// in a section of its own. A failed check is a warning on the app's line,
+// with the failing checks, each error said once, and what the owner does:
+// install what web-server show prints, or, when this run rewrote the app's
+// reference file, replace their copy with it. Where the app's reference
+// file step failed, the check only restates it, so it is not run and the
+// app has no line of its own but with --verbose; the app counts as failing
+// its check either way. A check that may still come is waited on, as
+// webServerResults says. Only the apps on the sites scope covers are
+// checked. It returns the apps that failed their check, and the steps that
+// failed outright.
 func convergeWebServer(r ui.Reporter, cfg *config.Config, files webServerFiles, scope webServerScope) (warned, failed []string) {
 	apps := scopedApps(cfg, scope)
 	if len(apps) == 0 {
@@ -131,20 +128,12 @@ func convergeWebServer(r ui.Reporter, cfg *config.Config, files webServerFiles, 
 			failed = append(failed, app)
 			continue
 		}
-		// A site file in place and unchanged is checked once, then
-		// reloaded and waited on; one whose step warned fails until the
-		// operator acts, so is not waited on.
-		again := sf != nil && sf.until == "" && sf.path != "" && !sf.reloaded
 		var results []webserver.Result
 		var waited time.Duration
-		if again || (sf != nil && sf.until != "") {
+		if sf != nil && sf.until != "" {
 			results = webServerResultsOnce(s, target)
 		} else {
 			results, waited = webServerResults(s, target, sf)
-		}
-		var advice string
-		if !passed(results) && again {
-			advice, waited = reloadAgain(s, sf, target, &results)
 		}
 		for _, res := range results {
 			mark := "✓"
@@ -162,20 +151,14 @@ func convergeWebServer(r ui.Reporter, cfg *config.Config, files webServerFiles, 
 			continue
 		}
 		var ws webserver.WebServer
-		if sf != nil && sf.ws.Server != "" {
+		if sf != nil {
 			ws = sf.ws
-		} else if sf == nil || sf.until == "" {
-			// What serves it is read only now, as the ssh user, so a
-			// passing app costs no ssh. The line
-			// spins while it is read.
-			s.Progress("read the web server on " + target.Site)
-			ws = findWebServer(scope.serverHost(cfg, target.Site), target)
 		}
 		s.End(ui.Warned, target.Hostname)
 		warned = append(warned, app)
 		checks := failedChecks(results, ws)
 		if sf != nil && sf.until != "" {
-			// The site file step said what to do; this follows from it.
+			// The reference file step said what to do; this follows from it.
 			if len(checks) == 1 {
 				r.Explain(fmt.Sprintf("%s, expected until %s, see above.", checks[0], sf.until))
 			} else {
@@ -183,40 +166,19 @@ func convergeWebServer(r ui.Reporter, cfg *config.Config, files webServerFiles, 
 			}
 			continue
 		}
-		if advice == "" {
-			advice = fmt.Sprintf("Add what paisans web-server show --app %s prints to the web server in front of it, then run paisans web-server check --app %s.", app, app)
-			if sf != nil && sf.path != "" {
-				advice = fmt.Sprintf("Its site file, %s, is in place, and %s runs it. Read %s's log for why it does not serve %s, then run paisans web-server check --app %s.", sf.path, ws.Server, ws.Server, target.Hostname, app)
-			}
-		}
-		r.Explain(strings.Join(append(checks, ws.Summary(), advice), "\n"))
+		r.Explain(strings.Join(append(checks, ws.Summary(), ownerAdvice(app, sf)), "\n"))
 	}
 	return warned, failed
 }
 
-// reloadAgain validates the configuration of the server in front of an app
-// whose site file is in place and unchanged, but whose check failed: the
-// server may run a configuration older than an edit of the operator's. A
-// server in a container is reloaded and the app checked once more, waiting
-// as after any reload; one on the host itself is the operator's to reload.
-// It returns the advice for a check that still fails, empty for the usual,
-// and how long the check waited.
-func reloadAgain(s ui.Step, sf *siteFile, target webserver.Target, results *[]webserver.Result) (string, time.Duration) {
-	s.Progress("validate " + string(sf.ws.Server))
-	reload, err := webserver.ValidateAndReload(sf.h, sf.ws)
-	switch {
-	case err != nil:
-		return fmt.Sprintf("%s\nNothing was reloaded. Fix the configuration, then run paisans apply --execute again.", err), 0
-	case reload.Kind == webserver.OperatorReloads:
-		return fmt.Sprintf("%s's configuration is valid, and %s runs on the host itself, so apply leaves its reload to you. If it has not been reloaded since its site file was written, reload it:\n\n    %s\n\nthen run paisans web-server check --app %s.", sf.ws.Server, sf.ws.Server, reload.Command, target.App), 0
-	case reload.Kind == webserver.Restarted:
-		s.Detail("%s's reload failed, so its container was restarted: %s", sf.ws.Server, reload.Why)
-	default:
-		s.Detail("%s validated and reloaded", sf.ws.Server)
+// ownerAdvice is what the host's owner does for an app whose check failed:
+// install what web-server show prints, or replace their copy when this run
+// rewrote the reference file.
+func ownerAdvice(app string, sf *siteFile) string {
+	if sf != nil && sf.changed {
+		return fmt.Sprintf("apply rewrote %s, so the host's owner replaces their copy with what paisans web-server show --app %s prints, then run paisans web-server check --app %s.", sf.path, app, app)
 	}
-	var waited time.Duration
-	*results, waited = webServerResults(s, target, sf)
-	return "", waited
+	return fmt.Sprintf("The host's owner installs what paisans web-server show --app %s prints in their web server, then run paisans web-server check --app %s.", app, app)
 }
 
 // passed reports whether every check passed.
@@ -268,7 +230,7 @@ func failedChecks(results []webserver.Result, ws webserver.WebServer) []string {
 }
 
 // webServerWait is how long a web server check waits, at most, for what a
-// just reloaded web server may not serve yet; webServerFirstPause is its
+// web server obtaining a certificate may not serve yet; webServerFirstPause is its
 // first pause between two checks, doubled after each.
 const (
 	webServerWait       = time.Minute
@@ -335,20 +297,25 @@ func waitingFor(results []webserver.Result, sf *siteFile) string {
 }
 
 // webServerFailed is how a run whose every step ran ends when what is left
-// is the operator's web server: apps that failed their check, or a site
+// is the owner's web server: apps that failed their check, or a reference
 // file step that warned. It is not complete, since a visitor cannot reach
-// the app as they should, or will not once the server restarts. Alone it
-// is the run's warning; beside a failure it is part of it.
-func webServerFailed(checked, warned []string) *ui.Problem {
+// the app as they should. It names, per app, what the host's owner does.
+// Alone it is the run's warning; beside a failure it is part of it.
+func webServerFailed(checked, warned []string, files webServerFiles) *ui.Problem {
+	var advice []string
+	for _, app := range warned {
+		advice = append(advice, ownerAdvice(app, files.apps[app]))
+	}
+	explain := "Every step ran. " + strings.Join(advice, "\n")
 	if len(warned) == len(checked) {
 		return &ui.Problem{
 			Hint:    fmt.Sprintf("Deployment complete, but %s failed its web server check: %s", plural(len(checked), "app"), andList(checked)),
-			Explain: "Every step ran. Fix each app's web server as noted above, then run paisans web-server check --app <app> to check it again.",
+			Explain: explain,
 		}
 	}
 	return &ui.Problem{
 		Hint:    "Deployment complete, but the web server needs you: " + andList(warned),
-		Explain: "Every step ran. Do what is noted above for each, then run paisans web-server check --app <app> to check each app again.",
+		Explain: explain,
 	}
 }
 

@@ -7,12 +7,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/webserver"
 )
@@ -71,14 +70,49 @@ func TestWebServerCheckFailsOnAFailedItem(t *testing.T) {
 	}
 }
 
-// The monitor's host is read as the ssh user, never through sudo.
-func TestWebServerHostReadsAsTheSSHUser(t *testing.T) {
-	h := webServerHost(fixture(t), "watch")
-	if plain, ok := h.Plain.(apply.SSHTransport); !ok || plain.Sudo {
-		t.Fatalf("plain %#v", h.Plain)
+// recordedServer serves the monitor's admission record, with the web
+// server ws admit detected, to web-server show and check, through a host
+// that records every command it is sent.
+func recordedServer(t *testing.T, path string, ws *admission.WebServer) *manifestHost {
+	t.Helper()
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if h.Sudo != nil {
-		t.Errorf("read through sudo: %#v", h.Sudo)
+	req, err := admission.Build(cfg, "watch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := admission.NewRecord(req, req.Grants, "", time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC))
+	rec.WebServer = ws
+	b, err := admission.EncodeRecord(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &manifestHost{files: map[string]string{admittedPath(cfg): string(b)}}
+	saved := webServerRecordHost
+	webServerRecordHost = func(*config.Config, string) admission.Reader { return h }
+	t.Cleanup(func() { webServerRecordHost = saved })
+	return h
+}
+
+// The monitor's web server is what admit recorded: show runs nothing on
+// the host to find it, no docker ps, no ss.
+func TestWebServerHostReadsAsTheSSHUser(t *testing.T) {
+	path := externalFixture(t)
+	h := recordedServer(t, path, &admission.WebServer{Server: "caddy", Process: "caddy", Config: "/etc/caddy/Caddyfile", Main: "/etc/caddy/Caddyfile", Certs: "automatic"})
+	captureStdout(t, func() {
+		if err := runWebServer([]string{"show", "--app", "health", "--config", path}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	for _, c := range h.ran {
+		if strings.Contains(c, "docker ps") || strings.HasPrefix(c, "ss ") || strings.Contains(c, " ss -") {
+			t.Errorf("ran %s", c)
+		}
+	}
+	if len(h.ran) != 0 {
+		t.Errorf("ran %v", h.ran)
 	}
 }
 
@@ -101,49 +135,20 @@ func externalFixture(t *testing.T) string {
 	return path
 }
 
-// show prints the snippet for the web server it finds on the monitor's
-// host, under the line naming it.
+// show prints the snippet for the web server the admission record names,
+// under the line naming it.
 func TestWebServerShowPrintsTheDetectedServer(t *testing.T) {
-	asked := fakeWebServer(t, caddyAutomatic)
+	path := externalFixture(t)
+	recorded := &admission.WebServer{Server: "nginx", Process: "nginx", Config: "/etc/nginx/nginx.conf", Main: "/etc/nginx/nginx.conf", Certs: "files", CertFile: "/etc/letsencrypt/live/health.example.org/fullchain.pem", KeyFile: "/etc/letsencrypt/live/health.example.org/privkey.pem"}
+	recordedServer(t, path, recorded)
 	var err error
 	out := captureStdout(t, func() {
-		err = runWebServer([]string{"show", "--app", "health", "--config", externalFixture(t)})
+		err = runWebServer([]string{"show", "--app", "health", "--config", path})
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(*asked, webServerAsks{"health sudo=false"}) {
-		t.Errorf("asked %v", *asked)
-	}
-	if !strings.Contains(out, caddyAutomatic.Summary()) || strings.Contains(out, "proxy_pass") || strings.Contains(out, "tls /etc/ssl") {
-		t.Errorf("sheet:\n%s", out)
-	}
-}
-
-// acmeDNSCaddy is a Caddy that obtains its own certificates with a global
-// acme_dns, which reaches the toolkit's site too.
-var acmeDNSCaddy = webserver.WebServer{
-	Server: webserver.ServerCaddy, Container: "caddy-1", Config: "/opt/caddy/Caddyfile", Main: "/etc/caddy/Caddyfile",
-	Mounts: []webserver.Mount{{Source: "/opt/caddy", Destination: "/etc/caddy"}},
-	Certs:  webserver.CertsAutomatic, DNS: webserver.DNSACME, ACMEDNS: []string{"acme_dns cloudflare {$CF_API_TOKEN}"},
-}
-
-// show warns, outside the sheet, that a global acme_dns reaches the site,
-// and still prints the site with its own issuer.
-func TestWebServerShowWarnsOfAGlobalACMEDNS(t *testing.T) {
-	fakeWebServer(t, acmeDNSCaddy)
-	rec := withRecorder(t, false)
-	var err error
-	out := captureStdout(t, func() {
-		err = runWebServer([]string{"show", "--app", "health", "--config", externalFixture(t)})
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if i := rec.Index("warn", "acme_dns"); i < 0 || !strings.Contains(rec.Events[i].Extra, "cert_issuer acme {") {
-		t.Errorf("no warning:\n%s", rec.Lines())
-	}
-	if !strings.Contains(out, "issuer acme") || strings.Contains(out, "cert_issuer") {
+	if !strings.Contains(out, webserver.FromRecord(recorded).Summary()) || !strings.Contains(out, "proxy_pass") || strings.Contains(out, "reverse_proxy") {
 		t.Errorf("sheet:\n%s", out)
 	}
 }
