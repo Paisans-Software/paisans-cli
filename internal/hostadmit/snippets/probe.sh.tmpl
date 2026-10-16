@@ -96,6 +96,10 @@ for d in{{ range .Dirs }} {{ q . }}{{ end }}; do
 done
 # The kernel and the network.
 if [ -d /sys/module/br_netfilter ]; then say br_netfilter loaded; else say br_netfilter absent; fi
+# The module the host's iptables uses, and whether it is loaded or built
+# in, judged as dockerd-rootless-setuptool.sh judges it before it installs.
+case $(iptables --version 2>/dev/null) in *legacy*) m=ip_tables ;; *) m=nf_tables ;; esac
+if grep -q "$m" /proc/modules 2>/dev/null || grep -q "$m" "/lib/modules/$(uname -r)/modules.builtin" 2>/dev/null; then say iptables-module "$m loaded"; else say iptables-module "$m absent"; fi
 ip -d -o link show type bridge 2>/dev/null | awk -F': ' '{ sub(/@.*/, "", $2); print "bridge " $2 }'
 say forward-policy "$(iptables -S FORWARD 2>/dev/null | awk '$1 == "-P" { print $3; exit }')"
 say port-start "$(sysctl -n net.ipv4.ip_unprivileged_port_start)"

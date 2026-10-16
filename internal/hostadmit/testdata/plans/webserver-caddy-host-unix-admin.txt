@@ -69,28 +69,88 @@ step 8: start paisans-f2a9's manager
   run:
     $ systemctl start user@<uid>.service
 
-step 9: create /srv/paisans
+step 9: load br_netfilter
+  daemon: load br_netfilter now, which the user's daemon needs with its userland proxy off
+  run:
+    $ modprobe br_netfilter
+
+step 10: load br_netfilter at boot
+  daemon: list br_netfilter and nf_tables in /etc/modules-load.d/paisans.conf, shared by every admitted deployment
+  write /etc/modules-load.d/paisans.conf mode 0644:
+    | # Written by paisans host admit. The rootless Docker daemons of admitted
+    | # deployments need br_netfilter to start with their userland proxy off,
+    | # and the module their iptables uses for the setup tool to install them.
+    | br_netfilter
+    | nf_tables
+
+step 11: write paisans-f2a9's daemon.json
+  daemon: userland proxy off, address pools clear of the mesh; written as paisans-f2a9
+  provisional: run once the user exists
+  run:
+    $ runuser -u paisans-f2a9 -- env -i HOME='/home/paisans-f2a9' PATH=/usr/bin:/bin:/usr/sbin:/sbin XDG_RUNTIME_DIR=/run/user/<uid> DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/<uid>/bus DOCKER_HOST=unix:///run/user/<uid>/docker.sock sh -c 'umask 077 && mkdir -p "$HOME/.config/docker" && cat > "$HOME/.config/docker/.daemon.json.paisans-tmp" && mv -f "$HOME/.config/docker/.daemon.json.paisans-tmp" "$HOME/.config/docker/daemon.json"'
+  stdin:
+    | {
+    |   "userland-proxy": false,
+    |   "default-address-pools": [
+    |     {
+    |       "base": "172.17.0.0/16",
+    |       "size": 24
+    |     },
+    |     {
+    |       "base": "172.18.0.0/16",
+    |       "size": 24
+    |     },
+    |     {
+    |       "base": "172.19.0.0/16",
+    |       "size": 24
+    |     },
+    |     {
+    |       "base": "172.20.0.0/14",
+    |       "size": 24
+    |     },
+    |     {
+    |       "base": "172.24.0.0/14",
+    |       "size": 24
+    |     },
+    |     {
+    |       "base": "172.28.0.0/14",
+    |       "size": 24
+    |     },
+    |     {
+    |       "base": "192.168.0.0/16",
+    |       "size": 24
+    |     }
+    |   ]
+    | }
+
+step 12: install paisans-f2a9's rootless Docker
+  daemon: dockerd-rootless-setuptool.sh install --force, as paisans-f2a9, which starts the daemon reading its daemon.json; --force because a system daemon may run beside it
+  provisional: run once the user exists
+  run:
+    $ runuser -u paisans-f2a9 -- env -i HOME='/home/paisans-f2a9' PATH=/usr/bin:/bin:/usr/sbin:/sbin XDG_RUNTIME_DIR=/run/user/<uid> DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/<uid>/bus DOCKER_HOST=unix:///run/user/<uid>/docker.sock sh -c 'dockerd-rootless-setuptool.sh install --force'
+
+step 13: create /srv/paisans
   directory: every deployment's directory lives in it, root's, mode 755
   run:
     $ install -d -m 755 -o root -g root /srv/paisans
 
-step 10: create /srv/paisans/f2a9
+step 14: create /srv/paisans/f2a9
   directory: the deployment's own, paisans-f2a9's, mode 750
   provisional: run once the user exists
   run:
     $ install -d -m 750 -o paisans-f2a9 -g paisans-f2a9 /srv/paisans/f2a9
 
-step 11: create /etc/wireguard
+step 15: create /etc/wireguard
   wireguard: root's, mode 700, so the deployment's user cannot plant a conf the helper has not checked
   run:
     $ install -d -m 700 -o root -g root /etc/wireguard
 
-step 12: create /usr/local/libexec/paisans
+step 16: create /usr/local/libexec/paisans
   wireguard: where each deployment's helper lives, root's, mode 755
   run:
     $ install -d -m 755 -o root -g root /usr/local/libexec/paisans
 
-step 13: install the WireGuard helper
+step 17: install the WireGuard helper
   wireguard: the one command paisans-f2a9 may run as root: it checks each conf before wg-quick sees it, and adds the mesh's mark
   write /usr/local/libexec/paisans/wg-psns-f2a9 mode 0755:
     | #!/bin/sh
@@ -435,7 +495,7 @@ step 13: install the WireGuard helper
     | 	;;
     | esac
 
-step 14: install the helper's sudoers line
+step 18: install the helper's sudoers line
   wireguard: /etc/sudoers.d/paisans-f2a9, mode 440, checked by visudo under a name sudo skips before it is moved into place
   write /etc/sudoers.d/paisans-f2a9.new mode 0440:
     | paisans-f2a9 ALL=(root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-f2a9
@@ -444,6 +504,8 @@ step 14: install the helper's sudoers line
 
 present: package: nftables installed
 present: apparmor: rootlesskit's profile is loaded
+present: br_netfilter: nf_tables, which the host's iptables uses, is loaded
+present: daemon: /home (ext2/ext3) has 42.9 GB free
 present: mesh: nothing on this host overlaps 10.44.0.0/24
 present: forwarding: not needed, this site has no endpoint
 warning: web server: its admin API did not answer on localhost:2019

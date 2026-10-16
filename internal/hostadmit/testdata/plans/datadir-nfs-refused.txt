@@ -1,0 +1,1 @@
+refused: daemon: Docker's data would live on /mnt/nas, which is on nfs, and Docker's overlay storage cannot keep its data there. Give --data-dir a directory on a local filesystem (ext4, xfs or btrfs) and admit again. Nothing was changed

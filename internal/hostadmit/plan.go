@@ -145,6 +145,12 @@ type planner struct {
 	// record is the admission record the record part writes; parts before
 	// it fill what they decide (data_dir, bridge_netfilter, web_server).
 	record admission.Record
+	// prev caches previous(): this deployment's record as the host holds it.
+	prev struct {
+		read bool
+		rec  *admission.Record
+		err  error
+	}
 }
 
 // step adds s to the plan, present what was found in place, warn a warning.
@@ -187,7 +193,9 @@ var parts = []part{
 	// 7. linger
 	{"linger", planLinger},
 	// 8. bridge netfilter
+	{"bridge netfilter", planBrNetfilter},
 	// 9. daemon
+	{"daemon", planDaemon},
 	{"deployment directory", planDeploymentDir}, // 10
 	{"mesh subnet", planMeshSubnet},             // 10a
 	{"wireguard", planWireGuard},                // 11
