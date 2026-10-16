@@ -19,10 +19,12 @@ reach only over SSH is the one step here that can lock you out.
 
 ## What you need
 
-* **Ubuntu 22.04 or 24.04, amd64 or arm64.** Admit refuses any other system,
-  naming the ones it supports. If your machine will hold the deployment's
-  database (a data site), it must have the same architecture as the
-  deployment's other data sites; the Ubuntu release may differ.
+* **Ubuntu 22.04 or 24.04, amd64 or arm64.** Admit refuses any other
+  release, naming the ones it supports; the binary exists for amd64 and
+  arm64 only. If your machine will hold the deployment's database (a data
+  site), it must have the same architecture as the deployment's other data
+  sites, which the operators' `site add` checks; the Ubuntu release may
+  differ.
 * **ufw installed.** Admit adds the deployment's rules to ufw and never
   installs it. If ufw is installed and not active, see step 4.
 * **Docker Engine 29.5 or later from Docker's repository, or no Docker.**
@@ -55,19 +57,23 @@ Each release attaches two static Linux binaries, `paisans-linux-amd64` and
 binary needs nothing else: not Go, not Docker, not Homebrew.
 
 ```sh
-uname -m              # x86_64 means amd64, aarch64 means arm64
-v=0.3.0               # the release your operators name
-arch=amd64
+v=0.3.0                                # the release your operators name
+arch=$(dpkg --print-architecture)      # amd64 or arm64
+echo "$arch"
 base="https://github.com/Paisans-Software/paisans-cli/releases/download/v$v"
-curl -fLO "$base/paisans-linux-$arch"
-curl -fLO "$base/SHA256SUMS"
-sha256sum --check --ignore-missing SHA256SUMS
-sudo install -m 755 "paisans-linux-$arch" /usr/local/bin/paisans
-paisans version
+curl -fLO "$base/paisans-linux-$arch" &&
+  curl -fLO "$base/SHA256SUMS" &&
+  sha256sum --check --ignore-missing SHA256SUMS &&
+  sudo install -m 755 "paisans-linux-$arch" /usr/local/bin/paisans &&
+  paisans version
 ```
 
-`sha256sum` prints `paisans-linux-amd64: OK`. Anything else, delete the file
-and download it again. The check proves the file arrived whole and is the one
+`dpkg --print-architecture` names your machine's architecture the way the
+release names its binaries, so the block downloads the one for your machine;
+`echo` shows which. Each step after it runs only when the one before
+succeeded, so nothing is installed unless the download is whole and
+`sha256sum` prints `paisans-linux-<arch>: OK`. Anything else, delete the
+file and download it again. The check proves the file arrived whole and is the one
 the release lists. Both files come from the same release page, so it proves
 nothing about who published the release.
 
@@ -114,7 +120,7 @@ three are yours to decide by your machine, not by the site.
 
 | Flag | What it lets the deployment do | What it costs you |
 |------|--------------------------------|-------------------|
-| `--watchdog` | Patroni, the database, uses the machine's watchdog to fence itself: if it hangs while it leads, the machine reboots before another site's promotion leaves two primaries taking writes. A data site needs it. | **It can reboot your machine.** The device is given to the deployment's user. One deployment per machine can hold it; a second is refused, and so is a machine whose systemd holds the watchdog itself (`RuntimeWatchdogSec`). Where there is no hardware watchdog, admit loads `softdog`. |
+| `--watchdog` | Patroni, the database, uses the machine's watchdog to fence itself: if it hangs while it leads, the machine reboots before another site's promotion leaves two primaries taking writes. A data site needs it. | **It can reboot your machine.** The device is given to the deployment's user. One deployment per machine can hold it; a second is refused, and so is a machine whose systemd (`RuntimeWatchdogSec`) or a watchdog daemon holds the watchdog itself. Where there is no hardware watchdog, admit loads `softdog`. |
 | `--public-ports` | The deployment binds ports 80 and 443, which a gateway or a monitor running Paisans' own Caddy serves on. | **Every local user can then bind ports 80 to 1023**: admit lowers `net.ipv4.ip_unprivileged_port_start` to 80 for the whole machine, and opens 80/tcp, 443/tcp and 443/udp in ufw. Before granting it, admit checks that nothing else answers on 80 or 443 (a listener, a container of your own Docker, or a forwarding rule), and refuses naming what does. |
 | `--data-dir <path>` | The deployment's Docker data (images, containers, volumes: the database on a data site, the stored objects on a storage site) goes under `<path>/paisans-<token>` instead of the user's home. | Nothing, if the disk has room. `<path>` must exist, be a directory and not a link, and be root's with no group or other write bit. With or without the flag, admit refuses to put the data on a filesystem Docker's storage cannot use (NFS, CIFS and SMB, FUSE, overlay, FAT, exFAT and NTFS), and the plan states the free space where it goes, warning below 20 GB for a data or storage site and 5 GB otherwise. |
 | `--bridge-netfilter` | Admit loads `br_netfilter`, which the deployment's Docker needs, on a machine with bridges of its own (libvirt's, LXD's, yours). | **Traffic across your own bridges then passes the firewall's FORWARD chain**, which it skipped before, and whose policy is often to drop. The refusal names each bridge and quotes the policy. Without the flag admit stops on such a machine; where the module is loaded already, or the only bridges are Docker's, it needs no flag. |
@@ -296,8 +302,8 @@ packets, which the kernel sends, are filtered the same way; with
 
 What it cannot do, and what you do about it:
 
-* **Bind your admin services to `127.0.0.1` or to your LAN address.** A
-  service of yours bound to every interface (`0.0.0.0` or `::`) is also
+* **Bind your admin services to `127.0.0.1` (or `::1`) or to your LAN
+  address.** A service of yours bound to every interface (`0.0.0.0` or `::`) is also
   bound to the machine's mesh address, which the deployment must reach and
   so is not dropped: the deployment, and its other sites over the mesh, can
   reach it there.
@@ -308,14 +314,44 @@ What it cannot do, and what you do about it:
 * **Routes the table does not read.** An on-link public IPv4 subnet, or a
   VPN of yours that routes non-private IPv4 ranges, is reachable.
 
-If the deployment needs something on your network, its operators ask you.
-Letting it through is a rule of yours, outside Paisans. An accept in a table
-of your own does not override the deployment's drop, so the rule goes into
-`inet paisans_<token>`'s `output` chain, ahead of its drops. The table is
-loaded again from its file at boot, whenever nftables is reloaded, and by
-admit whenever the loaded table differs from its file, each time without
-your rule: keep the rule in a unit of your own ordered after
-`paisans-<token>-egress.service`, and run it again after each admit.
+**Paisans has no supported way to open the egress table to one of your
+services**, and none that lasts. An accept in a table of your own does not
+override the deployment's drop. A rule added to `inet paisans_<token>`
+itself is removed whenever the table is loaded again from its file: at boot,
+on every reload or restart of nftables, and by any admit whose plan shows
+*reload the egress table*, which an added rule alone makes it do. Never
+weaken the table, or stop its unit, to make room for one service: it is what
+keeps the deployment off your whole machine and network.
+
+If the deployment needs something of yours, its operators ask you, and what
+works is one of these:
+
+* **Serve it on the mesh address.** The table accepts the mesh subnet, so a
+  service of yours bound to this machine's mesh address (`ip -4 addr show
+  psns-<token>`) is reachable by the deployment, and by every one of its
+  sites and its operators over the mesh, and by nothing else outside your
+  machine. That address exists only while the mesh is up, so the service
+  starts after `wg-quick@psns-<token>.service`.
+* **Serve it at a public address on another machine.** The table drops only
+  private, shared and link-local ranges, this machine's own addresses and
+  your on-link IPv6 prefixes, so a public address elsewhere is reachable.
+
+`--mesh-lan` is not one of them: it lets the mesh's own WireGuard packets
+reach your LAN, so the deployment's sites can dial each other there, and
+lets nothing else of the deployment's reach it.
+
+## Your own sites on a gateway
+
+When your machine is the deployment's gateway (`--public-ports`), the
+deployment's Caddy holds 80 and 443, so a site of your own on this machine,
+a blog for one, goes through that Caddy too. Its site block goes in
+`/srv/paisans/<token>/caddy.d`, a file per site ending `.caddy`, written as
+the deployment's user and never as root, since the user owns the
+directory: `sudo -u paisans-<token> tee
+/srv/paisans/<token>/caddy.d/blog.caddy`. Paisans never writes, changes or
+removes a file there, but **evict deletes the directory with the rest of
+`/srv/paisans/<token>`** (see *Evicting*). The README has the details,
+under *The gateway host's own sites live in the deployment's `caddy.d`*.
 
 ## Behind your own web server
 
@@ -383,6 +419,13 @@ admit one, so evict finds the Docker data. On a data site the plan warns that
 a Patroni that outlasts Docker's stop timeout is killed with the watchdog
 armed, which reboots the machine: have the operators stop the deployment
 first, or expect a reboot.
+
+**On a gateway, copy your own site blocks out of
+`/srv/paisans/<token>/caddy.d` before you evict.** Evict stops the
+deployment's Caddy, which serves them, with the rest of the deployment, and
+deletes `/srv/paisans/<token>` with everything in it, those files included;
+its plan does not warn of them. The operators' `site remove` keeps that
+Caddy serving them and says so, but evict does not.
 
 The operators' `paisans site remove` does what the deployment's user can, and
 ends by printing the `host evict` line for you.
