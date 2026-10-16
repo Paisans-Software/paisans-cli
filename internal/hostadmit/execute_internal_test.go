@@ -615,7 +615,7 @@ func (l *listing) List(rows []ui.ListRow, _ []ui.ListWarning) ui.List {
 	return l
 }
 
-func (l *listing) Start(i int, title string) ui.Step {
+func (l *listing) Start(i int, title string, _ ...string) ui.Step {
 	l.started = append(l.started, fmt.Sprintf("%d %s", i, title))
 	return &listingStep{l: l, at: len(l.started) - 1}
 }
@@ -704,5 +704,48 @@ func TestAPlanShownToRunIsLabelledOffATerminal(t *testing.T) {
 	(&Plan{Steps: plan.Steps, Warnings: plan.Warnings}).Show(r)
 	if strings.Contains(b.String(), ui.PlanLabel) {
 		t.Errorf("a plan not run is labelled:\n%s", b.String())
+	}
+}
+
+// Under --verbose off a terminal, a step run after the re-plan shows the
+// rebuilt step's sentence, its values filled, as it did before the plan
+// was a list. A step found done shows its title filled, deliberately, and
+// no sentence, since it did not run.
+func TestAVerboseRunAfterTheReplanShowsTheRebuiltSentence(t *testing.T) {
+	h := newTestHost()
+	h.onRun = func(command string) {
+		if strings.HasPrefix(command, "useradd ") {
+			h.set("passwd", "paisans-f2a9:x:1001:1001::/home/paisans-f2a9:/bin/bash")
+			h.set("group", "paisans-f2a9")
+			h.set("wg", "made")
+		}
+	}
+	withParts(t, []part{
+		userPart,
+		{"egress", func(p *planner) error {
+			p.step(Step{Title: "load the egress table", Describe: "egress for " + uidOf(p), Command: "nft uid " + uidOf(p), Provisional: !p.f.User.Exists})
+			if p.f.raw["wg"] == nil {
+				p.step(Step{Title: "create /etc/wireguard for " + uidOf(p), Describe: "wg dir", Command: "install -d /etc/wireguard"})
+			}
+			return nil
+		}},
+	})
+	in := testInput(t)
+	plan, err := Build(h, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
+	r := ui.NewPlain(&b, true)
+	plan.ShowToRun(r)
+	if err := Execute(h, in, plan, r); err != nil {
+		t.Fatal(err)
+	}
+	run := b.String()[strings.Index(b.String(), ui.RunLabel+":"):]
+	want := "  ok   create /etc/wireguard for 1001: done already\n" +
+		"  ok   load the egress table\n" +
+		"      egress for 1001\n"
+	if !strings.HasSuffix(run, want) {
+		t.Errorf("the run ends:\n%s\nwant it to end:\n%s", run, want)
 	}
 }

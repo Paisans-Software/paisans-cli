@@ -756,7 +756,7 @@ func RunSteps(t apply.Transport, plan *Plan, r ui.Reporter) error {
 	p := progressOf(plan, r)
 	defer p.close()
 	for i, s := range plan.Steps {
-		if err := run(t, s, p.start(i, s.Title, s.Describe)); err != nil {
+		if err := run(t, s, p.start(i, s.Title, ui.Visible(s.Describe))); err != nil {
 			return err
 		}
 	}

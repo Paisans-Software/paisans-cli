@@ -558,7 +558,7 @@ func Execute(t apply.Transport, in Input, approved *Plan, r ui.Reporter) error {
 				return err
 			}
 			for _, j := range done {
-				p.start(rows[i+j], fill.Replace(steps[i+j].Title), "").End(ui.OK, "done already")
+				p.start(rows[i+j], fill.Replace(steps[i+j].Title)).End(ui.OK, "done already")
 			}
 			next := rows[:i:i]
 			for _, j := range at {
@@ -566,7 +566,7 @@ func Execute(t apply.Transport, in Input, approved *Plan, r ui.Reporter) error {
 			}
 			steps, rows = append(steps[:i:i], rebuilt.plan.Steps...), next
 		}
-		if err := run(t, steps[i], p.start(rows[i], steps[i].Title, steps[i].Describe)); err != nil {
+		if err := run(t, steps[i], p.start(rows[i], steps[i].Title, ui.Visible(steps[i].Describe))); err != nil {
 			return err
 		}
 	}
@@ -582,15 +582,17 @@ type progress struct {
 
 func progressOf(p *Plan, r ui.Reporter) progress { return progress{r: r, list: p.list} }
 
-// start opens the step that runs in row, titled title, its sentence
-// describe a detail of its own when it has no row, whose details are the
-// plan's.
-func (p progress) start(row int, title, describe string) ui.Step {
+// start opens the step that runs in row, titled title, with details, the
+// step's sentence for a step that runs, and none for a step found done,
+// which did not run.
+func (p progress) start(row int, title string, details ...string) ui.Step {
 	if p.list != nil {
-		return p.list.Start(row, ui.Visible(title))
+		return p.list.Start(row, ui.Visible(title), details...)
 	}
 	st := p.r.Step(ui.Visible(title))
-	st.Detail("%s", ui.Visible(describe))
+	for _, d := range details {
+		st.Detail("%s", d)
+	}
 	return st
 }
 
