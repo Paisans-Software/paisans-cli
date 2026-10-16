@@ -56,8 +56,7 @@ deployment on it* in `README.md`).
 
 With `--execute`, `apply`, `apply --site`, `host prepare` and `site add` first show what
 `paisans-stack.yaml` grants on each host they reach that the host has not had (a key
-that may log in, an image that runs, the directory the operator's web server
-reads), and, when anything is added or changed, ask for the word `approve` at
+that may log in, an image that runs), and, when anything is added or changed, ask for the word `approve` at
 a terminal before the first change. Without a terminal they refuse, before any host
 changes; no flag answers the question. A run that adds or changes nothing asks
 nothing. Their dry runs show the same review and ask nothing (see *`apply` and
@@ -285,7 +284,7 @@ paisans secrets prune --without-record --execute   # no gateway to read; asks fo
   trust `paisans-stack.yaml` alone when no gateway's deployment record can be read;
   with `--execute` it asks for the word `prune` at a terminal).
 * **Hosts:** reads each gateway's deployment record, as the ssh user, since it
-  holds only names and is world readable. Changes none.
+  holds only names and is the deployment user's own file. Changes none.
 * **`--execute`:** removes them and writes the local secrets file, encrypted to
   the same recipients.
 
@@ -328,7 +327,7 @@ paisans secrets rotate --all --restart --execute           # the full list again
   are not rotated again. A recorded path the deployment no longer has a
   rotation of is refused, naming it and `--all --restart`.
 * **Hosts:** every site, since each must answer before anything changes, and
-  each is claimed. The secrets file is read and written on this machine only.
+  each is reached. The secrets file is read and written on this machine only.
 * **`--execute`:** rotates each secret in four gated stages, and stops at the
   first gate that fails. Asks for `sign out` at a terminal first when a rotation
   in the run signs members out, and is refused without one. Refuses before
@@ -337,7 +336,7 @@ paisans secrets rotate --all --restart --execute           # the full list again
   file that lacks a secret `init` generates, naming `paisans init`.
 * **A pasted secret** (the DNS token or an SMTP password) **that every host
   using it runs:** `--execute` asks for its new value at a terminal, with echo
-  off and before any host is claimed, naming where to replace it (the DNS
+  off and before any host is reached, naming where to replace it (the DNS
   provider, or the mail provider). The dry run lists it as asked for at
   `--execute`. An empty answer stops the run with nothing changed, naming
   `secrets set` and `--replaced`; an answer equal to the value the hosts run is
@@ -589,8 +588,9 @@ paisans host prepare --all --execute          # every site, one at a time
   a Docker older than engine 25.0.0 or compose 2.24.0, whatever its source,
   and a port a site claims that something else holds.
 * **Admission:** it reads the host's admission record and refuses on any
-  difference from the configuration (the site, user, ports, forwarding, roles
-  and grants), naming the request line the owner needs: `paisans host request
+  difference from the configuration (the site, user, SSH and WireGuard ports, mesh
+  subnet, forwarding, the grants the roles need and, for `managed_by: external`,
+  the web server), naming the request line the owner needs: `paisans host request
   --site <name> > <name>.admit`, then `sudo paisans host admit --request
   <name>.admit`.
 * **Docker:** left as it is. Installing it, or naming the packages in its way,
@@ -951,7 +951,7 @@ starts, restarts or recreates what changed.
   etcd member's apply also reads the other members, to compare the live
   membership. It reads every gateway's deployment record,
   `/srv/paisans/<token>/.paisans/deployed.json`, as the ssh user, since the
-  record holds only names and is world readable. A gateway's apply ends by
+  record holds only names and is the deployment user's own file. A gateway's apply ends by
   asking for `/.well-known/paisans/<token>` through the community's public
   address, on 443 and on 80 (expecting the redirect), and fails the step
   with "443 on <site> answers, but not as this deployment" when anything
@@ -965,7 +965,7 @@ starts, restarts or recreates what changed.
   against what the host last recorded, under
   `review what paisans-stack.yaml grants`; `--only` narrows the images to its
   stacks. With `--execute` it is asked for, as `approve` at a terminal, before
-  the claim, when anything is added or changed; the images are recorded once
+  the first change, when anything is added or changed; the images are recorded once
   the apply has succeeded.
 * **Configuration store:** gathered and checked before the review as the whole
   apply does, with `--secrets` refused when it names a file other than the
@@ -1113,7 +1113,7 @@ paisans site remove --force --ssh admin@203.0.113.9 --id f2a9 --execute --delete
   configuration store too, `/srv/paisans/<token>/.paisans/config/` and the
   user's units that serve it; the other sites still hold every version. What
   is root's stays: the mesh interface and its helper, the ufw rules, the
-  user, its home, the deployment's directory, the admission record and the
+  user, its home, `/srv/paisans`, the admission record and the
   registry entry. The plan ends with the line the host's owner runs for them,
   `sudo paisans host evict --deployment <id> --user <user> --execute`, and
   `--host-gone` prints the same line for a host it never reached. A gateway's

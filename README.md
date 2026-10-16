@@ -940,9 +940,9 @@ owner removes from their web server. `validate` refuses
 the owner's configuration, so there is no directory to name.
 
 `listen` belongs to `managed_by: external` alone, which cannot work without it
-(`web-server-listen-managed-by`). Docker publishes a port with its own iptables rules,
-in front of ufw, so a `listen` anything else can reach would expose the app
-around the web server whatever the firewall says. The web server runs on the
+(`web-server-listen-managed-by`). The mesh address is admitted whole by the firewall's
+`allow in on psns-<token>`, so a `listen` anything else can reach would expose
+the app around the web server. The web server runs on the
 same host, so only an IPv4 loopback address or the site's own mesh address is
 accepted, with a port written without leading zeros, the rule `host request`
 holds the site's request to (`web-server-listen-not-this-host`); loopback is the one
@@ -1681,7 +1681,7 @@ remove`, `prune`, `operator magic-link`, `app remove`, `oidc client create`,
 `secrets rotate` and `failover test`, reads the record of each site it will
 write to, as the deployment's user, before its first change. A host with no
 record has not admitted the deployment, or has evicted it, and a record that
-does not cover the site (its user, ports, forwarding, roles or grants) is
+does not cover the site (its user, SSH and WireGuard ports, mesh subnet, forwarding, the grants its roles need and, for `managed_by: external`, the web server) is
 refused with the request line the owner needs. Nothing on any host has
 changed when it refuses.
 
@@ -2418,9 +2418,9 @@ does not lose its secrets. `/srv/paisans/<token>/.paisans/deployed.json` on ever
 gateway lists the names of the sites, apps and Pocket ID groups deployed, and
 nothing else. It is the deployment user's, in that user's mode 700 state
 directory, written under the deployment's one lock there and left 0644 by a
-rename. Reading it is done as the deployment's user, so `apply --site` of a
-site that is not a gateway, which reads every gateway's record for its
-warnings, asks for no gateway's sudo password. A gateway's `apply` adds every name the yaml declares and never
+rename. It is the deployment user's own file, read as that user, so `apply --site` of a
+site that is not a gateway reads every gateway's record for its
+warnings without more than its ssh login. A gateway's `apply` adds every name the yaml declares and never
 takes one out, so an `apply` of a yaml mid-edit cannot shrink it. Only the
 removal commands take names out, on every gateway: `site remove` in its stage
 2, `site remove --force` for a site no longer declared, and `app remove` for
@@ -2639,7 +2639,7 @@ holds, the file has nothing new to hand out, so `--execute` asks for the new
 value at a terminal: it names the path and where it is replaced (the
 `acme.provider` for the DNS token, the mail provider for an SMTP password),
 the operator replaces it there, and pastes the new one with echo off. Every
-pasted secret in the run is asked for before any host is claimed, with the
+pasted secret in the run is asked for before any host is reached, with the
 `sign out` confirmation, so a run never stops part way to wait on a person
 (Founder decision). The answer goes under `rotations` as the next value,
 exactly as a generated secret's does, and stage 4 makes it the file's own, so
@@ -2697,7 +2697,7 @@ homeserver's and the gate's included, is minted by `oidc client create
 
 **A rotation that signs members out asks first.** When the plan includes one,
 `--execute` asks the operator to type `sign out` at a terminal before any host
-is claimed, and without a terminal it is refused. After the eviction of a
+is reached, and without a terminal it is refused. After the eviction of a
 gateway, which saw every session cookie, signing members out is the point
 (Founder decision).
 
@@ -5094,9 +5094,9 @@ runs each of them as a command of its own (see *`paisans apply` with no
 Everything that depends on the operating system lives in a **host profile**,
 which `host admit` and `host prepare` choose alike,
 chosen from `/etc/os-release` by `ID` and `VERSION_ID` together. A profile
-answers four questions (how to install the packages, how to enable services,
-how to load a kernel module now and at boot, how to drive the firewall), and
-its shell lives as templates in a directory under
+answers these questions: how to install the packages, how to enable services,
+how to load a kernel module now and at boot, how to drive the firewall, how to
+run the user's configuration store units, and how to hold Docker's packages. Its shell lives as templates in a directory under
 `internal/hostprep/profiles/`. Adding Debian or Fedora is adding a directory
 and a registration, not editing the command.
 
@@ -5271,15 +5271,14 @@ disrupt existing connections, and a timer turns ufw off again unless a new SSH
 login gets through (see `paisans host admit` in
 [docs/commands.md](docs/commands.md)).
 
-**Docker-published ports bypass the firewall.** Docker's install page says so
-in as many words: "When you expose container ports using Docker, these ports
-bypass your firewall rules." What ufw protects here is everything on the host network,
-which is etcd, Patroni, Garage, HAProxy and Caddy, all `network_mode: host`. A
-container that publishes a port is not covered by this table, which is why
-every rendered app publishes its port on the site's mesh address rather than on
-every interface; a monitor behind the operator's own web server publishes on
-its site's `listen` instead, which `validate` refuses on a public address.
-That binding is the renderer's, not the firewall's.
+**Nothing depends on the firewall for an app's port.** A rootless daemon's
+published port is a listener of its port forwarder, under the deployment user's
+UID, so ufw's rules apply to it. The renderer still publishes every app's port
+on the site's mesh address rather than on every interface; a monitor behind the
+operator's own web server publishes on its site's `listen` instead, which
+`validate` refuses on a public address. The mesh address is admitted whole by
+`allow in on psns-<token>`, so the binding is what keeps an app from being
+reached on any other address.
 
 #### host prepare manages the login user's authorized keys
 
@@ -5459,7 +5458,7 @@ from the configuration or from a host shows such a character as an escape
 mode 700 state directory. It holds fingerprints and image references, nothing
 secret. Each part is written by the command that applies it, once that
 command's steps for the site have all succeeded: the login and keys by `host
-prepare`, the images and the web server's directory by `apply`. What the
+prepare`, the images by `apply`. What the
 operator approves is written earlier, as soon as they type approve and before
 the first change, in the record's `approved` part: a run that fails part way
 leaves the applied parts as they were, and the next run applies what was
@@ -5556,8 +5555,8 @@ list stays readable. A host with no record of the parts a review covers counts i
 entries as new and says `first review` on its line, because there is no
 record yet: the first `--execute` on such a host asks once for the whole list,
 which is the record being made, and later runs show only what changes.
-`host prepare` reviews the login and the keys; `apply --site` the images and
-the web server's directory, narrowed to the named stacks by `--only`; `site
+`host prepare` reviews the login and the keys; `apply --site` the images,
+narrowed to the named stacks by `--only`; `site
 add` the new site's images, since its stage 4 applies that site's whole
 render, recording them once that stage's gate has passed; `apply` with no
 `--site` every part of every site, since it runs them all.
@@ -8558,13 +8557,13 @@ is not this deployment's is left alone and not listed:
 | rendered files | an entry in this deployment's manifest whose hash the file still has | deleted, then the manifest; a file edited on the host is kept and named |
 | units | named `paisans-<token>-*` in the user's own systemd directory, `~/.config/systemd/user` | disabled, stopped, deleted; the user's manager reloaded |
 | authorized keys | nothing can prove one: a key `host admit` or `host prepare` added is a key the operator logs in with | never removed. A key may be the only way into the host, and nothing on it says whether another exists; the operator deletes one by hand once it is no longer needed. This deployment's record of which keys it added, `/srv/paisans/<token>/.paisans/authorized_keys.owned`, is its own file, so that is deleted |
-| the deployment's directory | its path, `/srv/paisans/<token>`, the user's | empty directories removed; what apply did not write, the data in its bind mounts, is kept, and `--delete-data` empties it, through rootlesskit so the files a container's user owns go too, unless a file in it was edited. The directory itself is root's and stays for `host evict` |
+| the deployment's directory | its path, `/srv/paisans/<token>`, the user's | empty directories removed; what apply did not write, the data in its bind mounts, is kept, and `--delete-data` empties it, through rootlesskit so the files a container's user owns go too, unless a file in it was edited. The directory itself stays, because its parent `/srv/paisans` is root's, for `host evict` |
 | the deployment record, on a gateway | `/srv/paisans/<token>/.paisans/deployed.json` | deleted |
 | the configuration store | `/srv/paisans/<token>/.paisans/config/<token>.git`, its `<token>.peers` and `<token>.sync.json`, a `<token>.incoming.bundle` a cut-off push left behind, and `/srv/paisans/<token>/.paisans/bin/`; the units that serve and sync it are the user's `paisans-<token>-*` and go with the units above | deleted after the units, so the daemon and the sync have stopped using them. The versions on this host go with it; every other site still holds them, which is what makes a site's removal not a loss of the configuration's history |
 | the grant record | `/srv/paisans/<token>/.paisans/granted.json` (see *`apply` and `host prepare` review what `paisans-stack.yaml` grants*) | deleted last: left behind, a later deployment with the same token would be reviewed against a baseline it never applied |
 
 **What is root's is the owner's.** The mesh interface and its helper, the ufw
-rules, the deployment's user and its home, the deployment's directory, the
+rules, the deployment's user and its home, `/srv/paisans`, the
 admission record and the registry entry are not touched. The plan ends with
 the line the host's owner runs to remove them,
 `sudo paisans host evict --deployment <id> --user <user> --execute`.
@@ -8607,10 +8606,10 @@ approved specification.
   the report says Caddy is kept and for which files. Once `caddy.d` holds
   no site file, the next run removes Caddy and its files, as for any
   container. No flag removes it sooner.
-* **Another deployment meets it.** Its host check's conflict on 80 and 443
-  names the container as that deployment's kept Caddy and says what to do:
-  move the sites and remove it, or run `site remove --force --id` once they
-  are gone.
+* **Another deployment meets it.** While the kept deployment's admission
+  holds the gateway role, `host admit` refuses the gateway role or
+  `--public-ports` for another one. The owner moves the sites and runs
+  `host evict` for the old deployment.
 
 **`--host-gone` is for a host that is never coming back.** The host is not
 reached at all: stages 1, 2, 4, 5 and 6 run and stage 3 is skipped. The DNS
@@ -8742,7 +8741,7 @@ is the approved specification. How to run both, and their flags, are under
 [docs/commands.md](docs/commands.md).
 
 `host deployments` is run by the host's owner, through sudo, and marks each
-admission record `ok`: the deployment id, the user, the site, its roles,
+admission record with a check mark: the deployment id, the user, the site, its roles,
 whether the watchdog and public ports were granted, and when. A record it
 cannot parse is a warning, `!`. With sudo it goes on to the registry's
 entries (id, token, domain, site, roles and root) and, under *not in the
@@ -9040,7 +9039,7 @@ at, and "could not look" is not "looked and it was fine".
 | Clock | every site | `timedatectl show -p NTPSynchronized --value` | not `yes` |
 | Host | new site | the host check (see *The host check*), as the deployment's user | something foreign holds a claim, or its Docker is a snap or older than the toolkit needs |
 | Prepared | new site | `host prepare`'s own plan | it has any step left |
-| Admission | new site | `/etc/paisans/admitted.<token>.json`, read as the deployment's user | the host has not admitted this deployment, or its record does not cover the site: its user, ports, forwarding, roles or grants. The finding names the `paisans host request` line the host's owner needs. Another deployment holding this one's token, root, interface, listen port, a mesh subnet overlapping this one's, or the gateway or data role this one claims is `host admit`'s refusal, in the registry the owner's side keeps |
+| Admission | new site | `/etc/paisans/admitted.<token>.json`, read as the deployment's user | the host has not admitted this deployment, or its record does not cover the site: its user, SSH and WireGuard ports, mesh subnet, forwarding, the grants its roles need or, for `managed_by: external`, the web server. The finding names the `paisans host request` line the host's owner needs. Another deployment holding this one's token, root, interface, listen port, a mesh subnet overlapping this one's, or the gateway or data role this one claims is `host admit`'s refusal, in the registry the owner's side keeps |
 | Platform | new data site, against each existing data site | `dpkg --print-architecture` | the architecture differs |
 | WireGuard | new site | `/sys/module/wireguard`, else `modprobe -n wireguard` | neither |
 | Watchdog | new data site | `/dev/watchdog` exists | it does not |

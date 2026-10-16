@@ -84,9 +84,9 @@ subnet, and a claim refuses another deployment's same interface, same port or
 overlapping subnet. It carries the site's roles too (`roles`, sorted and
 comma joined so the awk matches one with `index()`), and a claim refuses
 `gateway` or `data` when another deployment on the host holds the same role.
-A site is one machine: `registry.Check` and `registry.Claim` refuse a host
-that runs another site of this deployment (`internal/registry/machine.go`),
-read from this deployment's entry, which names the site, or with no entry from
+A site is one machine: `host admit`'s claim (`planClaim`, with
+`internal/registry/machine.go`) refuses a host that runs another site of this
+deployment, read from this deployment's entry, which names the site, or with no entry from
 the `Address` line of `/srv/paisans/<token>/psns-<token>.conf`. The awk merge
 refuses the same thing under the lock, for two claims racing, and `Merge`
 mirrors it. `validate` refuses two sites with one mesh address
@@ -94,7 +94,7 @@ mirrors it. `validate` refuses two sites with one mesh address
 endpoint (`sites-share-a-machine`), so `apply` without `--site` runs every
 site's prepare and pull at once with no host shared between them.
 `apply` and `host prepare` also read the host's routes,
-addresses, Docker networks and Docker's address pools before they claim it,
+addresses, Docker networks and Docker's address pools before their first change,
 and refuse an overlap with the mesh subnet; `internal/mesh` holds the parsing
 and the overlap test as pure functions, and the probe (`mesh.Probe`, over any
 `mesh.Host`); `cmd/paisans/mesh.go` turns a clash into the refusal
@@ -104,8 +104,7 @@ has the reasoning.
 `apply`, `apply --site`, `host prepare` and `site add` review what
 `paisans-stack.yaml` grants before their first change. `internal/grant` computes a site's grant from the
 configuration and the render (the login user, every key of the operators
-`ssh.keys` names, every rendered service's image, and the web server's
-`include_dir`), compares it with the host's record,
+`ssh.keys` names, every rendered service's image), compares it with the host's record,
 `/srv/paisans/<token>/.paisans/granted.json`, and writes that record under the
 deployment's lock. `cmd/paisans/review.go` shows the review and asks for
 `approve` through `confirmWord`, refusing without a terminal;
@@ -394,10 +393,9 @@ the walk-through.
 
 `apply` without `--site` uses the same package once every step has run:
 `writeWebServerFiles` (`cmd/paisans/converge_webserver_files.go`) writes each
-app's snippet into the web server's `include_dir` through `webserver.Sync`
-(`internal/webserver/include.go`), recording each file in the manifest
-(`internal/apply/webserverrecord.go`) so `app remove` and `site remove` delete
-it through `webserver.Remove`, and `convergeWebServer`
+app's reference snippet (`internal/webserver/reference.go`) under
+`/srv/paisans/<token>/web-server/`, as the deployment's user, and writes
+nothing of the owner's; `convergeWebServer`
 (`cmd/paisans/converge_webserver.go`) runs `Check` once for each app, and a
 failure alone ends the run on a `ui.Warning`, which exits 0.
 
@@ -470,7 +468,7 @@ What "shared" changes, and where:
 
 | Command | On a shared host |
 |---|---|
-| `host prepare` | `hostprep.Shared()`: the profile's `Firewall` gets `hostWide` false and plans only its own `paisans-<token>:` rules, never `ufw default` or `ufw --force enable`; the host check does not read the firewall, whose policy is the host owner's and whose rules for the deployment `host admit` adds |
+| `host prepare` | nothing host-wide to hold back: it plans no firewall; the host check does not read the firewall, whose policy is the host owner's and whose rules for the deployment `host admit` adds |
 | `apply` | `apply.KeepImages()`, as `--keep-images`, which also skips the sweep |
 | `site add` | `siteadd.Plan.KeepImages`, passed to the replica stage's whole apply; `siteadd.Plan.SharedSites`, the monitor sites, for the reseed's apply |
 | `site remove`, `app remove` | the monitor sites are host checked, and the reseed's apply there keeps nothing back: `apply.MonitorReseed.KeepImages` is there for a caller to set |
@@ -1004,25 +1002,24 @@ undo:
   rules, the registry entry by `registry.RemoveCommand`, the user and the root
   directory) is `host evict`'s, and the plan ends with its line. A re-run
   therefore does only what is left. `verifyHost`, the stage's gate, runs last.
-* **The SSH allow is never removed, and not reported.** It is how the host
-  is reached, so it is always kept: `buildHost` leaves it out of the plan and
-  `runHost` skips it when it reads the rules again. The full removal,
-  `--force` and `--id` all go through those two, and
-  `TestNoRemovalDeletesTheSSHAllow` runs each, with and without
-  `--delete-data`.
+* **The SSH allow is never removed.** It is how the host is reached, and the
+  firewall is `host evict`'s: site remove reads and changes no ufw rule.
+  `TestNoRemovalDeletesTheSSHAllow` runs the full removal, `--force` and `--id`,
+  with and without `--delete-data`, and the rule survives each.
 * **Authorized keys are never removed.** A key may be the only way into the
   host, and nothing on it says whether another exists. The deployment's
   records of the keys `host prepare` added are its own bookkeeping, so they
-  are deleted under host prepare's key lock, with no step of their own in the plan.
-* **The registry removal has a Go counterpart**, `registry.Remove`, and the
-  tests run the awk program against `Encode` of its result.
+  are deleted under the deployment's lock, with no step of their own in the plan.
+* **The registry entry is `host evict`'s.** Site remove neither reads nor
+  writes the registry; `registry.Remove` has a Go counterpart for the awk
+  program that evict runs, and the tests run it against `Encode` of its result.
 * **`inspect` is a variable** standing in for `hostcheck.Inspect`, so the tests
   hand in a fake host's Docker objects and manifest.
 
 The tests in `internal/siteremove` run a world in maps (`world_test.go`):
 etcd's membership and health, Patroni's members, Garage's layout and resync,
 each HAProxy's served configuration, and per host its files, Docker objects,
-units, ufw rules, keys and registry. They cover the dry run changing nothing,
+units, keys and admission record. They cover the dry run changing nothing,
 a whole removal keeping every foreign container, file, unit and rule and an
 edited file, every refusal, resuming from each stage, the leader switched
 over first, synchronous mode turned off, `--host-gone`, `--delete-data`, the
@@ -1039,11 +1036,11 @@ the design, and `docs/specs/2026-10-11-site-evict.md` the approved
 specification. What the code relies on:
 
 * **Joining sites are read, then left alone.** `JoiningSites` reads each
-  remaining host's registry; one without this deployment's entry is a
-  replacement declared in the same edit, and is taken out of the transports,
+  remaining host's admission and deployment records; a site no record admits
+  or names is a replacement declared in the same edit, and is taken out of the transports,
   so no stage can reach it. `live` filters it out of every list a probe or
   gate walks (etcd members, cluster sites, Garage sites, gateways), and the
-  command neither host checks nor claims it.
+  command neither host checks nor reaches it.
 * **The cut is rendered without the joining sites** (`liveEnd`, which also
   drops apps pinned to them), so it never waits on a host or a DNS record
   that does not exist yet. Stage 6 uses the render with them, for HAProxy.
@@ -1129,7 +1126,7 @@ file, so stage 3 presents what stage 2 taught. What is easy to undo by accident:
   and `Run.Execute` refuses before anything changes unless `Run.Answer` took
   a value for it. The command asks for every one (`askPasted`, through
   `readRotateSecret`, which tests replace) after the `sign out` confirmation
-  and before any host is claimed, so a refusal leaves even the registries
+  and before any host is reached, so a refusal leaves every host
   alone. Stage 1 writes the answer under `rotations` in place of `Next`, and
   `Promote` sets the path, which changes nothing for a value `secrets set`
   already put there. A pending one is never asked for again.
@@ -1631,8 +1628,8 @@ installed, on a workstation or anywhere else.
 | `internal/patroni` | reading a Patroni cluster through the Spilo container: `/cluster`, the leader, lag, database size |
 | `internal/configstore` | the signed copies of the configuration: a version as a git commit and the bare repository holding it, the rules that choose which versions to trust and which is newest, gathering from every site, pushing to them, and the key by key merge of the secrets |
 | `internal/hostprep` | taking a blank host to what `apply` assumes; one profile per operating system, its shell under `profiles/<id>-<version>/` |
-| `internal/hostadmit` | what runs on a host as its owner, as root, for one deployment: the local transport `host admit` and `host evict` use with `--request`, each command through `sh -c` and each file walked by descriptor without following a link. Neither command exists yet |
-| `internal/render/templates` | the infrastructure templates, plus one directory per kind |
+| `internal/hostadmit` | what runs on a host as its owner, as root, for one deployment: the local transport `host admit` and `host evict` use with `--request`, each command through `sh -c` and each file walked by descriptor without following a link. |
+| `internal/render/templates` | the infrastructure templates |
 
 Templating is `text/template` from the standard library. No template engine is
 inherited, per the language decision in `docs/decisions.md`.
@@ -1921,9 +1918,9 @@ before.
   it would end up in every script, and approving is the control. Tests in
   `cmd/paisans/review_test.go` and `converge_review_test.go` drive the prompt
   through a pipe.
-* **The SSH allow follows `ssh.port` and is never removed**, including the
-  allow for a port the site used before. A test moves the port and asserts the
-  old allow is kept and noted.
+* **`host admit`'s SSH allow follows `ssh.port` and is never removed**,
+  including the allow for a port the site used before. A test moves the port and
+  asserts the old allow is kept and noted.
 
 ## What is not here yet
 

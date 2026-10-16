@@ -72,9 +72,9 @@ paisans apply --site health                  # shows what would change
 paisans apply --site health --execute
 ```
 
-`host prepare` and `apply` start with the host check. A host already running a
-web server is *shared*, which is fine here: nothing the monitor claims is
-taken. The firewall is the host owner's: `host admit` leaves ufw's default
+`host prepare` and `apply` start with the host check. A web server on the host
+is fine here, whatever class the host check gives its listeners: the monitor
+claims neither 80 nor 443. The firewall is the host owner's: `host admit` leaves ufw's default
 policy alone and only adds the deployment's own rules, each commented
 `paisans-<token>:` with the deployment's token. It does
 not open 80 or 443 with `managed_by: external`;
