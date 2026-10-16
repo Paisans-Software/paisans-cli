@@ -50,3 +50,17 @@ var ItalicFor = italic
 
 // DangerFor is Danger with the terminal chosen by the test.
 var DangerFor = danger
+
+// NewForTestSize is NewForTest on a terminal cols wide and rows high.
+func NewForTestSize(w io.Writer, verbose bool, cols, rows int, clock func() time.Time) Reporter {
+	r := NewForTest(w, verbose, true, clock).(*writer)
+	r.setSize(cols, rows)
+	return r
+}
+
+// NewForTestSizeTick is NewForTestSize with a real spinner tick.
+func NewForTestSizeTick(w io.Writer, cols, rows int, tick time.Duration) Reporter {
+	r := NewForTestSize(w, false, cols, rows, time.Now).(*writer)
+	r.tick = tick
+	return r
+}

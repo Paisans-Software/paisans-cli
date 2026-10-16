@@ -43,6 +43,19 @@ type writer struct {
 	// held counts the holds in place (see Hold). While any is, nothing is
 	// drawn, so a prompt on the terminal stays readable.
 	held int
+	// termRows is the terminal's height, 0 when it is not known.
+	termRows int
+	// list is the list whose block is redrawn in place, while one is.
+	list *liveList
+}
+
+// setSize sets the terminal's size, cols wide and rows high, 0 for what is
+// not known.
+func (r *writer) setSize(cols, rows int) {
+	r.termCols, r.cols, r.termRows = cols, cols, rows
+	if t, ok := r.w.(*tracked); ok {
+		t.cols = cols
+	}
 }
 
 func newWriter(w io.Writer, verbose, terminal bool) *writer {
@@ -85,6 +98,11 @@ func (r *writer) Section(title string) {
 type tracked struct {
 	w     io.Writer
 	wrote bool
+	// rows counts the rows of the terminal the lines written so far take,
+	// wrapped at cols, and partial is the line not yet ended (see List).
+	cols    int
+	rows    int
+	partial string
 }
 
 // Write is where every line the reporter draws leaves it, so each is
@@ -93,7 +111,9 @@ func (t *tracked) Write(p []byte) (int, error) {
 	if len(p) > 0 {
 		t.wrote = true
 	}
-	if _, err := io.WriteString(t.w, Redact(string(p))); err != nil {
+	text := Redact(string(p))
+	t.count(text)
+	if _, err := io.WriteString(t.w, text); err != nil {
 		return 0, err
 	}
 	return len(p), nil
@@ -153,7 +173,15 @@ func (r *writer) spinFrame(s *step, stop chan struct{}) {
 func (r *writer) frame() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if (r.open == nil && r.group == nil) || !r.terminal {
+	if !r.terminal {
+		return
+	}
+	if l := r.list; l != nil && l.running != nil && r.open == nil && r.group == nil {
+		r.frame_++
+		l.drawRowLocked(l.running)
+		return
+	}
+	if r.open == nil && r.group == nil {
 		return
 	}
 	r.frame_++
@@ -330,6 +358,10 @@ func (r *writer) Warn(hint, detail string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.interruptLocked()
+	r.warnLocked(hint, detail)
+}
+
+func (r *writer) warnLocked(hint, detail string) {
 	r.hintLocked(false, hint)
 	if r.verbose && detail != "" {
 		r.detailLocked(strings.Join(Wrap(detail, r.cols-len(detailIndent)), "\n"))
@@ -416,6 +448,9 @@ func (r *writer) Hold() (resume func()) {
 	}
 	r.held++
 	r.interruptLocked()
+	if r.list != nil {
+		r.list.heldLocked()
+	}
 	var once sync.Once
 	return func() {
 		once.Do(func() {
@@ -424,6 +459,9 @@ func (r *writer) Hold() (resume func()) {
 			r.held--
 			if r.held == 0 {
 				r.flushGroupLocked()
+				if r.list != nil {
+					r.list.resumedLocked()
+				}
 			}
 			r.drawLocked()
 		})
