@@ -12,6 +12,11 @@ table inet {{ .Table }} {
 	# the user's subordinate range, so the UID alone would miss them.
 	chain output {
 		type filter hook output priority 0; policy accept;
+		# A reply answers a flow someone else opened: the host side of each
+		# port the deployment publishes runs as its user, and its answers to
+		# a visitor on loopback, the LAN or this host must pass. Its own
+		# flows' replies come in through input, not here.
+		ct direction reply accept
 		meta skuid { {{ .Users }} } ip daddr {{ .Mesh }} accept
 {{- if .Resolvers4 }}
 		meta skuid { {{ .Users }} } ip daddr { {{ join .Resolvers4 ", " }} } meta l4proto { tcp, udp } th dport 53 accept

@@ -102,6 +102,36 @@ func TestEgressTableDropsTheHostAndItsOnLinkPrefixes(t *testing.T) {
 	}
 }
 
+// The UID chain's first rule accepts replies: the host side of every port
+// the deployment publishes runs as its user, so without it the answers to
+// a visitor on loopback, the LAN or the host's own address would meet the
+// drops below. The deployment's own flows are untouched, since their
+// replies come in through input.
+func TestEgressTableAcceptsRepliesFirst(t *testing.T) {
+	for _, gateway := range []bool{false, true} {
+		d := egress
+		d.Gateway = gateway
+		d.LAN6 = []netip.Prefix{netip.MustParsePrefix("2001:db8:1::/64")}
+		text, err := hostprep.EgressTable(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, chain, _ := strings.Cut(text, "chain output {\n")
+		var rules []string
+		for _, l := range strings.Split(chain, "\n") {
+			if l = strings.TrimSpace(l); l != "" && !strings.HasPrefix(l, "#") && !strings.HasPrefix(l, "type ") {
+				rules = append(rules, l)
+			}
+		}
+		if len(rules) == 0 || rules[0] != "ct direction reply accept" {
+			t.Errorf("gateway %v: the output chain does not accept replies first:\n%s", gateway, text)
+		}
+		if strings.Count(text, "ct direction reply accept") != 1 {
+			t.Errorf("gateway %v: replies are accepted outside the output chain:\n%s", gateway, text)
+		}
+	}
+}
+
 // An on-link prefix reaches the table only as a valid, masked IPv6 prefix;
 // anything else is refused rather than rendered.
 func TestEgressTableRefusesABadOnLinkPrefix(t *testing.T) {

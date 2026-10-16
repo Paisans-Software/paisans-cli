@@ -119,6 +119,11 @@ step 6: write the egress table
     | 	# the user's subordinate range, so the UID alone would miss them.
     | 	chain output {
     | 		type filter hook output priority 0; policy accept;
+    | 		# A reply answers a flow someone else opened: the host side of each
+    | 		# port the deployment publishes runs as its user, and its answers to
+    | 		# a visitor on loopback, the LAN or this host must pass. Its own
+    | 		# flows' replies come in through input, not here.
+    | 		ct direction reply accept
     | 		meta skuid { <uid>, <subordinate range> } ip daddr 10.44.0.0/24 accept
     | 		meta skuid { <uid>, <subordinate range> } ip daddr { 127.0.0.53 } meta l4proto { tcp, udp } th dport 53 accept
     | 		meta skuid { <uid>, <subordinate range> } ip daddr { 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 } drop

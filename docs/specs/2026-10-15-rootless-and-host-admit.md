@@ -415,7 +415,14 @@ LAN. Admit loads an nftables table `inet paisans_<token>` from a unit
 `paisans-<token>-egress.service`, ordered before `user@<uid>.service` so
 no container starts unfiltered at boot, with an output
 chain that matches the user's UID and its whole subordinate range (a
-container's users map into that range, so the UID alone misses them):
+container's users map into that range, so the UID alone misses them).
+The chain's first rule accepts every packet in the reply direction
+(`ct direction reply accept`). A reply answers a flow someone else opened:
+the host side of each port the deployment publishes runs as its user, so
+its answers to the owner's web server on loopback, to a visitor on the
+LAN and to the host's own address carry the user's UID. The deployment's
+own flows are untouched, since their replies come in through input. The
+UID rules follow it:
 
 1. Accept the mesh subnet.
 2. Accept port 53 to the host's resolvers, read at admit time
