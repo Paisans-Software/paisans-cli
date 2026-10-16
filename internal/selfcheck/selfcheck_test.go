@@ -71,6 +71,7 @@ func TestSelfCheckRefusesAnotherServer(t *testing.T) {
 		"a redirect on 443":     {https: []result{{a: selfcheck.Answer{Status: 302, Location: "https://elsewhere.example/f2a9"}}}, http: []result{redirect}},
 		"80 elsewhere":          {https: []result{ours}, http: []result{{a: selfcheck.Answer{Status: 301, Location: "https://other.example.org/"}}}},
 		"80 serves no redirect": {https: []result{ours}, http: []result{ours}},
+		"an echo of the path":   {https: []result{{a: selfcheck.Answer{Status: 200, Body: "/.well-known/paisans/f2a9\n"}}}, http: []result{redirect}},
 	} {
 		err := selfcheck.Check(context.Background(), probe(w), target)
 		var c *selfcheck.Conflict

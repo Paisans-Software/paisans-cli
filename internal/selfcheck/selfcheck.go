@@ -1,9 +1,9 @@
-// Package selfcheck asks a gateway, from outside, whether it answers as this
-// deployment. The deployment's user cannot read the host's ruleset or
+// Package selfcheck asks a site that runs the toolkit's Caddy, from outside,
+// whether it answers as this deployment. The deployment's user cannot read the host's ruleset or
 // another user's sockets, so a port another server took after admission,
 // and above all one a DNAT rule takes with no listener, is invisible from
-// the host. The gateway's Caddy answers /.well-known/paisans/<token> with
-// the token; anything else that answers there is another server.
+// the host. That Caddy answers /.well-known/paisans/<token> with the token;
+// anything else that answers there is another server.
 package selfcheck
 
 import (
@@ -97,15 +97,19 @@ type Target struct {
 	Site, Address, Host string
 }
 
-// TargetFor is site's check: its public_address, and the first hostname the
-// gateway serves. false for a site that is not a gateway, a gateway with no
+// TargetFor is site's check: its public_address, and the first hostname its
+// Caddy serves, a gateway's for the deployment and a monitor's its own.
+// false for a site that runs no Caddy of the toolkit's, one with no
 // public_address to ask through, or one with no hostname to ask for.
 func TargetFor(cfg *config.Config, site string) (Target, bool) {
 	s, ok := cfg.Sites[site]
-	if !ok || !s.Has(config.RoleGateway) || s.PublicAddress == "" {
+	if !ok || !s.RunsCaddy() || s.PublicAddress == "" {
 		return Target{}, false
 	}
 	names := dns.GatewayHostnames(cfg)
+	if !s.Has(config.RoleGateway) {
+		names = dns.ServedHostnames(cfg, site)
+	}
 	if len(names) == 0 {
 		return Target{}, false
 	}
