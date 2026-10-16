@@ -52,7 +52,8 @@ documentation.
 
 **A human decides:** which software fills a capability; anything changing the
 identity model; federation policy; anything that locks in a migration path; when
-a service is exposed to the public internet.
+a service is exposed to the public internet; whether a host takes a deployment,
+and what its owner grants it.
 
 An agent choosing between two candidate applications has left its lane. Research
 and recommend; the human chooses.
@@ -136,6 +137,25 @@ The distinction between the last two tiers matters and is easy to blur.
 *Approved* means a human said yes to this specific action. *Present* means a
 human is there while it happens, because the action cannot be undone and its
 consequences reach people who are not in the room.
+
+**Admitting and evicting are the host owner's.** A host's owner is often not
+one of the deployment's operators, and the machine is theirs, so these are
+never an agent's to run, whoever asks. Evicting always asks for the
+deployment's user name at a terminal, and admitting from a request asks for
+its digest; admitting from the configuration may ask nothing, and a
+NOPASSWD sudoers rule would let it run without a person, so this rule, not a
+prompt, is what stops an agent. An agent never answers either prompt, and
+never writes a sudoers rule or anything else that would let either command
+run without a person at the terminal. An agent may run `paisans host
+request`, which reads the configuration and reaches no host, and hand the
+file to an operator; the digest goes to the owner over another channel than
+the file, or the comparison proves nothing. When a run reports a site
+pending or down, or `site remove` prints the `host evict` line, the agent
+reports it to a human with that line, and runs nothing on the owner's behalf.
+
+The founder may authorise an agent to run admit and evict, prompts included,
+on test servers named in that authorisation. It never extends to any other
+host.
 
 ## Services the deployment runs
 
