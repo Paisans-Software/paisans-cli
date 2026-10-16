@@ -1895,8 +1895,8 @@ before.
   wrapper's arguments because setting `entrypoint` clears the image's
   command; dropping them leaves the wrapper running nothing.
 * **A published port binds the site's mesh address**, never every interface,
-  because Docker's iptables rules bypass a host firewall. A test walks every
-  rendered compose file to confirm it.
+  so the mesh is the only way to reach it whatever the host's firewall lets
+  in. A test walks every rendered compose file to confirm it.
 * **Nothing rendered carries a floating image tag.** `latest` is refused in an
   operator's configuration, so a default that floated would be the toolkit
   refusing what it writes itself. A test walks every rendered compose file.

@@ -29,15 +29,15 @@ services:
     # Published on sites.{{ .App.Site }}.web_server.listen alone, where the
     # operator's own web server proxies to. Nothing dials the mesh address:
     # the gateway does not route this app and the monitor does not check its
-    # own container. Docker's own iptables rules bypass a host firewall, which
-    # is why validate accepts only a loopback or private listen.
+    # own container. The owner's web server runs on this host and needs only
+    # loopback, which is why validate refuses any other listen but the mesh
+    # address, which it warns about.
     ports:
       - "{{ .WebServerListen }}:{{ .App.Port }}"
 {{- else }}
-    # The mesh address only, where the Caddy on this site reaches it. Docker's
-    # own iptables rules bypass a host firewall, so a port published on every
-    # interface of a host with a public address is reachable from the
-    # internet whatever ufw says.
+    # The mesh address only, where the Caddy on this site reaches it. A port
+    # published on every interface would answer anything the host's firewall
+    # lets in.
     ports:
       - "{{ .MeshAddress }}:{{ .App.Port }}:{{ .App.Port }}"
 {{- end }}

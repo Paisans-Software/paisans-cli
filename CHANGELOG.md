@@ -24,7 +24,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Changed
 
-- `secrets set` and `secrets rotate` try an SMTP password from the machine they run on, so one can be set before any site is deployed; an unreachable server is a warning.
+- `secrets set` and `secrets rotate` try an SMTP password from the machine they run on, warning when the server cannot be reached there, and rotate tries it from each site before handing it over.
 - Behind the owner's web server, `apply` writes each app's reference snippet to `/srv/paisans/<token>/web-server/` from what `host admit` detected, and warns until the owner's copy serves it; nothing of the owner's is written or reloaded.
 - `site remove` cleans a host only as the deployment's user its admission record names, empties its root through `rootlesskit`, and ends with the `host evict` line the host's owner runs to remove the rest.
 - `host deployments` lists every admission record on the host, with the user, site, grants and time, and lists only those with `--sudo=false`.

@@ -13,7 +13,7 @@
     },
     {
       "path": "srv/paisans/f2a9/account/compose.yaml",
-      "sha256": "465c260de9bbb2dc3ca6a3a83a26c70fdc4332c5135644cc53e3d0b3aeb91bb8",
+      "sha256": "15e2cb39644aeecd95942400e7aad09a23268399fc2ce384f6e5c0a98f5af33e",
       "mode": "0644"
     },
     {
@@ -23,7 +23,7 @@
     },
     {
       "path": "srv/paisans/f2a9/auth/compose.yaml",
-      "sha256": "4b4eb7864c48a5fe0bc511ff1ad6253d55bd9fea99d88fe6c4c8974aaa8c29a9",
+      "sha256": "27513ba9de43ee8bc24b59d38ab91f5d687413bac276b0ebbf9ffedae5ab687f",
       "mode": "0644"
     },
     {
