@@ -3,10 +3,10 @@
         The download goes to a temporary name first so that a failed
         transfer never leaves a truncated key the probe would call present,
         and the key is checked before it moves into place: the download must
-        hold exactly one primary key, its subkeys aside, and that key's
-        fingerprint must be Docker's release key's, since apt trusts every
-        key in the file. gpg reads it in a home of its own, which is removed
-        after. */ -}}
+        hold exactly one primary key, public or secret, its subkeys aside,
+        and that key's fingerprint must be Docker's release key's, since apt
+        trusts every key in the file. gpg reads it in a home of its own,
+        which is removed after. */ -}}
 set -e
 export DEBIAN_FRONTEND=noninteractive
 apt-get -o DPkg::Lock::Timeout=300 update
@@ -14,7 +14,7 @@ apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl gnupg
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc.paisans-tmp
 home=$(mktemp -d)
-fpr=$(GNUPGHOME="$home" gpg --show-keys --with-colons /etc/apt/keyrings/docker.asc.paisans-tmp 2>/dev/null | awk -F: '$1 == "pub" { n++; take = 1; next } $1 == "fpr" && take { fpr = $10; take = 0 } END { if (n == 1) print fpr }')
+fpr=$(GNUPGHOME="$home" gpg --show-keys --with-colons /etc/apt/keyrings/docker.asc.paisans-tmp 2>/dev/null | awk -F: '$1 == "pub" || $1 == "sec" { n++; take = 1; next } $1 == "fpr" && take { fpr = $10; take = 0 } END { if (n == 1) print fpr }')
 rm -rf "$home"
 if [ "$fpr" != {{ .Fingerprint }} ]; then
   rm -f /etc/apt/keyrings/docker.asc.paisans-tmp
