@@ -18,8 +18,9 @@ import (
 // Gather reads a run's evidence: each site's login and, where it answered,
 // its admission record; then what the deployment says has joined, each from
 // the first site holding it that answers: the gateways' deployment record,
-// etcd's membership and Patroni's. The deployment record, when no gateway
-// answered for it, is Unread.
+// etcd's membership and Patroni's. The deployment record is Unread when no
+// gateway answered or any gateway's could not be read, and etcd's membership
+// when no record was found and etcd answered only with errors.
 func Gather(cfg *config.Config, transports map[string]apply.Transport) Evidence {
 	d := cfg.Deployment()
 	ev := Evidence{Login: map[string]error{}, Records: map[string]RecordRead{}, Joined: map[string][]string{}}
@@ -65,22 +66,35 @@ func Gather(cfg *config.Config, transports map[string]apply.Transport) Evidence 
 			}
 		}
 		slices.Sort(unreadable)
+		// A record found on one gateway never stands for another's that
+		// could not be read: an apply that missed a gateway catches it up
+		// later, so the unreadable one may hold the only add of a site.
+		if found > 0 {
+			ev.Joined["the deployment record"] = rec.List("sites")
+			ev.DeployedApps = rec.List("apps")
+		}
 		switch {
 		case len(gateways) == 0:
 			ev.Unread = append(ev.Unread, "the deployment record (no gateway answered)")
-		case found > 0:
-			ev.Joined["the deployment record"] = rec.List("sites")
-			ev.DeployedApps = rec.List("apps")
 		case len(unreadable) > 0:
 			ev.Unread = append(ev.Unread, "the deployment record ("+strings.Join(unreadable, "; ")+")")
 		}
 	}
 
 	// etcd's and Patroni's members are read from the first member that
-	// answers; one that answers nowhere adds nothing.
+	// answers; one that answers nowhere adds nothing. With no deployment
+	// record found, etcd is the evidence of a site a first apply joined
+	// before the gateway recorded it, since the data sites and the witness
+	// are applied before the gateway: an etcd that answered only with errors
+	// is then unread.
+	var etcdFailed []string
 	for _, m := range answered(cfg.Etcd.Members) {
 		list, running, err := apply.ReadEtcdMembers(transports[m], d)
-		if err != nil || !running {
+		if err != nil {
+			etcdFailed = append(etcdFailed, m+": "+err.Error())
+			continue
+		}
+		if !running {
 			continue
 		}
 		var sites []string
@@ -89,6 +103,11 @@ func Gather(cfg *config.Config, transports map[string]apply.Transport) Evidence 
 		}
 		ev.Joined["etcd's membership"] = sites
 		break
+	}
+	_, recorded := ev.Joined["the deployment record"]
+	_, membership := ev.Joined["etcd's membership"]
+	if !recorded && !membership && len(etcdFailed) > 0 {
+		ev.Unread = append(ev.Unread, "etcd's membership ("+strings.Join(etcdFailed, "; ")+")")
 	}
 
 	for _, s := range answered(cfg.Cluster.Sites) {
