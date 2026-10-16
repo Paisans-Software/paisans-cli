@@ -197,7 +197,6 @@ func Check(cfg *config.Config) Result {
 	c.evenVoters()
 	c.oneVoterNoFailover()
 	c.asyncAutomaticFailover()
-	c.meshIsNotPrivate()
 	c.pinnedOntoWitness()
 	c.gatewayOnDataSite()
 	c.pocketIDFileBackend()
@@ -767,30 +766,6 @@ func sshKey(host string, port int) string {
 		host = ip.String()
 	}
 	return net.JoinHostPort(strings.ToLower(host), strconv.Itoa(port))
-}
-
-// meshIsNotPrivate warns about a mesh on publicly routable space.
-//
-// Preflight checks that the subnet does not collide with anything a host
-// already routes, and that check needs a host. This is the part that can be
-// checked from a file: a mesh on public address space collides with the real
-// internet everywhere at once, and the symptom is a host that can no longer
-// reach whoever actually owns those addresses.
-func (c *checker) meshIsNotPrivate() {
-	if c.cfg.Mesh.Subnet == "" {
-		return
-	}
-	_, network, err := net.ParseCIDR(c.cfg.Mesh.Subnet)
-	if err != nil {
-		return // the loader has already reported this
-	}
-	if network.IP.IsPrivate() {
-		return
-	}
-	c.warn("mesh-subnet-is-not-private", "mesh.subnet",
-		"mesh subnet is publicly routable",
-		"is %s, which is publicly routable address space. Every host would route those addresses into the tunnel instead of to whoever owns them. Use RFC 1918 space, for example 10.44.0.0/24, unless this range is genuinely yours.",
-		c.cfg.Mesh.Subnet)
 }
 
 // undeclaredSites refuses any reference to a site that does not exist. A

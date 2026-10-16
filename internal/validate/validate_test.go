@@ -72,7 +72,6 @@ func TestRulesFire(t *testing.T) {
 		{"floating-image-tag", "floating-image-tag", validate.Refuse},
 		{"cluster-placement-without-a-cluster", "cluster-placement-without-a-cluster", validate.Refuse},
 		{"even-etcd-voters", "even-etcd-voters", validate.Warn},
-		{"mesh-subnet-is-not-private", "mesh-subnet-is-not-private", validate.Warn},
 		{"pinned-app-on-witness", "pinned-app-on-witness", validate.Warn},
 		{"gateway-on-data-site", "gateway-on-data-site", validate.Warn},
 		{"pocket-id-file-backend", "pocket-id-file-backend", validate.Warn},

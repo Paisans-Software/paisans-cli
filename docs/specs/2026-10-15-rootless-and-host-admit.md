@@ -325,6 +325,14 @@ Admit validates a request as strictly as a configuration: every field
 present, the site's name and each role accepted by the configuration's own
 rules, the user name accepted by the same pattern as `ssh.user`, every
 key a public key the toolkit can parse, the address inside the subnet.
+The subnet is held to the configuration's rule for `mesh.subnet`: an IPv4
+network no larger than a /24, clear of `0.0.0.0/8`, loopback, link-local
+and multicast, and inside the private ranges `10.0.0.0/8`, `172.16.0.0/12`
+or `192.168.0.0/16`. Rule 3 of the egress table drops those ranges and no
+other routed address, so on a host two deployments share, a mesh outside
+them is one the other deployment's user could send to through this mesh's
+interface, as this mesh's address, and reach its sites. The mesh is IPv4
+alone, so IPv6's private range, `fc00::/7`, does not arise.
 
 ## Running on the host
 

@@ -1149,6 +1149,18 @@ func TestMeshOverAReservedRangeIsRefused(t *testing.T) {
 	}
 }
 
+// A mesh outside RFC 1918's private ranges is refused where it is
+// declared: another deployment's egress table on a shared host drops only
+// those, so its user could reach this mesh's sites.
+func TestMeshOutsideThePrivateRangesIsRefused(t *testing.T) {
+	body := strings.Replace(validConfig, "subnet: 10.44.0.0/24", "subnet: 44.1.2.0/24", 1)
+	body = strings.Replace(body, "address: 10.44.0.1", "address: 44.1.2.1", 1)
+	got := loadErr(t, body)
+	if !strings.Contains(got, `mesh.subnet: "44.1.2.0/24" is outside the private ranges`) || !strings.Contains(got, "`paisans init` picks a /24 in 10.0.0.0/8") {
+		t.Errorf("got %q", got)
+	}
+}
+
 // A site address that is the mesh's network or broadcast address is
 // refused, as a request refuses it.
 func TestSiteAddressIsNotTheMeshsNetworkOrBroadcast(t *testing.T) {

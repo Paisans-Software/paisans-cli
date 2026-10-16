@@ -1218,6 +1218,8 @@ func (c *Config) structural(noSubnet bool) error {
 		for _, p := range problems {
 			advice := "Write it as an IPv4 network address and a prefix length, for example 10.44.0.0/24."
 			switch {
+			case network != nil && strings.HasPrefix(p, "is outside the private ranges"):
+				advice = "Choose a /24 inside one of them; `paisans init` picks a /24 in 10.0.0.0/8."
 			case network != nil && strings.HasPrefix(p, "overlaps "):
 				advice = "A host's firewall lets the deployment reach the mesh before it stops it reaching loopback, link-local and other reserved ranges, so the mesh must lie outside them; `paisans init` picks a /24 in private space."
 			case network != nil:

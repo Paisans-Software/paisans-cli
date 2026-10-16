@@ -78,6 +78,7 @@ func TestCheckRefuses(t *testing.T) {
 		{"two keys on a line", func(r *admission.Request) { r.Operators[0].Keys = []string{alice + "\n" + alice} }, "more than one key on the line"},
 		{"a key under two operators", func(r *admission.Request) { r.Operators[1].Keys = []string{alice} }, `operators[1].keys[0]: the same key as "alice"'s`},
 		{"a mesh larger than a /24", func(r *admission.Request) { r.MeshSubnet = "10.44.0.0/16" }, `mesh_subnet: "10.44.0.0/16" is larger than a /24`},
+		{"a mesh outside the private ranges", func(r *admission.Request) { r.MeshSubnet, r.Address = "44.1.2.0/24", "44.1.2.1" }, `mesh_subnet: "44.1.2.0/24" is outside the private ranges`},
 		{"a mapped IPv6 subnet", func(r *admission.Request) { r.MeshSubnet, r.Address = "::ffff:10.44.0.0/120", "10.44.0.1" }, `mesh_subnet: "::ffff:10.44.0.0/120" is not written in its canonical form, 10.44.0.0/24`},
 		{"a mapped IPv6 address", func(r *admission.Request) { r.Address = "::ffff:10.44.0.1" }, `address: "::ffff:10.44.0.1" is not written as plain dotted IPv4`},
 		{"the network address", func(r *admission.Request) { r.Address = "10.44.0.0" }, "is the subnet's network or broadcast address"},

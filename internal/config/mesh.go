@@ -59,13 +59,36 @@ func MeshReservedOverlaps(mesh *net.IPNet) []string {
 	return out
 }
 
+// privateMesh are the ranges a mesh subnet must lie inside: RFC 1918's.
+// Every admitted host's egress table drops them, and only them among
+// routed addresses, for the deployment's user. On a host two deployments
+// share, a mesh outside them is one the other deployment's user can send
+// to through this mesh's interface, as this mesh's own address, and so
+// reach its sites. The mesh is IPv4 alone (ParseMeshSubnet), so fc00::/7,
+// IPv6's private range, does not arise.
+var privateMesh = []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"}
+
+// meshIsPrivate reports whether mesh lies wholly inside one of privateMesh.
+func meshIsPrivate(mesh *net.IPNet) bool {
+	ones, _ := mesh.Mask.Size()
+	for _, r := range privateMesh {
+		_, n, _ := net.ParseCIDR(r)
+		if rOnes, _ := n.Mask.Size(); n.Contains(mesh.IP) && ones >= rOnes {
+			return true
+		}
+	}
+	return false
+}
+
 // CheckMeshSubnet is the one rule a mesh subnet is held to, by the loader
 // for mesh.subnet, by a request for mesh_subnet and by the WireGuard
 // helper's renderer: subnet as a network, and what is wrong with it. A
 // subnet ParseMeshSubnet refuses gives its phrase alone and no network;
 // otherwise each problem is one phrase, "is larger than a /24, ..." for a
-// prefix shorter than MeshMinPrefix and "overlaps 127.0.0.0/8, ..." for each
-// reserved range it overlaps, each saying why. No problems means the subnet may be a mesh.
+// prefix shorter than MeshMinPrefix, "overlaps 127.0.0.0/8, ..." for each
+// reserved range it overlaps, and "is outside the private ranges ..." for
+// one not inside privateMesh, each saying why. No problems means the
+// subnet may be a mesh.
 func CheckMeshSubnet(subnet string) (*net.IPNet, []string) {
 	network, p := ParseMeshSubnet(subnet)
 	if p != "" {
@@ -77,6 +100,9 @@ func CheckMeshSubnet(subnet string) (*net.IPNet, []string) {
 	}
 	for _, r := range MeshReservedOverlaps(network) {
 		problems = append(problems, "overlaps "+r+", which the deployment must never reach")
+	}
+	if !meshIsPrivate(network) {
+		problems = append(problems, "is outside the private ranges 10.0.0.0/8, 172.16.0.0/12 and 192.168.0.0/16 (RFC 1918), the only ones another deployment's egress table drops, so on a shared host that deployment's user could reach this mesh's sites")
 	}
 	return network, problems
 }

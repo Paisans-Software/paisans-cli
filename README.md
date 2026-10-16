@@ -715,7 +715,7 @@ app, and its two Pocket ID addresses differ:
 |----------|-------|-----|
 | `ACCOUNT_OIDC_ISSUER` | `https://<pocket-id hostname>` | An OIDC issuer is the URL Pocket ID names itself by, which is its `APP_URL`; a token whose issuer does not match is refused. It carries no key. |
 | `ACCOUNT_IDP_URL` | `http://<site mesh address>:1413` | The API, with the static API key, through the site's own HAProxy to the active Pocket ID, so the key travels only over the mesh, which WireGuard encrypts between sites. |
-| `ACCOUNT_IDP_PRIVATE_NETWORKS` | `mesh.subnet` | The networks the service accepts `ACCOUNT_IDP_URL` in besides the private ranges, so the key still goes only to the mesh when `mesh.subnet` lies outside them. |
+| `ACCOUNT_IDP_PRIVATE_NETWORKS` | `mesh.subnet` | The networks the service accepts `ACCOUNT_IDP_URL` in besides the private ranges, set to the mesh. |
 
 Renaming the identity hostname re-renders the account service's `.env`, and
 the next `apply` recreates the account stack. The account app is cluster
@@ -1988,13 +1988,17 @@ app trusts the mesh subnet and every service binds an address in it, so moving
 it is a rebuild of every site.
 
 `validate` refuses a file without `mesh.subnet` and says to run `init`, and
-refuses one that is not an IPv4 network, one larger than a /24, and one
-overlapping `0.0.0.0/8`, `127.0.0.0/8`, `169.254.0.0/16` or `224.0.0.0/3`.
-The hosts' firewalls trust the whole mesh, so a larger one could cover an
-owner's LAN; an admitted host's egress table accepts the mesh before it
-drops loopback and link-local, so a mesh over those would let the
+refuses one that is not an IPv4 network, one larger than a /24, one
+overlapping `0.0.0.0/8`, `127.0.0.0/8`, `169.254.0.0/16` or `224.0.0.0/3`,
+and one outside the private ranges `10.0.0.0/8`, `172.16.0.0/12` and
+`192.168.0.0/16`. The hosts' firewalls trust the whole mesh, so a larger one
+could cover an owner's LAN; an admitted host's egress table accepts the mesh
+before it drops loopback and link-local, so a mesh over those would let the
 deployment reach the owner's local services and the cloud metadata address,
-and this network and multicast route nothing a mesh could use. It refuses a
+and this network and multicast route nothing a mesh could use. Every other
+deployment's egress table on a shared host drops the private ranges and no
+other routed address, so a mesh outside them would be one that deployment's
+user could reach. It refuses a
 site address outside the mesh, and one that is the mesh's network or
 broadcast address.
 
@@ -4700,7 +4704,9 @@ public key, and an address outside the subnet are each refused, and so is a
 mesh subnet overlapping `0.0.0.0/8`, loopback, link-local or multicast: the
 egress table accepts the mesh subnet before it drops the owner's loopback
 and link-local ranges, so a subnet over them would let the deployment reach
-what the table keeps it from. `host request` applies the same checks, so it
+what the table keeps it from. So is one outside the private ranges
+`10.0.0.0/8`, `172.16.0.0/12` and `192.168.0.0/16`, the only routed
+addresses another deployment's table drops on a shared host. `host request` applies the same checks, so it
 never writes a request the owner's side would refuse, and `validate` holds
 the configuration to each rule it can check from the file, `ssh.user`
 included, so a configuration it accepts gets a request. A refusal `host
