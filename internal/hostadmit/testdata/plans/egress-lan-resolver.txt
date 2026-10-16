@@ -112,17 +112,24 @@ step 5: write the egress table
     | 	# the user's subordinate range, so the UID alone would miss them.
     | 	chain output {
     | 		type filter hook output priority 0; policy accept;
-    | 		# A reply to a flow someone else opened passes: the host side of each
-    | 		# port the deployment publishes runs as its user, and its answers to
-    | 		# a visitor on loopback, the LAN or this host must pass. Every flow
-    | 		# the user opens is marked first, so a flow it opened under an
-    | 		# accept below can never carry a "reply" to an owner's service.
+    | 		# Replies to flows someone else opened pass where the deployment can
+    | 		# be the server: the host side of each port it publishes runs as its
+    | 		# user, and its answers to a visitor on loopback, the LAN or this
+    | 		# host must pass. TCP on any port, since a TCP reply reaches only
+    | 		# its own socket's peer and the user cannot bind an owner's TCP
+    | 		# listener's port. UDP only from 443 on a gateway, HTTP/3, whose
+    | 		# public ports are one deployment's per host: elsewhere a user
+    | 		# sharing an owner's UDP port through SO_REUSEADDR could answer the
+    | 		# owner's own clients. The mesh's UDP passes by its accept below.
+    | 		ct direction reply ct mark and 0x08000000 == 0 meta l4proto tcp accept
+    | 		# Every flow the user opens is marked before any accept or drop, so
+    | 		# a flow it opened under an accept below never carries a "reply".
     | 		# Bit 27 of the ct mark: clear of Tailscale's connmark mask
-    | 		# 0xff0000, of the mesh's packet mark 0x5053<token>, whose high
-    | 		# nibble 0x0 at bits 24-27 is always clear, and of kube-proxy's and
-    | 		# Docker's low bits (0x4000, 0x8000). Each deployment's table sets
-    | 		# the same bit, which only ever narrows the accept.
-    | 		ct direction reply ct mark and 0x08000000 == 0 accept
+    | 		# 0xff0000, of the mesh's packet mark 0x5053<token>, whose hex digit
+    | 		# for bits 24-27 is always 0, and of kube-proxy's and Docker's low
+    | 		# bits (0x4000, 0x8000). A host rule that copies a packet mark over
+    | 		# the whole ct mark (CONNMARK save with no mask) clears it. Each
+    | 		# deployment's table sets the same bit, which only narrows accepts.
     | 		meta skuid { 1001, 165536-231071 } ct direction original ct mark set ct mark or 0x08000000
     | 		meta skuid { 1001, 165536-231071 } ip daddr 10.44.0.0/24 accept
     | 		meta skuid { 1001, 165536-231071 } ip daddr { 192.168.1.1 } meta l4proto { tcp, udp } th dport 53 accept

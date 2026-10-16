@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -105,17 +106,21 @@ func TestEgressTableDropsTheHostAndItsOnLinkPrefixes(t *testing.T) {
 	}
 }
 
-// The output chain's first rule accepts replies, but only to flows the
-// deployment's user did not open: the host side of every port the
-// deployment publishes runs as its user, so without it the answers to a
+// The output chain opens with the replies it accepts, and only to flows
+// the deployment's user did not open: the host side of every port the
+// deployment publishes runs as its user, so without them the answers to a
 // visitor on loopback, the LAN or the host's own address would meet the
-// drops below. Its second marks every flow the user opens, before any
-// accept or drop, so the user cannot open a flow under an accepted rule
-// and then send its "reply" to an owner's service.
-func TestEgressTableAcceptsOnlyRepliesTheUserDidNotOpen(t *testing.T) {
+// drops below. TCP on any port, since a TCP reply reaches only its own
+// socket's peer; UDP only from 443 on a gateway, HTTP/3, since a user
+// sharing an owner's UDP port could otherwise answer the owner's own
+// clients. Next, every flow the user opens is marked, before any accept
+// or drop, so the user cannot open a flow under an accepted rule and then
+// send its "reply" to an owner's service.
+func TestEgressTableAcceptsOnlyRepliesTheDeploymentServes(t *testing.T) {
 	const (
-		reply = "ct direction reply ct mark and 0x08000000 == 0 accept"
-		mark  = "meta skuid { 1001, 165536-231071 } ct direction original ct mark set ct mark or 0x08000000"
+		tcp  = "ct direction reply ct mark and 0x08000000 == 0 meta l4proto tcp accept"
+		quic = "ct direction reply ct mark and 0x08000000 == 0 udp sport 443 accept"
+		mark = "meta skuid { 1001, 165536-231071 } ct direction original ct mark set ct mark or 0x08000000"
 	)
 	for _, gateway := range []bool{false, true} {
 		d := egress
@@ -133,12 +138,19 @@ func TestEgressTableAcceptsOnlyRepliesTheUserDidNotOpen(t *testing.T) {
 				rules = append(rules, l)
 			}
 		}
-		if !closed || len(rules) < 3 || rules[0] != reply || rules[1] != mark {
-			t.Errorf("gateway %v: the output chain does not accept replies, then mark the user's flows, first:\n%s", gateway, text)
+		want := []string{tcp, mark}
+		if gateway {
+			want = []string{tcp, quic, mark}
+		}
+		if !closed || len(rules) <= len(want) || !slices.Equal(rules[:len(want)], want) {
+			t.Errorf("gateway %v: the output chain does not open with %q:\n%s", gateway, want, text)
 		}
 		_, mesh, _ := strings.Cut(text, "chain mesh {")
-		if strings.Count(text, "ct mark and") != 1 || strings.Count(text, "ct mark set") != 1 || strings.Contains(mesh, "ct ") {
-			t.Errorf("gateway %v: replies are accepted, or flows marked, outside the output chain:\n%s", gateway, text)
+		if strings.Count(text, "ct mark and") != len(want)-1 || strings.Count(text, "ct mark set") != 1 || strings.Contains(mesh, "ct ") {
+			t.Errorf("gateway %v: replies are accepted, or flows marked, outside the output chain's opening:\n%s", gateway, text)
+		}
+		if strings.Contains(text, "ct direction reply ct mark and 0x08000000 == 0 accept") {
+			t.Errorf("gateway %v: replies of every protocol are accepted:\n%s", gateway, text)
 		}
 	}
 }

@@ -416,20 +416,31 @@ LAN. Admit loads an nftables table `inet paisans_<token>` from a unit
 no container starts unfiltered at boot, with an output
 chain that matches the user's UID and its whole subordinate range (a
 container's users map into that range, so the UID alone misses them).
-The chain's first rule accepts a reply to a flow someone else opened
-(`ct direction reply ct mark and 0x08000000 == 0 accept`). The host side
-of each port the deployment publishes runs as its user, so its answers to
-the owner's web server on loopback, to a visitor on the LAN and to the
-host's own address carry the user's UID. The second rule sets bit 27 of
-the ct mark on every flow the user opens, before any accept or drop, so a
-flow the user opened under an accept never carries a "reply" to an
-owner's service: binding an owner's UDP port as the source, sending to
-the mesh, then answering from the mesh is dropped. Bit 27 is clear of
-Tailscale's connmark mask `0xff0000`, of the mesh's packet mark
-`0x5053<token>` and of kube-proxy's and Docker's low bits. A reply with no
-conntrack entry, on a port the owner exempts from conntrack, meets the
-UID rules and is dropped. The deployment's own flows take their replies
-through input. The UID rules follow:
+The chain opens with the replies it accepts, each only to a flow someone
+else opened (`ct direction reply ct mark and 0x08000000 == 0`), and only
+where the deployment can be the server. The host side of each port the
+deployment publishes runs as its user, so its answers to the owner's web
+server on loopback, to a visitor on the LAN and to the host's own address
+carry the user's UID.
+
+* **TCP, on any port.** A TCP reply reaches only its own socket's peer,
+  and the user cannot bind an owner's TCP listener's port.
+* **UDP from port 443, on a gateway only**, for HTTP/3. A gateway's public
+  ports are one deployment's per host. Every other UDP reply meets the UID
+  rules: a user sharing an owner's UDP port through `SO_REUSEADDR` could
+  otherwise answer the owner's own clients from it. The mesh's UDP passes
+  by rule 1.
+
+Next, every flow the user opens gets bit 27 of its ct mark, before any
+accept or drop, so a flow the user opened under an accept never carries a
+"reply": binding an owner's UDP port as the source, sending to the mesh,
+then answering from the mesh is dropped. Bit 27 is clear of Tailscale's
+connmark mask `0xff0000`, of the mesh's packet mark `0x5053<token>` and of
+kube-proxy's and Docker's low bits. A host rule that copies a packet mark
+over the whole ct mark (`CONNMARK --save-mark` with no mask) clears it. A
+reply with no conntrack entry, on a port the owner exempts from
+conntrack, meets the UID rules and is dropped. The deployment's own flows
+take their replies through input. The UID rules follow:
 
 1. Accept the mesh subnet.
 2. Accept port 53 to the host's resolvers, read at admit time
@@ -474,6 +485,13 @@ table. Running admit again reads them again: a changed set is a changed
 table, which admit writes and loads again in place, and an unchanged set
 plans nothing. Until that run, a prefix the ISP has rotated is not
 dropped.
+
+**Known limit: flows opened while the table is absent.** A reload of
+`nftables.service` flushes the ruleset and loads the table again, and a
+flow the user opens in between carries no mark. Its replies stay
+acceptable for as long as the user keeps it alive. With the reply accepts
+limited as above, that matters only for UDP from 443 on a gateway, and
+for TCP not at all.
 
 A deployment that needs something on the owner's network asks the owner,
 who adds an accept rule. That is deliberately outside the CLI.
