@@ -51,6 +51,10 @@ type Manifest struct {
 	// Files, with what removing one needs: the server to validate and
 	// reload once it is gone.
 	WebServer []ManifestWebServer `json:"web_server,omitempty"`
+	// Pending is the sites that were pending when these files were
+	// rendered, sorted: the effective topology left them out, so a check
+	// comparing this site with a render uses the same view.
+	Pending []string `json:"pending,omitempty"`
 }
 
 // ManifestImage is one repository a site's stacks rendered, and every

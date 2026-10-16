@@ -272,3 +272,13 @@ func TestTheContainerProbeAsksForTheImage(t *testing.T) {
 		t.Error("the container probe does not ask docker inspect for .Image")
 	}
 }
+
+// The sites a manifest says were pending are read with it.
+func TestTheInventoryReadsTheManifestsPendingSites(t *testing.T) {
+	h := cleanHost()
+	h.files["/srv/paisans/f2a9/.paisans-manifest.json"] = `{"version":1,"files":[],"pending":["home-c"]}`
+	inv := inspect(t, h)
+	if strings.Join(inv.ManifestPending, ",") != "home-c" {
+		t.Errorf("pending %v", inv.ManifestPending)
+	}
+}

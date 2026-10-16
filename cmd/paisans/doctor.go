@@ -438,7 +438,7 @@ func gatherLeftovers(cfg *config.Config, site string, t apply.Transport) doctor.
 		p.Err = firstOf(err.Error())
 		return p
 	}
-	if p.Report, err = ownership.Classify(cfg, site, inv, inv.ManifestFiles); err != nil {
+	if p.Report, err = ownership.Classify(cfg.WithoutJoining(inv.ManifestPending...), site, inv, inv.ManifestFiles); err != nil {
 		p.Err = err.Error()
 	}
 	return p

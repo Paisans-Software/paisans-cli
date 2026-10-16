@@ -3087,3 +3087,32 @@ func TestTheModuleCheckIsOneExactLine(t *testing.T) {
 		t.Error("the gateway was reloaded")
 	}
 }
+
+// The manifest records the sites pending when the files were rendered.
+func TestTheManifestRecordsThePendingSites(t *testing.T) {
+	const manifest = "/srv/paisans/f2a9/.paisans-manifest.json"
+	host := newHost()
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host, apply.Pending("home-c", "home-b"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := apply.Execute(p, host); err != nil {
+		t.Fatal(err)
+	}
+	var m render.Manifest
+	if err := json.Unmarshal([]byte(host.files[manifest]), &m); err != nil || strings.Join(m.Pending, ",") != "home-b,home-c" {
+		t.Errorf("pending %v, %v", m.Pending, err)
+	}
+
+	plain := newHost()
+	p, err = apply.Build("home-a", plan(t), acmeModule(t), plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := apply.Execute(p, plain); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(plain.files[manifest], `"pending"`) {
+		t.Errorf("a run without pending sites recorded some:\n%s", plain.files[manifest])
+	}
+}

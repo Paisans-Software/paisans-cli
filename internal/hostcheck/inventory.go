@@ -51,6 +51,9 @@ type Inventory struct {
 	// ManifestWebServer is every file that record lists in the include
 	// directory of the operator's web server.
 	ManifestWebServer []render.ManifestWebServer
+	// ManifestPending is the sites that record says were pending when it
+	// was written, nil when it names none.
+	ManifestPending []string
 	// HostSites are the *.caddy files in the deployment's own render.HostSitesDir,
 	// by full path and sorted: site blocks somebody added to the gateway's
 	// Caddy, which no deployment owns.
@@ -262,6 +265,7 @@ func Inspect(t Transport, d deployment.Deployment) (*Inventory, error) {
 		if json.Unmarshal([]byte(content), &m) == nil {
 			inv.ManifestFiles = m.Files
 			inv.ManifestWebServer = m.WebServer
+			inv.ManifestPending = m.Pending
 			for _, f := range m.Files {
 				if f.Path == d.WireGuardConf() {
 					inv.ManifestWireGuard = true

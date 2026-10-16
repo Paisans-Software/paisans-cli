@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -140,6 +141,9 @@ type Note struct {
 type Plan struct {
 	Site      string
 	Transport string
+	// Pending is the sites pending in this run, sorted, recorded in the
+	// manifest.
+	Pending []string
 	// Deployment is whose files these are, and so where they land.
 	Deployment deployment.Deployment
 	Changes    []Change
@@ -394,10 +398,18 @@ const (
 	gatewayCompose   = "infra/compose.yaml"
 )
 
+// Pending names the sites pending in this run, recorded in the manifest so
+// that what compares this site with a render later renders the same view.
+func Pending(sites ...string) Option {
+	return func(o *options) { o.pending = slices.Sorted(slices.Values(sites)) }
+}
+
 // Option adjusts what Build plans, on the operator's word.
 type Option func(*options)
 
 type options struct {
+	// pending is the sites pending in this run; see Pending.
+	pending    []string
 	scope      []string
 	overwrite  []string
 	recreate   []string
@@ -565,6 +577,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 		opt(&o)
 	}
 	out.Report = o.report
+	out.Pending = o.pending
 	out.Served = o.served
 	out.listsImages = o.tolerateUnresolved
 	// An earlier pass of the same apply already carried out these. See After.
@@ -1615,7 +1628,7 @@ func writeManifest(plan *Plan, t Transport) error {
 		files = append(files, entry)
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
-	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files, Pins: pinRecord(plan), Arch: plan.Arch, Images: imageRecord(plan), WebServer: plan.recordedWebServer}, "", "  ")
+	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files, Pins: pinRecord(plan), Arch: plan.Arch, Images: imageRecord(plan), WebServer: plan.recordedWebServer, Pending: plan.Pending}, "", "  ")
 	if err != nil {
 		return err
 	}

@@ -26,7 +26,7 @@ func printLeftovers(r ui.Reporter, cfg *config.Config, site string, inv *hostche
 	if plan.Whole() {
 		manifest = plan.Leftovers
 	}
-	report, err := ownership.Classify(cfg, site, inv, manifest)
+	report, err := ownership.Classify(cfg.WithoutJoining(inv.ManifestPending...), site, inv, manifest)
 	if err != nil {
 		return err
 	}

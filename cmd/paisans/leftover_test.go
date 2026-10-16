@@ -93,3 +93,43 @@ func warned(rec *ui.Recorder, hint, detail string) bool {
 	}
 	return false
 }
+
+// The leftover report is read against the view the manifest recorded: the
+// declaration less the sites pending when this site's files were rendered. An
+// app pinned to such a site is not rendered here in either view, so a stack of
+// it running on this site is still reported, and the pending site's own
+// declaration (here one with no apps role) does not make the report fail.
+func TestLeftoversUseTheManifestsView(t *testing.T) {
+	const twoSites = `
+  home-b:
+    roles: [data]
+    address: 10.44.0.2
+    ssh:
+      host: home-b.local
+      user: ubuntu
+      keys: [alice]
+`
+	declared := strings.Replace(freshSite, "cluster:\n", twoSites+"cluster:\n", 1)
+	declared = strings.Replace(declared, "apps:\n", "apps:\n  docs:\n    blueprint: mbin\n    hostname: docs.example.org\n    placement: { pinned: home-b }\n", 1)
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
+	if err := os.WriteFile(path, []byte(declared), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := cfg.Deployment().ID
+	inv := &hostcheck.Inventory{
+		Containers:      []hostcheck.Container{{Name: "paisans-f2a9-docs-app-1", Deployment: id, Project: "paisans-f2a9-docs", PID: 2}},
+		ManifestPending: []string{"home-b"},
+	}
+	plan := &apply.Plan{Site: "home-a"}
+	rec := &ui.Recorder{Verbose_: true}
+	if err := printLeftovers(rec, cfg, "home-a", inv, plan); err != nil {
+		t.Fatal(err)
+	}
+	if !warned(rec, "left over: stack docs", "stack docs") {
+		t.Errorf("a stack of an app pinned elsewhere, running here, was not reported:\n%s", rec.Lines())
+	}
+}
