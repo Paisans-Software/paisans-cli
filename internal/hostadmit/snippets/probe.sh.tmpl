@@ -36,24 +36,45 @@ if [ -S /var/run/docker.sock ]; then say system-socket present; else say system-
 # Docker's rootless extras bring.
 say userns-restrict "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)"
 if grep -q rootlesskit /sys/kernel/security/apparmor/profiles 2>/dev/null; then say rootlesskit-profile loaded; else say rootlesskit-profile absent; fi
-# The user, and every user's subordinate ranges.
-home=
+# The user, and every user's subordinate ranges. userfiles are the files
+# admit writes as root whose paths hold the user's UID.
+home= userfiles=
 if line=$(getent passwd "$u"); then
   say passwd "$line"
   say groups "$(id -Gn "$u")"
   say group "$(id -gn "$u")"
   uid=$(id -u "$u")
+  userfiles="$userfiles /etc/systemd/system/user@$uid.service.d/paisans-mesh.conf"
   home=$(printf '%s' "$line" | cut -d: -f6)
   if [ -e "/var/lib/systemd/linger/$u" ]; then say linger yes; else say linger no; fi
   say manager "$(systemctl is-active "user@$uid.service" 2>/dev/null || true)"
+  # Everything sudo -l lists for the user: its rules, by name or by any
+  # group, and the Defaults that apply to it, its runas users and its
+  # commands. admit reads them. With no sudo installed there is none.
+  if command -v sudo >/dev/null 2>&1; then
+    say sudo listed
+    sudo -n -l -U "$u" 2>&1 | sed 's/^/sudo-l /'
+  else
+    say sudo absent
+  fi
+  homepath=$home
 else
   say passwd absent
+  homepath=$(useradd -D 2>/dev/null | sed -n 's/^HOME=//p')
+  homepath=${homepath:-/home}/$u
 fi
+# The user's home, or the one useradd would give a user not made yet: it
+# is stat'ed, never read inside.
+if [ -L "$homepath" ]; then say home "link 0 $homepath"
+elif [ -d "$homepath" ]; then say home "dir $(stat -c %u -- "$homepath") $homepath"
+elif [ -e "$homepath" ]; then say home "other 0 $homepath"
+else say home "absent 0 $homepath"; fi
 awk -F: 'NF >= 3 { print "subuid " $1 ":" $2 ":" $3 }' /etc/subuid 2>/dev/null
 awk -F: 'NF >= 3 { print "subgid " $1 ":" $2 ":" $3 }' /etc/subgid 2>/dev/null
 # Each file admit writes as root: its checksum, mode and owner, so admit
 # compares with what it would write without printing what is there.
-for f in{{ range .Files }} {{ q . }}{{ end }}; do
+# userfiles hold only the UID, which id printed, so they split safely.
+for f in{{ range .Files }} {{ q . }}{{ end }} $userfiles; do
   case $(above "$f") in
     link) say file "$f link-above"; continue ;;
     unsafe) say file "$f unsafe-above"; continue ;;

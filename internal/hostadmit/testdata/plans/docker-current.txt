@@ -8,28 +8,67 @@ step 1: install packages: docker-ce-rootless-extras=5:29.9.1-1~ubuntu.24.04~nobl
     $ apt-get -o DPkg::Lock::Timeout=300 update
     $ apt-get -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confold install -y --no-upgrade docker-ce-rootless-extras=5:29.9.1-1~ubuntu.24.04~noble uidmap
 
-step 2: create /srv/paisans
+step 2: create user paisans-f2a9
+  user: create paisans-f2a9 with a home, whose subordinate ID ranges useradd allocates
+  run:
+    $ useradd --create-home --shell /bin/bash paisans-f2a9
+
+step 3: start paisans-f2a9's manager after the mesh
+  user: order user@<uid>.service after wg-quick@psns-f2a9 at boot, so a container that publishes on the mesh address finds it; a manager running now is not restarted, and takes it at its next start
+  provisional: run once the user exists
+  write /etc/systemd/system/user@<uid>.service.d/paisans-mesh.conf mode 0644:
+    | # Written by paisans host admit for deployment f2a9; paisans host evict
+    | # removes it. The user's manager, its Docker daemon and its containers
+    | # start after the mesh at boot.
+    | [Unit]
+    | Wants=wg-quick@psns-f2a9.service
+    | After=wg-quick@psns-f2a9.service
+  run:
+    $ systemctl daemon-reload
+
+step 4: delegate cgroups to users
+  delegation: let every user's manager delegate cpu cpuset io memory pids, for compose's limits; written before paisans-f2a9's manager first starts
+  write /etc/systemd/system/user@.service.d/delegate.conf mode 0644:
+    | # Written by paisans host admit. Shared by every admitted deployment;
+    | # paisans host evict removes it with the last of them.
+    | [Service]
+    | Delegate=cpu cpuset io memory pids
+  run:
+    $ systemctl daemon-reload
+
+step 5: enable linger for paisans-f2a9
+  linger: run paisans-f2a9's manager, its Docker daemon and its timers without a login, and at boot
+  run:
+    $ loginctl enable-linger paisans-f2a9
+
+step 6: start paisans-f2a9's manager
+  linger: start user@<uid>.service and wait for it, which does nothing to a manager already running
+  provisional: run once the user exists
+  run:
+    $ systemctl start user@<uid>.service
+
+step 7: create /srv/paisans
   directory: every deployment's directory lives in it, root's, mode 755
   run:
     $ install -d -m 755 -o root -g root /srv/paisans
 
-step 3: create /srv/paisans/f2a9
+step 8: create /srv/paisans/f2a9
   directory: the deployment's own, paisans-f2a9's, mode 750
   provisional: run once the user exists
   run:
     $ install -d -m 750 -o paisans-f2a9 -g paisans-f2a9 /srv/paisans/f2a9
 
-step 4: create /etc/wireguard
+step 9: create /etc/wireguard
   wireguard: root's, mode 700, so the deployment's user cannot plant a conf the helper has not checked
   run:
     $ install -d -m 700 -o root -g root /etc/wireguard
 
-step 5: create /usr/local/libexec/paisans
+step 10: create /usr/local/libexec/paisans
   wireguard: where each deployment's helper lives, root's, mode 755
   run:
     $ install -d -m 755 -o root -g root /usr/local/libexec/paisans
 
-step 6: install the WireGuard helper
+step 11: install the WireGuard helper
   wireguard: the one command paisans-f2a9 may run as root: it checks each conf before wg-quick sees it, and adds the mesh's mark
   write /usr/local/libexec/paisans/wg-psns-f2a9 mode 0755:
     | #!/bin/sh
@@ -374,7 +413,7 @@ step 6: install the WireGuard helper
     | 	;;
     | esac
 
-step 7: install the helper's sudoers line
+step 12: install the helper's sudoers line
   wireguard: /etc/sudoers.d/paisans-f2a9, mode 440, checked by visudo under a name sudo skips before it is moved into place
   write /etc/sudoers.d/paisans-f2a9.new mode 0440:
     | paisans-f2a9 ALL=(root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-f2a9

@@ -1,16 +1,38 @@
 admit site vm of f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01 as paisans-f2a9 on fake (ubuntu 24.04)
 
-step 1: create /srv/paisans
+step 1: start paisans-f2a9's manager after the mesh
+  user: order user@1001.service after wg-quick@psns-f2a9 at boot, so a container that publishes on the mesh address finds it; a manager running now is not restarted, and takes it at its next start
+  write /etc/systemd/system/user@1001.service.d/paisans-mesh.conf mode 0644:
+    | # Written by paisans host admit for deployment f2a9; paisans host evict
+    | # removes it. The user's manager, its Docker daemon and its containers
+    | # start after the mesh at boot.
+    | [Unit]
+    | Wants=wg-quick@psns-f2a9.service
+    | After=wg-quick@psns-f2a9.service
+  run:
+    $ systemctl daemon-reload
+
+step 2: delegate cgroups to users
+  delegation: let every user's manager delegate cpu cpuset io memory pids, for compose's limits; paisans-f2a9's manager is running, and takes it at its next start
+  write /etc/systemd/system/user@.service.d/delegate.conf mode 0644:
+    | # Written by paisans host admit. Shared by every admitted deployment;
+    | # paisans host evict removes it with the last of them.
+    | [Service]
+    | Delegate=cpu cpuset io memory pids
+  run:
+    $ systemctl daemon-reload
+
+step 3: create /srv/paisans
   directory: every deployment's directory lives in it, root's, mode 755
   run:
     $ install -d -m 755 -o root -g root /srv/paisans
 
-step 2: create /srv/paisans/f2a9
+step 4: create /srv/paisans/f2a9
   directory: the deployment's own, paisans-f2a9's, mode 750
   run:
     $ install -d -m 750 -o paisans-f2a9 -g paisans-f2a9 /srv/paisans/f2a9
 
-step 3: restore the helper's sudoers line
+step 5: restore the helper's sudoers line
   wireguard: /etc/sudoers.d/paisans-f2a9, mode 440, checked by visudo under a name sudo skips before it is moved into place
   write /etc/sudoers.d/paisans-f2a9.new mode 0440:
     | paisans-f2a9 ALL=(root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-f2a9
@@ -25,6 +47,13 @@ present: package: wireguard-tools installed
 present: package: ufw installed
 present: package: git installed
 present: apparmor: rootlesskit's profile is loaded
+present: user: paisans-f2a9 exists, uid 1001, in no privileged group, and sudo grants it nothing beyond admit's helper
+present: user: paisans-f2a9 holds 165536-231071 in /etc/subuid
+present: user: paisans-f2a9 holds 165536-231071 in /etc/subgid
+present: linger: on for paisans-f2a9
+present: linger: paisans-f2a9's manager is running
 present: mesh: nothing on this host overlaps 10.44.0.0/24
 present: wireguard: /etc/wireguard is root's alone
 present: wireguard: the one command paisans-f2a9 may run as root: it checks each conf before wg-quick sees it, and adds the mesh's mark
+warning: delegation reaches paisans-f2a9's manager at its next start
+  Its manager is running, and restarting it would restart its Docker daemon and every container in it, so admit does not. cpuset and io limits apply after the host's next reboot.
