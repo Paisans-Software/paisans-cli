@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"io"
-	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -28,46 +27,6 @@ func siteApply(t *testing.T, path, site string, inside bool) (*ui.Recorder, erro
 		r = checkReporter{rec, rec, &[]checkReport{}}
 	}
 	return rec, siteApplied(r, cfg, path, site, "", 4, nil)
-}
-
-// apply --site on a monitor with managed_by: external writes its app's
-// site file, reloads the server in its container, records include_dir in
-// paisans-stack.yaml and checks the app once, then ends as applied.
-func TestApplySiteWritesTheSiteFileAndReloads(t *testing.T) {
-	checked := fakeWebServerCheck(t, nil)
-	path := externalFixture(t)
-	f := fakeWebServerFiles(t, mountedCaddy, "{\n\temail ops@example.org\n}\nimport /etc/caddy/paisans.d/*\n")
-	rec, err := siteApply(t, path, "watch", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(f.server.Files[healthFile], "reverse_proxy 127.0.0.1:8480") || !f.server.Ran("caddy validate") || !f.server.Ran("caddy reload") {
-		t.Errorf("files %v, asked %v", f.server.Files, f.server.Asked)
-	}
-	if got := f.manifest.record(t); len(got) != 1 || got[0].Path != healthFile {
-		t.Errorf("record %+v", got)
-	}
-	if data, _ := os.ReadFile(path); !strings.Contains(string(data), "include_dir: /opt/caddy/paisans.d\n") {
-		t.Errorf("paisans-stack.yaml:\n%s", data)
-	}
-	if !slices.Equal(*checked, []string{"health"}) {
-		t.Errorf("checked %v", *checked)
-	}
-	got := lines(inSection(rec, "web server"))
-	want := []string{
-		"step site file for health",
-		"progress read the web server on watch: site file for health",
-		"progress write paisans-f2a9-health.caddy: site file for health",
-		"done site file for health: " + healthFile + " written, caddy reloaded",
-		"note watch: include_dir set to /opt/caddy/paisans.d in paisans-stack.yaml: Apply derived it beside caddy's configuration, /opt/caddy/Caddyfile, which includes it. Change it there to use another directory, or set it to false to have apply write nothing for your web server.",
-		"step health",
-		"progress reach health.example.org: health",
-		"done health: health.example.org",
-		"result Applied 4 files to watch.",
-	}
-	if !slices.Equal(got, want) {
-		t.Errorf("web server section:\n%s", strings.Join(got, "\n"))
-	}
 }
 
 // With no line including the directory, apply --site writes nothing, says

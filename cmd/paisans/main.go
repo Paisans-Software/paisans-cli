@@ -882,24 +882,13 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err := checkGatewayAnswers(r, cfg, *site); err != nil {
 		return err
 	}
-	// What the steps applied is recorded once they have all succeeded:
-	// the images now, and the web server's directory once its step has
-	// written there. As a step of apply with no --site, the web server is
-	// the run's, which records it.
+	// What the steps applied is recorded once they have all succeeded.
 	if review != nil {
-		images := *review
-		images.scope.WebServer = false
-		if err := recordGrant(r, &images, cfg.Deployment(), approvedBy); err != nil {
+		if err := recordGrant(r, review, cfg.Deployment(), approvedBy); err != nil {
 			return err
 		}
 	}
-	err = siteApplied(r, cfg, *configPath, *site, *destination, written, clients.result())
-	if _, step := r.(checkReporter); err == nil && !step && review != nil {
-		web := *review
-		web.scope = grant.Scope{WebServer: true}
-		return recordGrant(r, &web, cfg.Deployment(), approvedBy)
-	}
-	return err
+	return siteApplied(r, cfg, *configPath, *site, *destination, written, clients.result())
 }
 
 // planningEverySite is set while apply without --site runs, for every

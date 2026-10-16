@@ -261,33 +261,6 @@ func TestAPinnedCaddyDigestIsTheReference(t *testing.T) {
 	}
 }
 
-func TestWebServerIsTheIncludeDirectory(t *testing.T) {
-	cfg := fixture(t)
-	s := cfg.Sites["watch"]
-	s.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "127.0.0.1:8480", IncludeDir: config.IncludeDir{Path: "/srv/caddy.d"}}
-	cfg.Sites["watch"] = s
-	g, err := grant.For(cfg, nil, "watch")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if g.WebServer == nil || g.WebServer.IncludeDir != "/srv/caddy.d" {
-		t.Fatalf("web server %+v", g.WebServer)
-	}
-	r := grant.Compare("watch", g, grant.Record{}, grant.ApplyScope())
-	if len(r.Changes) != 1 || r.Changes[0].Op != grant.Added {
-		t.Errorf("%+v", r.Changes)
-	}
-	r = grant.Compare("watch", grant.Grant{}, grant.Record{WebServer: &grant.WebServerPart{IncludeDir: "/srv/caddy.d"}}, grant.ApplyScope())
-	if len(r.Changes) != 1 || r.Changes[0].Op != grant.Removed || r.Pending() != 0 {
-		t.Errorf("removed: %+v", r.Changes)
-	}
-	s.WebServer.IncludeDir = config.IncludeDir{Off: true}
-	cfg.Sites["watch"] = s
-	if g, _ := grant.For(cfg, nil, "watch"); g.WebServer != nil {
-		t.Errorf("include_dir: false grants a directory: %+v", g.WebServer)
-	}
-}
-
 func TestOnlyNarrowsTheImages(t *testing.T) {
 	g := grant.Grant{Images: []grant.Image{{Stack: "talk", Service: "app", Reference: "b"}, {Stack: "blog", Service: "app", Reference: "b"}}}
 	rec := grant.Record{Images: &grant.ImagesPart{Entries: []grant.Image{{Stack: "blog", Service: "app", Reference: "a"}, {Stack: "chat", Service: "app", Reference: "a"}}}}

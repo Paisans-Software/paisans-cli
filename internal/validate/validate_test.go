@@ -678,31 +678,20 @@ func TestExternalWebServerNeedsListen(t *testing.T) {
 	}
 }
 
-// include_dir is where apply writes for the operator's web server: it fits
-// mode external alone, and must be a plain absolute path. false fits either.
-func TestWebServerIncludeDir(t *testing.T) {
-	for _, tc := range []struct {
-		mode config.ManagedBy
-		dir  config.IncludeDir
-		rule string
-	}{
-		{config.ManagedByExternal, config.IncludeDir{Path: "/opt/caddy/paisans.d"}, ""},
-		{config.ManagedByExternal, config.IncludeDir{Off: true}, ""},
-		{config.ManagedByExternal, config.IncludeDir{Path: "paisans.d"}, "web-server-include-dir-path"},
-		{config.ManagedByExternal, config.IncludeDir{Path: "/etc/nginx/*"}, "web-server-include-dir-path"},
-		{config.ManagedByPaisans, config.IncludeDir{Path: "/opt/caddy/paisans.d"}, "web-server-include-dir-managed-by"},
-	} {
-		cfg := load(t, "uptime-without-smtp")
-		site := cfg.Sites["watch"]
-		site.WebServer = &config.WebServer{ManagedBy: tc.mode, IncludeDir: tc.dir}
-		if tc.mode == config.ManagedByExternal {
-			site.WebServer.Listen = "127.0.0.1:8480"
-		}
-		cfg.Sites["watch"] = site
-		result := validate.Check(cfg)
-		for _, rule := range []string{"web-server-include-dir-path", "web-server-include-dir-managed-by"} {
-			if want := rule == tc.rule; refusedFor(result, rule, "sites.watch.web_server.include_dir") != want {
-				t.Errorf("%s %+v: %s refused %v, want %v: %v", tc.mode, tc.dir, rule, !want, want, result.Findings)
+// include_dir is refused by name, whatever it holds: nothing is written into
+// the owner's web server, so there is nothing for it to name.
+func TestIncludeDirIsRefused(t *testing.T) {
+	for _, dir := range []config.IncludeDir{{Path: "/etc/nginx/paisans.d"}, {Off: true}} {
+		for _, mode := range []config.ManagedBy{config.ManagedByExternal, config.ManagedByPaisans} {
+			cfg := load(t, "uptime-without-smtp")
+			site := cfg.Sites["watch"]
+			site.WebServer = &config.WebServer{ManagedBy: mode, IncludeDir: dir}
+			if mode == config.ManagedByExternal {
+				site.WebServer.Listen = "127.0.0.1:8480"
+			}
+			cfg.Sites["watch"] = site
+			if !refusedFor(validate.Check(cfg), "web-server-include-dir", "sites.watch.web_server.include_dir") {
+				t.Errorf("%s include_dir %+v accepted: %v", mode, dir, validate.Check(cfg).Findings)
 			}
 		}
 	}

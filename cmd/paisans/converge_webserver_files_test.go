@@ -113,57 +113,6 @@ func convergeAt(t *testing.T, path string, extra ...string) error {
 	return err
 }
 
-// With the directory included by a wildcard, apply writes the app's site
-// file into it, validates and reloads the server, records the file in the
-// manifest, and writes the directory it derived into paisans-stack.yaml with a
-// warning saying so. The next run finds it unchanged and reloads nothing.
-func TestApplyWritesTheSiteFileWhereTheServerIncludesIt(t *testing.T) {
-	fakeConverge(t, nil)
-	path := externalFixture(t)
-	before, _ := os.ReadFile(path)
-	f := fakeWebServerFiles(t, mountedCaddy, "{\n\temail ops@example.org\n}\nimport /etc/caddy/paisans.d/*\n")
-	rec := recordConverge(t)
-	if err := convergeAt(t, path, "--execute"); err != nil {
-		t.Fatal(err)
-	}
-	after, _ := os.ReadFile(path)
-	want := strings.Replace(string(before), "      listen: 127.0.0.1:8480\n", "      listen: 127.0.0.1:8480\n      include_dir: /opt/caddy/paisans.d\n", 1)
-	if string(after) != want {
-		t.Errorf("paisans-stack.yaml:\n%s", after)
-	}
-	if i := rec.Index("note", "watch: include_dir set to /opt/caddy/paisans.d in paisans-stack.yaml"); i < 0 {
-		t.Errorf("no warning for the yaml edit:\n%s", rec.Lines())
-	}
-	if !strings.Contains(f.server.Files[healthFile], "reverse_proxy 127.0.0.1:8480") {
-		t.Errorf("files %v", f.server.Files)
-	}
-	if !f.server.Ran("caddy validate") || !f.server.Ran("caddy reload") {
-		t.Errorf("asked %v", f.server.Asked)
-	}
-	if got := f.manifest.record(t); len(got) != 1 || got[0].Path != healthFile || got[0].Container != "caddy-1" {
-		t.Errorf("record %+v", got)
-	}
-	if i := rec.Index("done", "site file for health"); i < 0 || rec.Events[i].Extra != healthFile+" written, caddy reloaded" || !rec.Has("result", "Deployment complete.") {
-		t.Errorf("output:\n%s", rec.Lines())
-	}
-	got := lines(inSection(rec, "web server"))
-	if i, j := slices.Index(got, "step site file for health"), slices.Index(got, "step health"); i < 0 || j < i {
-		t.Errorf("the file is not written ahead of the check:\n%s", strings.Join(got, "\n"))
-	}
-
-	f.server.Asked = nil
-	rec = recordConverge(t)
-	if err := convergeAt(t, path, "--execute"); err != nil {
-		t.Fatal(err)
-	}
-	if f.server.Ran("printf") || f.server.Ran("reload") || rec.Has("note", "include_dir set") {
-		t.Errorf("a second run changed something: %v\n%s", f.server.Asked, rec.Lines())
-	}
-	if again, _ := os.ReadFile(path); string(again) != want {
-		t.Errorf("paisans-stack.yaml changed again:\n%s", again)
-	}
-}
-
 // With no line including the directory, nothing is written, nothing goes
 // into paisans-stack.yaml, the warning carries the one line to add, and the run
 // does not end as complete.
@@ -288,58 +237,6 @@ func TestApplyRefusesAnImportInsideABlock(t *testing.T) {
 		if !strings.Contains(rec.Events[i+1].Text, want) {
 			t.Errorf("warning lacks %q:\n%s", want, rec.Events[i+1].Text)
 		}
-	}
-}
-
-// include_dir: false writes nothing and asks the web server nothing: the
-// operator adds the snippet themselves, and the check is as before.
-func TestApplyWithIncludeDirFalseWritesNothing(t *testing.T) {
-	fakeConverge(t, nil)
-	path := externalFixture(t)
-	data, _ := os.ReadFile(path)
-	os.WriteFile(path, []byte(strings.Replace(string(data), "      listen: 127.0.0.1:8480\n", "      listen: 127.0.0.1:8480\n      include_dir: false\n", 1)), 0o600)
-	before, _ := os.ReadFile(path)
-	f := fakeWebServerFiles(t, mountedCaddy, "import /etc/caddy/paisans.d/*\n")
-	rec := recordConverge(t)
-	if err := convergeAt(t, path, "--execute"); err != nil {
-		t.Fatal(err)
-	}
-	if len(f.server.Asked) != 0 || len(f.reached) != 0 {
-		t.Errorf("the web server was asked %v", f.server.Asked)
-	}
-	if after, _ := os.ReadFile(path); string(after) != string(before) {
-		t.Errorf("paisans-stack.yaml was edited")
-	}
-	if !rec.Has("result", "Deployment complete.") {
-		t.Errorf("output:\n%s", rec.Lines())
-	}
-}
-
-// include_dir: false with files recorded from before removes them, and
-// only them.
-func TestApplyWithIncludeDirFalseRemovesWhatItWrote(t *testing.T) {
-	fakeConverge(t, nil)
-	path := externalFixture(t)
-	f := fakeWebServerFiles(t, mountedCaddy, "import /etc/caddy/paisans.d/*\n")
-	recordConverge(t)
-	if err := convergeAt(t, path, "--execute"); err != nil {
-		t.Fatal(err)
-	}
-	f.server.Files["/opt/caddy/paisans.d/blog.caddy"] = "blog.example.org {\n}\n"
-	data, _ := os.ReadFile(path)
-	os.WriteFile(path, []byte(strings.Replace(string(data), "include_dir: /opt/caddy/paisans.d", "include_dir: false", 1)), 0o600)
-	rec := recordConverge(t)
-	if err := convergeAt(t, path, "--execute"); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := f.server.Files[healthFile]; ok {
-		t.Errorf("the file stayed:\n%s", rec.Lines())
-	}
-	if _, ok := f.server.Files["/opt/caddy/paisans.d/blog.caddy"]; !ok {
-		t.Error("somebody else's file went")
-	}
-	if got := f.manifest.record(t); len(got) != 0 {
-		t.Errorf("record %+v", got)
 	}
 }
 

@@ -873,11 +873,6 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	// An app the operator's own web server serves is running, but not yet
 	// known to be reachable: the run is complete only once it is.
 	end, broken := webServerStep(r, cfg, configPath, webServerScope{})
-	if end == nil {
-		if err := convergeRecordWebServer(r, cfg, reviews); err != nil {
-			return err
-		}
-	}
 	convergeLeft(r, cfg, secretsPath, configPath)
 	if end != nil || adminErr != nil {
 		return webServerEnd(end, broken, adminErr)

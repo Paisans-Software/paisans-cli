@@ -36,9 +36,6 @@ type Grant struct {
 	// Images is one entry per service of every compose file the render
 	// writes for the site, sorted by stack and service.
 	Images []Image
-	// WebServer is the directory apply writes the operator's web server's
-	// files into, nil on a site with none.
-	WebServer *WebServer
 	// Blueprints is one entry per app on the site whose blueprint comes from
 	// a catalog, sorted by app: what decides the rest of that stack, since a
 	// catalog's author wrote its templates.
@@ -78,13 +75,6 @@ type Image struct {
 	Foundation bool `json:"foundation,omitempty"`
 }
 
-// WebServer is where apply writes the files the operator's web server
-// includes. It is a directory root writes into outside the deployment's own,
-// which is why it is reviewed.
-type WebServer struct {
-	IncludeDir string `json:"include_dir"`
-}
-
 // For computes site's grant from cfg and plan, plan being the render of cfg.
 // A nil plan computes the login and the keys alone, which is all host prepare
 // needs.
@@ -93,7 +83,7 @@ func For(cfg *config.Config, plan *render.Plan, site string) (Grant, error) {
 	if !ok {
 		return Grant{}, fmt.Errorf("no site %q is declared", site)
 	}
-	g := Grant{Login: declared.SSHUser(), Keys: KeysOf(declared.SSH), WebServer: WebServerOf(declared)}
+	g := Grant{Login: declared.SSHUser(), Keys: KeysOf(declared.SSH)}
 	if plan != nil {
 		images, err := ImagesOf(plan, site)
 		if err != nil {
@@ -199,15 +189,4 @@ func sortImages(list []Image) {
 		}
 		return list[i].Service < list[j].Service
 	})
-}
-
-// WebServerOf is the include directory of a site whose apps the operator's
-// own web server serves, when paisans-stack.yaml names one. An include_dir left
-// unset is derived on the host by apply and written into paisans-stack.yaml, so
-// it is reviewed from the run after that; false writes nothing there.
-func WebServerOf(s config.Site) *WebServer {
-	if !s.Has(config.RoleMonitor) || s.WebServerManagedBy() != config.ManagedByExternal || s.WebServer == nil || s.WebServer.IncludeDir.Path == "" {
-		return nil
-	}
-	return &WebServer{IncludeDir: s.WebServer.IncludeDir.Path}
 }

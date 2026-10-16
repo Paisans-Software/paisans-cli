@@ -117,28 +117,6 @@ func convergeReview(r ui.Reporter, cfg *config.Config, o convergeOptions) (map[s
 	return out, pending, nil
 }
 
-// convergeRecordWebServer records each site's web server part once the
-// run's web server step has succeeded, since that step is what writes into
-// the directory.
-func convergeRecordWebServer(r ui.Reporter, cfg *config.Config, reviews map[string]*siteReview) error {
-	by := ""
-	if reviewedByRun != nil {
-		by = reviewedByRun.approvedBy
-	}
-	for _, site := range cfg.SiteNames() {
-		s := reviews[site]
-		if s == nil {
-			continue
-		}
-		web := *s
-		web.scope = grant.Scope{WebServer: true}
-		if err := recordGrant(r, &web, cfg.Deployment(), by); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // convergeRecords is each reviewed site's grant record, by site.
 func convergeRecords(reviews map[string]*siteReview) map[string]grant.Record {
 	out := map[string]grant.Record{}

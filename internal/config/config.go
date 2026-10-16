@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path"
 	"regexp"
 	"slices"
 	"sort"
@@ -323,10 +322,9 @@ type WebServer struct {
 	// an IPv4 address and a port. Required with managed_by external, refused with
 	// managed_by paisans.
 	Listen string `yaml:"listen"`
-	// IncludeDir is the directory on the host the toolkit writes its own
-	// files in for the operator's web server, which includes them with one
-	// wildcard line. Unset, apply derives it beside the web server's
-	// configuration and writes it here; false writes nothing there.
+	// IncludeDir is parsed only so that validate can refuse it by name
+	// (web-server-include-dir) rather than the load failing on an unknown
+	// key. Nothing reads it.
 	IncludeDir IncludeDir `yaml:"include_dir"`
 }
 
@@ -359,23 +357,6 @@ func (d *IncludeDir) UnmarshalYAML(node *yaml.Node) error {
 	}
 	*d = IncludeDir{Path: node.Value}
 	return nil
-}
-
-// IncludeDirProblem says what is wrong with an include_dir path, empty when
-// nothing is. It is written into the web server's configuration and into
-// shell commands, so it is held to plain absolute paths.
-func IncludeDirProblem(dir string) string {
-	switch {
-	case !strings.HasPrefix(dir, "/"):
-		return "is not an absolute path"
-	case dir == "/":
-		return "is the root directory"
-	case path.Clean(dir) != dir:
-		return "is not written in its clean form, " + path.Clean(dir)
-	case strings.ContainsAny(dir, " \t\n'\"\\$`;#*?[]{}"):
-		return "holds a space, a quote or a character a shell or a web server's glob reads specially"
-	}
-	return ""
 }
 
 // ListenHostPort splits Listen into an IPv4 address and a port, false when it

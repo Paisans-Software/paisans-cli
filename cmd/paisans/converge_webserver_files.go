@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
@@ -224,17 +223,6 @@ func writeWebServerFile(r ui.Reporter, cfg *config.Config, configPath, site, app
 	case state == webserver.IncludeInBlock:
 		return warned(fmt.Sprintf("%s imports %s inside a block", ws.Server, inc.Seen),
 			fmt.Sprintf("Nothing was written. %s has:\n\n    %s\n\ninside a block: a site, a snippet or the global options. The site files hold site blocks, which Caddy reads only at the top level, so it would refuse the whole configuration once one is in the directory. Move the import line out of every block, to the top level of the Caddyfile, after the global options block if it has one:\n\n%s\nthen run paisans apply --execute again.", conf, found, webserver.IncludeExample(ws.Server, inc.Seen)))
-	}
-	if dir.Unset() {
-		// Recorded only once the server is known to read it, so a
-		// directory nothing includes is never written into paisans-stack.yaml.
-		if err := config.SetIncludeDir(configPath, site, inc.Dir); err != nil {
-			return failed(err)
-		}
-		cfg.Sites[site].WebServer.IncludeDir = config.IncludeDir{Path: inc.Dir}
-		// Said once the step has ended, so it does not break into it.
-		defer r.Note(fmt.Sprintf("%s: include_dir set to %s in %s", site, inc.Dir, filepath.Base(configPath)),
-			fmt.Sprintf("Apply derived it beside %s's configuration, %s, which includes it. Change it there to use another directory, or set it to false to have apply write nothing for your web server.", ws.Server, conf))
 	}
 	step.Progress("write " + name)
 	files := []webserver.File{{App: app, Name: name, Content: webserver.FileContent(target, ws)}}

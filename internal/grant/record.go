@@ -24,7 +24,7 @@ const Version = 3
 
 // Record is the grant a deployment last applied on one host, each part
 // written by the command that applies it once its steps for the site have
-// all succeeded: the keys part by host prepare, the images, web server and
+// all succeeded: the keys part by host prepare, the images and
 // configuration parts by apply. Approved is the one written before any step:
 // what an operator approved there and no command has applied yet. A part
 // that was never written is nil.
@@ -32,7 +32,6 @@ type Record struct {
 	Version    int             `json:"version"`
 	Keys       *KeysPart       `json:"keys,omitempty"`
 	Images     *ImagesPart     `json:"images,omitempty"`
-	WebServer  *WebServerPart  `json:"web_server,omitempty"`
 	Blueprints *BlueprintsPart `json:"blueprints,omitempty"`
 	Config     *ConfigPart     `json:"config,omitempty"`
 	Approved   *ApprovedPart   `json:"approved,omitempty"`
@@ -93,13 +92,6 @@ type BlueprintsPart struct {
 	AppliedAt  string      `json:"applied_at"`
 	ApprovedBy string      `json:"approved_by,omitempty"`
 	Entries    []Blueprint `json:"entries"`
-}
-
-// WebServerPart is the include directory apply last wrote into.
-type WebServerPart struct {
-	AppliedAt  string `json:"applied_at"`
-	ApprovedBy string `json:"approved_by,omitempty"`
-	IncludeDir string `json:"include_dir"`
 }
 
 // ErrMalformed is a record that cannot be read as one: corrupt, or written
@@ -226,10 +218,10 @@ func writeCommand(d deployment.Deployment, want, content string) string {
 func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 // Scope is the parts of a grant one command reviews and records: host
-// prepare's keys, apply's images and web server, or all of them for apply
+// prepare's keys, apply's images, or all of them for apply
 // with no --site.
 type Scope struct {
-	Keys, Images, WebServer bool
+	Keys, Images bool
 	// Stacks, when set, narrows the images to these stacks, as apply --only
 	// does: a stack the run leaves alone is neither reviewed nor recorded.
 	Stacks []string
@@ -237,7 +229,7 @@ type Scope struct {
 
 // holds reports whether rec holds any part s covers.
 func (rec Record) holds(s Scope) bool {
-	return (s.Keys && rec.Keys != nil) || (s.Images && rec.Images != nil) || (s.WebServer && rec.WebServer != nil)
+	return (s.Keys && rec.Keys != nil) || (s.Images && rec.Images != nil)
 }
 
 // PrepareScope is host prepare's.
@@ -245,11 +237,11 @@ var PrepareScope = Scope{Keys: true}
 
 // ApplyScope is apply --site's, narrowed to stacks when it names any.
 func ApplyScope(stacks ...string) Scope {
-	return Scope{Images: true, WebServer: true, Stacks: stacks}
+	return Scope{Images: true, Stacks: stacks}
 }
 
 // AllScope is every part, for apply with no --site.
-var AllScope = Scope{Keys: true, Images: true, WebServer: true}
+var AllScope = Scope{Keys: true, Images: true}
 
 func (s Scope) stack(name string) bool {
 	return len(s.Stacks) == 0 || slices.Contains(s.Stacks, name)
@@ -267,8 +259,6 @@ func (s Scope) covers(subject string) bool {
 		return s.Images && s.stack(stack)
 	case "blueprint":
 		return s.Images && s.stack(rest)
-	case "web":
-		return s.WebServer
 	}
 	return false
 }
@@ -428,14 +418,6 @@ func Update(rec Record, g Grant, s Scope, now time.Time, approvedBy string) Reco
 				part.ApprovedBy = rec.Blueprints.ApprovedBy
 			}
 			out.Blueprints = part
-		}
-	}
-	if s.WebServer {
-		switch {
-		case g.WebServer == nil:
-			out.WebServer = nil
-		case rec.WebServer == nil || rec.WebServer.IncludeDir != g.WebServer.IncludeDir:
-			out.WebServer = &WebServerPart{AppliedAt: at, ApprovedBy: approvedBy, IncludeDir: g.WebServer.IncludeDir}
 		}
 	}
 	return out

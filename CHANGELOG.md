@@ -62,6 +62,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 - `host allow`, `host disallow` and the key allowlist in `/etc/paisans/ssh-allow.<user>` are removed, with `host prepare`'s refusal of keys it lacked and `doctor`'s allowlist check.
 - `--sudo` is removed from every command but `host deployments`: each runs as the site's ssh user, and `apply`, `site remove`, `host prepare --all` and `config` ask no sudo password before they start.
+- `web_server.include_dir`: `validate` refuses it, since `apply` writes nothing into the host owner's web server.
 
 ### Fixed
 

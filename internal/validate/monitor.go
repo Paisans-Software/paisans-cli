@@ -122,10 +122,8 @@ func andList(words []string) string {
 // mesh address are accepted, and all but loopback with a warning.
 // One listen publishes one app, so an external monitor hosts the monitor and
 // nothing else: a second app pinned there would be routed by nothing.
-// include_dir is where apply writes that app's file for the operator's web
-// server, so it too belongs to managed_by external, and it is written into that
-// server's configuration and into shell commands, so it is held to a plain
-// absolute path.
+// include_dir is refused, since apply writes only into the deployment's own
+// root.
 func (c *checker) webServer() {
 	for _, name := range c.cfg.SiteNames() {
 		site := c.cfg.Sites[name]
@@ -146,14 +144,10 @@ func (c *checker) webServer() {
 			continue
 		}
 		managedBy, listen := site.WebServerManagedBy(), site.WebServer.Listen
-		if dir := site.WebServer.IncludeDir; !dir.Unset() && managedBy != config.ManagedByExternal {
-			c.refuse("web-server-include-dir-managed-by", key+".include_dir",
-				"web_server include_dir does not fit its managed_by",
-				"is set, but managed_by is paisans, where the toolkit's own Caddy serves the app and no other web server includes anything. Remove include_dir, or set managed_by: external.")
-		} else if p := config.IncludeDirProblem(dir.Path); dir.Path != "" && p != "" {
-			c.refuse("web-server-include-dir-path", key+".include_dir",
-				"web_server include_dir is not a plain absolute path",
-				"is %q, which %s. It is written into your web server's configuration and into commands on the host, so it must be an absolute path in its clean form, without spaces, quotes or glob characters, for example /etc/nginx/paisans.d.", dir.Path, p)
+		if !site.WebServer.IncludeDir.Unset() {
+			c.refuse("web-server-include-dir", key+".include_dir",
+				"web_server include_dir is not a setting",
+				"is set. apply writes nothing into your web server's configuration: it writes a reference snippet for each app under %s/web-server/ on the site, and the host's owner installs it in their web server (paisans web-server show --app <app> prints it). Remove include_dir.", c.cfg.Deployment().Root())
 		}
 		switch {
 		case managedBy == config.ManagedByPaisans && listen != "":
