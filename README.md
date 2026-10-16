@@ -4593,17 +4593,15 @@ included, so a configuration it accepts gets a request. A refusal `host
 request` can still reach names the configuration key to change beside the
 request's field.
 
-Admitting needs ufw installed and active on the host: `host admit` never
-enables it, and refuses before making any change otherwise. Ports 80 and 443
+Admitting needs ufw installed: `host admit` never installs it. When ufw is
+not active, admit enables it only with `--enable-ufw` or a yes at a
+terminal, behind a timer that turns it off again unless a new SSH login gets
+through (see *SSH is never shut out* below, and *If SSH stops answering after
+admit enables ufw* in
+[docs/guides/host-owners.md](docs/guides/host-owners.md)). Ports 80 and 443
 belong to one deployment per host. The egress table fences the deployment's
-user off the owner's machine, and one limit follows from the mesh staying
-reachable: an owner service bound to all interfaces (`0.0.0.0` or `::`) is
-reachable on the host's mesh address, by the deployment and by its other
-sites. Owners should bind admin services to `127.0.0.1` or to their LAN
-address. And the deployment's user may listen on any address and port no
-service of the owner's holds, so an owner's client may reach the deployment
-instead of a service that is down, or that is bound to the other family
-(`127.0.0.1` while the client tries `[::1]`). `paisans host admit` and
+user off the owner's machine, within the limits *Egress keeps the deployment
+off the owner's network* names. `paisans host admit` and
 `paisans host evict` are in `docs/commands.md`.
 
 #### Keys belong to operators, and sites name operators
@@ -4813,11 +4811,16 @@ file, not from the connection.
 #### A sudo that wants a password is asked for once, on a terminal
 
 Every command that acts on a deployment logs in as the site's ssh user and
-runs nothing through sudo. `host deployments` is the owner's command: it reads
-a host's registry and every deployment's directories, which are root's, so it
-runs through sudo (`--sudo`, on by default). Before its first command, the
-toolkit asks the host `sudo -n true`. `-n` makes sudo fail at once instead of
-waiting for a password, so the answer is immediate.
+runs nothing through sudo but the WireGuard helper, which its one sudoers
+line allows without a password. Three commands are the host owner's: `host
+admit` and `host evict`, which change the host as root, and `host
+deployments`, which reads the registry and every deployment's directories,
+root's. With `--request`, admit and evict run as root on the host itself,
+under the owner's own `sudo`; reached from a workstation, with `--site` and
+the owner's login in `--ssh`, they and `host deployments` run through sudo
+(`host deployments`' `--sudo`, on by default). Before the first such
+command, the toolkit asks the host `sudo -n true`. `-n` makes sudo fail at
+once instead of waiting for a password, so the answer is immediate.
 
 **A host whose sudo needs no password** runs each command as
 `sudo sh -c '<command>'`, and nobody is asked anything.
@@ -4896,9 +4899,14 @@ it was sent, so leaving the password out is not left to each of them.
 | refuses the user outright | sudo's own message; no password is asked for |
 | does not answer the probe | the host could not be reached, as for any probe (see *Never infer host state from a failed probe*); nothing about sudo is concluded or kept |
 
-An unattended run of an owner's command needs a NOPASSWD sudoers rule for
-the login `--ssh` names. Whether to write one is a decision about the host,
-made by whoever owns it, and the toolkit never makes it.
+`host evict` always asks for the deployment's user name at a terminal, and
+`host admit --request` for the request's digest, so neither runs without a
+person. `host admit --site` asks nothing once every grant is passed and ufw
+is active, and `host deployments` asks nothing, so an unattended run of
+either needs a NOPASSWD sudoers rule for the login `--ssh` names. Whether to
+write one is a decision about the host, made by whoever owns it, and the
+toolkit never makes it; an agent never runs admit or evict unattended,
+whatever sudo allows (`docs/deployment-agent-rules.md`).
 
 `host deployments` reports each of these as a sudo problem
 (`apply.ErrSudo`), separately from a host that does not answer, so it
@@ -5283,6 +5291,98 @@ operator's own web server publishes on its site's `listen` instead, which
 `validate` refuses on a public address. The mesh address is admitted whole by
 `allow in on psns-<token>`, so the binding is what keeps an app from being
 reached on any other address.
+
+#### Egress keeps the deployment off the owner's network
+
+Every infrastructure container shares the host's network namespace, so
+without a rule it reaches the owner's services bound to `127.0.0.1`, and the
+owner's LAN. `host admit` loads an nftables table, `inet paisans_<token>`,
+from `paisans-<token>-egress.service`, which is ordered before the user's
+manager, so no container starts unfiltered at boot. Its `output` chain
+matches the user's UID and its whole subordinate range, since a container's
+users map into that range and the UID alone would miss them. A table that
+changed is written beside its file, checked with `nft -c`, and only then
+moved into place, and loaded in one transaction, so a table nft refuses
+never becomes the one the next boot loads.
+
+The chain opens with two things before the rules below. It accepts the
+replies to flows someone else opened (`ct direction reply` with bit 27 of the
+conntrack mark clear), TCP on any port, since a TCP reply reaches only its
+own socket's peer; and UDP only from port 443, with the public ports grant,
+for HTTP/3. Then it sets bit 27 on every flow the user opens, before any
+accept or drop, so a flow the user opened under an accept never counts as a
+reply. The rules, in order:
+
+1. Accept the mesh subnet.
+2. Accept port 53, TCP and UDP, to the host's resolvers, read at admit time
+   from `/etc/resolv.conf` and, under systemd-resolved, from the stub's
+   upstream list.
+3. Drop `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`,
+   `169.254.0.0/16`, `100.64.0.0/10`, `::1`, `fc00::/7` and `fe80::/10`, and
+   NAT64's translations of the same IPv4 ranges, so a DNS64 host does not
+   open the owner's LAN through the translator.
+4. On a gateway (a site granted `--public-ports`, or whose `web_server` is
+   external), accept TCP 80 and 443 to the host's own addresses, and the
+   answers its own 80 and 443 send back.
+5. Drop every address of the host itself, its broadcast and its multicast.
+   This keeps the deployment off the owner's services bound to `0.0.0.0` or
+   `::`, and off mDNS, SSDP and broadcast UDP on the LAN.
+6. Drop the host's on-link IPv6 prefixes, read from the routing tables at
+   admit time: a home LAN's IPv6 is global address space, so rule 3 does not
+   cover it.
+
+The order is load-bearing. Rule 1 comes first so the mesh, which the
+deployment's services need, is never caught by the drops. Rule 4 follows
+rule 3, since loopback addresses are local too, and precedes rule 5, which
+would drop the gateway's own ports, and rule 6, since the host's own IPv6
+address lies in an on-link prefix.
+
+WireGuard's UDP is sent by the kernel, not by the user, so the chain above
+never sees it, and the user writes each peer's endpoint. The WireGuard helper
+marks the socket of every conf it installs with a mark of its own for the
+deployment, and a second chain, `mesh`, matches that mark after the
+endpoint's name is resolved. It drops loopback, link-local, multicast, the
+host's own addresses, and the private and shared ranges, as above, and the
+host's on-link IPv6 prefixes. The public endpoints a mesh normally dials
+pass. The mark's bits overlap Kubernetes's, so a host running Kubernetes is
+outside what admit supports.
+
+`--mesh-lan` adds an accept in the `mesh` chain for the private prefix of the
+host's own LAN, no wider than a /16, so a deployment's sites can dial each
+other there. The plan says plainly that the deployment can then send UDP to
+that LAN. Without it, sites on one LAN dial each other's public address,
+which needs a router that loops it back.
+
+**Known limits.**
+
+**An owner service bound to `0.0.0.0` or `::` is reachable on the mesh
+address**, by the deployment and by its other sites, since rule 1 accepts the
+mesh subnet. Owners should bind admin services to `127.0.0.1` or to their
+LAN address.
+
+**The deployment's user may listen on any address and port no owner's
+listener holds**, and answer whoever connects. An owner's client that means a
+service which is down, or bound to `127.0.0.1` while the client tries `[::1]`,
+can reach the deployment's listener instead. No table can tell such a client
+from a visitor.
+
+**Routes the table does not read.** Only on-link IPv6 routes are read, so an
+on-link public IPv4 subnet, or an owner's VPN that routes non-private IPv4
+ranges, is outside rule 3, and the deployment reaches it. Rule 1 names no
+interface: admit refuses a mesh subnet that overlaps a route at admit time,
+but a route added later on another interface would let the deployment reach
+that network through it.
+
+**Flows opened while the table is absent.** A reload of `nftables.service`
+flushes the ruleset and loads the table again, and a flow the user opens in
+between carries no mark. Its replies stay acceptable for as long as the user
+keeps it alive, which matters only for UDP from 443 with the public ports
+grant.
+
+A deployment that needs something on the owner's network asks the owner, who
+adds an accept rule of their own. That is outside the CLI on purpose. The
+owner's view of all this is *What the deployment can reach* in
+[docs/guides/host-owners.md](docs/guides/host-owners.md).
 
 #### host prepare manages the login user's authorized keys
 
