@@ -100,7 +100,7 @@ const (
 	networkProbe   = `docker network ls -q --no-trunc | xargs -r docker network inspect --format '{"id":{{json .Id}},"name":{{json .Name}},"labels":{{json .Labels}},"ipam":{{json .IPAM.Config}}}' 2>/dev/null || true`
 	socketProbe    = "ss -Hltnup"
 	linkProbe      = "ip -o link"
-	routeProbe     = "ip -j route"
+	routeProbe     = "ip -j route show table all"
 	ufwProbe       = `command -v ufw >/dev/null 2>&1 || { echo 'ufw absent'; exit 0; }; ufw status verbose`
 	firewalldProbe = "systemctl is-active firewalld || true"
 	// Each file is printed only when it is one, since an unmatched glob is

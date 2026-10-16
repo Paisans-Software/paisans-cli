@@ -9,9 +9,7 @@
 package preflight
 
 import (
-	"encoding/json"
 	"fmt"
-	"net"
 	"path"
 	"sort"
 	"strconv"
@@ -507,46 +505,30 @@ func (r *runner) meshClear(t apply.Transport) {
 	r.pass(r.newSite, "mesh", "nothing on the host overlaps the mesh subnet %s", r.cfg.Mesh.Subnet)
 }
 
-// routes checks the mesh subnet overlaps no route the host already has: a
-// Docker bridge, a LAN or another VPN on the same range would capture mesh
-// traffic, or have its own captured. A route through this deployment's own
-// interface is the mesh itself and is not a collision.
+// routes checks the mesh subnet overlaps no route the host already has, in
+// any routing table: a Docker bridge, a LAN or another VPN on the same
+// range, Tailscale's table 52 among them, would capture mesh traffic, or
+// have its own captured. A route through this deployment's own interface
+// is the mesh itself and is not a collision.
 func (r *runner) routes(t apply.Transport) {
-	_, mesh, err := net.ParseCIDR(r.cfg.Mesh.Subnet)
+	subnet, err := mesh.ParsePrefix(r.cfg.Mesh.Subnet)
 	if err != nil {
 		r.refuse(r.newSite, "routes", "mesh.subnet %q is not a network", r.cfg.Mesh.Subnet)
 		return
 	}
-	out, err := t.Run("ip -j route")
+	out, err := t.Run(mesh.RouteCommand)
 	if err != nil {
 		r.refuse(r.newSite, "routes", "could not list routes: %s", firstLine(errText(out, err)))
 		return
 	}
-	var routes []struct {
-		Dst string `json:"dst"`
-		Dev string `json:"dev"`
-	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &routes); err != nil {
-		r.refuse(r.newSite, "routes", "unreadable `ip -j route` output: %v", err)
+	routes, err := mesh.ParseRoutes(out, r.cfg.Deployment().Interface())
+	if err != nil {
+		r.refuse(r.newSite, "routes", "%v", err)
 		return
 	}
 	var clash []string
-	iface := r.cfg.Deployment().Interface()
-	for _, route := range routes {
-		if route.Dst == "default" || route.Dev == iface {
-			continue
-		}
-		dst := route.Dst
-		if !strings.Contains(dst, "/") {
-			dst += "/32"
-		}
-		_, network, err := net.ParseCIDR(dst)
-		if err != nil {
-			continue
-		}
-		if network.Contains(mesh.IP) || mesh.Contains(network.IP) {
-			clash = append(clash, fmt.Sprintf("%s dev %s", route.Dst, route.Dev))
-		}
+	for _, c := range mesh.Clashes(subnet, routes) {
+		clash = append(clash, c.What)
 	}
 	if len(clash) > 0 {
 		r.refuse(r.newSite, "routes", "mesh subnet %s overlaps %s", r.cfg.Mesh.Subnet, strings.Join(clash, ", "))

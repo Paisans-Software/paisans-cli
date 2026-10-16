@@ -273,6 +273,10 @@ func TestPreflightRefuses(t *testing.T) {
 			setup: func(h map[string]*fakeHost) {
 				h["home-b"].override(rule{match: "ip -j route", out: `[{"dst":"10.44.0.0/16","dev":"br-lan"}]`})
 			}},
+		{name: "a route in another table", site: "home-b", check: "routes", want: "route 10.44.0.0/24 dev tailscale0 table 52",
+			setup: func(h map[string]*fakeHost) {
+				h["home-b"].override(rule{match: "ip -j route show table all", out: `[{"dst":"10.44.0.0/24","dev":"tailscale0","table":"52"}]`})
+			}},
 		{name: "another deployment's mesh", site: "home-b", check: "mesh", want: "route 10.44.0.0/24 dev psns-0c1d",
 			setup: func(h map[string]*fakeHost) {
 				h["home-b"].override(rule{match: "ip -j route", out: `[{"dst":"10.44.0.0/24","dev":"psns-0c1d"}]`})

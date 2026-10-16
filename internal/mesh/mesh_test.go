@@ -87,6 +87,9 @@ const allTables = `[{"dst":"default","gateway":"192.0.2.1","dev":"eth0","protoco
 {"dst":"100.64.0.0/10","dev":"tailscale0","table":"52","flags":[]},
 {"dst":"100.100.100.100","dev":"tailscale0","table":"52","flags":[]},
 {"type":"throw","dst":"127.0.0.0/8","table":"52","flags":[]},
+{"type":"throw","dst":"10.44.0.0/16","table":"52","flags":[]},
+{"dst":"198.51.100.0/24","nexthops":[{"gateway":"192.0.2.2","dev":"eth0","weight":1},{"gateway":"192.0.2.3","dev":"eth1","weight":1}],"flags":[]},
+{"type":"blackhole","dst":"203.0.113.0/24","flags":[]},
 {"dst":"192.0.2.0/24","dev":"eth0","protocol":"kernel","scope":"link","prefsrc":"192.0.2.10","flags":[]},
 {"type":"local","dst":"192.0.2.10","table":"local","dev":"eth0","protocol":"kernel","scope":"host","prefsrc":"192.0.2.10","flags":[]},
 {"type":"broadcast","dst":"192.0.2.255","table":"local","dev":"eth0","protocol":"kernel","scope":"link","prefsrc":"192.0.2.10","flags":[]},
@@ -95,7 +98,9 @@ const allTables = `[{"dst":"default","gateway":"192.0.2.1","dev":"eth0","protoco
 // The route probe reads every routing table, so a route another VPN keeps
 // in a table of its own (Tailscale's 52, wg-quick's 51820) is seen, and
 // names the table; the local table's own addresses and broadcasts are left
-// to ParseAddrs.
+// to ParseAddrs. A throw route sends a lookup on to the next table and
+// holds no address, so it is not taken. A multipath route names each of
+// its interfaces, and a route with none names its type.
 func TestParseRoutesReadsEveryTable(t *testing.T) {
 	if mesh.RouteCommand != "ip -j route show table all" {
 		t.Errorf("RouteCommand is %q, which does not read every table", mesh.RouteCommand)
@@ -111,11 +116,22 @@ func TestParseRoutesReadsEveryTable(t *testing.T) {
 	want := []string{
 		"100.64.0.0/10 route 100.64.0.0/10 dev tailscale0 table 52",
 		"100.100.100.100/32 route 100.100.100.100 dev tailscale0 table 52",
-		"127.0.0.0/8 route 127.0.0.0/8 (throw) table 52",
+		"198.51.100.0/24 route 198.51.100.0/24 dev eth0, eth1",
+		"203.0.113.0/24 route 203.0.113.0/24 (blackhole)",
 		"192.0.2.0/24 route 192.0.2.0/24 dev eth0",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("ParseRoutes =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// A clash names what holds the network as the host printed it, made
+// visible, since every caller quotes it in a refusal.
+func TestClashesAreVisible(t *testing.T) {
+	taken := []mesh.Taken{{Prefix: netip.MustParsePrefix("10.44.0.0/16"), What: "route 10.44.0.0/16 dev br\x1b[2J"}}
+	clash := mesh.Clashes(netip.MustParsePrefix("10.44.0.0/24"), taken)
+	if len(clash) != 1 || clash[0].What != `route 10.44.0.0/16 dev br\x1b[2J` {
+		t.Errorf("Clashes = %q", clash)
 	}
 }
 

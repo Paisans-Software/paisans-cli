@@ -24,6 +24,8 @@ import (
 	"net/netip"
 	"sort"
 	"strings"
+
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // Taken is a network something on a host already holds, and what holds it,
@@ -66,11 +68,14 @@ func Overlap(a, b netip.Prefix) bool {
 	return a.Contains(b.Addr()) || b.Contains(a.Addr())
 }
 
-// Clashes is every taken network that overlaps subnet, in the order given.
+// Clashes is every taken network that overlaps subnet, in the order given,
+// each What made visible: every caller quotes it in a refusal, and it
+// holds names a host printed.
 func Clashes(subnet netip.Prefix, taken []Taken) []Taken {
 	var out []Taken
 	for _, t := range taken {
 		if Overlap(subnet, t.Prefix) {
+			t.What = ui.Visible(t.What)
 			out = append(out, t)
 		}
 	}
@@ -102,31 +107,45 @@ func LinkCommand(iface string) string {
 // ParseRoutes reads RouteCommand's output and returns every route's
 // destination as a taken network, naming its table when it is not main,
 // except the default route, routes through own, the deployment's own
-// interface, which are the mesh itself, and the local table's local and
+// interface, which are the mesh itself, the local table's local and
 // broadcast entries, which are the host's own addresses and ParseAddrs
-// reads with their prefixes.
+// reads with their prefixes, and throw routes, which send a lookup on to
+// the next table and hold no address (Tailscale's table 52 throws the
+// host's own ranges). A multipath route names each of its interfaces.
 func ParseRoutes(out, own string) ([]Taken, error) {
 	var routes []struct {
-		Type  string `json:"type"`
-		Dst   string `json:"dst"`
-		Dev   string `json:"dev"`
-		Table string `json:"table"`
+		Type     string `json:"type"`
+		Dst      string `json:"dst"`
+		Dev      string `json:"dev"`
+		Table    string `json:"table"`
+		Nexthops []struct {
+			Dev string `json:"dev"`
+		} `json:"nexthops"`
 	}
 	if err := decode(out, &routes); err != nil {
 		return nil, fmt.Errorf("unreadable `%s` output: %w", RouteCommand, err)
 	}
 	var taken []Taken
 	for _, r := range routes {
-		if r.Dst == "default" || r.Dev == own || r.Type == "local" || r.Type == "broadcast" {
+		if r.Dst == "default" || r.Dev == own || r.Type == "local" || r.Type == "broadcast" || r.Type == "throw" {
 			continue
 		}
 		p, err := ParsePrefix(r.Dst)
 		if err != nil || !p.Addr().Is4() {
 			continue
 		}
+		var devs []string
+		for _, h := range r.Nexthops {
+			devs = append(devs, h.Dev)
+		}
 		what := "route " + r.Dst + " dev " + r.Dev
-		if r.Dev == "" {
+		switch {
+		case r.Dev == "" && len(devs) > 0:
+			what = "route " + r.Dst + " dev " + strings.Join(devs, ", ")
+		case r.Dev == "" && r.Type != "":
 			what = "route " + r.Dst + " (" + r.Type + ")"
+		case r.Dev == "":
+			what = "route " + r.Dst
 		}
 		if r.Table != "" && r.Table != "main" {
 			what += " table " + r.Table

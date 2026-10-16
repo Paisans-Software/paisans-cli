@@ -246,10 +246,13 @@ func eachJSONLine(out string, fn func([]byte) error) error {
 	return nil
 }
 
-// Route is one entry of `ip -j route`.
+// Route is one entry of `ip -j route show table all`: every table, since
+// another VPN may keep its routes in one of its own (Tailscale's 52).
 type Route struct {
-	Dst string `json:"dst"`
-	Dev string `json:"dev"`
+	Type  string `json:"type"`
+	Dst   string `json:"dst"`
+	Dev   string `json:"dev"`
+	Table string `json:"table"`
 }
 
 func parseRoutes(out string) ([]Route, error) {
