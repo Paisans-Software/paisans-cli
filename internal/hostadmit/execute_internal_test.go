@@ -434,3 +434,18 @@ func TestBuildRefusesAnUnsafePath(t *testing.T) {
 		}
 	}
 }
+
+// Show marks a provisional step at every verbosity, so the owner can tell
+// which steps admit plans again once the user exists.
+func TestShowMarksAProvisionalStep(t *testing.T) {
+	plan := &Plan{Steps: []Step{{Title: "make the user", Describe: "user"}, {Title: "write the egress table", Describe: "egress", Provisional: true}}}
+	var b strings.Builder
+	plan.Show(ui.NewPlain(&b, false))
+	out := b.String()
+	if strings.Count(out, "runs once the user exists") != 1 {
+		t.Errorf("the provisional step is not marked once:\n%s", out)
+	}
+	if i, j := strings.Index(out, "write the egress table"), strings.Index(out, "runs once the user exists"); j < i {
+		t.Errorf("the mark is not under the provisional step:\n%s", out)
+	}
+}

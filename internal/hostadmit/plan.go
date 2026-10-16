@@ -184,7 +184,9 @@ type part struct {
 // with the claim first, delegation and the egress table before linger
 // starts the user's manager, and AppArmor after the packages that bring its
 // profile. Each is added by the task that writes it, at the place its
-// comment names.
+// comment names. Build wraps a part's error with the part's name and
+// nothing else, so a part that quotes what it found on the host passes
+// that through ui.Visible itself.
 var parts = []part{
 	{"claim", planClaim}, // 1
 	{"admission directory", planAdmissionDir},
@@ -412,9 +414,10 @@ func (p *Plan) Text() string {
 }
 
 // Show reports the plan as host prepare's does: each step pending under
-// its title, its sentence as a detail, then under --verbose what was
-// present and another's, then the warnings. Everything it shows passes
-// through ui.Visible, since a part may quote what it found on the host.
+// its title, its sentence as a detail, a provisional step noted as one,
+// then under --verbose what was present and another's, then the
+// warnings. Everything it shows passes through ui.Visible, since a part
+// may quote what it found on the host.
 func (p *Plan) Show(r ui.Reporter) {
 	if p.Site != "" {
 		r.Detail("site %s of deployment %s", ui.Visible(p.Site), p.Deployment)
@@ -423,7 +426,11 @@ func (p *Plan) Show(r ui.Reporter) {
 	for _, s := range p.Steps {
 		st := r.Step(ui.Visible(s.Title))
 		st.Detail("%s", ui.Visible(s.Describe))
-		st.End(ui.Pending, "")
+		note := ""
+		if s.Provisional {
+			note = "runs once the user exists"
+		}
+		st.End(ui.Pending, note)
 	}
 	if r.Verbose() {
 		for _, s := range p.Present {
