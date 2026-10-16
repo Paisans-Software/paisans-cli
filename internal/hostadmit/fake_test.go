@@ -162,6 +162,18 @@ func sum(content string) string {
 
 const ubuntu2404 = "PRETTY_NAME=\"Ubuntu 24.04.1 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nVERSION_CODENAME=noble\nID=ubuntu\nID_LIKE=debian\nUBUNTU_CODENAME=noble\n"
 
+const ubuntu2204 = "PRETTY_NAME=\"Ubuntu 22.04.5 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"22.04\"\nVERSION_CODENAME=jammy\nID=ubuntu\nID_LIKE=debian\nUBUNTU_CODENAME=jammy\n"
+
+// newJammy is newBlank on Ubuntu 22.04, as a VPS fresh from it probes:
+// the kernel has no apparmor_restrict_unprivileged_userns sysctl, so the
+// probe prints 0, and Ubuntu's apparmor package ships no rootlesskit
+// profile, so the probe finds none in its file list.
+func newJammy() *fakeHost {
+	h := newBlank().with("userns-restrict", "0").with("rootlesskit-profile", "absent").with("rootlesskit-shipped", "no")
+	h.files["/etc/os-release"] = ubuntu2204
+	return h
+}
+
 // newBlank is a VPS fresh from Ubuntu 24.04: no Docker, AppArmor
 // restricting unprivileged user namespaces with the rootlesskit profile
 // Ubuntu's apparmor package loads, no
@@ -176,7 +188,7 @@ func newBlank() *fakeHost {
 		{"engine", "absent"}, {"pkg", "docker-ce absent"}, {"pkg", "docker.io absent"},
 		{"pkg", "docker-ce-rootless-extras absent"}, {"pkg", "uidmap absent"}, {"pkg", "nftables installed"},
 		{"setuptool", "absent"}, {"snap", "absent"}, {"system-socket", "absent"},
-		{"userns-restrict", "1"}, {"rootlesskit-profile", "loaded"},
+		{"userns-restrict", "1"}, {"rootlesskit-profile", "loaded"}, {"rootlesskit-shipped", "yes"},
 		{"passwd", "absent"}, {"home", "absent 0 /home/paisans-f2a9"}, {"sudo", "absent"}, {"subuid", "ubuntu:100000:65536"}, {"subgid", "ubuntu:100000:65536"},
 		{"br_netfilter", "absent"}, {"iptables-module", "nf_tables loaded"}, {"forward-policy", "ACCEPT"},
 		{"port-start", "1024"}, {"ip-forward", "0"},

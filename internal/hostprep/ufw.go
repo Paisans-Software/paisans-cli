@@ -12,7 +12,9 @@ import (
 // What follows is how the Ubuntu profile reads and writes ufw rules. Every
 // claim about ufw's behaviour is from its source at tag 0.36.2, the version
 // Ubuntu 24.04 ships (0.36.2-6), at https://git.launchpad.net/ufw/tree/src
-// (read 2026-10-06):
+// (read 2026-10-06). Ubuntu 22.04's 0.36.1 printed the same `ufw show added`
+// and `ufw status numbered` for all four rule shapes written here (observed
+// 2026-10-16):
 //
 //   - parser.py, UFWCommandRule.parse: `comment '<text>'` is accepted on an
 //     allow rule, and a comment containing a single quote is refused

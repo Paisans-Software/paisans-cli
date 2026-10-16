@@ -62,10 +62,15 @@ elif [ -e /usr/sbin/policy-rc.d.paisans-owner ] || [ -L /usr/sbin/policy-rc.d.pa
   [ -e /usr/sbin/.policy-rc.d.paisans-tmp ] || [ -L /usr/sbin/.policy-rc.d.paisans-tmp ] ||
   [ -e /usr/sbin/.policy-rc.d.paisans-owner-tmp ] || [ -L /usr/sbin/.policy-rc.d.paisans-owner-tmp ]; then say docker-hold leftover
 else say docker-hold none; fi
-# AppArmor's restriction on unprivileged user namespaces, and the
-# rootlesskit profile Ubuntu's apparmor package loads at boot.
+# AppArmor's restriction on unprivileged user namespaces, the rootlesskit
+# profile Ubuntu's apparmor package loads at boot, and whether that package
+# ships it at all: Ubuntu 24.04's does, 22.04's does not, and a host
+# without the package has none to ship it.
 say userns-restrict "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)"
 if grep -q rootlesskit /sys/kernel/security/apparmor/profiles 2>/dev/null; then say rootlesskit-profile loaded; else say rootlesskit-profile absent; fi
+if ! dpkg-query -W -f='${Status}' apparmor 2>/dev/null | grep -q 'ok installed$'; then say rootlesskit-shipped no-package
+elif dpkg-query -L apparmor 2>/dev/null | grep -qx /etc/apparmor.d/rootlesskit; then say rootlesskit-shipped yes
+else say rootlesskit-shipped no; fi
 # The user, and every user's subordinate ranges. userfiles are the files
 # admit writes as root whose paths hold the user's UID.
 home= userfiles=

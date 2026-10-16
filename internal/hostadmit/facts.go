@@ -52,8 +52,11 @@ type Facts struct {
 	// OnDisk is, for each package /etc/paisans/installed names, whether
 	// dpkg has its files: installed, or unpacked or half-configured by an
 	// install that failed.
-	OnDisk   map[string]bool
-	AppArmor struct{ Restricted, Profile bool }
+	OnDisk map[string]bool
+	// AppArmor is whether unprivileged user namespaces are restricted,
+	// whether rootlesskit's profile is loaded, whether the apparmor package
+	// is installed, and whether it ships that profile.
+	AppArmor struct{ Restricted, Profile, Package, Shipped bool }
 	User     UserFacts
 	// SubUID and SubGID are every user's ranges, by name.
 	SubUID, SubGID             map[string][]IDRange
@@ -322,6 +325,9 @@ func parseFacts(out, user string) (Facts, error) {
 			f.AppArmor.Restricted = v == "1"
 		case "rootlesskit-profile":
 			f.AppArmor.Profile = v == "loaded"
+		case "rootlesskit-shipped":
+			f.AppArmor.Package = v != "no-package"
+			f.AppArmor.Shipped = v == "yes"
 		case "passwd":
 			if v == "absent" {
 				continue

@@ -167,7 +167,7 @@ func RunAll(cfg *config.Config, joining []string, transports map[string]apply.Tr
 		r.host(t)
 		r.hostPrepare(t)
 		r.registry(t)
-		r.osMatch(t)
+		r.archMatch(t)
 		r.wireguard(t)
 		r.watchdog(t)
 		r.ports()
@@ -317,64 +317,17 @@ func (r *runner) hostPrepare(t apply.Transport) {
 	r.refuse(r.newSite, "prepared", "host prepare still has %d step(s): %s. Run `paisans host prepare --site %s --execute` first", len(steps), strings.Join(steps, "; "), r.newSite)
 }
 
-// platform is what osMatch compares.
-type platform struct {
-	id, version, glibc, arch string
-}
-
-func (p platform) String() string {
-	return fmt.Sprintf("%s, %s %s, glibc %s", p.arch, p.id, p.version, p.glibc)
-}
-
-// readPlatform reads /etc/os-release and the version `ldd --version` prints
-// at the end of its first line ("ldd (Ubuntu GLIBC 2.39-0ubuntu8.3) 2.39").
-func readPlatform(t apply.Transport) (platform, error) {
-	content, found, err := t.ReadFile("/etc/os-release")
-	if err != nil {
-		return platform{}, err
-	}
-	if !found {
-		return platform{}, fmt.Errorf("no /etc/os-release")
-	}
-	host := hostprep.ParseOSRelease(content)
-	out, err := t.Run("ldd --version")
-	if err != nil {
-		return platform{}, fmt.Errorf("ldd --version: %s", firstLine(errText(out, err)))
-	}
-	fields := strings.Fields(firstLine(strings.TrimSpace(out)))
-	if len(fields) == 0 {
-		return platform{}, fmt.Errorf("ldd --version printed nothing")
-	}
-	arch, err := hostarch.Read("this site", t)
-	if err != nil {
-		return platform{}, err
-	}
-	return platform{id: host.ID, version: host.VersionID, glibc: glibcRelease(fields[len(fields)-1]), arch: arch}, nil
-}
-
-// glibcRelease keeps the "2.N" of a glibc version. glibc has been 2.x since
-// 1997 and numbers its releases by the second part, so the "major version"
-// the collation concern is about is 2.N: collations change between 2.N
-// releases (2.28 is the well known one), never within one.
-func glibcRelease(v string) string {
-	parts := strings.SplitN(v, ".", 3)
-	if len(parts) < 2 {
-		return v
-	}
-	return parts[0] + "." + parts[1]
-}
-
-// osMatch compares the new data site's platform with every existing data
-// site. A replica's indexes are the primary's bytes, sorted by the primary's
-// collation library; a replica whose glibc sorts differently reads them as
-// corrupt once it is promoted. Its data directory is also the primary's
-// bytes, in the primary's byte order and word size, so the architecture must
-// match too.
-func (r *runner) osMatch(t apply.Transport) {
+// archMatch compares the new data site's architecture with every existing
+// data site's. A replica's data directory is the primary's bytes, in the
+// primary's byte order and word size, so the architecture must match. The
+// OS release and glibc need not: Postgres runs in a container with the
+// image's own glibc, so the host's does not decide collation, and data sites
+// may run different releases.
+func (r *runner) archMatch(t apply.Transport) {
 	if !r.site.Has(config.RoleData) {
 		return
 	}
-	mine, err := readPlatform(t)
+	mine, err := hostarch.Read("this site", t)
 	if err != nil {
 		r.refuse(r.newSite, "platform", "could not read: %v", err)
 		return
@@ -389,14 +342,12 @@ func (r *runner) osMatch(t apply.Transport) {
 			r.refuse(r.newSite, "platform", "%s, not compared with %s, which could not be reached", mine, name)
 			continue
 		}
-		theirs, err := readPlatform(r.transports[name])
+		theirs, err := hostarch.Read(name, r.transports[name])
 		switch {
 		case err != nil:
 			r.refuse(r.newSite, "platform", "could not read %s's: %v", name, err)
-		case mine.arch != theirs.arch:
-			r.refuse(r.newSite, "platform", "%s, but %s runs %s. A replica must match its primary's architecture, or Postgres cannot read the data directory it copies", mine.arch, name, theirs.arch)
 		case mine != theirs:
-			r.refuse(r.newSite, "platform", "%s, but %s runs %s. A replica must match its primary's OS and glibc release, or indexes built under one collation are read under another", mine, name, theirs)
+			r.refuse(r.newSite, "platform", "%s, but %s runs %s. A replica must match its primary's architecture, or Postgres cannot read the data directory it copies", mine, name, theirs)
 		default:
 			r.pass(r.newSite, "platform", "%s, same as %s", mine, name)
 		}

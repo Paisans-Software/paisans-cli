@@ -17,11 +17,13 @@ changes share a bullet. Detailed notes are on the corresponding
 - Any run with `--execute` that logs in to a site leaving `ssh.user` out writes the deployment's user there; a run without `--execute` only says so, and a failed write is a warning.
 - `host admit` and `host evict` let a host's owner admit a deployment as its own unprivileged user with rootless Docker, from a request on the host or over their own SSH, and undo it.
 - `host prepare --all` prepares every site the configuration declares, one at a time in its order, each with its own review, stopping at the first failure.
+- `host admit`, `host prepare` and the rootless deployment commands support Ubuntu 22.04 beside 24.04, with Docker's apt source naming the codename the host's `/etc/os-release` gives.
 - Each release attaches static `paisans-linux-amd64` and `paisans-linux-arm64` binaries and a `SHA256SUMS` file, so a host owner can run the CLI on Linux without Go.
 
 ### Changed
 
 - `sites.*.roles` lists each role once, so a repeated role is refused when the configuration loads, as `host request` requires.
+- Preflight compares a new data site with the existing data sites on architecture alone, so data sites may run different Ubuntu releases, since Postgres uses its container's glibc.
 - `watchdog: off` is refused, since a data site's Patroni needs a watchdog to fail over safely and no other site uses one.
 - `apps.*.hostname` and `apps.*.hostnames.*` must be lowercase DNS names of two labels or more, so a capital, a single label, an empty or over-long label or an underscore is refused by `validate`.
 - `sites.*.web_server.listen` must be an IPv4 loopback address or the site's own mesh address, its port written without leading zeros, as `host request` requires; `web-server-listen-not-this-host` refuses anything else.

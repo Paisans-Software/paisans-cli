@@ -15,6 +15,11 @@ import (
 
 var dockerCases = addCases(
 	goldenCase{name: "docker-blank", host: newBlank, site: "vm"},
+	goldenCase{name: "docker-blank-jammy", host: newJammy, site: "vm"},
+	goldenCase{name: "docker-current-jammy", site: "vm", host: func() *fakeHost {
+		return newJammy().with("engine", "29.9.1").with("system-socket", "present").withPkg("docker-ce", "installed").
+			answer("docker compose version", "compose present\npkg docker-ce install ok installed\npkg ufw install ok installed\npkg git install ok installed\npkg wireguard-tools install ok installed\npkg nftables install ok installed\ndockerversion 5:29.9.1-1~ubuntu.22.04~jammy\nextras 5:29.9.1-1~ubuntu.22.04~jammy\nkeyring present\narch amd64\n")
+	}},
 	goldenCase{name: "docker-old-refused", site: "vm", host: func() *fakeHost {
 		return newBlank().with("engine", "27.5.1").withPkg("docker-ce", "installed").with("system-socket", "present")
 	}},
@@ -33,6 +38,9 @@ var dockerCases = addCases(
 	}},
 	goldenCase{name: "apparmor-without-profile-refused", site: "vm", host: func() *fakeHost {
 		return newBlank().with("rootlesskit-profile", "absent")
+	}},
+	goldenCase{name: "apparmor-not-shipped-refused", site: "vm", host: func() *fakeHost {
+		return newJammy().with("userns-restrict", "1")
 	}},
 	goldenCase{name: "apparmor-unrestricted", site: "vm", host: func() *fakeHost {
 		return newBlank().with("userns-restrict", "0").with("rootlesskit-profile", "absent")
@@ -61,13 +69,16 @@ func TestAnUnreadableEngineIsRefused(t *testing.T) {
 // The AppArmor check guards each of its three cases: no restriction
 // passes, a restriction with rootlesskit's profile loaded passes, and a
 // restriction without it is refused before any package is installed.
+// Where the host's apparmor package ships no rootlesskit profile, as
+// Ubuntu 22.04's does not, the refusal says to lift the restriction
+// instead of loading a profile that is not there.
 func TestAppArmorGuardsEachCase(t *testing.T) {
 	for _, c := range []struct {
 		restrict, profile, want string
 	}{
 		{"0", "absent", "present: apparmor: unprivileged user namespaces are not restricted"},
 		{"1", "loaded", "present: apparmor: rootlesskit's profile is loaded"},
-		{"1", "absent", "refused: apparmor: AppArmor restricts unprivileged user namespaces here and no rootlesskit profile is loaded"},
+		{"1", "absent", "refused: apparmor: AppArmor restricts unprivileged user namespaces here and no rootlesskit profile is loaded. The profile is /etc/apparmor.d/rootlesskit, from Ubuntu's apparmor package"},
 	} {
 		h := newBlank().with("userns-restrict", c.restrict).with("rootlesskit-profile", c.profile)
 		got, _ := golden(t, goldenCase{name: "apparmor", host: func() *fakeHost { return h }, site: "vm"})
@@ -81,6 +92,45 @@ func TestAppArmorGuardsEachCase(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestAppArmorWithoutAShippedProfileSaysToLiftTheRestriction(t *testing.T) {
+	h := newJammy().with("userns-restrict", "1")
+	got, _ := golden(t, goldenCase{name: "apparmor", host: func() *fakeHost { return h }, site: "vm"})
+	for _, want := range []string{
+		// What lifting it costs, and the choice not to.
+		"every user and program on this host may then create unprivileged user namespaces",
+		"the kernel attack surface the restriction exists to reduce",
+		"admit on another host instead",
+		// Persistence a later file cannot undo, and a check that it held.
+		"sysctl -w kernel.apparmor_restrict_unprivileged_userns=0",
+		"kernel.apparmor_restrict_unprivileged_userns = 0 in /etc/sysctl.d/99-zz-paisans-userns.conf",
+		"grep -rs apparmor_restrict_unprivileged_userns /etc/sysctl.conf /etc/sysctl.d /run/sysctl.d /usr/lib/sysctl.d",
+		"after the next reboot",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("a host whose apparmor ships no rootlesskit profile is not told %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "apparmor_parser") || strings.Contains(got, "--reinstall") || strings.Contains(got, "that line") {
+		t.Errorf("a host whose apparmor ships no rootlesskit profile is told:\n%s", got)
+	}
+}
+
+// A host with no apparmor package is not told its package ships no
+// profile: installing apparmor is the narrower fix, so it is told that,
+// and the host-wide sysctl is not offered.
+func TestAppArmorWithoutThePackageSaysToInstallIt(t *testing.T) {
+	h := newBlank().with("userns-restrict", "1").with("rootlesskit-profile", "absent").with("rootlesskit-shipped", "no-package")
+	got, _ := golden(t, goldenCase{name: "apparmor", host: func() *fakeHost { return h }, site: "vm"})
+	for _, want := range []string{"the apparmor package is not installed", "apt-get install apparmor", "apparmor_parser -r /etc/apparmor.d/rootlesskit"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("a host without apparmor is not told %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "ships none") || strings.Contains(got, "sysctl -w") {
+		t.Errorf("a host without apparmor is told:\n%s", got)
 	}
 }
 

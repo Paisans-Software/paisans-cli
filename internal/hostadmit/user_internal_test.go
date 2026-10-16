@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/hostprep"
 )
 
 // asUser runs a command as the user with nothing of root's environment:
@@ -69,5 +70,24 @@ func TestReadSudoReadsUbuntusListing(t *testing.T) {
 	readSudo(&u, []string{"Matching Defaults entries for paisans-f2a9 on host:", "    env_reset", "Something sudo never printed"})
 	if u.SudoRead {
 		t.Errorf("an unknown line is read: %+v", u)
+	}
+}
+
+// Every Ubuntu release a host profile supports has its default delegation
+// written down, so registering a release forces the question. A release
+// without one is read as systemd's long-standing default, memory and
+// pids, so no warning ever claims those are missing.
+func TestEverySupportedReleaseHasItsDefaultDelegation(t *testing.T) {
+	for _, s := range hostprep.Supported() {
+		id, version, _ := strings.Cut(s, " ")
+		if id != "ubuntu" {
+			continue
+		}
+		if _, ok := delegatedByDefault[version]; !ok {
+			t.Errorf("%s: no entry in delegatedByDefault", s)
+		}
+	}
+	if got := undelegated(hostprep.OSRelease{ID: "ubuntu", VersionID: "99.04"}); got != "cpu, cpuset and io" {
+		t.Errorf("an unlisted release lacks %q", got)
 	}
 }

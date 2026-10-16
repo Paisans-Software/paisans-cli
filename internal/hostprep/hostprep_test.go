@@ -289,7 +289,7 @@ func TestAnUnsupportedHostIsNamedWithWhatIsSupported(t *testing.T) {
 	host := freshHost()
 	host.files["/etc/os-release"] = "ID=debian\nVERSION_ID=\"12\"\n"
 	_, err := hostprep.Build("home-a", fixture(t), host)
-	want := "debian 12 is not supported. Use one of the following:\nubuntu 24.04"
+	want := "debian 12 is not supported. Use one of the following:\nubuntu 22.04\nubuntu 24.04"
 	if err == nil || err.Error() != want {
 		t.Fatalf("got %v, want exactly:\n%s", err, want)
 	}
@@ -298,15 +298,55 @@ func TestAnUnsupportedHostIsNamedWithWhatIsSupported(t *testing.T) {
 	}
 }
 
-// Another Ubuntu release is not this one. Docker's apt source names the
-// codename, and a profile matched on ID alone would write noble's packages
-// onto a host that is not noble.
+// Another Ubuntu release is not one of these. Docker's apt source names the
+// codename, and a profile matched on ID alone would accept a release nobody
+// has checked admit and prepare against.
 func TestAnotherUbuntuReleaseIsNotSupported(t *testing.T) {
 	host := freshHost()
-	host.files["/etc/os-release"] = strings.ReplaceAll(ubuntu2404, "24.04", "22.04")
+	host.files["/etc/os-release"] = strings.ReplaceAll(strings.ReplaceAll(ubuntu2404, "24.04", "20.04"), "noble", "focal")
 	_, err := hostprep.Build("home-a", fixture(t), host)
-	if err == nil || !strings.HasPrefix(err.Error(), "ubuntu 22.04 is not supported. Use one of the following:\n") {
+	if err == nil || !strings.HasPrefix(err.Error(), "ubuntu 20.04 is not supported. Use one of the following:\n") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+const ubuntu2204 = `PRETTY_NAME="Ubuntu 22.04.5 LTS"
+NAME="Ubuntu"
+VERSION_ID="22.04"
+VERSION="22.04.5 LTS (Jammy Jellyfish)"
+VERSION_CODENAME=jammy
+ID=ubuntu
+ID_LIKE=debian
+UBUNTU_CODENAME=jammy
+`
+
+// Ubuntu 22.04 is prepared with the same templates as 24.04, and Docker's
+// apt source names the host's own codename, jammy, read from os-release.
+func TestAnUbuntu2204HostGetsDockersJammyRepository(t *testing.T) {
+	host := freshHost()
+	host.files["/etc/os-release"] = ubuntu2204
+	plan, err := hostprep.Build("home-a", fixture(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Profile != "ubuntu 22.04" {
+		t.Errorf("profile is %q", plan.Profile)
+	}
+	if got := printed(plan); !strings.Contains(got, "docker: add Docker's apt repository for jammy/amd64 at /etc/apt/sources.list.d/docker.sources") {
+		t.Errorf("no jammy repository step:\n%s", got)
+	}
+	want := strings.Replace(dockerSources, "Suites: noble", "Suites: jammy", 1)
+	found := false
+	for _, s := range plan.Steps {
+		if s.File != nil && s.File.Path == "/etc/apt/sources.list.d/docker.sources" {
+			found = true
+			if s.File.Content != want {
+				t.Errorf("the apt source is:\n%s", s.File.Content)
+			}
+		}
+	}
+	if !found {
+		t.Error("no apt source was planned")
 	}
 }
 

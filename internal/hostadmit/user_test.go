@@ -117,6 +117,41 @@ func TestARunningManagerIsNeverRestarted(t *testing.T) {
 	}
 }
 
+// What a running manager lacks until its next start is what the release's
+// systemd does not delegate by default: Ubuntu 24.04's delegates cpu,
+// memory and pids, 22.04's only memory and pids, so there cpu limits wait
+// too. A host's own drop-in is warned about in the same terms.
+func TestDelegationNamesWhatTheReleaseLacks(t *testing.T) {
+	for _, c := range []struct {
+		osRelease, want, not string
+	}{
+		{ubuntu2404, "cpuset and io limits", "cpu, cpuset"},
+		{ubuntu2204, "cpu, cpuset and io limits", ""},
+	} {
+		running := current().withUser()
+		running.files["/etc/os-release"] = c.osRelease
+		foreign := current()
+		foreign.files["/etc/os-release"] = c.osRelease
+		foreign.withFile("/etc/systemd/system/user@.service.d/delegate.conf", "[Service]\nDelegate=memory pids\n", "644", 0)
+		for name, h := range map[string]*fakeHost{"running": running, "foreign": foreign} {
+			plan, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var details []string
+			for _, w := range plan.Warnings {
+				if strings.Contains(w.Hint, "delegat") {
+					details = append(details, w.Detail)
+				}
+			}
+			got := strings.Join(details, "\n")
+			if !strings.Contains(got, c.want) || (c.not != "" && strings.Contains(got, c.not)) {
+				t.Errorf("%s, %s: delegation warns %q", strings.Fields(c.osRelease)[1], name, got)
+			}
+		}
+	}
+}
+
 // The drop-in is written before linger is enabled, since enabling linger
 // starts the user's manager at once.
 func TestDelegationComesBeforeLinger(t *testing.T) {

@@ -11,7 +11,7 @@
 // unless told to with --execute.
 //
 // Everything that differs between operating systems lives behind Profile, and
-// each profile's shell lives in its own directory under profiles/. Adding a
+// each profile's shell lives in a directory under profiles/. Adding a
 // distribution is adding a directory and a registration, not editing Build.
 package hostprep
 

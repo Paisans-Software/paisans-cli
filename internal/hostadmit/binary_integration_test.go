@@ -1,7 +1,7 @@
 //go:build hostadmit_integration
 
 // This test runs the built paisans binary, as root, in a real ubuntu:24.04
-// container laid out as a stock host is: /etc/os-release and
+// container (or the image PAISANS_PROBE_IMAGE names) laid out as a stock host is: /etc/os-release and
 // /etc/resolv.conf are links there. It plans admit and evict through the
 // local transport, which is what runs on a host, so a read the fakes serve
 // directly is read here the way the host reads it.
@@ -20,7 +20,7 @@ import (
 )
 
 // stockLinks makes the container's system files what they are on a stock
-// Ubuntu 24.04 with systemd-resolved: os-release is already a link in the
+// Ubuntu with systemd-resolved: os-release is already a link in the
 // image, and resolv.conf, which Docker mounts as a file, becomes the link
 // to the stub resolver's file. iproute2 and an enabled ufw, which a stock
 // server has and admit needs, are set up, since the image lacks them.

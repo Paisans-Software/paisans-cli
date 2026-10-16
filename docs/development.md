@@ -1536,7 +1536,15 @@ and a file admit writes below a link. Each hostile path must read as unsafe,
 never as what is at the end of it. One more installs ufw from Ubuntu's archive,
 so it needs the network: ufw installed and not enabled reads as installed and
 not active, and enabled as both. On the blank image, which has no ufw, both
-read false.
+read false. Another installs apparmor the same way, and reads whether it ships
+rootlesskit's profile: 24.04's does, 22.04's does not.
+
+`PAISANS_PROBE_IMAGE` runs the same tests in another image, such as the other
+release admit supports:
+
+```
+PAISANS_PROBE_IMAGE=ubuntu:22.04 go test -tags hostadmit_integration ./internal/hostadmit/
+```
 
 Two more write the operators' keys the way admit does, as the deployment's
 user through `runuser`, so they make and remove a real user and run only as

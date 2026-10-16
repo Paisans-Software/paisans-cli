@@ -58,6 +58,10 @@ Founder decisions, 2026-10-15:
   `net.ipv4.ip_forward` for it and says so in the plan. There is no flag.
 * **Hosts that will not run a second Docker daemon are not supported.**
   Rootless runs beside a system daemon the owner already has.
+* **Ubuntu 22.04 and 24.04 are supported** (founder decision, 2026-10-16).
+  Both use the same host profile; where admit differs between them (the
+  AppArmor refusal, what cgroup delegation adds) is said in its step. Data
+  sites may run different releases, since Postgres's glibc is its image's.
 * **A system Docker admit installs never runs.** Where Docker is absent,
   admit installs Docker's packages for the rootless daemons and keeps the
   system daemon they bring disabled; the packages stay.
@@ -261,7 +265,17 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    the profile for `rootlesskit` at `/etc/apparmor.d/rootlesskit`, loaded at
    boot; admit checks it is loaded before it installs anything and refuses
    with the fix (install or update the `apparmor` package, load the profile)
-   if not.
+   if not. Ubuntu 22.04 has no such sysctl on its own kernel, so nothing is
+   restricted there; its `apparmor` package (3.0) ships no `rootlesskit`
+   profile, so on a 22.04 host whose newer kernel has the restriction turned
+   on, the refusal offers setting `kernel.apparmor_restrict_unprivileged_userns`
+   to 0 and says what that costs: every user and program on the host may then
+   create unprivileged user namespaces again, the kernel attack surface the
+   restriction exists to reduce. It names a file that sorts last,
+   `/etc/sysctl.d/99-zz-paisans-userns.conf`, says to change any other line
+   setting it, and to check the value after a reboot; an owner who turned the
+   restriction on deliberately admits on another host instead. Admit never
+   changes it. A host with no `apparmor` package is told to install it.
 3. **The user.** `useradd --create-home --shell /bin/bash paisans-<token>`
    unless it exists, then the privilege check above. Subordinate ID ranges
    of at least 65,536 in `/etc/subuid` and `/etc/subgid`, which `useradd`
@@ -271,8 +285,9 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    boot.
 5. **cgroup delegation.** `/etc/systemd/system/user@.service.d/delegate.conf`
    with `Delegate=cpu cpuset io memory pids`, then `daemon-reload`. Ubuntu
-   24.04 already delegates `cpu`, `memory` and `pids`, so compose CPU and
-   memory limits work without it; it adds `cpuset` and `io` (*Observed*).
+   24.04 already delegates `cpu`, `memory` and `pids`, so there it adds
+   `cpuset` and `io`; Ubuntu 22.04 delegates only `memory` and `pids`, so
+   there compose CPU limits need it too (*Observed* on both).
    Admit writes it before the user's manager first starts and never
    restarts `user@<uid>.service` for a user that is already running,
    because that restarts the user's daemon and every container in it. The
@@ -937,8 +952,9 @@ A rekey with sites down is in `docs/specs/2026-10-15-mesh-rekey-sites-down.md`.
 ## Tests
 
 * `config`: `ssh.user` optional; `SetSSHUser` splices and never overwrites.
-* `hostprep` admit plan: golden plans for a blank Ubuntu 24.04, a host with
-  an old system Docker (refused), one with a current one, and each flag.
+* `hostprep` admit plan: golden plans for a blank Ubuntu 24.04 and 22.04, a
+  host with an old system Docker (refused), one with a current one on each
+  release, and each flag.
 * The helper's `put`: a table of confs, every hook key refused, every
   unknown key refused, an `Address` outside the subnet refused, the
   renderer's own output accepted.
@@ -1020,6 +1036,13 @@ Docker's rootless documentation, read 2026-10-15:
 
 ## Observed
 
+Ubuntu 22.04 was checked against every admit step on 2026-10-16, on an
+Ubuntu 22.04.1 VPS (kernel 5.15, read only) and in an `ubuntu:22.04`
+container running systemd 249: Docker publishes Engine 29.5 and later for
+jammy, the egress table loads under nftables 1.0.2, and the kernel
+operations host networking rests on behave as on 24.04. What differs is
+under AppArmor (step 2) and cgroup delegation (step 5, R5).
+
 On a blank Ubuntu 24.04.1 VPS (kernel 6.8, amd64), 2026-10-15, with a second
 host as the mesh peer. Docker Engine 29.9.1 from Docker's repository,
 RootlessKit 3.3.0. The spike plan is
@@ -1047,6 +1070,9 @@ its.
   seconds.
 * **R5, delegation.** Ubuntu 24.04 delegated `cpu memory pids` by default
   and `--cpus 0.5 --memory 64m` worked; the drop-in added `cpuset io`.
+  Ubuntu 22.04 (systemd 249, 2026-10-16) delegated `memory pids` by
+  default, and with the drop-in a user's manager had `cpuset cpu io memory
+  pids`.
   Restarting `user@` restarted the user's daemon: a container with a
   restart policy came back, one without did not.
 * **R6, source address.** The daemon would not start with
