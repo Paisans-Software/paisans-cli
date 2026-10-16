@@ -60,6 +60,11 @@ var knownRoles = map[Role]bool{RoleData: true, RoleApps: true, RoleGateway: true
 // KnownRole reports whether r is a site role.
 func KnownRole(r Role) bool { return knownRoles[r] }
 
+// RoleRepeated reports whether roles[i] is listed earlier in roles. A site
+// lists each role once, and a request carries a site's roles as written, so
+// the loader and a request's Check refuse a repeat by this one rule.
+func RoleRepeated(roles []Role, i int) bool { return slices.Contains(roles[:i], roles[i]) }
+
 // Blueprint names an application the toolkit knows how to render, qualified
 // by its catalog unless it is the core catalog's.
 type Blueprint string
@@ -1234,9 +1239,12 @@ func (c *Config) structural(noSubnet bool) error {
 		if len(site.Roles) == 0 && len(c.PinnedTo(name)) == 0 {
 			add("sites.%s.roles: required. Give the site at least one of data, apps, gateway, witness, storage, monitor. A site may have none only when an app is pinned to it, because then it exists to host that app.", name)
 		}
-		for _, role := range site.Roles {
-			if !KnownRole(role) {
+		for i, role := range site.Roles {
+			switch {
+			case !KnownRole(role):
 				add("sites.%s.roles: unknown role %q. Valid roles are data, apps, gateway, witness, storage, monitor.", name, role)
+			case RoleRepeated(site.Roles, i):
+				add("sites.%s.roles: %q is listed twice. List each role once.", name, role)
 			}
 		}
 		if in := site.WebServer; in != nil {

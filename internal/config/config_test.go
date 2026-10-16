@@ -293,6 +293,16 @@ func TestWatchdogOffIsRefused(t *testing.T) {
 	}
 }
 
+// A role is listed once. host request carries a site's roles and refuses a
+// role listed twice, so the loader refuses it too, and validate and host
+// request agree on every configuration.
+func TestARepeatedRoleIsRefused(t *testing.T) {
+	body := strings.Replace(minimal, "roles: [data, apps]", "roles: [data, apps, data]", 1)
+	if got := loadErr(t, body); !strings.Contains(got, `sites.home-a.roles: "data" is listed twice`) {
+		t.Fatalf("a repeated role loaded or was refused without naming it: %q", got)
+	}
+}
+
 // Obviously fake keys: ed25519 keys of all zero, all one and all two bytes.
 const (
 	fakeKeyA = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org"
