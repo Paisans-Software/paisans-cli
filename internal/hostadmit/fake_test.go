@@ -30,6 +30,7 @@ type fakeHost struct {
 	answers map[string]string
 	ran     []string
 	inputs  []string
+	read    []string
 	writes  map[string]uint32
 	// onRun, when set, sees every command Execute runs, so a test can make
 	// the host change as a real one would.
@@ -74,6 +75,7 @@ func (h *fakeHost) run(command, stdin string) (string, error) {
 }
 
 func (h *fakeHost) ReadFile(path string) (string, bool, error) {
+	h.read = append(h.read, path)
 	c, ok := h.files[path]
 	return c, ok, nil
 }

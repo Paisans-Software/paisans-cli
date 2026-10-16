@@ -2,7 +2,6 @@ package hostadmit_test
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -50,16 +49,7 @@ func TestEarlyStops(t *testing.T) {
 			if !errors.As(err, &problem) || len(problem.Hint) > 80 || strings.Contains(problem.Hint, "\n") {
 				t.Errorf("not a Problem with a one-line hint of at most 80 characters: %q", err)
 			}
-			path := filepath.Join("testdata", "stops", c.name+".txt")
-			if *update {
-				os.MkdirAll(filepath.Dir(path), 0o755)
-				os.WriteFile(path, []byte(err.Error()+"\n"), 0o644)
-				return
-			}
-			want, rerr := os.ReadFile(path)
-			if rerr != nil || string(want) != err.Error()+"\n" {
-				t.Errorf("%s: got\n%s\nwant\n%s", path, err, want)
-			}
+			checkGoldenAt(t, filepath.Join("testdata", "stops", c.name+".txt"), err.Error()+"\n")
 		})
 	}
 }
@@ -71,7 +61,7 @@ func TestBuildStopsBeforeReadingTheHost(t *testing.T) {
 	if _, err := hostadmit.Build(h, input(t, "home-b", hostadmit.Flags{})); err == nil {
 		t.Fatal("a data site without --watchdog was planned")
 	}
-	if len(h.ran) != 0 {
-		t.Errorf("Build ran %q before stopping", h.ran)
+	if len(h.ran) != 0 || len(h.read) != 0 {
+		t.Errorf("Build ran %q and read %q before stopping", h.ran, h.read)
 	}
 }

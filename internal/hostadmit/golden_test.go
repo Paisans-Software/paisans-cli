@@ -15,8 +15,8 @@ import (
 var update = flag.Bool("update", false, "rewrite the golden plans")
 
 // goldenCase is one host, one site's request and the owner's flags, with
-// the plan admit draws for them in testdata/plans/<name>.txt, or, when
-// refused is set, the refusal in its place.
+// the plan admit draws for them in testdata/plans/<name>.txt, or the
+// refusal in its place when admit refuses.
 type goldenCase struct {
 	name  string
 	host  func() *fakeHost
