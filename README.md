@@ -1846,10 +1846,10 @@ Without `--execute` the same commands only read the registry and refuse the
 same way, so a dry run shows the conflict the real run would meet. `preflight`
 reads it on the site being added. `operator magic-link` and `oidc client create`
 reach a host without sudo, and their dry runs leave the registry alone; with
-`--execute` they claim it, which only root can: `paisans host admit` claims
-the host for the deployment when its owner admits it, from the request alone,
-so a host admitted from a request and one admitted from the configuration
-hold the same entry.
+`--execute` they claim it through sudo, since only root can write the
+registry. `paisans host admit` claims the host for the deployment when its
+owner admits it, from the request alone, so a host admitted from a request
+and one admitted from the configuration hold the same entry.
 
 ### Where the mesh dials a site
 
@@ -4675,12 +4675,11 @@ An owner who does not have the deployment's configuration admits a site
 from a request: `paisans host request --site <site> > <site>.admit` writes
 it, and the owner admits the site from that file. The request holds what
 admission needs and nothing secret: the deployment's id, the site's name
-and its roles, sorted, the site's user,
-its SSH and WireGuard ports, its mesh address and the mesh subnet, whether
-it has an endpoint, the grants its roles need (the watchdog for a data site,
-ports 80 and 443 for a gateway or a monitor running the toolkit's Caddy),
-the apps a monitor behind the owner's web server hands it, and each
-operator's public keys.
+and its roles, sorted, the site's user, its SSH and WireGuard ports, its
+mesh address and the mesh subnet, whether it has an endpoint, the grants
+its roles need (the watchdog for a data site, ports 80 and 443 for a
+gateway or a monitor running the toolkit's Caddy), the apps a monitor
+behind the owner's web server hands it, and each operator's public keys.
 
 Those keys get a shell on the owner's machine, so the request is only as
 trustworthy as the way it travelled. `host request` prints a digest of it
@@ -4695,23 +4694,23 @@ the owner was not shown. Keys travel without their comments, which are free
 text a forger could vary while searching for a request with a matching
 digest.
 
-A request is read as strictly as a configuration. An unknown version, a
-field missing or unknown, a site name or a role the configuration would
-refuse, a role listed twice or out of order, grants other than the ones its
-roles need, a user name `ssh.user` would refuse, `root`, a
-`paisans-` name other than the deployment's own, a key that is not a plain
-public key, and an address outside the subnet are each refused, and so is a
-mesh subnet overlapping `0.0.0.0/8`, loopback, link-local or multicast: the
-egress table accepts the mesh subnet before it drops the owner's loopback
-and link-local ranges, so a subnet over them would let the deployment reach
-what the table keeps it from. So is one outside the private ranges
-`10.0.0.0/8`, `172.16.0.0/12` and `192.168.0.0/16`, the only routed
-addresses another deployment's table drops on a shared host. `host request` applies the same checks, so it
-never writes a request the owner's side would refuse, and `validate` holds
-the configuration to each rule it can check from the file, `ssh.user`
-included, so a configuration it accepts gets a request. A refusal `host
-request` can still reach names the configuration key to change beside the
-request's field.
+A request is read as strictly as a configuration. An unknown version, a field
+missing or unknown, a site name or a role the configuration would refuse, a
+role listed twice or out of order, grants other than the ones its roles need,
+apps handed to the owner's web server on a site with no monitor role, a user
+name `ssh.user` would refuse, `root`, a `paisans-` name other than the
+deployment's own, a key that is not a plain public key, and an address
+outside the subnet are each refused, and so is a mesh subnet overlapping
+`0.0.0.0/8`, loopback, link-local or multicast: the egress table accepts the
+mesh subnet before it drops the owner's loopback and link-local ranges, so a
+subnet over them would let the deployment reach what the table keeps it from.
+So is one outside the private ranges `10.0.0.0/8`, `172.16.0.0/12` and
+`192.168.0.0/16`, the only IPv4 ranges another deployment's table drops on a
+shared host. `host request` applies the same checks, so it never writes a
+request the owner's side would refuse, and `validate` holds the configuration
+to each rule it can check from the file, `ssh.user` included, so a
+configuration it accepts gets a request. A refusal `host request` can still
+reach names the configuration key to change beside the request's field.
 
 Admitting needs ufw installed and active on the host: `host admit` never
 enables it, and refuses before making any change otherwise. Ports 80 and 443
@@ -4720,8 +4719,11 @@ user off the owner's machine, and one limit follows from the mesh staying
 reachable: an owner service bound to all interfaces (`0.0.0.0` or `::`) is
 reachable on the host's mesh address, by the deployment and by its other
 sites. Owners should bind admin services to `127.0.0.1` or to their LAN
-address. `paisans host admit` and `paisans host evict` are in
-`docs/commands.md`.
+address. And the deployment's user may listen on any address and port no
+service of the owner's holds, so an owner's client may reach the deployment
+instead of a service that is down, or that is bound to the other family
+(`127.0.0.1` while the client tries `[::1]`). `paisans host admit` and
+`paisans host evict` are in `docs/commands.md`.
 
 #### Keys belong to operators, and sites name operators
 

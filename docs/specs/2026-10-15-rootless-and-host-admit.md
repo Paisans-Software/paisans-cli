@@ -77,18 +77,27 @@ is there. A name in the file is the name used, so a deployment whose owner
 picked a different name declares it once.
 
 The user must not be privileged. `host admit` refuses a user that already
-exists and is root, or is in `sudo`, `wheel`, `admin`, `adm`, `docker`,
+exists and is root, is a system account (below UID 1000), is in a group of
+GID 0 under any name, or is in `sudo`, `wheel`, `admin`, `adm`, `docker`,
 `lxd`, `systemd-journal`, `disk`, `shadow`, `kmem`, `libvirt` or
 `incus-admin`. Any of those is root-equivalent or reads root's secrets, and
 `docker` in particular undoes the whole design, because it is the owner's
 system daemon. `paisans doctor` checks the same list on every run. Admit
-also refuses a user that `sudo -l -U` shows any rule for beyond admit's own
-helper line, or any Defaults that would pass the user's environment, PATH,
-root or working directory to that helper (`setenv`, `env_keep`,
-`!env_reset` and their kin) or that are set for a runas user or a command
-alone, a home that is a link or not the user's, a home already
-present for a user it is about to create, and a subordinate range that
-starts below 100000 or holds 0, 65534 or the user's own ID.
+also refuses, naming every problem it finds at once:
+
+* a rule `sudo -l -U` shows for the user beyond admit's own helper line;
+* a Defaults entry that would pass the user's environment, PATH, root or
+  working directory to that helper (`setenv`, `env_keep`, `!env_reset` and
+  their kin), or one set for a runas user or a command alone; `env_delete`,
+  which only takes variables away, passes;
+* sudo-rs, whose `sudo -l` lists no Defaults, so none can be read;
+* a home that is a link, is not the user's, or lies below a link or a
+  directory another user can write;
+* for a user it is about to create, a home already present, a group of its
+  name, which `useradd` would fail on, and a sudoers file other than
+  admit's own that names it, whose rules would reach the new user;
+* a subordinate range that starts below 100000 or holds 0, 65534 or the
+  user's own ID.
 
 ## `paisans host admit`
 
@@ -117,11 +126,11 @@ deployment's. Sudo works as it does today (`SudoAuth`, asked once, at a
 terminal). `--request` and `--site` are refused together, and `--request`
 is refused unless the command runs as root on the host.
 
-Grants are opt-in. The plan lists the grants the deployment needs for its
-roles; the owner gives each by passing its flag. Admitting without one is
-allowed, and the admission record says it was not given, so the operator's
-next command refuses with what is missing rather than failing halfway
-through an apply.
+Grants are the owner's to give, and they must match the site's roles. The
+plan lists the grants the deployment needs for its roles, and the owner
+gives each by passing its flag. A grant the roles need and the owner did
+not give, and one they do not need, each stop admit before it reaches the
+host (below). The admission record holds the grants given.
 
 Like `host prepare`, it probes read only, prints the plan, and changes the
 host only with `--execute`. Every step is idempotent, so a re-run after a
@@ -166,10 +175,14 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    the owner must upgrade it; upgrading the owner's Docker is not this
    command's decision. The extras are installed pinned to the installed
    `docker-ce` version, and admit refuses when the repository has none, since
-   apt would otherwise upgrade Docker to match them. 29.5 is the version from which a rootless container
-   with host networking shares the real host's network namespace
-   (*Sources*), and every infra container is `network_mode: host`, bound to
-   the mesh address. A snap Docker is refused, as today.
+   apt would otherwise upgrade Docker to match them; a `dockerd` whose
+   version cannot be read, or a Docker that is not dpkg's installed
+   `docker-ce`, is refused too. Docker's apt key is checked against the
+   fingerprint of Docker's release key before it is trusted. 29.5 is the
+   version from which a rootless container with host networking shares the
+   real host's network namespace (*Sources*), and every infra container is
+   `network_mode: host`, bound to the mesh address. A snap Docker is
+   refused, as today.
 2. **AppArmor.** On Ubuntu 24.04 and later, unprivileged user namespaces are
    restricted unless a profile allows them. Ubuntu's `apparmor` package ships
    the profile for `rootlesskit` at `/etc/apparmor.d/rootlesskit`, loaded at
@@ -209,19 +222,24 @@ Garage site and 5 GB otherwise. The path is in the admission record.
      traffic will be filtered by it from now on; admit stops, as it does
      for a missing grant, unless the owner passes `--bridge-netfilter`.
      The flag is in the admission record. Then, as the user,
-   with its runtime directory: `dockerd-rootless-setuptool.sh install
-   --force`. Then `~/.config/docker/daemon.json` with `"userland-proxy":
-   false`, so a published port carries the client's source address
-   (*Observed*), the deployment's `default-address-pools`, and, with
-   `--data-dir`, `data-root`.
+   with its runtime directory: `~/.config/docker/daemon.json` with
+   `"userland-proxy": false`, so a published port carries the client's
+   source address (*Observed*), the deployment's `default-address-pools`,
+   and, with `--data-dir`, `data-root`. Then `dockerd-rootless-setuptool.sh
+   install --force`, so the daemon's first start reads that file.
 7. **The deployment's directory.** `install -d -m 750 -o <user> -g <user>
-   /srv/paisans/<token>`. `/srv/paisans` itself stays root's, mode 755.
+   /srv/paisans/<token>`. `/srv/paisans` itself stays root's, mode 755. An
+   existing directory of the user's in another mode or group is given mode
+   750 and the user's group again (`chmod 00750`, which clears a setgid bit
+   too), since group or other write would let another local user plant
+   what the deployment runs; one with an ACL, which `chmod` cannot take
+   away, stops admit.
 8. **The WireGuard helper and its sudoers line** (below). Admit creates
-   `/etc/wireguard` root's, mode 700, when it is absent, and makes an
-   existing one root's and not writable by its group or others; one it
-   cannot make so (a link, or not a directory) stops admit. A directory the
-   deployment's user could write would let it plant a conf with `PostUp`,
-   which `wg-quick` runs as root, past the helper's checks.
+   `/etc/wireguard` root's, mode 700, when it is absent, and stops when an
+   existing one is not root's alone: another's, writable by its group or
+   others, a link, not a directory, or carrying an ACL. A conf planted while
+   another could write there would survive any repair, and `wg-quick` runs
+   its `PostUp` as root, past the helper's checks.
 9. **The firewall.** ufw rules tagged `paisans-<token>:` as today: the SSH
    port, the mesh's UDP `ListenPort`, `allow in on psns-<token>`, and 80/443
    with `--public-ports`. The `br-+` rules go: a rootless container's traffic
@@ -231,25 +249,39 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    host where ufw is absent or inactive.
 10. **Egress.** An nftables table that keeps the deployment off the owner's
     network (below).
-11. **The watchdog**, with `--watchdog`: softdog as `host prepare` does today,
-    and a udev rule giving `/dev/watchdog` and `/dev/watchdog0` to the
-    user, owner and group both, mode 600. The group matters: a device whose
-    group is root's cannot be `chown`ed inside the user namespace, and the
-    infra compose does that for Patroni (*Observed*). One deployment per
-    host can hold it; a second is refused.
+11. **The watchdog**, with `--watchdog`: softdog when the host has no
+    hardware watchdog, loaded now and at boot by a unit of admit's own,
+    ordered before `systemd-logind` starts the lingering users' managers,
+    whose Docker starts Patroni; and a udev rule matching the `watchdog`
+    and `misc` subsystems that gives `/dev/watchdog` and `/dev/watchdog0`
+    to the user, owner and group both, mode 600. The group matters: a
+    device whose group is root's cannot be `chown`ed inside the user
+    namespace, and the infra compose does that for Patroni (*Observed*). A
+    rule in place whose nodes are not yet the user's is applied again. One
+    deployment per host can hold it; a second is refused.
 12. **Low ports**, with `--public-ports`: `net.ipv4.ip_unprivileged_port_start=80`
-    in `/etc/sysctl.d/60-paisans.conf`, applied with `sysctl --system`. The
-    output says plainly that this lets every local user on the host bind
-    ports 80 to 1023. Before granting it, admit checks, as root, that
-    nothing else answers on 80 or 443: a TCP listener in `ss -Hltnp`, a
-    bound UDP socket in `ss -Hlunp`, a port the system Docker publishes (`docker ps` on its socket, when one is
-    running), or a DNAT rule for either port in `nft list ruleset`. A
-    Docker daemon with its userland proxy off publishes a port with a DNAT
-    rule alone and no listener, so `ss` cannot see it, and only root can
-    read the ruleset. Anything found refuses the grant, naming what holds
-    the port (process, container and compose project, or rule), and the
-    refusal names `web_server.managed_by: external` as the way to run
-    behind it.
+    in `/etc/sysctl.d/60-paisans.conf`, applied with `sysctl --system`,
+    which applies every sysctl file on the host again, then checked, since
+    a file read after it could set the key back. The output says plainly
+    that this lets every local user on the host bind ports 80 to 1023.
+    Before granting it, admit checks, as root, that nothing else answers on
+    80 or 443: a TCP listener in `ss -Hltnp`, a bound UDP socket in
+    `ss -Hlunp`, a port the system Docker publishes (`docker ps` on its
+    socket, when one is running), a stopped container of that Docker with
+    `restart: always`, which takes its ports again when the daemon
+    restarts, or a DNAT or redirect rule for either port in `nft list
+    ruleset`, or in `iptables-save` on a host without nft. A rule that
+    only matches conntrack's dnat status is not one, and a negated port
+    holds 80 or 443 unless it names both. A Docker daemon with its userland
+    proxy off publishes a port with a DNAT rule alone and no listener, so
+    `ss` cannot see it, and only root can read the ruleset. Anything found
+    refuses the grant, naming what holds the port (process, container and
+    compose project, or rule), and the refusal names
+    `web_server.managed_by: external` as the way to run behind it; so does
+    anything admit cannot read. A known limit: a DNAT rule with no
+    destination port, a forward of every port of an address, is not
+    counted, since rules of that shape are mostly a service's backends,
+    reached after a port matched elsewhere.
 13. **Forwarding**, for a site with an endpoint: `net.ipv4.ip_forward=1` in
     the same file. Such a site relays mesh traffic between sites behind NAT,
     which cannot dial each other (`isRelay` in `internal/render/site.go`).
@@ -260,19 +292,24 @@ Garage site and 5 GB otherwise. The path is in the admission record.
     for both keys, in `/etc/paisans/sysctl.before`, are the ones admit's
     first read of the host found: installing Docker starts dockerd, which
     turns forwarding on, so the read `--execute` makes once the user exists
-    keeps those values rather than the ones admit's own steps left.
+    keeps those values rather than the ones admit's own steps left. A key
+    is recorded there before admit sets it, and forgotten only after a
+    re-run that no longer needs it has restored it.
 14. **The admission record**, `/etc/paisans/admitted.<token>.json`, mode 644:
     the user, the grants (`watchdog`, `public_ports`), whether forwarding is
     on, the ports the firewall opened, the request's digest when there was
     one, and the time. It is how the deployment's own commands, which cannot
     read root's files, learn what they were granted, and what `host
-    deployments` lists.
+    deployments` lists. Admit keeps `/etc/paisans` root's, mode 755 (`chmod
+    00755`, which clears a setgid bit too; an ACL stops admit), so each
+    deployment's user reads its own record and none can write one.
 15. **The registry claim**, as today, under `/var/lib/paisans`, so two
     deployments on one host cannot collide on a token or a port.
 16. **The keys.** Write the `ssh.keys` operators' keys, from the
     configuration or the request, to the user's `~/.ssh/authorized_keys`,
-    owned by the user, so the operators can log in. From then on the
-    operators maintain them (*Keys*).
+    owned by the user, so the operators can log in, with group and other
+    write taken off `~/.ssh`, without which `sshd` ignores the keys. From
+    then on the operators maintain them (*Keys*).
 17. **The check.** With `--site`, connect as the user with an operator's
     key, run `docker version` against the user's socket, and write
     `ssh.user` back (*The deployment's user*). With `--request`, run
@@ -328,8 +365,9 @@ key a public key the toolkit can parse, the address inside the subnet.
 The subnet is held to the configuration's rule for `mesh.subnet`: an IPv4
 network no larger than a /24, clear of `0.0.0.0/8`, loopback, link-local
 and multicast, and inside the private ranges `10.0.0.0/8`, `172.16.0.0/12`
-or `192.168.0.0/16`. Rule 3 of the egress table drops those ranges and no
-other routed address, so on a host two deployments share, a mesh outside
+or `192.168.0.0/16`. Rule 3 of the egress table drops those ranges, with
+their NAT64 translations, and no other routed address, so on a host two
+deployments share, a mesh outside
 them is one the other deployment's user could send to through this mesh's
 interface, as this mesh's address, and reach its sites. The mesh is IPv4
 alone, so IPv6's private range, `fc00::/7`, does not arise.
@@ -361,15 +399,41 @@ record and refuses with the `host admit` line to run.
 
 The reverse, run by the owner the same two ways as admit, with `--execute`
 and the deployment's user name typed at a terminal, as `site remove
---delete-data` asks for the site's. It stops the user's systemd instance, disables linger,
-stops `wg-quick@psns-<token>` and removes
-`/etc/wireguard/psns-<token>.conf`, then removes the user with its home,
-its `--data-dir` directory, `/srv/paisans/<token>`, the helper, the sudoers
-line, the udev rule, the egress table, the deployment's ufw rules,
-the admission record and the registry claim. Host-wide files (`delegate.conf`,
-`60-paisans.conf`) are removed only when no other deployment is admitted, and
-`ip_unprivileged_port_start` and `ip_forward` are each restored only when
-no other admitted deployment holds `public_ports` or has forwarding on.
+--delete-data` asks for the site's. It deletes a user only when it is the
+deployment's: the record's, or, with no record, `paisans-<token>`, and
+never root, a system account or a user in a privileged group.
+
+It expires the user and stops its systemd instance, disables linger, then
+kills every process left whose real, effective or saved uid is the user's
+or in its subordinate range, and checks that none is, before anything that
+fences the deployment goes. On a data site the plan warns that a Patroni
+that outlasts Docker's stop timeout is killed with the watchdog armed,
+which reboots the host. It stops `wg-quick@psns-<token>` and removes
+`/etc/wireguard/psns-<token>.conf`, the user's mesh drop-in, found by the
+deployment it names when the owner has deleted the user by hand, and the
+egress table, then removes the user's `--data-dir` directory,
+`/srv/paisans/<token>`, and the user with its home, killing and checking
+again first. Its home is checked as admit checks it: a link or another's
+directory stops evict, and a home already gone deletes the user alone.
+Then it removes the helper, the sudoers line, the udev rule, the
+deployment's ufw rules but its SSH allow, the admission record and the
+registry claim. The SSH allow may be the rule the owner's own login
+arrives by, so it is kept, and the plan warns of it: the owner deletes it
+once nothing else needs it. Host-wide files (`delegate.conf`,
+`modules-load.d/paisans.conf`, `60-paisans.conf`) are removed only when
+they are as admit wrote them and no other deployment is admitted or
+claims the host, and `ip_unprivileged_port_start` and `ip_forward` are
+each restored only when no other admitted deployment holds `public_ports`
+or has forwarding on. A deployment the registry claims with no admission
+record, an admit in flight or one that failed early, keeps all of them, as
+a record evict cannot read does.
+
+With no admission record, evict cannot tell where admit put the Docker
+data: `--data-dir` names it, and evict removes that directory only when
+it is the user's or owned within its subordinate range. Without the flag,
+while a subordinate range is left to free, the plan warns that such a
+directory is not found. A user deleted by hand can leave an empty
+`/etc/systemd/system/user@<uid>.service.requires` behind.
 
 `site remove` does what the deployment's user can, then ends by printing the
 `host evict` line for the owner.
@@ -435,15 +499,18 @@ deployment publishes runs as its user, so its answers to the owner's web
 server on loopback, to a visitor on the LAN and to the host's own address
 carry the user's UID.
 
-* **TCP, on any port.** A TCP reply reaches only its own socket's peer,
-  and the user cannot bind an owner's TCP listener's port.
-* **UDP from port 443, on a gateway only**, for HTTP/3. A gateway's public
-  ports are one deployment's per host, and admit refuses `--public-ports`
-  while any other process holds TCP or UDP 80 or 443 (*What it does*, step
-  12), so no owner's UDP service on 443 receives these replies. Every
-  other UDP reply meets the UID rules: a user sharing an owner's UDP port
-  through `SO_REUSEADDR` could otherwise answer the owner's own clients
-  from it. The mesh's UDP passes by rule 1.
+* **TCP, on any port.** A TCP reply reaches only its own socket's peer, a
+  client that connected to a socket of the user's, which the user can bind
+  only at an address and port no owner's listener holds.
+* **UDP from port 443, with the public ports grant only**, for HTTP/3. The
+  grant is one deployment's per host, and admit refuses it while any other
+  process holds TCP or UDP 80 or 443 (*What it does*, step 12), so no
+  owner's UDP service on 443 receives these replies. A site behind the
+  owner's web server has no such accept: that server may hold UDP 443
+  itself, and no holder check runs without the grant. Every other UDP
+  reply meets the UID rules: a user sharing an owner's UDP port through
+  `SO_REUSEADDR` could otherwise answer the owner's own clients from it.
+  The mesh's UDP passes by rule 1.
 
 Next, every flow the user opens gets bit 27 of its ct mark, before any
 accept or drop, so a flow the user opened under an accept never carries a
@@ -457,20 +524,30 @@ conntrack, meets the UID rules and is dropped. The deployment's own flows
 take their replies through input. The UID rules follow:
 
 1. Accept the mesh subnet.
-2. Accept port 53 to the host's resolvers, read at admit time
-   (`127.0.0.53` under systemd-resolved, or the LAN resolver).
+2. Accept port 53 to the host's resolvers, read at admit time from
+   `/etc/resolv.conf` (`127.0.0.53` under systemd-resolved, or the LAN
+   resolver) and from `/run/systemd/resolve/resolv.conf`, the stub's
+   upstream servers, which a rootless network's DNS may use instead.
 3. Drop `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`,
-   `169.254.0.0/16`, `100.64.0.0/10`, `::1`, `fc00::/7` and `fe80::/10`.
+   `169.254.0.0/16`, `100.64.0.0/10`, `::1`, `fc00::/7` and `fe80::/10`,
+   and NAT64's translations of the same IPv4 ranges under the well-known
+   prefix `64:ff9b::/96`, with the local-use prefix `64:ff9b:1::/48`
+   whole. On a DNS64 host the user would otherwise reach the owner's IPv4
+   LAN through the translator. The well-known prefix's public translations
+   stay open, since an IPv6-only host reaches the IPv4 internet only
+   through them.
 4. On a gateway, accept TCP 80 and 443 to the host's own addresses
-   (`fib daddr type local`), and the answers its own 80 and 443 send
-   back to them, which the second rule marked as the user's. That second
-   accept is TCP only: no socket of the user's can hold a port an owner's
-   listener holds, so no TCP reply is forged. A site is a gateway when its
-   grant holds `public_ports`, where the deployment's own Caddy holds those
-   ports, or when its `web_server` is external, where the owner's web
-   server fronts it and the deployment reaches it by its public name.
-   Either way the ports answer the internet already. UDP 443 is not
-   accepted.
+   (`fib daddr type local`), and the answers its own 80 and 443 send back
+   to them, which the second rule marked as the user's. That second accept
+   is TCP only: a TCP reply reaches only its own socket's peer, here the
+   user's own client. A site is a gateway when its grant holds
+   `public_ports`, where the deployment's own Caddy holds those ports, or
+   when its `web_server` is external, where the owner's web server fronts
+   it and the deployment reaches it by its public name. Either way the
+   ports answer the internet already. The accept matches every local
+   address past rule 3's drops, so 80 and 443 on a second public address,
+   or on a global address of another interface, are open to the
+   deployment as well. UDP 443 is not accepted.
 5. Drop every address of the host itself, its broadcast and its multicast
    (`fib daddr type { local, broadcast, multicast }`). This keeps the
    deployment off the owner's services bound to `0.0.0.0` or `::`, which
@@ -484,28 +561,53 @@ are `local` too, and precedes rule 6, since the host's own IPv6 address
 lies in an on-link prefix. The mesh's own address stays reachable through
 rule 1, which the deployment's services need.
 
-**The on-link prefixes** are read at admit time from the main routing
-table: every IPv6 route with no gateway (`ip -6 -o route show table main`,
-no `via`), kept when it is global unicast (inside `2000::/3`) and on any
-interface but loopback and the mesh's own, and when it does not overlap
-the mesh subnet. The system Docker's bridges are kept: the deployment's
-own networks live in its user namespace and never show in the host's
-table, so a prefix on one is the owner's containers. Routes are read rather than addresses because a host
-holding a DHCPv6 `/128`, or an address added without a prefix route, still
-reaches its LAN's `/64` through an on-link route. A prefix inside another
-kept one is left out, and the rest are sorted. Each is parsed as a masked
-IPv6 prefix before it is rendered, and the probe's text never reaches the
-table. Running admit again reads them again: a changed set is a changed
-table, which admit writes and loads again in place, and an unchanged set
-plans nothing. Until that run, a prefix the ISP has rotated is not
-dropped.
+**The on-link prefixes** are read at admit time from every routing table,
+policy routing's among them: every IPv6 route with no gateway (`ip -6 -o
+route show table all`, no `via`), kept when it is global unicast (inside
+`2000::/3`) and on any interface but loopback and the mesh's own, and
+when it does not overlap the mesh subnet. The system Docker's bridges are
+kept: the deployment's own networks live in its user namespace and never
+show in the host's table, so a prefix on one is the owner's containers.
+Routes are read rather than addresses because a host holding a DHCPv6
+`/128`, or an address added without a prefix route, still reaches its
+LAN's `/64` through an on-link route. A prefix inside another kept one is
+left out, and the rest are sorted. Each is parsed as a masked IPv6 prefix
+before it is rendered, and the probe's text never reaches the table. The
+plan names the prefixes dropped, and warns of one wider than a `/32`: a
+full-tunnel VPN routes such prefixes on its interface, and the table then
+drops most of the deployment's IPv6. Running admit again reads them
+again: a changed set is a changed table, which admit writes and loads
+again in place, and an unchanged set plans nothing. Until that run, a
+prefix the ISP has rotated is not dropped.
 
-**Known limit: flows opened while the table is absent.** A reload of
-`nftables.service` flushes the ruleset and loads the table again, and a
-flow the user opens in between carries no mark. Its replies stay
-acceptable for as long as the user keeps it alive. With the reply accepts
-limited as above, that matters only for UDP from 443 on a gateway, and
-for TCP not at all.
+**Loading the table.** Admit writes the table beside its file, checks it
+with `nft -c`, and only then moves it over the file, so a table nft
+refuses never becomes the one the next boot loads. The table is loaded in
+one transaction. A loaded table that holds other rules than the file, one
+flushed or edited by hand, which the probe sees by counting its rules, is
+loaded again the same way. The unit requires the mount the file is on.
+
+**Known limits.**
+
+* **Flows opened while the table is absent.** A reload of
+  `nftables.service` flushes the ruleset and loads the table again, and a
+  flow the user opens in between carries no mark. Its replies stay
+  acceptable for as long as the user keeps it alive. With the reply
+  accepts limited as above, that matters only for UDP from 443 with the
+  public ports grant, and for TCP not at all.
+* **A service that is down or bound to one family.** The user may listen
+  on any address and port no owner's listener holds, and answer whoever
+  connects. An owner's client that means a service which is down, or
+  bound to `127.0.0.1` while the client tries `[::1]`, can reach the
+  deployment's listener instead. That is ordinary port squatting among a
+  host's users, and no table can tell such a client from a visitor.
+* **Routes the table does not read.** Only on-link IPv6 routes are read.
+  An on-link public IPv4 subnet, and an owner's VPN that routes non-private
+  IPv4 ranges, are outside rule 3, so the deployment reaches them.
+* **The mesh accept names no interface.** Rule 1 accepts the mesh subnet
+  wherever it is routed. Admit refuses a subnet that overlaps a route at
+  admit time, in any table; a route added later on another interface
+  would let the deployment reach that network through it.
 
 A deployment that needs something on the owner's network asks the owner,
 who adds an accept rule. That is deliberately outside the CLI.
@@ -722,10 +824,12 @@ A rekey with sites down is in `docs/specs/2026-10-15-mesh-rekey-sites-down.md`.
   unknown key refused, an `Address` outside the subnet refused, the
   renderer's own output accepted.
 * The egress table renders the user's UID and subordinate range, the
-  gateway's accept only for a gateway, and the on-link prefixes in both
-  chains; a prefix that is not a masked IPv6 prefix is refused. A re-run
-  with the same on-link prefixes plans nothing, and one with changed
-  prefixes writes and reloads the table.
+  gateway's accept only for a gateway, the UDP 443 reply accept only with
+  the public ports grant, NAT64's private translations, and the on-link
+  prefixes in both chains; a prefix that is not a masked IPv6 prefix is
+  refused. A re-run with the same on-link prefixes plans nothing, one with
+  changed prefixes writes and reloads the table, and one whose loaded
+  table holds other rules reloads it.
 * `host request`: a golden request per role mix; the digest is stable across
   runs and changes with any field. Admit refuses a request with a missing
   field, an unknown version, a bad key or a mistyped digest.
@@ -746,8 +850,9 @@ A rekey with sites down is in `docs/specs/2026-10-15-mesh-rekey-sites-down.md`.
   `SHA256SUMS`.
 * The Docker-tagged tests run against a rootless daemon.
 * Admit with `--public-ports`: golden plans refusing a host where 80 is a
-  process's listener, a system Docker container's published port, and a
-  DNAT rule with no listener, each naming what holds it.
+  process's listener, a system Docker container's published port, a
+  stopped one with `restart: always`, and a DNAT rule with no listener,
+  each naming what holds it.
 * The gateway's step fails, naming the conflict, when its fetch of
   `/.well-known/paisans/<token>` returns another body or another server.
 * Admit's `br_netfilter` plans: already loaded, not loaded with only
