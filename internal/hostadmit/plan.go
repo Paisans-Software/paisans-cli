@@ -185,9 +185,9 @@ var parts = []part{
 	// 7. linger
 	// 8. bridge netfilter
 	// 9. daemon
-	// 10. deployment directory
-	// 10a. mesh subnet
-	// 11. wireguard
+	{"deployment directory", planDeploymentDir}, // 10
+	{"mesh subnet", planMeshSubnet},             // 10a
+	{"wireguard", planWireGuard},                // 11
 	// 12. firewall
 	// 13. watchdog
 	// 14. sysctls

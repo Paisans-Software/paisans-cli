@@ -80,6 +80,45 @@ func TestParseRoutesSkipsTheDefaultAndOwnInterface(t *testing.T) {
 	}
 }
 
+// Output of `ip -j route show table all` on a host running Tailscale: its
+// routes live in table 52, not main, and the local table repeats the host's
+// own addresses, which ParseAddrs reads with their prefixes.
+const allTables = `[{"dst":"default","gateway":"192.0.2.1","dev":"eth0","protocol":"dhcp","flags":[]},
+{"dst":"100.64.0.0/10","dev":"tailscale0","table":"52","flags":[]},
+{"dst":"100.100.100.100","dev":"tailscale0","table":"52","flags":[]},
+{"type":"throw","dst":"127.0.0.0/8","table":"52","flags":[]},
+{"dst":"192.0.2.0/24","dev":"eth0","protocol":"kernel","scope":"link","prefsrc":"192.0.2.10","flags":[]},
+{"type":"local","dst":"192.0.2.10","table":"local","dev":"eth0","protocol":"kernel","scope":"host","prefsrc":"192.0.2.10","flags":[]},
+{"type":"broadcast","dst":"192.0.2.255","table":"local","dev":"eth0","protocol":"kernel","scope":"link","prefsrc":"192.0.2.10","flags":[]},
+{"type":"local","dst":"127.0.0.0/8","table":"local","dev":"lo","protocol":"kernel","scope":"host","prefsrc":"127.0.0.1","flags":[]}]`
+
+// The route probe reads every routing table, so a route another VPN keeps
+// in a table of its own (Tailscale's 52, wg-quick's 51820) is seen, and
+// names the table; the local table's own addresses and broadcasts are left
+// to ParseAddrs.
+func TestParseRoutesReadsEveryTable(t *testing.T) {
+	if mesh.RouteCommand != "ip -j route show table all" {
+		t.Errorf("RouteCommand is %q, which does not read every table", mesh.RouteCommand)
+	}
+	taken, err := mesh.ParseRoutes(allTables, "psns-f2a9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, tk := range taken {
+		got = append(got, tk.Prefix.String()+" "+tk.What)
+	}
+	want := []string{
+		"100.64.0.0/10 route 100.64.0.0/10 dev tailscale0 table 52",
+		"100.100.100.100/32 route 100.100.100.100 dev tailscale0 table 52",
+		"127.0.0.0/8 route 127.0.0.0/8 (throw) table 52",
+		"192.0.2.0/24 route 192.0.2.0/24 dev eth0",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("ParseRoutes =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
 const addrs = `[{"ifindex":1,"ifname":"lo","addr_info":[{"family":"inet","local":"127.0.0.1","prefixlen":8},{"family":"inet6","local":"::1","prefixlen":128}]},
 {"ifindex":2,"ifname":"eth0","addr_info":[{"family":"inet","local":"192.0.2.10","prefixlen":24}]},
 {"ifindex":5,"ifname":"psns-f2a9","addr_info":[{"family":"inet","local":"10.44.0.1","prefixlen":24}]},
