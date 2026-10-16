@@ -885,7 +885,7 @@ func TestEvictAsksForTheLoginAtATerminal(t *testing.T) {
 	// Evict then refuses ubuntu, the site's declared ssh.user, on a host
 	// with no record: what is under test is where it went.
 	_ = runHostEvict([]string{"--site", "vm", "--config", fixtureConfig()}, typed(t, "owner\n"), out)
-	if reached.User != "owner" || reached.Host != "vm.example.org" || !strings.Contains(out.String(), "which runs evict through sudo") {
+	if reached.User != "owner" || reached.Host != "vm.example.org" || !strings.Contains(out.String(), "Existing username on vm.example.org (site vm) to connect under, with sudo:") {
 		t.Errorf("reached %+v, asked:\n%s", reached, out.String())
 	}
 }
