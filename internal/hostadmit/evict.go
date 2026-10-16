@@ -299,7 +299,7 @@ func (e *evictor) mesh() error {
 		}
 		return nil
 	}
-	dropIn := meshDropInPath(uidOf(e.planner))
+	dropIn := MeshDropInPath(uidOf(e.planner))
 	if e.f.Files[dropIn].Present {
 		e.remove("remove "+dropIn, "the drop-in that started "+e.in.Request.User+"'s manager after the mesh, and its directory once empty",
 			"rm -f "+dropIn+" && rmdir --ignore-fail-on-non-empty "+path.Dir(dropIn)+" && systemctl daemon-reload")

@@ -209,19 +209,13 @@ func sudoRules(p *planner) error {
 	if err != nil {
 		return err
 	}
+	extra, reach := SudoList{Rules: u.SudoRules, Defaults: u.SudoDefaults, Specific: u.SudoSpecific}.BeyondHelper(helper)
 	var rules, defaults []string
-	for _, r := range u.SudoRules {
-		if r != "(root) NOPASSWD: "+helper {
-			rules = append(rules, "- "+ui.Visible(r))
-		}
+	for _, r := range extra {
+		rules = append(rules, "- "+ui.Visible(r))
 	}
-	for _, d := range u.SudoDefaults {
-		if why := sudoDefaultProblem(d); why != "" {
-			defaults = append(defaults, "- "+ui.Visible(d)+": "+why)
-		}
-	}
-	for _, d := range u.SudoSpecific {
-		defaults = append(defaults, "- "+ui.Visible(d)+": set for one runas user or command alone")
+	for _, d := range reach {
+		defaults = append(defaults, "- "+ui.Visible(d))
 	}
 	var found []string
 	if len(rules) > 0 {
@@ -386,7 +380,7 @@ func planMeshDropIn(p *planner) error {
 			Kinds:    []string{"user"},
 		})
 	}
-	path, content := meshDropInPath(uidOf(p)), meshConf(p)
+	path, content := MeshDropInPath(uidOf(p)), meshConf(p)
 	f := p.f.Files[path]
 	switch {
 	case f.Link:
