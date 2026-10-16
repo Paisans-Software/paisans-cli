@@ -150,10 +150,12 @@ const keysSeparator = "--- sidecar ---"
 // the user's rights alone. An authorized_keys that cannot be read stops it
 // before anything is replaced, so no key the owner put there is lost. A
 // ~/.ssh that was there keeps its mode but for group and other write,
-// with which sshd's StrictModes would ignore the keys.
+// with which sshd's StrictModes would ignore the keys. It holds the
+// deployment's lock, which makes the state directory, as host prepare's key
+// steps do, so the two never interleave their writes.
 func keysScript(d deployment.Deployment) string {
 	side := hostprep.OwnedKeysPath(d)
-	return `set -e; umask 077; mkdir -p "$HOME/.ssh" ` + d.StateDir() + `; chmod go-w "$HOME/.ssh"
+	return hostprep.Locked(d, `set -e; umask 077; mkdir -p "$HOME/.ssh"; chmod go-w "$HOME/.ssh"
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 awk -v k="$tmp/keys" -v s="$tmp/sidecar" '$0 == "` + keysSeparator + `" { out = 1; next } { if (out) print > s; else print > k }'
 touch "$tmp/keys" "$tmp/sidecar"
@@ -161,7 +163,7 @@ f="$HOME/.ssh/authorized_keys"
 { if [ -e "$f" ] || [ -L "$f" ]; then awk 1 "$f"; fi; cat "$tmp/keys"; } > "$HOME/.ssh/.authorized_keys.paisans-tmp"
 mv -f "$HOME/.ssh/.authorized_keys.paisans-tmp" "$f"
 cat "$tmp/sidecar" > ` + side + `.paisans-tmp
-mv -f ` + side + `.paisans-tmp ` + side
+mv -f ` + side + `.paisans-tmp ` + side)
 }
 
 // keysCommand is the keys step's command for user, whose home is home,

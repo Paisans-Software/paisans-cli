@@ -374,7 +374,7 @@ step 24: write the admission record
 step 25: add the operators' keys
   keys: 1 operator key into paisans-f2a9's authorized_keys, written as paisans-f2a9, and recorded in /srv/paisans/f2a9/.paisans/authorized_keys.owned for host prepare
   run:
-    $ runuser -u paisans-f2a9 -- env -i HOME='/home/paisans-f2a9' PATH=/usr/bin:/bin:/usr/sbin:/sbin XDG_RUNTIME_DIR=/run/user/1001 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1001/bus DOCKER_HOST=unix:///run/user/1001/docker.sock sh -c 'set -e; umask 077; mkdir -p "$HOME/.ssh" /srv/paisans/f2a9/.paisans; chmod go-w "$HOME/.ssh"
+    $ runuser -u paisans-f2a9 -- env -i HOME='/home/paisans-f2a9' PATH=/usr/bin:/bin:/usr/sbin:/sbin XDG_RUNTIME_DIR=/run/user/1001 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1001/bus DOCKER_HOST=unix:///run/user/1001/docker.sock sh -c 'umask 077; if [ -L '\''/srv/paisans/f2a9/.paisans'\'' ]; then echo '\''paisans: the state directory is a link, so the keys is not written'\''; exit 1; fi; [ -d '\''/srv/paisans/f2a9/.paisans'\'' ] || install -d -m 700 '\''/srv/paisans/f2a9/.paisans'\''; exec 9>>'\''/srv/paisans/f2a9/.paisans/lock'\''; flock -w 60 9 || { echo '\''paisans: another command holds the deployment lock'\''; exit 1; }; set -e; umask 077; mkdir -p "$HOME/.ssh"; chmod go-w "$HOME/.ssh"
     $ tmp=$(mktemp -d); trap '\''rm -rf "$tmp"'\'' EXIT
     $ awk -v k="$tmp/keys" -v s="$tmp/sidecar" '\''$0 == "--- sidecar ---" { out = 1; next } { if (out) print > s; else print > k }'\''
     $ touch "$tmp/keys" "$tmp/sidecar"
