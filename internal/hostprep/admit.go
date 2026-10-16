@@ -82,8 +82,7 @@ func AdmitRules(d deployment.Deployment, sshPort, listenPort int, public bool) [
 }
 
 // OwnedKey is one line of a deployment's authorized_keys sidecar: Mark is
-// added for a key paisans appended, shared for one an earlier format
-// recorded as another deployment's, whose line stays.
+// added, for a key paisans appended.
 type OwnedKey struct{ Mark, Fingerprint, Name string }
 
 // ParseOwnedKeys reads a sidecar, skipping any line that is not a claim, as

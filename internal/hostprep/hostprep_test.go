@@ -886,12 +886,6 @@ func TestEveryStepCarriesItsKind(t *testing.T) {
 			host.files[ownedKeys] += "added " + fingerprint(keyCarol) + " carol\n"
 			return hostprep.Build("home-a", fixture(t), host, admitted(t, fixture(t), "home-a"))
 		},
-		"key released": func(t *testing.T) (*hostprep.Plan, error) {
-			host := preparedHost(false)
-			host.files[authorizedKeys] = keyAlice + "\n" + keyCarol + "\n"
-			host.files[ownedKeys] = "added " + fingerprint(keyAlice) + " alice\nshared " + fingerprint(keyCarol) + " carol\n"
-			return hostprep.Build("home-a", withKeys(t, "home-a", keyAlice), host, admitted(t, withKeys(t, "home-a", keyAlice), "home-a"))
-		},
 		"key renamed": func(t *testing.T) (*hostprep.Plan, error) {
 			host := preparedHost(false)
 			host.files[ownedKeys] = "added " + fingerprint(keyAlice) + " alice-old\n"
@@ -924,7 +918,7 @@ func TestEveryStepCarriesItsKind(t *testing.T) {
 	for _, family := range []string{
 		"write daemon.json",
 		"create the configuration repository", "write <configuration store file>", "start the configuration store",
-		"create authorized_keys", "authorize ssh key", "rename ssh key", "forget ssh key", "release ssh key", "remove ssh key",
+		"create authorized_keys", "authorize ssh key", "rename ssh key", "forget ssh key", "remove ssh key",
 	} {
 		if !seen[family] {
 			t.Errorf("no plan here builds %q", family)

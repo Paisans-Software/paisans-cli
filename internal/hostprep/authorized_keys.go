@@ -20,9 +20,8 @@ import (
 // only ever removes a line marked added in the sidecar,
 // /srv/paisans/<token>/.paisans/authorized_keys.owned, which records what
 // host prepare and host admit added: one `<mark> <fingerprint> <name>` line
-// per key, `added` for a line paisans appended. A `shared` line, which an
-// earlier format wrote, is still read and its key's line is never removed.
-// A listed key that was already there is left as it is and never recorded:
+// per key, `added` for a line paisans appended. A line of any other shape is
+// no claim, so its key's line is never removed. A listed key that was already there is left as it is and never recorded:
 // it is often the key the operator logs in with. Every write to the sidecar
 // or to authorized_keys runs under the deployment's lock.
 //
@@ -31,12 +30,8 @@ import (
 // itself is OpenSSH's format everywhere, which is why this is not behind
 // Profile.
 
-// The marks a sidecar line starts with: a line paisans appended, and one an
-// earlier format recorded as another deployment's, whose line stays.
-const (
-	markAdded  = "added"
-	markShared = "shared"
-)
+// markAdded starts a sidecar line for a key paisans appended.
+const markAdded = "added"
 
 // OwnedKeysPath is the sidecar recording which keys of the deployment
 // user's authorized_keys host admit and host prepare added.
@@ -68,7 +63,7 @@ func parseOwned(content string) []ownedEntry {
 	var out []ownedEntry
 	for _, line := range strings.Split(content, "\n") {
 		f := strings.Fields(line)
-		if len(f) != 3 || (f[0] != markAdded && f[0] != markShared) || !strings.HasPrefix(f[1], "SHA256:") {
+		if len(f) != 3 || f[0] != markAdded || !strings.HasPrefix(f[1], "SHA256:") {
 			continue
 		}
 		out = append(out, ownedEntry{mark: f[0], fingerprint: f[1], name: f[2]})
@@ -231,14 +226,6 @@ func planAuthorizedKeys(t Transport, d deployment.Deployment, home string, s con
 				describe = fmt.Sprintf("ssh: forget key %s, which is now authorized with options by `%s` and so is no longer host prepare's", label, restricted[0].raw)
 			}
 			out.Steps = append(out.Steps, Step{Kinds: []string{KindSSHKeys}, Title: "forget ssh key", Describe: describe, Command: Locked(d, writeOwned(d, owned))})
-		case o.mark == markShared:
-			out.Steps = append(out.Steps, Step{
-				Kinds:    []string{KindSSHKeys},
-				Label:    "release",
-				Title:    "release ssh key",
-				Describe: fmt.Sprintf("ssh: stop recording key %s, which ssh.keys no longer lists; paisans did not add it here, so its line stays in %s", label, file),
-				Command:  Locked(d, writeOwned(d, owned)),
-			})
 		default:
 			var raws []string
 			for _, l := range plain {

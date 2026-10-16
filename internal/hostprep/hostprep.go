@@ -72,9 +72,8 @@ type Step struct {
 	// Command, when set, runs after File is written.
 	Command string
 	// Label is the kind of change, so one can be told apart without reading
-	// Describe: empty for an ordinary one, or "add", "rename",
-	// "release" or "remove". It is not printed; Title already says
-	// what the step does.
+	// Describe: empty for an ordinary one, or "add", "rename" or "remove".
+	// It is not printed; Title already says what the step does.
 	Label string
 	// Kinds are what the step changes on the host, Eg: KindDocker, as a dry
 	// run sums a plan up. Most steps change one thing; installing packages

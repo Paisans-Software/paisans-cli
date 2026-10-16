@@ -169,7 +169,7 @@ func TestAdmitPackagesPinsOnlyAnInstalledDockerCE(t *testing.T) {
 func TestOwnedKeysRoundTrip(t *testing.T) {
 	sidecar := "# Keys host admit and host prepare added to this deployment's user's authorized_keys: <mark> <fingerprint> <name>. host prepare removes a line only when it is marked added here and ssh.keys no longer lists it.\n" +
 		"added SHA256:4b2Q4Jx3ZQf1XU1Vb1k0f0sYz8m9n7bq3kq0iYkQWd0 alice\n" +
-		"shared SHA256:9xQ1m0bK3iYp2nWm7c8d5e4f3g2h1j0k9l8m7n6o5p4 bob\n"
+		"added SHA256:9xQ1m0bK3iYp2nWm7c8d5e4f3g2h1j0k9l8m7n6o5p4 bob\n"
 	keys := hostprep.ParseOwnedKeys(sidecar)
 	if len(keys) != 2 || keys[0] != (hostprep.OwnedKey{Mark: "added", Fingerprint: "SHA256:4b2Q4Jx3ZQf1XU1Vb1k0f0sYz8m9n7bq3kq0iYkQWd0", Name: "alice"}) {
 		t.Fatalf("ParseOwnedKeys = %+v", keys)
@@ -179,6 +179,16 @@ func TestOwnedKeysRoundTrip(t *testing.T) {
 	}
 	if got := hostprep.OwnedKeysFile([]hostprep.OwnedKey{keys[1], keys[0]}); got != sidecar {
 		t.Errorf("OwnedKeysFile does not sort by fingerprint:\n%s", got)
+	}
+}
+
+// A sidecar line with any mark but added is no claim, so its key's line is
+// never removed.
+func TestOnlyAnAddedSidecarLineIsAClaim(t *testing.T) {
+	keys := hostprep.ParseOwnedKeys("added SHA256:4b2Q4Jx3ZQf1XU1Vb1k0f0sYz8m9n7bq3kq0iYkQWd0 alice\n" +
+		"shared SHA256:9xQ1m0bK3iYp2nWm7c8d5e4f3g2h1j0k9l8m7n6o5p4 bob\n")
+	if len(keys) != 1 || keys[0].Name != "alice" {
+		t.Errorf("ParseOwnedKeys = %+v", keys)
 	}
 }
 
