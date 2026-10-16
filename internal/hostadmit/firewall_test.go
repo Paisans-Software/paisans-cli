@@ -83,6 +83,10 @@ func TestEveryHolderShapeRefuses(t *testing.T) {
 		// As ss -Hlunpe printed it on Debian, for a UDP socket bound to 443.
 		"udp listener": `listen-udp UNCONN 0      0      0.0.0.0:443 0.0.0.0:* users:(("openvpn",pid=331,fd=3)) ino:3663985 sk:3001 cgroup:/ <->` + "\n",
 		"udp dnat":     "dnat table ip nat chain PREROUTING: udp dport 443 dnat to 10.0.0.2\n",
+		// As docker inspect prints a stopped container's restart policy
+		// and bindings, which it takes again when the daemon restarts.
+		"stopped, restart always": `stopped /shop-web-1 always {"443/tcp":[{"HostIp":"","HostPort":"443"}]}` + "\n",
+		"iptables negation":       "dnat iptables-save -t nat: -A PREROUTING -p tcp -m tcp ! --dport 22 -j DNAT --to-destination 10.0.0.2\n",
 	} {
 		h := home().with("system-socket", "present").answer(portsMarker, answer+"end\n")
 		_, err := hostadmit.Build(h, input(t, "home-a", gateway))
@@ -94,6 +98,21 @@ func TestEveryHolderShapeRefuses(t *testing.T) {
 		}
 		if name == "udp listener" && err != nil && !strings.Contains(err.Error(), "openvpn (pid 331, uid 0) listens on 0.0.0.0:443/udp") {
 			t.Errorf("a UDP listener is not named as one: %v", err)
+		}
+	}
+}
+
+// A stopped container that does not restart on its own does not hold 80
+// or 443, nor does one that binds neither.
+func TestAStoppedContainerHoldsOnlyWithRestartAlways(t *testing.T) {
+	for _, answer := range []string{
+		`stopped /shop-web-1 no {"443/tcp":[{"HostIp":"","HostPort":"443"}]}`,
+		`stopped /shop-web-1 unless-stopped {"443/tcp":[{"HostIp":"","HostPort":"443"}]}`,
+		`stopped /shop-web-1 always {"80/tcp":[{"HostIp":"","HostPort":"8080"}]}`,
+	} {
+		h := home().with("system-socket", "present").answer(portsMarker, answer+"\nend\n")
+		if _, err := hostadmit.Build(h, input(t, "home-a", gateway)); err != nil {
+			t.Errorf("%s: %v", answer, err)
 		}
 	}
 }
@@ -201,5 +220,15 @@ func TestFirewallTextNamesAdmit(t *testing.T) {
 	}
 	if named != 3 {
 		t.Errorf("%d firewall lines name host admit, want 3:\n%s", named, plan.Text())
+	}
+}
+
+// An owner's deny on the SSH port is refused in admit's terms: admit never
+// enables the firewall, and the deny keeps the operators out.
+func TestAnOwnersSSHDenyIsRefusedInAdmitsTerms(t *testing.T) {
+	h := home().answer("ufw show added", "ufw present\nstatus active\nrule deny 22/tcp\n")
+	_, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+	if err == nil || strings.Contains(err.Error(), "Enabling") || strings.Contains(err.Error(), "firewall: firewall:") || !strings.Contains(err.Error(), "admit again. Nothing was changed") || !strings.Contains(err.Error(), "operators") {
+		t.Errorf("Build = %v", err)
 	}
 }

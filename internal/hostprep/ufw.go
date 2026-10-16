@@ -201,6 +201,9 @@ func planRules(tag string, rules []Rule, added []addedRule, by string) (out Sect
 			if strings.HasPrefix(a.action, "deny") || strings.HasPrefix(a.action, "reject") {
 				// Refused, not warned: enabling the firewall with this in
 				// place shuts out the connection prepare runs over.
+				if by == "host admit" {
+					return out, nil, fmt.Errorf("firewall: `ufw %s` blocks SSH, and %s did not add it. The operators could not log in as the deployment's user, and adding the allow would replace your rule; delete or change it yourself and %s", a.line, by, again)
+				}
 				return out, nil, fmt.Errorf("firewall: `ufw %s` blocks SSH, and %s did not add it. Enabling the firewall with it in place would lock out the next connection; delete or change it yourself and %s", a.line, by, again)
 			}
 			fallthrough
