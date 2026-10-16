@@ -548,3 +548,25 @@ func TestTheMeshIsSkippedUntilItsConfExists(t *testing.T) {
 		t.Errorf("a re-run writes the drop-in again:\n%s", plan.Text())
 	}
 }
+
+// Writing delegate.conf where its directory is absent creates the
+// directory, which admit records as its own, so evict removes it once
+// empty; a directory the host had is not recorded.
+func TestAdmitRecordsTheDelegationDirectoryItMakes(t *testing.T) {
+	for _, present := range []bool{false, true} {
+		h := current().withDir("/etc/systemd/system/user@.service.d", "absent", 0, 0)
+		if present {
+			h.withDir("/etc/systemd/system/user@.service.d", "drwxr-xr-x", 0, 0)
+		}
+		plan, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		recorded := slices.ContainsFunc(plan.Steps, func(s hostadmit.Step) bool {
+			return s.File != nil && s.File.Path == "/etc/paisans/installed" && strings.Contains(s.File.Content, "\ndir /etc/systemd/system/user@.service.d\n")
+		})
+		if recorded == present {
+			t.Errorf("the directory present: %v; the plan:\n%s", present, plan.Text())
+		}
+	}
+}

@@ -14,12 +14,13 @@ import (
 
 // installed is /etc/paisans/installed: what admit installed on this host
 // that it did not have, each package by name and Docker's apt key and
-// source by path, for every admitted deployment. It is written before the
+// source by path, for every admitted deployment, and each directory admit
+// created that evict removes once empty. It is written before the
 // install runs, so a run that stops after it still knows the system Docker
 // is admit's, and host evict names it all once the last deployment goes:
 // it stays installed.
 type installed struct {
-	Packages, Files []string
+	Packages, Files, Dirs []string
 }
 
 // packageName is a Debian package's name, as dpkg allows one.
@@ -37,6 +38,8 @@ func parseInstalled(content, by string) (installed, error) {
 			in.Packages = append(in.Packages, v)
 		case kind == "file" && path.IsAbs(v) && path.Clean(v) == v && ui.Visible(v) == v:
 			in.Files = append(in.Files, v)
+		case kind == "dir" && v == delegateDir:
+			in.Dirs = append(in.Dirs, v)
 		default:
 			return in, fmt.Errorf("%s holds %s, which is not a line admit wrote. Remove the line and %s again. Nothing was changed", installedPath, ui.Visible(line), by)
 		}
@@ -44,23 +47,33 @@ func parseInstalled(content, by string) (installed, error) {
 	return in, nil
 }
 
-// text is the file's content: a header, then each package, then each file.
+// text is the file's content: a header, then each package, each file and
+// each directory.
 func (in installed) text() string {
-	out := "# Written by paisans host admit: what it installed on this host. It stays\n" +
-		"# installed when paisans host evict removes the last admitted deployment.\n"
+	out := "# Written by paisans host admit: what it installed on this host, which stays\n" +
+		"# when paisans host evict removes the last admitted deployment, and each\n" +
+		"# directory it created, which evict removes once empty.\n"
 	for _, p := range in.Packages {
 		out += "package " + p + "\n"
 	}
 	for _, f := range in.Files {
 		out += "file " + f + "\n"
 	}
+	for _, d := range in.Dirs {
+		out += "dir " + d + "\n"
+	}
 	return out
 }
 
-// with is in and added together, each name once, in the order first
-// recorded.
-func (in installed) with(added hostprep.Installed) installed {
-	out := installed{Packages: slices.Clone(in.Packages), Files: slices.Clone(in.Files)}
+// with is in, added and the directories dirs together, each name once, in
+// the order first recorded.
+func (in installed) with(added hostprep.Installed, dirs ...string) installed {
+	out := installed{Packages: slices.Clone(in.Packages), Files: slices.Clone(in.Files), Dirs: slices.Clone(in.Dirs)}
+	for _, d := range dirs {
+		if !slices.Contains(out.Dirs, d) {
+			out.Dirs = append(out.Dirs, d)
+		}
+	}
 	for _, p := range added.Packages {
 		if !slices.Contains(out.Packages, p) {
 			out.Packages = append(out.Packages, p)
@@ -95,6 +108,7 @@ func readInstalled(p *planner, by string) (installed, error) {
 const systemDockerUnits = "docker.socket docker.service containerd.service"
 
 // planSystemDocker records what this run installs, before it installs it,
+// with delegate.conf's directory when the delegation part will create it,
 // and keeps the system Docker admit installs disabled. The install holds
 // the daemon so it never starts (hostprep's docker-hold.sh.tmpl), rather
 // than letting it start and then stopping it and undoing what it changed:
@@ -111,9 +125,13 @@ func planSystemDocker(p *planner, s hostprep.Section, added hostprep.Installed) 
 	if err != nil {
 		return err
 	}
-	now := was.with(added)
+	var dirs []string
+	if !p.f.Dirs[delegateDir].Present {
+		dirs = append(dirs, delegateDir)
+	}
+	now := was.with(added, dirs...)
 	if now.text() != was.text() {
-		p.step(Step{Title: "record what admit installs", Describe: "docker: " + installedPath + ", what admit installs on this host, which stays when the last deployment is evicted",
+		p.step(Step{Title: "record what admit installs", Describe: "docker: " + installedPath + ", what admit installs on this host, which stays when the last deployment is evicted, and the directories it creates",
 			File: &hostprep.File{Path: installedPath, Content: now.text(), Mode: 0o644}, Kinds: []string{"docker"}})
 	}
 	p.section(s)

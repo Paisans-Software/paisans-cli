@@ -531,7 +531,7 @@ func TestEvictRemovesTheMeshConfDropIn(t *testing.T) {
 // /etc/paisans. Beside another admitted deployment, nothing is said and
 // the file stays.
 func TestEvictNamesWhatAdmitInstalled(t *testing.T) {
-	content := "# Written by paisans host admit: what it installed on this host. It stays\n# installed when paisans host evict removes the last admitted deployment.\n" +
+	content := "# Written by paisans host admit: what it installed on this host, which stays\n# when paisans host evict removes the last admitted deployment, and each\n# directory it created, which evict removes once empty.\n" +
 		"package docker-ce\npackage docker-ce-cli\npackage containerd.io\npackage docker-ce-rootless-extras\npackage uidmap\npackage wireguard-tools\n" +
 		"file /etc/apt/keyrings/docker.asc\nfile /etc/apt/sources.list.d/docker.sources\n"
 	host := func(shared bool) *fakeHost {
@@ -582,6 +582,28 @@ func TestEvictSaysTheModulesStayLoaded(t *testing.T) {
 	for _, s := range plan.Steps {
 		if strings.Contains(s.Command, "modprobe -r") || strings.Contains(s.Command, "rmmod") {
 			t.Errorf("step %q unloads a module: %s", s.Title, s.Command)
+		}
+	}
+}
+
+// The drop-in directory delegate.conf lives in goes with it, once empty,
+// when admit created it, which /etc/paisans/installed records; one the
+// host had is left.
+func TestEvictRemovesTheDelegationDirectoryAdmitMade(t *testing.T) {
+	for _, made := range []bool{true, false} {
+		h := evicted("vm", hostadmit.Flags{})()
+		content := "package uidmap\n"
+		if made {
+			content += "dir /etc/systemd/system/user@.service.d\n"
+		}
+		h.file("/etc/paisans/installed", content).withFile("/etc/paisans/installed", content, "644", 0)
+		plan, err := hostadmit.BuildEvict(withEntries(h), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rmdir := stepIndex(plan, "rm -f /etc/systemd/system/user@.service.d/delegate.conf && rmdir --ignore-fail-on-non-empty /etc/systemd/system/user@.service.d && systemctl daemon-reload")
+		if made != (rmdir >= 0) {
+			t.Errorf("admit made the directory: %v; the plan:\n%s", made, plan.Text())
 		}
 	}
 }

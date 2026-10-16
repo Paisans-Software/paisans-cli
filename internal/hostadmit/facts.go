@@ -207,7 +207,7 @@ func countedDirs() []string { return []string{admission.Dir, deployment.Base, ap
 
 // probedDirs are the directories admit creates or checks.
 func probedDirs(d deployment.Deployment, in Input) []string {
-	dirs := []string{"/etc/wireguard", admission.Dir, deployment.Base, d.Root(), apply.HelperDir}
+	dirs := []string{"/etc/wireguard", admission.Dir, deployment.Base, d.Root(), apply.HelperDir, delegateDir}
 	if in.Flags.DataDir != "" {
 		dirs = append(dirs, in.Flags.DataDir, in.Flags.DataDir+"/"+d.Prefix())
 	}
@@ -616,7 +616,8 @@ func splitUnescaped(s string, sep byte) []string {
 // task that writes it writes; they live here, beside the probe, because the
 // probe is what reads them.
 const (
-	delegatePath     = "/etc/systemd/system/user@.service.d/delegate.conf"
+	delegateDir      = "/etc/systemd/system/user@.service.d"
+	delegatePath     = delegateDir + "/delegate.conf"
 	modulesLoadPath  = "/etc/modules-load.d/paisans.conf"
 	sysctlPath       = "/etc/sysctl.d/60-paisans.conf"
 	sysctlBeforePath = admission.Dir + "/sysctl.before"

@@ -71,9 +71,9 @@ step 14: remove ufw rule in on psns-f2a9
     $ ufw delete allow in on psns-f2a9 comment 'paisans-f2a9: the mesh: etcd, Patroni, Garage, HAProxy'
 
 step 15: remove /etc/systemd/system/user@.service.d/delegate.conf
-  evict: no other deployment is admitted
+  evict: no other deployment is admitted; and its directory, which admit created, once empty
   run:
-    $ rm -f /etc/systemd/system/user@.service.d/delegate.conf && systemctl daemon-reload
+    $ rm -f /etc/systemd/system/user@.service.d/delegate.conf && rmdir --ignore-fail-on-non-empty /etc/systemd/system/user@.service.d && systemctl daemon-reload
 
 step 16: remove /etc/modules-load.d/paisans.conf
   evict: no other deployment is admitted; br_netfilter stays loaded until the next boot

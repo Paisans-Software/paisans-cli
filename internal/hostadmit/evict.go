@@ -493,8 +493,9 @@ func (e *evictor) firewall() error {
 // not, or claims the host with no record.
 func (e *evictor) shared() bool { return len(e.others)+len(e.unreadable)+len(e.recordless) > 0 }
 
-// hostWide removes delegate.conf and modules-load.d/paisans.conf, each only
-// when it is as admit wrote it and no other deployment is admitted.
+// hostWide removes delegate.conf, with its directory once empty when admit
+// created it, and modules-load.d/paisans.conf, each only when it is as
+// admit wrote it and no other deployment is admitted.
 // br_netfilter stays loaded until the next boot: unloading it would change
 // what the host's FORWARD chain sees under whatever runs now.
 func (e *evictor) hostWide() error {
@@ -510,7 +511,14 @@ func (e *evictor) hostWide() error {
 		}
 		return nil
 	}
+	in, err := readInstalled(e.planner, "evict")
+	if err != nil {
+		return err
+	}
 	switch f := e.f.Files[delegatePath]; {
+	case f.Sum == sha(delegateConf) && slices.Contains(in.Dirs, delegateDir):
+		e.remove("remove "+delegatePath, "no other deployment is admitted; and its directory, which admit created, once empty",
+			"rm -f "+delegatePath+" && rmdir --ignore-fail-on-non-empty "+delegateDir+" && systemctl daemon-reload")
 	case f.Sum == sha(delegateConf):
 		e.remove("remove "+delegatePath, "no other deployment is admitted", "rm -f "+delegatePath+" && systemctl daemon-reload")
 	case f.Present:
@@ -645,15 +653,17 @@ func (e *evictor) installed() error {
 	if in.dockerIsAdmits() {
 		named = append(named, "the docker group")
 	}
+	describe := "the list of what admit created here"
 	if len(named) > 0 {
 		detail := "Evict removes no package: something else here may use them by now. Remove them yourself once nothing does."
 		if in.dockerIsAdmits() {
 			detail += " Docker's system daemon, which admit installed, stays disabled, and docker-ce made the docker group."
 		}
 		e.warn("packages: what admit installed stays: "+strings.Join(named, "; "), detail)
+		describe = "the list of what admit installed, which the plan names"
 	}
 	e.installedGone = true
-	e.remove("remove "+installedPath, "the list of what admit installed, which the plan names", "rm -f "+installedPath)
+	e.remove("remove "+installedPath, describe, "rm -f "+installedPath)
 	return nil
 }
 

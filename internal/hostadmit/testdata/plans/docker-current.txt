@@ -78,12 +78,14 @@ step 2: create /etc/paisans
     $ install -d -m 755 -o root -g root /etc/paisans
 
 step 3: record what admit installs
-  docker: /etc/paisans/installed, what admit installs on this host, which stays when the last deployment is evicted
+  docker: /etc/paisans/installed, what admit installs on this host, which stays when the last deployment is evicted, and the directories it creates
   write /etc/paisans/installed mode 0644:
-    | # Written by paisans host admit: what it installed on this host. It stays
-    | # installed when paisans host evict removes the last admitted deployment.
+    | # Written by paisans host admit: what it installed on this host, which stays
+    | # when paisans host evict removes the last admitted deployment, and each
+    | # directory it created, which evict removes once empty.
     | package docker-ce-rootless-extras
     | package uidmap
+    | dir /etc/systemd/system/user@.service.d
 
 step 4: install packages: docker-ce-rootless-extras=5:29.9.1-1~ubuntu.24.04~noble, uidmap
   packages: install docker-ce-rootless-extras=5:29.9.1-1~ubuntu.24.04~noble uidmap, leaving your Docker at the version it is

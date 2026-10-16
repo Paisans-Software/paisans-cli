@@ -158,7 +158,7 @@ func TestAdmitDisablesTheSystemDockerItInstalls(t *testing.T) {
 	if record < 0 || key < record || install < key || disable != install+1 {
 		t.Fatalf("record %d, key %d, install %d, disable %d:\n%s", record, key, install, disable, plan.Text())
 	}
-	want := "package docker-ce\npackage docker-ce-cli\npackage containerd.io\npackage docker-buildx-plugin\npackage docker-compose-plugin\npackage docker-ce-rootless-extras\npackage uidmap\npackage wireguard-tools\npackage git\nfile /etc/apt/keyrings/docker.asc\nfile /etc/apt/sources.list.d/docker.sources\n"
+	want := "package docker-ce\npackage docker-ce-cli\npackage containerd.io\npackage docker-buildx-plugin\npackage docker-compose-plugin\npackage docker-ce-rootless-extras\npackage uidmap\npackage wireguard-tools\npackage git\nfile /etc/apt/keyrings/docker.asc\nfile /etc/apt/sources.list.d/docker.sources\ndir /etc/systemd/system/user@.service.d\n"
 	if f := plan.Steps[record].File; f == nil || f.Path != "/etc/paisans/installed" || !strings.HasSuffix(f.Content, want) {
 		t.Errorf("the installed file: %+v", plan.Steps[record].File)
 	}
@@ -194,7 +194,7 @@ func TestAdmitLeavesTheOwnersDocker(t *testing.T) {
 // installedByAdmit is h with the installed file saying admit installed
 // Docker there.
 func installedByAdmit(h *fakeHost) *fakeHost {
-	content := "# Written by paisans host admit: what it installed on this host. It stays\n# installed when paisans host evict removes the last admitted deployment.\npackage docker-ce\npackage docker-ce-rootless-extras\npackage uidmap\n"
+	content := "# Written by paisans host admit: what it installed on this host, which stays\n# when paisans host evict removes the last admitted deployment, and each\n# directory it created, which evict removes once empty.\npackage docker-ce\npackage docker-ce-rootless-extras\npackage uidmap\ndir /etc/systemd/system/user@.service.d\n"
 	return h.file("/etc/paisans/installed", content).withFile("/etc/paisans/installed", content, "644", 0)
 }
 

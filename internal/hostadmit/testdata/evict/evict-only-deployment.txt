@@ -86,9 +86,9 @@ step 17: remove ufw rule 443/udp
     $ ufw delete allow 443/udp comment 'paisans-f2a9: public ports, HTTP/3'
 
 step 18: remove /etc/systemd/system/user@.service.d/delegate.conf
-  evict: no other deployment is admitted
+  evict: no other deployment is admitted; and its directory, which admit created, once empty
   run:
-    $ rm -f /etc/systemd/system/user@.service.d/delegate.conf && systemctl daemon-reload
+    $ rm -f /etc/systemd/system/user@.service.d/delegate.conf && rmdir --ignore-fail-on-non-empty /etc/systemd/system/user@.service.d && systemctl daemon-reload
 
 step 19: remove /etc/modules-load.d/paisans.conf
   evict: no other deployment is admitted; br_netfilter stays loaded until the next boot
@@ -100,27 +100,32 @@ step 20: remove the host's paisans sysctls
   run:
     $ sysctl -w net.ipv4.ip_unprivileged_port_start=1024 net.ipv4.ip_forward=0 >/dev/null && rm -f /etc/sysctl.d/60-paisans.conf /etc/paisans/sysctl.before
 
-step 21: remove the admission record
+step 21: remove /etc/paisans/installed
+  evict: the list of what admit created here
+  run:
+    $ rm -f /etc/paisans/installed
+
+step 22: remove the admission record
   evict: /etc/paisans/admitted.f2a9.json
   run:
     $ rm -f /etc/paisans/admitted.f2a9.json
 
-step 22: remove /etc/paisans
+step 23: remove /etc/paisans
   evict: it holds nothing once this deployment's files are gone
   run:
     $ rmdir /etc/paisans
 
-step 23: remove /srv/paisans
+step 24: remove /srv/paisans
   evict: it holds nothing once this deployment's files are gone
   run:
     $ rmdir /srv/paisans
 
-step 24: remove /usr/local/libexec/paisans
+step 25: remove /usr/local/libexec/paisans
   evict: it holds nothing once this deployment's files are gone
   run:
     $ rmdir /usr/local/libexec/paisans
 
-step 25: remove the registry entry
+step 26: remove the registry entry
   evict: deployment f2a9 from /var/lib/paisans/registry.json
   run:
     $ set -e; umask 077; [ -f /var/lib/paisans/registry.json ] || exit 0; exec 9>>/var/lib/paisans/registry.lock; flock -w 60 9 || { echo 'paisans: another command holds /var/lib/paisans/registry.lock'; exit 1; }; tmp=$(mktemp /var/lib/paisans/.registry.XXXXXX); trap 'rm -f "$tmp"' EXIT; awk '-v' 'id=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01' '-v' 'header={"version":1,"deployments":{' '-v' 'footer=}}' '-v' 'unreadable=paisans-registry-unreadable' '
