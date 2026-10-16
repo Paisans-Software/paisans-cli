@@ -211,6 +211,39 @@ func TestASelfProbeWithoutAUIDIsAnError(t *testing.T) {
 	}
 }
 
+// A self probe that names uid 0 is an error whatever the transport: root owns
+// every root listener, so each would read as this deployment's and never
+// conflict with a claim.
+func TestASelfProbeNamingRootIsAnError(t *testing.T) {
+	h := cleanHost()
+	h.answers[`echo "uid`] = "uid 0\nsubuid \n"
+	_, err := hostcheck.Inspect(h, fixtureDeployment)
+	if err == nil || !strings.Contains(err.Error(), "ran as root") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+// A subordinate range line that does not read as a start of at least 1 and a
+// count of at least 1 is refused, naming the line: read as start 0 it would
+// make root's and every system user's listeners this deployment's.
+func TestAMalformedSubordinateRangeIsAnError(t *testing.T) {
+	for _, line := range []string{
+		"paisans-f2a9:abc:65536",
+		"paisans-f2a9:-10:65536",
+		"paisans-f2a9:0:65536",
+		"paisans-f2a9:165536:abc",
+		"paisans-f2a9:165536:0",
+		"paisans-f2a9:165536",
+	} {
+		h := cleanHost()
+		h.answers[`echo "uid`] = "uid 1001\nsubuid " + line + "\n"
+		_, err := hostcheck.Inspect(h, fixtureDeployment)
+		if err == nil || !strings.Contains(err.Error(), line) {
+			t.Errorf("%s: got %v", line, err)
+		}
+	}
+}
+
 // A user with no subordinate range is still read, its range empty.
 func TestAUserWithoutASubordinateRange(t *testing.T) {
 	h := cleanHost()

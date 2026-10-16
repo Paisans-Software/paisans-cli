@@ -2,7 +2,9 @@ package hostcheck
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -72,9 +74,12 @@ func (s Self) Owns(uid int) bool {
 	return uid == s.UID || (s.SubCount > 0 && uid >= s.SubStart && uid < s.SubStart+s.SubCount)
 }
 
-// parseSelf reads selfProbe's two lines. One without a uid is an error,
-// since read as uid 0 it would make every listener of root's this
-// deployment's.
+// parseSelf reads selfProbe's two lines. One without a uid, or naming uid 0,
+// is an error, since as uid 0 every listener of root's would read as this
+// deployment's. A subordinate range line that is present and unreadable is
+// an error too, for the same reason: read as starting at 0 it would own
+// root's and every system user's UIDs. An absent one is no range, which owns
+// nothing.
 func parseSelf(out string) (Self, error) {
 	var s Self
 	found := false
@@ -86,19 +91,44 @@ func parseSelf(out string) (Self, error) {
 			if err != nil {
 				return s, fmt.Errorf("unreadable uid %q", rest)
 			}
+			if uid == 0 {
+				return s, errors.New("the probes ran as root, never the deployment's user")
+			}
 			s.UID, found = uid, true
 		case "subuid":
-			f := strings.Split(rest, ":")
-			if len(f) == 3 {
-				s.SubStart, _ = strconv.Atoi(f[1])
-				s.SubCount, _ = strconv.Atoi(f[2])
+			if rest == "" {
+				continue
 			}
+			start, count, ok := parseSubRange(rest)
+			if !ok {
+				return s, fmt.Errorf("unreadable /etc/subuid line %q", rest)
+			}
+			s.SubStart, s.SubCount = start, count
 		}
 	}
 	if !found {
 		return s, fmt.Errorf("no uid in %q", firstLine(out))
 	}
 	return s, nil
+}
+
+// parseSubRange reads an /etc/subuid line, name:start:count. A start below 1
+// or a count below 1 is not a range useradd or anyone else writes, and is
+// refused rather than read.
+func parseSubRange(line string) (start, count int, ok bool) {
+	f := strings.Split(line, ":")
+	if len(f) != 3 {
+		return 0, 0, false
+	}
+	start, err := strconv.Atoi(f[1])
+	if err != nil || start < 1 {
+		return 0, 0, false
+	}
+	count, err = strconv.Atoi(f[2])
+	if err != nil || count < 1 || start > math.MaxInt-count {
+		return 0, 0, false
+	}
+	return start, count, true
 }
 
 // Docker is the engine, if there is one.

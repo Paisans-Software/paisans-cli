@@ -395,7 +395,7 @@ func TestTheUsersOwnListenersAreOurs(t *testing.T) {
 	if r := hostcheck.Classify(gatewayClaims(t), inv); r.Refusal() != nil {
 		t.Errorf("the deployment's own Caddy refused: %v", r.Refusal())
 	}
-	for _, uid := range []int{0, 1002, 165536 + 65536} {
+	for _, uid := range []int{0, 1002, 165535, 165536 + 65536} {
 		inv.Sockets = []hostcheck.Socket{{Proto: "tcp", Port: 443, UID: uid}}
 		r := hostcheck.Classify(gatewayClaims(t), inv)
 		if r.Refusal() == nil || !strings.Contains(r.Refusal().Error(), "443") {
