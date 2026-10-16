@@ -23,6 +23,7 @@ changes share a bullet. Detailed notes are on the corresponding
 ### Changed
 
 - `sites.*.roles` lists each role once, so a repeated role is refused when the configuration loads, as `host request` requires.
+- Preflight compares a new data site with the existing data sites on architecture alone, so data sites may run different Ubuntu releases, since Postgres uses its container's glibc.
 - `watchdog: off` is refused, since a data site's Patroni needs a watchdog to fail over safely and no other site uses one.
 - `apps.*.hostname` and `apps.*.hostnames.*` must be lowercase DNS names of two labels or more, so a capital, a single label, an empty or over-long label or an underscore is refused by `validate`.
 - `sites.*.web_server.listen` must be an IPv4 loopback address or the site's own mesh address, its port written without leading zeros, as `host request` requires; `web-server-listen-not-this-host` refuses anything else.

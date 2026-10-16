@@ -1423,7 +1423,9 @@ failover. The toolkit never demands the witness; it refuses only the two
 voters (see *Nothing here is permanent*).
 
 A new data site must also have the data sites' architecture, which preflight
-compares along with the OS and glibc release (see *Architectures*).
+compares (see *Architectures*). Its OS release may differ from theirs: Postgres
+runs in a container with the image's own glibc, so the host's does not decide
+collation.
 
 ## The witness is a third location, not a cloud account
 
@@ -9044,9 +9046,9 @@ will eventually be violated:
 
 * SSH reachable; privilege escalation works
 * Docker present and recent enough
-* **OS, glibc major version and architecture match the existing sites** —
-  mismatched collation libraries between replicas risk corruption, and a data
-  directory is not portable between architectures
+* **Architecture matches the existing data sites**: a data directory is not
+  portable between architectures. The OS release need not match, since
+  Postgres's collation library is the container image's glibc, not the host's
 * Kernel WireGuard available; `/dev/watchdog` present
 * Ports free: 51820, 2379/2380, 5000
 * The mesh subnet does not collide with anything the host already routes
@@ -9075,7 +9077,7 @@ at, and "could not look" is not "looked and it was fine".
 | Host | new site | the host check (see *The host check*) | something foreign holds a claim, or the host is shared and its firewall is not already up and denying by default, or its Docker is a snap or older than the toolkit needs |
 | Prepared | new site | `host prepare`'s own plan, without the firewall's defaults on a shared host | it has any step left |
 | Registry | new site | `/var/lib/paisans/registry.json`, read and never claimed | another deployment there holds this one's token, root, interface or listen port, a mesh subnet overlapping this one's, or the gateway or data role this one claims |
-| Platform | new data site, against each existing data site | `/etc/os-release` `ID` and `VERSION_ID`, the release at the end of `ldd --version`'s first line, and `dpkg --print-architecture` | any of the four differs |
+| Platform | new data site, against each existing data site | `dpkg --print-architecture` | the architecture differs |
 | WireGuard | new site | `/sys/module/wireguard`, else `modprobe -n wireguard` | neither |
 | Watchdog | new data site | `/dev/watchdog` exists | it does not |
 | Ports | new site | the host check's `ss -Hltnup` against its claims | anything listens where the site will bind: the port it is dialled on, UDP, on a site with a `public_address` or an `endpoint`; 2379 or 2380 for an etcd member; 5432, 8008 or 8009 for a data site; the cluster port and 8404 where the site runs HAProxy; 3900 to 3903 for a Garage site; 80 and 443 for a gateway or a monitor in `managed_by: paisans`; `listen` for a monitor in `managed_by: external`; each app's published port |
@@ -9086,10 +9088,6 @@ at, and "could not look" is not "looked and it was fine".
 | Round trip | new site to every other site | three TCP connects to the site's `public_address` on its ssh port, timed with bash's `/dev/tcp` and `$EPOCHREALTIME`; the median is used | another site has no `public_address` to measure to, or `etcd.election_timeout_ms` is under five round trips |
 
 Three of these need a word.
-
-**glibc's "major version" is its 2.N release.** glibc has been 2.x since 1997
-and numbers releases by the second part, and collation changes ride on that
-(2.28 is the notorious one). Comparing the leading `2` would compare nothing.
 
 **The round trip warns as well as refusing.** It warns when `etcd.heartbeat_ms`
 is under one round trip, and when the election timeout is under ten: etcd's own

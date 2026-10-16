@@ -67,7 +67,6 @@ func healthy(name string) *fakeHost {
 		rules: []rule{
 			{match: "echo paisans-answers", out: "paisans-answers\n"},
 			{match: "timedatectl", out: "yes\n"},
-			{match: "ldd --version", out: "ldd (Ubuntu GLIBC 2.39-0ubuntu8.3) 2.39\nCopyright\n"},
 			{match: "dpkg --print-architecture", out: "amd64\n"},
 			{match: "wireguard"},
 			{match: "/dev/watchdog"},
@@ -247,16 +246,10 @@ func TestPreflightRefuses(t *testing.T) {
 		{name: "clock", site: "vm", check: "clock", want: "not synchronised",
 			setup: func(h map[string]*fakeHost) { h["vm"].override(rule{match: "timedatectl", out: "no\n"}) }},
 		{name: "host prepare owes steps", site: "home-b", check: "prepared", want: "install Docker", steps: []string{"install Docker"}},
-		{name: "glibc differs", site: "home-b", check: "platform", want: "glibc 2.41",
-			setup: func(h map[string]*fakeHost) {
-				h["home-b"].override(rule{match: "ldd --version", out: "ldd (GNU libc) 2.41\n"})
-			}},
 		{name: "architecture differs", site: "home-b", check: "platform", want: "arm64, but home-a runs amd64",
 			setup: func(h map[string]*fakeHost) {
 				h["home-b"].override(rule{match: "dpkg --print-architecture", out: "arm64\n"})
 			}},
-		{name: "os differs", site: "home-b", check: "platform", want: "ubuntu 22.04",
-			setup: func(h map[string]*fakeHost) { h["home-a"].files["/etc/os-release"] = "ID=ubuntu\nVERSION_ID=22.04\n" }},
 		{name: "no wireguard", site: "home-b", check: "wireguard", want: "no WireGuard",
 			setup: func(h map[string]*fakeHost) {
 				h["home-b"].override(rule{match: "wireguard", out: "modprobe: FATAL: Module wireguard not found", err: errors.New("exit status 1")})
@@ -456,16 +449,32 @@ func TestUndeclaredSiteIsAnError(t *testing.T) {
 	}
 }
 
-func TestMedianAndGlibc(t *testing.T) {
+func TestMedian(t *testing.T) {
 	ms, samples, err := medianMS("12500\n11800\n12000\n")
 	if err != nil || ms != 12.0 || strings.Join(samples, ",") != "11.8,12.0,12.5" {
 		t.Fatalf("median = %v %v %v", ms, samples, err)
 	}
-	if got := glibcRelease("2.39"); got != "2.39" {
-		t.Errorf("glibcRelease(2.39) = %q", got)
+}
+
+// Data sites may run different OS releases, Ubuntu 22.04 beside 24.04, and
+// so different glibc releases: Postgres runs in a container with its own
+// glibc, so the host's does not decide collation. Only the architecture is
+// compared, and neither the OS release nor glibc is read for it.
+func TestDataSitesMayRunDifferentOSReleases(t *testing.T) {
+	prepared(t)
+	h := hosts()
+	h["home-a"].files["/etc/os-release"] = "ID=ubuntu\nVERSION_ID=\"22.04\"\n"
+	r := run(t, fixture(t), h)
+	got := find(r, "home-b", "platform")
+	if len(got) != 1 || got[0].Refused || got[0].Detail != "amd64, same as home-a" {
+		t.Fatalf("platform: %+v", got)
 	}
-	if got := glibcRelease("2.35.1"); got != "2.35" {
-		t.Errorf("glibcRelease(2.35.1) = %q", got)
+	for name, host := range h {
+		for _, c := range host.ran {
+			if strings.Contains(c, "ldd") {
+				t.Errorf("glibc was read on %s: %q", name, c)
+			}
+		}
 	}
 }
 
