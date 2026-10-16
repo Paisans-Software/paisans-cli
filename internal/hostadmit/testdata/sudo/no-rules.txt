@@ -1,0 +1,1 @@
+User paisans-f2a9 is not allowed to run sudo on host.

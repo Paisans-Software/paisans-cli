@@ -106,10 +106,12 @@ type UserFacts struct {
 	HomeUID            int
 	Linger             bool
 	ManagerActive      bool
-	// SudoRead is sudo -l -U read for the user (or sudo absent);
-	// SudoRules are the rules it listed, as it printed them.
-	SudoRead  bool
-	SudoRules []string
+	// SudoRead is sudo -l -U read for the user, or sudo absent. From
+	// what it printed: SudoRules are the user's rules, SudoDefaults each
+	// entry of its matching Defaults, and SudoSpecific each runas or
+	// command-specific Defaults line, as sudo printed them.
+	SudoRead                              bool
+	SudoRules, SudoDefaults, SudoSpecific []string
 }
 
 // IDRange is one line of /etc/subuid or /etc/subgid: Count IDs from Start.
@@ -206,6 +208,7 @@ func parseFacts(out, user string) (Facts, error) {
 	f := Facts{Packages: map[string]bool{}, SubUID: map[string][]IDRange{}, SubGID: map[string][]IDRange{},
 		Files: map[string]FileState{}, Dirs: map[string]DirState{}, raw: map[string][]string{}}
 	f.User.Name = user
+	var sudoL []string
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	if len(lines) == 0 || lines[len(lines)-1] != "end" {
 		return f, fmt.Errorf("the probe's answer was cut short")
@@ -253,9 +256,9 @@ func parseFacts(out, user string) (Facts, error) {
 			}
 			f.User.HomeKind, f.User.HomeUID, f.User.HomePath = p[0], uid, p[2]
 		case "sudo":
-			f.User.SudoRead = v == "read"
-		case "sudo-rule":
-			f.User.SudoRules = append(f.User.SudoRules, v)
+			f.User.SudoRead = v == "absent"
+		case "sudo-l":
+			sudoL = append(sudoL, v)
 		case "groups":
 			f.User.Groups = strings.Fields(v)
 		case "group":
@@ -377,10 +380,70 @@ func parseFacts(out, user string) (Facts, error) {
 		}
 	}
 	f.OwnerFirewall = ownerFirewall(f.Ruleset)
+	if f.raw["sudo"] != nil && f.raw["sudo"][len(f.raw["sudo"])-1] == "listed" {
+		readSudo(&f.User, sudoL)
+	}
 	if f.User.Exists && f.User.Group == "" {
 		return f, fmt.Errorf("no primary group read for %s", user)
 	}
 	return f, nil
+}
+
+// readSudo reads what sudo -n -l -U printed for the user under LC_ALL=C:
+// a header line per section, each entry indented below it, long lines
+// wrapped onto more indented lines. A line it does not know, or a listing
+// with neither the user's rules nor sudo's "is not allowed", leaves
+// SudoRead false, so admit refuses rather than guess.
+func readSudo(u *UserFacts, lines []string) {
+	section, understood := "", false
+	var defaults []string
+	for _, l := range lines {
+		indented := strings.HasPrefix(l, " ") || strings.HasPrefix(l, "\t")
+		entry := strings.TrimSpace(l)
+		switch {
+		case entry == "":
+			section = ""
+		case !indented && strings.HasPrefix(l, "Matching Defaults entries for "):
+			section = "defaults"
+		case !indented && strings.HasPrefix(l, "Runas and Command-specific defaults for "):
+			section = "specific"
+		case !indented && strings.Contains(l, " may run the following commands on "):
+			section, understood = "rules", true
+		case !indented && strings.Contains(l, " is not allowed to run sudo on "):
+			section, understood = "", true
+		case indented && section == "defaults":
+			defaults = append(defaults, entry)
+		case indented && section == "specific":
+			u.SudoSpecific = append(u.SudoSpecific, entry)
+		case indented && section == "rules":
+			u.SudoRules = append(u.SudoRules, entry)
+		default:
+			return
+		}
+	}
+	// Defaults wrap after a comma, and a comma inside a value is escaped.
+	for _, e := range splitUnescaped(strings.Join(defaults, " "), ',') {
+		if e = strings.TrimSpace(e); e != "" {
+			u.SudoDefaults = append(u.SudoDefaults, e)
+		}
+	}
+	u.SudoRead = understood
+}
+
+// splitUnescaped splits s at each sep that no backslash escapes.
+func splitUnescaped(s string, sep byte) []string {
+	var out []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '\\':
+			i++
+		case sep:
+			out = append(out, s[start:i])
+			start = i + 1
+		}
+	}
+	return append(out, s[start:])
 }
 
 // The files admit writes as root that the probe reads. Each is what the

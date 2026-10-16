@@ -48,19 +48,14 @@ if line=$(getent passwd "$u"); then
   home=$(printf '%s' "$line" | cut -d: -f6)
   if [ -e "/var/lib/systemd/linger/$u" ]; then say linger yes; else say linger no; fi
   say manager "$(systemctl is-active "user@$uid.service" 2>/dev/null || true)"
-  # Every rule sudo grants the user, by name or by any group. With no sudo
-  # installed there is none.
-  if ! command -v sudo >/dev/null 2>&1; then
-    say sudo read
+  # Everything sudo -l lists for the user: its rules, by name or by any
+  # group, and the Defaults that apply to it, its runas users and its
+  # commands. admit reads them. With no sudo installed there is none.
+  if command -v sudo >/dev/null 2>&1; then
+    say sudo listed
+    sudo -n -l -U "$u" 2>&1 | sed 's/^/sudo-l /'
   else
-    rules=$(sudo -n -l -U "$u" 2>&1 || true)
-    case $rules in
-      *"may run the following commands"*)
-        say sudo read
-        printf '%s\n' "$rules" | awk '/may run the following commands/ { r = 1; next } r && /^[ \t]+[^ \t]/ { sub(/^[ \t]+/, ""); print "sudo-rule " $0 }' ;;
-      *"is not allowed to run sudo"*) say sudo read ;;
-      *) say sudo unknown ;;
-    esac
+    say sudo absent
   fi
   homepath=$home
 else

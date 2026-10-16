@@ -158,23 +158,84 @@ func ownHome(user string, u UserFacts) error {
 // sudoRules refuses a user sudo grants any rule to but admit's own line
 // for the WireGuard helper, which a re-run finds: a rule by name, or by a
 // group PrivilegedGroups does not list, reaches past the user as surely as
-// sudo's own group does.
+// sudo's own group does. It refuses too a Defaults entry that lets the
+// user hand the helper an environment or another root (sudoDefaultProblem),
+// and any entry set for a runas user or a command alone: sudo -l lists
+// only admit's line while setenv lets the user pass LD_PRELOAD to the
+// helper, which runs as root.
 func sudoRules(p *planner) error {
 	user := p.in.Request.User
-	if !p.f.User.SudoRead {
+	u := p.f.User
+	if !u.SudoRead {
 		return fmt.Errorf("sudo's rules for %s could not be read (sudo -l -U %s), so admit cannot tell what they grant. Nothing was changed", user, user)
 	}
 	helper, _ := apply.WGHelper{Iface: p.d.Interface()}.Path()
-	var others []string
-	for _, r := range p.f.User.SudoRules {
+	var rules, defaults []string
+	for _, r := range u.SudoRules {
 		if r != "(root) NOPASSWD: "+helper {
-			others = append(others, "- "+ui.Visible(r))
+			rules = append(rules, "- "+ui.Visible(r))
 		}
 	}
-	if len(others) == 0 {
-		return nil
+	for _, d := range u.SudoDefaults {
+		if why := sudoDefaultProblem(d); why != "" {
+			defaults = append(defaults, "- "+ui.Visible(d)+": "+why)
+		}
 	}
-	return fmt.Errorf("sudo grants %s a rule beyond admit's own, which reaches past the user:\n%s\nRemove them (sudo -l -U %s names them; look in /etc/sudoers and /etc/sudoers.d), or name another user in the request, and admit again. Nothing was changed", user, strings.Join(others, "\n"), user)
+	for _, d := range u.SudoSpecific {
+		defaults = append(defaults, "- "+ui.Visible(d)+": set for one runas user or command alone")
+	}
+	switch {
+	case len(rules) > 0:
+		return fmt.Errorf("sudo grants %s a rule beyond admit's own, which reaches past the user:\n%s\nRemove them (sudo -l -U %s names them; look in /etc/sudoers and /etc/sudoers.d), or name another user in the request, and admit again. Nothing was changed", user, strings.Join(rules, "\n"), user)
+	case len(defaults) > 0:
+		return fmt.Errorf("sudo's Defaults for %s would let it pass its own environment, or another root, to admit's helper, which runs as root:\n%s\nRemove them (sudo -l -U %s names them; look in /etc/sudoers and /etc/sudoers.d), or name another user in the request, and admit again. Nothing was changed", user, strings.Join(defaults, "\n"), user)
+	}
+	return nil
+}
+
+// stockSecurePath is the directories of Ubuntu's secure_path, each
+// root's alone; a secure_path of any of them passes.
+var stockSecurePath = []string{"/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/sbin", "/bin", "/snap/bin"}
+
+// sudoDefaultProblem says why one entry of the Defaults sudo applies to
+// the user lets it reach past the helper's fixed environment, or "":
+// keeping or setting variables (env_keep, env_check, env_file, setenv,
+// restricted_env_file, !env_reset), a PATH of its choosing (!secure_path,
+// a secure_path outside root's directories, exempt_group), a root
+// directory or working directory of its choosing (runchroot, runcwd), or
+// open descriptors (closefrom_override). Stock Ubuntu's env_reset,
+// mail_badpass, secure_path and use_pty pass, as does anything else.
+func sudoDefaultProblem(entry string) string {
+	name := strings.TrimPrefix(entry, "!")
+	value := ""
+	if i := strings.IndexAny(name, "+-="); i >= 0 {
+		name, value = name[:i], strings.TrimLeft(name[i:], "+-=")
+	}
+	negated := strings.HasPrefix(entry, "!")
+	switch name {
+	case "env_reset":
+		if negated {
+			return "the user's whole environment reaches the helper"
+		}
+	case "env_keep", "env_check", "env_file", "setenv", "restricted_env_file", "env_delete":
+		return "the user's variables reach the helper"
+	case "secure_path":
+		if negated {
+			return "the user's PATH reaches the helper"
+		}
+		for _, d := range strings.Split(strings.ReplaceAll(value, `\:`, ":"), ":") {
+			if !slices.Contains(stockSecurePath, d) {
+				return "the helper's PATH holds " + ui.Visible(d) + ", which is not root's alone"
+			}
+		}
+	case "exempt_group":
+		return "its members' PATH reaches the helper"
+	case "runchroot", "runcwd":
+		return "the user chooses the helper's root or working directory"
+	case "closefrom_override":
+		return "the user's open files reach the helper"
+	}
+	return ""
 }
 
 // misplaced says why r cannot be a deployment's subordinate range, or "":

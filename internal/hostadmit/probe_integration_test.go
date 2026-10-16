@@ -126,6 +126,14 @@ func TestProbeReadsTheUsersSudoRules(t *testing.T) {
 	if u := f.User; !u.SudoRead || !slices.Equal(slices.Sorted(slices.Values(u.SudoRules)), slices.Sorted(slices.Values(want))) {
 		t.Errorf("rules: %+v", u)
 	}
+	// Defaults set for the user join its matching entries; ones set for
+	// the helper alone are listed apart.
+	helperLine := "echo 'paisans-f2a9 ALL=(root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-f2a9' > /etc/sudoers.d/paisans-f2a9 && chmod 440 /etc/sudoers.d/paisans-f2a9\n"
+	f = probeIn(t, setup+helperLine+"echo 'Defaults:paisans-f2a9 setenv' > /etc/sudoers.d/zz && echo 'Defaults!/usr/local/libexec/paisans/wg-psns-f2a9 env_keep += \"LD_PRELOAD\"' >> /etc/sudoers.d/zz && chmod 440 /etc/sudoers.d/zz", "paisans-f2a9", "")
+	if u := f.User; !u.SudoRead || !slices.Contains(u.SudoDefaults, "setenv") || !slices.Contains(u.SudoDefaults, "env_reset") ||
+		!slices.Equal(u.SudoSpecific, []string{`Defaults!/usr/local/libexec/paisans/wg-psns-f2a9 env_keep+=LD_PRELOAD`}) {
+		t.Errorf("defaults: %+v", u)
+	}
 }
 
 // With nftables and iptables installed: an owner's own nft table is the

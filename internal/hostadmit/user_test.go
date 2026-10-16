@@ -2,6 +2,8 @@ package hostadmit_test
 
 import (
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -66,7 +68,10 @@ var userCases = addCases(
 		return h.add("subuid", "paisans-f2a9:0:65536")
 	}},
 	goldenCase{name: "user-sudo-rule-refused", site: "vm", host: func() *fakeHost {
-		return current().withUser().add("sudo-rule", "(ALL : ALL) NOPASSWD: ALL")
+		return withSudo(current().withUser(), sudoFixture("stock")+"    (ALL : ALL) NOPASSWD: ALL\n")
+	}},
+	goldenCase{name: "user-sudo-setenv-refused", site: "vm", host: func() *fakeHost {
+		return withSudo(current().withUser(), sudoFixture("setenv-helper"))
 	}},
 	goldenCase{name: "user-overlapping-subids-refused", site: "vm", host: func() *fakeHost {
 		return current().withUser().add("subuid", "someone:170000:65536")
@@ -312,19 +317,39 @@ func TestAnExistingHomeIsRefused(t *testing.T) {
 	}
 }
 
+// sudoFixture is what sudo -l -U paisans-f2a9 printed, under LC_ALL=C,
+// in ubuntu:24.04 with admit's helper line installed (stock) and with one
+// more sudoers entry for each other fixture; no-rules has no line at all.
+func sudoFixture(name string) string {
+	b, err := os.ReadFile(filepath.Join("testdata", "sudo", name+".txt"))
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
+// withSudo is h with sudo installed and listing out for the user, as the
+// probe prints it: one sudo-l line per line sudo printed.
+func withSudo(h *fakeHost, out string) *fakeHost {
+	h.with("sudo", "listed")
+	for _, l := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		h.add("sudo-l", l)
+	}
+	return h
+}
+
 // A user sudo grants anything to, by name or by a group admit does not
 // list, is refused: admit's own line for the WireGuard helper, which a
 // re-run finds, is to be its only rule.
 func TestAUserWithSudoRulesIsRefused(t *testing.T) {
-	const own = "(root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-f2a9"
 	for _, c := range []struct {
 		name string
 		host *fakeHost
 		want string
 	}{
-		{"a rule", current().withUser().add("sudo-rule", "(ALL : ALL) ALL"), "sudo grants paisans-f2a9 a rule"},
-		{"a rule beside admit's", current().withUser().add("sudo-rule", own).add("sudo-rule", "(root) /usr/bin/apt"), "(root) /usr/bin/apt"},
-		{"rules unread", current().withUser().with("sudo", "unknown"), "sudo's rules for paisans-f2a9 could not be read"},
+		{"a rule", withSudo(current().withUser(), sudoFixture("stock")+"    (ALL : ALL) ALL\n"), "sudo grants paisans-f2a9 a rule"},
+		{"a rule beside admit's", withSudo(current().withUser(), sudoFixture("stock")+"    (root) /usr/bin/apt\n"), "(root) /usr/bin/apt"},
+		{"output it cannot read", withSudo(current().withUser(), "sudo: unable to resolve host\n"), "sudo's rules for paisans-f2a9 could not be read"},
 		{"no sudo line", func() *fakeHost {
 			h := current().withUser()
 			var kept [][2]string
@@ -342,8 +367,35 @@ func TestAUserWithSudoRulesIsRefused(t *testing.T) {
 			t.Errorf("%s: %v", c.name, err)
 		}
 	}
-	if _, err := hostadmit.Build(current().withUser().add("sudo-rule", own), input(t, "vm", hostadmit.Flags{})); err != nil {
-		t.Errorf("admit's own helper rule is refused: %v", err)
+}
+
+// A sudoers default that lets the user hand the helper an environment, or
+// that is set for the user, its runas or the helper alone, is refused:
+// with setenv, sudo -l lists only admit's line while the user passes
+// LD_PRELOAD to the helper, as root. Stock Ubuntu's defaults, and ones
+// that change nothing the helper sees, pass.
+func TestASudoDefaultThatReachesTheHelperIsRefused(t *testing.T) {
+	for name, want := range map[string]string{
+		"setenv-user":      "setenv",
+		"setenv-helper":    "Defaults!/usr/local/libexec/paisans/wg-psns-f2a9 setenv",
+		"runas-root":       "Defaults>root env_reset",
+		"not-env-reset":    "!env_reset",
+		"env-keep":         "env_keep+=LD_PRELOAD",
+		"env-check":        "env_check+=FOO",
+		"env-file":         "env_file=/etc/x",
+		"not-secure-path":  "!secure_path",
+		"secure-path-home": `secure_path=/home/paisans-f2a9/bin\:/usr/bin`,
+		"runchroot":        "runchroot=*",
+	} {
+		_, err := hostadmit.Build(withSudo(current().withUser(), sudoFixture(name)), input(t, "vm", hostadmit.Flags{}))
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	for _, name := range []string{"stock", "no-rules", "harmless-user"} {
+		if _, err := hostadmit.Build(withSudo(current().withUser(), sudoFixture(name)), input(t, "vm", hostadmit.Flags{})); err != nil {
+			t.Errorf("%s is refused: %v", name, err)
+		}
 	}
 }
 

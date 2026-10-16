@@ -83,7 +83,10 @@ exists and is root, or is in `sudo`, `wheel`, `admin`, `adm`, `docker`,
 `docker` in particular undoes the whole design, because it is the owner's
 system daemon. `paisans doctor` checks the same list on every run. Admit
 also refuses a user that `sudo -l -U` shows any rule for beyond admit's own
-helper line, a home that is a link or not the user's, a home already
+helper line, or any Defaults that would pass the user's environment, PATH,
+root or working directory to that helper (`setenv`, `env_keep`,
+`!env_reset` and their kin) or that are set for a runas user or a command
+alone, a home that is a link or not the user's, a home already
 present for a user it is about to create, and a subordinate range that
 starts below 100000 or holds 0, 65534 or the user's own ID.
 

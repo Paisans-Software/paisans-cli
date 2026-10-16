@@ -155,7 +155,7 @@ func newBlank() *fakeHost {
 		{"pkg", "docker-ce-rootless-extras absent"}, {"pkg", "uidmap absent"}, {"pkg", "nftables installed"},
 		{"setuptool", "absent"}, {"snap", "absent"}, {"system-socket", "absent"},
 		{"userns-restrict", "1"}, {"rootlesskit-profile", "absent"},
-		{"passwd", "absent"}, {"home", "absent 0 /home/paisans-f2a9"}, {"sudo", "read"}, {"subuid", "ubuntu:100000:65536"}, {"subgid", "ubuntu:100000:65536"},
+		{"passwd", "absent"}, {"home", "absent 0 /home/paisans-f2a9"}, {"sudo", "absent"}, {"subuid", "ubuntu:100000:65536"}, {"subgid", "ubuntu:100000:65536"},
 		{"br_netfilter", "absent"}, {"forward-policy", "ACCEPT"},
 		{"port-start", "1024"}, {"ip-forward", "0"},
 		{"default-dev", "eth0"}, {"lan", "203.0.113.10/24"},

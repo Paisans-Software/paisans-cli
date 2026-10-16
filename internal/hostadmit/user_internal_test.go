@@ -1,6 +1,8 @@
 package hostadmit
 
 import (
+	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -38,5 +40,27 @@ func TestTheProbeReadsTheMeshDropIn(t *testing.T) {
 	}
 	if got := meshDropInPath("1001"); got != "/etc/systemd/system/user@1001.service.d/paisans-mesh.conf" {
 		t.Errorf("meshDropInPath: %s", got)
+	}
+}
+
+// readSudo reads sudo -l as ubuntu:24.04 prints it, its Defaults wrapped
+// over three lines, into each entry, each rule and each specific line.
+func TestReadSudoReadsUbuntusListing(t *testing.T) {
+	b, err := os.ReadFile("testdata/sudo/setenv-helper.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var u UserFacts
+	readSudo(&u, strings.Split(strings.TrimRight(string(b), "\n"), "\n"))
+	if !u.SudoRead ||
+		!slices.Equal(u.SudoDefaults, []string{"env_reset", "mail_badpass", `secure_path=/usr/local/sbin\:/usr/local/bin\:/usr/sbin\:/usr/bin\:/sbin\:/bin\:/snap/bin`, "use_pty"}) ||
+		!slices.Equal(u.SudoRules, []string{"(root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-f2a9"}) ||
+		!slices.Equal(u.SudoSpecific, []string{"Defaults!/usr/local/libexec/paisans/wg-psns-f2a9 setenv"}) {
+		t.Errorf("%+v", u)
+	}
+	u = UserFacts{}
+	readSudo(&u, []string{"Matching Defaults entries for paisans-f2a9 on host:", "    env_reset", "Something sudo never printed"})
+	if u.SudoRead {
+		t.Errorf("an unknown line is read: %+v", u)
 	}
 }
