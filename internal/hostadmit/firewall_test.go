@@ -238,7 +238,7 @@ func TestAnOwnersSSHDenyIsRefusedInAdmitsTerms(t *testing.T) {
 func TestANATRuleOnASetRefuses(t *testing.T) {
 	h := home().answer(portsMarker, "dnat table ip nat chain PREROUTING: tcp dport @web dnat ip to 10.0.0.2\nend\n")
 	_, err := hostadmit.Build(h, input(t, "home-a", gateway))
-	if err == nil || !strings.Contains(err.Error(), "set or map admit cannot read") || !strings.Contains(err.Error(), "tcp dport @web") {
+	if err == nil || !strings.Contains(err.Error(), "ports admit cannot read") || !strings.Contains(err.Error(), "tcp dport @web") {
 		t.Errorf("Build = %v", err)
 	}
 }

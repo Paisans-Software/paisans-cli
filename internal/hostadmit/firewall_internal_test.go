@@ -79,10 +79,14 @@ func TestANegatedPortHoldsWhatItDoesNotName(t *testing.T) {
 	}
 }
 
-// A port in a named set or a map is not one admit can read, so the rule
-// may hold 80 or 443, and does, unresolved, so the refusal can say so.
+// A port operand that yields no port admit can read, a named set, a map
+// or a concatenation, may hold 80 or 443, and does, unresolved, so the
+// refusal can say so.
 func TestAPortInASetOrMapHoldsUnresolved(t *testing.T) {
 	for _, rule := range []string{
+		"tcp dport . ip saddr { 443 . 1.2.3.4 } dnat ip to 10.0.0.2",
+		"tcp dport { https } dnat ip to 10.0.0.2",
+		"tcp dport { 22, @more } dnat ip to 10.0.0.2",
 		"tcp dport @web dnat ip to 10.0.0.2",
 		"dnat ip to tcp dport map { 443 : 10.0.0.2 }",
 		"dnat ip to tcp dport map @ports",

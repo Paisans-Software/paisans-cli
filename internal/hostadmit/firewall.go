@@ -178,7 +178,7 @@ func holders(p *planner) ([]holder, error) {
 		case "dnat":
 			switch holds, unresolved := ruleHoldsLow(rest); {
 			case unresolved:
-				found = append(found, holder{"a NAT rule whose ports are in a set or map admit cannot read, so it may hold 80 or 443, in " + hostText(rest)})
+				found = append(found, holder{"a NAT rule whose ports admit cannot read (a set, a map, a concatenation or a name), so it may hold 80 or 443, in " + hostText(rest)})
 			case holds:
 				found = append(found, holder{"a NAT rule in " + hostText(rest)})
 			}
@@ -217,19 +217,23 @@ func publishesLow(ports string) bool {
 // as its destination port: one port, a set, a range (nft's 1-1000,
 // iptables' 1:1000), or a negation (nft's !=, iptables' ! --dport), which
 // matches every port it does not name, so it holds 80 or 443 unless it
-// names both. A port in a named set or a map (@name, map, vmap) is not one
-// admit can read, so the rule is taken to hold them, unresolved.
+// names both. An operand that is anything but ports and ranges, a named
+// set, a map, a concatenation or a service's name, is not one admit can
+// read, so the rule is taken to hold them, unresolved.
 func ruleHoldsLow(rule string) (holds, unresolved bool) {
 	for _, m := range dport.FindAllStringSubmatch(rule, -1) {
-		if op := m[3]; strings.HasPrefix(op, "@") || op == "map" || op == "vmap" {
+		names := map[int]bool{}
+		tokens := strings.FieldsFunc(m[3], func(r rune) bool { return strings.ContainsRune("{}, ", r) })
+		if len(tokens) == 0 {
 			return true, true
 		}
-		names := map[int]bool{}
-		for _, tok := range strings.FieldsFunc(m[3], func(r rune) bool { return strings.ContainsRune("{}, ", r) }) {
-			if s := portSpan.FindStringSubmatch(tok); s != nil {
-				for _, port := range []int{80, 443} {
-					names[port] = names[port] || portIn(s[1], s[2], port)
-				}
+		for _, tok := range tokens {
+			s := portSpan.FindStringSubmatch(tok)
+			if s == nil {
+				return true, true
+			}
+			for _, port := range []int{80, 443} {
+				names[port] = names[port] || portIn(s[1], s[2], port)
 			}
 		}
 		negated := m[1] != "" || m[2] != ""
