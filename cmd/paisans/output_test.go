@@ -393,7 +393,8 @@ func fixtureRuns(t *testing.T) map[string]string {
 
 	{
 		var sent, writes []string
-		withDoctorHosts(t, stuckHosts(mustLoad(t, cfg), &sent, &writes))
+		loaded := mustLoad(t, cfg)
+		withDoctorHosts(t, loaded, stuckHosts(loaded, &sent, &writes))
 		runs["doctor"] = runDefault(t, "doctor", func() error { return runDoctor([]string{"--config", cfg}) })
 	}
 

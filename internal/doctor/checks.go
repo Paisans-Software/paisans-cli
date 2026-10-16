@@ -19,6 +19,16 @@ import (
 type Reads interface {
 	// Reach runs ReachCommand.
 	Reach(site string) SiteReach
+	// Admission reads the site's admission record, as the login user.
+	Admission(site string) AdmissionProbe
+	// User runs UserCommand on the site.
+	User(site string) UserProbe
+	// Docker runs DockerCommand on the site.
+	Docker(site string) DockerProbe
+	// Linger runs LingerCommand on the site.
+	Linger(site string) LingerProbe
+	// Sudo runs SudoCommand on the site.
+	Sudo(site string) SudoProbe
 	// Mesh reads the site's mesh interface and the networks on the host.
 	Mesh(site string) MeshProbe
 	// EtcdHealth runs EtcdHealthCommand on a member's host.
@@ -46,11 +56,13 @@ type Reads interface {
 }
 
 // Checks is every check doctor makes on sites, the ones it asks, as a
-// graph: each site's reach first, and everything read over a site's
-// connection needing it, then from the bottom of the stack up, the order
-// Diagnose reports in. Each check's judge is the section function Diagnose
-// calls, given the probes of the check's own subject, so the graph's
-// findings for a complete Input are Diagnose's.
+// graph: each site's reach first, then its admission record, which every
+// other read of the site needs, since nothing is asked of a pending site;
+// then the deployment's user, its rootless Docker, which every check that
+// runs docker there needs, linger and sudo; then from the bottom of the
+// stack up, the order Diagnose reports in. Each check's judge is the
+// section function Diagnose calls, given the probes of the check's own
+// subject, so the graph's findings for a complete Input are Diagnose's.
 //
 // Reads that answer DNSReads as well get the DNS checks after the rest:
 // Caddy's certificates on each Caddy site, the DNS token from each place
@@ -91,9 +103,83 @@ func Checks(cfg *config.Config, sites []string, reads Reads) *Graph {
 			Judge: func(in Input) []Finding { return Reach(cfg, bySite(in.Reach, site, SiteReach.site)) },
 		})
 	}
+	admitted := func(site string) string { return SectionAdmission + " " + site }
+	docker := func(site string) string { return SectionDocker + " " + site }
+	for _, site := range sites {
+		g.Add(Node{Name: admitted(site), Section: SectionAdmission, Site: site, Subject: site,
+			Hard: []Need{Hard(reach(site))},
+			Gather: func(Input) func(*Input) {
+				p := reads.Admission(site)
+				return func(in *Input) { in.Admission = append(in.Admission, p) }
+			},
+			Outcome: func(in Input) Outcome {
+				for _, p := range bySite(in.Admission, site, AdmissionProbe.site) {
+					if p.Pending() {
+						return Failed
+					}
+				}
+				return Passed
+			},
+			Judge: func(in Input) []Finding { return Admission(cfg, bySite(in.Admission, site, AdmissionProbe.site)) },
+		})
+	}
+	for _, site := range sites {
+		g.Add(Node{Name: SectionUser + " " + site, Section: SectionUser, Site: site, Subject: site,
+			Hard: []Need{Hard(admitted(site))},
+			Gather: func(Input) func(*Input) {
+				p := reads.User(site)
+				return func(in *Input) { in.Users = append(in.Users, p) }
+			},
+			Judge: func(in Input) []Finding { return User(bySite(in.Users, site, UserProbe.site)) },
+		})
+	}
+	for _, site := range sites {
+		g.Add(Node{Name: docker(site), Section: SectionDocker, Site: site, Subject: site,
+			Hard: []Need{Hard(admitted(site))},
+			Gather: func(Input) func(*Input) {
+				p := reads.Docker(site)
+				return func(in *Input) { in.Docker = append(in.Docker, p) }
+			},
+			Outcome: func(in Input) Outcome {
+				for _, p := range bySite(in.Docker, site, DockerProbe.site) {
+					if p.Answered() {
+						return Passed
+					}
+				}
+				return Failed
+			},
+			Judge: func(in Input) []Finding { return DockerSocket(bySite(in.Docker, site, DockerProbe.site)) },
+		})
+	}
+	for _, site := range sites {
+		g.Add(Node{Name: SectionDocker + " engine " + site, Section: SectionDocker, Site: site, Subject: site,
+			Hard:  []Need{Hard(docker(site))},
+			Judge: func(in Input) []Finding { return DockerEngine(bySite(in.Docker, site, DockerProbe.site)) },
+		})
+	}
+	for _, site := range sites {
+		g.Add(Node{Name: SectionLinger + " " + site, Section: SectionLinger, Site: site, Subject: site,
+			Hard: []Need{Hard(admitted(site))},
+			Gather: func(Input) func(*Input) {
+				p := reads.Linger(site)
+				return func(in *Input) { in.Linger = append(in.Linger, p) }
+			},
+			Judge: func(in Input) []Finding { return Linger(d, bySite(in.Linger, site, LingerProbe.site)) },
+		})
+	}
+	for _, site := range sites {
+		g.Add(Node{Name: SectionSudo + " " + site, Section: SectionSudo, Site: site, Subject: site,
+			Hard: []Need{Hard(admitted(site))},
+			Gather: func(Input) func(*Input) {
+				p := reads.Sudo(site)
+				return func(in *Input) { in.SudoRights = append(in.SudoRights, p) }
+			},
+			Judge: func(in Input) []Finding { return SudoRights(cfg, bySite(in.SudoRights, site, SudoProbe.site)) },
+		})
+	}
 	for _, site := range sites {
 		g.Add(Node{Name: SectionMesh + " " + site, Section: SectionMesh, Site: site, Subject: site,
-			Hard: []Need{Hard(reach(site))},
+			Hard: []Need{Hard(admitted(site))},
 			Gather: func(Input) func(*Input) {
 				p := reads.Mesh(site)
 				return func(in *Input) { in.Mesh = append(in.Mesh, p) }
@@ -163,7 +249,7 @@ func Checks(cfg *config.Config, sites []string, reads Reads) *Graph {
 			name := SectionPatroni + " " + site
 			members = append(members, name)
 			g.Add(Node{Name: name, Section: SectionPatroni, Site: site, Subject: site,
-				Hard: []Need{Hard(reach(site))},
+				Hard: []Need{Hard(docker(site))},
 				Soft: soft(SectionEtcd),
 				Gather: func(Input) func(*Input) {
 					out, failure := reads.PatroniCluster(site)
@@ -215,7 +301,7 @@ func Checks(cfg *config.Config, sites []string, reads Reads) *Graph {
 
 	for _, site := range sites {
 		g.Add(Node{Name: SectionContainers + " " + site, Section: SectionContainers, Site: site, Subject: site,
-			Hard: []Need{Hard(reach(site))},
+			Hard: []Need{Hard(docker(site))},
 			Soft: soft(SectionPatroni),
 			Gather: func(Input) func(*Input) {
 				c := reads.Containers(site)
@@ -238,7 +324,7 @@ func Checks(cfg *config.Config, sites []string, reads Reads) *Graph {
 				continue
 			}
 			g.Add(Node{Name: SectionSettings + " " + site + " " + app, Section: SectionSettings, Site: site, Subject: app + " on " + site,
-				Hard: []Need{Hard(reach(site))},
+				Hard: []Need{Hard(docker(site))},
 				Soft: soft(SectionContainers + " " + site),
 				Gather: func(Input) func(*Input) {
 					p := reads.Settings(site, app)
@@ -281,7 +367,7 @@ func Checks(cfg *config.Config, sites []string, reads Reads) *Graph {
 
 	for _, site := range sites {
 		g.Add(Node{Name: SectionClocks + " " + site, Section: SectionClocks, Site: site, Subject: site,
-			Hard: []Need{Hard(reach(site))},
+			Hard: []Need{Hard(admitted(site))},
 			Gather: func(Input) func(*Input) {
 				c := reads.Clock(site)
 				return func(in *Input) { in.Clocks = append(in.Clocks, c) }
@@ -291,7 +377,7 @@ func Checks(cfg *config.Config, sites []string, reads Reads) *Graph {
 	}
 	for _, site := range sites {
 		g.Add(Node{Name: SectionLeftovers + " " + site, Section: SectionLeftovers, Site: site, Subject: site,
-			Hard: []Need{Hard(reach(site))},
+			Hard: []Need{Hard(docker(site))},
 			Gather: func(Input) func(*Input) {
 				p := reads.Leftovers(site)
 				return func(in *Input) { in.Leftovers = append(in.Leftovers, p) }

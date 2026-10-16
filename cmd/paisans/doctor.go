@@ -13,6 +13,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/ui"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -157,7 +158,8 @@ func (b boundedTransport) timed(command string) (out string, before, after time.
 // doctorReads makes doctor's reads over each site's transport. Every
 // command here is one of internal/doctor's read commands, patroni's
 // ClusterCommand, apply.LookAtInstances' question, or the host check's
-// inventory (hostcheck.Inspect); none writes.
+// inventory (hostcheck.Inspect), and it reads the admission record; none
+// writes.
 type doctorReads struct {
 	cfg        *config.Config
 	transports map[string]apply.Transport
@@ -314,6 +316,56 @@ func (d doctorReads) Reach(site string) doctor.SiteReach {
 		r.Err = errText(out, err)
 	}
 	return r
+}
+
+// Admission reads the site's admission record as the login user, who may:
+// it is root's, mode 644, in a directory every user lists.
+func (d doctorReads) Admission(site string) doctor.AdmissionProbe {
+	p := doctor.AdmissionProbe{Site: site}
+	token := d.cfg.Deployment().Token()
+	rec, err := admission.Read(d.transports[site], token)
+	var refused *admission.Error
+	switch {
+	case errors.Is(err, admission.ErrNotAdmitted):
+	case errors.As(err, &refused):
+		lines := strings.Split(strings.TrimSpace(err.Error()), "\n")
+		p.Err, p.More = lines[0], append(lines[1:], moveAside(token))
+	case err != nil:
+		lines := strings.Split(strings.TrimSpace(err.Error()), "\n")
+		p.Err, p.More = lines[0], lines[1:]
+	default:
+		p.Found, p.Record = true, rec
+	}
+	return p
+}
+
+// moveAside is how a record host admit refuses to read is set aside, so
+// that admit writes a new one: it will not write over a record it cannot
+// read. The name it moves to is not admitted.*.json, which every command
+// that lists the records reads.
+func moveAside(token string) string {
+	path, _ := admission.Path(token)
+	return fmt.Sprintf("host admit will not write over a record it cannot read: its owner moves it aside first, `sudo mv %[1]s %[1]s.unreadable`, then admits this deployment again.", path)
+}
+
+func (d doctorReads) User(site string) doctor.UserProbe {
+	out, failure := d.read(site, doctor.UserCommand)
+	return doctor.UserProbe{Site: site, Out: out, Err: failure}
+}
+
+func (d doctorReads) Docker(site string) doctor.DockerProbe {
+	out, failure := d.read(site, doctor.DockerCommand)
+	return doctor.DockerProbe{Site: site, Out: out, Err: failure}
+}
+
+func (d doctorReads) Linger(site string) doctor.LingerProbe {
+	out, failure := d.read(site, doctor.LingerCommand)
+	return doctor.LingerProbe{Site: site, Out: out, Err: failure}
+}
+
+func (d doctorReads) Sudo(site string) doctor.SudoProbe {
+	out, failure := d.read(site, doctor.SudoCommand)
+	return doctor.SudoProbe{Site: site, Out: out, Err: failure}
 }
 
 func (d doctorReads) Mesh(site string) doctor.MeshProbe {

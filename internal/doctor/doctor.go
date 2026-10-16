@@ -71,7 +71,7 @@ const (
 	SectionLeftovers  = "leftovers"
 )
 
-var sections = []string{SectionReach, SectionMesh, SectionEtcd, SectionPatroni, SectionContainers, SectionSettings, SectionPocketID, SectionClocks, SectionLeftovers, SectionCaddy, SectionSecrets, SectionToken, SectionRecords}
+var sections = []string{SectionReach, SectionAdmission, SectionUser, SectionDocker, SectionLinger, SectionSudo, SectionMesh, SectionEtcd, SectionPatroni, SectionContainers, SectionSettings, SectionPocketID, SectionClocks, SectionLeftovers, SectionCaddy, SectionSecrets, SectionToken, SectionRecords}
 
 // Finding is one line of the report, with any explanation, recovery advice or
 // evidence under it.
@@ -215,8 +215,17 @@ func plural(n int, word string) string {
 type Input struct {
 	// Sites are the sites asked, in order: every declared site, or the ones
 	// --site named.
-	Sites      []string
-	Reach      []SiteReach
+	Sites []string
+	Reach []SiteReach
+	// Admission, Users, Docker, Linger and SudoRights are each site's
+	// rootless checks (admission.go, rootless.go, sudo.go). SudoRights is
+	// not named Sudo, which the guard against commands reaching for root
+	// refuses to see assigned (cmd/paisans/sudo_guard_test.go).
+	Admission  []AdmissionProbe
+	Users      []UserProbe
+	Docker     []DockerProbe
+	Linger     []LingerProbe
+	SudoRights []SudoProbe
 	Mesh       []MeshProbe
 	Etcd       EtcdProbe
 	Patroni    PatroniProbe
@@ -270,6 +279,12 @@ func Diagnose(cfg *config.Config, in Input) Report {
 	reached := in.Reached()
 	var findings []Finding
 	findings = append(findings, Reach(cfg, in.Reach)...)
+	findings = append(findings, Admission(cfg, in.Admission)...)
+	findings = append(findings, User(in.Users)...)
+	findings = append(findings, DockerSocket(in.Docker)...)
+	findings = append(findings, DockerEngine(in.Docker)...)
+	findings = append(findings, Linger(cfg.Deployment(), in.Linger)...)
+	findings = append(findings, SudoRights(cfg, in.SudoRights)...)
 	findings = append(findings, Mesh(cfg, in.Mesh)...)
 	findings = append(findings, Etcd(cfg, in)...)
 	findings = append(findings, Patroni(cfg, in)...)

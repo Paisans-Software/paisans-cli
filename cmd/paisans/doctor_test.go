@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/paisans-software/paisans-cli/internal/admitrules"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -26,6 +27,7 @@ type doctorHost struct {
 	name    string
 	down    bool
 	answers map[string]string
+	files   map[string]string
 	sent    *[]string
 	writes  *[]string
 }
@@ -50,7 +52,11 @@ func (h doctorHost) RunInput(command, _ string) (string, error) {
 }
 func (h doctorHost) ReadFile(path string) (string, bool, error) {
 	*h.sent = append(*h.sent, h.name+": read "+path)
-	return "", false, nil
+	if h.down {
+		return "", false, fmt.Errorf("%w after 3 attempts: exit status 255", apply.ErrUnreachable)
+	}
+	content, ok := h.files[path]
+	return content, ok, nil
 }
 func (h doctorHost) WriteFile(path string, _ string, _ uint32) error {
 	*h.writes = append(*h.writes, "WriteFile "+path)
@@ -76,6 +82,10 @@ func readOnly(cfg *config.Config) (exact []string, prefixes []string) {
 		patroni.ClusterCommand(cfg.Deployment(), "10.44.0.1:8008"),
 		patroni.ClusterCommand(cfg.Deployment(), "10.44.0.2:8008"),
 		doctor.CaddyLogCommand(cfg.Deployment()),
+		doctor.UserCommand,
+		doctor.DockerCommand,
+		doctor.LingerCommand,
+		doctor.SudoCommand,
 	}
 	prefixes = []string{
 		"docker inspect --format '{\"State\":{{json .State}},\"RestartCount\":{{.RestartCount}}}' ",
@@ -83,7 +93,7 @@ func readOnly(cfg *config.Config) (exact []string, prefixes []string) {
 		"if [ ! -f '/srv/paisans/f2a9/auth/compose.yaml' ]; then echo absent; ",
 	}
 	exact = append(exact, hostcheck.ReadCommands(cfg.Deployment())...)
-	exact = append(exact, "read "+cfg.Deployment().Manifest())
+	exact = append(exact, "read "+cfg.Deployment().Manifest(), "read "+admittedPath(cfg))
 	// Each gated app's settings read, which blueprints.LiveSettings promises
 	// prints only the named settings.
 	for _, name := range cfg.AppNames() {
@@ -100,8 +110,58 @@ func readOnly(cfg *config.Config) (exact []string, prefixes []string) {
 	return exact, prefixes
 }
 
-func withDoctorHosts(t *testing.T, hosts map[string]doctorHost) {
+// sudoHelperOnly is sudo -l's answer for a user host admit gave the helper
+// and nothing else.
+func sudoHelperOnly(user, host, helper string) string {
+	return "Matching Defaults entries for " + user + " on " + host + ":\n" +
+		"    env_reset, mail_badpass, use_pty\n\n" +
+		"User " + user + " may run the following commands on " + host + ":\n" +
+		"    " + admitrules.HelperRule(helper) + "\n"
+}
+
+// admitHosts makes each fake host one whose owner admitted its site as the
+// configuration declares it, with a sound rootless setup, unless the test
+// gave it another answer already: the record, a user in no privileged
+// group, its own rootless Docker 29.9.1, linger on with the manager after
+// the mesh, and sudo for the WireGuard helper alone.
+func admitHosts(t *testing.T, cfg *config.Config, hosts map[string]doctorHost) {
 	t.Helper()
+	helper, err := apply.WGHelper{Iface: cfg.Deployment().Interface()}.Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, site := range cfg.SiteNames() {
+		s := cfg.Sites[site]
+		h, ok := hosts[s.SSHHost()]
+		if !ok {
+			continue
+		}
+		if h.files == nil {
+			h.files = map[string]string{}
+		}
+		if _, given := h.files[admittedPath(cfg)]; !given {
+			h.files[admittedPath(cfg)] = admittedRecord(t, cfg, site)
+		}
+		if h.answers == nil {
+			h.answers = map[string]string{}
+		}
+		for command, answer := range map[string]string{
+			doctor.UserCommand:   "uid 1000\nuser " + s.SSHUser() + "\ngroups " + s.SSHUser() + "\n",
+			doctor.DockerCommand: "host unix:///run/user/1000/docker.sock\nengine 29.9.1\nsecurity [\"name=seccomp,profile=builtin\",\"name=rootless\",\"name=cgroupns\"]\n",
+			doctor.LingerCommand: "linger yes\nmesh-order yes\n",
+			doctor.SudoCommand:   sudoHelperOnly(s.SSHUser(), site, helper),
+		} {
+			if _, given := h.answers[command]; !given {
+				h.answers[command] = answer
+			}
+		}
+		hosts[s.SSHHost()] = h
+	}
+}
+
+func withDoctorHosts(t *testing.T, cfg *config.Config, hosts map[string]doctorHost) {
+	t.Helper()
+	admitHosts(t, cfg, hosts)
 	saved, savedNow, savedAtOnce := doctorTransport, doctorNow, doctorAtOnce
 	// One check at a time, in the graph's order, so the hosts' shared
 	// record of what they were sent is written by one goroutine.
@@ -177,7 +237,7 @@ func TestDoctorDiagnosesTheStuckReplicaAndOnlyReads(t *testing.T) {
 		t.Fatal(err)
 	}
 	var sent, writes []string
-	withDoctorHosts(t, stuckHosts(cfg, &sent, &writes))
+	withDoctorHosts(t, cfg, stuckHosts(cfg, &sent, &writes))
 
 	rec := withRecorder(t, true)
 	runErr := runDoctor([]string{"--config", fixtureConfig()})
@@ -199,7 +259,13 @@ func TestDoctorDiagnosesTheStuckReplicaAndOnlyReads(t *testing.T) {
 		"fail: check pocket-id auth no active instance, so sign in is down",
 		"home-b   unreachable did not answer ssh (see reach)",
 		"There is no database primary (see patroni)",
-		"Not checked because of this: mesh, patroni, containers, settings talk, clocks, leftovers on home-b.",
+		"Not checked because of this: admission, user, docker, docker engine, linger, sudo rights, mesh, patroni, containers, settings talk, clocks, leftovers on home-b.",
+		"done: check admission home-a admitted as ubuntu, covering its roles",
+		"done: check user home-a ubuntu is in no privileged group",
+		"done: check docker home-a its rootless Docker answers at unix:///run/user/1000/docker.sock",
+		"done: check docker engine home-a Docker Engine 29.9.1",
+		"done: check linger home-a its manager starts after the mesh at boot",
+		"done: check sudo rights home-a sudo lets ubuntu run the WireGuard helper and nothing else",
 		"section: failed, deepest first:",
 		"doctor changes nothing",
 	} {
@@ -270,7 +336,7 @@ func TestDoctorSiteNarrowsTheHostsReached(t *testing.T) {
 		t.Fatal(err)
 	}
 	var sent, writes []string
-	withDoctorHosts(t, map[string]doctorHost{
+	withDoctorHosts(t, cfg, map[string]doctorHost{
 		"vm.example.org": {name: "vm.example.org", sent: &sent, writes: &writes, answers: map[string]string{
 			doctor.ReachCommand:                        "",
 			doctor.ClockCommand:                        "1760000000.000000000\n",
@@ -292,6 +358,32 @@ func TestDoctorSiteNarrowsTheHostsReached(t *testing.T) {
 	}
 	if runErr == nil {
 		t.Error("a deployment whose database could not be read is not a pass")
+	}
+}
+
+// A record host admit could not have written fails admission with how its
+// owner recovers: move the record aside, since admit will not write over
+// one it cannot read, then request and admit again.
+func TestDoctorSaysToMoveAnUnreadableRecordAside(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := admittedPath(cfg)
+	var sent, writes []string
+	withDoctorHosts(t, cfg, map[string]doctorHost{
+		"vm.example.org": {name: "vm.example.org", sent: &sent, writes: &writes,
+			answers: map[string]string{doctor.ReachCommand: ""},
+			files:   map[string]string{path: "{not a record"}},
+	})
+	rec := withRecorder(t, true)
+	_ = runDoctor([]string{"--config", fixtureConfig(), "--site", "vm"})
+	out := rec.Lines()
+	move := strings.Index(out, "`sudo mv "+path+" "+path+".unreadable`")
+	request := strings.Index(out, "`paisans host request --site vm > vm.admit`")
+	admit := strings.Index(out, "`sudo paisans host admit --request vm.admit`")
+	if !strings.Contains(out, "fail: check admission vm its admission record cannot be read") || move < 0 || !(move < request && request < admit) {
+		t.Errorf("want the failure, then move it aside, request and admit, in that order:\n%s", out)
 	}
 }
 
@@ -333,7 +425,7 @@ func TestDoctorReportsLeftoversAndForeignCaddyUsers(t *testing.T) {
 		doctor.CaddyLogCommand(cfg.Deployment()): quietCaddyLog,
 	}
 	var sent, writes []string
-	withDoctorHosts(t, map[string]doctorHost{
+	withDoctorHosts(t, cfg, map[string]doctorHost{
 		"vm.example.org": {name: "vm.example.org", sent: &sent, writes: &writes, answers: answers},
 	})
 	rec := withRecorder(t, true)

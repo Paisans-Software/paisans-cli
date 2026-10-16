@@ -3,6 +3,7 @@ package doctor
 import (
 	"bytes"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -11,6 +12,8 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/topology"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -287,6 +290,65 @@ func (f *fixtureReads) Leftovers(site string) LeftoverProbe {
 	return LeftoverProbe{Site: site}
 }
 
+// fixtureConfig is the fixture the reads answer from, loaded once.
+var fixtureConfig = sync.OnceValue(func() *config.Config {
+	cfg, err := config.Load(filepath.Join("..", "render", "testdata", "deployment.yaml"))
+	if err != nil {
+		panic(err)
+	}
+	return cfg
+})
+
+func (f *fixtureReads) Admission(site string) AdmissionProbe {
+	f.asked("admission " + site)
+	for _, p := range f.in.Admission {
+		if p.Site == site {
+			return p
+		}
+	}
+	return AdmissionProbe{Site: site, Found: true, Record: admittedRecord(fixtureConfig(), site)}
+}
+
+func (f *fixtureReads) User(site string) UserProbe {
+	f.asked("user " + site)
+	for _, p := range f.in.Users {
+		if p.Site == site {
+			return p
+		}
+	}
+	return UserProbe{Site: site, Out: "uid 1000\nuser ubuntu\ngroups ubuntu\n"}
+}
+
+func (f *fixtureReads) Docker(site string) DockerProbe {
+	f.asked("docker " + site)
+	for _, p := range f.in.Docker {
+		if p.Site == site {
+			return p
+		}
+	}
+	return DockerProbe{Site: site, Out: rootlessDocker}
+}
+
+func (f *fixtureReads) Linger(site string) LingerProbe {
+	f.asked("linger " + site)
+	for _, p := range f.in.Linger {
+		if p.Site == site {
+			return p
+		}
+	}
+	return LingerProbe{Site: site, Out: "linger yes\nmesh-order yes\n"}
+}
+
+func (f *fixtureReads) Sudo(site string) SudoProbe {
+	f.asked("sudo " + site)
+	for _, p := range f.in.SudoRights {
+		if p.Site == site {
+			return p
+		}
+	}
+	return SudoProbe{Site: site, Out: sudoList(helperEntry)}
+}
+
 // fixtureInputs is every Input the section tests diagnose, by name.
 func fixtureInputs() map[string]Input {
 	out := map[string]Input{"healthy": healthyInput(), "stuck": stuckInput()}
@@ -384,7 +446,7 @@ func TestPruningIsReportedOnce(t *testing.T) {
 	if !reflect.DeepEqual(lines, []string{"check reach home-b"}) {
 		t.Errorf("home-b's lines are %v, want reach alone:\n%s", lines, rec.Lines())
 	}
-	want := "Not checked because of this: mesh, patroni, containers, settings talk, clocks, leftovers on home-b."
+	want := "Not checked because of this: admission, user, docker, docker engine, linger, sudo rights, mesh, patroni, containers, settings talk, clocks, leftovers on home-b."
 	if !rec.Has("explain", want) {
 		t.Errorf("reach home-b does not say what it kept from running, want %q:\n%s", want, rec.Lines())
 	}
@@ -396,13 +458,68 @@ func TestPruningIsReportedOnce(t *testing.T) {
 			listed += strings.Count(list, ",") + strings.Count(list, ";") + 1
 		}
 	}
-	if report.Pruned != 7 || listed != report.Pruned || report.Count(Skip) != 1 || !strings.Contains(report.Summary(), "8 skipped") {
+	if report.Pruned != 13 || listed != report.Pruned || report.Count(Skip) != 1 || !strings.Contains(report.Summary(), "14 skipped") {
 		t.Errorf("pruned %d, listed %d, summary %q", report.Pruned, listed, report.Summary())
 	}
 	for _, read := range reads.log.list {
 		if strings.HasSuffix(read, " home-b") && read != "reach home-b" {
 			t.Errorf("read home-b after it did not answer: %s", read)
 		}
+	}
+}
+
+// A site that answers but is pending is one warning, with the host request
+// line, and nothing more is read from it.
+func TestAPendingSiteIsCheckedNoFurther(t *testing.T) {
+	cfg := fixture(t)
+	fix := healthyInput()
+	fix.Admission = []AdmissionProbe{{Site: "home-b", Class: topology.Site{Name: "home-b", Class: topology.Pending, Why: "home-b: its host has not admitted this deployment", Request: true}}}
+	reads := &fixtureReads{in: fix, log: &events{}}
+	rec := &ui.Recorder{}
+	report, _ := Checks(cfg, fix.Sites, reads).Run(rec, 0)
+
+	f := find(t, report.Findings, SectionAdmission, "home-b: pending: this deployment is not admitted on its host")
+	if f.Level != Warn || !strings.Contains(strings.Join(f.More, "\n"), "`paisans host request --site home-b > home-b.admit`") {
+		t.Errorf("home-b: %+v", f)
+	}
+	want := "Not checked because of this: user, docker, docker engine, linger, sudo rights, mesh, patroni, containers, settings talk, clocks, leftovers on home-b."
+	if !rec.Has("explain", want) {
+		t.Errorf("admission home-b does not say what it kept from running, want %q:\n%s", want, rec.Lines())
+	}
+	for _, read := range reads.log.list {
+		if strings.HasSuffix(read, " home-b") && read != "reach home-b" && read != "admission home-b" {
+			t.Errorf("read home-b after it was found pending: %s", read)
+		}
+	}
+	for _, f := range report.Findings {
+		if strings.HasPrefix(f.Line, "home-b:") && f.Level == Fail {
+			t.Errorf("a pending data site failed a check: %+v", f)
+		}
+	}
+}
+
+// A daemon that does not answer stops what runs docker on its site, and
+// nothing else there.
+func TestDockerDownStopsWhatRunsDocker(t *testing.T) {
+	cfg := fixture(t)
+	fix := healthyInput()
+	fix.Docker = []DockerProbe{{Site: "home-a", Out: "host unix:///run/user/1000/docker.sock\n", Err: "Cannot connect to the Docker daemon"}}
+	reads := &fixtureReads{in: fix, log: &events{}}
+	rec := &ui.Recorder{}
+	Checks(cfg, fix.Sites, reads).Run(rec, 0)
+
+	for _, read := range []string{"containers home-a", "settings home-a talk", "leftovers home-a", "patroni home-a"} {
+		if reads.log.has(read) {
+			t.Errorf("%s ran although home-a's Docker did not answer", read)
+		}
+	}
+	for _, read := range []string{"linger home-a", "sudo home-a", "mesh home-a", "clock home-a", "containers home-b"} {
+		if !reads.log.has(read) {
+			t.Errorf("%s did not run", read)
+		}
+	}
+	if !rec.Has("explain", "Not checked because of this: docker engine, patroni, containers, settings talk, leftovers on home-a.") {
+		t.Errorf("docker home-a does not say what it kept from running:\n%s", rec.Lines())
 	}
 }
 
@@ -417,6 +534,11 @@ func TestBoundOfOneRunsInOrder(t *testing.T) {
 	report, in := Checks(cfg, fix.Sites, reads).Run(rec, 1)
 	want := []string{
 		"reach home-a", "reach home-b", "reach vm",
+		"admission home-a", "admission home-b", "admission vm",
+		"user home-a", "user home-b", "user vm",
+		"docker home-a", "docker home-b", "docker vm",
+		"linger home-a", "linger home-b", "linger vm",
+		"sudo home-a", "sudo home-b", "sudo vm",
 		"mesh home-a", "mesh home-b", "mesh vm",
 		"etcd health home-a", "etcd version home-a",
 		"patroni home-a", "patroni home-b", "sync home-a",

@@ -461,6 +461,11 @@ func (in Input) clone() Input {
 	out := in
 	out.Sites = slices.Clone(in.Sites)
 	out.Reach = slices.Clone(in.Reach)
+	out.Admission = slices.Clone(in.Admission)
+	out.Users = slices.Clone(in.Users)
+	out.Docker = slices.Clone(in.Docker)
+	out.Linger = slices.Clone(in.Linger)
+	out.SudoRights = slices.Clone(in.SudoRights)
 	out.Mesh = slices.Clone(in.Mesh)
 	out.Etcd.Tried = slices.Clone(in.Etcd.Tried)
 	out.Patroni.Cluster = maps.Clone(in.Patroni.Cluster)
