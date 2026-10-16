@@ -82,6 +82,18 @@
 	}
 }
 
+# The gateway answers as this deployment at a path only it serves, with its
+# token, and apply asks for it from outside after every gateway apply: a
+# server that took 80 or 443 after admission answers anything else. A named
+# matcher, which Caddy keeps in the order written, so this is matched before
+# a gated host's sign in.
+(paisans_self) {
+	@paisans_self path /.well-known/paisans/f2a9
+	handle @paisans_self {
+		respond "f2a9" 200
+	}
+}
+
 # Named Caddy snippets, not a hostname's routing: imported here, at the top
 # level, so that a site block below can import a name this file defines. See
 # templates/oauth2-proxy/caddy.snippet.gates.tmpl for what it declares.
@@ -89,6 +101,7 @@ import /etc/caddy/snippets/gate-gates.caddy
 
 
 account.example.org {
+	import paisans_self
 	import upstream_unavailable
 	# Stripped here as on a gated hostname: nothing that reaches an app may
 	# name a user unless the gate put the name there, and an ungated app that
@@ -103,6 +116,7 @@ account.example.org {
 # signs in at the gate first. Everything else is the public app. See
 # docs/specs/2026-10-08-visibility-gate.md in the toolkit.
 blog.example.org {
+	import paisans_self
 	import upstream_unavailable
 	# Stripped here as on a gated hostname: nothing that reaches an app may
 	# name a user unless the gate put the name there.
@@ -166,6 +180,7 @@ blog.example.org {
 
 
 chat.example.org {
+	import paisans_self
 	import upstream_unavailable
 	# Stripped here as on a gated hostname: nothing that reaches an app may
 	# name a user unless the gate put the name there, and an ungated app that
@@ -176,6 +191,7 @@ chat.example.org {
 
 
 example.org {
+	import paisans_self
 	import upstream_unavailable
 	# Stripped here as on a gated hostname: nothing that reaches an app may
 	# name a user unless the gate put the name there, and an ungated app that
@@ -186,6 +202,7 @@ example.org {
 
 
 gate.example.org {
+	import paisans_self
 	import upstream_unavailable
 	# Stripped here as on a gated hostname: nothing that reaches an app may
 	# name a user unless the gate put the name there, and an ungated app that
@@ -196,6 +213,7 @@ gate.example.org {
 
 
 id.example.org {
+	import paisans_self
 	import upstream_unavailable
 	# Stripped here as on a gated hostname: nothing that reaches an app may
 	# name a user unless the gate put the name there, and an ungated app that
@@ -206,6 +224,7 @@ id.example.org {
 
 
 join.example.org {
+	import paisans_self
 	import upstream_unavailable
 	# Stripped here as on a gated hostname: nothing that reaches an app may
 	# name a user unless the gate put the name there, and an ungated app that
@@ -221,6 +240,7 @@ join.example.org {
 # are written, so this is the order they are matched in. See
 # docs/specs/2026-10-08-visibility-gate.md in the toolkit.
 talk.example.org {
+	import paisans_self
 	import upstream_unavailable
 	# Nothing upstream of the gate may name a user: these headers are only
 	# ever the gate's verified answer.
@@ -329,6 +349,7 @@ talk.example.org {
 
 
 web.example.org {
+	import paisans_self
 	import upstream_unavailable
 	# Stripped here as on a gated hostname: nothing that reaches an app may
 	# name a user unless the gate put the name there, and an ungated app that
@@ -339,6 +360,7 @@ web.example.org {
 
 
 wiki.example.org {
+	import paisans_self
 	import upstream_unavailable
 	# Stripped here as on a gated hostname: nothing that reaches an app may
 	# name a user unless the gate put the name there, and an ungated app that

@@ -876,6 +876,12 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	}); err != nil {
 		return err
 	}
+	// The gateway is asked from outside last, once its Caddy has had the
+	// whole apply to start: a port another server holds shows nothing to
+	// the host's own checks.
+	if err := checkGatewayAnswers(r, cfg, *site); err != nil {
+		return err
+	}
 	// What the steps applied is recorded once they have all succeeded:
 	// the images now, and the web server's directory once its step has
 	// written there. As a step of apply with no --site, the web server is

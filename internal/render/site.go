@@ -468,6 +468,7 @@ func (p *planner) renderSite(site *siteView) ([]File, error) {
 			"ACMEDirective":   acme.Directive(p.cfg.ACME.Provider),
 			"HostSites":       hostSitesMount(site),
 			"HostSitesSource": HostSitesDir,
+			"Token":           p.dep().Token(),
 		})
 		if err != nil {
 			return nil, err

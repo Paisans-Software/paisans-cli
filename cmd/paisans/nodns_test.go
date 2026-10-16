@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
@@ -16,6 +18,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/grant"
 	"github.com/paisans-software/paisans-cli/internal/keystore"
 	"github.com/paisans-software/paisans-cli/internal/secretsgen"
+	"github.com/paisans-software/paisans-cli/internal/selfcheck"
 	"github.com/paisans-software/paisans-cli/internal/smtpcheck"
 	"github.com/paisans-software/paisans-cli/internal/smtpcheck/smtptest"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -51,6 +54,16 @@ func TestMain(m *testing.M) {
 	// they test is that a key is filled, opens with its passphrase and
 	// stays put, and secretsgen's tests hold the key to 4096 bits.
 	secretsgen.SetOAuthKeyBits(1024)
+	// No test reaches a gateway from outside: every gateway answers as the
+	// deployment it is asked about. A test about the check sets its own.
+	gatewayProbe = func() selfcheck.Probe {
+		return selfcheck.Probe{Fetch: func(_ context.Context, scheme, _, host, path string) (selfcheck.Answer, error) {
+			if scheme == "http" {
+				return selfcheck.Answer{Status: 308, Location: "https://" + host + path}, nil
+			}
+			return selfcheck.Answer{Status: 200, Body: path[strings.LastIndex(path, "/")+1:]}, nil
+		}, Now: time.Now, Sleep: func(time.Duration) {}}
+	}
 	// No test reaches a site or a mail server to try mail settings: every
 	// check is answered by an in-process server that takes any login. A
 	// test about the check sets its own (fakeSMTP).
