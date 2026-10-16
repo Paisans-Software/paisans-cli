@@ -180,6 +180,13 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    because that restarts the user's daemon and every container in it. The
    file is host wide and shared by every admitted deployment; it is written
    once and never removed by `evict` while another deployment is admitted.
+   Beside it, for this user only,
+   `/etc/systemd/system/user@<uid>.service.d/paisans-mesh.conf` with
+   `Wants=` and `After=wg-quick@psns-<token>.service`, so at boot the user's
+   manager, and with it the Docker daemon, starts after the mesh: a
+   container that publishes on the mesh address fails when the address is
+   not up yet, and Docker does not retry it. It takes effect at the next
+   boot, like `delegate.conf`, and evict removes it.
 6. **The rootless daemon.** First `br_netfilter`: loaded now and listed in
    `/etc/modules-load.d/paisans.conf`, because without it the daemon refuses
    to start with the userland proxy off (*Observed*). The module is host
@@ -343,7 +350,16 @@ the admission record and the registry claim. Host-wide files (`delegate.conf`,
 no other admitted deployment holds `public_ports` or has forwarding on.
 
 `site remove` does what the deployment's user can, then ends by printing the
-`host evict` line for the owner.
+`host evict` line for the owner. On a gateway whose Caddy serves only this
+deployment's sites, it stops and removes that Caddy; when Caddy also serves
+files the owner put in its `caddy.d`, it leaves Caddy running, and the evict
+line says evict stops it and deletes those files.
+
+After `paisans gateway move`, the old gateway's 80 and 443 stay open until
+its owner re-admits the site without `--public-ports` once DNS has moved:
+`gateway move` ends by printing the `host request` line for that site, and
+the re-admission closes the ports and restores the low-port setting when no
+other admitted deployment holds `public_ports`.
 
 ## The WireGuard helper
 
@@ -529,9 +545,10 @@ What changes in behaviour:
 * **`paisans doctor`** loses the sudo finding and the allowlist check, and
   gains: the user is not privileged, the rootless socket answers, Engine is
   29.5 or later, linger is on, `sudo -n -l` lists the helper and nothing
-  else, the admission record matches the declaration, and the gateway
-  answers its own `/.well-known/paisans/<token>` from outside, as `apply`
-  checks it.
+  else, the admission record matches the declaration, and the gateway and
+  every monitor running the toolkit's Caddy answer their own
+  `/.well-known/paisans/<token>` from outside, as `apply` checks the
+  gateway.
 * **`host deployments`** stays an owner's command with `--ssh` and sudo, and
   lists admission records beside what it lists today.
 
@@ -581,7 +598,8 @@ host request --site <s> > <s>.admit` line, then what the deployment is
 without (the wording of doctor's Reach row). The run ends `Applied,
 degraded: <n> sites pending or down (<names>)`, exit 0. `--require-all`
 makes a degraded run exit 1, for automation that must not pass on one.
-`doctor` reports each pending or down site as a `WARN` with the same list.
+`doctor` reports each pending or down site as a `WARN` with the same list,
+and the gateway as a `FAIL`, since the run refuses without it.
 
 **The declaration stays the only record.** The configuration store keeps
 `paisans-stack.yaml` as written; the effective topology is derived on every
