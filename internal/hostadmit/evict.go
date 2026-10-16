@@ -270,8 +270,8 @@ func (e *evictor) killCommand() string {
 }
 
 // mesh stops the deployment's interface and removes its conf, which holds
-// the site's private key, then the drop-in that ordered the user's manager
-// after it. The drop-in's path holds the UID, which the probe reads only
+// the site's private key, and the drop-in that skipped it without one,
+// then the drop-in that ordered the user's manager after it. The drop-in's path holds the UID, which the probe reads only
 // while the user exists, so it goes before the user does.
 func (e *evictor) mesh() error {
 	unit, conf := e.d.WireGuardUnit(), e.d.WireGuardInstalled()
@@ -280,6 +280,10 @@ func (e *evictor) mesh() error {
 	}
 	if e.f.Files[conf].Present {
 		e.remove("remove "+conf, "the mesh's conf, which holds the site's private key", "rm -f "+conf)
+	}
+	if cond := meshCondPath(unit); e.f.Files[cond].Present {
+		e.remove("remove "+cond, "the drop-in that skipped the mesh until its conf existed, and its directory once empty",
+			"rm -f "+cond+" && rmdir --ignore-fail-on-non-empty "+path.Dir(cond)+" && systemctl daemon-reload")
 	}
 	if !e.f.User.Exists {
 		// A user deleted by hand leaves the drop-in, whose path holds a UID

@@ -511,3 +511,40 @@ func TestEverySudoProblemIsNamedAtOnce(t *testing.T) {
 		t.Errorf("env_delete is refused: %v", err)
 	}
 }
+
+// The mesh's conf drop-in and its content, as admit writes them.
+const (
+	meshCondPath = "/etc/systemd/system/wg-quick@psns-f2a9.service.d/paisans-conf.conf"
+	meshCondConf = "# Written by paisans host admit for deployment f2a9; paisans host evict\n" +
+		"# removes it. Until paisans apply writes the mesh's conf, wg-quick has\n" +
+		"# nothing to bring up, so the unit is skipped rather than failed.\n" +
+		"[Unit]\nConditionPathExists=/etc/wireguard/psns-f2a9.conf\n"
+)
+
+// The user's manager wants the mesh's unit, whose conf only apply writes:
+// until then the unit would fail at every boot and show in systemctl
+// --failed. A drop-in of admit's makes it skip cleanly while there is no
+// conf; a re-run finds it in place and plans nothing for it.
+func TestTheMeshIsSkippedUntilItsConfExists(t *testing.T) {
+	plan, err := hostadmit.Build(current(), input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(plan.Steps, func(s hostadmit.Step) bool { return s.File != nil && s.File.Path == meshCondPath })
+	if i < 0 || plan.Steps[i].File.Content != meshCondConf || plan.Steps[i].File.Mode != 0o644 || plan.Steps[i].Command != "systemctl daemon-reload" || plan.Steps[i].Provisional {
+		t.Fatalf("no drop-in skips the mesh until its conf exists:\n%s", plan.Text())
+	}
+	if linger := slices.IndexFunc(plan.Steps, func(s hostadmit.Step) bool {
+		return strings.HasPrefix(s.Title, "start paisans-f2a9's manager") && s.File == nil
+	}); linger < i {
+		t.Errorf("the manager starts, wanting the mesh, before the drop-in is written:\n%s", plan.Text())
+	}
+	again := current().withFile(meshCondPath, meshCondConf, "644", 0)
+	plan, err = hostadmit.Build(again, input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.ContainsFunc(plan.Steps, func(s hostadmit.Step) bool { return s.File != nil && s.File.Path == meshCondPath }) {
+		t.Errorf("a re-run writes the drop-in again:\n%s", plan.Text())
+	}
+}

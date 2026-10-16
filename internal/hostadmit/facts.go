@@ -197,7 +197,7 @@ func probedFiles(d deployment.Deployment, in Input) ([]string, error) {
 		delegatePath, modulesLoadPath, sysctlPath, sysctlBeforePath, installedPath,
 		helper, sudoersPath(d), egressFilePath(d), egressFilePath(d) + ".new", "/etc/systemd/system/" + d.EgressUnit(),
 		watchdogRulePath(d), "/etc/systemd/system/" + d.Prefix() + "-watchdog.service",
-		record, d.WireGuardInstalled(),
+		record, d.WireGuardInstalled(), meshCondPath(d.WireGuardUnit()),
 	}, nil
 }
 

@@ -20,97 +20,102 @@ step 4: remove /etc/wireguard/psns-f2a9.conf
   run:
     $ rm -f /etc/wireguard/psns-f2a9.conf
 
-step 5: remove /etc/systemd/system/user@1001.service.d/paisans-mesh.conf
+step 5: remove /etc/systemd/system/wg-quick@psns-f2a9.service.d/paisans-conf.conf
+  evict: the drop-in that skipped the mesh until its conf existed, and its directory once empty
+  run:
+    $ rm -f /etc/systemd/system/wg-quick@psns-f2a9.service.d/paisans-conf.conf && rmdir --ignore-fail-on-non-empty /etc/systemd/system/wg-quick@psns-f2a9.service.d && systemctl daemon-reload
+
+step 6: remove /etc/systemd/system/user@1001.service.d/paisans-mesh.conf
   evict: the drop-in that started paisans-f2a9's manager after the mesh, and its directory once empty
   run:
     $ rm -f /etc/systemd/system/user@1001.service.d/paisans-mesh.conf && rmdir --ignore-fail-on-non-empty /etc/systemd/system/user@1001.service.d && systemctl daemon-reload
 
-step 6: remove the egress table
+step 7: remove the egress table
   evict: unload paisans_f2a9 and remove paisans-f2a9-egress.service and /etc/paisans/egress.f2a9.nft
   run:
     $ { systemctl disable --now paisans-f2a9-egress.service 2>/dev/null || true; } && { ! nft list table inet paisans_f2a9 >/dev/null 2>&1 || nft delete table inet paisans_f2a9; } && rm -f /etc/systemd/system/paisans-f2a9-egress.service /etc/paisans/egress.f2a9.nft /etc/paisans/egress.f2a9.nft.new && { [ ! -d /etc/systemd/system/user@1001.service.requires ] || rmdir --ignore-fail-on-non-empty /etc/systemd/system/user@1001.service.requires; } && systemctl daemon-reload
 
-step 7: remove /srv/paisans/f2a9
+step 8: remove /srv/paisans/f2a9
   evict: the deployment's directory
   run:
     $ [ ! -L '/srv/paisans/f2a9' ] && rm -rf --one-file-system -- '/srv/paisans/f2a9'
 
-step 8: delete user paisans-f2a9
+step 9: delete user paisans-f2a9
   evict: delete paisans-f2a9 with its home, /home/paisans-f2a9
   run:
     $ usermod --expiredate 1 paisans-f2a9 && { procs() { ps -eo pid=,ruid=,euid=,suid= | awk '$2 == 1001 || $3 == 1001 || $4 == 1001 || $2 >= 165536 && $2 < 231072 || $3 >= 165536 && $3 < 231072 || $4 >= 165536 && $4 < 231072 { print $1 }'; }; n=0; while [ -n "$(procs)" ] && [ $n -lt 10 ]; do procs | xargs -r kill -KILL 2>/dev/null; n=$((n+1)); sleep 0.5; done; [ -z "$(procs)" ] || { echo 'processes of uid 1001 or its subordinate range survived SIGKILL:'; procs | xargs -r ps -o pid=,uid=,args= -p; false; }; } && userdel --remove paisans-f2a9
 
-step 9: remove paisans-f2a9's subordinate ranges
+step 10: remove paisans-f2a9's subordinate ranges
   evict: its lines in /etc/subuid and /etc/subgid, which no other user may then be given by accident
   run:
     $ sed -i '/^paisans-f2a9:/d' /etc/subuid /etc/subgid
 
-step 10: remove /etc/sudoers.d/paisans-f2a9
+step 11: remove /etc/sudoers.d/paisans-f2a9
   evict: the line that let paisans-f2a9 run the WireGuard helper as root
   run:
     $ rm -f /etc/sudoers.d/paisans-f2a9 /etc/sudoers.d/paisans-f2a9.new
 
-step 11: remove /usr/local/libexec/paisans/wg-psns-f2a9
+step 12: remove /usr/local/libexec/paisans/wg-psns-f2a9
   evict: the WireGuard helper
   run:
     $ rm -f /usr/local/libexec/paisans/wg-psns-f2a9
 
-step 12: remove ufw rule 51821/udp
+step 13: remove ufw rule 51821/udp
   evict: delete `allow 51821/udp comment 'paisans-f2a9: WireGuard, the mesh'`, which host admit added for the deployment
   run:
     $ ufw delete allow 51821/udp comment 'paisans-f2a9: WireGuard, the mesh'
 
-step 13: remove ufw rule in on psns-f2a9
+step 14: remove ufw rule in on psns-f2a9
   evict: delete `allow in on psns-f2a9 comment 'paisans-f2a9: the mesh: etcd, Patroni, Garage, HAProxy'`, which host admit added for the deployment
   run:
     $ ufw delete allow in on psns-f2a9 comment 'paisans-f2a9: the mesh: etcd, Patroni, Garage, HAProxy'
 
-step 14: remove ufw rule 80/tcp
+step 15: remove ufw rule 80/tcp
   evict: delete `allow 80/tcp comment 'paisans-f2a9: public ports, HTTP'`, which host admit added for the deployment
   run:
     $ ufw delete allow 80/tcp comment 'paisans-f2a9: public ports, HTTP'
 
-step 15: remove ufw rule 443/tcp
+step 16: remove ufw rule 443/tcp
   evict: delete `allow 443/tcp comment 'paisans-f2a9: public ports, HTTPS'`, which host admit added for the deployment
   run:
     $ ufw delete allow 443/tcp comment 'paisans-f2a9: public ports, HTTPS'
 
-step 16: remove /etc/systemd/system/user@.service.d/delegate.conf
+step 17: remove /etc/systemd/system/user@.service.d/delegate.conf
   evict: no other deployment is admitted
   run:
     $ rm -f /etc/systemd/system/user@.service.d/delegate.conf && systemctl daemon-reload
 
-step 17: remove /etc/modules-load.d/paisans.conf
+step 18: remove /etc/modules-load.d/paisans.conf
   evict: no other deployment is admitted; br_netfilter stays loaded until the next boot
   run:
     $ rm -f /etc/modules-load.d/paisans.conf
 
-step 18: remove the host's paisans sysctls
+step 19: remove the host's paisans sysctls
   evict: no admitted deployment needs them; set each back to what it was before admit
   run:
     $ sysctl -w net.ipv4.ip_unprivileged_port_start=1024 net.ipv4.ip_forward=0 >/dev/null && rm -f /etc/sysctl.d/60-paisans.conf /etc/paisans/sysctl.before
 
-step 19: remove the admission record
+step 20: remove the admission record
   evict: /etc/paisans/admitted.f2a9.json
   run:
     $ rm -f /etc/paisans/admitted.f2a9.json
 
-step 20: remove /etc/paisans
+step 21: remove /etc/paisans
   evict: it holds nothing once this deployment's files are gone
   run:
     $ rmdir /etc/paisans
 
-step 21: remove /srv/paisans
+step 22: remove /srv/paisans
   evict: it holds nothing once this deployment's files are gone
   run:
     $ rmdir /srv/paisans
 
-step 22: remove /usr/local/libexec/paisans
+step 23: remove /usr/local/libexec/paisans
   evict: it holds nothing once this deployment's files are gone
   run:
     $ rmdir /usr/local/libexec/paisans
 
-step 23: remove the registry entry
+step 24: remove the registry entry
   evict: deployment f2a9 from /var/lib/paisans/registry.json
   run:
     $ set -e; umask 077; [ -f /var/lib/paisans/registry.json ] || exit 0; exec 9>>/var/lib/paisans/registry.lock; flock -w 60 9 || { echo 'paisans: another command holds /var/lib/paisans/registry.lock'; exit 1; }; tmp=$(mktemp /var/lib/paisans/.registry.XXXXXX); trap 'rm -f "$tmp"' EXIT; awk '-v' 'id=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01' '-v' 'header={"version":1,"deployments":{' '-v' 'footer=}}' '-v' 'unreadable=paisans-registry-unreadable' '

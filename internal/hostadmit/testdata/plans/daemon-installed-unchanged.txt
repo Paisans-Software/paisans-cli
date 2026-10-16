@@ -11,6 +11,7 @@ present: apparmor: rootlesskit's profile is loaded
 present: user: community exists, uid 1002, in no privileged group, and sudo grants it nothing beyond admit's helper
 present: user: community holds 231072-296607 in /etc/subuid
 present: user: community holds 231072-296607 in /etc/subgid
+present: user: /etc/systemd/system/wg-quick@psns-f2a9.service.d/paisans-conf.conf skips the mesh until its conf exists
 present: user: /etc/systemd/system/user@1002.service.d/paisans-mesh.conf starts community's manager after the mesh
 present: delegation: /etc/systemd/system/user@.service.d/delegate.conf delegates cpu cpuset io memory pids
 present: egress: the host's on-link IPv6 prefixes, dropped: 2001:db8:1::/64

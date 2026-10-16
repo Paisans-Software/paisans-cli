@@ -80,9 +80,12 @@ func (h *fakeHost) ReadFile(path string) (string, bool, error) {
 	return c, ok, nil
 }
 
+// WriteFile writes as the transport does, root's, so the probe then finds
+// the file with its checksum and mode.
 func (h *fakeHost) WriteFile(path, content string, mode uint32) error {
 	h.files[path] = content
 	h.writes[path] = mode
+	h.withFile(path, content, fmt.Sprintf("%o", mode), 0)
 	return nil
 }
 

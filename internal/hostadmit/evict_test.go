@@ -509,3 +509,14 @@ func TestEvictRemovesALeftoverEgressTable(t *testing.T) {
 		t.Errorf("/etc/paisans is kept:\n%s", plan.Text())
 	}
 }
+
+// Evict removes the mesh's conf drop-in, and its directory once empty.
+func TestEvictRemovesTheMeshConfDropIn(t *testing.T) {
+	plan, err := hostadmit.BuildEvict(evicted("vm", hostadmit.Flags{})(), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i := stepIndex(plan, "rm -f "+meshCondPath+" && rmdir --ignore-fail-on-non-empty /etc/systemd/system/wg-quick@psns-f2a9.service.d && systemctl daemon-reload"); i < 0 {
+		t.Errorf("evict leaves the mesh's conf drop-in:\n%s", plan.Text())
+	}
+}

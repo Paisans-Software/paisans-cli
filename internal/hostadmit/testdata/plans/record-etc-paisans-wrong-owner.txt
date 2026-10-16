@@ -16,6 +16,7 @@ present: apparmor: rootlesskit's profile is loaded
 present: user: paisans-f2a9 exists, uid 1001, in no privileged group, and sudo grants it nothing beyond admit's helper
 present: user: paisans-f2a9 holds 165536-231071 in /etc/subuid
 present: user: paisans-f2a9 holds 165536-231071 in /etc/subgid
+present: user: /etc/systemd/system/wg-quick@psns-f2a9.service.d/paisans-conf.conf skips the mesh until its conf exists
 present: user: /etc/systemd/system/user@1001.service.d/paisans-mesh.conf starts paisans-f2a9's manager after the mesh
 present: delegation: /etc/systemd/system/user@.service.d/delegate.conf delegates cpu cpuset io memory pids
 present: egress: the host's on-link IPv6 prefixes, dropped: 2001:db8:1::/64
