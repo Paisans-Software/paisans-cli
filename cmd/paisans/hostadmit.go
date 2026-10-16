@@ -75,6 +75,8 @@ func runHostAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 		return fmt.Errorf("host admit: --request runs on the host itself and takes no --ssh")
 	case request != "" && !runningAsRootOnLinux():
 		return fmt.Errorf("host admit: --request runs as root on the host it admits to: copy the request there and run sudo paisans host admit --request <file>")
+	case request != "" && execute && !stdinIsTerminal(stdin):
+		return fmt.Errorf("host admit: --execute with --request asks you to type the request's digest at a terminal, and stdin is not one. Run it from an interactive shell. Nothing was read or changed")
 	}
 	r := reporter()
 	in := hostadmit.Input{Flags: flags, Now: time.Now()}
@@ -108,6 +110,7 @@ func runHostAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 	var t apply.Transport
+	var dest config.Destination
 	if request != "" {
 		// The owner's environment never points admit's Docker commands
 		// at another daemon; over ssh, sudo's env_reset does the same.
@@ -116,8 +119,8 @@ func runHostAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 		t = localTransport()
 		r.Result("request digest %s: compare it with the one the operator gave you, over a channel you both trust, such as a call", in.Digest)
 	} else {
-		dest, err := config.ParseDestination(sshFlag)
-		if err != nil {
+		var err error
+		if dest, err = config.ParseDestination(sshFlag); err != nil {
 			return sshFlagProblem(sshFlag, err)
 		}
 		t = reachOwnerAdmit(dest)
@@ -152,13 +155,19 @@ func runHostAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 		return nil
 	}
 	// The operators' first login as the user, with the operator's own ssh,
-	// which records ssh.user where the declaration leaves it out.
+	// which records ssh.user where the declaration leaves it out. It goes
+	// to the declared host, which an alias or an address in --ssh may name
+	// otherwise, so a failure names both.
 	login := reachSiteUser(site, declared)
 	if err := ui.Run(r, "log in as "+user, func() error {
 		_, err := login.Run("docker version --format '{{.Server.Version}}'")
 		return err
 	}); err != nil {
-		return fmt.Errorf("host admit: %s is admitted and its Docker answers, but logging in as it failed: %w. Check that your key is one of sites.%s.ssh.keys", user, err, site)
+		where := ""
+		if h := declared.SSHHost(); h != dest.Host {
+			where = fmt.Sprintf(" The login went to %s, the site's declared ssh host, and admit to %s: check that they are the same machine.", ui.Visible(h), ui.Visible(dest.Host))
+		}
+		return fmt.Errorf("host admit: %s is admitted and its Docker answers, but logging in as it failed: %w. Check that your key is one of sites.%s.ssh.keys.%s", user, err, site, where)
 	}
 	r.Result("Admitted: %s runs Docker %s, and logs in with the operators' keys.", user, version)
 	return nil
@@ -256,6 +265,10 @@ func runHostEvict(args []string, stdin io.Reader, stdout io.Writer) error {
 		cfg, err := config.Load(*configPath)
 		if err != nil {
 			return err
+		}
+		if result := validate.Check(cfg); result.Refused() {
+			reportFindings(r, *configPath, result)
+			return refused(*configPath, len(result.Refusals()), "Nothing was read or changed.")
 		}
 		s, ok := cfg.Sites[*site]
 		if !ok {

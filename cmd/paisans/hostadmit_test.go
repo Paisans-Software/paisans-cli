@@ -499,3 +499,86 @@ func TestAdmitExecuteShowsThePlanFirst(t *testing.T) {
 		t.Fatal("--site: nothing executed")
 	}
 }
+
+// --execute with --request needs a terminal for the digest, so off one it
+// refuses before anything reads the host.
+func TestAdmitRefusesExecuteOffATerminalBeforeReadingTheHost(t *testing.T) {
+	path, _ := requestFile(t, "vm")
+	noHost(t)
+	withTerminal(t, false)
+	err := runHostAdmit([]string{"--request", path, "--public-ports", "--execute"}, strings.NewReader(""), new(strings.Builder))
+	if err == nil || !strings.Contains(err.Error(), "at a terminal") || !strings.Contains(err.Error(), "Nothing was read or changed") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// evict --site holds the declaration to what validate holds it to, as
+// admit does, before it reaches any host.
+func TestEvictSiteValidatesTheDeclaration(t *testing.T) {
+	body, err := os.ReadFile(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, _ := archFixture(t, strings.Replace(string(body), "address: 10.44.0.3", "address: 10.44.0.2", 1))
+	noHost(t)
+	err = runHostEvict([]string{"--site", "vm", "--ssh", "owner@vm.example.org", "--config", path}, strings.NewReader(""), new(strings.Builder))
+	if err == nil || !strings.Contains(err.Error(), "Nothing was read or changed") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// With --site, admit's last step logs in as the deployment's user through
+// the declaration's own site transport, which records ssh.user where the
+// declaration leaves it out; and a declared host that is not --ssh's host
+// is named when that login fails, since it may be another machine.
+func TestAdmitSiteLogsInThroughTheDeclaration(t *testing.T) {
+	savedExecute, savedLogin, savedOwner := executeAdmit, reachSiteUser, reachOwnerAdmit
+	t.Cleanup(func() { executeAdmit, reachSiteUser, reachOwnerAdmit = savedExecute, savedLogin, savedOwner })
+	executeAdmit = func(apply.Transport, hostadmit.Input, *hostadmit.Plan, ui.Reporter) error { return nil }
+	body, err := os.ReadFile(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, _ := archFixture(t, strings.Replace(string(body), "      host: vm.example.org\n      user: ubuntu\n", "      host: vm.example.org\n", 1))
+	quietAdmit(t)
+	executing(t)
+	reachOwnerAdmit = func(config.Destination) apply.Transport { return blankHost("paisans-f2a9") }
+	reachSiteUser = func(name string, site config.Site) apply.Transport {
+		tr := siteTransport(name, site, "")
+		if tr.Login == nil || tr.Login.Connected == nil {
+			t.Fatal("the login records nothing")
+		}
+		tr.Login.Connected()
+		return blankHost("paisans-f2a9")
+	}
+	if err := runHostAdmit([]string{"--site", "vm", "--ssh", "owner@vm.example.org", "--config", path, "--public-ports", "--execute"}, strings.NewReader(""), new(strings.Builder)); err != nil {
+		t.Fatal(err)
+	}
+	reread, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reread.Sites["vm"].SSH.User; got != "paisans-f2a9" {
+		t.Errorf("vm's ssh.user is %q, want paisans-f2a9", got)
+	}
+
+	quietAdmit(t)
+	reachSiteUser = func(string, config.Site) apply.Transport { return refusingHost{} }
+	err = runHostAdmit([]string{"--site", "vm", "--ssh", "owner@10.0.0.9", "--config", fixtureConfig(), "--public-ports", "--execute"}, strings.NewReader(""), new(strings.Builder))
+	if err == nil || !strings.Contains(err.Error(), "vm.example.org") || !strings.Contains(err.Error(), "10.0.0.9") {
+		t.Errorf("a failed login to another host: %v", err)
+	}
+}
+
+// refusingHost answers every command with a failure.
+type refusingHost struct{}
+
+func (refusingHost) Describe() string { return "refusing host" }
+func (refusingHost) Run(string) (string, error) {
+	return "", fmt.Errorf("ssh: connect to host: Connection refused")
+}
+func (refusingHost) RunInput(string, string) (string, error) {
+	return "", fmt.Errorf("ssh: connect to host: Connection refused")
+}
+func (refusingHost) ReadFile(string) (string, bool, error)  { return "", false, fmt.Errorf("refused") }
+func (refusingHost) WriteFile(string, string, uint32) error { return fmt.Errorf("refused") }
