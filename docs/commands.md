@@ -1334,7 +1334,7 @@ See *`app remove` takes an app off its hosts* in `README.md`.
 For an app pinned to a monitor site behind the operator's own web server.
 `show` prints what that web server must do, with the snippet for the web
 server `host admit` recorded in front of the app, read from the site's
-admission record over ssh as the deployment's user, or for Caddy, nginx and
+admission record over ssh as the site's ssh user, or for Caddy, nginx and
 Apache when admit found none. `check` checks, from this machine as a visitor would, that the
 hostname resolves to the monitor, that `/healthz` answers with a valid
 certificate, that sign in redirects with an https callback, and that the

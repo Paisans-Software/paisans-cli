@@ -914,11 +914,30 @@ sites:
   the same way in place of `Applied <n> files to <site>.`.
   `docs/guides/behind-your-own-web-server.md` walks through it.
 
-**The toolkit renders, the owner installs.** On a site with `managed_by: external`, `apply` runs the app on `listen` and writes the snippet for the web server in front of it to `/srv/paisans/<token>/web-server/<app>.caddy` or `<app>.conf`, filled in from what `host admit` detected as root: the server, its configuration and how it obtains certificates. When admit found no server it knows, it writes one for each of Caddy, nginx and Apache (`<app>.caddy`, `<app>.nginx.conf` and `<app>.apache.conf`). Apply puts the file back when it is missing or has been edited. The deployment's user cannot write the owner's configuration, test it or reload the server, and nothing grants it that, so the owner copies the snippet in; `paisans web-server show --app <app>` prints it with the rest of the hand-off sheet, read from the same admission record.
+**The toolkit renders, the owner installs.** On a site with `managed_by:
+external`, `apply` runs the app on `listen` and writes the snippet for the web
+server in front of it to `/srv/paisans/<token>/web-server/<app>.caddy` or
+`<app>.conf`, filled in from what `host admit` detected as root: the server,
+its configuration and how it obtains certificates. When admit found no server
+it knows, it writes one for each of Caddy, nginx and Apache (`<app>.caddy`,
+`<app>.nginx.conf` and `<app>.apache.conf`). Apply puts the file back when it
+is missing or has been edited. The deployment's user cannot write the owner's
+configuration, test it or reload the server, and nothing grants it that, so
+the owner copies the snippet in; `paisans web-server show --app <app>` prints
+it with the rest of the hand-off sheet, read from the same admission record.
 
-**apply checks from outside and warns until the owner's copy serves.** After writing the snippet, `apply` runs `web-server check` for the app once, without waiting. Until the check passes, the web server step ends on a warning naming `paisans web-server show --app <app>` for the owner. When a change to `paisans-stack.yaml` rewrites the snippet, the warning says so, because the owner's copy is then older than it.
+**apply checks from outside and warns until the owner's copy serves.** After
+writing the snippet, `apply` runs `web-server check` for the app once, without
+waiting. Until the check passes, the web server step ends on a warning naming
+`paisans web-server show --app <app>` for the owner. When a change to
+`paisans-stack.yaml` rewrites the snippet, the warning says so, because the
+owner's copy is then older than it.
 
-**Removing an app names the block to remove.** `app remove` and `site remove` delete the reference file, which is the deployment's, and say which block the owner removes from their web server. `validate` refuses `web_server.include_dir` (`web-server-include-dir`): nothing is written into the owner's configuration, so there is no directory to name.
+**Removing an app names the block to remove.** `app remove` and `site remove`
+delete the reference file, which is the deployment's, and say which block the
+owner removes from their web server. `validate` refuses
+`web_server.include_dir` (`web-server-include-dir`): nothing is written into
+the owner's configuration, so there is no directory to name.
 
 `listen` belongs to `managed_by: external` alone, which cannot work without it
 (`web-server-listen-managed-by`). Docker publishes a port with its own iptables rules,
@@ -984,8 +1003,8 @@ under `/etc/letsencrypt/live/` it names the files certbot will write for the
 new name and the `certbot certonly` command, with the authenticator the
 existing renewals use. A line above the snippet
 says what was found, such as `web server: caddy (docker container caddy-1,
-config /opt/caddy/Caddyfile), obtains its own certificates (this site uses
-HTTP-01)`, so it can be checked before anything is copied.
+config /opt/caddy/Caddyfile), obtains its own certificates`, so it can be
+checked before anything is copied.
 
 The site's own issuer is there so that its certificate never depends on a DNS
 challenge the operator set for their other sites, whose token may not cover

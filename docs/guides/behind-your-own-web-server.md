@@ -96,7 +96,7 @@ back if it is missing or edited. The toolkit's user cannot write your web
 server's configuration, test it or reload it, and nothing grants it that, so
 nothing there changes until you do it. `paisans web-server show --app health`
 prints the same snippet, with the rest of the sheet of step 4, from the
-admission record, as the deployment's user.
+admission record, as the site's ssh user.
 
 Put the snippet where your server reads its sites:
 
@@ -139,9 +139,9 @@ web server
        prints in their web server, then run paisans web-server check --app health.
 ```
 
-When a change to `paisans-stack.yaml` rewrites the snippet, the warning says
-that apply rewrote the reference file and that your copy needs replacing with
-what `web-server show` prints now.
+When the check fails after a change to `paisans-stack.yaml` rewrote the
+snippet, the warning says that apply rewrote the reference file and that your
+copy needs replacing with what `web-server show` prints now.
 
 ## 4. Get the hand-off sheet
 
@@ -169,7 +169,7 @@ It reads the machine's admission record over ssh, changing nothing, and prints:
   certificates, for you to check, such as:
 
   ```
-  web server: caddy (docker container caddy-1, config /opt/caddy/Caddyfile), obtains its own certificates (this site uses HTTP-01)
+  web server: caddy (docker container caddy-1, config /opt/caddy/Caddyfile), obtains its own certificates
   ```
 
 * the snippet for that web server, filled in;
@@ -217,8 +217,8 @@ of it:
 
 | Global options | This site |
 |---|---|
-| none | HTTP-01; the line says `(this site uses HTTP-01)` |
-| `cert_issuer acme { dns <provider> … }` | HTTP-01: its own issuer replaces the global one; the line says `(DNS-01 globally; this site uses HTTP-01)` |
+| none | HTTP-01 |
+| `cert_issuer acme { dns <provider> … }` | HTTP-01: its own issuer replaces the global one |
 | `acme_dns <provider> …` | DNS-01 with your global token: Caddy gives `acme_dns` to every ACME issuer without a DNS provider of its own, this one included |
 
 With `acme_dns`, either make sure the token covers the hostname's zone, or
