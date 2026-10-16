@@ -189,12 +189,13 @@ func (d Deployment) StatePath(name string) string { return d.StateDir() + "/" + 
 // first: a umask that keeps what it creates the user's, StateDir created 700
 // when it is absent and refused when it is a link, and the deployment's one
 // lock held for the rest of the command, so two commands never interleave
-// their writes. what names the record, for the message when it is refused.
+// their writes. what names the record, for the message when it is refused,
+// and is quoted, so any text is safe.
 func (d Deployment) StateLockCommand(what string) string {
 	dir, lock := shellQuote(d.StateDir()), shellQuote(d.StatePath("lock"))
 	return strings.Join([]string{
 		"umask 077",
-		fmt.Sprintf("if [ -L %[1]s ]; then echo 'paisans: the state directory is a link, so %[2]s is not written'; exit 1; fi", dir, what),
+		fmt.Sprintf("if [ -L %s ]; then echo %s; exit 1; fi", dir, shellQuote("paisans: the state directory is a link, so "+what+" is not written")),
 		fmt.Sprintf("[ -d %[1]s ] || install -d -m 700 %[1]s", dir),
 		"exec 9>>" + lock,
 		"flock -w 60 9 || { echo 'paisans: another command holds the deployment lock'; exit 1; }",

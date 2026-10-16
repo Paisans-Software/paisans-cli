@@ -806,7 +806,7 @@ func TestTheRecordAndMarkerAreDeletedUnderTheDeploymentsLock(t *testing.T) {
 			t.Fatalf("%s: %v", name, err)
 		}
 		d := w.cfg.Deployment()
-		lock := d.StateLockCommand("the gateway move records")
+		lock := d.StateLockCommand("the gateway move's records")
 		deleted := false
 		for _, c := range w.hosts["home-a"].ran {
 			at := strings.Index(c, "rm -f -- ")

@@ -154,7 +154,7 @@ func markerWriteCommand(d deployment.Deployment, content string) string {
 // the deployment's user on its own StateDir, where the lock prelude is
 // that user's to run.
 func removeRecordsCommand(d deployment.Deployment) string {
-	return d.StateLockCommand("the gateway move records") + "; rm -f -- " + quote(deployrecord.Path(d)) + " " + quote(MarkerPath(d))
+	return d.StateLockCommand("the gateway move's records") + "; rm -f -- " + quote(deployrecord.Path(d)) + " " + quote(MarkerPath(d))
 }
 
 // Plan is a whole move, decided from the live deployment.

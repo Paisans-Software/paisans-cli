@@ -1,6 +1,9 @@
 package deployment_test
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -140,5 +143,25 @@ func TestStateDir(t *testing.T) {
 	}
 	if strings.Contains(lock, "/var/lib/paisans") || strings.Contains(lock, "sudo") {
 		t.Errorf("the prelude reaches root's directory: %s", lock)
+	}
+}
+
+// A label is quoted for the shell, so one with an apostrophe still runs, and
+// the refusal of a linked state directory names it as given. The prelude
+// runs in a real sh, its state directory swapped for a link in a temporary
+// directory.
+func TestStateLockCommandQuotesItsLabel(t *testing.T) {
+	d := deployment.Deployment{ID: fixtureID}
+	dir := t.TempDir()
+	link := filepath.Join(dir, "state")
+	if err := os.Symlink(dir, link); err != nil {
+		t.Fatal(err)
+	}
+	what := "the gateway move's records"
+	cmd := strings.ReplaceAll(d.StateLockCommand(what), d.StateDir(), link)
+	out, err := exec.Command("sh", "-c", cmd).CombinedOutput()
+	want := "paisans: the state directory is a link, so " + what + " is not written\n"
+	if err == nil || string(out) != want {
+		t.Errorf("got %v, %q, want exit 1 and %q", err, out, want)
 	}
 }
