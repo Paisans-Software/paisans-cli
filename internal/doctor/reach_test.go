@@ -60,31 +60,3 @@ func TestAbsentSites(t *testing.T) {
 		})
 	}
 }
-
-// Admitted never holds a site the run's classification placed as pending
-// or down, whatever its record says: a check across sites does not ask it.
-func TestAdmittedLeavesOutPendingAndDownSites(t *testing.T) {
-	cfg := fixture(t)
-	covered := func(site string) AdmissionProbe {
-		return AdmissionProbe{Site: site, Found: true, Record: admittedRecord(cfg, site)}
-	}
-	in := Input{
-		Reach: []SiteReach{
-			{Site: "home-a"},
-			{Site: "home-b", Err: "timed out", Class: topology.Site{Name: "home-b", Class: topology.Down}},
-		},
-		Admission: []AdmissionProbe{
-			covered("home-a"),
-			covered("home-b"),
-		},
-	}
-	in.Admission[0].Class = topology.Site{Name: "home-a", Class: topology.Pending}
-	got := in.Admitted(cfg)
-	if got["home-a"] || got["home-b"] {
-		t.Errorf("admitted %v, want neither pending home-a nor down home-b", got)
-	}
-	in.Admission[0].Class = topology.Site{}
-	if got := in.Admitted(cfg); !got["home-a"] {
-		t.Errorf("admitted %v, want home-a, whose record covers it and which is not classified", got)
-	}
-}

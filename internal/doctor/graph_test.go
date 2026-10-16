@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -535,6 +536,62 @@ func TestAPendingSiteIsNotAskedAcrossSites(t *testing.T) {
 	f := find(t, report.Findings, SectionEtcd, "no etcd member reached")
 	if !strings.Contains(strings.Join(f.More, "\n"), "home-b: not asked: its admission did not pass (see admission)") {
 		t.Errorf("etcd does not say why home-b was not asked: %+v", f)
+	}
+}
+
+// classifiedReads is fixtureReads with the run's classification, as
+// cmd/paisans has it once a site did not answer.
+type classifiedReads struct {
+	*fixtureReads
+	c *topology.Classification
+}
+
+func (r classifiedReads) Classification() *topology.Classification { return r.c }
+
+// A site that answers and whose record covers it is still pending when its
+// every route into the mesh is through a pending site: here home-a, which
+// dials out only, while home-b, vm and watch, the sites with an endpoint,
+// refuse its login. The classification places it, from evidence a real run
+// reads, and no check across sites asks it.
+func TestARelayPendingSiteIsNotAskedAcrossSites(t *testing.T) {
+	cfg := fixture(t)
+	refused := errors.Join(apply.ErrLoginRefused, errors.New("Permission denied (publickey)"))
+	ev := topology.Evidence{Login: map[string]error{}, Records: map[string]topology.RecordRead{}, Joined: map[string][]string{}}
+	fix := healthyInput()
+	fix.Sites = cfg.SiteNames()
+	fix.Reach = nil
+	for _, name := range cfg.SiteNames() {
+		if cfg.Sites[name].DialEndpoint() == "" {
+			ev.Records[name] = topology.RecordRead{Record: admittedRecord(cfg, name)}
+			fix.Reach = append(fix.Reach, SiteReach{Site: name, Destination: "ubuntu@" + name + ".local"})
+			continue
+		}
+		ev.Login[name] = refused
+		fix.Reach = append(fix.Reach, SiteReach{Site: name, Destination: "ubuntu@" + name + ".local", Err: "Permission denied (publickey)."})
+	}
+	c, err := topology.Classify(cfg, ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Sites["home-a"].Class != topology.Pending {
+		t.Fatalf("the fixture's home-a is %v, want pending through its relays", c.Sites["home-a"].Class)
+	}
+	fix.Etcd = EtcdProbe{}
+	reads := &fixtureReads{in: fix, log: &events{}}
+	report, in := Checks(cfg, fix.Sites, classifiedReads{reads, c}).Run(&ui.Recorder{}, 1)
+
+	if reads.log.has("etcd health home-a") {
+		t.Errorf("asked relay-pending home-a for etcd's health: %v", reads.log.list)
+	}
+	if reads.standbyFrom["home-a"] {
+		t.Errorf("standby may ask %v, never relay-pending home-a", reads.standbyFrom)
+	}
+	if in.Admitted(cfg)["home-a"] {
+		t.Errorf("relay-pending home-a is admitted for checks across sites")
+	}
+	f := find(t, report.Findings, SectionEtcd, "no etcd member reached")
+	if !strings.Contains(strings.Join(f.More, "\n"), "home-a: "+notClassified) {
+		t.Errorf("etcd does not say why home-a was not asked: %+v", f)
 	}
 }
 

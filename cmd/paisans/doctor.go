@@ -207,6 +207,17 @@ func (d doctorReads) class(site string) (topology.Site, string) {
 	return d.classes.c.Sites[site], ""
 }
 
+// Classification is the run's classification, nil when none was made. It
+// never makes one: doctor's classification node asks it once every site's
+// reach and admission have ended, and those are what make it, so by then
+// it is made or never will be.
+func (d doctorReads) Classification() *topology.Classification {
+	if d.classes == nil {
+		return nil
+	}
+	return d.classes.c
+}
+
 // doctorClassify is the run's classification of every declared site, as
 // apply makes it at its start: topology reads each site's login and
 // record, the gateways' deployment record and the cluster's members, all

@@ -227,6 +227,32 @@ func TestDoctorClassifiesOnlyWhenASiteIsNotCovered(t *testing.T) {
 	}
 }
 
+// A site the classification places pending although it answers and its
+// record covers it, as a site whose every route into the mesh is pending
+// is, is asked nothing across sites: the classification reaches every
+// such check, whichever site's read made it.
+func TestDoctorAsksNoClassifiedPendingSiteAcrossSites(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sent, writes []string
+	withDoctorHosts(t, cfg, stuckHosts(cfg, &sent, &writes))
+	doctorClassify = func(*config.Config, map[string]apply.Transport) (*topology.Classification, error) {
+		return &topology.Classification{Sites: map[string]topology.Site{
+			"home-a": {Name: "home-a", Class: topology.Pending},
+			"home-b": {Name: "home-b", Class: topology.Down, Why: topology.DownLine("home-b")},
+		}}, nil
+	}
+	_ = withRecorder(t, true)
+	_ = runDoctor([]string{"--config", fixtureConfig(), "--site", "home-a", "--site", "home-b"})
+	for _, s := range sent {
+		if strings.HasPrefix(s, "home-a.local: "+doctor.EtcdHealthCommand(cfg)) {
+			t.Errorf("asked pending home-a for etcd's health: %s", s)
+		}
+	}
+}
+
 // unexpectedHost is a host a test did not give: anything sent to it fails
 // the test. Errorf, not Fatalf, since doctor's checks run on their own
 // goroutines.

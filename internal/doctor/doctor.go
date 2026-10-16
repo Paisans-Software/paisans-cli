@@ -16,11 +16,11 @@ package doctor
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/dns"
-	"github.com/paisans-software/paisans-cli/internal/topology"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -243,6 +243,14 @@ type Input struct {
 	Secrets SecretsProbe
 	Tokens  []dns.TokenResult
 	Records RecordsProbe
+	// Pending and Down are the sites the run's classification placed
+	// pending or down, once every site's reach and admission have ended,
+	// when it was made (see ClassReads). A site that answers with a record
+	// covering it is pending when its every route into the mesh is through
+	// a pending site, and one whose login failed only for the
+	// classification's own read is down.
+	Pending []string
+	Down    []string
 }
 
 // Reached is the set of sites that answered ssh, and can be asked the rest.
@@ -258,23 +266,32 @@ func (in Input) Reached() map[string]bool {
 
 // Admitted is the set of sites whose admission check passed: the record
 // was read and covers the site as cfg declares it, and the run's
-// classification, where it was asked, placed the site neither pending nor
-// down. A check that reads across sites asks only these, never a pending
-// or down site or one whose admission failed.
+// classification, when one was made, placed it neither pending nor down. A
+// check that reads across sites asks only these, never a pending or down
+// site or one whose admission failed.
 func (in Input) Admitted(cfg *config.Config) map[string]bool {
-	absent := map[string]bool{}
-	for _, r := range in.Reach {
-		if r.Class.Class == topology.Pending || r.Class.Class == topology.Down {
-			absent[r.Site] = true
-		}
-	}
 	out := map[string]bool{}
 	for _, p := range in.Admission {
-		if p.Covered(cfg) && !absent[p.Site] && p.Class.Class != topology.Pending && p.Class.Class != topology.Down {
+		if p.Covered(cfg) && !in.classedOut(p.Site) {
 			out[p.Site] = true
 		}
 	}
 	return out
+}
+
+// classedOut reports whether the run's classification placed site pending
+// or down.
+func (in Input) classedOut(site string) bool {
+	return slices.Contains(in.Pending, site) || slices.Contains(in.Down, site)
+}
+
+// notAsked is why a check that reads across sites did not ask a site that
+// answered ssh.
+func (in Input) notAsked(site string) string {
+	if in.classedOut(site) {
+		return notClassified
+	}
+	return notAdmitted
 }
 
 // Asked is the set of sites doctor was told to look at.

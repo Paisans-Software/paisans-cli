@@ -479,5 +479,7 @@ func (in Input) clone() Input {
 	out.Caddy = slices.Clone(in.Caddy)
 	out.Tokens = slices.Clone(in.Tokens)
 	out.Records.Entries = slices.Clone(in.Records.Entries)
+	out.Pending = slices.Clone(in.Pending)
+	out.Down = slices.Clone(in.Down)
 	return out
 }

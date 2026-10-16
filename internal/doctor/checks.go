@@ -7,6 +7,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/topology"
 )
 
 // Reads is how the checks read the hosts: one method per read, each on one
@@ -130,6 +131,32 @@ func Checks(cfg *config.Config, sites []string, reads Reads) *Graph {
 			Judge: func(in Input) []Finding { return Admission(cfg, bySite(in.Admission, site, AdmissionProbe.site)) },
 		})
 	}
+	var ended []string
+	for _, site := range sites {
+		ended = append(ended, reach(site), admitted(site))
+	}
+	g.Add(Node{Name: classification, Section: SectionAdmission, Soft: ended,
+		Gather: func(Input) func(*Input) {
+			cr, ok := reads.(ClassReads)
+			if !ok {
+				return nil
+			}
+			c := cr.Classification()
+			if c == nil {
+				return nil
+			}
+			var pending, down []string
+			for _, name := range cfg.SiteNames() {
+				switch c.Sites[name].Class {
+				case topology.Pending:
+					pending = append(pending, name)
+				case topology.Down:
+					down = append(down, name)
+				}
+			}
+			return func(in *Input) { in.Pending, in.Down = pending, down }
+		},
+	})
 	for _, site := range sites {
 		g.Add(Node{Name: SectionUser + " " + site, Section: SectionUser, Site: site, Subject: site,
 			Hard: []Need{Hard(admitted(site))},
@@ -198,6 +225,7 @@ func Checks(cfg *config.Config, sites []string, reads Reads) *Graph {
 	if len(cfg.Etcd.Members) > 0 {
 		g.Add(Node{Name: SectionEtcd, Section: SectionEtcd,
 			Hard: []Need{admissionOf(cfg.Etcd.Members)},
+			Soft: soft(classification),
 			// etcd, from the first admitted member that answers, in the
 			// order etcd.members gives.
 			Gather: func(in Input) func(*Input) {
@@ -206,7 +234,7 @@ func Checks(cfg *config.Config, sites []string, reads Reads) *Graph {
 				for _, name := range cfg.Etcd.Members {
 					if !admitted[name] {
 						if reached[name] {
-							p.Tried = append(p.Tried, name+": "+notAdmitted)
+							p.Tried = append(p.Tried, name+": "+in.notAsked(name))
 						}
 						continue
 					}
@@ -275,7 +303,7 @@ func Checks(cfg *config.Config, sites []string, reads Reads) *Graph {
 		}
 		g.Add(Node{Name: SectionPatroni, Section: SectionPatroni,
 			Hard: []Need{AnyOf(members...)},
-			Soft: soft(SectionEtcd),
+			Soft: soft(SectionEtcd, classification),
 			// /sync from the etcd member that answered, and, when no
 			// member names a leader, the log lines that say why.
 			Gather: func(in Input) func(*Input) {
@@ -356,13 +384,13 @@ func Checks(cfg *config.Config, sites []string, reads Reads) *Graph {
 	for _, app := range apply.StandbyApps(cfg) {
 		g.Add(Node{Name: SectionPocketID + " " + app, Section: SectionPocketID, Subject: app,
 			Hard: []Need{admissionOf(placed[app])},
-			Soft: soft(SectionPatroni),
+			Soft: soft(SectionPatroni, classification),
 			Gather: func(in Input) func(*Input) {
 				reached, admitted := in.Reached(), in.Admitted(cfg)
 				p := reads.Standby(app, admitted)
 				for i, inst := range p.Instances {
 					if inst.State == apply.Unreachable && reached[inst.Site] && !admitted[inst.Site] {
-						p.Instances[i].Detail = notAdmitted
+						p.Instances[i].Detail = in.notAsked(inst.Site)
 					}
 				}
 				return func(in *Input) { in.Standby = append(in.Standby, p) }
@@ -407,9 +435,26 @@ func Checks(cfg *config.Config, sites []string, reads Reads) *Graph {
 	return g
 }
 
-// notAdmitted is why a check that reads across sites did not ask a site
-// that answered ssh.
-const notAdmitted = "not asked: its admission did not pass (see admission)"
+// notAdmitted and notClassified are why a check that reads across sites
+// did not ask a site that answered ssh.
+const (
+	notAdmitted   = "not asked: its admission did not pass (see admission)"
+	notClassified = "not asked: the run's classification found it pending or down, as apply would"
+)
+
+// ClassReads is a Reads that holds the run's classification of its sites,
+// once one was made: cmd/paisans makes it the first time a site does not
+// answer or its record does not cover it. Classification never makes one;
+// nil is none made.
+type ClassReads interface {
+	Classification() *topology.Classification
+}
+
+// classification is the node that records the run's classification on the
+// Input, once every site's reach and admission have ended, so that every
+// check that reads across sites sees it whatever order those ran in. It
+// reads nothing from a host and reports no line of its own.
+const classification = "classification"
 
 // bySite is the probes in list about site.
 func bySite[T any](list []T, site string, of func(T) string) []T {
