@@ -265,7 +265,11 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    the profile for `rootlesskit` at `/etc/apparmor.d/rootlesskit`, loaded at
    boot; admit checks it is loaded before it installs anything and refuses
    with the fix (install or update the `apparmor` package, load the profile)
-   if not.
+   if not. Ubuntu 22.04 has no such sysctl on its own kernel, so nothing is
+   restricted there; its `apparmor` package (3.0) ships no `rootlesskit`
+   profile, so on a 22.04 host whose newer kernel has the restriction turned
+   on, the refusal says to set `kernel.apparmor_restrict_unprivileged_userns`
+   to 0 instead.
 3. **The user.** `useradd --create-home --shell /bin/bash paisans-<token>`
    unless it exists, then the privilege check above. Subordinate ID ranges
    of at least 65,536 in `/etc/subuid` and `/etc/subgid`, which `useradd`

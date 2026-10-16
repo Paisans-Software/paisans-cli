@@ -39,6 +39,9 @@ var dockerCases = addCases(
 	goldenCase{name: "apparmor-without-profile-refused", site: "vm", host: func() *fakeHost {
 		return newBlank().with("rootlesskit-profile", "absent")
 	}},
+	goldenCase{name: "apparmor-not-shipped-refused", site: "vm", host: func() *fakeHost {
+		return newJammy().with("userns-restrict", "1")
+	}},
 	goldenCase{name: "apparmor-unrestricted", site: "vm", host: func() *fakeHost {
 		return newBlank().with("userns-restrict", "0").with("rootlesskit-profile", "absent")
 	}},
@@ -66,13 +69,16 @@ func TestAnUnreadableEngineIsRefused(t *testing.T) {
 // The AppArmor check guards each of its three cases: no restriction
 // passes, a restriction with rootlesskit's profile loaded passes, and a
 // restriction without it is refused before any package is installed.
+// Where the host's apparmor package ships no rootlesskit profile, as
+// Ubuntu 22.04's does not, the refusal says to lift the restriction
+// instead of loading a profile that is not there.
 func TestAppArmorGuardsEachCase(t *testing.T) {
 	for _, c := range []struct {
 		restrict, profile, want string
 	}{
 		{"0", "absent", "present: apparmor: unprivileged user namespaces are not restricted"},
 		{"1", "loaded", "present: apparmor: rootlesskit's profile is loaded"},
-		{"1", "absent", "refused: apparmor: AppArmor restricts unprivileged user namespaces here and no rootlesskit profile is loaded"},
+		{"1", "absent", "refused: apparmor: AppArmor restricts unprivileged user namespaces here and no rootlesskit profile is loaded. The profile is /etc/apparmor.d/rootlesskit, from Ubuntu's apparmor package"},
 	} {
 		h := newBlank().with("userns-restrict", c.restrict).with("rootlesskit-profile", c.profile)
 		got, _ := golden(t, goldenCase{name: "apparmor", host: func() *fakeHost { return h }, site: "vm"})
@@ -86,6 +92,14 @@ func TestAppArmorGuardsEachCase(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestAppArmorWithoutAShippedProfileSaysToLiftTheRestriction(t *testing.T) {
+	h := newJammy().with("userns-restrict", "1")
+	got, _ := golden(t, goldenCase{name: "apparmor", host: func() *fakeHost { return h }, site: "vm"})
+	if !strings.Contains(got, "kernel.apparmor_restrict_unprivileged_userns=0") || strings.Contains(got, "apparmor_parser") || strings.Contains(got, "--reinstall") {
+		t.Errorf("a host whose apparmor ships no rootlesskit profile is told:\n%s", got)
 	}
 }
 

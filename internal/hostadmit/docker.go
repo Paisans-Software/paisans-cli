@@ -51,8 +51,11 @@ func planDocker(p *planner) error {
 // planAppArmor checks that Ubuntu's restriction on unprivileged user
 // namespaces lets rootlesskit run: the profile Ubuntu's apparmor package
 // installs at /etc/apparmor.d/rootlesskit must be loaded. A fresh Ubuntu
-// 24.04 has it. When it is not, no package this run installs would change
-// that, so admit refuses before installing anything.
+// 24.04 has it. Ubuntu 22.04 has neither the restriction nor the profile,
+// unless a newer kernel brings the restriction and its owner turns it on;
+// its apparmor ships no such profile, so the refusal there says to lift the
+// restriction instead. No package this run installs would change either,
+// so admit refuses before installing anything.
 func planAppArmor(p *planner) error {
 	a := p.f.AppArmor
 	switch {
@@ -60,8 +63,10 @@ func planAppArmor(p *planner) error {
 		p.present("apparmor: unprivileged user namespaces are not restricted")
 	case a.Profile:
 		p.present("apparmor: rootlesskit's profile is loaded")
-	default:
+	case a.Shipped:
 		return fmt.Errorf("AppArmor restricts unprivileged user namespaces here and no rootlesskit profile is loaded. The profile is /etc/apparmor.d/rootlesskit, from Ubuntu's apparmor package: install or update that package (apt-get install --reinstall apparmor), load the profile with apparmor_parser -r /etc/apparmor.d/rootlesskit, check aa-status lists rootlesskit, and admit again. Nothing was changed")
+	default:
+		return fmt.Errorf("AppArmor restricts unprivileged user namespaces here, no rootlesskit profile is loaded, and this host's apparmor package ships none (Ubuntu's ships /etc/apparmor.d/rootlesskit from 24.04). Lift the restriction with sysctl -w kernel.apparmor_restrict_unprivileged_userns=0, keep it at boot with that line in a file under /etc/sysctl.d/, and admit again. Nothing was changed")
 	}
 	return nil
 }

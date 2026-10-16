@@ -164,7 +164,7 @@ func blankHost(user string) *admitHost {
 		{"engine", "absent"}, {"pkg", "docker-ce absent"}, {"pkg", "docker.io absent"},
 		{"pkg", "docker-ce-rootless-extras absent"}, {"pkg", "uidmap absent"}, {"pkg", "nftables installed"},
 		{"setuptool", "absent"}, {"snap", "absent"}, {"system-socket", "absent"},
-		{"userns-restrict", "1"}, {"rootlesskit-profile", "loaded"},
+		{"userns-restrict", "1"}, {"rootlesskit-profile", "loaded"}, {"rootlesskit-shipped", "yes"},
 		{"passwd", "absent"}, {"home", "absent 0 /home/" + user}, {"sudo", "absent"},
 		{"subuid", "owner:100000:65536"}, {"subgid", "owner:100000:65536"},
 		{"br_netfilter", "absent"}, {"iptables-module", "nf_tables loaded"}, {"forward-policy", "ACCEPT"},
