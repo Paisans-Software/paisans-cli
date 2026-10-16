@@ -108,7 +108,7 @@ services:
       - {{ .Dir }}/caddy/snippets:/etc/caddy/snippets:ro
 {{- if .Site.IsGateway }}
       # Site blocks the host's owner adds, imported by the Caddyfile. The
-      # host's directory, not this deployment's: paisans only creates it.
+      # deployment's own caddy.d: paisans only creates it.
       - {{ .HostSitesSource }}:{{ .HostSites }}:ro
 {{- end }}
       - {{ .Dir }}/caddy/data:/data
