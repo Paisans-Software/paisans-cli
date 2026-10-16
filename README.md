@@ -5042,32 +5042,37 @@ inside.
 
 #### Docker is judged by its version, not its source
 
-Besides classifying the host, the check reads Docker itself. Where it
-came from does not matter: Docker's own repository, Ubuntu's `docker.io` with
-`docker-compose-v2`, or anything else whose `docker compose` works is
-accepted, because what the toolkit depends on is what the engine and compose
-can do, and that is a version, not a package name. So the check refuses, on
-any host and whatever its class:
+Each deployment runs its own rootless Docker daemon as its own user, beside
+whatever Docker the host's owner runs, and `host admit` sets it up. What the
+toolkit depends on is what that daemon and compose can do, and that is a
+version, so admit refuses, on any host and whatever its class:
 
-* **A Docker older than the toolkit needs.** The engine (daemon and CLI) must
-  be at least 25.0.0 and the compose plugin at least 2.24.0, the first
-  releases with `healthcheck.start_interval`, which the rendered stacks use.
-  The refusal names the versions found and the versions needed: upgrade
-  Docker from wherever it came from, or remove it and have the host's owner
-  run `host admit` again, which installs it from Docker's repository.
-  [docs/specs/2026-10-11-docker-version-gate.md](docs/specs/2026-10-11-docker-version-gate.md)
-  lists every Docker feature the toolkit depends on, with the release that
-  introduced it.
+* **An Engine older than 29.5.** From 29.5 a rootless container with host
+  networking shares the host's network namespace
+  ([Docker: rootless troubleshooting](https://docs.docker.com/engine/security/rootless/troubleshoot/)).
+  Every infrastructure container is `network_mode: host`, bound to the
+  site's mesh address, so on an older Engine no other site reaches it. The
+  refusal names the version found and leaves the upgrade to the owner, since
+  upgrading Docker restarts every container the owner runs.
+* **A Docker that cannot run rootless**: one that is not Docker's own
+  `docker-ce` and has no `dockerd-rootless-setuptool.sh`, such as Ubuntu's
+  `docker.io`. The rootless extras come from Docker's repository, which
+  installs beside `docker-ce` only, and admit never replaces packages the
+  owner chose.
 * **A Docker snap, however new.** Its confinement keeps Docker from bind
   mounting under `/srv`, where every stack keeps its data, and snapd refreshes
   it, restarting the daemon and every container, on snapd's schedule rather
-  than the operator's. A version number reveals neither.
+  than the owner's. A version number reveals neither.
 
-A Docker whose `docker compose` does not work is not refused here, because
-`host admit` is what installs the plugin, or names the packages in its way
-(see *Docker comes from Docker's repository when it is absent*). Nothing is
-removed: removing Docker stops every container it runs, and that is a decision
-for whoever started them.
+The host check, which `host prepare`, `apply` and the others run as the
+deployment's user, reads the user's own daemon and refuses one older than
+engine 25.0.0 or compose 2.24.0, the first releases with
+`healthcheck.start_interval`, which the rendered stacks use; admit has
+already held it to 29.5.
+[docs/specs/2026-10-11-docker-version-gate.md](docs/specs/2026-10-11-docker-version-gate.md)
+lists every Docker feature the toolkit depends on, with the release that
+introduced it. Nothing is upgraded or removed: either stops every container
+the owner runs, and that is a decision for whoever started them.
 
 ### `host prepare` keeps what is the deployment's user's
 
@@ -5123,12 +5128,11 @@ ubuntu 24.04
 
 #### Docker comes from Docker's repository when it is absent
 
-Where `docker compose` already works, Docker is left as it is, whatever its
-source: the host check has already refused a snap and anything older than the
-toolkit needs (see *Docker is judged by its version, not its source*). `host
-admit`, the owner's step, adds only the rootless extras beside it, pinned to
-the version installed so that apt has nothing to upgrade, and refuses an
-Engine older than 29.5 rather than upgrading it.
+Where Docker is there, admit leaves it as it is and adds only the rootless
+extras beside it, pinned to the version installed so that apt has nothing to
+upgrade; it refuses a Docker that cannot run rootless and an Engine older
+than 29.5, rather than upgrading or replacing either (see *Docker is judged
+by its version, not its source*).
 
 Where Docker is absent, `host admit` installs Docker Engine and the compose
 plugin from Docker's own apt repository, as
@@ -5138,15 +5142,12 @@ toolkit admits the same engine from the same source, whenever it was admitted.
 Docker's system daemons are kept from starting while its packages install and
 are then disabled, so only the deployments' rootless daemons run.
 
-Where Docker is there and `docker compose` does not work, the install would
-meet the packages that page lists as conflicting (`docker.io`,
-`docker-compose-v2`, `containerd`, `runc` and the rest), so they are **refused,
-not removed**: on a host already running containers from them, removing them
-stops those containers, and that is a decision for whoever started them. The
-refusal names them, and on a `docker.io` without `docker-compose-v2` it offers
-installing that package, Ubuntu's compose plugin, as the other way out. A
-Docker snap is refused here too, as the host check refuses it. Every `apt-get`
-runs non-interactively.
+Where Docker is absent and the host has packages Docker's page lists as
+conflicting (`containerd`, `runc` and the rest), they are **refused, not
+removed**: installing Docker's packages would remove them, and on a host
+already running containers from them that stops those containers, which is a
+decision for whoever started them. The refusal names the packages found, and
+leaves removing them to the owner. Every `apt-get` runs non-interactively.
 
 #### The user's Docker starts after the mesh interface
 
