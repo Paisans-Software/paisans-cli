@@ -51,6 +51,12 @@ type Site struct {
 	Name  string
 	Class Class
 	Why   string
+	// Request is a pending site whose own host has to admit this
+	// deployment: its login or its admission is why it is pending, so its
+	// host's owner is sent a request. A site pending for another reason,
+	// Eg: its only route into the mesh is through a pending site, may be
+	// admitted already.
+	Request bool
 }
 
 // RecordRead is a site's admission record as read, or why it was not.
@@ -123,7 +129,7 @@ func Classify(cfg *config.Config, ev Evidence) (*Classification, error) {
 	// that silence is not evidence, so the run stops rather than drop a site
 	// that may have joined. A source that could never list the site, etcd
 	// for a site that is no voter, holds nothing back.
-	pending := func(name, why string) error {
+	pending := func(name, why string, request bool) error {
 		var unread []string
 		for _, src := range ev.Unread {
 			if src.Sites == nil || slices.Contains(src.Sites, name) {
@@ -133,7 +139,7 @@ func Classify(cfg *config.Config, ev Evidence) (*Classification, error) {
 		if len(unread) > 0 {
 			return fmt.Errorf("%s, and whether it has joined the deployment cannot be told: %s could not be read. A joined site left out of the mesh and the cluster would be cut off from them, so the run stops. Run it again once it can be read", why, strings.Join(unread, ", and "))
 		}
-		c.Sites[name] = Site{Name: name, Class: Pending, Why: why}
+		c.Sites[name] = Site{Name: name, Class: Pending, Why: why, Request: request}
 		return nil
 	}
 	for _, name := range cfg.SiteNames() {
@@ -142,7 +148,7 @@ func Classify(cfg *config.Config, ev Evidence) (*Classification, error) {
 				c.Sites[name] = Site{Name: name, Class: Down, Why: DownLine(name)}
 				continue
 			}
-			if err := pending(name, fmt.Sprintf("%s: its login is refused or it does not answer (%v), and the deployment has not joined it: its host's owner has not admitted it yet", name, err)); err != nil {
+			if err := pending(name, fmt.Sprintf("%s: its login is refused or it does not answer (%v), and the deployment has not joined it: its host's owner has not admitted it yet", name, err), true); err != nil {
 				return nil, err
 			}
 			continue
@@ -165,12 +171,13 @@ func Classify(cfg *config.Config, ev Evidence) (*Classification, error) {
 		case joined[name]:
 			return nil, fmt.Errorf("%s has joined this deployment, and %s. The host's owner admits it again (sudo paisans host admit --request %s.admit, from paisans host request --site %s > %s.admit) before the run goes on", name, why, name, name, name)
 		default:
-			if err := pending(name, name+": "+why); err != nil {
+			if err := pending(name, name+": "+why, true); err != nil {
 				return nil, err
 			}
 		}
 	}
-	if err := c.relays(cfg, joined, pending); err != nil {
+	relayed := func(name, why string) error { return pending(name, why, false) }
+	if err := c.relays(cfg, joined, relayed); err != nil {
 		return nil, err
 	}
 	if err := c.garage(cfg, ev.DeployedApps); err != nil {

@@ -121,7 +121,7 @@ func degraded(t *testing.T) *topology.Classification {
 	for _, name := range cfg.SiteNames() {
 		c.Sites[name] = topology.Site{Name: name, Class: topology.Ready}
 	}
-	c.Sites["home-b"] = topology.Site{Name: "home-b", Class: topology.Pending, Why: "home-b: its host has not admitted this deployment"}
+	c.Sites["home-b"] = topology.Site{Name: "home-b", Class: topology.Pending, Why: "home-b: its host has not admitted this deployment", Request: true}
 	return c
 }
 
@@ -136,6 +136,19 @@ func TestThePendingSection(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("no %q in:\n%s", want, out)
 		}
+	}
+}
+
+// A site pending only because its route into the mesh is through a pending
+// one is not sent to ask its host again: its host may have admitted it.
+func TestThePendingSectionAsksOnlyWhereTheHostMust(t *testing.T) {
+	c := degraded(t)
+	c.Sites["watch"] = topology.Site{Name: "watch", Class: topology.Pending, Why: "watch: its only route into the mesh is through home-b, which is pending"}
+	r := &ui.Recorder{Verbose_: true}
+	showPending(r, fixture(t), c)
+	out := r.Lines()
+	if strings.Contains(out, "--site watch > watch.admit") || !strings.Contains(out, "only route into the mesh") {
+		t.Errorf("got:\n%s", out)
 	}
 }
 

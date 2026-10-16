@@ -158,8 +158,9 @@ func joinsWait(r ui.Reporter, declaration, cfg *config.Config, c *topology.Class
 }
 
 // showPending opens the plan: a line per pending or down site with its
-// reason, a pending one's request line, and what the deployment is without,
-// in doctor's words. cfg is the declaration.
+// reason, the request line of a pending one whose own host has to admit
+// the deployment, and what the deployment is without, in doctor's words.
+// cfg is the declaration.
 func showPending(r ui.Reporter, cfg *config.Config, c *topology.Classification) {
 	if !c.Degraded() && len(c.Warnings) == 0 {
 		return
@@ -168,7 +169,9 @@ func showPending(r ui.Reporter, cfg *config.Config, c *topology.Classification) 
 	for _, name := range c.Pending() {
 		s := r.Step(name)
 		s.Detail("%s", c.Sites[name].Why)
-		s.Detail("paisans host request --site %s > %s.admit", name, name)
+		if c.Sites[name].Request {
+			s.Detail("paisans host request --site %s > %s.admit", name, name)
+		}
 		if lost := doctor.Losses(cfg, name); lost != "" {
 			s.Detail("While it is pending the deployment is without %s.", lost)
 		}

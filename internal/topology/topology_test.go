@@ -309,6 +309,11 @@ func TestASiteReachableOnlyThroughAPendingRelayIsPending(t *testing.T) {
 		if c.Sites[name].Class != topology.Pending {
 			t.Errorf("%s is %v", name, c.Sites[name].Class)
 		}
+		// A relay's own host has to admit the deployment; a site pending
+		// only through its relay may have admitted it already.
+		if want := cfg.Sites[name].DialEndpoint() != ""; c.Sites[name].Request != want {
+			t.Errorf("%s: request %v, want %v", name, c.Sites[name].Request, want)
+		}
 	}
 }
 
