@@ -129,10 +129,8 @@ func CaddyfilePath(d deployment.Deployment) string {
 }
 
 // MarkerPath is the marker on the old gateway's host, beside the deployment
-// record and named by the token the same way.
-func MarkerPath(d deployment.Deployment) string {
-	return registry.Dir + "/gateway-move." + d.Token() + ".json"
-}
+// record in the deployment's state directory.
+func MarkerPath(d deployment.Deployment) string { return d.StatePath("gateway-move.json") }
 
 // Plan is a whole move, decided from the live deployment.
 type Plan struct {

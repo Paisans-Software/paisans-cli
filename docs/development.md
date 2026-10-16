@@ -104,8 +104,8 @@ has the reasoning.
 configuration and the render (the login user, every key of the operators
 `ssh.keys` names, every rendered service's image, and the web server's
 `include_dir`), compares it with the host's record,
-`/var/lib/paisans/granted.<token>.json`, and writes that record under the
-registry's lock. `cmd/paisans/review.go` shows the review and asks for
+`/srv/paisans/<token>/.paisans/granted.json`, and writes that record under the
+deployment's lock. `cmd/paisans/review.go` shows the review and asks for
 `approve` through `confirmWord`, refusing without a terminal;
 `cmd/paisans/converge_review.go` is `apply` with no `--site`'s one review for
 every site, which its steps check against rather than asking again. README.md

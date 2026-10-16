@@ -813,7 +813,7 @@ func (h *host) Run(command string) (string, error) {
 		data, _ := base64.StdEncoding.DecodeString(regexp.MustCompile(`printf %s '([^']*)' \| base64 -d`).FindStringSubmatch(command)[1])
 		h.files[path] = string(data)
 		return "", nil
-	case strings.HasPrefix(command, "rm -f -- '/var/lib/paisans/deployed."):
+	case strings.HasPrefix(command, "rm -f -- '/srv/paisans/") && strings.HasSuffix(command, "/.paisans/deployed.json'"):
 		delete(h.files, strings.TrimSuffix(strings.TrimPrefix(command, "rm -f -- '"), "'"))
 		return "", nil
 	case strings.HasPrefix(command, "for i in ") && strings.Contains(command, "docker image rm"):

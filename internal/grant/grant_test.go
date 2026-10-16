@@ -385,8 +385,8 @@ func TestWriteIsUnderTheLockAndKeepsTheOtherParts(t *testing.T) {
 	}
 	cmd := h.commands[0]
 	lock, mv := strings.Index(cmd, "flock -w 60 9"), strings.Index(cmd, `mv "$tmp" "$f"`)
-	if !strings.Contains(cmd, "exec 9>>/var/lib/paisans/registry.lock") || lock < 0 || mv < lock || !strings.Contains(cmd, `chmod 644 "$tmp"`) {
-		t.Errorf("not written under the registry's lock by a rename: %s", cmd)
+	if !strings.Contains(cmd, testDeployment(t).StateLockCommand("the grant record")) || lock < 0 || mv < lock || !strings.Contains(cmd, `chmod 644 "$tmp"`) {
+		t.Errorf("not written under the deployment's lock by a rename: %s", cmd)
 	}
 	rec, err := grant.Parse(h.content)
 	if err != nil || rec.Images == nil || rec.Keys == nil {
@@ -417,14 +417,14 @@ func TestWriteReadsAgainWhenAnotherCommandWrote(t *testing.T) {
 
 func TestAMalformedRecordIsNotRewritten(t *testing.T) {
 	h := &fakeHost{content: `{"version": 9}`, found: true}
-	if _, err := grant.Write(h, testDeployment(t), func(r grant.Record) grant.Record { return r }); err == nil || !strings.Contains(err.Error(), "sudo rm /var/lib/paisans/granted.") || len(h.commands) != 0 {
+	if _, err := grant.Write(h, testDeployment(t), func(r grant.Record) grant.Record { return r }); err == nil || !strings.Contains(err.Error(), "`rm /srv/paisans/f2a9/.paisans/granted.json`") || len(h.commands) != 0 {
 		t.Errorf("err %v after %d writes", err, len(h.commands))
 	}
 }
 
 func TestRemoveCommandNamesTheRecord(t *testing.T) {
 	d := testDeployment(t)
-	if got := grant.RemoveCommand(d); got != "rm -f -- '/var/lib/paisans/granted."+d.Token()+".json'" {
+	if got := grant.RemoveCommand(d); got != "rm -f -- '/srv/paisans/f2a9/.paisans/granted.json'" {
 		t.Errorf("%s", got)
 	}
 }
@@ -476,5 +476,11 @@ func TestTheLoginIsTheDefaultUserWhenSSHUserIsLeftOut(t *testing.T) {
 	}
 	if g.Login != "paisans-f2a9" {
 		t.Errorf("login is %q, want paisans-f2a9", g.Login)
+	}
+}
+
+func TestTheGrantRecordIsInTheDeploymentsStateDir(t *testing.T) {
+	if got := grant.Path(testDeployment(t)); got != "/srv/paisans/f2a9/.paisans/granted.json" {
+		t.Errorf("got %s", got)
 	}
 }

@@ -2538,16 +2538,13 @@ section: they decrypt every backup already taken.
 
 **What is deployed is recorded on each gateway**, so that a site or an app
 missing from `paisans-stack.yaml` by mistake (commented out, renamed, a bad merge)
-does not lose its secrets. `/var/lib/paisans/deployed.<token>.json` on every
+does not lose its secrets. `/srv/paisans/<token>/.paisans/deployed.json` on every
 gateway lists the names of the sites, apps and Pocket ID groups deployed, and
-nothing else. Because it holds nothing else, it is **readable without sudo**:
-every write leaves it 0644, and `/var/lib/paisans` 0711, which others may
-enter but not list, so the registry beside it and the names of its files stay
-root's. Reading it is done as the ssh user, so `apply --site` of a site that
-is not a gateway, which reads every gateway's record for its warnings, asks
-for no gateway's sudo password. A record the ssh user may not read, one
-written with other modes, is read through sudo instead, and the gateway's
-next `apply` writes it readable. A gateway's `apply` adds every name the yaml declares and never
+nothing else. It is the deployment user's, in that user's mode 700 state
+directory, written under the deployment's one lock there and left 0644 by a
+rename. Reading it is done as the deployment's user, so `apply --site` of a
+site that is not a gateway, which reads every gateway's record for its
+warnings, asks for no gateway's sudo password. A gateway's `apply` adds every name the yaml declares and never
 takes one out, so an `apply` of a yaml mid-edit cannot shrink it. Only the
 removal commands take names out, on every gateway: `site remove` in its stage
 2, `site remove --force` for a site no longer declared, and `app remove` for
@@ -5568,10 +5565,9 @@ from the configuration or from a host shows such a character as an escape
 (Eg: `\x1b`), never raw.
 
 **Each host records the grant last applied**, in
-`/var/lib/paisans/granted.<token>.json`, root's and 0644. It holds
-fingerprints and image references, nothing secret, so it is readable without
-`sudo`; only root writes it, so the login user alone cannot rewrite the
-baseline. Each part is written by the command that applies it, once that
+`/srv/paisans/<token>/.paisans/granted.json`, the deployment user's, in its
+mode 700 state directory. It holds fingerprints and image references, nothing
+secret. Each part is written by the command that applies it, once that
 command's steps for the site have all succeeded: the login and keys by `host
 prepare`, the images and the web server's directory by `apply`. What the
 operator approves is written earlier, as soon as they type approve and before
@@ -5581,7 +5577,7 @@ approved without asking again, because the operator saw exactly those entries
 and approving is not undone by a step that failed after it. Applying an entry
 moves it from the approvals to its part. An entry approved as one thing and
 now granted as another (Eg: an image moved on again) is asked about again.
-It is written under `/var/lib/paisans/registry.lock`, by a temporary file and
+It is written under the deployment's lock in that directory, by a temporary file and
 a rename, and only over the file that was read, so two commands writing
 different parts lose neither. A host with no record, which is every host of a
 deployment built before it existed, has an empty baseline: every entry is new
@@ -8607,9 +8603,9 @@ deployment's is left alone and not listed:
 | authorized keys | nothing can prove one: a key `host prepare` added is a key the operator logs in with | never removed. A key may be the only way into the host, and nothing on it says whether another exists; the operator deletes one by hand once it is no longer needed. This deployment's record of which keys it added, `/etc/paisans/authorized_keys.<user>.paisans-<token>.owned`, is its own file, so that is deleted |
 | the deployment's directory | its path, `/srv/paisans/<token>` | empty directories removed; what apply did not write, the data in its bind mounts, is kept, and `--delete-data` deletes it all unless a file in it was edited |
 | the registry entry | this id's line in `/var/lib/paisans/registry.json` | deleted under the same lock as a claim, by the same kind of awk program; while data is kept, marked `"kept": "data"` instead, so a later run with `--delete-data` finds the deployment, by `--id` too |
-| the deployment record, on a gateway | `/var/lib/paisans/deployed.<token>.json`, named for the token | deleted |
+| the deployment record, on a gateway | `/srv/paisans/<token>/.paisans/deployed.json` | deleted |
 | the configuration store | `/var/lib/paisans/config/<token>.git`, its `<token>.peers` and `<token>.sync.json`, a `<token>.incoming.bundle` a cut-off push left behind, and `/usr/local/lib/paisans-<token>/`, named for the token; the units that serve and sync it are `paisans-<token>-*` and go with the units above | deleted after the units, so the daemon and the sync have stopped using them. The versions on this host go with it; every other site still holds them, which is what makes a site's removal not a loss of the configuration's history |
-| the grant record | `/var/lib/paisans/granted.<token>.json`, named for the token (see *`apply` and `host prepare` review what `paisans-stack.yaml` grants*) | deleted just before the registry entry it goes with: left behind, a later deployment with the same token would be reviewed against a baseline it never applied |
+| the grant record | `/srv/paisans/<token>/.paisans/granted.json` (see *`apply` and `host prepare` review what `paisans-stack.yaml` grants*) | deleted just before the registry entry it goes with: left behind, a later deployment with the same token would be reviewed against a baseline it never applied |
 
 The check that nothing of this deployment's is left comes last, after the
 registry entry.
@@ -9439,7 +9435,7 @@ their own rules.
 
 **The wait** is the longest TTL of the deleted records, from the time of the
 last delete, which stage 4 writes on the old gateway's host
-(`/var/lib/paisans/gateway-move.<token>.json`) so that a run stopped during the
+(`/srv/paisans/<token>/.paisans/gateway-move.json`) so that a run stopped during the
 wait resumes it. Every record `dns init` makes carries the provider's automatic
 TTL, 300 seconds at Cloudflare
 ([Cloudflare: Time to Live](https://developers.cloudflare.com/dns/manage-dns-records/reference/ttl/)),

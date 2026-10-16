@@ -114,13 +114,9 @@ var ErrChanged = errors.New(changedMarker)
 
 const changedMarker = "paisans: the grant record changed while it was read"
 
-// Path is the record on a host, named by the deployment's token, beside the
-// registry. It is root's and 0644: it holds fingerprints and image references,
-// nothing secret, so it is readable without sudo, and only root writes it,
-// so the login user alone cannot rewrite the baseline a review compares with.
-func Path(d deployment.Deployment) string {
-	return registry.Dir + "/granted." + d.Token() + ".json"
-}
+// Path is the record on a host, the deployment user's, in its state
+// directory. It holds fingerprints and image references, nothing secret.
+func Path(d deployment.Deployment) string { return d.StatePath("granted.json") }
 
 // RemoveCommand deletes the record, for site remove's stage 3, which deletes
 // the deployment's registry entry beside it.
@@ -163,7 +159,7 @@ func Read(t registry.Runner, d deployment.Deployment) (Record, string, bool, err
 	}
 	rec, err := Parse(content)
 	if err != nil {
-		return Record{}, "", false, fmt.Errorf("%s: %s is %w (%v). Delete it with `sudo rm %s`; the next run then reviews every key and image again", t.Describe(), Path(d), ErrMalformed, err, Path(d))
+		return Record{}, "", false, fmt.Errorf("%s: %s is %w (%v). Delete it with `rm %s`; the next run then reviews every key and image again", t.Describe(), Path(d), ErrMalformed, err, Path(d))
 	}
 	return rec, content, true, nil
 }
@@ -210,21 +206,16 @@ func Write(t registry.Runner, d deployment.Deployment, change func(Record) Recor
 }
 
 // writeCommand replaces the record with content if the file still hashes to
-// want ("none" for no file), under the lock the registry and the deployment
-// record take.
+// want ("none" for no file), under the deployment's lock.
 func writeCommand(d deployment.Deployment, want, content string) string {
 	return strings.Join([]string{
 		"set -e",
-		"umask 077",
-		"mkdir -p " + registry.Dir,
-		"chmod 711 " + registry.Dir,
-		"exec 9>>" + registry.LockPath,
-		fmt.Sprintf("flock -w 60 9 || { echo 'paisans: another command holds %s'; exit 1; }", registry.LockPath),
+		d.StateLockCommand("the grant record"),
 		"f=" + quote(Path(d)),
 		"cur=none",
 		`if [ -f "$f" ]; then cur=$(sha256sum "$f" | cut -d' ' -f1); fi`,
 		`[ "$cur" = ` + quote(want) + ` ] || { echo ` + quote(changedMarker) + `; exit 1; }`,
-		"tmp=$(mktemp " + registry.Dir + "/.granted.XXXXXX)",
+		"tmp=$(mktemp " + quote(d.StatePath(".granted.XXXXXX")) + ")",
 		`trap 'rm -f "$tmp"' EXIT`,
 		"printf %s " + quote(base64.StdEncoding.EncodeToString([]byte(content))) + ` | base64 -d > "$tmp"`,
 		`chmod 644 "$tmp"`,

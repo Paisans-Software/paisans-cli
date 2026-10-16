@@ -44,7 +44,7 @@ var grantPayload = regexp.MustCompile(`printf %s '([A-Za-z0-9+/=]+)' \| base64 -
 func (m *memGrant) Run(command string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if !strings.Contains(command, "/var/lib/paisans/granted.") || !strings.Contains(command, "flock -w 60 9") {
+	if !strings.Contains(command, "/srv/paisans/f2a9/.paisans/granted.json") || !strings.Contains(command, "flock -w 60 9") {
 		return "", fmt.Errorf("not a grant write under the lock: %s", command)
 	}
 	data, err := base64.StdEncoding.DecodeString(grantPayload.FindStringSubmatch(command)[1])

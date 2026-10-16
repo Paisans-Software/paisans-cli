@@ -16,6 +16,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/deployrecord"
 	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/dns/dnstest"
@@ -760,5 +761,12 @@ func TestTheHostOwnersSitesNoteSpeaksOfTheHandOff(t *testing.T) {
 	notes := strings.Join(sw.mustBuild().Notes, "\n")
 	if strings.Contains(notes, "not stopped") || !strings.Contains(notes, "not handed off") {
 		t.Errorf("notes:\n%s", notes)
+	}
+}
+
+func TestTheMarkerIsInTheDeploymentsStateDir(t *testing.T) {
+	d := deployment.Deployment{ID: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}
+	if got := gatewaymove.MarkerPath(d); got != "/srv/paisans/f2a9/.paisans/gateway-move.json" {
+		t.Errorf("got %s", got)
 	}
 }

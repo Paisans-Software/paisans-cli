@@ -585,7 +585,7 @@ paisans host prepare --all --execute          # every site, one at a time
   there and `docker compose` does not work, the packages in the way are named
   and refused, never removed.
 * **Review:** the login user and the keys, against what the host last
-  recorded in `/var/lib/paisans/granted.<token>.json`: each key added or
+  recorded in `/srv/paisans/<token>/.paisans/granted.json`: each key added or
   changed is a `+` or `~` line under `review what paisans-stack.yaml grants`, each
   removed one a `-` line, at every verbosity.
 * **`--execute`:** asks for `approve` at a terminal when the review adds or
@@ -1040,7 +1040,7 @@ paisans site remove --force --ssh admin@203.0.113.9 --id f2a9 --execute --delete
   wrote there may still be in the web server's `include_dir`.
 * **`--execute`:** runs the stages, stopping at the first gate that fails. Stage
   3 deletes the record of what the deployment granted on the host,
-  `/var/lib/paisans/granted.<token>.json`, with its registry entry. It deletes
+  `/srv/paisans/<token>/.paisans/granted.json`, with its registry entry. It deletes
   the host's configuration store
   too, the repository and the files beside it; the other sites still hold every
   version.
