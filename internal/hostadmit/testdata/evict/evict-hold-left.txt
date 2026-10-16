@@ -94,7 +94,18 @@ step 15: put back /usr/sbin/policy-rc.d
     $ }
     $ release_docker_hold
     $ if [ -e /usr/sbin/policy-rc.d.paisans-owner ] || [ -L /usr/sbin/policy-rc.d.paisans-owner ]; then echo '/usr/sbin/policy-rc.d.paisans-owner, a copy of your policy-rc.d admit made while it installed Docker, differs from the /usr/sbin/policy-rc.d there now. Keep the one you want as /usr/sbin/policy-rc.d, remove the other, and run again'; exit 1; fi
-    $ if [ -f /etc/paisans/installed ]; then sed -i 's/^installing /package /' /etc/paisans/installed; fi
+    $ confirm_claims() {
+    $   f=/etc/paisans/installed
+    $   { [ -f "$f" ] && [ ! -L "$f" ]; } || return 0
+    $   ok=
+    $   for p in $(awk 'NF == 2 && $1 == "installing" && $2 ~ /^[a-z0-9][a-z0-9.+-]+$/ { print $2 }' "$f"); do
+    $     if dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q 'ok installed$'; then ok="$ok $p"; fi
+    $   done
+    $   [ -n "$ok" ] || return 0
+    $   awk -v ok="$ok " 'NF == 2 && $1 == "installing" && index(ok, " " $2 " ") { print "package " $2; next } { print }' "$f" > "$f.paisans-tmp" &&
+    $     chmod 644 "$f.paisans-tmp" && mv -f "$f.paisans-tmp" "$f"
+    $ }
+    $ confirm_claims
 
 step 16: remove the admission record
   evict: /etc/paisans/admitted.f2a9.json

@@ -129,6 +129,18 @@ step 5: add docker apt repo
 step 6: install packages: docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin, docker-compose-plugin, docker-ce-rootless-extras, uidmap, wireguard-tools, git
   packages: install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras uidmap wireguard-tools git; Docker's system daemon is kept from starting while its packages install, by a /usr/sbin/policy-rc.d of admit's that asks yours, if you have one, about every other service and is replaced by yours again after
   run:
+    $ confirm_claims() {
+    $   f=/etc/paisans/installed
+    $   { [ -f "$f" ] && [ ! -L "$f" ]; } || return 0
+    $   ok=
+    $   for p in $(awk 'NF == 2 && $1 == "installing" && $2 ~ /^[a-z0-9][a-z0-9.+-]+$/ { print $2 }' "$f"); do
+    $     if dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q 'ok installed$'; then ok="$ok $p"; fi
+    $   done
+    $   [ -n "$ok" ] || return 0
+    $   awk -v ok="$ok " 'NF == 2 && $1 == "installing" && index(ok, " " $2 " ") { print "package " $2; next } { print }' "$f" > "$f.paisans-tmp" &&
+    $     chmod 644 "$f.paisans-tmp" && mv -f "$f.paisans-tmp" "$f"
+    $ }
+    $ trap confirm_claims EXIT
     $ set -e
     $ release_docker_hold() {
     $   rm -f /usr/sbin/.policy-rc.d.paisans-tmp
@@ -164,14 +176,13 @@ step 6: install packages: docker-ce, docker-ce-cli, containerd.io, docker-buildx
     $ POLICY
     $ chmod 755 /usr/sbin/.policy-rc.d.paisans-tmp
     $ if [ -e /usr/sbin/policy-rc.d ] || [ -L /usr/sbin/policy-rc.d ]; then cp -pP /usr/sbin/policy-rc.d /usr/sbin/policy-rc.d.paisans-owner; fi
-    $ trap release_docker_hold EXIT
+    $ trap 'if command -v confirm_claims >/dev/null 2>&1; then confirm_claims || true; fi; release_docker_hold' EXIT
     $ trap 'exit 1' HUP INT TERM
     $ mv -f /usr/sbin/.policy-rc.d.paisans-tmp /usr/sbin/policy-rc.d
     $ set -e
     $ export DEBIAN_FRONTEND=noninteractive
     $ apt-get -o DPkg::Lock::Timeout=300 update
     $ apt-get -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confold install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras uidmap wireguard-tools git
-    $ sed -i 's/^installing /package /' /etc/paisans/installed
 
 step 7: disable the system Docker
   docker: the deployments run their own rootless daemons, so the system daemons admit installed, which their packages enable, are disabled (docker.socket, docker.service, containerd.service), and were kept from starting while they installed: they never changed forwarding, docker0 or the firewall

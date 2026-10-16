@@ -425,8 +425,8 @@ func admittedWithDataDir(site, dir string) *fakeHost {
 }
 
 // applied changes h as two of admit's commands change a real host: an apt
-// install makes dpkg show each package installed, and the install's
-// confirmation turns /etc/paisans/installed's claims into packages.
+// install makes dpkg show each package installed, and confirm_claims turns
+// /etc/paisans/installed's claims dpkg shows installed into packages.
 func (h *fakeHost) applied(command string) {
 	for _, line := range strings.Split(command, "\n") {
 		if _, rest, ok := strings.Cut(line, " install -y "); ok && strings.HasPrefix(line, "apt-get ") {
@@ -438,11 +438,28 @@ func (h *fakeHost) applied(command string) {
 			}
 		}
 	}
-	if strings.Contains(command, "sed -i 's/^installing /package /' /etc/paisans/installed") {
+	if strings.Contains(command, "\nconfirm_claims\n") || strings.Contains(command, "trap confirm_claims EXIT") {
 		if c, ok := h.files["/etc/paisans/installed"]; ok {
-			c = strings.ReplaceAll(c, "\ninstalling ", "\npackage ")
+			lines := strings.Split(c, "\n")
+			for i, l := range lines {
+				if p, ok := strings.CutPrefix(l, "installing "); ok && h.pkgInstalled(p) {
+					lines[i] = "package " + p
+				}
+			}
+			c = strings.Join(lines, "\n")
 			h.files["/etc/paisans/installed"] = c
 			h.withFile("/etc/paisans/installed", c, "644", 0)
 		}
 	}
+}
+
+// pkgInstalled reports whether h's probe says dpkg shows p installed.
+func (h *fakeHost) pkgInstalled(p string) bool {
+	installed := false
+	for _, kv := range h.facts {
+		if kv[0] == "pkg" && strings.HasPrefix(kv[1], p+" ") {
+			installed = kv[1] == p+" installed"
+		}
+	}
+	return installed
 }

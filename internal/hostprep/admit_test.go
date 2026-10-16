@@ -196,7 +196,7 @@ func TestAdmitPackagesHoldsTheSystemDocker(t *testing.T) {
 	}
 	install := s.Steps[len(s.Steps)-1]
 	hold, apt := strings.Index(install.Command, "mv -f /usr/sbin/.policy-rc.d.paisans-tmp /usr/sbin/policy-rc.d"), strings.Index(install.Command, "apt-get -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confold install")
-	if hold < 0 || apt < hold || !strings.Contains(install.Command, "trap release_docker_hold EXIT") {
+	if hold < 0 || apt < hold || !strings.Contains(install.Command, "release_docker_hold' EXIT") {
 		t.Errorf("the install does not hold Docker's daemons first:\n%s", install.Command)
 	}
 	if got := strings.Join(added.Packages, " "); got != "docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras uidmap nftables wireguard-tools git" {

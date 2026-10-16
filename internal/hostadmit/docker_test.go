@@ -1,6 +1,9 @@
 package hostadmit_test
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -346,7 +349,7 @@ func TestAStaleInstalledClaimIsDropped(t *testing.T) {
 }
 
 // The install step turns its "installing" claims into admit's packages
-// once apt has installed them, and only then.
+// from its exit trap, before the hold goes, whatever apt did.
 func TestTheInstallConfirmsItsClaims(t *testing.T) {
 	plan, err := hostadmit.Build(newBlank(), input(t, "vm", hostadmit.Flags{}))
 	if err != nil {
@@ -358,8 +361,8 @@ func TestTheInstallConfirmsItsClaims(t *testing.T) {
 	}
 	install := slices.IndexFunc(plan.Steps, func(s hostadmit.Step) bool { return strings.HasPrefix(s.Title, "install packages: docker-ce") })
 	c := plan.Steps[install].Command
-	if apt, sed := strings.LastIndex(c, "apt-get"), strings.Index(c, "sed -i 's/^installing /package /' /etc/paisans/installed"); sed < apt {
-		t.Errorf("the install does not confirm its claims after apt:\n%s", c)
+	if trap, apt := strings.Index(c, "confirm_claims || true; fi; release_docker_hold' EXIT"), strings.Index(c, "apt-get"); trap < 0 || apt < trap {
+		t.Errorf("the install does not confirm its claims from its exit trap:\n%s", c)
 	}
 }
 
@@ -403,5 +406,84 @@ func TestASystemDockerThatDoesNotAnswer(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "does not answer") || !strings.Contains(err.Error(), "Start it") || strings.Contains(err.Error(), "invalid character") {
 			t.Errorf("%s: Build = %v", name, err)
 		}
+	}
+}
+
+// runInstall runs plan's install step for real, its paths moved into a
+// directory of the test's, with an apt-get that makes dpkg show each
+// package of fails installed and then fails, as a package that does not
+// configure stops apt; dpkg-query answers from that. It returns
+// /etc/paisans/installed as the step left it, which starts as claimed,
+// and the moved /usr/sbin.
+func runInstall(t *testing.T, plan *hostadmit.Plan, claimed string, fails ...string) (string, string) {
+	t.Helper()
+	install := slices.IndexFunc(plan.Steps, func(s hostadmit.Step) bool { return strings.HasPrefix(s.Title, "install packages: ") })
+	if install < 0 {
+		t.Fatalf("no install step:\n%s", plan.Text())
+	}
+	dir := t.TempDir()
+	bin, sbin, list, dpkg := filepath.Join(dir, "bin"), filepath.Join(dir, "sbin"), filepath.Join(dir, "installed"), filepath.Join(dir, "dpkg")
+	for _, d := range []string{bin, sbin} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scripts := map[string]string{
+		"apt-get":    "#!/bin/sh\ncase \"$*\" in *' install '*) printf '%s\\n' " + strings.Join(fails, " ") + " >> " + dpkg + "; exit 100 ;; esac\nexit 0\n",
+		"dpkg-query": "#!/bin/sh\nfor p; do :; done\nif grep -qx \"$p\" " + dpkg + " 2>/dev/null; then printf 'install ok installed'; else exit 1; fi\n",
+		"flock":      "#!/bin/sh\nexit 0\n",
+	}
+	for name, s := range scripts {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte(s), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(list, []byte(claimed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := strings.NewReplacer("/usr/sbin/", sbin+"/", "/etc/paisans/installed", list, "/run/paisans-docker-hold.lock", filepath.Join(dir, "lock")).Replace(plan.Steps[install].Command)
+	cmd := exec.Command("sh", "-c", command)
+	cmd.Env = []string{"PATH=" + bin + ":/usr/bin:/bin"}
+	if out, err := cmd.CombinedOutput(); err == nil {
+		t.Fatalf("the install did not fail: %s", out)
+	}
+	got, err := os.ReadFile(list)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(got), sbin
+}
+
+// An install that fails after apt installed docker-ce still records it as
+// admit's: the claims are confirmed from the exit trap, before the hold
+// goes, for each package dpkg shows installed, so the next run does not
+// take admit's Docker for the owner's. The same holds for an install with
+// nothing to hold.
+func TestAFailedInstallConfirmsWhatItInstalled(t *testing.T) {
+	plan, err := hostadmit.Build(newBlank(), input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed := plan.Steps[titled(plan, "record what admit installs")].File.Content
+	got, sbin := runInstall(t, plan, claimed, "docker-ce", "containerd.io")
+	for _, want := range []string{"\npackage docker-ce\n", "\npackage containerd.io\n", "\ninstalling docker-ce-cli\n"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("after a failed install the list lacks %q:\n%s", want, got)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(sbin, "policy-rc.d")); !os.IsNotExist(err) {
+		t.Errorf("the hold is left: %v", err)
+	}
+
+	owner := newBlank().with("engine", "29.9.1").with("system-socket", "present").withPkg("docker-ce", "installed").
+		answer("docker compose version", "compose present\npkg docker-ce install ok installed\npkg ufw install ok installed\npkg git install ok installed\npkg wireguard-tools install ok installed\npkg nftables install ok installed\ndockerversion 5:29.9.1-1~ubuntu.24.04~noble\nextras 5:29.9.1-1~ubuntu.24.04~noble\nkeyring present\narch amd64\n")
+	plan, err = hostadmit.Build(owner, input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed = plan.Steps[titled(plan, "record what admit installs")].File.Content
+	got, _ = runInstall(t, plan, claimed, "uidmap")
+	if !strings.Contains(got, "\npackage uidmap\n") || !strings.Contains(got, "\ninstalling docker-ce-rootless-extras\n") {
+		t.Errorf("after a failed install with nothing held:\n%s", got)
 	}
 }
