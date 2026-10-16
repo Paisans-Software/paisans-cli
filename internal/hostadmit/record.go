@@ -28,8 +28,13 @@ func planClaim(p *planner) error {
 	}
 	mine, claimed := r.Deployments[id]
 	if claimed && registry.AnotherSite(mine, e) {
-		return fmt.Errorf("this machine already runs site %s of this deployment, at %s, and this request is for site %s at %s. A site is a machine: its files, containers and WireGuard interface are named for the deployment, so a second site of it here would overwrite the first. Admit it on another machine. Nothing was changed",
-			ui.Visible(mine.Site), ui.Visible(mine.Address), ui.Visible(e.Site), e.Address)
+		// A claim from before entries named their site has its address alone.
+		runs := "site " + ui.Visible(mine.Site) + " of this deployment"
+		if mine.Site == "" {
+			runs = "this deployment"
+		}
+		return fmt.Errorf("this machine already runs %s, at %s, and this request is for site %s at %s. A site is a machine: its files, containers and WireGuard interface are named for the deployment, so a second site of it here would overwrite the first. Admit it on another machine. Nothing was changed",
+			runs, ui.Visible(mine.Address), ui.Visible(e.Site), e.Address)
 	}
 	if c := registry.Conflicts(r, id, e); len(c) > 0 {
 		return shown(registry.Refused(p.t, e, c[0]))
@@ -143,10 +148,12 @@ const keysSeparator = "--- sidecar ---"
 // the sidecar after the separator, each through a temporary file and a
 // rename. It runs as the user, so a link the user planted is followed with
 // the user's rights alone. An authorized_keys that cannot be read stops it
-// before anything is replaced, so no key the owner put there is lost.
+// before anything is replaced, so no key the owner put there is lost. A
+// ~/.ssh that was there keeps its mode but for group and other write,
+// with which sshd's StrictModes would ignore the keys.
 func keysScript(token string) string {
 	side := sidecarPath(token)
-	return `set -e; umask 077; mkdir -p "$HOME/.ssh" ` + "/srv/paisans/" + token + `/.paisans
+	return `set -e; umask 077; mkdir -p "$HOME/.ssh" ` + "/srv/paisans/" + token + `/.paisans; chmod go-w "$HOME/.ssh"
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 awk -v k="$tmp/keys" -v s="$tmp/sidecar" '$0 == "` + keysSeparator + `" { out = 1; next } { if (out) print > s; else print > k }'
 touch "$tmp/keys" "$tmp/sidecar"

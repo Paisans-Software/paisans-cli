@@ -385,7 +385,7 @@ step 25: write the admission record
 step 26: add the operators' keys
   keys: 2 operator keys into community's authorized_keys, written as community, and recorded in /srv/paisans/f2a9/.paisans/authorized_keys.owned for host prepare
   run:
-    $ runuser -u community -- env -i HOME='/home/community' PATH=/usr/bin:/bin:/usr/sbin:/sbin XDG_RUNTIME_DIR=/run/user/1002 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1002/bus DOCKER_HOST=unix:///run/user/1002/docker.sock sh -c 'set -e; umask 077; mkdir -p "$HOME/.ssh" /srv/paisans/f2a9/.paisans
+    $ runuser -u community -- env -i HOME='/home/community' PATH=/usr/bin:/bin:/usr/sbin:/sbin XDG_RUNTIME_DIR=/run/user/1002 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1002/bus DOCKER_HOST=unix:///run/user/1002/docker.sock sh -c 'set -e; umask 077; mkdir -p "$HOME/.ssh" /srv/paisans/f2a9/.paisans; chmod go-w "$HOME/.ssh"
     $ tmp=$(mktemp -d); trap '\''rm -rf "$tmp"'\'' EXIT
     $ awk -v k="$tmp/keys" -v s="$tmp/sidecar" '\''$0 == "--- sidecar ---" { out = 1; next } { if (out) print > s; else print > k }'\''
     $ touch "$tmp/keys" "$tmp/sidecar"

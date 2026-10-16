@@ -6,6 +6,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/hostadmit"
+	"github.com/paisans-software/paisans-cli/internal/registry"
 )
 
 const keysMarker = "paisans host admit: keys, read as the user"
@@ -37,6 +38,41 @@ var recordCases = addCases(
 
 func TestRecordPlans(t *testing.T) { runGolden(t, recordCases) }
 
+// recordCase is the record case named name.
+func recordCase(t *testing.T, name string) goldenCase {
+	t.Helper()
+	for _, c := range recordCases {
+		if c.name == name {
+			return c
+		}
+	}
+	t.Fatalf("no record case %s", name)
+	return goldenCase{}
+}
+
+// A claim from before entries named their site holds only an address: the
+// refusal names that address and no empty site.
+func TestAnotherSiteWithNoNameIsRefusedByAddress(t *testing.T) {
+	_, e := registry.ForRequest(requestFor("home-a"), admitted)
+	e.Address, e.Site = "10.44.0.1", ""
+	h := home().file("/var/lib/paisans/registry.json", encodeRegistry("f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01", e))
+	_, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+	if err == nil || strings.Contains(err.Error(), "site  ") || !strings.Contains(err.Error(), "this machine already runs this deployment, at 10.44.0.1") {
+		t.Errorf("Build = %v", err)
+	}
+}
+
+// The keys go in with ~/.ssh no one but the user can write: sshd's
+// StrictModes ignores authorized_keys under a group- or other-writable
+// directory, so an existing ~/.ssh loses those bits.
+func TestTheKeysScriptKeepsSSHPrivate(t *testing.T) {
+	cmd := hostadmit.KeysCommand("paisans-f2a9", "/home/paisans-f2a9", "f2a9")
+	mkdir, chmod := strings.Index(cmd, `mkdir -p "$HOME/.ssh"`), strings.Index(cmd, `chmod go-w "$HOME/.ssh"`)
+	if mkdir < 0 || chmod < mkdir {
+		t.Errorf("the keys script does not make ~/.ssh private:\n%s", cmd)
+	}
+}
+
 // Every plan that writes the record writes it root's, mode 0644, at its
 // path, so the deployment's user reads it without sudo; and a record found
 // with another mode is rewritten.
@@ -53,7 +89,7 @@ func TestRecordIsWrittenMode0644(t *testing.T) {
 			}
 		}
 	}
-	plan, err := hostadmit.Build(recordCases[1].host(), input(t, "vm", hostadmit.Flags{}))
+	plan, err := hostadmit.Build(recordCase(t, "record-mode-restored").host(), input(t, "vm", hostadmit.Flags{}))
 	if err != nil {
 		t.Fatal(err)
 	}
