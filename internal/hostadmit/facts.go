@@ -15,6 +15,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/hostprep"
 )
 
 //go:embed snippets
@@ -48,6 +49,10 @@ var snippets embed.FS
 type Facts struct {
 	Docker   DockerFacts
 	Packages map[string]bool
+	// OnDisk is, for each package /etc/paisans/installed names, whether
+	// dpkg has its files: installed, or unpacked or half-configured by an
+	// install that failed.
+	OnDisk   map[string]bool
 	AppArmor struct{ Restricted, Profile bool }
 	User     UserFacts
 	// SubUID and SubGID are every user's ranges, by name.
@@ -105,7 +110,23 @@ type DockerFacts struct {
 	Setuptool  bool
 	Snap       bool
 	SystemSock bool
+	// SystemUnits are Docker's system units (docker.socket,
+	// docker.service, containerd.service), each enabled, or active, by
+	// name.
+	SystemUnits map[string]UnitState
+	// Held is what a run that stopped while admit held Docker's daemons
+	// left: admit's /usr/sbin/policy-rc.d, the copy of the owner's, or a
+	// temporary file of admit's. HeldPolicy is admit's policy in place,
+	// under which apt may have run; without it the run stopped before
+	// apt.
+	Held, HeldPolicy bool
+	// NetworkStore is the system Docker's network store being there, which
+	// only a daemon that has run leaves.
+	NetworkStore bool
 }
+
+// UnitState is whether a system unit is enabled, and active.
+type UnitState struct{ Enabled, Active bool }
 
 // UserFacts are the deployment's user, Exists false while it does not exist.
 type UserFacts struct {
@@ -171,8 +192,8 @@ type DirState struct {
 
 // probeData is what probe.sh.tmpl is rendered with.
 type probeData struct {
-	User, Token, Prefix, EgressUnit, EgressTable, DataParent, MeshUnit, Sudoers string
-	Files, Dirs, Counted                                                        []string
+	User, Token, Prefix, EgressUnit, EgressTable, DataParent, MeshUnit, Sudoers, HoldMarker string
+	Files, Dirs, Counted                                                                    []string
 }
 
 // probedFiles are the files admit writes as root, whose state the probe
@@ -187,10 +208,10 @@ func probedFiles(d deployment.Deployment, in Input) ([]string, error) {
 		return nil, err
 	}
 	return []string{
-		delegatePath, modulesLoadPath, sysctlPath, sysctlBeforePath,
+		delegatePath, modulesLoadPath, sysctlPath, sysctlBeforePath, installedPath,
 		helper, sudoersPath(d), egressFilePath(d), egressFilePath(d) + ".new", "/etc/systemd/system/" + d.EgressUnit(),
 		watchdogRulePath(d), "/etc/systemd/system/" + d.Prefix() + "-watchdog.service",
-		record, d.WireGuardInstalled(),
+		record, d.WireGuardInstalled(), meshCondPath(d.WireGuardUnit()),
 	}, nil
 }
 
@@ -200,7 +221,7 @@ func countedDirs() []string { return []string{admission.Dir, deployment.Base, ap
 
 // probedDirs are the directories admit creates or checks.
 func probedDirs(d deployment.Deployment, in Input) []string {
-	dirs := []string{"/etc/wireguard", admission.Dir, deployment.Base, d.Root(), apply.HelperDir}
+	dirs := []string{"/etc/wireguard", admission.Dir, deployment.Base, d.Root(), apply.HelperDir, delegateDir}
 	if in.Flags.DataDir != "" {
 		dirs = append(dirs, in.Flags.DataDir, in.Flags.DataDir+"/"+d.Prefix())
 	}
@@ -243,6 +264,7 @@ func probeScript(d deployment.Deployment, in Input) (string, error) {
 		User: in.Request.User, Token: d.Token(), Prefix: d.Prefix(),
 		EgressUnit: d.EgressUnit(), EgressTable: d.EgressTable(), DataParent: in.Flags.DataDir,
 		MeshUnit: d.WireGuardUnit(), Sudoers: sudoersPath(d), Files: files, Dirs: probedDirs(d, in), Counted: countedDirs(),
+		HoldMarker: hostprep.HoldDockerMarker,
 	}); err != nil {
 		return "", err
 	}
@@ -252,9 +274,10 @@ func probeScript(d deployment.Deployment, in Input) (string, error) {
 // parseFacts reads the probe's lines. Values the probe prints are paths,
 // numbers and names; a line it cannot read is refused rather than skipped.
 func parseFacts(out, user string) (Facts, error) {
-	f := Facts{Packages: map[string]bool{}, SubUID: map[string][]IDRange{}, SubGID: map[string][]IDRange{},
+	f := Facts{Packages: map[string]bool{}, OnDisk: map[string]bool{}, SubUID: map[string][]IDRange{}, SubGID: map[string][]IDRange{},
 		Files: map[string]FileState{}, Dirs: map[string]DirState{}, Entries: map[string]int{}, WatchdogDevs: map[string]int{}, raw: map[string][]string{}}
 	f.User.Name = user
+	f.Docker.SystemUnits = map[string]UnitState{}
 	var sudoL []string
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	if len(lines) == 0 || lines[len(lines)-1] != "end" {
@@ -272,6 +295,9 @@ func parseFacts(out, user string) (Facts, error) {
 			default:
 				f.Docker.Engine = v
 			}
+		case "ondisk":
+			name, state, _ := strings.Cut(v, " ")
+			f.OnDisk[name] = state == "present"
 		case "pkg":
 			name, state, _ := strings.Cut(v, " ")
 			f.Packages[name] = state == "installed"
@@ -281,6 +307,17 @@ func parseFacts(out, user string) (Facts, error) {
 			f.Docker.Snap = v == "docker"
 		case "system-socket":
 			f.Docker.SystemSock = v == "present"
+		case "system-unit":
+			fields := strings.Fields(v)
+			if len(fields) != 3 {
+				return f, fmt.Errorf("unreadable system-unit line %q", v)
+			}
+			f.Docker.SystemUnits[fields[0]] = UnitState{Enabled: fields[1] == "enabled" || fields[1] == "enabled-runtime",
+				Active: slices.Contains([]string{"active", "activating", "reloading"}, fields[2])}
+		case "docker-networks":
+			f.Docker.NetworkStore = v == "present"
+		case "docker-hold":
+			f.Docker.Held, f.Docker.HeldPolicy = v == "policy" || v == "leftover", v == "policy"
 		case "userns-restrict":
 			f.AppArmor.Restricted = v == "1"
 		case "rootlesskit-profile":
@@ -599,10 +636,12 @@ func splitUnescaped(s string, sep byte) []string {
 // task that writes it writes; they live here, beside the probe, because the
 // probe is what reads them.
 const (
-	delegatePath     = "/etc/systemd/system/user@.service.d/delegate.conf"
+	delegateDir      = "/etc/systemd/system/user@.service.d"
+	delegatePath     = delegateDir + "/delegate.conf"
 	modulesLoadPath  = "/etc/modules-load.d/paisans.conf"
 	sysctlPath       = "/etc/sysctl.d/60-paisans.conf"
 	sysctlBeforePath = admission.Dir + "/sysctl.before"
+	installedPath    = admission.Dir + "/installed"
 )
 
 // meshDropInPath is the user's drop-in that orders its manager after the
@@ -620,4 +659,14 @@ func egressFilePath(d deployment.Deployment) string {
 }
 func watchdogRulePath(d deployment.Deployment) string {
 	return "/etc/udev/rules.d/60-" + d.Prefix() + "-watchdog.rules"
+}
+
+// onDisk reports whether dpkg has package name's files, as the probe read
+// it for a package the installed list names; for one it does not, whether
+// dpkg shows it installed.
+func (f Facts) onDisk(name string) bool {
+	if v, ok := f.OnDisk[name]; ok {
+		return v
+	}
+	return f.Packages[name]
 }

@@ -57,6 +57,13 @@ func planMeshSubnet(p *planner) error {
 	if err != nil {
 		return shown(err)
 	}
+	// The system Docker admit installed was held through its install and
+	// disabled after: it has never run, so it has no networks, and its
+	// socket is gone. Any other Docker that does not answer still has its
+	// networks, and Taken says to start it.
+	if probed.DockerDown() && p.heldDocker {
+		probed.Networks = "[]"
+	}
 	taken, err := probed.Taken(p.d.Interface(), "")
 	if err != nil {
 		return shown(err)

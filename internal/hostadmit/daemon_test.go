@@ -114,6 +114,9 @@ var daemonCases = addCases(
 	goldenCase{name: "datadir-parent-writable-refused", site: "vm", flags: hostadmit.Flags{DataDir: "/srv/data"}, host: func() *fakeHost {
 		return home().withDir("/srv/data", "drwxrwxrwt", 0, 0).with("data-path", "/srv/data")
 	}},
+	goldenCase{name: "datadir-absent-refused", site: "vm", flags: hostadmit.Flags{DataDir: "/srv/data"}, host: func() *fakeHost {
+		return home().withDir("/srv/data", "absent", 0, 0).withDir("/srv/data/paisans-f2a9", "absent", 0, 0).with("data-path", "/srv")
+	}},
 	goldenCase{name: "datadir-child-another-users-refused", site: "vm", flags: hostadmit.Flags{DataDir: "/srv/data"}, host: func() *fakeHost {
 		return home().withDir("/srv/data", "drwxr-xr-x", 0, 0).withDir("/srv/data/paisans-f2a9", "drwx------", 1234, 1234).with("data-path", "/srv/data")
 	}},

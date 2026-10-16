@@ -58,6 +58,9 @@ Founder decisions, 2026-10-15:
   `net.ipv4.ip_forward` for it and says so in the plan. There is no flag.
 * **Hosts that will not run a second Docker daemon are not supported.**
   Rootless runs beside a system daemon the owner already has.
+* **A system Docker admit installs never runs.** Where Docker is absent,
+  admit installs Docker's packages for the rootless daemons and keeps the
+  system daemon they bring disabled; the packages stay.
 * **A deployment runs on the sites it has.** A site whose host has not
   admitted it yet, or cannot be used, does not hold up the rest, except
   where the deployment cannot run without it (*A deployment with sites
@@ -135,7 +138,10 @@ host (below). The admission record holds the grants given.
 Like `host prepare`, it probes read only, prints the plan, and changes the
 host only with `--execute`. Every step is idempotent, so a re-run after a
 failure resumes, and a re-run with different flags changes only what they
-govern.
+govern. A step that needs the user's UID is planned with a placeholder and
+run once the user exists: `--execute` reads the host again then, and goes
+on only when what is left is the approved steps, in order and unchanged,
+less any now done, which it reports as done already.
 
 **A data site without `--watchdog` stops admit before anything else.** The
 request's `grants` say whether the site needs the watchdog, and the check
@@ -160,7 +166,9 @@ the user's home by default (`~/.local/share/docker`), which for a data site
 is the database and its WAL archive and for a Garage site the stored
 objects. On many hosts `/home` is on a small root disk and the room is on a
 second disk, which only the owner knows. Without the flag the data stays
-under the home. With it, admit creates `<path>/paisans-<token>`, owned by
+under the home. `<path>` must exist, root's, mode 755 and writable by no one
+else; one that does not exist is refused, naming the command that creates
+it. With it, admit creates `<path>/paisans-<token>`, owned by
 the user, mode 700, and sets `data-root` to it in the user's `daemon.json`;
 the home itself stays where it is. Either way admit refuses a filesystem
 Docker's overlay storage cannot use, NFS included, and its plan states the
@@ -184,6 +192,70 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    networking shares the real host's network namespace (*Sources*), and every
    infra container is `network_mode: host`, bound to the mesh address. A snap
    Docker is refused, as today.
+
+   When admit installs Docker, the system daemons its packages bring never
+   run. As it starts, `dockerd` turns on forwarding for every interface,
+   creates `docker0`, adds its NAT and filter chains and sets the FORWARD
+   policy to DROP; a daemon that never started changed none of it, where one
+   stopped after would leave each change to be undone exactly. So the install
+   runs under a `/usr/sbin/policy-rc.d` of admit's, which Debian's
+   `invoke-rc.d` and `deb-systemd-invoke` ask before they start a service: it
+   forbids (101) the units of what the install adds, `docker`,
+   `docker.socket` and `docker.service` for `docker-ce`, `containerd` for
+   `containerd.io` only when admit adds that too, and asks the owner's own
+   `policy-rc.d` about every other. There is never a moment with no policy in
+   place: admit's is written whole, the owner's is copied, through a
+   temporary name so a copy cut short is never taken for it, to
+   `policy-rc.d.paisans-owner`, and admit's is renamed over it. The owner's
+   goes back when the install exits, however it exits. Saving the owner's
+   policy fails closed: if the copy or its rename fails, the step stops
+   before admit's policy is in place, with the owner's untouched. An install
+   that fails disables the units of what it adds from its exit trap, while
+   the hold is still in place, since their packages' scripts may have
+   enabled them before it failed. apt-get runs dpkg in a session of its
+   own, so dpkg can outlive a killed apt-get and go on running a package's
+   script: the exit trap waits for dpkg, up to ten minutes, before it
+   confirms, disables and releases, and when dpkg is still running then it
+   keeps the hold and fails the step, saying so. The hold holds
+   `/run/paisans-docker-hold.lock` throughout, so one run alone holds
+   Docker's daemons. What a killed run leaves, admit's policy, the owner's
+   copy beside it or beside nothing, or a temporary file of admit's, is put
+   right by the next admit, or by evict, whether or not another deployment
+   stays, under the same lock: while a running admit holds it, putting back
+   refuses, saying so. A copy that differs from the policy in place is the
+   owner's to choose between, and admit refuses, naming both. When the
+   owner's `containerd.io` is installed, apt may upgrade it to the version
+   `docker-ce` needs, which restarts it; the plan says so. The next step disables the same units, and fails if
+   `docker0` exists anyway, naming a reboot, which clears what the daemon
+   changed now that it is disabled.
+
+   `/etc/paisans/installed`, root's and mode 644 (admit and evict refuse it
+   otherwise), records what admit installs that the host did not have (each
+   package, Docker's apt key and source) and the directories it creates
+   (`user@.service.d`, below). Before the install each package is claimed
+   as `installing`. The install takes the hold's lock first, then, from its
+   exit trap, however it exits (a signal included) and before the hold is
+   released, makes each claim whose files dpkg has (installed, or unpacked
+   or half-configured by a failed install) a `package`, writing the list
+   through a temporary file of its own. A claim still `installing` stands
+   only while dpkg has the package's files and admit's own policy is still
+   in place, which says that install was killed outright and apt may have
+   run under it; a leftover from before the policy was in place keeps no
+   claim. Any other claim, and any package whose files dpkg does not have,
+   is dropped, so a Docker the owner installs after an admit that stopped
+   early is never taken for admit's. Putting a hold back confirms the same
+   way, under the lock, before it releases the hold. The admission record
+   says admit disabled the daemon once; while a record says so, or another
+   deployment's record cannot be read and so may, admit leaves the units as
+   they are, so an owner who enables the daemon keeps it. A Docker the owner
+   had before admit, and a `containerd.io` the host had, are never held,
+   disabled or otherwise touched.
+
+   The system Docker admit holds disabled, with no unit enabled and no
+   network store (`/var/lib/docker/network/files/local-kv.db`), has never
+   run, so the mesh's check reads it as having no networks. Any other Docker whose daemon does
+   not answer still has its networks, which come back when it starts, so
+   admit stops and says to start it.
 2. **AppArmor.** On Ubuntu 24.04 and later, unprivileged user namespaces are
    restricted unless a profile allows them. Ubuntu's `apparmor` package ships
    the profile for `rootlesskit` at `/etc/apparmor.d/rootlesskit`, loaded at
@@ -212,7 +284,15 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    manager, and with it the Docker daemon, starts after the mesh: a
    container that publishes on the mesh address fails when the address is
    not up yet, and Docker does not retry it. It takes effect at the next
-   boot, like `delegate.conf`, and evict removes it.
+   boot, like `delegate.conf`, and evict removes it. Until `apply` writes
+   `/etc/wireguard/psns-<token>.conf`, that unit has nothing to bring up, so
+   admit writes
+   `/etc/systemd/system/wg-quick@psns-<token>.service.d/paisans-conf.conf`
+   with `ConditionPathExists=` on the conf: the unit is skipped at boot,
+   never failed, and stays out of `systemctl --failed`. Evict removes it.
+   When `user@.service.d` is absent before admit writes `delegate.conf`,
+   admit records it as a directory it created, and evict removes it with
+   the file once it is empty.
 6. **The rootless daemon.** First `br_netfilter`: loaded now and listed in
    `/etc/modules-load.d/paisans.conf`, because without it the daemon refuses
    to start with the userland proxy off (*Observed*). The module is host
@@ -249,8 +329,8 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    another could write there would survive any repair, and `wg-quick` runs
    its `PostUp` as root, past the helper's checks.
 9. **The firewall.** ufw rules tagged `paisans-<token>:` as today: the SSH
-   port, the mesh's UDP `ListenPort`, `allow in on psns-<token>`, and 80/443
-   with `--public-ports`. The `br-+` rules go: a rootless container's traffic
+   port, the mesh's UDP `ListenPort`, `allow in on psns-<token>`, and 80/tcp,
+   443/tcp and 443/udp, for HTTP/3, with `--public-ports`. The `br-+` rules go: a rootless container's traffic
    to the mesh address leaves through the user's own process, not a host
    bridge. ufw must be installed and active: admit adds its rules and never
    enables ufw or sets its defaults, and stops before changing anything on a
@@ -286,9 +366,9 @@ Garage site and 5 GB otherwise. The path is in the admission record.
     hold them. A Docker daemon with its userland proxy off publishes a port
     with a DNAT rule alone and no listener, so `ss` cannot see it, and only
     root can read the ruleset. Anything found refuses the grant, naming what
-    holds the port (process, container and compose project, or rule), and the
-    refusal names `web_server.managed_by: external` as the way to run behind
-    it; so does anything admit cannot read. Known limits: a DNAT rule with no
+    holds the port (process, container and compose project, or rule, quoted
+    without its counters), and the refusal names `web_server.managed_by:
+    external` as the way to run behind it; so does anything admit cannot read. Known limits: a DNAT rule with no
     destination port, a forward of every port of an address, is not counted,
     since rules of that shape are mostly a service's backends, reached after
     a port matched elsewhere; and an iptables rule that matches its ports
@@ -302,14 +382,16 @@ Garage site and 5 GB otherwise. The path is in the admission record.
     that this turns on routing between every interface on the host, which the
     firewall's forward policy then governs. The values evict restores for
     both keys are recorded in `/etc/paisans/sysctl.before` by a step ahead of
-    Docker's install, which starts dockerd and turns forwarding on, so a run
-    that stops after it, and the run after that, still record the host's own
-    value; a key the file holds already keeps its value. A key is forgotten
+    Docker's install, since a `dockerd` that starts turns forwarding on, so a
+    run that stops after one started, and the run after that, still record
+    the host's own value; a key the file holds already keeps its value. A key is forgotten
     only after a re-run that no longer needs it has restored it.
 14. **The admission record**, `/etc/paisans/admitted.<token>.json`, mode 644:
     the user, the grants (`watchdog`, `public_ports`), whether forwarding is
     on, the ports the firewall opened, the request's digest when there was
-    one, and the time. It is how the deployment's own commands, which cannot
+    one, the time, and whether the system Docker is one admit installed and
+    disabled once (`system_docker_disabled`), which says what admit did, not
+    how the daemon stands now. It is how the deployment's own commands, which cannot
     read root's files, learn what they were granted, and what `host
     deployments` lists. Admit keeps `/etc/paisans` root's, mode 755 (`chmod
     00755`, which clears a setgid bit too; an ACL stops admit), so each
@@ -420,7 +502,8 @@ or in its subordinate range, and checks that none is, before anything that
 fences the deployment goes. On a data site the plan warns that a Patroni
 that outlasts Docker's stop timeout is killed with the watchdog armed,
 which reboots the host. It stops `wg-quick@psns-<token>` and removes
-`/etc/wireguard/psns-<token>.conf`, the user's mesh drop-in, found by the
+`/etc/wireguard/psns-<token>.conf`, the drop-in that skipped the unit
+without it, the user's mesh drop-in, found by the
 deployment it names when the owner has deleted the user by hand, and the
 egress table, with a `.new` table an interrupted admit left beside its
 file, then removes the user's `--data-dir` directory,
@@ -434,11 +517,24 @@ arrives by, so it is kept, and the plan warns of it: the owner deletes it
 once nothing else needs it. Host-wide files (`delegate.conf`,
 `modules-load.d/paisans.conf`, `60-paisans.conf`) are removed only when
 they are as admit wrote them and no other deployment is admitted or
-claims the host, and `ip_unprivileged_port_start` and `ip_forward` are
-each restored only when no other admitted deployment holds `public_ports`
-or has forwarding on. A deployment the registry claims with no admission
-record, an admit in flight or one that failed early, keeps all of them, as
-a record evict cannot read does.
+claims the host, `delegate.conf` with its `user@.service.d` once empty
+when admit created that, and `ip_unprivileged_port_start` and
+`ip_forward` are each restored only when no other admitted deployment
+holds `public_ports` or has forwarding on. A deployment the registry claims
+with no admission record, an admit in flight or one that failed early,
+keeps all of them, as a record evict cannot read does. Evict unloads no
+module: `br_netfilter` and the watchdog's module stay loaded until the
+next boot, and the plan warns of each as it removes its boot entry.
+
+What admit installed stays when the last deployment goes: the packages
+`/etc/paisans/installed` lists (Docker's, the rootless extras, `uidmap`,
+`wireguard-tools`, and any other admit installed), Docker's apt key and
+source, and the `docker` group `docker-ce` made, with the system daemon
+as it is now. Something else on the host may use them by then, so they
+are the owner's to remove: the plan names each, from the list, which it
+then removes. Only what admit installed and dpkg still shows installed is
+named. A hold on Docker's daemons a killed admit left is put back by every
+evict.
 
 With no admission record, evict cannot tell where admit put the Docker
 data: `--data-dir` names it, and evict removes that directory only when
@@ -881,6 +977,22 @@ A rekey with sites down is in `docs/specs/2026-10-15-mesh-rekey-sites-down.md`.
 * Admit's `br_netfilter` plans: already loaded, not loaded with only
   Docker's bridges, and not loaded with a libvirt bridge (stopped without
   `--bridge-netfilter`, loaded with it).
+* A first `--execute` on a blank host whose package step creates
+  `/etc/wireguard` runs to the end: a step the rebuilt plan no longer has is
+  done, while one added, moved or changed stops it.
+* The Docker hold, run for real against a directory of the test's: the
+  added packages' units forbidden, every other asked of the owner's
+  `policy-rc.d`, the owner's back after, or none when there was none; a
+  hold a killed run left, the owner's copy beside nothing or beside the
+  same file, or cut short, put right; a copy that differs refused; the hold
+  and putting it back refused while another run holds the lock; a copy
+  that fails, under dash, stopping the hold with the owner's policy
+  untouched; a failed install disabling what it adds.
+* The install run for real with an apt that fails after dpkg shows
+  `docker-ce` installed, or half-configured: the claim reads `package
+  docker-ce` after, with and without a hold.
+* A system Docker that does not answer: admit's held one read as having no
+  networks, the owner's refused, readably, saying to start it.
 * One end-to-end run on staging: admit a fresh host as its owner, apply as
   the deployment's user, then check that a container cannot connect to a
   service on the host's `127.0.0.1` or LAN, and that `sudo -n` as the user

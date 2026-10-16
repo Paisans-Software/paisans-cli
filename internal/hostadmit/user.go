@@ -345,13 +345,47 @@ func ours(f FileState, content string) bool {
 	return f.Present && !f.Link && f.Sum == sha(content) && f.Mode == "644" && f.UID == 0 && f.GID == 0
 }
 
-// planMeshDropIn writes the user's mesh drop-in and reloads systemd. It
-// never restarts the user's manager: the drop-in orders its next start,
-// which for a manager running now is the host's next boot. The drop-in
-// wants the mesh unit too, so a manager that starts before the mesh's conf
-// exists, as on a fresh host, tries the unit and leaves it failed until
-// the helper brings the mesh up; a Wants= failure never stops the manager.
+// meshCondConf is the mesh unit's drop-in that skips it while its conf
+// does not exist: the user's manager wants the unit from its first start,
+// and only paisans apply writes the conf, so without it the unit would
+// fail at every boot until then and show in systemctl --failed.
+func meshCondConf(p *planner) string {
+	return "# Written by paisans host admit for deployment " + p.d.Token() + "; paisans host evict\n" +
+		"# removes it. Until paisans apply writes the mesh's conf, wg-quick has\n" +
+		"# nothing to bring up, so the unit is skipped rather than failed.\n" +
+		"[Unit]\nConditionPathExists=" + p.d.WireGuardInstalled() + "\n"
+}
+
+// meshCondPath is where meshCondConf goes, beside the mesh unit's
+// instance.
+func meshCondPath(unit string) string {
+	return "/etc/systemd/system/" + unit + ".service.d/paisans-conf.conf"
+}
+
+// planMeshDropIn writes the mesh unit's drop-in that skips it until its
+// conf exists, then the user's mesh drop-in, and reloads systemd after
+// each. It never restarts the user's manager: the drop-in orders its next
+// start, which for a manager running now is the host's next boot. The
+// user's drop-in wants the mesh unit too, so a manager that starts before
+// the mesh's conf exists, as on a fresh host, finds the unit skipped,
+// which a Wants= never stops the manager for, until the helper brings the
+// mesh up.
 func planMeshDropIn(p *planner) error {
+	cond, condContent := meshCondPath(p.d.WireGuardUnit()), meshCondConf(p)
+	switch f := p.f.Files[cond]; {
+	case f.Link:
+		return fmt.Errorf("%s is a symbolic link, and admit writes it as root. Remove the link and admit again. Nothing was changed", cond)
+	case ours(f, condContent):
+		p.present("user: " + cond + " skips the mesh until its conf exists")
+	default:
+		p.step(Step{
+			Title:    "skip the mesh until its conf exists",
+			Describe: "user: " + p.d.WireGuardUnit() + " is skipped, not failed, at boot until paisans apply writes " + p.d.WireGuardInstalled(),
+			File:     &hostprep.File{Path: cond, Content: condContent, Mode: 0o644},
+			Command:  "systemctl daemon-reload",
+			Kinds:    []string{"user"},
+		})
+	}
 	path, content := meshDropInPath(uidOf(p)), meshConf(p)
 	f := p.f.Files[path]
 	switch {
@@ -363,7 +397,7 @@ func planMeshDropIn(p *planner) error {
 	}
 	p.step(Step{
 		Title:       "start " + p.in.Request.User + "'s manager after the mesh",
-		Describe:    "user: order user@" + uidOf(p) + ".service after wg-quick@" + p.d.Interface() + " at boot, so a container that publishes on the mesh address finds it; a manager running now is not restarted, and takes it at its next start. Until the mesh's conf is written, a start of the manager leaves wg-quick@" + p.d.Interface() + " failed, without stopping the manager",
+		Describe:    "user: order user@" + uidOf(p) + ".service after wg-quick@" + p.d.Interface() + " at boot, so a container that publishes on the mesh address finds it; a manager running now is not restarted, and takes it at its next start. Until the mesh's conf is written, wg-quick@" + p.d.Interface() + " is skipped",
 		File:        &hostprep.File{Path: path, Content: content, Mode: 0o644},
 		Command:     "systemctl daemon-reload",
 		Kinds:       []string{"user"},

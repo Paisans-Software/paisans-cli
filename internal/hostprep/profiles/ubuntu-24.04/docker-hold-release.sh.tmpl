@@ -1,0 +1,27 @@
+{{- /* Puts /usr/sbin/policy-rc.d back as it was before admit held Docker's
+        daemons. The owner's own was copied to policy-rc.d.paisans-owner
+        before admit's went in: with admit's in place, found by its marker
+        line, the copy goes back over it; with nothing in place, the copy
+        goes back; with the owner's still in place, the copy is the same
+        file and goes. With no copy, admit's is removed. Admit's temporary
+        files go too, its policy's and a copy of the owner's cut short. A copy beside a policy-rc.d that differs from it is
+        neither admit's nor safe to choose between, and is left for the
+        owner, which the hold and the put-back step both refuse on. */ -}}
+release_docker_hold() {
+  rm -f /usr/sbin/.policy-rc.d.paisans-tmp /usr/sbin/.policy-rc.d.paisans-owner-tmp
+  if [ -f /usr/sbin/policy-rc.d ] && [ ! -L /usr/sbin/policy-rc.d ] && grep -qxF '# {{ .Marker }}' /usr/sbin/policy-rc.d; then
+    if [ -e /usr/sbin/policy-rc.d.paisans-owner ] || [ -L /usr/sbin/policy-rc.d.paisans-owner ]; then
+      mv -f /usr/sbin/policy-rc.d.paisans-owner /usr/sbin/policy-rc.d
+    else
+      rm -f /usr/sbin/policy-rc.d
+    fi
+  elif [ -e /usr/sbin/policy-rc.d.paisans-owner ] || [ -L /usr/sbin/policy-rc.d.paisans-owner ]; then
+    if [ ! -e /usr/sbin/policy-rc.d ] && [ ! -L /usr/sbin/policy-rc.d ]; then
+      mv -f /usr/sbin/policy-rc.d.paisans-owner /usr/sbin/policy-rc.d
+    elif [ -L /usr/sbin/policy-rc.d ] && [ -L /usr/sbin/policy-rc.d.paisans-owner ] && [ "$(readlink /usr/sbin/policy-rc.d)" = "$(readlink /usr/sbin/policy-rc.d.paisans-owner)" ]; then
+      rm -f /usr/sbin/policy-rc.d.paisans-owner
+    elif [ ! -L /usr/sbin/policy-rc.d ] && [ ! -L /usr/sbin/policy-rc.d.paisans-owner ] && cmp -s /usr/sbin/policy-rc.d /usr/sbin/policy-rc.d.paisans-owner; then
+      rm -f /usr/sbin/policy-rc.d.paisans-owner
+    fi
+  fi
+}

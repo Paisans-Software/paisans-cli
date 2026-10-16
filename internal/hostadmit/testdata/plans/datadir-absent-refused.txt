@@ -1,0 +1,1 @@
+refused: daemon: --data-dir /srv/data does not exist. Create it as root, mode 755, writable by no one else (install -d -m 755 -o root -g root '/srv/data'), on the disk the deployment's Docker data is to live on, and admit again. Nothing was changed

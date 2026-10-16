@@ -49,6 +49,9 @@ func (h *fakeHost) run(command, stdin string) (string, error) {
 	if h.onRun != nil {
 		h.onRun(h, command)
 	}
+	if !strings.Contains(command, probeMarker) {
+		h.applied(command)
+	}
 	if strings.Contains(command, probeMarker) {
 		var b strings.Builder
 		for _, kv := range h.facts {
@@ -80,9 +83,12 @@ func (h *fakeHost) ReadFile(path string) (string, bool, error) {
 	return c, ok, nil
 }
 
+// WriteFile writes as the transport does, root's, so the probe then finds
+// the file with its checksum and mode.
 func (h *fakeHost) WriteFile(path, content string, mode uint32) error {
 	h.files[path] = content
 	h.writes[path] = mode
+	h.withFile(path, content, fmt.Sprintf("%o", mode), 0)
 	return nil
 }
 
@@ -416,4 +422,44 @@ func keysAfter(stdin string) string {
 // host whose dir is root's, mode 755.
 func admittedWithDataDir(site, dir string) *fakeHost {
 	return admittedOn(home().withDir(dir, "drwxr-xr-x", 0, 0), requestFor(site), hostadmit.Flags{DataDir: dir})
+}
+
+// applied changes h as two of admit's commands change a real host: an apt
+// install makes dpkg show each package installed, and confirm_claims turns
+// /etc/paisans/installed's claims dpkg shows installed into packages.
+func (h *fakeHost) applied(command string) {
+	for _, line := range strings.Split(command, "\n") {
+		if _, rest, ok := strings.Cut(line, " install -y "); ok && strings.HasPrefix(line, "apt-get ") {
+			for _, p := range strings.Fields(rest) {
+				if !strings.HasPrefix(p, "-") && !strings.Contains(p, ">") {
+					name, _, _ := strings.Cut(p, "=")
+					h.withPkg(name, "installed")
+				}
+			}
+		}
+	}
+	if strings.Contains(command, "\nconfirm_claims\n") || strings.Contains(command, "trap confirm_claims EXIT") {
+		if c, ok := h.files["/etc/paisans/installed"]; ok {
+			lines := strings.Split(c, "\n")
+			for i, l := range lines {
+				if p, ok := strings.CutPrefix(l, "installing "); ok && h.pkgInstalled(p) {
+					lines[i] = "package " + p
+				}
+			}
+			c = strings.Join(lines, "\n")
+			h.files["/etc/paisans/installed"] = c
+			h.withFile("/etc/paisans/installed", c, "644", 0)
+		}
+	}
+}
+
+// pkgInstalled reports whether h's probe says dpkg shows p installed.
+func (h *fakeHost) pkgInstalled(p string) bool {
+	installed := false
+	for _, kv := range h.facts {
+		if kv[0] == "pkg" && strings.HasPrefix(kv[1], p+" ") {
+			installed = kv[1] == p+" installed"
+		}
+	}
+	return installed
 }

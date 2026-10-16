@@ -147,6 +147,10 @@ type planner struct {
 	record admission.Record
 	// sx caches sysctls(), which both sysctl parts plan from.
 	sx *sysctlState
+	// heldDocker is a system Docker admit installed whose units none
+	// enables and that left no network store: it has never run, so it has
+	// no networks.
+	heldDocker bool
 	// prev caches previous(): this deployment's record as the host holds it.
 	prev struct {
 		read bool
@@ -447,9 +451,9 @@ func (p *Plan) Warn(r ui.Reporter) {
 // Execute runs approved's steps in order and stops at the first failure,
 // naming the step. At the first provisional step it reads the host again
 // and plans again, now that the user exists, and carries on with the plan
-// it rebuilt, provided that plan's steps from there on carry the titles
-// the owner approved: anything else means the host changed while admit ran,
-// and nothing more is done.
+// it rebuilt, provided that plan's steps are the ones the owner approved
+// from there on, less any now done (sameSteps): anything else means the
+// host changed while admit ran, and nothing more is done.
 func Execute(t apply.Transport, in Input, approved *Plan, r ui.Reporter) error {
 	steps := approved.Steps
 	for i := 0; i < len(steps); i++ {
@@ -458,8 +462,12 @@ func Execute(t apply.Transport, in Input, approved *Plan, r ui.Reporter) error {
 			if err != nil {
 				return stoppedOnRebuild(approved.User, steps[:i], err)
 			}
-			if err := sameSteps(steps[i:], rebuilt.plan.Steps, placeholders(rebuilt)); err != nil {
+			done, err := sameSteps(steps[i:], rebuilt.plan.Steps, placeholders(rebuilt))
+			if err != nil {
 				return err
+			}
+			for _, s := range done {
+				r.Step(ui.Visible(s.Title)).End(ui.OK, "done already")
 			}
 			steps = append(steps[:i:i], rebuilt.plan.Steps...)
 		}
@@ -482,29 +490,42 @@ func stoppedOnRebuild(user string, ran []Step, err error) error {
 }
 
 // sameSteps is nil when rebuilt is approved with its placeholders filled
-// by fill: the same steps, in the same order, each with the same title,
-// file path, content and mode, command and stdin, and none of them still
-// provisional. Describe and Kinds are what the owner read, not what runs,
-// so they are not compared. A difference is named by the first step and
-// the first of its fields that differs.
-func sameSteps(approved, rebuilt []Step, fill *strings.Replacer) error {
+// by fill, less the steps now done: the approved steps, in the same order,
+// each with the same title, file path, content and mode, command and
+// stdin, and none of them still provisional. An approved step the rebuilt
+// plan no longer has is done (installing wireguard-tools creates
+// /etc/wireguard, which admit would otherwise create), so it is not drift;
+// a step added, moved or changed is. Describe and Kinds are what the owner
+// read, not what runs, so they are not compared. A step that was approved
+// with a different file, command or stdin is named by the first of its
+// fields that differs. It returns the approved steps found done, which
+// Execute reports as such.
+func sameSteps(approved, rebuilt []Step, fill *strings.Replacer) ([]Step, error) {
 	for _, s := range rebuilt {
 		if s.Provisional {
-			return fmt.Errorf("the host changed while admit ran: %q still needs the user, which was to exist by now. Nothing more was done. Run host admit again to see the plan", s.Title)
+			return nil, fmt.Errorf("the host changed while admit ran: %q still needs the user, which was to exist by now. Nothing more was done. Run host admit again to see the plan", s.Title)
 		}
 	}
-	if len(approved) != len(rebuilt) {
-		return fmt.Errorf("the host changed while admit ran: %d steps were left to run and %d are now planned. The steps left were\n%s\nand are now\n%s\nNothing more was done. Run host admit again to see the plan", len(approved), len(rebuilt), titles(approved, fill), titles(rebuilt, nil))
-	}
-	for i, s := range approved {
-		if fill.Replace(s.Title) != rebuilt[i].Title {
-			return fmt.Errorf("the host changed while admit ran: step %d was %q and is now %q. Nothing more was done. Run host admit again to see the plan", i+1, fill.Replace(s.Title), rebuilt[i].Title)
+	var done []Step
+	i := 0
+	for _, s := range rebuilt {
+		k := i
+		for k < len(approved) && (fill.Replace(approved[k].Title) != s.Title || differs(approved[k], s, fill) != "") {
+			k++
 		}
-		if field := differs(s, rebuilt[i], fill); field != "" {
-			return fmt.Errorf("the host changed while admit ran: step %q now has a different %s from the one approved. Nothing more was done. Run host admit again to see the plan", rebuilt[i].Title, field)
+		if k < len(approved) {
+			done = append(done, approved[i:k]...)
+			i = k + 1
+			continue
 		}
+		for _, a := range approved[i:] {
+			if fill.Replace(a.Title) == s.Title {
+				return nil, fmt.Errorf("the host changed while admit ran: step %q now has a different %s from the one approved. Nothing more was done. Run host admit again to see the plan", s.Title, differs(a, s, fill))
+			}
+		}
+		return nil, fmt.Errorf("the host changed while admit ran: the steps left to run were\n%s\nand are now\n%s\nNothing more was done. Run host admit again to see the plan", titles(approved, fill), titles(rebuilt, nil))
 	}
-	return nil
+	return append(done, approved[i:]...), nil
 }
 
 // titles lists steps' titles, each quoted on its own line, filled by fill

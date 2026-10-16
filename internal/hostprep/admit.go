@@ -66,7 +66,7 @@ func PlanWatchdog(t Transport, d deployment.Deployment, profile Profile) (Sectio
 // AdmitRules are the inbound rules host admit gives a deployment: the SSH
 // port first, as host prepare orders them; the mesh's UDP port when one is
 // admitted; everything on the mesh interface; and 80 and 443 with the
-// public ports grant. No br-+ rule: a rootless container's traffic to the
+// public ports grant, 443 for UDP too, which HTTP/3 runs on. No br-+ rule: a rootless container's traffic to the
 // mesh address leaves through the user's own process, not a host bridge.
 func AdmitRules(d deployment.Deployment, sshPort, listenPort int, public bool) []Rule {
 	rules := []Rule{{Port: sshPort, Proto: "tcp", Why: sshWhy, SSH: true}}
@@ -75,7 +75,8 @@ func AdmitRules(d deployment.Deployment, sshPort, listenPort int, public bool) [
 	}
 	rules = append(rules, Rule{Interface: d.Interface(), Why: "the mesh: etcd, Patroni, Garage, HAProxy"})
 	if public {
-		rules = append(rules, Rule{Port: 80, Proto: "tcp", Why: "public ports, HTTP"}, Rule{Port: 443, Proto: "tcp", Why: "public ports, HTTPS"})
+		rules = append(rules, Rule{Port: 80, Proto: "tcp", Why: "public ports, HTTP"}, Rule{Port: 443, Proto: "tcp", Why: "public ports, HTTPS"},
+			Rule{Port: 443, Proto: "udp", Why: "public ports, HTTP/3"})
 	}
 	return rules
 }

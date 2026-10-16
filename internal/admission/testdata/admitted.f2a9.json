@@ -33,5 +33,6 @@
     "certbot": "",
     "admin_tcp": "localhost:2019",
     "why": ""
-  }
+  },
+  "system_docker_disabled": true
 }

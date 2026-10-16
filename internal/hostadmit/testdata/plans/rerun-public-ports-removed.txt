@@ -155,7 +155,12 @@ step 5: remove ufw rule 443/tcp
   run:
     $ ufw delete allow 443/tcp comment 'paisans-f2a9: public ports, HTTPS'
 
-step 6: set the host's sysctls
+step 6: remove ufw rule 443/udp
+  firewall: delete `ufw allow 443/udp comment 'paisans-f2a9: public ports, HTTP/3'`, which host admit added and this site's roles and configuration no longer give
+  run:
+    $ ufw delete allow 443/udp comment 'paisans-f2a9: public ports, HTTP/3'
+
+step 7: set the host's sysctls
   sysctls: /etc/sysctl.d/60-paisans.conf, applied with sysctl --system, which applies every sysctl file on the host again, then each key checked, since a file read after it could set one back
   write /etc/sysctl.d/60-paisans.conf mode 0644:
     | # Written by paisans host admit, for every admitted deployment that needs
@@ -164,19 +169,19 @@ step 6: set the host's sysctls
   run:
     $ sysctl --system >/dev/null && { [ "$(sysctl -n net.ipv4.ip_forward)" = 1 ] || { echo 'net.ipv4.ip_forward is not 1 after sysctl --system: a file read after /etc/sysctl.d/60-paisans.conf sets it'; exit 1; }; }
 
-step 7: restore net.ipv4.ip_unprivileged_port_start=1024
+step 8: restore net.ipv4.ip_unprivileged_port_start=1024
   sysctls: no admitted deployment needs them any more; set each back to what it was before admit
   run:
     $ sysctl -w net.ipv4.ip_unprivileged_port_start=1024 >/dev/null
 
-step 8: record the sysctls' values before
+step 9: record the sysctls' values before
   sysctls: /etc/paisans/sysctl.before, for host evict to restore
   write /etc/paisans/sysctl.before mode 0644:
     | # Written by paisans host admit: each value as it was before admit
     | # first changed it. paisans host evict restores them.
     | net.ipv4.ip_forward = 0
 
-step 9: write the admission record
+step 10: write the admission record
   record: who the deployment runs as and what you granted, which its own commands read
   write /etc/paisans/admitted.f2a9.json mode 0644:
     | {
@@ -198,7 +203,8 @@ step 9: write the admission record
     |   "data_dir": "",
     |   "bridge_netfilter": false,
     |   "mesh_lan": "",
-    |   "web_server": null
+    |   "web_server": null,
+    |   "system_docker_disabled": false
     | }
 
 present: docker: Engine 29.9.1
@@ -211,6 +217,7 @@ present: apparmor: rootlesskit's profile is loaded
 present: user: paisans-f2a9 exists, uid 1001, in no privileged group, and sudo grants it nothing beyond admit's helper
 present: user: paisans-f2a9 holds 165536-231071 in /etc/subuid
 present: user: paisans-f2a9 holds 165536-231071 in /etc/subgid
+present: user: /etc/systemd/system/wg-quick@psns-f2a9.service.d/paisans-conf.conf skips the mesh until its conf exists
 present: user: /etc/systemd/system/user@1001.service.d/paisans-mesh.conf starts paisans-f2a9's manager after the mesh
 present: delegation: /etc/systemd/system/user@.service.d/delegate.conf delegates cpu cpuset io memory pids
 present: egress: the host's on-link IPv6 prefixes, dropped: 2001:db8:1::/64

@@ -1,6 +1,7 @@
 package hostadmit_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -240,5 +241,45 @@ func TestANATRuleOnASetRefuses(t *testing.T) {
 	_, err := hostadmit.Build(h, input(t, "home-a", gateway))
 	if err == nil || !strings.Contains(err.Error(), "ports admit cannot read") || !strings.Contains(err.Error(), "tcp dport @web") {
 		t.Errorf("Build = %v", err)
+	}
+}
+
+// With --public-ports, HTTP/3's 443/udp is opened beside 80 and 443/tcp,
+// tagged like them, since the egress table lets the deployment's Caddy
+// answer from it; evict removes it with the rest.
+func TestThePublicPortsOpenUDP443(t *testing.T) {
+	plan, err := hostadmit.Build(home(), input(t, "watch", hostadmit.Flags{PublicPorts: true}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const allow = "ufw allow 443/udp comment 'paisans-f2a9: public ports, HTTP/3'"
+	if !slices.ContainsFunc(plan.Steps, func(s hostadmit.Step) bool { return s.Command == allow }) {
+		t.Errorf("no step runs %q:\n%s", allow, plan.Text())
+	}
+	evict, err := hostadmit.BuildEvict(evicted("watch", hostadmit.Flags{PublicPorts: true})(), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(evict.Steps, func(s hostadmit.Step) bool { return strings.HasPrefix(s.Command, "ufw delete allow 443/udp") }) {
+		t.Errorf("evict leaves 443/udp open:\n%s", evict.Text())
+	}
+}
+
+// A quoted nft rule is shown without its live counters, which change
+// between two runs and say nothing of what holds the port.
+func TestAQuotedNATRuleHasNoCounters(t *testing.T) {
+	h := home().answer(portsMarker, "dnat table ip nat chain DOCKER: iifname != \"docker0\" tcp dport 443 counter packets 12 bytes 720 dnat to 172.17.0.2:80\n"+
+		"dnat table ip nat chain PRE: tcp dport @web counter packets 3 bytes 180 dnat to 10.0.0.2\nend\n")
+	_, err := hostadmit.Build(h, input(t, "watch", hostadmit.Flags{PublicPorts: true}))
+	if err == nil {
+		t.Fatal("admit took the ports a NAT rule holds")
+	}
+	for _, want := range []string{`a NAT rule in table ip nat chain DOCKER: iifname != "docker0" tcp dport 443 dnat to 172.17.0.2:80`, "in table ip nat chain PRE: tcp dport @web dnat to 10.0.0.2"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not quote %q:\n%v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "counter packets") {
+		t.Errorf("the refusal quotes counters:\n%v", err)
 	}
 }

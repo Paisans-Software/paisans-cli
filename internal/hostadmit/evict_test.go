@@ -4,10 +4,12 @@ import (
 	"io"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/hostadmit"
+	"github.com/paisans-software/paisans-cli/internal/hostprep"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -93,6 +95,12 @@ var evictCases = []struct {
 		delete(h.files, "/etc/paisans/admitted.f2a9.json")
 		h.dropKeyed("file", "/etc/paisans/admitted.f2a9.json")
 		return withEntries(withoutRecordLine(h))
+	}},
+	{"evict-installed-by-admit", "paisans-f2a9", func() *fakeHost {
+		return withEntries(installedByAdmit(evicted("vm", hostadmit.Flags{})()))
+	}},
+	{"evict-hold-left", "paisans-f2a9", func() *fakeHost {
+		return withEntries(withOther(evicted("vm", hostadmit.Flags{})(), false, false).with("docker-hold", "policy"))
 	}},
 	{"evict-nothing-left", "paisans-f2a9", func() *fakeHost { return newBlank() }},
 }
@@ -507,5 +515,148 @@ func TestEvictRemovesALeftoverEgressTable(t *testing.T) {
 	}
 	if stepIndex(plan, "rmdir /etc/paisans") < 0 {
 		t.Errorf("/etc/paisans is kept:\n%s", plan.Text())
+	}
+}
+
+// Evict removes the mesh's conf drop-in, and its directory once empty.
+func TestEvictRemovesTheMeshConfDropIn(t *testing.T) {
+	plan, err := hostadmit.BuildEvict(evicted("vm", hostadmit.Flags{})(), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i := stepIndex(plan, "rm -f "+meshCondPath+" && rmdir --ignore-fail-on-non-empty /etc/systemd/system/wg-quick@psns-f2a9.service.d && systemctl daemon-reload"); i < 0 {
+		t.Errorf("evict leaves the mesh's conf drop-in:\n%s", plan.Text())
+	}
+}
+
+// What admit installed stays when the last deployment goes, and evict's
+// plan names it, from /etc/paisans/installed, which it then removes with
+// /etc/paisans. Beside another admitted deployment, nothing is said and
+// the file stays.
+func TestEvictNamesWhatAdmitInstalled(t *testing.T) {
+	content := "# Written by paisans host admit: what it installed on this host, which stays\n# when paisans host evict removes the last admitted deployment, and each\n# directory it created, which evict removes once empty.\n" +
+		"package docker-ce\npackage docker-ce-cli\npackage containerd.io\npackage docker-ce-rootless-extras\npackage uidmap\npackage wireguard-tools\n" +
+		"file /etc/apt/keyrings/docker.asc\nfile /etc/apt/sources.list.d/docker.sources\n"
+	host := func(shared bool) *fakeHost {
+		h := evicted("vm", hostadmit.Flags{})()
+		h.file("/etc/paisans/installed", content).withFile("/etc/paisans/installed", content, "644", 0)
+		for _, p := range []string{"docker-ce-cli", "containerd.io", "wireguard-tools"} {
+			h.withPkg(p, "installed")
+		}
+		if shared {
+			withOther(h, false, false)
+		}
+		return withEntries(h)
+	}
+	plan, err := hostadmit.BuildEvict(host(false), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "packages: what admit installed stays: docker-ce, docker-ce-cli, containerd.io, docker-ce-rootless-extras, uidmap, wireguard-tools; /etc/apt/keyrings/docker.asc, /etc/apt/sources.list.d/docker.sources; the docker group"
+	if !slices.ContainsFunc(plan.Warnings, func(w hostprep.Warning) bool { return w.Hint == want }) {
+		t.Errorf("the plan does not say %q:\n%s", want, plan.Text())
+	}
+	if stepIndex(plan, "rm -f /etc/paisans/installed") < 0 || stepIndex(plan, "rmdir /etc/paisans") < 0 {
+		t.Errorf("the installed file or /etc/paisans is left:\n%s", plan.Text())
+	}
+	plan, err = hostadmit.BuildEvict(host(true), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(plan.Text(), "what admit installed") || stepIndex(plan, "/etc/paisans/installed") >= 0 {
+		t.Errorf("beside another deployment:\n%s", plan.Text())
+	}
+}
+
+// Evict removes the boot entries of br_netfilter and the watchdog's
+// module and unloads neither: the plan says each stays loaded until the
+// next boot, by name.
+func TestEvictSaysTheModulesStayLoaded(t *testing.T) {
+	const unit = "/etc/systemd/system/paisans-f2a9-watchdog.service"
+	content := "[Unit]\nDescription=Load the softdog watchdog for Patroni\n\n[Service]\nType=oneshot\nExecStart=/usr/sbin/modprobe softdog\nRemainAfterExit=yes\n"
+	h := evicted("home-a", gateway)()
+	h.file(unit, content).withFile(unit, content, "644", 0)
+	plan, err := hostadmit.BuildEvict(withEntries(h), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"br_netfilter: stays loaded until the next boot", "watchdog: softdog stays loaded until the next boot"} {
+		if !slices.ContainsFunc(plan.Warnings, func(w hostprep.Warning) bool { return w.Hint == want }) {
+			t.Errorf("the plan does not say %q:\n%s", want, plan.Text())
+		}
+	}
+	for _, s := range plan.Steps {
+		if strings.Contains(s.Command, "modprobe -r") || strings.Contains(s.Command, "rmmod") {
+			t.Errorf("step %q unloads a module: %s", s.Title, s.Command)
+		}
+	}
+}
+
+// The drop-in directory delegate.conf lives in goes with it, once empty,
+// when admit created it, which /etc/paisans/installed records; one the
+// host had is left.
+func TestEvictRemovesTheDelegationDirectoryAdmitMade(t *testing.T) {
+	for _, made := range []bool{true, false} {
+		h := evicted("vm", hostadmit.Flags{})()
+		content := "package uidmap\n"
+		if made {
+			content += "dir /etc/systemd/system/user@.service.d\n"
+		}
+		h.file("/etc/paisans/installed", content).withFile("/etc/paisans/installed", content, "644", 0)
+		plan, err := hostadmit.BuildEvict(withEntries(h), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rmdir := stepIndex(plan, "rm -f /etc/systemd/system/user@.service.d/delegate.conf && rmdir --ignore-fail-on-non-empty /etc/systemd/system/user@.service.d && systemctl daemon-reload")
+		if made != (rmdir >= 0) {
+			t.Errorf("admit made the directory: %v; the plan:\n%s", made, plan.Text())
+		}
+	}
+}
+
+// A hold an admit stopped in left is never legitimate outside a running
+// install, so evict puts the owner's policy-rc.d back, whether or not
+// another deployment stays.
+func TestEvictPutsBackALeftHold(t *testing.T) {
+	for _, shared := range []bool{false, true} {
+		h := evicted("vm", hostadmit.Flags{})().with("docker-hold", "policy")
+		if shared {
+			withOther(h, false, false)
+		}
+		plan, err := hostadmit.BuildEvict(withEntries(h), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stepIndex(plan, "release_docker_hold") < 0 {
+			t.Errorf("shared %v: evict leaves the hold:\n%s", shared, plan.Text())
+		}
+	}
+}
+
+// The record says admit disabled the system daemon once, not that it is
+// disabled now: an owner may have enabled it since, so evict does not say
+// it stays disabled.
+func TestEvictDoesNotSayTheSystemDockerStaysDisabled(t *testing.T) {
+	plan, err := hostadmit.BuildEvict(withEntries(installedByAdmit(evicted("vm", hostadmit.Flags{})())), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range plan.Warnings {
+		if strings.Contains(w.Detail, "stays disabled") {
+			t.Errorf("evict says %q", w.Detail)
+		}
+	}
+	if !strings.Contains(plan.Text(), "it is left as it is now") {
+		t.Errorf("evict does not say the daemon is left as it is:\n%s", plan.Text())
+	}
+}
+
+// A malformed installed list matters only to the last deployment's evict:
+// another deployment's evict, beside it, goes on.
+func TestABadInstalledListStopsOnlyTheLastEvict(t *testing.T) {
+	h := withOther(evicted("vm", hostadmit.Flags{})(), false, false)
+	h.file("/etc/paisans/installed", "rm -rf /\n").withFile("/etc/paisans/installed", "rm -rf /\n", "644", 0)
+	if _, err := hostadmit.BuildEvict(withEntries(h), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"}); err != nil {
+		t.Errorf("BuildEvict beside another deployment = %v", err)
 	}
 }

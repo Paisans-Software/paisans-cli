@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -40,6 +41,8 @@ type evictor struct {
 	// claims the host for that have no admission record here.
 	recordless []string
 	beforeGone bool
+	// installedGone is whether the plan removes /etc/paisans/installed.
+	installedGone bool
 }
 
 // claimedWithoutRecord is the token of every other deployment the host's
@@ -86,8 +89,10 @@ var evictParts = []struct {
 	{"wireguard", (*evictor).helper},
 	{"watchdog", (*evictor).watchdog},
 	{"firewall", (*evictor).firewall},
+	{"docker hold", func(e *evictor) error { return releaseHold(e.planner, "evict") }},
 	{"host wide", (*evictor).hostWide},
 	{"sysctls", (*evictor).sysctls},
+	{"installed", (*evictor).installed},
 	{"record", (*evictor).admissionRecord},
 	{"empty directories", (*evictor).emptyDirs},
 	{"registry", (*evictor).registry},
@@ -270,8 +275,8 @@ func (e *evictor) killCommand() string {
 }
 
 // mesh stops the deployment's interface and removes its conf, which holds
-// the site's private key, then the drop-in that ordered the user's manager
-// after it. The drop-in's path holds the UID, which the probe reads only
+// the site's private key, and the drop-in that skipped it without one,
+// then the drop-in that ordered the user's manager after it. The drop-in's path holds the UID, which the probe reads only
 // while the user exists, so it goes before the user does.
 func (e *evictor) mesh() error {
 	unit, conf := e.d.WireGuardUnit(), e.d.WireGuardInstalled()
@@ -280,6 +285,10 @@ func (e *evictor) mesh() error {
 	}
 	if e.f.Files[conf].Present {
 		e.remove("remove "+conf, "the mesh's conf, which holds the site's private key", "rm -f "+conf)
+	}
+	if cond := meshCondPath(unit); e.f.Files[cond].Present {
+		e.remove("remove "+cond, "the drop-in that skipped the mesh until its conf existed, and its directory once empty",
+			"rm -f "+cond+" && rmdir --ignore-fail-on-non-empty "+path.Dir(cond)+" && systemctl daemon-reload")
 	}
 	if !e.f.User.Exists {
 		// A user deleted by hand leaves the drop-in, whose path holds a UID
@@ -425,11 +434,36 @@ func (e *evictor) watchdog() error {
 		e.remove("give the watchdog back to root", "remove "+rule+" and make the device root's again", "rm -f "+rule+" && "+udevTrigger+" && "+giveBack)
 	}
 	if e.f.Files["/etc/systemd/system/"+unit].Present {
-		e.remove("stop loading the watchdog at boot", "remove /etc/systemd/system/"+unit,
+		module, err := e.watchdogModule("/etc/systemd/system/" + unit)
+		if err != nil {
+			return err
+		}
+		e.remove("stop loading the watchdog at boot", "remove /etc/systemd/system/"+unit+"; "+module+" stays loaded until the next boot",
 			"systemctl disable "+unit+"; rm -f /etc/systemd/system/"+unit+" && systemctl daemon-reload")
+		e.warn("watchdog: "+module+" stays loaded until the next boot",
+			"Evict removes the unit that loads it at boot and does not unload it.")
 	}
 	return nil
 }
+
+// watchdogModule is the module the watchdog unit at path loads, as its
+// ExecStart names it, or "its module" when the unit names none admit
+// would write.
+func (e *evictor) watchdogModule(path string) (string, error) {
+	content, _, err := e.t.ReadFile(path)
+	if err != nil {
+		return "", shown(err)
+	}
+	for _, line := range strings.Split(content, "\n") {
+		if m, ok := strings.CutPrefix(line, "ExecStart=/usr/sbin/modprobe "); ok && moduleName.MatchString(m) {
+			return m, nil
+		}
+	}
+	return "its module", nil
+}
+
+// moduleName is a kernel module's name.
+var moduleName = regexp.MustCompile(`^[a-z0-9_]+$`)
 
 // firewall removes every ufw rule tagged as the deployment's but its SSH
 // allow, which may be what the owner's own login arrives by: that one is
@@ -460,8 +494,9 @@ func (e *evictor) firewall() error {
 // not, or claims the host with no record.
 func (e *evictor) shared() bool { return len(e.others)+len(e.unreadable)+len(e.recordless) > 0 }
 
-// hostWide removes delegate.conf and modules-load.d/paisans.conf, each only
-// when it is as admit wrote it and no other deployment is admitted.
+// hostWide removes delegate.conf, with its directory once empty when admit
+// created it, and modules-load.d/paisans.conf, each only when it is as
+// admit wrote it and no other deployment is admitted.
 // br_netfilter stays loaded until the next boot: unloading it would change
 // what the host's FORWARD chain sees under whatever runs now.
 func (e *evictor) hostWide() error {
@@ -477,7 +512,14 @@ func (e *evictor) hostWide() error {
 		}
 		return nil
 	}
+	in, err := readInstalled(e.planner, "evict")
+	if err != nil {
+		return err
+	}
 	switch f := e.f.Files[delegatePath]; {
+	case f.Sum == sha(delegateConf) && slices.Contains(in.Dirs, delegateDir):
+		e.remove("remove "+delegatePath, "no other deployment is admitted; and its directory, which admit created, once empty",
+			"rm -f "+delegatePath+" && rmdir --ignore-fail-on-non-empty "+delegateDir+" && systemctl daemon-reload")
 	case f.Sum == sha(delegateConf):
 		e.remove("remove "+delegatePath, "no other deployment is admitted", "rm -f "+delegatePath+" && systemctl daemon-reload")
 	case f.Present:
@@ -490,6 +532,8 @@ func (e *evictor) hostWide() error {
 		return sum == sha(modulesLoadConf(&g))
 	}):
 		e.remove("remove "+modulesLoadPath, "no other deployment is admitted; br_netfilter stays loaded until the next boot", "rm -f "+modulesLoadPath)
+		e.warn("br_netfilter: stays loaded until the next boot",
+			"Evict removes its boot entry and does not unload it: unloading it would change what the host's FORWARD chain sees under whatever runs now.")
 	case e.f.Files[modulesLoadPath].Present:
 		e.present("host wide: " + modulesLoadPath + " kept: it is not as admit wrote it")
 	}
@@ -590,6 +634,43 @@ func (e *evictor) sysctls() error {
 	return nil
 }
 
+// installed names, once no other deployment is admitted or claims the
+// host, what admit installed here, which stays: packages other software
+// may have come to use are the owner's to remove, and the system Docker
+// admit installed and disabled is left as it is now. Then the list goes, which /etc/paisans
+// needs to go too.
+func (e *evictor) installed() error {
+	if e.shared() || !e.f.Files[installedPath].Present {
+		return nil
+	}
+	in, err := readInstalled(e.planner, "evict")
+	if err != nil {
+		return err
+	}
+	var named []string
+	if len(in.Packages) > 0 {
+		named = append(named, strings.Join(in.Packages, ", "))
+	}
+	if len(in.Files) > 0 {
+		named = append(named, strings.Join(in.Files, ", "))
+	}
+	if in.dockerIsAdmits() {
+		named = append(named, "the docker group")
+	}
+	describe := "the list of what admit created here"
+	if len(named) > 0 {
+		detail := "Evict removes no package: something else here may use them by now. Remove them yourself once nothing does."
+		if in.dockerIsAdmits() {
+			detail += " Admit disabled Docker's system daemon when it installed it; it is left as it is now. docker-ce made the docker group."
+		}
+		e.warn("packages: what admit installed stays: "+strings.Join(named, "; "), detail)
+		describe = "the list of what admit installed, which the plan names"
+	}
+	e.installedGone = true
+	e.remove("remove "+installedPath, describe, "rm -f "+installedPath)
+	return nil
+}
+
 // admissionRecord removes the admission record.
 func (e *evictor) admissionRecord() error {
 	file, err := admission.Path(e.d.Token())
@@ -628,6 +709,9 @@ func (e *evictor) emptyDirs() error {
 		}
 	}
 	if e.beforeGone {
+		ours[admission.Dir]++
+	}
+	if e.installedGone {
 		ours[admission.Dir]++
 	}
 	for _, dir := range countedDirs() {

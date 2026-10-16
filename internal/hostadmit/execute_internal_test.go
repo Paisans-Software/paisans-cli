@@ -374,13 +374,13 @@ func TestSameStepsComparesCountsFirst(t *testing.T) {
 	fill := strings.NewReplacer()
 	one := []Step{{Title: "a\nb", Command: "true"}}
 	two := []Step{{Title: "a", Command: "true"}, {Title: "b", Command: "rm -rf /"}}
-	if err := sameSteps(one, two, fill); err == nil || !strings.Contains(err.Error(), "the host changed while admit ran") {
+	if _, err := sameSteps(one, two, fill); err == nil || !strings.Contains(err.Error(), "the host changed while admit ran") {
 		t.Errorf("one approved, two rebuilt: %v", err)
 	}
-	if err := sameSteps(two, one, fill); err == nil || !strings.Contains(err.Error(), "the host changed while admit ran") {
+	if _, err := sameSteps(two, one, fill); err == nil || !strings.Contains(err.Error(), "the host changed while admit ran") {
 		t.Errorf("two approved, one rebuilt: %v", err)
 	}
-	if err := sameSteps(two, two, fill); err != nil {
+	if _, err := sameSteps(two, two, fill); err != nil {
 		t.Errorf("the same steps: %v", err)
 	}
 }
@@ -488,5 +488,73 @@ func TestARefusalOnTheRebuildSaysWhatRan(t *testing.T) {
 	}
 	if len(hint) > 80 {
 		t.Errorf("the hint is longer than 80 characters: %q", hint)
+	}
+}
+
+// A step the rebuilt plan no longer has is done, not drift: installing
+// wireguard-tools creates /etc/wireguard, root's and 700, so the plan
+// rebuilt once the user exists has no "create /etc/wireguard". What is
+// left must still be the approved steps, in order, each as approved.
+func TestSameStepsAllowsAStepNowDone(t *testing.T) {
+	fill := strings.NewReplacer("<uid>", "1001")
+	wg := Step{Title: "create /etc/wireguard", Command: "install -d -m 700 -o root -g root /etc/wireguard"}
+	helper := Step{Title: "install the WireGuard helper", Command: "true"}
+	egress := Step{Title: "load the egress table", Command: "nft uid <uid>", Provisional: true}
+	filled := Step{Title: "load the egress table", Command: "nft uid 1001"}
+	approved := []Step{egress, wg, helper}
+	if done, err := sameSteps(approved, []Step{filled, helper}, fill); err != nil || len(done) != 1 || done[0].Title != wg.Title {
+		t.Errorf("a step now done: %v, done %v", err, done)
+	}
+	if done, err := sameSteps(approved, []Step{filled}, fill); err != nil || len(done) != 2 {
+		t.Errorf("two steps now done: %v, done %v", err, done)
+	}
+	for name, rebuilt := range map[string][]Step{
+		"added":     {filled, wg, {Title: "something new", Command: "rm -rf /"}, helper},
+		"reordered": {filled, helper, wg},
+		"changed":   {filled, {Title: "install the WireGuard helper", Command: "rm -rf /"}},
+		"retitled":  {filled, {Title: "install another helper", Command: "true"}},
+	} {
+		if _, err := sameSteps(approved, rebuilt, fill); err == nil || !strings.Contains(err.Error(), "the host changed while admit ran") {
+			t.Errorf("%s: sameSteps = %v", name, err)
+		}
+	}
+}
+
+// A step the rebuilt plan no longer has is not run, and Execute says so,
+// naming it, so the owner sees every approved step either run or found
+// done.
+func TestExecuteNamesAStepFoundDone(t *testing.T) {
+	h := newTestHost()
+	h.onRun = func(command string) {
+		if strings.HasPrefix(command, "useradd ") {
+			h.set("passwd", "paisans-f2a9:x:1001:1001::/home/paisans-f2a9:/bin/bash")
+			h.set("group", "paisans-f2a9")
+			h.set("wg", "made")
+		}
+	}
+	withParts(t, []part{
+		userPart,
+		{"egress", func(p *planner) error {
+			p.step(Step{Title: "load the egress table", Command: "nft uid " + uidOf(p), Provisional: !p.f.User.Exists})
+			if p.f.raw["wg"] == nil {
+				p.step(Step{Title: "create /etc/wireguard", Command: "install -d /etc/wireguard"})
+			}
+			return nil
+		}},
+	})
+	in := testInput(t)
+	plan, err := Build(h, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
+	if err := Execute(h, in, plan, ui.NewPlain(&b, false)); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "create /etc/wireguard") || !strings.Contains(b.String(), "done already") {
+		t.Errorf("Execute does not name the step found done:\n%s", b.String())
+	}
+	if len(h.ranMatching("install -d /etc/wireguard")) != 0 {
+		t.Error("the step found done ran")
 	}
 }

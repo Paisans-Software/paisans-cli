@@ -302,28 +302,89 @@ func pinExtras(facts packageFacts) (string, error) {
 // for a caller that has not.
 const SnapDockerAdmit = "Docker is installed as a snap, whose confinement keeps it from bind mounting under /srv and whose refreshes restart every container on snapd's schedule. Remove it yourself (snap remove docker), after checking nothing running depends on it, and admit again. Nothing was changed"
 
+// HoldDockerMarker is the line that marks /usr/sbin/policy-rc.d as the one
+// admit puts there while it installs Docker (docker-hold.sh.tmpl).
+const HoldDockerMarker = "Written by paisans host admit while it installs Docker, and removed after."
+
+// Installed is what an admit install adds that the host did not have:
+// each package by name, and Docker's apt key and source by path.
+type Installed struct {
+	Packages, Files []string
+}
+
+// SystemUnits are the system units of the packages given that start a
+// daemon: Docker's socket and service for docker-ce, containerd's service
+// for containerd.io, in that order.
+func SystemUnits(packages []string) []string {
+	var units []string
+	if slices.Contains(packages, "docker-ce") {
+		units = append(units, "docker.socket", "docker.service")
+	}
+	if slices.Contains(packages, "containerd.io") {
+		units = append(units, "containerd.service")
+	}
+	return units
+}
+
+// DockerHoldLock takes the hold's lock for the rest of the shell, or
+// refuses while another run holds it; the hold then keeps the lock its
+// shell took.
+func (u ubuntu) DockerHoldLock() (string, error) {
+	return snippet(u.tmpl("docker-hold-lock.sh.tmpl"), nil)
+}
+
+// ReleaseDockerHold is a script that puts /usr/sbin/policy-rc.d back as
+// it was before admit held Docker's daemons, for a run that stopped while
+// it held them, and fails, naming both, when the owner's copy differs from
+// what is in place, which is the owner's to choose between. It takes the
+// hold's lock first, and refuses while a running admit holds it; before
+// runs then, ahead of the release.
+func (u ubuntu) ReleaseDockerHold(before string) (string, error) {
+	release, err := snippet(u.tmpl("docker-hold-release.sh.tmpl"), map[string]string{"Marker": HoldDockerMarker})
+	if err != nil {
+		return "", err
+	}
+	lock, err := snippet(u.tmpl("docker-hold-lock.sh.tmpl"), nil)
+	if err != nil {
+		return "", err
+	}
+	return "set -e\n" + lock + release + before + "release_docker_hold\n" +
+		"if [ -e /usr/sbin/policy-rc.d.paisans-owner ] || [ -L /usr/sbin/policy-rc.d.paisans-owner ]; then echo '/usr/sbin/policy-rc.d.paisans-owner, a copy of your policy-rc.d admit made while it installed Docker, differs from the /usr/sbin/policy-rc.d there now. Keep the one you want as /usr/sbin/policy-rc.d, remove the other, and run again'; exit 1; fi\n", nil
+}
+
 // AdmitPackages: see Profile.
-func (u ubuntu) AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (Section, error) {
+func (u ubuntu) AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (Section, Installed, error) {
 	var out Section
+	var added Installed
 	facts, err := u.probePackages(t)
 	if err != nil {
-		return out, err
+		return out, added, err
 	}
 	if facts.snapDocker {
-		return out, errors.New("docker: " + SnapDockerAdmit)
+		return out, added, errors.New("docker: " + SnapDockerAdmit)
 	}
 	var install []string
 	if !dockerPresent {
 		// Refused, as host prepare refuses, so that apt never removes the
 		// owner's containerd, runc or docker.io to make room.
 		if msg := conflictMessage(facts, "admit"); msg != "" {
-			return out, fmt.Errorf("%s. Nothing was changed", msg)
+			return out, added, fmt.Errorf("%s. Nothing was changed", msg)
 		}
 		repo, err := u.dockerRepo(t, host, facts)
 		if err != nil {
-			return out, err
+			return out, added, err
 		}
 		out.add(repo)
+		if !facts.keyring {
+			added.Files = append(added.Files, dockerKeyring)
+		}
+		_, found, err := t.ReadFile(dockerSources)
+		if err != nil {
+			return out, added, err
+		}
+		if !found {
+			added.Files = append(added.Files, dockerSources)
+		}
 		for _, p := range dockerPackages {
 			if !facts.installed[p] {
 				install = append(install, p)
@@ -342,7 +403,7 @@ func (u ubuntu) AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (
 			// the resolver to upgrade.
 			pinned, err := pinExtras(facts)
 			if err != nil {
-				return out, err
+				return out, added, err
 			}
 			install = append(install, pinned)
 		default:
@@ -350,18 +411,56 @@ func (u ubuntu) AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (
 		}
 	}
 	if len(install) == 0 {
-		return out, nil
+		return out, added, nil
+	}
+	for _, p := range install {
+		name, _, _ := strings.Cut(p, "=")
+		added.Packages = append(added.Packages, name)
 	}
 	script, err := snippet(u.tmpl("apt-install.sh.tmpl"), map[string]any{"Packages": install, "NoUpgrade": dockerPresent})
 	if err != nil {
-		return out, err
+		return out, added, err
 	}
 	describe := "packages: install " + strings.Join(install, " ")
 	if dockerPresent {
 		describe += ", leaving your Docker at the version it is"
 	}
+	if !dockerPresent && facts.installed["containerd.io"] {
+		// containerd.io is the owner's, and is neither held nor claimed,
+		// but docker-ce depends on a version of it, which apt installs.
+		describe += "; your containerd.io may be upgraded to the version docker-ce needs, which restarts it, though its containers run on"
+	}
+	if units := SystemUnits(added.Packages); len(units) > 0 {
+		// docker-ce's and containerd.io's scripts would start their system
+		// daemons, and dockerd changes forwarding and the firewall as it
+		// starts: each this install adds is held for it instead, so it
+		// never starts. A containerd.io the host had is the owner's, and
+		// is not held.
+		var names []string
+		for _, unit := range units {
+			names = append(names, unit)
+			if base, ok := strings.CutSuffix(unit, ".service"); ok {
+				names = append([]string{base}, names...)
+			}
+		}
+		slices.Sort(names)
+		release, err := snippet(u.tmpl("docker-hold-release.sh.tmpl"), map[string]string{"Marker": HoldDockerMarker})
+		if err != nil {
+			return out, added, err
+		}
+		lock, err := snippet(u.tmpl("docker-hold-lock.sh.tmpl"), nil)
+		if err != nil {
+			return out, added, err
+		}
+		hold, err := snippet(u.tmpl("docker-hold.sh.tmpl"), map[string]string{"Marker": HoldDockerMarker, "Release": release, "Lock": lock, "Units": strings.Join(names, "|"), "Disable": strings.Join(units, " ")})
+		if err != nil {
+			return out, added, err
+		}
+		script = hold + script
+		describe += "; Docker's system daemon is kept from starting while its packages install, by a /usr/sbin/policy-rc.d of admit's that asks yours, if you have one, about every other service and is replaced by yours again after"
+	}
 	out.Steps = append(out.Steps, Step{Kinds: packageKinds(install), Title: "install packages: " + strings.Join(install, ", "), Describe: describe, Command: script})
-	return out, nil
+	return out, added, nil
 }
 
 // unitState reads `systemctl is-enabled` and `is-active` for one unit.

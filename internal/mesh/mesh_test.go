@@ -2,7 +2,12 @@ package mesh_test
 
 import (
 	"bytes"
+	"errors"
 	"net/netip"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -346,5 +351,43 @@ func TestReaddressKeepsHostNumbers(t *testing.T) {
 	}
 	if _, err := mesh.Readdress("", to, map[string]string{"home-a": "10.44.0.255"}); err == nil {
 		t.Error("a broadcast address was accepted")
+	}
+}
+
+// runNetworks runs NetworksCommand with a docker on PATH that prints out on
+// stdout and err on stderr, and exits with code, as the transport runs it,
+// stderr with stdout.
+func runNetworks(t *testing.T, out, errOut string, code int) string {
+	t.Helper()
+	dir := t.TempDir()
+	script := "#!/bin/sh\nprintf '%s' '" + out + "'\nprintf '%s\\n' '" + errOut + "' >&2\nexit " + strconv.Itoa(code) + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sh", "-c", mesh.NetworksCommand)
+	cmd.Env = []string{"PATH=" + dir + ":/usr/bin:/bin"}
+	got, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v: %s", err, got)
+	}
+	return string(got)
+}
+
+// A Docker that is installed and whose daemon does not answer has
+// networks the probe cannot read, which come back when it starts: the
+// probe says so, and reading it is a refusal that says to start it, never
+// a JSON error and never no networks.
+func TestADockerThatDoesNotAnswerIsNamed(t *testing.T) {
+	out := runNetworks(t, "", "failed to connect to the docker API at unix:///var/run/docker.sock; check if the path is correct and if the daemon is running: dial unix /var/run/docker.sock: connect: no such file or directory", 1)
+	p := mesh.Probed{Networks: out}
+	if !p.DockerDown() {
+		t.Fatalf("the probe does not say the daemon is down: %q", out)
+	}
+	_, err := mesh.ParseNetworks(out)
+	if !errors.Is(err, mesh.ErrDockerDown) || strings.Contains(err.Error(), "invalid character") || !strings.Contains(err.Error(), "Start it") || !strings.Contains(err.Error(), "no such file or directory") {
+		t.Errorf("ParseNetworks = %v", err)
+	}
+	if out := runNetworks(t, "", "", 0); strings.TrimSpace(out) != "[]" || (mesh.Probed{Networks: out}).DockerDown() {
+		t.Errorf("a daemon with no network: %q", out)
 	}
 }
