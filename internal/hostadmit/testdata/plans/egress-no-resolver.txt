@@ -116,11 +116,16 @@ step 5: write the egress table
     | 		# be the server: the host side of each port it publishes runs as its
     | 		# user, and its answers to a visitor on loopback, the LAN or this
     | 		# host must pass. TCP on any port, since a TCP reply reaches only
-    | 		# its own socket's peer and the user cannot bind an owner's TCP
-    | 		# listener's port. UDP only from 443 on a gateway, HTTP/3, whose
-    | 		# public ports are one deployment's per host: elsewhere a user
+    | 		# its own socket's peer, a client that connected to the user's
+    | 		# socket. A known limit: an owner's client can reach the user while
+    | 		# the service it means is down or bound to the other family alone
+    | 		# (127.0.0.1 and not [::1]), since the user may listen on the
+    | 		# address that service left free. UDP only from 443 with the public
+    | 		# ports grant, HTTP/3: admit found no other process holding 443,
+    | 		# and the grant is one deployment's per host. Elsewhere a user
     | 		# sharing an owner's UDP port through SO_REUSEADDR could answer the
-    | 		# owner's own clients. The mesh's UDP passes by its accept below.
+    | 		# owner's own clients, and an owner's web server may hold UDP 443.
+    | 		# The mesh's UDP passes by its accept below.
     | 		ct direction reply ct mark and 0x08000000 == 0 meta l4proto tcp accept
     | 		# Every flow the user opens is marked before any accept or drop, so
     | 		# a flow it opened under an accept below never carries a "reply".
@@ -134,6 +139,11 @@ step 5: write the egress table
     | 		meta skuid { 1001, 165536-231071 } ip daddr 10.44.0.0/24 accept
     | 		meta skuid { 1001, 165536-231071 } ip daddr { 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 } drop
     | 		meta skuid { 1001, 165536-231071 } ip6 daddr { ::1, fc00::/7, fe80::/10 } drop
+    | 		# NAT64 reaches IPv4 through IPv6, so the same ranges as the
+    | 		# well-known prefix writes them, and the local-use prefix whole. The
+    | 		# well-known prefix's public translations stay: an IPv6-only host
+    | 		# reaches the IPv4 internet only through them.
+    | 		meta skuid { 1001, 165536-231071 } ip6 daddr { 64:ff9b::7f00:0/104, 64:ff9b::a00:0/104, 64:ff9b::ac10:0/108, 64:ff9b::c0a8:0/112, 64:ff9b::a9fe:0/112, 64:ff9b::6440:0/106, 64:ff9b:1::/48 } drop
     | 		# The host's own addresses, public ones too, and its broadcast and
     | 		# multicast. A gateway's 80 and 443 answer the internet already; its
     | 		# accept follows the loopback drop, since loopback is local too, and
@@ -149,6 +159,7 @@ step 5: write the egress table
     | 		meta mark 0x5053f2a9 fib daddr type { local, broadcast, multicast } drop
     | 		meta mark 0x5053f2a9 ip daddr { 127.0.0.0/8, 169.254.0.0/16, 224.0.0.0/4, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10 } drop
     | 		meta mark 0x5053f2a9 ip6 daddr { ::1, fe80::/10, ff00::/8, fc00::/7 } drop
+    | 		meta mark 0x5053f2a9 ip6 daddr { 64:ff9b::7f00:0/104, 64:ff9b::a9fe:0/112, 64:ff9b::e000:0/100, 64:ff9b::a00:0/104, 64:ff9b::ac10:0/108, 64:ff9b::c0a8:0/112, 64:ff9b::6440:0/106, 64:ff9b:1::/48 } drop
     | 		meta mark 0x5053f2a9 ip6 daddr { 2001:db8:1::/64 } drop
     | 	}
     | }

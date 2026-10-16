@@ -40,7 +40,7 @@ func TestEgressTableRendersTheUsersRangeAndTheMark(t *testing.T) {
 			t.Errorf("the table lacks %q:\n%s", want, text)
 		}
 	}
-	if strings.Contains(text, "ip6 daddr {  }") || strings.Count(text, "meta mark 0x5053f2a9 ") != 3 {
+	if strings.Contains(text, "ip6 daddr {  }") || strings.Count(text, "meta mark 0x5053f2a9 ") != 4 {
 		t.Errorf("the table names a resolver or a LAN it was not given:\n%s", text)
 	}
 	lan := egress
@@ -111,20 +111,23 @@ func TestEgressTableDropsTheHostAndItsOnLinkPrefixes(t *testing.T) {
 // deployment publishes runs as its user, so without them the answers to a
 // visitor on loopback, the LAN or the host's own address would meet the
 // drops below. TCP on any port, since a TCP reply reaches only its own
-// socket's peer; UDP only from 443 on a gateway, HTTP/3, since a user
-// sharing an owner's UDP port could otherwise answer the owner's own
-// clients. Next, every flow the user opens is marked, before any accept
-// or drop, so the user cannot open a flow under an accepted rule and then
-// send its "reply" to an owner's service.
+// socket's peer; UDP only from 443 with the public ports grant, HTTP/3,
+// since a user sharing an owner's UDP port could otherwise answer the
+// owner's own clients. A gateway fronted by the owner's web server has no
+// grant, and that server may hold UDP 443 itself. Next, every flow the
+// user opens is marked, before any accept or drop, so the user cannot open
+// a flow under an accepted rule and then send its "reply" to an owner's
+// service.
 func TestEgressTableAcceptsOnlyRepliesTheDeploymentServes(t *testing.T) {
 	const (
 		tcp  = "ct direction reply ct mark and 0x08000000 == 0 meta l4proto tcp accept"
 		quic = "ct direction reply ct mark and 0x08000000 == 0 udp sport 443 accept"
 		mark = "meta skuid { 1001, 165536-231071 } ct direction original ct mark set ct mark or 0x08000000"
 	)
-	for _, gateway := range []bool{false, true} {
+	for _, c := range []struct{ gateway, public bool }{{false, false}, {true, false}, {true, true}} {
+		gateway := c.gateway
 		d := egress
-		d.Gateway = gateway
+		d.Gateway, d.PublicPorts = c.gateway, c.public
 		d.LAN6 = []netip.Prefix{netip.MustParsePrefix("2001:db8:1::/64")}
 		text, err := hostprep.EgressTable(d)
 		if err != nil {
@@ -139,19 +142,43 @@ func TestEgressTableAcceptsOnlyRepliesTheDeploymentServes(t *testing.T) {
 			}
 		}
 		want := []string{tcp, mark}
-		if gateway {
+		if c.public {
 			want = []string{tcp, quic, mark}
 		}
 		if !closed || len(rules) <= len(want) || !slices.Equal(rules[:len(want)], want) {
-			t.Errorf("gateway %v: the output chain does not open with %q:\n%s", gateway, want, text)
+			t.Errorf("gateway %v, public ports %v: the output chain does not open with %q:\n%s", gateway, c.public, want, text)
 		}
 		_, mesh, _ := strings.Cut(text, "chain mesh {")
 		if strings.Count(text, "ct mark and") != len(want)-1 || strings.Count(text, "ct mark set") != 1 || strings.Contains(mesh, "ct ") {
-			t.Errorf("gateway %v: replies are accepted, or flows marked, outside the output chain's opening:\n%s", gateway, text)
+			t.Errorf("gateway %v, public ports %v: replies are accepted, or flows marked, outside the output chain's opening:\n%s", gateway, c.public, text)
 		}
 		if strings.Contains(text, "ct direction reply ct mark and 0x08000000 == 0 accept") {
-			t.Errorf("gateway %v: replies of every protocol are accepted:\n%s", gateway, text)
+			t.Errorf("gateway %v, public ports %v: replies of every protocol are accepted:\n%s", gateway, c.public, text)
 		}
+	}
+}
+
+// NAT64 reaches IPv4 through IPv6: on a DNS64 host, 64:ff9b::a00:1 is
+// 10.0.0.1 on the owner's network. Both chains drop the well-known
+// prefix's translations of every IPv4 range they drop, and the local-use
+// prefix whole, since its embedding is the operator's choice. The
+// well-known prefix's public translations stay open: an IPv6-only host
+// reaches IPv4 registries only through them.
+func TestEgressTableDropsTheNAT64TranslationsOfPrivateRanges(t *testing.T) {
+	text, err := hostprep.EgressTable(egress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"meta skuid { 1001, 165536-231071 } ip6 daddr { 64:ff9b::7f00:0/104, 64:ff9b::a00:0/104, 64:ff9b::ac10:0/108, 64:ff9b::c0a8:0/112, 64:ff9b::a9fe:0/112, 64:ff9b::6440:0/106, 64:ff9b:1::/48 } drop",
+		"meta mark 0x5053f2a9 ip6 daddr { 64:ff9b::7f00:0/104, 64:ff9b::a9fe:0/112, 64:ff9b::e000:0/100, 64:ff9b::a00:0/104, 64:ff9b::ac10:0/108, 64:ff9b::c0a8:0/112, 64:ff9b::6440:0/106, 64:ff9b:1::/48 } drop",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the table lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "64:ff9b::/96") {
+		t.Errorf("the table drops every NAT64 translation, the internet's too:\n%s", text)
 	}
 }
 
@@ -198,7 +225,7 @@ func TestEgressTableParses(t *testing.T) {
 	lan := egress
 	lan.LAN = "192.168.1.0/24"
 	lan.Resolvers6 = []string{"fd00::1"}
-	lan.Gateway = true
+	lan.Gateway, lan.PublicPorts = true, true
 	lan.LAN6 = []netip.Prefix{netip.MustParsePrefix("2001:db8:1::/64"), netip.MustParsePrefix("2001:db8:2::/56")}
 	for _, d := range []hostprep.EgressData{egress, lan} {
 		text, err := hostprep.EgressTable(d)

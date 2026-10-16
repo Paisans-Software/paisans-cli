@@ -96,13 +96,15 @@ func tableOf(plan *hostadmit.Plan) string {
 
 // The deployment reaches 80 and 443 on the host's own addresses only on a
 // site whose own Caddy holds them (the public ports grant) or whose
-// owner's web server fronts it (web_server external).
+// owner's web server fronts it (web_server external). Its UDP answers from
+// 443 pass only with the grant: an owner's web server may hold UDP 443 for
+// HTTP/3, and without the grant no holder check has run.
 func TestEgressGatewayAccept(t *testing.T) {
 	for _, c := range []struct {
-		site    string
-		flags   hostadmit.Flags
-		gateway bool
-	}{{"vm", hostadmit.Flags{}, false}, {"home-b", dataSite, false}, {"home-a", gateway, true}, {"watch", hostadmit.Flags{PublicPorts: true}, true}, {"status", hostadmit.Flags{}, true}} {
+		site          string
+		flags         hostadmit.Flags
+		gateway, quic bool
+	}{{"vm", hostadmit.Flags{}, false, false}, {"home-b", dataSite, false, false}, {"home-a", gateway, true, true}, {"watch", hostadmit.Flags{PublicPorts: true}, true, true}, {"status", hostadmit.Flags{}, true, false}} {
 		h := home()
 		if c.site == "home-b" {
 			h = communityHome()
@@ -117,6 +119,9 @@ func TestEgressGatewayAccept(t *testing.T) {
 		}
 		if got := strings.Contains(table, "fib daddr type local tcp dport { 80, 443 } accept"); got != c.gateway {
 			t.Errorf("%s: the gateway accept is there %v, want %v:\n%s", c.site, got, c.gateway, table)
+		}
+		if got := strings.Contains(table, "udp sport 443 accept"); got != c.quic {
+			t.Errorf("%s: the UDP 443 reply accept is there %v, want %v:\n%s", c.site, got, c.quic, table)
 		}
 		if !strings.Contains(table, "ip6 daddr { 2001:db8:1::/64 } drop") {
 			t.Errorf("%s: the host's on-link prefix is not dropped:\n%s", c.site, table)

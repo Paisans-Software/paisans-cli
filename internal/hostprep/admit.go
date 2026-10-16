@@ -17,12 +17,15 @@ import (
 // mesh subnet, the host's resolvers by family, and with --mesh-lan the
 // host's own LAN prefix. Gateway is a site whose own Caddy, or whose
 // owner's web server, answers 80 and 443 on the host's addresses, which the
-// deployment may then reach. LAN6 are the host's on-link IPv6 prefixes,
-// dropped like the private ranges, since a home LAN's IPv6 is global.
+// deployment may then reach. PublicPorts is the grant, the one case where
+// the deployment's own Caddy holds UDP 443 and admit has checked no other
+// process does, so only then do its UDP answers from 443 pass. LAN6 are
+// the host's on-link IPv6 prefixes, dropped like the private ranges, since
+// a home LAN's IPv6 is global.
 type EgressData struct {
 	Token, Table, Mark, Users, Mesh, LAN string
 	Resolvers4, Resolvers6               []string
-	Gateway                              bool
+	Gateway, PublicPorts                 bool
 	LAN6                                 []netip.Prefix
 }
 

@@ -50,7 +50,7 @@ func planEgress(p *planner) error {
 	table, err := hostprep.EgressTable(hostprep.EgressData{
 		Token: p.d.Token(), Table: tableName, Mark: fmt.Sprintf("%#x", mark),
 		Users: uidOf(p) + ", " + subordinate, Mesh: p.in.Request.MeshSubnet, LAN: lan, Resolvers4: v4, Resolvers6: v6,
-		Gateway: p.in.Flags.PublicPorts || len(p.in.Request.WebServer) > 0, LAN6: onLink6(p.f, p.d.Interface(), p.in.Request.MeshSubnet),
+		Gateway: p.in.Flags.PublicPorts || len(p.in.Request.WebServer) > 0, PublicPorts: p.in.Flags.PublicPorts, LAN6: onLink6(p.f, p.d.Interface(), p.in.Request.MeshSubnet),
 	})
 	if err != nil {
 		return err
