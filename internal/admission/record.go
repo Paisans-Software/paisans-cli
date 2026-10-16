@@ -103,10 +103,11 @@ type Record struct {
 	// web_server.managed_by: external, nil for every other site.
 	WebServer *WebServer `json:"web_server"`
 	// SystemDockerDisabled is whether Docker's system daemon is one admit
-	// installed and disabled, so the deployments' own rootless daemons are
-	// the only Docker running. Nothing of paisans enables it again. It is
-	// false when the owner had Docker before admit, which admit never
-	// touches.
+	// installed and disabled once, so that the deployments' own rootless
+	// daemons were the only Docker running. It says what admit did, not
+	// how the daemon stands now: nothing of paisans enables it again, and
+	// an owner who has enabled it since keeps it so. It is false when the
+	// owner had Docker before admit, which admit never touches.
 	SystemDockerDisabled bool `json:"system_docker_disabled"`
 }
 

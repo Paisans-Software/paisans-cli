@@ -637,11 +637,14 @@ func (e *evictor) sysctls() error {
 // installed names, once no other deployment is admitted or claims the
 // host, what admit installed here, which stays: packages other software
 // may have come to use are the owner's to remove, and the system Docker
-// admit installed stays disabled. Then the list goes, which /etc/paisans
+// admit installed and disabled is left as it is now. Then the list goes, which /etc/paisans
 // needs to go too.
 func (e *evictor) installed() error {
+	if e.shared() || !e.f.Files[installedPath].Present {
+		return nil
+	}
 	in, err := readInstalled(e.planner, "evict")
-	if err != nil || e.shared() || !e.f.Files[installedPath].Present {
+	if err != nil {
 		return err
 	}
 	var named []string
@@ -658,7 +661,7 @@ func (e *evictor) installed() error {
 	if len(named) > 0 {
 		detail := "Evict removes no package: something else here may use them by now. Remove them yourself once nothing does."
 		if in.dockerIsAdmits() {
-			detail += " Docker's system daemon, which admit installed, stays disabled, and docker-ce made the docker group."
+			detail += " Admit disabled Docker's system daemon when it installed it; it is left as it is now. docker-ce made the docker group."
 		}
 		e.warn("packages: what admit installed stays: "+strings.Join(named, "; "), detail)
 		describe = "the list of what admit installed, which the plan names"

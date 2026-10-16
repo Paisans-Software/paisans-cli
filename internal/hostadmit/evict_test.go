@@ -632,3 +632,31 @@ func TestEvictPutsBackALeftHold(t *testing.T) {
 		}
 	}
 }
+
+// The record says admit disabled the system daemon once, not that it is
+// disabled now: an owner may have enabled it since, so evict does not say
+// it stays disabled.
+func TestEvictDoesNotSayTheSystemDockerStaysDisabled(t *testing.T) {
+	plan, err := hostadmit.BuildEvict(withEntries(installedByAdmit(evicted("vm", hostadmit.Flags{})())), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range plan.Warnings {
+		if strings.Contains(w.Detail, "stays disabled") {
+			t.Errorf("evict says %q", w.Detail)
+		}
+	}
+	if !strings.Contains(plan.Text(), "it is left as it is now") {
+		t.Errorf("evict does not say the daemon is left as it is:\n%s", plan.Text())
+	}
+}
+
+// A malformed installed list matters only to the last deployment's evict:
+// another deployment's evict, beside it, goes on.
+func TestABadInstalledListStopsOnlyTheLastEvict(t *testing.T) {
+	h := withOther(evicted("vm", hostadmit.Flags{})(), false, false)
+	h.file("/etc/paisans/installed", "rm -rf /\n").withFile("/etc/paisans/installed", "rm -rf /\n", "644", 0)
+	if _, err := hostadmit.BuildEvict(withEntries(h), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"}); err != nil {
+		t.Errorf("BuildEvict beside another deployment = %v", err)
+	}
+}

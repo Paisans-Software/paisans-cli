@@ -137,4 +137,4 @@ warning: firewall: the deployment's SSH allow on 22 is kept
 warning: br_netfilter: stays loaded until the next boot
   Evict removes its boot entry and does not unload it: unloading it would change what the host's FORWARD chain sees under whatever runs now.
 warning: packages: what admit installed stays: docker-ce, docker-ce-rootless-extras, uidmap; the docker group
-  Evict removes no package: something else here may use them by now. Remove them yourself once nothing does. Docker's system daemon, which admit installed, stays disabled, and docker-ce made the docker group.
+  Evict removes no package: something else here may use them by now. Remove them yourself once nothing does. Admit disabled Docker's system daemon when it installed it; it is left as it is now. docker-ce made the docker group.
