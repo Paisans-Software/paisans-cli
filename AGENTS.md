@@ -255,6 +255,12 @@ head commit's message with `kacl-skip:`.
    release listed under the operator notes and the Linux binaries and
    `SHA256SUMS` that `make release-binaries` builds attached.
 
+**If a release step fails after the tag is pushed**, a re-run releases nothing,
+because the tag exists. A human recovers it: delete the draft release if there
+is one, then the tag (`git push origin :refs/tags/vX.Y.Z`), then re-run the
+job. The comment above the tag step in `release.yml` says the same. A failure
+before the tag step leaves nothing behind and needs only the re-run.
+
 **Release is a human action.** Tagging and publishing leave this repository
 and cannot be walked back. An agent may run `make bump` and open the
 `Release x.y.z` pull request into `develop` when asked; it never merges into
