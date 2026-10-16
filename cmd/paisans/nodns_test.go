@@ -12,6 +12,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/grant"
 	"github.com/paisans-software/paisans-cli/internal/keystore"
+	"github.com/paisans-software/paisans-cli/internal/secretsgen"
 	"github.com/paisans-software/paisans-cli/internal/smtpcheck"
 	"github.com/paisans-software/paisans-cli/internal/smtpcheck/smtptest"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -43,6 +44,10 @@ func TestMain(m *testing.M) {
 	config.AgeKeystore = keystore.NewMemory()
 	// No test waits between two web server checks.
 	fakeWebServerClock()
+	// No test spends most of a second on each OAuth2 key it fills: what
+	// they test is that a key is filled, opens with its passphrase and
+	// stays put, and secretsgen's tests hold the key to 4096 bits.
+	secretsgen.SetOAuthKeyBits(1024)
 	// No test reaches a site or a mail server to try mail settings: every
 	// check is answered by an in-process server that takes any login. A
 	// test about the check sets its own (fakeSMTP).
