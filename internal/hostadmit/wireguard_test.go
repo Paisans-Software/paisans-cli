@@ -1,6 +1,7 @@
 package hostadmit_test
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,6 +13,8 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostadmit"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
+	"github.com/paisans-software/paisans-cli/internal/registry"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 var wireguardCases = addCases(
@@ -202,5 +205,58 @@ func TestAMeshInsideTailscalesRangeIsRefused(t *testing.T) {
 	}
 	if got != string(want) {
 		t.Errorf("%s differs from what admit plans now:\n%s", path, diff(string(want), got))
+	}
+}
+
+// blankExecution is a blank host that changes as a real one does while
+// admit of in runs there: the claim lands in the registry, /etc/paisans is
+// made, the package step installs Docker and wireguard-tools, which
+// creates /etc/wireguard root's and 700, and useradd makes the user.
+func blankExecution(in hostadmit.Input) *fakeHost {
+	h := newBlank()
+	h.onRun = func(h *fakeHost, command string) {
+		switch {
+		case strings.Contains(command, registry.LockPath):
+			h.file(registry.Path, registryOf(in.Request))
+		case strings.HasPrefix(command, "install -d -m 755 -o root -g root /etc/paisans"):
+			h.withDir("/etc/paisans", "drwxr-xr-x", 0, 0)
+		case strings.Contains(command, "wireguard-tools") && !strings.Contains(command, "docker compose version"):
+			h.with("engine", "29.9.1").with("setuptool", "present").with("system-socket", "present").
+				dropKeyed("pkg", "docker-ce")
+			h.add("pkg", "docker-ce installed").add("pkg", "docker-ce-rootless-extras installed").add("pkg", "uidmap installed").
+				answer("docker compose version", current().answers["docker compose version"]).
+				withDir("/etc/wireguard", "drwx------", 0, 0)
+		case strings.HasPrefix(command, "useradd "):
+			h.with("passwd", "paisans-f2a9:x:1001:1001::/home/paisans-f2a9:/bin/bash").with("home", "dir 1001 /home/paisans-f2a9").
+				with("groups", "paisans-f2a9").with("group", "paisans-f2a9").
+				with("linger", "no").with("manager", "inactive").
+				add("subuid", "paisans-f2a9:165536:65536").add("subgid", "paisans-f2a9:165536:65536")
+		}
+	}
+	return h
+}
+
+// The first admit of a blank host plans "create /etc/wireguard", and the
+// package step before it creates the directory. Read again once the user
+// exists, the plan no longer has that step, which is done, not drift: the
+// rest of it runs.
+func TestTheFirstExecuteSurvivesWireGuardToolsMakingItsDirectory(t *testing.T) {
+	in := input(t, "vm", hostadmit.Flags{})
+	h := blankExecution(in)
+	plan, err := hostadmit.Build(h, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(plan.Steps, func(s hostadmit.Step) bool { return s.Title == "create /etc/wireguard" }) {
+		t.Fatalf("the plan for a blank host does not create /etc/wireguard:\n%s", plan.Text())
+	}
+	if err := hostadmit.Execute(h, in, plan, ui.NewPlain(io.Discard, false)); err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(h.ran, "install -d -m 700 -o root -g root /etc/wireguard") {
+		t.Error("the step the package step did was run again")
+	}
+	if !slices.ContainsFunc(h.ran, func(c string) bool { return strings.HasPrefix(c, "useradd ") }) {
+		t.Errorf("the user was not created: %q", h.ran)
 	}
 }

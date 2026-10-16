@@ -490,3 +490,32 @@ func TestARefusalOnTheRebuildSaysWhatRan(t *testing.T) {
 		t.Errorf("the hint is longer than 80 characters: %q", hint)
 	}
 }
+
+// A step the rebuilt plan no longer has is done, not drift: installing
+// wireguard-tools creates /etc/wireguard, root's and 700, so the plan
+// rebuilt once the user exists has no "create /etc/wireguard". What is
+// left must still be the approved steps, in order, each as approved.
+func TestSameStepsAllowsAStepNowDone(t *testing.T) {
+	fill := strings.NewReplacer("<uid>", "1001")
+	wg := Step{Title: "create /etc/wireguard", Command: "install -d -m 700 -o root -g root /etc/wireguard"}
+	helper := Step{Title: "install the WireGuard helper", Command: "true"}
+	egress := Step{Title: "load the egress table", Command: "nft uid <uid>", Provisional: true}
+	filled := Step{Title: "load the egress table", Command: "nft uid 1001"}
+	approved := []Step{egress, wg, helper}
+	if err := sameSteps(approved, []Step{filled, helper}, fill); err != nil {
+		t.Errorf("a step now done is drift: %v", err)
+	}
+	if err := sameSteps(approved, []Step{filled}, fill); err != nil {
+		t.Errorf("two steps now done are drift: %v", err)
+	}
+	for name, rebuilt := range map[string][]Step{
+		"added":     {filled, wg, {Title: "something new", Command: "rm -rf /"}, helper},
+		"reordered": {filled, helper, wg},
+		"changed":   {filled, {Title: "install the WireGuard helper", Command: "rm -rf /"}},
+		"retitled":  {filled, {Title: "install another helper", Command: "true"}},
+	} {
+		if err := sameSteps(approved, rebuilt, fill); err == nil || !strings.Contains(err.Error(), "the host changed while admit ran") {
+			t.Errorf("%s: sameSteps = %v", name, err)
+		}
+	}
+}
