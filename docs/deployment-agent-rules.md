@@ -140,7 +140,7 @@ consequences reach people who are not in the room.
 
 **Admitting and evicting are the host owner's.** A host's owner is often not
 one of the deployment's operators, and the machine is theirs, so these are
-never an agent's to run, whoever asks. Evicting always asks for the
+never an agent's to run, whoever asks, except as follows. Evicting always asks for the
 deployment's user name at a terminal, and admitting from a request asks for
 its digest; admitting from the configuration may ask nothing, and a
 NOPASSWD sudoers rule would let it run without a person, so this rule, not a
@@ -153,9 +153,10 @@ the file, or the comparison proves nothing. When a run reports a site
 pending or down, or `site remove` prints the `host evict` line, the agent
 reports it to a human with that line, and runs nothing on the owner's behalf.
 
-The founder may authorise an agent to run admit and evict, prompts included,
-on test servers named in that authorisation. It never extends to any other
-host.
+The exception: a host's owner may authorise an agent to run admit and
+evict, prompts included, on hosts that owner names as test servers in that
+authorisation. It never extends to any other host, nor to a host whose owner
+did not give it.
 
 ## Services the deployment runs
 

@@ -4903,10 +4903,10 @@ it was sent, so leaving the password out is not left to each of them.
 
 `host evict` always asks for the deployment's user name at a terminal, and
 `host admit --request` for the request's digest, so neither runs without a
-person. `host admit --site` asks nothing once every grant is passed and ufw
-is active, and `host deployments` asks nothing, so an unattended run of
-either needs a NOPASSWD sudoers rule for the login `--ssh` names. Whether to
-write one is a decision about the host, made by whoever owns it, and the
+person. `host admit --site` asks nothing once every grant is passed, `--ssh`
+is given, and ufw is active or `--enable-ufw` is passed, and `host
+deployments` asks nothing, so an unattended run of either needs a NOPASSWD
+sudoers rule for the login `--ssh` names. Whether to write one is a decision about the host, made by whoever owns it, and the
 toolkit never makes it; an agent never runs admit or evict unattended,
 whatever sudo allows (`docs/deployment-agent-rules.md`).
 
@@ -5321,8 +5321,9 @@ reply. The rules, in order:
    upstream list.
 3. Drop `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`,
    `169.254.0.0/16`, `100.64.0.0/10`, `::1`, `fc00::/7` and `fe80::/10`, and
-   NAT64's translations of the same IPv4 ranges, so a DNS64 host does not
-   open the owner's LAN through the translator.
+   NAT64's translations of the same IPv4 ranges, and the local-use prefix
+   `64:ff9b:1::/48` whole, so a DNS64 host does not open the owner's LAN
+   through the translator.
 4. On a gateway (a site granted `--public-ports`, or whose `web_server` is
    external), accept TCP 80 and 443 to the host's own addresses, and the
    answers its own 80 and 443 send back.
@@ -5381,9 +5382,12 @@ between carries no mark. Its replies stay acceptable for as long as the user
 keeps it alive, which matters only for UDP from 443 with the public ports
 grant.
 
-A deployment that needs something on the owner's network asks the owner, who
-adds an accept rule of their own. That is outside the CLI on purpose. The
-owner's view of all this is *What the deployment can reach* in
+A deployment that needs something on the owner's network asks the owner.
+There is no supported way to open the table to one service: an accept in
+another table does not override its drop, and a rule added to it is gone at
+the next load from its file (boot, an nftables reload or restart, an admit
+that reloads it). The owner serves it on the host's mesh address, which rule
+1 accepts, or at a public address on another machine. The owner's view of all this is *What the deployment can reach* in
 [docs/guides/host-owners.md](docs/guides/host-owners.md).
 
 #### host prepare manages the login user's authorized keys
