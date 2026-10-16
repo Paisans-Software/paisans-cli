@@ -76,13 +76,13 @@ Where the spec or index leaves a choice open, or two of them disagree with the c
 31. **The check runs after `Execute`, on both paths, through `hostadmit.CheckUser`** (`docker version` as the user, on the host, through the root transport), so the two paths plan identical steps; with `--site` the command then logs in as the user over ssh, which records `ssh.user`.
 32. **The mesh subnet is checked against the host as root** (phase 4's handoff): a route, an address, a Docker network or a Docker pool overlapping it refuses admit, through `mesh.Probe`, the check `host prepare` runs today.
 
-## Founder questions
+## Founder decisions on the plan's questions
 
-None blocks this plan; each has an interim ruling above that the plan implements.
+These override the interim rulings they name.
 
-1. **May the request carry the site's name and roles?** Without them the registry entry from a request has no site name and records the exclusive roles by the grants that imply them (ruling 3), the plan cannot name the site to the owner, and a Garage site's free space is judged at 5 GB (ruling 21). Adding `site` and `roles` is a change to phase 4's request format (two fields, golden requests regenerated, `RequestVersion` unchanged since nothing is released) and to what the owner is shown.
-2. **An owner with their own firewall** (firewalld, or nftables rules of their own, with ufw inactive): admit stops (ruling 10). Should there be a flag with which the owner takes the deployment's ports into their own firewall and admit leaves ufw alone?
-3. **Grants the site does not need are refused** (ruling 4). Should an owner be able to pre-grant `--public-ports` or `--watchdog` to a site whose roles do not yet need them?
+1. **The request carries the site's name and roles** (overrides rulings 3 and 21). A new task, Task 2b below, adds `site` (the site's name in the configuration) and `roles` (its roles, sorted, from the configuration) to phase 4's request: `Build` fills them, `Check` and `Parse` require them (`site` by the configuration's site-name rule, `roles` each a known role, no duplicates, sorted, not empty), `Encode` writes them in the request's field order, the golden requests and digest vectors are regenerated, and the spec's request table gains both rows. `RequestVersion` is unchanged, since nothing is released. `registry.ForRequest` takes `Site` and `Roles` from the request; the plan names the site to the owner; free space is judged at 20 GB for a data or Garage site. The grants are still computed from the roles (`admission.Needs`), and `Check` refuses a request whose grants disagree with its roles.
+2. **ufw is the only firewall admit works with** (amends ruling 10). Admit exits 1 before changing anything when ufw is not installed, naming ufw and saying the owner installs it, since enabling a firewall the owner did not choose is not admit's decision. With ufw installed and inactive, it stops as ruling 10 says when another firewall is found, and otherwise sets ufw's defaults and enables it. Support for other firewalls is tracked outside this plan.
+3. **A grant the request does not need is refused** (ruling 4 stands). An owner grants later by running `host admit` again with the request for the site's new roles: admit is idempotent and adds only what the new grant needs.
 
 ## What this phase hands to phases 6, 7 and 10
 
@@ -430,6 +430,17 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
+### Task 2b: The request carries the site's name and roles
+
+Founder decision 1 above. Files: `internal/admission/request.go`, `encode.go`, their tests and golden files under `internal/admission/testdata/requests/`, `internal/registry` (`ForRequest`), `docs/specs/2026-10-15-rootless-and-host-admit.md` (the request table), README and `docs/commands.md` where they list the request's fields.
+
+- [ ] Write failing tests: `Build` fills `site` and `roles` for each golden role mix; `Parse` refuses a request missing either, a role that is not a known role, duplicate or unsorted roles, empty roles, and a `site` the configuration's site-name rule refuses, each message naming the field and quoting the value; `Check` refuses a request whose grants disagree with `admission.Needs` for its roles; the digest changes when `site` or `roles` changes (extend the field-sensitivity test through `Fields()`).
+- [ ] Implement: add `Site string` and `Roles []string` to `Request` in the order the spec's table gives (after `deployment`), fill them in `Build` from the configuration, validate them in `Check` with the configuration's own site-name rule and role set (one rule, shared, as for every other field), write them in `Encode`, read them strictly in `Parse`.
+- [ ] Regenerate the golden requests, read the diff (only the two new lines per file), and recompute the digest vectors independently with Python as Task 3 of phase 4 did; update the pinned vectors and the comment saying how they were computed.
+- [ ] `registry.ForRequest` takes `Site` and `Roles` from the request; update its tests.
+- [ ] Spec, README and `docs/commands.md`: the request's fields include `site` and `roles`.
+- [ ] `go build ./...`, `go vet ./...`, `go test -count=1 ./...`; commit (`feat:` with a CHANGELOG bullet amending nothing released: since `host request` is unreleased, fold the fields into its existing Added bullet if it stays within 35 words, else no bullet and say why in the body). Body: `Founder decision.`
+
 ### Task 3: The plan model, the probe and the early stops
 
 **Files:**
