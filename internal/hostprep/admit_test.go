@@ -659,3 +659,57 @@ func TestTheHoldWaitsForDpkg(t *testing.T) {
 		t.Errorf("the hold was released while dpkg ran: %q", p)
 	}
 }
+
+// wireguard-tools on Ubuntu 22.04 recommends a WireGuard kernel module
+// package, which on a host whose running kernel is not one of Ubuntu's
+// pulls in a whole kernel. It is installed without its recommendations, in
+// an apt call of its own: Docker's packages recommend what Docker needs
+// (iptables, pigz, the rootless extras), so the rest keep theirs. Both
+// calls close the hold's lock, and admit's keeps --no-upgrade on both.
+func TestWireGuardToolsIsInstalledWithoutRecommends(t *testing.T) {
+	for _, ubuntu := range []string{ubuntu2204, ubuntu2404} {
+		profile, err := hostprep.Select(hostprep.ParseOSRelease(ubuntu))
+		if err != nil {
+			t.Fatal(err)
+		}
+		host := freshHost()
+		host.files["/etc/os-release"] = ubuntu
+		prepare, err := profile.Packages(host, hostprep.ParseOSRelease(ubuntu))
+		if err != nil {
+			t.Fatal(err)
+		}
+		present := freshHost()
+		present.files["/etc/os-release"] = ubuntu
+		present.responses[probePackages] = "compose present\npkg docker-ce install ok installed\npkg wireguard-tools absent\npkg git install ok installed\ndockerversion 5:29.9.0-1~ubuntu.24.04~noble\nextras 5:29.9.0-1~ubuntu.24.04~noble\nkeyring present\narch amd64\n"
+		admit, _, err := profile.AdmitPackages(present, hostprep.ParseOSRelease(ubuntu), true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for name, s := range map[string]hostprep.Section{"prepare": prepare, "admit": admit} {
+			var command string
+			for _, step := range s.Steps {
+				if strings.Contains(step.Command, "wireguard-tools") {
+					command = step.Command
+				}
+			}
+			var lines []string
+			for _, line := range strings.Split(command, "\n") {
+				if strings.Contains(line, " install -y") {
+					lines = append(lines, line)
+				}
+			}
+			if len(lines) != 2 {
+				t.Fatalf("%s: want two install lines, got:\n%s", name, command)
+			}
+			if strings.Contains(lines[0], "--no-install-recommends") || strings.Contains(lines[0], "wireguard-tools") {
+				t.Errorf("%s: the main install is %q", name, lines[0])
+			}
+			if !strings.HasSuffix(lines[1], " --no-install-recommends wireguard-tools 8>&-") {
+				t.Errorf("%s: wireguard-tools is installed by %q", name, lines[1])
+			}
+			if name == "admit" && (!strings.Contains(lines[0], "--no-upgrade") || !strings.Contains(lines[1], "--no-upgrade")) {
+				t.Errorf("admit with Docker present dropped --no-upgrade:\n%s", command)
+			}
+		}
+	}
+}

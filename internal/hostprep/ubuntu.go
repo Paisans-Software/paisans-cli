@@ -54,6 +54,30 @@ var admitBasePackages = []string{"wireguard-tools", "git"}
 // (https://docs.docker.com/engine/security/rootless/, read 2026-10-15).
 var rootlessPackages = []string{"docker-ce-rootless-extras", "uidmap", "nftables"}
 
+// withoutRecommends are installed with --no-install-recommends, in an apt
+// call of their own. Ubuntu 22.04's wireguard-tools recommends
+// wireguard-modules or wireguard-dkms, which on a host whose running kernel
+// is not one of Ubuntu's (a provider's own kernel, a container) pulls in a
+// whole Ubuntu kernel; the kernel's own WireGuard is what the mesh uses.
+// Every other package keeps its recommendations, since Docker's recommend
+// what Docker needs (iptables, pigz, the rootless extras).
+var withoutRecommends = []string{"wireguard-tools"}
+
+// aptInstall is the script that installs packages, those in
+// withoutRecommends by a second apt call without their recommendations.
+func (u ubuntu) aptInstall(packages []string, noUpgrade bool) (string, error) {
+	var with, without []string
+	for _, p := range packages {
+		name, _, _ := strings.Cut(p, "=")
+		if slices.Contains(withoutRecommends, name) {
+			without = append(without, p)
+		} else {
+			with = append(with, p)
+		}
+	}
+	return snippet(u.tmpl("apt-install.sh.tmpl"), map[string]any{"Packages": with, "WithoutRecommends": without, "NoUpgrade": noUpgrade})
+}
+
 // packageKinds is the kind of change each package in an install makes, each
 // once, in the order the packages are named: Docker's are docker, and each
 // base package is what it is installed for.
@@ -269,7 +293,7 @@ func (u ubuntu) Packages(t Transport, host OSRelease) (Section, error) {
 		}
 	}
 	if len(install) > 0 {
-		script, err := snippet(u.tmpl("apt-install.sh.tmpl"), map[string]any{"Packages": install, "NoUpgrade": false})
+		script, err := u.aptInstall(install, false)
 		if err != nil {
 			return out, err
 		}
@@ -420,7 +444,7 @@ func (u ubuntu) AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (
 		name, _, _ := strings.Cut(p, "=")
 		added.Packages = append(added.Packages, name)
 	}
-	script, err := snippet(u.tmpl("apt-install.sh.tmpl"), map[string]any{"Packages": install, "NoUpgrade": dockerPresent})
+	script, err := u.aptInstall(install, dockerPresent)
 	if err != nil {
 		return out, added, err
 	}
