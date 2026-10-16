@@ -183,7 +183,7 @@ func planSystemDocker(p *planner, s hostprep.Section, added hostprep.Installed) 
 	if len(units) == 0 {
 		return nil
 	}
-	recorded, err := disabledBefore(p)
+	recorded, unknown, err := disabledBefore(p)
 	if err != nil {
 		return err
 	}
@@ -192,6 +192,8 @@ func planSystemDocker(p *planner, s hostprep.Section, added hostprep.Installed) 
 		return s.Enabled || s.Active
 	})
 	switch {
+	case !installs && !recorded && running && unknown != "":
+		p.present("docker: the system daemon admit installed is running and left as it is, since " + unknown + " cannot be read and may say admit disabled it once")
 	case installs || !recorded && running:
 		p.step(Step{Title: "disable the system Docker",
 			Describe: "docker: the deployments run their own rootless daemons, so the system daemons admit installed, which their packages enable, are disabled (" + strings.Join(units, ", ") + "), and were kept from starting while they installed: they never changed forwarding, docker0 or the firewall",
@@ -206,20 +208,25 @@ func planSystemDocker(p *planner, s hostprep.Section, added hostprep.Installed) 
 }
 
 // disabledBefore reports whether an admission record on the host, this
-// deployment's or another's, says admit disabled the system Docker.
-func disabledBefore(p *planner) (bool, error) {
+// deployment's or another's, says admit disabled the system Docker, and
+// names another's record that cannot be read, and so may say so.
+func disabledBefore(p *planner) (bool, string, error) {
 	prev, err := p.previous()
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
 	if prev != nil && prev.SystemDockerDisabled {
-		return true, nil
+		return true, "", nil
 	}
 	st, err := p.sysctls()
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
-	return slices.ContainsFunc(st.others, func(r admission.Record) bool { return r.SystemDockerDisabled }), nil
+	unknown := ""
+	if len(st.unreadable) > 0 {
+		unknown = ui.Visible(st.unreadable[0])
+	}
+	return slices.ContainsFunc(st.others, func(r admission.Record) bool { return r.SystemDockerDisabled }), unknown, nil
 }
 
 // releaseHold plans putting /usr/sbin/policy-rc.d back when a run that

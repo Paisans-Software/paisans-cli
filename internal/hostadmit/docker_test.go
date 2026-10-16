@@ -362,3 +362,17 @@ func TestTheInstallConfirmsItsClaims(t *testing.T) {
 		t.Errorf("the install does not confirm its claims after apt:\n%s", c)
 	}
 }
+
+// Another deployment's record that cannot be read may say admit disabled
+// the system Docker, so a running daemon the owner may have enabled is
+// left, and the plan says why.
+func TestAnUnreadableRecordKeepsTheSystemDockerAsItIs(t *testing.T) {
+	h := withUnreadable(installedByAdmit(current()).with("system-unit", "docker.service enabled active"))
+	plan, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if titled(plan, "disable the system Docker") >= 0 || !slices.ContainsFunc(plan.Present, func(s string) bool { return strings.Contains(s, "/etc/paisans/admitted.0c0d.json cannot be read") }) {
+		t.Errorf("beside an unreadable record:\n%s", plan.Text())
+	}
+}

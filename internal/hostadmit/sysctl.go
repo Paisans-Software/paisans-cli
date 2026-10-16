@@ -128,8 +128,10 @@ func holds(content, key string) bool {
 // no deployment needs are restored (b, with restore the sysctl -w
 // arguments).
 type sysctlState struct {
-	// others are the other admitted deployments' readable records.
+	// others are the other admitted deployments' readable records, and
+	// unreadable the files of those that cannot be read.
 	others           []admission.Record
+	unreadable       []string
 	wantLow, wantFwd bool
 	was, first, b    before
 	restore          []string
@@ -148,7 +150,7 @@ func (p *planner) sysctls() (*sysctlState, error) {
 	if err != nil {
 		return nil, err
 	}
-	st.others = recs
+	st.others, st.unreadable = recs, unreadable
 	current, _, err := p.t.ReadFile(sysctlPath)
 	if err != nil {
 		return nil, shown(err)
