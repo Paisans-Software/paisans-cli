@@ -11,8 +11,9 @@
 // one data site and a witness, two etcd voters, the witness leaves etcd in
 // the same removal (see EndState).
 //
-// On the site's host it runs only as the deployment's user, refusing a
-// login as root, and touches only what is provably this deployment's and
+// On the site's host it runs only as the deployment's user, the one its
+// admission record names, refusing any other login, root above all, and
+// touches only what is provably this deployment's and
 // that user's to remove: a Docker object with the deployment label carrying
 // this id, a file the manifest names by a clean path under its root whose
 // hash matches, a unit in its user's systemd directory named for its token,
@@ -195,10 +196,10 @@ type Plan struct {
 	patroni patroniState
 	garage  garageState
 	host    *hostPlan
-	// home is the login user's home on the site's host, read once a run by
-	// refuseRoot.
-	home  string
-	evict evictState
+	// home is the login user's home on the site's host, and loginUser its
+	// name, the deployment's user, read once a run by checkLogin.
+	home, loginUser string
+	evict           evictState
 	// open is the step the running stage is in the middle of, ended when the
 	// next one starts or the stage's work does.
 	open ui.Step
@@ -472,7 +473,7 @@ func Build(cfg *config.Config, secrets *config.Secrets, site string, transports 
 			}
 			return nil, fmt.Errorf("site remove %s: its host answered `true` with an error: %v: %s", site, err, lastLines(out, 2))
 		}
-		if err := p.refuseRoot(t); err != nil {
+		if err := p.checkLogin(t); err != nil {
 			return nil, err
 		}
 		p.transports[site] = t

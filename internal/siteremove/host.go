@@ -3,12 +3,14 @@ package siteremove
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"path"
 	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/appremove"
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -279,10 +281,11 @@ func (p *Plan) buildHost() (*Stage, error) {
 	hp := &hostPlan{}
 	p.host = hp
 
-	if err := p.refuseRoot(t); err != nil {
+	if err := p.checkLogin(t); err != nil {
 		return nil, err
 	}
 	hp.home = p.home
+	p.Evict = EvictLine(d, p.loginUser)
 
 	inv, err := inspect(t, p.cfg)
 	if err != nil {
@@ -293,7 +296,15 @@ func (p *Plan) buildHost() (*Stage, error) {
 	}
 	hp.dockerPresent = inv.Docker.Present
 	hp.manifest = inv.Manifest
-	hp.webServer = inv.ManifestWebServer
+	for _, e := range inv.ManifestWebServer {
+		// The manifest is the user's own file: an unclean path is never
+		// read or deleted.
+		if !cleanAbs(e.Path) {
+			p.Kept = append(p.Kept, fmt.Sprintf("%s: %s: not a clean path, so site remove leaves it; the host's owner removes it from %s's include directory if it is this deployment's", p.Site, e.Path, e.Server))
+			continue
+		}
+		hp.webServer = append(hp.webServer, e)
+	}
 	// Before anything else is planned: a kept Caddy changes what goes.
 	if hp.caddy, err = p.planCaddy(t, inv); err != nil {
 		return nil, err
@@ -459,24 +470,47 @@ func (p *Plan) buildHost() (*Stage, error) {
 	return st, nil
 }
 
-// refuseRoot reads the login user's home, once a run, and refuses a login
-// as root before anything else on the host is read: as root, a link the user
-// planted under the root could steer a deletion anywhere, and the units, the
-// containers and the evict line would all be root's, not the user's.
-func (p *Plan) refuseRoot(t apply.Transport) error {
+// checkLogin confirms, once a run and before anything else on the host is
+// read, that the login is the deployment's user: the one its admission
+// record names, which is never root. As anyone else, root above all, a link
+// the user planted under the root could steer a deletion into what that
+// login may delete and the user may not, and the units, the containers and
+// the evict line would be the login's, not the user's. The record is root's,
+// in root's own directory, so reading it is safe whoever logs in.
+func (p *Plan) checkLogin(t apply.Transport) error {
 	if p.home != "" {
 		return nil
 	}
 	d := p.dep()
-	home, uid, err := hostprep.HomeAndUID(t)
+	account, err := hostprep.LoginAccount(t)
 	if err != nil {
 		return fmt.Errorf("site remove %s: %w", p.Site, err)
 	}
-	if uid == 0 {
-		return fmt.Errorf("site remove %s: %s logs in as root, and site remove cleans a host only as the deployment's user, so that nothing the user planted under %s can steer a deletion past what that user may delete. Nothing was changed. Run it again with --ssh <the deployment's user>@<host>; the host's owner then removes what is root's with sudo paisans host evict --deployment %s --user <the deployment's user> --execute", p.Site, t.Describe(), d.Root(), d.ID)
+	rec, err := admission.Read(t, d.Token())
+	recordPath, _ := admission.Path(d.Token())
+	switch {
+	case errors.Is(err, admission.ErrNotAdmitted):
+		return fmt.Errorf("site remove %s: %s has no admission record for this deployment (%s), so nothing says who its user is, and site remove cleans a host only as that user. Nothing was changed. If the deployment's user is still there, the host's owner removes it and everything root's with sudo paisans host evict --deployment %s --user <the deployment's user> --execute", p.Site, t.Describe(), recordPath, d.ID)
+	case err != nil:
+		return fmt.Errorf("site remove %s: %w. Nothing was changed", p.Site, err)
 	}
-	p.home = home
+	if account.UID == 0 || account.Name != rec.User {
+		who := account.Name
+		if account.UID == 0 {
+			who = "root"
+		}
+		dest := p.cfg.Sites[p.Site].Destination()
+		dest.User = rec.User
+		return fmt.Errorf("site remove %s: %s logs in as %s, not the deployment's user %s that %s names, and site remove cleans a host only as that user, so that nothing the user planted under %s can steer a deletion past what that user may delete. Nothing was changed. Run it again with --ssh %s; the host's owner then removes what is root's with %s", p.Site, t.Describe(), who, rec.User, recordPath, d.Root(), dest, EvictLine(d, rec.User))
+	}
+	p.home, p.loginUser = account.Home, rec.User
 	return nil
+}
+
+// cleanAbs is cleanRel for an absolute path: a web server's include file.
+func cleanAbs(p string) bool {
+	rel, ok := strings.CutPrefix(p, "/")
+	return ok && cleanRel(rel)
 }
 
 // cleanRel reports whether a manifest path is relative and clean: no
@@ -738,9 +772,8 @@ func (p *Plan) runHost() error {
 			return err
 		}
 	}
-	// A plain rm, as the deployment and grant records go, and no lock: run
-	// through --ssh root@host, the lock would be taken as root, following a
-	// link the user planted at its path.
+	// A plain rm, as the deployment and grant records go, and no lock: the
+	// lock would create a lock file in the state directory again.
 	for _, r := range hp.keyRecords {
 		if err := run("deleting the key record", "rm -f -- "+quote(r)); err != nil {
 			return err

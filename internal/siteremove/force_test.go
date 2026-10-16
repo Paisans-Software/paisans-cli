@@ -1,6 +1,7 @@
 package siteremove_test
 
 import (
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"os"
 	"strings"
 	"testing"
@@ -77,12 +78,14 @@ func TestForcedHostStageMatchesTheFullRemoval(t *testing.T) {
 	}
 }
 
-// A host with nothing of this deployment's on it plans nothing.
+// A host with nothing of this deployment's on it but its admission record,
+// which names the user it runs as, plans nothing.
 func TestForcedOnACleanHostPlansNothing(t *testing.T) {
 	w := setup(t)
 	b := w.hosts["home-b"]
 	b.containers, b.networks, b.volumes, b.rules = nil, nil, nil, nil
-	b.files = map[string]string{registry.Path: encode(t, registry.Registry{Version: registry.Version, Deployments: map[string]registry.Entry{}})}
+	recordPath, _ := admission.Path(dep.Token())
+	b.files = map[string]string{registry.Path: encode(t, registry.Registry{Version: registry.Version, Deployments: map[string]registry.Entry{}}), recordPath: b.files[recordPath]}
 	b.wgUp = false
 	dest, _ := config.ParseDestination("ubuntu@192.0.2.11")
 	p := forced(t, w, w.cfg, "home-b", dest, siteremove.Options{})

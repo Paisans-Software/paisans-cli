@@ -20,32 +20,42 @@ const homeProbe = `u=$(id -un); getent passwd "$u" || echo "__PAISANS_ABSENT__ $
 // Home is the login user's home directory on the host t reaches. A login
 // user the host has no passwd entry for is refused by name.
 func Home(t Transport) (string, error) {
-	home, _, err := HomeAndUID(t)
-	return home, err
+	a, err := LoginAccount(t)
+	return a.Home, err
 }
 
-// HomeAndUID is Home with the login user's UID, from the same passwd entry,
-// so a command can tell a root login from the deployment's user.
-func HomeAndUID(t Transport) (home string, uid int, err error) {
+// Account is the login user as its passwd entry has it.
+type Account struct {
+	Name string
+	UID  int
+	Home string
+}
+
+// LoginAccount is the login user's name, UID and home on the host t
+// reaches, from one passwd entry, so a command can tell the deployment's
+// user from root or another account. A login user the host has no passwd
+// entry for is refused by name.
+func LoginAccount(t Transport) (Account, error) {
 	out, err := t.Run(homeProbe)
 	if err != nil {
-		return "", 0, fmt.Errorf("reading the login user's home on %s: %w", t.Describe(), err)
+		return Account{}, fmt.Errorf("reading the login user's home on %s: %w", t.Describe(), err)
 	}
 	if user, absent := strings.CutPrefix(strings.TrimSpace(out), "__PAISANS_ABSENT__"); absent {
-		return "", 0, fmt.Errorf("the login user %s does not exist on %s. host prepare does not create users: create it, with sudo, and prepare again", strings.TrimSpace(user), t.Describe())
+		return Account{}, fmt.Errorf("the login user %s does not exist on %s. host prepare does not create users: create it, with sudo, and prepare again", strings.TrimSpace(user), t.Describe())
 	}
 	fields := strings.Split(strings.TrimSpace(out), ":")
-	if len(fields) < 7 {
-		return "", 0, fmt.Errorf("the login user has no passwd entry on %s that paisans can read: %q", t.Describe(), strings.TrimSpace(out))
+	if len(fields) < 7 || fields[0] == "" {
+		return Account{}, fmt.Errorf("the login user has no passwd entry on %s that paisans can read: %q", t.Describe(), strings.TrimSpace(out))
 	}
-	if uid, err = strconv.Atoi(fields[2]); err != nil || uid < 0 {
-		return "", 0, fmt.Errorf("the login user's passwd entry on %s has no UID that paisans can read: %q", t.Describe(), strings.TrimSpace(out))
+	uid, err := strconv.Atoi(fields[2])
+	if err != nil || uid < 0 {
+		return Account{}, fmt.Errorf("the login user's passwd entry on %s has no UID that paisans can read: %q", t.Describe(), strings.TrimSpace(out))
 	}
-	home = strings.TrimSuffix(fields[5], "/")
+	home := strings.TrimSuffix(fields[5], "/")
 	if !strings.HasPrefix(home, "/") || strings.ContainsAny(home, " \t\n'\"") {
-		return "", 0, fmt.Errorf("the login user's home on %s is %q, not a plain absolute path", t.Describe(), home)
+		return Account{}, fmt.Errorf("the login user's home on %s is %q, not a plain absolute path", t.Describe(), home)
 	}
-	return home, uid, nil
+	return Account{Name: fields[0], UID: uid, Home: home}, nil
 }
 
 // UserUnitDir is where the login user's own systemd units live.

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
 	"github.com/paisans-software/paisans-cli/internal/registry"
@@ -180,10 +181,92 @@ func TestSiteRemoveRefusesARootLogin(t *testing.T) {
 					t.Errorf("ran %s before refusing", c)
 				}
 			}
+			recordPath, _ := admission.Path(dep.Token())
 			for _, r := range b.reads {
-				if r != registry.Path {
+				if r != registry.Path && r != recordPath {
 					t.Errorf("read %s before refusing", r)
 				}
+			}
+		})
+	}
+}
+
+// The host stage runs only as the deployment's user, the one its admission
+// record names: a login as anyone else, or a host with no record to say who
+// that is, is refused on every entry path before anything is read or
+// changed, naming the --ssh to run instead and the evict line. The
+// deployment's own user proceeds.
+func TestSiteRemoveRefusesALoginThatIsNotTheDeploymentsUser(t *testing.T) {
+	builds := map[string]func(*world) (*siteremove.Plan, error){
+		"full": func(w *world) (*siteremove.Plan, error) { return w.build("home-b", siteremove.Options{}) },
+		"forced": func(w *world) (*siteremove.Plan, error) {
+			dest, _ := config.ParseDestination("admin@192.0.2.12")
+			return siteremove.BuildForced(w.cfg, w.secrets, "home-b", dest, w.hosts["home-b"], siteremove.Options{DeleteData: true})
+		},
+		"by id": func(w *world) (*siteremove.Plan, error) {
+			dest, _ := config.ParseDestination("admin@192.0.2.12")
+			return siteremove.BuildForcedByID(dest, w.hosts["home-b"], ourID, siteremove.Options{DeleteData: true})
+		},
+	}
+	recordPath, _ := admission.Path(dep.Token())
+	quiet := func(t *testing.T, b *host) {
+		t.Helper()
+		for _, c := range b.commands {
+			if c != "true" && !strings.Contains(c, "getent passwd") && !strings.Contains(c, "ip -br addr") {
+				t.Errorf("ran %s before refusing", c)
+			}
+		}
+		for _, r := range b.reads {
+			if r != registry.Path && r != recordPath {
+				t.Errorf("read %s before refusing", r)
+			}
+		}
+	}
+	for name, build := range builds {
+		t.Run(name+", another user", func(t *testing.T) {
+			w := setup(t)
+			b := w.hosts["home-b"]
+			b.loginName = "admin"
+			_, err := build(w)
+			if err == nil {
+				t.Fatal("a login as admin was not refused")
+			}
+			for _, want := range []string{"logs in as admin", "not the deployment's user ubuntu", "Nothing was changed", "--ssh ubuntu@", "sudo paisans host evict --deployment " + ourID + " --user ubuntu --execute"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("no %q in: %v", want, err)
+				}
+			}
+			quiet(t, b)
+		})
+		t.Run(name+", no record", func(t *testing.T) {
+			if name == "by id" {
+				t.Skip("--id finds the deployment by its registry entry; Task 13 reads the record there")
+			}
+			w := setup(t)
+			b := w.hosts["home-b"]
+			delete(b.files, recordPath)
+			_, err := build(w)
+			if err == nil {
+				t.Fatal("a host with no admission record was not refused")
+			}
+			for _, want := range []string{"no admission record", "Nothing was changed", "sudo paisans host evict --deployment " + ourID} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("no %q in: %v", want, err)
+				}
+			}
+			quiet(t, b)
+		})
+		t.Run(name+", the deployment's user", func(t *testing.T) {
+			w := setup(t)
+			p, err := build(w)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if p.Evict != siteremove.EvictLine(dep, "ubuntu") {
+				t.Errorf("Evict = %q", p.Evict)
+			}
+			if err := siteremove.Execute(p); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}
@@ -263,7 +346,7 @@ func TestDeleteDataLeavesNothingUnderTheStateDir(t *testing.T) {
 func TestTheKeyRecordIsDeletedWithoutTheLock(t *testing.T) {
 	w := setup(t)
 	b := w.hosts["home-b"]
-	dest, _ := config.ParseDestination("deploy@192.0.2.12")
+	dest, _ := config.ParseDestination("ubuntu@192.0.2.12")
 	if err := siteremove.Execute(forced(t, w, w.cfg, "home-b", dest, siteremove.Options{})); err != nil {
 		t.Fatal(err)
 	}
@@ -302,8 +385,10 @@ func TestThePlanCarriesTheEvictLine(t *testing.T) {
 	if !strings.Contains(strings.Join(gone.Kept, "\n"), want) {
 		t.Errorf("--host-gone: kept %q", gone.Kept)
 	}
-	dest, _ := config.ParseDestination("deploy@192.0.2.12")
-	if p := forced(t, w, w.cfg, "home-b", dest, siteremove.Options{}); p.Evict != siteremove.EvictLine(dep, "deploy") {
+	// --force names the user the admission record names, which the login
+	// must be.
+	dest, _ := config.ParseDestination("ubuntu@192.0.2.12")
+	if p := forced(t, w, w.cfg, "home-b", dest, siteremove.Options{}); p.Evict != siteremove.EvictLine(dep, "ubuntu") {
 		t.Errorf("--force: Evict = %q", p.Evict)
 	}
 }

@@ -67,6 +67,41 @@ func TestSiteRemoveDeletesItsSiteFileOnly(t *testing.T) {
 	}
 }
 
+// A web server entry whose path is not clean is never read or deleted: the
+// manifest is the deployment user's own file. It is kept and reported, and
+// the clean entry beside it still goes.
+func TestAnUncleanSiteFileIsKept(t *testing.T) {
+	w := setup(t)
+	web := webOn(t, w, "watch")
+	h := w.hosts["watch"]
+	bad := webDir + "paisans.d/../../../etc/passwd"
+	var m render.Manifest
+	if err := json.Unmarshal([]byte(h.files[dep.Manifest()]), &m); err != nil {
+		t.Fatal(err)
+	}
+	m.WebServer = append(m.WebServer, render.ManifestWebServer{App: "health", Path: bad, SHA256: sum("x"), Server: "caddy", Container: "caddy-1", Config: "/etc/caddy/Caddyfile"})
+	data, _ := json.Marshal(m)
+	h.files[dep.Manifest()] = string(data)
+	p := forced(t, w, w.cfg, "watch", w.cfg.Sites["watch"].Destination(), siteremove.Options{})
+	if strings.Contains(printed(p), bad) {
+		t.Errorf("the plan names %s:\n%s", bad, printed(p))
+	}
+	if !strings.Contains(strings.Join(p.Kept, "\n"), bad+": not a clean path") {
+		t.Errorf("kept %q", p.Kept)
+	}
+	if err := siteremove.Execute(p); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range append(append([]string{}, h.commands...), web.Asked...) {
+		if strings.Contains(c, "../") {
+			t.Errorf("ran %s", c)
+		}
+	}
+	if _, ok := web.Files[siteFile]; ok {
+		t.Error("the clean site file stayed")
+	}
+}
+
 // A removal the web server refuses puts the file back and stops the run,
 // with the manifest still proving the file this deployment's, so a run
 // again resumes.

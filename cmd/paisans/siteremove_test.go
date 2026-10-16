@@ -6,7 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/dns"
@@ -162,7 +164,7 @@ func TestForcedOnAnEmptyHostSaysNothingToDo(t *testing.T) {
 func TestForcedRunReportsAGatewayItCouldNotReach(t *testing.T) {
 	savedSite, savedReg := removeSiteHost, registryHost
 	t.Cleanup(func() { removeSiteHost, registryHost = savedSite, savedReg })
-	quiet := runningHost{failingHost{match: "\x00"}}
+	quiet := admittedRunning{runningHost{failingHost{match: "\x00"}}}
 	removeSiteHost = func(string, config.Site) apply.Transport { return quiet }
 	registryHost = func(string, config.Site, string) registry.Runner { return &recordFake{down: true} }
 	var err error
@@ -202,7 +204,38 @@ func (h idHost) ReadFile(path string) (string, bool, error) {
 	if path == registry.Path {
 		return h.registry, true, nil
 	}
+	return admittedRunning{h.runningHost}.ReadFile(path)
+}
+
+// admittedRunning is a running host that admitted the fixture deployment
+// as its login user, ubuntu, whom site remove cleans as.
+type admittedRunning struct{ runningHost }
+
+func (h admittedRunning) ReadFile(path string) (string, bool, error) {
+	if p, _ := admission.Path("f2a9"); path == p {
+		return ubuntuRecord(), true, nil
+	}
 	return h.runningHost.ReadFile(path)
+}
+
+// ubuntuRecord is the fixture deployment's admission record naming ubuntu,
+// the user every fake host's passwd entry answers for the login.
+func ubuntuRecord() string {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		panic(err)
+	}
+	req, err := admission.Build(cfg, "home-a")
+	if err != nil {
+		panic(err)
+	}
+	rec := admission.NewRecord(req, req.Grants, "", time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC))
+	rec.User = "ubuntu"
+	b, err := admission.EncodeRecord(rec)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
 }
 
 // cleaningHost is an idHost holding one unit of the deployment's in its
@@ -255,7 +288,9 @@ func TestSiteRemoveByIDWarnsThatDNSWasNotModified(t *testing.T) {
 func TestForcedRemovalOfAnUndeclaredSiteMakesNoProvider(t *testing.T) {
 	savedSite, savedReg, savedDNS := removeSiteHost, registryHost, dnsProviderFor
 	t.Cleanup(func() { removeSiteHost, registryHost, dnsProviderFor = savedSite, savedReg, savedDNS })
-	removeSiteHost = func(string, config.Site) apply.Transport { return runningHost{failingHost{match: "\x00"}} }
+	removeSiteHost = func(string, config.Site) apply.Transport {
+		return admittedRunning{runningHost{failingHost{match: "\x00"}}}
+	}
 	registryHost = func(string, config.Site, string) registry.Runner { return &recordFake{} }
 	dnsProviderFor = func(string, string) (dns.Provider, error) {
 		t.Error("a DNS provider was made")
@@ -293,7 +328,7 @@ func TestSiteRemoveByIDEndsNamingTheDeployment(t *testing.T) {
 		t.Errorf("no result %q in:\n%s", want, rec.Lines())
 	}
 	// Then the line the host's owner runs to remove what is root's.
-	if !rec.Has("note", "the host's owner finishes on watch") || !strings.Contains(rec.Lines(), "    sudo paisans host evict --deployment "+monitorID+" --user admin --execute") {
+	if !rec.Has("note", "the host's owner finishes on watch") || !strings.Contains(rec.Lines(), "    sudo paisans host evict --deployment "+monitorID+" --user ubuntu --execute") {
 		t.Errorf("no evict line in:\n%s", rec.Lines())
 	}
 }

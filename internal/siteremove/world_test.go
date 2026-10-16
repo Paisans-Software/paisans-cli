@@ -162,8 +162,10 @@ type host struct {
 	// filesAnswer, when set, rewrites the answer to the probe that reads the
 	// manifest's files.
 	filesAnswer func(string) (string, error)
-	// loginRoot makes the login user root, as --ssh root@host does.
+	// loginRoot makes the login user root, as --ssh root@host does, and
+	// loginName another unprivileged user than the deployment's.
 	loginRoot bool
+	loginName string
 	// web is the operator's web server, when the host runs one: the
 	// commands writing or removing a file under webDir, those run in its
 	// container and its own on the host go to it.
@@ -726,6 +728,9 @@ func (h *host) Run(command string) (string, error) {
 	case strings.Contains(command, `getent passwd "$u"`):
 		if h.loginRoot {
 			return "root:x:0:0:root:/root:/bin/bash\n", nil
+		}
+		if h.loginName != "" {
+			return h.loginName + ":x:1001:1001::/home/" + h.loginName + ":/bin/bash\n", nil
 		}
 		return "ubuntu:x:1000:1000::/home/ubuntu:/bin/bash\n", nil
 	case strings.Contains(command, `for f in `+userUnits+`/paisans-f2a9-*; do [ -e "$f" ] && echo`):
