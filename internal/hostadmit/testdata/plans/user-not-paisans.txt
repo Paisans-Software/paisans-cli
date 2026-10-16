@@ -1,0 +1,39 @@
+admit site home-b of f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01 as community on fake (ubuntu 24.04)
+
+step 1: start community's manager after the mesh
+  user: order user@1002.service after wg-quick@psns-f2a9 at boot, so a container that publishes on the mesh address finds it; a manager running now is not restarted, and takes it at its next start
+  write /etc/systemd/system/user@1002.service.d/paisans-mesh.conf mode 0644:
+    | # Written by paisans host admit for deployment f2a9; paisans host evict
+    | # removes it. The user's manager, its Docker daemon and its containers
+    | # start after the mesh at boot.
+    | [Unit]
+    | Wants=wg-quick@psns-f2a9.service
+    | After=wg-quick@psns-f2a9.service
+  run:
+    $ systemctl daemon-reload
+
+step 2: delegate cgroups to users
+  delegation: let every user's manager delegate cpu cpuset io memory pids, for compose's limits; written before community's manager first starts
+  write /etc/systemd/system/user@.service.d/delegate.conf mode 0644:
+    | # Written by paisans host admit. Shared by every admitted deployment;
+    | # paisans host evict removes it with the last of them.
+    | [Service]
+    | Delegate=cpu cpuset io memory pids
+  run:
+    $ systemctl daemon-reload
+
+step 3: enable linger for community
+  linger: run community's manager, its Docker daemon and its timers without a login, and at boot
+  run:
+    $ loginctl enable-linger community
+
+step 4: start community's manager
+  linger: start user@1002.service and wait for it, which does nothing to a manager already running
+  run:
+    $ systemctl start user@1002.service
+
+present: user: community exists, uid 1002, in no privileged group
+present: user: community holds 231072-296607 in /etc/subuid
+present: user: community holds 231072-296607 in /etc/subgid
+warning: user: community already exists and is not paisans-f2a9
+  admit adds the operators' keys to community's authorized_keys and runs the deployment as community: check that this account is meant for the deployment and nothing else.

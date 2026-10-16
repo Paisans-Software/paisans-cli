@@ -180,9 +180,12 @@ var parts = []part{
 	// 2. docker
 	// 3. apparmor
 	// 4. user
+	{"user", planUser},
 	// 5. delegation
+	{"delegation", planDelegation},
 	// 6. egress
 	// 7. linger
+	{"linger", planLinger},
 	// 8. bridge netfilter
 	// 9. daemon
 	// 10. deployment directory

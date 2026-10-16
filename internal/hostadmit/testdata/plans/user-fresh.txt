@@ -1,0 +1,41 @@
+admit site vm of f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01 as paisans-f2a9 on fake (ubuntu 24.04)
+
+step 1: create user paisans-f2a9
+  user: create paisans-f2a9 with a home, whose subordinate ID ranges useradd allocates
+  run:
+    $ useradd --create-home --shell /bin/bash paisans-f2a9
+
+step 2: start paisans-f2a9's manager after the mesh
+  user: order user@<uid>.service after wg-quick@psns-f2a9 at boot, so a container that publishes on the mesh address finds it; a manager running now is not restarted, and takes it at its next start
+  provisional: run once the user exists
+  write /etc/systemd/system/user@<uid>.service.d/paisans-mesh.conf mode 0644:
+    | # Written by paisans host admit for deployment f2a9; paisans host evict
+    | # removes it. The user's manager, its Docker daemon and its containers
+    | # start after the mesh at boot.
+    | [Unit]
+    | Wants=wg-quick@psns-f2a9.service
+    | After=wg-quick@psns-f2a9.service
+  run:
+    $ systemctl daemon-reload
+
+step 3: delegate cgroups to users
+  delegation: let every user's manager delegate cpu cpuset io memory pids, for compose's limits; written before paisans-f2a9's manager first starts
+  write /etc/systemd/system/user@.service.d/delegate.conf mode 0644:
+    | # Written by paisans host admit. Shared by every admitted deployment;
+    | # paisans host evict removes it with the last of them.
+    | [Service]
+    | Delegate=cpu cpuset io memory pids
+  run:
+    $ systemctl daemon-reload
+
+step 4: enable linger for paisans-f2a9
+  linger: run paisans-f2a9's manager, its Docker daemon and its timers without a login, and at boot
+  run:
+    $ loginctl enable-linger paisans-f2a9
+
+step 5: start paisans-f2a9's manager
+  linger: start user@<uid>.service and wait for it, which does nothing to a manager already running
+  provisional: run once the user exists
+  run:
+    $ systemctl start user@<uid>.service
+

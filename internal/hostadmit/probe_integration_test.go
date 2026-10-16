@@ -69,6 +69,24 @@ func TestProbeOnABlankHost(t *testing.T) {
 	}
 }
 
+// The user's mesh drop-in is read at the path its UID names, summed as
+// any file admit writes, and a link there is seen as a link.
+func TestProbeReadsTheMeshDropIn(t *testing.T) {
+	const content = "[Unit]\nAfter=wg-quick@psns-f2a9.service\n"
+	setup := "useradd -u 1001 paisans-f2a9 && mkdir -p /etc/systemd/system/user@1001.service.d && " +
+		"printf '" + strings.ReplaceAll(content, "\n", "\\n") + "' > /etc/systemd/system/user@1001.service.d/paisans-mesh.conf && " +
+		"chmod 644 /etc/systemd/system/user@1001.service.d/paisans-mesh.conf"
+	f := probeIn(t, setup, "paisans-f2a9", "")
+	got := f.Files[meshDropInPath("1001")]
+	if !got.Present || got.Link || got.Sum != sha(content) || got.Mode != "644" || got.UID != 0 {
+		t.Errorf("mesh drop-in: %+v", got)
+	}
+	f = probeIn(t, "useradd -u 1001 paisans-f2a9 && mkdir -p /etc/systemd/system/user@1001.service.d && ln -s /etc/shadow /etc/systemd/system/user@1001.service.d/paisans-mesh.conf", "paisans-f2a9", "")
+	if got := f.Files[meshDropInPath("1001")]; !got.Link {
+		t.Errorf("a linked mesh drop-in: %+v", got)
+	}
+}
+
 // With nftables and iptables installed: an owner's own nft table is the
 // owner's firewall, Tailscale-shaped iptables-nft rules are not, and a rule
 // only iptables-legacy holds, which nft never shows, is read as legacy.

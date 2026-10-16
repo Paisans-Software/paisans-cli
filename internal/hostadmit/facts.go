@@ -1,7 +1,9 @@
 package hostadmit
 
 import (
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"fmt"
 	"strconv"
 	"strings"
@@ -161,6 +163,12 @@ func probe(t apply.Transport, d deployment.Deployment, in Input) (Facts, error) 
 		return Facts{}, err
 	}
 	return parseFacts(out, in.Request.User)
+}
+
+// sha is content's SHA-256 in hex, as the probe prints a file's sum.
+func sha(content string) string {
+	s := sha256.Sum256([]byte(content))
+	return hex.EncodeToString(s[:])
 }
 
 // probeScript is the probe rendered for d and in. Every value rendered in
@@ -363,6 +371,13 @@ const (
 	sysctlPath       = "/etc/sysctl.d/60-paisans.conf"
 	sysctlBeforePath = admission.Dir + "/sysctl.before"
 )
+
+// meshDropInPath is the user's drop-in that orders its manager after the
+// mesh. Its path holds the user's UID, which the probe learns, so the probe
+// reads it from its own list (userfiles) rather than from probedFiles.
+func meshDropInPath(uid string) string {
+	return "/etc/systemd/system/user@" + uid + ".service.d/paisans-mesh.conf"
+}
 
 // sudoersPath is the deployment's sudoers line, egressFilePath its egress
 // table's file, watchdogRulePath its watchdog's udev rule.
