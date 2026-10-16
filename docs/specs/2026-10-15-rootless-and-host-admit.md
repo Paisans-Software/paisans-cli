@@ -279,8 +279,9 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    boot.
 5. **cgroup delegation.** `/etc/systemd/system/user@.service.d/delegate.conf`
    with `Delegate=cpu cpuset io memory pids`, then `daemon-reload`. Ubuntu
-   24.04 already delegates `cpu`, `memory` and `pids`, so compose CPU and
-   memory limits work without it; it adds `cpuset` and `io` (*Observed*).
+   24.04 already delegates `cpu`, `memory` and `pids`, so there it adds
+   `cpuset` and `io`; Ubuntu 22.04 delegates only `memory` and `pids`, so
+   there compose CPU limits need it too (*Observed* on both).
    Admit writes it before the user's manager first starts and never
    restarts `user@<uid>.service` for a user that is already running,
    because that restarts the user's daemon and every container in it. The
@@ -1063,6 +1064,9 @@ its.
   seconds.
 * **R5, delegation.** Ubuntu 24.04 delegated `cpu memory pids` by default
   and `--cpus 0.5 --memory 64m` worked; the drop-in added `cpuset io`.
+  Ubuntu 22.04 (systemd 249, 2026-10-16) delegated `memory pids` by
+  default, and with the drop-in a user's manager had `cpuset cpu io memory
+  pids`.
   Restarting `user@` restarted the user's daemon: a container with a
   restart policy came back, one without did not.
 * **R6, source address.** The daemon would not start with

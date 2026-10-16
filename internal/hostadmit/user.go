@@ -406,13 +406,36 @@ func planMeshDropIn(p *planner) error {
 	return nil
 }
 
-// delegateConf is the drop-in that lets every user's manager hand cpuset
-// and io, besides what Ubuntu delegates already, to the containers below
-// it (spec, Observed R5). It is host wide, shared by every admitted
-// deployment.
+// delegateConf is the drop-in that lets every user's manager hand cpu,
+// cpuset, io, memory and pids to the containers below it (spec, Observed
+// R5). It is host wide, shared by every admitted deployment.
 const delegateConf = "# Written by paisans host admit. Shared by every admitted deployment;\n" +
 	"# paisans host evict removes it with the last of them.\n" +
 	"[Service]\nDelegate=cpu cpuset io memory pids\n"
+
+// delegatedByDefault is what each Ubuntu release's user@.service delegates
+// with no drop-in: systemd 255 on 24.04 delegates cpu, memory and pids,
+// systemd 249 on 22.04 only memory and pids (both observed).
+var delegatedByDefault = map[string][]string{
+	"22.04": {"memory", "pids"},
+	"24.04": {"cpu", "memory", "pids"},
+}
+
+// undelegated names the controllers delegateConf adds to what the host's
+// release delegates by default, as "cpu, cpuset and io": what compose
+// limits lack without it.
+func undelegated(host hostprep.OSRelease) string {
+	var out []string
+	for _, c := range []string{"cpu", "cpuset", "io", "memory", "pids"} {
+		if !slices.Contains(delegatedByDefault[host.VersionID], c) {
+			out = append(out, c)
+		}
+	}
+	if len(out) == 1 {
+		return out[0]
+	}
+	return strings.Join(out[:len(out)-1], ", ") + " and " + out[len(out)-1]
+}
 
 // planDelegation writes the drop-in before the user's manager first starts.
 // A manager already running gets it at its next start: restarting it would
@@ -430,7 +453,7 @@ func planDelegation(p *planner) error {
 	case f.Present && f.Sum != sha(delegateConf):
 		p.plan.Foreign = append(p.plan.Foreign, "delegation: "+delegatePath)
 		p.warn("delegation: "+delegatePath+" is not paisans', and is left as it is",
-			"It is the host's own drop-in for every user's manager. Compose cpuset and io limits work only if it delegates cpuset and io.")
+			"It is the host's own drop-in for every user's manager. Compose "+undelegated(p.host)+" limits work only if it delegates "+undelegated(p.host)+".")
 		return nil
 	}
 	when := "written before " + p.in.Request.User + "'s manager first starts"
@@ -446,7 +469,7 @@ func planDelegation(p *planner) error {
 	})
 	if p.f.User.ManagerActive {
 		p.warn("delegation reaches "+p.in.Request.User+"'s manager at its next start",
-			"Its manager is running, and restarting it would restart its Docker daemon and every container in it, so admit does not. cpuset and io limits apply after the host's next reboot.")
+			"Its manager is running, and restarting it would restart its Docker daemon and every container in it, so admit does not. "+undelegated(p.host)+" limits apply after the host's next reboot.")
 	}
 	return nil
 }
