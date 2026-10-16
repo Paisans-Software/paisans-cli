@@ -108,6 +108,17 @@ type UserFacts struct {
 	// HomeUID), link, other or absent; "" when no line was read.
 	HomeKind, HomePath string
 	HomeUID            int
+	// HomeAbove is how the directories above HomePath stand, as the probe's
+	// above prints it: safe, link or unsafe; "" when no line was read.
+	HomeAbove string
+	// GIDs are every group the user is in, by number, its primary first.
+	GIDs []int
+	// GroupTaken is a group of the user's name, for a user not made yet;
+	// SudoNames each sudoers file, admit's own aside, that names it then.
+	GroupTaken bool
+	SudoNames  []string
+	// SudoRS is sudo being sudo-rs, whose sudo -l lists no Defaults.
+	SudoRS bool
 	Linger             bool
 	ManagerActive      bool
 	// SudoRead is sudo -l -U read for the user, or sudo absent. From
@@ -149,21 +160,27 @@ type DirState struct {
 
 // probeData is what probe.sh.tmpl is rendered with.
 type probeData struct {
-	User, Token, Prefix, EgressUnit, EgressTable, DataParent, MeshUnit string
+	User, Token, Prefix, EgressUnit, EgressTable, DataParent, MeshUnit, Sudoers string
 	Files, Dirs, Counted                                               []string
 }
 
 // probedFiles are the files admit writes as root, whose state the probe
 // reads; each task that writes one adds its path here.
-func probedFiles(d deployment.Deployment, in Input) []string {
-	helper, _ := apply.WGHelper{Iface: d.Interface()}.Path()
-	record, _ := admission.Path(d.Token())
+func probedFiles(d deployment.Deployment, in Input) ([]string, error) {
+	helper, err := apply.WGHelper{Iface: d.Interface()}.Path()
+	if err != nil {
+		return nil, err
+	}
+	record, err := admission.Path(d.Token())
+	if err != nil {
+		return nil, err
+	}
 	return []string{
 		delegatePath, modulesLoadPath, sysctlPath, sysctlBeforePath,
 		helper, sudoersPath(d), egressFilePath(d), "/etc/systemd/system/" + d.EgressUnit(),
 		watchdogRulePath(d), "/etc/systemd/system/" + d.Prefix() + "-watchdog.service",
 		record, d.WireGuardInstalled(),
-	}
+	}, nil
 }
 
 // countedDirs are the directories admit creates for every deployment,
@@ -206,11 +223,15 @@ func probeScript(d deployment.Deployment, in Input) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	files, err := probedFiles(d, in)
+	if err != nil {
+		return "", err
+	}
 	var script strings.Builder
 	if err := tmpl.Execute(&script, probeData{
 		User: in.Request.User, Token: d.Token(), Prefix: d.Prefix(),
 		EgressUnit: d.EgressUnit(), EgressTable: d.EgressTable(), DataParent: in.Flags.DataDir,
-		MeshUnit: d.WireGuardUnit(), Files: probedFiles(d, in), Dirs: probedDirs(d, in), Counted: countedDirs(),
+		MeshUnit: d.WireGuardUnit(), Sudoers: sudoersPath(d), Files: files, Dirs: probedDirs(d, in), Counted: countedDirs(),
 	}); err != nil {
 		return "", err
 	}
@@ -276,6 +297,25 @@ func parseFacts(out, user string) (Facts, error) {
 			sudoL = append(sudoL, v)
 		case "groups":
 			f.User.Groups = strings.Fields(v)
+		case "gids":
+			for _, g := range strings.Fields(v) {
+				n, ok := id(g)
+				if !ok {
+					return f, fmt.Errorf("unreadable gids line %q", v)
+				}
+				f.User.GIDs = append(f.User.GIDs, n)
+			}
+		case "group-taken":
+			f.User.GroupTaken = v == "yes"
+		case "sudo-names":
+			f.User.SudoNames = append(f.User.SudoNames, v)
+		case "sudo-kind":
+			f.User.SudoRS = v == "rs"
+		case "home-above":
+			if !slices.Contains([]string{"safe", "link", "unsafe"}, v) {
+				return f, fmt.Errorf("unreadable home-above line %q", v)
+			}
+			f.User.HomeAbove = v
 		case "group":
 			f.User.Group = v
 		case "linger":

@@ -57,20 +57,42 @@ func userCommand(user, home, uid, command string) string {
 		" DOCKER_HOST=unix:///run/user/" + uid + "/docker.sock sh -c " + apply.ShellQuote(command)
 }
 
-// planUser creates the user, or checks the one that exists: never root,
-// in no privileged group, with one subordinate range of each kind, at least
-// 65,536 long and overlapping no other user's, since the egress table
-// trusts the whole range as the user's. Then it orders the user's manager
-// after the mesh.
+// uidMin is the lowest UID of a login account, Ubuntu's UID_MIN: below it
+// are root and the system accounts.
+const uidMin = 1000
+
+// planUser creates the user, or checks the one that exists: never root
+// nor a system account, in no privileged group nor GID 0, with one
+// subordinate range of each kind, at least 65,536 long and overlapping no
+// other user's, since the egress table trusts the whole range as the
+// user's. Before useradd it refuses what useradd would trip over or hand
+// the new user. Then it orders the user's manager after the mesh.
 func planUser(p *planner) error {
 	req := p.in.Request
 	if prob := config.DeploymentUserProblem(req.User, req.Deployment); prob != "" {
 		return fmt.Errorf("user %s", prob)
 	}
 	u := p.f.User
+	if u.SudoRS {
+		return fmt.Errorf("sudo on this host is sudo-rs, whose sudo -l does not list the Defaults that apply to a user, so admit cannot tell whether one passes %s's environment to the WireGuard helper, which runs as root. Nothing was changed", req.User)
+	}
+	if u.HomeAbove == "link" || u.HomeAbove == "unsafe" {
+		what := map[string]string{"link": "a link", "unsafe": "a directory that is not root's, or that its group or others can write"}[u.HomeAbove]
+		return fmt.Errorf("%s's home %s is below %s, so what admit and useradd put there is not what the path names. Make every directory above it a real directory, owned by root and writable by root alone, and admit again. Nothing was changed", req.User, ui.Visible(u.HomePath), what)
+	}
 	if !u.Exists {
 		if u.HomeKind != "absent" {
 			return homeExists(req.User, u)
+		}
+		if u.GroupTaken {
+			return fmt.Errorf("a group named %s already exists, and useradd, which makes the user's own group of that name, would fail. Remove it (groupdel %s) if nothing needs it, or name another user in the request, and admit again. Nothing was changed", req.User, req.User)
+		}
+		if len(u.SudoNames) > 0 {
+			var files []string
+			for _, f := range u.SudoNames {
+				files = append(files, ui.Visible(f))
+			}
+			return fmt.Errorf("sudoers already names %s, in %s: what an earlier account of that name was granted would reach the user admit makes. Remove those lines and admit again. Nothing was changed", req.User, strings.Join(files, ", "))
 		}
 		p.step(Step{
 			Title:    "create user " + req.User,
@@ -83,11 +105,17 @@ func planUser(p *planner) error {
 	if u.UID == 0 {
 		return fmt.Errorf("%s has uid 0, which is root, and a deployment's user is never root. Nothing was changed", req.User)
 	}
+	if u.UID < uidMin {
+		return fmt.Errorf("%s has uid %d, below %d, so it is a system account, and a deployment's user is an account of its own. Name another user in the request, and admit again. Nothing was changed", req.User, u.UID, uidMin)
+	}
 	var privileged []string
 	for _, g := range append([]string{u.Group}, u.Groups...) {
 		if slices.Contains(PrivilegedGroups, g) && !slices.Contains(privileged, g) {
 			privileged = append(privileged, g)
 		}
+	}
+	if u.GID == 0 || slices.Contains(u.GIDs, 0) {
+		privileged = append(privileged, "a group of GID 0, root's")
 	}
 	if len(privileged) > 0 {
 		return fmt.Errorf("%s is in %s, which reaches past the user (docker is your system daemon, which is root; sudo, wheel, admin and lxd reach root; adm and systemd-journal read every user's logs). Remove it from them (gpasswd -d %s <group>), or name another user in the request, and admit again. Nothing was changed", req.User, strings.Join(privileged, ", "), req.User)
@@ -177,7 +205,10 @@ func sudoRules(p *planner) error {
 	if !u.SudoRead {
 		return fmt.Errorf("sudo's rules for %s could not be read (sudo -l -U %s), so admit cannot tell what they grant. Nothing was changed", user, user)
 	}
-	helper, _ := apply.WGHelper{Iface: p.d.Interface()}.Path()
+	helper, err := apply.WGHelper{Iface: p.d.Interface()}.Path()
+	if err != nil {
+		return err
+	}
 	var rules, defaults []string
 	for _, r := range u.SudoRules {
 		if r != "(root) NOPASSWD: "+helper {
@@ -192,13 +223,17 @@ func sudoRules(p *planner) error {
 	for _, d := range u.SudoSpecific {
 		defaults = append(defaults, "- "+ui.Visible(d)+": set for one runas user or command alone")
 	}
-	switch {
-	case len(rules) > 0:
-		return fmt.Errorf("sudo grants %s a rule beyond admit's own, which reaches past the user:\n%s\nRemove them (sudo -l -U %s names them; look in /etc/sudoers and /etc/sudoers.d), or name another user in the request, and admit again. Nothing was changed", user, strings.Join(rules, "\n"), user)
-	case len(defaults) > 0:
-		return fmt.Errorf("sudo's Defaults for %s would let it pass its own environment, or another root, to admit's helper, which runs as root:\n%s\nRemove them (sudo -l -U %s names them; look in /etc/sudoers and /etc/sudoers.d), or name another user in the request, and admit again. Nothing was changed", user, strings.Join(defaults, "\n"), user)
+	var found []string
+	if len(rules) > 0 {
+		found = append(found, "sudo grants "+user+" a rule beyond admit's own, which reaches past the user:\n"+strings.Join(rules, "\n"))
 	}
-	return nil
+	if len(defaults) > 0 {
+		found = append(found, "sudo's Defaults for "+user+" would let it pass its own environment, or another root, to admit's helper, which runs as root:\n"+strings.Join(defaults, "\n"))
+	}
+	if len(found) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s\nRemove them (sudo -l -U %s names them; look in /etc/sudoers and /etc/sudoers.d, and for a Defaults:%s line), or name another user in the request, and admit again. Nothing was changed", strings.Join(found, "\n"), user, user)
 }
 
 // stockSecurePath is the directories of Ubuntu's secure_path, each
@@ -212,7 +247,8 @@ var stockSecurePath = []string{"/usr/local/sbin", "/usr/local/bin", "/usr/sbin",
 // a secure_path outside root's directories, exempt_group), a root
 // directory or working directory of its choosing (runchroot, runcwd), or
 // open descriptors (closefrom_override). Stock Ubuntu's env_reset,
-// mail_badpass, secure_path and use_pty pass, as does anything else.
+// mail_badpass, secure_path and use_pty pass, as does env_delete, which
+// only takes variables away, and anything else.
 func sudoDefaultProblem(entry string) string {
 	name := strings.TrimPrefix(entry, "!")
 	value := ""
@@ -225,7 +261,7 @@ func sudoDefaultProblem(entry string) string {
 		if negated {
 			return "the user's whole environment reaches the helper"
 		}
-	case "env_keep", "env_check", "env_file", "setenv", "restricted_env_file", "env_delete":
+	case "env_keep", "env_check", "env_file", "setenv", "restricted_env_file":
 		return "the user's variables reach the helper"
 	case "secure_path":
 		if negated {
@@ -311,7 +347,10 @@ func ours(f FileState, content string) bool {
 
 // planMeshDropIn writes the user's mesh drop-in and reloads systemd. It
 // never restarts the user's manager: the drop-in orders its next start,
-// which for a manager running now is the host's next boot.
+// which for a manager running now is the host's next boot. The drop-in
+// wants the mesh unit too, so a manager that starts before the mesh's conf
+// exists, as on a fresh host, tries the unit and leaves it failed until
+// the helper brings the mesh up; a Wants= failure never stops the manager.
 func planMeshDropIn(p *planner) error {
 	path, content := meshDropInPath(uidOf(p)), meshConf(p)
 	f := p.f.Files[path]
@@ -324,7 +363,7 @@ func planMeshDropIn(p *planner) error {
 	}
 	p.step(Step{
 		Title:       "start " + p.in.Request.User + "'s manager after the mesh",
-		Describe:    "user: order user@" + uidOf(p) + ".service after wg-quick@" + p.d.Interface() + " at boot, so a container that publishes on the mesh address finds it; a manager running now is not restarted, and takes it at its next start",
+		Describe:    "user: order user@" + uidOf(p) + ".service after wg-quick@" + p.d.Interface() + " at boot, so a container that publishes on the mesh address finds it; a manager running now is not restarted, and takes it at its next start. Until the mesh's conf is written, a start of the manager leaves wg-quick@" + p.d.Interface() + " failed, without stopping the manager",
 		File:        &hostprep.File{Path: path, Content: content, Mode: 0o644},
 		Command:     "systemctl daemon-reload",
 		Kinds:       []string{"user"},

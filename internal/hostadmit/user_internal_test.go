@@ -43,8 +43,9 @@ func TestTheProbeReadsTheMeshDropIn(t *testing.T) {
 	}
 }
 
-// readSudo reads sudo -l as ubuntu:24.04 prints it, its Defaults wrapped
-// over three lines, into each entry, each rule and each specific line.
+// readSudo reads sudo -l as ubuntu:24.04 prints it off a terminal, its
+// Defaults on one line, into each entry, each rule and each specific
+// line; and as it prints them on a terminal, wrapped after a comma.
 func TestReadSudoReadsUbuntusListing(t *testing.T) {
 	b, err := os.ReadFile("testdata/sudo/setenv-helper.txt")
 	if err != nil {
@@ -57,6 +58,12 @@ func TestReadSudoReadsUbuntusListing(t *testing.T) {
 		!slices.Equal(u.SudoRules, []string{"(root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-f2a9"}) ||
 		!slices.Equal(u.SudoSpecific, []string{"Defaults!/usr/local/libexec/paisans/wg-psns-f2a9 setenv"}) {
 		t.Errorf("%+v", u)
+	}
+	u = UserFacts{}
+	readSudo(&u, []string{"Matching Defaults entries for paisans-f2a9 on host:", "    env_reset, mail_badpass,", `    secure_path=/usr/bin\:/bin,`, "    use_pty", "",
+		"User paisans-f2a9 may run the following commands on host:", "    (root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-f2a9"})
+	if !u.SudoRead || !slices.Equal(u.SudoDefaults, []string{"env_reset", "mail_badpass", `secure_path=/usr/bin\:/bin`, "use_pty"}) {
+		t.Errorf("wrapped Defaults: %+v", u)
 	}
 	u = UserFacts{}
 	readSudo(&u, []string{"Matching Defaults entries for paisans-f2a9 on host:", "    env_reset", "Something sudo never printed"})

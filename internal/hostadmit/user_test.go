@@ -416,3 +416,98 @@ func TestTheRootEquivalentGroupsAreListed(t *testing.T) {
 		t.Errorf("a user in disk: %v", err)
 	}
 }
+
+// What useradd would trip over, or hand the new user, is refused before
+// anything runs: a group of the user's name, which useradd makes for it;
+// sudoers lines left naming the name, outside admit's own file; a home
+// below a link or a directory another user can write; and sudo-rs, whose
+// sudo -l lists no Defaults, so admit cannot read what reaches its helper.
+func TestWhatTheNewUserWouldInheritIsRefusedFirst(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		host *fakeHost
+		want string
+	}{
+		{"a group of its name", current().with("group-taken", "yes"), "a group named paisans-f2a9 already exists"},
+		{"sudoers naming it", current().add("sudo-names", "/etc/sudoers.d/old").add("sudo-names", "/etc/sudoers"), "/etc/sudoers.d/old, /etc/sudoers"},
+		{"a home below a link", current().with("home-above", "link"), "/home/paisans-f2a9 is below a link"},
+		{"a home below another's directory", current().with("home-above", "unsafe"), "/home/paisans-f2a9 is below a directory"},
+		{"sudo-rs", current().with("sudo-kind", "rs"), "sudo-rs"},
+		{"sudo-rs for a user that exists", current().withUser().with("sudo-kind", "rs"), "sudo-rs"},
+		{"an existing user's home below a link", current().withUser().with("home-above", "link"), "/home/paisans-f2a9 is below a link"},
+	} {
+		h := c.host
+		_, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v", c.name, err)
+		}
+		if len(h.writes) != 0 || slices.ContainsFunc(h.ran, func(s string) bool { return strings.HasPrefix(s, "useradd") }) {
+			t.Errorf("%s: Build changed the host: %q", c.name, h.ran)
+		}
+	}
+}
+
+// A user whose primary group, or any group, is GID 0 is root's group
+// whatever it is named; a system account, below UID 1000, is no
+// deployment's user.
+func TestAUserInGIDZeroOrASystemAccountIsRefused(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		host *fakeHost
+		want string
+	}{
+		{"a primary group of GID 0", current().withUser().with("passwd", "paisans-f2a9:x:1001:0::/home/paisans-f2a9:/bin/bash").with("gids", "0"), "GID 0"},
+		{"a group of GID 0", current().withUser().with("gids", "1001 0"), "GID 0"},
+		{"a privileged primary group", current().withUser().with("group", "docker"), "is in docker"},
+		{"a system account", current().withUser().with("passwd", "paisans-f2a9:x:33:33::/home/paisans-f2a9:/bin/bash").with("home", "dir 33 /home/paisans-f2a9"), "a system account"},
+	} {
+		_, err := hostadmit.Build(c.host, input(t, "vm", hostadmit.Flags{}))
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v", c.name, err)
+		}
+	}
+}
+
+// Each kind of subordinate range is checked on its own: one shorter than
+// 65,536, two ranges, or a problem in /etc/subgid alone is refused.
+func TestEachSubordinateRangeIsChecked(t *testing.T) {
+	for _, c := range []struct{ name, kind, line, want string }{
+		{"a short range", "subuid", "paisans-f2a9:165536:1000", "has 165536-166535"},
+		{"two ranges", "subuid", "paisans-f2a9:300000:65536", "has 165536-231071, 300000-365535"},
+		{"a short subgid range", "subgid", "paisans-f2a9:165536:1000", "in /etc/subgid"},
+	} {
+		h := current().withUser()
+		if c.name != "two ranges" {
+			var kept [][2]string
+			for _, kv := range h.facts {
+				if kv[0] != c.kind || !strings.HasPrefix(kv[1], "paisans-f2a9:") {
+					kept = append(kept, kv)
+				}
+			}
+			h.facts = kept
+		}
+		h.add(c.kind, c.line)
+		_, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), "/etc/"+c.kind) {
+			t.Errorf("%s: %v", c.name, err)
+		}
+	}
+}
+
+// Every problem sudo's listing shows is named at once, a rule and a
+// Defaults entry alike, and the advice names a Defaults:<user> line,
+// where a per-user entry lives. env_delete, which only takes variables
+// away, passes.
+func TestEverySudoProblemIsNamedAtOnce(t *testing.T) {
+	_, err := hostadmit.Build(withSudo(current().withUser(), sudoFixture("setenv-user")+"    (root) /usr/bin/apt\n"), input(t, "vm", hostadmit.Flags{}))
+	if err == nil || !strings.Contains(err.Error(), "(root) /usr/bin/apt") || !strings.Contains(err.Error(), "setenv") || !strings.Contains(err.Error(), "Defaults:paisans-f2a9") {
+		t.Errorf("a rule and a default: %v", err)
+	}
+	listing := strings.Replace(sudoFixture("stock"), "use_pty", "use_pty, env_delete+=FOO", 1)
+	if !strings.Contains(listing, "env_delete") {
+		t.Fatalf("the stock fixture has no use_pty:\n%s", listing)
+	}
+	if _, err := hostadmit.Build(withSudo(current().withUser(), listing), input(t, "vm", hostadmit.Flags{})); err != nil {
+		t.Errorf("env_delete is refused: %v", err)
+	}
+}

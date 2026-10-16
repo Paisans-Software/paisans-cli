@@ -42,6 +42,7 @@ home= userfiles=
 if line=$(getent passwd "$u"); then
   say passwd "$line"
   say groups "$(id -Gn "$u")"
+  say gids "$(id -G "$u")"
   say group "$(id -gn "$u")"
   uid=$(id -u "$u")
   userfiles="$userfiles /etc/systemd/system/user@$uid.service.d/paisans-mesh.conf"
@@ -62,9 +63,21 @@ else
   say passwd absent
   homepath=$(useradd -D 2>/dev/null | sed -n 's/^HOME=//p')
   homepath=${homepath:-/home}/$u
+  # What useradd would trip over or hand the new user: a group of its
+  # name, which useradd makes for it, and a sudoers file, admit's own
+  # aside, that names it already.
+  if getent group "$u" >/dev/null 2>&1; then say group-taken yes; fi
+  for f in /etc/sudoers /etc/sudoers.d/*; do
+    if [ -f "$f" ] && [ "$f" != {{ q .Sudoers }} ] && grep -qwF -- "$u" "$f" 2>/dev/null; then say sudo-names "$f"; fi
+  done
 fi
+# sudo-rs lists no Defaults under sudo -l, so admit cannot read them.
+if command -v sudo >/dev/null 2>&1 && sudo -V 2>/dev/null | sed -n 1p | grep -q '^sudo-rs'; then say sudo-kind rs; fi
 # The user's home, or the one useradd would give a user not made yet: it
-# is stat'ed, never read inside.
+# is stat'ed, never read inside, and read without a trailing slash, which
+# would follow a link there.
+while [ "$homepath" != / ] && [ "${homepath%/}" != "$homepath" ]; do homepath=${homepath%/}; done
+say home-above "$(above "$homepath")"
 if [ -L "$homepath" ]; then say home "link 0 $homepath"
 elif [ -d "$homepath" ]; then say home "dir $(stat -c %u -- "$homepath") $homepath"
 elif [ -e "$homepath" ]; then say home "other 0 $homepath"

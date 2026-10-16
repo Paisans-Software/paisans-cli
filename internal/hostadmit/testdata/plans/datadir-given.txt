@@ -78,7 +78,7 @@ step 2: create /etc/paisans
     $ install -d -m 755 -o root -g root /etc/paisans
 
 step 3: start community's manager after the mesh
-  user: order user@1002.service after wg-quick@psns-f2a9 at boot, so a container that publishes on the mesh address finds it; a manager running now is not restarted, and takes it at its next start
+  user: order user@1002.service after wg-quick@psns-f2a9 at boot, so a container that publishes on the mesh address finds it; a manager running now is not restarted, and takes it at its next start. Until the mesh's conf is written, a start of the manager leaves wg-quick@psns-f2a9 failed, without stopping the manager
   write /etc/systemd/system/user@1002.service.d/paisans-mesh.conf mode 0644:
     | # Written by paisans host admit for deployment f2a9; paisans host evict
     | # removes it. The user's manager, its Docker daemon and its containers

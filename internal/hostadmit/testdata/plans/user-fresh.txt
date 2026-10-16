@@ -83,7 +83,7 @@ step 3: create user paisans-f2a9
     $ useradd --create-home --shell /bin/bash paisans-f2a9
 
 step 4: start paisans-f2a9's manager after the mesh
-  user: order user@<uid>.service after wg-quick@psns-f2a9 at boot, so a container that publishes on the mesh address finds it; a manager running now is not restarted, and takes it at its next start
+  user: order user@<uid>.service after wg-quick@psns-f2a9 at boot, so a container that publishes on the mesh address finds it; a manager running now is not restarted, and takes it at its next start. Until the mesh's conf is written, a start of the manager leaves wg-quick@psns-f2a9 failed, without stopping the manager
   provisional: run once the user exists
   write /etc/systemd/system/user@<uid>.service.d/paisans-mesh.conf mode 0644:
     | # Written by paisans host admit for deployment f2a9; paisans host evict
