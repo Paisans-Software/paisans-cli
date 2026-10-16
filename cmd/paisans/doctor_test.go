@@ -718,9 +718,13 @@ func (h busyHost) WriteFile(string, string, uint32) error { return errors.New("d
 // per site bound, which keeps under sshd's sessions per connection, and
 // sites are not bounded against each other.
 func TestDoctorBoundsCommandsPerSiteOnly(t *testing.T) {
-	saved, savedBound, savedAtOnce := doctorTransport, doctorSiteCommands, doctorAtOnce
-	t.Cleanup(func() { doctorTransport, doctorSiteCommands, doctorAtOnce = saved, savedBound, savedAtOnce })
+	saved, savedBound, savedAtOnce, savedSelfCheck := doctorTransport, doctorSiteCommands, doctorAtOnce, doctorSelfCheck
+	t.Cleanup(func() {
+		doctorTransport, doctorSiteCommands, doctorAtOnce, doctorSelfCheck = saved, savedBound, savedAtOnce, savedSelfCheck
+	})
 	doctorSiteCommands, doctorAtOnce = 2, 0
+	// No test reaches a real address: every Caddy site answers as itself.
+	doctorSelfCheck = func(context.Context, selfcheck.Target) error { return nil }
 	var mu sync.Mutex
 	all, top := 0, 0
 	hosts := map[string]busyHost{}
