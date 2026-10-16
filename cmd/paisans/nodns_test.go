@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -74,9 +77,34 @@ func TestMain(m *testing.M) {
 		os.RemoveAll(dir)
 		os.Exit(1)
 	}
+	gitDirect(dir)
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)
+}
+
+// gitDirect puts the git that /usr/bin/git stands for first on PATH, linked
+// from a directory of its own in dir, when /usr/bin/git is the git on PATH
+// on macOS. That one is Xcode's stub, which asks xcrun where git is on every
+// call, and that doubles what each of the thousands of git commands these
+// tests run costs. The git that runs is the same one.
+func gitDirect(dir string) {
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	if found, err := exec.LookPath("git"); err != nil || found != "/usr/bin/git" {
+		return
+	}
+	out, err := exec.Command("xcrun", "--find", "git").Output()
+	real := strings.TrimSpace(string(out))
+	if err != nil || !filepath.IsAbs(real) {
+		return
+	}
+	bin := filepath.Join(dir, "git-bin")
+	if os.Mkdir(bin, 0o700) != nil || os.Symlink(real, filepath.Join(bin, "git")) != nil {
+		return
+	}
+	os.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 // noStore is a configuration store that checks nothing and publishes
