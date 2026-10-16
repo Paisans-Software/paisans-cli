@@ -1,0 +1,43 @@
+admit site vm of f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01 as paisans-f2a9 on fake (ubuntu 24.04)
+
+step 1: make /etc/paisans root's alone
+  record: it is drwxr-xr-x, owner 1000; made root's, mode 755
+  run:
+    $ chown root:root /etc/paisans && chmod 755 /etc/paisans
+
+present: registry: this host is claimed for deployment f2a9
+present: docker: Engine 29.9.1
+present: package: docker-ce-rootless-extras installed
+present: package: uidmap installed
+present: package: nftables installed
+present: package: wireguard-tools installed
+present: package: git installed
+present: apparmor: rootlesskit's profile is loaded
+present: user: paisans-f2a9 exists, uid 1001, in no privileged group, and sudo grants it nothing beyond admit's helper
+present: user: paisans-f2a9 holds 165536-231071 in /etc/subuid
+present: user: paisans-f2a9 holds 165536-231071 in /etc/subgid
+present: user: /etc/systemd/system/user@1001.service.d/paisans-mesh.conf starts paisans-f2a9's manager after the mesh
+present: delegation: /etc/systemd/system/user@.service.d/delegate.conf delegates cpu cpuset io memory pids
+present: egress: /etc/paisans/egress.f2a9.nft as written
+present: egress: paisans-f2a9-egress.service enabled
+present: egress: paisans_f2a9 loaded
+present: linger: on for paisans-f2a9
+present: linger: paisans-f2a9's manager is running
+present: br_netfilter: loaded already
+present: br_netfilter: nf_tables, which the host's iptables uses, is loaded
+present: br_netfilter: br_netfilter and nf_tables loaded at boot by /etc/modules-load.d/paisans.conf
+present: daemon: /home/paisans-f2a9 (ext2/ext3) has 42.9 GB free
+present: daemon: paisans-f2a9's daemon.json is as admit writes it
+present: daemon: paisans-f2a9's rootless Docker is installed and running
+present: directory: /srv/paisans/f2a9 is paisans-f2a9's
+present: mesh: nothing on this host overlaps 10.44.0.0/24
+present: wireguard: /etc/wireguard is root's alone
+present: wireguard: the one command paisans-f2a9 may run as root: it checks each conf before wg-quick sees it, and adds the mesh's mark
+present: wireguard: /etc/sudoers.d/paisans-f2a9 lets paisans-f2a9 run the helper alone
+present: firewall: 22/tcp allowed
+present: firewall: 51820/udp allowed
+present: firewall: all inbound on psns-f2a9 allowed
+present: firewall: ufw active, its default policy left to the owner
+present: forwarding: not needed, this site has no endpoint
+present: record: /etc/paisans/admitted.f2a9.json as admitted at 2026-10-15T12:00:00Z
+present: keys: every operator's key is in paisans-f2a9's authorized_keys

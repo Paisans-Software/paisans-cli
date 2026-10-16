@@ -51,12 +51,11 @@ func planClaim(p *planner) error {
 	return nil
 }
 
-// planRecord writes the admission record, root's and mode 0644 so the
-// deployment's own user reads it without sudo, through the transport's
-// write, which writes a temporary file beside it and renames it. A record
-// that says the same but for its time is left with its time; one found
-// with another mode or owner is rewritten.
-func planRecord(p *planner) error {
+// planAdmissionDir settles /etc/paisans before any part writes into it
+// (egress, the sysctls, the record): root's, mode exactly 755, so the
+// deployment's user reads its record without sudo and none can write one.
+// A directory made under a stricter umask, or another's, is mended here.
+func planAdmissionDir(p *planner) error {
 	dir := p.f.Dirs[admission.Dir]
 	switch {
 	case !dir.Present:
@@ -64,10 +63,25 @@ func planRecord(p *planner) error {
 			Command: "install -d -m 755 -o root -g root " + admission.Dir, Kinds: []string{"record"}})
 	case len(dir.Mode) < 10 || dir.Mode[0] != 'd':
 		return fmt.Errorf("%s is %q, not a directory: it must be root's, so no deployment can write another's record. Fix it and admit again. Nothing was changed", admission.Dir, ui.Visible(dir.Mode))
-	case !rootsAlone(dir):
+	case !readableByAll(dir):
 		p.step(Step{Title: "make " + admission.Dir + " root's alone", Describe: fmt.Sprintf("record: it is %s, owner %d; made root's, mode 755", ui.Visible(dir.Mode), dir.UID),
 			Command: "chown root:root " + admission.Dir + " && chmod 755 " + admission.Dir, Kinds: []string{"record"}})
 	}
+	return nil
+}
+
+// readableByAll reports whether a directory, as ls -ldn printed it, is a
+// real directory owned root:root with mode exactly 755.
+func readableByAll(d DirState) bool {
+	return d.Present && !d.Unsafe && d.Mode == "drwxr-xr-x" && d.UID == 0 && d.GID == 0
+}
+
+// planRecord writes the admission record, root's and mode 0644 so the
+// deployment's own user reads it without sudo, through the transport's
+// write, which writes a temporary file beside it and renames it. A record
+// that says the same but for its time is left with its time; one found
+// with another mode or owner is rewritten.
+func planRecord(p *planner) error {
 	path, err := admission.Path(p.d.Token())
 	if err != nil {
 		return err

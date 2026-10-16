@@ -183,6 +183,7 @@ type part struct {
 // comment names.
 var parts = []part{
 	{"claim", planClaim}, // 1
+	{"admission directory", planAdmissionDir},
 	{"docker", planDocker},
 	{"apparmor", planAppArmor},
 	// 4. user

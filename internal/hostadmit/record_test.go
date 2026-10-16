@@ -17,6 +17,12 @@ var recordCases = addCases(
 		return h.withFile("/etc/paisans/admitted.f2a9.json", h.files["/etc/paisans/admitted.f2a9.json"], "600", 0)
 	}},
 	goldenCase{name: "record-etc-paisans-link-refused", site: "vm", host: func() *fakeHost { return home().withDir("/etc/paisans", "lrwxrwxrwx", 0, 0) }},
+	goldenCase{name: "record-etc-paisans-private", site: "vm", host: func() *fakeHost {
+		return admittedHost(requestFor("vm"), hostadmit.Flags{}).withDir("/etc/paisans", "drwx------", 0, 0)
+	}},
+	goldenCase{name: "record-etc-paisans-wrong-owner", site: "vm", host: func() *fakeHost {
+		return admittedHost(requestFor("vm"), hostadmit.Flags{}).withDir("/etc/paisans", "drwxr-xr-x", 1000, 1000)
+	}},
 	goldenCase{name: "claim-another-site-of-this-deployment-refused", site: "vm", host: func() *fakeHost {
 		return home().file("/var/lib/paisans/registry.json", registryWith("f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01", "10.44.0.1"))
 	}},
@@ -53,6 +59,49 @@ func TestRecordIsWrittenMode0644(t *testing.T) {
 	}
 	if !strings.Contains(plan.Text(), "write "+path+" mode 0644") {
 		t.Errorf("a record found mode 600 is not rewritten 0644:\n%s", plan.Text())
+	}
+}
+
+// /etc/paisans is made, or made root's 755, before any part writes into it,
+// so a directory the user cannot traverse is mended before egress and the
+// sysctls put files there, and a re-run of a host with it right plans nothing.
+func TestEtcPaisansIsSettledBeforeItsWriters(t *testing.T) {
+	index := func(plan *hostadmit.Plan, title string) int {
+		for i, s := range plan.Steps {
+			if s.Title == title {
+				return i
+			}
+		}
+		return -1
+	}
+	for name, c := range map[string]struct {
+		host  *fakeHost
+		title string
+	}{
+		"absent":      {home(), "create /etc/paisans"},
+		"private":     {admittedHost(requestFor("vm"), hostadmit.Flags{}).withDir("/etc/paisans", "drwx------", 0, 0), "make /etc/paisans root's alone"},
+		"wrong owner": {admittedHost(requestFor("vm"), hostadmit.Flags{}).withDir("/etc/paisans", "drwxr-xr-x", 1000, 1000), "make /etc/paisans root's alone"},
+	} {
+		plan, err := hostadmit.Build(c.host, input(t, "vm", hostadmit.Flags{}))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		dir := index(plan, c.title)
+		if dir < 0 {
+			t.Fatalf("%s: no %q step:\n%s", name, c.title, plan.Text())
+		}
+		for _, w := range []string{"write the egress table", "write the sysctls"} {
+			if at := index(plan, w); at >= 0 && at < dir {
+				t.Errorf("%s: %q (step %d) runs before %q (step %d)", name, w, at, c.title, dir)
+			}
+		}
+	}
+	plan, err := hostadmit.Build(admittedHost(requestFor("vm"), hostadmit.Flags{}), input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Steps) != 0 {
+		t.Errorf("an admitted host plans steps:\n%s", plan.Text())
 	}
 }
 

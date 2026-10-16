@@ -72,7 +72,12 @@ step 1: claim the host
     $ }
     $ ' "$src" > "$tmp"; chmod 600 "$tmp"; mv "$tmp" /var/lib/paisans/registry.json
 
-step 2: start paisans-f2a9's manager after the mesh
+step 2: create /etc/paisans
+  record: root's, mode 755: every deployment's user reads its own record, none can write one
+  run:
+    $ install -d -m 755 -o root -g root /etc/paisans
+
+step 3: start paisans-f2a9's manager after the mesh
   user: order user@1001.service after wg-quick@psns-f2a9 at boot, so a container that publishes on the mesh address finds it; a manager running now is not restarted, and takes it at its next start
   write /etc/systemd/system/user@1001.service.d/paisans-mesh.conf mode 0644:
     | # Written by paisans host admit for deployment f2a9; paisans host evict
@@ -84,7 +89,7 @@ step 2: start paisans-f2a9's manager after the mesh
   run:
     $ systemctl daemon-reload
 
-step 3: delegate cgroups to users
+step 4: delegate cgroups to users
   delegation: let every user's manager delegate cpu cpuset io memory pids, for compose's limits; paisans-f2a9's manager is running, and takes it at its next start
   write /etc/systemd/system/user@.service.d/delegate.conf mode 0644:
     | # Written by paisans host admit. Shared by every admitted deployment;
@@ -94,7 +99,7 @@ step 3: delegate cgroups to users
   run:
     $ systemctl daemon-reload
 
-step 4: write the egress table
+step 5: write the egress table
   egress: keep paisans-f2a9, its containers and its mesh off this host's loopback and your network (/etc/paisans/egress.f2a9.nft)
   write /etc/paisans/egress.f2a9.nft mode 0644:
     | # Written by paisans host admit for paisans-f2a9. Keeps the
@@ -124,7 +129,7 @@ step 4: write the egress table
   run:
     $ nft -c -f /etc/paisans/egress.f2a9.nft
 
-step 5: install the egress unit
+step 6: install the egress unit
   egress: load the table at boot, before paisans-f2a9's manager, which requires it (paisans-f2a9-egress.service)
   write /etc/systemd/system/paisans-f2a9-egress.service mode 0644:
     | # Written by paisans host admit. Loads the table that keeps paisans-f2a9 off
@@ -160,17 +165,17 @@ step 5: install the egress unit
   run:
     $ systemctl daemon-reload && systemctl reenable paisans-f2a9-egress.service
 
-step 6: load the egress table
+step 7: load the egress table
   egress: load paisans_f2a9 now
   run:
     $ systemctl start paisans-f2a9-egress.service && nft -f /etc/paisans/egress.f2a9.nft
 
-step 7: load br_netfilter
+step 8: load br_netfilter
   daemon: load br_netfilter now, which the user's daemon needs with its userland proxy off
   run:
     $ modprobe br_netfilter
 
-step 8: load br_netfilter at boot
+step 9: load br_netfilter at boot
   daemon: list br_netfilter and nf_tables in /etc/modules-load.d/paisans.conf, shared by every admitted deployment
   write /etc/modules-load.d/paisans.conf mode 0644:
     | # Written by paisans host admit. The rootless Docker daemons of admitted
@@ -179,7 +184,7 @@ step 8: load br_netfilter at boot
     | br_netfilter
     | nf_tables
 
-step 9: write paisans-f2a9's daemon.json
+step 10: write paisans-f2a9's daemon.json
   daemon: userland proxy off, address pools clear of the mesh; written as paisans-f2a9
   run:
     $ runuser -u paisans-f2a9 -- env -i HOME='/home/paisans-f2a9' PATH=/usr/bin:/bin:/usr/sbin:/sbin XDG_RUNTIME_DIR=/run/user/1001 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1001/bus DOCKER_HOST=unix:///run/user/1001/docker.sock sh -c 'umask 077 && mkdir -p "$HOME/.config/docker" && cat > "$HOME/.config/docker/.daemon.json.paisans-tmp" && mv -f "$HOME/.config/docker/.daemon.json.paisans-tmp" "$HOME/.config/docker/daemon.json"'
@@ -218,22 +223,22 @@ step 9: write paisans-f2a9's daemon.json
     |   ]
     | }
 
-step 10: install paisans-f2a9's rootless Docker
+step 11: install paisans-f2a9's rootless Docker
   daemon: dockerd-rootless-setuptool.sh install --force, as paisans-f2a9, which starts the daemon reading its daemon.json; --force because a system daemon may run beside it
   run:
     $ runuser -u paisans-f2a9 -- env -i HOME='/home/paisans-f2a9' PATH=/usr/bin:/bin:/usr/sbin:/sbin XDG_RUNTIME_DIR=/run/user/1001 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1001/bus DOCKER_HOST=unix:///run/user/1001/docker.sock sh -c 'dockerd-rootless-setuptool.sh install --force'
 
-step 11: create /srv/paisans
+step 12: create /srv/paisans
   directory: every deployment's directory lives in it, root's, mode 755
   run:
     $ install -d -m 755 -o root -g root /srv/paisans
 
-step 12: create /srv/paisans/f2a9
+step 13: create /srv/paisans/f2a9
   directory: the deployment's own, paisans-f2a9's, mode 750
   run:
     $ install -d -m 750 -o paisans-f2a9 -g paisans-f2a9 /srv/paisans/f2a9
 
-step 13: restore: install the WireGuard helper
+step 14: restore: install the WireGuard helper
   wireguard: the one command paisans-f2a9 may run as root: it checks each conf before wg-quick sees it, and adds the mesh's mark (found changed: its content)
   write /usr/local/libexec/paisans/wg-psns-f2a9 mode 0755:
     | #!/bin/sh
@@ -578,25 +583,20 @@ step 13: restore: install the WireGuard helper
     | 	;;
     | esac
 
-step 14: allow 22/tcp
+step 15: allow 22/tcp
   firewall: allow 22/tcp (ssh, the bootstrap route)
   run:
     $ ufw allow 22/tcp comment 'paisans-f2a9: ssh, the bootstrap route'
 
-step 15: allow 51820/udp
+step 16: allow 51820/udp
   firewall: allow 51820/udp (WireGuard, the mesh)
   run:
     $ ufw allow 51820/udp comment 'paisans-f2a9: WireGuard, the mesh'
 
-step 16: allow all inbound on psns-f2a9
+step 17: allow all inbound on psns-f2a9
   firewall: allow all inbound on psns-f2a9 (the mesh: etcd, Patroni, Garage, HAProxy)
   run:
     $ ufw allow in on psns-f2a9 comment 'paisans-f2a9: the mesh: etcd, Patroni, Garage, HAProxy'
-
-step 17: create /etc/paisans
-  record: root's, mode 755: every deployment's user reads its own record, none can write one
-  run:
-    $ install -d -m 755 -o root -g root /etc/paisans
 
 step 18: write the admission record
   record: who the deployment runs as and what you granted, which its own commands read

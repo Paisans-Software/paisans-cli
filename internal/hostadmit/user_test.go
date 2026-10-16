@@ -219,6 +219,9 @@ func TestExecuteRunsTheUsersStepsWithItsUID(t *testing.T) {
 		if strings.Contains(command, registry.LockPath) {
 			h.file(registry.Path, registryOf(in.Request))
 		}
+		if strings.HasPrefix(command, "install -d -m 755 -o root -g root /etc/paisans") {
+			h.withDir("/etc/paisans", "drwxr-xr-x", 0, 0)
+		}
 		if strings.HasPrefix(command, "useradd ") {
 			h.with("passwd", "paisans-f2a9:x:1001:1001::/home/paisans-f2a9:/bin/bash").with("home", "dir 1001 /home/paisans-f2a9").
 				with("groups", "paisans-f2a9").with("group", "paisans-f2a9").
