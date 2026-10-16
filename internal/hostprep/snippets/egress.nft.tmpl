@@ -21,6 +21,18 @@ table inet {{ .Table }} {
 {{- end }}
 		meta skuid { {{ .Users }} } ip daddr { 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 } drop
 		meta skuid { {{ .Users }} } ip6 daddr { ::1, fc00::/7, fe80::/10 } drop
+		# The host's own addresses, public ones too, and its broadcast and
+		# multicast. A gateway's 80 and 443 answer the internet already; its
+		# accept follows the loopback drop, since loopback is local too, and
+		# precedes the on-link drop, which holds the host's own IPv6.
+{{- if .Gateway }}
+		meta skuid { {{ .Users }} } fib daddr type local tcp dport { 80, 443 } accept
+{{- end }}
+		meta skuid { {{ .Users }} } fib daddr type { local, broadcast, multicast } drop
+{{- if .OnLink6 }}
+		# The host's on-link IPv6 prefixes: a home LAN's IPv6 is global.
+		meta skuid { {{ .Users }} } ip6 daddr { {{ join .OnLink6 ", " }} } drop
+{{- end }}
 	}
 	# What the mesh's own socket sends, which no UID matches: the kernel
 	# sends it, to each Endpoint the user wrote, resolved as root.
@@ -32,5 +44,8 @@ table inet {{ .Table }} {
 {{- end }}
 		meta mark {{ .Mark }} ip daddr { 127.0.0.0/8, 169.254.0.0/16, 224.0.0.0/4, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10 } drop
 		meta mark {{ .Mark }} ip6 daddr { ::1, fe80::/10, ff00::/8, fc00::/7 } drop
+{{- if .OnLink6 }}
+		meta mark {{ .Mark }} ip6 daddr { {{ join .OnLink6 ", " }} } drop
+{{- end }}
 	}
 }

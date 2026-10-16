@@ -2,6 +2,8 @@
 package hostprep
 
 import (
+	"fmt"
+	"net/netip"
 	"strings"
 	"text/template"
 
@@ -13,15 +15,32 @@ import (
 // token and table, the mesh's mark as nft writes it, the user's UID and
 // subordinate range as an nft set's elements ("1001, 165536-231071"), the
 // mesh subnet, the host's resolvers by family, and with --mesh-lan the
-// host's own LAN prefix.
+// host's own LAN prefix. Gateway is a site whose own Caddy, or whose
+// owner's web server, answers 80 and 443 on the host's addresses, which the
+// deployment may then reach. LAN6 are the host's on-link IPv6 prefixes,
+// dropped like the private ranges, since a home LAN's IPv6 is global.
 type EgressData struct {
 	Token, Table, Mark, Users, Mesh, LAN string
 	Resolvers4, Resolvers6               []string
+	Gateway                              bool
+	LAN6                                 []netip.Prefix
 }
 
-// EgressTable is the nftables file host admit loads for a deployment.
+// EgressTable is the nftables file host admit loads for a deployment. An
+// on-link prefix is rendered only when it is a valid, masked IPv6 prefix,
+// so nothing but a CIDR ever reaches the table.
 func EgressTable(d EgressData) (string, error) {
-	return snippetFuncs("snippets/egress.nft.tmpl", template.FuncMap{"join": strings.Join}, d)
+	var lan6 []string
+	for _, p := range d.LAN6 {
+		if !p.IsValid() || !p.Addr().Is6() || p.Addr().Is4In6() || p.Addr().Zone() != "" || p != p.Masked() {
+			return "", fmt.Errorf("the on-link prefix %q is not a masked IPv6 prefix", p.String())
+		}
+		lan6 = append(lan6, p.String())
+	}
+	return snippetFuncs("snippets/egress.nft.tmpl", template.FuncMap{"join": strings.Join}, struct {
+		EgressData
+		OnLink6 []string
+	}{d, lan6})
 }
 
 // EgressUnitData is what the egress unit is rendered with.

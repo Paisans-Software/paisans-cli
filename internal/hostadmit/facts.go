@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/hex"
 	"fmt"
+	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
@@ -61,8 +62,14 @@ type Facts struct {
 	UFWInstalled, UFWActive    bool
 	PortStart, IPForward       string
 	DefaultDev, LAN            string
-	WatchdogRules              []string
-	Records                    []string
+	// OnLink6 are the IPv6 routes of the main table with no gateway, each
+	// a destination the host reaches directly on Dev; WireGuard the
+	// host's WireGuard interfaces. Admit drops the global ones for the
+	// deployment (onLink6).
+	OnLink6       []Route6
+	WireGuard     []string
+	WatchdogRules []string
+	Records       []string
 	// Data is where Docker's data would go: the nearest directory that
 	// exists. FS and Avail are not read when Unsafe; Above is the probe's
 	// data-above, safe, link-above or unsafe-above.
@@ -104,6 +111,12 @@ type UserFacts struct {
 	// command-specific Defaults line, as sudo printed them.
 	SudoRead                              bool
 	SudoRules, SudoDefaults, SudoSpecific []string
+}
+
+// Route6 is one on-link IPv6 route: a masked prefix and its interface.
+type Route6 struct {
+	Prefix netip.Prefix
+	Dev    string
 }
 
 // IDRange is one line of /etc/subuid or /etc/subgid: Count IDs from Start.
@@ -338,6 +351,14 @@ func parseFacts(out, user string) (Facts, error) {
 			f.DefaultDev = v
 		case "lan":
 			f.LAN = v
+		case "lan6":
+			r, err := parseRoute6(v)
+			if err != nil {
+				return f, err
+			}
+			f.OnLink6 = append(f.OnLink6, r)
+		case "wireguard":
+			f.WireGuard = append(f.WireGuard, v)
 		case "watchdog-rule":
 			f.WatchdogRules = append(f.WatchdogRules, v)
 		case "record":
@@ -366,6 +387,26 @@ func parseFacts(out, user string) (Facts, error) {
 		return f, fmt.Errorf("no primary group read for %s", user)
 	}
 	return f, nil
+}
+
+// parseRoute6 reads a lan6 line, "<destination> <interface>", as ip -6
+// route prints a destination: a prefix, or an address for a route to one
+// host. Anything but a masked IPv6 prefix with no zone is refused, so the
+// table is rendered from a parsed prefix and never from the probe's text.
+func parseRoute6(v string) (Route6, error) {
+	fields := strings.Fields(v)
+	if len(fields) != 2 {
+		return Route6{}, fmt.Errorf("unreadable lan6 line %q", v)
+	}
+	dest := fields[0]
+	if !strings.Contains(dest, "/") {
+		dest += "/128"
+	}
+	p, err := netip.ParsePrefix(dest)
+	if err != nil || !p.Addr().Is6() || p.Addr().Is4In6() || p != p.Masked() {
+		return Route6{}, fmt.Errorf("unreadable lan6 line %q", v)
+	}
+	return Route6{Prefix: p, Dev: fields[1]}, nil
 }
 
 // readSudo reads what sudo -n -l -U printed for the user under LC_ALL=C:

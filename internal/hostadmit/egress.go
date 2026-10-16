@@ -50,6 +50,7 @@ func planEgress(p *planner) error {
 	table, err := hostprep.EgressTable(hostprep.EgressData{
 		Token: p.d.Token(), Table: tableName, Mark: fmt.Sprintf("%#x", mark),
 		Users: uidOf(p) + ", " + subordinate, Mesh: p.in.Request.MeshSubnet, LAN: lan, Resolvers4: v4, Resolvers6: v6,
+		Gateway: p.in.Flags.PublicPorts || len(p.in.Request.WebServer) > 0, LAN6: onLink6(p.f, p.d.Interface()),
 	})
 	if err != nil {
 		return err
@@ -100,6 +101,46 @@ func planEgress(p *planner) error {
 // asWritten reports whether f is a file of root's, mode 644, holding content.
 func asWritten(f FileState, content string) bool {
 	return f.Present && !f.Link && f.Sum == sha(content) && f.Mode == "644" && f.UID == 0
+}
+
+// global6 is IPv6's global unicast space. Link-local and unique local
+// addresses are outside it, and the table drops those already.
+var global6 = netip.MustParsePrefix("2000::/3")
+
+// onLink6 are the host's on-link IPv6 prefixes the deployment is kept off:
+// each global unicast route with no gateway on an interface of the host's
+// own, which leaves out loopback, every WireGuard interface (the mesh's
+// among them, iface) and Docker's bridges. Routes rather than addresses,
+// because a host with a DHCPv6 /128, or with an address it adds without a
+// prefix route, still has its LAN's /64 as an on-link route. A prefix
+// inside another kept is left out, since the wider one drops it, and the
+// rest are sorted, so the same routes always render the same table.
+func onLink6(f Facts, iface string) []netip.Prefix {
+	var kept []netip.Prefix
+	for _, r := range f.OnLink6 {
+		switch {
+		case r.Dev == "lo", r.Dev == iface, slices.Contains(f.WireGuard, r.Dev), dockerBridgeName.MatchString(r.Dev):
+		case r.Prefix.Bits() < global6.Bits() || !global6.Contains(r.Prefix.Addr()):
+		default:
+			kept = append(kept, r.Prefix)
+		}
+	}
+	var out []netip.Prefix
+	for _, p := range kept {
+		covered := slices.ContainsFunc(kept, func(q netip.Prefix) bool {
+			return q != p && q.Bits() <= p.Bits() && q.Contains(p.Addr())
+		})
+		if !covered && !slices.Contains(out, p) {
+			out = append(out, p)
+		}
+	}
+	slices.SortFunc(out, func(a, b netip.Prefix) int {
+		if c := a.Addr().Compare(b.Addr()); c != 0 {
+			return c
+		}
+		return a.Bits() - b.Bits()
+	})
+	return out
 }
 
 // resolvers are the nameservers resolv.conf names, by family, each once,

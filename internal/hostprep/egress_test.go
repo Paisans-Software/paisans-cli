@@ -1,6 +1,7 @@
 package hostprep_test
 
 import (
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -59,6 +60,60 @@ func TestEgressTableRendersTheUsersRangeAndTheMark(t *testing.T) {
 	}
 }
 
+// Past the loopback and private drops, the UID chain drops every address
+// of the host itself, its broadcast and multicast, and then the host's
+// on-link IPv6 prefixes. Only a gateway, whose own Caddy or whose owner's
+// web server answers 80 and 443 to the internet anyway, may first reach
+// those two TCP ports on the host's own addresses. The mark chain drops
+// the on-link prefixes as well, since a peer's endpoint could sit in one.
+func TestEgressTableDropsTheHostAndItsOnLinkPrefixes(t *testing.T) {
+	const uid = "meta skuid { 1001, 165536-231071 } "
+	d := egress
+	d.LAN6 = []netip.Prefix{netip.MustParsePrefix("2001:db8:1::/64"), netip.MustParsePrefix("2001:db8:2::/56")}
+	for _, gateway := range []bool{false, true} {
+		d.Gateway = gateway
+		text, err := hostprep.EgressTable(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		private := strings.Index(text, uid+"ip6 daddr { ::1, fc00::/7, fe80::/10 } drop")
+		web := strings.Index(text, uid+"fib daddr type local tcp dport { 80, 443 } accept")
+		host := strings.Index(text, uid+"fib daddr type { local, broadcast, multicast } drop")
+		lan6 := strings.Index(text, uid+"ip6 daddr { 2001:db8:1::/64, 2001:db8:2::/56 } drop")
+		if private < 0 || host < private || lan6 < host {
+			t.Errorf("gateway %v: the UID chain does not drop the private ranges, then the host, then its on-link prefixes:\n%s", gateway, text)
+		}
+		switch {
+		case gateway && (web < private || web > host):
+			t.Errorf("a gateway's 80 and 443 on the host are not accepted between the private drops and the host's:\n%s", text)
+		case !gateway && web >= 0:
+			t.Errorf("a site that is no gateway reaches 80 and 443 on the host:\n%s", text)
+		}
+		if !strings.Contains(text, "meta mark 0x5053f2a9 ip6 daddr { 2001:db8:1::/64, 2001:db8:2::/56 } drop") {
+			t.Errorf("the mark chain does not drop the on-link prefixes:\n%s", text)
+		}
+		if strings.Count(text, "fib daddr type { local, broadcast, multicast } drop") != 2 {
+			t.Errorf("the host's own addresses are not dropped once in each chain:\n%s", text)
+		}
+	}
+	text, _ := hostprep.EgressTable(egress)
+	if strings.Contains(text, "ip6 daddr {  }") || strings.Contains(text, "2001:db8") {
+		t.Errorf("with no on-link prefix the table still drops one:\n%s", text)
+	}
+}
+
+// An on-link prefix reaches the table only as a valid, masked IPv6 prefix;
+// anything else is refused rather than rendered.
+func TestEgressTableRefusesABadOnLinkPrefix(t *testing.T) {
+	for _, bad := range []netip.Prefix{{}, netip.MustParsePrefix("192.168.1.0/24"), netip.MustParsePrefix("2001:db8:1::5/64"), netip.MustParsePrefix("::ffff:10.0.0.0/104")} {
+		d := egress
+		d.LAN6 = []netip.Prefix{bad}
+		if text, err := hostprep.EgressTable(d); err == nil {
+			t.Errorf("%v was rendered:\n%s", bad, text)
+		}
+	}
+}
+
 // The unit loads the table before the user's manager, and is required by
 // it, so a table that fails to load keeps every container from starting.
 // It follows nftables.service, whose configuration on Ubuntu flushes the
@@ -78,7 +133,8 @@ func TestEgressUnitIsRequiredByTheUsersManager(t *testing.T) {
 }
 
 // Where nft is installed and the test runs as root, the table parses, with
-// and without --mesh-lan and an IPv6 resolver.
+// and without --mesh-lan, an IPv6 resolver, the gateway's accept and the
+// on-link prefixes.
 func TestEgressTableParses(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("nft -c needs root")
@@ -89,6 +145,8 @@ func TestEgressTableParses(t *testing.T) {
 	lan := egress
 	lan.LAN = "192.168.1.0/24"
 	lan.Resolvers6 = []string{"fd00::1"}
+	lan.Gateway = true
+	lan.LAN6 = []netip.Prefix{netip.MustParsePrefix("2001:db8:1::/64"), netip.MustParsePrefix("2001:db8:2::/56")}
 	for _, d := range []hostprep.EgressData{egress, lan} {
 		text, err := hostprep.EgressTable(d)
 		if err != nil {

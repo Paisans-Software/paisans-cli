@@ -1,6 +1,8 @@
 package hostadmit
 
 import (
+	"net/netip"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -52,5 +54,35 @@ func TestPlanEgressRecordsTheMeshLAN(t *testing.T) {
 		if got != want {
 			t.Errorf("--mesh-lan %v: the record's mesh_lan is %q, want %q", flag, got, want)
 		}
+	}
+}
+
+// The on-link prefixes dropped are the global unicast routes the host
+// reaches with no gateway, on its own interfaces: never loopback, a
+// WireGuard interface, the deployment's mesh or a Docker bridge, never a
+// link-local or unique local prefix (the table drops those already), and
+// never one inside another kept. They come sorted, so a re-run that reads
+// them in another order writes the same table.
+func TestOnLink6(t *testing.T) {
+	r := func(p, dev string) Route6 { return Route6{netip.MustParsePrefix(p), dev} }
+	f := Facts{WireGuard: []string{"wg0", "psns-f2a9"}, OnLink6: []Route6{
+		r("2001:db8:2::/64", "eth1"),
+		r("2001:db8:1::/64", "eth0"),
+		r("2001:db8:1::5/128", "eth0"),
+		r("2001:db8:2::/64", "br0"),
+		r("fe80::/64", "eth0"),
+		r("fd00:1::/64", "eth0"),
+		r("2001:db8:3::/64", "wg0"),
+		r("2001:db8:4::/64", "psns-f2a9"),
+		r("2001:db8:5::/64", "docker0"),
+		r("2001:db8:6::/64", "br-0123456789ab"),
+		r("2001:db8:7::/64", "lo"),
+		r("ff00::/8", "eth0"),
+		r("::/0", "eth0"),
+	}}
+	got := onLink6(f, "psns-f2a9")
+	want := []netip.Prefix{netip.MustParsePrefix("2001:db8:1::/64"), netip.MustParsePrefix("2001:db8:2::/64")}
+	if !slices.Equal(got, want) {
+		t.Errorf("onLink6 = %v, want %v", got, want)
 	}
 }

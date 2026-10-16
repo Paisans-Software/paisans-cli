@@ -26,9 +26,10 @@ func TestASecondRunPlansNothing(t *testing.T) {
 	}
 }
 
-// The site no longer needs the public ports: the re-run takes 80 and 443
-// out of the firewall, drops the low ports from the shared file, restores
-// the value recorded before, and writes the record without the grant.
+// The site no longer needs the public ports: the re-run drops the egress
+// table's accept for 80 and 443 on the host, takes them out of the
+// firewall, drops the low ports from the shared file, restores the value
+// recorded before, and writes the record without the grant.
 var rerunCases = addCases(goldenCase{name: "rerun-public-ports-removed", site: "watch", flags: hostadmit.Flags{PublicPorts: true}, host: func() *fakeHost {
 	return admittedHost(requestFor("watch"), hostadmit.Flags{PublicPorts: true})
 }})

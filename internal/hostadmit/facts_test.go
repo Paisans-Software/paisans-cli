@@ -1,7 +1,9 @@
 package hostadmit
 
 import (
+	"net/netip"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 
@@ -18,7 +20,8 @@ func TestParseFacts(t *testing.T) {
 		"subuid ubuntu:100000:65536\nsubuid paisans-f2a9:165536:65536\n" +
 		"file /usr/local/libexec/paisans/wg-psns-f2a9 " + "ab12" + " 755 0 0\n" +
 		"file /etc/sudoers.d/paisans-f2a9 link\n" +
-		"dir /etc/wireguard drwx------ 0 0\ndir /srv/my data drwxr-xr-x 0 0\nbridge virbr0\nbridge docker0\nufw installed\nufw-active yes\nlan 192.168.1.20/24\nend\n"
+		"dir /etc/wireguard drwx------ 0 0\ndir /srv/my data drwxr-xr-x 0 0\nbridge virbr0\nbridge docker0\nufw installed\nufw-active yes\nlan 192.168.1.20/24\n" +
+		"wireguard wg0\nlan6 2001:db8:1::/64 eth0\nlan6 2001:db8:1::5 eth0\nlan6 fe80::/64 eth0\nend\n"
 	f, err := parseFacts(out, "paisans-f2a9")
 	if err != nil {
 		t.Fatal(err)
@@ -51,10 +54,18 @@ func TestParseFacts(t *testing.T) {
 	if len(f.Bridges) != 2 || f.LAN != "192.168.1.20/24" {
 		t.Errorf("bridges %v, lan %q", f.Bridges, f.LAN)
 	}
+	if len(f.WireGuard) != 1 || f.WireGuard[0] != "wg0" {
+		t.Errorf("wireguard %v", f.WireGuard)
+	}
+	want := []Route6{{netip.MustParsePrefix("2001:db8:1::/64"), "eth0"}, {netip.MustParsePrefix("2001:db8:1::5/128"), "eth0"}, {netip.MustParsePrefix("fe80::/64"), "eth0"}}
+	if !slices.Equal(f.OnLink6, want) {
+		t.Errorf("on-link routes %v, want %v", f.OnLink6, want)
+	}
 	if _, err := parseFacts("engine 29.9.1\n", "paisans-f2a9"); err == nil {
 		t.Error("an answer with no end line was read")
 	}
-	for _, bad := range []string{"subuid paisans-f2a9\nend\n", "subuid a:1:2:3\nend\n", "dir /etc/wireguard 0 0\nend\n", "dir /etc/wireguard drwx------ x 0\nend\n", "file /etc/x ab12 755\nend\n"} {
+	for _, bad := range []string{"subuid paisans-f2a9\nend\n", "subuid a:1:2:3\nend\n", "dir /etc/wireguard 0 0\nend\n", "dir /etc/wireguard drwx------ x 0\nend\n", "file /etc/x ab12 755\nend\n",
+		"lan6 2001:db8:1::/64\nend\n", "lan6 2001:db8:1::1/64 eth0\nend\n", "lan6 10.0.0.0/8 eth0\nend\n", "lan6 fe80::/64%eth0 eth0\nend\n", "lan6 2001:db8::/64; eth0\nend\n", "lan6 2001:db8::/64 eth0 x\nend\n"} {
 		if _, err := parseFacts(bad, "paisans-f2a9"); err == nil {
 			t.Errorf("%q was read", bad)
 		}

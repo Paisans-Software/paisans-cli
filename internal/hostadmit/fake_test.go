@@ -147,7 +147,7 @@ const ubuntu2404 = "PRETTY_NAME=\"Ubuntu 24.04.1 LTS\"\nNAME=\"Ubuntu\"\nVERSION
 // restricting unprivileged user namespaces with the rootlesskit profile
 // Ubuntu's apparmor package loads, no
 // deployment user, no file admit writes, ufw installed and active, one
-// public interface, systemd-resolved, and nothing on 80 or 443.
+// public interface, its IPv6 /64 on-link, systemd-resolved, and nothing on 80 or 443.
 func newBlank() *fakeHost {
 	h := &fakeHost{files: map[string]string{
 		"/etc/os-release":  ubuntu2404,
@@ -161,7 +161,7 @@ func newBlank() *fakeHost {
 		{"passwd", "absent"}, {"home", "absent 0 /home/paisans-f2a9"}, {"sudo", "absent"}, {"subuid", "ubuntu:100000:65536"}, {"subgid", "ubuntu:100000:65536"},
 		{"br_netfilter", "absent"}, {"iptables-module", "nf_tables loaded"}, {"forward-policy", "ACCEPT"},
 		{"port-start", "1024"}, {"ip-forward", "0"},
-		{"default-dev", "eth0"}, {"lan", "203.0.113.10/24"},
+		{"default-dev", "eth0"}, {"lan", "203.0.113.10/24"}, {"lan6", "2001:db8:1::/64 eth0"}, {"lan6", "fe80::/64 eth0"},
 		{"ufw", "installed"}, {"ufw-active", "yes"},
 		{"egress-enabled", "no"}, {"egress-table", "absent"},
 		{"data-path", "/home"}, {"data-fs", "ext2/ext3"}, {"data-avail", "42949672960"},

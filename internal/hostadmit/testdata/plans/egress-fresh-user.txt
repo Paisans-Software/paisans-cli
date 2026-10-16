@@ -123,6 +123,13 @@ step 6: write the egress table
     | 		meta skuid { <uid>, <subordinate range> } ip daddr { 127.0.0.53 } meta l4proto { tcp, udp } th dport 53 accept
     | 		meta skuid { <uid>, <subordinate range> } ip daddr { 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 } drop
     | 		meta skuid { <uid>, <subordinate range> } ip6 daddr { ::1, fc00::/7, fe80::/10 } drop
+    | 		# The host's own addresses, public ones too, and its broadcast and
+    | 		# multicast. A gateway's 80 and 443 answer the internet already; its
+    | 		# accept follows the loopback drop, since loopback is local too, and
+    | 		# precedes the on-link drop, which holds the host's own IPv6.
+    | 		meta skuid { <uid>, <subordinate range> } fib daddr type { local, broadcast, multicast } drop
+    | 		# The host's on-link IPv6 prefixes: a home LAN's IPv6 is global.
+    | 		meta skuid { <uid>, <subordinate range> } ip6 daddr { 2001:db8:1::/64 } drop
     | 	}
     | 	# What the mesh's own socket sends, which no UID matches: the kernel
     | 	# sends it, to each Endpoint the user wrote, resolved as root.
@@ -131,6 +138,7 @@ step 6: write the egress table
     | 		meta mark 0x5053f2a9 fib daddr type { local, broadcast, multicast } drop
     | 		meta mark 0x5053f2a9 ip daddr { 127.0.0.0/8, 169.254.0.0/16, 224.0.0.0/4, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10 } drop
     | 		meta mark 0x5053f2a9 ip6 daddr { ::1, fe80::/10, ff00::/8, fc00::/7 } drop
+    | 		meta mark 0x5053f2a9 ip6 daddr { 2001:db8:1::/64 } drop
     | 	}
     | }
   run:
