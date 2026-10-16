@@ -72,7 +72,7 @@ const (
 	SectionLeftovers  = "leftovers"
 )
 
-var sections = []string{SectionReach, SectionAdmission, SectionUser, SectionDocker, SectionLinger, SectionSudo, SectionMesh, SectionEtcd, SectionPatroni, SectionContainers, SectionSettings, SectionPocketID, SectionClocks, SectionLeftovers, SectionCaddy, SectionSecrets, SectionToken, SectionRecords}
+var sections = []string{SectionReach, SectionAdmission, SectionUser, SectionDocker, SectionLinger, SectionSudo, SectionMesh, SectionEtcd, SectionPatroni, SectionContainers, SectionSettings, SectionPocketID, SectionClocks, SectionLeftovers, SectionSelfCheck, SectionCaddy, SectionSecrets, SectionToken, SectionRecords}
 
 // Finding is one line of the report, with any explanation, recovery advice or
 // evidence under it.
@@ -235,6 +235,8 @@ type Input struct {
 	Clocks     []ClockSample
 	Leftovers  []LeftoverProbe
 	Settings   []SettingsProbe
+	// SelfChecks is each Caddy site's own answer, asked from outside (selfcheck.go).
+	SelfChecks []SelfCheckProbe
 	// Caddy is each Caddy site's certificate log, Secrets whether the
 	// secrets opened, Tokens each place's DNS token check, and Records
 	// the zone compared with what the deployment needs (see dnschecks.go).
@@ -334,6 +336,7 @@ func Diagnose(cfg *config.Config, in Input) Report {
 	findings = append(findings, Standby(cfg.Deployment(), in.Standby, noPrimary)...)
 	findings = append(findings, Clocks(in.Clocks)...)
 	findings = append(findings, Leftovers(in.Leftovers)...)
+	findings = append(findings, SelfChecks(cfg, in.SelfChecks)...)
 	findings = append(findings, CaddyCertificates(cfg, in.Caddy)...)
 	findings = append(findings, Secrets(in.Secrets)...)
 	findings = append(findings, Tokens(in)...)

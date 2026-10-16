@@ -476,6 +476,7 @@ func (in Input) clone() Input {
 	out.Clocks = slices.Clone(in.Clocks)
 	out.Leftovers = slices.Clone(in.Leftovers)
 	out.Settings = slices.Clone(in.Settings)
+	out.SelfChecks = slices.Clone(in.SelfChecks)
 	out.Caddy = slices.Clone(in.Caddy)
 	out.Tokens = slices.Clone(in.Tokens)
 	out.Records.Entries = slices.Clone(in.Records.Entries)

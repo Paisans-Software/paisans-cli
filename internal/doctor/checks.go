@@ -54,6 +54,10 @@ type Reads interface {
 	Clock(site string) ClockSample
 	// Leftovers takes the site's inventory and classifies it.
 	Leftovers(site string) LeftoverProbe
+	// SelfCheck asks a site running the toolkit's Caddy, from the
+	// workstation, through its public address, whether it answers as this
+	// deployment, as apply asks the gateway.
+	SelfCheck(site string) SelfCheckProbe
 }
 
 // Checks is every check doctor makes on sites, the ones it asks, as a
@@ -427,6 +431,20 @@ func Checks(cfg *config.Config, sites []string, reads Reads) *Graph {
 				return func(in *Input) { in.Leftovers = append(in.Leftovers, p) }
 			},
 			Judge: func(in Input) []Finding { return Leftovers(bySite(in.Leftovers, site, LeftoverProbe.site)) },
+		})
+	}
+	// Each site running the toolkit's Caddy, asked from outside: it needs
+	// no ssh, so one whose ssh does not answer is still asked.
+	for _, site := range sites {
+		if !cfg.Sites[site].RunsCaddy() {
+			continue
+		}
+		g.Add(Node{Name: SectionSelfCheck + " " + site, Section: SectionSelfCheck, Site: site, Subject: site,
+			Gather: func(Input) func(*Input) {
+				p := reads.SelfCheck(site)
+				return func(in *Input) { in.SelfChecks = append(in.SelfChecks, p) }
+			},
+			Judge: func(in Input) []Finding { return SelfChecks(cfg, bySite(in.SelfChecks, site, SelfCheckProbe.site)) },
 		})
 	}
 	if dr, ok := reads.(DNSReads); ok {

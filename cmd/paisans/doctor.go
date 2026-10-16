@@ -24,6 +24,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/mesh"
 	"github.com/paisans-software/paisans-cli/internal/patroni"
 	"github.com/paisans-software/paisans-cli/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/selfcheck"
 	"github.com/paisans-software/paisans-cli/internal/topology"
 )
 
@@ -549,6 +550,41 @@ func (d doctorReads) Clock(site string) doctor.ClockSample {
 
 func (d doctorReads) Leftovers(site string) doctor.LeftoverProbe {
 	return gatherLeftovers(d.cfg, site, d.transports[site])
+}
+
+// doctorSelfCheck asks t from this workstation with the check apply runs at
+// the end of the gateway's step, so the two cannot disagree about what
+// answers as this deployment. It asks once: doctor does not wait for a
+// certificate. Tests replace it, since no test may reach a real address.
+var doctorSelfCheck = func(ctx context.Context, t selfcheck.Target) error {
+	p := selfcheck.DefaultProbe()
+	p.Wait = 0
+	return selfcheck.Check(ctx, p, t)
+}
+
+// SelfCheck asks the site from outside, with a minute for both fetches.
+func (d doctorReads) SelfCheck(site string) doctor.SelfCheckProbe {
+	p := doctor.SelfCheckProbe{Site: site}
+	t, ok := selfcheck.TargetFor(d.cfg, site)
+	if !ok {
+		p.Unchecked = "no hostname to ask for"
+		if d.cfg.Sites[site].PublicAddress == "" {
+			p.Unchecked = "no public_address to ask through"
+		}
+		return p
+	}
+	p.Host, p.Address = t.Host, t.Address
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	err := doctorSelfCheck(ctx, t)
+	var c *selfcheck.Conflict
+	if errors.As(err, &c) {
+		p.Conflict = c.Port
+	}
+	if err != nil {
+		p.Err = err.Error()
+	}
+	return p
 }
 
 // gatherLeftovers takes one site's inventory with the host check's probes,

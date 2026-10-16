@@ -294,6 +294,16 @@ func (f *fixtureReads) Leftovers(site string) LeftoverProbe {
 	return LeftoverProbe{Site: site}
 }
 
+func (f *fixtureReads) SelfCheck(site string) SelfCheckProbe {
+	f.asked("self-check " + site)
+	for _, p := range f.in.SelfChecks {
+		if p.Site == site {
+			return p
+		}
+	}
+	return SelfCheckProbe{Site: site, Host: "talk.example.org", Address: "203.0.113.30"}
+}
+
 // fixtureConfig is the fixture the reads answer from, loaded once.
 var fixtureConfig = sync.OnceValue(func() *config.Config {
 	cfg, err := config.Load(filepath.Join("..", "render", "testdata", "deployment.yaml"))
@@ -620,6 +630,25 @@ func TestDockerDownStopsWhatRunsDocker(t *testing.T) {
 	}
 }
 
+// The gateway is asked from outside even when its ssh does not answer.
+func TestSelfCheckNeedsNoSsh(t *testing.T) {
+	cfg := fixture(t)
+	fix := healthyInput()
+	fix.Reach = []SiteReach{
+		{Site: "home-a", Destination: "ubuntu@home-a.local"},
+		{Site: "home-b", Destination: "ubuntu@home-b.local"},
+		{Site: "vm", Destination: "ubuntu@vm.example.org", Err: "ssh: connect to host vm.example.org port 22: Operation timed out"},
+	}
+	reads := &fixtureReads{in: fix, log: &events{}}
+	Checks(cfg, fix.Sites, reads).Run(ui.Discard, 0)
+	if !reads.log.has("self-check vm") {
+		t.Errorf("the gateway was not asked from outside: %v", reads.log.list)
+	}
+	if reads.log.has("self-check home-a") {
+		t.Errorf("a site with no Caddy of the toolkit's was asked: %v", reads.log.list)
+	}
+}
+
 // With one node at a time, the nodes run in the graph's order, every site's
 // check of one kind before the next kind, which is the order doctor read
 // in before it ran in parallel, and the lines print in Diagnose's order.
@@ -644,6 +673,7 @@ func TestBoundOfOneRunsInOrder(t *testing.T) {
 		"standby auth",
 		"clock home-a", "clock home-b", "clock vm",
 		"leftovers home-a", "leftovers home-b", "leftovers vm",
+		"self-check vm",
 	}
 	if !reflect.DeepEqual(reads.log.list, want) {
 		t.Errorf("reads in order:\n%s\nwant:\n%s", strings.Join(reads.log.list, "\n"), strings.Join(want, "\n"))

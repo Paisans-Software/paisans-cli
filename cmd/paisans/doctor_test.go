@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 	"github.com/paisans-software/paisans-cli/internal/mesh"
 	"github.com/paisans-software/paisans-cli/internal/patroni"
+	"github.com/paisans-software/paisans-cli/internal/selfcheck"
 	"github.com/paisans-software/paisans-cli/internal/topology"
 	"github.com/paisans-software/paisans-cli/internal/validate"
 )
@@ -184,6 +186,9 @@ func withDoctorHosts(t *testing.T, cfg *config.Config, hosts map[string]doctorHo
 		return h
 	}
 	doctorNow = func() time.Time { return time.Unix(1_760_000_000, 0) }
+	savedSelfCheck := doctorSelfCheck
+	doctorSelfCheck = func(context.Context, selfcheck.Target) error { return nil }
+	t.Cleanup(func() { doctorSelfCheck = savedSelfCheck })
 	savedClassify := doctorClassify
 	doctorClassify = func(*config.Config, map[string]apply.Transport) (*topology.Classification, error) {
 		return &topology.Classification{Sites: map[string]topology.Site{}}, nil
@@ -337,6 +342,29 @@ func stuckHosts(cfg *config.Config, sent, writes *[]string) map[string]doctorHos
 	}
 }
 
+// A monitor running Caddy that answers as something else fails doctor,
+// with apply's own words; a gateway with no public_address warns.
+func TestDoctorSelfChecksEachCaddySite(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sent, writes []string
+	withDoctorHosts(t, cfg, stuckHosts(cfg, &sent, &writes))
+	doctorSelfCheck = func(_ context.Context, target selfcheck.Target) error {
+		return &selfcheck.Conflict{Port: 443, Site: target.Site, Detail: `status 200, body "hello"`}
+	}
+	rec := withRecorder(t, true)
+	_ = runDoctor([]string{"--config", fixtureConfig(), "--site", "vm", "--site", "watch"})
+	out := rec.Lines()
+	if !strings.Contains(out, "fail: check self-check watch 443 on watch answers, but not as this deployment") {
+		t.Errorf("the monitor's answer is not a failure:\n%s", out)
+	}
+	if !strings.Contains(out, "warned: check self-check vm not asked from outside: no public_address to ask through") {
+		t.Errorf("the gateway with no public_address does not say it was not asked:\n%s", out)
+	}
+}
+
 // The stuck case, end to end: home-b led and is switched off, home-a is a
 // replica /sync no longer names. doctor says so, puts starting home-b first
 // and the forced failover second, exits non zero, and every command any host
@@ -378,6 +406,8 @@ func TestDoctorDiagnosesTheStuckReplicaAndOnlyReads(t *testing.T) {
 		"done: check sudo rights home-a sudo lets ubuntu run the WireGuard helper and nothing else",
 		"section: failed, deepest first:",
 		"doctor changes nothing",
+		"done: check self-check watch answers as this deployment on 443 and 80, asked for health.example.org through 203.0.113.20",
+		"warned: check self-check vm not asked from outside: no public_address to ask through",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
