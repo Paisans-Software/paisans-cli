@@ -288,3 +288,74 @@ func (h *stdinHost) RunInput(command, stdin string) (string, error) {
 	h.stdin[command] = stdin
 	return h.testHost.RunInput(command, stdin)
 }
+
+// The rebuilt plan must be the approved one in every step's command, file
+// and stdin once the placeholders are filled, not in its titles alone: a
+// step whose command changed under the same title is not run.
+func TestExecuteStopsWhenOnlyACommandChanged(t *testing.T) {
+	h := newTestHost()
+	h.onRun = func(command string) {
+		if strings.HasPrefix(command, "useradd ") {
+			h.set("passwd", "paisans-f2a9:x:1001:1001::/home/paisans-f2a9:/bin/bash")
+			h.set("group", "paisans-f2a9")
+			h.set("surprise", "yes")
+		}
+	}
+	withParts(t, []part{
+		userPart,
+		{"egress", func(p *planner) error {
+			command := "nft uid " + uidOf(p)
+			if p.f.raw["surprise"] != nil {
+				command += " && rm -rf /"
+			}
+			p.step(Step{Title: "load the egress table", Command: command, Provisional: !p.f.User.Exists})
+			return nil
+		}},
+	})
+	in := testInput(t)
+	plan, err := Build(h, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = Execute(h, in, plan, discard())
+	if err == nil || !strings.Contains(err.Error(), "the host changed while admit ran") || !strings.Contains(err.Error(), "command") {
+		t.Fatalf("Execute = %v", err)
+	}
+	if len(h.ranMatching("nft uid")) != 0 {
+		t.Errorf("Execute ran the changed step: %q", h.ran)
+	}
+}
+
+// The subordinate range is a placeholder too: filled from the range the
+// new user was given, a step that uses it is the approved step.
+func TestExecuteFillsTheSubordinateRange(t *testing.T) {
+	h := newTestHost()
+	h.onRun = func(command string) {
+		if strings.HasPrefix(command, "useradd ") {
+			h.set("passwd", "paisans-f2a9:x:1001:1001::/home/paisans-f2a9:/bin/bash")
+			h.set("group", "paisans-f2a9")
+			h.set("subuid", "paisans-f2a9:165536:65536")
+		}
+	}
+	withParts(t, []part{
+		userPart,
+		{"egress", func(p *planner) error {
+			p.step(Step{Title: "load the egress table", Command: "nft load", Input: "meta skuid { " + uidOf(p) + ", " + rangeOf(p) + " }\n", Provisional: !p.f.User.Exists})
+			return nil
+		}},
+	})
+	in := testInput(t)
+	plan, err := Build(h, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Steps[1].Input != "meta skuid { <uid>, <subordinate range> }\n" {
+		t.Fatalf("stdin %q", plan.Steps[1].Input)
+	}
+	if err := Execute(h, in, plan, discard()); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.ranMatching("nft load"); len(got) != 1 {
+		t.Errorf("the egress step ran %d times", len(got))
+	}
+}

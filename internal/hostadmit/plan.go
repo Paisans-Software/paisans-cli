@@ -200,6 +200,16 @@ var parts = []part{
 // refusal is an error; a plan with no steps is a host already admitted as
 // asked.
 func Build(t apply.Transport, in Input) (*Plan, error) {
+	p, err := build(t, in)
+	if err != nil {
+		return nil, err
+	}
+	return p.plan, nil
+}
+
+// build is Build, returning the planner, whose facts fill the placeholders
+// of an approved plan when Execute rebuilds it.
+func build(t apply.Transport, in Input) (*planner, error) {
 	if err := Early(in); err != nil {
 		return nil, err
 	}
@@ -229,7 +239,7 @@ func Build(t apply.Transport, in Input) (*Plan, error) {
 			return nil, fmt.Errorf("%s: %w", pt.name, err)
 		}
 	}
-	return p.plan, nil
+	return p, nil
 }
 
 // uidOf is the user's UID for a step's command or file, "<uid>" while the
@@ -239,6 +249,25 @@ func uidOf(p *planner) string {
 		return "<uid>"
 	}
 	return fmt.Sprint(p.f.User.UID)
+}
+
+// rangeOf is the user's subordinate UID range as nft writes one,
+// first-last, or "<subordinate range>" while the user does not exist or
+// has other than one range; a step that uses it is Provisional then.
+func rangeOf(p *planner) string {
+	r := p.f.SubUID[p.in.Request.User]
+	if !p.f.User.Exists || len(r) != 1 {
+		return "<subordinate range>"
+	}
+	return fmt.Sprintf("%d-%d", r[0].Start, r[0].Start+r[0].Count-1)
+}
+
+// placeholders fills, in an approved step, every placeholder uidOf and
+// rangeOf draw while the user does not exist, with what they give on p's
+// host. It is the one place a placeholder is filled, so a new one is a new
+// pair here.
+func placeholders(p *planner) *strings.Replacer {
+	return strings.NewReplacer("<uid>", uidOf(p), "<subordinate range>", rangeOf(p))
 }
 
 // Text is the plan as a reviewer reads it in a golden file: every step with
@@ -330,14 +359,14 @@ func Execute(t apply.Transport, in Input, approved *Plan, r ui.Reporter) error {
 	steps := approved.Steps
 	for i := 0; i < len(steps); i++ {
 		if steps[i].Provisional {
-			rebuilt, err := Build(t, in)
+			rebuilt, err := build(t, in)
 			if err != nil {
 				return fmt.Errorf("reading the host again once %s existed: %w", approved.User, err)
 			}
-			if err := sameTitles(steps[i:], rebuilt.Steps); err != nil {
+			if err := sameSteps(steps[i:], rebuilt.plan.Steps, placeholders(rebuilt)); err != nil {
 				return err
 			}
-			steps = append(steps[:i:i], rebuilt.Steps...)
+			steps = append(steps[:i:i], rebuilt.plan.Steps...)
 		}
 		if err := run(t, steps[i], r); err != nil {
 			return err
@@ -346,23 +375,54 @@ func Execute(t apply.Transport, in Input, approved *Plan, r ui.Reporter) error {
 	return nil
 }
 
-// sameTitles is nil when rebuilt holds exactly the approved steps' titles,
-// none of them provisional.
-func sameTitles(approved, rebuilt []Step) error {
-	var a, b []string
-	for _, s := range approved {
-		a = append(a, s.Title)
-	}
+// sameSteps is nil when rebuilt is approved with its placeholders filled
+// by fill: the same steps, in the same order, each with the same title,
+// file path, content and mode, command and stdin, and none of them still
+// provisional. Describe and Kinds are what the owner read, not what runs,
+// so they are not compared. A difference is named by the first step and
+// the first of its fields that differs.
+func sameSteps(approved, rebuilt []Step, fill *strings.Replacer) error {
 	for _, s := range rebuilt {
 		if s.Provisional {
 			return fmt.Errorf("the host changed while admit ran: %q still needs the user, which was to exist by now. Nothing more was done. Run host admit again to see the plan", s.Title)
 		}
+	}
+	var a, b []string
+	for _, s := range approved {
+		a = append(a, fill.Replace(s.Title))
+	}
+	for _, s := range rebuilt {
 		b = append(b, s.Title)
 	}
 	if strings.Join(a, "\n") != strings.Join(b, "\n") {
 		return fmt.Errorf("the host changed while admit ran: the steps left were\n- %s\nand are now\n- %s\nNothing more was done. Run host admit again to see the plan", strings.Join(a, "\n- "), strings.Join(b, "\n- "))
 	}
+	for i, s := range approved {
+		if field := differs(s, rebuilt[i], fill); field != "" {
+			return fmt.Errorf("the host changed while admit ran: step %q now has a different %s from the one approved. Nothing more was done. Run host admit again to see the plan", rebuilt[i].Title, field)
+		}
+	}
 	return nil
+}
+
+// differs names the first field of the approved step a, its placeholders
+// filled, that b does not share, or "" when they are the same step.
+func differs(a, b Step, fill *strings.Replacer) string {
+	switch {
+	case (a.File == nil) != (b.File == nil):
+		return "file"
+	case a.File != nil && fill.Replace(a.File.Path) != b.File.Path:
+		return "file path"
+	case a.File != nil && fill.Replace(a.File.Content) != b.File.Content:
+		return "file content"
+	case a.File != nil && a.File.Mode != b.File.Mode:
+		return "file mode"
+	case fill.Replace(a.Command) != b.Command:
+		return "command"
+	case fill.Replace(a.Input) != b.Input:
+		return "stdin"
+	}
+	return ""
 }
 
 // run runs one step, as host prepare's Execute does. A failure names the
