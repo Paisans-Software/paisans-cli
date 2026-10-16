@@ -22,7 +22,16 @@ var recordCases = addCases(
 		return admittedHost(requestFor("vm"), hostadmit.Flags{}).withDir("/etc/paisans", "drwx------", 0, 0)
 	}},
 	goldenCase{name: "record-etc-paisans-wrong-owner", site: "vm", host: func() *fakeHost {
-		return admittedHost(requestFor("vm"), hostadmit.Flags{}).withDir("/etc/paisans", "drwxr-xr-x", 1000, 1000)
+		// Root's, so the files below it are safe to read, but in another
+		// group: a directory another user owns is refused before any part
+		// plans, since everything below it is then unsafe.
+		return admittedHost(requestFor("vm"), hostadmit.Flags{}).withDir("/etc/paisans", "drwxr-xr-x", 0, 1000)
+	}},
+	goldenCase{name: "record-etc-paisans-setgid", site: "vm", host: func() *fakeHost {
+		return admittedHost(requestFor("vm"), hostadmit.Flags{}).withDir("/etc/paisans", "drwxr-sr-x", 0, 0)
+	}},
+	goldenCase{name: "record-etc-paisans-acl-refused", site: "vm", host: func() *fakeHost {
+		return admittedHost(requestFor("vm"), hostadmit.Flags{}).withDir("/etc/paisans", "drwxr-xr-x+", 0, 0)
 	}},
 	goldenCase{name: "claim-another-site-of-this-deployment-refused", site: "vm", host: func() *fakeHost {
 		return home().file("/var/lib/paisans/registry.json", registryWith("f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01", "10.44.0.1"))
@@ -48,6 +57,21 @@ func recordCase(t *testing.T, name string) goldenCase {
 	}
 	t.Fatalf("no record case %s", name)
 	return goldenCase{}
+}
+
+// /etc/paisans is mended with a mode chmod applies whole, setgid included,
+// which a plain 755 keeps on a directory, so the next run finds it right.
+func TestEtcPaisansIsMendedWhole(t *testing.T) {
+	plan, err := hostadmit.Build(recordCase(t, "record-etc-paisans-setgid").host(), input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Steps) == 0 || plan.Steps[0].Command != "chown root:root /etc/paisans && chmod 00755 /etc/paisans" || plan.Steps[0].Title != "make /etc/paisans root's, mode 755" {
+		t.Errorf("a setgid /etc/paisans is mended by %+v", plan.Steps)
+	}
+	if _, err := hostadmit.Build(recordCase(t, "record-etc-paisans-acl-refused").host(), input(t, "vm", hostadmit.Flags{})); err == nil || !strings.Contains(err.Error(), "setfacl -b /etc/paisans") {
+		t.Errorf("an ACL on /etc/paisans: %v", err)
+	}
 }
 
 // A claim from before entries named their site holds only an address: the
@@ -115,8 +139,8 @@ func TestEtcPaisansIsSettledBeforeItsWriters(t *testing.T) {
 		title string
 	}{
 		"absent":      {home(), "create /etc/paisans"},
-		"private":     {admittedHost(requestFor("vm"), hostadmit.Flags{}).withDir("/etc/paisans", "drwx------", 0, 0), "make /etc/paisans root's alone"},
-		"wrong owner": {admittedHost(requestFor("vm"), hostadmit.Flags{}).withDir("/etc/paisans", "drwxr-xr-x", 1000, 1000), "make /etc/paisans root's alone"},
+		"private":     {admittedHost(requestFor("vm"), hostadmit.Flags{}).withDir("/etc/paisans", "drwx------", 0, 0), "make /etc/paisans root's, mode 755"},
+		"wrong owner": {admittedHost(requestFor("vm"), hostadmit.Flags{}).withDir("/etc/paisans", "drwxr-xr-x", 0, 1000), "make /etc/paisans root's, mode 755"},
 	} {
 		plan, err := hostadmit.Build(c.host, input(t, "vm", hostadmit.Flags{}))
 		if err != nil {

@@ -59,7 +59,9 @@ func planClaim(p *planner) error {
 // planAdmissionDir settles /etc/paisans before any part writes into it
 // (egress, the sysctls, the record): root's, mode exactly 755, so the
 // deployment's user reads its record without sudo and none can write one.
-// A directory made under a stricter umask, or another's, is mended here.
+// A directory made under a stricter umask, or in another group, is mended
+// here, with chmod's leading zeros, which clear a setgid bit a plain 755
+// keeps on a directory. An ACL, which chmod cannot take away, is refused.
 func planAdmissionDir(p *planner) error {
 	dir := p.f.Dirs[admission.Dir]
 	switch {
@@ -68,16 +70,18 @@ func planAdmissionDir(p *planner) error {
 			Command: "install -d -m 755 -o root -g root " + admission.Dir, Kinds: []string{"record"}})
 	case len(dir.Mode) < 10 || dir.Mode[0] != 'd':
 		return fmt.Errorf("%s is %q, not a directory: it must be root's, so no deployment can write another's record. Fix it and admit again. Nothing was changed", admission.Dir, ui.Visible(dir.Mode))
-	case !readableByAll(dir):
-		p.step(Step{Title: "make " + admission.Dir + " root's alone", Describe: fmt.Sprintf("record: it is %s, owner %d; made root's, mode 755", ui.Visible(dir.Mode), dir.UID),
-			Command: "chown root:root " + admission.Dir + " && chmod 755 " + admission.Dir, Kinds: []string{"record"}})
+	case strings.HasSuffix(dir.Mode, "+"):
+		return fmt.Errorf("%s carries an ACL (%s), which chmod cannot take away, and it must be root's, mode 755, so no deployment can write another's record. Remove it with setfacl -b %s and admit again. Nothing was changed", admission.Dir, ui.Visible(dir.Mode), admission.Dir)
+	case !rootDir755(dir):
+		p.step(Step{Title: "make " + admission.Dir + " root's, mode 755", Describe: fmt.Sprintf("record: it is %s, owner %d, group %d; made root's, mode 755", ui.Visible(dir.Mode), dir.UID, dir.GID),
+			Command: "chown root:root " + admission.Dir + " && chmod 00755 " + admission.Dir, Kinds: []string{"record"}})
 	}
 	return nil
 }
 
-// readableByAll reports whether a directory, as ls -ldn printed it, is a
-// real directory owned root:root with mode exactly 755.
-func readableByAll(d DirState) bool {
+// rootDir755 reports whether a directory, as ls -ldn printed it, is a real
+// directory owned root:root with mode exactly 755.
+func rootDir755(d DirState) bool {
 	return d.Present && !d.Unsafe && d.Mode == "drwxr-xr-x" && d.UID == 0 && d.GID == 0
 }
 

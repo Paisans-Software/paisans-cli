@@ -1,9 +1,9 @@
 admit site vm of f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01 as paisans-f2a9 on fake (ubuntu 24.04)
 
-step 1: make /etc/paisans root's alone
-  record: it is drwx------, owner 0; made root's, mode 755
+step 1: make /etc/paisans root's, mode 755
+  record: it is drwx------, owner 0, group 0; made root's, mode 755
   run:
-    $ chown root:root /etc/paisans && chmod 755 /etc/paisans
+    $ chown root:root /etc/paisans && chmod 00755 /etc/paisans
 
 present: registry: this host is claimed for deployment f2a9
 present: docker: Engine 29.9.1
