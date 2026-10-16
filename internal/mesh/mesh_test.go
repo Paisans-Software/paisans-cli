@@ -222,6 +222,22 @@ func (h host) ReadFile(string) (string, bool, error) {
 }
 func (h host) Describe() string { return "fake" }
 
+// ProbeWith reads the networks through the docker command it is given, so
+// host admit, which runs as root, names the system socket and no
+// DOCKER_HOST or context of root's points it elsewhere.
+func TestProbeWithNamesTheDockerItIsGiven(t *testing.T) {
+	const system = "docker -H unix:///var/run/docker.sock"
+	command := mesh.NetworksCommandFor(system)
+	if !strings.Contains(command, system+" network ls -q") || !strings.Contains(command, system+" network inspect $ids") || mesh.NetworksCommand != mesh.NetworksCommandFor("docker") {
+		t.Fatalf("NetworksCommandFor = %q", command)
+	}
+	h := host{outputs: map[string]string{mesh.RouteCommand: routes, mesh.AddrCommand: addrs, command: networks}}
+	probed, err := mesh.ProbeWith(h, system)
+	if err != nil || probed.Networks != networks {
+		t.Errorf("ProbeWith = %+v, %v", probed, err)
+	}
+}
+
 func TestProbeGathersEverySource(t *testing.T) {
 	h := host{outputs: map[string]string{
 		mesh.RouteCommand:    routes,

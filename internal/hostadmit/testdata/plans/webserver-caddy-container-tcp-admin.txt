@@ -83,9 +83,17 @@ step 3: add docker apt key
     $ set -e
     $ export DEBIAN_FRONTEND=noninteractive
     $ apt-get -o DPkg::Lock::Timeout=300 update
-    $ apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl
+    $ apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl gnupg
     $ install -m 0755 -d /etc/apt/keyrings
     $ curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc.paisans-tmp
+    $ home=$(mktemp -d)
+    $ fpr=$(GNUPGHOME="$home" gpg --show-keys --with-colons /etc/apt/keyrings/docker.asc.paisans-tmp 2>/dev/null | awk -F: '$1 == "fpr" { print $10; exit }')
+    $ rm -rf "$home"
+    $ if [ "$fpr" != 9DC858229FC7DD38854AE2D88D81803C0EBFCD88 ]; then
+    $   rm -f /etc/apt/keyrings/docker.asc.paisans-tmp
+    $   echo "the key from download.docker.com has fingerprint ${fpr:-none}, not Docker's 9DC858229FC7DD38854AE2D88D81803C0EBFCD88; nothing reached apt" >&2
+    $   exit 1
+    $ fi
     $ chmod a+r /etc/apt/keyrings/docker.asc.paisans-tmp
     $ mv /etc/apt/keyrings/docker.asc.paisans-tmp /etc/apt/keyrings/docker.asc
 

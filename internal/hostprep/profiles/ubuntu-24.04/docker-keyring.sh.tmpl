@@ -1,12 +1,24 @@
 {{- /* Docker's apt repository, step 1, as published at
         https://docs.docker.com/engine/install/ubuntu/ (fetched 2026-10-06).
         The download goes to a temporary name first so that a failed
-        transfer never leaves a truncated key the probe would call present. */ -}}
+        transfer never leaves a truncated key the probe would call present,
+        and the key is checked against the fingerprint of Docker's release
+        key before it moves into place, so a download that is not Docker's
+        key never reaches apt. gpg reads it in a home of its own, which is
+        removed after. */ -}}
 set -e
 export DEBIAN_FRONTEND=noninteractive
 apt-get -o DPkg::Lock::Timeout=300 update
-apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl
+apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl gnupg
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc.paisans-tmp
+home=$(mktemp -d)
+fpr=$(GNUPGHOME="$home" gpg --show-keys --with-colons /etc/apt/keyrings/docker.asc.paisans-tmp 2>/dev/null | awk -F: '$1 == "fpr" { print $10; exit }')
+rm -rf "$home"
+if [ "$fpr" != {{ .Fingerprint }} ]; then
+  rm -f /etc/apt/keyrings/docker.asc.paisans-tmp
+  echo "the key from download.docker.com has fingerprint ${fpr:-none}, not Docker's {{ .Fingerprint }}; nothing reached apt" >&2
+  exit 1
+fi
 chmod a+r /etc/apt/keyrings/docker.asc.paisans-tmp
 mv /etc/apt/keyrings/docker.asc.paisans-tmp /etc/apt/keyrings/docker.asc

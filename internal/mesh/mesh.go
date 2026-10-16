@@ -99,6 +99,12 @@ const (
 	DaemonConfig = "/etc/docker/daemon.json"
 )
 
+// NetworksCommandFor is NetworksCommand with docker, the client and its
+// flags, in place of plain docker: host admit names the system socket.
+func NetworksCommandFor(docker string) string {
+	return `command -v docker >/dev/null 2>&1 || { echo '[]'; exit 0; }; ids=$(` + docker + ` network ls -q); if [ -z "$ids" ]; then echo '[]'; else ` + docker + ` network inspect $ids; fi`
+}
+
 // LinkCommand prints iface's link as JSON, or "absent" when there is none.
 func LinkCommand(iface string) string {
 	return "ip -j link show dev " + iface + " 2>/dev/null || echo absent"
@@ -295,7 +301,11 @@ type Probed struct {
 
 // Probe asks a host for its routes, addresses, Docker networks and Docker's
 // pools. It reads and never writes.
-func Probe(h Host) (Probed, error) {
+func Probe(h Host) (Probed, error) { return ProbeWith(h, "docker") }
+
+// ProbeWith is Probe with docker, the client and its flags, reading the
+// networks.
+func ProbeWith(h Host, docker string) (Probed, error) {
 	var p Probed
 	var err error
 	for _, step := range []struct {
@@ -304,7 +314,7 @@ func Probe(h Host) (Probed, error) {
 	}{
 		{RouteCommand, RouteCommand, &p.Routes},
 		{AddrCommand, AddrCommand, &p.Addrs},
-		{"docker network inspect", NetworksCommand, &p.Networks},
+		{"docker network inspect", NetworksCommandFor(docker), &p.Networks},
 	} {
 		out, runErr := h.Run(step.command)
 		if runErr != nil {

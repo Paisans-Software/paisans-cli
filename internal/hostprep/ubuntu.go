@@ -1,6 +1,7 @@
 package hostprep
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -130,6 +131,11 @@ func (u ubuntu) probePackages(t Transport) (packageFacts, error) {
 	return facts, nil
 }
 
+// DockerKeyFingerprint is the fingerprint of Docker's release key, which
+// signs its apt repository (Docker's install guide for Ubuntu gives it as
+// 9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88).
+const DockerKeyFingerprint = "9DC858229FC7DD38854AE2D88D81803C0EBFCD88"
+
 // dockerRepo plans Docker's apt key and repository, each only when it is
 // not already as written.
 func (u ubuntu) dockerRepo(t Transport, host OSRelease, facts packageFacts) (Section, error) {
@@ -137,7 +143,7 @@ func (u ubuntu) dockerRepo(t Transport, host OSRelease, facts packageFacts) (Sec
 	if facts.keyring {
 		out.Present = append(out.Present, "docker: apt signing key at "+dockerKeyring)
 	} else {
-		script, err := snippet(u.tmpl("docker-keyring.sh.tmpl"), nil)
+		script, err := snippet(u.tmpl("docker-keyring.sh.tmpl"), map[string]string{"Fingerprint": DockerKeyFingerprint})
 		if err != nil {
 			return out, err
 		}
@@ -177,7 +183,8 @@ func (u ubuntu) dockerRepo(t Transport, host OSRelease, facts packageFacts) (Sec
 // It refuses, not removes: removing docker.io on a host that is already
 // running containers from it takes those containers down, and that is a
 // decision for whoever started them. again is the command the owner runs
-// once they have decided.
+// once they have decided. Admit asks only where no Docker is installed, so
+// its reason is the removal, not compose.
 func conflictMessage(facts packageFacts, again string) string {
 	var conflicts []string
 	for _, p := range dockerConflicts {
@@ -196,8 +203,12 @@ func conflictMessage(facts packageFacts, again string) string {
 	if facts.installed["docker.io"] && !facts.installed["docker-compose-v2"] {
 		remove = "Install Ubuntu's compose plugin beside them (apt-get install docker-compose-v2), or r" + remove[1:]
 	}
-	return fmt.Sprintf("%s from Ubuntu's archive conflict with Docker's own packages, and `docker compose` does not work with them. %s, after checking nothing running depends on them, and %s again",
-		strings.Join(conflicts, ", "), remove, again)
+	why := "`docker compose` does not work with them"
+	if again == "admit" {
+		why = "installing Docker's packages would remove them"
+	}
+	return fmt.Sprintf("%s from Ubuntu's archive conflict with Docker's own packages, and %s. %s, after checking nothing running depends on them, and %s again",
+		strings.Join(conflicts, ", "), why, remove, again)
 }
 
 // Packages leaves an existing Docker as it is when `docker compose` works
@@ -255,7 +266,7 @@ func (u ubuntu) Packages(t Transport, host OSRelease) (Section, error) {
 		}
 	}
 	if len(install) > 0 {
-		script, err := snippet(u.tmpl("apt-install.sh.tmpl"), map[string]any{"Packages": install})
+		script, err := snippet(u.tmpl("apt-install.sh.tmpl"), map[string]any{"Packages": install, "NoUpgrade": false})
 		if err != nil {
 			return out, err
 		}
@@ -271,19 +282,25 @@ var debVersion = regexp.MustCompile(`^[0-9A-Za-z.+:~-]+$`)
 // pinExtras is the extras package pinned to the installed docker-ce's
 // version, or the refusal when the repository offers no such version.
 func pinExtras(facts packageFacts) (string, error) {
+	// dpkg keeps the version of a docker-ce removed with its configuration
+	// kept, and pinning to it would install docker-ce again.
 	v := facts.dockerVersion
-	if v == "" || !debVersion.MatchString(v) {
+	if !facts.installed["docker-ce"] || v == "" || !debVersion.MatchString(v) {
 		return "", fmt.Errorf("docker-ce is not installed as a Debian package here, so docker-ce-rootless-extras cannot be matched to your Docker's version. Install Docker from Docker's own apt repository yourself, or admit on another host. Nothing was changed")
 	}
+	if len(facts.extrasVersions) == 0 {
+		return "", fmt.Errorf("docker-ce %s is installed and the apt repositories offer no docker-ce-rootless-extras, so Docker's apt repository is not configured here, or apt-get update has not run since it was. Add it as Docker's install guide for Ubuntu says (https://docs.docker.com/engine/install/ubuntu/), run apt-get update, and admit again. Nothing was changed", v)
+	}
 	if !slices.Contains(facts.extrasVersions, v) {
-		offered := "none"
-		if len(facts.extrasVersions) > 0 {
-			offered = strings.Join(facts.extrasVersions, ", ")
-		}
-		return "", fmt.Errorf("docker-ce %s is installed and the apt repositories offer docker-ce-rootless-extras at %s. The extras must match your Docker exactly, or installing them upgrades it, which is not admit's decision. Run apt-get update and admit again, or upgrade Docker yourself first. Nothing was changed", v, offered)
+		return "", fmt.Errorf("docker-ce %s is installed and the apt repositories offer docker-ce-rootless-extras at %s. The extras must match your Docker exactly, or installing them upgrades it, which is not admit's decision. Run apt-get update and admit again, or upgrade Docker yourself first. Nothing was changed", v, strings.Join(facts.extrasVersions, ", "))
 	}
 	return "docker-ce-rootless-extras=" + v, nil
 }
+
+// SnapDockerAdmit is host admit's refusal of a snap Docker. Admit's own
+// probe refuses it first; AdmitPackages refuses it too, in the same words,
+// for a caller that has not.
+const SnapDockerAdmit = "Docker is installed as a snap, whose confinement keeps it from bind mounting under /srv and whose refreshes restart every container on snapd's schedule. Remove it yourself (snap remove docker), after checking nothing running depends on it, and admit again. Nothing was changed"
 
 // AdmitPackages: see Profile.
 func (u ubuntu) AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (Section, error) {
@@ -293,7 +310,7 @@ func (u ubuntu) AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (
 		return out, err
 	}
 	if facts.snapDocker {
-		return out, fmt.Errorf("docker: Docker is installed as a snap, whose confinement keeps it from bind mounting under /srv and whose refreshes restart every container on snapd's schedule. Remove it yourself (snap remove docker), after checking nothing running depends on it, and admit again")
+		return out, errors.New("docker: " + SnapDockerAdmit)
 	}
 	var install []string
 	if !dockerPresent {

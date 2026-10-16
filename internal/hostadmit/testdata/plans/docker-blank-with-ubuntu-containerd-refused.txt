@@ -1,1 +1,1 @@
-refused: docker: containerd, runc from Ubuntu's archive conflict with Docker's own packages, and `docker compose` does not work with them. Remove them yourself (apt-get remove containerd runc), after checking nothing running depends on them, and admit again. Nothing was changed
+refused: docker: containerd, runc from Ubuntu's archive conflict with Docker's own packages, and installing Docker's packages would remove them. Remove them yourself (apt-get remove containerd runc), after checking nothing running depends on them, and admit again. Nothing was changed

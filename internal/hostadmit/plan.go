@@ -181,10 +181,12 @@ type part struct {
 }
 
 // parts are admit's stages in the order they run: the spec's What it does,
-// with the claim first, delegation and the egress table before linger
-// starts the user's manager, and AppArmor after the packages that bring its
-// profile. Each is added by the task that writes it, at the place its
-// comment names. Build wraps a part's error with the part's name and
+// with the claim first, and delegation and the egress table before linger
+// starts the user's manager. AppArmor's check follows Docker's packages,
+// though none of them brings the rootlesskit profile, which is Ubuntu's
+// apparmor package's; like every part, it refuses while the plan is drawn,
+// before anything runs. Each is added by the task that writes it, at the
+// place its comment names. Build wraps a part's error with the part's name and
 // nothing else, so a part that quotes what it found on the host passes
 // that through ui.Visible itself.
 var parts = []part{

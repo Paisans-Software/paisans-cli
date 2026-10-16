@@ -81,7 +81,7 @@ const portsProbe = `# paisans host admit: who holds 80 and 443
 if out=$(ss -Hltnpe '( sport = :80 or sport = :443 )' 2>/dev/null); then printf '%s\n' "$out" | sed -n 's/^./listen &/p'; else echo 'unread listeners (ss)'; fi
 if out=$(ss -Hlunpe '( sport = :80 or sport = :443 )' 2>/dev/null); then printf '%s\n' "$out" | sed -n 's/^./listen-udp &/p'; else echo 'unread UDP sockets (ss)'; fi
 if [ -S /var/run/docker.sock ]; then
-  if out=$(` + systemDocker + ` ps --format '{{.Names}}\t{{.Ports}}\t{{.Label "com.docker.compose.project"}}' 2>/dev/null); then printf '%s\n' "$out" | sed -n 's/^./container &/p'; else echo 'unread containers (docker ps on /var/run/docker.sock)'; fi
+  if out=$(` + systemDocker + ` ps --format '{{.Names}}\t{{.Ports}}\t{{.Label "com.docker.compose.project"}}' 2>/dev/null); then printf '%s\n' "$out" | sed -n 's/^./container &/p'; else echo 'unread containers (ps of the system Docker)'; fi
 fi
 if command -v nft >/dev/null 2>&1; then
   if out=$(nft list ruleset 2>/dev/null); then

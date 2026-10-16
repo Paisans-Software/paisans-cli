@@ -32,8 +32,8 @@ done
 if command -v dockerd-rootless-setuptool.sh >/dev/null 2>&1; then say setuptool present; else say setuptool absent; fi
 if command -v snap >/dev/null 2>&1 && snap list docker >/dev/null 2>&1; then say snap docker; else say snap absent; fi
 if [ -S /var/run/docker.sock ]; then say system-socket present; else say system-socket absent; fi
-# AppArmor's restriction on unprivileged user namespaces, and the profile
-# Docker's rootless extras bring.
+# AppArmor's restriction on unprivileged user namespaces, and the
+# rootlesskit profile Ubuntu's apparmor package loads at boot.
 say userns-restrict "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)"
 if grep -q rootlesskit /sys/kernel/security/apparmor/profiles 2>/dev/null; then say rootlesskit-profile loaded; else say rootlesskit-profile absent; fi
 # The user, and every user's subordinate ranges. userfiles are the files

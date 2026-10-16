@@ -89,8 +89,10 @@ type Facts struct {
 
 // DockerFacts are the system Docker, if any, as the probe found it.
 type DockerFacts struct {
-	// Engine is dockerd's version, "" when Docker is absent.
+	// Engine is dockerd's version, "" when Docker is absent. Unreadable is
+	// a dockerd whose version the probe could not read.
 	Engine     string
+	Unreadable bool
 	Setuptool  bool
 	Snap       bool
 	SystemSock bool
@@ -118,9 +120,9 @@ type UserFacts struct {
 	GroupTaken bool
 	SudoNames  []string
 	// SudoRS is sudo being sudo-rs, whose sudo -l lists no Defaults.
-	SudoRS bool
-	Linger             bool
-	ManagerActive      bool
+	SudoRS        bool
+	Linger        bool
+	ManagerActive bool
 	// SudoRead is sudo -l -U read for the user, or sudo absent. From
 	// what it printed: SudoRules are the user's rules, SudoDefaults each
 	// entry of its matching Defaults, and SudoSpecific each runas or
@@ -161,7 +163,7 @@ type DirState struct {
 // probeData is what probe.sh.tmpl is rendered with.
 type probeData struct {
 	User, Token, Prefix, EgressUnit, EgressTable, DataParent, MeshUnit, Sudoers string
-	Files, Dirs, Counted                                               []string
+	Files, Dirs, Counted                                                        []string
 }
 
 // probedFiles are the files admit writes as root, whose state the probe
@@ -254,7 +256,11 @@ func parseFacts(out, user string) (Facts, error) {
 		f.raw[key] = append(f.raw[key], v)
 		switch key {
 		case "engine":
-			if v != "absent" {
+			switch v {
+			case "absent":
+			case "":
+				f.Docker.Unreadable = true
+			default:
 				f.Docker.Engine = v
 			}
 		case "pkg":

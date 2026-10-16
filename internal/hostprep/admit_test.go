@@ -89,8 +89,34 @@ func TestAdmitPackagesRefusesExtrasThatWouldUpgradeDocker(t *testing.T) {
 	}
 }
 
+// Docker's apt key moves into place only once gpg has shown it to be
+// Docker's release key, by fingerprint; anything else is removed.
+func TestTheDockerKeyIsCheckedByFingerprint(t *testing.T) {
+	profile, err := hostprep.Select(hostprep.ParseOSRelease(ubuntu2404))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := profile.AdmitPackages(freshHost(), hostprep.ParseOSRelease(ubuntu2404), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, st := range s.Steps {
+		if st.Title != "add docker apt key" {
+			continue
+		}
+		check := strings.Index(st.Command, `if [ "$fpr" != 9DC858229FC7DD38854AE2D88D81803C0EBFCD88 ]`)
+		move := strings.Index(st.Command, "mv /etc/apt/keyrings/docker.asc.paisans-tmp /etc/apt/keyrings/docker.asc")
+		if check < 0 || move < check || !strings.Contains(st.Command, "gpg --show-keys --with-colons") || !strings.Contains(st.Command, "install -y ca-certificates curl gnupg") {
+			t.Errorf("the key is not checked before it moves into place:\n%s", st.Command)
+		}
+		return
+	}
+	t.Fatal("no key step on a fresh host")
+}
+
 // On a host without Docker, admit refuses what host prepare refuses, so
-// installing Docker never removes Ubuntu's containerd or runc.
+// installing Docker never removes Ubuntu's containerd or runc; with no
+// Docker to run compose, the reason given is the removal.
 func TestAdmitPackagesRefusesConflicts(t *testing.T) {
 	profile, err := hostprep.Select(hostprep.ParseOSRelease(ubuntu2404))
 	if err != nil {
@@ -99,8 +125,31 @@ func TestAdmitPackagesRefusesConflicts(t *testing.T) {
 	h := freshHost()
 	h.responses[probePackages] = "compose absent\npkg containerd install ok installed\npkg runc install ok installed\nkeyring absent\narch amd64\n"
 	_, err = profile.AdmitPackages(h, hostprep.ParseOSRelease(ubuntu2404), false)
-	if err == nil || !strings.Contains(err.Error(), "containerd, runc") || !strings.Contains(err.Error(), "Nothing was changed") {
-		t.Errorf("want a refusal naming containerd and runc, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "containerd, runc") || !strings.Contains(err.Error(), "Nothing was changed") ||
+		!strings.Contains(err.Error(), "installing Docker's packages would remove them") || strings.Contains(err.Error(), "docker compose") {
+		t.Errorf("want a refusal naming containerd and runc, and why, got %v", err)
+	}
+}
+
+// The extras are pinned only to a docker-ce that dpkg holds installed: a
+// removed one whose configuration was kept still has a version, and
+// pinning to it would install docker-ce over the owner's Docker. With no
+// extras offered at all, Docker's repository is what is missing.
+func TestAdmitPackagesPinsOnlyAnInstalledDockerCE(t *testing.T) {
+	profile, err := hostprep.Select(hostprep.ParseOSRelease(ubuntu2404))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := freshHost()
+	h.responses[probePackages] = "compose present\npkg docker-ce deinstall ok config-files\ndockerversion 5:29.9.0-1~ubuntu.24.04~noble\nextras 5:29.9.0-1~ubuntu.24.04~noble\nkeyring present\narch amd64\n"
+	_, err = profile.AdmitPackages(h, hostprep.ParseOSRelease(ubuntu2404), true)
+	if err == nil || !strings.Contains(err.Error(), "docker-ce is not installed as a Debian package") {
+		t.Errorf("a removed docker-ce: %v", err)
+	}
+	h.responses[probePackages] = "compose present\npkg docker-ce install ok installed\ndockerversion 5:29.9.0-1~ubuntu.24.04~noble\nkeyring absent\narch amd64\n"
+	_, err = profile.AdmitPackages(h, hostprep.ParseOSRelease(ubuntu2404), true)
+	if err == nil || !strings.Contains(err.Error(), "offer no docker-ce-rootless-extras") || !strings.Contains(err.Error(), "Docker's apt repository") || strings.Contains(err.Error(), "at none") {
+		t.Errorf("no extras offered: %v", err)
 	}
 }
 

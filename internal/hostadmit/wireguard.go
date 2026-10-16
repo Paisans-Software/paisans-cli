@@ -53,7 +53,7 @@ func planMeshSubnet(p *planner) error {
 	if err != nil {
 		return err
 	}
-	probed, err := mesh.Probe(p.t)
+	probed, err := mesh.ProbeWith(p.t, systemDocker)
 	if err != nil {
 		return shown(err)
 	}

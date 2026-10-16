@@ -1,9 +1,11 @@
 package hostadmit
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
+	"github.com/paisans-software/paisans-cli/internal/hostprep"
 )
 
 // MinRootlessEngine is the oldest Docker Engine admit accepts: from 29.5 a
@@ -24,7 +26,10 @@ const systemDocker = "docker -H unix:///var/run/docker.sock"
 func planDocker(p *planner) error {
 	dk := p.f.Docker
 	if dk.Snap {
-		return fmt.Errorf("Docker is installed as a snap, whose confinement keeps it from bind mounting under /srv and whose refreshes restart every container on snapd's schedule. Remove it yourself (snap remove docker), after checking nothing running depends on it, and admit again. Nothing was changed")
+		return errors.New(hostprep.SnapDockerAdmit)
+	}
+	if dk.Unreadable {
+		return fmt.Errorf("dockerd is installed and dockerd --version printed no version admit can read, so admit cannot tell which Docker this is, and would otherwise install Docker's packages over it. Check that dockerd --version prints \"Docker version <version>, build <id>\", and admit again. Nothing was changed")
 	}
 	present := dk.Engine != ""
 	if present {
