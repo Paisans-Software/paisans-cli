@@ -32,6 +32,16 @@ done
 if command -v dockerd-rootless-setuptool.sh >/dev/null 2>&1; then say setuptool present; else say setuptool absent; fi
 if command -v snap >/dev/null 2>&1 && snap list docker >/dev/null 2>&1; then say snap docker; else say snap absent; fi
 if [ -S /var/run/docker.sock ]; then say system-socket present; else say system-socket absent; fi
+# Docker's system units, each as systemctl names its state; nothing
+# printed is neither enabled nor active.
+for unit in docker.socket docker.service containerd.service; do
+  e=$(systemctl is-enabled "$unit" 2>/dev/null | sed -n 1p)
+  a=$(systemctl is-active "$unit" 2>/dev/null | sed -n 1p)
+  say system-unit "$unit ${e:-disabled} ${a:-inactive}"
+done
+# A /usr/sbin/policy-rc.d admit put there to hold Docker's daemons while it
+# installed them, which a run that stopped then left.
+if [ -f /usr/sbin/policy-rc.d ] && [ ! -L /usr/sbin/policy-rc.d ] && grep -qxF {{ q (printf "# %s" .HoldMarker) }} /usr/sbin/policy-rc.d; then say docker-hold held; else say docker-hold none; fi
 # AppArmor's restriction on unprivileged user namespaces, and the
 # rootlesskit profile Ubuntu's apparmor package loads at boot.
 say userns-restrict "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)"

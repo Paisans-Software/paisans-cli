@@ -128,6 +128,8 @@ func holds(content, key string) bool {
 // no deployment needs are restored (b, with restore the sysctl -w
 // arguments).
 type sysctlState struct {
+	// others are the other admitted deployments' readable records.
+	others           []admission.Record
 	wantLow, wantFwd bool
 	was, first, b    before
 	restore          []string
@@ -146,6 +148,7 @@ func (p *planner) sysctls() (*sysctlState, error) {
 	if err != nil {
 		return nil, err
 	}
+	st.others = recs
 	current, _, err := p.t.ReadFile(sysctlPath)
 	if err != nil {
 		return nil, shown(err)
@@ -209,9 +212,10 @@ func recordBefore(p *planner, content string) {
 
 // planSysctlsBefore records, before anything else changes the host, the
 // value each key this run turns on has now, so evict restores the host's
-// own: installing Docker starts dockerd, which turns forwarding on, and a
-// run that stops after it would otherwise read that value on its next
-// try. A key the file holds already keeps the value it holds.
+// own: a dockerd that starts turns forwarding on, and admit's install holds
+// the system daemon so that it does not, but a run that stopped after one
+// started would otherwise read that value on its next try. A key the file
+// holds already keeps the value it holds.
 func planSysctlsBefore(p *planner) error {
 	st, err := p.sysctls()
 	if err != nil {

@@ -102,6 +102,12 @@ type Record struct {
 	// WebServer is what admit found in front of a site with
 	// web_server.managed_by: external, nil for every other site.
 	WebServer *WebServer `json:"web_server"`
+	// SystemDockerDisabled is whether Docker's system daemon is one admit
+	// installed and disabled, so the deployments' own rootless daemons are
+	// the only Docker running. Nothing of paisans enables it again. It is
+	// false when the owner had Docker before admit, which admit never
+	// touches.
+	SystemDockerDisabled bool `json:"system_docker_disabled"`
 }
 
 // Ports are the ports the firewall opened: the SSH port, the WireGuard port
@@ -218,7 +224,7 @@ func EncodeRecord(r Record) ([]byte, error) {
 
 // recordFields is every key a record holds; a record missing one was not
 // written by a toolkit of its version.
-var recordFields = []string{"version", "deployment", "user", "grants", "forwarding", "ports", "digest", "admitted_at", "data_dir", "bridge_netfilter", "mesh_lan", "web_server"}
+var recordFields = []string{"version", "deployment", "user", "grants", "forwarding", "ports", "digest", "admitted_at", "data_dir", "bridge_netfilter", "mesh_lan", "web_server", "system_docker_disabled"}
 
 // ParseRecord reads a record strictly: its version, every field present and
 // none unknown, a deployment whose token is token, the user a request for it

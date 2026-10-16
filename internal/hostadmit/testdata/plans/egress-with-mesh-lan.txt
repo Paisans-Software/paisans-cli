@@ -339,7 +339,8 @@ step 21: write the admission record
     |   "data_dir": "",
     |   "bridge_netfilter": false,
     |   "mesh_lan": "192.168.1.0/24",
-    |   "web_server": null
+    |   "web_server": null,
+    |   "system_docker_disabled": false
     | }
 
 step 22: add the operators' keys

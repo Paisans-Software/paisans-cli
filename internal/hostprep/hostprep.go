@@ -208,8 +208,14 @@ type Profile interface {
 	// never upgrading a package already installed; in both, uidmap,
 	// nftables and the base packages but the firewall, which admit needs
 	// installed and active already. dockerPresent is admit's own
-	// judgement, made from the engine's version.
-	AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (Section, error)
+	// judgement, made from the engine's version. With Docker absent, the
+	// install keeps Docker's system daemon from starting. Installed is
+	// what the plan adds that the host did not have.
+	AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (Section, Installed, error)
+	// ReleaseDockerHold puts back the host's own policy for starting
+	// services, which an install AdmitPackages planned holds while it runs,
+	// for a run that stopped before it could.
+	ReleaseDockerHold() (string, error)
 	// Services plans enabling and starting what Packages installed.
 	// Its own files carry the deployment's token, so that two deployments on
 	// one host each keep their own.

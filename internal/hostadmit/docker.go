@@ -22,7 +22,7 @@ const systemDocker = "docker -H unix:///var/run/docker.sock"
 // planDocker refuses a snap Docker and an Engine older than
 // MinRootlessEngine, since upgrading the owner's Docker is not admit's
 // decision, and a present Docker that cannot run rootless; then plans the
-// packages.
+// packages, and keeps a system Docker admit installs disabled.
 func planDocker(p *planner) error {
 	dk := p.f.Docker
 	if dk.Snap {
@@ -41,12 +41,11 @@ func planDocker(p *planner) error {
 		}
 		p.present("docker: Engine " + dk.Engine)
 	}
-	s, err := p.profile.AdmitPackages(p.t, p.host, present)
+	s, added, err := p.profile.AdmitPackages(p.t, p.host, present)
 	if err != nil {
 		return err
 	}
-	p.section(s)
-	return nil
+	return planSystemDocker(p, s, added)
 }
 
 // planAppArmor checks that Ubuntu's restriction on unprivileged user

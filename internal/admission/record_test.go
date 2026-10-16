@@ -46,6 +46,7 @@ func TestRecordGolden(t *testing.T) {
 	rec.DataDir = "/srv/data/paisans-f2a9"
 	rec.MeshLAN = "192.168.1.0/24"
 	rec.WebServer = &admission.WebServer{Server: "caddy", Process: "caddy", Config: "/etc/caddy/Caddyfile", Main: "/etc/caddy/Caddyfile", Certs: "automatic", AdminTCP: "localhost:2019"}
+	rec.SystemDockerDisabled = true
 	got := encode(t, rec)
 	path := filepath.Join("testdata", "admitted.f2a9.json")
 	if *update {

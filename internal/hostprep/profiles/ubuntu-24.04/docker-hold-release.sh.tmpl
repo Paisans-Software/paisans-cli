@@ -1,0 +1,13 @@
+{{- /* Puts /usr/sbin/policy-rc.d back as it was before admit held Docker's
+        daemons: the owner's own, moved aside to policy-rc.d.paisans-owner,
+        goes back, and admit's, found by its marker line, is removed when
+        the owner had none. Anything else there is the owner's and is left. */ -}}
+release_docker_hold() {
+  if [ -f /usr/sbin/policy-rc.d ] && [ ! -L /usr/sbin/policy-rc.d ] && grep -qxF '# {{ .Marker }}' /usr/sbin/policy-rc.d; then
+    if [ -e /usr/sbin/policy-rc.d.paisans-owner ] || [ -L /usr/sbin/policy-rc.d.paisans-owner ]; then
+      mv -f /usr/sbin/policy-rc.d.paisans-owner /usr/sbin/policy-rc.d
+    else
+      rm -f /usr/sbin/policy-rc.d
+    fi
+  fi
+}

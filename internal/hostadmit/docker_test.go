@@ -2,9 +2,11 @@ package hostadmit_test
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/hostadmit"
 )
 
@@ -111,5 +113,146 @@ func TestSystemDockerIsNamedBySocket(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// titled is the index of plan's step titled title, -1 for none.
+func titled(plan *hostadmit.Plan, title string) int {
+	for i, s := range plan.Steps {
+		if s.Title == title {
+			return i
+		}
+	}
+	return -1
+}
+
+// recordWritten is the admission record plan writes, decoded.
+func recordWritten(t *testing.T, plan *hostadmit.Plan) admission.Record {
+	t.Helper()
+	for _, s := range plan.Steps {
+		if s.File != nil && strings.HasPrefix(s.File.Path, "/etc/paisans/admitted.") {
+			rec, err := admission.ParseRecord([]byte(s.File.Content), "f2a9")
+			if err != nil {
+				t.Fatal(err)
+			}
+			return rec
+		}
+	}
+	t.Fatalf("no record written:\n%s", plan.Text())
+	return admission.Record{}
+}
+
+// Admit installs Docker for the deployments' rootless daemons, and the
+// system daemon its packages bring must never run: before it installs
+// anything, admit records what it installs, so a run that stops later
+// still knows the system Docker is its own; the install holds the daemon;
+// and the next step disables Docker's units. The record says so.
+func TestAdmitDisablesTheSystemDockerItInstalls(t *testing.T) {
+	plan, err := hostadmit.Build(newBlank(), input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, key := titled(plan, "record what admit installs"), titled(plan, "add docker apt key")
+	install := slices.IndexFunc(plan.Steps, func(s hostadmit.Step) bool { return strings.HasPrefix(s.Title, "install packages: docker-ce") })
+	disable := titled(plan, "disable the system Docker")
+	if record < 0 || key < record || install < key || disable != install+1 {
+		t.Fatalf("record %d, key %d, install %d, disable %d:\n%s", record, key, install, disable, plan.Text())
+	}
+	want := "package docker-ce\npackage docker-ce-cli\npackage containerd.io\npackage docker-buildx-plugin\npackage docker-compose-plugin\npackage docker-ce-rootless-extras\npackage uidmap\npackage wireguard-tools\npackage git\nfile /etc/apt/keyrings/docker.asc\nfile /etc/apt/sources.list.d/docker.sources\n"
+	if f := plan.Steps[record].File; f == nil || f.Path != "/etc/paisans/installed" || !strings.HasSuffix(f.Content, want) {
+		t.Errorf("the installed file: %+v", plan.Steps[record].File)
+	}
+	if c := plan.Steps[install].Command; !strings.Contains(c, "/usr/sbin/policy-rc.d") {
+		t.Errorf("the install does not hold the system daemon:\n%s", c)
+	}
+	if c := plan.Steps[disable].Command; !strings.HasPrefix(c, "systemctl disable --now docker.socket docker.service containerd.service && ") || !strings.Contains(c, "ip link show docker0") {
+		t.Errorf("the disable step runs %q", c)
+	}
+	if !recordWritten(t, plan).SystemDockerDisabled {
+		t.Error("the record does not say admit disabled the system Docker")
+	}
+}
+
+// A Docker the owner had before admit is never touched: no hold, no
+// disable, and the record says admit did not disable it.
+func TestAdmitLeavesTheOwnersDocker(t *testing.T) {
+	h := current().with("system-unit", "docker.service enabled active")
+	plan, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range plan.Steps {
+		if strings.Contains(s.Command, "policy-rc.d") || strings.Contains(s.Command, "systemctl disable") {
+			t.Errorf("step %q touches the owner's Docker: %s", s.Title, s.Command)
+		}
+	}
+	if recordWritten(t, plan).SystemDockerDisabled {
+		t.Error("the record says admit disabled the owner's Docker")
+	}
+}
+
+// installedByAdmit is h with the installed file saying admit installed
+// Docker there.
+func installedByAdmit(h *fakeHost) *fakeHost {
+	content := "# Written by paisans host admit: what it installed on this host. It stays\n# installed when paisans host evict removes the last admitted deployment.\npackage docker-ce\npackage docker-ce-rootless-extras\npackage uidmap\n"
+	return h.file("/etc/paisans/installed", content).withFile("/etc/paisans/installed", content, "644", 0)
+}
+
+// A run that stopped between the install and the disable left the
+// system Docker admit installed enabled and no record: the next run
+// disables it. Once a record says admit disabled it, admit leaves it as it
+// is, so an owner who enabled it since keeps it running.
+func TestAdmitDisablesTheSystemDockerOnceOnly(t *testing.T) {
+	stopped := installedByAdmit(current()).with("system-unit", "docker.service enabled active")
+	plan, err := hostadmit.Build(stopped, input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if titled(plan, "disable the system Docker") < 0 || titled(plan, "record what admit installs") >= 0 {
+		t.Errorf("a run after one that stopped before the disable plans:\n%s", plan.Text())
+	}
+	if !recordWritten(t, plan).SystemDockerDisabled {
+		t.Error("the record does not say admit disabled the system Docker")
+	}
+
+	in := input(t, "vm", hostadmit.Flags{})
+	rec := admission.NewRecord(in.Request, in.Flags.Grants(), in.Digest, in.Now)
+	rec.SystemDockerDisabled = true
+	data, err := admission.EncodeRecord(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enabled := installedByAdmit(current()).with("system-unit", "docker.service enabled active").
+		add("record", "/etc/paisans/admitted.f2a9.json").file("/etc/paisans/admitted.f2a9.json", string(data))
+	plan, err = hostadmit.Build(enabled, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if titled(plan, "disable the system Docker") >= 0 || !slices.Contains(plan.Present, "docker: the system daemon admit installed and disabled has been enabled since, and is left as it is") {
+		t.Errorf("a re-run disables what the owner enabled:\n%s", plan.Text())
+	}
+}
+
+// A run killed while it held the system Docker left admit's policy-rc.d
+// in place; with nothing left to install, the next run puts the owner's
+// back.
+func TestAdmitPutsBackAPolicyALeftHoldLeft(t *testing.T) {
+	plan, err := hostadmit.Build(installedByAdmit(current()).with("docker-hold", "held"), input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := titled(plan, "put back /usr/sbin/policy-rc.d")
+	if i < 0 || !strings.Contains(plan.Steps[i].Command, "release_docker_hold") {
+		t.Errorf("no step puts the policy back:\n%s", plan.Text())
+	}
+}
+
+// A line in the installed file admit did not write is refused before
+// anything changes: evict names its lines to the owner.
+func TestAForeignInstalledLineIsRefused(t *testing.T) {
+	h := current().file("/etc/paisans/installed", "package docker-ce\nrm -rf /\n").withFile("/etc/paisans/installed", "x", "644", 0)
+	_, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+	if err == nil || !strings.Contains(err.Error(), "/etc/paisans/installed holds rm -rf /") {
+		t.Errorf("Build = %v", err)
 	}
 }

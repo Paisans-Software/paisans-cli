@@ -302,28 +302,60 @@ func pinExtras(facts packageFacts) (string, error) {
 // for a caller that has not.
 const SnapDockerAdmit = "Docker is installed as a snap, whose confinement keeps it from bind mounting under /srv and whose refreshes restart every container on snapd's schedule. Remove it yourself (snap remove docker), after checking nothing running depends on it, and admit again. Nothing was changed"
 
+// HoldDockerMarker is the line that marks /usr/sbin/policy-rc.d as the one
+// admit puts there while it installs Docker (docker-hold.sh.tmpl).
+const HoldDockerMarker = "Written by paisans host admit while it installs Docker, and removed after."
+
+// Installed is what an admit install adds that the host did not have:
+// each package by name, and Docker's apt key and source by path.
+type Installed struct {
+	Packages, Files []string
+}
+
+// ReleaseDockerHold is a script that puts /usr/sbin/policy-rc.d back as
+// it was before admit held Docker's daemons, for a run that stopped while
+// it held them.
+func (u ubuntu) ReleaseDockerHold() (string, error) {
+	release, err := snippet(u.tmpl("docker-hold-release.sh.tmpl"), map[string]string{"Marker": HoldDockerMarker})
+	if err != nil {
+		return "", err
+	}
+	return "set -e\n" + release + "release_docker_hold\n", nil
+}
+
 // AdmitPackages: see Profile.
-func (u ubuntu) AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (Section, error) {
+func (u ubuntu) AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (Section, Installed, error) {
 	var out Section
+	var added Installed
 	facts, err := u.probePackages(t)
 	if err != nil {
-		return out, err
+		return out, added, err
 	}
 	if facts.snapDocker {
-		return out, errors.New("docker: " + SnapDockerAdmit)
+		return out, added, errors.New("docker: " + SnapDockerAdmit)
 	}
 	var install []string
 	if !dockerPresent {
 		// Refused, as host prepare refuses, so that apt never removes the
 		// owner's containerd, runc or docker.io to make room.
 		if msg := conflictMessage(facts, "admit"); msg != "" {
-			return out, fmt.Errorf("%s. Nothing was changed", msg)
+			return out, added, fmt.Errorf("%s. Nothing was changed", msg)
 		}
 		repo, err := u.dockerRepo(t, host, facts)
 		if err != nil {
-			return out, err
+			return out, added, err
 		}
 		out.add(repo)
+		if !facts.keyring {
+			added.Files = append(added.Files, dockerKeyring)
+		}
+		_, found, err := t.ReadFile(dockerSources)
+		if err != nil {
+			return out, added, err
+		}
+		if !found {
+			added.Files = append(added.Files, dockerSources)
+		}
 		for _, p := range dockerPackages {
 			if !facts.installed[p] {
 				install = append(install, p)
@@ -342,7 +374,7 @@ func (u ubuntu) AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (
 			// the resolver to upgrade.
 			pinned, err := pinExtras(facts)
 			if err != nil {
-				return out, err
+				return out, added, err
 			}
 			install = append(install, pinned)
 		default:
@@ -350,18 +382,37 @@ func (u ubuntu) AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (
 		}
 	}
 	if len(install) == 0 {
-		return out, nil
+		return out, added, nil
+	}
+	for _, p := range install {
+		name, _, _ := strings.Cut(p, "=")
+		added.Packages = append(added.Packages, name)
 	}
 	script, err := snippet(u.tmpl("apt-install.sh.tmpl"), map[string]any{"Packages": install, "NoUpgrade": dockerPresent})
 	if err != nil {
-		return out, err
+		return out, added, err
 	}
 	describe := "packages: install " + strings.Join(install, " ")
 	if dockerPresent {
 		describe += ", leaving your Docker at the version it is"
 	}
+	if slices.Contains(install, "docker-ce") {
+		// docker-ce's and containerd.io's scripts would start the system
+		// daemon, which changes forwarding and the firewall as it starts:
+		// it is held for the install instead, so it never starts.
+		release, err := snippet(u.tmpl("docker-hold-release.sh.tmpl"), map[string]string{"Marker": HoldDockerMarker})
+		if err != nil {
+			return out, added, err
+		}
+		hold, err := snippet(u.tmpl("docker-hold.sh.tmpl"), map[string]string{"Marker": HoldDockerMarker, "Release": release})
+		if err != nil {
+			return out, added, err
+		}
+		script = hold + script
+		describe += "; Docker's system daemon is kept from starting while its packages install, by a /usr/sbin/policy-rc.d of admit's that asks yours, if you have one, about every other service and is replaced by yours again after"
+	}
 	out.Steps = append(out.Steps, Step{Kinds: packageKinds(install), Title: "install packages: " + strings.Join(install, ", "), Describe: describe, Command: script})
-	return out, nil
+	return out, added, nil
 }
 
 // unitState reads `systemctl is-enabled` and `is-active` for one unit.

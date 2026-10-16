@@ -1,6 +1,9 @@
 package hostprep_test
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -38,7 +41,7 @@ func TestAdmitPackages(t *testing.T) {
 		t.Fatal(err)
 	}
 	blank := freshHost()
-	s, err := profile.AdmitPackages(blank, hostprep.ParseOSRelease(ubuntu2404), false)
+	s, _, err := profile.AdmitPackages(blank, hostprep.ParseOSRelease(ubuntu2404), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +63,7 @@ func TestAdmitPackages(t *testing.T) {
 
 	present := freshHost()
 	present.responses[probePackages] = "compose present\npkg docker-ce install ok installed\npkg wireguard-tools absent\npkg ufw install ok installed\npkg git install ok installed\ndockerversion 5:29.9.0-1~ubuntu.24.04~noble\nextras 5:29.9.1-1~ubuntu.24.04~noble\nextras 5:29.9.0-1~ubuntu.24.04~noble\nkeyring present\narch amd64\n"
-	s, err = profile.AdmitPackages(present, hostprep.ParseOSRelease(ubuntu2404), true)
+	s, _, err = profile.AdmitPackages(present, hostprep.ParseOSRelease(ubuntu2404), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +86,7 @@ func TestAdmitPackagesRefusesExtrasThatWouldUpgradeDocker(t *testing.T) {
 	}
 	h := freshHost()
 	h.responses[probePackages] = "compose present\npkg docker-ce install ok installed\ndockerversion 5:29.9.0-1~ubuntu.24.04~noble\nextras 5:29.9.1-1~ubuntu.24.04~noble\nkeyring present\narch amd64\n"
-	_, err = profile.AdmitPackages(h, hostprep.ParseOSRelease(ubuntu2404), true)
+	_, _, err = profile.AdmitPackages(h, hostprep.ParseOSRelease(ubuntu2404), true)
 	if err == nil || !strings.Contains(err.Error(), "5:29.9.0-1~ubuntu.24.04~noble") || !strings.Contains(err.Error(), "5:29.9.1-1~ubuntu.24.04~noble") {
 		t.Errorf("want a refusal naming both versions, got %v", err)
 	}
@@ -96,7 +99,7 @@ func TestTheDockerKeyIsCheckedByFingerprint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := profile.AdmitPackages(freshHost(), hostprep.ParseOSRelease(ubuntu2404), false)
+	s, _, err := profile.AdmitPackages(freshHost(), hostprep.ParseOSRelease(ubuntu2404), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +132,7 @@ func TestAdmitPackagesRefusesConflicts(t *testing.T) {
 	}
 	h := freshHost()
 	h.responses[probePackages] = "compose absent\npkg containerd install ok installed\npkg runc install ok installed\nkeyring absent\narch amd64\n"
-	_, err = profile.AdmitPackages(h, hostprep.ParseOSRelease(ubuntu2404), false)
+	_, _, err = profile.AdmitPackages(h, hostprep.ParseOSRelease(ubuntu2404), false)
 	if err == nil || !strings.Contains(err.Error(), "containerd, runc") || !strings.Contains(err.Error(), "Nothing was changed") ||
 		!strings.Contains(err.Error(), "installing Docker's packages would remove them") || strings.Contains(err.Error(), "docker compose") {
 		t.Errorf("want a refusal naming containerd and runc, and why, got %v", err)
@@ -147,12 +150,12 @@ func TestAdmitPackagesPinsOnlyAnInstalledDockerCE(t *testing.T) {
 	}
 	h := freshHost()
 	h.responses[probePackages] = "compose present\npkg docker-ce deinstall ok config-files\ndockerversion 5:29.9.0-1~ubuntu.24.04~noble\nextras 5:29.9.0-1~ubuntu.24.04~noble\nkeyring present\narch amd64\n"
-	_, err = profile.AdmitPackages(h, hostprep.ParseOSRelease(ubuntu2404), true)
+	_, _, err = profile.AdmitPackages(h, hostprep.ParseOSRelease(ubuntu2404), true)
 	if err == nil || !strings.Contains(err.Error(), "docker-ce is not installed as a Debian package") {
 		t.Errorf("a removed docker-ce: %v", err)
 	}
 	h.responses[probePackages] = "compose present\npkg docker-ce install ok installed\ndockerversion 5:29.9.0-1~ubuntu.24.04~noble\nkeyring absent\narch amd64\n"
-	_, err = profile.AdmitPackages(h, hostprep.ParseOSRelease(ubuntu2404), true)
+	_, _, err = profile.AdmitPackages(h, hostprep.ParseOSRelease(ubuntu2404), true)
 	if err == nil || !strings.Contains(err.Error(), "offer no docker-ce-rootless-extras") || !strings.Contains(err.Error(), "Docker's apt repository") || strings.Contains(err.Error(), "at none") {
 		t.Errorf("no extras offered: %v", err)
 	}
@@ -173,5 +176,128 @@ func TestOwnedKeysRoundTrip(t *testing.T) {
 	}
 	if got := hostprep.OwnedKeysFile("ubuntu", []hostprep.OwnedKey{keys[1], keys[0]}); got != sidecar {
 		t.Errorf("OwnedKeysFile does not sort by fingerprint:\n%s", got)
+	}
+}
+
+// Installing Docker where it is absent holds its system daemon: the
+// install's script starts by putting admit's policy-rc.d in place, and
+// what the plan adds is named, the packages without their pins and
+// Docker's key and source. With Docker present, nothing is held.
+func TestAdmitPackagesHoldsTheSystemDocker(t *testing.T) {
+	profile, err := hostprep.Select(hostprep.ParseOSRelease(ubuntu2404))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, added, err := profile.AdmitPackages(freshHost(), hostprep.ParseOSRelease(ubuntu2404), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	install := s.Steps[len(s.Steps)-1]
+	hold, apt := strings.Index(install.Command, "mv -f /usr/sbin/.policy-rc.d.paisans-tmp /usr/sbin/policy-rc.d"), strings.Index(install.Command, "apt-get -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confold install")
+	if hold < 0 || apt < hold || !strings.Contains(install.Command, "trap release_docker_hold EXIT") {
+		t.Errorf("the install does not hold Docker's daemons first:\n%s", install.Command)
+	}
+	if got := strings.Join(added.Packages, " "); got != "docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras uidmap nftables wireguard-tools git" {
+		t.Errorf("added packages %q", got)
+	}
+	if got := strings.Join(added.Files, " "); got != "/etc/apt/keyrings/docker.asc /etc/apt/sources.list.d/docker.sources" {
+		t.Errorf("added files %q", got)
+	}
+
+	present := freshHost()
+	present.responses[probePackages] = "compose present\npkg docker-ce install ok installed\npkg wireguard-tools absent\npkg ufw install ok installed\npkg git install ok installed\ndockerversion 5:29.9.0-1~ubuntu.24.04~noble\nextras 5:29.9.0-1~ubuntu.24.04~noble\nkeyring present\narch amd64\n"
+	s, added, err = profile.AdmitPackages(present, hostprep.ParseOSRelease(ubuntu2404), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(s.Steps[0].Command, "policy-rc.d") {
+		t.Errorf("the owner's Docker is held:\n%s", s.Steps[0].Command)
+	}
+	if got := strings.Join(added.Packages, " "); got != "docker-ce-rootless-extras uidmap nftables wireguard-tools" || len(added.Files) != 0 {
+		t.Errorf("added %+v", added)
+	}
+}
+
+// The hold, run for real with /usr/sbin moved into a directory of the
+// test's: while it holds, Docker's and containerd's units are forbidden
+// (101) and every other is asked of the owner's own policy-rc.d; after,
+// the owner's is back as it was, or there is none when the owner had none;
+// and one an interrupted run left is put right before anything else.
+func TestTheDockerHoldPutsBackTheOwnersPolicy(t *testing.T) {
+	profile, err := hostprep.Select(hostprep.ParseOSRelease(ubuntu2404))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, _, err := profile.AdmitPackages(freshHost(), hostprep.ParseOSRelease(ubuntu2404), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := s.Steps[len(s.Steps)-1].Command
+	hold := command[:strings.Index(command, "export DEBIAN_FRONTEND")]
+	release, err := profile.ReleaseDockerHold()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const owner = "#!/bin/sh\necho owner \"$@\" >> \"$LOG\"\nexit 0\n"
+	// asks is what the apt step stands in for: the policy asked for each
+	// unit as invoke-rc.d and deb-systemd-invoke ask it.
+	const asks = "for u in docker.service docker.socket containerd.service docker nginx.service; do r=0; /usr/sbin/policy-rc.d \"$u\" start || r=$?; echo \"$u $r\" >> \"$LOG\"; done\n"
+	for _, c := range []struct {
+		name, before, leftover string
+		want                   []string
+	}{
+		{name: "no policy", want: []string{"docker.service 101", "docker.socket 101", "containerd.service 101", "docker 101", "nginx.service 0"}},
+		{name: "the owner's", before: owner, want: []string{"docker.service 101", "docker.socket 101", "containerd.service 101", "docker 101", "owner nginx.service start", "nginx.service 0"}},
+		{name: "left by an interrupted run", before: owner, leftover: "hold", want: []string{"docker.service 101", "docker.socket 101", "containerd.service 101", "docker 101", "owner nginx.service start", "nginx.service 0"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			sbin := filepath.Join(dir, "sbin")
+			if err := os.Mkdir(sbin, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			policy := filepath.Join(sbin, "policy-rc.d")
+			if c.before != "" {
+				if err := os.WriteFile(policy, []byte(c.before), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			at := func(script string) string { return strings.ReplaceAll(script, "/usr/sbin/", sbin+"/") }
+			run := func(script string) {
+				t.Helper()
+				cmd := exec.Command("sh", "-c", script)
+				cmd.Env = append(os.Environ(), "LOG="+filepath.Join(dir, "log"))
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("%v: %s", err, out)
+				}
+			}
+			if c.leftover != "" {
+				// A run killed while it held: the owner's aside, admit's in place.
+				run(at(hold) + "trap - EXIT\n")
+			}
+			run(at(hold + asks))
+			log, _ := os.ReadFile(filepath.Join(dir, "log"))
+			if got := strings.Split(strings.TrimSpace(string(log)), "\n"); strings.Join(got, "\n") != strings.Join(c.want, "\n") {
+				t.Errorf("while held:\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(c.want, "\n"))
+			}
+			after, err := os.ReadFile(policy)
+			switch {
+			case c.before == "" && !os.IsNotExist(err):
+				t.Errorf("admit's policy-rc.d is left: %q, %v", after, err)
+			case c.before != "" && string(after) != c.before:
+				t.Errorf("the owner's policy-rc.d is %q, %v", after, err)
+			}
+			if _, err := os.Lstat(policy + ".paisans-owner"); !os.IsNotExist(err) {
+				t.Errorf("the owner's copy is left aside: %v", err)
+			}
+			if c.leftover != "" {
+				// ReleaseDockerHold alone puts it right too.
+				run(at(hold) + "trap - EXIT\n")
+				run(at(release))
+				if after, err := os.ReadFile(policy); string(after) != c.before {
+					t.Errorf("after ReleaseDockerHold the policy is %q, %v", after, err)
+				}
+			}
+		})
 	}
 }

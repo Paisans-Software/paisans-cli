@@ -22,7 +22,8 @@ step 1: write the admission record
     |   "data_dir": "",
     |   "bridge_netfilter": false,
     |   "mesh_lan": "",
-    |   "web_server": null
+    |   "web_server": null,
+    |   "system_docker_disabled": false
     | }
 
 present: registry: this host is claimed for deployment f2a9

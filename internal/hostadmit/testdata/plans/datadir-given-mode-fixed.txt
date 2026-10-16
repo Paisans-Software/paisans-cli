@@ -344,7 +344,8 @@ step 22: write the admission record
     |   "data_dir": "/srv/data/paisans-f2a9",
     |   "bridge_netfilter": false,
     |   "mesh_lan": "",
-    |   "web_server": null
+    |   "web_server": null,
+    |   "system_docker_disabled": false
     | }
 
 step 23: add the operators' keys

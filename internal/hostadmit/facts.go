@@ -15,6 +15,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/hostprep"
 )
 
 //go:embed snippets
@@ -105,6 +106,12 @@ type DockerFacts struct {
 	Setuptool  bool
 	Snap       bool
 	SystemSock bool
+	// SystemUnits is whether any of Docker's system units (docker.socket,
+	// docker.service, containerd.service) is enabled, or active.
+	SystemUnits struct{ Enabled, Active bool }
+	// Held is a /usr/sbin/policy-rc.d admit put there to hold Docker's
+	// daemons while it installed them, left by a run that stopped then.
+	Held bool
 }
 
 // UserFacts are the deployment's user, Exists false while it does not exist.
@@ -171,8 +178,8 @@ type DirState struct {
 
 // probeData is what probe.sh.tmpl is rendered with.
 type probeData struct {
-	User, Token, Prefix, EgressUnit, EgressTable, DataParent, MeshUnit, Sudoers string
-	Files, Dirs, Counted                                                        []string
+	User, Token, Prefix, EgressUnit, EgressTable, DataParent, MeshUnit, Sudoers, HoldMarker string
+	Files, Dirs, Counted                                                                    []string
 }
 
 // probedFiles are the files admit writes as root, whose state the probe
@@ -187,7 +194,7 @@ func probedFiles(d deployment.Deployment, in Input) ([]string, error) {
 		return nil, err
 	}
 	return []string{
-		delegatePath, modulesLoadPath, sysctlPath, sysctlBeforePath,
+		delegatePath, modulesLoadPath, sysctlPath, sysctlBeforePath, installedPath,
 		helper, sudoersPath(d), egressFilePath(d), egressFilePath(d) + ".new", "/etc/systemd/system/" + d.EgressUnit(),
 		watchdogRulePath(d), "/etc/systemd/system/" + d.Prefix() + "-watchdog.service",
 		record, d.WireGuardInstalled(),
@@ -243,6 +250,7 @@ func probeScript(d deployment.Deployment, in Input) (string, error) {
 		User: in.Request.User, Token: d.Token(), Prefix: d.Prefix(),
 		EgressUnit: d.EgressUnit(), EgressTable: d.EgressTable(), DataParent: in.Flags.DataDir,
 		MeshUnit: d.WireGuardUnit(), Sudoers: sudoersPath(d), Files: files, Dirs: probedDirs(d, in), Counted: countedDirs(),
+		HoldMarker: hostprep.HoldDockerMarker,
 	}); err != nil {
 		return "", err
 	}
@@ -281,6 +289,15 @@ func parseFacts(out, user string) (Facts, error) {
 			f.Docker.Snap = v == "docker"
 		case "system-socket":
 			f.Docker.SystemSock = v == "present"
+		case "system-unit":
+			fields := strings.Fields(v)
+			if len(fields) != 3 {
+				return f, fmt.Errorf("unreadable system-unit line %q", v)
+			}
+			f.Docker.SystemUnits.Enabled = f.Docker.SystemUnits.Enabled || fields[1] == "enabled" || fields[1] == "enabled-runtime"
+			f.Docker.SystemUnits.Active = f.Docker.SystemUnits.Active || slices.Contains([]string{"active", "activating", "reloading"}, fields[2])
+		case "docker-hold":
+			f.Docker.Held = v == "held"
 		case "userns-restrict":
 			f.AppArmor.Restricted = v == "1"
 		case "rootlesskit-profile":
@@ -603,6 +620,7 @@ const (
 	modulesLoadPath  = "/etc/modules-load.d/paisans.conf"
 	sysctlPath       = "/etc/sysctl.d/60-paisans.conf"
 	sysctlBeforePath = admission.Dir + "/sysctl.before"
+	installedPath    = admission.Dir + "/installed"
 )
 
 // meshDropInPath is the user's drop-in that orders its manager after the
