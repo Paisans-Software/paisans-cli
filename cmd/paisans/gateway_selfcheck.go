@@ -30,7 +30,7 @@ func checkGatewayAnswers(r ui.Reporter, cfg *config.Config, site string) error {
 		if s.PublicAddress == "" {
 			why = "no public_address to ask through"
 		}
-		r.Step(title).End(ui.OK, why)
+		r.Step(title).End(ui.Warned, "not checked: "+why)
 		return nil
 	}
 	step := r.Step(title)
@@ -46,7 +46,13 @@ func checkGatewayAnswers(r ui.Reporter, cfg *config.Config, site string) error {
 				Cause: err,
 			}
 		}
-		return err
+		return &ui.Problem{
+			Hint: fmt.Sprintf("the gateway %s does not answer through %s from this machine", site, t.Address),
+			Explain: err.Error() + ". apply asks the gateway's public address for this deployment's own page once its Caddy runs, waiting for its certificate. " +
+				"When the gateway is at home behind NAT and apply runs from the same network, the router has to send its own public address back inside (hairpin NAT, or NAT loopback); many do not, and then run apply from outside that network, or turn it on. " +
+				"Otherwise check that the router or the provider's firewall forwards 80 and 443 to the gateway, and that public_address is the address they arrive on. Then apply again.",
+			Cause: err,
+		}
 	}
 	step.Done("")
 	return nil
