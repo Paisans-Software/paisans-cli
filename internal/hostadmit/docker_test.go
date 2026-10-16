@@ -376,3 +376,32 @@ func TestAnUnreadableRecordKeepsTheSystemDockerAsItIs(t *testing.T) {
 		t.Errorf("beside an unreadable record:\n%s", plan.Text())
 	}
 }
+
+// dockerDown is what the networks probe prints for a system Docker whose
+// daemon does not answer: its socket is gone once its units are disabled.
+const dockerDown = "paisans: dockerd does not answer: failed to connect to the docker API at unix:///var/run/docker.sock; check if the path is correct and if the daemon is running: dial unix /var/run/docker.sock: connect: no such file or directory\n"
+
+// The system Docker admit installed and holds disabled has never run, so
+// it has no networks, and the mesh's check reads none. A Docker of the
+// owner's that does not answer still has its networks, which come back
+// when it starts, so admit stops and says to start it, never a JSON
+// error; so does one admit installed that the owner has enabled since.
+func TestASystemDockerThatDoesNotAnswer(t *testing.T) {
+	down := func(h *fakeHost) *fakeHost { return h.answer("unix:///var/run/docker.sock network ls", dockerDown) }
+	plan, err := hostadmit.Build(down(installedByAdmit(current())), input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatalf("admit's own held Docker: %v", err)
+	}
+	if !slices.Contains(plan.Present, "mesh: nothing on this host overlaps 10.44.0.0/24") {
+		t.Errorf("the mesh's check:\n%s", plan.Text())
+	}
+	for name, h := range map[string]*fakeHost{
+		"the owner's":            down(current()),
+		"admit's, enabled since": down(installedByAdmit(current()).with("system-unit", "docker.service enabled inactive")),
+	} {
+		_, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+		if err == nil || !strings.Contains(err.Error(), "does not answer") || !strings.Contains(err.Error(), "Start it") || strings.Contains(err.Error(), "invalid character") {
+			t.Errorf("%s: Build = %v", name, err)
+		}
+	}
+}

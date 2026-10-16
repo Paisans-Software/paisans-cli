@@ -19,6 +19,7 @@ package mesh
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/netip"
@@ -92,8 +93,10 @@ const (
 	AddrCommand = "ip -j addr"
 	// NetworksCommand inspects every Docker network, or prints an empty list
 	// when Docker is not installed yet: a host before `host prepare` has no
-	// networks, and its pools are still Docker's defaults.
-	NetworksCommand = `command -v docker >/dev/null 2>&1 || { echo '[]'; exit 0; }; ids=$(docker network ls -q); if [ -z "$ids" ]; then echo '[]'; else docker network inspect $ids; fi`
+	// networks, and its pools are still Docker's defaults. A Docker whose
+	// daemon does not answer prints dockerDown and the client's first line
+	// of error instead (Probed.DockerDown).
+	NetworksCommand = `command -v docker >/dev/null 2>&1 || { echo '[]'; exit 0; }; if ! ids=$(docker network ls -q 2>&1); then printf '` + dockerDown + `%s\n' "$(printf '%s\n' "$ids" | sed -n 1p)"; exit 0; fi; if [ -z "$ids" ]; then echo '[]'; else docker network inspect $ids; fi`
 	// DaemonConfig is Docker's daemon configuration, where
 	// default-address-pools is set when it is.
 	DaemonConfig = "/etc/docker/daemon.json"
@@ -102,7 +105,22 @@ const (
 // NetworksCommandFor is NetworksCommand with docker, the client and its
 // flags, in place of plain docker: host admit names the system socket.
 func NetworksCommandFor(docker string) string {
-	return `command -v docker >/dev/null 2>&1 || { echo '[]'; exit 0; }; ids=$(` + docker + ` network ls -q); if [ -z "$ids" ]; then echo '[]'; else ` + docker + ` network inspect $ids; fi`
+	return strings.ReplaceAll(NetworksCommand, "docker network ", docker+" network ")
+}
+
+// dockerDown starts what NetworksCommand prints for a Docker that is
+// installed and whose daemon does not answer.
+const dockerDown = "paisans: dockerd does not answer: "
+
+// ErrDockerDown is a Docker that is installed and whose daemon does not
+// answer: its networks still exist and come back when it starts, so they
+// are not read as none.
+var ErrDockerDown = errors.New("Docker is installed and its daemon does not answer")
+
+// DockerDown reports whether the networks were not read because the Docker
+// installed on the host does not answer.
+func (p Probed) DockerDown() bool {
+	return strings.HasPrefix(strings.TrimSpace(p.Networks), dockerDown)
 }
 
 // LinkCommand prints iface's link as JSON, or "absent" when there is none.
@@ -208,6 +226,9 @@ func ParseNetworks(out string) ([]Taken, error) {
 				Subnet string `json:"Subnet"`
 			} `json:"Config"`
 		} `json:"IPAM"`
+	}
+	if said, ok := strings.CutPrefix(strings.TrimSpace(out), dockerDown); ok {
+		return nil, fmt.Errorf("%w (%s), so its networks, which still exist and come back when it starts, cannot be read for what the mesh may overlap. Start it (systemctl start docker, or systemctl --user start docker as the user whose rootless daemon it is), or check why it does not answer, and run again", ErrDockerDown, said)
 	}
 	if err := decode(out, &networks); err != nil {
 		return nil, fmt.Errorf("unreadable `docker network inspect` output: %w", err)
