@@ -1,30 +1,32 @@
-{{- /* Run ahead of the install that brings docker-ce and containerd.io,
-        whose scripts would start Docker's system daemon, which turns on
-        forwarding, creates docker0 and adds its chains to the firewall as
-        it starts. Debian's invoke-rc.d and deb-systemd-invoke ask
+{{- /* Run ahead of the install that brings docker-ce or containerd.io, whose
+        scripts would start their system daemons; dockerd turns on
+        forwarding, creates docker0 and adds its chains to the firewall as it
+        starts. Debian's invoke-rc.d and deb-systemd-invoke ask
         /usr/sbin/policy-rc.d before they start a service, and 101 forbids
-        it: so a policy-rc.d is put in place that forbids Docker's and
-        containerd's units and asks the owner's own, moved aside to
-        policy-rc.d.paisans-owner, about every other. When the shell exits,
-        however it exits, the owner's goes back, or admit's is removed; one
-        an interrupted run left is put right first. */ -}}
+        it: so a policy-rc.d is put in place that forbids the units of the
+        packages this install adds, and asks the owner's own, copied to
+        policy-rc.d.paisans-owner, about every other. There is never a
+        moment with no policy in place: admit's is written whole first, the
+        owner's is copied, not moved, and admit's is renamed over it. When the
+        shell exits, however it exits, the owner's goes back, or admit's is
+        removed; one an interrupted run left is put right first. */ -}}
 set -e
 {{ .Release }}release_docker_hold
 if [ -e /usr/sbin/policy-rc.d.paisans-owner ] || [ -L /usr/sbin/policy-rc.d.paisans-owner ]; then
-  echo '/usr/sbin/policy-rc.d.paisans-owner is there, and admit moves your own /usr/sbin/policy-rc.d to that name while it installs Docker. Put it back, or remove it, and admit again'
+  echo '/usr/sbin/policy-rc.d.paisans-owner is there beside a /usr/sbin/policy-rc.d that differs from it, and admit copies your own policy-rc.d to that name while it installs Docker. Keep the one you want as /usr/sbin/policy-rc.d, remove the other, and admit again'
   exit 1
 fi
-if [ -e /usr/sbin/policy-rc.d ] || [ -L /usr/sbin/policy-rc.d ]; then mv /usr/sbin/policy-rc.d /usr/sbin/policy-rc.d.paisans-owner; fi
-trap release_docker_hold EXIT
-trap 'exit 1' HUP INT TERM
 cat > /usr/sbin/.policy-rc.d.paisans-tmp <<'POLICY'
 #!/bin/sh
 # {{ .Marker }}
 for a in "$@"; do
-  case $a in docker|docker.service|docker.socket|containerd|containerd.service) exit 101 ;; esac
+  case $a in {{ .Units }}) exit 101 ;; esac
 done
 if [ -x /usr/sbin/policy-rc.d.paisans-owner ]; then exec /usr/sbin/policy-rc.d.paisans-owner "$@"; fi
 exit 0
 POLICY
 chmod 755 /usr/sbin/.policy-rc.d.paisans-tmp
+if [ -e /usr/sbin/policy-rc.d ] || [ -L /usr/sbin/policy-rc.d ]; then cp -pP /usr/sbin/policy-rc.d /usr/sbin/policy-rc.d.paisans-owner; fi
+trap release_docker_hold EXIT
+trap 'exit 1' HUP INT TERM
 mv -f /usr/sbin/.policy-rc.d.paisans-tmp /usr/sbin/policy-rc.d

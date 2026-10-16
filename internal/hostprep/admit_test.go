@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -243,13 +244,30 @@ func TestTheDockerHoldPutsBackTheOwnersPolicy(t *testing.T) {
 	// asks is what the apt step stands in for: the policy asked for each
 	// unit as invoke-rc.d and deb-systemd-invoke ask it.
 	const asks = "for u in docker.service docker.socket containerd.service docker nginx.service; do r=0; /usr/sbin/policy-rc.d \"$u\" start || r=$?; echo \"$u $r\" >> \"$LOG\"; done\n"
+	held := []string{"docker.service 101", "docker.socket 101", "containerd.service 101", "docker 101", "owner nginx.service start", "nginx.service 0"}
 	for _, c := range []struct {
 		name, before, leftover string
-		want                   []string
+		// left is what a run that stopped early left in sbin, the
+		// owner's policy-rc.d at before.
+		left func(sbin string)
+		want []string
 	}{
 		{name: "no policy", want: []string{"docker.service 101", "docker.socket 101", "containerd.service 101", "docker 101", "nginx.service 0"}},
-		{name: "the owner's", before: owner, want: []string{"docker.service 101", "docker.socket 101", "containerd.service 101", "docker 101", "owner nginx.service start", "nginx.service 0"}},
-		{name: "left by an interrupted run", before: owner, leftover: "hold", want: []string{"docker.service 101", "docker.socket 101", "containerd.service 101", "docker 101", "owner nginx.service start", "nginx.service 0"}},
+		{name: "the owner's", before: owner, want: held},
+		{name: "left by an interrupted run", before: owner, leftover: "hold", want: held},
+		{name: "the owner's renamed, none in place", before: owner, want: held, left: func(sbin string) {
+			if err := os.Rename(filepath.Join(sbin, "policy-rc.d"), filepath.Join(sbin, "policy-rc.d.paisans-owner")); err != nil {
+				panic(err)
+			}
+		}},
+		{name: "a copy beside the owner's", before: owner, want: held, left: func(sbin string) {
+			if err := os.WriteFile(filepath.Join(sbin, "policy-rc.d.paisans-owner"), []byte(owner), 0o755); err != nil {
+				panic(err)
+			}
+			if err := os.WriteFile(filepath.Join(sbin, ".policy-rc.d.paisans-tmp"), []byte("half"), 0o755); err != nil {
+				panic(err)
+			}
+		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -276,6 +294,9 @@ func TestTheDockerHoldPutsBackTheOwnersPolicy(t *testing.T) {
 				// A run killed while it held: the owner's aside, admit's in place.
 				run(at(hold) + "trap - EXIT\n")
 			}
+			if c.left != nil {
+				c.left(sbin)
+			}
 			run(at(hold + asks))
 			log, _ := os.ReadFile(filepath.Join(dir, "log"))
 			if got := strings.Split(strings.TrimSpace(string(log)), "\n"); strings.Join(got, "\n") != strings.Join(c.want, "\n") {
@@ -288,8 +309,10 @@ func TestTheDockerHoldPutsBackTheOwnersPolicy(t *testing.T) {
 			case c.before != "" && string(after) != c.before:
 				t.Errorf("the owner's policy-rc.d is %q, %v", after, err)
 			}
-			if _, err := os.Lstat(policy + ".paisans-owner"); !os.IsNotExist(err) {
-				t.Errorf("the owner's copy is left aside: %v", err)
+			for _, f := range []string{policy + ".paisans-owner", filepath.Join(sbin, ".policy-rc.d.paisans-tmp")} {
+				if _, err := os.Lstat(f); !os.IsNotExist(err) {
+					t.Errorf("%s is left: %v", f, err)
+				}
 			}
 			if c.leftover != "" {
 				// ReleaseDockerHold alone puts it right too.
@@ -300,5 +323,63 @@ func TestTheDockerHoldPutsBackTheOwnersPolicy(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A copy beside a policy-rc.d that differs from it is not admit's to
+// choose between: the hold refuses, and leaves both as they are.
+func TestTheDockerHoldRefusesACopyThatDiffers(t *testing.T) {
+	profile, err := hostprep.Select(hostprep.ParseOSRelease(ubuntu2404))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, _, err := profile.AdmitPackages(freshHost(), hostprep.ParseOSRelease(ubuntu2404), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := s.Steps[len(s.Steps)-1].Command
+	hold := command[:strings.Index(command, "export DEBIAN_FRONTEND")]
+	sbin := t.TempDir()
+	for name, content := range map[string]string{"policy-rc.d": "#!/bin/sh\nexit 0\n", "policy-rc.d.paisans-owner": "#!/bin/sh\nexit 101\n"} {
+		if err := os.WriteFile(filepath.Join(sbin, name), []byte(content), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, err := exec.Command("sh", "-c", strings.ReplaceAll(hold, "/usr/sbin/", sbin+"/")).CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "differs from it") {
+		t.Errorf("the hold went on: %v: %s", err, out)
+	}
+	for name, content := range map[string]string{"policy-rc.d": "#!/bin/sh\nexit 0\n", "policy-rc.d.paisans-owner": "#!/bin/sh\nexit 101\n"} {
+		if got, _ := os.ReadFile(filepath.Join(sbin, name)); string(got) != content {
+			t.Errorf("%s is now %q", name, got)
+		}
+	}
+}
+
+// containerd.io already on the host is the owner's: the hold forbids only
+// Docker's units, and containerd.io is not among what the install adds.
+func TestTheDockerHoldLeavesAnOwnersContainerd(t *testing.T) {
+	profile, err := hostprep.Select(hostprep.ParseOSRelease(ubuntu2404))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := freshHost()
+	h.responses[probePackages] = "compose absent\npkg containerd.io install ok installed\nkeyring present\narch amd64\n"
+	s, added, err := profile.AdmitPackages(h, hostprep.ParseOSRelease(ubuntu2404), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := s.Steps[len(s.Steps)-1].Command
+	if slices.Contains(added.Packages, "containerd.io") {
+		t.Errorf("the owner's containerd.io is claimed: %v", added.Packages)
+	}
+	if !strings.Contains(command, "  case $a in docker|docker.service|docker.socket) exit 101 ;; esac\n") {
+		t.Errorf("the hold does not forbid Docker's units alone:\n%s", command)
+	}
+	if units := hostprep.SystemUnits(added.Packages); strings.Join(units, " ") != "docker.socket docker.service" {
+		t.Errorf("SystemUnits = %q", units)
+	}
+	if units := hostprep.SystemUnits([]string{"docker-ce", "containerd.io"}); strings.Join(units, " ") != "docker.socket docker.service containerd.service" {
+		t.Errorf("SystemUnits = %q", units)
 	}
 }

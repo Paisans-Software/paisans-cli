@@ -109,8 +109,9 @@ type DockerFacts struct {
 	// SystemUnits is whether any of Docker's system units (docker.socket,
 	// docker.service, containerd.service) is enabled, or active.
 	SystemUnits struct{ Enabled, Active bool }
-	// Held is a /usr/sbin/policy-rc.d admit put there to hold Docker's
-	// daemons while it installed them, left by a run that stopped then.
+	// Held is what a run that stopped while admit held Docker's daemons
+	// left: admit's /usr/sbin/policy-rc.d, the copy of the owner's beside
+	// it, or admit's temporary file.
 	Held bool
 }
 

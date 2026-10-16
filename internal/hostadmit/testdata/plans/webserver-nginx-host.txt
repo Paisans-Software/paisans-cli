@@ -131,32 +131,41 @@ step 6: install packages: docker-ce, docker-ce-cli, containerd.io, docker-buildx
   run:
     $ set -e
     $ release_docker_hold() {
+    $   rm -f /usr/sbin/.policy-rc.d.paisans-tmp
     $   if [ -f /usr/sbin/policy-rc.d ] && [ ! -L /usr/sbin/policy-rc.d ] && grep -qxF '# Written by paisans host admit while it installs Docker, and removed after.' /usr/sbin/policy-rc.d; then
     $     if [ -e /usr/sbin/policy-rc.d.paisans-owner ] || [ -L /usr/sbin/policy-rc.d.paisans-owner ]; then
     $       mv -f /usr/sbin/policy-rc.d.paisans-owner /usr/sbin/policy-rc.d
     $     else
     $       rm -f /usr/sbin/policy-rc.d
     $     fi
+    $   elif [ -e /usr/sbin/policy-rc.d.paisans-owner ] || [ -L /usr/sbin/policy-rc.d.paisans-owner ]; then
+    $     if [ ! -e /usr/sbin/policy-rc.d ] && [ ! -L /usr/sbin/policy-rc.d ]; then
+    $       mv -f /usr/sbin/policy-rc.d.paisans-owner /usr/sbin/policy-rc.d
+    $     elif [ -L /usr/sbin/policy-rc.d ] && [ -L /usr/sbin/policy-rc.d.paisans-owner ] && [ "$(readlink /usr/sbin/policy-rc.d)" = "$(readlink /usr/sbin/policy-rc.d.paisans-owner)" ]; then
+    $       rm -f /usr/sbin/policy-rc.d.paisans-owner
+    $     elif [ ! -L /usr/sbin/policy-rc.d ] && [ ! -L /usr/sbin/policy-rc.d.paisans-owner ] && cmp -s /usr/sbin/policy-rc.d /usr/sbin/policy-rc.d.paisans-owner; then
+    $       rm -f /usr/sbin/policy-rc.d.paisans-owner
+    $     fi
     $   fi
     $ }
     $ release_docker_hold
     $ if [ -e /usr/sbin/policy-rc.d.paisans-owner ] || [ -L /usr/sbin/policy-rc.d.paisans-owner ]; then
-    $   echo '/usr/sbin/policy-rc.d.paisans-owner is there, and admit moves your own /usr/sbin/policy-rc.d to that name while it installs Docker. Put it back, or remove it, and admit again'
+    $   echo '/usr/sbin/policy-rc.d.paisans-owner is there beside a /usr/sbin/policy-rc.d that differs from it, and admit copies your own policy-rc.d to that name while it installs Docker. Keep the one you want as /usr/sbin/policy-rc.d, remove the other, and admit again'
     $   exit 1
     $ fi
-    $ if [ -e /usr/sbin/policy-rc.d ] || [ -L /usr/sbin/policy-rc.d ]; then mv /usr/sbin/policy-rc.d /usr/sbin/policy-rc.d.paisans-owner; fi
-    $ trap release_docker_hold EXIT
-    $ trap 'exit 1' HUP INT TERM
     $ cat > /usr/sbin/.policy-rc.d.paisans-tmp <<'POLICY'
     $ #!/bin/sh
     $ # Written by paisans host admit while it installs Docker, and removed after.
     $ for a in "$@"; do
-    $   case $a in docker|docker.service|docker.socket|containerd|containerd.service) exit 101 ;; esac
+    $   case $a in containerd|containerd.service|docker|docker.service|docker.socket) exit 101 ;; esac
     $ done
     $ if [ -x /usr/sbin/policy-rc.d.paisans-owner ]; then exec /usr/sbin/policy-rc.d.paisans-owner "$@"; fi
     $ exit 0
     $ POLICY
     $ chmod 755 /usr/sbin/.policy-rc.d.paisans-tmp
+    $ if [ -e /usr/sbin/policy-rc.d ] || [ -L /usr/sbin/policy-rc.d ]; then cp -pP /usr/sbin/policy-rc.d /usr/sbin/policy-rc.d.paisans-owner; fi
+    $ trap release_docker_hold EXIT
+    $ trap 'exit 1' HUP INT TERM
     $ mv -f /usr/sbin/.policy-rc.d.paisans-tmp /usr/sbin/policy-rc.d
     $ set -e
     $ export DEBIAN_FRONTEND=noninteractive

@@ -312,15 +312,31 @@ type Installed struct {
 	Packages, Files []string
 }
 
+// SystemUnits are the system units of the packages given that start a
+// daemon: Docker's socket and service for docker-ce, containerd's service
+// for containerd.io, in that order.
+func SystemUnits(packages []string) []string {
+	var units []string
+	if slices.Contains(packages, "docker-ce") {
+		units = append(units, "docker.socket", "docker.service")
+	}
+	if slices.Contains(packages, "containerd.io") {
+		units = append(units, "containerd.service")
+	}
+	return units
+}
+
 // ReleaseDockerHold is a script that puts /usr/sbin/policy-rc.d back as
 // it was before admit held Docker's daemons, for a run that stopped while
-// it held them.
+// it held them, and fails, naming both, when the owner's copy differs from
+// what is in place, which is the owner's to choose between.
 func (u ubuntu) ReleaseDockerHold() (string, error) {
 	release, err := snippet(u.tmpl("docker-hold-release.sh.tmpl"), map[string]string{"Marker": HoldDockerMarker})
 	if err != nil {
 		return "", err
 	}
-	return "set -e\n" + release + "release_docker_hold\n", nil
+	return "set -e\n" + release + "release_docker_hold\n" +
+		"if [ -e /usr/sbin/policy-rc.d.paisans-owner ] || [ -L /usr/sbin/policy-rc.d.paisans-owner ]; then echo '/usr/sbin/policy-rc.d.paisans-owner, a copy of your policy-rc.d admit made while it installed Docker, differs from the /usr/sbin/policy-rc.d there now. Keep the one you want as /usr/sbin/policy-rc.d, remove the other, and run again'; exit 1; fi\n", nil
 }
 
 // AdmitPackages: see Profile.
@@ -396,15 +412,25 @@ func (u ubuntu) AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (
 	if dockerPresent {
 		describe += ", leaving your Docker at the version it is"
 	}
-	if slices.Contains(install, "docker-ce") {
-		// docker-ce's and containerd.io's scripts would start the system
-		// daemon, which changes forwarding and the firewall as it starts:
-		// it is held for the install instead, so it never starts.
+	if units := SystemUnits(added.Packages); len(units) > 0 {
+		// docker-ce's and containerd.io's scripts would start their system
+		// daemons, and dockerd changes forwarding and the firewall as it
+		// starts: each this install adds is held for it instead, so it
+		// never starts. A containerd.io the host had is the owner's, and
+		// is not held.
+		var names []string
+		for _, unit := range units {
+			names = append(names, unit)
+			if base, ok := strings.CutSuffix(unit, ".service"); ok {
+				names = append([]string{base}, names...)
+			}
+		}
+		slices.Sort(names)
 		release, err := snippet(u.tmpl("docker-hold-release.sh.tmpl"), map[string]string{"Marker": HoldDockerMarker})
 		if err != nil {
 			return out, added, err
 		}
-		hold, err := snippet(u.tmpl("docker-hold.sh.tmpl"), map[string]string{"Marker": HoldDockerMarker, "Release": release})
+		hold, err := snippet(u.tmpl("docker-hold.sh.tmpl"), map[string]string{"Marker": HoldDockerMarker, "Release": release, "Units": strings.Join(names, "|")})
 		if err != nil {
 			return out, added, err
 		}
