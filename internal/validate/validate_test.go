@@ -681,7 +681,7 @@ func TestExternalWebServerNeedsListen(t *testing.T) {
 // include_dir is refused by name, whatever it holds: nothing is written into
 // the owner's web server, so there is nothing for it to name.
 func TestIncludeDirIsRefused(t *testing.T) {
-	for _, dir := range []config.IncludeDir{{Path: "/etc/nginx/paisans.d"}, {Off: true}} {
+	for _, dir := range []config.IncludeDir{{Set: true}} {
 		for _, mode := range []config.ManagedBy{config.ManagedByExternal, config.ManagedByPaisans} {
 			cfg := load(t, "uptime-without-smtp")
 			site := cfg.Sites["watch"]

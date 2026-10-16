@@ -322,40 +322,25 @@ type WebServer struct {
 	// an IPv4 address and a port. Required with managed_by external, refused with
 	// managed_by paisans.
 	Listen string `yaml:"listen"`
-	// IncludeDir is parsed only so that validate can refuse it by name
+	// IncludeDir is read only so that validate can refuse it by name
 	// (web-server-include-dir) rather than the load failing on an unknown
-	// key. Nothing reads it.
+	// key. Nothing reads what it holds.
 	IncludeDir IncludeDir `yaml:"include_dir"`
 }
 
-// IncludeDir is sites.<site>.web_server.include_dir: a path, false, or unset.
+// IncludeDir is sites.<site>.web_server.include_dir, which is not a setting:
+// whether it is written at all.
 type IncludeDir struct {
-	Path string
-	// Off is include_dir: false.
-	Off bool
+	Set bool
 }
 
 // Unset reports whether include_dir is not written at all.
-func (d IncludeDir) Unset() bool { return d.Path == "" && !d.Off }
+func (d IncludeDir) Unset() bool { return !d.Set }
 
-// UnmarshalYAML reads a path or false. true means nothing, so it is refused
-// rather than read as either.
-func (d *IncludeDir) UnmarshalYAML(node *yaml.Node) error {
-	if node.Kind == yaml.ScalarNode && node.Tag == "!!bool" {
-		var on bool
-		if err := node.Decode(&on); err != nil {
-			return err
-		}
-		if on {
-			return fmt.Errorf("line %d: include_dir is true, which names no directory. Write the directory, or false to have the toolkit write nothing for your web server", node.Line)
-		}
-		*d = IncludeDir{Off: true}
-		return nil
-	}
-	if node.Kind != yaml.ScalarNode {
-		return fmt.Errorf("line %d: include_dir is %s, not a directory or false", node.Line, describeNode(node))
-	}
-	*d = IncludeDir{Path: node.Value}
+// UnmarshalYAML reads any value as include_dir written, and says nothing
+// about it: validate's refusal is the one message.
+func (d *IncludeDir) UnmarshalYAML(*yaml.Node) error {
+	*d = IncludeDir{Set: true}
 	return nil
 }
 

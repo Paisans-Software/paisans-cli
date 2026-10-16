@@ -8,26 +8,22 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
-// include_dir reads as a path or false; true names nothing and is refused.
-func TestIncludeDirReadsAPathOrFalse(t *testing.T) {
-	for _, tc := range []struct {
-		value string
-		want  config.IncludeDir
-		fails bool
-	}{
-		{"/opt/caddy/paisans.d", config.IncludeDir{Path: "/opt/caddy/paisans.d"}, false},
-		{"false", config.IncludeDir{Off: true}, false},
-		{"true", config.IncludeDir{}, true},
-		{"[a, b]", config.IncludeDir{}, true},
-	} {
-		cfg, err := loadWebServer(t, tc.value)
-		if (err != nil) != tc.fails {
-			t.Errorf("%s: err %v", tc.value, err)
+// include_dir is not a setting: whatever it holds, it loads, so that
+// validate's refusal (web-server-include-dir) is the one message about it.
+func TestIncludeDirLoadsWhateverItHolds(t *testing.T) {
+	for _, value := range []string{"/opt/caddy/paisans.d", "false", "true", "[a, b]", "{a: b}"} {
+		cfg, err := loadWebServer(t, value)
+		if err != nil {
+			t.Errorf("%s: err %v", value, err)
 			continue
 		}
-		if err == nil && cfg.Sites["watch"].WebServer.IncludeDir != tc.want {
-			t.Errorf("%s: got %+v", tc.value, cfg.Sites["watch"].WebServer.IncludeDir)
+		if cfg.Sites["watch"].WebServer.IncludeDir.Unset() {
+			t.Errorf("%s: read as unset", value)
 		}
+	}
+	var unset config.WebServer
+	if err := yaml.Unmarshal([]byte("managed_by: external\n"), &unset); err != nil || !unset.IncludeDir.Unset() {
+		t.Errorf("no include_dir: %+v, %v", unset.IncludeDir, err)
 	}
 }
 
