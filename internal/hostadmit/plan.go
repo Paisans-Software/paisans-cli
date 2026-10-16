@@ -177,8 +177,8 @@ type part struct {
 // comment names.
 var parts = []part{
 	// 1. claim
-	// 2. docker
-	// 3. apparmor
+	{"docker", planDocker},
+	{"apparmor", planAppArmor},
 	// 4. user
 	// 5. delegation
 	// 6. egress

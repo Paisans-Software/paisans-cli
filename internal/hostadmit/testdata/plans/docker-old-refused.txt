@@ -1,0 +1,1 @@
+refused: docker: Docker Engine 27.5.1 is installed, and admitting a deployment needs 29.5.0 or later: from 29.5 a rootless container with host networking shares the host's network namespace, which every infrastructure container needs. Upgrade Docker yourself and admit again; upgrading your Docker is not admit's decision. Nothing was changed
