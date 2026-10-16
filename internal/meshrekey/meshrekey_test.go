@@ -324,7 +324,7 @@ func newMesh(t *testing.T, edits ...func(*config.Config)) *mesh {
 		h.files[d.Manifest()] = string(manifest) + "\n"
 		h.files[wgInstalled], h.run = h.files[wgConf], h.files[wgConf]
 		reg := registry.Registry{Version: registry.Version, Deployments: map[string]registry.Entry{}}
-		id, e := registry.For(cfg, name, time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC))
+		id, e := claimOf(cfg, name, time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC))
 		reg.Deployments[id] = e
 		data, err := registry.Encode(reg)
 		if err != nil {
@@ -822,4 +822,23 @@ func admitted(t *testing.T, cfg *config.Config, site string) (string, string) {
 		t.Fatal(err)
 	}
 	return path, string(b)
+}
+
+// claimOf is the registry entry the fixture's deployment holds a site's host
+// with, read from the configuration.
+func claimOf(cfg *config.Config, site string, now time.Time) (string, registry.Entry) {
+	d := cfg.Deployment()
+	declared := cfg.Sites[site]
+	return d.ID, registry.Entry{
+		Token:      d.Token(),
+		Root:       d.Root(),
+		Domain:     cfg.Community.Domain,
+		Site:       site,
+		ClaimedAt:  now.UTC().Format(time.RFC3339),
+		Interface:  d.Interface(),
+		ListenPort: declared.ListenPort(),
+		Subnet:     cfg.Mesh.Subnet,
+		Address:    declared.Address,
+		Roles:      registry.JoinRoles(declared.Roles),
+	}
 }

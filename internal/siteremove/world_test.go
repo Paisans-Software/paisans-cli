@@ -1409,7 +1409,7 @@ func newWorld(t *testing.T, edits ...func(string) string) *world {
 			w.served[name] = proxy
 		}
 		reg := registry.Registry{Version: registry.Version, Deployments: map[string]registry.Entry{}}
-		id, e := registry.For(cfg, name, mustTime())
+		id, e := claimOf(cfg, name, mustTime())
 		reg.Deployments[id] = e
 		h.files[registry.Path] = encode(t, reg)
 		path, record := admitted(t, cfg, name)
@@ -1461,7 +1461,7 @@ func newWorld(t *testing.T, edits ...func(string) string) *world {
 	b.files[keysAt] = "# managed by hand\n" + alice + "\n" + bob + "\n"
 	b.files[record] = "# Keys paisans host prepare added.\n" + fingerprint(t, alice) + " alice@example.org\n"
 	reg := registry.Registry{Version: registry.Version, Deployments: map[string]registry.Entry{}}
-	id, e := registry.For(cfg, "home-b", mustTime())
+	id, e := claimOf(cfg, "home-b", mustTime())
 	reg.Deployments[id] = e
 	reg.Deployments[otherID] = registry.Entry{Token: "0c1d", Root: "/srv/paisans/0c1d", Domain: "example.net", Site: "x", Roles: "apps", ClaimedAt: "2026-10-01T00:00:00Z", Interface: "psns-0c1d", Subnet: "10.45.0.0/24", Address: "10.45.0.2"}
 	b.files[registry.Path] = encode(t, reg)
@@ -1551,4 +1551,23 @@ func admitted(t *testing.T, cfg *config.Config, site string) (string, string) {
 		t.Fatal(err)
 	}
 	return path, string(b)
+}
+
+// claimOf is the registry entry the fixture's deployment holds a site's host
+// with, read from the configuration.
+func claimOf(cfg *config.Config, site string, now time.Time) (string, registry.Entry) {
+	d := cfg.Deployment()
+	declared := cfg.Sites[site]
+	return d.ID, registry.Entry{
+		Token:      d.Token(),
+		Root:       d.Root(),
+		Domain:     cfg.Community.Domain,
+		Site:       site,
+		ClaimedAt:  now.UTC().Format(time.RFC3339),
+		Interface:  d.Interface(),
+		ListenPort: declared.ListenPort(),
+		Subnet:     cfg.Mesh.Subnet,
+		Address:    declared.Address,
+		Roles:      registry.JoinRoles(declared.Roles),
+	}
 }

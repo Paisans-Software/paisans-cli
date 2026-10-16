@@ -129,24 +129,6 @@ type Registry struct {
 	Deployments map[string]Entry `json:"deployments"`
 }
 
-// For is the entry a deployment claims a site's host with.
-func For(cfg *config.Config, site string, now time.Time) (string, Entry) {
-	d := cfg.Deployment()
-	declared := cfg.Sites[site]
-	return d.ID, Entry{
-		Token:      d.Token(),
-		Root:       d.Root(),
-		Domain:     cfg.Community.Domain,
-		Site:       site,
-		ClaimedAt:  now.UTC().Format(time.RFC3339),
-		Interface:  d.Interface(),
-		ListenPort: declared.ListenPort(),
-		Subnet:     cfg.Mesh.Subnet,
-		Address:    declared.Address,
-		Roles:      JoinRoles(declared.Roles),
-	}
-}
-
 // ForRequest is the entry host admit claims a host with, from the request
 // alone, so a plan from a request and one from the configuration claim
 // alike. It carries the request's site and roles; Domain stays empty, since
@@ -279,30 +261,6 @@ func Conflicts(r Registry, id string, e Entry) []Conflict {
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out
-}
-
-// Meshes is every other deployment's mesh subnet on this host, as networks
-// taken, for `paisans init` to choose a subnet clear of them. on names the
-// host in each description.
-func Meshes(r Registry, id, on string) []mesh.Taken {
-	ids := make([]string, 0, len(r.Deployments))
-	for other := range r.Deployments {
-		ids = append(ids, other)
-	}
-	sort.Strings(ids)
-	var out []mesh.Taken
-	for _, other := range ids {
-		e := r.Deployments[other]
-		if other == id {
-			continue
-		}
-		p, err := mesh.ParsePrefix(e.Subnet)
-		if err != nil {
-			continue
-		}
-		out = append(out, mesh.Taken{Prefix: p, What: fmt.Sprintf("deployment %s (%s)'s mesh %s on %s", other, e.Domain, e.Subnet, on)})
-	}
 	return out
 }
 
@@ -672,65 +630,4 @@ func RemoveCommand(id string) string {
 		`chmod 600 "$tmp"`,
 		`mv "$tmp" ` + Path,
 	}, "; ")
-}
-
-// Unclaim takes this deployment's entry out of the registry on the host t
-// reaches. A registry in another layout is reported, not rewritten.
-func Unclaim(t Runner, id string) error {
-	out, err := t.Run(RemoveCommand(id))
-	if err == nil {
-		return nil
-	}
-	if refusal := ParseClaim(out); refusal != nil {
-		return fmt.Errorf("%s: %w", t.Describe(), refusal)
-	}
-	return fmt.Errorf("%s: removing deployment %s from %s: %w\n%s", t.Describe(), id, Path, err, strings.TrimSpace(out))
-}
-
-// Find is the one entry ref names on this host: by its full id, or by its
-// token, the id's first deployment.TokenLength hex digits. No match and
-// several are refused, and the refusal lists every entry the host holds, so
-// the operator can name one.
-func Find(r Registry, ref string) (string, Entry, error) {
-	var ids []string
-	for id, e := range r.Deployments {
-		if id == ref || (len(ref) == deployment.TokenLength && (e.Token == ref || strings.HasPrefix(id, ref))) {
-			ids = append(ids, id)
-		}
-	}
-	sort.Strings(ids)
-	switch len(ids) {
-	case 1:
-		return ids[0], r.Deployments[ids[0]], nil
-	case 0:
-		return "", Entry{}, fmt.Errorf("no deployment in %s has id or token %s. %s", Path, ref, Holds(r))
-	}
-	return "", Entry{}, fmt.Errorf("token %s names %d deployments in %s, so name one by its full id. %s", ref, len(ids), Path, Holds(r))
-}
-
-// Holds is every entry of the registry in a sentence, sorted by id.
-func Holds(r Registry) string {
-	if len(r.Deployments) == 0 {
-		return "The host holds none"
-	}
-	ids := make([]string, 0, len(r.Deployments))
-	for id := range r.Deployments {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	var out []string
-	for _, id := range ids {
-		out = append(out, Describe(id, r.Deployments[id]))
-	}
-	return "The host holds " + strings.Join(out, "; ")
-}
-
-// Describe is one entry in words: Eg: f2a9c4e1-... (token f2a9, example.org,
-// site vm, roles gateway).
-func Describe(id string, e Entry) string {
-	roles := e.Roles
-	if roles == "" {
-		roles = "none"
-	}
-	return fmt.Sprintf("%s (token %s, %s, site %s, roles %s)", id, e.Token, e.Domain, e.Site, roles)
 }
