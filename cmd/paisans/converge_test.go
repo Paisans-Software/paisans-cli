@@ -2434,6 +2434,15 @@ func TestConvergeLeavesTheWebServerOfADownSite(t *testing.T) {
 	if !rec.Has("note", "watch") || !rec.Has("result", "Applied, degraded: 1 site pending or down (watch).") {
 		t.Errorf("no note or degraded end:\n%s", rec.Lines())
 	}
+
+	// The dry run does not promise a check --execute will skip.
+	rec = recordConverge(t)
+	if err := convergeAt(t, externalFixture(t)); err != nil {
+		t.Fatalf("dry run: %v: %s", err, problemText(err))
+	}
+	if strings.Contains(rec.Lines(), "checked with --execute") {
+		t.Errorf("the dry run lists down watch's app as checked with --execute:\n%s", rec.Lines())
+	}
 }
 
 // A degraded run that ends on the operator's web server still says it is

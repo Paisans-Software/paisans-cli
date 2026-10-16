@@ -843,7 +843,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		// A dry run's operator problem is shown on its line; it stops nothing.
 		pocketUp := pocketIDUp(r, cfg, sites)
 		_, _ = convergeOperators(r, cfg, o, false, func(app string) bool { return pocketUp(app) && convergeUp(cfg, steps, marks, app) })
-		convergeWebServerPending(r, cfg, webServerScope{})
+		convergeWebServerPending(r, cfg, webServerScope{down: sites.Down()})
 		// The review ends the plan, with what --execute asks approval for.
 		// A site it could not read is shown on its line; it stops nothing.
 		reviews, pending, _ := convergeReview(r, cfg, o)
