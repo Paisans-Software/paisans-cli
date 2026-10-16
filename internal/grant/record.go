@@ -110,8 +110,7 @@ const changedMarker = "paisans: the grant record changed while it was read"
 // directory. It holds fingerprints and image references, nothing secret.
 func Path(d deployment.Deployment) string { return d.StatePath("granted.json") }
 
-// RemoveCommand deletes the record, for site remove's stage 3, which deletes
-// the deployment's registry entry beside it.
+// RemoveCommand deletes the record, for site remove's host stage.
 func RemoveCommand(d deployment.Deployment) string { return "rm -f -- " + quote(Path(d)) }
 
 // Encode is the record as written.
