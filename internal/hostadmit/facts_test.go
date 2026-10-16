@@ -18,7 +18,7 @@ func TestParseFacts(t *testing.T) {
 		"subuid ubuntu:100000:65536\nsubuid paisans-f2a9:165536:65536\n" +
 		"file /usr/local/libexec/paisans/wg-psns-f2a9 " + "ab12" + " 755 0 0\n" +
 		"file /etc/sudoers.d/paisans-f2a9 link\n" +
-		"dir /etc/wireguard drwx------ 0 0\ndir /srv/my data drwxr-xr-x 0 0\nbridge virbr0\nbridge docker0\nlan 192.168.1.20/24\nend\n"
+		"dir /etc/wireguard drwx------ 0 0\ndir /srv/my data drwxr-xr-x 0 0\nbridge virbr0\nbridge docker0\nufw installed\nufw-active yes\nlan 192.168.1.20/24\nend\n"
 	f, err := parseFacts(out, "paisans-f2a9")
 	if err != nil {
 		t.Fatal(err)
@@ -44,6 +44,9 @@ func TestParseFacts(t *testing.T) {
 	}
 	if d := f.Dirs["/srv/my data"]; !d.Present || d.Mode != "drwxr-xr-x" {
 		t.Errorf("a directory with a space: %+v", f.Dirs)
+	}
+	if !f.UFWInstalled || !f.UFWActive {
+		t.Errorf("ufw: installed %v, active %v", f.UFWInstalled, f.UFWActive)
 	}
 	if len(f.Bridges) != 2 || f.LAN != "192.168.1.20/24" {
 		t.Errorf("bridges %v, lan %q", f.Bridges, f.LAN)

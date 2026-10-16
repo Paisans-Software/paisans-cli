@@ -31,11 +31,11 @@ var snippets embed.FS
 // and its paisans-<token> child, whose Dirs entry is not a directory of
 // root's (or, for the child, of the user's) with no group or other write.
 //
-// RulesetUnknown is a host whose nft ruleset could not be read,
-// LegacyRules are rules only iptables-legacy holds, which nft does not
-// show, and LegacyUnknown is a host whose legacy tables are loaded but
-// could not be saved. Each is a firewall admit cannot see, so Task 9
-// refuses on any of them as it does on OwnerFirewall.
+// UFWInstalled is ufw's binary being on the host, and UFWActive is the
+// first line of `ufw status`, read as root, being "Status: active"; an
+// answer the probe cannot read is not active. Admit works only on a host
+// where ufw is installed and active, and never enables it or sets its
+// defaults, so Task 9 refuses unless both are true.
 type Facts struct {
 	Docker   DockerFacts
 	Packages map[string]bool
@@ -49,25 +49,11 @@ type Facts struct {
 	BrNetfilter                bool
 	Bridges                    []string
 	ForwardPolicy              string
-	InputPolicy                string
-	InputRules                 int
-	InputChains                []string
-	// Ruleset is nft list ruleset, line by line; OwnerFirewall is each
-	// chain or rule in it that is the owner's own firewall, as
-	// ownerFirewall reads it.
-	Ruleset, OwnerFirewall []string
-	RulesetUnknown         bool
-	// LegacyRules are iptables-legacy-save's rules and non-ACCEPT
-	// policies, as it prints them.
-	LegacyRules []string
-	// LegacyUnknown is a host whose iptables-legacy tables are loaded and
-	// could not be saved.
-	LegacyUnknown        bool
-	Firewalld            bool
-	PortStart, IPForward string
-	DefaultDev, LAN      string
-	WatchdogRules        []string
-	Records              []string
+	UFWInstalled, UFWActive    bool
+	PortStart, IPForward       string
+	DefaultDev, LAN            string
+	WatchdogRules              []string
+	Records                    []string
 	// Data is where Docker's data would go: the nearest directory that
 	// exists. FS and Avail are not read when Unsafe; Above is the probe's
 	// data-above, safe, link-above or unsafe-above.
@@ -296,28 +282,10 @@ func parseFacts(out, user string) (Facts, error) {
 			f.Bridges = append(f.Bridges, v)
 		case "forward-policy":
 			f.ForwardPolicy = v
-		case "input-policy":
-			f.InputPolicy = v
-		case "input-rules":
-			f.InputRules, _ = strconv.Atoi(v)
-		case "ruleset":
-			// No line of a real ruleset is the word unknown alone.
-			if v == "unknown" {
-				f.RulesetUnknown = true
-				continue
-			}
-			f.Ruleset = append(f.Ruleset, v)
-		case "legacy":
-			// No line iptables-legacy-save prints is the word unknown.
-			if v == "unknown" {
-				f.LegacyUnknown = true
-				continue
-			}
-			f.LegacyRules = append(f.LegacyRules, v)
-		case "input-chain":
-			f.InputChains = append(f.InputChains, v)
-		case "firewalld":
-			f.Firewalld = v == "active"
+		case "ufw":
+			f.UFWInstalled = v == "installed"
+		case "ufw-active":
+			f.UFWActive = v == "yes"
 		case "port-start":
 			f.PortStart = v
 		case "ip-forward":
@@ -347,7 +315,6 @@ func parseFacts(out, user string) (Facts, error) {
 			f.Data.Avail, _ = strconv.ParseInt(v, 10, 64)
 		}
 	}
-	f.OwnerFirewall = ownerFirewall(f.Ruleset)
 	if f.User.Exists && f.User.Group == "" {
 		return f, fmt.Errorf("no primary group read for %s", user)
 	}

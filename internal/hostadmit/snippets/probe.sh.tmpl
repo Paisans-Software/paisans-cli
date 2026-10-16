@@ -77,39 +77,16 @@ done
 if [ -d /sys/module/br_netfilter ]; then say br_netfilter loaded; else say br_netfilter absent; fi
 ip -d -o link show type bridge 2>/dev/null | awk -F': ' '{ sub(/@.*/, "", $2); print "bridge " $2 }'
 say forward-policy "$(iptables -S FORWARD 2>/dev/null | awk '$1 == "-P" { print $3; exit }')"
-say input-policy "$(iptables -S INPUT 2>/dev/null | awk '$1 == "-P" { print $3; exit }')"
-say input-rules "$(iptables -S INPUT 2>/dev/null | grep -c '^-A INPUT' || true)"
 say port-start "$(sysctl -n net.ipv4.ip_unprivileged_port_start)"
 say ip-forward "$(sysctl -n net.ipv4.ip_forward)"
 dev=$(ip -4 -o route show default 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }')
 say default-dev "${dev:-absent}"
 if [ -n "$dev" ]; then ip -4 -o addr show dev "$dev" scope global | awk '{ print "lan " $4; exit }'; fi
-if systemctl is-active firewalld >/dev/null 2>&1; then say firewalld active; else say firewalld inactive; fi
-# The whole nft ruleset, or "ruleset unknown" when nft is absent or fails,
-# so a firewall admit cannot read is never read as none. Rules only
-# iptables-legacy holds are invisible to nft, so they are read too: only
-# when its tables are loaded already, since listing them would load them.
-if command -v nft >/dev/null 2>&1 && ruleset=$(nft list ruleset 2>/dev/null); then
-  [ -z "$ruleset" ] || printf '%s\n' "$ruleset" | sed 's/^/ruleset /'
-else
-  say ruleset unknown
-fi
-# A family's legacy tables that are loaded but cannot be saved, its save
-# missing or failing, print "legacy unknown". With none loaded there is no
-# legacy rule, and saving would load the modules, which this probe never
-# does.
-legacy=
-for fam in ip ip6; do
-  [ -n "$(cat "/proc/net/${fam}_tables_names" 2>/dev/null)" ] || continue
-  if command -v "${fam}tables-legacy-save" >/dev/null 2>&1 && saved=$("${fam}tables-legacy-save" 2>/dev/null); then
-    legacy="$legacy$saved
-"
-  else
-    say legacy unknown
-  fi
-done
-printf '%s' "$legacy" | grep -E '^-A |^:[^ ]+ (DROP|REJECT) ' | sed 's/^/legacy /'
-nft list chains 2>/dev/null | awk '/^table / { t = $2 " " $3 } /^[ \t]*chain / { c = $2 } /hook input/ { print "input-chain " t " " c }'
+# ufw: whether it is installed, and whether its first status line, read as
+# root, says active. Anything else, including a status that cannot be read,
+# is not active, so the answer fails closed.
+if command -v ufw >/dev/null 2>&1; then say ufw installed; else say ufw absent; fi
+if [ "$(ufw status 2>/dev/null | sed -n 1p)" = "Status: active" ]; then say ufw-active yes; else say ufw-active no; fi
 for f in /etc/udev/rules.d/60-paisans-*-watchdog.rules; do [ -e "$f" ] && say watchdog-rule "$f"; done
 for f in /etc/paisans/admitted.*.json; do [ -e "$f" ] && say record "$f"; done
 # Where Docker's data will live: --data-dir, or the user's home, or /home

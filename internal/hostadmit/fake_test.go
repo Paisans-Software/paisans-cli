@@ -143,7 +143,7 @@ const ubuntu2404 = "PRETTY_NAME=\"Ubuntu 24.04.1 LTS\"\nNAME=\"Ubuntu\"\nVERSION
 
 // newBlank is a VPS fresh from Ubuntu 24.04: no Docker, AppArmor
 // restricting unprivileged user namespaces with no rootlesskit profile, no
-// deployment user, no file admit writes, ufw installed and inactive, one
+// deployment user, no file admit writes, ufw installed and active, one
 // public interface, systemd-resolved, and nothing on 80 or 443.
 func newBlank() *fakeHost {
 	h := &fakeHost{files: map[string]string{
@@ -159,7 +159,7 @@ func newBlank() *fakeHost {
 		{"br_netfilter", "absent"}, {"forward-policy", "ACCEPT"},
 		{"port-start", "1024"}, {"ip-forward", "0"},
 		{"default-dev", "eth0"}, {"lan", "203.0.113.10/24"},
-		{"firewalld", "inactive"}, {"input-policy", "ACCEPT"}, {"input-rules", "0"},
+		{"ufw", "installed"}, {"ufw-active", "yes"},
 		{"egress-enabled", "no"}, {"egress-table", "absent"},
 		{"data-path", "/home"}, {"data-fs", "ext2/ext3"}, {"data-avail", "42949672960"},
 	} {
@@ -170,7 +170,7 @@ func newBlank() *fakeHost {
 	// hostprep's probes, as host prepare's tests answer them.
 	h.answer("docker compose version", "compose absent\nkeyring absent\narch amd64\n").
 		answer("RuntimeWatchdogUSec", "device absent\nsystemd 0\ndaemon absent\n").
-		answer("ufw show added", "ufw present\nstatus inactive\n").
+		answer("ufw show added", "ufw present\nstatus active\n").
 		answer("is-enabled", "enabled \nactive \n").
 		answer("ip -j route", "[]").answer("ip -j addr", "[]").answer("docker network", "[]")
 	return h
