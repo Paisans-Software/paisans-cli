@@ -204,14 +204,19 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    `docker.socket` and `docker.service` for `docker-ce`, `containerd` for
    `containerd.io` only when admit adds that too, and asks the owner's own
    `policy-rc.d` about every other. There is never a moment with no policy in
-   place: admit's is written whole, the owner's is copied to
+   place: admit's is written whole, the owner's is copied, through a
+   temporary name so a copy cut short is never taken for it, to
    `policy-rc.d.paisans-owner`, and admit's is renamed over it. The owner's
-   goes back when the install exits, however it exits. What a killed run
-   leaves, admit's policy, the owner's copy beside it or beside nothing, or
-   admit's temporary file, is put right by the next admit, or by evict,
-   whether or not another deployment stays; a copy that differs from the
-   policy in place is the owner's to choose between, and admit refuses,
-   naming both. The next step disables the same units, and fails if
+   goes back when the install exits, however it exits. The hold holds
+   `/run/paisans-docker-hold.lock` throughout, so one run alone holds
+   Docker's daemons. What a killed run leaves, admit's policy, the owner's
+   copy beside it or beside nothing, or a temporary file of admit's, is put
+   right by the next admit, or by evict, whether or not another deployment
+   stays, under the same lock: while a running admit holds it, putting back
+   refuses, saying so. A copy that differs from the policy in place is the
+   owner's to choose between, and admit refuses, naming both. When the
+   owner's `containerd.io` is installed, apt may upgrade it to the version
+   `docker-ce` needs, which restarts it; the plan says so. The next step disables the same units, and fails if
    `docker0` exists anyway, naming a reboot, which clears what the daemon
    changed now that it is disabled.
 
@@ -219,11 +224,13 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    otherwise), records what admit installs that the host did not have (each
    package, Docker's apt key and source) and the directories it creates
    (`user@.service.d`, below). Before the install each package is claimed
-   as `installing`; the install step makes it a `package` once apt has run.
-   A claim stands while dpkg shows the package installed and either the
-   install confirmed it or the hold that install left says it was admit's
-   own install that was killed; any other claim, and any package dpkg does
-   not show installed, is dropped, so a Docker the owner installs after an
+   as `installing`; the install's exit trap, however the install exits and
+   before the hold is released, makes each claim dpkg shows installed a
+   `package`. A claim still `installing` stands only while dpkg shows the
+   package installed and admit's own policy is still in place, which says
+   that install was killed outright and apt may have run under it; a
+   leftover from before the policy was in place keeps no claim. Any other
+   claim, and any package dpkg does not show installed, is dropped, so a Docker the owner installs after an
    admit that stopped early is never taken for admit's. The admission record
    says admit disabled the daemon once; while a record says so, or another
    deployment's record cannot be read and so may, admit leaves the units as
@@ -231,8 +238,9 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    had before admit, and a `containerd.io` the host had, are never held,
    disabled or otherwise touched.
 
-   The system Docker admit holds disabled has never run, so the mesh's
-   check reads it as having no networks. Any other Docker whose daemon does
+   The system Docker admit holds disabled, with no unit enabled and no
+   network store (`/var/lib/docker/network/files/local-kv.db`), has never
+   run, so the mesh's check reads it as having no networks. Any other Docker whose daemon does
    not answer still has its networks, which come back when it starts, so
    admit stops and says to start it.
 2. **AppArmor.** On Ubuntu 24.04 and later, unprivileged user namespaces are
@@ -963,7 +971,11 @@ A rekey with sites down is in `docs/specs/2026-10-15-mesh-rekey-sites-down.md`.
   added packages' units forbidden, every other asked of the owner's
   `policy-rc.d`, the owner's back after, or none when there was none; a
   hold a killed run left, the owner's copy beside nothing or beside the
-  same file, put right; a copy that differs refused.
+  same file, or cut short, put right; a copy that differs refused; the hold
+  and putting it back refused while another run holds the lock.
+* The install run for real with an apt that fails after dpkg shows
+  `docker-ce` installed: the claim reads `package docker-ce` after, with
+  and without a hold.
 * A system Docker that does not answer: admit's held one read as having no
   networks, the owner's refused, readably, saying to start it.
 * One end-to-end run on staging: admit a fresh host as its owner, apply as
