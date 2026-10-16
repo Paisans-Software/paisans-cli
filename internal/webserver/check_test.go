@@ -253,8 +253,13 @@ func TestCheckFailsAnUpstreamReachableAroundTheProxy(t *testing.T) {
 	w := good()
 	w.upstreamUp = true
 	r := result(t, run(t, w, external(t, "192.168.1.20:8480")), webserver.CheckUpstream)
-	if r.OK || !strings.Contains(r.Detail, "203.0.113.20:8480") || !strings.Contains(r.Fix, "DOCKER-USER") {
+	if r.OK || !strings.Contains(r.Detail, "203.0.113.20:8480") || !strings.Contains(r.Fix, "127.0.0.1:8480") || !strings.Contains(r.Fix, "firewall") {
 		t.Fatalf("%+v", r)
+	}
+	for _, wrong := range []string{"iptables", "in front of ufw", "DOCKER-USER"} {
+		if strings.Contains(r.Fix, wrong) {
+			t.Errorf("the fix says %q: %s", wrong, r.Fix)
+		}
 	}
 }
 

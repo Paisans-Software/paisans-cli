@@ -365,9 +365,9 @@ func (i WebServer) ListenHostPort() (string, int, bool) {
 // loopback address or the site's own mesh address, in plain dotted form, with
 // a port ListenHostPort accepts. A monitor behind the owner's web server is
 // handed to that server on the same host, so nothing beyond the host is
-// needed, and Docker publishes a port with rules of its own in front of the
-// firewall, so any other address would expose the app around the web
-// server. validate and host request both hold web_server.listen to it.
+// needed, and any other address would put the app where other machines
+// reach it around the web server. validate and host request both hold
+// web_server.listen to it.
 func ProxiesToThisHost(listen, address string) bool {
 	host, _, ok := WebServer{Listen: listen}.ListenHostPort()
 	if !ok {

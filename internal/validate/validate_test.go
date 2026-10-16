@@ -640,8 +640,9 @@ func TestARolelessSiteStillHostsOtherBlueprints(t *testing.T) {
 
 // A listen address is where Docker publishes the app for the operator's web
 // server, which runs on the same host. Loopback is quiet; the site's own mesh
-// address is allowed with the firewall warning; anything else is refused, a
-// LAN address included, as host request refuses it. 10.44.0.1 is inside the
+// address is allowed with a warning, since the firewall lets the mesh in;
+// anything else is refused, a LAN address included, as host request refuses
+// it. 10.44.0.1 is inside the
 // mesh, but it is another site's address, which nothing on this host binds.
 func TestWebServerListenAddresses(t *testing.T) {
 	for _, tc := range []struct {
@@ -663,6 +664,21 @@ func TestWebServerListenAddresses(t *testing.T) {
 		result := validate.Check(cfg)
 		if result.Has("web-server-listen-not-this-host") != tc.refused || result.Has("web-server-listen-bypasses-firewall") != tc.warns {
 			t.Errorf("%s: %v", tc.listen, result.Findings)
+		}
+		// Rootless Docker publishes through rootlesskit, on the host's own
+		// network stack, so ufw does apply: the reason is the route around
+		// the web server, and for the mesh address the firewall letting
+		// the mesh in whole.
+		for _, f := range result.Findings {
+			text := f.Hint + " " + f.Message
+			switch {
+			case strings.Contains(text, "iptables") || strings.Contains(text, "in front of ufw") || strings.Contains(text, "firewall misses"):
+				t.Errorf("%s: %s says Docker bypasses the firewall: %s", tc.listen, f.Rule, text)
+			case f.Rule == "web-server-listen-not-this-host" && !strings.Contains(f.Message, "around your web server"):
+				t.Errorf("%s: %s", tc.listen, text)
+			case f.Rule == "web-server-listen-bypasses-firewall" && !strings.Contains(f.Message, "lets the mesh in"):
+				t.Errorf("%s: %s", tc.listen, text)
+			}
 		}
 	}
 }
