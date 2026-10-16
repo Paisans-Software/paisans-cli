@@ -72,7 +72,7 @@ type Step struct {
 	// Command, when set, runs after File is written.
 	Command string
 	// Label is the kind of change, so one can be told apart without reading
-	// Describe: empty for an ordinary one, or "adopt", "add", "rename",
+	// Describe: empty for an ordinary one, or "add", "rename",
 	// "release" or "remove". It is not printed; Title already says
 	// what the step does.
 	Label string
@@ -228,18 +228,14 @@ type Profile interface {
 	// fetches from peers, the addresses of which are given, as the login
 	// user's own units under home.
 	ConfigStore(t Transport, d deployment.Deployment, self config.Site, peers []string, home string) (Section, error)
-	// Firewall plans the given inbound rules and, when hostWide, a default
-	// deny for everything else and enabling the firewall. The SSH rule must
-	// be in place before the firewall is enabled, and enabling must not
-	// prompt. Rules it added earlier that are no longer given are removed,
-	// last; rules it did not add are never removed or changed. What it added
-	// is told apart by the owner tag of deployment d in each rule's comment,
-	// so a rule another deployment added is as foreign as an operator's.
-	// hostWide is false on a shared host, where the default policy and
-	// whether the firewall is on decide other people's traffic too. by is
-	// the command planning, host prepare or host admit, which the plan's
-	// messages name.
-	Firewall(t Transport, d deployment.Deployment, rules []Rule, hostWide bool, by string) (Section, error)
+	// Firewall plans the given inbound rules for host admit. Rules it added
+	// earlier that are no longer given are removed, last; rules it did not
+	// add are never removed or changed. What it added is told apart by the
+	// owner tag of deployment d in each rule's comment, so a rule another
+	// deployment added is as foreign as an owner's. The default policy and
+	// whether the firewall is on decide other people's traffic too, and are
+	// never planned here.
+	Firewall(t Transport, d deployment.Deployment, rules []Rule) (Section, error)
 }
 
 var registry []Profile

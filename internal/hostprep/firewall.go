@@ -24,7 +24,7 @@ type Rule struct {
 
 // sshWhy is the SSH rule's reason, and so part of its ownership comment on the
 // host. It must not change: it is how planRules recognises an SSH allow host
-// prepare added for an earlier ssh.port, and keeps it.
+// admit added for an earlier ssh.port, and keeps it.
 const sshWhy = "ssh, the bootstrap route"
 
 // gatewayHTTPWhy and gatewayHTTPSWhy are the gateway's allows for 80 and

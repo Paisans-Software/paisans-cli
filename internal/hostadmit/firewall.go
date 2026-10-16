@@ -51,30 +51,12 @@ func planFirewall(p *planner) error {
 		}
 		p.present("public ports: nothing else answers on 80 or 443")
 	}
-	s, err := p.profile.Firewall(p.t, p.d, hostprep.AdmitRules(p.d, req.SSHPort, req.ListenPort, p.in.Flags.PublicPorts), false, "host admit")
+	s, err := p.profile.Firewall(p.t, p.d, hostprep.AdmitRules(p.d, req.SSHPort, req.ListenPort, p.in.Flags.PublicPorts))
 	if err != nil {
 		// Build names the part already.
 		return errors.New(strings.TrimPrefix(shown(err).Error(), "firewall: ") + ". Nothing was changed")
 	}
-	// A matching rule without the paisans comment is the owner's, most
-	// often the SSH allow they added before enabling ufw. Host prepare
-	// adopts one as its own; admit adds only its tagged rules and leaves
-	// the owner's as it is, which the profile has already reported present.
-	var steps []hostprep.Step
-	for _, st := range s.Steps {
-		if st.Label != "adopt" {
-			steps = append(steps, st)
-		}
-	}
-	s.Steps = steps
-	// The profile says why it leaves the policy alone in host prepare's
-	// terms, a shared host; admit leaves it alone on every host.
-	var present []string
-	for _, line := range s.Present {
-		if !strings.HasPrefix(line, "firewall: default policy and enabled state left alone") {
-			present = append(present, line)
-		}
-	}
+	present := s.Present
 	if before == nil {
 		s.Present = append(present, "firewall: ufw active, its default policy left to the owner")
 		if p.in.enabledUFW {

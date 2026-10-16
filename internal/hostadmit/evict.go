@@ -472,7 +472,7 @@ var moduleName = regexp.MustCompile(`^[a-z0-9_]+$`)
 // allow by its comment. The default policy and whether ufw is on are never
 // changed.
 func (e *evictor) firewall() error {
-	s, err := e.profile.Firewall(e.t, e.d, nil, false, "host admit")
+	s, err := e.profile.Firewall(e.t, e.d, nil)
 	if err != nil {
 		return err
 	}

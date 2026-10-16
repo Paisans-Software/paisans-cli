@@ -501,18 +501,12 @@ func (u ubuntu) WatchdogModule(t Transport, d deployment.Deployment, module stri
 	return out, nil
 }
 
-// Firewall drives ufw. The order of the steps is the safety property: every
-// allow and adoption, SSH first, then the default policy, then enabling, so
-// there is no moment at which the firewall is on and SSH is not allowed; and
-// removals last, so a rule is only taken away once everything it might have
-// stood in for is in place. `--force` is what stops `ufw enable` asking
-// whether to disrupt existing connections, a prompt that would hang a
-// non-interactive run. Which rules are added, adopted, removed or left alone
-// is planRules, in ufw.go. On a shared host (hostWide false) only the rules
-// are planned: the default policy and enabling belong to the host, not to
-// the deployment. by names the command planning, host admit, in what the
-// plan says.
-func (u ubuntu) Firewall(t Transport, d deployment.Deployment, rules []Rule, hostWide bool, by string) (Section, error) {
+// Firewall plans the deployment's ufw rules: every allow first, then the
+// removals, so a rule is only taken away once everything it might have stood
+// in for is in place. Which rules are added, removed or left alone is
+// planRules, in ufw.go. The default policy and whether ufw is on are the
+// owner's, and never planned here.
+func (u ubuntu) Firewall(t Transport, d deployment.Deployment, rules []Rule) (Section, error) {
 	var out Section
 	script, err := snippet(u.tmpl("firewall-probe.sh.tmpl"), nil)
 	if err != nil {
@@ -522,60 +516,22 @@ func (u ubuntu) Firewall(t Transport, d deployment.Deployment, rules []Rule, hos
 	if err != nil {
 		return out, err
 	}
-	var present, active bool
 	var added []addedRule
 	for _, line := range strings.Split(probe, "\n") {
 		key, rest, _ := strings.Cut(strings.TrimSpace(line), " ")
-		switch key {
-		case "ufw":
-			present = rest == "present"
-		case "status":
-			active = rest == "active"
-		case "rule":
-			if a, ok := parseAdded(rest); ok {
-				added = append(added, a)
-			}
+		if key != "rule" {
+			continue
+		}
+		if a, ok := parseAdded(rest); ok {
+			added = append(added, a)
 		}
 	}
 
-	planned, removals, err := planRules(ownerTag(d), rules, added, by)
+	planned, removals, err := planRules(ownerTag(d), rules, added)
 	if err != nil {
 		return out, err
 	}
 	out.add(planned)
-
-	if !hostWide {
-		out.Present = append(out.Present, "firewall: default policy and enabled state left alone, since the host is shared")
-		out.Steps = append(out.Steps, removals...)
-		return out, nil
-	}
-
-	input, output := "", ""
-	if present {
-		defaults, found, err := t.ReadFile("/etc/default/ufw")
-		if err != nil {
-			return out, err
-		}
-		if found {
-			fields := ParseOSRelease(defaults).Fields // the same KEY="value" shape
-			input, output = fields["DEFAULT_INPUT_POLICY"], fields["DEFAULT_OUTPUT_POLICY"]
-		}
-	}
-	if input == "DROP" {
-		out.Present = append(out.Present, "firewall: incoming denied by default")
-	} else {
-		out.Steps = append(out.Steps, Step{Kinds: []string{KindFirewall}, Title: "deny incoming", Describe: "firewall: deny incoming by default", Command: "ufw default deny incoming"})
-	}
-	if output == "ACCEPT" {
-		out.Present = append(out.Present, "firewall: outgoing allowed by default")
-	} else {
-		out.Steps = append(out.Steps, Step{Kinds: []string{KindFirewall}, Title: "allow outgoing", Describe: "firewall: allow outgoing by default", Command: "ufw default allow outgoing"})
-	}
-	if active {
-		out.Present = append(out.Present, "firewall: ufw active")
-	} else {
-		out.Steps = append(out.Steps, Step{Kinds: []string{KindFirewall}, Title: "enable ufw", Describe: "firewall: enable ufw", Command: "ufw --force enable"})
-	}
 	out.Steps = append(out.Steps, removals...)
 	return out, nil
 }
