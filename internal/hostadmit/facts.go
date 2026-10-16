@@ -536,7 +536,7 @@ func parseFacts(out, user string) (Facts, error) {
 		}
 	}
 	if f.raw["sudo"] != nil && f.raw["sudo"][len(f.raw["sudo"])-1] == "listed" {
-		if list, ok := ReadSudoList(sudoL); ok {
+		if list, ok := readSudoList(user, sudoL, false); ok {
 			f.User.SudoRules, f.User.SudoDefaults, f.User.SudoSpecific, f.User.SudoRead = list.Rules, list.Defaults, list.Specific, true
 		}
 	}

@@ -9,14 +9,25 @@ type SudoList struct {
 	Rules, Defaults, Specific []string
 }
 
-// ReadSudoList reads what sudo -n -l printed under LC_ALL=C, as root for a
-// user (-U) or as the user itself: a header line per section, each entry
-// indented below it, long lines wrapped onto more indented lines. A user
-// sudo refuses outright reads as a list with nothing in it. ok is false
-// for a line it does not know, or a listing with neither rules nor a
-// refusal, so no caller takes an answer it cannot read for one granting
-// nothing.
-func ReadSudoList(lines []string) (list SudoList, ok bool) {
+// ReadSudoList reads what sudo -n -l printed under LC_ALL=C for user, as
+// root for it (-U) or as the user itself: a header line per section, each
+// entry indented below it, long lines wrapped onto more indented lines. A
+// user sudo refuses outright reads as a list with nothing in it, and so
+// does sudo's refusal as the user sees it, alone and naming user. ok is
+// false for a line it does not know, a refusal naming anyone else or
+// beside any other line, or a listing with neither rules nor a refusal,
+// so no caller takes an answer it cannot read for one granting nothing.
+func ReadSudoList(user string, lines []string) (list SudoList, ok bool) {
+	return readSudoList(user, lines, true)
+}
+
+// readSudoList is ReadSudoList, taking sudo's refusal as the user sees it
+// only when asUser. admit asks as root, which sudo lists every user for,
+// so on its path that refusal is a listing it cannot read.
+func readSudoList(user string, lines []string, asUser bool) (list SudoList, ok bool) {
+	if asUser && len(lines) == 1 && strings.HasPrefix(strings.TrimRight(lines[0], "\r"), "Sorry, user "+user+" may not run sudo on ") {
+		return SudoList{}, true
+	}
 	section, understood := "", false
 	var defaults []string
 	for _, l := range lines {
@@ -32,8 +43,7 @@ func ReadSudoList(lines []string) (list SudoList, ok bool) {
 			section = "specific"
 		case !indented && strings.Contains(l, " may run the following commands on "):
 			section, understood = "rules", true
-		case !indented && strings.Contains(l, " is not allowed to run sudo on "),
-			!indented && strings.HasPrefix(l, "Sorry, user ") && strings.Contains(l, " may not run sudo on "):
+		case !indented && strings.Contains(l, " is not allowed to run sudo on "):
 			section, understood = "", true
 		case indented && section == "defaults":
 			defaults = append(defaults, entry)

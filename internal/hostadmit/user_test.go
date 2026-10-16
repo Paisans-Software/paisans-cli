@@ -390,6 +390,8 @@ func TestAUserWithSudoRulesIsRefused(t *testing.T) {
 		{"a rule", withSudo(current().withUser(), sudoFixture("stock")+"    (ALL : ALL) ALL\n"), "sudo grants paisans-f2a9 a rule"},
 		{"a rule beside admit's", withSudo(current().withUser(), sudoFixture("stock")+"    (root) /usr/bin/apt\n"), "(root) /usr/bin/apt"},
 		{"output it cannot read", withSudo(current().withUser(), "sudo: unable to resolve host\n"), "sudo's rules for paisans-f2a9 could not be read"},
+		{"sudo's refusal as the user sees it", withSudo(current().withUser(), "Sorry, user paisans-f2a9 may not run sudo on host.\n"), "sudo's rules for paisans-f2a9 could not be read"},
+		{"sudo's refusal of root", withSudo(current().withUser(), "Sorry, user root may not run sudo on host.\n"), "sudo's rules for paisans-f2a9 could not be read"},
 		{"no sudo line", func() *fakeHost {
 			h := current().withUser()
 			var kept [][2]string
