@@ -43,7 +43,8 @@ PersistentKeepalive = 25
 
 // shells are the shells the helper is run under: sh always, and dash and
 // bash where this machine has them, since a host's /bin/sh is dash on
-// Debian and Ubuntu.
+// Debian and Ubuntu. zsh is not among them: the helper's shebang is
+// /bin/sh, so it never runs under zsh.
 func shells() []string {
 	out := []string{"sh"}
 	for _, s := range []string{"dash", "bash"} {
@@ -63,6 +64,11 @@ func helperIn(t *testing.T, port int, subnet string) (script, dir string) {
 	text, err := hostprep.WGHelperScriptIn(dir, meshDeployment, port, subnet)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// PAISANS_TEST_AWK=busybox runs every test's check under busybox awk,
+	// which the helper reaches by name from a PATH it sets itself.
+	if a := os.Getenv("PAISANS_TEST_AWK"); a != "" {
+		text = strings.ReplaceAll(text, "\tawk -v", "\t"+a+" awk -v")
 	}
 	script = filepath.Join(t.TempDir(), "wg-psns-f2a9")
 	if err := os.WriteFile(script, []byte(text), 0o755); err != nil {
@@ -192,6 +198,9 @@ func TestTheHelperRefusesAnythingElse(t *testing.T) {
 		{"Table", replace("PrivateKey = ", "Table = off\nPrivateKey = "), "is not a key paisans writes"},
 		{"SaveConfig", replace("PrivateKey = ", "SaveConfig = true\nPrivateKey = "), "is not a key paisans writes"},
 		{"FwMark", replace("PrivateKey = ", "FwMark = 51820\nPrivateKey = "), "FwMark is set by this helper"},
+		{"fwmark in lower case", replace("PrivateKey = ", "fwmark = 0\nPrivateKey = "), "fwmark is set by this helper"},
+		{"FWMARK behind tabs", replace("PrivateKey = ", "\tFWMARK\t=\t0\nPrivateKey = "), "FWMARK is set by this helper"},
+		{"FwMark after a comment", replace("PrivateKey = ", "# FwMark = 0\nFwMark=0 # x\nPrivateKey = "), "FwMark is set by this helper"},
 		{"FwMark in a [Peer]", replace(keepalive, "FwMark = 0x5053f2a9\n"), "FwMark is set by this helper"},
 		{"an [Interface] key in a [Peer]", replace(keepalive, "MTU = 1420\n"), "is not a key paisans writes in [Peer]"},
 		{"a known key in another case", replace("Address = ", "address = "), "is not a key paisans writes"},
@@ -562,6 +571,58 @@ func TestPutMarksEveryConf(t *testing.T) {
 		}
 		if names := entries(t, dir); len(names) != 1 {
 			t.Errorf("%s: put left %v in the directory", shell, names)
+		}
+	}
+}
+
+// put is idempotent: installing the same conf again, over the marked one,
+// leaves the same bytes and one FwMark line.
+func TestPutTwiceInstallsTheSameBytes(t *testing.T) {
+	for _, shell := range shells() {
+		script, dir := helperIn(t, 51820, "10.44.0.0/24")
+		var first []byte
+		for i := 0; i < 2; i++ {
+			if out, code := runHelper(t, shell, script, goodConf, "put"); code != 0 {
+				t.Fatalf("%s: put %d refused (exit %d): %s", shell, i+1, code, out)
+			}
+			got, err := os.ReadFile(filepath.Join(dir, "psns-f2a9.conf"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if i == 0 {
+				first = got
+			} else if string(got) != string(first) {
+				t.Errorf("%s: the second put changed the conf:\n%s\nwas\n%s", shell, got, first)
+			}
+			if n := strings.Count(string(got), "FwMark"); n != 1 {
+				t.Errorf("%s: put %d left FwMark %d times", shell, i+1, n)
+			}
+		}
+	}
+}
+
+// busybox awk, as Debian builds it, has no math support and rejects ^, and
+// the helper must refuse and accept exactly what mawk and gawk do. It runs
+// only where busybox is installed.
+func TestTheHelperUnderBusyboxAwk(t *testing.T) {
+	if _, err := exec.LookPath("busybox"); err != nil {
+		t.Skip("busybox is not installed")
+	}
+	t.Setenv("PAISANS_TEST_AWK", "busybox")
+	script, dir := helperIn(t, 51820, "10.44.0.0/24")
+	if out, code := runHelper(t, "sh", script, goodConf, "put"); code != 0 {
+		t.Fatalf("busybox awk refused the good conf (exit %d): %s", code, out)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "psns-f2a9.conf")); string(got) != marked(goodConf) {
+		t.Errorf("busybox awk installed:\n%s", got)
+	}
+	for _, c := range []struct{ name, conf string }{
+		{"a network address", strings.Replace(goodConf, "10.44.0.4/24", "10.44.0.0/24", 1)},
+		{"a broadcast address", strings.Replace(goodConf, "10.44.0.4/24", "10.44.0.255/24", 1)},
+		{"a hook", strings.Replace(goodConf, "PersistentKeepalive = 25\n", "PostUp = id\n", 1)},
+	} {
+		if out, code := runHelper(t, "sh", script, c.conf, "put"); code != 65 {
+			t.Errorf("%s: exit %d, want 65: %s", c.name, code, out)
 		}
 	}
 }
