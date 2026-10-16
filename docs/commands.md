@@ -725,9 +725,12 @@ paisans host evict --site home-a --ssh owner@home-a.example.org --execute
   deployment's user, defaulting to `paisans-<token>`.
 * **`--execute`:** asks for the user's name at a terminal, then removes the
   mesh, the user with its home and Docker data, the deployment's directory,
-  the helper and sudoers line, the egress table and its firewall rules, the
-  record and the registry entry; host-wide files and sysctls only when no
-  other deployment is admitted, each sysctl restored to what it was.
+  the helper and sudoers line, the egress table and its firewall rules except
+  the SSH allow, the record and the registry entry; host-wide files and
+  sysctls only when no other deployment is admitted, each sysctl restored to
+  what it was. The SSH allow may be the rule the owner's own login arrives by,
+  so it is kept and evict warns of it: the owner deletes it themselves once
+  nothing else needs it.
 
 See *A host's owner admits a site from a request* in `README.md`.
 
