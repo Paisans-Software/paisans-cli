@@ -258,13 +258,6 @@ var recordFields = []string{"version", "deployment", "user", "site", "roles", "g
 // this deployment's, a mesh_lan that is empty or a LAN --mesh-lan may open,
 // and a mesh_subnet a mesh may have.
 func ParseRecord(data []byte, token string) (Record, error) {
-	return parseRecord(data, token, false)
-}
-
-// parseRecord is ParseRecord. With noSubnet it reads a record written
-// before mesh_subnet joined it, and only such a record, with MeshSubnet "":
-// see ReadToRewrite.
-func parseRecord(data []byte, token string, noSubnet bool) (Record, error) {
 	refuse := func(problems ...string) (Record, error) {
 		return Record{}, &Error{What: "the admission record for " + strconv.Quote(token), Problems: problems}
 	}
@@ -288,12 +281,9 @@ func parseRecord(data []byte, token string, noSubnet bool) (Record, error) {
 	}
 	var problems []string
 	for _, k := range recordFields {
-		if _, ok := keys[k]; !ok && !(noSubnet && k == "mesh_subnet") {
+		if _, ok := keys[k]; !ok {
 			problems = append(problems, k+": missing")
 		}
-	}
-	if _, ok := keys["mesh_subnet"]; noSubnet && ok {
-		problems = append(problems, "mesh_subnet: present, so it is read as any record is")
 	}
 	if len(problems) > 0 {
 		return refuse(problems...)
@@ -356,10 +346,8 @@ func parseRecord(data []byte, token string, noSubnet bool) (Record, error) {
 	if r.MeshLAN != "" && !MeshLAN(r.MeshLAN) {
 		problems = append(problems, fmt.Sprintf("mesh_lan: %q is not an IPv4 network in its masked form, a /16 or narrower inside 10.0.0.0/8, 172.16.0.0/12 or 192.168.0.0/16, or empty", r.MeshLAN))
 	}
-	if !noSubnet {
-		if _, p := config.CheckMeshSubnet(r.MeshSubnet); len(p) > 0 {
-			problems = append(problems, fmt.Sprintf("mesh_subnet: %q %s", r.MeshSubnet, strings.Join(p, ", ")))
-		}
+	if _, p := config.CheckMeshSubnet(r.MeshSubnet); len(p) > 0 {
+		problems = append(problems, fmt.Sprintf("mesh_subnet: %q %s", r.MeshSubnet, strings.Join(p, ", ")))
 	}
 	if len(problems) > 0 {
 		return refuse(problems...)
@@ -368,11 +356,7 @@ func parseRecord(data []byte, token string, noSubnet bool) (Record, error) {
 	// another case, a null, a missing nested field or a changed layout,
 	// which the decoder above reads differently from jq or a person, is
 	// refused rather than read.
-	want, err := EncodeRecord(r)
-	if noSubnet {
-		want = bytes.Replace(want, []byte("  \"mesh_subnet\": \"\",\n"), nil, 1)
-	}
-	if err != nil || !bytes.Equal(want, data) {
+	if want, err := EncodeRecord(r); err != nil || !bytes.Equal(want, data) {
 		return refuse("it is not exactly as host admit wrote it: something changed it after it was written (a repeated or differently cased key, a null, spacing or line endings). Run host admit again")
 	}
 	return r, nil
@@ -399,28 +383,6 @@ func Read(t Reader, token string) (Record, error) {
 		return Record{}, fmt.Errorf("%s: %w", path, ErrNotAdmitted)
 	}
 	return ParseRecord([]byte(content), token)
-}
-
-// ReadToRewrite is Read for host admit, which writes the record again: it
-// also reads a record written before mesh_subnet joined it, with MeshSubnet
-// "", so that admitting again rewrites that record rather than refusing
-// it. Every other command reads with Read, which refuses such a record as
-// it refuses any it cannot read.
-func ReadToRewrite(t Reader, token string) (Record, error) {
-	rec, err := Read(t, token)
-	var e *Error
-	if err == nil || !errors.As(err, &e) {
-		return rec, err
-	}
-	path, _ := Path(token)
-	content, _, rerr := t.ReadFile(path)
-	if rerr != nil {
-		return Record{}, err
-	}
-	if old, oerr := parseRecord([]byte(content), token, true); oerr == nil {
-		return old, nil
-	}
-	return Record{}, err
 }
 
 // ErrNotMine is a login with no admission record of its own on the host.

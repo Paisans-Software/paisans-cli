@@ -221,15 +221,13 @@ func userState(p *planner) (UserState, error) {
 }
 
 // previous is this deployment's admission record as the host holds it,
-// nil when it has none, read once per Build. One written before
-// mesh_subnet joined the record is read too, so that admitting again
-// rewrites it (admission.ReadToRewrite).
+// nil when it has none, read once per Build.
 func (p *planner) previous() (*admission.Record, error) {
 	if p.prev.read {
 		return p.prev.rec, p.prev.err
 	}
 	p.prev.read = true
-	rec, err := admission.ReadToRewrite(p.t, p.d.Token())
+	rec, err := admission.Read(p.t, p.d.Token())
 	switch {
 	case errors.Is(err, admission.ErrNotAdmitted):
 	case err != nil:

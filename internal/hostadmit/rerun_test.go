@@ -47,10 +47,9 @@ func TestRerunPlans(t *testing.T) {
 	checkGoldenText(t, c.name, plan.Text())
 }
 
-// A record written before mesh_subnet joined it is rewritten when the owner
-// admits again, rather than refused: the run plans that one write, of the
-// record as admit writes it now.
-func TestARerunRewritesARecordWithoutMeshSubnet(t *testing.T) {
+// A record without mesh_subnet is refused like any record admit cannot
+// read: the owner moves it aside and admits again.
+func TestARerunRefusesARecordWithoutMeshSubnet(t *testing.T) {
 	flags := hostadmit.Flags{}
 	h := admittedHost(requestFor("vm"), flags)
 	const path = "/etc/paisans/admitted.f2a9.json"
@@ -60,11 +59,8 @@ func TestARerunRewritesARecordWithoutMeshSubnet(t *testing.T) {
 		t.Fatalf("the record has no mesh_subnet to remove:\n%s", current)
 	}
 	h.file(path, old).withFile(path, old, "644", 0)
-	plan, err := hostadmit.Build(h, input(t, "vm", flags))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(plan.Steps) != 1 || plan.Steps[0].File == nil || plan.Steps[0].File.Content != current {
-		t.Errorf("the re-run plans:\n%s", plan.Text())
+	_, err := hostadmit.Build(h, input(t, "vm", flags))
+	if err == nil || !strings.Contains(err.Error(), "mesh_subnet: missing") || !strings.Contains(err.Error(), "Move it aside and admit again") {
+		t.Errorf("Build = %v", err)
 	}
 }
