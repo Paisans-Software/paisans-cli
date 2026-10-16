@@ -9,7 +9,7 @@ var CaddyAdmin = caddyAdmin
 
 // RecordOf is the admission record the parts have filled so far.
 func RecordOf(t apply.Transport, in Input) (admission.Record, error) {
-	p, err := build(t, in)
+	p, err := build(t, in, nil)
 	if err != nil {
 		return admission.Record{}, err
 	}

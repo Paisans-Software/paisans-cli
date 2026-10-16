@@ -1,11 +1,14 @@
 package hostadmit_test
 
 import (
+	"io"
 	"strings"
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/hostadmit"
+	"github.com/paisans-software/paisans-cli/internal/registry"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // other is the record of a second deployment on the host, 0c0d, with the
@@ -155,5 +158,58 @@ func TestSecondAdmitRecordsNothing(t *testing.T) {
 				t.Error("a key the file already sets was recorded again")
 			}
 		})
+	}
+}
+
+// Installing Docker starts dockerd, which turns ip_forward on. On a fresh
+// host the first --execute must still complete when it reads the host again
+// once the user exists, and the value recorded for evict to restore is the
+// one the host had before admit changed anything. A change from outside
+// admit, after the plan was approved, still stops it.
+func TestTheFirstExecuteRecordsForwardingAsItWasBeforeDocker(t *testing.T) {
+	for _, outside := range []bool{false, true} {
+		h := newBlank()
+		in := input(t, "watch", hostadmit.Flags{PublicPorts: true})
+		h.onRun = func(h *fakeHost, command string) {
+			switch {
+			case strings.Contains(command, registry.LockPath):
+				h.file(registry.Path, registryOf(in.Request))
+			case strings.HasPrefix(command, "install -d -m 755 -o root -g root /etc/paisans"):
+				h.withDir("/etc/paisans", "drwxr-xr-x", 0, 0)
+			case strings.Contains(command, "docker-ce-cli") && !strings.Contains(command, "docker compose version"):
+				// docker-ce's postinst starts dockerd, which turns on forwarding.
+				h.with("engine", "29.9.1").with("setuptool", "present").with("system-socket", "present").
+					dropKeyed("pkg", "docker-ce")
+				h.add("pkg", "docker-ce installed").add("pkg", "docker-ce-rootless-extras installed").add("pkg", "uidmap installed").
+					answer("docker compose version", current().answers["docker compose version"]).
+					with("ip-forward", "1")
+			case strings.HasPrefix(command, "useradd "):
+				h.with("passwd", "paisans-f2a9:x:1001:1001::/home/paisans-f2a9:/bin/bash").with("home", "dir 1001 /home/paisans-f2a9").
+					with("groups", "paisans-f2a9").with("group", "paisans-f2a9").
+					with("linger", "no").with("manager", "inactive").
+					add("subuid", "paisans-f2a9:165536:65536").add("subgid", "paisans-f2a9:165536:65536")
+				if outside {
+					// A second on-link prefix, which the egress table drops.
+					h.add("lan6", "2001:db8:2::/64 eth0")
+				}
+			}
+		}
+		plan, err := hostadmit.Build(h, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = hostadmit.Execute(h, in, plan, ui.NewPlain(io.Discard, false))
+		if outside {
+			if err == nil || !strings.Contains(err.Error(), "the host changed while admit ran") {
+				t.Errorf("an on-link prefix added from outside admit: Execute = %v", err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := h.files["/etc/paisans/sysctl.before"]; !strings.Contains(got, "net.ipv4.ip_forward = 0\n") || !strings.Contains(got, "net.ipv4.ip_unprivileged_port_start = 1024\n") {
+			t.Errorf("sysctl.before does not hold the host's values before admit:\n%s", got)
+		}
 	}
 }

@@ -256,7 +256,11 @@ Garage site and 5 GB otherwise. The path is in the admission record.
     Today that is a `PostUp` in the WireGuard conf, which runs as root; in
     this design no hook is accepted (*The WireGuard helper*). The plan says
     that this turns on routing between every interface on the host, which
-    the firewall's forward policy then governs.
+    the firewall's forward policy then governs. The values evict restores
+    for both keys, in `/etc/paisans/sysctl.before`, are the ones admit's
+    first read of the host found: installing Docker starts dockerd, which
+    turns forwarding on, so the read `--execute` makes once the user exists
+    keeps those values rather than the ones admit's own steps left.
 14. **The admission record**, `/etc/paisans/admitted.<token>.json`, mode 644:
     the user, the grants (`watchdog`, `public_ports`), whether forwarding is
     on, the ports the firewall opened, the request's digest when there was

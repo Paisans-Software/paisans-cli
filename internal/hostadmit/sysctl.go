@@ -31,6 +31,10 @@ func SysctlFile(low, forward bool) string {
 	return out
 }
 
+// hostSysctls are the values of admit's sysctl keys as a read of the host
+// found them.
+type hostSysctls struct{ PortStart, IPForward string }
+
 // before is /etc/paisans/sysctl.before: each key's value as admit found it
 // before it first changed it, which evict restores.
 type before map[string]string
@@ -163,16 +167,17 @@ func planSysctls(p *planner) error {
 	for k, v := range was {
 		b[k] = v
 	}
-	// The first admit to change a key records what it found; once
-	// 60-paisans.conf sets the key the live value is paisans', not the host's.
+	// The first admit to change a key records what it found before it
+	// changed anything; once 60-paisans.conf sets the key the live value is
+	// paisans', not the host's.
 	if wantLow && !setLow {
 		if _, ok := b[keyLowPorts]; !ok {
-			b[keyLowPorts] = p.f.PortStart
+			b[keyLowPorts] = p.plan.sysctls.PortStart
 		}
 	}
 	if wantFwd && !setFwd {
 		if _, ok := b[keyForward]; !ok {
-			b[keyForward] = p.f.IPForward
+			b[keyForward] = p.plan.sysctls.IPForward
 		}
 	}
 	var restore []string
