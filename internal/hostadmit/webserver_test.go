@@ -310,3 +310,23 @@ func TestCaddyConfigBelowAnothersDirectoryIsNotRead(t *testing.T) {
 		}
 	}
 }
+
+// A configuration skipped as below another's directory still leaves the
+// default endpoint to probe: a Caddy answering on localhost:2019 is
+// warned about as any other.
+func TestCaddyConfigNotReadStillProbesTheDefaultEndpoint(t *testing.T) {
+	h := onHost("caddy")().answer("ps -o args= -C caddy", "caddy run --config /srv/www/Caddyfile\n").
+		answer("readlink -e -- '/srv/www/Caddyfile'", "paisans-unsafe /srv/www\n").
+		answer("curl -s --max-time 3", "{}\n")
+	plan, err := hostadmit.Build(h, input(t, "status", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tcp bool
+	for _, w := range plan.Warnings {
+		tcp = tcp || strings.Contains(w.Hint, "answers on TCP")
+	}
+	if !tcp {
+		t.Errorf("the default endpoint was not probed:\n%s", plan.Text())
+	}
+}

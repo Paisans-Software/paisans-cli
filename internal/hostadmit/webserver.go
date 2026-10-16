@@ -88,8 +88,9 @@ func hostText(s string) string { return ui.Redact(visibleLines(s)) }
 // on its resolved path is root's and writable by root alone, as
 // refuseUnsafe holds admit's own paths: below another's, a link could be
 // swapped in between the check and the read. Such a path is not read, and
-// the plan says so; the server is the owner's, so admit goes on.
-// Otherwise the default endpoint, when it answers from the host. A Caddy
+// the plan says so; the server is the owner's, so admit goes on to the
+// default endpoint, as it does when the file names no address, or cannot
+// be read: that endpoint, when it answers from the host. A Caddy
 // in a container whose endpoint the host cannot reach is no local user's
 // to reach either.
 func caddyTCPAdmin(p *planner, ws webserver.WebServer) caddyAdminState {
@@ -99,9 +100,7 @@ func caddyTCPAdmin(p *planner, ws webserver.WebServer) caddyAdminState {
 		if dir, ok := strings.CutPrefix(strings.TrimSpace(conf), unsafeMarker+" "); err == nil && ok {
 			p.warn("web server: Caddy's configuration "+hostText(ws.Config)+" was not read",
 				hostText(dir)+" is not root's alone, so what the path names could change between admit's check and its read. Check the admin option in it yourself: on anything but a unix socket, or off, any local user can replace that Caddy's configuration.")
-			return caddyAdminState{}
-		}
-		if err == nil {
+		} else if err == nil {
 			if addr, set := caddyAdmin(conf); set {
 				return caddyAdminState{tcp: addr, local: addr == ""}
 			}
