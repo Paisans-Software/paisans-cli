@@ -32,13 +32,13 @@ func parseInstalled(content, by string) (installed, error) {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		kind, v, _ := strings.Cut(line, " ")
+		entry, v, _ := strings.Cut(line, " ")
 		switch {
-		case kind == "package" && packageName.MatchString(v):
+		case entry == "package" && packageName.MatchString(v):
 			in.Packages = append(in.Packages, v)
-		case kind == "file" && path.IsAbs(v) && path.Clean(v) == v && ui.Visible(v) == v:
+		case entry == "file" && path.IsAbs(v) && path.Clean(v) == v && ui.Visible(v) == v:
 			in.Files = append(in.Files, v)
-		case kind == "dir" && v == delegateDir:
+		case entry == "dir" && v == delegateDir:
 			in.Dirs = append(in.Dirs, v)
 		default:
 			return in, fmt.Errorf("%s holds %s, which is not a line admit wrote. Remove the line and %s again. Nothing was changed", installedPath, ui.Visible(line), by)
