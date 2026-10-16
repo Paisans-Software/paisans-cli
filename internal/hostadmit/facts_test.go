@@ -183,6 +183,22 @@ func TestParseFactsMarksAPathBelowALinkOrAnotherUsersDirectory(t *testing.T) {
 	}
 }
 
+// ls -l marks a file with an SELinux context by a trailing dot, which
+// grants nothing, so a directory's mode is read without it. An ACL's +
+// is kept, since an ACL grants what the mode does not show.
+func TestParseFactsReadsAnSELinuxModeAsItsMode(t *testing.T) {
+	f, err := parseFacts("dir /etc/wireguard drwx------. 0 0\ndir /etc/paisans drwxr-xr-x+ 0 0\nend\n", "paisans-f2a9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := f.Dirs["/etc/wireguard"].Mode; m != "drwx------" {
+		t.Errorf("an SELinux mode reads %q", m)
+	}
+	if m := f.Dirs["/etc/paisans"].Mode; m != "drwxr-xr-x+" {
+		t.Errorf("an ACL's mode reads %q", m)
+	}
+}
+
 // Evict's facts: the mesh unit's state, as systemctl names it, and how many
 // entries each directory evict may remove holds. A line that cannot be read
 // is refused, so evict never removes a directory it miscounted.

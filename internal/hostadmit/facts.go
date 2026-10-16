@@ -330,7 +330,12 @@ func parseFacts(out, user string) (Facts, error) {
 			if err1 != nil || err2 != nil || dir == "" {
 				return f, fmt.Errorf("unreadable dir line %q", v)
 			}
+			// ls marks an SELinux context with a trailing dot, which grants
+			// nothing; an ACL's + is kept.
 			mode := fields[n-3]
+			if len(mode) == 11 && mode[10] == '.' {
+				mode = mode[:10]
+			}
 			if mode == "link-above" || mode == "unsafe-above" {
 				f.Dirs[dir] = DirState{Present: true, Unsafe: true, Mode: mode, UID: -1, GID: -1}
 				continue
