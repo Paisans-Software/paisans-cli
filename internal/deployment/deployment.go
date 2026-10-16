@@ -144,10 +144,24 @@ func (d Deployment) WireGuardUnit() string { return "wg-quick@" + d.Interface() 
 // link-local, multicast and the private ranges. Kernel WireGuard sends from
 // no user, so the table's UID match cannot see the mesh's own packets, and
 // the mark is how it sees them. 0x5053 ("PS") above the token: the registry
-// keeps tokens unique on a host, so marks are too.
-func (d Deployment) FwMark() uint32 {
-	n, _ := strconv.ParseUint(d.Token(), 16, 16)
-	return 0x50530000 | uint32(n)
+// keeps tokens unique on a host, so marks are too. A token that is not
+// exactly TokenLength lower-case hex digits has no mark, so no bad token
+// shares token 0000's.
+//
+// The high half 0x5053 and the token in the low half are chosen for Docker
+// hosts. Kubernetes CNIs use overlapping bits (kube-proxy's 0x4000 and
+// 0x8000, Calico's 0xffff0000 mask), so a host running Kubernetes is outside
+// what admit supports.
+func (d Deployment) FwMark() (uint32, error) {
+	t := d.Token()
+	if len(t) != TokenLength || strings.Trim(t, "0123456789abcdef") != "" {
+		return 0, fmt.Errorf("deployment id %q has no token of %d lower-case hex digits to mark with", d.ID, TokenLength)
+	}
+	n, err := strconv.ParseUint(t, 16, 16)
+	if err != nil {
+		return 0, err
+	}
+	return 0x50530000 | uint32(n), nil
 }
 
 // EgressTable is the nftables table, in family inet, that keeps the

@@ -52,6 +52,10 @@ func wgHelperScript(dir string, owner int, d deployment.Deployment, listenPort i
 	if !path.IsAbs(dir) || strings.ContainsAny(dir, "'\n") {
 		return "", fmt.Errorf("the WireGuard helper for %s: %q cannot be its conf directory", iface, dir)
 	}
+	mark, err := d.FwMark()
+	if err != nil {
+		return "", fmt.Errorf("the WireGuard helper for %s: %w", iface, err)
+	}
 	return snippet("snippets/wg-helper.sh.tmpl", wgHelperData{
 		Interface:  iface,
 		Path:       helper,
@@ -62,6 +66,6 @@ func wgHelperScript(dir string, owner int, d deployment.Deployment, listenPort i
 		ListenPort: listenPort,
 		Prefix:     prefix,
 		Owner:      owner,
-		FwMark:     fmt.Sprintf("%#08x", d.FwMark()),
+		FwMark:     fmt.Sprintf("%#08x", mark),
 	})
 }

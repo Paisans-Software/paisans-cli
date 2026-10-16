@@ -103,12 +103,23 @@ func TestFwMark(t *testing.T) {
 		{"ffffc4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01", 0x5053ffff},
 	} {
 		d := deployment.Deployment{ID: c.id}
-		if got := d.FwMark(); got != c.want {
-			t.Errorf("%s: FwMark() = %#x, want %#x", c.id, got, c.want)
+		if got, err := d.FwMark(); err != nil || got != c.want {
+			t.Errorf("%s: FwMark() = %#x, %v, want %#x", c.id, got, err, c.want)
 		}
 	}
 	d := deployment.Deployment{ID: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}
 	if d.EgressTable() != "paisans_f2a9" || d.EgressUnit() != "paisans-f2a9-egress.service" {
 		t.Errorf("EgressTable() = %q, EgressUnit() = %q", d.EgressTable(), d.EgressUnit())
+	}
+}
+
+// A token that is not exactly TokenLength lower-case hex digits has no mark,
+// so it can never share token 0000's.
+func TestFwMarkRefusesABadToken(t *testing.T) {
+	for _, id := range []string{"", "f2a", "zzzz", "F2A9c4e1", "f2a 9", "+2a9c4e1", "0x2a9c4e1"} {
+		d := deployment.Deployment{ID: id}
+		if got, err := d.FwMark(); err == nil {
+			t.Errorf("ID %q: FwMark() = %#x, want an error", id, got)
+		}
 	}
 }
