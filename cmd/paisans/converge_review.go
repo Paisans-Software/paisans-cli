@@ -53,7 +53,8 @@ func convergeReview(r ui.Reporter, cfg *config.Config, o convergeOptions) (map[s
 		}
 		scope.Images = false
 	}
-	sites := cfg.SiteNames()
+	// A down site is not read: its own steps are skipped, its review too.
+	sites := runReady(cfg)
 	reviews := make([]*siteReview, len(sites))
 	errs := make([]error, len(sites))
 	r.Section("review")

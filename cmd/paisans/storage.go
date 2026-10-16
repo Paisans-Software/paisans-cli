@@ -48,6 +48,9 @@ func runStorageAdd(args []string) error {
 	if result.Refused() {
 		return refused(*configPath, len(result.Refusals()), "")
 	}
+	if cfg, err = storageConfig(r, cfg, ""); err != nil {
+		return err
+	}
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
 	}
@@ -112,4 +115,20 @@ func runStorageAdd(args []string) error {
 	reportOwedApplies(r, plan.Owed)
 	r.Result("storage add: every gate passed.")
 	return nil
+}
+
+// storageConfig is the effective topology storage init and storage add lay
+// Garage out on, or why storage waits this run: Garage with fewer ready
+// nodes than its replication, or a Garage node down. Laying it out then
+// would either fail at that node or take a layout the declaration does not
+// hold, so the command refuses. site is storage init's, or empty.
+func storageConfig(r ui.Reporter, cfg *config.Config, site string) (*config.Config, error) {
+	eff, sites, err := effectiveConfig(r, cfg, site)
+	if err != nil {
+		return nil, err
+	}
+	if why := storageWaits(eff, sites); why != "" {
+		return nil, &ui.Problem{Hint: "storage waits until every Garage site is ready", Explain: why + ". Nothing was changed. Run it again once each Garage site's host has admitted this deployment and answers."}
+	}
+	return eff, nil
 }

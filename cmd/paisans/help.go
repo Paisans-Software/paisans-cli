@@ -149,16 +149,18 @@ var helpCommands = []helpCommand{
 		summary: "Take every site from " + config.FileName + " to a running stack.",
 		usage: []string{
 			"paisans apply [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n" +
-				"              [--min-free <size>] [--keep-images] [--execute]",
+				"              [--min-free <size>] [--keep-images] [--require-all] [--execute]",
 			"paisans apply --site <name> [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n" +
 				"              [--ssh <destination>] [--only <stack>]... [--overwrite <path>]...\n" +
-				"              [--recreate <stack>]... [--min-free <size>] [--keep-images] [--execute]",
+				"              [--recreate <stack>]... [--min-free <size>] [--keep-images] [--require-all]\n" +
+				"              [--execute]",
 		},
 		detail: "Without --site: take every site from " + config.FileName + " to a running stack, running init, host prepare, apply, site add, storage and dns init in the order the deployment needs. " +
 			"With --site: compare that site's rendered artifacts with what is on its host and show what would change.\n\n" +
 			"Changes nothing on a host without --execute; without --site, the dry run may add missing generated secrets to the local secrets file, and says so when it does.\n\n" +
 			"Both, and host prepare, review the keys and images " + config.FileName + " grants against what each host last applied; --execute asks for the word approve at a terminal when anything is added or changed, and asks nothing when nothing is.\n\n" +
-			"Before anything changes, every app it starts logs in to its mail server from its site, sending nothing; one that does not log in refuses the apply.",
+			"Before anything changes, every app it starts logs in to its mail server from its site, sending nothing; one that does not log in refuses the apply.\n\n" +
+			"Every run, --site included, classifies every site and runs on the sites it has: a site whose host has not admitted the deployment is left out, a joined site that does not answer is kept with its own steps skipped, and the run ends degraded. --require-all: exit 1 when the run is degraded: a site pending or down.",
 	},
 	{
 		name:    "host prepare",

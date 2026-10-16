@@ -40,6 +40,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/secretsgen"
 	"github.com/paisans-software/paisans-cli/internal/storageadd"
+	"github.com/paisans-software/paisans-cli/internal/topology"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 	"github.com/paisans-software/paisans-cli/internal/validate"
 )
@@ -516,6 +517,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs.Var(&recreate, "recreate", "replace every container of this stack with `up -d --force-recreate`, even if nothing changed (repeatable)")
 	minFree := fs.String("min-free", "3G", "free space Docker's data root must have before a stack pulls an image, Eg: 2G")
 	keepImages := fs.Bool("keep-images", false, "leave the images this apply supersedes on the host, Eg: to keep one to roll back to")
+	mustAll := fs.Bool("require-all", false, "exit 1 when the run is degraded: a site pending or down")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -533,7 +535,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 			return fmt.Errorf("apply: --ssh, --overwrite, --only and --recreate are about one site, and apply without --site converges every site. Name it with --site")
 		}
 		verbose := fs.Lookup("verbose").Value.(flag.Getter).Get().(bool)
-		return runConverge(r, convergeOptions{Config: *configPath, Secrets: *secretsPath, Execute: *execute, Verbose: verbose, KeepImages: *keepImages, MinFree: *minFree, stdin: stdin, stdout: stdout})
+		return runConverge(r, convergeOptions{Config: *configPath, Secrets: *secretsPath, Execute: *execute, Verbose: verbose, KeepImages: *keepImages, MinFree: *minFree, RequireAll: *mustAll, stdin: stdin, stdout: stdout})
 	}
 
 	// The deployment and the version open the apply. As a step of apply
@@ -558,6 +560,17 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	declared, ok := cfg.Sites[*site]
 	if !ok {
 		return fmt.Errorf("apply: %s declares no site %q. Declared sites are %s", *configPath, *site, strings.Join(cfg.SiteNames(), ", "))
+	}
+	// Every apply, --site included, classifies every site, so one site's
+	// files never disagree with another's about who is in the mesh: as a
+	// step of apply without --site, by the run's classification; alone, by
+	// its own. A --site that is pending or down is refused here, before its
+	// host is reached. From here on cfg is the effective topology, and
+	// declaration the configuration as written.
+	declaration := cfg
+	cfg, sites, err := effectiveConfig(r, declaration, *site)
+	if err != nil {
+		return err
 	}
 
 	if *secretsPath == "" {
@@ -596,9 +609,10 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if cfg, err = recordArchitectures(r, *configPath, cfg, read, *execute && reviewedByRun == nil); err != nil {
+	if declaration, err = recordArchitectures(r, *configPath, declaration, read, *execute && reviewedByRun == nil); err != nil {
 		return err
 	}
+	cfg = sites.Effective(declaration)
 	if *execute && reviewedByRun == nil {
 		if _, loaded.Paisans, err = config.LoadWithBytes(*configPath); err != nil {
 			return err
@@ -624,7 +638,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	// As a step of apply without --site (a checkReporter) it leaves the
 	// record and the secrets to the run, which checks them once.
 	if _, step := r.(checkReporter); !step {
-		warnSecrets(r, cfg, secrets, recordForWarnings(r, cfg, applyRecordHosts(cfg, *site, *destination)))
+		warnSecrets(r, declaration, secrets, recordForWarnings(r, cfg, applyRecordHosts(cfg, *site, *destination)))
 		// Every app this apply starts on the site logs in to its mail
 		// server from there first, and a failure refuses before anything
 		// changes. As a step of apply without --site the run tried every
@@ -700,7 +714,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	if clients != nil {
 		clients.confirm = func(what string) error { return confirmWord(stdin, stdout, "create", what) }
 	}
-	options := []apply.Option{apply.Overwrite(overwrite...), apply.Recreate(recreate...), apply.MinFree(needFree), apply.Only(only...)}
+	options := append([]apply.Option{apply.Overwrite(overwrite...), apply.Recreate(recreate...), apply.MinFree(needFree), apply.Only(only...)}, pendingOptions(sites)...)
 	// An app this site shares with others stays on the build they run,
 	// unless the apply plans them all: as a step of apply without --site it
 	// does, and every site resolves through the run's one cache, so none is
@@ -780,7 +794,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	// Either way the plan's notes show, and a later pass's new ones too.
 	noted := map[string]bool{}
 	presentPlan(r, plan, *execute, noted)
-	if err := printLeftovers(r, cfg, *site, host.Inventory, plan); err != nil {
+	if err := printLeftovers(r, declaration, *site, host.Inventory, plan); err != nil {
 		return err
 	}
 
@@ -868,7 +882,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	}); err != nil {
 		return err
 	}
-	if err := recordApplied(r, cfg, *site, func(gw string) registry.Runner {
+	if err := recordApplied(r, declaration, sites, *site, func(gw string) registry.Runner {
 		if gw == *site {
 			return transport
 		}
@@ -888,7 +902,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 			return err
 		}
 	}
-	return siteApplied(r, cfg, *configPath, *site, *destination, written, clients.result())
+	return siteApplied(r, cfg, *configPath, *site, *destination, written, sites, *mustAll, clients.result())
 }
 
 // planningEverySite is set while apply without --site runs, for every
@@ -947,14 +961,26 @@ func readPeers(r ui.Reporter, cfg *config.Config, site string, only []string) ([
 // what the step left. err is the apply's own problem, if it has one. As a
 // step of apply without --site (a checkReporter) it leaves the web server
 // to the run, which does it once every step has run.
-func siteApplied(r ui.Reporter, cfg *config.Config, configPath, site, ssh string, written int, err error) error {
-	if _, step := r.(checkReporter); !step {
+//
+// Alone, with sites pending or down, it ends degraded, and with required
+// (--require-all) that is a failure. As a step, the run says so once, at its
+// end.
+func siteApplied(r ui.Reporter, cfg *config.Config, configPath, site, ssh string, written int, sites *topology.Classification, required bool, err error) error {
+	_, step := r.(checkReporter)
+	if !step {
 		if end, broken := webServerStep(r, cfg, configPath, webServerScope{site: site, ssh: ssh}); end != nil {
 			return webServerEnd(end, broken, err)
 		}
 	}
-	r.Result("Applied %s to %s.", plural(written, "file"), site)
-	return err
+	if step || sites == nil || !sites.Degraded() {
+		r.Result("Applied %s to %s.", plural(written, "file"), site)
+		return err
+	}
+	r.Result("%s. %s applied to %s.", degradedResult(sites), plural(written, "file"), site)
+	if err != nil {
+		return err
+	}
+	return requireAll(sites, required)
 }
 
 // checkStandby is the deployment level gate after an apply that acted on a
@@ -1130,6 +1156,9 @@ func runStorageInit(args []string) error {
 	declared, ok := cfg.Sites[*site]
 	if !ok {
 		return fmt.Errorf("storage init: %s declares no site %q. Declared sites are %s", *configPath, *site, strings.Join(cfg.SiteNames(), ", "))
+	}
+	if cfg, err = storageConfig(r, cfg, *site); err != nil {
+		return err
 	}
 
 	if *secretsPath == "" {
@@ -1530,6 +1559,14 @@ func dnsSetup(name, executeHelp string, args []string, extra ...func(*flag.FlagS
 	}
 	if result.Refused() {
 		return nil, nil, nil, nil, false, refused(*configPath, len(result.Refusals()), "")
+	}
+	// dns init publishes the effective topology's records, so none for a
+	// pending site. dns prune is left on the declaration: it removes, and
+	// a record a run did not publish is not one to take away.
+	if name == "dns init" {
+		if cfg, _, err = effectiveConfig(r, cfg, ""); err != nil {
+			return nil, nil, nil, nil, false, err
+		}
 	}
 	wants, err := dns.Desired(cfg)
 	if err != nil {

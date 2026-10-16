@@ -65,6 +65,10 @@ func TestMain(m *testing.M) {
 		}
 		return rec, nil
 	}
+	// Every run classifies every site: here each host lets the run in and
+	// has admitted the deployment as its site, so every site is ready. A
+	// test about a site missing sets its own (classifyWith).
+	classifyTransports = classifyHosts(nil)
 	// No test spends most of a second on each OAuth2 key it fills: what
 	// they test is that a key is filled, opens with its passphrase and
 	// stays put, and secretsgen's tests hold the key to 4096 bits.

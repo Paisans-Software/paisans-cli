@@ -26,7 +26,7 @@ func siteApply(t *testing.T, path, site string, inside bool) (*ui.Recorder, erro
 	if inside {
 		r = checkReporter{rec, rec, &[]checkReport{}}
 	}
-	return rec, siteApplied(r, cfg, path, site, "", 4, nil)
+	return rec, siteApplied(r, cfg, path, site, "", 4, nil, false, nil)
 }
 
 // Until the owner's copy serves the app, apply --site ends on the full
@@ -123,7 +123,7 @@ func TestApplyRunsTheWebServerStepOnce(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			return siteApplied(reporterOverride, cfg, path, "watch", "", 4, nil)
+			return siteApplied(reporterOverride, cfg, path, "watch", "", 4, nil, false, nil)
 		}
 		return fake(args)
 	}

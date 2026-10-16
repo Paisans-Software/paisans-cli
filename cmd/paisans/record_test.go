@@ -68,7 +68,7 @@ func TestApplyRecordsTheDeploymentOnAGateway(t *testing.T) {
 		t.Fatal(err)
 	}
 	gw := &recordFake{files: map[string]string{}}
-	if err := recordApplied(&ui.Recorder{}, cfg, "vm", func(string) registry.Runner { return gw }); err != nil {
+	if err := recordApplied(&ui.Recorder{}, cfg, nil, "vm", func(string) registry.Runner { return gw }); err != nil {
 		t.Fatal(err)
 	}
 	rec, found, _ := readRecord(gw, cfg.Deployment())
@@ -76,7 +76,7 @@ func TestApplyRecordsTheDeploymentOnAGateway(t *testing.T) {
 		t.Errorf("%+v %v", rec, found)
 	}
 	other := &recordFake{files: map[string]string{}}
-	if err := recordApplied(&ui.Recorder{}, cfg, "home-b", func(string) registry.Runner { return other }); err != nil || len(other.files) != 0 || len(other.ran) != 0 {
+	if err := recordApplied(&ui.Recorder{}, cfg, nil, "home-b", func(string) registry.Runner { return other }); err != nil || len(other.files) != 0 || len(other.ran) != 0 {
 		t.Errorf("a non gateway was written: %v %v", err, other.files)
 	}
 }
@@ -153,7 +153,7 @@ func TestForgetInRecordsReachesGatewaysInAStep(t *testing.T) {
 func TestApplyNamesTheWayOutOfAMalformedRecord(t *testing.T) {
 	cfg, _ := config.Load(fixtureConfig())
 	gw := &recordFake{files: map[string]string{deployrecord.Path(cfg.Deployment()): "{"}}
-	err := recordApplied(&ui.Recorder{}, cfg, "vm", func(string) registry.Runner { return gw })
+	err := recordApplied(&ui.Recorder{}, cfg, nil, "vm", func(string) registry.Runner { return gw })
 	if err == nil || !strings.Contains(err.Error(), "rm "+deployrecord.Path(cfg.Deployment())) || strings.Contains(err.Error(), "run it again") {
 		t.Errorf("err = %v", err)
 	}
@@ -192,7 +192,7 @@ func TestApplyRecordsOnEveryGatewayAndReportsOneDown(t *testing.T) {
 	down := &recordFake{files: map[string]string{}, down: true}
 	rec := &ui.Recorder{}
 	hosts := func(gw string) registry.Runner { return map[string]registry.Runner{"vm": vm, "vm2": down}[gw] }
-	if err := recordApplied(rec, withGateway(cfg, "vm2"), "vm", hosts); err != nil {
+	if err := recordApplied(rec, withGateway(cfg, "vm2"), nil, "vm", hosts); err != nil {
 		t.Fatal(err)
 	}
 	if _, found, _ := readRecord(vm, cfg.Deployment()); !found {
@@ -208,7 +208,7 @@ func TestARecordChangeThatReachedNoGatewaySaysSo(t *testing.T) {
 	cfg, _ := config.Load(fixtureConfig())
 	down := &recordFake{files: map[string]string{}, down: true}
 	rec := &ui.Recorder{}
-	if err := recordApplied(rec, cfg, "vm", func(string) registry.Runner { return down }); err != nil {
+	if err := recordApplied(rec, cfg, nil, "vm", func(string) registry.Runner { return down }); err != nil {
 		t.Fatal(err)
 	}
 	if rec.Has("done", "record the deployment") {

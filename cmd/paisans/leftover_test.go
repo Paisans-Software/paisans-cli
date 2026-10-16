@@ -166,13 +166,36 @@ func infraInventory(cfg *config.Config, pending ...string) *hostcheck.Inventory 
 	}
 }
 
-// The leftover report is read against the view the manifest recorded: the
-// declaration less the sites pending when this site's files were rendered.
-// With the monitor pending, home-a rendered no infra stack, so the one running
-// there is left over; the declaration alone would say it is rendered.
+// heartbeatPlan is home-a's plan under cfg, built over a host with nothing
+// on it.
+func heartbeatPlan(t *testing.T, cfg *config.Config, options ...apply.Option) *apply.Plan {
+	t.Helper()
+	secrets := &config.Secrets{Version: 1}
+	if _, err := secretsgen.Fill(cfg, secrets); err != nil {
+		t.Fatal(err)
+	}
+	rendered, err := render.Build(cfg, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := apply.Build("home-a", rendered, acme.Module(cfg.ACME.Provider), emptyHost{}, options...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return plan
+}
+
+// A partial plan's leftover report is read against the view the manifest
+// recorded: the declaration less the sites pending when this site's files
+// were rendered. With the monitor pending, home-a rendered no infra stack, so
+// the one running there is left over; the declaration alone would say it is
+// rendered.
 func TestLeftoversUseTheManifestsView(t *testing.T) {
 	cfg := heartbeatConfig(t)
-	plan := &apply.Plan{Site: "home-a"}
+	plan := heartbeatPlan(t, cfg, apply.Only("infra"))
+	if plan.Whole() {
+		t.Fatal("the plan is whole")
+	}
 
 	rec := &ui.Recorder{Verbose_: true}
 	if err := printLeftovers(rec, cfg, "home-a", infraInventory(cfg, "home-b"), plan); err != nil {
@@ -188,12 +211,33 @@ func TestLeftoversUseTheManifestsView(t *testing.T) {
 	}
 }
 
+// A whole plan's report is read against this run's view, the pending list
+// it records, not the old manifest's: it is about to write that manifest.
+// With the monitor pending at the last render and ready now, this plan
+// renders infra on home-a, so it is not left over; with the monitor pending
+// now, it is, whatever the old manifest said.
+func TestAWholePlansLeftoversUseThisRunsView(t *testing.T) {
+	cfg := heartbeatConfig(t)
+	rec := &ui.Recorder{Verbose_: true}
+	if err := printLeftovers(rec, cfg, "home-a", infraInventory(cfg, "home-b"), heartbeatPlan(t, cfg)); err != nil || len(rec.Events) != 0 {
+		t.Errorf("ready now, infra is rendered and not left over: %q, %v", rec.Lines(), err)
+	}
+	rec = &ui.Recorder{Verbose_: true}
+	pending := heartbeatPlan(t, cfg.WithoutJoining("home-b"), apply.Pending("home-b"))
+	if err := printLeftovers(rec, cfg, "home-a", infraInventory(cfg), pending); err != nil {
+		t.Fatal(err)
+	}
+	if !warned(rec, "left over: stack infra", "stack infra") {
+		t.Errorf("pending now, infra is not rendered and is left over:\n%s", rec.Lines())
+	}
+}
+
 // A manifest naming its own site as pending does not fail the report: the
 // site is classified against the view without the other sites it names.
 func TestLeftoversIgnoreASiteNamedPendingInItsOwnManifest(t *testing.T) {
 	cfg := heartbeatConfig(t)
 	rec := &ui.Recorder{Verbose_: true}
-	err := printLeftovers(rec, cfg, "home-a", infraInventory(cfg, "home-a", "home-b"), &apply.Plan{Site: "home-a"})
+	err := printLeftovers(rec, cfg, "home-a", infraInventory(cfg, "home-a", "home-b"), heartbeatPlan(t, cfg, apply.Only("infra")))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -24,11 +24,17 @@ func printLeftovers(r ui.Reporter, cfg *config.Config, site string, inv *hostche
 	if inv == nil {
 		return nil
 	}
-	manifest := inv.ManifestFiles
+	// A whole plan is read against this run's view, the sites pending now,
+	// since its files and marks are what it is about to record with that
+	// list in the manifest: read against the old manifest's view, a site
+	// pending then and ready now would make what this plan renders for it
+	// read as left over. A scoped or partial plan records no marks, so the
+	// manifest's marks are read against the view they were made in.
+	manifest, pending := inv.ManifestFiles, inv.ManifestPending
 	if plan.Whole() {
-		manifest = plan.Leftovers
+		manifest, pending = plan.Leftovers, plan.Pending
 	}
-	report, err := classifyLeftovers(cfg, site, inv, manifest)
+	report, err := classifyIn(cfg, site, pending, inv, manifest)
 	if err != nil {
 		return err
 	}
@@ -75,6 +81,12 @@ func removeAdvice(report ownership.Report) []string {
 // manifest that names the site itself among them is read without that name,
 // since the site being classified is, by being classified, not pending.
 func classifyLeftovers(cfg *config.Config, site string, inv *hostcheck.Inventory, manifest []render.ManifestFile) (ownership.Report, error) {
-	pending := slices.DeleteFunc(slices.Clone(inv.ManifestPending), func(s string) bool { return s == site })
+	return classifyIn(cfg, site, inv.ManifestPending, inv, manifest)
+}
+
+// classifyIn classifies a site against the declaration less pending, less
+// the site itself.
+func classifyIn(cfg *config.Config, site string, pending []string, inv *hostcheck.Inventory, manifest []render.ManifestFile) (ownership.Report, error) {
+	pending = slices.DeleteFunc(slices.Clone(pending), func(s string) bool { return s == site })
 	return ownership.Classify(cfg.WithoutJoining(pending...), site, inv, manifest)
 }

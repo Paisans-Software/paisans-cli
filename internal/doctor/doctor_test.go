@@ -639,7 +639,7 @@ func TestASharedGatewaysLossIsEveryHostname(t *testing.T) {
 	vm := cfg.Sites["vm"]
 	vm.Roles = append(vm.Roles, config.RoleMonitor)
 	cfg.Sites["vm"] = vm
-	got := losses(cfg, "vm")
+	got := Losses(cfg, "vm")
 	for _, want := range []string{"its gateway, which every public hostname goes through", "the uptime monitor"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("vm's loss lacks %q: %s", want, got)
@@ -657,7 +657,7 @@ func TestASharedGatewaysLossExceptsAnotherMonitor(t *testing.T) {
 	vm := cfg.Sites["vm"]
 	vm.Roles = append(vm.Roles, config.RoleMonitor)
 	cfg.Sites["vm"] = vm
-	if got := losses(cfg, "vm"); !strings.Contains(got, "every public hostname but the monitor's goes through") {
+	if got := Losses(cfg, "vm"); !strings.Contains(got, "every public hostname but the monitor's goes through") {
 		t.Errorf("vm's loss does not except watch's monitor: %s", got)
 	}
 }

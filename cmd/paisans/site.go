@@ -95,6 +95,11 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	if _, ok := cfg.Sites[site]; !ok {
 		return fmt.Errorf("site add: %s declares no site %q. Declared sites are %s", *configPath, site, strings.Join(cfg.SiteNames(), ", "))
 	}
+	// The site added must be ready, and the rest is joined as the run
+	// sees it: the effective topology, without the sites still pending.
+	if cfg, _, err = effectiveConfig(r, cfg, site); err != nil {
+		return err
+	}
 	// The new site's architecture is recorded as host prepare records it;
 	// preflight compares it with the data sites'.
 	read, err := readArchitectures(r, cfg, []string{site}, func(name string) hostarch.Runner { return transports[name] })

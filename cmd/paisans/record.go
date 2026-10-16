@@ -14,6 +14,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/deployrecord"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/secretsgen"
+	"github.com/paisans-software/paisans-cli/internal/topology"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -135,12 +136,21 @@ func prompt(stdout io.Writer, what, word string) {
 // every gateway, after a gateway's apply: apply only ever adds, so a yaml
 // edited by mistake cannot take a running site's protection away. A gateway
 // it cannot reach is warned about and caught up by the next change.
-func recordApplied(r ui.Reporter, cfg *config.Config, site string, hosts func(string) registry.Runner) error {
+//
+// cfg is the declaration, and sites the run's classification: the record
+// lists the sites of the effective topology, never one still pending. A
+// site recorded before its host admitted the deployment would read as
+// joined, and the next run would take it for down rather than pending.
+func recordApplied(r ui.Reporter, cfg *config.Config, sites *topology.Classification, site string, hosts func(string) registry.Runner) error {
 	if !cfg.Sites[site].Has(config.RoleGateway) {
 		return nil
 	}
+	applied := cfg
+	if sites != nil {
+		applied = sites.Effective(cfg)
+	}
 	s := r.Step("record the deployment")
-	res, err := deployrecord.Update(gatewayHosts(cfg, hosts), cfg.Deployment(), deployrecord.Adding(deployrecord.FromConfig(cfg)), time.Now())
+	res, err := deployrecord.Update(gatewayHosts(cfg, hosts), cfg.Deployment(), deployrecord.Adding(deployrecord.FromConfig(applied)), time.Now())
 	if errors.Is(err, deployrecord.ErrMalformed) {
 		s.Fail(err)
 		return fmt.Errorf("%w. The apply itself finished. What the record held cannot be read, so it is not rewritten: delete it on that gateway with `rm %s`, then apply %s again, which writes it from "+config.FileName, err, deployrecord.Path(cfg.Deployment()), site)
