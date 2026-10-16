@@ -9,6 +9,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/deployrecord"
 	"github.com/paisans-software/paisans-cli/internal/patroni"
 	"github.com/paisans-software/paisans-cli/internal/registry"
@@ -19,8 +20,8 @@ import (
 // its admission record; then what the deployment says has joined, each from
 // the first site holding it that answers: the gateways' deployment record,
 // etcd's membership and Patroni's. The deployment record is Unread when no
-// gateway answered or any gateway's could not be read, and etcd's membership
-// when no record was found and etcd answered only with errors.
+// gateway answered or any gateway's could not be read, and etcd's membership,
+// for etcd's voters, when etcd answered only with errors.
 func Gather(cfg *config.Config, transports map[string]apply.Transport) Evidence {
 	d := cfg.Deployment()
 	ev := Evidence{Login: map[string]error{}, Records: map[string]RecordRead{}, Joined: map[string][]string{}}
@@ -48,6 +49,9 @@ func Gather(cfg *config.Config, transports map[string]apply.Transport) Evidence 
 		return out
 	}
 
+	// A gateway that does not answer is not asked for its record, and its
+	// silence is not counted as unread: Refuse stops any run without every
+	// gateway ready, so a site only its record lists is never dropped.
 	gateways := map[string]registry.Runner{}
 	for _, gw := range answered(cfg.GatewaySites()) {
 		gateways[gw] = transports[gw]
@@ -75,39 +79,42 @@ func Gather(cfg *config.Config, transports map[string]apply.Transport) Evidence 
 		}
 		switch {
 		case len(gateways) == 0:
-			ev.Unread = append(ev.Unread, "the deployment record (no gateway answered)")
+			ev.Unread = append(ev.Unread, Source{Name: "the deployment record (no gateway answered)"})
 		case len(unreadable) > 0:
-			ev.Unread = append(ev.Unread, "the deployment record ("+strings.Join(unreadable, "; ")+")")
+			ev.Unread = append(ev.Unread, Source{Name: "the deployment record (" + strings.Join(unreadable, "; ") + ")"})
 		}
 	}
 
 	// etcd's and Patroni's members are read from the first member that
-	// answers; one that answers nowhere adds nothing. With no deployment
-	// record found, etcd is the evidence of a site a first apply joined
-	// before the gateway recorded it, since the data sites and the witness
-	// are applied before the gateway: an etcd that answered only with errors
-	// is then unread.
+	// answers; one that answers nowhere adds nothing. A member whose etcd
+	// errors is read again from its founding record, as apply reads a
+	// founding member alone, whose `member list` hangs until a second
+	// member joins: a member founded `new` belongs to the cluster its
+	// --initial-cluster names, so those are listed as joined. An etcd that
+	// answered only with errors is unread for the sites it could list, its
+	// voters, whether or not a deployment record was found: the record is
+	// written when a gateway is applied, after the data sites, so it lags
+	// what etcd lists.
 	var etcdFailed []string
+	membership := false
 	for _, m := range answered(cfg.Etcd.Members) {
 		list, running, err := apply.ReadEtcdMembers(transports[m], d)
 		if err != nil {
 			etcdFailed = append(etcdFailed, m+": "+err.Error())
+			if founders, ok := founding(transports[m], d); ok {
+				ev.Joined["etcd's founding record on "+m] = memberSites(cfg, founders)
+			}
 			continue
 		}
 		if !running {
 			continue
 		}
-		var sites []string
-		for _, em := range list {
-			sites = append(sites, apply.EtcdMemberSite(cfg, em))
-		}
-		ev.Joined["etcd's membership"] = sites
+		ev.Joined["etcd's membership"] = memberSites(cfg, list)
+		membership = true
 		break
 	}
-	_, recorded := ev.Joined["the deployment record"]
-	_, membership := ev.Joined["etcd's membership"]
-	if !recorded && !membership && len(etcdFailed) > 0 {
-		ev.Unread = append(ev.Unread, "etcd's membership ("+strings.Join(etcdFailed, "; ")+")")
+	if !membership && len(etcdFailed) > 0 {
+		ev.Unread = append(ev.Unread, Source{Name: "etcd's membership (" + strings.Join(etcdFailed, "; ") + ")", Sites: slices.Clone(cfg.Etcd.Members)})
 	}
 
 	for _, s := range answered(cfg.Cluster.Sites) {
@@ -129,4 +136,23 @@ func Gather(cfg *config.Config, transports map[string]apply.Transport) Evidence 
 		break
 	}
 	return ev
+}
+
+// founding is the members a host's etcd record says it was founded with,
+// when it was founded `new`; false for anything else.
+func founding(t apply.Transport, d deployment.Deployment) ([]apply.EtcdMember, bool) {
+	in, found, err := apply.ReadEtcdInitial(t, d)
+	if err != nil || !found || in.State != render.EtcdStateNew {
+		return nil, false
+	}
+	return apply.EtcdInitialMembers(in)
+}
+
+// memberSites names the site each etcd member runs on.
+func memberSites(cfg *config.Config, members []apply.EtcdMember) []string {
+	var sites []string
+	for _, em := range members {
+		sites = append(sites, apply.EtcdMemberSite(cfg, em))
+	}
+	return sites
 }

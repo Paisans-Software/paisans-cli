@@ -112,7 +112,7 @@ func TestUnreadableEvidenceNeverMakesAJoinedSitePending(t *testing.T) {
 	ev := everyoneAnswers(t, cfg)
 	ev.Login["home-c"] = timedOut
 	delete(ev.Records, "home-c")
-	ev.Unread = []string{"the deployment record (no gateway answered)"}
+	ev.Unread = []topology.Source{{Name: "the deployment record (no gateway answered)"}}
 	if _, err := topology.Classify(cfg, ev); err == nil || !strings.Contains(err.Error(), "the deployment record") {
 		t.Errorf("got %v", err)
 	}
@@ -126,9 +126,35 @@ func TestUnreadableEvidenceNeverMakesAJoinedSitePending(t *testing.T) {
 	// evicted it and kept the user, is as unknown while the record is unread.
 	ev = everyoneAnswers(t, cfg)
 	ev.Records["home-c"] = topology.RecordRead{Err: admission.ErrNotAdmitted}
-	ev.Unread = []string{"the deployment record (home-a: reading deployed.json: permission denied)"}
-	if _, err := topology.Classify(cfg, ev); err == nil || !strings.Contains(err.Error(), "the deployment record") {
+	ev.Unread = []topology.Source{{Name: "the deployment record (home-a: reading deployed.json: permission denied)"}}
+	_, err = topology.Classify(cfg, ev)
+	if err == nil || !strings.Contains(err.Error(), "the deployment record") {
 		t.Errorf("answering, not admitted, record unread: %v", err)
+	}
+	lowerCase(t, err)
+}
+
+// An unread source holds back only the sites it could have listed: etcd's
+// membership lists only etcd's voters, so while it is unread a voter nothing
+// lists refuses, and a site that is no voter is still pending.
+func TestUnreadEvidenceHoldsBackOnlyTheSitesItCouldList(t *testing.T) {
+	cfg := fixture(t)
+	etcd := topology.Source{Name: "etcd's membership (home-b: context deadline exceeded)", Sites: cfg.Etcd.Members}
+	if slices.Contains(cfg.Etcd.Members, "status") || !slices.Contains(cfg.Etcd.Members, "home-c") {
+		t.Fatalf("the fixture's etcd members %v", cfg.Etcd.Members)
+	}
+	ev := everyoneAnswers(t, cfg)
+	ev.Login["status"] = refused
+	delete(ev.Records, "status")
+	ev.Unread = []topology.Source{etcd}
+	c, err := topology.Classify(cfg, ev)
+	if err != nil || c.Sites["status"].Class != topology.Pending {
+		t.Errorf("a site etcd could never list: %+v %v", c, err)
+	}
+	ev.Records["home-c"] = topology.RecordRead{Err: admission.ErrNotAdmitted}
+	_, err = topology.Classify(cfg, ev)
+	if err == nil || !strings.Contains(err.Error(), "home-c") || !strings.Contains(err.Error(), "etcd's membership") {
+		t.Errorf("a voter nothing lists, etcd unread: %v", err)
 	}
 	lowerCase(t, err)
 }

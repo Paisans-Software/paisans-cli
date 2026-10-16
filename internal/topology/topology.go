@@ -69,10 +69,19 @@ type Evidence struct {
 	// Joined is each source of evidence that was read, by name, and the
 	// sites it lists as part of the deployment.
 	Joined map[string][]string
-	// Unread names each source that could not be read, and why.
-	Unread []string
+	// Unread is each source that could not be read, with why in its name,
+	// and the sites it could have listed.
+	Unread []Source
 	// DeployedApps is the apps the deployment record lists as deployed.
 	DeployedApps []string
+}
+
+// Source is a source of evidence that could not be read. Sites is the
+// sites it could have listed, nil for one that can list any declared site:
+// only those sites are held back by its silence.
+type Source struct {
+	Name  string
+	Sites []string
 }
 
 // Classification is the run's view of its sites.
@@ -105,12 +114,19 @@ func Classify(cfg *config.Config, ev Evidence) (*Classification, error) {
 		}
 	}
 	// pending is the one way a site becomes pending: nothing that was read
-	// lists it. While a source could not be read, that silence is not
-	// evidence, so the run stops rather than drop a site that may have
-	// joined.
+	// lists it. While a source that could have listed it could not be read,
+	// that silence is not evidence, so the run stops rather than drop a site
+	// that may have joined. A source that could never list the site, etcd
+	// for a site that is no voter, holds nothing back.
 	pending := func(name, why string) error {
-		if len(ev.Unread) > 0 {
-			return fmt.Errorf("%s, and whether it has joined the deployment cannot be told: %s could not be read. A joined site left out of the mesh and the cluster would be cut off from them, so the run stops. Run it again once it can be read", why, strings.Join(ev.Unread, ", and "))
+		var unread []string
+		for _, src := range ev.Unread {
+			if src.Sites == nil || slices.Contains(src.Sites, name) {
+				unread = append(unread, src.Name)
+			}
+		}
+		if len(unread) > 0 {
+			return fmt.Errorf("%s, and whether it has joined the deployment cannot be told: %s could not be read. A joined site left out of the mesh and the cluster would be cut off from them, so the run stops. Run it again once it can be read", why, strings.Join(unread, ", and "))
 		}
 		c.Sites[name] = Site{Name: name, Class: Pending, Why: why}
 		return nil

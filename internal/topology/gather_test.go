@@ -11,6 +11,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployrecord"
+	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/topology"
 )
 
@@ -125,7 +126,7 @@ func TestGatherReadsEachSourceFromTheFirstThatAnswers(t *testing.T) {
 			t.Errorf("%s was asked for etcd's members after %s answered", name, second)
 		}
 	}
-	if len(ev.Unread) != 1 || !strings.Contains(ev.Unread[0], "the deployment record") {
+	if len(ev.Unread) != 1 || !strings.Contains(ev.Unread[0].Name, "the deployment record") || ev.Unread[0].Sites != nil {
 		t.Errorf("with every gateway refusing, unread %v", ev.Unread)
 	}
 	if _, ok := ev.Joined["the deployment record"]; ok {
@@ -152,12 +153,23 @@ func TestGatherReadsEachSourceFromTheFirstThatAnswers(t *testing.T) {
 	}
 }
 
-// hostsFor is a fake host per site of cfg, each answering etcd's member
-// list, and transports is the same hosts as apply.Transport.
-func hostsFor(cfg *config.Config) map[string]*fakeHost {
+// hostsFor is a fake host per site of cfg, each admitting the deployment
+// with a record that covers it and answering etcd's member list, and
+// transports is the same hosts as apply.Transport.
+func hostsFor(t *testing.T, cfg *config.Config) map[string]*fakeHost {
+	t.Helper()
+	path, err := admission.Path(cfg.Deployment().Token())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev := everyoneAnswers(t, cfg)
 	out := map[string]*fakeHost{}
 	for _, name := range cfg.SiteNames() {
-		out[name] = &fakeHost{answers: map[string]string{"member list -w json": memberList}, fail: map[string]error{}, files: map[string]string{}, readErr: map[string]error{}}
+		data, err := admission.EncodeRecord(ev.Records[name].Record)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[name] = &fakeHost{answers: map[string]string{"member list -w json": memberList}, fail: map[string]error{}, files: map[string]string{path: string(data)}, readErr: map[string]error{}}
 	}
 	return out
 }
@@ -177,10 +189,10 @@ func TestGatherAnUnreadableRecordIsUnread(t *testing.T) {
 	cfg := fixture(t)
 	d := cfg.Deployment()
 	gw := cfg.GatewaySites()[0]
-	hs := hostsFor(cfg)
+	hs := hostsFor(t, cfg)
 	hs[gw].readErr[deployrecord.Path(d)] = errors.New("permission denied")
 	ev := topology.Gather(cfg, transportsOf(hs))
-	if len(ev.Unread) == 0 || !strings.Contains(ev.Unread[0], "the deployment record") || !strings.Contains(ev.Unread[0], "permission denied") {
+	if len(ev.Unread) == 0 || !strings.Contains(ev.Unread[0].Name, "the deployment record") || !strings.Contains(ev.Unread[0].Name, "permission denied") {
 		t.Errorf("one gateway, its record unreadable: unread %v", ev.Unread)
 	}
 
@@ -191,41 +203,105 @@ func TestGatherAnUnreadableRecordIsUnread(t *testing.T) {
 	if !slices.Equal(cfg.GatewaySites(), []string{gw, second}) {
 		t.Fatalf("gateways %v", cfg.GatewaySites())
 	}
-	hs = hostsFor(cfg)
+	hs = hostsFor(t, cfg)
 	hs[gw].files[deployrecord.Path(d)] = deployrecord.Encode(deployrecord.Record{Version: deployrecord.Version, Sites: []string{"home-a"}})
 	hs[second].readErr[deployrecord.Path(d)] = errors.New("permission denied")
 	ev = topology.Gather(cfg, transportsOf(hs))
-	if len(ev.Unread) == 0 || !strings.Contains(strings.Join(ev.Unread, " "), second) {
+	if len(ev.Unread) == 0 || !strings.Contains(ev.Unread[0].Name, second) {
 		t.Errorf("one record found, one unreadable: unread %v, joined %v", ev.Unread, ev.Joined)
 	}
 }
 
-// With no deployment record anywhere, etcd is the evidence of a site a
-// first apply joined before the gateway recorded it: etcd answering with an
-// error on every member is unread. With a record found, the record decides.
-func TestGatherAFailedEtcdReadIsUnreadWithoutARecord(t *testing.T) {
+// etcd answering with an error on every member is unread, for the sites
+// it could list, whether or not a deployment record was found: the record
+// is written when a gateway is applied, after the data sites, so it lags
+// what etcd lists.
+func TestGatherAFailedEtcdReadIsUnread(t *testing.T) {
 	cfg := fixture(t)
 	d := cfg.Deployment()
-	hs := hostsFor(cfg)
+	hs := hostsFor(t, cfg)
 	for _, h := range hs {
 		h.fail["member list -w json"] = errors.New("context deadline exceeded")
 	}
-	ev := topology.Gather(cfg, transportsOf(hs))
-	if !slices.ContainsFunc(ev.Unread, func(u string) bool { return strings.Contains(u, "etcd's membership") }) {
-		t.Errorf("no record, etcd failing: unread %v", ev.Unread)
+	etcdUnread := func(ev topology.Evidence) bool {
+		return slices.ContainsFunc(ev.Unread, func(u topology.Source) bool {
+			return strings.Contains(u.Name, "etcd's membership") && slices.Equal(u.Sites, cfg.Etcd.Members)
+		})
 	}
-
+	ev := topology.Gather(cfg, transportsOf(hs))
+	if !etcdUnread(ev) {
+		t.Errorf("no record, etcd failing: unread %+v", ev.Unread)
+	}
 	hs[cfg.GatewaySites()[0]].files[deployrecord.Path(d)] = deployrecord.Encode(deployrecord.Record{Version: deployrecord.Version, Sites: []string{"home-a"}})
 	ev = topology.Gather(cfg, transportsOf(hs))
-	if len(ev.Unread) != 0 {
-		t.Errorf("a record found, etcd failing: unread %v", ev.Unread)
+	if !etcdUnread(ev) {
+		t.Errorf("a record found, etcd failing: unread %+v", ev.Unread)
+	}
+}
+
+// Review Focus, with a record that lags etcd: the record lists every site
+// but home-c, which etcd would list, etcd errors on every member, and home-c
+// does not answer. The run refuses rather than take home-c for pending.
+func TestALaggingRecordWithEtcdUnreadRefuses(t *testing.T) {
+	cfg := fixture(t)
+	d := cfg.Deployment()
+	hs := hostsFor(t, cfg)
+	for _, h := range hs {
+		h.fail["member list -w json"] = errors.New("context deadline exceeded")
+	}
+	var sites []string
+	for _, name := range cfg.SiteNames() {
+		if name != "home-c" {
+			sites = append(sites, name)
+		}
+	}
+	hs[cfg.GatewaySites()[0]].files[deployrecord.Path(d)] = deployrecord.Encode(deployrecord.Record{Version: deployrecord.Version, Sites: sites})
+	hs["home-c"].login = refused
+	_, err := topology.Classify(cfg, topology.Gather(cfg, transportsOf(hs)))
+	if err == nil || !strings.Contains(err.Error(), "home-c") || !strings.Contains(err.Error(), "etcd's membership") {
+		t.Errorf("got %v", err)
+	}
+}
+
+// A first apply that founded one etcd member and stopped: that member's
+// `member list` hangs until a second joins, and the others run no etcd. Its
+// founding record lists it as joined; sites etcd could never list are still
+// pending, and a voter nothing lists refuses.
+func TestGatherAFoundingMemberAlone(t *testing.T) {
+	cfg := fixture(t)
+	d := cfg.Deployment()
+	hs := hostsFor(t, cfg)
+	for name, h := range hs {
+		h.answers["member list -w json"] = "__PAISANS_NO_ETCD__"
+		if name == "home-b" {
+			h.fail["member list -w json"] = errors.New("context deadline exceeded")
+			h.files["/"+render.EtcdInitialPath(d)] = render.FormatEtcdInitial(render.EtcdInitial{State: render.EtcdStateNew, Cluster: "home-b=http://10.44.0.2:2380"})
+		}
+	}
+	hs["status"].login = refused
+	ev := topology.Gather(cfg, transportsOf(hs))
+	listed := false
+	for _, sites := range ev.Joined {
+		listed = listed || slices.Contains(sites, "home-b")
+	}
+	if !listed {
+		t.Errorf("the founding member is not listed: joined %v", ev.Joined)
+	}
+	c, err := topology.Classify(cfg, ev)
+	if err != nil || c.Sites["status"].Class != topology.Pending {
+		t.Errorf("a site etcd could never list: %+v %v", c, err)
+	}
+	hs["home-c"].login = refused
+	_, err = topology.Classify(cfg, topology.Gather(cfg, transportsOf(hs)))
+	if err == nil || !strings.Contains(err.Error(), "home-c") {
+		t.Errorf("a voter nothing lists: %v", err)
 	}
 }
 
 // Patroni's members are read from the first cluster site that answers.
 func TestGatherReadsPatronisMembers(t *testing.T) {
 	cfg := fixture(t)
-	hs := hostsFor(cfg)
+	hs := hostsFor(t, cfg)
 	first := cfg.Cluster.Sites[0]
 	hs[first].login = refused
 	second := cfg.Cluster.Sites[1]
