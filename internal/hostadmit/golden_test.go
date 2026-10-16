@@ -49,24 +49,32 @@ func runGolden(t *testing.T, cases []goldenCase) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			got, _ := golden(t, c)
-			path := filepath.Join("testdata", "plans", c.name+".txt")
-			if *update {
-				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
-					t.Fatal(err)
-				}
-				return
-			}
-			want, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("%v (run go test ./internal/hostadmit/ -update, then read the file)", err)
-			}
-			if got != string(want) {
-				t.Errorf("%s differs from what admit plans now:\n%s", path, diff(string(want), got))
-			}
+			checkGoldenText(t, c.name, got)
 		})
+	}
+}
+
+// checkGoldenText compares got with testdata/plans/<name>.txt, or writes
+// it there under -update: runGolden's comparison, for a text a test built
+// by hand.
+func checkGoldenText(t *testing.T, name, got string) {
+	t.Helper()
+	path := filepath.Join("testdata", "plans", name+".txt")
+	if *update {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("%v (run go test ./internal/hostadmit/ -update, then read the file)", err)
+	}
+	if got != string(want) {
+		t.Errorf("%s differs from what admit plans now:\n%s", path, diff(string(want), got))
 	}
 }
 

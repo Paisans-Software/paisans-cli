@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/hostadmit"
+	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -35,14 +36,9 @@ const (
 		"[Unit]\nWants=wg-quick@psns-f2a9.service\nAfter=wg-quick@psns-f2a9.service\n"
 )
 
-// admittedUser is a host where admit has made paisans-f2a9 and written both
-// drop-ins, its manager running under linger, its egress table and ufw
-// rules in place, and its rootless daemon running with admit's
-// daemon.json: a re-run changes nothing.
-func admittedUser() *fakeHost {
-	return daemonInstalled(helperInstalled(egressAdmitted("")().withAdmitRules(), "vm").withDir("/srv/paisans", "drwxr-xr-x", 0, 0).withDir("/srv/paisans/f2a9", "drwxr-x---", 1001, 1001).
-		withFile(delegatePath, delegateConf, "644", 0).withFile(meshPath, meshConf, "644", 0))
-}
+// admittedUser is vm's host once admit has run there, every part of it
+// (admittedHost): a re-run changes nothing.
+func admittedUser() *fakeHost { return admittedHost(requestFor("vm"), hostadmit.Flags{}) }
 
 var userCases = addCases(
 	goldenCase{name: "user-fresh", host: current, site: "vm"},
@@ -218,7 +214,11 @@ func TestTheMeshDropInWaitsForTheUser(t *testing.T) {
 // runs the user's steps with the UID useradd gave it, as approved.
 func TestExecuteRunsTheUsersStepsWithItsUID(t *testing.T) {
 	h := current()
+	in := input(t, "vm", hostadmit.Flags{})
 	h.onRun = func(h *fakeHost, command string) {
+		if strings.Contains(command, registry.LockPath) {
+			h.file(registry.Path, registryOf(in.Request))
+		}
 		if strings.HasPrefix(command, "useradd ") {
 			h.with("passwd", "paisans-f2a9:x:1001:1001::/home/paisans-f2a9:/bin/bash").with("home", "dir 1001 /home/paisans-f2a9").
 				with("groups", "paisans-f2a9").with("group", "paisans-f2a9").
@@ -226,7 +226,6 @@ func TestExecuteRunsTheUsersStepsWithItsUID(t *testing.T) {
 				add("subuid", "paisans-f2a9:165536:65536").add("subgid", "paisans-f2a9:165536:65536")
 		}
 	}
-	in := input(t, "vm", hostadmit.Flags{})
 	plan, err := hostadmit.Build(h, in)
 	if err != nil {
 		t.Fatal(err)

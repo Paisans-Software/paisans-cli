@@ -119,7 +119,7 @@ var daemonCases = addCases(
 	}},
 	goldenCase{name: "daemon-running-with-containers", site: "vm", host: func() *fakeHost { return running(home(), 3) }},
 	goldenCase{name: "daemon-running-idle", site: "vm", host: func() *fakeHost { return running(home(), 0) }},
-	goldenCase{name: "daemon-installed-unchanged", site: "vm", host: func() *fakeHost { return daemonInstalled(home()) }},
+	goldenCase{name: "daemon-installed-unchanged", site: "home-b", flags: dataSite, host: func() *fakeHost { return admittedHost(requestFor("home-b"), dataSite) }},
 )
 
 func TestDaemonPlans(t *testing.T) { runGolden(t, daemonCases) }

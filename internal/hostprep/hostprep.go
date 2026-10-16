@@ -202,7 +202,8 @@ type Profile interface {
 	// runs rootless: with Docker absent, Docker's repository and packages
 	// with its rootless extras; with Docker present, the extras alone,
 	// never upgrading a package already installed; in both, uidmap,
-	// nftables and the base packages. dockerPresent is admit's own
+	// nftables and the base packages but the firewall, which admit needs
+	// installed and active already. dockerPresent is admit's own
 	// judgement, made from the engine's version.
 	AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (Section, error)
 	// Services plans enabling and starting what Packages installed.
@@ -224,8 +225,10 @@ type Profile interface {
 	// is told apart by the owner tag of deployment d in each rule's comment,
 	// so a rule another deployment added is as foreign as an operator's.
 	// hostWide is false on a shared host, where the default policy and
-	// whether the firewall is on decide other people's traffic too.
-	Firewall(t Transport, d deployment.Deployment, rules []Rule, hostWide bool) (Section, error)
+	// whether the firewall is on decide other people's traffic too. by is
+	// the command planning, host prepare or host admit, which the plan's
+	// messages name.
+	Firewall(t Transport, d deployment.Deployment, rules []Rule, hostWide bool, by string) (Section, error)
 }
 
 var registry []Profile
@@ -355,7 +358,7 @@ func Build(site string, cfg *config.Config, t Transport, opts ...Option) (*Plan,
 			})
 		}
 	}
-	firewall, err := profile.Firewall(t, d, rules, !o.shared)
+	firewall, err := profile.Firewall(t, d, rules, !o.shared, "host prepare")
 	if err != nil {
 		return nil, fmt.Errorf("firewall on %s: %w", t.Describe(), err)
 	}

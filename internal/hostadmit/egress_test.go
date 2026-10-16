@@ -58,7 +58,9 @@ var egressCases = addCases(
 		return home().file("/etc/resolv.conf", "nameserver 192.168.1.1\nnameserver fd00::1\nnameserver fe80::1%eth0\nnameserver 192.168.1.1\n")
 	}},
 	goldenCase{name: "egress-no-resolver", site: "vm", host: func() *fakeHost { return home().file("/etc/resolv.conf", "options edns0\n") }},
-	goldenCase{name: "egress-admitted", host: egressAdmitted(""), site: "vm"},
+	goldenCase{name: "egress-admitted", site: "vm", flags: hostadmit.Flags{MeshLAN: true}, host: func() *fakeHost {
+		return admittedHost(requestFor("vm"), hostadmit.Flags{MeshLAN: true})
+	}},
 	goldenCase{name: "egress-table-changed", host: egressAdmitted("table inet paisans_f2a9 {}\n"), site: "vm"},
 	goldenCase{name: "egress-table-unloaded", site: "vm", host: func() *fakeHost { return egressAdmitted("")().with("egress-table", "absent") }},
 	goldenCase{name: "egress-mesh-lan-added", site: "vm", flags: hostadmit.Flags{MeshLAN: true}, host: egressAdmitted("")},

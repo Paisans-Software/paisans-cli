@@ -182,7 +182,7 @@ type part struct {
 // profile. Each is added by the task that writes it, at the place its
 // comment names.
 var parts = []part{
-	// 1. claim
+	{"claim", planClaim}, // 1
 	{"docker", planDocker},
 	{"apparmor", planAppArmor},
 	// 4. user
@@ -204,9 +204,9 @@ var parts = []part{
 	{"watchdog", planWatchdogGrant},             // 13
 	{"sysctls", planSysctls},                    // 14
 	{"web server", planWebServer},               // 14a
-	// 15. record
-	// 16. keys
-	// 17. check
+	{"record", planRecord},                      // 15
+	{"keys", planKeys},                          // 16
+	// 17. the check, CheckUser, runs after Execute, on both paths.
 }
 
 // Build reads the host t reaches and plans admitting in.Request there. A

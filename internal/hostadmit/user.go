@@ -42,8 +42,16 @@ func asUser(p *planner, command string) string {
 	if home == "" {
 		home = "/home/" + p.in.Request.User
 	}
-	uid := uidOf(p)
-	return "runuser -u " + p.in.Request.User + " -- env -i HOME=" + apply.ShellQuote(home) +
+	return userCommand(p.in.Request.User, apply.ShellQuote(home), uidOf(p), command)
+}
+
+// userCommand is the one builder of a command run as user: runuser, then
+// env -i with the user's own HOME, PATH, runtime directory, bus and Docker
+// socket, then sh -c with command. home and uid are shell words as they
+// are: a quoted path and a number from the probe, or, where nothing was
+// probed, words that read them on the host when the command runs.
+func userCommand(user, home, uid, command string) string {
+	return "runuser -u " + user + " -- env -i HOME=" + home +
 		" PATH=/usr/bin:/bin:/usr/sbin:/sbin XDG_RUNTIME_DIR=/run/user/" + uid +
 		" DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/" + uid + "/bus" +
 		" DOCKER_HOST=unix:///run/user/" + uid + "/docker.sock sh -c " + apply.ShellQuote(command)

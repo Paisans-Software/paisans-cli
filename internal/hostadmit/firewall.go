@@ -35,7 +35,7 @@ func planFirewall(p *planner) error {
 		}
 		p.present("public ports: nothing else answers on 80 or 443")
 	}
-	s, err := p.profile.Firewall(p.t, p.d, hostprep.AdmitRules(p.d, req.SSHPort, req.ListenPort, p.in.Flags.PublicPorts), false)
+	s, err := p.profile.Firewall(p.t, p.d, hostprep.AdmitRules(p.d, req.SSHPort, req.ListenPort, p.in.Flags.PublicPorts), false, "host admit")
 	if err != nil {
 		return err
 	}

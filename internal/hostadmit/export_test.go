@@ -15,3 +15,7 @@ func RecordOf(t apply.Transport, in Input) (admission.Record, error) {
 	}
 	return p.record, nil
 }
+
+// KeysCommand is the keys step's command for user, whose home is home,
+// with its UID read on the host when it runs.
+var KeysCommand = keysCommand

@@ -1,11 +1,11 @@
 admit site vm of f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01 as paisans-f2a9 on fake (ubuntu 24.04)
 
+present: registry: this host is claimed for deployment f2a9
 present: docker: Engine 29.9.1
 present: package: docker-ce-rootless-extras installed
 present: package: uidmap installed
 present: package: nftables installed
 present: package: wireguard-tools installed
-present: package: ufw installed
 present: package: git installed
 present: apparmor: rootlesskit's profile is loaded
 present: user: paisans-f2a9 exists, uid 1001, in no privileged group, and sudo grants it nothing beyond admit's helper
@@ -34,3 +34,5 @@ present: firewall: 51820/udp allowed
 present: firewall: all inbound on psns-f2a9 allowed
 present: firewall: ufw active, its default policy left to the owner
 present: forwarding: not needed, this site has no endpoint
+present: record: /etc/paisans/admitted.f2a9.json as admitted at 2026-10-15T12:00:00Z
+present: keys: every operator's key is in paisans-f2a9's authorized_keys

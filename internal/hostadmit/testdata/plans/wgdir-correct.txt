@@ -1,6 +1,78 @@
 admit site vm of f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01 as paisans-f2a9 on fake (ubuntu 24.04)
 
-step 1: start paisans-f2a9's manager after the mesh
+step 1: claim the host
+  registry: record deployment f2a9 in /var/lib/paisans/registry.json, so no other deployment here takes its token, directory, interface, port, subnet or roles (witness)
+  run:
+    $ set -e; umask 077; mkdir -p /var/lib/paisans; chmod 711 /var/lib/paisans; exec 9>>/var/lib/paisans/registry.lock; flock -w 60 9 || { echo 'paisans: another command holds /var/lib/paisans/registry.lock'; exit 1; }; tmp=$(mktemp /var/lib/paisans/.registry.XXXXXX); trap 'rm -f "$tmp"' EXIT; src=/var/lib/paisans/registry.json; [ -f "$src" ] || src=/dev/null; awk '-v' 'id=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01' '-v' 'token=f2a9' '-v' 'root=/srv/paisans/f2a9' '-v' 'iface=psns-f2a9' '-v' 'port=51820' '-v' 'subnet=10.44.0.0/24' '-v' 'roles=witness' '-v' 'site=vm' '-v' 'address=10.44.0.3' '-v' 'entry="f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01":{"token":"f2a9","root":"/srv/paisans/f2a9","domain":"","site":"vm","claimed_at":"2026-10-15T12:00:00Z","interface":"psns-f2a9","listen_port":51820,"subnet":"10.44.0.0/24","address":"10.44.0.3","roles":"witness"}' '-v' 'header={"version":1,"deployments":{' '-v' 'footer=}}' '-v' 'marker=paisans-registry-conflict ' '-v' 'unreadable=paisans-registry-unreadable' '
+    $ function str(line, name,   key, i, rest) {
+    $ 	key = "\"" name "\":\""
+    $ 	i = index(line, key)
+    $ 	if (!i) return ""
+    $ 	rest = substr(line, i + length(key))
+    $ 	return substr(rest, 1, index(rest, "\"") - 1)
+    $ }
+    $ function num(line, name,   key, i, rest) {
+    $ 	key = "\"" name "\":"
+    $ 	i = index(line, key)
+    $ 	if (!i) return ""
+    $ 	rest = substr(line, i + length(key))
+    $ 	if (!match(rest, /^[0-9]+/)) return ""
+    $ 	return substr(rest, 1, RLENGTH)
+    $ }
+    $ function hasrole(list, r) {
+    $ 	return list != "" && index("," list ",", "," r ",") > 0
+    $ }
+    $ function ipnum(a,   p) {
+    $ 	split(a, p, ".")
+    $ 	return ((p[1] * 256 + p[2]) * 256 + p[3]) * 256 + p[4]
+    $ }
+    $ function overlaps(a, b,   pa, pb, la, lb, sa, sb) {
+    $ 	if (a == "" || b == "") return 0
+    $ 	split(a, pa, "/"); split(b, pb, "/")
+    $ 	la = 2 ^ (32 - pa[2]); lb = 2 ^ (32 - pb[2])
+    $ 	sa = ipnum(pa[1]); sa -= sa % la
+    $ 	sb = ipnum(pb[1]); sb -= sb % lb
+    $ 	return sa < sb + lb && sb < sa + la
+    $ }
+    $ NR == 1 { if ($0 != header) bad = 1; next }
+    $ done { if ($0 != "") bad = 1; next }
+    $ $0 == footer { done = 1; next }
+    $ {
+    $ 	line = $0
+    $ 	sub(/,$/, "", line)
+    $ 	if (line !~ /^"[^"]+":\{.*\}$/) { bad = 1; next }
+    $ 	key = substr(line, 2, index(line, "\":") - 2)
+    $ 	if (key == id) {
+    $ 		s = str(line, "site"); a = str(line, "address")
+    $ 		if ((s != "" && site != "") ? (s != site) : (a != "" && address != "" && a != address)) {
+    $ 			print marker line > "/dev/stderr"
+    $ 			conflict = 1
+    $ 		}
+    $ 		next
+    $ 	}
+    $ 	if (index(line, "\"token\":\"" token "\"") || index(line, "\"root\":\"" root "\"") ||
+    $ 		str(line, "interface") == iface ||
+    $ 		(port != "" && port != "0" && num(line, "listen_port") == port) ||
+    $ 		(subnet != "" && overlaps(subnet, str(line, "subnet"))) ||
+    $ 		(hasrole(roles, "gateway") && hasrole(str(line, "roles"), "gateway")) ||
+    $ 		(hasrole(roles, "data") && hasrole(str(line, "roles"), "data"))) {
+    $ 		print marker line > "/dev/stderr"
+    $ 		conflict = 1
+    $ 	}
+    $ 	kept[++n] = line
+    $ }
+    $ END {
+    $ 	if (NR > 0 && !done) bad = 1
+    $ 	if (bad) { print unreadable > "/dev/stderr"; exit 4 }
+    $ 	if (conflict) exit 3
+    $ 	print header
+    $ 	for (i = 1; i <= n; i++) print kept[i] ","
+    $ 	print entry
+    $ 	print footer
+    $ }
+    $ ' "$src" > "$tmp"; chmod 600 "$tmp"; mv "$tmp" /var/lib/paisans/registry.json
+
+step 2: start paisans-f2a9's manager after the mesh
   user: order user@1001.service after wg-quick@psns-f2a9 at boot, so a container that publishes on the mesh address finds it; a manager running now is not restarted, and takes it at its next start
   write /etc/systemd/system/user@1001.service.d/paisans-mesh.conf mode 0644:
     | # Written by paisans host admit for deployment f2a9; paisans host evict
@@ -12,7 +84,7 @@ step 1: start paisans-f2a9's manager after the mesh
   run:
     $ systemctl daemon-reload
 
-step 2: delegate cgroups to users
+step 3: delegate cgroups to users
   delegation: let every user's manager delegate cpu cpuset io memory pids, for compose's limits; paisans-f2a9's manager is running, and takes it at its next start
   write /etc/systemd/system/user@.service.d/delegate.conf mode 0644:
     | # Written by paisans host admit. Shared by every admitted deployment;
@@ -22,7 +94,7 @@ step 2: delegate cgroups to users
   run:
     $ systemctl daemon-reload
 
-step 3: write the egress table
+step 4: write the egress table
   egress: keep paisans-f2a9, its containers and its mesh off this host's loopback and your network (/etc/paisans/egress.f2a9.nft)
   write /etc/paisans/egress.f2a9.nft mode 0644:
     | # Written by paisans host admit for paisans-f2a9. Keeps the
@@ -52,7 +124,7 @@ step 3: write the egress table
   run:
     $ nft -c -f /etc/paisans/egress.f2a9.nft
 
-step 4: install the egress unit
+step 5: install the egress unit
   egress: load the table at boot, before paisans-f2a9's manager, which requires it (paisans-f2a9-egress.service)
   write /etc/systemd/system/paisans-f2a9-egress.service mode 0644:
     | # Written by paisans host admit. Loads the table that keeps paisans-f2a9 off
@@ -88,17 +160,17 @@ step 4: install the egress unit
   run:
     $ systemctl daemon-reload && systemctl reenable paisans-f2a9-egress.service
 
-step 5: load the egress table
+step 6: load the egress table
   egress: load paisans_f2a9 now
   run:
     $ systemctl start paisans-f2a9-egress.service && nft -f /etc/paisans/egress.f2a9.nft
 
-step 6: load br_netfilter
+step 7: load br_netfilter
   daemon: load br_netfilter now, which the user's daemon needs with its userland proxy off
   run:
     $ modprobe br_netfilter
 
-step 7: load br_netfilter at boot
+step 8: load br_netfilter at boot
   daemon: list br_netfilter and nf_tables in /etc/modules-load.d/paisans.conf, shared by every admitted deployment
   write /etc/modules-load.d/paisans.conf mode 0644:
     | # Written by paisans host admit. The rootless Docker daemons of admitted
@@ -107,7 +179,7 @@ step 7: load br_netfilter at boot
     | br_netfilter
     | nf_tables
 
-step 8: write paisans-f2a9's daemon.json
+step 9: write paisans-f2a9's daemon.json
   daemon: userland proxy off, address pools clear of the mesh; written as paisans-f2a9
   run:
     $ runuser -u paisans-f2a9 -- env -i HOME='/home/paisans-f2a9' PATH=/usr/bin:/bin:/usr/sbin:/sbin XDG_RUNTIME_DIR=/run/user/1001 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1001/bus DOCKER_HOST=unix:///run/user/1001/docker.sock sh -c 'umask 077 && mkdir -p "$HOME/.config/docker" && cat > "$HOME/.config/docker/.daemon.json.paisans-tmp" && mv -f "$HOME/.config/docker/.daemon.json.paisans-tmp" "$HOME/.config/docker/daemon.json"'
@@ -146,27 +218,27 @@ step 8: write paisans-f2a9's daemon.json
     |   ]
     | }
 
-step 9: install paisans-f2a9's rootless Docker
+step 10: install paisans-f2a9's rootless Docker
   daemon: dockerd-rootless-setuptool.sh install --force, as paisans-f2a9, which starts the daemon reading its daemon.json; --force because a system daemon may run beside it
   run:
     $ runuser -u paisans-f2a9 -- env -i HOME='/home/paisans-f2a9' PATH=/usr/bin:/bin:/usr/sbin:/sbin XDG_RUNTIME_DIR=/run/user/1001 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1001/bus DOCKER_HOST=unix:///run/user/1001/docker.sock sh -c 'dockerd-rootless-setuptool.sh install --force'
 
-step 10: create /srv/paisans
+step 11: create /srv/paisans
   directory: every deployment's directory lives in it, root's, mode 755
   run:
     $ install -d -m 755 -o root -g root /srv/paisans
 
-step 11: create /srv/paisans/f2a9
+step 12: create /srv/paisans/f2a9
   directory: the deployment's own, paisans-f2a9's, mode 750
   run:
     $ install -d -m 750 -o paisans-f2a9 -g paisans-f2a9 /srv/paisans/f2a9
 
-step 12: create /usr/local/libexec/paisans
+step 13: create /usr/local/libexec/paisans
   wireguard: where each deployment's helper lives, root's, mode 755
   run:
     $ install -d -m 755 -o root -g root /usr/local/libexec/paisans
 
-step 13: install the WireGuard helper
+step 14: install the WireGuard helper
   wireguard: the one command paisans-f2a9 may run as root: it checks each conf before wg-quick sees it, and adds the mesh's mark
   write /usr/local/libexec/paisans/wg-psns-f2a9 mode 0755:
     | #!/bin/sh
@@ -511,34 +583,81 @@ step 13: install the WireGuard helper
     | 	;;
     | esac
 
-step 14: install the helper's sudoers line
+step 15: install the helper's sudoers line
   wireguard: /etc/sudoers.d/paisans-f2a9, mode 440, checked by visudo under a name sudo skips before it is moved into place
   write /etc/sudoers.d/paisans-f2a9.new mode 0440:
     | paisans-f2a9 ALL=(root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-f2a9
   run:
     $ visudo -cqf /etc/sudoers.d/paisans-f2a9.new && chown root:root /etc/sudoers.d/paisans-f2a9.new && mv -f /etc/sudoers.d/paisans-f2a9.new /etc/sudoers.d/paisans-f2a9 || { rm -f /etc/sudoers.d/paisans-f2a9.new; echo 'visudo refused the line; nothing reached sudo'; exit 1; }
 
-step 15: allow 22/tcp
+step 16: allow 22/tcp
   firewall: allow 22/tcp (ssh, the bootstrap route)
   run:
     $ ufw allow 22/tcp comment 'paisans-f2a9: ssh, the bootstrap route'
 
-step 16: allow 51820/udp
+step 17: allow 51820/udp
   firewall: allow 51820/udp (WireGuard, the mesh)
   run:
     $ ufw allow 51820/udp comment 'paisans-f2a9: WireGuard, the mesh'
 
-step 17: allow all inbound on psns-f2a9
+step 18: allow all inbound on psns-f2a9
   firewall: allow all inbound on psns-f2a9 (the mesh: etcd, Patroni, Garage, HAProxy)
   run:
     $ ufw allow in on psns-f2a9 comment 'paisans-f2a9: the mesh: etcd, Patroni, Garage, HAProxy'
+
+step 19: create /etc/paisans
+  record: root's, mode 755: every deployment's user reads its own record, none can write one
+  run:
+    $ install -d -m 755 -o root -g root /etc/paisans
+
+step 20: write the admission record
+  record: who the deployment runs as and what you granted, which its own commands read
+  write /etc/paisans/admitted.f2a9.json mode 0644:
+    | {
+    |   "version": 1,
+    |   "deployment": "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01",
+    |   "user": "paisans-f2a9",
+    |   "grants": {
+    |     "watchdog": false,
+    |     "public_ports": false
+    |   },
+    |   "forwarding": false,
+    |   "ports": {
+    |     "ssh": 22,
+    |     "wireguard": 51820,
+    |     "public": []
+    |   },
+    |   "digest": "aadq-v10p-2qb7-jrsq",
+    |   "admitted_at": "2026-10-15T12:00:00Z",
+    |   "data_dir": "",
+    |   "bridge_netfilter": false,
+    |   "mesh_lan": "",
+    |   "web_server": null
+    | }
+
+step 21: add the operators' keys
+  keys: 1 operator key into paisans-f2a9's authorized_keys, written as paisans-f2a9, and recorded in /srv/paisans/f2a9/.paisans/authorized_keys.owned for host prepare
+  run:
+    $ runuser -u paisans-f2a9 -- env -i HOME='/home/paisans-f2a9' PATH=/usr/bin:/bin:/usr/sbin:/sbin XDG_RUNTIME_DIR=/run/user/1001 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1001/bus DOCKER_HOST=unix:///run/user/1001/docker.sock sh -c 'set -e; umask 077; mkdir -p "$HOME/.ssh" /srv/paisans/f2a9/.paisans
+    $ tmp=$(mktemp -d); trap '\''rm -rf "$tmp"'\'' EXIT
+    $ awk -v k="$tmp/keys" -v s="$tmp/sidecar" '\''$0 == "--- sidecar ---" { out = 1; next } { if (out) print > s; else print > k }'\''
+    $ touch "$tmp/keys" "$tmp/sidecar"
+    $ f="$HOME/.ssh/authorized_keys"
+    $ { if [ -e "$f" ] || [ -L "$f" ]; then awk 1 "$f"; fi; cat "$tmp/keys"; } > "$HOME/.ssh/.authorized_keys.paisans-tmp"
+    $ mv -f "$HOME/.ssh/.authorized_keys.paisans-tmp" "$f"
+    $ cat "$tmp/sidecar" > /srv/paisans/f2a9/.paisans/authorized_keys.owned.paisans-tmp
+    $ mv -f /srv/paisans/f2a9/.paisans/authorized_keys.owned.paisans-tmp /srv/paisans/f2a9/.paisans/authorized_keys.owned'
+  stdin:
+    | ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice
+    | --- sidecar ---
+    | # Keys this deployment claims in paisans-f2a9's authorized_keys: <mark> <fingerprint> <name>. host prepare removes a line only when it is marked added here and no other deployment's file lists it.
+    | added SHA256:kmYcvdi2GkPeWxB6XLjrZB8JHsy2Hm8luHMFp9GMvqk alice
 
 present: docker: Engine 29.9.1
 present: package: docker-ce-rootless-extras installed
 present: package: uidmap installed
 present: package: nftables installed
 present: package: wireguard-tools installed
-present: package: ufw installed
 present: package: git installed
 present: apparmor: rootlesskit's profile is loaded
 present: user: paisans-f2a9 exists, uid 1001, in no privileged group, and sudo grants it nothing beyond admit's helper

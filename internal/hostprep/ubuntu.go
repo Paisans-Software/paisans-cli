@@ -39,6 +39,11 @@ var dockerConflicts = []string{"docker.io", "docker-compose", "docker-compose-v2
 // store.
 var basePackages = []string{"wireguard-tools", "ufw", "git"}
 
+// admitBasePackages are the base packages host admit installs: ufw is not
+// among them, since admit works only on a host whose owner has installed
+// and enabled it, and choosing a firewall is the owner's.
+var admitBasePackages = []string{"wireguard-tools", "git"}
+
 // rootlessPackages are what a deployment's own rootless daemon needs
 // beside Docker: the setup tool and rootlesskit, newuidmap and newgidmap,
 // and nft for the egress table. Docker's rootless page names the first two
@@ -308,7 +313,7 @@ func (u ubuntu) AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (
 			}
 		}
 	}
-	for _, p := range append(append([]string{}, rootlessPackages...), basePackages...) {
+	for _, p := range append(append([]string{}, rootlessPackages...), admitBasePackages...) {
 		switch {
 		case facts.installed[p]:
 			out.Present = append(out.Present, "package: "+p+" installed")
@@ -477,8 +482,9 @@ func (u ubuntu) WatchdogModule(t Transport, d deployment.Deployment, module stri
 // non-interactive run. Which rules are added, adopted, removed or left alone
 // is planRules, in ufw.go. On a shared host (hostWide false) only the rules
 // are planned: the default policy and enabling belong to the host, not to
-// the deployment.
-func (u ubuntu) Firewall(t Transport, d deployment.Deployment, rules []Rule, hostWide bool) (Section, error) {
+// the deployment. by names the command planning, host prepare or host
+// admit, in what the plan says.
+func (u ubuntu) Firewall(t Transport, d deployment.Deployment, rules []Rule, hostWide bool, by string) (Section, error) {
 	var out Section
 	script, err := snippet(u.tmpl("firewall-probe.sh.tmpl"), nil)
 	if err != nil {
@@ -504,7 +510,7 @@ func (u ubuntu) Firewall(t Transport, d deployment.Deployment, rules []Rule, hos
 		}
 	}
 
-	planned, removals, err := planRules(ownerTag(d), rules, added)
+	planned, removals, err := planRules(ownerTag(d), rules, added, by)
 	if err != nil {
 		return out, err
 	}

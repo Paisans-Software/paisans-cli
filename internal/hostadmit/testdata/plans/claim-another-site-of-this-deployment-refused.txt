@@ -1,0 +1,1 @@
+refused: claim: this machine already runs site home-a of this deployment, at 10.44.0.1, and this request is for site vm at 10.44.0.3. A site is a machine: its files, containers and WireGuard interface are named for the deployment, so a second site of it here would overwrite the first. Admit it on another machine. Nothing was changed

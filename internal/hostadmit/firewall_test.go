@@ -19,7 +19,7 @@ var firewallCases = addCases(
 	}},
 	goldenCase{name: "firewall-ufw-absent-refused", site: "vm", host: func() *fakeHost { return home().with("ufw", "absent").with("ufw-active", "no") }},
 	goldenCase{name: "firewall-ufw-inactive-refused", site: "vm", host: func() *fakeHost { return home().with("ufw-active", "no") }},
-	goldenCase{name: "firewall-admitted", site: "vm", host: func() *fakeHost { return home().withAdmitRules() }},
+	goldenCase{name: "firewall-admitted", site: "home-a", flags: gateway, host: func() *fakeHost { return admittedHost(requestFor("home-a"), gateway) }},
 	goldenCase{name: "ports-free", site: "home-a", flags: gateway, host: home},
 	goldenCase{name: "ports-process-refused", site: "home-a", flags: gateway, host: func() *fakeHost {
 		return home().answer(portsMarker, `listen LISTEN 0 511 0.0.0.0:443 0.0.0.0:* users:(("nginx",pid=901,fd=6)) ino:1 sk:1`+"\nend\n")
@@ -45,15 +45,6 @@ var firewallCases = addCases(
 			"dnat table ip nat chain DOCKER: iifname != \"docker0\" tcp dport 8080 counter packets 0 bytes 0 dnat to 172.17.0.2:80\nend\n")
 	}},
 )
-
-// withAdmitRules is h with ufw holding the rules admit adds for vm, the
-// deployment's own, so a re-run plans none of them.
-func (h *fakeHost) withAdmitRules() *fakeHost {
-	return h.answer("ufw show added", "ufw present\nstatus active\n"+
-		"rule allow 22/tcp comment 'paisans-f2a9: ssh, the bootstrap route'\n"+
-		"rule allow 51820/udp comment 'paisans-f2a9: WireGuard, the mesh'\n"+
-		"rule allow in on psns-f2a9 comment 'paisans-f2a9: the mesh: etcd, Patroni, Garage, HAProxy'\n")
-}
 
 // ownCaddy is an admitted gateway whose Caddy, the deployment's own, runs
 // as its user (uid 1001) on 443 and in its subordinate range on 80, as
@@ -145,5 +136,34 @@ func TestTheOwnersSSHAllowIsLeftAlone(t *testing.T) {
 		if strings.Contains(s.Command, "22/tcp") {
 			t.Errorf("a step touches the owner's SSH allow: %s", s.Command)
 		}
+	}
+}
+
+// What the shared ufw planner says in admit's plan names admit, not host
+// prepare: a rule admit did not add, one it added and no longer gives, and
+// an old SSH allow it keeps.
+func TestFirewallTextNamesAdmit(t *testing.T) {
+	h := home().answer("ufw show added", "ufw present\nstatus active\n"+
+		"rule deny 51820/udp\n"+
+		"rule allow 22 comment 'paisans-f2a9: ssh, the bootstrap route'\n"+
+		"rule allow 8080/tcp comment 'paisans-f2a9: something given before'\n")
+	plan, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	named := 0
+	for _, line := range strings.Split(plan.Text(), "\n") {
+		if !strings.Contains(line, "firewall:") {
+			continue
+		}
+		if strings.Contains(line, "host prepare") {
+			t.Errorf("admit's plan says host prepare: %s", line)
+		}
+		if strings.Contains(line, "host admit") {
+			named++
+		}
+	}
+	if named != 3 {
+		t.Errorf("%d firewall lines name host admit, want 3:\n%s", named, plan.Text())
 	}
 }

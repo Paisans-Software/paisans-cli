@@ -30,7 +30,8 @@ func TestAdmitRules(t *testing.T) {
 // With Docker absent, admit installs Docker from Docker's repository with
 // the rootless extras; with it present, it installs the extras and the
 // rest without upgrading anything already installed, so the owner's
-// Docker is never upgraded by admit.
+// Docker is never upgraded by admit. ufw is not among them: admit works only
+// where the owner has installed and enabled it.
 func TestAdmitPackages(t *testing.T) {
 	profile, err := hostprep.Select(hostprep.ParseOSRelease(ubuntu2404))
 	if err != nil {
@@ -45,10 +46,13 @@ func TestAdmitPackages(t *testing.T) {
 	for _, st := range s.Steps {
 		all += st.Title + "\n" + st.Command + "\n"
 	}
-	for _, want := range []string{"add docker apt key", "add docker apt repo", "docker-ce ", "docker-ce-rootless-extras", "uidmap", "nftables", "wireguard-tools", "ufw", "git"} {
+	for _, want := range []string{"add docker apt key", "add docker apt repo", "docker-ce ", "docker-ce-rootless-extras", "uidmap", "nftables", "wireguard-tools", "git"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("a blank host's admit packages lack %q:\n%s", want, all)
 		}
+	}
+	if strings.Contains(all, "ufw") {
+		t.Errorf("admit installs ufw:\n%s", all)
 	}
 	if strings.Contains(all, "--no-upgrade") {
 		t.Errorf("a blank host's install is --no-upgrade:\n%s", all)
@@ -97,5 +101,23 @@ func TestAdmitPackagesRefusesConflicts(t *testing.T) {
 	_, err = profile.AdmitPackages(h, hostprep.ParseOSRelease(ubuntu2404), false)
 	if err == nil || !strings.Contains(err.Error(), "containerd, runc") || !strings.Contains(err.Error(), "Nothing was changed") {
 		t.Errorf("want a refusal naming containerd and runc, got %v", err)
+	}
+}
+
+// A sidecar as host prepare writes one reads back and writes out the same,
+// so admit's sidecar and host prepare's are one format.
+func TestOwnedKeysRoundTrip(t *testing.T) {
+	sidecar := "# Keys this deployment claims in ubuntu's authorized_keys: <mark> <fingerprint> <name>. host prepare removes a line only when it is marked added here and no other deployment's file lists it.\n" +
+		"added SHA256:4b2Q4Jx3ZQf1XU1Vb1k0f0sYz8m9n7bq3kq0iYkQWd0 alice\n" +
+		"shared SHA256:9xQ1m0bK3iYp2nWm7c8d5e4f3g2h1j0k9l8m7n6o5p4 bob\n"
+	keys := hostprep.ParseOwnedKeys(sidecar)
+	if len(keys) != 2 || keys[0] != (hostprep.OwnedKey{Mark: "added", Fingerprint: "SHA256:4b2Q4Jx3ZQf1XU1Vb1k0f0sYz8m9n7bq3kq0iYkQWd0", Name: "alice"}) {
+		t.Fatalf("ParseOwnedKeys = %+v", keys)
+	}
+	if got := hostprep.OwnedKeysFile("ubuntu", keys); got != sidecar {
+		t.Errorf("OwnedKeysFile =\n%s\nwant\n%s", got, sidecar)
+	}
+	if got := hostprep.OwnedKeysFile("ubuntu", []hostprep.OwnedKey{keys[1], keys[0]}); got != sidecar {
+		t.Errorf("OwnedKeysFile does not sort by fingerprint:\n%s", got)
 	}
 }

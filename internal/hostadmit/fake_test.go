@@ -14,6 +14,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/hostadmit"
+	"github.com/paisans-software/paisans-cli/internal/registry"
 )
 
 // probeMarker is a string only admit's own probe contains.
@@ -170,7 +171,7 @@ func newBlank() *fakeHost {
 	h.withDir("/etc/wireguard", "absent", 0, 0).withDir("/etc/paisans", "absent", 0, 0).
 		withDir("/srv/paisans", "absent", 0, 0).withDir("/srv/paisans/f2a9", "absent", 0, 0)
 	// hostprep's probes, as host prepare's tests answer them.
-	h.answer("docker compose version", "compose absent\npkg nftables install ok installed\nkeyring absent\narch amd64\n").
+	h.answer("docker compose version", "compose absent\npkg nftables install ok installed\npkg ufw install ok installed\nkeyring absent\narch amd64\n").
 		answer("RuntimeWatchdogUSec", "device absent\nsystemd 0\ndaemon absent\n").
 		answer("ufw show added", "ufw present\nstatus active\n").
 		answer(userStateMarker, idleUser).
@@ -259,4 +260,128 @@ func input(t *testing.T, site string, flags hostadmit.Flags) hostadmit.Input {
 	t.Helper()
 	req := request(t, site)
 	return hostadmit.Input{Request: req, Digest: admission.Digest(admission.Encode(req)), Flags: flags, Now: admitted}
+}
+
+// registryWith is a host registry holding one entry, home-a's claim made
+// for deployment id at address: what a claim of another site of id leaves.
+func registryWith(id, address string) string {
+	_, e := registry.ForRequest(requestFor("home-a"), admitted)
+	e.Address = address
+	return encodeRegistry(id, e)
+}
+
+// registryOf is the registry admit's claim of req leaves on a host no
+// other deployment has claimed.
+func registryOf(req admission.Request) string {
+	id, e := registry.ForRequest(req, admitted)
+	return encodeRegistry(id, e)
+}
+
+func encodeRegistry(id string, e registry.Entry) string {
+	data, err := registry.Encode(registry.Registry{Version: registry.Version, Deployments: map[string]registry.Entry{id: e}})
+	if err != nil {
+		panic(err)
+	}
+	return string(data)
+}
+
+// admittedHost is the fake host once admit of req with flags has run: the
+// plan built on home() (communityHome() for home-b's user), each of its
+// steps applied as a real host would change. Each file step's file is
+// present as written, root's, with its mode; each directory `install -d`
+// made; the user's daemon installed and running with the daemon.json
+// written; the keys and sidecar in place; ufw holding each rule added; the
+// sysctls applied; the egress table loaded; the registry claimed; the
+// record written. It is the one fully admitted host every re-run test
+// starts from, and TestASecondRunPlansNothing keeps it honest: a fact it
+// forgets is a step the second run plans.
+func admittedHost(req admission.Request, flags hostadmit.Flags) *fakeHost {
+	h := home()
+	if req.User == "community" {
+		h = communityHome()
+	}
+	if flags.Watchdog {
+		h.answer("RuntimeWatchdogUSec", "device present\nidentity watchdog0 iTCO_wdt\nsystemd 0\ndaemon absent\n")
+	}
+	in := hostadmit.Input{Request: req, Digest: admission.Digest(admission.Encode(req)), Flags: flags, Now: admitted}
+	plan, err := hostadmit.Build(h, in)
+	if err != nil {
+		panic(fmt.Sprintf("admitting %s: %v", req.Site, err))
+	}
+	uid := 1001
+	if req.User == "community" {
+		uid = 1002
+	}
+	var rules []string
+	daemonJSON, keys := "", ""
+	for _, s := range plan.Steps {
+		if s.File != nil {
+			h.withFile(s.File.Path, s.File.Content, fmt.Sprintf("%o", s.File.Mode), 0)
+			h.files[s.File.Path] = s.File.Content
+		}
+		for _, f := range strings.Split(s.Command, " && ") {
+			switch {
+			case strings.HasPrefix(f, "install -d -m "):
+				w := strings.Fields(f) // install -d -m MODE [-o U -g G] PATH
+				owner := 0
+				if len(w) > 5 && w[5] != "root" {
+					owner = uid
+				}
+				h.withDir(w[len(w)-1], modeString(w[3]), owner, owner)
+			case strings.HasPrefix(f, "ufw allow "):
+				rules = append(rules, "rule "+strings.TrimPrefix(f, "ufw "))
+			case strings.HasPrefix(f, "mv -f /etc/sudoers.d/"):
+				w := strings.Fields(f) // mv -f TMP FINAL || ...
+				h.withFile(w[3], h.files[w[2]], "440", 0)
+			}
+		}
+		if strings.Contains(s.Command, "daemon.json") {
+			daemonJSON = s.Input
+		}
+		if strings.Contains(s.Command, "authorized_keys") {
+			keys = s.Input
+		}
+	}
+	h.answer("ufw show added", "ufw present\nstatus active\n"+strings.Join(rules, "\n")+"\n").
+		with("br_netfilter", "loaded").with("egress-enabled", "yes").with("egress-table", "present").
+		answer(userStateMarker, "daemon active\nunit present\ndaemon-json "+sum(daemonJSON)+"\ncontainers 0\nimages 0\nvolumes 0\nend\n").
+		answer(keysMarker, keysAfter(keys))
+	if flags.PublicPorts {
+		h.with("port-start", "80")
+	}
+	if req.Endpoint {
+		h.with("ip-forward", "1")
+	}
+	path, _ := admission.Path(req.Token())
+	h.add("record", path)
+	return h.file(registry.Path, registryOf(req))
+}
+
+// modeString is an octal directory mode as ls -ldn prints it: 750 is
+// drwxr-x---.
+func modeString(octal string) string {
+	n, err := strconv.ParseUint(octal, 8, 32)
+	if err != nil {
+		panic(err)
+	}
+	out := []byte("d")
+	for shift := 6; shift >= 0; shift -= 3 {
+		bits := n >> shift
+		for i, c := range "rwx" {
+			if bits&(4>>i) != 0 {
+				out = append(out, byte(c))
+			} else {
+				out = append(out, '-')
+			}
+		}
+	}
+	return string(out)
+}
+
+// keysAfter is what the keys probe prints once the keys step has run with
+// stdin on a host whose user had no authorized_keys: the keys appended,
+// the marker, then the sidecar written.
+func keysAfter(stdin string) string {
+	keys, sidecar, _ := strings.Cut(stdin, "--- sidecar ---\n")
+	return keys + "paisans-sidecar\n" + sidecar
 }
