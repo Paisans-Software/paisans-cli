@@ -29,6 +29,7 @@ changes share a bullet. Detailed notes are on the corresponding
 - The host check runs as the deployment's user: it reads listeners with `ss -Hltnue`, counts its own user's and containers' as this deployment's, and leaves the firewall to `host admit`.
 - Every command that changes a host checks first that the host admitted the deployment as that site, with the grants its roles need, and names the `host request` and `host admit` lines when not.
 - The mesh subnet check reads the deployment's own Docker pools from `~/.config/docker/daemon.json`.
+- `host prepare` installs nothing: it checks the host's admission record against the configuration, then keeps the deployment user's keys, configuration store, units and `daemon.json`.
 - The configuration store lives in `/srv/paisans/<token>/.paisans/config/`, and its git daemon, sync and timer are the deployment user's own systemd units, the daemon retrying until the mesh is up.
 - The host owner's Caddy site files beside a gateway go in `/srv/paisans/<token>/caddy.d`, which `apply` creates as the deployment's user, instead of `/srv/caddy.d`.
 - The deployment record, the grant record and a gateway move's marker live in `/srv/paisans/<token>/.paisans/`, written by the deployment's own user under one lock of the deployment's.
@@ -40,7 +41,7 @@ changes share a bullet. Detailed notes are on the corresponding
 - `mesh.subnet` and `sites.*.address` must be written in canonical form, Eg: `10.44.0.0/24` and not `10.44.0.0/024`, as `host request` carries them.
 - `mesh.subnet` larger than a /24 or overlapping 0.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16 or 224.0.0.0/3 is refused, as is a site address on its network or broadcast address, since hosts' firewalls trust the mesh.
 - `mesh.subnet` outside 10.0.0.0/8, 172.16.0.0/12 and 192.168.0.0/16 is refused, replacing the `mesh-subnet-is-not-private` warning, so another deployment's user on a shared host cannot reach the mesh.
-- `host prepare` installs `gnupg` and checks Docker's apt key against the fingerprint of Docker's release key before apt trusts it, refusing a download that holds any other key.
+- `host admit` installs `gnupg` and checks Docker's apt key against the fingerprint of Docker's release key before apt trusts it, refusing a download that holds any other key.
 - Each site's mesh file renders inside the deployment's directory, as `/srv/paisans/<token>/psns-<token>.conf`, and carries no `PostUp`: a relaying site's forwarding is the host's sysctl.
 - `apply` starts, syncs and restarts each site's mesh through its WireGuard helper, `sudo -n /usr/local/libexec/paisans/wg-psns-<token>`, which checks the mesh file before installing it in `/etc/wireguard`.
 - `doctor` advises reading a down mesh interface's journal with its WireGuard helper's `log`, which the deployment's user can run, instead of `systemctl status` and `journalctl`.

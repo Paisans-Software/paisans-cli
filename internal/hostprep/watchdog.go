@@ -37,6 +37,9 @@ type watchdogFacts struct {
 	// prints it. Anything but zero means PID 1 holds the device.
 	RuntimeWatchdog string
 	Daemon          bool
+	// Owner is /dev/watchdog's owner's uid, and Me the uid the probe ran
+	// as: host admit gives the device to the deployment's user.
+	Owner, Me string
 }
 
 func probeWatchdog(t Transport) (watchdogFacts, error) {
@@ -61,6 +64,10 @@ func probeWatchdog(t Transport) (watchdogFacts, error) {
 			facts.RuntimeWatchdog = strings.TrimSpace(rest)
 		case "daemon":
 			facts.Daemon = rest == "running"
+		case "owner":
+			facts.Owner = strings.TrimSpace(rest)
+		case "me":
+			facts.Me = strings.TrimSpace(rest)
 		}
 	}
 	return facts, nil
@@ -173,5 +180,49 @@ func planWatchdog(t Transport, d deployment.Deployment, profile Profile, site co
 	}
 	out.add(module)
 	out.Warnings = append(out.Warnings, Warning{Hint: "watchdog: falling back to softdog", Detail: fmt.Sprintf(softdogWarning, by)})
+	return out, nil
+}
+
+// admitWatchdog is what fixes the watchdog when host prepare finds it wrong:
+// it is a root change, the host owner's.
+const admitWatchdog = "The host's owner runs sudo paisans host admit --request <site>.admit --watchdog again, from paisans host request --site <site> > <site>.admit."
+
+// checkWatchdog reads what a data site's watchdog is, as the deployment's
+// user: host admit loaded it and gave /dev/watchdog to the user. It plans
+// nothing; anything wrong refuses, naming what the owner runs.
+func checkWatchdog(t Transport, site config.Site) (Section, error) {
+	var out Section
+	if !site.Has(config.RoleData) {
+		out.Present = append(out.Present, "watchdog: not needed, this site holds no data role")
+		return out, nil
+	}
+	facts, err := probeWatchdog(t)
+	if err != nil {
+		return out, err
+	}
+	switch {
+	case systemdHoldsWatchdog(facts.RuntimeWatchdog):
+		return out, fmt.Errorf("watchdog: systemd's RuntimeWatchdogUSec is %s on %s, so PID 1 holds /dev/watchdog and Patroni cannot open it. The host's owner sets RuntimeWatchdogSec=0 in /etc/systemd/system.conf and runs systemctl daemon-reexec", facts.RuntimeWatchdog, t.Describe())
+	case facts.Daemon:
+		return out, fmt.Errorf("watchdog: a watchdog daemon is running on %s and holds /dev/watchdog. The host's owner stops and disables it (systemctl disable --now watchdog)", t.Describe())
+	case !facts.DeviceNode || facts.Owner == "" || facts.Owner != facts.Me:
+		return out, fmt.Errorf("watchdog: /dev/watchdog on %s is not the deployment's user's, so Patroni cannot open it. %s", t.Describe(), admitWatchdog)
+	}
+	hardware := facts.hardware()
+	switch site.WatchdogMode() {
+	case config.WatchdogRequired:
+		if len(hardware) == 0 {
+			return out, fmt.Errorf("watchdog: required, and %s has only softdog. required accepts a hardware or hypervisor watchdog and nothing else: the host's owner enables one in the firmware or the VM's settings, or declare watchdog: auto to accept softdog", t.Describe())
+		}
+	case config.WatchdogSoftdog:
+		if len(hardware) > 0 {
+			out.Warnings = append(out.Warnings, Warning{Hint: "watchdog: softdog declared, but a hardware watchdog exists", Detail: fmt.Sprintf("%s provides /dev/watchdog and Patroni opens that one, not softdog. Declare auto to say so.", hardware[0].Identity)})
+		}
+	default:
+		if len(hardware) == 0 {
+			out.Warnings = append(out.Warnings, Warning{Hint: "watchdog: softdog", Detail: fmt.Sprintf(softdogWarning, "host admit")})
+		}
+	}
+	out.Present = append(out.Present, "watchdog: "+facts.describe()+", the deployment's user's")
 	return out, nil
 }

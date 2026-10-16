@@ -159,14 +159,14 @@ func RunAll(cfg *config.Config, joining []string, transports map[string]apply.Tr
 		r.clock(name)
 	}
 	for _, name := range joining {
-		r.newSite, r.site, r.hostReport = name, cfg.Sites[name], nil
+		r.newSite, r.site, r.hostReport, r.record = name, cfg.Sites[name], nil, nil
 		if !r.reachable[name] {
 			continue
 		}
 		t := transports[name]
 		r.host(t)
-		r.hostPrepare(t)
 		r.admission(t)
+		r.hostPrepare(t)
 		r.archMatch(t)
 		r.wireguard(t)
 		r.watchdog(t)
@@ -191,6 +191,9 @@ type runner struct {
 	// hostReport is the host check's finding on the new site, nil when it
 	// could not be made.
 	hostReport *hostcheck.Report
+	// record is the new site's admission record, nil when the host has not
+	// admitted the deployment as that site.
+	record *admission.Record
 }
 
 func (r *runner) pass(site, name, format string, args ...any) {
@@ -293,15 +296,15 @@ func (r *runner) host(t apply.Transport) {
 }
 
 // hostPrepare requires that `host prepare` would do nothing. Every check
-// below assumes a prepared host (WireGuard tools, Docker, the firewall), and
-// reusing the plan rather than re-checking each part keeps one definition of
-// "prepared".
+// below assumes an admitted and prepared host, and reusing the plan rather
+// than re-checking each part keeps one definition of "prepared". The plan is
+// checked against the admission record, so a host without one is refused
+// by the admission check alone.
 func (r *runner) hostPrepare(t apply.Transport) {
-	var opts []hostprep.Option
-	if r.hostReport != nil && r.hostReport.Shared() {
-		opts = append(opts, hostprep.Shared())
+	if r.record == nil {
+		return
 	}
-	plan, err := buildHostPrep(r.newSite, r.cfg, t, opts...)
+	plan, err := buildHostPrep(r.newSite, r.cfg, t, *r.record)
 	if err != nil {
 		r.refuse(r.newSite, "prepared", "host prepare could not plan: %v", err)
 		return
@@ -492,10 +495,12 @@ func (r *runner) routes(t apply.Transport) {
 // that site, with the grants its roles need. It reads as the deployment's
 // user; host admit claimed the host in its registry.
 func (r *runner) admission(t apply.Transport) {
-	if _, err := admission.ForSite(t, r.cfg.ID, r.newSite, r.cfg.Sites[r.newSite]); err != nil {
+	rec, err := admission.ForSite(t, r.cfg.ID, r.newSite, r.cfg.Sites[r.newSite])
+	if err != nil {
 		r.refuse(r.newSite, "admission", "%v. Send the host's owner `paisans host request --site %s > %s.admit`", err, r.newSite, r.newSite)
 		return
 	}
+	r.record = &rec
 	r.pass(r.newSite, "admission", "the host admitted this deployment as %s", r.newSite)
 }
 

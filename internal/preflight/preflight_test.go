@@ -157,7 +157,7 @@ func run(t *testing.T, cfg *config.Config, h map[string]*fakeHost) Report {
 // prepared stubs host prepare's plan, which hostprep's own tests cover.
 func prepared(t *testing.T, steps ...string) {
 	old := buildHostPrep
-	buildHostPrep = func(site string, _ *config.Config, _ hostprep.Transport, _ ...hostprep.Option) (*hostprep.Plan, error) {
+	buildHostPrep = func(site string, _ *config.Config, _ hostprep.Transport, _ admission.Record) (*hostprep.Plan, error) {
 		plan := &hostprep.Plan{Site: site, Profile: "ubuntu 24.04"}
 		for _, s := range steps {
 			plan.Steps = append(plan.Steps, hostprep.Step{Describe: s})
@@ -525,24 +525,29 @@ func TestAGatewaysWebPortsAreChecked(t *testing.T) {
 	}
 }
 
-// A shared host is prepared without the firewall's defaults, so preflight
-// asks host prepare for that plan rather than one it would never run.
-func TestASharedHostIsPreparedAsShared(t *testing.T) {
-	var shared bool
+// host prepare's plan is checked against the site's admission record, so
+// preflight builds it with the record it read, and does not build it for a
+// host that has none: the admission check has refused that one already.
+func TestHostPrepareIsPlannedWithTheAdmissionRecord(t *testing.T) {
+	var got []string
 	old := buildHostPrep
-	buildHostPrep = func(site string, _ *config.Config, _ hostprep.Transport, opts ...hostprep.Option) (*hostprep.Plan, error) {
-		shared = len(opts) > 0
+	buildHostPrep = func(site string, _ *config.Config, _ hostprep.Transport, rec admission.Record) (*hostprep.Plan, error) {
+		got = append(got, rec.Site)
 		return &hostprep.Plan{Site: site, Profile: "ubuntu 24.04"}, nil
 	}
 	t.Cleanup(func() { buildHostPrep = old })
-	h := hosts()
-	h["home-b"].override(rule{match: "docker inspect", out: `{"id":"` + strings.Repeat("d", 64) + `","name":"/shop-app-1","pid":0,"labels":{"com.docker.compose.project":"shop"},"ports":{}}` + "\n"})
-	r := run(t, fixture(t), h)
-	if !shared {
-		t.Error("host prepare was planned as for a dedicated host")
+	run(t, fixture(t), hosts())
+	if len(got) != 1 || got[0] != "home-b" {
+		t.Errorf("host prepare planned with records for %v", got)
 	}
-	if c := find(r, "home-b", "host"); len(c) != 1 || c[0].Refused || !strings.Contains(c[0].Detail, "shared") {
-		t.Errorf("host check %+v", c)
+	got = nil
+	h := hosts()
+	cfg := fixture(t)
+	path, _ := admission.Path(cfg.Deployment().Token())
+	delete(h["home-b"].files, path)
+	r := run(t, cfg, h)
+	if len(got) != 0 || len(find(r, "home-b", "prepared")) != 0 {
+		t.Errorf("host prepare planned for an unadmitted host: %v", got)
 	}
 }
 

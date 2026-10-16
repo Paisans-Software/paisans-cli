@@ -1,7 +1,6 @@
 package hostadmit
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -13,7 +12,6 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
-	"github.com/paisans-software/paisans-cli/internal/mesh"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -256,43 +254,11 @@ func (p *planner) oldRoot() (string, error) {
 	return homeRoot(p), nil
 }
 
-// daemonConfig is the user's daemon.json, in a fixed field order.
-type daemonConfig struct {
-	UserlandProxy bool          `json:"userland-proxy"`
-	Pools         []addressPool `json:"default-address-pools"`
-	DataRoot      string        `json:"data-root,omitempty"`
-}
-
-type addressPool struct {
-	Base string `json:"base"`
-	Size int    `json:"size"`
-}
-
-// daemonJSON is the user's daemon.json: the userland proxy off, so a
-// published port carries the client's own address (spec, Observed R6);
-// Docker's default pools less any overlapping the mesh, each cut in /24s,
-// so no network of the user's takes the mesh's range; and the data root
-// --data-dir gives.
+// daemonJSON is the user's daemon.json, as hostprep.DaemonJSON has it for
+// the request's mesh and the data root --data-dir gives, so host admit and
+// host prepare never disagree on it.
 func daemonJSON(p *planner) (string, error) {
-	subnet, err := mesh.ParsePrefix(p.in.Request.MeshSubnet)
-	if err != nil {
-		return "", err
-	}
-	cfg := daemonConfig{UserlandProxy: false, DataRoot: p.record.DataDir}
-	for _, b := range mesh.DefaultPools {
-		pool, err := mesh.ParsePrefix(b)
-		if err != nil {
-			return "", err
-		}
-		if !mesh.Overlap(pool, subnet) {
-			cfg.Pools = append(cfg.Pools, addressPool{Base: b, Size: 24})
-		}
-	}
-	out, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return "", err
-	}
-	return string(out) + "\n", nil
+	return hostprep.DaemonJSON(p.in.Request.MeshSubnet, p.record.DataDir)
 }
 
 // refusedFS are filesystems Docker's overlay storage cannot keep its data

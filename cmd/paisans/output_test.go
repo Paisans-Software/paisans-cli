@@ -176,6 +176,10 @@ func quietAnswer(args []string, log, fail string) (string, int, bool) {
 		out.WriteString("ID=ubuntu\nVERSION_ID=\"24.04\"\nVERSION_CODENAME=noble\n")
 	case strings.Contains(cmd, "docker volume ls"):
 		out.WriteString("end\n")
+	case strings.Contains(cmd, "RuntimeWatchdogUSec"):
+		out.WriteString("device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\nowner 1000\nme 1000\n")
+	case cmd == "docker ps -q | wc -l":
+		out.WriteString("0\n")
 	case strings.Contains(cmd, "__PAISANS_NO_ETCD__"):
 		out.WriteString("__PAISANS_NO_ETCD__\n")
 	case strings.Contains(cmd, "__PAISANS_ABSENT__"):
@@ -194,8 +198,8 @@ func (e sshExit) ExitCode() int { return int(e) }
 // The remote command travels base64 encoded (apply.RemoteCommand), so the
 // script decodes it, drops the DOCKER_HOST export a site transport puts
 // first, and answers the few probes whose silence would be read as a
-// failure: who it runs as, which OS, what volumes there are, and that a
-// file is absent.
+// failure: who it runs as, which OS, what volumes there are, that a file
+// is absent, and that the watchdog admit gave the user is there.
 const quietHost = `#!/bin/sh
 for last; do :; done
 b=${last#*printf %s }
@@ -221,6 +225,9 @@ case "$cmd" in
 *"print-architecture"*) echo "arch amd64";;
 *"/etc/os-release"*) printf 'ID=ubuntu\nVERSION_ID="24.04"\nVERSION_CODENAME=noble\n';;
 *"docker volume ls"*) echo end;;
+# host admit loaded softdog and gave /dev/watchdog to the user.
+*RuntimeWatchdogUSec*) printf 'device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\nowner 1000\nme 1000\n';;
+"docker ps -q | wc -l") echo 0;;
 *__PAISANS_NO_ETCD__*) echo __PAISANS_NO_ETCD__;;
 *__PAISANS_ABSENT__*) echo __PAISANS_ABSENT__;;
 esac

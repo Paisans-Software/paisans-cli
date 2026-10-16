@@ -238,70 +238,6 @@ func conflictMessage(facts packageFacts, again string) string {
 		strings.Join(conflicts, ", "), why, remove, again)
 }
 
-// Packages leaves an existing Docker as it is when `docker compose` works
-// with it, whatever its source: the host check has already refused a snap,
-// and an engine or compose plugin older than the toolkit needs. Where Docker
-// is absent it installs it from Docker's own repository, because an install
-// needs one source and that one gives every host it prepares the same
-// engine and compose plugin.
-func (u ubuntu) Packages(t Transport, host OSRelease) (Section, error) {
-	var out Section
-	facts, err := u.probePackages(t)
-	if err != nil {
-		return out, err
-	}
-
-	// Refused, not removed, for the docker.io reason below, and whether or
-	// not compose works with it. The host check refuses it first; this is
-	// the same rule where the plan is built. A snap's confinement keeps
-	// Docker from bind mounting under /srv, and snapd refreshes it, which
-	// restarts the daemon, on its own schedule.
-	if facts.snapDocker {
-		return out, fmt.Errorf("docker: Docker is installed as a snap, whose confinement keeps it from bind mounting under /srv and whose refreshes restart every container on snapd's schedule. Remove it yourself (snap remove docker), after checking nothing running depends on it, and prepare again, which installs Docker from Docker's own apt repository")
-	}
-
-	var install []string
-	if facts.composeWorks {
-		out.Present = append(out.Present, "docker: `docker compose` already works")
-	} else {
-		// A Docker from Ubuntu's archive is accepted when compose works with
-		// it. Where it does not, the install below would conflict with it,
-		// so it is refused, not removed: removing docker.io on a host that is
-		// already running containers from it takes those containers down, and
-		// that is a decision for whoever started them.
-		if msg := conflictMessage(facts, "prepare"); msg != "" {
-			return out, fmt.Errorf("docker: %s", msg)
-		}
-
-		repo, err := u.dockerRepo(t, host, facts)
-		if err != nil {
-			return out, err
-		}
-		out.add(repo)
-		for _, p := range dockerPackages {
-			if !facts.installed[p] {
-				install = append(install, p)
-			}
-		}
-	}
-
-	for _, p := range basePackages {
-		if facts.installed[p] {
-			out.Present = append(out.Present, "package: "+p+" installed")
-		} else {
-			install = append(install, p)
-		}
-	}
-	if len(install) > 0 {
-		script, err := u.aptInstall(install, false)
-		if err != nil {
-			return out, err
-		}
-		out.Steps = append(out.Steps, Step{Kinds: packageKinds(install), Title: "install packages: " + strings.Join(install, ", "), Describe: "packages: install " + strings.Join(install, " "), Command: script})
-	}
-	return out, nil
-}
-
 // debVersion is what dpkg versions are made of; the pin is interpolated
 // into a shell command, so nothing else is accepted.
 var debVersion = regexp.MustCompile(`^[0-9A-Za-z.+:~-]+$`)
@@ -511,58 +447,6 @@ func (u ubuntu) unitState(t Transport, scope unitScope, unit string) (enabled, a
 		}
 	}
 	return enabled, active, nil
-}
-
-// dockerAfterWireGuard is the drop-in that orders Docker after the
-// deployment's mesh interface, named for the deployment that wrote it. Each
-// deployment on a host writes its own, so Docker waits for every mesh whose
-// address a container binds.
-func dockerAfterWireGuard(d deployment.Deployment) string {
-	return systemScope.dir + "/docker.service.d/" + d.Prefix() + "-after-wireguard.conf"
-}
-
-// Services makes Docker start at boot and now, and after the deployment's
-// mesh interface at boot. Docker's
-// packages enable it on install, so on a freshly installed host enabling it is
-// a no-op that is planned anyway: the probe runs before the install and cannot
-// know that.
-//
-// The ordering is a drop-in rather than an edit to Docker's own unit, which a
-// package upgrade replaces. Writing it needs only a daemon-reload: it takes
-// effect at the next boot, which is the only moment it matters, so Docker and
-// every container on the host keep running.
-func (u ubuntu) Services(t Transport, d deployment.Deployment) (Section, error) {
-	dropInPath := dockerAfterWireGuard(d)
-	var out Section
-	dropIn, err := snippet(u.tmpl("docker-after-wireguard.conf.tmpl"), map[string]string{"Interface": d.Interface(), "Unit": d.WireGuardUnit()})
-	if err != nil {
-		return out, err
-	}
-	current, found, err := t.ReadFile(dropInPath)
-	if err != nil {
-		return out, err
-	}
-	if found && current == dropIn {
-		out.Present = append(out.Present, "service: docker starts after "+d.Interface()+" at boot")
-	} else {
-		out.Steps = append(out.Steps, Step{
-			Kinds:    []string{KindDocker},
-			Title:    "start docker after mesh",
-			Describe: "service: start docker after " + d.Interface() + " at boot, so containers can bind the mesh address (" + dropInPath + ")",
-			File:     &File{Path: dropInPath, Content: dropIn, Mode: 0o644},
-			Command:  "systemctl daemon-reload",
-		})
-	}
-	enabled, active, err := u.unitState(t, systemScope, "docker")
-	if err != nil {
-		return out, err
-	}
-	if enabled && active {
-		out.Present = append(out.Present, "service: docker enabled and running")
-		return out, nil
-	}
-	out.Steps = append(out.Steps, Step{Kinds: []string{KindDocker}, Title: "start docker", Describe: "service: enable and start docker", Command: "systemctl enable --now docker"})
-	return out, nil
 }
 
 // watchdogUnit is the unit that loads the watchdog module at boot, named for

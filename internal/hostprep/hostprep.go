@@ -1,7 +1,9 @@
-// Package hostprep takes a blank host to the state `paisans apply` assumes:
-// Docker Engine with the compose plugin, the WireGuard tools, a firewall that
-// lets the mesh in and little else, and, on a data site, a /dev/watchdog that
-// Patroni alone will hold.
+// Package hostprep checks a host its owner admitted, as the deployment's
+// user, and keeps that user's own files: the authorized keys, the
+// configuration store and its user units, and the daemon's daemon.json.
+// What needs root, the profile's packages, the firewall and the watchdog
+// module, is what `paisans host admit` runs, and this package plans it for
+// admit.
 //
 // It is not part of apply. apply reconciles files it rendered against a
 // manifest it wrote; nothing here is a rendered file. Installed packages,
@@ -25,6 +27,7 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -199,9 +202,6 @@ type Profile interface {
 	// be selected, exactly: ID and VERSION_ID.
 	ID() string
 	Version() string
-	// Packages plans Docker Engine with the compose plugin, the WireGuard
-	// tools, and whatever the profile's own firewall needs.
-	Packages(t Transport, host OSRelease) (Section, error)
 	// AdmitPackages plans what host admit installs for a deployment that
 	// runs rootless: with Docker absent, Docker's repository and packages
 	// with its rootless extras; with Docker present, the extras alone,
@@ -220,10 +220,6 @@ type Profile interface {
 	// DockerHoldLock takes the lock a hold on Docker's daemons holds, for
 	// a caller that must hold it ahead of the hold.
 	DockerHoldLock() (string, error)
-	// Services plans enabling and starting what Packages installed.
-	// Its own files carry the deployment's token, so that two deployments on
-	// one host each keep their own.
-	Services(t Transport, d deployment.Deployment) (Section, error)
 	// WatchdogModule plans loading a kernel module now, unless loaded says
 	// it already is, and loading it at every boot.
 	WatchdogModule(t Transport, d deployment.Deployment, module string, loaded, admit bool) (Section, error)
@@ -279,38 +275,21 @@ func UnsupportedMessage(host OSRelease) string {
 		host.ID, host.VersionID, strings.Join(Supported(), "\n"))
 }
 
-// Option adjusts what Build plans.
-type Option func(*options)
-
-type options struct {
-	shared bool
-}
-
-// Shared plans for a host the host check found shared: something besides
-// the deployment runs there. The firewall's default policy and enabled state
-// are left alone, since they govern that other thing's traffic as well, and
-// only the rules host prepare marks as its own are added and removed. The
-// host check does not read the firewall: host admit adds the deployment's
-// rules, and the policy around them is the host owner's.
-func Shared() Option { return func(o *options) { o.shared = true } }
-
-// Build probes the site's host and returns only what is missing, in the order
-// it must run: packages, then services, then the watchdog, then the
-// configuration store, then the login user's authorized keys, then the
-// firewall, then removing authorized keys no longer listed. The firewall
-// follows the packages because the package step may be what installs it; key
-// removals are last so that nothing is taken away before every listed key is in
-// place.
-func Build(site string, cfg *config.Config, t Transport, opts ...Option) (*Plan, error) {
-	var o options
-	for _, opt := range opts {
-		opt(&o)
-	}
+// Build checks the site's host as the deployment's user and returns only
+// what is missing of the user's own: the admission record compared with the
+// declaration first, refusing on any difference; then the watchdog, read
+// only; daemon.json; the configuration store; the authorized keys, and last
+// the keys no longer listed. Nothing here is installed or written as root:
+// host admit did that, and a difference is the owner's to fix by admitting
+// again.
+func Build(site string, cfg *config.Config, t Transport, rec admission.Record) (*Plan, error) {
 	declared, ok := cfg.Sites[site]
 	if !ok {
 		return nil, fmt.Errorf("host prepare: no site %q is declared", site)
 	}
-
+	if diff := rec.Differences(site, declared); len(diff) > 0 {
+		return nil, fmt.Errorf("host prepare: %s's admission does not match %s:\n- %s\nSend the host's owner a new request, paisans host request --site %s > %s.admit, and ask them to run sudo paisans host admit --request %s.admit", site, config.FileName, strings.Join(diff, "\n- "), site, site, site)
+	}
 	content, found, err := t.ReadFile("/etc/os-release")
 	if err != nil {
 		return nil, fmt.Errorf("reading /etc/os-release on %s: %w", t.Describe(), err)
@@ -318,36 +297,21 @@ func Build(site string, cfg *config.Config, t Transport, opts ...Option) (*Plan,
 	if !found {
 		return nil, fmt.Errorf("%s has no /etc/os-release, so no host profile can be chosen for it", t.Describe())
 	}
-	host := ParseOSRelease(content)
-	profile, err := Select(host)
+	profile, err := Select(ParseOSRelease(content))
 	if err != nil {
 		return nil, err
 	}
-
 	plan := &Plan{Site: site, Profile: profile.ID() + " " + profile.Version()}
-
-	packages, err := profile.Packages(t, host)
-	if err != nil {
-		return nil, fmt.Errorf("packages on %s: %w", t.Describe(), err)
-	}
-	plan.add(packages)
-
 	d := cfg.Deployment()
-	services, err := profile.Services(t, d)
-	if err != nil {
-		return nil, fmt.Errorf("services on %s: %w", t.Describe(), err)
-	}
-	plan.add(services)
 
-	watchdog, err := planWatchdog(t, d, profile, declared, "prepare")
+	watchdog, err := checkWatchdog(t, declared)
 	if err != nil {
 		return nil, err
 	}
 	plan.add(watchdog)
 
 	// The home is read before the keys and the store, both of which need it:
-	// its probe refuses a login user the host lacks by name. The store's
-	// steps still come before the keys'.
+	// its probe refuses a login user the host lacks by name.
 	home, err := Home(t)
 	if err != nil {
 		return nil, err
@@ -356,39 +320,21 @@ func Build(site string, cfg *config.Config, t Transport, opts ...Option) (*Plan,
 	if err != nil {
 		return nil, fmt.Errorf("authorized keys on %s: %w", t.Describe(), err)
 	}
+	daemon, err := planDaemonJSON(t, home, cfg.Mesh.Subnet, rec)
+	if err != nil {
+		return nil, err
+	}
+	plan.add(daemon)
+
 	store, err := profile.ConfigStore(t, d, declared, configPeers(cfg, site), home)
 	if err != nil {
 		return nil, fmt.Errorf("configuration store on %s: %w", t.Describe(), err)
 	}
 	plan.add(store)
 	plan.add(keys)
-
-	rules := append(Rules(d, declared), ContainerRules(cfg, site)...)
-	if !declared.RunsCaddy() {
-		// A former gateway still serving through a move keeps 80 and 443
-		// (gateway.go).
-		out, err := t.Run(GatewayCaddyProbe(d))
-		if err != nil {
-			return nil, fmt.Errorf("asking %s for this deployment's gateway Caddy: %w", t.Describe(), err)
-		}
-		if len(ParseGatewayCaddy(out)) > 0 {
-			rules = append(rules, GatewayRules()...)
-			plan.Warnings = append(plan.Warnings, Warning{
-				Hint:   site + " keeps 80 and 443 for the gateway it was",
-				Detail: "This deployment's gateway Caddy still runs here although the site no longer holds the gateway role, so it keeps serving until paisans gateway move has moved DNS and stopped it. The next prepare after that removes both allows.",
-			})
-		}
-	}
-	firewall, err := profile.Firewall(t, d, rules, !o.shared, "host prepare")
-	if err != nil {
-		return nil, fmt.Errorf("firewall on %s: %w", t.Describe(), err)
-	}
-	plan.add(firewall)
-
-	// Last of all, after the firewall's own removals: a key is taken away
-	// only once everything else, the listed keys included, is in place.
+	// Last of all: a key is taken away only once everything else, the listed
+	// keys included, is in place.
 	plan.Steps = append(plan.Steps, keyRemovals...)
-
 	return plan, nil
 }
 

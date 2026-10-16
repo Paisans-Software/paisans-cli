@@ -1647,7 +1647,7 @@ func stepSite(s convergeStep) string {
 
 // dryRunFound is told by the dry run of each command apply without --site
 // runs as a step what it would change: a summary such as "3 changes", or
-// host prepare's kinds of change such as "docker, firewall", empty
+// host prepare's kinds of change such as "docker, ssh keys", empty
 // when there is nothing to do, and stop when it found something --execute
 // would stop at. checkStep sets it; otherwise it does nothing.
 var dryRunFound = func(summary string, stop error) {}

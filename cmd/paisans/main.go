@@ -1227,7 +1227,7 @@ func hostPrepareFlags(fs *flag.FlagSet) *hostPrepareOptions {
 	fs.StringVar(&o.site, "site", "", "the site to prepare, by the name it has in the configuration")
 	fs.BoolVar(&o.all, "all", false, "prepare every site the configuration declares, one at a time, in its order")
 	fs.StringVar(&o.ssh, "ssh", "", "ssh destination, used verbatim in place of the site's ssh section (its user, host, port and keys are then ignored)")
-	fs.BoolVar(&o.execute, "execute", false, "actually install and configure what is missing")
+	fs.BoolVar(&o.execute, "execute", false, "actually write what is missing")
 	return o
 }
 
@@ -1320,8 +1320,7 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 	// Only once it is true: a check that could not run found nothing.
 	done.Detail("nothing on %s overlaps the mesh subnet", o.site)
 	done.Done("")
-	host, err := hostGate(r, cfg, o.site, transport)
-	if err != nil {
+	if _, err := hostGate(r, cfg, o.site, transport); err != nil {
 		return err
 	}
 	// The review comes before the first change: an
@@ -1334,15 +1333,12 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 	if err != nil {
 		return err
 	}
-	if _, err := admittedHosts(r, cfg, map[string]registry.Runner{o.site: transport}); err != nil {
+	recs, err := admittedHosts(r, cfg, map[string]registry.Runner{o.site: transport})
+	if err != nil {
 		return err
 	}
-	var options []hostprep.Option
-	if host.Shared() {
-		options = append(options, hostprep.Shared())
-	}
 	plan, err := ui.Get(r, "read the host", func() (*hostprep.Plan, error) {
-		return hostprep.Build(o.site, cfg, transport, options...)
+		return hostprep.Build(o.site, cfg, transport, recs[o.site])
 	})
 	if err != nil {
 		return err

@@ -455,8 +455,7 @@ func TestTheDockerHoldIsLocked(t *testing.T) {
 
 // apt runs with the hold's lock closed, so nothing apt or a package's
 // script starts can keep /run/paisans-docker-hold.lock held after the
-// hold ends. Host prepare's install, which holds no lock, runs the same
-// apt lines unchanged in effect.
+// hold ends.
 func TestAptRunsWithoutTheHoldsLock(t *testing.T) {
 	profile, err := hostprep.Select(hostprep.ParseOSRelease(ubuntu2404))
 	if err != nil {
@@ -466,11 +465,7 @@ func TestAptRunsWithoutTheHoldsLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepare, err := profile.Packages(freshHost(), hostprep.ParseOSRelease(ubuntu2404))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, command := range map[string]string{"admit": admit.Steps[len(admit.Steps)-1].Command, "prepare": prepare.Steps[len(prepare.Steps)-1].Command} {
+	for name, command := range map[string]string{"admit": admit.Steps[len(admit.Steps)-1].Command} {
 		dir := t.TempDir()
 		bin, log := filepath.Join(dir, "bin"), filepath.Join(dir, "log")
 		if err := os.Mkdir(bin, 0o755); err != nil {
@@ -665,7 +660,8 @@ func TestTheHoldWaitsForDpkg(t *testing.T) {
 // pulls in a whole kernel. It is installed without its recommendations, in
 // an apt call of its own: Docker's packages recommend what Docker needs
 // (iptables, pigz, the rootless extras), so the rest keep theirs. Both
-// calls close the hold's lock, and admit's keeps --no-upgrade on both.
+// calls close the hold's lock, whether admit installs Docker or finds it,
+// and with Docker present both keep --no-upgrade.
 func TestWireGuardToolsIsInstalledWithoutRecommends(t *testing.T) {
 	for _, ubuntu := range []string{ubuntu2204, ubuntu2404} {
 		profile, err := hostprep.Select(hostprep.ParseOSRelease(ubuntu))
@@ -674,18 +670,18 @@ func TestWireGuardToolsIsInstalledWithoutRecommends(t *testing.T) {
 		}
 		host := freshHost()
 		host.files["/etc/os-release"] = ubuntu
-		prepare, err := profile.Packages(host, hostprep.ParseOSRelease(ubuntu))
+		absent, _, err := profile.AdmitPackages(host, hostprep.ParseOSRelease(ubuntu), false)
 		if err != nil {
 			t.Fatal(err)
 		}
 		present := freshHost()
 		present.files["/etc/os-release"] = ubuntu
 		present.responses[probePackages] = "compose present\npkg docker-ce install ok installed\npkg wireguard-tools absent\npkg git install ok installed\ndockerversion 5:29.9.0-1~ubuntu.24.04~noble\nextras 5:29.9.0-1~ubuntu.24.04~noble\nkeyring present\narch amd64\n"
-		admit, _, err := profile.AdmitPackages(present, hostprep.ParseOSRelease(ubuntu), true)
+		withDocker, _, err := profile.AdmitPackages(present, hostprep.ParseOSRelease(ubuntu), true)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for name, s := range map[string]hostprep.Section{"prepare": prepare, "admit": admit} {
+		for name, s := range map[string]hostprep.Section{"Docker absent": absent, "Docker present": withDocker} {
 			var command string
 			for _, step := range s.Steps {
 				if strings.Contains(step.Command, "wireguard-tools") {
@@ -707,7 +703,7 @@ func TestWireGuardToolsIsInstalledWithoutRecommends(t *testing.T) {
 			if !strings.HasSuffix(lines[1], " --no-install-recommends wireguard-tools 8>&-") {
 				t.Errorf("%s: wireguard-tools is installed by %q", name, lines[1])
 			}
-			if name == "admit" && (!strings.Contains(lines[0], "--no-upgrade") || !strings.Contains(lines[1], "--no-upgrade")) {
+			if name == "Docker present" && (!strings.Contains(lines[0], "--no-upgrade") || !strings.Contains(lines[1], "--no-upgrade")) {
 				t.Errorf("admit with Docker present dropped --no-upgrade:\n%s", command)
 			}
 		}

@@ -258,7 +258,7 @@ func TestTheDaemonServesOnlyThisDeploymentsRepositoryOnTheMeshAddress(t *testing
 
 func TestBuildGivesEverySiteTheStoreWithTheOtherSitesAsPeers(t *testing.T) {
 	cfg := fixture(t)
-	plan, err := hostprep.Build("home-a", cfg, freshHost())
+	plan, err := hostprep.Build("home-a", cfg, freshHost(), admitted(t, cfg, "home-a"))
 	if err != nil {
 		t.Fatal(err)
 	}

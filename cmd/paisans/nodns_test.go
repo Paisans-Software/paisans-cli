@@ -50,14 +50,20 @@ func TestMain(m *testing.M) {
 	// SOPS_AGE_* variable from the shell running the tests decide which key
 	// sops uses; a test that wants one sets it.
 	config.AgeKeystore = keystore.NewMemory()
-	// Every host has admitted the deployment as the site it is asked about.
+	// Every host has admitted the deployment as the site it is asked about,
+	// with every grant its roles need.
 	// The record is still read, so a test sees which hosts were checked and
 	// when; a test about the check reads and judges it (realAdmission).
 	admissionForSite = func(t admission.Reader, id, site string, s config.Site) (admission.Record, error) {
 		if p, err := admission.Path(deployment.Deployment{ID: id}.Token()); err == nil {
 			_, _, _ = t.ReadFile(p)
 		}
-		return admission.Record{Site: site, User: s.SSHUser()}, nil
+		rec := admission.Record{Site: site, User: s.SSHUser(), Grants: admission.Needs(s), Forwarding: s.Endpoint != "",
+			Ports: admission.Ports{SSH: s.SSH.PortOrDefault(), WireGuard: s.ListenPort()}}
+		if s.WebServerManagedBy() == config.ManagedByExternal {
+			rec.WebServer = &admission.WebServer{Server: "caddy"}
+		}
+		return rec, nil
 	}
 	// No test waits between two web server checks.
 	fakeWebServerClock()

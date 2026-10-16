@@ -2,16 +2,16 @@ package hostprep_test
 
 import (
 	"errors"
-	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
-	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -61,9 +61,6 @@ func (h *fakeHost) WriteFile(path, content string, mode uint32) error {
 const (
 	probePackages = "docker compose version"
 	probeWatchdog = "RuntimeWatchdogUSec"
-	probeDocker   = "is-enabled docker"
-	probeUnit     = "is-enabled paisans-f2a9-watchdog.service"
-	probeFirewall = "ufw show added"
 	probePasswd   = "getent passwd"
 )
 
@@ -98,6 +95,7 @@ func fingerprint(line string) string {
 }
 
 const ubuntu2404 = `PRETTY_NAME="Ubuntu 24.04.1 LTS"
+
 NAME="Ubuntu"
 VERSION_ID="24.04"
 VERSION="24.04.1 LTS (Noble Numbat)"
@@ -107,74 +105,46 @@ ID_LIKE=debian
 UBUNTU_CODENAME=noble
 `
 
-// freshHost is an Ubuntu 24.04 install with nothing added: no Docker, no
-// WireGuard tools, no ufw, no watchdog device. Its login user's keys are
-// already as prepared, so that tests of everything else see no key steps;
-// the key tests set them up themselves.
+// freshHost is an Ubuntu 24.04 install its owner has admitted and nothing
+// of the deployment user's is on yet: to host admit's package probe it has no
+// Docker, WireGuard tools, ufw or git; to host prepare, softdog is loaded and
+// /dev/watchdog is the user's, and the user's Docker runs no container. Its
+// login user's keys are already as prepared, so that tests of everything else
+// see no key steps; the key tests set them up themselves.
 func freshHost() *fakeHost {
 	return keysPrepared(&fakeHost{
 		files: map[string]string{"/etc/os-release": ubuntu2404},
 		responses: map[string]string{
-			probePackages: "compose absent\npkg docker-ce absent\npkg wireguard-tools absent\npkg ufw absent\npkg git absent\nkeyring absent\narch amd64\n",
-			probeWatchdog: "device absent\nsystemd 0\ndaemon absent\n",
-			probeDocker:   "enabled \nactive \n",
-			probeUnit:     "enabled \nactive \n",
-			probeFirewall: "ufw absent\n",
+			probePackages:  "compose absent\npkg docker-ce absent\npkg wireguard-tools absent\npkg ufw absent\npkg git absent\nkeyring absent\narch amd64\n",
+			probeWatchdog:  "device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\nowner 1000\nme 1000\n",
+			"docker ps -q": "0\n",
 		},
 	})
 }
 
-const dockerSources = `Types: deb
-URIs: https://download.docker.com/linux/ubuntu
-Suites: noble
-Components: stable
-Architectures: amd64
-Signed-By: /etc/apt/keyrings/docker.asc
-`
-
-// preparedHost is what a fresh host looks like after prepare ran on it with a
-// hardware watchdog present, for a site with the given rules.
-// dockerAfterWireGuard is the drop-in as host prepare writes it, so a
-// prepared host carries exactly that file.
-const dockerAfterWireGuard = `# Written by paisans host prepare. Do not edit: it is rewritten if it differs.
-#
-# Docker starts after this deployment's mesh interface, psns-f2a9, so a container publishing a port on
-# the site's mesh address can bind it at boot. Started first, Docker meets an
-# address that does not exist yet ("cannot assign requested address"), and it
-# does not retry a container that failed while setting up its network.
-[Unit]
-Wants=wg-quick@psns-f2a9.service
-After=wg-quick@psns-f2a9.service
-`
-
-const dockerDropIn = "/etc/systemd/system/docker.service.d/paisans-f2a9-after-wireguard.conf"
-
+// preparedHost is what an admitted host looks like after prepare ran on it
+// with a hardware watchdog present, for home-a or, as the gateway, vm.
 func preparedHost(gateway bool) *fakeHost {
-	// Only the gateway, vm, has an endpoint, so only it opens WireGuard's port.
-	firewall := "ufw present\nstatus active\n" + owned("allow 22/tcp", "allow in on psns-f2a9")
-	if !gateway {
-		firewall += owned("allow in on br-+ to 10.44.0.1 port 5000 proto tcp", "allow in on br-+ to 10.44.0.1 port 3900 proto tcp", "allow in on br-+ to 10.44.0.1 port 1413 proto tcp")
-	}
-	if gateway {
-		firewall += owned("allow 51820/udp", "allow 80/tcp", "allow 443/tcp")
-	}
 	site := "home-a"
 	if gateway {
 		site = "vm"
 	}
+	cfg, err := config.Load(filepath.Join("..", "render", "testdata", "deployment.yaml"))
+	if err != nil {
+		panic(err)
+	}
+	daemon, err := hostprep.DaemonJSON(cfg.Mesh.Subnet, "")
+	if err != nil {
+		panic(err)
+	}
 	return configStored(site, keysPrepared(&fakeHost{
 		files: map[string]string{
-			"/etc/os-release":                        ubuntu2404,
-			"/etc/default/ufw":                       "IPV6=yes\nDEFAULT_INPUT_POLICY=\"DROP\"\nDEFAULT_OUTPUT_POLICY=\"ACCEPT\"\n",
-			"/etc/apt/sources.list.d/docker.sources": dockerSources,
-			dockerDropIn:                             dockerAfterWireGuard,
+			"/etc/os-release": ubuntu2404,
+			daemonJSONPath:    daemon,
 		},
 		responses: map[string]string{
-			probePackages: "compose present\npkg docker-ce install ok installed\npkg wireguard-tools install ok installed\npkg ufw install ok installed\npkg git install ok installed\nkeyring present\narch amd64\n",
-			probeWatchdog: "device present\nidentity watchdog0 iTCO_wdt\nsystemd 0\ndaemon absent\n",
-			probeDocker:   "enabled enabled\nactive active\n",
-			probeUnit:     "enabled \nactive \n",
-			probeFirewall: firewall,
+			probeWatchdog:  "device present\nidentity watchdog0 iTCO_wdt\nsystemd 0\ndaemon absent\nowner 1000\nme 1000\n",
+			"docker ps -q": "2\n",
 		},
 	}))
 }
@@ -211,16 +181,6 @@ func configStored(site string, h *fakeHost) *fakeHost {
 	return h
 }
 
-// owned is how `ufw show added` prints rules host prepare added, as probe
-// lines. The comment's text after the tag is not compared, so any will do.
-func owned(specs ...string) string {
-	var out string
-	for _, spec := range specs {
-		out += "rule " + spec + " comment 'paisans-f2a9: test'\n"
-	}
-	return out
-}
-
 // fixture is the render fixture with every site logging in with alice's key
 // alone: the fixture declares a second operator, bob, whom validate requires,
 // and these tests add bob's key themselves where they are about one.
@@ -234,16 +194,6 @@ func fixture(t *testing.T) *config.Config {
 		s.SSH.Keys = []config.NamedKey{{Name: "alice", Line: keyAlice}}
 		cfg.Sites[name] = s
 	}
-	return cfg
-}
-
-// withoutMonitor is the fixture without its uptime app, for a test about the
-// firewall's handling of rules on vm that nothing about the monitor should
-// bear on.
-func withoutMonitor(t *testing.T) *config.Config {
-	t.Helper()
-	cfg := fixture(t)
-	delete(cfg.Apps, "health")
 	return cfg
 }
 
@@ -277,7 +227,7 @@ func printed(plan *hostprep.Plan) string {
 func TestAnUnsupportedHostIsNamedWithWhatIsSupported(t *testing.T) {
 	host := freshHost()
 	host.files["/etc/os-release"] = "ID=debian\nVERSION_ID=\"12\"\n"
-	_, err := hostprep.Build("home-a", fixture(t), host)
+	_, err := hostprep.Build("home-a", fixture(t), host, admitted(t, fixture(t), "home-a"))
 	want := "debian 12 is not supported. Use one of the following:\nubuntu 22.04\nubuntu 24.04"
 	if err == nil || err.Error() != want {
 		t.Fatalf("got %v, want exactly:\n%s", err, want)
@@ -293,7 +243,7 @@ func TestAnUnsupportedHostIsNamedWithWhatIsSupported(t *testing.T) {
 func TestAnotherUbuntuReleaseIsNotSupported(t *testing.T) {
 	host := freshHost()
 	host.files["/etc/os-release"] = strings.ReplaceAll(strings.ReplaceAll(ubuntu2404, "24.04", "20.04"), "noble", "focal")
-	_, err := hostprep.Build("home-a", fixture(t), host)
+	_, err := hostprep.Build("home-a", fixture(t), host, admitted(t, fixture(t), "home-a"))
 	if err == nil || !strings.HasPrefix(err.Error(), "ubuntu 20.04 is not supported. Use one of the following:\n") {
 		t.Fatalf("got %v", err)
 	}
@@ -309,131 +259,25 @@ ID_LIKE=debian
 UBUNTU_CODENAME=jammy
 `
 
-// Ubuntu 22.04 is prepared with the same templates as 24.04, and Docker's
-// apt source names the host's own codename, jammy, read from os-release.
-func TestAnUbuntu2204HostGetsDockersJammyRepository(t *testing.T) {
-	host := freshHost()
-	host.files["/etc/os-release"] = ubuntu2204
-	plan, err := hostprep.Build("home-a", fixture(t), host)
+// Ubuntu 22.04 is prepared as 24.04 is: its profile is selected, and host
+// prepare plans the same user's own steps and installs nothing. Docker's
+// jammy repository is host admit's (internal/hostadmit's jammy goldens).
+func TestAnUbuntu2204HostIsPreparedAs2404Is(t *testing.T) {
+	jammy := freshHost()
+	jammy.files["/etc/os-release"] = ubuntu2204
+	plan, err := hostprep.Build("home-a", fixture(t), jammy, admitted(t, fixture(t), "home-a"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if plan.Profile != "ubuntu 22.04" {
 		t.Errorf("profile is %q", plan.Profile)
 	}
-	if got := printed(plan); !strings.Contains(got, "docker: add Docker's apt repository for jammy/amd64 at /etc/apt/sources.list.d/docker.sources") {
-		t.Errorf("no jammy repository step:\n%s", got)
-	}
-	want := strings.Replace(dockerSources, "Suites: noble", "Suites: jammy", 1)
-	found := false
-	for _, s := range plan.Steps {
-		if s.File != nil && s.File.Path == "/etc/apt/sources.list.d/docker.sources" {
-			found = true
-			if s.File.Content != want {
-				t.Errorf("the apt source is:\n%s", s.File.Content)
-			}
-		}
-	}
-	if !found {
-		t.Error("no apt source was planned")
-	}
-}
-
-// A blank data site needs everything: Docker's repository and packages, the
-// tools, Docker running, softdog (auto, with no device), and the firewall.
-func TestAFreshDataSitePlansEveryStep(t *testing.T) {
-	host := freshHost()
-	plan, err := hostprep.Build("home-a", fixture(t), host)
+	noble, err := hostprep.Build("home-a", fixture(t), freshHost(), admitted(t, fixture(t), "home-a"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := printed(plan)
-	t.Logf("\n%s", got)
-	for _, want := range []string{
-		"docker: add Docker's apt signing key at /etc/apt/keyrings/docker.asc",
-		"docker: add Docker's apt repository for noble/amd64 at /etc/apt/sources.list.d/docker.sources",
-		"packages: install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin wireguard-tools ufw git",
-		"service: enable and start docker",
-		"watchdog: load softdog now",
-		"watchdog: load softdog at every boot (paisans-f2a9-watchdog.service)",
-		"firewall: allow 22/tcp",
-		"firewall: allow all inbound on psns-f2a9",
-		"firewall: deny incoming by default",
-		"firewall: allow outgoing by default",
-		"firewall: enable ufw",
-		"warn: watchdog: falling back to softdog",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("missing %q", want)
-		}
-	}
-	if strings.Contains(got, "80/tcp") || strings.Contains(got, "443/tcp") {
-		t.Errorf("home-a holds no gateway role and was given the gateway's ports:\n%s", got)
-	}
-
-	// The source names the host's own codename and architecture, and is
-	// written over stdin rather than echoed through a command line.
-	for _, s := range plan.Steps {
-		if s.File != nil && s.File.Path == "/etc/apt/sources.list.d/docker.sources" && s.File.Content != dockerSources {
-			t.Errorf("the apt source is:\n%s", s.File.Content)
-		}
-	}
-	// Every apt call is non-interactive.
-	for _, s := range plan.Steps {
-		if strings.Contains(s.Command, "apt-get") && !strings.Contains(s.Command, "DEBIAN_FRONTEND=noninteractive") {
-			t.Errorf("an apt step can prompt: %s", s.Describe)
-		}
-	}
-}
-
-// An arm64 host gets Docker's repository for arm64: the architecture is the
-// one dpkg reports, never assumed.
-func TestAnArm64HostGetsDockersArm64Repository(t *testing.T) {
-	host := freshHost()
-	host.responses[probePackages] = strings.Replace(host.responses[probePackages], "arch amd64", "arch arm64", 1)
-	plan, err := hostprep.Build("home-a", fixture(t), host)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := printed(plan); !strings.Contains(got, "docker: add Docker's apt repository for noble/arm64 at /etc/apt/sources.list.d/docker.sources") {
-		t.Errorf("no arm64 repository step:\n%s", got)
-	}
-	want := strings.Replace(dockerSources, "Architectures: amd64", "Architectures: arm64", 1)
-	found := false
-	for _, s := range plan.Steps {
-		if s.File != nil && s.File.Path == "/etc/apt/sources.list.d/docker.sources" {
-			found = true
-			if s.File.Content != want {
-				t.Errorf("the apt source is:\n%s", s.File.Content)
-			}
-		}
-	}
-	if !found {
-		t.Error("no apt source was written")
-	}
-}
-
-// The order is the safety property. The SSH allow lands before ufw is enabled,
-// and the firewall comes after the package step that installs ufw.
-func TestSSHIsAllowedBeforeTheFirewallIsEnabled(t *testing.T) {
-	plan, err := hostprep.Build("home-a", fixture(t), freshHost())
-	if err != nil {
-		t.Fatal(err)
-	}
-	index := func(cmd string) int {
-		for i, s := range plan.Steps {
-			if strings.Contains(s.Command, cmd) {
-				return i
-			}
-		}
-		return -1
-	}
-	ssh, deny, enable, install := index("ufw allow 22/tcp"), index("ufw default deny incoming"), index("ufw --force enable"), index("apt-get -o DPkg::Lock::Timeout=300 -o Dpkg::Options")
-	if ssh < 0 || deny < 0 || enable < 0 || install < 0 {
-		t.Fatalf("missing a step:\n%s", describes(plan))
-	}
-	if !(install < ssh && ssh < deny && deny < enable) {
-		t.Errorf("want install < allow ssh < default deny < enable, got %d %d %d %d", install, ssh, deny, enable)
+	if got, want := describes(plan), describes(noble); got != want {
+		t.Errorf("22.04 plans:\n%s\n24.04 plans:\n%s", got, want)
 	}
 }
 
@@ -445,7 +289,7 @@ func TestAPreparedHostPlansNothing(t *testing.T) {
 		gateway bool
 	}{{"home-a", false}, {"vm", true}} {
 		t.Run(tc.site, func(t *testing.T) {
-			plan, err := hostprep.Build(tc.site, fixture(t), preparedHost(tc.gateway))
+			plan, err := hostprep.Build(tc.site, fixture(t), preparedHost(tc.gateway), admitted(t, fixture(t), tc.site))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -462,7 +306,7 @@ func TestAPreparedHostPlansNothing(t *testing.T) {
 // Running Execute writes the files and runs the commands it planned, in order.
 func TestExecuteRunsEveryStepInOrder(t *testing.T) {
 	host := freshHost()
-	plan, err := hostprep.Build("home-a", fixture(t), host)
+	plan, err := hostprep.Build("home-a", fixture(t), host, admitted(t, fixture(t), "home-a"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -470,11 +314,11 @@ func TestExecuteRunsEveryStepInOrder(t *testing.T) {
 	if err := hostprep.Execute(plan, host, ui.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if len(host.written) != 8 {
-		t.Errorf("want the apt source, the docker drop-in, the unit and the five files of the configuration store written, got %v", host.written)
+	if len(host.written) != 5 {
+		t.Errorf("want the five files of the configuration store written, got %v", host.written)
 	}
-	if last := host.ran[len(host.ran)-1]; last != "ufw --force enable" {
-		t.Errorf("enabling the firewall is the last thing run, got %q", last)
+	if len(host.ran) == 0 || !strings.Contains(host.ran[0], daemonJSONPath) {
+		t.Errorf("writing daemon.json is the first thing run, got %q", host.ran)
 	}
 }
 
@@ -483,7 +327,7 @@ func TestExecuteRunsEveryStepInOrder(t *testing.T) {
 // leaves the line that failed marked.
 func TestExecuteReportsEachStepByItsTitle(t *testing.T) {
 	host := freshHost()
-	plan, err := hostprep.Build("home-a", fixture(t), host)
+	plan, err := hostprep.Build("home-a", fixture(t), host, admitted(t, fixture(t), "home-a"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -491,29 +335,24 @@ func TestExecuteReportsEachStepByItsTitle(t *testing.T) {
 	if err := hostprep.Execute(plan, host, rec); err != nil {
 		t.Fatal(err)
 	}
-	for _, title := range []string{"add docker apt key", "install packages: ", "enable ufw"} {
+	for _, title := range []string{"write daemon.json", "create the configuration repository", "start the configuration store"} {
 		if !rec.Has("done", title) {
 			t.Errorf("no finished step %q:\n%s", title, rec.Lines())
 		}
 	}
-	if !rec.Has("detail", "packages: install ") {
+	if !rec.Has("detail", "docker: write "+daemonJSONPath) {
 		t.Errorf("a step's sentence is its detail:\n%s", rec.Lines())
 	}
 }
 
 // A title is a verb and its object, short enough to share a line with a
-// result; the sentence behind it is for --verbose. install packages is the
-// one title as long as its object: it names each package it installs, which
-// is what a run shows while it waits on apt.
+// result; the sentence behind it is for --verbose.
 func TestEveryStepHasAShortTitle(t *testing.T) {
-	plan, err := hostprep.Build("home-a", fixture(t), freshHost())
+	plan, err := hostprep.Build("home-a", fixture(t), freshHost(), admitted(t, fixture(t), "home-a"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, s := range plan.Steps {
-		if strings.HasPrefix(s.Title, "install packages: ") {
-			continue
-		}
 		if s.Title == "" || len(s.Title) > 40 {
 			t.Errorf("step %q has title %q", s.Describe, s.Title)
 		}
@@ -525,17 +364,15 @@ func TestEveryStepHasAShortTitle(t *testing.T) {
 // the way apply's dry run marks its steps.
 func TestShowMarksStepsPendingAndFindingsDone(t *testing.T) {
 	host := preparedHost(false)
-	host.responses[probeFirewall] = "ufw present\nstatus active\n" +
-		"rule allow 22/tcp comment 'paisans-f2a9: ssh, the bootstrap route'\n" +
-		owned("allow in on psns-f2a9", "allow in on br-+ to 10.44.0.1 port 5000 proto tcp", "allow in on br-+ to 10.44.0.1 port 3900 proto tcp", "allow in on br-+ to 10.44.0.1 port 1413 proto tcp")
-	plan, err := hostprep.Build("home-a", withSSHPort(t, "home-a", 2222), host)
+	delete(host.files, daemonJSONPath)
+	plan, err := hostprep.Build("home-a", fixture(t), host, admitted(t, fixture(t), "home-a"))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	rec := &ui.Recorder{}
 	plan.Show(rec)
-	if !rec.Has("pending", "allow 2222/tcp") || !rec.Has("warn", "old SSH allow on 22 kept") {
+	if !rec.Has("pending", "write daemon.json") || !rec.Has("warn", "reads its new daemon.json at its next restart") {
 		t.Errorf("got:\n%s", rec.Lines())
 	}
 	if rec.Has("done", "") {
@@ -544,7 +381,7 @@ func TestShowMarksStepsPendingAndFindingsDone(t *testing.T) {
 
 	verbose := &ui.Recorder{Verbose_: true}
 	plan.Show(verbose)
-	if !verbose.Has("done", "firewall: ufw active") || !verbose.Has("detail", "firewall: allow 2222/tcp (ssh, the bootstrap route)") {
+	if !verbose.Has("done", "watchdog: watchdog0 is iTCO_wdt, the deployment's user's") || !verbose.Has("detail", "docker: write "+daemonJSONPath) {
 		t.Errorf("got:\n%s", verbose.Lines())
 	}
 
@@ -554,10 +391,10 @@ func TestShowMarksStepsPendingAndFindingsDone(t *testing.T) {
 	out := b.String()
 	t.Logf("\n%s", out)
 	for _, want := range []string{
-		"  todo allow 2222/tcp\n",
-		"      firewall: allow 2222/tcp (ssh, the bootstrap route)\n",
-		"  ok   firewall: ufw active\n",
-		"  WARN firewall: old SSH allow on 22 kept; delete it yourself once SSH on 2222 works\n",
+		"  todo write daemon.json\n",
+		"      docker: write " + daemonJSONPath + ": userland proxy off, address pools clear of the mesh\n",
+		"  ok   watchdog: watchdog0 is iTCO_wdt, the deployment's user's\n",
+		"  WARN docker: the deployment's Docker reads its new daemon.json at its next restart\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q", want)
@@ -574,13 +411,13 @@ func TestShowMarksStepsPendingAndFindingsDone(t *testing.T) {
 
 // A step a fresh host needs is pending, and a warning is still a warning.
 func TestAFreshHostMarksItsStepsPending(t *testing.T) {
-	plan, err := hostprep.Build("home-a", fixture(t), freshHost())
+	plan, err := hostprep.Build("home-a", fixture(t), freshHost(), admitted(t, fixture(t), "home-a"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	rec := &ui.Recorder{}
 	plan.Show(rec)
-	if !rec.Has("pending", "install packages: ") || !rec.Has("warn", "falling back to softdog") {
+	if !rec.Has("pending", "write daemon.json") || !rec.Has("warn", "watchdog: softdog") {
 		t.Errorf("got:\n%s", rec.Lines())
 	}
 }
@@ -588,152 +425,56 @@ func TestAFreshHostMarksItsStepsPending(t *testing.T) {
 // Execute stops at the first failure and names the step.
 func TestExecuteStopsAtTheFirstFailure(t *testing.T) {
 	host := freshHost()
-	plan, err := hostprep.Build("home-a", fixture(t), host)
+	plan, err := hostprep.Build("home-a", fixture(t), host, admitted(t, fixture(t), "home-a"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	host.failures = map[string]error{"modprobe softdog": errors.New("exit status 1")}
+	host.failures = map[string]error{"base64 -d": errors.New("exit status 1")}
 	host.ran = nil
 	err = hostprep.Execute(plan, host, ui.Discard)
-	if err == nil || !strings.HasPrefix(err.Error(), "watchdog: load softdog now") {
+	if err == nil || !strings.HasPrefix(err.Error(), "docker: write "+daemonJSONPath) {
 		t.Fatalf("got %v", err)
 	}
-	for _, c := range host.ran {
-		if strings.HasPrefix(c, "ufw") {
-			t.Fatalf("ran %q after a failed step", c)
-		}
+	if len(host.ran) != 1 || len(host.written) != 0 {
+		t.Fatalf("ran %q and wrote %q after a failed step", host.ran, host.written)
 	}
 }
 
-func TestFirewallRulesFollowRoles(t *testing.T) {
-	cfg := fixture(t)
-	var gateway, data []string
-	for _, r := range hostprep.Rules(cfg.Deployment(), cfg.Sites["vm"]) {
-		gateway = append(gateway, r.String())
-	}
-	for _, r := range hostprep.Rules(cfg.Deployment(), cfg.Sites["home-a"]) {
-		data = append(data, r.String())
-	}
-	if got, want := strings.Join(gateway, ","), "22/tcp,51820/udp,all inbound on psns-f2a9,80/tcp,443/tcp"; got != want {
-		t.Errorf("gateway: got %s, want %s", got, want)
-	}
-	// home-a has no endpoint: nothing dials it, so it opens no UDP port.
-	if got, want := strings.Join(data, ","), "22/tcp,all inbound on psns-f2a9"; got != want {
-		t.Errorf("data: got %s, want %s", got, want)
-	}
-}
-
-// A site with a public address and no endpoint is dialled on 51820, so it
-// opens that port; the port of a port-only endpoint is the one opened.
-func TestADerivedEndpointOpensItsPort(t *testing.T) {
-	cfg := fixture(t)
-	for _, tc := range []struct {
-		endpoint, want string
-	}{
-		{"", "22/tcp,51820/udp,all inbound on psns-f2a9"},
-		{":51821", "22/tcp,51821/udp,all inbound on psns-f2a9"},
-	} {
-		site := cfg.Sites["home-a"]
-		site.Endpoint, site.PublicAddress = tc.endpoint, "203.0.113.10"
-		var got []string
-		for _, r := range hostprep.Rules(cfg.Deployment(), site) {
-			got = append(got, r.String())
-		}
-		if strings.Join(got, ",") != tc.want {
-			t.Errorf("endpoint %q: got %s, want %s", tc.endpoint, strings.Join(got, ","), tc.want)
-		}
-	}
-}
-
-// A monitor serving its own apps opens 80 and 443 like a gateway; behind the
-// operator's own web server it opens nothing for the web, because that server
-// already holds both.
-func TestAPaisansMonitorOpensEightyAndFourFortyThree(t *testing.T) {
-	cfg := fixture(t)
-	var got []string
-	for _, r := range hostprep.Rules(cfg.Deployment(), cfg.Sites["watch"]) {
-		got = append(got, r.String())
-	}
-	if want := "22/tcp,51820/udp,all inbound on psns-f2a9,80/tcp,443/tcp"; strings.Join(got, ",") != want {
-		t.Errorf("paisans: got %s, want %s", strings.Join(got, ","), want)
-	}
-	watch := cfg.Sites["watch"]
-	watch.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "127.0.0.1:8480"}
-	got = nil
-	for _, r := range hostprep.Rules(cfg.Deployment(), watch) {
-		got = append(got, r.String())
-	}
-	if want := "22/tcp,51820/udp,all inbound on psns-f2a9"; strings.Join(got, ",") != want {
-		t.Errorf("external: got %s, want %s", strings.Join(got, ","), want)
-	}
-}
-
-// A fresh gateway gets 80 and 443 and no watchdog: it holds no data role.
-func TestAFreshGatewaySiteDiffersFromADataSite(t *testing.T) {
-	host := freshHost()
-	plan, err := hostprep.Build("vm", fixture(t), host)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := printed(plan)
-	for _, want := range []string{"firewall: allow 80/tcp", "firewall: allow 443/tcp", "watchdog: not needed"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("missing %q in:\n%s", want, got)
-		}
-	}
-	if strings.Contains(got, "softdog") {
-		t.Errorf("a site with no data role was given a watchdog:\n%s", got)
-	}
-	for _, c := range host.ran {
-		if strings.Contains(c, probeWatchdog) {
-			t.Error("the watchdog was probed on a site with no data role")
-		}
-	}
-}
-
-// Only the missing rule is planned on a firewall that is already up.
-func TestOnlyMissingFirewallRulesArePlanned(t *testing.T) {
-	host := preparedHost(false)
-	host.responses[probeFirewall] = "ufw present\nstatus active\n" + owned("allow 22/tcp", "allow in on br-+ to 10.44.0.1 port 5000 proto tcp", "allow in on br-+ to 10.44.0.1 port 3900 proto tcp", "allow in on br-+ to 10.44.0.1 port 1413 proto tcp")
-	plan, err := hostprep.Build("home-a", fixture(t), host)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := describes(plan); got != "firewall: allow all inbound on psns-f2a9 (the mesh: etcd, Patroni, Garage, HAProxy)" {
-		t.Errorf("got:\n%s", got)
-	}
-}
-
+// The watchdog is read, never planned: each mode accepts what admit left or
+// refuses with what the host's owner runs.
 func TestWatchdogModes(t *testing.T) {
-	hardware := "device present\nidentity watchdog0 sp5100_tco\nsystemd 0\ndaemon absent\n"
-	softdog := "device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\n"
-	none := "device absent\nsystemd 0\ndaemon absent\n"
+	const mine = "owner 1000\nme 1000\n"
+	hardware := "device present\nidentity watchdog0 sp5100_tco\nsystemd 0\ndaemon absent\n" + mine
+	softdog := "device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\n" + mine
+	none := "device absent\nsystemd 0\ndaemon absent\nowner \nme 1000\n"
+	roots := "device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\nowner 0\nme 1000\n"
 
 	cases := []struct {
 		name    string
 		mode    config.WatchdogMode
 		probe   string
 		refuse  string // substring of the error, when refused
-		steps   []string
 		present string
 		warn    bool
 	}{
 		{name: "auto uses hardware", mode: config.WatchdogAuto, probe: hardware, present: "watchdog0 is sp5100_tco"},
-		{name: "auto falls back to softdog", mode: config.WatchdogAuto, probe: none, steps: []string{"watchdog: load softdog now", "watchdog: load softdog at every boot"}, warn: true},
-		{name: "auto keeps a loaded softdog and persists it", mode: config.WatchdogAuto, probe: softdog, steps: []string{"watchdog: load softdog at every boot"}, present: "Software Watchdog", warn: true},
+		{name: "auto accepts softdog with a warning", mode: config.WatchdogAuto, probe: softdog, present: "Software Watchdog", warn: true},
 		{name: "required accepts hardware", mode: config.WatchdogRequired, probe: hardware, present: "sp5100_tco"},
 		{name: "required refuses softdog", mode: config.WatchdogRequired, probe: softdog, refuse: "has only softdog"},
-		{name: "required refuses none", mode: config.WatchdogRequired, probe: none, refuse: "has no watchdog device"},
-		{name: "softdog loads without a warning", mode: config.WatchdogSoftdog, probe: none, steps: []string{"watchdog: load softdog now", "watchdog: load softdog at every boot"}},
-		{name: "systemd holds the device", mode: config.WatchdogAuto, probe: "device present\nidentity watchdog0 iTCO_wdt\nsystemd 1min\ndaemon absent\n", refuse: "RuntimeWatchdogUSec is 1min"},
-		{name: "a daemon holds the device", mode: config.WatchdogAuto, probe: "device present\nidentity watchdog0 iTCO_wdt\nsystemd 0\ndaemon running\n", refuse: "a watchdog daemon is running"},
-		{name: "contention refuses required too", mode: config.WatchdogRequired, probe: "device present\nidentity watchdog0 iTCO_wdt\nsystemd 30s\ndaemon absent\n", refuse: "RuntimeWatchdogUSec"},
+		{name: "softdog accepts softdog without a warning", mode: config.WatchdogSoftdog, probe: softdog, present: "Software Watchdog"},
+		{name: "softdog warns of hardware", mode: config.WatchdogSoftdog, probe: hardware, present: "sp5100_tco", warn: true},
+		{name: "no device sends the owner to admit", mode: config.WatchdogAuto, probe: none, refuse: "sudo paisans host admit --request <site>.admit --watchdog"},
+		{name: "a root device sends the owner to admit", mode: config.WatchdogAuto, probe: roots, refuse: "is not the deployment's user's"},
+		{name: "systemd holds the device", mode: config.WatchdogAuto, probe: "device present\nidentity watchdog0 iTCO_wdt\nsystemd 1min\ndaemon absent\n" + mine, refuse: "RuntimeWatchdogUSec is 1min"},
+		{name: "a daemon holds the device", mode: config.WatchdogAuto, probe: "device present\nidentity watchdog0 iTCO_wdt\nsystemd 0\ndaemon running\n" + mine, refuse: "a watchdog daemon is running"},
+		{name: "contention refuses required too", mode: config.WatchdogRequired, probe: "device present\nidentity watchdog0 iTCO_wdt\nsystemd 30s\ndaemon absent\n" + mine, refuse: "RuntimeWatchdogUSec"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			host := preparedHost(false)
 			host.responses[probeWatchdog] = tc.probe
-			plan, err := hostprep.Build("home-a", withWatchdog(t, "home-a", tc.mode), host)
+			cfg := withWatchdog(t, "home-a", tc.mode)
+			plan, err := hostprep.Build("home-a", cfg, host, admitted(t, cfg, "home-a"))
 			if tc.refuse != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.refuse) {
 					t.Fatalf("want a refusal containing %q, got %v", tc.refuse, err)
@@ -743,13 +484,7 @@ func TestWatchdogModes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got := describes(plan)
-			for _, want := range tc.steps {
-				if !strings.Contains(got, want) {
-					t.Errorf("missing step %q in:\n%s", want, got)
-				}
-			}
-			if len(tc.steps) == 0 && got != "" {
+			if got := describes(plan); got != "" {
 				t.Errorf("want no steps, got:\n%s", got)
 			}
 			if tc.present != "" && !strings.Contains(strings.Join(plan.Present, "\n"), tc.present) {
@@ -759,420 +494,6 @@ func TestWatchdogModes(t *testing.T) {
 				t.Errorf("warnings: %v, want warning %v", plan.Warnings, tc.warn)
 			}
 		})
-	}
-}
-
-// softdog persisted by an earlier prepare plans nothing on the next one, and
-// still warns under auto: the host is prepared, and still on softdog.
-func TestASoftdogHostReRunsClean(t *testing.T) {
-	host := freshHost()
-	plan, err := hostprep.Build("home-a", fixture(t), host)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := hostprep.Execute(plan, host, ui.Discard); err != nil {
-		t.Fatal(err)
-	}
-	after := preparedHost(false)
-	after.files["/etc/systemd/system/paisans-f2a9-watchdog.service"] = host.files["/etc/systemd/system/paisans-f2a9-watchdog.service"]
-	after.responses[probeWatchdog] = "device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\n"
-	after.responses[probeUnit] = "enabled enabled\nactive active\n"
-	again, err := hostprep.Build("home-a", fixture(t), after)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(again.Steps) != 0 {
-		t.Fatalf("a softdog host prepared once planned again:\n%s", printed(again))
-	}
-	if len(again.Warnings) != 1 {
-		t.Errorf("auto on softdog should still warn, got %v", again.Warnings)
-	}
-}
-
-// Ubuntu's own docker.io without a working `docker compose` is refused rather
-// than removed: removing it would take down whatever containers it is
-// running. Without Ubuntu's compose plugin, installing that is offered too.
-func TestDistroDockerIsRefusedNotRemoved(t *testing.T) {
-	host := freshHost()
-	host.responses[probePackages] = "compose absent\npkg docker.io install ok installed\npkg runc install ok installed\nkeyring absent\narch amd64\n"
-	_, err := hostprep.Build("home-a", fixture(t), host)
-	if err == nil || !strings.Contains(err.Error(), "docker.io, runc") || !strings.Contains(err.Error(), "apt-get install docker-compose-v2), or remove them yourself (apt-get remove docker.io runc)") {
-		t.Fatalf("got %v", err)
-	}
-	host = freshHost()
-	host.responses[probePackages] = "compose absent\npkg docker.io install ok installed\npkg docker-compose-v2 install ok installed\nkeyring absent\narch amd64\n"
-	_, err = hostprep.Build("home-a", fixture(t), host)
-	if err == nil || strings.Contains(err.Error(), "apt-get install") || !strings.Contains(err.Error(), "Remove them yourself (apt-get remove docker.io docker-compose-v2)") {
-		t.Fatalf("got %v", err)
-	}
-}
-
-// Ubuntu's docker.io is left as it is when `docker compose` works with it:
-// nothing of Docker's is planned, and nothing refused.
-func TestDistroDockerWithComposeIsLeftAlone(t *testing.T) {
-	host := freshHost()
-	host.responses[probePackages] = "compose present\npkg docker.io install ok installed\npkg docker-compose-v2 install ok installed\npkg containerd install ok installed\npkg runc install ok installed\nkeyring absent\narch amd64\n"
-	plan, err := hostprep.Build("home-a", fixture(t), host)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := describes(plan); strings.Contains(got, "docker-ce") || strings.Contains(got, "docker apt") || strings.Contains(got, "Docker's apt") {
-		t.Errorf("Docker was planned over a working docker.io:\n%s", got)
-	}
-}
-
-// A package removed with its configuration kept reads "deinstall ok
-// config-files", which is not installed.
-func TestARemovedPackageIsNotInstalled(t *testing.T) {
-	host := preparedHost(false)
-	host.responses[probePackages] = "compose present\npkg wireguard-tools deinstall ok config-files\npkg ufw install ok installed\npkg git install ok installed\n"
-	plan, err := hostprep.Build("home-a", fixture(t), host)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := describes(plan); got != "packages: install wireguard-tools" {
-		t.Errorf("got:\n%s", got)
-	}
-}
-
-// An apps site lets its containers reach the database proxy and, where Garage
-// runs, object storage on its own mesh address, over the compose bridges and
-// nothing wider; where the account service runs, also HAProxy's route to
-// Pocket ID's API. A gateway only site gets none, and so does the fixture's
-// monitor site, where the monitor is the only app and does not check itself.
-func TestContainerRulesReachOnlyWhatAppsUse(t *testing.T) {
-	cfg := fixture(t)
-	var got []string
-	for _, r := range hostprep.ContainerRules(cfg, "home-a") {
-		got = append(got, r.String())
-	}
-	if want := "5000/tcp on br-+ to 10.44.0.1,3900/tcp on br-+ to 10.44.0.1,1413/tcp on br-+ to 10.44.0.1"; strings.Join(got, ",") != want {
-		t.Errorf("home-a: got %s, want %s", strings.Join(got, ","), want)
-	}
-	for _, site := range []string{"vm", "watch"} {
-		if rules := hostprep.ContainerRules(cfg, site); len(rules) != 0 {
-			t.Errorf("%s: got %v, want none", site, rules)
-		}
-	}
-}
-
-func commands(plan *hostprep.Plan) []string {
-	var out []string
-	for _, s := range plan.Steps {
-		out = append(out, s.Command)
-	}
-	return out
-}
-
-func indexOf(cmds []string, cmd string) int {
-	for i, c := range cmds {
-		if c == cmd {
-			return i
-		}
-	}
-	return -1
-}
-
-// Every rule a fresh host is given carries the comment that marks it as host
-// prepare's, in the syntax ufw 0.36.2 accepts and prints back.
-func TestAFreshHostAddsCommentedRules(t *testing.T) {
-	plan, err := hostprep.Build("home-a", fixture(t), freshHost())
-	if err != nil {
-		t.Fatal(err)
-	}
-	cmds := commands(plan)
-	for _, want := range []string{
-		"ufw allow 22/tcp comment 'paisans-f2a9: ssh, the bootstrap route'",
-		"ufw allow in on psns-f2a9 comment 'paisans-f2a9: the mesh: etcd, Patroni, Garage, HAProxy'",
-		"ufw allow in on br-+ to 10.44.0.1 port 5000 proto tcp comment 'paisans-f2a9: app containers to the local database proxy'",
-	} {
-		if indexOf(cmds, want) < 0 {
-			t.Errorf("missing %q in:\n%s", want, strings.Join(cmds, "\n"))
-		}
-	}
-	for _, c := range cmds {
-		if strings.HasPrefix(c, "ufw allow") && !strings.Contains(c, " comment 'paisans-f2a9: ") {
-			t.Errorf("an allow without the ownership comment: %s", c)
-		}
-	}
-}
-
-// A site that loses the gateway role loses 80 and 443 on its next prepare,
-// after the firewall's default policy and enabling, and nothing else goes.
-func TestAStaleOwnedRuleIsRemovedLast(t *testing.T) {
-	cfg := fixture(t)
-	vm := cfg.Sites["vm"]
-	vm.Roles = []config.Role{config.RoleWitness}
-	cfg.Sites["vm"] = vm
-	host := preparedHost(true)
-	host.files["/etc/default/ufw"] = "DEFAULT_INPUT_POLICY=\"ACCEPT\"\nDEFAULT_OUTPUT_POLICY=\"ACCEPT\"\n"
-	plan, err := hostprep.Build("vm", cfg, host)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("\n%s", printed(plan))
-	cmds := commands(plan)
-	want := []string{
-		"ufw default deny incoming",
-		"ufw delete allow 80/tcp comment 'paisans-f2a9: test'",
-		"ufw delete allow 443/tcp comment 'paisans-f2a9: test'",
-	}
-	if strings.Join(cmds, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("got:\n%s\nwant:\n%s", strings.Join(cmds, "\n"), strings.Join(want, "\n"))
-	}
-	for _, s := range plan.Steps[1:] {
-		if s.Label != "remove" {
-			t.Errorf("a removal is labelled %q: %s", s.Label, s.Describe)
-		}
-	}
-	if !strings.Contains(printed(plan), "pending: remove ufw rule 80/tcp") ||
-		!strings.Contains(printed(plan), "detail: firewall: delete `ufw allow 80/tcp comment 'paisans-f2a9: test'`") {
-		t.Errorf("the plan does not show the removal as remove:\n%s", printed(plan))
-	}
-}
-
-// A rule is host prepare's only under this deployment's tag. One another
-// deployment on the host added, paisans-<its token>:, and one carrying the
-// bare paisans: tag are foreign: neither is removed when no longer derived,
-// and neither satisfies or is rewritten for a derived rule.
-func TestAnotherDeploymentsRuleIsForeign(t *testing.T) {
-	cfg := withoutMonitor(t)
-	vm := cfg.Sites["vm"]
-	vm.Roles = []config.Role{config.RoleWitness}
-	cfg.Sites["vm"] = vm
-	host := configStored("vm", preparedHost(false))
-	host.responses[probeFirewall] = "ufw present\nstatus active\n" +
-		owned("allow 22/tcp", "allow 51820/udp", "allow in on psns-f2a9") +
-		"rule allow 80/tcp comment 'paisans-0c1d: the gateway'\n" +
-		"rule allow 443/tcp comment 'paisans: the gateway'\n"
-	plan, err := hostprep.Build("vm", cfg, host)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(plan.Steps) != 0 {
-		t.Fatalf("another deployment's rule was planned for:\n%s", printed(plan))
-	}
-}
-
-// Rules host prepare did not add are never removed or changed. One that bears
-// on a derived rule is listed; one that does not is not mentioned at all.
-func TestAForeignRuleIsNeverTouched(t *testing.T) {
-	cfg := withoutMonitor(t)
-	vm := cfg.Sites["vm"]
-	vm.Roles = []config.Role{config.RoleWitness}
-	cfg.Sites["vm"] = vm
-	host := configStored("vm", preparedHost(false))
-	host.responses[probeFirewall] = "ufw present\nstatus active\n" +
-		owned("allow 22/tcp", "allow 51820/udp", "allow in on psns-f2a9") +
-		"rule allow 80/tcp\n" + // uncommented, and no longer derived
-		"rule allow 8080/tcp comment 'grafana'\n" + // commented, someone else's
-		"rule allow from 192.0.2.7 to any port 22 proto tcp comment 'office'\n" + // bears on SSH
-		"rule allow in on psns-f2a9 to any port 9100 proto tcp\n" // bears on the mesh
-	plan, err := hostprep.Build("vm", cfg, host)
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := printed(plan)
-	t.Logf("\n%s", out)
-	if len(plan.Steps) != 0 {
-		t.Fatalf("a foreign rule was planned for:\n%s", out)
-	}
-	for _, want := range []string{
-		"done: firewall: `ufw allow from 192.0.2.7 to any port 22 proto tcp comment 'office'` (bears on 22/tcp) not paisans",
-		"done: firewall: `ufw allow in on psns-f2a9 to any port 9100 proto tcp` (bears on all inbound on psns-f2a9) not paisans",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("missing %q", want)
-		}
-	}
-	for _, unmentioned := range []string{"80/tcp", "8080"} {
-		if strings.Contains(out, unmentioned) {
-			t.Errorf("%s bears on no derived rule and was mentioned:\n%s", unmentioned, out)
-		}
-	}
-}
-
-// A rule someone else commented, matching a derived rule exactly, satisfies
-// it. Adding ours would make ufw rewrite theirs in place.
-func TestAForeignCommentedMatchIsLeftAlone(t *testing.T) {
-	host := preparedHost(true)
-	host.responses[probeFirewall] = "ufw present\nstatus active\n" +
-		owned("allow 22/tcp", "allow 51820/udp", "allow in on psns-f2a9", "allow 443/tcp") +
-		"rule allow 80/tcp comment 'acme http-01'\n"
-	plan, err := hostprep.Build("vm", withoutMonitor(t), host)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(plan.Steps) != 0 {
-		t.Fatalf("planned over a foreign rule:\n%s", printed(plan))
-	}
-	if !strings.Contains(printed(plan), "done: firewall: 80/tcp allowed by `ufw allow 80/tcp comment 'acme http-01'` not paisans") {
-		t.Errorf("got:\n%s", printed(plan))
-	}
-}
-
-// A different action on the same traffic is someone else's decision. It is
-// warned about and left alone, and a deny on SSH is refused outright, since
-// enabling the firewall over it would lock the operator out.
-func TestAForeignActionIsWarnedOrRefused(t *testing.T) {
-	host := preparedHost(true)
-	host.responses[probeFirewall] = "ufw present\nstatus active\n" +
-		owned("allow 51820/udp", "allow in on psns-f2a9", "allow 80/tcp") +
-		"rule limit 22/tcp\nrule deny 443/tcp\n"
-	plan, err := hostprep.Build("vm", withoutMonitor(t), host)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(plan.Steps) != 0 || len(plan.Warnings) != 2 {
-		t.Fatalf("got:\n%s", printed(plan))
-	}
-
-	host.responses[probeFirewall] = "ufw present\nstatus inactive\nrule deny 22/tcp\n"
-	if _, err := hostprep.Build("vm", withoutMonitor(t), host); err == nil || !strings.Contains(err.Error(), "blocks SSH") {
-		t.Fatalf("a deny on SSH was not refused: %v", err)
-	}
-}
-
-// A host prepared before rules carried a comment has every rule, uncommented.
-// Each is reported present and adopted with one command, which ufw applies as
-// an in place rewrite. No delete follows: ufw would let a delete without a
-// comment remove the commented rule just adopted.
-func TestALegacyRuleIsAdoptedWithoutAGap(t *testing.T) {
-	host := preparedHost(false)
-	host.responses[probeFirewall] = "ufw present\nstatus active\nrule allow 22/tcp\nrule allow in on psns-f2a9\nrule allow in on br-+ to 10.44.0.1 port 5000 proto tcp\nrule allow in on br-+ to 10.44.0.1 port 3900 proto tcp\nrule allow in on br-+ to 10.44.0.1 port 1413 proto tcp\n"
-	plan, err := hostprep.Build("home-a", fixture(t), host)
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := printed(plan)
-	t.Logf("\n%s", out)
-	if len(plan.Steps) != 5 {
-		t.Fatalf("want five adoptions, got:\n%s", out)
-	}
-	for _, s := range plan.Steps {
-		if s.Label != "adopt" || !strings.HasPrefix(s.Command, "ufw allow ") || !strings.Contains(s.Command, " comment 'paisans-f2a9: ") {
-			t.Errorf("not an adoption: %s %q", s.Label, s.Command)
-		}
-	}
-	if !strings.Contains(out, "pending: adopt rule 22/tcp") ||
-		!strings.Contains(out, "detail: firewall: mark `ufw allow 22/tcp` as host prepare's") ||
-		!strings.Contains(out, "done: firewall: 22/tcp allowed, by a rule without the paisans comment") {
-		t.Errorf("got:\n%s", out)
-	}
-
-	// Once adopted, the host plans nothing.
-	host.responses[probeFirewall] = "ufw present\nstatus active\n"
-	for _, c := range commands(plan) {
-		host.responses[probeFirewall] += "rule " + strings.TrimPrefix(c, "ufw ") + "\n"
-	}
-	again, err := hostprep.Build("home-a", fixture(t), host)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(again.Steps) != 0 {
-		t.Errorf("an adopted host planned again:\n%s", printed(again))
-	}
-}
-
-// SSH is never removed, even when host prepare added it and nothing derives it
-// any more: with incoming denied, that removal drops the next connection.
-func TestSSHIsNeverRemoved(t *testing.T) {
-	host := preparedHost(false)
-	host.responses[probeFirewall] = "ufw present\nstatus active\n" +
-		owned("allow 22/tcp", "allow in on psns-f2a9", "allow in on br-+ to 10.44.0.1 port 5000 proto tcp", "allow in on br-+ to 10.44.0.1 port 3900 proto tcp", "allow in on br-+ to 10.44.0.1 port 1413 proto tcp") +
-		owned("allow 22", "allow from 192.0.2.0/24 to any port 22 proto tcp")
-	plan, err := hostprep.Build("home-a", fixture(t), host)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, c := range commands(plan) {
-		if strings.HasPrefix(c, "ufw delete") {
-			t.Errorf("planned %q", c)
-		}
-	}
-	if !strings.Contains(printed(plan), "host prepare never removes an SSH allow") {
-		t.Errorf("got:\n%s", printed(plan))
-	}
-}
-
-func withSSHPort(t *testing.T, site string, port int) *config.Config {
-	t.Helper()
-	cfg := fixture(t)
-	s := cfg.Sites[site]
-	s.SSH.Port = port
-	cfg.Sites[site] = s
-	return cfg
-}
-
-// The SSH allow is for the declared port, and it is still the first allow.
-func TestTheSSHRuleFollowsTheDeclaredPort(t *testing.T) {
-	plan, err := hostprep.Build("home-a", withSSHPort(t, "home-a", 2222), freshHost())
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := printed(plan)
-	if !strings.Contains(out, "firewall: allow 2222/tcp (ssh, the bootstrap route)") {
-		t.Fatalf("no allow for the declared port:\n%s", out)
-	}
-	if strings.Contains(out, "allow 22/tcp") {
-		t.Errorf("port 22 allowed although ssh.port is 2222:\n%s", out)
-	}
-	cmds := commands(plan)
-	for _, c := range cmds {
-		if strings.HasPrefix(c, "ufw allow") {
-			if !strings.HasPrefix(c, "ufw allow 2222/tcp") {
-				t.Errorf("the first allow is %q, want SSH's", c)
-			}
-			break
-		}
-	}
-}
-
-// Moving ssh.port adds the new allow and keeps the old one, saying so: host
-// prepare cannot know sshd already listens on the new port.
-func TestMovingTheSSHPortKeepsTheOldAllow(t *testing.T) {
-	host := preparedHost(false)
-	host.responses[probeFirewall] = "ufw present\nstatus active\n" +
-		"rule allow 22/tcp comment 'paisans-f2a9: ssh, the bootstrap route'\n" +
-		owned("allow in on psns-f2a9", "allow in on br-+ to 10.44.0.1 port 5000 proto tcp", "allow in on br-+ to 10.44.0.1 port 3900 proto tcp", "allow in on br-+ to 10.44.0.1 port 1413 proto tcp")
-	plan, err := hostprep.Build("home-a", withSSHPort(t, "home-a", 2222), host)
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := printed(plan)
-	t.Logf("\n%s", out)
-	if got := commands(plan); len(got) != 1 || got[0] != "ufw allow 2222/tcp comment 'paisans-f2a9: ssh, the bootstrap route'" {
-		t.Fatalf("want only the new allow, got %q", got)
-	}
-	// Something the operator has to see to is a warning, not a finding.
-	if !strings.Contains(out, "warn: firewall: old SSH allow on 22 kept; delete it yourself once SSH on 2222 works") ||
-		strings.Contains(out, "done: firewall: old SSH allow") {
-		t.Errorf("the old allow is not warned about:\n%s", out)
-	}
-}
-
-// An old SSH allow whose port is not a single number is named by its rule.
-func TestAnOldSSHAllowWithoutOnePortIsNamedByItsRule(t *testing.T) {
-	host := preparedHost(false)
-	host.responses[probeFirewall] = "ufw present\nstatus active\n" +
-		"rule allow 22,2200/tcp comment 'paisans-f2a9: ssh, the bootstrap route'\n" +
-		owned("allow in on psns-f2a9", "allow in on br-+ to 10.44.0.1 port 5000 proto tcp", "allow in on br-+ to 10.44.0.1 port 3900 proto tcp", "allow in on br-+ to 10.44.0.1 port 1413 proto tcp")
-	plan, err := hostprep.Build("home-a", withSSHPort(t, "home-a", 2222), host)
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := printed(plan)
-	if !strings.Contains(out, "warn: firewall: old SSH allow `ufw allow 22,2200/tcp comment 'paisans-f2a9: ssh, the bootstrap route'` kept; delete it yourself once SSH on 2222 works") {
-		t.Errorf("the old allow is not named by its rule:\n%s", out)
-	}
-}
-
-// A deny on the declared SSH port is refused, whatever the port.
-func TestADenyOnTheDeclaredSSHPortIsRefused(t *testing.T) {
-	host := preparedHost(false)
-	host.responses[probeFirewall] = "ufw present\nstatus inactive\nrule deny 2222/tcp\n"
-	if _, err := hostprep.Build("home-a", withSSHPort(t, "home-a", 2222), host); err == nil || !strings.Contains(err.Error(), "blocks SSH") {
-		t.Fatalf("a deny on the SSH port was not refused: %v", err)
 	}
 }
 
@@ -1217,7 +538,7 @@ func TestAUserWithoutAuthorizedKeysGetsThem(t *testing.T) {
 	host := preparedHost(false)
 	delete(host.files, authorizedKeys)
 	delete(host.files, ownedKeys)
-	plan, err := hostprep.Build("home-a", withKeys(t, "home-a", keyAlice, keyBob), host)
+	plan, err := hostprep.Build("home-a", withKeys(t, "home-a", keyAlice, keyBob), host, admitted(t, withKeys(t, "home-a", keyAlice, keyBob), "home-a"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1261,7 +582,7 @@ func TestAUserWithoutAuthorizedKeysGetsThem(t *testing.T) {
 func TestKeysAreAddedWhateverAnSSHAllowFileHolds(t *testing.T) {
 	host := preparedHost(false)
 	host.files["/etc/paisans/ssh-allow.ubuntu"] = "# allows nothing\n"
-	plan, err := hostprep.Build("home-a", withKeys(t, "home-a", keyAlice, keyBob), host)
+	plan, err := hostprep.Build("home-a", withKeys(t, "home-a", keyAlice, keyBob), host, admitted(t, withKeys(t, "home-a", keyAlice, keyBob), "home-a"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1286,7 +607,7 @@ func TestAnExistingListedKeyIsLeftUnrecorded(t *testing.T) {
 	host := preparedHost(false)
 	host.files[authorizedKeys] = keyCloud + "\n" + keyAlice
 	delete(host.files, ownedKeys)
-	plan, err := hostprep.Build("home-a", withKeys(t, "home-a", keyAlice, keyBob), host)
+	plan, err := hostprep.Build("home-a", withKeys(t, "home-a", keyAlice, keyBob), host, admitted(t, withKeys(t, "home-a", keyAlice, keyBob), "home-a"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1318,7 +639,7 @@ func TestAKeyHostPrepareDidNotWriteIsNeverRemoved(t *testing.T) {
 	host := preparedHost(false)
 	host.files[authorizedKeys] = keyAlice + "\n" + keyCarol + "\n"
 	host.files[ownedKeys] = "added " + fingerprint(keyAlice) + " alice\n" + fingerprint(keyCarol) + " carol\n"
-	plan, err := hostprep.Build("home-a", withKeys(t, "home-a", keyAlice), host)
+	plan, err := hostprep.Build("home-a", withKeys(t, "home-a", keyAlice), host, admitted(t, withKeys(t, "home-a", keyAlice), "home-a"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1332,10 +653,9 @@ func TestAKeyHostPrepareDidNotWriteIsNeverRemoved(t *testing.T) {
 // last, by its exact line; one it never added is not, listed or not.
 func TestAnUnlistedOwnedKeyIsRemovedLast(t *testing.T) {
 	host := preparedHost(false)
-	host.files["/etc/default/ufw"] = "DEFAULT_INPUT_POLICY=\"ACCEPT\"\nDEFAULT_OUTPUT_POLICY=\"ACCEPT\"\n"
 	host.files[authorizedKeys] = keyCloud + "\n" + keyAlice + "\n" + keyCarol + "  \n"
 	host.files[ownedKeys] = "added " + fingerprint(keyAlice) + " alice\nadded " + fingerprint(keyCarol) + " carol\n"
-	plan, err := hostprep.Build("home-a", withKeys(t, "home-a", keyAlice, keyBob), host)
+	plan, err := hostprep.Build("home-a", withKeys(t, "home-a", keyAlice, keyBob), host, admitted(t, withKeys(t, "home-a", keyAlice, keyBob), "home-a"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1362,17 +682,15 @@ func TestAnUnlistedOwnedKeyIsRemovedLast(t *testing.T) {
 	if strings.Contains(lastCmd, keyCloud) || strings.Contains(lastCmd, keyAlice) {
 		t.Errorf("the removal names a line it must keep: %s", lastCmd)
 	}
-	// The add comes before the firewall's default policy, and the removal
-	// after it.
-	cmds := commands(plan)
-	addAt, denyAt := -1, indexOf(cmds, "ufw default deny incoming")
+	// The add comes before the removal.
+	addAt := -1
 	for i, s := range plan.Steps {
 		if s.Label == "add" {
 			addAt = i
 		}
 	}
-	if addAt < 0 || denyAt < 0 || addAt > denyAt || denyAt >= len(cmds)-1 {
-		t.Errorf("want add < firewall < remove, got add %d deny %d of %d", addAt, denyAt, len(cmds))
+	if addAt < 0 || addAt >= len(plan.Steps)-1 {
+		t.Errorf("want add < remove, got add %d of %d", addAt, len(plan.Steps))
 	}
 }
 
@@ -1381,7 +699,7 @@ func TestAnUnlistedOwnedKeyIsRemovedLast(t *testing.T) {
 func TestAnOwnedKeyGoneFromTheFileIsForgotten(t *testing.T) {
 	host := preparedHost(false)
 	host.files[ownedKeys] += "added " + fingerprint(keyCarol) + " carol\n"
-	plan, err := hostprep.Build("home-a", fixture(t), host)
+	plan, err := hostprep.Build("home-a", fixture(t), host, admitted(t, fixture(t), "home-a"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1400,7 +718,7 @@ func TestARestrictedListedKeyIsLeftAlone(t *testing.T) {
 	restricted := `from="203.0.113.0/24" ` + keyAlice
 	host.files[authorizedKeys] = restricted + "\n"
 	delete(host.files, ownedKeys)
-	plan, err := hostprep.Build("home-a", fixture(t), host)
+	plan, err := hostprep.Build("home-a", fixture(t), host, admitted(t, fixture(t), "home-a"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1417,7 +735,7 @@ func TestARestrictedListedKeyIsLeftAlone(t *testing.T) {
 func TestAMissingUserIsRefused(t *testing.T) {
 	host := preparedHost(false)
 	host.responses[probePasswd] = ""
-	_, err := hostprep.Build("home-a", fixture(t), host)
+	_, err := hostprep.Build("home-a", fixture(t), host, admitted(t, fixture(t), "home-a"))
 	if err == nil || !strings.Contains(err.Error(), "the login user has no passwd entry on fake that paisans can read") {
 		t.Fatalf("got %v", err)
 	}
@@ -1429,7 +747,7 @@ func TestAMissingUserIsRefused(t *testing.T) {
 func TestAMissingUserIsRefusedBeforeTheHomeOrStoreIsRead(t *testing.T) {
 	host := preparedHost(false)
 	host.responses[probePasswd] = "__PAISANS_ABSENT__ ubuntu\n"
-	_, err := hostprep.Build("home-a", fixture(t), host)
+	_, err := hostprep.Build("home-a", fixture(t), host, admitted(t, fixture(t), "home-a"))
 	if err == nil || !strings.Contains(err.Error(), "the login user ubuntu does not exist on fake. host prepare does not create users") {
 		t.Fatalf("got %v", err)
 	}
@@ -1452,7 +770,7 @@ func TestAMissingUserIsRefusedBeforeTheHomeOrStoreIsRead(t *testing.T) {
 func TestARenamedKeyIsRecordedUnderItsNewName(t *testing.T) {
 	host := preparedHost(false)
 	host.files[ownedKeys] = "added " + fingerprint(keyAlice) + " alice-old\n"
-	plan, err := hostprep.Build("home-a", fixture(t), host)
+	plan, err := hostprep.Build("home-a", fixture(t), host, admitted(t, fixture(t), "home-a"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1469,7 +787,7 @@ func TestNoPlanRemovesTheLastListedKey(t *testing.T) {
 	host := preparedHost(false)
 	host.files[authorizedKeys] = keyCarol + "\n"
 	host.files[ownedKeys] = "added " + fingerprint(keyCarol) + " carol\n"
-	_, err := hostprep.Build("home-a", withKeys(t, "home-a"), host)
+	_, err := hostprep.Build("home-a", withKeys(t, "home-a"), host, admitted(t, fixture(t), "home-a"))
 	if err == nil || !strings.Contains(err.Error(), "would leave the deployment's user with none of the keys ssh.keys lists") {
 		t.Fatalf("got %v", err)
 	}
@@ -1480,7 +798,7 @@ func TestPreparedKeysPlanNothing(t *testing.T) {
 	host := preparedHost(false)
 	host.files[authorizedKeys] = keyCloud + "\n" + keyAlice + "\n" + keyBob + "\n"
 	host.files[ownedKeys] = "added " + fingerprint(keyBob) + " bob\nadded " + fingerprint(keyAlice) + " alice\n"
-	plan, err := hostprep.Build("home-a", withKeys(t, "home-a", keyAlice, keyBob), host)
+	plan, err := hostprep.Build("home-a", withKeys(t, "home-a", keyAlice, keyBob), host, admitted(t, withKeys(t, "home-a", keyAlice, keyBob), "home-a"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1502,7 +820,7 @@ func TestKeyStepsAreTheUsersOwn(t *testing.T) {
 	s := cfg.Sites["home-a"]
 	s.SSH.Keys = append(s.SSH.Keys, config.NamedKey{Name: "bob", Line: keyBob})
 	cfg.Sites["home-a"] = s
-	plan, err := hostprep.Build("home-a", cfg, host)
+	plan, err := hostprep.Build("home-a", cfg, host, admitted(t, cfg, "home-a"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1524,157 +842,6 @@ func TestKeyStepsAreTheUsersOwn(t *testing.T) {
 	}
 	if keySteps < 3 {
 		t.Errorf("planned %d key steps, want create and two authorizations", keySteps)
-	}
-}
-
-// A site hosting the monitor lets its containers reach every app port on that
-// site's own mesh address, once per port, because the monitor's direct checks
-// to a local app arrive on a compose bridge rather than on the mesh interface.
-func TestContainerRulesLetTheMonitorReachLocalApps(t *testing.T) {
-	cfg := fixture(t)
-	health := cfg.Apps["health"]
-	health.Placement = config.Placement{Mode: config.PlacementPinned, Site: "home-a"}
-	cfg.Apps["health"] = health
-	homeA := cfg.Sites["home-a"]
-	homeA.Roles = append(homeA.Roles, config.RoleMonitor)
-	cfg.Sites["home-a"] = homeA
-	var got []string
-	for _, r := range hostprep.ContainerRules(cfg, "home-a") {
-		if r.Why == "the uptime monitor to apps on this site" {
-			if r.Interface != "br-+" || r.To != "10.44.0.1" || r.Proto != "tcp" {
-				t.Errorf("rule is wider or other than a bridge to the mesh address: %s", r)
-			}
-			got = append(got, fmt.Sprint(r.Port))
-		}
-	}
-	// home-a runs the clustered mbin (8080), wikijs (3000), pocket-id
-	// (1411) and account (8082), and the pinned writefreely (8081). 3001 is
-	// absent: the monitor does not check itself.
-	if want := "1411,3000,8080,8081,8082"; strings.Join(got, ",") != want {
-		t.Fatalf("got %v, want %s", got, want)
-	}
-	for _, r := range hostprep.ContainerRules(cfg, "home-b") {
-		if r.Why == "the uptime monitor to apps on this site" {
-			t.Errorf("home-b hosts no monitor and was given a monitor rule: %s", r)
-		}
-	}
-}
-
-// The account service calls Pocket ID's API at its own site's HAProxy on the
-// mesh address, and that call arrives on a compose bridge, where the default
-// deny dropped it on the first real host: every page that reads a member
-// timed out. A site without the account service gets no such rule.
-func TestContainerRulesLetTheAccountServiceReachPocketIDsAPI(t *testing.T) {
-	cfg := fixture(t)
-	api := func(site string) []hostprep.Rule {
-		var out []hostprep.Rule
-		for _, r := range hostprep.ContainerRules(cfg, site) {
-			if r.Port == render.PocketIDAPIPort {
-				out = append(out, r)
-			}
-		}
-		return out
-	}
-	for _, site := range render.AppSites(cfg)["account"] {
-		rules := api(site)
-		if len(rules) != 1 {
-			t.Fatalf("%s runs the account service: got %v, want one rule to port %d", site, rules, render.PocketIDAPIPort)
-		}
-		if r := rules[0]; r.Interface != "br-+" || r.To != cfg.Sites[site].Address || r.Proto != "tcp" {
-			t.Errorf("%s: rule is wider or other than a bridge to the mesh address: %s", site, r)
-		}
-	}
-	delete(cfg.Apps, "account")
-	for name := range cfg.Sites {
-		if rules := api(name); len(rules) != 0 {
-			t.Errorf("%s runs no account service and was given %v", name, rules)
-		}
-	}
-}
-
-// Docker starts after the mesh interface at boot, or a container publishing
-// a port on the mesh address fails to bind it and is never retried. The drop-in is written
-// when missing or different, and installing it reloads systemd without
-// restarting Docker, so no running container is touched.
-func TestDockerIsOrderedAfterTheMeshInterface(t *testing.T) {
-	for _, current := range []string{"", "[Unit]\nAfter=network.target\n"} {
-		host := preparedHost(false)
-		if current == "" {
-			delete(host.files, dockerDropIn)
-		} else {
-			host.files[dockerDropIn] = current
-		}
-		plan, err := hostprep.Build("home-a", fixture(t), host)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(plan.Steps) != 1 || plan.Steps[0].File == nil || plan.Steps[0].File.Path != dockerDropIn {
-			t.Fatalf("want only the drop-in planned, got %+v", plan.Steps)
-		}
-		step := plan.Steps[0]
-		if !strings.Contains(step.File.Content, "After=wg-quick@psns-f2a9.service") {
-			t.Errorf("the drop-in does not order docker after psns-f2a9:\n%s", step.File.Content)
-		}
-		if step.Command != "systemctl daemon-reload" {
-			t.Errorf("installing the drop-in runs %q; it must not restart docker", step.Command)
-		}
-	}
-}
-
-// On a shared host, prepare adds and removes only its own commented rules.
-// The default policy and enabling ufw are host wide, and something else
-// lives there whose traffic they would decide.
-func TestASharedHostNeverSetsTheFirewallsDefaults(t *testing.T) {
-	cfg := fixture(t)
-	host := freshHost()
-	host.responses[probeFirewall] = "ufw present\nstatus inactive\n" + owned("allow 9999/tcp")
-	host.files["/etc/default/ufw"] = "DEFAULT_INPUT_POLICY=\"ACCEPT\"\nDEFAULT_OUTPUT_POLICY=\"DROP\"\n"
-	dedicated, err := hostprep.Build("home-a", cfg, host)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if indexOf(commands(dedicated), "ufw --force enable") < 0 || indexOf(commands(dedicated), "ufw default deny incoming") < 0 {
-		t.Fatalf("the dedicated plan does not set the defaults, so this test proves nothing:\n%s", strings.Join(commands(dedicated), "\n"))
-	}
-	shared, err := hostprep.Build("home-a", cfg, host, hostprep.Shared())
-	if err != nil {
-		t.Fatal(err)
-	}
-	cmds := commands(shared)
-	for _, c := range cmds {
-		if strings.HasPrefix(c, "ufw default") || strings.Contains(c, "ufw --force enable") || c == "ufw enable" {
-			t.Errorf("a shared host's plan runs %q", c)
-		}
-	}
-	for _, want := range []string{
-		"ufw allow 22/tcp comment 'paisans-f2a9: ssh, the bootstrap route'",
-		"ufw delete allow 9999/tcp comment 'paisans-f2a9: test'",
-	} {
-		if indexOf(cmds, want) < 0 {
-			t.Errorf("a shared host's plan does not manage its own rules, missing %q:\n%s", want, strings.Join(cmds, "\n"))
-		}
-	}
-	if !strings.Contains(printed(shared), "default policy and enabled state left alone") {
-		t.Errorf("the plan does not say the defaults were left alone:\n%s", printed(shared))
-	}
-}
-
-// Docker installed as a snap is refused, not removed, whether or not
-// `docker compose` works with it: its confinement keeps it from bind mounting
-// under /srv. Removing it would stop whatever runs from it.
-func TestSnapDockerIsRefusedNotRemoved(t *testing.T) {
-	for _, compose := range []string{"compose present", "compose absent"} {
-		host := freshHost()
-		host.responses[probePackages] = compose + "\nsnap docker\npkg ufw install ok installed\npkg git install ok installed\nkeyring absent\narch amd64\n"
-		_, err := hostprep.Build("home-a", fixture(t), host)
-		if err == nil || !strings.Contains(err.Error(), "snap") || !strings.Contains(err.Error(), "snap remove docker") {
-			t.Errorf("%s: got %v", compose, err)
-		}
-		for _, c := range host.ran {
-			if strings.Contains(c, "snap remove") || strings.Contains(c, "apt-get") {
-				t.Errorf("%s: prepare changed something: %s", compose, c)
-			}
-		}
 	}
 }
 
@@ -1706,27 +873,13 @@ func TestParseAddedRulesTellsOursFromTheirs(t *testing.T) {
 }
 
 // expectedKind is the kind a step of each title is, by what the title says
-// it changes. install packages is left out: its kinds are its packages'.
+// it changes.
 func expectedKind(title string) (family, kind string) {
 	switch {
-	case strings.HasPrefix(title, "add docker apt "), title == "start docker", title == "start docker after mesh":
+	case title == "write daemon.json":
 		return title, hostprep.KindDocker
-	case title == "deny incoming", title == "allow outgoing", title == "enable ufw":
-		return title, hostprep.KindFirewall
-	case strings.HasPrefix(title, "allow "):
-		return "allow <rule>", hostprep.KindFirewall
-	case strings.HasPrefix(title, "adopt rule "):
-		return "adopt rule <rule>", hostprep.KindFirewall
-	case strings.HasPrefix(title, "remove ufw rule "):
-		return "remove ufw rule <rule>", hostprep.KindFirewall
 	case title == "create authorized_keys", strings.HasSuffix(title, " ssh key"):
 		return title, hostprep.KindSSHKeys
-	case strings.HasPrefix(title, "load ") && strings.HasSuffix(title, " at boot"):
-		return "load <module> at boot", hostprep.KindWatchdog
-	case strings.HasPrefix(title, "enable ") && strings.HasSuffix(title, " at boot"):
-		return "enable <module> at boot", hostprep.KindWatchdog
-	case strings.HasPrefix(title, "load "):
-		return "load <module>", hostprep.KindWatchdog
 	case title == "create the configuration repository", title == "start the configuration store":
 		return title, hostprep.KindConfigStore
 	case strings.HasSuffix(title, ".peers"), title == "write config-sync.sh", strings.HasPrefix(title, "write paisans-f2a9-config-"):
@@ -1741,61 +894,35 @@ func expectedKind(title string) (family, kind string) {
 func TestEveryStepCarriesItsKind(t *testing.T) {
 	plans := map[string]func(t *testing.T) (*hostprep.Plan, error){
 		"fresh data site": func(t *testing.T) (*hostprep.Plan, error) {
-			return hostprep.Build("home-a", fixture(t), freshHost())
+			return hostprep.Build("home-a", fixture(t), freshHost(), admitted(t, fixture(t), "home-a"))
 		},
 		"keys added": func(t *testing.T) (*hostprep.Plan, error) {
 			host := preparedHost(false)
 			delete(host.files, authorizedKeys)
 			delete(host.files, ownedKeys)
-			return hostprep.Build("home-a", withKeys(t, "home-a", keyAlice, keyBob), host)
+			return hostprep.Build("home-a", withKeys(t, "home-a", keyAlice, keyBob), host, admitted(t, withKeys(t, "home-a", keyAlice, keyBob), "home-a"))
 		},
 		"key removed": func(t *testing.T) (*hostprep.Plan, error) {
 			host := preparedHost(false)
 			host.files[authorizedKeys] = keyCloud + "\n" + keyAlice + "\n" + keyCarol + "\n"
 			host.files[ownedKeys] = "added " + fingerprint(keyAlice) + " alice\nadded " + fingerprint(keyCarol) + " carol\n"
-			return hostprep.Build("home-a", withKeys(t, "home-a", keyAlice, keyBob), host)
+			return hostprep.Build("home-a", withKeys(t, "home-a", keyAlice, keyBob), host, admitted(t, withKeys(t, "home-a", keyAlice, keyBob), "home-a"))
 		},
 		"key forgotten": func(t *testing.T) (*hostprep.Plan, error) {
 			host := preparedHost(false)
 			host.files[ownedKeys] += "added " + fingerprint(keyCarol) + " carol\n"
-			return hostprep.Build("home-a", fixture(t), host)
+			return hostprep.Build("home-a", fixture(t), host, admitted(t, fixture(t), "home-a"))
 		},
 		"key released": func(t *testing.T) (*hostprep.Plan, error) {
 			host := preparedHost(false)
 			host.files[authorizedKeys] = keyAlice + "\n" + keyCarol + "\n"
 			host.files[ownedKeys] = "added " + fingerprint(keyAlice) + " alice\nshared " + fingerprint(keyCarol) + " carol\n"
-			return hostprep.Build("home-a", withKeys(t, "home-a", keyAlice), host)
+			return hostprep.Build("home-a", withKeys(t, "home-a", keyAlice), host, admitted(t, withKeys(t, "home-a", keyAlice), "home-a"))
 		},
 		"key renamed": func(t *testing.T) (*hostprep.Plan, error) {
 			host := preparedHost(false)
 			host.files[ownedKeys] = "added " + fingerprint(keyAlice) + " alice-old\n"
-			return hostprep.Build("home-a", fixture(t), host)
-		},
-		"stale rule": func(t *testing.T) (*hostprep.Plan, error) {
-			cfg := fixture(t)
-			vm := cfg.Sites["vm"]
-			vm.Roles = []config.Role{config.RoleWitness}
-			cfg.Sites["vm"] = vm
-			return hostprep.Build("vm", cfg, preparedHost(true))
-		},
-		"legacy rule": func(t *testing.T) (*hostprep.Plan, error) {
-			host := preparedHost(false)
-			host.responses[probeFirewall] = "ufw present\nstatus active\nrule allow 22/tcp\nrule allow in on psns-f2a9\nrule allow in on br-+ to 10.44.0.1 port 5000 proto tcp\nrule allow in on br-+ to 10.44.0.1 port 3900 proto tcp\nrule allow in on br-+ to 10.44.0.1 port 1413 proto tcp\n"
-			return hostprep.Build("home-a", fixture(t), host)
-		},
-		"watchdog unit disabled": func(t *testing.T) (*hostprep.Plan, error) {
-			fresh := freshHost()
-			plan, err := hostprep.Build("home-a", fixture(t), fresh)
-			if err != nil {
-				return nil, err
-			}
-			if err := hostprep.Execute(plan, fresh, ui.Discard); err != nil {
-				return nil, err
-			}
-			host := preparedHost(false)
-			host.files["/etc/systemd/system/paisans-f2a9-watchdog.service"] = fresh.files["/etc/systemd/system/paisans-f2a9-watchdog.service"]
-			host.responses[probeWatchdog] = "device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\n"
-			return hostprep.Build("home-a", fixture(t), host)
+			return hostprep.Build("home-a", fixture(t), host, admitted(t, fixture(t), "home-a"))
 		},
 	}
 	seen := map[string]bool{}
@@ -1809,10 +936,6 @@ func TestEveryStepCarriesItsKind(t *testing.T) {
 				t.Fatal("planned nothing")
 			}
 			for _, s := range plan.Steps {
-				if strings.HasPrefix(s.Title, "install packages: ") {
-					seen["install packages: <packages>"] = true
-					continue
-				}
 				family, kind := expectedKind(s.Title)
 				seen[family] = true
 				if kind == "" {
@@ -1826,10 +949,8 @@ func TestEveryStepCarriesItsKind(t *testing.T) {
 		})
 	}
 	for _, family := range []string{
-		"add docker apt key", "add docker apt repo", "install packages: <packages>", "start docker", "start docker after mesh",
-		"load <module>", "load <module> at boot", "enable <module> at boot",
+		"write daemon.json",
 		"create the configuration repository", "write <configuration store file>", "start the configuration store",
-		"allow <rule>", "adopt rule <rule>", "remove ufw rule <rule>", "deny incoming", "allow outgoing", "enable ufw",
 		"create authorized_keys", "authorize ssh key", "rename ssh key", "forget ssh key", "release ssh key", "remove ssh key",
 	} {
 		if !seen[family] {
@@ -1838,54 +959,14 @@ func TestEveryStepCarriesItsKind(t *testing.T) {
 	}
 }
 
-// install packages installs several packages in one step, and is each kind
-// of change its packages make. Its title names the packages, in the order it
-// installs them.
-func TestInstallPackagesIsTheKindOfEachPackage(t *testing.T) {
-	for name, c := range map[string]struct {
-		probe string
-		want  []string
-		title string
-	}{
-		"everything": {probe: "compose absent\npkg docker-ce absent\npkg wireguard-tools absent\npkg ufw absent\npkg git absent\nkeyring absent\narch amd64\n", want: []string{"docker", "wireguard", "firewall", "configuration store"},
-			title: "install packages: docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin, docker-compose-plugin, wireguard-tools, ufw, git"},
-		"wireguard": {probe: "compose present\npkg wireguard-tools deinstall ok config-files\npkg ufw install ok installed\npkg git install ok installed\n", want: []string{"wireguard"}, title: "install packages: wireguard-tools"},
-		"ufw":       {probe: "compose present\npkg wireguard-tools install ok installed\npkg ufw absent\npkg git install ok installed\n", want: []string{"firewall"}, title: "install packages: ufw"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			host := preparedHost(false)
-			host.responses[probePackages] = c.probe
-			plan, err := hostprep.Build("home-a", fixture(t), host)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var install *hostprep.Step
-			for i, s := range plan.Steps {
-				if strings.HasPrefix(s.Title, "install packages") {
-					install = &plan.Steps[i]
-				}
-			}
-			if install == nil {
-				t.Fatalf("no install step:\n%s", printed(plan))
-			}
-			if strings.Join(install.Kinds, ",") != strings.Join(c.want, ",") {
-				t.Errorf("%s: kinds %q, want %q", install.Describe, install.Kinds, c.want)
-			}
-			if install.Title != c.title {
-				t.Errorf("title %q, want %q", install.Title, c.title)
-			}
-		})
-	}
-}
-
 // A plan's kinds are each kind its steps change, once, in a fixed order, so
 // two runs that plan the same kinds say the same thing.
 func TestAPlansKindsAreDistinctAndInAFixedOrder(t *testing.T) {
-	plan, err := hostprep.Build("home-a", fixture(t), freshHost())
+	plan, err := hostprep.Build("home-a", fixture(t), freshHost(), admitted(t, fixture(t), "home-a"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(plan.Kinds(), ", "); got != "docker, wireguard, firewall, watchdog, configuration store" {
+	if got := strings.Join(plan.Kinds(), ", "); got != "docker, configuration store" {
 		t.Errorf("a fresh data site's kinds are %q", got)
 	}
 	shuffled := &hostprep.Plan{Section: hostprep.Section{Steps: []hostprep.Step{
@@ -1897,51 +978,6 @@ func TestAPlansKindsAreDistinctAndInAFixedOrder(t *testing.T) {
 	}
 	if got := (&hostprep.Plan{}).Kinds(); len(got) != 0 {
 		t.Errorf("an empty plan has kinds %q", got)
-	}
-}
-
-// A site that was the gateway keeps 80 and 443 while this deployment's
-// gateway Caddy is still on it, so the move's overlap is not cut short by
-// the prepare that runs before it; once the move has stopped that Caddy, the
-// next prepare removes them.
-func TestAFormerGatewayKeepsItsWebAllowsUntilItsCaddyIsGone(t *testing.T) {
-	host := preparedHost(true)
-	host.responses["com.docker.compose.service=caddy"] = "caddy c0ffee running\n"
-	plan, err := hostprep.Build("home-a", fixture(t), host)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, s := range plan.Steps {
-		if strings.Contains(s.Command, "80/tcp") || strings.Contains(s.Command, "443/tcp") {
-			t.Errorf("removes a web allow while the old gateway serves: %s", s.Command)
-		}
-	}
-	if len(plan.Warnings) != 1 || !strings.Contains(plan.Warnings[0].Hint, "keeps 80 and 443") {
-		t.Errorf("warnings: %+v", plan.Warnings)
-	}
-
-	delete(host.responses, "com.docker.compose.service=caddy")
-	plan, err = hostprep.Build("home-a", fixture(t), host)
-	if err != nil {
-		t.Fatal(err)
-	}
-	removed := 0
-	for _, s := range plan.Steps {
-		if s.Label == "remove" && (strings.Contains(s.Command, "80") || strings.Contains(s.Command, "443")) {
-			removed++
-		}
-	}
-	if removed != 2 {
-		t.Errorf("want both web allows removed once the Caddy is gone:\n%s", printed(plan))
-	}
-}
-
-// A Docker that cannot be asked is an error, never no Caddy.
-func TestAFailedCaddyProbeIsAnError(t *testing.T) {
-	host := preparedHost(false)
-	host.failures = map[string]error{"com.docker.compose.service=caddy": errors.New("exit status 1")}
-	if _, err := hostprep.Build("home-a", fixture(t), host); err == nil {
-		t.Fatal("a failed probe was read as no Caddy")
 	}
 }
 
@@ -1957,7 +993,7 @@ func TestKeysGoToTheDefaultUserWhenSSHUserIsLeftOut(t *testing.T) {
 	host.responses[probePasswd] = "paisans-f2a9:x:1001:1001::/home/paisans-f2a9:/bin/sh\n"
 	delete(host.files, authorizedKeys)
 	delete(host.files, ownedKeys)
-	plan, err := hostprep.Build("home-a", cfg, host)
+	plan, err := hostprep.Build("home-a", cfg, host, admitted(t, cfg, "home-a"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1974,5 +1010,112 @@ func TestKeysGoToTheDefaultUserWhenSSHUserIsLeftOut(t *testing.T) {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("the add lacks %s: %s", want, cmd)
 		}
+	}
+}
+
+// daemonJSONPath is the deployment user's daemon.json on the fake hosts.
+const daemonJSONPath = "/home/ubuntu/.config/docker/daemon.json"
+
+// admitted is the record host admit leaves for site with every grant its
+// roles need: what host prepare is checked against.
+func admitted(t *testing.T, cfg *config.Config, site string) admission.Record {
+	t.Helper()
+	req, err := admission.Build(cfg, site)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := admission.NewRecord(req, req.Grants, "", time.Unix(0, 0))
+	if cfg.Sites[site].WebServerManagedBy() == config.ManagedByExternal {
+		rec.WebServer = &admission.WebServer{Server: "caddy"}
+	}
+	return rec
+}
+
+// host prepare as the deployment's user: nothing it plans installs a
+// package, writes outside the user's home or the deployment's root, or runs
+// a command only root can.
+func TestHostPrepareInstallsNothing(t *testing.T) {
+	cfg := fixture(t)
+	for _, site := range cfg.SiteNames() {
+		host := freshHost()
+		plan, err := hostprep.Build(site, cfg, host, admitted(t, cfg, site))
+		if err != nil {
+			t.Fatalf("%s: %v", site, err)
+		}
+		for _, s := range plan.Steps {
+			if s.File != nil && !strings.HasPrefix(s.File.Path, "/home/ubuntu/") && !strings.HasPrefix(s.File.Path, "/srv/paisans/f2a9/") {
+				t.Errorf("%s: %q writes %s", site, s.Title, s.File.Path)
+			}
+			for _, root := range []string{"apt-get", "modprobe", "ufw ", "/etc/", "sudo ", "systemctl daemon-reload &&", "systemctl enable docker"} {
+				if strings.Contains(s.Command, root) {
+					t.Errorf("%s: %q runs %q: %s", site, s.Title, root, s.Command)
+				}
+			}
+		}
+		for _, c := range host.ran {
+			if strings.Contains(c, "ufw") || strings.Contains(c, "dpkg") {
+				t.Errorf("%s: probed %q", site, c)
+			}
+		}
+	}
+}
+
+// A record that does not match the declaration refuses host prepare, naming
+// each difference and the line the owner runs.
+func TestARecordThatDiffersIsRefused(t *testing.T) {
+	cfg := fixture(t)
+	rec := admitted(t, cfg, "home-a")
+	rec.Grants.Watchdog = false
+	_, err := hostprep.Build("home-a", cfg, freshHost(), rec)
+	if err == nil || !strings.Contains(err.Error(), "--watchdog") || !strings.Contains(err.Error(), "sudo paisans host admit --request home-a.admit") {
+		t.Errorf("got %v", err)
+	}
+}
+
+// The watchdog is admit's: host prepare reads that /dev/watchdog is the
+// user's, and refuses with the admit line when it is not.
+func TestTheWatchdogIsOnlyRead(t *testing.T) {
+	cfg := fixture(t)
+	host := freshHost()
+	host.responses[probeWatchdog] = "device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\nowner 0\nme 1000\n"
+	if _, err := hostprep.Build("home-a", cfg, host, admitted(t, cfg, "home-a")); err == nil || !strings.Contains(err.Error(), "host admit") {
+		t.Errorf("a root-owned /dev/watchdog: %v", err)
+	}
+	host.responses[probeWatchdog] = "device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\nowner 1000\nme 1000\n"
+	plan, err := hostprep.Build("home-a", cfg, host, admitted(t, cfg, "home-a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range plan.Steps {
+		if slices.Contains(s.Kinds, hostprep.KindWatchdog) {
+			t.Errorf("planned a watchdog step: %+v", s)
+		}
+	}
+}
+
+// daemon.json is written as the user when it differs, and the daemon is
+// restarted only when it runs no container.
+func TestDaemonJSONIsWrittenAndTheDaemonRestartedOnlyWhenIdle(t *testing.T) {
+	cfg := fixture(t)
+	host := freshHost()
+	host.responses["docker ps -q"] = "3\n"
+	plan, err := hostprep.Build("vm", cfg, host, admitted(t, cfg, "vm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var write string
+	for _, s := range plan.Steps {
+		if s.Title == "write daemon.json" {
+			write = s.Command
+		}
+		if strings.Contains(s.Command, "restart docker") {
+			t.Errorf("restarted a daemon running containers: %s", s.Command)
+		}
+	}
+	if !strings.Contains(write, "/home/ubuntu/.config/docker/daemon.json") {
+		t.Errorf("write %q", write)
+	}
+	if len(plan.Warnings) == 0 || !strings.Contains(plan.Warnings[0].Hint, "next restart") {
+		t.Errorf("warnings %+v", plan.Warnings)
 	}
 }
