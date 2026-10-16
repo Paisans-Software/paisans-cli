@@ -78,6 +78,7 @@ func TestEgressTableDropsTheHostAndItsOnLinkPrefixes(t *testing.T) {
 		}
 		private := strings.Index(text, uid+"ip6 daddr { ::1, fc00::/7, fe80::/10 } drop")
 		web := strings.Index(text, uid+"fib daddr type local tcp dport { 80, 443 } accept")
+		webReply := strings.Index(text, uid+"ct direction reply fib daddr type local tcp sport { 80, 443 } accept")
 		host := strings.Index(text, uid+"fib daddr type { local, broadcast, multicast } drop")
 		lan6 := strings.Index(text, uid+"ip6 daddr { 2001:db8:1::/64, 2001:db8:2::/56 } drop")
 		if private < 0 || host < private || lan6 < host {
@@ -86,7 +87,9 @@ func TestEgressTableDropsTheHostAndItsOnLinkPrefixes(t *testing.T) {
 		switch {
 		case gateway && (web < private || web > host):
 			t.Errorf("a gateway's 80 and 443 on the host are not accepted between the private drops and the host's:\n%s", text)
-		case !gateway && web >= 0:
+		case gateway && (webReply < web || webReply > host):
+			t.Errorf("a gateway's answers from 80 and 443 to the host's own address are not accepted beside its accept:\n%s", text)
+		case !gateway && (web >= 0 || webReply >= 0):
 			t.Errorf("a site that is no gateway reaches 80 and 443 on the host:\n%s", text)
 		}
 		if !strings.Contains(text, "meta mark 0x5053f2a9 ip6 daddr { 2001:db8:1::/64, 2001:db8:2::/56 } drop") {
@@ -102,12 +105,18 @@ func TestEgressTableDropsTheHostAndItsOnLinkPrefixes(t *testing.T) {
 	}
 }
 
-// The UID chain's first rule accepts replies: the host side of every port
-// the deployment publishes runs as its user, so without it the answers to
-// a visitor on loopback, the LAN or the host's own address would meet the
-// drops below. The deployment's own flows are untouched, since their
-// replies come in through input.
-func TestEgressTableAcceptsRepliesFirst(t *testing.T) {
+// The output chain's first rule accepts replies, but only to flows the
+// deployment's user did not open: the host side of every port the
+// deployment publishes runs as its user, so without it the answers to a
+// visitor on loopback, the LAN or the host's own address would meet the
+// drops below. Its second marks every flow the user opens, before any
+// accept or drop, so the user cannot open a flow under an accepted rule
+// and then send its "reply" to an owner's service.
+func TestEgressTableAcceptsOnlyRepliesTheUserDidNotOpen(t *testing.T) {
+	const (
+		reply = "ct direction reply ct mark and 0x08000000 == 0 accept"
+		mark  = "meta skuid { 1001, 165536-231071 } ct direction original ct mark set ct mark or 0x08000000"
+	)
 	for _, gateway := range []bool{false, true} {
 		d := egress
 		d.Gateway = gateway
@@ -117,17 +126,19 @@ func TestEgressTableAcceptsRepliesFirst(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, chain, _ := strings.Cut(text, "chain output {\n")
+		chain, _, closed := strings.Cut(chain, "\n\t}\n")
 		var rules []string
 		for _, l := range strings.Split(chain, "\n") {
 			if l = strings.TrimSpace(l); l != "" && !strings.HasPrefix(l, "#") && !strings.HasPrefix(l, "type ") {
 				rules = append(rules, l)
 			}
 		}
-		if len(rules) == 0 || rules[0] != "ct direction reply accept" {
-			t.Errorf("gateway %v: the output chain does not accept replies first:\n%s", gateway, text)
+		if !closed || len(rules) < 3 || rules[0] != reply || rules[1] != mark {
+			t.Errorf("gateway %v: the output chain does not accept replies, then mark the user's flows, first:\n%s", gateway, text)
 		}
-		if strings.Count(text, "ct direction reply accept") != 1 {
-			t.Errorf("gateway %v: replies are accepted outside the output chain:\n%s", gateway, text)
+		_, mesh, _ := strings.Cut(text, "chain mesh {")
+		if strings.Count(text, "ct mark and") != 1 || strings.Count(text, "ct mark set") != 1 || strings.Contains(mesh, "ct ") {
+			t.Errorf("gateway %v: replies are accepted, or flows marked, outside the output chain:\n%s", gateway, text)
 		}
 	}
 }

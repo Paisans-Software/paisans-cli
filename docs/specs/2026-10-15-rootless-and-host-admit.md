@@ -416,13 +416,20 @@ LAN. Admit loads an nftables table `inet paisans_<token>` from a unit
 no container starts unfiltered at boot, with an output
 chain that matches the user's UID and its whole subordinate range (a
 container's users map into that range, so the UID alone misses them).
-The chain's first rule accepts every packet in the reply direction
-(`ct direction reply accept`). A reply answers a flow someone else opened:
-the host side of each port the deployment publishes runs as its user, so
-its answers to the owner's web server on loopback, to a visitor on the
-LAN and to the host's own address carry the user's UID. The deployment's
-own flows are untouched, since their replies come in through input. The
-UID rules follow it:
+The chain's first rule accepts a reply to a flow someone else opened
+(`ct direction reply ct mark and 0x08000000 == 0 accept`). The host side
+of each port the deployment publishes runs as its user, so its answers to
+the owner's web server on loopback, to a visitor on the LAN and to the
+host's own address carry the user's UID. The second rule sets bit 27 of
+the ct mark on every flow the user opens, before any accept or drop, so a
+flow the user opened under an accept never carries a "reply" to an
+owner's service: binding an owner's UDP port as the source, sending to
+the mesh, then answering from the mesh is dropped. Bit 27 is clear of
+Tailscale's connmark mask `0xff0000`, of the mesh's packet mark
+`0x5053<token>` and of kube-proxy's and Docker's low bits. A reply with no
+conntrack entry, on a port the owner exempts from conntrack, meets the
+UID rules and is dropped. The deployment's own flows take their replies
+through input. The UID rules follow:
 
 1. Accept the mesh subnet.
 2. Accept port 53 to the host's resolvers, read at admit time
@@ -430,11 +437,15 @@ UID rules follow it:
 3. Drop `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`,
    `169.254.0.0/16`, `100.64.0.0/10`, `::1`, `fc00::/7` and `fe80::/10`.
 4. On a gateway, accept TCP 80 and 443 to the host's own addresses
-   (`fib daddr type local`). A site is a gateway when its grant holds
-   `public_ports`, where the deployment's own Caddy holds those ports, or
-   when its `web_server` is external, where the owner's web server fronts
-   it and the deployment reaches it by its public name. Either way the
-   ports answer the internet already. UDP 443 is not accepted.
+   (`fib daddr type local`), and the answers its own 80 and 443 send
+   back to them, which the second rule marked as the user's. That second
+   accept is TCP only: no socket of the user's can hold a port an owner's
+   listener holds, so no TCP reply is forged. A site is a gateway when its
+   grant holds `public_ports`, where the deployment's own Caddy holds those
+   ports, or when its `web_server` is external, where the owner's web
+   server fronts it and the deployment reaches it by its public name.
+   Either way the ports answer the internet already. UDP 443 is not
+   accepted.
 5. Drop every address of the host itself, its broadcast and its multicast
    (`fib daddr type { local, broadcast, multicast }`). This keeps the
    deployment off the owner's services bound to `0.0.0.0` or `::`, which
