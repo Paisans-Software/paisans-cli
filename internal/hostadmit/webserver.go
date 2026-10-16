@@ -84,15 +84,24 @@ func hostText(s string) string { return ui.Redact(visibleLines(s)) }
 // Its path comes from a process any local user can start, so the file is
 // read as root only as a regular file, never under /proc, /sys or /dev,
 // where a read can block or consume (/proc/kmsg passes -f), its first 64
-// KiB alone and for five seconds at most.
+// KiB alone and for five seconds at most, and only when every directory
+// on its resolved path is root's and writable by root alone, as
+// refuseUnsafe holds admit's own paths: below another's, a link could be
+// swapped in between the check and the read. Such a path is not read, and
+// the plan says so; the server is the owner's, so admit goes on.
 // Otherwise the default endpoint, when it answers from the host. A Caddy
 // in a container whose endpoint the host cannot reach is no local user's
 // to reach either.
 func caddyTCPAdmin(p *planner, ws webserver.WebServer) caddyAdminState {
 	onHost := ws.Container == ""
 	if onHost && ws.Config != "" {
-		read := `f=$(readlink -e -- ` + apply.ShellQuote(ws.Config) + `) && case $f in /proc/*|/sys/*|/dev/*) false ;; esac && [ -f "$f" ] && timeout 5 head -c 65536 -- "$f"`
-		if conf, err := p.t.Run(read); err == nil {
+		conf, err := p.t.Run(caddyConfigRead(ws.Config))
+		if dir, ok := strings.CutPrefix(strings.TrimSpace(conf), unsafeMarker+" "); err == nil && ok {
+			p.warn("web server: Caddy's configuration "+hostText(ws.Config)+" was not read",
+				hostText(dir)+" is not root's alone, so what the path names could change between admit's check and its read. Check the admin option in it yourself: on anything but a unix socket, or off, any local user can replace that Caddy's configuration.")
+			return caddyAdminState{}
+		}
+		if err == nil {
 			if addr, set := caddyAdmin(conf); set {
 				return caddyAdminState{tcp: addr, local: addr == ""}
 			}
@@ -102,6 +111,26 @@ func caddyTCPAdmin(p *planner, ws webserver.WebServer) caddyAdminState {
 		return caddyAdminState{tcp: "localhost:2019"}
 	}
 	return caddyAdminState{unread: onHost && ws.Config == ""}
+}
+
+// unsafeMarker starts the line caddyConfigRead prints in place of the
+// file for a path below a directory that is not root's alone.
+const unsafeMarker = "paisans-unsafe"
+
+// caddyConfigRead is the command that reads the Caddy configuration at
+// path as caddyTCPAdmin says, printing unsafeMarker and the directory in
+// place of the file when a directory above it is another's.
+func caddyConfigRead(path string) string {
+	return `( f=$(readlink -e -- ` + apply.ShellQuote(path) + `) || exit 1
+case $f in /proc/*|/sys/*|/dev/*) exit 1 ;; esac
+d=$f
+while :; do
+  d=${d%/*}; [ -n "$d" ] || d=/
+  s=$(stat -c '%u %a' -- "$d") || exit 1
+  if [ "${s%% *}" != 0 ] || [ $((0${s#* } & 022)) -ne 0 ]; then echo "` + unsafeMarker + ` $d"; exit 0; fi
+  [ "$d" != / ] || break
+done
+[ -f "$f" ] && timeout 5 head -c 65536 -- "$f" )`
 }
 
 // caddyAdmin reads the admin setting of a Caddy configuration: in JSON,

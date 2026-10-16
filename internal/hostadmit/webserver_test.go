@@ -269,14 +269,44 @@ func TestCaddyAdminIsReadFromItsConfiguration(t *testing.T) {
 		t.Errorf("present: %q", plan.Present)
 	}
 	for _, c := range h.ran {
-		if strings.Contains(c, "/etc/caddy/Caddyfile") && c != `f=$(readlink -e -- '/etc/caddy/Caddyfile') && case $f in /proc/*|/sys/*|/dev/*) false ;; esac && [ -f "$f" ] && timeout 5 head -c 65536 -- "$f"` {
-			t.Errorf("the configuration is read as %q", c)
+		if !strings.Contains(c, "readlink -e -- '/etc/caddy/Caddyfile'") {
+			continue
+		}
+		for _, want := range []string{"/proc/*|/sys/*|/dev/*) exit 1", "stat -c '%u %a'", `[ -f "$f" ] && timeout 5 head -c 65536 -- "$f"`} {
+			if !strings.Contains(c, want) {
+				t.Errorf("the configuration's read lacks %q: %s", want, c)
+			}
 		}
 	}
 	plan, _ = hostadmit.Build(caseNamed(t, "webserver-caddy-host-tcp-admin").host(), input(t, "status", hostadmit.Flags{}))
 	for _, w := range plan.Warnings {
 		if strings.Contains(w.Hint, "answers on TCP") && (!strings.Contains(w.Detail, "restart Caddy") || strings.Contains(w.Detail, "reload Caddy")) {
 			t.Errorf("the fix does not say to restart Caddy: %q", w.Detail)
+		}
+	}
+}
+
+// The configuration is read only when every directory on its resolved path
+// is root's and writable by root alone: below another's, a link could be
+// swapped in between the check and the read. Such a path is skipped with a
+// warning naming it, and admit goes on.
+func TestCaddyConfigBelowAnothersDirectoryIsNotRead(t *testing.T) {
+	h := onHost("caddy")().answer("ps -o args= -C caddy", "caddy run --config /srv/www/Caddyfile\n").
+		answer("readlink -e -- '/srv/www/Caddyfile'", "paisans-unsafe /srv/www\n")
+	plan, err := hostadmit.Build(h, input(t, "status", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var warned bool
+	for _, w := range plan.Warnings {
+		warned = warned || strings.Contains(w.Hint, "/srv/www/Caddyfile was not read") && strings.Contains(w.Detail, "/srv/www is not root's alone")
+	}
+	if !warned {
+		t.Errorf("no warning naming the path:\n%s", plan.Text())
+	}
+	for _, c := range h.ran {
+		if strings.Contains(c, "readlink -e -- '/srv/www/Caddyfile'") && !strings.Contains(c, "stat -c '%u %a'") {
+			t.Errorf("the read checks no directory above the file: %s", c)
 		}
 	}
 }
