@@ -843,6 +843,11 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 		default:
 			r.Result("Nothing changed. Re-run with --execute to apply.")
 		}
+		// Alone, a degraded plan fails --require-all as the apply would;
+		// as a step, the run says so once.
+		if _, step := r.(checkReporter); !step && err == nil {
+			return requireAll(sites, *mustAll)
+		}
 		return err
 	}
 

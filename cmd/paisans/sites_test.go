@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -365,5 +366,35 @@ func TestSiteAddRefusesWithoutEverySite(t *testing.T) {
 	err = runSiteAdd([]string{"home-b", "--config", fixtureConfig(), "--secrets", fixtureSecretsPath()}, nil, nil)
 	if err == nil || !strings.Contains(problemText(err), "every joined site answers") || !strings.Contains(problemText(err), "watch") {
 		t.Errorf("down: %v: %s", err, problemText(err))
+	}
+}
+
+// A dry run of a degraded deployment with --require-all exits 1 as the run
+// would, so automation that gates on a dry run does not pass on one: apply
+// without --site, and apply --site alone.
+func TestADryRunHonoursRequireAll(t *testing.T) {
+	fakeConverge(t, nil)
+	classifyWith(t, classifyHosts([]string{"home-b"}))
+	recordConverge(t)
+	if err := converge(t); err != nil {
+		t.Fatalf("without --require-all: %v: %s", err, problemText(err))
+	}
+	if err := converge(t, "--require-all"); err == nil || !strings.Contains(problemText(err), "--require-all") {
+		t.Errorf("apply: %v", err)
+	}
+
+	quietSSH(t)
+	classified(t, degraded(t))
+	path := externalFixture(t)
+	rec := &ui.Recorder{}
+	saved := reporterOverride
+	reporterOverride = rec
+	t.Cleanup(func() { reporterOverride = saved })
+	var err error
+	captureStdout(t, func() {
+		err = runApply([]string{"--config", path, "--secrets", fixtureSecretsPath(), "--site", "watch", "--require-all"}, strings.NewReader(""), io.Discard)
+	})
+	if err == nil || !strings.Contains(problemText(err), "--require-all") || !rec.Has("result", "Nothing changed") {
+		t.Errorf("apply --site: %v: %s\n%s", err, problemText(err), rec.Lines())
 	}
 }

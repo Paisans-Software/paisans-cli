@@ -860,12 +860,14 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		if pending > 0 {
 			next = "Re-run with --execute to apply; it asks you to type " + approveWord + " for the review above."
 		}
+		// A degraded plan fails --require-all as the run would, so
+		// automation gating on a dry run does not pass on one.
 		if len(generated) > 0 {
 			r.Result("Nothing changed on the servers. Added %s to %s. %s", plural(len(generated), "generated secret"), filepath.Base(convergeSecretsPath(configPath, secretsPath)), next)
-			return nil
+			return requireAll(sites, o.RequireAll)
 		}
 		r.Result("Nothing changed. %s", next)
-		return nil
+		return requireAll(sites, o.RequireAll)
 	}
 	// One review for every site, asked once, before the first step that
 	// changes a host. init, which may have run above, writes only local
