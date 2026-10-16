@@ -1,6 +1,7 @@
 package hostadmit_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -33,7 +34,7 @@ var webserverCases = addCases(
 	}},
 	goldenCase{name: "webserver-caddy-host-unix-admin", site: "status", host: func() *fakeHost {
 		return onHost("caddy")().answer("ps -o args= -C caddy", "caddy run --config /etc/caddy/Caddyfile\n").
-			answer("cat '/etc/caddy/Caddyfile'", "{\n\tadmin unix//run/caddy-admin.sock\n}\nexample.org {\n}\n")
+			answer("head -c 65536 '/etc/caddy/Caddyfile'", "{\n\tadmin unix//run/caddy-admin.sock\n}\nexample.org {\n}\n")
 	}},
 	goldenCase{name: "webserver-caddy-container-tcp-admin", site: "status", host: func() *fakeHost {
 		return inContainer("caddy:2")().answer("localhost:2019/config/", caddyAPI)
@@ -89,6 +90,10 @@ func TestCaddyAdmin(t *testing.T) {
 		{"{\n\temail a@example.org\n}\nexample.org {\n\trespond admin\n}\n", "", false},
 		{"example.org {\n}\n", "", false},
 		{"{\n\tadmin :2020 {\n\t\torigins localhost\n\t}\n}\n", ":2020", true},
+		{`{"admin":{"listen":"0.0.0.0:2019"},"apps":{}}`, "0.0.0.0:2019", true},
+		{`{"admin":{"disabled":true}}`, "", true},
+		{`{"admin":{"listen":"unix//run/caddy.sock"}}`, "", true},
+		{`{"apps":{}}`, "", false},
 	} {
 		addr, set := hostadmit.CaddyAdmin(c.conf)
 		if addr != c.addr || set != c.set {
@@ -189,7 +194,7 @@ func TestCaddyAdminFromTheCaddyfile(t *testing.T) {
 		"{\n\tadmin off\n}\n":                                 "",
 	} {
 		h := onHost("caddy")().answer("ps -o args= -C caddy", "caddy run --config /etc/caddy/Caddyfile\n").
-			answer("cat '/etc/caddy/Caddyfile'", conf)
+			answer("head -c 65536 '/etc/caddy/Caddyfile'", conf)
 		rec, err := hostadmit.RecordOf(h, input(t, "status", hostadmit.Flags{}))
 		if err != nil {
 			t.Fatal(err)
@@ -204,6 +209,73 @@ func TestCaddyAdminFromTheCaddyfile(t *testing.T) {
 		}
 		if warned != (want != "") {
 			t.Errorf("%q: warned %v", conf, warned)
+		}
+	}
+}
+
+// The configuration Caddy runs with names its admin address before the
+// default endpoint does, so a Caddy bound wider than localhost is named
+// as it is; a Caddy on the host whose configuration admit cannot find is
+// warned about, since its admin address was not read; a Caddy whose
+// admin API is off or on a unix socket is present, not warned about, and
+// the configuration is read bounded, and only as a regular file.
+func TestCaddyAdminIsReadFromItsConfiguration(t *testing.T) {
+	caddy := func(args, read, conf string) *fakeHost {
+		h := onHost("caddy")().answer("localhost:2019/config/", caddyAPI)
+		if args != "" {
+			h.answer("ps -o args= -C caddy", args+"\n").answer(read, conf)
+		}
+		return h
+	}
+	for _, c := range []struct {
+		name       string
+		host       *fakeHost
+		warn, miss string
+	}{
+		{"a Caddyfile binding every address", caddy("caddy run --config /etc/caddy/Caddyfile", "head -c 65536 '/etc/caddy/Caddyfile'", "{\n\tadmin 0.0.0.0:2019\n}\n"), "answers on TCP at 0.0.0.0:2019", "localhost"},
+		{"a JSON configuration", caddy("caddy run --config /etc/caddy/caddy.json", "head -c 65536 '/etc/caddy/caddy.json'", `{"admin":{"listen":"0.0.0.0:2019"}}`), "answers on TCP at 0.0.0.0:2019", "localhost"},
+		{"no configuration on its command line", onHost("caddy")(), "admin address could not be read", "answers on TCP"},
+	} {
+		plan, err := hostadmit.Build(c.host, input(t, "status", hostadmit.Flags{}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var hints []string
+		for _, w := range plan.Warnings {
+			hints = append(hints, w.Hint)
+		}
+		all := strings.Join(hints, "\n")
+		if !strings.Contains(all, c.warn) || strings.Contains(all, c.miss) {
+			t.Errorf("%s: warnings\n%s", c.name, all)
+		}
+		for _, w := range plan.Warnings {
+			if c.name == "a JSON configuration" && strings.Contains(w.Hint, "answers on TCP") && !strings.Contains(w.Detail, `"admin": {"listen": "unix//run/caddy-admin.sock"}`) {
+				t.Errorf("a JSON configuration is given a Caddyfile's fix: %q", w.Detail)
+			}
+		}
+	}
+	h := caseNamed(t, "webserver-caddy-host-unix-admin").host()
+	plan, err := hostadmit.Build(h, input(t, "status", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range plan.Warnings {
+		if strings.HasPrefix(w.Hint, "web server:") {
+			t.Errorf("a Caddy with its admin API on a unix socket is warned about: %q", w.Hint)
+		}
+	}
+	if !slices.Contains(plan.Present, "web server: Caddy's admin API is not on TCP, so admit read none of its certificates") {
+		t.Errorf("present: %q", plan.Present)
+	}
+	for _, c := range h.ran {
+		if strings.Contains(c, "/etc/caddy/Caddyfile") && c != "[ -f '/etc/caddy/Caddyfile' ] && head -c 65536 '/etc/caddy/Caddyfile'" {
+			t.Errorf("the configuration is read as %q", c)
+		}
+	}
+	plan, _ = hostadmit.Build(caseNamed(t, "webserver-caddy-host-tcp-admin").host(), input(t, "status", hostadmit.Flags{}))
+	for _, w := range plan.Warnings {
+		if strings.Contains(w.Hint, "answers on TCP") && (!strings.Contains(w.Detail, "restart Caddy") || strings.Contains(w.Detail, "reload Caddy")) {
+			t.Errorf("the fix does not say to restart Caddy: %q", w.Detail)
 		}
 	}
 }
