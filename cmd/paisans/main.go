@@ -75,8 +75,12 @@ func main() {
 			err = runHostDeployments(os.Args[3:])
 		case len(os.Args) >= 3 && os.Args[2] == "request":
 			err = runHostRequest(os.Args[3:])
+		case len(os.Args) >= 3 && os.Args[2] == "admit":
+			err = runHostAdmit(os.Args[3:], os.Stdin, os.Stdout)
+		case len(os.Args) >= 3 && os.Args[2] == "evict":
+			err = runHostEvict(os.Args[3:], os.Stdin, os.Stdout)
 		default:
-			os.Exit(groupError(os.Stderr, "host", "host takes one subcommand, prepare, deployments or request"))
+			os.Exit(groupError(os.Stderr, "host", "host takes one subcommand, prepare, deployments, request, admit or evict"))
 		}
 	case "site":
 		switch {

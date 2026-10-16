@@ -1846,7 +1846,10 @@ Without `--execute` the same commands only read the registry and refuse the
 same way, so a dry run shows the conflict the real run would meet. `preflight`
 reads it on the site being added. `operator magic-link` and `oidc client create`
 reach a host without sudo, and their dry runs leave the registry alone; with
-`--execute` they claim through sudo, since the registry is root's.
+`--execute` they claim it, which only root can: `paisans host admit` claims
+the host for the deployment when its owner admits it, from the request alone,
+so a host admitted from a request and one admitted from the configuration
+hold the same entry.
 
 ### Where the mesh dials a site
 
@@ -4703,6 +4706,16 @@ the configuration to each rule it can check from the file, `ssh.user`
 included, so a configuration it accepts gets a request. A refusal `host
 request` can still reach names the configuration key to change beside the
 request's field.
+
+Admitting needs ufw installed and active on the host: `host admit` never
+enables it, and refuses before making any change otherwise. Ports 80 and 443
+belong to one deployment per host. The egress table fences the deployment's
+user off the owner's machine, and one limit follows from the mesh staying
+reachable: an owner service bound to all interfaces (`0.0.0.0` or `::`) is
+reachable on the host's mesh address, by the deployment and by its other
+sites. Owners should bind admin services to `127.0.0.1` or to their LAN
+address. `paisans host admit` and `paisans host evict` are in
+`docs/commands.md`.
 
 #### Keys belong to operators, and sites name operators
 

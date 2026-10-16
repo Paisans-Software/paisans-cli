@@ -291,11 +291,14 @@ func TestLocalCommandsStartInTheRootWhenHomeIsMissing(t *testing.T) {
 
 // The local transport runs a plan against the machine the CLI runs on, so
 // it is reached only through host admit and host evict with --request,
-// which run on the host itself. Neither exists yet, so no file outside this
-// package imports it, tests included, under any name.
+// which run on the host itself. No file outside this package but theirs
+// imports it, tests included, under any name.
 func TestOnlyHostAdmitReachesTheLocalTransport(t *testing.T) {
 	const importPath = "github.com/paisans-software/paisans-cli/internal/hostadmit"
-	allowed := map[string]bool{}
+	allowed := map[string]bool{
+		filepath.Join("cmd", "paisans", "hostadmit.go"):      true,
+		filepath.Join("cmd", "paisans", "hostadmit_test.go"): true,
+	}
 	root, err := filepath.Abs(".")
 	if err != nil {
 		t.Fatal(err)
