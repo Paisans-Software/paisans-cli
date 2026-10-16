@@ -80,17 +80,19 @@ func hostText(s string) string { return ui.Redact(visibleLines(s)) }
 
 // caddyTCPAdmin reads where the owner's Caddy serves its admin API. For a
 // Caddy on the host, its configuration, a Caddyfile or JSON, names the
-// address first, so one bound wider than localhost is named as it is;
-// the file is read as root only as a regular file, and its first 64 KiB
-// alone, since its path comes from a process any local user can start.
+// address first, so one bound wider than localhost is named as it is.
+// Its path comes from a process any local user can start, so the file is
+// read as root only as a regular file, never under /proc, /sys or /dev,
+// where a read can block or consume (/proc/kmsg passes -f), its first 64
+// KiB alone and for five seconds at most.
 // Otherwise the default endpoint, when it answers from the host. A Caddy
 // in a container whose endpoint the host cannot reach is no local user's
 // to reach either.
 func caddyTCPAdmin(p *planner, ws webserver.WebServer) caddyAdminState {
 	onHost := ws.Container == ""
 	if onHost && ws.Config != "" {
-		path := apply.ShellQuote(ws.Config)
-		if conf, err := p.t.Run("[ -f " + path + " ] && head -c 65536 " + path); err == nil {
+		read := `f=$(readlink -e -- ` + apply.ShellQuote(ws.Config) + `) && case $f in /proc/*|/sys/*|/dev/*) false ;; esac && [ -f "$f" ] && timeout 5 head -c 65536 -- "$f"`
+		if conf, err := p.t.Run(read); err == nil {
 			if addr, set := caddyAdmin(conf); set {
 				return caddyAdminState{tcp: addr, local: addr == ""}
 			}

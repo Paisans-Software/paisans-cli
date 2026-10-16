@@ -34,7 +34,7 @@ var webserverCases = addCases(
 	}},
 	goldenCase{name: "webserver-caddy-host-unix-admin", site: "status", host: func() *fakeHost {
 		return onHost("caddy")().answer("ps -o args= -C caddy", "caddy run --config /etc/caddy/Caddyfile\n").
-			answer("head -c 65536 '/etc/caddy/Caddyfile'", "{\n\tadmin unix//run/caddy-admin.sock\n}\nexample.org {\n}\n")
+			answer("readlink -e -- '/etc/caddy/Caddyfile'", "{\n\tadmin unix//run/caddy-admin.sock\n}\nexample.org {\n}\n")
 	}},
 	goldenCase{name: "webserver-caddy-container-tcp-admin", site: "status", host: func() *fakeHost {
 		return inContainer("caddy:2")().answer("localhost:2019/config/", caddyAPI)
@@ -194,7 +194,7 @@ func TestCaddyAdminFromTheCaddyfile(t *testing.T) {
 		"{\n\tadmin off\n}\n":                                 "",
 	} {
 		h := onHost("caddy")().answer("ps -o args= -C caddy", "caddy run --config /etc/caddy/Caddyfile\n").
-			answer("head -c 65536 '/etc/caddy/Caddyfile'", conf)
+			answer("readlink -e -- '/etc/caddy/Caddyfile'", conf)
 		rec, err := hostadmit.RecordOf(h, input(t, "status", hostadmit.Flags{}))
 		if err != nil {
 			t.Fatal(err)
@@ -218,7 +218,8 @@ func TestCaddyAdminFromTheCaddyfile(t *testing.T) {
 // as it is; a Caddy on the host whose configuration admit cannot find is
 // warned about, since its admin address was not read; a Caddy whose
 // admin API is off or on a unix socket is present, not warned about, and
-// the configuration is read bounded, and only as a regular file.
+// the configuration is read bounded in size and time, only as a regular
+// file and never under /proc, /sys or /dev, where a read can block.
 func TestCaddyAdminIsReadFromItsConfiguration(t *testing.T) {
 	caddy := func(args, read, conf string) *fakeHost {
 		h := onHost("caddy")().answer("localhost:2019/config/", caddyAPI)
@@ -232,8 +233,8 @@ func TestCaddyAdminIsReadFromItsConfiguration(t *testing.T) {
 		host       *fakeHost
 		warn, miss string
 	}{
-		{"a Caddyfile binding every address", caddy("caddy run --config /etc/caddy/Caddyfile", "head -c 65536 '/etc/caddy/Caddyfile'", "{\n\tadmin 0.0.0.0:2019\n}\n"), "answers on TCP at 0.0.0.0:2019", "localhost"},
-		{"a JSON configuration", caddy("caddy run --config /etc/caddy/caddy.json", "head -c 65536 '/etc/caddy/caddy.json'", `{"admin":{"listen":"0.0.0.0:2019"}}`), "answers on TCP at 0.0.0.0:2019", "localhost"},
+		{"a Caddyfile binding every address", caddy("caddy run --config /etc/caddy/Caddyfile", "readlink -e -- '/etc/caddy/Caddyfile'", "{\n\tadmin 0.0.0.0:2019\n}\n"), "answers on TCP at 0.0.0.0:2019", "localhost"},
+		{"a JSON configuration", caddy("caddy run --config /etc/caddy/caddy.json", "readlink -e -- '/etc/caddy/caddy.json'", `{"admin":{"listen":"0.0.0.0:2019"}}`), "answers on TCP at 0.0.0.0:2019", "localhost"},
 		{"no configuration on its command line", onHost("caddy")(), "admin address could not be read", "answers on TCP"},
 	} {
 		plan, err := hostadmit.Build(c.host, input(t, "status", hostadmit.Flags{}))
@@ -268,7 +269,7 @@ func TestCaddyAdminIsReadFromItsConfiguration(t *testing.T) {
 		t.Errorf("present: %q", plan.Present)
 	}
 	for _, c := range h.ran {
-		if strings.Contains(c, "/etc/caddy/Caddyfile") && c != "[ -f '/etc/caddy/Caddyfile' ] && head -c 65536 '/etc/caddy/Caddyfile'" {
+		if strings.Contains(c, "/etc/caddy/Caddyfile") && c != `f=$(readlink -e -- '/etc/caddy/Caddyfile') && case $f in /proc/*|/sys/*|/dev/*) false ;; esac && [ -f "$f" ] && timeout 5 head -c 65536 -- "$f"` {
 			t.Errorf("the configuration is read as %q", c)
 		}
 	}
