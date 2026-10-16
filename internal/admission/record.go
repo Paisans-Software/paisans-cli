@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"path"
 	"slices"
 	"strconv"
@@ -95,6 +96,9 @@ type Record struct {
 	// BridgeNetfilter is whether the owner passed --bridge-netfilter, which
 	// lets admit load br_netfilter on a host with bridges of its own.
 	BridgeNetfilter bool `json:"bridge_netfilter"`
+	// MeshLAN is the host's LAN prefix the owner let the mesh dial with
+	// --mesh-lan, "" without it.
+	MeshLAN string `json:"mesh_lan"`
 	// WebServer is what admit found in front of a site with
 	// web_server.managed_by: external, nil for every other site.
 	WebServer *WebServer `json:"web_server"`
@@ -139,7 +143,8 @@ type WebServer struct {
 
 // NewRecord is the record admit writes for req, with the grants the owner
 // gave, at at. The ports follow from req and the grants; forwarding follows
-// the endpoint. Admit sets DataDir, BridgeNetfilter and WebServer itself.
+// the endpoint. Admit sets DataDir, BridgeNetfilter, MeshLAN and WebServer
+// itself.
 func NewRecord(req Request, granted Grants, digest string, at time.Time) Record {
 	public := publicPorts(granted)
 	return Record{
@@ -174,6 +179,29 @@ func dataDirFor(dir, token string) bool {
 	return strings.HasPrefix(dir, "/") && path.Clean(dir) == dir && strings.HasSuffix(dir, "/paisans-"+token)
 }
 
+// privateRanges are the networks a home or office LAN is numbered from.
+var privateRanges = []netip.Prefix{
+	netip.MustParsePrefix("10.0.0.0/8"),
+	netip.MustParsePrefix("172.16.0.0/12"),
+	netip.MustParsePrefix("192.168.0.0/16"),
+}
+
+// MeshLAN reports whether s is a network --mesh-lan may open: an IPv4
+// prefix in its masked form, a /16 or narrower, inside 10.0.0.0/8,
+// 172.16.0.0/12 or 192.168.0.0/16. Nothing wider is the owner's own LAN.
+func MeshLAN(s string) bool {
+	p, err := netip.ParsePrefix(s)
+	if err != nil || !p.Addr().Is4() || p.Masked() != p || p.String() != s || p.Bits() < 16 {
+		return false
+	}
+	for _, r := range privateRanges {
+		if r.Contains(p.Addr()) && p.Bits() >= r.Bits() {
+			return true
+		}
+	}
+	return false
+}
+
 // EncodeRecord is the record's file: indented JSON with a final newline, the
 // only bytes ParseRecord accepts. The writer writes exactly these, with Mode,
 // to Path(token).
@@ -190,12 +218,13 @@ func EncodeRecord(r Record) ([]byte, error) {
 
 // recordFields is every key a record holds; a record missing one was not
 // written by a toolkit of its version.
-var recordFields = []string{"version", "deployment", "user", "grants", "forwarding", "ports", "digest", "admitted_at", "data_dir", "bridge_netfilter", "web_server"}
+var recordFields = []string{"version", "deployment", "user", "grants", "forwarding", "ports", "digest", "admitted_at", "data_dir", "bridge_netfilter", "mesh_lan", "web_server"}
 
 // ParseRecord reads a record strictly: its version, every field present and
 // none unknown, a deployment whose token is token, the user a request for it
 // may name, the public ports its grant opens, and a data_dir that is empty
-// or this deployment's.
+// or this deployment's, and a mesh_lan that is empty or a LAN --mesh-lan
+// may open.
 func ParseRecord(data []byte, token string) (Record, error) {
 	refuse := func(problems ...string) (Record, error) {
 		return Record{}, &Error{What: "the admission record for " + strconv.Quote(token), Problems: problems}
@@ -264,6 +293,9 @@ func ParseRecord(data []byte, token string) (Record, error) {
 	}
 	if r.DataDir != "" && !dataDirFor(r.DataDir, token) {
 		problems = append(problems, fmt.Sprintf("data_dir: %q is not an absolute path in its clean form ending in /paisans-%s, or empty", r.DataDir, token))
+	}
+	if r.MeshLAN != "" && !MeshLAN(r.MeshLAN) {
+		problems = append(problems, fmt.Sprintf("mesh_lan: %q is not an IPv4 network in its masked form, a /16 or narrower inside 10.0.0.0/8, 172.16.0.0/12 or 192.168.0.0/16, or empty", r.MeshLAN))
 	}
 	if len(problems) > 0 {
 		return refuse(problems...)

@@ -182,6 +182,7 @@ var parts = []part{
 	// 4. user
 	// 5. delegation
 	// 6. egress
+	{"egress", planEgress},
 	// 7. linger
 	// 8. bridge netfilter
 	// 9. daemon

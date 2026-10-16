@@ -1,0 +1,1 @@
+refused: egress: --mesh-lan: this host has no default route with an IPv4 address, so there is no LAN to let the mesh dial. Drop --mesh-lan. Nothing was changed

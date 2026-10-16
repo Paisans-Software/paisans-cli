@@ -19,6 +19,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	pathpkg "path"
 	"slices"
 	"sort"
 	"strings"
@@ -429,7 +430,12 @@ func Execute(plan *Plan, t Transport, r ui.Reporter) error {
 // snippet renders one embedded shell template. A missing template or a bad
 // one is a bug in this package, so it is returned rather than recovered from.
 func snippet(path string, data any) (string, error) {
-	tmpl, err := template.ParseFS(templates, path)
+	return snippetFuncs(path, nil, data)
+}
+
+// snippetFuncs is snippet with funcs given to the template.
+func snippetFuncs(path string, funcs template.FuncMap, data any) (string, error) {
+	tmpl, err := template.New(pathpkg.Base(path)).Funcs(funcs).ParseFS(templates, path)
 	if err != nil {
 		return "", fmt.Errorf("loading %s: %w", path, err)
 	}
