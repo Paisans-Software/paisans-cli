@@ -178,12 +178,12 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    apt would otherwise upgrade Docker to match them; a `dockerd` whose
    version cannot be read, or a Docker that is not dpkg's installed
    `docker-ce`, is refused too. Docker's apt key is trusted only when the
-   download holds one primary key, its subkeys aside, with the fingerprint of
-   Docker's release key, since apt trusts every key in the file. 29.5 is the
-   version from which a rootless container with host networking shares the
-   real host's network namespace (*Sources*), and every infra container is
-   `network_mode: host`, bound to the mesh address. A snap Docker is refused,
-   as today.
+   download holds one primary key, public or secret, its subkeys aside, with
+   the fingerprint of Docker's release key, since apt trusts every key in the
+   file. 29.5 is the version from which a rootless container with host
+   networking shares the real host's network namespace (*Sources*), and every
+   infra container is `network_mode: host`, bound to the mesh address. A snap
+   Docker is refused, as today.
 2. **AppArmor.** On Ubuntu 24.04 and later, unprivileged user namespaces are
    restricted unless a profile allows them. Ubuntu's `apparmor` package ships
    the profile for `rootlesskit` at `/etc/apparmor.d/rootlesskit`, loaded at
@@ -273,17 +273,20 @@ Garage site and 5 GB otherwise. The path is in the admission record.
     its ports again when the daemon restarts, or a DNAT or redirect rule for
     either port in `nft list ruleset`, or in `iptables-save` on a host
     without nft. A rule that only matches conntrack's dnat status is not one,
-    a negated port holds 80 or 443 unless it names both, and a port in a
-    named set or a map, which admit cannot read, is taken to hold them. A
-    Docker daemon with its userland proxy off publishes a port with a DNAT
-    rule alone and no listener, so `ss` cannot see it, and only root can read
-    the ruleset. Anything found refuses the grant, naming what holds the port
-    (process, container and compose project, or rule), and the refusal names
-    `web_server.managed_by: external` as the way to run behind it; so does
-    anything admit cannot read. A known limit: a DNAT rule with no
+    a negated port holds 80 or 443 unless it names both, and a port operand
+    that is anything but ports and ranges, a named set, a map, a
+    concatenation or a service's name, which admit cannot read, is taken to
+    hold them. A Docker daemon with its userland proxy off publishes a port
+    with a DNAT rule alone and no listener, so `ss` cannot see it, and only
+    root can read the ruleset. Anything found refuses the grant, naming what
+    holds the port (process, container and compose project, or rule), and the
+    refusal names `web_server.managed_by: external` as the way to run behind
+    it; so does anything admit cannot read. Known limits: a DNAT rule with no
     destination port, a forward of every port of an address, is not counted,
     since rules of that shape are mostly a service's backends, reached after
-    a port matched elsewhere.
+    a port matched elsewhere; and an iptables rule that matches its ports
+    through an ipset (`-m set --match-set`) names no `--dport`, so it is not
+    counted either.
 13. **Forwarding**, for a site with an endpoint: `net.ipv4.ip_forward=1` in
     the same file. Such a site relays mesh traffic between sites behind NAT,
     which cannot dial each other (`isRelay` in `internal/render/site.go`).
