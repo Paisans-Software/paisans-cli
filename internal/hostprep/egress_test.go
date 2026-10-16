@@ -61,12 +61,16 @@ func TestEgressTableRendersTheUsersRangeAndTheMark(t *testing.T) {
 
 // The unit loads the table before the user's manager, and is required by
 // it, so a table that fails to load keeps every container from starting.
+// It follows nftables.service, whose configuration on Ubuntu flushes the
+// whole ruleset: a reload of nftables loads the table again, and a restart
+// or stop restarts or stops it, so the table is never gone while the unit
+// reads as active.
 func TestEgressUnitIsRequiredByTheUsersManager(t *testing.T) {
 	text, err := hostprep.EgressUnit(hostprep.EgressUnitData{Token: "f2a9", User: "paisans-f2a9", Table: "paisans_f2a9", File: "/etc/paisans/egress.f2a9.nft", UID: "1001"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Before=network-pre.target user@1001.service", "After=nftables.service", "RequiredBy=user@1001.service", "ExecStart=/usr/sbin/nft -f /etc/paisans/egress.f2a9.nft", "ExecReload=/usr/sbin/nft -f /etc/paisans/egress.f2a9.nft"} {
+	for _, want := range []string{"Before=network-pre.target user@1001.service", "After=nftables.service", "RequiredBy=user@1001.service", "ExecStart=/usr/sbin/nft -f /etc/paisans/egress.f2a9.nft", "ExecReload=/usr/sbin/nft -f /etc/paisans/egress.f2a9.nft", "PartOf=nftables.service", "ReloadPropagatedFrom=nftables.service"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the unit lacks %q:\n%s", want, text)
 		}

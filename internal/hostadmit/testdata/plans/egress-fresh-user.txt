@@ -41,10 +41,17 @@ step 2: install the egress unit
     | # requires this unit, so a table that fails to load keeps them stopped.
     | # Never restart it: its stop deletes the table, and a restart restarts the
     | # manager that requires it. A changed table is loaded in place with reload.
+    | # It follows nftables.service, whose configuration flushes the whole
+    | # ruleset: a reload of nftables loads this table again, leaving the manager
+    | # running, and a restart or stop of nftables restarts or stops this unit,
+    | # and so the manager, its daemon and its containers with it, so the
+    | # deployment never runs while the table is gone.
     | [Unit]
     | Description=paisans f2a9: egress table for paisans-f2a9
     | DefaultDependencies=no
     | After=nftables.service
+    | PartOf=nftables.service
+    | ReloadPropagatedFrom=nftables.service
     | Wants=network-pre.target
     | Before=network-pre.target user@<uid>.service
     | 
