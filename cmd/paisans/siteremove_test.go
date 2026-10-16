@@ -196,34 +196,25 @@ func (h idHost) ReadFile(path string) (string, bool, error) {
 	return h.runningHost.ReadFile(path)
 }
 
-// cleaningHost is an idHost that a removal empties: once its registry entry
-// is taken out, the registry no longer lists it and no unit is left.
+// cleaningHost is an idHost holding one unit of the deployment's in its
+// user's systemd directory, which a removal deletes.
 type cleaningHost struct {
 	idHost
 	removed bool
 }
 
 func (h *cleaningHost) Run(command string) (string, error) {
-	if strings.Contains(command, "awk ") && strings.Contains(command, registry.Path) {
+	if strings.Contains(command, "daemon-reload") {
 		h.removed = true
 		return "", nil
 	}
-	if h.removed && strings.Contains(command, `echo "unit $f"`) {
-		return "", nil
+	if strings.Contains(command, `echo "unit $f"`) {
+		if h.removed {
+			return "", nil
+		}
+		return "unit /home/ubuntu/.config/systemd/user/paisans-f2a9-config-daemon.service\n", nil
 	}
 	return h.idHost.Run(command)
-}
-
-func (h *cleaningHost) ReadFile(path string) (string, bool, error) {
-	if path == registry.Path && h.removed {
-		reg, err := registry.Parse([]byte(h.registry))
-		if err != nil {
-			return "", false, err
-		}
-		data, err := registry.Encode(registry.Remove(reg, monitorID))
-		return string(data), true, err
-	}
-	return h.idHost.ReadFile(path)
 }
 
 // Every --id run says DNS was not modified, in one line and the comment to
@@ -269,7 +260,7 @@ func TestForcedRemovalOfAnUndeclaredSiteMakesNoProvider(t *testing.T) {
 }
 
 // An --id run that cleans the host ends on one line naming the host and the
-// deployment it was cleaned of.
+// deployment it was cleaned of, and the host evict line for its owner.
 func TestSiteRemoveByIDEndsNamingTheDeployment(t *testing.T) {
 	withHost(t, &cleaningHost{idHost: idHost{runningHost{failingHost{match: "\x00"}}, twoDeployments(t)}})
 	saved := isTerminal
@@ -291,6 +282,10 @@ func TestSiteRemoveByIDEndsNamingTheDeployment(t *testing.T) {
 	want := "admin@192.0.2.30:22 is cleaned of deployment " + monitorID + "."
 	if !rec.Has("result", want) {
 		t.Errorf("no result %q in:\n%s", want, rec.Lines())
+	}
+	// Then the line the host's owner runs to remove what is root's.
+	if !rec.Has("note", "the host's owner finishes on watch") || !strings.Contains(rec.Lines(), "    sudo paisans host evict --deployment "+monitorID+" --user admin --execute") {
+		t.Errorf("no evict line in:\n%s", rec.Lines())
 	}
 }
 

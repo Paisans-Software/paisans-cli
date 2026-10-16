@@ -52,8 +52,8 @@ func TestByIDCleansAMonitorWithNoConfiguration(t *testing.T) {
 	}
 	h := w.hosts["watch"]
 	reg, _ := registry.Parse([]byte(h.files[registry.Path]))
-	if _, ok := reg.Deployments[ourID]; ok {
-		t.Error("the registry entry is still there")
+	if _, ok := reg.Deployments[ourID]; !ok {
+		t.Error("the registry entry is gone, which is host evict's to remove")
 	}
 	for path := range h.files {
 		if strings.HasPrefix(path, root+"/") {
@@ -65,35 +65,34 @@ func TestByIDCleansAMonitorWithNoConfiguration(t *testing.T) {
 	}
 }
 
-// A removal without --delete-data keeps the data and the registry entry that
-// names it, marked kept, so a later run by --id finds the deployment and
-// deletes the data; a run without --delete-data in between leaves the entry
-// as it is.
+// A removal without --delete-data keeps the data, and the registry entry,
+// which is host evict's, stays as it was, so a later run by --id finds the
+// deployment and deletes the data; a run without --delete-data in between
+// keeps the data again and names no registry.
 func TestByIDDeletesDataARemovalWithoutDeleteDataKept(t *testing.T) {
 	w := setup(t)
 	h := w.hosts["home-b"]
+	entry := h.files[registry.Path]
 	if err := siteremove.Execute(byID(t, w, "home-b", "f2a9", siteremove.Options{})); err != nil {
 		t.Fatal(err)
 	}
-	reg, _ := registry.Parse([]byte(h.files[registry.Path]))
-	if reg.Deployments[ourID].Kept != registry.KeptData {
-		t.Fatalf("the registry entry is not marked kept for its data:\n%s", h.files[registry.Path])
+	if h.files[registry.Path] != entry {
+		t.Fatalf("the registry changed:\n%s", h.files[registry.Path])
 	}
 	if _, ok := h.files[root+"/infra/postgres/PG_VERSION"]; !ok {
 		t.Fatal("data was deleted without --delete-data")
 	}
 
 	again := byID(t, w, "home-b", "f2a9", siteremove.Options{})
-	if !again.DataKept || hasStep(again, 1, "home-b", "mark", "") || hasStep(again, 1, "home-b", "remove", registry.Path) {
-		t.Errorf("a second run without --delete-data changes the entry:\n%s", printed(again))
+	if !again.DataKept || strings.Contains(printed(again), registry.Path) {
+		t.Errorf("a second run without --delete-data:\n%s", printed(again))
 	}
 
 	if err := siteremove.Execute(byID(t, w, "home-b", "f2a9", siteremove.Options{DeleteData: true})); err != nil {
 		t.Fatal(err)
 	}
-	reg, _ = registry.Parse([]byte(h.files[registry.Path]))
-	if _, ok := reg.Deployments[ourID]; ok {
-		t.Error("the registry entry is still there")
+	if h.files[registry.Path] != entry {
+		t.Errorf("the registry changed:\n%s", h.files[registry.Path])
 	}
 	for path := range h.files {
 		if strings.HasPrefix(path, root+"/") {
@@ -140,7 +139,7 @@ func TestByIDLeavesAnotherDeploymentAlone(t *testing.T) {
 	if _, ok := reg.Deployments[otherID]; !ok {
 		t.Error("the other deployment's registry entry is gone")
 	}
-	if _, ok := b.files["/etc/systemd/system/paisans-0c1d-watchdog.service"]; !ok {
+	if _, ok := b.files[userUnits+"/paisans-0c1d-config-daemon.service"]; !ok {
 		t.Error("the other deployment's unit is gone")
 	}
 	if !contains(b.rules, "allow 51821/udp comment 'paisans-0c1d: wireguard'") {

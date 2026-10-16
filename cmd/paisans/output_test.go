@@ -273,6 +273,9 @@ func (h runningHost) Run(command string) (string, error) {
 	if strings.Contains(command, `echo "uid`) {
 		return "uid 1000\nsubuid ubuntu:165536:65536\n", nil
 	}
+	if strings.Contains(command, "getent passwd") {
+		return "ubuntu:x:1000:1000::/home/ubuntu:/bin/bash\n", nil
+	}
 	if strings.HasSuffix(command, "id -u") {
 		return "0\n", nil
 	}

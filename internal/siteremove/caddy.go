@@ -12,7 +12,6 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 	"github.com/paisans-software/paisans-cli/internal/ownership"
-	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
@@ -49,10 +48,6 @@ type caddyPlan struct {
 	// manifest is the manifest listing only the kept files, empty when the
 	// host's already is it.
 	manifest string
-	// entry is the registry entry, and mark whether it is still to be
-	// marked kept.
-	entry registry.Entry
-	mark  bool
 	// others are the paths under the root that are not Caddy's, and empty
 	// the empty directories among them, from keptProbe.
 	others, empty []string
@@ -281,7 +276,8 @@ func (p *Plan) parseKeptProbe(out string) (others, empty []string, files []strin
 // deleteBesideKept deletes everything under the root but the kept paths:
 // in the root and each directory above a kept path, every entry that is
 // neither kept nor above one, and everything in the snippets directory,
-// whose files were the deployment's routes.
+// whose files were the deployment's routes. Each goes through rootlesskit,
+// as emptyRootCommand's do, so a file a container's user owns goes too.
 func (p *Plan) deleteBesideKept() string {
 	root := p.dep().Root()
 	keep := map[string]map[string]bool{root: {}}
@@ -306,7 +302,7 @@ func (p *Plan) deleteBesideKept() string {
 		q := quote(dir)
 		head := fmt.Sprintf(`for f in %[1]s/* %[1]s/.[!.]* %[1]s/..?*; do [ -e "$f" ] || [ -L "$f" ] || continue;`, q)
 		if len(keep[dir]) == 0 {
-			loops = append(loops, head+` rm -rf -- "$f"; done`)
+			loops = append(loops, head+` rootlesskit rm -rf -- "$f"; done`)
 			continue
 		}
 		var names []string
@@ -314,7 +310,7 @@ func (p *Plan) deleteBesideKept() string {
 			names = append(names, quote(n))
 		}
 		sort.Strings(names)
-		loops = append(loops, head+fmt.Sprintf(` case "${f##*/}" in %s) ;; *) rm -rf -- "$f";; esac; done`, strings.Join(names, "|")))
+		loops = append(loops, head+fmt.Sprintf(` case "${f##*/}" in %s) ;; *) rootlesskit rm -rf -- "$f";; esac; done`, strings.Join(names, "|")))
 	}
 	// A directory walked that is a symbolic link would take the loop out of
 	// the root, Eg: snippets pointing at the owner's sites: nothing is
@@ -329,13 +325,14 @@ func (p *Plan) deleteBesideKept() string {
 
 // emptyBesideKept removes the empty directories under the root, but never a
 // kept one or one inside it: the container mounts them, and a missing mount
-// source keeps it from starting again.
+// source keeps it from starting again. find runs through rootlesskit, as
+// emptyRootCommand's does.
 func (p *Plan) emptyBesideKept() string {
 	var not []string
 	for _, k := range p.keptPaths() {
 		not = append(not, "! -path "+quote(k), "! -path "+quote(k+"/*"))
 	}
-	return fmt.Sprintf(`d=%s; if [ -d "$d" ]; then find "$d" -mindepth 1 -depth -type d -empty %s -delete; fi`, quote(p.dep().Root()), strings.Join(not, " "))
+	return fmt.Sprintf(`d=%s; if [ -d "$d" ]; then rootlesskit find "$d" -mindepth 1 -depth -type d -empty %s -delete; fi`, quote(p.dep().Root()), strings.Join(not, " "))
 }
 
 func caddyCommand(container hostcheck.Container, verb, config string) string {

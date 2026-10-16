@@ -244,6 +244,7 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	reportRemains(r, plan.Remains())
 	r.Result("%s is removed: every gate passed, and %s no longer declares it.", site, *configPath)
+	noteEvict(r, plan)
 	return nil
 }
 
@@ -347,6 +348,7 @@ func runSiteRemoveForced(r ui.Reporter, site string, a forcedArgs, stdin io.Read
 	forget(true)
 	reportRemains(r, plan.Remains())
 	r.Result("%s is cleaned of this deployment. %s and the secrets file are unchanged.", dest, a.config)
+	noteEvict(r, plan)
 	return nil
 }
 
@@ -427,7 +429,17 @@ func runSiteRemoveByID(r ui.Reporter, site string, a byIDArgs, stdin io.Reader, 
 	}
 	reportRemains(r, plan.Remains())
 	r.Result("%s is cleaned of deployment %s.", dest, plan.DeploymentID())
+	noteEvict(r, plan)
 	return nil
+}
+
+// noteEvict ends a run that reached or skipped a host with the line its
+// owner runs to remove what is root's, which site remove cannot.
+func noteEvict(r ui.Reporter, plan *siteremove.Plan) {
+	if plan.Evict == "" {
+		return
+	}
+	r.Note("the host's owner finishes on "+plan.Site, "Send them this line, which removes the deployment's user and everything root's that admit made for it:\n\n    "+plan.Evict)
 }
 
 // forcedNothingToDo ends a forced run on a host that holds nothing of this
@@ -439,11 +451,13 @@ func forcedNothingToDo(r ui.Reporter, plan *siteremove.Plan, dest config.Destina
 	}
 	if len(plan.CaddyKept) > 0 {
 		r.Result("%s holds nothing of this deployment but its Caddy, kept because it serves %s. Run this again once they have moved, and it goes.", dest, strings.Join(plan.CaddyKept, ", "))
+		noteEvict(r, plan)
 		return true
 	}
 	if plan.DataKept {
 		reportRemains(r, plan.Remains())
-		r.Result("%s holds nothing of this deployment but its data, which its registry entry keeps. Run this again with --delete-data, and it goes.", dest)
+		r.Result("%s holds nothing of this deployment but its data. Run this again with --delete-data, and it goes.", dest)
+		noteEvict(r, plan)
 		return true
 	}
 	if recordLeft {

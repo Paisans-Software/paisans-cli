@@ -30,7 +30,6 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
-	"github.com/paisans-software/paisans-cli/internal/hostprep"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/siteremove"
@@ -168,6 +167,9 @@ type host struct {
 	// container and its own on the host go to it.
 	web *webservertest.Server
 }
+
+// userUnits is the systemd directory of the world's login user, ubuntu.
+const userUnits = "/home/ubuntu/.config/systemd/user"
 
 // webDir is where the operator's web server's include directory is.
 const webDir = "/opt/caddy/"
@@ -719,39 +721,35 @@ func (h *host) Run(command string) (string, error) {
 		return "", nil
 
 	// the host stage
-	case strings.Contains(command, `/etc/systemd/system/paisans-f2a9-*; do [ -e "$f" ] && echo`):
+	case strings.Contains(command, `getent passwd "$u"`):
+		return "ubuntu:x:1000:1000::/home/ubuntu:/bin/bash\n", nil
+	case strings.Contains(command, `for f in `+userUnits+`/paisans-f2a9-*; do [ -e "$f" ] && echo`):
 		var b strings.Builder
 		for _, p := range h.sortedFiles() {
-			if strings.HasPrefix(p, "/etc/systemd/system/paisans-f2a9-") {
+			if strings.HasPrefix(p, userUnits+"/paisans-f2a9-") {
 				b.WriteString("unit " + p + "\n")
-			} else if strings.HasPrefix(p, "/etc/systemd/system/") && strings.Contains(p, ".d/paisans-f2a9-") {
-				b.WriteString("dropin " + p + "\n")
 			}
 		}
 		return b.String(), nil
-	case strings.Contains(command, `/etc/systemd/system/paisans-f2a9-*; do [ -e "$f" ] || continue`):
+	case strings.Contains(command, `for f in `+userUnits+`/paisans-f2a9-*; do [ -e "$f" ] || continue`):
 		for p := range h.files {
-			if strings.HasPrefix(p, "/etc/systemd/system/paisans-f2a9-") || strings.HasPrefix(p, "/etc/systemd/system/") && strings.Contains(p, ".d/paisans-f2a9-") {
+			if strings.HasPrefix(p, userUnits+"/paisans-f2a9-") {
 				delete(h.files, p)
 			}
 		}
 		return "", nil
-	case command == hostprep.AddedRulesProbe:
-		var b strings.Builder
-		for _, r := range h.rules {
-			b.WriteString("rule " + r + "\n")
-		}
-		return b.String(), nil
-	case strings.HasPrefix(command, "ufw delete "):
-		line := strings.TrimPrefix(command, "ufw delete ")
-		var kept []string
-		for _, r := range h.rules {
-			if r != line {
-				kept = append(kept, r)
+	case strings.HasPrefix(command, "if [ -d '") && strings.Contains(command, "rootlesskit find '"):
+		// Files hold the directories, so the empty-directories form has
+		// nothing to delete.
+		if !strings.Contains(command, "-type d -empty") {
+			dir := quoted(command)[0]
+			for p := range h.files {
+				if strings.HasPrefix(p, dir+"/") {
+					delete(h.files, p)
+				}
 			}
 		}
-		h.rules = kept
-		return "Rule deleted\n", nil
+		return "", nil
 	case strings.HasPrefix(command, "d='") && strings.Contains(command, "du -sb"):
 		dir := strings.TrimSuffix(strings.TrimPrefix(strings.SplitN(command, ";", 2)[0], "d='"), "'")
 		return h.dirAnswer(dir), nil
@@ -834,9 +832,6 @@ func (h *host) Run(command string) (string, error) {
 			}
 		}
 		return b.String(), nil
-	case strings.HasPrefix(command, "systemctl disable --now wg-quick@psns-f2a9"):
-		h.wgUp = false
-		return "", nil
 	case strings.HasPrefix(command, "f='"):
 		var out strings.Builder
 		for _, line := range strings.Split(strings.TrimSpace(command), "\n") {
@@ -858,41 +853,6 @@ func (h *host) Run(command string) (string, error) {
 		return out.String(), nil
 	case strings.HasPrefix(command, "rm -f -- '"):
 		delete(h.files, strings.TrimSuffix(strings.TrimPrefix(command, "rm -f -- '"), "'"))
-		return "", nil
-	case strings.Contains(command, "awk ") && strings.Contains(command, registry.Path) && strings.Contains(command, `"kept":"`):
-		r, err := registry.Parse([]byte(h.files[registry.Path]))
-		if err != nil {
-			return "paisans-registry-unreadable", errors.New("exit status 4")
-		}
-		m := regexp.MustCompile(`'entry="` + ourID + `":(\{[^']*\})'`).FindStringSubmatch(command)
-		var e registry.Entry
-		if m == nil || json.Unmarshal([]byte(m[1]), &e) != nil || (e.Kept != registry.KeptCaddy && e.Kept != registry.KeptData) {
-			return "", fmt.Errorf("not this deployment's entry marked kept: %s", command)
-		}
-		if old, ok := r.Deployments[ourID]; ok && func() registry.Entry { old.Kept = e.Kept; return old }() != e {
-			return "", fmt.Errorf("the entry marked kept is not the one there: %+v", e)
-		}
-		if want, _ := registry.ClaimCommand(ourID, e); command != want {
-			return "", fmt.Errorf("not a claim's merge: %s", command)
-		}
-		r.Deployments[ourID] = e
-		data, _ := registry.Encode(r)
-		h.files[registry.Path] = string(data)
-		return "", nil
-	case strings.Contains(command, "awk ") && strings.Contains(command, registry.Path):
-		if command != registry.RemoveCommand(ourID) {
-			return "", fmt.Errorf("not the removal: %s", command)
-		}
-		content, ok := h.files[registry.Path]
-		if !ok {
-			return "", nil
-		}
-		r, err := registry.Parse([]byte(content))
-		if err != nil {
-			return "paisans-registry-unreadable", errors.New("exit status 4")
-		}
-		data, _ := registry.Encode(registry.Remove(r, ourID))
-		h.files[registry.Path] = string(data)
 		return "", nil
 	case strings.HasSuffix(command, " stop"), strings.HasSuffix(command, " up -d"):
 		return "", nil
@@ -1010,6 +970,25 @@ func envLine(content, key string) string {
 }
 
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+// addToManifest writes a file on the host and lists it, with its checksum,
+// in the deployment's manifest there, as apply would have. path is relative
+// to the host's /, as manifest entries are.
+func (h *host) addToManifest(t *testing.T, path, content string) {
+	t.Helper()
+	var m render.Manifest
+	if err := json.Unmarshal([]byte(h.files[dep.Manifest()]), &m); err != nil {
+		t.Fatal(err)
+	}
+	h.files["/"+path] = content
+	m.Files = append(m.Files, render.ManifestFile{Path: path, SHA256: hexSum(content), Mode: "0644"})
+	sort.Slice(m.Files, func(i, j int) bool { return m.Files[i].Path < m.Files[j].Path })
+	data, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.files[dep.Manifest()] = string(data) + "\n"
+}
 
 func (h *host) sortedFiles() []string {
 	var out []string
@@ -1462,10 +1441,9 @@ func newWorld(t *testing.T, edits ...func(string) string) *world {
 	b.images["sha256:talk"], b.images["sha256:theirs"] = true, true
 	b.volumes = append(b.volumes, hostcheck.Volume{Name: "paisans-f2a9-talk_media", Project: "paisans-f2a9-talk", Deployment: ourID})
 	b.files[root+"/infra/postgres/PG_VERSION"] = "18\n"
-	b.files["/etc/systemd/system/paisans-f2a9-watchdog.service"] = "[Unit]\n"
-	b.files["/etc/systemd/system/docker.service.d/paisans-f2a9-after-wireguard.conf"] = "[Unit]\n"
-	b.files["/etc/systemd/system/paisans-0c1d-watchdog.service"] = "[Unit]\n"
-	b.files["/etc/systemd/system/docker.service.d/override.conf"] = "[Service]\n"
+	b.files[userUnits+"/paisans-f2a9-config-daemon.service"] = "[Unit]\n"
+	b.files[userUnits+"/paisans-0c1d-config-daemon.service"] = "[Unit]\n"
+	b.files["/etc/systemd/system/paisans-f2a9-egress.service"] = "[Unit]\n"
 	b.rules = []string{
 		"allow 22/tcp comment 'paisans-f2a9: ssh, the bootstrap route'",
 		"allow in on psns-f2a9 comment 'paisans-f2a9: the mesh'",

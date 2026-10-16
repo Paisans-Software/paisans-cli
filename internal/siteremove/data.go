@@ -131,7 +131,7 @@ func (p *Plan) probeEtcd() error {
 	if after > 0 && up*2 <= after {
 		problems = append(problems, fmt.Sprintf("without %s, %d of %d remaining members are healthy, which is no quorum", p.Site, up, after))
 	}
-	if p.Evict {
+	if p.Options.Evict {
 		if err := p.evictQuorum(members, up); err != nil {
 			return err
 		}
@@ -365,7 +365,7 @@ func (p *Plan) probePatroni() error {
 	// writes`.
 	evictedLeads := false
 	for _, m := range p.patroni.members {
-		evictedLeads = evictedLeads || p.Evict && m.name() == p.Site && m.role() == "Leader"
+		evictedLeads = evictedLeads || p.Options.Evict && m.name() == p.Site && m.role() == "Leader"
 	}
 	var problems []string
 	seen := map[string]bool{}
@@ -398,16 +398,16 @@ func (p *Plan) probePatroni() error {
 	// failover may be under way, and the members that stay are read as they
 	// move: the database stage waits for it, and its gate is what has to
 	// hold. A re-run after a partial cut completes it.
-	if p.Evict && (p.evict.cutDone || p.evict.cutStarted) {
+	if p.Options.Evict && (p.evict.cutDone || p.evict.cutStarted) {
 		problems = nil
 	}
 	if len(problems) > 0 {
 		return fmt.Errorf("site remove %s: the Patroni cluster is not healthy enough to change:\n  %s\nFix the members named (`paisans doctor` says how) and run again. Nothing was changed", p.Site, strings.Join(problems, "\n  "))
 	}
-	if p.patroni.leader == p.Site && p.Evict {
+	if p.patroni.leader == p.Site && p.Options.Evict {
 		p.evictLeader()
 	}
-	if p.patroni.leader == p.Site && !p.Evict {
+	if p.patroni.leader == p.Site && !p.Options.Evict {
 		for _, m := range p.patroni.members {
 			if m.role() == "Sync Standby" && m.state() == "streaming" && contains(p.end.Cluster.Sites, m.name()) {
 				p.patroni.candidate = m.name()
@@ -491,7 +491,7 @@ func (p *Plan) probeGarage() error {
 	if nodes < p.cfg.Storage.Garage.Replication {
 		return fmt.Errorf("site remove %s: %d node(s) in Garage's layout would stay without %s, fewer than storage.garage.replication %d, so Garage would refuse the new layout. Run paisans storage add for the sites missing from it first. Nothing was changed", p.Site, nodes, p.Site, p.cfg.Storage.Garage.Replication)
 	}
-	if p.Evict {
+	if p.Options.Evict {
 		if err := p.probeDeadNode(t, nodes); err != nil {
 			return err
 		}

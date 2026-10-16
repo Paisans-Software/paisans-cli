@@ -63,14 +63,7 @@ func directMeshCommand(s string) bool {
 
 // exemptLiterals are, by file, the exact strings that may run a mesh
 // command directly, and why.
-var exemptLiterals = map[string]map[string]string{
-	filepath.Join("..", "siteremove", "host.go"): {
-		// removeUnitsCommand
-		`for f in /etc/systemd/system/%[1]s*; do [ -e "$f" ] || continue; systemctl disable --now "$(basename "$f")" >/dev/null 2>&1 || true; rm -f -- "$f"; done; for f in /etc/systemd/system/*.d/%[1]s*; do [ -e "$f" ] || continue; rm -f -- "$f"; rmdir "$(dirname "$f")" 2>/dev/null || true; done; systemctl daemon-reload`: "site remove's host step removes the removed site's own units, which no helper verb does",
-		// wireguardCommand
-		`systemctl disable --now %[1]s >/dev/null 2>&1 || true; if systemctl is-active --quiet %[1]s; then echo "%[1]s is still active"; exit 1; fi`: "site remove's host step stops the removed site's own interface, which no helper verb does",
-	},
-}
+var exemptLiterals = map[string]map[string]string{}
 
 // Every command that reaches the mesh interface goes through the WireGuard
 // helper, because it is the one thing the deployment's user may run as

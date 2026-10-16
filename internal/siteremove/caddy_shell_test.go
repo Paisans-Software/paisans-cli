@@ -48,7 +48,16 @@ func shellTree(t *testing.T, files map[string]string, dirs, links []string) (bas
 func runUnder(t *testing.T, base, command string) error {
 	t.Helper()
 	command = strings.ReplaceAll(command, "'/srv/paisans/", "'"+base+"/srv/paisans/")
-	out, err := exec.Command("sh", "-c", command).CombinedOutput()
+	// rootlesskit, which a host has and this machine may not, stands in as
+	// a script that runs its arguments: the namespace changes whose files
+	// may be removed, not which.
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "rootlesskit"), []byte("#!/bin/sh\nexec \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sh", "-c", command)
+	cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Logf("%s: %v: %s", command, err, out)
 	}
