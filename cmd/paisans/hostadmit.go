@@ -196,7 +196,7 @@ func ownerDestination(sshFlag, site string, declared config.Site, stdin io.Reade
 		if !stdinIsTerminal(stdin) {
 			return config.Destination{}, fmt.Errorf("host admit: --site needs --ssh, your own login on %s, which runs admit through sudo: --ssh <user>, or --ssh user@host[:port] for another address. Nothing was read or changed", ui.Visible(host))
 		}
-		fmt.Fprintf(stdout, "Your own login on %s (site %s), which runs admit through sudo: ", ui.Visible(host), site)
+		fmt.Fprintf(stdout, "Existing username on %s (site %s) to connect under, with sudo: ", ui.Visible(host), site)
 		line, err := readTypedLine(stdin)
 		if err != nil {
 			return config.Destination{}, fmt.Errorf("host admit: reading your login: %w. Nothing was read or changed", err)
