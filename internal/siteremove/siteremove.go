@@ -11,11 +11,12 @@
 // one data site and a witness, two etcd voters, the witness leaves etcd in
 // the same removal (see EndState).
 //
-// On the site's host it touches only what is provably this deployment's and
-// its user's to remove: a Docker object with the deployment label carrying
-// this id, a file under its root whose hash matches this deployment's
-// manifest, a unit in its user's systemd directory named for its token, and
-// its own records. Everything else found is reported as kept. What is root's,
+// On the site's host it runs only as the deployment's user, refusing a
+// login as root, and touches only what is provably this deployment's and
+// that user's to remove: a Docker object with the deployment label carrying
+// this id, a file the manifest names by a clean path under its root whose
+// hash matches, a unit in its user's systemd directory named for its token,
+// and its own records. Everything else found is reported as kept. What is root's,
 // the user itself, the root directory, WireGuard, the firewall and the
 // registry entry, is host evict's: the plan ends with the line the host's
 // owner runs for it. docs/specs/2026-10-08-site-remove.md is the approved
@@ -194,7 +195,10 @@ type Plan struct {
 	patroni patroniState
 	garage  garageState
 	host    *hostPlan
-	evict   evictState
+	// home is the login user's home on the site's host, read once a run by
+	// refuseRoot.
+	home  string
+	evict evictState
 	// open is the step the running stage is in the middle of, ended when the
 	// next one starts or the stage's work does.
 	open ui.Step
@@ -467,6 +471,9 @@ func Build(cfg *config.Config, secrets *config.Secrets, site string, transports 
 				return nil, fmt.Errorf("site remove %s: its host does not answer over ssh (%v), so what is on it cannot be read or cleaned. Fix ssh and run again, or, if the host is never coming back, run with --host-gone: the cluster stages and the configuration edit run, and the host is left as it is", site, err)
 			}
 			return nil, fmt.Errorf("site remove %s: its host answered `true` with an error: %v: %s", site, err, lastLines(out, 2))
+		}
+		if err := p.refuseRoot(t); err != nil {
+			return nil, err
 		}
 		p.transports[site] = t
 	}

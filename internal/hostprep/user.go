@@ -2,6 +2,7 @@ package hostprep
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -19,22 +20,32 @@ const homeProbe = `u=$(id -un); getent passwd "$u" || echo "__PAISANS_ABSENT__ $
 // Home is the login user's home directory on the host t reaches. A login
 // user the host has no passwd entry for is refused by name.
 func Home(t Transport) (string, error) {
+	home, _, err := HomeAndUID(t)
+	return home, err
+}
+
+// HomeAndUID is Home with the login user's UID, from the same passwd entry,
+// so a command can tell a root login from the deployment's user.
+func HomeAndUID(t Transport) (home string, uid int, err error) {
 	out, err := t.Run(homeProbe)
 	if err != nil {
-		return "", fmt.Errorf("reading the login user's home on %s: %w", t.Describe(), err)
+		return "", 0, fmt.Errorf("reading the login user's home on %s: %w", t.Describe(), err)
 	}
 	if user, absent := strings.CutPrefix(strings.TrimSpace(out), "__PAISANS_ABSENT__"); absent {
-		return "", fmt.Errorf("the login user %s does not exist on %s. host prepare does not create users: create it, with sudo, and prepare again", strings.TrimSpace(user), t.Describe())
+		return "", 0, fmt.Errorf("the login user %s does not exist on %s. host prepare does not create users: create it, with sudo, and prepare again", strings.TrimSpace(user), t.Describe())
 	}
 	fields := strings.Split(strings.TrimSpace(out), ":")
 	if len(fields) < 7 {
-		return "", fmt.Errorf("the login user has no passwd entry on %s that paisans can read: %q", t.Describe(), strings.TrimSpace(out))
+		return "", 0, fmt.Errorf("the login user has no passwd entry on %s that paisans can read: %q", t.Describe(), strings.TrimSpace(out))
 	}
-	home := strings.TrimSuffix(fields[5], "/")
+	if uid, err = strconv.Atoi(fields[2]); err != nil || uid < 0 {
+		return "", 0, fmt.Errorf("the login user's passwd entry on %s has no UID that paisans can read: %q", t.Describe(), strings.TrimSpace(out))
+	}
+	home = strings.TrimSuffix(fields[5], "/")
 	if !strings.HasPrefix(home, "/") || strings.ContainsAny(home, " \t\n'\"") {
-		return "", fmt.Errorf("the login user's home on %s is %q, not a plain absolute path", t.Describe(), home)
+		return "", 0, fmt.Errorf("the login user's home on %s is %q, not a plain absolute path", t.Describe(), home)
 	}
-	return home, nil
+	return home, uid, nil
 }
 
 // UserUnitDir is where the login user's own systemd units live.

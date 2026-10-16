@@ -109,6 +109,86 @@ func TestSiteRemoveNeverReachesOutsideTheRoot(t *testing.T) {
 	}
 }
 
+// A manifest path that is not clean, one with a .. element above all, is
+// never deleted: the manifest is the deployment user's own file, and such a
+// path can name a file anywhere while it starts with the root. It is kept
+// and reported, and no command names it.
+func TestSiteRemoveNeverFollowsADotDotPath(t *testing.T) {
+	for _, bad := range []string{
+		dep.Rel() + "/../../../etc/ssh/sshd_config",
+		dep.Rel() + "/talk/../../0c1d/talk/.env",
+		dep.Rel() + "/./talk/x",
+		dep.Rel() + "//talk/x",
+	} {
+		t.Run(bad, func(t *testing.T) {
+			w := setup(t)
+			b := w.hosts["home-b"]
+			b.addToManifest(t, bad, "PermitRootLogin no\n")
+			p := w.mustBuild("home-b", siteremove.Options{DeleteData: true})
+			if strings.Contains(printed(p), bad) {
+				t.Errorf("the plan names %s:\n%s", bad, printed(p))
+			}
+			if !strings.Contains(strings.Join(p.Kept, "\n"), "/"+bad+": not a clean path under "+dep.Root()) {
+				t.Errorf("kept %q", p.Kept)
+			}
+			if err := siteremove.Execute(p); err != nil {
+				t.Fatal(err)
+			}
+			for _, c := range b.commands {
+				if strings.Contains(c, bad) {
+					t.Errorf("ran %s", c)
+				}
+			}
+		})
+	}
+}
+
+// The host stage runs only as the deployment's user: a destination that
+// logs in as root is refused before anything on the host is read or
+// changed, since as root a link the user planted under the root could steer
+// a deletion anywhere. The refusal names what to run instead.
+func TestSiteRemoveRefusesARootLogin(t *testing.T) {
+	builds := map[string]func(*world) error{
+		"full": func(w *world) error { _, err := w.build("home-b", siteremove.Options{}); return err },
+		"forced": func(w *world) error {
+			dest, _ := config.ParseDestination("root@192.0.2.12")
+			_, err := siteremove.BuildForced(w.cfg, w.secrets, "home-b", dest, w.hosts["home-b"], siteremove.Options{DeleteData: true})
+			return err
+		},
+		"by id": func(w *world) error {
+			dest, _ := config.ParseDestination("root@192.0.2.12")
+			_, err := siteremove.BuildForcedByID(dest, w.hosts["home-b"], ourID, siteremove.Options{DeleteData: true})
+			return err
+		},
+	}
+	for name, build := range builds {
+		t.Run(name, func(t *testing.T) {
+			w := setup(t)
+			b := w.hosts["home-b"]
+			b.loginRoot = true
+			err := build(w)
+			if err == nil {
+				t.Fatal("a root login was not refused")
+			}
+			for _, want := range []string{"logs in as root", "Nothing was changed", "--ssh", "the deployment's user", "sudo paisans host evict --deployment " + ourID} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("no %q in: %v", want, err)
+				}
+			}
+			for _, c := range b.commands {
+				if c != "true" && !strings.Contains(c, "getent passwd") && !strings.Contains(c, "ip -br addr") {
+					t.Errorf("ran %s before refusing", c)
+				}
+			}
+			for _, r := range b.reads {
+				if r != registry.Path {
+					t.Errorf("read %s before refusing", r)
+				}
+			}
+		})
+	}
+}
+
 // --delete-data empties the root through rootlesskit, as root of the
 // user's namespace, so files a container's user owns go too, and never
 // removes the root itself, which is root's to remove.
@@ -178,13 +258,12 @@ func TestDeleteDataLeavesNothingUnderTheStateDir(t *testing.T) {
 }
 
 // The key record is deleted with a plain rm, as the deployment and grant
-// records are, never under the deployment's lock: through --ssh root@host
-// the lock would be taken as root, following a link the user planted at
-// the lock's path and creating a root-owned file wherever it points.
+// records are, never under the deployment's lock, which would create a lock
+// file in the state directory again.
 func TestTheKeyRecordIsDeletedWithoutTheLock(t *testing.T) {
 	w := setup(t)
 	b := w.hosts["home-b"]
-	dest, _ := config.ParseDestination("root@192.0.2.12")
+	dest, _ := config.ParseDestination("deploy@192.0.2.12")
 	if err := siteremove.Execute(forced(t, w, w.cfg, "home-b", dest, siteremove.Options{})); err != nil {
 		t.Fatal(err)
 	}

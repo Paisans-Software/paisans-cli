@@ -23,7 +23,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Changed
 
-- `site remove` cleans a host as the deployment's user, emptying its root through `rootlesskit`, and ends with the `host evict` line the host's owner runs to remove the rest.
+- `site remove` cleans a host only as the deployment's user, refusing a root login, empties its root through `rootlesskit`, and ends with the `host evict` line the host's owner runs to remove the rest.
 - `paisans init` settles the mesh subnet on the hosts that have admitted the deployment and leaves the rest to `host admit`'s own check; `config recover` finds the deployment from the login's admission record.
 - `host prepare` maintains the deployment user's own `authorized_keys` as that user, recording what it added in `/srv/paisans/<token>/.paisans/authorized_keys.owned`.
 - `paisans prune` reads each dangling volume's size from `docker system df -v`, which the deployment's user can read for a volume a container's user owns.

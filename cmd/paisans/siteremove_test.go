@@ -142,6 +142,15 @@ func TestForcedOnAnEmptyHostSaysNothingToDo(t *testing.T) {
 	if out := rec.Lines(); !strings.Contains(out, "--execute") || !strings.Contains(out, "deployment record") {
 		t.Errorf("a dry run with a record left to clean printed:\n%s", out)
 	}
+	// A host left for its owner's evict says so on every ending.
+	plan.Evict = "sudo paisans host evict --deployment x --user deploy --execute"
+	for _, recordLeft := range []bool{false, true} {
+		rec = &ui.Recorder{}
+		forcedNothingToDo(rec, plan, config.Destination{User: "admin", Host: "192.0.2.1", Port: 22}, recordLeft)
+		if !strings.Contains(rec.Lines(), plan.Evict) {
+			t.Errorf("record left %v: no evict line in:\n%s", recordLeft, rec.Lines())
+		}
+	}
 	plan.Stages[0].Steps = []siteremove.Step{{Site: "home-b", Verb: "remove"}}
 	if forcedNothingToDo(&ui.Recorder{}, plan, config.Destination{}, false) {
 		t.Error("a plan with steps was ended")

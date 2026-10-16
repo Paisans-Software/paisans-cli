@@ -462,9 +462,13 @@ func forcedNothingToDo(r ui.Reporter, plan *siteremove.Plan, dest config.Destina
 	}
 	if recordLeft {
 		r.Result("%s holds nothing of this deployment. Re-run with --execute to take it out of the deployment record.", dest)
+		noteEvict(r, plan)
 		return true
 	}
+	// The deployment's user, its root and its admission record may still
+	// be there from an earlier run, whose evict line this repeats.
 	r.Result("%s holds nothing of this deployment. Nothing to do.", dest)
+	noteEvict(r, plan)
 	return true
 }
 

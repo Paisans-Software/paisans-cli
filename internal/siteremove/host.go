@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -278,11 +279,13 @@ func (p *Plan) buildHost() (*Stage, error) {
 	hp := &hostPlan{}
 	p.host = hp
 
+	if err := p.refuseRoot(t); err != nil {
+		return nil, err
+	}
+	hp.home = p.home
+
 	inv, err := inspect(t, p.cfg)
 	if err != nil {
-		return nil, fmt.Errorf("site remove %s: %w", p.Site, err)
-	}
-	if hp.home, err = hostprep.Home(t); err != nil {
 		return nil, fmt.Errorf("site remove %s: %w", p.Site, err)
 	}
 	if inv.Manifest && inv.ManifestFiles == nil {
@@ -325,6 +328,13 @@ func (p *Plan) buildHost() (*Stage, error) {
 	for _, e := range inv.ManifestFiles {
 		if strings.ContainsAny(e.Path, "'\n") {
 			return nil, fmt.Errorf("site remove %s: the manifest names %q, which this command will not put in a command line", p.Site, e.Path)
+		}
+		// The manifest is the user's own file: a path that is not clean can
+		// name a file anywhere while it starts with the root, so it is
+		// never read or deleted.
+		if !cleanRel(e.Path) {
+			p.Kept = append(p.Kept, fmt.Sprintf("%s: /%s: not a clean path under %s, so site remove leaves it; the host's owner removes it if it is this deployment's", p.Site, e.Path, d.Root()))
+			continue
 		}
 		// The user can remove nothing outside the root, and nothing there is
 		// provably this deployment's to the host's owner.
@@ -447,6 +457,41 @@ func (p *Plan) buildHost() (*Stage, error) {
 		return p.verifyHost(t)
 	}
 	return st, nil
+}
+
+// refuseRoot reads the login user's home, once a run, and refuses a login
+// as root before anything else on the host is read: as root, a link the user
+// planted under the root could steer a deletion anywhere, and the units, the
+// containers and the evict line would all be root's, not the user's.
+func (p *Plan) refuseRoot(t apply.Transport) error {
+	if p.home != "" {
+		return nil
+	}
+	d := p.dep()
+	home, uid, err := hostprep.HomeAndUID(t)
+	if err != nil {
+		return fmt.Errorf("site remove %s: %w", p.Site, err)
+	}
+	if uid == 0 {
+		return fmt.Errorf("site remove %s: %s logs in as root, and site remove cleans a host only as the deployment's user, so that nothing the user planted under %s can steer a deletion past what that user may delete. Nothing was changed. Run it again with --ssh <the deployment's user>@<host>; the host's owner then removes what is root's with sudo paisans host evict --deployment %s --user <the deployment's user> --execute", p.Site, t.Describe(), d.Root(), d.ID)
+	}
+	p.home = home
+	return nil
+}
+
+// cleanRel reports whether a manifest path is relative and clean: no
+// leading slash, no empty, . or .. element, so the root it starts with is
+// the directory it is in.
+func cleanRel(p string) bool {
+	if p == "" || path.IsAbs(p) || path.Clean(p) != p {
+		return false
+	}
+	for _, e := range strings.Split(p, "/") {
+		if e == ".." {
+			return false
+		}
+	}
+	return true
 }
 
 // planRoot plans the deployment's directory: its empty directories, or with
