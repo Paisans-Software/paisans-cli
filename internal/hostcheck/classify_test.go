@@ -94,7 +94,7 @@ func TestShowMarksWhatTheCheckFound(t *testing.T) {
 		"      home-a (ubuntu@host.example.org) is shared\n",
 		"  ok   docker: 27.3.1",
 		"  ok   container web-caddy-1 (compose project web): not paisans\n",
-		"  ok   shared: ufw's default policy",
+		"  ok   shared: superseded images are kept, and prune removes only volumes labelled with this deployment's id, as everywhere\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q", want)
@@ -177,7 +177,7 @@ func TestAForeignCaddyBesideASiteThatDoesNotClaimItIsShared(t *testing.T) {
 		"done: *:80/tcp held by a listener of another user's (uid 1002) not paisans",
 		"done: docker network shop_default (compose project shop) not paisans",
 		"done: volume shop_data (compose project shop) not paisans",
-		"done: shared ufw's default policy",
+		"done: shared superseded images are kept",
 	} {
 		wantLine(t, r, line)
 	}

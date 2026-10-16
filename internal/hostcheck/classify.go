@@ -406,6 +406,6 @@ func (r *Report) Show(rep ui.Reporter) {
 		rep.Step(n).End(ui.OK, "")
 	}
 	if r.Class == Shared {
-		rep.Step("shared").End(ui.OK, "ufw's default policy and enabled state are left alone, superseded images are kept, and prune removes only volumes labelled with this deployment's id, as everywhere")
+		rep.Step("shared").End(ui.OK, "superseded images are kept, and prune removes only volumes labelled with this deployment's id, as everywhere")
 	}
 }
