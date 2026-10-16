@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -84,6 +85,46 @@ func TestProbeReadsTheMeshDropIn(t *testing.T) {
 	f = probeIn(t, "useradd -u 1001 paisans-f2a9 && mkdir -p /etc/systemd/system/user@1001.service.d && ln -s /etc/shadow /etc/systemd/system/user@1001.service.d/paisans-mesh.conf", "paisans-f2a9", "")
 	if got := f.Files[meshDropInPath("1001")]; !got.Link {
 		t.Errorf("a linked mesh drop-in: %+v", got)
+	}
+}
+
+// The home useradd would give a user not made yet is read, so an earlier
+// user's directory or a link there is seen; an existing user's home is
+// read with its owner.
+func TestProbeReadsTheHome(t *testing.T) {
+	f := probeIn(t, "mkdir -p /home/paisans-f2a9 && chown 1234 /home/paisans-f2a9", "paisans-f2a9", "")
+	if u := f.User; u.Exists || u.HomeKind != "dir" || u.HomeUID != 1234 || u.HomePath != "/home/paisans-f2a9" {
+		t.Errorf("an earlier home: %+v", u)
+	}
+	f = probeIn(t, "ln -s /etc /home/paisans-f2a9", "paisans-f2a9", "")
+	if u := f.User; u.HomeKind != "link" {
+		t.Errorf("a linked home: %+v", u)
+	}
+	f = probeIn(t, "true", "paisans-f2a9", "")
+	if u := f.User; u.HomeKind != "absent" || u.HomePath != "/home/paisans-f2a9" {
+		t.Errorf("no home: %+v", u)
+	}
+	f = probeIn(t, "useradd -u 1001 --create-home paisans-f2a9", "paisans-f2a9", "")
+	if u := f.User; u.HomeKind != "dir" || u.HomeUID != 1001 || !u.SudoRead || len(u.SudoRules) != 0 {
+		t.Errorf("a user's own home, with no sudo installed: %+v", u)
+	}
+}
+
+// Every rule sudo grants the user is read, by name and by group, with
+// admit's own helper line as sudo -l prints it. It installs sudo from
+// Ubuntu's archive, so it needs the network.
+func TestProbeReadsTheUsersSudoRules(t *testing.T) {
+	setup := "apt-get update -qq >/dev/null 2>&1 && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo >/dev/null 2>&1 || exit 1\n" +
+		"useradd -u 1001 --create-home paisans-f2a9 && groupadd ops && usermod -aG ops paisans-f2a9\n"
+	f := probeIn(t, setup, "paisans-f2a9", "")
+	if u := f.User; !u.SudoRead || len(u.SudoRules) != 0 {
+		t.Errorf("no rule: %+v", u)
+	}
+	f = probeIn(t, setup+"echo 'paisans-f2a9 ALL=(root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-f2a9' > /etc/sudoers.d/paisans-f2a9 && chmod 440 /etc/sudoers.d/paisans-f2a9\n"+
+		"echo '%ops ALL=(ALL:ALL) ALL' > /etc/sudoers.d/ops && chmod 440 /etc/sudoers.d/ops", "paisans-f2a9", "")
+	want := []string{"(root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-f2a9", "(ALL : ALL) ALL"}
+	if u := f.User; !u.SudoRead || !slices.Equal(slices.Sorted(slices.Values(u.SudoRules)), slices.Sorted(slices.Values(want))) {
+		t.Errorf("rules: %+v", u)
 	}
 }
 

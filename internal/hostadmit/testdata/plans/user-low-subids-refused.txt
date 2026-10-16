@@ -1,0 +1,1 @@
+refused: user: paisans-f2a9's range in /etc/subuid, 0-65535, starts below 100000; holds 0, which is root; holds 65534, which is nobody; holds paisans-f2a9's own ID 1001, so a container's IDs would map onto real ones. Remove its line there and give it one of its own (usermod --add-subuids 165536-231071 paisans-f2a9), then admit again. Nothing was changed

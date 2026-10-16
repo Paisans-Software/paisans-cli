@@ -75,7 +75,9 @@ func (h *testHost) WriteFile(string, string, uint32) error { return nil }
 func (h *testHost) ranMatching(s string) []string {
 	var out []string
 	for _, c := range h.ran {
-		if strings.Contains(c, s) {
+		// The probe names commands it reads with, useradd -D among them,
+		// and is not a step.
+		if strings.Contains(c, s) && !strings.Contains(c, "paisans host admit: read only") {
 			out = append(out, c)
 		}
 	}

@@ -1,6 +1,6 @@
 admit site vm of f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01 as paisans-f2a9 on fake (ubuntu 24.04)
 
-present: user: paisans-f2a9 exists, uid 1001, in no privileged group
+present: user: paisans-f2a9 exists, uid 1001, in no privileged group, and sudo grants it nothing beyond admit's helper
 present: user: paisans-f2a9 holds 165536-231071 in /etc/subuid
 present: user: paisans-f2a9 holds 165536-231071 in /etc/subgid
 present: user: /etc/systemd/system/user@1001.service.d/paisans-mesh.conf starts paisans-f2a9's manager after the mesh

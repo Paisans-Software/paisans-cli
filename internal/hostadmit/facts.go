@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"text/template"
@@ -93,13 +94,22 @@ type DockerFacts struct {
 
 // UserFacts are the deployment's user, Exists false while it does not exist.
 type UserFacts struct {
-	Exists        bool
-	Name          string
-	UID, GID      int
-	Home, Group   string
-	Groups        []string
-	Linger        bool
-	ManagerActive bool
+	Exists      bool
+	Name        string
+	UID, GID    int
+	Home, Group string
+	Groups      []string
+	// HomeKind is how the probe found the user's home, or, for a user not
+	// made yet, the home useradd would give it, at HomePath: dir (owned by
+	// HomeUID), link, other or absent; "" when no line was read.
+	HomeKind, HomePath string
+	HomeUID            int
+	Linger             bool
+	ManagerActive      bool
+	// SudoRead is sudo -l -U read for the user (or sudo absent);
+	// SudoRules are the rules it listed, as it printed them.
+	SudoRead  bool
+	SudoRules []string
 }
 
 // IDRange is one line of /etc/subuid or /etc/subgid: Count IDs from Start.
@@ -235,6 +245,17 @@ func parseFacts(out, user string) (Facts, error) {
 				return f, fmt.Errorf("unreadable passwd entry %q", v)
 			}
 			f.User.Exists, f.User.UID, f.User.GID, f.User.Home = true, uid, gid, p[5]
+		case "home":
+			p := strings.SplitN(v, " ", 3)
+			uid, err := strconv.Atoi(p[min(1, len(p)-1)])
+			if len(p) != 3 || err != nil || !slices.Contains([]string{"dir", "link", "other", "absent"}, p[0]) {
+				return f, fmt.Errorf("unreadable home line %q", v)
+			}
+			f.User.HomeKind, f.User.HomeUID, f.User.HomePath = p[0], uid, p[2]
+		case "sudo":
+			f.User.SudoRead = v == "read"
+		case "sudo-rule":
+			f.User.SudoRules = append(f.User.SudoRules, v)
 		case "groups":
 			f.User.Groups = strings.Fields(v)
 		case "group":

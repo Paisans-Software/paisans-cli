@@ -44,12 +44,29 @@ var userCases = addCases(
 	goldenCase{name: "user-existing-running", site: "vm", host: func() *fakeHost { return current().withUser() }},
 	goldenCase{name: "user-admitted-unchanged", site: "vm", host: admittedUser},
 	goldenCase{name: "user-not-paisans", site: "home-b", flags: hostadmit.Flags{Watchdog: true}, host: func() *fakeHost {
-		return current().with("passwd", "community:x:1002:1002::/home/community:/bin/bash").with("groups", "community").
+		return current().with("passwd", "community:x:1002:1002::/home/community:/bin/bash").with("home", "dir 1002 /home/community").with("groups", "community").
 			with("group", "community").with("linger", "no").with("manager", "inactive").
 			add("subuid", "community:231072:65536").add("subgid", "community:231072:65536")
 	}},
 	goldenCase{name: "user-no-subids-refused", site: "vm", host: func() *fakeHost {
-		return current().with("passwd", "paisans-f2a9:x:1001:1001::/home/paisans-f2a9:/bin/bash").with("groups", "paisans-f2a9").with("group", "paisans-f2a9")
+		return current().with("passwd", "paisans-f2a9:x:1001:1001::/home/paisans-f2a9:/bin/bash").with("home", "dir 1001 /home/paisans-f2a9").with("groups", "paisans-f2a9").with("group", "paisans-f2a9")
+	}},
+	goldenCase{name: "user-home-exists-refused", site: "vm", host: func() *fakeHost {
+		return current().with("home", "dir 1234 /home/paisans-f2a9")
+	}},
+	goldenCase{name: "user-low-subids-refused", site: "vm", host: func() *fakeHost {
+		h := current().withUser()
+		var kept [][2]string
+		for _, kv := range h.facts {
+			if kv != [2]string{"subuid", "paisans-f2a9:165536:65536"} {
+				kept = append(kept, kv)
+			}
+		}
+		h.facts = kept
+		return h.add("subuid", "paisans-f2a9:0:65536")
+	}},
+	goldenCase{name: "user-sudo-rule-refused", site: "vm", host: func() *fakeHost {
+		return current().withUser().add("sudo-rule", "(ALL : ALL) NOPASSWD: ALL")
 	}},
 	goldenCase{name: "user-overlapping-subids-refused", site: "vm", host: func() *fakeHost {
 		return current().withUser().add("subuid", "someone:170000:65536")
@@ -195,7 +212,7 @@ func TestExecuteRunsTheUsersStepsWithItsUID(t *testing.T) {
 	h := current()
 	h.onRun = func(h *fakeHost, command string) {
 		if strings.HasPrefix(command, "useradd ") {
-			h.with("passwd", "paisans-f2a9:x:1001:1001::/home/paisans-f2a9:/bin/bash").
+			h.with("passwd", "paisans-f2a9:x:1001:1001::/home/paisans-f2a9:/bin/bash").with("home", "dir 1001 /home/paisans-f2a9").
 				with("groups", "paisans-f2a9").with("group", "paisans-f2a9").
 				with("linger", "no").with("manager", "inactive").
 				add("subuid", "paisans-f2a9:165536:65536").add("subgid", "paisans-f2a9:165536:65536")
@@ -216,5 +233,129 @@ func TestExecuteRunsTheUsersStepsWithItsUID(t *testing.T) {
 		if !slices.Contains(h.ran, c) {
 			t.Errorf("%q did not run: %q", c, h.ran)
 		}
+	}
+}
+
+// The user's own subordinate ranges must sit above every real ID: the
+// egress table trusts the whole range as the user's, and newuidmap maps
+// the containers' IDs onto it, so a range holding 0, 65534 or the user's
+// own UID would hand a container root, nobody or the user itself.
+func TestAMisplacedSubordinateRangeIsRefused(t *testing.T) {
+	for _, kind := range []string{"subuid", "subgid"} {
+		for _, c := range []struct{ name, line, want string }{
+			{"below 100000", "paisans-f2a9:99999:65536", "starts below 100000"},
+			{"holding 0", "paisans-f2a9:0:65536", "holds 0"},
+			{"holding 65534", "paisans-f2a9:65000:65536", "holds 65534"},
+			{"holding its own UID", "paisans-f2a9:165536:65536", "holds paisans-f2a9's own ID 170000"},
+		} {
+			h := current().withUser()
+			own := c.name == "holding its own UID"
+			if own {
+				h.with("passwd", "paisans-f2a9:x:170000:170000::/home/paisans-f2a9:/bin/bash").with("home", "dir 170000 /home/paisans-f2a9")
+			}
+			var kept [][2]string
+			for _, kv := range h.facts {
+				ranged := kv[0] == kind || own && (kv[0] == "subuid" || kv[0] == "subgid")
+				if !ranged || !strings.HasPrefix(kv[1], "paisans-f2a9:") {
+					kept = append(kept, kv)
+				}
+			}
+			h.facts = kept
+			h.add(kind, c.line)
+			if other := map[string]string{"subuid": "subgid", "subgid": "subuid"}[kind]; own {
+				h.add(other, "paisans-f2a9:300000:65536")
+			}
+			_, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+			if err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), "/etc/"+kind) {
+				t.Errorf("%s %s: %v", kind, c.name, err)
+			}
+		}
+	}
+}
+
+// A home that exists before useradd makes the user is refused, whoever
+// owns it: useradd takes it over with only a warning, and with it whatever
+// keys and data an earlier user left there. A link there would make the
+// new user's home wherever it points.
+func TestAnExistingHomeIsRefused(t *testing.T) {
+	for _, c := range []struct{ name, home, want string }{
+		{"another's", "dir 1234 /home/paisans-f2a9", "/home/paisans-f2a9 already exists"},
+		{"root's", "dir 0 /home/paisans-f2a9", "/home/paisans-f2a9 already exists"},
+		{"a file", "other 0 /home/paisans-f2a9", "/home/paisans-f2a9 already exists"},
+		{"a link", "link 0 /home/paisans-f2a9", "/home/paisans-f2a9 already exists"},
+	} {
+		_, err := hostadmit.Build(current().with("home", c.home), input(t, "vm", hostadmit.Flags{}))
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("a home that is %s, before the user: %v", c.name, err)
+		}
+	}
+	for _, c := range []struct{ name, home, want string }{
+		{"another's", "dir 1234 /home/paisans-f2a9", "is not paisans-f2a9's"},
+		{"a link", "link 0 /home/paisans-f2a9", "is a link"},
+		{"absent", "absent 0 /home/paisans-f2a9", "is not a directory"},
+		{"unread", "", "could not be read"},
+	} {
+		h := current().withUser().with("home", c.home)
+		if c.home == "" {
+			var kept [][2]string
+			for _, kv := range h.facts {
+				if kv[0] != "home" {
+					kept = append(kept, kv)
+				}
+			}
+			h.facts = kept
+		}
+		_, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("an existing user's home that is %s: %v", c.name, err)
+		}
+	}
+}
+
+// A user sudo grants anything to, by name or by a group admit does not
+// list, is refused: admit's own line for the WireGuard helper, which a
+// re-run finds, is to be its only rule.
+func TestAUserWithSudoRulesIsRefused(t *testing.T) {
+	const own = "(root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-f2a9"
+	for _, c := range []struct {
+		name string
+		host *fakeHost
+		want string
+	}{
+		{"a rule", current().withUser().add("sudo-rule", "(ALL : ALL) ALL"), "sudo grants paisans-f2a9 a rule"},
+		{"a rule beside admit's", current().withUser().add("sudo-rule", own).add("sudo-rule", "(root) /usr/bin/apt"), "(root) /usr/bin/apt"},
+		{"rules unread", current().withUser().with("sudo", "unknown"), "sudo's rules for paisans-f2a9 could not be read"},
+		{"no sudo line", func() *fakeHost {
+			h := current().withUser()
+			var kept [][2]string
+			for _, kv := range h.facts {
+				if kv[0] != "sudo" {
+					kept = append(kept, kv)
+				}
+			}
+			h.facts = kept
+			return h
+		}(), "sudo's rules for paisans-f2a9 could not be read"},
+	} {
+		_, err := hostadmit.Build(c.host, input(t, "vm", hostadmit.Flags{}))
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v", c.name, err)
+		}
+	}
+	if _, err := hostadmit.Build(current().withUser().add("sudo-rule", own), input(t, "vm", hostadmit.Flags{})); err != nil {
+		t.Errorf("admit's own helper rule is refused: %v", err)
+	}
+}
+
+// The groups added for Ubuntu 24.04 are refused like the rest.
+func TestTheRootEquivalentGroupsAreListed(t *testing.T) {
+	for _, g := range []string{"disk", "shadow", "kmem", "libvirt", "incus-admin", "lxd"} {
+		if !slices.Contains(hostadmit.PrivilegedGroups, g) {
+			t.Errorf("%s is not in PrivilegedGroups", g)
+		}
+	}
+	_, err := hostadmit.Build(current().withUser().with("groups", "paisans-f2a9 disk"), input(t, "vm", hostadmit.Flags{}))
+	if err == nil || !strings.Contains(err.Error(), "disk") {
+		t.Errorf("a user in disk: %v", err)
 	}
 }

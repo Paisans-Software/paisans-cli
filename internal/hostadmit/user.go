@@ -15,11 +15,22 @@ import (
 // reaches past the user, to root (sudo, wheel, admin, lxd), to every user's
 // logs (adm, systemd-journal), or to the owner's system Docker daemon,
 // which is root on the host (docker).
-var PrivilegedGroups = []string{"root", "sudo", "wheel", "admin", "adm", "docker", "lxd", "systemd-journal"}
+//
+// Each is root-equivalent or reads root's secrets: disk writes the raw
+// block devices, kmem reads the kernel's memory, shadow reads every
+// password hash, and libvirt, incus-admin and lxd start machines and
+// containers as root with the host's disks in reach.
+var PrivilegedGroups = []string{"root", "sudo", "wheel", "admin", "adm", "docker", "lxd", "systemd-journal",
+	"disk", "shadow", "kmem", "libvirt", "incus-admin"}
 
 // minSubIDs is the subordinate range a rootless daemon needs (Docker's
 // rootless page: "at least 65,536").
 const minSubIDs = 65536
+
+// subIDMin is the lowest ID a subordinate range may hold, Ubuntu's
+// SUB_UID_MIN and SUB_GID_MIN: below it are root, the system accounts,
+// nobody (65534) and the host's own users.
+const subIDMin = 100000
 
 // asUser is command run as the deployment's user, with an environment of
 // its own and nothing of root's: its home, its runtime directory and bus,
@@ -50,6 +61,9 @@ func planUser(p *planner) error {
 	}
 	u := p.f.User
 	if !u.Exists {
+		if u.HomeKind != "absent" {
+			return homeExists(req.User, u)
+		}
 		p.step(Step{
 			Title:    "create user " + req.User,
 			Describe: "user: create " + req.User + " with a home, whose subordinate ID ranges useradd allocates",
@@ -70,7 +84,13 @@ func planUser(p *planner) error {
 	if len(privileged) > 0 {
 		return fmt.Errorf("%s is in %s, which reaches past the user (docker is your system daemon, which is root; sudo, wheel, admin and lxd reach root; adm and systemd-journal read every user's logs). Remove it from them (gpasswd -d %s <group>), or name another user in the request, and admit again. Nothing was changed", req.User, strings.Join(privileged, ", "), req.User)
 	}
-	p.present(fmt.Sprintf("user: %s exists, uid %d, in no privileged group", req.User, u.UID))
+	if err := sudoRules(p); err != nil {
+		return err
+	}
+	if err := ownHome(req.User, u); err != nil {
+		return err
+	}
+	p.present(fmt.Sprintf("user: %s exists, uid %d, in no privileged group, and sudo grants it nothing beyond admit's helper", req.User, u.UID))
 	if req.User != p.d.Prefix() {
 		p.warn("user: "+req.User+" already exists and is not "+p.d.Prefix(),
 			"admit adds the operators' keys to "+req.User+"'s authorized_keys and runs the deployment as "+req.User+": check that this account is meant for the deployment and nothing else.")
@@ -89,6 +109,9 @@ func planUser(p *planner) error {
 		case len(mine) > 1 || mine[0].Count < minSubIDs:
 			return fmt.Errorf("%s needs one range of at least %d in /etc/%s, and has %s. Remove its lines there and give it one (%s), then admit again. Nothing was changed", req.User, minSubIDs, kind.name, spans(mine), fix)
 		}
+		if bad := misplaced(mine[0], u); bad != "" {
+			return fmt.Errorf("%s's range in /etc/%s, %s, %s, so a container's IDs would map onto real ones. Remove its line there and give it one of its own (%s), then admit again. Nothing was changed", req.User, kind.name, spans(mine), bad, fix)
+		}
 		for _, name := range sortedKeys(kind.ranges) {
 			for _, r := range kind.ranges[name] {
 				if name != req.User && r.Start < mine[0].Start+mine[0].Count && mine[0].Start < r.Start+r.Count {
@@ -100,6 +123,82 @@ func planUser(p *planner) error {
 		p.present(fmt.Sprintf("user: %s holds %s in /etc/%s", req.User, spans(mine), kind.name))
 	}
 	return planMeshDropIn(p)
+}
+
+// homeExists refuses a home already there for a user admit is about to
+// create: useradd takes it over with only a warning, and with it whatever
+// an earlier user left in it, its keys and its Docker data; a link there
+// makes the new user's home wherever it points.
+func homeExists(user string, u UserFacts) error {
+	if u.HomeKind == "" {
+		return fmt.Errorf("the home useradd would give %s could not be read, so admit cannot tell whether an earlier user left one there. Nothing was changed", user)
+	}
+	what := map[string]string{"dir": fmt.Sprintf("a directory of uid %d", u.HomeUID), "link": "a link", "other": "a file"}[u.HomeKind]
+	return fmt.Errorf("%s already exists (%s), and useradd would hand it to %s with whatever is in it: an earlier user's keys and data, or, through a link, wherever it points. Move it aside or remove it, then admit again. Nothing was changed", ui.Visible(u.HomePath), what, user)
+}
+
+// ownHome refuses an existing user whose home is not a directory of its
+// own: admit writes there as the user, and a link or another's directory
+// would put the operators' keys and the daemon's data somewhere else.
+func ownHome(user string, u UserFacts) error {
+	home := ui.Visible(u.HomePath)
+	switch {
+	case u.HomeKind == "":
+		return fmt.Errorf("%s's home could not be read. Nothing was changed", user)
+	case u.HomeKind == "link":
+		return fmt.Errorf("%s's home %s is a link, so what admit writes there as the user lands wherever it points. Make it a real directory of %s's and admit again. Nothing was changed", user, home, user)
+	case u.HomeKind != "dir":
+		return fmt.Errorf("%s's home %s is not a directory. Make it a directory of %s's and admit again. Nothing was changed", user, home, user)
+	case u.HomeUID != u.UID:
+		return fmt.Errorf("%s's home %s is not %s's (it is uid %d's), so another account can change what admit writes there. Give it to %s (chown -R %s: %s) and admit again. Nothing was changed", user, home, user, u.HomeUID, user, user, home)
+	}
+	return nil
+}
+
+// sudoRules refuses a user sudo grants any rule to but admit's own line
+// for the WireGuard helper, which a re-run finds: a rule by name, or by a
+// group PrivilegedGroups does not list, reaches past the user as surely as
+// sudo's own group does.
+func sudoRules(p *planner) error {
+	user := p.in.Request.User
+	if !p.f.User.SudoRead {
+		return fmt.Errorf("sudo's rules for %s could not be read (sudo -l -U %s), so admit cannot tell what they grant. Nothing was changed", user, user)
+	}
+	helper, _ := apply.WGHelper{Iface: p.d.Interface()}.Path()
+	var others []string
+	for _, r := range p.f.User.SudoRules {
+		if r != "(root) NOPASSWD: "+helper {
+			others = append(others, "- "+ui.Visible(r))
+		}
+	}
+	if len(others) == 0 {
+		return nil
+	}
+	return fmt.Errorf("sudo grants %s a rule beyond admit's own, which reaches past the user:\n%s\nRemove them (sudo -l -U %s names them; look in /etc/sudoers and /etc/sudoers.d), or name another user in the request, and admit again. Nothing was changed", user, strings.Join(others, "\n"), user)
+}
+
+// misplaced says why r cannot be a deployment's subordinate range, or "":
+// below subIDMin it holds root, nobody or a real user, and it must never
+// hold the user's own IDs.
+func misplaced(r IDRange, u UserFacts) string {
+	holds := func(id int64) bool { return r.Start <= id && id < r.Start+r.Count }
+	var why []string
+	if r.Start < subIDMin {
+		why = append(why, fmt.Sprintf("starts below %d", subIDMin))
+	}
+	if holds(0) {
+		why = append(why, "holds 0, which is root")
+	}
+	if holds(65534) {
+		why = append(why, "holds 65534, which is nobody")
+	}
+	for _, id := range []int{u.UID, u.GID} {
+		if holds(int64(id)) {
+			why = append(why, fmt.Sprintf("holds %s's own ID %d", u.Name, id))
+			break
+		}
+	}
+	return strings.Join(why, "; ")
 }
 
 // spans is ranges as first-last, comma separated.

@@ -1,0 +1,3 @@
+refused: user: sudo grants paisans-f2a9 a rule beyond admit's own, which reaches past the user:
+- (ALL : ALL) NOPASSWD: ALL
+Remove them (sudo -l -U paisans-f2a9 names them; look in /etc/sudoers and /etc/sudoers.d), or name another user in the request, and admit again. Nothing was changed

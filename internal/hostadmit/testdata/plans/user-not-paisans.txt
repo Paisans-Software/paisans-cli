@@ -32,7 +32,7 @@ step 4: start community's manager
   run:
     $ systemctl start user@1002.service
 
-present: user: community exists, uid 1002, in no privileged group
+present: user: community exists, uid 1002, in no privileged group, and sudo grants it nothing beyond admit's helper
 present: user: community holds 231072-296607 in /etc/subuid
 present: user: community holds 231072-296607 in /etc/subgid
 warning: user: community already exists and is not paisans-f2a9

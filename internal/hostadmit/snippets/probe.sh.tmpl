@@ -48,9 +48,32 @@ if line=$(getent passwd "$u"); then
   home=$(printf '%s' "$line" | cut -d: -f6)
   if [ -e "/var/lib/systemd/linger/$u" ]; then say linger yes; else say linger no; fi
   say manager "$(systemctl is-active "user@$uid.service" 2>/dev/null || true)"
+  # Every rule sudo grants the user, by name or by any group. With no sudo
+  # installed there is none.
+  if ! command -v sudo >/dev/null 2>&1; then
+    say sudo read
+  else
+    rules=$(sudo -n -l -U "$u" 2>&1 || true)
+    case $rules in
+      *"may run the following commands"*)
+        say sudo read
+        printf '%s\n' "$rules" | awk '/may run the following commands/ { r = 1; next } r && /^[ \t]+[^ \t]/ { sub(/^[ \t]+/, ""); print "sudo-rule " $0 }' ;;
+      *"is not allowed to run sudo"*) say sudo read ;;
+      *) say sudo unknown ;;
+    esac
+  fi
+  homepath=$home
 else
   say passwd absent
+  homepath=$(useradd -D 2>/dev/null | sed -n 's/^HOME=//p')
+  homepath=${homepath:-/home}/$u
 fi
+# The user's home, or the one useradd would give a user not made yet: it
+# is stat'ed, never read inside.
+if [ -L "$homepath" ]; then say home "link 0 $homepath"
+elif [ -d "$homepath" ]; then say home "dir $(stat -c %u -- "$homepath") $homepath"
+elif [ -e "$homepath" ]; then say home "other 0 $homepath"
+else say home "absent 0 $homepath"; fi
 awk -F: 'NF >= 3 { print "subuid " $1 ":" $2 ":" $3 }' /etc/subuid 2>/dev/null
 awk -F: 'NF >= 3 { print "subgid " $1 ":" $2 ":" $3 }' /etc/subgid 2>/dev/null
 # Each file admit writes as root: its checksum, mode and owner, so admit
