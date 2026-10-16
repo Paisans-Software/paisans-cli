@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -65,6 +66,72 @@ func TestProbeOnABlankHost(t *testing.T) {
 	// The image has no ufw: not installed, so not active.
 	if f.UFWInstalled || f.UFWActive {
 		t.Errorf("ufw: installed %v, active %v", f.UFWInstalled, f.UFWActive)
+	}
+}
+
+// The user's mesh drop-in is read at the path its UID names, summed as
+// any file admit writes, and a link there is seen as a link.
+func TestProbeReadsTheMeshDropIn(t *testing.T) {
+	const content = "[Unit]\nAfter=wg-quick@psns-f2a9.service\n"
+	setup := "useradd -u 1001 paisans-f2a9 && mkdir -p /etc/systemd/system/user@1001.service.d && " +
+		"printf '" + strings.ReplaceAll(content, "\n", "\\n") + "' > /etc/systemd/system/user@1001.service.d/paisans-mesh.conf && " +
+		"chmod 644 /etc/systemd/system/user@1001.service.d/paisans-mesh.conf"
+	f := probeIn(t, setup, "paisans-f2a9", "")
+	got := f.Files[meshDropInPath("1001")]
+	if !got.Present || got.Link || got.Sum != sha(content) || got.Mode != "644" || got.UID != 0 {
+		t.Errorf("mesh drop-in: %+v", got)
+	}
+	f = probeIn(t, "useradd -u 1001 paisans-f2a9 && mkdir -p /etc/systemd/system/user@1001.service.d && ln -s /etc/shadow /etc/systemd/system/user@1001.service.d/paisans-mesh.conf", "paisans-f2a9", "")
+	if got := f.Files[meshDropInPath("1001")]; !got.Link {
+		t.Errorf("a linked mesh drop-in: %+v", got)
+	}
+}
+
+// The home useradd would give a user not made yet is read, so an earlier
+// user's directory or a link there is seen; an existing user's home is
+// read with its owner.
+func TestProbeReadsTheHome(t *testing.T) {
+	f := probeIn(t, "mkdir -p /home/paisans-f2a9 && chown 1234 /home/paisans-f2a9", "paisans-f2a9", "")
+	if u := f.User; u.Exists || u.HomeKind != "dir" || u.HomeUID != 1234 || u.HomePath != "/home/paisans-f2a9" {
+		t.Errorf("an earlier home: %+v", u)
+	}
+	f = probeIn(t, "ln -s /etc /home/paisans-f2a9", "paisans-f2a9", "")
+	if u := f.User; u.HomeKind != "link" {
+		t.Errorf("a linked home: %+v", u)
+	}
+	f = probeIn(t, "true", "paisans-f2a9", "")
+	if u := f.User; u.HomeKind != "absent" || u.HomePath != "/home/paisans-f2a9" {
+		t.Errorf("no home: %+v", u)
+	}
+	f = probeIn(t, "useradd -u 1001 --create-home paisans-f2a9", "paisans-f2a9", "")
+	if u := f.User; u.HomeKind != "dir" || u.HomeUID != 1001 || !u.SudoRead || len(u.SudoRules) != 0 {
+		t.Errorf("a user's own home, with no sudo installed: %+v", u)
+	}
+}
+
+// Every rule sudo grants the user is read, by name and by group, with
+// admit's own helper line as sudo -l prints it. It installs sudo from
+// Ubuntu's archive, so it needs the network.
+func TestProbeReadsTheUsersSudoRules(t *testing.T) {
+	setup := "apt-get update -qq >/dev/null 2>&1 && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo >/dev/null 2>&1 || exit 1\n" +
+		"useradd -u 1001 --create-home paisans-f2a9 && groupadd ops && usermod -aG ops paisans-f2a9\n"
+	f := probeIn(t, setup, "paisans-f2a9", "")
+	if u := f.User; !u.SudoRead || len(u.SudoRules) != 0 {
+		t.Errorf("no rule: %+v", u)
+	}
+	f = probeIn(t, setup+"echo 'paisans-f2a9 ALL=(root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-f2a9' > /etc/sudoers.d/paisans-f2a9 && chmod 440 /etc/sudoers.d/paisans-f2a9\n"+
+		"echo '%ops ALL=(ALL:ALL) ALL' > /etc/sudoers.d/ops && chmod 440 /etc/sudoers.d/ops", "paisans-f2a9", "")
+	want := []string{"(root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-f2a9", "(ALL : ALL) ALL"}
+	if u := f.User; !u.SudoRead || !slices.Equal(slices.Sorted(slices.Values(u.SudoRules)), slices.Sorted(slices.Values(want))) {
+		t.Errorf("rules: %+v", u)
+	}
+	// Defaults set for the user join its matching entries; ones set for
+	// the helper alone are listed apart.
+	helperLine := "echo 'paisans-f2a9 ALL=(root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-f2a9' > /etc/sudoers.d/paisans-f2a9 && chmod 440 /etc/sudoers.d/paisans-f2a9\n"
+	f = probeIn(t, setup+helperLine+"echo 'Defaults:paisans-f2a9 setenv' > /etc/sudoers.d/zz && echo 'Defaults!/usr/local/libexec/paisans/wg-psns-f2a9 env_keep += \"LD_PRELOAD\"' >> /etc/sudoers.d/zz && chmod 440 /etc/sudoers.d/zz", "paisans-f2a9", "")
+	if u := f.User; !u.SudoRead || !slices.Contains(u.SudoDefaults, "setenv") || !slices.Contains(u.SudoDefaults, "env_reset") ||
+		!slices.Equal(u.SudoSpecific, []string{`Defaults!/usr/local/libexec/paisans/wg-psns-f2a9 env_keep+=LD_PRELOAD`}) {
+		t.Errorf("defaults: %+v", u)
 	}
 }
 

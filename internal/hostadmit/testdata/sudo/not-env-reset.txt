@@ -1,0 +1,7 @@
+Matching Defaults entries for paisans-f2a9 on host:
+    env_reset, mail_badpass,
+    secure_path=/usr/local/sbin\:/usr/local/bin\:/usr/sbin\:/usr/bin\:/sbin\:/bin\:/snap/bin,
+    use_pty, !env_reset
+
+User paisans-f2a9 may run the following commands on host:
+    (root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-f2a9

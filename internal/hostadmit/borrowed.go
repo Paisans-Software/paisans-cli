@@ -1,19 +1,8 @@
 package hostadmit
 
-import (
-	"crypto/sha256"
-	"encoding/hex"
-)
-
-// The three functions below are Task 5's sha and Task 7's rootsAlone and
-// groupOf, copied verbatim so this lane builds before those tasks merge.
-// When they merge, the compiler names each one twice: delete this file.
-
-// sha is content's hex SHA-256, as the probe prints a file's checksum.
-func sha(content string) string {
-	s := sha256.Sum256([]byte(content))
-	return hex.EncodeToString(s[:])
-}
+// The two functions below are Task 7's rootsAlone and groupOf, copied verbatim so
+// this lane builds before that task merges. When it merges, the compiler
+// names each one twice: delete this file.
 
 // rootsAlone reports whether a directory's ls -ldn mode and owner say it is
 // a directory, not a link, owned by root, with no group or other write bit

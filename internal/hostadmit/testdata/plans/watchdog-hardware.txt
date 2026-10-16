@@ -1,0 +1,1 @@
+refused: user: community's home /home/paisans-f2a9 is not community's (it is uid 1001's), so another account can change what admit writes there. Give it to community (chown -R community: /home/paisans-f2a9) and admit again. Nothing was changed

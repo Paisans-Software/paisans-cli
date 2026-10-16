@@ -78,7 +78,8 @@ func TestTheSudoersLineIsCheckedBeforeItIsInPlace(t *testing.T) {
 // line or /etc/wireguard, so a re-run changes none of them. Its egress
 // table is in place too, so nothing else is planned either.
 func TestAnInstalledHelperIsLeftAlone(t *testing.T) {
-	h := helperInstalled(egressAdmitted("")(), "vm").withDir("/srv/paisans", "drwxr-xr-x", 0, 0).withDir("/srv/paisans/f2a9", "drwxr-x---", 1001, 1001)
+	h := helperInstalled(egressAdmitted("")(), "vm").withDir("/srv/paisans", "drwxr-xr-x", 0, 0).withDir("/srv/paisans/f2a9", "drwxr-x---", 1001, 1001).
+		withFile(delegatePath, delegateConf, "644", 0).withFile(meshPath, meshConf, "644", 0)
 	plan, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
 	if err != nil {
 		t.Fatal(err)

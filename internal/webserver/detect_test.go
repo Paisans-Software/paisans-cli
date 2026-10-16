@@ -318,3 +318,22 @@ func TestDetectReadsTheGlobalDNSChallenge(t *testing.T) {
 		})
 	}
 }
+
+// With Host.Docker set, every docker command Detect runs starts with it;
+// without, with plain docker.
+func TestDetectDockerCommand(t *testing.T) {
+	for docker, prefix := range map[string]string{"": "docker", "docker -H unix:///run/x.sock": "docker -H unix:///run/x.sock"} {
+		plain := &fakeHost{answers: []answer{
+			{key: " ps --format", out: caddyPS},
+			{key: " inspect --format", out: caddyMounts},
+			{key: "curl", err: errors.New("exit status 7")},
+			{key: " exec caddy-1 wget", out: caddyAutomatic},
+		}}
+		webserver.Detect(webserver.Host{Plain: plain, Docker: docker}, external(t, "127.0.0.1:8480"))
+		for _, want := range []string{prefix + " ps --format", prefix + " inspect --format", prefix + " exec caddy-1"} {
+			if !plain.ran(want) {
+				t.Errorf("Docker %q: no command contains %q in %q", docker, want, plain.asked)
+			}
+		}
+	}
+}

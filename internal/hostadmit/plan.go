@@ -180,19 +180,22 @@ var parts = []part{
 	{"docker", planDocker},
 	{"apparmor", planAppArmor},
 	// 4. user
+	{"user", planUser},
 	// 5. delegation
+	{"delegation", planDelegation},
 	// 6. egress
 	{"egress", planEgress},
 	// 7. linger
+	{"linger", planLinger},
 	// 8. bridge netfilter
 	// 9. daemon
 	{"deployment directory", planDeploymentDir}, // 10
 	{"mesh subnet", planMeshSubnet},             // 10a
 	{"wireguard", planWireGuard},                // 11
 	// 12. firewall
-	// 13. watchdog
-	// 14. sysctls
-	// 14a. web server
+	{"watchdog", planWatchdogGrant}, // 13
+	{"sysctls", planSysctls},        // 14
+	{"web server", planWebServer},   // 14a
 	// 15. record
 	// 16. keys
 	// 17. check

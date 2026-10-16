@@ -156,7 +156,7 @@ func newBlank() *fakeHost {
 		{"pkg", "docker-ce-rootless-extras absent"}, {"pkg", "uidmap absent"}, {"pkg", "nftables installed"},
 		{"setuptool", "absent"}, {"snap", "absent"}, {"system-socket", "absent"},
 		{"userns-restrict", "1"}, {"rootlesskit-profile", "loaded"},
-		{"passwd", "absent"}, {"subuid", "ubuntu:100000:65536"}, {"subgid", "ubuntu:100000:65536"},
+		{"passwd", "absent"}, {"home", "absent 0 /home/paisans-f2a9"}, {"sudo", "absent"}, {"subuid", "ubuntu:100000:65536"}, {"subgid", "ubuntu:100000:65536"},
 		{"br_netfilter", "absent"}, {"forward-policy", "ACCEPT"},
 		{"port-start", "1024"}, {"ip-forward", "0"},
 		{"default-dev", "eth0"}, {"lan", "203.0.113.10/24"},
@@ -180,7 +180,7 @@ func newBlank() *fakeHost {
 // withUser is h once useradd has made paisans-f2a9, uid 1001, with its own
 // subordinate range after ubuntu's, its manager running under linger.
 func (h *fakeHost) withUser() *fakeHost {
-	return h.with("passwd", "paisans-f2a9:x:1001:1001::/home/paisans-f2a9:/bin/bash").
+	return h.with("passwd", "paisans-f2a9:x:1001:1001::/home/paisans-f2a9:/bin/bash").with("home", "dir 1001 /home/paisans-f2a9").
 		with("groups", "paisans-f2a9").with("group", "paisans-f2a9").
 		with("linger", "yes").with("manager", "active").with("daemon", "absent").
 		add("subuid", "paisans-f2a9:165536:65536").add("subgid", "paisans-f2a9:165536:65536").

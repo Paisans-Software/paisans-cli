@@ -1,0 +1,1 @@
+refused: user: /home/paisans-f2a9 already exists (a directory of uid 1234), and useradd would hand it to paisans-f2a9 with whatever is in it: an earlier user's keys and data, or, through a link, wherever it points. Move it aside or remove it, then admit again. Nothing was changed

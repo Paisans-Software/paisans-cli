@@ -1,0 +1,1 @@
+refused: user: paisans-f2a9's range in /etc/subuid overlaps someone's (170000-235535), so the egress table, which trusts the whole range as paisans-f2a9's, would trust someone's processes too. Give paisans-f2a9 a range of its own (usermod --add-subuids 235536-301071 paisans-f2a9) and admit again. Nothing was changed

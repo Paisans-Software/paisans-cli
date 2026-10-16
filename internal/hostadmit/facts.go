@@ -1,8 +1,11 @@
 package hostadmit
 
 import (
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"text/template"
@@ -77,13 +80,24 @@ type DockerFacts struct {
 
 // UserFacts are the deployment's user, Exists false while it does not exist.
 type UserFacts struct {
-	Exists        bool
-	Name          string
-	UID, GID      int
-	Home, Group   string
-	Groups        []string
-	Linger        bool
-	ManagerActive bool
+	Exists      bool
+	Name        string
+	UID, GID    int
+	Home, Group string
+	Groups      []string
+	// HomeKind is how the probe found the user's home, or, for a user not
+	// made yet, the home useradd would give it, at HomePath: dir (owned by
+	// HomeUID), link, other or absent; "" when no line was read.
+	HomeKind, HomePath string
+	HomeUID            int
+	Linger             bool
+	ManagerActive      bool
+	// SudoRead is sudo -l -U read for the user, or sudo absent. From
+	// what it printed: SudoRules are the user's rules, SudoDefaults each
+	// entry of its matching Defaults, and SudoSpecific each runas or
+	// command-specific Defaults line, as sudo printed them.
+	SudoRead                              bool
+	SudoRules, SudoDefaults, SudoSpecific []string
 }
 
 // IDRange is one line of /etc/subuid or /etc/subgid: Count IDs from Start.
@@ -149,6 +163,12 @@ func probe(t apply.Transport, d deployment.Deployment, in Input) (Facts, error) 
 	return parseFacts(out, in.Request.User)
 }
 
+// sha is content's SHA-256 in hex, as the probe prints a file's sum.
+func sha(content string) string {
+	s := sha256.Sum256([]byte(content))
+	return hex.EncodeToString(s[:])
+}
+
 // probeScript is the probe rendered for d and in. Every value rendered in
 // is quoted for the shell with q, so a --data-dir that is absolute and clean
 // but holds a space or a $( is a path and nothing else.
@@ -174,6 +194,7 @@ func parseFacts(out, user string) (Facts, error) {
 	f := Facts{Packages: map[string]bool{}, SubUID: map[string][]IDRange{}, SubGID: map[string][]IDRange{},
 		Files: map[string]FileState{}, Dirs: map[string]DirState{}, raw: map[string][]string{}}
 	f.User.Name = user
+	var sudoL []string
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	if len(lines) == 0 || lines[len(lines)-1] != "end" {
 		return f, fmt.Errorf("the probe's answer was cut short")
@@ -213,6 +234,17 @@ func parseFacts(out, user string) (Facts, error) {
 				return f, fmt.Errorf("unreadable passwd entry %q", v)
 			}
 			f.User.Exists, f.User.UID, f.User.GID, f.User.Home = true, uid, gid, p[5]
+		case "home":
+			p := strings.SplitN(v, " ", 3)
+			uid, err := strconv.Atoi(p[min(1, len(p)-1)])
+			if len(p) != 3 || err != nil || !slices.Contains([]string{"dir", "link", "other", "absent"}, p[0]) {
+				return f, fmt.Errorf("unreadable home line %q", v)
+			}
+			f.User.HomeKind, f.User.HomeUID, f.User.HomePath = p[0], uid, p[2]
+		case "sudo":
+			f.User.SudoRead = v == "absent"
+		case "sudo-l":
+			sudoL = append(sudoL, v)
 		case "groups":
 			f.User.Groups = strings.Fields(v)
 		case "group":
@@ -315,10 +347,70 @@ func parseFacts(out, user string) (Facts, error) {
 			f.Data.Avail, _ = strconv.ParseInt(v, 10, 64)
 		}
 	}
+	if f.raw["sudo"] != nil && f.raw["sudo"][len(f.raw["sudo"])-1] == "listed" {
+		readSudo(&f.User, sudoL)
+	}
 	if f.User.Exists && f.User.Group == "" {
 		return f, fmt.Errorf("no primary group read for %s", user)
 	}
 	return f, nil
+}
+
+// readSudo reads what sudo -n -l -U printed for the user under LC_ALL=C:
+// a header line per section, each entry indented below it, long lines
+// wrapped onto more indented lines. A line it does not know, or a listing
+// with neither the user's rules nor sudo's "is not allowed", leaves
+// SudoRead false, so admit refuses rather than guess.
+func readSudo(u *UserFacts, lines []string) {
+	section, understood := "", false
+	var defaults []string
+	for _, l := range lines {
+		indented := strings.HasPrefix(l, " ") || strings.HasPrefix(l, "\t")
+		entry := strings.TrimSpace(l)
+		switch {
+		case entry == "":
+			section = ""
+		case !indented && strings.HasPrefix(l, "Matching Defaults entries for "):
+			section = "defaults"
+		case !indented && strings.HasPrefix(l, "Runas and Command-specific defaults for "):
+			section = "specific"
+		case !indented && strings.Contains(l, " may run the following commands on "):
+			section, understood = "rules", true
+		case !indented && strings.Contains(l, " is not allowed to run sudo on "):
+			section, understood = "", true
+		case indented && section == "defaults":
+			defaults = append(defaults, entry)
+		case indented && section == "specific":
+			u.SudoSpecific = append(u.SudoSpecific, entry)
+		case indented && section == "rules":
+			u.SudoRules = append(u.SudoRules, entry)
+		default:
+			return
+		}
+	}
+	// Defaults wrap after a comma, and a comma inside a value is escaped.
+	for _, e := range splitUnescaped(strings.Join(defaults, " "), ',') {
+		if e = strings.TrimSpace(e); e != "" {
+			u.SudoDefaults = append(u.SudoDefaults, e)
+		}
+	}
+	u.SudoRead = understood
+}
+
+// splitUnescaped splits s at each sep that no backslash escapes.
+func splitUnescaped(s string, sep byte) []string {
+	var out []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '\\':
+			i++
+		case sep:
+			out = append(out, s[start:i])
+			start = i + 1
+		}
+	}
+	return append(out, s[start:])
 }
 
 // The files admit writes as root that the probe reads. Each is what the
@@ -330,6 +422,13 @@ const (
 	sysctlPath       = "/etc/sysctl.d/60-paisans.conf"
 	sysctlBeforePath = admission.Dir + "/sysctl.before"
 )
+
+// meshDropInPath is the user's drop-in that orders its manager after the
+// mesh. Its path holds the user's UID, which the probe learns, so the probe
+// reads it from its own list (userfiles) rather than from probedFiles.
+func meshDropInPath(uid string) string {
+	return "/etc/systemd/system/user@" + uid + ".service.d/paisans-mesh.conf"
+}
 
 // sudoersPath is the deployment's sudoers line, egressFilePath its egress
 // table's file, watchdogRulePath its watchdog's udev rule.
