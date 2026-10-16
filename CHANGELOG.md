@@ -21,7 +21,7 @@ changes share a bullet. Detailed notes are on the corresponding
 - `host prepare --all` prepares every site the configuration declares, one at a time in its order, each with its own review, stopping at the first failure.
 - `host admit`, `host prepare` and the rootless deployment commands support Ubuntu 22.04 beside 24.04.
 - Each release attaches static `paisans-linux-amd64` and `paisans-linux-arm64` binaries and a `SHA256SUMS` file, so a host owner can run the CLI on Linux without Go.
-- `doctor` checks each site as its deployment's user: the admission record, no privileged group, its own rootless Docker at Engine 29.5 or later, linger with the mesh first at boot, and sudo for the WireGuard helper alone.
+- `doctor` checks each site as its deployment's user: its admission record, no privileged group, rootless Docker at Engine 29.5 or later, linger after the mesh, and sudo for the WireGuard helper alone.
 
 ### Changed
 

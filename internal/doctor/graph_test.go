@@ -182,6 +182,8 @@ type fixtureReads struct {
 	log *events
 	// wait, when set, is called with each read before it answers.
 	wait func(read string)
+	// standbyFrom is the sites Standby was told it may ask.
+	standbyFrom map[string]bool
 }
 
 func (f *fixtureReads) asked(read string) {
@@ -267,6 +269,7 @@ func (f *fixtureReads) Settings(site, app string) SettingsProbe {
 
 func (f *fixtureReads) Standby(app string, reached map[string]bool) StandbyProbe {
 	f.asked("standby " + app)
+	f.standbyFrom = reached
 	for _, p := range f.in.Standby {
 		if p.App == app {
 			return p
@@ -495,6 +498,43 @@ func TestAPendingSiteIsCheckedNoFurther(t *testing.T) {
 		if strings.HasPrefix(f.Line, "home-b:") && f.Level == Fail {
 			t.Errorf("a pending data site failed a check: %+v", f)
 		}
+	}
+}
+
+// A check that reads across sites asks only the sites whose admission
+// passed: a pending site that answers ssh is never asked for etcd's health,
+// Patroni's log or a Pocket ID instance, even as the first etcd member.
+func TestAPendingSiteIsNotAskedAcrossSites(t *testing.T) {
+	cfg := fixture(t)
+	cfg.Etcd.Members = []string{"home-b", "home-a", "vm"}
+	fix := healthyInput()
+	fix.Admission = []AdmissionProbe{{Site: "home-b", Class: pendingClass("home-b")}}
+	// No member names a leader, so the patroni check reads each data
+	// site's log.
+	fix.Patroni.Cluster = map[string]string{"home-a": strings.Replace(healthyCluster, `"role": "leader"`, `"role": "replica"`, 1)}
+	reads := &fixtureReads{in: fix, log: &events{}}
+	report, _ := Checks(cfg, fix.Sites, reads).Run(&ui.Recorder{}, 1)
+
+	for _, read := range reads.log.list {
+		if strings.HasSuffix(read, " home-b") && read != "reach home-b" && read != "admission home-b" {
+			t.Errorf("read home-b after it was found pending: %s", read)
+		}
+	}
+	if !reads.log.has("patroni log home-a") {
+		t.Errorf("the patroni check did not read home-a's log: %v", reads.log.list)
+	}
+	if reads.standbyFrom["home-b"] || !reads.standbyFrom["home-a"] {
+		t.Errorf("standby may ask %v, want home-a and never home-b", reads.standbyFrom)
+	}
+	find(t, report.Findings, SectionEtcd, "asked from home-a")
+
+	// With no member answering, etcd says why it did not ask home-b.
+	fix.Etcd = EtcdProbe{}
+	reads = &fixtureReads{in: fix, log: &events{}}
+	report, _ = Checks(cfg, fix.Sites, reads).Run(&ui.Recorder{}, 1)
+	f := find(t, report.Findings, SectionEtcd, "no etcd member reached")
+	if !strings.Contains(strings.Join(f.More, "\n"), "home-b: not asked: its admission did not pass (see admission)") {
+		t.Errorf("etcd does not say why home-b was not asked: %+v", f)
 	}
 }
 

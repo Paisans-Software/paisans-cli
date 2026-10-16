@@ -329,7 +329,12 @@ func (d doctorReads) Admission(site string) doctor.AdmissionProbe {
 	case errors.Is(err, admission.ErrNotAdmitted):
 	case errors.As(err, &refused):
 		lines := strings.Split(strings.TrimSpace(err.Error()), "\n")
-		p.Err, p.More = lines[0], append(lines[1:], moveAside(token))
+		p.Err, p.More = lines[0], lines[1:]
+		// Read found the file at this path before refusing what it holds,
+		// so the path is there to move; with no path there is no advice.
+		if path, perr := admission.Path(token); perr == nil {
+			p.More = append(p.More, moveAside(path))
+		}
 	case err != nil:
 		lines := strings.Split(strings.TrimSpace(err.Error()), "\n")
 		p.Err, p.More = lines[0], lines[1:]
@@ -341,10 +346,9 @@ func (d doctorReads) Admission(site string) doctor.AdmissionProbe {
 
 // moveAside is how a record host admit refuses to read is set aside, so
 // that admit writes a new one: it will not write over a record it cannot
-// read. The name it moves to is not admitted.*.json, which every command
-// that lists the records reads.
-func moveAside(token string) string {
-	path, _ := admission.Path(token)
+// read. The name it moves path to is not admitted.*.json, which every
+// command that lists the records reads.
+func moveAside(path string) string {
 	return fmt.Sprintf("host admit will not write over a record it cannot read: its owner moves it aside first, `sudo mv %[1]s %[1]s.unreadable`, then admits this deployment again.", path)
 }
 
@@ -439,9 +443,9 @@ func (d doctorReads) Settings(site, app string) doctor.SettingsProbe {
 
 // Standby asks Pocket ID only of the sites that answered: a site that did
 // not is listed as unreachable rather than asked again.
-func (d doctorReads) Standby(app string, reached map[string]bool) doctor.StandbyProbe {
+func (d doctorReads) Standby(app string, admitted map[string]bool) doctor.StandbyProbe {
 	answering := map[string]apply.Transport{}
-	for name := range reached {
+	for name := range admitted {
 		answering[name] = d.transports[name]
 	}
 	list := apply.LookAtInstances(d.cfg, app, answering)

@@ -255,6 +255,20 @@ func (in Input) Reached() map[string]bool {
 	return out
 }
 
+// Admitted is the set of sites whose admission check passed: the record
+// was read and covers the site as cfg declares it. A check that reads
+// across sites asks only these, never a pending site or one whose
+// admission failed.
+func (in Input) Admitted(cfg *config.Config) map[string]bool {
+	out := map[string]bool{}
+	for _, p := range in.Admission {
+		if p.Covered(cfg) {
+			out[p.Site] = true
+		}
+	}
+	return out
+}
+
 // Asked is the set of sites doctor was told to look at.
 func (in Input) Asked() map[string]bool {
 	out := map[string]bool{}

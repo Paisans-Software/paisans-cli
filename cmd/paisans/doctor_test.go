@@ -28,6 +28,9 @@ type doctorHost struct {
 	down    bool
 	answers map[string]string
 	files   map[string]string
+	// readErr, when set, is every file read's error, on a host that still
+	// answers commands.
+	readErr error
 	sent    *[]string
 	writes  *[]string
 }
@@ -54,6 +57,9 @@ func (h doctorHost) ReadFile(path string) (string, bool, error) {
 	*h.sent = append(*h.sent, h.name+": read "+path)
 	if h.down {
 		return "", false, fmt.Errorf("%w after 3 attempts: exit status 255", apply.ErrUnreachable)
+	}
+	if h.readErr != nil {
+		return "", false, h.readErr
 	}
 	content, ok := h.files[path]
 	return content, ok, nil
@@ -384,6 +390,28 @@ func TestDoctorSaysToMoveAnUnreadableRecordAside(t *testing.T) {
 	admit := strings.Index(out, "`sudo paisans host admit --request vm.admit`")
 	if !strings.Contains(out, "fail: check admission vm its admission record cannot be read") || move < 0 || !(move < request && request < admit) {
 		t.Errorf("want the failure, then move it aside, request and admit, in that order:\n%s", out)
+	}
+}
+
+// A record that could not be read at all, the host answering commands but
+// the read failing, fails admission with why, and with no word of moving
+// the record aside: nothing says it is there to move.
+func TestDoctorMovesNoRecordItCouldNotRead(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sent, writes []string
+	withDoctorHosts(t, cfg, map[string]doctorHost{
+		"vm.example.org": {name: "vm.example.org", sent: &sent, writes: &writes,
+			answers: map[string]string{doctor.ReachCommand: ""},
+			readErr: errors.New("connection reset by peer")},
+	})
+	rec := withRecorder(t, true)
+	_ = runDoctor([]string{"--config", fixtureConfig(), "--site", "vm"})
+	out := rec.Lines()
+	if !strings.Contains(out, "fail: check admission vm its admission record cannot be read") || !strings.Contains(out, "connection reset by peer") || strings.Contains(out, "sudo mv") {
+		t.Errorf("want the failure with the read's error and no move aside:\n%s", out)
 	}
 }
 

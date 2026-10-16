@@ -47,8 +47,8 @@ type Reads interface {
 	// Settings asks an app's running copy on the site for its gate settings.
 	Settings(site, app string) SettingsProbe
 	// Standby asks every site running a Pocket ID app whether its instance
-	// is active, of the sites in reached alone.
-	Standby(app string, reached map[string]bool) StandbyProbe
+	// is active, of the sites in admitted alone.
+	Standby(app string, admitted map[string]bool) StandbyProbe
 	// Clock reads the site's clock, with the workstation's on either side.
 	Clock(site string) ClockSample
 	// Leftovers takes the site's inventory and classifies it.
@@ -58,9 +58,13 @@ type Reads interface {
 // Checks is every check doctor makes on sites, the ones it asks, as a
 // graph: each site's reach first, then its admission record, which every
 // other read of the site needs, since nothing is asked of a pending site;
-// then the deployment's user, its rootless Docker, which every check that
-// runs docker there needs, linger and sudo; then from the bottom of the
-// stack up, the order Diagnose reports in. Each check's judge is the
+// then the deployment's user, its rootless Docker, which every check of
+// that site alone that runs docker there needs, linger and sudo; then from
+// the bottom of the stack up, the order Diagnose reports in. A check that
+// reads across sites (etcd, Patroni's /sync and logs, Pocket ID's
+// instances) needs the admission of any of its sites, and asks only those
+// in Input.Admitted; it does not need their Docker, so a stopped daemon on
+// the member it asks is that check's own failure rather than a prune. Each check's judge is the
 // section function Diagnose calls, given the probes of the check's own
 // subject, so the graph's findings for a complete Input are Diagnose's.
 //
@@ -79,10 +83,13 @@ func Checks(cfg *config.Config, sites []string, reads Reads) *Graph {
 		asked[s] = true
 	}
 	reach := func(site string) string { return SectionReach + " " + site }
-	reachOf := func(list []string) Need {
+	// admissionOf is a need on any of the sites' admission checks: a check
+	// that reads across sites waits for every one of them, and asks only
+	// the sites in Input.Admitted.
+	admissionOf := func(list []string) Need {
 		var names []string
 		for _, s := range list {
-			names = append(names, reach(s))
+			names = append(names, SectionAdmission+" "+s)
 		}
 		return AnyOf(g.Existing(names...)...)
 	}
@@ -190,14 +197,17 @@ func Checks(cfg *config.Config, sites []string, reads Reads) *Graph {
 
 	if len(cfg.Etcd.Members) > 0 {
 		g.Add(Node{Name: SectionEtcd, Section: SectionEtcd,
-			Hard: []Need{reachOf(cfg.Etcd.Members)},
-			// etcd, from the first member that answers, in the order
-			// etcd.members gives.
+			Hard: []Need{admissionOf(cfg.Etcd.Members)},
+			// etcd, from the first admitted member that answers, in the
+			// order etcd.members gives.
 			Gather: func(in Input) func(*Input) {
-				reached := in.Reached()
+				reached, admitted := in.Reached(), in.Admitted(cfg)
 				var p EtcdProbe
 				for _, name := range cfg.Etcd.Members {
-					if !reached[name] {
+					if !admitted[name] {
+						if reached[name] {
+							p.Tried = append(p.Tried, name+": "+notAdmitted)
+						}
 						continue
 					}
 					out, failure := reads.EtcdHealth(name)
@@ -277,9 +287,9 @@ func Checks(cfg *config.Config, sites []string, reads Reads) *Graph {
 				}
 				logs := map[string]string{}
 				if !HasLeader(in.Patroni.Cluster) {
-					reached := in.Reached()
+					admitted := in.Admitted(cfg)
 					for _, site := range cfg.Cluster.Sites {
-						if reached[site] {
+						if admitted[site] {
 							logs[site] = reads.PatroniLog(site)
 						}
 					}
@@ -345,10 +355,16 @@ func Checks(cfg *config.Config, sites []string, reads Reads) *Graph {
 
 	for _, app := range apply.StandbyApps(cfg) {
 		g.Add(Node{Name: SectionPocketID + " " + app, Section: SectionPocketID, Subject: app,
-			Hard: []Need{reachOf(placed[app])},
+			Hard: []Need{admissionOf(placed[app])},
 			Soft: soft(SectionPatroni),
 			Gather: func(in Input) func(*Input) {
-				p := reads.Standby(app, in.Reached())
+				reached, admitted := in.Reached(), in.Admitted(cfg)
+				p := reads.Standby(app, admitted)
+				for i, inst := range p.Instances {
+					if inst.State == apply.Unreachable && reached[inst.Site] && !admitted[inst.Site] {
+						p.Instances[i].Detail = notAdmitted
+					}
+				}
 				return func(in *Input) { in.Standby = append(in.Standby, p) }
 			},
 			Judge: func(in Input) []Finding {
@@ -390,6 +406,10 @@ func Checks(cfg *config.Config, sites []string, reads Reads) *Graph {
 	}
 	return g
 }
+
+// notAdmitted is why a check that reads across sites did not ask a site
+// that answered ssh.
+const notAdmitted = "not asked: its admission did not pass (see admission)"
 
 // bySite is the probes in list about site.
 func bySite[T any](list []T, site string, of func(T) string) []T {
