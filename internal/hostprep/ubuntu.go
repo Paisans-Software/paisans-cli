@@ -329,13 +329,18 @@ func SystemUnits(packages []string) []string {
 // ReleaseDockerHold is a script that puts /usr/sbin/policy-rc.d back as
 // it was before admit held Docker's daemons, for a run that stopped while
 // it held them, and fails, naming both, when the owner's copy differs from
-// what is in place, which is the owner's to choose between.
+// what is in place, which is the owner's to choose between. It takes the
+// hold's lock first, and refuses while a running admit holds it.
 func (u ubuntu) ReleaseDockerHold() (string, error) {
 	release, err := snippet(u.tmpl("docker-hold-release.sh.tmpl"), map[string]string{"Marker": HoldDockerMarker})
 	if err != nil {
 		return "", err
 	}
-	return "set -e\n" + release + "release_docker_hold\n" +
+	lock, err := snippet(u.tmpl("docker-hold-lock.sh.tmpl"), nil)
+	if err != nil {
+		return "", err
+	}
+	return "set -e\n" + lock + release + "release_docker_hold\n" +
 		"if [ -e /usr/sbin/policy-rc.d.paisans-owner ] || [ -L /usr/sbin/policy-rc.d.paisans-owner ]; then echo '/usr/sbin/policy-rc.d.paisans-owner, a copy of your policy-rc.d admit made while it installed Docker, differs from the /usr/sbin/policy-rc.d there now. Keep the one you want as /usr/sbin/policy-rc.d, remove the other, and run again'; exit 1; fi\n", nil
 }
 
@@ -430,7 +435,11 @@ func (u ubuntu) AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (
 		if err != nil {
 			return out, added, err
 		}
-		hold, err := snippet(u.tmpl("docker-hold.sh.tmpl"), map[string]string{"Marker": HoldDockerMarker, "Release": release, "Units": strings.Join(names, "|")})
+		lock, err := snippet(u.tmpl("docker-hold-lock.sh.tmpl"), nil)
+		if err != nil {
+			return out, added, err
+		}
+		hold, err := snippet(u.tmpl("docker-hold.sh.tmpl"), map[string]string{"Marker": HoldDockerMarker, "Release": release, "Lock": lock, "Units": strings.Join(names, "|")})
 		if err != nil {
 			return out, added, err
 		}

@@ -15,7 +15,7 @@
         then the owner's goes back, or admit's is removed; one an
         interrupted run left is put right first. */ -}}
 set -e
-{{ .Release }}release_docker_hold
+{{ .Lock }}{{ .Release }}release_docker_hold
 if [ -e /usr/sbin/policy-rc.d.paisans-owner ] || [ -L /usr/sbin/policy-rc.d.paisans-owner ]; then
   echo '/usr/sbin/policy-rc.d.paisans-owner is there beside a /usr/sbin/policy-rc.d that differs from it, and admit copies your own policy-rc.d to that name while it installs Docker. Keep the one you want as /usr/sbin/policy-rc.d, remove the other, and admit again'
   exit 1

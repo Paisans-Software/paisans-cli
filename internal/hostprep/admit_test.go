@@ -1,6 +1,7 @@
 package hostprep_test
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -289,11 +290,13 @@ func TestTheDockerHoldPutsBackTheOwnersPolicy(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			at := func(script string) string { return strings.ReplaceAll(script, "/usr/sbin/", sbin+"/") }
+			at := func(script string) string {
+				return strings.NewReplacer("/usr/sbin/", sbin+"/", "/run/paisans-docker-hold.lock", filepath.Join(dir, "lock")).Replace(script)
+			}
 			run := func(script string) {
 				t.Helper()
 				cmd := exec.Command("sh", "-c", script)
-				cmd.Env = append(os.Environ(), "LOG="+filepath.Join(dir, "log"))
+				cmd.Env = append(os.Environ(), "LOG="+filepath.Join(dir, "log"), "PATH="+fakeFlock(t, 0)+":"+os.Getenv("PATH"))
 				if out, err := cmd.CombinedOutput(); err != nil {
 					t.Fatalf("%v: %s", err, out)
 				}
@@ -353,7 +356,9 @@ func TestTheDockerHoldRefusesACopyThatDiffers(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	out, err := exec.Command("sh", "-c", strings.ReplaceAll(hold, "/usr/sbin/", sbin+"/")).CombinedOutput()
+	cmd := exec.Command("sh", "-c", strings.NewReplacer("/usr/sbin/", sbin+"/", "/run/paisans-docker-hold.lock", filepath.Join(sbin, "lock")).Replace(hold))
+	cmd.Env = append(os.Environ(), "PATH="+fakeFlock(t, 0)+":"+os.Getenv("PATH"))
+	out, err := cmd.CombinedOutput()
 	if err == nil || !strings.Contains(string(out), "differs from it") {
 		t.Errorf("the hold went on: %v: %s", err, out)
 	}
@@ -389,5 +394,56 @@ func TestTheDockerHoldLeavesAnOwnersContainerd(t *testing.T) {
 	}
 	if units := hostprep.SystemUnits([]string{"docker-ce", "containerd.io"}); strings.Join(units, " ") != "docker.socket docker.service containerd.service" {
 		t.Errorf("SystemUnits = %q", units)
+	}
+}
+
+// fakeFlock is a directory holding a flock that exits with code, standing
+// in for util-linux's, which macOS lacks: 0 takes the lock, 1 finds it
+// held.
+func fakeFlock(t *testing.T, code int) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "flock"), []byte(fmt.Sprintf("#!/bin/sh\nexit %d\n", code)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// A hold is one run's alone: while another holds its lock, the hold and
+// putting a hold back both refuse, naming the run, and change nothing, so
+// no evict or second admit releases a live hold under a running install.
+func TestTheDockerHoldIsLocked(t *testing.T) {
+	profile, err := hostprep.Select(hostprep.ParseOSRelease(ubuntu2404))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, _, err := profile.AdmitPackages(freshHost(), hostprep.ParseOSRelease(ubuntu2404), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := s.Steps[len(s.Steps)-1].Command
+	hold := command[:strings.Index(command, "export DEBIAN_FRONTEND")]
+	release, err := profile.ReleaseDockerHold()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, script := range map[string]string{"hold": hold, "release": release} {
+		sbin := t.TempDir()
+		const marked = "#!/bin/sh\n# Written by paisans host admit while it installs Docker, and removed after.\nexit 101\n"
+		if err := os.WriteFile(filepath.Join(sbin, "policy-rc.d"), []byte(marked), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command("sh", "-c", strings.NewReplacer("/usr/sbin/", sbin+"/", "/run/paisans-docker-hold.lock", filepath.Join(sbin, "lock")).Replace(script))
+		cmd.Env = append(os.Environ(), "PATH="+fakeFlock(t, 1)+":"+os.Getenv("PATH"))
+		out, err := cmd.CombinedOutput()
+		if err == nil || !strings.Contains(string(out), "is installing Docker on this host now") {
+			t.Errorf("%s with the lock held: %v: %s", name, err, out)
+		}
+		if got, _ := os.ReadFile(filepath.Join(sbin, "policy-rc.d")); string(got) != marked {
+			t.Errorf("%s with the lock held changed the live hold: %q", name, got)
+		}
+		if !strings.Contains(script, "flock -n 8") {
+			t.Errorf("%s takes no lock:\n%s", name, script)
+		}
 	}
 }
