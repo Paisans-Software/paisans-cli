@@ -24,6 +24,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/mesh"
 	"github.com/paisans-software/paisans-cli/internal/patroni"
 	"github.com/paisans-software/paisans-cli/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/topology"
 )
 
 // doctorTransport is how doctor reaches a site. Tests replace it.
@@ -84,7 +85,18 @@ func runDoctor(args []string) error {
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
 	}
-	graph := doctor.Checks(cfg, sites, doctorReads{cfg: cfg, transports: transports, token: &workstationToken{path: *secretsPath}})
+	all := func() map[string]apply.Transport {
+		out := map[string]apply.Transport{}
+		for _, name := range cfg.SiteNames() {
+			if t, ok := transports[name]; ok {
+				out[name] = t
+				continue
+			}
+			out[name] = newBoundedTransport(doctorTransport(siteTransport(name, cfg.Sites[name], "")), doctorSiteCommands)
+		}
+		return out
+	}
+	graph := doctor.Checks(cfg, sites, doctorReads{cfg: cfg, transports: transports, all: all, classes: &siteClasses{}, token: &workstationToken{path: *secretsPath}})
 	report, _ := graph.Run(r, doctorAtOnce)
 	report.ShowEnd(r)
 	if report.Failed() {
@@ -163,8 +175,44 @@ func (b boundedTransport) timed(command string) (out string, before, after time.
 type doctorReads struct {
 	cfg        *config.Config
 	transports map[string]apply.Transport
+	// all makes a transport for every declared site, which the
+	// classification reads beyond the sites --site names; it is called only
+	// when the classification runs, so a site outside --site is never
+	// contacted otherwise. classes is the classification's answer.
+	all     func() map[string]apply.Transport
+	classes *siteClasses
 	// token is the workstation's DNS token, once Secrets has read it.
 	token *workstationToken
+}
+
+// siteClasses is the run's classification of its sites, made the first
+// time a site does not answer or its record does not cover it, and never
+// otherwise, so a healthy run never pays for it.
+type siteClasses struct {
+	once sync.Once
+	c    *topology.Classification
+	err  error
+}
+
+// class is how the run's classification placed site, or why it refused;
+// nothing, for reads made without one (a test's).
+func (d doctorReads) class(site string) (topology.Site, string) {
+	if d.classes == nil {
+		return topology.Site{}, ""
+	}
+	d.classes.once.Do(func() { d.classes.c, d.classes.err = doctorClassify(d.cfg, d.all()) })
+	if d.classes.err != nil {
+		return topology.Site{}, d.classes.err.Error()
+	}
+	return d.classes.c.Sites[site], ""
+}
+
+// doctorClassify is the run's classification of every declared site, as
+// apply makes it at its start: topology reads each site's login and
+// record, the gateways' deployment record and the cluster's members, all
+// reads. Tests replace it.
+var doctorClassify = func(cfg *config.Config, all map[string]apply.Transport) (*topology.Classification, error) {
+	return topology.Classify(cfg, topology.Gather(cfg, all))
 }
 
 // workstationToken is the DNS token from the secrets file. It stays here,
@@ -314,6 +362,7 @@ func (d doctorReads) Reach(site string) doctor.SiteReach {
 	r := doctor.SiteReach{Site: site, Destination: t.Describe()}
 	if out, err := t.Run(doctor.ReachCommand); err != nil {
 		r.Err = errText(out, err)
+		r.Class, r.Unclassified = d.class(site)
 	}
 	return r
 }
@@ -340,6 +389,9 @@ func (d doctorReads) Admission(site string) doctor.AdmissionProbe {
 		p.Err, p.More = lines[0], lines[1:]
 	default:
 		p.Found, p.Record = true, rec
+	}
+	if !p.Covered(d.cfg) {
+		p.Class, p.Unclassified = d.class(site)
 	}
 	return p
 }

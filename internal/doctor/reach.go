@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/topology"
 )
 
 // ReachCommand is the trivial command that proves a site answers: ssh
@@ -19,25 +20,47 @@ type SiteReach struct {
 	Destination string
 	// Err is what failed, empty when the site answered.
 	Err string
+	// Class is the run's classification of a site that did not answer,
+	// filled only then (cmd/paisans, doctorReads.Reach); Unclassified is
+	// why the classification refused, when it did.
+	Class        topology.Site
+	Unclassified string
 }
 
 // Answered reports whether the rest of the checks can ask this site.
 func (r SiteReach) Answered() bool { return r.Err == "" }
 
-// Reach is one line per site. A site that did not answer is a Fail, never a
-// crash: the rest of the report is made from the sites that did, and this
-// says what the deployment is missing while it is gone, so an operator can
-// tell an inconvenience from an outage at a glance.
+// Reach is one line per site. A site that did not answer is never a crash:
+// the rest of the report is made from the sites that did, and this says
+// what the deployment is without while it is gone, so an operator can tell
+// an inconvenience from an outage at a glance. A site the run's
+// classification found pending or down is a warning, since the deployment
+// runs on the sites it has; a gateway is a failure, since apply refuses to
+// run without it, and so is a site the classification did not place.
 func Reach(cfg *config.Config, list []SiteReach) []Finding {
 	var out []Finding
 	for _, r := range list {
+		ssh := "ssh to " + r.Destination + ": " + sshReason(firstLine(r.Err))
 		switch {
 		case r.Answered():
 			out = append(out, Finding{Section: SectionReach, Level: OK, Line: fmt.Sprintf("%s: %s answers", r.Site, r.Destination)})
+		case r.Class.Class == topology.Pending:
+			out = append(out, pending(cfg, SectionReach, r.Site,
+				fmt.Sprintf("%s: pending: its login is refused or it does not answer, and the deployment has not joined it", r.Site), ssh))
+		case r.Class.Class == topology.Down:
+			more := []string{roleLine(cfg, r.Site)}
+			if lost := Losses(cfg, r.Site); lost != "" {
+				more = append(more, "While it is down the deployment is without "+lost+".")
+			}
+			more = append(more, ssh, "recover:", "  1. Start the host or fix the route to it.")
+			out = append(out, Finding{Section: SectionReach, Level: absentLevel(cfg, r.Site), Line: topology.DownLine(r.Site), More: more})
 		default:
 			more := []string{roleLine(cfg, r.Site)}
 			if lost := Losses(cfg, r.Site); lost != "" {
 				more = append(more, "While it is down the deployment is without "+lost+".")
+			}
+			if r.Unclassified != "" {
+				more = append(more, "Whether it has joined the deployment could not be told: "+r.Unclassified)
 			}
 			more = append(more, "Start the host or fix the route to it. Every other check ran with the sites that answered.")
 			out = append(out, Finding{Section: SectionReach, Level: Fail,

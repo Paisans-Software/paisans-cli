@@ -18,6 +18,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 	"github.com/paisans-software/paisans-cli/internal/mesh"
 	"github.com/paisans-software/paisans-cli/internal/patroni"
+	"github.com/paisans-software/paisans-cli/internal/topology"
 	"github.com/paisans-software/paisans-cli/internal/validate"
 )
 
@@ -175,13 +176,74 @@ func withDoctorHosts(t *testing.T, cfg *config.Config, hosts map[string]doctorHo
 	doctorTransport = func(tr apply.SSHTransport) apply.Transport {
 		h, ok := hosts[tr.Host]
 		if !ok {
-			t.Fatalf("doctor reached an unexpected host %q", tr.Host)
+			// Making a transport is not reaching the host: the
+			// classification is handed one for every declared site, and a
+			// test's replacement of it may never use them. Using one is.
+			return unexpectedHost{t: t, name: tr.Host}
 		}
 		return h
 	}
 	doctorNow = func() time.Time { return time.Unix(1_760_000_000, 0) }
+	savedClassify := doctorClassify
+	doctorClassify = func(*config.Config, map[string]apply.Transport) (*topology.Classification, error) {
+		return &topology.Classification{Sites: map[string]topology.Site{}}, nil
+	}
+	t.Cleanup(func() { doctorClassify = savedClassify })
 	t.Cleanup(func() { doctorTransport, doctorNow, doctorAtOnce = saved, savedNow, savedAtOnce })
 }
+
+// A site that does not answer is classified once, and only then: a run
+// where every site answers and is admitted never asks.
+func TestDoctorClassifiesOnlyWhenASiteIsNotCovered(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sent, writes []string
+	withDoctorHosts(t, cfg, stuckHosts(cfg, &sent, &writes))
+	// After withDoctorHosts, whose own replacement this one overrides; its
+	// cleanup restores the original.
+	asked := 0
+	doctorClassify = func(c *config.Config, all map[string]apply.Transport) (*topology.Classification, error) {
+		asked++
+		if len(all) != len(c.Sites) {
+			t.Errorf("classification got %d transports, want one per declared site", len(all))
+		}
+		return &topology.Classification{Sites: map[string]topology.Site{"home-b": {Name: "home-b", Class: topology.Down, Why: topology.DownLine("home-b")}}}, nil
+	}
+	rec := withRecorder(t, true)
+	_ = runDoctor([]string{"--config", fixtureConfig(), "--site", "home-a", "--site", "home-b"})
+	if asked != 1 {
+		t.Errorf("classified %d times, want once", asked)
+	}
+	if out := rec.Lines(); !strings.Contains(out, "warned: check reach home-b its login is refused or it does not answer") {
+		t.Errorf("home-b is not reported down:\n%s", out)
+	}
+
+	asked = 0
+	_ = runDoctor([]string{"--config", fixtureConfig(), "--site", "home-a"})
+	if asked != 0 {
+		t.Errorf("a run where every site is covered classified %d times", asked)
+	}
+}
+
+// unexpectedHost is a host a test did not give: anything sent to it fails
+// the test. Errorf, not Fatalf, since doctor's checks run on their own
+// goroutines.
+type unexpectedHost struct {
+	t    *testing.T
+	name string
+}
+
+func (h unexpectedHost) Describe() string { return "ubuntu@" + h.name }
+func (h unexpectedHost) err() error {
+	h.t.Errorf("doctor reached an unexpected host %q", h.name)
+	return fmt.Errorf("unexpected host %q", h.name)
+}
+func (h unexpectedHost) Run(string) (string, error)              { return "", h.err() }
+func (h unexpectedHost) RunInput(string, string) (string, error) { return "", h.err() }
+func (h unexpectedHost) ReadFile(string) (string, bool, error)   { return "", false, h.err() }
+func (h unexpectedHost) WriteFile(string, string, uint32) error  { return h.err() }
 
 // quietCaddyLog is a caddy container with no certificate line in its log.
 const quietCaddyLog = "now 1760000000\nstarted 2025-10-09T08:00:00Z\n"
@@ -596,7 +658,10 @@ func TestDoctorBoundsCommandsPerSiteOnly(t *testing.T) {
 	doctorTransport = func(tr apply.SSHTransport) apply.Transport {
 		h, ok := hosts[tr.Host]
 		if !ok {
-			t.Fatalf("doctor reached an unexpected host %q", tr.Host)
+			// Making a transport is not reaching the host: the
+			// classification is handed one for every declared site, and a
+			// test's replacement of it may never use them. Using one is.
+			return unexpectedHost{t: t, name: tr.Host}
 		}
 		return h
 	}

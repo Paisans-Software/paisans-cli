@@ -20,6 +20,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/dns"
+	"github.com/paisans-software/paisans-cli/internal/topology"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -256,13 +257,20 @@ func (in Input) Reached() map[string]bool {
 }
 
 // Admitted is the set of sites whose admission check passed: the record
-// was read and covers the site as cfg declares it. A check that reads
-// across sites asks only these, never a pending site or one whose
-// admission failed.
+// was read and covers the site as cfg declares it, and the run's
+// classification, where it was asked, placed the site neither pending nor
+// down. A check that reads across sites asks only these, never a pending
+// or down site or one whose admission failed.
 func (in Input) Admitted(cfg *config.Config) map[string]bool {
+	absent := map[string]bool{}
+	for _, r := range in.Reach {
+		if r.Class.Class == topology.Pending || r.Class.Class == topology.Down {
+			absent[r.Site] = true
+		}
+	}
 	out := map[string]bool{}
 	for _, p := range in.Admission {
-		if p.Covered(cfg) {
+		if p.Covered(cfg) && !absent[p.Site] && p.Class.Class != topology.Pending && p.Class.Class != topology.Down {
 			out[p.Site] = true
 		}
 	}
