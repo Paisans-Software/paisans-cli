@@ -127,11 +127,9 @@ func runHostAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if !execute || r.Verbose() {
-		plan.Show(r)
-	} else {
-		plan.Warn(r)
-	}
+	// The whole plan, always: with --execute the owner approves it here,
+	// before the digest and before anything runs.
+	plan.Show(r)
 	if !execute {
 		r.Result("Nothing was changed. Run it again with --execute to make these changes.")
 		return nil

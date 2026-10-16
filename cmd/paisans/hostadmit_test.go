@@ -27,12 +27,16 @@ func noHost(t *testing.T) {
 	t.Cleanup(func() { localTransport, reachOwnerAdmit, runningAsRootOnLinux = savedLocal, savedOwner, savedRoot })
 }
 
+// admitReport is what the command under test has reported so far.
+var admitReport *strings.Builder
+
 // quietAdmit sends the commands' report to a buffer, and keeps their
 // unsetting of DOCKER_HOST and DOCKER_CONTEXT to the test.
 func quietAdmit(t *testing.T) {
 	t.Helper()
-	var b strings.Builder
-	reporterOverride = ui.NewPlain(&b, false)
+	b := new(strings.Builder)
+	admitReport = b
+	reporterOverride = ui.NewPlain(b, false)
 	t.Cleanup(func() { reporterOverride = nil })
 	t.Setenv("DOCKER_HOST", "")
 	t.Setenv("DOCKER_CONTEXT", "")
@@ -431,5 +435,67 @@ func TestEvictFlagCombinations(t *testing.T) {
 	runningAsRootOnLinux = func() bool { return false }
 	if err := runHostEvict([]string{"--deployment", fixtureID(t), "--user", "paisans-f2a9"}, strings.NewReader(""), new(strings.Builder)); err == nil || !strings.Contains(err.Error(), "as root on the host") {
 		t.Errorf("--deployment not as root: %v", err)
+	}
+}
+
+// writerFunc is an io.Writer that hands each write to a function.
+type writerFunc func([]byte) (int, error)
+
+func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
+
+// --execute shows the whole plan, every step's title, on both paths: before
+// the digest is asked for with --request, and before anything runs.
+func TestAdmitExecuteShowsThePlanFirst(t *testing.T) {
+	savedExecute, savedLogin := executeAdmit, reachSiteUser
+	t.Cleanup(func() { executeAdmit, reachSiteUser = savedExecute, savedLogin })
+	shown := func(when string, plan *hostadmit.Plan) {
+		t.Helper()
+		if len(plan.Steps) == 0 {
+			t.Fatalf("%s: the plan has no steps", when)
+		}
+		for _, s := range plan.Steps {
+			if !strings.Contains(admitReport.String(), s.Title) {
+				t.Errorf("%s: step %q not shown:\n%s", when, s.Title, admitReport.String())
+			}
+		}
+	}
+	var executed *hostadmit.Plan
+	executeAdmit = func(_ apply.Transport, _ hostadmit.Input, plan *hostadmit.Plan, _ ui.Reporter) error {
+		shown("before it runs", plan)
+		executed = plan
+		return nil
+	}
+	reachSiteUser = func(string, config.Site) apply.Transport { return blankHost("ubuntu") }
+
+	path, digest := requestFile(t, "vm")
+	withFakeLocalHost(t, "ubuntu")
+	withTerminal(t, true)
+	asked := false
+	prompt := writerFunc(func(p []byte) (int, error) {
+		if !asked {
+			asked = true
+			if !strings.Contains(admitReport.String(), "start ubuntu's manager after the mesh") {
+				t.Errorf("the digest was asked for before the plan was shown:\n%s", admitReport.String())
+			}
+		}
+		return len(p), nil
+	})
+	if err := runHostAdmit([]string{"--request", path, "--public-ports", "--execute"}, typed(t, digest+"\n"), prompt); err != nil {
+		t.Fatal(err)
+	}
+	if !asked || executed == nil {
+		t.Fatalf("--request: asked %v, executed %v", asked, executed != nil)
+	}
+
+	executed = nil
+	quietAdmit(t)
+	savedOwner := reachOwnerAdmit
+	t.Cleanup(func() { reachOwnerAdmit = savedOwner })
+	reachOwnerAdmit = func(config.Destination) apply.Transport { return blankHost("ubuntu") }
+	if err := runHostAdmit([]string{"--site", "vm", "--ssh", "owner@vm.example.org", "--config", fixtureConfig(), "--public-ports", "--execute"}, strings.NewReader(""), new(strings.Builder)); err != nil {
+		t.Fatal(err)
+	}
+	if executed == nil {
+		t.Fatal("--site: nothing executed")
 	}
 }
