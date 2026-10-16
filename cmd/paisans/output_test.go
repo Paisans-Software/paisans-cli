@@ -166,8 +166,8 @@ func quietAnswer(args []string, log, fail string) (string, int, bool) {
 		}
 	case strings.Contains(cmd, "getent passwd"):
 		out.WriteString("ubuntu:x:1000:1000::/home/ubuntu:/bin/bash\n")
-	case strings.HasSuffix(cmd, "id -u"):
-		out.WriteString("0\n")
+	case strings.Contains(cmd, `echo "uid`):
+		out.WriteString("uid 1000\nsubuid ubuntu:165536:65536\n")
 	case cmd == "dpkg --print-architecture":
 		out.WriteString("amd64\n")
 	case strings.Contains(cmd, "print-architecture"):
@@ -214,10 +214,9 @@ case "$cmd" in
 		case "$cmd" in *".Config.Volumes"*) echo "volumes $r null";; *) echo "present sha256:0123456789abcdef $r";; esac
 	done;;
 *"getent passwd"*) echo "ubuntu:x:1000:1000::/home/ubuntu:/bin/bash";;
-# The host check's inventory asks id -u too, and refuses anyone but root
-# until phase 6 moves it to the user, so it is answered 0 here. The login
-# probe, a bare id -u, is answered 1000 before this script runs.
-*"id -u") echo 0;;
+# The host check's inventory asks who it runs as. The login probe, a bare
+# id -u, is answered 1000 before this script runs.
+*'echo "uid'*) printf 'uid 1000\nsubuid ubuntu:165536:65536\n';;
 "dpkg --print-architecture") echo amd64;;
 *"print-architecture"*) echo "arch amd64";;
 *"/etc/os-release"*) printf 'ID=ubuntu\nVERSION_ID="24.04"\nVERSION_CODENAME=noble\n';;
@@ -266,6 +265,9 @@ func (h runningHost) Run(command string) (string, error) {
 	}
 	if strings.Contains(command, "ip -j ") {
 		return "[]\n", nil
+	}
+	if strings.Contains(command, `echo "uid`) {
+		return "uid 1000\nsubuid ubuntu:165536:65536\n", nil
 	}
 	if strings.HasSuffix(command, "id -u") {
 		return "0\n", nil

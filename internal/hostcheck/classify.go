@@ -6,8 +6,6 @@ import (
 	"net"
 	"strings"
 
-	"github.com/paisans-software/paisans-cli/internal/deployment"
-	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -42,7 +40,7 @@ type Conflict struct {
 	// Key is the paisans-stack.yaml key that claims it.
 	Key string
 	// Holder is what holds it: a container and its compose project, or a
-	// process and its PID.
+	// listener and its owner.
 	Holder string
 }
 
@@ -62,28 +60,11 @@ type Report struct {
 	// worth an operator's eye, one line each.
 	Notes     []string
 	Inventory *Inventory
-	// SSHPort is the site's ssh.port, for the firewall advice.
-	SSHPort int
 }
 
 // Shared reports whether the host is shared, so that a command touches only
 // what is the toolkit's.
 func (r *Report) Shared() bool { return r.Class == Shared }
-
-// baseProcesses are the base system's own listeners: what a stock server
-// runs and the toolkit expects beside it. ss prints a process's name as the
-// kernel keeps it, cut to 15 characters, so systemd-resolved and
-// systemd-networkd (whose DHCP client listens on 68/udp) are listed both
-// ways.
-var baseProcesses = map[string]bool{
-	"sshd":             true,
-	"systemd-resolve":  true,
-	"systemd-resolved": true,
-	"systemd-network":  true,
-	"systemd-networkd": true,
-	"chronyd":          true,
-	"tailscaled":       true,
-}
 
 // defaultNetworks are the networks every Docker install has.
 var defaultNetworks = map[string]bool{"bridge": true, "host": true, "none": true}
@@ -99,9 +80,8 @@ type holder struct {
 // whoever created it's choice, and two deployments on one host share every
 // naming convention.
 type owners struct {
-	inv  *Inventory
-	id   string
-	byID map[string]Container
+	inv *Inventory
+	id  string
 	// iface and port are this deployment's WireGuard interface and listen
 	// port, whose kernel socket is the toolkit's.
 	iface string
@@ -127,81 +107,36 @@ func (o owners) labelled(project, owner string) string {
 }
 
 func (o owners) container(c Container) holder {
-	if desc, ok := o.keptCaddy(c); ok {
-		return holder{desc: desc}
-	}
 	return holder{ours: o.ours(c.Deployment), desc: "container " + c.Name + " (" + o.labelled(c.Project, c.Deployment) + ")"}
 }
 
-// keptCaddy describes another deployment's Caddy by what the host registry
-// says of it (docs/specs/2026-10-10-gateway-caddy-kept.md): its infrastructure
-// project's caddy service, with its entry marked kept or no entry at all. It
-// never claims what that Caddy serves, because the other deployment's root is
-// its own user's and this check cannot read it. An entry not marked kept is a
-// live gateway, and a registry that cannot be read says nothing either way:
-// both keep the plain wording.
-func (o owners) keptCaddy(c Container) (string, bool) {
-	if c.Deployment == "" || o.ours(c.Deployment) || c.Service != "caddy" || o.inv.Registered == nil {
-		return "", false
-	}
-	kept, registered := o.inv.Registered[c.Deployment]
-	if registered && kept != registry.KeptCaddy {
-		return "", false
-	}
-	d := deployment.Deployment{ID: c.Deployment}
-	if c.Project != d.Project("infra") {
-		return "", false
-	}
-	list := fmt.Sprintf("Run paisans host deployments --ssh %s to see what it serves", sshArg(o.inv.Host))
-	if registered {
-		return fmt.Sprintf("container %s: paisans deployment %s's Caddy, which its registry entry marks kept for the host owner's sites. %s, move those sites to a Caddy of your own and remove this container, or run paisans site remove --force --ssh %s --id %s once they are gone", c.Name, d.Token(), list, sshArg(o.inv.Host), d.Token()), true
-	}
-	return fmt.Sprintf("container %s: paisans deployment %s's Caddy, which has no registry entry and whose files this check cannot read. %s, and remove this container by hand once it serves nothing", c.Name, d.Token(), list), true
-}
-
-// sshArg is a transport's description as --ssh takes it: user@host, or
-// user@host:port for one it describes as user@host port N.
-func sshArg(described string) string {
-	host, port, ok := strings.Cut(described, " port ")
-	if !ok {
-		return described
-	}
-	if user, h, ok := strings.Cut(host, "@"); ok && strings.Contains(h, ":") {
-		host = user + "@[" + h + "]"
-	}
-	return host + ":" + port
-}
-
-// socket decides who holds a listener. A process in a container's cgroup is
-// that container's, which covers a host network container's own processes.
-// A docker-proxy runs in Docker's cgroup rather than the container's, so it
-// is matched to the container publishing the same address and port. The
-// kernel's own WireGuard socket has no process, and is the toolkit's when
-// the toolkit wrote the interface it serves.
+// socket decides who holds a listener, by its owner. Every process a
+// rootless Docker runs, the daemon's port forwarder included, is the user's
+// UID or one in its subordinate range, so that is this deployment's. The
+// kernel's own WireGuard socket has no owner but root, and is the toolkit's
+// when the toolkit wrote the interface it serves. A listener of root's or of
+// a system user's (a UID below 1000, as the distribution's own daemons run
+// as) is the base system's, and so is any on loopback; one of another user's
+// makes the host shared.
 func (o owners) socket(s Socket) holder {
-	if s.PID > 0 {
-		if c, ok := o.byID[o.inv.Cgroups[s.PID]]; ok {
-			return o.container(c)
-		}
+	if o.inv.Self.Owns(s.UID) {
+		return holder{ours: true, desc: "this deployment's user"}
 	}
-	if s.Process == "docker-proxy" {
-		for _, c := range o.inv.Containers {
-			for _, b := range c.Bindings {
-				if b.Proto == s.Proto && b.Port == s.Port && b.Address == s.Address {
-					return o.container(c)
-				}
-			}
-		}
-	}
-	if s.Process == "" && s.Proto == "udp" && o.port != 0 && s.Port == o.port && o.inv.ManifestWireGuard && contains(o.inv.Links, o.iface) {
+	if s.UID == 0 && s.Proto == "udp" && o.port != 0 && s.Port == o.port && o.inv.ManifestWireGuard && contains(o.inv.Links, o.iface) {
 		return holder{ours: true, desc: "WireGuard (" + o.iface + ")"}
 	}
-	desc := "a kernel socket (no process)"
-	if s.Process != "" {
-		desc = fmt.Sprintf("process %s (pid %d)", s.Process, s.PID)
+	if s.UID == 0 {
+		return holder{base: true, desc: "a listener of root's"}
 	}
-	return holder{base: loopback(s.Address) || baseProcesses[s.Process], desc: desc}
+	if s.UID < firstLoginUID {
+		return holder{base: true, desc: fmt.Sprintf("a listener of a system user's (uid %d)", s.UID)}
+	}
+	return holder{base: loopback(s.Address), desc: fmt.Sprintf("a listener of another user's (uid %d)", s.UID)}
 }
+
+// firstLoginUID is the lowest UID Debian and Ubuntu give a login user
+// (UID_MIN in /etc/login.defs); every UID below it is a system account.
+const firstLoginUID = 1000
 
 // Classify decides who owns what the inventory found and compares it with
 // the claims.
@@ -212,11 +147,8 @@ func (o owners) socket(s Socket) holder {
 // loopback Postgres does not make a host shared, but the toolkit's own
 // loopback bind on its port would fail.
 func Classify(claims Claims, inv *Inventory) *Report {
-	r := &Report{Site: claims.Site, Host: inv.Host, Inventory: inv, SSHPort: claims.SSHPort}
-	o := owners{inv: inv, id: claims.Deployment.ID, byID: map[string]Container{}, iface: claims.Interface, port: claims.ListenPort}
-	for _, c := range inv.Containers {
-		o.byID[c.ID] = c
-	}
+	r := &Report{Site: claims.Site, Host: inv.Host, Inventory: inv}
+	o := owners{inv: inv, id: claims.Deployment.ID, iface: claims.Interface, port: claims.ListenPort}
 	seen := map[Conflict]bool{}
 	conflict := func(c Conflict) {
 		if !seen[c] {
@@ -412,10 +344,8 @@ func contains(list []string, s string) bool {
 
 // Refusal is the reason a command must not go on, or nil. A conflict is
 // always refused, with no override: the operator moves what holds the claim
-// or changes the configuration. A shared host is refused when its firewall
-// is not already up and denying (or rejecting) by default, because on a
-// shared host the toolkit never sets the default policy or enables ufw
-// itself.
+// or changes the configuration. A shared host is not refused: its firewall
+// is host admit's.
 //
 // Before either, a Docker the toolkit cannot run is refused: a snap, or an
 // engine or compose plugin older than MinEngine or MinCompose.
@@ -423,8 +353,7 @@ func (r *Report) Refusal() error {
 	if err := dockerRefusal(r.Host, r.Inventory.Docker); err != nil {
 		return err
 	}
-	switch r.Class {
-	case Conflicted:
+	if r.Class == Conflicted {
 		// The conflicts are listed here rather than with the report's other
 		// lines, which show only with --verbose: a refusal has to say what
 		// to move at any verbosity.
@@ -440,40 +369,13 @@ func (r *Report) Refusal() error {
 			Hint:    fmt.Sprintf("%s holds %s %s claims, so nothing was changed", r.Host, things, r.Site),
 			Explain: strings.Join(lines, "\n") + "\nMove what holds each one, or change the " + config.FileName + " key it names, and run again.",
 		}
-	case Shared:
-		if why := firewallGap(r.Inventory.Firewall); why != "" {
-			port := r.SSHPort
-			if port == 0 {
-				port = 22
-			}
-			return &ui.Problem{
-				Hint:    r.Host + " is shared, and its firewall is not up and denying",
-				Explain: fmt.Sprintf("It runs services this deployment does not own, and on a shared host the toolkit never sets ufw's default policy or enables it, so both must already be in place, and %s. In this order: allow SSH so the session you are in survives (ufw allow %d/tcp), allow what those services need, deny incoming by default (ufw default deny incoming), enable ufw (ufw enable), and run again.", why, port),
-			}
-		}
 	}
 	return nil
 }
 
-// firewallGap says what is missing from a shared host's firewall, "" for
-// nothing.
-func firewallGap(f Firewall) string {
-	switch {
-	case f.Firewalld:
-		return "firewalld is active: two firewalls on one host each decide what gets in, and the toolkit's rules are ufw's"
-	case !f.UFW:
-		return "ufw is not installed"
-	case !f.Active:
-		return "ufw is inactive"
-	case f.Incoming != "deny" && f.Incoming != "reject":
-		return fmt.Sprintf("ufw's default for incoming traffic is %s, not deny or reject", f.Incoming)
-	}
-	return ""
-}
-
 // Show reports what the check found, under the host check's own line and
 // only with --verbose, marked the way host prepare marks its plan: the class
-// as a detail, then Docker, the firewall, each note and, on a shared host,
+// as a detail, then Docker, each note and, on a shared host,
 // what sharing changes as done, and each foreign thing as done and not
 // paisans. Conflicts are not among them: they are in Refusal's error, which
 // prints in full.
@@ -497,7 +399,6 @@ func (r *Report) Show(rep ui.Reporter) {
 		docker += " (" + strings.Join(inv.Docker.Packages, ", ") + ")"
 	}
 	rep.Step("docker").End(ui.OK, docker)
-	rep.Step("firewall").End(ui.OK, firewallSummary(inv.Firewall))
 	for _, f := range r.Foreign {
 		rep.Step(f).End(ui.OK, "not paisans")
 	}
@@ -507,20 +408,4 @@ func (r *Report) Show(rep ui.Reporter) {
 	if r.Class == Shared {
 		rep.Step("shared").End(ui.OK, "ufw's default policy and enabled state are left alone, superseded images are kept, and prune removes only volumes labelled with this deployment's id, as everywhere")
 	}
-}
-
-func firewallSummary(f Firewall) string {
-	var s string
-	switch {
-	case !f.UFW:
-		s = "ufw absent"
-	case !f.Active:
-		s = "ufw inactive"
-	default:
-		s = "ufw active, incoming " + f.Incoming
-	}
-	if f.Firewalld {
-		s += "; firewalld active"
-	}
-	return s
 }

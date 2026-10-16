@@ -429,16 +429,18 @@ a host decides how much is touched* has the reasoning; what the code does:
   `render.SiteListeners` with its key, and the host check, preflight's ports
   check and validate's collision check all see it.
 * **Inventory** (`hostcheck.Inspect`) runs one probe per fact and changes
-  nothing. Every probe is prefixed `export LC_ALL=C; `, and the first is
-  `id -u`, refused unless it answers 0. A failed probe is an error, and Docker
+  nothing. Every probe is prefixed `export LC_ALL=C; ` and runs as the
+  deployment's user, none of them under sudo. The first names that user's UID
+  and its `/etc/subuid` range (`Inventory.Self`); `ss -Hltnue` gives each
+  listener its owner's UID, which `ss` prints for every user but root. A
+  failed probe is an error, and Docker
   installed but not answering is an error rather than an empty list; the three
   `docker ... inspect` probes discard stderr and their exit status, because a
   container removed between the listing and the inspect is gone, not a
   failure. Each probe is told apart in tests by a substring only it contains
-  (`id -u`, `docker version`, `dpkg-query`,
+  (`echo "uid`, `docker version`, `dpkg-query`,
   `docker inspect`, `docker volume inspect`, `docker network inspect`,
-  `ss -Hltnup`, `/proc/`, `ip -o link`, `ip -j route`, `ufw status verbose`,
-  `is-active firewalld`, `/srv/caddy.d/`); a fake transport elsewhere that reaches one of
+  `ss -Hltnue`, `ip -o link`, `ip -j route`, `caddy.d'`); a fake transport elsewhere that reaches one of
   these commands has to answer it. The `docker version` probe prints the
   daemon's and the CLI's versions on its first line and `compose <version>`
   or `compose absent` on the next; a fake that answers the first line alone
@@ -451,18 +453,22 @@ a host decides how much is touched* has the reasoning; what the code does:
   `docs/specs/2026-10-11-docker-version-gate.md` with the release that
   introduced it, and raises the constant when it is newer.
 * **Classification** (`hostcheck.Classify`) is a pure function of the
-  claims and the inventory, tested with recorded output: a clean host with
-  an empty Docker, the toolkit's own running stack, a foreign host network
-  Caddy against a site that claims 80 and 443 and one that does not, a
+  claims and the inventory. A listener is this deployment's when its owner
+  is the user or a UID in the user's subordinate range, which every process
+  of a rootless Docker runs as; the base system's when it is root's, a system
+  user's (below UID 1000) or on loopback; and another user's otherwise, which
+  makes the host shared. It is tested with recorded output: a clean host with
+  an empty Docker, the toolkit's own running stack, another user's Caddy
+  against a site that claims 80 and 443 and one that does not, a
   foreign Postgres, a published port with no listener, a foreign `psns-<token>`, a
-  network over the mesh, the three ways a shared host's firewall is
-  refused, and Docker from each source at old and current versions.
+  network over the mesh, and Docker from each source at old and current
+  versions.
 
 What "shared" changes, and where:
 
 | Command | On a shared host |
 |---|---|
-| `host prepare` | `hostprep.Shared()`: the profile's `Firewall` gets `hostWide` false and plans only its own `paisans-<token>:` rules, never `ufw default` or `ufw --force enable` |
+| `host prepare` | `hostprep.Shared()`: the profile's `Firewall` gets `hostWide` false and plans only its own `paisans-<token>:` rules, never `ufw default` or `ufw --force enable`; the host check does not read the firewall, whose policy is the host owner's and whose rules for the deployment `host admit` adds |
 | `apply` | `apply.KeepImages()`, as `--keep-images`, which also skips the sweep |
 | `site add` | `siteadd.Plan.KeepImages`, passed to the replica stage's whole apply; `siteadd.Plan.SharedSites`, the monitor sites, for the reseed's apply |
 | `site remove`, `app remove` | the monitor sites are host checked, and the reseed's apply there keeps nothing back: `apply.MonitorReseed.KeepImages` is there for a caller to set |
@@ -470,9 +476,9 @@ What "shared" changes, and where:
 | `storage add` | `storageadd.Options.SharedSites`: `apply.KeepImages()` in every scoped apply on that site, and in the monitor's reseed |
 | `preflight` | a `host` check line; the `prepared` check asks for the shared plan |
 
-A conflict, and a shared host whose ufw is not active with incoming denied or
-rejected by default (or whose firewalld is active), is refused by `Report.Refusal` before
-anything else is asked of the host. There is no flag to skip the check.
+A conflict is refused by `Report.Refusal` before anything else is asked of the
+host. A shared host is not refused: its firewall is `host admit`'s. There is
+no flag to skip the check.
 
 ## `apply`, and the gates in it
 

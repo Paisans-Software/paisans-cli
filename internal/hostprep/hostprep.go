@@ -289,8 +289,8 @@ type options struct {
 // the deployment runs there. The firewall's default policy and enabled state
 // are left alone, since they govern that other thing's traffic as well, and
 // only the rules host prepare marks as its own are added and removed. The
-// host check has already refused a shared host whose ufw is not active and
-// denying incoming by default.
+// host check does not read the firewall: host admit adds the deployment's
+// rules, and the policy around them is the host owner's.
 func Shared() Option { return func(o *options) { o.shared = true } }
 
 // Build probes the site's host and returns only what is missing, in the order

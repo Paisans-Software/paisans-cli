@@ -81,17 +81,14 @@ func healthy(name string) *fakeHost {
 			{match: "docker info", out: "/var/lib/docker\n"},
 			{match: "findmnt", out: "ext4 /dev/sda1\n"},
 			// The host check's inventory: Docker and nothing run on it.
-			{match: "id -u", out: "0\n"},
+			{match: `echo "uid`, out: "uid 1001\nsubuid paisans-f2a9:165536:65536\n"},
 			{match: "docker version", out: "27.3.1\n"},
 			{match: "dpkg-query", out: "docker-ce install ok installed\n"},
 			{match: "docker inspect", out: ""},
 			{match: "docker volume inspect", out: ""},
 			{match: "docker network inspect", out: ""},
 			{match: "ip -o link", out: "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536\n2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500\n"},
-			{match: "ufw status verbose", out: "Status: active\nDefault: deny (incoming), allow (outgoing), disabled (routed)\n"},
-			{match: "is-active firewalld", out: "inactive\n"},
 			{match: "/srv/paisans/f2a9/caddy.d'", out: ""},
-			{match: "/proc/", out: ""},
 		},
 	}
 }
@@ -484,7 +481,7 @@ func TestDataSitesMayRunDifferentOSReleases(t *testing.T) {
 func TestAGatewaysWebPortsAreChecked(t *testing.T) {
 	prepared(t)
 	h := hosts()
-	h["vm"].override(rule{match: "ss -Hltnu", out: "tcp LISTEN 0 511 0.0.0.0:80 0.0.0.0:* users:((\"nginx\",pid=900,fd=6))\n"})
+	h["vm"].override(rule{match: "ss -Hltnu", out: "tcp LISTEN 0 511 0.0.0.0:80 0.0.0.0:* uid:1002 ino:1 sk:1 <->\n"})
 	r, err := Run(fixture(t), "vm", transportsOf(h))
 	if err != nil {
 		t.Fatal(err)
@@ -492,7 +489,7 @@ func TestAGatewaysWebPortsAreChecked(t *testing.T) {
 	if got := refusedDetail(t, r, "vm", "ports"); !strings.Contains(got, "80/tcp (Caddy)") {
 		t.Errorf("ports detail %q", got)
 	}
-	if got := refusedDetail(t, r, "vm", "host"); !strings.Contains(got, "process nginx (pid 900)") {
+	if got := refusedDetail(t, r, "vm", "host"); !strings.Contains(got, "a listener of another user's (uid 1002)") {
 		t.Errorf("host detail %q", got)
 	}
 }

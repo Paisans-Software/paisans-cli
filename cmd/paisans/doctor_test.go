@@ -17,7 +17,6 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 	"github.com/paisans-software/paisans-cli/internal/mesh"
 	"github.com/paisans-software/paisans-cli/internal/patroni"
-	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/validate"
 )
 
@@ -82,10 +81,9 @@ func readOnly(cfg *config.Config) (exact []string, prefixes []string) {
 		"docker inspect --format '{\"State\":{{json .State}},\"RestartCount\":{{.RestartCount}}}' ",
 		"docker logs --tail 20 ",
 		"if [ ! -f '/srv/paisans/f2a9/auth/compose.yaml' ]; then echo absent; ",
-		hostcheck.CgroupPrefix,
 	}
 	exact = append(exact, hostcheck.ReadCommands(cfg.Deployment())...)
-	exact = append(exact, "read "+cfg.Deployment().Manifest(), "read "+registry.Path)
+	exact = append(exact, "read "+cfg.Deployment().Manifest())
 	// Each gated app's settings read, which blueprints.LiveSettings promises
 	// prints only the named settings.
 	for _, name := range cfg.AppNames() {
@@ -316,7 +314,7 @@ func TestDoctorReportsLeftoversAndForeignCaddyUsers(t *testing.T) {
 		mesh.RouteCommand:             `[{"dst":"10.44.0.0/24","dev":"psns-f2a9"}]`,
 		mesh.AddrCommand:              "[]",
 		mesh.NetworksCommand:          "[]",
-		probes[0]:                     "0\n",
+		probes[0]:                     "uid 1001\nsubuid paisans-f2a9:165536:65536\n",
 		probes[1]:                     "27.3.1\n",
 		probes[2]:                     "docker-ce install ok installed\n",
 		probes[3]: `{"id":"a","name":"/paisans-f2a9-infra-caddy-1","pid":10,"labels":{"community.paisans.deployment":"` + id + `","com.docker.compose.project":"paisans-f2a9-infra","com.docker.compose.service":"caddy"},"networks":{"web":{}},"ports":{}}
@@ -328,9 +326,7 @@ func TestDoctorReportsLeftoversAndForeignCaddyUsers(t *testing.T) {
 		probes[6]:                                "",
 		probes[7]:                                "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536\n",
 		probes[8]:                                "[]",
-		probes[9]:                                "ufw absent\n",
-		probes[10]:                               "inactive\n",
-		probes[11]:                               "/srv/paisans/f2a9/caddy.d/blog.caddy\n",
+		probes[9]:                                "/srv/paisans/f2a9/caddy.d/blog.caddy\n",
 		doctor.CaddyLogCommand(cfg.Deployment()): quietCaddyLog,
 	}
 	var sent, writes []string

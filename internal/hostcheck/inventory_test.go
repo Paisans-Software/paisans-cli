@@ -45,24 +45,18 @@ func TestInspectReadsEveryFact(t *testing.T) {
 	if len(inv.Networks) != 4 || inv.Networks[3].Name != "shop_default" || inv.Networks[3].Project != "shop" || !reflect.DeepEqual(inv.Networks[3].Subnets, []string{"192.0.2.0/24"}) {
 		t.Errorf("networks %+v", inv.Networks)
 	}
-	if inv.Cgroups[812] != caddyID || inv.Cgroups[1001] != "" {
-		t.Errorf("cgroups %v", inv.Cgroups)
-	}
 	if !reflect.DeepEqual(inv.Links, []string{"lo", "eth0", "docker0"}) {
 		t.Errorf("links %v", inv.Links)
 	}
 	if len(inv.Routes) != 3 || inv.Routes[2] != (hostcheck.Route{Dst: "172.17.0.0/16", Dev: "docker0"}) {
 		t.Errorf("routes %+v", inv.Routes)
 	}
-	if inv.Firewall != (hostcheck.Firewall{UFW: true, Active: true, Incoming: "deny"}) {
-		t.Errorf("firewall %+v", inv.Firewall)
-	}
 	if inv.Manifest || inv.ManifestWireGuard {
 		t.Errorf("a host with no manifest read as having one")
 	}
 	found := false
 	for _, s := range inv.Sockets {
-		if s == (hostcheck.Socket{Proto: "tcp", Address: "", Port: 80, Process: "caddy", PID: 812}) {
+		if s == (hostcheck.Socket{Proto: "tcp", Address: "", Port: 80, UID: 1002}) {
 			found = true
 		}
 	}
@@ -82,20 +76,20 @@ func TestInspectReadsEveryFact(t *testing.T) {
 // read as render.Listener has it, with "" for any address.
 func TestSocketsAreReadAsListeners(t *testing.T) {
 	h := cleanHost()
-	h.answers["ss -Hltnup"] = `tcp LISTEN 0 4096 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=701,fd=3))
-tcp LISTEN 0 4096 [::]:5432 [::]:* users:(("postgres",pid=1200,fd=5))
-tcp LISTEN 0 4096 *:80 *:* users:(("caddy",pid=812,fd=7))
-udp UNCONN 0 0 127.0.0.53%lo:53 0.0.0.0:* users:(("systemd-resolve",pid=402,fd=14))
-udp UNCONN 0 0 0.0.0.0:51820 0.0.0.0:*
-tcp LISTEN 0 4096 [::1]:2379 [::]:* users:(("etcd",pid=600,fd=7))
-tcp LISTEN 0 4096 [::ffff:10.44.0.1]:8080 *:* users:(("app",pid=601,fd=7))
-tcp LISTEN 0 4096 [::ffff:0.0.0.0]:8081 *:* users:(("app",pid=601,fd=8))
+	h.answers["ss -Hltnue"] = `tcp LISTEN 0 4096 0.0.0.0:22 0.0.0.0:* ino:1 sk:1 <->
+tcp LISTEN 0 4096 [::]:5432 [::]:* uid:113 ino:2 sk:2 v6only:1 <->
+tcp LISTEN 0 4096 *:80 *:* uid:1001 ino:3 sk:3 <->
+udp UNCONN 0 0 127.0.0.53%lo:53 0.0.0.0:* ino:4 sk:4 <->
+udp UNCONN 0 0 0.0.0.0:51820 0.0.0.0:* ino:5 sk:5 <->
+tcp LISTEN 0 4096 [::1]:2379 [::]:* uid:165600 ino:6 sk:6 <->
+tcp LISTEN 0 4096 [::ffff:10.44.0.1]:8080 *:* uid:1001 ino:7 sk:7 <->
+tcp LISTEN 0 4096 [::ffff:0.0.0.0]:8081 *:* uid:1001 ino:8 sk:8 <->
 `
 	var got []string
 	for _, s := range inspect(t, h).Sockets {
-		got = append(got, s.Listener().String()+" "+s.Process)
+		got = append(got, fmt.Sprintf("%s %d", s.Listener(), s.UID))
 	}
-	want := []string{"*:22/tcp sshd", "*:5432/tcp postgres", "*:80/tcp caddy", "127.0.0.53:53/udp systemd-resolve", "*:51820/udp ", "::1:2379/tcp etcd", "10.44.0.1:8080/tcp app", "*:8081/tcp app"}
+	want := []string{"*:22/tcp 0", "*:5432/tcp 113", "*:80/tcp 1001", "127.0.0.53:53/udp 0", "*:51820/udp 0", "::1:2379/tcp 165600", "10.44.0.1:8080/tcp 1001", "*:8081/tcp 1001"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got  %q\nwant %q", got, want)
 	}
@@ -151,7 +145,7 @@ func TestADockerThatDoesNotAnswerIsAnError(t *testing.T) {
 
 // Any probe that fails stops the inventory with what it was reading.
 func TestAFailedProbeIsAnError(t *testing.T) {
-	for _, probe := range []string{"ss -Hltnup", "ip -j route", "ufw status verbose", "docker inspect"} {
+	for _, probe := range []string{`echo "uid`, "ss -Hltnue", "ip -j route", "docker inspect"} {
 		h := cleanHost()
 		h.fail = map[string]error{probe: errors.New("exit status 1")}
 		if _, err := hostcheck.Inspect(h, fixtureDeployment); err == nil {
@@ -160,17 +154,7 @@ func TestAFailedProbeIsAnError(t *testing.T) {
 	}
 }
 
-// ufw absent, and firewalld active, are both read.
-func TestTheFirewallIsRead(t *testing.T) {
-	h := cleanHost()
-	h.answers["ufw status verbose"] = "ufw absent\n"
-	h.answers["is-active firewalld"] = "active\n"
-	if f := inspect(t, h).Firewall; f != (hostcheck.Firewall{Firewalld: true}) {
-		t.Errorf("firewall %+v", f)
-	}
-}
-
-// Every probe runs in the C locale: ufw, dpkg, ss and systemctl translate
+// Every probe runs in the C locale: dpkg and ss translate
 // what they print, and the parsers read the English words.
 func TestEveryProbeRunsInTheCLocale(t *testing.T) {
 	h := caddyHost()
@@ -182,34 +166,69 @@ func TestEveryProbeRunsInTheCLocale(t *testing.T) {
 	}
 }
 
-// The inventory runs as root, or it cannot name the process behind
-// another user's listener, and every root listener would read as a kernel
-// socket. It asks first, and refuses rather than misreading the host.
-func TestAProbeThatIsNotRootIsRefused(t *testing.T) {
+// The inventory runs as the deployment's user: no probe asks for root, and
+// none reads what only root may (ufw, firewalld, the registry, other users'
+// process tables).
+func TestTheInventoryRunsAsTheDeploymentsUser(t *testing.T) {
 	h := cleanHost()
-	h.answers["id -u"] = "1000\n"
-	_, err := hostcheck.Inspect(h, fixtureDeployment)
-	if err == nil || !strings.Contains(err.Error(), "uid 1000") || strings.Contains(err.Error(), "--sudo") {
+	inv, err := hostcheck.Inspect(h, fixtureDeployment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inv.Self != (hostcheck.Self{UID: 1001, SubStart: 165536, SubCount: 65536}) {
+		t.Errorf("self %+v", inv.Self)
+	}
+	for _, c := range h.ran {
+		for _, root := range []string{"ufw", "firewalld", "/proc/", "ss -Hltnup", "registry.json", "sudo"} {
+			if strings.Contains(c, root) {
+				t.Errorf("a probe reads %q, which needs root: %s", root, c)
+			}
+		}
+	}
+}
+
+// ss -e prints uid:N for a socket of any user but root.
+func TestSocketsCarryTheirOwner(t *testing.T) {
+	h := cleanHost()
+	h.answers["ss -Hltnue"] = "tcp LISTEN 0 4096 0.0.0.0:443 0.0.0.0:* uid:165536 ino:2 sk:1\ntcp LISTEN 0 128 0.0.0.0:22 0.0.0.0:* ino:3 sk:2\n"
+	inv, err := hostcheck.Inspect(h, fixtureDeployment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []hostcheck.Socket{{Proto: "tcp", Port: 443, UID: 165536}, {Proto: "tcp", Port: 22, UID: 0}}
+	if !reflect.DeepEqual(inv.Sockets, want) {
+		t.Errorf("sockets %+v", inv.Sockets)
+	}
+}
+
+// A self probe that names no uid is an error: read as uid 0, it would make
+// every listener of root's this deployment's.
+func TestASelfProbeWithoutAUIDIsAnError(t *testing.T) {
+	h := cleanHost()
+	h.answers[`echo "uid`] = ""
+	if _, err := hostcheck.Inspect(h, fixtureDeployment); err == nil || !strings.Contains(err.Error(), "who the probes run as") {
 		t.Fatalf("got %v", err)
 	}
-	if len(h.ran) != 1 || !strings.Contains(h.ran[0], "id -u") {
-		t.Errorf("asked more than who it runs as: %q", h.ran)
+}
+
+// A user with no subordinate range is still read, its range empty.
+func TestAUserWithoutASubordinateRange(t *testing.T) {
+	h := cleanHost()
+	h.answers[`echo "uid`] = "uid 1001\nsubuid \n"
+	if self := inspect(t, h).Self; self != (hostcheck.Self{UID: 1001}) {
+		t.Errorf("self %+v", self)
 	}
 }
 
 // A container, volume or network removed between the listing and its
 // inspect is gone, not an error: its inspect's complaint is discarded and
-// what did answer is read. A failed cgroup read says nothing on stderr
-// either, since the redirect that hides it comes before the one that fails.
+// what did answer is read.
 func TestTheProbesTolerateWhatVanishesMidway(t *testing.T) {
 	h := cleanHost()
 	inspect(t, h)
 	for _, c := range h.ran {
 		if strings.Contains(c, "xargs -r docker") && !strings.HasSuffix(c, "2>/dev/null || true") {
 			t.Errorf("an inspect fails the gate when something vanishes: %s", c)
-		}
-		if strings.Contains(c, "/proc/") && !strings.Contains(c, `2>/dev/null < /proc/$p/cgroup`) {
-			t.Errorf("the cgroup read reports a vanished process: %s", c)
 		}
 	}
 }

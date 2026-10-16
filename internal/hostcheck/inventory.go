@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/deployment"
-	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
@@ -28,18 +27,17 @@ type Transport interface {
 
 // Inventory is what one host already runs.
 type Inventory struct {
-	Host       string
+	Host string
+	// Self is who the probes ran as: the deployment's user, whose
+	// listeners and whose containers' are this deployment's.
+	Self       Self
 	Docker     Docker
 	Containers []Container
 	Volumes    []Volume
 	Networks   []Network
 	Sockets    []Socket
-	// Cgroups maps a listening process's PID to the container its
-	// /proc/<pid>/cgroup names, for the PIDs that are in one.
-	Cgroups  map[int]string
-	Links    []string
-	Routes   []Route
-	Firewall Firewall
+	Links      []string
+	Routes     []Route
 	// Manifest is whether this deployment's record of what it wrote exists
 	// at ManifestPath, and ManifestWireGuard whether that record lists
 	// its WireGuard config, which is how a mesh interface the deployment
@@ -57,11 +55,47 @@ type Inventory struct {
 	// by full path and sorted: site blocks somebody added to the gateway's
 	// Caddy, which no deployment owns.
 	HostSites []string
-	// Registered maps each deployment id the host's registry has an entry
-	// for to what that entry says is kept, "" for nothing. It is nil when
-	// the registry cannot be read or parsed, which says nothing about any
-	// entry: the host check reads it only to word a conflict.
-	Registered map[string]string
+}
+
+// Self is the login user and the subordinate range its containers' users map
+// into: everything a rootless Docker runs as is one of them.
+type Self struct {
+	UID                int
+	SubStart, SubCount int
+}
+
+// Owns reports whether uid is the user's or one its containers run as.
+func (s Self) Owns(uid int) bool {
+	return uid == s.UID || (s.SubCount > 0 && uid >= s.SubStart && uid < s.SubStart+s.SubCount)
+}
+
+// parseSelf reads selfProbe's two lines. One without a uid is an error,
+// since read as uid 0 it would make every listener of root's this
+// deployment's.
+func parseSelf(out string) (Self, error) {
+	var s Self
+	found := false
+	for _, line := range strings.Split(out, "\n") {
+		key, rest, _ := strings.Cut(strings.TrimSpace(line), " ")
+		switch key {
+		case "uid":
+			uid, err := strconv.Atoi(rest)
+			if err != nil {
+				return s, fmt.Errorf("unreadable uid %q", rest)
+			}
+			s.UID, found = uid, true
+		case "subuid":
+			f := strings.Split(rest, ":")
+			if len(f) == 3 {
+				s.SubStart, _ = strconv.Atoi(f[1])
+				s.SubCount, _ = strconv.Atoi(f[2])
+			}
+		}
+	}
+	if !found {
+		return s, fmt.Errorf("no uid in %q", firstLine(out))
+	}
+	return s, nil
 }
 
 // Docker is the engine, if there is one.
@@ -82,9 +116,8 @@ type Docker struct {
 	Packages []string
 }
 
-// The probes, one command per fact. Every one only reads. The transport runs
-// them under sudo, which `ss -p` needs to name another user's process, and
-// rootProbe checks that it did.
+// The probes, one command per fact. Every one only reads, and every one runs
+// as the deployment's user: none needs root.
 //
 // The three inspects take a list read a moment earlier, and a container,
 // volume or network removed in between makes `docker inspect` complain and
@@ -92,19 +125,21 @@ type Docker struct {
 // look: what is gone holds nothing, so the complaint is discarded and what
 // answered is read.
 const (
-	rootProbe      = "id -u"
+	// selfProbe names the login user's UID and its subordinate range, which
+	// a rootless container's users map into, so a listener can be told the
+	// deployment's own by its owner. /etc/subuid is world readable.
+	selfProbe      = `echo "uid $(id -u)"; echo "subuid $(grep "^$(id -un):" /etc/subuid | head -n 1)"`
 	dockerProbe    = `command -v docker >/dev/null 2>&1 || { echo absent; exit 0; }; docker version --format '{{.Server.Version}} {{.Client.Version}}' || exit 1; echo "compose $(docker compose version --short 2>/dev/null || echo absent)"`
 	packageProbe   = `dpkg-query -W -f='${Package} ${Status}\n' docker-ce docker.io 2>/dev/null; snap list docker 2>/dev/null; true`
 	containerProbe = `docker ps -aq --no-trunc | xargs -r docker inspect --format '{"id":{{json .Id}},"name":{{json .Name}},"image":{{json .Image}},"pid":{{.State.Pid}},"labels":{{json .Config.Labels}},"networks":{{json .NetworkSettings.Networks}},"ports":{{json .HostConfig.PortBindings}}}' 2>/dev/null || true`
 	volumeProbe    = `docker volume ls -q | xargs -r docker volume inspect --format '{"name":{{json .Name}},"labels":{{json .Labels}}}' 2>/dev/null || true`
 	networkProbe   = `docker network ls -q --no-trunc | xargs -r docker network inspect --format '{"id":{{json .Id}},"name":{{json .Name}},"labels":{{json .Labels}},"ipam":{{json .IPAM.Config}}}' 2>/dev/null || true`
-	socketProbe    = "ss -Hltnup"
-	linkProbe      = "ip -o link"
-	routeProbe     = "ip -j route show table all"
-	ufwProbe       = `command -v ufw >/dev/null 2>&1 || { echo 'ufw absent'; exit 0; }; ufw status verbose`
-	firewalldProbe = "systemctl is-active firewalld || true"
-
-	cLocale = "export LC_ALL=C; "
+	// socketProbe lists listeners with their owner's UID (-e) and without
+	// their process (-p), which only root can name for another user's.
+	socketProbe = "ss -Hltnue"
+	linkProbe   = "ip -o link"
+	routeProbe  = "ip -j route show table all"
+	cLocale     = "export LC_ALL=C; "
 )
 
 // hostSitesProbe lists the *.caddy files in d's render.HostSitesDir. Each
@@ -120,29 +155,13 @@ func hostSitesProbe(d deployment.Deployment) string {
 func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 // ReadCommands is every fixed command Inspect sends, exactly as it sends it,
-// for a caller's allow list of reads. The one command that varies is the
-// cgroup read, which starts with CgroupPrefix.
+// for a caller's allow list of reads.
 func ReadCommands(d deployment.Deployment) []string {
 	var out []string
-	for _, probe := range []string{rootProbe, dockerProbe, packageProbe, containerProbe, volumeProbe, networkProbe, socketProbe, linkProbe, routeProbe, ufwProbe, firewalldProbe, hostSitesProbe(d)} {
+	for _, probe := range []string{selfProbe, dockerProbe, packageProbe, containerProbe, volumeProbe, networkProbe, socketProbe, linkProbe, routeProbe, hostSitesProbe(d)} {
 		out = append(out, cLocale+probe)
 	}
 	return out
-}
-
-// CgroupPrefix starts the cgroup read, whose PID list varies.
-const CgroupPrefix = cLocale + "for p in "
-
-// cgroupProbe prints, per PID, the PID and its cgroup lines on one line. A
-// process that exited since ss ran prints its PID alone.
-func cgroupProbe(pids []int) string {
-	list := make([]string, len(pids))
-	for i, p := range pids {
-		list[i] = strconv.Itoa(p)
-	}
-	// 2>/dev/null comes first: redirections apply left to right, and the
-	// one that fails for an exited process is the < after it.
-	return fmt.Sprintf(`for p in %s; do printf '%%s ' "$p"; tr '\n' ' ' 2>/dev/null < /proc/$p/cgroup; echo; done`, strings.Join(list, " "))
 }
 
 // Inspect reads what a host already runs. It changes nothing. A probe that
@@ -150,12 +169,12 @@ func cgroupProbe(pids []int) string {
 // look has not found the host clean. d is the deployment whose manifest is
 // read.
 func Inspect(t Transport, d deployment.Deployment) (*Inventory, error) {
-	inv := &Inventory{Host: t.Describe(), Cgroups: map[int]string{}, ManifestPath: d.Manifest()}
+	inv := &Inventory{Host: t.Describe(), ManifestPath: d.Manifest()}
 	fail := func(what string, err error) error {
 		return fmt.Errorf("host check on %s: %s: %w", inv.Host, what, err)
 	}
-	// Every probe runs in the C locale, because ufw, dpkg, ss and systemctl
-	// translate what they print and the parsers read the English words.
+	// Every probe runs in the C locale, because dpkg and ss translate what
+	// they print and the parsers read the English words.
 	run := func(what, command string) (string, error) {
 		out, err := t.Run(cLocale + command)
 		if err != nil {
@@ -164,12 +183,12 @@ func Inspect(t Transport, d deployment.Deployment) (*Inventory, error) {
 		return out, nil
 	}
 
-	out, err := run("asking who the probes run as", rootProbe)
+	out, err := run("asking who the probes run as", selfProbe)
 	if err != nil {
 		return nil, err
 	}
-	if uid := strings.TrimSpace(out); uid != "0" {
-		return nil, fail("asking who the probes run as", fmt.Errorf("they run as uid %s, not root, so ss cannot name the process behind another user's listener and every one of them would read as unowned", uid))
+	if inv.Self, err = parseSelf(out); err != nil {
+		return nil, fail("asking who the probes run as", err)
 	}
 
 	out, err = run("asking Docker for its version", dockerProbe)
@@ -209,12 +228,6 @@ func Inspect(t Transport, d deployment.Deployment) (*Inventory, error) {
 	if inv.Sockets, err = parseSockets(out); err != nil {
 		return nil, fail("listing listeners", err)
 	}
-	if pids := listeningPIDs(inv.Sockets); len(pids) > 0 {
-		if out, err = run("reading listeners' cgroups", cgroupProbe(pids)); err != nil {
-			return nil, err
-		}
-		inv.Cgroups = parseCgroups(out)
-	}
 
 	if out, err = run("listing interfaces", linkProbe); err != nil {
 		return nil, err
@@ -227,15 +240,6 @@ func Inspect(t Transport, d deployment.Deployment) (*Inventory, error) {
 		return nil, fail("listing routes", err)
 	}
 
-	if out, err = run("reading ufw's status", ufwProbe); err != nil {
-		return nil, err
-	}
-	inv.Firewall = parseUFW(out)
-	if out, err = run("asking whether firewalld is active", firewalldProbe); err != nil {
-		return nil, err
-	}
-	inv.Firewall.Firewalld = strings.TrimSpace(out) == "active"
-
 	if out, err = run("listing "+render.HostSitesDir(d), hostSitesProbe(d)); err != nil {
 		return nil, err
 	}
@@ -245,15 +249,6 @@ func Inspect(t Transport, d deployment.Deployment) (*Inventory, error) {
 		}
 	}
 	sort.Strings(inv.HostSites)
-
-	if reg, _, err := t.ReadFile(registry.Path); err == nil {
-		if r, err := registry.Parse([]byte(reg)); err == nil {
-			inv.Registered = map[string]string{}
-			for id, e := range r.Deployments {
-				inv.Registered[id] = e.Kept
-			}
-		}
-	}
 
 	content, found, err := t.ReadFile(inv.ManifestPath)
 	if err != nil {
@@ -275,19 +270,6 @@ func Inspect(t Transport, d deployment.Deployment) (*Inventory, error) {
 		}
 	}
 	return inv, nil
-}
-
-func listeningPIDs(sockets []Socket) []int {
-	seen := map[int]bool{}
-	var pids []int
-	for _, s := range sockets {
-		if s.PID > 0 && !seen[s.PID] {
-			seen[s.PID] = true
-			pids = append(pids, s.PID)
-		}
-	}
-	sort.Ints(pids)
-	return pids
 }
 
 func firstLine(s string) string {
