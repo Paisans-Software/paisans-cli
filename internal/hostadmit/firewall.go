@@ -67,15 +67,19 @@ func planFirewall(p *planner) error {
 type holder struct{ What string }
 
 // portsProbe reads, as root, everything that can answer on 80 or 443: a
-// listener with its process and uid, a port the system Docker publishes,
-// and a DNAT or redirect rule, which a daemon with its userland proxy off
-// publishes with no listener at all, so only the ruleset shows it. The
+// TCP listener or a bound UDP socket with its process and uid, a port the
+// system Docker publishes, and a DNAT or redirect rule, which a daemon with
+// its userland proxy off publishes with no listener at all, so only the
+// ruleset shows it. A UDP socket counts because a gateway's egress table
+// accepts the deployment's UDP replies from 443, which an owner's UDP
+// service there would receive as its peers' packets. The
 // ruleset is read with nft; a host without nft is read with iptables-save,
 // which shows the same rules a Docker on iptables writes. Whatever it
 // cannot read it says so, and admit refuses rather than read it as
 // nothing.
 const portsProbe = `# paisans host admit: who holds 80 and 443
 if out=$(ss -Hltnpe '( sport = :80 or sport = :443 )' 2>/dev/null); then printf '%s\n' "$out" | sed -n 's/^./listen &/p'; else echo 'unread listeners (ss)'; fi
+if out=$(ss -Hlunpe '( sport = :80 or sport = :443 )' 2>/dev/null); then printf '%s\n' "$out" | sed -n 's/^./listen-udp &/p'; else echo 'unread UDP sockets (ss)'; fi
 if [ -S /var/run/docker.sock ]; then
   if out=$(` + systemDocker + ` ps --format '{{.Names}}\t{{.Ports}}\t{{.Label "com.docker.compose.project"}}' 2>/dev/null); then printf '%s\n' "$out" | sed -n 's/^./container &/p'; else echo 'unread containers (docker ps on /var/run/docker.sock)'; fi
 fi
@@ -119,7 +123,7 @@ func holders(p *planner) ([]holder, error) {
 		switch kind {
 		case "unread":
 			return nil, fmt.Errorf("reading what answers on 80 and 443: admit could not read the %s, so it cannot tell whether something else holds them. Nothing was changed", hostText(rest))
-		case "listen":
+		case "listen", "listen-udp":
 			f := strings.Fields(rest)
 			if len(f) < 4 || !lowPort.MatchString(f[3]) {
 				continue
@@ -132,9 +136,13 @@ func holders(p *planner) ([]holder, error) {
 			if p.ownUID(uid) {
 				continue
 			}
-			what := fmt.Sprintf("a process (uid %d) listens on %s", uid, hostText(f[3]))
+			on := hostText(f[3])
+			if kind == "listen-udp" {
+				on += "/udp"
+			}
+			what := fmt.Sprintf("a process (uid %d) listens on %s", uid, on)
 			if m := ssProc.FindStringSubmatch(rest); m != nil {
-				what = fmt.Sprintf("%s (pid %s, uid %d) listens on %s", hostText(m[1]), m[2], uid, hostText(f[3]))
+				what = fmt.Sprintf("%s (pid %s, uid %d) listens on %s", hostText(m[1]), m[2], uid, on)
 			}
 			found = append(found, holder{what})
 		case "container":

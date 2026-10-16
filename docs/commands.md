@@ -676,7 +676,8 @@ paisans host admit --site home-a --ssh owner@home-a.example.org --execute   # fr
   before making any change otherwise. A data site without `--watchdog`, or a
   gateway or Caddy monitor without `--public-ports`, stops it before anything
   is read; so does a grant the site does not need. Ports 80 and 443 belong to
-  one deployment per host.
+  one deployment per host, and `--public-ports` is refused while anything
+  else holds either of them, over TCP or UDP.
 * **`--execute`:** makes the changes the plan shows, which it always prints in
   full. With `--request` it first asks for the request's digest at a
   terminal. With `--site` it ends by logging in as the deployment's user with

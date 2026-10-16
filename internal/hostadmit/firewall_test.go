@@ -80,6 +80,9 @@ func TestEveryHolderShapeRefuses(t *testing.T) {
 		"redirect":        "dnat table ip nat chain PREROUTING: tcp dport 80 redirect to :8080\n",
 		"iptables":        "dnat iptables-save -t nat: -A DOCKER ! -i docker0 -p tcp -m tcp --dport 443 -j DNAT --to-destination 172.17.0.2:443\n",
 		"root listener":   `listen LISTEN 0 511 [::]:80 [::]:* users:(("apache2",pid=7,fd=4)) ino:1 sk:1` + "\n",
+		// As ss -Hlunpe printed it on Debian, for a UDP socket bound to 443.
+		"udp listener": `listen-udp UNCONN 0      0      0.0.0.0:443 0.0.0.0:* users:(("openvpn",pid=331,fd=3)) ino:3663985 sk:3001 cgroup:/ <->` + "\n",
+		"udp dnat":     "dnat table ip nat chain PREROUTING: udp dport 443 dnat to 10.0.0.2\n",
 	} {
 		h := home().with("system-socket", "present").answer(portsMarker, answer+"end\n")
 		_, err := hostadmit.Build(h, input(t, "home-a", gateway))
@@ -88,6 +91,9 @@ func TestEveryHolderShapeRefuses(t *testing.T) {
 		}
 		if name == "root listener" && err != nil && !strings.Contains(err.Error(), "uid 0") {
 			t.Errorf("a listener with no uid is not named root's: %v", err)
+		}
+		if name == "udp listener" && err != nil && !strings.Contains(err.Error(), "openvpn (pid 331, uid 0) listens on 0.0.0.0:443/udp") {
+			t.Errorf("a UDP listener is not named as one: %v", err)
 		}
 	}
 }
@@ -108,6 +114,36 @@ func TestACutShortHolderAnswerRefuses(t *testing.T) {
 	h := home().answer(portsMarker, "")
 	if _, err := hostadmit.Build(h, input(t, "home-a", gateway)); err == nil || !strings.Contains(err.Error(), "cut short") {
 		t.Fatalf("a cut-short answer: %v", err)
+	}
+}
+
+// The probe reads UDP sockets on 80 and 443 as well as TCP listeners: a
+// gateway's egress table accepts UDP replies from 443, which are forged into
+// an owner's UDP service there, so one refuses the grant.
+func TestTheHolderProbeReadsUDP(t *testing.T) {
+	h := home()
+	if _, err := hostadmit.Build(h, input(t, "home-a", gateway)); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range h.ran {
+		if strings.Contains(c, portsMarker) {
+			for _, want := range []string{"ss -Hltnpe '( sport = :80 or sport = :443 )'", "ss -Hlunpe '( sport = :80 or sport = :443 )'", "listen-udp"} {
+				if !strings.Contains(c, want) {
+					t.Errorf("the probe does not carry %q:\n%s", want, c)
+				}
+			}
+			return
+		}
+	}
+	t.Fatal("the holder probe did not run")
+}
+
+// The deployment's own Caddy answers HTTP/3 on UDP 443 as its user, and is
+// not a holder.
+func TestOwnUDPListenerIsNotAHolder(t *testing.T) {
+	h := home().answer(portsMarker, `listen-udp UNCONN 0 0 *:443 *:* users:(("caddy",pid=2201,fd=10)) uid:1001 ino:4 sk:4`+"\nend\n")
+	if _, err := hostadmit.Build(h, input(t, "home-a", gateway)); err != nil {
+		t.Fatalf("the deployment's own Caddy on UDP 443 refused the grant: %v", err)
 	}
 }
 

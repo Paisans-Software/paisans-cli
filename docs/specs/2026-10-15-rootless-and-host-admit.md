@@ -241,8 +241,8 @@ Garage site and 5 GB otherwise. The path is in the admission record.
     in `/etc/sysctl.d/60-paisans.conf`, applied with `sysctl --system`. The
     output says plainly that this lets every local user on the host bind
     ports 80 to 1023. Before granting it, admit checks, as root, that
-    nothing else answers on 80 or 443: a listener in `ss -Hltnp`, a port the
-    system Docker publishes (`docker ps` on its socket, when one is
+    nothing else answers on 80 or 443: a TCP listener in `ss -Hltnp`, a
+    bound UDP socket in `ss -Hlunp`, a port the system Docker publishes (`docker ps` on its socket, when one is
     running), or a DNAT rule for either port in `nft list ruleset`. A
     Docker daemon with its userland proxy off publishes a port with a DNAT
     rule alone and no listener, so `ss` cannot see it, and only root can
@@ -430,10 +430,12 @@ carry the user's UID.
 * **TCP, on any port.** A TCP reply reaches only its own socket's peer,
   and the user cannot bind an owner's TCP listener's port.
 * **UDP from port 443, on a gateway only**, for HTTP/3. A gateway's public
-  ports are one deployment's per host. Every other UDP reply meets the UID
-  rules: a user sharing an owner's UDP port through `SO_REUSEADDR` could
-  otherwise answer the owner's own clients from it. The mesh's UDP passes
-  by rule 1.
+  ports are one deployment's per host, and admit refuses `--public-ports`
+  while any other process holds TCP or UDP 80 or 443 (*What it does*, step
+  12), so no owner's UDP service on 443 receives these replies. Every
+  other UDP reply meets the UID rules: a user sharing an owner's UDP port
+  through `SO_REUSEADDR` could otherwise answer the owner's own clients
+  from it. The mesh's UDP passes by rule 1.
 
 Next, every flow the user opens gets bit 27 of its ct mark, before any
 accept or drop, so a flow the user opened under an accept never carries a
