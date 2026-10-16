@@ -58,14 +58,14 @@ func DefaultProbe() Probe {
 	return Probe{Fetch: fetch, Now: time.Now, Sleep: time.Sleep, Wait: 2 * time.Minute}
 }
 
+// ports is where fetch connects for each scheme.
+var ports = map[string]string{"https": "443", "http": "80"}
+
 // fetch does not judge the certificate: the body is what tells this
 // deployment from another server, and whether the certificate is valid is
 // the certificate check's to say, which a staging ACME directory would fail.
 func fetch(ctx context.Context, scheme, address, host, path string) (Answer, error) {
-	port := "443"
-	if scheme == "http" {
-		port = "80"
-	}
+	port := ports[scheme]
 	dialer := &net.Dialer{Timeout: 5 * time.Second}
 	client := &http.Client{
 		Timeout: 15 * time.Second,
@@ -123,11 +123,24 @@ func (c *Conflict) Error() string {
 }
 
 // notYet is an answer worth waiting for: nothing listening, nothing
-// answering, or a handshake Caddy fails while it has no certificate.
+// answering, or a handshake the server fails, as Caddy fails every one
+// while it has no certificate. Over TCP, Go reports an alert the server
+// sends as a *net.OpError whose Op is "remote error" (tls.AlertError is
+// QUIC's form), and a server that closes the connection mid handshake as
+// an EOF.
 func notYet(err error) bool {
 	var ne net.Error
+	var op *net.OpError
 	var tlsAlert tls.AlertError
-	return errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) || errors.As(err, &ne) && ne.Timeout() || errors.As(err, &tlsAlert)
+	switch {
+	case errors.Is(err, syscall.ECONNREFUSED), errors.Is(err, syscall.ECONNRESET):
+		return true
+	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
+		return true
+	case errors.As(err, &op) && op.Op == "remote error", errors.As(err, &tlsAlert):
+		return true
+	}
+	return errors.As(err, &ne) && ne.Timeout()
 }
 
 // Check asks t on 443 for the token, waiting up to p.Wait while nothing
