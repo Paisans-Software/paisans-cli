@@ -3,8 +3,8 @@
 # never moves a ref: paisans_receive creates only versions this site lacks,
 # each named for its own hash, and ignores every other ref a peer holds.
 set -u
-{{.Receive}}repo=/var/lib/paisans/config/{{.Token}}.git
-log=/var/lib/paisans/config/{{.Token}}.sync.json
+{{.Receive}}repo={{.Repo}}
+log={{.Log}}
 out=""
 while IFS= read -r peer; do
 	[ -n "$peer" ] || continue
@@ -14,5 +14,5 @@ while IFS= read -r peer; do
 		ok=false
 	fi
 	out="$out{\"peer\":\"$peer\",\"ok\":$ok},"
-done < /var/lib/paisans/config/{{.Token}}.peers
+done < {{.Peers}}
 printf '{"at":"%s","peers":[%s]}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${out%,}" > "$log.tmp" && mv "$log.tmp" "$log"

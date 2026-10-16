@@ -9,30 +9,32 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 )
 
-// configDir holds every deployment's configuration store on a host, one
-// <token>.git beside its <token>.peers and <token>.sync.json. The git daemon
-// serves it as its base path, so the token alone names a repository.
-const configDir = "/var/lib/paisans/config"
+// ConfigDir holds the deployment's configuration store on a host, in its
+// state directory: the repository <token>.git beside <token>.peers and
+// <token>.sync.json. The git daemon serves it as its base path, so the token
+// alone names the repository, and every peer fetches git://<address>/<token>.git.
+func ConfigDir(d deployment.Deployment) string { return d.StatePath("config") }
 
 // ConfigRepo is the deployment's bare repository of configuration versions.
-func ConfigRepo(d deployment.Deployment) string { return configDir + "/" + d.Token() + ".git" }
+func ConfigRepo(d deployment.Deployment) string { return ConfigDir(d) + "/" + d.Token() + ".git" }
 
 // ConfigPeers lists the mesh addresses the sync fetches from, one per line.
-func ConfigPeers(d deployment.Deployment) string { return configDir + "/" + d.Token() + ".peers" }
+func ConfigPeers(d deployment.Deployment) string { return ConfigDir(d) + "/" + d.Token() + ".peers" }
 
 // ConfigSyncLog is what the last sync reached, written by the sync script.
-func ConfigSyncLog(d deployment.Deployment) string { return configDir + "/" + d.Token() + ".sync.json" }
+func ConfigSyncLog(d deployment.Deployment) string {
+	return ConfigDir(d) + "/" + d.Token() + ".sync.json"
+}
 
 // ConfigIncoming is where a pushed bundle lands for the length of one push,
 // beside the repository it is taken into. A push that is cut off can leave
 // it behind, so site remove deletes it with the rest of the store.
 func ConfigIncoming(d deployment.Deployment) string {
-	return configDir + "/" + d.Token() + ".incoming.bundle"
+	return ConfigDir(d) + "/" + d.Token() + ".incoming.bundle"
 }
 
-// ConfigScriptDir holds the sync script, named for the deployment so that
-// two deployments on one host keep their own.
-func ConfigScriptDir(d deployment.Deployment) string { return "/usr/local/lib/" + d.Prefix() }
+// ConfigScriptDir holds the sync script, in the deployment's state directory.
+func ConfigScriptDir(d deployment.Deployment) string { return d.StatePath("bin") }
 
 // configPeers is every other site's mesh address, in site name order.
 func configPeers(cfg *config.Config, site string) []string {
@@ -45,21 +47,20 @@ func configPeers(cfg *config.Config, site string) []string {
 	return peers
 }
 
-// repoCommand creates the repository where it is absent. The daemon runs as
-// nobody and the repository belongs to root, so every directory must be 0755
-// and every file 0644: umask and --shared=0644 give that to what git writes
-// later, including what a sync fetches, and the chmod gives it to the files
-// git init wrote with its own modes.
-func repoCommand(repo string) string {
-	q := "'" + repo + "'"
-	return fmt.Sprintf("set -e; umask 022; install -d -m 0755 %s; git init --bare --quiet --shared=0644 %[2]s; find %[2]s -type d -exec chmod 0755 {} +; find %[2]s -type f -exec chmod 0644 {} +", "'"+configDir+"'", q)
+// repoCommand creates the repository where it is absent, the user's and 700
+// like the rest of the state directory: the daemon that serves it runs as
+// the same user.
+func repoCommand(d deployment.Deployment) string {
+	return fmt.Sprintf("set -e; umask 077; install -d -m 700 %s %s; git init --bare --quiet %s",
+		shellQuote(d.StateDir()), shellQuote(ConfigDir(d)), shellQuote(ConfigRepo(d)))
 }
 
 // ConfigStore gives the site a repository of signed configuration versions,
 // a daemon that serves it read only to the mesh, and a timer that fetches
-// from peers what this site lacks. Each step is planned only where the host
-// differs from it.
-func (u ubuntu) ConfigStore(t Transport, d deployment.Deployment, self config.Site, peers []string) (Section, error) {
+// from peers what this site lacks, all of it the login user's, whose home
+// is given: the units are its own, under the linger host admit enabled.
+// Each step is planned only where the host differs from it.
+func (u ubuntu) ConfigStore(t Transport, d deployment.Deployment, self config.Site, peers []string, home string) (Section, error) {
 	var out Section
 	kinds := []string{KindConfigStore}
 	repo := ConfigRepo(d)
@@ -74,15 +75,16 @@ func (u ubuntu) ConfigStore(t Transport, d deployment.Deployment, self config.Si
 		out.Steps = append(out.Steps, Step{
 			Kinds:    kinds,
 			Title:    "create the configuration repository",
-			Describe: "configuration store: create the bare repository at " + repo + ", readable by the user the daemon runs as",
-			Command:  repoCommand(repo),
+			Describe: "configuration store: create the bare repository at " + repo + ", the deployment's user's alone",
+			Command:  repoCommand(d),
 		})
 	}
 
-	// WireGuard's unit by its full name: systemd takes a template instance
-	// only with its suffix, and ignores a dependency on one without.
-	wireGuard := d.WireGuardUnit() + ".service"
-	data := map[string]string{"Prefix": d.Prefix(), "Token": d.Token(), "Address": self.Address, "WireGuardUnit": wireGuard, "Receive": ConfigReceiveShell}
+	data := map[string]string{
+		"Prefix": d.Prefix(), "Token": d.Token(), "Address": self.Address, "Receive": ConfigReceiveShell,
+		"ConfigDir": ConfigDir(d), "Repo": ConfigRepo(d), "Peers": ConfigPeers(d), "Log": ConfigSyncLog(d),
+		"Script": ConfigScriptDir(d) + "/config-sync.sh",
+	}
 	peerList := ""
 	if len(peers) > 0 {
 		// A final newline, since read in the sync script drops a last line without one.
@@ -108,6 +110,7 @@ func (u ubuntu) ConfigStore(t Transport, d deployment.Deployment, self config.Si
 	daemonUnit := d.Prefix() + "-config-daemon.service"
 	syncUnit := d.Prefix() + "-config-sync.service"
 	timerUnit := d.Prefix() + "-config-sync.timer"
+	unitDir := UserUnitDir(home)
 	files := []struct {
 		file, content, what string
 		mode                uint32
@@ -115,9 +118,9 @@ func (u ubuntu) ConfigStore(t Transport, d deployment.Deployment, self config.Si
 	}{
 		{ConfigPeers(d), peerList, "the peers to fetch from", 0o644, false},
 		{ConfigScriptDir(d) + "/config-sync.sh", script, "the sync script", 0o755, false},
-		{"/etc/systemd/system/" + daemonUnit, daemon, "the unit " + daemonUnit, 0o644, true},
-		{"/etc/systemd/system/" + syncUnit, syncService, "the unit " + syncUnit, 0o644, true},
-		{"/etc/systemd/system/" + timerUnit, timer, "the unit " + timerUnit, 0o644, true},
+		{unitDir + "/" + daemonUnit, daemon, "the unit " + daemonUnit, 0o644, true},
+		{unitDir + "/" + syncUnit, syncService, "the unit " + syncUnit, 0o644, true},
+		{unitDir + "/" + timerUnit, timer, "the unit " + timerUnit, 0o644, true},
 	}
 	unitsChanged, daemonChanged := false, false
 	for _, f := range files {
@@ -130,7 +133,7 @@ func (u ubuntu) ConfigStore(t Transport, d deployment.Deployment, self config.Si
 			continue
 		}
 		unitsChanged = unitsChanged || f.unit
-		daemonChanged = daemonChanged || f.file == "/etc/systemd/system/"+daemonUnit
+		daemonChanged = daemonChanged || f.file == unitDir+"/"+daemonUnit
 		out.Steps = append(out.Steps, Step{
 			Kinds:    kinds,
 			Title:    "write " + path.Base(f.file),
@@ -139,40 +142,34 @@ func (u ubuntu) ConfigStore(t Transport, d deployment.Deployment, self config.Si
 		})
 	}
 
-	daemonEnabled, daemonActive, err := u.unitState(t, daemonUnit)
+	daemonEnabled, daemonActive, err := u.userUnitState(t, daemonUnit)
 	if err != nil {
 		return out, err
 	}
-	timerEnabled, timerActive, err := u.unitState(t, timerUnit)
+	timerEnabled, timerActive, err := u.userUnitState(t, timerUnit)
 	if err != nil {
 		return out, err
 	}
 	// The daemon listens on the mesh address, which exists only while
-	// WireGuard is up, and WireGuard is first started by apply, after host
-	// prepare. Enabled, the daemon starts whenever WireGuard does (its
-	// WantedBy); it is started here only where the mesh is up, since started
-	// before, git daemon cannot bind and its restarts run out. A daemon not
-	// running on a mesh that is not up is as it should be.
-	_, meshUp, err := u.unitState(t, wireGuard)
-	if err != nil {
-		return out, err
-	}
-	if unitsChanged || !(daemonEnabled && (daemonActive || !meshUp) && timerEnabled && timerActive) {
+	// WireGuard is up. A user unit cannot be ordered after the system's
+	// wg-quick, so the daemon restarts every ten seconds until it can bind,
+	// and is started here whether or not the mesh is up yet.
+	if unitsChanged || !(daemonEnabled && daemonActive && timerEnabled && timerActive) {
 		// reenable for a changed unit, so links its earlier [Install] made
 		// go with it.
 		enable, start := "enable", "start"
 		if daemonChanged {
 			enable, start = "reenable", "restart"
 		}
-		command := fmt.Sprintf("systemctl daemon-reload && systemctl enable --now %[1]s && systemctl %[2]s %[3]s && if systemctl is-active --quiet %[4]s; then systemctl %[5]s %[3]s; fi", timerUnit, enable, daemonUnit, wireGuard, start)
+		command := fmt.Sprintf("%[1]s daemon-reload && %[1]s enable --now %[2]s && %[1]s %[3]s %[4]s && %[1]s %[5]s %[4]s", UserSystemctl, timerUnit, enable, daemonUnit, start)
 		out.Steps = append(out.Steps, Step{
 			Kinds:    kinds,
 			Title:    "start the configuration store",
-			Describe: fmt.Sprintf("configuration store: enable %s and %s, and start them, %s once %s is up", daemonUnit, timerUnit, daemonUnit, wireGuard),
+			Describe: fmt.Sprintf("configuration store: enable %s and %s as the deployment's user, and start them", daemonUnit, timerUnit),
 			Command:  command,
 		})
 	} else {
-		out.Present = append(out.Present, fmt.Sprintf("configuration store: %s and %s enabled, and running where %s is up", daemonUnit, timerUnit, wireGuard))
+		out.Present = append(out.Present, fmt.Sprintf("configuration store: %s and %s enabled and running", daemonUnit, timerUnit))
 	}
 	return out, nil
 }

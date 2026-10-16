@@ -420,7 +420,7 @@ func allSitesUp(answer string, runs *[]string) {
 
 func synced(runs []string) bool {
 	for _, r := range runs {
-		if strings.Contains(r, "systemctl start") {
+		if strings.Contains(r, "systemctl --user start") {
 			return true
 		}
 	}

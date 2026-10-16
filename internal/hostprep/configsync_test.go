@@ -88,7 +88,7 @@ func TestTheSyncScriptNeverMovesAVersion(t *testing.T) {
 	if script == "" {
 		t.Fatal("no sync script planned")
 	}
-	script = strings.ReplaceAll(script, "/var/lib/paisans/config", conf)
+	script = strings.ReplaceAll(script, "/srv/paisans/f2a9/.paisans/config", conf)
 	script = strings.ReplaceAll(script, "git://", "")
 	path := filepath.Join(tmp, "config-sync.sh")
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {

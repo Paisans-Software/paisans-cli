@@ -492,7 +492,7 @@ func (u ubuntu) AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (
 
 // unitState reads `systemctl is-enabled` and `is-active` for one unit.
 func (u ubuntu) unitState(t Transport, unit string) (enabled, active bool, err error) {
-	script, err := snippet(u.tmpl("services-probe.sh.tmpl"), map[string]string{"Unit": unit})
+	script, err := snippet(u.tmpl("services-probe.sh.tmpl"), map[string]string{"Unit": unit, "Systemctl": "systemctl"})
 	if err != nil {
 		return false, false, err
 	}
@@ -507,6 +507,30 @@ func (u ubuntu) unitState(t Transport, unit string) (enabled, active bool, err e
 			enabled = rest == "enabled"
 		case "active":
 			active = rest == "active"
+		}
+	}
+	return enabled, active, nil
+}
+
+// userUnitState is unitState for the login user's own manager. activating
+// counts as active: a daemon waiting to restart until the mesh is up is
+// running as it should.
+func (u ubuntu) userUnitState(t Transport, unit string) (enabled, active bool, err error) {
+	script, err := snippet(u.tmpl("services-probe.sh.tmpl"), map[string]string{"Unit": unit, "Systemctl": UserSystemctl})
+	if err != nil {
+		return false, false, err
+	}
+	out, err := t.Run(script)
+	if err != nil {
+		return false, false, err
+	}
+	for _, line := range strings.Split(out, "\n") {
+		key, rest, _ := strings.Cut(strings.TrimSpace(line), " ")
+		switch key {
+		case "enabled":
+			enabled = rest == "enabled"
+		case "active":
+			active = rest == "active" || rest == "activating"
 		}
 	}
 	return enabled, active, nil

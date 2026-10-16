@@ -207,7 +207,7 @@ func configStored(site string, h *fakeHost) *fakeHost {
 			peers = append(peers, cfg.Sites[name].Address)
 		}
 	}
-	section, err := profile.ConfigStore(&fakeHost{files: map[string]string{}, responses: map[string]string{}}, cfg.Deployment(), cfg.Sites[site], peers)
+	section, err := profile.ConfigStore(&fakeHost{files: map[string]string{}, responses: map[string]string{}}, cfg.Deployment(), cfg.Sites[site], peers, "/home/ubuntu")
 	if err != nil {
 		panic(err)
 	}
@@ -216,7 +216,7 @@ func configStored(site string, h *fakeHost) *fakeHost {
 			h.files[s.File.Path] = s.File.Content
 		}
 	}
-	h.files["/var/lib/paisans/config/f2a9.git/HEAD"] = "ref: refs/heads/main\n"
+	h.files["/srv/paisans/f2a9/.paisans/config/f2a9.git/HEAD"] = "ref: refs/heads/main\n"
 	h.responses["is-enabled paisans-f2a9-config-daemon.service"] = "enabled enabled\nactive active\n"
 	h.responses["is-enabled paisans-f2a9-config-sync.timer"] = "enabled enabled\nactive active\n"
 	return h

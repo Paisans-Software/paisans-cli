@@ -18,7 +18,7 @@ func TestCleaningAHostDeletesItsConfigurationStore(t *testing.T) {
 	vm := w.hosts["vm"]
 	repo, peers, syncLog, scripts := hostprep.ConfigRepo(dep), hostprep.ConfigPeers(dep), hostprep.ConfigSyncLog(dep), hostprep.ConfigScriptDir(dep)
 	incoming := hostprep.ConfigIncoming(dep)
-	other := "/var/lib/paisans/config/0c1d.git/HEAD"
+	other := "/srv/paisans/0c1d/.paisans/config/0c1d.git/HEAD"
 	for path, content := range map[string]string{
 		repo + "/HEAD": "ref: refs/heads/main\n", repo + "/objects/ab/cdef": "x",
 		peers: "10.44.0.2\n", syncLog: "{}\n", syncLog + ".tmp": "{", scripts + "/config-sync.sh": "#!/bin/sh\n",

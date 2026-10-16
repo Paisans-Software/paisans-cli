@@ -27,6 +27,7 @@ changes share a bullet. Detailed notes are on the corresponding
 - The host check runs as the deployment's user: it reads listeners with `ss -Hltnue`, counts its own user's and containers' as this deployment's, and leaves the firewall to `host admit`.
 - Every command that changes a host checks first that the host admitted the deployment as that site, with the grants its roles need, and names the `host request` and `host admit` lines when not.
 - The mesh subnet check reads the deployment's own Docker pools from `~/.config/docker/daemon.json`.
+- The configuration store lives in `/srv/paisans/<token>/.paisans/config/`, and its git daemon, sync and timer are the deployment user's own systemd units, the daemon retrying until the mesh is up.
 - The host owner's Caddy site files beside a gateway go in `/srv/paisans/<token>/caddy.d`, which `apply` creates as the deployment's user, instead of `/srv/caddy.d`.
 - The deployment record, the grant record and a gateway move's marker live in `/srv/paisans/<token>/.paisans/`, written by the deployment's own user under one lock of the deployment's.
 - `sites.*.roles` lists each role once, so a repeated role is refused when the configuration loads, as `host request` requires.

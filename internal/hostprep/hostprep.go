@@ -229,8 +229,9 @@ type Profile interface {
 	WatchdogModule(t Transport, d deployment.Deployment, module string, loaded, admit bool) (Section, error)
 	// ConfigStore plans the deployment's repository of configuration
 	// versions, the daemon that serves it to the mesh and the timer that
-	// fetches from peers, the addresses of which are given.
-	ConfigStore(t Transport, d deployment.Deployment, self config.Site, peers []string) (Section, error)
+	// fetches from peers, the addresses of which are given, as the login
+	// user's own units under home.
+	ConfigStore(t Transport, d deployment.Deployment, self config.Site, peers []string, home string) (Section, error)
 	// Firewall plans the given inbound rules and, when hostWide, a default
 	// deny for everything else and enabling the firewall. The SSH rule must
 	// be in place before the firewall is enabled, and enabling must not
@@ -344,16 +345,21 @@ func Build(site string, cfg *config.Config, t Transport, opts ...Option) (*Plan,
 	}
 	plan.add(watchdog)
 
-	store, err := profile.ConfigStore(t, d, declared, configPeers(cfg, site))
-	if err != nil {
-		return nil, fmt.Errorf("configuration store on %s: %w", t.Describe(), err)
-	}
-	plan.add(store)
-
+	// The keys are read before the login user's home, so that a declared
+	// user the host lacks is refused by name; the store still plans first.
 	keys, keyRemovals, err := planAuthorizedKeys(t, d, declared.SSHUser(), declared.SSH)
 	if err != nil {
 		return nil, fmt.Errorf("authorized keys on %s: %w", t.Describe(), err)
 	}
+	home, err := Home(t)
+	if err != nil {
+		return nil, err
+	}
+	store, err := profile.ConfigStore(t, d, declared, configPeers(cfg, site), home)
+	if err != nil {
+		return nil, fmt.Errorf("configuration store on %s: %w", t.Describe(), err)
+	}
+	plan.add(store)
 	plan.add(keys)
 
 	rules := append(Rules(d, declared), ContainerRules(cfg, site)...)
