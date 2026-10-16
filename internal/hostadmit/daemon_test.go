@@ -385,3 +385,47 @@ func TestAStoppedDaemonsGuardLooksInTheRecordsDataDir(t *testing.T) {
 		t.Errorf("the probe was not handed the record's data_dir: %q", h.ran)
 	}
 }
+
+// A daemon that answers with containers is never restarted, whatever
+// systemd says of its unit: one started outside the unit reads inactive
+// there. One that answers and could not be counted is not either.
+func TestADaemonThatAnswersIsNotRestartedUnderItsContainers(t *testing.T) {
+	for name, state := range map[string]string{
+		"answering with containers": "daemon inactive\nunit present\ndaemon-json x\nroot /home/paisans-f2a9/.local/share/docker\ncontainers 2\nimages 0\nvolumes 0\nend\n",
+		"answering, uncounted":      "daemon inactive\nunit present\ndaemon-json x\nroot /home/paisans-f2a9/.local/share/docker\ncontainers unknown\nimages 0\nvolumes 0\nold-root empty\nend\n",
+	} {
+		plan, err := hostadmit.Build(home().answer(userStateMarker, state), input(t, "vm", hostadmit.Flags{}))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		for _, s := range plan.Steps {
+			if strings.Contains(s.Command, "restart docker") || strings.Contains(s.Command, "start docker") {
+				t.Errorf("%s: %q", name, s.Command)
+			}
+		}
+	}
+}
+
+// Each count comes from its own command, and one that fails reads as
+// unknown, never as none: wc counts nothing from a docker ps that failed.
+func TestTheUsersCountsFailClosed(t *testing.T) {
+	h := home()
+	if _, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{})); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range h.ran {
+		if !strings.Contains(c, userStateMarker) {
+			continue
+		}
+		if strings.Contains(c, "| wc -l") {
+			t.Errorf("a count is piped to wc: %s", c)
+		}
+		for _, want := range []string{"docker ps -aq", "docker images -aq", "docker volume ls -q", "containers unknown"} {
+			if !strings.Contains(c, want) {
+				t.Errorf("the user's probe lacks %q", want)
+			}
+		}
+		return
+	}
+	t.Fatal("the user's state was not read")
+}

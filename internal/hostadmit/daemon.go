@@ -131,7 +131,9 @@ func (s UserState) holdsData() bool {
 // the user's rights alone. Its first line carries the marker a test's fake
 // host answers it by; old is the data root to look in when the daemon does
 // not answer and its daemon.json sets none. data-root is read from the
-// line admit writes it on.
+// line admit writes it on. Each count is its own command's, and one that
+// fails is unknown, never none; then the data root the daemon named is
+// looked in as a stopped daemon's is.
 const userStateProbe = `# paisans host admit: as the user
 old=%s
 if systemctl --user is-active -q docker.service 2>/dev/null; then echo "daemon active"; else echo "daemon inactive"; fi
@@ -143,13 +145,19 @@ if [ -f "$HOME/.config/docker/daemon.json" ]; then
 else
   echo "daemon-json absent"
 fi
+count() { k=$1; shift; if out=$("$@" 2>/dev/null); then echo "$k $(printf '%%s' "$out" | grep -c .)"; else echo "$k unknown"; unknown=1; fi; }
+unknown=
 if root=$(docker info --format '{{.DockerRootDir}}' 2>/dev/null) && [ -n "$root" ]; then
   echo "root $root"
-  echo "containers $(docker ps -aq | wc -l)"
-  echo "images $(docker images -aq | wc -l)"
-  echo "volumes $(docker volume ls -q | wc -l)"
+  count containers docker ps -aq
+  count images docker images -aq
+  count volumes docker volume ls -q
+  old=$root
 else
   echo "containers unknown"; echo "images unknown"; echo "volumes unknown"
+  unknown=1
+fi
+if [ -n "$unknown" ]; then
   if [ -n "$(ls -A "$old" 2>/dev/null)" ]; then echo "old-root held"; else echo "old-root empty"; fi
 fi
 echo end`
@@ -378,10 +386,12 @@ func planDaemon(p *planner) error {
 	case !state.UnitPresent:
 		p.step(Step{Title: "install " + user + "'s rootless Docker", Describe: "daemon: dockerd-rootless-setuptool.sh install --force, as " + user + ", which starts the daemon reading its daemon.json; --force because a system daemon may run beside it",
 			Command: asUser(p, "dockerd-rootless-setuptool.sh install --force"), Kinds: []string{"docker"}, Provisional: !p.f.User.Exists})
-	case changed && state.DaemonActive && (!state.Counted || state.Containers > 0):
+	case changed && (state.Containers > 0 || (state.DaemonActive || state.Root != "") && !state.Counted):
+		// A daemon that answers is running, whatever systemd says of
+		// its unit: one started outside it reads inactive there.
 		runs := fmt.Sprintf("It runs %d %s", state.Containers, plural(state.Containers, "container"))
 		if !state.Counted {
-			runs = "It is running and did not answer, so admit cannot tell whether it runs containers"
+			runs = "It is running and its containers could not be counted, so admit cannot tell whether it runs any"
 		}
 		p.warn("daemon: "+user+"'s daemon picks up its new daemon.json at its next restart",
 			runs+", and admit never restarts a daemon under them. The operators restart it, or the host's next reboot does.")
@@ -423,7 +433,7 @@ func keepDataRoot(p *planner, s UserState) error {
 	}
 	held := fmt.Sprintf("%d %s, %d %s and %d %s", s.Images, plural(s.Images, "image"), s.Containers, plural(s.Containers, "container"), s.Volumes, plural(s.Volumes, "volume"))
 	if !s.Counted {
-		held = "data, though its daemon did not answer to count it"
+		held = "files, though its daemon could not count them (a root any daemon has started on holds its own directories, so they may be nothing but those)"
 	}
 	return fmt.Errorf("%s's Docker keeps its data in %s, which holds %s, and this admit would move its data root to %s, hiding all of it. Keep the --data-dir it was admitted with, or have the operators remove the deployment's stacks first. Nothing was changed", ui.Visible(p.in.Request.User), ui.Visible(was), held, ui.Visible(now))
 }
