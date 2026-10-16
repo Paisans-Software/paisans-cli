@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -269,4 +270,64 @@ func TestParseRecordSize(t *testing.T) {
 	if _, err := admission.ParseRecord([]byte(big), "f2a9"); err == nil || !strings.Contains(err.Error(), "65537 bytes") || !strings.Contains(err.Error(), "65536") {
 		t.Errorf("got %v", err)
 	}
+}
+
+// The record carries the request's site and roles, so a command that has
+// no configuration (site remove --force --id, host deployments) learns
+// what the host was admitted as.
+func TestNewRecordCarriesTheSiteAndRoles(t *testing.T) {
+	req := build(t, "home-a")
+	rec := admission.NewRecord(req, admission.Grants{Watchdog: true}, "", at)
+	if rec.Site != "home-a" || strings.Join(rec.Roles, ",") != strings.Join(req.Roles, ",") {
+		t.Errorf("site %q roles %v, want home-a %v", rec.Site, rec.Roles, req.Roles)
+	}
+}
+
+// A record without them, or with roles out of order or unknown, is not one
+// admit writes.
+func TestParseRecordRefusesABadSiteOrRoles(t *testing.T) {
+	good := encode(t, admission.NewRecord(build(t, "home-a"), admission.Grants{Watchdog: true}, "", at))
+	for name, edit := range map[string]func(string) string{
+		"no site":      func(s string) string { return strings.Replace(s, "  \"site\": \"home-a\",\n", "", 1) },
+		"bad site":     func(s string) string { return strings.Replace(s, `"site": "home-a"`, `"site": "Home A"`, 1) },
+		"unknown role": func(s string) string { return strings.Replace(s, `"data"`, `"database"`, 1) },
+	} {
+		if _, err := admission.ParseRecord([]byte(edit(string(good))), "f2a9"); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+// Mine is the login's own record: the one under /etc/paisans whose user is
+// the name `id -un` prints, whatever other deployments are admitted beside it.
+func TestMineIsTheLoginsOwnRecord(t *testing.T) {
+	mine := encode(t, admission.NewRecord(build(t, "home-a"), admission.Grants{Watchdog: true}, "", at))
+	other := strings.ReplaceAll(strings.ReplaceAll(string(mine), "f2a9c4e1", "0b0bc4e1"), "paisans-f2a9", "paisans-0b0b")
+	h := &listing{host: host{files: map[string]string{
+		"/etc/paisans/admitted.f2a9.json": string(mine),
+		"/etc/paisans/admitted.0b0b.json": other,
+	}}, user: "paisans-f2a9"}
+	rec, err := admission.Mine(h)
+	if err != nil || rec.User != "paisans-f2a9" || rec.Site != "home-a" {
+		t.Fatalf("Mine = %+v, %v", rec, err)
+	}
+	h.user = "ubuntu"
+	if _, err := admission.Mine(h); !errors.Is(err, admission.ErrNotMine) {
+		t.Errorf("a login with no record of its own: %v", err)
+	}
+}
+
+// listing is a host that answers Mine's listing and the login's name.
+type listing struct {
+	host
+	user string
+}
+
+func (l *listing) Run(command string) (string, error) {
+	var names []string
+	for p := range l.files {
+		names = append(names, p)
+	}
+	slices.Sort(names)
+	return "user " + l.user + "\n" + strings.Join(names, "\n") + "\n", nil
 }

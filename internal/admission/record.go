@@ -77,6 +77,11 @@ type Record struct {
 	Version    int    `json:"version"`
 	Deployment string `json:"deployment"`
 	User       string `json:"user"`
+	// Site is the site's name in the configuration and Roles its roles,
+	// sorted, as the request named them: what a command with no
+	// configuration learns the host was admitted as.
+	Site  string   `json:"site"`
+	Roles []string `json:"roles"`
 	// Grants are what the owner gave, which may be less than the site's
 	// roles need: Needs(site).Missing(record.Grants) is what is lacking.
 	Grants Grants `json:"grants"`
@@ -158,6 +163,8 @@ func NewRecord(req Request, granted Grants, digest string, at time.Time) Record 
 		Version:    RecordVersion,
 		Deployment: req.Deployment,
 		User:       req.User,
+		Site:       req.Site,
+		Roles:      append([]string{}, req.Roles...),
 		Grants:     granted,
 		Forwarding: req.Endpoint,
 		Ports:      Ports{SSH: req.SSHPort, WireGuard: req.ListenPort, Public: public},
@@ -213,6 +220,9 @@ func MeshLAN(s string) bool {
 // only bytes ParseRecord accepts. The writer writes exactly these, with Mode,
 // to Path(token).
 func EncodeRecord(r Record) ([]byte, error) {
+	if r.Roles == nil {
+		r.Roles = []string{}
+	}
 	if r.Ports.Public == nil {
 		r.Ports.Public = []int{}
 	}
@@ -225,7 +235,7 @@ func EncodeRecord(r Record) ([]byte, error) {
 
 // recordFields is every key a record holds; a record missing one was not
 // written by a toolkit of its version.
-var recordFields = []string{"version", "deployment", "user", "grants", "forwarding", "ports", "digest", "admitted_at", "data_dir", "bridge_netfilter", "mesh_lan", "web_server", "system_docker_disabled"}
+var recordFields = []string{"version", "deployment", "user", "site", "roles", "grants", "forwarding", "ports", "digest", "admitted_at", "data_dir", "bridge_netfilter", "mesh_lan", "web_server", "system_docker_disabled"}
 
 // ParseRecord reads a record strictly: its version, every field present and
 // none unknown, a deployment whose token is token, the user a request for it
@@ -274,6 +284,23 @@ func ParseRecord(data []byte, token string) (Record, error) {
 	}
 	if p := config.DeploymentUserProblem(r.User, r.Deployment); p != "" {
 		problems = append(problems, "user: "+p)
+	}
+	if !config.ValidSiteName(r.Site) {
+		problems = append(problems, fmt.Sprintf("site: %q is not a site name", r.Site))
+	}
+	roles := make([]config.Role, len(r.Roles))
+	for i, role := range r.Roles {
+		roles[i] = config.Role(role)
+	}
+	for i, role := range r.Roles {
+		switch {
+		case !config.KnownRole(roles[i]):
+			problems = append(problems, fmt.Sprintf("roles[%d]: %q is not a site role", i, role))
+		case config.RoleRepeated(roles, i):
+			problems = append(problems, fmt.Sprintf("roles[%d]: %q is listed twice", i, role))
+		case i > 0 && role < r.Roles[i-1]:
+			problems = append(problems, fmt.Sprintf("roles[%d]: %q comes after %q, and roles are written sorted", i, role, r.Roles[i-1]))
+		}
 	}
 	if r.Digest != "" {
 		if d, err := ParseDigest(r.Digest); err != nil || d != r.Digest {
@@ -338,4 +365,52 @@ func Read(t Reader, token string) (Record, error) {
 		return Record{}, fmt.Errorf("%s: %w", path, ErrNotAdmitted)
 	}
 	return ParseRecord([]byte(content), token)
+}
+
+// ErrNotMine is a login with no admission record of its own on the host.
+var ErrNotMine = errors.New("no admission record names this login")
+
+// Runner is what Mine needs of a host: a command, and a file read.
+type Runner interface {
+	Reader
+	Run(command string) (string, error)
+}
+
+// mineCommand prints the login's name, then every record's path. /etc/paisans
+// is 755 and every record 644, so the deployment's user lists and reads them.
+const mineCommand = `echo "user $(id -un)"; for f in ` + Dir + `/admitted.*.json; do [ -f "$f" ] && echo "$f"; done; true`
+
+// Mine is the admission record of the deployment the login belongs to: the
+// one whose user is the login's own name. A deployment's commands that run
+// without its configuration (config recover) learn the deployment from it.
+// A record that does not parse is skipped, since it cannot name the login.
+func Mine(t Runner) (Record, error) {
+	out, err := t.Run(mineCommand)
+	if err != nil {
+		return Record{}, fmt.Errorf("listing %s: %w", Dir, err)
+	}
+	var user string
+	var paths []string
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if name, ok := strings.CutPrefix(line, "user "); ok {
+			user = name
+		} else if line != "" {
+			paths = append(paths, line)
+		}
+	}
+	for _, p := range paths {
+		token := strings.TrimSuffix(strings.TrimPrefix(p, Dir+"/admitted."), ".json")
+		if !ValidToken(token) {
+			continue
+		}
+		content, found, err := t.ReadFile(p)
+		if err != nil || !found {
+			continue
+		}
+		if rec, err := ParseRecord([]byte(content), token); err == nil && rec.User == user {
+			return rec, nil
+		}
+	}
+	return Record{}, fmt.Errorf("%s: %w (%s)", Dir, ErrNotMine, user)
 }

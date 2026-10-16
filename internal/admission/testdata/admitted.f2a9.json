@@ -2,6 +2,12 @@
   "version": 1,
   "deployment": "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01",
   "user": "paisans-f2a9",
+  "site": "home-a",
+  "roles": [
+    "apps",
+    "data",
+    "gateway"
+  ],
   "grants": {
     "watchdog": true,
     "public_ports": true
