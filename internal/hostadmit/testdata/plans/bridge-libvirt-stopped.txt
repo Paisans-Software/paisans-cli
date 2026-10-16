@@ -1,0 +1,1 @@
+refused: bridge netfilter: br_netfilter is not loaded, and this host has bridges of its own (virbr0). The deployment's daemon needs it, and once it is loaded their traffic passes the FORWARD chain, whose policy is DROP, which it skips today. Check that the chain lets their traffic through, then admit again with --bridge-netfilter. Nothing was changed

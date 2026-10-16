@@ -15,6 +15,11 @@ present: user: /etc/systemd/system/user@1001.service.d/paisans-mesh.conf starts 
 present: delegation: /etc/systemd/system/user@.service.d/delegate.conf delegates cpu cpuset io memory pids
 present: linger: on for paisans-f2a9
 present: linger: paisans-f2a9's manager is running
+present: br_netfilter: loaded already
+present: br_netfilter: loaded at boot by /etc/modules-load.d/paisans.conf
+present: daemon: /home/paisans-f2a9 (ext2/ext3) has 42.9 GB free
+present: daemon: paisans-f2a9's daemon.json is as admit writes it
+present: daemon: paisans-f2a9's rootless Docker is installed and running
 present: directory: /srv/paisans/f2a9 is paisans-f2a9's
 present: mesh: nothing on this host overlaps 10.44.0.0/24
 present: wireguard: /etc/wireguard is root's alone

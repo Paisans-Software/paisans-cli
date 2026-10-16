@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -172,6 +173,7 @@ func newBlank() *fakeHost {
 	h.answer("docker compose version", "compose absent\npkg nftables install ok installed\nkeyring absent\narch amd64\n").
 		answer("RuntimeWatchdogUSec", "device absent\nsystemd 0\ndaemon absent\n").
 		answer("ufw show added", "ufw present\nstatus active\n").
+		answer(userStateMarker, idleUser).
 		answer("is-enabled", "enabled \nactive \n").
 		answer("ip -j route", "[]").answer("ip -j addr", "[]").answer("docker network", "[]")
 	return h
@@ -235,6 +237,22 @@ func requestFor(site string) admission.Request {
 
 // admitted is the time every golden plan is drawn at.
 var admitted = time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+
+func itoa(n int) string { return strconv.Itoa(n) }
+
+// previousRecord is the record an earlier admit of site wrote, with
+// dataDir, encoded as admit writes it.
+func previousRecord(t *testing.T, site, dataDir string) string {
+	t.Helper()
+	req := request(t, site)
+	rec := admission.NewRecord(req, req.Grants, "", admitted)
+	rec.DataDir = dataDir
+	data, err := admission.EncodeRecord(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
 
 func input(t *testing.T, site string, flags hostadmit.Flags) hostadmit.Input {
 	t.Helper()
