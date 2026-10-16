@@ -1,9 +1,13 @@
 package hostprep_test
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -205,7 +209,7 @@ func TestTheStoreIsTheUsersOwn(t *testing.T) {
 // retries until the mesh address exists, and never gives up.
 func TestTheDaemonRetriesUntilTheMeshIsUp(t *testing.T) {
 	unit := storeUnit(storePlan(t, freshHost(), nil), storeDaemon)
-	for _, want := range []string{"Restart=always", "RestartSec=10", "StartLimitIntervalSec=0", "WantedBy=default.target"} {
+	for _, want := range []string{"Restart=always", "RestartSec=10", "StartLimitIntervalSec=0", "TimeoutStartSec=infinity", "WantedBy=default.target"} {
 		if !strings.Contains(unit, want) {
 			t.Errorf("the daemon unit has no %q:\n%s", want, unit)
 		}
@@ -214,6 +218,53 @@ func TestTheDaemonRetriesUntilTheMeshIsUp(t *testing.T) {
 		if strings.Contains(unit, not) {
 			t.Errorf("the daemon unit still has %q:\n%s", not, unit)
 		}
+	}
+}
+
+// Until the mesh address exists the daemon waits for it in one start,
+// rather than failing to bind and restarting every ten seconds: the wait
+// command loops while the address is missing and returns once it is there.
+func TestTheDaemonWaitsForTheMeshAddressBeforeStarting(t *testing.T) {
+	unit := storeUnit(storePlan(t, freshHost(), nil), storeDaemon)
+	var wait string
+	for _, line := range strings.Split(unit, "\n") {
+		if cmd, ok := strings.CutPrefix(line, "ExecStartPre=/bin/sh -c "); ok {
+			wait = strings.Trim(cmd, "'")
+		}
+	}
+	if wait == "" {
+		t.Fatalf("the daemon unit waits for nothing:\n%s", unit)
+	}
+	dir := t.TempDir()
+	flag := filepath.Join(dir, "up")
+	// A fake ip prints the mesh address only once the flag file exists.
+	fake := "#!/bin/sh\necho '1: lo    inet 127.0.0.1/8 scope host lo'\n[ -e " + flag + " ] && echo '5: psns-f2a9    inet 10.44.0.1/24 scope global psns-f2a9'\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(dir, "ip"), []byte(fake), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("/bin/sh", "-c", strings.ReplaceAll(wait, "sleep 5", "sleep 0.1"))
+	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		t.Fatalf("the wait returned with no mesh address: %v", err)
+	case <-time.After(500 * time.Millisecond):
+	}
+	if err := os.WriteFile(flag, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("the wait failed once the address was up: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		cmd.Process.Kill()
+		t.Fatal("the wait did not return once the mesh address was up")
 	}
 }
 
