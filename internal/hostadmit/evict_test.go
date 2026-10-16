@@ -561,3 +561,27 @@ func TestEvictNamesWhatAdmitInstalled(t *testing.T) {
 		t.Errorf("beside another deployment:\n%s", plan.Text())
 	}
 }
+
+// Evict removes the boot entries of br_netfilter and the watchdog's
+// module and unloads neither: the plan says each stays loaded until the
+// next boot, by name.
+func TestEvictSaysTheModulesStayLoaded(t *testing.T) {
+	const unit = "/etc/systemd/system/paisans-f2a9-watchdog.service"
+	content := "[Unit]\nDescription=Load the softdog watchdog for Patroni\n\n[Service]\nType=oneshot\nExecStart=/usr/sbin/modprobe softdog\nRemainAfterExit=yes\n"
+	h := evicted("home-a", gateway)()
+	h.file(unit, content).withFile(unit, content, "644", 0)
+	plan, err := hostadmit.BuildEvict(withEntries(h), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"br_netfilter: stays loaded until the next boot", "watchdog: softdog stays loaded until the next boot"} {
+		if !slices.ContainsFunc(plan.Warnings, func(w hostprep.Warning) bool { return w.Hint == want }) {
+			t.Errorf("the plan does not say %q:\n%s", want, plan.Text())
+		}
+	}
+	for _, s := range plan.Steps {
+		if strings.Contains(s.Command, "modprobe -r") || strings.Contains(s.Command, "rmmod") {
+			t.Errorf("step %q unloads a module: %s", s.Title, s.Command)
+		}
+	}
+}

@@ -134,5 +134,7 @@ step 22: remove the registry entry
 
 warning: firewall: the deployment's SSH allow on 22 is kept
   It may be the rule your own login arrives by. Delete it yourself once nothing else needs it.
+warning: br_netfilter: stays loaded until the next boot
+  Evict removes its boot entry and does not unload it: unloading it would change what the host's FORWARD chain sees under whatever runs now.
 warning: packages: what admit installed stays: docker-ce, docker-ce-rootless-extras, uidmap; the docker group
   Evict removes no package: something else here may use them by now. Remove them yourself once nothing does. Docker's system daemon, which admit installed, stays disabled, and docker-ce made the docker group.

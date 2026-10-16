@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -432,11 +433,36 @@ func (e *evictor) watchdog() error {
 		e.remove("give the watchdog back to root", "remove "+rule+" and make the device root's again", "rm -f "+rule+" && "+udevTrigger+" && "+giveBack)
 	}
 	if e.f.Files["/etc/systemd/system/"+unit].Present {
-		e.remove("stop loading the watchdog at boot", "remove /etc/systemd/system/"+unit,
+		module, err := e.watchdogModule("/etc/systemd/system/" + unit)
+		if err != nil {
+			return err
+		}
+		e.remove("stop loading the watchdog at boot", "remove /etc/systemd/system/"+unit+"; "+module+" stays loaded until the next boot",
 			"systemctl disable "+unit+"; rm -f /etc/systemd/system/"+unit+" && systemctl daemon-reload")
+		e.warn("watchdog: "+module+" stays loaded until the next boot",
+			"Evict removes the unit that loads it at boot and does not unload it.")
 	}
 	return nil
 }
+
+// watchdogModule is the module the watchdog unit at path loads, as its
+// ExecStart names it, or "its module" when the unit names none admit
+// would write.
+func (e *evictor) watchdogModule(path string) (string, error) {
+	content, _, err := e.t.ReadFile(path)
+	if err != nil {
+		return "", shown(err)
+	}
+	for _, line := range strings.Split(content, "\n") {
+		if m, ok := strings.CutPrefix(line, "ExecStart=/usr/sbin/modprobe "); ok && moduleName.MatchString(m) {
+			return m, nil
+		}
+	}
+	return "its module", nil
+}
+
+// moduleName is a kernel module's name.
+var moduleName = regexp.MustCompile(`^[a-z0-9_]+$`)
 
 // firewall removes every ufw rule tagged as the deployment's but its SSH
 // allow, which may be what the owner's own login arrives by: that one is
@@ -497,6 +523,8 @@ func (e *evictor) hostWide() error {
 		return sum == sha(modulesLoadConf(&g))
 	}):
 		e.remove("remove "+modulesLoadPath, "no other deployment is admitted; br_netfilter stays loaded until the next boot", "rm -f "+modulesLoadPath)
+		e.warn("br_netfilter: stays loaded until the next boot",
+			"Evict removes its boot entry and does not unload it: unloading it would change what the host's FORWARD chain sees under whatever runs now.")
 	case e.f.Files[modulesLoadPath].Present:
 		e.present("host wide: " + modulesLoadPath + " kept: it is not as admit wrote it")
 	}

@@ -156,3 +156,5 @@ warning: watchdog: stopping paisans-f2a9's manager stops its Patroni, which hold
   A Patroni that does not stop within Docker's stop timeout is killed with the watchdog armed, and the host reboots. Have the operators stop the deployment's stacks first, or expect a reboot.
 warning: firewall: the deployment's SSH allow on 22 is kept
   It may be the rule your own login arrives by. Delete it yourself once nothing else needs it.
+warning: br_netfilter: stays loaded until the next boot
+  Evict removes its boot entry and does not unload it: unloading it would change what the host's FORWARD chain sees under whatever runs now.

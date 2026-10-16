@@ -126,3 +126,5 @@ warning: data: without an admission record, a data directory outside paisans-f2a
   If admit was run with --data-dir, run host evict again with the same --data-dir, so its paisans-f2a9 directory is removed. Otherwise those files stay, owned by IDs in the subordinate range evict frees, and map onto whichever user is later given that range.
 warning: firewall: the deployment's SSH allow on 22 is kept
   It may be the rule your own login arrives by. Delete it yourself once nothing else needs it.
+warning: br_netfilter: stays loaded until the next boot
+  Evict removes its boot entry and does not unload it: unloading it would change what the host's FORWARD chain sees under whatever runs now.
