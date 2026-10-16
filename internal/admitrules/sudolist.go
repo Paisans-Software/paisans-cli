@@ -1,6 +1,16 @@
-package hostadmit
+// Package admitrules holds the read-only rules host admit and paisans doctor
+// share: the groups a deployment's user must not hold, the Docker Engine
+// floor, the path of the mesh drop-in, and the reading of sudo -l. It imports
+// neither hostadmit nor apply, so doctor can read them without reaching the
+// root-only local transport.
+package admitrules
 
-import "strings"
+import (
+	"slices"
+	"strings"
+
+	"github.com/paisans-software/paisans-cli/internal/ui"
+)
 
 // SudoList is what sudo -l printed for one user: its rules, each entry of
 // the Defaults that apply to it, and each runas or command-specific
@@ -64,6 +74,13 @@ func readSudoList(user string, lines []string, asUser bool) (list SudoList, ok b
 	return list, understood
 }
 
+// ReadSudoListAsRoot is ReadSudoList for what admit reads: sudo -l -U as
+// root, which lists every user, so sudo's refusal as the user sees it is a
+// listing it cannot read.
+func ReadSudoListAsRoot(user string, lines []string) (list SudoList, ok bool) {
+	return readSudoList(user, lines, false)
+}
+
 // HelperRule is the one rule host admit grants a deployment's user, as
 // sudo -l lists it: the WireGuard helper, as root, with no password.
 func HelperRule(helper string) string { return "(root) NOPASSWD: " + helper }
@@ -104,4 +121,50 @@ func splitUnescaped(s string, sep byte) []string {
 		}
 	}
 	return append(out, s[start:])
+}
+
+// stockSecurePath is the directories of Ubuntu's secure_path, each
+// root's alone; a secure_path of any of them passes.
+var stockSecurePath = []string{"/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/sbin", "/bin", "/snap/bin"}
+
+// sudoDefaultProblem says why one entry of the Defaults sudo applies to
+// the user lets it reach past the helper's fixed environment, or "":
+// keeping or setting variables (env_keep, env_check, env_file, setenv,
+// restricted_env_file, !env_reset), a PATH of its choosing (!secure_path,
+// a secure_path outside root's directories, exempt_group), a root
+// directory or working directory of its choosing (runchroot, runcwd), or
+// open descriptors (closefrom_override). Stock Ubuntu's env_reset,
+// mail_badpass, secure_path and use_pty pass, as does env_delete, which
+// only takes variables away, and anything else.
+func sudoDefaultProblem(entry string) string {
+	name := strings.TrimPrefix(entry, "!")
+	value := ""
+	if i := strings.IndexAny(name, "+-="); i >= 0 {
+		name, value = name[:i], strings.TrimLeft(name[i:], "+-=")
+	}
+	negated := strings.HasPrefix(entry, "!")
+	switch name {
+	case "env_reset":
+		if negated {
+			return "the user's whole environment reaches the helper"
+		}
+	case "env_keep", "env_check", "env_file", "setenv", "restricted_env_file":
+		return "the user's variables reach the helper"
+	case "secure_path":
+		if negated {
+			return "the user's PATH reaches the helper"
+		}
+		for _, d := range strings.Split(strings.ReplaceAll(value, `\:`, ":"), ":") {
+			if !slices.Contains(stockSecurePath, d) {
+				return "the helper's PATH holds " + ui.Visible(d) + ", which is not root's alone"
+			}
+		}
+	case "exempt_group":
+		return "its members' PATH reaches the helper"
+	case "runchroot", "runcwd":
+		return "the user chooses the helper's root or working directory"
+	case "closefrom_override":
+		return "the user's open files reach the helper"
+	}
+	return ""
 }

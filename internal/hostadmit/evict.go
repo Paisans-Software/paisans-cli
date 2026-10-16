@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/admission"
+	"github.com/paisans-software/paisans-cli/internal/admitrules"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
@@ -189,7 +190,7 @@ func BuildEvict(t apply.Transport, in EvictInput) (*Plan, error) {
 			privileged = append(privileged, fmt.Sprintf("uid %d, a system account's", u.UID))
 		}
 		for _, g := range append([]string{u.Group}, u.Groups...) {
-			if slices.Contains(PrivilegedGroups, g) && !slices.Contains(privileged, g) {
+			if slices.Contains(admitrules.PrivilegedGroups, g) && !slices.Contains(privileged, g) {
 				privileged = append(privileged, g)
 			}
 		}
@@ -299,7 +300,7 @@ func (e *evictor) mesh() error {
 		}
 		return nil
 	}
-	dropIn := MeshDropInPath(uidOf(e.planner))
+	dropIn := admitrules.MeshDropInPath(uidOf(e.planner))
 	if e.f.Files[dropIn].Present {
 		e.remove("remove "+dropIn, "the drop-in that started "+e.in.Request.User+"'s manager after the mesh, and its directory once empty",
 			"rm -f "+dropIn+" && rmdir --ignore-fail-on-non-empty "+path.Dir(dropIn)+" && systemctl daemon-reload")

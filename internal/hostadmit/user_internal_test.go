@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-cli/internal/admitrules"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
 )
@@ -37,7 +38,7 @@ func TestTheProbeReadsTheMeshDropIn(t *testing.T) {
 		!strings.Contains(script, " $userfiles; do") {
 		t.Errorf("the probe does not read the mesh drop-in:\n%s", script)
 	}
-	if got := MeshDropInPath("1001"); got != "/etc/systemd/system/user@1001.service.d/paisans-mesh.conf" {
+	if got := admitrules.MeshDropInPath("1001"); got != "/etc/systemd/system/user@1001.service.d/paisans-mesh.conf" {
 		t.Errorf("MeshDropInPath: %s", got)
 	}
 }

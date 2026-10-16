@@ -13,6 +13,7 @@ import (
 	"text/template"
 
 	"github.com/paisans-software/paisans-cli/internal/admission"
+	"github.com/paisans-software/paisans-cli/internal/admitrules"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
@@ -536,7 +537,7 @@ func parseFacts(out, user string) (Facts, error) {
 		}
 	}
 	if f.raw["sudo"] != nil && f.raw["sudo"][len(f.raw["sudo"])-1] == "listed" {
-		if list, ok := readSudoList(user, sudoL, false); ok {
+		if list, ok := admitrules.ReadSudoListAsRoot(user, sudoL); ok {
 			f.User.SudoRules, f.User.SudoDefaults, f.User.SudoSpecific, f.User.SudoRead = list.Rules, list.Defaults, list.Specific, true
 		}
 	}
@@ -594,14 +595,6 @@ const (
 	sysctlBeforePath = admission.Dir + "/sysctl.before"
 	installedPath    = admission.Dir + "/installed"
 )
-
-// MeshDropInPath is the user's drop-in that orders its manager after the
-// mesh. Its path holds the user's UID, which the probe learns, so the probe
-// reads it from its own list (userfiles) rather than from probedFiles.
-// doctor asks whether it is there, as the user: it is mode 644.
-func MeshDropInPath(uid string) string {
-	return "/etc/systemd/system/user@" + uid + ".service.d/paisans-mesh.conf"
-}
 
 // sudoersPath is the deployment's sudoers line, egressFilePath its egress
 // table's file, watchdogRulePath its watchdog's udev rule.
