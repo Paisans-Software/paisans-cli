@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -80,6 +81,8 @@ func retryOnce(t *testing.T) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	// Closed while the fake is still first on PATH, as main closes them.
 	t.Cleanup(apply.CloseConnections)
+	// The retry is what is tested, not the two seconds before it.
+	t.Cleanup(apply.SetSleep(func(time.Duration) {}))
 	if _, err := (apply.SSHTransport{Site: "home-a", Destination: "ubuntu@x"}).Run("true"); err != nil {
 		t.Fatal(err)
 	}

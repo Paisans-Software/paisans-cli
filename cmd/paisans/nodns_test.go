@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -12,6 +15,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/grant"
 	"github.com/paisans-software/paisans-cli/internal/keystore"
+	"github.com/paisans-software/paisans-cli/internal/secretsgen"
 	"github.com/paisans-software/paisans-cli/internal/smtpcheck"
 	"github.com/paisans-software/paisans-cli/internal/smtpcheck/smtptest"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -43,6 +47,10 @@ func TestMain(m *testing.M) {
 	config.AgeKeystore = keystore.NewMemory()
 	// No test waits between two web server checks.
 	fakeWebServerClock()
+	// No test spends most of a second on each OAuth2 key it fills: what
+	// they test is that a key is filled, opens with its passphrase and
+	// stays put, and secretsgen's tests hold the key to 4096 bits.
+	secretsgen.SetOAuthKeyBits(1024)
 	// No test reaches a site or a mail server to try mail settings: every
 	// check is answered by an in-process server that takes any login. A
 	// test about the check sets its own (fakeSMTP).
@@ -69,9 +77,34 @@ func TestMain(m *testing.M) {
 		os.RemoveAll(dir)
 		os.Exit(1)
 	}
+	gitDirect(dir)
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)
+}
+
+// gitDirect puts the git that /usr/bin/git stands for first on PATH, linked
+// from a directory of its own in dir, when /usr/bin/git is the git on PATH
+// on macOS. That one is Xcode's stub, which asks xcrun where git is on every
+// call, and that doubles what each of the thousands of git commands these
+// tests run costs. The git that runs is the same one.
+func gitDirect(dir string) {
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	if found, err := exec.LookPath("git"); err != nil || found != "/usr/bin/git" {
+		return
+	}
+	out, err := exec.Command("xcrun", "--find", "git").Output()
+	real := strings.TrimSpace(string(out))
+	if err != nil || !filepath.IsAbs(real) {
+		return
+	}
+	bin := filepath.Join(dir, "git-bin")
+	if os.Mkdir(bin, 0o700) != nil || os.Symlink(real, filepath.Join(bin, "git")) != nil {
+		return
+	}
+	os.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 // noStore is a configuration store that checks nothing and publishes

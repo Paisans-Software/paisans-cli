@@ -2,8 +2,10 @@ package main
 
 import (
 	"encoding/base64"
+	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -63,7 +65,131 @@ func runDefault(t *testing.T, name string, fn func() error) string {
 
 // quietSSH puts an ssh on PATH that connects and answers as a clean, empty
 // host, so a command that reaches one reports what it would do there.
-func quietSSH(t *testing.T) { sshAnswering(t, quietHost) }
+func quietSSH(t *testing.T) { answerQuietly(t, "", "") }
+
+// answerQuietly is quietSSH that logs each remote command, decoded, to log
+// when log is set, and fails one containing fail when fail is set.
+//
+// The script still goes on PATH, for what runs ssh itself (ssh -G, a
+// master's -O exit), but each remote command is answered in process, by
+// quietAnswer, as the script would answer it: a test sends hundreds, and the
+// script costs a fork and several execs for each.
+func answerQuietly(t *testing.T, log, fail string) {
+	t.Helper()
+	script := quietHost
+	if log != "" {
+		script = strings.Replace(script, "case \"$cmd\" in\n", "printf '%s\\n' \"$cmd\" >> '"+log+"'\ncase \"$cmd\" in\n", 1)
+	}
+	if fail != "" {
+		script = strings.Replace(script, "case \"$cmd\" in\n", "case \"$cmd\" in\n*'"+fail+"'*) echo failed; exit 1;;\n", 1)
+	}
+	sshAnswering(t, script)
+	t.Cleanup(apply.SetRunSSH(func(cmd *exec.Cmd) error {
+		out, exit, ok := quietAnswer(cmd.Args, log, fail)
+		if !ok {
+			return cmd.Run()
+		}
+		io.WriteString(cmd.Stdout, out)
+		if exit != 0 {
+			return sshExit(exit)
+		}
+		return nil
+	}))
+}
+
+// quietAnswer is what loginProbe and then quietHost, with answerQuietly's
+// log and fail, print and exit with for an ssh given args, read the way the
+// script reads them. It is not ok for a last argument that is not a
+// RemoteCommand, which is left to the script.
+func quietAnswer(args []string, log, fail string) (string, int, bool) {
+	if strings.Contains(strings.Join(args[1:], " "), "printf %s "+base64.StdEncoding.EncodeToString([]byte("id -u"))+" |") {
+		return "1000\n", 0, true
+	}
+	b := args[len(args)-1]
+	if _, after, found := strings.Cut(b, "printf %s "); found {
+		b = after
+	}
+	b, _, _ = strings.Cut(b, " |")
+	decoded, err := base64.StdEncoding.DecodeString(b)
+	if err != nil {
+		return "", 0, false
+	}
+	// $(...) drops the trailing newlines.
+	cmd := strings.TrimRight(string(decoded), "\n")
+	if strings.HasPrefix(cmd, "export DOCKER_HOST=") {
+		if _, after, found := strings.Cut(cmd, "\n"); found {
+			cmd = after
+		}
+	}
+	if log != "" {
+		f, err := os.OpenFile(log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			return "", 0, false
+		}
+		fmt.Fprintf(f, "%s\n", cmd)
+		f.Close()
+	}
+	// words is the list between `in ` and `; do`, split as sh splits it,
+	// with the quotes tr -d takes out taken out.
+	words := func(in string) []string {
+		l := cmd
+		if _, after, found := strings.Cut(l, in); found {
+			l = after
+		}
+		l, _, _ = strings.Cut(l, "; do")
+		var out []string
+		for _, w := range strings.Fields(l) {
+			out = append(out, strings.ReplaceAll(w, "'", ""))
+		}
+		return out
+	}
+	var out strings.Builder
+	switch {
+	case fail != "" && strings.Contains(cmd, fail):
+		return "failed\n", 1, true
+	case strings.Contains(cmd, "for n in "):
+		for _, n := range words("for n in ") {
+			out.WriteString("absent " + n + "\n")
+		}
+	case strings.Contains(cmd, "paisans-sweep-end"):
+		for _, r := range words("for r in ") {
+			out.WriteString("present sha256:0123456789abcdef " + r + "\n")
+		}
+		out.WriteString("paisans-sweep-end\n")
+	case strings.Contains(cmd, "for r in "):
+		for _, r := range words("for r in ") {
+			if strings.Contains(cmd, ".Config.Volumes") {
+				out.WriteString("volumes " + r + " null\n")
+			} else {
+				out.WriteString("present sha256:0123456789abcdef " + r + "\n")
+			}
+		}
+	case strings.Contains(cmd, "getent passwd"):
+		out.WriteString("ubuntu:x:1000:1000::/home/ubuntu:/bin/bash\n")
+	case strings.HasSuffix(cmd, "id -u"):
+		out.WriteString("0\n")
+	case cmd == "dpkg --print-architecture":
+		out.WriteString("amd64\n")
+	case strings.Contains(cmd, "print-architecture"):
+		out.WriteString("arch amd64\n")
+	case strings.Contains(cmd, "/etc/os-release"):
+		out.WriteString("ID=ubuntu\nVERSION_ID=\"24.04\"\nVERSION_CODENAME=noble\n")
+	case strings.Contains(cmd, "docker volume ls"):
+		out.WriteString("end\n")
+	case strings.Contains(cmd, "__PAISANS_NO_ETCD__"):
+		out.WriteString("__PAISANS_NO_ETCD__\n")
+	case strings.Contains(cmd, "__PAISANS_ABSENT__"):
+		out.WriteString("__PAISANS_ABSENT__\n")
+	}
+	return out.String(), 0, true
+}
+
+// sshExit is an ssh that exited with a status, as *exec.ExitError reports
+// one.
+type sshExit int
+
+func (e sshExit) Error() string { return fmt.Sprintf("exit status %d", int(e)) }
+func (e sshExit) ExitCode() int { return int(e) }
 
 // The remote command travels base64 encoded (apply.RemoteCommand), so the
 // script decodes it, drops the DOCKER_HOST export a site transport puts
@@ -121,6 +247,8 @@ func sshAnswering(t *testing.T, script string) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	// Closed while the fake is still first on PATH, as main closes them.
 	t.Cleanup(apply.CloseConnections)
+	// Every command reaches the script, whatever an earlier fake answered.
+	t.Cleanup(apply.SetRunSSH(nil))
 }
 
 // loginProbe answers the login probe, a remote command that is exactly

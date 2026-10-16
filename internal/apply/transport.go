@@ -315,9 +315,32 @@ func (t SSHTransport) named(command string) string {
 // test can shrink them.
 var sshRetryDelays = []time.Duration{2 * time.Second, 4 * time.Second}
 
+// SetSleep makes every wait in this package, the one before an ssh retry
+// among them, call sleep instead, and returns a function restoring the one
+// before. It is for tests in other packages, which drive a retry to see how
+// it is reported and need not wait the seconds it waits.
+func SetSleep(sleeper func(time.Duration)) (restore func()) {
+	old := sleep
+	sleep = sleeper
+	return func() { sleep = old }
+}
+
 // runSSH runs one built ssh command. A package variable so that a test can
 // stand in for the ssh binary and choose its output and exit status.
 var runSSH = func(cmd *exec.Cmd) error { return cmd.Run() }
+
+// SetRunSSH runs each built ssh command with run instead, or with ssh itself
+// for nil, and returns a function restoring the one before. It is runSSH for
+// tests in other packages: a fake host answered in process costs nothing,
+// where an ssh script on PATH costs a fork and an exec for every command.
+func SetRunSSH(run func(cmd *exec.Cmd) error) (restore func()) {
+	old := runSSH
+	if run == nil {
+		run = func(cmd *exec.Cmd) error { return cmd.Run() }
+	}
+	runSSH = run
+	return func() { runSSH = old }
+}
 
 // retryLog receives one line per retry. Nothing by default: a retry that
 // then succeeds is not news, and one that runs out is reported in full by the

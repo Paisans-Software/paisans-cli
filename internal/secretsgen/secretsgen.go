@@ -438,7 +438,7 @@ func fillKeypair(app string, entries map[string]any, pair keypair, note func(boo
 // It is encrypted, rather than left plain with an unused passphrase, because
 // it is rendered 0644: README, "Three kinds of secret", says why.
 func oauthKeypairPEM(passphrase string) (string, string, error) {
-	key, err := rsa.GenerateKey(rand.Reader, 4096)
+	key, err := rsa.GenerateKey(rand.Reader, oauthKeyBits)
 	if err != nil {
 		return "", "", fmt.Errorf("generating the OAuth2 key: %w", err)
 	}
@@ -453,6 +453,20 @@ func oauthKeypairPEM(passphrase string) (string, string, error) {
 		return "", "", err
 	}
 	return string(pem.EncodeToMemory(block)), public, nil
+}
+
+// oauthKeyBits is the size of the key oauthKeypairPEM makes.
+var oauthKeyBits = 4096
+
+// SetOAuthKeyBits makes oauthKeypairPEM's keys bits long, and returns a
+// function restoring the size before. It is for tests in other packages,
+// which fill secrets often and test what is filled rather than the key's
+// size: a 4096 bit key costs most of a second to make, a 1024 bit one a few
+// milliseconds. This package's own tests keep 4096.
+func SetOAuthKeyBits(bits int) (restore func()) {
+	old := oauthKeyBits
+	oauthKeyBits = bits
+	return func() { oauthKeyBits = old }
 }
 
 // OpenPrivateKey decrypts and parses an OAuth2 private key the way Mbin
