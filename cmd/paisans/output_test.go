@@ -166,6 +166,9 @@ func quietAnswer(args []string, log, fail string) (string, int, bool) {
 		}
 	case strings.Contains(cmd, "getent passwd"):
 		out.WriteString("ubuntu:x:1000:1000::/home/ubuntu:/bin/bash\n")
+	// The watchdog probe asks who it runs as too, so it is matched first.
+	case strings.Contains(cmd, "RuntimeWatchdogUSec"):
+		out.WriteString("device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\nowner 1000\nuid 1000\nsubuid ubuntu:165536:65536\n")
 	case strings.Contains(cmd, `echo "uid`):
 		out.WriteString("uid 1000\nsubuid ubuntu:165536:65536\n")
 	case cmd == "dpkg --print-architecture":
@@ -176,8 +179,6 @@ func quietAnswer(args []string, log, fail string) (string, int, bool) {
 		out.WriteString("ID=ubuntu\nVERSION_ID=\"24.04\"\nVERSION_CODENAME=noble\n")
 	case strings.Contains(cmd, "docker volume ls"):
 		out.WriteString("end\n")
-	case strings.Contains(cmd, "RuntimeWatchdogUSec"):
-		out.WriteString("device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\nowner 1000\nme 1000\n")
 	case strings.Contains(cmd, "__PAISANS_NO_ETCD__"):
 		out.WriteString("__PAISANS_NO_ETCD__\n")
 	case strings.Contains(cmd, "__PAISANS_ABSENT__"):
@@ -216,6 +217,9 @@ case "$cmd" in
 		case "$cmd" in *".Config.Volumes"*) echo "volumes $r null";; *) echo "present sha256:0123456789abcdef $r";; esac
 	done;;
 *"getent passwd"*) echo "ubuntu:x:1000:1000::/home/ubuntu:/bin/bash";;
+# host admit loaded softdog and gave /dev/watchdog to the user. It asks who
+# it runs as too, so it is matched first.
+*RuntimeWatchdogUSec*) printf 'device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\nowner 1000\nuid 1000\nsubuid ubuntu:165536:65536\n';;
 # The host check's inventory asks who it runs as. The login probe, a bare
 # id -u, is answered 1000 before this script runs.
 *'echo "uid'*) printf 'uid 1000\nsubuid ubuntu:165536:65536\n';;
@@ -223,8 +227,6 @@ case "$cmd" in
 *"print-architecture"*) echo "arch amd64";;
 *"/etc/os-release"*) printf 'ID=ubuntu\nVERSION_ID="24.04"\nVERSION_CODENAME=noble\n';;
 *"docker volume ls"*) echo end;;
-# host admit loaded softdog and gave /dev/watchdog to the user.
-*RuntimeWatchdogUSec*) printf 'device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\nowner 1000\nme 1000\n';;
 *__PAISANS_NO_ETCD__*) echo __PAISANS_NO_ETCD__;;
 *__PAISANS_ABSENT__*) echo __PAISANS_ABSENT__;;
 esac

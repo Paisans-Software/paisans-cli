@@ -74,13 +74,13 @@ func (s Self) Owns(uid int) bool {
 	return uid == s.UID || (s.SubCount > 0 && uid >= s.SubStart && uid < s.SubStart+s.SubCount)
 }
 
-// parseSelf reads selfProbe's two lines. One without a uid, or naming uid 0,
+// ParseSelf reads SelfProbe's two lines. One without a uid, or naming uid 0,
 // is an error, since as uid 0 every listener of root's would read as this
 // deployment's. A subordinate range line that is present and unreadable is
 // an error too, for the same reason: read as starting at 0 it would own
 // root's and every system user's UIDs. An absent one is no range, which owns
 // nothing.
-func parseSelf(out string) (Self, error) {
+func ParseSelf(out string) (Self, error) {
 	var s Self
 	found := false
 	for _, line := range strings.Split(out, "\n") {
@@ -158,10 +158,10 @@ type Docker struct {
 // look: what is gone holds nothing, so the complaint is discarded and what
 // answered is read.
 const (
-	// selfProbe names the login user's UID and its subordinate range, which
+	// SelfProbe names the login user's UID and its subordinate range, which
 	// a rootless container's users map into, so a listener can be told the
 	// deployment's own by its owner. /etc/subuid is world readable.
-	selfProbe      = `echo "uid $(id -u)"; echo "subuid $(grep "^$(id -un):" /etc/subuid | head -n 1)"`
+	SelfProbe      = `echo "uid $(id -u)"; echo "subuid $(grep "^$(id -un):" /etc/subuid | head -n 1)"`
 	dockerProbe    = `command -v docker >/dev/null 2>&1 || { echo absent; exit 0; }; docker version --format '{{.Server.Version}} {{.Client.Version}}' || exit 1; echo "compose $(docker compose version --short 2>/dev/null || echo absent)"`
 	packageProbe   = `dpkg-query -W -f='${Package} ${Status}\n' docker-ce docker.io 2>/dev/null; snap list docker 2>/dev/null; true`
 	containerProbe = `docker ps -aq --no-trunc | xargs -r docker inspect --format '{"id":{{json .Id}},"name":{{json .Name}},"image":{{json .Image}},"pid":{{.State.Pid}},"labels":{{json .Config.Labels}},"networks":{{json .NetworkSettings.Networks}},"ports":{{json .HostConfig.PortBindings}}}' 2>/dev/null || true`
@@ -191,7 +191,7 @@ func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + 
 // for a caller's allow list of reads.
 func ReadCommands(d deployment.Deployment) []string {
 	var out []string
-	for _, probe := range []string{selfProbe, dockerProbe, packageProbe, containerProbe, volumeProbe, networkProbe, socketProbe, linkProbe, routeProbe, hostSitesProbe(d)} {
+	for _, probe := range []string{SelfProbe, dockerProbe, packageProbe, containerProbe, volumeProbe, networkProbe, socketProbe, linkProbe, routeProbe, hostSitesProbe(d)} {
 		out = append(out, cLocale+probe)
 	}
 	return out
@@ -216,11 +216,11 @@ func Inspect(t Transport, d deployment.Deployment) (*Inventory, error) {
 		return out, nil
 	}
 
-	out, err := run("asking who the probes run as", selfProbe)
+	out, err := run("asking who the probes run as", SelfProbe)
 	if err != nil {
 		return nil, err
 	}
-	if inv.Self, err = parseSelf(out); err != nil {
+	if inv.Self, err = ParseSelf(out); err != nil {
 		return nil, fail("asking who the probes run as", err)
 	}
 

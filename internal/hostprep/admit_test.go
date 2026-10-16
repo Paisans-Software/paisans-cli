@@ -719,3 +719,27 @@ func TestWireGuardToolsIsInstalledWithoutRecommends(t *testing.T) {
 		}
 	}
 }
+
+// Admit reads the watchdog as root, where who the probe ran as is neither
+// asked nor needed: only the deployment's user's read compares the owner.
+func TestAdmitReadsTheWatchdogAsRoot(t *testing.T) {
+	host := freshHost()
+	host.responses[probeWatchdog] = "device present\nidentity watchdog0 iTCO_wdt\nsystemd 0\ndaemon absent\nowner 0\n"
+	profile, err := hostprep.Select(hostprep.ParseOSRelease(ubuntu2404))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := deployment.Deployment{ID: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}
+	section, err := hostprep.PlanWatchdog(host, d, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(section.Present, "\n"), "iTCO_wdt") {
+		t.Errorf("want the hardware watchdog present, got %+v", section)
+	}
+	for _, cmd := range host.ran {
+		if strings.Contains(cmd, "/etc/subuid") {
+			t.Errorf("admit asked who it ran as: %q", cmd)
+		}
+	}
+}

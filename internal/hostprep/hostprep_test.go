@@ -116,7 +116,7 @@ func freshHost() *fakeHost {
 		files: map[string]string{"/etc/os-release": ubuntu2404},
 		responses: map[string]string{
 			probePackages:  "compose absent\npkg docker-ce absent\npkg wireguard-tools absent\npkg ufw absent\npkg git absent\nkeyring absent\narch amd64\n",
-			probeWatchdog:  "device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\nowner 1000\nme 1000\n",
+			probeWatchdog:  "device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\nowner 1000\nuid 1000\nsubuid paisans-f2a9:165536:65536\n",
 			"docker ps -q": "",
 		},
 	})
@@ -143,7 +143,7 @@ func preparedHost(gateway bool) *fakeHost {
 			daemonJSONPath:    daemon,
 		},
 		responses: map[string]string{
-			probeWatchdog:  "device present\nidentity watchdog0 iTCO_wdt\nsystemd 0\ndaemon absent\nowner 1000\nme 1000\n",
+			probeWatchdog:  "device present\nidentity watchdog0 iTCO_wdt\nsystemd 0\ndaemon absent\nowner 1000\nuid 1000\nsubuid paisans-f2a9:165536:65536\n",
 			"docker ps -q": "3f2a9c1d0b7e\n9b1c4e2f8a6d\n",
 		},
 	}))
@@ -443,11 +443,16 @@ func TestExecuteStopsAtTheFirstFailure(t *testing.T) {
 // The watchdog is read, never planned: each mode accepts what admit left or
 // refuses with what the host's owner runs.
 func TestWatchdogModes(t *testing.T) {
-	const mine = "owner 1000\nme 1000\n"
+	const mine = "owner 1000\nuid 1000\nsubuid paisans-f2a9:165536:65536\n"
 	hardware := "device present\nidentity watchdog0 sp5100_tco\nsystemd 0\ndaemon absent\n" + mine
 	softdog := "device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\n" + mine
-	none := "device absent\nsystemd 0\ndaemon absent\nowner \nme 1000\n"
-	roots := "device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\nowner 0\nme 1000\n"
+	none := "device absent\nsystemd 0\ndaemon absent\nowner \nuid 1000\nsubuid paisans-f2a9:165536:65536\n"
+	roots := "device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\nowner 0\nuid 1000\nsubuid paisans-f2a9:165536:65536\n"
+	// Spilo's start hands the device to its postgres user, UID 101 in the
+	// container, which is 165536+100 on the host.
+	containers := "device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\nowner 165636\nuid 1000\nsubuid paisans-f2a9:165536:65536\n"
+	beyond := "device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\nowner 231072\nuid 1000\nsubuid paisans-f2a9:165536:65536\n"
+	noRange := "device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\nowner 1000\nuid 1000\nsubuid \n"
 
 	cases := []struct {
 		name    string
@@ -465,6 +470,9 @@ func TestWatchdogModes(t *testing.T) {
 		{name: "softdog warns of hardware", mode: config.WatchdogSoftdog, probe: hardware, present: "sp5100_tco", warn: true},
 		{name: "no device sends the owner to admit", mode: config.WatchdogAuto, probe: none, refuse: "sudo paisans host admit --request home-a.admit --watchdog again, from paisans host request --site home-a > home-a.admit"},
 		{name: "a root device sends the owner to admit", mode: config.WatchdogAuto, probe: roots, refuse: "is not the deployment's user's"},
+		{name: "a device the deployment's container took is the deployment's", mode: config.WatchdogAuto, probe: containers, present: "Software Watchdog", warn: true},
+		{name: "a device past the user's subordinate range sends the owner to admit", mode: config.WatchdogAuto, probe: beyond, refuse: "is not the deployment's user's"},
+		{name: "the user's own device needs no subordinate range", mode: config.WatchdogAuto, probe: noRange, present: "Software Watchdog", warn: true},
 		{name: "systemd holds the device", mode: config.WatchdogAuto, probe: "device present\nidentity watchdog0 iTCO_wdt\nsystemd 1min\ndaemon absent\n" + mine, refuse: "RuntimeWatchdogUSec is 1min"},
 		{name: "a daemon holds the device", mode: config.WatchdogAuto, probe: "device present\nidentity watchdog0 iTCO_wdt\nsystemd 0\ndaemon running\n" + mine, refuse: "a watchdog daemon is running"},
 		{name: "contention refuses required too", mode: config.WatchdogRequired, probe: "device present\nidentity watchdog0 iTCO_wdt\nsystemd 30s\ndaemon absent\n" + mine, refuse: "RuntimeWatchdogUSec"},
@@ -1044,11 +1052,11 @@ func TestARecordThatDiffersIsRefused(t *testing.T) {
 func TestTheWatchdogIsOnlyRead(t *testing.T) {
 	cfg := fixture(t)
 	host := freshHost()
-	host.responses[probeWatchdog] = "device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\nowner 0\nme 1000\n"
+	host.responses[probeWatchdog] = "device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\nowner 0\nuid 1000\nsubuid paisans-f2a9:165536:65536\n"
 	if _, err := hostprep.Build("home-a", cfg, host, admitted(t, cfg, "home-a")); err == nil || !strings.Contains(err.Error(), "host admit") {
 		t.Errorf("a root-owned /dev/watchdog: %v", err)
 	}
-	host.responses[probeWatchdog] = "device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\nowner 1000\nme 1000\n"
+	host.responses[probeWatchdog] = "device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\nowner 1000\nuid 1000\nsubuid paisans-f2a9:165536:65536\n"
 	plan, err := hostprep.Build("home-a", cfg, host, admitted(t, cfg, "home-a"))
 	if err != nil {
 		t.Fatal(err)

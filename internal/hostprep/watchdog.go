@@ -2,10 +2,12 @@ package hostprep
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 )
 
 // softdogIdentity is the identity softdog reports in sysfs. Read from the
@@ -37,21 +39,41 @@ type watchdogFacts struct {
 	// prints it. Anything but zero means PID 1 holds the device.
 	RuntimeWatchdog string
 	Daemon          bool
-	// Owner is /dev/watchdog's owner's uid, and Me the uid the probe ran
-	// as: host admit gives the device to the deployment's user.
-	Owner, Me string
+	// Owner is /dev/watchdog's owner's uid. Host admit gives the device to
+	// the deployment's user, and Patroni's container may hand it on to its
+	// own user, which maps into the user's subordinate range.
+	Owner string
+	// Me is the user the probe ran as and its subordinate range.
+	Me hostcheck.Self
 }
 
-func probeWatchdog(t Transport) (watchdogFacts, error) {
+// mine reports whether the deployment owns /dev/watchdog: its user does, or
+// one of its containers' users.
+func (f watchdogFacts) mine() bool {
+	owner, err := strconv.Atoi(f.Owner)
+	return err == nil && f.Me.Owns(owner)
+}
+
+// probeWatchdog reads the watchdog. asUser also reads who the probe ran as,
+// which only the deployment's user's read needs: admit runs it as root.
+func probeWatchdog(t Transport, asUser bool) (watchdogFacts, error) {
 	script, err := snippet("snippets/watchdog-probe.sh", nil)
 	if err != nil {
 		return watchdogFacts{}, err
+	}
+	if asUser {
+		script += "\n" + hostcheck.SelfProbe
 	}
 	out, err := t.Run(script)
 	if err != nil {
 		return watchdogFacts{}, fmt.Errorf("probing the watchdog on %s: %w", t.Describe(), err)
 	}
 	var facts watchdogFacts
+	if asUser {
+		if facts.Me, err = hostcheck.ParseSelf(out); err != nil {
+			return watchdogFacts{}, fmt.Errorf("probing the watchdog on %s: %w", t.Describe(), err)
+		}
+	}
 	for _, line := range strings.Split(out, "\n") {
 		key, rest, _ := strings.Cut(strings.TrimSpace(line), " ")
 		switch key {
@@ -66,8 +88,6 @@ func probeWatchdog(t Transport) (watchdogFacts, error) {
 			facts.Daemon = rest == "running"
 		case "owner":
 			facts.Owner = strings.TrimSpace(rest)
-		case "me":
-			facts.Me = strings.TrimSpace(rest)
 		}
 	}
 	return facts, nil
@@ -128,7 +148,7 @@ func planWatchdog(t Transport, d deployment.Deployment, profile Profile, site co
 		return out, nil
 	}
 
-	facts, err := probeWatchdog(t)
+	facts, err := probeWatchdog(t, false)
 	if err != nil {
 		return out, err
 	}
@@ -199,7 +219,7 @@ func checkWatchdog(t Transport, name string, site config.Site) (Section, error) 
 		out.Present = append(out.Present, "watchdog: not needed, this site holds no data role")
 		return out, nil
 	}
-	facts, err := probeWatchdog(t)
+	facts, err := probeWatchdog(t, true)
 	if err != nil {
 		return out, err
 	}
@@ -208,7 +228,7 @@ func checkWatchdog(t Transport, name string, site config.Site) (Section, error) 
 		return out, fmt.Errorf("watchdog: systemd's RuntimeWatchdogUSec is %s on %s, so PID 1 holds /dev/watchdog and Patroni cannot open it. The host's owner sets RuntimeWatchdogSec=0 in /etc/systemd/system.conf and runs systemctl daemon-reexec", facts.RuntimeWatchdog, t.Describe())
 	case facts.Daemon:
 		return out, fmt.Errorf("watchdog: a watchdog daemon is running on %s and holds /dev/watchdog. The host's owner stops and disables it (systemctl disable --now watchdog)", t.Describe())
-	case !facts.DeviceNode || facts.Owner == "" || facts.Owner != facts.Me:
+	case !facts.DeviceNode || !facts.mine():
 		return out, fmt.Errorf("watchdog: /dev/watchdog on %s is not the deployment's user's, so Patroni cannot open it. %s", t.Describe(), admitWatchdog(name))
 	}
 	hardware := facts.hardware()
