@@ -9,7 +9,6 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
-	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/deployrecord"
 	"github.com/paisans-software/paisans-cli/internal/patroni"
 	"github.com/paisans-software/paisans-cli/internal/registry"
@@ -20,8 +19,9 @@ import (
 // its admission record; then what the deployment says has joined, each from
 // the first site holding it that answers: the gateways' deployment record,
 // etcd's membership and Patroni's. The deployment record is Unread when no
-// gateway answered or any gateway's could not be read, and etcd's membership,
-// for etcd's voters, when etcd answered only with errors.
+// gateway answered or any gateway's could not be read; etcd's membership,
+// for etcd's voters, and Patroni's, for the cluster's sites, when none that
+// answered could be read and one of them has run it.
 func Gather(cfg *config.Config, transports map[string]apply.Transport) Evidence {
 	d := cfg.Deployment()
 	ev := Evidence{Login: map[string]error{}, Records: map[string]RecordRead{}, Joined: map[string][]string{}}
@@ -94,37 +94,61 @@ func Gather(cfg *config.Config, transports map[string]apply.Transport) Evidence 
 	// answered only with errors is unread for the sites it could list, its
 	// voters, whether or not a deployment record was found: the record is
 	// written when a gateway is applied, after the data sites, so it lags
-	// what etcd lists.
+	// what etcd lists. An etcd that does not run is an answer, "no etcd
+	// here", only on a host that has never run one: on a host with an etcd
+	// record it is etcd stopped, or the user's Docker not up after a reboot,
+	// and is as unread as an error.
 	var etcdFailed []string
 	membership := false
 	for _, m := range answered(cfg.Etcd.Members) {
-		list, running, err := apply.ReadEtcdMembers(transports[m], d)
-		if err != nil {
+		t := transports[m]
+		list, running, err := apply.ReadEtcdMembers(t, d)
+		if err == nil && running {
+			ev.Joined["etcd's membership"] = memberSites(cfg, list)
+			membership = true
+			break
+		}
+		in, found, inErr := apply.ReadEtcdInitial(t, d)
+		switch {
+		case err != nil:
 			etcdFailed = append(etcdFailed, m+": "+err.Error())
-			if founders, ok := founding(transports[m], d); ok {
+		case inErr != nil:
+			etcdFailed = append(etcdFailed, m+": etcd does not run, and its etcd record cannot be read: "+inErr.Error())
+		case found:
+			etcdFailed = append(etcdFailed, m+": etcd does not run, though the host has run an etcd member")
+		}
+		if inErr == nil && found && in.State == render.EtcdStateNew {
+			if founders, ok := apply.EtcdInitialMembers(in); ok {
 				ev.Joined["etcd's founding record on "+m] = memberSites(cfg, founders)
 			}
-			continue
 		}
-		if !running {
-			continue
-		}
-		ev.Joined["etcd's membership"] = memberSites(cfg, list)
-		membership = true
-		break
 	}
 	if !membership && len(etcdFailed) > 0 {
 		ev.Unread = append(ev.Unread, Source{Name: "etcd's membership (" + strings.Join(etcdFailed, "; ") + ")", Sites: slices.Clone(cfg.Etcd.Members)})
 	}
 
+	// Patroni lists the cluster's sites, some of which an etcd.members
+	// written out may leave out. A Patroni that cannot be read is an
+	// answer, "no Patroni here", only on a host never given one, which has
+	// no patroni.env; on any other it is unread for the cluster's sites.
+	var patroniFailed []string
+	patroniRead := false
 	for _, s := range answered(cfg.Cluster.Sites) {
+		t := transports[s]
 		api := fmt.Sprintf("%s:%d", cfg.Sites[s].Address, render.PatroniAPIPort)
-		out, err := transports[s].Run(patroni.ClusterCommand(d, api))
-		if err != nil {
-			continue
+		out, err := t.Run(patroni.ClusterCommand(d, api))
+		var c patroni.Cluster
+		if err == nil {
+			c, err = patroni.Parse(out)
 		}
-		c, err := patroni.Parse(out)
 		if err != nil {
+			_, found, envErr := t.ReadFile(d.Path("infra", "patroni.env"))
+			switch {
+			case envErr != nil:
+				patroniFailed = append(patroniFailed, s+": "+err.Error()+", and whether the host runs Patroni cannot be read: "+envErr.Error())
+			case found:
+				patroniFailed = append(patroniFailed, s+": "+err.Error())
+			}
 			continue
 		}
 		var sites []string
@@ -133,19 +157,13 @@ func Gather(cfg *config.Config, transports map[string]apply.Transport) Evidence 
 		}
 		slices.Sort(sites)
 		ev.Joined["Patroni's members"] = sites
+		patroniRead = true
 		break
 	}
-	return ev
-}
-
-// founding is the members a host's etcd record says it was founded with,
-// when it was founded `new`; false for anything else.
-func founding(t apply.Transport, d deployment.Deployment) ([]apply.EtcdMember, bool) {
-	in, found, err := apply.ReadEtcdInitial(t, d)
-	if err != nil || !found || in.State != render.EtcdStateNew {
-		return nil, false
+	if !patroniRead && len(patroniFailed) > 0 {
+		ev.Unread = append(ev.Unread, Source{Name: "Patroni's members (" + strings.Join(patroniFailed, "; ") + ")", Sites: slices.Clone(cfg.Cluster.Sites)})
 	}
-	return apply.EtcdInitialMembers(in)
+	return ev
 }
 
 // memberSites names the site each etcd member runs on.

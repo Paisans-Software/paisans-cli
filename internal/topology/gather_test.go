@@ -311,3 +311,98 @@ func TestGatherReadsPatronisMembers(t *testing.T) {
 		t.Errorf("Patroni's members %v", got)
 	}
 }
+
+// recordLacking is a deployment record listing every site of cfg but one.
+func recordLacking(cfg *config.Config, site string) string {
+	var sites []string
+	for _, name := range cfg.SiteNames() {
+		if name != site {
+			sites = append(sites, name)
+		}
+	}
+	return deployrecord.Encode(deployrecord.Record{Version: deployrecord.Version, Sites: sites})
+}
+
+// An etcd that does not run on a host that has run one, every site
+// rebooted with the user's Docker not yet up, is no answer: with no voter's
+// etcd running and a record that lags, a joined voter that does not answer
+// or is not admitted refuses the run. A host that never ran etcd is an
+// answer, so a fresh deployment still goes on.
+func TestGatherAStoppedEtcdThatHasRunIsUnread(t *testing.T) {
+	cfg := fixture(t)
+	d := cfg.Deployment()
+	initial := render.FormatEtcdInitial(render.EtcdInitial{State: render.EtcdStateExisting, Cluster: "home-a=http://10.44.0.1:2380,home-b=http://10.44.0.2:2380,home-c=http://10.44.0.8:2380"})
+	stopped := func(withRecords bool) map[string]*fakeHost {
+		hs := hostsFor(t, cfg)
+		for _, name := range cfg.Etcd.Members {
+			hs[name].answers["member list -w json"] = "__PAISANS_NO_ETCD__"
+			if withRecords {
+				hs[name].files["/"+render.EtcdInitialPath(d)] = initial
+			}
+		}
+		return hs
+	}
+	for _, how := range []string{"refused", "not admitted"} {
+		hs := stopped(true)
+		hs[cfg.GatewaySites()[0]].files[deployrecord.Path(d)] = recordLacking(cfg, "home-c")
+		if how == "refused" {
+			hs["home-c"].login = refused
+		} else {
+			hs["home-c"].files = map[string]string{}
+		}
+		_, err := topology.Classify(cfg, topology.Gather(cfg, transportsOf(hs)))
+		if err == nil || !strings.Contains(err.Error(), "home-c") || !strings.Contains(err.Error(), "etcd") {
+			t.Errorf("home-c %s, every etcd stopped: %v", how, err)
+		}
+	}
+	hs := stopped(false)
+	hs["home-c"].login = refused
+	c, err := topology.Classify(cfg, topology.Gather(cfg, transportsOf(hs)))
+	if err != nil || c.Sites["home-c"].Class != topology.Pending {
+		t.Errorf("a fresh deployment: %+v %v", c, err)
+	}
+}
+
+// A cluster site an explicit etcd.members leaves out is listed only by
+// Patroni: a Patroni that cannot be read on a host that has run it is
+// unread for the cluster's sites, so such a site that does not answer
+// refuses the run. A host never given Patroni is an answer.
+func TestGatherAnUnreadablePatroniIsUnread(t *testing.T) {
+	cfg := fixture(t)
+	d := cfg.Deployment()
+	cfg.Etcd.Members = []string{"home-a", "home-b"}
+	if !slices.Contains(cfg.Cluster.Sites, "home-c") {
+		t.Fatalf("cluster sites %v", cfg.Cluster.Sites)
+	}
+	twoMembers := `{"header":{"cluster_id":1,"member_id":2,"raft_term":3},"members":[` +
+		`{"ID":1,"name":"home-a","peerURLs":["http://10.44.0.1:2380"],"clientURLs":["http://10.44.0.1:2379"]},` +
+		`{"ID":2,"name":"home-b","peerURLs":["http://10.44.0.2:2380"],"clientURLs":["http://10.44.0.2:2379"]}]}`
+	setup := func(deployed bool) map[string]*fakeHost {
+		hs := hostsFor(t, cfg)
+		for _, name := range cfg.Cluster.Sites {
+			hs[name].answers["member list -w json"] = twoMembers
+			hs[name].fail["/cluster"] = errors.New("service \"patroni\" is not running")
+			if deployed {
+				hs[name].files[d.Path("infra", "patroni.env")] = "SCOPE=x\n"
+			}
+		}
+		hs["home-c"].login = refused
+		return hs
+	}
+	hs := setup(true)
+	hs[cfg.GatewaySites()[0]].files[deployrecord.Path(d)] = recordLacking(cfg, "home-c")
+	ev := topology.Gather(cfg, transportsOf(hs))
+	if !slices.ContainsFunc(ev.Unread, func(u topology.Source) bool {
+		return strings.Contains(u.Name, "Patroni") && slices.Equal(u.Sites, cfg.Cluster.Sites)
+	}) {
+		t.Errorf("unread %+v", ev.Unread)
+	}
+	_, err := topology.Classify(cfg, ev)
+	if err == nil || !strings.Contains(err.Error(), "home-c") || !strings.Contains(err.Error(), "Patroni") {
+		t.Errorf("a cluster site only Patroni lists, Patroni unread: %v", err)
+	}
+	c, err := topology.Classify(cfg, topology.Gather(cfg, transportsOf(setup(false))))
+	if err != nil || c.Sites["home-c"].Class != topology.Pending {
+		t.Errorf("Patroni never deployed: %+v %v", c, err)
+	}
+}
