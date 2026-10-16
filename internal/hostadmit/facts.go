@@ -31,10 +31,11 @@ var snippets embed.FS
 // and its paisans-<token> child, whose Dirs entry is not a directory of
 // root's (or, for the child, of the user's) with no group or other write.
 //
-// RulesetUnknown is a host whose nft ruleset could not be read, and
+// RulesetUnknown is a host whose nft ruleset could not be read,
 // LegacyRules are rules only iptables-legacy holds, which nft does not
-// show. Either is a firewall admit cannot see, so Task 9 refuses on either
-// as it does on OwnerFirewall.
+// show, and LegacyUnknown is a host whose legacy tables are loaded but
+// could not be saved. Each is a firewall admit cannot see, so Task 9
+// refuses on any of them as it does on OwnerFirewall.
 type Facts struct {
 	Docker   DockerFacts
 	Packages map[string]bool
@@ -58,7 +59,10 @@ type Facts struct {
 	RulesetUnknown         bool
 	// LegacyRules are iptables-legacy-save's rules and non-ACCEPT
 	// policies, as it prints them.
-	LegacyRules          []string
+	LegacyRules []string
+	// LegacyUnknown is a host whose iptables-legacy tables are loaded and
+	// could not be saved.
+	LegacyUnknown        bool
 	Firewalld            bool
 	PortStart, IPForward string
 	DefaultDev, LAN      string
@@ -304,6 +308,11 @@ func parseFacts(out, user string) (Facts, error) {
 			}
 			f.Ruleset = append(f.Ruleset, v)
 		case "legacy":
+			// No line iptables-legacy-save prints is the word unknown.
+			if v == "unknown" {
+				f.LegacyUnknown = true
+				continue
+			}
 			f.LegacyRules = append(f.LegacyRules, v)
 		case "input-chain":
 			f.InputChains = append(f.InputChains, v)

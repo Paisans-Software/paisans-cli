@@ -1533,11 +1533,13 @@ They run the rendered probe as root in `ubuntu:24.04` and parse what it
 prints: on a blank image, and with `/srv/paisans` linked elsewhere, a
 `--data-dir` below another user's directory or link, a group-writable `/srv`,
 and a file admit writes below a link. Each hostile path must read as unsafe,
-never as what is at the end of it. One more installs nftables and iptables
-from Ubuntu's archive, so it needs the network, and checks that an owner's
-own nft table reads as a firewall, Tailscale-shaped rules do not, and a rule
-only iptables-legacy holds is read too; on the blank image, which has no nft,
-the ruleset must read as unknown, never as no firewall.
+never as what is at the end of it. Three more install packages from Ubuntu's
+archive, so they need the network: an owner's own nft table reads as a
+firewall, Tailscale-shaped rules do not, and a rule only iptables-legacy
+holds is read too; a loaded legacy table whose save is missing reads as
+unknown; and ufw, enabled as an owner enables it, reads as ufw's. On the
+blank image, which has no nft, the ruleset must read as unknown, never as no
+firewall.
 
 Nothing runs
 `go test ./...` or any tagged test for you, so run them before a pull request.

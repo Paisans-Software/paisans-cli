@@ -94,11 +94,21 @@ if command -v nft >/dev/null 2>&1 && ruleset=$(nft list ruleset 2>/dev/null); th
 else
   say ruleset unknown
 fi
-if [ -n "$(cat /proc/net/ip_tables_names /proc/net/ip6_tables_names 2>/dev/null)" ]; then
-  for save in iptables-legacy-save ip6tables-legacy-save; do
-    command -v "$save" >/dev/null 2>&1 && "$save" 2>/dev/null
-  done | grep -E '^-A |^:[^ ]+ (DROP|REJECT) ' | sed 's/^/legacy /'
-fi
+# A family's legacy tables that are loaded but cannot be saved, its save
+# missing or failing, print "legacy unknown". With none loaded there is no
+# legacy rule, and saving would load the modules, which this probe never
+# does.
+legacy=
+for fam in ip ip6; do
+  [ -n "$(cat "/proc/net/${fam}_tables_names" 2>/dev/null)" ] || continue
+  if command -v "${fam}tables-legacy-save" >/dev/null 2>&1 && saved=$("${fam}tables-legacy-save" 2>/dev/null); then
+    legacy="$legacy$saved
+"
+  else
+    say legacy unknown
+  fi
+done
+printf '%s' "$legacy" | grep -E '^-A |^:[^ ]+ (DROP|REJECT) ' | sed 's/^/legacy /'
 nft list chains 2>/dev/null | awk '/^table / { t = $2 " " $3 } /^[ \t]*chain / { c = $2 } /hook input/ { print "input-chain " t " " c }'
 for f in /etc/udev/rules.d/60-paisans-*-watchdog.rules; do [ -e "$f" ] && say watchdog-rule "$f"; done
 for f in /etc/paisans/admitted.*.json; do [ -e "$f" ] && say record "$f"; done

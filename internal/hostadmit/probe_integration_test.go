@@ -147,3 +147,26 @@ func TestProbeSeesAFileBelowALink(t *testing.T) {
 		t.Errorf("sudoers: %+v", s)
 	}
 }
+
+// A loaded legacy table whose save is missing is unknown, never read as
+// holding no rule. It installs iptables, so it needs the network.
+func TestProbeReadsLegacyUnknown(t *testing.T) {
+	setup := "apt-get update -qq >/dev/null 2>&1 && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq iptables >/dev/null 2>&1 || exit 1\n" +
+		"iptables-legacy -A INPUT -p tcp --dport 2222 -j ACCEPT && rm -f \"$(command -v iptables-legacy-save)\""
+	f := probeIn(t, setup, "paisans-f2a9", "", "--cap-add", "NET_ADMIN")
+	if !f.LegacyUnknown || len(f.LegacyRules) != 0 {
+		t.Errorf("legacy unknown %v, rules %q", f.LegacyUnknown, f.LegacyRules)
+	}
+}
+
+// ufw enabled as its owner enables it is ufw's, not a firewall of the
+// owner's that admit would put ufw over. It installs ufw, so it needs the
+// network.
+func TestProbeReadsUFWAsUFWs(t *testing.T) {
+	setup := "apt-get update -qq >/dev/null 2>&1 && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ufw nftables iptables >/dev/null 2>&1 || exit 1\n" +
+		"ufw allow 22/tcp >/dev/null && ufw --force enable >/dev/null"
+	f := probeIn(t, setup, "paisans-f2a9", "", "--cap-add", "NET_ADMIN", "--cap-add", "NET_RAW")
+	if f.RulesetUnknown || len(f.Ruleset) == 0 || len(f.OwnerFirewall) != 0 || f.LegacyUnknown || len(f.LegacyRules) != 0 {
+		t.Errorf("ruleset unknown %v, %d lines, owner %q, legacy %v %q", f.RulesetUnknown, len(f.Ruleset), f.OwnerFirewall, f.LegacyUnknown, f.LegacyRules)
+	}
+}
