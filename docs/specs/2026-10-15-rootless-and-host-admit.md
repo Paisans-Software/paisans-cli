@@ -421,6 +421,10 @@ mostly choose to a service on the owner's loopback or LAN. So:
 * **The helper marks the socket.** `put` adds `FwMark = <mark>` to every
   conf it installs, the mark baked in when admit renders the helper, one
   per deployment. A conf that sets `FwMark` itself is refused, as today.
+  The mark is `0x5053` above the deployment's token, chosen for Docker
+  hosts: Kubernetes CNIs use overlapping bits (kube-proxy's `0x4000` and
+  `0x8000`, Calico's `0xffff0000` mask), so a host running Kubernetes is
+  outside what admit supports.
 * **The egress table filters the mark**, in a second output chain matching
   `meta mark <mark>`, after the name was resolved, so nothing can change
   between the check and the send. It drops loopback, link-local and
