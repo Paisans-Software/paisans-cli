@@ -421,13 +421,23 @@ var delegatedByDefault = map[string][]string{
 	"24.04": {"cpu", "memory", "pids"},
 }
 
+// fallbackDelegated is what a release missing from delegatedByDefault is
+// read as delegating: memory and pids, systemd's user@.service default
+// since long before any release a profile supports, so a warning never
+// claims those are missing. A test keeps every supported release listed.
+var fallbackDelegated = []string{"memory", "pids"}
+
 // undelegated names the controllers delegateConf adds to what the host's
 // release delegates by default, as "cpu, cpuset and io": what compose
-// limits lack without it.
+// limits lack without it. An unlisted release is read as fallbackDelegated.
 func undelegated(host hostprep.OSRelease) string {
+	defaults, ok := delegatedByDefault[host.VersionID]
+	if !ok {
+		defaults = fallbackDelegated
+	}
 	var out []string
 	for _, c := range []string{"cpu", "cpuset", "io", "memory", "pids"} {
-		if !slices.Contains(delegatedByDefault[host.VersionID], c) {
+		if !slices.Contains(defaults, c) {
 			out = append(out, c)
 		}
 	}
