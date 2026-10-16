@@ -12,7 +12,8 @@ import (
 )
 
 // Admit opens the SSH port, the mesh's port when one is admitted, the
-// mesh interface, and 80 and 443 with the public ports; no br-+ rule, since
+// mesh interface, and 80 and 443 with the public ports, 443 for UDP too,
+// which HTTP/3 runs on; no br-+ rule, since
 // a rootless container reaches the mesh address through the user's own
 // process, not a host bridge.
 func TestAdmitRules(t *testing.T) {
@@ -21,7 +22,7 @@ func TestAdmitRules(t *testing.T) {
 	for _, r := range hostprep.AdmitRules(d, 2222, 51820, true) {
 		got = append(got, r.String()+" ("+r.Why+")")
 	}
-	want := []string{"2222/tcp (ssh, the bootstrap route)", "51820/udp (WireGuard, the mesh)", "all inbound on psns-f2a9 (the mesh: etcd, Patroni, Garage, HAProxy)", "80/tcp (public ports, HTTP)", "443/tcp (public ports, HTTPS)"}
+	want := []string{"2222/tcp (ssh, the bootstrap route)", "51820/udp (WireGuard, the mesh)", "all inbound on psns-f2a9 (the mesh: etcd, Patroni, Garage, HAProxy)", "80/tcp (public ports, HTTP)", "443/tcp (public ports, HTTPS)", "443/udp (public ports, HTTP/3)"}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("AdmitRules =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}

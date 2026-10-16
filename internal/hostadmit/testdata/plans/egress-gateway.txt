@@ -351,12 +351,17 @@ step 24: allow 443/tcp
   run:
     $ ufw allow 443/tcp comment 'paisans-f2a9: public ports, HTTPS'
 
-step 25: load softdog
+step 25: allow 443/udp
+  firewall: allow 443/udp (public ports, HTTP/3)
+  run:
+    $ ufw allow 443/udp comment 'paisans-f2a9: public ports, HTTP/3'
+
+step 26: load softdog
   watchdog: load softdog now
   run:
     $ modprobe softdog
 
-step 26: load softdog at boot
+step 27: load softdog at boot
   watchdog: load softdog at every boot (paisans-f2a9-watchdog.service)
   write /etc/systemd/system/paisans-f2a9-watchdog.service mode 0644:
     | # Written by paisans host admit. Loads softdog at boot, before
@@ -381,7 +386,7 @@ step 26: load softdog at boot
   run:
     $ systemctl daemon-reload && systemctl enable paisans-f2a9-watchdog.service
 
-step 27: give the watchdog to paisans-f2a9
+step 28: give the watchdog to paisans-f2a9
   watchdog: /etc/udev/rules.d/60-paisans-f2a9-watchdog.rules makes /dev/watchdog and /dev/watchdog0 paisans-f2a9's, owner and group, mode 600
   write /etc/udev/rules.d/60-paisans-f2a9-watchdog.rules mode 0644:
     | # Written by paisans host admit: the watchdog is paisans-f2a9's, for its
@@ -390,7 +395,7 @@ step 27: give the watchdog to paisans-f2a9
   run:
     $ udevadm control --reload && udevadm trigger --subsystem-match=watchdog --subsystem-match=misc
 
-step 28: set the host's sysctls
+step 29: set the host's sysctls
   sysctls: /etc/sysctl.d/60-paisans.conf, applied with sysctl --system, which applies every sysctl file on the host again, then each key checked, since a file read after it could set one back
   write /etc/sysctl.d/60-paisans.conf mode 0644:
     | # Written by paisans host admit, for every admitted deployment that needs
@@ -400,7 +405,7 @@ step 28: set the host's sysctls
   run:
     $ sysctl --system >/dev/null && { [ "$(sysctl -n net.ipv4.ip_unprivileged_port_start)" = 80 ] || { echo 'net.ipv4.ip_unprivileged_port_start is not 80 after sysctl --system: a file read after /etc/sysctl.d/60-paisans.conf sets it'; exit 1; }; } && { [ "$(sysctl -n net.ipv4.ip_forward)" = 1 ] || { echo 'net.ipv4.ip_forward is not 1 after sysctl --system: a file read after /etc/sysctl.d/60-paisans.conf sets it'; exit 1; }; }
 
-step 29: write the admission record
+step 30: write the admission record
   record: who the deployment runs as and what you granted, which its own commands read
   write /etc/paisans/admitted.f2a9.json mode 0644:
     | {
@@ -429,7 +434,7 @@ step 29: write the admission record
     |   "system_docker_disabled": false
     | }
 
-step 30: add the operators' keys
+step 31: add the operators' keys
   keys: 3 operator keys into paisans-f2a9's authorized_keys, written as paisans-f2a9, and recorded in /srv/paisans/f2a9/.paisans/authorized_keys.owned for host prepare
   run:
     $ runuser -u paisans-f2a9 -- env -i HOME='/home/paisans-f2a9' PATH=/usr/bin:/bin:/usr/sbin:/sbin XDG_RUNTIME_DIR=/run/user/1001 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1001/bus DOCKER_HOST=unix:///run/user/1001/docker.sock sh -c 'set -e; umask 077; mkdir -p "$HOME/.ssh" /srv/paisans/f2a9/.paisans; chmod go-w "$HOME/.ssh"

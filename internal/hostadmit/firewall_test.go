@@ -1,6 +1,7 @@
 package hostadmit_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -240,5 +241,26 @@ func TestANATRuleOnASetRefuses(t *testing.T) {
 	_, err := hostadmit.Build(h, input(t, "home-a", gateway))
 	if err == nil || !strings.Contains(err.Error(), "ports admit cannot read") || !strings.Contains(err.Error(), "tcp dport @web") {
 		t.Errorf("Build = %v", err)
+	}
+}
+
+// With --public-ports, HTTP/3's 443/udp is opened beside 80 and 443/tcp,
+// tagged like them, since the egress table lets the deployment's Caddy
+// answer from it; evict removes it with the rest.
+func TestThePublicPortsOpenUDP443(t *testing.T) {
+	plan, err := hostadmit.Build(home(), input(t, "watch", hostadmit.Flags{PublicPorts: true}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const allow = "ufw allow 443/udp comment 'paisans-f2a9: public ports, HTTP/3'"
+	if !slices.ContainsFunc(plan.Steps, func(s hostadmit.Step) bool { return s.Command == allow }) {
+		t.Errorf("no step runs %q:\n%s", allow, plan.Text())
+	}
+	evict, err := hostadmit.BuildEvict(evicted("watch", hostadmit.Flags{PublicPorts: true})(), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(evict.Steps, func(s hostadmit.Step) bool { return strings.HasPrefix(s.Command, "ufw delete allow 443/udp") }) {
+		t.Errorf("evict leaves 443/udp open:\n%s", evict.Text())
 	}
 }

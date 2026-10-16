@@ -37,6 +37,7 @@ present: firewall: 51820/udp allowed
 present: firewall: all inbound on psns-f2a9 allowed
 present: firewall: 80/tcp allowed
 present: firewall: 443/tcp allowed
+present: firewall: 443/udp allowed
 present: firewall: ufw active, its default policy left to the owner
 present: watchdog: watchdog0 is iTCO_wdt
 present: watchdog: the device is paisans-f2a9's
