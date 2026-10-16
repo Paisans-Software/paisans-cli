@@ -445,6 +445,7 @@ step 14: install the helper's sudoers line
 present: package: nftables installed
 present: apparmor: rootlesskit's profile is loaded
 present: mesh: nothing on this host overlaps 10.44.0.0/24
+present: forwarding: not needed, this site has no endpoint
 present: web server: caddy (process caddy), obtains its own certificates
 warning: web server: Caddy's admin API answers on TCP at localhost:2019
   Any local user, every admitted deployment's user among them, can replace that Caddy's configuration through it. Put admin unix//run/caddy-admin.sock, or admin off, in the global options block of its Caddyfile, and reload Caddy.

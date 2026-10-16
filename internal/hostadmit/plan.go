@@ -192,9 +192,9 @@ var parts = []part{
 	{"mesh subnet", planMeshSubnet},             // 10a
 	{"wireguard", planWireGuard},                // 11
 	// 12. firewall
-	// 13. watchdog
-	// 14. sysctls
-	{"web server", planWebServer}, // 14a
+	{"watchdog", planWatchdogGrant}, // 13
+	{"sysctls", planSysctls},        // 14
+	{"web server", planWebServer},   // 14a
 	// 15. record
 	// 16. keys
 	// 17. check

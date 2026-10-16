@@ -445,4 +445,5 @@ step 14: install the helper's sudoers line
 present: package: nftables installed
 present: apparmor: rootlesskit's profile is loaded
 present: mesh: nothing on this host overlaps 10.44.0.0/24
+present: forwarding: not needed, this site has no endpoint
 present: web server: apache (process apache2, config /etc/apache2/apache2.conf), loads its certificates from files

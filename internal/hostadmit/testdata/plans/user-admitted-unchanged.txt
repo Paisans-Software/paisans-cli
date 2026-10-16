@@ -20,3 +20,4 @@ present: mesh: nothing on this host overlaps 10.44.0.0/24
 present: wireguard: /etc/wireguard is root's alone
 present: wireguard: the one command paisans-f2a9 may run as root: it checks each conf before wg-quick sees it, and adds the mesh's mark
 present: wireguard: /etc/sudoers.d/paisans-f2a9 lets paisans-f2a9 run the helper alone
+present: forwarding: not needed, this site has no endpoint

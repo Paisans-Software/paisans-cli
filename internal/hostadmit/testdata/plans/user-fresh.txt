@@ -421,3 +421,4 @@ present: package: ufw installed
 present: package: git installed
 present: apparmor: rootlesskit's profile is loaded
 present: mesh: nothing on this host overlaps 10.44.0.0/24
+present: forwarding: not needed, this site has no endpoint

@@ -404,6 +404,44 @@ step 10: install the helper's sudoers line
   run:
     $ visudo -cqf /etc/sudoers.d/paisans-f2a9.new && chown root:root /etc/sudoers.d/paisans-f2a9.new && mv -f /etc/sudoers.d/paisans-f2a9.new /etc/sudoers.d/paisans-f2a9 || { rm -f /etc/sudoers.d/paisans-f2a9.new; echo 'visudo refused the line; nothing reached sudo'; exit 1; }
 
+step 11: load softdog
+  watchdog: load softdog now
+  run:
+    $ modprobe softdog
+
+step 12: load softdog at boot
+  watchdog: load softdog at every boot (paisans-f2a9-watchdog.service)
+  write /etc/systemd/system/paisans-f2a9-watchdog.service mode 0644:
+    | # Written by paisans host prepare. Loads softdog at boot, before Docker
+    | # starts the Patroni container that maps /dev/watchdog.
+    | #
+    | # A unit and not /etc/modules-load.d: Ubuntu's kernel package blacklists the
+    | # watchdog drivers, and systemd-modules-load applies that blacklist, so a
+    | # modules-load.d entry would be skipped at boot. modprobe named on a command
+    | # line does not apply it.
+    | [Unit]
+    | Description=Load the softdog watchdog for Patroni
+    | Before=docker.service
+    | 
+    | [Service]
+    | Type=oneshot
+    | ExecStart=/usr/sbin/modprobe softdog
+    | RemainAfterExit=yes
+    | 
+    | [Install]
+    | WantedBy=multi-user.target
+  run:
+    $ systemctl daemon-reload && systemctl enable paisans-f2a9-watchdog.service
+
+step 13: give the watchdog to community
+  watchdog: /etc/udev/rules.d/60-paisans-f2a9-watchdog.rules makes /dev/watchdog and /dev/watchdog0 community's, owner and group, mode 600
+  write /etc/udev/rules.d/60-paisans-f2a9-watchdog.rules mode 0644:
+    | # Written by paisans host admit: the watchdog is community's, for its
+    | # Patroni. One deployment per host holds it; paisans host evict removes this.
+    | KERNEL=="watchdog*", OWNER="community", GROUP="community", MODE="0600"
+  run:
+    $ udevadm control --reload && udevadm trigger --subsystem-match=watchdog --subsystem-match=misc
+
 present: docker: Engine 29.9.1
 present: package: docker-ce-rootless-extras installed
 present: package: uidmap installed
@@ -416,5 +454,10 @@ present: user: community exists, uid 1002, in no privileged group, and sudo gran
 present: user: community holds 231072-296607 in /etc/subuid
 present: user: community holds 231072-296607 in /etc/subgid
 present: mesh: nothing on this host overlaps 10.44.0.0/24
+present: forwarding: not needed, this site has no endpoint
 warning: user: community already exists and is not paisans-f2a9
   admit adds the operators' keys to community's authorized_keys and runs the deployment as community: check that this account is meant for the deployment and nothing else.
+warning: watchdog: falling back to softdog
+  the watchdog will be softdog. It reboots the host when Patroni hangs, but not when the kernel does, and a hung kernel cannot fence itself any other way. A hardware or hypervisor watchdog is better: enable one in the firmware or the VM's settings, and prepare again.
+warning: watchdog: community's Patroni can reboot this machine
+  Patroni arms the watchdog and reboots the whole host when it stops renewing it, which is what makes its failover safe.

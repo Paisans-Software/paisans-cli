@@ -445,5 +445,6 @@ step 14: install the helper's sudoers line
 present: package: nftables installed
 present: apparmor: rootlesskit's profile is loaded
 present: mesh: nothing on this host overlaps 10.44.0.0/24
+present: forwarding: not needed, this site has no endpoint
 warning: web server: its configuration names no certificate file
   Admit records what it could tell; paisans web-server show asks you for the rest when the operators run it.
