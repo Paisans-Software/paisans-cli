@@ -7,7 +7,9 @@
         packages this install adds, and asks the owner's own, copied to
         policy-rc.d.paisans-owner, about every other. There is never a
         moment with no policy in place: admit's is written whole first, the
-        owner's is copied, not moved, and admit's is renamed over it. When the
+        owner's is copied, not moved, through a temporary name, so a copy cut
+        short is never taken for the owner's, and admit's is renamed over
+        it. When the
         shell exits, however it exits, confirm_claims runs first when the
         caller defines it (host admit records there what apt installed),
         then the owner's goes back, or admit's is removed; one an
@@ -28,7 +30,7 @@ if [ -x /usr/sbin/policy-rc.d.paisans-owner ]; then exec /usr/sbin/policy-rc.d.p
 exit 0
 POLICY
 chmod 755 /usr/sbin/.policy-rc.d.paisans-tmp
-if [ -e /usr/sbin/policy-rc.d ] || [ -L /usr/sbin/policy-rc.d ]; then cp -pP /usr/sbin/policy-rc.d /usr/sbin/policy-rc.d.paisans-owner; fi
+if [ -e /usr/sbin/policy-rc.d ] || [ -L /usr/sbin/policy-rc.d ]; then cp -pP /usr/sbin/policy-rc.d /usr/sbin/.policy-rc.d.paisans-owner-tmp && mv -f /usr/sbin/.policy-rc.d.paisans-owner-tmp /usr/sbin/policy-rc.d.paisans-owner; fi
 trap 'if command -v confirm_claims >/dev/null 2>&1; then confirm_claims || true; fi; release_docker_hold' EXIT
 trap 'exit 1' HUP INT TERM
 mv -f /usr/sbin/.policy-rc.d.paisans-tmp /usr/sbin/policy-rc.d

@@ -236,6 +236,9 @@ func TestTheDockerHoldPutsBackTheOwnersPolicy(t *testing.T) {
 	}
 	command := s.Steps[len(s.Steps)-1].Command
 	hold := command[:strings.Index(command, "export DEBIAN_FRONTEND")]
+	if !strings.Contains(hold, "cp -pP /usr/sbin/policy-rc.d /usr/sbin/.policy-rc.d.paisans-owner-tmp && mv -f /usr/sbin/.policy-rc.d.paisans-owner-tmp /usr/sbin/policy-rc.d.paisans-owner") {
+		t.Errorf("the owner's policy is not copied through a temporary name:\n%s", hold)
+	}
 	release, err := profile.ReleaseDockerHold()
 	if err != nil {
 		t.Fatal(err)
@@ -257,6 +260,11 @@ func TestTheDockerHoldPutsBackTheOwnersPolicy(t *testing.T) {
 		{name: "left by an interrupted run", before: owner, leftover: "hold", want: held},
 		{name: "the owner's renamed, none in place", before: owner, want: held, left: func(sbin string) {
 			if err := os.Rename(filepath.Join(sbin, "policy-rc.d"), filepath.Join(sbin, "policy-rc.d.paisans-owner")); err != nil {
+				panic(err)
+			}
+		}},
+		{name: "a copy cut short", before: owner, want: held, left: func(sbin string) {
+			if err := os.WriteFile(filepath.Join(sbin, ".policy-rc.d.paisans-owner-tmp"), []byte("#!/bin/sh\nec"), 0o755); err != nil {
 				panic(err)
 			}
 		}},
@@ -309,7 +317,7 @@ func TestTheDockerHoldPutsBackTheOwnersPolicy(t *testing.T) {
 			case c.before != "" && string(after) != c.before:
 				t.Errorf("the owner's policy-rc.d is %q, %v", after, err)
 			}
-			for _, f := range []string{policy + ".paisans-owner", filepath.Join(sbin, ".policy-rc.d.paisans-tmp")} {
+			for _, f := range []string{policy + ".paisans-owner", filepath.Join(sbin, ".policy-rc.d.paisans-tmp"), filepath.Join(sbin, ".policy-rc.d.paisans-owner-tmp")} {
 				if _, err := os.Lstat(f); !os.IsNotExist(err) {
 					t.Errorf("%s is left: %v", f, err)
 				}

@@ -47,10 +47,11 @@ for unit in docker.socket docker.service containerd.service; do
   say system-unit "$unit ${e:-disabled} ${a:-inactive}"
 done
 # What a run that stopped while admit held Docker's daemons can leave: its
-# own /usr/sbin/policy-rc.d, the copy of the owner's, or its temporary file.
+# own /usr/sbin/policy-rc.d, the copy of the owner's, or a temporary file.
 if { [ -f /usr/sbin/policy-rc.d ] && [ ! -L /usr/sbin/policy-rc.d ] && grep -qxF {{ q (printf "# %s" .HoldMarker) }} /usr/sbin/policy-rc.d; } ||
   [ -e /usr/sbin/policy-rc.d.paisans-owner ] || [ -L /usr/sbin/policy-rc.d.paisans-owner ] ||
-  [ -e /usr/sbin/.policy-rc.d.paisans-tmp ] || [ -L /usr/sbin/.policy-rc.d.paisans-tmp ]; then say docker-hold held; else say docker-hold none; fi
+  [ -e /usr/sbin/.policy-rc.d.paisans-tmp ] || [ -L /usr/sbin/.policy-rc.d.paisans-tmp ] ||
+  [ -e /usr/sbin/.policy-rc.d.paisans-owner-tmp ] || [ -L /usr/sbin/.policy-rc.d.paisans-owner-tmp ]; then say docker-hold held; else say docker-hold none; fi
 # AppArmor's restriction on unprivileged user namespaces, and the
 # rootlesskit profile Ubuntu's apparmor package loads at boot.
 say userns-restrict "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)"

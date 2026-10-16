@@ -75,7 +75,7 @@ step 15: put back /usr/sbin/policy-rc.d
   run:
     $ set -e
     $ release_docker_hold() {
-    $   rm -f /usr/sbin/.policy-rc.d.paisans-tmp
+    $   rm -f /usr/sbin/.policy-rc.d.paisans-tmp /usr/sbin/.policy-rc.d.paisans-owner-tmp
     $   if [ -f /usr/sbin/policy-rc.d ] && [ ! -L /usr/sbin/policy-rc.d ] && grep -qxF '# Written by paisans host admit while it installs Docker, and removed after.' /usr/sbin/policy-rc.d; then
     $     if [ -e /usr/sbin/policy-rc.d.paisans-owner ] || [ -L /usr/sbin/policy-rc.d.paisans-owner ]; then
     $       mv -f /usr/sbin/policy-rc.d.paisans-owner /usr/sbin/policy-rc.d

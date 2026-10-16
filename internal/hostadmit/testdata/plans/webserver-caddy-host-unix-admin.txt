@@ -143,7 +143,7 @@ step 6: install packages: docker-ce, docker-ce-cli, containerd.io, docker-buildx
     $ trap confirm_claims EXIT
     $ set -e
     $ release_docker_hold() {
-    $   rm -f /usr/sbin/.policy-rc.d.paisans-tmp
+    $   rm -f /usr/sbin/.policy-rc.d.paisans-tmp /usr/sbin/.policy-rc.d.paisans-owner-tmp
     $   if [ -f /usr/sbin/policy-rc.d ] && [ ! -L /usr/sbin/policy-rc.d ] && grep -qxF '# Written by paisans host admit while it installs Docker, and removed after.' /usr/sbin/policy-rc.d; then
     $     if [ -e /usr/sbin/policy-rc.d.paisans-owner ] || [ -L /usr/sbin/policy-rc.d.paisans-owner ]; then
     $       mv -f /usr/sbin/policy-rc.d.paisans-owner /usr/sbin/policy-rc.d
@@ -175,7 +175,7 @@ step 6: install packages: docker-ce, docker-ce-cli, containerd.io, docker-buildx
     $ exit 0
     $ POLICY
     $ chmod 755 /usr/sbin/.policy-rc.d.paisans-tmp
-    $ if [ -e /usr/sbin/policy-rc.d ] || [ -L /usr/sbin/policy-rc.d ]; then cp -pP /usr/sbin/policy-rc.d /usr/sbin/policy-rc.d.paisans-owner; fi
+    $ if [ -e /usr/sbin/policy-rc.d ] || [ -L /usr/sbin/policy-rc.d ]; then cp -pP /usr/sbin/policy-rc.d /usr/sbin/.policy-rc.d.paisans-owner-tmp && mv -f /usr/sbin/.policy-rc.d.paisans-owner-tmp /usr/sbin/policy-rc.d.paisans-owner; fi
     $ trap 'if command -v confirm_claims >/dev/null 2>&1; then confirm_claims || true; fi; release_docker_hold' EXIT
     $ trap 'exit 1' HUP INT TERM
     $ mv -f /usr/sbin/.policy-rc.d.paisans-tmp /usr/sbin/policy-rc.d
