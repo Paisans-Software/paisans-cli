@@ -1,0 +1,1 @@
+refused: wireguard: /etc/wireguard carries an ACL (drwx------+), and admit cannot make it a directory only root may write. A conf the deployment's user could plant there would run its PostUp as root at the next up. Fix it yourself (remove the link, or the ACL with setfacl -b) and admit again. Nothing was changed

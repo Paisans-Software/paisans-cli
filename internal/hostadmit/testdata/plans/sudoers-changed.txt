@@ -1,0 +1,22 @@
+admit site vm of f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01 as paisans-f2a9 on fake (ubuntu 24.04)
+
+step 1: create /srv/paisans
+  directory: every deployment's directory lives in it, root's, mode 755
+  run:
+    $ install -d -m 755 -o root -g root /srv/paisans
+
+step 2: create /srv/paisans/f2a9
+  directory: the deployment's own, paisans-f2a9's, mode 750
+  run:
+    $ install -d -m 750 -o paisans-f2a9 -g paisans-f2a9 /srv/paisans/f2a9
+
+step 3: restore the helper's sudoers line
+  wireguard: /etc/sudoers.d/paisans-f2a9, mode 440, checked by visudo under a name sudo skips before it is moved into place
+  write /etc/sudoers.d/paisans-f2a9.new mode 0440:
+    | paisans-f2a9 ALL=(root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-f2a9
+  run:
+    $ visudo -cqf /etc/sudoers.d/paisans-f2a9.new && chown root:root /etc/sudoers.d/paisans-f2a9.new && mv -f /etc/sudoers.d/paisans-f2a9.new /etc/sudoers.d/paisans-f2a9 || { rm -f /etc/sudoers.d/paisans-f2a9.new; echo 'visudo refused the line; nothing reached sudo'; exit 1; }
+
+present: mesh: nothing on this host overlaps 10.44.0.0/24
+present: wireguard: /etc/wireguard is root's alone
+present: wireguard: the one command paisans-f2a9 may run as root: it checks each conf before wg-quick sees it, and adds the mesh's mark

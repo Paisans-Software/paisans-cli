@@ -214,6 +214,24 @@ func request(t *testing.T, site string) admission.Request {
 	return req
 }
 
+// requestFor is request without a *testing.T, for a fixture's builders.
+// The fixture always builds, so an error is a broken test and panics.
+func requestFor(site string) admission.Request {
+	cfg, err := config.Load(filepath.Join("..", "admission", "testdata", "paisans-stack.yaml"))
+	if err != nil {
+		panic(err)
+	}
+	built, err := admission.Build(cfg, site)
+	if err != nil {
+		panic(err)
+	}
+	req, err := admission.Parse(admission.Encode(built))
+	if err != nil {
+		panic(err)
+	}
+	return req
+}
+
 // admitted is the time every golden plan is drawn at.
 var admitted = time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
 
