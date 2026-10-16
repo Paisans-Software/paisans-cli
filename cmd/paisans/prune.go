@@ -105,10 +105,13 @@ func showVolumePrune(r ui.Reporter, plan *apply.VolumePrune) {
 		return
 	}
 	var total int64
+	unknown := 0
 	for _, v := range plan.Volumes {
 		if v.Remove {
 			if v.Size >= 0 {
 				total += v.Size
+			} else {
+				unknown++
 			}
 			showVolume(r, "remove", v, ui.Pending)
 		}
@@ -120,7 +123,11 @@ func showVolumePrune(r ui.Reporter, plan *apply.VolumePrune) {
 			}
 		}
 	}
-	r.Detail("total: %d of %d dangling volume(s), %s", len(plan.Removals()), len(plan.Volumes), apply.FormatSize(total))
+	size := apply.FormatSize(total)
+	if unknown > 0 {
+		size += fmt.Sprintf(" (plus %d of unknown size)", unknown)
+	}
+	r.Detail("total: %d of %d dangling volume(s), %s", len(plan.Removals()), len(plan.Volumes), size)
 }
 
 // showVolume is one verdict: verb and the volume's name as the title, its

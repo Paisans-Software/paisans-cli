@@ -96,3 +96,17 @@ func TestPruneShortensOnlyAnonymousVolumeNames(t *testing.T) {
 		t.Errorf("named volumes are not told apart:\n%s", rec.Lines())
 	}
 }
+
+// A volume whose size Docker did not report is not counted as nothing: the
+// total says how many it leaves out.
+func TestPruneTotalNamesVolumesOfUnknownSize(t *testing.T) {
+	plan := &apply.VolumePrune{Volumes: []apply.DanglingVolume{
+		{Name: "a", Size: 1024, Remove: true},
+		{Name: "b", Size: -1, Remove: true},
+	}}
+	rec := &ui.Recorder{}
+	showVolumePrune(rec, plan)
+	if !strings.Contains(rec.Lines(), "total: 2 of 2 dangling volume(s), 0.0 MiB (plus 1 of unknown size)") {
+		t.Errorf("got:\n%s", rec.Lines())
+	}
+}
