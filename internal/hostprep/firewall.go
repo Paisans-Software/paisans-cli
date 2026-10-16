@@ -27,14 +27,6 @@ type Rule struct {
 // admit added for an earlier ssh.port, and keeps it.
 const sshWhy = "ssh, the bootstrap route"
 
-// gatewayHTTPWhy and gatewayHTTPSWhy are the gateway's allows for 80 and
-// 443, which a site remove keeps while the gateway's Caddy is kept for the
-// host owner's sites.
-const (
-	gatewayHTTPWhy  = "the gateway, HTTP"
-	gatewayHTTPSWhy = "the gateway, HTTPS"
-)
-
 func (r Rule) String() string {
 	if r.Interface != "" && r.To != "" {
 		return fmt.Sprintf("%d/%s on %s to %s", r.Port, r.Proto, r.Interface, r.To)
