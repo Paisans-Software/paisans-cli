@@ -355,13 +355,38 @@ func TestDoctorSelfChecksEachCaddySite(t *testing.T) {
 		return &selfcheck.Conflict{Port: 443, Site: target.Site, Detail: `status 200, body "hello"`}
 	}
 	rec := withRecorder(t, true)
-	_ = runDoctor([]string{"--config", fixtureConfig(), "--site", "vm", "--site", "watch"})
+	runErr := runDoctor([]string{"--config", fixtureConfig(), "--site", "vm", "--site", "watch"})
 	out := rec.Lines()
+	if runErr == nil {
+		t.Errorf("doctor passed with a monitor answering as something else:\n%s", out)
+	}
 	if !strings.Contains(out, "fail: check self-check watch 443 on watch answers, but not as this deployment") {
 		t.Errorf("the monitor's answer is not a failure:\n%s", out)
 	}
 	if !strings.Contains(out, "warned: check self-check vm not asked from outside: no public_address to ask through") {
 		t.Errorf("the gateway with no public_address does not say it was not asked:\n%s", out)
+	}
+}
+
+// A Caddy site with a public_address but no hostname of its own is not
+// asked, and says it has no hostname to ask for.
+func TestDoctorSelfCheckWithNoHostname(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	health := cfg.Apps["health"]
+	health.Hostname = ""
+	cfg.Apps["health"] = health
+	saved := doctorSelfCheck
+	t.Cleanup(func() { doctorSelfCheck = saved })
+	doctorSelfCheck = func(context.Context, selfcheck.Target) error {
+		t.Error("asked a site with no hostname to ask for")
+		return nil
+	}
+	p := doctorReads{cfg: cfg}.SelfCheck("watch")
+	if p.Unchecked != "no hostname to ask for" {
+		t.Errorf("watch with no hostname: %+v", p)
 	}
 }
 
