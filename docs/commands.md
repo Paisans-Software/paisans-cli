@@ -259,8 +259,8 @@ paisans secrets set
 
 * **Flags:** the key, as the first argument, or none to be asked for each owed
   secret; `--config`, `--secrets`.
-* **Hosts:** none, except for an SMTP password, which is tried from a site
-  running an app that uses it, over ssh, and changes nothing there.
+* **Hosts:** none. An SMTP password is tried from this machine, and `apply`
+  tries it from each site running an app that uses it.
 * **`--execute`:** not taken. It writes the local file at once. Given no key
   it refuses anything but a terminal on stdin.
 
@@ -352,10 +352,13 @@ paisans secrets rotate --all --restart --execute           # the full list again
   it is refused before it is written or handed to any Caddy. A provider whose
   record management is not implemented is not checked; the plan says so.
 * **An SMTP password's check:** a pasted one logs in to the mail server from
-  a site running each app that uses it and sends every operator one test
-  message as soon as it is given; one set with `secrets set` logs in when the
+  this machine and sends every operator one test message as soon as it is
+  given; one set with `secrets set` logs in when the
   run is planned. One that fails is refused before it is written under
-  `rotations`. Stage 2 logs in again, and sends nothing.
+  `rotations`. A server this machine cannot reach is a warning and the
+  rotation goes on. Stage 2 logs in again from this machine, and each site
+  tries the password before it is handed it, a refusal stopping the rotation
+  there; nothing more is sent.
 
 A pending rotation that cannot finish, Eg: of a secret whose app was taken
 out of `paisans-stack.yaml`, is ended by hand: *A rotation that cannot finish* in
@@ -870,10 +873,13 @@ images it superseded* in `README.md`).
   is left out as if not yet added; a down site, joined and not answering, is
   kept as declared with its own steps skipped. The plan opens with a `pending`
   section, a line for each with its reason, a pending one's `paisans host
-  request --site <name> > <name>.admit` line, and what the deployment is
-  without while it is gone. The run goes on with the sites it has and ends
+  request --site <name> > <name>.admit` line (only for a site pending for
+  its own login or admission, not through a relay), and what the deployment is
+  without while it is gone. While a joined site is down, a site joining
+  through `site add` waits as well (`site add <site>: waits until every joined
+  site answers`). The run goes on with the sites it has and ends
   `Applied, degraded: <n> sites pending or down (<names>)`, exit 0.
-  `--require-all` makes a degraded run exit 1. It still refuses when the
+  `--require-all` makes a degraded run, or its dry run, exit 1. It still refuses when the
   gateway is pending or down, when no ready data site remains while an app
   needs a database, or when etcd or Patroni has no quorum among the members
   that answer.
@@ -955,7 +961,8 @@ starts, restarts or recreates what changed.
   asking for `/.well-known/paisans/<token>` through the community's public
   address, on 443 and on 80 (expecting the redirect), and fails the step
   with "443 on <site> answers, but not as this deployment" when anything
-  else answers there. `--require-all` is as for the whole apply.
+  else answers there. With no `public_address` it warns "not checked"; a gateway
+  that does not answer fails with an account of hairpin NAT. `--require-all` is as for the whole apply.
 * **Mail:** before the host check, dry run or not, every app the apply
   starts on the site (`--only` narrows it) logs in to its mail server from
   the site, through `--ssh` when given, under `mail`; nothing is sent. A

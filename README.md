@@ -2674,7 +2674,7 @@ the mail server, from the machine the command runs on, and sends the
 operators one test message as soon as it is given, so a mistyped password, or
 a sender the provider refuses, is refused before it is written under
 `rotations`. One set with `secrets set` sent its message when it was set, and
-logs in when the run is planned. Stage 2 logs in with it again, and the run
+logs in when the run is planned. A server this machine cannot reach is a warning and the rotation goes on. Stage 2 logs in with it again, from this machine and from each site before that site is handed the password, and the run
 stops there, before stage 3, when it does not. No other message is sent
 (*Mail settings are tried before they are used*).
 
@@ -2908,7 +2908,7 @@ default (`AllowTcpForwarding`, sshd_config(5)); a host that refuses it says
 | Command | What it tries | On failure |
 |---|---|---|
 | `secrets set` an SMTP password | from this machine, logs in with the new password and sends one test message | refused; nothing is written. A server this machine cannot reach is a warning, and the password is written for `apply` to try |
-| `secrets rotate` an SMTP password | from this machine, a pasted one logs in and sends one test message when pasted; one set with `secrets set` logs in when the run is planned; stage 2 logs in again | refused before anything is written under `rotations`, or stopped at stage 2 before any app is handed it |
+| `secrets rotate` an SMTP password | from this machine, a pasted one logs in and sends one test message when pasted; one set with `secrets set` logs in when the run is planned; stage 2 logs in again, and each site tries it before it is handed the password | refused before anything is written under `rotations`, or stopped at stage 2 before any app is handed it; a server this machine cannot reach is a warning, and the sites alone try it |
 | `apply`, with or without `--site` | every app it would start logs in, from each site it runs on; nothing is sent | refused before any host is changed, naming the app, where its settings are declared, and the server's reply |
 | `validate` | every app logs in, from each site it runs on; nothing is sent | a warning |
 
@@ -5030,7 +5030,11 @@ check. The gateway's Caddy serves `/.well-known/paisans/<token>`, answering
 with the deployment's token, and `apply` ends the gateway's step by fetching
 it through the community's public address on 443 (and on 80, expecting the
 redirect). Any other answer is a conflict: the step fails with "443 on <site>
-answers, but not as this deployment", whatever the host check saw.
+answers, but not as this deployment", whatever the host check saw. A gateway
+with no `public_address` or hostname to ask for warns "not checked", and one
+that does not answer fails with an account of hairpin NAT: a gateway at home,
+reached from its own network, needs the router to send its public address back
+inside.
 
 #### Docker is judged by its version, not its source
 
@@ -5210,7 +5214,7 @@ says `todo`, `ok` and `WARN` instead.
 | nothing matching | `○ allow <rule>` | added, with the comment |
 | the rule, with the comment | `✓` | nothing |
 | the rule, with the comment, another action | `○ allow <rule>` | re-added as an allow, replacing the hand edit |
-| the rule, with no comment | `✓`, then `○ adopt rule <rule>` | re-added with the comment |
+| the rule, with no comment | `✓ …: without the paisans comment` | nothing; it is the owner's, reported and left alone |
 | the rule, with someone else's comment | `✓ …: not paisans` | nothing; it satisfies the rule |
 | the same traffic, another action (`limit`, `deny`) | `!` | nothing; a `deny` or `reject` on SSH is refused |
 | a commented rule nothing derives any more | `○ remove ufw rule <rule>` | deleted, last |
@@ -5232,13 +5236,8 @@ adds). So adding ours over a rule someone else commented would rewrite their
 comment, and adding an allow over their `limit` would loosen it. Both are left
 alone.
 
-The same behaviour makes adoption one command. A host prepared before rules
-carried a comment holds exactly the derived rules, uncommented. Re-adding each
-with the comment rewrites it in place, so there is no moment without the rule
-and nothing to delete afterwards. That matters, because ufw lets a delete that
-names no comment remove a rule that has one, so a delete there would remove the
-rule just adopted, and for SSH, lock the host out. An uncommented rule that no longer matches anything
-derived is indistinguishable from an owner's and stays until removed by hand.
+An uncommented rule is the owner's, whether or not it matches a derived rule:
+it is reported and left alone, and it stays until removed by hand.
 
 **SSH is never removed**, not even an allow `host admit` added itself. With
 incoming denied by default, that deletion drops the next connection, every
@@ -5309,9 +5308,8 @@ mode 700 state directory, one line per key:
 | Mark | Meaning |
 |------|---------|
 | `added` | `host admit` or `host prepare` appended the line to `authorized_keys` |
-| `shared` | the key is recorded, but its line is never removed |
 
-A line of any other shape is not one of this deployment's claims. Keys are
+Only an `added` line is one of this deployment's claims; a line of any other shape is no claim. Keys are
 compared by fingerprint, so a key whose comment was changed is still the same
 key, and the deployment keeps its own name for it.
 
@@ -5328,12 +5326,10 @@ For a key the sidecar lists that `ssh.keys` no longer does:
 
 | `authorized_keys` holds | Mark | The plan says | What happens |
 |-------------------------|------|---------------|--------------|
-| nothing for the key | any | `○ forget ssh key` | dropped from the sidecar |
-| the key | `shared` | `○ release ssh key` | dropped from the sidecar; the line stays |
+| nothing for the key | `added` | `○ forget ssh key` | dropped from the sidecar |
 | the key | `added` | `○ remove ssh key` | that exact line deleted, last of all |
 
-A key whose claim is released stays in `authorized_keys`, recorded nowhere,
-until someone deletes it by hand. Any key the sidecar does not list is never
+Any key the sidecar does not list is never
 mentioned and never touched. With `-v`, the keys' part of a plan reads:
 
 ```
@@ -6054,12 +6050,15 @@ when a source that could have listed a site cannot be read, the run stops
 rather than guess.
 
 **What it says.** The plan opens with a `pending` section: a line per pending
-or down site with its reason and, for a pending one, its `paisans host request
---site <site> > <site>.admit` line, then what the deployment is without (the
+or down site with its reason and, for a site pending for its own login or
+admission, its `paisans host request --site <site> > <site>.admit` line (a site
+pending through a relay has none), then what the deployment is without (the
 wording of `doctor`'s Reach row). The run ends `Applied, degraded: <n> sites
 pending or down (<names>)` and exits 0, since every step it could take ran.
-`--require-all` makes a degraded run exit 1, for automation that must not pass
-on one. `doctor` reports a site that does not answer as a `FAIL` in its Reach
+While a joined site is down, a site joining through `site add` waits too, with
+the line `site add <site>: waits until every joined site answers`, and the run
+ends degraded. `--require-all` makes a degraded run, or its dry run, exit 1, for
+automation that must not pass on one. `doctor` reports a site that does not answer as a `FAIL` in its Reach
 row, with the same account of what the deployment is without.
 
 **The declaration stays the only record.** The configuration store keeps

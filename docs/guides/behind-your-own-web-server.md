@@ -41,13 +41,14 @@ apps:
       admin_group: operators
 ```
 
-**Choose `listen` carefully.** Docker publishes a port with its own iptables
-rules, which sit in front of ufw, so the firewall does not protect a published
-port. Use `127.0.0.1` whenever the web server runs on the same machine: then
-only that machine can reach the app. `paisans validate` refuses a public
-address, and warns about a private LAN address (RFC 1918, or `100.64.0.0/10`
-as Tailscale uses) or the site's mesh address, because anything that can
-reach those reaches the app around your web server.
+**Choose `listen` carefully.** Rootless Docker publishes a port through
+rootlesskit, a listener on the host's own network stack, so the firewall's
+rules apply to it, but they admit the whole mesh. Use `127.0.0.1` whenever the
+web server runs on the same machine: then only that machine can reach the app.
+`paisans validate` refuses any address but loopback and the site's own mesh
+address, a public or private LAN address among them (RFC 1918, or `100.64.0.0/10`
+as Tailscale uses), and warns about the mesh address, because anything that can
+reach the mesh reaches the app around your web server.
 Pick a port nothing else on the machine uses; `validate` refuses one the
 toolkit already binds there.
 
