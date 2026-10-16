@@ -1,9 +1,10 @@
 //go:build hostadmit_integration
 
 // These tests run admit's probe, as root, in a real ubuntu:24.04 container,
-// and read what it prints with parseFacts: a blank image, and the hostile
-// layouts the probe must not be fooled by. They need Docker, and pull the
-// image when it is absent.
+// or the image PAISANS_PROBE_IMAGE names (ubuntu:22.04 is the other
+// release admit supports), and read what it prints with parseFacts: a blank
+// image, and the hostile layouts the probe must not be fooled by. They need
+// Docker, and pull the image when it is absent.
 package hostadmit
 
 import (
@@ -20,7 +21,12 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 )
 
-const probeImage = "ubuntu:24.04"
+var probeImage = func() string {
+	if image := os.Getenv("PAISANS_PROBE_IMAGE"); image != "" {
+		return image
+	}
+	return "ubuntu:24.04"
+}()
 
 // probeIn runs setup, then the probe rendered for the user and --data-dir,
 // in a fresh container as root with docker run's extra arguments, and
@@ -275,5 +281,23 @@ func TestTheUserProbeReadsTheDataRootOfItsDaemonJSON(t *testing.T) {
 		if c.dataRoot == "" && strings.Contains(string(out), "json-root") {
 			t.Errorf("a json-root with none set:\n%s", out)
 		}
+	}
+}
+
+// Whether the apparmor package ships rootlesskit's profile is read from
+// its file list: Ubuntu 24.04's does, 22.04's does not, and the AppArmor
+// refusal's advice follows it. It installs apparmor from Ubuntu's archive,
+// so it needs the network.
+func TestProbeReadsWhetherApparmorShipsTheRootlesskitProfile(t *testing.T) {
+	want, known := map[string]bool{"ubuntu:24.04": true, "ubuntu:22.04": false}[probeImage]
+	if !known {
+		t.Skipf("no expectation for %s", probeImage)
+	}
+	if f := probeIn(t, "true", "paisans-f2a9", ""); f.AppArmor.Shipped {
+		t.Errorf("no apparmor installed, and the profile reads as shipped")
+	}
+	setup := "apt-get update -qq >/dev/null 2>&1 && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq apparmor >/dev/null 2>&1 || exit 1"
+	if f := probeIn(t, setup, "paisans-f2a9", ""); f.AppArmor.Shipped != want {
+		t.Errorf("%s: shipped %v, want %v", probeImage, f.AppArmor.Shipped, want)
 	}
 }
