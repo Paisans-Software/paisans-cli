@@ -328,8 +328,8 @@ func (u ubuntu) AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (
 	}
 	var install []string
 	if !dockerPresent {
-		// Refused, as host prepare refuses, so that apt never removes the
-		// owner's containerd, runc or docker.io to make room.
+		// Refused, not removed, so that apt never removes the owner's
+		// containerd, runc or docker.io to make room.
 		if msg := conflictMessage(facts, "admit"); msg != "" {
 			return out, added, fmt.Errorf("%s. Nothing was changed", msg)
 		}
@@ -510,8 +510,8 @@ func (u ubuntu) WatchdogModule(t Transport, d deployment.Deployment, module stri
 // non-interactive run. Which rules are added, adopted, removed or left alone
 // is planRules, in ufw.go. On a shared host (hostWide false) only the rules
 // are planned: the default policy and enabling belong to the host, not to
-// the deployment. by names the command planning, host prepare or host
-// admit, in what the plan says.
+// the deployment. by names the command planning, host admit, in what the
+// plan says.
 func (u ubuntu) Firewall(t Transport, d deployment.Deployment, rules []Rule, hostWide bool, by string) (Section, error) {
 	var out Section
 	script, err := snippet(u.tmpl("firewall-probe.sh.tmpl"), nil)
