@@ -24,6 +24,7 @@ changes share a bullet. Detailed notes are on the corresponding
 ### Changed
 
 - `paisans init` settles the mesh subnet on the hosts that have admitted the deployment and leaves the rest to `host admit`'s own check; `config recover` finds the deployment from the login's admission record.
+- `host prepare` maintains the deployment user's own `authorized_keys` as that user, recording what it added in `/srv/paisans/<token>/.paisans/authorized_keys.owned`.
 - `paisans prune` reads each dangling volume's size from `docker system df -v`, which the deployment's user can read for a volume a container's user owns.
 - The host check runs as the deployment's user: it reads listeners with `ss -Hltnue`, counts its own user's and containers' as this deployment's, and leaves the firewall to `host admit`.
 - Every command that changes a host checks first that the host admitted the deployment as that site, with the grants its roles need, and names the `host request` and `host admit` lines when not.

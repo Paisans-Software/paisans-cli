@@ -464,7 +464,7 @@ step 32: add the operators' keys
     | ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB bob
     | ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC bob
     | --- sidecar ---
-    | # Keys this deployment claims in paisans-f2a9's authorized_keys: <mark> <fingerprint> <name>. host prepare removes a line only when it is marked added here and no other deployment's file lists it.
+    | # Keys host admit and host prepare added to this deployment's user's authorized_keys: <mark> <fingerprint> <name>. host prepare removes a line only when it is marked added here and ssh.keys no longer lists it.
     | added SHA256:X75Mb3nqVpJG3UuCRMIO94EyEAtegd44QTYVIRv99HI bob
     | added SHA256:zpa+NMqw+6z5XIib6AyyKOtOnilzIda0f4kqtWRHm88 bob
 

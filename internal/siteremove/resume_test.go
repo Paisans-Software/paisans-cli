@@ -220,10 +220,10 @@ func TestSSHKeysAreNeverRemoved(t *testing.T) {
 			}
 			locked := false
 			for _, c := range b.commands {
-				locked = locked || strings.Contains(c, "flock '/etc/paisans/authorized_keys.lock'") && strings.Contains(c, "rm -f -- ")
+				locked = locked || strings.Contains(c, "flock -w 60 9") && strings.Contains(c, "rm -f -- ")
 			}
 			if !locked {
-				t.Error("the record was not deleted under host prepare's key lock")
+				t.Error("the record was not deleted under the deployment's lock")
 			}
 		})
 	}

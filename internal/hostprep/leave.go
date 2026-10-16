@@ -55,8 +55,3 @@ func ParseAddedRules(d deployment.Deployment, out string) (rules []AddedRule, ab
 	}
 	return rules, false
 }
-
-// OwnedKeysPrefixGlob matches the records of keys d added for any user.
-func OwnedKeysPrefixGlob(d deployment.Deployment) string {
-	return ownedDir + "/authorized_keys.*." + d.Prefix() + ".owned"
-}

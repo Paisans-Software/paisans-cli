@@ -46,8 +46,8 @@ type hostPlan struct {
 	units     []string
 	dropins   []string
 	rules     []string
-	// keyRecords are this deployment's records of the authorized keys
-	// host prepare added, one per login user.
+	// keyRecords is this deployment's record of the authorized keys host
+	// admit and host prepare added, when the host has one.
 	keyRecords []string
 	registry   bool
 	root       dirState
@@ -550,16 +550,21 @@ func (p *Plan) planKeptRoot(t apply.Transport, hp *hostPlan, edited bool) error 
 	return nil
 }
 
-// probeKeys finds this deployment's records of the authorized keys host
-// prepare added. The keys themselves are never removed: they may be the only
-// way into the host, and nothing here can tell whether another exists. The
-// records are this deployment's own files, so they go with it.
+// probeKeys finds this deployment's record of the authorized keys host
+// admit and host prepare added. The keys themselves are never removed: they
+// may be the only way into the host, and nothing here can tell whether
+// another exists. The record is this deployment's own file, so it goes with
+// it.
 func (p *Plan) probeKeys(t apply.Transport, hp *hostPlan) error {
-	out, err := t.Run(fmt.Sprintf(`for f in %s; do [ -f "$f" ] && echo "$f"; done; true`, hostprep.OwnedKeysPrefixGlob(p.dep())))
+	path := hostprep.OwnedKeysPath(p.dep())
+	_, found, err := t.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("site remove %s: listing this deployment's key records: %w", p.Site, err)
+		return fmt.Errorf("site remove %s: reading this deployment's key record: %w", p.Site, err)
 	}
-	hp.keyRecords = strings.Fields(out)
+	hp.keyRecords = nil
+	if found {
+		hp.keyRecords = []string{path}
+	}
 	return nil
 }
 
@@ -831,7 +836,7 @@ func (p *Plan) runHost() error {
 		for i, r := range hp.keyRecords {
 			q[i] = quote(r)
 		}
-		if err := run("deleting the key records", hostprep.Locked("rm -f -- "+strings.Join(q, " "))); err != nil {
+		if err := run("deleting the key records", hostprep.Locked(d, "rm -f -- "+strings.Join(q, " "))); err != nil {
 			return err
 		}
 	}
@@ -930,5 +935,5 @@ func (p *Plan) hostGoneLeft() string {
 		web = fmt.Sprintf(" Its web server may still include site files named %s-* in %s, which apply wrote: delete them and reload it, or it keeps routing this deployment's hostnames to apps that no longer run.", d.Prefix(), in.IncludeDir.Path)
 	}
 	return fmt.Sprintf("%s: host not reached (--host-gone); clean it by hand, or reinstall it. If it ever comes back it still holds this deployment's containers and networks (label %s), %s and its manifest, %s and %s, units and drop-ins named %s-* under /etc/systemd/system, its configuration store (%s, %s, %s, %s and %s), ufw rules commented %s:, the keys %s lists and that record, %s, and its entry in %s. Nothing it runs can reach the cluster: no remaining site has it as a WireGuard peer, and its etcd member is gone",
-		p.Site, d.LabelFilter(), d.Root(), d.WireGuardUnit(), d.WireGuardInstalled(), d.Prefix(), hostprep.ConfigRepo(d), hostprep.ConfigPeers(d), hostprep.ConfigSyncLog(d), hostprep.ConfigIncoming(d), hostprep.ConfigScriptDir(d), d.Prefix(), hostprep.OwnedKeysPath(d, p.cfg.Sites[p.Site].SSHUser()), grant.Path(d), registry.Path) + web
+		p.Site, d.LabelFilter(), d.Root(), d.WireGuardUnit(), d.WireGuardInstalled(), d.Prefix(), hostprep.ConfigRepo(d), hostprep.ConfigPeers(d), hostprep.ConfigSyncLog(d), hostprep.ConfigIncoming(d), hostprep.ConfigScriptDir(d), d.Prefix(), hostprep.OwnedKeysPath(d), grant.Path(d), registry.Path) + web
 }

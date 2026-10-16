@@ -48,7 +48,7 @@ const (
 	// installs the mesh file on a real host.
 	wgHelper    = "sudo -n '/usr/local/libexec/paisans/wg-psns-f2a9' "
 	wgInstalled = "/etc/wireguard/psns-f2a9.conf"
-	record      = "/etc/paisans/authorized_keys.ubuntu.paisans-f2a9.owned"
+	record      = "/srv/paisans/f2a9/.paisans/authorized_keys.owned"
 	keysAt      = "/home/ubuntu/.ssh/authorized_keys"
 	alice       = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org"
 )
@@ -377,9 +377,10 @@ func (h *host) Run(command string) (string, error) {
 	if h.webCommand(command) {
 		return h.web.Plain().Run(command)
 	}
-	// host prepare's key lock: the command inside it is what runs.
-	if inner, ok := strings.CutPrefix(command, "mkdir -p /etc/paisans && flock '/etc/paisans/authorized_keys.lock' sh -c '"); ok {
-		command = strings.ReplaceAll(strings.TrimSuffix(inner, "'"), `'\''`, "'")
+	// the deployment's lock, which the keys take: the command after it is
+	// what runs.
+	if inner, ok := strings.CutPrefix(command, (deployment.Deployment{ID: "f2a9"}).StateLockCommand("the keys")+"; "); ok {
+		command = inner
 	}
 	quoted := func(s string) []string {
 		var out []string
@@ -749,14 +750,6 @@ func (h *host) Run(command string) (string, error) {
 		}
 		h.rules = kept
 		return "Rule deleted\n", nil
-	case strings.Contains(command, "/etc/paisans/authorized_keys.*.paisans-f2a9.owned"):
-		var b strings.Builder
-		for _, p := range h.sortedFiles() {
-			if strings.HasPrefix(p, "/etc/paisans/authorized_keys.") && strings.HasSuffix(p, ".paisans-f2a9.owned") {
-				b.WriteString(p + "\n")
-			}
-		}
-		return b.String(), nil
 	case strings.HasPrefix(command, "d='") && strings.Contains(command, "du -sb"):
 		dir := strings.TrimSuffix(strings.TrimPrefix(strings.SplitN(command, ";", 2)[0], "d='"), "'")
 		return h.dirAnswer(dir), nil

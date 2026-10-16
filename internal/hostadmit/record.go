@@ -8,6 +8,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -131,17 +132,12 @@ const keysMarker = "paisans-sidecar"
 // keysProbe reads, as the user, its authorized_keys and the sidecar admit
 // and host prepare keep of the keys they appended. awk 1 ends each file's
 // last line, so the marker is always a line of its own.
-func keysProbe(token string) string {
+func keysProbe(d deployment.Deployment) string {
+	side := hostprep.OwnedKeysPath(d)
 	return "# paisans host admit: keys, read as the user\n" +
 		`if [ -f "$HOME/.ssh/authorized_keys" ]; then awk 1 "$HOME/.ssh/authorized_keys"; fi` + "\n" +
 		"echo " + keysMarker + "\n" +
-		"if [ -f " + sidecarPath(token) + " ]; then awk 1 " + sidecarPath(token) + "; fi"
-}
-
-// sidecarPath is where a deployment records the keys it appended to its
-// user's authorized_keys, in its own directory, which is the user's.
-func sidecarPath(token string) string {
-	return "/srv/paisans/" + token + "/.paisans/authorized_keys.owned"
+		"if [ -f " + side + " ]; then awk 1 " + side + "; fi"
 }
 
 // keysSeparator divides the keys step's stdin: the key lines to append,
@@ -155,9 +151,9 @@ const keysSeparator = "--- sidecar ---"
 // before anything is replaced, so no key the owner put there is lost. A
 // ~/.ssh that was there keeps its mode but for group and other write,
 // with which sshd's StrictModes would ignore the keys.
-func keysScript(token string) string {
-	side := sidecarPath(token)
-	return `set -e; umask 077; mkdir -p "$HOME/.ssh" ` + "/srv/paisans/" + token + `/.paisans; chmod go-w "$HOME/.ssh"
+func keysScript(d deployment.Deployment) string {
+	side := hostprep.OwnedKeysPath(d)
+	return `set -e; umask 077; mkdir -p "$HOME/.ssh" ` + d.StateDir() + `; chmod go-w "$HOME/.ssh"
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 awk -v k="$tmp/keys" -v s="$tmp/sidecar" '$0 == "` + keysSeparator + `" { out = 1; next } { if (out) print > s; else print > k }'
 touch "$tmp/keys" "$tmp/sidecar"
@@ -172,7 +168,7 @@ mv -f ` + side + `.paisans-tmp ` + side
 // with its UID read on the host when it runs, for a test that runs it
 // without a plan.
 func keysCommand(user, home, token string) string {
-	return userCommand(user, apply.ShellQuote(home), "$(id -u "+apply.ShellQuote(user)+")", keysScript(token))
+	return userCommand(user, apply.ShellQuote(home), "$(id -u "+apply.ShellQuote(user)+")", keysScript(deployment.Deployment{ID: token}))
 }
 
 // planKeys adds each operator's key the user's authorized_keys lacks, and
@@ -184,7 +180,7 @@ func planKeys(p *planner) error {
 	have := map[string]bool{}
 	var owned []hostprep.OwnedKey
 	if p.f.User.Exists {
-		out, err := p.t.Run(asUser(p, keysProbe(p.d.Token())))
+		out, err := p.t.Run(asUser(p, keysProbe(p.d)))
 		if err != nil {
 			return fmt.Errorf("reading %s's keys as %s: %w", user, user, shown(err))
 		}
@@ -223,9 +219,9 @@ func planKeys(p *planner) error {
 		return nil
 	}
 	p.step(Step{Title: "add the operators' keys",
-		Describe: fmt.Sprintf("keys: %d operator %s into %s's authorized_keys, written as %s, and recorded in %s for host prepare", len(add), plural(len(add), "key"), user, user, sidecarPath(p.d.Token())),
-		Command:  asUser(p, keysScript(p.d.Token())),
-		Input:    strings.Join(add, "\n") + "\n" + keysSeparator + "\n" + hostprep.OwnedKeysFile(user, owned),
+		Describe: fmt.Sprintf("keys: %d operator %s into %s's authorized_keys, written as %s, and recorded in %s for host prepare", len(add), plural(len(add), "key"), user, user, hostprep.OwnedKeysPath(p.d)),
+		Command:  asUser(p, keysScript(p.d)),
+		Input:    strings.Join(add, "\n") + "\n" + keysSeparator + "\n" + hostprep.OwnedKeysFile(owned),
 		Kinds:    []string{hostprep.KindSSHKeys}, Provisional: !p.f.User.Exists})
 	return nil
 }

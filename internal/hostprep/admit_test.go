@@ -167,17 +167,17 @@ func TestAdmitPackagesPinsOnlyAnInstalledDockerCE(t *testing.T) {
 // A sidecar as host prepare writes one reads back and writes out the same,
 // so admit's sidecar and host prepare's are one format.
 func TestOwnedKeysRoundTrip(t *testing.T) {
-	sidecar := "# Keys this deployment claims in ubuntu's authorized_keys: <mark> <fingerprint> <name>. host prepare removes a line only when it is marked added here and no other deployment's file lists it.\n" +
+	sidecar := "# Keys host admit and host prepare added to this deployment's user's authorized_keys: <mark> <fingerprint> <name>. host prepare removes a line only when it is marked added here and ssh.keys no longer lists it.\n" +
 		"added SHA256:4b2Q4Jx3ZQf1XU1Vb1k0f0sYz8m9n7bq3kq0iYkQWd0 alice\n" +
 		"shared SHA256:9xQ1m0bK3iYp2nWm7c8d5e4f3g2h1j0k9l8m7n6o5p4 bob\n"
 	keys := hostprep.ParseOwnedKeys(sidecar)
 	if len(keys) != 2 || keys[0] != (hostprep.OwnedKey{Mark: "added", Fingerprint: "SHA256:4b2Q4Jx3ZQf1XU1Vb1k0f0sYz8m9n7bq3kq0iYkQWd0", Name: "alice"}) {
 		t.Fatalf("ParseOwnedKeys = %+v", keys)
 	}
-	if got := hostprep.OwnedKeysFile("ubuntu", keys); got != sidecar {
+	if got := hostprep.OwnedKeysFile(keys); got != sidecar {
 		t.Errorf("OwnedKeysFile =\n%s\nwant\n%s", got, sidecar)
 	}
-	if got := hostprep.OwnedKeysFile("ubuntu", []hostprep.OwnedKey{keys[1], keys[0]}); got != sidecar {
+	if got := hostprep.OwnedKeysFile([]hostprep.OwnedKey{keys[1], keys[0]}); got != sidecar {
 		t.Errorf("OwnedKeysFile does not sort by fingerprint:\n%s", got)
 	}
 }

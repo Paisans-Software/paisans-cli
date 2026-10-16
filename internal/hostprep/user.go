@@ -11,14 +11,20 @@ import (
 const UserSystemctl = "XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user"
 
 // homeProbe prints the login user's passwd entry, whose sixth field is the
-// home sshd and systemd use, whatever HOME the session was given.
-const homeProbe = `getent passwd "$(id -un)"`
+// home sshd and systemd use, whatever HOME the session was given, or a
+// marker and the user's name when it has none, so that "no such user"
+// cannot be confused with ssh failing.
+const homeProbe = `u=$(id -un); getent passwd "$u" || echo "__PAISANS_ABSENT__ $u"`
 
-// Home is the login user's home directory on the host t reaches.
+// Home is the login user's home directory on the host t reaches. A login
+// user the host has no passwd entry for is refused by name.
 func Home(t Transport) (string, error) {
 	out, err := t.Run(homeProbe)
 	if err != nil {
 		return "", fmt.Errorf("reading the login user's home on %s: %w", t.Describe(), err)
+	}
+	if user, absent := strings.CutPrefix(strings.TrimSpace(out), "__PAISANS_ABSENT__"); absent {
+		return "", fmt.Errorf("the login user %s does not exist on %s. host prepare does not create users: create it, with sudo, and prepare again", strings.TrimSpace(user), t.Describe())
 	}
 	fields := strings.Split(strings.TrimSpace(out), ":")
 	if len(fields) < 7 {

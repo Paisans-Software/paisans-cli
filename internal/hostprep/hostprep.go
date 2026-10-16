@@ -70,7 +70,7 @@ type Step struct {
 	Command string
 	// Label is the kind of change, so one can be told apart without reading
 	// Describe: empty for an ordinary one, or "adopt", "add", "rename",
-	// "share", "release" or "remove". It is not printed; Title already says
+	// "release" or "remove". It is not printed; Title already says
 	// what the step does.
 	Label string
 	// Kinds are what the step changes on the host, Eg: KindDocker, as a dry
@@ -345,16 +345,16 @@ func Build(site string, cfg *config.Config, t Transport, opts ...Option) (*Plan,
 	}
 	plan.add(watchdog)
 
-	// The keys are read before the login user's home, so that a declared
-	// user the host lacks is refused by name; the store's steps still come
-	// first.
-	keys, keyRemovals, err := planAuthorizedKeys(t, d, declared.SSHUser(), declared.SSH)
-	if err != nil {
-		return nil, fmt.Errorf("authorized keys on %s: %w", t.Describe(), err)
-	}
+	// The home is read before the keys and the store, both of which need it:
+	// its probe refuses a login user the host lacks by name. The store's
+	// steps still come before the keys'.
 	home, err := Home(t)
 	if err != nil {
 		return nil, err
+	}
+	keys, keyRemovals, err := planAuthorizedKeys(t, d, home, declared.SSH)
+	if err != nil {
+		return nil, fmt.Errorf("authorized keys on %s: %w", t.Describe(), err)
 	}
 	store, err := profile.ConfigStore(t, d, declared, configPeers(cfg, site), home)
 	if err != nil {
