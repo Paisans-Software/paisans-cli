@@ -40,6 +40,8 @@ type evictor struct {
 	// claims the host for that have no admission record here.
 	recordless []string
 	beforeGone bool
+	// installedGone is whether the plan removes /etc/paisans/installed.
+	installedGone bool
 }
 
 // claimedWithoutRecord is the token of every other deployment the host's
@@ -88,6 +90,7 @@ var evictParts = []struct {
 	{"firewall", (*evictor).firewall},
 	{"host wide", (*evictor).hostWide},
 	{"sysctls", (*evictor).sysctls},
+	{"installed", (*evictor).installed},
 	{"record", (*evictor).admissionRecord},
 	{"empty directories", (*evictor).emptyDirs},
 	{"registry", (*evictor).registry},
@@ -594,6 +597,38 @@ func (e *evictor) sysctls() error {
 	return nil
 }
 
+// installed names, once no other deployment is admitted or claims the
+// host, what admit installed here, which stays: packages other software
+// may have come to use are the owner's to remove, and the system Docker
+// admit installed stays disabled. Then the list goes, which /etc/paisans
+// needs to go too.
+func (e *evictor) installed() error {
+	in, err := readInstalled(e.planner, "evict")
+	if err != nil || e.shared() || !e.f.Files[installedPath].Present {
+		return err
+	}
+	var named []string
+	if len(in.Packages) > 0 {
+		named = append(named, strings.Join(in.Packages, ", "))
+	}
+	if len(in.Files) > 0 {
+		named = append(named, strings.Join(in.Files, ", "))
+	}
+	if in.dockerIsAdmits() {
+		named = append(named, "the docker group")
+	}
+	if len(named) > 0 {
+		detail := "Evict removes no package: something else here may use them by now. Remove them yourself once nothing does."
+		if in.dockerIsAdmits() {
+			detail += " Docker's system daemon, which admit installed, stays disabled, and docker-ce made the docker group."
+		}
+		e.warn("packages: what admit installed stays: "+strings.Join(named, "; "), detail)
+	}
+	e.installedGone = true
+	e.remove("remove "+installedPath, "the list of what admit installed, which the plan names", "rm -f "+installedPath)
+	return nil
+}
+
 // admissionRecord removes the admission record.
 func (e *evictor) admissionRecord() error {
 	file, err := admission.Path(e.d.Token())
@@ -632,6 +667,9 @@ func (e *evictor) emptyDirs() error {
 		}
 	}
 	if e.beforeGone {
+		ours[admission.Dir]++
+	}
+	if e.installedGone {
 		ours[admission.Dir]++
 	}
 	for _, dir := range countedDirs() {

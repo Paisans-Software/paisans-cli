@@ -4,10 +4,12 @@ import (
 	"io"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/hostadmit"
+	"github.com/paisans-software/paisans-cli/internal/hostprep"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -93,6 +95,9 @@ var evictCases = []struct {
 		delete(h.files, "/etc/paisans/admitted.f2a9.json")
 		h.dropKeyed("file", "/etc/paisans/admitted.f2a9.json")
 		return withEntries(withoutRecordLine(h))
+	}},
+	{"evict-installed-by-admit", "paisans-f2a9", func() *fakeHost {
+		return withEntries(installedByAdmit(evicted("vm", hostadmit.Flags{})()))
 	}},
 	{"evict-nothing-left", "paisans-f2a9", func() *fakeHost { return newBlank() }},
 }
@@ -518,5 +523,41 @@ func TestEvictRemovesTheMeshConfDropIn(t *testing.T) {
 	}
 	if i := stepIndex(plan, "rm -f "+meshCondPath+" && rmdir --ignore-fail-on-non-empty /etc/systemd/system/wg-quick@psns-f2a9.service.d && systemctl daemon-reload"); i < 0 {
 		t.Errorf("evict leaves the mesh's conf drop-in:\n%s", plan.Text())
+	}
+}
+
+// What admit installed stays when the last deployment goes, and evict's
+// plan names it, from /etc/paisans/installed, which it then removes with
+// /etc/paisans. Beside another admitted deployment, nothing is said and
+// the file stays.
+func TestEvictNamesWhatAdmitInstalled(t *testing.T) {
+	content := "# Written by paisans host admit: what it installed on this host. It stays\n# installed when paisans host evict removes the last admitted deployment.\n" +
+		"package docker-ce\npackage docker-ce-cli\npackage containerd.io\npackage docker-ce-rootless-extras\npackage uidmap\npackage wireguard-tools\n" +
+		"file /etc/apt/keyrings/docker.asc\nfile /etc/apt/sources.list.d/docker.sources\n"
+	host := func(shared bool) *fakeHost {
+		h := evicted("vm", hostadmit.Flags{})()
+		h.file("/etc/paisans/installed", content).withFile("/etc/paisans/installed", content, "644", 0)
+		if shared {
+			withOther(h, false, false)
+		}
+		return withEntries(h)
+	}
+	plan, err := hostadmit.BuildEvict(host(false), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "packages: what admit installed stays: docker-ce, docker-ce-cli, containerd.io, docker-ce-rootless-extras, uidmap, wireguard-tools; /etc/apt/keyrings/docker.asc, /etc/apt/sources.list.d/docker.sources; the docker group"
+	if !slices.ContainsFunc(plan.Warnings, func(w hostprep.Warning) bool { return w.Hint == want }) {
+		t.Errorf("the plan does not say %q:\n%s", want, plan.Text())
+	}
+	if stepIndex(plan, "rm -f /etc/paisans/installed") < 0 || stepIndex(plan, "rmdir /etc/paisans") < 0 {
+		t.Errorf("the installed file or /etc/paisans is left:\n%s", plan.Text())
+	}
+	plan, err = hostadmit.BuildEvict(host(true), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(plan.Text(), "what admit installed") || stepIndex(plan, "/etc/paisans/installed") >= 0 {
+		t.Errorf("beside another deployment:\n%s", plan.Text())
 	}
 }
