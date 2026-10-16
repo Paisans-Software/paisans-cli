@@ -347,9 +347,35 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    port, the mesh's UDP `ListenPort`, `allow in on psns-<token>`, and 80/tcp,
    443/tcp and 443/udp, for HTTP/3, with `--public-ports`. The `br-+` rules go: a rootless container's traffic
    to the mesh address leaves through the user's own process, not a host
-   bridge. ufw must be installed and active: admit adds its rules and never
-   enables ufw or sets its defaults, and stops before changing anything on a
-   host where ufw is absent or inactive.
+   bridge. ufw must be installed: admit never installs it, and never sets
+   its defaults. ufw that is not active is enabled only with `--enable-ufw`,
+   or a yes at a terminal, by steps after the deployment's own rules, in
+   this order: an allow for every TCP port sshd listens on, tagged
+   `paisans: ssh`, which is no deployment's tag, so evict never removes it;
+   the fallback, `systemd-run --on-active=600 --unit=paisans-ufw-fallback ufw
+   disable`; then `ufw --force enable`. ufw takes rules while inactive and
+   applies them as it is enabled, so SSH is allowed from its first moment on.
+   The ports sshd listens on are read as root from the sockets, with `ss
+   -Hltnp` and an active `ssh.socket` or `sshd.socket`'s `Listen`, not from
+   `sshd -T`: under socket activation, Ubuntu 24.04's default, systemd holds
+   the listening socket and sshd's own Port lines say nothing of it. When an
+   allow of the owner's already covers a port, admit adds none for it; when
+   the deployment's own SSH allow would be the same rule, ufw would rewrite
+   it in place, so the `paisans: ssh` allow alone is planned. Admit refuses
+   to enable ufw when it reads no sshd port, when a rule of the owner's
+   denies one, when it cannot read ufw's rules, or when the timer cannot be
+   armed (no `systemd-run`, or a `paisans-ufw-fallback` unit still loaded).
+   Once ufw is on, a new SSH login stops the timer (`systemctl stop
+   paisans-ufw-fallback.timer`): with `--site`, admit's own login as the
+   deployment's user at its end, after which the timer is stopped through the
+   owner's login; with `--request`, admit asks the owner to open a new SSH
+   session and type yes. Anything else leaves the timer to disable ufw
+   within 10 minutes, and admit says when. Without `--enable-ufw` and off a
+   terminal admit stops before changing anything, naming `--enable-ufw` and
+   the commands that enable ufw by hand, numbered, every `sudo ufw allow
+   <port>/tcp` before `sudo ufw enable`, with no enable command when it read
+   no sshd port. A re-run on a host whose ufw is active plans none of these
+   steps.
 10. **Egress.** An nftables table that keeps the deployment off the owner's
     network (below).
 11. **The watchdog**, with `--watchdog`: softdog when the host has no
@@ -404,9 +430,10 @@ Garage site and 5 GB otherwise. The path is in the admission record.
 14. **The admission record**, `/etc/paisans/admitted.<token>.json`, mode 644:
     the user, the grants (`watchdog`, `public_ports`), whether forwarding is
     on, the ports the firewall opened, the request's digest when there was
-    one, the time, and whether the system Docker is one admit installed and
+    one, the time, whether the system Docker is one admit installed and
     disabled once (`system_docker_disabled`), which says what admit did, not
-    how the daemon stands now. It is how the deployment's own commands, which cannot
+    how the daemon stands now, and `ufw_enabled: true` when admit enabled
+    ufw, written only then and kept by every later admit. It is how the deployment's own commands, which cannot
     read root's files, learn what they were granted, and what `host
     deployments` lists. Admit keeps `/etc/paisans` root's, mode 755 (`chmod
     00755`, which clears a setgid bit too; an ACL stops admit), so each
@@ -529,7 +556,9 @@ Then it removes the helper, the sudoers line, the udev rule, the
 deployment's ufw rules but its SSH allow, the admission record and the
 registry claim. The SSH allow may be the rule the owner's own login
 arrives by, so it is kept, and the plan warns of it: the owner deletes it
-once nothing else needs it. Host-wide files (`delegate.conf`,
+once nothing else needs it. Evict never disables ufw: when the record says
+admit enabled it, the plan says ufw stays enabled with its `paisans: ssh`
+allows, and that disabling it is the owner's. Host-wide files (`delegate.conf`,
 `modules-load.d/paisans.conf`, `60-paisans.conf`) are removed only when
 they are as admit wrote them and no other deployment is admitted or
 claims the host, `delegate.conf` with its `user@.service.d` once empty

@@ -3,6 +3,7 @@ package hostadmit
 import (
 	"fmt"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -27,6 +28,10 @@ type Flags struct {
 	BridgeNetfilter bool
 	// MeshLAN is --mesh-lan: let the mesh dial the host's own LAN.
 	MeshLAN bool
+	// EnableUFW is --enable-ufw: enable ufw when it is installed and not
+	// active, behind an allow for every port sshd listens on and a timer
+	// that turns it off again (planEnableUFW).
+	EnableUFW bool
 }
 
 // Grants are the grants the flags give.
@@ -42,6 +47,10 @@ type Input struct {
 	Digest  string
 	Flags   Flags
 	Now     time.Time
+	// enabledUFW is set by Execute when it reads the host again after this
+	// run's own `ufw --force enable` ran, so the plan it rebuilds records
+	// that admit enabled ufw although ufw is active by then.
+	enabledUFW bool
 }
 
 // Grant is a grant the site's roles need and the flags leave out, for the
@@ -153,6 +162,9 @@ type Plan struct {
 	Present  []string
 	Foreign  []string
 	Warnings []hostprep.Warning
+	// EnablesUFW is a plan that enables ufw behind the fallback timer, which
+	// the command stops once a new SSH login gets through (DisarmUFW).
+	EnablesUFW bool
 }
 
 // planner is one Build: the host, the input and what the probe found, and
@@ -481,6 +493,9 @@ func Execute(t apply.Transport, in Input, approved *Plan, r ui.Reporter) error {
 	steps := approved.Steps
 	for i := 0; i < len(steps); i++ {
 		if steps[i].Provisional {
+			if slices.ContainsFunc(steps[:i], func(s Step) bool { return s.Command == enableUFW }) {
+				in.enabledUFW = true
+			}
 			rebuilt, err := build(t, in)
 			if err != nil {
 				return stoppedOnRebuild(approved.User, steps[:i], err)

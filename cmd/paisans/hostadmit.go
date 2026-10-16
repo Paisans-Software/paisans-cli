@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bufio"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -59,6 +59,7 @@ func runHostAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs.StringVar(&flags.DataDir, "data-dir", "", "keep the deployment's Docker data under this directory instead of the user's home")
 	fs.BoolVar(&flags.BridgeNetfilter, "bridge-netfilter", false, "load br_netfilter although this host has bridges of its own")
 	fs.BoolVar(&flags.MeshLAN, "mesh-lan", false, "let the mesh dial this host's own LAN")
+	fs.BoolVar(&flags.EnableUFW, "enable-ufw", false, "enable ufw when it is installed and not active: allow every port sshd listens on, arm a timer that turns ufw off again in 10 minutes, enable it, and stop the timer once a new SSH login gets through")
 	fs.BoolVar(&execute, "execute", false, "make the changes the plan shows")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -138,9 +139,34 @@ func runHostAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 		t = reachOwnerAdmit(dest)
 	}
 	r.Section(fmt.Sprintf("admit %s on %s", ui.Visible(in.Request.User), t.Describe()))
-	plan, err := ui.Get(r, "read the host", func() (*hostadmit.Plan, error) { return hostadmit.Build(t, in) })
+	// An inactive ufw is a question at a terminal, as a missing grant is:
+	// the plan is drawn again with --enable-ufw on a yes. Off a terminal it
+	// refuses, naming --enable-ufw and the commands that enable it safely.
+	var inactive *hostadmit.UFWInactiveError
+	var refusal error
+	plan, err := ui.Get(r, "read the host", func() (*hostadmit.Plan, error) {
+		p, err := hostadmit.Build(t, in)
+		if errors.As(err, &inactive) && len(inactive.SSHPorts) > 0 && stdinIsTerminal(stdin) {
+			refusal = err
+			return nil, nil
+		}
+		return p, err
+	})
 	if err != nil {
 		return err
+	}
+	if plan == nil {
+		yes, err := askEnableUFW(stdin, stdout, inactive.SSHPorts, site != "")
+		if err != nil {
+			return err
+		}
+		if !yes {
+			return refusal
+		}
+		in.Flags.EnableUFW = true
+		if plan, err = ui.Get(r, "read the host again, to enable ufw", func() (*hostadmit.Plan, error) { return hostadmit.Build(t, in) }); err != nil {
+			return err
+		}
 	}
 	// The whole plan, always: with --execute the owner approves it here,
 	// before the digest and before anything runs.
@@ -155,14 +181,17 @@ func runHostAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 	}
 	if err := executeAdmit(t, in, plan, r); err != nil {
-		return err
+		return ufwFallbackNote(err, plan, false)
 	}
 	user := ui.Visible(in.Request.User)
 	version, err := ui.Get(r, "check "+user+"'s Docker", func() (string, error) { return hostadmit.CheckUser(t, in.Request) })
 	if err != nil {
-		return err
+		return ufwFallbackNote(err, plan, true)
 	}
 	if site == "" {
+		if plan.EnablesUFW {
+			return confirmUFW(stdin, stdout, r, t, user, version)
+		}
 		r.Result("Admitted: %s runs Docker %s. The operators' next command logs in as %s.", user, version, user)
 		return nil
 	}
@@ -179,7 +208,14 @@ func runHostAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 		if h := declared.SSHHost(); h != dest.Host {
 			where = fmt.Sprintf(" The login went to %s, the site's declared ssh host, and admit to %s: check that they are the same machine.", ui.Visible(h), ui.Visible(dest.Host))
 		}
-		return fmt.Errorf("host admit: %s is admitted and its Docker answers, but logging in as it failed: %w. Check that your key is one of sites.%s.ssh.keys.%s", user, err, site, where)
+		return ufwFallbackNote(fmt.Errorf("host admit: %s is admitted and its Docker answers, but logging in as it failed: %w. Check that your key is one of sites.%s.ssh.keys.%s", user, err, site, where), plan, true)
+	}
+	// That login was a new SSH connection, made after ufw was enabled, so
+	// ufw lets SSH in: the fallback is stopped, through the owner's login.
+	if plan.EnablesUFW {
+		if err := ui.Run(r, "stop the ufw fallback", func() error { return hostadmit.Disarm(t) }); err != nil {
+			return fmt.Errorf("host admit: %s logs in through ufw, but %w. ufw turns itself off again by %s: run sudo %s on the host to keep it on", user, err, ufwOffAt(), hostadmit.DisarmUFW)
+		}
 	}
 	r.Result("Admitted: %s runs Docker %s, and logs in with the operators' keys.", user, version)
 	return nil
@@ -213,6 +249,72 @@ func ownerDestination(sshFlag, site string, declared config.Site, stdin io.Reade
 		return config.Destination{}, sshFlagProblem(login, err)
 	}
 	return dest, nil
+}
+
+// askEnableUFW asks the owner at a terminal whether admit may enable ufw,
+// saying what it does, in order, and the risk. Only y or yes says so.
+func askEnableUFW(stdin io.Reader, stdout io.Writer, ports []int, bySite bool) (bool, error) {
+	var list []string
+	for _, port := range ports {
+		list = append(list, strconv.Itoa(port)+"/tcp")
+	}
+	confirm := "you open a new SSH session to this host when admit asks, and say it logged in"
+	if bySite {
+		confirm = "admit's own login as the deployment's user, at its end"
+	}
+	fmt.Fprintf(stdout, "\nufw is installed but not active on this host. Admit can enable it, in this order:\n"+
+		"  1. allow %s, every port sshd listens on, tagged paisans: ssh, which evict never removes\n"+
+		"  2. arm a timer that runs ufw disable in 10 minutes\n"+
+		"  3. enable ufw, the deployment's own rules already in place\n"+
+		"  4. stop the timer once a new SSH login gets through: %s\n"+
+		"The risk: something admit cannot see, such as a cloud firewall, could still block SSH. You are then locked out until the timer turns ufw off again, at most 10 minutes later.\n"+
+		"Enable ufw (--enable-ufw)? [y/N] ", strings.Join(list, ", "), confirm)
+	line, err := readTypedLine(stdin)
+	if err != nil {
+		return false, fmt.Errorf("host admit: reading your answer: %w. Nothing was changed", err)
+	}
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "y", "yes":
+		return true, nil
+	}
+	return false, nil
+}
+
+// ufwOffAt is the latest the fallback armed by now turns ufw off.
+func ufwOffAt() string { return time.Now().Add(hostadmit.FallbackAfter).Format("15:04 MST") }
+
+// ufwFallbackNote is err, from a plan that enables ufw, with what the
+// owner needs to know of the fallback: armed is whether admit is known to
+// have armed it.
+func ufwFallbackNote(err error, plan *hostadmit.Plan, armed bool) error {
+	if !plan.EnablesUFW {
+		return err
+	}
+	when := "ufw turns itself off again by " + ufwOffAt() + ", since no new SSH login has shown that it lets SSH in"
+	if !armed {
+		when = "If admit armed the ufw fallback before it stopped, " + when
+	}
+	return fmt.Errorf("%w\n%s. Once a new SSH login to this host works, run sudo %s to keep ufw on; or let it turn off, and run admit again with --enable-ufw", err, when, hostadmit.DisarmUFW)
+}
+
+// confirmUFW, on the host with --request once admit has enabled ufw, asks
+// the owner to open a new SSH session and stops the fallback only on a
+// typed yes. Anything else leaves the timer to turn ufw off, and says so.
+func confirmUFW(stdin io.Reader, stdout io.Writer, r ui.Reporter, t apply.Transport, user, version string) error {
+	off := ufwOffAt()
+	fmt.Fprintf(stdout, "\nufw is on, and turns itself off again by %s unless a new SSH login gets through. Open a new SSH session to this host now. Type yes once it logs in: ", off)
+	line, err := readTypedLine(stdin)
+	if err != nil || strings.ToLower(strings.TrimSpace(line)) != "yes" {
+		r.Warn("ufw turns itself off again by "+off,
+			"No new SSH login was confirmed, so the timer admit armed is left to run ufw disable. If a new login works before then, run sudo "+hostadmit.DisarmUFW+" to keep ufw on; otherwise run admit again with --enable-ufw once you know why SSH was blocked.")
+		r.Result("Admitted: %s runs Docker %s. The operators' next command logs in as %s. ufw turns itself off again by %s.", user, version, user, off)
+		return nil
+	}
+	if err := ui.Run(r, "stop the ufw fallback", func() error { return hostadmit.Disarm(t) }); err != nil {
+		return fmt.Errorf("host admit: %w. ufw turns itself off again by %s: run sudo %s to keep it on", err, off, hostadmit.DisarmUFW)
+	}
+	r.Result("Admitted: %s runs Docker %s, and ufw is on. The operators' next command logs in as %s.", user, version, user)
+	return nil
 }
 
 // askGrant puts g to the owner at a terminal: what it gives, and whether to
@@ -278,8 +380,10 @@ func confirmDigest(stdin io.Reader, stdout io.Writer, digest string) error {
 		return fmt.Errorf("host admit: --execute with --request asks you to type the request's digest at a terminal, and stdin is not one. Run it from an interactive shell. Nothing was changed")
 	}
 	fmt.Fprintf(stdout, "\nThe request carries the keys that will log in to this machine. Type the digest the operator gave you, over a channel you trust: ")
-	line, err := bufio.NewReader(stdin).ReadString('\n')
-	if err != nil && line == "" {
+	// A byte at a time, so the confirmation of a new SSH login that admit
+	// asks for after it, once it has enabled ufw, is not read ahead.
+	line, err := readTypedLine(stdin)
+	if err != nil || line == "" {
 		return fmt.Errorf("host admit: no digest read. Nothing was changed")
 	}
 	typed, err := admission.ParseDigest(strings.TrimSpace(line))

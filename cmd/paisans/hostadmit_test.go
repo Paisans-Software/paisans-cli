@@ -661,3 +661,146 @@ func TestAdmitAsksForAMissingGrantAtATerminal(t *testing.T) {
 		t.Errorf("--site asked for --public-ports: %v", err)
 	}
 }
+
+// inactiveUFW makes h a host whose ufw is installed and not active, with
+// sshd listening on 22, systemd-run there and no fallback loaded.
+func inactiveUFW(h *admitHost) *admitHost {
+	for i, kv := range h.facts {
+		if kv[0] == "ufw-active" {
+			h.facts[i][1] = "no"
+		}
+	}
+	h.answers["paisans host admit: before enabling ufw"] = `sshd LISTEN 0 4096 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=812,fd=3))` + "\nsystemd-run present\nfallback not-found not-found\nend\n"
+	return h
+}
+
+// ranIndex is the index of the first command run that contains s, -1 for
+// none.
+func (h *admitHost) ranIndex(s string) int {
+	for i, c := range h.ran {
+		if strings.Contains(c, s) {
+			return i
+		}
+	}
+	return -1
+}
+
+// Off a terminal, an inactive ufw refuses, naming --enable-ufw and the
+// commands that enable it safely; at a terminal admit asks, and only a yes
+// plans the enable.
+func TestAdmitAsksToEnableUFWAtATerminal(t *testing.T) {
+	path, _ := requestFile(t, "vm")
+	for _, c := range []struct {
+		typed    string
+		terminal bool
+		plans    bool
+	}{
+		{"y\n", true, true},
+		{"yes\n", true, true},
+		{"n\n", true, false},
+		{"", true, false},
+		{"y\n", false, false},
+	} {
+		h := withFakeLocalHost(t, "ubuntu")
+		inactiveUFW(h)
+		withTerminal(t, c.terminal)
+		out := new(strings.Builder)
+		err := runHostAdmit([]string{"--request", path, "--public-ports"}, typed(t, c.typed), out)
+		if planned := err == nil && strings.Contains(admitReport.String(), "arm the ufw fallback"); planned != c.plans {
+			t.Errorf("typed %q at a terminal %v: planned the enable %v (%v)", c.typed, c.terminal, planned, err)
+		}
+		if !c.plans && (err == nil || !strings.Contains(err.Error(), "--enable-ufw") || !strings.Contains(err.Error(), "1. sudo ufw allow 22/tcp")) {
+			t.Errorf("typed %q at a terminal %v: %v", c.typed, c.terminal, err)
+		}
+		if c.terminal && !strings.Contains(out.String(), "allow 22/tcp, every port sshd listens on") {
+			t.Errorf("the question does not say what admit does:\n%s", out.String())
+		}
+	}
+	// --enable-ufw asks nothing.
+	h := withFakeLocalHost(t, "ubuntu")
+	inactiveUFW(h)
+	withTerminal(t, false)
+	if err := runHostAdmit([]string{"--request", path, "--public-ports", "--enable-ufw"}, typed(t, ""), new(strings.Builder)); err != nil || !strings.Contains(admitReport.String(), "arm the ufw fallback") {
+		t.Errorf("--enable-ufw: %v\n%s", err, admitReport.String())
+	}
+}
+
+// fakeExecute replaces Execute with one that runs nothing, for the test.
+func fakeExecute(t *testing.T) {
+	saved := executeAdmit
+	executeAdmit = func(apply.Transport, hostadmit.Input, *hostadmit.Plan, ui.Reporter) error { return nil }
+	t.Cleanup(func() { executeAdmit = saved })
+}
+
+// With --site, the login as the deployment's user, a new SSH connection
+// made after ufw is on, is what stops the fallback, through the owner's
+// login; a failed login leaves it armed and says when ufw turns off.
+func TestAdmitSiteStopsTheUFWFallbackAfterTheLogin(t *testing.T) {
+	fakeExecute(t)
+	savedLogin, savedOwner := reachSiteUser, reachOwnerAdmit
+	t.Cleanup(func() { reachSiteUser, reachOwnerAdmit = savedLogin, savedOwner })
+	args := []string{"--site", "vm", "--ssh", "owner", "--config", fixtureConfig(), "--public-ports", "--enable-ufw", "--execute"}
+
+	quietAdmit(t)
+	owner := inactiveUFW(blankHost("ubuntu"))
+	reachOwnerAdmit = func(config.Destination) apply.Transport { return owner }
+	login := blankHost("ubuntu")
+	loggedIn := -1
+	reachSiteUser = func(string, config.Site) apply.Transport { loggedIn = len(owner.ran); return login }
+	if err := runHostAdmit(args, strings.NewReader(""), new(strings.Builder)); err != nil {
+		t.Fatal(err)
+	}
+	if i := owner.ranIndex(hostadmit.DisarmUFW); i < 0 || loggedIn < 0 || i < loggedIn {
+		t.Errorf("the fallback was stopped at %d, the login made at %d: %q", i, loggedIn, owner.ran)
+	}
+
+	quietAdmit(t)
+	owner = inactiveUFW(blankHost("ubuntu"))
+	reachSiteUser = func(string, config.Site) apply.Transport { return refusingHost{} }
+	err := runHostAdmit(args, strings.NewReader(""), new(strings.Builder))
+	if err == nil || !strings.Contains(err.Error(), "ufw turns itself off again by") || owner.ranIndex(hostadmit.DisarmUFW) >= 0 {
+		t.Errorf("a failed login: %v, stopped the fallback at %d", err, owner.ranIndex(hostadmit.DisarmUFW))
+	}
+
+	// A plan that enables nothing stops nothing.
+	quietAdmit(t)
+	owner = blankHost("ubuntu")
+	reachSiteUser = func(string, config.Site) apply.Transport { return login }
+	if err := runHostAdmit(args, strings.NewReader(""), new(strings.Builder)); err != nil || owner.ranIndex(hostadmit.DisarmUFW) >= 0 {
+		t.Errorf("active ufw: %v, stopped the fallback at %d", err, owner.ranIndex(hostadmit.DisarmUFW))
+	}
+}
+
+// With --request, the owner on the host confirms a new SSH session: a yes
+// stops the fallback, anything else leaves it to turn ufw off, and says so.
+// The answer to the ufw question, the digest and the confirmation are read
+// from one terminal in turn.
+func TestAdmitRequestConfirmsANewLoginBeforeStoppingTheFallback(t *testing.T) {
+	fakeExecute(t)
+	path, digest := requestFile(t, "vm")
+	for _, c := range []struct {
+		typed string
+		stops bool
+	}{
+		{"y\n" + digest + "\nyes\n", true},
+		{"y\n" + digest + "\nno\n", false},
+		{"y\n" + digest + "\n", false},
+	} {
+		h := withFakeLocalHost(t, "ubuntu")
+		inactiveUFW(h)
+		withTerminal(t, true)
+		out := new(strings.Builder)
+		if err := runHostAdmit([]string{"--request", path, "--public-ports", "--execute"}, typed(t, c.typed), out); err != nil {
+			t.Fatalf("typed %q: %v", c.typed, err)
+		}
+		if stopped := h.ranIndex(hostadmit.DisarmUFW) >= 0; stopped != c.stops {
+			t.Errorf("typed %q: stopped the fallback %v", c.typed, stopped)
+		}
+		if !strings.Contains(out.String(), "Open a new SSH session to this host now. Type yes once it logs in") {
+			t.Errorf("typed %q: not asked for a new session:\n%s", c.typed, out.String())
+		}
+		if !c.stops && !strings.Contains(admitReport.String(), "ufw turns itself off again by") {
+			t.Errorf("typed %q: does not say ufw turns off:\n%s", c.typed, admitReport.String())
+		}
+	}
+}

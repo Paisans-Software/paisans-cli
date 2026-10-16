@@ -33,3 +33,10 @@ func FollowLinkAt(t interface{ Cleanup(func()) }, path string) {
 
 // LinkedSystemFiles is the list of system files read through a link.
 func LinkedSystemFiles() []string { return append([]string(nil), linkedSystemFiles...) }
+
+// EnabledUFWByThisRun is in as Execute rebuilds it once its own enable of
+// ufw has run.
+func EnabledUFWByThisRun(in Input) Input {
+	in.enabledUFW = true
+	return in
+}

@@ -44,8 +44,8 @@ var snippets embed.FS
 // UFWInstalled is ufw's binary being on the host, and UFWActive is the
 // first line of `ufw status`, read as root, being "Status: active"; an
 // answer the probe cannot read is not active. Admit works only on a host
-// where ufw is installed and active, and never enables it or sets its
-// defaults, so Task 9 refuses unless both are true.
+// where ufw is installed, and enables it only with --enable-ufw
+// (planEnableUFW).
 type Facts struct {
 	Docker   DockerFacts
 	Packages map[string]bool

@@ -677,10 +677,28 @@ paisans host admit --site home-a --ssh owner@home-a.example.org --execute   # fr
     host and port, or as `user@host[:port]`; left out, it is asked for at a
     terminal;
   * either way: the grants `--watchdog` and `--public-ports`;
-    `--data-dir <path>`, `--bridge-netfilter`, `--mesh-lan`; `--execute`.
+    `--data-dir <path>`, `--bridge-netfilter`, `--mesh-lan`, `--enable-ufw`;
+    `--execute`.
 * **Hosts:** the one it runs on, or the one `--ssh` names, through sudo. The
-  host needs ufw installed and active: admit never enables it, and refuses
-  before making any change otherwise. At a terminal, admit asks for each
+  host needs ufw installed; admit never installs it.
+* **ufw not active:** `--enable-ufw`, or a yes at a terminal, where admit
+  asks, adds these steps after the deployment's own rules, in this order:
+  an allow for every TCP port sshd listens on (read from its sockets with
+  `ss`, and from an active `ssh.socket`), tagged `paisans: ssh`; a timer,
+  `systemd-run --on-active=600 --unit=paisans-ufw-fallback ufw disable`;
+  `ufw --force enable`. ufw takes every rule while it is inactive and
+  applies them as it is enabled, so SSH is allowed from the first moment ufw
+  is on. The timer is stopped once a new SSH login gets through: with
+  `--site`, admit's own login as the deployment's user at its end; with
+  `--request`, admit asks you to open a new SSH session and type yes. Without
+  that, ufw turns itself off again within 10 minutes, and admit says when.
+  Admit refuses to enable ufw when it cannot read a port sshd listens on, when
+  a rule of yours denies one, or when the timer cannot be armed. Without
+  `--enable-ufw` and off a terminal, it refuses before making any change, and
+  prints the commands that enable ufw by hand, numbered, every
+  `sudo ufw allow <port>/tcp` before `sudo ufw enable`; with no sshd port
+  read, it prints no enable command at all.
+* **Grants:** at a terminal, admit asks for each
   grant the site's roles need and the flags leave out, saying what it gives;
   elsewhere a data site without `--watchdog`, or a gateway or Caddy monitor
   without `--public-ports`, stops it before the host is reached. A grant the
@@ -760,7 +778,10 @@ paisans host evict --site home-a --ssh owner@home-a.example.org --execute
   deployment goes, and the plan names it. A hold on Docker's daemons that a
   killed admit left is put back. The SSH allow may be the rule the
   owner's own login arrives by, so it is kept and evict warns of it: the
-  owner deletes it themselves once nothing else needs it. Every process of
+  owner deletes it themselves once nothing else needs it. Evict never
+  disables ufw: when admit enabled it, ufw stays enabled with its
+  `paisans: ssh` allows, and the plan says so; disabling it is the owner's.
+  Every process of
   the user, or of its subordinate range, is killed first. A user the owner
   deleted by hand can leave an empty
   `/etc/systemd/system/user@<uid>.service.requires` behind.

@@ -487,6 +487,13 @@ func (e *evictor) firewall() error {
 				"It may be the rule your own login arrives by. Delete it yourself once nothing else needs it.")
 		}
 	}
+	// Enabling ufw was the owner's choice, made at admit; undoing it is
+	// theirs too, so evict leaves ufw on and the paisans: ssh allows, which
+	// carry no deployment's tag, in place.
+	if e.rec != nil && e.rec.UFWEnabled {
+		e.warn("firewall: ufw stays enabled, and its "+sshAllowTag+" allows stay",
+			"Host admit enabled ufw when you admitted this deployment, and evict never disables it. Disable it yourself with sudo ufw disable if you want it off.")
+	}
 	return nil
 }
 

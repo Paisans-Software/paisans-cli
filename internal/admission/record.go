@@ -114,6 +114,11 @@ type Record struct {
 	// an owner who has enabled it since keeps it so. It is false when the
 	// owner had Docker before admit, which admit never touches.
 	SystemDockerDisabled bool `json:"system_docker_disabled"`
+	// UFWEnabled is whether admit enabled ufw, with --enable-ufw, for this
+	// deployment or an earlier admit of it. It says what admit did: evict
+	// leaves ufw enabled and says so. It is written only when true, so the
+	// record of a host whose ufw was active already reads as before.
+	UFWEnabled bool `json:"ufw_enabled,omitempty"`
 }
 
 // Ports are the ports the firewall opened: the SSH port, the WireGuard port
@@ -233,7 +238,8 @@ func EncodeRecord(r Record) ([]byte, error) {
 	return append(out, '\n'), nil
 }
 
-// recordFields is every key a record holds; a record missing one was not
+// recordFields is every key a record holds but ufw_enabled, which is
+// written only when true; a record missing one was not
 // written by a toolkit of its version.
 var recordFields = []string{"version", "deployment", "user", "site", "roles", "grants", "forwarding", "ports", "digest", "admitted_at", "data_dir", "bridge_netfilter", "mesh_lan", "web_server", "system_docker_disabled"}
 
