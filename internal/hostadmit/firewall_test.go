@@ -19,7 +19,7 @@ var firewallCases = addCases(
 		return home().answer("ufw show added", "ufw present\nstatus active\nrule allow 22/tcp\n")
 	}},
 	goldenCase{name: "firewall-ufw-absent-refused", site: "vm", host: func() *fakeHost { return home().with("ufw", "absent").with("ufw-active", "no") }},
-	goldenCase{name: "firewall-ufw-inactive-refused", site: "vm", host: func() *fakeHost { return home().with("ufw-active", "no") }},
+	goldenCase{name: "firewall-ufw-inactive-refused", site: "vm", host: inactiveUFW(sshdOn22)},
 	goldenCase{name: "firewall-admitted", site: "home-a", flags: gateway, host: func() *fakeHost { return admittedHost(requestFor("home-a"), gateway) }},
 	goldenCase{name: "ports-free", site: "home-a", flags: gateway, host: home},
 	goldenCase{name: "ports-process-refused", site: "home-a", flags: gateway, host: func() *fakeHost {

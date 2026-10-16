@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/siteremove"
@@ -52,8 +53,8 @@ func TestByIDCleansAMonitorWithNoConfiguration(t *testing.T) {
 	}
 	h := w.hosts["watch"]
 	reg, _ := registry.Parse([]byte(h.files[registry.Path]))
-	if _, ok := reg.Deployments[ourID]; ok {
-		t.Error("the registry entry is still there")
+	if _, ok := reg.Deployments[ourID]; !ok {
+		t.Error("the registry entry is gone, which is host evict's to remove")
 	}
 	for path := range h.files {
 		if strings.HasPrefix(path, root+"/") {
@@ -65,35 +66,34 @@ func TestByIDCleansAMonitorWithNoConfiguration(t *testing.T) {
 	}
 }
 
-// A removal without --delete-data keeps the data and the registry entry that
-// names it, marked kept, so a later run by --id finds the deployment and
-// deletes the data; a run without --delete-data in between leaves the entry
-// as it is.
+// A removal without --delete-data keeps the data, and the registry entry,
+// which is host evict's, stays as it was, so a later run by --id finds the
+// deployment and deletes the data; a run without --delete-data in between
+// keeps the data again and names no registry.
 func TestByIDDeletesDataARemovalWithoutDeleteDataKept(t *testing.T) {
 	w := setup(t)
 	h := w.hosts["home-b"]
+	entry := h.files[registry.Path]
 	if err := siteremove.Execute(byID(t, w, "home-b", "f2a9", siteremove.Options{})); err != nil {
 		t.Fatal(err)
 	}
-	reg, _ := registry.Parse([]byte(h.files[registry.Path]))
-	if reg.Deployments[ourID].Kept != registry.KeptData {
-		t.Fatalf("the registry entry is not marked kept for its data:\n%s", h.files[registry.Path])
+	if h.files[registry.Path] != entry {
+		t.Fatalf("the registry changed:\n%s", h.files[registry.Path])
 	}
 	if _, ok := h.files[root+"/infra/postgres/PG_VERSION"]; !ok {
 		t.Fatal("data was deleted without --delete-data")
 	}
 
 	again := byID(t, w, "home-b", "f2a9", siteremove.Options{})
-	if !again.DataKept || hasStep(again, 1, "home-b", "mark", "") || hasStep(again, 1, "home-b", "remove", registry.Path) {
-		t.Errorf("a second run without --delete-data changes the entry:\n%s", printed(again))
+	if !again.DataKept || strings.Contains(printed(again), registry.Path) {
+		t.Errorf("a second run without --delete-data:\n%s", printed(again))
 	}
 
 	if err := siteremove.Execute(byID(t, w, "home-b", "f2a9", siteremove.Options{DeleteData: true})); err != nil {
 		t.Fatal(err)
 	}
-	reg, _ = registry.Parse([]byte(h.files[registry.Path]))
-	if _, ok := reg.Deployments[ourID]; ok {
-		t.Error("the registry entry is still there")
+	if h.files[registry.Path] != entry {
+		t.Errorf("the registry changed:\n%s", h.files[registry.Path])
 	}
 	for path := range h.files {
 		if strings.HasPrefix(path, root+"/") {
@@ -140,7 +140,7 @@ func TestByIDLeavesAnotherDeploymentAlone(t *testing.T) {
 	if _, ok := reg.Deployments[otherID]; !ok {
 		t.Error("the other deployment's registry entry is gone")
 	}
-	if _, ok := b.files["/etc/systemd/system/paisans-0c1d-watchdog.service"]; !ok {
+	if _, ok := b.files[userUnits+"/paisans-0c1d-config-daemon.service"]; !ok {
 		t.Error("the other deployment's unit is gone")
 	}
 	if !contains(b.rules, "allow 51821/udp comment 'paisans-0c1d: wireguard'") {
@@ -160,55 +160,58 @@ func TestByIDLeavesAnotherDeploymentAlone(t *testing.T) {
 	}
 }
 
-// An entry that does not agree with its id is refused before anything is
-// planned: every name removed is made from the id.
-func TestByIDRefusesAnEntryThatDisagreesWithItsID(t *testing.T) {
-	for name, edit := range map[string]func(registry.Registry){
-		"token": func(r registry.Registry) {
-			e := r.Deployments[ourID]
-			e.Token = "beef"
-			r.Deployments[ourID] = e
-		},
-		"root": func(r registry.Registry) {
-			e := r.Deployments[ourID]
-			e.Root = "/srv/paisans/beef"
-			r.Deployments[ourID] = e
-		},
-		"key": func(r registry.Registry) {
-			e := r.Deployments[ourID]
-			delete(r.Deployments, ourID)
-			r.Deployments["f2a9-not-an-id"] = e
-		},
-	} {
+// The deployment is the one the login's own admission record names, read
+// with no registry: the registry is root's, and the deployment's user cannot
+// read it. Its token and its full id both find it, as the site and roles the
+// record names.
+func TestByIDFindsTheDeploymentByTheLoginsRecord(t *testing.T) {
+	for _, ref := range []string{"f2a9", ourID} {
 		w := setup(t)
-		h := w.hosts["watch"]
-		reg, _ := registry.Parse([]byte(h.files[registry.Path]))
-		edit(reg)
-		h.files[registry.Path] = encode(t, reg)
-		dest, _ := config.ParseDestination("ubuntu@192.0.2.30")
-		_, err := siteremove.BuildForcedByID(dest, h, "f2a9", siteremove.Options{})
-		if err == nil || !strings.Contains(err.Error(), "Nothing was changed") {
-			t.Errorf("%s: err = %v", name, err)
+		h := w.hosts["home-b"]
+		delete(h.files, registry.Path)
+		p := byID(t, w, "home-b", ref, siteremove.Options{})
+		if p.Site != "home-b" || p.DeploymentID() != ourID {
+			t.Errorf("%s: site %q, deployment %s", ref, p.Site, p.DeploymentID())
 		}
-		if n := h.ran("docker"); n != 0 {
-			t.Errorf("%s: %d docker command(s) ran", name, n)
+		for _, r := range h.reads {
+			if r == registry.Path {
+				t.Errorf("%s: read the registry", ref)
+			}
 		}
 	}
 }
 
-// No match and several are refused, listing what the host holds.
-func TestByIDRefusesNoMatchAndSeveral(t *testing.T) {
+// --id naming another deployment than the login's record is refused, naming
+// the deployment the record is for, before anything is planned.
+func TestByIDRefusesAnotherDeploymentThanTheLoginsRecord(t *testing.T) {
 	w := setup(t)
 	b := w.hosts["home-b"]
 	dest, _ := config.ParseDestination("ubuntu@192.0.2.30")
-	if _, err := siteremove.BuildForcedByID(dest, b, "beef", siteremove.Options{}); err == nil || !strings.Contains(err.Error(), otherID) {
-		t.Errorf("no match: %v", err)
+	_, err := siteremove.BuildForcedByID(dest, b, "0c1d", siteremove.Options{})
+	if err == nil {
+		t.Fatal("--id 0c1d was not refused")
 	}
-	reg, _ := registry.Parse([]byte(b.files[registry.Path]))
-	reg.Deployments["f2a91111-2222-4333-8444-555566667777"] = registry.Entry{Token: "f2a9", Root: root, Domain: "example.com", Site: "y", Roles: "monitor", ClaimedAt: "2026-10-01T00:00:00Z", Interface: "psns-f2a9", Subnet: "10.46.0.0/24", Address: "10.46.0.2"}
-	b.files[registry.Path] = encode(t, reg)
-	if _, err := siteremove.BuildForcedByID(dest, b, "f2a9", siteremove.Options{}); err == nil || !strings.Contains(err.Error(), "full id") {
-		t.Errorf("several: %v", err)
+	for _, want := range []string{"site remove --id 0c1d: this login's admission record on ubuntu@192.0.2.30:22 is for deployment " + ourID + " (home-b)", "Log in as that deployment's user", "Nothing was changed"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("no %q in: %v", want, err)
+		}
+	}
+	if n := b.ran("docker"); n != 0 {
+		t.Errorf("%d docker command(s) ran", n)
+	}
+}
+
+// A login with no admission record of its own, on a host with none for
+// --id either, is refused naming why.
+func TestByIDRefusesALoginWithNoRecord(t *testing.T) {
+	w := setup(t)
+	b := w.hosts["home-b"]
+	recordPath, _ := admission.Path(dep.Token())
+	delete(b.files, recordPath)
+	dest, _ := config.ParseDestination("ubuntu@192.0.2.30")
+	_, err := siteremove.BuildForcedByID(dest, b, "f2a9", siteremove.Options{})
+	if err == nil || !strings.Contains(err.Error(), admission.ErrNotMine.Error()) || !strings.Contains(err.Error(), "Nothing was changed") {
+		t.Errorf("err = %v", err)
 	}
 	if n := b.ran("docker"); n != 0 {
 		t.Errorf("%d docker command(s) ran", n)
@@ -220,29 +223,5 @@ func TestByIDRefusesHostGone(t *testing.T) {
 	dest, _ := config.ParseDestination("ubuntu@192.0.2.30")
 	if _, err := siteremove.BuildForcedByID(dest, w.hosts["watch"], "f2a9", siteremove.Options{HostGone: true}); err == nil || !strings.Contains(err.Error(), "Drop one of them") {
 		t.Errorf("err = %v", err)
-	}
-}
-
-// Another entry holding the same token or root is refused even when --id is
-// the full id: every name but the label is made from the token, so the two
-// would share them.
-func TestByIDRefusesAFullIDWhoseTokenAnotherEntryHolds(t *testing.T) {
-	for name, e := range map[string]registry.Entry{
-		"token": {Token: "f2a9", Root: "/srv/paisans/beef", Domain: "example.com", Site: "y", Roles: "monitor", ClaimedAt: "2026-10-01T00:00:00Z", Interface: "psns-f2a9", Subnet: "10.46.0.0/24", Address: "10.46.0.2"},
-		"root":  {Token: "beef", Root: root, Domain: "example.com", Site: "y", Roles: "monitor", ClaimedAt: "2026-10-01T00:00:00Z", Interface: "psns-beef", Subnet: "10.46.0.0/24", Address: "10.46.0.2"},
-	} {
-		w := setup(t)
-		h := w.hosts["watch"]
-		reg, _ := registry.Parse([]byte(h.files[registry.Path]))
-		reg.Deployments["beef1111-2222-4333-8444-555566667777"] = e
-		h.files[registry.Path] = encode(t, reg)
-		dest, _ := config.ParseDestination("ubuntu@192.0.2.30")
-		_, err := siteremove.BuildForcedByID(dest, h, ourID, siteremove.Options{})
-		if err == nil || !strings.Contains(err.Error(), "beef1111") || !strings.Contains(err.Error(), "Nothing was changed") {
-			t.Errorf("%s: err = %v", name, err)
-		}
-		if n := h.ran("docker"); n != 0 {
-			t.Errorf("%s: %d docker command(s) ran", name, n)
-		}
 	}
 }

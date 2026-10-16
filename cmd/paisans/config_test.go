@@ -5,9 +5,11 @@ import (
 	"encoding/base64"
 	"errors"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -15,20 +17,21 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
-	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // storeHost answers the commands configstore.Pull runs with a fixed bundle,
-// and holds the registry a recovery reads the deployment's id from. A host
+// and logs in as login, holding the admission records in files that a
+// recovery reads the deployment's id from. A host
 // that is down fails everything. runs, when set, logs every command run on
 // any host sharing it. A host with noPush answers but refuses a pushed
 // bundle; one whose noStore says so has no store to push into.
 type storeHost struct {
-	name, answer, registry string
-	down, noPush           bool
-	noStore                func() bool
-	runs                   *[]string
+	name, answer, login string
+	files               map[string]string
+	down, noPush        bool
+	noStore             func() bool
+	runs                *[]string
 }
 
 func (h *storeHost) Run(c string) (string, error) {
@@ -37,6 +40,13 @@ func (h *storeHost) Run(c string) (string, error) {
 	}
 	if h.down {
 		return "", errors.New("ssh: connect to host " + h.name + " port 22: Connection refused")
+	}
+	if strings.HasPrefix(c, `echo "user $(id -un)"`) {
+		out := "user " + h.login + "\n"
+		for _, p := range slices.Sorted(maps.Keys(h.files)) {
+			out += p + "\n"
+		}
+		return out, nil
 	}
 	if strings.Contains(c, "bundle create") {
 		return h.answer, nil
@@ -54,10 +64,8 @@ func (h *storeHost) ReadFile(p string) (string, bool, error) {
 	if h.down {
 		return "", false, errors.New("ssh: connect to host " + h.name + " port 22: Connection refused")
 	}
-	if p == registry.Path && h.registry != "" {
-		return h.registry, true, nil
-	}
-	return "", false, nil
+	c, ok := h.files[p]
+	return c, ok, nil
 }
 func (h *storeHost) WriteFile(string, string, uint32) error { return nil }
 func (h *storeHost) Describe() string                       { return h.name }
@@ -186,10 +194,9 @@ func recoverHosts(t *testing.T, answer string) {
 	t.Helper()
 	savedDest, savedSite := reachDestination, configSiteTransport
 	t.Cleanup(func() { reachDestination, configSiteTransport = savedDest, savedSite })
-	id, _ := config.LoadBytes(must(os.ReadFile(fixtureConfig())))
-	reg := `{"version":1,"deployments":{"` + id.ID + `":{"token":"x","root":"/srv/paisans/x","domain":"example.org","site":"home-a","claimed_at":"2026-10-12T00:00:00Z"}}}`
+	files := ownRecord(t)
 	reachDestination = func(dest config.Destination) apply.Transport {
-		return &storeHost{name: dest.String(), answer: answer, registry: reg}
+		return &storeHost{name: dest.String(), answer: answer, login: "paisans-f2a9", files: files}
 	}
 	configSiteTransport = func(name string, _ config.Site) apply.Transport {
 		return &storeHost{name: name, answer: answer, down: name != "home-a"}
@@ -198,6 +205,20 @@ func recoverHosts(t *testing.T, answer string) {
 	savedR := reporterOverride
 	reporterOverride = ui.NewPlain(&b, false)
 	t.Cleanup(func() { reporterOverride = savedR })
+}
+
+// ownRecord is a host's admission records: the fixture deployment's, for
+// home-a reached as the deployment's own user, paisans-f2a9.
+func ownRecord(t *testing.T) map[string]string {
+	t.Helper()
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := cfg.Sites["home-a"]
+	s.SSH.User = ""
+	cfg.Sites["home-a"] = s
+	return map[string]string{admittedPath(cfg): admittedRecord(t, cfg, "home-a")}
 }
 
 func must[T any](v T, err error) T {
@@ -420,37 +441,53 @@ func allSitesUp(answer string, runs *[]string) {
 
 func synced(runs []string) bool {
 	for _, r := range runs {
-		if strings.Contains(r, "systemctl start") {
+		if strings.Contains(r, "systemctl --user start") {
 			return true
 		}
 	}
 	return false
 }
 
-// A registry entry that is not a deployment id is refused, naming the host
-// and the entry, before any command reaches any host.
+// A recovery learns the deployment from the admission record that names
+// the login it reaches the host as: one under the deployment's own user is
+// recovered as that deployment, and a login no record names is refused.
+func TestConfigRecoverReadsTheLoginsAdmissionRecord(t *testing.T) {
+	hosts := map[string]apply.Transport{"ubuntu@203.0.113.9": &storeHost{name: "ubuntu@203.0.113.9", login: "paisans-f2a9", files: ownRecord(t)}}
+	if id, err := recoverID(hosts, ""); err != nil || id != exampleID {
+		t.Errorf("recoverID = %q, %v", id, err)
+	}
+	hosts = map[string]apply.Transport{"ubuntu@203.0.113.9": &storeHost{name: "ubuntu@203.0.113.9", login: "ubuntu", files: ownRecord(t)}}
+	_, err := recoverID(hosts, "")
+	if text := problemText(err); err == nil || !strings.Contains(text, "no admission record names this login") || !strings.Contains(text, "ubuntu@203.0.113.9") {
+		t.Errorf("a login no record names: %v\n%s", err, text)
+	}
+}
+
+// A record whose deployment is not an id is never read as one, so a
+// recovery that finds only such a record names nothing to recover, and no
+// command but the listing reaches any host.
 func TestConfigRecoverRefusesAnInjectedID(t *testing.T) {
 	_, answer, _ := storedVersion(t)
 	recoverHosts(t, answer)
 	var runs []string
-	bad := `{"version":1,"deployments":{"f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01;touch /pwned":{"token":"x","root":"/srv/paisans/x","domain":"example.org","site":"home-a","claimed_at":"2026-10-12T00:00:00Z"}}}`
+	files := ownRecord(t)
+	for p, c := range files {
+		files[p] = strings.Replace(c, exampleID, exampleID+";touch /pwned", 1)
+	}
 	reachDestination = func(dest config.Destination) apply.Transport {
-		reg := ""
-		if dest.Host == "203.0.113.9" {
-			reg = bad
-		}
-		return &storeHost{name: dest.String(), answer: answer, registry: reg, runs: &runs}
+		return &storeHost{name: dest.String(), answer: answer, login: "paisans-f2a9", files: files, runs: &runs}
 	}
 	allSitesUp(answer, &runs)
 	dir := t.TempDir()
 	var out bytes.Buffer
-	err := runConfig([]string{"recover", "--from", "ubuntu@203.0.113.9", "--from", "ubuntu@203.0.113.10", "--root", strings.Repeat("a", 40), "--config", filepath.Join(dir, "paisans-stack.yaml"), "--execute"}, answering(t, "partial\n"), &out)
-	text := problemText(err)
-	if err == nil || !strings.Contains(text, "203.0.113.9") || !strings.Contains(text, "touch /pwned") {
+	err := runConfig([]string{"recover", "--from", "ubuntu@203.0.113.9", "--root", strings.Repeat("a", 40), "--config", filepath.Join(dir, "paisans-stack.yaml"), "--execute"}, answering(t, "partial\n"), &out)
+	if text := problemText(err); err == nil || !strings.Contains(text, "no admission record names this login") || strings.Contains(text, "touch /pwned") {
 		t.Fatalf("got %v: %s", err, text)
 	}
-	if len(runs) != 0 {
-		t.Fatalf("commands reached hosts: %q", runs)
+	for _, r := range runs {
+		if !strings.Contains(r, `echo "user $(id -un)"`) {
+			t.Fatalf("a command reached a host: %q", r)
+		}
 	}
 }
 

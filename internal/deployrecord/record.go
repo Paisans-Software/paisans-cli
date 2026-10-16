@@ -15,7 +15,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"path"
 	"slices"
 	"sort"
 	"strings"
@@ -51,11 +50,9 @@ type Record struct {
 	PocketIDGroups []string `json:"pocket_id_groups"`
 }
 
-// Path is the record on a gateway, named by the deployment's token, which is
-// what proves it this deployment's.
-func Path(d deployment.Deployment) string {
-	return registry.Dir + "/deployed." + d.Token() + ".json"
-}
+// Path is the record on a gateway, in the deployment's state directory,
+// which only the deployment's user writes.
+func Path(d deployment.Deployment) string { return d.StatePath("deployed.json") }
 
 // FromConfig is everything cfg declares.
 func FromConfig(cfg *config.Config) Record {
@@ -412,7 +409,7 @@ func sameNames(a, b Record) bool {
 	return slices.Equal(a.Sites, b.Sites) && slices.Equal(a.Apps, b.Apps) && slices.Equal(a.PocketIDGroups, b.PocketIDGroups)
 }
 
-// write replaces the record with content, under the registry's lock, only if
+// write replaces the record with content, under the deployment's lock, only if
 // the file still hashes to what was read: a record another command changed
 // meanwhile is refused rather than overwritten.
 func write(t registry.Runner, d deployment.Deployment, raw string, found bool, content string) error {
@@ -431,24 +428,19 @@ func write(t registry.Runner, d deployment.Deployment, raw string, found bool, c
 	return nil
 }
 
-// writeCommand leaves the record 0644 in a directory others may enter, so
-// that a command which only reads it, Eg: an apply of a site that is not a
-// gateway, needs no sudo on the gateway. It holds the names of sites, apps and
-// Pocket ID groups and nothing else. The directory is not listable, for the
-// registry beside it (see registry.Dir).
+// writeCommand replaces the record, which is the deployment user's and sits
+// in its state directory, under the deployment's lock. The record is left
+// 0644 inside that 700 directory by a rename. It holds the names of sites,
+// apps and Pocket ID groups and nothing else.
 func writeCommand(d deployment.Deployment, want, content string) string {
 	return strings.Join([]string{
 		"set -e",
-		"umask 077",
-		"mkdir -p " + registry.Dir,
-		"chmod 711 " + registry.Dir,
-		"exec 9>>" + registry.LockPath,
-		fmt.Sprintf("flock -w 60 9 || { echo 'paisans: another command holds %s'; exit 1; }", registry.LockPath),
+		d.StateLockCommand("the deployment record"),
 		"f=" + quote(Path(d)),
 		"cur=none",
 		`if [ -f "$f" ]; then cur=$(sha256sum "$f" | cut -d' ' -f1); fi`,
 		`[ "$cur" = ` + quote(want) + ` ] || { echo ` + quote(ChangedMarker) + `; exit 1; }`,
-		"tmp=$(mktemp " + registry.Dir + "/.deployed.XXXXXX)",
+		"tmp=$(mktemp " + quote(d.StatePath(".deployed.XXXXXX")) + ")",
 		`trap 'rm -f "$tmp"' EXIT`,
 		"printf %s " + quote(base64.StdEncoding.EncodeToString([]byte(content))) + ` | base64 -d > "$tmp"`,
 		`chmod 644 "$tmp"`,
@@ -460,50 +452,3 @@ func writeCommand(d deployment.Deployment, want, content string) string {
 func RemoveCommand(d deployment.Deployment) string { return "rm -f -- " + quote(Path(d)) }
 
 func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
-
-// The markers ReadAsUser's command prints in place of the record.
-const (
-	absentMarker = "__PAISANS_ABSENT__"
-	deniedMarker = "__PAISANS_DENIED__"
-)
-
-// ReadAsUser is gateway user for reading the record as the ssh user, without
-// sudo, which the modes a write leaves allow. A record the ssh user may not
-// read, one written with other modes, is read through elevated instead,
-// which is made only then, so that a read which needs no sudo asks for no
-// sudo password. The next write leaves the record readable. Run is for
-// writes, and goes through elevated.
-func ReadAsUser(user registry.Runner, elevated func() registry.Runner) registry.Runner {
-	return userReader{user: user, elevated: elevated}
-}
-
-type userReader struct {
-	user     registry.Runner
-	elevated func() registry.Runner
-}
-
-func (u userReader) Describe() string { return u.user.Describe() }
-
-func (u userReader) Run(command string) (string, error) { return u.elevated().Run(command) }
-
-func (u userReader) ReadFile(p string) (string, bool, error) {
-	out, err := u.user.Run(userReadCommand(p))
-	if err != nil {
-		return "", false, err
-	}
-	switch strings.TrimSpace(out) {
-	case absentMarker:
-		return "", false, nil
-	case deniedMarker:
-		return u.elevated().ReadFile(p)
-	}
-	return out, true, nil
-}
-
-// userReadCommand prints the file at p, or a marker: denied for a file the
-// user may not read, or one in a directory the user may not enter, which
-// hides whether the file is there at all; absent otherwise.
-func userReadCommand(p string) string {
-	f, dir := quote(p), quote(path.Dir(p))
-	return fmt.Sprintf(`if [ -f %[1]s ] && [ -r %[1]s ]; then cat %[1]s; elif [ -e %[1]s ] || { [ -d %[2]s ] && ! [ -x %[2]s ]; }; then echo %[3]s; else echo %[4]s; fi`, f, dir, deniedMarker, absentMarker)
-}

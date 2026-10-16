@@ -139,7 +139,7 @@ func listPlan(r ui.Reporter, plan *apply.Plan) {
 
 	if plan.HostSites {
 		r.Step("ensure host sites directory").End(ui.Pending, "")
-		r.Detail("%s, if missing, for site blocks the host's owner adds; nothing in it is ever changed", render.HostSitesDir)
+		r.Detail("%s, if missing, for site blocks the host's owner adds; nothing in it is ever changed", render.HostSitesDir(plan.Deployment))
 	}
 	if plan.GatewayChanging && plan.ACMEModule != "" {
 		r.Step("check gateway modules").End(ui.Pending, "")

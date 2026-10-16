@@ -1,6 +1,7 @@
 package siteremove_test
 
 import (
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"os"
 	"strings"
 	"testing"
@@ -77,12 +78,14 @@ func TestForcedHostStageMatchesTheFullRemoval(t *testing.T) {
 	}
 }
 
-// A host with nothing of this deployment's on it plans nothing.
+// A host with nothing of this deployment's on it but its admission record,
+// which names the user it runs as, plans nothing.
 func TestForcedOnACleanHostPlansNothing(t *testing.T) {
 	w := setup(t)
 	b := w.hosts["home-b"]
 	b.containers, b.networks, b.volumes, b.rules = nil, nil, nil, nil
-	b.files = map[string]string{registry.Path: encode(t, registry.Registry{Version: registry.Version, Deployments: map[string]registry.Entry{}})}
+	recordPath, _ := admission.Path(dep.Token())
+	b.files = map[string]string{registry.Path: encode(t, registry.Registry{Version: registry.Version, Deployments: map[string]registry.Entry{}}), recordPath: b.files[recordPath]}
 	b.wgUp = false
 	dest, _ := config.ParseDestination("ubuntu@192.0.2.11")
 	p := forced(t, w, w.cfg, "home-b", dest, siteremove.Options{})
@@ -112,9 +115,11 @@ func TestForcedRefusesHostGone(t *testing.T) {
 }
 
 // A --ssh that reaches another declared site's host is refused: it would
-// take a live site down under another site's name.
+// take a live site down under another site's name. The site is the one the
+// host's admission record names; the registry, root's, is not read.
 func TestForcedRefusesAnotherDeclaredSitesHost(t *testing.T) {
 	w := setup(t)
+	delete(w.hosts["home-b"].files, registry.Path)
 	dest, _ := config.ParseDestination("ubuntu@192.0.2.99")
 	_, err := siteremove.BuildForced(w.cfg, w.secrets, "monitor-x", dest, w.hosts["home-b"], siteremove.Options{})
 	if err == nil || !strings.Contains(err.Error(), "home-b") {
@@ -125,10 +130,11 @@ func TestForcedRefusesAnotherDeclaredSitesHost(t *testing.T) {
 	}
 }
 
-// The site's own host is known by its registry entry, however --ssh spells
-// it.
-func TestForcedKnowsTheSitesOwnHostByItsRegistryEntry(t *testing.T) {
+// The site's own host is known by its admission record, however --ssh
+// spells it, with no registry to read.
+func TestForcedKnowsTheSitesOwnHostByItsAdmissionRecord(t *testing.T) {
 	w := setup(t)
+	delete(w.hosts["home-b"].files, registry.Path)
 	dest, _ := config.ParseDestination("root@192.0.2.12:2222")
 	p := forced(t, w, w.cfg, "home-b", dest, siteremove.Options{})
 	if !p.Current {

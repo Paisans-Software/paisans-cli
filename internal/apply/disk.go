@@ -88,6 +88,9 @@ func ParseSize(s string) (int64, error) {
 
 // FormatSize prints bytes in GiB or MiB, to one decimal.
 func FormatSize(n int64) string {
+	if n < 0 {
+		return "size unknown"
+	}
 	if n >= 1<<30 {
 		return fmt.Sprintf("%.1f GiB", float64(n)/(1<<30))
 	}

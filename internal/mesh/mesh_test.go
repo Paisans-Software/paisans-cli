@@ -184,7 +184,7 @@ func TestParseNetworks(t *testing.T) {
 }
 
 func TestPools(t *testing.T) {
-	defaults, err := mesh.Pools("", false)
+	defaults, err := mesh.Pools("", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,10 +198,10 @@ func TestPools(t *testing.T) {
 	}
 
 	// A daemon.json without pools leaves the defaults.
-	if same, err := mesh.Pools(`{"log-driver":"journald"}`, true); err != nil || len(same) != len(mesh.DefaultPools) {
+	if same, err := mesh.Pools(`{"log-driver":"journald"}`, true, ""); err != nil || len(same) != len(mesh.DefaultPools) {
 		t.Errorf("a daemon.json without pools = %v, %v", same, err)
 	}
-	set, err := mesh.Pools(`{"default-address-pools":[{"base":"10.200.0.0/16","size":24}]}`, true)
+	set, err := mesh.Pools(`{"default-address-pools":[{"base":"10.200.0.0/16","size":24}]}`, true, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestPools(t *testing.T) {
 	if len(mesh.Clashes(prefix(t, "172.17.0.0/24"), set)) != 0 {
 		t.Error("configured pools still included the defaults")
 	}
-	if _, err := mesh.Pools(`{`, true); err == nil {
+	if _, err := mesh.Pools(`{`, true, ""); err == nil {
 		t.Error("an unreadable daemon.json was accepted")
 	}
 }
@@ -391,3 +391,60 @@ func TestADockerThatDoesNotAnswerIsNamed(t *testing.T) {
 		t.Errorf("a daemon with no network: %q", out)
 	}
 }
+
+// The deployment's user reads its own daemon's pools, through its own shell
+// so that ~ is its home; the system daemon's file is admit's to read.
+func TestProbeUserReadsTheUsersDaemonJSON(t *testing.T) {
+	h := &userHost{host: host{outputs: map[string]string{
+		mesh.RouteCommand:      "[]",
+		mesh.AddrCommand:       "[]",
+		mesh.NetworksCommand:   "[]",
+		mesh.UserDaemonCommand: "present\n" + `{"default-address-pools":[{"base":"10.44.0.0/16","size":24}]}`,
+	}}}
+	p, err := mesh.ProbeUser(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taken, err := p.Taken("psns-f2a9", "home-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(taken) != 1 || !strings.Contains(taken[0].What, "~/.config/docker/daemon.json") {
+		t.Errorf("taken %+v", taken)
+	}
+	if h.read != 0 {
+		t.Errorf("read %d files directly; the user's file is read through its shell", h.read)
+	}
+	h.outputs[mesh.UserDaemonCommand] = "absent\n"
+	if p, err = mesh.ProbeUser(h); err != nil || p.DaemonFound {
+		t.Errorf("absent read as found: %+v %v", p, err)
+	}
+}
+
+// A user's rootless daemon that does not answer is not a user with no
+// networks: the probe's networks read fails readably.
+func TestProbeUserDaemonNotAnsweringFailsReadably(t *testing.T) {
+	h := &userHost{host: host{outputs: map[string]string{
+		mesh.RouteCommand:      "[]",
+		mesh.AddrCommand:       "[]",
+		mesh.NetworksCommand:   "paisans: dockerd does not answer: Cannot connect\n",
+		mesh.UserDaemonCommand: "absent\n",
+	}}}
+	p, err := mesh.ProbeUser(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.DockerDown() {
+		t.Error("a daemon that does not answer was not marked down")
+	}
+	if _, err := p.Taken("psns-f2a9", "home-a"); !errors.Is(err, mesh.ErrDockerDown) {
+		t.Errorf("Taken = %v, want ErrDockerDown", err)
+	}
+}
+
+type userHost struct {
+	host
+	read int
+}
+
+func (h *userHost) ReadFile(string) (string, bool, error) { h.read++; return "", false, nil }

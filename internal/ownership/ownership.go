@@ -9,7 +9,7 @@
 // relying on the gateway's Caddy is reported so whoever moves or stops the
 // gateway knows what else goes with it. The Caddyfile is this deployment's
 // and Caddy runs in the host's network namespace, so the one way something
-// foreign is served through it is a site block in /srv/caddy.d, and that
+// foreign is served through it is a site block in the deployment's caddy.d, and that
 // directory is what counts.
 //
 // Classify is a pure function of the configuration, an inventory from
@@ -38,7 +38,7 @@ type Report struct {
 	Stacks []Stack
 	// Files are the manifest's entries marked left over, sorted by path.
 	Files []render.ManifestFile
-	// HostSites are the *.caddy files in render.HostSitesDir, which the
+	// HostSites are the *.caddy files in the deployment's render.HostSitesDir, which the
 	// gateway's Caddy serves, on a gateway site only.
 	HostSites []string
 }

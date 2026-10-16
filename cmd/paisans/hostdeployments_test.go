@@ -3,11 +3,14 @@ package main
 import (
 	"bytes"
 	"errors"
+	"sort"
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -24,15 +27,20 @@ type listedHost struct {
 	t        *testing.T
 	registry string
 	probe    string
+	// records are the admission records, by path, the records listing
+	// answers with.
+	records  map[string]string
 	commands []string
 	// readErr fails the registry's read, and probeErr the probe, which
 	// then answers probe as its output.
 	readErr, probeErr error
+	registryRead      bool
 }
 
 func (h *listedHost) Describe() string { return "admin@192.0.2.30" }
 func (h *listedHost) ReadFile(path string) (string, bool, error) {
 	if path == registry.Path {
+		h.registryRead = true
 		return h.registry, h.registry != "", h.readErr
 	}
 	return "", false, nil
@@ -49,6 +57,18 @@ func (h *listedHost) Run(command string) (string, error) {
 		return "", nil
 	case command == deploymentsProbe:
 		return h.probe, h.probeErr
+	case command == hostDeploymentsAdmitted:
+		var b strings.Builder
+		paths := make([]string, 0, len(h.records))
+		for p := range h.records {
+			paths = append(paths, p)
+		}
+		sort.Strings(paths)
+		for _, p := range paths {
+			b.WriteString("record " + p + "\n" + h.records[p] + "\n")
+		}
+		b.WriteString("end\n")
+		return b.String(), nil
 	}
 	h.t.Errorf("unexpected command %q", command)
 	return "", nil
@@ -86,22 +106,79 @@ func plainOutput(t *testing.T) *bytes.Buffer {
 	return &b
 }
 
-// host deployments lists each registry entry in full, then what of a
-// deployment is on the host with no entry, and changes nothing.
-func TestHostDeploymentsListsEntriesAndLeftovers(t *testing.T) {
-	h := &listedHost{t: t, registry: twoDeployments(t), probe: strings.Join([]string{
-		"root f2a9", "root 0c1d", "root dead",
-		"container\t" + monitorID + "\tpaisans-f2a9-health\tapp",
-		"container\t" + strayID + "\tpaisans-dead-talk\tapp",
-		"container\t" + strayID + "\tpaisans-dead-talk\tapp",
-		"end",
-	}, "\n") + "\n"}
-	withHost(t, h)
-	out := plainOutput(t)
-	if err := runHostDeployments([]string{"--ssh", "admin@192.0.2.30"}); err != nil {
+// admittedRecords is the records listing's records: the monitor
+// deployment's, admitted as vm, a gateway, with public ports.
+func admittedRecords(t *testing.T) map[string]string {
+	t.Helper()
+	rec := admission.Record{
+		Version: admission.RecordVersion, Deployment: monitorID, User: "paisans-f2a9", Site: "vm", Roles: []string{"gateway"},
+		Grants: admission.Grants{PublicPorts: true}, Ports: admission.Ports{SSH: 22, WireGuard: 51820, Public: []int{80, 443}},
+		AdmittedAt: "2026-10-15T00:00:00Z", MeshSubnet: "10.44.0.0/24",
+	}
+	b, err := admission.EncodeRecord(rec)
+	if err != nil {
 		t.Fatal(err)
 	}
-	got := out.String()
+	p, _ := admission.Path("f2a9")
+	return map[string]string{p: string(b)}
+}
+
+// runDeployments runs host deployments against h and returns what it printed.
+func runDeployments(t *testing.T, h *listedHost, args ...string) string {
+	t.Helper()
+	withHost(t, h)
+	out := plainOutput(t)
+	if err := runHostDeployments(args); err != nil {
+		t.Fatal(err)
+	}
+	return out.String()
+}
+
+// The owner's listing names every admission record beside the registry:
+// the user, the site, the grants and when it was admitted.
+func TestHostDeploymentsListsAdmissionRecords(t *testing.T) {
+	h := &listedHost{t: t, registry: twoDeployments(t), records: admittedRecords(t), probe: "end\n"}
+	out := runDeployments(t, h, "--ssh", "owner@vm.example.org")
+	for _, want := range []string{monitorID + ": admitted: paisans-f2a9 as vm (gateway), watchdog no, public ports yes, at 2026-10-15T00:00:00Z", "token 0c1d"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("no %q in:\n%s", want, out)
+		}
+	}
+}
+
+// Without sudo, only the records are read: they are 644 in a 755 directory.
+func TestHostDeploymentsWithoutSudoListsOnlyRecords(t *testing.T) {
+	h := &listedHost{t: t, registry: twoDeployments(t), records: admittedRecords(t), probe: "end\n"}
+	out := runDeployments(t, h, "--ssh", "owner@vm.example.org", "--sudo=false")
+	if !strings.Contains(out, "admitted: paisans-f2a9") || strings.Contains(out, "token 0c1d") {
+		t.Errorf("not the records alone:\n%s", out)
+	}
+	for _, c := range h.commands {
+		if strings.Contains(c, "registry") || strings.Contains(c, deployment.Base) {
+			t.Errorf("read %q without sudo", c)
+		}
+	}
+	if h.registryRead {
+		t.Error("read the registry without sudo")
+	}
+}
+
+// A record that does not parse is a warning naming the file and why, and
+// the rest is still listed.
+func TestHostDeploymentsWarnsOfARecordThatDoesNotParse(t *testing.T) {
+	records := admittedRecords(t)
+	records["/etc/paisans/admitted.0c1d.json"] = "{}"
+	out := runDeployments(t, &listedHost{t: t, registry: twoDeployments(t), records: records, probe: "end\n"}, "--ssh", "owner@vm.example.org")
+	if !strings.Contains(out, "WARN /etc/paisans/admitted.0c1d.json:") || !strings.Contains(out, "admitted: paisans-f2a9") {
+		t.Errorf("printed:\n%s", out)
+	}
+}
+
+// host deployments lists each registry entry in full, then each deployment
+// directory with no entry, and changes nothing.
+func TestHostDeploymentsListsEntriesAndLeftovers(t *testing.T) {
+	h := &listedHost{t: t, registry: twoDeployments(t), probe: "root f2a9\nroot 0c1d\nroot dead\nend\n"}
+	got := runDeployments(t, h, "--ssh", "admin@192.0.2.30")
 	// The host is read in a step, so a spinner shows while ssh answers.
 	if !strings.Contains(got, "ok   read admin@192.0.2.30:22") {
 		t.Errorf("the read is not a step:\n%s", got)
@@ -112,29 +189,26 @@ func TestHostDeploymentsListsEntriesAndLeftovers(t *testing.T) {
 		"  ok   " + monitorID + ": token f2a9",
 		"  ok   " + neighbour + ": token 0c1d",
 		"  WARN /srv/paisans/dead: no registry entry",
-		"  WARN compose project paisans-dead-talk: no registry entry",
 		"--id <id or token>",
+		"no admission record in /etc/paisans",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("no %q in:\n%s", want, got)
 		}
 	}
-	if strings.Count(got, "paisans-dead-talk") != 1 {
-		t.Errorf("a project is listed once per container:\n%s", got)
-	}
-	if strings.Contains(got, "/srv/paisans/f2a9: no registry entry") || strings.Contains(got, "paisans-f2a9-health") {
+	if strings.Contains(got, "/srv/paisans/f2a9: no registry entry") {
 		t.Errorf("a registered deployment is listed as a leftover:\n%s", got)
 	}
 }
 
 func TestHostDeploymentsOnAnEmptyHost(t *testing.T) {
-	withHost(t, &listedHost{t: t, probe: "end\n"})
-	out := plainOutput(t)
-	if err := runHostDeployments([]string{"--ssh", "admin@192.0.2.30", "--sudo=false"}); err != nil {
-		t.Fatal(err)
+	out := runDeployments(t, &listedHost{t: t, probe: "end\n"}, "--ssh", "admin@192.0.2.30")
+	if !strings.Contains(out, "No deployment") || !strings.Contains(out, "no admission record") {
+		t.Errorf("printed:\n%s", out)
 	}
-	if !strings.Contains(out.String(), "No deployment") {
-		t.Errorf("printed:\n%s", out.String())
+	out = runDeployments(t, &listedHost{t: t, probe: "end\n"}, "--ssh", "admin@192.0.2.30", "--sudo=false")
+	if !strings.Contains(out, "0 admission record(s)") {
+		t.Errorf("--sudo=false printed:\n%s", out)
 	}
 }
 
@@ -181,29 +255,32 @@ func TestSiteRemoveByIDRefusesBeforeReachingAHost(t *testing.T) {
 	}
 }
 
-// No match and several are refused with what the host holds, and nothing
-// past the registry is read.
-func TestSiteRemoveByIDRefusesNoMatchAndSeveral(t *testing.T) {
-	h := &listedHost{t: t, registry: twoDeployments(t)}
+// --id naming another deployment than the one the login's admission record
+// names is refused naming that one, and nothing past the record is read.
+func TestSiteRemoveByIDRefusesAnotherDeployment(t *testing.T) {
+	h := &recordingIDHost{idHost: idHost{runningHost{failingHost{match: "\x00"}}, twoDeployments(t)}}
 	withHost(t, h)
 	plainOutput(t)
-	err := runSiteRemove([]string{"--force", "--ssh", "admin@192.0.2.30", "--id", "beef"}, strings.NewReader(""), &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "no deployment") || !strings.Contains(err.Error(), neighbour) || !strings.Contains(err.Error(), monitorID) {
-		t.Errorf("no match: %v", err)
-	}
-	r, _ := registry.Parse([]byte(h.registry))
-	r.Deployments["f2a91111-2222-4333-8444-555566667777"] = registry.Entry{Token: "f2a9", Root: "/srv/paisans/f2a9", Domain: "example.com", Site: "y", Roles: "monitor", ClaimedAt: "2026-10-01T00:00:00Z", Interface: "psns-f2a9", Subnet: "10.46.0.0/24", Address: "10.46.0.2"}
-	data, _ := registry.Encode(r)
-	h.registry = string(data)
-	err = runSiteRemove([]string{"--force", "--ssh", "admin@192.0.2.30", "--id", "f2a9"}, strings.NewReader(""), &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "full id") {
-		t.Errorf("several: %v", err)
+	err := runSiteRemove([]string{"--force", "--ssh", "ubuntu@192.0.2.30", "--id", "0c1d"}, strings.NewReader(""), &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "this login's admission record on ubuntu@192.0.2.30:22 is for deployment "+monitorID+" (watch)") {
+		t.Errorf("err = %v", err)
 	}
 	for _, c := range h.commands {
-		if c != "true" {
+		if c != "true" && !strings.Contains(c, "$(id -un)") {
 			t.Errorf("ran %q", c)
 		}
 	}
+}
+
+// recordingIDHost is an idHost that records the commands it runs.
+type recordingIDHost struct {
+	idHost
+	commands []string
+}
+
+func (h *recordingIDHost) Run(command string) (string, error) {
+	h.commands = append(h.commands, command)
+	return h.idHost.Run(command)
 }
 
 // A host whose registry or probe cannot be read is an error naming what
@@ -219,7 +296,6 @@ func TestHostDeploymentsFailsRatherThanListingPartly(t *testing.T) {
 		"registry malformed":     {&listedHost{registry: "not json", probe: good}, registry.Path},
 		"registry dir hidden":    {&listedHost{probe: "cannot read /var/lib/paisans\n", probeErr: errors.New("exit status 3")}, "cannot read /var/lib/paisans"},
 		"deployments dir hidden": {&listedHost{probe: "cannot read /srv/paisans\n", probeErr: errors.New("exit status 3")}, "cannot read /srv/paisans"},
-		"docker ps failed":       {&listedHost{probe: "root f2a9\ndocker ps failed: Cannot connect to the Docker daemon\n", probeErr: errors.New("exit status 4")}, "docker ps failed"},
 		"cut short":              {&listedHost{probe: "root f2a9\n"}, "cut short"},
 		"unreadable line":        {&listedHost{probe: "root f2a9\nsomething else\nend\n"}, "something else"},
 	} {
@@ -237,88 +313,6 @@ func TestHostDeploymentsFailsRatherThanListingPartly(t *testing.T) {
 		if strings.Contains(out.String(), "token ") || strings.Contains(out.String(), "no registry entry") {
 			t.Errorf("%s: printed a listing:\n%s", name, out.String())
 		}
-	}
-}
-
-// An entry whose Caddy is kept shows it, and the owner's files it serves.
-func TestHostDeploymentsShowsAKeptCaddy(t *testing.T) {
-	r, _ := registry.Parse([]byte(twoDeployments(t)))
-	r.Deployments[neighbour] = registry.KeepCaddy(r.Deployments[neighbour])
-	data, _ := registry.Encode(r)
-	withHost(t, &listedHost{t: t, registry: string(data), probe: "root 0c1d\nsite a.caddy\nsite b.caddy\ncontainer\t" + neighbour + "\tpaisans-0c1d-infra\tcaddy\nend\n"})
-	out := plainOutput(t)
-	if err := runHostDeployments([]string{"--ssh", "admin@192.0.2.30"}); err != nil {
-		t.Fatal(err)
-	}
-	got := out.String()
-	if !strings.Contains(got, "caddy kept: serves /srv/caddy.d sites (a.caddy, b.caddy)") {
-		t.Errorf("no kept Caddy in:\n%s", got)
-	}
-	if strings.Count(got, "caddy kept") != 1 {
-		t.Errorf("the kept Caddy is shown for another entry too:\n%s", got)
-	}
-}
-
-// A Caddy labelled for a deployment with no registry entry, while the
-// owner's sites are there, is an orphaned Caddy; the same Caddy with its
-// entry is shown with the entry, and nothing else changes.
-func TestHostDeploymentsFlagsAnOrphanedCaddy(t *testing.T) {
-	probe := "root dead\nsite a.caddy\nsite b.caddy\ncontainer\t" + strayID + "\tpaisans-dead-infra\tcaddy\ncontainer\t" + strayID + "\tpaisans-dead-talk\tapp\nend\n"
-	withHost(t, &listedHost{t: t, registry: twoDeployments(t), probe: probe})
-	out := plainOutput(t)
-	if err := runHostDeployments([]string{"--ssh", "admin@192.0.2.30"}); err != nil {
-		t.Fatal(err)
-	}
-	got := out.String()
-	for _, want := range []string{
-		strayID + " orphaned Caddy: serves /srv/caddy.d sites (a.caddy, b.caddy); its registry entry was removed, so remove it by hand once those sites have moved",
-		"compose project paisans-dead-talk: no registry entry",
-		"/srv/paisans/dead: no registry entry",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("no %q in:\n%s", want, got)
-		}
-	}
-	if strings.Contains(got, "compose project paisans-dead-infra") {
-		t.Errorf("the orphaned Caddy is also listed as a plain leftover:\n%s", got)
-	}
-
-	// No site of the owner's: a plain leftover, not a Caddy kept for anything.
-	withHost(t, &listedHost{t: t, registry: twoDeployments(t), probe: "container\t" + strayID + "\tpaisans-dead-infra\tcaddy\nend\n"})
-	out = plainOutput(t)
-	if err := runHostDeployments([]string{"--ssh", "admin@192.0.2.30"}); err != nil {
-		t.Fatal(err)
-	}
-	if got := out.String(); strings.Contains(got, "orphaned") || !strings.Contains(got, "compose project paisans-dead-infra: no registry entry") {
-		t.Errorf("with no site of the owner's:\n%s", got)
-	}
-
-	// Its entry is there: shown with the entry, not as orphaned.
-	r, _ := registry.Parse([]byte(twoDeployments(t)))
-	r.Deployments[neighbour] = registry.KeepCaddy(r.Deployments[neighbour])
-	data, _ := registry.Encode(r)
-	withHost(t, &listedHost{t: t, registry: string(data), probe: "root 0c1d\nsite a.caddy\ncontainer\t" + neighbour + "\tpaisans-0c1d-infra\tcaddy\nend\n"})
-	out = plainOutput(t)
-	if err := runHostDeployments([]string{"--ssh", "admin@192.0.2.30"}); err != nil {
-		t.Fatal(err)
-	}
-	if got := out.String(); strings.Contains(got, "orphaned") || strings.Contains(got, "not in the registry") || !strings.Contains(got, "caddy kept: serves /srv/caddy.d sites (a.caddy)") {
-		t.Errorf("a kept Caddy with its entry:\n%s", got)
-	}
-}
-
-// A kept Caddy whose sites are gone says the next removal takes it.
-func TestHostDeploymentsKeptCaddyWithNoSitesLeft(t *testing.T) {
-	r, _ := registry.Parse([]byte(twoDeployments(t)))
-	r.Deployments[neighbour] = registry.KeepCaddy(r.Deployments[neighbour])
-	data, _ := registry.Encode(r)
-	withHost(t, &listedHost{t: t, registry: string(data), probe: "root 0c1d\nend\n"})
-	out := plainOutput(t)
-	if err := runHostDeployments([]string{"--ssh", "admin@192.0.2.30"}); err != nil {
-		t.Fatal(err)
-	}
-	if got := out.String(); !strings.Contains(got, "caddy kept, but /srv/caddy.d holds no site now: paisans site remove --force --ssh admin@192.0.2.30 --id 0c1d removes it") {
-		t.Errorf("printed:\n%s", got)
 	}
 }
 

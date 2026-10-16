@@ -253,7 +253,7 @@ func convergePlan(cfg *config.Config, st convergeState) []convergeStep {
 }
 
 // convergeRun runs one step: the existing command, in this process, so it
-// plans, gates, claims and reports as typed by hand. Tests replace it.
+// plans, gates, checks the admission and reports as typed by hand. Tests replace it.
 var convergeRun func(args []string) error
 
 // The step runner and the check are set here rather than where they are
@@ -404,7 +404,7 @@ func convergeGatewayMove(cfg *config.Config) (bool, error) {
 	if len(gateways) != 1 {
 		return false, nil
 	}
-	for _, site := range cfg.SiteNames() {
+	for _, site := range runReady(cfg) {
 		if site == gateways[0] {
 			continue
 		}
@@ -430,6 +430,14 @@ func convergeFounded(r ui.Reporter, cfg *config.Config) (map[string]render.EtcdI
 	}
 	for _, m := range cfg.Etcd.Members {
 		s := r.Step("read " + m + "'s etcd record")
+		// A down member is not read. Only a joined site is down, and a
+		// joined member has founded or joined the cluster, so it counts as
+		// recorded: the run neither founds nor joins it.
+		if runSites != nil && !runSites.Ready(m) {
+			records[m] = render.EtcdInitial{}
+			s.End(ui.Warned, "down, not read")
+			continue
+		}
 		in, recorded, err := convergeReadInitial(cfg, m)
 		if err != nil {
 			s.Fail(err)
@@ -473,6 +481,9 @@ type convergeOptions struct {
 	// KeepImages and MinFree are apply's, so each apply step takes them.
 	KeepImages bool
 	MinFree    string
+	// RequireAll is --require-all: a degraded run exits 1. The run says
+	// so once, at its end, so no step takes it.
+	RequireAll bool
 	// stdin and stdout are where the run's review asks for approval. No
 	// step is handed them: the run asks once for every site.
 	stdin  io.Reader
@@ -742,21 +753,40 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 			line.End(ui.Pending, initWhy(st))
 		}
 	}
+	// The run classifies every site once, here, and every step reads that
+	// classification (runSites): the run plans and renders the effective
+	// topology, the declaration less its pending sites and the apps held
+	// back, and runs no step of a site that is down. A refusal stops the
+	// run. The plan opens with what it is without. From here on cfg is the
+	// effective topology and declaration the configuration as written.
+	// See the spec's "A deployment with sites missing".
+	savedSites := runSites
+	defer func() { runSites = savedSites }()
+	runSites = nil
+	declaration := cfg
+	cfg, sites, err := effectiveConfig(r, declaration, "")
+	if err != nil {
+		return err
+	}
+	runSites = sites
+	showPending(r, declaration, sites)
 	// Every site's architecture is read before anything is planned, and a
 	// missing one is recorded before the file is gathered and published:
 	// each step of the run refuses bytes changed after the publish. See
 	// recordArchitectures. The read has a section of its own, rather than
-	// ending whichever section came last.
+	// ending whichever section came last. A down site is not read: it was
+	// joined, so its architecture is recorded already.
 	r.Section("architecture")
-	read, err := readArchitectures(r, cfg, cfg.SiteNames(), func(name string) hostarch.Runner {
+	read, err := readArchitectures(r, cfg, readySites(cfg, sites), func(name string) hostarch.Runner {
 		return convergeHost(name, cfg.Sites[name])
 	})
 	if err != nil {
 		return err
 	}
-	if cfg, err = recordArchitectures(r, configPath, cfg, read, execute); err != nil {
+	if declaration, err = recordArchitectures(r, configPath, declaration, read, execute); err != nil {
 		return err
 	}
+	cfg = sites.Effective(declaration)
 	// Every site's images are checked against its architecture here, from
 	// the render: each site's apply checks them only once host prepare has
 	// run on every host. The render needs the secrets, so a dry run whose
@@ -776,25 +806,30 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		return err
 	}
 	// An init that has just run warned about the secrets itself.
+	// It reads the declaration: a secret of an app held back, or pinned to
+	// a pending site, is still used.
 	if !initRan {
-		convergeSecrets(r, cfg, convergeSecretsPath(configPath, secretsPath))
+		convergeSecrets(r, declaration, convergeSecretsPath(configPath, secretsPath))
 	}
 	// Every app's mail settings are tried from its site before the first
 	// step, so a password that does not log in refuses the run with every
 	// host as it was. A dry run whose init still has work tries them once
 	// init has run, as its later steps wait on it.
 	if secrets != nil && !st.NeedsInit {
-		if err := checkMailForApply(r, cfg, secrets, nil, nil, nil); err != nil {
+		if err := checkMailForApply(r, cfg, secrets, readySites(cfg, sites), nil, nil); err != nil {
 			return err
 		}
 	}
 	if st.Initial, err = convergeFounded(r, cfg); err != nil {
 		return err
 	}
+	if cfg, err = joinsWait(r, declaration, cfg, sites, st); err != nil {
+		return err
+	}
 	if st.MoveGateway, err = convergeGatewayMove(cfg); err != nil {
 		return err
 	}
-	steps := convergePlan(cfg, st)
+	steps := runOn(cfg, sites, convergePlan(cfg, st))
 	// The version the run applies is gathered once, before the review, so
 	// a fork or a stale base is refused before the operator is asked
 	// anything; its steps do not gather again.
@@ -806,8 +841,9 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	if !execute {
 		marks := convergeStatus(r, cfg, steps, o)
 		// A dry run's operator problem is shown on its line; it stops nothing.
-		_, _ = convergeOperators(r, cfg, o, false, func(app string) bool { return convergeUp(cfg, steps, marks, app) })
-		convergeWebServerPending(r, cfg, webServerScope{})
+		pocketUp := pocketIDUp(r, cfg, sites)
+		_, _ = convergeOperators(r, cfg, o, false, func(app string) bool { return pocketUp(app) && convergeUp(cfg, steps, marks, app) })
+		convergeWebServerPending(r, cfg, webServerScope{down: sites.Down()})
 		// The review ends the plan, with what --execute asks approval for.
 		// A site it could not read is shown on its line; it stops nothing.
 		reviews, pending, _ := convergeReview(r, cfg, o)
@@ -824,12 +860,14 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		if pending > 0 {
 			next = "Re-run with --execute to apply; it asks you to type " + approveWord + " for the review above."
 		}
+		// A degraded plan fails --require-all as the run would, so
+		// automation gating on a dry run does not pass on one.
 		if len(generated) > 0 {
 			r.Result("Nothing changed on the servers. Added %s to %s. %s", plural(len(generated), "generated secret"), filepath.Base(convergeSecretsPath(configPath, secretsPath)), next)
-			return nil
+			return requireAll(sites, o.RequireAll)
 		}
 		r.Result("Nothing changed. %s", next)
-		return nil
+		return requireAll(sites, o.RequireAll)
 	}
 	// One review for every site, asked once, before the first step that
 	// changes a host. init, which may have run above, writes only local
@@ -862,7 +900,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	routeRetries(r)
 	routeHolds(r)
 	routeLoginNotes(r)
-	links, adminErr := convergeOperators(r, cfg, o, true, func(string) bool { return true })
+	links, adminErr := convergeOperators(r, cfg, o, true, pocketIDUp(r, cfg, sites))
 	// The links are printed last, after the result, whatever it is: a run
 	// that fails after issuing them has still issued them.
 	// The deployment and the version are named again ahead of them.
@@ -872,18 +910,25 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	}()
 	// An app the operator's own web server serves is running, but not yet
 	// known to be reachable: the run is complete only once it is.
-	end, broken := webServerStep(r, cfg, configPath, webServerScope{})
-	if end == nil {
-		if err := convergeRecordWebServer(r, cfg, reviews); err != nil {
-			return err
-		}
-	}
+	// A down site's web server is left alone, as its other steps are.
+	noteDownWebServers(r, cfg, sites)
+	end, broken := webServerStep(r, cfg, configPath, webServerScope{down: sites.Down(), degraded: sites.Degraded()})
 	convergeLeft(r, cfg, secretsPath, configPath)
-	if end != nil || adminErr != nil {
-		return webServerEnd(end, broken, adminErr)
+	if end == nil && adminErr == nil && !sites.Degraded() {
+		r.Result("Deployment complete.")
+		return nil
 	}
-	r.Result("Deployment complete.")
-	return nil
+	return degradedEnd(r, sites, o.RequireAll, webServerEnd(end, broken, adminErr))
+}
+
+// runReady is the sites of cfg a step of the run reaches: every one but
+// those the run's classification does not have ready, or every one outside
+// a run.
+func runReady(cfg *config.Config) []string {
+	if runSites == nil {
+		return cfg.SiteNames()
+	}
+	return readySites(cfg, runSites)
 }
 
 // convergeStop is the error a run stops with at a step: the step named in
@@ -1647,7 +1692,7 @@ func stepSite(s convergeStep) string {
 
 // dryRunFound is told by the dry run of each command apply without --site
 // runs as a step what it would change: a summary such as "3 changes", or
-// host prepare's kinds of change such as "docker, firewall", empty
+// host prepare's kinds of change such as "docker, ssh keys", empty
 // when there is nothing to do, and stop when it found something --execute
 // would stop at. checkStep sets it; otherwise it does nothing.
 var dryRunFound = func(summary string, stop error) {}
@@ -1782,8 +1827,9 @@ func errLine(err error) string {
 	return strings.TrimRight(strings.TrimSpace(line), ":.")
 }
 
-// convergeHost is how apply without --site reaches a site to read it, as the
-// ssh user. Tests replace it.
+// convergeHost is how apply without --site reaches a site to read it, as its
+// login: the deployment's own user, unless ssh.user names another. Tests
+// replace it.
 var convergeHost = func(name string, site config.Site) apply.Transport {
 	return siteTransport(name, site, "")
 }

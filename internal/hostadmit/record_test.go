@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/admission"
+	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostadmit"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 )
@@ -94,6 +96,18 @@ func TestTheKeysScriptKeepsSSHPrivate(t *testing.T) {
 	mkdir, chmod := strings.Index(cmd, `mkdir -p "$HOME/.ssh"`), strings.Index(cmd, `chmod go-w "$HOME/.ssh"`)
 	if mkdir < 0 || chmod < mkdir {
 		t.Errorf("the keys script does not make ~/.ssh private:\n%s", cmd)
+	}
+}
+
+// The keys are written under the deployment's lock, taken as the user in
+// the same shell that writes them, as host prepare's key steps take it, so
+// an admit and a host prepare never interleave their writes to
+// authorized_keys and the sidecar.
+func TestTheKeysScriptTakesTheDeploymentsLock(t *testing.T) {
+	cmd := hostadmit.KeysCommand("paisans-f2a9", "/home/paisans-f2a9", "f2a9")
+	quoted := apply.ShellQuote(deployment.Deployment{ID: "f2a9"}.StateLockCommand("the keys") + "; ")
+	if !strings.Contains(cmd, "-- env -i ") || !strings.Contains(cmd, " sh -c "+strings.TrimSuffix(quoted, "'")) {
+		t.Errorf("the keys script does not start with the deployment's lock, as the user:\n%s", cmd)
 	}
 }
 

@@ -347,7 +347,7 @@ func TestADepartingGatewayMountsTheHostOwnersSites(t *testing.T) {
 		t.Fatal(err)
 	}
 	compose := planFiles(plan)["watch/srv/paisans/f2a9/infra/compose.yaml"]
-	if mount := "- " + render.HostSitesDir + ":" + render.HostSitesMount + ":ro"; !strings.Contains(compose, mount) {
+	if mount := "- " + render.HostSitesDir(plan.Deployment) + ":" + render.HostSitesMount + ":ro"; !strings.Contains(compose, mount) {
 		t.Errorf("the departing gateway's Caddy lacks %q:\n%s", mount, compose)
 	}
 }

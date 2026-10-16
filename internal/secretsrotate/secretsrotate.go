@@ -66,9 +66,25 @@ type Env struct {
 	// Nil is dns.For; tests replace it, since none may reach a provider.
 	DNSProvider func(name, token string) (dns.Provider, error)
 	// Mail is how stage 2 reaches a mail server to try an SMTP password,
-	// from a site running an app that uses it. Tests dial an in-process
+	// from the machine the command runs on. Tests dial an in-process
 	// server, since none may reach a real one.
 	Mail smtpcheck.Env
+	// MailFrom tries the SMTP password at path, as s holds it, from site
+	// for the apps among stacks there. Stage 2 runs it for every site that
+	// will be handed the password, pasted or set beforehand, before stage 3
+	// hands it to any, since this machine may not have reached the server
+	// to try it. Nil tries nothing.
+	MailFrom func(site, path string, s *config.Secrets, stacks []string) error
+	// Warn is told what was left untried and why, Eg: a mail server this
+	// machine cannot reach, so the run goes on with the operator told.
+	// Nil discards it.
+	Warn func(hint, detail string)
+}
+
+func (e Env) warn(hint, detail string) {
+	if e.Warn != nil {
+		e.Warn(hint, detail)
+	}
 }
 
 // CannotFinish is what every refusal over a pending rotation that cannot
@@ -615,6 +631,23 @@ func (r *Run) rotate(e Env, it Item) error {
 			return err
 		}
 	}
+	shown := cloneSecrets(s)
+	if err := rot.Promote(shown, next); err != nil {
+		step.Fail(err)
+		return err
+	}
+	// Still in stage 2, a value every site tries (SiteTrier) is tried from
+	// each site that will be handed it, and only once every one accepts is
+	// any handed it: a refusal at the last site stops the rotation before
+	// the first runs a value the mail server refuses.
+	if t, ok := rot.(SiteTrier); ok && t.TriedFromSites() && e.MailFrom != nil {
+		for _, u := range rot.Users(e) {
+			if err := e.MailFrom(u.Site, path, shown, u.Stacks); err != nil {
+				step.Fail(err)
+				return err
+			}
+		}
+	}
 	step.Done("accepts the next value")
 
 	// Stage 3: each user in turn, rendered with the next value while the
@@ -622,10 +655,6 @@ func (r *Run) rotate(e Env, it Item) error {
 	// are read again here rather than taken from the plan: a rotation earlier
 	// in the run can change their order, Eg: a cluster role's switchover moves
 	// the leader, which the next cluster role must restart last.
-	shown := cloneSecrets(s)
-	if err := rot.Promote(shown, next); err != nil {
-		return err
-	}
 	uses := rot.Users(e)
 	for _, u := range uses {
 		if u.Do == nil && e.Apply == nil {

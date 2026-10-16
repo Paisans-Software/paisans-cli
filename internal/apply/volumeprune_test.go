@@ -19,7 +19,7 @@ type volumeHost struct {
 
 func (h *volumeHost) Run(command string) (string, error) {
 	h.commands = append(h.commands, command)
-	if strings.Contains(command, "vs=$(docker volume ls -qf dangling=true)") {
+	if strings.Contains(command, "docker system df -v --format") {
 		return h.listing, nil
 	}
 	if name, ok := strings.CutPrefix(command, "docker volume rm "); ok {
@@ -44,7 +44,11 @@ const (
 	oldName = "8cce176c65a4f3a4a255ca46dc4588b38d917bffc8f0c13fd4d5335d4fc8f830"
 )
 
-func listing(lines ...string) string { return strings.Join(lines, "\n") + "\nend\n" }
+// listing is the probe's answer: Docker's volume sizes as JSON, then one
+// line per dangling volume, then the end marker.
+func listing(sizes string, lines ...string) string {
+	return sizes + "\nvolumes\n" + strings.Join(lines, "\n") + "\nend\n"
+}
 
 // ours is the label the fixture deployment's volumes carry, and theirs
 // another deployment's on the same host.
@@ -59,12 +63,13 @@ const (
 // named like this deployment's), an anonymous one and a named one are kept.
 func TestPruneDecidesEachDanglingVolume(t *testing.T) {
 	host := &volumeHost{listing: listing(
-		"volume\t"+leaked1+"\t48234496\t"+ours+"\tcache log",
-		"volume\t"+leaked2+"\t1024\t"+theirs+"\t",
-		"volume\tpaisans-f2a9-talk_data\t4096\t{\"com.docker.compose.project\":\"paisans-f2a9-talk\",\"com.docker.compose.volume\":\"data\"}\tx",
-		"volume\t"+oldName+"\t1024\t{\"com.docker.volume.anonymous\":\"\"}\t",
-		"volume\tother_db\t9999\t{\"com.docker.compose.project\":\"other\",\"com.docker.compose.volume\":\"db\"}\tpgdata",
-		"volume\tbackups\t1\tnull\tdump.sql",
+		`[{"Name":"`+leaked1+`","Size":"48.38MB"},{"Name":"`+leaked2+`","Size":"1.024kB"}]`,
+		"volume\t"+leaked1+"\t"+ours+"\tcache log",
+		"volume\t"+leaked2+"\t"+theirs+"\t",
+		"volume\tpaisans-f2a9-talk_data\t{\"com.docker.compose.project\":\"paisans-f2a9-talk\",\"com.docker.compose.volume\":\"data\"}\tx",
+		"volume\t"+oldName+"\t{\"com.docker.volume.anonymous\":\"\"}\t",
+		"volume\tother_db\t{\"com.docker.compose.project\":\"other\",\"com.docker.compose.volume\":\"db\"}\tpgdata",
+		"volume\tbackups\tnull\tdump.sql",
 	)}
 	p, err := apply.BuildVolumePrune(apply.Fixture, "home-a", host)
 	if err != nil {
@@ -80,7 +85,7 @@ func TestPruneDecidesEachDanglingVolume(t *testing.T) {
 		}
 	}
 	first := p.Volumes[0]
-	if first.Size != 48234496 || strings.Join(first.Entries, " ") != "cache log" {
+	if first.Size != 48380000 || strings.Join(first.Entries, " ") != "cache log" {
 		t.Errorf("size and entries were not read: %+v", first)
 	}
 	if !strings.Contains(p.Volumes[1].Reason, "0c1d2e3f-4a5b-4c6d-8e7f-8091a2b3c4d5") {
@@ -108,7 +113,7 @@ func TestPruneDecidesEachDanglingVolume(t *testing.T) {
 // and the rest are still removed; the failure is reported at the end.
 func TestPruneReportsAVolumeDockerWouldNotRemove(t *testing.T) {
 	host := &volumeHost{
-		listing: listing("volume\t"+leaked1+"\t1\t"+ours+"\t", "volume\t"+leaked2+"\t1\t"+ours+"\t"),
+		listing: listing(`[]`, "volume\t"+leaked1+"\t"+ours+"\t", "volume\t"+leaked2+"\t"+ours+"\t"),
 		inUse:   map[string]bool{leaked1: true},
 	}
 	p, err := apply.BuildVolumePrune(apply.Fixture, "home-a", host)
@@ -127,8 +132,39 @@ func TestPruneReportsAVolumeDockerWouldNotRemove(t *testing.T) {
 // An answer without its end marker was cut short, and is not read as a
 // shorter list.
 func TestPruneRefusesACutShortListing(t *testing.T) {
-	host := &volumeHost{listing: "volume\t" + leaked1 + "\t1\tnull\t\n"}
+	host := &volumeHost{listing: "[]\nvolumes\nvolume\t" + leaked1 + "\tnull\t\n"}
 	if _, err := apply.BuildVolumePrune(apply.Fixture, "home-a", host); err == nil {
 		t.Error("a listing with no end marker was accepted")
+	}
+}
+
+// Sizes are Docker's, read back from its human readable form, since du
+// cannot read a volume a container's user owns.
+func TestParseDockerSize(t *testing.T) {
+	for in, want := range map[string]int64{"0B": 0, "512B": 512, "1.5kB": 1500, "48.38MB": 48380000, "2GB": 2000000000, "1.2TB": 1200000000000} {
+		if got, ok := apply.ParseDockerSize(in); !ok || got != want {
+			t.Errorf("%s: %d %v, want %d", in, got, ok, want)
+		}
+	}
+	for _, bad := range []string{"", "N/A", "12", "1.2XB", "-3e6B"} {
+		if _, ok := apply.ParseDockerSize(bad); ok {
+			t.Errorf("%q read as a size", bad)
+		}
+	}
+}
+
+// A volume Docker gives no readable size for is still decided, with its
+// size unknown, never zero.
+func TestAVolumeWithoutASizeIsUnknown(t *testing.T) {
+	h := &volumeHost{listing: listing(`[{"Name":"`+leaked1+`","Size":"N/A"}]`, "volume\t"+leaked1+"\t"+ours+"\tcache")}
+	p, err := apply.BuildVolumePrune(apply.Fixture, "home-a", h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Volumes) != 1 || p.Volumes[0].Size != -1 || apply.FormatSize(-1) != "size unknown" {
+		t.Errorf("volumes %+v", p.Volumes)
+	}
+	if strings.Contains(h.commands[0], "du ") {
+		t.Errorf("the probe still runs du: %s", h.commands[0])
 	}
 }

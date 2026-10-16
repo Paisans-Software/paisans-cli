@@ -48,7 +48,16 @@ func shellTree(t *testing.T, files map[string]string, dirs, links []string) (bas
 func runUnder(t *testing.T, base, command string) error {
 	t.Helper()
 	command = strings.ReplaceAll(command, "'/srv/paisans/", "'"+base+"/srv/paisans/")
-	out, err := exec.Command("sh", "-c", command).CombinedOutput()
+	// rootlesskit, which a host has and this machine may not, stands in as
+	// a script that runs its arguments: the namespace changes whose files
+	// may be removed, not which.
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "rootlesskit"), []byte("#!/bin/sh\nexec \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sh", "-c", command)
+	cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Logf("%s: %v: %s", command, err, out)
 	}
@@ -79,7 +88,7 @@ func TestDeleteBesideKeptKeepsCaddysPathsAlone(t *testing.T) {
 		r + "talk/.env":                       "x",
 		r + ".hidden":                         "x",
 		"outside/keep.txt":                    "owner",
-		"srv/caddy.d/blog.caddy":              "blog",
+		"srv/paisans/f2a9/caddy.d/blog.caddy": "blog",
 	}, []string{r + "infra/caddy/config"}, []string{r + "link", "outside"})
 	if err := runUnder(t, base, shellPlan().deleteBesideKept()); err != nil {
 		t.Fatal(err)
@@ -94,7 +103,7 @@ func TestDeleteBesideKeptKeepsCaddysPathsAlone(t *testing.T) {
 			t.Errorf("%s is left", rel)
 		}
 	}
-	for _, rel := range []string{"outside/keep.txt", "srv/caddy.d/blog.caddy"} {
+	for _, rel := range []string{"outside/keep.txt", "srv/paisans/f2a9/caddy.d/blog.caddy"} {
 		if !exists(base, rel) {
 			t.Errorf("%s, outside the root, was deleted", rel)
 		}
@@ -105,14 +114,14 @@ func TestDeleteBesideKeptKeepsCaddysPathsAlone(t *testing.T) {
 // outside the root: it stops before deleting anything.
 func TestDeleteBesideKeptRefusesASymlinkedDirectory(t *testing.T) {
 	base := shellTree(t, map[string]string{
-		r + "infra/caddy/Caddyfile": "{\n}\n",
-		r + "talk/.env":             "x",
-		"srv/caddy.d/blog.caddy":    "blog",
-	}, nil, []string{r + "infra/caddy/snippets", "srv/caddy.d"})
+		r + "infra/caddy/Caddyfile":           "{\n}\n",
+		r + "talk/.env":                       "x",
+		"srv/paisans/f2a9/caddy.d/blog.caddy": "blog",
+	}, nil, []string{r + "infra/caddy/snippets", "srv/paisans/f2a9/caddy.d"})
 	if err := runUnder(t, base, shellPlan().deleteBesideKept()); err == nil {
 		t.Error("a symlinked snippets directory was walked")
 	}
-	if !exists(base, "srv/caddy.d/blog.caddy") {
+	if !exists(base, "srv/paisans/f2a9/caddy.d/blog.caddy") {
 		t.Error("the owner's site was deleted through the link")
 	}
 	if !exists(base, r+"talk/.env") {

@@ -77,6 +77,11 @@ type Record struct {
 	Version    int    `json:"version"`
 	Deployment string `json:"deployment"`
 	User       string `json:"user"`
+	// Site is the site's name in the configuration and Roles its roles,
+	// sorted, as the request named them: what a command with no
+	// configuration learns the host was admitted as.
+	Site  string   `json:"site"`
+	Roles []string `json:"roles"`
 	// Grants are what the owner gave, which may be less than the site's
 	// roles need: Needs(site).Missing(record.Grants) is what is lacking.
 	Grants Grants `json:"grants"`
@@ -99,6 +104,14 @@ type Record struct {
 	// MeshLAN is the host's LAN prefix the owner let the mesh dial with
 	// --mesh-lan, "" without it.
 	MeshLAN string `json:"mesh_lan"`
+	// MeshSubnet is the request's mesh subnet, which admit bakes into
+	// root's state the deployment's user cannot change: the egress table's
+	// accept for the mesh, the WireGuard helper's check of mesh confs, the
+	// rootless daemon's address pools chosen clear of it, and the check that
+	// it overlaps nothing on the host, which only root can run. Differences
+	// compares it with mesh.subnet. The site's mesh address is not kept:
+	// nothing of root's restricts it.
+	MeshSubnet string `json:"mesh_subnet"`
 	// WebServer is what admit found in front of a site with
 	// web_server.managed_by: external, nil for every other site.
 	WebServer *WebServer `json:"web_server"`
@@ -109,6 +122,11 @@ type Record struct {
 	// an owner who has enabled it since keeps it so. It is false when the
 	// owner had Docker before admit, which admit never touches.
 	SystemDockerDisabled bool `json:"system_docker_disabled"`
+	// UFWEnabled is whether admit enabled ufw, with --enable-ufw, for this
+	// deployment or an earlier admit of it. It says what admit did: evict
+	// leaves ufw enabled and says so. It is written only when true, so the
+	// record of a host whose ufw was active already reads as before.
+	UFWEnabled bool `json:"ufw_enabled,omitempty"`
 }
 
 // Ports are the ports the firewall opened: the SSH port, the WireGuard port
@@ -158,11 +176,14 @@ func NewRecord(req Request, granted Grants, digest string, at time.Time) Record 
 		Version:    RecordVersion,
 		Deployment: req.Deployment,
 		User:       req.User,
+		Site:       req.Site,
+		Roles:      append([]string{}, req.Roles...),
 		Grants:     granted,
 		Forwarding: req.Endpoint,
 		Ports:      Ports{SSH: req.SSHPort, WireGuard: req.ListenPort, Public: public},
 		Digest:     digest,
 		AdmittedAt: at.UTC().Format(time.RFC3339),
+		MeshSubnet: req.MeshSubnet,
 	}
 }
 
@@ -213,6 +234,9 @@ func MeshLAN(s string) bool {
 // only bytes ParseRecord accepts. The writer writes exactly these, with Mode,
 // to Path(token).
 func EncodeRecord(r Record) ([]byte, error) {
+	if r.Roles == nil {
+		r.Roles = []string{}
+	}
 	if r.Ports.Public == nil {
 		r.Ports.Public = []int{}
 	}
@@ -223,15 +247,16 @@ func EncodeRecord(r Record) ([]byte, error) {
 	return append(out, '\n'), nil
 }
 
-// recordFields is every key a record holds; a record missing one was not
+// recordFields is every key a record holds but ufw_enabled, which is
+// written only when true; a record missing one was not
 // written by a toolkit of its version.
-var recordFields = []string{"version", "deployment", "user", "grants", "forwarding", "ports", "digest", "admitted_at", "data_dir", "bridge_netfilter", "mesh_lan", "web_server", "system_docker_disabled"}
+var recordFields = []string{"version", "deployment", "user", "site", "roles", "grants", "forwarding", "ports", "digest", "admitted_at", "data_dir", "bridge_netfilter", "mesh_lan", "mesh_subnet", "web_server", "system_docker_disabled"}
 
 // ParseRecord reads a record strictly: its version, every field present and
 // none unknown, a deployment whose token is token, the user a request for it
-// may name, the public ports its grant opens, and a data_dir that is empty
-// or this deployment's, and a mesh_lan that is empty or a LAN --mesh-lan
-// may open.
+// may name, the public ports its grant opens, a data_dir that is empty or
+// this deployment's, a mesh_lan that is empty or a LAN --mesh-lan may open,
+// and a mesh_subnet a mesh may have.
 func ParseRecord(data []byte, token string) (Record, error) {
 	refuse := func(problems ...string) (Record, error) {
 		return Record{}, &Error{What: "the admission record for " + strconv.Quote(token), Problems: problems}
@@ -275,6 +300,23 @@ func ParseRecord(data []byte, token string) (Record, error) {
 	if p := config.DeploymentUserProblem(r.User, r.Deployment); p != "" {
 		problems = append(problems, "user: "+p)
 	}
+	if !config.ValidSiteName(r.Site) {
+		problems = append(problems, fmt.Sprintf("site: %q is not a site name", r.Site))
+	}
+	roles := make([]config.Role, len(r.Roles))
+	for i, role := range r.Roles {
+		roles[i] = config.Role(role)
+	}
+	for i, role := range r.Roles {
+		switch {
+		case !config.KnownRole(roles[i]):
+			problems = append(problems, fmt.Sprintf("roles[%d]: %q is not a site role", i, role))
+		case config.RoleRepeated(roles, i):
+			problems = append(problems, fmt.Sprintf("roles[%d]: %q is listed twice", i, role))
+		case i > 0 && role < r.Roles[i-1]:
+			problems = append(problems, fmt.Sprintf("roles[%d]: %q comes after %q, and roles are written sorted", i, role, r.Roles[i-1]))
+		}
+	}
 	if r.Digest != "" {
 		if d, err := ParseDigest(r.Digest); err != nil || d != r.Digest {
 			problems = append(problems, fmt.Sprintf("digest: %q is not a digest as paisans writes one, sixteen lower-case characters in four groups of four", r.Digest))
@@ -303,6 +345,9 @@ func ParseRecord(data []byte, token string) (Record, error) {
 	}
 	if r.MeshLAN != "" && !MeshLAN(r.MeshLAN) {
 		problems = append(problems, fmt.Sprintf("mesh_lan: %q is not an IPv4 network in its masked form, a /16 or narrower inside 10.0.0.0/8, 172.16.0.0/12 or 192.168.0.0/16, or empty", r.MeshLAN))
+	}
+	if _, p := config.CheckMeshSubnet(r.MeshSubnet); len(p) > 0 {
+		problems = append(problems, fmt.Sprintf("mesh_subnet: %q %s", r.MeshSubnet, strings.Join(p, ", ")))
 	}
 	if len(problems) > 0 {
 		return refuse(problems...)
@@ -338,4 +383,121 @@ func Read(t Reader, token string) (Record, error) {
 		return Record{}, fmt.Errorf("%s: %w", path, ErrNotAdmitted)
 	}
 	return ParseRecord([]byte(content), token)
+}
+
+// ErrNotMine is a login with no admission record of its own on the host.
+var ErrNotMine = errors.New("no admission record names this login")
+
+// Runner is what Mine needs of a host: a command, and a file read.
+type Runner interface {
+	Reader
+	Run(command string) (string, error)
+}
+
+// mineCommand prints the login's name, then every record's path. /etc/paisans
+// is 755 and every record 644, so the deployment's user lists and reads them.
+const mineCommand = `echo "user $(id -un)"; for f in ` + Dir + `/admitted.*.json; do [ -f "$f" ] && echo "$f"; done; true`
+
+// Mine is the admission record of the deployment the login belongs to: the
+// one whose user is the login's own name. A deployment's commands that run
+// without its configuration (config recover) learn the deployment from it.
+// A record that does not parse is skipped, since it cannot name the login.
+func Mine(t Runner) (Record, error) {
+	out, err := t.Run(mineCommand)
+	if err != nil {
+		return Record{}, fmt.Errorf("listing %s: %w", Dir, err)
+	}
+	var user string
+	var paths []string
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if name, ok := strings.CutPrefix(line, "user "); ok {
+			user = name
+		} else if line != "" {
+			paths = append(paths, line)
+		}
+	}
+	for _, p := range paths {
+		token := strings.TrimSuffix(strings.TrimPrefix(p, Dir+"/admitted."), ".json")
+		if !ValidToken(token) {
+			continue
+		}
+		content, found, err := t.ReadFile(p)
+		if err != nil || !found {
+			continue
+		}
+		if rec, err := ParseRecord([]byte(content), token); err == nil && rec.User == user {
+			return rec, nil
+		}
+	}
+	return Record{}, fmt.Errorf("%s: %w (%s)", Dir, ErrNotMine, user)
+}
+
+// Differences is every way r, what the owner admitted, differs from site as
+// cfg declares it: each is a root change, so each needs the owner to run
+// host admit again. None when r covers the site.
+func (r Record) Differences(cfg *config.Config, site string) []string {
+	s := cfg.Sites[site]
+	var out []string
+	if r.Site != site {
+		out = append(out, fmt.Sprintf("the host was admitted as site %s, and this is %s", r.Site, site))
+	}
+	if r.User != s.SSHUser() {
+		out = append(out, fmt.Sprintf("the host admitted user %s, and sites.%s.ssh.user is %s", r.User, site, s.SSHUser()))
+	}
+	if r.Ports.SSH != s.SSH.PortOrDefault() {
+		out = append(out, fmt.Sprintf("the host opened ssh port %d, and the site's is %d", r.Ports.SSH, s.SSH.PortOrDefault()))
+	}
+	if r.Ports.WireGuard != s.ListenPort() {
+		out = append(out, fmt.Sprintf("the host opened WireGuard port %d, and the site's is %d", r.Ports.WireGuard, s.ListenPort()))
+	}
+	// Admit baked the mesh subnet into root's state: the egress table, the
+	// WireGuard helper, the daemon's address pools. A changed one would make
+	// apply fail partway, when the helper refuses the conf, or drop mesh
+	// traffic silently, so it is refused up front, as a changed SSH port is.
+	if r.MeshSubnet != cfg.Mesh.Subnet {
+		out = append(out, fmt.Sprintf("the host admitted mesh subnet %s, and mesh.subnet is %s", r.MeshSubnet, cfg.Mesh.Subnet))
+	}
+	if want := s.Endpoint != ""; r.Forwarding != want {
+		out = append(out, fmt.Sprintf("forwarding is %s on the host, and the site %s an endpoint, which relays the mesh", onOff(r.Forwarding), map[bool]string{true: "has", false: "has no"}[want]))
+	}
+	for _, g := range Needs(s).Missing(r.Grants) {
+		out = append(out, fmt.Sprintf("the site's roles need --%s, which the host's owner did not grant", g))
+	}
+	if s.WebServerManagedBy() == config.ManagedByExternal && r.WebServer == nil {
+		out = append(out, "the site is behind the owner's web server (managed_by: external), and the host was admitted without it")
+	}
+	return out
+}
+
+func onOff(b bool) string {
+	if b {
+		return "on"
+	}
+	return "off"
+}
+
+// SiteError is a host whose admission does not cover its site.
+type SiteError struct {
+	Site     string
+	Problems []string
+}
+
+func (e *SiteError) Error() string {
+	return e.Site + "'s admission does not cover it: " + strings.Join(e.Problems, "; ")
+}
+
+// ForSite reads, as the deployment's user, the admission record of cfg's
+// deployment on the host t reaches, and judges it against site.
+// An error wrapping ErrNotAdmitted is a host with no record; a *SiteError is
+// one whose record does not cover the site.
+func ForSite(t Reader, cfg *config.Config, site string) (Record, error) {
+	rec, err := Read(t, deployment.Deployment{ID: cfg.ID}.Token())
+	if err != nil {
+		return Record{}, err
+	}
+	if p := rec.Differences(cfg, site); len(p) > 0 {
+		return rec, &SiteError{Site: site, Problems: p}
+	}
+	return rec, nil
 }

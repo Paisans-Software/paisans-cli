@@ -17,6 +17,7 @@ import (
 
 	"filippo.io/age"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/blueprints/coretest"
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -123,6 +124,12 @@ func (f rotateFake) Run(command string) (string, error) {
 func (f rotateFake) RunInput(command, stdin string) (string, error) { return f.Run(command) }
 
 func (f rotateFake) ReadFile(path string) (string, bool, error) {
+	if strings.HasPrefix(path, admission.Dir+"/admitted.") {
+		f.w.mu.Lock()
+		f.w.commands = append(f.w.commands, "read "+path)
+		f.w.mu.Unlock()
+		return "", false, nil
+	}
 	if path == registry.Path || strings.HasSuffix(path, "/psns-f2a9.conf") {
 		return "", false, nil
 	}
@@ -418,10 +425,8 @@ func TestSecretsRotateAsksSignOut(t *testing.T) {
 			if strings.Count(err.Error(), "Nothing was changed") != 1 {
 				t.Errorf("err = %v", err)
 			}
-			for _, c := range w.commands {
-				if strings.Contains(c, registry.Path) {
-					t.Errorf("a host was claimed before sign out was answered: %s", c)
-				}
+			if w.checked() {
+				t.Errorf("a host was checked before sign out was answered:\n%s", strings.Join(w.commands, "\n"))
 			}
 			if after, _ := os.ReadFile(secretsPath); !bytes.Equal(before, after) {
 				t.Error("a refused run changed the secrets file")
@@ -448,12 +453,8 @@ func TestSecretsRotateAsksSignOut(t *testing.T) {
 	if next := s.Rotations["apps.gate.cookie_secret"]; next == "" || next == "fixture-not-a-secret-gate-cookie" {
 		t.Errorf("stage 1 did not write a next value: %v", s.Rotations)
 	}
-	claimed := false
-	for _, c := range w.commands {
-		claimed = claimed || strings.Contains(c, registry.Path)
-	}
-	if !claimed {
-		t.Errorf("no host was claimed before it was written to:\n%s", strings.Join(w.commands, "\n"))
+	if !w.checked() {
+		t.Errorf("no host's admission was checked before it was written to:\n%s", strings.Join(w.commands, "\n"))
 	}
 }
 
@@ -797,12 +798,12 @@ func pastedAtTerminal(t *testing.T, answers map[string]string) *[]string {
 	return asked
 }
 
-// claimed reports whether any host's registry was touched.
-func (w *rotateWorld) claimed() bool {
+// checked reports whether any host's admission record was read.
+func (w *rotateWorld) checked() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for _, c := range w.commands {
-		if strings.Contains(c, registry.Path) {
+		if strings.Contains(c, admission.Dir+"/admitted.") {
 			return true
 		}
 	}
@@ -810,7 +811,7 @@ func (w *rotateWorld) claimed() bool {
 }
 
 // A pasted secret every host runs is asked for at --execute, before any host
-// is claimed, and the answer is stage 1's next value, written under
+// is checked, and the answer is stage 1's next value, written under
 // rotations; nothing shows it.
 func TestSecretsRotateAsksForAPastedSecret(t *testing.T) {
 	w, rec := fakeRotateHosts(t)
@@ -827,8 +828,8 @@ func TestSecretsRotateAsksForAPastedSecret(t *testing.T) {
 	if !slices.Equal(*asked, []string{"external.acme_dns_token at desec"}) {
 		t.Errorf("asked %v", *asked)
 	}
-	if !w.claimed() {
-		t.Error("no host was claimed")
+	if !w.checked() {
+		t.Error("no host's admission was checked")
 	}
 	s, lerr := config.LoadDeploymentSecrets(secretsPath, "")
 	if lerr != nil {
@@ -842,7 +843,7 @@ func TestSecretsRotateAsksForAPastedSecret(t *testing.T) {
 	}
 }
 
-// Every refusal of the ask happens before any host is claimed and leaves the
+// Every refusal of the ask happens before any host is checked and leaves the
 // secrets file as it was: an answer equal to the value the hosts run, an
 // empty one, and a run with no terminal, which says how to set it instead.
 func TestSecretsRotatePastedRefusals(t *testing.T) {
@@ -877,8 +878,8 @@ func TestSecretsRotatePastedRefusals(t *testing.T) {
 			if !tc.terminal && len(*asked) != 0 {
 				t.Errorf("asked without a terminal: %v", *asked)
 			}
-			if w.claimed() {
-				t.Error("a host was claimed before the answer was taken")
+			if w.checked() {
+				t.Error("a host was checked before the answer was taken")
 			}
 			if after, _ := os.ReadFile(secretsPath); !bytes.Equal(before, after) {
 				t.Error("a refused run changed the secrets file")
@@ -967,7 +968,7 @@ func TestSecretsRotateDryRunSaysItAsks(t *testing.T) {
 
 // The DNS token pasted is tried against the zone at the provider rotate
 // reaches through rotateDNSProvider, and one that cannot see it is refused
-// before any host is claimed.
+// before any host is checked.
 func TestSecretsRotatePastedTokenIsTriedAgainstTheZone(t *testing.T) {
 	w, rec := fakeRotateHosts(t)
 	configPath, secretsPath := rotateDeployment(t, nil)
@@ -990,8 +991,8 @@ func TestSecretsRotatePastedTokenIsTriedAgainstTheZone(t *testing.T) {
 	if provider.Token != next {
 		t.Error("the pasted token was not the one tried")
 	}
-	if w.claimed() {
-		t.Error("a host was claimed")
+	if w.checked() {
+		t.Error("a host was checked")
 	}
 	if after, _ := os.ReadFile(secretsPath); !bytes.Equal(before, after) {
 		t.Error("the secrets file changed")

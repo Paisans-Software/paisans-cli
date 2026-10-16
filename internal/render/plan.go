@@ -36,7 +36,7 @@ type Plan struct {
 	// Deployment is the identity every path and name in Files derives from.
 	Deployment deployment.Deployment
 	// HostSites names the sites whose Caddy mounts the host's own
-	// HostSitesDir, which apply creates there when it is missing.
+	// HostSitesDir, which apply creates there when it is absent.
 	HostSites map[string]bool
 	// Images is, for each site, every image reference its compose files name
 	// that the configuration decides: each app stack's images, and the

@@ -87,7 +87,7 @@ func gatewayMoveCommand(args []string) error {
 	if options.ApplySite == nil {
 		// The hand-off off a site that keeps the monitor applies its infra
 		// stack as typed by hand, with this move's own files and options, so
-		// it claims, reviews and gates exactly as apply does. Only an executed
+		// it checks the admission, reviews and gates exactly as apply does. Only an executed
 		// move reaches it, after its dry run has passed before the first
 		// stage.
 		options.ApplySite = func(site string) error {
@@ -113,9 +113,9 @@ func gatewayMoveCommand(args []string) error {
 		}
 		return nil
 	}
-	// The move writes to both gateways' hosts: the record and the marker,
-	// and the old Caddy stopped.
-	if err := claimSites(r, cfg, *execute, plan.From, plan.To); err != nil {
+	// The move writes to both gateways' hosts, so it checks the admission
+	// of each: the record and the marker, and the old Caddy stopped.
+	if _, err := admittedSites(r, cfg, plan.From, plan.To); err != nil {
 		return err
 	}
 	if !*execute || r.Verbose() {

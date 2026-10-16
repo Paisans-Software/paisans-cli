@@ -117,9 +117,9 @@ func runMeshRekey(args []string) error {
 	if !*execute || r.Verbose() {
 		plan.Show(r)
 	}
-	// Every site is a peer of some site rekeyed, so every one is written to,
-	// but a site not brought up yet, which a claim would make look prepared.
-	if err := claimSites(r, cfg, *execute, withoutNames(cfg.SiteNames(), plan.Joining)...); err != nil {
+	// Every site is a peer of some site rekeyed, so every one is written to
+	// and has its admission checked, but a site not brought up yet.
+	if _, err := admittedSites(r, cfg, withoutNames(cfg.SiteNames(), plan.Joining)...); err != nil {
 		return err
 	}
 	if !*execute {

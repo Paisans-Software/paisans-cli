@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -158,6 +159,13 @@ func TestParseRecordRefuses(t *testing.T) {
 		{"a mesh_lan wider than a /16", strings.Replace(g, `"mesh_lan": "192.168.1.0/24"`, `"mesh_lan": "10.0.0.0/8"`, 1), "f2a9", `mesh_lan: "10.0.0.0/8" is not`},
 		{"a mesh_lan not masked", strings.Replace(g, `"mesh_lan": "192.168.1.0/24"`, `"mesh_lan": "192.168.1.20/24"`, 1), "f2a9", `mesh_lan: "192.168.1.20/24" is not`},
 		{"a mesh_lan of one address", strings.Replace(g, `"mesh_lan": "192.168.1.0/24"`, `"mesh_lan": "192.168.1.1"`, 1), "f2a9", `mesh_lan: "192.168.1.1" is not`},
+		{"no mesh_subnet", strings.Replace(g, "  \"mesh_subnet\": \"10.44.0.0/24\",\n", "", 1), "f2a9", "mesh_subnet: missing"},
+		{"an empty mesh_subnet", strings.Replace(g, `"mesh_subnet": "10.44.0.0/24"`, `"mesh_subnet": ""`, 1), "f2a9", `mesh_subnet: "" is not a network`},
+		// Differences compares mesh_subnet with mesh.subnet as strings, which
+		// holds because both are only ever the canonical spelling.
+		{"a mesh_subnet that is a host address", strings.Replace(g, `"mesh_subnet": "10.44.0.0/24"`, `"mesh_subnet": "10.44.0.1/24"`, 1), "f2a9", `mesh_subnet: "10.44.0.1/24" is a host address`},
+		{"a mesh_subnet with a leading zero", strings.Replace(g, `"mesh_subnet": "10.44.0.0/24"`, `"mesh_subnet": "10.044.0.0/24"`, 1), "f2a9", `mesh_subnet: "10.044.0.0/24" is not`},
+		{"a public mesh_subnet", strings.Replace(g, `"mesh_subnet": "10.44.0.0/24"`, `"mesh_subnet": "8.8.8.0/24"`, 1), "f2a9", `mesh_subnet: "8.8.8.0/24" is outside the private ranges`},
 		{"an IPv6 mesh_lan", strings.Replace(g, `"mesh_lan": "192.168.1.0/24"`, `"mesh_lan": "fd00::/64"`, 1), "f2a9", `mesh_lan: "fd00::/64" is not`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -268,5 +276,122 @@ func TestParseRecordSize(t *testing.T) {
 	big := strings.Repeat(" ", 64*1024+1)
 	if _, err := admission.ParseRecord([]byte(big), "f2a9"); err == nil || !strings.Contains(err.Error(), "65537 bytes") || !strings.Contains(err.Error(), "65536") {
 		t.Errorf("got %v", err)
+	}
+}
+
+// The record carries the request's site and roles, so a command that has
+// no configuration (site remove --force --id, host deployments) learns
+// what the host was admitted as.
+func TestNewRecordCarriesTheSiteAndRoles(t *testing.T) {
+	req := build(t, "home-a")
+	rec := admission.NewRecord(req, admission.Grants{Watchdog: true}, "", at)
+	if rec.Site != "home-a" || strings.Join(rec.Roles, ",") != strings.Join(req.Roles, ",") {
+		t.Errorf("site %q roles %v, want home-a %v", rec.Site, rec.Roles, req.Roles)
+	}
+}
+
+// A record without them, or with roles out of order or unknown, is not one
+// admit writes.
+func TestParseRecordRefusesABadSiteOrRoles(t *testing.T) {
+	good := encode(t, admission.NewRecord(build(t, "home-a"), admission.Grants{Watchdog: true}, "", at))
+	for name, edit := range map[string]func(string) string{
+		"no site":      func(s string) string { return strings.Replace(s, "  \"site\": \"home-a\",\n", "", 1) },
+		"bad site":     func(s string) string { return strings.Replace(s, `"site": "home-a"`, `"site": "Home A"`, 1) },
+		"unknown role": func(s string) string { return strings.Replace(s, `"data"`, `"database"`, 1) },
+	} {
+		if _, err := admission.ParseRecord([]byte(edit(string(good))), "f2a9"); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+// Mine is the login's own record: the one under /etc/paisans whose user is
+// the name `id -un` prints, whatever other deployments are admitted beside it.
+func TestMineIsTheLoginsOwnRecord(t *testing.T) {
+	mine := encode(t, admission.NewRecord(build(t, "home-a"), admission.Grants{Watchdog: true}, "", at))
+	other := strings.ReplaceAll(strings.ReplaceAll(string(mine), "f2a9c4e1", "0b0bc4e1"), "paisans-f2a9", "paisans-0b0b")
+	h := &listing{host: host{files: map[string]string{
+		"/etc/paisans/admitted.f2a9.json": string(mine),
+		"/etc/paisans/admitted.0b0b.json": other,
+	}}, user: "paisans-f2a9"}
+	rec, err := admission.Mine(h)
+	if err != nil || rec.User != "paisans-f2a9" || rec.Site != "home-a" {
+		t.Fatalf("Mine = %+v, %v", rec, err)
+	}
+	h.user = "ubuntu"
+	if _, err := admission.Mine(h); !errors.Is(err, admission.ErrNotMine) {
+		t.Errorf("a login with no record of its own: %v", err)
+	}
+}
+
+// listing is a host that answers Mine's listing and the login's name.
+type listing struct {
+	host
+	user string
+}
+
+func (l *listing) Run(command string) (string, error) {
+	var names []string
+	for p := range l.files {
+		names = append(names, p)
+	}
+	slices.Sort(names)
+	return "user " + l.user + "\n" + strings.Join(names, "\n") + "\n", nil
+}
+
+// Every difference between what the owner admitted and what the
+// declaration says is named; none when they agree.
+func TestDifferences(t *testing.T) {
+	cfg := fixture(t)
+	rec := admission.NewRecord(build(t, "home-a"), admission.Grants{Watchdog: true, PublicPorts: true}, "", at)
+	if d := rec.Differences(cfg, "home-a"); len(d) != 0 {
+		t.Fatalf("an exact admission differs: %v", d)
+	}
+	rec.Grants.Watchdog = false
+	rec.Ports.SSH = 2222
+	d := rec.Differences(cfg, "home-a")
+	if len(d) != 2 || !strings.Contains(d[0], "ssh port") || !strings.Contains(d[1], "--watchdog") {
+		t.Errorf("differences %q", d)
+	}
+	if d := rec.Differences(cfg, "home-b"); len(d) == 0 || !strings.Contains(d[0], "admitted as site home-a") {
+		t.Errorf("another site's record: %q", d)
+	}
+}
+
+// A mesh subnet changed after admission is a difference, since admit baked
+// it into root's state; the site's mesh address is not, since nothing of
+// root's restricts it.
+func TestDifferencesMeshSubnet(t *testing.T) {
+	cfg := fixture(t)
+	rec := admission.NewRecord(build(t, "home-a"), admission.Grants{Watchdog: true, PublicPorts: true}, "", at)
+	if rec.MeshSubnet != "10.44.0.0/24" {
+		t.Fatalf("NewRecord's mesh subnet is %q, want the request's 10.44.0.0/24", rec.MeshSubnet)
+	}
+	cfg.Mesh.Subnet = "10.44.1.0/24"
+	want := "the host admitted mesh subnet 10.44.0.0/24, and mesh.subnet is 10.44.1.0/24"
+	if d := rec.Differences(cfg, "home-a"); len(d) != 1 || d[0] != want {
+		t.Errorf("differences %q, want [%q]", d, want)
+	}
+	cfg = fixture(t)
+	s := cfg.Sites["home-a"]
+	s.Address = "10.44.0.99"
+	cfg.Sites["home-a"] = s
+	if d := rec.Differences(cfg, "home-a"); len(d) != 0 {
+		t.Errorf("a changed mesh address differs: %q", d)
+	}
+}
+
+// ForSite reads the record as the deployment's user and judges it.
+func TestForSite(t *testing.T) {
+	cfg := fixture(t)
+	h := &host{files: map[string]string{}}
+	if _, err := admission.ForSite(h, cfg, "home-a"); !errors.Is(err, admission.ErrNotAdmitted) {
+		t.Errorf("no record: %v", err)
+	}
+	h.files["/etc/paisans/admitted.f2a9.json"] = string(encode(t, admission.NewRecord(build(t, "home-a"), admission.Grants{}, "", at)))
+	_, err := admission.ForSite(h, cfg, "home-a")
+	var se *admission.SiteError
+	if !errors.As(err, &se) || se.Site != "home-a" || len(se.Problems) != 2 {
+		t.Errorf("grants missing: %v", err)
 	}
 }

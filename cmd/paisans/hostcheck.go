@@ -14,8 +14,8 @@ import (
 // tells the command to touch only what is the toolkit's.
 //
 // It is the first thing host prepare, apply, site add and prune do on the
-// site they change. There is no flag to skip it: what holds a claim is
-// moved, or the configuration is changed.
+// site they change. There is no flag to skip it: what holds a conflicting
+// claim is moved, or the configuration is changed.
 func hostGate(r ui.Reporter, cfg *config.Config, site string, t hostcheck.Transport) (*hostcheck.Report, error) {
 	return gate(r, "host check", cfg, site, t)
 }

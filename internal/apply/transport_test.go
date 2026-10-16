@@ -3,6 +3,7 @@ package apply_test
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -465,6 +466,33 @@ func TestANotAdmittedDestinationNamesItsHost(t *testing.T) {
 	}
 	if !strings.Contains(p.Explain, "paisans-f2a9, and 203.0.113.10 refused it") {
 		t.Errorf("explain:\n%s", p.Explain)
+	}
+}
+
+// runRefused is a login ssh refused, as the deployment's own user when
+// defaultUser is set and as a user the site names otherwise.
+func runRefused(t *testing.T, defaultUser bool) error {
+	t.Helper()
+	apply.ForgetContacts()
+	t.Cleanup(apply.ForgetContacts)
+	s := &sshScript{answers: []sshAnswer{{"paisans-f2a9@203.0.113.10: Permission denied (publickey).\n", 255}}}
+	s.install(t)
+	tr := apply.SSHTransport{Site: "home-a", User: "paisans-f2a9", Host: "203.0.113.10", PublicKeys: []string{keyA}, DefaultUser: defaultUser}
+	_, err := tr.Run("true")
+	return err
+}
+
+// A refused login is told apart from a failed command, whichever words ssh
+// used, and so is a host that does not answer.
+func TestNoLogin(t *testing.T) {
+	for _, defaultUser := range []bool{true, false} {
+		refused := runRefused(t, defaultUser)
+		if !errors.Is(refused, apply.ErrLoginRefused) || !apply.NoLogin(refused) {
+			t.Errorf("a refused login (default user %v): %v", defaultUser, refused)
+		}
+	}
+	if !apply.NoLogin(fmt.Errorf("x: %w", apply.ErrUnreachable)) || apply.NoLogin(errors.New("exit status 1")) {
+		t.Error("NoLogin misreads an unreachable host or a failed command")
 	}
 }
 

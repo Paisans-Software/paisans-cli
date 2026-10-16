@@ -9,64 +9,37 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 )
 
-// What follows makes the keys of the admins a site's ssh.keys names the login
-// user's authorized keys, without taking the file over.
+// What follows keeps the deployment's user's authorized_keys holding the
+// keys of the admins a site's ssh.keys names. Host admit first wrote the
+// operators' keys there; host prepare, run as that user, maintains them from
+// ssh.keys. The user is this deployment's alone, so no other deployment
+// shares the file.
 //
-// authorized_keys is shared with whoever else manages the host: cloud-init
-// puts the provider's key there, an operator may add a restricted key by
-// hand, and several deployments may share the user. So host prepare only ever
-// adds a listed key, and only ever removes a line it wrote itself that no other
-// deployment claims. A listed key that was already there, and that no
-// deployment claims, is left as it is and never recorded: it is often the key
-// the operator logs in with.
+// A key someone else put there, an operator by hand, with options or
+// without, is never removed. host prepare only ever adds a listed key, and
+// only ever removes a line marked added in the sidecar,
+// /srv/paisans/<token>/.paisans/authorized_keys.owned, which records what
+// host prepare and host admit added: one `<mark> <fingerprint> <name>` line
+// per key, `added` for a line paisans appended. A line of any other shape is
+// no claim, so its key's line is never removed. A listed key that was already there is left as it is and never recorded:
+// it is often the key the operator logs in with. Every write to the sidecar
+// or to authorized_keys runs under the deployment's lock.
 //
-// Each deployment records its claims in a sidecar file,
-// /etc/paisans/authorized_keys.<user>.paisans-<token>.owned, root's and 0600,
-// one `<mark> <fingerprint> <name>` line per key: `added` for a line this
-// deployment appended, `shared` for one another deployment's sidecar listed
-// when this one recorded it. The line in authorized_keys is left exactly as
-// the key was written. Every write to a sidecar or to authorized_keys runs
-// under one lock, and a removal checks the other sidecars again inside it.
-//
-// The commands use GNU coreutils (`chown --reference`) and util-linux's
-// `flock`, which every Linux profile registered here has. authorized_keys itself is OpenSSH's format
-// everywhere, which is why this is not behind Profile.
+// The commands use GNU coreutils (`chmod --reference`) and util-linux's
+// `flock`, which every Linux profile registered here has. authorized_keys
+// itself is OpenSSH's format everywhere, which is why this is not behind
+// Profile.
 
-// ownedDir holds the sidecar files.
-const ownedDir = "/etc/paisans"
+// markAdded starts a sidecar line for a key paisans appended.
+const markAdded = "added"
 
-// The marks a sidecar line starts with: a line this deployment appended, and
-// one another deployment wrote that this one also needs.
-const (
-	markAdded  = "added"
-	markShared = "shared"
-)
+// OwnedKeysPath is the sidecar recording which keys of the deployment
+// user's authorized_keys host admit and host prepare added.
+func OwnedKeysPath(d deployment.Deployment) string { return d.StatePath("authorized_keys.owned") }
 
-// keysLock serialises every write to a sidecar or to authorized_keys on a
-// host, across users and deployments, so a removal's check of the other
-// sidecars still holds when it deletes.
-const keysLock = ownedDir + "/authorized_keys.lock"
-
-// Locked runs command under keysLock.
-func Locked(command string) string {
-	return fmt.Sprintf("mkdir -p %s && flock %s sh -c %s", ownedDir, shellQuote(keysLock), shellQuote(command))
-}
-
-// OwnedKeysGlob matches every deployment's sidecar for user.
-func OwnedKeysGlob(user string) string {
-	return ownedDir + "/authorized_keys." + user + ".paisans-*.owned"
-}
-
-// OwnedKeysPath is the sidecar recording which of user's authorized keys host
-// prepare added for deployment d.
-func OwnedKeysPath(d deployment.Deployment, user string) string {
-	return ownedDir + "/authorized_keys." + user + "." + d.Prefix() + ".owned"
-}
-
-// passwdProbe prints the user's passwd entry, or a marker when there is none,
-// so that "no such user" cannot be confused with ssh failing.
-func passwdProbe(user string) string {
-	return "getent passwd " + shellQuote(user) + " || echo __PAISANS_ABSENT__"
+// Locked runs command under the deployment's lock, in its state directory.
+func Locked(d deployment.Deployment, command string) string {
+	return d.StateLockCommand("the keys") + "; " + command
 }
 
 // hostKeyLine is one key line of a host's authorized_keys.
@@ -90,7 +63,7 @@ func parseOwned(content string) []ownedEntry {
 	var out []ownedEntry
 	for _, line := range strings.Split(content, "\n") {
 		f := strings.Fields(line)
-		if len(f) != 3 || (f[0] != markAdded && f[0] != markShared) || !strings.HasPrefix(f[1], "SHA256:") {
+		if len(f) != 3 || f[0] != markAdded || !strings.HasPrefix(f[1], "SHA256:") {
 			continue
 		}
 		out = append(out, ownedEntry{mark: f[0], fingerprint: f[1], name: f[2]})
@@ -98,30 +71,17 @@ func parseOwned(content string) []ownedEntry {
 	return out
 }
 
-// userKeys is a login user's authorized_keys as host prepare reads it: who
-// owns it, where it is, and every key line it understands.
+// userKeys is the deployment user's authorized_keys as host prepare reads
+// it: where it is, and every key line it understands.
 type userKeys struct {
-	uid, gid, dir, file string
-	found               bool
-	lines               []hostKeyLine
+	dir, file string
+	found     bool
+	lines     []hostKeyLine
 }
 
-// readUserKeys reads user's authorized_keys on the host t reaches, finding
-// it from the user's passwd entry.
-func readUserKeys(t Transport, user string) (userKeys, error) {
-	entry, err := t.Run(passwdProbe(user))
-	if err != nil {
-		return userKeys{}, err
-	}
-	entry = strings.TrimSpace(entry)
-	if entry == "" || entry == "__PAISANS_ABSENT__" {
-		return userKeys{}, fmt.Errorf("the login user %s does not exist on %s. host prepare does not create users: create it, with sudo, and prepare again", user, t.Describe())
-	}
-	fields := strings.Split(entry, ":")
-	if len(fields) < 7 || fields[5] == "" {
-		return userKeys{}, fmt.Errorf("cannot read the passwd entry for %s on %s: %q", user, t.Describe(), entry)
-	}
-	k := userKeys{uid: fields[2], gid: fields[3], dir: strings.TrimSuffix(fields[5], "/") + "/.ssh"}
+// readUserKeys reads the authorized_keys under home on the host t reaches.
+func readUserKeys(t Transport, home string) (userKeys, error) {
+	k := userKeys{dir: home + "/.ssh"}
 	k.file = k.dir + "/authorized_keys"
 	content, found, err := t.ReadFile(k.file)
 	if err != nil {
@@ -142,58 +102,28 @@ func readUserKeys(t Transport, user string) (userKeys, error) {
 	return k, nil
 }
 
-// planAuthorizedKeys compares the keys s lists with user's authorized_keys,
-// this deployment's sidecar and every other deployment's sidecar for the same
-// user. It returns the additions and the changes to the sidecar, which run
-// with the rest of the plan, and the removals, which run last: a key is only
-// taken away once every listed key is in place.
-func planAuthorizedKeys(t Transport, d deployment.Deployment, user string, s config.SSH) (out Section, removals []Step, err error) {
+// planAuthorizedKeys compares the keys s lists with the authorized_keys under
+// home and the deployment's sidecar. It returns the additions and the changes
+// to the sidecar, which run with the rest of the plan, and the removals,
+// which run last: a key is only taken away once every listed key is in place.
+func planAuthorizedKeys(t Transport, d deployment.Deployment, home string, s config.SSH) (out Section, removals []Step, err error) {
 	listed, problems := s.AuthorizedKeys()
 	if len(problems) > 0 {
 		// Load refuses these; reaching here is a bug, not an operator error.
 		return out, nil, fmt.Errorf("ssh.keys: %s", strings.Join(problems, "; "))
 	}
 
-	keys, err := readUserKeys(t, user)
+	keys, err := readUserKeys(t, home)
 	if err != nil {
 		return out, nil, err
 	}
-	uid, gid, dir, file, found, lines := keys.uid, keys.gid, keys.dir, keys.file, keys.found, keys.lines
+	dir, file, found, lines := keys.dir, keys.file, keys.found, keys.lines
 
-	own := OwnedKeysPath(d, user)
-	sidecar, _, err := t.ReadFile(own)
+	sidecar, _, err := t.ReadFile(OwnedKeysPath(d))
 	if err != nil {
 		return out, nil, err
 	}
 	owned := parseOwned(sidecar)
-
-	// Every other deployment's sidecar for this user, whole. A file claims a
-	// key when the key's fingerprint appears anywhere in it, whatever the
-	// line's shape, so a format this version does not read keeps a key.
-	listing, err := t.Run(fmt.Sprintf(`for f in %s; do [ -f "$f" ] && echo "$f"; done; true`, OwnedKeysGlob(user)))
-	if err != nil {
-		return out, nil, err
-	}
-	var others []string // "<path>\n<content>" per sidecar, for claimedBy
-	for _, path := range strings.Fields(listing) {
-		if path == own {
-			continue
-		}
-		c, _, err := t.ReadFile(path)
-		if err != nil {
-			return out, nil, err
-		}
-		others = append(others, path+"\n"+c)
-	}
-	claimedBy := func(fp string) string {
-		for _, o := range others {
-			path, c, _ := strings.Cut(o, "\n")
-			if strings.Contains(c, fp) {
-				return strings.TrimSuffix(strings.TrimPrefix(path, ownedDir+"/authorized_keys."+user+"."), ".owned")
-			}
-		}
-		return ""
-	}
 
 	find := func(fp string) int {
 		for i, o := range owned {
@@ -225,9 +155,8 @@ func planAuthorizedKeys(t Transport, d deployment.Deployment, user string, s con
 		out.Steps = append(out.Steps, Step{
 			Kinds:    []string{KindSSHKeys},
 			Title:    "create authorized_keys",
-			Describe: fmt.Sprintf("ssh: create %s (0600) in %s (0700), owned by %s", file, dir, user),
-			Command: fmt.Sprintf("set -e; [ -d %[1]s ] || install -d -m 700 -o %[3]s -g %[4]s %[1]s; [ -f %[2]s ] || install -m 600 -o %[3]s -g %[4]s /dev/null %[2]s",
-				shellQuote(dir), shellQuote(file), uid, gid),
+			Describe: fmt.Sprintf("ssh: create %s (0600) in %s (0700), as the deployment's user", file, dir),
+			Command:  fmt.Sprintf("set -e; umask 077; [ -d %[1]s ] || install -d -m 700 %[1]s; [ -f %[2]s ] || install -m 600 /dev/null %[2]s", shellQuote(dir), shellQuote(file)),
 		})
 	}
 
@@ -241,7 +170,7 @@ func planAuthorizedKeys(t Transport, d deployment.Deployment, user string, s con
 		switch {
 		case len(plain) > 0 && i >= 0:
 			remaining++
-			out.Present = append(out.Present, fmt.Sprintf("ssh: key %s authorized for %s", label, user))
+			out.Present = append(out.Present, fmt.Sprintf("ssh: key %s authorized for the deployment's user", label))
 			if owned[i].name != k.Name {
 				was := owned[i].name
 				owned[i].name = k.Name
@@ -250,42 +179,20 @@ func planAuthorizedKeys(t Transport, d deployment.Deployment, user string, s con
 					Label:    "rename",
 					Title:    "rename ssh key",
 					Describe: fmt.Sprintf("ssh: record key %s as %s's, which was recorded as %s's", k.Fingerprint, k.Name, was),
-					Command:  Locked(writeOwned(d, user, owned)),
+					Command:  Locked(d, writeOwned(d, owned)),
 				})
 			}
-		case len(plain) > 0 && claimedBy(k.Fingerprint) != "":
-			// Already there, and another deployment claims it: paisans wrote
-			// it. Claimed here too, so that deployment cannot remove it from
-			// under this one, but shared, so this one never removes it. The
-			// other deployment may remove the line between this plan and its
-			// run, so the step looks again under the lock and, with the line
-			// gone, appends it and records it added instead.
-			remaining++
-			var raws []string
-			for _, l := range plain {
-				raws = append(raws, "-e "+shellQuote(l.raw))
-			}
-			added := append(append([]ownedEntry(nil), owned...), ownedEntry{mark: markAdded, fingerprint: k.Fingerprint, name: k.Name})
-			owned = append(owned, ownedEntry{mark: markShared, fingerprint: k.Fingerprint, name: k.Name})
-			out.Steps = append(out.Steps, Step{
-				Kinds:    []string{KindSSHKeys},
-				Label:    "share",
-				Title:    "share ssh key",
-				Describe: fmt.Sprintf("ssh: key %s is already authorized for %s and %s claims it; claim it too, so it stays while either lists it", label, user, claimedBy(k.Fingerprint)),
-				Command: Locked(fmt.Sprintf("if grep -qxF %s %s; then %s; else %s; %s; fi",
-					strings.Join(raws, " "), shellQuote(file), writeOwned(d, user, owned), appendKey(file, k.Line), writeOwned(d, user, added))),
-			})
 		case len(plain) > 0:
 			// Already there, put there by someone else (cloud-init, most
 			// often), and often the key this run logs in with. Neither added
 			// again nor recorded, so host prepare never removes it.
 			remaining++
-			out.Present = append(out.Present, fmt.Sprintf("ssh: key %s authorized for %s, not by host prepare, which never removes it", label, user))
+			out.Present = append(out.Present, fmt.Sprintf("ssh: key %s authorized for the deployment's user, not by host prepare, which never removes it", label))
 		case len(restricted) > 0:
 			// The key is there with options someone chose. It is theirs:
 			// adding the plain key beside it would undo the restriction.
 			remaining++
-			out.Foreign = append(out.Foreign, fmt.Sprintf("ssh: key %s authorized for %s with options, by `%s`; left as it is", label, user, restricted[0].raw))
+			out.Foreign = append(out.Foreign, fmt.Sprintf("ssh: key %s authorized for the deployment's user with options, by `%s`; left as it is", label, restricted[0].raw))
 		default:
 			remaining++
 			drop(k.Fingerprint)
@@ -294,13 +201,13 @@ func planAuthorizedKeys(t Transport, d deployment.Deployment, user string, s con
 				Kinds:    []string{KindSSHKeys},
 				Label:    "add",
 				Title:    "authorize ssh key",
-				Describe: fmt.Sprintf("ssh: authorize key %s for %s", label, user),
-				Command:  Locked(appendKey(file, k.Line) + "; " + writeOwned(d, user, owned)),
+				Describe: fmt.Sprintf("ssh: authorize key %s for the deployment's user", label),
+				Command:  Locked(d, appendKey(file, k.Line)+"; "+writeOwned(d, owned)),
 			})
 		}
 	}
 
-	// Keys this deployment claims that are no longer listed. Snapshot first:
+	// Keys the sidecar records that are no longer listed. Snapshot first:
 	// the loop changes owned.
 	previous := append([]ownedEntry(nil), owned...)
 	for _, o := range previous {
@@ -318,23 +225,7 @@ func planAuthorizedKeys(t Transport, d deployment.Deployment, user string, s con
 			if len(restricted) > 0 {
 				describe = fmt.Sprintf("ssh: forget key %s, which is now authorized with options by `%s` and so is no longer host prepare's", label, restricted[0].raw)
 			}
-			out.Steps = append(out.Steps, Step{Kinds: []string{KindSSHKeys}, Title: "forget ssh key", Describe: describe, Command: Locked(writeOwned(d, user, owned))})
-		case o.mark == markShared:
-			out.Steps = append(out.Steps, Step{
-				Kinds:    []string{KindSSHKeys},
-				Label:    "release",
-				Title:    "release ssh key",
-				Describe: fmt.Sprintf("ssh: stop claiming key %s, which ssh.keys no longer lists; another deployment wrote it, so its line stays in %s", label, file),
-				Command:  Locked(writeOwned(d, user, owned)),
-			})
-		case claimedBy(o.fingerprint) != "":
-			out.Steps = append(out.Steps, Step{
-				Kinds:    []string{KindSSHKeys},
-				Label:    "release",
-				Title:    "release ssh key",
-				Describe: fmt.Sprintf("ssh: stop claiming key %s, which ssh.keys no longer lists; %s still claims it, so its line stays in %s", label, claimedBy(o.fingerprint), file),
-				Command:  Locked(writeOwned(d, user, owned)),
-			})
+			out.Steps = append(out.Steps, Step{Kinds: []string{KindSSHKeys}, Title: "forget ssh key", Describe: describe, Command: Locked(d, writeOwned(d, owned))})
 		default:
 			var raws []string
 			for _, l := range plain {
@@ -344,8 +235,8 @@ func planAuthorizedKeys(t Transport, d deployment.Deployment, user string, s con
 				Kinds:    []string{KindSSHKeys},
 				Label:    "remove",
 				Title:    "remove ssh key",
-				Describe: fmt.Sprintf("ssh: remove key %s from %s, which host prepare added, ssh.keys no longer lists and no other deployment claims", label, file),
-				Command:  Locked(removeUnclaimed(user, own, o.fingerprint, file, raws, writeOwned(d, user, owned))),
+				Describe: fmt.Sprintf("ssh: remove key %s from %s, which host prepare or host admit added and ssh.keys no longer lists", label, file),
+				Command:  Locked(d, removeLines(file, raws)+"; "+writeOwned(d, owned)),
 			})
 		}
 	}
@@ -355,7 +246,7 @@ func planAuthorizedKeys(t Transport, d deployment.Deployment, user string, s con
 	// today; it is here so that a later change to either cannot quietly plan
 	// a file with no listed key left in it.
 	if len(removals) > 0 && remaining == 0 {
-		return out, nil, fmt.Errorf("ssh: removing %d key(s) from %s would leave %s with none of the keys ssh.keys lists. Nothing was planned", len(removals), file, user)
+		return out, nil, fmt.Errorf("ssh: removing %d key(s) from %s would leave the deployment's user with none of the keys ssh.keys lists. Nothing was planned", len(removals), file)
 	}
 	return out, removals, nil
 }
@@ -369,7 +260,7 @@ func keyLabel(fingerprint, name string) string {
 
 // appendKey adds one line to authorized_keys, first ending the last line if
 // someone left it without a newline, so the key is never glued onto it.
-// Appending as root keeps the file's owner and mode.
+// Appending as the file's owner keeps its owner and mode.
 func appendKey(file, line string) string {
 	f := shellQuote(file)
 	return fmt.Sprintf("set -e; if [ -s %[1]s ] && [ -n \"$(tail -c1 %[1]s)\" ]; then echo >> %[1]s; fi; printf '%%s\\n' %[2]s >> %[1]s",
@@ -377,9 +268,10 @@ func appendKey(file, line string) string {
 }
 
 // removeLines drops exactly these lines from authorized_keys and nothing else,
-// through a temporary file given the original's owner and mode and renamed
-// over it, so sshd never reads a half written file. grep exits 1 when no line
-// is left, which here is an empty file rather than a failure.
+// through a temporary file given the original's mode and renamed over it, so
+// sshd never reads a half written file. The user owns both, so the owner
+// needs no copying. grep exits 1 when no line is left, which here is an empty
+// file rather than a failure.
 func removeLines(file string, lines []string) string {
 	f := shellQuote(file)
 	tmp := shellQuote(file + ".paisans-tmp")
@@ -387,35 +279,26 @@ func removeLines(file string, lines []string) string {
 	for _, l := range lines {
 		patterns = append(patterns, "-e "+shellQuote(l))
 	}
-	return fmt.Sprintf("set -e; grep -vxF %[3]s %[1]s > %[2]s || [ $? -eq 1 ]; chown --reference=%[1]s %[2]s; chmod --reference=%[1]s %[2]s; mv %[2]s %[1]s",
+	return fmt.Sprintf("set -e; grep -vxF %[3]s %[1]s > %[2]s || [ $? -eq 1 ]; chmod --reference=%[1]s %[2]s; mv %[2]s %[1]s",
 		f, tmp, strings.Join(patterns, " "))
 }
 
-// removeUnclaimed deletes lines, a key's plain lines, from authorized_keys
-// only if no other sidecar for user then contains its fingerprint, and writes
-// this deployment's sidecar either way. It runs under the lock, so the check
-// still holds when it deletes; a sidecar grep cannot read counts as a claim.
-func removeUnclaimed(user, own, fingerprint, file string, lines []string, write string) string {
-	return fmt.Sprintf(`claimed=0; for f in %s; do [ "$f" = %s ] && continue; [ -e "$f" ] || continue; grep -qF -- %s "$f"; [ $? -eq 1 ] || claimed=1; done; if [ $claimed -eq 0 ]; then %s; fi; %s`,
-		OwnedKeysGlob(user), shellQuote(own), shellQuote(fingerprint), removeLines(file, lines), write)
-}
-
-// writeOwned replaces the sidecar with entries, sorted so that the file does
-// not change when only the order of the configuration did. Fingerprints and
-// comments are public, so a command line is no leak.
-func writeOwned(d deployment.Deployment, user string, entries []ownedEntry) string {
-	body := ownedBody(user, entries)
-	path := OwnedKeysPath(d, user)
-	return fmt.Sprintf("mkdir -p %s && printf '%%s' %s > %s && chmod 600 %s && mv %s %s",
-		ownedDir, shellQuote(body), shellQuote(path+".paisans-tmp"), shellQuote(path+".paisans-tmp"), shellQuote(path+".paisans-tmp"), shellQuote(path))
+// writeOwned replaces the sidecar with entries, through a temporary file in
+// the state directory renamed into place. Fingerprints and comments are
+// public, so a command line is no leak.
+func writeOwned(d deployment.Deployment, entries []ownedEntry) string {
+	path := OwnedKeysPath(d)
+	tmp := shellQuote(path + ".paisans-tmp")
+	return fmt.Sprintf("printf '%%s' %s > %s && chmod 600 %s && mv %s %s",
+		shellQuote(ownedBody(entries)), tmp, tmp, tmp, shellQuote(path))
 }
 
 // ownedBody is a sidecar's content: its header, then entries sorted so that
 // the file does not change when only the order of the configuration did.
-func ownedBody(user string, entries []ownedEntry) string {
+func ownedBody(entries []ownedEntry) string {
 	sorted := append([]ownedEntry(nil), entries...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].fingerprint < sorted[j].fingerprint })
-	body := "# Keys this deployment claims in " + user + "'s authorized_keys: <mark> <fingerprint> <name>. host prepare removes a line only when it is marked added here and no other deployment's file lists it.\n"
+	body := "# Keys host admit and host prepare added to this deployment's user's authorized_keys: <mark> <fingerprint> <name>. host prepare removes a line only when it is marked added here and ssh.keys no longer lists it.\n"
 	for _, e := range sorted {
 		body += e.mark + " " + e.fingerprint + " " + e.name + "\n"
 	}

@@ -158,25 +158,6 @@ func TestConvergeReviewNeedsEverySite(t *testing.T) {
 	}
 }
 
-// The run records each site's web server directory itself, once its web
-// server step has written there, with who approved it.
-func TestConvergeRecordsTheWebServerDirectory(t *testing.T) {
-	cfg := fixture(t)
-	host := &memGrant{}
-	g := grant.Grant{WebServer: &grant.WebServer{IncludeDir: "/srv/caddy.d"}}
-	reviews := map[string]*siteReview{"watch": {grant: g, scope: grant.AllScope, host: host}}
-	saved := reviewedByRun
-	reviewedByRun = &runReview{approvedBy: "alice"}
-	t.Cleanup(func() { reviewedByRun = saved })
-	if err := convergeRecordWebServer(recordConverge(t), cfg, reviews); err != nil {
-		t.Fatal(err)
-	}
-	rec := host.record(t)
-	if rec.WebServer == nil || rec.WebServer.IncludeDir != "/srv/caddy.d" || rec.WebServer.ApprovedBy != "alice" || rec.Keys != nil || rec.Images != nil {
-		t.Errorf("record %+v %+v", rec.WebServer, rec)
-	}
-}
-
 // apply with no --site records what was approved on each site before its
 // first step, so a run that stops part way asks nothing when it runs again,
 // terminal or not, and says what it approved earlier.

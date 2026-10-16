@@ -77,15 +77,14 @@ func AtLeast(version, min string) bool {
 // The source does not matter, except a snap: its confinement keeps it from
 // bind mounting under /srv, and snapd refreshes it, restarting the daemon
 // and every container, on snapd's schedule rather than the operator's. A
-// Docker without a working `docker compose` is not refused here: host
-// prepare installs the plugin, or names the packages that keep it from
-// working.
+// Docker without a working `docker compose` is not refused here: the
+// check reports it, and installing the plugin is the host owner's.
 func dockerRefusal(host string, d Docker) error {
 	for _, p := range d.Packages {
 		if p == "snap" {
 			return &ui.Problem{
 				Hint:    host + " runs Docker from a snap, which the toolkit cannot use",
-				Explain: "A snap's confinement keeps Docker from bind mounting under /srv, where every stack keeps its data, and snapd refreshes it on its own schedule, restarting every container. Remove it yourself (snap remove docker), after checking nothing running depends on it, and run host prepare, which installs Docker from Docker's own apt repository.",
+				Explain: "A snap's confinement keeps Docker from bind mounting under /srv, where every stack keeps its data, and snapd refreshes it on its own schedule, restarting every container. Remove it yourself (snap remove docker), after checking nothing running depends on it, and have the host's owner run host admit again, which installs Docker from Docker's own apt repository.",
 			}
 		}
 	}
@@ -107,7 +106,7 @@ func dockerRefusal(host string, d Docker) error {
 	}
 	return &ui.Problem{
 		Hint:    host + "'s Docker is older than the toolkit needs, so nothing was changed",
-		Explain: strings.Join(old, "\n") + "\nUpgrade Docker from wherever it came from, or remove it, after checking nothing running depends on it, and run host prepare, which installs Docker from Docker's own apt repository. Then run again.",
+		Explain: strings.Join(old, "\n") + "\nUpgrade Docker from wherever it came from, or remove it, after checking nothing running depends on it, and have the host's owner run host admit again, which installs Docker from Docker's own apt repository. Then run again.",
 	}
 }
 

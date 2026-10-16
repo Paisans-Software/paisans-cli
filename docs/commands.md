@@ -45,17 +45,19 @@ deleting DNS records, making an administrator) or a read (`doctor`,
 | `--sudo` | on | `host deployments` | run its remote commands through sudo, since the registry is root's; `--sudo=false` skips it (see *A sudo that wants a password is asked for once, on a terminal* in `README.md`). Every other command runs as the site's ssh user, without sudo |
 | `--ssh <destination>` | the site's `ssh` section | commands about one site's host | used verbatim in place of the site's `ssh` section, whose user, host, port and keys are then ignored (see *`--ssh` replaces the whole section* in `README.md`) |
 
-With `--execute`, a command first claims each host it writes to in
-`/var/lib/paisans/registry.json`, and refuses if another deployment there
-holds this one's token, WireGuard interface or listen port, or an overlapping
-mesh subnet (see *A deployment has an id, and a host knows every deployment on
-it* in `README.md`).
+Every command that changes a host first reads, as the site's ssh user, the
+admission record `/etc/paisans/admitted.<token>.json` its owner's `host admit`
+wrote, and refuses, with nothing changed, a host with none or whose record
+does not cover the site. `host admit` claimed the host in
+`/var/lib/paisans/registry.json`, which is root's, and refused if another
+deployment there held this one's token, WireGuard interface or listen port, or
+an overlapping mesh subnet (see *A deployment has an id, and a host knows every
+deployment on it* in `README.md`).
 
 With `--execute`, `apply`, `apply --site`, `host prepare` and `site add` first show what
 `paisans-stack.yaml` grants on each host they reach that the host has not had (a key
-that may log in, an image that runs, the directory the operator's web server
-reads), and, when anything is added or changed, ask for the word `approve` at
-a terminal before that claim. Without a terminal they refuse, before any host
+that may log in, an image that runs), and, when anything is added or changed, ask for the word `approve` at
+a terminal before the first change. Without a terminal they refuse, before any host
 changes; no flag answers the question. A run that adds or changes nothing asks
 nothing. Their dry runs show the same review and ask nothing (see *`apply` and
 `host prepare` review what `paisans-stack.yaml` grants* in `README.md`).
@@ -226,10 +228,12 @@ such as the DNS provider's token.
 
 An SMTP password (`external.smtp_password`, `apps.<app>.smtp_password`) is
 tried before it is written: for each sender of the apps that log in with it,
-from a site running one of them, it logs in to the mail server and sends one
-test message to every operator's email. A failure writes nothing, and says
-the server's reply, never the password (see *Mail settings are tried before
-they are used* in `README.md`).
+from this machine, it logs in to the mail server and sends one test message to
+every operator's email, so no site need be deployed yet. A server that answers
+and refuses writes nothing, and says its reply, never the password; a server
+this machine cannot reach is warned about and the password written untried,
+for `apply` to try from each site (see *Mail settings are tried before they
+are used* in `README.md`).
 
 ```
 security find-generic-password -s acme -w | paisans secrets set external.acme_dns_token
@@ -255,8 +259,8 @@ paisans secrets set
 
 * **Flags:** the key, as the first argument, or none to be asked for each owed
   secret; `--config`, `--secrets`.
-* **Hosts:** none, except for an SMTP password, which is tried from a site
-  running an app that uses it, over ssh, and changes nothing there.
+* **Hosts:** none. An SMTP password is tried from this machine, and `apply`
+  tries it from each site running an app that uses it.
 * **`--execute`:** not taken. It writes the local file at once. Given no key
   it refuses anything but a terminal on stdin.
 
@@ -280,7 +284,7 @@ paisans secrets prune --without-record --execute   # no gateway to read; asks fo
   trust `paisans-stack.yaml` alone when no gateway's deployment record can be read;
   with `--execute` it asks for the word `prune` at a terminal).
 * **Hosts:** reads each gateway's deployment record, as the ssh user, since it
-  holds only names and is world readable. Changes none.
+  holds only names and is the deployment user's own file. Changes none.
 * **`--execute`:** removes them and writes the local secrets file, encrypted to
   the same recipients.
 
@@ -323,7 +327,7 @@ paisans secrets rotate --all --restart --execute           # the full list again
   are not rotated again. A recorded path the deployment no longer has a
   rotation of is refused, naming it and `--all --restart`.
 * **Hosts:** every site, since each must answer before anything changes, and
-  each is claimed. The secrets file is read and written on this machine only.
+  each is reached. The secrets file is read and written on this machine only.
 * **`--execute`:** rotates each secret in four gated stages, and stops at the
   first gate that fails. Asks for `sign out` at a terminal first when a rotation
   in the run signs members out, and is refused without one. Refuses before
@@ -332,7 +336,7 @@ paisans secrets rotate --all --restart --execute           # the full list again
   file that lacks a secret `init` generates, naming `paisans init`.
 * **A pasted secret** (the DNS token or an SMTP password) **that every host
   using it runs:** `--execute` asks for its new value at a terminal, with echo
-  off and before any host is claimed, naming where to replace it (the DNS
+  off and before any host is reached, naming where to replace it (the DNS
   provider, or the mail provider). The dry run lists it as asked for at
   `--execute`. An empty answer stops the run with nothing changed, naming
   `secrets set` and `--replaced`; an answer equal to the value the hosts run is
@@ -348,10 +352,14 @@ paisans secrets rotate --all --restart --execute           # the full list again
   it is refused before it is written or handed to any Caddy. A provider whose
   record management is not implemented is not checked; the plan says so.
 * **An SMTP password's check:** a pasted one logs in to the mail server from
-  a site running each app that uses it and sends every operator one test
-  message as soon as it is given; one set with `secrets set` logs in when the
+  this machine and sends every operator one test message as soon as it is
+  given; one set with `secrets set` logs in when the
   run is planned. One that fails is refused before it is written under
-  `rotations`. Stage 2 logs in again, and sends nothing.
+  `rotations`. A server this machine cannot reach is a warning and the
+  rotation goes on. Stage 2 logs in again from this machine, then from every
+  site that will be handed the password, and no site is handed it until all
+  accept; a refusal at any site stops the rotation there. Nothing more is
+  sent.
 
 A pending rotation that cannot finish, Eg: of a secret whose app was taken
 out of `paisans-stack.yaml`, is ended by hand: *A rotation that cannot finish* in
@@ -388,7 +396,7 @@ paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty
   | `--merge` | `publish` | the version's parents are every head, after the operator has merged a fork or an incoming change by hand |
   | `--root <sha>` | `pull`, `log`, `recover` | trust starts from this version; `pull` and `recover` record it, `log` judges from it for the run only |
   | `--from <user@host[:port]>` | `recover` (required, repeatable) | a host of the deployment to recover from; every site the trusted heads name is reached after it |
-  | `--id <id>` | `recover` | the deployment, when a host's registry lists more than one; it must be a deployment id |
+  | `--id <id>` | `recover` | the deployment, when the logins' admission records name more than one; it must be a deployment id |
   | `--execute` | `publish`, `pull`, `recover` | do it; `log` takes none |
 
   And the flags every command shares.
@@ -557,10 +565,12 @@ there. See *A blueprint can come from a catalog* in `README.md`.
 
 ### `paisans host prepare`
 
-Takes a blank host to the state `apply` assumes: Docker with the compose
-plugin, the WireGuard tools, a firewall following the site's roles, the login
-user's authorized keys (every key of each operator the site's `ssh.keys` names),
-and a watchdog on a data site. Installs only what is missing.
+Keeps what is the deployment's user's on a host its owner has admitted the
+deployment to: the user's authorized keys (every key of each operator the
+site's `ssh.keys` names), its configuration store with the units that serve
+it, and its `daemon.json`. It runs as the deployment's user, installs nothing
+and writes nothing that is root's. Docker, the WireGuard tools, the firewall
+and the watchdog are `host admit`'s.
 
 ```
 paisans host prepare --site home-a            # shows what it would do
@@ -577,41 +587,49 @@ paisans host prepare --all --execute          # every site, one at a time
   exactly as `--site` prepares it, with its own review. It stops at the first
   site that fails; re-running it resumes there, since a prepared host plans
   nothing.
-* **Hosts:** the one site's, or with `--all` each site's in turn. It runs the host check first, which refuses a
-  Docker snap and a Docker older than engine 25.0.0 or compose 2.24.0,
-  whatever its source.
-* **Docker:** left as it is wherever `docker compose` works, from any source.
-  Installed from Docker's own apt repository where it is absent. Where it is
-  there and `docker compose` does not work, the packages in the way are named
-  and refused, never removed.
+* **Hosts:** the one site's, or with `--all` each site's in turn. It runs the
+  host check first, as the deployment's user, which refuses a Docker snap and
+  a Docker older than engine 25.0.0 or compose 2.24.0, whatever its source,
+  and a port a site claims that something else holds.
+* **Admission:** it reads the host's admission record and refuses on any
+  difference from the configuration (the site, user, SSH and WireGuard ports, mesh
+  subnet, forwarding, the grants the roles need and, for `managed_by: external`,
+  the web server), naming the request line the owner needs: `paisans host request
+  --site <name> > <name>.admit`, then `sudo paisans host admit --request
+  <name>.admit`.
+* **Docker:** left as it is. Installing it, or naming the packages in its way,
+  is `host admit`'s.
 * **Review:** the login user and the keys, against what the host last
-  recorded in `/var/lib/paisans/granted.<token>.json`: each key added or
+  recorded in `/srv/paisans/<token>/.paisans/granted.json`: each key added or
   changed is a `+` or `~` line under `review what paisans-stack.yaml grants`, each
   removed one a `-` line, at every verbosity.
 * **`--execute`:** asks for `approve` at a terminal when the review adds or
-  changes anything, before the claim; then installs and configures what the
-  plan lists, and records the login and the keys once every step has
-  succeeded. Without it, it probes and prints the plan and the review; a
-  prepared host plans nothing.
-* **Configuration store:** installs `git`, and plans under *configuration store*
-  what the host lacks of a site's store: the bare repository at
-  `/var/lib/paisans/config/<token>.git`, the peers file, the sync script, and
-  the units `paisans-<token>-config-daemon`, `-config-sync` and
-  `-config-sync.timer`. The daemon runs while the deployment's WireGuard unit
-  does, so on a host whose mesh `apply` has not brought up it is enabled and
-  not running. Every site's `host prepare` is also what makes the store
-  `apply` publishes to, so `apply` refuses a version no site could take with
-  this command named.
+  changes anything, before the first change; then writes what the plan lists,
+  and records the login and the keys once every step has succeeded. Without
+  it, it probes and prints the plan and the review; a prepared host plans
+  nothing.
+* **Configuration store:** plans under *configuration store* what the host
+  lacks of a site's store, all under `/srv/paisans/<token>/.paisans/`: the
+  bare repository `config/<token>.git`, the peers file, `bin/config-sync.sh`,
+  and the user's units `paisans-<token>-config-daemon`, `-config-sync` and
+  `-config-sync.timer`, enabled under linger. The daemon binds the mesh
+  address, so on a host whose mesh `apply` has not brought up it restarts every
+  ten seconds until it can. Every site's `host prepare` is also what makes the
+  store `apply` publishes to, so `apply` refuses a version no site could take
+  with this command named.
 
-See *`host prepare` takes a blank host to an apply-able state*, *Docker is
-judged by its version, not its source* and *`apply` and `host prepare` review
-what `paisans-stack.yaml` grants* in `README.md`.
+See *`host prepare` keeps what is the deployment's user's*, *Docker is judged
+by its version, not its source* and *`apply` and `host prepare` review what
+`paisans-stack.yaml` grants* in `README.md`.
 
 ### `paisans host deployments`
 
-Lists every deployment in the registry of the host `--ssh` names: id, token,
-domain, site, roles and root, and a Caddy kept for `/srv/caddy.d`. Warns of any
-deployment directory or labelled compose project no registry entry names.
+The host owner's listing of what a host holds for paisans: every admission
+record in `/etc/paisans` (the deployment id, the user, the site and roles it
+was admitted as, the grants given and when), then, through sudo, every
+deployment in the host's registry (id, token, domain, site, roles and root),
+and a warning for any deployment directory under `/srv/paisans` that no
+registry entry names. A record it cannot parse is a warning.
 
 ```sh
 paisans host deployments --ssh admin@203.0.113.9   # read only
@@ -620,8 +638,10 @@ paisans host deployments --ssh admin@203.0.113.9   # read only
 * **Alone:** always, and without `paisans-stack.yaml`: to see what a shared host
   holds, or to find the id `site remove --id` takes.
 * **Flags:** `--ssh <user@host[:port]>` (required), `--sudo`.
-* **Hosts:** reads the one host named. Changes nothing.
-* **`--execute`:** not taken.
+* **Hosts:** reads the one host named, as its owner: through sudo unless
+  `--sudo=false`, which lists the admission records alone, since they are
+  readable without sudo and the registry and the deployments' directories are
+  root's. Changes nothing.
 
 See *`--id` cleans a host when `paisans-stack.yaml` is lost* in `README.md`.
 
@@ -670,15 +690,49 @@ paisans host admit --site home-a --ssh owner@home-a.example.org --execute   # fr
   it is the owner's root step on their own machine.
 * **Flags:**
   * from a request: `--request <file>`, on the host, as root;
-  * from the configuration: `--site <name>` with `--ssh <your login>`, from
-    a workstation, and `--config`;
+  * from the configuration: `--site <name>` from a workstation, with
+    `--config`, and `--ssh` as your login alone, for the site's declared ssh
+    host and port, or as `user@host[:port]`; left out, it is asked for at a
+    terminal;
   * either way: the grants `--watchdog` and `--public-ports`;
-    `--data-dir <path>`, `--bridge-netfilter`, `--mesh-lan`; `--execute`.
+    `--data-dir <path>`, `--bridge-netfilter`, `--mesh-lan`, `--enable-ufw`;
+    `--execute`.
 * **Hosts:** the one it runs on, or the one `--ssh` names, through sudo. The
-  host needs ufw installed and active: admit never enables it, and refuses
-  before making any change otherwise. A data site without `--watchdog`, or a
-  gateway or Caddy monitor without `--public-ports`, stops it before the
-  host is reached; so does a grant the site does not need. Ports 80 and 443
+  host needs ufw installed; admit never installs it.
+* **ufw not active:** `--enable-ufw`, or a yes at a terminal, where admit
+  asks, adds these steps after the deployment's own rules, in this order:
+  an allow for every TCP port sshd listens on (read from its sockets with
+  `ss`, and from an active `ssh.socket`), tagged `paisans: ssh`; a timer,
+  `systemd-run --on-active=600 --timer-property=AccuracySec=1s
+  --unit=paisans-ufw-fallback ufw disable`, which does not survive a reboot
+  (a reboot before it fires leaves ufw enabled, so wait for it instead);
+  `ufw --force enable`. ufw takes every rule while it is inactive and
+  applies them as it is enabled, so SSH is allowed from the first moment ufw
+  is on. The timer is stopped once a new SSH login gets through: with
+  `--site`, admit's own login as the deployment's user at its end; with
+  `--request`, admit asks you to open a new SSH session and type yes. Without
+  that, ufw turns itself off again within 10 minutes, and admit says when.
+  Admit refuses to enable ufw when it cannot read a port sshd listens on or
+  ufw's rules; when ufw holds any deny or reject rule of yours, in any form,
+  which it lists, since those decide what reaches SSH; when
+  `IPV6`, read as ufw reads it from `/etc/default/ufw` then
+  `/etc/ufw/ufw.conf`, is not `yes` and sshd listens on IPv6, since ufw
+  would then drop SSH over IPv6; or when the timer cannot be armed. Admit
+  allows only the TCP ports sshd listens on, and cannot see DROP rules
+  written by hand in `/etc/ufw/before.rules`, `before6.rules` or
+  `user.rules`, nor other ways in such as sslh, dropbear or mosh: if you
+  rely on either, enable ufw by hand after checking them.
+  These refuse with `--enable-ufw` and without it, and admit asks nothing
+  then. Otherwise, without `--enable-ufw` and off a terminal, it refuses
+  before making any change, and prints the commands that enable ufw by hand,
+  numbered, every `sudo ufw allow <port>/tcp` before `sudo ufw enable`. The
+  refusal for your deny rules prints the same commands after them; with no
+  sshd port read, or for `IPV6`, it prints no enable command at all.
+* **Grants:** at a terminal, admit asks for each
+  grant the site's roles need and the flags leave out, saying what it gives;
+  elsewhere a data site without `--watchdog`, or a gateway or Caddy monitor
+  without `--public-ports`, stops it before the host is reached. A grant the
+  site does not need stops it too. Ports 80 and 443
   belong to one deployment per host, and `--public-ports` is refused while
   anything else holds either of them, over TCP or UDP.
 * **`--execute`:** makes the changes the plan shows, which it always prints in
@@ -734,7 +788,9 @@ paisans host evict --site home-a --ssh owner@home-a.example.org --execute
 * **Alone:** always, by the host's owner, and never by an agent unattended:
   it deletes the deployment's user and data as root.
 * **Flags:** `--request <file>`, or `--deployment <id> --user <name>` (both on
-  the host, as root), or `--site <name> --ssh <your login>` with `--config`;
+  the host, as root), or `--site <name>` with `--config`, and `--ssh` as
+  your login alone, for the site's declared ssh host and port, or as
+  `user@host[:port]`; left out, it is asked for at a terminal;
   `--data-dir <path>`, the one admit was given, needed only when the host
   holds no admission record; `--execute`.
 * **Hosts:** the one it runs on, or the one `--ssh` names, through sudo.
@@ -754,7 +810,10 @@ paisans host evict --site home-a --ssh owner@home-a.example.org --execute
   deployment goes, and the plan names it. A hold on Docker's daemons that a
   killed admit left is put back. The SSH allow may be the rule the
   owner's own login arrives by, so it is kept and evict warns of it: the
-  owner deletes it themselves once nothing else needs it. Every process of
+  owner deletes it themselves once nothing else needs it. Evict never
+  disables ufw: when admit enabled it, ufw stays as it is, with its
+  `paisans: ssh` allows, and the plan says so; disabling it is the owner's.
+  Every process of
   the user, or of its subordinate range, is killed first. A user the owner
   deleted by hand can leave an empty
   `/etc/systemd/system/user@<uid>.service.requires` behind.
@@ -767,7 +826,8 @@ Lists one site's dangling Docker volumes, with size and top level entries, and
 says which carry this deployment's label.
 
 * **Alone:** always, for volumes that accumulated before `apply` removed its
-  own.
+  own. Sizes are Docker's own accounting (`docker system df -v`), since the
+  deployment's user cannot read a directory a container's user owns.
 * **Flags:** `--site <name>` (required), `--config`, `--ssh`, `--execute`.
 * **Hosts:** the one site's.
 * **`--execute`:** removes the volumes labelled with this deployment's id;
@@ -789,8 +849,8 @@ founding applies, `site add`, the other sites, storage and pass two; `gateway
 move`, when a site without the gateway role still serves as the gateway; the
 `pocket id` step, which makes each operator a user of every running Pocket ID
 app and issues a login link to one with no passkey; and, for each app behind the operator's own web
-server, its site file written into the web server's `include_dir` and
-`web-server check`'s checks. The version of the configuration it applies is
+server, its reference snippet written under `/srv/paisans/<token>/web-server/`
+and `web-server check`'s checks. The version of the configuration it applies is
 published once the `host prepare` steps have made every site's store and before
 any other step changes a host (see *Every site keeps signed copies of the
 configuration* in `README.md`). Each `apply --site` it runs that covers the
@@ -800,23 +860,39 @@ images it superseded* in `README.md`).
 
 * **Alone:** this is the command an operator types; everything else is the
   exception.
-* **Flags:** `--config`, `--secrets`, `--execute`, `--min-free`
-  and `--keep-images` (handed to each `apply` step, below; the pull checks
-  free space against `--min-free` too). `--ssh`,
+* **Flags:** `--config`, `--secrets`, `--execute`, `--min-free`,
+  `--keep-images` and `--require-all` (the first two handed to each `apply`
+  step, below; the pull checks free space against `--min-free` too). `--ssh`,
   `--overwrite`, `--only` and `--recreate` are about one site and are refused
   without `--site`.
 * **Hosts:** every site, and each app behind the operator's own web server
   from this machine, as a visitor would.
+* **Sites missing:** the run first classifies every declared site, once, as
+  ready, pending or down (see *A deployment with sites missing* in
+  `README.md`). A pending site, whose host has not admitted the deployment or
+  has not granted what its roles need and which the deployment has not joined,
+  is left out as if not yet added; a down site, joined and not answering, is
+  kept as declared with its own steps skipped. The plan opens with a `pending`
+  section, a line for each with its reason, a pending one's `paisans host
+  request --site <name> > <name>.admit` line (only for a site pending for
+  its own login or admission, not through a relay), and what the deployment is
+  without while it is gone. While a joined site is down, a site joining
+  through `site add` waits as well (`site add <site>: waits until every joined
+  site answers`). The run goes on with the sites it has and ends
+  `Applied, degraded: <n> sites pending or down (<names>)`, exit 0.
+  `--require-all` makes a degraded run, or its dry run, exit 1. It still refuses when the
+  gateway is pending or down, when no ready data site remains while an app
+  needs a database, or when etcd or Patroni has no quorum among the members
+  that answer.
 * **Review:** before the first step that
   changes a host (an `init` with work runs first: it writes only local
   files), one review of what `paisans-stack.yaml` grants on every site, under `review`, a line per site
-  with each change under it: keys, images and the web server's directory.
+  with each change under it: keys and images.
   With `--execute`, when anything is added or changed, it asks once for
   `approve` at a terminal, for every site, and refuses without one; each step
   then applies what was approved, and refuses anything that changed since.
   The dry run shows it, asks nothing, and ends saying what `--execute` will
-  ask for. Each step records its part once it has succeeded, and the run
-  records each web server's directory after its web server step.
+  ask for. Each step records its part once it has succeeded.
 * **Configuration store:** before the review, every site's versions are gathered
   (under `configuration store`) and a fork, a base older than the sites' newest
   version, or a key no operator lists is refused, naming `config pull` or `config
@@ -839,22 +915,18 @@ images it superseded* in `README.md`).
   `apply` steps it runs do not try again. See *Mail settings are tried before
   they are used* in `README.md`.
 * **`--execute`:** runs the steps, stopping at the first failure; run again,
-  it reads live state again and carries on. It ends `Deployment complete.`, or,
-  when an app failed its web server check or its site file step warned, ends
-  on a warning naming each such app and exits 0, since every step ran and the
-  web server is the operator's; with another failure as well, or a web server
-  step that could not reach or write what it needs on the host, it exits 1.
-  Each problem with the operator's web server is one `!` line with one set of
-  instructions; an app whose site file step warned or failed has no check line
-  of its own but with `-v`. Caddy's `import` of the include directory goes at
-  the top level of the Caddyfile, after the global options block if it has
-  one; apply refuses one above that block or inside a block, writing nothing,
-  and says where to move it. A web server container without the include
-  directory is diagnosed from its compose file, read only, with the command
-  that recreates it, since a restart does not add a mount. A web server in a Docker container is validated and reloaded
-  after its site file changes, restarted when the reload fails; one on the
-  host itself is validated, and the warning gives the command to reload it. An `include_dir` it
-  derives is written into `paisans-stack.yaml`. Without it, every step is checked
+  it reads live state again and carries on. It ends `Deployment complete.`
+  (`Applied, degraded: ...` when sites are pending or down), or,
+  when an app has not passed its web server check, ends on a warning naming
+  each such app and `paisans web-server show --app <app>`, and exits 0, since
+  every step ran and the web server is the owner's; with another failure as
+  well, or a web server step that could not reach or write what it needs on
+  the host, it exits 1. Each app behind the owner's web server has its
+  reference snippet written under `/srv/paisans/<token>/web-server/`, from the
+  host's admission record, and checked once, without waiting; apply puts the
+  file back when it is missing or edited, and nothing is written into the
+  owner's configuration or reloaded. A warning for a rewritten snippet says the
+  owner's copy needs replacing. Without `--execute`, every step is checked
   as its own dry run, the web server checks are listed as `checked with
   --execute`, and the generated secrets the file lacks may be added to the
   local secrets file, as `init` would add them, which it says when it does.
@@ -881,21 +953,28 @@ starts, restarts or recreates what changed.
   | `--keep-images` | off | leave the images this apply supersedes on the host, and skip the sweep |
 
   And `--config`, `--secrets`, `--execute`.
-* **Hosts:** the site's own; an etcd member's apply also reads the other
-  members, to compare the live membership. It reads every gateway's
-  deployment record as the ssh user, since the record holds only names and
-  is world readable.
+* **Hosts:** the site's own, and every other site's host to classify it (see
+  *Sites missing* above): a `--site` that is pending or down is refused. An
+  etcd member's apply also reads the other members, to compare the live
+  membership. It reads every gateway's deployment record,
+  `/srv/paisans/<token>/.paisans/deployed.json`, as the ssh user, since the
+  record holds only names and is the deployment user's own file. A gateway's apply ends by
+  asking for `/.well-known/paisans/<token>` through the community's public
+  address, on 443 and on 80 (expecting the redirect), and fails the step
+  with "443 on <site> answers, but not as this deployment" when anything
+  else answers there. With no `public_address` it warns "not checked"; a gateway
+  that does not answer fails with an account of hairpin NAT. `--require-all` is as for the whole apply.
 * **Mail:** before the host check, dry run or not, every app the apply
   starts on the site (`--only` narrows it) logs in to its mail server from
   the site, through `--ssh` when given, under `mail`; nothing is sent. A
   failure refuses the apply before anything changes, naming the app, where
   its settings are declared and the server's reply.
 * **Review:** the images every rendered `compose.yaml` of the site runs, and
-  the web server's `include_dir`, against what the host last recorded, under
+  against what the host last recorded, under
   `review what paisans-stack.yaml grants`; `--only` narrows the images to its
   stacks. With `--execute` it is asked for, as `approve` at a terminal, before
-  the claim, when anything is added or changed; the images are recorded once
-  the apply has succeeded, and the directory once the web server step has.
+  the first change, when anything is added or changed; the images are recorded once
+  the apply has succeeded.
 * **Configuration store:** gathered and checked before the review as the whole
   apply does, with `--secrets` refused when it names a file other than the
   `secrets.enc.yaml` beside `paisans-stack.yaml`. `--execute` publishes the version it
@@ -909,19 +988,17 @@ starts, restarts or recreates what changed.
   images` in the plan). Without it, it reads and prints the plan. On a monitor
   with `managed_by: external`, `--execute` then runs the web server step for
   the apps that monitor serves, as the whole apply does at its end: each
-  app's site file written into `include_dir` (an `include_dir` it derives
-  written into `paisans-stack.yaml`), the configuration validated, a server in a
-  container reloaded and the reload command given for one on the host, then
-  `web-server check`'s checks, a line per app in a `web server` section. A
-  certificate or sign in failure, which a web server still obtaining its
-  certificate gives, is checked again after 2, 4, 8 and 16 seconds and then
-  30, up to a minute in all, the line saying what it waits for; any other
-  failure, such as DNS, is reported at once. It
+  app's reference snippet written under `/srv/paisans/<token>/web-server/`
+  from the admission record (restored when missing or edited), then
+  `web-server check`'s checks once, without waiting, a line per app in a
+  `web server` section, and a warning naming `paisans web-server show --app
+  <app>` until the check passes. Nothing is written into the owner's
+  configuration and nothing reloads it. It
   reaches the monitor through the same ssh as the rest of the apply,
   `--ssh` included. A problem with the operator's web server ends it on the
   whole apply's warning with exit status 0, in place of `Applied <n> files to
   <site>.`; one apply could not do on the host, such as reading or writing the
-  record of its site files, ends it failed with exit status 1. Its dry run
+  reference file, ends it failed with exit status 1. Its dry run
   lists the check as `checked with --execute`. The applies the whole apply
   runs as its steps leave the step to it, so it runs once.
 
@@ -980,11 +1057,11 @@ See *Preflight* in `README.md`.
 ### `paisans site remove`
 
 Takes a site out of the running deployment in gated stages: its data out, out
-of the cluster, its host cleaned of what is provably this deployment's (on a
-monitor behind the operator's own web server, the site files apply wrote into
-its `include_dir` included, after which a web server in a Docker container is
-validated and reloaded, and one on the host itself validated and left for the
-operator to reload with the command it names), its DNS records deleted, and
+of the cluster, its host cleaned, as the deployment's user, of what is provably
+this deployment's and that user's to remove (on a
+monitor behind the operator's own web server, the reference files apply wrote
+under `/srv/paisans/<token>/web-server/` deleted, with the block the owner
+removes from their web server named), its DNS records deleted, and
 its entry out of `paisans-stack.yaml`.
 
 ```sh
@@ -1031,19 +1108,27 @@ paisans site remove --force --ssh admin@203.0.113.9 --id f2a9 --execute --delete
   | `--delete-data` | off | also delete this deployment's data on the host; asks for the site's name at a terminal |
   | `--force` | off | clean this deployment off one host and nothing else; no cluster stage, and neither file edited |
   | `--ssh <user@host[:port]>` | the site's `ssh` section | with `--force`: the host to clean |
-  | `--id <id or token>` | none | with `--force` and `--ssh`, and no `paisans-stack.yaml`: the deployment to clean, as `host deployments` lists it |
+  | `--id <id or token>` | none | with `--force` and `--ssh`, and no `paisans-stack.yaml`: the deployment to clean, found by the login's own admission record, as `host deployments` lists them |
 
   And the site as an argument, `--config`, `--secrets`, `--execute`.
 * **Hosts:** every site, and the DNS provider for the removed site's records;
   `--force` reaches the one host only and leaves DNS alone. `--host-gone`
-  reaches the removed site's host not at all, so it says the site files apply
-  wrote there may still be in the web server's `include_dir`.
+  reaches the removed site's host not at all, so it says the reference files
+  apply wrote there may still be under `/srv/paisans/<token>/web-server/`.
 * **`--execute`:** runs the stages, stopping at the first gate that fails. Stage
   3 deletes the record of what the deployment granted on the host,
-  `/var/lib/paisans/granted.<token>.json`, with its registry entry. It deletes
-  the host's configuration store
-  too, the repository and the files beside it; the other sites still hold every
-  version.
+  `/srv/paisans/<token>/.paisans/granted.json`, last. It deletes the host's
+  configuration store too, `/srv/paisans/<token>/.paisans/config/` and the
+  user's units that serve it; the other sites still hold every version. What
+  is root's stays: the mesh interface and its helper, the ufw rules, the
+  user, its home, `/srv/paisans`, the admission record and the
+  registry entry. The plan ends with the line the host's owner runs for them,
+  `sudo paisans host evict --deployment <id> --user <user> --execute`, and
+  `--host-gone` prints the same line for a host it never reached. A gateway's
+  Caddy kept for the owner's sites in `/srv/paisans/<token>/caddy.d` stays too,
+  and `host evict` stops it.
+  `--id` finds the deployment by the login's admission record, not by the
+  registry.
   With `--evict` it needs a terminal, and asks, in order: `revoked` for a
   gateway, once its DNS token is revoked at the provider and a new one set
   with `secrets set`; the site's name; `lose writes` when the leader has no
@@ -1276,8 +1361,8 @@ paisans gateway move --execute    # record, serve, dns add, dns remove, wait, st
   stops the run with its evidence; a re-run resumes at the first stage with
   anything left to do. It deletes only the old gateway's address records
   that `dns init` made, once the new gateway passed its check on the same run,
-  and does not stop the old Caddy while the host's `/srv/caddy.d` holds a site
-  file. Without it, it shows the old gateway it found and every stage.
+  and does not stop the old Caddy while the host's
+  `/srv/paisans/<token>/caddy.d` holds a site file. Without it, it shows the old gateway it found and every stage.
 
 See *Moving the gateway* in `README.md`.
 
@@ -1311,10 +1396,9 @@ See *`oidc client create` makes an app's client at Pocket ID* in `README.md`.
 
 Takes an app that has left `paisans-stack.yaml` off every host, once a whole apply
 on each site has marked its files left over. For an app behind the operator's
-own web server it also deletes the site file apply wrote into the web
-server's `include_dir`, then validates that web server and reloads it when it
-runs in a Docker container. One on the host itself is the operator's to
-reload: what is left at the end gives the command.
+own web server it also deletes the reference file apply wrote under
+`/srv/paisans/<token>/web-server/` and names the block the owner removes from
+their web server.
 
 ```sh
 paisans app remove docs                              # shows what it would do
@@ -1337,8 +1421,9 @@ See *`app remove` takes an app off its hosts* in `README.md`.
 
 For an app pinned to a monitor site behind the operator's own web server.
 `show` prints what that web server must do, with the snippet for the web
-server it finds in front of the app, or for Caddy, nginx and Apache when it
-finds none. `check` checks, from this machine as a visitor would, that the
+server `host admit` recorded in front of the app, read from the site's
+admission record over ssh as the site's ssh user, or for Caddy, nginx and
+Apache when admit found none. `check` checks, from this machine as a visitor would, that the
 hostname resolves to the monitor, that `/healthz` answers with a valid
 certificate, that sign in redirects with an https callback, and that the
 published port is closed from outside; when a check fails, it names the web
@@ -1350,14 +1435,13 @@ paisans web-server check --app health   # from your machine, as a visitor would
 ```
 
 * **Alone:** `show` always, to hand the snippet to whoever runs the web
-  server. The whole apply writes that snippet into the web server's
-  `include_dir` and runs `check`'s checks after every step, waiting up to a
-  minute on a certificate or sign in failure and reporting a DNS or routing
-  failure at once, so `check` is typed alone to check again once the web
-  server is fixed. Typed alone it checks once.
+  server. The whole apply writes that snippet under
+  `/srv/paisans/<token>/web-server/` and runs `check`'s checks once after every
+  step, without waiting, warning until they pass, so `check` is typed alone to
+  check again once the owner has installed the snippet.
 * **Flags:** `--app <name>` (required), `--config`. It reads as the ssh user.
-* **Hosts:** in `managed_by` `external`, the monitor over ssh, reading only:
-  `show` always, `check` only when a check fails. `check` otherwise looks at
+* **Hosts:** in `managed_by` `external`, the monitor over ssh, reading its
+  admission record only: `show` always, `check` only when a check fails. `check` otherwise looks at
   the public hostname only.
 * **`--execute`:** not taken. Neither changes anything. `check` exits 1 on any
   `FAIL`.

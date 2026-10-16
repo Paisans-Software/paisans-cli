@@ -16,6 +16,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/deployrecord"
 	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/dns/dnstest"
@@ -31,7 +32,7 @@ const (
 )
 
 // host is one site's machine: its files, this deployment's gateway Caddy
-// containers, and the host owner's site files in /srv/caddy.d.
+// containers, and the host owner's site files in /srv/paisans/f2a9/caddy.d.
 type host struct {
 	name   string
 	files  map[string]string
@@ -39,6 +40,8 @@ type host struct {
 	sites  []string
 	ran    []string
 	failOn string
+	// wrote are the paths written through WriteFile, which takes no lock.
+	wrote []string
 }
 
 func (h *host) Describe() string { return h.name }
@@ -58,7 +61,7 @@ func (h *host) Run(command string) (string, error) {
 			fmt.Fprintf(&b, "site %s\n", s)
 		}
 		return b.String(), nil
-	case strings.Contains(command, "/.deployed."):
+	case strings.Contains(command, "/.deployed."), strings.Contains(command, "/.gateway-move."):
 		path := regexp.MustCompile(`f='([^']+)'`).FindStringSubmatch(command)[1]
 		data, _ := base64.StdEncoding.DecodeString(regexp.MustCompile(`printf %s '([^']*)' \| base64 -d`).FindStringSubmatch(command)[1])
 		h.files[path] = string(data)
@@ -67,7 +70,7 @@ func (h *host) Run(command string) (string, error) {
 		id := strings.Fields(command)[4]
 		h.caddy = slices.DeleteFunc(h.caddy, func(c string) bool { return c == id })
 		return "", nil
-	case strings.HasPrefix(command, "rm -f -- "):
+	case strings.Contains(command, "rm -f -- "):
 		for _, q := range regexp.MustCompile(`'([^']+)'`).FindAllStringSubmatch(command, -1) {
 			delete(h.files, q[1])
 		}
@@ -82,6 +85,7 @@ func (h *host) ReadFile(path string) (string, bool, error) {
 }
 
 func (h *host) WriteFile(path, content string, _ uint32) error {
+	h.wrote = append(h.wrote, path)
 	h.files[path] = content
 	return nil
 }
@@ -401,7 +405,7 @@ func TestTheOldGatewayIsNotStoppedWhenTheCheckFailsAtTheStop(t *testing.T) {
 
 func TestTheHostOwnersSitesKeepTheOldCaddy(t *testing.T) {
 	w := newWorld(t)
-	w.hosts["home-a"].sites = []string{"/srv/caddy.d/blog.caddy"}
+	w.hosts["home-a"].sites = []string{"/srv/paisans/f2a9/caddy.d/blog.caddy"}
 	err := w.run()
 	if err == nil || !strings.Contains(err.Error(), "stage 6 (stop)") || !strings.Contains(err.Error(), "host owner's sites") {
 		t.Fatalf("want a refusal at stage 6: %v", err)
@@ -756,9 +760,73 @@ func TestACommentInTheCaddyfileIsNotARoute(t *testing.T) {
 // stopped.
 func TestTheHostOwnersSitesNoteSpeaksOfTheHandOff(t *testing.T) {
 	sw := sharedWorld(t)
-	sw.hosts["home-a"].sites = []string{"/srv/caddy.d/blog.caddy"}
+	sw.hosts["home-a"].sites = []string{"/srv/paisans/f2a9/caddy.d/blog.caddy"}
 	notes := strings.Join(sw.mustBuild().Notes, "\n")
 	if strings.Contains(notes, "not stopped") || !strings.Contains(notes, "not handed off") {
 		t.Errorf("notes:\n%s", notes)
+	}
+}
+
+// The marker is written as every other record in StateDir is: under the
+// deployment's lock, with StateDir made 700 if absent, by a rename. Through
+// WriteFile its mkdir -p would make StateDir with the session's umask and
+// could interleave with an apply writing the deployment record.
+func TestTheMarkerIsWrittenUnderTheDeploymentsLock(t *testing.T) {
+	w := newWorld(t)
+	if err := w.run(); err != nil {
+		t.Fatal(err)
+	}
+	old := w.hosts["home-a"]
+	if len(old.wrote) != 0 {
+		t.Errorf("written without the lock: %v", old.wrote)
+	}
+	d := w.cfg.Deployment()
+	lock := d.StateLockCommand("the gateway move marker")
+	found := false
+	for _, c := range old.ran {
+		if !strings.Contains(c, gatewaymove.MarkerPath(d)) || !strings.Contains(c, "mktemp") {
+			continue
+		}
+		found = true
+		at, mv := strings.Index(c, lock), strings.Index(c, `mv "$tmp" "$f"`)
+		if at < 0 || mv < at {
+			t.Errorf("the marker is not written under the lock: %s", c)
+		}
+	}
+	if !found {
+		t.Errorf("no command wrote the marker: %v", old.ran)
+	}
+}
+
+// The stop and the release delete the deployment record and the marker under
+// the deployment's lock, so neither races an apply writing the record.
+func TestTheRecordAndMarkerAreDeletedUnderTheDeploymentsLock(t *testing.T) {
+	for name, w := range map[string]*world{"stop": newWorld(t), "release": sharedWorld(t).world} {
+		if err := w.run(); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		d := w.cfg.Deployment()
+		lock := d.StateLockCommand("the gateway move's records")
+		deleted := false
+		for _, c := range w.hosts["home-a"].ran {
+			at := strings.Index(c, "rm -f -- ")
+			if at < 0 || !strings.Contains(c, deployrecord.Path(d)) {
+				continue
+			}
+			deleted = true
+			if l := strings.Index(c, lock); l < 0 || l > at {
+				t.Errorf("%s: deleted without the lock: %s", name, c)
+			}
+		}
+		if !deleted {
+			t.Errorf("%s: nothing deleted the record", name)
+		}
+	}
+}
+
+func TestTheMarkerIsInTheDeploymentsStateDir(t *testing.T) {
+	d := deployment.Deployment{ID: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}
+	if got := gatewaymove.MarkerPath(d); got != "/srv/paisans/f2a9/.paisans/gateway-move.json" {
+		t.Errorf("got %s", got)
 	}
 }

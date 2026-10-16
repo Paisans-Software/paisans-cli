@@ -64,7 +64,7 @@ func WorstCaseRemains() []string {
 		recordMissed(site, strings.Repeat("w", 80)),
 		recordRaced(site, site, strings.Repeat("w", 80)),
 	}
-	out = append(out, caddyKept(site, name, []string{path, path}, path))
+	out = append(out, caddyKept(site, name, []string{path, path}, "/srv/paisans/f2a9/caddy.d", path))
 	return out
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -9,13 +10,17 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/grant"
 	"github.com/paisans-software/paisans-cli/internal/keystore"
 	"github.com/paisans-software/paisans-cli/internal/secretsgen"
+	"github.com/paisans-software/paisans-cli/internal/selfcheck"
 	"github.com/paisans-software/paisans-cli/internal/smtpcheck"
 	"github.com/paisans-software/paisans-cli/internal/smtpcheck/smtptest"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -45,17 +50,46 @@ func TestMain(m *testing.M) {
 	// SOPS_AGE_* variable from the shell running the tests decide which key
 	// sops uses; a test that wants one sets it.
 	config.AgeKeystore = keystore.NewMemory()
-	// No test waits between two web server checks.
-	fakeWebServerClock()
+	// Every host has admitted the deployment as the site it is asked about,
+	// with every grant its roles need.
+	// The record is still read, so a test sees which hosts were checked and
+	// when; a test about the check reads and judges it (realAdmission).
+	admissionForSite = func(t admission.Reader, cfg *config.Config, site string) (admission.Record, error) {
+		if p, err := admission.Path(deployment.Deployment{ID: cfg.ID}.Token()); err == nil {
+			_, _, _ = t.ReadFile(p)
+		}
+		s := cfg.Sites[site]
+		rec := admission.Record{Site: site, User: s.SSHUser(), Grants: admission.Needs(s), Forwarding: s.Endpoint != "",
+			Ports: admission.Ports{SSH: s.SSH.PortOrDefault(), WireGuard: s.ListenPort()}, MeshSubnet: cfg.Mesh.Subnet}
+		if s.WebServerManagedBy() == config.ManagedByExternal {
+			rec.WebServer = &admission.WebServer{Server: "caddy"}
+		}
+		return rec, nil
+	}
+	// Every run classifies every site: here each host lets the run in and
+	// has admitted the deployment as its site, so every site is ready. A
+	// test about a site missing sets its own (classifyWith).
+	classifyTransports = classifyHosts(nil)
 	// No test spends most of a second on each OAuth2 key it fills: what
 	// they test is that a key is filled, opens with its passphrase and
 	// stays put, and secretsgen's tests hold the key to 4096 bits.
 	secretsgen.SetOAuthKeyBits(1024)
+	// No test reaches a gateway from outside: every gateway answers as the
+	// deployment it is asked about. A test about the check sets its own.
+	gatewayProbe = func() selfcheck.Probe {
+		return selfcheck.Probe{Fetch: func(_ context.Context, scheme, _, host, path string) (selfcheck.Answer, error) {
+			if scheme == "http" {
+				return selfcheck.Answer{Status: 308, Location: "https://" + host + path}, nil
+			}
+			return selfcheck.Answer{Status: 200, Body: path[strings.LastIndex(path, "/")+1:]}, nil
+		}, Now: time.Now, Sleep: func(time.Duration) {}}
+	}
 	// No test reaches a site or a mail server to try mail settings: every
 	// check is answered by an in-process server that takes any login. A
 	// test about the check sets its own (fakeSMTP).
 	acceptAll := smtptest.New()
 	smtpEnv = func(*config.Config, map[string]string) smtpcheck.Env { return acceptAll.Env() }
+	localSMTPEnv = func() smtpcheck.Env { return acceptAll.Env() }
 	for _, name := range config.AgeVariables() {
 		os.Unsetenv(name)
 	}

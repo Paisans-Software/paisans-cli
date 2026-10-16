@@ -3,13 +3,13 @@ package main
 import (
 	"errors"
 	"io"
-	"os"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/topology"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -27,77 +27,61 @@ func siteApply(t *testing.T, path, site string, inside bool) (*ui.Recorder, erro
 	if inside {
 		r = checkReporter{rec, rec, &[]checkReport{}}
 	}
-	return rec, siteApplied(r, cfg, path, site, "", 4, nil)
+	return rec, siteApplied(r, cfg, path, site, "", 4, nil, false, nil)
 }
 
-// apply --site on a monitor with managed_by: external writes its app's
-// site file, reloads the server in its container, records include_dir in
-// paisans-stack.yaml and checks the app once, then ends as applied.
-func TestApplySiteWritesTheSiteFileAndReloads(t *testing.T) {
-	checked := fakeWebServerCheck(t, nil)
+// Until the owner's copy serves the app, apply --site ends on the full
+// apply's warning: every step ran, the exit status is 0, and the warning
+// names what the owner installs.
+func TestApplySiteWarnsUntilTheOwnersCopyServes(t *testing.T) {
+	fakeWebServerCheck(t, certificateFails)
 	path := externalFixture(t)
-	f := fakeWebServerFiles(t, mountedCaddy, "{\n\temail ops@example.org\n}\nimport /etc/caddy/paisans.d/*\n")
-	rec, err := siteApply(t, path, "watch", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(f.server.Files[healthFile], "reverse_proxy 127.0.0.1:8480") || !f.server.Ran("caddy validate") || !f.server.Ran("caddy reload") {
-		t.Errorf("files %v, asked %v", f.server.Files, f.server.Asked)
-	}
-	if got := f.manifest.record(t); len(got) != 1 || got[0].Path != healthFile {
-		t.Errorf("record %+v", got)
-	}
-	if data, _ := os.ReadFile(path); !strings.Contains(string(data), "include_dir: /opt/caddy/paisans.d\n") {
-		t.Errorf("paisans-stack.yaml:\n%s", data)
-	}
-	if !slices.Equal(*checked, []string{"health"}) {
-		t.Errorf("checked %v", *checked)
-	}
-	got := lines(inSection(rec, "web server"))
-	want := []string{
-		"step site file for health",
-		"progress read the web server on watch: site file for health",
-		"progress write paisans-f2a9-health.caddy: site file for health",
-		"done site file for health: " + healthFile + " written, caddy reloaded",
-		"note watch: include_dir set to /opt/caddy/paisans.d in paisans-stack.yaml: Apply derived it beside caddy's configuration, /opt/caddy/Caddyfile, which includes it. Change it there to use another directory, or set it to false to have apply write nothing for your web server.",
-		"step health",
-		"progress reach health.example.org: health",
-		"done health: health.example.org",
-		"result Applied 4 files to watch.",
-	}
-	if !slices.Equal(got, want) {
-		t.Errorf("web server section:\n%s", strings.Join(got, "\n"))
-	}
-}
-
-// With no line including the directory, apply --site writes nothing, says
-// the line to add, and ends on the full apply's warning: every step ran,
-// and the exit status is 0. The check would only restate the site file's
-// warning, so it is not run.
-func TestApplySiteWarnsWhereTheServerDoesNotIncludeTheDirectory(t *testing.T) {
-	checked := fakeWebServerCheck(t, nil)
-	path := externalFixture(t)
-	f := fakeWebServerFiles(t, mountedCaddy, "blog.example.org {\n\treverse_proxy 127.0.0.1:2368\n}\n")
+	h := fakeWebServerFiles(t, path)
 	rec, err := siteApply(t, path, "watch", false)
 	var w *ui.Warning
-	if !errors.As(err, &w) || w.Hint != "Deployment complete, but 1 app failed its web server check: health" {
-		t.Fatalf("err %v", err)
+	if !errors.As(err, &w) || w.Hint != "Deployment complete, but 1 app failed its web server check: health" || !strings.Contains(w.Explain, "paisans web-server show --app health") {
+		t.Fatalf("err %v\n%s", err, rec.Lines())
 	}
 	if reportError(io.Discard, err, false) != 0 {
 		t.Errorf("a warning exits non-zero")
 	}
-	if len(f.server.Files) != 0 || f.manifest.writes != 0 {
-		t.Errorf("wrote %v", f.server.Files)
-	}
-	i := rec.Index("warned", "site file for health")
-	if i < 0 || rec.Events[i].Extra != "caddy does not include /etc/caddy/paisans.d" || !strings.Contains(rec.Events[i+1].Text, "    import /etc/caddy/paisans.d/*\n") {
-		t.Fatalf("output:\n%s", rec.Lines())
-	}
-	if got := lines(inSection(rec, "web server")); slices.Contains(got, "step health") || len(*checked) != 0 {
-		t.Errorf("checked %v:\n%s", *checked, rec.Lines())
+	if _, ok := h.files[healthReference]; !ok {
+		t.Errorf("wrote %v", h.written)
 	}
 	if rec.Has("result", "Applied") {
 		t.Errorf("ended as applied:\n%s", rec.Lines())
+	}
+}
+
+// Degraded, apply --site ends on the web server warning under the degraded
+// result line, which still says what was applied, and the warning says
+// "Applied, but": the deployment is not complete. With --require-all the
+// run fails, the warning folded into the failure.
+func TestApplySiteEndsDegradedOnAWebServerWarning(t *testing.T) {
+	fakeWebServerCheck(t, certificateFails)
+	path := externalFixture(t)
+	fakeWebServerFiles(t, path)
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &topology.Classification{Sites: map[string]topology.Site{}}
+	for _, name := range cfg.SiteNames() {
+		c.Sites[name] = topology.Site{Name: name, Class: topology.Ready}
+	}
+	c.Sites["home-b"] = topology.Site{Name: "home-b", Class: topology.Pending, Why: "home-b: its host has not admitted this deployment"}
+	rec := &ui.Recorder{}
+	err = siteApplied(rec, cfg, path, "watch", "", 4, c, false, nil)
+	var w *ui.Warning
+	if !errors.As(err, &w) || w.Hint != "Applied, but 1 app failed its web server check: health" {
+		t.Fatalf("err %v\n%s", err, rec.Lines())
+	}
+	if !rec.Has("result", "Applied, degraded: 1 site pending or down (home-b). 4 files applied to watch.") {
+		t.Errorf("result:\n%s", rec.Lines())
+	}
+	err = siteApplied(&ui.Recorder{}, cfg, path, "watch", "", 4, c, true, nil)
+	if err == nil || errors.As(err, &w) || !strings.Contains(problemText(err), "--require-all") || !strings.Contains(problemText(err), "web server check") {
+		t.Errorf("--require-all: %v: %s", err, problemText(err))
 	}
 }
 
@@ -106,20 +90,20 @@ func TestApplySiteWarnsWhereTheServerDoesNotIncludeTheDirectory(t *testing.T) {
 func TestApplySiteFailsWhereTheMonitorCannotBeRead(t *testing.T) {
 	fakeWebServerCheck(t, nil)
 	path := externalFixture(t)
-	f := fakeWebServerFiles(t, mountedCaddy, "import /etc/caddy/paisans.d/*\n")
-	f.manifest.unreachable = true
+	f := fakeWebServerFiles(t, path)
+	f.unreachable = true
 	rec, err := siteApply(t, path, "watch", false)
 	var w *ui.Warning
 	if err == nil || errors.As(err, &w) {
 		t.Fatalf("err %v", err)
 	}
-	if hint, _ := ui.Describe(err); hint != "Deployment not complete: 1 web server step failed: site files on watch" {
+	if hint, _ := ui.Describe(err); hint != "Deployment not complete: 1 web server step failed: reference files on watch" {
 		t.Errorf("hint %q", hint)
 	}
 	if reportError(io.Discard, err, false) != 1 {
 		t.Errorf("a failure exits 0")
 	}
-	if !rec.Has("fail", "site files on watch") || rec.Has("result", "Applied") {
+	if !rec.Has("fail", "reference files on watch") || rec.Has("result", "Applied") {
 		t.Errorf("output:\n%s", rec.Lines())
 	}
 }
@@ -129,13 +113,13 @@ func TestApplySiteFailsWhereTheMonitorCannotBeRead(t *testing.T) {
 func TestApplySiteWithoutAnExternalWebServerRunsNoWebServerStep(t *testing.T) {
 	checked := fakeWebServerCheck(t, nil)
 	path := externalFixture(t)
-	f := fakeWebServerFiles(t, mountedCaddy, "import /etc/caddy/paisans.d/*\n")
+	f := fakeWebServerFiles(t, path)
 	rec, err := siteApply(t, path, "home-a", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(f.server.Asked) != 0 || len(f.reached) != 0 || len(*checked) != 0 || rec.Has("section", "web server") {
-		t.Errorf("asked %v, checked %v:\n%s", f.server.Asked, *checked, rec.Lines())
+	if len(f.ran) != 0 || f.writes != 0 || len(*checked) != 0 || rec.Has("section", "web server") {
+		t.Errorf("ran %v, checked %v:\n%s", f.ran, *checked, rec.Lines())
 	}
 	if !rec.Has("result", "Applied 4 files to home-a.") {
 		t.Errorf("output:\n%s", rec.Lines())
@@ -147,24 +131,24 @@ func TestApplySiteWithoutAnExternalWebServerRunsNoWebServerStep(t *testing.T) {
 func TestApplySiteInsideTheFullApplyLeavesTheWebServerToIt(t *testing.T) {
 	checked := fakeWebServerCheck(t, nil)
 	path := externalFixture(t)
-	f := fakeWebServerFiles(t, mountedCaddy, "import /etc/caddy/paisans.d/*\n")
+	f := fakeWebServerFiles(t, path)
 	rec, err := siteApply(t, path, "watch", true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(f.server.Asked) != 0 || len(f.reached) != 0 || len(*checked) != 0 || rec.Has("section", "web server") {
-		t.Errorf("asked %v, checked %v:\n%s", f.server.Asked, *checked, rec.Lines())
+	if len(f.ran) != 0 || f.writes != 0 || len(*checked) != 0 || rec.Has("section", "web server") {
+		t.Errorf("ran %v, checked %v:\n%s", f.ran, *checked, rec.Lines())
 	}
 }
 
-// A full apply writes the site file and checks the app once, at its end,
+// A full apply writes the reference file and checks the app once, at its end,
 // although the apply --site it runs for the monitor ends as that command
 // does.
 func TestApplyRunsTheWebServerStepOnce(t *testing.T) {
 	fakeConverge(t, nil)
 	checked := fakeWebServerCheck(t, nil)
 	path := externalFixture(t)
-	f := fakeWebServerFiles(t, mountedCaddy, "import /etc/caddy/paisans.d/*\n")
+	f := fakeWebServerFiles(t, path)
 	fake := convergeRun
 	convergeRun = func(args []string) error {
 		if args[0] == "apply" && slices.Contains(args, "watch") && slices.Contains(args, "--execute") {
@@ -172,7 +156,7 @@ func TestApplyRunsTheWebServerStepOnce(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			return siteApplied(reporterOverride, cfg, path, "watch", "", 4, nil)
+			return siteApplied(reporterOverride, cfg, path, "watch", "", 4, nil, false, nil)
 		}
 		return fake(args)
 	}
@@ -180,19 +164,14 @@ func TestApplyRunsTheWebServerStepOnce(t *testing.T) {
 	if err := convergeAt(t, path, "--execute"); err != nil {
 		t.Fatal(err)
 	}
-	steps, reloads := 0, 0
+	steps := 0
 	for _, e := range rec.Events {
-		if e.Kind == "step" && e.Text == "site file for health" {
+		if e.Kind == "step" && e.Text == "reference file for health" {
 			steps++
 		}
 	}
-	for _, c := range f.server.Asked {
-		if strings.Contains(c, "caddy reload") {
-			reloads++
-		}
-	}
-	if steps != 1 || reloads != 1 || !slices.Equal(*checked, []string{"health"}) {
-		t.Errorf("site file steps %d, asked %v, checked %v:\n%s", steps, f.server.Asked, *checked, rec.Lines())
+	if steps != 1 || !slices.Equal(f.written, []string{healthReference, manifestFile}) || !slices.Equal(*checked, []string{"health"}) {
+		t.Errorf("reference file steps %d, wrote %v, checked %v:\n%s", steps, f.written, *checked, rec.Lines())
 	}
 }
 
@@ -233,7 +212,8 @@ func TestApplySiteDryRunListsTheWebServerStep(t *testing.T) {
 }
 
 // apply --site --ssh's web server step reaches the monitor to read and write
-// its site files through the destination it was given, as the ssh user.
+// its reference files through the destination it was given, as the ssh
+// user.
 func TestApplySiteWebServerStepReachesTheSiteAsTheApplyDid(t *testing.T) {
 	cfg := fixture(t)
 	scope := webServerScope{site: "watch", ssh: "root@203.0.113.9"}
@@ -241,10 +221,5 @@ func TestApplySiteWebServerStepReachesTheSiteAsTheApplyDid(t *testing.T) {
 	record, ok := scope.recordHost(cfg, "watch").(apply.SSHTransport)
 	if !ok || record.Describe() != applied.Describe() || record.Sudo {
 		t.Errorf("record through %#v", record)
-	}
-	h := scope.serverHost(cfg, "watch")
-	plain, _ := h.Plain.(apply.SSHTransport)
-	if plain.Describe() != applied.Describe() || plain.Sudo || h.Sudo != nil {
-		t.Errorf("web server through %#v, %#v", h.Plain, h.Sudo)
 	}
 }

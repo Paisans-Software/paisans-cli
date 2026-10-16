@@ -14,11 +14,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
-	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 	"gopkg.in/yaml.v3"
 )
@@ -763,7 +763,7 @@ func runConfigRecover(args []string, stdin io.Reader, stdout io.Writer) error {
 	var from pathList
 	fs.Var(&from, "from", "a host of the deployment to recover from, user@host[:port] (repeatable)")
 	root := fs.String("root", "", "pin this version as the root, the version trust starts from")
-	id := fs.String("id", "", "the deployment's id, when a host's registry names more than one")
+	id := fs.String("id", "", "the deployment's id, when the hosts' logins belong to more than one")
 	execute := fs.Bool("execute", false, "write the recovered files and state")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -887,10 +887,11 @@ func recoverSites(l configstore.Local, g configstore.Gathered, id string) (map[s
 }
 
 // recoverID is the deployment a recovery is for: id when given, else the one
-// deployment the hosts' registries name. More than one is refused, since
-// which one to recover is the operator's to say, and so is an entry that is
-// not a deployment id: whoever has root on a host can write its registry,
-// and the id becomes part of every command a recovery runs on every site.
+// deployment each login's admission record names, the record under
+// /etc/paisans whose user is the login's own. More than one is refused,
+// since which one to recover is the operator's to say. A record whose
+// deployment is not an id never parses, so it names nothing here: the id
+// becomes part of every command a recovery runs on every site.
 func recoverID(hosts map[string]apply.Transport, id string) (string, error) {
 	if id != "" {
 		if !deployment.ValidID(id) {
@@ -900,18 +901,16 @@ func recoverID(hosts map[string]apply.Transport, id string) (string, error) {
 	}
 	ids := map[string]bool{}
 	var errs []error
+	var why []string
 	for _, name := range slices.Sorted(maps.Keys(hosts)) {
-		reg, err := registry.Read(hosts[name])
+		rec, err := admission.Mine(hosts[name])
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", name, err))
+			hint, _ := ui.Describe(err)
+			why = append(why, fmt.Sprintf("- %s: %s", name, hint))
 			continue
 		}
-		for _, found := range slices.Sorted(maps.Keys(reg.Deployments)) {
-			if !deployment.ValidID(found) {
-				return "", &ui.Problem{Hint: name + " lists a deployment id that is not one", Explain: fmt.Sprintf("Its registry names %q, which is not a deployment id, so nothing is read from any host with it. Whoever can write that registry may not be trusted; recover from another host with --from, or name the deployment with --id.", found)}
-			}
-			ids[found] = true
-		}
+		ids[rec.Deployment] = true
 	}
 	switch len(ids) {
 	case 1:
@@ -919,8 +918,8 @@ func recoverID(hosts map[string]apply.Transport, id string) (string, error) {
 			return found, nil
 		}
 	case 0:
-		return "", &ui.Problem{Hint: "no host named lists a deployment", Explain: "Name the deployment with --id, or another host with --from.", Cause: errors.Join(errs...)}
+		return "", &ui.Problem{Hint: "no host named holds an admission record for the login", Explain: strings.Join(append(why, "Name the deployment with --id, or another host with --from."), "\n"), Cause: errors.Join(errs...)}
 	}
 	list := slices.Sorted(maps.Keys(ids))
-	return "", &ui.Problem{Hint: "the hosts list more than one deployment", Explain: "Name the one to recover with --id: " + strings.Join(list, ", ") + "."}
+	return "", &ui.Problem{Hint: "the hosts' logins belong to more than one deployment", Explain: "Name the one to recover with --id: " + strings.Join(list, ", ") + "."}
 }

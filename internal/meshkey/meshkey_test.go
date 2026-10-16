@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/apply/meshfake"
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -139,5 +141,65 @@ func TestASudoRefusalIsTheOwnersProblem(t *testing.T) {
 	_, err = meshkey.Peers("home-a", refused, dep)
 	if !errors.As(err, &problem) || !strings.Contains(problem.Hint, "could not be run on home-a") {
 		t.Errorf("Peers = %v, want the helper's sudo refusal as the owner's problem", err)
+	}
+}
+
+// recordHost serves files, an admission record among them, and fails
+// everything with err when it is set.
+type recordHost struct {
+	host
+	files map[string]string
+	err   error
+}
+
+func (h recordHost) Run(command string) (string, error) {
+	if h.err != nil {
+		return "", h.err
+	}
+	return h.host.Run(command)
+}
+
+func (h recordHost) ReadFile(path string) (string, bool, error) {
+	if h.err != nil {
+		return "", false, h.err
+	}
+	c, ok := h.files[path]
+	return c, ok, nil
+}
+
+// A site is joining when its host holds no admission record of this
+// deployment, or refuses the deployment's login, and nothing else says it
+// ran here; one that holds a record is not, and one that does not answer
+// cannot be told.
+func TestJoiningReadsAdmissionRecords(t *testing.T) {
+	cfg, err := config.Load("../render/testdata/deployment.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := func(site string) map[string]string {
+		req, err := admission.Build(cfg, site)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := admission.EncodeRecord(admission.NewRecord(req, req.Grants, "", time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return map[string]string{"/etc/paisans/admitted.f2a9.json": string(b)}
+	}
+	transports := map[string]apply.Transport{
+		"home-a": recordHost{files: record("home-a")},
+		"home-b": recordHost{files: record("home-b")},
+		"vm":     recordHost{},
+		"watch":  recordHost{err: fmt.Errorf("ssh: %w", apply.ErrLoginRefused)},
+	}
+	got, err := meshkey.Joining(cfg, nil, "", transports)
+	if err != nil || strings.Join(got, ",") != "vm,watch" {
+		t.Fatalf("Joining = %v, %v", got, err)
+	}
+	transports["watch"] = recordHost{err: errors.New("exit status 1")}
+	var none *meshkey.NoAnswer
+	if _, err := meshkey.Joining(cfg, nil, "", transports); !errors.As(err, &none) || none.Site != "watch" {
+		t.Errorf("a host that failed otherwise: %v", err)
 	}
 }

@@ -8,7 +8,6 @@
 package hostadmit
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -19,6 +18,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/hostprep"
 )
 
 var probeImage = func() string {
@@ -257,13 +257,13 @@ func TestTheUserProbeReadsTheDataRootOfItsDaemonJSON(t *testing.T) {
 		{"/srv/data/paisans-f2a9", []string{"json-root /srv/data/paisans-f2a9", "containers unknown", "old-root held"}},
 		{"", []string{"daemon-json ", "old-root empty"}},
 	} {
-		data, err := json.MarshalIndent(daemonConfig{Pools: []addressPool{{"172.17.0.0/16", 24}}, DataRoot: c.dataRoot}, "", "  ")
+		data, err := hostprep.DaemonJSON("10.44.0.0/24", c.dataRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
 		dir := t.TempDir()
 		script := fmt.Sprintf(userStateProbe, "'/root/.local/share/docker'")
-		for name, content := range map[string]string{"daemon.json": string(data) + "\n", "user.sh": script} {
+		for name, content := range map[string]string{"daemon.json": data, "user.sh": script} {
 			if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 				t.Fatal(err)
 			}

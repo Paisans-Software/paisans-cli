@@ -3,13 +3,12 @@ package siteremove
 import (
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
-	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
@@ -24,8 +23,8 @@ import (
 // nothing.
 //
 // The host stage runs against a copy of the configuration in which the site
-// is declared with dest as its ssh destination and the roles its registry
-// entry on the host records. Those are what the host was deployed with, which
+// is declared with dest as its ssh destination and the roles its admission
+// record on the host names. Those are what the host was deployed with, which
 // is what cleaning it needs, for an undeclared site and for a host the site
 // has left alike.
 func BuildForced(cfg *config.Config, secrets *config.Secrets, site string, dest config.Destination, t apply.Transport, o Options) (*Plan, error) {
@@ -41,25 +40,24 @@ func BuildForced(cfg *config.Config, secrets *config.Secrets, site string, dest 
 	}
 	s := declared
 	s.SSH.User, s.SSH.Host, s.SSH.Port = dest.User, dest.Host, dest.Port
-	reg, err := registry.Read(t)
-	if err != nil {
-		return nil, fmt.Errorf("site remove %s: %w", site, err)
-	}
-	if e, ok := reg.Deployments[cfg.ID]; ok {
-		// The entry names the site the host was deployed as, which is the
+	rec, err := admission.Read(t, cfg.Deployment().Token())
+	switch {
+	case errors.Is(err, admission.ErrNotAdmitted):
+		// Nothing of this deployment's is admitted here: the host stage
+		// plans what the host still holds, and refuses the login if it
+		// cannot say whose host this is.
+	case err != nil:
+		return nil, fmt.Errorf("site remove %s: %s: %w. Nothing was changed", site, dest, err)
+	default:
+		// The record names the site the host was admitted as, which is the
 		// proof of whose host this is, whatever --ssh spelled.
-		if e.Site != site {
-			if _, live := cfg.Sites[e.Site]; live {
-				return nil, fmt.Errorf("site remove %s: %s is %s's host, which "+config.FileName+" still declares, by this deployment's entry in its registry. Nothing was changed. To clean it, name that site: paisans site remove %s --force", site, dest, e.Site, e.Site)
+		if rec.Site != site {
+			if _, live := cfg.Sites[rec.Site]; live {
+				return nil, fmt.Errorf("site remove %s: %s is %s's host, which "+config.FileName+" still declares, by this deployment's admission record on it. Nothing was changed. To clean it, name that site: paisans site remove %s --force", site, dest, rec.Site, rec.Site)
 			}
 		}
-		p.Current = isDeclared && e.Site == site
-		s.Roles = nil
-		for _, r := range strings.Split(e.Roles, ",") {
-			if r != "" {
-				s.Roles = append(s.Roles, config.Role(r))
-			}
-		}
+		p.Current = isDeclared && rec.Site == site
+		s.Roles = recordRoles(rec)
 	}
 	forcedCfg := *cfg
 	forcedCfg.Sites = map[string]config.Site{}
@@ -103,14 +101,29 @@ func answers(what string, dest config.Destination, t apply.Transport) error {
 	return nil
 }
 
+// recordRoles is the roles an admission record names, as a site holds them.
+func recordRoles(rec admission.Record) []config.Role {
+	var roles []config.Role
+	for _, r := range rec.Roles {
+		roles = append(roles, config.Role(r))
+	}
+	return roles
+}
+
 // BuildForcedByID plans `site remove --force --id`: the host at dest cleaned
-// of the deployment its registry names by ref, a full id or a token, with no
+// of the deployment ref names, a full id or a token, with no
 // paisans-stack.yaml and no secrets file (docs/specs/2026-10-10-remove-without-
 // config.md).
 //
+// The deployment, its site and its roles are the login's own admission
+// record's: the login is the deployment's user, who cannot read the
+// registry, which is root's. A login with no record of its own is planned
+// from --id's record, if the host holds one, so that the host stage refuses
+// it naming the user to log in as.
+//
 // The host stage reads the configuration for the id, the site's ssh user and
-// destination, and the site's roles, which the registry entry and dest hold.
-// So the plan runs against a configuration of just those, and is the forced
+// destination, and the site's roles, which the record and dest hold. So the
+// plan runs against a configuration of just those, and is the forced
 // removal's own host stage, without the Pocket ID note, which reads the
 // configuration's apps. A gateway's kept Caddy is reduced from the
 // Caddyfile on the host, as with a configuration. The remains say what was
@@ -123,53 +136,22 @@ func BuildForcedByID(dest config.Destination, t apply.Transport, ref string, o O
 	if err := answers(what, dest, t); err != nil {
 		return nil, err
 	}
-	reg, err := registry.Read(t)
+	rec, err := admission.Mine(t)
+	if errors.Is(err, admission.ErrNotMine) {
+		rec, err = byRef(dest, t, ref, err)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("site remove %s: %w", what, err)
 	}
-	id, e, err := registry.Find(reg, ref)
-	if err != nil {
-		return nil, fmt.Errorf("site remove %s: %s: %w. Nothing was changed", what, dest, err)
-	}
-	// Every name removed is made from the id, so the entry must be the one
-	// a claim by that id writes.
-	d := deployment.Deployment{ID: id}
-	var wrong []string
-	if !deployment.ValidID(id) {
-		wrong = append(wrong, "its key is not a deployment id")
-	}
-	if e.Token != d.Token() {
-		wrong = append(wrong, fmt.Sprintf("its token is %q, not %s", e.Token, d.Token()))
-	}
-	if e.Root != d.Root() {
-		wrong = append(wrong, fmt.Sprintf("its root is %q, not %s", e.Root, d.Root()))
-	}
-	if e.Site == "" {
-		wrong = append(wrong, "it names no site")
-	}
-	// Every name but the label is made from the token, so another entry
-	// holding it or the root would share them, whichever id --id spelled.
-	var sharing []string
-	for other, oe := range reg.Deployments {
-		if other != id && (oe.Token == d.Token() || oe.Root == d.Root() || strings.HasPrefix(other, d.Token())) {
-			sharing = append(sharing, fmt.Sprintf("entry %s holds its token or root too", other))
-		}
-	}
-	sort.Strings(sharing)
-	wrong = append(wrong, sharing...)
-	if len(wrong) > 0 {
-		return nil, fmt.Errorf("site remove %s: the entry %s in %s on %s is not one a claim writes: %s. Nothing was changed. Look at the registry by hand", what, id, registry.Path, dest, strings.Join(wrong, ", "))
+	d := deployment.Deployment{ID: rec.Deployment}
+	if ref != d.ID && ref != d.Token() {
+		return nil, fmt.Errorf("site remove --id %s: this login's admission record on %s is for deployment %s (%s). Log in as that deployment's user to clean it. Nothing was changed", ref, dest, d.ID, rec.Site)
 	}
 
-	s := config.Site{}
+	s := config.Site{Roles: recordRoles(rec)}
 	s.SSH.User, s.SSH.Host, s.SSH.Port = dest.User, dest.Host, dest.Port
-	for _, r := range strings.Split(e.Roles, ",") {
-		if r != "" {
-			s.Roles = append(s.Roles, config.Role(r))
-		}
-	}
-	cfg := &config.Config{ID: id, Community: config.Community{Domain: e.Domain}, Sites: map[string]config.Site{e.Site: s}}
-	p := &Plan{Site: e.Site, Options: o, transports: map[string]apply.Transport{e.Site: t}, forced: true, byID: true, dest: dest, cfg: cfg}
+	cfg := &config.Config{ID: d.ID, Sites: map[string]config.Site{rec.Site: s}}
+	p := &Plan{Site: rec.Site, Options: o, transports: map[string]apply.Transport{rec.Site: t}, forced: true, byID: true, dest: dest, cfg: cfg}
 	host, err := p.buildHost()
 	if err != nil {
 		return nil, err
@@ -178,14 +160,37 @@ func BuildForcedByID(dest config.Destination, t apply.Transport, ref string, o O
 	return p, nil
 }
 
+// byRef is the admission record ref names, for a login with none of its own
+// (notMine says so): the host stage then refuses the login, naming the user
+// the record names. With no record for ref either, nothing says whose host
+// this is.
+func byRef(dest config.Destination, t apply.Transport, ref string, notMine error) (admission.Record, error) {
+	token, evictID := ref, "<the deployment's id>"
+	if deployment.ValidID(ref) {
+		token, evictID = deployment.Deployment{ID: ref}.Token(), ref
+	}
+	rec, err := admission.Read(t, token)
+	switch {
+	case errors.Is(err, admission.ErrNotAdmitted):
+		return rec, fmt.Errorf("%s: %v, and none is for %s, so nothing says who the deployment's user is, and site remove cleans a host only as that user. Nothing was changed. If the deployment's user is still there, the host's owner removes it and everything root's with sudo paisans host evict --deployment %s --user <the deployment's user> --execute", dest, notMine, ref, evictID)
+	case err != nil:
+		return rec, fmt.Errorf("%s: %w. Nothing was changed", dest, err)
+	}
+	return rec, nil
+}
+
 // Confirmation is what --execute says before it asks for the site's name:
 // what is cleaned off dest, and what goes with it that the plan alone shows,
 // then, with --delete-data, the sentence saying the data is deleted, apart so
 // that it can be set off.
 func (p *Plan) Confirmation(dest config.Destination) (what, deletes string) {
-	out := fmt.Sprintf("This cleans deployment %s (%s), site %s, off %s, and nothing says whether it still runs.", p.cfg.ID, p.cfg.Community.Domain, p.Site, dest)
+	deployed := p.cfg.ID
+	if p.cfg.Community.Domain != "" {
+		deployed += " (" + p.cfg.Community.Domain + ")"
+	}
+	out := fmt.Sprintf("This cleans deployment %s, site %s, off %s, and nothing says whether it still runs.", deployed, p.Site, dest)
 	if len(p.CaddyKept) > 0 {
-		out += fmt.Sprintf(" Its Caddy is kept, reduced to the host owner's sites in %s: %s.", render.HostSitesDir, strings.Join(p.CaddyKept, ", "))
+		out += fmt.Sprintf(" Its Caddy is kept, reduced to the host owner's sites in %s: %s.", render.HostSitesDir(p.dep()), strings.Join(p.CaddyKept, ", "))
 	}
 	if p.DeleteData {
 		deletes = fmt.Sprintf("This permanently deletes this deployment's data on %s.", dest)

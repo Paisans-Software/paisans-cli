@@ -15,10 +15,9 @@ services:
     # ACCOUNT_LISTEN_ADDR's port, which apply's health gate reads.
     env_file:
       - .env
-    # The mesh address only. Docker's own iptables rules bypass a host
-    # firewall, so a port published on every interface of a host with a
-    # public address is reachable from the internet whatever ufw says. The
-    # gateway, over the mesh, is the only thing that should reach it.
+    # The mesh address only. The gateway, over the mesh, is the only thing
+    # that should reach it, and a port published on every interface would
+    # answer anything the host's firewall lets in.
     ports:
       - "10.44.0.1:8082:8082"
     # The code of conduct, rendered from apps.account.settings.code_of_conduct,

@@ -124,7 +124,7 @@ func entries(n int) string {
 
 // showReview reports one site's review as a line, marked pending when
 // anything needs approval, with each change below it at every verbosity:
-// keys first, then images, then the web server.
+// keys first, then images, then blueprints.
 func showReview(r ui.Reporter, title string, rev grant.Review, execute bool) {
 	endReview(r, r.Step(title), rev, execute)
 }

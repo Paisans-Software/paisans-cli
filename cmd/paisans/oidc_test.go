@@ -166,7 +166,7 @@ func (f *idpFake) RunInput(command, stdin string) (string, error) {
 func withIDPFake(t *testing.T) *idpFake {
 	t.Helper()
 	fake := newIDPFake()
-	withRegistryFake(t)
+	withAdmittedFake(t)
 	saved := oidcTransport
 	oidcTransport = func(tr apply.SSHTransport) pocketid.Transport {
 		fake.destination = tr.Describe()

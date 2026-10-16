@@ -3,6 +3,7 @@ package hostadmit
 import (
 	"fmt"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -27,6 +28,10 @@ type Flags struct {
 	BridgeNetfilter bool
 	// MeshLAN is --mesh-lan: let the mesh dial the host's own LAN.
 	MeshLAN bool
+	// EnableUFW is --enable-ufw: enable ufw when it is installed and not
+	// active, behind an allow for every port sshd listens on and a timer
+	// that turns it off again (planEnableUFW).
+	EnableUFW bool
 }
 
 // Grants are the grants the flags give.
@@ -42,6 +47,38 @@ type Input struct {
 	Digest  string
 	Flags   Flags
 	Now     time.Time
+	// enabledUFW is set by Execute when it reads the host again after this
+	// run's own `ufw --force enable` ran, so the plan it rebuilds records
+	// that admit enabled ufw although ufw is active by then.
+	enabledUFW bool
+}
+
+// Grant is a grant the site's roles need and the flags leave out, for the
+// owner to give: Flag names it, Hint and Explain say why it is needed and
+// what it gives, Unless ("; ...") names a way not to need it, and Give sets
+// it.
+type Grant struct {
+	Flag, Hint, Explain, Unless string
+	Give                        func(*Flags)
+}
+
+// Missing is every grant the request's roles need and in's flags do not
+// give, in the order Early names them.
+func Missing(in Input) []Grant {
+	needed, given := in.Request.Grants, in.Flags.Grants()
+	var out []Grant
+	if needed.Watchdog && !given.Watchdog {
+		out = append(out, Grant{Flag: "--watchdog", Hint: "this is a data site, and admitting it needs --watchdog",
+			Explain: "Its Patroni member needs the host's watchdog to fail over safely: without one, a member that has lost its lock can keep acting as leader. The watchdog reboots the whole machine when Patroni stops renewing it.",
+			Give:    func(f *Flags) { f.Watchdog = true }})
+	}
+	if needed.PublicPorts && !given.PublicPorts {
+		out = append(out, Grant{Flag: "--public-ports", Hint: "this site runs the toolkit's Caddy, and admitting it needs --public-ports",
+			Explain: "The gateway, or a monitor with web_server.managed_by: paisans, binds ports 80 and 443. --public-ports lowers net.ipv4.ip_unprivileged_port_start to 80 for the whole host, so every local user may then bind ports 80 to 1023, and opens 80 and 443 in the firewall.",
+			Unless:  "; a monitor behind your own web server (web_server.managed_by: external) needs neither",
+			Give:    func(f *Flags) { f.PublicPorts = true }})
+	}
+	return out
 }
 
 // Early is admit's first check, before anything reaches the host: a grant
@@ -52,13 +89,8 @@ func Early(in Input) error {
 	needed, given := in.Request.Grants, in.Flags.Grants()
 	type stop struct{ hint, explain string }
 	var stops []stop
-	if needed.Watchdog && !given.Watchdog {
-		stops = append(stops, stop{"this is a data site, and admitting it needs --watchdog",
-			"Its Patroni member needs the host's watchdog to fail over safely: without one, a member that has lost its lock can keep acting as leader. The watchdog reboots the whole machine when Patroni stops renewing it. Admit it with --watchdog, or do not admit it."})
-	}
-	if needed.PublicPorts && !given.PublicPorts {
-		stops = append(stops, stop{"this site runs the toolkit's Caddy, and admitting it needs --public-ports",
-			"The gateway, or a monitor with web_server.managed_by: paisans, binds ports 80 and 443. --public-ports lowers net.ipv4.ip_unprivileged_port_start to 80 for the whole host, so every local user may then bind ports 80 to 1023, and opens 80 and 443 in the firewall. Admit it with --public-ports, or do not admit it; a monitor behind your own web server (web_server.managed_by: external) needs neither."})
+	for _, m := range Missing(in) {
+		stops = append(stops, stop{m.Hint, m.Explain + " Admit it with " + m.Flag + ", or do not admit it" + m.Unless + "."})
 	}
 	if given.Watchdog && !needed.Watchdog {
 		stops = append(stops, stop{"--watchdog is not needed: this site holds no data role",
@@ -130,6 +162,12 @@ type Plan struct {
 	Present  []string
 	Foreign  []string
 	Warnings []hostprep.Warning
+	// EnablesUFW is a plan that enables ufw behind the fallback timer, which
+	// the command stops once a new SSH login gets through (DisarmUFW).
+	EnablesUFW bool
+	// list is the plan as ShowToRun drew it, whose rows Execute and
+	// RunSteps run; nil when it was not drawn to run.
+	list ui.List
 }
 
 // planner is one Build: the host, the input and what the probe found, and
@@ -411,6 +449,44 @@ func (p *Plan) Text() string {
 	return b.String()
 }
 
+// ShowToRun is Show for a plan about to run, with --execute: its steps,
+// what was present and another's under --verbose, and its warnings are a
+// list (see ui.NewList) whose rows Execute, or RunSteps, then runs. On a
+// terminal that holds it, each row is redrawn in place as it runs, so the
+// plan becomes the run's progress rather than a second list after it. A
+// plan with no step has nothing to run, and is shown as Show shows it.
+func (p *Plan) ShowToRun(r ui.Reporter) {
+	if len(p.Steps) == 0 {
+		p.Show(r)
+		return
+	}
+	if p.Site != "" {
+		r.Detail("site %s of deployment %s", ui.Visible(p.Site), p.Deployment)
+	}
+	r.Detail("host profile %s", p.Profile)
+	var rows []ui.ListRow
+	for _, s := range p.Steps {
+		row := ui.ListRow{Title: ui.Visible(s.Title), Mark: ui.Pending, Details: []string{ui.Visible(s.Describe)}}
+		if s.Provisional {
+			row.Result = "runs once the user exists"
+		}
+		rows = append(rows, row)
+	}
+	if r.Verbose() {
+		for _, s := range p.Present {
+			rows = append(rows, ui.ListRow{Title: ui.Visible(s), Mark: ui.OK})
+		}
+		for _, s := range p.Foreign {
+			rows = append(rows, ui.ListRow{Title: ui.Visible(s), Mark: ui.OK, Result: "not paisans"})
+		}
+	}
+	var warnings []ui.ListWarning
+	for _, w := range p.Warnings {
+		warnings = append(warnings, ui.ListWarning{Hint: ui.Visible(w.Hint), Detail: ui.Visible(w.Detail)})
+	}
+	p.list = ui.NewList(r, rows, warnings)
+}
+
 // Show reports the plan as host prepare's does: each step pending under
 // its title, its sentence as a detail, a provisional step noted as one,
 // then under --verbose what was present and another's, then the
@@ -454,28 +530,76 @@ func (p *Plan) Warn(r ui.Reporter) {
 // it rebuilt, provided that plan's steps are the ones the owner approved
 // from there on, less any now done (sameSteps): anything else means the
 // host changed while admit ran, and nothing more is done.
+//
+// Each step runs in its row of the plan when ShowToRun drew it, under its
+// title as rebuilt, its placeholders filled; a step found done is ended
+// there as done already.
 func Execute(t apply.Transport, in Input, approved *Plan, r ui.Reporter) error {
+	p := progressOf(approved, r)
+	defer p.close()
 	steps := approved.Steps
+	// rows is the row of approved's that each of steps runs in.
+	rows := make([]int, len(steps))
+	for i := range rows {
+		rows[i] = i
+	}
 	for i := 0; i < len(steps); i++ {
 		if steps[i].Provisional {
+			if slices.ContainsFunc(steps[:i], func(s Step) bool { return s.Command == enableUFW }) {
+				in.enabledUFW = true
+			}
 			rebuilt, err := build(t, in)
 			if err != nil {
 				return stoppedOnRebuild(approved.User, steps[:i], err)
 			}
-			done, err := sameSteps(steps[i:], rebuilt.plan.Steps, placeholders(rebuilt))
+			fill := placeholders(rebuilt)
+			done, at, err := matchSteps(steps[i:], rebuilt.plan.Steps, fill)
 			if err != nil {
 				return err
 			}
-			for _, s := range done {
-				r.Step(ui.Visible(s.Title)).End(ui.OK, "done already")
+			for _, j := range done {
+				p.start(rows[i+j], fill.Replace(steps[i+j].Title)).End(ui.OK, "done already")
 			}
-			steps = append(steps[:i:i], rebuilt.plan.Steps...)
+			next := rows[:i:i]
+			for _, j := range at {
+				next = append(next, rows[i+j])
+			}
+			steps, rows = append(steps[:i:i], rebuilt.plan.Steps...), next
 		}
-		if err := run(t, steps[i], r); err != nil {
+		if err := run(t, steps[i], p.start(rows[i], steps[i].Title, ui.Visible(steps[i].Describe))); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// progress is where a run's steps report: the rows of the plan ShowToRun
+// drew, or steps of their own on r.
+type progress struct {
+	r    ui.Reporter
+	list ui.List
+}
+
+func progressOf(p *Plan, r ui.Reporter) progress { return progress{r: r, list: p.list} }
+
+// start opens the step that runs in row, titled title, with details, the
+// step's sentence for a step that runs, and none for a step found done,
+// which did not run.
+func (p progress) start(row int, title string, details ...string) ui.Step {
+	if p.list != nil {
+		return p.list.Start(row, ui.Visible(title), details...)
+	}
+	st := p.r.Step(ui.Visible(title))
+	for _, d := range details {
+		st.Detail("%s", d)
+	}
+	return st
+}
+
+func (p progress) close() {
+	if p.list != nil {
+		p.list.Close()
+	}
 }
 
 // stoppedOnRebuild is a refusal from reading the host again once user
@@ -501,12 +625,25 @@ func stoppedOnRebuild(user string, ran []Step, err error) error {
 // fields that differs. It returns the approved steps found done, which
 // Execute reports as such.
 func sameSteps(approved, rebuilt []Step, fill *strings.Replacer) ([]Step, error) {
+	done, _, err := matchSteps(approved, rebuilt, fill)
+	if err != nil {
+		return nil, err
+	}
+	var out []Step
+	for _, j := range done {
+		out = append(out, approved[j])
+	}
+	return out, nil
+}
+
+// matchSteps is sameSteps by index: the approved steps found done, and for
+// each rebuilt step the approved one it is.
+func matchSteps(approved, rebuilt []Step, fill *strings.Replacer) (done, at []int, err error) {
 	for _, s := range rebuilt {
 		if s.Provisional {
-			return nil, fmt.Errorf("the host changed while admit ran: %q still needs the user, which was to exist by now. Nothing more was done. Run host admit again to see the plan", s.Title)
+			return nil, nil, fmt.Errorf("the host changed while admit ran: %q still needs the user, which was to exist by now. Nothing more was done. Run host admit again to see the plan", s.Title)
 		}
 	}
-	var done []Step
 	i := 0
 	for _, s := range rebuilt {
 		k := i
@@ -514,18 +651,24 @@ func sameSteps(approved, rebuilt []Step, fill *strings.Replacer) ([]Step, error)
 			k++
 		}
 		if k < len(approved) {
-			done = append(done, approved[i:k]...)
+			for ; i < k; i++ {
+				done = append(done, i)
+			}
+			at = append(at, k)
 			i = k + 1
 			continue
 		}
 		for _, a := range approved[i:] {
 			if fill.Replace(a.Title) == s.Title {
-				return nil, fmt.Errorf("the host changed while admit ran: step %q now has a different %s from the one approved. Nothing more was done. Run host admit again to see the plan", s.Title, differs(a, s, fill))
+				return nil, nil, fmt.Errorf("the host changed while admit ran: step %q now has a different %s from the one approved. Nothing more was done. Run host admit again to see the plan", s.Title, differs(a, s, fill))
 			}
 		}
-		return nil, fmt.Errorf("the host changed while admit ran: the steps left to run were\n%s\nand are now\n%s\nNothing more was done. Run host admit again to see the plan", titles(approved, fill), titles(rebuilt, nil))
+		return nil, nil, fmt.Errorf("the host changed while admit ran: the steps left to run were\n%s\nand are now\n%s\nNothing more was done. Run host admit again to see the plan", titles(approved, fill), titles(rebuilt, nil))
 	}
-	return append(done, approved[i:]...), nil
+	for ; i < len(approved); i++ {
+		done = append(done, i)
+	}
+	return done, at, nil
 }
 
 // titles lists steps' titles, each quoted on its own line, filled by fill
@@ -562,11 +705,10 @@ func differs(a, b Step, fill *strings.Replacer) string {
 	return ""
 }
 
-// run runs one step, as host prepare's Execute does. A failure names the
-// step and quotes what the host printed, through ui.Visible and redaction.
-func run(t apply.Transport, s Step, r ui.Reporter) error {
-	st := r.Step(ui.Visible(s.Title))
-	st.Detail("%s", ui.Visible(s.Describe))
+// run runs one step, as host prepare's Execute does, reporting to st. A
+// failure names the step and quotes what the host printed, through
+// ui.Visible and redaction.
+func run(t apply.Transport, s Step, st ui.Step) error {
 	if s.File != nil {
 		if err := t.WriteFile(s.File.Path, s.File.Content, s.File.Mode); err != nil {
 			err = fmt.Errorf("%s: %w", s.Title, shown(err))

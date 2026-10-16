@@ -1,6 +1,10 @@
 package deployment_test
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/deployment"
@@ -121,5 +125,43 @@ func TestFwMarkRefusesABadToken(t *testing.T) {
 		if got, err := d.FwMark(); err == nil {
 			t.Errorf("ID %q: FwMark() = %#x, want an error", id, got)
 		}
+	}
+}
+
+// The toolkit's own records on a host sit in the deployment's root, where
+// its user writes them without sudo.
+func TestStateDir(t *testing.T) {
+	d := deployment.Deployment{ID: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}
+	if d.StateDir() != "/srv/paisans/f2a9/.paisans" || d.StatePath("deployed.json") != "/srv/paisans/f2a9/.paisans/deployed.json" {
+		t.Errorf("StateDir %s, StatePath %s", d.StateDir(), d.StatePath("deployed.json"))
+	}
+	lock := d.StateLockCommand("the deployment record")
+	for _, want := range []string{"umask 077", "[ -L '/srv/paisans/f2a9/.paisans' ]", "install -d -m 700 '/srv/paisans/f2a9/.paisans'", "exec 9>>'/srv/paisans/f2a9/.paisans/lock'", "flock -w 60 9"} {
+		if !strings.Contains(lock, want) {
+			t.Errorf("the lock prelude has no %q:\n%s", want, lock)
+		}
+	}
+	if strings.Contains(lock, "/var/lib/paisans") || strings.Contains(lock, "sudo") {
+		t.Errorf("the prelude reaches root's directory: %s", lock)
+	}
+}
+
+// A label is quoted for the shell, so one with an apostrophe still runs, and
+// the refusal of a linked state directory names it as given. The prelude
+// runs in a real sh, its state directory swapped for a link in a temporary
+// directory.
+func TestStateLockCommandQuotesItsLabel(t *testing.T) {
+	d := deployment.Deployment{ID: fixtureID}
+	dir := t.TempDir()
+	link := filepath.Join(dir, "state")
+	if err := os.Symlink(dir, link); err != nil {
+		t.Fatal(err)
+	}
+	what := "the gateway move's records"
+	cmd := strings.ReplaceAll(d.StateLockCommand(what), d.StateDir(), link)
+	out, err := exec.Command("sh", "-c", cmd).CombinedOutput()
+	want := "paisans: the state directory is a link, so " + what + " is not written\n"
+	if err == nil || string(out) != want {
+		t.Errorf("got %v, %q, want exit 1 and %q", err, out, want)
 	}
 }

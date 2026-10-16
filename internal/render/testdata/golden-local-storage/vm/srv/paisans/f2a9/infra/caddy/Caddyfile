@@ -82,6 +82,22 @@
 	}
 }
 
+# The gateway answers as this deployment at a path only it serves, with its
+# token, and apply asks for it from outside after every gateway apply: a
+# server that took 80 or 443 after admission answers anything else. Every
+# host block imports it first, and holds nothing else at its top level that
+# could answer: Caddy orders redir, rewrite, basic_auth, forward_auth and
+# the like before handle, so a blueprint's routing always sits inside a
+# handle of its own. Among handle blocks Caddy matches the one with a single,
+# longest path first, so this one's one literal path wins over every other;
+# a second matcher here would lose that.
+(paisans_self) {
+	@paisans_self path /.well-known/paisans/f2a9
+	handle @paisans_self {
+		respond "f2a9" 200
+	}
+}
+
 # Named Caddy snippets, not a hostname's routing: imported here, at the top
 # level, so that a site block below can import a name this file defines. See
 # templates/oauth2-proxy/caddy.snippet.gates.tmpl for what it declares.
@@ -89,12 +105,16 @@ import /etc/caddy/snippets/gate-gates.caddy
 
 
 account.example.org {
+	import paisans_self
 	import upstream_unavailable
 	# Stripped here as on a gated hostname: nothing that reaches an app may
 	# name a user unless the gate put the name there, and an ungated app that
 	# trusted the header would otherwise trust whoever sent the request.
 	request_header -X-Auth-Request-*
-	import /etc/caddy/snippets/account.caddy
+
+	handle {
+		import /etc/caddy/snippets/account.caddy
+	}
 }
 
 
@@ -103,6 +123,7 @@ account.example.org {
 # signs in at the gate first. Everything else is the public app. See
 # docs/specs/2026-10-08-visibility-gate.md in the toolkit.
 blog.example.org {
+	import paisans_self
 	import upstream_unavailable
 	# Stripped here as on a gated hostname: nothing that reaches an app may
 	# name a user unless the gate put the name there.
@@ -166,52 +187,72 @@ blog.example.org {
 
 
 chat.example.org {
+	import paisans_self
 	import upstream_unavailable
 	# Stripped here as on a gated hostname: nothing that reaches an app may
 	# name a user unless the gate put the name there, and an ungated app that
 	# trusted the header would otherwise trust whoever sent the request.
 	request_header -X-Auth-Request-*
-	import /etc/caddy/snippets/chat.caddy
+
+	handle {
+		import /etc/caddy/snippets/chat.caddy
+	}
 }
 
 
 example.org {
+	import paisans_self
 	import upstream_unavailable
 	# Stripped here as on a gated hostname: nothing that reaches an app may
 	# name a user unless the gate put the name there, and an ungated app that
 	# trusted the header would otherwise trust whoever sent the request.
 	request_header -X-Auth-Request-*
-	import /etc/caddy/snippets/chat-wellknown.caddy
+
+	handle {
+		import /etc/caddy/snippets/chat-wellknown.caddy
+	}
 }
 
 
 gate.example.org {
+	import paisans_self
 	import upstream_unavailable
 	# Stripped here as on a gated hostname: nothing that reaches an app may
 	# name a user unless the gate put the name there, and an ungated app that
 	# trusted the header would otherwise trust whoever sent the request.
 	request_header -X-Auth-Request-*
-	import /etc/caddy/snippets/gate.caddy
+
+	handle {
+		import /etc/caddy/snippets/gate.caddy
+	}
 }
 
 
 id.example.org {
+	import paisans_self
 	import upstream_unavailable
 	# Stripped here as on a gated hostname: nothing that reaches an app may
 	# name a user unless the gate put the name there, and an ungated app that
 	# trusted the header would otherwise trust whoever sent the request.
 	request_header -X-Auth-Request-*
-	import /etc/caddy/snippets/auth.caddy
+
+	handle {
+		import /etc/caddy/snippets/auth.caddy
+	}
 }
 
 
 join.example.org {
+	import paisans_self
 	import upstream_unavailable
 	# Stripped here as on a gated hostname: nothing that reaches an app may
 	# name a user unless the gate put the name there, and an ungated app that
 	# trusted the header would otherwise trust whoever sent the request.
 	request_header -X-Auth-Request-*
-	import /etc/caddy/snippets/account-join.caddy
+
+	handle {
+		import /etc/caddy/snippets/account-join.caddy
+	}
 }
 
 
@@ -221,6 +262,7 @@ join.example.org {
 # are written, so this is the order they are matched in. See
 # docs/specs/2026-10-08-visibility-gate.md in the toolkit.
 talk.example.org {
+	import paisans_self
 	import upstream_unavailable
 	# Nothing upstream of the gate may name a user: these headers are only
 	# ever the gate's verified answer.
@@ -329,26 +371,34 @@ talk.example.org {
 
 
 web.example.org {
+	import paisans_self
 	import upstream_unavailable
 	# Stripped here as on a gated hostname: nothing that reaches an app may
 	# name a user unless the gate put the name there, and an ungated app that
 	# trusted the header would otherwise trust whoever sent the request.
 	request_header -X-Auth-Request-*
-	import /etc/caddy/snippets/web.caddy
+
+	handle {
+		import /etc/caddy/snippets/web.caddy
+	}
 }
 
 
 wiki.example.org {
+	import paisans_self
 	import upstream_unavailable
 	# Stripped here as on a gated hostname: nothing that reaches an app may
 	# name a user unless the gate put the name there, and an ungated app that
 	# trusted the header would otherwise trust whoever sent the request.
 	request_header -X-Auth-Request-*
-	import /etc/caddy/snippets/wiki.caddy
+
+	handle {
+		import /etc/caddy/snippets/wiki.caddy
+	}
 }
 
 # Site blocks the host's owner adds for things paisans does not run, Eg: a blog
-# beside the community. The host's /srv/caddy.d is mounted read only at
+# beside the community. The host's /srv/paisans/f2a9/caddy.d is mounted read only at
 # /etc/caddy.d, and paisans never writes, records or removes a file there.
 # Imported last and at the top level, so a block there is a whole site and can
 # import every snippet defined above. A glob that matches no file is a warning

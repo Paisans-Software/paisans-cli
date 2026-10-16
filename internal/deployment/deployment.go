@@ -176,6 +176,34 @@ func (d Deployment) EgressUnit() string { return d.Prefix() + "-egress.service" 
 // deployment on a host.
 func (d Deployment) Manifest() string { return d.Path(".paisans-manifest.json") }
 
+// StateDir is where the toolkit keeps its own records for this deployment on
+// a host: /srv/paisans/<token>/.paisans, the deployment user's, mode 700.
+// The deployed record, the grant record and a gateway move's marker live
+// here, so every command writes them as the deployment's user, without sudo.
+func (d Deployment) StateDir() string { return d.Path(".paisans") }
+
+// StatePath is a file in StateDir.
+func (d Deployment) StatePath(name string) string { return d.StateDir() + "/" + name }
+
+// StateLockCommand is the shell every writer of a record in StateDir runs
+// first: a umask that keeps what it creates the user's, StateDir created 700
+// when it is absent and refused when it is a link, and the deployment's one
+// lock held for the rest of the command, so two commands never interleave
+// their writes. what names the record, for the message when it is refused,
+// and is quoted, so any text is safe.
+func (d Deployment) StateLockCommand(what string) string {
+	dir, lock := shellQuote(d.StateDir()), shellQuote(d.StatePath("lock"))
+	return strings.Join([]string{
+		"umask 077",
+		fmt.Sprintf("if [ -L %s ]; then echo %s; exit 1; fi", dir, shellQuote("paisans: the state directory is a link, so "+what+" is not written")),
+		fmt.Sprintf("[ -d %[1]s ] || install -d -m 700 %[1]s", dir),
+		"exec 9>>" + lock,
+		"flock -w 60 9 || { echo 'paisans: another command holds the deployment lock'; exit 1; }",
+	}, "; ")
+}
+
+func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
 // LabelFilter is the `docker ... --filter` argument selecting this
 // deployment's objects by label.
 func (d Deployment) LabelFilter() string { return "label=" + Label + "=" + d.ID }

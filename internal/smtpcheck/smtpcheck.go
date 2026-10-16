@@ -58,7 +58,7 @@ const DefaultTimeout = time.Minute
 // Check is one set of mail settings, tried from one site.
 type Check struct {
 	// Site is where the connection is dialled from: a site running every
-	// app in Apps.
+	// app in Apps, or "" for the machine the command runs on.
 	Site string
 	// Apps send mail with these settings, in configuration order.
 	Apps []string
@@ -94,7 +94,15 @@ func (c Check) Title() string {
 	if c.SMTP.Username != "" {
 		who = ", as " + c.SMTP.Username
 	}
-	return fmt.Sprintf("%s, %s%s, from %s", c.Address(), c.Security(), who, c.Site)
+	return fmt.Sprintf("%s, %s%s, from %s", c.Address(), c.Security(), who, c.From())
+}
+
+// From names where the check is dialled from: its site, or this machine.
+func (c Check) From() string {
+	if c.Site == "" {
+		return "this machine"
+	}
+	return c.Site
 }
 
 // Whose is the apps, as a message names them, Eg: "talk's mail" or "talk and
@@ -184,10 +192,12 @@ func Logins(cfg *config.Config, secrets *config.Secrets, sites []string) []Check
 // before it is written or handed out: one for each set of settings an app
 // logs in with that password under, with its sender, since the test message
 // goes from each sender the provider must accept. Each is dialled from the
-// first site running one of its apps. secrets must hold the new value at
-// path, so that an app's own password, just set, is the one it uses.
+// machine the command runs on: whether the provider takes the password and
+// the sender does not depend on a site, and none need be deployed yet;
+// apply tries the login from each site, which is whether the site reaches
+// the server. secrets must hold the new value at path, so that an app's own
+// password, just set, is the one it uses.
 func ForPassword(cfg *config.Config, secrets *config.Secrets, path string) []Check {
-	placed := render.AppSites(cfg)
 	var out []Check
 	for _, app := range cfg.AppNames() {
 		if !blueprints.SendsMail(cfg.Apps[app].Blueprint) {
@@ -198,23 +208,13 @@ func ForPassword(cfg *config.Config, secrets *config.Secrets, path string) []Che
 			continue
 		}
 		c := Check{Apps: []string{app}, SMTP: s, PasswordPath: path}
-		if sites := placed[app]; len(sites) > 0 {
-			c.Site = sites[0]
-		}
 		if i := slices.IndexFunc(out, func(o Check) bool { return sameLogin(o, c) && o.SMTP.FromAddress == c.SMTP.FromAddress }); i >= 0 {
 			out[i].Apps = append(out[i].Apps, app)
-			if out[i].Site == "" {
-				out[i].Site = c.Site
-			}
 			continue
 		}
 		out = append(out, c)
 	}
 	for i := range out {
-		if out[i].Site == "" {
-			out[i].Skip = appList(out[i].Apps) + " runs on no site, so there is nowhere to try it from"
-			continue
-		}
 		out[i].Skip = skipReason(out[i], secrets)
 	}
 	return out
@@ -227,15 +227,20 @@ func sameLogin(a, b Check) bool {
 
 // skipReason is why c cannot be made, or "". A host that only the app's own
 // container resolves, a compose service name or a loopback address, is not
-// one the site's host reaches. A username with no password set has nothing to
-// log in with; init and apply already name that secret as owed.
+// one the site's host, or this machine, reaches. A username with no password
+// set has nothing to log in with; init and apply already name that secret
+// as owed.
 func skipReason(c Check, secrets *config.Secrets) string {
 	host := strings.TrimSuffix(c.SMTP.Host, ".")
+	where := "this machine"
+	if c.Site != "" {
+		where = "the host of " + c.Site
+	}
 	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() || strings.EqualFold(host, "localhost") {
-		return fmt.Sprintf("%s is the app's own container, which the host of %s does not reach", c.SMTP.Host, c.Site)
+		return fmt.Sprintf("%s is the app's own container, which %s does not reach", c.SMTP.Host, where)
 	}
 	if net.ParseIP(host) == nil && !strings.Contains(host, ".") {
-		return fmt.Sprintf("%s is a name only the app's own network resolves, which the host of %s does not reach", c.SMTP.Host, c.Site)
+		return fmt.Sprintf("%s is a name only the app's own network resolves, which %s does not reach", c.SMTP.Host, where)
 	}
 	if c.PasswordPath != "" {
 		if v, _ := secrets.Get(c.PasswordPath); v == "" {
@@ -269,7 +274,7 @@ func TestMail(cfg *config.Config, c Check, path, command string, to []string) Ma
 		verb = "send"
 	}
 	fmt.Fprintf(&b, "%s %s mail through %s with %s, as %s, from %s.\n", appList(c.Apps), verb, c.Address(), c.Security(), c.SMTP.Username, c.SMTP.FromAddress)
-	fmt.Fprintf(&b, "This message was sent from %s, so the server took the password and the sender.\n\n", c.Site)
+	fmt.Fprintf(&b, "This message was sent from %s, so the server took the password and the sender.\n\n", c.From())
 	b.WriteString("Nothing needs doing. The password is not in this message.\n")
 	return Mail{
 		To:      to,
@@ -318,14 +323,15 @@ func (e *Error) Reply() string {
 	return e.Stage + ": " + ui.Redact(strings.TrimSpace(text))
 }
 
-// Dialled reports whether the connection to the site was made: false when
-// the site itself was not reached, so nothing about the mail server was
-// learned.
-func (e *Error) Dialled() bool { return e.Stage != stageSite }
+// Dialled reports whether the connection to the mail server was made:
+// false when it could not be opened from where the check is dialled, a site
+// or this machine, so nothing about the mail server was learned.
+func (e *Error) Dialled() bool { return e.Stage != stageConnect }
 
-const stageSite = "reach the site"
+// stageConnect is opening the connection, from a site or from this machine.
+const stageConnect = "connect"
 
-// converse is the conversation: dial from the site, TLS for tls, EHLO,
+// converse is the conversation: dial from the site or this machine, TLS for tls, EHLO,
 // STARTTLS for starttls, AUTH when a username is declared, and the message
 // when there is one, then QUIT. Every step must succeed.
 func converse(e Env, c Check, password string, m *Mail) error {
@@ -334,7 +340,7 @@ func converse(e Env, c Check, password string, m *Mail) error {
 	}
 	fail := func(stage string, err error) error { return &Error{Check: c, Stage: stage, Err: err} }
 	if e.Dial == nil {
-		return fail(stageSite, errors.New("no way to reach the site"))
+		return fail(stageConnect, errors.New("no way to dial the mail server"))
 	}
 	timeout := e.Timeout
 	if timeout == 0 {
@@ -346,7 +352,7 @@ func converse(e Env, c Check, password string, m *Mail) error {
 	}
 	conn, err := e.Dial(c.Site, c.Address())
 	if err != nil {
-		return fail(stageSite, err)
+		return fail(stageConnect, err)
 	}
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(timeout))
@@ -362,7 +368,7 @@ func converse(e Env, c Check, password string, m *Mail) error {
 	}
 	client, err := smtp.NewClient(conn, host)
 	if err != nil {
-		return fail("connect", explainConnect(err))
+		return fail("greeting", explainConnect(err))
 	}
 	defer client.Close()
 	if err := client.Hello("localhost"); err != nil {
@@ -555,17 +561,21 @@ func Recipients(cfg *config.Config) ([]string, error) {
 	return out, nil
 }
 
-// Tried is the outcome of trying a password: the checks made and those
-// skipped, with why.
+// Tried is the outcome of trying a password: the checks made, those
+// skipped, with why, and those whose server could not be reached from where
+// they were dialled, with the error.
 type Tried struct {
 	Made, Skipped []Check
+	Unreached     []*Error
 }
 
 // TryPassword tries value as the password at path, as `secrets set` and
 // `secrets rotate` do before it is written or handed out: every check
 // ForPassword finds is made, logging in and, with send, sending the test
 // message to the operators from each sender. secrets is copied, not changed.
-// The first failure is returned.
+// A check whose server cannot be reached from where it is dialled learned
+// nothing, so it is listed in Unreached and the rest are still made. The
+// first other failure is returned.
 func TryPassword(e Env, cfg *config.Config, secrets *config.Secrets, path, value, command string, send bool) (Tried, error) {
 	ui.Secret(value)
 	probe := withValue(secrets, path, value)
@@ -586,6 +596,11 @@ func TryPassword(e Env, cfg *config.Config, secrets *config.Secrets, path, value
 			err = Send(e, c, value, TestMail(cfg, c, path, command, to))
 		} else {
 			err = Login(e, c, value)
+		}
+		var failed *Error
+		if errors.As(err, &failed) && !failed.Dialled() {
+			tried.Unreached = append(tried.Unreached, failed)
+			continue
 		}
 		if err != nil {
 			return tried, err

@@ -460,6 +460,17 @@ var blankLineOnTerminal = func() {
 // never read the second as an answer.
 var ErrUnreachable = errors.New("ssh could not connect to the host")
 
+// ErrLoginRefused is a host that answered and would not let the login in:
+// no key it accepts, or no such user, which for the deployment's own user is
+// a host that has not admitted it.
+var ErrLoginRefused = errors.New("the host refused the login")
+
+// NoLogin reports whether err is a host that could not be logged into at
+// all, refused or not answering, rather than a command that failed there.
+func NoLogin(err error) bool {
+	return errors.Is(err, ErrLoginRefused) || errors.Is(err, ErrUnreachable)
+}
+
 // UnreachableError is ErrUnreachable for one site, so a command that reads
 // several can say which one did not answer and refer the operator to
 // doctor for it. Site is the transport's, empty when it reaches no site.
@@ -558,13 +569,13 @@ func (t SSHTransport) authProblem(err error, out string) error {
 		return &ui.Problem{
 			Hint:    fmt.Sprintf("site %s is not admitted on %s", t.Site, host),
 			Explain: fmt.Sprintf("The site names no ssh.user, so paisans logs in as the deployment's own user, %s, and %s refused it. That user exists only once the host's owner has admitted the deployment. Send them a request:\n\n    paisans host request --site %s > %s.admit\n\nIf they have admitted it, check that your key is loaded in your ssh agent (ssh-add -l) and is under an operator the site's ssh.keys names. If the deployment logs in as another user on that host, name it in sites.%s.ssh.user.", user, host, t.Site, t.Site, t.Site),
-			Cause:   err,
+			Cause:   fmt.Errorf("%w: %w", ErrLoginRefused, err),
 		}
 	case strings.Contains(last, "Permission denied (") || strings.Contains(last, "Too many authentication failures"):
 		return &ui.Problem{
 			Hint:    t.Describe() + " did not accept your ssh key",
 			Explain: "Check that your key is loaded in your ssh agent (ssh-add -l), that its public half is under an admin the site's ssh.keys names, and that the host's authorized_keys for that user holds it.",
-			Cause:   err,
+			Cause:   fmt.Errorf("%w: %w", ErrLoginRefused, err),
 		}
 	}
 	return nil

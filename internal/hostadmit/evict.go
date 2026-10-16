@@ -472,7 +472,7 @@ var moduleName = regexp.MustCompile(`^[a-z0-9_]+$`)
 // allow by its comment. The default policy and whether ufw is on are never
 // changed.
 func (e *evictor) firewall() error {
-	s, err := e.profile.Firewall(e.t, e.d, nil, false, "host admit")
+	s, err := e.profile.Firewall(e.t, e.d, nil)
 	if err != nil {
 		return err
 	}
@@ -486,6 +486,13 @@ func (e *evictor) firewall() error {
 			e.warn("firewall: the deployment's SSH allow "+w.KeptSSH+" is kept",
 				"It may be the rule your own login arrives by. Delete it yourself once nothing else needs it.")
 		}
+	}
+	// Enabling ufw was the owner's choice, made at admit; undoing it is
+	// theirs too, so evict leaves ufw on and the paisans: ssh allows, which
+	// carry no deployment's tag, in place.
+	if e.rec != nil && e.rec.UFWEnabled {
+		e.warn("firewall: ufw stays as it is, with its "+sshAllowTag+" allows",
+			"Host admit enabled ufw when you admitted this deployment, and evict never disables it. Disable it yourself with sudo ufw disable if you want it off.")
 	}
 	return nil
 }
@@ -743,9 +750,13 @@ func (e *evictor) registry() error {
 // RunSteps runs plan's steps in order and stops at the first failure,
 // naming it. Evict's steps never need a rebuild; each runs through the
 // same run admit's Execute uses.
+//
+// Each step runs in its row of the plan when ShowToRun drew it.
 func RunSteps(t apply.Transport, plan *Plan, r ui.Reporter) error {
-	for _, s := range plan.Steps {
-		if err := run(t, s, r); err != nil {
+	p := progressOf(plan, r)
+	defer p.close()
+	for i, s := range plan.Steps {
+		if err := run(t, s, p.start(i, s.Title, ui.Visible(s.Describe))); err != nil {
 			return err
 		}
 	}

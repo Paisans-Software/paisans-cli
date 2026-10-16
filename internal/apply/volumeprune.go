@@ -3,6 +3,7 @@ package apply
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -28,7 +29,8 @@ type VolumePrune struct {
 // DanglingVolume is one volume no container uses.
 type DanglingVolume struct {
 	Name string
-	// Size is what `du -sb` reports for its mountpoint, in bytes.
+	// Size is what Docker's `system df -v` reports for it, in bytes, -1 when
+	// it reported none it could read.
 	Size int64
 	// Entries are its top level names, at most ten, so an operator can see
 	// what it held (Mbin's leaked volumes hold cache/ and log/).
@@ -54,12 +56,15 @@ func (p *VolumePrune) Removals() []DanglingVolume {
 // and an operator should read it before agreeing to it.
 const PruneHeader = "A host may carry several deployments and things that are no deployment's at all, so a volume is removed only when it carries this deployment's label, community.paisans.deployment with this deployment's id. Every other volume is kept: one labelled with another id is that deployment's, and one with no such label, anonymous ones included, cannot be attributed to any deployment. apply removes the anonymous volumes its own recreates abandon, read from its own containers before they are replaced."
 
-// danglingProbe lists every dangling volume with its size, labels and top
-// level entries, one tab separated line each, and ends with a marker so a
-// cut short answer is not read as a short list. Volume names cannot contain
-// whitespace (Docker allows [a-zA-Z0-9][a-zA-Z0-9_.-]), so the word split
-// over the list is safe.
-const danglingProbe = `set -e; vs=$(docker volume ls -qf dangling=true); for v in $vs; do m=$(docker volume inspect --format '{{.Mountpoint}}' "$v") || continue; l=$(docker volume inspect --format '{{json .Labels}}' "$v") || continue; s=$(du -sb "$m" 2>/dev/null | cut -f1); e=$(ls -A "$m" 2>/dev/null | head -n 10 | paste -sd ' ' -); printf 'volume\t%s\t%s\t%s\t%s\n' "$v" "${s:-0}" "$l" "$e"; done; echo end`
+// danglingProbe prints Docker's size for every volume, then each dangling
+// volume's labels and top level entries, one tab separated line each, and
+// ends with a marker so a cut short answer is not read as a short list. The
+// sizes come from Docker, which reads them as the daemon: the deployment's
+// user cannot read a directory a container's user owns, so du on a volume's
+// mountpoint can be denied. ls of the top level is allowed to fail the same
+// way, and then lists nothing. Volume names cannot contain whitespace (Docker
+// allows [a-zA-Z0-9][a-zA-Z0-9_.-]), so the word split over the list is safe.
+const danglingProbe = `set -e; docker system df -v --format '{{json .Volumes}}'; echo volumes; vs=$(docker volume ls -qf dangling=true); for v in $vs; do m=$(docker volume inspect --format '{{.Mountpoint}}' "$v") || continue; l=$(docker volume inspect --format '{{json .Labels}}' "$v") || continue; e=$(ls -A "$m" 2>/dev/null | head -n 10 | paste -sd ' ' -); printf 'volume\t%s\t%s\t%s\n' "$v" "$l" "$e"; done; echo end`
 
 // composeProject is the label Compose puts on every volume it creates.
 const composeProject = "com.docker.compose.project"
@@ -81,20 +86,34 @@ func BuildVolumePrune(d deployment.Deployment, site string, t Transport) (*Volum
 	if !strings.HasSuffix(strings.TrimSpace(out), "end") {
 		return nil, fmt.Errorf("%s: listing dangling volumes: the answer was cut short:\n%s", site, out)
 	}
+	head, rest, _ := strings.Cut(out, "\nvolumes\n")
+	var listed []struct{ Name, Size string }
+	if err := json.Unmarshal([]byte(strings.TrimSpace(head)), &listed); err != nil {
+		return nil, fmt.Errorf("%s: reading Docker's volume sizes: %w", site, err)
+	}
+	sizes := map[string]int64{}
+	for _, v := range listed {
+		if n, ok := ParseDockerSize(v.Size); ok {
+			sizes[v.Name] = n
+		}
+	}
 	p := &VolumePrune{Site: site, Transport: t.Describe()}
-	for _, line := range strings.Split(out, "\n") {
+	for _, line := range strings.Split(rest, "\n") {
 		fields := strings.Split(strings.TrimRight(line, "\r"), "\t")
-		if len(fields) < 4 || fields[0] != "volume" {
+		if len(fields) < 3 || fields[0] != "volume" {
 			continue
 		}
 		v := DanglingVolume{Name: fields[1]}
-		v.Size, _ = strconv.ParseInt(fields[2], 10, 64)
-		var labels map[string]string
-		if err := json.Unmarshal([]byte(fields[3]), &labels); err != nil {
-			return nil, fmt.Errorf("%s: volume %s has unreadable labels %q", site, v.Name, fields[3])
+		v.Size = -1
+		if n, ok := sizes[v.Name]; ok {
+			v.Size = n
 		}
-		if len(fields) > 4 && strings.TrimSpace(fields[4]) != "" {
-			v.Entries = strings.Fields(fields[4])
+		var labels map[string]string
+		if err := json.Unmarshal([]byte(fields[2]), &labels); err != nil {
+			return nil, fmt.Errorf("%s: volume %s has unreadable labels %q", site, v.Name, fields[2])
+		}
+		if len(fields) > 3 && strings.TrimSpace(fields[3]) != "" {
+			v.Entries = strings.Fields(fields[3])
 		}
 		v.Remove, v.Reason = pruneVerdict(d, labels)
 		p.Volumes = append(p.Volumes, v)
@@ -134,4 +153,24 @@ func ExecuteVolumePrune(p *VolumePrune, t Transport) error {
 		return fmt.Errorf("%s: %d volume(s) were not removed:\n  %s", p.Site, len(failed), strings.Join(failed, "\n  "))
 	}
 	return nil
+}
+
+// dockerSize is a size as Docker prints one (go-units HumanSize): a decimal
+// number and a unit in powers of 1000.
+var dockerSize = regexp.MustCompile(`^([0-9]+(?:\.[0-9]+)?)(B|kB|KB|MB|GB|TB|PB)$`)
+
+var dockerUnits = map[string]float64{"B": 1, "kB": 1e3, "KB": 1e3, "MB": 1e6, "GB": 1e9, "TB": 1e12, "PB": 1e15}
+
+// ParseDockerSize reads a size Docker printed, Eg: 48.38MB. Anything else,
+// N/A included, is not a size.
+func ParseDockerSize(s string) (int64, bool) {
+	m := dockerSize.FindStringSubmatch(strings.TrimSpace(s))
+	if m == nil {
+		return 0, false
+	}
+	n, err := strconv.ParseFloat(m[1], 64)
+	if err != nil {
+		return 0, false
+	}
+	return int64(math.Round(n * dockerUnits[m[2]])), true
 }

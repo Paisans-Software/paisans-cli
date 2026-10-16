@@ -86,9 +86,9 @@ func runOIDCClientCreate(args []string) error {
 		return err
 	}
 	// The calls need no root, and only a run that will change something
-	// claims the host in its registry.
+	// checks the host's admission.
 	if *execute {
-		if err := claimHosts(r, cfg, true, map[string]registry.Runner{where: registryHost(where, cfg.Sites[where], *destination)}); err != nil {
+		if _, err := admittedHosts(r, cfg, map[string]registry.Runner{where: registryHost(where, cfg.Sites[where], *destination)}); err != nil {
 			return err
 		}
 	}

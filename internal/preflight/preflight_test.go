@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
-	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -63,7 +64,7 @@ const cluster = `{"members":[{"name":"home-a","role":"leader","state":"running"}
 func healthy(name string) *fakeHost {
 	return &fakeHost{
 		name:  name,
-		files: map[string]string{"/etc/os-release": ubuntu},
+		files: map[string]string{"/etc/os-release": ubuntu, admittedPath: admittedRecord(name)},
 		rules: []rule{
 			{match: "echo paisans-answers", out: "paisans-answers\n"},
 			{match: "timedatectl", out: "yes\n"},
@@ -73,6 +74,7 @@ func healthy(name string) *fakeHost {
 			{match: "ss -Hltnu", out: "tcp LISTEN 0 4096 0.0.0.0:22 0.0.0.0:*\nudp UNCONN 0 0 127.0.0.53%lo:53 0.0.0.0:*\n"},
 			{match: "ip -j route", out: `[{"dst":"default","dev":"eth0"},{"dst":"203.0.113.0/24","dev":"eth0"},{"dst":"172.17.0.0/16","dev":"docker0"}]`},
 			{match: "ip -j addr", out: `[{"ifname":"eth0","addr_info":[{"family":"inet","local":"203.0.113.20","prefixlen":24}]}]`},
+			{match: ".config/docker/daemon.json", out: "absent\n"},
 			{match: "docker network", out: `[{"Name":"bridge","IPAM":{"Config":[{"Subnet":"172.17.0.0/16"}]}}]`},
 			{match: "/cluster", out: cluster},
 			{match: "pg_database_size", out: fmt.Sprintf("%d\n", int64(1)<<30)},
@@ -81,19 +83,45 @@ func healthy(name string) *fakeHost {
 			{match: "docker info", out: "/var/lib/docker\n"},
 			{match: "findmnt", out: "ext4 /dev/sda1\n"},
 			// The host check's inventory: Docker and nothing run on it.
-			{match: "id -u", out: "0\n"},
+			{match: `echo "uid`, out: "uid 1001\nsubuid paisans-f2a9:165536:65536\n"},
 			{match: "docker version", out: "27.3.1\n"},
 			{match: "dpkg-query", out: "docker-ce install ok installed\n"},
 			{match: "docker inspect", out: ""},
 			{match: "docker volume inspect", out: ""},
 			{match: "docker network inspect", out: ""},
 			{match: "ip -o link", out: "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536\n2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500\n"},
-			{match: "ufw status verbose", out: "Status: active\nDefault: deny (incoming), allow (outgoing), disabled (routed)\n"},
-			{match: "is-active firewalld", out: "inactive\n"},
-			{match: "/srv/caddy.d/", out: ""},
-			{match: "/proc/", out: ""},
+			{match: "/srv/paisans/f2a9/caddy.d'", out: ""},
 		},
 	}
+}
+
+// admittedPath is where the fixture deployment's admission record is.
+var admittedPath, _ = admission.Path(mustFixture().Deployment().Token())
+
+// admittedRecord is the record host admit writes for site, with every grant
+// its roles need.
+func admittedRecord(site string) string {
+	cfg := mustFixture()
+	if _, ok := cfg.Sites[site]; !ok {
+		return ""
+	}
+	req, err := admission.Build(cfg, site)
+	if err != nil {
+		panic(err)
+	}
+	b, err := admission.EncodeRecord(admission.NewRecord(req, req.Grants, "", time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)))
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
+func mustFixture() *config.Config {
+	cfg, err := config.Load("testdata/site-add.yaml")
+	if err != nil {
+		panic(err)
+	}
+	return cfg
 }
 
 func fixture(t *testing.T) *config.Config {
@@ -129,7 +157,7 @@ func run(t *testing.T, cfg *config.Config, h map[string]*fakeHost) Report {
 // prepared stubs host prepare's plan, which hostprep's own tests cover.
 func prepared(t *testing.T, steps ...string) {
 	old := buildHostPrep
-	buildHostPrep = func(site string, _ *config.Config, _ hostprep.Transport, _ ...hostprep.Option) (*hostprep.Plan, error) {
+	buildHostPrep = func(site string, _ *config.Config, _ hostprep.Transport, _ admission.Record) (*hostprep.Plan, error) {
 		plan := &hostprep.Plan{Site: site, Profile: "ubuntu 24.04"}
 		for _, s := range steps {
 			plan.Steps = append(plan.Steps, hostprep.Step{Describe: s})
@@ -484,7 +512,7 @@ func TestDataSitesMayRunDifferentOSReleases(t *testing.T) {
 func TestAGatewaysWebPortsAreChecked(t *testing.T) {
 	prepared(t)
 	h := hosts()
-	h["vm"].override(rule{match: "ss -Hltnu", out: "tcp LISTEN 0 511 0.0.0.0:80 0.0.0.0:* users:((\"nginx\",pid=900,fd=6))\n"})
+	h["vm"].override(rule{match: "ss -Hltnu", out: "tcp LISTEN 0 511 0.0.0.0:80 0.0.0.0:* uid:1002 ino:1 sk:1 <->\n"})
 	r, err := Run(fixture(t), "vm", transportsOf(h))
 	if err != nil {
 		t.Fatal(err)
@@ -492,52 +520,53 @@ func TestAGatewaysWebPortsAreChecked(t *testing.T) {
 	if got := refusedDetail(t, r, "vm", "ports"); !strings.Contains(got, "80/tcp (Caddy)") {
 		t.Errorf("ports detail %q", got)
 	}
-	if got := refusedDetail(t, r, "vm", "host"); !strings.Contains(got, "process nginx (pid 900)") {
+	if got := refusedDetail(t, r, "vm", "host"); !strings.Contains(got, "a listener of another user's (uid 1002)") {
 		t.Errorf("host detail %q", got)
 	}
 }
 
-// A shared host is prepared without the firewall's defaults, so preflight
-// asks host prepare for that plan rather than one it would never run.
-func TestASharedHostIsPreparedAsShared(t *testing.T) {
-	var shared bool
+// host prepare's plan is checked against the site's admission record, so
+// preflight builds it with the record it read, and does not build it for a
+// host that has none: the admission check has refused that one already.
+func TestHostPrepareIsPlannedWithTheAdmissionRecord(t *testing.T) {
+	var got []string
 	old := buildHostPrep
-	buildHostPrep = func(site string, _ *config.Config, _ hostprep.Transport, opts ...hostprep.Option) (*hostprep.Plan, error) {
-		shared = len(opts) > 0
+	buildHostPrep = func(site string, _ *config.Config, _ hostprep.Transport, rec admission.Record) (*hostprep.Plan, error) {
+		got = append(got, rec.Site)
 		return &hostprep.Plan{Site: site, Profile: "ubuntu 24.04"}, nil
 	}
 	t.Cleanup(func() { buildHostPrep = old })
-	h := hosts()
-	h["home-b"].override(rule{match: "docker inspect", out: `{"id":"` + strings.Repeat("d", 64) + `","name":"/shop-app-1","pid":0,"labels":{"com.docker.compose.project":"shop"},"ports":{}}` + "\n"})
-	r := run(t, fixture(t), h)
-	if !shared {
-		t.Error("host prepare was planned as for a dedicated host")
+	run(t, fixture(t), hosts())
+	if len(got) != 1 || got[0] != "home-b" {
+		t.Errorf("host prepare planned with records for %v", got)
 	}
-	if c := find(r, "home-b", "host"); len(c) != 1 || c[0].Refused || !strings.Contains(c[0].Detail, "shared") {
-		t.Errorf("host check %+v", c)
+	got = nil
+	h := hosts()
+	cfg := fixture(t)
+	path, _ := admission.Path(cfg.Deployment().Token())
+	delete(h["home-b"].files, path)
+	r := run(t, cfg, h)
+	if len(got) != 0 || len(find(r, "home-b", "prepared")) != 0 {
+		t.Errorf("host prepare planned for an unadmitted host: %v", got)
 	}
 }
 
-// A host another deployment with the same token has claimed is refused, by
-// reading its registry; preflight never claims.
-func TestARegistryConflictIsRefused(t *testing.T) {
+// A host that has not admitted the deployment is refused, with the line
+// the operator sends its owner; preflight only reads the record.
+func TestAnUnadmittedHostIsRefused(t *testing.T) {
 	prepared(t)
 	h := hosts()
-	if h["home-b"].files == nil {
-		h["home-b"].files = map[string]string{}
-	}
-	h["home-b"].files[registry.Path] = `{"version":1,"deployments":{
-"f2a91111-2222-4333-8444-555566667777":{"token":"f2a9","root":"/srv/paisans/f2a9","domain":"example.net","site":"vm","claimed_at":"2026-10-01T00:00:00Z"}
-}}
-`
-	r := run(t, fixture(t), h)
-	got := refusedDetail(t, r, "home-b", "registry")
-	if !strings.Contains(got, "f2a91111-2222-4333-8444-555566667777") || !strings.Contains(got, "example.net") {
-		t.Errorf("the refusal does not name the other deployment: %q", got)
+	cfg := fixture(t)
+	path, _ := admission.Path(cfg.Deployment().Token())
+	delete(h["home-b"].files, path)
+	r := run(t, cfg, h)
+	got := refusedDetail(t, r, "home-b", "admission")
+	if !strings.Contains(got, "paisans host request --site home-b") {
+		t.Errorf("the refusal does not name the request: %q", got)
 	}
 	for _, c := range h["home-b"].ran {
-		if strings.Contains(c, "flock") {
-			t.Errorf("preflight claimed the host: %s", c)
+		if strings.Contains(c, "flock") || strings.Contains(c, "registry") {
+			t.Errorf("preflight reached the registry: %s", c)
 		}
 	}
 }

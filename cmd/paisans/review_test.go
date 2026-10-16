@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/grant"
 	"github.com/paisans-software/paisans-cli/internal/registry"
@@ -44,7 +45,7 @@ var grantPayload = regexp.MustCompile(`printf %s '([A-Za-z0-9+/=]+)' \| base64 -
 func (m *memGrant) Run(command string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if !strings.Contains(command, "/var/lib/paisans/granted.") || !strings.Contains(command, "flock -w 60 9") {
+	if !strings.Contains(command, "/srv/paisans/f2a9/.paisans/granted.json") || !strings.Contains(command, "flock -w 60 9") {
 		return "", fmt.Errorf("not a grant write under the lock: %s", command)
 	}
 	data, err := base64.StdEncoding.DecodeString(grantPayload.FindStringSubmatch(command)[1])
@@ -221,10 +222,10 @@ func logged(t *testing.T, log string) string {
 	return string(data)
 }
 
-// claimed reports whether a command in the log claims the host, which is
-// the first change any command that writes makes.
-func claimed(log string) bool {
-	return strings.Contains(log, registry.Path) && strings.Contains(log, "flock -w")
+// checked reports whether a command in the log reads the host's admission
+// record, which every command that writes does before its first change.
+func checked(log string) bool {
+	return strings.Contains(log, admission.Dir+"/admitted.")
 }
 
 func prepare(t *testing.T, stdin io.Reader, stdout io.Writer, args ...string) (*ui.Recorder, error) {
@@ -241,7 +242,7 @@ func prepare(t *testing.T, stdin io.Reader, stdout io.Writer, args ...string) (*
 }
 
 // host prepare with something to approve and no terminal is refused before
-// the host is claimed or changed; the dry run shows the review and asks
+// the host is checked or changed; the dry run shows the review and asks
 // nothing.
 func TestHostPrepareRefusesWithoutATerminal(t *testing.T) {
 	log := loggingSSH(t, "")
@@ -250,8 +251,8 @@ func TestHostPrepareRefusesWithoutATerminal(t *testing.T) {
 	if err == nil || !strings.Contains(problemText(err), "stdin is not a terminal") {
 		t.Fatalf("got %v\n%s", err, rec.Lines())
 	}
-	if claimed(logged(t, log)) {
-		t.Errorf("the host was claimed before the review was approved:\n%s", logged(t, log))
+	if checked(logged(t, log)) {
+		t.Errorf("the host was checked before the review was approved:\n%s", logged(t, log))
 	}
 	if !rec.Has("pending", "review what paisans-stack.yaml grants") || !strings.Contains(rec.Lines(), "explain: + key SHA256:") {
 		t.Errorf("the review is not shown:\n%s", rec.Lines())
@@ -271,7 +272,7 @@ func TestHostPrepareWithNothingToApproveRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, rec.Lines())
 	}
-	if !claimed(logged(t, log)) || !rec.Has("result", "Prepared home-a.") {
+	if !checked(logged(t, log)) || !rec.Has("result", "Prepared home-a.") {
 		t.Errorf("not prepared:\n%s", rec.Lines())
 	}
 	if hosts["home-a"].writes != 0 {
@@ -356,16 +357,17 @@ func TestHostPrepareNotApprovedChangesNothing(t *testing.T) {
 			log := loggingSSH(t, "")
 			hosts := fakeGrants(t, func(string) *grant.Record { return nil })
 			_, err := prepare(t, answering(t, answer), io.Discard, "--execute")
-			if err == nil || claimed(logged(t, log)) || hosts["home-a"].writes != 0 {
-				t.Errorf("err %v, claimed %v, writes %d", err, claimed(logged(t, log)), hosts["home-a"].writes)
+			if err == nil || checked(logged(t, log)) || hosts["home-a"].writes != 0 {
+				t.Errorf("err %v, checked %v, writes %d", err, checked(logged(t, log)), hosts["home-a"].writes)
 			}
 		})
 	}
 }
 
 // apply --site, with something to approve and no terminal, is refused before
-// the host is claimed; with nothing to approve it goes on to the claim.
-func TestApplySiteReviewsBeforeTheClaim(t *testing.T) {
+// the host's admission is checked; with nothing to approve it goes on to the
+// check.
+func TestApplySiteReviewsBeforeTheAdmissionCheck(t *testing.T) {
 	for name, hold := range map[string]func(string) *grant.Record{
 		"something to approve": func(string) *grant.Record { return nil },
 		"nothing to approve":   grantedAlready(t, fixtureConfig(), fixtureSecretsPath()),
@@ -380,16 +382,16 @@ func TestApplySiteReviewsBeforeTheClaim(t *testing.T) {
 			})
 			refused := err != nil && strings.Contains(problemText(err), "stdin is not a terminal")
 			if name == "something to approve" {
-				if !refused || claimed(logged(t, log)) {
-					t.Errorf("err %v, claimed %v:\n%s", err, claimed(logged(t, log)), rec.Lines())
+				if !refused || checked(logged(t, log)) {
+					t.Errorf("err %v, checked %v:\n%s", err, checked(logged(t, log)), rec.Lines())
 				}
 				if !strings.Contains(rec.Lines(), "explain: + image infra/") {
 					t.Errorf("the images are not reviewed:\n%s", rec.Lines())
 				}
 				return
 			}
-			if refused || !claimed(logged(t, log)) {
-				t.Errorf("err %v, claimed %v:\n%s", err, claimed(logged(t, log)), rec.Lines())
+			if refused || !checked(logged(t, log)) {
+				t.Errorf("err %v, checked %v:\n%s", err, checked(logged(t, log)), rec.Lines())
 			}
 		})
 	}
@@ -448,9 +450,9 @@ func joinConfig(t *testing.T) string {
 
 // site add applies the new site's whole render in its stage 4, so it
 // reviews the new site's images as apply --site does: with something to
-// approve and no terminal it is refused before any host is claimed, and the
+// approve and no terminal it is refused before any host's admission is checked, and the
 // dry run shows the review and asks nothing.
-func TestSiteAddReviewsBeforeTheClaim(t *testing.T) {
+func TestSiteAddReviewsBeforeTheAdmissionCheck(t *testing.T) {
 	path := joinConfig(t)
 	log := loggingSSH(t, "")
 	fakeGrants(t, func(string) *grant.Record { return nil })
@@ -459,8 +461,8 @@ func TestSiteAddReviewsBeforeTheClaim(t *testing.T) {
 	if err == nil || !strings.Contains(problemText(err), "stdin is not a terminal") || !strings.Contains(problemText(err), "paisans site add home-b --execute") {
 		t.Fatalf("got %v\n%s", err, rec.Lines())
 	}
-	if claimed(logged(t, log)) {
-		t.Errorf("the hosts were claimed before the review was approved:\n%s", logged(t, log))
+	if checked(logged(t, log)) {
+		t.Errorf("the hosts were checked before the review was approved:\n%s", logged(t, log))
 	}
 	if !strings.Contains(rec.Lines(), "explain: + image infra/") || strings.Contains(rec.Lines(), "explain: + key ") {
 		t.Errorf("the review is not the new site's images:\n%s", rec.Lines())
@@ -485,8 +487,8 @@ func TestSiteAddChecksTheRunsApproval(t *testing.T) {
 	reviewedByRun = &runReview{approved: map[string]grant.Review{}}
 	recordConverge(t)
 	err := runSiteAdd([]string{"home-b", "--config", path, "--secrets", mustAbs(t, fixtureSecretsPath()), "--execute"}, noTerminalStdin(), io.Discard)
-	if err == nil || !strings.Contains(problemText(err), "changed after it was approved") || claimed(logged(t, log)) {
-		t.Errorf("err %v, claimed %v", err, claimed(logged(t, log)))
+	if err == nil || !strings.Contains(problemText(err), "changed after it was approved") || checked(logged(t, log)) {
+		t.Errorf("err %v, checked %v", err, checked(logged(t, log)))
 	}
 }
 

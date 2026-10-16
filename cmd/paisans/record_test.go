@@ -47,9 +47,6 @@ func (h *recordFake) Run(command string) (string, error) {
 	if h.down {
 		return "", errors.New("ssh: connect to host vm.example.org port 22: Operation timed out")
 	}
-	if out, ok := userRead(h.files, command); ok {
-		return out, nil
-	}
 	h.ran = append(h.ran, command)
 	path := recordPathRe.FindStringSubmatch(command)[1]
 	cur := "none"
@@ -65,30 +62,13 @@ func (h *recordFake) Run(command string) (string, error) {
 	return "", nil
 }
 
-// userReadRe is the path in deployrecord.ReadAsUser's command.
-var userReadRe = regexp.MustCompile(`^if \[ -f '([^']+)' \] && \[ -r `)
-
-// userRead answers deployrecord.ReadAsUser's command from files, as the ssh
-// user would see a record the write left readable, an empty one as absent.
-// ok is false for any other command.
-func userRead(files map[string]string, command string) (string, bool) {
-	m := userReadRe.FindStringSubmatch(command)
-	if m == nil {
-		return "", false
-	}
-	if c := files[m[1]]; c != "" {
-		return c, true
-	}
-	return "__PAISANS_ABSENT__\n", true
-}
-
 func TestApplyRecordsTheDeploymentOnAGateway(t *testing.T) {
 	cfg, err := config.Load(fixtureConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
 	gw := &recordFake{files: map[string]string{}}
-	if err := recordApplied(&ui.Recorder{}, cfg, "vm", func(string) registry.Runner { return gw }); err != nil {
+	if err := recordApplied(&ui.Recorder{}, cfg, nil, "vm", func(string) registry.Runner { return gw }); err != nil {
 		t.Fatal(err)
 	}
 	rec, found, _ := readRecord(gw, cfg.Deployment())
@@ -96,7 +76,7 @@ func TestApplyRecordsTheDeploymentOnAGateway(t *testing.T) {
 		t.Errorf("%+v %v", rec, found)
 	}
 	other := &recordFake{files: map[string]string{}}
-	if err := recordApplied(&ui.Recorder{}, cfg, "home-b", func(string) registry.Runner { return other }); err != nil || len(other.files) != 0 || len(other.ran) != 0 {
+	if err := recordApplied(&ui.Recorder{}, cfg, nil, "home-b", func(string) registry.Runner { return other }); err != nil || len(other.files) != 0 || len(other.ran) != 0 {
 		t.Errorf("a non gateway was written: %v %v", err, other.files)
 	}
 }
@@ -173,7 +153,7 @@ func TestForgetInRecordsReachesGatewaysInAStep(t *testing.T) {
 func TestApplyNamesTheWayOutOfAMalformedRecord(t *testing.T) {
 	cfg, _ := config.Load(fixtureConfig())
 	gw := &recordFake{files: map[string]string{deployrecord.Path(cfg.Deployment()): "{"}}
-	err := recordApplied(&ui.Recorder{}, cfg, "vm", func(string) registry.Runner { return gw })
+	err := recordApplied(&ui.Recorder{}, cfg, nil, "vm", func(string) registry.Runner { return gw })
 	if err == nil || !strings.Contains(err.Error(), "rm "+deployrecord.Path(cfg.Deployment())) || strings.Contains(err.Error(), "run it again") {
 		t.Errorf("err = %v", err)
 	}
@@ -212,7 +192,7 @@ func TestApplyRecordsOnEveryGatewayAndReportsOneDown(t *testing.T) {
 	down := &recordFake{files: map[string]string{}, down: true}
 	rec := &ui.Recorder{}
 	hosts := func(gw string) registry.Runner { return map[string]registry.Runner{"vm": vm, "vm2": down}[gw] }
-	if err := recordApplied(rec, withGateway(cfg, "vm2"), "vm", hosts); err != nil {
+	if err := recordApplied(rec, withGateway(cfg, "vm2"), nil, "vm", hosts); err != nil {
 		t.Fatal(err)
 	}
 	if _, found, _ := readRecord(vm, cfg.Deployment()); !found {
@@ -228,7 +208,7 @@ func TestARecordChangeThatReachedNoGatewaySaysSo(t *testing.T) {
 	cfg, _ := config.Load(fixtureConfig())
 	down := &recordFake{files: map[string]string{}, down: true}
 	rec := &ui.Recorder{}
-	if err := recordApplied(rec, cfg, "vm", func(string) registry.Runner { return down }); err != nil {
+	if err := recordApplied(rec, cfg, nil, "vm", func(string) registry.Runner { return down }); err != nil {
 		t.Fatal(err)
 	}
 	if rec.Has("done", "record the deployment") {
@@ -282,18 +262,6 @@ func TestConfirmWordAsksOnALineOfItsOwn(t *testing.T) {
 	}
 }
 
-// deniedFake is a gateway whose record the ssh user may not read with a
-// plain read, one written with other modes: the user's read is denied and
-// only ReadFile gives it.
-type deniedFake struct{ *recordFake }
-
-func (d deniedFake) Run(command string) (string, error) {
-	if userReadRe.MatchString(command) {
-		return "__PAISANS_DENIED__\n", nil
-	}
-	return d.recordFake.Run(command)
-}
-
 // reachLog makes registryHost answer with gw for every site, logging each
 // site it reached and the destination it was given, if any.
 func reachLog(t *testing.T, gw registry.Runner) *[]string {
@@ -318,21 +286,6 @@ func TestApplyOfANonGatewayReadsTheRecordAsTheSSHUser(t *testing.T) {
 	vm := &recordFake{files: map[string]string{deployrecord.Path(cfg.Deployment()): deployrecord.Encode(deployrecord.Record{Sites: []string{"vm", "monitor-a"}})}}
 	log := reachLog(t, vm)
 	rec := recordForWarnings(&ui.Recorder{}, cfg, applyRecordHosts(cfg, "watch", "admin@203.0.113.9"))
-	if rec == nil || !rec.Lists("sites", "monitor-a") {
-		t.Fatalf("record %+v", rec)
-	}
-	if strings.Join(*log, ",") != "vm" {
-		t.Errorf("reached %v", *log)
-	}
-}
-
-// A record the ssh user's plain read is denied is read through the same
-// host, reached once.
-func TestADeniedRecordIsReadThroughTheSameHost(t *testing.T) {
-	cfg, _ := config.Load(fixtureConfig())
-	vm := deniedFake{&recordFake{files: map[string]string{deployrecord.Path(cfg.Deployment()): deployrecord.Encode(deployrecord.Record{Sites: []string{"vm", "monitor-a"}})}}}
-	log := reachLog(t, vm)
-	rec := recordForWarnings(&ui.Recorder{}, cfg, applyRecordHosts(cfg, "watch", ""))
 	if rec == nil || !rec.Lists("sites", "monitor-a") {
 		t.Fatalf("record %+v", rec)
 	}

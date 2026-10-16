@@ -193,8 +193,8 @@ func (r *racer) ReadFile(p string) (string, bool, error) {
 	return c, ok, err
 }
 
-func TestThePathCarriesTheToken(t *testing.T) {
-	if got := deployrecord.Path(dep); got != "/var/lib/paisans/deployed.f2a9.json" {
+func TestTheRecordIsInTheDeploymentsStateDir(t *testing.T) {
+	if got := deployrecord.Path(dep); got != "/srv/paisans/f2a9/.paisans/deployed.json" {
 		t.Errorf("got %s", got)
 	}
 }

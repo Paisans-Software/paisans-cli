@@ -50,7 +50,7 @@ func (c Change) NeedsApproval() bool { return c.Op != Removed && !c.Foundation }
 func (c Change) Line() string { return string(c.Op) + " " + ui.Visible(c.Text) }
 
 // Review is what one site's grant changes from its record: keys first, then
-// images, then catalog blueprints, then the web server. An entry in both and the same is not in it.
+// images, then catalog blueprints. An entry in both and the same is not in it.
 type Review struct {
 	Site    string
 	Changes []Change
@@ -114,9 +114,6 @@ func Compare(site string, g Grant, rec Record, s Scope) Review {
 			was = s.blueprints(rec.Blueprints.Entries)
 		}
 		r.Changes = append(r.Changes, compareBlueprints(s.blueprints(g.Blueprints), was)...)
-	}
-	if s.WebServer {
-		r.Changes = append(r.Changes, compareWebServer(g.WebServer, rec.WebServer)...)
 	}
 	var asked []Change
 	for _, c := range r.Changes {
@@ -269,20 +266,6 @@ func imageChanges(now, was []Image) []Change {
 		}
 	}
 	return out
-}
-
-func compareWebServer(now *WebServer, was *WebServerPart) []Change {
-	switch {
-	case now == nil && was == nil:
-		return nil
-	case now == nil:
-		return []Change{{Op: Removed, Subject: "web server", Text: "web server files in " + was.IncludeDir}}
-	case was == nil:
-		return []Change{{Op: Added, Subject: "web server", To: now.IncludeDir, Text: "web server files written into " + now.IncludeDir + ", as root"}}
-	case was.IncludeDir != now.IncludeDir:
-		return []Change{{Op: Changed, Subject: "web server", To: now.IncludeDir, Text: "web server files: " + was.IncludeDir + " → " + now.IncludeDir}}
-	}
-	return nil
 }
 
 // Summary is what the reviews ask approval for, as a sentence: how many

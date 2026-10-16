@@ -11,12 +11,17 @@
 // one data site and a witness, two etcd voters, the witness leaves etcd in
 // the same removal (see EndState).
 //
-// On the site's host it touches only what is provably this deployment's: a
-// Docker object with the deployment label carrying this id, a file whose
-// hash matches this deployment's manifest, a unit named for its token, a ufw
-// rule with its owner tag, a key its record lists, and its own registry
-// entry. Everything else found is reported as kept. docs/specs/
-// 2026-10-08-site-remove.md is the approved design.
+// On the site's host it runs only as the deployment's user, the one its
+// admission record names, refusing any other login, root above all, and
+// touches only what is provably this deployment's and
+// that user's to remove: a Docker object with the deployment label carrying
+// this id, a file the manifest names by a clean path under its root whose
+// hash matches, a unit in its user's systemd directory named for its token,
+// and its own records. Everything else found is reported as kept. What is root's,
+// the user itself, the root directory, WireGuard, the firewall and the
+// registry entry, is host evict's: the plan ends with the line the host's
+// owner runs for it. docs/specs/2026-10-08-site-remove.md is the approved
+// design.
 package siteremove
 
 import (
@@ -133,6 +138,12 @@ func (st *Stage) skipTitle() string {
 	return "skip " + st.Name
 }
 
+// EvictLine is how the host's owner removes what a site remove left for
+// them, without the request file.
+func EvictLine(d deployment.Deployment, user string) string {
+	return fmt.Sprintf("sudo paisans host evict --deployment %s --user %s --execute", d.ID, user)
+}
+
 // Plan is a whole removal, decided from the live deployment.
 type Plan struct {
 	Site string
@@ -147,12 +158,18 @@ type Plan struct {
 	// own, which its cluster still counts on: the command asks for the
 	// site's name before cleaning it.
 	Current bool
-	// CaddyKept are the host owner's site files in /srv/caddy.d that the
+	// CaddyKept are the host owner's site files in the deployment's caddy.d that the
 	// gateway's Caddy is kept for, empty when it is not kept.
 	CaddyKept []string
-	// DataKept is whether the host keeps this deployment's data, and its
-	// registry entry marked kept for it, because --delete-data was not given.
+	// DataKept is whether the host keeps this deployment's data, because
+	// --delete-data was not given.
 	DataKept bool
+	// Evict is the line the host's owner runs to finish: what is root's
+	// (the user, its home, the root directory, WireGuard, the firewall, the
+	// registry entry and the admission record) only host evict removes.
+	// Empty when the plan reaches no host. It shadows Options.Evict, which
+	// the package reads as p.Options.Evict.
+	Evict string
 	// forced is a plan BuildForced or BuildForcedByID made, and declared
 	// whether paisans-stack.yaml still declares its site.
 	forced, declared bool
@@ -179,7 +196,10 @@ type Plan struct {
 	patroni patroniState
 	garage  garageState
 	host    *hostPlan
-	evict   evictState
+	// home is the login user's home on the site's host, and loginUser its
+	// name, the deployment's user, read once a run by checkLogin.
+	home, loginUser string
+	evict           evictState
 	// open is the step the running stage is in the middle of, ended when the
 	// next one starts or the stage's work does.
 	open ui.Step
@@ -453,6 +473,9 @@ func Build(cfg *config.Config, secrets *config.Secrets, site string, transports 
 			}
 			return nil, fmt.Errorf("site remove %s: its host answered `true` with an error: %v: %s", site, err, lastLines(out, 2))
 		}
+		if err := p.checkLogin(t); err != nil {
+			return nil, err
+		}
 		p.transports[site] = t
 	}
 
@@ -630,7 +653,7 @@ func (p *Plan) writtenLists() string {
 // before moving past it.
 func Execute(p *Plan) error {
 	r := p.reporter()
-	if p.Evict {
+	if p.Options.Evict {
 		if err := p.recheckLeader(); err != nil {
 			return err
 		}
@@ -683,7 +706,7 @@ func (p *Plan) fail(st *Stage, err error) error {
 		return fmt.Errorf("%s: %v", head, err)
 	}
 	next := "Fix the cause and run site remove again: it resumes at the first stage with anything left to do"
-	if p.Evict {
+	if p.Options.Evict {
 		next = "Fix the cause and run site remove --evict again: it resumes at the first stage with anything left to do"
 	}
 	// A Problem, Eg: the health gate's, keeps its cause for --verbose.
@@ -742,7 +765,7 @@ func (p *Plan) Remains() []string {
 	}
 	out = append(out, p.Notes...)
 	out = append(out, p.Kept...)
-	if p.Evict {
+	if p.Options.Evict {
 		out = append(out, p.EvictReport()...)
 	}
 	return out

@@ -315,52 +315,46 @@ func (e *Executor) files(h Host, d deployment.Deployment, s SitePlan) error {
 	return nil
 }
 
-// webServer removes the app's files from the include directory of the
-// operator's web server, validating the server after each and reloading
-// one in a container, and drops their entries from the manifest. One on
-// the host itself is the operator's to reload, and what is left says how. A file edited on the host is
-// kept, and one already gone is fine. A removal the server refuses puts the
-// file back and stops the run, which a run again resumes.
+// webServer deletes the app's reference files, which apply wrote in the
+// deployment's root for the host's owner, and drops their entries from the
+// manifest. The owner's web server is theirs: nothing here reads, edits or
+// reloads it, and what is left names the block the owner removes from it.
 func (e *Executor) webServer(h Host, d deployment.Deployment, s SitePlan) error {
 	if len(s.WebServer) == 0 {
 		return nil
 	}
 	drop := map[string]bool{}
-	var failed error
+	var removed []render.ManifestWebServer
 	for _, entry := range s.WebServer {
-		e.work("remove site file").Detail("%s, then validate %s", entry.Path, entry.Server)
-		o := webserver.Remove(webserver.Host{Plain: h}, entry)
-		switch o.Kind {
-		case webserver.Removed, webserver.Gone:
-			drop[entry.Path] = true
-			if o.Reload.Kind == webserver.OperatorReloads {
-				e.Kept = append(e.Kept, reloadLeft(s.Site, entry.Server, o.Reload.Command))
-			}
-		case webserver.Edited:
-			e.Kept = append(e.Kept, fileEdited(s.Site, entry.Path))
-		default:
-			failed = fmt.Errorf("removing %s: %s. The file is back, and the web server runs its previous configuration", entry.Path, o.Why)
+		if !webserver.OwnReference(d, entry.Path) {
+			e.Kept = append(e.Kept, foreignReference(s.Site, entry.Path))
+			continue
 		}
-		if failed != nil {
-			break
+		removed = append(removed, entry)
+		e.work("remove reference files").Detail("%s", entry.Path)
+		if out, err := h.Run("rm -f -- " + quote(entry.Path)); err != nil {
+			return fmt.Errorf("%s: removing %s: %w: %s", s.Site, entry.Path, err, strings.TrimSpace(out))
+		}
+		drop[entry.Path] = true
+	}
+	if len(removed) == 0 {
+		return nil
+	}
+	e.Kept = append(e.Kept, OwnerBlocks(s.Site, removed)...)
+	recorded, err := apply.ReadWebServerRecord(h, d)
+	if err != nil {
+		return err
+	}
+	var keep []render.ManifestWebServer
+	for _, entry := range recorded {
+		if !drop[entry.Path] {
+			keep = append(keep, entry)
 		}
 	}
-	if len(drop) > 0 {
-		recorded, err := apply.ReadWebServerRecord(h, d)
-		if err != nil {
-			return err
-		}
-		var keep []render.ManifestWebServer
-		for _, entry := range recorded {
-			if !drop[entry.Path] {
-				keep = append(keep, entry)
-			}
-		}
-		if err := apply.WriteWebServerRecord(h, d, keep); err != nil {
-			return fmt.Errorf("writing %s: %w", d.Manifest(), err)
-		}
+	if err := apply.WriteWebServerRecord(h, d, keep); err != nil {
+		return fmt.Errorf("writing %s: %w", d.Manifest(), err)
 	}
-	return failed
+	return nil
 }
 
 // DropSQL drops the database and then the role. DROP DATABASE ... WITH

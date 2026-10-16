@@ -17,7 +17,6 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 	"github.com/paisans-software/paisans-cli/internal/mesh"
 	"github.com/paisans-software/paisans-cli/internal/patroni"
-	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/validate"
 )
 
@@ -73,7 +72,7 @@ func readOnly(cfg *config.Config) (exact []string, prefixes []string) {
 		mesh.RouteCommand,
 		mesh.AddrCommand,
 		mesh.NetworksCommand,
-		"read " + mesh.DaemonConfig,
+		mesh.UserDaemonCommand,
 		patroni.ClusterCommand(cfg.Deployment(), "10.44.0.1:8008"),
 		patroni.ClusterCommand(cfg.Deployment(), "10.44.0.2:8008"),
 		doctor.CaddyLogCommand(cfg.Deployment()),
@@ -82,10 +81,9 @@ func readOnly(cfg *config.Config) (exact []string, prefixes []string) {
 		"docker inspect --format '{\"State\":{{json .State}},\"RestartCount\":{{.RestartCount}}}' ",
 		"docker logs --tail 20 ",
 		"if [ ! -f '/srv/paisans/f2a9/auth/compose.yaml' ]; then echo absent; ",
-		hostcheck.CgroupPrefix,
 	}
-	exact = append(exact, hostcheck.ReadCommands()...)
-	exact = append(exact, "read "+cfg.Deployment().Manifest(), "read "+registry.Path)
+	exact = append(exact, hostcheck.ReadCommands(cfg.Deployment())...)
+	exact = append(exact, "read "+cfg.Deployment().Manifest())
 	// Each gated app's settings read, which blueprints.LiveSettings promises
 	// prints only the named settings.
 	for _, name := range cfg.AppNames() {
@@ -142,12 +140,14 @@ func stuckHosts(cfg *config.Config, sent, writes *[]string) map[string]doctorHos
 		mesh.RouteCommand:                                   `[{"dst":"10.44.0.0/24","dev":"psns-f2a9"}]`,
 		mesh.AddrCommand:                                    `[{"ifname":"psns-f2a9","addr_info":[{"family":"inet","local":"10.44.0.1","prefixlen":24}]}]`,
 		mesh.NetworksCommand:                                "[]",
+		mesh.UserDaemonCommand:                              "absent\n",
 	}
 	vm := map[string]string{
 		mesh.LinkCommand("psns-f2a9"):              `[{"ifname":"psns-f2a9","flags":["POINTOPOINT","NOARP","UP","LOWER_UP"]}]`,
 		mesh.RouteCommand:                          `[{"dst":"10.44.0.0/24","dev":"psns-f2a9"},{"dst":"10.44.0.0/16","dev":"wg9"}]`,
 		mesh.AddrCommand:                           "[]",
 		mesh.NetworksCommand:                       "[]",
+		mesh.UserDaemonCommand:                     "absent\n",
 		doctor.ReachCommand:                        "",
 		doctor.ClockCommand:                        "1760000000.000000000\n",
 		doctor.ContainersCommand(cfg.Deployment()): `{"Names":"paisans-f2a9-infra-etcd-1","State":"running","Status":"Up 2 days","Labels":"community.paisans.deployment=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}`,
@@ -305,7 +305,7 @@ func TestDoctorReportsLeftoversAndForeignCaddyUsers(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := cfg.Deployment().ID
-	probes := hostcheck.ReadCommands()
+	probes := hostcheck.ReadCommands(cfg.Deployment())
 	answers := map[string]string{
 		doctor.ReachCommand:                        "",
 		doctor.ClockCommand:                        "1760000000.000000000\n",
@@ -316,7 +316,8 @@ func TestDoctorReportsLeftoversAndForeignCaddyUsers(t *testing.T) {
 		mesh.RouteCommand:             `[{"dst":"10.44.0.0/24","dev":"psns-f2a9"}]`,
 		mesh.AddrCommand:              "[]",
 		mesh.NetworksCommand:          "[]",
-		probes[0]:                     "0\n",
+		mesh.UserDaemonCommand:        "absent\n",
+		probes[0]:                     "uid 1001\nsubuid paisans-f2a9:165536:65536\n",
 		probes[1]:                     "27.3.1\n",
 		probes[2]:                     "docker-ce install ok installed\n",
 		probes[3]: `{"id":"a","name":"/paisans-f2a9-infra-caddy-1","pid":10,"labels":{"community.paisans.deployment":"` + id + `","com.docker.compose.project":"paisans-f2a9-infra","com.docker.compose.service":"caddy"},"networks":{"web":{}},"ports":{}}
@@ -328,9 +329,7 @@ func TestDoctorReportsLeftoversAndForeignCaddyUsers(t *testing.T) {
 		probes[6]:                                "",
 		probes[7]:                                "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536\n",
 		probes[8]:                                "[]",
-		probes[9]:                                "ufw absent\n",
-		probes[10]:                               "inactive\n",
-		probes[11]:                               "/srv/caddy.d/blog.caddy\n",
+		probes[9]:                                "/srv/paisans/f2a9/caddy.d/blog.caddy\n",
 		doctor.CaddyLogCommand(cfg.Deployment()): quietCaddyLog,
 	}
 	var sent, writes []string
@@ -347,7 +346,7 @@ func TestDoctorReportsLeftoversAndForeignCaddyUsers(t *testing.T) {
 		"apply leaves them in place.",
 		"`paisans app remove old` takes old's off every site, once a whole apply has run on each; it keeps its data unless given --delete-data.",
 		"done: check leftovers vm 1 foreign thing(s) rely on this deployment's Caddy",
-		"site block /srv/caddy.d/blog.caddy, served by this deployment's Caddy",
+		"site block /srv/paisans/f2a9/caddy.d/blog.caddy, served by this deployment's Caddy",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)

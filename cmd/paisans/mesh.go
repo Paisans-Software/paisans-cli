@@ -8,7 +8,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -19,7 +18,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
-// initHost is how `paisans init` reaches a site to read its registry and its
+// initHost is how `paisans init` reaches a site to read its manifest and its
 // networks. A test replaces it.
 var initHost = func(name string, site config.Site) registry.Runner {
 	return siteTransport(name, site, "")
@@ -31,14 +30,14 @@ var meshRandom io.Reader = rand.Reader
 // checkMeshLive refuses when anything on the host h reaches, outside this
 // deployment's own interface, holds a network overlapping the mesh subnet:
 // a route, an address, a Docker network or one of Docker's address pools.
-// apply and host prepare run it before they claim the host, dry run or not,
+// apply and host prepare run it before they change the host, dry run or not,
 // so a clash stops them with nothing changed. See internal/mesh.
 func checkMeshLive(cfg *config.Config, site string, h mesh.Host) error {
 	subnet, err := mesh.ParsePrefix(cfg.Mesh.Subnet)
 	if err != nil {
 		return fmt.Errorf("mesh.subnet %q is not a network: %w", cfg.Mesh.Subnet, err)
 	}
-	probed, err := mesh.Probe(h)
+	probed, err := mesh.ProbeUser(h)
 	if err != nil {
 		return err
 	}
@@ -55,49 +54,35 @@ func checkMeshLive(cfg *config.Config, site string, h mesh.Host) error {
 		what[i] = c.What
 	}
 	return &ui.Problem{
-		Hint:    "mesh subnet " + cfg.Mesh.Subnet + " is in use" + holder(h, site, clash),
+		Hint:    "mesh subnet " + cfg.Mesh.Subnet + " is in use" + holder(clash),
 		Explain: "Remove it if not in use or run paisans init to pick a free subnet.",
 		Cause:   fmt.Errorf("%s: the mesh subnet %s overlaps %s, so nothing was changed", h.Describe(), cfg.Mesh.Subnet, strings.Join(what, ", ")),
 	}
 }
 
 // holder names what holds a clashing subnet, for the refusal's hint: the
-// paisans deployment whose interface it is, with its domain when the host's
-// registry lists it, and its site name there where that is not site, which
-// the line already names; or else the first clash itself.
-func holder(h mesh.Host, site string, clash []mesh.Taken) string {
+// paisans deployment whose interface it is, by its token, or else the first
+// clash itself.
+func holder(clash []mesh.Taken) string {
 	for _, c := range clash {
-		token, ok := strings.CutPrefix(c.Dev, deployment.InterfacePrefix)
-		if !ok || token == "" {
-			continue
+		if token, ok := strings.CutPrefix(c.Dev, deployment.InterfacePrefix); ok && token != "" {
+			return " by paisans deployment " + token
 		}
-		out := " by paisans deployment " + token
-		if reg, err := registry.Read(h); err == nil {
-			for _, e := range reg.Deployments {
-				if e.Token == token {
-					if e.Site != site {
-						out += " (" + e.Domain + ", as site " + e.Site + ")"
-					} else {
-						out += " (" + e.Domain + ")"
-					}
-					break
-				}
-			}
-		}
-		return out
 	}
 	return " (" + clash[0].What + ")"
 }
 
-// settleMesh is init's subnet decision. It reads every site's registry
-// first. Once any of them records this deployment, the subnet is deployed
-// and settleMesh never changes it. Otherwise every site must answer, since an
-// unchecked host is exactly where a collision would go unseen; it gathers
-// every other deployment's mesh from each registry and everything each host
-// holds (see checkMeshLive), keeps the declared subnet if it overlaps none of
-// it, and otherwise rolls a random /24 that overlaps none, moving each
-// site's address into it with its host number kept. It writes paisans-stack.yaml
-// only when it rolled, and says why. It reports whether it wrote.
+// settleMesh is init's subnet decision. It asks every site first whether it
+// holds this deployment's manifest. Once any of them does, the subnet is
+// deployed and settleMesh never changes it. A site that refuses the login
+// has not admitted the deployment yet, and is left to host admit, which
+// checks the subnet against it as root; every other site must answer, since
+// an unchecked host is exactly where a collision would go unseen. It gathers
+// everything each admitted host holds (see checkMeshLive), keeps the
+// declared subnet if it overlaps none of it, and otherwise rolls a random
+// /24 that overlaps none, moving each site's address into it with its host
+// number kept. It writes paisans-stack.yaml only when it rolled, and says
+// why. It reports whether it wrote.
 //
 // The decision is one step, "settle mesh subnet", whose result is what
 // happened to the subnet; why is its details. Its progress names the site
@@ -117,15 +102,20 @@ func settleMesh(r ui.Reporter, cfg *config.Config, path string, hosts map[string
 // chooseMesh is settleMesh's decision, reporting what it finds to s, and
 // returning whether it wrote and the short result for the step.
 func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]registry.Runner, random io.Reader) (bool, string, error) {
-	sites := cfg.SiteNames()
-	registries := map[string]registry.Registry{}
-	var unreachable, advice, referrals []string
+	manifest := cfg.Deployment().Manifest()
+	var admitted, unreachable, advice, referrals []string
 	var failures []error
 	var claimedOn []string
-	for _, name := range sites {
+	for _, name := range cfg.SiteNames() {
 		s.Progress("read " + name)
-		reg, err := registry.Read(hosts[name])
+		h := hosts[name]
+		_, found, err := h.ReadFile(manifest)
+		if errors.Is(err, apply.ErrLoginRefused) {
+			s.Detail("%s has not admitted this deployment yet; host admit checks the subnet against it as root, and refuses one that overlaps anything there", name)
+			continue
+		}
 		if err != nil {
+			err = fmt.Errorf("%s: reading %s: %w", h.Describe(), manifest, err)
 			// Each site is one line in the operator's words, and what to do
 			// about it follows the list. The full chain, with the file it
 			// failed at, is the cause, for --verbose.
@@ -143,22 +133,18 @@ func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]reg
 			failures = append(failures, fmt.Errorf("%s: %w", name, err))
 			continue
 		}
-		registries[name] = reg
-		if _, ok := reg.Deployments[cfg.ID]; ok {
+		admitted = append(admitted, name)
+		if found {
 			claimedOn = append(claimedOn, name)
+			s.Detail("%s holds this deployment's manifest", name)
 		}
 	}
 
 	if len(claimedOn) > 0 {
-		recorded := registries[claimedOn[0]].Deployments[cfg.ID].Subnet
 		if cfg.Mesh.Subnet == "" {
-			hint := ""
-			if recorded != "" {
-				hint = fmt.Sprintf(" %s records it as %s.", claimedOn[0], recorded)
-			}
-			return false, "", fmt.Errorf("%s: mesh.subnet is missing, and this deployment is already on %s, so its subnet is deployed and is not chosen again.%s Restore it in %s", path, strings.Join(claimedOn, ", "), hint, path)
+			return false, "", fmt.Errorf("%s: mesh.subnet is missing, and this deployment is already on %s, so its subnet is deployed and is not chosen again. Restore it in %s", path, strings.Join(claimedOn, ", "), path)
 		}
-		s.Detail("%s: mesh.subnet %s is deployed (this deployment is on %s), so it is kept as it is.", path, cfg.Mesh.Subnet, strings.Join(claimedOn, ", "))
+		s.Detail("%s: mesh.subnet %s is deployed (%s holds this deployment's manifest), so it is kept as it is.", path, cfg.Mesh.Subnet, strings.Join(claimedOn, ", "))
 		return false, "deployed, kept", nil
 	}
 	if len(unreachable) > 0 {
@@ -172,10 +158,9 @@ func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]reg
 
 	iface := cfg.Deployment().Interface()
 	var taken []mesh.Taken
-	for _, name := range sites {
-		taken = append(taken, registry.Meshes(registries[name], cfg.ID, name)...)
+	for _, name := range admitted {
 		s.Progress("read the networks on " + name)
-		probed, err := mesh.Probe(hosts[name])
+		probed, err := mesh.ProbeUser(hosts[name])
 		if err != nil {
 			return false, "", fmt.Errorf("%v. Nothing was written", err)
 		}
@@ -194,7 +179,7 @@ func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]reg
 	addresses := map[string]string{}
 	if choice.Rolled {
 		current := map[string]string{}
-		for _, name := range sites {
+		for _, name := range cfg.SiteNames() {
 			current[name] = cfg.Sites[name].Address
 		}
 		if addresses, err = mesh.Readdress(cfg.Mesh.Subnet, choice.Subnet, current); err != nil {
@@ -202,27 +187,12 @@ func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]reg
 		}
 	}
 
-	// The registries are already in hand, so the rest of a claim's decision
-	// is made here too: a clash on the interface or listen port would refuse
-	// the first apply, and is better found before anything is written.
-	next := *cfg
-	next.Mesh.Subnet = subnet
-	next.Sites = map[string]config.Site{}
-	for name, s := range cfg.Sites {
-		if a, ok := addresses[name]; ok {
-			s.Address = a
-		}
-		next.Sites[name] = s
+	if !choice.Rolled && len(admitted) == 0 {
+		s.Detail("%s: mesh.subnet %s is kept; no site has admitted this deployment yet, so host admit checks it on each.", path, subnet)
+		return false, "kept", nil
 	}
-	for _, name := range sites {
-		id, e := registry.For(&next, name, time.Time{})
-		if c := registry.Conflicts(registries[name], id, e); len(c) > 0 {
-			return false, "", fmt.Errorf("%s: %v, and nothing was written. %s", name, c[0], conflictAdvice(c[0]))
-		}
-	}
-
 	if !choice.Rolled {
-		s.Detail("%s: mesh.subnet %s overlaps nothing on %s; kept.", path, subnet, strings.Join(sites, ", "))
+		s.Detail("%s: mesh.subnet %s overlaps nothing on %s; kept.", path, subnet, strings.Join(admitted, ", "))
 		return false, "kept", nil
 	}
 	if err := config.SetMesh(path, subnet, addresses); err != nil {
@@ -239,17 +209,6 @@ func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]reg
 	}
 	s.Detail("It is fixed from the first apply on: every app trusts it for forwarded client addresses and every service binds an address in it.")
 	return true, "rolled to " + subnet, nil
-}
-
-// conflictAdvice is what an operator does about a registry conflict init
-// found before anything was deployed.
-func conflictAdvice(c registry.Conflict) string {
-	for _, clash := range c.Clashes {
-		if strings.HasPrefix(clash, "WireGuard listen port") {
-			return "Give that site's endpoint another port in " + config.FileName + ", and forward it where the host is behind NAT"
-		}
-	}
-	return "Use another host for that site"
 }
 
 // initHosts reaches every declared site for init.

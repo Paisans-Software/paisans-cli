@@ -12,10 +12,12 @@
 package meshkey
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
@@ -127,11 +129,12 @@ func (e *NoAnswer) Unwrap() error { return e.Err }
 
 // Joining is the sites cfg declares, but skip, that are new to this
 // deployment, Eg: a replacement declared in the same edit as an eviction.
-// Their hosts hold no claim of this deployment in their registry, and
-// nothing else says they ever ran in it: no remaining site lists their key as
-// a WireGuard peer, and no gateway's deployment record lists them. A missing
-// registry entry alone is not enough, since a claim can be lost, or a site's
-// ssh section can reach the wrong host; a site that ran and is taken for new
+// Their hosts have not admitted this deployment, holding no admission record
+// of it or refusing its login, and nothing else says they ever ran in it: no
+// remaining site lists their key as a WireGuard peer, and no gateway's
+// deployment record lists them. A missing record alone is not enough, since
+// an owner can evict the deployment, or a site's ssh section can reach the
+// wrong host; a site that ran and is taken for new
 // would be left out of a cut or a rekey while its peers still talk to it, so
 // that is refused, naming the site and the evidence.
 func Joining(cfg *config.Config, secrets *config.Secrets, skip string, transports map[string]apply.Transport) ([]string, error) {
@@ -144,14 +147,14 @@ func Joining(cfg *config.Config, secrets *config.Secrets, skip string, transport
 		if !ok {
 			return nil, &NoAnswer{Site: name, Err: fmt.Errorf("no way to reach it")}
 		}
-		reg, err := registry.Read(t)
-		if err != nil {
-			return nil, &NoAnswer{Site: name, Err: err}
-		}
-		if _, ok := reg.Deployments[cfg.ID]; ok {
+		_, err := admission.Read(t, cfg.Deployment().Token())
+		switch {
+		case err == nil:
 			claimed = append(claimed, name)
-		} else {
+		case errors.Is(err, admission.ErrNotAdmitted), errors.Is(err, apply.ErrLoginRefused):
 			unclaimed = append(unclaimed, name)
+		default:
+			return nil, &NoAnswer{Site: name, Err: err}
 		}
 	}
 	if len(unclaimed) == 0 {
@@ -200,7 +203,7 @@ func Joining(cfg *config.Config, secrets *config.Secrets, skip string, transport
 	}
 	for _, site := range unclaimed {
 		if len(evidence[site]) > 0 {
-			return nil, fmt.Errorf("%s's host holds no claim of this deployment in %s, yet %s, so it has run in this deployment and is not a new site. Check that its ssh section reaches the host it runs on, and that the host's registry still holds this deployment's entry. Nothing was changed", site, registry.Path, strings.Join(evidence[site], ", and "))
+			return nil, fmt.Errorf("%s's host has not admitted this deployment, yet %s, so it has run in this deployment and is not a new site. Check that its ssh section reaches the host it runs on, and that the host's owner has not evicted this deployment. Nothing was changed", site, strings.Join(evidence[site], ", and "))
 		}
 	}
 	return unclaimed, nil

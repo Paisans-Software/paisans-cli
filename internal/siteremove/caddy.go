@@ -9,9 +9,9 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 	"github.com/paisans-software/paisans-cli/internal/ownership"
-	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
@@ -48,10 +48,6 @@ type caddyPlan struct {
 	// manifest is the manifest listing only the kept files, empty when the
 	// host's already is it.
 	manifest string
-	// entry is the registry entry, and mark whether it is still to be
-	// marked kept.
-	entry registry.Entry
-	mark  bool
 	// others are the paths under the root that are not Caddy's, and empty
 	// the empty directories among them, from keptProbe.
 	others, empty []string
@@ -69,7 +65,8 @@ func (p *Plan) staged() string { return p.dep().Path("infra", "caddy", "snippets
 
 // keptPaths are the paths under the root the kept Caddy needs, with
 // everything under each: its compose file, Caddyfile, DNS token, data and
-// config, the snippets directory it mounts, and the manifest.
+// config, the snippets directory it mounts, the manifest, and the host
+// owner's caddy.d, which holds the sites it is kept for.
 func (p *Plan) keptPaths() []string {
 	d := p.dep()
 	return []string{
@@ -80,6 +77,7 @@ func (p *Plan) keptPaths() []string {
 		d.Path("infra", "caddy", "data"),
 		d.Path("infra", "caddy", "config"),
 		d.Path("infra", "caddy", "snippets"),
+		render.HostSitesDir(d),
 	}
 }
 
@@ -128,17 +126,17 @@ func (p *Plan) planCaddy(t apply.Transport, inv *hostcheck.Inventory) (*caddyPla
 		return nil, fmt.Errorf("site remove %s: reading %s: %w", p.Site, p.caddyfile(), err)
 	}
 	if !found {
-		return nil, fmt.Errorf("site remove %s: its Caddy serves the host owner's sites in %s, and %s is not there to reduce to them. Nothing was changed", p.Site, render.HostSitesDir, p.caddyfile())
+		return nil, fmt.Errorf("site remove %s: its Caddy serves the host owner's sites in %s, and %s is not there to reduce to them. Nothing was changed", p.Site, render.HostSitesDir(p.dep()), p.caddyfile())
 	}
 	cp.original = content
-	if cp.reduced, err = reduceCaddyfile(content, p.dep().ID); err != nil {
-		return nil, fmt.Errorf("site remove %s: its Caddy serves the host owner's sites in %s, and %s cannot be reduced to them: %v. Nothing was changed", p.Site, render.HostSitesDir, p.caddyfile(), err)
+	if cp.reduced, err = reduceCaddyfile(content, p.dep()); err != nil {
+		return nil, fmt.Errorf("site remove %s: its Caddy serves the host owner's sites in %s, and %s cannot be reduced to them: %v. Nothing was changed", p.Site, render.HostSitesDir(p.dep()), p.caddyfile(), err)
 	}
 	if cp.reduce() && c.PID == 0 {
-		return nil, fmt.Errorf("site remove %s: its Caddy, %s, serves the host owner's sites in %s and is not running, so its reduced configuration cannot be validated and loaded in it. Nothing was changed. Start it (docker start %s) and run again", p.Site, c.Name, render.HostSitesDir, c.Name)
+		return nil, fmt.Errorf("site remove %s: its Caddy, %s, serves the host owner's sites in %s and is not running, so its reduced configuration cannot be validated and loaded in it. Nothing was changed. Start it (docker start %s) and run again", p.Site, c.Name, render.HostSitesDir(p.dep()), c.Name)
 	}
 	p.CaddyKept = cp.sites
-	p.Kept = append(p.Kept, caddyKept(p.Site, c.Name, cp.sites, p.dep().Dir("infra")))
+	p.Kept = append(p.Kept, caddyKept(p.Site, c.Name, cp.sites, render.HostSitesDir(p.dep()), p.dep().Dir("infra")))
 	return cp, nil
 }
 
@@ -147,7 +145,7 @@ func (p *Plan) planCaddy(t apply.Transport, inv *hostcheck.Inventory) (*caddyPla
 // snippets their files may import, and the import of their directory. No
 // site block of the deployment's is in it. Reducing its result gives the
 // same file.
-func reduceCaddyfile(content, id string) (string, error) {
+func reduceCaddyfile(content string, d deployment.Deployment) (string, error) {
 	global, err := globalBlock(content)
 	if err != nil {
 		return "", err
@@ -163,7 +161,7 @@ func reduceCaddyfile(content, id string) (string, error) {
 	header := fmt.Sprintf(`# Reduced by paisans site remove when deployment %s left this host. This
 # Caddy is kept for the host owner's sites in %s alone, and a later
 # paisans site remove --force removes it once that directory holds none.
-`, id, render.HostSitesDir)
+`, d.ID, render.HostSitesDir(d))
 	return header + global + "\n\n" + snippets + "\n" + imp + "\n", nil
 }
 
@@ -278,7 +276,8 @@ func (p *Plan) parseKeptProbe(out string) (others, empty []string, files []strin
 // deleteBesideKept deletes everything under the root but the kept paths:
 // in the root and each directory above a kept path, every entry that is
 // neither kept nor above one, and everything in the snippets directory,
-// whose files were the deployment's routes.
+// whose files were the deployment's routes. Each goes through rootlesskit,
+// as emptyRootCommand's do, so a file a container's user owns goes too.
 func (p *Plan) deleteBesideKept() string {
 	root := p.dep().Root()
 	keep := map[string]map[string]bool{root: {}}
@@ -303,7 +302,7 @@ func (p *Plan) deleteBesideKept() string {
 		q := quote(dir)
 		head := fmt.Sprintf(`for f in %[1]s/* %[1]s/.[!.]* %[1]s/..?*; do [ -e "$f" ] || [ -L "$f" ] || continue;`, q)
 		if len(keep[dir]) == 0 {
-			loops = append(loops, head+` rm -rf -- "$f"; done`)
+			loops = append(loops, head+` rootlesskit rm -rf -- "$f"; done`)
 			continue
 		}
 		var names []string
@@ -311,7 +310,7 @@ func (p *Plan) deleteBesideKept() string {
 			names = append(names, quote(n))
 		}
 		sort.Strings(names)
-		loops = append(loops, head+fmt.Sprintf(` case "${f##*/}" in %s) ;; *) rm -rf -- "$f";; esac; done`, strings.Join(names, "|")))
+		loops = append(loops, head+fmt.Sprintf(` case "${f##*/}" in %s) ;; *) rootlesskit rm -rf -- "$f";; esac; done`, strings.Join(names, "|")))
 	}
 	// A directory walked that is a symbolic link would take the loop out of
 	// the root, Eg: snippets pointing at the owner's sites: nothing is
@@ -326,13 +325,14 @@ func (p *Plan) deleteBesideKept() string {
 
 // emptyBesideKept removes the empty directories under the root, but never a
 // kept one or one inside it: the container mounts them, and a missing mount
-// source keeps it from starting again.
+// source keeps it from starting again. find runs through rootlesskit, as
+// emptyRootCommand's does.
 func (p *Plan) emptyBesideKept() string {
 	var not []string
 	for _, k := range p.keptPaths() {
 		not = append(not, "! -path "+quote(k), "! -path "+quote(k+"/*"))
 	}
-	return fmt.Sprintf(`d=%s; if [ -d "$d" ]; then find "$d" -mindepth 1 -depth -type d -empty %s -delete; fi`, quote(p.dep().Root()), strings.Join(not, " "))
+	return fmt.Sprintf(`d=%s; if [ -d "$d" ]; then rootlesskit find "$d" -mindepth 1 -depth -type d -empty %s -delete; fi`, quote(p.dep().Root()), strings.Join(not, " "))
 }
 
 func caddyCommand(container hostcheck.Container, verb, config string) string {

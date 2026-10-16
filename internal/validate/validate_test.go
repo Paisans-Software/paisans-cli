@@ -640,8 +640,9 @@ func TestARolelessSiteStillHostsOtherBlueprints(t *testing.T) {
 
 // A listen address is where Docker publishes the app for the operator's web
 // server, which runs on the same host. Loopback is quiet; the site's own mesh
-// address is allowed with the firewall warning; anything else is refused, a
-// LAN address included, as host request refuses it. 10.44.0.1 is inside the
+// address is allowed with a warning, since the firewall lets the mesh in;
+// anything else is refused, a LAN address included, as host request refuses
+// it. 10.44.0.1 is inside the
 // mesh, but it is another site's address, which nothing on this host binds.
 func TestWebServerListenAddresses(t *testing.T) {
 	for _, tc := range []struct {
@@ -664,6 +665,21 @@ func TestWebServerListenAddresses(t *testing.T) {
 		if result.Has("web-server-listen-not-this-host") != tc.refused || result.Has("web-server-listen-bypasses-firewall") != tc.warns {
 			t.Errorf("%s: %v", tc.listen, result.Findings)
 		}
+		// Rootless Docker publishes through rootlesskit, on the host's own
+		// network stack, so ufw does apply: the reason is the route around
+		// the web server, and for the mesh address the firewall letting
+		// the mesh in whole.
+		for _, f := range result.Findings {
+			text := f.Hint + " " + f.Message
+			switch {
+			case strings.Contains(text, "iptables") || strings.Contains(text, "in front of ufw") || strings.Contains(text, "firewall misses"):
+				t.Errorf("%s: %s says Docker bypasses the firewall: %s", tc.listen, f.Rule, text)
+			case f.Rule == "web-server-listen-not-this-host" && !strings.Contains(f.Message, "around your web server"):
+				t.Errorf("%s: %s", tc.listen, text)
+			case f.Rule == "web-server-listen-bypasses-firewall" && !strings.Contains(f.Message, "lets the mesh in"):
+				t.Errorf("%s: %s", tc.listen, text)
+			}
+		}
 	}
 }
 
@@ -678,31 +694,20 @@ func TestExternalWebServerNeedsListen(t *testing.T) {
 	}
 }
 
-// include_dir is where apply writes for the operator's web server: it fits
-// mode external alone, and must be a plain absolute path. false fits either.
-func TestWebServerIncludeDir(t *testing.T) {
-	for _, tc := range []struct {
-		mode config.ManagedBy
-		dir  config.IncludeDir
-		rule string
-	}{
-		{config.ManagedByExternal, config.IncludeDir{Path: "/opt/caddy/paisans.d"}, ""},
-		{config.ManagedByExternal, config.IncludeDir{Off: true}, ""},
-		{config.ManagedByExternal, config.IncludeDir{Path: "paisans.d"}, "web-server-include-dir-path"},
-		{config.ManagedByExternal, config.IncludeDir{Path: "/etc/nginx/*"}, "web-server-include-dir-path"},
-		{config.ManagedByPaisans, config.IncludeDir{Path: "/opt/caddy/paisans.d"}, "web-server-include-dir-managed-by"},
-	} {
-		cfg := load(t, "uptime-without-smtp")
-		site := cfg.Sites["watch"]
-		site.WebServer = &config.WebServer{ManagedBy: tc.mode, IncludeDir: tc.dir}
-		if tc.mode == config.ManagedByExternal {
-			site.WebServer.Listen = "127.0.0.1:8480"
-		}
-		cfg.Sites["watch"] = site
-		result := validate.Check(cfg)
-		for _, rule := range []string{"web-server-include-dir-path", "web-server-include-dir-managed-by"} {
-			if want := rule == tc.rule; refusedFor(result, rule, "sites.watch.web_server.include_dir") != want {
-				t.Errorf("%s %+v: %s refused %v, want %v: %v", tc.mode, tc.dir, rule, !want, want, result.Findings)
+// include_dir is refused by name, whatever it holds: nothing is written into
+// the owner's web server, so there is nothing for it to name.
+func TestIncludeDirIsRefused(t *testing.T) {
+	for _, dir := range []config.IncludeDir{{Set: true}} {
+		for _, mode := range []config.ManagedBy{config.ManagedByExternal, config.ManagedByPaisans} {
+			cfg := load(t, "uptime-without-smtp")
+			site := cfg.Sites["watch"]
+			site.WebServer = &config.WebServer{ManagedBy: mode, IncludeDir: dir}
+			if mode == config.ManagedByExternal {
+				site.WebServer.Listen = "127.0.0.1:8480"
+			}
+			cfg.Sites["watch"] = site
+			if !refusedFor(validate.Check(cfg), "web-server-include-dir", "sites.watch.web_server.include_dir") {
+				t.Errorf("%s include_dir %+v accepted: %v", mode, dir, validate.Check(cfg).Findings)
 			}
 		}
 	}

@@ -26,25 +26,18 @@ const anonymousLabel = "com.docker.volume.anonymous"
 
 var anonymousName = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
-// containerID is how a cgroup path names a container: the full 64 hex ID,
-// as docker-<id>.scope under the systemd driver or docker/<id> under
-// cgroupfs.
-var containerID = regexp.MustCompile(`[0-9a-f]{64}`)
+// uidField is a socket's owner as `ss -e` prints it, for any user but root.
+var uidField = regexp.MustCompile(`\buid:(\d+)\b`)
 
-// processField is the first process ss names for a socket:
-// users:(("caddy",pid=812,fd=7),...).
-var processField = regexp.MustCompile(`users:\(\("([^"]+)",pid=(\d+)`)
-
-// Socket is one listener `ss -Hltnup` printed.
+// Socket is one listener `ss -Hltnue` printed.
 type Socket struct {
 	Proto string
 	// Address is the bound address, "" for every address.
 	Address string
 	Port    int
-	// Process and PID are empty for a socket the kernel holds itself, as
-	// WireGuard's is.
-	Process string
-	PID     int
+	// UID is the socket's owner: 0 for root's, which ss prints no uid for,
+	// and for one the kernel holds itself, as WireGuard's is.
+	UID int
 }
 
 // Listener is the socket as render describes a bind, so the two compare
@@ -53,8 +46,8 @@ func (s Socket) Listener() render.Listener {
 	return render.Listener{Proto: s.Proto, Address: s.Address, Port: s.Port}
 }
 
-// parseSockets reads `ss -Hltnup`: Netid, State, Recv-Q, Send-Q, Local
-// Address:Port, Peer Address:Port, then the process. The port is after the
+// parseSockets reads `ss -Hltnue`: Netid, State, Recv-Q, Send-Q, Local
+// Address:Port, Peer Address:Port, then the details, uid:N among them. The port is after the
 // last colon, which holds for "*:22", "[::]:22" and "127.0.0.53%lo:53".
 func parseSockets(out string) ([]Socket, error) {
 	var list []Socket
@@ -73,9 +66,8 @@ func parseSockets(out string) ([]Socket, error) {
 			return nil, fmt.Errorf("unreadable ss port in %q", local)
 		}
 		s := Socket{Proto: f[0], Address: bindAddress(local[:i]), Port: port}
-		if m := processField.FindStringSubmatch(line); m != nil {
-			s.Process = m[1]
-			s.PID, _ = strconv.Atoi(m[2])
+		if m := uidField.FindStringSubmatch(line); m != nil {
+			s.UID, _ = strconv.Atoi(m[1])
 		}
 		list = append(list, s)
 	}
@@ -282,43 +274,6 @@ func parseLinks(out string) []string {
 	return names
 }
 
-// Firewall is what the host's firewalls say about themselves.
-type Firewall struct {
-	// UFW is installed, and Active is its status.
-	UFW, Active bool
-	// Incoming is ufw's default for incoming traffic: deny, reject or
-	// allow, as `ufw status verbose` prints it.
-	Incoming string
-	// Firewalld is active.
-	Firewalld bool
-}
-
-// parseUFW reads `ufw status verbose`:
-//
-//	Status: active
-//	Default: deny (incoming), allow (outgoing), disabled (routed)
-func parseUFW(out string) Firewall {
-	var f Firewall
-	if strings.TrimSpace(out) == "ufw absent" {
-		return f
-	}
-	f.UFW = true
-	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimSpace(line)
-		if v, ok := strings.CutPrefix(line, "Status:"); ok {
-			f.Active = strings.TrimSpace(v) == "active"
-		}
-		if v, ok := strings.CutPrefix(line, "Default:"); ok {
-			for _, part := range strings.Split(v, ",") {
-				if fields := strings.Fields(part); len(fields) == 2 && fields[1] == "(incoming)" {
-					f.Incoming = fields[0]
-				}
-			}
-		}
-	}
-	return f
-}
-
 // parsePackages names where Docker came from, from dpkg-query's
 // "<package> <status>" lines and `snap list docker`'s table.
 func parsePackages(out string) []string {
@@ -334,24 +289,4 @@ func parsePackages(out string) []string {
 		}
 	}
 	return found
-}
-
-// parseCgroups reads cgroupProbe's lines, "<pid> <cgroup lines>", into the
-// container each PID belongs to, for those that belong to one.
-func parseCgroups(out string) map[int]string {
-	in := map[int]string{}
-	for _, line := range strings.Split(out, "\n") {
-		f := strings.Fields(line)
-		if len(f) < 2 {
-			continue
-		}
-		pid, err := strconv.Atoi(f[0])
-		if err != nil {
-			continue
-		}
-		if id := containerID.FindString(strings.Join(f[1:], " ")); id != "" {
-			in[pid] = id
-		}
-	}
-	return in
 }

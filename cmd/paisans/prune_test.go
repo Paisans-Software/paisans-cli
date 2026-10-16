@@ -21,8 +21,8 @@ func (danglingHost) Describe() string                       { return "ubuntu@hom
 // each volume's size and contents, so an operator can tell a leaked cache
 // from somebody's data before agreeing.
 func TestPruneDryRunShowsTheAssumptionAndEachVolume(t *testing.T) {
-	host := danglingHost{listing: "volume\t3a37a98261c4f658850d43b3d0ddc746ae25d9ec6bb58e83132662b7ea646191\t48234496\t{\"community.paisans.deployment\":\"f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01\"}\tcache log\n" +
-		"volume\tother_db\t9999\t{\"com.docker.compose.project\":\"other\"}\tpgdata\nend\n"}
+	host := danglingHost{listing: `[{"Name":"3a37a98261c4f658850d43b3d0ddc746ae25d9ec6bb58e83132662b7ea646191","Size":"48.234MB"},{"Name":"other_db","Size":"9.999kB"}]` + "\nvolumes\nvolume\t3a37a98261c4f658850d43b3d0ddc746ae25d9ec6bb58e83132662b7ea646191\t{\"community.paisans.deployment\":\"f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01\"}\tcache log\n" +
+		"volume\tother_db\t{\"com.docker.compose.project\":\"other\"}\tpgdata\nend\n"}
 	plan, err := apply.BuildVolumePrune(deployment.Deployment{ID: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}, "home-a", host)
 	if err != nil {
 		t.Fatal(err)
@@ -94,5 +94,19 @@ func TestPruneShortensOnlyAnonymousVolumeNames(t *testing.T) {
 	}
 	if !rec.Has("pending", "remove volume paisans-f2a9-old_data") || !rec.Has("pending", "remove volume paisans-f2a9-old_logs") {
 		t.Errorf("named volumes are not told apart:\n%s", rec.Lines())
+	}
+}
+
+// A volume whose size Docker did not report is not counted as nothing: the
+// total says how many it leaves out.
+func TestPruneTotalNamesVolumesOfUnknownSize(t *testing.T) {
+	plan := &apply.VolumePrune{Volumes: []apply.DanglingVolume{
+		{Name: "a", Size: 1024, Remove: true},
+		{Name: "b", Size: -1, Remove: true},
+	}}
+	rec := &ui.Recorder{}
+	showVolumePrune(rec, plan)
+	if !strings.Contains(rec.Lines(), "total: 2 of 2 dangling volume(s), 0.0 MiB (plus 1 of unknown size)") {
+		t.Errorf("got:\n%s", rec.Lines())
 	}
 }

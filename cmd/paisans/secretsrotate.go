@@ -195,6 +195,9 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 		Apply: func(site string, s *config.Secrets, stacks []string) error {
 			return rotateApply(r, cfg, transports[site], site, s, stacks)
 		},
+		MailFrom: func(site, path string, s *config.Secrets, stacks []string) error {
+			return checkMailForRotation(r, cfg, s, path, site, stacks)
+		},
 		Healthy: func(site string, stacks []string) error {
 			for _, stack := range stacks {
 				if err := apply.WaitHealthy(cfg.Deployment(), site, stack, transports[site], rotateStopped); err != nil {
@@ -205,7 +208,8 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 		},
 		Now:         time.Now,
 		DNSProvider: rotateDNSProvider,
-		Mail:        smtpEnv(cfg, nil),
+		Mail:        localSMTPEnv(),
+		Warn:        onceEach(r.Note),
 	}
 	run, err := ui.Get(r, "read where each secret stands", func() (*secretsrotate.Run, error) {
 		if err := checkReplaced(env, replacedRs); err != nil {
@@ -231,8 +235,8 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 	if len(run.Items) == 0 {
 		return nothingToRotate(r, env, run, *execute)
 	}
-	// Asked before the hosts are claimed, so a refusal leaves even the
-	// registries as they were.
+	// Asked before any host's admission is checked, so a refusal reaches
+	// no host.
 	confirm := func(word, what string) error { return confirmWord(stdin, stdout, word, what) }
 	if *execute {
 		if err := run.ConfirmSignOut(confirm); err != nil {
@@ -242,13 +246,13 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 			return err
 		}
 	}
-	// Every site may be handed a value, and each is written to only through
-	// a claim, as apply's are.
+	// Every site may be handed a value, and each is written to only once its
+	// admission is checked, as apply's are.
 	runners := map[string]registry.Runner{}
 	for name, t := range transports {
 		runners[name] = t
 	}
-	if err := claimHosts(r, cfg, *execute, runners); err != nil {
+	if _, err := admittedHosts(r, cfg, runners); err != nil {
 		return err
 	}
 	if !*execute {
@@ -292,7 +296,7 @@ func nothingToRotate(r ui.Reporter, env secretsrotate.Env, run *secretsrotate.Ru
 }
 
 // askPasted asks for the next value of every pasted secret in the run whose
-// value every host using it runs, all before any host is claimed, so the run
+// value every host using it runs, all before any host is reached, so the run
 // never stops part way to wait on a person. Each answer is refused, with
 // nothing changed, when it is empty, unchanged, too long to be a credential,
 // or not accepted where the secret is checked (secretsrotate.Run.Answer). Run
@@ -876,3 +880,15 @@ func refuseMidRotation(secrets *config.Secrets, command string) error {
 // cannotFinish is where a refusal over a rotation that cannot finish sends
 // the operator.
 const cannotFinish = secretsrotate.CannotFinish
+
+// onceEach is note, saying each hint once however often it is given: the
+// plan and stage 2 both try a value, and both find the same thing untried.
+func onceEach(note func(hint, detail string)) func(hint, detail string) {
+	said := map[string]bool{}
+	return func(hint, detail string) {
+		if !said[hint] {
+			said[hint] = true
+			note(hint, detail)
+		}
+	}
+}

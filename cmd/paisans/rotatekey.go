@@ -89,7 +89,7 @@ func runStorageRotateKey(args []string) error {
 	// Garage's first site, where the key is imported and deleted, and every
 	// site the app runs on, where the switch applies it.
 	if len(cfg.Storage.Garage.Sites) > 0 {
-		if err := claimSites(r, cfg, *execute, union(cfg.Storage.Garage.Sites[:1], render.AppSites(cfg)[*appName])...); err != nil {
+		if _, err := admittedSites(r, cfg, union(cfg.Storage.Garage.Sites[:1], render.AppSites(cfg)[*appName])...); err != nil {
 			return err
 		}
 	}

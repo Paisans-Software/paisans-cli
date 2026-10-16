@@ -115,17 +115,15 @@ func andList(words []string) string {
 // ignored anywhere else. A monitor beside the gateway is served by the
 // gateway's Caddy, so it carries none either. listen is where Docker publishes the app for the
 // operator's own web server, so it belongs to managed_by external alone, which
-// cannot work without it. Docker publishes a port in front of ufw, so a
-// listen address the internet could reach would expose the app around the
-// proxy whatever the firewall says: only loopback, a private LAN address
-// (RFC 1918, or carrier grade NAT space as Tailscale uses) or the site's own
-// mesh address are accepted, and all but loopback with a warning.
+// cannot work without it. The web server runs on the same host, so nothing
+// beyond it needs the port, and any other address would put the app where
+// other machines reach it around the proxy: only loopback or the site's own
+// mesh address is accepted, and the mesh address with a warning, since the
+// firewall lets the mesh in whole.
 // One listen publishes one app, so an external monitor hosts the monitor and
 // nothing else: a second app pinned there would be routed by nothing.
-// include_dir is where apply writes that app's file for the operator's web
-// server, so it too belongs to managed_by external, and it is written into that
-// server's configuration and into shell commands, so it is held to a plain
-// absolute path.
+// include_dir is refused, since apply writes only into the deployment's own
+// root.
 func (c *checker) webServer() {
 	for _, name := range c.cfg.SiteNames() {
 		site := c.cfg.Sites[name]
@@ -146,14 +144,10 @@ func (c *checker) webServer() {
 			continue
 		}
 		managedBy, listen := site.WebServerManagedBy(), site.WebServer.Listen
-		if dir := site.WebServer.IncludeDir; !dir.Unset() && managedBy != config.ManagedByExternal {
-			c.refuse("web-server-include-dir-managed-by", key+".include_dir",
-				"web_server include_dir does not fit its managed_by",
-				"is set, but managed_by is paisans, where the toolkit's own Caddy serves the app and no other web server includes anything. Remove include_dir, or set managed_by: external.")
-		} else if p := config.IncludeDirProblem(dir.Path); dir.Path != "" && p != "" {
-			c.refuse("web-server-include-dir-path", key+".include_dir",
-				"web_server include_dir is not a plain absolute path",
-				"is %q, which %s. It is written into your web server's configuration and into commands on the host, so it must be an absolute path in its clean form, without spaces, quotes or glob characters, for example /etc/nginx/paisans.d.", dir.Path, p)
+		if !site.WebServer.IncludeDir.Unset() {
+			c.refuse("web-server-include-dir", key+".include_dir",
+				"web_server include_dir is not a setting",
+				"is set. apply writes nothing into your web server's configuration: it writes a reference snippet for each app under %s/web-server/ on the site, and the host's owner installs it in their web server (paisans web-server show --app <app> prints it). Remove include_dir.", c.cfg.Deployment().Root())
 		}
 		switch {
 		case managedBy == config.ManagedByPaisans && listen != "":
@@ -185,11 +179,11 @@ func (c *checker) webServer() {
 		case !config.ProxiesToThisHost(listen, site.Address):
 			c.refuse("web-server-listen-not-this-host", key+".listen",
 				"web_server listens beyond loopback and the site's mesh address",
-				"is %s. Your web server runs on this host, so it reaches the app on loopback, and Docker publishes a port with its own iptables rules, in front of ufw, so any other address exposes the app around your web server. Use loopback, 127.0.0.1, or this site's own mesh address, %s.", listen, site.Address)
+				"is %s. Your web server runs on this host and reaches the app on loopback, so nothing beyond the host needs the port, and any other address puts the app where other machines can reach it directly, around your web server, held back only by whatever the host's firewall allows. Use loopback, 127.0.0.1, or this site's own mesh address, %s.", listen, site.Address)
 		case strings.HasPrefix(listen, site.Address+":"):
 			c.warn("web-server-listen-bypasses-firewall", key+".listen",
-				"web_server listens on a non-loopback address the firewall misses",
-				"is %s, which is not loopback. Docker publishes a port with its own iptables rules, in front of ufw, so the firewall does not protect it: anything that can reach %s over the mesh can reach the app around your web server. Prefer 127.0.0.1.", listen, site.Address)
+				"web_server listens on the mesh address, which every site reaches",
+				"is %s, which is not loopback. The firewall lets the mesh in whole, so anything that can reach %s over the mesh, every site of this deployment, can reach the app around your web server. Prefer 127.0.0.1.", listen, site.Address)
 		}
 	}
 }

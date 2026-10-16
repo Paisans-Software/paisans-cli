@@ -3081,3 +3081,43 @@ and an operator had nothing to write that moved the infrastructure sooner.
 * **An override for a pinned app's own Postgres:** left out.
 * **The stale-override check in validate:** validate reads the file alone and
   reaches no registry.
+
+## 2026-10-16: `host admit` enables ufw when the owner says so
+
+Founder decision, 2026-10-16. Spec: `docs/specs/2026-10-15-rootless-and-host-admit.md`, step 9.
+
+### What was decided
+
+* With `--enable-ufw`, or a yes at a terminal, admit enables an installed,
+  inactive ufw: an allow for every TCP port sshd listens on, tagged
+  `paisans: ssh`, after the deployment's own rules; a 10 minute
+  `systemd-run` timer that runs `ufw disable`; `ufw --force enable`; and the
+  timer stopped once a new SSH login gets through.
+* Without it, admit refuses, naming `--enable-ufw` first, then the commands
+  that enable ufw by hand, numbered, every allow before the enable.
+* Admit does not enable ufw while it holds any deny or reject rule of the
+  owner's, in any form, nor with `IPV6` other than `yes` in
+  `/etc/default/ufw` while sshd listens on IPv6; the refusal says why, and
+  no question is asked.
+* Evict never disables ufw and never removes a `paisans: ssh` allow.
+
+### Why
+
+Admit used to refuse an inactive ufw and tell the owner to allow their SSH
+port and run `sudo ufw enable`. An owner who ran only the enable was locked
+out of SSH. Allowing the ports sshd actually listens on, with a fallback that
+turns ufw off again, takes the lockout out of the owner's hands.
+
+### What was weighed
+
+* **Keep refusing, with better instructions:** the instructions stay, for
+  the owner who wants to do it by hand, but a refusal is still a step to get
+  wrong.
+* **The ports from `sshd -T`:** under socket activation, Ubuntu 24.04's
+  default, systemd holds the listening socket and sshd's Port lines say
+  nothing of it, so the sockets are read with `ss` instead.
+* **Parse the owner's deny rules, or insert admit's allows first (`ufw
+  insert 1`):** parsing every rule form is open-ended, and inserting first
+  overrides an owner's deliberate deny.
+* **Enable without a fallback:** a cloud firewall or a rule admit cannot see
+  would still lock the owner out, with nothing to undo it.

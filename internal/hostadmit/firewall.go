@@ -10,17 +10,32 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
 )
 
-// planFirewall checks that ufw is installed and active, checks 80 and 443
-// before the public ports are granted, then plans the deployment's tagged
-// ufw rules through the host profile. Admit never enables ufw and never
-// sets its defaults: choosing a firewall and its policy is the owner's.
+// planFirewall checks that ufw is installed, checks 80 and 443 before the
+// public ports are granted, then plans the deployment's tagged ufw rules
+// through the host profile. ufw that is installed but not active is
+// enabled only with --enable-ufw (planEnableUFW), after every rule; without
+// it admit refuses, naming the commands that enable it safely. Admit never
+// sets ufw's defaults: choosing the policy is the owner's.
 func planFirewall(p *planner) error {
 	req := p.in.Request
+	var before *ufwBefore
 	switch {
 	case !p.f.UFWInstalled:
-		return fmt.Errorf("ufw is not installed. Admit works only on a host whose firewall is ufw, and does not install or enable one: install ufw, allow your own SSH port, run `sudo ufw enable`, then run admit again. Nothing was changed")
+		return fmt.Errorf("ufw is not installed. Admit works only on a host whose firewall is ufw, and does not install one: install ufw, then run admit again with --enable-ufw, which allows your SSH port before it enables ufw. Nothing was changed")
 	case !p.f.UFWActive:
-		return fmt.Errorf("ufw is installed but not active. Admit does not enable it: allow your own SSH port, run `sudo ufw enable`, then run admit again. Nothing was changed")
+		b, err := readUFWBefore(p)
+		if err != nil {
+			return err
+		}
+		// What would stop --enable-ufw stops admit without it too, so the
+		// owner is never asked, or told to pass the flag, only to be refused.
+		if err := b.blocker(); err != nil {
+			return err
+		}
+		if !p.in.Flags.EnableUFW {
+			return &UFWInactiveError{SSHPorts: b.ports}
+		}
+		before = &b
 	}
 	if p.in.Flags.PublicPorts {
 		found, err := holders(p)
@@ -36,32 +51,32 @@ func planFirewall(p *planner) error {
 		}
 		p.present("public ports: nothing else answers on 80 or 443")
 	}
-	s, err := p.profile.Firewall(p.t, p.d, hostprep.AdmitRules(p.d, req.SSHPort, req.ListenPort, p.in.Flags.PublicPorts), false, "host admit")
+	s, err := p.profile.Firewall(p.t, p.d, hostprep.AdmitRules(p.d, req.SSHPort, req.ListenPort, p.in.Flags.PublicPorts))
 	if err != nil {
 		// Build names the part already.
 		return errors.New(strings.TrimPrefix(shown(err).Error(), "firewall: ") + ". Nothing was changed")
 	}
-	// A matching rule without the paisans comment is the owner's, most
-	// often the SSH allow they added before enabling ufw. Host prepare
-	// adopts one as its own; admit adds only its tagged rules and leaves
-	// the owner's as it is, which the profile has already reported present.
-	var steps []hostprep.Step
-	for _, st := range s.Steps {
-		if st.Label != "adopt" {
-			steps = append(steps, st)
+	present := s.Present
+	if before == nil {
+		s.Present = append(present, "firewall: ufw active, its default policy left to the owner")
+		if p.in.enabledUFW {
+			s.Present = append(s.Present, "firewall: ufw enabled by this admit")
 		}
+	} else {
+		s.Present = append(present, "firewall: ufw's default policy left to the owner")
 	}
-	s.Steps = steps
-	// The profile says why it leaves the policy alone in host prepare's
-	// terms, a shared host; admit leaves it alone on every host.
-	var present []string
-	for _, line := range s.Present {
-		if !strings.HasPrefix(line, "firewall: default policy and enabled state left alone") {
-			present = append(present, line)
-		}
-	}
-	s.Present = append(present, "firewall: ufw active, its default policy left to the owner")
 	p.section(s)
+	prev, err := p.previous()
+	if err != nil {
+		return err
+	}
+	p.record.UFWEnabled = p.in.enabledUFW || prev != nil && prev.UFWEnabled
+	if before != nil {
+		return planEnableUFW(p, *before)
+	}
+	if p.in.Flags.EnableUFW && !p.in.enabledUFW {
+		p.present("firewall: ufw is active already, so --enable-ufw changes nothing")
+	}
 	return nil
 }
 

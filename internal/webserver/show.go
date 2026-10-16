@@ -84,8 +84,8 @@ func ListenWarning(t Target) (hint, detail string, ok bool) {
 	if ip == nil || ip.IsLoopback() {
 		return "", "", false
 	}
-	return fmt.Sprintf("listen is %s, not loopback: ufw does not protect it", t.Listen),
-		fmt.Sprintf("Docker publishes the port with its own iptables rules, in front of ufw, so ufw does not protect it: anything that can reach %s can reach the app around your web server. Restrict it upstream of the host, or in Docker's DOCKER-USER chain.", t.ListenHost), true
+	return fmt.Sprintf("listen is %s, not loopback: the app is reachable around your web server", t.Listen),
+		fmt.Sprintf("Your web server runs on this host and reaches the app on loopback, but the port is published on %s, so anything the host's firewall lets reach %s reaches the app directly, around your web server. The firewall lets the mesh in whole, so on the site's mesh address that is every site of this deployment. Prefer 127.0.0.1.", t.ListenHost, t.ListenHost), true
 }
 
 // ACMEDNSWarning is the warning for a Caddy whose global acme_dns reaches

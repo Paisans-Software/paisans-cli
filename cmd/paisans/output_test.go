@@ -166,8 +166,8 @@ func quietAnswer(args []string, log, fail string) (string, int, bool) {
 		}
 	case strings.Contains(cmd, "getent passwd"):
 		out.WriteString("ubuntu:x:1000:1000::/home/ubuntu:/bin/bash\n")
-	case strings.HasSuffix(cmd, "id -u"):
-		out.WriteString("0\n")
+	case strings.Contains(cmd, `echo "uid`):
+		out.WriteString("uid 1000\nsubuid ubuntu:165536:65536\n")
 	case cmd == "dpkg --print-architecture":
 		out.WriteString("amd64\n")
 	case strings.Contains(cmd, "print-architecture"):
@@ -176,6 +176,8 @@ func quietAnswer(args []string, log, fail string) (string, int, bool) {
 		out.WriteString("ID=ubuntu\nVERSION_ID=\"24.04\"\nVERSION_CODENAME=noble\n")
 	case strings.Contains(cmd, "docker volume ls"):
 		out.WriteString("end\n")
+	case strings.Contains(cmd, "RuntimeWatchdogUSec"):
+		out.WriteString("device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\nowner 1000\nme 1000\n")
 	case strings.Contains(cmd, "__PAISANS_NO_ETCD__"):
 		out.WriteString("__PAISANS_NO_ETCD__\n")
 	case strings.Contains(cmd, "__PAISANS_ABSENT__"):
@@ -194,8 +196,8 @@ func (e sshExit) ExitCode() int { return int(e) }
 // The remote command travels base64 encoded (apply.RemoteCommand), so the
 // script decodes it, drops the DOCKER_HOST export a site transport puts
 // first, and answers the few probes whose silence would be read as a
-// failure: who it runs as, which OS, what volumes there are, and that a
-// file is absent.
+// failure: who it runs as, which OS, what volumes there are, that a file
+// is absent, and that the watchdog admit gave the user is there.
 const quietHost = `#!/bin/sh
 for last; do :; done
 b=${last#*printf %s }
@@ -214,14 +216,15 @@ case "$cmd" in
 		case "$cmd" in *".Config.Volumes"*) echo "volumes $r null";; *) echo "present sha256:0123456789abcdef $r";; esac
 	done;;
 *"getent passwd"*) echo "ubuntu:x:1000:1000::/home/ubuntu:/bin/bash";;
-# The host check's inventory asks id -u too, and refuses anyone but root
-# until phase 6 moves it to the user, so it is answered 0 here. The login
-# probe, a bare id -u, is answered 1000 before this script runs.
-*"id -u") echo 0;;
+# The host check's inventory asks who it runs as. The login probe, a bare
+# id -u, is answered 1000 before this script runs.
+*'echo "uid'*) printf 'uid 1000\nsubuid ubuntu:165536:65536\n';;
 "dpkg --print-architecture") echo amd64;;
 *"print-architecture"*) echo "arch amd64";;
 *"/etc/os-release"*) printf 'ID=ubuntu\nVERSION_ID="24.04"\nVERSION_CODENAME=noble\n';;
 *"docker volume ls"*) echo end;;
+# host admit loaded softdog and gave /dev/watchdog to the user.
+*RuntimeWatchdogUSec*) printf 'device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\nowner 1000\nme 1000\n';;
 *__PAISANS_NO_ETCD__*) echo __PAISANS_NO_ETCD__;;
 *__PAISANS_ABSENT__*) echo __PAISANS_ABSENT__;;
 esac
@@ -266,6 +269,12 @@ func (h runningHost) Run(command string) (string, error) {
 	}
 	if strings.Contains(command, "ip -j ") {
 		return "[]\n", nil
+	}
+	if strings.Contains(command, `echo "uid`) {
+		return "uid 1000\nsubuid ubuntu:165536:65536\n", nil
+	}
+	if strings.Contains(command, "getent passwd") {
+		return "ubuntu:x:1000:1000::/home/ubuntu:/bin/bash\n", nil
 	}
 	if strings.HasSuffix(command, "id -u") {
 		return "0\n", nil
@@ -354,8 +363,8 @@ func fixtureRuns(t *testing.T) map[string]string {
 	}
 
 	{
-		host := danglingHost{listing: "volume\t3a37a98261c4f658850d43b3d0ddc746ae25d9ec6bb58e83132662b7ea646191\t48234496\t{\"community.paisans.deployment\":\"f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01\"}\tcache log\n" +
-			"volume\tother_db\t9999\t{\"com.docker.compose.project\":\"other\"}\tpgdata\nend\n"}
+		host := danglingHost{listing: `[{"Name":"3a37a98261c4f658850d43b3d0ddc746ae25d9ec6bb58e83132662b7ea646191","Size":"48.234MB"},{"Name":"other_db","Size":"9.999kB"}]` + "\nvolumes\nvolume\t3a37a98261c4f658850d43b3d0ddc746ae25d9ec6bb58e83132662b7ea646191\t{\"community.paisans.deployment\":\"f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01\"}\tcache log\n" +
+			"volume\tother_db\t{\"com.docker.compose.project\":\"other\"}\tpgdata\nend\n"}
 		plan, err := apply.BuildVolumePrune(deployment.Deployment{ID: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}, "home-a", host)
 		if err != nil {
 			t.Fatal(err)

@@ -6,7 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/dns"
@@ -142,6 +144,15 @@ func TestForcedOnAnEmptyHostSaysNothingToDo(t *testing.T) {
 	if out := rec.Lines(); !strings.Contains(out, "--execute") || !strings.Contains(out, "deployment record") {
 		t.Errorf("a dry run with a record left to clean printed:\n%s", out)
 	}
+	// A host left for its owner's evict says so on every ending.
+	plan.Evict = "sudo paisans host evict --deployment x --user deploy --execute"
+	for _, recordLeft := range []bool{false, true} {
+		rec = &ui.Recorder{}
+		forcedNothingToDo(rec, plan, config.Destination{User: "admin", Host: "192.0.2.1", Port: 22}, recordLeft)
+		if !strings.Contains(rec.Lines(), plan.Evict) {
+			t.Errorf("record left %v: no evict line in:\n%s", recordLeft, rec.Lines())
+		}
+	}
 	plan.Stages[0].Steps = []siteremove.Step{{Site: "home-b", Verb: "remove"}}
 	if forcedNothingToDo(&ui.Recorder{}, plan, config.Destination{}, false) {
 		t.Error("a plan with steps was ended")
@@ -153,7 +164,7 @@ func TestForcedOnAnEmptyHostSaysNothingToDo(t *testing.T) {
 func TestForcedRunReportsAGatewayItCouldNotReach(t *testing.T) {
 	savedSite, savedReg := removeSiteHost, registryHost
 	t.Cleanup(func() { removeSiteHost, registryHost = savedSite, savedReg })
-	quiet := runningHost{failingHost{match: "\x00"}}
+	quiet := admittedRunning{runningHost: runningHost{failingHost{match: "\x00"}}, site: "monitor-a", roles: []string{"monitor"}}
 	removeSiteHost = func(string, config.Site) apply.Transport { return quiet }
 	registryHost = func(string, config.Site, string) registry.Runner { return &recordFake{down: true} }
 	var err error
@@ -171,19 +182,20 @@ func TestForcedRunReportsAGatewayItCouldNotReach(t *testing.T) {
 // A host whose only part of the deployment is its kept Caddy says so, and
 // names the sites it is kept for, rather than that it holds nothing.
 func TestForcedOnAHostWithOnlyAKeptCaddySaysSo(t *testing.T) {
-	plan := &siteremove.Plan{Site: "vm", Stages: []*siteremove.Stage{{Number: 3, Name: "clean the host"}}, CaddyKept: []string{"/srv/caddy.d/blog.caddy"}}
+	plan := &siteremove.Plan{Site: "vm", Stages: []*siteremove.Stage{{Number: 3, Name: "clean the host"}}, CaddyKept: []string{"/srv/paisans/f2a9/caddy.d/blog.caddy"}}
 	rec := &ui.Recorder{}
 	if !forcedNothingToDo(rec, plan, config.Destination{User: "admin", Host: "192.0.2.1", Port: 22}, false) {
 		t.Fatal("a plan with nothing to do was not ended")
 	}
 	out := rec.Lines()
-	if !strings.Contains(out, "Caddy") || !strings.Contains(out, "/srv/caddy.d/blog.caddy") || strings.Contains(out, "holds nothing of this deployment.") {
+	if !strings.Contains(out, "Caddy") || !strings.Contains(out, "/srv/paisans/f2a9/caddy.d/blog.caddy") || strings.Contains(out, "holds nothing of this deployment.") {
 		t.Errorf("printed:\n%s", out)
 	}
 }
 
 // idHost is an empty running host whose registry holds the fixture
-// deployment's monitor and a neighbour's entry.
+// deployment's monitor and a neighbour's entry, and whose login, ubuntu, the
+// fixture deployment's admission record names as its watch site's user.
 type idHost struct {
 	runningHost
 	registry string
@@ -193,37 +205,76 @@ func (h idHost) ReadFile(path string) (string, bool, error) {
 	if path == registry.Path {
 		return h.registry, true, nil
 	}
+	return admittedRunning{runningHost: h.runningHost, site: "watch", roles: []string{"monitor"}}.ReadFile(path)
+}
+
+func (h idHost) Run(command string) (string, error) {
+	if strings.Contains(command, `echo "user $(id -un)"`) {
+		p, _ := admission.Path("f2a9")
+		return "user ubuntu\n" + p + "\n", nil
+	}
+	return h.runningHost.Run(command)
+}
+
+// admittedRunning is a running host that admitted the fixture deployment
+// as its login user, ubuntu, whom site remove cleans as: as site with
+// roles, or as home-a when site is empty.
+type admittedRunning struct {
+	runningHost
+	site  string
+	roles []string
+}
+
+func (h admittedRunning) ReadFile(path string) (string, bool, error) {
+	if p, _ := admission.Path("f2a9"); path == p {
+		return ubuntuRecord(h.site, h.roles), true, nil
+	}
 	return h.runningHost.ReadFile(path)
 }
 
-// cleaningHost is an idHost that a removal empties: once its registry entry
-// is taken out, the registry no longer lists it and no unit is left.
+// ubuntuRecord is the fixture deployment's admission record naming ubuntu,
+// the user every fake host's passwd entry answers for the login, for home-a,
+// or for site with roles when site is not empty.
+func ubuntuRecord(site string, roles []string) string {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		panic(err)
+	}
+	req, err := admission.Build(cfg, "home-a")
+	if err != nil {
+		panic(err)
+	}
+	rec := admission.NewRecord(req, req.Grants, "", time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC))
+	rec.User = "ubuntu"
+	if site != "" {
+		rec.Site, rec.Roles = site, roles
+	}
+	b, err := admission.EncodeRecord(rec)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
+// cleaningHost is an idHost holding one unit of the deployment's in its
+// user's systemd directory, which a removal deletes.
 type cleaningHost struct {
 	idHost
 	removed bool
 }
 
 func (h *cleaningHost) Run(command string) (string, error) {
-	if strings.Contains(command, "awk ") && strings.Contains(command, registry.Path) {
+	if strings.Contains(command, "daemon-reload") {
 		h.removed = true
 		return "", nil
 	}
-	if h.removed && strings.Contains(command, `echo "unit $f"`) {
-		return "", nil
+	if strings.Contains(command, `echo "unit $f"`) {
+		if h.removed {
+			return "", nil
+		}
+		return "unit /home/ubuntu/.config/systemd/user/paisans-f2a9-config-daemon.service\n", nil
 	}
 	return h.idHost.Run(command)
-}
-
-func (h *cleaningHost) ReadFile(path string) (string, bool, error) {
-	if path == registry.Path && h.removed {
-		reg, err := registry.Parse([]byte(h.registry))
-		if err != nil {
-			return "", false, err
-		}
-		data, err := registry.Encode(registry.Remove(reg, monitorID))
-		return string(data), true, err
-	}
-	return h.idHost.ReadFile(path)
 }
 
 // Every --id run says DNS was not modified, in one line and the comment to
@@ -255,7 +306,9 @@ func TestSiteRemoveByIDWarnsThatDNSWasNotModified(t *testing.T) {
 func TestForcedRemovalOfAnUndeclaredSiteMakesNoProvider(t *testing.T) {
 	savedSite, savedReg, savedDNS := removeSiteHost, registryHost, dnsProviderFor
 	t.Cleanup(func() { removeSiteHost, registryHost, dnsProviderFor = savedSite, savedReg, savedDNS })
-	removeSiteHost = func(string, config.Site) apply.Transport { return runningHost{failingHost{match: "\x00"}} }
+	removeSiteHost = func(string, config.Site) apply.Transport {
+		return admittedRunning{runningHost: runningHost{failingHost{match: "\x00"}}, site: "monitor-a", roles: []string{"monitor"}}
+	}
 	registryHost = func(string, config.Site, string) registry.Runner { return &recordFake{} }
 	dnsProviderFor = func(string, string) (dns.Provider, error) {
 		t.Error("a DNS provider was made")
@@ -269,7 +322,7 @@ func TestForcedRemovalOfAnUndeclaredSiteMakesNoProvider(t *testing.T) {
 }
 
 // An --id run that cleans the host ends on one line naming the host and the
-// deployment it was cleaned of.
+// deployment it was cleaned of, and the host evict line for its owner.
 func TestSiteRemoveByIDEndsNamingTheDeployment(t *testing.T) {
 	withHost(t, &cleaningHost{idHost: idHost{runningHost{failingHost{match: "\x00"}}, twoDeployments(t)}})
 	saved := isTerminal
@@ -291,6 +344,10 @@ func TestSiteRemoveByIDEndsNamingTheDeployment(t *testing.T) {
 	want := "admin@192.0.2.30:22 is cleaned of deployment " + monitorID + "."
 	if !rec.Has("result", want) {
 		t.Errorf("no result %q in:\n%s", want, rec.Lines())
+	}
+	// Then the line the host's owner runs to remove what is root's.
+	if !rec.Has("note", "the host's owner finishes on watch") || !strings.Contains(rec.Lines(), "    sudo paisans host evict --deployment "+monitorID+" --user ubuntu --execute") {
+		t.Errorf("no evict line in:\n%s", rec.Lines())
 	}
 }
 

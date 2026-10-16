@@ -38,22 +38,19 @@ func (h *inventoryHost) Run(command string) (string, error) {
 }
 func (h *inventoryHost) ReadFile(string) (string, bool, error) { return "", false, nil }
 
-// webHost runs somebody's web server on 80 and 443, outside Docker.
-func webHost(ufw string) *inventoryHost {
+// webHost runs another user's web server on 80 and 443, outside Docker.
+func webHost() *inventoryHost {
 	return &inventoryHost{answers: map[string]string{
-		"id -u":                  "0\n",
-		"docker version":         "absent\n",
-		"dpkg-query":             "",
-		"ss -Hltnup":             "tcp LISTEN 0 511 0.0.0.0:80 0.0.0.0:* users:((\"nginx\",pid=900,fd=6))\ntcp LISTEN 0 511 0.0.0.0:443 0.0.0.0:* users:((\"nginx\",pid=900,fd=7))\n",
-		"/proc/":                 "900 0::/system.slice/nginx.service \n",
-		"ip -o link":             "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536\n2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500\n",
-		"ip -j route":            `[{"dst":"default","dev":"eth0"}]`,
-		"ufw status verbose":     ufw,
-		"is-active firewalld":    "inactive\n",
-		"/srv/caddy.d/":          "",
-		"docker inspect":         "",
-		"docker volume inspect":  "",
-		"docker network inspect": "",
+		`echo "uid`:                  "uid 1001\nsubuid paisans-f2a9:165536:65536\n",
+		"docker version":             "absent\n",
+		"dpkg-query":                 "",
+		"ss -Hltnue":                 "tcp LISTEN 0 511 0.0.0.0:80 0.0.0.0:* uid:1002 ino:1 sk:1 <->\ntcp LISTEN 0 511 0.0.0.0:443 0.0.0.0:* uid:1002 ino:2 sk:2 <->\n",
+		"ip -o link":                 "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536\n2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500\n",
+		"ip -j route":                `[{"dst":"default","dev":"eth0"}]`,
+		"/srv/paisans/f2a9/caddy.d'": "",
+		"docker inspect":             "",
+		"docker volume inspect":      "",
+		"docker network inspect":     "",
 	}}
 }
 
@@ -66,25 +63,23 @@ func hostCheckFixture(t *testing.T) *config.Config {
 	return cfg
 }
 
-const ufwUp = "Status: active\nDefault: deny (incoming), allow (outgoing), disabled (routed)\n"
-
 // A conflict is refused with the conflict named in the error, which prints
 // at any verbosity, the host check's step marked failed, and nothing but the
 // inventory's own probes reached the host.
 func TestTheGateRefusesAConflictHavingOnlyLooked(t *testing.T) {
-	h := webHost(ufwUp)
+	h := webHost()
 	rec := &ui.Recorder{}
 	_, err := hostGate(rec, hostCheckFixture(t), "edge", h)
 	if err == nil || !strings.Contains(err.Error(), "nothing was changed") {
 		t.Fatalf("got %v", err)
 	}
-	if !strings.Contains(err.Error(), "*:80/tcp (Caddy): claimed by sites.edge.roles (gateway), held by process nginx (pid 900)") {
+	if !strings.Contains(err.Error(), "*:80/tcp (Caddy): claimed by sites.edge.roles (gateway), held by a listener of another user's (uid 1002)") {
 		t.Errorf("the refusal does not name the conflict: %v", err)
 	}
 	if !rec.Has("fail", "host check") {
 		t.Errorf("the host check is not marked failed:\n%s", rec.Lines())
 	}
-	probes := []string{"id -u", "docker version", "dpkg-query", "ss -Hltnup", "/proc/", "ip -o link", "ip -j route", "ufw status verbose", "is-active firewalld", "/srv/caddy.d/"}
+	probes := []string{`echo "uid`, "docker version", "dpkg-query", "ss -Hltnue", "ip -o link", "ip -j route", "/srv/paisans/f2a9/caddy.d'"}
 	for _, c := range h.ran {
 		known := false
 		for _, p := range probes {
@@ -100,7 +95,7 @@ func TestTheGateRefusesAConflictHavingOnlyLooked(t *testing.T) {
 // found marked under it.
 func TestTheGateIsOneStepWhoseResultIsTheClass(t *testing.T) {
 	rec := &ui.Recorder{Verbose_: true}
-	if _, err := hostGate(rec, hostCheckFixture(t), "home-a", webHost(ufwUp)); err != nil {
+	if _, err := hostGate(rec, hostCheckFixture(t), "home-a", webHost()); err != nil {
 		t.Fatal(err)
 	}
 	i := rec.Index("done", "host check")
@@ -108,12 +103,12 @@ func TestTheGateIsOneStepWhoseResultIsTheClass(t *testing.T) {
 		t.Fatalf("the host check did not end with its class:\n%s", rec.Lines())
 	}
 	// What it found is marked under the step's own line, with --verbose.
-	if f := rec.Index("done", "firewall"); f < i || rec.Events[f].Extra != "ufw active, incoming deny" {
-		t.Errorf("the firewall is not marked after the host check:\n%s", rec.Lines())
+	if f := rec.Index("done", "docker"); f < i || rec.Events[f].Extra != "absent" {
+		t.Errorf("Docker is not marked after the host check:\n%s", rec.Lines())
 	}
 
-	empty := webHost(ufwUp)
-	empty.answers["ss -Hltnup"], empty.answers["/proc/"] = "", ""
+	empty := webHost()
+	empty.answers["ss -Hltnue"] = ""
 	clean := &ui.Recorder{}
 	if _, err := hostGate(clean, hostCheckFixture(t), "home-a", empty); err != nil {
 		t.Fatal(err)
@@ -123,18 +118,15 @@ func TestTheGateIsOneStepWhoseResultIsTheClass(t *testing.T) {
 	}
 }
 
-// A shared host is let through only with its firewall already up.
-func TestTheGateNeedsASharedHostsFirewall(t *testing.T) {
-	cfg := hostCheckFixture(t)
-	if _, err := hostGate(ui.Discard, cfg, "home-a", webHost("Status: inactive\n")); err == nil || !strings.Contains(err.Error(), "ufw is inactive") {
-		t.Errorf("got %v", err)
-	}
-	report, err := hostGate(ui.Discard, cfg, "home-a", webHost(ufwUp))
+// A shared host is let through, and read as shared: its firewall is host
+// admit's.
+func TestTheGateLetsASharedHostThrough(t *testing.T) {
+	report, err := hostGate(ui.Discard, hostCheckFixture(t), "home-a", webHost())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !report.Shared() {
-		t.Error("a host with a foreign web server is not shared")
+		t.Error("a host with another user's web server is not shared")
 	}
 }
 
@@ -142,7 +134,7 @@ func TestTheGateNeedsASharedHostsFirewall(t *testing.T) {
 // and learns which are shared.
 func TestGateSitesChecksEachAndNamesTheShared(t *testing.T) {
 	cfg := hostCheckFixture(t)
-	hosts := map[string]*inventoryHost{"home-a": webHost(ufwUp), "edge": webHost(ufwUp)}
+	hosts := map[string]*inventoryHost{"home-a": webHost(), "edge": webHost()}
 	reach := func(site string) hostcheck.Transport { return hosts[site] }
 	if _, err := gateSites(ui.Discard, cfg, []string{"home-a", "edge"}, reach); err == nil {
 		t.Fatal("a conflict on edge was not refused")

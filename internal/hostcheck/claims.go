@@ -27,9 +27,6 @@ type Claims struct {
 	// toolkit's only when it carries this deployment's label, so another
 	// deployment's containers on the same host are as foreign as anyone's.
 	Deployment deployment.Deployment
-	// SSHPort is the site's ssh.port, which any advice about enabling a
-	// firewall has to allow first.
-	SSHPort int
 	// Networks are the subnets the site's stacks pin, each with the key
 	// behind it (render.SiteNetworks): a foreign Docker network or route
 	// over one is a conflict, as one over the mesh is.
@@ -63,7 +60,6 @@ func ClaimsFor(cfg *config.Config, site string) (Claims, error) {
 		Interface:  cfg.Deployment().Interface(),
 		ListenPort: cfg.Sites[site].ListenPort(),
 		Mesh:       mesh,
-		SSHPort:    cfg.Sites[site].SSH.PortOrDefault(),
 	}
 	for _, n := range render.SiteNetworks(cfg, site) {
 		_, subnet, err := net.ParseCIDR(n.Subnet)

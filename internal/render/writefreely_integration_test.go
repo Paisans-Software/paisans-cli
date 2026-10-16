@@ -35,6 +35,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/paisans-software/paisans-cli/internal/dockertest"
 )
 
 const (
@@ -59,9 +61,7 @@ type wfCluster struct {
 // tag degrades on a workstation that lacks it instead of looking like a bug.
 func requireDockerForWriteFreely(t *testing.T) {
 	t.Helper()
-	if _, err := exec.LookPath("docker"); err != nil {
-		t.Skip("docker is not on PATH; skipping the WriteFreely integration test")
-	}
+	dockertest.RequireRootless(t)
 }
 
 // renderedImage reads one service's image out of the rendered compose file, so

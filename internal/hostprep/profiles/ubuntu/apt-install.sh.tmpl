@@ -3,10 +3,10 @@
         than prompting about it, and the lock timeout waits out the
         unattended-upgrades run a freshly booted cloud image often starts.
         8>&- closes host admit's Docker hold lock for apt, so nothing apt or
-        a package's script starts keeps it held; where it is not open, as
-        under host prepare, closing it does nothing. WithoutRecommends are
-        installed by a second call, without their recommendations
-        (withoutRecommends in ubuntu.go says why). */ -}}
+        a package's script starts keeps it held; where it is not open,
+        closing it does nothing. WithoutRecommends are installed by a second
+        call, without their recommendations (withoutRecommends in ubuntu.go
+        says why). */ -}}
 set -e
 export DEBIAN_FRONTEND=noninteractive
 apt-get -o DPkg::Lock::Timeout=300 update 8>&-

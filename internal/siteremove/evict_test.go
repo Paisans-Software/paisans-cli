@@ -13,7 +13,6 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/deployrecord"
 	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/dns/dnstest"
-	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/siteremove"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -63,7 +62,7 @@ func replacement(text string) string {
 	return strings.ReplaceAll(text, "placement: { pinned: vm }", "placement: { pinned: home-d }")
 }
 
-// joining makes site's host a fresh one: no claim, no files, in no cluster,
+// joining makes site's host a fresh one: no admission record, no files, in no cluster,
 // and every other site's mesh as an apply without it rendered it, since it
 // has never run.
 func (w *world) joining(site string) {
@@ -707,16 +706,17 @@ func TestAnEvictionRereadsTheLeaderBeforeTheCut(t *testing.T) {
 	}
 }
 
-// A site whose host lost its claim is not taken for a new one while anything
+// A site whose host lost its admission record is not taken for a new one while anything
 // says it ran in this deployment: a remaining site listing its key, or a
 // gateway's deployment record listing it. Taken for new, it would be left out
 // of the cut while its peers still talk to it.
 func TestAnEvictionRefusesASiteThatOnlyLostItsClaim(t *testing.T) {
 	t.Run("a peer lists its key", func(t *testing.T) {
 		w, zone := evictWorld(t, "home-b")
-		delete(w.hosts["home-c"].files, registry.Path)
+		path, _ := admitted(t, w.cfg, "home-c")
+		delete(w.hosts["home-c"].files, path)
 		_, err := w.build("home-b", evictOptions(zone))
-		if err == nil || !strings.Contains(err.Error(), "home-c's host holds no claim") || !strings.Contains(err.Error(), "home-a lists its WireGuard key as a peer") {
+		if err == nil || !strings.Contains(err.Error(), "home-c's host has not admitted this deployment") || !strings.Contains(err.Error(), "home-a lists its WireGuard key as a peer") {
 			t.Fatalf("err = %v", err)
 		}
 	})
@@ -725,7 +725,7 @@ func TestAnEvictionRefusesASiteThatOnlyLostItsClaim(t *testing.T) {
 		w.joining("home-d")
 		w.hosts["vm"].files[deployrecord.Path(dep)] = deployrecord.Encode(deployrecord.Record{Sites: []string{"home-a", "home-b", "home-c", "home-d", "vm", "watch"}})
 		_, err := w.build("home-b", evictOptions(zone))
-		if err == nil || !strings.Contains(err.Error(), "home-d's host holds no claim") || !strings.Contains(err.Error(), "deployment record on the gateway lists it") {
+		if err == nil || !strings.Contains(err.Error(), "home-d's host has not admitted this deployment") || !strings.Contains(err.Error(), "deployment record on the gateway lists it") {
 			t.Fatalf("err = %v", err)
 		}
 	})

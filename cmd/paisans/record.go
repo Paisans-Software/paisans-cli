@@ -14,30 +14,29 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/deployrecord"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/secretsgen"
+	"github.com/paisans-software/paisans-cli/internal/topology"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // deploymentRecord is the names the gateways' deployment records, merged,
 // hold as deployed, and, for each gateway that could not give one, why:
 // deployrecord.ErrNoRecord for one that answered without one. Each record is
-// read as the ssh user, hosts(gw, false), and through hosts(gw, true) only
-// when that user may not read it (see deployrecord.ReadAsUser).
+// read as the deployment's user, whose it is.
 func deploymentRecord(cfg *config.Config, hosts recordHosts) (deployrecord.Record, map[string]error) {
 	deployed, _, missing := deployrecord.Gather(recordReaders(cfg, hosts), cfg.Deployment())
 	return deployed, missing
 }
 
-// recordHosts reaches a gateway to read its deployment record, as the ssh
-// user.
+// recordHosts reaches a gateway to read its deployment record, as the
+// deployment's user.
 type recordHosts func(gw string) registry.Runner
 
 // recordReaders is every gateway paisans-stack.yaml declares, each read as
-// the ssh user.
+// the deployment's user, whose record it is.
 func recordReaders(cfg *config.Config, hosts recordHosts) map[string]registry.Runner {
 	out := map[string]registry.Runner{}
 	for _, gw := range cfg.GatewaySites() {
-		h := hosts(gw)
-		out[gw] = deployrecord.ReadAsUser(h, func() registry.Runner { return h })
+		out[gw] = hosts(gw)
 	}
 	return out
 }
@@ -137,15 +136,24 @@ func prompt(stdout io.Writer, what, word string) {
 // every gateway, after a gateway's apply: apply only ever adds, so a yaml
 // edited by mistake cannot take a running site's protection away. A gateway
 // it cannot reach is warned about and caught up by the next change.
-func recordApplied(r ui.Reporter, cfg *config.Config, site string, hosts func(string) registry.Runner) error {
+//
+// cfg is the declaration, and sites the run's classification: the record
+// lists the sites of the effective topology, never one still pending. A
+// site recorded before its host admitted the deployment would read as
+// joined, and the next run would take it for down rather than pending.
+func recordApplied(r ui.Reporter, cfg *config.Config, sites *topology.Classification, site string, hosts func(string) registry.Runner) error {
 	if !cfg.Sites[site].Has(config.RoleGateway) {
 		return nil
 	}
+	applied := cfg
+	if sites != nil {
+		applied = sites.Effective(cfg)
+	}
 	s := r.Step("record the deployment")
-	res, err := deployrecord.Update(gatewayHosts(cfg, hosts), cfg.Deployment(), deployrecord.Adding(deployrecord.FromConfig(cfg)), time.Now())
+	res, err := deployrecord.Update(gatewayHosts(cfg, hosts), cfg.Deployment(), deployrecord.Adding(deployrecord.FromConfig(applied)), time.Now())
 	if errors.Is(err, deployrecord.ErrMalformed) {
 		s.Fail(err)
-		return fmt.Errorf("%w. The apply itself finished. What the record held cannot be read, so it is not rewritten: delete it on that gateway with `sudo rm %s`, then apply %s again, which writes it from "+config.FileName, err, deployrecord.Path(cfg.Deployment()), site)
+		return fmt.Errorf("%w. The apply itself finished. What the record held cannot be read, so it is not rewritten: delete it on that gateway with `rm %s`, then apply %s again, which writes it from "+config.FileName, err, deployrecord.Path(cfg.Deployment()), site)
 	}
 	if err != nil {
 		s.Fail(err)

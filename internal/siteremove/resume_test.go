@@ -29,7 +29,7 @@ func TestARemovalResumesFromEachStage(t *testing.T) {
 			stage            int
 			site, verb, text string
 		}{{1, "home-a", "remove", "bbbbbbbbbbbbbbbb"}, {2, "home-a", "remove", "etcd member"}, {2, "home-a", "update", "haproxy.cfg"}}},
-		{3, "ufw delete", []struct {
+		{3, "rootlesskit find", []struct {
 			stage            int
 			site, verb, text string
 		}{{2, "home-a", "remove", "etcd member"}, {3, "home-b", "remove", "every container"}, {3, "home-b", "delete", "the manifest"}}},
@@ -55,7 +55,7 @@ func TestARemovalResumesFromEachStage(t *testing.T) {
 			if err := siteremove.Execute(again); err != nil {
 				t.Fatalf("resuming: %v\n%s", err, rec.Lines())
 			}
-			if w.member("home-b") != nil || !strings.Contains(w.hosts["home-b"].files["/var/lib/paisans/registry.json"], `"kept":"data"`) {
+			if _, manifest := w.hosts["home-b"].files[dep.Manifest()]; w.member("home-b") != nil || manifest || w.hosts["home-b"].ran("rootlesskit find") == 0 {
 				t.Error("the resumed removal did not finish")
 			}
 		})
@@ -169,7 +169,7 @@ func TestHostGoneSkipsTheHost(t *testing.T) {
 		t.Error("its member key is still in etcd")
 	}
 	remains := strings.Join(p.Remains(), "\n")
-	if !strings.Contains(remains, "--host-gone") || !strings.Contains(remains, "/var/lib/paisans/registry.json") {
+	if !strings.Contains(remains, "--host-gone") || !strings.Contains(remains, "sudo paisans host evict --deployment "+ourID) {
 		t.Errorf("the report does not say what is left:\n%s", remains)
 	}
 }
@@ -178,7 +178,7 @@ func TestHostGoneSkipsTheHost(t *testing.T) {
 func TestDeleteDataDeletesTheRootAndVolumes(t *testing.T) {
 	w := setup(t)
 	p := w.mustBuild("home-b", siteremove.Options{DeleteData: true})
-	if !hasStep(p, 3, "home-b", "delete", "volumes paisans-f2a9-talk_media") || !hasStep(p, 3, "home-b", "delete", root+" and everything in it") {
+	if !hasStep(p, 3, "home-b", "delete", "volumes paisans-f2a9-talk_media") || !hasStep(p, 3, "home-b", "delete", "everything in "+root+", through rootlesskit") {
 		t.Fatalf("no deletion planned:\n%s", printed(p))
 	}
 	if err := siteremove.Execute(p); err != nil {
@@ -218,12 +218,10 @@ func TestSSHKeysAreNeverRemoved(t *testing.T) {
 			if _, ok := b.files[record]; ok {
 				t.Error("this deployment's record is still there")
 			}
-			locked := false
 			for _, c := range b.commands {
-				locked = locked || strings.Contains(c, "flock '/etc/paisans/authorized_keys.lock'") && strings.Contains(c, "rm -f -- ")
-			}
-			if !locked {
-				t.Error("the record was not deleted under host prepare's key lock")
+				if strings.Contains(c, "flock -w 60 9") {
+					t.Errorf("ran the deployment's lock: %s", c)
+				}
 			}
 		})
 	}

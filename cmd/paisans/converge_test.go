@@ -22,8 +22,10 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/storageadd"
+	"github.com/paisans-software/paisans-cli/internal/topology"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 	"github.com/paisans-software/paisans-cli/internal/validate"
+	"github.com/paisans-software/paisans-cli/internal/webserver"
 )
 
 // stageLabels names each stage for a test's plan lines. The run shows none
@@ -951,13 +953,13 @@ func TestConvergeFindingsOpenTheConfigurationSection(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{true, nil, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "step init", "pending init", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section etcd members"}},
-		{false, nil, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section mail", "step smtp.example.org:587, starttls, as robot@example.org, from home-a", "step smtp.example.org:587, starttls, as robot@example.org, from home-b", "step smtp.example.org:587, starttls, as robot@example.org, from watch", "section etcd members"}},
-		{false, []string{"--execute"}, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section mail", "step smtp.example.org:587, starttls, as robot@example.org, from home-a", "step smtp.example.org:587, starttls, as robot@example.org, from home-b", "step smtp.example.org:587, starttls, as robot@example.org, from watch", "section etcd members"}},
+		{true, nil, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "step init", "pending init", "section sites", "step classify the sites", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section etcd members"}},
+		{false, nil, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "section sites", "step classify the sites", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section mail", "step smtp.example.org:587, starttls, as robot@example.org, from home-a", "step smtp.example.org:587, starttls, as robot@example.org, from home-b", "step smtp.example.org:587, starttls, as robot@example.org, from watch", "section etcd members"}},
+		{false, []string{"--execute"}, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "section sites", "step classify the sites", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section mail", "step smtp.example.org:587, starttls, as robot@example.org, from home-a", "step smtp.example.org:587, starttls, as robot@example.org, from home-b", "step smtp.example.org:587, starttls, as robot@example.org, from watch", "section etcd members"}},
 		// init ran first and reported the findings and the secrets itself,
 		// under the file's path; they are not reported a second time.
 		// The deployment and the version open every run, ahead of both.
-		{true, []string{"--execute"}, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section mail", "step smtp.example.org:587, starttls, as robot@example.org, from home-a", "step smtp.example.org:587, starttls, as robot@example.org, from home-b", "step smtp.example.org:587, starttls, as robot@example.org, from watch", "section etcd members"}},
+		{true, []string{"--execute"}, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section sites", "step classify the sites", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section mail", "step smtp.example.org:587, starttls, as robot@example.org, from home-a", "step smtp.example.org:587, starttls, as robot@example.org, from home-b", "step smtp.example.org:587, starttls, as robot@example.org, from watch", "section etcd members"}},
 	} {
 		rec.Events = nil
 		needsInit = c.init
@@ -1095,7 +1097,7 @@ func statuses(rec *ui.Recorder) []string {
 			continue
 		}
 		mark := map[string]string{"done": "✓", "pending": "○", "waiting": "·", "fail": "✗"}[e.Kind]
-		if mark == "" || section == "deployment" || section == "architecture" || section == "pocket id" || section == "secrets" || section == "mail" || section == "review" || strings.Contains(e.Text, "etcd record") || strings.HasSuffix(e.Text, "for an admin") {
+		if mark == "" || section == "deployment" || section == "sites" || section == "architecture" || section == "pocket id" || section == "secrets" || section == "mail" || section == "review" || strings.Contains(e.Text, "etcd record") || strings.HasSuffix(e.Text, "for an admin") {
 			continue
 		}
 		title := e.Text
@@ -1354,7 +1356,7 @@ func TestHostPrepareDryRunSaysWhatItWouldChange(t *testing.T) {
 	quietSSH(t)
 	o := convergeOptions{Config: fixtureConfig(), Secrets: fixtureSecretsPath()}
 	for args, want := range map[string]*regexp.Regexp{
-		"host prepare --site home-a": regexp.MustCompile(`^docker, wireguard, firewall, ssh keys, watchdog, configuration store$`),
+		"host prepare --site home-a": regexp.MustCompile(`^docker, ssh keys, configuration store$`),
 		"storage add":                regexp.MustCompile(`^[1-9][0-9]* [a-z]+s?$`),
 	} {
 		summary, _, err := checkStep(ui.Discard, convergeFlags(strings.Fields(args), o), runStep)
@@ -2218,5 +2220,259 @@ func TestPrintLoginLinksAlignsEachLink(t *testing.T) {
 		"  bob on auth-staff  https://staff.example.org/lc/tok-b\n\n"
 	if links.String() != want {
 		t.Errorf("links %q\nwant %q", links.String(), want)
+	}
+}
+
+// meshFile is site's WireGuard file as the step that applies it renders it,
+// from the run's classification.
+func meshFile(t *testing.T, sites *topology.Classification, site string) string {
+	t.Helper()
+	declared := fixture(t)
+	secrets, err := config.LoadDeploymentSecrets(fixtureSecretsPath(), declared.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := render.Build(sites.Effective(declared), secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range plan.Files {
+		if strings.HasPrefix(f.Path, site+"/") && strings.Contains(f.Path, "/psns-") && strings.HasSuffix(f.Path, ".conf") {
+			return f.Content
+		}
+	}
+	t.Fatalf("no WireGuard file for %s", site)
+	return ""
+}
+
+// stepSites keeps the classification each step of the run sees.
+func stepSites(t *testing.T) *[]*topology.Classification {
+	t.Helper()
+	var seen []*topology.Classification
+	saved := convergeRun
+	convergeRun = func(args []string) error {
+		seen = append(seen, runSites)
+		return saved(args)
+	}
+	t.Cleanup(func() { convergeRun = saved })
+	return &seen
+}
+
+// With one data site pending, the run plans no step for it, renders every
+// other site without it, hands each apply its pending list, and ends
+// degraded, exit 0; with --require-all, exit 1. Garage has one of its two
+// nodes, so storage is held back and no storage step runs.
+func TestConvergeRunsOnTheSitesItHas(t *testing.T) {
+	ran := fakeConverge(t, nil)
+	seen := stepSites(t)
+	classifyWith(t, classifyHosts([]string{"home-b"}))
+	rec := recordConverge(t)
+	if err := converge(t, "--execute"); err != nil {
+		t.Fatalf("%v: %s", err, problemText(err))
+	}
+	sameLines(t, *ran, []string{
+		"host prepare --site home-a", "host prepare --site vm", "host prepare --site watch",
+		"dns init",
+		"apply --site vm", "apply --site home-a", "apply --site watch",
+		"apply --site home-a", "apply --site vm", "apply --site watch",
+	})
+	for _, s := range *seen {
+		if s == nil || !slices.Equal(s.Pending(), []string{"home-b"}) {
+			t.Fatalf("a step did not see the run's classification: %+v", s)
+		}
+	}
+	if conf := meshFile(t, (*seen)[0], "home-a"); strings.Contains(conf, "[Peer]\n# home-b\n") {
+		t.Errorf("home-a peers with pending home-b:\n%s", conf)
+	}
+	if !rec.Has("section", "pending") || !rec.Has("result", "Applied, degraded: 1 site pending or down (home-b).") {
+		t.Errorf("no pending section or degraded end:\n%s", rec.Lines())
+	}
+	if runSites != nil {
+		t.Error("the run left its classification behind")
+	}
+
+	*ran = nil
+	err := converge(t, "--execute", "--require-all")
+	var w *ui.Warning
+	if err == nil || errors.As(err, &w) || !strings.Contains(problemText(err), "--require-all") {
+		t.Errorf("--require-all: %v", err)
+	}
+}
+
+// A down site keeps its place in the rendered mesh but none of its own
+// steps run, and storage, one of whose nodes it is, waits.
+func TestConvergeSkipsADownSitesSteps(t *testing.T) {
+	ran := fakeConverge(t, nil)
+	seen := stepSites(t)
+	convergeReadInitial = func(_ *config.Config, m string) (render.EtcdInitial, bool, error) {
+		if m == "home-b" {
+			t.Errorf("down home-b's etcd record was read")
+		}
+		return initial("home-a", "home-b", "vm"), true, nil
+	}
+	classifyWith(t, classifyHosts([]string{"home-b"}, "home-a", "home-b", "vm", "watch"))
+	rec := recordConverge(t)
+	if err := converge(t, "--execute"); err != nil {
+		t.Fatalf("%v: %s", err, problemText(err))
+	}
+	sameLines(t, *ran, []string{
+		"host prepare --site home-a", "host prepare --site vm", "host prepare --site watch",
+		"dns init",
+		"apply --site watch",
+		"apply --site home-a", "apply --site vm", "apply --site watch",
+	})
+	if s := (*seen)[0]; s == nil || !slices.Equal(s.Down(), []string{"home-b"}) {
+		t.Fatalf("classification %+v", s)
+	}
+	if conf := meshFile(t, (*seen)[0], "home-a"); !strings.Contains(conf, "[Peer]\n# home-b\n") {
+		t.Errorf("home-a lost its peer, down home-b:\n%s", conf)
+	}
+	if !rec.Has("result", "Applied, degraded: 1 site pending or down (home-b).") {
+		t.Errorf("no degraded end:\n%s", rec.Lines())
+	}
+}
+
+// A data site ready to join waits while a joined site is down: the join
+// changes every joined site's mesh and HAProxy files, which the down one
+// cannot take. Its site add is dropped and the site is left out of the run
+// as a pending one is, so no other site is handed files naming a member
+// the cluster has not admitted; the plan says why, and the run goes on and
+// ends degraded.
+func TestConvergeJoinWaitsWhileASiteIsDown(t *testing.T) {
+	ran := fakeConverge(t, nil)
+	seen := stepSites(t)
+	convergeReadInitial = func(_ *config.Config, m string) (render.EtcdInitial, bool, error) {
+		if m == "home-b" {
+			return render.EtcdInitial{}, false, nil
+		}
+		return initial("home-a", "vm"), true, nil
+	}
+	classifyWith(t, classifyHosts([]string{"watch"}, "home-a", "vm", "watch"))
+	rec := recordConverge(t)
+	if err := converge(t, "--execute"); err != nil {
+		t.Fatalf("%v: %s\n%s", err, problemText(err), rec.Lines())
+	}
+	for _, line := range *ran {
+		if strings.Contains(line, "home-b") || strings.HasPrefix(line, "site add") {
+			t.Errorf("ran %s while watch is down", line)
+		}
+	}
+	if !slices.Contains(*ran, "apply --site home-a") {
+		t.Errorf("the run stopped short: %v", *ran)
+	}
+	if s := (*seen)[0]; s == nil || !slices.Equal(s.Pending(), []string{"home-b"}) || !slices.Equal(s.Down(), []string{"watch"}) {
+		t.Fatalf("classification %+v", s)
+	}
+	if conf := meshFile(t, (*seen)[0], "home-a"); strings.Contains(conf, "[Peer]\n# home-b\n") {
+		t.Errorf("home-a peers with home-b, whose join waits:\n%s", conf)
+	}
+	if !rec.Has("end", "site add home-b") && !strings.Contains(rec.Lines(), "site add home-b") {
+		t.Errorf("no line for the join that waits:\n%s", rec.Lines())
+	}
+	if !strings.Contains(rec.Lines(), "every joined site answers") {
+		t.Errorf("the plan does not say why the join waits:\n%s", rec.Lines())
+	}
+	if !rec.Has("result", "Applied, degraded: 2 sites pending or down (home-b, watch).") {
+		t.Errorf("no degraded end:\n%s", rec.Lines())
+	}
+}
+
+// everySite is the fixture's sites, as a deployment record lists them once
+// every one has joined.
+var everySite = []string{"home-a", "home-b", "vm", "watch"}
+
+// A Pocket ID on a down site is not asked to make its operators: the run
+// warns that they wait, and ends degraded, exit 0.
+func TestConvergeLeavesOperatorsOfADownPocketID(t *testing.T) {
+	fakeConverge(t, nil)
+	path := editedFixture(t, "hostname: id.example.org\n    placement: cluster", "hostname: id.example.org\n    placement: { pinned: home-b }")
+	convergeReadInitial = func(*config.Config, string) (render.EtcdInitial, bool, error) {
+		return initial("home-a", "home-b", "vm"), true, nil
+	}
+	asked := fakeDeclaredOperators(t, func(app, id string, execute bool) (declaredOperator, error) {
+		if app == "auth" {
+			return declaredOperator{}, errors.New("home-b: the host refused the login")
+		}
+		return declaredOperator{}, nil
+	})
+	classifyWith(t, classifyHosts([]string{"home-b"}, everySite...))
+	rec := recordConverge(t)
+	if err := convergeAt(t, path, "--execute"); err != nil {
+		t.Fatalf("%v: %s", err, problemText(err))
+	}
+	for _, a := range *asked {
+		if strings.HasPrefix(a, "auth/") {
+			t.Errorf("asked %s of down home-b", a)
+		}
+	}
+	if !rec.Has("warn", "auth") || !rec.Has("result", "Applied, degraded: 1 site pending or down (home-b).") {
+		t.Errorf("no warning or degraded end:\n%s", rec.Lines())
+	}
+}
+
+// The web server step does not reach a down monitor: its site files are
+// neither written nor checked, a note says so, and the run ends degraded.
+func TestConvergeLeavesTheWebServerOfADownSite(t *testing.T) {
+	fakeConverge(t, nil)
+	checked := fakeWebServerCheck(t, nil)
+	reached := false
+	convergeWebServerFiles = func(_ ui.Reporter, _ *config.Config, _ string, scope webServerScope) webServerFiles {
+		if scope.covers("watch") {
+			reached = true
+			return webServerFiles{failed: []string{"site files on watch"}}
+		}
+		return webServerFiles{}
+	}
+	classifyWith(t, classifyHosts([]string{"watch"}, everySite...))
+	rec := recordConverge(t)
+	if err := convergeAt(t, externalFixture(t), "--execute"); err != nil {
+		t.Fatalf("%v: %s", err, problemText(err))
+	}
+	if reached || slices.Contains(*checked, "health") {
+		t.Errorf("the web server step reached down watch: files %v, checked %v", reached, *checked)
+	}
+	if !rec.Has("note", "watch") || !rec.Has("result", "Applied, degraded: 1 site pending or down (watch).") {
+		t.Errorf("no note or degraded end:\n%s", rec.Lines())
+	}
+
+	// The dry run does not promise a check --execute will skip.
+	rec = recordConverge(t)
+	if err := convergeAt(t, externalFixture(t)); err != nil {
+		t.Fatalf("dry run: %v: %s", err, problemText(err))
+	}
+	if strings.Contains(rec.Lines(), "checked with --execute") {
+		t.Errorf("the dry run lists down watch's app as checked with --execute:\n%s", rec.Lines())
+	}
+}
+
+// A degraded run that ends on the operator's web server still says it is
+// degraded, and --require-all still fails it; so does one that ends on an
+// operator's error.
+func TestEveryDegradedEndHonoursRequireAll(t *testing.T) {
+	fakeConverge(t, nil)
+	fakeWebServerCheck(t, map[string][]webserver.Result{"health": {{Name: webserver.CheckDNS, Detail: "health.example.org does not resolve"}}})
+	classifyWith(t, classifyHosts([]string{"home-b"}))
+	rec := recordConverge(t)
+	path := externalFixture(t)
+	err := convergeAt(t, path, "--execute")
+	var w *ui.Warning
+	if !errors.As(err, &w) || !strings.HasPrefix(w.Hint, "Applied, but 1 app failed its web server check") {
+		t.Fatalf("not the degraded run's warning: %v", err)
+	}
+	if !rec.Has("result", "Applied, degraded: 1 site pending or down (home-b).") {
+		t.Errorf("no degraded end beside the web server's warning:\n%s", rec.Lines())
+	}
+	err = convergeAt(t, path, "--execute", "--require-all")
+	if err == nil || errors.As(err, &w) || !strings.Contains(problemText(err), "--require-all") {
+		t.Errorf("--require-all with the web server's warning: %v", err)
+	}
+
+	fakeWebServerCheck(t, nil)
+	fakeDeclaredOperators(t, func(string, string, bool) (declaredOperator, error) {
+		return declaredOperator{}, errors.New("pocket id did not answer")
+	})
+	err = convergeAt(t, path, "--execute", "--require-all")
+	if err == nil || !strings.Contains(problemText(err), "--require-all") {
+		t.Errorf("--require-all with an operator's error: %v: %s", err, problemText(err))
 	}
 }

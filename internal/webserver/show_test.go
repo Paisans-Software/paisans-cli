@@ -92,8 +92,15 @@ func TestShowWarnsWhenListenIsNotLoopback(t *testing.T) {
 	target := external(t, "192.168.1.20:8480")
 	webserver.Show(&buf, target, webserver.WebServer{})
 	hint, detail, ok := webserver.ListenWarning(target)
-	if !ok || !strings.Contains(hint, "ufw") || !strings.Contains(detail, "DOCKER-USER") {
+	if !ok || !strings.Contains(hint, "not loopback") || !strings.Contains(detail, "around your web server") {
 		t.Fatalf("no warning: %q %q", hint, detail)
+	}
+	// Rootless Docker publishes on the host's own network stack, so ufw
+	// applies to the port: the warning says so, not that Docker bypasses it.
+	for _, wrong := range []string{"iptables", "in front of ufw", "DOCKER-USER", "does not protect"} {
+		if strings.Contains(hint+detail, wrong) {
+			t.Errorf("the warning says %q: %q %q", wrong, hint, detail)
+		}
 	}
 	// The sheet is copied into a web server, so the warning is not in it.
 	if strings.Contains(buf.String(), "WARNING") || !strings.Contains(buf.String(), "proxy_pass http://192.168.1.20:8480;") {

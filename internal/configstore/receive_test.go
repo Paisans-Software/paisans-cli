@@ -171,7 +171,7 @@ type localShell struct {
 	dir string
 }
 
-const hostConfigDir = "/var/lib/paisans/config"
+const hostConfigDir = "/srv/paisans/f2a9/.paisans/config"
 
 func (s localShell) local(p string) string { return strings.ReplaceAll(p, hostConfigDir, s.dir) }
 

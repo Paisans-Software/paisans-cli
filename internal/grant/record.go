@@ -24,7 +24,7 @@ const Version = 3
 
 // Record is the grant a deployment last applied on one host, each part
 // written by the command that applies it once its steps for the site have
-// all succeeded: the keys part by host prepare, the images, web server and
+// all succeeded: the keys part by host prepare, the images and
 // configuration parts by apply. Approved is the one written before any step:
 // what an operator approved there and no command has applied yet. A part
 // that was never written is nil.
@@ -32,7 +32,6 @@ type Record struct {
 	Version    int             `json:"version"`
 	Keys       *KeysPart       `json:"keys,omitempty"`
 	Images     *ImagesPart     `json:"images,omitempty"`
-	WebServer  *WebServerPart  `json:"web_server,omitempty"`
 	Blueprints *BlueprintsPart `json:"blueprints,omitempty"`
 	Config     *ConfigPart     `json:"config,omitempty"`
 	Approved   *ApprovedPart   `json:"approved,omitempty"`
@@ -95,13 +94,6 @@ type BlueprintsPart struct {
 	Entries    []Blueprint `json:"entries"`
 }
 
-// WebServerPart is the include directory apply last wrote into.
-type WebServerPart struct {
-	AppliedAt  string `json:"applied_at"`
-	ApprovedBy string `json:"approved_by,omitempty"`
-	IncludeDir string `json:"include_dir"`
-}
-
 // ErrMalformed is a record that cannot be read as one: corrupt, or written
 // by a toolkit with a newer layout. It is not rewritten, since what it held
 // is unknown; deleting it by hand makes the next run review everything
@@ -114,16 +106,11 @@ var ErrChanged = errors.New(changedMarker)
 
 const changedMarker = "paisans: the grant record changed while it was read"
 
-// Path is the record on a host, named by the deployment's token, beside the
-// registry. It is root's and 0644: it holds fingerprints and image references,
-// nothing secret, so it is readable without sudo, and only root writes it,
-// so the login user alone cannot rewrite the baseline a review compares with.
-func Path(d deployment.Deployment) string {
-	return registry.Dir + "/granted." + d.Token() + ".json"
-}
+// Path is the record on a host, the deployment user's, in its state
+// directory. It holds fingerprints and image references, nothing secret.
+func Path(d deployment.Deployment) string { return d.StatePath("granted.json") }
 
-// RemoveCommand deletes the record, for site remove's stage 3, which deletes
-// the deployment's registry entry beside it.
+// RemoveCommand deletes the record, for site remove's host stage.
 func RemoveCommand(d deployment.Deployment) string { return "rm -f -- " + quote(Path(d)) }
 
 // Encode is the record as written.
@@ -163,7 +150,7 @@ func Read(t registry.Runner, d deployment.Deployment) (Record, string, bool, err
 	}
 	rec, err := Parse(content)
 	if err != nil {
-		return Record{}, "", false, fmt.Errorf("%s: %s is %w (%v). Delete it with `sudo rm %s`; the next run then reviews every key and image again", t.Describe(), Path(d), ErrMalformed, err, Path(d))
+		return Record{}, "", false, fmt.Errorf("%s: %s is %w (%v). Delete it with `rm %s`; the next run then reviews every key and image again", t.Describe(), Path(d), ErrMalformed, err, Path(d))
 	}
 	return rec, content, true, nil
 }
@@ -210,21 +197,16 @@ func Write(t registry.Runner, d deployment.Deployment, change func(Record) Recor
 }
 
 // writeCommand replaces the record with content if the file still hashes to
-// want ("none" for no file), under the lock the registry and the deployment
-// record take.
+// want ("none" for no file), under the deployment's lock.
 func writeCommand(d deployment.Deployment, want, content string) string {
 	return strings.Join([]string{
 		"set -e",
-		"umask 077",
-		"mkdir -p " + registry.Dir,
-		"chmod 711 " + registry.Dir,
-		"exec 9>>" + registry.LockPath,
-		fmt.Sprintf("flock -w 60 9 || { echo 'paisans: another command holds %s'; exit 1; }", registry.LockPath),
+		d.StateLockCommand("the grant record"),
 		"f=" + quote(Path(d)),
 		"cur=none",
 		`if [ -f "$f" ]; then cur=$(sha256sum "$f" | cut -d' ' -f1); fi`,
 		`[ "$cur" = ` + quote(want) + ` ] || { echo ` + quote(changedMarker) + `; exit 1; }`,
-		"tmp=$(mktemp " + registry.Dir + "/.granted.XXXXXX)",
+		"tmp=$(mktemp " + quote(d.StatePath(".granted.XXXXXX")) + ")",
 		`trap 'rm -f "$tmp"' EXIT`,
 		"printf %s " + quote(base64.StdEncoding.EncodeToString([]byte(content))) + ` | base64 -d > "$tmp"`,
 		`chmod 644 "$tmp"`,
@@ -235,10 +217,10 @@ func writeCommand(d deployment.Deployment, want, content string) string {
 func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 // Scope is the parts of a grant one command reviews and records: host
-// prepare's keys, apply's images and web server, or all of them for apply
+// prepare's keys, apply's images, or all of them for apply
 // with no --site.
 type Scope struct {
-	Keys, Images, WebServer bool
+	Keys, Images bool
 	// Stacks, when set, narrows the images to these stacks, as apply --only
 	// does: a stack the run leaves alone is neither reviewed nor recorded.
 	Stacks []string
@@ -246,7 +228,7 @@ type Scope struct {
 
 // holds reports whether rec holds any part s covers.
 func (rec Record) holds(s Scope) bool {
-	return (s.Keys && rec.Keys != nil) || (s.Images && rec.Images != nil) || (s.WebServer && rec.WebServer != nil)
+	return (s.Keys && rec.Keys != nil) || (s.Images && rec.Images != nil)
 }
 
 // PrepareScope is host prepare's.
@@ -254,11 +236,11 @@ var PrepareScope = Scope{Keys: true}
 
 // ApplyScope is apply --site's, narrowed to stacks when it names any.
 func ApplyScope(stacks ...string) Scope {
-	return Scope{Images: true, WebServer: true, Stacks: stacks}
+	return Scope{Images: true, Stacks: stacks}
 }
 
 // AllScope is every part, for apply with no --site.
-var AllScope = Scope{Keys: true, Images: true, WebServer: true}
+var AllScope = Scope{Keys: true, Images: true}
 
 func (s Scope) stack(name string) bool {
 	return len(s.Stacks) == 0 || slices.Contains(s.Stacks, name)
@@ -276,8 +258,6 @@ func (s Scope) covers(subject string) bool {
 		return s.Images && s.stack(stack)
 	case "blueprint":
 		return s.Images && s.stack(rest)
-	case "web":
-		return s.WebServer
 	}
 	return false
 }
@@ -437,14 +417,6 @@ func Update(rec Record, g Grant, s Scope, now time.Time, approvedBy string) Reco
 				part.ApprovedBy = rec.Blueprints.ApprovedBy
 			}
 			out.Blueprints = part
-		}
-	}
-	if s.WebServer {
-		switch {
-		case g.WebServer == nil:
-			out.WebServer = nil
-		case rec.WebServer == nil || rec.WebServer.IncludeDir != g.WebServer.IncludeDir:
-			out.WebServer = &WebServerPart{AppliedAt: at, ApprovedBy: approvedBy, IncludeDir: g.WebServer.IncludeDir}
 		}
 	}
 	return out

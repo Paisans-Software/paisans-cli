@@ -167,24 +167,23 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 
 	transports := map[string]apply.Transport{}
-	var claim []string
+	var written []string
 	for _, name := range cfg.SiteNames() {
 		if name == site && *hostGone {
 			continue
 		}
 		transports[name] = removeSiteHost(name, cfg.Sites[name])
-		claim = append(claim, name)
+		written = append(written, name)
 	}
-	// A site declared for the first time is neither checked nor claimed: the
-	// eviction leaves its host to the apply that brings it up, and a claim
-	// would make it look prepared.
+	// A site declared for the first time is neither checked nor written to:
+	// the eviction leaves its host to the apply that brings it up.
 	monitors := cfg.MonitorSites()
 	if *evict {
 		joining, err := siteremove.JoiningSites(cfg, secrets, site, transports)
 		if err != nil {
 			return err
 		}
-		claim, monitors = withoutNames(claim, joining), withoutNames(monitors, joining)
+		written, monitors = withoutNames(written, joining), withoutNames(monitors, joining)
 	}
 	// The monitor's stack is applied last, with the site out of its seed,
 	// so each monitor site is host checked as apply would check it.
@@ -200,9 +199,10 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	if !*execute || r.Verbose() {
 		plan.Show(r)
 	}
-	// Every site it reaches is written to: the cluster and the mesh change
-	// on each remaining one, and the leaving host is cleaned.
-	if err := claimSites(r, cfg, *execute, claim...); err != nil {
+	// Every site it reaches is written to, so it checks the admission of
+	// each: the cluster and the mesh change on each remaining one, and the
+	// leaving host is cleaned.
+	if _, err := admittedSites(r, cfg, written...); err != nil {
 		return err
 	}
 	if filled.Changed() {
@@ -244,6 +244,7 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	reportRemains(r, plan.Remains())
 	r.Result("%s is removed: every gate passed, and %s no longer declares it.", site, *configPath)
+	noteEvict(r, plan)
 	return nil
 }
 
@@ -255,8 +256,8 @@ type forcedArgs struct {
 // runSiteRemoveForced is `site remove --force`: one host cleaned of this
 // deployment, nothing else read or changed. See siteremove.BuildForced.
 //
-// The host is never claimed in its registry, as other commands that write to
-// a host do: cleaning it removes this deployment's entry there.
+// The host's admission is not checked, as other commands that write to a
+// host check it: cleaning it removes this deployment from the host.
 func runSiteRemoveForced(r ui.Reporter, site string, a forcedArgs, stdin io.Reader, stdout io.Writer) error {
 	if a.hostGone {
 		return forceAndHostGone()
@@ -347,6 +348,7 @@ func runSiteRemoveForced(r ui.Reporter, site string, a forcedArgs, stdin io.Read
 	forget(true)
 	reportRemains(r, plan.Remains())
 	r.Result("%s is cleaned of this deployment. %s and the secrets file are unchanged.", dest, a.config)
+	noteEvict(r, plan)
 	return nil
 }
 
@@ -360,7 +362,7 @@ type byIDArgs struct {
 var tokenShape = regexp.MustCompile(fmt.Sprintf("^[0-9a-f]{%d}$", deployment.TokenLength))
 
 // runSiteRemoveByID is `site remove --force --ssh <dest> --id <id or token>`:
-// one host cleaned of the deployment its registry names, with no
+// one host cleaned of the deployment the login's admission record names, with no
 // paisans-stack.yaml and no secrets file. See siteremove.BuildForcedByID and
 // docs/specs/2026-10-10-remove-without-config.md.
 //
@@ -372,7 +374,7 @@ func runSiteRemoveByID(r ui.Reporter, site string, a byIDArgs, stdin io.Reader, 
 	case !a.force:
 		return &ui.Problem{Hint: "--id needs --force", Explain: "--id names a deployment for --force to clean off one host, so add --force."}
 	case site != "":
-		return &ui.Problem{Hint: "--id takes no site", Explain: "The host's registry entry names the site, so drop " + site + "."}
+		return &ui.Problem{Hint: "--id takes no site", Explain: "The login's admission record on the host names the site, so drop " + site + "."}
 	case a.config:
 		return &ui.Problem{Hint: "--id takes no --config", Explain: "--id reads no " + config.FileName + ", and a configuration names its own id. Drop --config, or --id."}
 	case a.secrets:
@@ -427,7 +429,17 @@ func runSiteRemoveByID(r ui.Reporter, site string, a byIDArgs, stdin io.Reader, 
 	}
 	reportRemains(r, plan.Remains())
 	r.Result("%s is cleaned of deployment %s.", dest, plan.DeploymentID())
+	noteEvict(r, plan)
 	return nil
+}
+
+// noteEvict ends a run that reached or skipped a host with the line its
+// owner runs to remove what is root's, which site remove cannot.
+func noteEvict(r ui.Reporter, plan *siteremove.Plan) {
+	if plan.Evict == "" {
+		return
+	}
+	r.Note("the host's owner finishes on "+plan.Site, "Send them this line, which removes the deployment's user and everything root's that admit made for it:\n\n    "+plan.Evict)
 }
 
 // forcedNothingToDo ends a forced run on a host that holds nothing of this
@@ -439,18 +451,24 @@ func forcedNothingToDo(r ui.Reporter, plan *siteremove.Plan, dest config.Destina
 	}
 	if len(plan.CaddyKept) > 0 {
 		r.Result("%s holds nothing of this deployment but its Caddy, kept because it serves %s. Run this again once they have moved, and it goes.", dest, strings.Join(plan.CaddyKept, ", "))
+		noteEvict(r, plan)
 		return true
 	}
 	if plan.DataKept {
 		reportRemains(r, plan.Remains())
-		r.Result("%s holds nothing of this deployment but its data, which its registry entry keeps. Run this again with --delete-data, and it goes.", dest)
+		r.Result("%s holds nothing of this deployment but its data. Run this again with --delete-data, and it goes.", dest)
+		noteEvict(r, plan)
 		return true
 	}
 	if recordLeft {
 		r.Result("%s holds nothing of this deployment. Re-run with --execute to take it out of the deployment record.", dest)
+		noteEvict(r, plan)
 		return true
 	}
+	// The deployment's user, its root and its admission record may still
+	// be there from an earlier run, whose evict line this repeats.
 	r.Result("%s holds nothing of this deployment. Nothing to do.", dest)
+	noteEvict(r, plan)
 	return true
 }
 

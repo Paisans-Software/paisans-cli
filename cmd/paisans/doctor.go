@@ -21,7 +21,6 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/doctor"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 	"github.com/paisans-software/paisans-cli/internal/mesh"
-	"github.com/paisans-software/paisans-cli/internal/ownership"
 	"github.com/paisans-software/paisans-cli/internal/patroni"
 	"github.com/paisans-software/paisans-cli/internal/render"
 )
@@ -200,7 +199,7 @@ var doctorSiteToken = func(ctx context.Context, check dns.TokenCheck, host dns.R
 }
 
 // CaddyLog reads Caddy's certificate log lines over the site's transport,
-// as the ssh user, as every other read.
+// as the site's login, as every other read.
 func (d doctorReads) CaddyLog(site string) doctor.CaddyLogProbe {
 	out, err := d.transports[site].Run(doctor.CaddyLogCommand(d.cfg.Deployment()))
 	p := doctor.CaddyLogProbe{Site: site, Out: out}
@@ -236,7 +235,7 @@ func (d doctorReads) Secrets() doctor.SecretsProbe {
 }
 
 // SiteToken checks the token in the site's caddy.env, from the site, over
-// its transport, as the ssh user, as every other read here.
+// its transport, as the site's login, as every other read here.
 func (d doctorReads) SiteToken(site string) dns.TokenResult {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -325,7 +324,7 @@ func (d doctorReads) Mesh(site string) doctor.MeshProbe {
 	} else {
 		p.Link = out
 	}
-	if probed, err := mesh.Probe(t); err != nil {
+	if probed, err := mesh.ProbeUser(t); err != nil {
 		p.ProbeErr = err.Error()
 	} else {
 		p.Probed = probed
@@ -438,7 +437,7 @@ func gatherLeftovers(cfg *config.Config, site string, t apply.Transport) doctor.
 		p.Err = firstOf(err.Error())
 		return p
 	}
-	if p.Report, err = ownership.Classify(cfg, site, inv, inv.ManifestFiles); err != nil {
+	if p.Report, err = classifyLeftovers(cfg, site, inv, inv.ManifestFiles); err != nil {
 		p.Err = err.Error()
 	}
 	return p

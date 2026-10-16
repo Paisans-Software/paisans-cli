@@ -84,9 +84,9 @@ func runOperatorMagicLink(args []string) error {
 		r.Result("Nothing changed. Re-run with --execute to issue it.")
 		return nil
 	}
-	// The calls need no root, and a run that changes something claims its
-	// host in the registry.
-	if err := claimHosts(r, cfg, true, map[string]registry.Runner{where: registryHost(where, cfg.Sites[where], *destination)}); err != nil {
+	// The calls need no root, and a run that changes something checks its
+	// host's admission.
+	if _, err := admittedHosts(r, cfg, map[string]registry.Runner{where: registryHost(where, cfg.Sites[where], *destination)}); err != nil {
 		return err
 	}
 	s := r.Step("issue " + what)

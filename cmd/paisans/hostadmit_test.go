@@ -253,9 +253,8 @@ func TestAdmitFlagCombinations(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{}, "--request <file> on the host, or --site <name> --ssh"},
+		{[]string{}, "--request <file> on the host, or --site <name> from a workstation"},
 		{[]string{"--request", path, "--site", "vm"}, "not both"},
-		{[]string{"--site", "vm", "--config", fixtureConfig()}, "--ssh"},
 		{[]string{"--request", path, "--ssh", "owner@h"}, "--ssh"},
 		{[]string{"--request", path, "extra"}, "takes no argument"},
 	} {
@@ -422,7 +421,7 @@ func TestEvictFlagCombinations(t *testing.T) {
 		{[]string{"--request", path, "--site", "vm", "--ssh", "owner@h"}, "give one of"},
 		{[]string{"--deployment", "x"}, "go together"},
 		{[]string{"--user", "paisans-f2a9"}, "go together"},
-		{[]string{"--site", "vm"}, "--site needs --ssh"},
+		{[]string{"--site", "vm"}, "--site needs --ssh off a terminal"},
 		{[]string{"--request", path, "--ssh", "owner@h"}, "--ssh goes with --site"},
 		{[]string{"--request", path, "extra"}, "takes no argument"},
 	} {
@@ -582,3 +581,395 @@ func (refusingHost) RunInput(string, string) (string, error) {
 }
 func (refusingHost) ReadFile(string) (string, bool, error)  { return "", false, fmt.Errorf("refused") }
 func (refusingHost) WriteFile(string, string, uint32) error { return fmt.Errorf("refused") }
+
+// --site knows the site's host from the declaration, so --ssh may name
+// only the owner's login, and without --ssh admit asks for it at a
+// terminal.
+func TestAdmitSiteTakesTheHostFromTheDeclaration(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		ssh      []string
+		typed    string
+		terminal bool
+		want     string
+	}{
+		{"login alone", []string{"--ssh", "owner"}, "", false, "owner@vm.example.org:22"},
+		{"asked at a terminal", nil, "owner\n", true, "owner@vm.example.org:22"},
+		{"full destination", []string{"--ssh", "admin@10.0.0.9:2222"}, "", false, "admin@10.0.0.9:2222"},
+	} {
+		quietAdmit(t)
+		withTerminal(t, c.terminal)
+		savedOwner := reachOwnerAdmit
+		var reached config.Destination
+		reachOwnerAdmit = func(d config.Destination) apply.Transport { reached = d; return blankHost("ubuntu") }
+		args := append([]string{"--site", "vm", "--config", fixtureConfig(), "--public-ports"}, c.ssh...)
+		if err := runHostAdmit(args, typed(t, c.typed), new(strings.Builder)); err != nil {
+			t.Errorf("%s: %v", c.name, err)
+		}
+		if got := fmt.Sprintf("%s@%s:%d", reached.User, reached.Host, reached.Port); got != c.want {
+			t.Errorf("%s: reached %s, want %s", c.name, got, c.want)
+		}
+		reachOwnerAdmit = savedOwner
+	}
+	// Off a terminal, with no --ssh, there is no one to ask.
+	noHost(t)
+	withTerminal(t, false)
+	err := runHostAdmit([]string{"--site", "vm", "--config", fixtureConfig(), "--public-ports"}, typed(t, ""), new(strings.Builder))
+	if err == nil || !strings.Contains(err.Error(), "--ssh") {
+		t.Errorf("no --ssh off a terminal: %v", err)
+	}
+}
+
+// A grant the site's roles need and the flags leave out is asked for at a
+// terminal, with what it gives; a yes grants it, anything else stops admit
+// before the host is reached. Off a terminal it stops, as a flag would.
+func TestAdmitAsksForAMissingGrantAtATerminal(t *testing.T) {
+	data, _ := requestFile(t, dataSiteOf(t))
+	for _, c := range []struct {
+		typed    string
+		terminal bool
+		admits   bool
+	}{
+		{"y\n", true, true},
+		{"yes\n", true, true},
+		{"n\n", true, false},
+		{"\n", true, false},
+		{"", true, false},
+		{"y\n", false, false},
+	} {
+		h := withFakeLocalHost(t, "ubuntu")
+		withTerminal(t, c.terminal)
+		out := new(strings.Builder)
+		err := runHostAdmit([]string{"--request", data}, typed(t, c.typed), out)
+		if planned := err == nil; planned != c.admits {
+			t.Errorf("typed %q at a terminal %v: planned %v (%v)", c.typed, c.terminal, planned, err)
+		}
+		if !c.admits && err != nil && !strings.Contains(err.Error(), "Nothing was read or changed") {
+			t.Errorf("typed %q: %v", c.typed, err)
+		}
+		if c.terminal && !strings.Contains(out.String(), "--watchdog") {
+			t.Errorf("the question does not name the grant:\n%s", out.String())
+		}
+		_ = h
+	}
+	// --site asks the same.
+	quietAdmit(t)
+	withTerminal(t, true)
+	savedOwner := reachOwnerAdmit
+	t.Cleanup(func() { reachOwnerAdmit = savedOwner })
+	reachOwnerAdmit = func(config.Destination) apply.Transport { return blankHost("ubuntu") }
+	if err := runHostAdmit([]string{"--site", "vm", "--ssh", "owner", "--config", fixtureConfig()}, typed(t, "y\n"), new(strings.Builder)); err != nil {
+		t.Errorf("--site asked for --public-ports: %v", err)
+	}
+}
+
+// inactiveUFW makes h a host whose ufw is installed and not active, with
+// sshd listening on 22, systemd-run there and no fallback loaded.
+func inactiveUFW(h *admitHost) *admitHost {
+	for i, kv := range h.facts {
+		if kv[0] == "ufw-active" {
+			h.facts[i][1] = "no"
+		}
+	}
+	h.answers["paisans host admit: before enabling ufw"] = `sshd LISTEN 0 4096 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=812,fd=3))` + "\nipv6 yes\nsystemd-run present\nfallback not-found not-found\nend\n"
+	return h
+}
+
+// ranIndex is the index of the first command run that contains s, -1 for
+// none.
+func (h *admitHost) ranIndex(s string) int {
+	for i, c := range h.ran {
+		if strings.Contains(c, s) {
+			return i
+		}
+	}
+	return -1
+}
+
+// Off a terminal, an inactive ufw refuses, naming --enable-ufw and the
+// commands that enable it safely; at a terminal admit asks, and only a yes
+// plans the enable.
+func TestAdmitAsksToEnableUFWAtATerminal(t *testing.T) {
+	path, _ := requestFile(t, "vm")
+	for _, c := range []struct {
+		typed    string
+		terminal bool
+		plans    bool
+	}{
+		{"y\n", true, true},
+		{"yes\n", true, true},
+		{"n\n", true, false},
+		{"", true, false},
+		{"y\n", false, false},
+	} {
+		h := withFakeLocalHost(t, "ubuntu")
+		inactiveUFW(h)
+		withTerminal(t, c.terminal)
+		out := new(strings.Builder)
+		err := runHostAdmit([]string{"--request", path, "--public-ports"}, typed(t, c.typed), out)
+		if planned := err == nil && strings.Contains(admitReport.String(), "arm the ufw fallback"); planned != c.plans {
+			t.Errorf("typed %q at a terminal %v: planned the enable %v (%v)", c.typed, c.terminal, planned, err)
+		}
+		if !c.plans && (err == nil || !strings.Contains(err.Error(), "--enable-ufw") || !strings.Contains(err.Error(), "1. sudo ufw allow 22/tcp")) {
+			t.Errorf("typed %q at a terminal %v: %v", c.typed, c.terminal, err)
+		}
+		if c.terminal && !strings.Contains(out.String(), "allow 22/tcp, every port sshd listens on") {
+			t.Errorf("the question does not say what admit does:\n%s", out.String())
+		}
+	}
+	// --enable-ufw asks nothing.
+	h := withFakeLocalHost(t, "ubuntu")
+	inactiveUFW(h)
+	withTerminal(t, false)
+	if err := runHostAdmit([]string{"--request", path, "--public-ports", "--enable-ufw"}, typed(t, ""), new(strings.Builder)); err != nil || !strings.Contains(admitReport.String(), "arm the ufw fallback") {
+		t.Errorf("--enable-ufw: %v\n%s", err, admitReport.String())
+	}
+}
+
+// fakeExecute replaces Execute with one that runs nothing, for the test.
+func fakeExecute(t *testing.T) {
+	saved := executeAdmit
+	executeAdmit = func(apply.Transport, hostadmit.Input, *hostadmit.Plan, ui.Reporter) error { return nil }
+	t.Cleanup(func() { executeAdmit = saved })
+}
+
+// With --site, the login as the deployment's user, a new SSH connection
+// made after ufw is on, is what stops the fallback, through the owner's
+// login; a failed login leaves it armed and says when ufw turns off.
+func TestAdmitSiteStopsTheUFWFallbackAfterTheLogin(t *testing.T) {
+	fakeExecute(t)
+	savedLogin, savedOwner := reachSiteUser, reachOwnerAdmit
+	t.Cleanup(func() { reachSiteUser, reachOwnerAdmit = savedLogin, savedOwner })
+	args := []string{"--site", "vm", "--ssh", "owner", "--config", fixtureConfig(), "--public-ports", "--enable-ufw", "--execute"}
+
+	quietAdmit(t)
+	owner := inactiveUFW(blankHost("ubuntu"))
+	reachOwnerAdmit = func(config.Destination) apply.Transport { return owner }
+	login := blankHost("ubuntu")
+	loggedIn := -1
+	reachSiteUser = func(string, config.Site) apply.Transport { loggedIn = len(owner.ran); return login }
+	if err := runHostAdmit(args, strings.NewReader(""), new(strings.Builder)); err != nil {
+		t.Fatal(err)
+	}
+	if i := owner.ranIndex(hostadmit.DisarmUFW); i < 0 || loggedIn < 0 || i < loggedIn {
+		t.Errorf("the fallback was stopped at %d, the login made at %d: %q", i, loggedIn, owner.ran)
+	}
+
+	quietAdmit(t)
+	owner = inactiveUFW(blankHost("ubuntu"))
+	reachSiteUser = func(string, config.Site) apply.Transport { return refusingHost{} }
+	err := runHostAdmit(args, strings.NewReader(""), new(strings.Builder))
+	if err == nil || !strings.Contains(err.Error(), "ufw turns itself off again by") || owner.ranIndex(hostadmit.DisarmUFW) >= 0 {
+		t.Errorf("a failed login: %v, stopped the fallback at %d", err, owner.ranIndex(hostadmit.DisarmUFW))
+	}
+
+	// A plan that enables nothing stops nothing.
+	quietAdmit(t)
+	owner = blankHost("ubuntu")
+	reachSiteUser = func(string, config.Site) apply.Transport { return login }
+	if err := runHostAdmit(args, strings.NewReader(""), new(strings.Builder)); err != nil || owner.ranIndex(hostadmit.DisarmUFW) >= 0 {
+		t.Errorf("active ufw: %v, stopped the fallback at %d", err, owner.ranIndex(hostadmit.DisarmUFW))
+	}
+}
+
+// With --request, the owner on the host confirms a new SSH session: a yes
+// stops the fallback, anything else leaves it to turn ufw off, and says so.
+// The answer to the ufw question, the digest and the confirmation are read
+// from one terminal in turn.
+func TestAdmitRequestConfirmsANewLoginBeforeStoppingTheFallback(t *testing.T) {
+	fakeExecute(t)
+	path, digest := requestFile(t, "vm")
+	for _, c := range []struct {
+		typed string
+		stops bool
+	}{
+		{"y\n" + digest + "\nyes\n", true},
+		{"y\n" + digest + "\nno\n", false},
+		{"y\n" + digest + "\n", false},
+	} {
+		h := withFakeLocalHost(t, "ubuntu")
+		inactiveUFW(h)
+		withTerminal(t, true)
+		out := new(strings.Builder)
+		if err := runHostAdmit([]string{"--request", path, "--public-ports", "--execute"}, typed(t, c.typed), out); err != nil {
+			t.Fatalf("typed %q: %v", c.typed, err)
+		}
+		if stopped := h.ranIndex(hostadmit.DisarmUFW) >= 0; stopped != c.stops {
+			t.Errorf("typed %q: stopped the fallback %v", c.typed, stopped)
+		}
+		if !strings.Contains(out.String(), "Open a new SSH session to this host now. Type yes once it logs in") {
+			t.Errorf("typed %q: not asked for a new session:\n%s", c.typed, out.String())
+		}
+		if !c.stops && !strings.Contains(admitReport.String(), "ufw turns itself off again by") {
+			t.Errorf("typed %q: does not say ufw turns off:\n%s", c.typed, admitReport.String())
+		}
+	}
+}
+
+// The public-ports question ends with how a monitor needs neither, as a
+// sentence of its own.
+func TestThePublicPortsQuestionReadsAsSentences(t *testing.T) {
+	gw, _ := requestFile(t, gatewayOf(t))
+	withFakeLocalHost(t, "ubuntu")
+	withTerminal(t, true)
+	out := new(strings.Builder)
+	if err := runHostAdmit([]string{"--request", gw}, typed(t, "y\n"), out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "in the firewall. A monitor behind your own web server (web_server.managed_by: external) needs neither.\nGrant --public-ports? [y/N] ") {
+		t.Errorf("the question:\n%s", out.String())
+	}
+}
+
+// A grant answered at a terminal, then the digest, are read in turn from
+// one stdin: the answer is not read ahead past its line.
+func TestAGrantThenTheDigestAtOneTerminal(t *testing.T) {
+	data, digest := requestFile(t, dataSiteOf(t))
+	saved := executeAdmit
+	t.Cleanup(func() { executeAdmit = saved })
+	var granted *bool
+	executeAdmit = func(_ apply.Transport, in hostadmit.Input, _ *hostadmit.Plan, _ ui.Reporter) error {
+		granted = &in.Flags.Watchdog
+		return nil
+	}
+	withFakeLocalHost(t, "ubuntu")
+	withTerminal(t, true)
+	if err := runHostAdmit([]string{"--request", data, "--execute"}, typed(t, "y\n"+digest+"\n"), new(strings.Builder)); err != nil {
+		t.Fatal(err)
+	}
+	if granted == nil || !*granted {
+		t.Errorf("executed %v with the grant", granted != nil)
+	}
+}
+
+// A login alone reaches the site's declared host and port, an IPv6
+// address and a port other than 22 among them, with admit and evict alike.
+func TestALoginAloneReachesAnIPv6HostOnItsDeclaredPort(t *testing.T) {
+	body, err := os.ReadFile(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, _ := archFixture(t, strings.Replace(string(body), "      host: vm.example.org\n", "      host: 2001:db8::9\n      port: 2222\n", 1))
+	savedOwner := reachOwnerAdmit
+	t.Cleanup(func() { reachOwnerAdmit = savedOwner })
+	for _, run := range []func([]string) error{
+		func(a []string) error {
+			return runHostAdmit(append(a, "--public-ports"), strings.NewReader(""), new(strings.Builder))
+		},
+		// Evict then refuses ubuntu, the site's declared ssh.user, on a host
+		// with no record: what is under test is where it went.
+		func(a []string) error { _ = runHostEvict(a, strings.NewReader(""), new(strings.Builder)); return nil },
+	} {
+		quietAdmit(t)
+		var reached config.Destination
+		reachOwnerAdmit = func(d config.Destination) apply.Transport { reached = d; return blankHost("ubuntu") }
+		if err := run([]string{"--site", "vm", "--ssh", "owner", "--config", path}); err != nil {
+			t.Fatal(err)
+		}
+		if reached.User != "owner" || reached.Host != "2001:db8::9" || reached.Port != 2222 {
+			t.Errorf("reached %+v", reached)
+		}
+	}
+}
+
+// Evict, like admit, asks for the owner's login at a terminal when --ssh is
+// left out.
+func TestEvictAsksForTheLoginAtATerminal(t *testing.T) {
+	quietAdmit(t)
+	withTerminal(t, true)
+	savedOwner := reachOwnerAdmit
+	t.Cleanup(func() { reachOwnerAdmit = savedOwner })
+	var reached config.Destination
+	reachOwnerAdmit = func(d config.Destination) apply.Transport { reached = d; return blankHost("ubuntu") }
+	out := new(strings.Builder)
+	// Evict then refuses ubuntu, the site's declared ssh.user, on a host
+	// with no record: what is under test is where it went.
+	_ = runHostEvict([]string{"--site", "vm", "--config", fixtureConfig()}, typed(t, "owner\n"), out)
+	if reached.User != "owner" || reached.Host != "vm.example.org" || !strings.Contains(out.String(), "Existing username on vm.example.org (site vm) to connect under, with sudo:") {
+		t.Errorf("reached %+v, asked:\n%s", reached, out.String())
+	}
+}
+
+// Where --enable-ufw would be refused, a deny rule of the owner's among
+// them, admit asks nothing at a terminal and gives the refusal.
+func TestAdmitDoesNotAskToEnableUFWWhereTheFlagWouldBeRefused(t *testing.T) {
+	path, _ := requestFile(t, "vm")
+	h := withFakeLocalHost(t, "ubuntu")
+	inactiveUFW(h)
+	h.answers["paisans host admit: before enabling ufw"] = "rule deny OpenSSH\n" + h.answers["paisans host admit: before enabling ufw"]
+	withTerminal(t, true)
+	out := new(strings.Builder)
+	err := runHostAdmit([]string{"--request", path, "--public-ports"}, typed(t, "y\n"), out)
+	if err == nil || !strings.Contains(err.Error(), "`ufw deny OpenSSH`") || strings.Contains(out.String(), "Enable ufw") {
+		t.Errorf("%v\n%s", err, out.String())
+	}
+}
+
+// The question and a failure once the fallback is armed both say the
+// timer does not survive a reboot.
+func TestTheUFWQuestionSaysTheFallbackDoesNotSurviveAReboot(t *testing.T) {
+	path, _ := requestFile(t, "vm")
+	inactiveUFW(withFakeLocalHost(t, "ubuntu"))
+	withTerminal(t, true)
+	out := new(strings.Builder)
+	_ = runHostAdmit([]string{"--request", path, "--public-ports"}, typed(t, "n\n"), out)
+	if !strings.Contains(out.String(), "does not survive a reboot") || !strings.Contains(out.String(), "/etc/ufw/before.rules") || !strings.Contains(out.String(), "sslh") {
+		t.Errorf("the question:\n%s", out.String())
+	}
+	err := ufwFallbackNote(fmt.Errorf("failed"), &hostadmit.Plan{EnablesUFW: true}, true)
+	if !strings.Contains(err.Error(), "does not survive a reboot") {
+		t.Errorf("the note: %v", err)
+	}
+}
+
+// holding is a reporter that counts the holds in place, so a test sees
+// whether a prompt was written while the reporter was held.
+type holding struct {
+	ui.Reporter
+	held int
+}
+
+func (h *holding) Hold() func() {
+	h.held++
+	return func() { h.held-- }
+}
+
+// The digest admit asks for and the word evict asks for are prompts on the
+// terminal the plan was drawn on: each is asked with the reporter held, so
+// the run draws the plan's rows again below it rather than reach above it.
+func TestThePromptsBeforeARunHoldTheReporter(t *testing.T) {
+	saved := executeAdmit
+	t.Cleanup(func() { executeAdmit = saved })
+	executeAdmit = func(apply.Transport, hostadmit.Input, *hostadmit.Plan, ui.Reporter) error { return nil }
+	path, digest := requestFile(t, "vm")
+	withFakeLocalHost(t, "ubuntu")
+	withTerminal(t, true)
+	r := &holding{Reporter: reporterOverride}
+	reporterOverride = r
+	heldAtPrompt := false
+	prompt := writerFunc(func(p []byte) (int, error) {
+		heldAtPrompt = heldAtPrompt || (r.held > 0 && strings.Contains(string(p), "digest"))
+		return len(p), nil
+	})
+	if err := runHostAdmit([]string{"--request", path, "--public-ports", "--execute"}, typed(t, digest+"\n"), prompt); err != nil {
+		t.Fatal(err)
+	}
+	if !heldAtPrompt || r.held != 0 {
+		t.Errorf("admit: held at the digest %v, holds left %d", heldAtPrompt, r.held)
+	}
+
+	evictedHost(t)
+	r = &holding{Reporter: reporterOverride}
+	reporterOverride = r
+	heldAtPrompt = false
+	prompt = writerFunc(func(p []byte) (int, error) {
+		heldAtPrompt = heldAtPrompt || (r.held > 0 && strings.Contains(string(p), "to proceed"))
+		return len(p), nil
+	})
+	if err := runHostEvict([]string{"--deployment", fixtureID(t), "--user", "paisans-f2a9", "--execute"}, typed(t, "paisans-f2a9\n"), prompt); err != nil {
+		t.Fatal(err)
+	}
+	if !heldAtPrompt || r.held != 0 {
+		t.Errorf("evict: held at the word %v, holds left %d", heldAtPrompt, r.held)
+	}
+}

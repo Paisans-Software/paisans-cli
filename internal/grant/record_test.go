@@ -32,6 +32,20 @@ func TestParseReadsVersionOneAndTwo(t *testing.T) {
 	}
 }
 
+// A record with a web_server part, which no version of the record holds, is
+// refused rather than read with the part dropped: the web server is not
+// something a grant reviews.
+func TestParseRefusesAWebServerPart(t *testing.T) {
+	for _, bad := range []string{
+		`{"version": 3, "web_server": {"include_dir": "/etc/caddy/paisans.d"}}`,
+		`{"version": 3, "images": {"applied_at": "x", "entries": []}, "web_server": {}}`,
+	} {
+		if rec, err := grant.Parse(bad); err == nil {
+			t.Errorf("read %s as %+v", bad, rec)
+		}
+	}
+}
+
 // The version applied is recorded with when; the same version applied again
 // keeps the time it was first recorded, so the record is not rewritten.
 func TestWithConfigRecordsTheVersionApplied(t *testing.T) {

@@ -36,7 +36,7 @@ func Reach(cfg *config.Config, list []SiteReach) []Finding {
 			out = append(out, Finding{Section: SectionReach, Level: OK, Line: fmt.Sprintf("%s: %s answers", r.Site, r.Destination)})
 		default:
 			more := []string{roleLine(cfg, r.Site)}
-			if lost := losses(cfg, r.Site); lost != "" {
+			if lost := Losses(cfg, r.Site); lost != "" {
 				more = append(more, "While it is down the deployment is without "+lost+".")
 			}
 			more = append(more, "Start the host or fix the route to it. Every other check ran with the sites that answered.")
@@ -70,11 +70,12 @@ func monitorElsewhere(cfg *config.Config, site string) bool {
 	return false
 }
 
-// losses is what a site's absence takes away, from its roles and its place
+// Losses is what a site's absence takes away, from its roles and its place
 // in the configuration rather than from its roles alone: a data site that is
 // not in etcd.members holds no etcd vote, and a gateway that is not the only
-// one is not every hostname.
-func losses(cfg *config.Config, site string) string {
+// one is not every hostname. apply's pending section words what a pending or
+// down site's absence takes away the same way.
+func Losses(cfg *config.Config, site string) string {
 	declared := cfg.Sites[site]
 	var lost []string
 	if declared.Has(config.RoleGateway) {

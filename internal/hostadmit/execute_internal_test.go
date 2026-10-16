@@ -11,6 +11,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/hostprep"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -556,5 +557,195 @@ func TestExecuteNamesAStepFoundDone(t *testing.T) {
 	}
 	if len(h.ranMatching("install -d /etc/wireguard")) != 0 {
 		t.Error("the step found done ran")
+	}
+}
+
+// When admit's own enable of ufw ran before the first provisional step,
+// the plan Execute rebuilds there is told so, since ufw is active by then
+// and the record must still say admit enabled it. Before the enable, it
+// is not.
+func TestExecuteTellsTheRebuildItEnabledUFW(t *testing.T) {
+	for _, enableFirst := range []bool{true, false} {
+		h := newTestHost()
+		h.onRun = func(command string) {
+			if strings.HasPrefix(command, "useradd ") {
+				h.set("passwd", "paisans-f2a9:x:1001:1001::/home/paisans-f2a9:/bin/bash")
+				h.set("group", "paisans-f2a9")
+			}
+		}
+		var told []bool
+		enable := part{"firewall", func(p *planner) error {
+			told = append(told, p.in.enabledUFW)
+			if !p.f.User.Exists {
+				p.step(Step{Title: "enable ufw", Command: enableUFW})
+			}
+			return nil
+		}}
+		keys := part{"keys", func(p *planner) error {
+			p.step(Step{Title: "keys", Command: "keys " + uidOf(p), Provisional: !p.f.User.Exists})
+			return nil
+		}}
+		if enableFirst {
+			withParts(t, []part{userPart, enable, keys})
+		} else {
+			withParts(t, []part{userPart, keys, enable})
+		}
+		in := testInput(t)
+		plan, err := Build(h, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = Execute(h, in, plan, discard())
+		if len(told) != 2 || told[0] || told[1] != enableFirst {
+			t.Errorf("enable first %v: the builds were told %v", enableFirst, told)
+		}
+	}
+}
+
+// listing is a reporter that draws lists, recording each row a run starts,
+// by its index in the plan, its title and how it ended.
+type listing struct {
+	ui.Recorder
+	rows    []ui.ListRow
+	started []string
+}
+
+func (l *listing) List(rows []ui.ListRow, _ []ui.ListWarning) ui.List {
+	l.rows = rows
+	return l
+}
+
+func (l *listing) Start(i int, title string, _ ...string) ui.Step {
+	l.started = append(l.started, fmt.Sprintf("%d %s", i, title))
+	return &listingStep{l: l, at: len(l.started) - 1}
+}
+
+func (l *listing) Close() {}
+
+type listingStep struct {
+	ui.Step
+	l  *listing
+	at int
+}
+
+func (s *listingStep) Done(result string) { s.End(ui.OK, result) }
+func (s *listingStep) Fail(error)         { s.End(ui.Failed, "") }
+func (s *listingStep) End(m ui.Mark, result string) {
+	s.l.started[s.at] += fmt.Sprintf(" -> %d %s", m, result)
+}
+func (s *listingStep) Detail(string, ...any) {}
+func (s *listingStep) Progress(string)       {}
+
+// A plan shown to run is run in its own rows: each step in the row the
+// owner approved it in, under its title with the placeholders filled once
+// the user exists, and a step found done ended in its row as done already.
+func TestExecuteRunsInThePlansRows(t *testing.T) {
+	h := newTestHost()
+	h.onRun = func(command string) {
+		if strings.HasPrefix(command, "useradd ") {
+			h.set("passwd", "paisans-f2a9:x:1001:1001::/home/paisans-f2a9:/bin/bash")
+			h.set("group", "paisans-f2a9")
+			h.set("wg", "made")
+		}
+	}
+	withParts(t, []part{
+		userPart,
+		{"egress", func(p *planner) error {
+			p.step(Step{Title: "load the egress table for " + uidOf(p), Command: "nft uid " + uidOf(p), Provisional: !p.f.User.Exists})
+			if p.f.raw["wg"] == nil {
+				p.step(Step{Title: "create /etc/wireguard", Command: "install -d /etc/wireguard"})
+			}
+			return nil
+		}},
+	})
+	in := testInput(t)
+	plan, err := Build(h, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &listing{}
+	plan.ShowToRun(r)
+	if len(r.rows) != len(plan.Steps) || r.rows[1].Title != "load the egress table for <uid>" || r.rows[1].Result != "runs once the user exists" {
+		t.Fatalf("rows: %+v", r.rows)
+	}
+	if err := Execute(h, in, plan, r); err != nil {
+		t.Fatal(err)
+	}
+	last := len(plan.Steps) - 1
+	want := []string{
+		fmt.Sprintf("%d create /etc/wireguard -> 0 done already", last),
+		fmt.Sprintf("%d load the egress table for 1001 -> 0 ", last-1),
+	}
+	if got := r.started[len(r.started)-2:]; !slices.Equal(got, want) {
+		t.Errorf("rows run:\n%s\nwant the last two:\n%s", strings.Join(r.started, "\n"), strings.Join(want, "\n"))
+	}
+	if len(r.started) != len(plan.Steps) {
+		t.Errorf("%d rows started for %d steps:\n%s", len(r.started), len(plan.Steps), strings.Join(r.started, "\n"))
+	}
+}
+
+// Off a terminal a plan shown to run and its run are two lists, each
+// labelled, and nothing else about either changes.
+func TestAPlanShownToRunIsLabelledOffATerminal(t *testing.T) {
+	plan := &Plan{Steps: []Step{{Title: "make the user", Describe: "user"}, {Title: "write the egress table", Describe: "egress"}},
+		Warnings: []hostprep.Warning{{Hint: "ufw is off"}}}
+	var b strings.Builder
+	r := ui.NewPlain(&b, false)
+	plan.ShowToRun(r)
+	if err := RunSteps(newTestHost(), plan, r); err != nil {
+		t.Fatal(err)
+	}
+	want := "  plan, nothing done yet:\n  todo make the user\n  todo write the egress table\n  WARN ufw is off\n" +
+		"  running:\n  ok   make the user\n  ok   write the egress table\n"
+	if b.String() != want {
+		t.Errorf("got:\n%s\nwant:\n%s", b.String(), want)
+	}
+	b.Reset()
+	(&Plan{Steps: plan.Steps, Warnings: plan.Warnings}).Show(r)
+	if strings.Contains(b.String(), ui.PlanLabel) {
+		t.Errorf("a plan not run is labelled:\n%s", b.String())
+	}
+}
+
+// Under --verbose off a terminal, a step run after the re-plan shows the
+// rebuilt step's sentence, its values filled, as it did before the plan
+// was a list. A step found done shows its title filled, deliberately, and
+// no sentence, since it did not run.
+func TestAVerboseRunAfterTheReplanShowsTheRebuiltSentence(t *testing.T) {
+	h := newTestHost()
+	h.onRun = func(command string) {
+		if strings.HasPrefix(command, "useradd ") {
+			h.set("passwd", "paisans-f2a9:x:1001:1001::/home/paisans-f2a9:/bin/bash")
+			h.set("group", "paisans-f2a9")
+			h.set("wg", "made")
+		}
+	}
+	withParts(t, []part{
+		userPart,
+		{"egress", func(p *planner) error {
+			p.step(Step{Title: "load the egress table", Describe: "egress for " + uidOf(p), Command: "nft uid " + uidOf(p), Provisional: !p.f.User.Exists})
+			if p.f.raw["wg"] == nil {
+				p.step(Step{Title: "create /etc/wireguard for " + uidOf(p), Describe: "wg dir", Command: "install -d /etc/wireguard"})
+			}
+			return nil
+		}},
+	})
+	in := testInput(t)
+	plan, err := Build(h, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
+	r := ui.NewPlain(&b, true)
+	plan.ShowToRun(r)
+	if err := Execute(h, in, plan, r); err != nil {
+		t.Fatal(err)
+	}
+	run := b.String()[strings.Index(b.String(), ui.RunLabel+":"):]
+	want := "  ok   create /etc/wireguard for 1001: done already\n" +
+		"  ok   load the egress table\n" +
+		"      egress for 1001\n"
+	if !strings.HasSuffix(run, want) {
+		t.Errorf("the run ends:\n%s\nwant it to end:\n%s", run, want)
 	}
 }

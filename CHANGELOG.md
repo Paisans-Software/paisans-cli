@@ -12,16 +12,30 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Added
 
+- `apply` runs on the sites it has: a site not yet admitted is left out, a joined site that does not answer is kept, the plan lists them, and `--require-all` fails a degraded run.
+- The gateway's Caddy answers `/.well-known/paisans/<token>`, and `apply` ends a gateway's step by fetching it through the public address, failing when another server answers on 443 or 80.
 - `infra.images` and `infra.postgres.<major>.spilo` override the infrastructure stack's images without a catalog release, and `paisans images` lists each site's builds, what would move, and overrides behind their track.
 - `host request --site <s>` writes the request a host's owner admits that site from, naming the site and its roles, and prints its digest on stderr for the owner to compare over a trusted channel.
 - Any run with `--execute` that logs in to a site leaving `ssh.user` out writes the deployment's user there; a run without `--execute` only says so, and a failed write is a warning.
 - `host admit` and `host evict` let a host's owner admit a deployment as its own unprivileged user with rootless Docker, from a request on the host or over their own SSH, and undo it.
 - `host prepare --all` prepares every site the configuration declares, one at a time in its order, each with its own review, stopping at the first failure.
-- `host admit`, `host prepare` and the rootless deployment commands support Ubuntu 22.04 beside 24.04, with Docker's apt source naming the codename the host's `/etc/os-release` gives.
+- `host admit`, `host prepare` and the rootless deployment commands support Ubuntu 22.04 beside 24.04.
 - Each release attaches static `paisans-linux-amd64` and `paisans-linux-arm64` binaries and a `SHA256SUMS` file, so a host owner can run the CLI on Linux without Go.
 
 ### Changed
 
+- `secrets set` and `secrets rotate` try an SMTP password from the machine they run on, warning when the server cannot be reached there, and rotate tries it from every site before handing it to any.
+- Behind the owner's web server, `apply` writes each app's reference snippet to `/srv/paisans/<token>/web-server/` from what `host admit` detected, and warns until the owner's copy serves it; nothing of the owner's is written or reloaded.
+- `site remove` cleans a host only as the deployment's user its admission record names, empties its root through `rootlesskit`, and ends with the `host evict` line the host's owner runs to remove the rest.
+- `host deployments` lists every admission record on the host, with the user, site, grants and time, and lists only those with `--sudo=false`.
+- `paisans init` settles the mesh subnet on the hosts that have admitted the deployment and leaves the rest to `host admit`'s own check; `config recover` finds the deployment from the login's admission record.
+- `paisans prune` reads each dangling volume's size from `docker system df -v`, which the deployment's user can read for a volume a container's user owns.
+- The host check runs as the deployment's user: it reads listeners with `ss -Hltnue`, counts its own user's and containers' as this deployment's, and leaves the firewall to `host admit`.
+- Every command that changes a host checks first that the host admitted the deployment as that site, with the grants its roles need, and names the `host request` and `host admit` lines when not.
+- `host prepare` installs nothing: it checks the admission record, then keeps the deployment user's `authorized_keys`, configuration store in `.paisans/config/`, user systemd units and `daemon.json`.
+- The mesh subnet check reads the deployment's own Docker pools from `~/.config/docker/daemon.json`.
+- The host owner's Caddy site files beside a gateway go in `/srv/paisans/<token>/caddy.d`, which `apply` creates as the deployment's user, instead of `/srv/caddy.d`.
+- The deployment record, the grant record and a gateway move's marker live in `/srv/paisans/<token>/.paisans/`, written by the deployment's own user under one lock of the deployment's.
 - `sites.*.roles` lists each role once, so a repeated role is refused when the configuration loads, as `host request` requires.
 - Preflight compares a new data site with the existing data sites on architecture alone, so data sites may run different Ubuntu releases, since Postgres uses its container's glibc.
 - `watchdog: off` is refused, since a data site's Patroni needs a watchdog to fail over safely and no other site uses one.
@@ -30,7 +44,6 @@ changes share a bullet. Detailed notes are on the corresponding
 - `mesh.subnet` and `sites.*.address` must be written in canonical form, Eg: `10.44.0.0/24` and not `10.44.0.0/024`, as `host request` carries them.
 - `mesh.subnet` larger than a /24 or overlapping 0.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16 or 224.0.0.0/3 is refused, as is a site address on its network or broadcast address, since hosts' firewalls trust the mesh.
 - `mesh.subnet` outside 10.0.0.0/8, 172.16.0.0/12 and 192.168.0.0/16 is refused, replacing the `mesh-subnet-is-not-private` warning, so another deployment's user on a shared host cannot reach the mesh.
-- `host prepare` installs `gnupg` and checks Docker's apt key against the fingerprint of Docker's release key before apt trusts it, refusing a download that holds any other key.
 - Each site's mesh file renders inside the deployment's directory, as `/srv/paisans/<token>/psns-<token>.conf`, and carries no `PostUp`: a relaying site's forwarding is the host's sysctl.
 - `apply` starts, syncs and restarts each site's mesh through its WireGuard helper, `sudo -n /usr/local/libexec/paisans/wg-psns-<token>`, which checks the mesh file before installing it in `/etc/wireguard`.
 - `doctor` advises reading a down mesh interface's journal with its WireGuard helper's `log`, which the deployment's user can run, instead of `systemctl status` and `journalctl`.
@@ -50,20 +63,19 @@ changes share a bullet. Detailed notes are on the corresponding
 
 - `host allow`, `host disallow` and the key allowlist in `/etc/paisans/ssh-allow.<user>` are removed, with `host prepare`'s refusal of keys it lacked and `doctor`'s allowlist check.
 - `--sudo` is removed from every command but `host deployments`: each runs as the site's ssh user, and `apply`, `site remove`, `host prepare --all` and `config` ask no sudo password before they start.
+- `web_server.include_dir`: `validate` refuses it, since `apply` writes nothing into the host owner's web server.
 
 ### Fixed
 
 - Every mesh overlap check reads every routing table, so a route another VPN keeps in its own table, such as Tailscale's table 52, is refused.
 - Mesh overlap refusals in `init`, `apply`, `host prepare`, `preflight` and `doctor` show control characters in names a host printed as escapes, so none is drawn on the terminal.
-- The configuration store's daemon starts and stops with the deployment's WireGuard unit, and `host prepare` starts it only where the mesh is up, so peers can fetch from it once `apply` starts the mesh.
 - `apply --execute` starts no peer sync on a site `host prepare` has not given a store, which has nothing to sync, rather than warning on every bare host that its sync did not complete.
-- `site remove` without `--delete-data` keeps the registry entry, marked `data` kept, while data is left, so a later `--force --id ... --delete-data` finds the deployment instead of refusing.
 - `site remove` and `app remove` read every flag given after the name before they report, so `-v` there shows detail and `--execute` there records `ssh.user`.
 - `apply` on a site whose mesh interface is up without its file's address, key or peers restarts or syncs it, so a run stopped between writing the file and handing it over completes.
 
 ### Security
 
-- Files written to a host are staged in a `mktemp` file beside the target, created exclusively and renamed into place, so a symlink planted at a guessable name is never written through, even under sudo.
+- Files written to a host are staged in a `mktemp` file beside the target, created exclusively and renamed into place, so a symlink planted at a guessable name is never written through.
 - Writing a file to a host refuses a target that is a symbolic link or a directory, rather than replacing the link or moving the file into the directory.
 
 ## [0.2.0] - 2026-10-15

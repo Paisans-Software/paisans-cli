@@ -97,7 +97,7 @@ func Pull(t apply.Transport, d deployment.Deployment, syncFirst bool) ([]byte, *
 	repo := hostprep.ConfigRepo(d)
 	var syncErr string
 	if syncFirst {
-		if out, err := t.Run(fmt.Sprintf("if [ -d %s ]; then systemctl start %s; fi", quote(repo), quote(d.Prefix()+"-config-sync.service"))); err != nil {
+		if out, err := t.Run(fmt.Sprintf("if [ -d %s ]; then %s start %s; fi", quote(repo), hostprep.UserSystemctl, quote(d.Prefix()+"-config-sync.service"))); err != nil {
 			syncErr = strings.TrimSpace(err.Error() + " " + out)
 		}
 	}

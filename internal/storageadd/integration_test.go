@@ -27,6 +27,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/dockertest"
 	"github.com/paisans-software/paisans-cli/internal/garage"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/storageadd"
@@ -129,12 +130,7 @@ func (g *gatewayHost) Run(command string) (string, error) {
 
 func requireDocker(t *testing.T) {
 	t.Helper()
-	if _, err := exec.LookPath("docker"); err != nil {
-		t.Skip("docker is not on PATH")
-	}
-	if out, err := exec.Command("docker", "info").CombinedOutput(); err != nil {
-		t.Skipf("docker is not running: %s", out)
-	}
+	dockertest.RequireRootless(t)
 }
 
 func mustRun(t *testing.T, name string, args ...string) string {

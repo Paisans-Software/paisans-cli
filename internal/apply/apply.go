@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -140,6 +141,9 @@ type Note struct {
 type Plan struct {
 	Site      string
 	Transport string
+	// Pending is the sites pending in this run, sorted, recorded in the
+	// manifest.
+	Pending []string
 	// Deployment is whose files these are, and so where they land.
 	Deployment deployment.Deployment
 	Changes    []Change
@@ -215,9 +219,9 @@ type Plan struct {
 	// path refuses the apply before anything is written. See VolumeCheck.
 	Volumes *VolumeCheck
 	// HostSites is set when this site's Caddy mounts the host's own
-	// render.HostSitesDir. Execute creates the directory, root's and 0755,
-	// before the first container that mounts it, when it is missing, and
-	// never touches what is inside it.
+	// render.HostSitesDir. Execute creates the directory, the deployment
+	// user's and 0755, before the first container that mounts it, when it is
+	// absent, and never touches what is inside it.
 	HostSites bool
 	// KeepImages skips pruning and the sweep for this run, as --keep-images
 	// does.
@@ -238,8 +242,8 @@ type Plan struct {
 	// and Arch the one this plan was made for, which Execute records.
 	recordedArch string
 	Arch         string
-	// recordedWebServer is what the manifest Build read recorded of the files
-	// in the operator's web server's include directory. Apply writes them
+	// recordedWebServer is what the manifest Build read recorded of the
+	// reference files for the host owner's web server. Apply writes them
 	// after every site is up, so every manifest write keeps them.
 	recordedWebServer []render.ManifestWebServer
 	// images is what each stack of this site renders, from its compose file.
@@ -373,10 +377,11 @@ const remoteRoot = "/"
 // apply would be a blind overwrite.
 func manifestPath(d deployment.Deployment) string { return d.Manifest() }
 
-// HostSitesCommand creates render.HostSitesDir, root's and 0755, when it is
-// missing, and changes nothing when it exists.
-func HostSitesCommand() string {
-	return fmt.Sprintf("[ -d %[1]s ] || install -d -m 755 -o root -g root %[1]s", render.HostSitesDir)
+// HostSitesCommand creates render.HostSitesDir, the deployment user's and
+// 0755, when it is absent: the gateway's Caddy mounts it, and the host's
+// owner writes their site files into it.
+func HostSitesCommand(d deployment.Deployment) string {
+	return fmt.Sprintf("[ -d %[1]s ] || install -d -m 755 %[1]s", shellQuote(render.HostSitesDir(d)))
 }
 
 // gatewayCaddyfile and gatewayCompose are the two rendered files that say a
@@ -397,6 +402,8 @@ const (
 type Option func(*options)
 
 type options struct {
+	// pending is the sites pending in this run; see Pending.
+	pending    []string
 	scope      []string
 	overwrite  []string
 	recreate   []string
@@ -426,6 +433,12 @@ type options struct {
 	peers []PeerCompose
 	// served is Plan.Served; see Serves.
 	served diagnosis.Served
+}
+
+// Pending names the sites pending in this run, recorded in the manifest so
+// that what compares this site with a render later renders the same view.
+func Pending(sites ...string) Option {
+	return func(o *options) { o.pending = slices.Compact(slices.Sorted(slices.Values(sites))) }
 }
 
 // Serves gives the plan the hostnames each Caddy site serves, from
@@ -564,6 +577,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 		opt(&o)
 	}
 	out.Report = o.report
+	out.Pending = o.pending
 	out.Served = o.served
 	out.listsImages = o.tolerateUnresolved
 	// An earlier pass of the same apply already carried out these. See After.
@@ -1247,8 +1261,8 @@ func execute(plan *Plan, t Transport) error {
 	// that mounts it, the validation below. An existing one is left exactly
 	// as it is, owner and mode included: it is the host's.
 	if plan.HostSites {
-		if out, err := t.Run(HostSitesCommand()); err != nil {
-			return fmt.Errorf("%s: creating %s, so the gateway was not changed:\n%s", plan.Site, render.HostSitesDir, out)
+		if out, err := t.Run(HostSitesCommand(plan.Deployment)); err != nil {
+			return fmt.Errorf("%s: creating %s, so the gateway was not changed:\n%s", plan.Site, render.HostSitesDir(plan.Deployment), out)
 		}
 	}
 
@@ -1614,7 +1628,7 @@ func writeManifest(plan *Plan, t Transport) error {
 		files = append(files, entry)
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
-	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files, Pins: pinRecord(plan), Arch: plan.Arch, Images: imageRecord(plan), WebServer: plan.recordedWebServer}, "", "  ")
+	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files, Pins: pinRecord(plan), Arch: plan.Arch, Images: imageRecord(plan), WebServer: plan.recordedWebServer, Pending: plan.Pending}, "", "  ")
 	if err != nil {
 		return err
 	}

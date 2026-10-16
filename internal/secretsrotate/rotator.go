@@ -31,6 +31,14 @@ type Use struct {
 	Do func(e Env, s *config.Secrets) error
 }
 
+// SiteTrier is a rotator whose next value is tried from every site that
+// will be handed it (Env.MailFrom) at the end of stage 2, before stage 3
+// hands it to any, Eg: an SMTP password, which this machine may not have
+// reached the server to try.
+type SiteTrier interface {
+	TriedFromSites() bool
+}
+
 // Rotator is one secret's rotation: where its next value comes from, the side
 // that checks it, the stacks that present it, and how the value is promoted.
 type Rotator interface {

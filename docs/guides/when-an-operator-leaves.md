@@ -158,7 +158,7 @@ community's decision.
 
       `secrets rotate --all --execute` in step 3 asks for each new value at
       the terminal before it changes anything, and hands it to the hosts.
-      Each new SMTP password logs in to the mail server from a site and sends
+      Each new SMTP password logs in to the mail server from this machine, and from each site before it is handed the password, and sends
       every operator one test message before it is taken, whether it is
       pasted there or set now, so expect one per sender. To
       put the new DNS token in the file now rather than wait for step 3, set

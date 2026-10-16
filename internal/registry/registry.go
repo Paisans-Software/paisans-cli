@@ -7,8 +7,8 @@
 // The token is only four hex digits of a random id, so a collision is
 // unlikely and not impossible, and nothing about the id alone can see one.
 // The registry can: /var/lib/paisans/registry.json lists every deployment
-// that has claimed the host, by id, with its token and root, and a command
-// that writes to a host claims it first. A claim by an id whose token or root
+// that has claimed the host, by id, with its token and root, and host admit
+// claims it, as root, before it changes anything. A claim by an id whose token or root
 // is already another id's is refused, and the host is left as it was.
 //
 // The same record keeps two deployments' meshes apart. Each entry carries the
@@ -20,7 +20,7 @@
 // everything else on the host.
 //
 // It also keeps the gateway and the data role to one deployment per host.
-// The gateway owns ports 80 and 443 and the Caddy that imports /srv/caddy.d;
+// The gateway owns ports 80 and 443 and the Caddy that imports its deployment's caddy.d;
 // a data site owns the Postgres and etcd ports and the storage under
 // them. Each entry carries the site's roles as one string, sorted and joined
 // with commas (Eg: "apps,data,gateway"), so the awk merge tests a role with
@@ -30,9 +30,8 @@
 //
 // The claim runs as one remote shell command under flock, so two operators
 // claiming one host at once are serialised rather than both reading the old
-// file. The merge itself is awk, which a host has before host prepare has
-// installed anything, and host prepare is itself a command that claims. The
-// file therefore has a fixed layout, one deployment per line, which Encode
+// file. The merge itself is awk, which a host has before anything is
+// installed on it. The file therefore has a fixed layout, one deployment per line, which Encode
 // writes and the awk program reads; a file in any other layout is refused
 // rather than guessed at. The layout is also plain JSON.
 //
@@ -88,7 +87,7 @@ type Entry struct {
 	Domain string `json:"domain"`
 	// Site is this host's site name in that deployment.
 	Site string `json:"site"`
-	// ClaimedAt is when a command last claimed the host for it, RFC 3339.
+	// ClaimedAt is when the host was last claimed for it, RFC 3339.
 	ClaimedAt string `json:"claimed_at"`
 	// Interface is the deployment's WireGuard interface, psns-<token>.
 	Interface string `json:"interface,omitempty"`
@@ -102,53 +101,10 @@ type Entry struct {
 	// Roles is the site's roles, sorted and joined with commas, one string
 	// because the awk merge matches a role in it with index().
 	Roles string `json:"roles,omitempty"`
-	// Kept names what the deployment left running on the host after a site
-	// remove cleaned it, empty for nothing: KeptCaddy for a gateway's Caddy
-	// still serving the host owner's sites, KeptData for the data a removal
-	// without --delete-data left. The entry stays, because what is kept
-	// still holds the root it names, and it is what lets a later site remove
-	// find the deployment, by --id too. A claim by the same id writes the
-	// entry without it.
-	Kept string `json:"kept,omitempty"`
-}
-
-// KeptCaddy is Kept for a gateway's Caddy kept for the host owner's sites in
-// /srv/caddy.d (docs/specs/2026-10-10-gateway-caddy-kept.md).
-const KeptCaddy = "caddy"
-
-// KeptData is Kept for a deployment whose only parts left on the host are
-// its data: files under its root and its named volumes, which a site remove
-// without --delete-data keeps.
-const KeptData = "data"
-
-// KeepCaddy is e marked as a deployment whose only part left on the host is
-// its Caddy.
-func KeepCaddy(e Entry) Entry {
-	e.Kept = KeptCaddy
-	return e
-}
-
-// Keep writes e, marked as keeping kept (KeptCaddy or KeptData), as id's
-// entry, under the claim's lock and through the claim's merge, so every
-// other entry stays as it was.
-func Keep(t Runner, id string, e Entry, kept string) error {
-	e.Kept = kept
-	command, err := ClaimCommand(id, e)
-	if err != nil {
-		return err
-	}
-	out, err := t.Run(command)
-	if err == nil {
-		return nil
-	}
-	if refusal := ParseClaim(out); refusal != nil {
-		return fmt.Errorf("%s: marking deployment %s's %s kept in %s: %w", t.Describe(), id, kept, Path, refusal)
-	}
-	return fmt.Errorf("%s: marking deployment %s's %s kept in %s: %w\n%s", t.Describe(), id, kept, Path, err, strings.TrimSpace(out))
 }
 
 // exclusiveRoles are the roles one host gives to one deployment: the gateway
-// binds 80 and 443 and runs the Caddy that imports /srv/caddy.d, and a data
+// binds 80 and 443 and runs the Caddy that imports its deployment's caddy.d, and a data
 // site binds the Postgres and etcd ports and holds the cluster's storage.
 var exclusiveRoles = []config.Role{config.RoleData, config.RoleGateway}
 
@@ -171,24 +127,6 @@ func hasRole(list string, role config.Role) bool {
 type Registry struct {
 	Version     int              `json:"version"`
 	Deployments map[string]Entry `json:"deployments"`
-}
-
-// For is the entry a deployment claims a site's host with.
-func For(cfg *config.Config, site string, now time.Time) (string, Entry) {
-	d := cfg.Deployment()
-	declared := cfg.Sites[site]
-	return d.ID, Entry{
-		Token:      d.Token(),
-		Root:       d.Root(),
-		Domain:     cfg.Community.Domain,
-		Site:       site,
-		ClaimedAt:  now.UTC().Format(time.RFC3339),
-		Interface:  d.Interface(),
-		ListenPort: declared.ListenPort(),
-		Subnet:     cfg.Mesh.Subnet,
-		Address:    declared.Address,
-		Roles:      JoinRoles(declared.Roles),
-	}
 }
 
 // ForRequest is the entry host admit claims a host with, from the request
@@ -220,8 +158,8 @@ func ForRequest(req admission.Request, now time.Time) (string, Entry) {
 	}
 }
 
-// Refused is the refusal a claim of e meets for why, in the words Claim
-// uses, for host admit's read-only check.
+// Refused is the refusal a claim of e meets for why, for host admit's
+// read-only check.
 func Refused(t Runner, e Entry, why error) error { return refused(t, e, why) }
 
 // Parse reads a registry. An empty file is an empty registry, which is what a
@@ -326,30 +264,6 @@ func Conflicts(r Registry, id string, e Entry) []Conflict {
 	return out
 }
 
-// Meshes is every other deployment's mesh subnet on this host, as networks
-// taken, for `paisans init` to choose a subnet clear of them. on names the
-// host in each description.
-func Meshes(r Registry, id, on string) []mesh.Taken {
-	ids := make([]string, 0, len(r.Deployments))
-	for other := range r.Deployments {
-		ids = append(ids, other)
-	}
-	sort.Strings(ids)
-	var out []mesh.Taken
-	for _, other := range ids {
-		e := r.Deployments[other]
-		if other == id {
-			continue
-		}
-		p, err := mesh.ParsePrefix(e.Subnet)
-		if err != nil {
-			continue
-		}
-		out = append(out, mesh.Taken{Prefix: p, What: fmt.Sprintf("deployment %s (%s)'s mesh %s on %s", other, e.Domain, e.Subnet, on)})
-	}
-	return out
-}
-
 // Merge adds or refreshes id's entry, or refuses with the first conflict and
 // returns r unchanged. id's own entry for another site (AnotherSite) is
 // refused as the awk merge refuses it, with a Conflict naming id itself.
@@ -438,7 +352,7 @@ const (
 // (the refresh), and prints the result with entry last. id's own line naming
 // another site is a conflict too, and so, where either line names no site,
 // is one at another mesh address: the host is that site's machine (see
-// sameMachine and AnotherSite). A line under another
+// AnotherSite). A line under another
 // id holding the claimed token, root, interface or listen port, a mesh
 // subnet overlapping the claimed one, or the gateway or data role the claim
 // also holds, is a conflict: it is printed to stderr
@@ -602,66 +516,6 @@ type Runner interface {
 	Describe() string
 }
 
-// Claim claims the host t reaches for cfg's deployment, as site. It is the
-// first thing every command that writes to a host does: a refusal stops the
-// command with nothing on the host changed.
-//
-// A host that already runs another site of this deployment is refused before
-// the claim runs, and the merge refuses it again under the lock, for two
-// claims racing.
-func Claim(t Runner, cfg *config.Config, site string, now time.Time) error {
-	id, e := For(cfg, site, now)
-	content, _, err := t.ReadFile(Path)
-	if err != nil {
-		return fmt.Errorf("%s: reading %s: %w", t.Describe(), Path, err)
-	}
-	// A registry in another layout is the merge's to refuse, in its own words.
-	var current *Registry
-	if r, err := Parse([]byte(content)); err == nil {
-		current = &r
-	}
-	if err := sameMachine(t, current, cfg, site); err != nil {
-		return err
-	}
-	command, err := ClaimCommand(id, e)
-	if err != nil {
-		return err
-	}
-	out, err := t.Run(command)
-	if err == nil {
-		return nil
-	}
-	if refusal := ParseClaim(out); refusal != nil {
-		var c Conflict
-		if errors.As(refusal, &c) && c.ID == id {
-			return otherSite(t, cfg, site, c.Entry.Site, c.Entry.Address, c.Entry.Kept)
-		}
-		if errors.As(refusal, &c) {
-			c.Clashes = clashes(c.Entry, e)
-			refusal = c
-		}
-		return refused(t, e, refusal)
-	}
-	return fmt.Errorf("%s: claiming the host in %s: %w\n%s", t.Describe(), Path, err, strings.TrimSpace(out))
-}
-
-// Check is a claim's decision without the write, for a dry run and the read
-// only commands: it reads the registry and reports a conflict as Claim would.
-func Check(t Runner, cfg *config.Config, site string) error {
-	id, e := For(cfg, site, time.Time{})
-	r, err := Read(t)
-	if err != nil {
-		return err
-	}
-	if err := sameMachine(t, &r, cfg, site); err != nil {
-		return err
-	}
-	if c := Conflicts(r, id, e); len(c) > 0 {
-		return refused(t, e, c[0])
-	}
-	return nil
-}
-
 // Read reads the registry on the host t reaches. A host no deployment has
 // claimed has none, which is an empty registry.
 func Read(t Runner) (Registry, error) {
@@ -686,7 +540,7 @@ func refused(t Runner, e Entry, why error) error {
 	if errors.As(why, &c) && len(c.Clashes) > 0 && !strings.HasPrefix(c.Clashes[0], "token") && !strings.HasPrefix(c.Clashes[0], "root") && !strings.HasPrefix(c.Clashes[0], "WireGuard interface") {
 		switch {
 		case strings.HasPrefix(c.Clashes[0], "the gateway role"):
-			advice = "One host gives ports 80 and 443 to one deployment: its gateway binds them and its Caddy imports /srv/caddy.d, and a site admitted with --public-ports holds them too. Use another host for one of them"
+			advice = "One host gives ports 80 and 443 to one deployment: its gateway binds them and its Caddy imports its deployment's caddy.d, and a site admitted with --public-ports holds them too. Use another host for one of them"
 		case strings.HasPrefix(c.Clashes[0], "the data role"):
 			advice = "One host runs one deployment's data site: it binds the Postgres and etcd ports and holds the cluster's storage. Use another host for one of the data sites"
 		case strings.HasPrefix(c.Clashes[0], "WireGuard listen port"):
@@ -776,69 +630,4 @@ func RemoveCommand(id string) string {
 		`chmod 600 "$tmp"`,
 		`mv "$tmp" ` + Path,
 	}, "; ")
-}
-
-// Unclaim takes this deployment's entry out of the registry on the host t
-// reaches. A registry in another layout is reported, not rewritten.
-func Unclaim(t Runner, id string) error {
-	out, err := t.Run(RemoveCommand(id))
-	if err == nil {
-		return nil
-	}
-	if refusal := ParseClaim(out); refusal != nil {
-		return fmt.Errorf("%s: %w", t.Describe(), refusal)
-	}
-	return fmt.Errorf("%s: removing deployment %s from %s: %w\n%s", t.Describe(), id, Path, err, strings.TrimSpace(out))
-}
-
-// Find is the one entry ref names on this host: by its full id, or by its
-// token, the id's first deployment.TokenLength hex digits. No match and
-// several are refused, and the refusal lists every entry the host holds, so
-// the operator can name one.
-func Find(r Registry, ref string) (string, Entry, error) {
-	var ids []string
-	for id, e := range r.Deployments {
-		if id == ref || (len(ref) == deployment.TokenLength && (e.Token == ref || strings.HasPrefix(id, ref))) {
-			ids = append(ids, id)
-		}
-	}
-	sort.Strings(ids)
-	switch len(ids) {
-	case 1:
-		return ids[0], r.Deployments[ids[0]], nil
-	case 0:
-		return "", Entry{}, fmt.Errorf("no deployment in %s has id or token %s. %s", Path, ref, Holds(r))
-	}
-	return "", Entry{}, fmt.Errorf("token %s names %d deployments in %s, so name one by its full id. %s", ref, len(ids), Path, Holds(r))
-}
-
-// Holds is every entry of the registry in a sentence, sorted by id.
-func Holds(r Registry) string {
-	if len(r.Deployments) == 0 {
-		return "The host holds none"
-	}
-	ids := make([]string, 0, len(r.Deployments))
-	for id := range r.Deployments {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	var out []string
-	for _, id := range ids {
-		out = append(out, Describe(id, r.Deployments[id]))
-	}
-	return "The host holds " + strings.Join(out, "; ")
-}
-
-// Describe is one entry in words: Eg: f2a9c4e1-... (token f2a9, example.org,
-// site vm, roles gateway).
-func Describe(id string, e Entry) string {
-	roles := e.Roles
-	if roles == "" {
-		roles = "none"
-	}
-	out := fmt.Sprintf("%s (token %s, %s, site %s, roles %s", id, e.Token, e.Domain, e.Site, roles)
-	if e.Kept != "" {
-		out += ", " + e.Kept + " kept"
-	}
-	return out + ")"
 }
