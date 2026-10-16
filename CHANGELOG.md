@@ -27,6 +27,8 @@ changes share a bullet. Detailed notes are on the corresponding
 - `sites.*.web_server.listen` must be an IPv4 loopback address or the site's own mesh address, its port written without leading zeros, as `host request` requires; `web-server-listen-not-this-host` refuses anything else.
 - `mesh.subnet` and `sites.*.address` must be written in canonical form, Eg: `10.44.0.0/24` and not `10.44.0.0/024`, as `host request` carries them.
 - `mesh.subnet` larger than a /24 or overlapping 0.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16 or 224.0.0.0/3 is refused, as is a site address on its network or broadcast address, since hosts' firewalls trust the mesh.
+- `mesh.subnet` outside 10.0.0.0/8, 172.16.0.0/12 and 192.168.0.0/16 is refused, replacing the `mesh-subnet-is-not-private` warning, so another deployment's user on a shared host cannot reach the mesh.
+- `host prepare` installs `gnupg` and checks Docker's apt key against the fingerprint of Docker's release key before apt trusts it, refusing a download that holds any other key.
 - Each site's mesh file renders inside the deployment's directory, as `/srv/paisans/<token>/psns-<token>.conf`, and carries no `PostUp`: a relaying site's forwarding is the host's sysctl.
 - `apply` starts, syncs and restarts each site's mesh through its WireGuard helper, `sudo -n /usr/local/libexec/paisans/wg-psns-<token>`, which checks the mesh file before installing it in `/etc/wireguard`.
 - `doctor` advises reading a down mesh interface's journal with its WireGuard helper's `log`, which the deployment's user can run, instead of `systemctl status` and `journalctl`.
@@ -49,7 +51,8 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Fixed
 
-- The mesh overlap checks of `init`, `apply`, `host prepare`, `site add`, `prune`, `preflight` and `doctor` read every routing table, so a route another VPN keeps in its own table, such as Tailscale's table 52, is refused.
+- Every mesh overlap check reads every routing table, so a route another VPN keeps in its own table, such as Tailscale's table 52, is refused.
+- Mesh overlap refusals in `init`, `apply`, `host prepare`, `preflight` and `doctor` show control characters in names a host printed as escapes, so none is drawn on the terminal.
 - The configuration store's daemon starts and stops with the deployment's WireGuard unit, and `host prepare` starts it only where the mesh is up, so peers can fetch from it once `apply` starts the mesh.
 - `apply --execute` starts no peer sync on a site `host prepare` has not given a store, which has nothing to sync, rather than warning on every bare host that its sync did not complete.
 - `site remove` without `--delete-data` keeps the registry entry, marked `data` kept, while data is left, so a later `--force --id ... --delete-data` finds the deployment instead of refusing.
