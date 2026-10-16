@@ -462,12 +462,12 @@ step 14: install the helper's sudoers line
   run:
     $ visudo -cqf /etc/sudoers.d/paisans-f2a9.new && chown root:root /etc/sudoers.d/paisans-f2a9.new && mv -f /etc/sudoers.d/paisans-f2a9.new /etc/sudoers.d/paisans-f2a9 || { rm -f /etc/sudoers.d/paisans-f2a9.new; echo 'visudo refused the line; nothing reached sudo'; exit 1; }
 
-step 11: load softdog
+step 15: load softdog
   watchdog: load softdog now
   run:
     $ modprobe softdog
 
-step 12: load softdog at boot
+step 16: load softdog at boot
   watchdog: load softdog at every boot (paisans-f2a9-watchdog.service)
   write /etc/systemd/system/paisans-f2a9-watchdog.service mode 0644:
     | # Written by paisans host prepare. Loads softdog at boot, before Docker
@@ -491,7 +491,7 @@ step 12: load softdog at boot
   run:
     $ systemctl daemon-reload && systemctl enable paisans-f2a9-watchdog.service
 
-step 13: give the watchdog to community
+step 17: give the watchdog to community
   watchdog: /etc/udev/rules.d/60-paisans-f2a9-watchdog.rules makes /dev/watchdog and /dev/watchdog0 community's, owner and group, mode 600
   write /etc/udev/rules.d/60-paisans-f2a9-watchdog.rules mode 0644:
     | # Written by paisans host admit: the watchdog is community's, for its

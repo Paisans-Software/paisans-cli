@@ -472,5 +472,6 @@ present: linger: on for paisans-f2a9
 present: linger: paisans-f2a9's manager is running
 present: daemon: /home/paisans-f2a9 (ext2/ext3) has 42.9 GB free
 present: mesh: nothing on this host overlaps 10.44.0.0/24
+present: forwarding: not needed, this site has no endpoint
 warning: delegation reaches paisans-f2a9's manager at its next start
   Its manager is running, and restarting it would restart its Docker daemon and every container in it, so admit does not. cpuset and io limits apply after the host's next reboot.

@@ -453,6 +453,7 @@ present: br_netfilter: br_netfilter and nf_tables loaded at boot by /etc/modules
 present: daemon: /srv/data (xfs) has 42.9 GB free
 present: daemon: /srv/data/paisans-f2a9 is paisans-f2a9's alone
 present: mesh: nothing on this host overlaps 10.44.0.0/24
+present: forwarding: not needed, this site has no endpoint
 warning: delegation reaches paisans-f2a9's manager at its next start
   Its manager is running, and restarting it would restart its Docker daemon and every container in it, so admit does not. cpuset and io limits apply after the host's next reboot.
 warning: daemon: paisans-f2a9's daemon picks up its new daemon.json at its next restart

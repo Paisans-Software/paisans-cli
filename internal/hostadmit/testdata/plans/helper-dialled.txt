@@ -452,12 +452,12 @@ step 12: install the helper's sudoers line
   run:
     $ visudo -cqf /etc/sudoers.d/paisans-f2a9.new && chown root:root /etc/sudoers.d/paisans-f2a9.new && mv -f /etc/sudoers.d/paisans-f2a9.new /etc/sudoers.d/paisans-f2a9 || { rm -f /etc/sudoers.d/paisans-f2a9.new; echo 'visudo refused the line; nothing reached sudo'; exit 1; }
 
-step 9: load softdog
+step 13: load softdog
   watchdog: load softdog now
   run:
     $ modprobe softdog
 
-step 10: load softdog at boot
+step 14: load softdog at boot
   watchdog: load softdog at every boot (paisans-f2a9-watchdog.service)
   write /etc/systemd/system/paisans-f2a9-watchdog.service mode 0644:
     | # Written by paisans host prepare. Loads softdog at boot, before Docker
@@ -481,7 +481,7 @@ step 10: load softdog at boot
   run:
     $ systemctl daemon-reload && systemctl enable paisans-f2a9-watchdog.service
 
-step 11: give the watchdog to paisans-f2a9
+step 15: give the watchdog to paisans-f2a9
   watchdog: /etc/udev/rules.d/60-paisans-f2a9-watchdog.rules makes /dev/watchdog and /dev/watchdog0 paisans-f2a9's, owner and group, mode 600
   write /etc/udev/rules.d/60-paisans-f2a9-watchdog.rules mode 0644:
     | # Written by paisans host admit: the watchdog is paisans-f2a9's, for its
@@ -490,7 +490,7 @@ step 11: give the watchdog to paisans-f2a9
   run:
     $ udevadm control --reload && udevadm trigger --subsystem-match=watchdog --subsystem-match=misc
 
-step 12: record the sysctls' values before
+step 16: record the sysctls' values before
   sysctls: /etc/paisans/sysctl.before, for host evict to restore
   write /etc/paisans/sysctl.before mode 0644:
     | # Written by paisans host admit: each value as it was before admit
@@ -498,7 +498,7 @@ step 12: record the sysctls' values before
     | net.ipv4.ip_forward = 0
     | net.ipv4.ip_unprivileged_port_start = 1024
 
-step 13: set the host's sysctls
+step 17: set the host's sysctls
   sysctls: /etc/sysctl.d/60-paisans.conf, applied with sysctl --system
   write /etc/sysctl.d/60-paisans.conf mode 0644:
     | # Written by paisans host admit, for every admitted deployment that needs
