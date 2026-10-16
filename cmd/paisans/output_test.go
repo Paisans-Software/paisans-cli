@@ -354,8 +354,8 @@ func fixtureRuns(t *testing.T) map[string]string {
 	}
 
 	{
-		host := danglingHost{listing: "volume\t3a37a98261c4f658850d43b3d0ddc746ae25d9ec6bb58e83132662b7ea646191\t48234496\t{\"community.paisans.deployment\":\"f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01\"}\tcache log\n" +
-			"volume\tother_db\t9999\t{\"com.docker.compose.project\":\"other\"}\tpgdata\nend\n"}
+		host := danglingHost{listing: `[{"Name":"3a37a98261c4f658850d43b3d0ddc746ae25d9ec6bb58e83132662b7ea646191","Size":"48.234MB"},{"Name":"other_db","Size":"9.999kB"}]` + "\nvolumes\nvolume\t3a37a98261c4f658850d43b3d0ddc746ae25d9ec6bb58e83132662b7ea646191\t{\"community.paisans.deployment\":\"f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01\"}\tcache log\n" +
+			"volume\tother_db\t{\"com.docker.compose.project\":\"other\"}\tpgdata\nend\n"}
 		plan, err := apply.BuildVolumePrune(deployment.Deployment{ID: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}, "home-a", host)
 		if err != nil {
 			t.Fatal(err)

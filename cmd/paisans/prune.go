@@ -107,7 +107,9 @@ func showVolumePrune(r ui.Reporter, plan *apply.VolumePrune) {
 	var total int64
 	for _, v := range plan.Volumes {
 		if v.Remove {
-			total += v.Size
+			if v.Size >= 0 {
+				total += v.Size
+			}
 			showVolume(r, "remove", v, ui.Pending)
 		}
 	}
