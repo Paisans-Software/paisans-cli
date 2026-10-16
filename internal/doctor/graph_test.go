@@ -649,6 +649,50 @@ func TestSelfCheckNeedsNoSsh(t *testing.T) {
 	}
 }
 
+// A monitor running Caddy that the classification found down is still
+// asked from outside, and a failure there is a warning pointing to reach,
+// as the monitor's absence is, never a second failure.
+func TestSelfCheckOfADownMonitorWarns(t *testing.T) {
+	cfg := fixture(t)
+	fix := healthyInput()
+	fix.Sites = append(fix.Sites, "watch")
+	fix.Reach = append(fix.Reach, SiteReach{Site: "watch", Destination: "ubuntu@watch.example.org", Err: "ssh: connect to host watch.example.org port 22: Operation timed out"})
+	fix.SelfChecks = []SelfCheckProbe{{Site: "watch", Host: "health.example.org", Address: "203.0.113.20",
+		Err: "nothing answers on 443 at 203.0.113.20: dial tcp 203.0.113.20:443: i/o timeout"}}
+	c := &topology.Classification{Sites: map[string]topology.Site{
+		"watch": {Name: "watch", Class: topology.Down, Why: topology.DownLine("watch")}}}
+	reads := &fixtureReads{in: fix, log: &events{}}
+	report, _ := Checks(cfg, fix.Sites, classifiedReads{reads, c}).Run(&ui.Recorder{}, 1)
+	if !reads.log.has("self-check watch") {
+		t.Errorf("down watch was not asked from outside: %v", reads.log.list)
+	}
+	f := find(t, report.Findings, SectionSelfCheck, "watch:")
+	if f.Level != Warn {
+		t.Errorf("down watch's self-check is %v, want a warning:\n%s", f.Level, dump(report.Findings))
+	}
+	if more := strings.Join(f.More, "\n"); !strings.Contains(more, "(see reach)") {
+		t.Errorf("down watch's self-check does not point to reach:\n%s", more)
+	}
+}
+
+// A gateway the classification found pending was never deployed, so it is
+// not asked from outside: a warning says admission is why.
+func TestSelfCheckSkipsAPendingGateway(t *testing.T) {
+	cfg := fixture(t)
+	fix := healthyInput()
+	c := &topology.Classification{Sites: map[string]topology.Site{
+		"vm": {Name: "vm", Class: topology.Pending, Request: true}}}
+	reads := &fixtureReads{in: fix, log: &events{}}
+	report, _ := Checks(cfg, fix.Sites, classifiedReads{reads, c}).Run(&ui.Recorder{}, 1)
+	if reads.log.has("self-check vm") {
+		t.Errorf("pending vm was asked from outside: %v", reads.log.list)
+	}
+	f := find(t, report.Findings, SectionSelfCheck, "vm:")
+	if f.Level != Warn || !strings.Contains(f.Line, "admission") {
+		t.Errorf("pending vm's self-check is %v %q, want a warning naming admission", f.Level, f.Line)
+	}
+}
+
 // With one node at a time, the nodes run in the graph's order, every site's
 // check of one kind before the next kind, which is the order doctor read
 // in before it ran in parallel, and the lines print in Diagnose's order.

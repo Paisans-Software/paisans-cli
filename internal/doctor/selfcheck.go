@@ -16,12 +16,19 @@ const SectionSelfCheck = "self-check"
 // workstation with the check apply runs at the end of the gateway's step.
 // Host and Address are what was asked; Unchecked is why nothing was. Err
 // is the check's error, and Conflict the port that answered as something
-// else, 0 when nothing answered.
+// else, 0 when nothing answered. Pending and Down are the run's
+// classification of the site: a pending site is not asked, and a down one
+// is asked with its absence in mind.
 type SelfCheckProbe struct {
 	Site, Host, Address, Unchecked string
 	Conflict                       int
 	Err                            string
+	Pending, Down                  bool
 }
+
+// selfCheckPending is why a site the classification found pending is not
+// asked from outside: apply has never deployed its Caddy.
+const selfCheckPending = "not asked from outside: the run's classification found it pending admission, so apply has not deployed its Caddy (see admission)"
 
 func (p SelfCheckProbe) site() string { return p.Site }
 
@@ -34,6 +41,9 @@ func SelfChecks(cfg *config.Config, probes []SelfCheckProbe) []Finding {
 	var out []Finding
 	for _, p := range probes {
 		switch {
+		case p.Pending:
+			out = append(out, Finding{Section: SectionSelfCheck, Level: Warn,
+				Line: fmt.Sprintf("%s: %s", p.Site, selfCheckPending)})
 		case p.Unchecked != "":
 			out = append(out, Finding{Section: SectionSelfCheck, Level: Warn,
 				Line: fmt.Sprintf("%s: not asked from outside: %s", p.Site, p.Unchecked),
@@ -41,6 +51,16 @@ func SelfChecks(cfg *config.Config, probes []SelfCheckProbe) []Finding {
 		case p.Err == "":
 			out = append(out, Finding{Section: SectionSelfCheck, Level: OK,
 				Line: fmt.Sprintf("%s: answers as this deployment on 443 and 80, asked for %s through %s", p.Site, p.Host, p.Address)})
+		case p.Down:
+			asked := fmt.Sprintf("doctor asked %s for https://%s%s from this workstation, once, and nothing answered.", p.Address, p.Host, path)
+			if p.Conflict != 0 {
+				asked = fmt.Sprintf("doctor asked %s for https://%s%s from this workstation, once, and another server answered on %d.", p.Address, p.Host, path, p.Conflict)
+			}
+			out = append(out, Finding{Section: SectionSelfCheck, Level: absentLevel(cfg, p.Site),
+				Line: fmt.Sprintf("%s: %s", p.Site, firstLine(p.Err)),
+				More: []string{asked,
+					fmt.Sprintf("The run's classification found %s down (see reach): its absence is the cause to look at first. Once its ssh answers, `paisans doctor --site %s` again.", p.Site, p.Site),
+				}})
 		case p.Conflict != 0:
 			out = append(out, Finding{Section: SectionSelfCheck, Level: Fail,
 				Line: fmt.Sprintf("%s: %s", p.Site, firstLine(p.Err)),

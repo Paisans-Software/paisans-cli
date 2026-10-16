@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
@@ -434,14 +435,23 @@ func Checks(cfg *config.Config, sites []string, reads Reads) *Graph {
 		})
 	}
 	// Each site running the toolkit's Caddy, asked from outside: it needs
-	// no ssh, so one whose ssh does not answer is still asked.
+	// no ssh, so one whose ssh does not answer is still asked. It follows
+	// the classification: a pending site was never deployed and is not
+	// asked, and a down one is asked with its absence in mind.
 	for _, site := range sites {
 		if !cfg.Sites[site].RunsCaddy() {
 			continue
 		}
 		g.Add(Node{Name: SectionSelfCheck + " " + site, Section: SectionSelfCheck, Site: site, Subject: site,
-			Gather: func(Input) func(*Input) {
-				p := reads.SelfCheck(site)
+			Soft: soft(classification),
+			Gather: func(in Input) func(*Input) {
+				var p SelfCheckProbe
+				if slices.Contains(in.Pending, site) {
+					p = SelfCheckProbe{Site: site, Pending: true}
+				} else {
+					p = reads.SelfCheck(site)
+					p.Down = slices.Contains(in.Down, site)
+				}
 				return func(in *Input) { in.SelfChecks = append(in.SelfChecks, p) }
 			},
 			Judge: func(in Input) []Finding { return SelfChecks(cfg, bySite(in.SelfChecks, site, SelfCheckProbe.site)) },
