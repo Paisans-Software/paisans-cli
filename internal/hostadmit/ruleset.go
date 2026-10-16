@@ -19,7 +19,10 @@ import (
 // that makes it is itself an allowlisted shape marked follow; the chain it
 // reaches is then read the same way. Anything else, a conditional jump, a
 // verdict map, a line the parser does not know, is the owner's. Admit's
-// own egress table, inet paisans_<token>, is admit's.
+// own egress table, inet paisans_<token>, is admit's where it hooks output,
+// which is all it hooks; any other hook in a table of that name is judged.
+// A ruleset whose braces or quotes do not balance is not one the parser
+// understands, and is named unreadable whole.
 //
 // A chain hooked on input or forward in a table iptables-nft does not
 // manage is the owner's whether or not it holds a rule, since only the
@@ -33,7 +36,7 @@ func ownerFirewall(lines []string) []string {
 	out := rs.unreadable
 	for _, key := range rs.order {
 		ch := rs.chains[key]
-		if ch.hook == "" || egressTableRe.MatchString(ch.family+" "+ch.table) {
+		if ch.hook == "" || ch.hook == "output" && egressTableRe.MatchString(ch.family+" "+ch.table) {
 			continue
 		}
 		if (ch.hook == "input" || ch.hook == "forward") && !iptablesTable(ch.family, ch.table) {
@@ -49,6 +52,9 @@ func ownerFirewall(lines []string) []string {
 		}
 		out = append(out, rs.judge(ch, map[string]bool{ch.key(): true})...)
 	}
+	if rs.unbalanced {
+		out = append(out, "unreadable ruleset: its braces or quotes do not balance")
+	}
 	return out
 }
 
@@ -56,7 +62,10 @@ func ownerFirewall(lines []string) []string {
 // chains of the named iptables-nft tables. Its rule is matched token by
 // token against a rule with its counter left out; a token in angle
 // brackets is a placeholder, checked by placeholder. follow marks a jump
-// or goto whose target is read against the allowlist in turn.
+// or goto whose target is read against the allowlist in turn. inBridge
+// marks a shape whose <host4> must be inside a network Docker masquerades
+// for the shape's <bridge>, in the same ruleset's ip nat POSTROUTING, so
+// only a container's address is Docker's to drop.
 //
 // Adding a shape needs a real nft list ruleset that shows it, kept in
 // testdata beside the three this list was taken from: ufw active on
@@ -66,48 +75,48 @@ func ownerFirewall(lines []string) []string {
 type shape struct {
 	families, table, chains string
 	rule                    string
-	follow                  bool
+	follow, inBridge        bool
 }
 
 // allowlist is every rule shape that is not the owner's.
 var allowlist = []shape{
 	// ufw: its hook chains jump to its own chains, which are ufw's whole.
-	{"ip", "filter", "INPUT FORWARD OUTPUT", "jump <ufw4>", false},
-	{"ip6", "filter", "INPUT FORWARD OUTPUT", "jump <ufw6>", false},
+	{"ip", "filter", "INPUT FORWARD OUTPUT", "jump <ufw4>", false, false},
+	{"ip6", "filter", "INPUT FORWARD OUTPUT", "jump <ufw6>", false, false},
 
 	// Docker 29: FORWARD jumps to its chains, DOCKER-USER is the owner's
 	// to fill and is read; NAT for published ports and outbound traffic;
 	// raw PREROUTING drops what reaches a container's address from outside
 	// its bridge, one host at a time.
-	{"ip ip6", "filter", "FORWARD", "jump DOCKER-USER", true},
-	{"ip ip6", "filter", "FORWARD", "jump DOCKER-FORWARD", false},
-	{"ip ip6", "filter", "DOCKER-USER", "return", false},
-	{"ip ip6", "nat", "PREROUTING", `xt match "addrtype" jump DOCKER`, false},
-	{"ip", "nat", "OUTPUT", `ip daddr != 127.0.0.0/8 xt match "addrtype" jump DOCKER`, false},
-	{"ip6", "nat", "OUTPUT", `ip6 daddr != ::1 xt match "addrtype" jump DOCKER`, false},
-	{"ip", "nat", "POSTROUTING", `ip saddr <net4> oifname != <bridge> xt target "MASQUERADE"`, false},
-	{"ip", "raw", "PREROUTING", "ip daddr <host4> iifname != <bridge> drop", false},
+	{"ip ip6", "filter", "FORWARD", "jump DOCKER-USER", true, false},
+	{"ip ip6", "filter", "FORWARD", "jump DOCKER-FORWARD", false, false},
+	{"ip ip6", "filter", "DOCKER-USER", "return", false, false},
+	{"ip ip6", "nat", "PREROUTING", `xt match "addrtype" jump DOCKER`, false, false},
+	{"ip", "nat", "OUTPUT", `ip daddr != 127.0.0.0/8 xt match "addrtype" jump DOCKER`, false, false},
+	{"ip6", "nat", "OUTPUT", `ip6 daddr != ::1 xt match "addrtype" jump DOCKER`, false, false},
+	{"ip", "nat", "POSTROUTING", `ip saddr <net4> oifname != <bridge> xt target "MASQUERADE"`, false, false},
+	{"ip", "raw", "PREROUTING", "ip daddr <host4> iifname != <bridge> drop", false, true},
 
 	// Tailscale: the hook chains jump to its three chains, whose rules are
 	// about its interface, its port, its mark and its ranges; it marks
 	// connections in mangle.
-	{"ip ip6", "filter", "INPUT", "jump ts-input", true},
-	{"ip ip6", "filter", "FORWARD", "jump ts-forward", true},
-	{"ip ip6", "nat", "POSTROUTING", "jump ts-postrouting", true},
-	{"ip", "filter", "ts-input", `ip saddr <ts4> iifname "lo" accept`, false},
-	{"ip ip6", "filter", "ts-input", `iifname "tailscale0" accept`, false},
-	{"ip ip6", "filter", "ts-input", "udp dport 41641 accept", false},
-	{"ip", "filter", "ts-input", `ip saddr 100.115.92.0/23 iifname != "tailscale0" return`, false},
-	{"ip", "filter", "ts-input", `ip saddr 100.64.0.0/10 iifname != "tailscale0" drop`, false},
-	{"ip6", "filter", "ts-input", `ip6 saddr <ts6> iifname "lo" accept`, false},
-	{"ip ip6", "filter", "ts-forward", `iifname "tailscale0" meta mark set mark and 0xff00ffff xor 0x40000`, false},
-	{"ip ip6", "filter", "ts-forward", "meta mark & 0x00ff0000 == 0x00040000 accept", false},
-	{"ip", "filter", "ts-forward", `ip saddr 100.64.0.0/10 oifname "tailscale0" drop`, false},
-	{"ip ip6", "filter", "ts-forward", `oifname "tailscale0" accept`, false},
-	{"ip", "nat", "ts-postrouting", "meta mark & 0x00ff0000 == 0x00040000 masquerade", false},
-	{"ip6", "nat", "ts-postrouting", `meta mark & 0x00ff0000 == 0x00040000 xt target "MASQUERADE"`, false},
-	{"ip ip6", "mangle", "PREROUTING", "ct state related,established ct mark and 0xff0000 != 0x0 meta mark set ct mark and 0xff0000", false},
-	{"ip ip6", "mangle", "OUTPUT", "ct state new meta mark & 0x00ff0000 != 0x00000000 ct mark set mark and 0xff0000", false},
+	{"ip ip6", "filter", "INPUT", "jump ts-input", true, false},
+	{"ip ip6", "filter", "FORWARD", "jump ts-forward", true, false},
+	{"ip ip6", "nat", "POSTROUTING", "jump ts-postrouting", true, false},
+	{"ip", "filter", "ts-input", `ip saddr <ts4> iifname "lo" accept`, false, false},
+	{"ip ip6", "filter", "ts-input", `iifname "tailscale0" accept`, false, false},
+	{"ip ip6", "filter", "ts-input", "udp dport 41641 accept", false, false},
+	{"ip", "filter", "ts-input", `ip saddr 100.115.92.0/23 iifname != "tailscale0" return`, false, false},
+	{"ip", "filter", "ts-input", `ip saddr 100.64.0.0/10 iifname != "tailscale0" drop`, false, false},
+	{"ip6", "filter", "ts-input", `ip6 saddr <ts6> iifname "lo" accept`, false, false},
+	{"ip ip6", "filter", "ts-forward", `iifname "tailscale0" meta mark set mark and 0xff00ffff xor 0x40000`, false, false},
+	{"ip ip6", "filter", "ts-forward", "meta mark & 0x00ff0000 == 0x00040000 accept", false, false},
+	{"ip", "filter", "ts-forward", `ip saddr 100.64.0.0/10 oifname "tailscale0" drop`, false, false},
+	{"ip ip6", "filter", "ts-forward", `oifname "tailscale0" accept`, false, false},
+	{"ip", "nat", "ts-postrouting", "meta mark & 0x00ff0000 == 0x00040000 masquerade", false, false},
+	{"ip6", "nat", "ts-postrouting", `meta mark & 0x00ff0000 == 0x00040000 xt target "MASQUERADE"`, false, false},
+	{"ip ip6", "mangle", "PREROUTING", "ct state related,established ct mark and 0xff0000 != 0x0 meta mark set ct mark and 0xff0000", false, false},
+	{"ip ip6", "mangle", "OUTPUT", "ct state new meta mark & 0x00ff0000 != 0x00000000 ct mark set mark and 0xff0000", false, false},
 }
 
 // policyAllowed reports whether ch's policy is one ufw or Docker sets:
@@ -139,6 +148,9 @@ func (rs ruleset) judge(ch *chain, seen map[string]bool) []string {
 	var out []string
 	for _, r := range ch.rules {
 		s, ok := match(ch, r)
+		if ok && s.inBridge {
+			ok = rs.inBridge(strings.Fields(r)[2], strings.Fields(r)[5])
+		}
 		if !ok {
 			out = append(out, ui.Visible(ch.key()+": "+r))
 			continue
@@ -159,6 +171,33 @@ func (rs ruleset) judge(ch *chain, seen map[string]bool) []string {
 		out = append(out, rs.judge(next, seen)...)
 	}
 	return out
+}
+
+// inBridge reports whether addr is inside a network Docker masquerades for
+// bridge, read from the ruleset's ip nat POSTROUTING rules of Docker's
+// shape.
+func (rs ruleset) inBridge(addr, bridge string) bool {
+	a, err := netip.ParseAddr(addr)
+	if err != nil {
+		return false
+	}
+	post, ok := rs.chains["ip nat POSTROUTING"]
+	if !ok {
+		return false
+	}
+	for _, r := range post.rules {
+		if s, ok := match(post, r); !ok || !strings.Contains(s.rule, "MASQUERADE") {
+			continue
+		}
+		f := strings.Fields(r)
+		if f[5] != bridge {
+			continue
+		}
+		if p, err := netip.ParsePrefix(f[2]); err == nil && p.Contains(a) {
+			return true
+		}
+	}
+	return false
 }
 
 // match finds the allowlisted shape rule r of ch is, if any.
@@ -268,6 +307,9 @@ type ruleset struct {
 	order  []string
 	// unreadable names each line the parser could not place.
 	unreadable []string
+	// unbalanced is a ruleset whose braces do not close by its end, or
+	// with a line that ends inside a quoted string.
+	unbalanced bool
 }
 
 // The patterns a ruleset is read with.
@@ -312,11 +354,14 @@ func parseRuleset(lines []string) ruleset {
 				continue
 			}
 		}
+		if strings.Count(s, `"`)%2 != 0 {
+			rs.unbalanced = true
+		}
 		bare := unquoted(s)
 		start := depth
 		depth += strings.Count(bare, "{") - strings.Count(bare, "}")
 		if depth < 0 {
-			depth = 0
+			depth, rs.unbalanced = 0, true
 		}
 		word, _, _ := strings.Cut(s, " ")
 		switch {
@@ -374,6 +419,9 @@ func parseRuleset(lines []string) ruleset {
 			inChain = false
 		}
 	}
+	if depth != 0 {
+		rs.unbalanced = true
+	}
 	return rs
 }
 
@@ -401,12 +449,11 @@ func digits(s string) bool {
 }
 
 // commentAt is the index of the first # outside a quoted string, or -1.
+// nft's quoted strings have no escape character: a backslash is itself.
 func commentAt(s string) int {
 	in := false
 	for i := 0; i < len(s); i++ {
 		switch c := s[i]; {
-		case in && c == '\\':
-			i++
 		case c == '"':
 			in = !in
 		case !in && c == '#':
@@ -416,14 +463,13 @@ func commentAt(s string) int {
 	return -1
 }
 
-// unquoted is s with every double-quoted string, and its escapes, removed.
+// unquoted is s with every double-quoted string removed. nft's quoted
+// strings have no escape character, so a backslash ends nothing.
 func unquoted(s string) string {
 	var b strings.Builder
 	in := false
 	for i := 0; i < len(s); i++ {
 		switch c := s[i]; {
-		case in && c == '\\':
-			i++
 		case c == '"':
 			in = !in
 		case !in:

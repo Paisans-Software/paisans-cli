@@ -97,6 +97,9 @@ func TestAnOwnersTableIsAFirewall(t *testing.T) {
 func TestOutputIngressAndPreroutingDropsAreAFirewall(t *testing.T) {
 	egress := "table inet paisans_f2a9 {\n\tset private {\n\t\ttype ipv4_addr\n\t\tflags interval\n\t\telements = { 10.0.0.0/8,\n\t\t\t     192.168.0.0/16 }\n\t}\n\tchain users {\n\t\ttype filter hook output priority 0; policy accept;\n\t\tip daddr @private drop\n\t}\n}"
 	wantOwner(t, "admit's egress table", split(egress))
+	// Only its output hook is admit's: an input hook in a table of that
+	// name is judged like any other.
+	wantOwner(t, "an input hook in admit's table", split("table inet paisans_f2a9 {\n\tchain in {\n\t\ttype filter hook input priority 0; policy drop;\n\t}\n}"), "inet paisans_f2a9 in")
 	wantOwner(t, "output drop", split("table inet own {\n\tchain out {\n\t\ttype filter hook output priority 0; policy accept;\n\t\tip daddr 192.0.2.1 drop\n\t}\n}"), "inet own out: ip daddr 192.0.2.1 drop")
 	wantOwner(t, "ingress policy", split("table netdev own {\n\tchain in {\n\t\ttype filter hook ingress device \"eth0\" priority 0; policy drop;\n\t}\n}"), "netdev own in: policy drop")
 	wantOwner(t, "prerouting reject", split("table inet own {\n\tchain pre {\n\t\ttype filter hook prerouting priority 0; policy accept;\n\t\ttcp dport 25 reject\n\t\tmeta mark set 0x1\n\t}\n}"), "inet own pre: tcp dport 25 reject", "inet own pre: meta mark set 0x1")
@@ -146,12 +149,17 @@ func TestOnlyKnownJumpsAreFollowed(t *testing.T) {
 func TestHiddenRulesAreNamed(t *testing.T) {
 	// A conditional goto on prerouting, to a chain that drops.
 	wantOwner(t, "goto on prerouting", split("table ip mangle {\n\tchain X {\n\t\tdrop\n\t}\n\tchain PREROUTING {\n\t\ttype filter hook prerouting priority mangle; policy accept;\n\t\tiifname \"eth0\" goto X\n\t}\n}"), "ip mangle PREROUTING: iifname \"eth0\" goto X")
-	// Docker's per-port drop names one host and one of Docker's bridges.
+	// Docker's per-port drop names one host, inside the network Docker
+	// masquerades for the same bridge, and that bridge.
+	nat := "table ip nat {\n\tchain POSTROUTING {\n\t\ttype nat hook postrouting priority srcnat; policy accept;\n\t\tip saddr 172.19.0.0/16 oifname != \"br-179c4f2598a0\" counter packets 0 bytes 0 xt target \"MASQUERADE\"\n\t\tip saddr 172.18.0.0/16 oifname != \"docker0\" counter packets 0 bytes 0 xt target \"MASQUERADE\"\n\t}\n}\n"
 	raw := func(family, table, rule string) []string {
-		return split("table " + family + " " + table + " {\n\tchain PREROUTING {\n\t\ttype filter hook prerouting priority raw; policy accept;\n\t\t" + rule + "\n\t}\n}")
+		return split(nat + "table " + family + " " + table + " {\n\tchain PREROUTING {\n\t\ttype filter hook prerouting priority raw; policy accept;\n\t\t" + rule + "\n\t}\n}")
 	}
 	wantOwner(t, "docker's drop", raw("ip", "raw", "ip daddr 172.18.0.2 iifname != \"docker0\" counter packets 0 bytes 0 drop"))
 	wantOwner(t, "docker's drop on a bridge", raw("ip", "raw", "ip daddr 172.19.0.2 iifname != \"br-179c4f2598a0\" drop"))
+	wantOwner(t, "the host's own address", raw("ip", "raw", "ip daddr 203.0.113.5 iifname != \"docker0\" drop"), "ip raw PREROUTING: ip daddr 203.0.113.5 iifname != \"docker0\" drop")
+	wantOwner(t, "another bridge's network", raw("ip", "raw", "ip daddr 172.19.0.2 iifname != \"docker0\" drop"), "ip raw PREROUTING: ip daddr 172.19.0.2 iifname != \"docker0\" drop")
+	wantOwner(t, "no masquerade at all", split("table ip raw {\n\tchain PREROUTING {\n\t\ttype filter hook prerouting priority raw; policy accept;\n\t\tip daddr 172.18.0.2 iifname != \"docker0\" drop\n\t}\n}"), "ip raw PREROUTING: ip daddr 172.18.0.2 iifname != \"docker0\" drop")
 	wantOwner(t, "a prefix", raw("ip", "raw", "ip daddr 0.0.0.0/1 iifname != \"docker0\" drop"), "ip raw PREROUTING: ip daddr 0.0.0.0/1 iifname != \"docker0\" drop")
 	wantOwner(t, "an inet raw table", raw("inet", "raw", "ip daddr 172.18.0.2 iifname != \"docker0\" drop"), "inet raw PREROUTING: ip daddr 172.18.0.2 iifname != \"docker0\" drop")
 	wantOwner(t, "another interface", raw("ip", "raw", "ip daddr 172.18.0.2 iifname != \"eth0\" drop"), "ip raw PREROUTING: ip daddr 172.18.0.2 iifname != \"eth0\" drop")
@@ -219,5 +227,28 @@ func TestParseFactsReadsLegacyUnknown(t *testing.T) {
 	}
 	if !f.LegacyUnknown || len(f.LegacyRules) != 0 {
 		t.Errorf("legacy unknown %v, rules %q", f.LegacyUnknown, f.LegacyRules)
+	}
+}
+
+// nft's quoted strings have no escape: "a\" is a string ending in a
+// backslash, as nft 1.0.9 prints a set holding it. Read as an escape, the
+// quote would stay open and the chain after it would vanish.
+func TestABackslashDoesNotEscapeAQuote(t *testing.T) {
+	ruleset := "table ip filter {\n\tchain X {\n\t\tiifname { \"b\", \"a\\\" } drop\n\t}\n\n\tchain INPUT {\n\t\ttype filter hook input priority filter; policy drop;\n\t\ttcp dport 443 drop\n\t}\n}"
+	wantOwner(t, "backslash", split(ruleset), "ip filter INPUT: policy drop", "ip filter INPUT: tcp dport 443 drop")
+}
+
+// A ruleset whose braces do not balance, or a line left inside an open
+// quote, is not one the parser understands: the whole ruleset is named
+// unreadable, as an unknown ruleset is.
+func TestAnUnbalancedRulesetIsUnreadable(t *testing.T) {
+	for name, ruleset := range map[string]string{
+		"brace": "table ip filter {\n\tchain INPUT {\n\t\ttype filter hook input priority filter; policy accept;\n\t}\n",
+		"quote": "table ip filter {\n\tchain INPUT {\n\t\ttype filter hook input priority filter; policy accept;\n\t\tcomment \"open\n\t}\n}",
+	} {
+		got := ownerFirewall(split(ruleset))
+		if len(got) == 0 || got[len(got)-1] != "unreadable ruleset: its braces or quotes do not balance" {
+			t.Errorf("%s: ownerFirewall = %q", name, got)
+		}
 	}
 }
