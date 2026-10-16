@@ -1,1 +1,1 @@
-refused: user: community's home /home/paisans-f2a9 is not community's (it is uid 1001's), so another account can change what admit writes there. Give it to community (chown -R community: /home/paisans-f2a9) and admit again. Nothing was changed
+refused: watchdog: another deployment holds this host's watchdog (/etc/udev/rules.d/60-paisans-0c0d-watchdog.rules), and only one Patroni can open the device. Admit this data site on another host, or evict that deployment first. Nothing was changed

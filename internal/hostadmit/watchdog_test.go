@@ -22,11 +22,9 @@ var watchdogCases = addCases(
 	}},
 )
 
-// homeB is a home host whose existing user is home-b's, community.
-func homeB() *fakeHost {
-	return home().with("passwd", "community:x:1002:1002::/home/community:/bin/bash").with("groups", "community").
-		with("group", "community").add("subuid", "community:231072:65536").add("subgid", "community:231072:65536")
-}
+// homeB is a home host whose existing user is home-b's, community, with
+// its own home.
+func homeB() *fakeHost { return communityHome() }
 
 func TestWatchdogPlans(t *testing.T) { runGolden(t, watchdogCases) }
 
