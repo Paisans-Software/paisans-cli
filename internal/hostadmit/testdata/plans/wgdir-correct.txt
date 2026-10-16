@@ -377,3 +377,4 @@ present: package: git installed
 present: apparmor: rootlesskit's profile is loaded
 present: mesh: nothing on this host overlaps 10.44.0.0/24
 present: wireguard: /etc/wireguard is root's alone
+present: forwarding: not needed, this site has no endpoint

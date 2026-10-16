@@ -1,0 +1,396 @@
+admit site home-b of f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01 as community on fake (ubuntu 24.04)
+
+step 1: create /srv/paisans
+  directory: every deployment's directory lives in it, root's, mode 755
+  run:
+    $ install -d -m 755 -o root -g root /srv/paisans
+
+step 2: create /srv/paisans/f2a9
+  directory: the deployment's own, community's, mode 750
+  run:
+    $ install -d -m 750 -o community -g community /srv/paisans/f2a9
+
+step 3: create /etc/wireguard
+  wireguard: root's, mode 700, so the deployment's user cannot plant a conf the helper has not checked
+  run:
+    $ install -d -m 700 -o root -g root /etc/wireguard
+
+step 4: create /usr/local/libexec/paisans
+  wireguard: where each deployment's helper lives, root's, mode 755
+  run:
+    $ install -d -m 755 -o root -g root /usr/local/libexec/paisans
+
+step 5: install the WireGuard helper
+  wireguard: the one command community may run as root: it checks each conf before wg-quick sees it, and adds the mesh's mark
+  write /usr/local/libexec/paisans/wg-psns-f2a9 mode 0755:
+    | #!/bin/sh
+    | # The WireGuard helper for psns-f2a9, rendered by paisans with this
+    | # deployment's interface, listen port and mesh subnet built in. paisans host
+    | # admit installs it as /usr/local/libexec/paisans/wg-psns-f2a9, root's and mode 755, with one sudoers line
+    | # that lets the deployment's user run it, and nothing else, as root.
+    | #
+    | # Creating psns-f2a9, installing its conf and syncing its peers need
+    | # CAP_NET_ADMIN in the host's network namespace, which the deployment's user
+    | # does not have. wg-quick runs a conf's PreUp, PostUp, PreDown and PostDown as
+    | # root, so a helper that installed any conf it was given would hand root to
+    | # its caller. put therefore installs only a conf made of the keys paisans
+    | # renders, each value matching its pattern, the ListenPort the owner admitted
+    | # and addresses inside the mesh subnet; anything else refuses the whole file
+    | # and installs nothing.
+    | #
+    | # The verbs are the only arguments it takes:
+    | #   put           read a conf on stdin, check it, install it as /etc/wireguard/psns-f2a9.conf, 600,
+    | #                 with this deployment's FwMark added, in a directory only
+    | #                 root may write
+    | #   up            systemctl enable --now wg-quick@psns-f2a9
+    | #   restart       systemctl restart wg-quick@psns-f2a9
+    | #   sync          wg-quick strip the installed conf, then wg syncconf
+    | #   show FIELD    wg show psns-f2a9 FIELD: peers, latest-handshakes,
+    | #                 public-key, allowed-ips, persistent-keepalive or listen-port,
+    | #                 each of which the conf holds already or says how the mesh is
+    | #                 doing; no key the interface keeps secret, and no address a
+    | #                 peer last sent from
+    | #   log           the unit's last 200 journal lines
+    | # A wrong verb or argument count exits 64; a refused conf exits 65.
+    | set -eu
+    | PATH=/usr/sbin:/usr/bin:/sbin:/bin
+    | LC_ALL=C
+    | export PATH LC_ALL
+    | umask 077
+    | 
+    | iface='psns-f2a9'
+    | dir='/etc/wireguard'
+    | conf="$dir/$iface.conf"
+    | unit='wg-quick@psns-f2a9'
+    | # The admitted ListenPort, 0 for a site nothing dials, whose conf has none.
+    | port='0'
+    | # The mesh subnet, as its network address and prefix length.
+    | net='10.44.0.0'
+    | prefix='24'
+    | # The uid that must own the conf directory: root on a host.
+    | owner='0'
+    | # The mark put adds to every conf it installs: the egress table drops what
+    | # a socket with it sends to this host, loopback, link-local, multicast and
+    | # the private ranges, after wg has resolved each Endpoint as root.
+    | fwmark='0x5053f2a9'
+    | # The largest conf put reads. A mesh of a hundred sites is under 20 KiB.
+    | max=65536
+    | 
+    | usage() {
+    | 	echo "usage: $0 put | up | restart | sync | show peers|latest-handshakes|public-key|allowed-ips|persistent-keepalive|listen-port | log" >&2
+    | 	exit 64
+    | }
+    | 
+    | refuse() {
+    | 	echo "wg-$iface: $1; nothing was installed" >&2
+    | 	exit 65
+    | }
+    | 
+    | # check reads a conf on stdin and prints why it is refused, exiting 1, or
+    | # prints nothing and exits 0. Keys and section names are matched exactly, as
+    | # the renderer writes them; a hook key is refused in any section, in any case
+    | # and with any whitespace around it. It is POSIX awk only, with no regular
+    | # expression intervals, for mawk, gawk, BSD awk and busybox awk alike, so no ^ operator.
+    | check() {
+    | 	awk -v port="$port" -v net="$net" -v prefix="$prefix" '
+    | 	function why(msg) { if (!failed) reason = msg; failed = 1 }
+    | 	function no(msg) { why("line " NR ": " msg); exit 1 }
+    | 	function ip4(s,    a, n, i, v) {
+    | 		n = split(s, a, ".")
+    | 		if (n != 4) return -1
+    | 		v = 0
+    | 		for (i = 1; i <= 4; i++) {
+    | 			if (a[i] !~ /^(0|[1-9][0-9]?[0-9]?)$/ || a[i] + 0 > 255) return -1
+    | 			v = v * 256 + a[i]
+    | 		}
+    | 		return v
+    | 	}
+    | 	# blockedval is whether the address value v is in 0.0.0.0/8, 127.0.0.0/8,
+    | 	# 169.254.0.0/16 or 224.0.0.0/3.
+    | 	function blockedval(v) { return v < 16777216 || int(v / 16777216) == 127 || int(v / 65536) == 43518 || v >= 3758096384 }
+    | 	function hexval(s,    i, v) {
+    | 		v = 0
+    | 		for (i = 1; i <= length(s); i++) v = v * 16 + index("0123456789abcdef", substr(s, i, 1)) - 1
+    | 		return v
+    | 	}
+    | 	# blocked is whether an Endpoint host is a literal loopback, unspecified,
+    | 	# link-local or multicast address, in any spelling libc or the kernel
+    | 	# reads as one: 127.1, 2130706433, 0177.0.0.1, 0x7f.0.0.1, [::1], [ff02::1]
+    | 	# (all of ff00::/8), and localhost. It does not block names, which wg resolves as root at every
+    | 	# up, restart and sync; the non-loopback addresses of this host; or LAN
+    | 	# addresses, which stay allowed because two sites may share a LAN. Kernel
+    | 	# WireGuard sends from no UID, so the UID-matched egress table does not
+    | 	# see its packets, and after a handshake its transport packets carry
+    | 	# content the deployment user can choose. The guard for this traffic
+    | 	# belongs to the egress table (spec, Egress), not to this helper; this
+    | 	# check only keeps the handshake off this host and its link.
+    | 	function blocked(h,    l, r, a, n, i) {
+    | 		if (substr(h, 1, 1) == "[") {
+    | 			h = tolower(substr(h, 2, length(h) - 2))
+    | 			if (h ~ /^[0:]+$/ || h ~ /^[0:]*:0*1$/ || h ~ /^fe[89ab][0-9a-f]:/ || h ~ /^ff/) return 1
+    | 			r = h
+    | 			if (sub(/^[0:]*:(ffff:)?/, "", r)) {
+    | 				if (r ~ /^[0-9.]+$/) return ip4(r) < 0 || blockedval(ip4(r))
+    | 				if (r ~ /^[0-9a-f]+:[0-9a-f]+$/) {
+    | 					split(r, a, ":")
+    | 					return blockedval(hexval(a[1]) * 65536 + hexval(a[2]))
+    | 				}
+    | 			}
+    | 			return 0
+    | 		}
+    | 		if (h ~ /^[0-9.]+$/) {
+    | 			n = ip4(h)
+    | 			return n < 0 || blockedval(n)
+    | 		}
+    | 		n = split(h, a, ".")
+    | 		for (i = 1; i <= n; i++) if (a[i] ~ /^0[xX][0-9A-Fa-f]*$/) return 1
+    | 		l = tolower(h)
+    | 		sub(/\.$/, "", l)
+    | 		return l == "localhost" || l ~ /\.localhost$/
+    | 	}
+    | 	# cidr parses address/prefix into cv and cp, false when it is not one.
+    | 	function cidr(s,    a) {
+    | 		if (split(s, a, "/") != 2 || a[2] !~ /^(0|[1-9][0-9]?)$/ || a[2] + 0 > 32) return 0
+    | 		cp = a[2] + 0
+    | 		cv = ip4(a[1])
+    | 		return cv >= 0
+    | 	}
+    | 	# inside is whether the parsed cv/cp lies inside the mesh subnet.
+    | 	function inside(    d) {
+    | 		if (cp < prefix) return 0
+    | 		d = pow2(32 - prefix)
+    | 		return int(cv / d) == int(netv / d)
+    | 	}
+    | 	# pow2 is 2 to the n, by multiplying: busybox awk built without math
+    | 	# support rejects the ^ operator.
+    | 	function pow2(n,    r) {
+    | 		for (r = 1; n > 0; n--) r *= 2
+    | 		return r
+    | 	}
+    | 	function key(s) { return length(s) == 44 && s ~ /^[A-Za-z0-9+\/]+=$/ }
+    | 	function num(s, lo, hi) { return s ~ /^(0|[1-9][0-9]*)$/ && length(s) <= 5 && s + 0 >= lo && s + 0 <= hi }
+    | 	BEGIN {
+    | 		netv = ip4(net)
+    | 		if (netv < 0 || !num(prefix, 1, 32) || !num(port, 0, 65535)) { why("the helper was rendered with a bad subnet or port"); exit 1 }
+    | 	}
+    | 	/\r/ { no("a carriage return; write the conf with Unix line endings") }
+    | 	/^[ \t]*$/ { next }
+    | 	/^[ \t]*#/ { next }
+    | 	{
+    | 		line = $0
+    | 		sub(/^[ \t]+/, "", line)
+    | 		sub(/[ \t]+$/, "", line)
+    | 		if (substr(line, 1, 1) == "[") {
+    | 			if (line == "[Interface]") {
+    | 				if (interfaces || peers) no("a second [Interface], or one after a [Peer]")
+    | 				interfaces = 1; section = "Interface"
+    | 			} else if (line == "[Peer]") {
+    | 				if (!interfaces) no("[Peer] before [Interface]")
+    | 				if (section == "Peer" && !pub) no("the [Peer] before this one has no PublicKey")
+    | 				peers++; pub = 0; section = "Peer"
+    | 			} else {
+    | 				no("section " line " is not [Interface] or [Peer]")
+    | 			}
+    | 			next
+    | 		}
+    | 		eq = index(line, "=")
+    | 		if (eq == 0) no("\"" line "\" is not key = value")
+    | 		k = substr(line, 1, eq - 1)
+    | 		v = substr(line, eq + 1)
+    | 		sub(/[ \t]+$/, "", k)
+    | 		sub(/^[ \t]+/, "", v)
+    | 		lk = tolower(k)
+    | 		if (lk == "preup" || lk == "postup" || lk == "predown" || lk == "postdown") no(k " runs a command as root, and no conf may carry one")
+    | 		if (lk == "fwmark") no(k " is set by this helper, never by the conf")
+    | 		if (section == "") no(k " before any section")
+    | 		if (seen[peers, k]++) no("a second " k " in one section")
+    | 		if (section == "Interface") {
+    | 			if (k == "Address") {
+    | 				if (!cidr(v) || cp != prefix || !inside()) no("Address " v " is not one address in " net "/" prefix)
+    | 				# The network names the subnet and the broadcast reaches every
+    | 				# host on it, so no site holds either, as validate says.
+    | 				if (cv == netv || cv == netv + pow2(32 - prefix) - 1) no("Address " v " is the network or broadcast address of " net "/" prefix)
+    | 				address = 1
+    | 			} else if (k == "PrivateKey") {
+    | 				if (!key(v)) no("PrivateKey is not a WireGuard key")
+    | 				private = 1
+    | 			} else if (k == "ListenPort") {
+    | 				if (port == 0) no("ListenPort " v ", but this deployment was admitted with none on this host")
+    | 				if (v != port) no("ListenPort " v ", but this deployment was admitted on " port)
+    | 				listen = 1
+    | 			} else if (k == "MTU") {
+    | 				if (!num(v, 1280, 9000)) no("MTU " v " is not from 1280 to 9000")
+    | 			} else {
+    | 				no(k " is not a key paisans writes in [Interface]")
+    | 			}
+    | 		} else {
+    | 			if (k == "PublicKey") {
+    | 				if (!key(v)) no("PublicKey is not a WireGuard key")
+    | 				pub = 1
+    | 			} else if (k == "PresharedKey") {
+    | 				if (!key(v)) no("PresharedKey is not a WireGuard key")
+    | 			} else if (k == "AllowedIPs") {
+    | 				if (v == "") no("AllowedIPs is empty")
+    | 				n = split(v, ips, ",")
+    | 				for (i = 1; i <= n; i++) {
+    | 					s = ips[i]
+    | 					sub(/^[ \t]+/, "", s)
+    | 					sub(/[ \t]+$/, "", s)
+    | 					if (!cidr(s) || !inside()) no("AllowedIPs " s " is not inside " net "/" prefix)
+    | 				}
+    | 			} else if (k == "Endpoint") {
+    | 				p = v
+    | 				sub(/^.*:/, "", p)
+    | 				if (v !~ /^([A-Za-z0-9][A-Za-z0-9.-]*|\[[0-9A-Fa-f:.]+\]):[0-9]+$/ || !num(p, 1, 65535)) no("Endpoint " v " is not host:port")
+    | 				h = v
+    | 				sub(/:[0-9]+$/, "", h)
+    | 				if (blocked(h)) no("Endpoint " v " is a loopback, link-local, multicast or unspecified address")
+    | 			} else if (k == "PersistentKeepalive") {
+    | 				if (!num(v, 0, 65535)) no("PersistentKeepalive " v " is not from 0 to 65535")
+    | 			} else {
+    | 				no(k " is not a key paisans writes in [Peer]")
+    | 			}
+    | 		}
+    | 	}
+    | 	END {
+    | 		if (!failed) {
+    | 			if (!interfaces) why("no [Interface]")
+    | 			else if (!address) why("no Address")
+    | 			else if (!private) why("no PrivateKey")
+    | 			else if (port != 0 && !listen) why("no ListenPort, but this deployment was admitted on " port)
+    | 			else if (section == "Peer" && !pub) why("the last [Peer] has no PublicKey")
+    | 		}
+    | 		if (failed) { print reason; exit 1 }
+    | 	}'
+    | }
+    | 
+    | # rootonly is whether $dir is owned by $owner and neither its group nor
+    | # others may write it, read from ls -ldn, which POSIX defines and every
+    | # ls prints alike: the mode, the link count, then the numeric owner. A
+    | # listing that cannot be read or parsed, or that marks an ACL with +, is
+    | # not root's alone.
+    | rootonly() {
+    | 	listing=$(ls -ldn "$dir") || return 1
+    | 	set -f
+    | 	# shellcheck disable=SC2086
+    | 	set -- $listing
+    | 	set +f
+    | 	[ $# -ge 3 ] || return 1
+    | 	case "$1" in
+    | 	??????????+*) return 1 ;;
+    | 	d????-??-*) ;;
+    | 	*) return 1 ;;
+    | 	esac
+    | 	[ "$3" = "$owner" ]
+    | }
+    | 
+    | put() {
+    | 	if [ ! -d "$dir" ] || [ -L "$dir" ]; then
+    | 		refuse "$dir is not a directory"
+    | 	fi
+    | 	# A directory the deployment's user could write would let it plant a
+    | 	# conf with PostUp, which wg-quick runs as root at the next up, past
+    | 	# every check below. host admit makes it root's, 700; put checks it
+    | 	# each time rather than trusting that it stayed so.
+    | 	if ! rootonly; then
+    | 		refuse "$dir is not a directory only root may write"
+    | 	fi
+    | 	# -d follows a link, so a link to a directory is refused here too. A link
+    | 	# to anything else is replaced by the rename below, never written through.
+    | 	if [ -d "$conf" ]; then
+    | 		refuse "$conf is a directory"
+    | 	fi
+    | 	tmp=$(mktemp "$dir/.$iface.conf.XXXXXX")
+    | 	trap 'rm -f "$tmp"' EXIT
+    | 	head -c $((max + 1)) > "$tmp"
+    | 	size=$(($(wc -c < "$tmp")))
+    | 	if [ "$size" -gt "$max" ]; then
+    | 		refuse "the conf is larger than $max bytes"
+    | 	fi
+    | 	if [ "$(($(tr -d '\000' < "$tmp" | wc -c)))" -ne "$size" ]; then
+    | 		refuse "the conf has a NUL byte"
+    | 	fi
+    | 	if ! reason=$(check < "$tmp"); then
+    | 		refuse "$reason"
+    | 	fi
+    | 	marked=$(mktemp "$dir/.$iface.conf.XXXXXX")
+    | 	trap 'rm -f "$tmp" "$marked"' EXIT
+    | 	# The mark on the line after [Interface], which check has seen exactly
+    | 	# once, before any [Peer].
+    | 	awk -v mark="$fwmark" '{ print } !done && /^[ \t]*\[Interface\][ \t]*$/ { print "FwMark = " mark; done = 1 }' "$tmp" > "$marked"
+    | 	chmod 600 "$marked"
+    | 	mv -f "$marked" "$conf"
+    | 	rm -f "$tmp"
+    | 	trap - EXIT
+    | }
+    | 
+    | case "${1-}" in
+    | put)
+    | 	[ $# -eq 1 ] || usage
+    | 	put
+    | 	;;
+    | up)
+    | 	[ $# -eq 1 ] || usage
+    | 	exec systemctl enable --now "$unit"
+    | 	;;
+    | restart)
+    | 	[ $# -eq 1 ] || usage
+    | 	exec systemctl restart "$unit"
+    | 	;;
+    | sync)
+    | 	[ $# -eq 1 ] || usage
+    | 	# Through a file rather than a pipe: sh has no pipefail, so a strip that
+    | 	# failed would hand syncconf an empty conf, and syncconf removes every
+    | 	# peer it is not given.
+    | 	# In the conf directory, beside the conf, never under a TMPDIR: it holds
+    | 	# the private key.
+    | 	stripped=$(mktemp "$dir/.$iface.strip.XXXXXX")
+    | 	trap 'rm -f "$stripped"' EXIT
+    | 	wg-quick strip "$conf" > "$stripped"
+    | 	wg syncconf "$iface" "$stripped"
+    | 	;;
+    | show)
+    | 	[ $# -eq 2 ] || usage
+    | 	case "$2" in
+    | 	peers | latest-handshakes | public-key | allowed-ips | persistent-keepalive | listen-port) exec wg show "$iface" "$2" ;;
+    | 	*) usage ;;
+    | 	esac
+    | 	;;
+    | log)
+    | 	[ $# -eq 1 ] || usage
+    | 	exec journalctl -u "$unit" -n 200 --no-pager
+    | 	;;
+    | *)
+    | 	usage
+    | 	;;
+    | esac
+
+step 6: install the helper's sudoers line
+  wireguard: /etc/sudoers.d/paisans-f2a9, mode 440, checked by visudo under a name sudo skips before it is moved into place
+  write /etc/sudoers.d/paisans-f2a9.new mode 0440:
+    | community ALL=(root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-f2a9
+  run:
+    $ visudo -cqf /etc/sudoers.d/paisans-f2a9.new && chown root:root /etc/sudoers.d/paisans-f2a9.new && mv -f /etc/sudoers.d/paisans-f2a9.new /etc/sudoers.d/paisans-f2a9 || { rm -f /etc/sudoers.d/paisans-f2a9.new; echo 'visudo refused the line; nothing reached sudo'; exit 1; }
+
+step 7: give the watchdog to community
+  watchdog: /etc/udev/rules.d/60-paisans-f2a9-watchdog.rules makes /dev/watchdog and /dev/watchdog0 community's, owner and group, mode 600
+  write /etc/udev/rules.d/60-paisans-f2a9-watchdog.rules mode 0644:
+    | # Written by paisans host admit: the watchdog is community's, for its
+    | # Patroni. One deployment per host holds it; paisans host evict removes this.
+    | KERNEL=="watchdog*", OWNER="community", GROUP="community", MODE="0600"
+  run:
+    $ udevadm control --reload && udevadm trigger --subsystem-match=watchdog --subsystem-match=misc
+
+present: docker: Engine 29.9.1
+present: package: docker-ce-rootless-extras installed
+present: package: uidmap installed
+present: package: nftables installed
+present: package: wireguard-tools installed
+present: package: ufw installed
+present: package: git installed
+present: apparmor: rootlesskit's profile is loaded
+present: mesh: nothing on this host overlaps 10.44.0.0/24
+present: watchdog: watchdog0 is iTCO_wdt
+present: forwarding: not needed, this site has no endpoint
+warning: watchdog: community's Patroni can reboot this machine
+  Patroni arms the watchdog and reboots the whole host when it stops renewing it, which is what makes its failover safe.

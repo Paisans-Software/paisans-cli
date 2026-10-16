@@ -1,0 +1,67 @@
+package hostadmit
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/paisans-software/paisans-cli/internal/hostprep"
+	"github.com/paisans-software/paisans-cli/internal/ui"
+)
+
+// udevTrigger applies the rules to the devices that exist now (spec,
+// Observed R4).
+const udevTrigger = "udevadm control --reload && udevadm trigger --subsystem-match=watchdog --subsystem-match=misc"
+
+// watchdogRule gives the device to the user, owner and group both: a
+// device whose group is root's cannot be chowned inside the user
+// namespace, and the infra compose chowns it for Patroni (Observed R4).
+func watchdogRule(user, group string) string {
+	return "# Written by paisans host admit: the watchdog is " + user + "'s, for its\n" +
+		"# Patroni. One deployment per host holds it; paisans host evict removes this.\n" +
+		`KERNEL=="watchdog*", OWNER="` + user + `", GROUP="` + group + `", MODE="0600"` + "\n"
+}
+
+// planWatchdogGrant gives the watchdog with --watchdog: the module as host
+// prepare loads it, then the device to the user. One deployment per host
+// holds it, so another deployment's rule refuses. Without the grant, a
+// rule an earlier admit wrote is removed, with the module's unit.
+func planWatchdogGrant(p *planner) error {
+	own := watchdogRulePath(p.d)
+	unit := "/etc/systemd/system/" + p.d.Prefix() + "-watchdog.service"
+	if !p.in.Flags.Watchdog {
+		if p.f.Files[own].Present {
+			p.step(Step{Title: "take the watchdog back", Describe: "watchdog: this site is no longer a data site; remove " + own + " and give the device back to root",
+				Command: "rm -f " + own + " && " + udevTrigger, Kinds: []string{hostprep.KindWatchdog}})
+		}
+		if p.f.Files[unit].Present {
+			p.step(Step{Title: "stop loading the watchdog at boot", Describe: "watchdog: remove " + unit,
+				Command: "systemctl disable " + p.d.Prefix() + "-watchdog.service; rm -f " + unit + " && systemctl daemon-reload", Kinds: []string{hostprep.KindWatchdog}})
+		}
+		return nil
+	}
+	for _, r := range p.f.WatchdogRules {
+		if r != own {
+			return fmt.Errorf("another deployment holds this host's watchdog (%s), and only one Patroni can open the device. Admit this data site on another host, or evict that deployment first. Nothing was changed", ui.Visible(r))
+		}
+	}
+	s, err := hostprep.PlanWatchdog(p.t, p.d, p.profile)
+	if err != nil {
+		return errors.New(strings.TrimPrefix(shown(err).Error(), "watchdog: "))
+	}
+	p.section(s)
+	user := p.in.Request.User
+	rule := watchdogRule(user, groupOf(p))
+	f := p.f.Files[own]
+	switch {
+	case f.Link:
+		return fmt.Errorf("%s is a symbolic link. Remove it and admit again. Nothing was changed", own)
+	case f.Sum == sha(rule) && f.Mode == "644" && f.UID == 0:
+		p.present("watchdog: the device is " + user + "'s")
+	default:
+		p.step(Step{Title: "give the watchdog to " + user, Describe: "watchdog: " + own + " makes /dev/watchdog and /dev/watchdog0 " + user + "'s, owner and group, mode 600",
+			File: &hostprep.File{Path: own, Content: rule, Mode: 0o644}, Command: udevTrigger, Kinds: []string{hostprep.KindWatchdog}, Provisional: !p.f.User.Exists})
+	}
+	p.warn("watchdog: "+user+"'s Patroni can reboot this machine", "Patroni arms the watchdog and reboots the whole host when it stops renewing it, which is what makes its failover safe.")
+	return nil
+}

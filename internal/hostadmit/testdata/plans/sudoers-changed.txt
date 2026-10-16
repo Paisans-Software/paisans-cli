@@ -28,3 +28,4 @@ present: apparmor: rootlesskit's profile is loaded
 present: mesh: nothing on this host overlaps 10.44.0.0/24
 present: wireguard: /etc/wireguard is root's alone
 present: wireguard: the one command paisans-f2a9 may run as root: it checks each conf before wg-quick sees it, and adds the mesh's mark
+present: forwarding: not needed, this site has no endpoint
