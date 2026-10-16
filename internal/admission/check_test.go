@@ -59,6 +59,9 @@ func TestCheckRefuses(t *testing.T) {
 		{"a listen with no port", func(r *admission.Request) {
 			r.WebServer = []admission.WebApp{{App: "status", Hostname: "status.example.org", Listen: "127.0.0.1"}}
 		}, `web_server[0].listen: "127.0.0.1" is not a loopback address or this site's mesh address, with a port`},
+		{"a web server app on a site with no monitor", func(r *admission.Request) {
+			r.WebServer = []admission.WebApp{{App: "status", Hostname: "status.example.org", Listen: "127.0.0.1:8480"}}
+		}, `web_server: 1 app, and roles ["apps" "data" "gateway"] hold no monitor, the only role the owner's web server fronts`},
 		{"no site", func(r *admission.Request) { r.Site = "" }, `site: "" is not a site name`},
 		{"a site with a terminal escape", func(r *admission.Request) { r.Site = "home\x1b[2J" }, `site: "home\x1b[2J" is not a site name`},
 		{"no roles, with grants", func(r *admission.Request) { r.Roles = []string{} }, `grants: watchdog true and public_ports true, and roles [] need watchdog false and public_ports false`},

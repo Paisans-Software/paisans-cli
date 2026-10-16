@@ -217,12 +217,7 @@ func (r Request) Check() []string {
 			add("roles[%d]: %q comes after %q, and roles are written sorted", i, role, r.Roles[i-1])
 		}
 	}
-	// The grants are what the roles need, and roles alone cannot say whether
-	// a monitor runs the toolkit's Caddy, which binds 80 and 443, or sits
-	// behind the owner's web server, which needs no low port. web_server
-	// says which: it lists the monitor's app exactly when managed_by is
-	// external, since validate refuses such a monitor with no app pinned to
-	// it, and so its request always hands the owner's web server one.
+	// The grants are what the roles need, as needs reads them.
 	if need := r.needs(); need != r.Grants {
 		add("grants: watchdog %t and public_ports %t, and roles %q need watchdog %t and public_ports %t", r.Grants.Watchdog, r.Grants.PublicPorts, r.Roles, need.Watchdog, need.PublicPorts)
 	}
@@ -252,6 +247,11 @@ func (r Request) Check() []string {
 		case config.IsNetworkOrBroadcast(a, mesh):
 			add("address: %s is the subnet's network or broadcast address", r.Address)
 		}
+	}
+	// Only a monitor sits behind the owner's web server, and admit opens
+	// 80 and 443 on the host to a site that hands that server an app.
+	if n := len(r.WebServer); n > 0 && !slices.Contains(roles, config.RoleMonitor) {
+		add("web_server: %d app%s, and roles %q hold no monitor, the only role the owner's web server fronts", n, map[bool]string{true: "s"}[n > 1], r.Roles)
 	}
 	apps, hostnames := map[string]bool{}, map[string]bool{}
 	for i, w := range r.WebServer {
@@ -317,9 +317,12 @@ func (r Request) roleList() []config.Role {
 }
 
 // needs is what r's roles need granted, by Needs on a site holding them.
-// A monitor whose request hands the owner's web server an app is behind
-// that server, managed_by: external, since validate refuses such a monitor
-// with no app pinned to it; every other monitor runs the toolkit's Caddy.
+// Roles alone cannot say whether a monitor runs the toolkit's Caddy, which
+// binds 80 and 443, or sits behind the owner's web server, which needs no
+// low port. web_server says which: a monitor whose request hands that
+// server an app is managed_by: external, since validate refuses such a
+// monitor with no app pinned to it; every other monitor runs the toolkit's
+// Caddy.
 func (r Request) needs() Grants {
 	s := config.Site{Roles: r.roleList()}
 	if len(r.WebServer) > 0 {
