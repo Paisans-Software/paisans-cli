@@ -4928,7 +4928,7 @@ home-a (ubuntu@home-a.local)
       home-a (ubuntu@home-a.local) is shared
   ✓ docker: 29.5.0, compose 2.40.0 (docker-ce)
   ✓ *:8080/tcp held by a listener of another user's (uid 1001): not paisans
-  ✓ shared: ufw's default policy and enabled state are left alone, superseded images are kept, and prune removes only volumes labelled with this deployment's id, as everywhere
+  ✓ shared: superseded images are kept, and prune removes only volumes labelled with this deployment's id, as everywhere
 ```
 
 `storage rotate-key` and `storage add` run the check too, since they apply
@@ -9593,7 +9593,10 @@ so each file there is a whole site block and may import
 
 **paisans never touches what is in it.** `apply` creates the directory, the
 deployment user's and 0755, when it is missing, and leaves an existing one as
-it is. The host's owner writes into it as root. paisans never writes a file
+it is. The host's owner writes into it as the deployment's user, Eg: `sudo
+-u paisans-<token> tee /srv/paisans/<token>/caddy.d/blog.caddy`, never as
+root: the user owns the directory and could put a link in a file's place,
+which a root write would follow. paisans never writes a file
 there, never records one in its manifest and never removes one, because what
 is in it belongs to the host's owner rather than to the deployment. An empty
 directory is fine: Caddy logs a warning for an import glob that matches no
