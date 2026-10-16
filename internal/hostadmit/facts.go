@@ -49,6 +49,10 @@ var snippets embed.FS
 type Facts struct {
 	Docker   DockerFacts
 	Packages map[string]bool
+	// OnDisk is, for each package /etc/paisans/installed names, whether
+	// dpkg has its files: installed, or unpacked or half-configured by an
+	// install that failed.
+	OnDisk   map[string]bool
 	AppArmor struct{ Restricted, Profile bool }
 	User     UserFacts
 	// SubUID and SubGID are every user's ranges, by name.
@@ -270,7 +274,7 @@ func probeScript(d deployment.Deployment, in Input) (string, error) {
 // parseFacts reads the probe's lines. Values the probe prints are paths,
 // numbers and names; a line it cannot read is refused rather than skipped.
 func parseFacts(out, user string) (Facts, error) {
-	f := Facts{Packages: map[string]bool{}, SubUID: map[string][]IDRange{}, SubGID: map[string][]IDRange{},
+	f := Facts{Packages: map[string]bool{}, OnDisk: map[string]bool{}, SubUID: map[string][]IDRange{}, SubGID: map[string][]IDRange{},
 		Files: map[string]FileState{}, Dirs: map[string]DirState{}, Entries: map[string]int{}, WatchdogDevs: map[string]int{}, raw: map[string][]string{}}
 	f.User.Name = user
 	f.Docker.SystemUnits = map[string]UnitState{}
@@ -291,6 +295,9 @@ func parseFacts(out, user string) (Facts, error) {
 			default:
 				f.Docker.Engine = v
 			}
+		case "ondisk":
+			name, state, _ := strings.Cut(v, " ")
+			f.OnDisk[name] = state == "present"
 		case "pkg":
 			name, state, _ := strings.Cut(v, " ")
 			f.Packages[name] = state == "installed"
@@ -652,4 +659,14 @@ func egressFilePath(d deployment.Deployment) string {
 }
 func watchdogRulePath(d deployment.Deployment) string {
 	return "/etc/udev/rules.d/60-" + d.Prefix() + "-watchdog.rules"
+}
+
+// onDisk reports whether dpkg has package name's files, as the probe read
+// it for a package the installed list names; for one it does not, whether
+// dpkg shows it installed.
+func (f Facts) onDisk(name string) bool {
+	if v, ok := f.OnDisk[name]; ok {
+		return v
+	}
+	return f.Packages[name]
 }

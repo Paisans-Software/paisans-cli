@@ -108,29 +108,36 @@ func (in installed) all() []string { return append(slices.Clone(in.Packages), in
 func (in installed) dockerIsAdmits() bool { return slices.Contains(in.all(), "docker-ce") }
 
 // confirmClaims defines confirm_claims, which turns each "installing"
-// claim in the installed list into a package of admit's when dpkg shows
-// it installed. The install step runs it from its exit trap, however the
-// install exits and before a hold on Docker's daemons is released, so a
-// package apt installed before it failed or was interrupted stays admit's.
-// It rewrites the list through a temporary file and a rename, with awk
-// rather than sed -i, which BSD sed reads differently.
+// claim in the installed list into a package of admit's when dpkg has its
+// files on disk: installed, or unpacked or half-configured by an install
+// that failed, whose scripts may have enabled its units already. The
+// install step runs it from its exit trap, once it holds the hold's lock,
+// however the install exits and before a hold on Docker's daemons is
+// released. It rewrites the list through a temporary file of its own and a
+// rename, with awk rather than sed -i, which BSD sed reads differently.
 const confirmClaims = `confirm_claims() {
   f=` + installedPath + `
   { [ -f "$f" ] && [ ! -L "$f" ]; } || return 0
   ok=
   for p in $(awk 'NF == 2 && $1 == "installing" && $2 ~ /^[a-z0-9][a-z0-9.+-]+$/ { print $2 }' "$f"); do
-    if dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q 'ok installed$'; then ok="$ok $p"; fi
+    s=$(dpkg-query -W -f='${Status}' "$p" 2>/dev/null) || continue
+    case $s in *" not-installed"|*" config-files"|"") ;; *) ok="$ok $p" ;; esac
   done
   [ -n "$ok" ] || return 0
-  awk -v ok="$ok " 'NF == 2 && $1 == "installing" && index(ok, " " $2 " ") { print "package " $2; next } { print }' "$f" > "$f.paisans-tmp" &&
-    chmod 644 "$f.paisans-tmp" && mv -f "$f.paisans-tmp" "$f"
+  t=$(mktemp "$f.XXXXXX") || return 1
+  if awk -v ok="$ok " 'NF == 2 && $1 == "installing" && index(ok, " " $2 " ") { print "package " $2; next } { print }' "$f" > "$t" && chmod 644 "$t"; then
+    mv -f "$t" "$f"
+  else
+    rm -f "$t"
+    return 1
+  fi
 }
 `
 
 // readInstalled is the installed file as the host holds it, refused when
 // it is not root's, mode 644, as admit writes it, or holds a line admit
-// did not write: it decides whose the system Docker is. A package dpkg
-// does not show installed is left out, as is a claim with no policy of
+// did not write: it decides whose the system Docker is. A package whose
+// files dpkg does not have is left out, as is a claim with no policy of
 // admit's left in place to say its install ran (installed, which the
 // probe reads for every package the file names).
 func readInstalled(p *planner, by string) (installed, error) {
@@ -146,8 +153,8 @@ func readInstalled(p *planner, by string) (installed, error) {
 		return in, err
 	}
 	return installed{
-		Packages:   slices.DeleteFunc(in.Packages, func(x string) bool { return !p.f.Packages[x] }),
-		Installing: slices.DeleteFunc(in.Installing, func(x string) bool { return !p.f.Packages[x] || !p.f.Docker.HeldPolicy }),
+		Packages:   slices.DeleteFunc(in.Packages, func(x string) bool { return !p.f.onDisk(x) }),
+		Installing: slices.DeleteFunc(in.Installing, func(x string) bool { return !p.f.onDisk(x) || !p.f.Docker.HeldPolicy }),
 		Files:      in.Files, Dirs: in.Dirs, file: content,
 	}, nil
 }
@@ -183,9 +190,15 @@ func planSystemDocker(p *planner, s hostprep.Section, added hostprep.Installed) 
 		// AdmitPackages plans the install last. Whatever apt installed of
 		// what it claimed is admit's, however it exits: the hold's own exit
 		// trap calls confirm_claims before it releases the hold, and an
-		// install with nothing to hold runs it from this trap.
+		// install with nothing to hold runs it from this trap. The hold's
+		// lock is taken first, so a run refused there writes nothing, and a
+		// signal exits through the trap.
 		last := &s.Steps[len(s.Steps)-1]
-		last.Command = confirmClaims + "trap confirm_claims EXIT\n" + last.Command
+		lock, err := p.profile.DockerHoldLock()
+		if err != nil {
+			return err
+		}
+		last.Command = "set -e\n" + lock + confirmClaims + "trap confirm_claims EXIT\ntrap 'exit 1' HUP INT TERM\n" + last.Command
 	}
 	p.section(s)
 	installs := len(hostprep.SystemUnits(added.Packages)) > 0
@@ -259,18 +272,19 @@ func releaseHold(p *planner, prefix string) error {
 	if !p.f.Docker.Held {
 		return nil
 	}
-	release, err := p.profile.ReleaseDockerHold("")
+	// With admit's policy in place, apt may have run under it, and that
+	// install was admit's: what it claimed and dpkg has on disk is
+	// admit's (readInstalled keeps only those claims while the policy is
+	// there), and is recorded so, under the lock, before the hold is
+	// released, so a run that dies between the two still finds the policy.
+	// A leftover from before the policy confirms nothing: apt never ran.
+	before := ""
+	if p.f.Docker.HeldPolicy {
+		before = confirmClaims + "confirm_claims\n"
+	}
+	command, err := p.profile.ReleaseDockerHold(before)
 	if err != nil {
 		return err
-	}
-	// With admit's policy in place, apt may have run under it, and that
-	// install was admit's: what it claimed and dpkg shows installed is
-	// admit's (readInstalled keeps only those claims while the policy is
-	// there), and stays so once the hold is gone. A leftover from before
-	// the policy confirms nothing: apt never ran.
-	command := release
-	if p.f.Docker.HeldPolicy {
-		command += confirmClaims + "confirm_claims\n"
 	}
 	p.step(Step{Title: "put back /usr/sbin/policy-rc.d", Describe: prefix + ": an admit that stopped while it installed Docker left its hold on Docker's daemons; your own policy-rc.d, if you had one, goes back, and what that install claimed is recorded as installed",
 		Command: command, Kinds: []string{prefix}})

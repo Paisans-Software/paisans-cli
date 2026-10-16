@@ -34,6 +34,10 @@ done
 if [ -f /etc/paisans/installed ] && [ ! -L /etc/paisans/installed ]; then
   for p in $(awk 'NF == 2 && ($1 == "package" || $1 == "installing") && $2 ~ /^[a-z0-9][a-z0-9.+-]+$/ { print $2 }' /etc/paisans/installed); do
     if dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q 'ok installed$'; then say pkg "$p installed"; else say pkg "$p absent"; fi
+    # On disk: dpkg has its files, installed or left unpacked or
+    # half-configured by an install that failed.
+    s=$(dpkg-query -W -f='${Status}' "$p" 2>/dev/null || true)
+    case $s in *" not-installed"|*" config-files"|"") say ondisk "$p absent" ;; *) say ondisk "$p present" ;; esac
   done
 fi
 if command -v dockerd-rootless-setuptool.sh >/dev/null 2>&1; then say setuptool present; else say setuptool absent; fi

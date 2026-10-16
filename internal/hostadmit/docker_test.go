@@ -431,8 +431,11 @@ func runInstall(t *testing.T, plan *hostadmit.Plan, claimed string, fails ...str
 		}
 	}
 	scripts := map[string]string{
-		"apt-get":    "#!/bin/sh\ncase \"$*\" in *' install '*) printf '%s\\n' " + strings.Join(fails, " ") + " >> " + dpkg + "; exit 100 ;; esac\nexit 0\n",
-		"dpkg-query": "#!/bin/sh\nfor p; do :; done\nif grep -qx \"$p\" " + dpkg + " 2>/dev/null; then printf 'install ok installed'; else exit 1; fi\n",
+		"apt-get": "#!/bin/sh\ncase \"$*\" in *' install '*) printf '%s\\n' " + strings.Join(fails, " ") + " >> " + dpkg + "; exit 100 ;; esac\nexit 0\n",
+		// A package as name, or name:status for one dpkg left in another
+		// state than installed.
+		"dpkg-query": "#!/bin/sh\nfor p; do :; done\nline=$(grep -E \"^$p(:|\\$)\" " + dpkg + " 2>/dev/null | head -n 1)\n[ -n \"$line\" ] || exit 1\ncase $line in *:*) printf 'install ok %s' \"${line#*:}\" ;; *) printf 'install ok installed' ;; esac\n",
+		"systemctl":  "#!/bin/sh\nexit 0\n",
 		"flock":      "#!/bin/sh\nexit 0\n",
 	}
 	for name, s := range scripts {
@@ -444,7 +447,11 @@ func runInstall(t *testing.T, plan *hostadmit.Plan, claimed string, fails ...str
 		t.Fatal(err)
 	}
 	command := strings.NewReplacer("/usr/sbin/", sbin+"/", "/etc/paisans/installed", list, "/run/paisans-docker-hold.lock", filepath.Join(dir, "lock")).Replace(plan.Steps[install].Command)
-	cmd := exec.Command("sh", "-c", command)
+	sh := "sh"
+	if p, err := exec.LookPath("dash"); err == nil {
+		sh = p
+	}
+	cmd := exec.Command(sh, "-c", command)
 	cmd.Env = []string{"PATH=" + bin + ":/usr/bin:/bin"}
 	if out, err := cmd.CombinedOutput(); err == nil {
 		t.Fatalf("the install did not fail: %s", out)
@@ -477,9 +484,7 @@ func TestAFailedInstallConfirmsWhatItInstalled(t *testing.T) {
 		t.Errorf("the hold is left: %v", err)
 	}
 
-	owner := newBlank().with("engine", "29.9.1").with("system-socket", "present").withPkg("docker-ce", "installed").
-		answer("docker compose version", "compose present\npkg docker-ce install ok installed\npkg ufw install ok installed\npkg git install ok installed\npkg wireguard-tools install ok installed\npkg nftables install ok installed\ndockerversion 5:29.9.1-1~ubuntu.24.04~noble\nextras 5:29.9.1-1~ubuntu.24.04~noble\nkeyring present\narch amd64\n")
-	plan, err = hostadmit.Build(owner, input(t, "vm", hostadmit.Flags{}))
+	plan, err = hostadmit.Build(ownersDocker(), input(t, "vm", hostadmit.Flags{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -509,5 +514,79 @@ func TestALeftoverBeforeThePolicyKeepsNoClaim(t *testing.T) {
 	}
 	if titled(plan, "disable the system Docker") >= 0 || recordWritten(t, plan).SystemDockerDisabled {
 		t.Errorf("the owner's Docker is taken for admit's:\n%s", plan.Text())
+	}
+}
+
+// A package whose files dpkg has unpacked is admit's even when apt failed
+// before it was configured: its script may have enabled its units, so the
+// claim stands for the next run to disable them.
+func TestAFailedInstallConfirmsAPackageLeftHalfConfigured(t *testing.T) {
+	plan, err := hostadmit.Build(newBlank(), input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed := plan.Steps[titled(plan, "record what admit installs")].File.Content
+	got, _ := runInstall(t, plan, claimed, "docker-ce:half-configured", "containerd.io:config-files")
+	if !strings.Contains(got, "\npackage docker-ce\n") || !strings.Contains(got, "\ninstalling containerd.io\n") {
+		t.Errorf("after an install left docker-ce half-configured:\n%s", got)
+	}
+}
+
+// The install takes the hold's lock before it sets its exit trap, so a
+// run refused at the lock writes nothing, and confirm_claims writes the
+// list through a temporary file of its own; a signal ends the install
+// through its exit trap, so its claims are confirmed then too.
+func TestTheInstallLocksBeforeItConfirms(t *testing.T) {
+	for name, h := range map[string]*fakeHost{"held": newBlank(), "nothing held": ownersDocker()} {
+		plan, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		install := slices.IndexFunc(plan.Steps, func(s hostadmit.Step) bool { return strings.HasPrefix(s.Title, "install packages: ") })
+		c := plan.Steps[install].Command
+		lock, trap, signals, apt := strings.Index(c, "flock -n 8"), strings.Index(c, "trap confirm_claims EXIT"), strings.Index(c, "trap 'exit 1' HUP INT TERM"), strings.Index(c, "apt-get")
+		if lock < 0 || trap < lock || signals < 0 || apt < signals {
+			t.Errorf("%s: lock %d, trap %d, signals %d, apt %d:\n%s", name, lock, trap, signals, apt, c)
+		}
+		if !strings.Contains(c, "mktemp \"$f.XXXXXX\"") || strings.Contains(c, "$f.paisans-tmp") {
+			t.Errorf("%s: confirm_claims writes through a shared name:\n%s", name, c)
+		}
+	}
+}
+
+// Putting back a hold admit's own policy left confirms that install's
+// claims before it releases the hold, so a run that dies between the two
+// still finds the policy that says the claims stand.
+func TestPuttingBackConfirmsBeforeItReleases(t *testing.T) {
+	plan, err := hostadmit.Build(installedByAdmit(current()).with("docker-hold", "policy"), input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := plan.Steps[titled(plan, "put back /usr/sbin/policy-rc.d")].Command
+	lock, confirm, release := strings.Index(c, "flock -n 8"), strings.Index(c, "\nconfirm_claims\n"), strings.LastIndex(c, "\nrelease_docker_hold\n")
+	if lock < 0 || confirm < lock || release < confirm {
+		t.Errorf("lock %d, confirm %d, release %d:\n%s", lock, confirm, release, c)
+	}
+}
+
+// ownersDocker is a blank host with the owner's Docker 29.9.1 and no
+// rootless extras: admit installs them and uidmap, holding nothing.
+func ownersDocker() *fakeHost {
+	return newBlank().with("engine", "29.9.1").with("system-socket", "present").withPkg("docker-ce", "installed").
+		answer("docker compose version", "compose present\npkg docker-ce install ok installed\npkg ufw install ok installed\npkg git install ok installed\npkg wireguard-tools install ok installed\npkg nftables install ok installed\ndockerversion 5:29.9.1-1~ubuntu.24.04~noble\nextras 5:29.9.1-1~ubuntu.24.04~noble\nkeyring present\narch amd64\n")
+}
+
+// A package of admit's that dpkg left unpacked but not configured is on
+// disk, its units perhaps enabled: the list keeps it, and the system
+// Docker is still admit's to disable.
+func TestAnInstalledListKeepsAPackageOnDisk(t *testing.T) {
+	h := installedByAdmit(current()).with("system-unit", "docker.service enabled active").
+		withPkg("docker-ce", "absent").add("ondisk", "docker-ce present")
+	plan, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if titled(plan, "record what admit installs") >= 0 || titled(plan, "disable the system Docker") < 0 {
+		t.Errorf("a docker-ce left half-configured is dropped:\n%s", plan.Text())
 	}
 }

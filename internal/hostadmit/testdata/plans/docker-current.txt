@@ -90,18 +90,31 @@ step 3: record what admit installs
 step 4: install packages: docker-ce-rootless-extras=5:29.9.1-1~ubuntu.24.04~noble, uidmap
   packages: install docker-ce-rootless-extras=5:29.9.1-1~ubuntu.24.04~noble uidmap, leaving your Docker at the version it is
   run:
+    $ set -e
+    $ if [ -z "${paisans_hold_locked:-}" ]; then
+    $   exec 8>/run/paisans-docker-hold.lock
+    $   flock -n 8 || { echo 'another paisans host admit is installing Docker on this host now (it holds /run/paisans-docker-hold.lock). Run again once it is done'; exit 1; }
+    $   paisans_hold_locked=1
+    $ fi
     $ confirm_claims() {
     $   f=/etc/paisans/installed
     $   { [ -f "$f" ] && [ ! -L "$f" ]; } || return 0
     $   ok=
     $   for p in $(awk 'NF == 2 && $1 == "installing" && $2 ~ /^[a-z0-9][a-z0-9.+-]+$/ { print $2 }' "$f"); do
-    $     if dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q 'ok installed$'; then ok="$ok $p"; fi
+    $     s=$(dpkg-query -W -f='${Status}' "$p" 2>/dev/null) || continue
+    $     case $s in *" not-installed"|*" config-files"|"") ;; *) ok="$ok $p" ;; esac
     $   done
     $   [ -n "$ok" ] || return 0
-    $   awk -v ok="$ok " 'NF == 2 && $1 == "installing" && index(ok, " " $2 " ") { print "package " $2; next } { print }' "$f" > "$f.paisans-tmp" &&
-    $     chmod 644 "$f.paisans-tmp" && mv -f "$f.paisans-tmp" "$f"
+    $   t=$(mktemp "$f.XXXXXX") || return 1
+    $   if awk -v ok="$ok " 'NF == 2 && $1 == "installing" && index(ok, " " $2 " ") { print "package " $2; next } { print }' "$f" > "$t" && chmod 644 "$t"; then
+    $     mv -f "$t" "$f"
+    $   else
+    $     rm -f "$t"
+    $     return 1
+    $   fi
     $ }
     $ trap confirm_claims EXIT
+    $ trap 'exit 1' HUP INT TERM
     $ set -e
     $ export DEBIAN_FRONTEND=noninteractive
     $ apt-get -o DPkg::Lock::Timeout=300 update 8>&-

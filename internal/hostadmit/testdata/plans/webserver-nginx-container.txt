@@ -129,18 +129,31 @@ step 5: add docker apt repo
 step 6: install packages: docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin, docker-compose-plugin, docker-ce-rootless-extras, uidmap, wireguard-tools, git
   packages: install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras uidmap wireguard-tools git; Docker's system daemon is kept from starting while its packages install, by a /usr/sbin/policy-rc.d of admit's that asks yours, if you have one, about every other service and is replaced by yours again after
   run:
+    $ set -e
+    $ if [ -z "${paisans_hold_locked:-}" ]; then
+    $   exec 8>/run/paisans-docker-hold.lock
+    $   flock -n 8 || { echo 'another paisans host admit is installing Docker on this host now (it holds /run/paisans-docker-hold.lock). Run again once it is done'; exit 1; }
+    $   paisans_hold_locked=1
+    $ fi
     $ confirm_claims() {
     $   f=/etc/paisans/installed
     $   { [ -f "$f" ] && [ ! -L "$f" ]; } || return 0
     $   ok=
     $   for p in $(awk 'NF == 2 && $1 == "installing" && $2 ~ /^[a-z0-9][a-z0-9.+-]+$/ { print $2 }' "$f"); do
-    $     if dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q 'ok installed$'; then ok="$ok $p"; fi
+    $     s=$(dpkg-query -W -f='${Status}' "$p" 2>/dev/null) || continue
+    $     case $s in *" not-installed"|*" config-files"|"") ;; *) ok="$ok $p" ;; esac
     $   done
     $   [ -n "$ok" ] || return 0
-    $   awk -v ok="$ok " 'NF == 2 && $1 == "installing" && index(ok, " " $2 " ") { print "package " $2; next } { print }' "$f" > "$f.paisans-tmp" &&
-    $     chmod 644 "$f.paisans-tmp" && mv -f "$f.paisans-tmp" "$f"
+    $   t=$(mktemp "$f.XXXXXX") || return 1
+    $   if awk -v ok="$ok " 'NF == 2 && $1 == "installing" && index(ok, " " $2 " ") { print "package " $2; next } { print }' "$f" > "$t" && chmod 644 "$t"; then
+    $     mv -f "$t" "$f"
+    $   else
+    $     rm -f "$t"
+    $     return 1
+    $   fi
     $ }
     $ trap confirm_claims EXIT
+    $ trap 'exit 1' HUP INT TERM
     $ set -e
     $ if [ -z "${paisans_hold_locked:-}" ]; then
     $   exec 8>/run/paisans-docker-hold.lock
