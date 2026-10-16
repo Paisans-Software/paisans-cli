@@ -214,7 +214,9 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    port, the mesh's UDP `ListenPort`, `allow in on psns-<token>`, and 80/443
    with `--public-ports`. The `br-+` rules go: a rootless container's traffic
    to the mesh address leaves through the user's own process, not a host
-   bridge. Defaults are set only on a host with no active firewall, as today.
+   bridge. ufw must be installed and active: admit adds its rules and never
+   enables ufw or sets its defaults, and stops before changing anything on a
+   host where ufw is absent or inactive.
 10. **Egress.** An nftables table that keeps the deployment off the owner's
     network (below).
 11. **The watchdog**, with `--watchdog`: softdog as `host prepare` does today,

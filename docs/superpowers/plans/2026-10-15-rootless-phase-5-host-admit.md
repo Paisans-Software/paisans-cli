@@ -52,7 +52,7 @@ Where the spec or index leaves a choice open, or two of them disagree with the c
 7. **Sysctl values are restored to what they were.** The first admit that changes `net.ipv4.ip_unprivileged_port_start` or `net.ipv4.ip_forward` records the value it found in `/etc/paisans/sysctl.before` (root's, 0644). `/etc/sysctl.d/60-paisans.conf` holds a key while any admitted deployment needs it; evict, once none does, drops the key, runs `sysctl -w` with the recorded value, and removes both files once both keys are gone. A system Docker that set `ip_forward=1` is therefore left with it.
 8. **`br_netfilter` is never unloaded.** `/etc/modules-load.d/paisans.conf` is removed with the last admitted deployment; the module stays loaded until the next boot, since a system Docker may depend on it.
 9. **The user's `default-address-pools`** are Docker's default pools (`mesh.DefaultPools`) less any that overlaps the mesh subnet, each with `size: 24`, so a bridge network inside the user's namespace never takes the mesh's range.
-10. **A host with its own firewall stops admit.** ufw's default policy is set and ufw enabled only when ufw is inactive and no other firewall is found (firewalld active, or an nftables `hook input` chain in a table that is neither ufw's nor Docker's); otherwise, with ufw inactive, admit stops naming the firewall and the ports the deployment needs. See founder question 2.
+10. **Admit works only on a host where ufw is installed and active.** It never enables ufw and never sets its defaults. With ufw not installed, or installed and inactive, admit exits 1 before changing anything, saying the owner installs or enables ufw (`sudo ufw enable`, after allowing their own SSH port) and runs admit again. Admit adds only the deployment's tagged rules. Whether the host runs some other firewall is not judged. See founder decision 2.
 11. **The user's daemon is never restarted under a container.** A changed `daemon.json` restarts the user's `docker.service` only when it runs no container; otherwise the step ends on a warning that the change applies at the daemon's next restart. A change of `data_dir` (added, changed or removed) while the old data root holds any image, container or volume is refused, naming both paths.
 12. **Keys are added, never removed, and recorded as host prepare records them.** Admit appends each request key missing from `~/.ssh/authorized_keys` and writes `/srv/paisans/<token>/.paisans/authorized_keys.owned` (the spec's *Keys* path) as the user, one `added <fingerprint> <name>` line per key it appended, in the sidecar format of `internal/hostprep/authorized_keys.go`, so phase 6's `host prepare` can later remove a key an operator drops.
 13. **Evict without a record deletes only a user named `paisans-<token>`.** With a record, the user must be the record's; without one, any other name is refused, so a lost request and a mistyped `--user` cannot delete the owner's login.
@@ -81,7 +81,7 @@ Where the spec or index leaves a choice open, or two of them disagree with the c
 These override the interim rulings they name.
 
 1. **The request carries the site's name and roles** (overrides rulings 3 and 21). A new task, Task 2b below, adds `site` (the site's name in the configuration) and `roles` (its roles, sorted, from the configuration) to phase 4's request: `Build` fills them, `Check` and `Parse` require them (`site` by the configuration's site-name rule, `roles` each a known role, no duplicates, sorted, and empty for a site that only hosts a pinned app, which the configuration allows), `Encode` writes them in the request's field order, the golden requests and digest vectors are regenerated, and the spec's request table gains both rows. `RequestVersion` is unchanged, since nothing is released. `registry.ForRequest` takes `Site` and `Roles` from the request; the plan names the site to the owner; free space is judged at 20 GB for a data or Garage site. The grants are still computed from the roles (`admission.Needs`), and `Check` refuses a request whose grants disagree with its roles.
-2. **ufw is the only firewall admit works with** (amends ruling 10). Admit exits 1 before changing anything when ufw is not installed, naming ufw and saying the owner installs it, since enabling a firewall the owner did not choose is not admit's decision. With ufw installed and inactive, it stops as ruling 10 says when another firewall is found, and otherwise sets ufw's defaults and enables it. Support for other firewalls is tracked outside this plan.
+2. **ufw must be installed and active** (amends ruling 10). Admit exits 1 before changing anything when ufw is not installed, or is installed but inactive, saying the owner installs or enables ufw (`sudo ufw enable`, after allowing their own SSH port) and runs admit again. Admit never enables ufw and never sets its defaults, since choosing a firewall and its policy is the owner's decision. The probe reports `Facts.UFWInstalled` and `Facts.UFWActive`; Task 9 refuses unless both are true. Support for other firewalls is tracked outside this plan.
 3. **A grant the request does not need is refused** (ruling 4 stands). An owner grants later by running `host admit` again with the request for the site's new roles: admit is idempotent and adds only what the new grant needs.
 
 4. **The user's manager starts after the mesh at boot.** Admit writes `/etc/systemd/system/user@<uid>.service.d/paisans-mesh.conf` with `[Unit]` `Wants=wg-quick@psns-<token>.service` and `After=wg-quick@psns-<token>.service`, root's, mode 644, and runs `systemctl daemon-reload`, never restarting `user@<uid>.service` (the drop-in takes effect at the next boot; a running user is untouched). It goes in Task 5's user steps, with the egress unit's `Before=user@` drop-in beside it; evict removes it. Golden plans show it on a blank host and as unchanged on a re-run. Without it, an app container that publishes on the mesh address loses the race at boot and Docker does not retry it.
@@ -111,7 +111,7 @@ These override the interim rulings they name.
 | `internal/hostadmit/egress.go` | create | the egress table, its unit, `--mesh-lan` |
 | `internal/hostadmit/daemon.go` | create | `br_netfilter`, the rootless daemon, `daemon.json`, `--data-dir` |
 | `internal/hostadmit/wireguard.go` | create | the deployment directory, `/etc/wireguard`, the helper, sudoers |
-| `internal/hostadmit/firewall.go` | create | ufw through the profile, other firewalls, the 80/443 holders |
+| `internal/hostadmit/firewall.go` | create | ufw through the profile, the ufw requirement, the 80/443 holders |
 | `internal/hostadmit/watchdog.go`, `sysctl.go` | create | the watchdog grant; the host-wide sysctls |
 | `internal/hostadmit/webserver.go` | create | the owner's web server into the record, the admin API warning |
 | `internal/hostadmit/record.go` | create | the record, the claim, the keys, the check |
@@ -634,7 +634,7 @@ const ubuntu2404 = "PRETTY_NAME=\"Ubuntu 24.04.1 LTS\"\nNAME=\"Ubuntu\"\nVERSION
 
 // newBlank is a VPS fresh from Ubuntu 24.04: no Docker, AppArmor
 // restricting unprivileged user namespaces with no rootlesskit profile, no
-// deployment user, no file admit writes, ufw installed and inactive, one
+// deployment user, no file admit writes, ufw installed and active, one
 // public interface, systemd-resolved, and nothing on 80 or 443.
 func newBlank() *fakeHost {
 	h := &fakeHost{files: map[string]string{
@@ -650,7 +650,7 @@ func newBlank() *fakeHost {
 		{"br_netfilter", "absent"}, {"forward-policy", "ACCEPT"},
 		{"port-start", "1024"}, {"ip-forward", "0"},
 		{"default-dev", "eth0"}, {"lan", "203.0.113.10/24"},
-		{"firewalld", "inactive"}, {"input-policy", "ACCEPT"}, {"input-rules", "0"},
+		{"ufw", "installed"}, {"ufw-active", "yes"},
 		{"egress-enabled", "no"}, {"egress-table", "absent"},
 		{"data-path", "/home"}, {"data-fs", "ext2/ext3"}, {"data-avail", "42949672960"},
 	} {
@@ -661,7 +661,7 @@ func newBlank() *fakeHost {
 	// hostprep's probes, as host prepare's tests answer them.
 	h.answer("docker compose version", "compose absent\nkeyring absent\narch amd64\n").
 		answer("RuntimeWatchdogUSec", "device absent\nsystemd 0\ndaemon absent\n").
-		answer("ufw show added", "ufw present\nstatus inactive\n").
+		answer("ufw show added", "ufw present\nstatus active\n").
 		answer("is-enabled", "enabled \nactive \n").
 		answer("ip -j route", "[]").answer("ip -j addr", "[]").answer("docker network", "[]")
 	return h
@@ -1484,15 +1484,15 @@ done
 if [ -d /sys/module/br_netfilter ]; then say br_netfilter loaded; else say br_netfilter absent; fi
 ip -d -o link show type bridge 2>/dev/null | awk -F': ' '{ sub(/@.*/, "", $2); print "bridge " $2 }'
 say forward-policy "$(iptables -S FORWARD 2>/dev/null | awk '$1 == "-P" { print $3; exit }')"
-say input-policy "$(iptables -S INPUT 2>/dev/null | awk '$1 == "-P" { print $3; exit }')"
-say input-rules "$(iptables -S INPUT 2>/dev/null | grep -c '^-A INPUT' || true)"
 say port-start "$(sysctl -n net.ipv4.ip_unprivileged_port_start)"
 say ip-forward "$(sysctl -n net.ipv4.ip_forward)"
 dev=$(ip -4 -o route show default 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }')
 say default-dev "${dev:-absent}"
 if [ -n "$dev" ]; then ip -4 -o addr show dev "$dev" scope global | awk '{ print "lan " $4; exit }'; fi
-if systemctl is-active firewalld >/dev/null 2>&1; then say firewalld active; else say firewalld inactive; fi
-nft list chains 2>/dev/null | awk '/^table / { t = $2 " " $3 } /^[ \t]*chain / { c = $2 } /hook input/ { print "input-chain " t " " c }'
+# ufw installed, and active when the first line of `ufw status`, read as
+# root, says so; unreadable output is not active.
+if command -v ufw >/dev/null 2>&1; then say ufw installed; else say ufw absent; fi
+if [ "$(ufw status 2>/dev/null | sed -n 1p)" = "Status: active" ]; then say ufw-active yes; else say ufw-active no; fi
 for f in /etc/udev/rules.d/60-paisans-*-watchdog.rules; do [ -e "$f" ] && say watchdog-rule "$f"; done
 for f in /etc/paisans/admitted.*.json; do [ -e "$f" ] && say record "$f"; done
 # Where Docker's data will live: --data-dir, or the user's home, or /home
@@ -1541,10 +1541,7 @@ type Facts struct {
 	BrNetfilter    bool
 	Bridges        []string
 	ForwardPolicy  string
-	InputPolicy    string
-	InputRules     int
-	InputChains    []string
-	Firewalld      bool
+	UFWInstalled, UFWActive bool
 	PortStart, IPForward string
 	DefaultDev, LAN      string
 	WatchdogRules  []string
@@ -1736,14 +1733,10 @@ func parseFacts(out, user string) (Facts, error) {
 			f.Bridges = append(f.Bridges, v)
 		case "forward-policy":
 			f.ForwardPolicy = v
-		case "input-policy":
-			f.InputPolicy = v
-		case "input-rules":
-			f.InputRules, _ = strconv.Atoi(v)
-		case "input-chain":
-			f.InputChains = append(f.InputChains, v)
-		case "firewalld":
-			f.Firewalld = v == "active"
+		case "ufw":
+			f.UFWInstalled = v == "installed"
+		case "ufw-active":
+			f.UFWActive = v == "yes"
 		case "port-start":
 			f.PortStart = v
 		case "ip-forward":
@@ -3656,14 +3649,13 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 **Files:**
 - Modify: `internal/hostprep/admit.go` (`AdmitRules`)
-- Modify: `internal/hostadmit/snippets/probe.sh.tmpl`, `internal/hostadmit/facts.go` (`UFWActive`)
 - Create: `internal/hostadmit/firewall.go`
 - Modify: `internal/hostadmit/plan.go` (`parts`)
 - Test: `internal/hostprep/admit_test.go`, `internal/hostadmit/firewall_test.go`, `internal/hostadmit/testdata/plans/firewall-*.txt`, `ports-*.txt`
 
 **Interfaces:**
-- Consumes: `hostprep.Profile.Firewall(t, d, rules, hostWide)`, `hostprep.Rule`, `sshWhy`; Task 3's `Facts`; Task 4's `systemDocker`; Task 5's `rangeOf` values through `p.f.SubUID`.
-- Produces: `hostprep.AdmitRules(d deployment.Deployment, sshPort, listenPort int, public bool) []Rule`; `Facts.UFWActive bool`; `type holder struct{ What string }` and `func holders(p *planner) ([]holder, error)`; part `{"firewall", planFirewall}` after `wireguard`.
+- Consumes: `hostprep.Profile.Firewall(t, d, rules, hostWide)`, `hostprep.Rule`, `sshWhy`; Task 3's `Facts` (`UFWInstalled`, `UFWActive`); Task 4's `systemDocker`; Task 5's `rangeOf` values through `p.f.SubUID`.
+- Produces: `hostprep.AdmitRules(d deployment.Deployment, sshPort, listenPort int, public bool) []Rule`; `type holder struct{ What string }` and `func holders(p *planner) ([]holder, error)`; part `{"firewall", planFirewall}` after `wireguard`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -3708,12 +3700,12 @@ const portsMarker = "paisans host admit: who holds 80 and 443"
 var gateway = hostadmit.Flags{Watchdog: true, PublicPorts: true}
 
 var firewallCases = addCases(
-	goldenCase{name: "firewall-inactive-ufw", site: "vm", host: home},
-	goldenCase{name: "firewall-active-ufw", site: "vm", host: func() *fakeHost {
-		return home().with("ufw", "active").answer("ufw show added", "ufw present\nstatus active\nrule allow 22/tcp\n")
+	goldenCase{name: "firewall-active-ufw", site: "vm", host: home},
+	goldenCase{name: "firewall-active-ufw-with-rules", site: "vm", host: func() *fakeHost {
+		return home().answer("ufw show added", "ufw present\nstatus active\nrule allow 22/tcp\n")
 	}},
-	goldenCase{name: "firewall-firewalld-refused", site: "vm", host: func() *fakeHost { return home().with("firewalld", "active") }},
-	goldenCase{name: "firewall-own-nft-refused", site: "vm", host: func() *fakeHost { return home().add("input-chain", "inet filter input") }},
+	goldenCase{name: "firewall-ufw-absent-refused", site: "vm", host: func() *fakeHost { return home().with("ufw", "absent").with("ufw-active", "no") }},
+	goldenCase{name: "firewall-ufw-inactive-refused", site: "vm", host: func() *fakeHost { return home().with("ufw-active", "no") }},
 	goldenCase{name: "ports-free", site: "home-a", flags: gateway, host: home},
 	goldenCase{name: "ports-process-refused", site: "home-a", flags: gateway, host: func() *fakeHost {
 		return home().answer(portsMarker, `listen LISTEN 0 511 0.0.0.0:443 0.0.0.0:* users:(("nginx",pid=901,fd=6)) uid:0 ino:1 sk:1`+"\nend\n")
@@ -3779,13 +3771,7 @@ func AdmitRules(d deployment.Deployment, sshPort, listenPort int, public bool) [
 }
 ```
 
-In `probe.sh.tmpl`, after the firewalld line:
-
-```sh
-if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then say ufw active; else say ufw inactive; fi
-```
-
-and in `parseFacts`: `case "ufw": f.UFWActive = v == "active"`, with `UFWActive bool` in `Facts`; `newBlank` adds `{"ufw", "inactive"}`.
+The probe and `Facts.UFWInstalled`, `Facts.UFWActive` are Task 3's; `newBlank` there is a host with ufw installed and active, which every plan needs.
 
 Create `internal/hostadmit/firewall.go`:
 
@@ -3801,14 +3787,18 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
 )
 
-// planFirewall checks 80 and 443 before the public ports are granted, then
-// plans ufw through the host profile: the deployment's tagged rules, and
-// the default policy and enabling only on a host with no active firewall.
-// A host whose own firewall is not ufw stops admit, naming it and the
-// ports the deployment needs, since admit enabling ufw there would put a
-// second firewall over the owner's.
+// planFirewall checks that ufw is installed and active, checks 80 and 443
+// before the public ports are granted, then plans the deployment's tagged
+// ufw rules through the host profile. Admit never enables ufw and never
+// sets its defaults: choosing a firewall and its policy is the owner's.
 func planFirewall(p *planner) error {
 	req := p.in.Request
+	switch {
+	case !p.f.UFWInstalled:
+		return fmt.Errorf("ufw is not installed. Admit works only on a host whose firewall is ufw, and does not install or enable one: install ufw, allow your own SSH port, run `sudo ufw enable`, then run admit again. Nothing was changed")
+	case !p.f.UFWActive:
+		return fmt.Errorf("ufw is installed but not active. Admit does not enable it: allow your own SSH port, run `sudo ufw enable`, then run admit again. Nothing was changed")
+	}
 	if p.in.Flags.PublicPorts {
 		found, err := holders(p)
 		if err != nil {
@@ -3823,31 +3813,7 @@ func planFirewall(p *planner) error {
 		}
 		p.present("public ports: nothing else answers on 80 or 443")
 	}
-	if !p.f.UFWActive {
-		var other []string
-		if p.f.Firewalld {
-			other = append(other, "firewalld is active")
-		}
-		for _, c := range p.f.InputChains {
-			if !strings.HasPrefix(c, "ip filter ") && !strings.HasPrefix(c, "ip6 filter ") {
-				other = append(other, "nftables chain "+c+" filters incoming traffic")
-			}
-		}
-		if p.f.InputPolicy != "" && p.f.InputPolicy != "ACCEPT" || p.f.InputRules > 0 {
-			other = append(other, fmt.Sprintf("iptables INPUT has policy %s and %d rules", policyOr(p.f.InputPolicy), p.f.InputRules))
-		}
-		if len(other) > 0 {
-			ports := fmt.Sprintf("%d/tcp (SSH), the mesh interface %s", req.SSHPort, p.d.Interface())
-			if req.ListenPort != 0 {
-				ports += fmt.Sprintf(", %d/udp (WireGuard)", req.ListenPort)
-			}
-			if p.in.Flags.PublicPorts {
-				ports += ", 80/tcp and 443/tcp"
-			}
-			return fmt.Errorf("this host has a firewall of its own (%s), and ufw is not active. Admit would enable ufw, a second firewall over yours, so it stops: open %s in your firewall and enable ufw, or admit on a host whose firewall is ufw. Nothing was changed", strings.Join(other, "; "), ports)
-		}
-	}
-	s, err := p.profile.Firewall(p.t, p.d, hostprep.AdmitRules(p.d, req.SSHPort, req.ListenPort, p.in.Flags.PublicPorts), !p.f.UFWActive)
+	s, err := p.profile.Firewall(p.t, p.d, hostprep.AdmitRules(p.d, req.SSHPort, req.ListenPort, p.in.Flags.PublicPorts), false)
 	if err != nil {
 		return err
 	}
@@ -3953,7 +3919,7 @@ In `parts`, after `wireguard`: `{"firewall", planFirewall}`.
 - [ ] **Step 4: Run, regenerate and read**
 
 Run: `go test ./internal/hostprep/ && go test ./internal/hostadmit/ -update && go test ./internal/hostadmit/`
-Expected: PASS. Every plan gains `allow 22/tcp`, `allow 51820/udp` where a port is admitted, `allow all inbound on psns-f2a9`, then `deny incoming`, `allow outgoing`, `enable ufw` on an inactive ufw; `firewall-active-ufw` adds the tagged rules only; `ports-free` adds 80 and 443; the three `ports-*-refused` name nginx with its pid and uid, `shop-web-1` with project `shop`, and the DNAT rule, each ending with `web_server.managed_by: external`; `ports-own-caddy` is planned.
+Expected: PASS. Every plan gains `allow 22/tcp`, `allow 51820/udp` where a port is admitted and `allow all inbound on psns-f2a9`, and never `deny incoming`, `allow outgoing` or `enable ufw`; `firewall-ufw-absent-refused` and `firewall-ufw-inactive-refused` are each one line naming ufw and what the owner does, and change nothing; `ports-free` adds 80 and 443; the three `ports-*-refused` name nginx with its pid and uid, `shop-web-1` with project `shop`, and the DNAT rule, each ending with `web_server.managed_by: external`; `ports-own-caddy` is planned.
 
 - [ ] **Step 5: Commit**
 
@@ -3961,9 +3927,9 @@ Expected: PASS. Every plan gains `allow 22/tcp`, `allow 51820/udp` where a port 
 git add internal/hostprep internal/hostadmit
 git commit -m "feat: plan admit's firewall and check who holds 80 and 443
 
-Admit opens the deployment's ports in ufw with its own tagged rules, and
-sets ufw's defaults only where no firewall is active; a host with a
-firewall of its own stops admit rather than gaining a second one. Before
+Admit works only where ufw is installed and active: it opens the
+deployment's ports with its own tagged rules and never enables ufw or
+sets its defaults, and stops before changing anything otherwise. Before
 granting the public ports it reads, as root, every listener, every port
 the owner's Docker publishes and every DNAT rule on 80 and 443, since a
 daemon without its userland proxy holds a port with a rule alone, and
