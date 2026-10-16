@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/hostadmit"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
 )
@@ -41,7 +43,30 @@ func golden(t *testing.T, c goldenCase) (string, *hostadmit.Plan) {
 	if err != nil {
 		return "refused: " + err.Error() + "\n", nil
 	}
-	return plan.Text(), plan
+	return withHelperDigest(c.name, plan).Text(), plan
+}
+
+// helperInFull are the goldens that show the WireGuard helper's script
+// in full. hostprep's own goldens pin it, so every other plan shows its
+// digest in its place, and a change to the script churns these alone.
+var helperInFull = map[string]bool{"model-blank-witness": true, "helper-dialled": true, "helper-no-listen-port": true}
+
+// withHelperDigest is plan, with the helper's content as its digest unless
+// name is in helperInFull.
+func withHelperDigest(name string, plan *hostadmit.Plan) *hostadmit.Plan {
+	if helperInFull[name] {
+		return plan
+	}
+	short := *plan
+	short.Steps = slices.Clone(plan.Steps)
+	for i, s := range short.Steps {
+		if s.File != nil && strings.HasPrefix(s.File.Path, apply.HelperDir+"/") {
+			f := *s.File
+			f.Content = "<the WireGuard helper hostprep renders, sha256 " + sum(f.Content) + ">\n"
+			short.Steps[i].File = &f
+		}
+	}
+	return &short
 }
 
 func runGolden(t *testing.T, cases []goldenCase) {
