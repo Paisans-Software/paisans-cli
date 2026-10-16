@@ -300,6 +300,11 @@ func admittedHost(req admission.Request, flags hostadmit.Flags) *fakeHost {
 	if req.User == "community" {
 		h = communityHome()
 	}
+	return admittedOn(h, req, flags)
+}
+
+// admittedOn is admittedHost on the host h.
+func admittedOn(h *fakeHost, req admission.Request, flags hostadmit.Flags) *fakeHost {
 	if flags.Watchdog {
 		h.answer("RuntimeWatchdogUSec", "device present\nidentity watchdog0 iTCO_wdt\nsystemd 0\ndaemon absent\n")
 	}
@@ -327,7 +332,7 @@ func admittedHost(req admission.Request, flags hostadmit.Flags) *fakeHost {
 				if len(w) > 5 && w[5] != "root" {
 					owner = uid
 				}
-				h.withDir(w[len(w)-1], modeString(w[3]), owner, owner)
+				h.withDir(strings.Trim(w[len(w)-1], "'"), modeString(w[3]), owner, owner)
 			case strings.HasPrefix(f, "ufw allow "):
 				rules = append(rules, "rule "+strings.TrimPrefix(f, "ufw "))
 			case strings.HasPrefix(f, "mv -f /etc/sudoers.d/"):
@@ -384,4 +389,10 @@ func modeString(octal string) string {
 func keysAfter(stdin string) string {
 	keys, sidecar, _ := strings.Cut(stdin, "--- sidecar ---\n")
 	return keys + "paisans-sidecar\n" + sidecar
+}
+
+// admittedWithDataDir is admittedHost of site with --data-dir dir, on a
+// host whose dir is root's, mode 755.
+func admittedWithDataDir(site, dir string) *fakeHost {
+	return admittedOn(home().withDir(dir, "drwxr-xr-x", 0, 0), requestFor(site), hostadmit.Flags{DataDir: dir})
 }

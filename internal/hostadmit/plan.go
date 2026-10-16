@@ -248,7 +248,7 @@ func build(t apply.Transport, in Input) (*planner, error) {
 		plan: &Plan{Deployment: in.Request.Deployment, User: in.Request.User, Site: in.Request.Site,
 			Profile: profile.ID() + " " + profile.Version(), Host: t.Describe()},
 		record: admission.NewRecord(in.Request, in.Flags.Grants(), in.Digest, in.Now)}
-	if err := refuseUnsafe(facts); err != nil {
+	if err := refuseUnsafe(facts, "admit"); err != nil {
 		return nil, err
 	}
 	for _, pt := range parts {
@@ -259,13 +259,14 @@ func build(t apply.Transport, in Input) (*planner, error) {
 	return p, nil
 }
 
-// refuseUnsafe stops admit, before any part plans, when the probe found
-// a path admit reads or writes as root below a link, or below a directory
+// refuseUnsafe stops admit, or evict, as by names, before any part plans,
+// when the probe found a path it reads, writes or removes as root below a
+// link, or below a directory
 // that is not root's or that its group or others can write. What is below
 // one is not what its path names, or can be swapped between the probe and
 // the change, so no part may act there; refusing here means no part can
 // forget to.
-func refuseUnsafe(f Facts) error {
+func refuseUnsafe(f Facts, by string) error {
 	var bad []string
 	why := func(mode string) string {
 		if mode == "link-above" {
@@ -289,8 +290,9 @@ func refuseUnsafe(f Facts) error {
 	if len(bad) == 0 {
 		return nil
 	}
-	return &ui.Problem{Hint: "a path admit writes as root is not root's alone",
-		Explain: "Each of these is below a link or a directory another user could change, so what admit would write there is not what it names:\n" + strings.Join(bad, "\n") + "\nMake every directory above them a real directory, owned by root and writable by root alone, then run host admit again. Nothing was changed."}
+	act := map[string]string{"admit": "writes", "evict": "removes"}[by]
+	return &ui.Problem{Hint: "a path " + by + " " + act + " as root is not root's alone",
+		Explain: "Each of these is below a link or a directory another user could change, so what " + by + " would " + strings.TrimSuffix(act, "s") + " there is not what it names:\n" + strings.Join(bad, "\n") + "\nMake every directory above them a real directory, owned by root and writable by root alone, then run host " + by + " again. Nothing was changed."}
 }
 
 func sortedKeys[V any](m map[string]V) []string {
@@ -349,7 +351,11 @@ func placeholders(p *planner) *strings.Replacer {
 // a terminal; Show is what an owner sees.
 func (p *Plan) Text() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "admit site %s of %s as %s on %s (%s)\n", p.Site, p.Deployment, p.User, p.Host, p.Profile)
+	if p.Site == "" {
+		fmt.Fprintf(&b, "evict %s as %s on %s (%s)\n", p.Deployment, p.User, p.Host, p.Profile)
+	} else {
+		fmt.Fprintf(&b, "admit site %s of %s as %s on %s (%s)\n", p.Site, p.Deployment, p.User, p.Host, p.Profile)
+	}
 	indent := func(prefix, text string) {
 		for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
 			fmt.Fprintf(&b, "%s%s\n", prefix, line)
