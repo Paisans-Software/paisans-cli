@@ -447,8 +447,9 @@ Garage site and 5 GB otherwise. The path is in the admission record.
     only after a re-run that no longer needs it has restored it.
 14. **The admission record**, `/etc/paisans/admitted.<token>.json`, mode 644:
     the user, the grants (`watchdog`, `public_ports`), whether forwarding is
-    on, the ports the firewall opened, the request's digest when there was
-    one, the time, whether the system Docker is one admit installed and
+    on, the ports the firewall opened, the mesh subnet, the request's digest
+    when there was one, the time, whether the system Docker is one admit
+    installed and
     disabled once (`system_docker_disabled`), which says what admit did, not
     how the daemon stands now, and `ufw_enabled: true` when admit enabled
     ufw, written only then and kept by every later admit. It is how the deployment's own commands, which cannot
@@ -544,9 +545,21 @@ binaries and a `SHA256SUMS` file to each release, and the guide for host
 owners gives the download and the check. Admit itself needs only the
 binary, run with sudo.
 
-A change of WireGuard port, SSH port or grant needs a re-run, because each
-is a root change. `host prepare` compares the declaration with the admission
-record and refuses with the `host admit` line to run.
+A change of site, user, WireGuard port, SSH port, endpoint, grant or mesh
+subnet needs a re-run, because each is a root change. Every deployment
+command, `host prepare` among them, compares the declaration with the
+admission record (`admission.Record.Differences`) and refuses up front,
+naming the admitted value, the declared one, and the `host request` and
+`host admit` lines to run. The mesh subnet is compared because admit bakes
+it into root's state the deployment's user cannot change: the egress
+table's accept for the mesh, the WireGuard helper's check of mesh confs, the
+rootless daemon's address pools chosen clear of it, and the check that it
+overlaps nothing on the host. A subnet changed after admission would make
+apply fail partway, when the helper refuses the conf, or drop mesh traffic
+silently. The site's mesh address is not compared: nothing of root's
+restricts it. A record written before `mesh_subnet` joined it is unreadable
+to every deployment command, which refuses it as any unreadable record;
+`host admit` run again reads it and rewrites it.
 
 ## `paisans host evict`
 
