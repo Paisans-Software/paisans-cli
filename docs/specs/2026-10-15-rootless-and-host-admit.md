@@ -58,6 +58,10 @@ Founder decisions, 2026-10-15:
   `net.ipv4.ip_forward` for it and says so in the plan. There is no flag.
 * **Hosts that will not run a second Docker daemon are not supported.**
   Rootless runs beside a system daemon the owner already has.
+* **Ubuntu 22.04 and 24.04 are supported** (founder decision, 2026-10-16).
+  Both use the same host profile; where admit differs between them (the
+  AppArmor refusal, what cgroup delegation adds) is said in its step. Data
+  sites may run different releases, since Postgres's glibc is its image's.
 * **A system Docker admit installs never runs.** Where Docker is absent,
   admit installs Docker's packages for the rootless daemons and keeps the
   system daemon they bring disabled; the packages stay.
@@ -937,8 +941,9 @@ A rekey with sites down is in `docs/specs/2026-10-15-mesh-rekey-sites-down.md`.
 ## Tests
 
 * `config`: `ssh.user` optional; `SetSSHUser` splices and never overwrites.
-* `hostprep` admit plan: golden plans for a blank Ubuntu 24.04, a host with
-  an old system Docker (refused), one with a current one, and each flag.
+* `hostprep` admit plan: golden plans for a blank Ubuntu 24.04 and 22.04, a
+  host with an old system Docker (refused), one with a current one on each
+  release, and each flag.
 * The helper's `put`: a table of confs, every hook key refused, every
   unknown key refused, an `Address` outside the subnet refused, the
   renderer's own output accepted.
@@ -1019,6 +1024,13 @@ Docker's rootless documentation, read 2026-10-15:
   `--cap-add` applies only inside the user namespace.
 
 ## Observed
+
+Ubuntu 22.04 was checked against every admit step on 2026-10-16, on an
+Ubuntu 22.04.1 VPS (kernel 5.15, read only) and in an `ubuntu:22.04`
+container running systemd 249: Docker publishes Engine 29.5 and later for
+jammy, the egress table loads under nftables 1.0.2, and the kernel
+operations host networking rests on behave as on 24.04. What differs is
+under AppArmor (step 2) and cgroup delegation (step 5, R5).
 
 On a blank Ubuntu 24.04.1 VPS (kernel 6.8, amd64), 2026-10-15, with a second
 host as the mesh peer. Docker Engine 29.9.1 from Docker's repository,

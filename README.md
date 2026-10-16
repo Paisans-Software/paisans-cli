@@ -5203,17 +5203,20 @@ Everything that depends on the operating system lives in a **host profile**,
 chosen from `/etc/os-release` by `ID` and `VERSION_ID` together. A profile
 answers four questions (how to install the packages, how to enable services,
 how to load a kernel module now and at boot, how to drive the firewall), and
-its shell lives as templates in its own directory under
+its shell lives as templates in a directory under
 `internal/hostprep/profiles/`. Adding Debian or Fedora is adding a directory
 and a registration, not editing the command.
 
-Only `ubuntu 24.04` ships. A profile matches the release as well as `ID`,
-because Docker's apt source names the release codename, and a profile that
-accepted every Ubuntu would write one release's packages onto another. A host
-no profile matches is refused, naming what is supported:
+`ubuntu 22.04` and `ubuntu 24.04` ship, and share the templates in
+`profiles/ubuntu/`: what differs between them, such as the codename Docker's
+apt source names, is read from the host's `/etc/os-release`. A profile matches
+the release as well as `ID`, so a release nobody has checked the templates
+against is refused rather than written to as if it were another. A host no
+profile matches is refused, naming what is supported:
 
 ```
 debian 12 is not supported. Use one of the following:
+ubuntu 22.04
 ubuntu 24.04
 ```
 
@@ -5324,9 +5327,11 @@ Rules are matched the way ufw matches them, on everything except action and
 comment. That is not a choice: ufw keeps one rule per match and **adding a rule
 that differs only in comment or action replaces the existing one in place**
 (ufw 0.36.2, the version Ubuntu 24.04 ships: `UFWRule.match` in `common.py`,
-`set_rule` in `backend_iptables.py`). So adding ours over a rule someone else
-commented would rewrite their comment, and adding an allow over their `limit`
-would loosen it. Both are left alone.
+`set_rule` in `backend_iptables.py`; Ubuntu 22.04's 0.36.1 prints the same
+`ufw show added` and `ufw status numbered` for every rule shape Paisans
+adds). So adding ours over a rule someone else commented would rewrite their
+comment, and adding an allow over their `limit` would loosen it. Both are left
+alone.
 
 The same behaviour makes adoption one command. A host prepared before rules
 carried a comment holds exactly the derived rules, uncommented. Re-adding each

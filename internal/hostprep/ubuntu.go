@@ -11,20 +11,23 @@ import (
 )
 
 // ubuntu is the profile for Ubuntu releases. Its shell lives in
-// profiles/ubuntu-<version>/; a second release that differs only in its
-// templates is a second directory and a second register call.
+// profiles/ubuntu/, shared by every release registered here: each was
+// checked against those templates, and whatever differs by release, such as
+// the codename in Docker's apt source, is read from the host. A release whose
+// shell differs needs a directory of its own.
 type ubuntu struct {
 	version string
 }
 
 func init() {
+	register(ubuntu{version: "22.04"})
 	register(ubuntu{version: "24.04"})
 }
 
 func (u ubuntu) ID() string      { return "ubuntu" }
 func (u ubuntu) Version() string { return u.version }
 
-func (u ubuntu) tmpl(name string) string { return "profiles/ubuntu-" + u.version + "/" + name }
+func (u ubuntu) tmpl(name string) string { return "profiles/ubuntu/" + name }
 
 // dockerPackages are the ones Docker's install page names, step 2 of "Install
 // using the apt repository": https://docs.docker.com/engine/install/ubuntu/

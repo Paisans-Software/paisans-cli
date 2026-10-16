@@ -15,6 +15,11 @@ import (
 
 var dockerCases = addCases(
 	goldenCase{name: "docker-blank", host: newBlank, site: "vm"},
+	goldenCase{name: "docker-blank-jammy", host: newJammy, site: "vm"},
+	goldenCase{name: "docker-current-jammy", site: "vm", host: func() *fakeHost {
+		return newJammy().with("engine", "29.9.1").with("system-socket", "present").withPkg("docker-ce", "installed").
+			answer("docker compose version", "compose present\npkg docker-ce install ok installed\npkg ufw install ok installed\npkg git install ok installed\npkg wireguard-tools install ok installed\npkg nftables install ok installed\ndockerversion 5:29.9.1-1~ubuntu.22.04~jammy\nextras 5:29.9.1-1~ubuntu.22.04~jammy\nkeyring present\narch amd64\n")
+	}},
 	goldenCase{name: "docker-old-refused", site: "vm", host: func() *fakeHost {
 		return newBlank().with("engine", "27.5.1").withPkg("docker-ce", "installed").with("system-socket", "present")
 	}},

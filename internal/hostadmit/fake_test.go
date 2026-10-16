@@ -162,6 +162,18 @@ func sum(content string) string {
 
 const ubuntu2404 = "PRETTY_NAME=\"Ubuntu 24.04.1 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nVERSION_CODENAME=noble\nID=ubuntu\nID_LIKE=debian\nUBUNTU_CODENAME=noble\n"
 
+const ubuntu2204 = "PRETTY_NAME=\"Ubuntu 22.04.5 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"22.04\"\nVERSION_CODENAME=jammy\nID=ubuntu\nID_LIKE=debian\nUBUNTU_CODENAME=jammy\n"
+
+// newJammy is newBlank on Ubuntu 22.04, as a VPS fresh from it probes:
+// the kernel has no apparmor_restrict_unprivileged_userns sysctl, so the
+// probe prints 0, and Ubuntu's apparmor package ships no rootlesskit
+// profile.
+func newJammy() *fakeHost {
+	h := newBlank().with("userns-restrict", "0").with("rootlesskit-profile", "absent")
+	h.files["/etc/os-release"] = ubuntu2204
+	return h
+}
+
 // newBlank is a VPS fresh from Ubuntu 24.04: no Docker, AppArmor
 // restricting unprivileged user namespaces with the rootlesskit profile
 // Ubuntu's apparmor package loads, no
