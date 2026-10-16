@@ -55,16 +55,19 @@ type Facts struct {
 	Files                      map[string]FileState
 	Dirs                       map[string]DirState
 	EgressEnabled, EgressTable bool
-	BrNetfilter                bool
-	IptablesModule             string
-	IptablesModuleLoaded       bool
-	Bridges                    []string
-	ForwardPolicy              string
-	UFWInstalled, UFWActive    bool
-	PortStart, IPForward       string
-	DefaultDev, LAN            string
-	// OnLink6 are the IPv6 routes of the main table with no gateway, each
-	// a destination the host reaches directly on Dev. Admit drops the
+	// EgressRules is how many rules the loaded egress table holds, -1 when
+	// the probe did not say.
+	EgressRules             int
+	BrNetfilter             bool
+	IptablesModule          string
+	IptablesModuleLoaded    bool
+	Bridges                 []string
+	ForwardPolicy           string
+	UFWInstalled, UFWActive bool
+	PortStart, IPForward    string
+	DefaultDev, LAN         string
+	// OnLink6 are the IPv6 routes of every routing table with no gateway,
+	// each a destination the host reaches directly on Dev. Admit drops the
 	// global ones for the deployment (onLink6).
 	OnLink6       []Route6
 	WatchdogRules []string
@@ -396,7 +399,12 @@ func parseFacts(out, user string) (Facts, error) {
 		case "egress-enabled":
 			f.EgressEnabled = v == "yes"
 		case "egress-table":
-			f.EgressTable = v == "present"
+			// present, with how many rules the loaded table holds.
+			state, count, _ := strings.Cut(v, " ")
+			f.EgressTable, f.EgressRules = state == "present", -1
+			if n, ok := id(count); ok {
+				f.EgressRules = n
+			}
 		case "br_netfilter":
 			f.BrNetfilter = v == "loaded"
 		case "iptables-module":

@@ -36,7 +36,7 @@ func egressAdmitted(table string) func() *fakeHost {
 			table = want
 		}
 		return home().withFile(egressFile, table, "644", 0).withFile(egressUnit, unit, "644", 0).
-			with("egress-enabled", "yes").with("egress-table", "present")
+			with("egress-enabled", "yes").with("egress-table", "present "+itoa(hostadmit.EgressRuleCount(table)))
 	}
 }
 
@@ -84,10 +84,11 @@ var egressCases = addCases(
 
 func TestEgressPlans(t *testing.T) { runGolden(t, egressCases) }
 
-// tableOf is the egress table a plan writes, "" when it writes none.
+// tableOf is the egress table a plan writes, beside the file before nft
+// checks it, "" when it writes none.
 func tableOf(plan *hostadmit.Plan) string {
 	for _, s := range plan.Steps {
-		if s.File != nil && s.File.Path == egressFile {
+		if s.File != nil && s.File.Path == egressFile+".new" {
 			return s.File.Content
 		}
 	}
@@ -146,5 +147,80 @@ func TestEgressOnLinkPrefixChangeReplansTheTable(t *testing.T) {
 	}
 	if table := tableOf(plan); !strings.Contains(table, "ip6 daddr { 2001:db8:42::/64 } drop") || strings.Contains(table, "2001:db8:1::") {
 		t.Errorf("the table does not drop the new prefix alone:\n%s", table)
+	}
+}
+
+// Under systemd-resolved, /etc/resolv.conf names the stub alone, and a
+// rootless network's DNS may go to the stub's upstream servers instead:
+// those are accepted on port 53 too, each once.
+func TestEgressAcceptsTheStubsUpstreamResolvers(t *testing.T) {
+	h := home().file("/run/systemd/resolve/resolv.conf", "nameserver 10.0.0.2\nnameserver 127.0.0.53\nnameserver fd00::53\n")
+	plan, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	table := tableOf(plan)
+	for _, want := range []string{"ip daddr { 127.0.0.53, 10.0.0.2 } meta l4proto { tcp, udp } th dport 53 accept", "ip6 daddr { fd00::53 } meta l4proto { tcp, udp } th dport 53 accept"} {
+		if !strings.Contains(table, want) {
+			t.Errorf("the table lacks %q:\n%s", want, table)
+		}
+	}
+}
+
+// The table is written beside the file and checked by nft before it
+// replaces it, so a table nft would refuse never becomes the one the next
+// boot loads.
+func TestEgressTableIsCheckedBeforeItIsWritten(t *testing.T) {
+	plan, err := hostadmit.Build(home(), input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range plan.Steps {
+		if s.File != nil && strings.HasPrefix(s.File.Path, egressFile) {
+			if s.File.Path != egressFile+".new" || !strings.HasPrefix(s.Command, "nft -c -f "+egressFile+".new && mv -f "+egressFile+".new "+egressFile+" ||") {
+				t.Errorf("the table is written to %s and then runs %q", s.File.Path, s.Command)
+			}
+			return
+		}
+	}
+	t.Fatalf("no table written:\n%s", plan.Text())
+}
+
+// A loaded table that holds other than the file's rules, flushed or edited
+// by hand, is loaded again, even when the file is as written.
+func TestALoadedTableWithOtherRulesIsLoadedAgain(t *testing.T) {
+	admitted := admittedHost(requestFor("vm"), hostadmit.Flags{})
+	for _, c := range []struct {
+		line   string
+		reload bool
+	}{{"present 0", true}, {"present", true}, {admitted.fact("egress-table"), false}} {
+		h := admittedHost(requestFor("vm"), hostadmit.Flags{}).with("egress-table", c.line)
+		plan, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var titles []string
+		for _, s := range plan.Steps {
+			titles = append(titles, s.Title)
+		}
+		if got := strings.Join(titles, ", ") == "reload the egress table"; got != c.reload {
+			t.Errorf("egress-table %q plans %q", c.line, titles)
+		}
+	}
+}
+
+// An on-link prefix wider than a /32, as a full-tunnel VPN routes, is
+// warned about, since the table then drops most of the deployment's IPv6;
+// the prefixes dropped are named in what the plan found.
+func TestAWideOnLinkPrefixIsWarnedAbout(t *testing.T) {
+	plan, err := hostadmit.Build(home().add("lan6", "2000::/4 tun0"), input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(plan.Text(), "warning: egress: 2000::/4 on tun0 is wider than a /32") {
+		t.Errorf("no warning:\n%s", plan.Text())
+	}
+	if !strings.Contains(plan.Text(), "present: egress: the host's on-link IPv6 prefixes, dropped: 2000::/4") {
+		t.Errorf("the dropped prefixes are not named:\n%s", plan.Text())
 	}
 }

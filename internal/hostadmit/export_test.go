@@ -7,6 +7,9 @@ import (
 
 var CaddyAdmin = caddyAdmin
 
+// EgressRuleCount is how many rules an egress table file holds.
+var EgressRuleCount = ruleCount
+
 // RecordOf is the admission record the parts have filled so far.
 func RecordOf(t apply.Transport, in Input) (admission.Record, error) {
 	p, err := build(t, in, nil)

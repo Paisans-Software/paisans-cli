@@ -100,8 +100,8 @@ step 4: delegate cgroups to users
     $ systemctl daemon-reload
 
 step 5: write the egress table
-  egress: keep paisans-f2a9, its containers and its mesh off this host's loopback and your network (/etc/paisans/egress.f2a9.nft)
-  write /etc/paisans/egress.f2a9.nft mode 0644:
+  egress: keep paisans-f2a9, its containers and its mesh off this host's loopback and your network (/etc/paisans/egress.f2a9.nft, checked by nft before it replaces the one there)
+  write /etc/paisans/egress.f2a9.nft.new mode 0644:
     | # Written by paisans host admit for paisans-f2a9. Keeps the
     | # deployment's user, its containers and its mesh off this host's loopback
     | # and the owner's network. paisans host evict removes it.
@@ -165,7 +165,7 @@ step 5: write the egress table
     | 	}
     | }
   run:
-    $ nft -c -f /etc/paisans/egress.f2a9.nft
+    $ nft -c -f /etc/paisans/egress.f2a9.nft.new && mv -f /etc/paisans/egress.f2a9.nft.new /etc/paisans/egress.f2a9.nft || { rm -f /etc/paisans/egress.f2a9.nft.new; echo 'the egress table was not replaced'; exit 1; }
 
 step 6: reload the egress table
   egress: replace paisans_f2a9 in one transaction
@@ -330,6 +330,7 @@ present: apparmor: rootlesskit's profile is loaded
 present: user: paisans-f2a9 exists, uid 1001, in no privileged group, and sudo grants it nothing beyond admit's helper
 present: user: paisans-f2a9 holds 165536-231071 in /etc/subuid
 present: user: paisans-f2a9 holds 165536-231071 in /etc/subgid
+present: egress: the host's on-link IPv6 prefixes, dropped: 2001:db8:1::/64
 present: egress: paisans-f2a9-egress.service enabled
 present: linger: on for paisans-f2a9
 present: linger: paisans-f2a9's manager is running

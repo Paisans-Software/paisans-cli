@@ -98,6 +98,17 @@ func (h *fakeHost) with(key, value string) *fakeHost {
 	return h
 }
 
+// fact is the value of key's last line, "" for none.
+func (h *fakeHost) fact(key string) string {
+	v := ""
+	for _, kv := range h.facts {
+		if kv[0] == key {
+			v = kv[1]
+		}
+	}
+	return v
+}
+
 // add adds a line for a key that repeats.
 func (h *fakeHost) add(key, value string) *fakeHost {
 	h.facts = append(h.facts, [2]string{key, value})
@@ -320,11 +331,16 @@ func admittedOn(h *fakeHost, req admission.Request, flags hostadmit.Flags) *fake
 		uid = 1002
 	}
 	var rules []string
-	daemonJSON, keys := "", ""
+	daemonJSON, keys, egressRules := "", "", 0
+	modes := map[string]string{}
 	for _, s := range plan.Steps {
 		if s.File != nil {
-			h.withFile(s.File.Path, s.File.Content, fmt.Sprintf("%o", s.File.Mode), 0)
+			modes[s.File.Path] = fmt.Sprintf("%o", s.File.Mode)
+			h.withFile(s.File.Path, s.File.Content, modes[s.File.Path], 0)
 			h.files[s.File.Path] = s.File.Content
+			if strings.HasPrefix(s.File.Path, "/etc/paisans/egress.") {
+				egressRules = hostadmit.EgressRuleCount(s.File.Content)
+			}
 		}
 		for _, f := range strings.Split(s.Command, " && ") {
 			switch {
@@ -337,9 +353,12 @@ func admittedOn(h *fakeHost, req admission.Request, flags hostadmit.Flags) *fake
 				h.withDir(strings.Trim(w[len(w)-1], "'"), modeString(w[3]), owner, owner)
 			case strings.HasPrefix(f, "ufw allow "):
 				rules = append(rules, "rule "+strings.TrimPrefix(f, "ufw "))
-			case strings.HasPrefix(f, "mv -f /etc/sudoers.d/"):
+			case strings.HasPrefix(f, "mv -f /"):
 				w := strings.Fields(f) // mv -f TMP FINAL || ...
-				h.withFile(w[3], h.files[w[2]], "440", 0)
+				h.withFile(w[3], h.files[w[2]], modes[w[2]], 0)
+				h.files[w[3]] = h.files[w[2]]
+				h.dropKeyed("file", w[2])
+				delete(h.files, w[2])
 			}
 		}
 		if strings.Contains(s.Command, "daemon.json") {
@@ -350,7 +369,7 @@ func admittedOn(h *fakeHost, req admission.Request, flags hostadmit.Flags) *fake
 		}
 	}
 	h.answer("ufw show added", "ufw present\nstatus active\n"+strings.Join(rules, "\n")+"\n").
-		with("br_netfilter", "loaded").with("egress-enabled", "yes").with("egress-table", "present").
+		with("br_netfilter", "loaded").with("egress-enabled", "yes").with("egress-table", "present "+itoa(egressRules)).
 		answer(userStateMarker, "daemon active\nunit present\ndaemon-json "+sum(daemonJSON)+"\ncontainers 0\nimages 0\nvolumes 0\nend\n").
 		answer(keysMarker, keysAfter(keys))
 	if flags.PublicPorts {

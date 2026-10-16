@@ -8,10 +8,13 @@
 # ruleset: a reload of nftables loads this table again, leaving the manager
 # running, and a restart or stop of nftables restarts or stops this unit,
 # and so the manager, its daemon and its containers with it, so the
-# deployment never runs while the table is gone.
+# deployment never runs while the table is gone. With no default
+# dependencies, it waits for the filesystem the table is on by name, for a
+# host whose /etc is mounted on its own.
 [Unit]
 Description=paisans {{ .Token }}: egress table for {{ .User }}
 DefaultDependencies=no
+RequiresMountsFor={{ .File }}
 After=nftables.service
 PartOf=nftables.service
 ReloadPropagatedFrom=nftables.service

@@ -106,9 +106,9 @@ step 5: delegate cgroups to users
     $ systemctl daemon-reload
 
 step 6: write the egress table
-  egress: keep paisans-f2a9, its containers and its mesh off this host's loopback and your network (/etc/paisans/egress.f2a9.nft)
+  egress: keep paisans-f2a9, its containers and its mesh off this host's loopback and your network (/etc/paisans/egress.f2a9.nft, checked by nft before it replaces the one there)
   provisional: run once the user exists
-  write /etc/paisans/egress.f2a9.nft mode 0644:
+  write /etc/paisans/egress.f2a9.nft.new mode 0644:
     | # Written by paisans host admit for paisans-f2a9. Keeps the
     | # deployment's user, its containers and its mesh off this host's loopback
     | # and the owner's network. paisans host evict removes it.
@@ -172,7 +172,7 @@ step 6: write the egress table
     | 	}
     | }
   run:
-    $ nft -c -f /etc/paisans/egress.f2a9.nft
+    $ nft -c -f /etc/paisans/egress.f2a9.nft.new && mv -f /etc/paisans/egress.f2a9.nft.new /etc/paisans/egress.f2a9.nft || { rm -f /etc/paisans/egress.f2a9.nft.new; echo 'the egress table was not replaced'; exit 1; }
 
 step 7: install the egress unit
   egress: load the table at boot, before paisans-f2a9's manager, which requires it (paisans-f2a9-egress.service)
@@ -188,10 +188,13 @@ step 7: install the egress unit
     | # ruleset: a reload of nftables loads this table again, leaving the manager
     | # running, and a restart or stop of nftables restarts or stops this unit,
     | # and so the manager, its daemon and its containers with it, so the
-    | # deployment never runs while the table is gone.
+    | # deployment never runs while the table is gone. With no default
+    | # dependencies, it waits for the filesystem the table is on by name, for a
+    | # host whose /etc is mounted on its own.
     | [Unit]
     | Description=paisans f2a9: egress table for paisans-f2a9
     | DefaultDependencies=no
+    | RequiresMountsFor=/etc/paisans/egress.f2a9.nft
     | After=nftables.service
     | PartOf=nftables.service
     | ReloadPropagatedFrom=nftables.service
@@ -387,6 +390,7 @@ present: package: nftables installed
 present: package: wireguard-tools installed
 present: package: git installed
 present: apparmor: rootlesskit's profile is loaded
+present: egress: the host's on-link IPv6 prefixes, dropped: 2001:db8:1::/64
 present: br_netfilter: nf_tables, which the host's iptables uses, is loaded
 present: daemon: /home (ext2/ext3) has 42.9 GB free
 present: mesh: nothing on this host overlaps 10.44.0.0/24

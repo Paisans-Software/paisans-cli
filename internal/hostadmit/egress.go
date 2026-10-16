@@ -27,9 +27,15 @@ func planEgress(p *planner) error {
 			"Its sites may then dial each other on your LAN, and the deployment's user, which writes each peer's endpoint, can send WireGuard packets to any address in "+lan+".")
 	}
 	p.record.MeshLAN = lan
-	resolv, _, err := p.t.ReadFile("/etc/resolv.conf")
-	if err != nil {
-		return shown(err)
+	// Under systemd-resolved, /etc/resolv.conf names the stub alone, and a
+	// rootless network's DNS may go to the stub's upstream servers instead.
+	var resolv string
+	for _, file := range []string{"/etc/resolv.conf", "/run/systemd/resolve/resolv.conf"} {
+		content, _, err := p.t.ReadFile(file)
+		if err != nil {
+			return shown(err)
+		}
+		resolv += content + "\n"
 	}
 	v4, v6 := resolvers(resolv)
 	if len(v4)+len(v6) == 0 {
@@ -47,10 +53,27 @@ func planEgress(p *planner) error {
 	provisional := !p.f.User.Exists
 	user, unitName, tableName := p.in.Request.User, p.d.EgressUnit(), p.d.EgressTable()
 	file, unitPath := egressFilePath(p.d), "/etc/systemd/system/"+unitName
+	lan6 := onLink6(p.f, p.d.Interface(), p.in.Request.MeshSubnet)
+	if len(lan6) > 0 {
+		var names []string
+		for _, pfx := range lan6 {
+			names = append(names, pfx.String())
+		}
+		p.present("egress: the host's on-link IPv6 prefixes, dropped: " + strings.Join(names, ", "))
+	}
+	// A full-tunnel VPN routes such prefixes on its interface, and the
+	// table then drops most of the deployment's IPv6, the mesh's endpoints
+	// among them.
+	for _, r := range p.f.OnLink6 {
+		if slices.Contains(lan6, r.Prefix) && r.Prefix.Bits() < 32 {
+			p.warn("egress: "+r.Prefix.String()+" on "+ui.Visible(r.Dev)+" is wider than a /32, and the deployment is kept off it",
+				"It is an on-link route of the host's, so the egress table drops it for the deployment, which then reaches little of the IPv6 internet. A full-tunnel VPN adds such routes; if that is not meant, remove the route and admit again.")
+		}
+	}
 	table, err := hostprep.EgressTable(hostprep.EgressData{
 		Token: p.d.Token(), Table: tableName, Mark: fmt.Sprintf("%#x", mark),
 		Users: uidOf(p) + ", " + subordinate, Mesh: p.in.Request.MeshSubnet, LAN: lan, Resolvers4: v4, Resolvers6: v6,
-		Gateway: p.in.Flags.PublicPorts || len(p.in.Request.WebServer) > 0, PublicPorts: p.in.Flags.PublicPorts, LAN6: onLink6(p.f, p.d.Interface(), p.in.Request.MeshSubnet),
+		Gateway: p.in.Flags.PublicPorts || len(p.in.Request.WebServer) > 0, PublicPorts: p.in.Flags.PublicPorts, LAN6: lan6,
 	})
 	if err != nil {
 		return err
@@ -70,9 +93,15 @@ func planEgress(p *planner) error {
 	tableChanged := !asWritten(p.f.Files[file], table)
 	unitChanged := !asWritten(p.f.Files[unitPath], unit)
 	if tableChanged {
+		// Written beside the file and checked by nft before it replaces
+		// it, so a table nft refuses never becomes the one the next boot
+		// loads.
+		next := file + ".new"
 		p.step(Step{Title: "write the egress table",
-			Describe: "egress: keep " + user + ", its containers and its mesh off this host's loopback and your network (" + file + ")",
-			File:     &hostprep.File{Path: file, Content: table, Mode: 0o644}, Command: "nft -c -f " + file, Kinds: []string{"egress"}, Provisional: provisional})
+			Describe: "egress: keep " + user + ", its containers and its mesh off this host's loopback and your network (" + file + ", checked by nft before it replaces the one there)",
+			File:     &hostprep.File{Path: next, Content: table, Mode: 0o644},
+			Command:  "nft -c -f " + next + " && mv -f " + next + " " + file + " || { rm -f " + next + "; echo 'the egress table was not replaced'; exit 1; }",
+			Kinds:    []string{"egress"}, Provisional: provisional})
 	} else {
 		p.present("egress: " + file + " as written")
 	}
@@ -87,15 +116,40 @@ func planEgress(p *planner) error {
 	// replaces the table in one transaction, so the table loaded is the
 	// one written whether the unit was running or not.
 	load := "systemctl start " + unitName + " && nft -f " + file
-	switch {
+	switch want := ruleCount(table); {
 	case !p.f.EgressTable:
 		p.step(Step{Title: "load the egress table", Describe: "egress: load " + tableName + " now", Command: load, Kinds: []string{"egress"}, Provisional: provisional})
 	case tableChanged:
 		p.step(Step{Title: "reload the egress table", Describe: "egress: replace " + tableName + " in one transaction", Command: load, Kinds: []string{"egress"}, Provisional: provisional})
+	case p.f.EgressRules != want:
+		// A table flushed or edited by hand holds other rules than the file.
+		found := "an unread number of"
+		if p.f.EgressRules >= 0 {
+			found = fmt.Sprint(p.f.EgressRules)
+		}
+		p.step(Step{Title: "reload the egress table", Describe: fmt.Sprintf("egress: %s holds %s rules and %s holds %d; replace it in one transaction", tableName, found, file, want), Command: load, Kinds: []string{"egress"}, Provisional: provisional})
 	default:
-		p.present("egress: " + tableName + " loaded")
+		p.present(fmt.Sprintf("egress: %s loaded, its %d rules as written", tableName, want))
 	}
 	return nil
+}
+
+// ruleCount is how many rules a table file holds: every line of a chain's
+// body but its type line and comments, as nft -a lists one rule a line.
+func ruleCount(table string) int {
+	n, in := 0, false
+	for _, line := range strings.Split(table, "\n") {
+		l := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(l, "chain ") && strings.HasSuffix(l, "{"):
+			in = true
+		case in && l == "}":
+			in = false
+		case in && l != "" && !strings.HasPrefix(l, "#") && !strings.HasPrefix(l, "type "):
+			n++
+		}
+	}
+	return n
 }
 
 // asWritten reports whether f is a file of root's, mode 644, holding content.
@@ -112,11 +166,11 @@ var global6 = netip.MustParsePrefix("2000::/3")
 // and the mesh's own (iface), which must stay reachable. The system
 // Docker's bridges are kept: the deployment's own networks live in its
 // user namespace and never show in the host's table, so they are the
-// owner's containers. Routes rather than addresses,
-// because a host with a DHCPv6 /128, or with an address it adds without a
-// prefix route, still has its LAN's /64 as an on-link route. A prefix
-// inside another kept is left out, since the wider one drops it, and the
-// rest are sorted, so the same routes always render the same table.
+// owner's containers. Routes rather than addresses, because a host with a
+// DHCPv6 /128, or with an address it adds without a prefix route, still
+// has its LAN's /64 as an on-link route. A prefix inside another kept is
+// left out, since the wider one drops it, and the rest are sorted, so the
+// same routes always render the same table.
 func onLink6(f Facts, iface, mesh string) []netip.Prefix {
 	meshPrefix, _ := netip.ParsePrefix(mesh)
 	var kept []netip.Prefix

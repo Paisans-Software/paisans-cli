@@ -262,6 +262,7 @@ present: apparmor: rootlesskit's profile is loaded
 present: user: paisans-f2a9 exists, uid 1001, in no privileged group, and sudo grants it nothing beyond admit's helper
 present: user: paisans-f2a9 holds 165536-231071 in /etc/subuid
 present: user: paisans-f2a9 holds 165536-231071 in /etc/subgid
+present: egress: the host's on-link IPv6 prefixes, dropped: 2001:db8:1::/64
 present: egress: /etc/paisans/egress.f2a9.nft as written
 present: egress: paisans-f2a9-egress.service enabled
 present: linger: on for paisans-f2a9

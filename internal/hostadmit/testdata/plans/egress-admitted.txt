@@ -13,9 +13,10 @@ present: user: paisans-f2a9 holds 165536-231071 in /etc/subuid
 present: user: paisans-f2a9 holds 165536-231071 in /etc/subgid
 present: user: /etc/systemd/system/user@1001.service.d/paisans-mesh.conf starts paisans-f2a9's manager after the mesh
 present: delegation: /etc/systemd/system/user@.service.d/delegate.conf delegates cpu cpuset io memory pids
+present: egress: the host's on-link IPv6 prefixes, dropped: 2001:db8:1::/64
 present: egress: /etc/paisans/egress.f2a9.nft as written
 present: egress: paisans-f2a9-egress.service enabled
-present: egress: paisans_f2a9 loaded
+present: egress: paisans_f2a9 loaded, its 15 rules as written
 present: linger: on for paisans-f2a9
 present: linger: paisans-f2a9's manager is running
 present: br_netfilter: loaded already

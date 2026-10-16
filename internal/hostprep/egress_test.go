@@ -205,7 +205,7 @@ func TestEgressUnitIsRequiredByTheUsersManager(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Before=network-pre.target user@1001.service", "After=nftables.service", "RequiredBy=user@1001.service", "ExecStart=/usr/sbin/nft -f /etc/paisans/egress.f2a9.nft", "ExecReload=/usr/sbin/nft -f /etc/paisans/egress.f2a9.nft", "PartOf=nftables.service", "ReloadPropagatedFrom=nftables.service"} {
+	for _, want := range []string{"Before=network-pre.target user@1001.service", "After=nftables.service", "RequiredBy=user@1001.service", "ExecStart=/usr/sbin/nft -f /etc/paisans/egress.f2a9.nft", "ExecReload=/usr/sbin/nft -f /etc/paisans/egress.f2a9.nft", "PartOf=nftables.service", "ReloadPropagatedFrom=nftables.service", "RequiresMountsFor=/etc/paisans/egress.f2a9.nft"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the unit lacks %q:\n%s", want, text)
 		}
