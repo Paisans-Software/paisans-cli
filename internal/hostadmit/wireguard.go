@@ -12,9 +12,13 @@ import (
 )
 
 // planDeploymentDir creates /srv/paisans, root's and 755, and the
-// deployment's directory in it, the user's and 750. A deployment directory
-// that exists and is not the user's is an earlier deployment run as root,
-// which is redeployed, not converted.
+// deployment's directory in it, the user's and 750 in the user's group. A
+// deployment directory that exists and is not the user's is an earlier
+// deployment run as root, which is redeployed, not converted. One that is
+// the user's with another mode or group is restored, since group or other
+// write lets another local user plant what the deployment runs; chmod's
+// leading zeros clear a setgid bit, which a plain 750 keeps on a
+// directory. An ACL, which chmod cannot take away, is refused.
 func planDeploymentDir(p *planner) error {
 	base, root, user := p.f.Dirs[deployment.Base], p.f.Dirs[p.d.Root()], p.in.Request.User
 	switch {
@@ -26,11 +30,16 @@ func planDeploymentDir(p *planner) error {
 	switch {
 	case !root.Present:
 		p.step(Step{Title: "create " + p.d.Root(), Describe: "directory: the deployment's own, " + user + "'s, mode 750",
-			Command: "install -d -m 750 -o " + user + " -g " + groupOf(p) + " " + p.d.Root(), Kinds: []string{"directory"}, Provisional: !p.f.User.Exists})
+			Command: "install -d -m 750 -o " + user + " -g " + apply.ShellQuote(groupOf(p)) + " " + p.d.Root(), Kinds: []string{"directory"}, Provisional: !p.f.User.Exists})
 	case !strings.HasPrefix(root.Mode, "d") || !p.f.User.Exists || root.UID != p.f.User.UID:
 		return fmt.Errorf("%s exists and is not a directory of %s's (%q, owner %d). It is an earlier deployment run as root, which is redeployed rather than taken over: remove it with paisans site remove, or by hand once nothing in it is wanted, and admit again. Nothing was changed", p.d.Root(), ui.Visible(user), root.Mode, root.UID)
+	case strings.HasSuffix(root.Mode, "+"):
+		return fmt.Errorf("%s carries an ACL (%s), which chmod cannot take away, and another local user could plant what the deployment runs through it. Remove it with setfacl -b %s and admit again. Nothing was changed", p.d.Root(), ui.Visible(root.Mode), p.d.Root())
+	case root.Mode != "drwxr-x---" || root.GID != p.f.User.GID:
+		p.step(Step{Title: "restore the mode of " + p.d.Root(), Describe: fmt.Sprintf("directory: %s's, mode 750, group %s (found %s, group %d)", user, ui.Visible(groupOf(p)), ui.Visible(root.Mode), root.GID),
+			Command: "chmod 00750 " + p.d.Root() + " && chgrp " + apply.ShellQuote(groupOf(p)) + " " + p.d.Root(), Kinds: []string{"directory"}})
 	default:
-		p.present("directory: " + p.d.Root() + " is " + user + "'s")
+		p.present("directory: " + p.d.Root() + " is " + user + "'s, mode 750")
 	}
 	return nil
 }
@@ -115,7 +124,7 @@ func planWireGuard(p *planner) error {
 	if err != nil {
 		return err
 	}
-	if err := ensureRootFile(p, helper, script, 0o755, "install the WireGuard helper", "wireguard: the one command "+p.in.Request.User+" may run as root: it checks each conf before wg-quick sees it, and adds the mesh's mark"); err != nil {
+	if err := ensureRootFile(p, helper, script, 0o755, "install the WireGuard helper", "wireguard: the one command "+p.in.Request.User+" may run as root: it checks each conf before wg-quick sees it, and adds the mesh's mark", "wireguard: "+helper+" is root's, mode 755, as admit writes it"); err != nil {
 		return err
 	}
 	line, err := sudoersLine(p.d, p.in.Request.User)
@@ -137,20 +146,21 @@ func planWireGuard(p *planner) error {
 	}
 	p.step(Step{Title: title, Describe: "wireguard: " + final + ", mode 440, checked by visudo under a name sudo skips before it is moved into place",
 		File:    &hostprep.File{Path: tmp, Content: line, Mode: 0o440},
-		Command: "visudo -cqf " + tmp + " && chown root:root " + tmp + " && mv -f " + tmp + " " + final + " || { rm -f " + tmp + "; echo 'visudo refused the line; nothing reached sudo'; exit 1; }",
+		Command: "visudo -cqf " + tmp + " && chown root:root " + tmp + " && mv -f " + tmp + " " + final + " || { rm -f " + tmp + "; echo 'the line was not installed (checked by visudo, then chown and mv); nothing reached sudo'; exit 1; }",
 		Kinds:   []string{"wireguard"}})
 	return nil
 }
 
 // ensureRootFile plans writing content at path, root's, with mode, unless
-// it is there as written; a link is refused, and a changed file restored.
-func ensureRootFile(p *planner, path, content string, mode uint32, title, describe string) error {
+// it is there as written, which present says; a link is refused, and a
+// changed file restored.
+func ensureRootFile(p *planner, path, content string, mode uint32, title, describe, present string) error {
 	f := p.f.Files[path]
 	switch {
 	case f.Link:
 		return fmt.Errorf("%s is a symbolic link, and admit writes it as root. Remove the link and admit again. Nothing was changed", path)
 	case f.Present && f.Sum == sha(content) && f.Mode == fmt.Sprintf("%o", mode) && f.UID == 0:
-		p.present(describe)
+		p.present(present)
 		return nil
 	case f.Present:
 		var changed []string

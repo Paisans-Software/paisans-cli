@@ -3,6 +3,7 @@ package hostadmit_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -32,7 +33,45 @@ var wireguardCases = addCases(
 	goldenCase{name: "srv-root-owned-refused", site: "vm", host: func() *fakeHost {
 		return home().withDir("/srv/paisans", "drwxr-xr-x", 0, 0).withDir("/srv/paisans/f2a9", "drwxr-xr-x", 0, 0)
 	}},
+	goldenCase{name: "srv-mode-restored", site: "vm", host: func() *fakeHost {
+		return home().withDir("/srv/paisans", "drwxr-xr-x", 0, 0).withDir("/srv/paisans/f2a9", "drwxrwsrwx", 1001, 0)
+	}},
+	goldenCase{name: "srv-acl-refused", site: "vm", host: func() *fakeHost {
+		return home().withDir("/srv/paisans", "drwxr-xr-x", 0, 0).withDir("/srv/paisans/f2a9", "drwxr-x---+", 1001, 1001)
+	}},
 )
+
+// The deployment's directory is the user's, 750, in the user's group:
+// group or other write would let another local user, another
+// deployment's among them, plant what this deployment runs. A looser
+// mode or another group is restored, setgid included, and an ACL, which
+// chmod cannot take away, is refused.
+func TestTheDeploymentDirectoryIsKept750(t *testing.T) {
+	h := home().withDir("/srv/paisans", "drwxr-xr-x", 0, 0).withDir("/srv/paisans/f2a9", "drwxr-x---", 1001, 1001)
+	plan, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(plan.Present, "directory: /srv/paisans/f2a9 is paisans-f2a9's, mode 750") {
+		t.Errorf("a correct directory is not present: %q", plan.Present)
+	}
+	for _, s := range plan.Steps {
+		if strings.HasSuffix(s.Command, " /srv/paisans/f2a9") {
+			t.Errorf("a correct directory plans %q", s.Command)
+		}
+	}
+	plan, err = hostadmit.Build(home().withDir("/srv/paisans", "drwxr-xr-x", 0, 0).withDir("/srv/paisans/f2a9", "drwxrwsrwx", 1001, 0), input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixed bool
+	for _, s := range plan.Steps {
+		fixed = fixed || s.Command == "chmod 00750 /srv/paisans/f2a9 && chgrp 'paisans-f2a9' /srv/paisans/f2a9"
+	}
+	if !fixed {
+		t.Errorf("a loose directory is not restored:\n%s", plan.Text())
+	}
+}
 
 const helperPath = "/usr/local/libexec/paisans/wg-psns-f2a9"
 

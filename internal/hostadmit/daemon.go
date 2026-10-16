@@ -445,7 +445,7 @@ func planDataDir(p *planner) error {
 		return fmt.Errorf("--data-dir %s would put %s's Docker data in %s, which is its home. Give --data-dir another directory and admit again. Nothing was changed", ui.Visible(p.in.Flags.DataDir), user, shown)
 	case !child.Present:
 		p.step(Step{Title: "create " + shown, Describe: "daemon: " + user + "'s Docker data, on the disk --data-dir names, " + user + "'s, mode 700",
-			Command: "install -d -m 700 -o " + user + " -g " + groupOf(p) + " " + apply.ShellQuote(dir), Kinds: []string{"docker"}, Provisional: !p.f.User.Exists})
+			Command: "install -d -m 700 -o " + user + " -g " + apply.ShellQuote(groupOf(p)) + " " + apply.ShellQuote(dir), Kinds: []string{"docker"}, Provisional: !p.f.User.Exists})
 	case child.Unsafe || len(child.Mode) != 10 || child.Mode[0] != 'd' || !p.f.User.Exists || child.UID != p.f.User.UID:
 		return fmt.Errorf("%s exists and is not a directory of %s's (its listing is %q, owner %d). Remove it, or give another --data-dir, and admit again. Nothing was changed", shown, user, ui.Visible(child.Mode), child.UID)
 	case child.Mode != "drwx------" && child.Mode != "drwx--x---":

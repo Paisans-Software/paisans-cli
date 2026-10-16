@@ -239,7 +239,7 @@ step 11: create /srv/paisans
 step 12: create /srv/paisans/f2a9
   directory: the deployment's own, paisans-f2a9's, mode 750
   run:
-    $ install -d -m 750 -o paisans-f2a9 -g paisans-f2a9 /srv/paisans/f2a9
+    $ install -d -m 750 -o paisans-f2a9 -g 'paisans-f2a9' /srv/paisans/f2a9
 
 step 13: create /etc/wireguard
   wireguard: root's, mode 700, so the deployment's user cannot plant a conf the helper has not checked
@@ -261,7 +261,7 @@ step 16: install the helper's sudoers line
   write /etc/sudoers.d/paisans-f2a9.new mode 0440:
     | paisans-f2a9 ALL=(root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-f2a9
   run:
-    $ visudo -cqf /etc/sudoers.d/paisans-f2a9.new && chown root:root /etc/sudoers.d/paisans-f2a9.new && mv -f /etc/sudoers.d/paisans-f2a9.new /etc/sudoers.d/paisans-f2a9 || { rm -f /etc/sudoers.d/paisans-f2a9.new; echo 'visudo refused the line; nothing reached sudo'; exit 1; }
+    $ visudo -cqf /etc/sudoers.d/paisans-f2a9.new && chown root:root /etc/sudoers.d/paisans-f2a9.new && mv -f /etc/sudoers.d/paisans-f2a9.new /etc/sudoers.d/paisans-f2a9 || { rm -f /etc/sudoers.d/paisans-f2a9.new; echo 'the line was not installed (checked by visudo, then chown and mv); nothing reached sudo'; exit 1; }
 
 step 17: allow 22/tcp
   firewall: allow 22/tcp (ssh, the bootstrap route)
