@@ -204,10 +204,11 @@ var helpCommands = []helpCommand{
 		usage: []string{
 			"sudo paisans host evict --request <file> [--data-dir <path>] [--execute]",
 			"sudo paisans host evict --deployment <id> --user <name> [--data-dir <path>] [--execute]",
-			"paisans host evict --site <name> --ssh <user@host[:port]> [--config " + config.FileName + "] [--data-dir <path>]\n                   [--execute]",
+			"paisans host evict --site <name> [--ssh <user>|<user@host[:port]>] [--config " + config.FileName + "] [--data-dir <path>]\n                   [--execute]",
 		},
 		detail: "Undo host admit for one deployment: its mesh, its user with its home and data, the helper, the egress table, its firewall rules, the record and the registry entry. ufw stays enabled when admit enabled it, with its paisans: ssh allows. Host-wide files and sysctls go only when no other deployment is admitted. " +
 			"--data-dir, the one admit was given, is needed only when the host holds no admission record. " +
+			"With --site, --ssh may be your login alone, for the site's declared ssh host and port, and is asked for at a terminal when left out. " +
 			"--execute asks for the user's name at a terminal. Never run by an agent unattended.",
 	},
 	{

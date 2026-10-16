@@ -128,8 +128,10 @@ paisans host admit --site home-a --ssh owner@home-a.example.org                #
 paisans host admit --site home-a --ssh owner@home-a.example.org --watchdog --public-ports --execute
 ```
 
-`--ssh` is required with `--site`: it is the owner's login, not the
-deployment's. Sudo works as it does today (`SudoAuth`, asked once, at a
+`--ssh` is the owner's login, not the deployment's: the login alone, for
+the site's declared ssh host and port, or `user@host[:port]`. Left out, it
+is asked for at a terminal, and off a terminal admit refuses; `host evict
+--site` takes it the same way. Sudo works as it does today (`SudoAuth`, asked once, at a
 terminal). `--request` and `--site` are refused together, and `--request`
 is refused unless the command runs as root on the host.
 

@@ -253,7 +253,7 @@ func TestAdmitFlagCombinations(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{}, "--request <file> on the host, or --site <name> --ssh"},
+		{[]string{}, "--request <file> on the host, or --site <name> from a workstation"},
 		{[]string{"--request", path, "--site", "vm"}, "not both"},
 		{[]string{"--request", path, "--ssh", "owner@h"}, "--ssh"},
 		{[]string{"--request", path, "extra"}, "takes no argument"},
@@ -421,7 +421,7 @@ func TestEvictFlagCombinations(t *testing.T) {
 		{[]string{"--request", path, "--site", "vm", "--ssh", "owner@h"}, "give one of"},
 		{[]string{"--deployment", "x"}, "go together"},
 		{[]string{"--user", "paisans-f2a9"}, "go together"},
-		{[]string{"--site", "vm"}, "--site needs --ssh"},
+		{[]string{"--site", "vm"}, "--site needs --ssh off a terminal"},
 		{[]string{"--request", path, "--ssh", "owner@h"}, "--ssh goes with --site"},
 		{[]string{"--request", path, "extra"}, "takes no argument"},
 	} {
@@ -634,6 +634,7 @@ func TestAdmitAsksForAMissingGrantAtATerminal(t *testing.T) {
 		{"yes\n", true, true},
 		{"n\n", true, false},
 		{"\n", true, false},
+		{"", true, false},
 		{"y\n", false, false},
 	} {
 		h := withFakeLocalHost(t, "ubuntu")
@@ -802,5 +803,89 @@ func TestAdmitRequestConfirmsANewLoginBeforeStoppingTheFallback(t *testing.T) {
 		if !c.stops && !strings.Contains(admitReport.String(), "ufw turns itself off again by") {
 			t.Errorf("typed %q: does not say ufw turns off:\n%s", c.typed, admitReport.String())
 		}
+	}
+}
+
+// The public-ports question ends with how a monitor needs neither, as a
+// sentence of its own.
+func TestThePublicPortsQuestionReadsAsSentences(t *testing.T) {
+	gw, _ := requestFile(t, gatewayOf(t))
+	withFakeLocalHost(t, "ubuntu")
+	withTerminal(t, true)
+	out := new(strings.Builder)
+	if err := runHostAdmit([]string{"--request", gw}, typed(t, "y\n"), out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "in the firewall. A monitor behind your own web server (web_server.managed_by: external) needs neither.\nGrant --public-ports? [y/N] ") {
+		t.Errorf("the question:\n%s", out.String())
+	}
+}
+
+// A grant answered at a terminal, then the digest, are read in turn from
+// one stdin: the answer is not read ahead past its line.
+func TestAGrantThenTheDigestAtOneTerminal(t *testing.T) {
+	data, digest := requestFile(t, dataSiteOf(t))
+	saved := executeAdmit
+	t.Cleanup(func() { executeAdmit = saved })
+	var granted *bool
+	executeAdmit = func(_ apply.Transport, in hostadmit.Input, _ *hostadmit.Plan, _ ui.Reporter) error {
+		granted = &in.Flags.Watchdog
+		return nil
+	}
+	withFakeLocalHost(t, "ubuntu")
+	withTerminal(t, true)
+	if err := runHostAdmit([]string{"--request", data, "--execute"}, typed(t, "y\n"+digest+"\n"), new(strings.Builder)); err != nil {
+		t.Fatal(err)
+	}
+	if granted == nil || !*granted {
+		t.Errorf("executed %v with the grant", granted != nil)
+	}
+}
+
+// A login alone reaches the site's declared host and port, an IPv6
+// address and a port other than 22 among them, with admit and evict alike.
+func TestALoginAloneReachesAnIPv6HostOnItsDeclaredPort(t *testing.T) {
+	body, err := os.ReadFile(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, _ := archFixture(t, strings.Replace(string(body), "      host: vm.example.org\n", "      host: 2001:db8::9\n      port: 2222\n", 1))
+	savedOwner := reachOwnerAdmit
+	t.Cleanup(func() { reachOwnerAdmit = savedOwner })
+	for _, run := range []func([]string) error{
+		func(a []string) error {
+			return runHostAdmit(append(a, "--public-ports"), strings.NewReader(""), new(strings.Builder))
+		},
+		// Evict then refuses ubuntu, the site's declared ssh.user, on a host
+		// with no record: what is under test is where it went.
+		func(a []string) error { _ = runHostEvict(a, strings.NewReader(""), new(strings.Builder)); return nil },
+	} {
+		quietAdmit(t)
+		var reached config.Destination
+		reachOwnerAdmit = func(d config.Destination) apply.Transport { reached = d; return blankHost("ubuntu") }
+		if err := run([]string{"--site", "vm", "--ssh", "owner", "--config", path}); err != nil {
+			t.Fatal(err)
+		}
+		if reached.User != "owner" || reached.Host != "2001:db8::9" || reached.Port != 2222 {
+			t.Errorf("reached %+v", reached)
+		}
+	}
+}
+
+// Evict, like admit, asks for the owner's login at a terminal when --ssh is
+// left out.
+func TestEvictAsksForTheLoginAtATerminal(t *testing.T) {
+	quietAdmit(t)
+	withTerminal(t, true)
+	savedOwner := reachOwnerAdmit
+	t.Cleanup(func() { reachOwnerAdmit = savedOwner })
+	var reached config.Destination
+	reachOwnerAdmit = func(d config.Destination) apply.Transport { reached = d; return blankHost("ubuntu") }
+	out := new(strings.Builder)
+	// Evict then refuses ubuntu, the site's declared ssh.user, on a host
+	// with no record: what is under test is where it went.
+	_ = runHostEvict([]string{"--site", "vm", "--config", fixtureConfig()}, typed(t, "owner\n"), out)
+	if reached.User != "owner" || reached.Host != "vm.example.org" || !strings.Contains(out.String(), "which runs evict through sudo") {
+		t.Errorf("reached %+v, asked:\n%s", reached, out.String())
 	}
 }

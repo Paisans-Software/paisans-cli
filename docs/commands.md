@@ -758,7 +758,9 @@ paisans host evict --site home-a --ssh owner@home-a.example.org --execute
 * **Alone:** always, by the host's owner, and never by an agent unattended:
   it deletes the deployment's user and data as root.
 * **Flags:** `--request <file>`, or `--deployment <id> --user <name>` (both on
-  the host, as root), or `--site <name> --ssh <your login>` with `--config`;
+  the host, as root), or `--site <name>` with `--config`, and `--ssh` as
+  your login alone, for the site's declared ssh host and port, or as
+  `user@host[:port]`; left out, it is asked for at a terminal;
   `--data-dir <path>`, the one admit was given, needed only when the host
   holds no admission record; `--execute`.
 * **Hosts:** the one it runs on, or the one `--ssh` names, through sudo.

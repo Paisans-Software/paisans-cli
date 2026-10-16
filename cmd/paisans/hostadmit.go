@@ -51,7 +51,7 @@ func runHostAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 		execute                            bool
 	)
 	fs.StringVar(&request, "request", "", "the request file the operator sent, on this host, as root")
-	fs.StringVar(&site, "site", "", "the site to admit, from the configuration, with --ssh")
+	fs.StringVar(&site, "site", "", "the site to admit, from the configuration, from a workstation")
 	fs.StringVar(&sshFlag, "ssh", "", "your own login on the host, with --site: user, for the site's declared host, or user@host[:port]; asked for at a terminal when left out")
 	fs.StringVar(&configPath, "config", config.FileName, "path to the deployment declaration, with --site")
 	fs.BoolVar(&flags.Watchdog, "watchdog", false, "grant the host's watchdog, which can reboot it, to a data site's Patroni")
@@ -69,7 +69,7 @@ func runHostAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	switch {
 	case request == "" && site == "":
-		return fmt.Errorf("host admit: give --request <file> on the host, or --site <name> --ssh <your login> from a workstation")
+		return fmt.Errorf("host admit: give --request <file> on the host, or --site <name> from a workstation")
 	case request != "" && site != "":
 		return fmt.Errorf("host admit: --request or --site, not both")
 	case request != "" && sshFlag != "":
@@ -133,7 +133,7 @@ func runHostAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 		r.Result("request digest %s: compare it with the one the operator gave you, over a channel you both trust, such as a call", in.Digest)
 	} else {
 		var err error
-		if dest, err = ownerDestination(sshFlag, site, declared, stdin, stdout); err != nil {
+		if dest, err = ownerDestination("host admit", sshFlag, site, declared, stdin, stdout); err != nil {
 			return err
 		}
 		t = reachOwnerAdmit(dest)
@@ -221,24 +221,26 @@ func runHostAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 	return nil
 }
 
-// ownerDestination is where admit --site logs in as the owner: --ssh as
+// ownerDestination is where command (host admit or host evict) --site
+// logs in as the owner: --ssh as
 // user@host[:port], or a login alone for the site's declared ssh host and
 // port, or, with no --ssh, a login asked for at a terminal. Off a terminal
 // with no --ssh there is no one to ask, so it refuses.
-func ownerDestination(sshFlag, site string, declared config.Site, stdin io.Reader, stdout io.Writer) (config.Destination, error) {
+func ownerDestination(command, sshFlag, site string, declared config.Site, stdin io.Reader, stdout io.Writer) (config.Destination, error) {
 	host, port := declared.SSHHost(), declared.SSH.PortOrDefault()
+	verb := strings.TrimPrefix(command, "host ")
 	login := sshFlag
 	if login == "" {
 		if !stdinIsTerminal(stdin) {
-			return config.Destination{}, fmt.Errorf("host admit: --site needs --ssh, your own login on %s, which runs admit through sudo: --ssh <user>, or --ssh user@host[:port] for another address. Nothing was read or changed", ui.Visible(host))
+			return config.Destination{}, fmt.Errorf("%s: --site needs --ssh off a terminal, your own login on %s, which runs %s through sudo: --ssh <user>, or --ssh user@host[:port] for another address. Nothing was read or changed", command, ui.Visible(host), verb)
 		}
 		fmt.Fprintf(stdout, "Existing username on %s (site %s) to connect under, with sudo: ", ui.Visible(host), site)
 		line, err := readTypedLine(stdin)
 		if err != nil {
-			return config.Destination{}, fmt.Errorf("host admit: reading your login: %w. Nothing was read or changed", err)
+			return config.Destination{}, fmt.Errorf("%s: reading your login: %w. Nothing was read or changed", command, err)
 		}
 		if login = strings.TrimSpace(line); login == "" {
-			return config.Destination{}, fmt.Errorf("host admit: no login was given. Nothing was read or changed")
+			return config.Destination{}, fmt.Errorf("%s: no login was given. Nothing was read or changed", command)
 		}
 	}
 	if !strings.Contains(login, "@") {
@@ -320,7 +322,13 @@ func confirmUFW(stdin io.Reader, stdout io.Writer, r ui.Reporter, t apply.Transp
 // askGrant puts g to the owner at a terminal: what it gives, and whether to
 // grant it. Only y or yes grants it.
 func askGrant(stdin io.Reader, stdout io.Writer, req admission.Request, g hostadmit.Grant) (bool, error) {
-	fmt.Fprintf(stdout, "\nSite %s (roles: %s): %s.\n%s%s\nGrant %s? [y/N] ", ui.Visible(req.Site), strings.Join(req.Roles, ", "), g.Hint, g.Explain, strings.TrimPrefix(g.Unless, ";"), g.Flag)
+	// Unless is a clause after Early's "or do not admit it"; here it is a
+	// sentence of its own.
+	unless := ""
+	if u := strings.TrimSpace(strings.TrimPrefix(g.Unless, ";")); u != "" {
+		unless = " " + strings.ToUpper(u[:1]) + u[1:] + "."
+	}
+	fmt.Fprintf(stdout, "\nSite %s (roles: %s): %s.\n%s%s\nGrant %s? [y/N] ", ui.Visible(req.Site), strings.Join(req.Roles, ", "), g.Hint, g.Explain, unless, g.Flag)
 	line, err := readTypedLine(stdin)
 	if err != nil {
 		return false, fmt.Errorf("host admit: reading your answer: %w. Nothing was read or changed", err)
@@ -402,7 +410,7 @@ func runHostEvict(args []string, stdin io.Reader, stdout io.Writer) error {
 	id := fs.String("deployment", "", "the deployment's id, with --user, on this host, as root")
 	user := fs.String("user", "", "the deployment's user, with --deployment")
 	site := fs.String("site", "", "the site to evict, from the configuration, with --ssh")
-	sshFlag := fs.String("ssh", "", "your own login on the host, user@host[:port], with --site")
+	sshFlag := fs.String("ssh", "", "your own login on the host, with --site: user, for the site's declared host, or user@host[:port]; asked for at a terminal when left out")
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration, with --site")
 	dataDir := fs.String("data-dir", "", "the --data-dir admit was given, needed only when the host holds no admission record")
 	execute := fs.Bool("execute", false, "make the changes the plan shows")
@@ -423,8 +431,8 @@ func runHostEvict(args []string, stdin io.Reader, stdout io.Writer) error {
 		return fmt.Errorf("host evict: give one of --request <file>, --deployment <id> --user <name> (both on the host), or --site <name> --ssh <your login>")
 	case (*id == "") != (*user == ""):
 		return fmt.Errorf("host evict: --deployment and --user go together")
-	case *site != "" && *sshFlag == "":
-		return fmt.Errorf("host evict: --site needs --ssh, your own login on the host (user@host[:port])")
+	case *site != "" && *sshFlag == "" && !stdinIsTerminal(stdin):
+		return fmt.Errorf("host evict: --site needs --ssh off a terminal, your own login on the host: --ssh <user> for the site's declared host, or --ssh user@host[:port]. Nothing was read or changed")
 	case *site == "" && *sshFlag != "":
 		return fmt.Errorf("host evict: --ssh goes with --site")
 	case *site == "" && !runningAsRootOnLinux():
@@ -432,6 +440,7 @@ func runHostEvict(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	r := reporter()
 	in := hostadmit.EvictInput{DataDir: *dataDir}
+	var declared config.Site
 	switch {
 	case *request != "":
 		data, err := readRequest("host evict", *request)
@@ -459,12 +468,13 @@ func runHostEvict(args []string, stdin io.Reader, stdout io.Writer) error {
 			return fmt.Errorf("host evict: %s declares no site %q", *configPath, *site)
 		}
 		in.Deployment, in.User = cfg.ID, s.SSHUser()
+		declared = s
 	}
 	var t apply.Transport
 	if *site != "" {
-		dest, err := config.ParseDestination(*sshFlag)
+		dest, err := ownerDestination("host evict", *sshFlag, *site, declared, stdin, stdout)
 		if err != nil {
-			return sshFlagProblem(*sshFlag, err)
+			return err
 		}
 		t = reachOwnerAdmit(dest)
 	} else {
