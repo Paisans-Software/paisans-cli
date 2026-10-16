@@ -177,12 +177,13 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    `docker-ce` version, and admit refuses when the repository has none, since
    apt would otherwise upgrade Docker to match them; a `dockerd` whose
    version cannot be read, or a Docker that is not dpkg's installed
-   `docker-ce`, is refused too. Docker's apt key is checked against the
-   fingerprint of Docker's release key before it is trusted. 29.5 is the
+   `docker-ce`, is refused too. Docker's apt key is trusted only when the
+   download holds one primary key, its subkeys aside, with the fingerprint of
+   Docker's release key, since apt trusts every key in the file. 29.5 is the
    version from which a rootless container with host networking shares the
    real host's network namespace (*Sources*), and every infra container is
-   `network_mode: host`, bound to the mesh address. A snap Docker is
-   refused, as today.
+   `network_mode: host`, bound to the mesh address. A snap Docker is refused,
+   as today.
 2. **AppArmor.** On Ubuntu 24.04 and later, unprivileged user namespaces are
    restricted unless a profile allows them. Ubuntu's `apparmor` package ships
    the profile for `rootlesskit` at `/etc/apparmor.d/rootlesskit`, loaded at
@@ -259,42 +260,42 @@ Garage site and 5 GB otherwise. The path is in the admission record.
     namespace, and the infra compose does that for Patroni (*Observed*). A
     rule in place whose nodes are not yet the user's is applied again. One
     deployment per host can hold it; a second is refused.
-12. **Low ports**, with `--public-ports`: `net.ipv4.ip_unprivileged_port_start=80`
-    in `/etc/sysctl.d/60-paisans.conf`, applied with `sysctl --system`,
-    which applies every sysctl file on the host again, then checked, since
-    a file read after it could set the key back. The output says plainly
-    that this lets every local user on the host bind ports 80 to 1023.
-    Before granting it, admit checks, as root, that nothing else answers on
-    80 or 443: a TCP listener in `ss -Hltnp`, a bound UDP socket in
-    `ss -Hlunp`, a port the system Docker publishes (`docker ps` on its
-    socket, when one is running), a stopped container of that Docker with
-    `restart: always`, which takes its ports again when the daemon
-    restarts, or a DNAT or redirect rule for either port in `nft list
-    ruleset`, or in `iptables-save` on a host without nft. A rule that
-    only matches conntrack's dnat status is not one, and a negated port
-    holds 80 or 443 unless it names both. A Docker daemon with its userland
-    proxy off publishes a port with a DNAT rule alone and no listener, so
-    `ss` cannot see it, and only root can read the ruleset. Anything found
-    refuses the grant, naming what holds the port (process, container and
-    compose project, or rule), and the refusal names
+12. **Low ports**, with `--public-ports`:
+    `net.ipv4.ip_unprivileged_port_start=80` in
+    `/etc/sysctl.d/60-paisans.conf`, applied with `sysctl --system`, which
+    applies every sysctl file on the host again, then checked, since a file
+    read after it could set the key back. The output says plainly that this
+    lets every local user on the host bind ports 80 to 1023. Before granting
+    it, admit checks, as root, that nothing else answers on 80 or 443: a TCP
+    listener in `ss -Hltnp`, a bound UDP socket in `ss -Hlunp`, a port the
+    system Docker publishes (`docker ps` on its socket, when one is running),
+    a stopped container of that Docker with `restart: always`, which takes
+    its ports again when the daemon restarts, or a DNAT or redirect rule for
+    either port in `nft list ruleset`, or in `iptables-save` on a host
+    without nft. A rule that only matches conntrack's dnat status is not one,
+    a negated port holds 80 or 443 unless it names both, and a port in a
+    named set or a map, which admit cannot read, is taken to hold them. A
+    Docker daemon with its userland proxy off publishes a port with a DNAT
+    rule alone and no listener, so `ss` cannot see it, and only root can read
+    the ruleset. Anything found refuses the grant, naming what holds the port
+    (process, container and compose project, or rule), and the refusal names
     `web_server.managed_by: external` as the way to run behind it; so does
     anything admit cannot read. A known limit: a DNAT rule with no
-    destination port, a forward of every port of an address, is not
-    counted, since rules of that shape are mostly a service's backends,
-    reached after a port matched elsewhere.
+    destination port, a forward of every port of an address, is not counted,
+    since rules of that shape are mostly a service's backends, reached after
+    a port matched elsewhere.
 13. **Forwarding**, for a site with an endpoint: `net.ipv4.ip_forward=1` in
     the same file. Such a site relays mesh traffic between sites behind NAT,
     which cannot dial each other (`isRelay` in `internal/render/site.go`).
     Today that is a `PostUp` in the WireGuard conf, which runs as root; in
     this design no hook is accepted (*The WireGuard helper*). The plan says
-    that this turns on routing between every interface on the host, which
-    the firewall's forward policy then governs. The values evict restores
-    for both keys, in `/etc/paisans/sysctl.before`, are the ones admit's
-    first read of the host found: installing Docker starts dockerd, which
-    turns forwarding on, so the read `--execute` makes once the user exists
-    keeps those values rather than the ones admit's own steps left. A key
-    is recorded there before admit sets it, and forgotten only after a
-    re-run that no longer needs it has restored it.
+    that this turns on routing between every interface on the host, which the
+    firewall's forward policy then governs. The values evict restores for
+    both keys are recorded in `/etc/paisans/sysctl.before` by a step ahead of
+    Docker's install, which starts dockerd and turns forwarding on, so a run
+    that stops after it, and the run after that, still record the host's own
+    value; a key the file holds already keeps its value. A key is forgotten
+    only after a re-run that no longer needs it has restored it.
 14. **The admission record**, `/etc/paisans/admitted.<token>.json`, mode 644:
     the user, the grants (`watchdog`, `public_ports`), whether forwarding is
     on, the ports the firewall opened, the request's digest when there was
@@ -365,11 +366,11 @@ key a public key the toolkit can parse, the address inside the subnet.
 The subnet is held to the configuration's rule for `mesh.subnet`: an IPv4
 network no larger than a /24, clear of `0.0.0.0/8`, loopback, link-local
 and multicast, and inside the private ranges `10.0.0.0/8`, `172.16.0.0/12`
-or `192.168.0.0/16`. Rule 3 of the egress table drops those ranges, with
-their NAT64 translations, and no other routed address, so on a host two
-deployments share, a mesh outside
-them is one the other deployment's user could send to through this mesh's
-interface, as this mesh's address, and reach its sites. The mesh is IPv4
+or `192.168.0.0/16`. Rule 3 of the egress table drops those ranges, and
+of the rest only ranges a mesh may not use, so on a host two deployments
+share, a mesh outside them is one the other deployment's user could send
+to through this mesh's interface, as this mesh's address, and reach its
+sites. The mesh is IPv4
 alone, so IPv6's private range, `fc00::/7`, does not arise.
 
 ## Running on the host
@@ -411,7 +412,8 @@ that outlasts Docker's stop timeout is killed with the watchdog armed,
 which reboots the host. It stops `wg-quick@psns-<token>` and removes
 `/etc/wireguard/psns-<token>.conf`, the user's mesh drop-in, found by the
 deployment it names when the owner has deleted the user by hand, and the
-egress table, then removes the user's `--data-dir` directory,
+egress table, with a `.new` table an interrupted admit left beside its
+file, then removes the user's `--data-dir` directory,
 `/srv/paisans/<token>`, and the user with its home, killing and checking
 again first. Its home is checked as admit checks it: a link or another's
 directory stops evict, and a home already gone deletes the user alone.

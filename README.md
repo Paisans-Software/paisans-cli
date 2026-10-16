@@ -1997,10 +1997,9 @@ before it drops loopback and link-local, so a mesh over those would let the
 deployment reach the owner's local services and the cloud metadata address,
 and this network and multicast route nothing a mesh could use. Every other
 deployment's egress table on a shared host drops the private ranges and no
-other routed address, so a mesh outside them would be one that deployment's
-user could reach. It refuses a
-site address outside the mesh, and one that is the mesh's network or
-broadcast address.
+other range a mesh may use, so a mesh outside them would be one that
+deployment's user could reach. It refuses a site address outside the mesh,
+and one that is the mesh's network or broadcast address.
 
 `doctor` has a `mesh` section, checked on every site it reaches: the
 interface exists and is up (`ip -j link show dev psns-<token>`), and the live
@@ -4705,12 +4704,13 @@ outside the subnet are each refused, and so is a mesh subnet overlapping
 mesh subnet before it drops the owner's loopback and link-local ranges, so a
 subnet over them would let the deployment reach what the table keeps it from.
 So is one outside the private ranges `10.0.0.0/8`, `172.16.0.0/12` and
-`192.168.0.0/16`, the only IPv4 ranges another deployment's table drops on a
-shared host. `host request` applies the same checks, so it never writes a
-request the owner's side would refuse, and `validate` holds the configuration
-to each rule it can check from the file, `ssh.user` included, so a
-configuration it accepts gets a request. A refusal `host request` can still
-reach names the configuration key to change beside the request's field.
+`192.168.0.0/16`: another deployment's table on a shared host drops these and
+no other range a mesh may use. `host request` applies the same checks, so it
+never writes a request the owner's side would refuse, and `validate` holds
+the configuration to each rule it can check from the file, `ssh.user`
+included, so a configuration it accepts gets a request. A refusal `host
+request` can still reach names the configuration key to change beside the
+request's field.
 
 Admitting needs ufw installed and active on the host: `host admit` never
 enables it, and refuses before making any change otherwise. Ports 80 and 443
