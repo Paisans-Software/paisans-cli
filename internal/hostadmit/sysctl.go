@@ -31,10 +31,6 @@ func SysctlFile(low, forward bool) string {
 	return out
 }
 
-// hostSysctls are the values of admit's sysctl keys as a read of the host
-// found them.
-type hostSysctls struct{ PortStart, IPForward string }
-
 // before is /etc/paisans/sysctl.before: each key's value as admit found it
 // before it first changed it, which evict restores.
 type before map[string]string
@@ -125,132 +121,154 @@ func holds(content, key string) bool {
 	return false
 }
 
-// planSysctls keeps 60-paisans.conf holding a key while any admitted
-// deployment needs it: the low ports for one granted them, forwarding for
-// one with an endpoint, which relays mesh traffic between sites behind
-// NAT. The value each key had before admit first changed it is recorded,
-// for evict to restore.
-func planSysctls(p *planner) error {
+// sysctlState is what the sysctl parts plan from, read once per Build:
+// which keys some admitted deployment needs, which 60-paisans.conf sets,
+// the before file as it is (was), as first recorded (first: was with the
+// keys this run turns on, at their values now), and as left once the keys
+// no deployment needs are restored (b, with restore the sysctl -w
+// arguments).
+type sysctlState struct {
+	wantLow, wantFwd bool
+	was, first, b    before
+	restore          []string
+	lowFor, fwdFor   []string
+}
+
+// sysctls reads sysctlState for p, once: the record of another deployment
+// that cannot be read is warned about once.
+func (p *planner) sysctls() (*sysctlState, error) {
+	if p.sx != nil {
+		return p.sx, nil
+	}
 	low, fwd := p.in.Flags.PublicPorts, p.in.Request.Endpoint
-	var lowFor, fwdFor []string
+	st := &sysctlState{}
 	recs, unreadable, err := others(p)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	current, _, err := p.t.ReadFile(sysctlPath)
 	if err != nil {
-		return shown(err)
+		return nil, shown(err)
 	}
 	// A key 60-paisans.conf sets is paisans' to keep for a record admit
 	// cannot read, and its live value is not the host's own.
 	setLow, setFwd := holds(current, keyLowPorts), holds(current, keyForward)
 	for _, r := range recs {
 		if r.Grants.PublicPorts {
-			lowFor = append(lowFor, ui.Visible(r.Deployment))
+			st.lowFor = append(st.lowFor, ui.Visible(r.Deployment))
 		}
 		if r.Forwarding {
-			fwdFor = append(fwdFor, ui.Visible(r.Deployment))
+			st.fwdFor = append(st.fwdFor, ui.Visible(r.Deployment))
 		}
 	}
 	keep := len(unreadable) > 0
-	wantLow, wantFwd := low || len(lowFor) > 0 || keep && setLow, fwd || len(fwdFor) > 0 || keep && setFwd
-	if low {
-		p.warn("public ports: every local user on this host may bind ports 80 to 1023", keyLowPorts+" = 80 is host wide: no user's process needs root for a port from 80 up, the deployment's Caddy among them.")
-	}
-	if fwd {
-		p.warn("forwarding: this turns on routing between every interface on this host", "The site has an endpoint, so it relays mesh traffic between sites behind NAT, which cannot dial each other. The firewall's forward policy governs what is routed.")
-	} else if len(fwdFor) == 0 {
-		p.present("forwarding: not needed, this site has no endpoint")
-	}
+	st.wantLow, st.wantFwd = low || len(st.lowFor) > 0 || keep && setLow, fwd || len(st.fwdFor) > 0 || keep && setFwd
 	for _, f := range []string{sysctlPath, sysctlBeforePath} {
 		if p.f.Files[f].Link {
-			return fmt.Errorf("%s is a symbolic link. Remove it and admit again. Nothing was changed", f)
+			return nil, fmt.Errorf("%s is a symbolic link. Remove it and admit again. Nothing was changed", f)
 		}
 	}
 	beforeContent, _, err := p.t.ReadFile(sysctlBeforePath)
 	if err != nil {
-		return shown(err)
+		return nil, shown(err)
 	}
-	was := parseBefore(beforeContent)
-	if err := was.check("admit"); err != nil {
+	st.was = parseBefore(beforeContent)
+	if err := st.was.check("admit"); err != nil {
+		return nil, err
+	}
+	st.first, st.b = before{}, before{}
+	for k, v := range st.was {
+		st.first[k], st.b[k] = v, v
+	}
+	// The first admit to change a key records what this Build's read of
+	// the host found; once 60-paisans.conf sets the key the live value is
+	// paisans', not the host's. A key recorded already keeps its value.
+	if _, ok := st.first[keyLowPorts]; st.wantLow && !setLow && !ok {
+		st.first[keyLowPorts], st.b[keyLowPorts] = p.f.PortStart, p.f.PortStart
+	}
+	if _, ok := st.first[keyForward]; st.wantFwd && !setFwd && !ok {
+		st.first[keyForward], st.b[keyForward] = p.f.IPForward, p.f.IPForward
+	}
+	for _, k := range []struct {
+		key  string
+		want bool
+	}{{keyLowPorts, st.wantLow}, {keyForward, st.wantFwd}} {
+		if v, ok := st.b[k.key]; !k.want && ok {
+			st.restore = append(st.restore, k.key+"="+v)
+			delete(st.b, k.key)
+		}
+	}
+	p.sx = st
+	return st, nil
+}
+
+// recordBefore is the step that writes content to sysctl.before.
+func recordBefore(p *planner, content string) {
+	p.step(Step{Title: "record the sysctls' values before", Describe: "sysctls: " + sysctlBeforePath + ", for host evict to restore", File: &hostprep.File{Path: sysctlBeforePath, Content: content, Mode: 0o644}, Kinds: []string{"sysctl"}})
+}
+
+// planSysctlsBefore records, before anything else changes the host, the
+// value each key this run turns on has now, so evict restores the host's
+// own: installing Docker starts dockerd, which turns forwarding on, and a
+// run that stops after it would otherwise read that value on its next
+// try. A key the file holds already keeps the value it holds.
+func planSysctlsBefore(p *planner) error {
+	st, err := p.sysctls()
+	if err != nil {
 		return err
 	}
-	b := before{}
-	for k, v := range was {
-		b[k] = v
+	if len(st.first) > 0 && st.first.text() != st.was.text() {
+		recordBefore(p, st.first.text())
 	}
-	// The first admit to change a key records what it found before it
-	// changed anything; once 60-paisans.conf sets the key the live value is
-	// paisans', not the host's.
-	if wantLow && !setLow {
-		if _, ok := b[keyLowPorts]; !ok {
-			b[keyLowPorts] = p.plan.sysctls.PortStart
-		}
+	return nil
+}
+
+// planSysctls keeps 60-paisans.conf holding a key while any admitted
+// deployment needs it: the low ports for one granted them, forwarding for
+// one with an endpoint, which relays mesh traffic between sites behind
+// NAT. A key no deployment needs any more is restored to its recorded
+// value, and only then forgotten, so a restore that fails leaves the
+// value for the next run.
+func planSysctls(p *planner) error {
+	st, err := p.sysctls()
+	if err != nil {
+		return err
 	}
-	if wantFwd && !setFwd {
-		if _, ok := b[keyForward]; !ok {
-			b[keyForward] = p.plan.sysctls.IPForward
-		}
+	if p.in.Flags.PublicPorts {
+		p.warn("public ports: every local user on this host may bind ports 80 to 1023", keyLowPorts+" = 80 is host wide: no user's process needs root for a port from 80 up, the deployment's Caddy among them.")
 	}
-	var restore []string
-	if !wantLow {
-		if v, ok := b[keyLowPorts]; ok {
-			restore = append(restore, keyLowPorts+"="+v)
-			delete(b, keyLowPorts)
-		}
+	if p.in.Request.Endpoint {
+		p.warn("forwarding: this turns on routing between every interface on this host", "The site has an endpoint, so it relays mesh traffic between sites behind NAT, which cannot dial each other. The firewall's forward policy governs what is routed.")
+	} else if len(st.fwdFor) == 0 {
+		p.present("forwarding: not needed, this site has no endpoint")
 	}
-	if !wantFwd {
-		if v, ok := b[keyForward]; ok {
-			restore = append(restore, keyForward+"="+v)
-			delete(b, keyForward)
-		}
-	}
-	// A key is recorded before it is set, and forgotten only once it is
-	// restored, so a step that fails leaves its value in the file for the
-	// next run. With nothing restored the file is written once, first.
-	record := func(content string) {
-		p.step(Step{Title: "record the sysctls' values before", Describe: "sysctls: " + sysctlBeforePath + ", for host evict to restore", File: &hostprep.File{Path: sysctlBeforePath, Content: content, Mode: 0o644}, Kinds: []string{"sysctl"}})
-	}
-	first := b
-	if len(restore) > 0 {
-		first = before{}
-		for k, v := range was {
-			first[k] = v
-		}
-		for k, v := range b {
-			first[k] = v
-		}
-	}
-	if len(first) > 0 && first.text() != was.text() {
-		record(first.text())
-	}
-	file := SysctlFile(wantLow, wantFwd)
-	live := (!wantLow || p.f.PortStart == "80") && (!wantFwd || p.f.IPForward == "1")
+	file := SysctlFile(st.wantLow, st.wantFwd)
+	live := (!st.wantLow || p.f.PortStart == "80") && (!st.wantFwd || p.f.IPForward == "1")
 	switch {
-	case !wantLow && !wantFwd:
+	case !st.wantLow && !st.wantFwd:
 		if p.f.Files[sysctlPath].Present {
 			p.step(Step{Title: "remove " + sysctlPath, Describe: "sysctls: no admitted deployment needs it", Command: "rm -f " + sysctlPath, Kinds: []string{"sysctl"}})
 		}
 	case p.f.Files[sysctlPath].Sum != sha(file) || !live:
 		p.step(Step{Title: "set the host's sysctls", Describe: "sysctls: " + sysctlPath + ", applied with sysctl --system, which applies every sysctl file on the host again, then each key checked, since a file read after it could set one back",
-			File: &hostprep.File{Path: sysctlPath, Content: file, Mode: 0o644}, Command: "sysctl --system >/dev/null && " + checkSysctls(wantLow, wantFwd), Kinds: []string{"sysctl"}})
+			File: &hostprep.File{Path: sysctlPath, Content: file, Mode: 0o644}, Command: "sysctl --system >/dev/null && " + checkSysctls(st.wantLow, st.wantFwd), Kinds: []string{"sysctl"}})
 	default:
 		p.present("sysctls: " + sysctlPath + " as written and applied")
 	}
-	if len(restore) > 0 {
-		p.step(Step{Title: "restore " + strings.Join(restore, ", "), Describe: "sysctls: no admitted deployment needs them any more; set each back to what it was before admit",
-			Command: "sysctl -w " + strings.Join(restore, " ") + " >/dev/null", Kinds: []string{"sysctl"}})
+	if len(st.restore) > 0 {
+		p.step(Step{Title: "restore " + strings.Join(st.restore, ", "), Describe: "sysctls: no admitted deployment needs them any more; set each back to what it was before admit",
+			Command: "sysctl -w " + strings.Join(st.restore, " ") + " >/dev/null", Kinds: []string{"sysctl"}})
 		switch {
-		case len(b) == 0 && (p.f.Files[sysctlBeforePath].Present || first.text() != was.text()):
+		case len(st.b) == 0 && (p.f.Files[sysctlBeforePath].Present || st.first.text() != st.was.text()):
 			p.step(Step{Title: "remove " + sysctlBeforePath, Describe: "sysctls: nothing left to restore", Command: "rm -f " + sysctlBeforePath, Kinds: []string{"sysctl"}})
-		case len(b) > 0 && b.text() != first.text():
-			record(b.text())
+		case len(st.b) > 0 && st.b.text() != st.first.text():
+			recordBefore(p, st.b.text())
 		}
 	}
-	for _, d := range lowFor {
+	for _, d := range st.lowFor {
 		p.present("sysctls: low ports kept for deployment " + d)
 	}
-	for _, d := range fwdFor {
+	for _, d := range st.fwdFor {
 		p.present("sysctls: forwarding kept for deployment " + d)
 	}
 	return nil

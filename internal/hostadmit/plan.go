@@ -130,10 +130,6 @@ type Plan struct {
 	Present  []string
 	Foreign  []string
 	Warnings []hostprep.Warning
-	// sysctls are the host's sysctl values as this plan's first read of the
-	// host found them, before admit changed anything. A rebuild carries the
-	// approved plan's, since admit's own earlier steps change them.
-	sysctls hostSysctls
 }
 
 // planner is one Build: the host, the input and what the probe found, and
@@ -149,6 +145,8 @@ type planner struct {
 	// record is the admission record the record part writes; parts before
 	// it fill what they decide (data_dir, bridge_netfilter, web_server).
 	record admission.Record
+	// sx caches sysctls(), which both sysctl parts plan from.
+	sx *sysctlState
 	// prev caches previous(): this deployment's record as the host holds it.
 	prev struct {
 		read bool
@@ -192,6 +190,7 @@ type part struct {
 var parts = []part{
 	{"claim", planClaim}, // 1
 	{"admission directory", planAdmissionDir},
+	{"sysctls before", planSysctlsBefore},
 	{"docker", planDocker},
 	{"apparmor", planAppArmor},
 	// 4. user
@@ -222,7 +221,7 @@ var parts = []part{
 // refusal is an error; a plan with no steps is a host already admitted as
 // asked.
 func Build(t apply.Transport, in Input) (*Plan, error) {
-	p, err := build(t, in, nil)
+	p, err := build(t, in)
 	if err != nil {
 		return nil, err
 	}
@@ -230,11 +229,8 @@ func Build(t apply.Transport, in Input) (*Plan, error) {
 }
 
 // build is Build, returning the planner, whose facts fill the placeholders
-// of an approved plan when Execute rebuilds it. approved is that plan when
-// Execute rebuilds, and nil otherwise: the sysctl values the rebuild
-// records for evict are then approved's, read before admit changed the
-// host, and not the ones its own earlier steps left.
-func build(t apply.Transport, in Input, approved *Plan) (*planner, error) {
+// of an approved plan when Execute rebuilds it.
+func build(t apply.Transport, in Input) (*planner, error) {
 	if err := Early(in); err != nil {
 		return nil, err
 	}
@@ -257,12 +253,8 @@ func build(t apply.Transport, in Input, approved *Plan) (*planner, error) {
 	}
 	p := &planner{t: t, in: in, d: d, f: facts, profile: profile, host: host,
 		plan: &Plan{Deployment: in.Request.Deployment, User: in.Request.User, Site: in.Request.Site,
-			Profile: profile.ID() + " " + profile.Version(), Host: t.Describe(),
-			sysctls: hostSysctls{PortStart: facts.PortStart, IPForward: facts.IPForward}},
+			Profile: profile.ID() + " " + profile.Version(), Host: t.Describe()},
 		record: admission.NewRecord(in.Request, in.Flags.Grants(), in.Digest, in.Now)}
-	if approved != nil {
-		p.plan.sysctls = approved.sysctls
-	}
 	if err := refuseUnsafe(facts, "admit"); err != nil {
 		return nil, err
 	}
@@ -457,14 +449,12 @@ func (p *Plan) Warn(r ui.Reporter) {
 // and plans again, now that the user exists, and carries on with the plan
 // it rebuilt, provided that plan's steps from there on carry the titles
 // the owner approved: anything else means the host changed while admit ran,
-// and nothing more is done. The rebuild records the sysctl values the
-// approved plan read, since its own earlier steps change them: installing
-// Docker starts dockerd, which turns on forwarding.
+// and nothing more is done.
 func Execute(t apply.Transport, in Input, approved *Plan, r ui.Reporter) error {
 	steps := approved.Steps
 	for i := 0; i < len(steps); i++ {
 		if steps[i].Provisional {
-			rebuilt, err := build(t, in, approved)
+			rebuilt, err := build(t, in)
 			if err != nil {
 				return stoppedOnRebuild(approved.User, steps[:i], err)
 			}

@@ -262,3 +262,38 @@ func TestRestoreRunsBeforeTheValueIsForgotten(t *testing.T) {
 		t.Errorf("the values are recorded at %d and set at %d", record, set)
 	}
 }
+
+// The values evict restores are recorded before anything else changes the
+// host: installing Docker starts dockerd, which turns forwarding on, so a
+// run that stops after it, and the run after that, must still find the
+// host's own value. A value recorded already is kept, whatever the host
+// reads now.
+func TestTheBeforeValuesAreRecordedAheadOfDocker(t *testing.T) {
+	plan, err := hostadmit.Build(newBlank(), input(t, "watch", hostadmit.Flags{PublicPorts: true}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, docker := -1, -1
+	for i, s := range plan.Steps {
+		switch {
+		case s.File != nil && s.File.Path == "/etc/paisans/sysctl.before" && record < 0:
+			record = i
+		case strings.HasPrefix(s.Title, "install packages") && docker < 0:
+			docker = i
+		}
+	}
+	if record < 0 || docker < 0 || record > docker {
+		t.Errorf("recorded at %d, Docker installed at %d:\n%s", record, docker, plan.Text())
+	}
+	// A run that stopped once Docker was in: forwarding is on now, and the
+	// before file holds what the host had.
+	h := current().withFile("/etc/paisans/sysctl.before", beforeFile, "644", 0).file("/etc/paisans/sysctl.before", beforeFile).
+		withDir("/etc/paisans", "drwxr-xr-x", 0, 0).with("ip-forward", "1")
+	plan, err = hostadmit.Build(h, input(t, "watch", hostadmit.Flags{PublicPorts: true}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if writes(plan, "/etc/paisans/sysctl.before") {
+		t.Errorf("a re-run records the before values again:\n%s", plan.Text())
+	}
+}
