@@ -921,3 +921,55 @@ func TestTheUFWQuestionSaysTheFallbackDoesNotSurviveAReboot(t *testing.T) {
 		t.Errorf("the note: %v", err)
 	}
 }
+
+// holding is a reporter that counts the holds in place, so a test sees
+// whether a prompt was written while the reporter was held.
+type holding struct {
+	ui.Reporter
+	held int
+}
+
+func (h *holding) Hold() func() {
+	h.held++
+	return func() { h.held-- }
+}
+
+// The digest admit asks for and the word evict asks for are prompts on the
+// terminal the plan was drawn on: each is asked with the reporter held, so
+// the run draws the plan's rows again below it rather than reach above it.
+func TestThePromptsBeforeARunHoldTheReporter(t *testing.T) {
+	saved := executeAdmit
+	t.Cleanup(func() { executeAdmit = saved })
+	executeAdmit = func(apply.Transport, hostadmit.Input, *hostadmit.Plan, ui.Reporter) error { return nil }
+	path, digest := requestFile(t, "vm")
+	withFakeLocalHost(t, "ubuntu")
+	withTerminal(t, true)
+	r := &holding{Reporter: reporterOverride}
+	reporterOverride = r
+	heldAtPrompt := false
+	prompt := writerFunc(func(p []byte) (int, error) {
+		heldAtPrompt = heldAtPrompt || (r.held > 0 && strings.Contains(string(p), "digest"))
+		return len(p), nil
+	})
+	if err := runHostAdmit([]string{"--request", path, "--public-ports", "--execute"}, typed(t, digest+"\n"), prompt); err != nil {
+		t.Fatal(err)
+	}
+	if !heldAtPrompt || r.held != 0 {
+		t.Errorf("admit: held at the digest %v, holds left %d", heldAtPrompt, r.held)
+	}
+
+	evictedHost(t)
+	r = &holding{Reporter: reporterOverride}
+	reporterOverride = r
+	heldAtPrompt = false
+	prompt = writerFunc(func(p []byte) (int, error) {
+		heldAtPrompt = heldAtPrompt || (r.held > 0 && strings.Contains(string(p), "to proceed"))
+		return len(p), nil
+	})
+	if err := runHostEvict([]string{"--deployment", fixtureID(t), "--user", "paisans-f2a9", "--execute"}, typed(t, "paisans-f2a9\n"), prompt); err != nil {
+		t.Fatal(err)
+	}
+	if !heldAtPrompt || r.held != 0 {
+		t.Errorf("evict: held at the word %v, holds left %d", heldAtPrompt, r.held)
+	}
+}

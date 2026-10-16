@@ -750,9 +750,13 @@ func (e *evictor) registry() error {
 // RunSteps runs plan's steps in order and stops at the first failure,
 // naming it. Evict's steps never need a rebuild; each runs through the
 // same run admit's Execute uses.
+//
+// Each step runs in its row of the plan when ShowToRun drew it.
 func RunSteps(t apply.Transport, plan *Plan, r ui.Reporter) error {
-	for _, s := range plan.Steps {
-		if err := run(t, s, r); err != nil {
+	p := progressOf(plan, r)
+	defer p.close()
+	for i, s := range plan.Steps {
+		if err := run(t, s, p.start(i, s.Title, s.Describe)); err != nil {
 			return err
 		}
 	}

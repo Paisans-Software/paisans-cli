@@ -169,14 +169,21 @@ func runHostAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 	}
 	// The whole plan, always: with --execute the owner approves it here,
-	// before the digest and before anything runs.
-	plan.Show(r)
+	// before the digest and before anything runs, and its rows then show
+	// the run.
 	if !execute {
+		plan.Show(r)
 		r.Result("Nothing was changed. Run it again with --execute to make these changes.")
 		return nil
 	}
+	plan.ShowToRun(r)
 	if request != "" {
-		if err := confirmDigest(stdin, stdout, in.Digest); err != nil {
+		// The prompt is held as one, so the run draws the plan's rows
+		// again below it rather than reach above it.
+		resume := ui.Hold(r)
+		err := confirmDigest(stdin, stdout, in.Digest)
+		resume()
+		if err != nil {
 			return err
 		}
 	}
@@ -487,17 +494,22 @@ func runHostEvict(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	plan.Show(r)
 	if !*execute {
+		plan.Show(r)
 		r.Result("Nothing was changed. Run it again with --execute to evict.")
 		return nil
 	}
+	plan.ShowToRun(r)
 	if len(plan.Steps) == 0 {
 		r.Result("Nothing of deployment %s is left on %s.", in.Deployment, t.Describe())
 		return nil
 	}
 	what := ui.Danger(stdout, fmt.Sprintf("This deletes %s with its home, its Docker data and everything of deployment %s on %s. Nothing brings it back.", in.User, in.Deployment, t.Describe()))
-	if err := confirmWord(stdin, stdout, in.User, what); err != nil {
+	// Held as the digest is in admit: the run draws the rows again below.
+	resume := ui.Hold(r)
+	err = confirmWord(stdin, stdout, in.User, what)
+	resume()
+	if err != nil {
 		return fmt.Errorf("host evict: %w", err)
 	}
 	if err := hostadmit.RunSteps(t, plan, r); err != nil {
