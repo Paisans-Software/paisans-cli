@@ -458,8 +458,12 @@ func Execute(t apply.Transport, in Input, approved *Plan, r ui.Reporter) error {
 			if err != nil {
 				return stoppedOnRebuild(approved.User, steps[:i], err)
 			}
-			if err := sameSteps(steps[i:], rebuilt.plan.Steps, placeholders(rebuilt)); err != nil {
+			done, err := sameSteps(steps[i:], rebuilt.plan.Steps, placeholders(rebuilt))
+			if err != nil {
 				return err
+			}
+			for _, s := range done {
+				r.Step(ui.Visible(s.Title)).End(ui.OK, "done already")
 			}
 			steps = append(steps[:i:i], rebuilt.plan.Steps...)
 		}
@@ -490,13 +494,15 @@ func stoppedOnRebuild(user string, ran []Step, err error) error {
 // a step added, moved or changed is. Describe and Kinds are what the owner
 // read, not what runs, so they are not compared. A step that was approved
 // with a different file, command or stdin is named by the first of its
-// fields that differs.
-func sameSteps(approved, rebuilt []Step, fill *strings.Replacer) error {
+// fields that differs. It returns the approved steps found done, which
+// Execute reports as such.
+func sameSteps(approved, rebuilt []Step, fill *strings.Replacer) ([]Step, error) {
 	for _, s := range rebuilt {
 		if s.Provisional {
-			return fmt.Errorf("the host changed while admit ran: %q still needs the user, which was to exist by now. Nothing more was done. Run host admit again to see the plan", s.Title)
+			return nil, fmt.Errorf("the host changed while admit ran: %q still needs the user, which was to exist by now. Nothing more was done. Run host admit again to see the plan", s.Title)
 		}
 	}
+	var done []Step
 	i := 0
 	for _, s := range rebuilt {
 		k := i
@@ -504,17 +510,18 @@ func sameSteps(approved, rebuilt []Step, fill *strings.Replacer) error {
 			k++
 		}
 		if k < len(approved) {
+			done = append(done, approved[i:k]...)
 			i = k + 1
 			continue
 		}
 		for _, a := range approved[i:] {
 			if fill.Replace(a.Title) == s.Title {
-				return fmt.Errorf("the host changed while admit ran: step %q now has a different %s from the one approved. Nothing more was done. Run host admit again to see the plan", s.Title, differs(a, s, fill))
+				return nil, fmt.Errorf("the host changed while admit ran: step %q now has a different %s from the one approved. Nothing more was done. Run host admit again to see the plan", s.Title, differs(a, s, fill))
 			}
 		}
-		return fmt.Errorf("the host changed while admit ran: the steps left to run were\n%s\nand are now\n%s\nNothing more was done. Run host admit again to see the plan", titles(approved, fill), titles(rebuilt, nil))
+		return nil, fmt.Errorf("the host changed while admit ran: the steps left to run were\n%s\nand are now\n%s\nNothing more was done. Run host admit again to see the plan", titles(approved, fill), titles(rebuilt, nil))
 	}
-	return nil
+	return append(done, approved[i:]...), nil
 }
 
 // titles lists steps' titles, each quoted on its own line, filled by fill
