@@ -20,8 +20,9 @@ import (
 const probeImage = "ubuntu:24.04"
 
 // probeIn runs setup, then the probe rendered for the user and --data-dir,
-// in a fresh container as root, and parses what the probe printed.
-func probeIn(t *testing.T, setup, user, dataDir string) Facts {
+// in a fresh container as root with docker run's extra arguments, and
+// parses what the probe printed.
+func probeIn(t *testing.T, setup, user, dataDir string, extra ...string) Facts {
 	t.Helper()
 	in := Input{Request: admission.Request{Deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01", User: user}, Flags: Flags{DataDir: dataDir}}
 	script, err := probeScript(deployment.Deployment{ID: in.Request.Deployment}, in)
@@ -32,7 +33,8 @@ func probeIn(t *testing.T, setup, user, dataDir string) Facts {
 	if err := os.WriteFile(filepath.Join(dir, "probe.sh"), []byte(script), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("docker", "run", "--rm", "--user", "0", "-v", dir+":/p:ro", probeImage, "sh", "-c", setup+"\nsh /p/probe.sh")
+	args := append(append([]string{"run", "--rm", "--user", "0", "-v", dir + ":/p:ro"}, extra...), probeImage, "sh", "-c", setup+"\nsh /p/probe.sh")
+	cmd := exec.Command("docker", args...)
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("docker run: %v\n%s", err, out)
@@ -59,6 +61,32 @@ func TestProbeOnABlankHost(t *testing.T) {
 	}
 	if f.Data.Unsafe || f.Data.Path != "/home" || f.Data.Avail <= 0 {
 		t.Errorf("data: %+v", f.Data)
+	}
+	// The image has no nft: a ruleset admit cannot read is unknown, never
+	// read as no firewall.
+	if !f.RulesetUnknown || len(f.Ruleset) != 0 || len(f.OwnerFirewall) != 0 || len(f.LegacyRules) != 0 {
+		t.Errorf("ruleset: unknown %v, %q, owner %q, legacy %q", f.RulesetUnknown, f.Ruleset, f.OwnerFirewall, f.LegacyRules)
+	}
+}
+
+// With nftables and iptables installed: an owner's own nft table is the
+// owner's firewall, Tailscale-shaped iptables-nft rules are not, and a rule
+// only iptables-legacy holds, which nft never shows, is read as legacy.
+// It installs both from Ubuntu's archive, so it needs the network.
+func TestProbeReadsTheRulesetAndLegacyRules(t *testing.T) {
+	setup := "apt-get update -qq >/dev/null 2>&1 && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nftables iptables >/dev/null 2>&1 || exit 1\n" +
+		"iptables -N ts-input && iptables -A ts-input -i tailscale0 -j ACCEPT && iptables -I INPUT -j ts-input\n" +
+		"nft add table inet own && nft 'add chain inet own in { type filter hook input priority 0; policy accept; }'\n" +
+		"iptables-legacy -A INPUT -p tcp --dport 2222 -j ACCEPT"
+	f := probeIn(t, setup, "paisans-f2a9", "", "--cap-add", "NET_ADMIN")
+	if f.RulesetUnknown || len(f.Ruleset) == 0 {
+		t.Fatalf("ruleset: unknown %v, %d lines", f.RulesetUnknown, len(f.Ruleset))
+	}
+	if len(f.OwnerFirewall) != 1 || f.OwnerFirewall[0] != "inet own in" {
+		t.Errorf("owner firewall %q", f.OwnerFirewall)
+	}
+	if len(f.LegacyRules) != 1 || f.LegacyRules[0] != "-A INPUT -p tcp -m tcp --dport 2222 -j ACCEPT" {
+		t.Errorf("legacy %q", f.LegacyRules)
 	}
 }
 

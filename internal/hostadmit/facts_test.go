@@ -101,6 +101,12 @@ func TestParseFactsMarksAPathBelowALinkOrAnotherUsersDirectory(t *testing.T) {
 			t.Errorf("%s: %+v", p, d)
 		}
 	}
+	if d := f.Dirs["/srv/paisans/f2a9"]; d.UID != -1 || d.GID != -1 {
+		t.Errorf("an unsafe directory reports an owner: %+v", d)
+	}
+	if s := f.Files["/etc/sudoers.d/paisans-f2a9"]; s.UID != -1 || s.GID != -1 {
+		t.Errorf("an unsafe file reports an owner: %+v", s)
+	}
 	if d := f.Dirs["/etc/wireguard"]; d.Unsafe {
 		t.Errorf("/etc/wireguard: %+v", d)
 	}

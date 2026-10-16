@@ -17,14 +17,24 @@ var snippets embed.FS
 
 // Facts are what the probe found, read once per Build.
 //
-// A path below a link, or below a directory that is not root's or that its
-// group or others can write, is read as Unsafe: its FileState or DirState
-// says so and carries nothing else of it, and Data.Unsafe says the same of
-// where Docker's data would go. What is below such a directory is not what
-// its path names, or can be swapped between this read and admit's change,
-// so a part that would create, write or hand over anything there refuses,
-// naming the path: Task 7 for the data directory and --data-dir, Task 8 for
-// /srv/paisans/<token>, and every part for the files it writes.
+// A probed file or directory below a link, or below a directory that is
+// not root's or that its group or others can write, is read as Unsafe: its
+// FileState or DirState says so and carries nothing else of it. What is
+// below such a directory is not what its path names, or can be swapped
+// between this read and admit's change, so Build refuses any Unsafe file,
+// directory or data path before a part plans (refuseUnsafe), and no part
+// needs to check Unsafe itself.
+//
+// Data.Unsafe covers only the directories above where Docker's data would
+// go, and that path being a link. It says nothing of the directory itself:
+// whose it is and its mode are its Dirs entry. Task 7 refuses a --data-dir,
+// and its paisans-<token> child, whose Dirs entry is not a directory of
+// root's (or, for the child, of the user's) with no group or other write.
+//
+// RulesetUnknown is a host whose nft ruleset could not be read, and
+// LegacyRules are rules only iptables-legacy holds, which nft does not
+// show. Either is a firewall admit cannot see, so Task 9 refuses on either
+// as it does on OwnerFirewall.
 type Facts struct {
 	Docker   DockerFacts
 	Packages map[string]bool
@@ -45,17 +55,22 @@ type Facts struct {
 	// chain or rule in it that is the owner's own firewall, as
 	// ownerFirewall reads it.
 	Ruleset, OwnerFirewall []string
-	Firewalld              bool
-	PortStart, IPForward   string
-	DefaultDev, LAN        string
-	WatchdogRules          []string
-	Records                []string
+	RulesetUnknown         bool
+	// LegacyRules are iptables-legacy-save's rules and non-ACCEPT
+	// policies, as it prints them.
+	LegacyRules          []string
+	Firewalld            bool
+	PortStart, IPForward string
+	DefaultDev, LAN      string
+	WatchdogRules        []string
+	Records              []string
 	// Data is where Docker's data would go: the nearest directory that
-	// exists. FS and Avail are not read when Unsafe.
+	// exists. FS and Avail are not read when Unsafe; Above is the probe's
+	// data-above, safe, link-above or unsafe-above.
 	Data struct {
-		Path, FS string
-		Avail    int64
-		Unsafe   bool
+		Path, FS, Above string
+		Avail           int64
+		Unsafe          bool
 	}
 	// raw is every line, by key, for what no field above carries.
 	raw map[string][]string
@@ -86,7 +101,7 @@ type IDRange struct{ Start, Count int64 }
 
 // FileState is one file admit writes, as the probe saw it. Unsafe is a
 // file below a link or another's directory: Present, with Mode link-above
-// or unsafe-above and nothing else read.
+// or unsafe-above, UID and GID -1, and nothing else read.
 type FileState struct {
 	Present, Link, Unsafe bool
 	Sum, Mode             string
@@ -95,7 +110,8 @@ type FileState struct {
 
 // DirState is one directory as ls -ldn printed it. Unsafe is one below a
 // link or another's directory: Present, with Mode link-above or
-// unsafe-above, which no check for a directory's d accepts.
+// unsafe-above, which no check for a directory's d accepts, and UID and
+// GID -1, which no check for an owner accepts.
 type DirState struct {
 	Present, Unsafe bool
 	Mode            string
@@ -238,7 +254,7 @@ func parseFacts(out, user string) (Facts, error) {
 			case len(fields) == 2 && fields[1] == "absent":
 				f.Files[fields[0]] = FileState{}
 			case len(fields) == 2 && (fields[1] == "link-above" || fields[1] == "unsafe-above"):
-				f.Files[fields[0]] = FileState{Present: true, Unsafe: true, Mode: fields[1]}
+				f.Files[fields[0]] = FileState{Present: true, Unsafe: true, Mode: fields[1], UID: -1, GID: -1}
 			case len(fields) == 5:
 				uid, _ := strconv.Atoi(fields[3])
 				gid, _ := strconv.Atoi(fields[4])
@@ -261,7 +277,11 @@ func parseFacts(out, user string) (Facts, error) {
 				return f, fmt.Errorf("unreadable dir line %q", v)
 			}
 			mode := fields[n-3]
-			f.Dirs[dir] = DirState{Present: mode != "absent", Unsafe: mode == "link-above" || mode == "unsafe-above", Mode: mode, UID: uid, GID: gid}
+			if mode == "link-above" || mode == "unsafe-above" {
+				f.Dirs[dir] = DirState{Present: true, Unsafe: true, Mode: mode, UID: -1, GID: -1}
+				continue
+			}
+			f.Dirs[dir] = DirState{Present: mode != "absent", Mode: mode, UID: uid, GID: gid}
 		case "egress-enabled":
 			f.EgressEnabled = v == "yes"
 		case "egress-table":
@@ -277,7 +297,14 @@ func parseFacts(out, user string) (Facts, error) {
 		case "input-rules":
 			f.InputRules, _ = strconv.Atoi(v)
 		case "ruleset":
+			// No line of a real ruleset is the word unknown alone.
+			if v == "unknown" {
+				f.RulesetUnknown = true
+				continue
+			}
 			f.Ruleset = append(f.Ruleset, v)
+		case "legacy":
+			f.LegacyRules = append(f.LegacyRules, v)
 		case "input-chain":
 			f.InputChains = append(f.InputChains, v)
 		case "firewalld":
@@ -295,6 +322,7 @@ func parseFacts(out, user string) (Facts, error) {
 		case "record":
 			f.Records = append(f.Records, v)
 		case "data-above":
+			f.Data.Above = v
 			switch v {
 			case "safe":
 			case "link-above", "unsafe-above":
