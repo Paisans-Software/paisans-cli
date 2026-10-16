@@ -41,6 +41,8 @@ func (f *initFake) Run(command string) (string, error) {
 		return `[{"dst":"default","dev":"eth0"}]`, nil
 	case mesh.AddrCommand, mesh.NetworksCommand:
 		return "[]", nil
+	case mesh.UserDaemonCommand:
+		return "absent\n", nil
 	}
 	return "", errors.New("unexpected command " + command)
 }

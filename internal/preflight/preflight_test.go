@@ -74,6 +74,7 @@ func healthy(name string) *fakeHost {
 			{match: "ss -Hltnu", out: "tcp LISTEN 0 4096 0.0.0.0:22 0.0.0.0:*\nudp UNCONN 0 0 127.0.0.53%lo:53 0.0.0.0:*\n"},
 			{match: "ip -j route", out: `[{"dst":"default","dev":"eth0"},{"dst":"203.0.113.0/24","dev":"eth0"},{"dst":"172.17.0.0/16","dev":"docker0"}]`},
 			{match: "ip -j addr", out: `[{"ifname":"eth0","addr_info":[{"family":"inet","local":"203.0.113.20","prefixlen":24}]}]`},
+			{match: ".config/docker/daemon.json", out: "absent\n"},
 			{match: "docker network", out: `[{"Name":"bridge","IPAM":{"Config":[{"Subnet":"172.17.0.0/16"}]}}]`},
 			{match: "/cluster", out: cluster},
 			{match: "pg_database_size", out: fmt.Sprintf("%d\n", int64(1)<<30)},

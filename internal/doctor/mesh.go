@@ -82,7 +82,7 @@ func Mesh(cfg *config.Config, probes []MeshProbe) []Finding {
 				"Whichever route the kernel prefers takes the other network's traffic, so mesh packets can leave by the wrong interface, or the other network's arrive on the mesh.",
 				"The mesh subnet is fixed once deployed: every app trusts it for forwarded client addresses and every service binds an address in it. The other network has to move.",
 				"recover:",
-				"  1. Move it to a range clear of " + cfg.Mesh.Subnet + ": a LAN or VPN in its own configuration; a Docker network by recreating it with another subnet; Docker's pools with default-address-pools in " + mesh.DaemonConfig + " and a restart of Docker.",
+				"  1. Move it to a range clear of " + cfg.Mesh.Subnet + ": a LAN or VPN in its own configuration; a Docker network by recreating it with another subnet; Docker's pools with default-address-pools in " + mesh.UserDaemonConfig + " and a restart of the deployment's Docker.",
 				fmt.Sprintf("  2. `paisans doctor --site %s` again.", p.Site),
 			}})
 	}

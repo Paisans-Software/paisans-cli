@@ -325,7 +325,7 @@ func (d doctorReads) Mesh(site string) doctor.MeshProbe {
 	} else {
 		p.Link = out
 	}
-	if probed, err := mesh.Probe(t); err != nil {
+	if probed, err := mesh.ProbeUser(t); err != nil {
 		p.ProbeErr = err.Error()
 	} else {
 		p.Probed = probed

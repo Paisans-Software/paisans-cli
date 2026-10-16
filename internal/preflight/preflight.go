@@ -435,7 +435,7 @@ func (r *runner) meshClear(t apply.Transport) {
 		r.refuse(r.newSite, "mesh", "mesh.subnet %q is not a network", r.cfg.Mesh.Subnet)
 		return
 	}
-	probed, err := mesh.Probe(t)
+	probed, err := mesh.ProbeUser(t)
 	if err != nil {
 		r.refuse(r.newSite, "mesh", "%v", err)
 		return

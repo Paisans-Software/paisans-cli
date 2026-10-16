@@ -38,7 +38,7 @@ func checkMeshLive(cfg *config.Config, site string, h mesh.Host) error {
 	if err != nil {
 		return fmt.Errorf("mesh.subnet %q is not a network: %w", cfg.Mesh.Subnet, err)
 	}
-	probed, err := mesh.Probe(h)
+	probed, err := mesh.ProbeUser(h)
 	if err != nil {
 		return err
 	}
@@ -175,7 +175,7 @@ func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]reg
 	for _, name := range sites {
 		taken = append(taken, registry.Meshes(registries[name], cfg.ID, name)...)
 		s.Progress("read the networks on " + name)
-		probed, err := mesh.Probe(hosts[name])
+		probed, err := mesh.ProbeUser(hosts[name])
 		if err != nil {
 			return false, "", fmt.Errorf("%v. Nothing was written", err)
 		}

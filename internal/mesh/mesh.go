@@ -100,6 +100,12 @@ const (
 	// DaemonConfig is Docker's daemon configuration, where
 	// default-address-pools is set when it is.
 	DaemonConfig = "/etc/docker/daemon.json"
+	// UserDaemonConfig names the deployment user's daemon configuration in
+	// messages: its rootless Docker reads ~/.config/docker/daemon.json.
+	UserDaemonConfig = "~/.config/docker/daemon.json"
+	// UserDaemonCommand prints whether the user's daemon.json is there and
+	// then its content, through the user's own shell, so $HOME is its home.
+	UserDaemonCommand = `f="$HOME/.config/docker/daemon.json"; if [ -f "$f" ]; then echo present; cat -- "$f"; else echo absent; fi`
 )
 
 // NetworksCommandFor is NetworksCommand with docker, the client and its
@@ -261,7 +267,10 @@ var DefaultPools = []string{
 // Pools reads Docker's daemon.json and returns the address pools it will
 // allocate from: default-address-pools when the file sets it, and
 // DefaultPools otherwise.
-func Pools(daemonJSON string, found bool) ([]Taken, error) {
+func Pools(daemonJSON string, found bool, path string) ([]Taken, error) {
+	if path == "" {
+		path = DaemonConfig
+	}
 	var bases []string
 	configured := false
 	if found && strings.TrimSpace(daemonJSON) != "" {
@@ -271,7 +280,7 @@ func Pools(daemonJSON string, found bool) ([]Taken, error) {
 			} `json:"default-address-pools"`
 		}
 		if err := json.Unmarshal([]byte(daemonJSON), &daemon); err != nil {
-			return nil, fmt.Errorf("unreadable %s: %w", DaemonConfig, err)
+			return nil, fmt.Errorf("unreadable %s: %w", path, err)
 		}
 		for _, p := range daemon.Pools {
 			bases = append(bases, p.Base)
@@ -282,13 +291,13 @@ func Pools(daemonJSON string, found bool) ([]Taken, error) {
 	if !configured {
 		bases = DefaultPools
 	} else {
-		what = "Docker's address pool %s (" + DaemonConfig + ")"
+		what = "Docker's address pool %s (" + path + ")"
 	}
 	var taken []Taken
 	for _, b := range bases {
 		p, err := ParsePrefix(b)
 		if err != nil {
-			return nil, fmt.Errorf("%s: pool %q is not a network", DaemonConfig, b)
+			return nil, fmt.Errorf("%s: pool %q is not a network", path, b)
 		}
 		if p.Addr().Is4() {
 			taken = append(taken, Taken{Prefix: p, What: fmt.Sprintf(what, b)})
@@ -318,10 +327,14 @@ type Probed struct {
 	Routes, Addrs, Networks string
 	Daemon                  string
 	DaemonFound             bool
+	// DaemonPath is the file the pools came from, which Taken and Pools
+	// name; empty means DaemonConfig.
+	DaemonPath string
 }
 
-// Probe asks a host for its routes, addresses, Docker networks and Docker's
-// pools. It reads and never writes.
+// Probe asks a host for its routes, addresses, Docker networks and the
+// system daemon's pools, from DaemonConfig, which `host admit` checks as
+// root. It reads and never writes.
 func Probe(h Host) (Probed, error) { return ProbeWith(h, "docker") }
 
 // ProbeWith is Probe with docker, the client and its flags, reading the
@@ -343,8 +356,43 @@ func ProbeWith(h Host, docker string) (Probed, error) {
 		}
 		*step.into = out
 	}
+	p.DaemonPath = DaemonConfig
 	if p.Daemon, p.DaemonFound, err = h.ReadFile(DaemonConfig); err != nil {
 		return p, fmt.Errorf("%s: reading %s: %w", h.Describe(), DaemonConfig, err)
+	}
+	return p, nil
+}
+
+// ProbeUser is Probe for the deployment's user: its routes and addresses,
+// which are the host's, its own daemon's networks (the transport points
+// docker at it), and its own daemon's pools, from UserDaemonConfig. A
+// daemon that does not answer is marked down in Networks, as in Probe, and
+// Taken refuses it rather than reading it as no networks.
+func ProbeUser(h Host) (Probed, error) {
+	var p Probed
+	for _, step := range []struct {
+		name, command string
+		into          *string
+	}{
+		{RouteCommand, RouteCommand, &p.Routes},
+		{AddrCommand, AddrCommand, &p.Addrs},
+		{"docker network inspect", NetworksCommand, &p.Networks},
+	} {
+		out, err := h.Run(step.command)
+		if err != nil {
+			return p, fmt.Errorf("%s: `%s` failed: %v: %s", h.Describe(), step.name, err, strings.TrimSpace(out))
+		}
+		*step.into = out
+	}
+	out, err := h.Run(UserDaemonCommand)
+	if err != nil {
+		return p, fmt.Errorf("%s: reading %s: %v: %s", h.Describe(), UserDaemonConfig, err, strings.TrimSpace(out))
+	}
+	state, content, _ := strings.Cut(out, "\n")
+	p.DaemonPath = UserDaemonConfig
+	p.DaemonFound = strings.TrimSpace(state) == "present"
+	if p.DaemonFound {
+		p.Daemon = content
 	}
 	return p, nil
 }
@@ -365,7 +413,7 @@ func (p Probed) Taken(own, on string) ([]Taken, error) {
 	if err != nil {
 		return nil, err
 	}
-	pools, err := Pools(p.Daemon, p.DaemonFound)
+	pools, err := Pools(p.Daemon, p.DaemonFound, p.DaemonPath)
 	if err != nil {
 		return nil, err
 	}
