@@ -293,11 +293,11 @@ func TestProbeReadsWhetherApparmorShipsTheRootlesskitProfile(t *testing.T) {
 	if !known {
 		t.Skipf("no expectation for %s", probeImage)
 	}
-	if f := probeIn(t, "true", "paisans-f2a9", ""); f.AppArmor.Shipped {
-		t.Errorf("no apparmor installed, and the profile reads as shipped")
+	if f := probeIn(t, "true", "paisans-f2a9", ""); f.AppArmor.Package || f.AppArmor.Shipped {
+		t.Errorf("no apparmor installed, and it reads as package %v, shipped %v", f.AppArmor.Package, f.AppArmor.Shipped)
 	}
 	setup := "apt-get update -qq >/dev/null 2>&1 && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq apparmor >/dev/null 2>&1 || exit 1"
-	if f := probeIn(t, setup, "paisans-f2a9", ""); f.AppArmor.Shipped != want {
-		t.Errorf("%s: shipped %v, want %v", probeImage, f.AppArmor.Shipped, want)
+	if f := probeIn(t, setup, "paisans-f2a9", ""); !f.AppArmor.Package || f.AppArmor.Shipped != want {
+		t.Errorf("%s: package %v, shipped %v, want shipped %v", probeImage, f.AppArmor.Package, f.AppArmor.Shipped, want)
 	}
 }

@@ -268,8 +268,14 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    if not. Ubuntu 22.04 has no such sysctl on its own kernel, so nothing is
    restricted there; its `apparmor` package (3.0) ships no `rootlesskit`
    profile, so on a 22.04 host whose newer kernel has the restriction turned
-   on, the refusal says to set `kernel.apparmor_restrict_unprivileged_userns`
-   to 0 instead.
+   on, the refusal offers setting `kernel.apparmor_restrict_unprivileged_userns`
+   to 0 and says what that costs: every user and program on the host may then
+   create unprivileged user namespaces again, the kernel attack surface the
+   restriction exists to reduce. It names a file that sorts last,
+   `/etc/sysctl.d/99-zz-paisans-userns.conf`, says to change any other line
+   setting it, and to check the value after a reboot; an owner who turned the
+   restriction on deliberately admits on another host instead. Admit never
+   changes it. A host with no `apparmor` package is told to install it.
 3. **The user.** `useradd --create-home --shell /bin/bash paisans-<token>`
    unless it exists, then the privilege check above. Subordinate ID ranges
    of at least 65,536 in `/etc/subuid` and `/etc/subgid`, which `useradd`

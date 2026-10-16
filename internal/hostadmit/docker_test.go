@@ -98,8 +98,39 @@ func TestAppArmorGuardsEachCase(t *testing.T) {
 func TestAppArmorWithoutAShippedProfileSaysToLiftTheRestriction(t *testing.T) {
 	h := newJammy().with("userns-restrict", "1")
 	got, _ := golden(t, goldenCase{name: "apparmor", host: func() *fakeHost { return h }, site: "vm"})
-	if !strings.Contains(got, "kernel.apparmor_restrict_unprivileged_userns=0") || strings.Contains(got, "apparmor_parser") || strings.Contains(got, "--reinstall") {
+	for _, want := range []string{
+		// What lifting it costs, and the choice not to.
+		"every user and program on this host may then create unprivileged user namespaces",
+		"the kernel attack surface the restriction exists to reduce",
+		"admit on another host instead",
+		// Persistence a later file cannot undo, and a check that it held.
+		"sysctl -w kernel.apparmor_restrict_unprivileged_userns=0",
+		"kernel.apparmor_restrict_unprivileged_userns = 0 in /etc/sysctl.d/99-zz-paisans-userns.conf",
+		"grep -rs apparmor_restrict_unprivileged_userns /etc/sysctl.conf /etc/sysctl.d /run/sysctl.d /usr/lib/sysctl.d",
+		"after the next reboot",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("a host whose apparmor ships no rootlesskit profile is not told %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "apparmor_parser") || strings.Contains(got, "--reinstall") || strings.Contains(got, "that line") {
 		t.Errorf("a host whose apparmor ships no rootlesskit profile is told:\n%s", got)
+	}
+}
+
+// A host with no apparmor package is not told its package ships no
+// profile: installing apparmor is the narrower fix, so it is told that,
+// and the host-wide sysctl is not offered.
+func TestAppArmorWithoutThePackageSaysToInstallIt(t *testing.T) {
+	h := newBlank().with("userns-restrict", "1").with("rootlesskit-profile", "absent").with("rootlesskit-shipped", "no-package")
+	got, _ := golden(t, goldenCase{name: "apparmor", host: func() *fakeHost { return h }, site: "vm"})
+	for _, want := range []string{"the apparmor package is not installed", "apt-get install apparmor", "apparmor_parser -r /etc/apparmor.d/rootlesskit"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("a host without apparmor is not told %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "ships none") || strings.Contains(got, "sysctl -w") {
+		t.Errorf("a host without apparmor is told:\n%s", got)
 	}
 }
 
