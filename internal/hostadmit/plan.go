@@ -464,7 +464,7 @@ func Execute(t apply.Transport, in Input, approved *Plan, r ui.Reporter) error {
 		if steps[i].Provisional {
 			rebuilt, err := build(t, in, approved)
 			if err != nil {
-				return fmt.Errorf("reading the host again once %s existed: %w", approved.User, err)
+				return stoppedOnRebuild(approved.User, steps[:i], err)
 			}
 			if err := sameSteps(steps[i:], rebuilt.plan.Steps, placeholders(rebuilt)); err != nil {
 				return err
@@ -476,6 +476,17 @@ func Execute(t apply.Transport, in Input, approved *Plan, r ui.Reporter) error {
 		}
 	}
 	return nil
+}
+
+// stoppedOnRebuild is a refusal from reading the host again once user
+// existed. The steps that ran have changed the host, so a part's "Nothing
+// was changed" is not so: the refusal names them and says nothing more
+// was done.
+func stoppedOnRebuild(user string, ran []Step, err error) error {
+	text := strings.ReplaceAll(visibleLines(err.Error()), "Nothing was changed", "Nothing more was done")
+	return &ui.Problem{Hint: "admit stopped once " + user + " existed",
+		Explain: "These steps ran:\n" + titles(ran, nil) + "\nReading the host again then found: " + text + "\nRun host admit again to see the plan.",
+		Cause:   err}
 }
 
 // sameSteps is nil when rebuilt is approved with its placeholders filled

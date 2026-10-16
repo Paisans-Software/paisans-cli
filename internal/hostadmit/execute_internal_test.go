@@ -449,3 +449,44 @@ func TestShowMarksAProvisionalStep(t *testing.T) {
 		t.Errorf("the mark is not under the provisional step:\n%s", out)
 	}
 }
+
+// A refusal while Execute reads the host again comes after the steps
+// before it ran, the user among them, so it never says nothing was
+// changed: it says which steps ran and that nothing more was done.
+func TestARefusalOnTheRebuildSaysWhatRan(t *testing.T) {
+	h := newTestHost()
+	h.onRun = func(command string) {
+		if strings.HasPrefix(command, "useradd ") {
+			h.set("passwd", "paisans-f2a9:x:1001:1001::/home/paisans-f2a9:/bin/bash")
+			h.set("group", "paisans-f2a9")
+		}
+	}
+	withParts(t, []part{
+		userPart,
+		{"egress", func(p *planner) error {
+			if p.f.User.Exists {
+				return fmt.Errorf("paisans-f2a9 has no range in /etc/subuid. Nothing was changed")
+			}
+			p.step(Step{Title: "load the egress table", Command: "nft uid " + uidOf(p), Provisional: true})
+			return nil
+		}},
+	})
+	in := testInput(t)
+	plan, err := Build(h, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = Execute(h, in, plan, discard())
+	if err == nil {
+		t.Fatal("Execute went on past the refusal")
+	}
+	hint, explain := ui.Describe(err)
+	text := hint + "\n" + explain
+	if strings.Contains(text, "Nothing was changed") || !strings.Contains(text, "has no range in /etc/subuid") ||
+		!strings.Contains(text, `"create user paisans-f2a9"`) || !strings.Contains(text, "Nothing more was done") {
+		t.Errorf("the refusal reads:\n%s", text)
+	}
+	if len(hint) > 80 {
+		t.Errorf("the hint is longer than 80 characters: %q", hint)
+	}
+}
