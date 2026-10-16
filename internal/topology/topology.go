@@ -23,7 +23,9 @@ type Class int
 
 const (
 	// Ready is a site that answers with an admission covering its roles.
-	Ready Class = iota
+	// It is not the zero Class, so a site no classification names is never
+	// taken for ready.
+	Ready Class = iota + 1
 	// Pending is a site the deployment has not joined that cannot be used
 	// yet: it is left out of the topology, as if not yet added.
 	Pending
@@ -32,7 +34,17 @@ const (
 	Down
 )
 
-func (c Class) String() string { return [...]string{"ready", "pending", "down"}[c] }
+func (c Class) String() string {
+	switch c {
+	case Ready:
+		return "ready"
+	case Pending:
+		return "pending"
+	case Down:
+		return "down"
+	}
+	return "unclassified"
+}
 
 // Site is one declared site's class, and for a pending or down one, why.
 type Site struct {
@@ -80,30 +92,38 @@ func DownLine(site string) string {
 }
 
 // Classify judges ev. It refuses only where a site's class cannot be told
-// safely: a site that does not answer while evidence could not be read, a
-// joined site whose admission no longer covers it, and an app the
+// safely: a site that would be pending because nothing lists it while
+// evidence could not be read, a joined site whose admission no longer
+// covers it or whose every route into the mesh is pending, and an app the
 // deployment runs that Garage could not hold.
 func Classify(cfg *config.Config, ev Evidence) (*Classification, error) {
 	c := &Classification{Sites: map[string]Site{}}
-	listed := func(site string) bool {
-		for _, sites := range ev.Joined {
-			if slices.Contains(sites, site) {
-				return true
-			}
+	joined := map[string]bool{}
+	for _, sites := range ev.Joined {
+		for _, s := range sites {
+			joined[s] = true
 		}
-		return false
+	}
+	// pending is the one way a site becomes pending: nothing that was read
+	// lists it. While a source could not be read, that silence is not
+	// evidence, so the run stops rather than drop a site that may have
+	// joined.
+	pending := func(name, why string) error {
+		if len(ev.Unread) > 0 {
+			return fmt.Errorf("%s, and whether it has joined the deployment cannot be told: %s could not be read. A joined site left out of the mesh and the cluster would be cut off from them, so the run stops. Run it again once it can be read", why, strings.Join(ev.Unread, ", and "))
+		}
+		c.Sites[name] = Site{Name: name, Class: Pending, Why: why}
+		return nil
 	}
 	for _, name := range cfg.SiteNames() {
 		s := cfg.Sites[name]
-		joined := listed(name)
 		if err := ev.Login[name]; err != nil {
-			switch {
-			case joined:
+			if joined[name] {
 				c.Sites[name] = Site{Name: name, Class: Down, Why: DownLine(name)}
-			case len(ev.Unread) > 0:
-				return nil, fmt.Errorf("%s does not let this run in (%v), and whether it has joined the deployment cannot be told: %s could not be read. A joined site left out of the mesh and the cluster would be cut off from them, so the run stops. Run it again once one of them answers", name, err, strings.Join(ev.Unread, ", and "))
-			default:
-				c.Sites[name] = Site{Name: name, Class: Pending, Why: fmt.Sprintf("%s: its login is refused or it does not answer, and the deployment has not joined it: its host's owner has not admitted it yet", name)}
+				continue
+			}
+			if err := pending(name, fmt.Sprintf("%s: its login is refused or it does not answer (%v), and the deployment has not joined it: its host's owner has not admitted it yet", name, err)); err != nil {
+				return nil, err
 			}
 			continue
 		}
@@ -122,13 +142,17 @@ func Classify(cfg *config.Config, ev Evidence) (*Classification, error) {
 		switch {
 		case why == "":
 			c.Sites[name] = Site{Name: name, Class: Ready}
-		case joined:
+		case joined[name]:
 			return nil, fmt.Errorf("%s has joined this deployment, and %s. The host's owner admits it again (sudo paisans host admit --request %s.admit, from paisans host request --site %s > %s.admit) before the run goes on", name, why, name, name, name)
 		default:
-			c.Sites[name] = Site{Name: name, Class: Pending, Why: name + ": " + why}
+			if err := pending(name, name+": "+why); err != nil {
+				return nil, err
+			}
 		}
 	}
-	c.relays(cfg)
+	if err := c.relays(cfg, joined, pending); err != nil {
+		return nil, err
+	}
 	if err := c.garage(cfg, ev.DeployedApps); err != nil {
 		return nil, err
 	}
@@ -136,32 +160,44 @@ func Classify(cfg *config.Config, ev Evidence) (*Classification, error) {
 }
 
 // relays makes pending each site that dials out only and whose every route
-// into the mesh, a site with a dial endpoint, is pending, until nothing
-// changes.
-func (c *Classification) relays(cfg *config.Config) {
-	for changed := true; changed; {
-		changed = false
-		var endpoints, live []string
-		for _, name := range cfg.SiteNames() {
-			if cfg.Sites[name].DialEndpoint() != "" {
-				endpoints = append(endpoints, name)
-				if c.Sites[name].Class != Pending {
-					live = append(live, name)
-				}
+// into the mesh, a site with a dial endpoint, is pending. A joined site in
+// that place refuses the run instead, since the run never drops a joined
+// site from the mesh. One pass is enough: only sites without an endpoint
+// change, and only sites with one are routes.
+func (c *Classification) relays(cfg *config.Config, joined map[string]bool, pending func(name, why string) error) error {
+	var endpoints, live []string
+	for _, name := range cfg.SiteNames() {
+		if cfg.Sites[name].DialEndpoint() != "" {
+			endpoints = append(endpoints, name)
+			if c.Sites[name].Class != Pending {
+				live = append(live, name)
 			}
-		}
-		if len(endpoints) == 0 {
-			return
-		}
-		for _, name := range cfg.SiteNames() {
-			s := c.Sites[name]
-			if s.Class == Pending || cfg.Sites[name].DialEndpoint() != "" || slices.ContainsFunc(live, func(o string) bool { return o != name }) {
-				continue
-			}
-			c.Sites[name] = Site{Name: name, Class: Pending, Why: fmt.Sprintf("%s: its only route into the mesh is through %s, which is pending", name, strings.Join(endpoints, ", "))}
-			changed = true
 		}
 	}
+	if len(endpoints) == 0 || len(live) > 0 {
+		return nil
+	}
+	through := endpoints[0] + ", which is pending"
+	if len(endpoints) > 1 {
+		through = strings.Join(endpoints, ", ") + ", each of which is pending"
+	}
+	for _, name := range cfg.SiteNames() {
+		s := c.Sites[name]
+		if s.Class == Pending || cfg.Sites[name].DialEndpoint() != "" {
+			continue
+		}
+		why := fmt.Sprintf("%s: its only route into the mesh is through %s", name, through)
+		if joined[name] {
+			if s.Class == Down {
+				continue
+			}
+			return fmt.Errorf("%s has joined this deployment, and its only route into the mesh is through %s. The run stops rather than cut it off; admit one of them first", name, through)
+		}
+		if err := pending(name, why); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // garage holds back storage when the Garage nodes the run keeps, ready and
@@ -186,7 +222,7 @@ func (c *Classification) garage(cfg *config.Config, deployed []string) error {
 	for _, name := range cfg.AppNames() {
 		if blueprints.InObjectStorage(cfg, cfg.Apps[name]) {
 			if slices.Contains(deployed, name) {
-				return fmt.Errorf("Garage has %d of its sites in the run and keeps %d copies, so it cannot take objects, and %s keeps its uploads there and is deployed. The run stops rather than run %s without its storage. Admit the pending Garage sites first", kept, g.Replication, name, name)
+				return fmt.Errorf("garage has %d of its sites in the run and keeps %d copies, so it cannot take objects, and %s keeps its uploads there and is deployed. The run stops rather than run %s without its storage. Admit the pending Garage sites first", kept, g.Replication, name, name)
 			}
 			c.Held = append(c.Held, name)
 		}
@@ -246,8 +282,13 @@ func (c *Classification) Effective(cfg *config.Config) *config.Config {
 // members that answer, a Patroni cluster none of whose members answer, and
 // site naming a site that is pending or down.
 func (c *Classification) Refuse(cfg *config.Config, site string) error {
-	if site != "" && !c.Ready(site) {
-		return fmt.Errorf("--site %s: %s", site, c.Sites[site].Why)
+	if site != "" {
+		if _, ok := cfg.Sites[site]; !ok {
+			return fmt.Errorf("--site %s: no site of that name is declared", site)
+		}
+		if !c.Ready(site) {
+			return fmt.Errorf("--site %s: %s", site, c.Sites[site].Why)
+		}
 	}
 	for _, gw := range cfg.GatewaySites() {
 		if !c.Ready(gw) {

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 
 	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
@@ -120,6 +121,62 @@ func TestUnreadableEvidenceNeverMakesAJoinedSitePending(t *testing.T) {
 	if err != nil || c.Sites["home-c"].Class != topology.Down {
 		t.Errorf("listed by a source that was read: %+v %v", c, err)
 	}
+
+	// A host that answers but no longer admits the deployment, whose owner
+	// evicted it and kept the user, is as unknown while the record is unread.
+	ev = everyoneAnswers(t, cfg)
+	ev.Records["home-c"] = topology.RecordRead{Err: admission.ErrNotAdmitted}
+	ev.Unread = []string{"the deployment record (home-a: reading deployed.json: permission denied)"}
+	if _, err := topology.Classify(cfg, ev); err == nil || !strings.Contains(err.Error(), "the deployment record") {
+		t.Errorf("answering, not admitted, record unread: %v", err)
+	}
+	lowerCase(t, err)
+}
+
+// lowerCase fails the test when err's message opens with a capital.
+func lowerCase(t *testing.T, err error) {
+	t.Helper()
+	if err != nil && err.Error() != "" && unicode.IsUpper([]rune(err.Error())[0]) {
+		t.Errorf("error opens with a capital: %v", err)
+	}
+}
+
+// A site the deployment lists as joined is never pending, whatever its
+// route: one whose every route into the mesh is through pending sites
+// refuses the run instead of leaving the mesh.
+func TestARelayNeverDropsAJoinedSite(t *testing.T) {
+	cfg := fixture(t)
+	ev := everyoneAnswers(t, cfg)
+	for _, name := range cfg.SiteNames() {
+		if cfg.Sites[name].DialEndpoint() != "" {
+			ev.Login[name] = refused
+			delete(ev.Records, name)
+		}
+	}
+	ev.Joined["etcd's membership"] = []string{"home-b"}
+	c, err := topology.Classify(cfg, ev)
+	if err == nil || !strings.Contains(err.Error(), "home-b") {
+		t.Errorf("a joined site with no route: %+v %v", c, err)
+	}
+	lowerCase(t, err)
+}
+
+// The zero Class is no class: an undeclared site is not ready, and --site
+// naming one refuses.
+func TestAnUndeclaredSiteIsNotReady(t *testing.T) {
+	cfg := fixture(t)
+	c, err := topology.Classify(cfg, everyoneAnswers(t, cfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Ready("typo") || topology.Class(0) == topology.Ready {
+		t.Error("the zero class reads as ready")
+	}
+	err = c.Refuse(cfg, "typo")
+	if err == nil || !strings.Contains(err.Error(), "--site typo") {
+		t.Errorf("--site typo: %v", err)
+	}
+	lowerCase(t, err)
 }
 
 // The effective topology is the declaration less the pending sites: no
@@ -178,8 +235,32 @@ func TestEffectiveTopologyNeverMovesAnAppToLocalStorage(t *testing.T) {
 		}
 	}
 	ev.DeployedApps = s3[:1]
-	if _, err := topology.Classify(cfg, ev); err == nil || !strings.Contains(err.Error(), s3[0]) {
+	_, err = topology.Classify(cfg, ev)
+	if err == nil || !strings.Contains(err.Error(), s3[0]) {
 		t.Errorf("a deployed app held back: %v", err)
+	}
+	lowerCase(t, err)
+
+	// With a site outside Garage pending, Garage keeps its replication: no
+	// app is held, and every one in object storage stays there.
+	ev = everyoneAnswers(t, cfg)
+	ev.Login["vm"] = refused
+	delete(ev.Records, "vm")
+	if slices.Contains(cfg.Storage.Garage.Sites, "vm") || len(cfg.PinnedTo("vm")) > 0 {
+		t.Fatal("the fixture's vm holds Garage or an app")
+	}
+	c, err = topology.Classify(cfg, ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.StorageHeld() || c.Sites["vm"].Class != topology.Pending {
+		t.Fatalf("held %v, vm %+v", c.Held, c.Sites["vm"])
+	}
+	eff = c.Effective(cfg)
+	for _, name := range s3 {
+		if app, ok := eff.Apps[name]; !ok || !blueprints.InObjectStorage(eff, app) {
+			t.Errorf("%s left object storage (in the run: %v)", name, ok)
+		}
 	}
 }
 
@@ -233,6 +314,7 @@ func TestRefusals(t *testing.T) {
 		if err == nil {
 			t.Errorf("%s: not refused", name)
 		}
+		lowerCase(t, err)
 	}
 	ev := everyoneAnswers(t, cfg)
 	ev.Login["home-c"] = refused
