@@ -212,7 +212,11 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    before admit's policy is in place, with the owner's untouched. An install
    that fails disables the units of what it adds from its exit trap, while
    the hold is still in place, since their packages' scripts may have
-   enabled them before it failed. The hold holds
+   enabled them before it failed. apt-get runs dpkg in a session of its
+   own, so dpkg can outlive a killed apt-get and go on running a package's
+   script: the exit trap waits for dpkg, up to ten minutes, before it
+   confirms, disables and releases, and when dpkg is still running then it
+   keeps the hold and fails the step, saying so. The hold holds
    `/run/paisans-docker-hold.lock` throughout, so one run alone holds
    Docker's daemons. What a killed run leaves, admit's policy, the owner's
    copy beside it or beside nothing, or a temporary file of admit's, is put
