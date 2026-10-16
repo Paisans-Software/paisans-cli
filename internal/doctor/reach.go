@@ -48,19 +48,15 @@ func Reach(cfg *config.Config, list []SiteReach) []Finding {
 			out = append(out, pending(cfg, SectionReach, r.Site,
 				fmt.Sprintf("%s: pending: its login is refused or it does not answer, and the deployment has not joined it", r.Site), ssh))
 		case r.Class.Class == topology.Down:
-			more := []string{roleLine(cfg, r.Site)}
-			if lost := Losses(cfg, r.Site); lost != "" {
-				more = append(more, "While it is down the deployment is without "+lost+".")
-			}
-			more = append(more, ssh, "recover:", "  1. Start the host or fix the route to it.")
+			more := append(whileDown(cfg, r.Site), ssh, "recover:", "  1. Start the host or fix the route to it.")
 			out = append(out, Finding{Section: SectionReach, Level: absentLevel(cfg, r.Site), Line: topology.DownLine(r.Site), More: more})
 		default:
-			more := []string{roleLine(cfg, r.Site)}
-			if lost := Losses(cfg, r.Site); lost != "" {
-				more = append(more, "While it is down the deployment is without "+lost+".")
-			}
-			if r.Unclassified != "" {
+			more := whileDown(cfg, r.Site)
+			switch {
+			case r.Unclassified != "":
 				more = append(more, "Whether it has joined the deployment could not be told: "+r.Unclassified)
+			case r.Class.Class == topology.Ready:
+				more = append(more, "The run's classification found it ready, yet it did not answer here: its login fails some of the time.")
 			}
 			more = append(more, "Start the host or fix the route to it. Every other check ran with the sites that answered.")
 			out = append(out, Finding{Section: SectionReach, Level: Fail,
@@ -69,6 +65,16 @@ func Reach(cfg *config.Config, list []SiteReach) []Finding {
 		}
 	}
 	return out
+}
+
+// whileDown is a site's roles and what the deployment is without while it
+// does not answer.
+func whileDown(cfg *config.Config, site string) []string {
+	more := []string{roleLine(cfg, site)}
+	if lost := Losses(cfg, site); lost != "" {
+		more = append(more, "While it is down the deployment is without "+lost+".")
+	}
+	return more
 }
 
 func roleLine(cfg *config.Config, site string) string {

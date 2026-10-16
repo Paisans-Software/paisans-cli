@@ -227,6 +227,22 @@ func TestDoctorClassifiesOnlyWhenASiteIsNotCovered(t *testing.T) {
 	}
 }
 
+// A site that does not answer and that the classification did not place
+// says so, rather than leave the operator to guess why.
+func TestDoctorSaysASiteWasNotPlaced(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sent, writes []string
+	withDoctorHosts(t, cfg, stuckHosts(cfg, &sent, &writes))
+	rec := withRecorder(t, true)
+	_ = runDoctor([]string{"--config", fixtureConfig(), "--site", "home-a", "--site", "home-b"})
+	if out := rec.Lines(); !strings.Contains(out, "home-b: the run's classification did not place it") {
+		t.Errorf("home-b does not say the classification left it out:\n%s", out)
+	}
+}
+
 // A site the classification places pending although it answers and its
 // record covers it, as a site whose every route into the mesh is pending
 // is, is asked nothing across sites: the classification reaches every

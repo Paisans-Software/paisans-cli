@@ -30,9 +30,9 @@ func TestAbsentSites(t *testing.T) {
 			[]string{"roles: data, apps", "ssh to ubuntu@home-b.local: ubuntu@home-b.local: Permission denied (publickey).", "Until it joins, the deployment is without one of 3 etcd votes", "`paisans host request --site home-b > home-b.admit`"}},
 		{"down, timed out", SiteReach{Site: "home-b", Destination: "ubuntu@home-b.local", Err: timeout, Class: topology.Site{Name: "home-b", Class: topology.Down}}, Warn,
 			topology.DownLine("home-b"),
-			[]string{"While it is down the deployment is without one of 3 etcd votes", "ssh to ubuntu@home-b.local: Operation timed out", "Start the host or fix the route to it."}},
+			[]string{"roles: data, apps", "While it is down the deployment is without one of 3 etcd votes", "ssh to ubuntu@home-b.local: Operation timed out", "recover:\n  1. Start the host or fix the route to it."}},
 		{"down, refused", SiteReach{Site: "home-b", Destination: "ubuntu@home-b.local", Err: refused, Class: topology.Site{Name: "home-b", Class: topology.Down}}, Warn,
-			topology.DownLine("home-b"), nil},
+			topology.DownLine("home-b"), []string{"roles: data, apps", "ssh to ubuntu@home-b.local: ubuntu@home-b.local: Permission denied (publickey).", "recover:"}},
 		{"gateway down", SiteReach{Site: "vm", Destination: "ubuntu@vm.example.org", Err: timeout, Class: topology.Site{Name: "vm", Class: topology.Down}}, Fail,
 			topology.DownLine("vm"), []string{"its gateway"}},
 		{"gateway pending", SiteReach{Site: "vm", Destination: "ubuntu@vm.example.org", Err: refused, Class: topology.Site{Name: "vm", Class: topology.Pending, Request: true}}, Fail,
@@ -40,7 +40,10 @@ func TestAbsentSites(t *testing.T) {
 			[]string{"`paisans host request --site vm > vm.admit`"}},
 		{"unclassified", SiteReach{Site: "home-b", Destination: "ubuntu@home-b.local", Err: timeout, Unclassified: "home-b: its login is refused or it does not answer, and whether it has joined the deployment cannot be told"}, Fail,
 			"home-b: ssh to ubuntu@home-b.local did not answer (Operation timed out)",
-			[]string{"Whether it has joined the deployment could not be told: home-b: its login", "Start the host or fix the route to it."}},
+			[]string{"roles: data, apps", "While it is down the deployment is without one of 3 etcd votes", "Whether it has joined the deployment could not be told: home-b: its login", "Start the host or fix the route to it."}},
+		{"placed ready, yet not answering", SiteReach{Site: "home-b", Destination: "ubuntu@home-b.local", Err: timeout, Class: topology.Site{Name: "home-b", Class: topology.Ready}}, Fail,
+			"home-b: ssh to ubuntu@home-b.local did not answer (Operation timed out)",
+			[]string{"The run's classification found it ready, yet it did not answer here: its login fails some of the time."}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			fs := Reach(cfg, []SiteReach{c.reach})

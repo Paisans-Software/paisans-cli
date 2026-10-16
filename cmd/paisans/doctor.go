@@ -204,7 +204,11 @@ func (d doctorReads) class(site string) (topology.Site, string) {
 	if d.classes.err != nil {
 		return topology.Site{}, d.classes.err.Error()
 	}
-	return d.classes.c.Sites[site], ""
+	s, ok := d.classes.c.Sites[site]
+	if !ok {
+		return topology.Site{}, site + ": the run's classification did not place it"
+	}
+	return s, ""
 }
 
 // Classification is the run's classification, nil when none was made. It
