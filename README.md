@@ -2674,9 +2674,12 @@ the mail server, from the machine the command runs on, and sends the
 operators one test message as soon as it is given, so a mistyped password, or
 a sender the provider refuses, is refused before it is written under
 `rotations`. One set with `secrets set` sent its message when it was set, and
-logs in when the run is planned. A server this machine cannot reach is a warning and the rotation goes on. Stage 2 logs in with it again, from this machine and from each site before that site is handed the password, and the run
-stops there, before stage 3, when it does not. No other message is sent
-(*Mail settings are tried before they are used*).
+logs in when the run is planned. Stage 2 logs in with it again from this
+machine, then from every site that will be handed it, and no site is handed it
+until every one accepts. A refusal at either point, or a site that cannot make
+the try, stops the run there, before stage 3 and before any app is handed it.
+A server this machine cannot reach is a warning, and the sites alone try it.
+No other message is sent (*Mail settings are tried before they are used*).
 
 **Which value a host runs is read per secret, not per file.** The lines that
 carry the secret are the ones a render with any other value changes; the host
@@ -2908,7 +2911,7 @@ default (`AllowTcpForwarding`, sshd_config(5)); a host that refuses it says
 | Command | What it tries | On failure |
 |---|---|---|
 | `secrets set` an SMTP password | from this machine, logs in with the new password and sends one test message | refused; nothing is written. A server this machine cannot reach is a warning, and the password is written for `apply` to try |
-| `secrets rotate` an SMTP password | from this machine, a pasted one logs in and sends one test message when pasted; one set with `secrets set` logs in when the run is planned; stage 2 logs in again, and each site tries it before it is handed the password | refused before anything is written under `rotations`, or stopped at stage 2 before any app is handed it; a server this machine cannot reach is a warning, and the sites alone try it |
+| `secrets rotate` an SMTP password | from this machine, a pasted one logs in and sends one test message when pasted; one set with `secrets set` logs in when the run is planned; stage 2 logs in again from this machine, then from every site that will be handed it, before any is | refused before anything is written under `rotations`, or stopped at stage 2 before any site is handed it; a server this machine cannot reach is a warning, and the sites alone try it |
 | `apply`, with or without `--site` | every app it would start logs in, from each site it runs on; nothing is sent | refused before any host is changed, naming the app, where its settings are declared, and the server's reply |
 | `validate` | every app logs in, from each site it runs on; nothing is sent | a warning |
 
