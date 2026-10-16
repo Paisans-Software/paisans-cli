@@ -255,7 +255,6 @@ func TestAdmitFlagCombinations(t *testing.T) {
 	}{
 		{[]string{}, "--request <file> on the host, or --site <name> --ssh"},
 		{[]string{"--request", path, "--site", "vm"}, "not both"},
-		{[]string{"--site", "vm", "--config", fixtureConfig()}, "--ssh"},
 		{[]string{"--request", path, "--ssh", "owner@h"}, "--ssh"},
 		{[]string{"--request", path, "extra"}, "takes no argument"},
 	} {
@@ -582,3 +581,83 @@ func (refusingHost) RunInput(string, string) (string, error) {
 }
 func (refusingHost) ReadFile(string) (string, bool, error)  { return "", false, fmt.Errorf("refused") }
 func (refusingHost) WriteFile(string, string, uint32) error { return fmt.Errorf("refused") }
+
+// --site knows the site's host from the declaration, so --ssh may name
+// only the owner's login, and without --ssh admit asks for it at a
+// terminal.
+func TestAdmitSiteTakesTheHostFromTheDeclaration(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		ssh      []string
+		typed    string
+		terminal bool
+		want     string
+	}{
+		{"login alone", []string{"--ssh", "owner"}, "", false, "owner@vm.example.org:22"},
+		{"asked at a terminal", nil, "owner\n", true, "owner@vm.example.org:22"},
+		{"full destination", []string{"--ssh", "admin@10.0.0.9:2222"}, "", false, "admin@10.0.0.9:2222"},
+	} {
+		quietAdmit(t)
+		withTerminal(t, c.terminal)
+		savedOwner := reachOwnerAdmit
+		var reached config.Destination
+		reachOwnerAdmit = func(d config.Destination) apply.Transport { reached = d; return blankHost("ubuntu") }
+		args := append([]string{"--site", "vm", "--config", fixtureConfig(), "--public-ports"}, c.ssh...)
+		if err := runHostAdmit(args, typed(t, c.typed), new(strings.Builder)); err != nil {
+			t.Errorf("%s: %v", c.name, err)
+		}
+		if got := fmt.Sprintf("%s@%s:%d", reached.User, reached.Host, reached.Port); got != c.want {
+			t.Errorf("%s: reached %s, want %s", c.name, got, c.want)
+		}
+		reachOwnerAdmit = savedOwner
+	}
+	// Off a terminal, with no --ssh, there is no one to ask.
+	noHost(t)
+	withTerminal(t, false)
+	err := runHostAdmit([]string{"--site", "vm", "--config", fixtureConfig(), "--public-ports"}, typed(t, ""), new(strings.Builder))
+	if err == nil || !strings.Contains(err.Error(), "--ssh") {
+		t.Errorf("no --ssh off a terminal: %v", err)
+	}
+}
+
+// A grant the site's roles need and the flags leave out is asked for at a
+// terminal, with what it gives; a yes grants it, anything else stops admit
+// before the host is reached. Off a terminal it stops, as a flag would.
+func TestAdmitAsksForAMissingGrantAtATerminal(t *testing.T) {
+	data, _ := requestFile(t, dataSiteOf(t))
+	for _, c := range []struct {
+		typed    string
+		terminal bool
+		admits   bool
+	}{
+		{"y\n", true, true},
+		{"yes\n", true, true},
+		{"n\n", true, false},
+		{"\n", true, false},
+		{"y\n", false, false},
+	} {
+		h := withFakeLocalHost(t, "ubuntu")
+		withTerminal(t, c.terminal)
+		out := new(strings.Builder)
+		err := runHostAdmit([]string{"--request", data}, typed(t, c.typed), out)
+		if planned := err == nil; planned != c.admits {
+			t.Errorf("typed %q at a terminal %v: planned %v (%v)", c.typed, c.terminal, planned, err)
+		}
+		if !c.admits && err != nil && !strings.Contains(err.Error(), "Nothing was read or changed") {
+			t.Errorf("typed %q: %v", c.typed, err)
+		}
+		if c.terminal && !strings.Contains(out.String(), "--watchdog") {
+			t.Errorf("the question does not name the grant:\n%s", out.String())
+		}
+		_ = h
+	}
+	// --site asks the same.
+	quietAdmit(t)
+	withTerminal(t, true)
+	savedOwner := reachOwnerAdmit
+	t.Cleanup(func() { reachOwnerAdmit = savedOwner })
+	reachOwnerAdmit = func(config.Destination) apply.Transport { return blankHost("ubuntu") }
+	if err := runHostAdmit([]string{"--site", "vm", "--ssh", "owner", "--config", fixtureConfig()}, typed(t, "y\n"), new(strings.Builder)); err != nil {
+		t.Errorf("--site asked for --public-ports: %v", err)
+	}
+}

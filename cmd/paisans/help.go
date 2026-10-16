@@ -188,11 +188,12 @@ var helpCommands = []helpCommand{
 		summary: "Admit a deployment to this host, as its owner.",
 		usage: []string{
 			"sudo paisans host admit --request <file> [--watchdog] [--public-ports] [--data-dir <path>]\n                        [--bridge-netfilter] [--mesh-lan] [--execute]",
-			"paisans host admit --site <name> --ssh <user@host[:port]> [--config " + config.FileName + "] [the same grants]\n                   [--execute]",
+			"paisans host admit --site <name> [--ssh <user>|<user@host[:port]>] [--config " + config.FileName + "] [the same grants]\n                   [--execute]",
 		},
 		detail: "The one root step for a deployment on a host, run by the host's owner: the deployment's own unprivileged user with its own rootless Docker, the WireGuard helper and its sudoers line, the firewall, the egress table, the grants given and the admission record. " +
 			"ufw must be installed and active. " +
-			"--watchdog and --public-ports are the owner's to give; a data site without --watchdog, or a gateway or Caddy monitor without --public-ports, stops before the host is reached. " +
+			"--watchdog and --public-ports are the owner's to give: at a terminal, admit asks for each one the site's roles need and the flags leave out; elsewhere a data site without --watchdog, or a gateway or Caddy monitor without --public-ports, stops before the host is reached. " +
+			"With --site, --ssh may be your login alone, for the site's declared ssh host and port, and is asked for at a terminal when left out. " +
 			"--execute with --request asks for the request's digest at a terminal; with --site it ends by logging in as the user with your own key. Never run by an agent unattended.",
 	},
 	{

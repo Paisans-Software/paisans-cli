@@ -44,6 +44,34 @@ type Input struct {
 	Now     time.Time
 }
 
+// Grant is a grant the site's roles need and the flags leave out, for the
+// owner to give: Flag names it, Hint and Explain say why it is needed and
+// what it gives, Unless ("; ...") names a way not to need it, and Give sets
+// it.
+type Grant struct {
+	Flag, Hint, Explain, Unless string
+	Give                        func(*Flags)
+}
+
+// Missing is every grant the request's roles need and in's flags do not
+// give, in the order Early names them.
+func Missing(in Input) []Grant {
+	needed, given := in.Request.Grants, in.Flags.Grants()
+	var out []Grant
+	if needed.Watchdog && !given.Watchdog {
+		out = append(out, Grant{Flag: "--watchdog", Hint: "this is a data site, and admitting it needs --watchdog",
+			Explain: "Its Patroni member needs the host's watchdog to fail over safely: without one, a member that has lost its lock can keep acting as leader. The watchdog reboots the whole machine when Patroni stops renewing it.",
+			Give:    func(f *Flags) { f.Watchdog = true }})
+	}
+	if needed.PublicPorts && !given.PublicPorts {
+		out = append(out, Grant{Flag: "--public-ports", Hint: "this site runs the toolkit's Caddy, and admitting it needs --public-ports",
+			Explain: "The gateway, or a monitor with web_server.managed_by: paisans, binds ports 80 and 443. --public-ports lowers net.ipv4.ip_unprivileged_port_start to 80 for the whole host, so every local user may then bind ports 80 to 1023, and opens 80 and 443 in the firewall.",
+			Unless:  "; a monitor behind your own web server (web_server.managed_by: external) needs neither",
+			Give:    func(f *Flags) { f.PublicPorts = true }})
+	}
+	return out
+}
+
 // Early is admit's first check, before anything reaches the host: a grant
 // the site's roles need and the owner did not give, a grant it does not
 // need, and a --data-dir that is not an absolute, clean path. Each is the
@@ -52,13 +80,8 @@ func Early(in Input) error {
 	needed, given := in.Request.Grants, in.Flags.Grants()
 	type stop struct{ hint, explain string }
 	var stops []stop
-	if needed.Watchdog && !given.Watchdog {
-		stops = append(stops, stop{"this is a data site, and admitting it needs --watchdog",
-			"Its Patroni member needs the host's watchdog to fail over safely: without one, a member that has lost its lock can keep acting as leader. The watchdog reboots the whole machine when Patroni stops renewing it. Admit it with --watchdog, or do not admit it."})
-	}
-	if needed.PublicPorts && !given.PublicPorts {
-		stops = append(stops, stop{"this site runs the toolkit's Caddy, and admitting it needs --public-ports",
-			"The gateway, or a monitor with web_server.managed_by: paisans, binds ports 80 and 443. --public-ports lowers net.ipv4.ip_unprivileged_port_start to 80 for the whole host, so every local user may then bind ports 80 to 1023, and opens 80 and 443 in the firewall. Admit it with --public-ports, or do not admit it; a monitor behind your own web server (web_server.managed_by: external) needs neither."})
+	for _, m := range Missing(in) {
+		stops = append(stops, stop{m.Hint, m.Explain + " Admit it with " + m.Flag + ", or do not admit it" + m.Unless + "."})
 	}
 	if given.Watchdog && !needed.Watchdog {
 		stops = append(stops, stop{"--watchdog is not needed: this site holds no data role",

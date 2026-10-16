@@ -5,8 +5,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -50,7 +52,7 @@ func runHostAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 	)
 	fs.StringVar(&request, "request", "", "the request file the operator sent, on this host, as root")
 	fs.StringVar(&site, "site", "", "the site to admit, from the configuration, with --ssh")
-	fs.StringVar(&sshFlag, "ssh", "", "your own login on the host, user@host[:port], with --site")
+	fs.StringVar(&sshFlag, "ssh", "", "your own login on the host, with --site: user, for the site's declared host, or user@host[:port]; asked for at a terminal when left out")
 	fs.StringVar(&configPath, "config", config.FileName, "path to the deployment declaration, with --site")
 	fs.BoolVar(&flags.Watchdog, "watchdog", false, "grant the host's watchdog, which can reboot it, to a data site's Patroni")
 	fs.BoolVar(&flags.PublicPorts, "public-ports", false, "let every local user bind ports 80 to 1023, and open 80 and 443, for the toolkit's Caddy")
@@ -69,8 +71,6 @@ func runHostAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 		return fmt.Errorf("host admit: give --request <file> on the host, or --site <name> --ssh <your login> from a workstation")
 	case request != "" && site != "":
 		return fmt.Errorf("host admit: --request or --site, not both")
-	case site != "" && sshFlag == "":
-		return fmt.Errorf("host admit: --site needs --ssh, your own login on the host (user@host[:port]), which runs admit through sudo")
 	case request != "" && sshFlag != "":
 		return fmt.Errorf("host admit: --request runs on the host itself and takes no --ssh")
 	case request != "" && !runningAsRootOnLinux():
@@ -105,7 +105,19 @@ func runHostAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 		declared = cfg.Sites[site]
 	}
 	// The grants first, before any transport exists: the owner's decision
-	// needs nothing from the host.
+	// needs nothing from the host. At a terminal, a grant the site's roles
+	// need and the flags leave out is asked for, with what it gives.
+	if stdinIsTerminal(stdin) {
+		for _, g := range hostadmit.Missing(in) {
+			yes, err := askGrant(stdin, stdout, in.Request, g)
+			if err != nil {
+				return err
+			}
+			if yes {
+				g.Give(&in.Flags)
+			}
+		}
+	}
 	if err := hostadmit.Early(in); err != nil {
 		return err
 	}
@@ -120,8 +132,8 @@ func runHostAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 		r.Result("request digest %s: compare it with the one the operator gave you, over a channel you both trust, such as a call", in.Digest)
 	} else {
 		var err error
-		if dest, err = config.ParseDestination(sshFlag); err != nil {
-			return sshFlagProblem(sshFlag, err)
+		if dest, err = ownerDestination(sshFlag, site, declared, stdin, stdout); err != nil {
+			return err
 		}
 		t = reachOwnerAdmit(dest)
 	}
@@ -171,6 +183,74 @@ func runHostAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	r.Result("Admitted: %s runs Docker %s, and logs in with the operators' keys.", user, version)
 	return nil
+}
+
+// ownerDestination is where admit --site logs in as the owner: --ssh as
+// user@host[:port], or a login alone for the site's declared ssh host and
+// port, or, with no --ssh, a login asked for at a terminal. Off a terminal
+// with no --ssh there is no one to ask, so it refuses.
+func ownerDestination(sshFlag, site string, declared config.Site, stdin io.Reader, stdout io.Writer) (config.Destination, error) {
+	host, port := declared.SSHHost(), declared.SSH.PortOrDefault()
+	login := sshFlag
+	if login == "" {
+		if !stdinIsTerminal(stdin) {
+			return config.Destination{}, fmt.Errorf("host admit: --site needs --ssh, your own login on %s, which runs admit through sudo: --ssh <user>, or --ssh user@host[:port] for another address. Nothing was read or changed", ui.Visible(host))
+		}
+		fmt.Fprintf(stdout, "Your own login on %s (site %s), which runs admit through sudo: ", ui.Visible(host), site)
+		line, err := readTypedLine(stdin)
+		if err != nil {
+			return config.Destination{}, fmt.Errorf("host admit: reading your login: %w. Nothing was read or changed", err)
+		}
+		if login = strings.TrimSpace(line); login == "" {
+			return config.Destination{}, fmt.Errorf("host admit: no login was given. Nothing was read or changed")
+		}
+	}
+	if !strings.Contains(login, "@") {
+		login += "@" + net.JoinHostPort(host, strconv.Itoa(port))
+	}
+	dest, err := config.ParseDestination(login)
+	if err != nil {
+		return config.Destination{}, sshFlagProblem(login, err)
+	}
+	return dest, nil
+}
+
+// askGrant puts g to the owner at a terminal: what it gives, and whether to
+// grant it. Only y or yes grants it.
+func askGrant(stdin io.Reader, stdout io.Writer, req admission.Request, g hostadmit.Grant) (bool, error) {
+	fmt.Fprintf(stdout, "\nSite %s (roles: %s): %s.\n%s%s\nGrant %s? [y/N] ", ui.Visible(req.Site), strings.Join(req.Roles, ", "), g.Hint, g.Explain, strings.TrimPrefix(g.Unless, ";"), g.Flag)
+	line, err := readTypedLine(stdin)
+	if err != nil {
+		return false, fmt.Errorf("host admit: reading your answer: %w. Nothing was read or changed", err)
+	}
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "y", "yes":
+		return true, nil
+	}
+	return false, nil
+}
+
+// readTypedLine reads one line from stdin a byte at a time, so that nothing
+// typed after it, such as the digest admit asks for next, is read ahead and
+// lost.
+func readTypedLine(stdin io.Reader) (string, error) {
+	var b strings.Builder
+	one := make([]byte, 1)
+	for {
+		n, err := stdin.Read(one)
+		if n == 1 {
+			if one[0] == '\n' {
+				return b.String(), nil
+			}
+			b.WriteByte(one[0])
+		}
+		if err == io.EOF {
+			return b.String(), nil
+		}
+		if err != nil {
+			return "", err
+		}
+	}
 }
 
 // readRequest reads a request file, refusing one larger than any request.

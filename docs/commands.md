@@ -672,15 +672,19 @@ paisans host admit --site home-a --ssh owner@home-a.example.org --execute   # fr
   it is the owner's root step on their own machine.
 * **Flags:**
   * from a request: `--request <file>`, on the host, as root;
-  * from the configuration: `--site <name>` with `--ssh <your login>`, from
-    a workstation, and `--config`;
+  * from the configuration: `--site <name>` from a workstation, with
+    `--config`, and `--ssh` as your login alone, for the site's declared ssh
+    host and port, or as `user@host[:port]`; left out, it is asked for at a
+    terminal;
   * either way: the grants `--watchdog` and `--public-ports`;
     `--data-dir <path>`, `--bridge-netfilter`, `--mesh-lan`; `--execute`.
 * **Hosts:** the one it runs on, or the one `--ssh` names, through sudo. The
   host needs ufw installed and active: admit never enables it, and refuses
-  before making any change otherwise. A data site without `--watchdog`, or a
-  gateway or Caddy monitor without `--public-ports`, stops it before the
-  host is reached; so does a grant the site does not need. Ports 80 and 443
+  before making any change otherwise. At a terminal, admit asks for each
+  grant the site's roles need and the flags leave out, saying what it gives;
+  elsewhere a data site without `--watchdog`, or a gateway or Caddy monitor
+  without `--public-ports`, stops it before the host is reached. A grant the
+  site does not need stops it too. Ports 80 and 443
   belong to one deployment per host, and `--public-ports` is refused while
   anything else holds either of them, over TCP or UDP.
 * **`--execute`:** makes the changes the plan shows, which it always prints in
