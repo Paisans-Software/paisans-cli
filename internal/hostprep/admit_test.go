@@ -104,6 +104,9 @@ func TestTheDockerKeyIsCheckedByFingerprint(t *testing.T) {
 		if st.Title != "add docker apt key" {
 			continue
 		}
+		if !strings.Contains(st.Command, `$1 == "pub" { n++; take = 1; next }`) || !strings.Contains(st.Command, `END { if (n == 1) print fpr }`) {
+			t.Errorf("the check does not require exactly one primary key:\n%s", st.Command)
+		}
 		check := strings.Index(st.Command, `if [ "$fpr" != 9DC858229FC7DD38854AE2D88D81803C0EBFCD88 ]`)
 		move := strings.Index(st.Command, "mv /etc/apt/keyrings/docker.asc.paisans-tmp /etc/apt/keyrings/docker.asc")
 		if check < 0 || move < check || !strings.Contains(st.Command, "gpg --show-keys --with-colons") || !strings.Contains(st.Command, "install -y ca-certificates curl gnupg") {

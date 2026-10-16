@@ -87,11 +87,11 @@ step 3: add docker apt key
     $ install -m 0755 -d /etc/apt/keyrings
     $ curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc.paisans-tmp
     $ home=$(mktemp -d)
-    $ fpr=$(GNUPGHOME="$home" gpg --show-keys --with-colons /etc/apt/keyrings/docker.asc.paisans-tmp 2>/dev/null | awk -F: '$1 == "fpr" { print $10; exit }')
+    $ fpr=$(GNUPGHOME="$home" gpg --show-keys --with-colons /etc/apt/keyrings/docker.asc.paisans-tmp 2>/dev/null | awk -F: '$1 == "pub" { n++; take = 1; next } $1 == "fpr" && take { fpr = $10; take = 0 } END { if (n == 1) print fpr }')
     $ rm -rf "$home"
     $ if [ "$fpr" != 9DC858229FC7DD38854AE2D88D81803C0EBFCD88 ]; then
     $   rm -f /etc/apt/keyrings/docker.asc.paisans-tmp
-    $   echo "the key from download.docker.com has fingerprint ${fpr:-none}, not Docker's 9DC858229FC7DD38854AE2D88D81803C0EBFCD88; nothing reached apt" >&2
+    $   echo "the download from download.docker.com is not Docker's release key 9DC858229FC7DD38854AE2D88D81803C0EBFCD88 alone (its one primary key: ${fpr:-none, or more than one}); nothing reached apt" >&2
     $   exit 1
     $ fi
     $ chmod a+r /etc/apt/keyrings/docker.asc.paisans-tmp
