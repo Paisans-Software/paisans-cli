@@ -94,7 +94,7 @@ func writeWebServerFiles(r ui.Reporter, cfg *config.Config, configPath string, s
 		if len(apps) > 0 {
 			rec, err := admission.Read(t, d.Token())
 			if err != nil {
-				fail(admissionProblem(site, err))
+				fail(admissionProblem(site, d.Token(), err))
 				continue
 			}
 			ws = webserver.FromRecord(rec.WebServer)

@@ -33,7 +33,7 @@ func admittedHosts(r ui.Reporter, cfg *config.Config, transports map[string]regi
 		rec, err := ui.Get(r, "check "+name+"'s admission", func() (admission.Record, error) {
 			rec, err := admissionForSite(transports[site], cfg, site)
 			if err != nil {
-				return rec, admissionProblem(site, err)
+				return rec, admissionProblem(site, cfg.Deployment().Token(), err)
 			}
 			return rec, nil
 		})
@@ -66,15 +66,21 @@ func admittedSites(r ui.Reporter, cfg *config.Config, sites ...string) (map[stri
 }
 
 // admissionProblem is a refusal in the operator's words: what the record
-// lacks, and the two lines that fix it, the operator's and the owner's.
-func admissionProblem(site string, err error) error {
+// lacks, and the two lines that fix it, the operator's and the owner's. A
+// record that cannot be read is first moved aside by the owner, since host
+// admit refuses it too. token is the deployment's.
+func admissionProblem(site, token string, err error) error {
 	lines := fmt.Sprintf("Send the host's owner a new request:\n\n    paisans host request --site %[1]s > %[1]s.admit\n\nand ask them to run, on the host:\n\n    sudo paisans host admit --request %[1]s.admit", site)
 	var se *admission.SiteError
+	var unreadable *admission.Error
 	switch {
 	case errors.Is(err, admission.ErrNotAdmitted):
 		return &ui.Problem{Hint: site + " is not admitted", Explain: "Its host has no admission record for this deployment: its owner has not admitted it, or has evicted it. " + lines, Cause: err}
 	case errors.As(err, &se):
 		return &ui.Problem{Hint: site + "'s admission does not match " + config.FileName, Explain: "- " + strings.Join(se.Problems, "\n- ") + "\n" + lines, Cause: err}
+	case errors.As(err, &unreadable):
+		path, _ := admission.Path(token)
+		return &ui.Problem{Hint: site + "'s admission record cannot be read", Explain: "- " + strings.Join(unreadable.Problems, "\n- ") + "\nAsk the host's owner to move " + path + " aside, which host admit refuses as it is. " + lines, Cause: err}
 	}
 	return err
 }

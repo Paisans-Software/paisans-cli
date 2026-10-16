@@ -2,6 +2,7 @@ package main
 
 import (
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -164,6 +165,24 @@ func TestAChangedMeshSubnetIsRefused(t *testing.T) {
 	_, err := admittedHosts(&ui.Recorder{}, cfg, map[string]registry.Runner{"home-a": h})
 	hint, explain := ui.Describe(err)
 	for _, want := range []string{"home-a's admission does not match", "the host admitted mesh subnet " + admitted + ", and mesh.subnet is 10.77.33.0/24", "paisans host request --site home-a > home-a.admit", "sudo paisans host admit --request home-a.admit"} {
+		if !strings.Contains(hint+"\n"+explain, want) {
+			t.Errorf("no %q in:\n%s\n%s", want, hint, explain)
+		}
+	}
+}
+
+// A record that cannot be read, such as one without mesh_subnet, is
+// refused naming what is wrong and the fix: the owner moves it aside, and
+// the operator and the owner run the two lines that admit the site again.
+func TestAnUnreadableAdmissionIsRefusedWithTheFix(t *testing.T) {
+	realAdmission(t)
+	cfg := fixture(t)
+	path := admittedPath(cfg)
+	old := regexp.MustCompile(`(?m)^  "mesh_subnet": .*\n`).ReplaceAllString(admittedRecord(t, cfg, "home-a"), "")
+	h := &recordedHost{files: map[string]string{path: old}}
+	_, err := admittedHosts(&ui.Recorder{}, cfg, map[string]registry.Runner{"home-a": h})
+	hint, explain := ui.Describe(err)
+	for _, want := range []string{"home-a's admission record cannot be read", "mesh_subnet: missing", "move " + path + " aside", "paisans host request --site home-a > home-a.admit", "sudo paisans host admit --request home-a.admit"} {
 		if !strings.Contains(hint+"\n"+explain, want) {
 			t.Errorf("no %q in:\n%s\n%s", want, hint, explain)
 		}

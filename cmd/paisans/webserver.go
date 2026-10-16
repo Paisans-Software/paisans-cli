@@ -28,7 +28,7 @@ var webServerRecordHost = func(cfg *config.Config, site string) admission.Reader
 func recordedWebServer(cfg *config.Config, target webserver.Target) (webserver.WebServer, error) {
 	rec, err := admission.Read(webServerRecordHost(cfg, target.Site), cfg.Deployment().Token())
 	if err != nil {
-		return webserver.WebServer{}, admissionProblem(target.Site, err)
+		return webserver.WebServer{}, admissionProblem(target.Site, cfg.Deployment().Token(), err)
 	}
 	return webserver.FromRecord(rec.WebServer), nil
 }
