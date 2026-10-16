@@ -251,10 +251,32 @@ func (p pasted) Users(e Env) []Use {
 			}
 		}
 		if len(stacks) > 0 {
-			out = append(out, Use{Site: site, Stacks: stacks})
+			out = append(out, p.use(site, stacks))
 		}
 	}
 	return out
+}
+
+// use is the Use handing the secret to stacks on site. An SMTP password is
+// tried from the site first (Env.MailFrom), and a site that refuses it is
+// not handed it; anything else is the plain scoped apply.
+func (p pasted) use(site string, stacks []string) Use {
+	u := Use{Site: site, Stacks: stacks}
+	if !p.smtp {
+		return u
+	}
+	u.Do = func(e Env, s *config.Secrets) error {
+		if e.MailFrom != nil {
+			if err := e.MailFrom(site, p.path, s, stacks); err != nil {
+				return err
+			}
+		}
+		if e.Apply == nil {
+			return fmt.Errorf("no apply to hand %s the next value with", site)
+		}
+		return e.Apply(site, s, stacks)
+	}
+	return u
 }
 
 // Pasted reports whether r rotates a pasted secret: the DNS token or an SMTP

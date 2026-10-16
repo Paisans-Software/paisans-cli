@@ -277,6 +277,38 @@ func TestSecretsRotateStopsWhenTheSiteRefusesAnUntriedPassword(t *testing.T) {
 	}
 }
 
+// A password set beforehand, with secrets set, is the file's own value, yet
+// it is still being handed out: when this machine could not try it, each
+// site tries it before it is handed it, and a site that refuses it is not.
+func TestSecretsRotateTriesASetPasswordFromTheSiteWhenThisMachineCannotReachTheServer(t *testing.T) {
+	const next = "not-a-real-smtp-password-0007"
+	server := fakeSMTP(t, map[string]string{"robot@example.org": "the-right-one"})
+	refuseLocalDial(t)
+	w, rec := fakeRotateHosts(t)
+	configPath, secretsPath := rotateDeployment(t, nil)
+	w.applied(t, configPath, secretsPath, nil)
+	configPath, secretsPath = rewriteSecrets(t, configPath, secretsPath, func(text string) string {
+		return strings.Replace(text, fixtureSMTPPassword, next, 1)
+	})
+	err := runSecretsRotate(rotateArgs(configPath, secretsPath, "external.smtp_password", "--execute"), terminalStdin(t, "", false), &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "535") {
+		t.Fatalf("err = %v\n%s", err, rec.Lines())
+	}
+	if strings.Contains(err.Error(), "fake: ") {
+		t.Errorf("the site was handed the password: %v", err)
+	}
+	var fromSite bool
+	for _, d := range server.Dials() {
+		fromSite = fromSite || d.Site != ""
+	}
+	if !fromSite {
+		t.Errorf("not tried from a site: %+v", server.Dials())
+	}
+	if strings.Contains(err.Error()+rec.Lines(), next) {
+		t.Error("the password was shown")
+	}
+}
+
 // The same warning from secrets set names the connect stage and this
 // machine, not a site.
 func TestSecretsSetNamesThisMachineWhenItCannotReachTheServer(t *testing.T) {

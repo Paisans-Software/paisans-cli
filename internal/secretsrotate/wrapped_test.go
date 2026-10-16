@@ -895,3 +895,79 @@ func TestSMTPPasswordNotReachedFromThisMachineIsWarnedAndHandedOut(t *testing.T)
 		t.Errorf("after: %v", s.Rotations)
 	}
 }
+
+// Stage 3 tries an SMTP password from each site before handing it to the
+// stacks there, whether it was pasted or set beforehand, and a site that
+// refuses it is not handed it. The DNS token is handed over with no such
+// try.
+func TestSMTPPasswordIsTriedFromEachSiteBeforeItIsHandedOut(t *testing.T) {
+	w := newWrapWorld(t)
+	s, _ := w.store.Load()
+	s.External["smtp_password"] = "fixture-not-a-secret-smtp-reissued"
+	_ = w.store.Save(s)
+	e := w.env()
+	var tried []string
+	e.MailFrom = func(site, path string, s *config.Secrets, stacks []string) error {
+		v, _ := s.Get(path)
+		tried = append(tried, fmt.Sprintf("%s %s %s", site, path, v))
+		w.log = append(w.log, "mail "+site)
+		return nil
+	}
+	run, err := Plan(e, []Rotator{SMTPPassword("external.smtp_password")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Execute(e, nil); err != nil {
+		t.Fatal(err)
+	}
+	uses := run.Items[0].Uses
+	if len(tried) != len(uses) {
+		t.Fatalf("tried %v for uses %v", tried, uses)
+	}
+	for i, u := range uses {
+		if tried[i] != u.Site+" external.smtp_password fixture-not-a-secret-smtp-reissued" {
+			t.Errorf("tried %q", tried[i])
+		}
+	}
+	if len(w.log) == 0 || !strings.HasPrefix(w.log[0], "mail ") {
+		t.Errorf("handed out before it was tried: %v", w.log)
+	}
+
+	// A site that refuses it stops the rotation before that site applies.
+	w = newWrapWorld(t)
+	s, _ = w.store.Load()
+	s.External["smtp_password"] = "fixture-not-a-secret-smtp-reissued"
+	_ = w.store.Save(s)
+	e = w.env()
+	e.MailFrom = func(string, string, *config.Secrets, []string) error { return errors.New("535 5.7.8 refused") }
+	run, err = Plan(e, []Rotator{SMTPPassword("external.smtp_password")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Execute(e, nil); err == nil || !strings.Contains(err.Error(), "535") {
+		t.Errorf("err = %v", err)
+	}
+	for _, line := range w.log {
+		if strings.HasPrefix(line, "apply ") {
+			t.Errorf("applied after a refusal: %v", w.log)
+		}
+	}
+
+	// The DNS token is not tried at the sites.
+	w = newWrapWorld(t)
+	e = w.env()
+	e.MailFrom = func(string, string, *config.Secrets, []string) error {
+		t.Error("the DNS token was tried as mail")
+		return nil
+	}
+	run, err = Plan(e, []Rotator{DNSToken()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Answer(e, "external.acme_dns_token", newDNSToken); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Execute(e, nil); err != nil {
+		t.Fatal(err)
+	}
+}

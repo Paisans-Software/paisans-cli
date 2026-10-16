@@ -193,14 +193,10 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 		Store: store,
 		Sites: transports,
 		Apply: func(site string, s *config.Secrets, stacks []string) error {
-			held, err := store.Load()
-			if err != nil {
-				return err
-			}
-			if err := checkMailForRotation(r, cfg, held, s, site, stacks); err != nil {
-				return err
-			}
 			return rotateApply(r, cfg, transports[site], site, s, stacks)
+		},
+		MailFrom: func(site, path string, s *config.Secrets, stacks []string) error {
+			return checkMailForRotation(r, cfg, s, path, site, stacks)
 		},
 		Healthy: func(site string, stacks []string) error {
 			for _, stack := range stacks {

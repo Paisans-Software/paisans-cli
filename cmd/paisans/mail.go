@@ -87,22 +87,15 @@ func checkMailForApply(r ui.Reporter, cfg *config.Config, secrets *config.Secret
 	return tryMailFromSites(r, cfg, secrets, checks, ssh, " Then apply again. Nothing was changed.", " Nothing was changed.")
 }
 
-// checkMailForRotation is how a rotation's scoped apply tries an SMTP
-// password before it hands one to site: every app among stacks there whose
-// password in handed differs from the one the secrets file holds (held)
-// logs in from site, as apply's own check does, and nothing is sent. It is
-// what tries a password this machine could not reach the server to try.
-func checkMailForRotation(r ui.Reporter, cfg *config.Config, held, handed *config.Secrets, site string, stacks []string) error {
+// checkMailForRotation is how a rotation tries the SMTP password at path
+// before it hands it to site: every app among stacks there that logs in
+// with it logs in from site with the value handed holds, as apply's own
+// check does, and nothing is sent. It runs whether the password was pasted
+// or set beforehand, since this machine may not have reached the server.
+func checkMailForRotation(r ui.Reporter, cfg *config.Config, handed *config.Secrets, path, site string, stacks []string) error {
 	var checks []smtpcheck.Check
 	for _, c := range mailChecks(cfg, handed, []string{site}, stacks) {
-		if c.PasswordPath == "" {
-			continue
-		}
-		next, _ := handed.Get(c.PasswordPath)
-		was, _ := held.Get(c.PasswordPath)
-		ui.Secret(next)
-		ui.Secret(was)
-		if next != was {
+		if c.PasswordPath == path {
 			checks = append(checks, c)
 		}
 	}

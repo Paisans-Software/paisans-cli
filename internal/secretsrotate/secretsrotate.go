@@ -69,6 +69,12 @@ type Env struct {
 	// from the machine the command runs on. Tests dial an in-process
 	// server, since none may reach a real one.
 	Mail smtpcheck.Env
+	// MailFrom tries the SMTP password at path, as s holds it, from site
+	// for the apps among stacks there, before stage 3 hands it to them. It
+	// runs for every SMTP password handed out, pasted or set beforehand,
+	// since this machine may not have reached the server to try it. Nil
+	// tries nothing.
+	MailFrom func(site, path string, s *config.Secrets, stacks []string) error
 	// Warn is told what was left untried and why, Eg: a mail server this
 	// machine cannot reach, so the run goes on with the operator told.
 	// Nil discards it.
