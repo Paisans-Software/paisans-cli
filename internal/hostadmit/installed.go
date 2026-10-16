@@ -104,9 +104,6 @@ func readInstalled(p *planner, by string) (installed, error) {
 	return parseInstalled(content, by)
 }
 
-// systemDockerUnits are Docker's system units, which its packages enable.
-const systemDockerUnits = "docker.socket docker.service containerd.service"
-
 // planSystemDocker records what this run installs, before it installs it,
 // with delegate.conf's directory when the delegation part will create it,
 // and keeps the system Docker admit installs disabled. The install holds
@@ -135,28 +132,34 @@ func planSystemDocker(p *planner, s hostprep.Section, added hostprep.Installed) 
 			File: &hostprep.File{Path: installedPath, Content: now.text(), Mode: 0o644}, Kinds: []string{"docker"}})
 	}
 	p.section(s)
-	installs := slices.Contains(added.Packages, "docker-ce")
+	installs := len(hostprep.SystemUnits(added.Packages)) > 0
 	if !installs {
 		if err := releaseHold(p, "docker"); err != nil {
 			return err
 		}
 	}
 	p.record.SystemDockerDisabled = now.dockerIsAdmits()
-	if !now.dockerIsAdmits() {
+	// Only the units of what admit installed: a containerd.io the host had
+	// is the owner's.
+	units := hostprep.SystemUnits(now.Packages)
+	if len(units) == 0 {
 		return nil
 	}
 	recorded, err := disabledBefore(p)
 	if err != nil {
 		return err
 	}
-	units := p.f.Docker.SystemUnits
+	running := slices.ContainsFunc(units, func(u string) bool {
+		s := p.f.Docker.SystemUnits[u]
+		return s.Enabled || s.Active
+	})
 	switch {
-	case installs || !recorded && (units.Enabled || units.Active):
+	case installs || !recorded && running:
 		p.step(Step{Title: "disable the system Docker",
-			Describe: "docker: the deployments run their own rootless daemons, so Docker's system daemon, which its packages enable, is disabled, and was kept from starting while they installed: it never changed forwarding, docker0 or the firewall",
-			Command:  "systemctl disable --now " + systemDockerUnits + " && if ip link show docker0 >/dev/null 2>&1; then echo 'docker0 exists, so the system Docker ran and changed forwarding and the firewall as it started. It is disabled now: reboot the host, which clears what it changed, and admit again'; exit 1; fi",
+			Describe: "docker: the deployments run their own rootless daemons, so the system daemons admit installed, which their packages enable, are disabled (" + strings.Join(units, ", ") + "), and were kept from starting while they installed: they never changed forwarding, docker0 or the firewall",
+			Command:  "systemctl disable --now " + strings.Join(units, " ") + " && if ip link show docker0 >/dev/null 2>&1; then echo 'docker0 exists, so the system Docker ran and changed forwarding and the firewall as it started. It is disabled now: reboot the host, which clears what it changed, and admit again'; exit 1; fi",
 			Kinds:    []string{"docker"}})
-	case units.Enabled || units.Active:
+	case running:
 		p.present("docker: the system daemon admit installed and disabled has been enabled since, and is left as it is")
 	default:
 		p.present("docker: the system daemon admit installed is disabled")

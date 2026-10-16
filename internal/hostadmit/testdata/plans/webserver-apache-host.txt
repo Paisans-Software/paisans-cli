@@ -173,7 +173,7 @@ step 6: install packages: docker-ce, docker-ce-cli, containerd.io, docker-buildx
     $ apt-get -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confold install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras uidmap wireguard-tools git
 
 step 7: disable the system Docker
-  docker: the deployments run their own rootless daemons, so Docker's system daemon, which its packages enable, is disabled, and was kept from starting while they installed: it never changed forwarding, docker0 or the firewall
+  docker: the deployments run their own rootless daemons, so the system daemons admit installed, which their packages enable, are disabled (docker.socket, docker.service, containerd.service), and were kept from starting while they installed: they never changed forwarding, docker0 or the firewall
   run:
     $ systemctl disable --now docker.socket docker.service containerd.service && if ip link show docker0 >/dev/null 2>&1; then echo 'docker0 exists, so the system Docker ran and changed forwarding and the firewall as it started. It is disabled now: reboot the host, which clears what it changed, and admit again'; exit 1; fi
 

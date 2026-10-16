@@ -256,3 +256,32 @@ func TestAForeignInstalledLineIsRefused(t *testing.T) {
 		t.Errorf("Build = %v", err)
 	}
 }
+
+// containerd.io the host had is the owner's: admit installs Docker beside
+// it, and holds and disables Docker's units alone, now and on a re-run
+// that finds containerd running.
+func TestAdmitLeavesAnOwnersContainerd(t *testing.T) {
+	h := newBlank().with("system-unit", "containerd.service enabled active").
+		answer("docker compose version", "compose absent\npkg containerd.io install ok installed\nkeyring absent\narch amd64\n")
+	plan, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := titled(plan, "disable the system Docker")
+	if i < 0 || !strings.HasPrefix(plan.Steps[i].Command, "systemctl disable --now docker.socket docker.service && ") {
+		t.Fatalf("the disable step:\n%s", plan.Text())
+	}
+	for _, s := range plan.Steps {
+		if s.File != nil && strings.Contains(s.File.Content, "package containerd.io") {
+			t.Errorf("containerd.io is claimed as admit's:\n%s", s.File.Content)
+		}
+	}
+	rerun := installedByAdmit(current()).with("system-unit", "containerd.service enabled active")
+	plan, err = hostadmit.Build(rerun, input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if titled(plan, "disable the system Docker") >= 0 {
+		t.Errorf("a re-run disables the owner's containerd:\n%s", plan.Text())
+	}
+}

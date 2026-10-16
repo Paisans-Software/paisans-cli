@@ -106,14 +106,18 @@ type DockerFacts struct {
 	Setuptool  bool
 	Snap       bool
 	SystemSock bool
-	// SystemUnits is whether any of Docker's system units (docker.socket,
-	// docker.service, containerd.service) is enabled, or active.
-	SystemUnits struct{ Enabled, Active bool }
+	// SystemUnits are Docker's system units (docker.socket,
+	// docker.service, containerd.service), each enabled, or active, by
+	// name.
+	SystemUnits map[string]UnitState
 	// Held is what a run that stopped while admit held Docker's daemons
 	// left: admit's /usr/sbin/policy-rc.d, the copy of the owner's beside
 	// it, or admit's temporary file.
 	Held bool
 }
+
+// UnitState is whether a system unit is enabled, and active.
+type UnitState struct{ Enabled, Active bool }
 
 // UserFacts are the deployment's user, Exists false while it does not exist.
 type UserFacts struct {
@@ -264,6 +268,7 @@ func parseFacts(out, user string) (Facts, error) {
 	f := Facts{Packages: map[string]bool{}, SubUID: map[string][]IDRange{}, SubGID: map[string][]IDRange{},
 		Files: map[string]FileState{}, Dirs: map[string]DirState{}, Entries: map[string]int{}, WatchdogDevs: map[string]int{}, raw: map[string][]string{}}
 	f.User.Name = user
+	f.Docker.SystemUnits = map[string]UnitState{}
 	var sudoL []string
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	if len(lines) == 0 || lines[len(lines)-1] != "end" {
@@ -295,8 +300,8 @@ func parseFacts(out, user string) (Facts, error) {
 			if len(fields) != 3 {
 				return f, fmt.Errorf("unreadable system-unit line %q", v)
 			}
-			f.Docker.SystemUnits.Enabled = f.Docker.SystemUnits.Enabled || fields[1] == "enabled" || fields[1] == "enabled-runtime"
-			f.Docker.SystemUnits.Active = f.Docker.SystemUnits.Active || slices.Contains([]string{"active", "activating", "reloading"}, fields[2])
+			f.Docker.SystemUnits[fields[0]] = UnitState{Enabled: fields[1] == "enabled" || fields[1] == "enabled-runtime",
+				Active: slices.Contains([]string{"active", "activating", "reloading"}, fields[2])}
 		case "docker-hold":
 			f.Docker.Held = v == "held"
 		case "userns-restrict":
