@@ -158,7 +158,7 @@ func newBlank() *fakeHost {
 		{"setuptool", "absent"}, {"snap", "absent"}, {"system-socket", "absent"},
 		{"userns-restrict", "1"}, {"rootlesskit-profile", "loaded"},
 		{"passwd", "absent"}, {"home", "absent 0 /home/paisans-f2a9"}, {"sudo", "absent"}, {"subuid", "ubuntu:100000:65536"}, {"subgid", "ubuntu:100000:65536"},
-		{"br_netfilter", "absent"}, {"forward-policy", "ACCEPT"},
+		{"br_netfilter", "absent"}, {"iptables-module", "nf_tables loaded"}, {"forward-policy", "ACCEPT"},
 		{"port-start", "1024"}, {"ip-forward", "0"},
 		{"default-dev", "eth0"}, {"lan", "203.0.113.10/24"},
 		{"ufw", "installed"}, {"ufw-active", "yes"},

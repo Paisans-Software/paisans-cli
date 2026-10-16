@@ -28,11 +28,13 @@ step 3: load br_netfilter
     $ modprobe br_netfilter
 
 step 4: load br_netfilter at boot
-  daemon: list br_netfilter in /etc/modules-load.d/paisans.conf, shared by every admitted deployment
+  daemon: list br_netfilter and nf_tables in /etc/modules-load.d/paisans.conf, shared by every admitted deployment
   write /etc/modules-load.d/paisans.conf mode 0644:
     | # Written by paisans host admit. The rootless Docker daemons of admitted
-    | # deployments need it to start with their userland proxy off.
+    | # deployments need br_netfilter to start with their userland proxy off,
+    | # and the module their iptables uses for the setup tool to install them.
     | br_netfilter
+    | nf_tables
 
 step 5: write paisans-f2a9's daemon.json
   daemon: userland proxy off, address pools clear of the mesh; written as paisans-f2a9
@@ -463,6 +465,7 @@ present: user: paisans-f2a9 holds 165536-231071 in /etc/subuid
 present: user: paisans-f2a9 holds 165536-231071 in /etc/subgid
 present: linger: on for paisans-f2a9
 present: linger: paisans-f2a9's manager is running
+present: br_netfilter: nf_tables, which the host's iptables uses, is loaded
 present: daemon: /home/paisans-f2a9 (ext2/ext3) has 42.9 GB free
 present: mesh: nothing on this host overlaps 10.44.0.0/24
 warning: delegation reaches paisans-f2a9's manager at its next start

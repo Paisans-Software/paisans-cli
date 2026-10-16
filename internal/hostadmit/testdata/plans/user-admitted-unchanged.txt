@@ -16,7 +16,8 @@ present: delegation: /etc/systemd/system/user@.service.d/delegate.conf delegates
 present: linger: on for paisans-f2a9
 present: linger: paisans-f2a9's manager is running
 present: br_netfilter: loaded already
-present: br_netfilter: loaded at boot by /etc/modules-load.d/paisans.conf
+present: br_netfilter: nf_tables, which the host's iptables uses, is loaded
+present: br_netfilter: br_netfilter and nf_tables loaded at boot by /etc/modules-load.d/paisans.conf
 present: daemon: /home/paisans-f2a9 (ext2/ext3) has 42.9 GB free
 present: daemon: paisans-f2a9's daemon.json is as admit writes it
 present: daemon: paisans-f2a9's rootless Docker is installed and running

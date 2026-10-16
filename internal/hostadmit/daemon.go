@@ -17,10 +17,25 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
-// modulesLoadConf loads br_netfilter at every boot: without it the user's
-// daemon will not start with its userland proxy off (spec, Observed R6).
-const modulesLoadConf = "# Written by paisans host admit. The rootless Docker daemons of admitted\n" +
-	"# deployments need it to start with their userland proxy off.\nbr_netfilter\n"
+// modulesLoadConf loads br_netfilter at every boot, without which the
+// user's daemon will not start with its userland proxy off (spec, Observed
+// R6), and the module the host's iptables uses, without which
+// dockerd-rootless-setuptool.sh refuses to install it.
+func modulesLoadConf(p *planner) string {
+	return "# Written by paisans host admit. The rootless Docker daemons of admitted\n" +
+		"# deployments need br_netfilter to start with their userland proxy off,\n" +
+		"# and the module their iptables uses for the setup tool to install them.\n" +
+		"br_netfilter\n" + iptablesModule(p) + "\n"
+}
+
+// iptablesModule is the module the host's iptables uses: ip_tables for
+// legacy iptables, nf_tables otherwise.
+func iptablesModule(p *planner) string {
+	if p.f.IptablesModule == "ip_tables" {
+		return "ip_tables"
+	}
+	return "nf_tables"
+}
 
 // dockerBridgeName is a bridge a Docker daemon made: docker0, or a
 // network's br-<12 hex>, as Docker names them.
@@ -56,15 +71,22 @@ func planBrNetfilter(p *planner) error {
 		p.step(Step{Title: "load br_netfilter", Describe: "daemon: load br_netfilter now, which the user's daemon needs with its userland proxy off",
 			Command: "modprobe br_netfilter", Kinds: []string{"docker"}})
 	}
-	f := p.f.Files[modulesLoadPath]
+	module := iptablesModule(p)
+	if p.f.IptablesModuleLoaded {
+		p.present("br_netfilter: " + module + ", which the host's iptables uses, is loaded")
+	} else {
+		p.step(Step{Title: "load " + module, Describe: "daemon: load " + module + " now, which the host's iptables uses and dockerd-rootless-setuptool.sh needs loaded before it installs the user's daemon",
+			Command: "modprobe " + module, Kinds: []string{"docker"}})
+	}
+	f, content := p.f.Files[modulesLoadPath], modulesLoadConf(p)
 	switch {
 	case f.Link:
 		return fmt.Errorf("%s is a symbolic link, and admit writes it as root. Remove the link and admit again. Nothing was changed", modulesLoadPath)
-	case ours(f, modulesLoadConf):
-		p.present("br_netfilter: loaded at boot by " + modulesLoadPath)
+	case ours(f, content):
+		p.present("br_netfilter: br_netfilter and " + module + " loaded at boot by " + modulesLoadPath)
 	default:
-		p.step(Step{Title: "load br_netfilter at boot", Describe: "daemon: list br_netfilter in " + modulesLoadPath + ", shared by every admitted deployment",
-			File: &hostprep.File{Path: modulesLoadPath, Content: modulesLoadConf, Mode: 0o644}, Kinds: []string{"docker"}})
+		p.step(Step{Title: "load br_netfilter at boot", Describe: "daemon: list br_netfilter and " + module + " in " + modulesLoadPath + ", shared by every admitted deployment",
+			File: &hostprep.File{Path: modulesLoadPath, Content: content, Mode: 0o644}, Kinds: []string{"docker"}})
 	}
 	return nil
 }
@@ -87,8 +109,11 @@ type UserState struct {
 	// are its own count and Root its DockerRootDir. A daemon that does not
 	// answer counts nothing: OldRootHeld then says whether the data root
 	// admit last gave it holds anything.
-	Counted                     bool
-	Root                        string
+	Counted bool
+	Root    string
+	// JSONRoot is the data-root the user's daemon.json sets, "" for none:
+	// where a daemon that does not answer keeps its data.
+	JSONRoot                    string
 	Containers, Images, Volumes int
 	OldRootHeld                 bool
 }
@@ -105,12 +130,19 @@ func (s UserState) holdsData() bool {
 // userStateProbe runs as the user, so a link in its home is followed with
 // the user's rights alone. Its first line carries the marker a test's fake
 // host answers it by; old is the data root to look in when the daemon does
-// not answer.
+// not answer and its daemon.json sets none. data-root is read from the
+// line admit writes it on.
 const userStateProbe = `# paisans host admit: as the user
 old=%s
 if systemctl --user is-active -q docker.service 2>/dev/null; then echo "daemon active"; else echo "daemon inactive"; fi
 if [ -f "$HOME/.config/systemd/user/docker.service" ]; then echo "unit present"; else echo "unit absent"; fi
-if [ -f "$HOME/.config/docker/daemon.json" ]; then echo "daemon-json $(sha256sum < "$HOME/.config/docker/daemon.json" | cut -c1-64)"; else echo "daemon-json absent"; fi
+if [ -f "$HOME/.config/docker/daemon.json" ]; then
+  echo "daemon-json $(sha256sum < "$HOME/.config/docker/daemon.json" | cut -c1-64)"
+  set -- "$(sed -n 's/^ *"data-root": *"\([^"]*\)",\{0,1\} *$/\1/p' "$HOME/.config/docker/daemon.json" | head -n 1)"
+  if [ -n "$1" ]; then echo "json-root $1"; old=$1; fi
+else
+  echo "daemon-json absent"
+fi
 if root=$(docker info --format '{{.DockerRootDir}}' 2>/dev/null) && [ -n "$root" ]; then
   echo "root $root"
   echo "containers $(docker ps -aq | wc -l)"
@@ -155,6 +187,8 @@ func userState(p *planner) (UserState, error) {
 			}
 		case "root":
 			s.Root = v
+		case "json-root":
+			s.JSONRoot = v
 		case "containers", "images", "volumes":
 			if v == "unknown" {
 				continue
@@ -366,14 +400,19 @@ func planDaemon(p *planner) error {
 // keepDataRoot refuses to move the daemon's data root, by adding,
 // changing or dropping --data-dir, while the root it uses now holds any
 // image, container or volume: the daemon would start on an empty root and
-// hide all of them.
+// hide all of them. The root it uses now is what the daemon answers, else
+// the data-root its daemon.json sets, else the record's data_dir, else the
+// home's default.
 func keepDataRoot(p *planner, s UserState) error {
 	was, err := p.oldRoot()
 	if err != nil {
 		return err
 	}
-	if s.Root != "" {
+	switch {
+	case s.Root != "":
 		was = s.Root
+	case s.JSONRoot != "":
+		was = s.JSONRoot
 	}
 	now := p.record.DataDir
 	if now == "" {

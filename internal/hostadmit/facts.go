@@ -34,6 +34,10 @@ var snippets embed.FS
 // and its paisans-<token> child, whose Dirs entry is not a directory of
 // root's (or, for the child, of the user's) with no group or other write.
 //
+// IptablesModule is the module the host's iptables uses, nf_tables or
+// ip_tables (legacy), and IptablesModuleLoaded whether it is loaded or
+// built in, as dockerd-rootless-setuptool.sh judges it before it installs.
+//
 // UFWInstalled is ufw's binary being on the host, and UFWActive is the
 // first line of `ufw status`, read as root, being "Status: active"; an
 // answer the probe cannot read is not active. Admit works only on a host
@@ -50,6 +54,8 @@ type Facts struct {
 	Dirs                       map[string]DirState
 	EgressEnabled, EgressTable bool
 	BrNetfilter                bool
+	IptablesModule             string
+	IptablesModuleLoaded       bool
 	Bridges                    []string
 	ForwardPolicy              string
 	UFWInstalled, UFWActive    bool
@@ -310,6 +316,12 @@ func parseFacts(out, user string) (Facts, error) {
 			f.EgressTable = v == "present"
 		case "br_netfilter":
 			f.BrNetfilter = v == "loaded"
+		case "iptables-module":
+			name, state, _ := strings.Cut(v, " ")
+			if name != "nf_tables" && name != "ip_tables" {
+				return f, fmt.Errorf("unreadable iptables-module line %q", v)
+			}
+			f.IptablesModule, f.IptablesModuleLoaded = name, state == "loaded"
 		case "bridge":
 			f.Bridges = append(f.Bridges, v)
 		case "forward-policy":

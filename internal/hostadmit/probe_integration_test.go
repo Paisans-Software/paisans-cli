@@ -7,6 +7,8 @@
 package hostadmit
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -203,5 +205,56 @@ func TestProbeReadsUFW(t *testing.T) {
 	}
 	if f := probeIn(t, install+"ufw allow 22/tcp >/dev/null && ufw --force enable >/dev/null", "paisans-f2a9", "", caps...); !f.UFWInstalled || !f.UFWActive {
 		t.Errorf("enabled: installed %v, active %v", f.UFWInstalled, f.UFWActive)
+	}
+}
+
+// The probe names the module the host's iptables uses, and reads it as
+// loaded when the kernel lists it as built in, as the setup tool does.
+func TestProbeReadsTheIptablesModule(t *testing.T) {
+	builtin := `mkdir -p "/lib/modules/$(uname -r)" && echo kernel/net/netfilter/nf_tables.ko > "/lib/modules/$(uname -r)/modules.builtin"`
+	legacy := `printf '#!/bin/sh\necho "iptables v1.8.10 (legacy)"\n' > /usr/sbin/iptables && chmod 755 /usr/sbin/iptables`
+	if f := probeIn(t, builtin, "paisans-f2a9", ""); f.IptablesModule != "nf_tables" || !f.IptablesModuleLoaded {
+		t.Errorf("built in: %q loaded %v", f.IptablesModule, f.IptablesModuleLoaded)
+	}
+	if f := probeIn(t, legacy, "paisans-f2a9", ""); f.IptablesModule != "ip_tables" {
+		t.Errorf("legacy: %q", f.IptablesModule)
+	}
+}
+
+// The user's probe reads the data-root admit writes in daemon.json, and,
+// with no daemon answering, looks in that root rather than the one it was
+// handed.
+func TestTheUserProbeReadsTheDataRootOfItsDaemonJSON(t *testing.T) {
+	for _, c := range []struct {
+		dataRoot string
+		want     []string
+	}{
+		{"/srv/data/paisans-f2a9", []string{"json-root /srv/data/paisans-f2a9", "containers unknown", "old-root held"}},
+		{"", []string{"daemon-json ", "old-root empty"}},
+	} {
+		data, err := json.MarshalIndent(daemonConfig{Pools: []addressPool{{"172.17.0.0/16", 24}}, DataRoot: c.dataRoot}, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		dir := t.TempDir()
+		script := fmt.Sprintf(userStateProbe, "'/root/.local/share/docker'")
+		for name, content := range map[string]string{"daemon.json": string(data) + "\n", "user.sh": script} {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		setup := "mkdir -p /root/.config/docker /srv/data/paisans-f2a9/image && cp /p/daemon.json /root/.config/docker/"
+		out, err := exec.Command("docker", "run", "--rm", "-v", dir+":/p:ro", probeImage, "sh", "-c", setup+" && HOME=/root sh /p/user.sh").CombinedOutput()
+		if err != nil {
+			t.Fatalf("docker run: %v\n%s", err, out)
+		}
+		for _, w := range c.want {
+			if !strings.Contains(string(out), w) {
+				t.Errorf("data-root %q: no %q in\n%s", c.dataRoot, w, out)
+			}
+		}
+		if c.dataRoot == "" && strings.Contains(string(out), "json-root") {
+			t.Errorf("a json-root with none set:\n%s", out)
+		}
 	}
 }

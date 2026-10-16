@@ -28,11 +28,13 @@ step 3: load br_netfilter
     $ modprobe br_netfilter
 
 step 4: load br_netfilter at boot
-  daemon: list br_netfilter in /etc/modules-load.d/paisans.conf, shared by every admitted deployment
+  daemon: list br_netfilter and nf_tables in /etc/modules-load.d/paisans.conf, shared by every admitted deployment
   write /etc/modules-load.d/paisans.conf mode 0644:
     | # Written by paisans host admit. The rootless Docker daemons of admitted
-    | # deployments need it to start with their userland proxy off.
+    | # deployments need br_netfilter to start with their userland proxy off,
+    | # and the module their iptables uses for the setup tool to install them.
     | br_netfilter
+    | nf_tables
 
 step 5: create /srv/data/paisans-f2a9
   daemon: community's Docker data, on the disk --data-dir names, community's, mode 700
@@ -469,6 +471,7 @@ present: user: community holds 231072-296607 in /etc/subuid
 present: user: community holds 231072-296607 in /etc/subgid
 present: linger: on for community
 present: linger: community's manager is running
+present: br_netfilter: nf_tables, which the host's iptables uses, is loaded
 present: daemon: /srv/data (xfs) has 500.0 GB free
 present: mesh: nothing on this host overlaps 10.44.0.0/24
 warning: user: community already exists and is not paisans-f2a9

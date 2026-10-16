@@ -28,11 +28,13 @@ step 3: load br_netfilter
     $ modprobe br_netfilter
 
 step 4: load br_netfilter at boot
-  daemon: list br_netfilter in /etc/modules-load.d/paisans.conf, shared by every admitted deployment
+  daemon: list br_netfilter and nf_tables in /etc/modules-load.d/paisans.conf, shared by every admitted deployment
   write /etc/modules-load.d/paisans.conf mode 0644:
     | # Written by paisans host admit. The rootless Docker daemons of admitted
-    | # deployments need it to start with their userland proxy off.
+    | # deployments need br_netfilter to start with their userland proxy off,
+    | # and the module their iptables uses for the setup tool to install them.
     | br_netfilter
+    | nf_tables
 
 step 5: write community's daemon.json
   daemon: userland proxy off, address pools clear of the mesh; written as community
@@ -463,6 +465,7 @@ present: user: community holds 231072-296607 in /etc/subuid
 present: user: community holds 231072-296607 in /etc/subgid
 present: linger: on for community
 present: linger: community's manager is running
+present: br_netfilter: nf_tables, which the host's iptables uses, is loaded
 present: mesh: nothing on this host overlaps 10.44.0.0/24
 warning: user: community already exists and is not paisans-f2a9
   admit adds the operators' keys to community's authorized_keys and runs the deployment as community: check that this account is meant for the deployment and nothing else.

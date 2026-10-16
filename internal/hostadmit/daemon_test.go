@@ -19,7 +19,8 @@ const idleUser = "daemon inactive\nunit absent\ndaemon-json absent\ncontainers 0
 const (
 	modulesLoadPath = "/etc/modules-load.d/paisans.conf"
 	modulesLoadConf = "# Written by paisans host admit. The rootless Docker daemons of admitted\n" +
-		"# deployments need it to start with their userland proxy off.\nbr_netfilter\n"
+		"# deployments need br_netfilter to start with their userland proxy off,\n" +
+		"# and the module their iptables uses for the setup tool to install them.\nbr_netfilter\nnf_tables\n"
 )
 
 // witnessDaemonJSON is vm's daemon.json: the userland proxy off and
@@ -87,6 +88,8 @@ var daemonCases = addCases(
 		return home().add("bridge", "virbr0").with("forward-policy", "DROP")
 	}},
 	goldenCase{name: "bridge-lookalike-stopped", site: "vm", host: func() *fakeHost { return home().add("bridge", "br-lan") }},
+	goldenCase{name: "bridge-nf-tables-absent", site: "vm", host: func() *fakeHost { return home().with("iptables-module", "nf_tables absent") }},
+	goldenCase{name: "bridge-ip-tables-absent", site: "vm", host: func() *fakeHost { return home().with("iptables-module", "ip_tables absent") }},
 	goldenCase{name: "datadir-none", site: "vm", host: home},
 	goldenCase{name: "datadir-given", site: "home-b", flags: hostadmit.Flags{Watchdog: true, DataDir: "/srv/data"}, host: func() *fakeHost {
 		return communityHome().withDir("/srv/data", "drwxr-xr-x", 0, 0).withDir("/srv/data/paisans-f2a9", "absent", 0, 0).
@@ -313,5 +316,72 @@ func TestTheRecordCarriesTheDataDirAndTheBridgeFlag(t *testing.T) {
 	}
 	if rec.DataDir != "/srv/data/paisans-f2a9" || !rec.BridgeNetfilter {
 		t.Errorf("data_dir %q, bridge_netfilter %v", rec.DataDir, rec.BridgeNetfilter)
+	}
+}
+
+// The setup tool refuses to install the daemon unless the module the
+// host's iptables uses is loaded or built in, so admit loads it first, and
+// at boot beside br_netfilter; a host that has it loads nothing.
+func TestTheIptablesModuleIsLoadedBeforeTheSetupTool(t *testing.T) {
+	for module, want := range map[string]string{"nf_tables absent": "modprobe nf_tables", "ip_tables absent": "modprobe ip_tables", "nf_tables loaded": ""} {
+		plan, err := hostadmit.Build(home().with("iptables-module", module), input(t, "vm", hostadmit.Flags{}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		loaded, setup, boot := -1, -1, ""
+		for i, s := range plan.Steps {
+			if strings.HasPrefix(s.Command, "modprobe ") && s.Command != "modprobe br_netfilter" {
+				loaded = i
+				if s.Command != want {
+					t.Errorf("%s: %q", module, s.Command)
+				}
+			}
+			if strings.Contains(s.Command, "dockerd-rootless-setuptool.sh") {
+				setup = i
+			}
+			if s.File != nil && s.File.Path == modulesLoadPath {
+				boot = s.File.Content
+			}
+		}
+		switch {
+		case want == "" && loaded >= 0:
+			t.Errorf("%s: a module is loaded", module)
+		case want != "" && (loaded < 0 || setup < 0 || loaded > setup):
+			t.Errorf("%s: loaded at step %d, setup tool at %d", module, loaded, setup)
+		}
+		name := strings.Fields(module)[0]
+		if !strings.Contains(boot, "\nbr_netfilter\n"+name+"\n") {
+			t.Errorf("%s: the boot entry is %q", module, boot)
+		}
+	}
+}
+
+// With its daemon stopped and no record, the user's own daemon.json says
+// where its data is: a re-run without --data-dir does not move the data
+// root home from under it.
+func TestAStoppedDaemonsDataRootIsReadFromItsDaemonJSON(t *testing.T) {
+	h := home().answer(userStateMarker, "daemon inactive\nunit present\ndaemon-json x\njson-root /srv/data/paisans-f2a9\ncontainers unknown\nimages unknown\nvolumes unknown\nold-root held\nend\n")
+	_, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+	if err == nil || !strings.Contains(err.Error(), "/srv/data/paisans-f2a9") || !strings.Contains(err.Error(), "/home/paisans-f2a9/.local/share/docker") {
+		t.Fatalf("Build = %v", err)
+	}
+}
+
+// With its daemon stopped and no data-root in its daemon.json, the guard
+// looks in the record's data_dir: the probe is handed it, and a held root
+// refuses dropping --data-dir.
+func TestAStoppedDaemonsGuardLooksInTheRecordsDataDir(t *testing.T) {
+	h := home().answer(userStateMarker, "daemon inactive\nunit present\ndaemon-json x\ncontainers unknown\nimages unknown\nvolumes unknown\nold-root held\nend\n")
+	h.file("/etc/paisans/admitted.f2a9.json", previousRecord(t, "vm", "/srv/data/paisans-f2a9"))
+	_, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+	if err == nil || !strings.Contains(err.Error(), "/srv/data/paisans-f2a9") || !strings.Contains(err.Error(), "/home/paisans-f2a9/.local/share/docker") {
+		t.Fatalf("Build = %v", err)
+	}
+	handed := false
+	for _, c := range h.ran {
+		handed = handed || strings.Contains(c, userStateMarker) && strings.Contains(c, "old='\\''/srv/data/paisans-f2a9'\\''")
+	}
+	if !handed {
+		t.Errorf("the probe was not handed the record's data_dir: %q", h.ran)
 	}
 }

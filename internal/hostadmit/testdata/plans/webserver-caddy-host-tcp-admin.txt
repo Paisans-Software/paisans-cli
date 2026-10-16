@@ -75,11 +75,13 @@ step 9: load br_netfilter
     $ modprobe br_netfilter
 
 step 10: load br_netfilter at boot
-  daemon: list br_netfilter in /etc/modules-load.d/paisans.conf, shared by every admitted deployment
+  daemon: list br_netfilter and nf_tables in /etc/modules-load.d/paisans.conf, shared by every admitted deployment
   write /etc/modules-load.d/paisans.conf mode 0644:
     | # Written by paisans host admit. The rootless Docker daemons of admitted
-    | # deployments need it to start with their userland proxy off.
+    | # deployments need br_netfilter to start with their userland proxy off,
+    | # and the module their iptables uses for the setup tool to install them.
     | br_netfilter
+    | nf_tables
 
 step 11: write paisans-f2a9's daemon.json
   daemon: userland proxy off, address pools clear of the mesh; written as paisans-f2a9
@@ -502,6 +504,7 @@ step 18: install the helper's sudoers line
 
 present: package: nftables installed
 present: apparmor: rootlesskit's profile is loaded
+present: br_netfilter: nf_tables, which the host's iptables uses, is loaded
 present: daemon: /home (ext2/ext3) has 42.9 GB free
 present: mesh: nothing on this host overlaps 10.44.0.0/24
 present: web server: caddy (process caddy), obtains its own certificates

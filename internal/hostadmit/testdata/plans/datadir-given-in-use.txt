@@ -448,7 +448,8 @@ present: user: paisans-f2a9 holds 165536-231071 in /etc/subgid
 present: linger: on for paisans-f2a9
 present: linger: paisans-f2a9's manager is running
 present: br_netfilter: loaded already
-present: br_netfilter: loaded at boot by /etc/modules-load.d/paisans.conf
+present: br_netfilter: nf_tables, which the host's iptables uses, is loaded
+present: br_netfilter: br_netfilter and nf_tables loaded at boot by /etc/modules-load.d/paisans.conf
 present: daemon: /srv/data (xfs) has 42.9 GB free
 present: daemon: /srv/data/paisans-f2a9 is paisans-f2a9's alone
 present: mesh: nothing on this host overlaps 10.44.0.0/24
