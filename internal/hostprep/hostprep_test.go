@@ -117,7 +117,7 @@ func freshHost() *fakeHost {
 		responses: map[string]string{
 			probePackages:  "compose absent\npkg docker-ce absent\npkg wireguard-tools absent\npkg ufw absent\npkg git absent\nkeyring absent\narch amd64\n",
 			probeWatchdog:  "device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\nowner 1000\nme 1000\n",
-			"docker ps -q": "0\n",
+			"docker ps -q": "",
 		},
 	})
 }
@@ -144,7 +144,7 @@ func preparedHost(gateway bool) *fakeHost {
 		},
 		responses: map[string]string{
 			probeWatchdog:  "device present\nidentity watchdog0 iTCO_wdt\nsystemd 0\ndaemon absent\nowner 1000\nme 1000\n",
-			"docker ps -q": "2\n",
+			"docker ps -q": "3f2a9c1d0b7e\n9b1c4e2f8a6d\n",
 		},
 	}))
 }
@@ -463,7 +463,7 @@ func TestWatchdogModes(t *testing.T) {
 		{name: "required refuses softdog", mode: config.WatchdogRequired, probe: softdog, refuse: "has only softdog"},
 		{name: "softdog accepts softdog without a warning", mode: config.WatchdogSoftdog, probe: softdog, present: "Software Watchdog"},
 		{name: "softdog warns of hardware", mode: config.WatchdogSoftdog, probe: hardware, present: "sp5100_tco", warn: true},
-		{name: "no device sends the owner to admit", mode: config.WatchdogAuto, probe: none, refuse: "sudo paisans host admit --request <site>.admit --watchdog"},
+		{name: "no device sends the owner to admit", mode: config.WatchdogAuto, probe: none, refuse: "sudo paisans host admit --request home-a.admit --watchdog again, from paisans host request --site home-a > home-a.admit"},
 		{name: "a root device sends the owner to admit", mode: config.WatchdogAuto, probe: roots, refuse: "is not the deployment's user's"},
 		{name: "systemd holds the device", mode: config.WatchdogAuto, probe: "device present\nidentity watchdog0 iTCO_wdt\nsystemd 1min\ndaemon absent\n" + mine, refuse: "RuntimeWatchdogUSec is 1min"},
 		{name: "a daemon holds the device", mode: config.WatchdogAuto, probe: "device present\nidentity watchdog0 iTCO_wdt\nsystemd 0\ndaemon running\n" + mine, refuse: "a watchdog daemon is running"},
@@ -1098,7 +1098,7 @@ func TestTheWatchdogIsOnlyRead(t *testing.T) {
 func TestDaemonJSONIsWrittenAndTheDaemonRestartedOnlyWhenIdle(t *testing.T) {
 	cfg := fixture(t)
 	host := freshHost()
-	host.responses["docker ps -q"] = "3\n"
+	host.responses["docker ps -q"] = "3f2a9c1d0b7e\n"
 	plan, err := hostprep.Build("vm", cfg, host, admitted(t, cfg, "vm"))
 	if err != nil {
 		t.Fatal(err)
@@ -1116,6 +1116,58 @@ func TestDaemonJSONIsWrittenAndTheDaemonRestartedOnlyWhenIdle(t *testing.T) {
 		t.Errorf("write %q", write)
 	}
 	if len(plan.Warnings) == 0 || !strings.Contains(plan.Warnings[0].Hint, "next restart") {
+		t.Errorf("warnings %+v", plan.Warnings)
+	}
+}
+
+// A daemon that runs no container has daemon.json written and is restarted
+// at once, with nothing to warn of.
+func TestAnIdleDaemonIsRestartedUnderItsNewDaemonJSON(t *testing.T) {
+	cfg := fixture(t)
+	host := freshHost()
+	plan, err := hostprep.Build("vm", cfg, host, admitted(t, cfg, "vm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var write string
+	for _, s := range plan.Steps {
+		if s.Title == "write daemon.json" {
+			write = s.Command
+		}
+	}
+	if !strings.HasSuffix(write, "systemctl --user restart docker") {
+		t.Errorf("write %q", write)
+	}
+	if len(plan.Warnings) != 0 {
+		t.Errorf("warnings %+v", plan.Warnings)
+	}
+}
+
+// A daemon host prepare cannot ask what it runs is never restarted: it
+// may be running containers, so daemon.json is written and the plan warns.
+func TestADaemonThatCannotBeAskedIsNotRestarted(t *testing.T) {
+	cfg := fixture(t)
+	host := freshHost()
+	host.failures = map[string]error{"docker ps -q": errors.New("exit status 1")}
+	plan, err := hostprep.Build("vm", cfg, host, admitted(t, cfg, "vm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range host.ran {
+		if strings.Contains(c, "docker ps -q") && c != "docker ps -q" {
+			t.Errorf("the count runs in a pipeline, which hides a failed docker ps: %q", c)
+		}
+	}
+	var write string
+	for _, s := range plan.Steps {
+		if s.Title == "write daemon.json" {
+			write = s.Command
+		}
+	}
+	if write == "" || strings.Contains(write, "restart docker") {
+		t.Errorf("write %q", write)
+	}
+	if len(plan.Warnings) == 0 || !strings.Contains(plan.Warnings[0].Hint, "next restart") || !strings.Contains(plan.Warnings[0].Detail, "could not ask") {
 		t.Errorf("warnings %+v", plan.Warnings)
 	}
 }

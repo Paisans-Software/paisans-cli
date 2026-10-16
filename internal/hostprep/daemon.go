@@ -50,13 +50,16 @@ func DaemonJSON(meshSubnet, dataDir string) (string, error) {
 	return string(out) + "\n", nil
 }
 
-// containersProbe counts the containers the user's daemon runs.
-const containersProbe = "docker ps -q | wc -l"
+// containersProbe lists the IDs of the containers the user's daemon runs,
+// one a line. It runs alone, not into a pipe, so a docker ps that fails is
+// an error and never read as no container.
+const containersProbe = "docker ps -q"
 
 // planDaemonJSON keeps the user's daemon.json as DaemonJSON has it, written
 // as the user through a temporary file. A daemon running a container is
 // never restarted under it: the change applies at its next restart, and the
-// plan warns.
+// plan warns. A daemon that cannot be asked what it runs is treated as one
+// that runs containers.
 func planDaemonJSON(t Transport, home, meshSubnet string, rec admission.Record) (Section, error) {
 	var out Section
 	want, err := DaemonJSON(meshSubnet, rec.DataDir)
@@ -73,24 +76,25 @@ func planDaemonJSON(t Transport, home, meshSubnet string, rec admission.Record) 
 		out.Present = append(out.Present, "docker: "+path+" as admit wrote it")
 		return out, nil
 	}
-	running, err := t.Run(containersProbe)
-	if err != nil {
-		return out, fmt.Errorf("asking the deployment's Docker what it runs: %w", err)
-	}
+	running, askErr := t.Run(containersProbe)
 	tmp := path + ".paisans-tmp"
 	command := fmt.Sprintf("set -e; umask 077; mkdir -p %s; printf %%s %s | base64 -d > %s; mv -f %s %s",
 		shellQuote(dir), shellQuote(base64.StdEncoding.EncodeToString([]byte(want))), shellQuote(tmp), shellQuote(tmp), shellQuote(path))
 	describe := "docker: write " + path + ": userland proxy off, address pools clear of the mesh"
-	idle := strings.TrimSpace(running) == "0"
+	idle := askErr == nil && strings.TrimSpace(running) == ""
 	if idle {
 		command += "; " + UserSystemctl + " restart docker"
 		describe += ", and restart the daemon, which runs no container"
 	}
 	out.Steps = append(out.Steps, Step{Kinds: []string{KindDocker}, Title: "write daemon.json", Describe: describe, Command: command})
 	if !idle {
+		why := "It runs containers, and host prepare never restarts a daemon under them."
+		if askErr != nil {
+			why = fmt.Sprintf("host prepare could not ask it what it runs (%v), and never restarts a daemon that may be running containers.", askErr)
+		}
 		out.Warnings = append(out.Warnings, Warning{
 			Hint:   "docker: the deployment's Docker reads its new daemon.json at its next restart",
-			Detail: "It runs containers, and host prepare never restarts a daemon under them. Restart it when the deployment can stop for a moment: " + UserSystemctl + " restart docker."})
+			Detail: why + " Restart it when the deployment can stop for a moment: " + UserSystemctl + " restart docker."})
 	}
 	return out, nil
 }

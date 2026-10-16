@@ -304,7 +304,7 @@ func Build(site string, cfg *config.Config, t Transport, rec admission.Record) (
 	plan := &Plan{Site: site, Profile: profile.ID() + " " + profile.Version()}
 	d := cfg.Deployment()
 
-	watchdog, err := checkWatchdog(t, declared)
+	watchdog, err := checkWatchdog(t, site, declared)
 	if err != nil {
 		return nil, err
 	}

@@ -178,8 +178,6 @@ func quietAnswer(args []string, log, fail string) (string, int, bool) {
 		out.WriteString("end\n")
 	case strings.Contains(cmd, "RuntimeWatchdogUSec"):
 		out.WriteString("device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\nowner 1000\nme 1000\n")
-	case cmd == "docker ps -q | wc -l":
-		out.WriteString("0\n")
 	case strings.Contains(cmd, "__PAISANS_NO_ETCD__"):
 		out.WriteString("__PAISANS_NO_ETCD__\n")
 	case strings.Contains(cmd, "__PAISANS_ABSENT__"):
@@ -227,7 +225,6 @@ case "$cmd" in
 *"docker volume ls"*) echo end;;
 # host admit loaded softdog and gave /dev/watchdog to the user.
 *RuntimeWatchdogUSec*) printf 'device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\nowner 1000\nme 1000\n';;
-"docker ps -q | wc -l") echo 0;;
 *__PAISANS_NO_ETCD__*) echo __PAISANS_NO_ETCD__;;
 *__PAISANS_ABSENT__*) echo __PAISANS_ABSENT__;;
 esac
