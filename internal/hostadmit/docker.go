@@ -45,10 +45,10 @@ func planDocker(p *planner) error {
 }
 
 // planAppArmor checks that Ubuntu's restriction on unprivileged user
-// namespaces lets rootlesskit run: the profile docker-ce-rootless-extras
-// installs must be loaded. When this run installs the extras, the check is
-// a step after the install; when they are installed already and the
-// profile is not loaded, admit refuses with the fix.
+// namespaces lets rootlesskit run: the profile Ubuntu's apparmor package
+// installs at /etc/apparmor.d/rootlesskit must be loaded. A fresh Ubuntu
+// 24.04 has it. When it is not, no package this run installs would change
+// that, so admit refuses before installing anything.
 func planAppArmor(p *planner) error {
 	a := p.f.AppArmor
 	switch {
@@ -56,15 +56,8 @@ func planAppArmor(p *planner) error {
 		p.present("apparmor: unprivileged user namespaces are not restricted")
 	case a.Profile:
 		p.present("apparmor: rootlesskit's profile is loaded")
-	case p.f.Packages["docker-ce-rootless-extras"]:
-		return fmt.Errorf("AppArmor restricts unprivileged user namespaces here and no rootlesskit profile is loaded, though docker-ce-rootless-extras is installed. Load the profile it installed with systemctl reload apparmor, check aa-status lists rootlesskit, and admit again. Nothing was changed")
 	default:
-		p.step(Step{
-			Title:    "check rootlesskit's AppArmor profile",
-			Describe: "apparmor: Ubuntu restricts unprivileged user namespaces, so the rootlesskit profile docker-ce-rootless-extras installs must be loaded before the user's daemon can start",
-			Command:  `grep -q rootlesskit /sys/kernel/security/apparmor/profiles || { echo "AppArmor restricts unprivileged user namespaces and no rootlesskit profile is loaded after installing docker-ce-rootless-extras. Load it with systemctl reload apparmor, check aa-status lists rootlesskit, and run host admit again"; exit 1; }`,
-			Kinds:    []string{"docker"},
-		})
+		return fmt.Errorf("AppArmor restricts unprivileged user namespaces here and no rootlesskit profile is loaded. The profile is /etc/apparmor.d/rootlesskit, from Ubuntu's apparmor package: install or update that package (apt-get install --reinstall apparmor), load the profile with apparmor_parser -r /etc/apparmor.d/rootlesskit, check aa-status lists rootlesskit, and admit again. Nothing was changed")
 	}
 	return nil
 }

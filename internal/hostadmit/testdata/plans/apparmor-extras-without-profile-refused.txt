@@ -1,1 +1,0 @@
-refused: apparmor: AppArmor restricts unprivileged user namespaces here and no rootlesskit profile is loaded, though docker-ce-rootless-extras is installed. Load the profile it installed with systemctl reload apparmor, check aa-status lists rootlesskit, and admit again. Nothing was changed

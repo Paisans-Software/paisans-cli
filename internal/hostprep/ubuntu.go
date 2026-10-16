@@ -2,6 +2,7 @@ package hostprep
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -79,6 +80,11 @@ type packageFacts struct {
 	keyring      bool
 	arch         string
 	snapDocker   bool
+	// dockerVersion is docker-ce's installed dpkg version, "" when it is not
+	// installed; extrasVersions are the versions of docker-ce-rootless-extras
+	// the configured repositories offer.
+	dockerVersion  string
+	extrasVersions []string
 }
 
 func (u ubuntu) probePackages(t Transport) (packageFacts, error) {
@@ -108,6 +114,12 @@ func (u ubuntu) probePackages(t Transport) (packageFacts, error) {
 			facts.arch = strings.TrimSpace(rest)
 		case "snap":
 			facts.snapDocker = strings.TrimSpace(rest) == "docker"
+		case "dockerversion":
+			facts.dockerVersion = strings.TrimSpace(rest)
+		case "extras":
+			if v := strings.TrimSpace(rest); v != "" {
+				facts.extrasVersions = append(facts.extrasVersions, v)
+			}
 		}
 	}
 	return facts, nil
@@ -155,6 +167,34 @@ func (u ubuntu) dockerRepo(t Transport, host OSRelease, facts packageFacts) (Sec
 	return out, nil
 }
 
+// conflictMessage is why Docker's own packages cannot be installed beside
+// what the host carries from Ubuntu's archive, or "" when nothing conflicts.
+// It refuses, not removes: removing docker.io on a host that is already
+// running containers from it takes those containers down, and that is a
+// decision for whoever started them. again is the command the owner runs
+// once they have decided.
+func conflictMessage(facts packageFacts, again string) string {
+	var conflicts []string
+	for _, p := range dockerConflicts {
+		if facts.installed[p] {
+			conflicts = append(conflicts, p)
+		}
+	}
+	if len(conflicts) == 0 {
+		return ""
+	}
+	// Ubuntu's docker-compose-v2 is the compose plugin
+	// (/usr/libexec/docker/cli-plugins/docker-compose in its file
+	// list, packages.ubuntu.com, noble-updates, fetched 2026-10-11),
+	// so a docker.io without it can be completed instead.
+	remove := fmt.Sprintf("Remove them yourself (apt-get remove %s)", strings.Join(conflicts, " "))
+	if facts.installed["docker.io"] && !facts.installed["docker-compose-v2"] {
+		remove = "Install Ubuntu's compose plugin beside them (apt-get install docker-compose-v2), or r" + remove[1:]
+	}
+	return fmt.Sprintf("%s from Ubuntu's archive conflict with Docker's own packages, and `docker compose` does not work with them. %s, after checking nothing running depends on them, and %s again",
+		strings.Join(conflicts, ", "), remove, again)
+}
+
 // Packages leaves an existing Docker as it is when `docker compose` works
 // with it, whatever its source: the host check has already refused a snap,
 // and an engine or compose plugin older than the toolkit needs. Where Docker
@@ -186,23 +226,8 @@ func (u ubuntu) Packages(t Transport, host OSRelease) (Section, error) {
 		// so it is refused, not removed: removing docker.io on a host that is
 		// already running containers from it takes those containers down, and
 		// that is a decision for whoever started them.
-		var conflicts []string
-		for _, p := range dockerConflicts {
-			if facts.installed[p] {
-				conflicts = append(conflicts, p)
-			}
-		}
-		if len(conflicts) > 0 {
-			// Ubuntu's docker-compose-v2 is the compose plugin
-			// (/usr/libexec/docker/cli-plugins/docker-compose in its file
-			// list, packages.ubuntu.com, noble-updates, fetched 2026-10-11),
-			// so a docker.io without it can be completed instead.
-			remove := fmt.Sprintf("Remove them yourself (apt-get remove %s)", strings.Join(conflicts, " "))
-			if facts.installed["docker.io"] && !facts.installed["docker-compose-v2"] {
-				remove = "Install Ubuntu's compose plugin beside them (apt-get install docker-compose-v2), or r" + remove[1:]
-			}
-			return out, fmt.Errorf("docker: %s from Ubuntu's archive conflict with Docker's own packages, and `docker compose` does not work with them. %s, after checking nothing running depends on them, and prepare again",
-				strings.Join(conflicts, ", "), remove)
+		if msg := conflictMessage(facts, "prepare"); msg != "" {
+			return out, fmt.Errorf("docker: %s", msg)
 		}
 
 		repo, err := u.dockerRepo(t, host, facts)
@@ -234,6 +259,27 @@ func (u ubuntu) Packages(t Transport, host OSRelease) (Section, error) {
 	return out, nil
 }
 
+// debVersion is what dpkg versions are made of; the pin is interpolated
+// into a shell command, so nothing else is accepted.
+var debVersion = regexp.MustCompile(`^[0-9A-Za-z.+:~-]+$`)
+
+// pinExtras is the extras package pinned to the installed docker-ce's
+// version, or the refusal when the repository offers no such version.
+func pinExtras(facts packageFacts) (string, error) {
+	v := facts.dockerVersion
+	if v == "" || !debVersion.MatchString(v) {
+		return "", fmt.Errorf("docker-ce is not installed as a Debian package here, so docker-ce-rootless-extras cannot be matched to your Docker's version. Install Docker from Docker's own apt repository yourself, or admit on another host. Nothing was changed")
+	}
+	if !slices.Contains(facts.extrasVersions, v) {
+		offered := "none"
+		if len(facts.extrasVersions) > 0 {
+			offered = strings.Join(facts.extrasVersions, ", ")
+		}
+		return "", fmt.Errorf("docker-ce %s is installed and the apt repositories offer docker-ce-rootless-extras at %s. The extras must match your Docker exactly, or installing them upgrades it, which is not admit's decision. Run apt-get update and admit again, or upgrade Docker yourself first. Nothing was changed", v, offered)
+	}
+	return "docker-ce-rootless-extras=" + v, nil
+}
+
 // AdmitPackages: see Profile.
 func (u ubuntu) AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (Section, error) {
 	var out Section
@@ -246,6 +292,11 @@ func (u ubuntu) AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (
 	}
 	var install []string
 	if !dockerPresent {
+		// Refused, as host prepare refuses, so that apt never removes the
+		// owner's containerd, runc or docker.io to make room.
+		if msg := conflictMessage(facts, "admit"); msg != "" {
+			return out, fmt.Errorf("%s. Nothing was changed", msg)
+		}
 		repo, err := u.dockerRepo(t, host, facts)
 		if err != nil {
 			return out, err
@@ -258,9 +309,21 @@ func (u ubuntu) AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (
 		}
 	}
 	for _, p := range append(append([]string{}, rootlessPackages...), basePackages...) {
-		if facts.installed[p] {
+		switch {
+		case facts.installed[p]:
 			out.Present = append(out.Present, "package: "+p+" installed")
-		} else {
+		case p == "docker-ce-rootless-extras" && dockerPresent:
+			// apt resolves the extras' dependency on docker-ce to the
+			// newest version, upgrading the owner's Docker, which
+			// --no-upgrade does not prevent for a dependency. Pinning the
+			// extras to the installed docker-ce version leaves nothing for
+			// the resolver to upgrade.
+			pinned, err := pinExtras(facts)
+			if err != nil {
+				return out, err
+			}
+			install = append(install, pinned)
+		default:
 			install = append(install, p)
 		}
 	}
@@ -273,7 +336,7 @@ func (u ubuntu) AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (
 	}
 	describe := "packages: install " + strings.Join(install, " ")
 	if dockerPresent {
-		describe += ", upgrading nothing already installed"
+		describe += ", leaving your Docker at the version it is"
 	}
 	out.Steps = append(out.Steps, Step{Kinds: packageKinds(install), Title: "install packages: " + strings.Join(install, ", "), Describe: describe, Command: script})
 	return out, nil

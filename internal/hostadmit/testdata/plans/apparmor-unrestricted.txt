@@ -1,0 +1,34 @@
+admit site vm of f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01 as paisans-f2a9 on fake (ubuntu 24.04)
+
+step 1: add docker apt key
+  docker: add Docker's apt signing key at /etc/apt/keyrings/docker.asc
+  run:
+    $ set -e
+    $ export DEBIAN_FRONTEND=noninteractive
+    $ apt-get -o DPkg::Lock::Timeout=300 update
+    $ apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl
+    $ install -m 0755 -d /etc/apt/keyrings
+    $ curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc.paisans-tmp
+    $ chmod a+r /etc/apt/keyrings/docker.asc.paisans-tmp
+    $ mv /etc/apt/keyrings/docker.asc.paisans-tmp /etc/apt/keyrings/docker.asc
+
+step 2: add docker apt repo
+  docker: add Docker's apt repository for noble/amd64 at /etc/apt/sources.list.d/docker.sources
+  write /etc/apt/sources.list.d/docker.sources mode 0644:
+    | Types: deb
+    | URIs: https://download.docker.com/linux/ubuntu
+    | Suites: noble
+    | Components: stable
+    | Architectures: amd64
+    | Signed-By: /etc/apt/keyrings/docker.asc
+
+step 3: install packages: docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin, docker-compose-plugin, docker-ce-rootless-extras, uidmap, wireguard-tools, ufw, git
+  packages: install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras uidmap wireguard-tools ufw git
+  run:
+    $ set -e
+    $ export DEBIAN_FRONTEND=noninteractive
+    $ apt-get -o DPkg::Lock::Timeout=300 update
+    $ apt-get -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confold install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras uidmap wireguard-tools ufw git
+
+present: package: nftables installed
+present: apparmor: unprivileged user namespaces are not restricted

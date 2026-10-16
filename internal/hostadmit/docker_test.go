@@ -12,7 +12,7 @@ var dockerCases = addCases(
 	}},
 	goldenCase{name: "docker-current", site: "vm", host: func() *fakeHost {
 		return newBlank().with("engine", "29.9.1").with("system-socket", "present").add("pkg", "docker-ce installed").
-			answer("docker compose version", "compose present\npkg docker-ce install ok installed\npkg ufw install ok installed\npkg git install ok installed\npkg wireguard-tools install ok installed\npkg nftables install ok installed\nkeyring present\narch amd64\n")
+			answer("docker compose version", "compose present\npkg docker-ce install ok installed\npkg ufw install ok installed\npkg git install ok installed\npkg wireguard-tools install ok installed\npkg nftables install ok installed\ndockerversion 5:29.9.1-1~ubuntu.24.04~noble\nextras 5:29.9.1-1~ubuntu.24.04~noble\nkeyring present\narch amd64\n")
 	}},
 	goldenCase{name: "docker-snap-refused", site: "vm", host: func() *fakeHost {
 		return newBlank().with("snap", "docker").with("engine", "29.9.1")
@@ -20,9 +20,14 @@ var dockerCases = addCases(
 	goldenCase{name: "docker-distro-without-extras-refused", site: "vm", host: func() *fakeHost {
 		return newBlank().with("engine", "29.6.0").with("pkg", "docker.io installed")
 	}},
-	goldenCase{name: "apparmor-extras-without-profile-refused", site: "vm", host: func() *fakeHost {
-		return newBlank().with("engine", "29.9.1").with("setuptool", "present").
-			with("pkg", "docker-ce-rootless-extras installed")
+	goldenCase{name: "docker-blank-with-ubuntu-containerd-refused", site: "vm", host: func() *fakeHost {
+		return newBlank().answer("docker compose version", "compose absent\npkg containerd install ok installed\npkg runc install ok installed\nkeyring absent\narch amd64\n")
+	}},
+	goldenCase{name: "apparmor-without-profile-refused", site: "vm", host: func() *fakeHost {
+		return newBlank().with("rootlesskit-profile", "absent")
+	}},
+	goldenCase{name: "apparmor-unrestricted", site: "vm", host: func() *fakeHost {
+		return newBlank().with("userns-restrict", "0").with("rootlesskit-profile", "absent")
 	}},
 )
 

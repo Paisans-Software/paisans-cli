@@ -1,20 +1,16 @@
 admit site vm of f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01 as paisans-f2a9 on fake (ubuntu 24.04)
 
-step 1: install packages: docker-ce-rootless-extras, uidmap
-  packages: install docker-ce-rootless-extras uidmap, upgrading nothing already installed
+step 1: install packages: docker-ce-rootless-extras=5:29.9.1-1~ubuntu.24.04~noble, uidmap
+  packages: install docker-ce-rootless-extras=5:29.9.1-1~ubuntu.24.04~noble uidmap, leaving your Docker at the version it is
   run:
     $ set -e
     $ export DEBIAN_FRONTEND=noninteractive
     $ apt-get -o DPkg::Lock::Timeout=300 update
-    $ apt-get -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confold install -y --no-upgrade docker-ce-rootless-extras uidmap
-
-step 2: check rootlesskit's AppArmor profile
-  apparmor: Ubuntu restricts unprivileged user namespaces, so the rootlesskit profile docker-ce-rootless-extras installs must be loaded before the user's daemon can start
-  run:
-    $ grep -q rootlesskit /sys/kernel/security/apparmor/profiles || { echo "AppArmor restricts unprivileged user namespaces and no rootlesskit profile is loaded after installing docker-ce-rootless-extras. Load it with systemctl reload apparmor, check aa-status lists rootlesskit, and run host admit again"; exit 1; }
+    $ apt-get -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confold install -y --no-upgrade docker-ce-rootless-extras=5:29.9.1-1~ubuntu.24.04~noble uidmap
 
 present: docker: Engine 29.9.1
 present: package: nftables installed
 present: package: wireguard-tools installed
 present: package: ufw installed
 present: package: git installed
+present: apparmor: rootlesskit's profile is loaded

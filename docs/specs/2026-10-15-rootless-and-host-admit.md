@@ -156,14 +156,18 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    as `host prepare` does today, plus `docker-ce-rootless-extras` and
    `uidmap`. If Docker is present, refuse an Engine older than 29.5 and say
    the owner must upgrade it; upgrading the owner's Docker is not this
-   command's decision. 29.5 is the version from which a rootless container
+   command's decision. The extras are installed pinned to the installed
+   `docker-ce` version, and admit refuses when the repository has none, since
+   apt would otherwise upgrade Docker to match them. 29.5 is the version from which a rootless container
    with host networking shares the real host's network namespace
    (*Sources*), and every infra container is `network_mode: host`, bound to
    the mesh address. A snap Docker is refused, as today.
 2. **AppArmor.** On Ubuntu 24.04 and later, unprivileged user namespaces are
-   restricted unless a profile allows them. The deb package bundles the
-   profile for `rootlesskit`; admit checks it is loaded and refuses with the
-   fix if not.
+   restricted unless a profile allows them. Ubuntu's `apparmor` package ships
+   the profile for `rootlesskit` at `/etc/apparmor.d/rootlesskit`, loaded at
+   boot; admit checks it is loaded before it installs anything and refuses
+   with the fix (install or update the `apparmor` package, load the profile)
+   if not.
 3. **The user.** `useradd --create-home --shell /bin/bash paisans-<token>`
    unless it exists, then the privilege check above. Subordinate ID ranges
    of at least 65,536 in `/etc/subuid` and `/etc/subgid`, which `useradd`
