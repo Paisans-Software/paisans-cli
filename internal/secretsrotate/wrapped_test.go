@@ -971,3 +971,47 @@ func TestSMTPPasswordIsTriedFromEachSiteBeforeItIsHandedOut(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Every site is tried before any is handed the password: with two or more
+// sites, a refusal at a later one stops the rotation before the first is
+// handed it, so no site runs a password another site's server refuses.
+func TestSMTPPasswordRefusedAtALaterSiteIsHandedToNone(t *testing.T) {
+	w := newWrapWorld(t)
+	s, _ := w.store.Load()
+	s.External["smtp_password"] = "fixture-not-a-secret-smtp-reissued"
+	_ = w.store.Save(s)
+	e := w.env()
+	run, err := Plan(e, []Rotator{SMTPPassword("external.smtp_password")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	uses := run.Items[0].Uses
+	if len(uses) < 2 {
+		t.Fatalf("the fixture hands the password to %d sites, want two or more", len(uses))
+	}
+	last := uses[len(uses)-1].Site
+	var tried []string
+	e.MailFrom = func(site, _ string, _ *config.Secrets, _ []string) error {
+		tried = append(tried, site)
+		if site == last {
+			return errors.New("535 5.7.8 refused")
+		}
+		return nil
+	}
+	rec := &ui.Recorder{}
+	run.Report = rec
+	if err := run.Execute(e, nil); err == nil || !strings.Contains(err.Error(), "535") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(tried) != len(uses) {
+		t.Errorf("tried %v, want every site %v", tried, uses)
+	}
+	for _, line := range w.log {
+		if strings.HasPrefix(line, "apply ") {
+			t.Errorf("a site was handed the password: %v", w.log)
+		}
+	}
+	if !rec.Has("fail", "stage 2, where it is checked") {
+		t.Errorf("the refusal is not stage 2's:\n%s", rec.Lines())
+	}
+}

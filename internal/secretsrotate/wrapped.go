@@ -125,7 +125,7 @@ func (p pasted) Accepts(e Env, next string) (bool, error) {
 // CheckText is what the plan says stage 2 does for the secret.
 func (p pasted) CheckText(cfg *config.Config) string {
 	if p.smtp {
-		return "the next password logs in to the mail server from this machine; a pasted one also sends the operators a test message when pasted, as `paisans secrets set` does. Each site tries it again before it is handed the password, and a server this machine cannot reach is tried from the sites alone"
+		return "the next password logs in to the mail server from this machine; a pasted one also sends the operators a test message when pasted, as `paisans secrets set` does. Every site that will be handed it tries it too, and none is handed it until all accept; a server this machine cannot reach is tried from the sites alone"
 	}
 	if !p.dns {
 		return "nothing checks it here: " + p.issuer(cfg) + " issued it"
@@ -185,8 +185,8 @@ func dnsCheck(e Env, token string) error {
 // names the server's reply, never the password. Settings nothing can be
 // tried from, Eg: a relay only the app's own network resolves, are not
 // tried. A server this machine cannot reach is warned about and left
-// untried, as `secrets set` leaves it: the scoped apply that hands the
-// password to each site tries it from there first.
+// untried, as `secrets set` leaves it: stage 2 tries it from every site
+// that will be handed it before any is (SiteTrier).
 func smtpCheck(e Env, path, password string, send bool) error {
 	s, err := e.Store.Load()
 	if err != nil {
@@ -203,7 +203,7 @@ func smtpCheck(e Env, path, password string, send bool) error {
 	for _, u := range tried.Unreached {
 		c := u.Check
 		e.warn(path+" is not tried for "+c.Whose()+" from "+c.From(),
-			fmt.Sprintf("%s could not be reached from %s (%s), so %s goes on untried. Each site running %s tries it from there before it is handed the password.", c.Address(), c.From(), strings.TrimSuffix(ui.Redact(u.Reply()), "."), path, strings.TrimSuffix(c.Whose(), "'s mail")))
+			fmt.Sprintf("%s could not be reached from %s (%s), so %s goes on untried. Each site running %s tries it from there, and none is handed it until every one accepts it.", c.Address(), c.From(), strings.TrimSuffix(ui.Redact(u.Reply()), "."), path, strings.TrimSuffix(c.Whose(), "'s mail")))
 	}
 	return nil
 }
@@ -251,33 +251,15 @@ func (p pasted) Users(e Env) []Use {
 			}
 		}
 		if len(stacks) > 0 {
-			out = append(out, p.use(site, stacks))
+			out = append(out, Use{Site: site, Stacks: stacks})
 		}
 	}
 	return out
 }
 
-// use is the Use handing the secret to stacks on site. An SMTP password is
-// tried from the site first (Env.MailFrom), and a site that refuses it is
-// not handed it; anything else is the plain scoped apply.
-func (p pasted) use(site string, stacks []string) Use {
-	u := Use{Site: site, Stacks: stacks}
-	if !p.smtp {
-		return u
-	}
-	u.Do = func(e Env, s *config.Secrets) error {
-		if e.MailFrom != nil {
-			if err := e.MailFrom(site, p.path, s, stacks); err != nil {
-				return err
-			}
-		}
-		if e.Apply == nil {
-			return fmt.Errorf("no apply to hand %s the next value with", site)
-		}
-		return e.Apply(site, s, stacks)
-	}
-	return u
-}
+// TriedFromSites is true of an SMTP password: stage 2 tries it from every
+// site that will be handed it before any is (SiteTrier).
+func (p pasted) TriedFromSites() bool { return p.smtp }
 
 // Pasted reports whether r rotates a pasted secret: the DNS token or an SMTP
 // password.

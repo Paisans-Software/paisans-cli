@@ -88,10 +88,11 @@ func checkMailForApply(r ui.Reporter, cfg *config.Config, secrets *config.Secret
 }
 
 // checkMailForRotation is how a rotation tries the SMTP password at path
-// before it hands it to site: every app among stacks there that logs in
-// with it logs in from site with the value handed holds, as apply's own
-// check does, and nothing is sent. It runs whether the password was pasted
-// or set beforehand, since this machine may not have reached the server.
+// from site: every app among stacks there that logs in with it logs in from
+// site with the value handed holds, as apply's own check does, and nothing
+// is sent. Stage 2 runs it for every site that will be handed the password,
+// pasted or set beforehand, before stage 3 hands it to any, since this
+// machine may not have reached the server.
 func checkMailForRotation(r ui.Reporter, cfg *config.Config, handed *config.Secrets, path, site string, stacks []string) error {
 	var checks []smtpcheck.Check
 	for _, c := range mailChecks(cfg, handed, []string{site}, stacks) {
@@ -99,7 +100,7 @@ func checkMailForRotation(r ui.Reporter, cfg *config.Config, handed *config.Secr
 			checks = append(checks, c)
 		}
 	}
-	after := " " + site + " was not handed it."
+	after := " No site was handed it."
 	return tryMailFromSites(r, cfg, handed, checks, nil, after, after)
 }
 
