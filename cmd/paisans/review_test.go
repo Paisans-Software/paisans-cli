@@ -211,11 +211,7 @@ func TestApprover(t *testing.T) {
 func loggingSSH(t *testing.T, fail string) string {
 	t.Helper()
 	log := filepath.Join(t.TempDir(), "ssh.log")
-	script := strings.Replace(quietHost, "case \"$cmd\" in\n", "printf '%s\\n' \"$cmd\" >> '"+log+"'\ncase \"$cmd\" in\n", 1)
-	if fail != "" {
-		script = strings.Replace(script, "case \"$cmd\" in\n", "case \"$cmd\" in\n*'"+fail+"'*) echo failed; exit 1;;\n", 1)
-	}
-	sshAnswering(t, script)
+	answerQuietly(t, log, fail)
 	return log
 }
 

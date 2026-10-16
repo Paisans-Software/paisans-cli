@@ -319,6 +319,19 @@ var sshRetryDelays = []time.Duration{2 * time.Second, 4 * time.Second}
 // stand in for the ssh binary and choose its output and exit status.
 var runSSH = func(cmd *exec.Cmd) error { return cmd.Run() }
 
+// SetRunSSH runs each built ssh command with run instead, or with ssh itself
+// for nil, and returns a function restoring the one before. It is runSSH for
+// tests in other packages: a fake host answered in process costs nothing,
+// where an ssh script on PATH costs a fork and an exec for every command.
+func SetRunSSH(run func(cmd *exec.Cmd) error) (restore func()) {
+	old := runSSH
+	if run == nil {
+		run = func(cmd *exec.Cmd) error { return cmd.Run() }
+	}
+	runSSH = run
+	return func() { runSSH = old }
+}
+
 // retryLog receives one line per retry. Nothing by default: a retry that
 // then succeeds is not news, and one that runs out is reported in full by the
 // error that ends the command, so the lines are only worth showing to
