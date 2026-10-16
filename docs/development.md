@@ -32,7 +32,7 @@ code behind each one is laid out.
 render and `secrets list` touch nothing outside the working directory, and
 create writes one new file there. validate reads only the files, except that
 it tries each app's mail settings from a site running it, and `secrets set`
-does the same for an SMTP password before writing it; neither changes a site,
+tries an SMTP password from this machine before writing it; neither changes a site,
 and `validate --offline` reaches none. init writes only local files, and reads every site over ssh to settle the mesh subnet.
 `host prepare`, `apply`, `prune`, `site add`, `site remove`, `mesh rekey`,
 `secrets rotate`, `storage init`, `storage add`, `storage rotate-key`, `app
@@ -1149,7 +1149,8 @@ file, so stage 3 presents what stage 2 taught. What is easy to undo by accident:
 `internal/smtpcheck` tries an app's mail settings: `Logins` is what `apply`
 and `validate` try (one check per site and set of settings), `ForPassword`
 what `secrets set` and `secrets rotate` try for a changed password (one per
-sender, from the first site running one of its apps), and `Login` and `Send`
+sender, dialled from this machine; an unreachable server is a warning, and
+rotate then has each site try the password before it is handed it), and `Login` and `Send`
 hold the conversation with `net/smtp`. Its own PLAIN and LOGIN mechanisms send
 the password only after the TLS the settings declare, since `net/smtp`'s
 `PlainAuth` refuses plaintext to anything but localhost, and `none` toward a

@@ -946,7 +946,7 @@ the app around the web server. The web server runs on the
 same host, so only an IPv4 loopback address or the site's own mesh address is
 accepted, with a port written without leading zeros, the rule `host request`
 holds the site's request to (`web-server-listen-not-this-host`); loopback is the one
-to use, and the mesh address warns that ufw does not cover it
+to use, and the mesh address warns that every site of the deployment reaches it
 (`web-server-listen-bypasses-firewall`). One `listen` publishes one app, so an
 external monitor hosts the monitor alone (`web-server-external-serves-one-app`).
 
@@ -2561,7 +2561,7 @@ Finishing either command first costs nothing but its resume.
 | Secret | Checked by | Used by | Cost to members |
 |---|---|---|---|
 | `external.acme_dns_token` | the provider, asked for the zone with the next token at stage 2 | each site running the toolkit's Caddy | none |
-| `external.smtp_password`, `apps.<app>.smtp_password` | the mail provider, logged in to with the next password at stage 2, from a site running each app that uses it | each app that logs in to send mail with it, which takes a `username` | none |
+| `external.smtp_password`, `apps.<app>.smtp_password` | the mail provider, logged in to with the next password from this machine, and from each site running an app that uses it before that site is handed it | each app that logs in to send mail with it, which takes a `username` | none |
 | `oidc_clients.<app>.client_secret` | Pocket ID | the app | none |
 | `apps.<app>.oauth` (Mbin's OAuth2 unit) | Mbin | Mbin | every API client and app signs in again |
 | Mbin `app_secret`, oauth2-proxy `cookie_secret`, uptime `session_secret`, account `session_key` | the app | the app | signed in browser sessions of that app end |
@@ -3466,10 +3466,11 @@ all. The same is true of every gated app.
 (Eg: `"10.44.0.1:8080:8080"`, never `"8080:8080"`). The gateway reaches every
 app over the mesh, so the mesh is the only interface a port needs, and the
 members of the mesh are the hosts this deployment already trusts. The bind
-address is the control, because Docker writes its own iptables rules for a
-published port, ahead of the host's, so a port published on all interfaces of
-a host with a public address is reachable from the internet whatever ufw says.
-A cloud VM holding the apps role is exactly that host. The one port published
+address is the control, so that nothing depends on the firewall: a rootless
+daemon's published port is a listener of the user's port forwarder, which ufw's
+rules cover, but a port published on all interfaces of a host with a public
+address would be there for anything those rules admit. A cloud VM holding the
+apps role is exactly that host. The one port published
 elsewhere is the uptime app's on a monitor with `managed_by: external`, the one
 app that setting allows, which binds the site's `listen` for the operator's own
 web server, under the rules in *The monitor has a site of its own*; nothing
