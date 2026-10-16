@@ -2,72 +2,79 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** `paisans doctor` checks that each site is still what its owner's `host admit` made it (the admission record matches the declaration, the deployment's user holds no privileged group, its own rootless Docker answers at Engine 29.5 or later, linger is on, and sudo lets it run the WireGuard helper and nothing else), reports a site pending admission or down as a `WARN` naming what the deployment is without, and fetches each gateway's `/.well-known/paisans/<token>` from outside with the code `apply` runs; every one a node of the check graph.
+## Revised against develop 6783478a
 
-**Architecture:** Each new check is a pure judge in `internal/doctor` (`rootless.go`, `sudo.go`, `admission.go`, `answer.go`) over a probe a new `Reads` method fills, and a node in `doctor.Checks`. The admission node runs first on every site that answered and is a hard need of everything else asked of that site, so a site that has not admitted the deployment is one `WARN` line and nothing more; the `docker <site>` node is a hard need of every check that runs `docker` there, so a daemon that does not answer is one `FAIL` and no cascade. Pending and down come from phase 6's classification, asked once per run and only when a site does not answer, through one package variable in `cmd/paisans`. The gateway's answer is phase 6's own check, called from the workstation through another.
+This plan was first written before phase 6 existed and named phase 6's interfaces as phase 6's plan predicted them. It is revised against `develop` at `6783478a` (phase 6 merged as PR #370). What changed, and why:
 
-**Tech Stack:** Go 1.25, the existing `internal/doctor` check graph (`Graph`, `Node`, `Need`), `internal/admission` (phase 4), `internal/hostadmit` and `internal/hostcheck` (phase 5), `apply.WGHelper` (phase 3), phase 6's classification and gateway answer check, the `cmd/paisans` doctor test harness (`doctorHost`, `withDoctorHosts`, `readOnly`).
+* **Task 0 (reconcile) is gone.** This revision is that reconciliation; every name below exists on `develop` or is produced by a task here.
+* **The classification is `internal/topology`**, not an assumed `sitestate`: `topology.Gather(cfg, transports) Evidence` and `topology.Classify(cfg, ev) (*Classification, error)`, with `Classification.Sites map[string]topology.Site` (`Name`, `Class`, `Why`, `Request`), the classes `topology.Ready`, `topology.Pending`, `topology.Down` (zero is unclassified), `topology.DownLine(site)`, and a refusal (an error) where a site's class cannot be told safely: unread evidence (`Source{Name, Sites}`), or a joined site whose admission no longer covers it. doctor keeps topology's types instead of mapping them to its own. `Classification.Wait` holds a join while a joined site is down; that is `apply`'s, and doctor reports the down site that causes it.
+* **The record comparison exists.** `admission.Record.Differences(cfg *config.Config, site string) []string` and `admission.ForSite(t, cfg, site)` landed in phase 6, and compare the site name, user, SSH and WireGuard ports, `mesh_subnet`, forwarding, the grants, and the owner's web server. The old Task 3 steps that wrote `Differences(config.Site)` and moved `host prepare`'s comparison are dropped; the admission judge calls the merged one.
+* **A site whose admission does not cover it is pending only when the deployment has not joined it** (topology's table). The old ruling 6 made a differing record a `FAIL` and a missing one a `WARN`; the admission judge now asks the classification whenever the record does not cover the site, so doctor and `apply` agree: pending is a `WARN` (`FAIL` on a gateway), and a joined site the record no longer covers is a `FAIL` with the classification's own refusal.
+* **The gateway's own answer is `internal/selfcheck`**: `selfcheck.Check(ctx, Probe, Target) error`, `selfcheck.TargetFor(cfg, site) (Target, bool)`, `*selfcheck.Conflict{Port, Site, Detail}`, `selfcheck.Path`, `selfcheck.DefaultProbe`. It already compares the trimmed body with the token exactly, so the echo case is a pinning test row, not a fix. `TargetFor` knows only gateways; founder decision 2 also asks each monitor running the toolkit's Caddy, so Task 5 extends it. The node is `self-check <site>`, since it is no longer only the gateway's.
+* **`doctor.Losses`** is exported (phase 6), and `apply`'s pending section words absence with it.
+* **host admit's sudo reading is reused, not copied.** Phase 5/6 merged `readSudo` and `sudoRules` in `internal/hostadmit`, which also refuse a Defaults entry that hands the helper an environment (`setenv`, `env_keep`, ...) and any runas or command-specific Defaults line. The old Task 2 wrote a second parser that knew none of that; Task 1 now exports admit's (`ReadSudoList`, `SudoList.BeyondHelper`, `HelperRule`) and Task 3 judges with it, so admit and doctor refuse the same things.
+* **Boot ordering is checked, per founder decision 3.** host admit writes `/etc/systemd/system/user@<uid>.service.d/paisans-mesh.conf` (mode 644) to start the user's manager after the mesh. The linger check reads whether it is there (Task 1 exports its path as `hostadmit.MeshDropInPath`), and the container advice for `cannot assign requested address` names the container only, pointing at the linger check for the ordering.
+* **`hostadmit.PrivilegedGroups` grew** (disk, shadow, kmem, libvirt, incus-admin); doctor reads the list, so nothing here changes for it.
+* **Already delivered by phase 6, so not in this plan:** doctor reads the user's own `daemon.json` (`mesh.ProbeUser` in `doctorReads.Mesh`), the host check runs as the user (`ss -Hltnue`, UIDs), Leftovers classifies against the manifest's pending list, every command carries the user's `DOCKER_HOST` (an `id -u` login probe that refuses uid 0), `apply.NoLogin` / `apply.ErrLoginRefused` tell a refused login from an unreachable host, `host admit --enable-ufw` (`ufw_enabled` in the record), the egress table, the WireGuard helper, and SMTP set and rotate from the workstation. None of them needs a doctor change here.
+* **Test harness names that exist:** `cmd/paisans` already has `admittedRecord(t, cfg, site) string` and `admittedPath(cfg)` (`admitted_test.go`), so the command tests reuse them; `readOnly` no longer lists the registry read.
+* **Tasks were split for parallel worktrees** (see *Task order and parallel groups*).
 
-**Spec:** `docs/specs/2026-10-15-rootless-and-host-admit.md` (*The deployment's user*, *The WireGuard helper*, *What runs as the deployment's user*: "`paisans doctor` loses the sudo finding and the allowlist check, and gains [...]", *The gateway answers as itself*, *A deployment with sites missing*), `docs/specs/2026-10-15-doctor-check-graph.md` (*The check graph*, *Running the graph*, *Reporting each check as it ends*), and the phase index `docs/superpowers/plans/2026-10-15-rootless-and-host-admit.md`, *Phase 7: Doctor*, read beside *Phase 5*, *Phase 6* and *Phase 9*. Phase 5's plan, *What this phase hands to phases 6, 7 and 10*, names what this phase checks.
+---
+
+**Goal:** `paisans doctor` checks that each site is still what its owner's `host admit` made it (the admission record covers the site, the deployment's user holds no privileged group, its own rootless Docker answers at Engine 29.5 or later, linger is on and its manager starts after the mesh, and sudo lets it run the WireGuard helper and nothing else), reports a site pending admission or down as a `WARN` naming what the deployment is without (a `FAIL` for a gateway), and fetches `/.well-known/paisans/<token>` from outside from the gateway and every monitor running the toolkit's Caddy, with the code `apply` runs; every one a node of the check graph.
+
+**Architecture:** Each new check is a pure judge in `internal/doctor` (`rootless.go`, `sudo.go`, `admission.go`, `selfcheck.go`) over a probe a new `Reads` method fills, and a node in `doctor.Checks`. The admission node runs first on every site that answered and is a hard need of everything else asked of that site, so a pending site is one `WARN` line and nothing more; the `docker <site>` node is a hard need of every check that runs `docker` there, so a daemon that does not answer is one `FAIL` and no cascade. Pending and down come from `topology`'s classification, asked once per run and only when a site does not answer or its record does not cover it, through one package variable in `cmd/paisans`. The self-check is `internal/selfcheck`, called from the workstation through another.
+
+**Tech Stack:** Go 1.25, the `internal/doctor` check graph (`Graph`, `Node`, `Need`, `Unless`), `internal/admission`, `internal/hostadmit`, `internal/hostcheck`, `internal/topology`, `internal/selfcheck`, `apply.WGHelper`, the `cmd/paisans` doctor test harness (`doctorHost`, `withDoctorHosts`, `readOnly`, `stuckHosts`, `admittedRecord`, `admittedPath`).
+
+**Spec:** `docs/specs/2026-10-15-rootless-and-host-admit.md` (*The deployment's user*, *The WireGuard helper*, *What runs as the deployment's user*: "`paisans doctor` loses the sudo finding and the allowlist check, and gains [...] the gateway and every monitor running the toolkit's Caddy answer their own `/.well-known/paisans/<token>` from outside", *The gateway answers as itself*, *A deployment with sites missing*), `docs/specs/2026-10-15-doctor-check-graph.md` (*The check graph*, *Running the graph*, *Reporting each check as it ends*), and the phase index `docs/superpowers/plans/2026-10-15-rootless-and-host-admit.md`, *Phase 7: Doctor*.
 
 ## Global Constraints
 
 * "the user is not privileged, the rootless socket answers, Engine 29.5 or later, linger on, `sudo -n -l` lists only the helper, the admission record matches the declaration. Each in the check graph [...], with the sudo finding removed, and a gateway check that fetches `/.well-known/paisans/<token>` from outside as `apply` does, sharing its code, and a `WARN` for each pending or down site listing what the deployment is without." (index, *Phase 7*)
-* "`host admit` refuses a user that already exists and is root, or is in `sudo`, `wheel`, `admin`, `adm`, `docker`, `lxd` or `systemd-journal`. [...] `paisans doctor` checks the same list on every run." (spec, *The deployment's user*) The list is `hostadmit.PrivilegedGroups`; doctor never keeps a copy.
-* "Docker Engine 29.5 or later." (index) The floor is `hostadmit.MinRootlessEngine`; doctor never keeps a copy.
-* "`doctor` reports each pending or down site as a `WARN` with the same list." (spec, *A deployment with sites missing*) "Whether a site has joined is read from the deployment, never from the site's own host." (same)
-* "A failed node's dependents are pruned, transitively, and get no lines of their own. The failed line says once what was not checked because of it." (doctor spec, *Reporting each check as it ends*) "A **hard need** must have passed for the node to run." (doctor spec, *The check graph*)
-* "Doctor is the read-only answer [...]": every command doctor sends is a read; the command-level test's allow list (`readOnly` in `cmd/paisans/doctor_test.go`) gains each new command and refuses any other.
+* "`paisans doctor` checks the same list on every run." (spec, *The deployment's user*) The list is `hostadmit.PrivilegedGroups`, the Engine floor `hostadmit.MinRootlessEngine`, the sudo reading `hostadmit.ReadSudoList` and `SudoList.BeyondHelper`, the drop-in path `hostadmit.MeshDropInPath`; doctor never keeps a copy of any.
+* "`doctor` reports each pending or down site as a `WARN` with the same list, and the gateway as a `FAIL`, since the run refuses without it." (spec, *A deployment with sites missing*) "Whether a site has joined is read from the deployment, never from the site's own host." (same) doctor asks `topology`, never its own reading.
+* "A failed node's dependents are pruned, transitively, and get no lines of their own. The failed line says once what was not checked because of it." (doctor spec) "A **hard need** must have passed for the node to run." (same)
+* Doctor only reads: the command-level test's allow list (`readOnly` in `cmd/paisans/doctor_test.go`) gains each new command and the record read, and refuses any other.
 * "`doctor.Input` stays the record of every probe [...] running every node's judge over a complete `Input` gives the same findings the graph reported." (doctor spec) `Diagnose` calls every new judge, in the graph's order.
 * No em dashes anywhere: code, comments, commit messages. Code comments describe what is, never what was.
 * Commits: `<type>: <lowercase subject>`, a body saying why, `Founder decision.` where it was one, the trailer `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. A behaviour-changing commit adds one `CHANGELOG.md` bullet under `[Unreleased]`, one sentence, at most 35 words; a commit with nothing an operator would notice adds none and says so in its body.
 * User documentation is phase 9's (*Rulings*, 9): this phase changes `CHANGELOG.md` and code only.
 * Never `git stash`; other sessions share the stash. Never push.
-* Implementers run the touched packages during each task (`go test ./internal/doctor/ ./cmd/paisans/ ...`) and the full suite once, at the end (*Final checks*).
+* Implementers run the touched packages during each task and the full suite once, at the end (*Final checks*).
 
 ## Review Focus
 
 The index names no Review Focus line for this phase. The five below are what the spec implies and no line of it tests, most likely first; each is pinned by a test in the task named.
 
-* **sudo's answer in another language, or in a shape the parse does not know.** On a host whose `LANG` is not English, `sudo -l` translates "may run the following commands"; a parse that found no header could read "nothing listed" as "nothing but the helper". The command runs in the C locale, and any answer the parse does not recognise is a `WARN` that it could not be read, never an `ok` (Task 2: `TestSudoRights`, rows `unrecognised` and `translated`).
-* **sudo allowing the helper and something more, on one line or through a group.** `(root) NOPASSWD: <helper>, /bin/sh`, a second line `(ALL : ALL) ALL` from a `%group` rule, the helper with `(ALL)` as the run-as user, or another deployment's helper: each must `FAIL` naming exactly what is extra (Task 2: rows `helper and a shell on one line`, `helper and ALL`, `helper as any user`, `another deployment's helper`).
-* **A site that answers ssh but has not admitted the deployment.** `ssh.user` names an existing account the owner never ran `host admit` for: the login works, there is no record. It must be one `WARN` with the `host request` line, and nothing else asked of that host, rather than a `FAIL` per check (Task 4: `TestAPendingSiteIsCheckedNoFurther`).
-* **A gateway that is pending or down.** The deployment cannot serve without it and `apply` refuses to run (spec, *What still refuses the run*), so the line must stay a `FAIL` and doctor must exit 1, while a pending or down data or apps site is a `WARN` and doctor exits 0 for it (Task 5: `TestAbsentSites`, rows `gateway down` and `gateway pending`).
-* **A server on 443 that echoes the request.** A service that answers any path with the path itself puts the token in its body; a check that looks for the token anywhere in the body would pass it. The gateway check must accept the token as the whole body and nothing else (Task 6: `TestGatewayAnswerRefusesAnEcho`, written against phase 6's shared check).
+* **sudo's answer in another language, or in a shape the parse does not know.** On a host whose `LANG` is not English, `sudo -l` translates its headers; a parse that found no header could read "nothing listed" as "nothing but the helper". The command runs in the C locale, and any answer the parse does not recognise is a `WARN` that it could not be read, never an `ok` (Task 3: `TestSudoRights`, rows `unrecognised` and `translated`; Task 1: `TestReadSudoList`).
+* **sudo allowing the helper and something more, on one line, through a group, or through a Defaults entry.** `(root) NOPASSWD: <helper>, /bin/sh`, a `%group` rule's `(ALL : ALL) ALL`, the helper with `(ALL)` as the run-as user, another deployment's helper, `setenv` in the matching Defaults, or a `Defaults!<helper>` line: each must `FAIL` naming exactly what reaches past the helper (Task 3: the rows of `TestSudoRights`).
+* **A site that answers ssh but has not admitted the deployment.** `ssh.user` names an existing account the owner never ran `host admit` for: the login works, there is no record. It must be one `WARN` with the `host request` line, and nothing else asked of that host, rather than a `FAIL` per check (Task 6: `TestAPendingSiteIsCheckedNoFurther`).
+* **A gateway that is pending or down.** The deployment cannot serve without it and `apply` refuses to run (`Classification.Refuse`), so the line must stay a `FAIL` and doctor must exit 1, while a pending or down data or apps site is a `WARN` and doctor exits 0 for it (Task 4: `TestAdmission`, row `gateway without the ports`; Task 7: `TestAbsentSites`, rows `gateway down` and `gateway pending`).
+* **A server on 443 that echoes the request.** A service that answers any path with the path itself puts the token in its body; a check that looks for the token anywhere in the body would pass it. The check must accept the token as the whole body and nothing else (Task 5: the `an echo of the path` row of `TestSelfCheckRefusesAnotherServer`).
 
 ## Rulings
 
 Where the spec, the index or the code leaves a choice open, this plan decides as follows. Each is restated where its task implements it.
 
-1. **The sudo finding is gone already.** Phase 2 removed it (`16b7bbcb`, "feat: deployment commands run without sudo": "doctor's finding for a sudo it could not use goes too, since none of its transports has one"), and phase 1 removed the allowlist check. This phase removes nothing; *Final checks* confirms with a grep, and the read-only allow list keeps any sudo command but `SudoCommand` out.
-2. **The new checks are part of `doctor.Reads`, not an optional interface** as `DNSReads` is. Every deployment is rootless, so every doctor run asks them; the DNS checks are optional only because they need the secrets.
-3. **Node order and needs.** After `reach <site>`: `admission <site>` (hard: reach); then `user <site>`, `docker <site>`, `docker engine <site>` (hard: `docker <site>`, no read of its own), `linger <site>` and `sudo rights <site>` (hard: admission). Every existing node that reads one site needs `admission <site>` in place of `reach <site>`; `containers`, `settings`, `leftovers`, `patroni <site>` and `caddy certificates` need `docker <site>`, since each runs `docker` there. `etcd`, `etcd version` and `pocket-id` keep their any-of needs on `reach`, since their gathers already try each member in turn and record why one failed.
-4. **The Engine floor is `hostadmit.MinRootlessEngine`, compared with `hostcheck.AtLeast`** (both phase 5, Task 4), and the privileged groups are `hostadmit.PrivilegedGroups` (phase 5, Task 5). `internal/doctor` imports `internal/hostadmit` for those two names only; `hostadmit` does not import `doctor`, so there is no cycle.
-5. **What sudo may allow is exactly the line `host admit` writes**: one entry, run as `root`, tagged `NOPASSWD` and nothing else, whose one command is `apply.WGHelper{Iface}.Path()`. Anything else is a `FAIL` naming it. `sudo -n -l` runs as `LC_ALL=C sudo -n -l`, and an answer the parse does not know is a `WARN`.
-6. **A site with no record, or without a grant its roles need, is pending**: a `WARN` (a `FAIL` on a gateway, ruling 8) whose node's outcome is `Failed`, so nothing more is asked of that site. A record that cannot be read, or that differs from the declaration, is a `FAIL` whose outcome is `Passed`, so the rest of the site is still checked.
-7. **The record is compared with the declaration by `(admission.Record).Differences(config.Site) []string`**: user, SSH port, WireGuard port, forwarding, and the owner's web server for a monitor behind it. The grants are not among them; `admission.Needs(site).Missing(record.Grants)` names those, and makes a site pending rather than wrong. If phase 6 already compares the record with the declaration in `host prepare`, Task 3 moves that comparison here and has `host prepare` call it, so the two can never disagree.
-8. **A gateway pending or down is a `FAIL`.** The spec makes each pending or down site a `WARN`, and also has the run refuse while the gateway is pending or down; doctor's exit status follows the run, so a deployment `apply` refuses is one doctor fails. Every other site is a `WARN`. Founder decision.
-9. **User documentation is phase 9's.** The founder decided phase 9 runs alongside this phase and documents doctor's checks as they land; this phase changes no `README.md`, `docs/commands.md` or `docs/development.md` text, and *What this phase hands to phase 9* lists every name and wording phase 9's last task describes.
-10. **Pending and down are asked of phase 6's classification once per run, and only when a site does not answer.** A healthy run never pays for it. The classification gets a transport for every declared site, not only those `--site` names, since it reads the gateway's deployed record and the cluster's members.
-11. **The gateway answer node runs on the workstation, one per gateway asked, with no needs.** It asks from outside, so a site whose ssh does not answer is still asked.
-12. **A container that failed with `cannot assign requested address`** is advised to be started again or its stack recreated, as the deployment's user: nothing installs a drop-in ordering Docker after `wg-quick` (phase 6: `host prepare` installs nothing), and each deployment runs its own daemon. See founder decision 3.
+1. **The sudo finding is gone already.** Phase 2 removed it, and phase 1 removed the allowlist check. This phase removes nothing; *Final checks* confirms with a grep, and the read-only allow list keeps any sudo command but `SudoCommand` out.
+2. **The new checks are part of `doctor.Reads`, not an optional interface** as `DNSReads` is. Every deployment is rootless, so every doctor run asks them.
+3. **Node order and needs.** After `reach <site>`: `admission <site>` (hard: reach); then `user <site>`, `docker <site>`, `docker engine <site>` (hard: `docker <site>`, no read of its own), `linger <site>` and `sudo rights <site>` (hard: admission). Every existing node that reads one site needs `admission <site>` in place of `reach <site>` (`mesh`, `clocks`, `dns token <site>`); `patroni <site>`, `containers`, `settings`, `leftovers` and `caddy certificates` need `docker <site>`, since each runs `docker` there. `etcd`, `etcd version`, the `patroni` aggregate and `pocket-id` keep their any-of needs on `reach`, since their gathers try each member in turn and record why one failed. `self-check <site>` has no needs and runs after `leftovers`, before the DNS nodes.
+4. **Shared, never copied:** the Engine floor is `hostadmit.MinRootlessEngine`, compared with `hostcheck.AtLeast`; the privileged groups are `hostadmit.PrivilegedGroups`; what sudo may allow is `hostadmit.SudoList.BeyondHelper` over `hostadmit.ReadSudoList`; the boot-order drop-in is `hostadmit.MeshDropInPath`. `internal/doctor` imports `internal/hostadmit` for these names only; `hostadmit` does not import `doctor`, so there is no cycle.
+5. **What sudo may allow is exactly what host admit accepts**: the one rule `hostadmit.HelperRule(helper)`, `(root) NOPASSWD: <helper>`, no Defaults entry `sudoDefaultProblem` names, and no runas or command-specific Defaults line. Anything else is a `FAIL` naming it. `sudo -n -l` runs as `LC_ALL=C sudo -n -l`, and an answer the parse does not know is a `WARN`.
+6. **The record covers the site when `admission.Read` found it and `Record.Differences(cfg, site)` is empty.** When it does not (no record, one that cannot be read, or any difference, grants included), the read asks the classification. A site `topology` classed pending is a `WARN` (a `FAIL` on a gateway, ruling 8) whose node's outcome is `Failed`, so nothing more is asked of that site. Any other uncovered site (joined, or a classification that refused) is a `FAIL` whose outcome is `Passed`, so the rest of the site is still checked, and its finding carries the classification's refusal.
+7. **Grants are among `Differences`.** The merged `Differences` names a missing grant ("the site's roles need --watchdog, which the host's owner did not grant"); the judge adds what each grant gives, from `admission.Needs(site).Missing(record.Grants)`.
+8. **A gateway pending or down is a `FAIL`.** The spec makes each pending or down site a `WARN`, and has the run refuse while the gateway is pending or down; doctor's exit status follows the run. Every other site is a `WARN`. Founder decision.
+9. **User documentation is phase 9's.** Phase 9 runs alongside this phase and documents doctor's checks as they land; this phase changes no `README.md`, `docs/commands.md` or `docs/development.md` text, and *What this phase hands to phase 9* lists every name and wording.
+10. **The classification is asked once per run, and only when a site does not answer or its record does not cover it.** A healthy run never pays for it. It gets a transport for every declared site, not only those `--site` names, since it reads the gateways' deployment record and the cluster's members. A refusal is kept as text (`Unclassified`) and reported, never a crash.
+11. **The self-check node runs on the workstation, one per asked site that runs the toolkit's Caddy (`config.Site.RunsCaddy`), with no needs**, so a site whose ssh does not answer is still asked. It asks once (`Probe.Wait` 0): doctor does not wait for a certificate as `apply` does after starting Caddy. A site with no `public_address` or no hostname is a `WARN` "not asked from outside", as `apply`'s step warns.
+12. **A container that failed with `cannot assign requested address`** is advised to be started again or its stack recreated, as the deployment's user. Whether its manager is ordered after the mesh at boot is the linger node's to say (founder decision 3), and the advice points there.
 
 ## Founder decisions
 
 1. **A pending or down gateway is a `FAIL`**; every other pending or down site is a `WARN` (ruling 8 stands).
-2. **Doctor fetches `/.well-known/paisans/<token>` from every site that runs the toolkit's Caddy**: the gateway and each monitor with `web_server.managed_by: paisans`. Task 6 checks both, sharing phase 6's fetch; a monitor behind the owner's web server is not fetched.
-3. **`host admit` orders the user's manager after the mesh** (phase 5 adds the drop-in). Task 7's advice for `cannot assign requested address` names a reboot ordering problem only when the drop-in is missing from the admission's plan; otherwise it names the container.
-
-## Phase 6 interfaces this plan assumes
-
-Phase 6's plan did not exist when this plan was written. The names below are what this plan calls; each is used in exactly one place, so a different name is a one-line change. **Before Task 1**, reconcile them (Task 0).
-
-| What | Assumed name and shape | Called from |
-|---|---|---|
-| The classification of every declared site, once per run | `sitestate.Classify(cfg *config.Config, transports map[string]apply.Transport) (map[string]sitestate.Class, error)`, with `sitestate.Class{State sitestate.State; Reason string}` and states `sitestate.Ready`, `sitestate.Pending`, `sitestate.Down` | `doctorClassify` in `cmd/paisans/doctor.go` (Task 5) |
-| The gateway's own answer, fetched through its public address on 443 and on 80 | `apply.CheckGatewayAnswer(ctx context.Context, fetch apply.Fetcher, cfg *config.Config, site string) error`, `apply.HTTPFetcher{}` the real fetcher, an error whose first line is "443 on <site> answers, but not as this deployment" for another answer | `doctorGatewayAnswer` in `cmd/paisans/doctor.go` (Task 6) |
-| Where `host prepare` compares the admission record with the declaration | whatever phase 6 wrote; Task 3 makes it `(admission.Record).Differences` | Task 3 |
-| What a site's absence costs | `losses(cfg, site)` in `internal/doctor/reach.go`, unless phase 6 moved it so `apply`'s plan can print the same words | Tasks 3 and 5 |
+2. **Doctor fetches `/.well-known/paisans/<token>` from every site that runs the toolkit's Caddy**: the gateway and each monitor with `web_server.managed_by: paisans`. Task 5 extends `selfcheck.TargetFor` to the monitor; a monitor behind the owner's web server is not fetched.
+3. **`host admit` orders the user's manager after the mesh** (its drop-in, `hostadmit.MeshDropInPath`). The advice names a reboot ordering problem only when the drop-in is missing: the linger node fails then (Task 2), and the container advice (Task 9) names the container.
 
 ---
 
@@ -75,9 +82,9 @@ Phase 6's plan did not exist when this plan was written. The names below are wha
 
 Phase 9's last task documents doctor's checks from this phase's merged code. It describes, in `README.md`'s checks table and `docs/commands.md`'s `paisans doctor` entry:
 
-* The nodes, in the graph's order: `reach <site>`, `admission <site>`, `user <site>`, `docker <site>`, `docker engine <site>`, `linger <site>`, `sudo rights <site>`, then the existing ones, then `gateway answer <site>` after `leftovers <site>` and before the DNS nodes.
-* The commands: `doctor.UserCommand`, `doctor.DockerCommand`, `doctor.LingerCommand`, `doctor.SudoCommand` (`LC_ALL=C sudo -n -l`), and the record read from `admission.Path(token)` as the login user.
-* What fails and what warns: a privileged group or uid 0; a daemon that does not answer or is not rootless; an Engine below 29.5; linger off; sudo allowing anything but the helper, or not the helper; a record unreadable or differing (each a `FAIL`). A site not admitted, admitted without a grant, or down: a `WARN`, a `FAIL` on a gateway, with what the deployment is without and the `host request` or `site remove --host-gone` line. The gateway answering as something else: a `FAIL` with the phase 6 message.
+* The nodes, in the graph's order: `reach <site>`, `admission <site>`, `user <site>`, `docker <site>`, `docker engine <site>`, `linger <site>`, `sudo rights <site>`, then the existing ones, then `self-check <site>` after `leftovers <site>` and before the DNS nodes.
+* The commands: `doctor.UserCommand`, `doctor.DockerCommand`, `doctor.LingerCommand` (linger, and the drop-in at `/etc/systemd/system/user@<uid>.service.d/paisans-mesh.conf`), `doctor.SudoCommand` (`LC_ALL=C sudo -n -l`), and the record read from `admission.Path(token)` as the login user.
+* What fails and what warns: a privileged group or uid 0; a daemon that does not answer or is not rootless; an Engine below 29.5; linger off; the manager not ordered after the mesh; sudo allowing anything past the helper, or not the helper; a record that does not cover a joined site (each a `FAIL`). A site not admitted, admitted without a grant or with a record that differs, while the deployment has not joined it, or down: a `WARN`, a `FAIL` on a gateway, with what the deployment is without and the `host request` or `site remove --host-gone` line. A Caddy site answering as something else, or not answering, from the workstation: a `FAIL`; one with no `public_address`: a `WARN`.
 * That pending skips the rest of that site's checks, and a daemon that does not answer skips every check that runs `docker` there.
 * The container advice for `cannot assign requested address`.
 
@@ -85,84 +92,307 @@ Phase 9's last task documents doctor's checks from this phase's merged code. It 
 
 ## File Structure
 
-| File | Change | Responsibility |
+| File | Change | Responsibility | Task |
+|---|---|---|---|
+| `internal/hostadmit/sudolist.go`, `sudolist_test.go` | create | `SudoList`, `ReadSudoList`, `HelperRule`, `(SudoList).BeyondHelper`, `splitUnescaped` (moved) | 1 |
+| `internal/hostadmit/facts.go`, `user.go`, `evict.go`, `user_internal_test.go`, `probe_integration_test.go` | modify | `readSudo` gone, `sudoRules` over `BeyondHelper`, `meshDropInPath` renamed `MeshDropInPath` | 1 |
+| `internal/doctor/rootless.go`, `rootless_test.go` | create | `UserCommand`, `DockerCommand`, `LingerCommand`; the probes; `User`, `DockerSocket`, `DockerEngine`, `Linger` | 2 |
+| `internal/doctor/sudo.go`, `sudo_test.go` | create | `SudoCommand`, `SudoProbe`, `SudoRights` | 3 |
+| `internal/doctor/admission.go`, `admission_test.go` | create | `SectionAdmission`, `AdmissionProbe`, `Admission`, `pending`, `absentLevel`, `requestAdvice` | 4 |
+| `internal/selfcheck/selfcheck.go`, `selfcheck_test.go`, `target_test.go` | modify, modify, create | `TargetFor` for a monitor running Caddy; the echo row | 5 |
+| `internal/doctor/selfcheck.go`, `selfcheck_test.go` | create | `SectionSelfCheck`, `SelfCheckProbe`, `SelfChecks` | 5 |
+| `internal/doctor/checks.go`, `doctor.go`, `graph.go`, `dnschecks.go`, `graph_test.go` | modify | the `Reads` methods; nodes and needs; `Input`, `sections`, `Diagnose`, `clone` | 6, 7, 8 |
+| `cmd/paisans/doctor.go`, `doctor_test.go`, `doctor_dns_test.go`, `output_test.go` | modify | the reads, the classification, the self-check; the harness | 6, 7, 8 |
+| `internal/doctor/reach.go`, `reach_test.go` | modify, create | pending and down in `Reach` | 7 |
+| `internal/doctor/containers.go`, `doctor_test.go` | modify | the boot advice | 9 |
+| `CHANGELOG.md` | modify | four bullets | 6, 7, 8, 9 |
+
+## Task order and parallel groups
+
+Each group's tasks touch no file in common and may run in parallel worktrees, integrated one at a time; a later group starts once every task of the one before has merged into the phase branch.
+
+| Group | Tasks | Why together |
 |---|---|---|
-| `internal/doctor/rootless.go`, `rootless_test.go` | create | `UserCommand`, `DockerCommand`, `LingerCommand`; `UserProbe`, `DockerProbe`, `LingerProbe`; `User`, `DockerSocket`, `DockerEngine`, `Linger`; the section names |
-| `internal/doctor/sudo.go`, `sudo_test.go` | create | `SudoCommand`, `SudoProbe`, `SudoEntry`, `ParseSudoList`, `SudoRights` |
-| `internal/admission/record.go`, `differences_test.go` | modify, create | `(Record).Differences(config.Site) []string` |
-| `internal/doctor/admission.go`, `admission_test.go` | create | `AdmissionProbe`, `Admission`, `pending`, `absentLevel`, `requestAdvice` |
-| `internal/doctor/checks.go` | modify | the `Reads` methods; the new nodes and needs |
-| `internal/doctor/doctor.go` | modify | `Input` fields, `sections`, `Diagnose` |
-| `internal/doctor/graph.go` | modify | `Input.clone` |
-| `internal/doctor/reach.go`, `reach_test.go` | modify, create | `SiteState`, `SiteClass`, `SiteReach.Class`; pending and down in `Reach` |
-| `internal/doctor/answer.go`, `answer_test.go` | create | `SectionAnswer`, `AnswerProbe`, `GatewayAnswers` |
-| `internal/doctor/containers.go`, `doctor_test.go` | modify | the boot advice; the fixtures |
-| `internal/doctor/graph_test.go` | modify | `fixtureReads`' new reads; the order and pruning tests |
-| `cmd/paisans/doctor.go` | modify | `doctorReads`' new reads, `doctorClassify`, `doctorGatewayAnswer`, the classification transports |
-| `cmd/paisans/doctor_test.go`, `doctor_dns_test.go`, `output_test.go` | modify | `doctorHost.files`, `admitHosts`, `withDoctorHosts(t, cfg, hosts)`, `readOnly`, expectations |
-| `internal/apply/<phase 6's gateway answer test file>` | modify | `TestGatewayAnswerRefusesAnEcho` |
-| `CHANGELOG.md` | modify | four bullets |
+| A | 1, 4, 5, 9 | Task 1 is `internal/hostadmit` alone; 4 and 5 create new files in `internal/doctor` and `internal/selfcheck`; 9 is `containers.go` and `internal/doctor/doctor_test.go`. Only 9 adds a changelog bullet. |
+| B | 2, 3 | Both need Task 1's exports; each creates its own two files in `internal/doctor`. |
+| then, in order | 6, 7, 8 | Each changes `checks.go`, `doctor.go`, `cmd/paisans/doctor.go` and the command test harness. |
+
+Test helpers are named apart so the parallel tasks' test files compile together: `rootlessDocker` (Task 2), `sudoList`, `helperEntry` (Task 3), `admittedRecord` (Task 4), `ourCaddy` (Task 5).
 
 ---
 
-### Task 0: Reconcile with phases 5 and 6
-
-Not a code task, and no commit unless a name changes. This branch was cut from phase 5 in progress; phases 5 and 6 merge into `develop` before this phase starts (index: "Depends on: phase 6").
+### Task 1: Share host admit's sudo reading and its drop-in path
 
 **Files:**
-- Modify (only if a name differs): this plan
+- Create: `internal/hostadmit/sudolist.go`, `internal/hostadmit/sudolist_test.go`
+- Modify: `internal/hostadmit/facts.go`, `internal/hostadmit/user.go`, `internal/hostadmit/evict.go`
+- Modify: `internal/hostadmit/user_internal_test.go`, `internal/hostadmit/probe_integration_test.go`
 
 **Interfaces:**
-- Consumes: phase 5's `hostadmit.PrivilegedGroups`, `hostadmit.MinRootlessEngine`, `hostcheck.AtLeast`, `admission.Record.MeshLAN`; phase 6's names in *Phase 6 interfaces this plan assumes*.
-- Produces: a plan whose every name exists on `develop`.
+- Consumes: `readSudo`, `splitUnescaped`, `meshDropInPath` (`facts.go`), `sudoRules`, `sudoDefaultProblem` (`user.go`), the fixture `testdata/sudo/setenv-helper.txt`.
+- Produces: `type SudoList struct{ Rules, Defaults, Specific []string }`; `func ReadSudoList(lines []string) (SudoList, bool)`; `func HelperRule(helper string) string`; `func (l SudoList) BeyondHelper(helper string) (rules, defaults []string)`; `func MeshDropInPath(uid string) string`.
 
-- [ ] **Step 1: Bring the branch up to `develop`**
+- [ ] **Step 1: Write the failing test**
 
-The branch holds only this plan's commit.
+Create `internal/hostadmit/sudolist_test.go`:
 
-Run: `git fetch origin && git rebase origin/develop`
-Expected: the plan's commit replays cleanly onto `develop`.
+```go
+package hostadmit_test
 
-- [ ] **Step 2: Check phase 5's names**
+import (
+	"os"
+	"slices"
+	"strings"
+	"testing"
 
-Run: `grep -n "var PrivilegedGroups\|MinRootlessEngine =\|func AtLeast" internal/hostadmit/*.go internal/hostcheck/*.go`
-Expected: three hits, `PrivilegedGroups` in `internal/hostadmit/user.go`, `MinRootlessEngine` in `internal/hostadmit/docker.go`, `AtLeast` in `internal/hostcheck/docker.go`.
+	"github.com/paisans-software/paisans-cli/internal/hostadmit"
+)
 
-- [ ] **Step 3: Check phase 6's names**
+const helper = "/usr/local/libexec/paisans/wg-psns-f2a9"
 
-Run: `grep -rn "func Classify\|func CheckGatewayAnswer\|type Fetcher\|HTTPFetcher" internal/ cmd/ | grep -v _test.go`
-Expected: the classification and the gateway answer check. Where a name or a signature differs from *Phase 6 interfaces this plan assumes*, edit this plan's table and the two functions that call them (`doctorClassify` in Task 5, `doctorGatewayAnswer` in Task 6) to phase 6's, and read phase 6's error text for another answer.
+// ReadSudoList reads sudo -l as Ubuntu 24.04 prints it, as root for a user
+// or as the user itself: its Defaults split into entries, each rule, each
+// specific line; a refusal is a list of nothing; anything else is unread.
+func TestReadSudoList(t *testing.T) {
+	b, err := os.ReadFile("testdata/sudo/setenv-helper.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, ok := hostadmit.ReadSudoList(strings.Split(strings.TrimRight(string(b), "\n"), "\n"))
+	if !ok ||
+		!slices.Equal(l.Defaults, []string{"env_reset", "mail_badpass", `secure_path=/usr/local/sbin\:/usr/local/bin\:/usr/sbin\:/usr/bin\:/sbin\:/bin\:/snap/bin`, "use_pty"}) ||
+		!slices.Equal(l.Rules, []string{hostadmit.HelperRule(helper)}) ||
+		!slices.Equal(l.Specific, []string{"Defaults!" + helper + " setenv"}) {
+		t.Errorf("%+v, %v", l, ok)
+	}
+	l, ok = hostadmit.ReadSudoList([]string{"Matching Defaults entries for paisans-f2a9 on host:", "    env_reset, mail_badpass,", `    secure_path=/usr/bin\:/bin,`, "    use_pty", "",
+		"User paisans-f2a9 may run the following commands on host:", "    " + hostadmit.HelperRule(helper)})
+	if !ok || !slices.Equal(l.Defaults, []string{"env_reset", "mail_badpass", `secure_path=/usr/bin\:/bin`, "use_pty"}) {
+		t.Errorf("wrapped Defaults: %+v", l)
+	}
+	for _, refused := range []string{"User paisans-f2a9 is not allowed to run sudo on host.", "Sorry, user paisans-f2a9 may not run sudo on host."} {
+		if l, ok := hostadmit.ReadSudoList([]string{refused}); !ok || len(l.Rules) != 0 {
+			t.Errorf("%q: %+v, %v", refused, l, ok)
+		}
+	}
+	for _, lines := range [][]string{
+		{""},
+		{"something else"},
+		{"Matching Defaults entries for paisans-f2a9 on host:", "    env_reset", "Something sudo never printed"},
+		{"Benutzer paisans-f2a9 darf die folgenden Befehle auf host ausführen:", "    " + hostadmit.HelperRule(helper)},
+	} {
+		if l, ok := hostadmit.ReadSudoList(lines); ok {
+			t.Errorf("%q read as %+v", lines, l)
+		}
+	}
+}
 
-Run: `grep -rn "admission.Read\|Ports.SSH\|Ports.WireGuard" internal/hostprep/*.go | grep -v _test.go`
-Expected: where phase 6's `host prepare` compares the record with the declaration. Task 3, Step 5 moves it.
+// BeyondHelper is every rule but the helper's, every Defaults entry that
+// hands the helper the user's environment or path, and every specific line.
+func TestBeyondHelper(t *testing.T) {
+	l := hostadmit.SudoList{
+		Rules:    []string{hostadmit.HelperRule(helper), "(ALL : ALL) ALL", "(root) NOPASSWD: " + helper + ", /bin/sh"},
+		Defaults: []string{"env_reset", "use_pty", "setenv", "!env_reset"},
+		Specific: []string{"Defaults!" + helper + " setenv"},
+	}
+	rules, defaults := l.BeyondHelper(helper)
+	if !slices.Equal(rules, []string{"(ALL : ALL) ALL", "(root) NOPASSWD: " + helper + ", /bin/sh"}) {
+		t.Errorf("rules %q", rules)
+	}
+	if !slices.Equal(defaults, []string{
+		"setenv: the user's variables reach the helper",
+		"!env_reset: the user's whole environment reaches the helper",
+		"Defaults!" + helper + " setenv: set for one runas user or command alone",
+	}) {
+		t.Errorf("defaults %q", defaults)
+	}
+	if r, d := (hostadmit.SudoList{Rules: []string{hostadmit.HelperRule(helper)}, Defaults: []string{"env_reset", "use_pty"}}).BeyondHelper(helper); len(r)+len(d) != 0 {
+		t.Errorf("admit's own line reaches past it: %q %q", r, d)
+	}
+}
+```
 
-Run: `grep -rn "func losses" internal/`
-Expected: `internal/doctor/reach.go`, or wherever phase 6 moved it; Tasks 3 and 5 call it there.
+Run: `go test ./internal/hostadmit/ -run 'TestReadSudoList|TestBeyondHelper'`
+Expected: FAIL to compile, `undefined: hostadmit.ReadSudoList`.
 
-- [ ] **Step 4: Commit, only if the plan changed**
+- [ ] **Step 2: Move the reading out of the facts, and export it**
+
+Create `internal/hostadmit/sudolist.go`:
+
+```go
+package hostadmit
+
+import "strings"
+
+// SudoList is what sudo -l printed for one user: its rules, each entry of
+// the Defaults that apply to it, and each runas or command-specific
+// Defaults line, as sudo printed them.
+type SudoList struct {
+	Rules, Defaults, Specific []string
+}
+
+// ReadSudoList reads what sudo -n -l printed under LC_ALL=C, as root for a
+// user (-U) or as the user itself: a header line per section, each entry
+// indented below it, long lines wrapped onto more indented lines. A user
+// sudo refuses outright reads as a list with nothing in it. ok is false
+// for a line it does not know, or a listing with neither rules nor a
+// refusal, so no caller takes an answer it cannot read for one granting
+// nothing.
+func ReadSudoList(lines []string) (list SudoList, ok bool) {
+	section, understood := "", false
+	var defaults []string
+	for _, l := range lines {
+		l = strings.TrimRight(l, "\r")
+		indented := strings.HasPrefix(l, " ") || strings.HasPrefix(l, "\t")
+		entry := strings.TrimSpace(l)
+		switch {
+		case entry == "":
+			section = ""
+		case !indented && strings.HasPrefix(l, "Matching Defaults entries for "):
+			section = "defaults"
+		case !indented && strings.HasPrefix(l, "Runas and Command-specific defaults for "):
+			section = "specific"
+		case !indented && strings.Contains(l, " may run the following commands on "):
+			section, understood = "rules", true
+		case !indented && strings.Contains(l, " is not allowed to run sudo on "),
+			!indented && strings.HasPrefix(l, "Sorry, user ") && strings.Contains(l, " may not run sudo on "):
+			section, understood = "", true
+		case indented && section == "defaults":
+			defaults = append(defaults, entry)
+		case indented && section == "specific":
+			list.Specific = append(list.Specific, entry)
+		case indented && section == "rules":
+			list.Rules = append(list.Rules, entry)
+		default:
+			return SudoList{}, false
+		}
+	}
+	// Defaults wrap after a comma, and a comma inside a value is escaped.
+	for _, e := range splitUnescaped(strings.Join(defaults, " "), ',') {
+		if e = strings.TrimSpace(e); e != "" {
+			list.Defaults = append(list.Defaults, e)
+		}
+	}
+	return list, understood
+}
+
+// HelperRule is the one rule host admit grants a deployment's user, as
+// sudo -l lists it: the WireGuard helper, as root, with no password.
+func HelperRule(helper string) string { return "(root) NOPASSWD: " + helper }
+
+// BeyondHelper is what in l reaches past the helper: every rule but
+// HelperRule(helper); every Defaults entry sudoDefaultProblem names, with
+// why; and every runas or command-specific Defaults line, which sudo -l
+// lists apart from the rule it changes. host admit refuses a user with any
+// of them, and doctor fails one.
+func (l SudoList) BeyondHelper(helper string) (rules, defaults []string) {
+	for _, r := range l.Rules {
+		if r != HelperRule(helper) {
+			rules = append(rules, r)
+		}
+	}
+	for _, d := range l.Defaults {
+		if why := sudoDefaultProblem(d); why != "" {
+			defaults = append(defaults, d+": "+why)
+		}
+	}
+	for _, d := range l.Specific {
+		defaults = append(defaults, d+": set for one runas user or command alone")
+	}
+	return rules, defaults
+}
+
+// splitUnescaped splits s at each sep that no backslash escapes.
+func splitUnescaped(s string, sep byte) []string {
+	var out []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '\\':
+			i++
+		case sep:
+			out = append(out, s[start:i])
+			start = i + 1
+		}
+	}
+	return append(out, s[start:])
+}
+```
+
+In `internal/hostadmit/facts.go`, delete `readSudo` and `splitUnescaped`, and replace the call in `parseFacts`:
+
+```go
+	if f.raw["sudo"] != nil && f.raw["sudo"][len(f.raw["sudo"])-1] == "listed" {
+		if list, ok := ReadSudoList(sudoL); ok {
+			f.User.SudoRules, f.User.SudoDefaults, f.User.SudoSpecific, f.User.SudoRead = list.Rules, list.Defaults, list.Specific, true
+		}
+	}
+```
+
+In `internal/hostadmit/user.go`, `sudoRules`, replace the three loops that build `rules` and `defaults` with:
+
+```go
+	extra, reach := SudoList{Rules: u.SudoRules, Defaults: u.SudoDefaults, Specific: u.SudoSpecific}.BeyondHelper(helper)
+	var rules, defaults []string
+	for _, r := range extra {
+		rules = append(rules, "- "+ui.Visible(r))
+	}
+	for _, d := range reach {
+		defaults = append(defaults, "- "+ui.Visible(d))
+	}
+```
+
+The message is unchanged: `ui.Visible` leaves text that is visible already as it is.
+
+- [ ] **Step 3: Export the drop-in path**
+
+Rename `meshDropInPath` to `MeshDropInPath` everywhere in the package, and say why it is exported:
+
+Run: `grep -rln 'meshDropInPath' internal/hostadmit | xargs sed -i '' 's/meshDropInPath/MeshDropInPath/g'` (GNU sed: `sed -i`)
+
+In `facts.go`, its comment becomes:
+
+```go
+// MeshDropInPath is the user's drop-in that orders its manager after the
+// mesh. Its path holds the user's UID, which the probe learns, so the probe
+// reads it from its own list (userfiles) rather than from probedFiles.
+// doctor asks whether it is there, as the user: it is mode 644.
+```
+
+In `user_internal_test.go`, replace `TestReadSudoReadsUbuntusListing` (now `TestReadSudoList` in `sudolist_test.go`) by deleting it, and drop the `os` and `slices` imports if nothing else there uses them.
+
+Run: `gofmt -l internal/hostadmit && go vet ./internal/hostadmit/ && go test ./internal/hostadmit/`
+Expected: nothing listed; PASS, the golden plans and every refusal unchanged.
+
+- [ ] **Step 4: Commit**
 
 ```bash
-git add docs/superpowers/plans/2026-10-15-rootless-phase-7-doctor.md
-git commit -m "kacl-skip: docs: name phase 6's interfaces in the doctor plan
+git add internal/hostadmit
+git commit -m "refactor: share host admit's reading of sudo -l and its drop-in path
 
-The plan was written before phase 6's, and named the classification and
-the gateway answer check as it expected them; this names them as phase 6
-merged them, so each task calls what exists.
+doctor checks on every run what admit checks once: that sudo lets the
+deployment's user reach no further than the WireGuard helper, and that
+its manager starts after the mesh at boot. Exporting admit's own reading,
+its judgement of what reaches past the helper and the drop-in's path
+keeps the two from drifting. The reading also takes sudo's refusal as
+the user sees it, which doctor gets and admit, asking as root, does not.
+
+Nothing an operator would notice, so no changelog entry.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 1: The user, its Docker daemon and linger, judged
+### Task 2: The user, its Docker daemon and linger, judged
 
 **Files:**
 - Create: `internal/doctor/rootless.go`
 - Test: `internal/doctor/rootless_test.go`
 
 **Interfaces:**
-- Consumes: `hostadmit.PrivilegedGroups []string`, `hostadmit.MinRootlessEngine string` (`"29.5.0"`), `hostcheck.AtLeast(version, min string) bool`; `firstLine`, `lastLines` (`internal/doctor/doctor.go`); the test helper `find(t, findings, section, contains)` (`doctor_test.go`).
-- Produces: `const SectionAdmission = "admission"`, `SectionUser = "user"`, `SectionDocker = "docker"`, `SectionLinger = "linger"`, `SectionSudo = "sudo rights"`; `const UserCommand`, `DockerCommand`, `LingerCommand string`; `type UserProbe struct{ Site, Out, Err string }`, `type DockerProbe struct{ Site, Out, Err string }`, `type LingerProbe struct{ Site, Out, Err string }`, each with an unexported `site() string`; `func (p DockerProbe) Answered() bool`; `func User(probes []UserProbe) []Finding`, `func DockerSocket(probes []DockerProbe) []Finding`, `func DockerEngine(probes []DockerProbe) []Finding`, `func Linger(probes []LingerProbe) []Finding`; `func keyed(out string) map[string]string`.
+- Consumes: `hostadmit.PrivilegedGroups`, `hostadmit.MinRootlessEngine` (`"29.5.0"`), `hostadmit.MeshDropInPath` (Task 1), `hostcheck.AtLeast(version, min string) bool`; `firstLine`, `lastLines` (`doctor.go`); the test helpers `fixture`, `find`, `dump` (`doctor_test.go`).
+- Produces: `const SectionUser = "user"`, `SectionDocker = "docker"`, `SectionLinger = "linger"`; `const UserCommand`, `DockerCommand string`; `var LingerCommand string`; `type UserProbe`, `DockerProbe`, `LingerProbe struct{ Site, Out, Err string }`, each with `site()`; `func (p DockerProbe) Answered() bool`; `func User(probes []UserProbe) []Finding`, `func DockerSocket(probes []DockerProbe) []Finding`, `func DockerEngine(probes []DockerProbe) []Finding`, `func Linger(d deployment.Deployment, probes []LingerProbe) []Finding`; `func keyed(out string) map[string]string`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -178,8 +408,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/hostadmit"
 )
 
-// rootlessDocker is what DockerCommand printed for a rootless daemon on a
-// staging host, with the UID and the version kept and nothing else.
+// rootlessDocker is what DockerCommand prints for a rootless daemon.
 const rootlessDocker = "host unix:///run/user/1001/docker.sock\nengine 29.9.1\nsecurity [\"name=seccomp,profile=builtin\",\"name=rootless\",\"name=cgroupns\"]\n"
 
 // A user in any group that reaches past it fails, naming each group; uid 0
@@ -207,8 +436,7 @@ func TestUser(t *testing.T) {
 	}
 }
 
-// Every group hostadmit refuses at admission fails here too: the two read
-// one list.
+// Every group host admit refuses fails here too: the two read one list.
 func TestEveryPrivilegedGroupFails(t *testing.T) {
 	for _, g := range hostadmit.PrivilegedGroups {
 		fs := User([]UserProbe{{Site: "home-a", Out: "uid 1001\nuser paisans-f2a9\ngroups paisans-f2a9 " + g + "\n"}})
@@ -272,31 +500,46 @@ func TestDockerEngine(t *testing.T) {
 	}
 }
 
+// Linger on and the manager ordered after the mesh pass; either missing
+// fails; an answer that cannot be read is a warning.
 func TestLinger(t *testing.T) {
-	findings := Linger([]LingerProbe{
-		{Site: "home-a", Out: "yes\n"},
-		{Site: "home-b", Out: "no\n"},
-		{Site: "vm", Err: "Failed to get user: No such process"},
+	d := fixture(t).Deployment()
+	findings := Linger(d, []LingerProbe{
+		{Site: "home-a", Out: "linger yes\nmesh-order yes\n"},
+		{Site: "home-b", Out: "linger no\nmesh-order no\n"},
+		{Site: "vm", Out: "linger \nmesh-order yes\n"},
 	})
 	if f := find(t, findings, SectionLinger, "home-a: linger is on"); f.Level != OK {
 		t.Errorf("home-a: level %v", f.Level)
+	}
+	if f := find(t, findings, SectionLinger, "home-a: its manager starts after the mesh at boot"); f.Level != OK {
+		t.Errorf("home-a order: level %v", f.Level)
 	}
 	b := find(t, findings, SectionLinger, "home-b: linger is off")
 	if b.Level != Fail || !strings.Contains(strings.Join(b.More, "\n"), "`paisans host admit`") {
 		t.Errorf("home-b: %+v", b)
 	}
+	o := find(t, findings, SectionLinger, "home-b: its manager is not ordered after the mesh at boot")
+	if o.Level != Fail || !strings.Contains(strings.Join(o.More, "\n"), "wg-quick@psns-f2a9") {
+		t.Errorf("home-b order: %+v", o)
+	}
 	if f := find(t, findings, SectionLinger, "vm: could not read whether linger is on"); f.Level != Warn {
 		t.Errorf("vm: level %v", f.Level)
 	}
 }
-```
 
-- [ ] **Step 2: Run them to verify they fail**
+// LingerCommand looks for the drop-in at host admit's own path.
+func TestLingerCommandReadsAdmitsDropIn(t *testing.T) {
+	if !strings.Contains(LingerCommand, `"`+hostadmit.MeshDropInPath("$(id -u)")+`"`) {
+		t.Errorf("LingerCommand: %s", LingerCommand)
+	}
+}
+```
 
 Run: `go test ./internal/doctor/ -run 'TestUser|TestEveryPrivilegedGroupFails|TestDocker|TestLinger'`
 Expected: FAIL to compile, `undefined: User` (and the other judges and probes).
 
-- [ ] **Step 3: Write the judges**
+- [ ] **Step 2: Write the judges**
 
 Create `internal/doctor/rootless.go`:
 
@@ -309,27 +552,25 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostadmit"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 )
 
 // The rootless checks ask whether a site is still what its owner's host
-// admit made it: the admission record matches the declaration
-// (admission.go), the deployment's user holds no group that reaches past
-// it, its own rootless Docker daemon answers and is new enough, linger keeps
-// that daemon running with nobody logged in, and sudo lets the user run the
-// WireGuard helper and nothing else (sudo.go). Each is read as the login
-// user, with nothing that user may not read. See
+// admit made it: the admission record covers the site (admission.go), the
+// deployment's user holds no group that reaches past it, its own rootless
+// Docker daemon answers and is new enough, linger keeps that daemon running
+// with nobody logged in and its manager starts after the mesh, and sudo
+// lets the user run the WireGuard helper and nothing else (sudo.go). Each
+// is read as the login user, with nothing that user may not read. See
 // docs/specs/2026-10-15-rootless-and-host-admit.md, The deployment's user.
 
-// Sections of the rootless checks, read right after reach: each says
-// whether the rest of a site's checks can be believed.
+// Sections of the rootless checks, read right after admission.
 const (
-	SectionAdmission = "admission"
-	SectionUser      = "user"
-	SectionDocker    = "docker"
-	SectionLinger    = "linger"
-	SectionSudo      = "sudo rights"
+	SectionUser   = "user"
+	SectionDocker = "docker"
+	SectionLinger = "linger"
 )
 
 // UserCommand prints the login user's UID, name and groups, a line each.
@@ -337,13 +578,16 @@ const UserCommand = `printf 'uid %s\nuser %s\ngroups %s\n' "$(id -u)" "$(id -un)
 
 // DockerCommand prints the DOCKER_HOST the command ran with, then asks the
 // daemon there for its Engine version and its security options, which name
-// rootless for a daemon running as its user. The transport sets
-// DOCKER_HOST to the login user's own socket on every command.
+// rootless for a daemon running as its user. The transport exports
+// DOCKER_HOST as the login user's own socket ahead of every command.
 const DockerCommand = `printf 'host %s\n' "${DOCKER_HOST:-unset}" && docker version --format 'engine {{.Server.Version}}' && docker info --format 'security {{json .SecurityOptions}}'`
 
-// LingerCommand prints yes when systemd keeps the login user's instance,
-// and with it the user's Docker daemon, running with no session open.
-const LingerCommand = `loginctl show-user "$(id -un)" --property=Linger --value`
+// LingerCommand prints whether systemd keeps the login user's instance, and
+// with it the user's Docker daemon, running with no session open, and
+// whether host admit's drop-in starts that instance after the mesh at boot.
+// The drop-in is root's, mode 644, so the user reads it.
+var LingerCommand = `printf 'linger %s\n' "$(loginctl show-user "$(id -un)" --property=Linger --value)"; ` +
+	`if [ -f "` + hostadmit.MeshDropInPath("$(id -u)") + `" ]; then echo 'mesh-order yes'; else echo 'mesh-order no'; fi`
 
 // UserProbe is UserCommand's answer on one site.
 type UserProbe struct{ Site, Out, Err string }
@@ -411,7 +655,7 @@ func User(probes []UserProbe) []Finding {
 		out = append(out, Finding{Section: SectionUser, Level: Fail,
 			Line: fmt.Sprintf("%s: %s is in %s", p.Site, name, strings.Join(held, ", ")),
 			More: []string{
-				"The deployment's user is the boundary between this deployment and the rest of the host, and each of these reaches past it: root, sudo, wheel and admin give root; docker is the owner's system daemon, which is root on the host; adm and systemd-journal read every log on it; lxd starts privileged containers.",
+				"The deployment's user is the boundary between this deployment and the rest of the host, and each of these groups reaches past it, to root, to every user's logs, to the owner's system Docker daemon, or to the host's disks and secrets.",
 				"recover:",
 				fmt.Sprintf("  1. The host's owner takes %s out of each, with `sudo gpasswd -d %s <group>` on %s.", name, name, p.Site),
 				fmt.Sprintf("  2. `paisans doctor --site %s` again.", p.Site),
@@ -505,16 +749,18 @@ func DockerEngine(probes []DockerProbe) []Finding {
 }
 
 // Linger checks that systemd keeps the login user's instance running with
-// nobody logged in: without it the user's Docker daemon, and every
-// container in it, stops when the last login ends and does not start at
-// boot.
-func Linger(probes []LingerProbe) []Finding {
+// nobody logged in, and that host admit's drop-in starts it after the mesh
+// at boot. Without linger the user's Docker daemon, and every container in
+// it, stops when the last login ends and does not start at boot; without
+// the drop-in it may start the containers before the mesh address exists.
+func Linger(d deployment.Deployment, probes []LingerProbe) []Finding {
 	var out []Finding
 	for _, p := range probes {
-		switch answer := strings.TrimSpace(p.Out); {
-		case p.Err == "" && answer == "yes":
+		f := keyed(p.Out)
+		switch linger := f["linger"]; {
+		case p.Err == "" && linger == "yes":
 			out = append(out, Finding{Section: SectionLinger, Level: OK, Line: fmt.Sprintf("%s: linger is on: its Docker daemon runs with nobody logged in, and starts at boot", p.Site)})
-		case p.Err == "" && answer == "no":
+		case p.Err == "" && linger == "no":
 			out = append(out, Finding{Section: SectionLinger, Level: Fail,
 				Line: fmt.Sprintf("%s: linger is off", p.Site),
 				More: []string{
@@ -528,18 +774,31 @@ func Linger(probes []LingerProbe) []Finding {
 				why = "unreadable answer: " + firstLine(p.Out)
 			}
 			out = append(out, Finding{Section: SectionLinger, Level: Warn, Line: fmt.Sprintf("%s: could not read whether linger is on", p.Site), More: []string{why}})
+			continue
+		}
+		switch f["mesh-order"] {
+		case "yes":
+			out = append(out, Finding{Section: SectionLinger, Level: OK, Line: fmt.Sprintf("%s: its manager starts after the mesh at boot", p.Site)})
+		case "no":
+			out = append(out, Finding{Section: SectionLinger, Level: Fail,
+				Line: fmt.Sprintf("%s: its manager is not ordered after the mesh at boot", p.Site),
+				More: []string{
+					fmt.Sprintf("host admit's drop-in, which starts the user's manager after %s, is missing. At boot its Docker daemon can then start a container before %s is up, and one that publishes on the mesh address fails with cannot assign requested address, which Docker does not retry.", d.WireGuardUnit(), d.Interface()),
+					"recover:",
+					fmt.Sprintf("  1. The host's owner runs `paisans host admit` for %s again, which writes it; it takes effect at the next boot.", p.Site),
+				}})
 		}
 	}
 	return out
 }
 ```
 
-- [ ] **Step 4: Run them to verify they pass**
+- [ ] **Step 3: Run them to verify they pass**
 
 Run: `go test ./internal/doctor/ -run 'TestUser|TestEveryPrivilegedGroupFails|TestDocker|TestLinger' && go vet ./internal/doctor/`
-Expected: PASS. `TestLinger`'s `home-a` find matches the start of the OK line.
+Expected: PASS. `find` matches the start of a line, so `home-a: linger is on` finds the longer OK line.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add internal/doctor/rootless.go internal/doctor/rootless_test.go
@@ -547,10 +806,11 @@ git commit -m "feat: judge the deployment's user, its rootless docker and linger
 
 Admission draws the boundary once; a group added to the user afterwards,
 a daemon that stopped answering or was replaced by a root one, an Engine
-too old for host networking, or linger turned off each undoes part of it
+too old for host networking, linger turned off or the drop-in that
+starts the user's manager after the mesh gone each undoes part of it
 with nothing else to notice. These are the judges doctor runs over what
-each site says; the privileged groups and the Engine floor are host
-admit's own, so the two cannot drift.
+each site says; the privileged groups, the Engine floor and the
+drop-in's path are host admit's own, so the two cannot drift.
 
 Nothing an operator would notice yet, since no check runs them, so no
 changelog entry.
@@ -560,15 +820,15 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 2: What sudo lets the deployment's user run
+### Task 3: What sudo lets the deployment's user run
 
 **Files:**
 - Create: `internal/doctor/sudo.go`
 - Test: `internal/doctor/sudo_test.go`
 
 **Interfaces:**
-- Consumes: Task 1's `SectionSudo`, `keyed`; `apply.WGHelper{Iface string}.Path() (string, error)`; `deployment.Deployment.Interface()`, `.Prefix()`; `config.Config.Sites[site].SSHUser()`; `lastLines`.
-- Produces: `const SudoCommand = "LC_ALL=C sudo -n -l"`; `type SudoProbe struct{ Site, Out, Err string }` with `site()`; `type SudoEntry struct { RunAs string; Tags []string; Commands []string }`; `func ParseSudoList(out string) (entries []SudoEntry, ok bool)`; `func SudoRights(cfg *config.Config, probes []SudoProbe) []Finding`.
+- Consumes: Task 1's `hostadmit.ReadSudoList`, `hostadmit.HelperRule`, `SudoList.BeyondHelper`; `apply.WGHelper{Iface string}.Path() (string, error)`; `deployment.Deployment.Interface()`, `.Prefix()`; `config.Site.SSHUser()`; `ui.Visible`; `lastLines`.
+- Produces: `const SectionSudo = "sudo rights"`; `const SudoCommand = "LC_ALL=C sudo -n -l"`; `type SudoProbe struct{ Site, Out, Err string }` with `site()`; `func SudoRights(cfg *config.Config, probes []SudoProbe) []Finding`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -578,14 +838,13 @@ Create `internal/doctor/sudo_test.go`:
 package doctor
 
 import (
-	"reflect"
 	"strings"
 	"testing"
 )
 
-// sudoDefaults is the start of sudo -l's answer on Ubuntu 24.04, sudo
-// 1.9.15, before the list itself.
-const sudoDefaults = "Matching Defaults entries for paisans-f2a9 on home-a:\n" +
+// sudoDefaults is the start of sudo -l's answer on Ubuntu 24.04, before
+// the list itself.
+const sudoDefaults = "Matching Defaults entries for ubuntu on home-a:\n" +
 	"    env_reset, mail_badpass,\n" +
 	"    secure_path=/usr/local/sbin\\:/usr/local/bin\\:/usr/sbin\\:/usr/bin\\:/sbin\\:/bin\\:/snap/bin,\n" +
 	"    use_pty\n\n"
@@ -593,32 +852,12 @@ const sudoDefaults = "Matching Defaults entries for paisans-f2a9 on home-a:\n" +
 const helperEntry = "(root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-f2a9"
 
 func sudoList(entries ...string) string {
-	return sudoDefaults + "User paisans-f2a9 may run the following commands on home-a:\n    " + strings.Join(entries, "\n    ") + "\n"
+	return sudoDefaults + "User ubuntu may run the following commands on home-a:\n    " + strings.Join(entries, "\n    ") + "\n"
 }
 
-func TestParseSudoList(t *testing.T) {
-	got, ok := ParseSudoList(sudoList(helperEntry, "(ALL : ALL) ALL", "(root) NOPASSWD: SETENV: /bin/a, /bin/b"))
-	want := []SudoEntry{
-		{RunAs: "root", Tags: []string{"NOPASSWD"}, Commands: []string{"/usr/local/libexec/paisans/wg-psns-f2a9"}},
-		{RunAs: "ALL : ALL", Commands: []string{"ALL"}},
-		{RunAs: "root", Tags: []string{"NOPASSWD", "SETENV"}, Commands: []string{"/bin/a", "/bin/b"}},
-	}
-	if !ok || !reflect.DeepEqual(got, want) {
-		t.Errorf("got %+v, %v\nwant %+v", got, ok, want)
-	}
-	if got, ok := ParseSudoList("Sorry, user paisans-f2a9 may not run sudo on home-a.\n"); !ok || len(got) != 0 {
-		t.Errorf("not allowed: %+v, %v", got, ok)
-	}
-	for _, out := range []string{"", "something else\n", sudoDefaults, "Einträge für paisans-f2a9 auf home-a:\n    (root) NOPASSWD: /bin/sh\n"} {
-		if _, ok := ParseSudoList(out); ok {
-			t.Errorf("%q read as a list", out)
-		}
-	}
-}
-
-// What sudo allows is exactly the line host admit writes, or the check
-// fails naming what is extra or what is missing; an answer it cannot read
-// is a warning.
+// What sudo allows is exactly what host admit accepts, or the check fails
+// naming what reaches past the helper, or that the helper is missing; an
+// answer it cannot read is a warning.
 func TestSudoRights(t *testing.T) {
 	cfg := fixture(t)
 	for _, c := range []struct {
@@ -628,13 +867,15 @@ func TestSudoRights(t *testing.T) {
 		more           string
 	}{
 		{"helper alone", sudoList(helperEntry), "", OK, "home-a: sudo lets ubuntu run the WireGuard helper and nothing else", ""},
-		{"helper and ALL", sudoList(helperEntry, "(ALL : ALL) ALL"), "", Fail, "home-a: sudo lets ubuntu run more than the WireGuard helper: (ALL : ALL) ALL", "`sudo -l -U ubuntu`"},
-		{"helper and a shell on one line", sudoList(helperEntry + ", /bin/sh"), "", Fail, "more than the WireGuard helper: (root) NOPASSWD: /bin/sh", ""},
-		{"helper as any user", sudoList("(ALL) NOPASSWD: /usr/local/libexec/paisans/wg-psns-f2a9"), "", Fail, "more than the WireGuard helper: (ALL) NOPASSWD: /usr/local/libexec/paisans/wg-psns-f2a9", "The helper's own line is missing too"},
-		{"helper asking a password", sudoList("(root) /usr/local/libexec/paisans/wg-psns-f2a9"), "", Fail, "more than the WireGuard helper: (root) /usr/local/libexec/paisans/wg-psns-f2a9", ""},
-		{"another deployment's helper", sudoList(helperEntry, "(root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-0a0b"), "", Fail, "more than the WireGuard helper: (root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-0a0b", ""},
+		{"helper and ALL", sudoList(helperEntry, "(ALL : ALL) ALL"), "", Fail, "home-a: sudo lets ubuntu reach past the WireGuard helper: (ALL : ALL) ALL", "`sudo -l -U ubuntu`"},
+		{"helper and a shell on one line", sudoList(helperEntry + ", /bin/sh"), "", Fail, "reach past the WireGuard helper: " + helperEntry + ", /bin/sh", ""},
+		{"helper as any user", sudoList("(ALL) NOPASSWD: /usr/local/libexec/paisans/wg-psns-f2a9"), "", Fail, "reach past the WireGuard helper: (ALL) NOPASSWD: /usr/local/libexec/paisans/wg-psns-f2a9", ""},
+		{"helper asking a password", sudoList("(root) /usr/local/libexec/paisans/wg-psns-f2a9"), "", Fail, "reach past the WireGuard helper: (root) /usr/local/libexec/paisans/wg-psns-f2a9", ""},
+		{"another deployment's helper", sudoList(helperEntry, "(root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-0a0b"), "", Fail, "reach past the WireGuard helper: (root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-0a0b", ""},
+		{"setenv in the Defaults", strings.Replace(sudoList(helperEntry), "use_pty", "use_pty, setenv", 1), "", Fail, "reach past the WireGuard helper: setenv: the user's variables reach the helper", ""},
+		{"a specific Defaults line", sudoDefaults + "Runas and Command-specific defaults for ubuntu:\n    Defaults!/usr/local/libexec/paisans/wg-psns-f2a9 setenv\n\nUser ubuntu may run the following commands on home-a:\n    " + helperEntry + "\n", "", Fail, "set for one runas user or command alone", ""},
 		{"not allowed", "Sorry, user ubuntu may not run sudo on home-a.\n", "exit status 1", Fail, "home-a: sudo does not let ubuntu run the WireGuard helper", "`paisans host admit`"},
-		{"password required", "", "sudo: a password is required", Fail, "home-a: sudo does not let ubuntu run the WireGuard helper", ""},
+		{"password required", "sudo: a password is required\n", "exit status 1", Fail, "home-a: sudo does not let ubuntu run the WireGuard helper", ""},
 		{"unrecognised", "something else\n", "", Warn, "home-a: could not read what sudo lets ubuntu run", ""},
 		{"translated", "Benutzer ubuntu darf die folgenden Befehle auf home-a ausführen:\n    " + helperEntry + "\n", "", Warn, "home-a: could not read what sudo lets ubuntu run", ""},
 	} {
@@ -652,12 +893,10 @@ func TestSudoRights(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+Run: `go test ./internal/doctor/ -run TestSudoRights`
+Expected: FAIL to compile, `undefined: SudoRights`.
 
-Run: `go test ./internal/doctor/ -run 'TestParseSudoList|TestSudoRights'`
-Expected: FAIL to compile, `undefined: ParseSudoList`, `undefined: SudoRights`.
-
-- [ ] **Step 3: Write the parse and the judge**
+- [ ] **Step 2: Write the judge**
 
 Create `internal/doctor/sudo.go`:
 
@@ -666,17 +905,22 @@ package doctor
 
 import (
 	"fmt"
-	"regexp"
 	"slices"
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/hostadmit"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
+// SectionSudo is what sudo lets the deployment's user run.
+const SectionSudo = "sudo rights"
+
 // SudoCommand lists what sudo lets the login user run, without asking for
-// a password, in the C locale: sudo translates its answer, and the parse
-// reads its English words.
+// a password, in the C locale: sudo translates its answer, and the reading
+// knows its English words. The transport returns stderr with stdout, so a
+// refusal is in the answer too.
 const SudoCommand = "LC_ALL=C sudo -n -l"
 
 // SudoProbe is SudoCommand's answer on one site.
@@ -684,90 +928,19 @@ type SudoProbe struct{ Site, Out, Err string }
 
 func (p SudoProbe) site() string { return p.Site }
 
-// SudoEntry is one line of what sudo -l lists under "may run the following
-// commands": the user the commands run as, their tags, and the commands.
-type SudoEntry struct {
-	RunAs    string
-	Tags     []string
-	Commands []string
-}
-
-var (
-	sudoHeader     = regexp.MustCompile(`^User \S+ may run the following commands on \S+:$`)
-	sudoNotAllowed = regexp.MustCompile(`^Sorry, user \S+ may not run sudo on \S+\.$`)
-	sudoRunAs      = regexp.MustCompile(`^\(([^)]*)\)\s*`)
-	sudoTag        = regexp.MustCompile(`^([A-Z_]+):\s*`)
-)
-
-// ParseSudoList reads sudo -l's answer: the entries under its "may run"
-// line, or none for a user sudo refuses outright. ok is false for anything
-// else, so a check never takes an answer it does not know for one listing
-// nothing.
-func ParseSudoList(out string) (entries []SudoEntry, ok bool) {
-	in := false
-	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimRight(line, "\r")
-		t := strings.TrimSpace(line)
-		switch {
-		case sudoNotAllowed.MatchString(t):
-			return nil, true
-		case sudoHeader.MatchString(t):
-			in = true
-			continue
-		case !in || t == "":
-			continue
-		case !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t"):
-			return nil, false
-		}
-		var e SudoEntry
-		if m := sudoRunAs.FindStringSubmatch(t); m != nil {
-			e.RunAs = strings.TrimSpace(m[1])
-			t = t[len(m[0]):]
-		}
-		for m := sudoTag.FindStringSubmatch(t); m != nil; m = sudoTag.FindStringSubmatch(t) {
-			e.Tags = append(e.Tags, m[1])
-			t = t[len(m[0]):]
-		}
-		for _, c := range strings.Split(t, ",") {
-			if c = strings.TrimSpace(c); c != "" {
-				e.Commands = append(e.Commands, c)
-			}
-		}
-		if len(e.Commands) == 0 {
-			return nil, false
-		}
-		entries = append(entries, e)
-	}
-	return entries, in
-}
-
-// line is one command of e as sudo -l prints it.
-func (e SudoEntry) line(command string) string {
-	s := ""
-	if e.RunAs != "" {
-		s = "(" + e.RunAs + ") "
-	}
-	for _, t := range e.Tags {
-		s += t + ": "
-	}
-	return s + command
-}
-
 // SudoRights checks that sudo lets the deployment's user run the WireGuard
-// helper and nothing else, by comparing what sudo -l lists with the one
-// line host admit writes: run as root, NOPASSWD, the helper's path. Every
-// operator of the deployment can log in as the user, so anything more is
-// theirs too, and root on the host for anything past the helper.
+// helper and nothing else, as host admit accepts it: its one rule, no
+// Defaults entry that hands the helper the user's environment or path, and
+// no runas or command-specific Defaults line (hostadmit.SudoList.
+// BeyondHelper). Every operator of the deployment can log in as the user,
+// so anything more is theirs too, and root on the host for anything past
+// the helper.
 func SudoRights(cfg *config.Config, probes []SudoProbe) []Finding {
 	d := cfg.Deployment()
-	helper, err := apply.WGHelper{Iface: d.Interface()}.Path()
+	helper, helperErr := apply.WGHelper{Iface: d.Interface()}.Path()
 	var out []Finding
 	for _, p := range probes {
 		user := cfg.Sites[p.Site].SSHUser()
-		text := p.Out
-		if strings.TrimSpace(text) == "" {
-			text = p.Err
-		}
 		missing := Finding{Section: SectionSudo, Level: Fail,
 			Line: fmt.Sprintf("%s: sudo does not let %s run the WireGuard helper", p.Site, user),
 			More: []string{
@@ -775,56 +948,47 @@ func SudoRights(cfg *config.Config, probes []SudoProbe) []Finding {
 				"recover:",
 				fmt.Sprintf("  1. The host's owner runs `paisans host admit` for %s again, which installs %s and its line in /etc/sudoers.d/%s.", p.Site, helper, d.Prefix()),
 			}}
-		if err != nil || strings.Contains(text, "a password is required") {
+		if helperErr != nil || strings.Contains(p.Out, "a password is required") {
 			out = append(out, missing)
 			continue
 		}
-		entries, ok := ParseSudoList(text)
+		list, ok := hostadmit.ReadSudoList(strings.Split(strings.TrimRight(p.Out, "\n"), "\n"))
 		if !ok {
-			out = append(out, Finding{Section: SectionSudo, Level: Warn, Line: fmt.Sprintf("%s: could not read what sudo lets %s run", p.Site, user), More: lastLines(text, 3)})
+			out = append(out, Finding{Section: SectionSudo, Level: Warn, Line: fmt.Sprintf("%s: could not read what sudo lets %s run", p.Site, user), More: lastLines(p.Out+"\n"+p.Err, 3)})
 			continue
 		}
-		var extra []string
-		seen := false
-		for _, e := range entries {
-			for _, c := range e.Commands {
-				if e.RunAs == "root" && slices.Equal(e.Tags, []string{"NOPASSWD"}) && c == helper {
-					seen = true
-					continue
-				}
-				extra = append(extra, e.line(c))
+		rules, defaults := list.BeyondHelper(helper)
+		if extra := append(rules, defaults...); len(extra) > 0 {
+			shown := make([]string, len(extra))
+			for i, e := range extra {
+				shown[i] = ui.Visible(e)
 			}
-		}
-		switch {
-		case len(extra) > 0:
-			more := []string{
-				fmt.Sprintf("Every operator of this deployment can log in as %s, so whatever sudo allows it is theirs too, and root on the host for anything past the helper. host admit writes one line, in /etc/sudoers.d/%s; the rest comes from elsewhere in the host's sudoers.", user, d.Prefix()),
-			}
-			if !seen {
-				more = append(more, "The helper's own line is missing too, so apply cannot manage the mesh on this site.")
-			}
-			more = append(more, "recover:",
-				fmt.Sprintf("  1. The host's owner lists every rule for the user with `sudo -l -U %s` and removes all but the helper's with `visudo`.", user),
-				fmt.Sprintf("  2. `paisans doctor --site %s` again.", p.Site))
 			out = append(out, Finding{Section: SectionSudo, Level: Fail,
-				Line: fmt.Sprintf("%s: sudo lets %s run more than the WireGuard helper: %s", p.Site, user, strings.Join(extra, "; ")),
-				More: more})
-		case seen:
-			out = append(out, Finding{Section: SectionSudo, Level: OK, Line: fmt.Sprintf("%s: sudo lets %s run the WireGuard helper and nothing else", p.Site, user)})
-		default:
-			out = append(out, missing)
+				Line: fmt.Sprintf("%s: sudo lets %s reach past the WireGuard helper: %s", p.Site, user, strings.Join(shown, "; ")),
+				More: []string{
+					fmt.Sprintf("Every operator of this deployment can log in as %s, so whatever sudo allows it is theirs too, and root on the host for anything past the helper. host admit writes one line, %s, in /etc/sudoers.d/%s; the rest comes from elsewhere in the host's sudoers.", user, hostadmit.HelperRule(helper), d.Prefix()),
+					"recover:",
+					fmt.Sprintf("  1. The host's owner lists every rule and Defaults entry for the user with `sudo -l -U %s` and removes all but host admit's line with `visudo`, looking in /etc/sudoers and /etc/sudoers.d.", user),
+					fmt.Sprintf("  2. `paisans doctor --site %s` again.", p.Site),
+				}})
+			continue
 		}
+		if slices.Contains(list.Rules, hostadmit.HelperRule(helper)) {
+			out = append(out, Finding{Section: SectionSudo, Level: OK, Line: fmt.Sprintf("%s: sudo lets %s run the WireGuard helper and nothing else", p.Site, user)})
+			continue
+		}
+		out = append(out, missing)
 	}
 	return out
 }
 ```
 
-- [ ] **Step 4: Run them to verify they pass**
+- [ ] **Step 3: Run it to verify it passes**
 
-Run: `go test ./internal/doctor/ -run 'TestParseSudoList|TestSudoRights' && go vet ./internal/doctor/`
-Expected: PASS. The fixture's sites log in as `ubuntu` (`internal/render/testdata/deployment.yaml`), so the lines name `ubuntu`.
+Run: `go test ./internal/doctor/ -run TestSudoRights && go vet ./internal/doctor/`
+Expected: PASS. The fixture's sites log in as `ubuntu`, so the lines name `ubuntu`.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add internal/doctor/sudo.go internal/doctor/sudo_test.go
@@ -833,9 +997,11 @@ git commit -m "feat: judge what sudo lets the deployment's user run
 The WireGuard helper is the one command the deployment's user may run as
 root, through the one sudoers line host admit writes. Every operator can
 log in as that user, so a second rule, a group's ALL, the helper allowed
-as any user, or the helper's line gone are each worth a failure naming
-it. sudo -l is read in the C locale and an answer the parse does not
-know is a warning, never a pass.
+as any user, a Defaults entry that hands the helper the user's
+environment, or the helper's line gone are each worth a failure naming
+it. The reading and the judgement are host admit's own, sudo -l is read
+in the C locale, and an answer it does not know is a warning, never a
+pass.
 
 Nothing an operator would notice yet, since no check runs it, so no
 changelog entry.
@@ -845,140 +1011,17 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 3: The admission record against the declaration
+### Task 4: The admission record against the declaration
 
 **Files:**
-- Modify: `internal/admission/record.go`
-- Create: `internal/admission/differences_test.go`
 - Create: `internal/doctor/admission.go`
 - Test: `internal/doctor/admission_test.go`
-- Modify (only when phase 6 compares the record itself): the `internal/hostprep` file Task 0, Step 3 found
 
 **Interfaces:**
-- Consumes: `admission.Record`, `admission.Ports`, `admission.Needs(config.Site) Grants`, `(Grants).Missing(Grants) []string`; `config.Site.SSHUser()`, `.SSH.PortOrDefault()`, `.ListenPort()`, `.Endpoint`, `.Has(config.Role)`, `.WebServerManagedBy()`, `config.ManagedByExternal`, `config.RoleMonitor`, `config.RoleGateway`, `config.FileName`; `roleLine`, `losses` (`internal/doctor/reach.go`); Task 1's `SectionAdmission`.
-- Produces: `func (r Record) Differences(site config.Site) []string`; in `internal/doctor`: `type AdmissionProbe struct { Site string; Found bool; Record admission.Record; Err string; More []string }` with `site()` and `func (p AdmissionProbe) Pending(site config.Site) bool`; `func Admission(cfg *config.Config, probes []AdmissionProbe) []Finding`; `func pending(cfg *config.Config, section, site, line string, why ...string) Finding`; `func absentLevel(cfg *config.Config, site string) Level`; `func requestAdvice(site string) string`.
+- Consumes: `admission.Record`, `(Record).Differences(cfg *config.Config, site string) []string`, `admission.Needs(config.Site) Grants`, `(Grants).Missing(Grants) []string`, `admission.Build`, `admission.NewRecord`; `topology.Site`, `topology.Pending`; `config.Site.SSHUser()`, `.Has(config.RoleGateway)`, `.WebServerManagedBy()`; `roleLine`, `Losses` (`internal/doctor/reach.go`).
+- Produces: `const SectionAdmission = "admission"`; `type AdmissionProbe struct { Site string; Found bool; Record admission.Record; Err string; More []string; Class topology.Site; Unclassified string }` with `site()`, `func (p AdmissionProbe) Covered(cfg *config.Config) bool`, `func (p AdmissionProbe) Pending() bool`; `func Admission(cfg *config.Config, probes []AdmissionProbe) []Finding`; `func pending(cfg *config.Config, section, site, line string, why ...string) Finding`; `func absentLevel(cfg *config.Config, site string) Level`; `func requestAdvice(site string) string`. In tests: `func admittedRecord(cfg *config.Config, site string) admission.Record`.
 
-- [ ] **Step 1: Write the failing test for the comparison**
-
-Create `internal/admission/differences_test.go`:
-
-```go
-package admission_test
-
-import (
-	"strings"
-	"testing"
-	"time"
-
-	"github.com/paisans-software/paisans-cli/internal/admission"
-)
-
-// A record made from a site's own request differs from it in nothing; each
-// field the declaration changes afterwards is one line naming both values.
-func TestDifferences(t *testing.T) {
-	cfg := fixture(t)
-	at := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
-	for _, site := range []string{"home-a", "home-b", "vm", "status", "watch", "store"} {
-		req := build(t, site)
-		rec := admission.NewRecord(req, req.Grants, "", at)
-		if site == "status" {
-			rec.WebServer = &admission.WebServer{Server: "nginx", Process: "nginx"}
-		}
-		if got := rec.Differences(cfg.Sites[site]); len(got) != 0 {
-			t.Errorf("%s: %q", site, got)
-		}
-	}
-
-	req := build(t, "home-a")
-	rec := admission.NewRecord(req, req.Grants, "", at)
-	s := cfg.Sites["home-a"]
-	s.SSH.User = "community"
-	s.SSH.Port = 2200
-	s.Endpoint = ":51821"
-	got := strings.Join(rec.Differences(s), "\n")
-	for _, want := range []string{
-		"user: admitted as " + req.User + ", and the site logs in as community",
-		"ssh port: the firewall opened 22, and the site declares 2200",
-		"wireguard port: the firewall opened 51820, and the site is dialled on 51821",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("lacks %q:\n%s", want, got)
-		}
-	}
-
-	s = cfg.Sites["home-a"]
-	s.Endpoint = ""
-	if got := strings.Join(rec.Differences(s), "\n"); !strings.Contains(got, "forwarding: on, and the site has no endpoint") {
-		t.Errorf("forwarding:\n%s", got)
-	}
-
-	status := admission.NewRecord(build(t, "status"), admission.Grants{}, "", at)
-	if got := strings.Join(status.Differences(cfg.Sites["status"]), "\n"); !strings.Contains(got, "web server: the site runs behind the owner's web server") {
-		t.Errorf("web server:\n%s", got)
-	}
-
-	// The grants are not a difference: Needs and Missing name them.
-	bare := admission.NewRecord(build(t, "home-a"), admission.Grants{}, "", at)
-	if got := bare.Differences(cfg.Sites["home-a"]); len(got) != 0 {
-		t.Errorf("grants compared: %q", got)
-	}
-}
-```
-
-- [ ] **Step 2: Run it to verify it fails**
-
-Run: `go test ./internal/admission/ -run TestDifferences`
-Expected: FAIL to compile, `rec.Differences undefined`.
-
-- [ ] **Step 3: Write the comparison**
-
-In `internal/admission/record.go`, after `NewRecord`, add:
-
-```go
-// Differences names each thing the record says that the site's declaration
-// does not: the user, the SSH and WireGuard ports the firewall opened,
-// whether forwarding is on, and, for a monitor behind the owner's web
-// server, whether that server was detected. Each is a root change, so only
-// the host's owner brings the host back in line, by admitting the site
-// again. The grants are not compared: Needs(site).Missing(r.Grants) names
-// what is lacking, which leaves a site pending rather than wrong.
-func (r Record) Differences(site config.Site) []string {
-	var out []string
-	if u := site.SSHUser(); r.User != u {
-		out = append(out, fmt.Sprintf("user: admitted as %s, and the site logs in as %s", r.User, u))
-	}
-	if p := site.SSH.PortOrDefault(); r.Ports.SSH != p {
-		out = append(out, fmt.Sprintf("ssh port: the firewall opened %d, and the site declares %d", r.Ports.SSH, p))
-	}
-	if p := site.ListenPort(); r.Ports.WireGuard != p {
-		out = append(out, fmt.Sprintf("wireguard port: the firewall opened %s, and the site is dialled on %s", portOrNone(r.Ports.WireGuard), portOrNone(p)))
-	}
-	switch endpoint := site.Endpoint != ""; {
-	case endpoint && !r.Forwarding:
-		out = append(out, "forwarding: off, and the site has an endpoint, so it relays mesh traffic between sites that have none")
-	case !endpoint && r.Forwarding:
-		out = append(out, "forwarding: on, and the site has no endpoint, so nothing relays through it")
-	}
-	if site.Has(config.RoleMonitor) && site.WebServerManagedBy() == config.ManagedByExternal && r.WebServer == nil {
-		out = append(out, "web server: the site runs behind the owner's web server, and was admitted when it did not, so nothing detected that server")
-	}
-	return out
-}
-
-// portOrNone is a port as the record and the declaration hold it, 0 being
-// none.
-func portOrNone(p int) string {
-	if p == 0 {
-		return "none"
-	}
-	return strconv.Itoa(p)
-}
-```
-
-Run: `go test ./internal/admission/ && go vet ./internal/admission/`
-Expected: PASS. Should `vm` or another fixture site show a difference, read `NewRecord` and the site's declaration: a difference there is a bug in `Differences`, never in the fixture.
-
-- [ ] **Step 4: Write the failing test for the judge**
+- [ ] **Step 1: Write the failing test**
 
 Create `internal/doctor/admission_test.go`:
 
@@ -988,30 +1031,30 @@ package doctor
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/topology"
 )
 
 // admittedRecord is the record host admit leaves for a site of cfg as
-// declared, with every grant its roles need.
+// declared, with every grant its roles need. It panics rather than take a
+// *testing.T, since the graph tests' reads call it.
 func admittedRecord(cfg *config.Config, site string) admission.Record {
-	s := cfg.Sites[site]
-	g := admission.Needs(s)
-	public := []int{}
-	if g.PublicPorts {
-		public = []int{80, 443}
+	req, err := admission.Build(cfg, site)
+	if err != nil {
+		panic(err)
 	}
-	rec := admission.Record{
-		Version: admission.RecordVersion, Deployment: cfg.ID, User: s.SSHUser(), Grants: g,
-		Forwarding: s.Endpoint != "",
-		Ports:      admission.Ports{SSH: s.SSH.PortOrDefault(), WireGuard: s.ListenPort(), Public: public},
-		AdmittedAt: "2026-10-15T12:00:00Z",
-	}
-	if s.Has(config.RoleMonitor) && s.WebServerManagedBy() == config.ManagedByExternal {
+	rec := admission.NewRecord(req, req.Grants, "", time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC))
+	if cfg.Sites[site].WebServerManagedBy() == config.ManagedByExternal {
 		rec.WebServer = &admission.WebServer{Server: "nginx", Process: "nginx"}
 	}
 	return rec
+}
+
+func pendingClass(site string) topology.Site {
+	return topology.Site{Name: site, Class: topology.Pending, Why: site + ": its host has not admitted this deployment", Request: true}
 }
 
 func TestAdmission(t *testing.T) {
@@ -1023,6 +1066,7 @@ func TestAdmission(t *testing.T) {
 	noPorts := admittedRecord(cfg, "vm")
 	noPorts.Grants.PublicPorts = false
 	noPorts.Ports.Public = []int{}
+	joined := "home-a has joined this deployment, and its admission does not cover it: the host opened ssh port 2222, and the site's is 22."
 
 	for _, c := range []struct {
 		name    string
@@ -1032,12 +1076,23 @@ func TestAdmission(t *testing.T) {
 		more    []string
 		pending bool
 	}{
-		{"admitted", AdmissionProbe{Site: "home-a", Found: true, Record: admittedRecord(cfg, "home-a")}, OK, "home-a: admitted as ubuntu, with every grant its roles need", nil, false},
-		{"not admitted", AdmissionProbe{Site: "home-b"}, Warn, "home-b: this deployment is not admitted on its host", []string{"roles: data, apps", "Until it joins, the deployment is without one of 3 etcd votes", "`paisans host request --site home-b > home-b.admit`"}, true},
-		{"without the watchdog", AdmissionProbe{Site: "home-b", Found: true, Record: noWatchdog}, Warn, "home-b: admitted without --watchdog, which its roles need", []string{"--watchdog grants Patroni the machine's watchdog"}, true},
-		{"gateway without the ports", AdmissionProbe{Site: "vm", Found: true, Record: noPorts}, Fail, "vm: admitted without --public-ports, which its roles need", []string{"--public-ports lets the deployment bind ports 80 and 443"}, true},
-		{"differs", AdmissionProbe{Site: "home-a", Found: true, Record: moved}, Fail, "home-a: the admission record differs from paisans-stack.yaml", []string{"ssh port: the firewall opened 2222, and the site declares 22", "host prepare refuses"}, false},
-		{"unreadable", AdmissionProbe{Site: "home-a", Err: `the admission record for "f2a9" is refused:`, More: []string{"- version: \"2\""}}, Fail, "home-a: its admission record cannot be read", []string{`- version: "2"`, "`paisans host admit`"}, false},
+		{"admitted", AdmissionProbe{Site: "home-a", Found: true, Record: admittedRecord(cfg, "home-a")}, OK,
+			"home-a: admitted as ubuntu, covering its roles", nil, false},
+		{"not admitted, pending", AdmissionProbe{Site: "home-b", Class: pendingClass("home-b")}, Warn,
+			"home-b: pending: this deployment is not admitted on its host",
+			[]string{"roles: data, apps", "Until it joins, the deployment is without one of 3 etcd votes", "`paisans host request --site home-b > home-b.admit`"}, true},
+		{"without the watchdog, pending", AdmissionProbe{Site: "home-b", Found: true, Record: noWatchdog, Class: pendingClass("home-b")}, Warn,
+			"home-b: pending: its admission does not cover it",
+			[]string{"the site's roles need --watchdog, which the host's owner did not grant", "--watchdog grants Patroni the machine's watchdog"}, true},
+		{"gateway without the ports", AdmissionProbe{Site: "vm", Found: true, Record: noPorts, Class: pendingClass("vm")}, Fail,
+			"vm: pending: its admission does not cover it",
+			[]string{"--public-ports lets the deployment bind ports 80 and 443", "its gateway"}, true},
+		{"differs, joined", AdmissionProbe{Site: "home-a", Found: true, Record: moved, Unclassified: joined}, Fail,
+			"home-a: its admission does not cover it",
+			[]string{"the host opened ssh port 2222, and the site's is 22", "The run's classification of the sites refuses: home-a has joined", "`paisans host request --site home-a > home-a.admit`"}, false},
+		{"unreadable", AdmissionProbe{Site: "home-a", Err: `the admission record for "f2a9" is refused:`, More: []string{"- version: \"2\""}}, Fail,
+			"home-a: its admission record cannot be read",
+			[]string{`- version: "2"`, "`paisans host request --site home-a > home-a.admit`"}, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			fs := Admission(cfg, []AdmissionProbe{c.probe})
@@ -1054,7 +1109,7 @@ func TestAdmission(t *testing.T) {
 					t.Errorf("lacks %q:\n%s", want, text)
 				}
 			}
-			if got := c.probe.Pending(cfg.Sites[c.probe.Site]); got != c.pending {
+			if got := c.probe.Pending(); got != c.pending {
 				t.Errorf("Pending %v, want %v", got, c.pending)
 			}
 		})
@@ -1062,12 +1117,10 @@ func TestAdmission(t *testing.T) {
 }
 ```
 
-- [ ] **Step 5: Run it to verify it fails**
-
 Run: `go test ./internal/doctor/ -run TestAdmission`
 Expected: FAIL to compile, `undefined: AdmissionProbe`, `undefined: Admission`.
 
-- [ ] **Step 6: Write the judge**
+- [ ] **Step 2: Write the judge**
 
 Create `internal/doctor/admission.go`:
 
@@ -1076,11 +1129,16 @@ package doctor
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/topology"
 )
+
+// SectionAdmission is each site's admission record against its
+// declaration, read right after reach: every other read of the site needs
+// it.
+const SectionAdmission = "admission"
 
 // AdmissionProbe is the site's admission record, read as the login user:
 // it is mode 644, so the deployment's user reads it without sudo.
@@ -1093,20 +1151,25 @@ type AdmissionProbe struct {
 	// More the rest of it.
 	Err  string
 	More []string
+	// Class is the run's classification of the site, asked only when the
+	// record does not cover it; Unclassified is why the classification
+	// refused, when it did.
+	Class        topology.Site
+	Unclassified string
 }
 
 func (p AdmissionProbe) site() string { return p.Site }
 
-// Pending reports whether the site has not joined because of its host: no
-// record, or one without a grant its roles need. Nothing more is asked of a
-// pending site. A record that could not be read is not pending: the rest
-// of the site is still checked.
-func (p AdmissionProbe) Pending(site config.Site) bool {
-	if p.Err != "" {
-		return false
-	}
-	return !p.Found || len(admission.Needs(site).Missing(p.Record.Grants)) > 0
+// Covered reports whether the record was read and covers the site as cfg
+// declares it: the same test every command that writes to a host makes
+// (admission.ForSite).
+func (p AdmissionProbe) Covered(cfg *config.Config) bool {
+	return p.Err == "" && p.Found && len(p.Record.Differences(cfg, p.Site)) == 0
 }
+
+// Pending reports whether the run's classification left the site out as
+// pending: nothing more is asked of it.
+func (p AdmissionProbe) Pending() bool { return p.Class.Class == topology.Pending }
 
 // grantWhy is what each grant gives, by the flag that gives it.
 var grantWhy = map[string]string{
@@ -1114,59 +1177,56 @@ var grantWhy = map[string]string{
 	"public-ports": "--public-ports lets the deployment bind ports 80 and 443, which the gateway and a monitor running Paisans' Caddy serve on; every local user can then bind ports below 1024.",
 }
 
-// Admission checks the site's admission record against its declaration.
-// A site whose host has not admitted the deployment, or not with every
-// grant its roles need, is pending: the deployment runs without it, so it
-// is a warning naming what it is without and how its owner admits it (a
-// failure on a gateway, absentLevel). A record that cannot be read, or that
-// says something the declaration does not, is a failure: each difference
-// is a root change only the owner makes, and host prepare refuses until
-// the record matches.
+// Admission checks each site's admission record against its declaration. A
+// site the record does not cover (none, unreadable, or differing, a
+// missing grant included) is pending when the run's classification says
+// so: the deployment runs without it, so it is a warning naming what it is
+// without and how its owner admits it (a failure on a gateway,
+// absentLevel). Any other site the record does not cover is a failure,
+// with the classification's refusal: the deployment has joined it, or
+// cannot tell, and apply stops until its owner admits it again.
 func Admission(cfg *config.Config, probes []AdmissionProbe) []Finding {
 	var out []Finding
 	for _, p := range probes {
-		s := cfg.Sites[p.Site]
+		if p.Covered(cfg) {
+			out = append(out, Finding{Section: SectionAdmission, Level: OK, Line: fmt.Sprintf("%s: admitted as %s, covering its roles", p.Site, p.Record.User)})
+			continue
+		}
+		var problem string
+		var more []string
 		switch {
 		case p.Err != "":
-			more := append([]string{}, p.More...)
-			more = append(more, "recover:", fmt.Sprintf("  1. The host's owner runs `paisans host admit` for %s again, which rewrites it.", p.Site))
-			out = append(out, Finding{Section: SectionAdmission, Level: Fail, Line: fmt.Sprintf("%s: its admission record cannot be read", p.Site), More: append([]string{p.Err}, more...)})
+			problem = "its admission record cannot be read"
+			more = append([]string{p.Err}, p.More...)
 		case !p.Found:
-			out = append(out, pending(cfg, SectionAdmission, p.Site,
-				fmt.Sprintf("%s: this deployment is not admitted on its host", p.Site),
-				fmt.Sprintf("Its login as %s works, but the host holds no admission record for this deployment, so its owner has not run host admit for it.", s.SSHUser())))
+			problem = "this deployment is not admitted on its host"
+			more = []string{fmt.Sprintf("Its login as %s works, and the host holds no admission record for this deployment: its owner has not admitted it, or has evicted it.", cfg.Sites[p.Site].SSHUser())}
 		default:
-			if missing := admission.Needs(s).Missing(p.Record.Grants); len(missing) > 0 {
-				flags := make([]string, len(missing))
-				var why []string
-				for i, m := range missing {
-					flags[i] = "--" + m
-					why = append(why, grantWhy[m])
-				}
-				out = append(out, pending(cfg, SectionAdmission, p.Site,
-					fmt.Sprintf("%s: admitted without %s, which its roles need", p.Site, strings.Join(flags, " and ")), why...))
-				continue
+			problem = "its admission does not cover it"
+			more = p.Record.Differences(cfg, p.Site)
+			for _, g := range admission.Needs(cfg.Sites[p.Site]).Missing(p.Record.Grants) {
+				more = append(more, grantWhy[g])
 			}
-			if diffs := p.Record.Differences(s); len(diffs) > 0 {
-				more := append([]string{}, diffs...)
-				more = append(more,
-					"Each is a root change only the host's owner makes, and host prepare refuses until the record matches.",
-					"recover:", requestAdvice(p.Site))
-				out = append(out, Finding{Section: SectionAdmission, Level: Fail, Line: fmt.Sprintf("%s: the admission record differs from %s", p.Site, config.FileName), More: more})
-				continue
-			}
-			out = append(out, Finding{Section: SectionAdmission, Level: OK, Line: fmt.Sprintf("%s: admitted as %s, with every grant its roles need", p.Site, p.Record.User)})
 		}
+		if p.Pending() {
+			out = append(out, pending(cfg, SectionAdmission, p.Site, fmt.Sprintf("%s: pending: %s", p.Site, problem), more...))
+			continue
+		}
+		if p.Unclassified != "" {
+			more = append(more, "The run's classification of the sites refuses: "+p.Unclassified)
+		}
+		more = append(more, "recover:", requestAdvice(p.Site))
+		out = append(out, Finding{Section: SectionAdmission, Level: Fail, Line: fmt.Sprintf("%s: %s", p.Site, problem), More: more})
 	}
 	return out
 }
 
 // pending is a site the deployment runs without because its host has not
-// admitted it, or not with every grant its roles need: its roles, why, what
-// the deployment is without until it joins, and how its owner admits it.
+// admitted it, or not as declared: its roles, why, what the deployment is
+// without until it joins, and how its owner admits it.
 func pending(cfg *config.Config, section, site, line string, why ...string) Finding {
 	more := append([]string{roleLine(cfg, site)}, why...)
-	if lost := losses(cfg, site); lost != "" {
+	if lost := Losses(cfg, site); lost != "" {
 		more = append(more, "Until it joins, the deployment is without "+lost+".")
 	}
 	more = append(more, "recover:", requestAdvice(site))
@@ -1183,40 +1243,33 @@ func absentLevel(cfg *config.Config, site string) Level {
 	return Warn
 }
 
-// requestAdvice is how a site's owner admits it, or admits it again.
+// requestAdvice is how a site's owner admits it, or admits it again, in
+// the words apply's refusal uses.
 func requestAdvice(site string) string {
-	return fmt.Sprintf("  1. `paisans host request --site %s > %s.admit` writes the request its owner admits it from; they run `sudo paisans host admit --request %s.admit --execute` on the host, with the grants it asks for, and the next `paisans apply` joins it.", site, site, site)
+	return fmt.Sprintf("  1. `paisans host request --site %[1]s > %[1]s.admit` writes the request; its owner runs `sudo paisans host admit --request %[1]s.admit` on the host, granting what it asks for, and the next `paisans apply` joins it.", site)
 }
 ```
 
-- [ ] **Step 7: Run it to verify it passes**
+- [ ] **Step 3: Run it to verify it passes**
 
 Run: `go test ./internal/doctor/ -run TestAdmission && go vet ./internal/doctor/`
-Expected: PASS.
+Expected: PASS. Should the `admitted` row show a difference, read `admission.Build` and `NewRecord` for that site: a difference there is a bug in the helper, never in `Differences`.
 
-- [ ] **Step 8: One comparison, used by `host prepare` too**
-
-Only when Task 0, Step 3 found phase 6's `host prepare` comparing the record's user, ports or forwarding with the declaration itself: replace that comparison with `rec.Differences(site)`, keeping `host prepare`'s refusal and its `host admit` line around it, and keep its tests passing; where a test there asserts the old wording, change it to the wording `Differences` gives.
-
-Run: `go test ./internal/hostprep/ ./internal/admission/ ./internal/doctor/`
-Expected: PASS.
-
-- [ ] **Step 9: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add internal/admission/record.go internal/admission/differences_test.go internal/doctor/admission.go internal/doctor/admission_test.go
-git add internal/hostprep   # only when Step 8 changed it
-git commit -m "feat: compare a site's admission record with its declaration
+git add internal/doctor/admission.go internal/doctor/admission_test.go
+git commit -m "feat: judge a site's admission record against its declaration
 
 The record is what the host's owner granted and opened; the declaration
-is what the deployment now needs. A site whose host holds no record, or
-one without a grant its roles need, is pending: the deployment runs
-without it, so doctor will say so as a warning with what it lacks and
-the host request line, and a failure for a gateway, which apply cannot
-run without. A record that says another user, other ports or other
-forwarding is a failure, since only the owner can change those.
-Differences is the one comparison, so host prepare and doctor cannot
-disagree about it.
+is what the deployment now needs. A site the record does not cover is
+pending when the deployment has not joined it, which the run's
+classification decides, never the site's own host: doctor will say so
+as a warning with what the deployment is without and the host request
+line, and a failure for a gateway, which apply cannot run without. A
+joined site the record no longer covers is a failure, since apply stops
+on it. The comparison is the one every command that writes to a host
+makes.
 
 Nothing an operator would notice yet, since no check runs it, so no
 changelog entry.
@@ -1226,26 +1279,277 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 4: The rootless checks in the graph
+### Task 5: The self-check, for the gateway and a monitor running Caddy
 
 **Files:**
-- Modify: `internal/doctor/checks.go`, `internal/doctor/doctor.go`, `internal/doctor/graph.go`, `internal/doctor/dnschecks.go` (`addDNS`'s need)
+- Modify: `internal/selfcheck/selfcheck.go` (`TargetFor`, the package comment)
+- Modify: `internal/selfcheck/selfcheck_test.go` (the echo row)
+- Create: `internal/selfcheck/target_test.go`
+- Create: `internal/doctor/selfcheck.go`, `internal/doctor/selfcheck_test.go`
+
+**Interfaces:**
+- Consumes: `selfcheck.TargetFor`, `selfcheck.Path`, `selfcheck.Conflict`; `dns.GatewayHostnames`, `dns.ServedHostnames(cfg, site)`; `config.Site.RunsCaddy()`.
+- Produces: `selfcheck.TargetFor` answering for a monitor that runs the toolkit's Caddy; in `internal/doctor`: `const SectionSelfCheck = "self-check"`; `type SelfCheckProbe struct { Site, Host, Address, Unchecked string; Conflict int; Err string }` with `site()`; `func SelfChecks(cfg *config.Config, probes []SelfCheckProbe) []Finding`.
+
+- [ ] **Step 1: Pin the echo, and the monitor's target**
+
+In `internal/selfcheck/selfcheck_test.go`, `TestSelfCheckRefusesAnotherServer`, add a row to the map:
+
+```go
+		"an echo of the path": {https: []result{{a: selfcheck.Answer{Status: 200, Body: "/.well-known/paisans/f2a9\n"}}}, http: []result{redirect}},
+```
+
+Create `internal/selfcheck/target_test.go`:
+
+```go
+package selfcheck_test
+
+import (
+	"path/filepath"
+	"testing"
+
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/dns"
+	"github.com/paisans-software/paisans-cli/internal/selfcheck"
+)
+
+// A gateway is asked for a hostname it serves for the deployment, a
+// monitor running the toolkit's Caddy for one of its own; a site with no
+// Caddy of the toolkit's, or no public_address, has no target.
+func TestTargetForTheGatewayAndAMonitor(t *testing.T) {
+	cfg, err := config.Load(filepath.Join("..", "render", "testdata", "deployment.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, site := range []string{"home-a", "vm"} {
+		if got, ok := selfcheck.TargetFor(cfg, site); ok {
+			t.Errorf("%s: %+v", site, got)
+		}
+	}
+	got, ok := selfcheck.TargetFor(cfg, "watch")
+	want := selfcheck.Target{Deployment: cfg.Deployment(), Site: "watch", Address: "203.0.113.20", Host: "health.example.org"}
+	if !ok || got != want {
+		t.Errorf("watch: %+v, %v", got, ok)
+	}
+
+	vm := cfg.Sites["vm"]
+	vm.PublicAddress = "203.0.113.30"
+	cfg.Sites["vm"] = vm
+	got, ok = selfcheck.TargetFor(cfg, "vm")
+	if !ok || got.Address != "203.0.113.30" || got.Host != dns.GatewayHostnames(cfg)[0].Name {
+		t.Errorf("vm: %+v, %v", got, ok)
+	}
+
+	watch := cfg.Sites["watch"]
+	watch.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal}
+	cfg.Sites["watch"] = watch
+	if got, ok := selfcheck.TargetFor(cfg, "watch"); ok {
+		t.Errorf("a monitor behind the owner's web server: %+v", got)
+	}
+}
+```
+
+Run: `go test ./internal/selfcheck/`
+Expected: the echo row PASSES (`Check` compares the trimmed body with the token exactly); `TestTargetForTheGatewayAndAMonitor` FAILS on `watch`. Should the echo row fail, the check accepts a body holding the token among other text: make it compare `strings.TrimSpace(a.Body)` with `Body(t.Deployment)` exactly, which fixes `apply`'s step as well.
+
+- [ ] **Step 2: A target for a monitor running Caddy**
+
+In `internal/selfcheck/selfcheck.go`, replace the package comment's first sentence with "Package selfcheck asks a site that runs the toolkit's Caddy, from outside, whether it answers as this deployment." and its last sentence with "That Caddy answers /.well-known/paisans/<token> with the token; anything else that answers there is another server." Replace `TargetFor`:
+
+```go
+// TargetFor is site's check: its public_address, and the first hostname its
+// Caddy serves, a gateway's for the deployment and a monitor's its own.
+// false for a site that runs no Caddy of the toolkit's, one with no
+// public_address to ask through, or one with no hostname to ask for.
+func TargetFor(cfg *config.Config, site string) (Target, bool) {
+	s, ok := cfg.Sites[site]
+	if !ok || !s.RunsCaddy() || s.PublicAddress == "" {
+		return Target{}, false
+	}
+	names := dns.GatewayHostnames(cfg)
+	if !s.Has(config.RoleGateway) {
+		names = dns.ServedHostnames(cfg, site)
+	}
+	if len(names) == 0 {
+		return Target{}, false
+	}
+	return Target{Deployment: cfg.Deployment(), Site: site, Address: s.PublicAddress, Host: names[0].Name}, true
+}
+```
+
+`apply`'s step (`checkGatewayAnswers`) asks only a gateway, so nothing it does changes.
+
+Run: `go test ./internal/selfcheck/ ./cmd/paisans/ -run 'SelfCheck|TargetFor|Gateway'`
+Expected: PASS.
+
+- [ ] **Step 3: Write the failing doctor test**
+
+Create `internal/doctor/selfcheck_test.go`:
+
+```go
+package doctor
+
+import (
+	"strings"
+	"testing"
+)
+
+// ourCaddy is a site that answered as this deployment.
+var ourCaddy = SelfCheckProbe{Site: "watch", Host: "health.example.org", Address: "203.0.113.20"}
+
+func TestSelfChecks(t *testing.T) {
+	cfg := fixture(t)
+	conflict := ourCaddy
+	conflict.Conflict, conflict.Err = 443, `443 on watch answers, but not as this deployment: status 200, body "hello"`
+	silent := ourCaddy
+	silent.Err = "443 on watch does not answer https://health.example.org/.well-known/paisans/f2a9 through 203.0.113.20: connection refused"
+	fs := SelfChecks(cfg, []SelfCheckProbe{ourCaddy, {Site: "vm", Unchecked: "no public_address to ask through"}, conflict, silent})
+	if len(fs) != 4 {
+		t.Fatalf("want four findings:\n%s", dump(fs))
+	}
+	for i, c := range []struct {
+		level Level
+		line  string
+		more  []string
+	}{
+		{OK, "watch: answers as this deployment on 443 and 80, asked for health.example.org through 203.0.113.20", nil},
+		{Warn, "vm: not asked from outside: no public_address to ask through", []string{"/.well-known/paisans/f2a9"}},
+		{Fail, `watch: 443 on watch answers, but not as this deployment: status 200, body "hello"`, []string{"/.well-known/paisans/f2a9", "`sudo ss -Hltnp`", "web_server.managed_by: external", "`paisans gateway move`"}},
+		{Fail, "watch: 443 on watch does not answer", []string{"hairpin NAT"}},
+	} {
+		f := fs[i]
+		if f.Level != c.level || !strings.HasPrefix(f.Line, c.line) {
+			t.Errorf("%d: got %v %q", i, f.Level, f.Line)
+		}
+		text := strings.Join(f.More, "\n")
+		for _, want := range c.more {
+			if !strings.Contains(text, want) {
+				t.Errorf("%d lacks %q:\n%s", i, want, text)
+			}
+		}
+	}
+}
+```
+
+Run: `go test ./internal/doctor/ -run TestSelfChecks`
+Expected: FAIL to compile, `undefined: SelfChecks`.
+
+- [ ] **Step 4: Write the judge**
+
+Create `internal/doctor/selfcheck.go`:
+
+```go
+package doctor
+
+import (
+	"fmt"
+
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/selfcheck"
+)
+
+// SectionSelfCheck is each Caddy site's own answer, asked from outside,
+// after everything read on the sites.
+const SectionSelfCheck = "self-check"
+
+// SelfCheckProbe is whether a site running the toolkit's Caddy answered
+// /.well-known/paisans/<token> as this deployment, fetched from the
+// workstation with the check apply runs at the end of the gateway's step.
+// Host and Address are what was asked; Unchecked is why nothing was. Err
+// is the check's error, and Conflict the port that answered as something
+// else, 0 when nothing answered.
+type SelfCheckProbe struct {
+	Site, Host, Address, Unchecked string
+	Conflict                       int
+	Err                            string
+}
+
+func (p SelfCheckProbe) site() string { return p.Site }
+
+// SelfChecks judges each site's answer. The deployment's user cannot read
+// the host's ruleset or another user's sockets, so a port taken after
+// admission, and above all one taken by a DNAT rule with no listener, is
+// invisible from the host; asking from outside is the one way to see it.
+func SelfChecks(cfg *config.Config, probes []SelfCheckProbe) []Finding {
+	path := selfcheck.Path(cfg.Deployment())
+	var out []Finding
+	for _, p := range probes {
+		switch {
+		case p.Unchecked != "":
+			out = append(out, Finding{Section: SectionSelfCheck, Level: Warn,
+				Line: fmt.Sprintf("%s: not asked from outside: %s", p.Site, p.Unchecked),
+				More: []string{fmt.Sprintf("doctor asks each site that runs the toolkit's Caddy for %s through its public_address, as apply asks the gateway; without it, another server holding 443 or 80 there goes unseen.", path)}})
+		case p.Err == "":
+			out = append(out, Finding{Section: SectionSelfCheck, Level: OK,
+				Line: fmt.Sprintf("%s: answers as this deployment on 443 and 80, asked for %s through %s", p.Site, p.Host, p.Address)})
+		case p.Conflict != 0:
+			out = append(out, Finding{Section: SectionSelfCheck, Level: Fail,
+				Line: fmt.Sprintf("%s: %s", p.Site, firstLine(p.Err)),
+				More: []string{
+					fmt.Sprintf("doctor asked %s for https://%s%s from this workstation, as apply does at the end of the gateway's step, and another server answered on %d: a listener of the host owner's, a container of their system Docker, or a DNAT rule, which only root on the host can see.", p.Address, p.Host, path, p.Conflict),
+					"recover:",
+					fmt.Sprintf("  1. The host's owner finds what holds %d on %s: `sudo ss -Hltnp`, `sudo docker ps` for the system daemon, and `sudo nft list ruleset` for a DNAT rule.", p.Conflict, p.Site),
+					"  2. They free the port; or the site runs behind their web server (web_server.managed_by: external, on a monitor), or the gateway moves to another site with `paisans gateway move`.",
+					fmt.Sprintf("  3. `paisans doctor --site %s` again.", p.Site),
+				}})
+		default:
+			out = append(out, Finding{Section: SectionSelfCheck, Level: Fail,
+				Line: fmt.Sprintf("%s: %s", p.Site, firstLine(p.Err)),
+				More: []string{
+					fmt.Sprintf("doctor asked %s for https://%s%s from this workstation, once, and nothing answered.", p.Address, p.Host, path),
+					"When the site is at home behind NAT and doctor runs from the same network, the router has to send its own public address back inside (hairpin NAT, or NAT loopback); many do not, and then doctor is run from outside that network.",
+					fmt.Sprintf("Otherwise check that the router or the provider's firewall forwards 80 and 443 to %s, that public_address is the address they arrive on, and that its Caddy runs (containers %s).", p.Site, p.Site),
+				}})
+		}
+	}
+	return out
+}
+```
+
+Run: `go test ./internal/doctor/ -run TestSelfChecks && go vet ./internal/doctor/ ./internal/selfcheck/`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add internal/selfcheck internal/doctor/selfcheck.go internal/doctor/selfcheck_test.go
+git commit -m "feat: judge the self-check of the gateway and a monitor running caddy
+
+A monitor that serves its own hostname runs the toolkit's Caddy on 80
+and 443 as the gateway does, so a port another server took there after
+admission is as invisible from the host. The self-check now has a target
+for it, its own first hostname, and doctor's judge words each answer:
+this deployment, another server, nothing, or a site with no public
+address to ask through. A server that echoes the path is pinned as
+another server.
+
+Nothing an operator would notice yet: apply asks only the gateway, and
+no doctor check runs the judge. No changelog entry.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 6: The rootless checks in the graph
+
+**Files:**
+- Modify: `internal/doctor/checks.go`, `internal/doctor/doctor.go`, `internal/doctor/graph.go`, `internal/doctor/dnschecks.go` (`addDNS`'s needs)
 - Modify: `internal/doctor/graph_test.go`
 - Modify: `cmd/paisans/doctor.go`
 - Modify: `cmd/paisans/doctor_test.go`, `cmd/paisans/doctor_dns_test.go`, `cmd/paisans/output_test.go`
 - Modify: `CHANGELOG.md`
 
 **Interfaces:**
-- Consumes: Tasks 1 to 3's probes and judges; `admission.Read(Reader, token string) (Record, error)`, `admission.ErrNotAdmitted`, `admission.Path`, `admission.EncodeRecord`; `doctorReads.read` (`cmd/paisans/doctor.go`); the graph's `Node`, `Hard`, `bySite`.
-- Produces: `doctor.Reads` gains `Admission(site string) AdmissionProbe`, `User(site string) UserProbe`, `Docker(site string) DockerProbe`, `Linger(site string) LingerProbe`, `Sudo(site string) SudoProbe`; `doctor.Input` gains `Admission []AdmissionProbe`, `Users []UserProbe`, `Docker []DockerProbe`, `Linger []LingerProbe`, `Sudo []SudoProbe`; nodes `admission <site>`, `user <site>`, `docker <site>`, `docker engine <site>`, `linger <site>`, `sudo rights <site>`. In `cmd/paisans` tests: `doctorHost.files map[string]string`, `func admitHosts(t *testing.T, cfg *config.Config, hosts map[string]doctorHost)`, `func withDoctorHosts(t *testing.T, cfg *config.Config, hosts map[string]doctorHost)`, `func admittedRecord(cfg *config.Config, site string) admission.Record`, `func sudoHelperOnly(user, host, helper string) string`.
+- Consumes: Tasks 2 to 4's probes and judges; `admission.Read(Reader, token string) (Record, error)`, `admission.ErrNotAdmitted`; `doctorReads.read`; the graph's `Node`, `Hard`, `bySite`; in tests, `admittedRecord(t, cfg, site) string` and `admittedPath(cfg) string` (`cmd/paisans/admitted_test.go`).
+- Produces: `doctor.Reads` gains `Admission(site string) AdmissionProbe`, `User(site string) UserProbe`, `Docker(site string) DockerProbe`, `Linger(site string) LingerProbe`, `Sudo(site string) SudoProbe`; `doctor.Input` gains `Admission []AdmissionProbe`, `Users []UserProbe`, `Docker []DockerProbe`, `Linger []LingerProbe`, `Sudo []SudoProbe`; nodes `admission <site>`, `user <site>`, `docker <site>`, `docker engine <site>`, `linger <site>`, `sudo rights <site>`. In `cmd/paisans` tests: `doctorHost.files map[string]string`, `func admitHosts(t *testing.T, cfg *config.Config, hosts map[string]doctorHost)`, `func withDoctorHosts(t *testing.T, cfg *config.Config, hosts map[string]doctorHost)`, `func sudoHelperOnly(user, host, helper string) string`.
 
 - [ ] **Step 1: Teach the test reads the new questions**
 
 In `internal/doctor/graph_test.go`, add to `fixtureReads`, below `Leftovers`. Each answers from the fixture's `Input` when the site is there, and otherwise as a sound admitted host:
 
 ```go
-// fixtureConfig is the fixture the tests load, once, for the reads that
-// answer from the declaration.
+// fixtureConfig is the fixture the reads answer from, loaded once.
 var fixtureConfig = sync.OnceValue(func() *config.Config {
 	cfg, err := config.Load(filepath.Join("..", "render", "testdata", "deployment.yaml"))
 	if err != nil {
@@ -1291,7 +1595,7 @@ func (f *fixtureReads) Linger(site string) LingerProbe {
 			return p
 		}
 	}
-	return LingerProbe{Site: site, Out: "yes\n"}
+	return LingerProbe{Site: site, Out: "linger yes\nmesh-order yes\n"}
 }
 
 func (f *fixtureReads) Sudo(site string) SudoProbe {
@@ -1305,7 +1609,7 @@ func (f *fixtureReads) Sudo(site string) SudoProbe {
 }
 ```
 
-Add `"path/filepath"`, `"sync"` and `"github.com/paisans-software/paisans-cli/internal/config"` to its imports.
+Add `"path/filepath"`, `"github.com/paisans-software/paisans-cli/internal/config"` and `"github.com/paisans-software/paisans-cli/internal/topology"` to its imports (`sync` is there already).
 
 - [ ] **Step 2: Write the failing graph tests**
 
@@ -1343,22 +1647,22 @@ In `TestPruningIsReportedOnce`, replace the `want` sentence and the count check:
 Add, below `TestPruningIsReportedOnce`:
 
 ```go
-// A site that answers but has not admitted the deployment is one warning,
-// with the host request line, and nothing more is read from it.
+// A site that answers but is pending is one warning, with the host request
+// line, and nothing more is read from it.
 func TestAPendingSiteIsCheckedNoFurther(t *testing.T) {
 	cfg := fixture(t)
 	fix := healthyInput()
-	fix.Admission = []AdmissionProbe{{Site: "home-b"}}
+	fix.Admission = []AdmissionProbe{{Site: "home-b", Class: topology.Site{Name: "home-b", Class: topology.Pending, Why: "home-b: its host has not admitted this deployment", Request: true}}}
 	reads := &fixtureReads{in: fix, log: &events{}}
 	rec := &ui.Recorder{}
 	report, _ := Checks(cfg, fix.Sites, reads).Run(rec, 0)
 
-	f := find(t, report.Findings, SectionAdmission, "home-b: this deployment is not admitted on its host")
+	f := find(t, report.Findings, SectionAdmission, "home-b: pending: this deployment is not admitted on its host")
 	if f.Level != Warn || !strings.Contains(strings.Join(f.More, "\n"), "`paisans host request --site home-b > home-b.admit`") {
 		t.Errorf("home-b: %+v", f)
 	}
 	want := "Not checked because of this: user, docker, docker engine, linger, sudo rights, mesh, patroni, containers, settings talk, clocks, leftovers on home-b."
-	if !rec.Has("explain", want) && !rec.Has("detail", want) {
+	if !rec.Has("explain", want) {
 		t.Errorf("admission home-b does not say what it kept from running, want %q:\n%s", want, rec.Lines())
 	}
 	for _, read := range reads.log.list {
@@ -1400,7 +1704,7 @@ func TestDockerDownStopsWhatRunsDocker(t *testing.T) {
 ```
 
 Run: `go test ./internal/doctor/ -run 'TestBoundOfOne|TestPruningIsReportedOnce|TestAPendingSite|TestDockerDown|TestGraph'`
-Expected: FAIL to compile, `f.in.Admission undefined` (no such field in `Input`), then, once Step 3's fields exist, FAIL on the read order and the pruning lists.
+Expected: FAIL to compile, `f.in.Admission undefined`, then, once Step 3's fields exist, FAIL on the read order and the pruning lists.
 
 - [ ] **Step 3: The probes in the Input, cloned and judged**
 
@@ -1429,7 +1733,7 @@ In `Diagnose`, after the `Reach` line:
 	findings = append(findings, User(in.Users)...)
 	findings = append(findings, DockerSocket(in.Docker)...)
 	findings = append(findings, DockerEngine(in.Docker)...)
-	findings = append(findings, Linger(in.Linger)...)
+	findings = append(findings, Linger(cfg.Deployment(), in.Linger)...)
 	findings = append(findings, SudoRights(cfg, in.Sudo)...)
 ```
 
@@ -1460,21 +1764,20 @@ In `internal/doctor/checks.go`, add to `Reads`, after `Reach`:
 	Sudo(site string) SudoProbe
 ```
 
-Rewrite `Checks`' comment's first paragraph to say what it does now:
+Rewrite `Checks`' comment's first paragraph:
 
 ```go
 // Checks is every check doctor makes on sites, the ones it asks, as a
 // graph: each site's reach first, then its admission record, which every
-// other read of the site needs, since nothing is asked of a host that has
-// not admitted the deployment; then the deployment's user, its rootless
-// Docker, which every check that runs docker there needs, linger and sudo;
-// then from the bottom of the stack up, the order Diagnose reports in. Each
-// check's judge is the section function Diagnose calls, given the probes of
-// the check's own subject, so the graph's findings for a complete Input are
-// Diagnose's.
+// other read of the site needs, since nothing is asked of a pending site;
+// then the deployment's user, its rootless Docker, which every check that
+// runs docker there needs, linger and sudo; then from the bottom of the
+// stack up, the order Diagnose reports in. Each check's judge is the
+// section function Diagnose calls, given the probes of the check's own
+// subject, so the graph's findings for a complete Input are Diagnose's.
 ```
 
-After the `for _, site := range sites { g.Add(Node{Name: reach(site) ...}) }` loop, add:
+After the `reach` loop, add:
 
 ```go
 	admitted := func(site string) string { return SectionAdmission + " " + site }
@@ -1488,7 +1791,7 @@ After the `for _, site := range sites { g.Add(Node{Name: reach(site) ...}) }` lo
 			},
 			Outcome: func(in Input) Outcome {
 				for _, p := range bySite(in.Admission, site, AdmissionProbe.site) {
-					if p.Pending(cfg.Sites[site]) {
+					if p.Pending() {
 						return Failed
 					}
 				}
@@ -1538,7 +1841,7 @@ After the `for _, site := range sites { g.Add(Node{Name: reach(site) ...}) }` lo
 				p := reads.Linger(site)
 				return func(in *Input) { in.Linger = append(in.Linger, p) }
 			},
-			Judge: func(in Input) []Finding { return Linger(bySite(in.Linger, site, LingerProbe.site)) },
+			Judge: func(in Input) []Finding { return Linger(d, bySite(in.Linger, site, LingerProbe.site)) },
 		})
 	}
 	for _, site := range sites {
@@ -1557,12 +1860,12 @@ Then change the existing nodes' hard needs:
 
 * `mesh <site>`, `clocks <site>`: `Hard: []Need{Hard(reach(site))}` becomes `Hard: []Need{Hard(admitted(site))}`.
 * `patroni <site>`, `containers <site>`, `settings <site> <app>`, `leftovers <site>`: `Hard: []Need{Hard(reach(site))}` becomes `Hard: []Need{Hard(docker(site))}`.
-* `etcd`, `etcd version`, `patroni` and `pocket-id <app>` keep theirs.
+* `etcd`, `etcd version`, the `patroni` aggregate and `pocket-id <app>` keep theirs.
 
-In `internal/doctor/dnschecks.go`, `addDNS`, the `caddy certificates <site>` node's `Hard: []Need{Hard(SectionReach + " " + site)}` becomes `Hard: []Need{Hard(SectionDocker + " " + site)}`, since it reads Caddy's log with `docker compose logs`.
+In `internal/doctor/dnschecks.go`, `addDNS`: the `caddy certificates <site>` node's `Hard(SectionReach + " " + site)` becomes `Hard(SectionDocker + " " + site)`, since it runs `docker compose`; the `dns token <site>` node's becomes `Hard(SectionAdmission + " " + site)`.
 
 Run: `go test ./internal/doctor/`
-Expected: PASS, including `TestGraphFindsWhatDiagnoseFinds` (its fixture inputs hold no rootless probes, so neither side reports any) and `TestStreamingPrintsAsChecksEnd`. Where `TestPruningIsReportedOnce`'s "Not checked" list or `TestDockerDownStopsWhatRunsDocker`'s differs from what the run prints, compare the run's list with the node order above: the test is right when it names every node a failed need cut, in the graph's order.
+Expected: PASS, including `TestGraphFindsWhatDiagnoseFinds` (its inputs hold no rootless probes, so neither side reports any), `TestGraphRunReportsItsInput` and `TestStreamingPrintsAsChecksEnd`. Where a "Not checked" list differs from what the run prints, compare it with the node order above: the test is right when it names every node a failed need cut, in the graph's order. In `dnschecks_test.go`, a list naming `caddy certificates` or `dns token` under a failed reach now names them after `admission` and `docker`; correct it the same way.
 
 - [ ] **Step 5: The reads over each site's transport**
 
@@ -1606,13 +1909,11 @@ func (d doctorReads) Sudo(site string) doctor.SudoProbe {
 }
 ```
 
-Add `"github.com/paisans-software/paisans-cli/internal/admission"` to its imports. Update `doctorReads`' comment's list of what it sends: "Every command here is one of internal/doctor's read commands, patroni's ClusterCommand, apply.LookAtInstances' question, or the host check's inventory (hostcheck.Inspect), and it reads the admission record; none writes."
+Add `"github.com/paisans-software/paisans-cli/internal/admission"` to its imports. Update `doctorReads`' comment: "Every command here is one of internal/doctor's read commands, patroni's ClusterCommand, apply.LookAtInstances' question, or the host check's inventory (hostcheck.Inspect), and it reads the admission record; none writes."
 
 - [ ] **Step 6: Admit the fake hosts in the command tests**
 
-In `cmd/paisans/doctor_test.go`:
-
-Give `doctorHost` a `files map[string]string` field, after `answers`, and make `ReadFile` answer from it:
+In `cmd/paisans/doctor_test.go`, give `doctorHost` a `files map[string]string` field, after `answers`, and make `ReadFile` answer from it:
 
 ```go
 func (h doctorHost) ReadFile(path string) (string, bool, error) {
@@ -1628,49 +1929,23 @@ func (h doctorHost) ReadFile(path string) (string, bool, error) {
 Add, below `readOnly`:
 
 ```go
-// admittedRecord is the record host admit leaves for a site of cfg as
-// declared, with every grant its roles need.
-func admittedRecord(cfg *config.Config, site string) admission.Record {
-	s := cfg.Sites[site]
-	g := admission.Needs(s)
-	public := []int{}
-	if g.PublicPorts {
-		public = []int{80, 443}
-	}
-	rec := admission.Record{
-		Version: admission.RecordVersion, Deployment: cfg.ID, User: s.SSHUser(), Grants: g,
-		Forwarding: s.Endpoint != "",
-		Ports:      admission.Ports{SSH: s.SSH.PortOrDefault(), WireGuard: s.ListenPort(), Public: public},
-		AdmittedAt: "2026-10-15T12:00:00Z",
-	}
-	if s.Has(config.RoleMonitor) && s.WebServerManagedBy() == config.ManagedByExternal {
-		rec.WebServer = &admission.WebServer{Server: "nginx", Process: "nginx"}
-	}
-	return rec
-}
-
 // sudoHelperOnly is sudo -l's answer for a user host admit gave the helper
 // and nothing else.
 func sudoHelperOnly(user, host, helper string) string {
 	return "Matching Defaults entries for " + user + " on " + host + ":\n" +
 		"    env_reset, mail_badpass, use_pty\n\n" +
 		"User " + user + " may run the following commands on " + host + ":\n" +
-		"    (root) NOPASSWD: " + helper + "\n"
+		"    " + hostadmit.HelperRule(helper) + "\n"
 }
 
 // admitHosts makes each fake host one whose owner admitted its site as the
 // configuration declares it, with a sound rootless setup, unless the test
 // gave it another answer already: the record, a user in no privileged
-// group, its own rootless Docker 29.9.1, linger on, and sudo for the
-// WireGuard helper alone.
+// group, its own rootless Docker 29.9.1, linger on with the manager after
+// the mesh, and sudo for the WireGuard helper alone.
 func admitHosts(t *testing.T, cfg *config.Config, hosts map[string]doctorHost) {
 	t.Helper()
-	d := cfg.Deployment()
-	path, err := admission.Path(d.Token())
-	if err != nil {
-		t.Fatal(err)
-	}
-	helper, err := apply.WGHelper{Iface: d.Interface()}.Path()
+	helper, err := apply.WGHelper{Iface: cfg.Deployment().Interface()}.Path()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1683,12 +1958,8 @@ func admitHosts(t *testing.T, cfg *config.Config, hosts map[string]doctorHost) {
 		if h.files == nil {
 			h.files = map[string]string{}
 		}
-		if _, given := h.files[path]; !given {
-			data, err := admission.EncodeRecord(admittedRecord(cfg, site))
-			if err != nil {
-				t.Fatal(err)
-			}
-			h.files[path] = string(data)
+		if _, given := h.files[admittedPath(cfg)]; !given {
+			h.files[admittedPath(cfg)] = admittedRecord(t, cfg, site)
 		}
 		if h.answers == nil {
 			h.answers = map[string]string{}
@@ -1696,7 +1967,7 @@ func admitHosts(t *testing.T, cfg *config.Config, hosts map[string]doctorHost) {
 		for command, answer := range map[string]string{
 			doctor.UserCommand:   "uid 1000\nuser " + s.SSHUser() + "\ngroups " + s.SSHUser() + "\n",
 			doctor.DockerCommand: "host unix:///run/user/1000/docker.sock\nengine 29.9.1\nsecurity [\"name=seccomp,profile=builtin\",\"name=rootless\",\"name=cgroupns\"]\n",
-			doctor.LingerCommand: "yes\n",
+			doctor.LingerCommand: "linger yes\nmesh-order yes\n",
 			doctor.SudoCommand:   sudoHelperOnly(s.SSHUser(), site, helper),
 		} {
 			if _, given := h.answers[command]; !given {
@@ -1731,14 +2002,13 @@ In `readOnly`, add to `exact`:
 		doctor.SudoCommand,
 ```
 
-and after the `exact = append(exact, "read "+cfg.Deployment().Manifest(), "read "+registry.Path)` line:
+and change `exact = append(exact, "read "+cfg.Deployment().Manifest())` to:
 
 ```go
-	recordPath, _ := admission.Path(cfg.Deployment().Token())
-	exact = append(exact, "read "+recordPath)
+	exact = append(exact, "read "+cfg.Deployment().Manifest(), "read "+admittedPath(cfg))
 ```
 
-Add `"github.com/paisans-software/paisans-cli/internal/admission"` to the test file's imports.
+Add `"github.com/paisans-software/paisans-cli/internal/hostadmit"` to the test file's imports.
 
 - [ ] **Step 7: The command tests' expectations**
 
@@ -1751,49 +2021,50 @@ In `TestDoctorDiagnosesTheStuckReplicaAndOnlyReads`, replace the `Not checked` e
 and add to its `want` list:
 
 ```go
-		"done: check admission home-a admitted as ubuntu, with every grant its roles need",
+		"done: check admission home-a admitted as ubuntu, covering its roles",
 		"done: check user home-a ubuntu is in no privileged group",
 		"done: check docker home-a its rootless Docker answers at unix:///run/user/1000/docker.sock",
 		"done: check docker engine home-a Docker Engine 29.9.1",
+		"done: check linger home-a its manager starts after the mesh at boot",
 		"done: check sudo rights home-a sudo lets ubuntu run the WireGuard helper and nothing else",
 ```
 
 Run: `go test ./cmd/paisans/ -run 'Doctor|DefaultOutput'`
-Expected: PASS. Where another doctor test asserts a summary count ("N checks passed", "N skipped"), recount it: each site that answered adds six passed checks (admission, user, docker, docker engine, linger, sudo rights), and each site that did not adds six skipped. Change the number, never the check's wording. Where a test's host answers a command by prefix, check that no new command matches one of its prefixes: `UserCommand` and `DockerCommand` start `printf 'uid` and `printf 'host`, `LingerCommand` `loginctl`, `SudoCommand` `LC_ALL=C sudo`.
+Expected: PASS. Where another doctor test asserts a summary count ("N checks passed", "N skipped"), recount it: each site that answered adds six passed checks (admission, user, docker, docker engine, linger, sudo rights), and each site that did not adds six skipped. Change the number, never a check's wording. Where a test's host answers a command by prefix, check that no new command matches one of its prefixes: `UserCommand`, `DockerCommand` and `LingerCommand` start `printf 'uid`, `printf 'host` and `printf 'linger`, `SudoCommand` `LC_ALL=C sudo`.
 
 - [ ] **Step 8: The changelog**
 
 In `CHANGELOG.md`, under `[Unreleased]`, `### Added`, add:
 
 ```markdown
-- `doctor` checks each site as its deployment's user: the admission record against the declaration, no privileged group, its own rootless Docker at Engine 29.5 or later, linger on, and sudo for the WireGuard helper alone.
+- `doctor` checks each site as its deployment's user: the admission record, no privileged group, its own rootless Docker at Engine 29.5 or later, linger with the mesh first at boot, and sudo for the WireGuard helper alone.
 ```
 
 - [ ] **Step 9: Run the touched packages**
 
-Run: `gofmt -l internal/doctor cmd/paisans internal/admission && go vet ./internal/doctor/ ./cmd/paisans/ ./internal/admission/ && go test ./internal/doctor/ ./cmd/paisans/ ./internal/admission/`
+Run: `gofmt -l internal/doctor cmd/paisans && go vet ./internal/doctor/ ./cmd/paisans/ && go test ./internal/doctor/ ./cmd/paisans/`
 Expected: nothing listed; PASS.
 
 - [ ] **Step 10: Commit**
 
 ```bash
-git add internal/doctor/checks.go internal/doctor/doctor.go internal/doctor/graph.go internal/doctor/dnschecks.go internal/doctor/graph_test.go cmd/paisans/doctor.go cmd/paisans/doctor_test.go cmd/paisans/doctor_dns_test.go cmd/paisans/output_test.go CHANGELOG.md
+git add internal/doctor cmd/paisans CHANGELOG.md
 git commit -m "feat: doctor checks each site's admission and rootless setup
 
-Every command now runs as the deployment's own user against its own
-rootless daemon, so doctor asks first whether that holds: the admission
-record against the declaration, the user's groups, its daemon and Engine,
-linger, and what sudo allows. The record comes first and every other read
-of a site needs it, so a host that has not admitted the deployment is one
-warning rather than a failure per check; the daemon comes before every
-check that runs docker, so a stopped daemon is one failure.
+Every command runs as the deployment's own user against its own rootless
+daemon, so doctor asks first whether that holds: the admission record
+against the declaration, the user's groups, its daemon and Engine,
+linger and the mesh's place at boot, and what sudo allows. The record
+comes first and every other read of a site needs it, so a pending site
+is one warning rather than a failure per check; the daemon comes before
+every check that runs docker, so a stopped daemon is one failure.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 5: Pending and down sites, as warnings
+### Task 7: Pending and down sites, from the classification
 
 **Files:**
 - Modify: `internal/doctor/reach.go`
@@ -1802,8 +2073,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Modify: `CHANGELOG.md`
 
 **Interfaces:**
-- Consumes: Task 3's `pending`, `absentLevel`, `roleLine`, `losses`, `sshReason`; phase 6's classification (*Phase 6 interfaces this plan assumes*: `sitestate.Classify`, `sitestate.Class`, `sitestate.Pending`, `sitestate.Down`).
-- Produces: `type SiteState int` with `Unclassified`, `Pending`, `Down`; `type SiteClass struct { State SiteState; Reason string }`; `SiteReach.Class SiteClass`; in `cmd/paisans`: `var doctorClassify func(cfg *config.Config, transports map[string]apply.Transport) map[string]doctor.SiteClass`, `type siteClasses struct`, `func (d doctorReads) class(site string) doctor.SiteClass`, the field `doctorReads.classes *siteClasses` and `doctorReads.all map[string]apply.Transport`.
+- Consumes: Task 4's `pending`, `absentLevel`, `requestAdvice`, `AdmissionProbe.Covered`; `roleLine`, `Losses`, `sshReason`; `topology.Gather(cfg, transports) Evidence`, `topology.Classify(cfg, ev) (*Classification, error)`, `topology.Site`, `topology.Pending`, `topology.Down`, `topology.DownLine(site)`.
+- Produces: `SiteReach.Class topology.Site`, `SiteReach.Unclassified string`; in `cmd/paisans`: `var doctorClassify func(cfg *config.Config, all map[string]apply.Transport) (*topology.Classification, error)`, `type siteClasses struct`, `func (d doctorReads) class(site string) (topology.Site, string)`, the fields `doctorReads.all func() map[string]apply.Transport` and `doctorReads.classes *siteClasses`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1815,17 +2086,21 @@ package doctor
 import (
 	"strings"
 	"testing"
+
+	"github.com/paisans-software/paisans-cli/internal/topology"
 )
 
 // A site that did not answer is a warning once the classification says it
 // is pending or down, saying what the deployment is without and what to
 // run; a gateway is a failure either way, since apply refuses to run
 // without it; a site the classification did not place is a failure, as
-// before. A refused login and a timeout read the same.
+// before, with the classification's refusal when there was one. A refused
+// login and a timeout read the same.
 func TestAbsentSites(t *testing.T) {
 	cfg := fixture(t)
 	timeout := "ssh: connect to host home-b.local port 22: Operation timed out"
-	refused := "paisans-f2a9@home-b.local: Permission denied (publickey)."
+	refused := "ubuntu@home-b.local: Permission denied (publickey)."
+	pendingB := topology.Site{Name: "home-b", Class: topology.Pending, Request: true}
 	for _, c := range []struct {
 		name  string
 		reach SiteReach
@@ -1833,24 +2108,22 @@ func TestAbsentSites(t *testing.T) {
 		line  string
 		more  []string
 	}{
-		{"pending", SiteReach{Site: "home-b", Destination: "ubuntu@home-b.local", Err: refused, Class: SiteClass{State: Pending, Reason: "its owner has not admitted this deployment"}}, Warn,
-			"home-b: pending: its owner has not admitted this deployment",
-			[]string{"roles: data, apps", "Until it joins, the deployment is without one of 3 etcd votes", "`paisans host request --site home-b > home-b.admit`"}},
-		{"down, timed out", SiteReach{Site: "home-b", Destination: "ubuntu@home-b.local", Err: timeout, Class: SiteClass{State: Down}}, Warn,
-			"home-b: its login is refused or it does not answer: the host is down, or its owner evicted this deployment",
-			[]string{"While it is down the deployment is without one of 3 etcd votes", "ssh to ubuntu@home-b.local: Operation timed out", "`paisans site remove --site home-b --host-gone` removes it from the deployment"}},
-		{"down, refused", SiteReach{Site: "home-b", Destination: "ubuntu@home-b.local", Err: refused, Class: SiteClass{State: Down}}, Warn,
-			"home-b: its login is refused or it does not answer: the host is down, or its owner evicted this deployment",
-			[]string{"`paisans site remove --site home-b --host-gone`"}},
-		{"gateway down", SiteReach{Site: "vm", Destination: "ubuntu@vm.example.org", Err: timeout, Class: SiteClass{State: Down}}, Fail,
-			"vm: its login is refused or it does not answer: the host is down, or its owner evicted this deployment",
-			[]string{"its gateway"}},
-		{"gateway pending", SiteReach{Site: "vm", Destination: "ubuntu@vm.example.org", Err: refused, Class: SiteClass{State: Pending, Reason: "its owner has not admitted this deployment"}}, Fail,
-			"vm: pending: its owner has not admitted this deployment",
+		{"pending", SiteReach{Site: "home-b", Destination: "ubuntu@home-b.local", Err: refused, Class: pendingB}, Warn,
+			"home-b: pending: its login is refused or it does not answer, and the deployment has not joined it",
+			[]string{"roles: data, apps", "ssh to ubuntu@home-b.local: ubuntu@home-b.local: Permission denied (publickey).", "Until it joins, the deployment is without one of 3 etcd votes", "`paisans host request --site home-b > home-b.admit`"}},
+		{"down, timed out", SiteReach{Site: "home-b", Destination: "ubuntu@home-b.local", Err: timeout, Class: topology.Site{Name: "home-b", Class: topology.Down}}, Warn,
+			topology.DownLine("home-b"),
+			[]string{"While it is down the deployment is without one of 3 etcd votes", "ssh to ubuntu@home-b.local: Operation timed out", "Start the host or fix the route to it."}},
+		{"down, refused", SiteReach{Site: "home-b", Destination: "ubuntu@home-b.local", Err: refused, Class: topology.Site{Name: "home-b", Class: topology.Down}}, Warn,
+			topology.DownLine("home-b"), nil},
+		{"gateway down", SiteReach{Site: "vm", Destination: "ubuntu@vm.example.org", Err: timeout, Class: topology.Site{Name: "vm", Class: topology.Down}}, Fail,
+			topology.DownLine("vm"), []string{"its gateway"}},
+		{"gateway pending", SiteReach{Site: "vm", Destination: "ubuntu@vm.example.org", Err: refused, Class: topology.Site{Name: "vm", Class: topology.Pending, Request: true}}, Fail,
+			"vm: pending: its login is refused or it does not answer, and the deployment has not joined it",
 			[]string{"`paisans host request --site vm > vm.admit`"}},
-		{"unclassified", SiteReach{Site: "home-b", Destination: "ubuntu@home-b.local", Err: timeout}, Fail,
+		{"unclassified", SiteReach{Site: "home-b", Destination: "ubuntu@home-b.local", Err: timeout, Unclassified: "home-b: its login is refused or it does not answer, and whether it has joined the deployment cannot be told"}, Fail,
 			"home-b: ssh to ubuntu@home-b.local did not answer (Operation timed out)",
-			[]string{"Start the host or fix the route to it."}},
+			[]string{"Whether it has joined the deployment could not be told: home-b: its login", "Start the host or fix the route to it."}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			fs := Reach(cfg, []SiteReach{c.reach})
@@ -1876,87 +2149,68 @@ In `cmd/paisans/doctor_test.go`, add:
 
 ```go
 // A site that does not answer is classified once, and only then: a run
-// where every site answers never asks.
-func TestDoctorClassifiesOnlyWhenASiteDoesNotAnswer(t *testing.T) {
+// where every site answers and is admitted never asks.
+func TestDoctorClassifiesOnlyWhenASiteIsNotCovered(t *testing.T) {
 	cfg, err := config.Load(fixtureConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
 	var sent, writes []string
 	withDoctorHosts(t, cfg, stuckHosts(cfg, &sent, &writes))
-	// After withDoctorHosts, which places nothing, so this one is in force;
-	// its cleanup restores the original.
+	// After withDoctorHosts, whose own replacement this one overrides; its
+	// cleanup restores the original.
 	asked := 0
-	doctorClassify = func(c *config.Config, all map[string]apply.Transport) map[string]doctor.SiteClass {
+	doctorClassify = func(c *config.Config, all map[string]apply.Transport) (*topology.Classification, error) {
 		asked++
 		if len(all) != len(c.Sites) {
 			t.Errorf("classification got %d transports, want one per declared site", len(all))
 		}
-		return map[string]doctor.SiteClass{"home-b": {State: doctor.Down}}
+		return &topology.Classification{Sites: map[string]topology.Site{"home-b": {Name: "home-b", Class: topology.Down, Why: topology.DownLine("home-b")}}}, nil
 	}
 	rec := withRecorder(t, true)
 	_ = runDoctor([]string{"--config", fixtureConfig(), "--site", "home-a", "--site", "home-b"})
 	if asked != 1 {
 		t.Errorf("classified %d times, want once", asked)
 	}
-	if out := rec.Lines(); !strings.Contains(out, "check reach home-b its login is refused or it does not answer") {
+	if out := rec.Lines(); !strings.Contains(out, "warned: check reach home-b its login is refused or it does not answer") {
 		t.Errorf("home-b is not reported down:\n%s", out)
+	}
+
+	asked = 0
+	_ = runDoctor([]string{"--config", fixtureConfig(), "--site", "home-a"})
+	if asked != 0 {
+		t.Errorf("a run where every site is covered classified %d times", asked)
 	}
 }
 ```
+
+Add `"github.com/paisans-software/paisans-cli/internal/topology"` to the test file's imports.
 
 Run: `go test ./internal/doctor/ -run TestAbsentSites; go test ./cmd/paisans/ -run TestDoctorClassifies`
 Expected: FAIL to compile, `unknown field Class in struct literal of type SiteReach`, `undefined: doctorClassify`.
 
 - [ ] **Step 2: Pending and down in `Reach`**
 
-In `internal/doctor/reach.go`, add after `SiteReach`:
+In `internal/doctor/reach.go`, add to `SiteReach`, after `Err`:
 
 ```go
-// SiteState is what the run's classification made of a site that did not
-// answer: whether it has joined the deployment, read from the deployment
-// (the gateway's deployed record, etcd's and Patroni's members) and never
-// from the site's own host, since a host that is down, one whose owner
-// evicted the deployment and one that never admitted it look alike from
-// outside.
-type SiteState int
-
-const (
-	// Unclassified is a site the classification said nothing of, or a run
-	// whose classification could not be made.
-	Unclassified SiteState = iota
-	// Pending is a site that has not joined: its host has not admitted the
-	// deployment, or not with every grant its roles need.
-	Pending
-	// Down is a site that has joined and does not answer.
-	Down
-)
-
-// SiteClass is a site's state and the reason the classification gives.
-type SiteClass struct {
-	State  SiteState
-	Reason string
-}
+	// Class is the run's classification of a site that did not answer,
+	// filled only then (cmd/paisans, doctorReads.Reach); Unclassified is
+	// why the classification refused, when it did.
+	Class        topology.Site
+	Unclassified string
 ```
 
-Add to `SiteReach`, after `Err`:
-
-```go
-	// Class is the classification of a site that did not answer, filled
-	// only then (see cmd/paisans, doctorReads.Reach).
-	Class SiteClass
-```
-
-Rewrite `Reach`'s comment and its `default:` branch:
+Add `"github.com/paisans-software/paisans-cli/internal/topology"` to its imports, and rewrite `Reach` and its comment:
 
 ```go
 // Reach is one line per site. A site that did not answer is never a crash:
 // the rest of the report is made from the sites that did, and this says
 // what the deployment is without while it is gone, so an operator can tell
-// an inconvenience from an outage at a glance. A site the classification
-// found pending or down is a warning, since the deployment runs on the sites
-// it has; a gateway is a failure, since apply refuses to run without it,
-// and so is a site the classification did not place.
+// an inconvenience from an outage at a glance. A site the run's
+// classification found pending or down is a warning, since the deployment
+// runs on the sites it has; a gateway is a failure, since apply refuses to
+// run without it, and so is a site the classification did not place.
 func Reach(cfg *config.Config, list []SiteReach) []Finding {
 	var out []Finding
 	for _, r := range list {
@@ -1964,24 +2218,23 @@ func Reach(cfg *config.Config, list []SiteReach) []Finding {
 		switch {
 		case r.Answered():
 			out = append(out, Finding{Section: SectionReach, Level: OK, Line: fmt.Sprintf("%s: %s answers", r.Site, r.Destination)})
-		case r.Class.State == Pending:
-			out = append(out, pending(cfg, SectionReach, r.Site, fmt.Sprintf("%s: pending: %s", r.Site, r.Class.Reason), ssh))
-		case r.Class.State == Down:
+		case r.Class.Class == topology.Pending:
+			out = append(out, pending(cfg, SectionReach, r.Site,
+				fmt.Sprintf("%s: pending: its login is refused or it does not answer, and the deployment has not joined it", r.Site), ssh))
+		case r.Class.Class == topology.Down:
 			more := []string{roleLine(cfg, r.Site)}
-			if lost := losses(cfg, r.Site); lost != "" {
+			if lost := Losses(cfg, r.Site); lost != "" {
 				more = append(more, "While it is down the deployment is without "+lost+".")
 			}
-			more = append(more, ssh,
-				"recover:",
-				"  1. Start the host or fix the route to it.",
-				fmt.Sprintf("  2. If its owner evicted this deployment, `paisans site remove --site %s --host-gone` removes it from the deployment.", r.Site))
-			out = append(out, Finding{Section: SectionReach, Level: absentLevel(cfg, r.Site),
-				Line: fmt.Sprintf("%s: its login is refused or it does not answer: the host is down, or its owner evicted this deployment", r.Site),
-				More: more})
+			more = append(more, ssh, "recover:", "  1. Start the host or fix the route to it.")
+			out = append(out, Finding{Section: SectionReach, Level: absentLevel(cfg, r.Site), Line: topology.DownLine(r.Site), More: more})
 		default:
 			more := []string{roleLine(cfg, r.Site)}
-			if lost := losses(cfg, r.Site); lost != "" {
+			if lost := Losses(cfg, r.Site); lost != "" {
 				more = append(more, "While it is down the deployment is without "+lost+".")
+			}
+			if r.Unclassified != "" {
+				more = append(more, "Whether it has joined the deployment could not be told: "+r.Unclassified)
 			}
 			more = append(more, "Start the host or fix the route to it. Every other check ran with the sites that answered.")
 			out = append(out, Finding{Section: SectionReach, Level: Fail,
@@ -1992,6 +2245,8 @@ func Reach(cfg *config.Config, list []SiteReach) []Finding {
 	return out
 }
 ```
+
+`topology.DownLine` names `paisans site remove --site <s> --host-gone` in the line itself, as `apply`'s pending section prints it.
 
 Run: `go test ./internal/doctor/`
 Expected: PASS, `TestUnreachableSiteSaysWhatIsLost` among them (its sites carry no class).
@@ -2013,46 +2268,37 @@ and below it:
 
 ```go
 // siteClasses is the run's classification of its sites, made the first
-// time a site does not answer and never otherwise, so a healthy run never
-// pays for it.
+// time a site does not answer or its record does not cover it, and never
+// otherwise, so a healthy run never pays for it.
 type siteClasses struct {
-	once   sync.Once
-	byName map[string]doctor.SiteClass
+	once sync.Once
+	c    *topology.Classification
+	err  error
 }
 
-// class is how the run's classification placed site; nothing, for reads
-// made without one (a test's).
-func (d doctorReads) class(site string) doctor.SiteClass {
+// class is how the run's classification placed site, or why it refused;
+// nothing, for reads made without one (a test's).
+func (d doctorReads) class(site string) (topology.Site, string) {
 	if d.classes == nil {
-		return doctor.SiteClass{}
+		return topology.Site{}, ""
 	}
-	d.classes.once.Do(func() { d.classes.byName = doctorClassify(d.cfg, d.all()) })
-	return d.classes.byName[site]
+	d.classes.once.Do(func() { d.classes.c, d.classes.err = doctorClassify(d.cfg, d.all()) })
+	if d.classes.err != nil {
+		return topology.Site{}, d.classes.err.Error()
+	}
+	return d.classes.c.Sites[site], ""
 }
 
-// doctorClassify is phase 6's classification of every declared site,
-// mapped to doctor's: pending, down, or nothing for a site it found ready
-// or a run it could not classify, which doctor then reports as a site that
-// did not answer. Tests replace it.
-var doctorClassify = func(cfg *config.Config, all map[string]apply.Transport) map[string]doctor.SiteClass {
-	classes, err := sitestate.Classify(cfg, all)
-	if err != nil {
-		return nil
-	}
-	out := map[string]doctor.SiteClass{}
-	for site, c := range classes {
-		switch c.State {
-		case sitestate.Pending:
-			out[site] = doctor.SiteClass{State: doctor.Pending, Reason: c.Reason}
-		case sitestate.Down:
-			out[site] = doctor.SiteClass{State: doctor.Down, Reason: c.Reason}
-		}
-	}
-	return out
+// doctorClassify is the run's classification of every declared site, as
+// apply makes it at its start: topology reads each site's login and
+// record, the gateways' deployment record and the cluster's members, all
+// reads. Tests replace it.
+var doctorClassify = func(cfg *config.Config, all map[string]apply.Transport) (*topology.Classification, error) {
+	return topology.Classify(cfg, topology.Gather(cfg, all))
 }
 ```
 
-Add phase 6's package to the imports (`internal/sitestate` as assumed; Task 0 reconciled the name). Make `Reach` fill the class when the site did not answer:
+Add `"github.com/paisans-software/paisans-cli/internal/topology"` to the imports. Make `Reach` fill the class when the site did not answer, and `Admission` when the record does not cover the site:
 
 ```go
 func (d doctorReads) Reach(site string) doctor.SiteReach {
@@ -2060,10 +2306,18 @@ func (d doctorReads) Reach(site string) doctor.SiteReach {
 	r := doctor.SiteReach{Site: site, Destination: t.Describe()}
 	if out, err := t.Run(doctor.ReachCommand); err != nil {
 		r.Err = errText(out, err)
-		r.Class = d.class(site)
+		r.Class, r.Unclassified = d.class(site)
 	}
 	return r
 }
+```
+
+and at the end of `Admission`, before `return p`:
+
+```go
+	if !p.Covered(d.cfg) {
+		p.Class, p.Unclassified = d.class(site)
+	}
 ```
 
 In `runDoctor`, after the `transports` loop, say how to make a transport for every declared site, reusing the ones already made, and pass it:
@@ -2086,24 +2340,22 @@ In `runDoctor`, after the `transports` loop, say how to make a transport for eve
 	graph := doctor.Checks(cfg, sites, doctorReads{cfg: cfg, transports: transports, all: all, classes: &siteClasses{}, token: &workstationToken{path: *secretsPath}})
 ```
 
-In `withDoctorHosts` (`cmd/paisans/doctor_test.go`), make the classification place nothing unless a test says otherwise, so the existing expectations hold:
+In `withDoctorHosts` (`cmd/paisans/doctor_test.go`), make the classification place nothing unless a test says otherwise, so the existing expectations hold, before its own `t.Cleanup`:
 
 ```go
 	savedClassify := doctorClassify
-	doctorClassify = func(*config.Config, map[string]apply.Transport) map[string]doctor.SiteClass { return nil }
+	doctorClassify = func(*config.Config, map[string]apply.Transport) (*topology.Classification, error) {
+		return &topology.Classification{Sites: map[string]topology.Site{}}, nil
+	}
 	t.Cleanup(func() { doctorClassify = savedClassify })
 ```
 
-placed before `withDoctorHosts`' own `t.Cleanup`. `TestDoctorClassifiesOnlyWhenASiteDoesNotAnswer` sets its own after calling `withDoctorHosts`, so its replacement is the one in force.
-
-A transport to a site outside `--site` is made only when the classification runs, so `TestDoctorSiteNarrowsTheHostsReached`, whose one host answers, still contacts nothing else; a test whose classification runs must give every declared site's host, as `stuckHosts` does.
-
-- [ ] **Step 4: Run the tests**
+A transport to a site outside `--site` is made only when the classification runs, so `TestDoctorSiteNarrowsTheHostsReached`, whose one host answers and is admitted, still contacts nothing else; a test whose classification runs gives every declared site's host, as `stuckHosts` does.
 
 Run: `go test ./internal/doctor/ ./cmd/paisans/ -run 'Reach|Absent|Doctor'`
 Expected: PASS.
 
-- [ ] **Step 5: The changelog**
+- [ ] **Step 4: The changelog**
 
 In `CHANGELOG.md`, under `[Unreleased]`, `### Changed`, add:
 
@@ -2111,7 +2363,7 @@ In `CHANGELOG.md`, under `[Unreleased]`, `### Changed`, add:
 - `doctor` reports a site pending admission, or down after joining, as a warning naming what the deployment is without and how to admit or remove it; a gateway stays a failure.
 ```
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add internal/doctor/reach.go internal/doctor/reach_test.go cmd/paisans/doctor.go cmd/paisans/doctor_test.go CHANGELOG.md
@@ -2120,114 +2372,57 @@ git commit -m "feat: doctor warns of a site pending admission or down
 A deployment runs on the sites it has, so a site whose host has not
 admitted it yet, or a joined site that does not answer, is a risk to
 know about rather than an outage. Whether a site has joined is read from
-the deployment, through the run's classification, which doctor asks once
-and only when a site does not answer. Each such site is a warning with
-what the deployment is without and the host request or site remove line;
-a gateway stays a failure, since apply refuses to run without one.
+the deployment, through the classification apply makes, which doctor
+asks once and only when a site does not answer or its record does not
+cover it. Each such site is a warning with what the deployment is
+without and the host request or site remove line; a gateway stays a
+failure, since apply refuses to run without one.
+
+Founder decision.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 6: The gateway answers as itself, from outside
+### Task 8: The self-check in the graph
 
 **Files:**
-- Create: `internal/doctor/answer.go`, `internal/doctor/answer_test.go`
 - Modify: `internal/doctor/checks.go`, `internal/doctor/doctor.go`, `internal/doctor/graph.go`, `internal/doctor/graph_test.go`
 - Modify: `cmd/paisans/doctor.go`, `cmd/paisans/doctor_test.go`
-- Modify: phase 6's test file for its gateway answer check, in `internal/apply`
 - Modify: `CHANGELOG.md`
 
 **Interfaces:**
-- Consumes: phase 6's `apply.CheckGatewayAnswer`, `apply.HTTPFetcher` (*Phase 6 interfaces this plan assumes*); `config.Config.GatewaySites()`; `deployment.Deployment.Token()`.
-- Produces: `const SectionAnswer = "gateway answer"`; `type AnswerProbe struct { Site, Err string; More []string }` with `site()`; `func GatewayAnswers(cfg *config.Config, probes []AnswerProbe) []Finding`; `Reads.GatewayAnswer(site string) AnswerProbe`; `Input.Answers []AnswerProbe`; nodes `gateway answer <site>`; in `cmd/paisans`: `var doctorGatewayAnswer func(ctx context.Context, cfg *config.Config, site string) error`.
+- Consumes: Task 5's `SelfCheckProbe`, `SelfChecks`, `SectionSelfCheck`, `selfcheck.TargetFor`; `selfcheck.Check`, `selfcheck.DefaultProbe`, `*selfcheck.Conflict`; `config.Site.RunsCaddy()`.
+- Produces: `Reads.SelfCheck(site string) SelfCheckProbe`; `Input.SelfChecks []SelfCheckProbe`; nodes `self-check <site>`; in `cmd/paisans`: `var doctorSelfCheck func(ctx context.Context, t selfcheck.Target) error`.
 
-- [ ] **Step 1: Pin the shared check against an echo**
-
-Phase 6's tests for its gateway check use a fake fetcher, with cases for a matching body, another body, another server and no answer. Add, beside them and in their form:
-
-```go
-// A server that answers any path with the path itself carries the token in
-// its body; only the token as the whole body is this deployment.
-func TestGatewayAnswerRefusesAnEcho(t *testing.T) {
-	// The fake returns, for the 443 fetch, status 200 and the body
-	// "/.well-known/paisans/f2a9\n", which contains the token f2a9; the 80
-	// fetch answers as the matching case does. Build the fake as phase 6's
-	// "another body" case builds its own.
-	err := /* phase 6's check, called as its "another body" case calls it, with that fake */
-	if err == nil || !strings.Contains(err.Error(), "443 on vm answers, but not as this deployment") {
-		t.Errorf("an echo of the path passed: %v", err)
-	}
-}
-```
-
-Write the two marked lines in the form phase 6's own "another body" case takes; the fake's body and the expected error are the test.
-
-Run: `go test ./internal/apply/ -run TestGatewayAnswer`
-Expected: PASS when phase 6 compares the whole body with the token. If it FAILS, the shared check accepts a body that holds the token among other text: make it compare the body, with surrounding white space trimmed, with the token exactly, which fixes `apply`'s step as well, and run again.
-
-- [ ] **Step 2: Write the failing doctor tests**
-
-Create `internal/doctor/answer_test.go`:
-
-```go
-package doctor
-
-import (
-	"strings"
-	"testing"
-)
-
-func TestGatewayAnswers(t *testing.T) {
-	cfg := fixture(t)
-	fs := GatewayAnswers(cfg, []AnswerProbe{
-		{Site: "vm"},
-		{Site: "vm", Err: "443 on vm answers, but not as this deployment", More: []string{"the body was \"hello\""}},
-	})
-	if len(fs) != 2 {
-		t.Fatalf("want two findings:\n%s", dump(fs))
-	}
-	if fs[0].Level != OK || fs[0].Line != "vm: 443 and 80 answer as this deployment" {
-		t.Errorf("ok: %v %q", fs[0].Level, fs[0].Line)
-	}
-	text := strings.Join(fs[1].More, "\n")
-	if fs[1].Level != Fail || fs[1].Line != "vm: 443 on vm answers, but not as this deployment" {
-		t.Errorf("fail: %v %q", fs[1].Level, fs[1].Line)
-	}
-	for _, want := range []string{"the body was \"hello\"", "/.well-known/paisans/f2a9", "`sudo ss -Hltnp`", "`paisans gateway move`"} {
-		if !strings.Contains(text, want) {
-			t.Errorf("lacks %q:\n%s", want, text)
-		}
-	}
-}
-```
+- [ ] **Step 1: Write the failing tests**
 
 In `internal/doctor/graph_test.go`, add to `fixtureReads`:
 
 ```go
-func (f *fixtureReads) GatewayAnswer(site string) AnswerProbe {
-	f.asked("answer " + site)
-	for _, p := range f.in.Answers {
+func (f *fixtureReads) SelfCheck(site string) SelfCheckProbe {
+	f.asked("self-check " + site)
+	for _, p := range f.in.SelfChecks {
 		if p.Site == site {
 			return p
 		}
 	}
-	return AnswerProbe{Site: site}
+	return SelfCheckProbe{Site: site, Host: "talk.example.org", Address: "203.0.113.30"}
 }
 ```
 
 and to `TestBoundOfOneRunsInOrder`'s `want`, after `"leftovers vm"`:
 
 ```go
-		"answer vm",
+		"self-check vm",
 ```
 
 Add, below `TestDockerDownStopsWhatRunsDocker`:
 
 ```go
 // The gateway is asked from outside even when its ssh does not answer.
-func TestGatewayAnswerNeedsNoSsh(t *testing.T) {
+func TestSelfCheckNeedsNoSsh(t *testing.T) {
 	cfg := fixture(t)
 	fix := healthyInput()
 	fix.Reach = []SiteReach{
@@ -2237,194 +2432,175 @@ func TestGatewayAnswerNeedsNoSsh(t *testing.T) {
 	}
 	reads := &fixtureReads{in: fix, log: &events{}}
 	Checks(cfg, fix.Sites, reads).Run(ui.Discard, 0)
-	if !reads.log.has("answer vm") {
+	if !reads.log.has("self-check vm") {
 		t.Errorf("the gateway was not asked from outside: %v", reads.log.list)
 	}
-}
-```
-
-Run: `go test ./internal/doctor/ -run 'TestGatewayAnswer|TestBoundOfOne'`
-Expected: FAIL to compile, `undefined: GatewayAnswers`, `undefined: AnswerProbe`.
-
-- [ ] **Step 3: The judge, the probe and the node**
-
-Create `internal/doctor/answer.go`:
-
-```go
-package doctor
-
-import (
-	"fmt"
-
-	"github.com/paisans-software/paisans-cli/internal/config"
-)
-
-// SectionAnswer is the gateway's own answer, asked from outside, after
-// everything read on the sites.
-const SectionAnswer = "gateway answer"
-
-// AnswerProbe is whether the gateway answered /.well-known/paisans/<token>
-// as this deployment, fetched from the workstation with the check apply
-// runs at the end of the gateway's step. Err is that check's error, its
-// first line, and More the rest.
-type AnswerProbe struct {
-	Site string
-	Err  string
-	More []string
-}
-
-func (p AnswerProbe) site() string { return p.Site }
-
-// GatewayAnswers judges each gateway's answer. The deployment's user cannot
-// read the host's ruleset or another user's sockets, so a port taken after
-// admission, and above all one taken by a DNAT rule with no listener, is
-// invisible from the host; asking from outside is the one way to see it.
-func GatewayAnswers(cfg *config.Config, probes []AnswerProbe) []Finding {
-	path := "/.well-known/paisans/" + cfg.Deployment().Token()
-	var out []Finding
-	for _, p := range probes {
-		if p.Err == "" {
-			out = append(out, Finding{Section: SectionAnswer, Level: OK, Line: fmt.Sprintf("%s: 443 and 80 answer as this deployment", p.Site)})
-			continue
-		}
-		more := append([]string{}, p.More...)
-		more = append(more,
-			fmt.Sprintf("doctor fetched %s through %s's public address from this workstation, as apply does at the end of the gateway's step, and something other than this deployment's Caddy answered, or nothing did. A listener, a container of the owner's system Docker or a DNAT rule may hold the port, and only root on the host can see which.", path, p.Site),
-			"recover:",
-			fmt.Sprintf("  1. The host's owner finds what holds 443 and 80 on %s: `sudo ss -Hltnp`, `sudo docker ps` for the system daemon, and `sudo nft list ruleset` for a DNAT rule.", p.Site),
-			"  2. They free the ports, or the operators move the gateway to another site with `paisans gateway move`.",
-			fmt.Sprintf("  3. `paisans doctor --site %s` again.", p.Site))
-		out = append(out, Finding{Section: SectionAnswer, Level: Fail, Line: fmt.Sprintf("%s: %s", p.Site, p.Err), More: more})
+	if reads.log.has("self-check home-a") {
+		t.Errorf("a site with no Caddy of the toolkit's was asked: %v", reads.log.list)
 	}
-	return out
 }
 ```
+
+Run: `go test ./internal/doctor/ -run 'TestSelfCheckNeedsNoSsh|TestBoundOfOne'`
+Expected: FAIL to compile, `f.in.SelfChecks undefined`.
+
+- [ ] **Step 2: The probe in the Input, the read and the node**
+
+In `internal/doctor/doctor.go`: add `SelfChecks []SelfCheckProbe` to `Input` after `Settings`, with the comment `// SelfChecks is each Caddy site's own answer, asked from outside (selfcheck.go).`; insert `SectionSelfCheck` in `sections` after `SectionLeftovers`; in `Diagnose`, after the `Leftovers` line, `findings = append(findings, SelfChecks(cfg, in.SelfChecks)...)`. In `internal/doctor/graph.go`, `clone`, add `out.SelfChecks = slices.Clone(in.SelfChecks)`.
 
 In `internal/doctor/checks.go`, add to `Reads`:
 
 ```go
-	// GatewayAnswer fetches the gateway's /.well-known/paisans/<token> from
-	// the workstation, through its public address, as apply does.
-	GatewayAnswer(site string) AnswerProbe
+	// SelfCheck asks a site running the toolkit's Caddy, from the
+	// workstation, through its public address, whether it answers as this
+	// deployment, as apply asks the gateway.
+	SelfCheck(site string) SelfCheckProbe
 ```
 
 and in `Checks`, after the `leftovers` loop and before `if dr, ok := reads.(DNSReads)`:
 
 ```go
-	// Each gateway asked, from outside: it needs no ssh, so a gateway whose
-	// ssh does not answer is still asked.
-	for _, site := range cfg.GatewaySites() {
-		if !asked[site] {
+	// Each site running the toolkit's Caddy, asked from outside: it needs
+	// no ssh, so one whose ssh does not answer is still asked.
+	for _, site := range sites {
+		if !cfg.Sites[site].RunsCaddy() {
 			continue
 		}
-		g.Add(Node{Name: SectionAnswer + " " + site, Section: SectionAnswer, Site: site, Subject: site,
+		g.Add(Node{Name: SectionSelfCheck + " " + site, Section: SectionSelfCheck, Site: site, Subject: site,
 			Gather: func(Input) func(*Input) {
-				p := reads.GatewayAnswer(site)
-				return func(in *Input) { in.Answers = append(in.Answers, p) }
+				p := reads.SelfCheck(site)
+				return func(in *Input) { in.SelfChecks = append(in.SelfChecks, p) }
 			},
-			Judge: func(in Input) []Finding { return GatewayAnswers(cfg, bySite(in.Answers, site, AnswerProbe.site)) },
+			Judge: func(in Input) []Finding { return SelfChecks(cfg, bySite(in.SelfChecks, site, SelfCheckProbe.site)) },
 		})
 	}
 ```
 
-In `internal/doctor/doctor.go`: add `Answers []AnswerProbe` to `Input` after `Settings`, with the comment `// Answers is each gateway's own answer, asked from outside (answer.go).`; insert `SectionAnswer` in `sections` after `SectionLeftovers`; in `Diagnose`, after the `Leftovers` line, `findings = append(findings, GatewayAnswers(cfg, in.Answers)...)`. In `internal/doctor/graph.go`, `clone`, add `out.Answers = slices.Clone(in.Answers)`.
-
 Run: `go test ./internal/doctor/`
 Expected: PASS.
 
-- [ ] **Step 4: The read, through phase 6's check**
+- [ ] **Step 3: The read, through the self-check apply runs**
 
 In `cmd/paisans/doctor.go`, add:
 
 ```go
-// doctorGatewayAnswer fetches the gateway's /.well-known/paisans/<token>
-// from this workstation with the check apply runs at the end of the
-// gateway's step, so the two cannot disagree about what answers as this
-// deployment. Tests replace it, since no test may reach a real address.
-var doctorGatewayAnswer = func(ctx context.Context, cfg *config.Config, site string) error {
-	return apply.CheckGatewayAnswer(ctx, apply.HTTPFetcher{}, cfg, site)
+// doctorSelfCheck asks t from this workstation with the check apply runs at
+// the end of the gateway's step, so the two cannot disagree about what
+// answers as this deployment. It asks once: doctor does not wait for a
+// certificate. Tests replace it, since no test may reach a real address.
+var doctorSelfCheck = func(ctx context.Context, t selfcheck.Target) error {
+	p := selfcheck.DefaultProbe()
+	p.Wait = 0
+	return selfcheck.Check(ctx, p, t)
 }
 
-// GatewayAnswer asks the gateway from outside, with a minute for both
-// fetches.
-func (d doctorReads) GatewayAnswer(site string) doctor.AnswerProbe {
+// SelfCheck asks the site from outside, with a minute for both fetches.
+func (d doctorReads) SelfCheck(site string) doctor.SelfCheckProbe {
+	p := doctor.SelfCheckProbe{Site: site}
+	t, ok := selfcheck.TargetFor(d.cfg, site)
+	if !ok {
+		p.Unchecked = "no hostname to ask for"
+		if d.cfg.Sites[site].PublicAddress == "" {
+			p.Unchecked = "no public_address to ask through"
+		}
+		return p
+	}
+	p.Host, p.Address = t.Host, t.Address
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	p := doctor.AnswerProbe{Site: site}
-	if err := doctorGatewayAnswer(ctx, d.cfg, site); err != nil {
-		lines := strings.Split(strings.TrimSpace(err.Error()), "\n")
-		p.Err, p.More = lines[0], lines[1:]
+	err := doctorSelfCheck(ctx, t)
+	var c *selfcheck.Conflict
+	if errors.As(err, &c) {
+		p.Conflict = c.Port
+	}
+	if err != nil {
+		p.Err = err.Error()
 	}
 	return p
 }
 ```
 
-In `withDoctorHosts`, make the gateway answer as itself unless a test says otherwise, before its own `t.Cleanup`:
+Add `"github.com/paisans-software/paisans-cli/internal/selfcheck"` to the imports.
+
+In `withDoctorHosts`, make every site answer as itself unless a test says otherwise, before its own `t.Cleanup`:
 
 ```go
-	savedAnswer := doctorGatewayAnswer
-	doctorGatewayAnswer = func(context.Context, *config.Config, string) error { return nil }
-	t.Cleanup(func() { doctorGatewayAnswer = savedAnswer })
+	savedSelfCheck := doctorSelfCheck
+	doctorSelfCheck = func(context.Context, selfcheck.Target) error { return nil }
+	t.Cleanup(func() { doctorSelfCheck = savedSelfCheck })
 ```
 
-Add `"context"` to the test file's imports. Add a command test:
+Add `"context"` and `"github.com/paisans-software/paisans-cli/internal/selfcheck"` to the test file's imports. Add a command test:
 
 ```go
-// A gateway that answers as something else fails doctor, with apply's own
-// words.
-func TestDoctorFailsAGatewayAnsweringAsSomethingElse(t *testing.T) {
+// A monitor running Caddy that answers as something else fails doctor,
+// with apply's own words; a gateway with no public_address warns.
+func TestDoctorSelfChecksEachCaddySite(t *testing.T) {
 	cfg, err := config.Load(fixtureConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
 	var sent, writes []string
 	withDoctorHosts(t, cfg, stuckHosts(cfg, &sent, &writes))
-	doctorGatewayAnswer = func(_ context.Context, _ *config.Config, site string) error {
-		return fmt.Errorf("443 on %s answers, but not as this deployment\nit answered with another body", site)
+	doctorSelfCheck = func(_ context.Context, target selfcheck.Target) error {
+		return &selfcheck.Conflict{Port: 443, Site: target.Site, Detail: `status 200, body "hello"`}
 	}
 	rec := withRecorder(t, true)
-	_ = runDoctor([]string{"--config", fixtureConfig(), "--site", "vm"})
-	if out := rec.Lines(); !strings.Contains(out, "fail: check gateway answer vm 443 on vm answers, but not as this deployment") {
-		t.Errorf("the gateway's answer is not a failure:\n%s", out)
+	_ = runDoctor([]string{"--config", fixtureConfig(), "--site", "vm", "--site", "watch"})
+	out := rec.Lines()
+	if !strings.Contains(out, "fail: check self-check watch 443 on watch answers, but not as this deployment") {
+		t.Errorf("the monitor's answer is not a failure:\n%s", out)
+	}
+	if !strings.Contains(out, "warned: check self-check vm not asked from outside: no public_address to ask through") {
+		t.Errorf("the gateway with no public_address does not say it was not asked:\n%s", out)
 	}
 }
 ```
 
-Run: `go test ./cmd/paisans/ -run Doctor`
-Expected: PASS. A summary count in another doctor test grows by one passed check for the gateway's answer, where the gateway was asked; recount it as Task 4, Step 7 says.
+In `TestDoctorDiagnosesTheStuckReplicaAndOnlyReads`, add to `want`:
 
-- [ ] **Step 5: The changelog**
+```go
+		"done: check self-check watch answers as this deployment on 443 and 80, asked for health.example.org through 203.0.113.20",
+		"warned: check self-check vm not asked from outside: no public_address to ask through",
+```
+
+Run: `go test ./cmd/paisans/ -run 'Doctor|DefaultOutput'`
+Expected: PASS. A summary count in another doctor test grows by one passed check for `watch` and one warning for `vm`, where each was asked; recount it as Task 6, Step 7 says.
+
+- [ ] **Step 4: The changelog**
 
 In `CHANGELOG.md`, under `[Unreleased]`, `### Added`, add:
 
 ```markdown
-- `doctor` fetches each gateway's `/.well-known/paisans/<token>` from the workstation, as `apply` does, and fails when 443 or 80 answers as anything but this deployment.
+- `doctor` fetches `/.well-known/paisans/<token>` from the gateway and each monitor running Paisans' Caddy, from the workstation as `apply` does, and fails when 443 or 80 answers as anything else.
 ```
 
-- [ ] **Step 6: Run the touched packages**
+- [ ] **Step 5: Run the touched packages**
 
-Run: `gofmt -l internal/doctor internal/apply cmd/paisans && go vet ./internal/doctor/ ./internal/apply/ ./cmd/paisans/ && go test ./internal/doctor/ ./internal/apply/ ./cmd/paisans/`
+Run: `gofmt -l internal/doctor internal/selfcheck cmd/paisans && go vet ./internal/doctor/ ./internal/selfcheck/ ./cmd/paisans/ && go test ./internal/doctor/ ./internal/selfcheck/ ./cmd/paisans/`
 Expected: nothing listed; PASS.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add internal/doctor/answer.go internal/doctor/answer_test.go internal/doctor/checks.go internal/doctor/doctor.go internal/doctor/graph.go internal/doctor/graph_test.go cmd/paisans/doctor.go cmd/paisans/doctor_test.go internal/apply CHANGELOG.md
-git commit -m "feat: doctor asks each gateway from outside whether it answers as itself
+git add internal/doctor cmd/paisans CHANGELOG.md
+git commit -m "feat: doctor asks each caddy site from outside whether it answers as itself
 
 The deployment's user cannot read the host's ruleset or another user's
 sockets, so a port taken after admission, and above all one a DNAT rule
 takes with no listener, is invisible from the host. doctor fetches the
-gateway's own well-known path from the workstation with the check apply
-runs, so the two cannot disagree, and the check accepts only the token as
-the whole body, so a server that echoes the path does not pass.
+gateway's and each Caddy monitor's own well-known path from the
+workstation with the check apply runs, so the two cannot disagree, and
+asks even a site whose ssh does not answer.
+
+Founder decision.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 7: A container whose mesh address was missing at boot
+### Task 9: A container whose mesh address was missing at boot
 
 **Files:**
 - Modify: `internal/doctor/containers.go` (the `cannot assign requested address` case)
@@ -2437,10 +2613,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 - [ ] **Step 1: Change the test to the advice that holds**
 
-In `TestContainerThatStartedBeforeWg0`, replace the `want` list:
+In `TestContainerThatStartedBeforeWg0`, replace the `want` loop:
 
 ```go
-	for _, want := range []string{"Its Docker daemon started it before psns-f2a9 was up", "`docker start paisans-f2a9-talk-app-1` on home-b, as the deployment's user", "`paisans apply --site home-b --recreate talk --execute`"} {
+	for _, want := range []string{"Its Docker daemon started it before psns-f2a9 was up", "`docker start paisans-f2a9-talk-app-1` on home-b, as the deployment's user", "`paisans apply --site home-b --recreate talk --execute`", "`paisans doctor --site home-b`"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q:\n%s", want, text)
 		}
@@ -2462,6 +2638,7 @@ In `internal/doctor/containers.go`, replace the `cannot assign requested address
 			fmt.Sprintf("Its Docker daemon started it before %s was up. The container publishes its port on the site's mesh address, which exists only once %s has brought %s up, and Docker does not retry a container whose network setup failed.", dep.Interface(), dep.WireGuardUnit(), dep.Interface()),
 			"recover:",
 			fmt.Sprintf("  1. `docker start %s` on %s, as the deployment's user, or %s.", name, site, recreate),
+			fmt.Sprintf("  2. If it happens at every boot, `paisans doctor --site %s` says under linger whether the user's manager is ordered after the mesh.", site),
 		}
 ```
 
@@ -2484,9 +2661,12 @@ git commit -m "fix: doctor's boot advice names what the deployment's user can ru
 
 A container that failed with cannot assign requested address was told to
 run host prepare, which ordered the system Docker after the mesh. Each
-deployment's containers run in its own user's daemon, and host prepare
-installs nothing, so the advice is what that user can do: start the
-container again, or recreate its stack.
+deployment's containers run in its own user's daemon, host prepare
+installs nothing, and host admit's drop-in orders that user's manager
+after the mesh, which the linger check reads. So the advice is what the
+user can do: start the container again, or recreate its stack.
+
+Founder decision.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -2498,7 +2678,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - [ ] **Step 1: The sudo finding stays gone**
 
 Run: `grep -rn "sudo" internal/doctor/*.go cmd/paisans/doctor.go | grep -v _test.go`
-Expected: `SudoCommand` and its comments in `internal/doctor/sudo.go`, `SudoRights`' advice, the user check's advice (`sudo gpasswd`), the gateway answer's advice (`sudo ss`, `sudo docker ps`, `sudo nft`), and `journalAdvice`'s helper command in `mesh.go`. Nothing that runs a command through sudo, and no finding about a sudo the transport could not use.
+Expected: `SudoCommand`, `SectionSudo` and their comments in `internal/doctor/sudo.go`, `SudoRights`' advice, the user check's advice (`sudo gpasswd`), the self-check's advice (`sudo ss`, `sudo docker ps`, `sudo nft`), and `journalAdvice`'s helper command in `mesh.go`. Nothing that runs a command through sudo, and no finding about a sudo the transport could not use.
 
 - [ ] **Step 2: The whole suite**
 
@@ -2521,8 +2701,8 @@ Request the final whole-branch review (superpowers:requesting-code-review). Ever
 
 ## Self-Review Notes
 
-* **Spec coverage.** The index's phase 7 list: the user is not privileged (Task 1, `User`, reading `hostadmit.PrivilegedGroups`); the rootless socket answers (Task 1, `DockerSocket`); Engine 29.5 or later (Task 1, `DockerEngine`, `hostadmit.MinRootlessEngine`); linger on (Task 1, `Linger`); `sudo -n -l` lists only the helper (Task 2); the admission record matches the declaration (Task 3); each in the check graph (Task 4); the sudo finding removed (ruling 1, *Final checks* Step 1); the gateway's `/.well-known/paisans/<token>` from outside sharing `apply`'s code (Task 6); a `WARN` per pending or down site listing what the deployment is without (Task 5 for a site that does not answer, Task 3 for one that answers without a record or a grant). The spec's *What runs as the deployment's user* list for doctor is the same list. *A deployment with sites missing*: "`doctor` reports each pending or down site as a `WARN` with the same list" (Tasks 3 and 5, `losses`); "a timeout is treated the same way" (Task 5, rows `down, timed out` and `down, refused`). The doctor graph spec: hard needs prune and report once (Task 4, `TestAPendingSiteIsCheckedNoFurther`, `TestDockerDownStopsWhatRunsDocker`, `TestPruningIsReportedOnce`); same findings as `Diagnose` (Task 4, Step 3); bound of one in the table's order (Task 4, `TestBoundOfOneRunsInOrder`).
-* **Review Focus.** sudo in another language or an unknown shape: Task 2, `TestSudoRights` rows `translated`, `unrecognised`, and `TestParseSudoList`'s refusals. Extra rules: Task 2 rows `helper and a shell on one line`, `helper and ALL`, `helper as any user`, `another deployment's helper`. A site that answers but is not admitted: Task 4, `TestAPendingSiteIsCheckedNoFurther`. A gateway pending or down: Task 5, `TestAbsentSites` rows `gateway down`, `gateway pending`. An echoing server: Task 6, `TestGatewayAnswerRefusesAnEcho`.
-* **Left to other phases, on purpose.** User documentation of every check here is phase 9's last task (ruling 9). The classification itself and the gateway's well-known route and fetch are phase 6's; this phase calls them. `host admit` orders the user's manager after the mesh at boot (phase 5). Staging confirmation of `sudo -n -l`'s exact output (R9 recorded that it "listed only the helper", not its text) is phase 10's.
-* **Type consistency.** `UserProbe`, `DockerProbe`, `LingerProbe` (Task 1), `SudoProbe`, `SudoEntry` (Task 2), `AdmissionProbe` (Task 3), `AnswerProbe` (Task 6) are each an `Input` field's element (`Users`, `Docker`, `Linger`, `Sudo`, `Admission`, `Answers`) and a `Reads` method's return (`User`, `Docker`, `Linger`, `Sudo`, `Admission`, `GatewayAnswer`). `pending`, `absentLevel` and `requestAdvice` are Task 3's and Task 5's `Reach` calls them. `admittedRecord` is written once per test package (`internal/doctor/admission_test.go`, `cmd/paisans/doctor_test.go`), since test helpers do not cross packages. `rootlessDocker` (Task 1), `sudoList` and `helperEntry` (Task 2) are the defaults `fixtureReads` answers with (Task 4). Node names: `admission <site>`, `user <site>`, `docker <site>`, `docker engine <site>`, `linger <site>`, `sudo rights <site>`, `gateway answer <site>`; the pruned labels in the tests drop the site word from each.
-* **Placeholder scan.** Two places name code this plan cannot see, each saying where to read it: Task 6, Step 1's fake, written in the form of phase 6's own "another body" case; and Task 3, Step 8, which runs only when phase 6 compares the record in `host prepare`. Phase 6's two other names are in one table and two functions, reconciled by Task 0.
+* **Spec coverage.** The index's phase 7 list: the user is not privileged (Task 2, `User`, reading `hostadmit.PrivilegedGroups`); the rootless socket answers (Task 2, `DockerSocket`); Engine 29.5 or later (Task 2, `DockerEngine`, `hostadmit.MinRootlessEngine`); linger on (Task 2, `Linger`, with the boot order of founder decision 3); `sudo -n -l` lists only the helper (Tasks 1 and 3, admit's own judgement); the admission record matches the declaration (Task 4, the merged `Differences`); each in the check graph (Tasks 6 and 8); the sudo finding removed (ruling 1, *Final checks* Step 1); the self-check from outside sharing `apply`'s code (Tasks 5 and 8, the gateway and each Caddy monitor per the spec's *What runs as the deployment's user*); a `WARN` per pending or down site listing what the deployment is without (Task 7 for a site that does not answer, Task 4 for one that answers uncovered, both from `topology`'s classification). *A deployment with sites missing*: "`doctor` reports each pending or down site as a `WARN` with the same list, and the gateway as a `FAIL`" (Tasks 4 and 7, `Losses`, `absentLevel`); "Whether a site has joined is read from the deployment" (ruling 10, `topology.Gather`). The doctor graph spec: hard needs prune and report once (Task 6, `TestAPendingSiteIsCheckedNoFurther`, `TestDockerDownStopsWhatRunsDocker`, `TestPruningIsReportedOnce`); same findings as `Diagnose` (Tasks 6 and 8, Step 3 and Step 2); bound of one in the table's order (`TestBoundOfOneRunsInOrder`).
+* **Review Focus.** sudo in another language or an unknown shape: Task 3 rows `translated`, `unrecognised`, Task 1's `TestReadSudoList`. Reaching past the helper: Task 3's rows and Task 1's `TestBeyondHelper`. A site that answers but is not admitted: Task 6, `TestAPendingSiteIsCheckedNoFurther`. A gateway pending or down: Task 4 row `gateway without the ports`, Task 7 rows `gateway down`, `gateway pending`. An echoing server: Task 5, the `an echo of the path` row.
+* **Left to other phases, on purpose.** User documentation of every check here is phase 9's last task (ruling 9). The classification, the self-check's fetch and `apply`'s step are phase 6's; this phase calls them. Staging confirmation of `sudo -n -l`'s exact output as the user is phase 10's.
+* **Type consistency.** `UserProbe`, `DockerProbe`, `LingerProbe` (Task 2), `SudoProbe` (Task 3), `AdmissionProbe` (Task 4), `SelfCheckProbe` (Task 5) are each an `Input` field's element (`Users`, `Docker`, `Linger`, `Sudo`, `Admission`, `SelfChecks`) and a `Reads` method's return (`User`, `Docker`, `Linger`, `Sudo`, `Admission`, `SelfCheck`). `pending`, `absentLevel` and `requestAdvice` are Task 4's, and Task 7's `Reach` calls them. Each section constant lives in its judge's file. `admittedRecord` exists once per test package: `internal/doctor/admission_test.go` (Task 4, no `*testing.T`) and `cmd/paisans/admitted_test.go` (already on `develop`, with one). `rootlessDocker` (Task 2), `sudoList` and `helperEntry` (Task 3) are the defaults `fixtureReads` answers with (Task 6). Node names: `admission <site>`, `user <site>`, `docker <site>`, `docker engine <site>`, `linger <site>`, `sudo rights <site>`, `self-check <site>`; the pruned labels in the tests drop the site word from each.
+* **Placeholder scan.** None: every function this plan calls is on `develop` at `6783478a` or produced by a task above.
