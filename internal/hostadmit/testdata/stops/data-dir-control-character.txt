@@ -1,0 +1,2 @@
+--data-dir must be an absolute path in its plain form
+The request is for site vm (roles: witness). "/srv/da\x1bta" is not: give the directory as /srv/data, with no trailing slash, no . or .., no control character, and not / itself. Nothing was read or changed.

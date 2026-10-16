@@ -1,0 +1,425 @@
+package hostadmit
+
+import (
+	"fmt"
+	"path"
+	"strings"
+	"time"
+
+	"github.com/paisans-software/paisans-cli/internal/admission"
+	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/hostprep"
+	"github.com/paisans-software/paisans-cli/internal/ui"
+)
+
+// Flags are the owner's choices: the two grants, where Docker's data goes,
+// and the two host-wide permissions a host may need.
+type Flags struct {
+	Watchdog, PublicPorts bool
+	// DataDir is --data-dir: admit creates DataDir/paisans-<token> for the
+	// deployment's Docker data. "" leaves it under the user's home.
+	DataDir string
+	// BridgeNetfilter is --bridge-netfilter: load br_netfilter on a host
+	// whose own bridges its FORWARD chain will then filter.
+	BridgeNetfilter bool
+	// MeshLAN is --mesh-lan: let the mesh dial the host's own LAN.
+	MeshLAN bool
+}
+
+// Grants are the grants the flags give.
+func (f Flags) Grants() admission.Grants {
+	return admission.Grants{Watchdog: f.Watchdog, PublicPorts: f.PublicPorts}
+}
+
+// Input is everything admit is given: the request, from a file or built
+// from the configuration, its digest ("" with --site), the flags, and the
+// time the record will carry.
+type Input struct {
+	Request admission.Request
+	Digest  string
+	Flags   Flags
+	Now     time.Time
+}
+
+// Early is admit's first check, before anything reaches the host: a grant
+// the site's roles need and the owner did not give, a grant it does not
+// need, and a --data-dir that is not an absolute, clean path. Each is the
+// owner's to decide, so admit stops having read and changed nothing.
+func Early(in Input) error {
+	needed, given := in.Request.Grants, in.Flags.Grants()
+	type stop struct{ hint, explain string }
+	var stops []stop
+	if needed.Watchdog && !given.Watchdog {
+		stops = append(stops, stop{"this is a data site, and admitting it needs --watchdog",
+			"Its Patroni member needs the host's watchdog to fail over safely: without one, a member that has lost its lock can keep acting as leader. The watchdog reboots the whole machine when Patroni stops renewing it. Admit it with --watchdog, or do not admit it."})
+	}
+	if needed.PublicPorts && !given.PublicPorts {
+		stops = append(stops, stop{"this site runs the toolkit's Caddy, and admitting it needs --public-ports",
+			"The gateway, or a monitor with web_server.managed_by: paisans, binds ports 80 and 443. --public-ports lowers net.ipv4.ip_unprivileged_port_start to 80 for the whole host, so every local user may then bind ports 80 to 1023, and opens 80 and 443 in the firewall. Admit it with --public-ports, or do not admit it; a monitor behind your own web server (web_server.managed_by: external) needs neither."})
+	}
+	if given.Watchdog && !needed.Watchdog {
+		stops = append(stops, stop{"--watchdog is not needed: this site holds no data role",
+			"The watchdog can reboot the machine and is given only to a data site's Patroni. Drop --watchdog."})
+	}
+	if given.PublicPorts && !needed.PublicPorts {
+		stops = append(stops, stop{"--public-ports is not needed: this site binds no port below 1024",
+			"--public-ports lets every local user bind ports 80 to 1023 and is given only to a site that runs the toolkit's Caddy. Drop --public-ports."})
+	}
+	if d := in.Flags.DataDir; d != "" && !plainDir(d) {
+		stops = append(stops, stop{"--data-dir must be an absolute path in its plain form",
+			fmt.Sprintf("%q is not: give the directory as /srv/data, with no trailing slash, no . or .., no control character, and not / itself.", d)})
+	}
+	switch len(stops) {
+	case 0:
+		return nil
+	case 1:
+		return &ui.Problem{Hint: stops[0].hint, Explain: about(in.Request) + " " + stops[0].explain + " Nothing was read or changed."}
+	}
+	explain := about(in.Request)
+	for _, s := range stops {
+		explain += "\n- " + s.hint + ". " + s.explain
+	}
+	return &ui.Problem{Hint: "the flags given do not suit this request", Explain: explain + "\nNothing was read or changed."}
+}
+
+// plainDir reports whether d is an absolute path in its clean form, not /,
+// with no control character: a directory admit can name in a plan, a probe
+// and a record as it is.
+func plainDir(d string) bool {
+	_, bad := config.ControlRune(d)
+	return !bad && path.IsAbs(d) && path.Clean(d) == d && d != "/"
+}
+
+// about names the site a request is for and its roles, so an owner holding
+// requests for two sites of one deployment knows which one this is.
+func about(r admission.Request) string {
+	roles := "no role"
+	if len(r.Roles) > 0 {
+		roles = "roles: " + strings.Join(r.Roles, ", ")
+	}
+	return ui.Visible(fmt.Sprintf("The request is for site %s (%s).", r.Site, roles))
+}
+
+// Step is one change admit still needs to make, in order.
+type Step struct {
+	// Title is the step's short name, Describe its sentence.
+	Title, Describe string
+	// File, when set, is written first, by the transport, as root.
+	File *hostprep.File
+	// Command, when set, runs after File, with Input on its stdin when
+	// Input is not empty: content written as the deployment's user goes
+	// there, never on a command line.
+	Command, Input string
+	Kinds          []string
+	// Provisional marks a step rendered before the user existed, with
+	// <uid> and <subordinate range> in place of the values useradd will
+	// give it. Execute never runs one: it reads the host again once the
+	// user exists and runs the step as rebuilt.
+	Provisional bool
+}
+
+// Plan is what admit found on one host for one site of a deployment.
+type Plan struct {
+	Deployment, User, Profile, Host string
+	// Site is the site the request is for, "" in evict's plan.
+	Site     string
+	Steps    []Step
+	Present  []string
+	Foreign  []string
+	Warnings []hostprep.Warning
+}
+
+// planner is one Build: the host, the input and what the probe found, and
+// the plan as the parts fill it.
+type planner struct {
+	t       apply.Transport
+	in      Input
+	d       deployment.Deployment
+	f       Facts
+	profile hostprep.Profile
+	host    hostprep.OSRelease
+	plan    *Plan
+	// record is the admission record the record part writes; parts before
+	// it fill what they decide (data_dir, bridge_netfilter, web_server).
+	record admission.Record
+}
+
+// step adds s to the plan, present what was found in place, warn a warning.
+func (p *planner) step(s Step)         { p.plan.Steps = append(p.plan.Steps, s) }
+func (p *planner) present(what string) { p.plan.Present = append(p.plan.Present, what) }
+func (p *planner) warn(hint, detail string) {
+	p.plan.Warnings = append(p.plan.Warnings, hostprep.Warning{Hint: hint, Detail: detail})
+}
+
+// section adds what one of hostprep's planners found, its steps as admit's.
+func (p *planner) section(s hostprep.Section) {
+	for _, st := range s.Steps {
+		p.step(Step{Title: st.Title, Describe: st.Describe, File: st.File, Command: st.Command, Kinds: st.Kinds})
+	}
+	p.plan.Present = append(p.plan.Present, s.Present...)
+	p.plan.Foreign = append(p.plan.Foreign, s.Foreign...)
+	p.plan.Warnings = append(p.plan.Warnings, s.Warnings...)
+}
+
+// part is one stage of admit, in the order parts lists them.
+type part struct {
+	name string
+	plan func(*planner) error
+}
+
+// parts are admit's stages in the order they run: the spec's What it does,
+// with the claim first, delegation and the egress table before linger
+// starts the user's manager, and AppArmor after the packages that bring its
+// profile. Each is added by the task that writes it, at the place its
+// comment names.
+var parts = []part{
+	// 1. claim
+	// 2. docker
+	// 3. apparmor
+	// 4. user
+	// 5. delegation
+	// 6. egress
+	// 7. linger
+	// 8. bridge netfilter
+	// 9. daemon
+	// 10. deployment directory
+	// 10a. mesh subnet
+	// 11. wireguard
+	// 12. firewall
+	// 13. watchdog
+	// 14. sysctls
+	// 14a. web server
+	// 15. record
+	// 16. keys
+	// 17. check
+}
+
+// Build reads the host t reaches and plans admitting in.Request there. A
+// refusal is an error; a plan with no steps is a host already admitted as
+// asked.
+func Build(t apply.Transport, in Input) (*Plan, error) {
+	if err := Early(in); err != nil {
+		return nil, err
+	}
+	content, found, err := t.ReadFile("/etc/os-release")
+	if err != nil {
+		return nil, fmt.Errorf("reading /etc/os-release on %s: %w", t.Describe(), shown(err))
+	}
+	if !found {
+		return nil, fmt.Errorf("%s has no /etc/os-release, so no host profile can be chosen for it", t.Describe())
+	}
+	host := hostprep.ParseOSRelease(content)
+	profile, err := hostprep.Select(host)
+	if err != nil {
+		return nil, err
+	}
+	d := deployment.Deployment{ID: in.Request.Deployment}
+	facts, err := probe(t, d, in)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", t.Describe(), shown(err))
+	}
+	p := &planner{t: t, in: in, d: d, f: facts, profile: profile, host: host,
+		plan: &Plan{Deployment: in.Request.Deployment, User: in.Request.User, Site: in.Request.Site,
+			Profile: profile.ID() + " " + profile.Version(), Host: t.Describe()},
+		record: admission.NewRecord(in.Request, in.Flags.Grants(), in.Digest, in.Now)}
+	for _, pt := range parts {
+		if err := pt.plan(p); err != nil {
+			return nil, fmt.Errorf("%s: %w", pt.name, err)
+		}
+	}
+	return p.plan, nil
+}
+
+// uidOf is the user's UID for a step's command or file, "<uid>" while the
+// user does not exist; a step that uses it is Provisional then.
+func uidOf(p *planner) string {
+	if !p.f.User.Exists {
+		return "<uid>"
+	}
+	return fmt.Sprint(p.f.User.UID)
+}
+
+// Text is the plan as a reviewer reads it in a golden file: every step with
+// its command, its file and its stdin in full, byte for byte, then what was
+// present, what was another's, and each warning. It is for review, not for
+// a terminal; Show is what an owner sees.
+func (p *Plan) Text() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "admit site %s of %s as %s on %s (%s)\n", p.Site, p.Deployment, p.User, p.Host, p.Profile)
+	indent := func(prefix, text string) {
+		for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
+			fmt.Fprintf(&b, "%s%s\n", prefix, line)
+		}
+	}
+	for i, s := range p.Steps {
+		fmt.Fprintf(&b, "\nstep %d: %s\n", i+1, s.Title)
+		indent("  ", s.Describe)
+		if s.Provisional {
+			b.WriteString("  provisional: run once the user exists\n")
+		}
+		if s.File != nil {
+			fmt.Fprintf(&b, "  write %s mode %04o:\n", s.File.Path, s.File.Mode)
+			indent("    | ", s.File.Content)
+		}
+		if s.Command != "" {
+			b.WriteString("  run:\n")
+			indent("    $ ", s.Command)
+		}
+		if s.Input != "" {
+			b.WriteString("  stdin:\n")
+			indent("    | ", s.Input)
+		}
+	}
+	for _, s := range p.Present {
+		fmt.Fprintf(&b, "\npresent: %s", s)
+	}
+	for _, s := range p.Foreign {
+		fmt.Fprintf(&b, "\nforeign: %s", s)
+	}
+	for _, w := range p.Warnings {
+		fmt.Fprintf(&b, "\nwarning: %s", w.Hint)
+		if w.Detail != "" {
+			fmt.Fprintf(&b, "\n  %s", w.Detail)
+		}
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// Show reports the plan as host prepare's does: each step pending under
+// its title, its sentence as a detail, then under --verbose what was
+// present and another's, then the warnings. Everything it shows passes
+// through ui.Visible, since a part may quote what it found on the host.
+func (p *Plan) Show(r ui.Reporter) {
+	if p.Site != "" {
+		r.Detail("site %s of deployment %s", ui.Visible(p.Site), p.Deployment)
+	}
+	r.Detail("host profile %s", p.Profile)
+	for _, s := range p.Steps {
+		st := r.Step(ui.Visible(s.Title))
+		st.Detail("%s", ui.Visible(s.Describe))
+		st.End(ui.Pending, "")
+	}
+	if r.Verbose() {
+		for _, s := range p.Present {
+			r.Step(ui.Visible(s)).End(ui.OK, "")
+		}
+		for _, s := range p.Foreign {
+			r.Step(ui.Visible(s)).End(ui.OK, "not paisans")
+		}
+	}
+	p.Warn(r)
+}
+
+// Warn reports the warnings alone, as --execute does.
+func (p *Plan) Warn(r ui.Reporter) {
+	for _, w := range p.Warnings {
+		r.Warn(ui.Visible(w.Hint), ui.Visible(w.Detail))
+	}
+}
+
+// Execute runs approved's steps in order and stops at the first failure,
+// naming the step. At the first provisional step it reads the host again
+// and plans again, now that the user exists, and carries on with the plan
+// it rebuilt, provided that plan's steps from there on carry the titles
+// the owner approved: anything else means the host changed while admit ran,
+// and nothing more is done.
+func Execute(t apply.Transport, in Input, approved *Plan, r ui.Reporter) error {
+	steps := approved.Steps
+	for i := 0; i < len(steps); i++ {
+		if steps[i].Provisional {
+			rebuilt, err := Build(t, in)
+			if err != nil {
+				return fmt.Errorf("reading the host again once %s existed: %w", approved.User, err)
+			}
+			if err := sameTitles(steps[i:], rebuilt.Steps); err != nil {
+				return err
+			}
+			steps = append(steps[:i:i], rebuilt.Steps...)
+		}
+		if err := run(t, steps[i], r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// sameTitles is nil when rebuilt holds exactly the approved steps' titles,
+// none of them provisional.
+func sameTitles(approved, rebuilt []Step) error {
+	var a, b []string
+	for _, s := range approved {
+		a = append(a, s.Title)
+	}
+	for _, s := range rebuilt {
+		if s.Provisional {
+			return fmt.Errorf("the host changed while admit ran: %q still needs the user, which was to exist by now. Nothing more was done. Run host admit again to see the plan", s.Title)
+		}
+		b = append(b, s.Title)
+	}
+	if strings.Join(a, "\n") != strings.Join(b, "\n") {
+		return fmt.Errorf("the host changed while admit ran: the steps left were\n- %s\nand are now\n- %s\nNothing more was done. Run host admit again to see the plan", strings.Join(a, "\n- "), strings.Join(b, "\n- "))
+	}
+	return nil
+}
+
+// run runs one step, as host prepare's Execute does. A failure names the
+// step and quotes what the host printed, through ui.Visible and redaction.
+func run(t apply.Transport, s Step, r ui.Reporter) error {
+	st := r.Step(ui.Visible(s.Title))
+	st.Detail("%s", ui.Visible(s.Describe))
+	if s.File != nil {
+		if err := t.WriteFile(s.File.Path, s.File.Content, s.File.Mode); err != nil {
+			err = fmt.Errorf("%s: %w", s.Title, shown(err))
+			st.Fail(err)
+			return err
+		}
+	}
+	if s.Command != "" {
+		var out string
+		var err error
+		if s.Input != "" {
+			out, err = t.RunInput(s.Command, s.Input)
+		} else {
+			out, err = t.Run(s.Command)
+		}
+		if err != nil {
+			text := visibleLines(err.Error())
+			if o := strings.TrimSpace(out); o != "" && !strings.Contains(err.Error(), o) {
+				text += ": " + visibleLines(o)
+			}
+			err = fmt.Errorf("%s: %w", s.Title, ui.RedactError(shownError{text, err}))
+			st.Fail(err)
+			return err
+		}
+	}
+	st.Done("")
+	return nil
+}
+
+// shownError is an error whose text is what a host said, made visible and
+// redacted, that still unwraps to the error the transport returned.
+type shownError struct {
+	text string
+	err  error
+}
+
+func (e shownError) Error() string { return e.text }
+func (e shownError) Unwrap() error { return e.err }
+
+// shown is err with its text, which quotes a host, made safe to print.
+func shown(err error) error {
+	return ui.RedactError(shownError{visibleLines(err.Error()), err})
+}
+
+// visibleLines is text with each line passed through ui.Visible, so a
+// host's escape sequence is shown and never drawn.
+func visibleLines(text string) string {
+	lines := strings.Split(text, "\n")
+	for i, l := range lines {
+		lines[i] = ui.Visible(l)
+	}
+	return strings.Join(lines, "\n")
+}

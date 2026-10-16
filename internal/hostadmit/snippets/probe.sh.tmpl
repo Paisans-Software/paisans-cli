@@ -1,0 +1,72 @@
+{{- /* paisans host admit: read only. One "key value" line per fact; a key
+        that repeats is a list. Nothing here changes the host, and nothing
+        reads inside the deployment user's home, which is read as the user.
+        Every value rendered in is quoted with q. */ -}}
+# paisans host admit: read only
+export LC_ALL=C PATH=/usr/sbin:/usr/bin:/sbin:/bin
+u={{ q .User }}
+say() { printf '%s %s\n' "$1" "$2"; }
+# Docker, judged by its binary so a stopped daemon is judged too.
+if command -v dockerd >/dev/null 2>&1; then say engine "$(dockerd --version 2>/dev/null | sed -n 's/^Docker version \([^,]*\),.*/\1/p')"; else say engine absent; fi
+for p in docker-ce docker.io docker-ce-rootless-extras uidmap nftables; do
+  if dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q 'ok installed$'; then say pkg "$p installed"; else say pkg "$p absent"; fi
+done
+if command -v dockerd-rootless-setuptool.sh >/dev/null 2>&1; then say setuptool present; else say setuptool absent; fi
+if command -v snap >/dev/null 2>&1 && snap list docker >/dev/null 2>&1; then say snap docker; else say snap absent; fi
+if [ -S /var/run/docker.sock ]; then say system-socket present; else say system-socket absent; fi
+# AppArmor's restriction on unprivileged user namespaces, and the profile
+# Docker's rootless extras bring.
+say userns-restrict "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)"
+if grep -q rootlesskit /sys/kernel/security/apparmor/profiles 2>/dev/null; then say rootlesskit-profile loaded; else say rootlesskit-profile absent; fi
+# The user, and every user's subordinate ranges.
+home=
+if line=$(getent passwd "$u"); then
+  say passwd "$line"
+  say groups "$(id -Gn "$u")"
+  say group "$(id -gn "$u")"
+  uid=$(id -u "$u")
+  home=$(printf '%s' "$line" | cut -d: -f6)
+  if [ -e "/var/lib/systemd/linger/$u" ]; then say linger yes; else say linger no; fi
+  say manager "$(systemctl is-active "user@$uid.service" 2>/dev/null || true)"
+else
+  say passwd absent
+fi
+awk -F: 'NF >= 3 { print "subuid " $1 ":" $2 ":" $3 }' /etc/subuid 2>/dev/null
+awk -F: 'NF >= 3 { print "subgid " $1 ":" $2 ":" $3 }' /etc/subgid 2>/dev/null
+# Each file admit writes as root: its checksum, mode and owner, so admit
+# compares with what it would write without printing what is there.
+for f in{{ range .Files }} {{ q . }}{{ end }}; do
+  if [ -L "$f" ]; then say file "$f link"
+  elif [ -f "$f" ]; then say file "$f $(sha256sum < "$f" | cut -c1-64) $(stat -c '%a %u %g' "$f")"
+  else say file "$f absent"; fi
+done
+if systemctl is-enabled {{ q .EgressUnit }} >/dev/null 2>&1; then say egress-enabled yes; else say egress-enabled no; fi
+if nft list table inet {{ q .EgressTable }} >/dev/null 2>&1; then say egress-table present; else say egress-table absent; fi
+# Each directory admit creates or checks, as ls -ldn prints it, so a link,
+# a non-directory and an ACL (a + after the mode) are all seen.
+for d in{{ range .Dirs }} {{ q . }}{{ end }}; do
+  if [ -e "$d" ] || [ -L "$d" ]; then say dir "$d $(ls -ldn "$d" | awk '{ print $1, $3, $4 }')"; else say dir "$d absent 0 0"; fi
+done
+# The kernel and the network.
+if [ -d /sys/module/br_netfilter ]; then say br_netfilter loaded; else say br_netfilter absent; fi
+ip -d -o link show type bridge 2>/dev/null | awk -F': ' '{ sub(/@.*/, "", $2); print "bridge " $2 }'
+say forward-policy "$(iptables -S FORWARD 2>/dev/null | awk '$1 == "-P" { print $3; exit }')"
+say input-policy "$(iptables -S INPUT 2>/dev/null | awk '$1 == "-P" { print $3; exit }')"
+say input-rules "$(iptables -S INPUT 2>/dev/null | grep -c '^-A INPUT' || true)"
+say port-start "$(sysctl -n net.ipv4.ip_unprivileged_port_start)"
+say ip-forward "$(sysctl -n net.ipv4.ip_forward)"
+dev=$(ip -4 -o route show default 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }')
+say default-dev "${dev:-absent}"
+if [ -n "$dev" ]; then ip -4 -o addr show dev "$dev" scope global | awk '{ print "lan " $4; exit }'; fi
+if systemctl is-active firewalld >/dev/null 2>&1; then say firewalld active; else say firewalld inactive; fi
+nft list chains 2>/dev/null | awk '/^table / { t = $2 " " $3 } /^[ \t]*chain / { c = $2 } /hook input/ { print "input-chain " t " " c }'
+for f in /etc/udev/rules.d/60-paisans-*-watchdog.rules; do [ -e "$f" ] && say watchdog-rule "$f"; done
+for f in /etc/paisans/admitted.*.json; do [ -e "$f" ] && say record "$f"; done
+# Where Docker's data will live: --data-dir, or the user's home, or /home
+# for a user not made yet; the nearest directory that exists.
+target={{ if .DataParent }}{{ q .DataParent }}{{ else }}"${home:-/home}"{{ end }}
+while [ ! -e "$target" ]; do target=$(dirname "$target"); done
+say data-path "$target"
+say data-fs "$(stat -f -c %T "$target")"
+say data-avail "$(df -P -B1 "$target" | awk 'NR == 2 { print $4 }')"
+echo end

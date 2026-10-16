@@ -1,0 +1,304 @@
+package hostadmit
+
+import (
+	"embed"
+	"fmt"
+	"strconv"
+	"strings"
+	"text/template"
+
+	"github.com/paisans-software/paisans-cli/internal/admission"
+	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
+)
+
+//go:embed snippets
+var snippets embed.FS
+
+// Facts are what the probe found, read once per Build.
+type Facts struct {
+	Docker   DockerFacts
+	Packages map[string]bool
+	AppArmor struct{ Restricted, Profile bool }
+	User     UserFacts
+	// SubUID and SubGID are every user's ranges, by name.
+	SubUID, SubGID             map[string][]IDRange
+	Files                      map[string]FileState
+	Dirs                       map[string]DirState
+	EgressEnabled, EgressTable bool
+	BrNetfilter                bool
+	Bridges                    []string
+	ForwardPolicy              string
+	InputPolicy                string
+	InputRules                 int
+	InputChains                []string
+	Firewalld                  bool
+	PortStart, IPForward       string
+	DefaultDev, LAN            string
+	WatchdogRules              []string
+	Records                    []string
+	Data                       struct {
+		Path, FS string
+		Avail    int64
+	}
+	// raw is every line, by key, for what no field above carries.
+	raw map[string][]string
+}
+
+// DockerFacts are the system Docker, if any, as the probe found it.
+type DockerFacts struct {
+	// Engine is dockerd's version, "" when Docker is absent.
+	Engine     string
+	Setuptool  bool
+	Snap       bool
+	SystemSock bool
+}
+
+// UserFacts are the deployment's user, Exists false while it does not exist.
+type UserFacts struct {
+	Exists        bool
+	Name          string
+	UID, GID      int
+	Home, Group   string
+	Groups        []string
+	Linger        bool
+	ManagerActive bool
+}
+
+// IDRange is one line of /etc/subuid or /etc/subgid: Count IDs from Start.
+type IDRange struct{ Start, Count int64 }
+
+// FileState is one file admit writes, as the probe saw it.
+type FileState struct {
+	Present, Link bool
+	Sum, Mode     string
+	UID, GID      int
+}
+
+// DirState is one directory as ls -ldn printed it.
+type DirState struct {
+	Present  bool
+	Mode     string
+	UID, GID int
+}
+
+// probeData is what probe.sh.tmpl is rendered with.
+type probeData struct {
+	User, Token, Prefix, EgressUnit, EgressTable, DataParent string
+	Files, Dirs                                              []string
+}
+
+// probedFiles are the files admit writes as root, whose state the probe
+// reads; each task that writes one adds its path here.
+func probedFiles(d deployment.Deployment, in Input) []string {
+	helper, _ := apply.WGHelper{Iface: d.Interface()}.Path()
+	record, _ := admission.Path(d.Token())
+	return []string{
+		delegatePath, modulesLoadPath, sysctlPath, sysctlBeforePath,
+		helper, sudoersPath(d), egressFilePath(d), "/etc/systemd/system/" + d.EgressUnit(),
+		watchdogRulePath(d), "/etc/systemd/system/" + d.Prefix() + "-watchdog.service",
+		record,
+	}
+}
+
+// probedDirs are the directories admit creates or checks.
+func probedDirs(d deployment.Deployment, in Input) []string {
+	dirs := []string{"/etc/wireguard", admission.Dir, deployment.Base, d.Root(), apply.HelperDir}
+	if in.Flags.DataDir != "" {
+		dirs = append(dirs, in.Flags.DataDir, in.Flags.DataDir+"/"+d.Prefix())
+	}
+	return dirs
+}
+
+// probe runs the probe on t and reads what it prints.
+func probe(t apply.Transport, d deployment.Deployment, in Input) (Facts, error) {
+	script, err := probeScript(d, in)
+	if err != nil {
+		return Facts{}, err
+	}
+	out, err := t.Run(script)
+	if err != nil {
+		return Facts{}, err
+	}
+	return parseFacts(out, in.Request.User)
+}
+
+// probeScript is the probe rendered for d and in. Every value rendered in
+// is quoted for the shell with q, so a --data-dir that is absolute and clean
+// but holds a space or a $( is a path and nothing else.
+func probeScript(d deployment.Deployment, in Input) (string, error) {
+	tmpl, err := template.New("probe.sh.tmpl").Funcs(template.FuncMap{"q": apply.ShellQuote}).ParseFS(snippets, "snippets/probe.sh.tmpl")
+	if err != nil {
+		return "", err
+	}
+	var script strings.Builder
+	if err := tmpl.Execute(&script, probeData{
+		User: in.Request.User, Token: d.Token(), Prefix: d.Prefix(),
+		EgressUnit: d.EgressUnit(), EgressTable: d.EgressTable(), DataParent: in.Flags.DataDir,
+		Files: probedFiles(d, in), Dirs: probedDirs(d, in),
+	}); err != nil {
+		return "", err
+	}
+	return script.String(), nil
+}
+
+// parseFacts reads the probe's lines. Values the probe prints are paths,
+// numbers and names; a line it cannot read is refused rather than skipped.
+func parseFacts(out, user string) (Facts, error) {
+	f := Facts{Packages: map[string]bool{}, SubUID: map[string][]IDRange{}, SubGID: map[string][]IDRange{},
+		Files: map[string]FileState{}, Dirs: map[string]DirState{}, raw: map[string][]string{}}
+	f.User.Name = user
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) == 0 || lines[len(lines)-1] != "end" {
+		return f, fmt.Errorf("the probe's answer was cut short")
+	}
+	for _, line := range lines[:len(lines)-1] {
+		key, v, _ := strings.Cut(line, " ")
+		f.raw[key] = append(f.raw[key], v)
+		switch key {
+		case "engine":
+			if v != "absent" {
+				f.Docker.Engine = v
+			}
+		case "pkg":
+			name, state, _ := strings.Cut(v, " ")
+			f.Packages[name] = state == "installed"
+		case "setuptool":
+			f.Docker.Setuptool = v == "present"
+		case "snap":
+			f.Docker.Snap = v == "docker"
+		case "system-socket":
+			f.Docker.SystemSock = v == "present"
+		case "userns-restrict":
+			f.AppArmor.Restricted = v == "1"
+		case "rootlesskit-profile":
+			f.AppArmor.Profile = v == "loaded"
+		case "passwd":
+			if v == "absent" {
+				continue
+			}
+			p := strings.Split(v, ":")
+			if len(p) != 7 || p[0] != user {
+				return f, fmt.Errorf("unreadable passwd entry %q", v)
+			}
+			uid, err1 := strconv.Atoi(p[2])
+			gid, err2 := strconv.Atoi(p[3])
+			if err1 != nil || err2 != nil {
+				return f, fmt.Errorf("unreadable passwd entry %q", v)
+			}
+			f.User.Exists, f.User.UID, f.User.GID, f.User.Home = true, uid, gid, p[5]
+		case "groups":
+			f.User.Groups = strings.Fields(v)
+		case "group":
+			f.User.Group = v
+		case "linger":
+			f.User.Linger = v == "yes"
+		case "manager":
+			f.User.ManagerActive = v == "active"
+		case "subuid", "subgid":
+			p := strings.Split(v, ":")
+			if len(p) != 3 {
+				return f, fmt.Errorf("unreadable %s line %q", key, v)
+			}
+			start, err1 := strconv.ParseInt(p[1], 10, 64)
+			count, err2 := strconv.ParseInt(p[2], 10, 64)
+			if err1 != nil || err2 != nil {
+				return f, fmt.Errorf("unreadable %s line %q", key, v)
+			}
+			m := f.SubUID
+			if key == "subgid" {
+				m = f.SubGID
+			}
+			m[p[0]] = append(m[p[0]], IDRange{start, count})
+		case "file":
+			fields := strings.Fields(v)
+			switch {
+			case len(fields) == 2 && fields[1] == "link":
+				f.Files[fields[0]] = FileState{Present: true, Link: true}
+			case len(fields) == 2 && fields[1] == "absent":
+				f.Files[fields[0]] = FileState{}
+			case len(fields) == 5:
+				uid, _ := strconv.Atoi(fields[3])
+				gid, _ := strconv.Atoi(fields[4])
+				f.Files[fields[0]] = FileState{Present: true, Sum: fields[1], Mode: fields[2], UID: uid, GID: gid}
+			default:
+				return f, fmt.Errorf("unreadable file line %q", v)
+			}
+		case "dir":
+			// The path is everything before the last three fields, so a
+			// --data-dir with a space in it is read whole.
+			fields := strings.Split(v, " ")
+			if len(fields) < 4 {
+				return f, fmt.Errorf("unreadable dir line %q", v)
+			}
+			n := len(fields)
+			uid, err1 := strconv.Atoi(fields[n-2])
+			gid, err2 := strconv.Atoi(fields[n-1])
+			dir := strings.Join(fields[:n-3], " ")
+			if err1 != nil || err2 != nil || dir == "" {
+				return f, fmt.Errorf("unreadable dir line %q", v)
+			}
+			f.Dirs[dir] = DirState{Present: fields[n-3] != "absent", Mode: fields[n-3], UID: uid, GID: gid}
+		case "egress-enabled":
+			f.EgressEnabled = v == "yes"
+		case "egress-table":
+			f.EgressTable = v == "present"
+		case "br_netfilter":
+			f.BrNetfilter = v == "loaded"
+		case "bridge":
+			f.Bridges = append(f.Bridges, v)
+		case "forward-policy":
+			f.ForwardPolicy = v
+		case "input-policy":
+			f.InputPolicy = v
+		case "input-rules":
+			f.InputRules, _ = strconv.Atoi(v)
+		case "input-chain":
+			f.InputChains = append(f.InputChains, v)
+		case "firewalld":
+			f.Firewalld = v == "active"
+		case "port-start":
+			f.PortStart = v
+		case "ip-forward":
+			f.IPForward = v
+		case "default-dev":
+			f.DefaultDev = v
+		case "lan":
+			f.LAN = v
+		case "watchdog-rule":
+			f.WatchdogRules = append(f.WatchdogRules, v)
+		case "record":
+			f.Records = append(f.Records, v)
+		case "data-path":
+			f.Data.Path = v
+		case "data-fs":
+			f.Data.FS = v
+		case "data-avail":
+			f.Data.Avail, _ = strconv.ParseInt(v, 10, 64)
+		}
+	}
+	if f.User.Exists && f.User.Group == "" {
+		return f, fmt.Errorf("no primary group read for %s", user)
+	}
+	return f, nil
+}
+
+// The files admit writes as root that the probe reads. Each is what the
+// task that writes it writes; they live here, beside the probe, because the
+// probe is what reads them.
+const (
+	delegatePath     = "/etc/systemd/system/user@.service.d/delegate.conf"
+	modulesLoadPath  = "/etc/modules-load.d/paisans.conf"
+	sysctlPath       = "/etc/sysctl.d/60-paisans.conf"
+	sysctlBeforePath = admission.Dir + "/sysctl.before"
+)
+
+// sudoersPath is the deployment's sudoers line, egressFilePath its egress
+// table's file, watchdogRulePath its watchdog's udev rule.
+func sudoersPath(d deployment.Deployment) string { return "/etc/sudoers.d/" + d.Prefix() }
+func egressFilePath(d deployment.Deployment) string {
+	return admission.Dir + "/egress." + d.Token() + ".nft"
+}
+func watchdogRulePath(d deployment.Deployment) string {
+	return "/etc/udev/rules.d/60-" + d.Prefix() + "-watchdog.rules"
+}
