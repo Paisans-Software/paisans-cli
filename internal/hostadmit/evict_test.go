@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/hostadmit"
+	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -118,9 +119,10 @@ func TestEvictOfAnEvictedHostPlansNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// With no record and no --data-dir it warns that a data directory
-	// outside the home cannot be found, and plans nothing.
-	if len(plan.Steps) != 0 || len(plan.Warnings) != 1 {
+	// With no user and no subordinate range left, there is no range left
+	// to free, so the warning about a data directory evict cannot find is
+	// not given again.
+	if len(plan.Steps) != 0 || len(plan.Warnings) != 0 {
 		t.Errorf("evict of an evicted host plans:\n%s", plan.Text())
 	}
 	// What a finished evict leaves: the SSH allow it keeps, and a registry
@@ -131,7 +133,7 @@ func TestEvictOfAnEvictedHostPlansNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Steps) != 0 || len(plan.Warnings) != 2 {
+	if len(plan.Steps) != 0 || len(plan.Warnings) != 1 {
 		t.Errorf("evict of an evicted host plans:\n%s", plan.Text())
 	}
 }
@@ -300,10 +302,14 @@ func TestEvictKillsEveryProcessOfTheUser(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", c.name, err)
 		}
-		kill := stepIndex(plan, "pkill -KILL -U 1001")
-		if kill < 0 || stepIndex(plan, "pgrep -U 1001") != kill {
-			t.Errorf("%s: no step kills and checks uid 1001's processes:\n%s", c.name, plan.Text())
+		kill := stepIndex(plan, "ps -eo pid=,ruid=,euid=,suid=")
+		if kill < 0 || !strings.Contains(plan.Steps[kill].Command, "$2 == 1001 || $3 == 1001 || $4 == 1001") ||
+			!strings.Contains(plan.Steps[kill].Command, "$2 >= 165536 && $2 < 231072") || !strings.Contains(plan.Steps[kill].Command, "survived SIGKILL") {
+			t.Errorf("%s: no step kills and checks every process of uid 1001 and its subordinate range, by real, effective and saved uid:\n%s", c.name, plan.Text())
 			continue
+		}
+		if del := stepIndex(plan, "userdel"); del >= 0 && !strings.Contains(plan.Steps[del].Command, "ps -eo pid=,ruid=,euid=,suid=") {
+			t.Errorf("%s: userdel does not kill and check again first: %s", c.name, plan.Steps[del].Command)
 		}
 		for _, later := range []string{"paisans-mesh.conf", "nft delete table", "userdel"} {
 			if i := stepIndex(plan, later); i >= 0 && i < kill {
@@ -374,5 +380,115 @@ func TestEvictDataDirAgainstTheRecord(t *testing.T) {
 	}
 	if _, err := hostadmit.BuildEvict(evicted("vm", hostadmit.Flags{})(), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9", DataDir: "/srv/data"}); err == nil {
 		t.Error("--data-dir against a record with none was planned")
+	}
+}
+
+// A deployment claimed here with no record yet, an admit in flight or one
+// that failed before its record, may need the host-wide files and sysctls
+// as much as an admitted one: evict keeps them, as beside a record it
+// cannot read, and says why.
+func TestEvictBesideAClaimWithNoRecordKeepsTheHostWide(t *testing.T) {
+	h := evicted("watch", hostadmit.Flags{PublicPorts: true})()
+	_, other := registry.ForRequest(requestFor("home-a"), admitted)
+	other.Token, other.Root, other.Interface, other.ListenPort, other.Subnet, other.Address, other.Roles = "0c0d", "/srv/paisans/0c0d", "psns-0c0d", 51899, "10.50.0.0/24", "10.50.0.1", ""
+	data, err := registry.Encode(registry.Registry{Version: registry.Version, Deployments: map[string]registry.Entry{
+		id:                                     func() registry.Entry { _, e := registry.ForRequest(requestFor("watch"), admitted); return e }(),
+		"0c0dc4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01": other,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := hostadmit.BuildEvict(withEntries(h.file(registry.Path, string(data))), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kept := range []string{"delegate.conf", "modules-load.d/paisans.conf", "60-paisans.conf", "sysctl -w"} {
+		if i := stepIndex(plan, kept); i >= 0 {
+			t.Errorf("evict beside a claim with no record touches %s: %s", kept, plan.Steps[i].Command)
+		}
+	}
+	if !strings.Contains(plan.Text(), "deployment 0c0d is claimed here and has no admission record") {
+		t.Errorf("the plan does not say why it keeps them:\n%s", plan.Text())
+	}
+}
+
+// userdel --remove deletes whatever home passwd names, so evict checks it
+// as admit did: a link or another's directory is refused; a home already
+// gone deletes the user alone. A system account is no deployment's user.
+func TestEvictChecksTheHomeItDeletes(t *testing.T) {
+	for _, c := range []struct {
+		name, home, want string
+	}{
+		{"a link", "link 0 /home/paisans-f2a9", "is a link"},
+		{"another's", "dir 1234 /home/paisans-f2a9", "is not paisans-f2a9's"},
+	} {
+		_, err := hostadmit.BuildEvict(evicted("vm", hostadmit.Flags{})().with("home", c.home), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v", c.name, err)
+		}
+	}
+	plan, err := hostadmit.BuildEvict(evicted("vm", hostadmit.Flags{})().with("home", "absent 0 /home/paisans-f2a9"), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i := stepIndex(plan, "userdel"); i < 0 || strings.Contains(plan.Steps[i].Command, "--remove") {
+		t.Errorf("a user whose home is gone is deleted by %q", plan.Steps[i].Command)
+	}
+	_, err = hostadmit.BuildEvict(evicted("vm", hostadmit.Flags{})().with("passwd", "paisans-f2a9:x:33:33::/home/paisans-f2a9:/bin/bash").with("home", "dir 33 /home/paisans-f2a9"), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err == nil || !strings.Contains(err.Error(), "system account") {
+		t.Errorf("a system account: %v", err)
+	}
+}
+
+// Stopping the manager of a data site stops Patroni, and one that does not
+// stop in time is killed with the watchdog armed, which reboots the host:
+// the plan says so.
+func TestEvictOfADataSiteWarnsOfTheWatchdog(t *testing.T) {
+	plan, err := hostadmit.BuildEvict(withEntries(evicted("home-a", gateway)()), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(plan.Text(), "warning: watchdog: stopping") {
+		t.Errorf("no watchdog warning:\n%s", plan.Text())
+	}
+}
+
+// A host-wide file that is not as admit wrote it is the owner's, kept, and
+// the plan says so.
+func TestEvictKeepsAHostWideFileItDidNotWrite(t *testing.T) {
+	h := evicted("vm", hostadmit.Flags{})().withFile("/etc/systemd/system/user@.service.d/delegate.conf", "[Service]\nDelegate=yes\n", "644", 0)
+	plan, err := hostadmit.BuildEvict(withEntries(h), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stepIndex(plan, "delegate.conf") >= 0 || !strings.Contains(plan.Text(), "delegate.conf kept: it is not as admit wrote it") {
+		t.Errorf("the owner's delegate.conf:\n%s", plan.Text())
+	}
+}
+
+// A user the owner deleted by hand leaves its mesh drop-in, whose path
+// holds the UID evict can no longer read; the probe finds it by the
+// deployment it names, and evict removes it.
+func TestEvictFindsTheDropInOfADeletedUser(t *testing.T) {
+	h := newBlank().add("orphan-dropin", "/etc/systemd/system/user@1001.service.d/paisans-mesh.conf")
+	plan, err := hostadmit.BuildEvict(h, hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stepIndex(plan, "rm -f /etc/systemd/system/user@1001.service.d/paisans-mesh.conf") < 0 {
+		t.Errorf("the drop-in is left:\n%s", plan.Text())
+	}
+	if _, err := hostadmit.BuildEvict(newBlank().add("orphan-dropin", "/etc/x; reboot"), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"}); err == nil {
+		t.Error("an orphan drop-in that is no drop-in's path was read")
+	}
+}
+
+// An admission record evict cannot read is to be moved aside; the refusal
+// says --data-dir then finds the Docker data admit put outside the home.
+func TestEvictsUnreadableRecordRefusalNamesTheDataDir(t *testing.T) {
+	h := evicted("vm", hostadmit.Flags{})().file("/etc/paisans/admitted.f2a9.json", "{")
+	_, err := hostadmit.BuildEvict(h, hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err == nil || !strings.Contains(err.Error(), "Move it aside") || !strings.Contains(err.Error(), "--data-dir") {
+		t.Errorf("BuildEvict = %v", err)
 	}
 }

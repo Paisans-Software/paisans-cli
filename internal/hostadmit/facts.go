@@ -71,6 +71,10 @@ type Facts struct {
 	// WatchdogDevs is each watchdog node's owner, by path.
 	WatchdogDevs map[string]int
 	Records      []string
+	// OrphanDropIns are the deployment's mesh drop-ins the probe found by
+	// the deployment they name while the user does not exist: a user
+	// deleted by hand leaves its own.
+	OrphanDropIns []string
 	// MeshUnit is the deployment's wg-quick unit: enabled, at boot or at
 	// runtime, and active, or on its way up.
 	MeshUnit struct{ Enabled, Active bool }
@@ -429,6 +433,11 @@ func parseFacts(out, user string) (Facts, error) {
 				return f, err
 			}
 			f.OnLink6 = append(f.OnLink6, r)
+		case "orphan-dropin":
+			if !orphanDropIn.MatchString(v) {
+				return f, fmt.Errorf("unreadable orphan-dropin line %q", v)
+			}
+			f.OrphanDropIns = append(f.OrphanDropIns, v)
 		case "watchdog-rule":
 			f.WatchdogRules = append(f.WatchdogRules, v)
 		case "watchdog-dev":
@@ -485,10 +494,11 @@ func parseFacts(out, user string) (Facts, error) {
 }
 
 // fileSum is a checksum as the probe prints one, fileMode a mode as stat's
-// %a does.
+// %a does, and orphanDropIn the path of a mesh drop-in, meshDropInPath's.
 var (
-	fileSum  = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	fileMode = regexp.MustCompile(`^[0-7]{3,4}$`)
+	fileSum      = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	fileMode     = regexp.MustCompile(`^[0-7]{3,4}$`)
+	orphanDropIn = regexp.MustCompile(`^/etc/systemd/system/user@[0-9]+\.service\.d/paisans-mesh\.conf$`)
 )
 
 // id is v read as a UID, a GID or a sysctl's value: digits alone.

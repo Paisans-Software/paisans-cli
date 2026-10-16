@@ -67,6 +67,11 @@ else
   # name, which useradd makes for it, and a sudoers file, admit's own
   # aside, that names it already.
   if getent group "$u" >/dev/null 2>&1; then say group-taken yes; fi
+  # A mesh drop-in of this deployment's whose user was deleted by hand:
+  # its path holds a UID no one has now, so it is found by its content.
+  for f in /etc/systemd/system/user@*.service.d/paisans-mesh.conf; do
+    if [ -f "$f" ] && [ ! -L "$f" ] && grep -qF {{ q (printf "for deployment %s;" .Token) }} "$f"; then say orphan-dropin "$f"; fi
+  done
   for f in /etc/sudoers /etc/sudoers.d/*; do
     if [ -f "$f" ] && [ "$f" != {{ q .Sudoers }} ] && grep -qwF -- "$u" "$f" 2>/dev/null; then say sudo-names "$f"; fi
   done

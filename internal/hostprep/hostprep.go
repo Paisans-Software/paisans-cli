@@ -136,6 +136,10 @@ type Section struct {
 type Warning struct {
 	Hint   string
 	Detail string
+	// KeptSSH, on the warning that an earlier SSH allow is kept, is that
+	// allow as the warning names it, so a caller finds it without reading
+	// the hint's words.
+	KeptSSH string
 }
 
 func (s *Section) add(other Section) {

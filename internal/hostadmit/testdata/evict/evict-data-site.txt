@@ -6,9 +6,9 @@ step 1: stop paisans-f2a9's manager
     $ usermod --expiredate 1 paisans-f2a9 && loginctl disable-linger paisans-f2a9 && systemctl stop user@1001.service && { loginctl terminate-user paisans-f2a9 2>/dev/null || true; }
 
 step 2: kill paisans-f2a9's processes
-  evict: expire paisans-f2a9, kill every process of uid 1001 and check that none is left, before anything that fences it goes
+  evict: expire paisans-f2a9, kill every process of uid 1001 or of its subordinate range and check that none is left, before anything that fences it goes
   run:
-    $ usermod --expiredate 1 paisans-f2a9 && { pkill -KILL -U 1001; n=0; while pgrep -U 1001 >/dev/null && [ $n -lt 10 ]; do n=$((n+1)); sleep 0.5; pkill -KILL -U 1001; done; ! pgrep -U 1001 >/dev/null || { echo 'processes of uid 1001 survived SIGKILL:'; pgrep -a -U 1001; false; }; }
+    $ usermod --expiredate 1 paisans-f2a9 && { procs() { ps -eo pid=,ruid=,euid=,suid= | awk '$2 == 1001 || $3 == 1001 || $4 == 1001 || $2 >= 165536 && $2 < 231072 || $3 >= 165536 && $3 < 231072 || $4 >= 165536 && $4 < 231072 { print $1 }'; }; n=0; while [ -n "$(procs)" ] && [ $n -lt 10 ]; do procs | xargs -r kill -KILL 2>/dev/null; n=$((n+1)); sleep 0.5; done; [ -z "$(procs)" ] || { echo 'processes of uid 1001 or its subordinate range survived SIGKILL:'; procs | xargs -r ps -o pid=,uid=,args= -p; false; }; }
 
 step 3: stop the mesh
   evict: stop and disable wg-quick@psns-f2a9, the deployment's mesh interface
@@ -38,7 +38,7 @@ step 7: remove /srv/paisans/f2a9
 step 8: delete user paisans-f2a9
   evict: delete paisans-f2a9 with its home, /home/paisans-f2a9
   run:
-    $ userdel --remove paisans-f2a9
+    $ usermod --expiredate 1 paisans-f2a9 && { procs() { ps -eo pid=,ruid=,euid=,suid= | awk '$2 == 1001 || $3 == 1001 || $4 == 1001 || $2 >= 165536 && $2 < 231072 || $3 >= 165536 && $3 < 231072 || $4 >= 165536 && $4 < 231072 { print $1 }'; }; n=0; while [ -n "$(procs)" ] && [ $n -lt 10 ]; do procs | xargs -r kill -KILL 2>/dev/null; n=$((n+1)); sleep 0.5; done; [ -z "$(procs)" ] || { echo 'processes of uid 1001 or its subordinate range survived SIGKILL:'; procs | xargs -r ps -o pid=,uid=,args= -p; false; }; } && userdel --remove paisans-f2a9
 
 step 9: remove paisans-f2a9's subordinate ranges
   evict: its lines in /etc/subuid and /etc/subgid, which no other user may then be given by accident
@@ -142,5 +142,7 @@ step 24: remove the registry entry
     $ }
     $ ' /var/lib/paisans/registry.json > "$tmp"; chmod 600 "$tmp"; mv "$tmp" /var/lib/paisans/registry.json
 
+warning: watchdog: stopping paisans-f2a9's manager stops its Patroni, which holds the watchdog
+  A Patroni that does not stop within Docker's stop timeout is killed with the watchdog armed, and the host reboots. Have the operators stop the deployment's stacks first, or expect a reboot.
 warning: firewall: the deployment's SSH allow on 22 is kept
   It may be the rule your own login arrives by. Delete it yourself once nothing else needs it.

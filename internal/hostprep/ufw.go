@@ -254,7 +254,7 @@ func planRules(tag string, rules []Rule, added []addedRule, by string) (out Sect
 				to = strconv.Itoa(ssh.Port)
 			}
 			// A warning, not a finding: deleting it is the operator's.
-			out.Warnings = append(out.Warnings, Warning{Hint: fmt.Sprintf("firewall: old SSH allow %s kept; delete it yourself once SSH on %s works", old, to)})
+			out.Warnings = append(out.Warnings, Warning{Hint: fmt.Sprintf("firewall: old SSH allow %s kept; delete it yourself once SSH on %s works", old, to), KeptSSH: old})
 			continue
 		}
 		removals = append(removals, Step{

@@ -36,7 +36,33 @@ type evictor struct {
 	fromFlag   bool
 	others     []admission.Record
 	unreadable []string
+	// recordless are the tokens of the other deployments the registry
+	// claims the host for that have no admission record here.
+	recordless []string
 	beforeGone bool
+}
+
+// claimedWithoutRecord is the token of every other deployment the host's
+// registry claims it for whose admission record is not here, an admit in
+// flight or one that failed before its record, or a deployment host
+// prepare put here. Evict keeps for them what it keeps beside a record it
+// cannot read.
+func claimedWithoutRecord(e *evictor) ([]string, error) {
+	r, err := registry.Read(e.t)
+	if err != nil {
+		return nil, shown(err)
+	}
+	recorded := map[string]bool{}
+	for _, file := range e.f.Records {
+		recorded[strings.TrimSuffix(strings.TrimPrefix(path.Base(file), "admitted."), ".json")] = true
+	}
+	var out []string
+	for _, id := range sortedKeys(r.Deployments) {
+		if t := r.Deployments[id].Token; id != e.in.Request.Deployment && !recorded[t] {
+			out = append(out, ui.Visible(t))
+		}
+	}
+	return out, nil
 }
 
 // evictParts are evict's stages in the order they run. The user's manager
@@ -103,7 +129,7 @@ func BuildEvict(t apply.Transport, in EvictInput) (*Plan, error) {
 	switch r, err := admission.Read(t, d.Token()); {
 	case errors.Is(err, admission.ErrNotAdmitted):
 	case err != nil:
-		return nil, fmt.Errorf("this deployment's admission record: %w. Move it aside and run host evict again. Nothing was changed", shown(err))
+		return nil, fmt.Errorf("this deployment's admission record: %w. Move it aside and run host evict again, and if admit was given --data-dir, give evict the same --data-dir, since the record said where the Docker data went. Nothing was changed", shown(err))
 	default:
 		rec = &r
 	}
@@ -151,8 +177,11 @@ func BuildEvict(t apply.Transport, in EvictInput) (*Plan, error) {
 	}
 	if u := f.User; u.Exists {
 		var privileged []string
-		if u.UID == 0 {
+		switch {
+		case u.UID == 0:
 			privileged = append(privileged, "uid 0")
+		case u.UID < uidMin:
+			privileged = append(privileged, fmt.Sprintf("uid %d, a system account's", u.UID))
 		}
 		for _, g := range append([]string{u.Group}, u.Groups...) {
 			if slices.Contains(PrivilegedGroups, g) && !slices.Contains(privileged, g) {
@@ -166,6 +195,9 @@ func BuildEvict(t apply.Transport, in EvictInput) (*Plan, error) {
 	e := &evictor{rec: rec, dataDir: dataDir, fromFlag: fromFlag, planner: &planner{t: t, in: ain, d: d, f: f, profile: profile, host: host,
 		plan: &Plan{Deployment: in.Deployment, User: in.User, Profile: profile.ID() + " " + profile.Version(), Host: t.Describe()}}}
 	if e.others, e.unreadable, err = others(e.planner); err != nil {
+		return nil, err
+	}
+	if e.recordless, err = claimedWithoutRecord(e); err != nil {
 		return nil, err
 	}
 	for _, pt := range evictParts {
@@ -184,33 +216,57 @@ func (e *evictor) remove(title, describe, command string) {
 // manager stops the user's manager, which stops its Docker daemon and
 // every container, and ends its sessions. The account is expired first, so
 // no login, by key or otherwise, starts the manager again before userdel.
+// On a data site that stops Patroni, which Docker kills if it outlasts its
+// stop timeout, with the watchdog still armed.
 func (e *evictor) manager() error {
 	u, user := e.f.User, e.in.Request.User
 	if !u.Exists || !u.Linger && !u.ManagerActive {
 		return nil
+	}
+	if e.f.Files[watchdogRulePath(e.d)].Present {
+		e.warn("watchdog: stopping "+user+"'s manager stops its Patroni, which holds the watchdog",
+			"A Patroni that does not stop within Docker's stop timeout is killed with the watchdog armed, and the host reboots. Have the operators stop the deployment's stacks first, or expect a reboot.")
 	}
 	e.remove("stop "+user+"'s manager", fmt.Sprintf("expire %s so no login starts it again, disable linger, and stop user@%d.service, which stops its Docker daemon and every container", user, u.UID),
 		fmt.Sprintf("usermod --expiredate 1 %s && loginctl disable-linger %s && systemctl stop user@%d.service && { loginctl terminate-user %s 2>/dev/null || true; }", user, user, u.UID, user))
 	return nil
 }
 
-// processes kills every process of the user's uid and checks that none is
+// processes kills every process of the user and checks that none is
 // left, whenever the user exists: one the manager's stop missed, started
 // by runuser or cron outside any session, or running while the manager
 // was already stopped, would otherwise run on unfenced once the egress
-// table goes, and keep userdel from deleting the user. The account is
-// expired first, so no login starts another. A process that survives
-// SIGKILL fails the step, naming it, and nothing after it runs.
+// table goes, and keep userdel from deleting the user. A process is the
+// user's by its real, effective or saved uid, which userdel refuses on,
+// and by a uid in its subordinate range: a container's process that
+// outlived its daemon would otherwise share IDs with whichever user is
+// later given the range. The account is expired first, so no login starts
+// another. A process that survives SIGKILL fails the step, naming it, and
+// nothing after it runs.
 func (e *evictor) processes() error {
-	u, user := e.f.User, e.in.Request.User
-	if !u.Exists {
+	if !e.f.User.Exists {
 		return nil
 	}
-	uid := fmt.Sprint(u.UID)
-	e.remove("kill "+user+"'s processes", "expire "+user+", kill every process of uid "+uid+" and check that none is left, before anything that fences it goes",
-		"usermod --expiredate 1 "+user+" && { pkill -KILL -U "+uid+"; n=0; while pgrep -U "+uid+" >/dev/null && [ $n -lt 10 ]; do n=$((n+1)); sleep 0.5; pkill -KILL -U "+uid+"; done; "+
-			"! pgrep -U "+uid+" >/dev/null || { echo 'processes of uid "+uid+" survived SIGKILL:'; pgrep -a -U "+uid+"; false; }; }")
+	user := e.in.Request.User
+	e.remove("kill "+user+"'s processes", "expire "+user+", kill every process of uid "+fmt.Sprint(e.f.User.UID)+" or of its subordinate range and check that none is left, before anything that fences it goes",
+		e.killCommand())
 	return nil
+}
+
+// killCommand expires the user, kills every process of its uid or of its
+// subordinate range, by real, effective or saved uid, and fails, naming
+// them, if any is left after ten tries.
+func (e *evictor) killCommand() string {
+	uid := fmt.Sprint(e.f.User.UID)
+	cond := []string{"$2 == " + uid + " || $3 == " + uid + " || $4 == " + uid}
+	for _, r := range e.f.SubUID[e.in.Request.User] {
+		for _, field := range []string{"$2", "$3", "$4"} {
+			cond = append(cond, fmt.Sprintf("%s >= %d && %s < %d", field, r.Start, field, r.Start+r.Count))
+		}
+	}
+	return "usermod --expiredate 1 " + e.in.Request.User + " && { procs() { ps -eo pid=,ruid=,euid=,suid= | awk '" + strings.Join(cond, " || ") + " { print $1 }'; }; " +
+		"n=0; while [ -n \"$(procs)\" ] && [ $n -lt 10 ]; do procs | xargs -r kill -KILL 2>/dev/null; n=$((n+1)); sleep 0.5; done; " +
+		"[ -z \"$(procs)\" ] || { echo 'processes of uid " + uid + " or its subordinate range survived SIGKILL:'; procs | xargs -r ps -o pid=,uid=,args= -p; false; }; }"
 }
 
 // mesh stops the deployment's interface and removes its conf, which holds
@@ -226,6 +282,12 @@ func (e *evictor) mesh() error {
 		e.remove("remove "+conf, "the mesh's conf, which holds the site's private key", "rm -f "+conf)
 	}
 	if !e.f.User.Exists {
+		// A user deleted by hand leaves the drop-in, whose path holds a UID
+		// evict cannot read; the probe found it by the deployment it names.
+		for _, dropIn := range e.f.OrphanDropIns {
+			e.remove("remove "+dropIn, "the drop-in that started the deleted user's manager after the mesh, and its directory once empty",
+				"rm -f "+dropIn+" && rmdir --ignore-fail-on-non-empty "+path.Dir(dropIn)+" && systemctl daemon-reload")
+		}
 		return nil
 	}
 	dropIn := meshDropInPath(uidOf(e.planner))
@@ -260,11 +322,23 @@ func (e *evictor) egress() error {
 }
 
 // user deletes the user with its home, then any line of its in
-// /etc/subuid and /etc/subgid that userdel left.
+// /etc/subuid and /etc/subgid that userdel left. userdel --remove deletes
+// whatever home passwd names, so the home is checked as admit checks it:
+// a real directory of the user's, or already gone, when the user alone is
+// deleted. The processes are killed and checked again first, since the
+// data directories' removal before it can take minutes.
 func (e *evictor) user() error {
 	u, user := e.f.User, e.in.Request.User
 	if u.Exists {
-		e.remove("delete user "+user, "delete "+user+" with its home, "+ui.Visible(u.Home), "userdel --remove "+user)
+		switch {
+		case u.HomeKind == "absent":
+			e.remove("delete user "+user, "delete "+user+"; its home, "+ui.Visible(u.HomePath)+", is gone already", e.killCommand()+" && userdel "+user)
+		default:
+			if err := ownHome(user, u); err != nil {
+				return err
+			}
+			e.remove("delete user "+user, "delete "+user+" with its home, "+ui.Visible(u.Home), e.killCommand()+" && userdel --remove "+user)
+		}
 	}
 	if len(e.f.SubUID[user])+len(e.f.SubGID[user]) > 0 {
 		e.remove("remove "+user+"'s subordinate ranges", "its lines in /etc/subuid and /etc/subgid, which no other user may then be given by accident",
@@ -285,7 +359,7 @@ func (e *evictor) dirs() error {
 			return err
 		}
 		dirs = append(dirs, [2]string{e.dataDir, "the deployment's Docker data, on the disk --data-dir named"})
-	} else if e.rec == nil {
+	} else if e.rec == nil && (e.f.User.Exists || len(e.f.SubUID[e.in.Request.User]) > 0) {
 		e.warn("data: without an admission record, a data directory outside "+e.in.Request.User+"'s home cannot be found",
 			"If admit was run with --data-dir, run host evict again with the same --data-dir, so its "+e.d.Prefix()+" directory is removed. Otherwise those files stay, owned by IDs in the subordinate range evict frees, and map onto whichever user is later given that range.")
 	}
@@ -372,9 +446,8 @@ func (e *evictor) firewall() error {
 		}
 	}
 	for _, w := range s.Warnings {
-		if what, ok := strings.CutPrefix(w.Hint, "firewall: old SSH allow "); ok {
-			what, _, _ = strings.Cut(what, " kept;")
-			e.warn("firewall: the deployment's SSH allow "+what+" is kept",
+		if w.KeptSSH != "" {
+			e.warn("firewall: the deployment's SSH allow "+w.KeptSSH+" is kept",
 				"It may be the rule your own login arrives by. Delete it yourself once nothing else needs it.")
 		}
 	}
@@ -382,8 +455,8 @@ func (e *evictor) firewall() error {
 }
 
 // shared reports whether another deployment is admitted here, readable or
-// not.
-func (e *evictor) shared() bool { return len(e.others)+len(e.unreadable) > 0 }
+// not, or claims the host with no record.
+func (e *evictor) shared() bool { return len(e.others)+len(e.unreadable)+len(e.recordless) > 0 }
 
 // hostWide removes delegate.conf and modules-load.d/paisans.conf, each only
 // when it is as admit wrote it and no other deployment is admitted.
@@ -397,17 +470,26 @@ func (e *evictor) hostWide() error {
 		for _, file := range e.unreadable {
 			e.present("host wide: delegate.conf and br_netfilter kept, since " + ui.Visible(file) + " cannot be read")
 		}
+		for _, token := range e.recordless {
+			e.present("host wide: delegate.conf and br_netfilter kept, since deployment " + token + " is claimed here and has no admission record")
+		}
 		return nil
 	}
-	if e.f.Files[delegatePath].Sum == sha(delegateConf) {
+	switch f := e.f.Files[delegatePath]; {
+	case f.Sum == sha(delegateConf):
 		e.remove("remove "+delegatePath, "no other deployment is admitted", "rm -f "+delegatePath+" && systemctl daemon-reload")
+	case f.Present:
+		e.present("host wide: " + delegatePath + " kept: it is not as admit wrote it")
 	}
-	if sum := e.f.Files[modulesLoadPath].Sum; sum != "" && slices.ContainsFunc([]string{"nf_tables", "ip_tables"}, func(m string) bool {
+	switch sum := e.f.Files[modulesLoadPath].Sum; {
+	case sum != "" && slices.ContainsFunc([]string{"nf_tables", "ip_tables"}, func(m string) bool {
 		g := *e.planner
 		g.f.IptablesModule = m
 		return sum == sha(modulesLoadConf(&g))
-	}) {
+	}):
 		e.remove("remove "+modulesLoadPath, "no other deployment is admitted; br_netfilter stays loaded until the next boot", "rm -f "+modulesLoadPath)
+	case e.f.Files[modulesLoadPath].Present:
+		e.present("host wide: " + modulesLoadPath + " kept: it is not as admit wrote it")
 	}
 	return nil
 }
@@ -428,7 +510,7 @@ func (e *evictor) sysctls() error {
 	if err := was.check("evict"); err != nil {
 		return err
 	}
-	keep := len(e.unreadable) > 0
+	keep := len(e.unreadable)+len(e.recordless) > 0
 	setLow, setFwd := holds(current, keyLowPorts), holds(current, keyForward)
 	var lowFor, fwdFor []string
 	for _, r := range e.others {

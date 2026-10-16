@@ -1,4 +1,2 @@
 evict f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01 as paisans-f2a9 on fake (ubuntu 24.04)
 
-warning: data: without an admission record, a data directory outside paisans-f2a9's home cannot be found
-  If admit was run with --data-dir, run host evict again with the same --data-dir, so its paisans-f2a9 directory is removed. Otherwise those files stay, owned by IDs in the subordinate range evict frees, and map onto whichever user is later given that range.
