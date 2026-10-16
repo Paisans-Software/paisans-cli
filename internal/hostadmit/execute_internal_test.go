@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -238,7 +239,7 @@ func TestExecuteStopsAtAFailureAndShowsItsOutputVisibly(t *testing.T) {
 	if strings.Contains(err.Error(), "\x1b") || !strings.Contains(err.Error(), `boom\x1b[2J`) || !strings.Contains(err.Error(), "second line") {
 		t.Errorf("the host's output is not shown visibly: %q", err.Error())
 	}
-	if len(failing.ranMatching("never")) != 0 {
+	if slices.Contains(failing.ran, "never") {
 		t.Error("Execute ran past a failed step")
 	}
 }
@@ -340,7 +341,11 @@ func TestExecuteFillsTheSubordinateRange(t *testing.T) {
 	withParts(t, []part{
 		userPart,
 		{"egress", func(p *planner) error {
-			p.step(Step{Title: "load the egress table", Command: "nft load", Input: "meta skuid { " + uidOf(p) + ", " + rangeOf(p) + " }\n", Provisional: !p.f.User.Exists})
+			r, err := rangeOf(p)
+			if err != nil {
+				return err
+			}
+			p.step(Step{Title: "load the egress table", Command: "nft load", Input: "meta skuid { " + uidOf(p) + ", " + r + " }\n", Provisional: !p.f.User.Exists})
 			return nil
 		}},
 	})
@@ -357,5 +362,73 @@ func TestExecuteFillsTheSubordinateRange(t *testing.T) {
 	}
 	if got := h.ranMatching("nft load"); len(got) != 1 {
 		t.Errorf("the egress step ran %d times", len(got))
+	}
+}
+
+// Steps are compared one by one, after their counts: a title holding a
+// newline is never read as two steps, and a rebuilt plan longer or shorter
+// than the approved one is refused, not indexed past its end.
+func TestSameStepsComparesCountsFirst(t *testing.T) {
+	fill := strings.NewReplacer()
+	one := []Step{{Title: "a\nb", Command: "true"}}
+	two := []Step{{Title: "a", Command: "true"}, {Title: "b", Command: "rm -rf /"}}
+	if err := sameSteps(one, two, fill); err == nil || !strings.Contains(err.Error(), "the host changed while admit ran") {
+		t.Errorf("one approved, two rebuilt: %v", err)
+	}
+	if err := sameSteps(two, one, fill); err == nil || !strings.Contains(err.Error(), "the host changed while admit ran") {
+		t.Errorf("two approved, one rebuilt: %v", err)
+	}
+	if err := sameSteps(two, two, fill); err != nil {
+		t.Errorf("the same steps: %v", err)
+	}
+}
+
+// A user that exists with no subordinate range, or with more than one, has
+// no range a step can name: rangeOf refuses, naming /etc/subuid, and Build
+// stops rather than plan a step with the placeholder in it.
+func TestRangeOfRefusesAnExistingUserWithoutOneRange(t *testing.T) {
+	for name, ranges := range map[string][]string{"none": nil, "two": {"paisans-f2a9:165536:65536", "paisans-f2a9:300000:65536"}} {
+		t.Run(name, func(t *testing.T) {
+			h := newTestHost()
+			h.set("passwd", "paisans-f2a9:x:1001:1001::/home/paisans-f2a9:/bin/bash")
+			h.set("group", "paisans-f2a9")
+			for _, r := range ranges {
+				h.facts = append(h.facts, [2]string{"subuid", r})
+			}
+			withParts(t, []part{{"egress", func(p *planner) error {
+				r, err := rangeOf(p)
+				if err != nil {
+					return err
+				}
+				p.step(Step{Title: "load the egress table", Command: "nft " + r})
+				return nil
+			}}})
+			_, err := Build(h, testInput(t))
+			if err == nil || !strings.Contains(err.Error(), "/etc/subuid") {
+				t.Fatalf("Build = %v", err)
+			}
+		})
+	}
+}
+
+// A probed path below a link or another's directory stops admit before
+// any part plans, naming the path and why, so no part can forget to.
+func TestBuildRefusesAnUnsafePath(t *testing.T) {
+	for _, c := range []struct{ key, value, want string }{
+		{"dir", "/srv/paisans/f2a9 link-above 0 0", "/srv/paisans/f2a9"},
+		{"file", "/etc/sudoers.d/paisans-f2a9 unsafe-above", "/etc/sudoers.d/paisans-f2a9"},
+		{"data-above", "unsafe-above", "where Docker's data would go"},
+	} {
+		h := newTestHost()
+		h.facts = append(h.facts, [2]string{c.key, c.value})
+		planned := false
+		withParts(t, []part{{"any", func(p *planner) error { planned = true; return nil }}})
+		_, err := Build(h, testInput(t))
+		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), "Nothing was changed") {
+			t.Errorf("%s %s: Build = %v", c.key, c.value, err)
+		}
+		if planned {
+			t.Errorf("%s %s: a part planned on an unsafe host", c.key, c.value)
+		}
 	}
 }

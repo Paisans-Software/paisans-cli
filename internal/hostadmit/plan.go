@@ -3,6 +3,7 @@ package hostadmit
 import (
 	"fmt"
 	"path"
+	"sort"
 	"strings"
 	"time"
 
@@ -234,12 +235,58 @@ func build(t apply.Transport, in Input) (*planner, error) {
 		plan: &Plan{Deployment: in.Request.Deployment, User: in.Request.User, Site: in.Request.Site,
 			Profile: profile.ID() + " " + profile.Version(), Host: t.Describe()},
 		record: admission.NewRecord(in.Request, in.Flags.Grants(), in.Digest, in.Now)}
+	if err := refuseUnsafe(facts); err != nil {
+		return nil, err
+	}
 	for _, pt := range parts {
 		if err := pt.plan(p); err != nil {
 			return nil, fmt.Errorf("%s: %w", pt.name, err)
 		}
 	}
 	return p, nil
+}
+
+// refuseUnsafe stops admit, before any part plans, when the probe found
+// a path admit reads or writes as root below a link, or below a directory
+// that is not root's or that its group or others can write. What is below
+// one is not what its path names, or can be swapped between the probe and
+// the change, so no part may act there; refusing here means no part can
+// forget to.
+func refuseUnsafe(f Facts) error {
+	var bad []string
+	why := func(mode string) string {
+		if mode == "link-above" {
+			return "a link above it"
+		}
+		return "a directory above it that is not root's, or that its group or others can write"
+	}
+	for _, path := range sortedKeys(f.Dirs) {
+		if d := f.Dirs[path]; d.Unsafe {
+			bad = append(bad, fmt.Sprintf("- %s (%s)", ui.Visible(path), why(d.Mode)))
+		}
+	}
+	for _, path := range sortedKeys(f.Files) {
+		if s := f.Files[path]; s.Unsafe {
+			bad = append(bad, fmt.Sprintf("- %s (%s)", ui.Visible(path), why(s.Mode)))
+		}
+	}
+	if f.Data.Unsafe {
+		bad = append(bad, fmt.Sprintf("- %s, where Docker's data would go (%s)", ui.Visible(f.Data.Path), why(f.Data.Above)))
+	}
+	if len(bad) == 0 {
+		return nil
+	}
+	return &ui.Problem{Hint: "a path admit writes as root is not root's alone",
+		Explain: "Each of these is below a link or a directory another user could change, so what admit would write there is not what it names:\n" + strings.Join(bad, "\n") + "\nMake every directory above them a real directory, owned by root and writable by root alone, then run host admit again. Nothing was changed."}
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // uidOf is the user's UID for a step's command or file, "<uid>" while the
@@ -252,22 +299,35 @@ func uidOf(p *planner) string {
 }
 
 // rangeOf is the user's subordinate UID range as nft writes one,
-// first-last, or "<subordinate range>" while the user does not exist or
-// has other than one range; a step that uses it is Provisional then.
-func rangeOf(p *planner) string {
-	r := p.f.SubUID[p.in.Request.User]
-	if !p.f.User.Exists || len(r) != 1 {
-		return "<subordinate range>"
+// first-last, or "<subordinate range>" while the user does not exist; a
+// step that uses it is Provisional then. A user that exists with no range,
+// or with more than one, is an error the part returns, so Build refuses
+// rather than plan a runnable step with the placeholder in it.
+func rangeOf(p *planner) (string, error) {
+	if !p.f.User.Exists {
+		return "<subordinate range>", nil
 	}
-	return fmt.Sprintf("%d-%d", r[0].Start, r[0].Start+r[0].Count-1)
+	r := p.f.SubUID[p.in.Request.User]
+	if len(r) != 1 {
+		return "", fmt.Errorf("%s has %d subordinate UID ranges in /etc/subuid, and admit needs exactly one: the egress table and the user's Docker name it. Give %s one range of its own with usermod --add-subuids, then run host admit again. Nothing was changed", ui.Visible(p.in.Request.User), len(r), ui.Visible(p.in.Request.User))
+	}
+	return fmt.Sprintf("%d-%d", r[0].Start, r[0].Start+r[0].Count-1), nil
 }
 
 // placeholders fills, in an approved step, every placeholder uidOf and
 // rangeOf draw while the user does not exist, with what they give on p's
 // host. It is the one place a placeholder is filled, so a new one is a new
 // pair here.
+//
+// A user with other than one range has none to fill in: the part that
+// needed it refused while p was built, so the rebuilt plan holds no step
+// naming it, and an approved step that does differs from it.
 func placeholders(p *planner) *strings.Replacer {
-	return strings.NewReplacer("<uid>", uidOf(p), "<subordinate range>", rangeOf(p))
+	pairs := []string{"<uid>", uidOf(p)}
+	if r, err := rangeOf(p); err == nil {
+		pairs = append(pairs, "<subordinate range>", r)
+	}
+	return strings.NewReplacer(pairs...)
 }
 
 // Text is the plan as a reviewer reads it in a golden file: every step with
@@ -387,22 +447,32 @@ func sameSteps(approved, rebuilt []Step, fill *strings.Replacer) error {
 			return fmt.Errorf("the host changed while admit ran: %q still needs the user, which was to exist by now. Nothing more was done. Run host admit again to see the plan", s.Title)
 		}
 	}
-	var a, b []string
-	for _, s := range approved {
-		a = append(a, fill.Replace(s.Title))
-	}
-	for _, s := range rebuilt {
-		b = append(b, s.Title)
-	}
-	if strings.Join(a, "\n") != strings.Join(b, "\n") {
-		return fmt.Errorf("the host changed while admit ran: the steps left were\n- %s\nand are now\n- %s\nNothing more was done. Run host admit again to see the plan", strings.Join(a, "\n- "), strings.Join(b, "\n- "))
+	if len(approved) != len(rebuilt) {
+		return fmt.Errorf("the host changed while admit ran: %d steps were left to run and %d are now planned. The steps left were\n%s\nand are now\n%s\nNothing more was done. Run host admit again to see the plan", len(approved), len(rebuilt), titles(approved, fill), titles(rebuilt, nil))
 	}
 	for i, s := range approved {
+		if fill.Replace(s.Title) != rebuilt[i].Title {
+			return fmt.Errorf("the host changed while admit ran: step %d was %q and is now %q. Nothing more was done. Run host admit again to see the plan", i+1, fill.Replace(s.Title), rebuilt[i].Title)
+		}
 		if field := differs(s, rebuilt[i], fill); field != "" {
 			return fmt.Errorf("the host changed while admit ran: step %q now has a different %s from the one approved. Nothing more was done. Run host admit again to see the plan", rebuilt[i].Title, field)
 		}
 	}
 	return nil
+}
+
+// titles lists steps' titles, each quoted on its own line, filled by fill
+// when it is not nil.
+func titles(steps []Step, fill *strings.Replacer) string {
+	var out []string
+	for _, s := range steps {
+		t := s.Title
+		if fill != nil {
+			t = fill.Replace(t)
+		}
+		out = append(out, fmt.Sprintf("- %q", t))
+	}
+	return strings.Join(out, "\n")
 }
 
 // differs names the first field of the approved step a, its placeholders
