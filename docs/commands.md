@@ -685,19 +685,26 @@ paisans host admit --site home-a --ssh owner@home-a.example.org --execute   # fr
   asks, adds these steps after the deployment's own rules, in this order:
   an allow for every TCP port sshd listens on (read from its sockets with
   `ss`, and from an active `ssh.socket`), tagged `paisans: ssh`; a timer,
-  `systemd-run --on-active=600 --unit=paisans-ufw-fallback ufw disable`;
+  `systemd-run --on-active=600 --timer-property=AccuracySec=1s
+  --unit=paisans-ufw-fallback ufw disable`, which does not survive a reboot
+  (a reboot before it fires leaves ufw enabled, so wait for it instead);
   `ufw --force enable`. ufw takes every rule while it is inactive and
   applies them as it is enabled, so SSH is allowed from the first moment ufw
   is on. The timer is stopped once a new SSH login gets through: with
   `--site`, admit's own login as the deployment's user at its end; with
   `--request`, admit asks you to open a new SSH session and type yes. Without
   that, ufw turns itself off again within 10 minutes, and admit says when.
-  Admit refuses to enable ufw when it cannot read a port sshd listens on, when
-  a rule of yours denies one, or when the timer cannot be armed. Without
-  `--enable-ufw` and off a terminal, it refuses before making any change, and
-  prints the commands that enable ufw by hand, numbered, every
-  `sudo ufw allow <port>/tcp` before `sudo ufw enable`; with no sshd port
-  read, it prints no enable command at all.
+  Admit refuses to enable ufw when it cannot read a port sshd listens on or
+  ufw's rules; when ufw holds any deny or reject rule of yours, in any form,
+  which it lists, since those decide what reaches SSH; when
+  `/etc/default/ufw` does not set `IPV6=yes` and sshd listens on IPv6, since
+  ufw would then drop SSH over IPv6; or when the timer cannot be armed.
+  These refuse with `--enable-ufw` and without it, and admit asks nothing
+  then. Otherwise, without `--enable-ufw` and off a terminal, it refuses
+  before making any change, and prints the commands that enable ufw by hand,
+  numbered, every `sudo ufw allow <port>/tcp` before `sudo ufw enable`. The
+  refusal for your deny rules prints the same commands after them; with no
+  sshd port read, or for `IPV6`, it prints no enable command at all.
 * **Grants:** at a terminal, admit asks for each
   grant the site's roles need and the flags leave out, saying what it gives;
   elsewhere a data site without `--watchdog`, or a gateway or Caddy monitor
@@ -781,7 +788,7 @@ paisans host evict --site home-a --ssh owner@home-a.example.org --execute
   killed admit left is put back. The SSH allow may be the rule the
   owner's own login arrives by, so it is kept and evict warns of it: the
   owner deletes it themselves once nothing else needs it. Evict never
-  disables ufw: when admit enabled it, ufw stays enabled with its
+  disables ufw: when admit enabled it, ufw stays as it is, with its
   `paisans: ssh` allows, and the plan says so; disabling it is the owner's.
   Every process of
   the user, or of its subordinate range, is killed first. A user the owner

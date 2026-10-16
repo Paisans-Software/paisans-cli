@@ -16,14 +16,14 @@ const ufwBeforeMarker = "paisans host admit: before enabling ufw"
 // with sshd listening on 22, systemd-run there and no fallback loaded.
 const sshdOn22 = `sshd LISTEN 0 4096 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=812,fd=3))` + "\n" +
 	`sshd LISTEN 0 4096 [::]:22 [::]:* users:(("sshd",pid=812,fd=4))` + "\n" +
-	"systemd-run present\nfallback not-found not-found\nend\n"
+	"ipv6 yes\nsystemd-run present\nfallback not-found not-found\nend\n"
 
 // sshdOn22And2222 adds 2222, which a socket-activated ssh.socket listens
 // on for sshd.
 const sshdOn22And2222 = "socket [::]:2222 (Stream)\n" + sshdOn22
 
 // noSSHD is the probe on a host where nothing listens for sshd.
-const noSSHD = "systemd-run present\nfallback not-found not-found\nend\n"
+const noSSHD = "ipv6 yes\nsystemd-run present\nfallback not-found not-found\nend\n"
 
 // inactiveUFW is home() with ufw installed and not active, and the probe
 // before enabling it answered with answer.
@@ -36,6 +36,8 @@ var enableUFW = hostadmit.Flags{EnableUFW: true}
 var ufwCases = addCases(
 	goldenCase{name: "firewall-ufw-inactive-two-ports-refused", site: "vm", host: inactiveUFW(sshdOn22And2222)},
 	goldenCase{name: "firewall-ufw-inactive-no-sshd-refused", site: "vm", host: inactiveUFW(noSSHD)},
+	goldenCase{name: "firewall-ufw-owner-deny-refused", site: "vm", host: inactiveUFW("rule deny in on eth0 to any port 22\nrule reject 22:23/tcp\n" + sshdOn22And2222)},
+	goldenCase{name: "firewall-enable-ufw-ipv6-off-refused", site: "vm", flags: enableUFW, host: inactiveUFW(strings.Replace(sshdOn22, "ipv6 yes", "ipv6 no", 1))},
 	goldenCase{name: "firewall-enable-ufw", site: "vm", flags: enableUFW, host: inactiveUFW(sshdOn22And2222)},
 	goldenCase{name: "firewall-enable-ufw-owner-allow", site: "vm", flags: enableUFW, host: func() *fakeHost {
 		return inactiveUFW("rule allow 22/tcp\n"+sshdOn22)().answer("ufw show added", "ufw present\nstatus inactive\nrule allow 22/tcp\n")
@@ -47,7 +49,8 @@ func TestEnableUFWPlans(t *testing.T) { runGolden(t, ufwCases) }
 // Without --enable-ufw an inactive ufw refuses, naming the flag first, then
 // the commands that enable it by hand in their order, each allow before the
 // enable, and what enabling without them does. With no port sshd listens
-// on read, no enable command is given at all.
+// on read, no enable command is given at all
+// (TestARefusalTheFlagWouldMeetIsGivenAsItIs).
 func TestAnInactiveUFWRefusesNamingTheFlagAndTheSafeOrder(t *testing.T) {
 	for _, c := range []struct {
 		name, answer string
@@ -55,8 +58,6 @@ func TestAnInactiveUFWRefusesNamingTheFlagAndTheSafeOrder(t *testing.T) {
 	}{
 		{"one port", sshdOn22, []string{"--enable-ufw", "  1. sudo ufw allow 22/tcp\n  2. sudo ufw enable\n", "without step 1 cuts off SSH"}},
 		{"two ports", sshdOn22And2222, []string{"--enable-ufw", "  1. sudo ufw allow 22/tcp\n  2. sudo ufw allow 2222/tcp\n  3. sudo ufw enable\n", "without steps 1 and 2 cuts off SSH"}},
-		{"none", noSSHD, []string{"found no port sshd listens on", "cuts off SSH"}},
-		{"unread", "unread listeners (ss -Hltnp)\n" + noSSHD, []string{"could not read the listeners (ss -Hltnp)", "cuts off SSH"}},
 	} {
 		_, err := hostadmit.Build(inactiveUFW(c.answer)(), input(t, "vm", hostadmit.Flags{}))
 		var inactive *hostadmit.UFWInactiveError
@@ -107,7 +108,7 @@ func TestEnableUFWPlansTheAllowsTheFallbackThenTheEnable(t *testing.T) {
 		}
 	}
 	if plan.Steps[a22].Command != "ufw allow 22/tcp comment 'paisans: ssh'" ||
-		plan.Steps[arm].Command != "systemd-run --on-active=600 --unit=paisans-ufw-fallback ufw disable" ||
+		plan.Steps[arm].Command != "systemd-run --on-active=600 --timer-property=AccuracySec=1s --unit=paisans-ufw-fallback ufw disable" ||
 		plan.Steps[enable].Command != "ufw --force enable" {
 		t.Errorf("the commands:\n%s", plan.Text())
 	}
@@ -127,8 +128,8 @@ func TestEnableUFWRefusesWhatWouldEnableItBlind(t *testing.T) {
 		"no systemd-run":     {strings.Replace(sshdOn22, "systemd-run present", "systemd-run absent", 1), "cannot arm the timer"},
 		"fallback loaded":    {strings.Replace(sshdOn22, "fallback not-found not-found", "fallback loaded not-found", 1), "already loaded"},
 		"fallback unread":    {strings.Replace(sshdOn22, "fallback not-found not-found", "fallback", 1), "already loaded"},
-		"owner denies 22":    {"rule deny 22/tcp\n" + sshdOn22, "blocks 22/tcp"},
-		"owner rejects 2222": {"rule reject 2222\n" + sshdOn22And2222, "blocks 2222/tcp"},
+		"owner denies 22":    {"rule deny 22/tcp\n" + sshdOn22, "`ufw deny 22/tcp`"},
+		"owner rejects 2222": {"rule reject 2222\n" + sshdOn22And2222, "`ufw reject 2222`"},
 	} {
 		_, err := hostadmit.Build(inactiveUFW(c.answer)(), input(t, "vm", enableUFW))
 		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), "Nothing was changed") {
@@ -205,7 +206,102 @@ func TestEvictKeepsUFWAndTheSSHAllow(t *testing.T) {
 			t.Errorf("evict touches ufw's state or the owner's SSH allow: %s", s.Command)
 		}
 	}
-	if !slices.ContainsFunc(plan.Warnings, func(w hostprep.Warning) bool { return strings.Contains(w.Hint, "ufw stays enabled") }) {
-		t.Errorf("evict does not say ufw stays enabled:\n%s", plan.Text())
+	if !slices.ContainsFunc(plan.Warnings, func(w hostprep.Warning) bool { return strings.Contains(w.Hint, "ufw stays as it is") }) {
+		t.Errorf("evict does not say ufw stays as it is:\n%s", plan.Text())
+	}
+}
+
+// Any deny or reject rule of the owner's, in whatever form, stops admit
+// enabling ufw: ufw matches the first rule, and admit neither parses every
+// form nor overrides the owner's rules. The refusal lists them, and the
+// commands to enable ufw by hand once they are checked, each allow before
+// the enable. With the flag or without, at a terminal or not, nothing asks
+// to enable ufw then.
+func TestAnOwnersDenyInAnyFormStopsTheEnable(t *testing.T) {
+	for _, rule := range []string{"deny in on eth0 to any port 22", "reject 22:23/tcp", "deny 22,80/tcp", "deny OpenSSH", "deny from 203.0.113.0/24"} {
+		for _, flags := range []hostadmit.Flags{enableUFW, {}} {
+			_, err := hostadmit.Build(inactiveUFW("rule "+rule+"\n"+sshdOn22)(), input(t, "vm", flags))
+			var inactive *hostadmit.UFWInactiveError
+			if err == nil || errors.As(err, &inactive) {
+				t.Fatalf("%q %+v: %v", rule, flags, err)
+			}
+			for _, want := range []string{"`ufw " + rule + "`", "decide what reaches SSH", "  1. sudo ufw allow 22/tcp\n  2. sudo ufw enable", "Nothing was changed"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("%q %+v: the refusal does not say %q:\n%v", rule, flags, want, err)
+				}
+			}
+			if strings.Contains(err.Error(), "safe way") {
+				t.Errorf("%q: the refusal calls --enable-ufw the safe way:\n%v", rule, err)
+			}
+		}
+	}
+	// An allow, a limit and a route rule are no deny.
+	for _, rule := range []string{"allow 80/tcp", "limit 22/tcp", "route deny in on eth1"} {
+		if _, err := hostadmit.Build(inactiveUFW("rule "+rule+"\n"+sshdOn22)(), input(t, "vm", enableUFW)); err != nil {
+			t.Errorf("%q: %v", rule, err)
+		}
+	}
+}
+
+// With IPV6 other than yes in /etc/default/ufw, enabling ufw drops all IPv6,
+// SSH over IPv6 included: admit refuses when sshd listens on IPv6, and gives
+// no command that enables ufw. With sshd on IPv4 alone it enables.
+func TestIPv6OffStopsTheEnableWhenSSHDListensOnIPv6(t *testing.T) {
+	v6 := strings.Replace(sshdOn22, "ipv6 yes", "ipv6 no", 1) // sshdOn22 listens on [::]:22
+	for _, answer := range []string{v6, "socket [::]:22 (Stream)\nipv6 no\nsystemd-run present\nfallback not-found not-found\nend\n",
+		`sshd LISTEN 0 4096 *:22 *:* users:(("sshd",pid=1,fd=3))` + "\n" + "ipv6\nsystemd-run present\nfallback not-found not-found\nend\n"} {
+		for _, flags := range []hostadmit.Flags{enableUFW, {}} {
+			_, err := hostadmit.Build(inactiveUFW(answer)(), input(t, "vm", flags))
+			if err == nil || !strings.Contains(err.Error(), "IPV6=yes") || !strings.Contains(err.Error(), "/etc/default/ufw") || !strings.Contains(err.Error(), "SSH over IPv6") || strings.Contains(err.Error(), "sudo ufw enable") {
+				t.Errorf("%q %+v: %v", answer, flags, err)
+			}
+		}
+	}
+	v4 := `sshd LISTEN 0 4096 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=812,fd=3))` + "\nipv6 no\nsystemd-run present\nfallback not-found not-found\nend\n"
+	if _, err := hostadmit.Build(inactiveUFW(v4)(), input(t, "vm", enableUFW)); err != nil {
+		t.Errorf("sshd on IPv4 alone with IPV6=no: %v", err)
+	}
+}
+
+// Off a terminal, a refusal that --enable-ufw would meet too is given as
+// it is, never as the question's refusal calling the flag the safe way.
+func TestARefusalTheFlagWouldMeetIsGivenAsItIs(t *testing.T) {
+	for _, answer := range []string{noSSHD, strings.Replace(sshdOn22, "systemd-run present", "systemd-run absent", 1),
+		strings.Replace(sshdOn22, "fallback not-found not-found", "fallback loaded not-found", 1), "unread rules (ufw show added)\n" + sshdOn22} {
+		_, err := hostadmit.Build(inactiveUFW(answer)(), input(t, "vm", hostadmit.Flags{}))
+		var inactive *hostadmit.UFWInactiveError
+		if err == nil || errors.As(err, &inactive) || strings.Contains(err.Error(), "safe way") {
+			t.Errorf("%q: %v", answer, err)
+		}
+	}
+}
+
+// An owner's limit on an sshd port lets SSH in: no allow of admit's for it.
+// An application profile's allow is not read, so admit adds its own, which
+// is harmless.
+func TestALimitOrAProfileAllowOnTheSSHPort(t *testing.T) {
+	plan, err := hostadmit.Build(inactiveUFW("rule limit 22/tcp comment 'SSH (rate-limited)'\n"+sshdOn22)(), input(t, "vm", enableUFW))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if titledStep(plan, "allow SSH on 22/tcp") >= 0 || !slices.Contains(plan.Present, "firewall: SSH on 22/tcp allowed by `ufw limit 22/tcp comment 'SSH (rate-limited)'`") {
+		t.Errorf("a limit on 22:\n%s", plan.Text())
+	}
+	plan, err = hostadmit.Build(inactiveUFW("rule allow OpenSSH\n"+sshdOn22)(), input(t, "vm", enableUFW))
+	if err != nil || titledStep(plan, "allow SSH on 22/tcp") < 0 {
+		t.Errorf("allow OpenSSH: %v", err)
+	}
+}
+
+// The fallback fires on time, and the plan says it does not survive a
+// reboot.
+func TestTheFallbackIsAccurateAndSaysItDoesNotSurviveAReboot(t *testing.T) {
+	plan, err := hostadmit.Build(inactiveUFW(sshdOn22)(), input(t, "vm", enableUFW))
+	if err != nil {
+		t.Fatal(err)
+	}
+	arm := plan.Steps[titledStep(plan, "arm the ufw fallback")]
+	if arm.Command != "systemd-run --on-active=600 --timer-property=AccuracySec=1s --unit=paisans-ufw-fallback ufw disable" || !strings.Contains(arm.Describe, "does not survive a reboot") {
+		t.Errorf("the fallback: %+v", arm)
 	}
 }

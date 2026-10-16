@@ -1,0 +1,8 @@
+refused: firewall: ufw is installed but not active, and admit will not enable it: ufw already holds these rules of yours:
+  `ufw deny in on eth0 to any port 22`
+  `ufw reject 22:23/tcp`
+ufw applies the first rule a connection matches, so they decide what reaches SSH, and admit neither reads every form a rule takes nor overrides yours. Check that none of them blocks the ports sshd listens on (22/tcp, 2222/tcp), and delete or change any that does; then enable ufw yourself, in this order:
+  1. sudo ufw allow 22/tcp
+  2. sudo ufw allow 2222/tcp
+  3. sudo ufw enable
+Enabling ufw without steps 1 and 2 cuts off SSH to this host, your own login included. Then run admit again. Nothing was changed

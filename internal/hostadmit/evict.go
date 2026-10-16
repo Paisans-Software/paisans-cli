@@ -491,7 +491,7 @@ func (e *evictor) firewall() error {
 	// theirs too, so evict leaves ufw on and the paisans: ssh allows, which
 	// carry no deployment's tag, in place.
 	if e.rec != nil && e.rec.UFWEnabled {
-		e.warn("firewall: ufw stays enabled, and its "+sshAllowTag+" allows stay",
+		e.warn("firewall: ufw stays as it is, with its "+sshAllowTag+" allows",
 			"Host admit enabled ufw when you admitted this deployment, and evict never disables it. Disable it yourself with sudo ufw disable if you want it off.")
 	}
 	return nil

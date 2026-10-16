@@ -193,7 +193,7 @@ var helpCommands = []helpCommand{
 			"paisans host admit --site <name> [--ssh <user>|<user@host[:port]>] [--config " + config.FileName + "] [the same grants]\n                   [--execute]",
 		},
 		detail: "The one root step for a deployment on a host, run by the host's owner: the deployment's own unprivileged user with its own rootless Docker, the WireGuard helper and its sudoers line, the firewall, the egress table, the grants given and the admission record. " +
-			"ufw must be installed. When it is not active, --enable-ufw, or a yes at a terminal, has admit allow every port sshd listens on, arm a timer that turns ufw off again in 10 minutes, enable ufw, and stop the timer once a new SSH login gets through: with --site, admit's own login as the user; with --request, one you open and confirm. Without it admit refuses, and prints the commands that enable ufw by hand, every allow before the enable. " +
+			"ufw must be installed. When it is not active, --enable-ufw, or a yes at a terminal, has admit allow every port sshd listens on, arm a timer that turns ufw off again in 10 minutes, enable ufw, and stop the timer once a new SSH login gets through: with --site, admit's own login as the user; with --request, one you open and confirm. Without it admit refuses, and prints the commands that enable ufw by hand, every allow before the enable. Admit never enables ufw while it holds a deny or reject rule of yours, or with IPV6 off in /etc/default/ufw while sshd listens on IPv6, and then asks nothing. " +
 			"--watchdog and --public-ports are the owner's to give: at a terminal, admit asks for each one the site's roles need and the flags leave out; elsewhere a data site without --watchdog, or a gateway or Caddy monitor without --public-ports, stops before the host is reached. " +
 			"With --site, --ssh may be your login alone, for the site's declared ssh host and port, and is asked for at a terminal when left out. " +
 			"--execute with --request asks for the request's digest at a terminal; with --site it ends by logging in as the user with your own key. Never run by an agent unattended.",
@@ -206,7 +206,7 @@ var helpCommands = []helpCommand{
 			"sudo paisans host evict --deployment <id> --user <name> [--data-dir <path>] [--execute]",
 			"paisans host evict --site <name> [--ssh <user>|<user@host[:port]>] [--config " + config.FileName + "] [--data-dir <path>]\n                   [--execute]",
 		},
-		detail: "Undo host admit for one deployment: its mesh, its user with its home and data, the helper, the egress table, its firewall rules, the record and the registry entry. ufw stays enabled when admit enabled it, with its paisans: ssh allows. Host-wide files and sysctls go only when no other deployment is admitted. " +
+		detail: "Undo host admit for one deployment: its mesh, its user with its home and data, the helper, the egress table, its firewall rules, the record and the registry entry. Evict never disables ufw, which stays as it is with its paisans: ssh allows when admit enabled it. Host-wide files and sysctls go only when no other deployment is admitted. " +
 			"--data-dir, the one admit was given, is needed only when the host holds no admission record. " +
 			"With --site, --ssh may be your login alone, for the site's declared ssh host and port, and is asked for at a terminal when left out. " +
 			"--execute asks for the user's name at a terminal. Never run by an agent unattended.",

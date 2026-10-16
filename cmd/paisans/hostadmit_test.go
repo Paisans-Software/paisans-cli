@@ -671,7 +671,7 @@ func inactiveUFW(h *admitHost) *admitHost {
 			h.facts[i][1] = "no"
 		}
 	}
-	h.answers["paisans host admit: before enabling ufw"] = `sshd LISTEN 0 4096 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=812,fd=3))` + "\nsystemd-run present\nfallback not-found not-found\nend\n"
+	h.answers["paisans host admit: before enabling ufw"] = `sshd LISTEN 0 4096 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=812,fd=3))` + "\nipv6 yes\nsystemd-run present\nfallback not-found not-found\nend\n"
 	return h
 }
 
@@ -887,5 +887,37 @@ func TestEvictAsksForTheLoginAtATerminal(t *testing.T) {
 	_ = runHostEvict([]string{"--site", "vm", "--config", fixtureConfig()}, typed(t, "owner\n"), out)
 	if reached.User != "owner" || reached.Host != "vm.example.org" || !strings.Contains(out.String(), "which runs evict through sudo") {
 		t.Errorf("reached %+v, asked:\n%s", reached, out.String())
+	}
+}
+
+// Where --enable-ufw would be refused, a deny rule of the owner's among
+// them, admit asks nothing at a terminal and gives the refusal.
+func TestAdmitDoesNotAskToEnableUFWWhereTheFlagWouldBeRefused(t *testing.T) {
+	path, _ := requestFile(t, "vm")
+	h := withFakeLocalHost(t, "ubuntu")
+	inactiveUFW(h)
+	h.answers["paisans host admit: before enabling ufw"] = "rule deny OpenSSH\n" + h.answers["paisans host admit: before enabling ufw"]
+	withTerminal(t, true)
+	out := new(strings.Builder)
+	err := runHostAdmit([]string{"--request", path, "--public-ports"}, typed(t, "y\n"), out)
+	if err == nil || !strings.Contains(err.Error(), "`ufw deny OpenSSH`") || strings.Contains(out.String(), "Enable ufw") {
+		t.Errorf("%v\n%s", err, out.String())
+	}
+}
+
+// The question and a failure once the fallback is armed both say the
+// timer does not survive a reboot.
+func TestTheUFWQuestionSaysTheFallbackDoesNotSurviveAReboot(t *testing.T) {
+	path, _ := requestFile(t, "vm")
+	inactiveUFW(withFakeLocalHost(t, "ubuntu"))
+	withTerminal(t, true)
+	out := new(strings.Builder)
+	_ = runHostAdmit([]string{"--request", path, "--public-ports"}, typed(t, "n\n"), out)
+	if !strings.Contains(out.String(), "does not survive a reboot") {
+		t.Errorf("the question:\n%s", out.String())
+	}
+	err := ufwFallbackNote(fmt.Errorf("failed"), &hostadmit.Plan{EnablesUFW: true}, true)
+	if !strings.Contains(err.Error(), "does not survive a reboot") {
+		t.Errorf("the note: %v", err)
 	}
 }

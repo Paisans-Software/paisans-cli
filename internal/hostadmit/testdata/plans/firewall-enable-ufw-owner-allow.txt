@@ -331,9 +331,9 @@ step 21: allow all inbound on psns-f2a9
     $ ufw allow in on psns-f2a9 comment 'paisans-f2a9: the mesh: etcd, Patroni, Garage, HAProxy'
 
 step 22: arm the ufw fallback
-  firewall: a timer, paisans-ufw-fallback.timer, that runs ufw disable 10 minutes from now, so a login ufw blocks is let back in; admit stops it once a new SSH login gets through
+  firewall: a timer, paisans-ufw-fallback.timer, that runs ufw disable 10 minutes from now, so a login ufw blocks is let back in; admit stops it once a new SSH login gets through. It does not survive a reboot: a reboot before it fires leaves ufw enabled, so wait for it rather than reboot
   run:
-    $ systemd-run --on-active=600 --unit=paisans-ufw-fallback ufw disable
+    $ systemd-run --on-active=600 --timer-property=AccuracySec=1s --unit=paisans-ufw-fallback ufw disable
 
 step 23: enable ufw
   firewall: enable ufw, every rule above already in place, with the default policy ufw has (Ubuntu's denies incoming)

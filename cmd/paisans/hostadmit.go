@@ -269,7 +269,7 @@ func askEnableUFW(stdin io.Reader, stdout io.Writer, ports []int, bySite bool) (
 		"  2. arm a timer that runs ufw disable in 10 minutes\n"+
 		"  3. enable ufw, the deployment's own rules already in place\n"+
 		"  4. stop the timer once a new SSH login gets through: %s\n"+
-		"The risk: something admit cannot see, such as a cloud firewall, could still block SSH. You are then locked out until the timer turns ufw off again, at most 10 minutes later.\n"+
+		"The risk: something admit cannot see, such as a cloud firewall, could still block SSH. You are then locked out until the timer turns ufw off again, at most 10 minutes later. The timer does not survive a reboot: a reboot before it fires leaves ufw enabled, so wait for it rather than reboot.\n"+
 		"Enable ufw (--enable-ufw)? [y/N] ", strings.Join(list, ", "), confirm)
 	line, err := readTypedLine(stdin)
 	if err != nil {
@@ -296,7 +296,7 @@ func ufwFallbackNote(err error, plan *hostadmit.Plan, armed bool) error {
 	if !armed {
 		when = "If admit armed the ufw fallback before it stopped, " + when
 	}
-	return fmt.Errorf("%w\n%s. Once a new SSH login to this host works, run sudo %s to keep ufw on; or let it turn off, and run admit again with --enable-ufw", err, when, hostadmit.DisarmUFW)
+	return fmt.Errorf("%w\n%s. Once a new SSH login to this host works, run sudo %s to keep ufw on; or let it turn off, and run admit again with --enable-ufw. The timer does not survive a reboot: a reboot before it fires leaves ufw enabled, so wait for it rather than reboot", err, when, hostadmit.DisarmUFW)
 }
 
 // confirmUFW, on the host with --request once admit has enabled ufw, asks
@@ -308,7 +308,7 @@ func confirmUFW(stdin io.Reader, stdout io.Writer, r ui.Reporter, t apply.Transp
 	line, err := readTypedLine(stdin)
 	if err != nil || strings.ToLower(strings.TrimSpace(line)) != "yes" {
 		r.Warn("ufw turns itself off again by "+off,
-			"No new SSH login was confirmed, so the timer admit armed is left to run ufw disable. If a new login works before then, run sudo "+hostadmit.DisarmUFW+" to keep ufw on; otherwise run admit again with --enable-ufw once you know why SSH was blocked.")
+			"No new SSH login was confirmed, so the timer admit armed is left to run ufw disable. If a new login works before then, run sudo "+hostadmit.DisarmUFW+" to keep ufw on; otherwise run admit again with --enable-ufw once you know why SSH was blocked. The timer does not survive a reboot: a reboot before it fires leaves ufw enabled, so wait for it rather than reboot.")
 		r.Result("Admitted: %s runs Docker %s. The operators' next command logs in as %s. ufw turns itself off again by %s.", user, version, user, off)
 		return nil
 	}

@@ -354,8 +354,10 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    or a yes at a terminal, by steps after the deployment's own rules, in
    this order: an allow for every TCP port sshd listens on, tagged
    `paisans: ssh`, which is no deployment's tag, so evict never removes it;
-   the fallback, `systemd-run --on-active=600 --unit=paisans-ufw-fallback ufw
-   disable`; then `ufw --force enable`. ufw takes rules while inactive and
+   the fallback, `systemd-run --on-active=600
+   --timer-property=AccuracySec=1s --unit=paisans-ufw-fallback ufw disable`,
+   a transient timer, which does not survive a reboot, so a reboot before it
+   fires leaves ufw enabled and admit says to wait for it instead; then `ufw --force enable`. ufw takes rules while inactive and
    applies them as it is enabled, so SSH is allowed from its first moment on.
    The ports sshd listens on are read as root from the sockets, with `ss
    -Hltnp` and an active `ssh.socket` or `sshd.socket`'s `Listen`, not from
@@ -364,9 +366,16 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    allow of the owner's already covers a port, admit adds none for it; when
    the deployment's own SSH allow would be the same rule, ufw would rewrite
    it in place, so the `paisans: ssh` allow alone is planned. Admit refuses
-   to enable ufw when it reads no sshd port, when a rule of the owner's
-   denies one, when it cannot read ufw's rules, or when the timer cannot be
-   armed (no `systemd-run`, or a `paisans-ufw-fallback` unit still loaded).
+   to enable ufw when it reads no sshd port; when it cannot read ufw's
+   rules; when ufw holds any deny or reject rule of the owner's, in any
+   form, since ufw applies the first rule a connection matches and admit
+   neither parses every form nor overrides the owner's rules, so the refusal
+   lists them; when `/etc/default/ufw` does not set `IPV6=yes` and sshd
+   listens on IPv6, since ufw then drops all IPv6, SSH over IPv6 included;
+   or when the timer cannot be armed (no `systemd-run`, or a
+   `paisans-ufw-fallback` unit still loaded). Each of these refuses with
+   `--enable-ufw` and without it alike, so admit never asks, or names
+   `--enable-ufw`, where the flag would be refused.
    Once ufw is on, a new SSH login stops the timer (`systemctl stop
    paisans-ufw-fallback.timer`): with `--site`, admit's own login as the
    deployment's user at its end, after which the timer is stopped through the
@@ -375,8 +384,9 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    within 10 minutes, and admit says when. Without `--enable-ufw` and off a
    terminal admit stops before changing anything, naming `--enable-ufw` and
    the commands that enable ufw by hand, numbered, every `sudo ufw allow
-   <port>/tcp` before `sudo ufw enable`, with no enable command when it read
-   no sshd port. A re-run on a host whose ufw is active plans none of these
+   <port>/tcp` before `sudo ufw enable`. The refusal for the owner's deny
+   rules lists them before the same commands; the refusals for no sshd port
+   and for `IPV6` give no enable command. A re-run on a host whose ufw is active plans none of these
    steps.
 10. **Egress.** An nftables table that keeps the deployment off the owner's
     network (below).
@@ -559,8 +569,8 @@ deployment's ufw rules but its SSH allow, the admission record and the
 registry claim. The SSH allow may be the rule the owner's own login
 arrives by, so it is kept, and the plan warns of it: the owner deletes it
 once nothing else needs it. Evict never disables ufw: when the record says
-admit enabled it, the plan says ufw stays enabled with its `paisans: ssh`
-allows, and that disabling it is the owner's. Host-wide files (`delegate.conf`,
+admit enabled it, the plan says ufw stays as it is, with its `paisans:
+ssh` allows, and that disabling it is the owner's. Host-wide files (`delegate.conf`,
 `modules-load.d/paisans.conf`, `60-paisans.conf`) are removed only when
 they are as admit wrote them and no other deployment is admitted or
 claims the host, `delegate.conf` with its `user@.service.d` once empty

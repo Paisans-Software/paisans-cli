@@ -1,0 +1,1 @@
+refused: firewall: ufw is installed but not active, and admit will not enable it: /etc/default/ufw sets IPV6=no, and sshd listens on IPv6. Enabled so, ufw drops all IPv6 traffic, SSH over IPv6 included, and its allows reach IPv4 alone. Set IPV6=yes in /etc/default/ufw, then run admit again with --enable-ufw. Nothing was changed

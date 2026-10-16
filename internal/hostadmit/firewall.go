@@ -27,8 +27,13 @@ func planFirewall(p *planner) error {
 		if err != nil {
 			return err
 		}
+		// What would stop --enable-ufw stops admit without it too, so the
+		// owner is never asked, or told to pass the flag, only to be refused.
+		if err := b.blocker(); err != nil {
+			return err
+		}
 		if !p.in.Flags.EnableUFW {
-			return &UFWInactiveError{SSHPorts: b.ports, Unread: b.unread}
+			return &UFWInactiveError{SSHPorts: b.ports}
 		}
 		before = &b
 	}
