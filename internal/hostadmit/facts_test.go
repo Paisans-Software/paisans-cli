@@ -21,7 +21,7 @@ func TestParseFacts(t *testing.T) {
 		"file /usr/local/libexec/paisans/wg-psns-f2a9 " + "ab12" + " 755 0 0\n" +
 		"file /etc/sudoers.d/paisans-f2a9 link\n" +
 		"dir /etc/wireguard drwx------ 0 0\ndir /srv/my data drwxr-xr-x 0 0\nbridge virbr0\nbridge docker0\nufw installed\nufw-active yes\nlan 192.168.1.20/24\n" +
-		"wireguard wg0\nlan6 2001:db8:1::/64 eth0\nlan6 2001:db8:1::5 eth0\nlan6 fe80::/64 eth0\nend\n"
+		"lan6 2001:db8:1::/64 eth0\nlan6 2001:db8:1::5 eth0\nlan6 fe80::/64 eth0\nend\n"
 	f, err := parseFacts(out, "paisans-f2a9")
 	if err != nil {
 		t.Fatal(err)
@@ -53,9 +53,6 @@ func TestParseFacts(t *testing.T) {
 	}
 	if len(f.Bridges) != 2 || f.LAN != "192.168.1.20/24" {
 		t.Errorf("bridges %v, lan %q", f.Bridges, f.LAN)
-	}
-	if len(f.WireGuard) != 1 || f.WireGuard[0] != "wg0" {
-		t.Errorf("wireguard %v", f.WireGuard)
 	}
 	want := []Route6{{netip.MustParsePrefix("2001:db8:1::/64"), "eth0"}, {netip.MustParsePrefix("2001:db8:1::5/128"), "eth0"}, {netip.MustParsePrefix("fe80::/64"), "eth0"}}
 	if !slices.Equal(f.OnLink6, want) {

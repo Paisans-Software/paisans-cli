@@ -63,11 +63,9 @@ type Facts struct {
 	PortStart, IPForward       string
 	DefaultDev, LAN            string
 	// OnLink6 are the IPv6 routes of the main table with no gateway, each
-	// a destination the host reaches directly on Dev; WireGuard the
-	// host's WireGuard interfaces. Admit drops the global ones for the
-	// deployment (onLink6).
+	// a destination the host reaches directly on Dev. Admit drops the
+	// global ones for the deployment (onLink6).
 	OnLink6       []Route6
-	WireGuard     []string
 	WatchdogRules []string
 	Records       []string
 	// Data is where Docker's data would go: the nearest directory that
@@ -357,8 +355,6 @@ func parseFacts(out, user string) (Facts, error) {
 				return f, err
 			}
 			f.OnLink6 = append(f.OnLink6, r)
-		case "wireguard":
-			f.WireGuard = append(f.WireGuard, v)
 		case "watchdog-rule":
 			f.WatchdogRules = append(f.WatchdogRules, v)
 		case "record":

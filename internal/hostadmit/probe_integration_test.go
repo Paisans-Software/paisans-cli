@@ -208,23 +208,21 @@ func TestProbeReadsUFW(t *testing.T) {
 	}
 }
 
-// The probe reads every IPv6 route with no gateway, and the host's
-// WireGuard interfaces, and onLink6 keeps the global prefixes on the
-// host's own interfaces: a LAN /64 from an address, a /64 the owner routes
-// on-link by hand, but not a route through a gateway, the default route,
-// a WireGuard interface's prefix, link-local or unique local prefixes. It
+// The probe reads every IPv6 route with no gateway, and onLink6 keeps the
+// global prefixes on every interface but loopback and the mesh's: a LAN
+// /64 from an address, a /64 the owner routes on-link by hand, another
+// WireGuard interface's prefix, but not the mesh's, a route through a
+// gateway, the default route, link-local or unique local prefixes. It
 // installs iproute2, so it needs the network.
 func TestProbeReadsTheOnLinkPrefixes(t *testing.T) {
 	setup := "apt-get update -qq >/dev/null 2>&1 && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq iproute2 >/dev/null 2>&1 || exit 1\n" +
 		"ip link add lan0 type dummy && ip link set lan0 up && ip addr add 2001:db8:1::20/64 dev lan0 nodad && ip addr add fd00:1::20/64 dev lan0 nodad && " +
 		"ip -6 route add 2001:db8:2::/64 dev lan0 && ip -6 route add 2001:db8:99::/48 via 2001:db8:1::1 dev lan0 && ip -6 route add default via 2001:db8:1::1 dev lan0 && " +
-		"ip link add wg9 type wireguard && ip link set wg9 up && ip addr add 2001:db8:3::1/64 dev wg9 nodad"
+		"ip link add wg9 type wireguard && ip link set wg9 up && ip addr add 2001:db8:3::1/64 dev wg9 nodad && " +
+		"ip link add psns-f2a9 type wireguard && ip link set psns-f2a9 up && ip addr add 2001:db8:4::1/64 dev psns-f2a9 nodad"
 	f := probeIn(t, setup, "paisans-f2a9", "", "--cap-add", "NET_ADMIN", "--sysctl", "net.ipv6.conf.all.disable_ipv6=0")
-	if !slices.Contains(f.WireGuard, "wg9") {
-		t.Errorf("wireguard: %v", f.WireGuard)
-	}
-	got := fmt.Sprint(onLink6(f, "psns-f2a9"))
-	if want := "[2001:db8:1::/64 2001:db8:2::/64]"; got != want {
+	got := fmt.Sprint(onLink6(f, "psns-f2a9", "10.44.0.0/24"))
+	if want := "[2001:db8:1::/64 2001:db8:2::/64 2001:db8:3::/64]"; got != want {
 		t.Errorf("on-link prefixes %s, want %s, from %v", got, want, f.OnLink6)
 	}
 }

@@ -443,10 +443,11 @@ rule 1, which the deployment's services need.
 
 **The on-link prefixes** are read at admit time from the main routing
 table: every IPv6 route with no gateway (`ip -6 -o route show table main`,
-no `via`), kept when it is global unicast (inside `2000::/3`) and on an
-interface of the host's own, which leaves out loopback, every WireGuard
-interface (the mesh's among them) and Docker's bridges (`docker0`,
-`br-<12 hex>`). Routes are read rather than addresses because a host
+no `via`), kept when it is global unicast (inside `2000::/3`) and on any
+interface but loopback and the mesh's own, and when it does not overlap
+the mesh subnet. The system Docker's bridges are kept: the deployment's
+own networks live in its user namespace and never show in the host's
+table, so a prefix on one is the owner's containers. Routes are read rather than addresses because a host
 holding a DHCPv6 `/128`, or an address added without a prefix route, still
 reaches its LAN's `/64` through an on-link route. A prefix inside another
 kept one is left out, and the rest are sorted. Each is parsed as a masked

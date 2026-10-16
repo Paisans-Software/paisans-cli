@@ -69,9 +69,8 @@ var egressCases = addCases(
 	goldenCase{name: "egress-mesh-lan-added", site: "vm", flags: hostadmit.Flags{MeshLAN: true}, host: egressAdmitted("")},
 	goldenCase{name: "egress-gateway", host: home, site: "home-a", flags: gateway},
 	goldenCase{name: "egress-onlink6", site: "vm", host: func() *fakeHost {
-		return home().with("wireguard", "wg0").add("wireguard", "psns-f2a9").
-			add("lan6", "2001:db8:9::/56 eth1").add("lan6", "2001:db8:9:1::/64 eth1").add("lan6", "2001:db8:3::/64 wg0").
-			add("lan6", "2001:db8:5::/64 docker0").add("lan6", "fd00:1::/64 eth0")
+		return home().add("lan6", "2001:db8:9::/56 eth1").add("lan6", "2001:db8:9:1::/64 eth1").add("lan6", "2001:db8:3::/64 wg0").
+			add("lan6", "2001:db8:5::/64 docker0").add("lan6", "2001:db8:4::/64 psns-f2a9").add("lan6", "2001:db8:7::/64 lo").add("lan6", "fd00:1::/64 eth0")
 	}},
 	goldenCase{name: "egress-onlink6-changed", site: "vm", host: func() *fakeHost {
 		return admittedHost(requestFor("vm"), hostadmit.Flags{}).with("lan6", "2001:db8:42::/64 eth0")

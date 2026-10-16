@@ -50,7 +50,7 @@ func planEgress(p *planner) error {
 	table, err := hostprep.EgressTable(hostprep.EgressData{
 		Token: p.d.Token(), Table: tableName, Mark: fmt.Sprintf("%#x", mark),
 		Users: uidOf(p) + ", " + subordinate, Mesh: p.in.Request.MeshSubnet, LAN: lan, Resolvers4: v4, Resolvers6: v6,
-		Gateway: p.in.Flags.PublicPorts || len(p.in.Request.WebServer) > 0, LAN6: onLink6(p.f, p.d.Interface()),
+		Gateway: p.in.Flags.PublicPorts || len(p.in.Request.WebServer) > 0, LAN6: onLink6(p.f, p.d.Interface(), p.in.Request.MeshSubnet),
 	})
 	if err != nil {
 		return err
@@ -108,19 +108,22 @@ func asWritten(f FileState, content string) bool {
 var global6 = netip.MustParsePrefix("2000::/3")
 
 // onLink6 are the host's on-link IPv6 prefixes the deployment is kept off:
-// each global unicast route with no gateway on an interface of the host's
-// own, which leaves out loopback, every WireGuard interface (the mesh's
-// among them, iface) and Docker's bridges. Routes rather than addresses,
+// each global unicast route with no gateway on any interface but loopback
+// and the mesh's own (iface), which must stay reachable. The system
+// Docker's bridges are kept: the deployment's own networks live in its
+// user namespace and never show in the host's table, so they are the
+// owner's containers. Routes rather than addresses,
 // because a host with a DHCPv6 /128, or with an address it adds without a
 // prefix route, still has its LAN's /64 as an on-link route. A prefix
 // inside another kept is left out, since the wider one drops it, and the
 // rest are sorted, so the same routes always render the same table.
-func onLink6(f Facts, iface string) []netip.Prefix {
+func onLink6(f Facts, iface, mesh string) []netip.Prefix {
+	meshPrefix, _ := netip.ParsePrefix(mesh)
 	var kept []netip.Prefix
 	for _, r := range f.OnLink6 {
 		switch {
-		case r.Dev == "lo", r.Dev == iface, slices.Contains(f.WireGuard, r.Dev), dockerBridgeName.MatchString(r.Dev):
-		case r.Prefix.Bits() < global6.Bits() || !global6.Contains(r.Prefix.Addr()):
+		case r.Dev == "lo", r.Dev == iface:
+		case r.Prefix.Bits() < global6.Bits() || !global6.Contains(r.Prefix.Addr()), meshPrefix.IsValid() && meshPrefix.Overlaps(r.Prefix):
 		default:
 			kept = append(kept, r.Prefix)
 		}
