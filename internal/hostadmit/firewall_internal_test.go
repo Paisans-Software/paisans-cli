@@ -98,3 +98,29 @@ func TestAPortInASetOrMapHoldsUnresolved(t *testing.T) {
 		}
 	}
 }
+
+// IPV6 is read as ufw reads it: /etc/default/ufw, then /etc/ufw/ufw.conf,
+// the key in any case, the last value winning.
+func TestIPv6IsReadAsUFWReadsIt(t *testing.T) {
+	dir := t.TempDir()
+	defaults, conf := filepath.Join(dir, "default-ufw"), filepath.Join(dir, "ufw.conf")
+	for _, c := range []struct{ defaults, conf, want string }{
+		{"IPV6=yes\n", "ENABLED=no\n", "yes"},
+		{"IPV6=\"yes\"\n", "", "yes"},
+		{"IPV6=yes\n", "ENABLED=no\nIPV6=no\n", "no"},
+		{"IPV6=yes\nipv6=no\n", "", "no"},
+		{"IPV6=YES\n", "", "yes"},
+		{"IPV6=yes # on\n", "", "yes # on"},
+		{"", "", ""},
+	} {
+		os.WriteFile(defaults, []byte(c.defaults), 0o644)
+		os.WriteFile(conf, []byte(c.conf), 0o644)
+		out, err := exec.Command("sh", "-c", ipv6Read(defaults, conf)).CombinedOutput()
+		if err != nil || string(out) != "ipv6 "+c.want+"\n" {
+			t.Errorf("%q then %q: %q (%v), want ipv6 %s", c.defaults, c.conf, out, err, c.want)
+		}
+	}
+	if !strings.Contains(ufwBeforeProbe, ipv6Read("/etc/default/ufw", "/etc/ufw/ufw.conf")) {
+		t.Error("the probe does not read IPV6 from both of ufw's files")
+	}
+}

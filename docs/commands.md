@@ -697,8 +697,13 @@ paisans host admit --site home-a --ssh owner@home-a.example.org --execute   # fr
   Admit refuses to enable ufw when it cannot read a port sshd listens on or
   ufw's rules; when ufw holds any deny or reject rule of yours, in any form,
   which it lists, since those decide what reaches SSH; when
-  `/etc/default/ufw` does not set `IPV6=yes` and sshd listens on IPv6, since
-  ufw would then drop SSH over IPv6; or when the timer cannot be armed.
+  `IPV6`, read as ufw reads it from `/etc/default/ufw` then
+  `/etc/ufw/ufw.conf`, is not `yes` and sshd listens on IPv6, since ufw
+  would then drop SSH over IPv6; or when the timer cannot be armed. Admit
+  allows only the TCP ports sshd listens on, and cannot see DROP rules
+  written by hand in `/etc/ufw/before.rules`, `before6.rules` or
+  `user.rules`, nor other ways in such as sslh, dropbear or mosh: if you
+  rely on either, enable ufw by hand after checking them.
   These refuse with `--enable-ufw` and without it, and admit asks nothing
   then. Otherwise, without `--enable-ufw` and off a terminal, it refuses
   before making any change, and prints the commands that enable ufw by hand,

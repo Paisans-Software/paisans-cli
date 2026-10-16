@@ -50,15 +50,16 @@ const ufwBeforeMarker = "paisans host admit: before enabling ufw"
 // started. ss shows what a new login connects to now; an active ssh.socket
 // or sshd.socket adds what systemd listens on for it. ufw's rules are read
 // with `ufw show added`, which lists them while ufw is inactive, and IPV6
-// from /etc/default/ufw, without which ufw drops all IPv6 once enabled.
+// as ufw reads it (ipv6Read), without which ufw drops all IPv6 once
+// enabled.
 // Whatever it cannot read it says so.
-const ufwBeforeProbe = `# ` + ufwBeforeMarker + `
+var ufwBeforeProbe = `# ` + ufwBeforeMarker + `
 if out=$(ss -Hltnp 2>/dev/null); then printf '%s\n' "$out" | grep -F '("sshd",pid=' | sed 's/^/sshd /'; else echo 'unread listeners (ss -Hltnp)'; fi
 for u in ssh.socket sshd.socket; do
   if [ "$(systemctl is-active "$u" 2>/dev/null)" = active ]; then systemctl show -p Listen --value "$u" 2>/dev/null | sed 's/^/socket /'; fi
 done
 if added=$(ufw show added 2>/dev/null); then printf '%s\n' "$added" | sed -n 's/^ufw /rule /p'; else echo 'unread rules (ufw show added)'; fi
-v=$(sed -n 's/^IPV6=//p' /etc/default/ufw 2>/dev/null | tail -n 1); v=${v#\"}; v=${v%\"}; echo "ipv6 $v"
+` + ipv6Read("/etc/default/ufw", "/etc/ufw/ufw.conf") + `
 if command -v systemd-run >/dev/null 2>&1; then echo 'systemd-run present'; else echo 'systemd-run absent'; fi
 echo "fallback $(systemctl show -p LoadState --value ` + FallbackUnit + `.timer 2>/dev/null) $(systemctl show -p LoadState --value ` + FallbackUnit + `.service 2>/dev/null)"
 echo end`
@@ -163,11 +164,11 @@ func (b ufwBefore) blocker() error {
 		return fmt.Errorf(head+"ufw already holds these rules of yours:\n%s\nufw applies the first rule a connection matches, so they decide what reaches SSH, and admit neither reads every form a rule takes nor overrides yours. Check that none of them blocks the ports sshd listens on (%s), and delete or change any that does; then enable ufw yourself, in this order:\n%s Then run admit again.%s",
 			strings.Join(rules, "\n"), portList(b.ports), byHand(b.ports), nothing)
 	case b.v6 && b.ipv6 != "yes":
-		setting := "does not set IPV6=yes"
+		setting := "is not set"
 		if b.ipv6 != "" {
-			setting = "sets IPV6=" + ui.Visible(b.ipv6)
+			setting = "is " + ui.Visible(b.ipv6)
 		}
-		return fmt.Errorf(head+"/etc/default/ufw %s, and sshd listens on IPv6. Enabled so, ufw drops all IPv6 traffic, SSH over IPv6 included, and its allows reach IPv4 alone. Set IPV6=yes in /etc/default/ufw, then run admit again with --enable-ufw.%s", setting, nothing)
+		return fmt.Errorf(head+"IPV6, as ufw reads it from /etc/default/ufw and then /etc/ufw/ufw.conf, %s, and sshd listens on IPv6. Enabled so, ufw drops all IPv6 traffic, SSH over IPv6 included, and its allows reach IPv4 alone. Set IPV6=yes in /etc/default/ufw, and in /etc/ufw/ufw.conf if it sets IPV6 too, then run admit again with --enable-ufw.%s", setting, nothing)
 	case !b.systemdRun:
 		return fmt.Errorf(head+"systemd-run is not on this host, so admit cannot arm the timer that turns ufw off again if SSH is cut off, and it never enables ufw without one. To enable ufw yourself, in this order:\n%s Then run admit again.%s", byHand(b.ports), nothing)
 	case b.fallback != "not-found not-found":
@@ -277,7 +278,7 @@ func planEnableUFW(p *planner, b ufwBefore) error {
 		Describe: fmt.Sprintf("firewall: a timer, %s.timer, that runs ufw disable %d minutes from now, so a login ufw blocks is let back in; admit stops it once a new SSH login gets through. It does not survive a reboot: a reboot before it fires leaves ufw enabled, so wait for it rather than reboot", FallbackUnit, int(FallbackAfter/time.Minute)),
 		Command:  armFallback, Kinds: []string{"firewall"}})
 	p.step(Step{Title: "enable ufw",
-		Describe: "firewall: enable ufw, every rule above already in place, with the default policy ufw has (Ubuntu's denies incoming)",
+		Describe: "firewall: enable ufw, every rule above already in place, with the default policy ufw has (Ubuntu's denies incoming). " + CannotSee,
 		Command:  enableUFW, Kinds: []string{"firewall"}})
 	p.plan.EnablesUFW = true
 	p.record.UFWEnabled = true
@@ -291,4 +292,17 @@ func Disarm(t apply.Transport) error {
 		return fmt.Errorf("stopping %s.timer: %w", FallbackUnit, shown(err))
 	}
 	return nil
+}
+
+// CannotSee is what admit says, in the plan and in the question, it does
+// not see before it enables ufw.
+const CannotSee = "Admit allows only the TCP ports sshd listens on, and cannot see DROP rules written by hand in /etc/ufw/before.rules, before6.rules or user.rules, nor other ways in such as sslh, dropbear or mosh: if you rely on either, enable ufw by hand after checking them."
+
+// ipv6Read is the probe's line that reads IPV6 as ufw's backend.py
+// (_get_defaults) does: defaults, then conf, each line that starts with a
+// key and a value of word characters, the key in any case, the value
+// lowercased with its quotes taken off, the last one winning. Anything but
+// yes leaves ufw's IPv6 off, and admit reads it so.
+func ipv6Read(defaults, conf string) string {
+	return `v=$(grep -hE '^[Ii][Pp][Vv]6="?[A-Za-z0-9_]' ` + defaults + ` ` + conf + ` 2>/dev/null | tail -n 1 | cut -d= -f2 | tr -d "\"'" | tr '[:upper:]' '[:lower:]'); echo "ipv6 $v"`
 }

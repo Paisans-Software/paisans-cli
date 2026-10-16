@@ -305,3 +305,18 @@ func TestTheFallbackIsAccurateAndSaysItDoesNotSurviveAReboot(t *testing.T) {
 		t.Errorf("the fallback: %+v", arm)
 	}
 }
+
+// The plan and the question say what admit cannot see: drop rules written
+// by hand in ufw's own rule files, and ways in that are not sshd.
+func TestTheEnableSaysWhatAdmitCannotSee(t *testing.T) {
+	plan, err := hostadmit.Build(inactiveUFW(sshdOn22)(), input(t, "vm", enableUFW))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := plan.Steps[titledStep(plan, "enable ufw")].Describe
+	for _, want := range []string{"only the TCP ports sshd listens on", "/etc/ufw/before.rules", "before6.rules", "user.rules", "sslh", "dropbear", "mosh", "enable ufw by hand"} {
+		if !strings.Contains(d, want) {
+			t.Errorf("the enable step does not say %q:\n%s", want, d)
+		}
+	}
+}

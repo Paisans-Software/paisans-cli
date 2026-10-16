@@ -913,7 +913,7 @@ func TestTheUFWQuestionSaysTheFallbackDoesNotSurviveAReboot(t *testing.T) {
 	withTerminal(t, true)
 	out := new(strings.Builder)
 	_ = runHostAdmit([]string{"--request", path, "--public-ports"}, typed(t, "n\n"), out)
-	if !strings.Contains(out.String(), "does not survive a reboot") {
+	if !strings.Contains(out.String(), "does not survive a reboot") || !strings.Contains(out.String(), "/etc/ufw/before.rules") || !strings.Contains(out.String(), "sslh") {
 		t.Errorf("the question:\n%s", out.String())
 	}
 	err := ufwFallbackNote(fmt.Errorf("failed"), &hostadmit.Plan{EnablesUFW: true}, true)

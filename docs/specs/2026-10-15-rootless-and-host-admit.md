@@ -370,12 +370,18 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    rules; when ufw holds any deny or reject rule of the owner's, in any
    form, since ufw applies the first rule a connection matches and admit
    neither parses every form nor overrides the owner's rules, so the refusal
-   lists them; when `/etc/default/ufw` does not set `IPV6=yes` and sshd
-   listens on IPv6, since ufw then drops all IPv6, SSH over IPv6 included;
+   lists them; when `IPV6`, read as ufw's backend reads it, from
+   `/etc/default/ufw` then `/etc/ufw/ufw.conf`, the key in any case and the
+   last value winning, is not `yes` and sshd listens on IPv6, since ufw then
+   drops all IPv6, SSH over IPv6 included;
    or when the timer cannot be armed (no `systemd-run`, or a
    `paisans-ufw-fallback` unit still loaded). Each of these refuses with
    `--enable-ufw` and without it alike, so admit never asks, or names
-   `--enable-ufw`, where the flag would be refused.
+   `--enable-ufw`, where the flag would be refused. Admit allows only the TCP
+   ports sshd listens on, and cannot see DROP rules written by hand in
+   `/etc/ufw/before.rules`, `before6.rules` or `user.rules`, nor other ways
+   in such as sslh, dropbear or mosh: the plan and the question say so, and
+   an owner who relies on either enables ufw by hand after checking them.
    Once ufw is on, a new SSH login stops the timer (`systemctl stop
    paisans-ufw-fallback.timer`): with `--site`, admit's own login as the
    deployment's user at its end, after which the timer is stopped through the
