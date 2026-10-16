@@ -207,7 +207,12 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    place: admit's is written whole, the owner's is copied, through a
    temporary name so a copy cut short is never taken for it, to
    `policy-rc.d.paisans-owner`, and admit's is renamed over it. The owner's
-   goes back when the install exits, however it exits. The hold holds
+   goes back when the install exits, however it exits. Saving the owner's
+   policy fails closed: if the copy or its rename fails, the step stops
+   before admit's policy is in place, with the owner's untouched. An install
+   that fails disables the units of what it adds from its exit trap, while
+   the hold is still in place, since their packages' scripts may have
+   enabled them before it failed. The hold holds
    `/run/paisans-docker-hold.lock` throughout, so one run alone holds
    Docker's daemons. What a killed run leaves, admit's policy, the owner's
    copy beside it or beside nothing, or a temporary file of admit's, is put
@@ -224,14 +229,18 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    otherwise), records what admit installs that the host did not have (each
    package, Docker's apt key and source) and the directories it creates
    (`user@.service.d`, below). Before the install each package is claimed
-   as `installing`; the install's exit trap, however the install exits and
-   before the hold is released, makes each claim dpkg shows installed a
-   `package`. A claim still `installing` stands only while dpkg shows the
-   package installed and admit's own policy is still in place, which says
-   that install was killed outright and apt may have run under it; a
-   leftover from before the policy was in place keeps no claim. Any other
-   claim, and any package dpkg does not show installed, is dropped, so a Docker the owner installs after an
-   admit that stopped early is never taken for admit's. The admission record
+   as `installing`. The install takes the hold's lock first, then, from its
+   exit trap, however it exits (a signal included) and before the hold is
+   released, makes each claim whose files dpkg has (installed, or unpacked
+   or half-configured by a failed install) a `package`, writing the list
+   through a temporary file of its own. A claim still `installing` stands
+   only while dpkg has the package's files and admit's own policy is still
+   in place, which says that install was killed outright and apt may have
+   run under it; a leftover from before the policy was in place keeps no
+   claim. Any other claim, and any package whose files dpkg does not have,
+   is dropped, so a Docker the owner installs after an admit that stopped
+   early is never taken for admit's. Putting a hold back confirms the same
+   way, under the lock, before it releases the hold. The admission record
    says admit disabled the daemon once; while a record says so, or another
    deployment's record cannot be read and so may, admit leaves the units as
    they are, so an owner who enables the daemon keeps it. A Docker the owner
@@ -972,10 +981,12 @@ A rekey with sites down is in `docs/specs/2026-10-15-mesh-rekey-sites-down.md`.
   `policy-rc.d`, the owner's back after, or none when there was none; a
   hold a killed run left, the owner's copy beside nothing or beside the
   same file, or cut short, put right; a copy that differs refused; the hold
-  and putting it back refused while another run holds the lock.
+  and putting it back refused while another run holds the lock; a copy
+  that fails, under dash, stopping the hold with the owner's policy
+  untouched; a failed install disabling what it adds.
 * The install run for real with an apt that fails after dpkg shows
-  `docker-ce` installed: the claim reads `package docker-ce` after, with
-  and without a hold.
+  `docker-ce` installed, or half-configured: the claim reads `package
+  docker-ce` after, with and without a hold.
 * A system Docker that does not answer: admit's held one read as having no
   networks, the owner's refused, readably, saying to start it.
 * One end-to-end run on staging: admit a fresh host as its owner, apply as
