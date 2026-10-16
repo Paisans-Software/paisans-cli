@@ -66,7 +66,7 @@ type Env struct {
 	// Nil is dns.For; tests replace it, since none may reach a provider.
 	DNSProvider func(name, token string) (dns.Provider, error)
 	// Mail is how stage 2 reaches a mail server to try an SMTP password,
-	// from a site running an app that uses it. Tests dial an in-process
+	// from the machine the command runs on. Tests dial an in-process
 	// server, since none may reach a real one.
 	Mail smtpcheck.Env
 }

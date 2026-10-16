@@ -226,10 +226,12 @@ such as the DNS provider's token.
 
 An SMTP password (`external.smtp_password`, `apps.<app>.smtp_password`) is
 tried before it is written: for each sender of the apps that log in with it,
-from a site running one of them, it logs in to the mail server and sends one
-test message to every operator's email. A failure writes nothing, and says
-the server's reply, never the password (see *Mail settings are tried before
-they are used* in `README.md`).
+from this machine, it logs in to the mail server and sends one test message to
+every operator's email, so no site need be deployed yet. A server that answers
+and refuses writes nothing, and says its reply, never the password; a server
+this machine cannot reach is warned about and the password written untried,
+for `apply` to try from each site (see *Mail settings are tried before they
+are used* in `README.md`).
 
 ```
 security find-generic-password -s acme -w | paisans secrets set external.acme_dns_token

@@ -61,8 +61,8 @@ func DNSToken() Rotator {
 // SMTPPassword is the rotation of a password the mail provider issued:
 // external.smtp_password, the deployment's, or apps.<app>.smtp_password, an
 // app's own. Every app stack that sends mail with it renders it. Stage 2
-// logs in to the mail server with the next password, from a site running
-// each app that uses it, and a pasted one also sends the operators a test
+// logs in to the mail server with the next password, from the machine the
+// command runs on, and a pasted one also sends the operators a test
 // message before it is taken (smtpCheck).
 func SMTPPassword(path string) Rotator {
 	return pasted{path: path, issuer: func(*config.Config) string { return "the mail provider" }, smtp: true}
@@ -130,7 +130,7 @@ func (p pasted) Accepts(e Env, next string) (bool, error) {
 // CheckText is what the plan says stage 2 does for the secret.
 func (p pasted) CheckText(cfg *config.Config) string {
 	if p.smtp {
-		return "the next password logs in to the mail server from a site running each app that uses it; a pasted one also sends the operators a test message when pasted, as `paisans secrets set` does"
+		return "the next password logs in to the mail server from this machine; a pasted one also sends the operators a test message when pasted, as `paisans secrets set` does"
 	}
 	if !p.dns {
 		return "nothing checks it here: " + p.issuer(cfg) + " issued it"
@@ -184,8 +184,8 @@ func dnsCheck(e Env, token string) error {
 	return nil
 }
 
-// smtpCheck tries password as the SMTP password at path, from a site running
-// each app that logs in with it, with send also sending the operators the
+// smtpCheck tries password as the SMTP password at path, from the machine
+// the command runs on, for each sender that logs in with it, with send also sending the operators the
 // test message (smtpcheck.TryPassword). A failure names the server's reply,
 // never the password. Settings nothing can be tried from, Eg: a relay only
 // the app's own network resolves, are not tried.

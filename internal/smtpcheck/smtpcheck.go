@@ -58,7 +58,7 @@ const DefaultTimeout = time.Minute
 // Check is one set of mail settings, tried from one site.
 type Check struct {
 	// Site is where the connection is dialled from: a site running every
-	// app in Apps.
+	// app in Apps, or "" for the machine the command runs on.
 	Site string
 	// Apps send mail with these settings, in configuration order.
 	Apps []string
@@ -94,7 +94,15 @@ func (c Check) Title() string {
 	if c.SMTP.Username != "" {
 		who = ", as " + c.SMTP.Username
 	}
-	return fmt.Sprintf("%s, %s%s, from %s", c.Address(), c.Security(), who, c.Site)
+	return fmt.Sprintf("%s, %s%s, from %s", c.Address(), c.Security(), who, c.From())
+}
+
+// From names where the check is dialled from: its site, or this machine.
+func (c Check) From() string {
+	if c.Site == "" {
+		return "this machine"
+	}
+	return c.Site
 }
 
 // Whose is the apps, as a message names them, Eg: "talk's mail" or "talk and
@@ -184,10 +192,12 @@ func Logins(cfg *config.Config, secrets *config.Secrets, sites []string) []Check
 // before it is written or handed out: one for each set of settings an app
 // logs in with that password under, with its sender, since the test message
 // goes from each sender the provider must accept. Each is dialled from the
-// first site running one of its apps. secrets must hold the new value at
-// path, so that an app's own password, just set, is the one it uses.
+// machine the command runs on: whether the provider takes the password and
+// the sender does not depend on a site, and none need be deployed yet;
+// apply tries the login from each site, which is whether the site reaches
+// the server. secrets must hold the new value at path, so that an app's own
+// password, just set, is the one it uses.
 func ForPassword(cfg *config.Config, secrets *config.Secrets, path string) []Check {
-	placed := render.AppSites(cfg)
 	var out []Check
 	for _, app := range cfg.AppNames() {
 		if !blueprints.SendsMail(cfg.Apps[app].Blueprint) {
@@ -198,23 +208,13 @@ func ForPassword(cfg *config.Config, secrets *config.Secrets, path string) []Che
 			continue
 		}
 		c := Check{Apps: []string{app}, SMTP: s, PasswordPath: path}
-		if sites := placed[app]; len(sites) > 0 {
-			c.Site = sites[0]
-		}
 		if i := slices.IndexFunc(out, func(o Check) bool { return sameLogin(o, c) && o.SMTP.FromAddress == c.SMTP.FromAddress }); i >= 0 {
 			out[i].Apps = append(out[i].Apps, app)
-			if out[i].Site == "" {
-				out[i].Site = c.Site
-			}
 			continue
 		}
 		out = append(out, c)
 	}
 	for i := range out {
-		if out[i].Site == "" {
-			out[i].Skip = appList(out[i].Apps) + " runs on no site, so there is nowhere to try it from"
-			continue
-		}
 		out[i].Skip = skipReason(out[i], secrets)
 	}
 	return out
@@ -227,15 +227,20 @@ func sameLogin(a, b Check) bool {
 
 // skipReason is why c cannot be made, or "". A host that only the app's own
 // container resolves, a compose service name or a loopback address, is not
-// one the site's host reaches. A username with no password set has nothing to
-// log in with; init and apply already name that secret as owed.
+// one the site's host, or this machine, reaches. A username with no password
+// set has nothing to log in with; init and apply already name that secret
+// as owed.
 func skipReason(c Check, secrets *config.Secrets) string {
 	host := strings.TrimSuffix(c.SMTP.Host, ".")
+	where := "this machine"
+	if c.Site != "" {
+		where = "the host of " + c.Site
+	}
 	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() || strings.EqualFold(host, "localhost") {
-		return fmt.Sprintf("%s is the app's own container, which the host of %s does not reach", c.SMTP.Host, c.Site)
+		return fmt.Sprintf("%s is the app's own container, which %s does not reach", c.SMTP.Host, where)
 	}
 	if net.ParseIP(host) == nil && !strings.Contains(host, ".") {
-		return fmt.Sprintf("%s is a name only the app's own network resolves, which the host of %s does not reach", c.SMTP.Host, c.Site)
+		return fmt.Sprintf("%s is a name only the app's own network resolves, which %s does not reach", c.SMTP.Host, where)
 	}
 	if c.PasswordPath != "" {
 		if v, _ := secrets.Get(c.PasswordPath); v == "" {
@@ -269,7 +274,7 @@ func TestMail(cfg *config.Config, c Check, path, command string, to []string) Ma
 		verb = "send"
 	}
 	fmt.Fprintf(&b, "%s %s mail through %s with %s, as %s, from %s.\n", appList(c.Apps), verb, c.Address(), c.Security(), c.SMTP.Username, c.SMTP.FromAddress)
-	fmt.Fprintf(&b, "This message was sent from %s, so the server took the password and the sender.\n\n", c.Site)
+	fmt.Fprintf(&b, "This message was sent from %s, so the server took the password and the sender.\n\n", c.From())
 	b.WriteString("Nothing needs doing. The password is not in this message.\n")
 	return Mail{
 		To:      to,

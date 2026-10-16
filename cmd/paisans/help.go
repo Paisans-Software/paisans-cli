@@ -386,7 +386,7 @@ var helpCommands = []helpCommand{
 			"With a key, at a terminal, ask for its value with echo off, saying whether it is already set; an empty answer writes nothing.\n\n" +
 			"With no key, at a terminal, ask for each secret still owed in turn, saying why it is owed, and read each with echo off. " +
 			"Each answer is written before the next is asked; an empty one skips the key, which stays owed. A sign-in client is not asked for, since apply creates it.\n\n" +
-			"An SMTP password is tried before it is written: from a site running an app that uses it, over ssh, it logs in to the mail server and sends one test message to every operator. One that fails is not written.",
+			"An SMTP password is tried before it is written: from this machine, it logs in to the mail server and sends one test message to every operator, so no site need be deployed yet. One the server refuses is not written; a server this machine cannot reach is warned about, and apply tries the password from each site.",
 	},
 	{
 		name:    "secrets prune",

@@ -79,11 +79,16 @@ func TestForPasswordIsOneCheckPerSender(t *testing.T) {
 	if len(checks) != 2 {
 		t.Fatalf("checks = %+v, want one per sender", checks)
 	}
-	if c := checks[0]; c.Site != "home-a" || !slices.Equal(c.Apps, []string{"account", "health"}) {
+	if c := checks[0]; c.Site != "" || !slices.Equal(c.Apps, []string{"account", "health"}) {
 		t.Errorf("first = %+v", c)
 	}
-	if c := checks[1]; c.Site != "home-b" || c.SMTP.FromAddress != "id@example.org" {
+	if c := checks[1]; c.Site != "" || c.SMTP.FromAddress != "id@example.org" {
 		t.Errorf("second = %+v", c)
+	}
+	// A password is tried from the machine the command runs on, not a
+	// site: no site need be deployed, or even reachable, to set one.
+	if title := checks[0].Title(); !strings.HasSuffix(title, ", from this machine") {
+		t.Errorf("title = %q", title)
 	}
 	// An app's own password, once set, is its own path's alone.
 	secrets.Apps = map[string]map[string]any{"id": {"smtp_password": "own"}}
@@ -92,6 +97,21 @@ func TestForPasswordIsOneCheckPerSender(t *testing.T) {
 	}
 	if shared := smtpcheck.ForPassword(cfg, secrets, "external.smtp_password"); len(shared) != 1 {
 		t.Errorf("external.smtp_password still checks id: %+v", shared)
+	}
+}
+
+// An app placed on no site still has its password tried, since the try
+// runs from this machine.
+func TestForPasswordTriesAnAppOnNoSite(t *testing.T) {
+	cfg, secrets := deployment()
+	for name, app := range cfg.Apps {
+		app.Placement = config.Placement{Mode: config.PlacementPinned, Site: "nowhere"}
+		cfg.Apps[name] = app
+	}
+	for _, c := range smtpcheck.ForPassword(cfg, secrets, "external.smtp_password") {
+		if c.Skip != "" || c.Site != "" {
+			t.Errorf("check = %+v, want one tried from this machine", c)
+		}
 	}
 }
 

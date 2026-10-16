@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"slices"
 	"strings"
@@ -26,9 +27,10 @@ func fakeSMTP(t *testing.T, users map[string]string) *smtptest.Server {
 	t.Helper()
 	server := smtptest.New()
 	server.Users = users
-	saved := smtpEnv
+	saved, savedLocal := smtpEnv, localSMTPEnv
 	smtpEnv = func(*config.Config, map[string]string) smtpcheck.Env { return server.Env() }
-	t.Cleanup(func() { smtpEnv = saved })
+	localSMTPEnv = func() smtpcheck.Env { return server.Env() }
+	t.Cleanup(func() { smtpEnv, localSMTPEnv = saved, savedLocal })
 	return server
 }
 
@@ -36,8 +38,7 @@ func fakeSMTP(t *testing.T, users map[string]string) *smtptest.Server {
 var fixtureOperators = []string{"alice@example.org", "bob@example.org"}
 
 // An SMTP password set with secrets set logs in and sends the operators one
-// test message from each sender, from a site running the apps, before it is
-// written.
+// test message from each sender, from this machine, before it is written.
 func TestSecretsSetTriesAnSMTPPassword(t *testing.T) {
 	const next = "not-a-real-smtp-password-0001"
 	server := fakeSMTP(t, map[string]string{"robot@example.org": next})
@@ -61,7 +62,7 @@ func TestSecretsSetTriesAnSMTPPassword(t *testing.T) {
 	if !strings.Contains(msgs[0].Data, "`paisans secrets set` is changing external.smtp_password") {
 		t.Errorf("message:\n%s", msgs[0].Data)
 	}
-	if !rec.Has("done", "smtp.example.org:587, starttls, as robot@example.org, from home-a") {
+	if !rec.Has("done", "smtp.example.org:587, starttls, as robot@example.org, from this machine") {
 		t.Errorf("the check is not shown:\n%s", rec.Lines())
 	}
 	if strings.Contains(rec.Lines()+msgs[0].Data, next) {
@@ -97,19 +98,49 @@ func TestSecretsSetRefusesAnSMTPPasswordThatDoesNotLogIn(t *testing.T) {
 	}
 }
 
-// A site that cannot be reached leaves the password untried, and so unwritten.
-func TestSecretsSetRefusesWhenTheSiteIsNotReached(t *testing.T) {
-	server := fakeSMTP(t, nil)
-	server.Unreachable = map[string]error{"home-a": errors.New("ssh could not connect to the host")}
+// The password is tried from this machine, so it is set before any site is
+// deployed: no site is dialled, and one that cannot be reached does not
+// matter.
+func TestSecretsSetTriesFromThisMachineWithNoSiteReached(t *testing.T) {
+	const next = "not-a-real-smtp-password-0002"
+	server := fakeSMTP(t, map[string]string{"robot@example.org": next})
+	// Any dial through a site fails, as before a deployment: only this
+	// machine's own dial reaches the server.
+	smtpEnv = func(*config.Config, map[string]string) smtpcheck.Env {
+		return smtpcheck.Env{Dial: func(site, _ string) (net.Conn, error) {
+			return nil, errors.New("ssh could not connect to " + site)
+		}}
+	}
 	configPath, secretsPath := rotateDeployment(t, nil)
 	withRecorder(t, false)
-	before, _ := os.ReadFile(secretsPath)
-	_, err := set(t, configPath, secretsPath, "external.smtp_password", "not-a-real-smtp-password-0002")
-	if err == nil || !strings.Contains(err.Error(), "home-a could not be reached") || !strings.Contains(err.Error(), "Nothing was written") {
+	if _, err := set(t, configPath, secretsPath, "external.smtp_password", next); err != nil {
 		t.Fatalf("err = %v", err)
 	}
-	if after, _ := os.ReadFile(secretsPath); !bytes.Equal(before, after) {
-		t.Error("the secrets file changed")
+	if got := mustSecrets(t, secretsPath).External["smtp_password"]; got != next {
+		t.Errorf("stored %q", got)
+	}
+	if len(server.Messages()) == 0 {
+		t.Error("no test message was sent")
+	}
+}
+
+// A mail server this machine cannot reach leaves the password untried:
+// it is written with a warning, since whether it works is the server's to
+// say, and apply tries it from each site.
+func TestSecretsSetWritesWhenThisMachineCannotReachTheServer(t *testing.T) {
+	const next = "not-a-real-smtp-password-0003"
+	server := fakeSMTP(t, nil)
+	server.Unreachable = map[string]error{"": errors.New("dial tcp: connection refused")}
+	configPath, secretsPath := rotateDeployment(t, nil)
+	rec := withRecorder(t, false)
+	if _, err := set(t, configPath, secretsPath, "external.smtp_password", next); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if got := mustSecrets(t, secretsPath).External["smtp_password"]; got != next {
+		t.Errorf("stored %q", got)
+	}
+	if !strings.Contains(rec.Lines(), "paisans apply") {
+		t.Errorf("the warning does not say apply tries it:\n%s", rec.Lines())
 	}
 }
 

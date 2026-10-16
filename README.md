@@ -2794,7 +2794,7 @@ implemented here (`dns init` lists those that are) is not checked, and the
 plan says so.
 
 **An SMTP password is tried before any app gets it.** A pasted one logs in to
-the mail server, from a site running each app that uses it, and sends the
+the mail server, from the machine the command runs on, and sends the
 operators one test message as soon as it is given, so a mistyped password, or
 a sender the provider refuses, is refused before it is written under
 `rotations`. One set with `secrets set` sent its message when it was set, and
@@ -3031,8 +3031,8 @@ default (`AllowTcpForwarding`, sshd_config(5)); a host that refuses it says
 
 | Command | What it tries | On failure |
 |---|---|---|
-| `secrets set` an SMTP password | logs in with the new password and sends one test message | refused; nothing is written |
-| `secrets rotate` an SMTP password | a pasted one logs in and sends one test message when pasted; one set with `secrets set` logs in when the run is planned; stage 2 logs in again | refused before anything is written under `rotations`, or stopped at stage 2 before any app is handed it |
+| `secrets set` an SMTP password | from this machine, logs in with the new password and sends one test message | refused; nothing is written. A server this machine cannot reach is a warning, and the password is written for `apply` to try |
+| `secrets rotate` an SMTP password | from this machine, a pasted one logs in and sends one test message when pasted; one set with `secrets set` logs in when the run is planned; stage 2 logs in again | refused before anything is written under `rotations`, or stopped at stage 2 before any app is handed it |
 | `apply`, with or without `--site` | every app it would start logs in, from each site it runs on; nothing is sent | refused before any host is changed, naming the app, where its settings are declared, and the server's reply |
 | `validate` | every app logs in, from each site it runs on; nothing is sent | a warning |
 

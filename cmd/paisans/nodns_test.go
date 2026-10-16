@@ -86,6 +86,7 @@ func TestMain(m *testing.M) {
 	// test about the check sets its own (fakeSMTP).
 	acceptAll := smtptest.New()
 	smtpEnv = func(*config.Config, map[string]string) smtpcheck.Env { return acceptAll.Env() }
+	localSMTPEnv = func() smtpcheck.Env { return acceptAll.Env() }
 	for _, name := range config.AgeVariables() {
 		os.Unsetenv(name)
 	}
