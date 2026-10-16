@@ -291,6 +291,25 @@ func hasStepIn(st *siteremove.Stage, site, verb, text string) bool {
 	return false
 }
 
+// --delete-data leaves nothing under the deployment's root, the key
+// record's deletion included: its lock is taken before the root goes, so
+// no lock file or state directory comes back after.
+func TestDeleteDataLeavesNothingUnderTheRoot(t *testing.T) {
+	w := setup(t)
+	b := w.hosts["home-b"]
+	if _, ok := b.files[record]; !ok {
+		t.Fatalf("home-b has no key record %s", record)
+	}
+	if err := siteremove.Execute(w.mustBuild("home-b", siteremove.Options{DeleteData: true})); err != nil {
+		t.Fatal(err)
+	}
+	for path := range b.files {
+		if strings.HasPrefix(path, root+"/") {
+			t.Errorf("%s is left under the root", path)
+		}
+	}
+}
+
 // The SSH allow is how the host is reached, so no removal deletes it: not
 // the full one, not --force, not --id, with or without --delete-data. Its
 // plan never names it, and after the removal it is still there.

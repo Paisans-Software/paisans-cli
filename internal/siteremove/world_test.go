@@ -377,10 +377,12 @@ func (h *host) Run(command string) (string, error) {
 	if h.webCommand(command) {
 		return h.web.Plain().Run(command)
 	}
-	// the deployment's lock, which the keys take: the command after it is
+	// the deployment's lock, which the keys take: it leaves its lock file
+	// in the state directory, as on a host, and the command after it is
 	// what runs.
-	if inner, ok := strings.CutPrefix(command, (deployment.Deployment{ID: "f2a9"}).StateLockCommand("the keys")+"; "); ok {
-		command = inner
+	if dep := (deployment.Deployment{ID: "f2a9"}); strings.HasPrefix(command, dep.StateLockCommand("the keys")+"; ") {
+		h.files[dep.StatePath("lock")] = ""
+		command = strings.TrimPrefix(command, dep.StateLockCommand("the keys")+"; ")
 	}
 	quoted := func(s string) []string {
 		var out []string

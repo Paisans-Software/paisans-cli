@@ -750,6 +750,17 @@ func (p *Plan) runHost() error {
 			return err
 		}
 	}
+	// Before the root: its lock makes the state directory and a lock file
+	// in it, which --delete-data then removes with the rest.
+	if len(hp.keyRecords) > 0 {
+		q := make([]string, len(hp.keyRecords))
+		for i, r := range hp.keyRecords {
+			q[i] = quote(r)
+		}
+		if err := run("deleting the key records", hostprep.Locked(d, "rm -f -- "+strings.Join(q, " "))); err != nil {
+			return err
+		}
+	}
 	if len(hp.units) > 0 || len(hp.dropins) > 0 {
 		p.work("remove units")
 		if err := run("removing units", p.removeUnitsCommand()); err != nil {
@@ -828,15 +839,6 @@ func (p *Plan) runHost() error {
 	if hp.markData {
 		p.work("mark the registry entry kept")
 		if err := registry.Keep(t, d.ID, hp.dataEntry, registry.KeptData); err != nil {
-			return err
-		}
-	}
-	if len(hp.keyRecords) > 0 {
-		q := make([]string, len(hp.keyRecords))
-		for i, r := range hp.keyRecords {
-			q[i] = quote(r)
-		}
-		if err := run("deleting the key records", hostprep.Locked(d, "rm -f -- "+strings.Join(q, " "))); err != nil {
 			return err
 		}
 	}
