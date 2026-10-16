@@ -84,9 +84,13 @@
 
 # The gateway answers as this deployment at a path only it serves, with its
 # token, and apply asks for it from outside after every gateway apply: a
-# server that took 80 or 443 after admission answers anything else. A named
-# matcher, which Caddy keeps in the order written, so this is matched before
-# a gated host's sign in.
+# server that took 80 or 443 after admission answers anything else. Every
+# host block imports it first, and holds nothing else at its top level that
+# could answer: Caddy orders redir, rewrite, basic_auth, forward_auth and
+# the like before handle, so a blueprint's routing always sits inside a
+# handle of its own. Among handle blocks Caddy matches the one with a single,
+# longest path first, so this one's one literal path wins over every other;
+# a second matcher here would lose that.
 (paisans_self) {
 	@paisans_self path /.well-known/paisans/f2a9
 	handle @paisans_self {
@@ -107,7 +111,10 @@ account.example.org {
 	# name a user unless the gate put the name there, and an ungated app that
 	# trusted the header would otherwise trust whoever sent the request.
 	request_header -X-Auth-Request-*
-	import /etc/caddy/snippets/account.caddy
+
+	handle {
+		import /etc/caddy/snippets/account.caddy
+	}
 }
 
 
@@ -186,7 +193,10 @@ chat.example.org {
 	# name a user unless the gate put the name there, and an ungated app that
 	# trusted the header would otherwise trust whoever sent the request.
 	request_header -X-Auth-Request-*
-	import /etc/caddy/snippets/chat.caddy
+
+	handle {
+		import /etc/caddy/snippets/chat.caddy
+	}
 }
 
 
@@ -197,7 +207,10 @@ example.org {
 	# name a user unless the gate put the name there, and an ungated app that
 	# trusted the header would otherwise trust whoever sent the request.
 	request_header -X-Auth-Request-*
-	import /etc/caddy/snippets/chat-wellknown.caddy
+
+	handle {
+		import /etc/caddy/snippets/chat-wellknown.caddy
+	}
 }
 
 
@@ -208,7 +221,10 @@ gate.example.org {
 	# name a user unless the gate put the name there, and an ungated app that
 	# trusted the header would otherwise trust whoever sent the request.
 	request_header -X-Auth-Request-*
-	import /etc/caddy/snippets/gate.caddy
+
+	handle {
+		import /etc/caddy/snippets/gate.caddy
+	}
 }
 
 
@@ -219,7 +235,10 @@ id.example.org {
 	# name a user unless the gate put the name there, and an ungated app that
 	# trusted the header would otherwise trust whoever sent the request.
 	request_header -X-Auth-Request-*
-	import /etc/caddy/snippets/auth.caddy
+
+	handle {
+		import /etc/caddy/snippets/auth.caddy
+	}
 }
 
 
@@ -230,7 +249,10 @@ join.example.org {
 	# name a user unless the gate put the name there, and an ungated app that
 	# trusted the header would otherwise trust whoever sent the request.
 	request_header -X-Auth-Request-*
-	import /etc/caddy/snippets/account-join.caddy
+
+	handle {
+		import /etc/caddy/snippets/account-join.caddy
+	}
 }
 
 
@@ -355,7 +377,10 @@ web.example.org {
 	# name a user unless the gate put the name there, and an ungated app that
 	# trusted the header would otherwise trust whoever sent the request.
 	request_header -X-Auth-Request-*
-	import /etc/caddy/snippets/web.caddy
+
+	handle {
+		import /etc/caddy/snippets/web.caddy
+	}
 }
 
 
@@ -366,7 +391,10 @@ wiki.example.org {
 	# name a user unless the gate put the name there, and an ungated app that
 	# trusted the header would otherwise trust whoever sent the request.
 	request_header -X-Auth-Request-*
-	import /etc/caddy/snippets/wiki.caddy
+
+	handle {
+		import /etc/caddy/snippets/wiki.caddy
+	}
 }
 
 # Site blocks the host's owner adds for things paisans does not run, Eg: a blog

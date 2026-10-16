@@ -2788,7 +2788,9 @@ func TestAGatedHostBlockLetsPastOnlyWhatAuthenticatesItself(t *testing.T) {
 	}
 
 	web := hostBlock(t, caddyfile, "web.example.org")
-	if strings.Contains(web, "handle") || strings.Contains(web, "import gate") {
+	// Its one handle is the bare one holding the app's routing, which keeps
+	// the self check ahead of it.
+	if strings.Contains(web, "handle @") || strings.Count(web, "handle {") != 1 || strings.Contains(web, "import gate") {
 		t.Errorf("a public host block carries gate handling:\n%s", web)
 	}
 
