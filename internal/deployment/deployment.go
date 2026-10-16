@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -136,6 +137,26 @@ func (d Deployment) WireGuardInstalled() string {
 // WireGuardUnit is the systemd unit wireguard-tools ships to bring the
 // interface up from that file, wg-quick@psns-<token>.
 func (d Deployment) WireGuardUnit() string { return "wg-quick@" + d.Interface() }
+
+// FwMark is the mark the deployment's WireGuard socket carries: the helper
+// host admit installs adds it to every conf it installs, and the egress
+// table drops what a socket with it sends to the host itself, loopback,
+// link-local, multicast and the private ranges. Kernel WireGuard sends from
+// no user, so the table's UID match cannot see the mesh's own packets, and
+// the mark is how it sees them. 0x5053 ("PS") above the token: the registry
+// keeps tokens unique on a host, so marks are too.
+func (d Deployment) FwMark() uint32 {
+	n, _ := strconv.ParseUint(d.Token(), 16, 16)
+	return 0x50530000 | uint32(n)
+}
+
+// EgressTable is the nftables table, in family inet, that keeps the
+// deployment's user off the host's loopback and the owner's network.
+func (d Deployment) EgressTable() string { return "paisans_" + d.Token() }
+
+// EgressUnit is the system unit that loads EgressTable at boot, before the
+// deployment user's manager starts.
+func (d Deployment) EgressUnit() string { return d.Prefix() + "-egress.service" }
 
 // Manifest is the toolkit's record of every file apply wrote for this
 // deployment on a host.

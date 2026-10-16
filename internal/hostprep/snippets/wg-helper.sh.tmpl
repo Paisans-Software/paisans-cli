@@ -15,7 +15,8 @@
 #
 # The verbs are the only arguments it takes:
 #   put           read a conf on stdin, check it, install it as {{.Conf}}, 600,
-#                 in a directory only root may write
+#                 with this deployment's FwMark added, in a directory only
+#                 root may write
 #   up            systemctl enable --now {{.Unit}}
 #   restart       systemctl restart {{.Unit}}
 #   sync          wg-quick strip the installed conf, then wg syncconf
@@ -43,6 +44,10 @@ net='{{.Network}}'
 prefix='{{.Prefix}}'
 # The uid that must own the conf directory: root on a host.
 owner='{{.Owner}}'
+# The mark put adds to every conf it installs: the egress table drops what
+# a socket with it sends to this host, loopback, link-local, multicast and
+# the private ranges, after wg has resolved each Endpoint as root.
+fwmark='{{.FwMark}}'
 # The largest conf put reads. A mesh of a hundred sites is under 20 KiB.
 max=65536
 
@@ -165,6 +170,7 @@ check() {
 		sub(/^[ \t]+/, "", v)
 		lk = tolower(k)
 		if (lk == "preup" || lk == "postup" || lk == "predown" || lk == "postdown") no(k " runs a command as root, and no conf may carry one")
+		if (lk == "fwmark") no(k " is set by this helper, never by the conf")
 		if (section == "") no(k " before any section")
 		if (seen[peers, k]++) no("a second " k " in one section")
 		if (section == "Interface") {
@@ -276,8 +282,14 @@ put() {
 	if ! reason=$(check < "$tmp"); then
 		refuse "$reason"
 	fi
-	chmod 600 "$tmp"
-	mv -f "$tmp" "$conf"
+	marked=$(mktemp "$dir/.$iface.conf.XXXXXX")
+	trap 'rm -f "$tmp" "$marked"' EXIT
+	# The mark on the line after [Interface], which check has seen exactly
+	# once, before any [Peer].
+	awk -v mark="$fwmark" '{ print } !done && /^[ \t]*\[Interface\][ \t]*$/ { print "FwMark = " mark; done = 1 }' "$tmp" > "$marked"
+	chmod 600 "$marked"
+	mv -f "$marked" "$conf"
+	rm -f "$tmp"
 	trap - EXIT
 }
 

@@ -135,7 +135,7 @@ func TestTheHelperInstallsWhatTheRendererWrites(t *testing.T) {
 			}
 			conf := filepath.Join(dir, "psns-f2a9.conf")
 			got, err := os.ReadFile(conf)
-			if err != nil || string(got) != f.Content {
+			if err != nil || string(got) != marked(f.Content) {
 				t.Errorf("%s: %s's mesh file was not installed as written: %v", shell, site, err)
 			}
 			if info, err := os.Lstat(conf); err != nil || info.Mode() != 0o600 {
@@ -191,7 +191,8 @@ func TestTheHelperRefusesAnythingElse(t *testing.T) {
 		{"DNS", replace("PrivateKey = ", "DNS = 1.1.1.1\nPrivateKey = "), "is not a key paisans writes in [Interface]"},
 		{"Table", replace("PrivateKey = ", "Table = off\nPrivateKey = "), "is not a key paisans writes"},
 		{"SaveConfig", replace("PrivateKey = ", "SaveConfig = true\nPrivateKey = "), "is not a key paisans writes"},
-		{"FwMark", replace("PrivateKey = ", "FwMark = 51820\nPrivateKey = "), "is not a key paisans writes"},
+		{"FwMark", replace("PrivateKey = ", "FwMark = 51820\nPrivateKey = "), "FwMark is set by this helper"},
+		{"FwMark in a [Peer]", replace(keepalive, "FwMark = 0x5053f2a9\n"), "FwMark is set by this helper"},
 		{"an [Interface] key in a [Peer]", replace(keepalive, "MTU = 1420\n"), "is not a key paisans writes in [Peer]"},
 		{"a known key in another case", replace("Address = ", "address = "), "is not a key paisans writes"},
 		{"a section in another case", replace("[Peer]", "[peer]"), "is not [Interface] or [Peer]"},
@@ -339,7 +340,7 @@ func TestARefusedPutLeavesTheInstalledFile(t *testing.T) {
 		if _, code := runHelper(t, shell, script, bad, "put"); code != 65 {
 			t.Fatalf("%s: the bad conf was not refused", shell)
 		}
-		if got, _ := os.ReadFile(filepath.Join(dir, "psns-f2a9.conf")); string(got) != goodConf {
+		if got, _ := os.ReadFile(filepath.Join(dir, "psns-f2a9.conf")); string(got) != marked(goodConf) {
 			t.Errorf("%s: a refused put changed the installed conf", shell)
 		}
 	}
@@ -534,5 +535,33 @@ func TestSyncKeepsItsTemporaryFileBesideTheConf(t *testing.T) {
 	}
 	if strings.Contains(text, "mktemp)") {
 		t.Error("the helper makes a temporary file under TMPDIR")
+	}
+}
+
+// marked is conf as put installs it: the deployment's FwMark on the line
+// after [Interface], which the egress table's mark chain matches.
+func marked(conf string) string {
+	return strings.Replace(conf, "[Interface]\n", "[Interface]\nFwMark = 0x5053f2a9\n", 1)
+}
+
+// The mark goes into every conf put installs, exactly once, after
+// [Interface], whatever spacing the [Interface] line has.
+func TestPutMarksEveryConf(t *testing.T) {
+	for _, shell := range shells() {
+		script, dir := helperIn(t, 51820, "10.44.0.0/24")
+		conf := strings.Replace(goodConf, "[Interface]", "  [Interface]\t", 1)
+		if out, code := runHelper(t, shell, script, conf, "put"); code != 0 {
+			t.Fatalf("%s: refused (exit %d): %s", shell, code, out)
+		}
+		got, err := os.ReadFile(filepath.Join(dir, "psns-f2a9.conf"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := strings.Count(string(got), "FwMark"); n != 1 || !strings.Contains(string(got), "  [Interface]\t\nFwMark = 0x5053f2a9\n") {
+			t.Errorf("%s: installed conf carries FwMark %d times, or not after [Interface]:\n%s", shell, n, got)
+		}
+		if names := entries(t, dir); len(names) != 1 {
+			t.Errorf("%s: put left %v in the directory", shell, names)
+		}
 	}
 }

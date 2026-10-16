@@ -88,3 +88,27 @@ func TestInterfaceFitsIFNAMSIZ(t *testing.T) {
 		t.Errorf("Interface() = %q, %d characters, want 9 and at most %d", name, len(name), deployment.MaxInterfaceName)
 	}
 }
+
+// The mark is the token in the low sixteen bits under a fixed "PS" in the
+// high sixteen, so two deployments on a host, whose tokens the registry
+// keeps apart, never share one, and the helper and the egress table read
+// the same value.
+func TestFwMark(t *testing.T) {
+	for _, c := range []struct {
+		id   string
+		want uint32
+	}{
+		{"f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01", 0x5053f2a9},
+		{"0000c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01", 0x50530000},
+		{"ffffc4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01", 0x5053ffff},
+	} {
+		d := deployment.Deployment{ID: c.id}
+		if got := d.FwMark(); got != c.want {
+			t.Errorf("%s: FwMark() = %#x, want %#x", c.id, got, c.want)
+		}
+	}
+	d := deployment.Deployment{ID: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}
+	if d.EgressTable() != "paisans_f2a9" || d.EgressUnit() != "paisans-f2a9-egress.service" {
+		t.Errorf("EgressTable() = %q, EgressUnit() = %q", d.EgressTable(), d.EgressUnit())
+	}
+}
