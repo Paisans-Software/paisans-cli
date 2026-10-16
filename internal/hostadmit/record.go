@@ -157,13 +157,13 @@ func keysScript(d deployment.Deployment) string {
 	side := hostprep.OwnedKeysPath(d)
 	return hostprep.Locked(d, `set -e; umask 077; mkdir -p "$HOME/.ssh"; chmod go-w "$HOME/.ssh"
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
-awk -v k="$tmp/keys" -v s="$tmp/sidecar" '$0 == "` + keysSeparator + `" { out = 1; next } { if (out) print > s; else print > k }'
+awk -v k="$tmp/keys" -v s="$tmp/sidecar" '$0 == "`+keysSeparator+`" { out = 1; next } { if (out) print > s; else print > k }'
 touch "$tmp/keys" "$tmp/sidecar"
 f="$HOME/.ssh/authorized_keys"
 { if [ -e "$f" ] || [ -L "$f" ]; then awk 1 "$f"; fi; cat "$tmp/keys"; } > "$HOME/.ssh/.authorized_keys.paisans-tmp"
 mv -f "$HOME/.ssh/.authorized_keys.paisans-tmp" "$f"
-cat "$tmp/sidecar" > ` + side + `.paisans-tmp
-mv -f ` + side + `.paisans-tmp ` + side)
+cat "$tmp/sidecar" > `+side+`.paisans-tmp
+mv -f `+side+`.paisans-tmp `+side)
 }
 
 // keysCommand is the keys step's command for user, whose home is home,
