@@ -118,7 +118,9 @@ func TestEvictOfAnEvictedHostPlansNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Steps) != 0 || len(plan.Warnings) != 0 {
+	// With no record and no --data-dir it warns that a data directory
+	// outside the home cannot be found, and plans nothing.
+	if len(plan.Steps) != 0 || len(plan.Warnings) != 1 {
 		t.Errorf("evict of an evicted host plans:\n%s", plan.Text())
 	}
 	// What a finished evict leaves: the SSH allow it keeps, and a registry
@@ -129,7 +131,7 @@ func TestEvictOfAnEvictedHostPlansNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Steps) != 0 || len(plan.Warnings) != 1 {
+	if len(plan.Steps) != 0 || len(plan.Warnings) != 2 {
 		t.Errorf("evict of an evicted host plans:\n%s", plan.Text())
 	}
 }
@@ -256,5 +258,121 @@ func TestRunStepsRunsEveryStep(t *testing.T) {
 	}
 	if strings.Join(h.ran, "\n") != strings.Join(want, "\n") {
 		t.Errorf("ran\n%s\nwant\n%s", strings.Join(h.ran, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// stepIndex is the index of plan's first step whose command holds sub, -1
+// when none does.
+func stepIndex(plan *hostadmit.Plan, sub string) int {
+	for i, s := range plan.Steps {
+		if strings.Contains(s.Command, sub) {
+			return i
+		}
+	}
+	return -1
+}
+
+// Whenever the user exists, every process of its uid is killed, and none
+// is left, before the mesh drop-in or the egress table goes and before
+// userdel: a process the manager's stop missed, one runuser or cron
+// started, would otherwise run unfenced. It is planned with the manager
+// stopped already, and on a re-run whose egress table is gone.
+func TestEvictKillsEveryProcessOfTheUser(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		host func() *fakeHost
+	}{
+		{"admitted", evicted("vm", hostadmit.Flags{})},
+		{"manager stopped, linger off", func() *fakeHost {
+			return evicted("vm", hostadmit.Flags{})().with("linger", "no").with("manager", "inactive")
+		}},
+		{"egress gone, userdel failed", func() *fakeHost {
+			h := evicted("vm", hostadmit.Flags{})().with("linger", "no").with("manager", "inactive").
+				with("egress-enabled", "no").with("egress-table", "absent").with("mesh-unit", "disabled inactive")
+			for _, f := range []string{"/etc/systemd/system/paisans-f2a9-egress.service", "/etc/paisans/egress.f2a9.nft",
+				"/etc/systemd/system/user@1001.service.d/paisans-mesh.conf", "/etc/wireguard/psns-f2a9.conf"} {
+				h.dropKeyed("file", f)
+			}
+			return h
+		}},
+	} {
+		plan, err := hostadmit.BuildEvict(c.host(), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		kill := stepIndex(plan, "pkill -KILL -U 1001")
+		if kill < 0 || stepIndex(plan, "pgrep -U 1001") != kill {
+			t.Errorf("%s: no step kills and checks uid 1001's processes:\n%s", c.name, plan.Text())
+			continue
+		}
+		for _, later := range []string{"paisans-mesh.conf", "nft delete table", "userdel"} {
+			if i := stepIndex(plan, later); i >= 0 && i < kill {
+				t.Errorf("%s: %q runs before the user's processes are killed", c.name, later)
+			}
+		}
+		if stepIndex(plan, "userdel") < 0 {
+			t.Errorf("%s: no userdel", c.name)
+		}
+	}
+}
+
+// noRecordWithDataDir is an admitted vm with --data-dir /srv/data whose
+// record is gone, its Docker data directory owned by owner with mode.
+func noRecordWithDataDir(mode string, owner int) *fakeHost {
+	h := admittedWithDataDir("vm", "/srv/data").withDir("/srv/data/paisans-f2a9", mode, owner, owner)
+	delete(h.files, "/etc/paisans/admitted.f2a9.json")
+	h.dropKeyed("file", "/etc/paisans/admitted.f2a9.json")
+	return withoutRecordLine(h)
+}
+
+// With no record, --data-dir names where admit put the Docker data: it is
+// removed when it is a directory of the user's or of its subordinate
+// range, and refused otherwise. Without --data-dir, the plan warns that
+// data outside the home cannot be found.
+func TestEvictDataDirWithoutRecord(t *testing.T) {
+	for _, c := range []struct {
+		name, mode string
+		owner      int
+		refused    bool
+	}{
+		{"the user's", "drwx------", 1001, false},
+		{"its subordinate range's", "drwx--x---", 165536, false},
+		{"root's", "drwx------", 0, true},
+		{"another range's", "drwx------", 300000, true},
+		{"a link", "lrwxrwxrwx", 1001, true},
+	} {
+		plan, err := hostadmit.BuildEvict(noRecordWithDataDir(c.mode, c.owner), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9", DataDir: "/srv/data"})
+		switch {
+		case c.refused && err == nil:
+			t.Errorf("%s: planned:\n%s", c.name, plan.Text())
+		case !c.refused && err != nil:
+			t.Errorf("%s: %v", c.name, err)
+		case !c.refused && stepIndex(plan, "rm -rf --one-file-system -- '/srv/data/paisans-f2a9'") < 0:
+			t.Errorf("%s: the data directory is not removed:\n%s", c.name, plan.Text())
+		}
+	}
+	plan, err := hostadmit.BuildEvict(noRecordWithDataDir("drwx------", 1001), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(plan.Text(), "warning: data: ") || !strings.Contains(plan.Text(), "--data-dir") || !strings.Contains(plan.Text(), "subordinate range") {
+		t.Errorf("no warning that the data directory cannot be found:\n%s", plan.Text())
+	}
+}
+
+// With a record, its data_dir is the one evict removes, and a --data-dir
+// that names another is refused rather than ignored.
+func TestEvictDataDirAgainstTheRecord(t *testing.T) {
+	h := func() *fakeHost { return admittedWithDataDir("vm", "/srv/data").with("mesh-unit", "enabled active") }
+	if _, err := hostadmit.BuildEvict(h(), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9", DataDir: "/srv/data"}); err != nil {
+		t.Errorf("the record's own --data-dir: %v", err)
+	}
+	for _, other := range []string{"/srv/other", "/srv/data/"} {
+		if _, err := hostadmit.BuildEvict(h(), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9", DataDir: other}); err == nil {
+			t.Errorf("--data-dir %s, against the record's /srv/data, was planned", other)
+		}
+	}
+	if _, err := hostadmit.BuildEvict(evicted("vm", hostadmit.Flags{})(), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9", DataDir: "/srv/data"}); err == nil {
+		t.Error("--data-dir against a record with none was planned")
 	}
 }

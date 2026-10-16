@@ -16,9 +16,10 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
-// EvictInput is what evict is given: the deployment, and the user the
-// owner names, from a request or typed.
-type EvictInput struct{ Deployment, User string }
+// EvictInput is what evict is given: the deployment, the user the owner
+// names, from a request or typed, and DataDir, the --data-dir admit was
+// given, which evict needs only when the host holds no admission record.
+type EvictInput struct{ Deployment, User, DataDir string }
 
 // evictor is one BuildEvict: the planner admit's parts use, the
 // deployment's record (nil when the host holds none), every other admitted
@@ -27,7 +28,12 @@ type EvictInput struct{ Deployment, User string }
 // /etc/paisans is left empty.
 type evictor struct {
 	*planner
-	rec        *admission.Record
+	rec *admission.Record
+	// dataDir is the deployment's Docker data directory on the disk
+	// --data-dir named, "" for none; fromFlag when --data-dir gave it,
+	// with no record to say it is the deployment's.
+	dataDir    string
+	fromFlag   bool
 	others     []admission.Record
 	unreadable []string
 	beforeGone bool
@@ -38,16 +44,19 @@ type evictor struct {
 // mesh, the egress table) goes; the egress table goes before the user, so
 // on a re-run whose user is gone there is no table left that needed its
 // UID; the record and the registry entry go last, so a failed evict is
-// found and run again.
+// found and run again. Every process of the user is killed before
+// anything that fences it goes, and the data directories go while the user
+// still exists, so a re-run can still tell they are its.
 var evictParts = []struct {
 	name string
 	plan func(*evictor) error
 }{
 	{"manager", (*evictor).manager},
+	{"processes", (*evictor).processes},
 	{"mesh", (*evictor).mesh},
 	{"egress", (*evictor).egress},
-	{"user", (*evictor).user},
 	{"directories", (*evictor).dirs},
+	{"user", (*evictor).user},
 	{"wireguard", (*evictor).helper},
 	{"watchdog", (*evictor).watchdog},
 	{"firewall", (*evictor).firewall},
@@ -104,11 +113,30 @@ func BuildEvict(t apply.Transport, in EvictInput) (*Plan, error) {
 	case rec == nil && in.User != d.Prefix():
 		return nil, fmt.Errorf("this host holds no admission record for %s, so evict deletes only %s, the deployment's own default user, and not %s, which may be someone else's. Nothing was changed", d.Token(), d.Prefix(), in.User)
 	}
+	// The record says where admit put the Docker data, and a --data-dir
+	// that says otherwise is refused rather than ignored: one of them is
+	// wrong, and the owner decides which.
+	dataDir, fromFlag := "", false
+	switch {
+	case rec != nil && in.DataDir != "" && (rec.DataDir == "" || path.Dir(rec.DataDir) != in.DataDir):
+		where := "under the user's home"
+		if rec.DataDir != "" {
+			where = "in " + ui.Visible(rec.DataDir)
+		}
+		return nil, fmt.Errorf("--data-dir %s is not where this deployment's admission record says admit put its Docker data (%s). Drop --data-dir: the record answers it. Nothing was changed", ui.Visible(in.DataDir), where)
+	case rec != nil:
+		dataDir = rec.DataDir
+	case in.DataDir != "":
+		if !plainDir(in.DataDir) {
+			return nil, fmt.Errorf("--data-dir must be an absolute path in its plain form, as admit was given it; %q is not. Nothing was changed", ui.Visible(in.DataDir))
+		}
+		dataDir, fromFlag = in.DataDir+"/"+d.Prefix(), true
+	}
 	ain := Input{Request: admission.Request{Deployment: in.Deployment, User: in.User}}
-	if rec != nil && rec.DataDir != "" {
-		ain.Flags.DataDir = path.Dir(rec.DataDir)
+	if dataDir != "" {
+		ain.Flags.DataDir = path.Dir(dataDir)
 		if !plainDir(ain.Flags.DataDir) {
-			return nil, fmt.Errorf("this deployment's admission record names data_dir %s, which admit never gives. Nothing was changed", ui.Visible(rec.DataDir))
+			return nil, fmt.Errorf("this deployment's admission record names data_dir %s, which admit never gives. Nothing was changed", ui.Visible(dataDir))
 		}
 	}
 	f, err := probe(t, d, ain)
@@ -135,7 +163,7 @@ func BuildEvict(t apply.Transport, in EvictInput) (*Plan, error) {
 			return nil, fmt.Errorf("%s has %s, which admit never gives a deployment's user, so it is not this deployment's to delete. Nothing was changed", in.User, strings.Join(privileged, ", "))
 		}
 	}
-	e := &evictor{rec: rec, planner: &planner{t: t, in: ain, d: d, f: f, profile: profile, host: host,
+	e := &evictor{rec: rec, dataDir: dataDir, fromFlag: fromFlag, planner: &planner{t: t, in: ain, d: d, f: f, profile: profile, host: host,
 		plan: &Plan{Deployment: in.Deployment, User: in.User, Profile: profile.ID() + " " + profile.Version(), Host: t.Describe()}}}
 	if e.others, e.unreadable, err = others(e.planner); err != nil {
 		return nil, err
@@ -163,6 +191,25 @@ func (e *evictor) manager() error {
 	}
 	e.remove("stop "+user+"'s manager", fmt.Sprintf("expire %s so no login starts it again, disable linger, and stop user@%d.service, which stops its Docker daemon and every container", user, u.UID),
 		fmt.Sprintf("usermod --expiredate 1 %s && loginctl disable-linger %s && systemctl stop user@%d.service && { loginctl terminate-user %s 2>/dev/null || true; }", user, user, u.UID, user))
+	return nil
+}
+
+// processes kills every process of the user's uid and checks that none is
+// left, whenever the user exists: one the manager's stop missed, started
+// by runuser or cron outside any session, or running while the manager
+// was already stopped, would otherwise run on unfenced once the egress
+// table goes, and keep userdel from deleting the user. The account is
+// expired first, so no login starts another. A process that survives
+// SIGKILL fails the step, naming it, and nothing after it runs.
+func (e *evictor) processes() error {
+	u, user := e.f.User, e.in.Request.User
+	if !u.Exists {
+		return nil
+	}
+	uid := fmt.Sprint(u.UID)
+	e.remove("kill "+user+"'s processes", "expire "+user+", kill every process of uid "+uid+" and check that none is left, before anything that fences it goes",
+		"usermod --expiredate 1 "+user+" && { pkill -KILL -U "+uid+"; n=0; while pgrep -U "+uid+" >/dev/null && [ $n -lt 10 ]; do n=$((n+1)); sleep 0.5; pkill -KILL -U "+uid+"; done; "+
+			"! pgrep -U "+uid+" >/dev/null || { echo 'processes of uid "+uid+" survived SIGKILL:'; pgrep -a -U "+uid+"; false; }; }")
 	return nil
 }
 
@@ -233,8 +280,14 @@ func (e *evictor) user() error {
 // and the removal.
 func (e *evictor) dirs() error {
 	var dirs [][2]string
-	if e.rec != nil && e.rec.DataDir != "" {
-		dirs = append(dirs, [2]string{e.rec.DataDir, "the deployment's Docker data, on the disk --data-dir named"})
+	if e.dataDir != "" {
+		if err := e.checkDataDir(); err != nil {
+			return err
+		}
+		dirs = append(dirs, [2]string{e.dataDir, "the deployment's Docker data, on the disk --data-dir named"})
+	} else if e.rec == nil {
+		e.warn("data: without an admission record, a data directory outside "+e.in.Request.User+"'s home cannot be found",
+			"If admit was run with --data-dir, run host evict again with the same --data-dir, so its "+e.d.Prefix()+" directory is removed. Otherwise those files stay, owned by IDs in the subordinate range evict frees, and map onto whichever user is later given that range.")
 	}
 	dirs = append(dirs, [2]string{e.d.Root(), "the deployment's directory"})
 	for _, dir := range dirs {
@@ -247,6 +300,28 @@ func (e *evictor) dirs() error {
 		}
 		q := apply.ShellQuote(dir[0])
 		e.remove("remove "+ui.Visible(dir[0]), dir[1], "[ ! -L "+q+" ] && rm -rf --one-file-system -- "+q)
+	}
+	return nil
+}
+
+// checkDataDir refuses a --data-dir directory that, with no record to say
+// it is the deployment's, is not plainly the user's Docker data: a real
+// directory owned by the user or by an ID in its subordinate range.
+func (e *evictor) checkDataDir() error {
+	s := e.f.Dirs[e.dataDir]
+	if !e.fromFlag || !s.Present {
+		return nil
+	}
+	u, user := e.f.User, e.in.Request.User
+	owned := u.Exists && s.UID == u.UID
+	for _, r := range e.f.SubUID[user] {
+		owned = owned || u.Exists && int64(s.UID) >= r.Start && int64(s.UID) < r.Start+r.Count
+	}
+	switch {
+	case !strings.HasPrefix(s.Mode, "d"):
+		return fmt.Errorf("%s is %q, not a directory, and evict removes only the directory admit made there. Look at what it is, remove it yourself if it is the deployment's, and run host evict again. Nothing was changed", ui.Visible(e.dataDir), ui.Visible(s.Mode))
+	case !owned:
+		return fmt.Errorf("%s is owned by uid %d, which is neither %s's nor in its subordinate range, so with no admission record evict cannot tell it is this deployment's Docker data. Look at it, remove it yourself if it is, and run host evict again without --data-dir. Nothing was changed", ui.Visible(e.dataDir), s.UID, user)
 	}
 	return nil
 }
