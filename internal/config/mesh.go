@@ -102,7 +102,7 @@ func CheckMeshSubnet(subnet string) (*net.IPNet, []string) {
 		problems = append(problems, "overlaps "+r+", which the deployment must never reach")
 	}
 	if !meshIsPrivate(network) {
-		problems = append(problems, "is outside the private ranges 10.0.0.0/8, 172.16.0.0/12 and 192.168.0.0/16 (RFC 1918), the only ones another deployment's egress table drops, so on a shared host that deployment's user could reach this mesh's sites")
+		problems = append(problems, "is outside the private ranges 10.0.0.0/8, 172.16.0.0/12 and 192.168.0.0/16 (RFC 1918): another deployment's egress table on a shared host drops these and no other range a mesh may use, so that deployment's user could reach a mesh elsewhere")
 	}
 	return network, problems
 }

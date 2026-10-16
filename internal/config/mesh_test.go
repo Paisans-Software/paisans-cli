@@ -205,7 +205,7 @@ func TestSetMeshAddsAMissingSubnet(t *testing.T) {
 // form, no larger than a /24, clear of every reserved range, and inside
 // RFC 1918's private ranges.
 func TestCheckMeshSubnet(t *testing.T) {
-	const private = "is outside the private ranges 10.0.0.0/8, 172.16.0.0/12 and 192.168.0.0/16 (RFC 1918), the only ones another deployment's egress table drops, so on a shared host that deployment's user could reach this mesh's sites"
+	const private = "is outside the private ranges 10.0.0.0/8, 172.16.0.0/12 and 192.168.0.0/16 (RFC 1918): another deployment's egress table on a shared host drops these and no other range a mesh may use, so that deployment's user could reach a mesh elsewhere"
 	for subnet, want := range map[string][]string{
 		"10.44.0.0/24":    nil,
 		"10.44.0.0/28":    nil,
