@@ -15,6 +15,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/secretsgen"
 	"github.com/paisans-software/paisans-cli/internal/siteadd"
+	"github.com/paisans-software/paisans-cli/internal/topology"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 	"github.com/paisans-software/paisans-cli/internal/validate"
 )
@@ -96,9 +97,18 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 		return fmt.Errorf("site add: %s declares no site %q. Declared sites are %s", *configPath, site, strings.Join(cfg.SiteNames(), ", "))
 	}
 	// The site added must be ready, and the rest is joined as the run
-	// sees it: the effective topology, without the sites still pending.
-	if cfg, _, err = effectiveConfig(r, cfg, site); err != nil {
+	// sees it: the effective topology, without the sites still pending. A
+	// join changes the mesh and HAProxy files of every joined site, which a
+	// down one cannot take, so it waits until every joined site answers.
+	var sites *topology.Classification
+	if cfg, sites, err = effectiveConfig(r, cfg, ""); err != nil {
 		return err
+	}
+	if !sites.Ready(site) {
+		return &ui.Problem{Hint: "site add " + site + ": it is " + sites.Sites[site].Class.String(), Explain: sites.Sites[site].Why + "."}
+	}
+	if down := sites.Down(); len(down) > 0 {
+		return &ui.Problem{Hint: "site add " + site + ": a site joins once every joined site answers", Explain: "The join changes every joined site's mesh and HAProxy files, and " + strings.Join(down, ", ") + " does not answer:\n" + topology.DownLine(down[0]) + "\nNothing was changed."}
 	}
 	// The new site's architecture is recorded as host prepare records it;
 	// preflight compares it with the data sites'.

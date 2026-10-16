@@ -294,3 +294,63 @@ func TestStorageWaitsForItsSites(t *testing.T) {
 		t.Errorf("every site ready: %v", err)
 	}
 }
+
+// apply --site alone ends degraded in one line, and --require-all fails it;
+// a warning it ends on is folded into that failure, never left to exit 0.
+func TestApplySiteEndsDegraded(t *testing.T) {
+	cfg := fixture(t)
+	rec := &ui.Recorder{}
+	if err := siteApplied(rec, cfg, fixtureConfig(), "home-a", "", 3, degraded(t), false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !rec.Has("result", "Applied, degraded: 1 site pending or down (home-b). 3 files applied to home-a.") {
+		t.Errorf("result:\n%s", rec.Lines())
+	}
+	err := siteApplied(&ui.Recorder{}, cfg, fixtureConfig(), "home-a", "", 3, degraded(t), true, nil)
+	var w *ui.Warning
+	if err == nil || errors.As(err, &w) {
+		t.Errorf("--require-all: %v", err)
+	}
+	warning := &ui.Warning{Problem: ui.Problem{Hint: "1 app failed its web server check"}}
+	rec = &ui.Recorder{}
+	err = degradedEnd(rec, degraded(t), true, warning)
+	if err == nil || errors.As(err, &w) || !strings.Contains(problemText(err), "web server check") || !rec.Has("result", "Applied, degraded") {
+		t.Errorf("a warning under --require-all: %v: %s\n%s", err, problemText(err), rec.Lines())
+	}
+	if err := degradedEnd(&ui.Recorder{}, degraded(t), false, warning); !errors.As(err, &w) {
+		t.Errorf("without --require-all the warning stays a warning: %v", err)
+	}
+}
+
+// apply --site naming a down site is refused, as a pending one is.
+func TestApplySiteRefusesADownSite(t *testing.T) {
+	c := degraded(t)
+	c.Sites["home-b"] = topology.Site{Name: "home-b", Class: topology.Down, Why: topology.DownLine("home-b")}
+	classified(t, c)
+	var err error
+	captureStdout(t, func() {
+		err = runApply([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "--site", "home-b"}, nil, nil)
+	})
+	if err == nil || !strings.Contains(problemText(err), "--site home-b") || !strings.Contains(problemText(err), "evicted") {
+		t.Errorf("got %v: %s", err, problemText(err))
+	}
+}
+
+// site add names the site as it was typed, as an argument, when it is not
+// ready; and refuses plainly while a joined site is down, since a join
+// changes every site's mesh file and a down one cannot take it.
+func TestSiteAddRefusesWithoutEverySite(t *testing.T) {
+	classified(t, degraded(t))
+	err := runSiteAdd([]string{"home-b", "--config", fixtureConfig(), "--secrets", fixtureSecretsPath()}, nil, nil)
+	if err == nil || !strings.Contains(problemText(err), "site add home-b:") || strings.Contains(problemText(err), "--site") {
+		t.Errorf("pending: %v: %s", err, problemText(err))
+	}
+	c := degraded(t)
+	c.Sites["home-b"] = topology.Site{Name: "home-b", Class: topology.Ready}
+	c.Sites["watch"] = topology.Site{Name: "watch", Class: topology.Down, Why: topology.DownLine("watch")}
+	classified(t, c)
+	err = runSiteAdd([]string{"home-b", "--config", fixtureConfig(), "--secrets", fixtureSecretsPath()}, nil, nil)
+	if err == nil || !strings.Contains(problemText(err), "every joined site answers") || !strings.Contains(problemText(err), "watch") {
+		t.Errorf("down: %v: %s", err, problemText(err))
+	}
+}

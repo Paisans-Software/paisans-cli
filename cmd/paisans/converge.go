@@ -838,7 +838,8 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	if !execute {
 		marks := convergeStatus(r, cfg, steps, o)
 		// A dry run's operator problem is shown on its line; it stops nothing.
-		_, _ = convergeOperators(r, cfg, o, false, func(app string) bool { return convergeUp(cfg, steps, marks, app) })
+		pocketUp := pocketIDUp(r, cfg, sites)
+		_, _ = convergeOperators(r, cfg, o, false, func(app string) bool { return pocketUp(app) && convergeUp(cfg, steps, marks, app) })
 		convergeWebServerPending(r, cfg, webServerScope{})
 		// The review ends the plan, with what --execute asks approval for.
 		// A site it could not read is shown on its line; it stops nothing.
@@ -894,7 +895,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	routeRetries(r)
 	routeHolds(r)
 	routeLoginNotes(r)
-	links, adminErr := convergeOperators(r, cfg, o, true, func(string) bool { return true })
+	links, adminErr := convergeOperators(r, cfg, o, true, pocketIDUp(r, cfg, sites))
 	// The links are printed last, after the result, whatever it is: a run
 	// that fails after issuing them has still issued them.
 	// The deployment and the version are named again ahead of them.
@@ -904,17 +905,15 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	}()
 	// An app the operator's own web server serves is running, but not yet
 	// known to be reachable: the run is complete only once it is.
-	end, broken := webServerStep(r, cfg, configPath, webServerScope{})
+	// A down site's web server is left alone, as its other steps are.
+	noteDownWebServers(r, cfg, sites)
+	end, broken := webServerStep(r, cfg, configPath, webServerScope{down: sites.Down()})
 	convergeLeft(r, cfg, secretsPath, configPath)
-	if end != nil || adminErr != nil {
-		return webServerEnd(end, broken, adminErr)
+	if end == nil && adminErr == nil && !sites.Degraded() {
+		r.Result("Deployment complete.")
+		return nil
 	}
-	if sites.Degraded() {
-		r.Result("%s.", degradedResult(sites))
-		return requireAll(sites, o.RequireAll)
-	}
-	r.Result("Deployment complete.")
-	return nil
+	return degradedEnd(r, sites, o.RequireAll, webServerEnd(end, broken, adminErr))
 }
 
 // runReady is the sites of cfg a step of the run reaches: every one but

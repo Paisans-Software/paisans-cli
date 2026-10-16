@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -163,4 +164,70 @@ func requireAll(c *topology.Classification, required bool) error {
 // classification: the sites pending, recorded in its manifest.
 func pendingOptions(c *topology.Classification) []apply.Option {
 	return []apply.Option{apply.Pending(c.Pending()...)}
+}
+
+// pocketIDUp reports, for a Pocket ID app, whether the run can make its
+// operators: a Pocket ID on one site is reached on that site, so one whose
+// site is not ready waits, and a warning says so. One on several sites
+// reaches the active instance, which a down site's standing by does not
+// hide.
+func pocketIDUp(r ui.Reporter, cfg *config.Config, c *topology.Classification) func(app string) bool {
+	warned := map[string]bool{}
+	return func(app string) bool {
+		if slices.Contains(apply.StandbyApps(cfg), app) {
+			return true
+		}
+		where, err := adminSite(cfg, app, "", "apply")
+		if err != nil || c.Ready(where) {
+			return true
+		}
+		if !warned[app] {
+			warned[app] = true
+			r.Warn(app+": its operators are made once "+where+" answers", where+" is "+c.Sites[where].Class.String()+", and "+app+" runs there alone.")
+		}
+		return false
+	}
+}
+
+// noteDownWebServers notes each down site whose web server the run leaves
+// alone: its site files are neither written nor checked until it answers.
+func noteDownWebServers(r ui.Reporter, cfg *config.Config, c *topology.Classification) {
+	for _, site := range c.Down() {
+		if cfg.Sites[site].WebServerManagedBy() == config.ManagedByExternal {
+			r.Note("web server: "+site+" is down, so its site files are neither written nor checked", "The next apply once it answers writes and checks them.")
+		}
+	}
+}
+
+// degradedEnd is how a run, or apply --site alone, ends on the sites it
+// has, err being what it would end on otherwise. A run that is degraded says
+// so whenever it applied, a warning left for the operator included, and with
+// required (--require-all) fails, whatever else it ends on: a warning would
+// exit 0, so it is folded into the failure rather than joined to it.
+func degradedEnd(r ui.Reporter, c *topology.Classification, required bool, err error) error {
+	if c == nil || !c.Degraded() {
+		return err
+	}
+	var w *ui.Warning
+	if err == nil || errors.As(err, &w) {
+		r.Result("%s.", degradedResult(c))
+	}
+	return degradedErr(c, required, err)
+}
+
+// degradedErr is what a degraded run ends on, err being what it would end
+// on otherwise; see degradedEnd.
+func degradedErr(c *topology.Classification, required bool, err error) error {
+	var w *ui.Warning
+	warning := errors.As(err, &w)
+	need := requireAll(c, required)
+	switch {
+	case need == nil:
+		return err
+	case err == nil:
+		return need
+	case warning:
+		return &ui.Problem{Hint: "the run is degraded and --require-all was given", Explain: degradedResult(c) + ".\n" + sentences(err)}
+	}
+	return errors.Join(err, need)
 }

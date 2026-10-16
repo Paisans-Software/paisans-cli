@@ -160,7 +160,7 @@ var helpCommands = []helpCommand{
 			"Changes nothing on a host without --execute; without --site, the dry run may add missing generated secrets to the local secrets file, and says so when it does.\n\n" +
 			"Both, and host prepare, review the keys and images " + config.FileName + " grants against what each host last applied; --execute asks for the word approve at a terminal when anything is added or changed, and asks nothing when nothing is.\n\n" +
 			"Before anything changes, every app it starts logs in to its mail server from its site, sending nothing; one that does not log in refuses the apply.\n\n" +
-			"Every run, --site included, classifies every site and runs on the sites it has: a site whose host has not admitted the deployment is left out, a joined site that does not answer is kept with its own steps skipped, and the run ends degraded. --require-all: exit 1 when the run is degraded: a site pending or down.",
+			"Every run, --site included, reaches every site's host to classify it, and runs on the sites it has: a site whose host has not admitted the deployment is left out, a joined site that does not answer is kept with its own steps skipped, and the run ends degraded. --require-all: exit 1 when the run is degraded: a site pending or down.",
 	},
 	{
 		name:    "host prepare",

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/admission"
@@ -193,10 +194,18 @@ func writeWebServerFiles(r ui.Reporter, cfg *config.Config, configPath string, s
 // one, or with site set that one alone, as apply --site applies it, reached
 // through ssh, verbatim, in place of its ssh section when that is set, as
 // apply --site --ssh reaches it.
-type webServerScope struct{ site, ssh string }
+//
+// down is the sites a run has down: the step never reaches them, since a
+// down site's own steps are skipped (see sites.go).
+type webServerScope struct {
+	site, ssh string
+	down      []string
+}
 
 // covers reports whether the step covers site.
-func (s webServerScope) covers(site string) bool { return s.site == "" || s.site == site }
+func (s webServerScope) covers(site string) bool {
+	return (s.site == "" || s.site == site) && !slices.Contains(s.down, site)
+}
 
 // recordHost is how the step reaches site to read its admission record and
 // to write its reference files and their record.

@@ -25,6 +25,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/topology"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 	"github.com/paisans-software/paisans-cli/internal/validate"
+	"github.com/paisans-software/paisans-cli/internal/webserver"
 )
 
 // stageLabels names each stage for a test's plan lines. The run shows none
@@ -2328,5 +2329,96 @@ func TestConvergeSkipsADownSitesSteps(t *testing.T) {
 	}
 	if !rec.Has("result", "Applied, degraded: 1 site pending or down (home-b).") {
 		t.Errorf("no degraded end:\n%s", rec.Lines())
+	}
+}
+
+// everySite is the fixture's sites, as a deployment record lists them once
+// every one has joined.
+var everySite = []string{"home-a", "home-b", "vm", "watch"}
+
+// A Pocket ID on a down site is not asked to make its operators: the run
+// warns that they wait, and ends degraded, exit 0.
+func TestConvergeLeavesOperatorsOfADownPocketID(t *testing.T) {
+	fakeConverge(t, nil)
+	path := editedFixture(t, "hostname: id.example.org\n    placement: cluster", "hostname: id.example.org\n    placement: { pinned: home-b }")
+	convergeReadInitial = func(*config.Config, string) (render.EtcdInitial, bool, error) {
+		return initial("home-a", "home-b", "vm"), true, nil
+	}
+	asked := fakeDeclaredOperators(t, func(app, id string, execute bool) (declaredOperator, error) {
+		if app == "auth" {
+			return declaredOperator{}, errors.New("home-b: the host refused the login")
+		}
+		return declaredOperator{}, nil
+	})
+	classifyWith(t, classifyHosts([]string{"home-b"}, everySite...))
+	rec := recordConverge(t)
+	if err := convergeAt(t, path, "--execute"); err != nil {
+		t.Fatalf("%v: %s", err, problemText(err))
+	}
+	for _, a := range *asked {
+		if strings.HasPrefix(a, "auth/") {
+			t.Errorf("asked %s of down home-b", a)
+		}
+	}
+	if !rec.Has("warn", "auth") || !rec.Has("result", "Applied, degraded: 1 site pending or down (home-b).") {
+		t.Errorf("no warning or degraded end:\n%s", rec.Lines())
+	}
+}
+
+// The web server step does not reach a down monitor: its site files are
+// neither written nor checked, a note says so, and the run ends degraded.
+func TestConvergeLeavesTheWebServerOfADownSite(t *testing.T) {
+	fakeConverge(t, nil)
+	checked := fakeWebServerCheck(t, nil)
+	reached := false
+	convergeWebServerFiles = func(_ ui.Reporter, _ *config.Config, _ string, scope webServerScope) webServerFiles {
+		if scope.covers("watch") {
+			reached = true
+			return webServerFiles{failed: []string{"site files on watch"}}
+		}
+		return webServerFiles{}
+	}
+	classifyWith(t, classifyHosts([]string{"watch"}, everySite...))
+	rec := recordConverge(t)
+	if err := convergeAt(t, externalFixture(t), "--execute"); err != nil {
+		t.Fatalf("%v: %s", err, problemText(err))
+	}
+	if reached || slices.Contains(*checked, "health") {
+		t.Errorf("the web server step reached down watch: files %v, checked %v", reached, *checked)
+	}
+	if !rec.Has("note", "watch") || !rec.Has("result", "Applied, degraded: 1 site pending or down (watch).") {
+		t.Errorf("no note or degraded end:\n%s", rec.Lines())
+	}
+}
+
+// A degraded run that ends on the operator's web server still says it is
+// degraded, and --require-all still fails it; so does one that ends on an
+// operator's error.
+func TestEveryDegradedEndHonoursRequireAll(t *testing.T) {
+	fakeConverge(t, nil)
+	fakeWebServerCheck(t, map[string][]webserver.Result{"health": {{Name: webserver.CheckDNS, Detail: "health.example.org does not resolve"}}})
+	classifyWith(t, classifyHosts([]string{"home-b"}))
+	rec := recordConverge(t)
+	path := externalFixture(t)
+	err := convergeAt(t, path, "--execute")
+	var w *ui.Warning
+	if err != nil && !errors.As(err, &w) {
+		t.Fatalf("not a warning: %v", err)
+	}
+	if !rec.Has("result", "Applied, degraded: 1 site pending or down (home-b).") {
+		t.Errorf("no degraded end beside the web server's warning:\n%s", rec.Lines())
+	}
+	err = convergeAt(t, path, "--execute", "--require-all")
+	if err == nil || errors.As(err, &w) || !strings.Contains(problemText(err), "--require-all") {
+		t.Errorf("--require-all with the web server's warning: %v", err)
+	}
+
+	fakeWebServerCheck(t, nil)
+	fakeDeclaredOperators(t, func(string, string, bool) (declaredOperator, error) {
+		return declaredOperator{}, errors.New("pocket id did not answer")
+	})
+	err = convergeAt(t, path, "--execute", "--require-all")
+	if err == nil || !strings.Contains(problemText(err), "--require-all") {
+		t.Errorf("--require-all with an operator's error: %v: %s", err, problemText(err))
 	}
 }

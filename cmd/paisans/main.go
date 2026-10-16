@@ -969,7 +969,7 @@ func siteApplied(r ui.Reporter, cfg *config.Config, configPath, site, ssh string
 	_, step := r.(checkReporter)
 	if !step {
 		if end, broken := webServerStep(r, cfg, configPath, webServerScope{site: site, ssh: ssh}); end != nil {
-			return webServerEnd(end, broken, err)
+			return degradedEnd(r, sites, required, webServerEnd(end, broken, err))
 		}
 	}
 	if step || sites == nil || !sites.Degraded() {
@@ -977,10 +977,7 @@ func siteApplied(r ui.Reporter, cfg *config.Config, configPath, site, ssh string
 		return err
 	}
 	r.Result("%s. %s applied to %s.", degradedResult(sites), plural(written, "file"), site)
-	if err != nil {
-		return err
-	}
-	return requireAll(sites, required)
+	return degradedErr(sites, required, err)
 }
 
 // checkStandby is the deployment level gate after an apply that acted on a
