@@ -197,7 +197,7 @@ func TestAdmitPackagesHoldsTheSystemDocker(t *testing.T) {
 	}
 	install := s.Steps[len(s.Steps)-1]
 	hold, apt := strings.Index(install.Command, "mv -f /usr/sbin/.policy-rc.d.paisans-tmp /usr/sbin/policy-rc.d"), strings.Index(install.Command, "apt-get -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confold install")
-	if hold < 0 || apt < hold || !strings.Contains(install.Command, "release_docker_hold' EXIT") {
+	if hold < 0 || apt < hold || !strings.Contains(install.Command, "release_docker_hold; exit \"$paisans_status\"' EXIT") {
 		t.Errorf("the install does not hold Docker's daemons first:\n%s", install.Command)
 	}
 	if got := strings.Join(added.Packages, " "); got != "docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras uidmap nftables wireguard-tools git" {
@@ -237,10 +237,10 @@ func TestTheDockerHoldPutsBackTheOwnersPolicy(t *testing.T) {
 	}
 	command := s.Steps[len(s.Steps)-1].Command
 	hold := command[:strings.Index(command, "export DEBIAN_FRONTEND")]
-	if !strings.Contains(hold, "cp -pP /usr/sbin/policy-rc.d /usr/sbin/.policy-rc.d.paisans-owner-tmp && mv -f /usr/sbin/.policy-rc.d.paisans-owner-tmp /usr/sbin/policy-rc.d.paisans-owner") {
+	if !strings.Contains(hold, "\n  cp -pP /usr/sbin/policy-rc.d /usr/sbin/.policy-rc.d.paisans-owner-tmp\n  mv -f /usr/sbin/.policy-rc.d.paisans-owner-tmp /usr/sbin/policy-rc.d.paisans-owner\n") {
 		t.Errorf("the owner's policy is not copied through a temporary name:\n%s", hold)
 	}
-	release, err := profile.ReleaseDockerHold()
+	release, err := profile.ReleaseDockerHold("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -428,7 +428,7 @@ func TestTheDockerHoldIsLocked(t *testing.T) {
 	}
 	command := s.Steps[len(s.Steps)-1].Command
 	hold := command[:strings.Index(command, "export DEBIAN_FRONTEND")]
-	release, err := profile.ReleaseDockerHold()
+	release, err := profile.ReleaseDockerHold("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -492,5 +492,118 @@ func TestAptRunsWithoutTheHoldsLock(t *testing.T) {
 		if lines := strings.Split(strings.TrimSpace(string(got)), "\n"); len(lines) < 2 || strings.Contains(string(got), "fd8 open") {
 			t.Errorf("%s: apt ran with the lock open, or not at all:\n%s", name, got)
 		}
+	}
+}
+
+// shell is dash where the host has it, as Ubuntu's /bin/sh is, else sh.
+func shell() string {
+	if p, err := exec.LookPath("dash"); err == nil {
+		return p
+	}
+	return "sh"
+}
+
+// holdScript is the hold that AdmitPackages plans on a fresh host, before
+// its apt lines, its paths moved into dir, and the release ReleaseDockerHold
+// gives with before ahead of the release.
+func holdScript(t *testing.T, dir, before string) (string, string) {
+	t.Helper()
+	profile, err := hostprep.Select(hostprep.ParseOSRelease(ubuntu2404))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, _, err := profile.AdmitPackages(freshHost(), hostprep.ParseOSRelease(ubuntu2404), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := s.Steps[len(s.Steps)-1].Command
+	release, err := profile.ReleaseDockerHold(before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := strings.NewReplacer("/usr/sbin/", dir+"/", "/run/paisans-docker-hold.lock", filepath.Join(dir, "lock")).Replace
+	return at(command[:strings.Index(command, "export DEBIAN_FRONTEND")]), at(release)
+}
+
+// fakeTools is a directory of stand-ins on PATH: a flock that takes the
+// lock, a systemctl that logs its arguments to log, and cp, when cpFails,
+// one that leaves half a file and fails, as a full disk does.
+func fakeTools(t *testing.T, log string, cpFails bool) string {
+	t.Helper()
+	dir := t.TempDir()
+	tools := map[string]string{
+		"flock":     "#!/bin/sh\nexit 0\n",
+		"systemctl": "#!/bin/sh\necho \"systemctl $*\" >> " + log + "\n",
+	}
+	if cpFails {
+		tools["cp"] = "#!/bin/sh\nfor last; do :; done\nprintf '#!/bin/sh\\nec' > \"$last\"\necho 'cp: No space left on device' >&2\nexit 1\n"
+	}
+	for name, s := range tools {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(s), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// When saving the owner's policy-rc.d fails, the hold fails closed: the
+// step exits non-zero, admit's policy is never put in place, and the
+// owner's is untouched.
+func TestTheDockerHoldFailsClosedWhenTheCopyFails(t *testing.T) {
+	sbin := t.TempDir()
+	const owner = "#!/bin/sh\nexit 0\n"
+	policy := filepath.Join(sbin, "policy-rc.d")
+	if err := os.WriteFile(policy, []byte(owner), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hold, _ := holdScript(t, sbin, "")
+	cmd := exec.Command(shell(), "-c", hold+"echo the hold went on\n")
+	cmd.Env = []string{"PATH=" + fakeTools(t, filepath.Join(sbin, "log"), true) + ":/usr/bin:/bin"}
+	out, err := cmd.CombinedOutput()
+	if err == nil || strings.Contains(string(out), "the hold went on") {
+		t.Errorf("the hold went on after the copy failed: %v: %s", err, out)
+	}
+	if got, err := os.ReadFile(policy); string(got) != owner {
+		t.Errorf("the owner's policy-rc.d is now %q, %v", got, err)
+	}
+	if _, err := os.Lstat(policy + ".paisans-owner"); !os.IsNotExist(err) {
+		t.Errorf("a copy is in place as the owner's: %v", err)
+	}
+}
+
+// An install that fails leaves the units of what it adds disabled, from
+// the hold's exit trap while the hold is still in place: their packages'
+// scripts may have enabled them before the failure, and a reboot would
+// otherwise start the system daemon. One that succeeds leaves that to the
+// next step.
+func TestAFailedHoldDisablesWhatItAdds(t *testing.T) {
+	for _, c := range []struct {
+		tail string
+		want bool
+	}{{"false\n", true}, {"true\n", false}} {
+		sbin := t.TempDir()
+		log := filepath.Join(sbin, "log")
+		hold, _ := holdScript(t, sbin, "")
+		cmd := exec.Command(shell(), "-c", hold+c.tail)
+		cmd.Env = []string{"PATH=" + fakeTools(t, log, false) + ":/usr/bin:/bin"}
+		out, err := cmd.CombinedOutput()
+		if (err != nil) != c.want {
+			t.Errorf("%q: the exit status is not the install's: %v: %s", c.tail, err, out)
+		}
+		got, _ := os.ReadFile(log)
+		if disabled := strings.Contains(string(got), "systemctl disable docker.socket docker.service containerd.service"); disabled != c.want {
+			t.Errorf("%q: disabled %v:\n%s", c.tail, disabled, got)
+		}
+	}
+}
+
+// ReleaseDockerHold runs what its caller gives after the lock is taken
+// and before the hold is released, so a caller's record of the install
+// is made while the hold still says the install was admit's.
+func TestReleaseDockerHoldRunsBeforeAhead(t *testing.T) {
+	_, release := holdScript(t, t.TempDir(), "echo before-the-release\n")
+	lock, before, call := strings.Index(release, "flock -n 8"), strings.Index(release, "echo before-the-release"), strings.LastIndex(release, "\nrelease_docker_hold\n")
+	if lock < 0 || before < lock || call < before {
+		t.Errorf("lock %d, before %d, release %d:\n%s", lock, before, call, release)
 	}
 }

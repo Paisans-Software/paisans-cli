@@ -259,7 +259,7 @@ func releaseHold(p *planner, prefix string) error {
 	if !p.f.Docker.Held {
 		return nil
 	}
-	release, err := p.profile.ReleaseDockerHold()
+	release, err := p.profile.ReleaseDockerHold("")
 	if err != nil {
 		return err
 	}

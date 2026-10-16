@@ -214,8 +214,12 @@ type Profile interface {
 	AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (Section, Installed, error)
 	// ReleaseDockerHold puts back the host's own policy for starting
 	// services, which an install AdmitPackages planned holds while it runs,
-	// for a run that stopped before it could.
-	ReleaseDockerHold() (string, error)
+	// for a run that stopped before it could, running before ahead of the
+	// release once it holds the hold's lock.
+	ReleaseDockerHold(before string) (string, error)
+	// DockerHoldLock takes the lock a hold on Docker's daemons holds, for
+	// a caller that must hold it ahead of the hold.
+	DockerHoldLock() (string, error)
 	// Services plans enabling and starting what Packages installed.
 	// Its own files carry the deployment's token, so that two deployments on
 	// one host each keep their own.

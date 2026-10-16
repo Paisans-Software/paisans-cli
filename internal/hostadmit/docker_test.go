@@ -361,7 +361,7 @@ func TestTheInstallConfirmsItsClaims(t *testing.T) {
 	}
 	install := slices.IndexFunc(plan.Steps, func(s hostadmit.Step) bool { return strings.HasPrefix(s.Title, "install packages: docker-ce") })
 	c := plan.Steps[install].Command
-	if trap, apt := strings.Index(c, "confirm_claims || true; fi; release_docker_hold' EXIT"), strings.Index(c, "apt-get"); trap < 0 || apt < trap {
+	if trap, apt := strings.Index(c, "confirm_claims || true; fi;"), strings.Index(c, "apt-get"); trap < 0 || apt < trap {
 		t.Errorf("the install does not confirm its claims from its exit trap:\n%s", c)
 	}
 }

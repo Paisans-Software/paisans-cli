@@ -142,8 +142,11 @@ step 6: install packages: docker-ce, docker-ce-cli, containerd.io, docker-buildx
     $ }
     $ trap confirm_claims EXIT
     $ set -e
-    $ exec 8>/run/paisans-docker-hold.lock
-    $ flock -n 8 || { echo 'another paisans host admit is installing Docker on this host now (it holds /run/paisans-docker-hold.lock). Run again once it is done'; exit 1; }
+    $ if [ -z "${paisans_hold_locked:-}" ]; then
+    $   exec 8>/run/paisans-docker-hold.lock
+    $   flock -n 8 || { echo 'another paisans host admit is installing Docker on this host now (it holds /run/paisans-docker-hold.lock). Run again once it is done'; exit 1; }
+    $   paisans_hold_locked=1
+    $ fi
     $ release_docker_hold() {
     $   rm -f /usr/sbin/.policy-rc.d.paisans-tmp /usr/sbin/.policy-rc.d.paisans-owner-tmp
     $   if [ -f /usr/sbin/policy-rc.d ] && [ ! -L /usr/sbin/policy-rc.d ] && grep -qxF '# Written by paisans host admit while it installs Docker, and removed after.' /usr/sbin/policy-rc.d; then
@@ -177,8 +180,11 @@ step 6: install packages: docker-ce, docker-ce-cli, containerd.io, docker-buildx
     $ exit 0
     $ POLICY
     $ chmod 755 /usr/sbin/.policy-rc.d.paisans-tmp
-    $ if [ -e /usr/sbin/policy-rc.d ] || [ -L /usr/sbin/policy-rc.d ]; then cp -pP /usr/sbin/policy-rc.d /usr/sbin/.policy-rc.d.paisans-owner-tmp && mv -f /usr/sbin/.policy-rc.d.paisans-owner-tmp /usr/sbin/policy-rc.d.paisans-owner; fi
-    $ trap 'if command -v confirm_claims >/dev/null 2>&1; then confirm_claims || true; fi; release_docker_hold' EXIT
+    $ if [ -e /usr/sbin/policy-rc.d ] || [ -L /usr/sbin/policy-rc.d ]; then
+    $   cp -pP /usr/sbin/policy-rc.d /usr/sbin/.policy-rc.d.paisans-owner-tmp
+    $   mv -f /usr/sbin/.policy-rc.d.paisans-owner-tmp /usr/sbin/policy-rc.d.paisans-owner
+    $ fi
+    $ trap 'paisans_status=$?; if command -v confirm_claims >/dev/null 2>&1; then confirm_claims || true; fi; if [ "$paisans_status" -ne 0 ]; then systemctl disable docker.socket docker.service containerd.service >/dev/null 2>&1 || true; fi; release_docker_hold; exit "$paisans_status"' EXIT
     $ trap 'exit 1' HUP INT TERM
     $ mv -f /usr/sbin/.policy-rc.d.paisans-tmp /usr/sbin/policy-rc.d
     $ set -e

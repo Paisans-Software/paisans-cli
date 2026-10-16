@@ -11,9 +11,13 @@
         short is never taken for the owner's, and admit's is renamed over
         it. When the
         shell exits, however it exits, confirm_claims runs first when the
-        caller defines it (host admit records there what apt installed),
-        then the owner's goes back, or admit's is removed; one an
-        interrupted run left is put right first. */ -}}
+        caller defines it (host admit records there what apt installed);
+        an install that failed has its units disabled, since their
+        packages' scripts may have enabled them before it failed; then the
+        owner's goes back, or admit's is removed; one an interrupted run
+        left is put right first. Saving the owner's policy is two simple
+        commands, so set -e stops the shell, before the trap is set and
+        before admit's policy is in place, when either fails. */ -}}
 set -e
 {{ .Lock }}{{ .Release }}release_docker_hold
 if [ -e /usr/sbin/policy-rc.d.paisans-owner ] || [ -L /usr/sbin/policy-rc.d.paisans-owner ]; then
@@ -30,7 +34,10 @@ if [ -x /usr/sbin/policy-rc.d.paisans-owner ]; then exec /usr/sbin/policy-rc.d.p
 exit 0
 POLICY
 chmod 755 /usr/sbin/.policy-rc.d.paisans-tmp
-if [ -e /usr/sbin/policy-rc.d ] || [ -L /usr/sbin/policy-rc.d ]; then cp -pP /usr/sbin/policy-rc.d /usr/sbin/.policy-rc.d.paisans-owner-tmp && mv -f /usr/sbin/.policy-rc.d.paisans-owner-tmp /usr/sbin/policy-rc.d.paisans-owner; fi
-trap 'if command -v confirm_claims >/dev/null 2>&1; then confirm_claims || true; fi; release_docker_hold' EXIT
+if [ -e /usr/sbin/policy-rc.d ] || [ -L /usr/sbin/policy-rc.d ]; then
+  cp -pP /usr/sbin/policy-rc.d /usr/sbin/.policy-rc.d.paisans-owner-tmp
+  mv -f /usr/sbin/.policy-rc.d.paisans-owner-tmp /usr/sbin/policy-rc.d.paisans-owner
+fi
+trap 'paisans_status=$?; if command -v confirm_claims >/dev/null 2>&1; then confirm_claims || true; fi; if [ "$paisans_status" -ne 0 ]; then systemctl disable {{ .Disable }} >/dev/null 2>&1 || true; fi; release_docker_hold; exit "$paisans_status"' EXIT
 trap 'exit 1' HUP INT TERM
 mv -f /usr/sbin/.policy-rc.d.paisans-tmp /usr/sbin/policy-rc.d
