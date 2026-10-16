@@ -70,7 +70,7 @@ func (h *host) Run(command string) (string, error) {
 		id := strings.Fields(command)[4]
 		h.caddy = slices.DeleteFunc(h.caddy, func(c string) bool { return c == id })
 		return "", nil
-	case strings.HasPrefix(command, "rm -f -- "):
+	case strings.Contains(command, "rm -f -- "):
 		for _, q := range regexp.MustCompile(`'([^']+)'`).FindAllStringSubmatch(command, -1) {
 			delete(h.files, q[1])
 		}
@@ -795,6 +795,32 @@ func TestTheMarkerIsWrittenUnderTheDeploymentsLock(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("no command wrote the marker: %v", old.ran)
+	}
+}
+
+// The stop and the release delete the deployment record and the marker under
+// the deployment's lock, so neither races an apply writing the record.
+func TestTheRecordAndMarkerAreDeletedUnderTheDeploymentsLock(t *testing.T) {
+	for name, w := range map[string]*world{"stop": newWorld(t), "release": sharedWorld(t).world} {
+		if err := w.run(); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		d := w.cfg.Deployment()
+		lock := d.StateLockCommand("the gateway move records")
+		deleted := false
+		for _, c := range w.hosts["home-a"].ran {
+			at := strings.Index(c, "rm -f -- ")
+			if at < 0 || !strings.Contains(c, deployrecord.Path(d)) {
+				continue
+			}
+			deleted = true
+			if l := strings.Index(c, lock); l < 0 || l > at {
+				t.Errorf("%s: deleted without the lock: %s", name, c)
+			}
+		}
+		if !deleted {
+			t.Errorf("%s: nothing deleted the record", name)
+		}
 	}
 }
 

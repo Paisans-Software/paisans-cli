@@ -148,6 +148,15 @@ func markerWriteCommand(d deployment.Deployment, content string) string {
 	}, "; ")
 }
 
+// removeRecordsCommand deletes the deployment record and the marker from
+// the old gateway under the deployment's lock, so the delete never lands
+// between an apply's read of the record and its write. It always runs as
+// the deployment's user on its own StateDir, where the lock prelude is
+// that user's to run.
+func removeRecordsCommand(d deployment.Deployment) string {
+	return d.StateLockCommand("the gateway move records") + "; rm -f -- " + quote(deployrecord.Path(d)) + " " + quote(MarkerPath(d))
+}
+
 // Plan is a whole move, decided from the live deployment.
 type Plan struct {
 	// From is the old gateway's site, empty when there is nothing to move;
@@ -761,7 +770,7 @@ func (p *Plan) stopStage() *Stage {
 		// The marker goes last: until it does, a run finds this site again
 		// and resumes here.
 		s := p.reporter().Step("forget " + p.From + " as a gateway")
-		if out, err := p.from().Run("rm -f -- " + quote(deployrecord.Path(d)) + " " + quote(MarkerPath(d))); err != nil {
+		if out, err := p.from().Run(removeRecordsCommand(d)); err != nil {
 			err = fmt.Errorf("%s: %w: %s", p.From, err, strings.TrimSpace(out))
 			s.Fail(err)
 			return err
@@ -813,7 +822,7 @@ func (p *Plan) releaseStage() *Stage {
 			return refuse(fmt.Sprintf("%s's Caddy still serves the host owner's sites", p.From), fmt.Sprintf("%s holds %s, which a monitor's Caddy does not serve, so handing %s off would take them dark. Move them to %s's %s, or delete them, then run the move again.", render.HostSitesDir(d), strings.Join(ev.HostSites, ", "), p.From, p.To, render.HostSitesDir(d)))
 		}
 		s := p.reporter().Step("forget " + p.From + " as a gateway")
-		if out, err := p.from().Run("rm -f -- " + quote(deployrecord.Path(d)) + " " + quote(MarkerPath(d))); err != nil {
+		if out, err := p.from().Run(removeRecordsCommand(d)); err != nil {
 			err = fmt.Errorf("%s: %w: %s", p.From, err, strings.TrimSpace(out))
 			s.Fail(err)
 			return err
