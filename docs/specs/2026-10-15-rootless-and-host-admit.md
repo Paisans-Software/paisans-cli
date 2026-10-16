@@ -138,7 +138,10 @@ host (below). The admission record holds the grants given.
 Like `host prepare`, it probes read only, prints the plan, and changes the
 host only with `--execute`. Every step is idempotent, so a re-run after a
 failure resumes, and a re-run with different flags changes only what they
-govern.
+govern. A step that needs the user's UID is planned with a placeholder and
+run once the user exists: `--execute` reads the host again then, and goes
+on only when what is left is the approved steps, in order and unchanged,
+less any now done, which it reports as done already.
 
 **A data site without `--watchdog` stops admit before anything else.** The
 request's `grants` say whether the site needs the watchdog, and the check
@@ -190,27 +193,48 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    infra container is `network_mode: host`, bound to the mesh address. A snap
    Docker is refused, as today.
 
-   When admit installs Docker, the system daemon its packages bring never
-   runs. As it starts, `dockerd` turns on forwarding for every interface,
+   When admit installs Docker, the system daemons its packages bring never
+   run. As it starts, `dockerd` turns on forwarding for every interface,
    creates `docker0`, adds its NAT and filter chains and sets the FORWARD
    policy to DROP; a daemon that never started changed none of it, where one
    stopped after would leave each change to be undone exactly. So the install
    runs under a `/usr/sbin/policy-rc.d` of admit's, which Debian's
    `invoke-rc.d` and `deb-systemd-invoke` ask before they start a service: it
-   forbids `docker`, `docker.socket` and `containerd` (101) and asks the
-   owner's own `policy-rc.d`, moved aside to `policy-rc.d.paisans-owner`
-   while the install runs, about every other. The owner's goes back when the
-   install exits, however it exits, and one a killed run left is put back by
-   the next run. The next step disables `docker.socket`, `docker.service`
-   and `containerd.service`, and fails if `docker0` exists anyway, naming a
-   reboot, which clears what the daemon changed now that it is disabled.
-   Before anything is installed, `/etc/paisans/installed` records what admit
-   installs that the host did not have (each package, Docker's apt key and
-   source) and the directories it creates (`user@.service.d`, below), so a
-   run that stops after the install still knows the system Docker is
-   admit's. The admission record says admit disabled it, and once a record
-   says so nothing of paisans touches the units again. A Docker the owner
-   had before admit is never held, disabled or otherwise touched.
+   forbids (101) the units of what the install adds, `docker`,
+   `docker.socket` and `docker.service` for `docker-ce`, `containerd` for
+   `containerd.io` only when admit adds that too, and asks the owner's own
+   `policy-rc.d` about every other. There is never a moment with no policy in
+   place: admit's is written whole, the owner's is copied to
+   `policy-rc.d.paisans-owner`, and admit's is renamed over it. The owner's
+   goes back when the install exits, however it exits. What a killed run
+   leaves, admit's policy, the owner's copy beside it or beside nothing, or
+   admit's temporary file, is put right by the next admit, or by evict,
+   whether or not another deployment stays; a copy that differs from the
+   policy in place is the owner's to choose between, and admit refuses,
+   naming both. The next step disables the same units, and fails if
+   `docker0` exists anyway, naming a reboot, which clears what the daemon
+   changed now that it is disabled.
+
+   `/etc/paisans/installed`, root's and mode 644 (admit and evict refuse it
+   otherwise), records what admit installs that the host did not have (each
+   package, Docker's apt key and source) and the directories it creates
+   (`user@.service.d`, below). Before the install each package is claimed
+   as `installing`; the install step makes it a `package` once apt has run.
+   A claim stands while dpkg shows the package installed and either the
+   install confirmed it or the hold that install left says it was admit's
+   own install that was killed; any other claim, and any package dpkg does
+   not show installed, is dropped, so a Docker the owner installs after an
+   admit that stopped early is never taken for admit's. The admission record
+   says admit disabled the daemon once; while a record says so, or another
+   deployment's record cannot be read and so may, admit leaves the units as
+   they are, so an owner who enables the daemon keeps it. A Docker the owner
+   had before admit, and a `containerd.io` the host had, are never held,
+   disabled or otherwise touched.
+
+   The system Docker admit holds disabled has never run, so the mesh's
+   check reads it as having no networks. Any other Docker whose daemon does
+   not answer still has its networks, which come back when it starts, so
+   admit stops and says to start it.
 2. **AppArmor.** On Ubuntu 24.04 and later, unprivileged user namespaces are
    restricted unless a profile allows them. Ubuntu's `apparmor` package ships
    the profile for `rootlesskit` at `/etc/apparmor.d/rootlesskit`, loaded at
@@ -345,7 +369,8 @@ Garage site and 5 GB otherwise. The path is in the admission record.
     the user, the grants (`watchdog`, `public_ports`), whether forwarding is
     on, the ports the firewall opened, the request's digest when there was
     one, the time, and whether the system Docker is one admit installed and
-    disabled (`system_docker_disabled`). It is how the deployment's own commands, which cannot
+    disabled once (`system_docker_disabled`), which says what admit did, not
+    how the daemon stands now. It is how the deployment's own commands, which cannot
     read root's files, learn what they were granted, and what `host
     deployments` lists. Admit keeps `/etc/paisans` root's, mode 755 (`chmod
     00755`, which clears a setgid bit too; an ACL stops admit), so each
@@ -484,9 +509,11 @@ What admit installed stays when the last deployment goes: the packages
 `/etc/paisans/installed` lists (Docker's, the rootless extras, `uidmap`,
 `wireguard-tools`, and any other admit installed), Docker's apt key and
 source, and the `docker` group `docker-ce` made, with the system daemon
-still disabled. Something else on the host may use them by then, so they
+as it is now. Something else on the host may use them by then, so they
 are the owner's to remove: the plan names each, from the list, which it
-then removes. Only what admit installed is named.
+then removes. Only what admit installed and dpkg still shows installed is
+named. A hold on Docker's daemons a killed admit left is put back by every
+evict.
 
 With no admission record, evict cannot tell where admit put the Docker
 data: `--data-dir` names it, and evict removes that directory only when
@@ -932,10 +959,13 @@ A rekey with sites down is in `docs/specs/2026-10-15-mesh-rekey-sites-down.md`.
 * A first `--execute` on a blank host whose package step creates
   `/etc/wireguard` runs to the end: a step the rebuilt plan no longer has is
   done, while one added, moved or changed stops it.
-* The Docker hold, run for real against a directory of the test's: Docker's
-  and containerd's units forbidden, every other asked of the owner's
-  `policy-rc.d`, the owner's back after, or none when there was none, and
-  one a killed run left put right.
+* The Docker hold, run for real against a directory of the test's: the
+  added packages' units forbidden, every other asked of the owner's
+  `policy-rc.d`, the owner's back after, or none when there was none; a
+  hold a killed run left, the owner's copy beside nothing or beside the
+  same file, put right; a copy that differs refused.
+* A system Docker that does not answer: admit's held one read as having no
+  networks, the owner's refused, readably, saying to start it.
 * One end-to-end run on staging: admit a fresh host as its owner, apply as
   the deployment's user, then check that a container cannot connect to a
   service on the host's `127.0.0.1` or LAN, and that `sudo -n` as the user

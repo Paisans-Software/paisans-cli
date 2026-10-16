@@ -687,19 +687,19 @@ paisans host admit --site home-a --ssh owner@home-a.example.org --execute   # fr
   the operator's own key, and writes `ssh.user` back into the configuration
   when the declaration leaves it out.
 * **What it changes:** Docker from Docker's repository where absent (an Engine
-  older than 29.5 is refused, never upgraded), with its system daemon kept
+  older than 29.5 is refused, never upgraded), with its system daemons kept
   from starting while its packages install and then disabled, so only the
-  deployments' rootless daemons run; a Docker the owner had is never touched;
-  `/etc/paisans/installed`, what admit installed and created; the user, with
-  linger and its rootless daemon; the cgroup delegation drop-in; the egress
-  table; `/srv/paisans/<token>`; `/etc/wireguard`; the WireGuard helper and
-  its sudoers line; a drop-in that skips `wg-quick@psns-<token>` at boot until
-  `apply` writes its conf; ufw rules tagged `paisans-<token>:`; with
-  `--watchdog`, the device for the user; with `--public-ports`,
-  `ip_unprivileged_port_start` of 80 and 80/tcp, 443/tcp and 443/udp open; for
-  a site with an endpoint, forwarding; the admission record; the registry
-  claim; the operators' keys in the user's `authorized_keys`. `/etc/paisans`
-  is root's, at mode 755.
+  deployments' rootless daemons run; a Docker or `containerd.io` the owner had
+  is never touched; `/etc/paisans/installed`, what admit installed and
+  created; the user, with linger and its rootless daemon; the cgroup
+  delegation drop-in; the egress table; `/srv/paisans/<token>`;
+  `/etc/wireguard`; the WireGuard helper and its sudoers line; a drop-in that
+  skips `wg-quick@psns-<token>` at boot until `apply` writes its conf; ufw
+  rules tagged `paisans-<token>:`; with `--watchdog`, the device for the user;
+  with `--public-ports`, `ip_unprivileged_port_start` of 80 and 80/tcp,
+  443/tcp and 443/udp open; for a site with an endpoint, forwarding; the
+  admission record; the registry claim; the operators' keys in the user's
+  `authorized_keys`. `/etc/paisans` is root's, at mode 755.
 * **The egress table:** fences the deployment's user off the owner's machine.
   It allows DNS to the host's resolvers, then drops loopback and the private
   ranges, with their NAT64 translations, the host's own addresses,
@@ -751,7 +751,8 @@ paisans host evict --site home-a --ssh owner@home-a.example.org --execute
   module stay loaded until the next boot, and the plan says so. What admit
   installed (Docker's packages and its apt key and source, the rootless
   extras, uidmap, wireguard-tools, the `docker` group) stays when the last
-  deployment goes, and the plan names it. The SSH allow may be the rule the
+  deployment goes, and the plan names it. A hold on Docker's daemons that a
+  killed admit left is put back. The SSH allow may be the rule the
   owner's own login arrives by, so it is kept and evict warns of it: the
   owner deletes it themselves once nothing else needs it. Every process of
   the user, or of its subordinate range, is killed first. A user the owner
