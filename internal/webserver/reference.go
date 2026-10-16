@@ -2,6 +2,8 @@ package webserver
 
 import (
 	"fmt"
+	"path"
+	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -14,6 +16,17 @@ import (
 // it or reload the server, and nothing grants it that: the toolkit renders,
 // the owner installs.
 func ReferenceDir(d deployment.Deployment) string { return d.Path("web-server") }
+
+// OwnReference reports whether p, as a manifest's web_server entry holds
+// it, is one of d's reference files: absolute, clean, and directly in
+// ReferenceDir. The manifest is the deployment user's own file, so an entry
+// that is not is never read or deleted, whoever runs the command.
+func OwnReference(d deployment.Deployment, p string) bool {
+	if !strings.HasPrefix(p, "/") || path.Clean(p) != p || strings.Contains(p, "..") {
+		return false
+	}
+	return path.Dir(p) == ReferenceDir(d)
+}
 
 // Reference is one reference file: an app's snippet for one server.
 type Reference struct {

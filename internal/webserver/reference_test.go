@@ -43,3 +43,38 @@ func TestFromRecord(t *testing.T) {
 		t.Errorf("nil record: %+v", ws)
 	}
 }
+
+// A recorded Caddy gets <app>.caddy, a recorded Apache <app>.conf.
+func TestReferenceNamesForCaddyAndApache(t *testing.T) {
+	for server, want := range map[webserver.Server]string{webserver.ServerCaddy: "/srv/paisans/f2a9/web-server/status.caddy", webserver.ServerApache: "/srv/paisans/f2a9/web-server/status.conf"} {
+		refs := webserver.References(dep, status, webserver.WebServer{Server: server})
+		if len(refs) != 1 || refs[0].Path != want || refs[0].Server != server {
+			t.Errorf("%s: %+v", server, refs)
+		}
+	}
+	if c := webserver.References(dep, status, webserver.WebServer{Server: webserver.ServerApache})[0].Content; !strings.Contains(c, "<VirtualHost") {
+		t.Errorf("apache:\n%s", c)
+	}
+}
+
+// Only a clean path directly in the deployment's reference directory is a
+// reference file: the manifest is the deployment user's own file.
+func TestOwnReference(t *testing.T) {
+	for p, want := range map[string]bool{
+		"/srv/paisans/f2a9/web-server/status.caddy":        true,
+		"/srv/paisans/f2a9/web-server/../../../etc/passwd": false,
+		"/srv/paisans/f2a9/web-server/./status.caddy":      false,
+		"srv/paisans/f2a9/web-server/status.caddy":         false,
+		"/etc/passwd":                                   false,
+		"/srv/paisans/f2a9/health/compose.yaml":         false,
+		"/srv/paisans/f2a9/web-server/sub/status.caddy": false,
+		"/srv/paisans/f2a9/web-server":                  false,
+		"/srv/paisans/f2a9/web-server/..":               false,
+		"/srv/paisans/f2a9/web-server//status.caddy":    false,
+		"/srv/paisans/f2a90/web-server/status.caddy":    false,
+	} {
+		if got := webserver.OwnReference(dep, p); got != want {
+			t.Errorf("%s: %v", p, got)
+		}
+	}
+}

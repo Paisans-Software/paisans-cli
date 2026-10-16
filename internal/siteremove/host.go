@@ -297,10 +297,10 @@ func (p *Plan) buildHost() (*Stage, error) {
 	hp.dockerPresent = inv.Docker.Present
 	hp.manifest = inv.Manifest
 	for _, e := range inv.ManifestWebServer {
-		// The manifest is the user's own file: an unclean path is never
-		// read or deleted.
-		if !cleanAbs(e.Path) {
-			p.Kept = append(p.Kept, fmt.Sprintf("%s: %s: not a clean path, so site remove leaves it; the host's owner removes it if it is this deployment's", p.Site, e.Path))
+		// The manifest is the user's own file: an entry that is not one of
+		// the deployment's reference files is never read or deleted.
+		if !webserver.OwnReference(p.dep(), e.Path) {
+			p.Kept = append(p.Kept, fmt.Sprintf("%s: %s: not a reference file of this deployment's, so site remove leaves it; the host's owner removes it if it is this deployment's", p.Site, e.Path))
 			continue
 		}
 		hp.webServer = append(hp.webServer, e)
@@ -505,12 +505,6 @@ func (p *Plan) checkLogin(t apply.Transport) error {
 	}
 	p.home, p.loginUser = account.Home, rec.User
 	return nil
-}
-
-// cleanAbs is cleanRel for an absolute path: a reference file.
-func cleanAbs(p string) bool {
-	rel, ok := strings.CutPrefix(p, "/")
-	return ok && cleanRel(rel)
 }
 
 // cleanRel reports whether a manifest path is relative and clean: no

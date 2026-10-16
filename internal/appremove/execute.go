@@ -13,6 +13,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/garage"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/webserver"
 )
 
 // composeProjectLabel is the label Compose puts on every container, network
@@ -323,14 +324,23 @@ func (e *Executor) webServer(h Host, d deployment.Deployment, s SitePlan) error 
 		return nil
 	}
 	drop := map[string]bool{}
+	var removed []render.ManifestWebServer
 	for _, entry := range s.WebServer {
+		if !webserver.OwnReference(d, entry.Path) {
+			e.Kept = append(e.Kept, foreignReference(s.Site, entry.Path))
+			continue
+		}
+		removed = append(removed, entry)
 		e.work("remove reference files").Detail("%s", entry.Path)
 		if out, err := h.Run("rm -f -- " + quote(entry.Path)); err != nil {
 			return fmt.Errorf("%s: removing %s: %w: %s", s.Site, entry.Path, err, strings.TrimSpace(out))
 		}
 		drop[entry.Path] = true
 	}
-	e.Kept = append(e.Kept, OwnerBlocks(s.Site, s.WebServer)...)
+	if len(removed) == 0 {
+		return nil
+	}
+	e.Kept = append(e.Kept, OwnerBlocks(s.Site, removed)...)
 	recorded, err := apply.ReadWebServerRecord(h, d)
 	if err != nil {
 		return err

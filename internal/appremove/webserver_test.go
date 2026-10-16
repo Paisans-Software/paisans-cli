@@ -53,7 +53,7 @@ func TestAppRemoveNamesTheBlockTheOwnerRemoves(t *testing.T) {
 		t.Fatalf("planned %+v", sp.WebServer)
 	}
 	rec := &ui.Recorder{}
-	(&Plan{App: "health", Sites: []SitePlan{sp}}).Show(rec)
+	(&Plan{App: "health", Deployment: d, Sites: []SitePlan{sp}}).Show(rec)
 	if !rec.Has("detail", "remove the reference file "+health.Path+"; the host's owner removes the block from caddy") {
 		t.Errorf("plan:\n%s", rec.Lines())
 	}
@@ -79,5 +79,34 @@ func TestAppRemoveNamesTheBlockTheOwnerRemoves(t *testing.T) {
 	json.Unmarshal([]byte(h.manifest[manifestPath]), &after)
 	if len(after.WebServer) != 1 || after.WebServer[0] != other || len(after.Files) != 1 {
 		t.Errorf("manifest %+v", after)
+	}
+}
+
+// An entry that is not a reference file of this deployment's, by a path
+// with .., outside the deployment's root, or elsewhere in it, is never
+// deleted: it is kept with its entry and reported.
+func TestAppRemoveKeepsAnEntryOutsideTheReferenceDirectory(t *testing.T) {
+	cfg := fixture(t)
+	d := cfg.Deployment()
+	for _, p := range []string{"/srv/paisans/f2a9/web-server/../../../etc/passwd", "/etc/passwd", "/srv/paisans/f2a9/health/compose.yaml", "srv/paisans/f2a9/web-server/health.caddy"} {
+		entry := render.ManifestWebServer{App: "health", Hostname: "health.example.org", Path: p, SHA256: "ab", Server: "caddy"}
+		m, _ := json.Marshal(render.Manifest{Version: 1, WebServer: []render.ManifestWebServer{entry}})
+		var ran []string
+		h := webHost{&ran, map[string]string{manifestPath: string(m)}}
+		e := &Executor{}
+		if err := e.webServer(h, d, SitePlan{Site: "watch", WebServer: []render.ManifestWebServer{entry}}); err != nil {
+			t.Fatal(err)
+		}
+		if len(ran) != 0 {
+			t.Errorf("%s: ran %v", p, ran)
+		}
+		if !strings.Contains(strings.Join(e.Kept, "\n"), "not a reference file of this deployment's. It names "+p+",") {
+			t.Errorf("%s: kept %v", p, e.Kept)
+		}
+		var after render.Manifest
+		json.Unmarshal([]byte(h.manifest[manifestPath]), &after)
+		if len(after.WebServer) != 1 {
+			t.Errorf("%s: manifest %+v", p, after)
+		}
 	}
 }

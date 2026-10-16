@@ -253,3 +253,64 @@ func TestApplyFailsWhereTheReferenceRecordCannotBeRead(t *testing.T) {
 		t.Errorf("output:\n%s", rec.Lines())
 	}
 }
+
+// A reference file deleted or edited on the host is written again: apply
+// compares the file itself, not only the manifest. The owner's copy still
+// matches what apply writes, so it is not called a rewrite.
+func TestApplyRestoresADeletedOrEditedReferenceFile(t *testing.T) {
+	fakeConverge(t, nil)
+	fakeWebServerCheck(t, certificateFails)
+	path := externalFixture(t)
+	h := fakeWebServerFiles(t, path)
+	recordConverge(t)
+	convergeAt(t, path, "--execute")
+	want := h.files[healthReference]
+	for name, change := range map[string]func(){
+		"deleted": func() { delete(h.files, healthReference) },
+		"edited":  func() { h.files[healthReference] = "somebody else's" },
+	} {
+		change()
+		h.written = nil
+		rec := recordConverge(t)
+		err := convergeAt(t, path, "--execute")
+		if h.files[healthReference] != want || !slices.Contains(h.written, healthReference) {
+			t.Errorf("%s: not restored, wrote %v", name, h.written)
+		}
+		if hint, explain := ui.Describe(err); strings.Contains(hint+explain, "replaces their copy") {
+			t.Errorf("%s: called a rewrite: %s\n%s", name, explain, rec.Lines())
+		}
+	}
+}
+
+// A manifest entry that is not a reference file of this deployment's, by a
+// path with .., an absolute path elsewhere, or a clean path in the root but
+// outside web-server/, is never deleted: apply reports it and keeps it.
+func TestApplyKeepsAForeignReferenceEntry(t *testing.T) {
+	for _, bad := range []string{"/srv/paisans/f2a9/web-server/../../../etc/passwd", "/etc/passwd", "/srv/paisans/f2a9/health/compose.yaml"} {
+		fakeConverge(t, nil)
+		fakeWebServerCheck(t, nil)
+		path := externalFixture(t)
+		h := fakeWebServerFiles(t, path)
+		m, _ := json.Marshal(render.Manifest{Version: 1, WebServer: []render.ManifestWebServer{{App: "blog", Path: bad, SHA256: sha("x"), Server: "caddy"}}})
+		h.files[manifestFile] = string(m)
+		h.files[bad] = "x"
+		rec := recordConverge(t)
+		if err := convergeAt(t, path, "--execute"); err != nil {
+			t.Fatalf("%s: %v\n%s", bad, err, rec.Lines())
+		}
+		if _, ok := h.files[bad]; !ok {
+			t.Errorf("%s was deleted", bad)
+		}
+		for _, c := range h.ran {
+			if strings.Contains(c, bad) {
+				t.Errorf("ran %s", c)
+			}
+		}
+		if !rec.Has("warn", "not a reference file of this deployment's: "+bad) {
+			t.Errorf("%s: not reported:\n%s", bad, rec.Lines())
+		}
+		if got := h.record(t); len(got) != 2 {
+			t.Errorf("%s: record %+v", bad, got)
+		}
+	}
+}

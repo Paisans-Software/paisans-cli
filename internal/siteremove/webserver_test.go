@@ -57,37 +57,39 @@ func TestSiteRemoveNamesTheBlockTheOwnerRemoves(t *testing.T) {
 	}
 }
 
-// A web server entry whose path is not clean is never read or deleted: the
-// manifest is the deployment user's own file. It is kept and reported, and
-// the clean entry beside it still goes.
-func TestAnUncleanReferenceFileIsKept(t *testing.T) {
-	w := setup(t)
-	h := referenceOn(t, w, "watch")
-	bad := "/srv/paisans/f2a9/web-server/../../../etc/passwd"
-	var m render.Manifest
-	if err := json.Unmarshal([]byte(h.files[dep.Manifest()]), &m); err != nil {
-		t.Fatal(err)
-	}
-	m.WebServer = append(m.WebServer, render.ManifestWebServer{App: "health", Path: bad, SHA256: sum("x"), Server: "caddy", Config: "/etc/caddy/Caddyfile"})
-	data, _ := json.Marshal(m)
-	h.files[dep.Manifest()] = string(data)
-	p := forced(t, w, w.cfg, "watch", w.cfg.Sites["watch"].Destination(), siteremove.Options{})
-	if strings.Contains(printed(p), bad) {
-		t.Errorf("the plan names %s:\n%s", bad, printed(p))
-	}
-	if !strings.Contains(strings.Join(p.Kept, "\n"), bad+": not a clean path") {
-		t.Errorf("kept %q", p.Kept)
-	}
-	if err := siteremove.Execute(p); err != nil {
-		t.Fatal(err)
-	}
-	for _, c := range h.commands {
-		if strings.Contains(c, "../") {
-			t.Errorf("ran %s", c)
+// A web server entry that is not a reference file of this deployment's, by
+// a path with .., or a clean one outside the reference directory, is never
+// read or deleted: the manifest is the deployment user's own file. It is
+// kept and reported, and the reference file beside it still goes.
+func TestAForeignReferenceEntryIsKept(t *testing.T) {
+	for _, bad := range []string{"/srv/paisans/f2a9/web-server/../../../etc/passwd", "/etc/passwd", "/srv/paisans/f2a9/health/compose.yaml"} {
+		w := setup(t)
+		h := referenceOn(t, w, "watch")
+		var m render.Manifest
+		if err := json.Unmarshal([]byte(h.files[dep.Manifest()]), &m); err != nil {
+			t.Fatal(err)
 		}
-	}
-	if _, ok := h.files[referenceFile]; ok {
-		t.Error("the clean reference file stayed")
+		m.WebServer = append(m.WebServer, render.ManifestWebServer{App: "health", Path: bad, SHA256: sum("x"), Server: "caddy", Config: "/etc/caddy/Caddyfile"})
+		data, _ := json.Marshal(m)
+		h.files[dep.Manifest()] = string(data)
+		p := forced(t, w, w.cfg, "watch", w.cfg.Sites["watch"].Destination(), siteremove.Options{})
+		if hasStepIn(stageNamed(p, "clean the host"), "watch", "remove", bad) {
+			t.Errorf("the plan removes %s:\n%s", bad, printed(p))
+		}
+		if !strings.Contains(strings.Join(p.Kept, "\n"), bad+": not a reference file of this deployment's") {
+			t.Errorf("%s: kept %q", bad, p.Kept)
+		}
+		if err := siteremove.Execute(p); err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range h.commands {
+			if strings.Contains(c, "rm -f -- '"+bad+"'") || strings.Contains(c, "../") {
+				t.Errorf("ran %s", c)
+			}
+		}
+		if _, ok := h.files[referenceFile]; ok {
+			t.Error("the reference file stayed")
+		}
 	}
 }
 

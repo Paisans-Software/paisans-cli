@@ -26,9 +26,8 @@ type webServerFiles struct {
 	headed bool
 	// apps is each app's reference file, by app.
 	apps map[string]*siteFile
-	// warned are the steps that ended on a warning, an app's title or a
-	// site's, and failed those that failed outright.
-	warned, failed []string
+	// failed are the steps that failed outright.
+	failed []string
 }
 
 // siteFile is what the reference step came to for one app.
@@ -127,15 +126,23 @@ func writeWebServerFiles(r ui.Reporter, cfg *config.Config, configPath string, s
 			for _, ref := range webserver.References(d, target, ws) {
 				wanted[ref.Path] = true
 				entry := render.ManifestWebServer{App: app, Hostname: target.Hostname, Path: ref.Path, SHA256: sha(ref.Content), Server: string(ref.Server), Container: ws.Container, Config: ws.Config}
+				// The file itself is compared, not only its entry: one
+				// deleted or edited on the host is written again. A changed
+				// snippet is a rewrite the owner's copy lacks.
 				prev, had := recordedAt(recorded, ref.Path)
-				if !had || prev.SHA256 != entry.SHA256 {
+				onHost, found, err := t.ReadFile(ref.Path)
+				if err != nil {
+					werr = fmt.Errorf("reading %s: %w", ref.Path, err)
+					break
+				}
+				if !found || onHost != ref.Content {
 					if err := t.WriteFile(ref.Path, ref.Content, 0o644); err != nil {
 						werr = fmt.Errorf("writing %s: %w", ref.Path, err)
 						break
 					}
-					sf.changed = sf.changed || had
 					step.Detail("wrote %s", ref.Path)
 				}
+				sf.changed = sf.changed || (had && prev.SHA256 != entry.SHA256)
 				paths = append(paths, ref.Path)
 				keep = append(keep, entry)
 			}
@@ -150,6 +157,13 @@ func writeWebServerFiles(r ui.Reporter, cfg *config.Config, configPath string, s
 		// step failed, which keeps what it had.
 		for _, e := range recorded {
 			if _, ok := recordedAt(keep, e.Path); ok {
+				continue
+			}
+			if !webserver.OwnReference(d, e.Path) {
+				// The manifest is the deployment user's own file: an entry
+				// outside the reference directory is never deleted.
+				r.Warn("not a reference file of this deployment's: "+e.Path, fmt.Sprintf("The manifest on %s lists it among the reference files, but it is not in %s, so apply neither read nor deleted it. Remove the entry from the manifest by hand once you know whose it is.", site, webserver.ReferenceDir(d)))
+				keep = append(keep, e)
 				continue
 			}
 			if wanted[e.Path] || failedApps[e.App] {
@@ -191,16 +205,6 @@ func (s webServerScope) recordHost(cfg *config.Config, site string) apply.Transp
 		return siteTransport(site, cfg.Sites[site], s.ssh)
 	}
 	return convergeHost(site, cfg.Sites[site])
-}
-
-// add counts a step that ended on m.
-func (w *webServerFiles) add(title string, m ui.Mark) {
-	switch m {
-	case ui.Warned:
-		w.warned = append(w.warned, title)
-	case ui.Failed:
-		w.failed = append(w.failed, title)
-	}
 }
 
 // recordedAt is the entry for path in list.

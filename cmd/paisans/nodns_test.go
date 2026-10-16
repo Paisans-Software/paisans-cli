@@ -65,8 +65,6 @@ func TestMain(m *testing.M) {
 		}
 		return rec, nil
 	}
-	// No test waits between two web server checks.
-	fakeWebServerClock()
 	// No test spends most of a second on each OAuth2 key it fills: what
 	// they test is that a key is filled, opens with its passphrase and
 	// stays put, and secretsgen's tests hold the key to 4096 bits.

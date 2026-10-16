@@ -7,6 +7,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/webserver"
 )
 
 // Show lists the plan: a section per place it acts, a line per kind of thing
@@ -72,6 +73,10 @@ func (p *Plan) Show(r ui.Reporter) {
 			}
 		}
 		for _, f := range s.WebServer {
+			if !webserver.OwnReference(p.Deployment, f.Path) {
+				edited("keep the manifest entry for %s: not a reference file of this deployment's", f.Path)
+				continue
+			}
 			line("remove reference files", "remove the reference file %s; the host's owner removes the block from %s", f.Path, OwnerServer(s.WebServer))
 		}
 		dir := s.Dir

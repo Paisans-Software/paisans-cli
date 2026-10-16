@@ -61,6 +61,10 @@ func fileEdited(site, path string) string {
 	return fmt.Sprintf("%s: an edited file kept; delete it once nothing needs it, then run this again. It is %s, edited on the host since apply wrote it, so it stays with its manifest entry until it is deleted by hand", site, path)
 }
 
+func foreignReference(site, path string) string {
+	return fmt.Sprintf("%s: a manifest entry kept, not a reference file of this deployment's. It names %s, outside the deployment's web-server directory, so nothing was read or deleted there; remove the entry from the manifest by hand once you know whose it is", site, path)
+}
+
 // OwnerBlocks is, per app, what the host's owner still does once its
 // reference files are gone: remove from their web server the block they
 // copied from them, which nothing of the deployment's can touch.

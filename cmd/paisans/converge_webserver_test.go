@@ -5,7 +5,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -193,117 +192,29 @@ func TestConvergeFailedWebServerAndAdminFails(t *testing.T) {
 	}
 }
 
-// webServerClock is the clock every test's web server check waits on: it
-// stands still but for each wait, which moves it on at once, so no test
-// waits. TestMain installs it.
-var webServerClock time.Time
-
-func fakeWebServerClock() {
-	webServerNow = func() time.Time { return webServerClock }
-	webServerSleep = func(d time.Duration) { webServerClock = webServerClock.Add(d) }
-}
-
-// recordWaits records each wait between two web server checks.
-func recordWaits(t *testing.T) *[]time.Duration {
-	t.Helper()
-	var waits []time.Duration
-	saved := webServerSleep
-	webServerSleep = func(d time.Duration) {
-		waits = append(waits, d)
-		saved(d)
-	}
-	t.Cleanup(func() { webServerSleep = saved })
-	return &waits
-}
-
-func total(waits []time.Duration) time.Duration {
-	var sum time.Duration
-	for _, d := range waits {
-		sum += d
-	}
-	return sum
-}
-
-// A certificate the web server is still obtaining fails the check for a
-// while after its site is reloaded, so a certificate or sign in failure is
-// checked again, after 2s, then 4s, and on, until it passes. The line then
-// passes, saying how long it waited, and says while it waits what for.
-func TestConvergeWaitsForACertificate(t *testing.T) {
-	fakeConverge(t, nil)
-	externalWatch(t)
-	fakeWebServerCheck(t, nil)
-	waits := recordWaits(t)
-	checks := 0
-	convergeWebServerCheck = func(target webserver.Target) []webserver.Result {
-		checks++
-		if checks < 3 {
-			return tlsInternal["health"]
-		}
-		return []webserver.Result{{Name: webserver.CheckCertificate, OK: true, Detail: "https://health.example.org/healthz answered 200"}}
-	}
-	rec := recordConverge(t)
-	if err := converge(t, "--execute"); err != nil {
-		t.Fatalf("%v\n%s", err, rec.Lines())
-	}
-	if checks != 3 || !slices.Equal(*waits, []time.Duration{2 * time.Second, 4 * time.Second}) {
-		t.Errorf("checked %d times, waited %v", checks, *waits)
-	}
-	if !rec.Has("progress", "waiting for the certificate") {
-		t.Errorf("no progress while waiting:\n%s", rec.Lines())
-	}
-	if i := rec.Index("done", "health"); i < 0 || rec.Events[i].Extra != "health.example.org, after 6s" || !rec.Has("result", "Deployment complete.") {
-		t.Errorf("output:\n%s", rec.Lines())
-	}
-}
-
-// A certificate that never comes is checked for a minute, no longer, and
-// then fails as a check run once does.
-func TestConvergeWaitsAMinuteAtMost(t *testing.T) {
-	fakeConverge(t, nil)
-	externalWatch(t)
-	checked := fakeWebServerCheck(t, certificateFails)
-	waits := recordWaits(t)
-	rec := recordConverge(t)
-	converge(t, "--execute")
-	if total(*waits) != time.Minute || !slices.Equal(*waits, []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 30 * time.Second}) {
-		t.Errorf("waited %v", *waits)
-	}
-	if len(*checked) != len(*waits)+1 {
-		t.Errorf("checked %d times after %d waits", len(*checked), len(*waits))
-	}
-	i := rec.Index("warned", "health")
-	if i < 0 || rec.Events[i].Extra != "health.example.org" || rec.Events[i+1].Kind != "explain" ||
-		!strings.Contains(rec.Events[i+1].Text, "certificate: the certificate is not valid for health.example.org: it names watch.example.org") {
-		t.Fatalf("not the check's warning:\n%s", rec.Lines())
-	}
-}
-
-// Waiting cannot fix a name that does not resolve, or an app reachable
-// around the web server, so those fail at once, whatever else fails beside
-// them.
-func TestConvergeDoesNotWaitOnWhatWaitingCannotFix(t *testing.T) {
+// apply checks each app once and warns at once: nothing apply does makes
+// the owner's web server serve the app, so waiting on a certificate it may
+// still be obtaining would cost every run a minute while the owner has not
+// installed the snippet. web-server check is how the operator checks again.
+func TestConvergeChecksOnceAndDoesNotWait(t *testing.T) {
 	for name, results := range map[string][]webserver.Result{
+		"certificate": certificateFails["health"],
+		"tls":         tlsInternal["health"],
 		"dns": {
 			{Name: webserver.CheckDNS, Detail: "health.example.org does not resolve"},
 			{Name: webserver.CheckCertificate, Detail: "https://health.example.org/healthz: no such host"},
-		},
-		"upstream": {
-			{Name: webserver.CheckDNS, OK: true, Detail: "health.example.org resolves to 203.0.113.20"},
-			{Name: webserver.CheckCertificate, OK: true, Detail: "https://health.example.org/healthz answered 200"},
-			{Name: webserver.CheckUpstream, Detail: "203.0.113.20:8480 answers"},
 		},
 	} {
 		fakeConverge(t, nil)
 		externalWatch(t)
 		checked := fakeWebServerCheck(t, map[string][]webserver.Result{"health": results})
-		waits := recordWaits(t)
 		rec := recordConverge(t)
 		converge(t, "--execute")
-		if len(*checked) != 1 || len(*waits) != 0 {
-			t.Errorf("%s: checked %d times, waited %v", name, len(*checked), *waits)
+		if len(*checked) != 1 || rec.Has("progress", "waiting for") {
+			t.Errorf("%s: checked %d times:\n%s", name, len(*checked), rec.Lines())
 		}
-		if rec.Has("progress", "waiting for") {
-			t.Errorf("%s: said it was waiting:\n%s", name, rec.Lines())
+		if i := rec.Index("warned", "health"); i < 0 || rec.Events[i].Extra != "health.example.org" || rec.Events[i+1].Kind != "explain" {
+			t.Errorf("%s: not the check's warning:\n%s", name, rec.Lines())
 		}
 	}
 }
