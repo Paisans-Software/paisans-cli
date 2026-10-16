@@ -193,6 +193,13 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 		Store: store,
 		Sites: transports,
 		Apply: func(site string, s *config.Secrets, stacks []string) error {
+			held, err := store.Load()
+			if err != nil {
+				return err
+			}
+			if err := checkMailForRotation(r, cfg, held, s, site, stacks); err != nil {
+				return err
+			}
 			return rotateApply(r, cfg, transports[site], site, s, stacks)
 		},
 		Healthy: func(site string, stacks []string) error {
@@ -206,6 +213,7 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 		Now:         time.Now,
 		DNSProvider: rotateDNSProvider,
 		Mail:        localSMTPEnv(),
+		Warn:        onceEach(r.Note),
 	}
 	run, err := ui.Get(r, "read where each secret stands", func() (*secretsrotate.Run, error) {
 		if err := checkReplaced(env, replacedRs); err != nil {
@@ -876,3 +884,15 @@ func refuseMidRotation(secrets *config.Secrets, command string) error {
 // cannotFinish is where a refusal over a rotation that cannot finish sends
 // the operator.
 const cannotFinish = secretsrotate.CannotFinish
+
+// onceEach is note, saying each hint once however often it is given: the
+// plan and stage 2 both try a value, and both find the same thing untried.
+func onceEach(note func(hint, detail string)) func(hint, detail string) {
+	said := map[string]bool{}
+	return func(hint, detail string) {
+		if !said[hint] {
+			said[hint] = true
+			note(hint, detail)
+		}
+	}
+}

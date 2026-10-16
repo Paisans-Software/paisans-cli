@@ -83,8 +83,41 @@ func checkMailForApply(r ui.Reporter, cfg *config.Config, secrets *config.Secret
 	if len(checks) == 0 {
 		return nil
 	}
-	env := smtpEnv(cfg, ssh)
 	r.Section("mail")
+	return tryMailFromSites(r, cfg, secrets, checks, ssh, " Then apply again. Nothing was changed.", " Nothing was changed.")
+}
+
+// checkMailForRotation is how a rotation's scoped apply tries an SMTP
+// password before it hands one to site: every app among stacks there whose
+// password in handed differs from the one the secrets file holds (held)
+// logs in from site, as apply's own check does, and nothing is sent. It is
+// what tries a password this machine could not reach the server to try.
+func checkMailForRotation(r ui.Reporter, cfg *config.Config, held, handed *config.Secrets, site string, stacks []string) error {
+	var checks []smtpcheck.Check
+	for _, c := range mailChecks(cfg, handed, []string{site}, stacks) {
+		if c.PasswordPath == "" {
+			continue
+		}
+		next, _ := handed.Get(c.PasswordPath)
+		was, _ := held.Get(c.PasswordPath)
+		ui.Secret(next)
+		ui.Secret(was)
+		if next != was {
+			checks = append(checks, c)
+		}
+	}
+	after := " " + site + " was not handed it."
+	return tryMailFromSites(r, cfg, handed, checks, nil, after, after)
+}
+
+// tryMailFromSites logs in with each of checks from its site, after says
+// what was left unchanged by a refusal, and reached by one that could not
+// be made.
+func tryMailFromSites(r ui.Reporter, cfg *config.Config, secrets *config.Secrets, checks []smtpcheck.Check, ssh map[string]string, after, unreached string) error {
+	if len(checks) == 0 {
+		return nil
+	}
+	env := smtpEnv(cfg, ssh)
 	for _, c := range checks {
 		step := r.Step(c.Title())
 		if c.Skip != "" {
@@ -102,9 +135,9 @@ func checkMailForApply(r ui.Reporter, cfg *config.Config, secrets *config.Secret
 			var failed *smtpcheck.Error
 			if errors.As(err, &failed) && failed.Dialled() {
 				hint, explain := mailFailure(cfg, failed)
-				return &ui.Problem{Hint: hint, Explain: explain + " Then apply again. Nothing was changed.", Cause: err}
+				return &ui.Problem{Hint: hint, Explain: explain + after, Cause: err}
 			}
-			return &ui.Problem{Hint: c.Site + " could not be reached to try " + c.Whose(), Explain: "apply tries every app's mail settings from its site before anything changes. Nothing was changed.", Cause: err}
+			return &ui.Problem{Hint: c.From() + " could not be reached to try " + c.Whose(), Explain: "every app's mail settings are tried from its site before anything there changes." + unreached, Cause: err}
 		}
 		if c.PasswordPath != "" {
 			step.Done("logs in")
@@ -227,7 +260,11 @@ func trySMTPPassword(r ui.Reporter, cfg *config.Config, secrets *config.Secrets,
 			}
 		}
 		step.End(ui.Warned, "not reached")
-		r.Explain(fmt.Sprintf("%s could not be reached from %s (%s), so %s is written untried. `paisans apply` tries it from each site running %s before it changes anything.", c.Address(), c.From(), strings.TrimSuffix(ui.Redact(err.Error()), "."), key, appsOf(c)))
+		why := err.Error()
+		if errors.As(err, &failed) {
+			why = failed.Reply()
+		}
+		r.Explain(fmt.Sprintf("%s could not be reached from %s (%s), so %s is written untried. `paisans apply` tries it from each site running %s before it changes anything.", c.Address(), c.From(), strings.TrimSuffix(ui.Redact(why), "."), key, appsOf(c)))
 	}
 	return nil
 }

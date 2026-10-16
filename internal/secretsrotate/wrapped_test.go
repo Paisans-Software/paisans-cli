@@ -862,3 +862,36 @@ func endedWith(rec *ui.Recorder, text string) bool {
 	}
 	return false
 }
+
+// A mail server this machine cannot reach leaves the password untried, as
+// `secrets set` leaves it: the run is told so, naming this machine and not a
+// blank site, and goes on, since the scoped apply at each site tries it from
+// there before handing it out.
+func TestSMTPPasswordNotReachedFromThisMachineIsWarnedAndHandedOut(t *testing.T) {
+	w := newWrapWorld(t)
+	w.mail.Unreachable = map[string]error{"": errors.New("dial tcp: connection refused")}
+	s, _ := w.store.Load()
+	s.External["smtp_password"] = "fixture-not-a-secret-smtp-reissued"
+	_ = w.store.Save(s)
+	e := w.env()
+	var warned []string
+	e.Warn = func(hint, detail string) { warned = append(warned, hint+"\n"+detail) }
+	run, err := Plan(e, []Rotator{SMTPPassword("external.smtp_password")})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if err := run.Execute(e, nil); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(warned) == 0 {
+		t.Fatal("nothing was warned")
+	}
+	for _, text := range warned {
+		if !strings.Contains(text, "from this machine") || strings.HasPrefix(text, " ") || strings.Contains(text, "reach the site") {
+			t.Errorf("warning %q", text)
+		}
+	}
+	if s, _ := w.store.Load(); s.External["smtp_password"] != "fixture-not-a-secret-smtp-reissued" || len(s.Rotations) != 0 {
+		t.Errorf("after: %v", s.Rotations)
+	}
+}

@@ -201,6 +201,33 @@ func TestSiteNotReached(t *testing.T) {
 	if !errors.As(err, &e) || e.Dialled() {
 		t.Fatalf("err = %v, want one that never dialled", err)
 	}
+	// The stage reads the same from a site and from this machine, where
+	// there is no site to reach.
+	if got := e.Reply(); !strings.HasPrefix(got, "connect: ") {
+		t.Errorf("reply %q, want the connect stage", got)
+	}
+}
+
+// TryPassword goes past a check whose server cannot be reached from where it
+// is dialled, and says which ones: nothing was learned there, so it is not a
+// failure. Every other check is still made.
+func TestTryPasswordGoesPastAServerNotReached(t *testing.T) {
+	server := smtptest.New()
+	server.Users = map[string]string{"robot@example.org": password}
+	server.Unreachable = map[string]error{"": errors.New("dial tcp: connection refused")}
+	cfg, s := deployment()
+	tried, err := smtpcheck.TryPassword(server.Env(), cfg, s, "external.smtp_password", password, "paisans secrets rotate", false)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if len(tried.Unreached) == 0 || len(tried.Made) != 0 {
+		t.Fatalf("tried %+v", tried)
+	}
+	for _, u := range tried.Unreached {
+		if u.Dialled() || u.Check.From() != "this machine" {
+			t.Errorf("unreached %v", u)
+		}
+	}
 }
 
 func TestSendTheTestMessage(t *testing.T) {

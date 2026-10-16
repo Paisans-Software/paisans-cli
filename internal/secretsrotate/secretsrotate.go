@@ -69,6 +69,16 @@ type Env struct {
 	// from the machine the command runs on. Tests dial an in-process
 	// server, since none may reach a real one.
 	Mail smtpcheck.Env
+	// Warn is told what was left untried and why, Eg: a mail server this
+	// machine cannot reach, so the run goes on with the operator told.
+	// Nil discards it.
+	Warn func(hint, detail string)
+}
+
+func (e Env) warn(hint, detail string) {
+	if e.Warn != nil {
+		e.Warn(hint, detail)
+	}
 }
 
 // CannotFinish is what every refusal over a pending rotation that cannot

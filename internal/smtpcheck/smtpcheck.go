@@ -323,14 +323,15 @@ func (e *Error) Reply() string {
 	return e.Stage + ": " + ui.Redact(strings.TrimSpace(text))
 }
 
-// Dialled reports whether the connection to the site was made: false when
-// the site itself was not reached, so nothing about the mail server was
-// learned.
-func (e *Error) Dialled() bool { return e.Stage != stageSite }
+// Dialled reports whether the connection to the mail server was made:
+// false when it could not be opened from where the check is dialled, a site
+// or this machine, so nothing about the mail server was learned.
+func (e *Error) Dialled() bool { return e.Stage != stageConnect }
 
-const stageSite = "reach the site"
+// stageConnect is opening the connection, from a site or from this machine.
+const stageConnect = "connect"
 
-// converse is the conversation: dial from the site, TLS for tls, EHLO,
+// converse is the conversation: dial from the site or this machine, TLS for tls, EHLO,
 // STARTTLS for starttls, AUTH when a username is declared, and the message
 // when there is one, then QUIT. Every step must succeed.
 func converse(e Env, c Check, password string, m *Mail) error {
@@ -339,7 +340,7 @@ func converse(e Env, c Check, password string, m *Mail) error {
 	}
 	fail := func(stage string, err error) error { return &Error{Check: c, Stage: stage, Err: err} }
 	if e.Dial == nil {
-		return fail(stageSite, errors.New("no way to reach the site"))
+		return fail(stageConnect, errors.New("no way to dial the mail server"))
 	}
 	timeout := e.Timeout
 	if timeout == 0 {
@@ -351,7 +352,7 @@ func converse(e Env, c Check, password string, m *Mail) error {
 	}
 	conn, err := e.Dial(c.Site, c.Address())
 	if err != nil {
-		return fail(stageSite, err)
+		return fail(stageConnect, err)
 	}
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(timeout))
@@ -367,7 +368,7 @@ func converse(e Env, c Check, password string, m *Mail) error {
 	}
 	client, err := smtp.NewClient(conn, host)
 	if err != nil {
-		return fail("connect", explainConnect(err))
+		return fail("greeting", explainConnect(err))
 	}
 	defer client.Close()
 	if err := client.Hello("localhost"); err != nil {
@@ -560,17 +561,21 @@ func Recipients(cfg *config.Config) ([]string, error) {
 	return out, nil
 }
 
-// Tried is the outcome of trying a password: the checks made and those
-// skipped, with why.
+// Tried is the outcome of trying a password: the checks made, those
+// skipped, with why, and those whose server could not be reached from where
+// they were dialled, with the error.
 type Tried struct {
 	Made, Skipped []Check
+	Unreached     []*Error
 }
 
 // TryPassword tries value as the password at path, as `secrets set` and
 // `secrets rotate` do before it is written or handed out: every check
 // ForPassword finds is made, logging in and, with send, sending the test
 // message to the operators from each sender. secrets is copied, not changed.
-// The first failure is returned.
+// A check whose server cannot be reached from where it is dialled learned
+// nothing, so it is listed in Unreached and the rest are still made. The
+// first other failure is returned.
 func TryPassword(e Env, cfg *config.Config, secrets *config.Secrets, path, value, command string, send bool) (Tried, error) {
 	ui.Secret(value)
 	probe := withValue(secrets, path, value)
@@ -591,6 +596,11 @@ func TryPassword(e Env, cfg *config.Config, secrets *config.Secrets, path, value
 			err = Send(e, c, value, TestMail(cfg, c, path, command, to))
 		} else {
 			err = Login(e, c, value)
+		}
+		var failed *Error
+		if errors.As(err, &failed) && !failed.Dialled() {
+			tried.Unreached = append(tried.Unreached, failed)
+			continue
 		}
 		if err != nil {
 			return tried, err

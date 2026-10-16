@@ -110,19 +110,14 @@ func (p pasted) Checked(e Env, next string) error {
 // resumed run plans it and Checked says why. An SMTP password is only logged
 // in with here: the plan reads it, and stage 2 reads it again, and neither
 // sends mail. The one test message is sent where the value was given, by
-// `secrets set` or when it was pasted. A site that could not be reached is an
-// error, since nothing was learned.
+// `secrets set` or when it was pasted. A server this machine cannot reach is
+// accepted with a warning (smtpCheck).
 func (p pasted) Accepts(e Env, next string) (bool, error) {
 	switch {
 	case p.dns:
 		return dnsCheck(e, next) == nil, nil
 	case p.smtp:
-		err := smtpCheck(e, p.path, next, false)
-		var failed *smtpcheck.Error
-		if errors.As(err, &failed) && !failed.Dialled() {
-			return false, err
-		}
-		return err == nil, nil
+		return smtpCheck(e, p.path, next, false) == nil, nil
 	}
 	return true, nil
 }
@@ -130,7 +125,7 @@ func (p pasted) Accepts(e Env, next string) (bool, error) {
 // CheckText is what the plan says stage 2 does for the secret.
 func (p pasted) CheckText(cfg *config.Config) string {
 	if p.smtp {
-		return "the next password logs in to the mail server from this machine; a pasted one also sends the operators a test message when pasted, as `paisans secrets set` does"
+		return "the next password logs in to the mail server from this machine; a pasted one also sends the operators a test message when pasted, as `paisans secrets set` does. Each site tries it again before it is handed the password, and a server this machine cannot reach is tried from the sites alone"
 	}
 	if !p.dns {
 		return "nothing checks it here: " + p.issuer(cfg) + " issued it"
@@ -185,24 +180,30 @@ func dnsCheck(e Env, token string) error {
 }
 
 // smtpCheck tries password as the SMTP password at path, from the machine
-// the command runs on, for each sender that logs in with it, with send also sending the operators the
-// test message (smtpcheck.TryPassword). A failure names the server's reply,
-// never the password. Settings nothing can be tried from, Eg: a relay only
-// the app's own network resolves, are not tried.
+// the command runs on, for each sender that logs in with it, with send also
+// sending the operators the test message (smtpcheck.TryPassword). A failure
+// names the server's reply, never the password. Settings nothing can be
+// tried from, Eg: a relay only the app's own network resolves, are not
+// tried. A server this machine cannot reach is warned about and left
+// untried, as `secrets set` leaves it: the scoped apply that hands the
+// password to each site tries it from there first.
 func smtpCheck(e Env, path, password string, send bool) error {
 	s, err := e.Store.Load()
 	if err != nil {
 		return err
 	}
-	if _, err := smtpcheck.TryPassword(e.Mail, e.Cfg, s, path, password, "paisans secrets rotate", send); err != nil {
+	tried, err := smtpcheck.TryPassword(e.Mail, e.Cfg, s, path, password, "paisans secrets rotate", send)
+	if err != nil {
 		var failed *smtpcheck.Error
-		switch {
-		case errors.As(err, &failed) && failed.Dialled():
+		if errors.As(err, &failed) {
 			return fmt.Errorf("the SMTP password does not work for %s: %w, so no app is handed it. Check it at the mail provider", failed.Check.Whose(), failed)
-		case errors.As(err, &failed):
-			return fmt.Errorf("%s could not be reached to try the SMTP password for %s (%w), so no app is handed it", failed.Check.Site, failed.Check.Whose(), failed)
 		}
 		return err
+	}
+	for _, u := range tried.Unreached {
+		c := u.Check
+		e.warn(path+" is not tried for "+c.Whose()+" from "+c.From(),
+			fmt.Sprintf("%s could not be reached from %s (%s), so %s goes on untried. Each site running %s tries it from there before it is handed the password.", c.Address(), c.From(), strings.TrimSuffix(ui.Redact(u.Reply()), "."), path, strings.TrimSuffix(c.Whose(), "'s mail")))
 	}
 	return nil
 }
