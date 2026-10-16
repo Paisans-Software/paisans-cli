@@ -274,11 +274,22 @@ func TestUnknownWatchdogModeIsRefused(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "sites.home-a.watchdog") {
 		t.Fatalf("an unknown watchdog mode loaded: %v", err)
 	}
-	for _, mode := range []string{"auto", "required", "softdog", "off"} {
+	for _, mode := range []string{"auto", "required", "softdog"} {
 		body := strings.Replace(minimal, "    address: 10.44.0.1\n", "    address: 10.44.0.1\n    watchdog: "+mode+"\n", 1)
 		if _, err := config.Load(write(t, body)); err != nil {
 			t.Errorf("watchdog %s was refused: %v", mode, err)
 		}
+	}
+}
+
+// watchdog: off is not a mode. A data site's Patroni needs a watchdog to fail
+// over safely and no other site uses one, so the loader refuses it on any
+// site and names the modes that exist.
+func TestWatchdogOffIsRefused(t *testing.T) {
+	body := strings.Replace(minimal, "    address: 10.44.0.1\n", "    address: 10.44.0.1\n    watchdog: off\n", 1)
+	_, err := config.Load(write(t, body))
+	if err == nil || !strings.Contains(err.Error(), "sites.home-a.watchdog") || !strings.Contains(err.Error(), "auto, required and softdog") {
+		t.Fatalf("watchdog: off loaded or was refused without naming the modes: %v", err)
 	}
 }
 

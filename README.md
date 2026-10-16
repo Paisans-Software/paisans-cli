@@ -4174,7 +4174,7 @@ sites:
       host: home-a.local
       user: ubuntu
       keys: [alice]
-    watchdog: auto   # auto | required | softdog | off; auto when absent
+    watchdog: auto   # auto | required | softdog; auto when absent
 ```
 
 | Mode | What `host prepare` does | What is rendered |
@@ -4182,7 +4182,6 @@ sites:
 | `auto` | uses the device the host has, whatever its driver; with none, loads and persists `softdog` and prints a warning | `required`, device mapped |
 | `required` | refuses unless a driver other than `softdog` is present | `required`, device mapped |
 | `softdog` | loads and persists `softdog`; warns only when a hardware or hypervisor watchdog is present, because Patroni opens that device rather than softdog | `required`, device mapped |
-| `off` | nothing | `off`, no device mapping |
 
 **`softdog` is a fallback, never the assumption.** It is a kernel timer, so it
 reboots a machine whose Patroni hung but not one whose kernel did, and a hung
@@ -4190,11 +4189,11 @@ kernel is exactly the case where the node cannot fence itself any other way. A
 hardware or hypervisor watchdog is better wherever one exists, and `auto` takes
 the real one when it is there.
 
-**`off` is refused on a data site** (`watchdog-off-on-data-site`). A Patroni
-member without a watchdog can keep acting as leader after it has lost its
-lock, so failover is not safe without one, and the host's owner admits a data
-site only with `paisans host admit --watchdog`. `off` remains on every other
-site, where nothing maps the device.
+**`off` is not a mode.** A data site's Patroni needs a watchdog to fail over
+safely: a member without one can keep acting as leader after it has lost its
+lock. No other site uses one, so the loader refuses `watchdog: off` on any
+site, and the host's owner admits a data site only with `paisans host admit
+--watchdog`.
 
 **Only one process can hold the device, and it has to be Patroni.** `host
 prepare` refuses a host where systemd's own runtime watchdog
@@ -9049,7 +9048,7 @@ at, and "could not look" is not "looked and it was fine".
 | Registry | new site | `/var/lib/paisans/registry.json`, read and never claimed | another deployment there holds this one's token, root, interface or listen port, a mesh subnet overlapping this one's, or the gateway or data role this one claims |
 | Platform | new data site, against each existing data site | `/etc/os-release` `ID` and `VERSION_ID`, the release at the end of `ldd --version`'s first line, and `dpkg --print-architecture` | any of the four differs |
 | WireGuard | new site | `/sys/module/wireguard`, else `modprobe -n wireguard` | neither |
-| Watchdog | new data site, unless its mode is `off` | `/dev/watchdog` exists | it does not |
+| Watchdog | new data site | `/dev/watchdog` exists | it does not |
 | Ports | new site | the host check's `ss -Hltnup` against its claims | anything listens where the site will bind: the port it is dialled on, UDP, on a site with a `public_address` or an `endpoint`; 2379 or 2380 for an etcd member; 5432, 8008 or 8009 for a data site; the cluster port and 8404 where the site runs HAProxy; 3900 to 3903 for a Garage site; 80 and 443 for a gateway or a monitor in `managed_by: paisans`; `listen` for a monitor in `managed_by: external`; each app's published port |
 | Mesh | new site | `ip -j route`, `ip -j addr`, `docker network inspect`, `/etc/docker/daemon.json` | a route, an address, a Docker network or a Docker address pool overlaps `mesh.subnet`, other than a route or address on this deployment's own interface (see *Two deployments on one host never share a mesh*) |
 | Routes | new site | `ip -j route` | a route overlaps `mesh.subnet`, other than one through `psns-<token>` |

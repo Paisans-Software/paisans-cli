@@ -81,7 +81,6 @@ func TestRulesFire(t *testing.T) {
 		{"mbin-rabbitmq-across-sites", "mbin-rabbitmq-across-sites", validate.Warn},
 		{"pocket-id-standby-marker-unknown", "pocket-id-standby-marker-unknown", validate.Warn},
 		{"image-for-absent-postgres", "image-for-absent-postgres", validate.Warn},
-		{"watchdog-off-on-data-site", "watchdog-off-on-data-site", validate.Refuse},
 		{"acme-provider-needs-an-image", "acme-provider-needs-an-image", validate.Refuse},
 		{"acme-image-is-stock-caddy", "acme-image-is-stock-caddy", validate.Refuse},
 		{"acme-image-is-latest", "acme-image-is-latest", validate.Refuse},
@@ -835,31 +834,6 @@ func TestACMEImageMayMoveWithinAMajorVersion(t *testing.T) {
 		if !refusedFor(validate.Check(cfg), "acme-image-is-latest", "acme.image") {
 			t.Errorf("%s was not refused, and it crosses Caddy major versions", image)
 		}
-	}
-}
-
-// A data site's Patroni member without a watchdog can keep acting as leader
-// after it has lost its lock, so failover is not safe without one; the
-// refusal says so and names the grant the host's owner gives.
-func TestWatchdogOffRefusalSaysWhy(t *testing.T) {
-	result := validate.Check(load(t, "watchdog-off-on-data-site"))
-	found := false
-	for _, f := range result.Findings {
-		if f.Rule != "watchdog-off-on-data-site" {
-			continue
-		}
-		found = true
-		if f.Level != validate.Refuse {
-			t.Errorf("watchdog: off on a data site is %v, want a refusal", f.Level)
-		}
-		for _, want := range []string{"lost its lock", "--watchdog"} {
-			if !strings.Contains(f.Message, want) {
-				t.Errorf("the refusal does not say %q: %s", want, f.Message)
-			}
-		}
-	}
-	if !found {
-		t.Fatal("watchdog: off on a data site was not reported")
 	}
 }
 

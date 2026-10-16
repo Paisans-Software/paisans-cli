@@ -107,7 +107,7 @@ func (f watchdogFacts) softdogLoaded() bool {
 
 // planWatchdog decides what a data site's watchdog needs, by the site's mode.
 //
-// Contention is checked first and refuses in every mode but off. Only one
+// Contention is checked first and refuses in every mode. Only one
 // process can open /dev/watchdog, and if systemd or a watchdog daemon already
 // has it, Patroni fails to open it at its first start, on a host that a plan
 // had just called prepared.
@@ -116,10 +116,6 @@ func planWatchdog(t Transport, d deployment.Deployment, profile Profile, site co
 	mode := site.WatchdogMode()
 	if !site.Has(config.RoleData) {
 		out.Present = append(out.Present, "watchdog: not needed, this site holds no data role")
-		return out, nil
-	}
-	if mode == config.WatchdogOff {
-		out.Present = append(out.Present, "watchdog: off, Patroni is rendered without one")
 		return out, nil
 	}
 

@@ -55,7 +55,6 @@ services:
       - patroni.env
     volumes:
       - {{ .Dir }}/postgres:/home/postgres/pgdata
-{{- if not .Site.WatchdogOff }}
     # Fencing needs the watchdog, and there is exactly one Patroni per data
     # bearing host, so there is exactly one claimant for the device.
     devices:
@@ -68,7 +67,6 @@ services:
     # rule) was tried first and rejected: chpst drops the group it relied on,
     # and any mode wide enough would let every local user arm the timer.
     command: ["/bin/sh", "-c", "chown postgres /dev/watchdog && exec /bin/sh /launch.sh init"]
-{{- end }}
 {{- end }}
 {{- if .Site.NeedsProxy }}
   haproxy:

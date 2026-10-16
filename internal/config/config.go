@@ -439,12 +439,9 @@ const (
 	// WatchdogSoftdog loads and persists softdog because the operator chose
 	// it, so no warning is printed.
 	WatchdogSoftdog WatchdogMode = "softdog"
-	// WatchdogOff leaves the host alone and renders Patroni without a
-	// watchdog at all.
-	WatchdogOff WatchdogMode = "off"
 )
 
-var knownWatchdogModes = map[WatchdogMode]bool{WatchdogAuto: true, WatchdogRequired: true, WatchdogSoftdog: true, WatchdogOff: true}
+var knownWatchdogModes = map[WatchdogMode]bool{WatchdogAuto: true, WatchdogRequired: true, WatchdogSoftdog: true}
 
 // WatchdogMode returns the site's declared mode, auto when none is declared.
 func (s Site) WatchdogMode() WatchdogMode {
@@ -1278,7 +1275,7 @@ func (c *Config) structural(noSubnet bool) error {
 			}
 		}
 		if site.Watchdog != "" && !knownWatchdogModes[site.Watchdog] {
-			add("sites.%s.watchdog: unknown value %q. Valid values are auto, required, softdog and off.", name, site.Watchdog)
+			add("sites.%s.watchdog: unknown value %q. Valid values are auto, required and softdog.", name, site.Watchdog)
 		}
 		if site.Arch != "" && !hostarch.Supported(site.Arch) {
 			add("sites.%s.arch: unknown value %q. The toolkit supports amd64 and arm64, and writes this line itself: delete it, and the next apply records what the host reports.", name, site.Arch)

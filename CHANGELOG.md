@@ -20,7 +20,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Changed
 
-- `validate` refuses `watchdog: off` on a data site, since a Patroni member without a watchdog can lead after losing its lock and the host's owner admits a data site only with `--watchdog`.
+- `watchdog: off` is refused, since a data site's Patroni needs a watchdog to fail over safely and no other site uses one.
 - `apps.*.hostname` and `apps.*.hostnames.*` must be lowercase DNS names of two labels or more, so a capital, a single label, an empty or over-long label or an underscore is refused by `validate`.
 - `sites.*.web_server.listen` must be an IPv4 loopback address or the site's own mesh address, its port written without leading zeros, as `host request` requires; `web-server-listen-not-this-host` refuses anything else.
 - `mesh.subnet` and `sites.*.address` must be written in canonical form, Eg: `10.44.0.0/24` and not `10.44.0.0/024`, as `host request` carries them.

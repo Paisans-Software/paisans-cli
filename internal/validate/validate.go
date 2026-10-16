@@ -209,7 +209,6 @@ func Check(cfg *config.Config) Result {
 	c.pocketIDStandbyMarkerUnknown()
 	c.imageForAbsentPostgres()
 	c.publicAddress()
-	c.watchdogOffOnDataSite()
 
 	sort.SliceStable(c.findings, func(i, j int) bool {
 		if c.findings[i].Level != c.findings[j].Level {
@@ -1786,22 +1785,6 @@ func throwawayCollisions(cfg *config.Config) ([]*render.ConfigCollision, error) 
 		return nil, err
 	}
 	return render.ConfigCollisions(cfg, &throwaway.secrets), nil
-}
-
-// watchdogOffOnDataSite refuses a data site without a watchdog. A Patroni
-// member without one can keep acting as leader after it has lost its lock,
-// so failover is not safe without it, and host admit refuses to admit a
-// data site without the owner's --watchdog grant whatever its mode: a
-// configuration that turns it off could never be admitted.
-func (c *checker) watchdogOffOnDataSite() {
-	for _, name := range c.cfg.SiteNames() {
-		site := c.cfg.Sites[name]
-		if site.Has(config.RoleData) && site.WatchdogMode() == config.WatchdogOff {
-			c.refuse("watchdog-off-on-data-site", fmt.Sprintf("sites.%s.watchdog", name),
-				"watchdog is off on a data site",
-				"is off on a site holding the data role. A Patroni member without a watchdog can keep acting as leader after it has lost its lock, so failover is not safe without one, and the host's owner admits a data site only with paisans host admit --watchdog. Use auto, required or softdog.")
-		}
-	}
 }
 
 // adminGroupNotAdmins warns about an app that reads its administrators from

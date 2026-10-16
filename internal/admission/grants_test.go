@@ -19,7 +19,6 @@ func TestNeeds(t *testing.T) {
 		want admission.Grants
 	}{
 		{"data", config.Site{Roles: []config.Role{config.RoleData}}, admission.Grants{Watchdog: true}},
-		{"data, watchdog off", config.Site{Roles: []config.Role{config.RoleData}, Watchdog: config.WatchdogOff}, admission.Grants{Watchdog: true}},
 		{"gateway", config.Site{Roles: []config.Role{config.RoleGateway}}, admission.Grants{PublicPorts: true}},
 		{"Caddy monitor", config.Site{Roles: []config.Role{config.RoleMonitor}}, admission.Grants{PublicPorts: true}},
 		{"external monitor", config.Site{Roles: []config.Role{config.RoleMonitor}, WebServer: external}, admission.Grants{}},

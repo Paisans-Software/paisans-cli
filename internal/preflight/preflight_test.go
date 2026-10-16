@@ -421,19 +421,6 @@ func TestTheMeshsOwnRouteIsNotACollision(t *testing.T) {
 	}
 }
 
-func TestWatchdogOffNeedsNoDevice(t *testing.T) {
-	prepared(t)
-	cfg := fixture(t)
-	site := cfg.Sites["home-b"]
-	site.Watchdog = config.WatchdogOff
-	cfg.Sites["home-b"] = site
-	h := hosts()
-	h["home-b"].override(rule{match: "/dev/watchdog", err: errors.New("exit status 1")})
-	if r := run(t, cfg, h); r.Refused() {
-		t.Fatalf("refused:\n%s", printed(r))
-	}
-}
-
 // An unreachable site is refused once, at ssh, and nothing else is tried on
 // it; the rest of the report still arrives.
 func TestAnUnreachableNewSiteIsCheckedNoFurther(t *testing.T) {

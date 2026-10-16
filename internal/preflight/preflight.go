@@ -420,17 +420,13 @@ func (r *runner) wireguard(t apply.Transport) {
 }
 
 // watchdog checks /dev/watchdog on a data site whose watchdog mode wants one.
-// Patroni renders `watchdog: required` for every mode but off, and refuses to
+// Patroni renders `watchdog: required` for every mode, and refuses to
 // take the leader key without the device.
 func (r *runner) watchdog(t apply.Transport) {
 	if !r.site.Has(config.RoleData) {
 		return
 	}
 	mode := r.site.WatchdogMode()
-	if mode == config.WatchdogOff {
-		r.pass(r.newSite, "watchdog", "mode off, none needed")
-		return
-	}
 	if out, err := t.Run("test -e /dev/watchdog"); err != nil {
 		r.refuse(r.newSite, "watchdog", "mode %s, and there is no /dev/watchdog: %s. Run `paisans host prepare --site %s`", mode, firstLine(errText(out, "absent")), r.newSite)
 		return
