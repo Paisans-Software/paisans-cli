@@ -24,7 +24,7 @@ const giveBack = `for d in /dev/watchdog /dev/watchdog[0-9]*; do if [ -e "$d" ];
 func watchdogRule(user, group string) string {
 	return "# Written by paisans host admit: the watchdog is " + user + "'s, for its\n" +
 		"# Patroni. One deployment per host holds it; paisans host evict removes this.\n" +
-		`KERNEL=="watchdog*", OWNER="` + user + `", GROUP="` + group + `", MODE="0600"` + "\n"
+		`SUBSYSTEM=="watchdog|misc", KERNEL=="watchdog*", OWNER="` + user + `", GROUP="` + group + `", MODE="0600"` + "\n"
 }
 
 // planWatchdogGrant gives the watchdog with --watchdog: the module as host
@@ -52,7 +52,7 @@ func planWatchdogGrant(p *planner) error {
 	}
 	s, err := hostprep.PlanWatchdog(p.t, p.d, p.profile)
 	if err != nil {
-		return errors.New(strings.TrimPrefix(shown(err).Error(), "watchdog: "))
+		return errors.New(strings.TrimPrefix(shown(err).Error(), "watchdog: ") + ". Nothing was changed")
 	}
 	p.section(s)
 	user := p.in.Request.User
@@ -62,7 +62,18 @@ func planWatchdogGrant(p *planner) error {
 	case f.Link:
 		return fmt.Errorf("%s is a symbolic link. Remove it and admit again. Nothing was changed", own)
 	case f.Sum == sha(rule) && f.Mode == "644" && f.UID == 0:
-		p.present("watchdog: the device is " + user + "'s")
+		var root []string
+		for _, dev := range sortedKeys(p.f.WatchdogDevs) {
+			if p.f.WatchdogDevs[dev] != p.f.User.UID {
+				root = append(root, ui.Visible(dev))
+			}
+		}
+		if len(root) == 0 {
+			p.present("watchdog: the device is " + user + "'s")
+			break
+		}
+		p.step(Step{Title: "give the watchdog to " + user, Describe: "watchdog: " + own + " is in place and " + strings.Join(root, ", ") + " is not " + user + "'s yet; apply the rule again",
+			Command: udevTrigger, Kinds: []string{hostprep.KindWatchdog}})
 	default:
 		p.step(Step{Title: "give the watchdog to " + user, Describe: "watchdog: " + own + " makes /dev/watchdog and /dev/watchdog0 " + user + "'s, owner and group, mode 600",
 			File: &hostprep.File{Path: own, Content: rule, Mode: 0o644}, Command: udevTrigger, Kinds: []string{hostprep.KindWatchdog}, Provisional: !p.f.User.Exists})

@@ -143,6 +143,8 @@ ip -6 -o route show table main 2>/dev/null | awk '$1 ~ /:/ && !/ via / { for (i 
 if command -v ufw >/dev/null 2>&1; then say ufw installed; else say ufw absent; fi
 if [ "$(ufw status 2>/dev/null | sed -n 1p)" = "Status: active" ]; then say ufw-active yes; else say ufw-active no; fi
 for f in /etc/udev/rules.d/60-paisans-*-watchdog.rules; do [ -e "$f" ] && say watchdog-rule "$f"; done
+# Who owns each watchdog node, which the rule gives the user.
+for d in /dev/watchdog /dev/watchdog[0-9]*; do [ -e "$d" ] && say watchdog-dev "$(stat -c %u "$d") $d"; done
 for f in /etc/paisans/admitted.*.json; do [ -e "$f" ] && say record "$f"; done
 # Where Docker's data will live: --data-dir, or the user's home, or /home
 # for a user not made yet; the nearest directory that exists.

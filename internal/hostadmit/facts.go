@@ -68,7 +68,9 @@ type Facts struct {
 	// global ones for the deployment (onLink6).
 	OnLink6       []Route6
 	WatchdogRules []string
-	Records       []string
+	// WatchdogDevs is each watchdog node's owner, by path.
+	WatchdogDevs map[string]int
+	Records      []string
 	// MeshUnit is the deployment's wg-quick unit: enabled, at boot or at
 	// runtime, and active, or on its way up.
 	MeshUnit struct{ Enabled, Active bool }
@@ -244,7 +246,7 @@ func probeScript(d deployment.Deployment, in Input) (string, error) {
 // numbers and names; a line it cannot read is refused rather than skipped.
 func parseFacts(out, user string) (Facts, error) {
 	f := Facts{Packages: map[string]bool{}, SubUID: map[string][]IDRange{}, SubGID: map[string][]IDRange{},
-		Files: map[string]FileState{}, Dirs: map[string]DirState{}, Entries: map[string]int{}, raw: map[string][]string{}}
+		Files: map[string]FileState{}, Dirs: map[string]DirState{}, Entries: map[string]int{}, WatchdogDevs: map[string]int{}, raw: map[string][]string{}}
 	f.User.Name = user
 	var sudoL []string
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
@@ -429,6 +431,13 @@ func parseFacts(out, user string) (Facts, error) {
 			f.OnLink6 = append(f.OnLink6, r)
 		case "watchdog-rule":
 			f.WatchdogRules = append(f.WatchdogRules, v)
+		case "watchdog-dev":
+			owner, dev, ok := strings.Cut(v, " ")
+			uid, okUID := id(owner)
+			if !ok || !okUID || !strings.HasPrefix(dev, "/dev/watchdog") {
+				return f, fmt.Errorf("unreadable watchdog-dev line %q", v)
+			}
+			f.WatchdogDevs[dev] = uid
 		case "record":
 			f.Records = append(f.Records, v)
 		case "mesh-unit":

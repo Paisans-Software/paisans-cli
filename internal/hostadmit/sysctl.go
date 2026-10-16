@@ -102,6 +102,18 @@ func others(p *planner) ([]admission.Record, []string, error) {
 	return out, unreadable, nil
 }
 
+// checkSysctls is a shell check that each key 60-paisans.conf sets has its
+// value, failing with the key's name otherwise.
+func checkSysctls(low, forward bool) string {
+	var checks []string
+	for _, kv := range [][3]string{{keyLowPorts, "80", fmt.Sprint(low)}, {keyForward, "1", fmt.Sprint(forward)}} {
+		if kv[2] == "true" {
+			checks = append(checks, `{ [ "$(sysctl -n `+kv[0]+`)" = `+kv[1]+` ] || { echo '`+kv[0]+` is not `+kv[1]+` after sysctl --system: a file read after `+sysctlPath+` sets it'; exit 1; }; }`)
+		}
+	}
+	return strings.Join(checks, " && ")
+}
+
 // holds reports whether the sysctl file content sets key.
 func holds(content, key string) bool {
 	for _, line := range strings.Split(content, "\n") {
@@ -193,8 +205,24 @@ func planSysctls(p *planner) error {
 			delete(b, keyForward)
 		}
 	}
-	if len(b) > 0 && b.text() != was.text() {
-		p.step(Step{Title: "record the sysctls' values before", Describe: "sysctls: " + sysctlBeforePath + ", for host evict to restore", File: &hostprep.File{Path: sysctlBeforePath, Content: b.text(), Mode: 0o644}, Kinds: []string{"sysctl"}})
+	// A key is recorded before it is set, and forgotten only once it is
+	// restored, so a step that fails leaves its value in the file for the
+	// next run. With nothing restored the file is written once, first.
+	record := func(content string) {
+		p.step(Step{Title: "record the sysctls' values before", Describe: "sysctls: " + sysctlBeforePath + ", for host evict to restore", File: &hostprep.File{Path: sysctlBeforePath, Content: content, Mode: 0o644}, Kinds: []string{"sysctl"}})
+	}
+	first := b
+	if len(restore) > 0 {
+		first = before{}
+		for k, v := range was {
+			first[k] = v
+		}
+		for k, v := range b {
+			first[k] = v
+		}
+	}
+	if len(first) > 0 && first.text() != was.text() {
+		record(first.text())
 	}
 	file := SysctlFile(wantLow, wantFwd)
 	live := (!wantLow || p.f.PortStart == "80") && (!wantFwd || p.f.IPForward == "1")
@@ -204,16 +232,19 @@ func planSysctls(p *planner) error {
 			p.step(Step{Title: "remove " + sysctlPath, Describe: "sysctls: no admitted deployment needs it", Command: "rm -f " + sysctlPath, Kinds: []string{"sysctl"}})
 		}
 	case p.f.Files[sysctlPath].Sum != sha(file) || !live:
-		p.step(Step{Title: "set the host's sysctls", Describe: "sysctls: " + sysctlPath + ", applied with sysctl --system",
-			File: &hostprep.File{Path: sysctlPath, Content: file, Mode: 0o644}, Command: "sysctl --system >/dev/null", Kinds: []string{"sysctl"}})
+		p.step(Step{Title: "set the host's sysctls", Describe: "sysctls: " + sysctlPath + ", applied with sysctl --system, which applies every sysctl file on the host again, then each key checked, since a file read after it could set one back",
+			File: &hostprep.File{Path: sysctlPath, Content: file, Mode: 0o644}, Command: "sysctl --system >/dev/null && " + checkSysctls(wantLow, wantFwd), Kinds: []string{"sysctl"}})
 	default:
 		p.present("sysctls: " + sysctlPath + " as written and applied")
 	}
 	if len(restore) > 0 {
 		p.step(Step{Title: "restore " + strings.Join(restore, ", "), Describe: "sysctls: no admitted deployment needs them any more; set each back to what it was before admit",
 			Command: "sysctl -w " + strings.Join(restore, " ") + " >/dev/null", Kinds: []string{"sysctl"}})
-		if len(b) == 0 && p.f.Files[sysctlBeforePath].Present {
+		switch {
+		case len(b) == 0 && (p.f.Files[sysctlBeforePath].Present || first.text() != was.text()):
 			p.step(Step{Title: "remove " + sysctlBeforePath, Describe: "sysctls: nothing left to restore", Command: "rm -f " + sysctlBeforePath, Kinds: []string{"sysctl"}})
+		case len(b) > 0 && b.text() != first.text():
+			record(b.text())
 		}
 	}
 	for _, d := range lowFor {

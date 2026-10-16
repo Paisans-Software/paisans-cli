@@ -213,3 +213,52 @@ func TestTheFirstExecuteRecordsForwardingAsItWasBeforeDocker(t *testing.T) {
 		}
 	}
 }
+
+// A key no admitted deployment needs any more is restored before the
+// before file forgets it, so a restore that fails leaves its value there
+// for the next run; and the file is set with every key checked after
+// sysctl --system, since a file read after 60-paisans.conf could set one
+// back.
+func TestRestoreRunsBeforeTheValueIsForgotten(t *testing.T) {
+	h := admittedHost(requestFor("watch"), hostadmit.Flags{PublicPorts: true}).file("/etc/paisans/sysctl.before", beforeFile)
+	req := requestFor("watch")
+	req.Grants.PublicPorts = false
+	plan, err := hostadmit.Build(h, hostadmit.Input{Request: req, Digest: admission.Digest(admission.Encode(req)), Now: admitted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restore, forget := -1, -1
+	for i, s := range plan.Steps {
+		switch {
+		case strings.HasPrefix(s.Title, "restore net.ipv4"):
+			restore = i
+		case s.File != nil && s.File.Path == "/etc/paisans/sysctl.before", s.Command == "rm -f /etc/paisans/sysctl.before":
+			forget = i
+		}
+	}
+	if restore < 0 || forget >= 0 && forget < restore {
+		t.Errorf("restore is step %d and the before file is rewritten at %d:\n%s", restore, forget, plan.Text())
+	}
+
+	plan, err = hostadmit.Build(home(), input(t, "watch", hostadmit.Flags{PublicPorts: true}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, set := -1, -1
+	for i, s := range plan.Steps {
+		switch {
+		case s.File != nil && s.File.Path == "/etc/paisans/sysctl.before":
+			record = i
+		case s.Title == "set the host's sysctls":
+			set = i
+			for _, want := range []string{`"$(sysctl -n net.ipv4.ip_unprivileged_port_start)" = 80`, `"$(sysctl -n net.ipv4.ip_forward)" = 1`} {
+				if !strings.Contains(s.Command, want) {
+					t.Errorf("the set step does not check %q:\n%s", want, s.Command)
+				}
+			}
+		}
+	}
+	if record < 0 || set < record {
+		t.Errorf("the values are recorded at %d and set at %d", record, set)
+	}
+}

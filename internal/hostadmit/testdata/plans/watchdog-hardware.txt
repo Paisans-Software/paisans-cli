@@ -313,7 +313,7 @@ step 20: give the watchdog to community
   write /etc/udev/rules.d/60-paisans-f2a9-watchdog.rules mode 0644:
     | # Written by paisans host admit: the watchdog is community's, for its
     | # Patroni. One deployment per host holds it; paisans host evict removes this.
-    | KERNEL=="watchdog*", OWNER="community", GROUP="community", MODE="0600"
+    | SUBSYSTEM=="watchdog|misc", KERNEL=="watchdog*", OWNER="community", GROUP="community", MODE="0600"
   run:
     $ udevadm control --reload && udevadm trigger --subsystem-match=watchdog --subsystem-match=misc
 

@@ -316,8 +316,9 @@ step 20: load softdog
 step 21: load softdog at boot
   watchdog: load softdog at every boot (paisans-f2a9-watchdog.service)
   write /etc/systemd/system/paisans-f2a9-watchdog.service mode 0644:
-    | # Written by paisans host prepare. Loads softdog at boot, before Docker
-    | # starts the Patroni container that maps /dev/watchdog.
+    | # Written by paisans host admit. Loads softdog at boot, before
+    | # systemd-logind starts the lingering users' managers, whose Docker starts
+    | # the Patroni container that maps /dev/watchdog.
     | #
     | # A unit and not /etc/modules-load.d: Ubuntu's kernel package blacklists the
     | # watchdog drivers, and systemd-modules-load applies that blacklist, so a
@@ -325,7 +326,7 @@ step 21: load softdog at boot
     | # line does not apply it.
     | [Unit]
     | Description=Load the softdog watchdog for Patroni
-    | Before=docker.service
+    | Before=systemd-logind.service
     | 
     | [Service]
     | Type=oneshot
@@ -342,7 +343,7 @@ step 22: give the watchdog to community
   write /etc/udev/rules.d/60-paisans-f2a9-watchdog.rules mode 0644:
     | # Written by paisans host admit: the watchdog is community's, for its
     | # Patroni. One deployment per host holds it; paisans host evict removes this.
-    | KERNEL=="watchdog*", OWNER="community", GROUP="community", MODE="0600"
+    | SUBSYSTEM=="watchdog|misc", KERNEL=="watchdog*", OWNER="community", GROUP="community", MODE="0600"
   run:
     $ udevadm control --reload && udevadm trigger --subsystem-match=watchdog --subsystem-match=misc
 
@@ -413,6 +414,6 @@ warning: user: community already exists and is not paisans-f2a9
 warning: delegation reaches community's manager at its next start
   Its manager is running, and restarting it would restart its Docker daemon and every container in it, so admit does not. cpuset and io limits apply after the host's next reboot.
 warning: watchdog: falling back to softdog
-  the watchdog will be softdog. It reboots the host when Patroni hangs, but not when the kernel does, and a hung kernel cannot fence itself any other way. A hardware or hypervisor watchdog is better: enable one in the firmware or the VM's settings, and prepare again.
+  the watchdog will be softdog. It reboots the host when Patroni hangs, but not when the kernel does, and a hung kernel cannot fence itself any other way. A hardware or hypervisor watchdog is better: enable one in the firmware or the VM's settings, and admit again.
 warning: watchdog: community's Patroni can reboot this machine
   Patroni arms the watchdog and reboots the whole host when it stops renewing it, which is what makes its failover safe.

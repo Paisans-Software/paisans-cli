@@ -212,7 +212,7 @@ type Profile interface {
 	Services(t Transport, d deployment.Deployment) (Section, error)
 	// WatchdogModule plans loading a kernel module now, unless loaded says
 	// it already is, and loading it at every boot.
-	WatchdogModule(t Transport, d deployment.Deployment, module string, loaded bool) (Section, error)
+	WatchdogModule(t Transport, d deployment.Deployment, module string, loaded, admit bool) (Section, error)
 	// ConfigStore plans the deployment's repository of configuration
 	// versions, the daemon that serves it to the mesh and the timer that
 	// fetches from peers, the addresses of which are given.
@@ -324,7 +324,7 @@ func Build(site string, cfg *config.Config, t Transport, opts ...Option) (*Plan,
 	}
 	plan.add(services)
 
-	watchdog, err := planWatchdog(t, d, profile, declared)
+	watchdog, err := planWatchdog(t, d, profile, declared, "prepare")
 	if err != nil {
 		return nil, err
 	}

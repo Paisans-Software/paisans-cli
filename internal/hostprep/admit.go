@@ -60,7 +60,7 @@ func EgressUnit(d EgressUnitData) (string, error) {
 // Admit plans it whatever the site's mode, which a request does not carry;
 // host prepare and doctor compare the mode with what admit found.
 func PlanWatchdog(t Transport, d deployment.Deployment, profile Profile) (Section, error) {
-	return planWatchdog(t, d, profile, config.Site{Roles: []config.Role{config.RoleData}, Watchdog: config.WatchdogAuto})
+	return planWatchdog(t, d, profile, config.Site{Roles: []config.Role{config.RoleData}, Watchdog: config.WatchdogAuto}, "admit")
 }
 
 // AdmitRules are the inbound rules host admit gives a deployment: the SSH

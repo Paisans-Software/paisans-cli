@@ -677,8 +677,9 @@ step 23: load softdog
 step 24: load softdog at boot
   watchdog: load softdog at every boot (paisans-f2a9-watchdog.service)
   write /etc/systemd/system/paisans-f2a9-watchdog.service mode 0644:
-    | # Written by paisans host prepare. Loads softdog at boot, before Docker
-    | # starts the Patroni container that maps /dev/watchdog.
+    | # Written by paisans host admit. Loads softdog at boot, before
+    | # systemd-logind starts the lingering users' managers, whose Docker starts
+    | # the Patroni container that maps /dev/watchdog.
     | #
     | # A unit and not /etc/modules-load.d: Ubuntu's kernel package blacklists the
     | # watchdog drivers, and systemd-modules-load applies that blacklist, so a
@@ -686,7 +687,7 @@ step 24: load softdog at boot
     | # line does not apply it.
     | [Unit]
     | Description=Load the softdog watchdog for Patroni
-    | Before=docker.service
+    | Before=systemd-logind.service
     | 
     | [Service]
     | Type=oneshot
@@ -703,7 +704,7 @@ step 25: give the watchdog to paisans-f2a9
   write /etc/udev/rules.d/60-paisans-f2a9-watchdog.rules mode 0644:
     | # Written by paisans host admit: the watchdog is paisans-f2a9's, for its
     | # Patroni. One deployment per host holds it; paisans host evict removes this.
-    | KERNEL=="watchdog*", OWNER="paisans-f2a9", GROUP="paisans-f2a9", MODE="0600"
+    | SUBSYSTEM=="watchdog|misc", KERNEL=="watchdog*", OWNER="paisans-f2a9", GROUP="paisans-f2a9", MODE="0600"
   run:
     $ udevadm control --reload && udevadm trigger --subsystem-match=watchdog --subsystem-match=misc
 
@@ -716,14 +717,14 @@ step 26: record the sysctls' values before
     | net.ipv4.ip_unprivileged_port_start = 1024
 
 step 27: set the host's sysctls
-  sysctls: /etc/sysctl.d/60-paisans.conf, applied with sysctl --system
+  sysctls: /etc/sysctl.d/60-paisans.conf, applied with sysctl --system, which applies every sysctl file on the host again, then each key checked, since a file read after it could set one back
   write /etc/sysctl.d/60-paisans.conf mode 0644:
     | # Written by paisans host admit, for every admitted deployment that needs
     | # it; paisans host evict restores each value once none does.
     | net.ipv4.ip_unprivileged_port_start = 80
     | net.ipv4.ip_forward = 1
   run:
-    $ sysctl --system >/dev/null
+    $ sysctl --system >/dev/null && { [ "$(sysctl -n net.ipv4.ip_unprivileged_port_start)" = 80 ] || { echo 'net.ipv4.ip_unprivileged_port_start is not 80 after sysctl --system: a file read after /etc/sysctl.d/60-paisans.conf sets it'; exit 1; }; } && { [ "$(sysctl -n net.ipv4.ip_forward)" = 1 ] || { echo 'net.ipv4.ip_forward is not 1 after sysctl --system: a file read after /etc/sysctl.d/60-paisans.conf sets it'; exit 1; }; }
 
 step 28: write the admission record
   record: who the deployment runs as and what you granted, which its own commands read
@@ -795,7 +796,7 @@ present: firewall: ufw active, its default policy left to the owner
 warning: delegation reaches paisans-f2a9's manager at its next start
   Its manager is running, and restarting it would restart its Docker daemon and every container in it, so admit does not. cpuset and io limits apply after the host's next reboot.
 warning: watchdog: falling back to softdog
-  the watchdog will be softdog. It reboots the host when Patroni hangs, but not when the kernel does, and a hung kernel cannot fence itself any other way. A hardware or hypervisor watchdog is better: enable one in the firmware or the VM's settings, and prepare again.
+  the watchdog will be softdog. It reboots the host when Patroni hangs, but not when the kernel does, and a hung kernel cannot fence itself any other way. A hardware or hypervisor watchdog is better: enable one in the firmware or the VM's settings, and admit again.
 warning: watchdog: paisans-f2a9's Patroni can reboot this machine
   Patroni arms the watchdog and reboots the whole host when it stops renewing it, which is what makes its failover safe.
 warning: public ports: every local user on this host may bind ports 80 to 1023

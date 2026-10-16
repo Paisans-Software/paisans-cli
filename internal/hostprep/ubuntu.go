@@ -449,13 +449,13 @@ func watchdogUnit(d deployment.Deployment) string { return d.Prefix() + "-watchd
 // module_load_and_warn probes with KMOD_PROBE_APPLY_BLACKLIST), so a
 // modules-load.d file would be skipped at every boot while looking correct.
 // modprobe named on a command line does not apply the blacklist.
-func (u ubuntu) WatchdogModule(t Transport, d deployment.Deployment, module string, loaded bool) (Section, error) {
+func (u ubuntu) WatchdogModule(t Transport, d deployment.Deployment, module string, loaded, admit bool) (Section, error) {
 	var out Section
 	unitName := watchdogUnit(d)
 	if !loaded {
 		out.Steps = append(out.Steps, Step{Kinds: []string{KindWatchdog}, Title: "load " + module, Describe: "watchdog: load " + module + " now", Command: "modprobe " + module})
 	}
-	unit, err := snippet(u.tmpl("watchdog-module.service.tmpl"), map[string]string{"Module": module})
+	unit, err := snippet(u.tmpl("watchdog-module.service.tmpl"), map[string]any{"Module": module, "Admit": admit})
 	if err != nil {
 		return out, err
 	}
