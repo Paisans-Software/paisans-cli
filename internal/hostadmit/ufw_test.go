@@ -320,3 +320,26 @@ func TestTheEnableSaysWhatAdmitCannotSee(t *testing.T) {
 		}
 	}
 }
+
+// Only root's sshd listeners off loopback are SSH ports to allow: a
+// session's X11 or remote forward, held by a per-session sshd as the
+// logged-in user or on loopback, and any process a user names sshd, are not.
+// ss -e prints uid:N for every owner but root.
+func TestOnlyRootsSSHDListenersOffLoopbackAreAllowed(t *testing.T) {
+	answer := `sshd LISTEN 0 128 127.0.0.1:6010 0.0.0.0:* users:(("sshd",pid=4410,fd=9)) uid:1000 ino:91 sk:3` + "\n" +
+		`sshd LISTEN 0 128 [::1]:6010 [::]:* users:(("sshd",pid=4410,fd=10)) uid:1000 ino:92 sk:4` + "\n" +
+		`sshd LISTEN 0 128 127.0.0.1:6011 0.0.0.0:* users:(("sshd",pid=4411,fd=9)) ino:93 sk:5` + "\n" +
+		`sshd LISTEN 0 128 0.0.0.0:2200 0.0.0.0:* users:(("sshd",pid=4500,fd=3)) uid:1001 ino:94 sk:6` + "\n" +
+		sshdOn22
+	h := inactiveUFW(answer)()
+	_, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+	var inactive *hostadmit.UFWInactiveError
+	if !errors.As(err, &inactive) || !slices.Equal(inactive.SSHPorts, []int{22}) {
+		t.Fatalf("ports %v: %v", inactive, err)
+	}
+	for _, c := range h.ran {
+		if strings.Contains(c, ufwBeforeMarker) && !strings.Contains(c, "ss -Hltnpe") {
+			t.Errorf("the probe does not read the listeners' owners: %s", c)
+		}
+	}
+}

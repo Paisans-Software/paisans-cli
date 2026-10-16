@@ -48,13 +48,16 @@ const ufwBeforeMarker = "paisans host admit: before enabling ufw"
 // default) systemd holds the listening socket and the Port lines sshd -T
 // prints say nothing of it, and sshd_config may have changed since sshd
 // started. ss shows what a new login connects to now; an active ssh.socket
-// or sshd.socket adds what systemd listens on for it. ufw's rules are read
+// or sshd.socket adds what systemd listens on for it. Only root's sshd
+// listeners off loopback count (sshdListener): a per-session sshd holds a
+// session's X11 and remote forwards as the logged-in user or on loopback,
+// and any user can name a process sshd. ufw's rules are read
 // with `ufw show added`, which lists them while ufw is inactive, and IPV6
 // as ufw reads it (ipv6Read), without which ufw drops all IPv6 once
 // enabled.
 // Whatever it cannot read it says so.
 var ufwBeforeProbe = `# ` + ufwBeforeMarker + `
-if out=$(ss -Hltnp 2>/dev/null); then printf '%s\n' "$out" | grep -F '("sshd",pid=' | sed 's/^/sshd /'; else echo 'unread listeners (ss -Hltnp)'; fi
+if out=$(ss -Hltnpe 2>/dev/null); then printf '%s\n' "$out" | grep -F '("sshd",pid=' | sed 's/^/sshd /'; else echo 'unread listeners (ss -Hltnpe)'; fi
 for u in ssh.socket sshd.socket; do
   if [ "$(systemctl is-active "$u" 2>/dev/null)" = active ]; then systemctl show -p Listen --value "$u" 2>/dev/null | sed 's/^/socket /'; fi
 done
@@ -117,8 +120,8 @@ func readUFWBefore(p *planner) (ufwBefore, error) {
 				b.unread = hostText(rest)
 			}
 		case "sshd":
-			if f := strings.Fields(rest); len(f) >= 4 {
-				add(f[3])
+			if addr, ok := sshdListener(rest); ok {
+				add(addr)
 			}
 		case "socket":
 			if f := strings.Fields(rest); len(f) == 2 && f[1] == "(Stream)" {
@@ -140,6 +143,26 @@ func readUFWBefore(p *planner) (ufwBefore, error) {
 	}
 	slices.Sort(b.ports)
 	return b, nil
+}
+
+// sshdListener is the local address of one `ss -Hltnpe` line of an sshd
+// listener, when it is one a login arrives by: root's, since ss -e prints
+// uid:N for every other owner, and off loopback, which ufw never filters.
+func sshdListener(line string) (string, bool) {
+	f := strings.Fields(line)
+	if len(f) < 4 {
+		return "", false
+	}
+	for _, field := range f[4:] {
+		if strings.HasPrefix(field, "uid:") {
+			return "", false
+		}
+	}
+	addr := f[3]
+	if strings.HasPrefix(addr, "127.") || strings.HasPrefix(addr, "[::1]") || strings.HasPrefix(addr, "[::ffff:127.") {
+		return "", false
+	}
+	return addr, true
 }
 
 // blocker is why admit will not enable ufw on this host, with

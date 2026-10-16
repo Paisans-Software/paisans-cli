@@ -360,9 +360,12 @@ Garage site and 5 GB otherwise. The path is in the admission record.
    fires leaves ufw enabled and admit says to wait for it instead; then `ufw --force enable`. ufw takes rules while inactive and
    applies them as it is enabled, so SSH is allowed from its first moment on.
    The ports sshd listens on are read as root from the sockets, with `ss
-   -Hltnp` and an active `ssh.socket` or `sshd.socket`'s `Listen`, not from
+   -Hltnpe` and an active `ssh.socket` or `sshd.socket`'s `Listen`, not from
    `sshd -T`: under socket activation, Ubuntu 24.04's default, systemd holds
-   the listening socket and sshd's own Port lines say nothing of it. When an
+   the listening socket and sshd's own Port lines say nothing of it. Only
+   root's sshd listeners off loopback count: a per-session sshd holds a
+   session's X11 and remote forwards as the logged-in user or on loopback,
+   and any user can name a process sshd. When an
    allow of the owner's already covers a port, admit adds none for it; when
    the deployment's own SSH allow would be the same rule, ufw would rewrite
    it in place, so the `paisans: ssh` allow alone is planned. Admit refuses
