@@ -607,3 +607,55 @@ func TestReleaseDockerHoldRunsBeforeAhead(t *testing.T) {
 		t.Errorf("lock %d, before %d, release %d:\n%s", lock, before, call, release)
 	}
 }
+
+// fakePgrep is a directory whose pgrep answers that dpkg runs for its
+// first busy calls, noting in log each answer and whether admit's policy
+// is in place, then that it does not; busy below 0 answers it runs always.
+func fakePgrep(t *testing.T, sbin, log string, busy int) string {
+	t.Helper()
+	dir := t.TempDir()
+	script := fmt.Sprintf("#!/bin/sh\nn=$(cat %[1]s/calls 2>/dev/null || echo 0)\necho $((n+1)) > %[1]s/calls\nheld=no; grep -q 'paisans host admit' %[2]s/policy-rc.d 2>/dev/null && held=yes\nif [ %[3]d -lt 0 ] || [ \"$n\" -lt %[3]d ]; then echo \"dpkg running, hold $held\" >> %[4]s; exit 0; fi\necho \"dpkg gone, hold $held\" >> %[4]s\nexit 1\n", dir, sbin, busy, log)
+	if err := os.WriteFile(filepath.Join(dir, "pgrep"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// apt-get runs dpkg in a session of its own, so a kill of apt-get can
+// leave dpkg running docker-ce's postinst, which enables its units again.
+// The exit trap waits for dpkg to finish, with the hold in place, before
+// it confirms, disables and releases; a dpkg still running at the bound
+// keeps the hold and fails the step, saying so.
+func TestTheHoldWaitsForDpkg(t *testing.T) {
+	sbin := t.TempDir()
+	log := filepath.Join(sbin, "log")
+	hold, _ := holdScript(t, sbin, "")
+	cmd := exec.Command(shell(), "-c", hold+"false\n")
+	cmd.Env = []string{"PATH=" + fakePgrep(t, sbin, log, 2) + ":" + fakeTools(t, log, false) + ":/usr/bin:/bin"}
+	if out, err := cmd.CombinedOutput(); err == nil {
+		t.Fatalf("a failed install succeeded: %s", out)
+	}
+	got, _ := os.ReadFile(log)
+	want := "dpkg running, hold yes\ndpkg running, hold yes\ndpkg gone, hold yes\nsystemctl disable docker.socket docker.service containerd.service\n"
+	if string(got) != want {
+		t.Errorf("the trap did not wait for dpkg with the hold in place:\n%s\nwant\n%s", got, want)
+	}
+
+	sbin = t.TempDir()
+	log = filepath.Join(sbin, "log")
+	hold, _ = holdScript(t, sbin, "")
+	hold = strings.Replace(hold, `[ "$n" -lt 600 ]`, `[ "$n" -lt 2 ]`, 1)
+	cmd = exec.Command(shell(), "-c", hold+"false\n")
+	cmd.Env = []string{"PATH=" + fakePgrep(t, sbin, log, -1) + ":" + fakeTools(t, log, false) + ":/usr/bin:/bin"}
+	out, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "dpkg is still running") {
+		t.Errorf("a dpkg that does not finish: %v: %s", err, out)
+	}
+	got, _ = os.ReadFile(log)
+	if strings.Contains(string(got), "systemctl") {
+		t.Errorf("the units were touched while dpkg ran:\n%s", got)
+	}
+	if p, _ := os.ReadFile(filepath.Join(sbin, "policy-rc.d")); !strings.Contains(string(p), "paisans host admit") {
+		t.Errorf("the hold was released while dpkg ran: %q", p)
+	}
+}
