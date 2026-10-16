@@ -347,3 +347,57 @@ func TestOnlyHostAdmitReachesTheLocalTransport(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Only the named system files are read through a link, and only to read:
+// /etc/os-release and /etc/resolv.conf are links on a stock Ubuntu. Any
+// other link, and a write to a named file that is a link, are refused, and
+// the file the link names is read as strictly as any other.
+func TestLocalFollowsALinkOnlyAtANamedSystemFile(t *testing.T) {
+	if got := hostadmit.LinkedSystemFiles(); strings.Join(got, " ") != "/etc/os-release /etc/resolv.conf" {
+		t.Errorf("the system files read through a link are %q", got)
+	}
+	linuxOnly(t)
+	l := hostadmit.Local()
+	dir := t.TempDir()
+	os.Mkdir(filepath.Join(dir, "lib"), 0o755)
+	target := filepath.Join(dir, "lib", "os-release")
+	os.WriteFile(target, []byte("ID=ubuntu\n"), 0o644)
+	named := filepath.Join(dir, "os-release")
+	os.Symlink("lib/os-release", named)
+	other := filepath.Join(dir, "other")
+	os.Symlink("lib/os-release", other)
+	dangling := filepath.Join(dir, "resolv.conf")
+	os.Symlink("run/stub-resolv.conf", dangling)
+	fifo := filepath.Join(dir, "fifo")
+	syscall.Mkfifo(filepath.Join(dir, "lib", "fifo"), 0o600)
+	os.Symlink("lib/fifo", fifo)
+	for _, p := range []string{named, dangling, fifo} {
+		hostadmit.FollowLinkAt(t, p)
+	}
+
+	if content, found, err := l.ReadFile(named); err != nil || !found || content != "ID=ubuntu\n" {
+		t.Errorf("a named file's link: %q, %v, %v", content, found, err)
+	}
+	if _, found, err := l.ReadFile(dangling); found || err != nil {
+		t.Errorf("a named file's dangling link: found %v, %v", found, err)
+	}
+	if _, found, err := l.ReadFile(other); found || err == nil || !strings.Contains(err.Error(), "symbolic link") {
+		t.Errorf("a link at a path that is not named: found %v, %v", found, err)
+	}
+	done := make(chan error, 1)
+	go func() { _, _, err := l.ReadFile(fifo); done <- err }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("a named file's link to a FIFO read without an error")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("ReadFile blocked on a FIFO behind a named file's link")
+	}
+	if err := l.WriteFile(named, "ID=other\n", 0o644); err == nil || !strings.Contains(err.Error(), "symbolic link") {
+		t.Errorf("a write to a named file's link: %v", err)
+	}
+	if b, _ := os.ReadFile(target); string(b) != "ID=ubuntu\n" {
+		t.Errorf("the link's target was written: %q", b)
+	}
+}
