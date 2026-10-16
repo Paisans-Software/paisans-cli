@@ -148,7 +148,8 @@ type planner struct {
 	// sx caches sysctls(), which both sysctl parts plan from.
 	sx *sysctlState
 	// heldDocker is a system Docker admit installed whose units none
-	// enables: it has never run, so it has no networks.
+	// enables and that left no network store: it has never run, so it has
+	// no networks.
 	heldDocker bool
 	// prev caches previous(): this deployment's record as the host holds it.
 	prev struct {

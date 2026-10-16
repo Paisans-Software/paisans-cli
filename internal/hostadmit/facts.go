@@ -116,6 +116,9 @@ type DockerFacts struct {
 	// under which apt may have run; without it the run stopped before
 	// apt.
 	Held, HeldPolicy bool
+	// NetworkStore is the system Docker's network store being there, which
+	// only a daemon that has run leaves.
+	NetworkStore bool
 }
 
 // UnitState is whether a system unit is enabled, and active.
@@ -304,6 +307,8 @@ func parseFacts(out, user string) (Facts, error) {
 			}
 			f.Docker.SystemUnits[fields[0]] = UnitState{Enabled: fields[1] == "enabled" || fields[1] == "enabled-runtime",
 				Active: slices.Contains([]string{"active", "activating", "reloading"}, fields[2])}
+		case "docker-networks":
+			f.Docker.NetworkStore = v == "present"
 		case "docker-hold":
 			f.Docker.Held, f.Docker.HeldPolicy = v == "policy" || v == "leftover", v == "policy"
 		case "userns-restrict":

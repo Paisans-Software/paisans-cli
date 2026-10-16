@@ -46,6 +46,9 @@ for unit in docker.socket docker.service containerd.service; do
   a=$(systemctl is-active "$unit" 2>/dev/null | sed -n 1p)
   say system-unit "$unit ${e:-disabled} ${a:-inactive}"
 done
+# The system Docker's network store, which only a daemon that has run
+# leaves.
+if [ -e /var/lib/docker/network/files/local-kv.db ]; then say docker-networks present; else say docker-networks absent; fi
 # What a run that stopped while admit held Docker's daemons can leave:
 # policy is its own /usr/sbin/policy-rc.d, under which apt may have run;
 # leftover is the copy of the owner's or a temporary file alone, from a run

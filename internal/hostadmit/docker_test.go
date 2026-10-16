@@ -388,7 +388,8 @@ const dockerDown = "paisans: dockerd does not answer: failed to connect to the d
 // it has no networks, and the mesh's check reads none. A Docker of the
 // owner's that does not answer still has its networks, which come back
 // when it starts, so admit stops and says to start it, never a JSON
-// error; so does one admit installed that the owner has enabled since.
+// error; so does one admit installed that the owner has enabled since,
+// or started since, which left its network store behind.
 func TestASystemDockerThatDoesNotAnswer(t *testing.T) {
 	down := func(h *fakeHost) *fakeHost { return h.answer("unix:///var/run/docker.sock network ls", dockerDown) }
 	plan, err := hostadmit.Build(down(installedByAdmit(current())), input(t, "vm", hostadmit.Flags{}))
@@ -401,6 +402,7 @@ func TestASystemDockerThatDoesNotAnswer(t *testing.T) {
 	for name, h := range map[string]*fakeHost{
 		"the owner's":            down(current()),
 		"admit's, enabled since": down(installedByAdmit(current()).with("system-unit", "docker.service enabled inactive")),
+		"admit's, run since":     down(installedByAdmit(current()).with("docker-networks", "present")),
 	} {
 		_, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
 		if err == nil || !strings.Contains(err.Error(), "does not answer") || !strings.Contains(err.Error(), "Start it") || strings.Contains(err.Error(), "invalid character") {

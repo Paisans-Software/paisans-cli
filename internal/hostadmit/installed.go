@@ -209,7 +209,10 @@ func planSystemDocker(p *planner, s hostprep.Section, added hostprep.Installed) 
 		s := p.f.Docker.SystemUnits[u]
 		return s.Enabled || s.Active
 	})
-	p.heldDocker = slices.Contains(units, "docker.service") && !slices.ContainsFunc(units, func(u string) bool { return p.f.Docker.SystemUnits[u].Enabled })
+	// Held disabled and never run: no unit enabled, and no network store,
+	// which a daemon the owner started and stopped again leaves.
+	p.heldDocker = slices.Contains(units, "docker.service") && !p.f.Docker.NetworkStore &&
+		!slices.ContainsFunc(units, func(u string) bool { return p.f.Docker.SystemUnits[u].Enabled })
 	switch {
 	case !installs && !recorded && running && unknown != "":
 		p.present("docker: the system daemon admit installed is running and left as it is, since " + unknown + " cannot be read and may say admit disabled it once")
