@@ -204,20 +204,26 @@ func (r Request) Check() []string {
 	if !config.ValidSiteName(r.Site) {
 		add("site: %q is not a site name", r.Site)
 	}
-	if len(r.Roles) == 0 {
-		add("roles: none; a site holds at least one")
-	}
+	// No roles is a site that exists to host an app pinned to it, which the
+	// configuration allows, so roles may be empty.
+	roles := r.roleList()
 	for i, role := range r.Roles {
 		switch {
-		case !config.KnownRole(config.Role(role)):
+		case !config.KnownRole(roles[i]):
 			add("roles[%d]: %q is not a site role", i, role)
-		case slices.Contains(r.Roles[:i], role):
+		case config.RoleRepeated(roles, i):
 			add("roles[%d]: %q is listed twice", i, role)
 		case i > 0 && role < r.Roles[i-1]:
 			add("roles[%d]: %q comes after %q, and roles are written sorted", i, role, r.Roles[i-1])
 		}
 	}
-	if need := r.needs(); len(r.Roles) > 0 && need != r.Grants {
+	// The grants are what the roles need, and roles alone cannot say whether
+	// a monitor runs the toolkit's Caddy, which binds 80 and 443, or sits
+	// behind the owner's web server, which needs no low port. web_server
+	// says which: it lists the monitor's app exactly when managed_by is
+	// external, since validate refuses such a monitor with no app pinned to
+	// it, and so its request always hands the owner's web server one.
+	if need := r.needs(); need != r.Grants {
 		add("grants: watchdog %t and public_ports %t, and roles %q need watchdog %t and public_ports %t", r.Grants.Watchdog, r.Grants.PublicPorts, r.Roles, need.Watchdog, need.PublicPorts)
 	}
 	if p := config.DeploymentUserProblem(r.User, r.Deployment); p != "" {
@@ -301,15 +307,21 @@ func (r Request) Check() []string {
 	return problems
 }
 
+// roleList is r's roles as the configuration's type.
+func (r Request) roleList() []config.Role {
+	roles := make([]config.Role, len(r.Roles))
+	for i, role := range r.Roles {
+		roles[i] = config.Role(role)
+	}
+	return roles
+}
+
 // needs is what r's roles need granted, by Needs on a site holding them.
 // A monitor whose request hands the owner's web server an app is behind
 // that server, managed_by: external, since validate refuses such a monitor
 // with no app pinned to it; every other monitor runs the toolkit's Caddy.
 func (r Request) needs() Grants {
-	s := config.Site{}
-	for _, role := range r.Roles {
-		s.Roles = append(s.Roles, config.Role(role))
-	}
+	s := config.Site{Roles: r.roleList()}
 	if len(r.WebServer) > 0 {
 		s.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal}
 	}

@@ -61,7 +61,7 @@ func TestCheckRefuses(t *testing.T) {
 		}, `web_server[0].listen: "127.0.0.1" is not a loopback address or this site's mesh address, with a port`},
 		{"no site", func(r *admission.Request) { r.Site = "" }, `site: "" is not a site name`},
 		{"a site with a terminal escape", func(r *admission.Request) { r.Site = "home\x1b[2J" }, `site: "home\x1b[2J" is not a site name`},
-		{"no roles", func(r *admission.Request) { r.Roles = nil }, "roles: none; a site holds at least one"},
+		{"no roles, with grants", func(r *admission.Request) { r.Roles = []string{} }, `grants: watchdog true and public_ports true, and roles [] need watchdog false and public_ports false`},
 		{"an unknown role", func(r *admission.Request) { r.Roles = []string{"apps", "data", "root"} }, `roles[2]: "root" is not a site role`},
 		{"a role twice", func(r *admission.Request) { r.Roles = []string{"apps", "apps", "data", "gateway"} }, `roles[1]: "apps" is listed twice`},
 		{"roles unsorted", func(r *admission.Request) { r.Roles = []string{"data", "apps", "gateway"} }, `roles[1]: "apps" comes after "data"`},
@@ -126,15 +126,30 @@ func TestCheckRefuses(t *testing.T) {
 // an app: each golden role mix passes, and the monitor that hands one over
 // needs no low ports.
 func TestCheckGrantsFollowTheRoles(t *testing.T) {
-	for _, site := range []string{"home-a", "home-b", "vm", "status", "watch", "store"} {
+	for _, site := range []string{"home-a", "home-b", "vm", "status", "watch", "store", "host"} {
 		if problems := build(t, site).Check(); len(problems) > 0 {
 			t.Errorf("%s: %q", site, problems)
 		}
 	}
 	r := build(t, "status")
+	if len(r.WebServer) == 0 || r.Grants.PublicPorts {
+		t.Errorf("a monitor with managed_by: external and its uptime app pinned: web_server %+v, grants %+v; want its app handed over and no public_ports", r.WebServer, r.Grants)
+	}
 	r.Grants.PublicPorts = true
 	if problems := strings.Join(r.Check(), "\n"); !strings.Contains(problems, `roles ["monitor"] need watchdog false and public_ports false`) {
 		t.Errorf("a monitor handing its app to the owner's web server was let ask for low ports: %q", problems)
+	}
+}
+
+// A site with no roles exists to host an app pinned to it, which the
+// configuration allows, so its request carries roles: [] and no grant.
+func TestCheckAcceptsNoRoles(t *testing.T) {
+	r := build(t, "host")
+	if len(r.Roles) != 0 || r.Grants != (admission.Grants{}) {
+		t.Fatalf("roles %q, grants %+v", r.Roles, r.Grants)
+	}
+	if problems := r.Check(); len(problems) > 0 {
+		t.Errorf("%q", problems)
 	}
 }
 

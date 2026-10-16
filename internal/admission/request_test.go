@@ -33,6 +33,7 @@ func TestBuildReadsTheSite(t *testing.T) {
 		{"status", []string{"monitor"}, admission.Grants{}, "paisans-f2a9", 22, 51820, false, 1, []string{"alice"}},
 		{"watch", []string{"monitor"}, admission.Grants{PublicPorts: true}, "paisans-f2a9", 22, 51821, true, 0, []string{"alice"}},
 		{"store", []string{"storage"}, admission.Grants{}, "paisans-f2a9", 22, 0, false, 0, []string{"alice"}},
+		{"host", []string{}, admission.Grants{}, "paisans-f2a9", 22, 0, false, 0, []string{"alice"}},
 	} {
 		r := build(t, c.site)
 		var names []string

@@ -15,7 +15,7 @@ import (
 // One golden request per role mix in the fixture: each is the file host
 // request prints, byte for byte, and each reads back as itself.
 func TestGoldenRequests(t *testing.T) {
-	for _, site := range []string{"home-a", "home-b", "vm", "status", "watch", "store"} {
+	for _, site := range []string{"home-a", "home-b", "vm", "status", "watch", "store", "host"} {
 		t.Run(site, func(t *testing.T) {
 			got := admission.Encode(build(t, site))
 			path := filepath.Join("testdata", "requests", site+".admit")
@@ -220,7 +220,7 @@ func TestParseRefuses(t *testing.T) {
 		{"a missing field", strings.Replace(g, "ssh_port: 22\n", "", 1), "ssh_port: missing"},
 		{"no site", strings.Replace(g, "site: \"home-a\"\n", "", 1), "site: missing"},
 		{"no roles", strings.Replace(g, "roles:\n  - \"apps\"\n  - \"data\"\n  - \"gateway\"\n", "", 1), "roles: missing"},
-		{"empty roles", strings.Replace(g, "roles:\n  - \"apps\"\n  - \"data\"\n  - \"gateway\"\n", "roles: []\n", 1), "roles: none"},
+		{"no roles, with grants", strings.Replace(g, "roles:\n  - \"apps\"\n  - \"data\"\n  - \"gateway\"\n", "roles: []\n", 1), "grants: watchdog true and public_ports true, and roles [] need watchdog false and public_ports false"},
 		{"an unknown role", strings.Replace(g, `  - "apps"`, `  - "admin"`, 1), `roles[0]: "admin" is not a site role`},
 		{"a role twice", strings.Replace(g, `  - "apps"`, `  - "data"`, 1), `roles[1]: "data" is listed twice`},
 		{"roles unsorted", strings.Replace(g, "  - \"apps\"\n  - \"data\"\n", "  - \"data\"\n  - \"apps\"\n", 1), `roles[1]: "apps" comes after "data"`},
