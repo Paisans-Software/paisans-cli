@@ -16,6 +16,7 @@ package gatewaymove
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -131,6 +132,21 @@ func CaddyfilePath(d deployment.Deployment) string {
 // MarkerPath is the marker on the old gateway's host, beside the deployment
 // record in the deployment's state directory.
 func MarkerPath(d deployment.Deployment) string { return d.StatePath("gateway-move.json") }
+
+// markerWriteCommand replaces the marker as every record in StateDir is
+// written: under the deployment's lock, StateDir made 700 when absent, and
+// by a rename so a reader never sees half of it.
+func markerWriteCommand(d deployment.Deployment, content string) string {
+	return strings.Join([]string{
+		"set -e",
+		d.StateLockCommand("the gateway move marker"),
+		"f=" + quote(MarkerPath(d)),
+		"tmp=$(mktemp " + quote(d.StatePath(".gateway-move.XXXXXX")) + ")",
+		`trap 'rm -f "$tmp"' EXIT`,
+		"printf %s " + quote(base64.StdEncoding.EncodeToString([]byte(content))) + ` | base64 -d > "$tmp"`,
+		`mv "$tmp" "$f"`,
+	}, "; ")
+}
 
 // Plan is a whole move, decided from the live deployment.
 type Plan struct {
@@ -620,7 +636,10 @@ func (p *Plan) removeStage(mp *dns.MovePlan) *Stage {
 		}
 		m := Marker{From: p.From, To: p.To, DeletedAt: p.probes.Now().UTC(), TTL: ttl}
 		data, _ := json.Marshal(m)
-		return p.from().WriteFile(MarkerPath(p.dep()), string(data)+"\n", 0o600)
+		if out, err := p.from().Run(markerWriteCommand(p.dep(), string(data)+"\n")); err != nil {
+			return fmt.Errorf("%s: writing %s: %w: %s", p.From, MarkerPath(p.dep()), err, strings.TrimSpace(out))
+		}
+		return nil
 	}
 	st.gate = func() error {
 		fresh, err := p.planDNS()

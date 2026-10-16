@@ -40,6 +40,8 @@ type host struct {
 	sites  []string
 	ran    []string
 	failOn string
+	// wrote are the paths written through WriteFile, which takes no lock.
+	wrote []string
 }
 
 func (h *host) Describe() string { return h.name }
@@ -59,7 +61,7 @@ func (h *host) Run(command string) (string, error) {
 			fmt.Fprintf(&b, "site %s\n", s)
 		}
 		return b.String(), nil
-	case strings.Contains(command, "/.deployed."):
+	case strings.Contains(command, "/.deployed."), strings.Contains(command, "/.gateway-move."):
 		path := regexp.MustCompile(`f='([^']+)'`).FindStringSubmatch(command)[1]
 		data, _ := base64.StdEncoding.DecodeString(regexp.MustCompile(`printf %s '([^']*)' \| base64 -d`).FindStringSubmatch(command)[1])
 		h.files[path] = string(data)
@@ -83,6 +85,7 @@ func (h *host) ReadFile(path string) (string, bool, error) {
 }
 
 func (h *host) WriteFile(path, content string, _ uint32) error {
+	h.wrote = append(h.wrote, path)
 	h.files[path] = content
 	return nil
 }
@@ -761,6 +764,37 @@ func TestTheHostOwnersSitesNoteSpeaksOfTheHandOff(t *testing.T) {
 	notes := strings.Join(sw.mustBuild().Notes, "\n")
 	if strings.Contains(notes, "not stopped") || !strings.Contains(notes, "not handed off") {
 		t.Errorf("notes:\n%s", notes)
+	}
+}
+
+// The marker is written as every other record in StateDir is: under the
+// deployment's lock, with StateDir made 700 if absent, by a rename. Through
+// WriteFile its mkdir -p would make StateDir with the session's umask and
+// could interleave with an apply writing the deployment record.
+func TestTheMarkerIsWrittenUnderTheDeploymentsLock(t *testing.T) {
+	w := newWorld(t)
+	if err := w.run(); err != nil {
+		t.Fatal(err)
+	}
+	old := w.hosts["home-a"]
+	if len(old.wrote) != 0 {
+		t.Errorf("written without the lock: %v", old.wrote)
+	}
+	d := w.cfg.Deployment()
+	lock := d.StateLockCommand("the gateway move marker")
+	found := false
+	for _, c := range old.ran {
+		if !strings.Contains(c, gatewaymove.MarkerPath(d)) || !strings.Contains(c, "mktemp") {
+			continue
+		}
+		found = true
+		at, mv := strings.Index(c, lock), strings.Index(c, `mv "$tmp" "$f"`)
+		if at < 0 || mv < at {
+			t.Errorf("the marker is not written under the lock: %s", c)
+		}
+	}
+	if !found {
+		t.Errorf("no command wrote the marker: %v", old.ran)
 	}
 }
 
