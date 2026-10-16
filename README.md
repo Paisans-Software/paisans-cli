@@ -869,7 +869,6 @@ sites:
     web_server:
       managed_by: external        # paisans (default) or external
       listen: 127.0.0.1:8480      # external only, and required there
-      # include_dir: /etc/nginx/paisans.d   # external only; apply derives it, false opts out
 ```
 
 * **`managed_by: paisans`**, the default, runs the toolkit's Caddy on the monitor,
@@ -899,175 +898,27 @@ sites:
   off it no longer runs the toolkit's Caddy, so `paisans gateway move` treats
   it as an ordinary old gateway and stops that Caddy: the health page is down
   until the operator's web server serves it. Move the gateway first, then
-  switch the web server in an apply of its own. `paisans apply` without `--site` runs
-  `paisans web-server check` for each such app once every step has run, and
-  `paisans apply --site` on such a monitor runs it for the apps the monitor
-  serves once its stacks are up, a line
-  per app in a `web server` section, and does not call the deployment complete
-  while one fails: the app's line is a warning, `!`, with the checks that
-  failed under it, an error several of them share said once, then the web
-  server `web-server show` finds in front of it, read as the site's ssh user,
-  and the `web-server show` and `web-server check`
-  commands to fix it with. Where the app's site file step above already
-  warned or failed with its own instructions, the check would only restate
-  them, so the app has no check line; with `--verbose` it has one, which names
-  what failed and says that is expected until that step's problem is fixed,
-  and the app counts as failing its check either way. Each problem has one
-  line and one set of instructions. The run ends on
-  a warning, `! Deployment complete, but 1 app failed its web server check`,
-  with exit status 0: every step ran, and the web server is the operator's.
-  A certificate or sign in failure is what a web server still obtaining its
-  certificate gives, for a while after its site is written or it is
-  reloaded, so the check waits on it: it checks again after 2, 4, 8 and 16
-  seconds and then 30, a minute in all, the line saying meanwhile what it
-  waits for (`waiting for caddy's certificate`), and passes with how long it
-  waited (`health.example.org, after 14s`). After a minute it fails on the
-  last check's result. A failure waiting cannot fix, such as a name that does
-  not resolve or an app reachable around the web server, fails at once. A
-  site file already in place and unchanged is checked once, and waited on
-  only after apply reloaded its web server in a container (below). A dry run
-  lists the check without running it.
-  `apply --site` on such a monitor runs the whole step, the site files below
-  and then the check, reaching the monitor through the ssh login the rest
-  of its apply uses, and ends the same way, on the warning or the failure in
-  place of `Applied <n> files to <site>.`. The applies a full apply runs as
-  its steps leave the step to the full apply, which runs it once.
+  switch the web server in an apply of its own. `paisans apply` without `--site` writes each such app's reference snippet and
+  checks it with `paisans web-server check`'s checks once every step has run, and
+  `paisans apply --site` on such a monitor does the same for the apps the monitor
+  serves once its stacks are up. Each app has a line in a `web server` section,
+  and each is checked once, without waiting. A line that fails is a warning, `!`,
+  with the checks that failed under it, an error several of them share said
+  once, then the web server admit found in front of the app and the commands
+  for the owner to finish with. The run ends on a warning,
+  `! Deployment complete, but 1 app failed its web server check`, with exit
+  status 0: every step ran, and the web server is the owner's. What apply
+  itself could not do, such as reaching the monitor's host over ssh or writing
+  a reference file, is a failure, `✗`, and the run ends failed with exit
+  status 1. A dry run lists the check without running it. `apply --site` ends
+  the same way in place of `Applied <n> files to <site>.`.
   `docs/guides/behind-your-own-web-server.md` walks through it.
 
-**The toolkit writes its own file, never the operator's configuration.** In
-`managed_by: external` `paisans apply` puts each app's site, the snippet `web-server show`
-prints for the web server it finds, in a file of its own in `include_dir`, a
-directory on the host the web server includes with one line the operator adds
-once:
+**The toolkit renders, the owner installs.** On a site with `managed_by: external`, `apply` runs the app on `listen` and writes the snippet for the web server in front of it to `/srv/paisans/<token>/web-server/<app>.caddy` or `<app>.conf`, filled in from what `host admit` detected as root: the server, its configuration and how it obtains certificates. When admit found no server it knows, it writes one for each of Caddy, nginx and Apache (`<app>.caddy`, `<app>.nginx.conf` and `<app>.apache.conf`). Apply puts the file back when it is missing or has been edited. The deployment's user cannot write the owner's configuration, test it or reload the server, and nothing grants it that, so the owner copies the snippet in; `paisans web-server show --app <app>` prints it with the rest of the hand-off sheet, read from the same admission record.
 
-| Server | The one line |
-|---|---|
-| Caddy | `import /etc/caddy/paisans.d/*`, at the top level of the Caddyfile, after the global options block if it has one |
-| nginx | `include /etc/nginx/paisans.d/*.conf;`, inside the `http` block |
-| Apache | `IncludeOptional /etc/apache2/paisans.d/*.conf` |
+**apply checks from outside and warns until the owner's copy serves.** After writing the snippet, `apply` runs `web-server check` for the app once, without waiting. Until the check passes, the web server step ends on a warning naming `paisans web-server show --app <app>` for the owner. When a change to `paisans-stack.yaml` rewrites the snippet, the warning says so, because the owner's copy is then older than it.
 
-Caddy requires its global options block, the one that opens with `{` alone,
-to come first in the Caddyfile, so the import goes after it and outside every
-site block and snippet:
-
-```
-{
-    email admin@example.org
-}
-
-import /etc/caddy/paisans.d/*
-
-example.org {
-    ...
-}
-```
-
-An import above the global options block validates while the directory is
-empty, and Caddy refuses the whole configuration once a site file is in it.
-Apply reads the Caddyfile before it writes anything, and for an import above
-the global options block or inside a block it writes nothing and warns with
-where to move the line.
-
-The file is named for the deployment, `paisans-<token>-<app>.caddy` or
-`.conf`, so two deployments writing in one directory never collide. Apply
-writes it before the web server check and validates the server's whole
-configuration (`caddy validate`, `nginx -t`, `apachectl configtest`, inside
-the container for one in a container). When the configuration does not
-validate it puts back what was there, reloads nothing, and warns with the
-server's own error, so the server keeps the configuration it ran. What
-happens once it validates depends on where the server runs:
-
-* **In a Docker container**, apply reloads it gracefully inside the container
-  (`caddy reload`, `nginx -s reload`, `apachectl graceful`, through `docker
-  exec`), and when that fails restarts the container with `docker restart`;
-  the step's line says which. Only when the restart fails too does it put
-  back what was there and warn.
-* **On the host itself**, apply does not reload or restart it: the server is
-  the operator's to restart. The step's line is a warning that the file was
-  written and the server not reloaded, with the command that reloads it,
-  `sudo systemctl reload caddy` (or `nginx`, `apache2`, `httpd`) when that
-  systemd unit is active, otherwise `caddy reload --config <its Caddyfile>
-  --adapter caddyfile`, `sudo nginx -s reload` or `sudo apachectl graceful`,
-  and the run ends on the warning.
-
-A file already as it should be is not written and nothing is reloaded, unless
-the app's web server check then fails: apply validates the configuration
-again, in case the operator edited it, reloads a server in a container and
-checks the app again, waiting on it as after any reload, or for one on the
-host gives the reload command.
-Each file goes into the deployment's manifest with what removing it needs, so
-its removal is driven by that record: `app remove`, `site remove` (with
-`--force` too) and an apply where the app's hostname moved off the site or
-`include_dir` changed delete the file, and only that file, never the
-directory or anything else in it, then validate the same way, reloading a
-server in a container and naming the reload command for one on the host. A
-file changed on the host since apply wrote it is left and reported; one
-already gone is fine. `site remove --host-gone` reaches nothing, and says the
-files may still be there.
-
-Everything about the operator's web server is a warning, `!`, on its step's
-line, and leaves the run's exit status 0: a web server not determined, one
-apply has no file for, no directory it reads to write in (a container
-whose mounts do not include one), no line including the directory, a
-literal one, or a Caddy import above its global options block or inside a
-block, a configuration it refuses, a file edited on the host, a reload
-left to the operator, and a failed web server check. What apply itself could
-not do is a failure, `✗`, and the run ends failed with exit status 1: the
-monitor's host not reached over ssh, the record of its site files not read
-or written, a site file not read, written or removed there, or `paisans-stack.yaml`
-not written.
-
-**A container without the directory is diagnosed from its compose file.**
-Docker adds a mount only when it creates a container, so a line added to the
-compose file takes effect once the container is recreated (`docker compose up
--d <service>`), and `docker restart` is not enough. When the server's
-container lacks the directory, apply reads the labels compose put on it
-(`com.docker.compose.project`, `.service`, `.project.working_dir`,
-`.project.config_files`) and the compose files they name, as the site's ssh
-user, and says which it is, in a few lines with the
-command that recreates the container: the line declared on the server's
-service for a container created before it; declared on another service, named
-with the one it belongs to; declared at a container path the configuration
-does not import, both paths named; or not declared, with the line to add to
-that service in that file, the only case that also offers `include_dir:
-false`. Short and long volume syntax are read, relative sources against the
-project's directory, and a volume written with a variable is compared as
-written and said to be. When the configuration already has the wildcard line,
-the warning adds that it matches nothing until the mount exists, which is
-harmless. Apply never edits a compose file, recreates a container or restarts
-one for a mount; a container it cannot read the compose file of gets the line
-to add. The command it gives is `cd <project directory> && docker compose up
--d <service>`, or `docker compose -p <project> -f <file> ... up -d <service>`
-where the files are not the ones compose finds there by itself.
-
-The line must be a wildcard, because the directory may go: a deployment
-removed, or the directory deleted by hand. Caddy's `import` of a glob that
-matches nothing, nginx's `include` of one and Apache's `IncludeOptional` all
-start with an empty or missing directory, without the paisans sites. A line
-naming a file or the directory itself, or Apache's plain `Include`, fails the
-next start or reload once it is gone, and takes down every site the server
-carries, the operator's own included. So apply reads the server's
-configuration first (the Caddyfile, `nginx -T`, Apache's include lines) and
-writes nothing unless it includes the directory by a wildcard that takes in
-the toolkit's files: with no such line it warns with the exact line to add,
-and with a literal one it warns with the line it found and the one to use
-instead; either way the run does not end as complete.
-
-`include_dir` unset, apply derives it beside the server's main configuration,
-`<its directory>/paisans.d`, and writes it into `paisans-stack.yaml` under the
-site's `web_server`, in place, keeping every comment, with a warning saying so
-(`health: include_dir set to /etc/nginx/paisans.d in paisans-stack.yaml`). It is
-recorded only once the server is found to include it. For a server in a
-container the directory must be visible inside it: the host path comes from
-the mount of the configuration's directory, and the line names the path as
-the container sees it. A container that mounts its configuration file alone
-has no such directory, so nothing is recorded, and the warning names the
-mount to add to its compose file. `include_dir: false` writes nothing, for a
-server apply has no snippet for or an operator who keeps the configuration by
-hand: `web-server show` prints the snippet to copy, as it always does. `validate`
-refuses `include_dir` outside `managed_by: external` (`web-server-include-dir-managed-by`)
-and anything but a plain absolute path, since it goes into the server's
-configuration and into commands on the host (`web-server-include-dir-path`).
+**Removing an app names the block to remove.** `app remove` and `site remove` delete the reference file, which is the deployment's, and say which block the owner removes from their web server. `validate` refuses `web_server.include_dir` (`web-server-include-dir`): nothing is written into the owner's configuration, so there is no directory to name.
 
 `listen` belongs to `managed_by: external` alone, which cannot work without it
 (`web-server-listen-managed-by`). Docker publishes a port with its own iptables rules,
@@ -1121,22 +972,20 @@ How to run them, and their flags, are under *`paisans web-server show` and
 the web server must do (terminate TLS for the hostname, pass `Host`, set
 `X-Forwarded-For` and `X-Forwarded-Proto`, refuse what the toolkit's own edge
 refuses, below); the snippet for the web server in front of the monitor; and
-the ufw warning when `listen` is not loopback. It finds that web server over
-ssh, reading only, through the transport `apply` uses: the container
-publishing 443 or 80 (`docker ps`), and its configuration from the
-container's mounts; failing that, the process listening on 443 or 80
-(`ss -ltnp`). For Caddy it asks the admin API on `localhost:2019`, on the host or inside the container: a Caddy that
+the ufw warning when `listen` is not loopback. It reads the web server that
+`host admit` detected as root from the site's admission record, over ssh as the
+site's ssh user, and detects nothing itself: the server and its container or
+process, its configuration, and how it obtains certificates. A Caddy that
 obtains its own certificates gets a site level `tls { issuer acme }`, one that
 loads certificate files gets a `tls` line following their pattern for the new
-name, and where a
-server is bound to a private address only the snippet says which listener the
-site belongs on. For nginx (`nginx -T`) and Apache it reads the certificate
-files the configuration names; under `/etc/letsencrypt/live/` it names the
-files certbot will write for the new name and the `certbot certonly` command,
-with the authenticator the existing renewals use. A line above the snippet
+name, and where a server is bound to a private address only the snippet says
+which listener the site belongs on. For nginx and Apache with certificates
+under `/etc/letsencrypt/live/` it names the files certbot will write for the
+new name and the `certbot certonly` command, with the authenticator the
+existing renewals use. A line above the snippet
 says what was found, such as `web server: caddy (docker container caddy-1,
-config /opt/caddy/Caddyfile), obtains its own certificates (DNS-01 globally;
-this site uses HTTP-01)`, so it can be checked before anything is copied.
+config /opt/caddy/Caddyfile), obtains its own certificates (this site uses
+HTTP-01)`, so it can be checked before anything is copied.
 
 The site's own issuer is there so that its certificate never depends on a DNS
 challenge the operator set for their other sites, whose token may not cover
@@ -1148,16 +997,14 @@ issuer replaces a global `cert_issuer acme { dns … }`, but not a global
 `acme_dns`: Caddy gives that to every ACME issuer without a DNS provider of
 its own, the site's included (`fillInGlobalACMEDefaults` in
 `caddyconfig/httpcaddyfile/tlsapp.go`, Caddy v2.11.7), and then uses the DNS
-challenge alone. So `show` reads the Caddyfile's global options block too, and
-where it finds `acme_dns` it warns, as `apply` does on the site file's step,
-that the certificate needs the global token to cover the hostname's zone, with
-the line rewritten as a `cert_issuer acme { dns … }` that lets the site use
-HTTP-01. That rewrite drops Caddy's default ZeroSSL fallback issuer for the
-sites without one of their own. The site file is written either way: it is
-valid, and with `acme_dns` it changes nothing. When nothing could be read, or the server
-has no snippet, that line says why and the sheet carries the Caddy, nginx and
-Apache snippets, with Caddy's `tls` line commented out. It reads as the ssh
-user. `check` reports pass or fail, with the fix, for: the hostname
+challenge alone. Admit does not record the Caddyfile's global options, so
+neither `show` nor `apply` warns about it: an owner whose global options set
+`acme_dns` needs that token to cover the hostname's zone, or rewrites it as a
+`cert_issuer acme { dns … }`, which lets the site use HTTP-01 and drops
+Caddy's default ZeroSSL fallback issuer for the sites without one of their
+own. When admit found no server it knows, that line says why and the sheet
+carries the Caddy, nginx and Apache snippets, with Caddy's `tls` line commented
+out. `check` reports pass or fail, with the fix, for: the hostname
 resolving to the monitor's `public_address` (and `public_address6`) and to
 nothing else, so a stale record still on the gateway fails;
 `https://<hostname>/healthz` answering with a certificate valid for the
@@ -5535,7 +5382,6 @@ render, never from the host, so nothing on the host chooses what is reviewed:
 | login | `ssh.user`, or `paisans-<token>` when it is left out | the site's `ssh` section |
 | keys | per key: its operator, its SHA256 fingerprint and its comment | every key of every operator in the site's `ssh.keys` |
 | images | per service: its stack, its name, the image reference as the compose file writes it, and whether it is a foundation image (see below) | every `compose.yaml` the render writes for the site, the infrastructure's (which runs with `network_mode: host`) and the apps' |
-| web server | the include directory | `web_server.include_dir` on a monitor site whose apps the operator's web server serves: root writes files there that the server reads |
 | blueprints | per app whose blueprint a catalog provides, the core catalog included: the blueprint, its tag and commit, and the SHA-256 of its files | the catalog blueprints of the apps on the site: a catalog's author wrote those templates, so a moved pin chooses code as an image does, and a new core catalog release moves the core blueprints of every deployment that does not pin core itself |
 
 A key is the same key when its fingerprint is, so a new comment or a new operator
@@ -5968,8 +5814,8 @@ whose sites' steps are all up to date, or have run (`<operator> on <app>`),
 since one not running yet cannot answer: `registered` for an operator who has
 a passkey, what the run made otherwise, and in a dry run what it would make.
 Then, when an app is served behind the operator's own web
-server, a `web server` section: with `--execute` a line for each site file
-written into `include_dir` and a line per app for its web server check, and in a
+server, a `web server` section: with `--execute` a line for each reference
+snippet written and a line per app for its web server check, and in a
 dry run a line per app, `checked with --execute` (see *The monitor has a site
 of its own*). Last, a note names `secrets set` for each credential still owed,
 since only the operator can supply it. A run with `--execute` ends

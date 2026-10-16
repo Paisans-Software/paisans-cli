@@ -795,8 +795,8 @@ founding applies, `site add`, the other sites, storage and pass two; `gateway
 move`, when a site without the gateway role still serves as the gateway; the
 `pocket id` step, which makes each operator a user of every running Pocket ID
 app and issues a login link to one with no passkey; and, for each app behind the operator's own web
-server, its site file written into the web server's `include_dir` and
-`web-server check`'s checks. The version of the configuration it applies is
+server, its reference snippet written under `/srv/paisans/<token>/web-server/`
+and `web-server check`'s checks. The version of the configuration it applies is
 published once the `host prepare` steps have made every site's store and before
 any other step changes a host (see *Every site keeps signed copies of the
 configuration* in `README.md`). Each `apply --site` it runs that covers the
@@ -816,13 +816,12 @@ images it superseded* in `README.md`).
 * **Review:** before the first step that
   changes a host (an `init` with work runs first: it writes only local
   files), one review of what `paisans-stack.yaml` grants on every site, under `review`, a line per site
-  with each change under it: keys, images and the web server's directory.
+  with each change under it: keys and images.
   With `--execute`, when anything is added or changed, it asks once for
   `approve` at a terminal, for every site, and refuses without one; each step
   then applies what was approved, and refuses anything that changed since.
   The dry run shows it, asks nothing, and ends saying what `--execute` will
-  ask for. Each step records its part once it has succeeded, and the run
-  records each web server's directory after its web server step.
+  ask for. Each step records its part once it has succeeded.
 * **Configuration store:** before the review, every site's versions are gathered
   (under `configuration store`) and a fork, a base older than the sites' newest
   version, or a key no operator lists is refused, naming `config pull` or `config
@@ -846,21 +845,16 @@ images it superseded* in `README.md`).
   they are used* in `README.md`.
 * **`--execute`:** runs the steps, stopping at the first failure; run again,
   it reads live state again and carries on. It ends `Deployment complete.`, or,
-  when an app failed its web server check or its site file step warned, ends
-  on a warning naming each such app and exits 0, since every step ran and the
-  web server is the operator's; with another failure as well, or a web server
-  step that could not reach or write what it needs on the host, it exits 1.
-  Each problem with the operator's web server is one `!` line with one set of
-  instructions; an app whose site file step warned or failed has no check line
-  of its own but with `-v`. Caddy's `import` of the include directory goes at
-  the top level of the Caddyfile, after the global options block if it has
-  one; apply refuses one above that block or inside a block, writing nothing,
-  and says where to move it. A web server container without the include
-  directory is diagnosed from its compose file, read only, with the command
-  that recreates it, since a restart does not add a mount. A web server in a Docker container is validated and reloaded
-  after its site file changes, restarted when the reload fails; one on the
-  host itself is validated, and the warning gives the command to reload it. An `include_dir` it
-  derives is written into `paisans-stack.yaml`. Without it, every step is checked
+  when an app has not passed its web server check, ends on a warning naming
+  each such app and `paisans web-server show --app <app>`, and exits 0, since
+  every step ran and the web server is the owner's; with another failure as
+  well, or a web server step that could not reach or write what it needs on
+  the host, it exits 1. Each app behind the owner's web server has its
+  reference snippet written under `/srv/paisans/<token>/web-server/`, from the
+  host's admission record, and checked once, without waiting; apply puts the
+  file back when it is missing or edited, and nothing is written into the
+  owner's configuration or reloaded. A warning for a rewritten snippet says the
+  owner's copy needs replacing. Without `--execute`, every step is checked
   as its own dry run, the web server checks are listed as `checked with
   --execute`, and the generated secrets the file lacks may be added to the
   local secrets file, as `init` would add them, which it says when it does.
@@ -897,11 +891,11 @@ starts, restarts or recreates what changed.
   failure refuses the apply before anything changes, naming the app, where
   its settings are declared and the server's reply.
 * **Review:** the images every rendered `compose.yaml` of the site runs, and
-  the web server's `include_dir`, against what the host last recorded, under
+  against what the host last recorded, under
   `review what paisans-stack.yaml grants`; `--only` narrows the images to its
   stacks. With `--execute` it is asked for, as `approve` at a terminal, before
   the claim, when anything is added or changed; the images are recorded once
-  the apply has succeeded, and the directory once the web server step has.
+  the apply has succeeded.
 * **Configuration store:** gathered and checked before the review as the whole
   apply does, with `--secrets` refused when it names a file other than the
   `secrets.enc.yaml` beside `paisans-stack.yaml`. `--execute` publishes the version it
@@ -915,19 +909,17 @@ starts, restarts or recreates what changed.
   images` in the plan). Without it, it reads and prints the plan. On a monitor
   with `managed_by: external`, `--execute` then runs the web server step for
   the apps that monitor serves, as the whole apply does at its end: each
-  app's site file written into `include_dir` (an `include_dir` it derives
-  written into `paisans-stack.yaml`), the configuration validated, a server in a
-  container reloaded and the reload command given for one on the host, then
-  `web-server check`'s checks, a line per app in a `web server` section. A
-  certificate or sign in failure, which a web server still obtaining its
-  certificate gives, is checked again after 2, 4, 8 and 16 seconds and then
-  30, up to a minute in all, the line saying what it waits for; any other
-  failure, such as DNS, is reported at once. It
+  app's reference snippet written under `/srv/paisans/<token>/web-server/`
+  from the admission record (restored when missing or edited), then
+  `web-server check`'s checks once, without waiting, a line per app in a
+  `web server` section, and a warning naming `paisans web-server show --app
+  <app>` until the check passes. Nothing is written into the owner's
+  configuration and nothing reloads it. It
   reaches the monitor through the same ssh as the rest of the apply,
   `--ssh` included. A problem with the operator's web server ends it on the
   whole apply's warning with exit status 0, in place of `Applied <n> files to
   <site>.`; one apply could not do on the host, such as reading or writing the
-  record of its site files, ends it failed with exit status 1. Its dry run
+  reference file, ends it failed with exit status 1. Its dry run
   lists the check as `checked with --execute`. The applies the whole apply
   runs as its steps leave the step to it, so it runs once.
 
@@ -987,10 +979,9 @@ See *Preflight* in `README.md`.
 
 Takes a site out of the running deployment in gated stages: its data out, out
 of the cluster, its host cleaned of what is provably this deployment's (on a
-monitor behind the operator's own web server, the site files apply wrote into
-its `include_dir` included, after which a web server in a Docker container is
-validated and reloaded, and one on the host itself validated and left for the
-operator to reload with the command it names), its DNS records deleted, and
+monitor behind the operator's own web server, the reference files apply wrote
+under `/srv/paisans/<token>/web-server/` deleted, with the block the owner
+removes from their web server named), its DNS records deleted, and
 its entry out of `paisans-stack.yaml`.
 
 ```sh
@@ -1042,8 +1033,8 @@ paisans site remove --force --ssh admin@203.0.113.9 --id f2a9 --execute --delete
   And the site as an argument, `--config`, `--secrets`, `--execute`.
 * **Hosts:** every site, and the DNS provider for the removed site's records;
   `--force` reaches the one host only and leaves DNS alone. `--host-gone`
-  reaches the removed site's host not at all, so it says the site files apply
-  wrote there may still be in the web server's `include_dir`.
+  reaches the removed site's host not at all, so it says the reference files
+  apply wrote there may still be under `/srv/paisans/<token>/web-server/`.
 * **`--execute`:** runs the stages, stopping at the first gate that fails. Stage
   3 deletes the record of what the deployment granted on the host,
   `/srv/paisans/<token>/.paisans/granted.json`, with its registry entry. It deletes
@@ -1317,10 +1308,9 @@ See *`oidc client create` makes an app's client at Pocket ID* in `README.md`.
 
 Takes an app that has left `paisans-stack.yaml` off every host, once a whole apply
 on each site has marked its files left over. For an app behind the operator's
-own web server it also deletes the site file apply wrote into the web
-server's `include_dir`, then validates that web server and reloads it when it
-runs in a Docker container. One on the host itself is the operator's to
-reload: what is left at the end gives the command.
+own web server it also deletes the reference file apply wrote under
+`/srv/paisans/<token>/web-server/` and names the block the owner removes from
+their web server.
 
 ```sh
 paisans app remove docs                              # shows what it would do
@@ -1343,8 +1333,9 @@ See *`app remove` takes an app off its hosts* in `README.md`.
 
 For an app pinned to a monitor site behind the operator's own web server.
 `show` prints what that web server must do, with the snippet for the web
-server it finds in front of the app, or for Caddy, nginx and Apache when it
-finds none. `check` checks, from this machine as a visitor would, that the
+server `host admit` recorded in front of the app, read from the site's
+admission record over ssh as the deployment's user, or for Caddy, nginx and
+Apache when admit found none. `check` checks, from this machine as a visitor would, that the
 hostname resolves to the monitor, that `/healthz` answers with a valid
 certificate, that sign in redirects with an https callback, and that the
 published port is closed from outside; when a check fails, it names the web
@@ -1356,14 +1347,13 @@ paisans web-server check --app health   # from your machine, as a visitor would
 ```
 
 * **Alone:** `show` always, to hand the snippet to whoever runs the web
-  server. The whole apply writes that snippet into the web server's
-  `include_dir` and runs `check`'s checks after every step, waiting up to a
-  minute on a certificate or sign in failure and reporting a DNS or routing
-  failure at once, so `check` is typed alone to check again once the web
-  server is fixed. Typed alone it checks once.
+  server. The whole apply writes that snippet under
+  `/srv/paisans/<token>/web-server/` and runs `check`'s checks once after every
+  step, without waiting, warning until they pass, so `check` is typed alone to
+  check again once the owner has installed the snippet.
 * **Flags:** `--app <name>` (required), `--config`. It reads as the ssh user.
-* **Hosts:** in `managed_by` `external`, the monitor over ssh, reading only:
-  `show` always, `check` only when a check fails. `check` otherwise looks at
+* **Hosts:** in `managed_by` `external`, the monitor over ssh, reading its
+  admission record only: `show` always, `check` only when a check fails. `check` otherwise looks at
   the public hostname only.
 * **`--execute`:** not taken. Neither changes anything. `check` exits 1 on any
   `FAIL`.
