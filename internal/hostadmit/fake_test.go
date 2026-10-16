@@ -142,7 +142,8 @@ func sum(content string) string {
 const ubuntu2404 = "PRETTY_NAME=\"Ubuntu 24.04.1 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nVERSION_CODENAME=noble\nID=ubuntu\nID_LIKE=debian\nUBUNTU_CODENAME=noble\n"
 
 // newBlank is a VPS fresh from Ubuntu 24.04: no Docker, AppArmor
-// restricting unprivileged user namespaces with no rootlesskit profile, no
+// restricting unprivileged user namespaces with the rootlesskit profile
+// Ubuntu's apparmor package loads, no
 // deployment user, no file admit writes, ufw installed and active, one
 // public interface, systemd-resolved, and nothing on 80 or 443.
 func newBlank() *fakeHost {
@@ -154,7 +155,7 @@ func newBlank() *fakeHost {
 		{"engine", "absent"}, {"pkg", "docker-ce absent"}, {"pkg", "docker.io absent"},
 		{"pkg", "docker-ce-rootless-extras absent"}, {"pkg", "uidmap absent"}, {"pkg", "nftables installed"},
 		{"setuptool", "absent"}, {"snap", "absent"}, {"system-socket", "absent"},
-		{"userns-restrict", "1"}, {"rootlesskit-profile", "absent"},
+		{"userns-restrict", "1"}, {"rootlesskit-profile", "loaded"},
 		{"passwd", "absent"}, {"subuid", "ubuntu:100000:65536"}, {"subgid", "ubuntu:100000:65536"},
 		{"br_netfilter", "absent"}, {"forward-policy", "ACCEPT"},
 		{"port-start", "1024"}, {"ip-forward", "0"},
@@ -168,7 +169,7 @@ func newBlank() *fakeHost {
 	h.withDir("/etc/wireguard", "absent", 0, 0).withDir("/etc/paisans", "absent", 0, 0).
 		withDir("/srv/paisans", "absent", 0, 0).withDir("/srv/paisans/f2a9", "absent", 0, 0)
 	// hostprep's probes, as host prepare's tests answer them.
-	h.answer("docker compose version", "compose absent\nkeyring absent\narch amd64\n").
+	h.answer("docker compose version", "compose absent\npkg nftables install ok installed\nkeyring absent\narch amd64\n").
 		answer("RuntimeWatchdogUSec", "device absent\nsystemd 0\ndaemon absent\n").
 		answer("ufw show added", "ufw present\nstatus active\n").
 		answer("is-enabled", "enabled \nactive \n").

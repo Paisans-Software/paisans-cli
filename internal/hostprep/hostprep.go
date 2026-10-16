@@ -197,6 +197,13 @@ type Profile interface {
 	// Packages plans Docker Engine with the compose plugin, the WireGuard
 	// tools, and whatever the profile's own firewall needs.
 	Packages(t Transport, host OSRelease) (Section, error)
+	// AdmitPackages plans what host admit installs for a deployment that
+	// runs rootless: with Docker absent, Docker's repository and packages
+	// with its rootless extras; with Docker present, the extras alone,
+	// never upgrading a package already installed; in both, uidmap,
+	// nftables and the base packages. dockerPresent is admit's own
+	// judgement, made from the engine's version.
+	AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (Section, error)
 	// Services plans enabling and starting what Packages installed.
 	// Its own files carry the deployment's token, so that two deployments on
 	// one host each keep their own.

@@ -1,0 +1,1 @@
+refused: docker: Docker 29.6.0 here is not Docker's own docker-ce and has no dockerd-rootless-setuptool.sh. The rootless extras come from Docker's apt repository, which installs beside docker-ce only. Install Docker from Docker's repository yourself, or admit on another host. Nothing was changed
