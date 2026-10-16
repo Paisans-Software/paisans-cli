@@ -83,3 +83,43 @@ func TestProbeQuotesWhatItIsGiven(t *testing.T) {
 		t.Errorf("sh -n: %v: %s", err, out)
 	}
 }
+
+// A path below a link, or below a directory another user owns or can
+// write, is read as unsafe and never as what is there: the probe prints
+// link-above or unsafe-above in place of its state, and the parse marks
+// the fact Unsafe, as it does the data directory's.
+func TestParseFactsMarksAPathBelowALinkOrAnotherUsersDirectory(t *testing.T) {
+	out := "dir /srv/paisans/f2a9 link-above 0 0\ndir /mnt/ext/data unsafe-above 0 0\ndir /etc/wireguard drwx------ 0 0\n" +
+		"file /etc/sudoers.d/paisans-f2a9 link-above\nfile /etc/paisans/admitted.f2a9.json unsafe-above\n" +
+		"data-above unsafe-above\ndata-path /mnt/ext/data\nend\n"
+	f, err := parseFacts(out, "paisans-f2a9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"/srv/paisans/f2a9", "/mnt/ext/data"} {
+		if d := f.Dirs[p]; !d.Unsafe || !d.Present || strings.HasPrefix(d.Mode, "d") {
+			t.Errorf("%s: %+v", p, d)
+		}
+	}
+	if d := f.Dirs["/etc/wireguard"]; d.Unsafe {
+		t.Errorf("/etc/wireguard: %+v", d)
+	}
+	for _, p := range []string{"/etc/sudoers.d/paisans-f2a9", "/etc/paisans/admitted.f2a9.json"} {
+		if s := f.Files[p]; !s.Unsafe || !s.Present || s.Sum != "" {
+			t.Errorf("%s: %+v", p, s)
+		}
+	}
+	if f.Files["/etc/sudoers.d/paisans-f2a9"].Mode != "link-above" || f.Files["/etc/paisans/admitted.f2a9.json"].Mode != "unsafe-above" {
+		t.Errorf("files: %+v", f.Files)
+	}
+	if !f.Data.Unsafe || f.Data.Path != "/mnt/ext/data" {
+		t.Errorf("data: %+v", f.Data)
+	}
+	f, err = parseFacts("data-above safe\ndata-path /home\nend\n", "paisans-f2a9")
+	if err != nil || f.Data.Unsafe {
+		t.Errorf("a safe data path: %+v %v", f.Data, err)
+	}
+	if _, err := parseFacts("data-above maybe\nend\n", "paisans-f2a9"); err == nil {
+		t.Error("an unknown data-above was read")
+	}
+}

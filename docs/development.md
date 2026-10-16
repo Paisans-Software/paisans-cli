@@ -1522,6 +1522,19 @@ hence the longer timeout. `PAISANS_WF_IMAGE=<reference>` runs it against
 another build, such as a local one of a release newer than the one the kind
 names.
 
+`host admit`'s read-only probe has Docker tests of its own, behind their own
+tag:
+
+```
+go test -tags hostadmit_integration ./internal/hostadmit/
+```
+
+They run the rendered probe as root in `ubuntu:24.04` and parse what it
+prints: on a blank image, and with `/srv/paisans` linked elsewhere, a
+`--data-dir` below another user's directory or link, a group-writable `/srv`,
+and a file admit writes below a link. Each hostile path must read as unsafe,
+never as what is at the end of it.
+
 Nothing runs
 `go test ./...` or any tagged test for you, so run them before a pull request.
 

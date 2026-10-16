@@ -6,6 +6,24 @@
 export LC_ALL=C PATH=/usr/sbin:/usr/bin:/sbin:/bin
 u={{ q .User }}
 say() { printf '%s %s\n' "$1" "$2"; }
+# above is how the directories above $1 stand, from / down to its parent:
+# link when one is a link, unsafe when one is not root's or is group or
+# other writable, safe otherwise. Below such a directory a path is not
+# what it names, or can be swapped between this read and admit's change,
+# so nothing below it is read.
+above() {
+  _r=${1#/} _a=
+  set -- /
+  while :; do
+    if [ -L "$1" ]; then echo link; return; fi
+    if [ ! -e "$1" ]; then echo safe; return; fi
+    _s=$(stat -c '%u %a' "$1") || { echo unsafe; return; }
+    if [ "${_s%% *}" != 0 ] || [ $((0${_s#* } & 022)) -ne 0 ]; then echo unsafe; return; fi
+    case $_r in */*) ;; *) echo safe; return ;; esac
+    _a=$_a/${_r%%/*} _r=${_r#*/}
+    set -- "$_a"
+  done
+}
 # Docker, judged by its binary so a stopped daemon is judged too.
 if command -v dockerd >/dev/null 2>&1; then say engine "$(dockerd --version 2>/dev/null | sed -n 's/^Docker version \([^,]*\),.*/\1/p')"; else say engine absent; fi
 for p in docker-ce docker.io docker-ce-rootless-extras uidmap nftables; do
@@ -36,6 +54,10 @@ awk -F: 'NF >= 3 { print "subgid " $1 ":" $2 ":" $3 }' /etc/subgid 2>/dev/null
 # Each file admit writes as root: its checksum, mode and owner, so admit
 # compares with what it would write without printing what is there.
 for f in{{ range .Files }} {{ q . }}{{ end }}; do
+  case $(above "$f") in
+    link) say file "$f link-above"; continue ;;
+    unsafe) say file "$f unsafe-above"; continue ;;
+  esac
   if [ -L "$f" ]; then say file "$f link"
   elif [ -f "$f" ]; then say file "$f $(sha256sum < "$f" | cut -c1-64) $(stat -c '%a %u %g' "$f")"
   else say file "$f absent"; fi
@@ -45,6 +67,10 @@ if nft list table inet {{ q .EgressTable }} >/dev/null 2>&1; then say egress-tab
 # Each directory admit creates or checks, as ls -ldn prints it, so a link,
 # a non-directory and an ACL (a + after the mode) are all seen.
 for d in{{ range .Dirs }} {{ q . }}{{ end }}; do
+  case $(above "$d") in
+    link) say dir "$d link-above 0 0"; continue ;;
+    unsafe) say dir "$d unsafe-above 0 0"; continue ;;
+  esac
   if [ -e "$d" ] || [ -L "$d" ]; then say dir "$d $(ls -ldn "$d" | awk '{ print $1, $3, $4 }')"; else say dir "$d absent 0 0"; fi
 done
 # The kernel and the network.
@@ -59,14 +85,22 @@ dev=$(ip -4 -o route show default 2>/dev/null | awk '{ for (i = 1; i < NF; i++) 
 say default-dev "${dev:-absent}"
 if [ -n "$dev" ]; then ip -4 -o addr show dev "$dev" scope global | awk '{ print "lan " $4; exit }'; fi
 if systemctl is-active firewalld >/dev/null 2>&1; then say firewalld active; else say firewalld inactive; fi
+nft list ruleset 2>/dev/null | sed 's/^/ruleset /'
 nft list chains 2>/dev/null | awk '/^table / { t = $2 " " $3 } /^[ \t]*chain / { c = $2 } /hook input/ { print "input-chain " t " " c }'
 for f in /etc/udev/rules.d/60-paisans-*-watchdog.rules; do [ -e "$f" ] && say watchdog-rule "$f"; done
 for f in /etc/paisans/admitted.*.json; do [ -e "$f" ] && say record "$f"; done
 # Where Docker's data will live: --data-dir, or the user's home, or /home
 # for a user not made yet; the nearest directory that exists.
 target={{ if .DataParent }}{{ q .DataParent }}{{ else }}"${home:-/home}"{{ end }}
-while [ ! -e "$target" ]; do target=$(dirname "$target"); done
+while [ ! -e "$target" ] && [ ! -L "$target" ]; do target=$(dirname "$target"); done
+# Its filesystem and free space are read only when nothing above it, and
+# not the path itself, is a link or another user's.
+above=$(above "$target")
+if [ -L "$target" ]; then above=link; fi
+say data-above "$above$([ "$above" = safe ] || echo -above)"
 say data-path "$target"
-say data-fs "$(stat -f -c %T "$target")"
-say data-avail "$(df -P -B1 "$target" | awk 'NR == 2 { print $4 }')"
+if [ "$above" = safe ]; then
+  say data-fs "$(stat -f -c %T "$target")"
+  say data-avail "$(df -P -B1 "$target" | awk 'NR == 2 { print $4 }')"
+fi
 echo end

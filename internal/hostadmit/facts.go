@@ -16,6 +16,15 @@ import (
 var snippets embed.FS
 
 // Facts are what the probe found, read once per Build.
+//
+// A path below a link, or below a directory that is not root's or that its
+// group or others can write, is read as Unsafe: its FileState or DirState
+// says so and carries nothing else of it, and Data.Unsafe says the same of
+// where Docker's data would go. What is below such a directory is not what
+// its path names, or can be swapped between this read and admit's change,
+// so a part that would create, write or hand over anything there refuses,
+// naming the path: Task 7 for the data directory and --data-dir, Task 8 for
+// /srv/paisans/<token>, and every part for the files it writes.
 type Facts struct {
 	Docker   DockerFacts
 	Packages map[string]bool
@@ -32,14 +41,21 @@ type Facts struct {
 	InputPolicy                string
 	InputRules                 int
 	InputChains                []string
-	Firewalld                  bool
-	PortStart, IPForward       string
-	DefaultDev, LAN            string
-	WatchdogRules              []string
-	Records                    []string
-	Data                       struct {
+	// Ruleset is nft list ruleset, line by line; OwnerFirewall is each
+	// chain or rule in it that is the owner's own firewall, as
+	// ownerFirewall reads it.
+	Ruleset, OwnerFirewall []string
+	Firewalld              bool
+	PortStart, IPForward   string
+	DefaultDev, LAN        string
+	WatchdogRules          []string
+	Records                []string
+	// Data is where Docker's data would go: the nearest directory that
+	// exists. FS and Avail are not read when Unsafe.
+	Data struct {
 		Path, FS string
 		Avail    int64
+		Unsafe   bool
 	}
 	// raw is every line, by key, for what no field above carries.
 	raw map[string][]string
@@ -68,18 +84,22 @@ type UserFacts struct {
 // IDRange is one line of /etc/subuid or /etc/subgid: Count IDs from Start.
 type IDRange struct{ Start, Count int64 }
 
-// FileState is one file admit writes, as the probe saw it.
+// FileState is one file admit writes, as the probe saw it. Unsafe is a
+// file below a link or another's directory: Present, with Mode link-above
+// or unsafe-above and nothing else read.
 type FileState struct {
-	Present, Link bool
-	Sum, Mode     string
-	UID, GID      int
+	Present, Link, Unsafe bool
+	Sum, Mode             string
+	UID, GID              int
 }
 
-// DirState is one directory as ls -ldn printed it.
+// DirState is one directory as ls -ldn printed it. Unsafe is one below a
+// link or another's directory: Present, with Mode link-above or
+// unsafe-above, which no check for a directory's d accepts.
 type DirState struct {
-	Present  bool
-	Mode     string
-	UID, GID int
+	Present, Unsafe bool
+	Mode            string
+	UID, GID        int
 }
 
 // probeData is what probe.sh.tmpl is rendered with.
@@ -217,6 +237,8 @@ func parseFacts(out, user string) (Facts, error) {
 				f.Files[fields[0]] = FileState{Present: true, Link: true}
 			case len(fields) == 2 && fields[1] == "absent":
 				f.Files[fields[0]] = FileState{}
+			case len(fields) == 2 && (fields[1] == "link-above" || fields[1] == "unsafe-above"):
+				f.Files[fields[0]] = FileState{Present: true, Unsafe: true, Mode: fields[1]}
 			case len(fields) == 5:
 				uid, _ := strconv.Atoi(fields[3])
 				gid, _ := strconv.Atoi(fields[4])
@@ -238,7 +260,8 @@ func parseFacts(out, user string) (Facts, error) {
 			if err1 != nil || err2 != nil || dir == "" {
 				return f, fmt.Errorf("unreadable dir line %q", v)
 			}
-			f.Dirs[dir] = DirState{Present: fields[n-3] != "absent", Mode: fields[n-3], UID: uid, GID: gid}
+			mode := fields[n-3]
+			f.Dirs[dir] = DirState{Present: mode != "absent", Unsafe: mode == "link-above" || mode == "unsafe-above", Mode: mode, UID: uid, GID: gid}
 		case "egress-enabled":
 			f.EgressEnabled = v == "yes"
 		case "egress-table":
@@ -253,6 +276,8 @@ func parseFacts(out, user string) (Facts, error) {
 			f.InputPolicy = v
 		case "input-rules":
 			f.InputRules, _ = strconv.Atoi(v)
+		case "ruleset":
+			f.Ruleset = append(f.Ruleset, v)
 		case "input-chain":
 			f.InputChains = append(f.InputChains, v)
 		case "firewalld":
@@ -269,6 +294,14 @@ func parseFacts(out, user string) (Facts, error) {
 			f.WatchdogRules = append(f.WatchdogRules, v)
 		case "record":
 			f.Records = append(f.Records, v)
+		case "data-above":
+			switch v {
+			case "safe":
+			case "link-above", "unsafe-above":
+				f.Data.Unsafe = true
+			default:
+				return f, fmt.Errorf("unreadable data-above line %q", v)
+			}
 		case "data-path":
 			f.Data.Path = v
 		case "data-fs":
@@ -277,6 +310,7 @@ func parseFacts(out, user string) (Facts, error) {
 			f.Data.Avail, _ = strconv.ParseInt(v, 10, 64)
 		}
 	}
+	f.OwnerFirewall = ownerFirewall(f.Ruleset)
 	if f.User.Exists && f.User.Group == "" {
 		return f, fmt.Errorf("no primary group read for %s", user)
 	}
