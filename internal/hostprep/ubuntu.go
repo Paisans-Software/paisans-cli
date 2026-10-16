@@ -490,9 +490,10 @@ func (u ubuntu) AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (
 	return out, added, nil
 }
 
-// unitState reads `systemctl is-enabled` and `is-active` for one unit.
-func (u ubuntu) unitState(t Transport, unit string) (enabled, active bool, err error) {
-	script, err := snippet(u.tmpl("services-probe.sh.tmpl"), map[string]string{"Unit": unit, "Systemctl": "systemctl"})
+// unitState reads `systemctl is-enabled` and `is-active` for one unit of
+// the manager scope names.
+func (u ubuntu) unitState(t Transport, scope unitScope, unit string) (enabled, active bool, err error) {
+	script, err := snippet(u.tmpl("services-probe.sh.tmpl"), map[string]string{"Unit": unit, "Systemctl": scope.systemctl})
 	if err != nil {
 		return false, false, err
 	}
@@ -506,31 +507,7 @@ func (u ubuntu) unitState(t Transport, unit string) (enabled, active bool, err e
 		case "enabled":
 			enabled = rest == "enabled"
 		case "active":
-			active = rest == "active"
-		}
-	}
-	return enabled, active, nil
-}
-
-// userUnitState is unitState for the login user's own manager. activating
-// counts as active: a daemon waiting to restart until the mesh is up is
-// running as it should.
-func (u ubuntu) userUnitState(t Transport, unit string) (enabled, active bool, err error) {
-	script, err := snippet(u.tmpl("services-probe.sh.tmpl"), map[string]string{"Unit": unit, "Systemctl": UserSystemctl})
-	if err != nil {
-		return false, false, err
-	}
-	out, err := t.Run(script)
-	if err != nil {
-		return false, false, err
-	}
-	for _, line := range strings.Split(out, "\n") {
-		key, rest, _ := strings.Cut(strings.TrimSpace(line), " ")
-		switch key {
-		case "enabled":
-			enabled = rest == "enabled"
-		case "active":
-			active = rest == "active" || rest == "activating"
+			active = rest == "active" || (scope.activatingIsActive && rest == "activating")
 		}
 	}
 	return enabled, active, nil
@@ -541,7 +518,7 @@ func (u ubuntu) userUnitState(t Transport, unit string) (enabled, active bool, e
 // deployment on a host writes its own, so Docker waits for every mesh whose
 // address a container binds.
 func dockerAfterWireGuard(d deployment.Deployment) string {
-	return "/etc/systemd/system/docker.service.d/" + d.Prefix() + "-after-wireguard.conf"
+	return systemScope.dir + "/docker.service.d/" + d.Prefix() + "-after-wireguard.conf"
 }
 
 // Services makes Docker start at boot and now, and after the deployment's
@@ -576,7 +553,7 @@ func (u ubuntu) Services(t Transport, d deployment.Deployment) (Section, error) 
 			Command:  "systemctl daemon-reload",
 		})
 	}
-	enabled, active, err := u.unitState(t, "docker")
+	enabled, active, err := u.unitState(t, systemScope, "docker")
 	if err != nil {
 		return out, err
 	}
@@ -609,12 +586,12 @@ func (u ubuntu) WatchdogModule(t Transport, d deployment.Deployment, module stri
 	if err != nil {
 		return out, err
 	}
-	path := "/etc/systemd/system/" + unitName
+	path := systemScope.dir + "/" + unitName
 	current, found, err := t.ReadFile(path)
 	if err != nil {
 		return out, err
 	}
-	enabled, _, err := u.unitState(t, unitName)
+	enabled, _, err := u.unitState(t, systemScope, unitName)
 	if err != nil {
 		return out, err
 	}

@@ -110,7 +110,8 @@ func (u ubuntu) ConfigStore(t Transport, d deployment.Deployment, self config.Si
 	daemonUnit := d.Prefix() + "-config-daemon.service"
 	syncUnit := d.Prefix() + "-config-sync.service"
 	timerUnit := d.Prefix() + "-config-sync.timer"
-	unitDir := UserUnitDir(home)
+	scope := userScope(home)
+	unitDir := scope.dir
 	files := []struct {
 		file, content, what string
 		mode                uint32
@@ -142,11 +143,11 @@ func (u ubuntu) ConfigStore(t Transport, d deployment.Deployment, self config.Si
 		})
 	}
 
-	daemonEnabled, daemonActive, err := u.userUnitState(t, daemonUnit)
+	daemonEnabled, daemonActive, err := u.unitState(t, scope, daemonUnit)
 	if err != nil {
 		return out, err
 	}
-	timerEnabled, timerActive, err := u.userUnitState(t, timerUnit)
+	timerEnabled, timerActive, err := u.unitState(t, scope, timerUnit)
 	if err != nil {
 		return out, err
 	}
@@ -161,7 +162,7 @@ func (u ubuntu) ConfigStore(t Transport, d deployment.Deployment, self config.Si
 		if daemonChanged {
 			enable, start = "reenable", "restart"
 		}
-		command := fmt.Sprintf("%[1]s daemon-reload && %[1]s enable --now %[2]s && %[1]s %[3]s %[4]s && %[1]s %[5]s %[4]s", UserSystemctl, timerUnit, enable, daemonUnit, start)
+		command := fmt.Sprintf("%[1]s daemon-reload && %[1]s enable --now %[2]s && %[1]s %[3]s %[4]s && %[1]s %[5]s %[4]s", scope.systemctl, timerUnit, enable, daemonUnit, start)
 		out.Steps = append(out.Steps, Step{
 			Kinds:    kinds,
 			Title:    "start the configuration store",

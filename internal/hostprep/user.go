@@ -33,3 +33,24 @@ func Home(t Transport) (string, error) {
 
 // UserUnitDir is where the login user's own systemd units live.
 func UserUnitDir(home string) string { return home + "/.config/systemd/user" }
+
+// unitScope is one systemd manager: the command that reaches it, with its
+// environment, and the directory its own unit files go in.
+type unitScope struct {
+	systemctl string
+	dir       string
+	// activatingIsActive counts a unit that is activating as running: the
+	// user's git daemon waits out RestartSec until the mesh is up, and is
+	// running as it should while it does.
+	activatingIsActive bool
+}
+
+// systemScope is the system's manager, which host admit and the root-side
+// profile steps use.
+var systemScope = unitScope{systemctl: "systemctl", dir: "/etc/systemd/system"}
+
+// userScope is the login user's own manager, under the linger host admit
+// enabled, whose home is given.
+func userScope(home string) unitScope {
+	return unitScope{systemctl: UserSystemctl, dir: UserUnitDir(home), activatingIsActive: true}
+}

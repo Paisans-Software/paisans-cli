@@ -346,7 +346,8 @@ func Build(site string, cfg *config.Config, t Transport, opts ...Option) (*Plan,
 	plan.add(watchdog)
 
 	// The keys are read before the login user's home, so that a declared
-	// user the host lacks is refused by name; the store still plans first.
+	// user the host lacks is refused by name; the store's steps still come
+	// first.
 	keys, keyRemovals, err := planAuthorizedKeys(t, d, declared.SSHUser(), declared.SSH)
 	if err != nil {
 		return nil, fmt.Errorf("authorized keys on %s: %w", t.Describe(), err)

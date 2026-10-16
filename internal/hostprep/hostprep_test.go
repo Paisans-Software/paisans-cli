@@ -1429,6 +1429,23 @@ func TestAMissingUserIsRefused(t *testing.T) {
 	}
 }
 
+// The declared user is read before the login user's home and the store:
+// a missing user is refused by name, not by the passwd error of the home
+// probe, and nothing of the store is probed first.
+func TestAMissingUserIsRefusedBeforeTheHomeOrStoreIsRead(t *testing.T) {
+	host := preparedHost(false)
+	host.responses[probePasswd] = "__PAISANS_ABSENT__\n"
+	_, err := hostprep.Build("home-a", fixture(t), host)
+	if err == nil || !strings.Contains(err.Error(), "host prepare does not create users") {
+		t.Fatalf("got %v", err)
+	}
+	for _, c := range host.ran {
+		if strings.Contains(c, `getent passwd "$(id -un)"`) || strings.Contains(c, "paisans-f2a9-config-") {
+			t.Errorf("read the home or the store before refusing the user: %s", c)
+		}
+	}
+}
+
 // theirKeys is another deployment's sidecar for the same user.
 const theirKeys = "/etc/paisans/authorized_keys.ubuntu.paisans-0c1d.owned"
 
