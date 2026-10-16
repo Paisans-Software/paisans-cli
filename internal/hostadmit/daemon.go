@@ -334,6 +334,9 @@ func planDaemon(p *planner) error {
 	user, flags := p.in.Request.User, p.in.Flags
 	if flags.DataDir != "" {
 		parent := p.f.Dirs[flags.DataDir]
+		if !parent.Present {
+			return fmt.Errorf("--data-dir %s does not exist. Create it as root, mode 755, writable by no one else (install -d -m 755 -o root -g root %s), on the disk the deployment's Docker data is to live on, and admit again. Nothing was changed", ui.Visible(flags.DataDir), ui.Visible(apply.ShellQuote(flags.DataDir)))
+		}
 		if !rootsAlone(parent) {
 			return fmt.Errorf("--data-dir %s must be a directory, not a link, owned by root and writable by nobody else (its listing is %q, owner %d), so that no one but root can replace what admit creates in it. Fix it and admit again. Nothing was changed", ui.Visible(flags.DataDir), ui.Visible(parent.Mode), parent.UID)
 		}
