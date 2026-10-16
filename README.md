@@ -2561,7 +2561,7 @@ Finishing either command first costs nothing but its resume.
 | Secret | Checked by | Used by | Cost to members |
 |---|---|---|---|
 | `external.acme_dns_token` | the provider, asked for the zone with the next token at stage 2 | each site running the toolkit's Caddy | none |
-| `external.smtp_password`, `apps.<app>.smtp_password` | the mail provider, logged in to with the next password from this machine, and from each site running an app that uses it before that site is handed it | each app that logs in to send mail with it, which takes a `username` | none |
+| `external.smtp_password`, `apps.<app>.smtp_password` | the mail provider, logged in to with the next password from this machine, then from every site running an app that uses it, before any site is handed it | each app that logs in to send mail with it, which takes a `username` | none |
 | `oidc_clients.<app>.client_secret` | Pocket ID | the app | none |
 | `apps.<app>.oauth` (Mbin's OAuth2 unit) | Mbin | Mbin | every API client and app signs in again |
 | Mbin `app_secret`, oauth2-proxy `cookie_secret`, uptime `session_secret`, account `session_key` | the app | the app | signed in browser sessions of that app end |

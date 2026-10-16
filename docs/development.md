@@ -1150,7 +1150,9 @@ file, so stage 3 presents what stage 2 taught. What is easy to undo by accident:
 and `validate` try (one check per site and set of settings), `ForPassword`
 what `secrets set` and `secrets rotate` try for a changed password (one per
 sender, dialled from this machine; an unreachable server is a warning, and
-rotate then has each site try the password before it is handed it), and `Login` and `Send`
+in stage 2 rotate then has every site that will be handed the password try
+it, through `secretsrotate.Env.MailFrom`, and hands it to none until all
+accept), and `Login` and `Send`
 hold the conversation with `net/smtp`. Its own PLAIN and LOGIN mechanisms send
 the password only after the TLS the settings declare, since `net/smtp`'s
 `PlainAuth` refuses plaintext to anything but localhost, and `none` toward a

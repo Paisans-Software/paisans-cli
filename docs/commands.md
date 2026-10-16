@@ -356,9 +356,10 @@ paisans secrets rotate --all --restart --execute           # the full list again
   given; one set with `secrets set` logs in when the
   run is planned. One that fails is refused before it is written under
   `rotations`. A server this machine cannot reach is a warning and the
-  rotation goes on. Stage 2 logs in again from this machine, and each site
-  tries the password before it is handed it, a refusal stopping the rotation
-  there; nothing more is sent.
+  rotation goes on. Stage 2 logs in again from this machine, then from every
+  site that will be handed the password, and no site is handed it until all
+  accept; a refusal at any site stops the rotation there. Nothing more is
+  sent.
 
 A pending rotation that cannot finish, Eg: of a secret whose app was taken
 out of `paisans-stack.yaml`, is ended by hand: *A rotation that cannot finish* in
