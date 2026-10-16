@@ -190,6 +190,7 @@ var parts = []part{
 	// 5. delegation
 	{"delegation", planDelegation},
 	// 6. egress
+	{"egress", planEgress},
 	// 7. linger
 	{"linger", planLinger},
 	// 8. bridge netfilter
@@ -199,10 +200,10 @@ var parts = []part{
 	{"deployment directory", planDeploymentDir}, // 10
 	{"mesh subnet", planMeshSubnet},             // 10a
 	{"wireguard", planWireGuard},                // 11
-	// 12. firewall
-	{"watchdog", planWatchdogGrant}, // 13
-	{"sysctls", planSysctls},        // 14
-	{"web server", planWebServer},   // 14a
+	{"firewall", planFirewall},                  // 12
+	{"watchdog", planWatchdogGrant},             // 13
+	{"sysctls", planSysctls},                    // 14
+	{"web server", planWebServer},               // 14a
 	// 15. record
 	// 16. keys
 	// 17. check

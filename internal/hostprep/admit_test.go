@@ -4,8 +4,28 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
 )
+
+// Admit opens the SSH port, the mesh's port when one is admitted, the
+// mesh interface, and 80 and 443 with the public ports; no br-+ rule, since
+// a rootless container reaches the mesh address through the user's own
+// process, not a host bridge.
+func TestAdmitRules(t *testing.T) {
+	d := deployment.Deployment{ID: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}
+	var got []string
+	for _, r := range hostprep.AdmitRules(d, 2222, 51820, true) {
+		got = append(got, r.String()+" ("+r.Why+")")
+	}
+	want := []string{"2222/tcp (ssh, the bootstrap route)", "51820/udp (WireGuard, the mesh)", "all inbound on psns-f2a9 (the mesh: etcd, Patroni, Garage, HAProxy)", "80/tcp (public ports, HTTP)", "443/tcp (public ports, HTTPS)"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("AdmitRules =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	if rules := hostprep.AdmitRules(d, 22, 0, false); len(rules) != 2 || !rules[0].SSH {
+		t.Errorf("no port, no public ports: %+v", rules)
+	}
+}
 
 // With Docker absent, admit installs Docker from Docker's repository with
 // the rootless extras; with it present, it installs the extras and the
