@@ -55,7 +55,7 @@ func webServerStep(r ui.Reporter, cfg *config.Config, configPath string, scope w
 		return webServerBroken(failed), true
 	}
 	if len(checked) > 0 {
-		return webServerFailed(checked, files), false
+		return webServerFailed(checked, files, scope.degraded), false
 	}
 	return nil, false
 }
@@ -209,14 +209,19 @@ func failedChecks(results []webserver.Result, ws webserver.WebServer) []string {
 // is the owner's web server: apps that failed their check. It is not
 // complete, since a visitor cannot reach the app as they should. It names,
 // per app, what the host's owner does. Alone it is the run's warning;
-// beside a failure it is part of it.
-func webServerFailed(checked []string, files webServerFiles) *ui.Problem {
+// beside a failure it is part of it. A degraded run is not a complete
+// deployment either way, so its warning says only that it applied.
+func webServerFailed(checked []string, files webServerFiles, degraded bool) *ui.Problem {
 	var advice []string
 	for _, app := range checked {
 		advice = append(advice, ownerAdvice(app, files.apps[app]))
 	}
+	lead := "Deployment complete"
+	if degraded {
+		lead = "Applied"
+	}
 	return &ui.Problem{
-		Hint:    fmt.Sprintf("Deployment complete, but %s failed its web server check: %s", plural(len(checked), "app"), andList(checked)),
+		Hint:    fmt.Sprintf("%s, but %s failed its web server check: %s", lead, plural(len(checked), "app"), andList(checked)),
 		Explain: "Every step ran. " + strings.Join(advice, "\n"),
 	}
 }

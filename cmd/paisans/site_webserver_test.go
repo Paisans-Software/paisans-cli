@@ -9,6 +9,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/topology"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -49,6 +50,38 @@ func TestApplySiteWarnsUntilTheOwnersCopyServes(t *testing.T) {
 	}
 	if rec.Has("result", "Applied") {
 		t.Errorf("ended as applied:\n%s", rec.Lines())
+	}
+}
+
+// Degraded, apply --site ends on the web server warning under the degraded
+// result line, which still says what was applied, and the warning says
+// "Applied, but": the deployment is not complete. With --require-all the
+// run fails, the warning folded into the failure.
+func TestApplySiteEndsDegradedOnAWebServerWarning(t *testing.T) {
+	fakeWebServerCheck(t, certificateFails)
+	path := externalFixture(t)
+	fakeWebServerFiles(t, path)
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &topology.Classification{Sites: map[string]topology.Site{}}
+	for _, name := range cfg.SiteNames() {
+		c.Sites[name] = topology.Site{Name: name, Class: topology.Ready}
+	}
+	c.Sites["home-b"] = topology.Site{Name: "home-b", Class: topology.Pending, Why: "home-b: its host has not admitted this deployment"}
+	rec := &ui.Recorder{}
+	err = siteApplied(rec, cfg, path, "watch", "", 4, c, false, nil)
+	var w *ui.Warning
+	if !errors.As(err, &w) || w.Hint != "Applied, but 1 app failed its web server check: health" {
+		t.Fatalf("err %v\n%s", err, rec.Lines())
+	}
+	if !rec.Has("result", "Applied, degraded: 1 site pending or down (home-b). 4 files applied to watch.") {
+		t.Errorf("result:\n%s", rec.Lines())
+	}
+	err = siteApplied(&ui.Recorder{}, cfg, path, "watch", "", 4, c, true, nil)
+	if err == nil || errors.As(err, &w) || !strings.Contains(problemText(err), "--require-all") || !strings.Contains(problemText(err), "web server check") {
+		t.Errorf("--require-all: %v: %s", err, problemText(err))
 	}
 }
 

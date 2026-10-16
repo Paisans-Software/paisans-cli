@@ -2447,8 +2447,8 @@ func TestEveryDegradedEndHonoursRequireAll(t *testing.T) {
 	path := externalFixture(t)
 	err := convergeAt(t, path, "--execute")
 	var w *ui.Warning
-	if err != nil && !errors.As(err, &w) {
-		t.Fatalf("not a warning: %v", err)
+	if !errors.As(err, &w) || !strings.HasPrefix(w.Hint, "Applied, but 1 app failed its web server check") {
+		t.Fatalf("not the degraded run's warning: %v", err)
 	}
 	if !rec.Has("result", "Applied, degraded: 1 site pending or down (home-b).") {
 		t.Errorf("no degraded end beside the web server's warning:\n%s", rec.Lines())

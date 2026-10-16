@@ -200,6 +200,10 @@ func writeWebServerFiles(r ui.Reporter, cfg *config.Config, configPath string, s
 type webServerScope struct {
 	site, ssh string
 	down      []string
+	// degraded is a run without some declared site: it is not a complete
+	// deployment, so a warning says "Applied, but", not "Deployment
+	// complete, but".
+	degraded bool
 }
 
 // covers reports whether the step covers site.

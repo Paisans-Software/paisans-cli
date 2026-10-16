@@ -967,12 +967,23 @@ func readPeers(r ui.Reporter, cfg *config.Config, site string, only []string) ([
 // end.
 func siteApplied(r ui.Reporter, cfg *config.Config, configPath, site, ssh string, written int, sites *topology.Classification, required bool, err error) error {
 	_, step := r.(checkReporter)
+	degraded := sites != nil && sites.Degraded()
 	if !step {
-		if end, broken := webServerStep(r, cfg, configPath, webServerScope{site: site, ssh: ssh}); end != nil {
-			return degradedEnd(r, sites, required, webServerEnd(end, broken, err))
+		if end, broken := webServerStep(r, cfg, configPath, webServerScope{site: site, ssh: ssh, degraded: degraded}); end != nil {
+			err = webServerEnd(end, broken, err)
+			if !degraded {
+				return err
+			}
+			// A warning is the run's end, under the degraded result line,
+			// which says what was applied; a failure is its own end.
+			var w *ui.Warning
+			if errors.As(err, &w) {
+				r.Result("%s. %s applied to %s.", degradedResult(sites), plural(written, "file"), site)
+			}
+			return degradedErr(sites, required, err)
 		}
 	}
-	if step || sites == nil || !sites.Degraded() {
+	if step || !degraded {
 		r.Result("Applied %s to %s.", plural(written, "file"), site)
 		return err
 	}

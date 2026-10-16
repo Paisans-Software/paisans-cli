@@ -910,7 +910,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	// known to be reachable: the run is complete only once it is.
 	// A down site's web server is left alone, as its other steps are.
 	noteDownWebServers(r, cfg, sites)
-	end, broken := webServerStep(r, cfg, configPath, webServerScope{down: sites.Down()})
+	end, broken := webServerStep(r, cfg, configPath, webServerScope{down: sites.Down(), degraded: sites.Degraded()})
 	convergeLeft(r, cfg, secretsPath, configPath)
 	if end == nil && adminErr == nil && !sites.Degraded() {
 		r.Result("Deployment complete.")
