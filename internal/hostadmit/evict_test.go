@@ -100,7 +100,7 @@ var evictCases = []struct {
 		return withEntries(installedByAdmit(evicted("vm", hostadmit.Flags{})()))
 	}},
 	{"evict-hold-left", "paisans-f2a9", func() *fakeHost {
-		return withEntries(withOther(evicted("vm", hostadmit.Flags{})(), false, false).with("docker-hold", "held"))
+		return withEntries(withOther(evicted("vm", hostadmit.Flags{})(), false, false).with("docker-hold", "policy"))
 	}},
 	{"evict-nothing-left", "paisans-f2a9", func() *fakeHost { return newBlank() }},
 }
@@ -619,7 +619,7 @@ func TestEvictRemovesTheDelegationDirectoryAdmitMade(t *testing.T) {
 // another deployment stays.
 func TestEvictPutsBackALeftHold(t *testing.T) {
 	for _, shared := range []bool{false, true} {
-		h := evicted("vm", hostadmit.Flags{})().with("docker-hold", "held")
+		h := evicted("vm", hostadmit.Flags{})().with("docker-hold", "policy")
 		if shared {
 			withOther(h, false, false)
 		}

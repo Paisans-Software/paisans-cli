@@ -240,7 +240,7 @@ func TestAdmitDisablesTheSystemDockerOnceOnly(t *testing.T) {
 // in place; with nothing left to install, the next run puts the owner's
 // back.
 func TestAdmitPutsBackAPolicyALeftHoldLeft(t *testing.T) {
-	plan, err := hostadmit.Build(installedByAdmit(current()).with("docker-hold", "held"), input(t, "vm", hostadmit.Flags{}))
+	plan, err := hostadmit.Build(installedByAdmit(current()).with("docker-hold", "policy"), input(t, "vm", hostadmit.Flags{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -338,7 +338,7 @@ func TestAStaleInstalledClaimIsDropped(t *testing.T) {
 	}
 	// An admit killed during its own install: the hold is left, so the
 	// claim stands and the daemon is disabled.
-	killed := claim(current().with("system-unit", "docker.service enabled active").with("docker-hold", "held"), "package docker-ce-rootless-extras\npackage uidmap\ninstalling docker-ce\ndir /etc/systemd/system/user@.service.d\n")
+	killed := claim(current().with("system-unit", "docker.service enabled active").with("docker-hold", "policy"), "package docker-ce-rootless-extras\npackage uidmap\ninstalling docker-ce\ndir /etc/systemd/system/user@.service.d\n")
 	plan, err = hostadmit.Build(killed, input(t, "vm", hostadmit.Flags{}))
 	if err != nil {
 		t.Fatal(err)
@@ -485,5 +485,27 @@ func TestAFailedInstallConfirmsWhatItInstalled(t *testing.T) {
 	got, _ = runInstall(t, plan, claimed, "uidmap")
 	if !strings.Contains(got, "\npackage uidmap\n") || !strings.Contains(got, "\ninstalling docker-ce-rootless-extras\n") {
 		t.Errorf("after a failed install with nothing held:\n%s", got)
+	}
+}
+
+// A hold that stopped before admit's policy was in place (a temporary
+// file, or the owner's copy) means apt never ran under it: it is put back,
+// but an "installing" claim does not stand on it, so a Docker the owner
+// installed since is not taken for admit's, and no claim is confirmed.
+func TestALeftoverBeforeThePolicyKeepsNoClaim(t *testing.T) {
+	header := "# Written by paisans host admit: what it installed on this host, which stays\n# when paisans host evict removes the last admitted deployment, and each\n# directory it created, which evict removes once empty.\n"
+	lines := "package docker-ce-rootless-extras\npackage uidmap\ninstalling docker-ce\ndir /etc/systemd/system/user@.service.d\n"
+	h := current().with("system-unit", "docker.service enabled active").with("docker-hold", "leftover").
+		file("/etc/paisans/installed", header+lines).withFile("/etc/paisans/installed", header+lines, "644", 0)
+	plan, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	put := titled(plan, "put back /usr/sbin/policy-rc.d")
+	if put < 0 || strings.Contains(plan.Steps[put].Command, "confirm_claims") {
+		t.Errorf("the leftover is not put back, or its claims are confirmed:\n%s", plan.Text())
+	}
+	if titled(plan, "disable the system Docker") >= 0 || recordWritten(t, plan).SystemDockerDisabled {
+		t.Errorf("the owner's Docker is taken for admit's:\n%s", plan.Text())
 	}
 }

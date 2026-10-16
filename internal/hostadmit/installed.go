@@ -18,13 +18,13 @@ import (
 // created that evict removes once empty. Host evict names what is
 // installed once the last deployment goes: it stays installed.
 //
-// A package is claimed as Installing before the install runs and as one
-// of Packages once apt has installed it, which the install step's own
-// command records. So a run killed during the install, which leaves its
-// hold on Docker's daemons behind, still knows the system Docker is
-// admit's; and a claim whose install never ran is dropped once a probe
-// finds the hold gone, so a Docker the owner installs later is never
-// taken for admit's.
+// A package is claimed as Installing before the install runs and becomes
+// one of Packages when dpkg shows it installed as the install exits,
+// however it exits (confirmClaims, from the install's exit trap). A run
+// killed outright leaves admit's policy-rc.d in place, and apt may have
+// run under it, so its claims for what dpkg shows installed still stand;
+// any other claim is dropped, so a Docker the owner installs later is
+// never taken for admit's.
 type installed struct {
 	Packages, Installing, Files, Dirs []string
 	// file is the file's content as read, "" for none.
@@ -130,9 +130,9 @@ const confirmClaims = `confirm_claims() {
 // readInstalled is the installed file as the host holds it, refused when
 // it is not root's, mode 644, as admit writes it, or holds a line admit
 // did not write: it decides whose the system Docker is. A package dpkg
-// does not show installed is left out, as is a claim whose install never
-// ran (installed, which the probe reads for every package the file
-// names).
+// does not show installed is left out, as is a claim with no policy of
+// admit's left in place to say its install ran (installed, which the
+// probe reads for every package the file names).
 func readInstalled(p *planner, by string) (installed, error) {
 	if f := p.f.Files[installedPath]; f.Present && (f.Link || f.UID != 0 || f.GID != 0 || f.Mode != "644") {
 		return installed{}, fmt.Errorf("%s is not root's, mode 644, as admit writes it (it is a link, or its mode is %s, owner %d, group %d), and it says whose the system Docker is. Look at what it holds, remove it, and %s again. Nothing was changed", installedPath, ui.Visible(f.Mode), f.UID, f.GID, by)
@@ -147,7 +147,7 @@ func readInstalled(p *planner, by string) (installed, error) {
 	}
 	return installed{
 		Packages:   slices.DeleteFunc(in.Packages, func(x string) bool { return !p.f.Packages[x] }),
-		Installing: slices.DeleteFunc(in.Installing, func(x string) bool { return !p.f.Packages[x] || !p.f.Docker.Held }),
+		Installing: slices.DeleteFunc(in.Installing, func(x string) bool { return !p.f.Packages[x] || !p.f.Docker.HeldPolicy }),
 		Files:      in.Files, Dirs: in.Dirs, file: content,
 	}, nil
 }
@@ -260,10 +260,16 @@ func releaseHold(p *planner, prefix string) error {
 	if err != nil {
 		return err
 	}
-	// The install the hold was for was admit's: what it claimed and dpkg
-	// shows installed is admit's (readInstalled keeps only those claims
-	// while the hold is there), and stays so once the hold is gone.
+	// With admit's policy in place, apt may have run under it, and that
+	// install was admit's: what it claimed and dpkg shows installed is
+	// admit's (readInstalled keeps only those claims while the policy is
+	// there), and stays so once the hold is gone. A leftover from before
+	// the policy confirms nothing: apt never ran.
+	command := release
+	if p.f.Docker.HeldPolicy {
+		command += confirmClaims + "confirm_claims\n"
+	}
 	p.step(Step{Title: "put back /usr/sbin/policy-rc.d", Describe: prefix + ": an admit that stopped while it installed Docker left its hold on Docker's daemons; your own policy-rc.d, if you had one, goes back, and what that install claimed is recorded as installed",
-		Command: release + confirmClaims + "confirm_claims\n", Kinds: []string{prefix}})
+		Command: command, Kinds: []string{prefix}})
 	return nil
 }

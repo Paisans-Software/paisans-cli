@@ -111,9 +111,11 @@ type DockerFacts struct {
 	// name.
 	SystemUnits map[string]UnitState
 	// Held is what a run that stopped while admit held Docker's daemons
-	// left: admit's /usr/sbin/policy-rc.d, the copy of the owner's beside
-	// it, or admit's temporary file.
-	Held bool
+	// left: admit's /usr/sbin/policy-rc.d, the copy of the owner's, or a
+	// temporary file of admit's. HeldPolicy is admit's policy in place,
+	// under which apt may have run; without it the run stopped before
+	// apt.
+	Held, HeldPolicy bool
 }
 
 // UnitState is whether a system unit is enabled, and active.
@@ -303,7 +305,7 @@ func parseFacts(out, user string) (Facts, error) {
 			f.Docker.SystemUnits[fields[0]] = UnitState{Enabled: fields[1] == "enabled" || fields[1] == "enabled-runtime",
 				Active: slices.Contains([]string{"active", "activating", "reloading"}, fields[2])}
 		case "docker-hold":
-			f.Docker.Held = v == "held"
+			f.Docker.Held, f.Docker.HeldPolicy = v == "policy" || v == "leftover", v == "policy"
 		case "userns-restrict":
 			f.AppArmor.Restricted = v == "1"
 		case "rootlesskit-profile":
