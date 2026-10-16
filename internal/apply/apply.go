@@ -398,12 +398,6 @@ const (
 	gatewayCompose   = "infra/compose.yaml"
 )
 
-// Pending names the sites pending in this run, recorded in the manifest so
-// that what compares this site with a render later renders the same view.
-func Pending(sites ...string) Option {
-	return func(o *options) { o.pending = slices.Sorted(slices.Values(sites)) }
-}
-
 // Option adjusts what Build plans, on the operator's word.
 type Option func(*options)
 
@@ -439,6 +433,12 @@ type options struct {
 	peers []PeerCompose
 	// served is Plan.Served; see Serves.
 	served diagnosis.Served
+}
+
+// Pending names the sites pending in this run, recorded in the manifest so
+// that what compares this site with a render later renders the same view.
+func Pending(sites ...string) Option {
+	return func(o *options) { o.pending = slices.Compact(slices.Sorted(slices.Values(sites))) }
 }
 
 // Serves gives the plan the hostnames each Caddy site serves, from

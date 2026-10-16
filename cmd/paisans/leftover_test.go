@@ -9,6 +9,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/acme"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/secretsgen"
@@ -94,42 +95,156 @@ func warned(rec *ui.Recorder, hint, detail string) bool {
 	return false
 }
 
-// The leftover report is read against the view the manifest recorded: the
-// declaration less the sites pending when this site's files were rendered. An
-// app pinned to such a site is not rendered here in either view, so a stack of
-// it running on this site is still reported, and the pending site's own
-// declaration (here one with no apps role) does not make the report fail.
-func TestLeftoversUseTheManifestsView(t *testing.T) {
-	const twoSites = `
+// heartbeatSite declares an uptime monitor pinned to home-b. Under the
+// declaration every other site pushes a heartbeat, so home-a, which has no
+// infrastructure role of its own, renders an infra stack; without home-b's
+// monitor it renders none.
+const heartbeatSite = `version: 1
+id: f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01
+community:
+  name: Example
+  domain: example.org
+mesh:
+  subnet: 10.44.0.0/24
+acme:
+  provider: desec
+operators:
+  alice:
+    name: Alice Example
+    email: alice@example.org
+    keys: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org
+sites:
+  home-a:
+    roles: [apps]
+    address: 10.44.0.1
+    ssh:
+      host: home-a.local
+      user: ubuntu
+      keys: [alice]
   home-b:
-    roles: [data]
+    roles: [data, apps]
     address: 10.44.0.2
     ssh:
       host: home-b.local
       user: ubuntu
       keys: [alice]
+cluster:
+  sites: [home-b]
+  port: 5000
+  postgres_version: "18"
+etcd:
+  members: [home-b]
+storage:
+  garage:
+    sites: [home-b]
+    replication: 1
+apps:
+  uptime:
+    blueprint: uptime
+    hostname: health.example.org
+    placement: { pinned: home-b }
 `
-	declared := strings.Replace(freshSite, "cluster:\n", twoSites+"cluster:\n", 1)
-	declared = strings.Replace(declared, "apps:\n", "apps:\n  docs:\n    blueprint: mbin\n    hostname: docs.example.org\n    placement: { pinned: home-b }\n", 1)
+
+func heartbeatConfig(t *testing.T) *config.Config {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
-	if err := os.WriteFile(path, []byte(declared), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(heartbeatSite), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := config.Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	id := cfg.Deployment().ID
-	inv := &hostcheck.Inventory{
-		Containers:      []hostcheck.Container{{Name: "paisans-f2a9-docs-app-1", Deployment: id, Project: "paisans-f2a9-docs", PID: 2}},
-		ManifestPending: []string{"home-b"},
+	return cfg
+}
+
+func infraInventory(cfg *config.Config, pending ...string) *hostcheck.Inventory {
+	return &hostcheck.Inventory{
+		Containers:      []hostcheck.Container{{Name: "paisans-f2a9-infra-caddy-1", Deployment: cfg.Deployment().ID, Project: "paisans-f2a9-infra", PID: 3}},
+		ManifestPending: pending,
 	}
+}
+
+// The leftover report is read against the view the manifest recorded: the
+// declaration less the sites pending when this site's files were rendered.
+// With the monitor pending, home-a rendered no infra stack, so the one running
+// there is left over; the declaration alone would say it is rendered.
+func TestLeftoversUseTheManifestsView(t *testing.T) {
+	cfg := heartbeatConfig(t)
 	plan := &apply.Plan{Site: "home-a"}
+
 	rec := &ui.Recorder{Verbose_: true}
-	if err := printLeftovers(rec, cfg, "home-a", inv, plan); err != nil {
+	if err := printLeftovers(rec, cfg, "home-a", infraInventory(cfg, "home-b"), plan); err != nil {
 		t.Fatal(err)
 	}
-	if !warned(rec, "left over: stack docs", "stack docs") {
-		t.Errorf("a stack of an app pinned elsewhere, running here, was not reported:\n%s", rec.Lines())
+	if !warned(rec, "left over: stack infra", "stack infra") {
+		t.Errorf("the infra stack, rendered nowhere in the manifest view, was not reported:\n%s", rec.Lines())
+	}
+
+	rec = &ui.Recorder{Verbose_: true}
+	if err := printLeftovers(rec, cfg, "home-a", infraInventory(cfg), plan); err != nil || len(rec.Events) != 0 {
+		t.Errorf("with nothing pending, infra is rendered and not left over: %q, %v", rec.Lines(), err)
+	}
+}
+
+// A manifest naming its own site as pending does not fail the report: the
+// site is classified against the view without the other sites it names.
+func TestLeftoversIgnoreASiteNamedPendingInItsOwnManifest(t *testing.T) {
+	cfg := heartbeatConfig(t)
+	rec := &ui.Recorder{Verbose_: true}
+	err := printLeftovers(rec, cfg, "home-a", infraInventory(cfg, "home-a", "home-b"), &apply.Plan{Site: "home-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !warned(rec, "left over: stack infra", "stack infra") {
+		t.Errorf("the other pending site was dropped with the site itself:\n%s", rec.Lines())
+	}
+}
+
+// leftoverHost answers the host check's probes for a host running one
+// container of this deployment, and holds the manifest.
+type leftoverHost struct {
+	container string
+	manifest  string
+}
+
+func (d leftoverHost) Run(command string) (string, error) {
+	switch {
+	case strings.Contains(command, "id -u"):
+		return "uid 1000\n", nil
+	case strings.Contains(command, "docker ps"):
+		return d.container + "\n", nil
+	case strings.Contains(command, "docker version"):
+		return "27.3.1 27.3.1\ncompose v2.29.0\n", nil
+	}
+	return "", nil
+}
+
+func (d leftoverHost) RunInput(command, _ string) (string, error) { return d.Run(command) }
+
+func (d leftoverHost) ReadFile(path string) (string, bool, error) {
+	if path == "/srv/paisans/f2a9/.paisans-manifest.json" {
+		return d.manifest, true, nil
+	}
+	return "", false, nil
+}
+
+func (leftoverHost) WriteFile(string, string, uint32) error { return nil }
+func (leftoverHost) Describe() string                       { return "fake" }
+
+// Doctor's Leftovers reads the manifest from the host and reports against its
+// view.
+func TestDoctorLeftoversUseTheManifestsView(t *testing.T) {
+	cfg := heartbeatConfig(t)
+	container := `{"id":"` + strings.Repeat("e", 64) + `","name":"/paisans-f2a9-infra-caddy-1","image":"sha256:x","pid":3,"labels":{"com.docker.compose.project":"paisans-f2a9-infra","` + deployment.Label + `":"` + cfg.Deployment().ID + `"},"networks":{},"ports":{}}`
+
+	p := gatherLeftovers(cfg, "home-a", leftoverHost{container, `{"version":1,"files":[],"pending":["home-b"]}`})
+	if p.Err != "" || len(p.Report.Stacks) != 1 || p.Report.Stacks[0].Name != "infra" {
+		t.Errorf("pending home-b: %+v", p)
+	}
+	p = gatherLeftovers(cfg, "home-a", leftoverHost{container, `{"version":1,"files":[]}`})
+	if p.Err != "" || len(p.Report.Stacks) != 0 {
+		t.Errorf("nothing pending: %+v", p)
 	}
 }

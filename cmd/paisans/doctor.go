@@ -21,7 +21,6 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/doctor"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 	"github.com/paisans-software/paisans-cli/internal/mesh"
-	"github.com/paisans-software/paisans-cli/internal/ownership"
 	"github.com/paisans-software/paisans-cli/internal/patroni"
 	"github.com/paisans-software/paisans-cli/internal/render"
 )
@@ -438,7 +437,7 @@ func gatherLeftovers(cfg *config.Config, site string, t apply.Transport) doctor.
 		p.Err = firstOf(err.Error())
 		return p
 	}
-	if p.Report, err = ownership.Classify(cfg.WithoutJoining(inv.ManifestPending...), site, inv, inv.ManifestFiles); err != nil {
+	if p.Report, err = classifyLeftovers(cfg, site, inv, inv.ManifestFiles); err != nil {
 		p.Err = err.Error()
 	}
 	return p

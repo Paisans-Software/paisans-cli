@@ -2,11 +2,13 @@ package main
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 	"github.com/paisans-software/paisans-cli/internal/ownership"
+	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -26,7 +28,7 @@ func printLeftovers(r ui.Reporter, cfg *config.Config, site string, inv *hostche
 	if plan.Whole() {
 		manifest = plan.Leftovers
 	}
-	report, err := ownership.Classify(cfg.WithoutJoining(inv.ManifestPending...), site, inv, manifest)
+	report, err := classifyLeftovers(cfg, site, inv, manifest)
 	if err != nil {
 		return err
 	}
@@ -66,4 +68,13 @@ func removeAdvice(report ownership.Report) []string {
 		out = append(out, fmt.Sprintf("`paisans app remove %s` takes %s's off every site, once a whole apply has run on each; it keeps its data unless given --delete-data", app, app))
 	}
 	return out
+}
+
+// classifyLeftovers classifies a site against the view its manifest recorded:
+// the declaration less the sites pending when its files were rendered. A
+// manifest that names the site itself among them is read without that name,
+// since the site being classified is, by being classified, not pending.
+func classifyLeftovers(cfg *config.Config, site string, inv *hostcheck.Inventory, manifest []render.ManifestFile) (ownership.Report, error) {
+	pending := slices.DeleteFunc(slices.Clone(inv.ManifestPending), func(s string) bool { return s == site })
+	return ownership.Classify(cfg.WithoutJoining(pending...), site, inv, manifest)
 }

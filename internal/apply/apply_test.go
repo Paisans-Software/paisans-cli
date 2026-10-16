@@ -3092,7 +3092,7 @@ func TestTheModuleCheckIsOneExactLine(t *testing.T) {
 func TestTheManifestRecordsThePendingSites(t *testing.T) {
 	const manifest = "/srv/paisans/f2a9/.paisans-manifest.json"
 	host := newHost()
-	p, err := apply.Build("home-a", plan(t), acmeModule(t), host, apply.Pending("home-c", "home-b"))
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host, apply.Pending("home-c", "home-b", "home-c"))
 	if err != nil {
 		t.Fatal(err)
 	}
