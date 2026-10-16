@@ -18,7 +18,8 @@ import (
 var webServerProbes = webserver.DefaultProbes
 
 // webServerRecordHost reaches a monitor site to read its admission record,
-// as the ssh user. Tests replace it.
+// as its login: the deployment's own user, unless ssh.user names another.
+// Tests replace it.
 var webServerRecordHost = func(cfg *config.Config, site string) admission.Reader {
 	return siteTransport(site, cfg.Sites[site], "")
 }

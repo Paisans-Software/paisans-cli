@@ -90,8 +90,9 @@ func operatorEmailOn(cfg *config.Config, app string) bool {
 }
 
 // convergeDeclaredOperator plans, and with execute makes, one declared
-// operator of a Pocket ID app, reaching the site Pocket ID answers on as the
-// ssh user. Tests replace it.
+// operator of a Pocket ID app, reaching the site Pocket ID answers on as its
+// login: the deployment's own user, unless ssh.user names another. Tests
+// replace it.
 var convergeDeclaredOperator = func(cfg *config.Config, app, id string, o convergeOptions, execute bool) (declaredOperator, error) {
 	out := declaredOperator{App: app, ID: id, Email: cfg.Operators[id].Email}
 	where, err := pocketIDSite(ui.Discard, cfg, app, "", "apply")

@@ -199,7 +199,7 @@ var doctorSiteToken = func(ctx context.Context, check dns.TokenCheck, host dns.R
 }
 
 // CaddyLog reads Caddy's certificate log lines over the site's transport,
-// as the ssh user, as every other read.
+// as the site's login, as every other read.
 func (d doctorReads) CaddyLog(site string) doctor.CaddyLogProbe {
 	out, err := d.transports[site].Run(doctor.CaddyLogCommand(d.cfg.Deployment()))
 	p := doctor.CaddyLogProbe{Site: site, Out: out}
@@ -235,7 +235,7 @@ func (d doctorReads) Secrets() doctor.SecretsProbe {
 }
 
 // SiteToken checks the token in the site's caddy.env, from the site, over
-// its transport, as the ssh user, as every other read here.
+// its transport, as the site's login, as every other read here.
 func (d doctorReads) SiteToken(site string) dns.TokenResult {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()

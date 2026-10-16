@@ -1827,8 +1827,9 @@ func errLine(err error) string {
 	return strings.TrimRight(strings.TrimSpace(line), ":.")
 }
 
-// convergeHost is how apply without --site reaches a site to read it, as the
-// ssh user. Tests replace it.
+// convergeHost is how apply without --site reaches a site to read it, as its
+// login: the deployment's own user, unless ssh.user names another. Tests
+// replace it.
 var convergeHost = func(name string, site config.Site) apply.Transport {
 	return siteTransport(name, site, "")
 }
