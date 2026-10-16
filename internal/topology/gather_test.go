@@ -393,7 +393,7 @@ func TestGatherAnUnreadablePatroniIsUnread(t *testing.T) {
 	hs[cfg.GatewaySites()[0]].files[deployrecord.Path(d)] = recordLacking(cfg, "home-c")
 	ev := topology.Gather(cfg, transportsOf(hs))
 	if !slices.ContainsFunc(ev.Unread, func(u topology.Source) bool {
-		return strings.Contains(u.Name, "Patroni") && slices.Equal(u.Sites, cfg.Cluster.Sites)
+		return strings.Contains(u.Name, "Patroni") && slices.Equal(u.Sites, []string{"home-c"})
 	}) {
 		t.Errorf("unread %+v", ev.Unread)
 	}
@@ -404,5 +404,42 @@ func TestGatherAnUnreadablePatroniIsUnread(t *testing.T) {
 	c, err := topology.Classify(cfg, topology.Gather(cfg, transportsOf(setup(false))))
 	if err != nil || c.Sites["home-c"].Class != topology.Pending {
 		t.Errorf("Patroni never deployed: %+v %v", c, err)
+	}
+}
+
+// Patroni's silence holds back only the cluster sites etcd cannot settle:
+// etcd lists every voter, so with etcd read, an unadmitted voter it does not
+// list is pending whatever Patroni says, and the run goes on.
+func TestAnUnreadablePatroniHoldsBackOnlyClusterSitesEtcdDoesNotVote(t *testing.T) {
+	cfg := fixture(t)
+	d := cfg.Deployment()
+	if !slices.Equal(cfg.Etcd.Members, cfg.Cluster.Sites) {
+		t.Fatalf("etcd members %v, cluster sites %v", cfg.Etcd.Members, cfg.Cluster.Sites)
+	}
+	twoMembers := `{"header":{"cluster_id":1,"member_id":2,"raft_term":3},"members":[` +
+		`{"ID":1,"name":"home-a","peerURLs":["http://10.44.0.1:2380"],"clientURLs":["http://10.44.0.1:2379"]},` +
+		`{"ID":2,"name":"home-b","peerURLs":["http://10.44.0.2:2380"],"clientURLs":["http://10.44.0.2:2379"]}]}`
+	hs := hostsFor(t, cfg)
+	for _, name := range cfg.Cluster.Sites {
+		hs[name].answers["member list -w json"] = twoMembers
+		hs[name].fail["/cluster"] = errors.New("service \"patroni\" is not running")
+		hs[name].files[d.Path("infra", "patroni.env")] = "SCOPE=x\n"
+	}
+	hs["home-c"].files = map[string]string{d.Path("infra", "patroni.env"): "SCOPE=x\n"}
+	hs[cfg.GatewaySites()[0]].files[deployrecord.Path(d)] = recordLacking(cfg, "home-c")
+	ev := topology.Gather(cfg, transportsOf(hs))
+	for _, u := range ev.Unread {
+		if u.Sites == nil || len(u.Sites) == 0 {
+			t.Errorf("an unread source covering every site: %+v", u)
+		}
+	}
+	c, err := topology.Classify(cfg, ev)
+	if err != nil || c.Sites["home-c"].Class != topology.Pending {
+		t.Errorf("an unadmitted voter etcd does not list: %+v %v", c, err)
+	}
+	if err == nil {
+		if err := c.Refuse(cfg, ""); err != nil {
+			t.Errorf("refused: %v", err)
+		}
 	}
 }

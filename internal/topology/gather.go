@@ -20,8 +20,8 @@ import (
 // the first site holding it that answers: the gateways' deployment record,
 // etcd's membership and Patroni's. The deployment record is Unread when no
 // gateway answered or any gateway's could not be read; etcd's membership,
-// for etcd's voters, and Patroni's, for the cluster's sites, when none that
-// answered could be read and one of them has run it.
+// for etcd's voters, and Patroni's, for the cluster's sites that are no
+// voter, when none that answered could be read and one of them has run it.
 func Gather(cfg *config.Config, transports map[string]apply.Transport) Evidence {
 	d := cfg.Deployment()
 	ev := Evidence{Login: map[string]error{}, Records: map[string]RecordRead{}, Joined: map[string][]string{}}
@@ -160,8 +160,18 @@ func Gather(cfg *config.Config, transports map[string]apply.Transport) Evidence 
 		patroniRead = true
 		break
 	}
-	if !patroniRead && len(patroniFailed) > 0 {
-		ev.Unread = append(ev.Unread, Source{Name: "Patroni's members (" + strings.Join(patroniFailed, "; ") + ")", Sites: slices.Clone(cfg.Cluster.Sites)})
+	// etcd lists every voter, read or unread on its own account, so
+	// Patroni's silence holds back only the cluster's sites that are no
+	// voter. With none, it holds back nothing, and no source is added: a
+	// Source with no sites would read as one that lists every site.
+	var patroniOnly []string
+	for _, s := range cfg.Cluster.Sites {
+		if !slices.Contains(cfg.Etcd.Members, s) {
+			patroniOnly = append(patroniOnly, s)
+		}
+	}
+	if !patroniRead && len(patroniFailed) > 0 && len(patroniOnly) > 0 {
+		ev.Unread = append(ev.Unread, Source{Name: "Patroni's members (" + strings.Join(patroniFailed, "; ") + ")", Sites: patroniOnly})
 	}
 	return ev
 }
