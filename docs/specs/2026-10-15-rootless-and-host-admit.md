@@ -447,14 +447,14 @@ Garage site and 5 GB otherwise. The path is in the admission record.
     only after a re-run that no longer needs it has restored it.
 14. **The admission record**, `/etc/paisans/admitted.<token>.json`, mode 644:
     the user, the grants (`watchdog`, `public_ports`), whether forwarding is
-    on, the ports the firewall opened, the mesh subnet, the request's digest
-    when there was one, the time, whether the system Docker is one admit
-    installed and
-    disabled once (`system_docker_disabled`), which says what admit did, not
-    how the daemon stands now, and `ufw_enabled: true` when admit enabled
-    ufw, written only then and kept by every later admit. It is how the deployment's own commands, which cannot
-    read root's files, learn what they were granted, and what `host
-    deployments` lists. Admit keeps `/etc/paisans` root's, mode 755 (`chmod
+    on, the ports the firewall opened, the mesh subnet, the request's
+    digest when there was one, the time, whether the system Docker is one
+    admit installed and disabled once (`system_docker_disabled`), which says
+    what admit did, not how the daemon stands now, and `ufw_enabled: true`
+    when admit enabled ufw, written only then and kept by every later admit.
+    It is how the deployment's own commands, which cannot read root's files,
+    learn what they were granted, and what `host deployments` lists. Admit
+    keeps `/etc/paisans` root's, mode 755 (`chmod
     00755`, which clears a setgid bit too; an ACL stops admit), so each
     deployment's user reads its own record and none can write one.
 15. **The registry claim**, as today, under `/var/lib/paisans`, so two
@@ -557,9 +557,10 @@ rootless daemon's address pools chosen clear of it, and the check that it
 overlaps nothing on the host. A subnet changed after admission would make
 apply fail partway, when the helper refuses the conf, or drop mesh traffic
 silently. The site's mesh address is not compared: nothing of root's
-restricts it. A record written before `mesh_subnet` joined it is unreadable
-to every deployment command, which refuses it as any unreadable record;
-`host admit` run again reads it and rewrites it.
+restricts it. A record that does not parse, one without `mesh_subnet`
+among them, is refused by every deployment command, naming what is wrong,
+the record to move aside and the two lines, and by `host admit` and `host
+evict`, which ask the owner to move it aside.
 
 ## `paisans host evict`
 
