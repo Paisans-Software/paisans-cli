@@ -125,6 +125,9 @@ the questions it came from again, and nothing is written until the file is
 refused nothing and the operator says yes. It then names `secrets set`,
 `init` and `apply`.
 
+Each machine's SSH user may be left empty, which is the deployment's own
+user, `paisans-<token>`, that the host's owner's `host admit` makes.
+
 * **Alone:** once, before anything else, for a deployment that has no
   `paisans-stack.yaml` yet. The whole apply never runs it.
 * **Flags:** `--config` (the file to write; default `paisans-stack.yaml`).
@@ -649,7 +652,9 @@ See *`--id` cleans a host when `paisans-stack.yaml` is lost* in `README.md`.
 
 Writes the request a host's owner admits one site from, to stdout, and its
 digest to stderr as sixteen characters in four groups, `xxxx-xxxx-xxxx-xxxx`.
-The owner compares that digest with the one the file shows them.
+The owner compares that digest with the one `host admit` shows them for the
+file; tell it to them over another channel than the one that carries the
+file, such as a call, or the comparison proves nothing.
 
 ```sh
 paisans host request --site home-a > home-a.admit   # the digest is on stderr
@@ -688,6 +693,8 @@ paisans host admit --site home-a --ssh owner@home-a.example.org --execute   # fr
 
 * **Alone:** always, by the host's owner, and never by an agent unattended:
   it is the owner's root step on their own machine.
+  [guides/host-owners.md](guides/host-owners.md) is the owner's whole path,
+  from installing the binary to evicting.
 * **Flags:**
   * from a request: `--request <file>`, on the host, as root;
   * from the configuration: `--site <name>` from a workstation, with
@@ -727,7 +734,9 @@ paisans host admit --site home-a --ssh owner@home-a.example.org --execute   # fr
   before making any change, and prints the commands that enable ufw by hand,
   numbered, every `sudo ufw allow <port>/tcp` before `sudo ufw enable`. The
   refusal for your deny rules prints the same commands after them; with no
-  sshd port read, or for `IPV6`, it prints no enable command at all.
+  sshd port read, or for `IPV6`, it prints no enable command at all. If SSH
+  stops answering, see *If SSH stops answering after admit enables ufw* in
+  [guides/host-owners.md](guides/host-owners.md).
 * **Grants:** at a terminal, admit asks for each
   grant the site's roles need and the flags leave out, saying what it gives;
   elsewhere a data site without `--watchdog`, or a gateway or Caddy monitor
@@ -737,7 +746,8 @@ paisans host admit --site home-a --ssh owner@home-a.example.org --execute   # fr
   anything else holds either of them, over TCP or UDP.
 * **`--execute`:** makes the changes the plan shows, which it always prints in
   full. With `--request` it first asks for the request's digest at a
-  terminal. With `--site` it ends by logging in as the deployment's user with
+  terminal, which the owner has from an operator over another channel than
+  the one that carried the file. With `--site` it ends by logging in as the deployment's user with
   the operator's own key, and writes `ssh.user` back into the configuration
   when the declaration leaves it out.
 * **What it changes:** Docker from Docker's repository where absent (an Engine
@@ -786,7 +796,9 @@ paisans host evict --site home-a --ssh owner@home-a.example.org --execute
 ```
 
 * **Alone:** always, by the host's owner, and never by an agent unattended:
-  it deletes the deployment's user and data as root.
+  it deletes the deployment's user and data as root. `site remove` ends by
+  printing this command for them; see *Evicting* and *What stays after
+  evicting* in [guides/host-owners.md](guides/host-owners.md).
 * **Flags:** `--request <file>`, or `--deployment <id> --user <name>` (both on
   the host, as root), or `--site <name>` with `--config`, and `--ssh` as
   your login alone, for the site's declared ssh host and port, or as
