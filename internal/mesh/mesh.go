@@ -24,6 +24,8 @@ import (
 	"net/netip"
 	"sort"
 	"strings"
+
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // Taken is a network something on a host already holds, and what holds it,
@@ -66,11 +68,14 @@ func Overlap(a, b netip.Prefix) bool {
 	return a.Contains(b.Addr()) || b.Contains(a.Addr())
 }
 
-// Clashes is every taken network that overlaps subnet, in the order given.
+// Clashes is every taken network that overlaps subnet, in the order given,
+// each What made visible: every caller quotes it in a refusal, and it
+// holds names a host printed.
 func Clashes(subnet netip.Prefix, taken []Taken) []Taken {
 	var out []Taken
 	for _, t := range taken {
 		if Overlap(subnet, t.Prefix) {
+			t.What = ui.Visible(t.What)
 			out = append(out, t)
 		}
 	}
@@ -79,8 +84,10 @@ func Clashes(subnet netip.Prefix, taken []Taken) []Taken {
 
 // Commands a probe runs. Each prints JSON on stdout and nothing else.
 const (
-	// RouteCommand lists the main routing table.
-	RouteCommand = "ip -j route"
+	// RouteCommand lists every routing table, not main alone: another VPN
+	// may keep its routes in a table of its own (Tailscale's 52, wg-quick's
+	// 51820), and they compete for the mesh's addresses all the same.
+	RouteCommand = "ip -j route show table all"
 	// AddrCommand lists every address on every interface.
 	AddrCommand = "ip -j addr"
 	// NetworksCommand inspects every Docker network, or prints an empty list
@@ -92,32 +99,64 @@ const (
 	DaemonConfig = "/etc/docker/daemon.json"
 )
 
+// NetworksCommandFor is NetworksCommand with docker, the client and its
+// flags, in place of plain docker: host admit names the system socket.
+func NetworksCommandFor(docker string) string {
+	return `command -v docker >/dev/null 2>&1 || { echo '[]'; exit 0; }; ids=$(` + docker + ` network ls -q); if [ -z "$ids" ]; then echo '[]'; else ` + docker + ` network inspect $ids; fi`
+}
+
 // LinkCommand prints iface's link as JSON, or "absent" when there is none.
 func LinkCommand(iface string) string {
 	return "ip -j link show dev " + iface + " 2>/dev/null || echo absent"
 }
 
-// ParseRoutes reads `ip -j route` and returns every route's destination as a
-// taken network, except the default route and routes through own, the
-// deployment's own interface, which are the mesh itself.
+// ParseRoutes reads RouteCommand's output and returns every route's
+// destination as a taken network, naming its table when it is not main,
+// except the default route, routes through own, the deployment's own
+// interface, which are the mesh itself, the local table's local and
+// broadcast entries, which are the host's own addresses and ParseAddrs
+// reads with their prefixes, and throw routes, which send a lookup on to
+// the next table and hold no address (Tailscale's table 52 throws the
+// host's own ranges). A multipath route names each of its interfaces.
 func ParseRoutes(out, own string) ([]Taken, error) {
 	var routes []struct {
-		Dst string `json:"dst"`
-		Dev string `json:"dev"`
+		Type     string `json:"type"`
+		Dst      string `json:"dst"`
+		Dev      string `json:"dev"`
+		Table    string `json:"table"`
+		Nexthops []struct {
+			Dev string `json:"dev"`
+		} `json:"nexthops"`
 	}
 	if err := decode(out, &routes); err != nil {
 		return nil, fmt.Errorf("unreadable `%s` output: %w", RouteCommand, err)
 	}
 	var taken []Taken
 	for _, r := range routes {
-		if r.Dst == "default" || r.Dev == own {
+		if r.Dst == "default" || r.Dev == own || r.Type == "local" || r.Type == "broadcast" || r.Type == "throw" {
 			continue
 		}
 		p, err := ParsePrefix(r.Dst)
 		if err != nil || !p.Addr().Is4() {
 			continue
 		}
-		taken = append(taken, Taken{Prefix: p, What: fmt.Sprintf("route %s dev %s", r.Dst, r.Dev), Dev: r.Dev})
+		var devs []string
+		for _, h := range r.Nexthops {
+			devs = append(devs, h.Dev)
+		}
+		what := "route " + r.Dst + " dev " + r.Dev
+		switch {
+		case r.Dev == "" && len(devs) > 0:
+			what = "route " + r.Dst + " dev " + strings.Join(devs, ", ")
+		case r.Dev == "" && r.Type != "":
+			what = "route " + r.Dst + " (" + r.Type + ")"
+		case r.Dev == "":
+			what = "route " + r.Dst
+		}
+		if r.Table != "" && r.Table != "main" {
+			what += " table " + r.Table
+		}
+		taken = append(taken, Taken{Prefix: p, What: what, Dev: r.Dev})
 	}
 	return taken, nil
 }
@@ -262,7 +301,11 @@ type Probed struct {
 
 // Probe asks a host for its routes, addresses, Docker networks and Docker's
 // pools. It reads and never writes.
-func Probe(h Host) (Probed, error) {
+func Probe(h Host) (Probed, error) { return ProbeWith(h, "docker") }
+
+// ProbeWith is Probe with docker, the client and its flags, reading the
+// networks.
+func ProbeWith(h Host, docker string) (Probed, error) {
 	var p Probed
 	var err error
 	for _, step := range []struct {
@@ -271,7 +314,7 @@ func Probe(h Host) (Probed, error) {
 	}{
 		{RouteCommand, RouteCommand, &p.Routes},
 		{AddrCommand, AddrCommand, &p.Addrs},
-		{"docker network inspect", NetworksCommand, &p.Networks},
+		{"docker network inspect", NetworksCommandFor(docker), &p.Networks},
 	} {
 		out, runErr := h.Run(step.command)
 		if runErr != nil {

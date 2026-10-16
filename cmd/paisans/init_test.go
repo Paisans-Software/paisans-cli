@@ -331,6 +331,12 @@ func TestCheckMeshLive(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "route 10.44.0.0/23 dev psns-0c1d on home-a") || !strings.Contains(err.Error(), "nothing was changed") {
 		t.Errorf("checkMeshLive = %v, want a refusal naming the other route", err)
 	}
+	// Tailscale keeps its routes in table 52, which the probe reads too.
+	tailscale := &initFake{name: "home-a.local", routes: `[{"dst":"10.44.0.0/16","dev":"tailscale0","table":"52"}]`}
+	err = checkMeshLive(cfg, "home-a", tailscale)
+	if err == nil || !strings.Contains(err.Error(), "route 10.44.0.0/16 dev tailscale0 table 52 on home-a") {
+		t.Errorf("checkMeshLive = %v, want a refusal naming Tailscale's route", err)
+	}
 }
 
 // init reports the subnet decision as one step with its result, each secret

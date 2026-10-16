@@ -5,4 +5,4 @@
 set -e
 export DEBIAN_FRONTEND=noninteractive
 apt-get -o DPkg::Lock::Timeout=300 update
-apt-get -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confold install -y{{ range .Packages }} {{ . }}{{ end }}
+apt-get -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confold install -y{{ if .NoUpgrade }} --no-upgrade{{ end }}{{ range .Packages }} {{ . }}{{ end }}

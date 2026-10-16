@@ -128,6 +128,9 @@ change to a group that exists, stays in the tier above.
 * Changing private-network access control
 * Deleting backups
 * Removing or rotating the identity provider's API key
+* Admitting a deployment to a host or evicting one (`paisans host admit`,
+  `paisans host evict`): it is the host owner's root step on their own
+  machine
 
 The distinction between the last two tiers matters and is easy to blur.
 *Approved* means a human said yes to this specific action. *Present* means a

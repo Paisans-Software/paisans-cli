@@ -1,0 +1,1 @@
+refused: daemon: --data-dir /srv/data must be a directory, not a link, owned by root and writable by nobody else (its listing is "drwxrwxrwt", owner 0), so that no one but root can replace what admit creates in it. Fix it and admit again. Nothing was changed

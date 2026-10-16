@@ -19,6 +19,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	pathpkg "path"
 	"slices"
 	"sort"
 	"strings"
@@ -135,6 +136,10 @@ type Section struct {
 type Warning struct {
 	Hint   string
 	Detail string
+	// KeptSSH, on the warning that an earlier SSH allow is kept, is that
+	// allow as the warning names it, so a caller finds it without reading
+	// the hint's words.
+	KeptSSH string
 }
 
 func (s *Section) add(other Section) {
@@ -197,13 +202,21 @@ type Profile interface {
 	// Packages plans Docker Engine with the compose plugin, the WireGuard
 	// tools, and whatever the profile's own firewall needs.
 	Packages(t Transport, host OSRelease) (Section, error)
+	// AdmitPackages plans what host admit installs for a deployment that
+	// runs rootless: with Docker absent, Docker's repository and packages
+	// with its rootless extras; with Docker present, the extras alone,
+	// never upgrading a package already installed; in both, uidmap,
+	// nftables and the base packages but the firewall, which admit needs
+	// installed and active already. dockerPresent is admit's own
+	// judgement, made from the engine's version.
+	AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (Section, error)
 	// Services plans enabling and starting what Packages installed.
 	// Its own files carry the deployment's token, so that two deployments on
 	// one host each keep their own.
 	Services(t Transport, d deployment.Deployment) (Section, error)
 	// WatchdogModule plans loading a kernel module now, unless loaded says
 	// it already is, and loading it at every boot.
-	WatchdogModule(t Transport, d deployment.Deployment, module string, loaded bool) (Section, error)
+	WatchdogModule(t Transport, d deployment.Deployment, module string, loaded, admit bool) (Section, error)
 	// ConfigStore plans the deployment's repository of configuration
 	// versions, the daemon that serves it to the mesh and the timer that
 	// fetches from peers, the addresses of which are given.
@@ -216,8 +229,10 @@ type Profile interface {
 	// is told apart by the owner tag of deployment d in each rule's comment,
 	// so a rule another deployment added is as foreign as an operator's.
 	// hostWide is false on a shared host, where the default policy and
-	// whether the firewall is on decide other people's traffic too.
-	Firewall(t Transport, d deployment.Deployment, rules []Rule, hostWide bool) (Section, error)
+	// whether the firewall is on decide other people's traffic too. by is
+	// the command planning, host prepare or host admit, which the plan's
+	// messages name.
+	Firewall(t Transport, d deployment.Deployment, rules []Rule, hostWide bool, by string) (Section, error)
 }
 
 var registry []Profile
@@ -313,7 +328,7 @@ func Build(site string, cfg *config.Config, t Transport, opts ...Option) (*Plan,
 	}
 	plan.add(services)
 
-	watchdog, err := planWatchdog(t, d, profile, declared)
+	watchdog, err := planWatchdog(t, d, profile, declared, "prepare")
 	if err != nil {
 		return nil, err
 	}
@@ -347,7 +362,7 @@ func Build(site string, cfg *config.Config, t Transport, opts ...Option) (*Plan,
 			})
 		}
 	}
-	firewall, err := profile.Firewall(t, d, rules, !o.shared)
+	firewall, err := profile.Firewall(t, d, rules, !o.shared, "host prepare")
 	if err != nil {
 		return nil, fmt.Errorf("firewall on %s: %w", t.Describe(), err)
 	}
@@ -422,7 +437,12 @@ func Execute(plan *Plan, t Transport, r ui.Reporter) error {
 // snippet renders one embedded shell template. A missing template or a bad
 // one is a bug in this package, so it is returned rather than recovered from.
 func snippet(path string, data any) (string, error) {
-	tmpl, err := template.ParseFS(templates, path)
+	return snippetFuncs(path, nil, data)
+}
+
+// snippetFuncs is snippet with funcs given to the template.
+func snippetFuncs(path string, funcs template.FuncMap, data any) (string, error) {
+	tmpl, err := template.New(pathpkg.Base(path)).Funcs(funcs).ParseFS(templates, path)
 	if err != nil {
 		return "", fmt.Errorf("loading %s: %w", path, err)
 	}

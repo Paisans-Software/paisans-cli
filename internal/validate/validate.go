@@ -197,7 +197,6 @@ func Check(cfg *config.Config) Result {
 	c.evenVoters()
 	c.oneVoterNoFailover()
 	c.asyncAutomaticFailover()
-	c.meshIsNotPrivate()
 	c.pinnedOntoWitness()
 	c.gatewayOnDataSite()
 	c.pocketIDFileBackend()
@@ -209,7 +208,6 @@ func Check(cfg *config.Config) Result {
 	c.pocketIDStandbyMarkerUnknown()
 	c.imageForAbsentPostgres()
 	c.publicAddress()
-	c.watchdogOffOnDataSite()
 
 	sort.SliceStable(c.findings, func(i, j int) bool {
 		if c.findings[i].Level != c.findings[j].Level {
@@ -768,30 +766,6 @@ func sshKey(host string, port int) string {
 		host = ip.String()
 	}
 	return net.JoinHostPort(strings.ToLower(host), strconv.Itoa(port))
-}
-
-// meshIsNotPrivate warns about a mesh on publicly routable space.
-//
-// Preflight checks that the subnet does not collide with anything a host
-// already routes, and that check needs a host. This is the part that can be
-// checked from a file: a mesh on public address space collides with the real
-// internet everywhere at once, and the symptom is a host that can no longer
-// reach whoever actually owns those addresses.
-func (c *checker) meshIsNotPrivate() {
-	if c.cfg.Mesh.Subnet == "" {
-		return
-	}
-	_, network, err := net.ParseCIDR(c.cfg.Mesh.Subnet)
-	if err != nil {
-		return // the loader has already reported this
-	}
-	if network.IP.IsPrivate() {
-		return
-	}
-	c.warn("mesh-subnet-is-not-private", "mesh.subnet",
-		"mesh subnet is publicly routable",
-		"is %s, which is publicly routable address space. Every host would route those addresses into the tunnel instead of to whoever owns them. Use RFC 1918 space, for example 10.44.0.0/24, unless this range is genuinely yours.",
-		c.cfg.Mesh.Subnet)
 }
 
 // undeclaredSites refuses any reference to a site that does not exist. A
@@ -1786,24 +1760,6 @@ func throwawayCollisions(cfg *config.Config) ([]*render.ConfigCollision, error) 
 		return nil, err
 	}
 	return render.ConfigCollisions(cfg, &throwaway.secrets), nil
-}
-
-// watchdogOffOnDataSite warns that a data site's Patroni runs unfenced.
-//
-// It is a warning rather than a refusal because there are hosts with no device
-// and no way to load one (some container based VPS kernels), and a one node
-// cluster has nobody to split brain with. It is still risky: without a
-// watchdog, a Patroni that hangs while holding the leader key can keep
-// accepting writes after its lease expires and another node is promoted.
-func (c *checker) watchdogOffOnDataSite() {
-	for _, name := range c.cfg.SiteNames() {
-		site := c.cfg.Sites[name]
-		if site.Has(config.RoleData) && site.WatchdogMode() == config.WatchdogOff {
-			c.warn("watchdog-off-on-data-site", fmt.Sprintf("sites.%s.watchdog", name),
-				"watchdog is off on a data site",
-				"is off on a site holding the data role. patroni.env sets the watchdog mode to off inside SPILO_CONFIGURATION, so a Patroni that hangs while it is leader is not fenced and can keep taking writes after another node is promoted. Use auto unless this host genuinely cannot load any watchdog driver.")
-		}
-	}
 }
 
 // adminGroupNotAdmins warns about an app that reads its administrators from

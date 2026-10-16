@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"strings"
 
 	"golang.org/x/crypto/ssh"
@@ -22,8 +23,12 @@ const RequestVersion = 1
 type Request struct {
 	Version    int    `yaml:"version"`
 	Deployment string `yaml:"deployment"`
-	User       string `yaml:"user"`
-	SSHPort    int    `yaml:"ssh_port"`
+	// Site is the site's name in the configuration, and Roles its roles,
+	// sorted: what the owner is admitting, and what its grants follow from.
+	Site    string   `yaml:"site"`
+	Roles   []string `yaml:"roles"`
+	User    string   `yaml:"user"`
+	SSHPort int      `yaml:"ssh_port"`
 	// ListenPort is the site's WireGuard port, 0 when no site dials it and
 	// WireGuard picks one, so the firewall opens none.
 	ListenPort int    `yaml:"listen_port"`
@@ -68,6 +73,8 @@ func Build(cfg *config.Config, site string) (Request, error) {
 	r := Request{
 		Version:    RequestVersion,
 		Deployment: cfg.ID,
+		Site:       site,
+		Roles:      []string{},
 		User:       s.SSHUser(),
 		SSHPort:    s.SSH.PortOrDefault(),
 		ListenPort: s.ListenPort(),
@@ -78,6 +85,10 @@ func Build(cfg *config.Config, site string) (Request, error) {
 		WebServer:  []WebApp{},
 		Operators:  []Operator{},
 	}
+	for _, role := range s.Roles {
+		r.Roles = append(r.Roles, string(role))
+	}
+	slices.Sort(r.Roles)
 	if s.Has(config.RoleMonitor) && s.WebServerManagedBy() == config.ManagedByExternal && s.WebServer != nil {
 		for _, app := range cfg.PinnedTo(site) {
 			r.WebServer = append(r.WebServer, WebApp{App: app, Hostname: cfg.Apps[app].Hostname, Listen: s.WebServer.Listen})
@@ -118,6 +129,10 @@ func (r Request) withConfigKey(problem, site string) string {
 	switch name, _, _ := strings.Cut(field, "["); {
 	case field == "deployment":
 		key = "id"
+	case field == "site":
+		key = "sites." + site
+	case name == "roles", field == "grants":
+		key = "sites." + site + ".roles"
 	case field == "user":
 		key = "sites." + site + ".ssh.user"
 	case field == "ssh_port":
@@ -186,6 +201,26 @@ func (r Request) Check() []string {
 	if !deployment.ValidID(r.Deployment) {
 		add("deployment: %q is not a deployment id", r.Deployment)
 	}
+	if !config.ValidSiteName(r.Site) {
+		add("site: %q is not a site name", r.Site)
+	}
+	// No roles is a site that exists to host an app pinned to it, which the
+	// configuration allows, so roles may be empty.
+	roles := r.roleList()
+	for i, role := range r.Roles {
+		switch {
+		case !config.KnownRole(roles[i]):
+			add("roles[%d]: %q is not a site role", i, role)
+		case config.RoleRepeated(roles, i):
+			add("roles[%d]: %q is listed twice", i, role)
+		case i > 0 && role < r.Roles[i-1]:
+			add("roles[%d]: %q comes after %q, and roles are written sorted", i, role, r.Roles[i-1])
+		}
+	}
+	// The grants are what the roles need, as needs reads them.
+	if need := r.needs(); need != r.Grants {
+		add("grants: watchdog %t and public_ports %t, and roles %q need watchdog %t and public_ports %t", r.Grants.Watchdog, r.Grants.PublicPorts, r.Roles, need.Watchdog, need.PublicPorts)
+	}
 	if p := config.DeploymentUserProblem(r.User, r.Deployment); p != "" {
 		add("user: %s", p)
 	}
@@ -212,6 +247,11 @@ func (r Request) Check() []string {
 		case config.IsNetworkOrBroadcast(a, mesh):
 			add("address: %s is the subnet's network or broadcast address", r.Address)
 		}
+	}
+	// Only a monitor sits behind the owner's web server, and admit opens
+	// 80 and 443 on the host to a site that hands that server an app.
+	if n := len(r.WebServer); n > 0 && !slices.Contains(roles, config.RoleMonitor) {
+		add("web_server: %d app%s, and roles %q hold no monitor, the only role the owner's web server fronts", n, map[bool]string{true: "s"}[n > 1], r.Roles)
 	}
 	apps, hostnames := map[string]bool{}, map[string]bool{}
 	for i, w := range r.WebServer {
@@ -265,6 +305,30 @@ func (r Request) Check() []string {
 		}
 	}
 	return problems
+}
+
+// roleList is r's roles as the configuration's type.
+func (r Request) roleList() []config.Role {
+	roles := make([]config.Role, len(r.Roles))
+	for i, role := range r.Roles {
+		roles[i] = config.Role(role)
+	}
+	return roles
+}
+
+// needs is what r's roles need granted, by Needs on a site holding them.
+// Roles alone cannot say whether a monitor runs the toolkit's Caddy, which
+// binds 80 and 443, or sits behind the owner's web server, which needs no
+// low port. web_server says which: a monitor whose request hands that
+// server an app is managed_by: external, since validate refuses such a
+// monitor with no app pinned to it; every other monitor runs the toolkit's
+// Caddy.
+func (r Request) needs() Grants {
+	s := config.Site{Roles: r.roleList()}
+	if len(r.WebServer) > 0 {
+		s.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal}
+	}
+	return Needs(s)
 }
 
 // Error is a request, or a record, refused, with every problem found.

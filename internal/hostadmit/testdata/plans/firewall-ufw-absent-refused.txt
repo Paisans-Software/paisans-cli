@@ -1,0 +1,1 @@
+refused: firewall: ufw is not installed. Admit works only on a host whose firewall is ufw, and does not install or enable one: install ufw, allow your own SSH port, run `sudo ufw enable`, then run admit again. Nothing was changed

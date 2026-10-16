@@ -404,15 +404,22 @@ func removeUnclaimed(user, own, fingerprint, file string, lines []string, write 
 // not change when only the order of the configuration did. Fingerprints and
 // comments are public, so a command line is no leak.
 func writeOwned(d deployment.Deployment, user string, entries []ownedEntry) string {
+	body := ownedBody(user, entries)
+	path := OwnedKeysPath(d, user)
+	return fmt.Sprintf("mkdir -p %s && printf '%%s' %s > %s && chmod 600 %s && mv %s %s",
+		ownedDir, shellQuote(body), shellQuote(path+".paisans-tmp"), shellQuote(path+".paisans-tmp"), shellQuote(path+".paisans-tmp"), shellQuote(path))
+}
+
+// ownedBody is a sidecar's content: its header, then entries sorted so that
+// the file does not change when only the order of the configuration did.
+func ownedBody(user string, entries []ownedEntry) string {
 	sorted := append([]ownedEntry(nil), entries...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].fingerprint < sorted[j].fingerprint })
 	body := "# Keys this deployment claims in " + user + "'s authorized_keys: <mark> <fingerprint> <name>. host prepare removes a line only when it is marked added here and no other deployment's file lists it.\n"
 	for _, e := range sorted {
 		body += e.mark + " " + e.fingerprint + " " + e.name + "\n"
 	}
-	path := OwnedKeysPath(d, user)
-	return fmt.Sprintf("mkdir -p %s && printf '%%s' %s > %s && chmod 600 %s && mv %s %s",
-		ownedDir, shellQuote(body), shellQuote(path+".paisans-tmp"), shellQuote(path+".paisans-tmp"), shellQuote(path+".paisans-tmp"), shellQuote(path))
+	return body
 }
 
 // shellQuote wraps a value in single quotes for /bin/sh.

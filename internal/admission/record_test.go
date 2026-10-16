@@ -44,6 +44,7 @@ func TestRecordGolden(t *testing.T) {
 	req := build(t, "home-a")
 	rec := admission.NewRecord(req, admission.Grants{Watchdog: true, PublicPorts: true}, admission.Digest(admission.Encode(req)), at)
 	rec.DataDir = "/srv/data/paisans-f2a9"
+	rec.MeshLAN = "192.168.1.0/24"
 	rec.WebServer = &admission.WebServer{Server: "caddy", Process: "caddy", Config: "/etc/caddy/Caddyfile", Main: "/etc/caddy/Caddyfile", Certs: "automatic", AdminTCP: "localhost:2019"}
 	got := encode(t, rec)
 	path := filepath.Join("testdata", "admitted.f2a9.json")
@@ -152,6 +153,11 @@ func TestParseRecordRefuses(t *testing.T) {
 		{"a data_dir not clean", strings.Replace(g, `"data_dir": "/srv/data/paisans-f2a9"`, `"data_dir": "/srv/../data/paisans-f2a9"`, 1), "f2a9", `data_dir: "/srv/../data/paisans-f2a9" is not`},
 		{"a data_dir of another token", strings.Replace(g, `"data_dir": "/srv/data/paisans-f2a9"`, `"data_dir": "/srv/data/paisans-0a0b"`, 1), "f2a9", `data_dir: "/srv/data/paisans-0a0b" is not`},
 		{"a data_dir with a control character", strings.Replace(g, `"data_dir": "/srv/data/paisans-f2a9"`, `"data_dir": "/srv/da\nta/paisans-f2a9"`, 1), "f2a9", `data_dir: "/srv/da\nta/paisans-f2a9" is not`},
+		{"a public mesh_lan", strings.Replace(g, `"mesh_lan": "192.168.1.0/24"`, `"mesh_lan": "8.8.8.0/24"`, 1), "f2a9", `mesh_lan: "8.8.8.0/24" is not`},
+		{"a mesh_lan wider than a /16", strings.Replace(g, `"mesh_lan": "192.168.1.0/24"`, `"mesh_lan": "10.0.0.0/8"`, 1), "f2a9", `mesh_lan: "10.0.0.0/8" is not`},
+		{"a mesh_lan not masked", strings.Replace(g, `"mesh_lan": "192.168.1.0/24"`, `"mesh_lan": "192.168.1.20/24"`, 1), "f2a9", `mesh_lan: "192.168.1.20/24" is not`},
+		{"a mesh_lan of one address", strings.Replace(g, `"mesh_lan": "192.168.1.0/24"`, `"mesh_lan": "192.168.1.1"`, 1), "f2a9", `mesh_lan: "192.168.1.1" is not`},
+		{"an IPv6 mesh_lan", strings.Replace(g, `"mesh_lan": "192.168.1.0/24"`, `"mesh_lan": "fd00::/64"`, 1), "f2a9", `mesh_lan: "fd00::/64" is not`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if _, err := admission.ParseRecord([]byte(c.data), c.token); err == nil || !strings.Contains(err.Error(), c.want) {

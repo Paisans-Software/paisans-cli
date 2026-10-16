@@ -1,5 +1,11 @@
+{{- if .Admit -}}
+# Written by paisans host admit. Loads {{ .Module }} at boot, before
+# systemd-logind starts the lingering users' managers, whose Docker starts
+# the Patroni container that maps /dev/watchdog.
+{{ else -}}
 # Written by paisans host prepare. Loads {{ .Module }} at boot, before Docker
 # starts the Patroni container that maps /dev/watchdog.
+{{ end -}}
 #
 # A unit and not /etc/modules-load.d: Ubuntu's kernel package blacklists the
 # watchdog drivers, and systemd-modules-load applies that blacklist, so a
@@ -7,7 +13,7 @@
 # line does not apply it.
 [Unit]
 Description=Load the {{ .Module }} watchdog for Patroni
-Before=docker.service
+Before={{ if .Admit }}systemd-logind.service{{ else }}docker.service{{ end }}
 
 [Service]
 Type=oneshot

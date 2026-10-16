@@ -715,7 +715,7 @@ app, and its two Pocket ID addresses differ:
 |----------|-------|-----|
 | `ACCOUNT_OIDC_ISSUER` | `https://<pocket-id hostname>` | An OIDC issuer is the URL Pocket ID names itself by, which is its `APP_URL`; a token whose issuer does not match is refused. It carries no key. |
 | `ACCOUNT_IDP_URL` | `http://<site mesh address>:1413` | The API, with the static API key, through the site's own HAProxy to the active Pocket ID, so the key travels only over the mesh, which WireGuard encrypts between sites. |
-| `ACCOUNT_IDP_PRIVATE_NETWORKS` | `mesh.subnet` | The networks the service accepts `ACCOUNT_IDP_URL` in besides the private ranges, so the key still goes only to the mesh when `mesh.subnet` lies outside them. |
+| `ACCOUNT_IDP_PRIVATE_NETWORKS` | `mesh.subnet` | The networks the service accepts `ACCOUNT_IDP_URL` in besides the private ranges, set to the mesh. |
 
 Renaming the identity hostname re-renders the account service's `.env`, and
 the next `apply` recreates the account stack. The account app is cluster
@@ -1846,7 +1846,10 @@ Without `--execute` the same commands only read the registry and refuse the
 same way, so a dry run shows the conflict the real run would meet. `preflight`
 reads it on the site being added. `operator magic-link` and `oidc client create`
 reach a host without sudo, and their dry runs leave the registry alone; with
-`--execute` they claim through sudo, since the registry is root's.
+`--execute` they claim it through sudo, since only root can write the
+registry. `paisans host admit` claims the host for the deployment when its
+owner admits it, from the request alone, so a host admitted from a request
+and one admitted from the configuration hold the same entry.
 
 ### Where the mesh dials a site
 
@@ -1944,7 +1947,7 @@ subnet overlaps:
 
 | Source | Read with |
 |--------|-----------|
-| a route, other than one through this deployment's own interface | `ip -j route` |
+| a route in any table, other than one through this deployment's own interface, so a VPN that keeps its routes in a table of its own (Tailscale's 52, wg-quick's 51820) is seen | `ip -j route show table all` |
 | an address and its network, on any other interface | `ip -j addr` |
 | a Docker network's subnet | `docker network inspect` over `docker network ls -q`, `IPAM.Config` |
 | a pool Docker allocates new networks from | `default-address-pools` in `/etc/docker/daemon.json` when set, and otherwise Docker's defaults: `172.17.0.0/16`, `172.18.0.0/16`, `172.19.0.0/16`, `172.20.0.0/14`, `172.24.0.0/14`, `172.28.0.0/14` and `192.168.0.0/16` (moby v27.5.1, `libnetwork/ipamutils/utils.go`, `localScopeDefaultNetworks`, which `daemon/daemon.go` uses unless the pools are configured) |
@@ -1985,15 +1988,18 @@ app trusts the mesh subnet and every service binds an address in it, so moving
 it is a rebuild of every site.
 
 `validate` refuses a file without `mesh.subnet` and says to run `init`, and
-refuses one that is not an IPv4 network, one larger than a /24, and one
-overlapping `0.0.0.0/8`, `127.0.0.0/8`, `169.254.0.0/16` or `224.0.0.0/3`.
-The hosts' firewalls trust the whole mesh, so a larger one could cover an
-owner's LAN; an admitted host's egress table accepts the mesh before it
-drops loopback and link-local, so a mesh over those would let the
+refuses one that is not an IPv4 network, one larger than a /24, one
+overlapping `0.0.0.0/8`, `127.0.0.0/8`, `169.254.0.0/16` or `224.0.0.0/3`,
+and one outside the private ranges `10.0.0.0/8`, `172.16.0.0/12` and
+`192.168.0.0/16`. The hosts' firewalls trust the whole mesh, so a larger one
+could cover an owner's LAN; an admitted host's egress table accepts the mesh
+before it drops loopback and link-local, so a mesh over those would let the
 deployment reach the owner's local services and the cloud metadata address,
-and this network and multicast route nothing a mesh could use. It refuses a
-site address outside the mesh, and one that is the mesh's network or
-broadcast address.
+and this network and multicast route nothing a mesh could use. Every other
+deployment's egress table on a shared host drops the private ranges and no
+other range a mesh may use, so a mesh outside them would be one that
+deployment's user could reach. It refuses a site address outside the mesh,
+and one that is the mesh's network or broadcast address.
 
 `doctor` has a `mesh` section, checked on every site it reaches: the
 interface exists and is up (`ip -j link show dev psns-<token>`), and the live
@@ -4174,7 +4180,7 @@ sites:
       host: home-a.local
       user: ubuntu
       keys: [alice]
-    watchdog: auto   # auto | required | softdog | off; auto when absent
+    watchdog: auto   # auto | required | softdog; auto when absent
 ```
 
 | Mode | What `host prepare` does | What is rendered |
@@ -4182,7 +4188,6 @@ sites:
 | `auto` | uses the device the host has, whatever its driver; with none, loads and persists `softdog` and prints a warning | `required`, device mapped |
 | `required` | refuses unless a driver other than `softdog` is present | `required`, device mapped |
 | `softdog` | loads and persists `softdog`; warns only when a hardware or hypervisor watchdog is present, because Patroni opens that device rather than softdog | `required`, device mapped |
-| `off` | nothing | `off`, no device mapping |
 
 **`softdog` is a fallback, never the assumption.** It is a kernel timer, so it
 reboots a machine whose Patroni hung but not one whose kernel did, and a hung
@@ -4190,12 +4195,11 @@ kernel is exactly the case where the node cannot fence itself any other way. A
 hardware or hypervisor watchdog is better wherever one exists, and `auto` takes
 the real one when it is there.
 
-**`off` is a warning, not a refusal** (`watchdog-off-on-data-site`). Some hosts
-genuinely cannot load any driver, and a single data site has nobody to split
-brain with. It is still risky once a second data site exists, so it has to be
-chosen rather than stumbled into. `off` also drops the device mapping from the
-infrastructure compose file: compose will not create a container whose device
-does not exist, so keeping the mapping would fail the exact host `off` is for.
+**`off` is not a mode.** A data site's Patroni needs a watchdog to fail over
+safely: a member without one can keep acting as leader after it has lost its
+lock. No other site uses one, so the loader refuses `watchdog: off` on any
+site, and the host's owner admits a data site only with `paisans host admit
+--watchdog`.
 
 **Only one process can hold the device, and it has to be Patroni.** `host
 prepare` refuses a host where systemd's own runtime watchdog
@@ -4669,12 +4673,12 @@ nothing to read twice, and the string has nowhere to put the keys.
 An owner who does not have the deployment's configuration admits a site
 from a request: `paisans host request --site <site> > <site>.admit` writes
 it, and the owner admits the site from that file. The request holds what
-admission needs and nothing secret: the deployment's id, the site's user,
-its SSH and WireGuard ports, its mesh address and the mesh subnet, whether
-it has an endpoint, the grants its roles need (the watchdog for a data site,
-ports 80 and 443 for a gateway or a monitor running the toolkit's Caddy),
-the apps a monitor behind the owner's web server hands it, and each
-operator's public keys.
+admission needs and nothing secret: the deployment's id, the site's name
+and its roles, sorted, the site's user, its SSH and WireGuard ports, its
+mesh address and the mesh subnet, whether it has an endpoint, the grants
+its roles need (the watchdog for a data site, ports 80 and 443 for a
+gateway or a monitor running the toolkit's Caddy), the apps a monitor
+behind the owner's web server hands it, and each operator's public keys.
 
 Those keys get a shell on the owner's machine, so the request is only as
 trustworthy as the way it travelled. `host request` prints a digest of it
@@ -4689,19 +4693,37 @@ the owner was not shown. Keys travel without their comments, which are free
 text a forger could vary while searching for a request with a matching
 digest.
 
-A request is read as strictly as a configuration. An unknown version, a
-field missing or unknown, a user name `ssh.user` would refuse, `root`, a
-`paisans-` name other than the deployment's own, a key that is not a plain
-public key, and an address outside the subnet are each refused, and so is a
-mesh subnet overlapping `0.0.0.0/8`, loopback, link-local or multicast: the
-egress table accepts the mesh subnet before it drops the owner's loopback
-and link-local ranges, so a subnet over them would let the deployment reach
-what the table keeps it from. `host request` applies the same checks, so it
+A request is read as strictly as a configuration. An unknown version, a field
+missing or unknown, a site name or a role the configuration would refuse, a
+role listed twice or out of order, grants other than the ones its roles need,
+apps handed to the owner's web server on a site with no monitor role, a user
+name `ssh.user` would refuse, `root`, a `paisans-` name other than the
+deployment's own, a key that is not a plain public key, and an address
+outside the subnet are each refused, and so is a mesh subnet overlapping
+`0.0.0.0/8`, loopback, link-local or multicast: the egress table accepts the
+mesh subnet before it drops the owner's loopback and link-local ranges, so a
+subnet over them would let the deployment reach what the table keeps it from.
+So is one outside the private ranges `10.0.0.0/8`, `172.16.0.0/12` and
+`192.168.0.0/16`: another deployment's table on a shared host drops these and
+no other range a mesh may use. `host request` applies the same checks, so it
 never writes a request the owner's side would refuse, and `validate` holds
 the configuration to each rule it can check from the file, `ssh.user`
 included, so a configuration it accepts gets a request. A refusal `host
 request` can still reach names the configuration key to change beside the
 request's field.
+
+Admitting needs ufw installed and active on the host: `host admit` never
+enables it, and refuses before making any change otherwise. Ports 80 and 443
+belong to one deployment per host. The egress table fences the deployment's
+user off the owner's machine, and one limit follows from the mesh staying
+reachable: an owner service bound to all interfaces (`0.0.0.0` or `::`) is
+reachable on the host's mesh address, by the deployment and by its other
+sites. Owners should bind admin services to `127.0.0.1` or to their LAN
+address. And the deployment's user may listen on any address and port no
+service of the owner's holds, so an owner's client may reach the deployment
+instead of a service that is down, or that is bound to the other family
+(`127.0.0.1` while the client tries `[::1]`). `paisans host admit` and
+`paisans host evict` are in `docs/commands.md`.
 
 #### Keys belong to operators, and sites name operators
 
@@ -9050,9 +9072,9 @@ at, and "could not look" is not "looked and it was fine".
 | Registry | new site | `/var/lib/paisans/registry.json`, read and never claimed | another deployment there holds this one's token, root, interface or listen port, a mesh subnet overlapping this one's, or the gateway or data role this one claims |
 | Platform | new data site, against each existing data site | `/etc/os-release` `ID` and `VERSION_ID`, the release at the end of `ldd --version`'s first line, and `dpkg --print-architecture` | any of the four differs |
 | WireGuard | new site | `/sys/module/wireguard`, else `modprobe -n wireguard` | neither |
-| Watchdog | new data site, unless its mode is `off` | `/dev/watchdog` exists | it does not |
+| Watchdog | new data site | `/dev/watchdog` exists | it does not |
 | Ports | new site | the host check's `ss -Hltnup` against its claims | anything listens where the site will bind: the port it is dialled on, UDP, on a site with a `public_address` or an `endpoint`; 2379 or 2380 for an etcd member; 5432, 8008 or 8009 for a data site; the cluster port and 8404 where the site runs HAProxy; 3900 to 3903 for a Garage site; 80 and 443 for a gateway or a monitor in `managed_by: paisans`; `listen` for a monitor in `managed_by: external`; each app's published port |
-| Mesh | new site | `ip -j route`, `ip -j addr`, `docker network inspect`, `/etc/docker/daemon.json` | a route, an address, a Docker network or a Docker address pool overlaps `mesh.subnet`, other than a route or address on this deployment's own interface (see *Two deployments on one host never share a mesh*) |
+| Mesh | new site | `ip -j route show table all`, `ip -j addr`, `docker network inspect`, `/etc/docker/daemon.json` | a route, an address, a Docker network or a Docker address pool overlaps `mesh.subnet`, other than a route or address on this deployment's own interface (see *Two deployments on one host never share a mesh*) |
 | Routes | new site | `ip -j route` | a route overlaps `mesh.subnet`, other than one through `psns-<token>` |
 | Disk | new data site | the leader's `sum(pg_database_size(...))`, through its Patroni container's `psql`; `df` on the deepest existing directory towards `/srv/paisans/<token>/infra/postgres` | free space is under that plus 2 GiB |
 | Storage | new site | `docker info --format '{{.DockerRootDir}}'`, then `findmnt -no FSTYPE,SOURCE --target` on Docker's root and on the deployment's root, `/srv/paisans/<token>` (or the deepest directory towards it that exists) | either is a network filesystem (`nfs`, `nfs4`, `cifs`, `smb3`, `glusterfs`, `ceph`, `fuse.sshfs` and the others preflight lists); a type that is neither that nor a local block filesystem (`ext4`, `xfs`, `btrfs`, `zfs`, `f2fs`) warns |
@@ -9212,7 +9234,7 @@ closing list is usually the cause of those after it:
 | Check | How | FAIL when |
 |---|---|---|
 | Reach | `true` over ssh, on every site asked | the site does not answer. The finding says what the deployment is without while it is gone: the gateway, an etcd vote, a Patroni member, a Garage node, its copy of each clustered app, the apps pinned to it |
-| Mesh | `ip -j link show dev psns-<token>`, then the overlap test of *Two deployments on one host never share a mesh*: `ip -j route`, `ip -j addr`, `docker network inspect` and `/etc/docker/daemon.json`, on every site that answered | the interface is missing or down, or anything outside it overlaps `mesh.subnet`, named with the subnet. The advice is that the subnet is fixed once deployed and the other network moves |
+| Mesh | `ip -j link show dev psns-<token>`, then the overlap test of *Two deployments on one host never share a mesh*: `ip -j route show table all`, `ip -j addr`, `docker network inspect` and `/etc/docker/daemon.json`, on every site that answered | the interface is missing or down, or anything outside it overlaps `mesh.subnet`, named with the subnet. The advice is that the subnet is fixed once deployed and the other network moves |
 | etcd quorum | `etcdctl endpoint health -w json` in the etcd container of the first member that answers, naming every member of `etcd.members` by its mesh address | fewer than half the members plus one are healthy. One member down with quorum intact is a `WARN` |
 | etcd version | `curl` on the host to `http://127.0.0.1:2379/version`; skipped, and said so, where the host has no `curl` | the cluster version is `3.0.0` under a 3.5 server |
 | Patroni | `/cluster` from every database site's Patroni, through `curl` in its container as `apply` asks it, and Patroni's `/sync` key from etcd | there is no running leader. A replica that is not `streaming`, or more than 16 MiB behind, is a `WARN`, and so is a leader with no Sync Standby while `cluster.synchronous` is true |

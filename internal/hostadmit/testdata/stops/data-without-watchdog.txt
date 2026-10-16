@@ -1,0 +1,2 @@
+this is a data site, and admitting it needs --watchdog
+The request is for site home-b (roles: data). Its Patroni member needs the host's watchdog to fail over safely: without one, a member that has lost its lock can keep acting as leader. The watchdog reboots the whole machine when Patroni stops renewing it. Admit it with --watchdog, or do not admit it. Nothing was read or changed.

@@ -13,17 +13,22 @@ changes share a bullet. Detailed notes are on the corresponding
 ### Added
 
 - `infra.images` and `infra.postgres.<major>.spilo` override the infrastructure stack's images without a catalog release, and `paisans images` lists each site's builds, what would move, and overrides behind their track.
-- `host request --site <s>` writes the request a host's owner admits that site from, and prints its digest on stderr for the owner to compare over a channel both trust.
+- `host request --site <s>` writes the request a host's owner admits that site from, naming the site and its roles, and prints its digest on stderr for the owner to compare over a trusted channel.
 - Any run with `--execute` that logs in to a site leaving `ssh.user` out writes the deployment's user there; a run without `--execute` only says so, and a failed write is a warning.
+- `host admit` and `host evict` let a host's owner admit a deployment as its own unprivileged user with rootless Docker, from a request on the host or over their own SSH, and undo it.
 - `host prepare --all` prepares every site the configuration declares, one at a time in its order, each with its own review, stopping at the first failure.
 - Each release attaches static `paisans-linux-amd64` and `paisans-linux-arm64` binaries and a `SHA256SUMS` file, so a host owner can run the CLI on Linux without Go.
 
 ### Changed
 
+- `sites.*.roles` lists each role once, so a repeated role is refused when the configuration loads, as `host request` requires.
+- `watchdog: off` is refused, since a data site's Patroni needs a watchdog to fail over safely and no other site uses one.
 - `apps.*.hostname` and `apps.*.hostnames.*` must be lowercase DNS names of two labels or more, so a capital, a single label, an empty or over-long label or an underscore is refused by `validate`.
 - `sites.*.web_server.listen` must be an IPv4 loopback address or the site's own mesh address, its port written without leading zeros, as `host request` requires; `web-server-listen-not-this-host` refuses anything else.
 - `mesh.subnet` and `sites.*.address` must be written in canonical form, Eg: `10.44.0.0/24` and not `10.44.0.0/024`, as `host request` carries them.
 - `mesh.subnet` larger than a /24 or overlapping 0.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16 or 224.0.0.0/3 is refused, as is a site address on its network or broadcast address, since hosts' firewalls trust the mesh.
+- `mesh.subnet` outside 10.0.0.0/8, 172.16.0.0/12 and 192.168.0.0/16 is refused, replacing the `mesh-subnet-is-not-private` warning, so another deployment's user on a shared host cannot reach the mesh.
+- `host prepare` installs `gnupg` and checks Docker's apt key against the fingerprint of Docker's release key before apt trusts it, refusing a download that holds any other key.
 - Each site's mesh file renders inside the deployment's directory, as `/srv/paisans/<token>/psns-<token>.conf`, and carries no `PostUp`: a relaying site's forwarding is the host's sysctl.
 - `apply` starts, syncs and restarts each site's mesh through its WireGuard helper, `sudo -n /usr/local/libexec/paisans/wg-psns-<token>`, which checks the mesh file before installing it in `/etc/wireguard`.
 - `doctor` advises reading a down mesh interface's journal with its WireGuard helper's `log`, which the deployment's user can run, instead of `systemctl status` and `journalctl`.
@@ -46,6 +51,8 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Fixed
 
+- Every mesh overlap check reads every routing table, so a route another VPN keeps in its own table, such as Tailscale's table 52, is refused.
+- Mesh overlap refusals in `init`, `apply`, `host prepare`, `preflight` and `doctor` show control characters in names a host printed as escapes, so none is drawn on the terminal.
 - The configuration store's daemon starts and stops with the deployment's WireGuard unit, and `host prepare` starts it only where the mesh is up, so peers can fetch from it once `apply` starts the mesh.
 - `apply --execute` starts no peer sync on a site `host prepare` has not given a store, which has nothing to sync, rather than warning on every bare host that its sync did not complete.
 - `site remove` without `--delete-data` keeps the registry entry, marked `data` kept, while data is left, so a later `--force --id ... --delete-data` finds the deployment instead of refusing.

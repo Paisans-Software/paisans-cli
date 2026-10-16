@@ -1,0 +1,1 @@
+refused: deployment directory: /srv/paisans/f2a9 exists and is not a directory of paisans-f2a9's ("drwxr-xr-x", owner 0). It is an earlier deployment run as root, which is redeployed rather than taken over: remove it with paisans site remove, or by hand once nothing in it is wanted, and admit again. Nothing was changed

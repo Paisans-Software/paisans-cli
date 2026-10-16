@@ -26,6 +26,15 @@ func Encode(r Request) []byte {
 	b.WriteString(header)
 	fmt.Fprintf(&b, "version: %d\n", r.Version)
 	fmt.Fprintf(&b, "deployment: %s\n", quote(r.Deployment))
+	fmt.Fprintf(&b, "site: %s\n", quote(r.Site))
+	if len(r.Roles) == 0 {
+		b.WriteString("roles: []\n")
+	} else {
+		b.WriteString("roles:\n")
+		for _, role := range r.Roles {
+			fmt.Fprintf(&b, "  - %s\n", quote(role))
+		}
+	}
 	fmt.Fprintf(&b, "user: %s\n", quote(r.User))
 	fmt.Fprintf(&b, "ssh_port: %d\n", r.SSHPort)
 	fmt.Fprintf(&b, "listen_port: %d\n", r.ListenPort)
@@ -73,7 +82,7 @@ func quote(s string) string {
 
 // fields is every key a request's mappings hold, by where the mapping is.
 var fields = map[string][]string{
-	"":           {"version", "deployment", "user", "ssh_port", "listen_port", "mesh_subnet", "address", "endpoint", "grants", "web_server", "operators"},
+	"":           {"version", "deployment", "site", "roles", "user", "ssh_port", "listen_port", "mesh_subnet", "address", "endpoint", "grants", "web_server", "operators"},
 	"grants":     {"watchdog", "public_ports"},
 	"web_server": {"app", "hostname", "listen"},
 	"operators":  {"name", "keys"},

@@ -41,7 +41,7 @@ type helpSection struct {
 // groupSummary is the line the first page gives a command with
 // subcommands. A command without any is listed by its own summary.
 var groupSummary = map[string]string{
-	"host":        "Prepare a host, list what is on it, or request admission.",
+	"host":        "Prepare a host or list it; request, admit or evict a deployment.",
 	"site":        "Add a site to the running deployment, or remove one.",
 	"mesh":        "Replace sites' WireGuard keys.",
 	"gateway":     "Move the gateway role to another site.",
@@ -182,6 +182,30 @@ var helpCommands = []helpCommand{
 		detail: "Write to stdout the request the host's owner admits the site from: the deployment's id, the site's user, SSH and WireGuard ports, mesh address and subnet, whether it has an endpoint, the grants its roles need, the apps handed to the owner's web server, and each operator's public keys. " +
 			"Print its digest, sixteen characters as xxxx-xxxx-xxxx-xxxx, to stderr, for the owner to compare over a channel you both trust, since the request carries the keys that will log in to their machine. " +
 			"Reaches no host; holds nothing secret.",
+	},
+	{
+		name:    "host admit",
+		summary: "Admit a deployment to this host, as its owner.",
+		usage: []string{
+			"sudo paisans host admit --request <file> [--watchdog] [--public-ports] [--data-dir <path>]\n                        [--bridge-netfilter] [--mesh-lan] [--execute]",
+			"paisans host admit --site <name> --ssh <user@host[:port]> [--config " + config.FileName + "] [the same grants]\n                   [--execute]",
+		},
+		detail: "The one root step for a deployment on a host, run by the host's owner: the deployment's own unprivileged user with its own rootless Docker, the WireGuard helper and its sudoers line, the firewall, the egress table, the grants given and the admission record. " +
+			"ufw must be installed and active. " +
+			"--watchdog and --public-ports are the owner's to give; a data site without --watchdog, or a gateway or Caddy monitor without --public-ports, stops before the host is reached. " +
+			"--execute with --request asks for the request's digest at a terminal; with --site it ends by logging in as the user with your own key. Never run by an agent unattended.",
+	},
+	{
+		name:    "host evict",
+		summary: "Remove a deployment from this host, as its owner.",
+		usage: []string{
+			"sudo paisans host evict --request <file> [--data-dir <path>] [--execute]",
+			"sudo paisans host evict --deployment <id> --user <name> [--data-dir <path>] [--execute]",
+			"paisans host evict --site <name> --ssh <user@host[:port]> [--config " + config.FileName + "] [--data-dir <path>]\n                   [--execute]",
+		},
+		detail: "Undo host admit for one deployment: its mesh, its user with its home and data, the helper, the egress table, its firewall rules, the record and the registry entry. Host-wide files and sysctls go only when no other deployment is admitted. " +
+			"--data-dir, the one admit was given, is needed only when the host holds no admission record. " +
+			"--execute asks for the user's name at a terminal. Never run by an agent unattended.",
 	},
 	{
 		name:    "site add",
@@ -425,25 +449,28 @@ const configTrust = "\n\n" +
 const executeTopic = `host prepare, host deployments, apply, prune, site add, site remove, mesh rekey,
 storage init, storage add, storage rotate-key, app admin create, app remove,
 oidc client create, secrets prune, secrets rotate, preflight, failover test,
-doctor, init, config and operator register are the only commands that reach a
-host. Each reads it to plan, and changes it only with --execute; config and
-operator register claim nothing, and their --execute only starts each site's
-configuration sync and, for publish and register, adds a version to its store;
-host deployments, preflight and init have no --execute and never change it;
-doctor's --execute and secrets prune's change no host either, editing only the
-local files, and secrets prune only reads the gateways' deployment records. With --execute, a command first claims each
-host it writes to in /var/lib/paisans/registry.json, and refuses if another
-deployment there holds this one's token, WireGuard interface or listen port, or
-a mesh subnet overlapping this one's. apply and host prepare also refuse when
-anything else on the host overlaps the mesh subnet. dns init and dns prune reach
-no host, only the DNS provider's API, and change it only with --execute; host
-request reaches no host and takes no --execute, writing only to stdout and
-stderr; site
-remove also deletes the removed site's records there. web-server show and
-web-server check change nothing: check looks at a monitor's public hostname as
-any visitor could, and with managed_by: external both read the monitor's web
-server over ssh, show always and check when a check fails. Everything else
-writes files locally and stops.
+doctor, init, config, operator register, host admit and host evict
+are the only commands that reach a host. Each reads it to plan, and changes it
+only with --execute; config and operator register claim nothing, and their
+--execute only starts each site's configuration sync and, for publish and
+register, adds a version to its store; host deployments, preflight and init have
+no --execute and never change it; doctor's --execute and secrets prune's change
+no host either, editing only the local files, and secrets prune only reads the
+gateways' deployment records. host admit and host evict reach a host as its
+owner, as root on it or through your own sudo. With --execute, a command first
+claims each host it writes to in /var/lib/paisans/registry.json, and refuses if
+another deployment there holds this one's token, WireGuard interface or listen
+port, or a mesh subnet overlapping this one's; host admit claims the host as a
+step of its plan, refusing the same, and host evict takes the claim away as its
+last. apply and host prepare also refuse when anything else on the host overlaps
+the mesh subnet. dns init and dns prune reach no host, only the DNS provider's
+API, and change it only with --execute; host request reaches no host and takes
+no --execute, writing only to stdout and stderr; site remove also deletes the
+removed site's records there. web-server show and web-server check change
+nothing: check looks at a monitor's public hostname as any visitor could, and
+with managed_by: external both read the monitor's web server over ssh, show
+always and check when a check fails. Everything else writes files locally and
+stops.
 
 Every command takes -v or --verbose. By default each step is one line; with it,
 the reasons, values, request bodies and command output behind each step show

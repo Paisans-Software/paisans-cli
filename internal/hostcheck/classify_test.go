@@ -324,6 +324,23 @@ func TestABroaderRouteIsANoteNotAConflict(t *testing.T) {
 	wantClass(t, check(t, "home-a", h), hostcheck.Conflicted)
 }
 
+// Routes are read from every table, so a VPN that keeps its routes in one
+// of its own, Tailscale's 52, is seen and named with its table. The local
+// table's own addresses and a table's throw routes hold no network.
+func TestARouteInAnotherTableConflicts(t *testing.T) {
+	h := cleanHost()
+	delete(h.answers, "ip -j route")
+	h.answers["ip -j route show table all"] = `[{"dst":"default","dev":"eth0"},{"type":"throw","dst":"10.44.0.0/16","table":"52"},{"type":"local","dst":"10.44.0.9","dev":"eth1","table":"local"}]`
+	wantClass(t, check(t, "home-a", h), hostcheck.Clean)
+
+	h.answers["ip -j route show table all"] = `[{"dst":"10.44.0.0/24","dev":"tailscale0","table":"52"}]`
+	r := check(t, "home-a", h)
+	wantClass(t, r, hostcheck.Conflicted)
+	if !strings.Contains(fmt.Sprint(r.Conflicts), "route 10.44.0.0/24 dev tailscale0 table 52") {
+		t.Errorf("the conflict does not name the table: %+v", r.Conflicts)
+	}
+}
+
 // reject refuses incoming traffic as deny does, only answering instead of
 // dropping, so a shared host denying by either is protected.
 func TestRejectByDefaultIsAFirewallUp(t *testing.T) {

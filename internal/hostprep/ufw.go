@@ -148,8 +148,10 @@ func overlaps(a addedRule, r Rule) bool {
 
 // planRules compares the rules a site derives with what ufw holds. It returns
 // the additions, which go before the default policy and enabling, and the
-// removals, which go after everything else.
-func planRules(tag string, rules []Rule, added []addedRule) (out Section, removals []Step, err error) {
+// removals, which go after everything else. by is the command planning,
+// host prepare or host admit, which its messages name.
+func planRules(tag string, rules []Rule, added []addedRule, by string) (out Section, removals []Step, err error) {
+	again := strings.TrimPrefix(by, "host ") + " again"
 	var ssh *Rule
 	for i := range rules {
 		if rules[i].SSH {
@@ -199,7 +201,10 @@ func planRules(tag string, rules []Rule, added []addedRule) (out Section, remova
 			if strings.HasPrefix(a.action, "deny") || strings.HasPrefix(a.action, "reject") {
 				// Refused, not warned: enabling the firewall with this in
 				// place shuts out the connection prepare runs over.
-				return out, nil, fmt.Errorf("firewall: `ufw %s` blocks SSH, and host prepare did not add it. Enabling the firewall with it in place would lock out the next connection; delete or change it yourself and prepare again", a.line)
+				if by == "host admit" {
+					return out, nil, fmt.Errorf("firewall: `ufw %s` blocks SSH, and %s did not add it. The operators could not log in as the deployment's user, and adding the allow would replace your rule; delete or change it yourself and %s", a.line, by, again)
+				}
+				return out, nil, fmt.Errorf("firewall: `ufw %s` blocks SSH, and %s did not add it. Enabling the firewall with it in place would lock out the next connection; delete or change it yourself and %s", a.line, by, again)
 			}
 			fallthrough
 		default:
@@ -208,8 +213,8 @@ func planRules(tag string, rules []Rule, added []addedRule) (out Section, remova
 			out.Foreign = append(out.Foreign, fmt.Sprintf("firewall: `ufw %s`", a.line))
 			out.Warnings = append(out.Warnings, Warning{
 				Hint: "firewall: " + r.String() + " is governed by another ufw rule",
-				Detail: fmt.Sprintf("firewall: %s is governed by `ufw %s`, which host prepare did not add, so it is not allowed as derived (%s). Adding the allow would replace that rule, so it is left alone; change or delete it yourself if the allow is wanted",
-					r, a.line, r.Why)})
+				Detail: fmt.Sprintf("firewall: %s is governed by `ufw %s`, which %s did not add, so it is not allowed as derived (%s). Adding the allow would replace that rule, so it is left alone; change or delete it yourself if the allow is wanted",
+					r, a.line, by, r.Why)})
 		}
 	}
 
@@ -232,7 +237,7 @@ func planRules(tag string, rules []Rule, added []addedRule) (out Section, remova
 		// takes a console. A stale SSH allow costs almost nothing; a wrong
 		// removal costs the host.
 		if ssh != nil && overlaps(a, *ssh) {
-			out.Present = append(out.Present, fmt.Sprintf("firewall: `ufw %s` kept; host prepare never removes an SSH allow", a.line))
+			out.Present = append(out.Present, fmt.Sprintf("firewall: `ufw %s` kept; %s never removes an SSH allow", a.line, by))
 			continue
 		}
 		// The same holds for the allow an earlier ssh.port was given, which
@@ -249,14 +254,14 @@ func planRules(tag string, rules []Rule, added []addedRule) (out Section, remova
 				to = strconv.Itoa(ssh.Port)
 			}
 			// A warning, not a finding: deleting it is the operator's.
-			out.Warnings = append(out.Warnings, Warning{Hint: fmt.Sprintf("firewall: old SSH allow %s kept; delete it yourself once SSH on %s works", old, to)})
+			out.Warnings = append(out.Warnings, Warning{Hint: fmt.Sprintf("firewall: old SSH allow %s kept; delete it yourself once SSH on %s works", old, to), KeptSSH: old})
 			continue
 		}
 		removals = append(removals, Step{
 			Kinds:    []string{KindFirewall},
 			Label:    "remove",
 			Title:    "remove ufw rule " + a.key,
-			Describe: fmt.Sprintf("firewall: delete `ufw %s`, which host prepare added and this site's roles and configuration no longer give", a.line),
+			Describe: fmt.Sprintf("firewall: delete `ufw %s`, which %s added and this site's roles and configuration no longer give", a.line, by),
 			Command:  "ufw delete " + a.line,
 		})
 	}

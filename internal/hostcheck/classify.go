@@ -285,8 +285,11 @@ func Classify(claims Claims, inv *Inventory) *Report {
 	// as the mesh interface's. A broader one (a provider's 10.0.0.0/8 private
 	// network) is shorter than the mesh interface's route, so the mesh still
 	// wins, and it is noted.
+	// The local table's entries are the host's own addresses, and a throw
+	// route only sends a lookup on to the next table: neither holds a
+	// network.
 	for _, route := range inv.Routes {
-		if route.Dst == "default" || route.Dev == claims.Interface || bridges[route.Dev] {
+		if route.Dst == "default" || route.Dev == claims.Interface || bridges[route.Dev] || route.Type == "local" || route.Type == "broadcast" || route.Type == "throw" {
 			continue
 		}
 		n, ok := network(route.Dst)
@@ -294,6 +297,9 @@ func Classify(claims Claims, inv *Inventory) *Report {
 			continue
 		}
 		resource := "route " + route.Dst + " dev " + route.Dev
+		if route.Table != "" && route.Table != "main" {
+			resource += " table " + route.Table
+		}
 		// A pinned network's bridge route is more specific than any broader
 		// route, as the mesh interface's is, so only one equal to it or inside it captures
 		// its traffic.

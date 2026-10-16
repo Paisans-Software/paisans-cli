@@ -696,7 +696,6 @@ func TestWatchdogModes(t *testing.T) {
 		{name: "required refuses softdog", mode: config.WatchdogRequired, probe: softdog, refuse: "has only softdog"},
 		{name: "required refuses none", mode: config.WatchdogRequired, probe: none, refuse: "has no watchdog device"},
 		{name: "softdog loads without a warning", mode: config.WatchdogSoftdog, probe: none, steps: []string{"watchdog: load softdog now", "watchdog: load softdog at every boot"}},
-		{name: "off touches nothing", mode: config.WatchdogOff, probe: none, present: "watchdog: off"},
 		{name: "systemd holds the device", mode: config.WatchdogAuto, probe: "device present\nidentity watchdog0 iTCO_wdt\nsystemd 1min\ndaemon absent\n", refuse: "RuntimeWatchdogUSec is 1min"},
 		{name: "a daemon holds the device", mode: config.WatchdogAuto, probe: "device present\nidentity watchdog0 iTCO_wdt\nsystemd 0\ndaemon running\n", refuse: "a watchdog daemon is running"},
 		{name: "contention refuses required too", mode: config.WatchdogRequired, probe: "device present\nidentity watchdog0 iTCO_wdt\nsystemd 30s\ndaemon absent\n", refuse: "RuntimeWatchdogUSec"},
@@ -729,13 +728,6 @@ func TestWatchdogModes(t *testing.T) {
 			}
 			if (len(plan.Warnings) > 0) != tc.warn {
 				t.Errorf("warnings: %v, want warning %v", plan.Warnings, tc.warn)
-			}
-			if tc.mode == config.WatchdogOff {
-				for _, c := range host.ran {
-					if strings.Contains(c, probeWatchdog) {
-						t.Error("off probed the watchdog")
-					}
-				}
 			}
 		})
 	}

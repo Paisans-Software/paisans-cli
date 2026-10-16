@@ -72,7 +72,6 @@ func TestRulesFire(t *testing.T) {
 		{"floating-image-tag", "floating-image-tag", validate.Refuse},
 		{"cluster-placement-without-a-cluster", "cluster-placement-without-a-cluster", validate.Refuse},
 		{"even-etcd-voters", "even-etcd-voters", validate.Warn},
-		{"mesh-subnet-is-not-private", "mesh-subnet-is-not-private", validate.Warn},
 		{"pinned-app-on-witness", "pinned-app-on-witness", validate.Warn},
 		{"gateway-on-data-site", "gateway-on-data-site", validate.Warn},
 		{"pocket-id-file-backend", "pocket-id-file-backend", validate.Warn},
@@ -81,7 +80,6 @@ func TestRulesFire(t *testing.T) {
 		{"mbin-rabbitmq-across-sites", "mbin-rabbitmq-across-sites", validate.Warn},
 		{"pocket-id-standby-marker-unknown", "pocket-id-standby-marker-unknown", validate.Warn},
 		{"image-for-absent-postgres", "image-for-absent-postgres", validate.Warn},
-		{"watchdog-off-on-data-site", "watchdog-off-on-data-site", validate.Warn},
 		{"acme-provider-needs-an-image", "acme-provider-needs-an-image", validate.Refuse},
 		{"acme-image-is-stock-caddy", "acme-image-is-stock-caddy", validate.Refuse},
 		{"acme-image-is-latest", "acme-image-is-latest", validate.Refuse},
@@ -835,30 +833,6 @@ func TestACMEImageMayMoveWithinAMajorVersion(t *testing.T) {
 		if !refusedFor(validate.Check(cfg), "acme-image-is-latest", "acme.image") {
 			t.Errorf("%s was not refused, and it crosses Caddy major versions", image)
 		}
-	}
-}
-
-// The watchdog warning names the mechanism that is actually rendered. Spilo
-// strips every PATRONI_* variable before it starts Patroni, so the mode is set
-// in SPILO_CONFIGURATION, and a warning that sent the operator looking for
-// PATRONI_WATCHDOG_MODE in patroni.env would send them looking for nothing.
-func TestWatchdogWarningNamesSpiloConfiguration(t *testing.T) {
-	result := validate.Check(load(t, "watchdog-off-on-data-site"))
-	found := false
-	for _, f := range result.Findings {
-		if f.Rule != "watchdog-off-on-data-site" {
-			continue
-		}
-		found = true
-		if !strings.Contains(f.Message, "SPILO_CONFIGURATION") {
-			t.Errorf("the warning does not name SPILO_CONFIGURATION: %s", f.Message)
-		}
-		if strings.Contains(f.Message, "PATRONI_WATCHDOG_MODE") {
-			t.Errorf("the warning names PATRONI_WATCHDOG_MODE, which Spilo never passes to Patroni: %s", f.Message)
-		}
-	}
-	if !found {
-		t.Fatalf("the watchdog warning did not fire: %v", result.Findings)
 	}
 }
 

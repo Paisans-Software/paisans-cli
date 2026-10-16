@@ -15,7 +15,8 @@
 #
 # The verbs are the only arguments it takes:
 #   put           read a conf on stdin, check it, install it as {{.Conf}}, 600,
-#                 in a directory only root may write
+#                 with this deployment's FwMark added, in a directory only
+#                 root may write
 #   up            systemctl enable --now {{.Unit}}
 #   restart       systemctl restart {{.Unit}}
 #   sync          wg-quick strip the installed conf, then wg syncconf
@@ -43,6 +44,10 @@ net='{{.Network}}'
 prefix='{{.Prefix}}'
 # The uid that must own the conf directory: root on a host.
 owner='{{.Owner}}'
+# The mark put adds to every conf it installs: the egress table drops what
+# a socket with it sends to this host, loopback, link-local, multicast and
+# the private ranges, after wg has resolved each Endpoint as root.
+fwmark='{{.FwMark}}'
 # The largest conf put reads. A mesh of a hundred sites is under 20 KiB.
 max=65536
 
@@ -60,7 +65,7 @@ refuse() {
 # prints nothing and exits 0. Keys and section names are matched exactly, as
 # the renderer writes them; a hook key is refused in any section, in any case
 # and with any whitespace around it. It is POSIX awk only, with no regular
-# expression intervals, for mawk, gawk and BSD awk alike.
+# expression intervals, for mawk, gawk, BSD awk and busybox awk alike, so no ^ operator.
 check() {
 	awk -v port="$port" -v net="$net" -v prefix="$prefix" '
 	function why(msg) { if (!failed) reason = msg; failed = 1 }
@@ -128,8 +133,14 @@ check() {
 	# inside is whether the parsed cv/cp lies inside the mesh subnet.
 	function inside(    d) {
 		if (cp < prefix) return 0
-		d = 2 ^ (32 - prefix)
+		d = pow2(32 - prefix)
 		return int(cv / d) == int(netv / d)
+	}
+	# pow2 is 2 to the n, by multiplying: busybox awk built without math
+	# support rejects the ^ operator.
+	function pow2(n,    r) {
+		for (r = 1; n > 0; n--) r *= 2
+		return r
 	}
 	function key(s) { return length(s) == 44 && s ~ /^[A-Za-z0-9+\/]+=$/ }
 	function num(s, lo, hi) { return s ~ /^(0|[1-9][0-9]*)$/ && length(s) <= 5 && s + 0 >= lo && s + 0 <= hi }
@@ -165,6 +176,7 @@ check() {
 		sub(/^[ \t]+/, "", v)
 		lk = tolower(k)
 		if (lk == "preup" || lk == "postup" || lk == "predown" || lk == "postdown") no(k " runs a command as root, and no conf may carry one")
+		if (lk == "fwmark") no(k " is set by this helper, never by the conf")
 		if (section == "") no(k " before any section")
 		if (seen[peers, k]++) no("a second " k " in one section")
 		if (section == "Interface") {
@@ -172,7 +184,7 @@ check() {
 				if (!cidr(v) || cp != prefix || !inside()) no("Address " v " is not one address in " net "/" prefix)
 				# The network names the subnet and the broadcast reaches every
 				# host on it, so no site holds either, as validate says.
-				if (cv == netv || cv == netv + 2 ^ (32 - prefix) - 1) no("Address " v " is the network or broadcast address of " net "/" prefix)
+				if (cv == netv || cv == netv + pow2(32 - prefix) - 1) no("Address " v " is the network or broadcast address of " net "/" prefix)
 				address = 1
 			} else if (k == "PrivateKey") {
 				if (!key(v)) no("PrivateKey is not a WireGuard key")
@@ -276,8 +288,14 @@ put() {
 	if ! reason=$(check < "$tmp"); then
 		refuse "$reason"
 	fi
-	chmod 600 "$tmp"
-	mv -f "$tmp" "$conf"
+	marked=$(mktemp "$dir/.$iface.conf.XXXXXX")
+	trap 'rm -f "$tmp" "$marked"' EXIT
+	# The mark on the line after [Interface], which check has seen exactly
+	# once, before any [Peer].
+	awk -v mark="$fwmark" '{ print } !done && /^[ \t]*\[Interface\][ \t]*$/ { print "FwMark = " mark; done = 1 }' "$tmp" > "$marked"
+	chmod 600 "$marked"
+	mv -f "$marked" "$conf"
+	rm -f "$tmp"
 	trap - EXIT
 }
 

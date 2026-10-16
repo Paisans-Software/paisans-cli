@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/config"
 )
 
@@ -264,6 +266,35 @@ func TestClaimMergeAgreesWithMerge(t *testing.T) {
 		t.Error("Merge took what the awk merge refused")
 	}
 
+	// The same deployment at another mesh address is another site of it
+	// when the claim names no site; at the same address with no site
+	// named, it is a refresh, and so is the same site at a new address.
+	at := func(site, address string) Entry {
+		e := entry("f2a9", "example.org", site)
+		e.Address = address
+		return e
+	}
+	addressed, err := Encode(Registry{Version: Version, Deployments: map[string]Entry{ours: at("home-a", "10.44.0.2")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, code = runMerge(t, string(addressed), ours, at("", "10.44.0.1"))
+	if code != 3 || stdout != "" || !strings.Contains(stderr, conflictMarker) {
+		t.Errorf("a second address of one deployment was not refused: exit %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	if _, err := Merge(Registry{Version: Version, Deployments: map[string]Entry{ours: at("home-a", "10.44.0.2")}}, ours, at("", "10.44.0.1")); err == nil {
+		t.Error("Merge took a second address the awk merge refused")
+	}
+	if _, stderr, code := runMerge(t, string(addressed), ours, at("", "10.44.0.2")); code != 0 {
+		t.Errorf("the same address with no site named was refused: exit %d, %s", code, stderr)
+	}
+	if _, stderr, code := runMerge(t, string(addressed), ours, at("home-a", "10.44.0.1")); code != 0 {
+		t.Errorf("the same site at a new address was refused: exit %d, %s", code, stderr)
+	}
+	if _, err := Merge(Registry{Version: Version, Deployments: map[string]Entry{ours: at("home-a", "10.44.0.2")}}, ours, at("home-a", "10.44.0.1")); err != nil {
+		t.Errorf("Merge refused the same site at a new address: %v", err)
+	}
+
 	if _, _, code := runMerge(t, "{\"something\":\"else\"}\n", ours, entry("f2a9", "example.org", "home-a")); code != 4 {
 		t.Errorf("a registry in another layout exited %d, want 4", code)
 	}
@@ -384,7 +415,7 @@ func TestRoleConflicts(t *testing.T) {
 	for _, tc := range []struct {
 		name, roles, clash, advice string
 	}{
-		{"a second gateway", "gateway", "the gateway role", "Use another host for one of the gateways"},
+		{"a second gateway", "gateway", "the gateway role", "ports 80 and 443 to one deployment"},
 		{"a second data site", "apps,data", "the data role", "Use another host for one of the data sites"},
 		{"both", "data,gateway", "the data role", "Use another host for one of the data sites"},
 	} {
@@ -605,5 +636,40 @@ func TestKeptCaddyEntry(t *testing.T) {
 	}
 	if strings.Contains(Describe(ours, base.Deployments[ours]), "kept") {
 		t.Errorf("Describe of an entry with nothing kept = %s", Describe(ours, base.Deployments[ours]))
+	}
+}
+
+// A claim from a request carries what the request does: token, root,
+// interface, port, subnet, address, the site and its roles. The public
+// ports are one deployment's per host, so a request granted them claims
+// the gateway role whatever its roles, and a second deployment holding
+// 80 and 443 is refused as a second gateway is.
+func TestForRequest(t *testing.T) {
+	now := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+	req := admission.Request{Version: 1, Deployment: ours, Site: "home-a", Roles: []string{"apps", "data", "gateway"}, User: "paisans-f2a9", SSHPort: 22, ListenPort: 51820,
+		MeshSubnet: "10.44.0.0/24", Address: "10.44.0.1", Grants: admission.Grants{Watchdog: true, PublicPorts: true}}
+	id, e := ForRequest(req, now)
+	want := Entry{Token: "f2a9", Root: "/srv/paisans/f2a9", Site: "home-a", ClaimedAt: "2026-10-15T12:00:00Z", Interface: "psns-f2a9", ListenPort: 51820,
+		Subnet: "10.44.0.0/24", Address: "10.44.0.1", Roles: "apps,data,gateway"}
+	if id != ours || e != want {
+		t.Errorf("ForRequest = %s %+v", id, e)
+	}
+
+	monitor := admission.Request{Version: 1, Deployment: theirs, Site: "watch", Roles: []string{"monitor"}, User: "paisans-f2a9", SSHPort: 22,
+		MeshSubnet: "10.45.0.0/24", Address: "10.45.0.5", Grants: admission.Grants{PublicPorts: true}}
+	_, m := ForRequest(monitor, now)
+	if m.Roles != "gateway,monitor" {
+		t.Errorf("a monitor granted the public ports claims roles %q", m.Roles)
+	}
+	gw := entry("0c1d", "example.net", "edge")
+	gw.Roles = "gateway"
+	c := Conflicts(Registry{Version: Version, Deployments: map[string]Entry{other: gw}}, theirs, m)
+	if len(c) != 1 || !strings.Contains(c[0].Error(), "the gateway role") {
+		t.Errorf("a second holder of 80 and 443 was not refused: %v", c)
+	}
+
+	monitor.Grants.PublicPorts = false
+	if _, m := ForRequest(monitor, now); m.Roles != "monitor" {
+		t.Errorf("a monitor without the public ports claims roles %q", m.Roles)
 	}
 }

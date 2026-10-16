@@ -1,0 +1,1 @@
+refused: egress: --mesh-lan: eth0 is on 10.0.0.0/8, which is not a private network of a /16 or narrower, so there is no LAN of yours for the mesh to dial. Drop --mesh-lan. Nothing was changed

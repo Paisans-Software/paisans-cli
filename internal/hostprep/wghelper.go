@@ -12,8 +12,8 @@ import (
 
 // wgHelperData is what snippets/wg-helper.sh.tmpl is rendered with.
 type wgHelperData struct {
-	Interface, Path, Conf, Unit, Dir, Network string
-	ListenPort, Prefix, Owner                 int
+	Interface, Path, Conf, Unit, Dir, Network, FwMark string
+	ListenPort, Prefix, Owner                         int
 }
 
 // WGHelperScript is the WireGuard helper host admit installs for d at
@@ -22,7 +22,8 @@ type wgHelperData struct {
 // restart, sync, show and read the journal of d's interface. The interface,
 // the listen port the owner admits (0 for a site nothing dials) and the mesh
 // subnet are built in, so nothing the deployment's user passes it can widen
-// them.
+// them. put adds d.FwMark to every conf it installs and refuses one that sets
+// FwMark itself, so the egress table's mark chain sees the mesh's own packets.
 func WGHelperScript(d deployment.Deployment, listenPort int, subnet string) (string, error) {
 	return wgHelperScript(path.Dir(d.WireGuardInstalled()), 0, d, listenPort, subnet)
 }
@@ -51,6 +52,10 @@ func wgHelperScript(dir string, owner int, d deployment.Deployment, listenPort i
 	if !path.IsAbs(dir) || strings.ContainsAny(dir, "'\n") {
 		return "", fmt.Errorf("the WireGuard helper for %s: %q cannot be its conf directory", iface, dir)
 	}
+	mark, err := d.FwMark()
+	if err != nil {
+		return "", fmt.Errorf("the WireGuard helper for %s: %w", iface, err)
+	}
 	return snippet("snippets/wg-helper.sh.tmpl", wgHelperData{
 		Interface:  iface,
 		Path:       helper,
@@ -61,5 +66,6 @@ func wgHelperScript(dir string, owner int, d deployment.Deployment, listenPort i
 		ListenPort: listenPort,
 		Prefix:     prefix,
 		Owner:      owner,
+		FwMark:     fmt.Sprintf("%#08x", mark),
 	})
 }

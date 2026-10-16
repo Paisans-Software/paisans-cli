@@ -15,7 +15,7 @@ import (
 // One golden request per role mix in the fixture: each is the file host
 // request prints, byte for byte, and each reads back as itself.
 func TestGoldenRequests(t *testing.T) {
-	for _, site := range []string{"home-a", "home-b", "vm", "status", "watch", "store"} {
+	for _, site := range []string{"home-a", "home-b", "vm", "status", "watch", "store", "host"} {
 		t.Run(site, func(t *testing.T) {
 			got := admission.Encode(build(t, site))
 			path := filepath.Join("testdata", "requests", site+".admit")
@@ -72,7 +72,10 @@ func TestDigestIsStable(t *testing.T) {
 //	    'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567',
 //	    '0123456789abcdefghjkmnpqrstvwxyz'))
 //
-// then cut into groups of four. The second input is testdata/requests/home-a.admit.
+// then cut into groups of four, run as python3 -I with the file's bytes read
+// in binary mode. The second input is testdata/requests/home-a.admit, and its
+// vector is recomputed so whenever that file changes (last for the site and
+// roles fields).
 func TestDigestKnownVectors(t *testing.T) {
 	golden, err := os.ReadFile(filepath.Join("testdata", "requests", "home-a.admit"))
 	if err != nil {
@@ -84,7 +87,7 @@ func TestDigestKnownVectors(t *testing.T) {
 		want string
 	}{
 		{"nothing", nil, "werc-8gmr-zge1-96qv"},
-		{"home-a.admit", golden, "p7xh-w1a8-2q08-0a17"},
+		{"home-a.admit", golden, "r7n7-wmtp-0jpj-b8je"},
 	} {
 		if got := admission.Digest(c.data); got != c.want {
 			t.Errorf("%s: digest %s, want %s", c.name, got, c.want)
@@ -146,6 +149,8 @@ func TestParseDigestRefuses(t *testing.T) {
 var mutations = map[string]func(*admission.Request){
 	"version":             func(r *admission.Request) { r.Version = 2 },
 	"deployment":          func(r *admission.Request) { r.Deployment = "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e02" },
+	"site":                func(r *admission.Request) { r.Site = "home-b" },
+	"roles":               func(r *admission.Request) { r.Roles = []string{"data", "gateway"} },
 	"user":                func(r *admission.Request) { r.User = "community" },
 	"ssh_port":            func(r *admission.Request) { r.SSHPort = 2222 },
 	"listen_port":         func(r *admission.Request) { r.ListenPort = 51821 },
@@ -213,6 +218,15 @@ func TestParseRefuses(t *testing.T) {
 		{"version 0", strings.Replace(g, "version: 1", "version: 0", 1), `version: "0", and this paisans reads version 1`},
 		{"no version", strings.Replace(g, "version: 1\n", "", 1), "version: missing"},
 		{"a missing field", strings.Replace(g, "ssh_port: 22\n", "", 1), "ssh_port: missing"},
+		{"no site", strings.Replace(g, "site: \"home-a\"\n", "", 1), "site: missing"},
+		{"no roles", strings.Replace(g, "roles:\n  - \"apps\"\n  - \"data\"\n  - \"gateway\"\n", "", 1), "roles: missing"},
+		{"no roles, with grants", strings.Replace(g, "roles:\n  - \"apps\"\n  - \"data\"\n  - \"gateway\"\n", "roles: []\n", 1), "grants: watchdog true and public_ports true, and roles [] need watchdog false and public_ports false"},
+		{"an unknown role", strings.Replace(g, `  - "apps"`, `  - "admin"`, 1), `roles[0]: "admin" is not a site role`},
+		{"a role twice", strings.Replace(g, `  - "apps"`, `  - "data"`, 1), `roles[1]: "data" is listed twice`},
+		{"roles unsorted", strings.Replace(g, "  - \"apps\"\n  - \"data\"\n", "  - \"data\"\n  - \"apps\"\n", 1), `roles[1]: "apps" comes after "data"`},
+		{"a site paisans refuses", strings.Replace(g, `site: "home-a"`, `site: "Home_A"`, 1), `site: "Home_A" is not a site name`},
+		{"roles as text", strings.Replace(g, "roles:\n  - \"apps\"\n  - \"data\"\n  - \"gateway\"\n", "roles: \"apps\"\n", 1), "the wrong kind of value"},
+		{"grants the roles do not need", strings.NewReplacer("roles:\n  - \"apps\"\n  - \"data\"\n  - \"gateway\"\n", "roles:\n  - \"apps\"\n").Replace(g), "grants: watchdog true and public_ports true, and roles [\"apps\"] need watchdog false and public_ports false"},
 		{"a missing grant", strings.Replace(g, "  public_ports: true\n", "", 1), "grants.public_ports: missing"},
 		{"a missing operator field", strings.Replace(g, "  - name: \"alice\"\n    keys:", "  - keys:", 1), "operators.name: missing"},
 		{"an unknown field", strings.Replace(g, "endpoint: true\n", "endpoint: true\nsudo: true\n", 1), `"sudo": not a field of a request`},

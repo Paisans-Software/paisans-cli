@@ -1,0 +1,1 @@
+refused: watchdog: another deployment holds this host's watchdog (/etc/udev/rules.d/60-paisans-0c0d-watchdog.rules), and only one Patroni can open the device. Admit this data site on another host, or evict that deployment first. Nothing was changed

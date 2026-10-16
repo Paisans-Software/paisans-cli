@@ -48,8 +48,8 @@ func TestVersionParsing(t *testing.T) {
 		{"5.4.0", "2.24.0", true},
 		{"", "2.24.0", false},
 	} {
-		if got := atLeast(c.v, c.min); got != c.want {
-			t.Errorf("atLeast(%q, %q) = %v", c.v, c.min, got)
+		if got := AtLeast(c.v, c.min); got != c.want {
+			t.Errorf("AtLeast(%q, %q) = %v", c.v, c.min, got)
 		}
 	}
 }

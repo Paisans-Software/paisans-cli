@@ -644,12 +644,110 @@ paisans host request --site home-a > home-a.admit   # the digest is on stderr
   itself be refused.
 * **`--execute`:** not taken. It writes nothing but stdout.
 * **The request:** YAML holding nothing secret: the deployment's id, the
-  site's user, its SSH and WireGuard ports (`listen_port: 0` when no site
-  dials it), its mesh address and the subnet, whether it has an endpoint,
-  the grants its roles need (`watchdog` for a data site, `public_ports` for
-  a gateway or a monitor running the toolkit's Caddy), the apps a monitor
-  behind the owner's web server hands it, and each operator's public keys,
-  without their comments. Two runs print the same bytes, so the same digest.
+  site's name and its roles, sorted, the site's user, its SSH and WireGuard
+  ports (`listen_port: 0` when no site dials it), its mesh address and the
+  subnet, whether it has an endpoint, the grants its roles need (`watchdog`
+  for a data site, `public_ports` for a gateway or a monitor running the
+  toolkit's Caddy), the apps a monitor behind the owner's web server hands
+  it, and each operator's public keys, without their comments. Two runs
+  print the same bytes, so the same digest.
+
+See *A host's owner admits a site from a request* in `README.md`.
+
+### `paisans host admit`
+
+The host's owner admits one site of a deployment to their machine: the one
+step that runs as root. It makes the deployment's own unprivileged user, with
+its own rootless Docker, and everything that user cannot do itself.
+
+```sh
+sudo paisans host admit --request home-a.admit    # shows what it would do
+sudo paisans host admit --request home-a.admit --watchdog --public-ports --execute
+paisans host admit --site home-a --ssh owner@home-a.example.org --execute   # from a workstation
+```
+
+* **Alone:** always, by the host's owner, and never by an agent unattended:
+  it is the owner's root step on their own machine.
+* **Flags:**
+  * from a request: `--request <file>`, on the host, as root;
+  * from the configuration: `--site <name>` with `--ssh <your login>`, from
+    a workstation, and `--config`;
+  * either way: the grants `--watchdog` and `--public-ports`;
+    `--data-dir <path>`, `--bridge-netfilter`, `--mesh-lan`; `--execute`.
+* **Hosts:** the one it runs on, or the one `--ssh` names, through sudo. The
+  host needs ufw installed and active: admit never enables it, and refuses
+  before making any change otherwise. A data site without `--watchdog`, or a
+  gateway or Caddy monitor without `--public-ports`, stops it before the
+  host is reached; so does a grant the site does not need. Ports 80 and 443
+  belong to one deployment per host, and `--public-ports` is refused while
+  anything else holds either of them, over TCP or UDP.
+* **`--execute`:** makes the changes the plan shows, which it always prints in
+  full. With `--request` it first asks for the request's digest at a
+  terminal. With `--site` it ends by logging in as the deployment's user with
+  the operator's own key, and writes `ssh.user` back into the configuration
+  when the declaration leaves it out.
+* **What it changes:** Docker from Docker's repository where absent (an
+  Engine older than 29.5 is refused, never upgraded); the user, with linger
+  and its rootless daemon; the cgroup delegation drop-in; the egress table;
+  `/srv/paisans/<token>`; `/etc/wireguard`; the WireGuard helper and its
+  sudoers line; ufw rules tagged `paisans-<token>:`; with `--watchdog`, the
+  device for the user; with `--public-ports`, `ip_unprivileged_port_start` of
+  80; for a site with an endpoint, forwarding; the admission record; the
+  registry claim; the operators' keys in the user's `authorized_keys`.
+  `/etc/paisans` is root's, at mode 755.
+* **The egress table:** fences the deployment's user off the owner's machine.
+  It allows DNS to the host's resolvers, then drops loopback and the private
+  ranges, with their NAT64 translations, the host's own addresses,
+  broadcast and multicast, and the host's on-link IPv6 prefixes, which admit
+  reads at admit time: if the LAN's prefix changes, run admit again to refresh
+  them. The mesh stays reachable. On a gateway, a site granted
+  `--public-ports` or whose `web_server` is external, TCP 80 and 443 on the
+  host's own addresses are allowed. TCP replies to connections the
+  deployment did not open are allowed, so the owner's web server and
+  visitors reach its listeners; UDP replies only from 443, with
+  `--public-ports`, for HTTP/3. `--mesh-lan` lets the mesh dial the host's
+  own LAN.
+* **Known limits:** an owner service bound to all interfaces (`0.0.0.0` or
+  `::`) is reachable on the host's mesh address, by the deployment and by its
+  other sites. Owners should bind admin services to `127.0.0.1` or to their
+  LAN address. And the deployment's user may listen on any address and port
+  no service of the owner's holds, so an owner's client may reach the
+  deployment instead of a service that is down, or that is bound to the
+  other family (`127.0.0.1` while the client tries `[::1]`).
+
+### `paisans host evict`
+
+Undoes `host admit` for one deployment, leaving every other deployment and the
+owner's own services as they were.
+
+```sh
+sudo paisans host evict --request home-a.admit --execute
+sudo paisans host evict --deployment <id> --user paisans-1a2b --execute   # without the request
+paisans host evict --site home-a --ssh owner@home-a.example.org --execute
+```
+
+* **Alone:** always, by the host's owner, and never by an agent unattended:
+  it deletes the deployment's user and data as root.
+* **Flags:** `--request <file>`, or `--deployment <id> --user <name>` (both on
+  the host, as root), or `--site <name> --ssh <your login>` with `--config`;
+  `--data-dir <path>`, the one admit was given, needed only when the host
+  holds no admission record; `--execute`.
+* **Hosts:** the one it runs on, or the one `--ssh` names, through sudo.
+  With `--site`, the user evicted is the site's `ssh.user`, the login as the
+  deployment's user, defaulting to `paisans-<token>`. Evict deletes a user
+  only when it is the deployment's: the admission record's, or, with no
+  record, `paisans-<token>`; any other account is refused.
+* **`--execute`:** asks for the user's name at a terminal, then removes the
+  mesh, the user with its home and Docker data, the deployment's directory,
+  the helper and sudoers line, the egress table and its firewall rules except
+  the SSH allow, the record and the registry entry; host-wide files and
+  sysctls only when no other deployment is admitted or claims the host,
+  each sysctl restored to what it was. The SSH allow may be the rule the
+  owner's own login arrives by, so it is kept and evict warns of it: the
+  owner deletes it themselves once nothing else needs it. Every process of
+  the user, or of its subordinate range, is killed first. A user the owner
+  deleted by hand can leave an empty
+  `/etc/systemd/system/user@<uid>.service.requires` behind.
 
 See *A host's owner admits a site from a request* in `README.md`.
 

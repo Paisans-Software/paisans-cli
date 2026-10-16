@@ -1,0 +1,429 @@
+admit site home-b of f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01 as community on fake (ubuntu 24.04)
+
+step 1: claim the host
+  registry: record deployment f2a9 in /var/lib/paisans/registry.json, so no other deployment here takes its token, directory, interface, port, subnet or roles (data)
+  run:
+    $ set -e; umask 077; mkdir -p /var/lib/paisans; chmod 711 /var/lib/paisans; exec 9>>/var/lib/paisans/registry.lock; flock -w 60 9 || { echo 'paisans: another command holds /var/lib/paisans/registry.lock'; exit 1; }; tmp=$(mktemp /var/lib/paisans/.registry.XXXXXX); trap 'rm -f "$tmp"' EXIT; src=/var/lib/paisans/registry.json; [ -f "$src" ] || src=/dev/null; awk '-v' 'id=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01' '-v' 'token=f2a9' '-v' 'root=/srv/paisans/f2a9' '-v' 'iface=psns-f2a9' '-v' 'port=' '-v' 'subnet=10.44.0.0/24' '-v' 'roles=data' '-v' 'site=home-b' '-v' 'address=10.44.0.2' '-v' 'entry="f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01":{"token":"f2a9","root":"/srv/paisans/f2a9","domain":"","site":"home-b","claimed_at":"2026-10-15T12:00:00Z","interface":"psns-f2a9","subnet":"10.44.0.0/24","address":"10.44.0.2","roles":"data"}' '-v' 'header={"version":1,"deployments":{' '-v' 'footer=}}' '-v' 'marker=paisans-registry-conflict ' '-v' 'unreadable=paisans-registry-unreadable' '
+    $ function str(line, name,   key, i, rest) {
+    $ 	key = "\"" name "\":\""
+    $ 	i = index(line, key)
+    $ 	if (!i) return ""
+    $ 	rest = substr(line, i + length(key))
+    $ 	return substr(rest, 1, index(rest, "\"") - 1)
+    $ }
+    $ function num(line, name,   key, i, rest) {
+    $ 	key = "\"" name "\":"
+    $ 	i = index(line, key)
+    $ 	if (!i) return ""
+    $ 	rest = substr(line, i + length(key))
+    $ 	if (!match(rest, /^[0-9]+/)) return ""
+    $ 	return substr(rest, 1, RLENGTH)
+    $ }
+    $ function hasrole(list, r) {
+    $ 	return list != "" && index("," list ",", "," r ",") > 0
+    $ }
+    $ function ipnum(a,   p) {
+    $ 	split(a, p, ".")
+    $ 	return ((p[1] * 256 + p[2]) * 256 + p[3]) * 256 + p[4]
+    $ }
+    $ function overlaps(a, b,   pa, pb, la, lb, sa, sb) {
+    $ 	if (a == "" || b == "") return 0
+    $ 	split(a, pa, "/"); split(b, pb, "/")
+    $ 	la = 2 ^ (32 - pa[2]); lb = 2 ^ (32 - pb[2])
+    $ 	sa = ipnum(pa[1]); sa -= sa % la
+    $ 	sb = ipnum(pb[1]); sb -= sb % lb
+    $ 	return sa < sb + lb && sb < sa + la
+    $ }
+    $ NR == 1 { if ($0 != header) bad = 1; next }
+    $ done { if ($0 != "") bad = 1; next }
+    $ $0 == footer { done = 1; next }
+    $ {
+    $ 	line = $0
+    $ 	sub(/,$/, "", line)
+    $ 	if (line !~ /^"[^"]+":\{.*\}$/) { bad = 1; next }
+    $ 	key = substr(line, 2, index(line, "\":") - 2)
+    $ 	if (key == id) {
+    $ 		s = str(line, "site"); a = str(line, "address")
+    $ 		if ((s != "" && site != "") ? (s != site) : (a != "" && address != "" && a != address)) {
+    $ 			print marker line > "/dev/stderr"
+    $ 			conflict = 1
+    $ 		}
+    $ 		next
+    $ 	}
+    $ 	if (index(line, "\"token\":\"" token "\"") || index(line, "\"root\":\"" root "\"") ||
+    $ 		str(line, "interface") == iface ||
+    $ 		(port != "" && port != "0" && num(line, "listen_port") == port) ||
+    $ 		(subnet != "" && overlaps(subnet, str(line, "subnet"))) ||
+    $ 		(hasrole(roles, "gateway") && hasrole(str(line, "roles"), "gateway")) ||
+    $ 		(hasrole(roles, "data") && hasrole(str(line, "roles"), "data"))) {
+    $ 		print marker line > "/dev/stderr"
+    $ 		conflict = 1
+    $ 	}
+    $ 	kept[++n] = line
+    $ }
+    $ END {
+    $ 	if (NR > 0 && !done) bad = 1
+    $ 	if (bad) { print unreadable > "/dev/stderr"; exit 4 }
+    $ 	if (conflict) exit 3
+    $ 	print header
+    $ 	for (i = 1; i <= n; i++) print kept[i] ","
+    $ 	print entry
+    $ 	print footer
+    $ }
+    $ ' "$src" > "$tmp"; chmod 600 "$tmp"; mv "$tmp" /var/lib/paisans/registry.json
+
+step 2: create /etc/paisans
+  record: root's, mode 755: every deployment's user reads its own record, none can write one
+  run:
+    $ install -d -m 755 -o root -g root /etc/paisans
+
+step 3: start community's manager after the mesh
+  user: order user@1002.service after wg-quick@psns-f2a9 at boot, so a container that publishes on the mesh address finds it; a manager running now is not restarted, and takes it at its next start. Until the mesh's conf is written, a start of the manager leaves wg-quick@psns-f2a9 failed, without stopping the manager
+  write /etc/systemd/system/user@1002.service.d/paisans-mesh.conf mode 0644:
+    | # Written by paisans host admit for deployment f2a9; paisans host evict
+    | # removes it. The user's manager, its Docker daemon and its containers
+    | # start after the mesh at boot.
+    | [Unit]
+    | Wants=wg-quick@psns-f2a9.service
+    | After=wg-quick@psns-f2a9.service
+  run:
+    $ systemctl daemon-reload
+
+step 4: delegate cgroups to users
+  delegation: let every user's manager delegate cpu cpuset io memory pids, for compose's limits; community's manager is running, and takes it at its next start
+  write /etc/systemd/system/user@.service.d/delegate.conf mode 0644:
+    | # Written by paisans host admit. Shared by every admitted deployment;
+    | # paisans host evict removes it with the last of them.
+    | [Service]
+    | Delegate=cpu cpuset io memory pids
+  run:
+    $ systemctl daemon-reload
+
+step 5: write the egress table
+  egress: keep community, its containers and its mesh off this host's loopback and your network (/etc/paisans/egress.f2a9.nft, checked by nft before it replaces the one there)
+  write /etc/paisans/egress.f2a9.nft.new mode 0644:
+    | # Written by paisans host admit for paisans-f2a9. Keeps the
+    | # deployment's user, its containers and its mesh off this host's loopback
+    | # and the owner's network. paisans host evict removes it.
+    | table inet paisans_f2a9
+    | delete table inet paisans_f2a9
+    | table inet paisans_f2a9 {
+    | 	# What the user and its containers send: a container's users map into
+    | 	# the user's subordinate range, so the UID alone would miss them.
+    | 	chain output {
+    | 		type filter hook output priority 0; policy accept;
+    | 		# Replies to flows someone else opened pass where the deployment can
+    | 		# be the server: the host side of each port it publishes runs as its
+    | 		# user, and its answers to a visitor on loopback, the LAN or this
+    | 		# host must pass. TCP on any port, since a TCP reply reaches only
+    | 		# its own socket's peer, a client that connected to the user's
+    | 		# socket. A known limit: an owner's client can reach the user while
+    | 		# the service it means is down or bound to the other family alone
+    | 		# (127.0.0.1 and not [::1]), since the user may listen on the
+    | 		# address that service left free. UDP only from 443 with the public
+    | 		# ports grant, HTTP/3: admit found no other process holding 443,
+    | 		# and the grant is one deployment's per host. Elsewhere a user
+    | 		# sharing an owner's UDP port through SO_REUSEADDR could answer the
+    | 		# owner's own clients, and an owner's web server may hold UDP 443.
+    | 		# The mesh's UDP passes by its accept below.
+    | 		ct direction reply ct mark and 0x08000000 == 0 meta l4proto tcp accept
+    | 		# Every flow the user opens is marked before any accept or drop, so
+    | 		# a flow it opened under an accept below never carries a "reply".
+    | 		# Bit 27 of the ct mark: clear of Tailscale's connmark mask
+    | 		# 0xff0000, of the mesh's packet mark 0x5053<token>, whose hex digit
+    | 		# for bits 24-27 is always 0, and of kube-proxy's and Docker's low
+    | 		# bits (0x4000, 0x8000). A host rule that copies a packet mark over
+    | 		# the whole ct mark (CONNMARK save with no mask) clears it. Each
+    | 		# deployment's table sets the same bit, which only narrows accepts.
+    | 		meta skuid { 1002, 231072-296607 } ct direction original ct mark set ct mark or 0x08000000
+    | 		meta skuid { 1002, 231072-296607 } ip daddr 10.44.0.0/24 accept
+    | 		meta skuid { 1002, 231072-296607 } ip daddr { 127.0.0.53 } meta l4proto { tcp, udp } th dport 53 accept
+    | 		meta skuid { 1002, 231072-296607 } ip daddr { 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 } drop
+    | 		meta skuid { 1002, 231072-296607 } ip6 daddr { ::1, fc00::/7, fe80::/10 } drop
+    | 		# NAT64 reaches IPv4 through IPv6, so the same ranges as the
+    | 		# well-known prefix writes them, and the local-use prefix whole. The
+    | 		# well-known prefix's public translations stay: an IPv6-only host
+    | 		# reaches the IPv4 internet only through them.
+    | 		meta skuid { 1002, 231072-296607 } ip6 daddr { 64:ff9b::7f00:0/104, 64:ff9b::a00:0/104, 64:ff9b::ac10:0/108, 64:ff9b::c0a8:0/112, 64:ff9b::a9fe:0/112, 64:ff9b::6440:0/106, 64:ff9b:1::/48 } drop
+    | 		# The host's own addresses, public ones too, and its broadcast and
+    | 		# multicast. A gateway's 80 and 443 answer the internet already; its
+    | 		# accept follows the loopback drop, since loopback is local too, and
+    | 		# precedes the on-link drop, which holds the host's own IPv6.
+    | 		meta skuid { 1002, 231072-296607 } fib daddr type { local, broadcast, multicast } drop
+    | 		# The host's on-link IPv6 prefixes: a home LAN's IPv6 is global.
+    | 		meta skuid { 1002, 231072-296607 } ip6 daddr { 2001:db8:1::/64 } drop
+    | 	}
+    | 	# What the mesh's own socket sends, which no UID matches: the kernel
+    | 	# sends it, to each Endpoint the user wrote, resolved as root.
+    | 	chain mesh {
+    | 		type filter hook output priority 0; policy accept;
+    | 		meta mark 0x5053f2a9 fib daddr type { local, broadcast, multicast } drop
+    | 		meta mark 0x5053f2a9 ip daddr { 127.0.0.0/8, 169.254.0.0/16, 224.0.0.0/4, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10 } drop
+    | 		meta mark 0x5053f2a9 ip6 daddr { ::1, fe80::/10, ff00::/8, fc00::/7 } drop
+    | 		meta mark 0x5053f2a9 ip6 daddr { 64:ff9b::7f00:0/104, 64:ff9b::a9fe:0/112, 64:ff9b::e000:0/100, 64:ff9b::a00:0/104, 64:ff9b::ac10:0/108, 64:ff9b::c0a8:0/112, 64:ff9b::6440:0/106, 64:ff9b:1::/48 } drop
+    | 		meta mark 0x5053f2a9 ip6 daddr { 2001:db8:1::/64 } drop
+    | 	}
+    | }
+  run:
+    $ nft -c -f /etc/paisans/egress.f2a9.nft.new && mv -f /etc/paisans/egress.f2a9.nft.new /etc/paisans/egress.f2a9.nft || { rm -f /etc/paisans/egress.f2a9.nft.new; echo 'the egress table was not replaced'; exit 1; }
+
+step 6: install the egress unit
+  egress: load the table at boot, before community's manager, which requires it (paisans-f2a9-egress.service)
+  write /etc/systemd/system/paisans-f2a9-egress.service mode 0644:
+    | # Written by paisans host admit. Loads the table that keeps community off
+    | # this host's loopback and the owner's network, before community's
+    | # manager, and so its Docker daemon and containers, can start: the manager
+    | # requires this unit, so a table that fails to load keeps them stopped.
+    | # Never restart it: its stop deletes the table, and a restart restarts the
+    | # manager that requires it. A changed table is loaded in place with reload.
+    | # It follows nftables.service, whose configuration flushes the whole
+    | # ruleset: a reload of nftables loads this table again, leaving the manager
+    | # running, and a restart or stop of nftables restarts or stops this unit,
+    | # and so the manager, its daemon and its containers with it, so the
+    | # deployment never runs while the table is gone. With no default
+    | # dependencies, it waits for the filesystem the table is on by name, for a
+    | # host whose /etc is mounted on its own.
+    | [Unit]
+    | Description=paisans f2a9: egress table for community
+    | DefaultDependencies=no
+    | RequiresMountsFor=/etc/paisans/egress.f2a9.nft
+    | After=nftables.service
+    | PartOf=nftables.service
+    | ReloadPropagatedFrom=nftables.service
+    | Wants=network-pre.target
+    | Before=network-pre.target user@1002.service
+    | 
+    | [Service]
+    | Type=oneshot
+    | RemainAfterExit=yes
+    | ExecStart=/usr/sbin/nft -f /etc/paisans/egress.f2a9.nft
+    | ExecReload=/usr/sbin/nft -f /etc/paisans/egress.f2a9.nft
+    | ExecStop=/usr/sbin/nft delete table inet paisans_f2a9
+    | 
+    | [Install]
+    | WantedBy=multi-user.target
+    | RequiredBy=user@1002.service
+  run:
+    $ systemctl daemon-reload && systemctl reenable paisans-f2a9-egress.service
+
+step 7: load the egress table
+  egress: load paisans_f2a9 now
+  run:
+    $ systemctl start paisans-f2a9-egress.service && nft -f /etc/paisans/egress.f2a9.nft
+
+step 8: load br_netfilter
+  daemon: load br_netfilter now, which the user's daemon needs with its userland proxy off
+  run:
+    $ modprobe br_netfilter
+
+step 9: load br_netfilter at boot
+  daemon: list br_netfilter and nf_tables in /etc/modules-load.d/paisans.conf, shared by every admitted deployment
+  write /etc/modules-load.d/paisans.conf mode 0644:
+    | # Written by paisans host admit. The rootless Docker daemons of admitted
+    | # deployments need br_netfilter to start with their userland proxy off,
+    | # and the module their iptables uses for the setup tool to install them.
+    | br_netfilter
+    | nf_tables
+
+step 10: create /srv/data/paisans-f2a9
+  daemon: community's Docker data, on the disk --data-dir names, community's, mode 700
+  run:
+    $ install -d -m 700 -o community -g 'community' '/srv/data/paisans-f2a9'
+
+step 11: write community's daemon.json
+  daemon: userland proxy off, address pools clear of the mesh, data root /srv/data/paisans-f2a9; written as community
+  run:
+    $ runuser -u community -- env -i HOME='/home/community' PATH=/usr/bin:/bin:/usr/sbin:/sbin XDG_RUNTIME_DIR=/run/user/1002 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1002/bus DOCKER_HOST=unix:///run/user/1002/docker.sock sh -c 'umask 077 && mkdir -p "$HOME/.config/docker" && cat > "$HOME/.config/docker/.daemon.json.paisans-tmp" && mv -f "$HOME/.config/docker/.daemon.json.paisans-tmp" "$HOME/.config/docker/daemon.json"'
+  stdin:
+    | {
+    |   "userland-proxy": false,
+    |   "default-address-pools": [
+    |     {
+    |       "base": "172.17.0.0/16",
+    |       "size": 24
+    |     },
+    |     {
+    |       "base": "172.18.0.0/16",
+    |       "size": 24
+    |     },
+    |     {
+    |       "base": "172.19.0.0/16",
+    |       "size": 24
+    |     },
+    |     {
+    |       "base": "172.20.0.0/14",
+    |       "size": 24
+    |     },
+    |     {
+    |       "base": "172.24.0.0/14",
+    |       "size": 24
+    |     },
+    |     {
+    |       "base": "172.28.0.0/14",
+    |       "size": 24
+    |     },
+    |     {
+    |       "base": "192.168.0.0/16",
+    |       "size": 24
+    |     }
+    |   ],
+    |   "data-root": "/srv/data/paisans-f2a9"
+    | }
+
+step 12: install community's rootless Docker
+  daemon: dockerd-rootless-setuptool.sh install --force, as community, which starts the daemon reading its daemon.json; --force because a system daemon may run beside it
+  run:
+    $ runuser -u community -- env -i HOME='/home/community' PATH=/usr/bin:/bin:/usr/sbin:/sbin XDG_RUNTIME_DIR=/run/user/1002 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1002/bus DOCKER_HOST=unix:///run/user/1002/docker.sock sh -c 'dockerd-rootless-setuptool.sh install --force'
+
+step 13: create /srv/paisans
+  directory: every deployment's directory lives in it, root's, mode 755
+  run:
+    $ install -d -m 755 -o root -g root /srv/paisans
+
+step 14: create /srv/paisans/f2a9
+  directory: the deployment's own, community's, mode 750
+  run:
+    $ install -d -m 750 -o community -g 'community' /srv/paisans/f2a9
+
+step 15: create /etc/wireguard
+  wireguard: root's, mode 700, so the deployment's user cannot plant a conf the helper has not checked
+  run:
+    $ install -d -m 700 -o root -g root /etc/wireguard
+
+step 16: create /usr/local/libexec/paisans
+  wireguard: where each deployment's helper lives, root's, mode 755
+  run:
+    $ install -d -m 755 -o root -g root /usr/local/libexec/paisans
+
+step 17: install the WireGuard helper
+  wireguard: the one command community may run as root: it checks each conf before wg-quick sees it, and adds the mesh's mark
+  write /usr/local/libexec/paisans/wg-psns-f2a9 mode 0755:
+    | <the WireGuard helper hostprep renders, sha256 f5081a5ee2d3e5e99dd18d520da4a7fec3318f00df7cb26fc3be414d9588e9b9>
+
+step 18: install the helper's sudoers line
+  wireguard: /etc/sudoers.d/paisans-f2a9, mode 440, checked by visudo under a name sudo skips before it is moved into place
+  write /etc/sudoers.d/paisans-f2a9.new mode 0440:
+    | community ALL=(root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-f2a9
+  run:
+    $ visudo -cqf /etc/sudoers.d/paisans-f2a9.new && chown root:root /etc/sudoers.d/paisans-f2a9.new && mv -f /etc/sudoers.d/paisans-f2a9.new /etc/sudoers.d/paisans-f2a9 || { rm -f /etc/sudoers.d/paisans-f2a9.new; echo 'the line was not installed (checked by visudo, then chown and mv); nothing reached sudo'; exit 1; }
+
+step 19: allow 2222/tcp
+  firewall: allow 2222/tcp (ssh, the bootstrap route)
+  run:
+    $ ufw allow 2222/tcp comment 'paisans-f2a9: ssh, the bootstrap route'
+
+step 20: allow all inbound on psns-f2a9
+  firewall: allow all inbound on psns-f2a9 (the mesh: etcd, Patroni, Garage, HAProxy)
+  run:
+    $ ufw allow in on psns-f2a9 comment 'paisans-f2a9: the mesh: etcd, Patroni, Garage, HAProxy'
+
+step 21: load softdog
+  watchdog: load softdog now
+  run:
+    $ modprobe softdog
+
+step 22: load softdog at boot
+  watchdog: load softdog at every boot (paisans-f2a9-watchdog.service)
+  write /etc/systemd/system/paisans-f2a9-watchdog.service mode 0644:
+    | # Written by paisans host admit. Loads softdog at boot, before
+    | # systemd-logind starts the lingering users' managers, whose Docker starts
+    | # the Patroni container that maps /dev/watchdog.
+    | #
+    | # A unit and not /etc/modules-load.d: Ubuntu's kernel package blacklists the
+    | # watchdog drivers, and systemd-modules-load applies that blacklist, so a
+    | # modules-load.d entry would be skipped at boot. modprobe named on a command
+    | # line does not apply it.
+    | [Unit]
+    | Description=Load the softdog watchdog for Patroni
+    | Before=systemd-logind.service
+    | 
+    | [Service]
+    | Type=oneshot
+    | ExecStart=/usr/sbin/modprobe softdog
+    | RemainAfterExit=yes
+    | 
+    | [Install]
+    | WantedBy=multi-user.target
+  run:
+    $ systemctl daemon-reload && systemctl enable paisans-f2a9-watchdog.service
+
+step 23: give the watchdog to community
+  watchdog: /etc/udev/rules.d/60-paisans-f2a9-watchdog.rules makes /dev/watchdog and /dev/watchdog0 community's, owner and group, mode 600
+  write /etc/udev/rules.d/60-paisans-f2a9-watchdog.rules mode 0644:
+    | # Written by paisans host admit: the watchdog is community's, for its
+    | # Patroni. One deployment per host holds it; paisans host evict removes this.
+    | SUBSYSTEM=="watchdog|misc", KERNEL=="watchdog*", OWNER="community", GROUP="community", MODE="0600"
+  run:
+    $ udevadm control --reload && udevadm trigger --subsystem-match=watchdog --subsystem-match=misc
+
+step 24: write the admission record
+  record: who the deployment runs as and what you granted, which its own commands read
+  write /etc/paisans/admitted.f2a9.json mode 0644:
+    | {
+    |   "version": 1,
+    |   "deployment": "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01",
+    |   "user": "community",
+    |   "grants": {
+    |     "watchdog": true,
+    |     "public_ports": false
+    |   },
+    |   "forwarding": false,
+    |   "ports": {
+    |     "ssh": 2222,
+    |     "wireguard": 0,
+    |     "public": []
+    |   },
+    |   "digest": "kz0t-7f21-a88a-z6m0",
+    |   "admitted_at": "2026-10-15T12:00:00Z",
+    |   "data_dir": "/srv/data/paisans-f2a9",
+    |   "bridge_netfilter": false,
+    |   "mesh_lan": "",
+    |   "web_server": null
+    | }
+
+step 25: add the operators' keys
+  keys: 2 operator keys into community's authorized_keys, written as community, and recorded in /srv/paisans/f2a9/.paisans/authorized_keys.owned for host prepare
+  run:
+    $ runuser -u community -- env -i HOME='/home/community' PATH=/usr/bin:/bin:/usr/sbin:/sbin XDG_RUNTIME_DIR=/run/user/1002 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1002/bus DOCKER_HOST=unix:///run/user/1002/docker.sock sh -c 'set -e; umask 077; mkdir -p "$HOME/.ssh" /srv/paisans/f2a9/.paisans; chmod go-w "$HOME/.ssh"
+    $ tmp=$(mktemp -d); trap '\''rm -rf "$tmp"'\'' EXIT
+    $ awk -v k="$tmp/keys" -v s="$tmp/sidecar" '\''$0 == "--- sidecar ---" { out = 1; next } { if (out) print > s; else print > k }'\''
+    $ touch "$tmp/keys" "$tmp/sidecar"
+    $ f="$HOME/.ssh/authorized_keys"
+    $ { if [ -e "$f" ] || [ -L "$f" ]; then awk 1 "$f"; fi; cat "$tmp/keys"; } > "$HOME/.ssh/.authorized_keys.paisans-tmp"
+    $ mv -f "$HOME/.ssh/.authorized_keys.paisans-tmp" "$f"
+    $ cat "$tmp/sidecar" > /srv/paisans/f2a9/.paisans/authorized_keys.owned.paisans-tmp
+    $ mv -f /srv/paisans/f2a9/.paisans/authorized_keys.owned.paisans-tmp /srv/paisans/f2a9/.paisans/authorized_keys.owned'
+  stdin:
+    | ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB bob
+    | ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC bob
+    | --- sidecar ---
+    | # Keys this deployment claims in community's authorized_keys: <mark> <fingerprint> <name>. host prepare removes a line only when it is marked added here and no other deployment's file lists it.
+    | added SHA256:X75Mb3nqVpJG3UuCRMIO94EyEAtegd44QTYVIRv99HI bob
+    | added SHA256:zpa+NMqw+6z5XIib6AyyKOtOnilzIda0f4kqtWRHm88 bob
+
+present: docker: Engine 29.9.1
+present: package: docker-ce-rootless-extras installed
+present: package: uidmap installed
+present: package: nftables installed
+present: package: wireguard-tools installed
+present: package: git installed
+present: apparmor: rootlesskit's profile is loaded
+present: user: community exists, uid 1002, in no privileged group, and sudo grants it nothing beyond admit's helper
+present: user: community holds 231072-296607 in /etc/subuid
+present: user: community holds 231072-296607 in /etc/subgid
+present: egress: the host's on-link IPv6 prefixes, dropped: 2001:db8:1::/64
+present: linger: on for community
+present: linger: community's manager is running
+present: br_netfilter: nf_tables, which the host's iptables uses, is loaded
+present: daemon: /srv/data (xfs) has 500.0 GB free
+present: mesh: nothing on this host overlaps 10.44.0.0/24
+present: firewall: ufw active, its default policy left to the owner
+present: forwarding: not needed, this site has no endpoint
+warning: user: community already exists and is not paisans-f2a9
+  admit adds the operators' keys to community's authorized_keys and runs the deployment as community: check that this account is meant for the deployment and nothing else.
+warning: delegation reaches community's manager at its next start
+  Its manager is running, and restarting it would restart its Docker daemon and every container in it, so admit does not. cpuset and io limits apply after the host's next reboot.
+warning: watchdog: falling back to softdog
+  the watchdog will be softdog. It reboots the host when Patroni hangs, but not when the kernel does, and a hung kernel cannot fence itself any other way. A hardware or hypervisor watchdog is better: enable one in the firmware or the VM's settings, and admit again.
+warning: watchdog: community's Patroni can reboot this machine
+  Patroni arms the watchdog and reboots the whole host when it stops renewing it, which is what makes its failover safe.

@@ -5,9 +5,13 @@ package hostadmit
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
@@ -58,6 +62,14 @@ func (l local) run(command string, stdin *string) (string, error) {
 	return out.String(), nil
 }
 
+// linkedSystemFiles are the system files a stock host may hold as links,
+// which ReadFile alone reads through a link: on Ubuntu, /etc/os-release
+// points into /usr/lib and, with systemd-resolved, /etc/resolv.conf into
+// /run. They are read and never written. A path paisans owns is never on
+// this list: the records, the registry, sudoers, /etc/paisans and the
+// deployment's home are read with every link refused.
+var linkedSystemFiles = []string{"/etc/os-release", "/etc/resolv.conf"}
+
 // ReadFile reads a regular file. The directories on the way are opened one
 // by one by descriptor and a link in any of them is an error naming it, as
 // is a link as the file itself, because this process runs as root and the
@@ -65,8 +77,13 @@ func (l local) run(command string, stdin *string) (string, error) {
 // through a regular file, read as absent, as `[ -f ]` does over ssh; any
 // other kind of file, a FIFO among them, is an error and is never waited on.
 // The path must be absolute.
+//
+// The one exception is a path in linkedSystemFiles: its links are resolved
+// first, and the file they name is then read under the same rules, so a
+// link that changes in between is refused. A link to nothing reads as
+// absent.
 func (l local) ReadFile(path string) (string, bool, error) {
-	content, found, err := readFile(path)
+	content, found, err := readLocal(path)
 	if err != nil {
 		err = ui.RedactError(fmt.Errorf("%s: reading %s: %w", l.Describe(), path, err))
 	}
@@ -87,6 +104,21 @@ func (l local) WriteFile(path, content string, mode uint32) error {
 		return ui.RedactError(fmt.Errorf("%s: writing %s: %w", l.Describe(), path, err))
 	}
 	return nil
+}
+
+// readLocal is readFile, with a path in linkedSystemFiles resolved first.
+func readLocal(path string) (string, bool, error) {
+	if !slices.Contains(linkedSystemFiles, path) {
+		return readFile(path)
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return readFile(resolved)
 }
 
 func firstLine(s string) string {

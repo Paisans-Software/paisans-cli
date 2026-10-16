@@ -1522,6 +1522,37 @@ hence the longer timeout. `PAISANS_WF_IMAGE=<reference>` runs it against
 another build, such as a local one of a release newer than the one the kind
 names.
 
+`host admit`'s read-only probe has Docker tests of its own, behind their own
+tag:
+
+```
+go test -tags hostadmit_integration ./internal/hostadmit/
+```
+
+They run the rendered probe as root in `ubuntu:24.04` and parse what it
+prints: on a blank image, and with `/srv/paisans` linked elsewhere, a
+`--data-dir` below another user's directory or link, a group-writable `/srv`,
+and a file admit writes below a link. Each hostile path must read as unsafe,
+never as what is at the end of it. One more installs ufw from Ubuntu's archive,
+so it needs the network: ufw installed and not enabled reads as installed and
+not active, and enabled as both. On the blank image, which has no ufw, both
+read false.
+
+Two more write the operators' keys the way admit does, as the deployment's
+user through `runuser`, so they make and remove a real user and run only as
+root with `PAISANS_ROOT_TESTS=1`, on a throwaway machine or in a container:
+
+```
+GOOS=linux go test -c -o hostadmit.test ./internal/hostadmit/
+docker run --rm -v "$PWD/hostadmit.test:/hostadmit.test:ro" -e PAISANS_ROOT_TESTS=1 \
+  ubuntu:24.04 /hostadmit.test -test.run 'TestTheKeysAreWrittenAsTheUser|TestAPlantedSSHLinkLeavesItsTargetAlone'
+```
+
+The first checks that the keys are appended to what `authorized_keys` held
+and the sidecar written, both the user's and mode 600; the second that a
+`~/.ssh` the user planted as a link to a directory of root's leaves that
+directory as it was.
+
 Nothing runs
 `go test ./...` or any tagged test for you, so run them before a pull request.
 

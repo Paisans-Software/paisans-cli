@@ -59,6 +59,18 @@ func TestCheckRefuses(t *testing.T) {
 		{"a listen with no port", func(r *admission.Request) {
 			r.WebServer = []admission.WebApp{{App: "status", Hostname: "status.example.org", Listen: "127.0.0.1"}}
 		}, `web_server[0].listen: "127.0.0.1" is not a loopback address or this site's mesh address, with a port`},
+		{"a web server app on a site with no monitor", func(r *admission.Request) {
+			r.WebServer = []admission.WebApp{{App: "status", Hostname: "status.example.org", Listen: "127.0.0.1:8480"}}
+		}, `web_server: 1 app, and roles ["apps" "data" "gateway"] hold no monitor, the only role the owner's web server fronts`},
+		{"no site", func(r *admission.Request) { r.Site = "" }, `site: "" is not a site name`},
+		{"a site with a terminal escape", func(r *admission.Request) { r.Site = "home\x1b[2J" }, `site: "home\x1b[2J" is not a site name`},
+		{"no roles, with grants", func(r *admission.Request) { r.Roles = []string{} }, `grants: watchdog true and public_ports true, and roles [] need watchdog false and public_ports false`},
+		{"an unknown role", func(r *admission.Request) { r.Roles = []string{"apps", "data", "root"} }, `roles[2]: "root" is not a site role`},
+		{"a role twice", func(r *admission.Request) { r.Roles = []string{"apps", "apps", "data", "gateway"} }, `roles[1]: "apps" is listed twice`},
+		{"roles unsorted", func(r *admission.Request) { r.Roles = []string{"data", "apps", "gateway"} }, `roles[1]: "apps" comes after "data"`},
+		{"a watchdog the roles do not need", func(r *admission.Request) { r.Roles = []string{"apps", "gateway"} }, `grants: watchdog true and public_ports true, and roles ["apps" "gateway"] need watchdog false and public_ports true`},
+		{"a watchdog the roles need, not asked", func(r *admission.Request) { r.Grants.Watchdog = false }, `grants: watchdog false and public_ports true, and roles ["apps" "data" "gateway"] need watchdog true and public_ports true`},
+		{"low ports a Caddy monitor needs, not asked", func(r *admission.Request) { r.Roles, r.Grants = []string{"monitor"}, admission.Grants{} }, `need watchdog false and public_ports true`},
 		{"no operator", func(r *admission.Request) { r.Operators = nil }, "operators: none, so nobody could log in as \"paisans-f2a9\""},
 		{"an operator with a bad name", func(r *admission.Request) { r.Operators[0].Name = "Alice" }, `operators[0].name: "Alice" is not an operator name`},
 		{"an operator twice", func(r *admission.Request) { r.Operators[1].Name = "alice" }, "operators[1].name: alice is listed twice"},
@@ -69,6 +81,7 @@ func TestCheckRefuses(t *testing.T) {
 		{"two keys on a line", func(r *admission.Request) { r.Operators[0].Keys = []string{alice + "\n" + alice} }, "more than one key on the line"},
 		{"a key under two operators", func(r *admission.Request) { r.Operators[1].Keys = []string{alice} }, `operators[1].keys[0]: the same key as "alice"'s`},
 		{"a mesh larger than a /24", func(r *admission.Request) { r.MeshSubnet = "10.44.0.0/16" }, `mesh_subnet: "10.44.0.0/16" is larger than a /24`},
+		{"a mesh outside the private ranges", func(r *admission.Request) { r.MeshSubnet, r.Address = "44.1.2.0/24", "44.1.2.1" }, `mesh_subnet: "44.1.2.0/24" is outside the private ranges`},
 		{"a mapped IPv6 subnet", func(r *admission.Request) { r.MeshSubnet, r.Address = "::ffff:10.44.0.0/120", "10.44.0.1" }, `mesh_subnet: "::ffff:10.44.0.0/120" is not written in its canonical form, 10.44.0.0/24`},
 		{"a mapped IPv6 address", func(r *admission.Request) { r.Address = "::ffff:10.44.0.1" }, `address: "::ffff:10.44.0.1" is not written as plain dotted IPv4`},
 		{"the network address", func(r *admission.Request) { r.Address = "10.44.0.0" }, "is the subnet's network or broadcast address"},
@@ -109,6 +122,38 @@ func TestCheckRefuses(t *testing.T) {
 				t.Errorf("got %q\nwant it to say %q", problems, c.want)
 			}
 		})
+	}
+}
+
+// The grants Check holds a request to are Needs for its roles, with a
+// monitor behind the owner's web server when the request hands that server
+// an app: each golden role mix passes, and the monitor that hands one over
+// needs no low ports.
+func TestCheckGrantsFollowTheRoles(t *testing.T) {
+	for _, site := range []string{"home-a", "home-b", "vm", "status", "watch", "store", "host"} {
+		if problems := build(t, site).Check(); len(problems) > 0 {
+			t.Errorf("%s: %q", site, problems)
+		}
+	}
+	r := build(t, "status")
+	if len(r.WebServer) == 0 || r.Grants.PublicPorts {
+		t.Errorf("a monitor with managed_by: external and its uptime app pinned: web_server %+v, grants %+v; want its app handed over and no public_ports", r.WebServer, r.Grants)
+	}
+	r.Grants.PublicPorts = true
+	if problems := strings.Join(r.Check(), "\n"); !strings.Contains(problems, `roles ["monitor"] need watchdog false and public_ports false`) {
+		t.Errorf("a monitor handing its app to the owner's web server was let ask for low ports: %q", problems)
+	}
+}
+
+// A site with no roles exists to host an app pinned to it, which the
+// configuration allows, so its request carries roles: [] and no grant.
+func TestCheckAcceptsNoRoles(t *testing.T) {
+	r := build(t, "host")
+	if len(r.Roles) != 0 || r.Grants != (admission.Grants{}) {
+		t.Fatalf("roles %q, grants %+v", r.Roles, r.Grants)
+	}
+	if problems := r.Check(); len(problems) > 0 {
+		t.Errorf("%q", problems)
 	}
 }
 
@@ -188,6 +233,9 @@ func TestCheckQuotesWhatItEchoes(t *testing.T) {
 		"key options":            func(r *admission.Request) { r.Operators[0].Keys = []string{"from=\"" + esc + "\" " + alice} },
 		"duplicate key":          func(r *admission.Request) { r.Operators[0].Name, r.Operators[1].Keys = esc, []string{alice} },
 		"key type":               func(r *admission.Request) { r.Operators[0].Keys = []string{esc + " AAAA"} },
+		"site":                   func(r *admission.Request) { r.Site = esc },
+		"role":                   func(r *admission.Request) { r.Roles = []string{"apps", esc} },
+		"roles with grants":      func(r *admission.Request) { r.Roles = []string{esc} },
 	} {
 		r := build(t, "home-a")
 		mutate(&r)

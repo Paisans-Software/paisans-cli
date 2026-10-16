@@ -1,7 +1,9 @@
 package hostprep
 
 import (
+	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -38,6 +40,17 @@ var dockerConflicts = []string{"docker.io", "docker-compose", "docker-compose-v2
 // store.
 var basePackages = []string{"wireguard-tools", "ufw", "git"}
 
+// admitBasePackages are the base packages host admit installs: ufw is not
+// among them, since admit works only on a host whose owner has installed
+// and enabled it, and choosing a firewall is the owner's.
+var admitBasePackages = []string{"wireguard-tools", "git"}
+
+// rootlessPackages are what a deployment's own rootless daemon needs
+// beside Docker: the setup tool and rootlesskit, newuidmap and newgidmap,
+// and nft for the egress table. Docker's rootless page names the first two
+// (https://docs.docker.com/engine/security/rootless/, read 2026-10-15).
+var rootlessPackages = []string{"docker-ce-rootless-extras", "uidmap", "nftables"}
+
 // packageKinds is the kind of change each package in an install makes, each
 // once, in the order the packages are named: Docker's are docker, and each
 // base package is what it is installed for.
@@ -46,7 +59,7 @@ func packageKinds(packages []string) []string {
 	for _, p := range packages {
 		kind := "packages"
 		switch {
-		case slices.Contains(dockerPackages, p):
+		case slices.Contains(dockerPackages, p), slices.Contains(rootlessPackages, p):
 			kind = KindDocker
 		case p == "wireguard-tools":
 			kind = KindWireGuard
@@ -73,10 +86,15 @@ type packageFacts struct {
 	keyring      bool
 	arch         string
 	snapDocker   bool
+	// dockerVersion is docker-ce's installed dpkg version, "" when it is not
+	// installed; extrasVersions are the versions of docker-ce-rootless-extras
+	// the configured repositories offer.
+	dockerVersion  string
+	extrasVersions []string
 }
 
 func (u ubuntu) probePackages(t Transport) (packageFacts, error) {
-	all := append(append(append([]string{}, dockerPackages...), dockerConflicts...), basePackages...)
+	all := append(append(append(append([]string{}, dockerPackages...), dockerConflicts...), rootlessPackages...), basePackages...)
 	script, err := snippet(u.tmpl("packages-probe.sh.tmpl"), map[string]any{"Packages": all})
 	if err != nil {
 		return packageFacts{}, err
@@ -102,9 +120,95 @@ func (u ubuntu) probePackages(t Transport) (packageFacts, error) {
 			facts.arch = strings.TrimSpace(rest)
 		case "snap":
 			facts.snapDocker = strings.TrimSpace(rest) == "docker"
+		case "dockerversion":
+			facts.dockerVersion = strings.TrimSpace(rest)
+		case "extras":
+			if v := strings.TrimSpace(rest); v != "" {
+				facts.extrasVersions = append(facts.extrasVersions, v)
+			}
 		}
 	}
 	return facts, nil
+}
+
+// DockerKeyFingerprint is the fingerprint of Docker's release key, which
+// signs its apt repository (Docker's install guide for Ubuntu gives it as
+// 9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88).
+const DockerKeyFingerprint = "9DC858229FC7DD38854AE2D88D81803C0EBFCD88"
+
+// dockerRepo plans Docker's apt key and repository, each only when it is
+// not already as written.
+func (u ubuntu) dockerRepo(t Transport, host OSRelease, facts packageFacts) (Section, error) {
+	var out Section
+	if facts.keyring {
+		out.Present = append(out.Present, "docker: apt signing key at "+dockerKeyring)
+	} else {
+		script, err := snippet(u.tmpl("docker-keyring.sh.tmpl"), map[string]string{"Fingerprint": DockerKeyFingerprint})
+		if err != nil {
+			return out, err
+		}
+		out.Steps = append(out.Steps, Step{Kinds: []string{KindDocker}, Title: "add docker apt key", Describe: "docker: add Docker's apt signing key at " + dockerKeyring, Command: script})
+	}
+
+	codename := host.Fields["UBUNTU_CODENAME"]
+	if codename == "" {
+		codename = host.Fields["VERSION_CODENAME"]
+	}
+	if codename == "" || facts.arch == "" {
+		return out, fmt.Errorf("docker: could not read the release codename (%q) or the dpkg architecture (%q), and Docker's apt source needs both", codename, facts.arch)
+	}
+	sources, err := snippet(u.tmpl("docker.sources.tmpl"), map[string]string{"Codename": codename, "Arch": facts.arch})
+	if err != nil {
+		return out, err
+	}
+	current, found, err := t.ReadFile(dockerSources)
+	if err != nil {
+		return out, err
+	}
+	if found && current == sources {
+		out.Present = append(out.Present, "docker: apt repository at "+dockerSources)
+	} else {
+		out.Steps = append(out.Steps, Step{
+			Kinds:    []string{KindDocker},
+			Title:    "add docker apt repo",
+			Describe: fmt.Sprintf("docker: add Docker's apt repository for %s/%s at %s", codename, facts.arch, dockerSources),
+			File:     &File{Path: dockerSources, Content: sources, Mode: 0o644},
+		})
+	}
+	return out, nil
+}
+
+// conflictMessage is why Docker's own packages cannot be installed beside
+// what the host carries from Ubuntu's archive, or "" when nothing conflicts.
+// It refuses, not removes: removing docker.io on a host that is already
+// running containers from it takes those containers down, and that is a
+// decision for whoever started them. again is the command the owner runs
+// once they have decided. Admit asks only where no Docker is installed, so
+// its reason is the removal, not compose.
+func conflictMessage(facts packageFacts, again string) string {
+	var conflicts []string
+	for _, p := range dockerConflicts {
+		if facts.installed[p] {
+			conflicts = append(conflicts, p)
+		}
+	}
+	if len(conflicts) == 0 {
+		return ""
+	}
+	// Ubuntu's docker-compose-v2 is the compose plugin
+	// (/usr/libexec/docker/cli-plugins/docker-compose in its file
+	// list, packages.ubuntu.com, noble-updates, fetched 2026-10-11),
+	// so a docker.io without it can be completed instead.
+	remove := fmt.Sprintf("Remove them yourself (apt-get remove %s)", strings.Join(conflicts, " "))
+	if facts.installed["docker.io"] && !facts.installed["docker-compose-v2"] {
+		remove = "Install Ubuntu's compose plugin beside them (apt-get install docker-compose-v2), or r" + remove[1:]
+	}
+	why := "`docker compose` does not work with them"
+	if again == "admit" {
+		why = "installing Docker's packages would remove them"
+	}
+	return fmt.Sprintf("%s from Ubuntu's archive conflict with Docker's own packages, and %s. %s, after checking nothing running depends on them, and %s again",
+		strings.Join(conflicts, ", "), why, remove, again)
 }
 
 // Packages leaves an existing Docker as it is when `docker compose` works
@@ -138,60 +242,15 @@ func (u ubuntu) Packages(t Transport, host OSRelease) (Section, error) {
 		// so it is refused, not removed: removing docker.io on a host that is
 		// already running containers from it takes those containers down, and
 		// that is a decision for whoever started them.
-		var conflicts []string
-		for _, p := range dockerConflicts {
-			if facts.installed[p] {
-				conflicts = append(conflicts, p)
-			}
-		}
-		if len(conflicts) > 0 {
-			// Ubuntu's docker-compose-v2 is the compose plugin
-			// (/usr/libexec/docker/cli-plugins/docker-compose in its file
-			// list, packages.ubuntu.com, noble-updates, fetched 2026-10-11),
-			// so a docker.io without it can be completed instead.
-			remove := fmt.Sprintf("Remove them yourself (apt-get remove %s)", strings.Join(conflicts, " "))
-			if facts.installed["docker.io"] && !facts.installed["docker-compose-v2"] {
-				remove = "Install Ubuntu's compose plugin beside them (apt-get install docker-compose-v2), or r" + remove[1:]
-			}
-			return out, fmt.Errorf("docker: %s from Ubuntu's archive conflict with Docker's own packages, and `docker compose` does not work with them. %s, after checking nothing running depends on them, and prepare again",
-				strings.Join(conflicts, ", "), remove)
+		if msg := conflictMessage(facts, "prepare"); msg != "" {
+			return out, fmt.Errorf("docker: %s", msg)
 		}
 
-		if facts.keyring {
-			out.Present = append(out.Present, "docker: apt signing key at "+dockerKeyring)
-		} else {
-			script, err := snippet(u.tmpl("docker-keyring.sh.tmpl"), nil)
-			if err != nil {
-				return out, err
-			}
-			out.Steps = append(out.Steps, Step{Kinds: []string{KindDocker}, Title: "add docker apt key", Describe: "docker: add Docker's apt signing key at " + dockerKeyring, Command: script})
-		}
-
-		codename := host.Fields["UBUNTU_CODENAME"]
-		if codename == "" {
-			codename = host.Fields["VERSION_CODENAME"]
-		}
-		if codename == "" || facts.arch == "" {
-			return out, fmt.Errorf("docker: could not read the release codename (%q) or the dpkg architecture (%q), and Docker's apt source needs both", codename, facts.arch)
-		}
-		sources, err := snippet(u.tmpl("docker.sources.tmpl"), map[string]string{"Codename": codename, "Arch": facts.arch})
+		repo, err := u.dockerRepo(t, host, facts)
 		if err != nil {
 			return out, err
 		}
-		current, found, err := t.ReadFile(dockerSources)
-		if err != nil {
-			return out, err
-		}
-		if found && current == sources {
-			out.Present = append(out.Present, "docker: apt repository at "+dockerSources)
-		} else {
-			out.Steps = append(out.Steps, Step{
-				Kinds:    []string{KindDocker},
-				Title:    "add docker apt repo",
-				Describe: fmt.Sprintf("docker: add Docker's apt repository for %s/%s at %s", codename, facts.arch, dockerSources),
-				File:     &File{Path: dockerSources, Content: sources, Mode: 0o644},
-			})
-		}
+		out.add(repo)
 		for _, p := range dockerPackages {
 			if !facts.installed[p] {
 				install = append(install, p)
@@ -207,12 +266,101 @@ func (u ubuntu) Packages(t Transport, host OSRelease) (Section, error) {
 		}
 	}
 	if len(install) > 0 {
-		script, err := snippet(u.tmpl("apt-install.sh.tmpl"), map[string]any{"Packages": install})
+		script, err := snippet(u.tmpl("apt-install.sh.tmpl"), map[string]any{"Packages": install, "NoUpgrade": false})
 		if err != nil {
 			return out, err
 		}
 		out.Steps = append(out.Steps, Step{Kinds: packageKinds(install), Title: "install packages: " + strings.Join(install, ", "), Describe: "packages: install " + strings.Join(install, " "), Command: script})
 	}
+	return out, nil
+}
+
+// debVersion is what dpkg versions are made of; the pin is interpolated
+// into a shell command, so nothing else is accepted.
+var debVersion = regexp.MustCompile(`^[0-9A-Za-z.+:~-]+$`)
+
+// pinExtras is the extras package pinned to the installed docker-ce's
+// version, or the refusal when the repository offers no such version.
+func pinExtras(facts packageFacts) (string, error) {
+	// dpkg keeps the version of a docker-ce removed with its configuration
+	// kept, and pinning to it would install docker-ce again.
+	v := facts.dockerVersion
+	if !facts.installed["docker-ce"] || v == "" || !debVersion.MatchString(v) {
+		return "", fmt.Errorf("docker-ce is not installed as a Debian package here, so docker-ce-rootless-extras cannot be matched to your Docker's version. Install Docker from Docker's own apt repository yourself, or admit on another host. Nothing was changed")
+	}
+	if len(facts.extrasVersions) == 0 {
+		return "", fmt.Errorf("docker-ce %s is installed and the apt repositories offer no docker-ce-rootless-extras, so Docker's apt repository is not configured here, or apt-get update has not run since it was. Add it as Docker's install guide for Ubuntu says (https://docs.docker.com/engine/install/ubuntu/), run apt-get update, and admit again. Nothing was changed", v)
+	}
+	if !slices.Contains(facts.extrasVersions, v) {
+		return "", fmt.Errorf("docker-ce %s is installed and the apt repositories offer docker-ce-rootless-extras at %s. The extras must match your Docker exactly, or installing them upgrades it, which is not admit's decision. Run apt-get update and admit again, or upgrade Docker yourself first. Nothing was changed", v, strings.Join(facts.extrasVersions, ", "))
+	}
+	return "docker-ce-rootless-extras=" + v, nil
+}
+
+// SnapDockerAdmit is host admit's refusal of a snap Docker. Admit's own
+// probe refuses it first; AdmitPackages refuses it too, in the same words,
+// for a caller that has not.
+const SnapDockerAdmit = "Docker is installed as a snap, whose confinement keeps it from bind mounting under /srv and whose refreshes restart every container on snapd's schedule. Remove it yourself (snap remove docker), after checking nothing running depends on it, and admit again. Nothing was changed"
+
+// AdmitPackages: see Profile.
+func (u ubuntu) AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (Section, error) {
+	var out Section
+	facts, err := u.probePackages(t)
+	if err != nil {
+		return out, err
+	}
+	if facts.snapDocker {
+		return out, errors.New("docker: " + SnapDockerAdmit)
+	}
+	var install []string
+	if !dockerPresent {
+		// Refused, as host prepare refuses, so that apt never removes the
+		// owner's containerd, runc or docker.io to make room.
+		if msg := conflictMessage(facts, "admit"); msg != "" {
+			return out, fmt.Errorf("%s. Nothing was changed", msg)
+		}
+		repo, err := u.dockerRepo(t, host, facts)
+		if err != nil {
+			return out, err
+		}
+		out.add(repo)
+		for _, p := range dockerPackages {
+			if !facts.installed[p] {
+				install = append(install, p)
+			}
+		}
+	}
+	for _, p := range append(append([]string{}, rootlessPackages...), admitBasePackages...) {
+		switch {
+		case facts.installed[p]:
+			out.Present = append(out.Present, "package: "+p+" installed")
+		case p == "docker-ce-rootless-extras" && dockerPresent:
+			// apt resolves the extras' dependency on docker-ce to the
+			// newest version, upgrading the owner's Docker, which
+			// --no-upgrade does not prevent for a dependency. Pinning the
+			// extras to the installed docker-ce version leaves nothing for
+			// the resolver to upgrade.
+			pinned, err := pinExtras(facts)
+			if err != nil {
+				return out, err
+			}
+			install = append(install, pinned)
+		default:
+			install = append(install, p)
+		}
+	}
+	if len(install) == 0 {
+		return out, nil
+	}
+	script, err := snippet(u.tmpl("apt-install.sh.tmpl"), map[string]any{"Packages": install, "NoUpgrade": dockerPresent})
+	if err != nil {
+		return out, err
+	}
+	describe := "packages: install " + strings.Join(install, " ")
+	if dockerPresent {
+		describe += ", leaving your Docker at the version it is"
+	}
+	out.Steps = append(out.Steps, Step{Kinds: packageKinds(install), Title: "install packages: " + strings.Join(install, ", "), Describe: describe, Command: script})
 	return out, nil
 }
 
@@ -301,13 +449,13 @@ func watchdogUnit(d deployment.Deployment) string { return d.Prefix() + "-watchd
 // module_load_and_warn probes with KMOD_PROBE_APPLY_BLACKLIST), so a
 // modules-load.d file would be skipped at every boot while looking correct.
 // modprobe named on a command line does not apply the blacklist.
-func (u ubuntu) WatchdogModule(t Transport, d deployment.Deployment, module string, loaded bool) (Section, error) {
+func (u ubuntu) WatchdogModule(t Transport, d deployment.Deployment, module string, loaded, admit bool) (Section, error) {
 	var out Section
 	unitName := watchdogUnit(d)
 	if !loaded {
 		out.Steps = append(out.Steps, Step{Kinds: []string{KindWatchdog}, Title: "load " + module, Describe: "watchdog: load " + module + " now", Command: "modprobe " + module})
 	}
-	unit, err := snippet(u.tmpl("watchdog-module.service.tmpl"), map[string]string{"Module": module})
+	unit, err := snippet(u.tmpl("watchdog-module.service.tmpl"), map[string]any{"Module": module, "Admit": admit})
 	if err != nil {
 		return out, err
 	}
@@ -351,8 +499,9 @@ func (u ubuntu) WatchdogModule(t Transport, d deployment.Deployment, module stri
 // non-interactive run. Which rules are added, adopted, removed or left alone
 // is planRules, in ufw.go. On a shared host (hostWide false) only the rules
 // are planned: the default policy and enabling belong to the host, not to
-// the deployment.
-func (u ubuntu) Firewall(t Transport, d deployment.Deployment, rules []Rule, hostWide bool) (Section, error) {
+// the deployment. by names the command planning, host prepare or host
+// admit, in what the plan says.
+func (u ubuntu) Firewall(t Transport, d deployment.Deployment, rules []Rule, hostWide bool, by string) (Section, error) {
 	var out Section
 	script, err := snippet(u.tmpl("firewall-probe.sh.tmpl"), nil)
 	if err != nil {
@@ -378,7 +527,7 @@ func (u ubuntu) Firewall(t Transport, d deployment.Deployment, rules []Rule, hos
 		}
 	}
 
-	planned, removals, err := planRules(ownerTag(d), rules, added)
+	planned, removals, err := planRules(ownerTag(d), rules, added, by)
 	if err != nil {
 		return out, err
 	}

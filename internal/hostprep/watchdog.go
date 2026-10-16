@@ -13,10 +13,11 @@ import (
 // observed on a host.
 const softdogIdentity = "Software Watchdog"
 
-// softdogWarning is printed whenever auto falls back to softdog. It is a
-// warning and not a refusal because softdog still fences the common failure,
-// a Patroni that stopped renewing its lease.
-const softdogWarning = "the watchdog will be softdog. It reboots the host when Patroni hangs, but not when the kernel does, and a hung kernel cannot fence itself any other way. A hardware or hypervisor watchdog is better: enable one in the firmware or the VM's settings, and prepare again."
+// softdogWarning is printed whenever auto falls back to softdog, with the
+// command to run again, prepare or admit. It is a warning and not a
+// refusal because softdog still fences the common failure, a Patroni that
+// stopped renewing its lease.
+const softdogWarning = "the watchdog will be softdog. It reboots the host when Patroni hangs, but not when the kernel does, and a hung kernel cannot fence itself any other way. A hardware or hypervisor watchdog is better: enable one in the firmware or the VM's settings, and %s again."
 
 // watchdogDevice is one entry under /sys/class/watchdog.
 type watchdogDevice struct {
@@ -107,19 +108,16 @@ func (f watchdogFacts) softdogLoaded() bool {
 
 // planWatchdog decides what a data site's watchdog needs, by the site's mode.
 //
-// Contention is checked first and refuses in every mode but off. Only one
+// Contention is checked first and refuses in every mode. Only one
 // process can open /dev/watchdog, and if systemd or a watchdog daemon already
 // has it, Patroni fails to open it at its first start, on a host that a plan
-// had just called prepared.
-func planWatchdog(t Transport, d deployment.Deployment, profile Profile, site config.Site) (Section, error) {
+// had just called prepared. by is the command planning it, prepare or
+// admit, which its words name.
+func planWatchdog(t Transport, d deployment.Deployment, profile Profile, site config.Site, by string) (Section, error) {
 	var out Section
 	mode := site.WatchdogMode()
 	if !site.Has(config.RoleData) {
 		out.Present = append(out.Present, "watchdog: not needed, this site holds no data role")
-		return out, nil
-	}
-	if mode == config.WatchdogOff {
-		out.Present = append(out.Present, "watchdog: off, Patroni is rendered without one")
 		return out, nil
 	}
 
@@ -128,10 +126,10 @@ func planWatchdog(t Transport, d deployment.Deployment, profile Profile, site co
 		return out, err
 	}
 	if systemdHoldsWatchdog(facts.RuntimeWatchdog) {
-		return out, fmt.Errorf("watchdog: systemd's RuntimeWatchdogUSec is %s on %s, so PID 1 holds /dev/watchdog and Patroni cannot open it. Set RuntimeWatchdogSec=0 in /etc/systemd/system.conf (or remove the drop-in that sets it), run systemctl daemon-reexec, and prepare again", facts.RuntimeWatchdog, t.Describe())
+		return out, fmt.Errorf("watchdog: systemd's RuntimeWatchdogUSec is %s on %s, so PID 1 holds /dev/watchdog and Patroni cannot open it. Set RuntimeWatchdogSec=0 in /etc/systemd/system.conf (or remove the drop-in that sets it), run systemctl daemon-reexec, and %s again", facts.RuntimeWatchdog, t.Describe(), by)
 	}
 	if facts.Daemon {
-		return out, fmt.Errorf("watchdog: a watchdog daemon is running on %s and holds /dev/watchdog, so Patroni cannot open it. Stop and disable it (systemctl disable --now watchdog) and prepare again", t.Describe())
+		return out, fmt.Errorf("watchdog: a watchdog daemon is running on %s and holds /dev/watchdog, so Patroni cannot open it. Stop and disable it (systemctl disable --now watchdog) and %s again", t.Describe(), by)
 	}
 
 	hardware := facts.hardware()
@@ -153,7 +151,7 @@ func planWatchdog(t Transport, d deployment.Deployment, profile Profile, site co
 				Hint:   "watchdog: softdog declared, but a hardware watchdog exists",
 				Detail: fmt.Sprintf("watchdog: softdog was declared, but %s already provides /dev/watchdog and Patroni will open that one, not softdog. Declare auto to say so.", hardware[0].Identity)})
 		}
-		module, err := profile.WatchdogModule(t, d, "softdog", facts.softdogLoaded())
+		module, err := profile.WatchdogModule(t, d, "softdog", facts.softdogLoaded(), by == "admit")
 		if err != nil {
 			return out, err
 		}
@@ -169,11 +167,11 @@ func planWatchdog(t Transport, d deployment.Deployment, profile Profile, site co
 	if facts.softdogLoaded() {
 		out.Present = append(out.Present, "watchdog: "+facts.describe())
 	}
-	module, err := profile.WatchdogModule(t, d, "softdog", facts.softdogLoaded())
+	module, err := profile.WatchdogModule(t, d, "softdog", facts.softdogLoaded(), by == "admit")
 	if err != nil {
 		return out, err
 	}
 	out.add(module)
-	out.Warnings = append(out.Warnings, Warning{Hint: "watchdog: falling back to softdog", Detail: softdogWarning})
+	out.Warnings = append(out.Warnings, Warning{Hint: "watchdog: falling back to softdog", Detail: fmt.Sprintf(softdogWarning, by)})
 	return out, nil
 }

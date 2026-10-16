@@ -274,11 +274,32 @@ func TestUnknownWatchdogModeIsRefused(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "sites.home-a.watchdog") {
 		t.Fatalf("an unknown watchdog mode loaded: %v", err)
 	}
-	for _, mode := range []string{"auto", "required", "softdog", "off"} {
+	for _, mode := range []string{"auto", "required", "softdog"} {
 		body := strings.Replace(minimal, "    address: 10.44.0.1\n", "    address: 10.44.0.1\n    watchdog: "+mode+"\n", 1)
 		if _, err := config.Load(write(t, body)); err != nil {
 			t.Errorf("watchdog %s was refused: %v", mode, err)
 		}
+	}
+}
+
+// watchdog: off is not a mode. A data site's Patroni needs a watchdog to fail
+// over safely and no other site uses one, so the loader refuses it on any
+// site and names the modes that exist.
+func TestWatchdogOffIsRefused(t *testing.T) {
+	body := strings.Replace(minimal, "    address: 10.44.0.1\n", "    address: 10.44.0.1\n    watchdog: off\n", 1)
+	_, err := config.Load(write(t, body))
+	if err == nil || !strings.Contains(err.Error(), "sites.home-a.watchdog") || !strings.Contains(err.Error(), "auto, required and softdog") {
+		t.Fatalf("watchdog: off loaded or was refused without naming the modes: %v", err)
+	}
+}
+
+// A role is listed once. host request carries a site's roles and refuses a
+// role listed twice, so the loader refuses it too, and validate and host
+// request agree on every configuration.
+func TestARepeatedRoleIsRefused(t *testing.T) {
+	body := strings.Replace(minimal, "roles: [data, apps]", "roles: [data, apps, data]", 1)
+	if got := loadErr(t, body); !strings.Contains(got, `sites.home-a.roles: "data" is listed twice`) {
+		t.Fatalf("a repeated role loaded or was refused without naming it: %q", got)
 	}
 }
 
@@ -1125,6 +1146,18 @@ func TestMeshOverAReservedRangeIsRefused(t *testing.T) {
 		if !strings.Contains(got, "mesh.subnet") || !strings.Contains(got, "overlaps "+c.overlaps) {
 			t.Errorf("%s: got %q", c.subnet, got)
 		}
+	}
+}
+
+// A mesh outside RFC 1918's private ranges is refused where it is
+// declared: another deployment's egress table on a shared host drops only
+// those, so its user could reach this mesh's sites.
+func TestMeshOutsideThePrivateRangesIsRefused(t *testing.T) {
+	body := strings.Replace(validConfig, "subnet: 10.44.0.0/24", "subnet: 44.1.2.0/24", 1)
+	body = strings.Replace(body, "address: 10.44.0.1", "address: 44.1.2.1", 1)
+	got := loadErr(t, body)
+	if !strings.Contains(got, `mesh.subnet: "44.1.2.0/24" is outside the private ranges`) || !strings.Contains(got, "`paisans init` picks a /24 in 10.0.0.0/8") {
+		t.Errorf("got %q", got)
 	}
 }
 

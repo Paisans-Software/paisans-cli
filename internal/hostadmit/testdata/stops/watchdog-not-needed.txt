@@ -1,0 +1,2 @@
+--watchdog is not needed: this site holds no data role
+The request is for site vm (roles: witness). The watchdog can reboot the machine and is given only to a data site's Patroni. Drop --watchdog. Nothing was read or changed.

@@ -1,0 +1,1 @@
+refused: watchdog: systemd's RuntimeWatchdogUSec is 30s on fake, so PID 1 holds /dev/watchdog and Patroni cannot open it. Set RuntimeWatchdogSec=0 in /etc/systemd/system.conf (or remove the drop-in that sets it), run systemctl daemon-reexec, and admit again. Nothing was changed

@@ -273,6 +273,10 @@ func TestPreflightRefuses(t *testing.T) {
 			setup: func(h map[string]*fakeHost) {
 				h["home-b"].override(rule{match: "ip -j route", out: `[{"dst":"10.44.0.0/16","dev":"br-lan"}]`})
 			}},
+		{name: "a route in another table", site: "home-b", check: "routes", want: "route 10.44.0.0/24 dev tailscale0 table 52",
+			setup: func(h map[string]*fakeHost) {
+				h["home-b"].override(rule{match: "ip -j route show table all", out: `[{"dst":"10.44.0.0/24","dev":"tailscale0","table":"52"}]`})
+			}},
 		{name: "another deployment's mesh", site: "home-b", check: "mesh", want: "route 10.44.0.0/24 dev psns-0c1d",
 			setup: func(h map[string]*fakeHost) {
 				h["home-b"].override(rule{match: "ip -j route", out: `[{"dst":"10.44.0.0/24","dev":"psns-0c1d"}]`})
@@ -417,19 +421,6 @@ func TestTheMeshsOwnRouteIsNotACollision(t *testing.T) {
 		rule{match: "ip -j addr", out: `[{"ifname":"psns-f2a9","addr_info":[{"family":"inet","local":"10.44.0.2","prefixlen":24}]}]`},
 	)
 	if r := run(t, fixture(t), h); r.Refused() {
-		t.Fatalf("refused:\n%s", printed(r))
-	}
-}
-
-func TestWatchdogOffNeedsNoDevice(t *testing.T) {
-	prepared(t)
-	cfg := fixture(t)
-	site := cfg.Sites["home-b"]
-	site.Watchdog = config.WatchdogOff
-	cfg.Sites["home-b"] = site
-	h := hosts()
-	h["home-b"].override(rule{match: "/dev/watchdog", err: errors.New("exit status 1")})
-	if r := run(t, cfg, h); r.Refused() {
 		t.Fatalf("refused:\n%s", printed(r))
 	}
 }

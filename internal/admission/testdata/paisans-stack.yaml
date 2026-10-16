@@ -72,6 +72,13 @@ sites:
     ssh:
       host: store.local
       keys: [alice]
+  # no role, hosting an app pinned to it: no grant, roles: [].
+  host:
+    roles: []
+    address: 10.44.0.7
+    ssh:
+      host: host.local
+      keys: [alice]
 etcd:
   members: [home-a, home-b, vm]
 storage:
@@ -90,3 +97,7 @@ apps:
     blueprint: uptime
     hostname: watch.example.org
     placement: { pinned: watch }
+  notes:
+    blueprint: mbin
+    hostname: notes.example.org
+    placement: { pinned: host }

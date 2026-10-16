@@ -130,9 +130,6 @@ type siteView struct {
 	Heartbeats []heartbeatTarget
 	Apps       []plannedApp
 	NeedsProxy bool
-	// WatchdogOff renders Patroni without fencing and drops the device
-	// mapping, which compose would otherwise refuse to start without.
-	WatchdogOff bool
 }
 
 type planner struct {
@@ -222,8 +219,6 @@ func newPlanner(cfg *config.Config, secrets *config.Secrets) *planner {
 			IsGarage:   contains(cfg.Storage.Garage.Sites, name),
 			RunsCaddy:  site.RunsCaddy(),
 			Heartbeats: heartbeatTargets(cfg, name),
-
-			WatchdogOff: site.WatchdogMode() == config.WatchdogOff,
 		}
 	}
 
