@@ -276,10 +276,10 @@ func containerFinding(dep deployment.Deployment, site string, d ContainerProbe, 
 			recreate = "`paisans apply --site " + site + " --recreate " + stack + " --execute`"
 		}
 		f.More = []string{
-			fmt.Sprintf("Docker started before %s at boot. The container publishes its port on the site's mesh address, which exists only once %s has brought %s up, and Docker does not retry a container whose network setup failed.", dep.Interface(), dep.WireGuardUnit(), dep.Interface()),
+			fmt.Sprintf("Its Docker daemon started it before %s was up. The container publishes its port on the site's mesh address, which exists only once %s has brought %s up, and Docker does not retry a container whose network setup failed.", dep.Interface(), dep.WireGuardUnit(), dep.Interface()),
 			"recover:",
-			fmt.Sprintf("  1. `paisans host prepare --site %s --execute`, which orders Docker after %s from the next boot on.", site, dep.WireGuardUnit()),
-			fmt.Sprintf("  2. `docker start %s` on %s, or %s.", name, site, recreate),
+			fmt.Sprintf("  1. `docker start %s` on %s, as the deployment's user, or %s.", name, site, recreate),
+			fmt.Sprintf("  2. If it happens at every boot, `paisans doctor --site %s` says under linger whether the user's manager is ordered after the mesh.", site),
 		}
 	case restarting && anyMatch(logs, networkUnreachable):
 		f.More = []string{
