@@ -188,7 +188,7 @@ func probedFiles(d deployment.Deployment, in Input) ([]string, error) {
 	}
 	return []string{
 		delegatePath, modulesLoadPath, sysctlPath, sysctlBeforePath,
-		helper, sudoersPath(d), egressFilePath(d), "/etc/systemd/system/" + d.EgressUnit(),
+		helper, sudoersPath(d), egressFilePath(d), egressFilePath(d) + ".new", "/etc/systemd/system/" + d.EgressUnit(),
 		watchdogRulePath(d), "/etc/systemd/system/" + d.Prefix() + "-watchdog.service",
 		record, d.WireGuardInstalled(),
 	}, nil

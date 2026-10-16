@@ -23,7 +23,7 @@ step 4: remove /etc/systemd/system/user@1001.service.d/paisans-mesh.conf
 step 5: remove the egress table
   evict: unload paisans_f2a9 and remove paisans-f2a9-egress.service and /etc/paisans/egress.f2a9.nft
   run:
-    $ { systemctl disable --now paisans-f2a9-egress.service 2>/dev/null || true; } && { ! nft list table inet paisans_f2a9 >/dev/null 2>&1 || nft delete table inet paisans_f2a9; } && rm -f /etc/systemd/system/paisans-f2a9-egress.service /etc/paisans/egress.f2a9.nft && { [ ! -d /etc/systemd/system/user@1001.service.requires ] || rmdir --ignore-fail-on-non-empty /etc/systemd/system/user@1001.service.requires; } && systemctl daemon-reload
+    $ { systemctl disable --now paisans-f2a9-egress.service 2>/dev/null || true; } && { ! nft list table inet paisans_f2a9 >/dev/null 2>&1 || nft delete table inet paisans_f2a9; } && rm -f /etc/systemd/system/paisans-f2a9-egress.service /etc/paisans/egress.f2a9.nft /etc/paisans/egress.f2a9.nft.new && { [ ! -d /etc/systemd/system/user@1001.service.requires ] || rmdir --ignore-fail-on-non-empty /etc/systemd/system/user@1001.service.requires; } && systemctl daemon-reload
 
 step 6: remove /srv/data/paisans-f2a9
   evict: the deployment's Docker data, on the disk --data-dir named

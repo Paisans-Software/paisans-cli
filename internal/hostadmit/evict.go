@@ -305,13 +305,15 @@ func (e *evictor) mesh() error {
 func (e *evictor) egress() error {
 	unit, table := e.d.EgressUnit(), e.d.EgressTable()
 	unitPath, file := "/etc/systemd/system/"+unit, egressFilePath(e.d)
-	if !e.f.Files[unitPath].Present && !e.f.Files[file].Present && !e.f.EgressEnabled && !e.f.EgressTable {
+	// .new is the table admit writes beside the file before nft checks it,
+	// left by an admit stopped in between.
+	if !e.f.Files[unitPath].Present && !e.f.Files[file].Present && !e.f.Files[file+".new"].Present && !e.f.EgressEnabled && !e.f.EgressTable {
 		return nil
 	}
 	parts := []string{
 		"{ systemctl disable --now " + unit + " 2>/dev/null || true; }",
 		"{ ! nft list table inet " + table + " >/dev/null 2>&1 || nft delete table inet " + table + "; }",
-		"rm -f " + unitPath + " " + file,
+		"rm -f " + unitPath + " " + file + " " + file + ".new",
 	}
 	if e.f.User.Exists {
 		requires := fmt.Sprintf("/etc/systemd/system/user@%d.service.requires", e.f.User.UID)
@@ -620,7 +622,7 @@ func (e *evictor) emptyDirs() error {
 	if e.f.Files[helper].Present {
 		ours[apply.HelperDir]++
 	}
-	for _, f := range []string{record, egressFilePath(e.d)} {
+	for _, f := range []string{record, egressFilePath(e.d), egressFilePath(e.d) + ".new"} {
 		if e.f.Files[f].Present {
 			ours[admission.Dir]++
 		}

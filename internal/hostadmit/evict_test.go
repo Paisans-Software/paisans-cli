@@ -492,3 +492,20 @@ func TestEvictsUnreadableRecordRefusalNamesTheDataDir(t *testing.T) {
 		t.Errorf("BuildEvict = %v", err)
 	}
 }
+
+// An admit stopped between writing the egress table beside its file and
+// moving it over leaves egress.<token>.nft.new; evict removes it, and
+// counts it among its own in /etc/paisans.
+func TestEvictRemovesALeftoverEgressTable(t *testing.T) {
+	h := newBlank().withDir("/etc/paisans", "drwxr-xr-x", 0, 0).withFile(egressFile+".new", "table inet paisans_f2a9 {}\n", "644", 0).add("entries", "1 /etc/paisans")
+	plan, err := hostadmit.BuildEvict(h, hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i := stepIndex(plan, egressFile+".new"); i < 0 {
+		t.Errorf("the leftover is kept:\n%s", plan.Text())
+	}
+	if stepIndex(plan, "rmdir /etc/paisans") < 0 {
+		t.Errorf("/etc/paisans is kept:\n%s", plan.Text())
+	}
+}
