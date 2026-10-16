@@ -191,7 +191,7 @@ var parts = []part{
 	// 12. firewall
 	// 13. watchdog
 	// 14. sysctls
-	// 14a. web server
+	{"web server", planWebServer}, // 14a
 	// 15. record
 	// 16. keys
 	// 17. check
