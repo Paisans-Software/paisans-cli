@@ -26,7 +26,7 @@ func planWebServer(p *planner) error {
 		return nil
 	}
 	target := webserver.Target{App: apps[0].App, Hostname: apps[0].Hostname, Mode: config.ManagedByExternal, Listen: apps[0].Listen}
-	ws := webserver.Detect(webserver.Host{Plain: p.t}, target)
+	ws := webserver.Detect(webserver.Host{Plain: p.t, Docker: systemDocker}, target)
 	admin := ""
 	if ws.Server == webserver.ServerCaddy {
 		admin = caddyTCPAdmin(p, ws)
@@ -93,13 +93,13 @@ func caddyAdmin(conf string) (string, bool) {
 		case len(f) == 0:
 		case f[0] == "}":
 			depth--
-		case strings.HasSuffix(strings.TrimSpace(lines[i]), "{"):
-			depth++
-		case depth == 1 && f[0] == "admin" && len(f) >= 2:
+		case depth == 1 && f[0] == "admin" && len(f) >= 2 && f[1] != "{":
 			if f[1] == "off" || strings.HasPrefix(f[1], "unix/") {
 				return "", true
 			}
 			return f[1], true
+		case strings.HasSuffix(strings.TrimSpace(lines[i]), "{"):
+			depth++
 		}
 	}
 	return "", false

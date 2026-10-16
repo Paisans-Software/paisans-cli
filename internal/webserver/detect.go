@@ -22,6 +22,17 @@ type Host struct {
 	Plain Runner
 	// Sudo is set by no command: each reads its web server as the ssh user.
 	Sudo Runner
+	// Docker is the command that starts each docker command Detect runs,
+	// "docker" when empty. Admit sets it to name the system socket.
+	Docker string
+}
+
+// docker is the command every docker command Detect runs starts with.
+func (h Host) docker() string {
+	if h.Docker == "" {
+		return "docker"
+	}
+	return h.Docker
 }
 
 // Server is a web server Detect recognises.
@@ -155,7 +166,9 @@ func (w WebServer) Summary() string {
 // noDocker is what the docker listing prints on a host without docker.
 const noDocker = "__PAISANS_NO_DOCKER__"
 
-const dockerPS = "if command -v docker >/dev/null 2>&1; then docker ps --format '{{.Names}}\t{{.Image}}\t{{.Ports}}'; else echo " + noDocker + "; fi"
+func dockerPS(docker string) string {
+	return "if command -v docker >/dev/null 2>&1; then " + docker + " ps --format '{{.Names}}\t{{.Image}}\t{{.Ports}}'; else echo " + noDocker + "; fi"
+}
 
 // Detect finds the web server in front of t's app on its host, reading
 // only: a container publishing 443 or 80, asked as the ssh user and then
@@ -205,7 +218,7 @@ func Detect(h Host, t Target) WebServer {
 		}
 	}
 	if ws.Container != "" {
-		ws.Mounts = containerMounts(docker, ws.Container)
+		ws.Mounts = containerMounts(docker, h.docker(), ws.Container)
 		ws.Config = containerConfig(ws.Mounts, ws.Server)
 		if paths := configPaths[ws.Server]; len(paths) > 0 {
 			ws.Main = paths[0]
@@ -213,7 +226,7 @@ func Detect(h Host, t Target) WebServer {
 	}
 	exec := func(command string) (string, error) {
 		if ws.Container != "" {
-			return docker.Run("docker exec " + ws.Container + " " + command)
+			return docker.Run(h.docker() + " exec " + ws.Container + " " + command)
 		}
 		return read(h, command)
 	}
@@ -266,13 +279,13 @@ var hostPort = regexp.MustCompile(`:(\d+)->`)
 // why is set when docker is there but could not be listed.
 func listContainers(h Host) (Runner, []container, string) {
 	runner := h.Plain
-	out, err := runner.Run(dockerPS)
+	out, err := runner.Run(dockerPS(h.docker()))
 	if err != nil && strings.Contains(strings.ToLower(out+err.Error()), "permission denied") {
 		if h.Sudo == nil {
 			return nil, nil, "docker refuses the ssh user"
 		}
 		runner = h.Sudo
-		out, err = runner.Run(dockerPS)
+		out, err = runner.Run(dockerPS(h.docker()))
 	}
 	if err != nil {
 		return nil, nil, firstLine(out, err)
@@ -367,8 +380,8 @@ var configPaths = map[Server][]string{
 }
 
 // containerMounts reads a container's mounts.
-func containerMounts(docker Runner, name string) []Mount {
-	out, err := docker.Run("docker inspect --format '{{json .Mounts}}' " + name)
+func containerMounts(docker Runner, command, name string) []Mount {
+	out, err := docker.Run(command + " inspect --format '{{json .Mounts}}' " + name)
 	if err != nil {
 		return nil
 	}
