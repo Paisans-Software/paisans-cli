@@ -49,6 +49,9 @@ func (h *fakeHost) run(command, stdin string) (string, error) {
 	if h.onRun != nil {
 		h.onRun(h, command)
 	}
+	if !strings.Contains(command, probeMarker) {
+		h.applied(command)
+	}
 	if strings.Contains(command, probeMarker) {
 		var b strings.Builder
 		for _, kv := range h.facts {
@@ -419,4 +422,27 @@ func keysAfter(stdin string) string {
 // host whose dir is root's, mode 755.
 func admittedWithDataDir(site, dir string) *fakeHost {
 	return admittedOn(home().withDir(dir, "drwxr-xr-x", 0, 0), requestFor(site), hostadmit.Flags{DataDir: dir})
+}
+
+// applied changes h as two of admit's commands change a real host: an apt
+// install makes dpkg show each package installed, and the install's
+// confirmation turns /etc/paisans/installed's claims into packages.
+func (h *fakeHost) applied(command string) {
+	for _, line := range strings.Split(command, "\n") {
+		if _, rest, ok := strings.Cut(line, " install -y "); ok && strings.HasPrefix(line, "apt-get ") {
+			for _, p := range strings.Fields(rest) {
+				if !strings.HasPrefix(p, "-") {
+					name, _, _ := strings.Cut(p, "=")
+					h.withPkg(name, "installed")
+				}
+			}
+		}
+	}
+	if strings.Contains(command, "sed -i 's/^installing /package /' /etc/paisans/installed") {
+		if c, ok := h.files["/etc/paisans/installed"]; ok {
+			c = strings.ReplaceAll(c, "\ninstalling ", "\npackage ")
+			h.files["/etc/paisans/installed"] = c
+			h.withFile("/etc/paisans/installed", c, "644", 0)
+		}
+	}
 }

@@ -15,12 +15,20 @@ import (
 // installed is /etc/paisans/installed: what admit installed on this host
 // that it did not have, each package by name and Docker's apt key and
 // source by path, for every admitted deployment, and each directory admit
-// created that evict removes once empty. It is written before the
-// install runs, so a run that stops after it still knows the system Docker
-// is admit's, and host evict names it all once the last deployment goes:
-// it stays installed.
+// created that evict removes once empty. Host evict names what is
+// installed once the last deployment goes: it stays installed.
+//
+// A package is claimed as Installing before the install runs and as one
+// of Packages once apt has installed it, which the install step's own
+// command records. So a run killed during the install, which leaves its
+// hold on Docker's daemons behind, still knows the system Docker is
+// admit's; and a claim whose install never ran is dropped once a probe
+// finds the hold gone, so a Docker the owner installs later is never
+// taken for admit's.
 type installed struct {
-	Packages, Files, Dirs []string
+	Packages, Installing, Files, Dirs []string
+	// file is the file's content as read, "" for none.
+	file string
 }
 
 // packageName is a Debian package's name, as dpkg allows one.
@@ -36,6 +44,8 @@ func parseInstalled(content, by string) (installed, error) {
 		switch {
 		case entry == "package" && packageName.MatchString(v):
 			in.Packages = append(in.Packages, v)
+		case entry == "installing" && packageName.MatchString(v):
+			in.Installing = append(in.Installing, v)
 		case entry == "file" && path.IsAbs(v) && path.Clean(v) == v && ui.Visible(v) == v:
 			in.Files = append(in.Files, v)
 		case entry == "dir" && v == delegateDir:
@@ -47,14 +57,17 @@ func parseInstalled(content, by string) (installed, error) {
 	return in, nil
 }
 
-// text is the file's content: a header, then each package, each file and
-// each directory.
+// text is the file's content: a header, then each package, each package
+// being installed, each file and each directory.
 func (in installed) text() string {
 	out := "# Written by paisans host admit: what it installed on this host, which stays\n" +
 		"# when paisans host evict removes the last admitted deployment, and each\n" +
 		"# directory it created, which evict removes once empty.\n"
 	for _, p := range in.Packages {
 		out += "package " + p + "\n"
+	}
+	for _, p := range in.Installing {
+		out += "installing " + p + "\n"
 	}
 	for _, f := range in.Files {
 		out += "file " + f + "\n"
@@ -68,15 +81,15 @@ func (in installed) text() string {
 // with is in, added and the directories dirs together, each name once, in
 // the order first recorded.
 func (in installed) with(added hostprep.Installed, dirs ...string) installed {
-	out := installed{Packages: slices.Clone(in.Packages), Files: slices.Clone(in.Files), Dirs: slices.Clone(in.Dirs)}
+	out := installed{Packages: slices.Clone(in.Packages), Installing: slices.Clone(in.Installing), Files: slices.Clone(in.Files), Dirs: slices.Clone(in.Dirs)}
 	for _, d := range dirs {
 		if !slices.Contains(out.Dirs, d) {
 			out.Dirs = append(out.Dirs, d)
 		}
 	}
 	for _, p := range added.Packages {
-		if !slices.Contains(out.Packages, p) {
-			out.Packages = append(out.Packages, p)
+		if !slices.Contains(out.Packages, p) && !slices.Contains(out.Installing, p) {
+			out.Installing = append(out.Installing, p)
 		}
 	}
 	for _, f := range added.Files {
@@ -87,21 +100,40 @@ func (in installed) with(added hostprep.Installed, dirs ...string) installed {
 	return out
 }
 
+// all is every package in, installed or being installed.
+func (in installed) all() []string { return append(slices.Clone(in.Packages), in.Installing...) }
+
 // dockerIsAdmits reports whether admit installed the host's docker-ce, so
 // its system daemon is admit's to keep disabled.
-func (in installed) dockerIsAdmits() bool { return slices.Contains(in.Packages, "docker-ce") }
+func (in installed) dockerIsAdmits() bool { return slices.Contains(in.all(), "docker-ce") }
+
+// confirmInstalled is the command the install step ends with once apt has
+// installed what it claimed.
+const confirmInstalled = "sed -i 's/^installing /package /' " + installedPath
 
 // readInstalled is the installed file as the host holds it, refused when
-// it is a link or holds a line admit did not write.
+// it is not root's, mode 644, as admit writes it, or holds a line admit
+// did not write: it decides whose the system Docker is. A package dpkg
+// does not show installed is left out, as is a claim whose install never
+// ran (installed, which the probe reads for every package the file
+// names).
 func readInstalled(p *planner, by string) (installed, error) {
-	if p.f.Files[installedPath].Link {
-		return installed{}, fmt.Errorf("%s is a symbolic link. Remove it and %s again. Nothing was changed", installedPath, by)
+	if f := p.f.Files[installedPath]; f.Present && (f.Link || f.UID != 0 || f.GID != 0 || f.Mode != "644") {
+		return installed{}, fmt.Errorf("%s is not root's, mode 644, as admit writes it (it is a link, or its mode is %s, owner %d, group %d), and it says whose the system Docker is. Look at what it holds, remove it, and %s again. Nothing was changed", installedPath, ui.Visible(f.Mode), f.UID, f.GID, by)
 	}
 	content, _, err := p.t.ReadFile(installedPath)
 	if err != nil {
 		return installed{}, shown(err)
 	}
-	return parseInstalled(content, by)
+	in, err := parseInstalled(content, by)
+	if err != nil {
+		return in, err
+	}
+	return installed{
+		Packages:   slices.DeleteFunc(in.Packages, func(x string) bool { return !p.f.Packages[x] }),
+		Installing: slices.DeleteFunc(in.Installing, func(x string) bool { return !p.f.Packages[x] || !p.f.Docker.Held }),
+		Files:      in.Files, Dirs: in.Dirs, file: content,
+	}, nil
 }
 
 // planSystemDocker records what this run installs, before it installs it,
@@ -127,9 +159,15 @@ func planSystemDocker(p *planner, s hostprep.Section, added hostprep.Installed) 
 		dirs = append(dirs, delegateDir)
 	}
 	now := was.with(added, dirs...)
-	if now.text() != was.text() {
+	if now.text() != was.file && (was.file != "" || len(now.all())+len(now.Files)+len(now.Dirs) > 0) {
 		p.step(Step{Title: "record what admit installs", Describe: "docker: " + installedPath + ", what admit installs on this host, which stays when the last deployment is evicted, and the directories it creates",
 			File: &hostprep.File{Path: installedPath, Content: now.text(), Mode: 0o644}, Kinds: []string{"docker"}})
+	}
+	if len(added.Packages) > 0 {
+		// AdmitPackages plans the install last: once apt has run, what it
+		// claimed is admit's.
+		last := &s.Steps[len(s.Steps)-1]
+		last.Command += confirmInstalled + "\n"
 	}
 	p.section(s)
 	installs := len(hostprep.SystemUnits(added.Packages)) > 0
@@ -141,7 +179,7 @@ func planSystemDocker(p *planner, s hostprep.Section, added hostprep.Installed) 
 	p.record.SystemDockerDisabled = now.dockerIsAdmits()
 	// Only the units of what admit installed: a containerd.io the host had
 	// is the owner's.
-	units := hostprep.SystemUnits(now.Packages)
+	units := hostprep.SystemUnits(now.all())
 	if len(units) == 0 {
 		return nil
 	}
@@ -196,7 +234,10 @@ func releaseHold(p *planner, prefix string) error {
 	if err != nil {
 		return err
 	}
-	p.step(Step{Title: "put back /usr/sbin/policy-rc.d", Describe: prefix + ": an admit that stopped while it installed Docker left its hold on Docker's daemons; your own policy-rc.d, if you had one, goes back",
-		Command: release, Kinds: []string{prefix}})
+	// The install the hold was for was admit's: what it claimed and dpkg
+	// shows installed is admit's (readInstalled keeps only those claims
+	// while the hold is there), and stays so once the hold is gone.
+	p.step(Step{Title: "put back /usr/sbin/policy-rc.d", Describe: prefix + ": an admit that stopped while it installed Docker left its hold on Docker's daemons; your own policy-rc.d, if you had one, goes back, and what that install claimed is recorded as installed",
+		Command: release + "if [ -f " + installedPath + " ]; then " + confirmInstalled + "; fi\n", Kinds: []string{prefix}})
 	return nil
 }

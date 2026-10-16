@@ -71,7 +71,7 @@ step 14: remove ufw rule in on psns-f2a9
     $ ufw delete allow in on psns-f2a9 comment 'paisans-f2a9: the mesh: etcd, Patroni, Garage, HAProxy'
 
 step 15: put back /usr/sbin/policy-rc.d
-  evict: an admit that stopped while it installed Docker left its hold on Docker's daemons; your own policy-rc.d, if you had one, goes back
+  evict: an admit that stopped while it installed Docker left its hold on Docker's daemons; your own policy-rc.d, if you had one, goes back, and what that install claimed is recorded as installed
   run:
     $ set -e
     $ release_docker_hold() {
@@ -94,6 +94,7 @@ step 15: put back /usr/sbin/policy-rc.d
     $ }
     $ release_docker_hold
     $ if [ -e /usr/sbin/policy-rc.d.paisans-owner ] || [ -L /usr/sbin/policy-rc.d.paisans-owner ]; then echo '/usr/sbin/policy-rc.d.paisans-owner, a copy of your policy-rc.d admit made while it installed Docker, differs from the /usr/sbin/policy-rc.d there now. Keep the one you want as /usr/sbin/policy-rc.d, remove the other, and run again'; exit 1; fi
+    $ if [ -f /etc/paisans/installed ]; then sed -i 's/^installing /package /' /etc/paisans/installed; fi
 
 step 16: remove the admission record
   evict: /etc/paisans/admitted.f2a9.json

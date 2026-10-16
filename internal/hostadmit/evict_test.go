@@ -540,6 +540,9 @@ func TestEvictNamesWhatAdmitInstalled(t *testing.T) {
 	host := func(shared bool) *fakeHost {
 		h := evicted("vm", hostadmit.Flags{})()
 		h.file("/etc/paisans/installed", content).withFile("/etc/paisans/installed", content, "644", 0)
+		for _, p := range []string{"docker-ce-cli", "containerd.io", "wireguard-tools"} {
+			h.withPkg(p, "installed")
+		}
 		if shared {
 			withOther(h, false, false)
 		}

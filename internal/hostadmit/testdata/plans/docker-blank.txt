@@ -83,15 +83,15 @@ step 3: record what admit installs
     | # Written by paisans host admit: what it installed on this host, which stays
     | # when paisans host evict removes the last admitted deployment, and each
     | # directory it created, which evict removes once empty.
-    | package docker-ce
-    | package docker-ce-cli
-    | package containerd.io
-    | package docker-buildx-plugin
-    | package docker-compose-plugin
-    | package docker-ce-rootless-extras
-    | package uidmap
-    | package wireguard-tools
-    | package git
+    | installing docker-ce
+    | installing docker-ce-cli
+    | installing containerd.io
+    | installing docker-buildx-plugin
+    | installing docker-compose-plugin
+    | installing docker-ce-rootless-extras
+    | installing uidmap
+    | installing wireguard-tools
+    | installing git
     | file /etc/apt/keyrings/docker.asc
     | file /etc/apt/sources.list.d/docker.sources
     | dir /etc/systemd/system/user@.service.d
@@ -171,6 +171,7 @@ step 6: install packages: docker-ce, docker-ce-cli, containerd.io, docker-buildx
     $ export DEBIAN_FRONTEND=noninteractive
     $ apt-get -o DPkg::Lock::Timeout=300 update
     $ apt-get -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confold install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras uidmap wireguard-tools git
+    $ sed -i 's/^installing /package /' /etc/paisans/installed
 
 step 7: disable the system Docker
   docker: the deployments run their own rootless daemons, so the system daemons admit installed, which their packages enable, are disabled (docker.socket, docker.service, containerd.service), and were kept from starting while they installed: they never changed forwarding, docker0 or the firewall

@@ -29,6 +29,13 @@ if command -v dockerd >/dev/null 2>&1; then say engine "$(dockerd --version 2>/d
 for p in docker-ce docker.io docker-ce-rootless-extras uidmap nftables; do
   if dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q 'ok installed$'; then say pkg "$p installed"; else say pkg "$p absent"; fi
 done
+# Every package /etc/paisans/installed names, which admit keeps as its own
+# only while dpkg shows it installed.
+if [ -f /etc/paisans/installed ] && [ ! -L /etc/paisans/installed ]; then
+  for p in $(awk 'NF == 2 && ($1 == "package" || $1 == "installing") && $2 ~ /^[a-z0-9][a-z0-9.+-]+$/ { print $2 }' /etc/paisans/installed); do
+    if dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q 'ok installed$'; then say pkg "$p installed"; else say pkg "$p absent"; fi
+  done
+fi
 if command -v dockerd-rootless-setuptool.sh >/dev/null 2>&1; then say setuptool present; else say setuptool absent; fi
 if command -v snap >/dev/null 2>&1 && snap list docker >/dev/null 2>&1; then say snap docker; else say snap absent; fi
 if [ -S /var/run/docker.sock ]; then say system-socket present; else say system-socket absent; fi

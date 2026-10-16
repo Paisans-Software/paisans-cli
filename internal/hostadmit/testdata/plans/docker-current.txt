@@ -83,8 +83,8 @@ step 3: record what admit installs
     | # Written by paisans host admit: what it installed on this host, which stays
     | # when paisans host evict removes the last admitted deployment, and each
     | # directory it created, which evict removes once empty.
-    | package docker-ce-rootless-extras
-    | package uidmap
+    | installing docker-ce-rootless-extras
+    | installing uidmap
     | dir /etc/systemd/system/user@.service.d
 
 step 4: install packages: docker-ce-rootless-extras=5:29.9.1-1~ubuntu.24.04~noble, uidmap
@@ -94,6 +94,7 @@ step 4: install packages: docker-ce-rootless-extras=5:29.9.1-1~ubuntu.24.04~nobl
     $ export DEBIAN_FRONTEND=noninteractive
     $ apt-get -o DPkg::Lock::Timeout=300 update
     $ apt-get -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confold install -y --no-upgrade docker-ce-rootless-extras=5:29.9.1-1~ubuntu.24.04~noble uidmap
+    $ sed -i 's/^installing /package /' /etc/paisans/installed
 
 step 5: create user paisans-f2a9
   user: create paisans-f2a9 with a home, whose subordinate ID ranges useradd allocates

@@ -158,7 +158,7 @@ func TestAdmitDisablesTheSystemDockerItInstalls(t *testing.T) {
 	if record < 0 || key < record || install < key || disable != install+1 {
 		t.Fatalf("record %d, key %d, install %d, disable %d:\n%s", record, key, install, disable, plan.Text())
 	}
-	want := "package docker-ce\npackage docker-ce-cli\npackage containerd.io\npackage docker-buildx-plugin\npackage docker-compose-plugin\npackage docker-ce-rootless-extras\npackage uidmap\npackage wireguard-tools\npackage git\nfile /etc/apt/keyrings/docker.asc\nfile /etc/apt/sources.list.d/docker.sources\ndir /etc/systemd/system/user@.service.d\n"
+	want := "installing docker-ce\ninstalling docker-ce-cli\ninstalling containerd.io\ninstalling docker-buildx-plugin\ninstalling docker-compose-plugin\ninstalling docker-ce-rootless-extras\ninstalling uidmap\ninstalling wireguard-tools\ninstalling git\nfile /etc/apt/keyrings/docker.asc\nfile /etc/apt/sources.list.d/docker.sources\ndir /etc/systemd/system/user@.service.d\n"
 	if f := plan.Steps[record].File; f == nil || f.Path != "/etc/paisans/installed" || !strings.HasSuffix(f.Content, want) {
 		t.Errorf("the installed file: %+v", plan.Steps[record].File)
 	}
@@ -283,5 +283,82 @@ func TestAdmitLeavesAnOwnersContainerd(t *testing.T) {
 	}
 	if titled(plan, "disable the system Docker") >= 0 {
 		t.Errorf("a re-run disables the owner's containerd:\n%s", plan.Text())
+	}
+}
+
+// /etc/paisans/installed decides whose the system Docker is, so it is
+// read only when it is root's, mode 644, as admit writes it: one another
+// user owns or can write is refused, by admit and by evict.
+func TestAnInstalledListNotRootsIsRefused(t *testing.T) {
+	h := installedByAdmit(current())
+	content := h.files["/etc/paisans/installed"]
+	for _, c := range []struct {
+		mode string
+		uid  int
+	}{{"644", 1001}, {"664", 0}} {
+		h := installedByAdmit(current()).withFile("/etc/paisans/installed", content, c.mode, c.uid)
+		_, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+		if err == nil || !strings.Contains(err.Error(), "/etc/paisans/installed is not root's") {
+			t.Errorf("mode %s, uid %d: Build = %v", c.mode, c.uid, err)
+		}
+		_, err = hostadmit.BuildEvict(h, hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+		if err == nil || !strings.Contains(err.Error(), "/etc/paisans/installed is not root's") {
+			t.Errorf("mode %s, uid %d: BuildEvict = %v", c.mode, c.uid, err)
+		}
+	}
+}
+
+// A package is claimed as "installing" before the install and as admit's
+// once the install has run. A claim whose install never ran does not
+// outlive it: an "installing" line for a package the owner has since
+// installed is dropped, unless the hold that install left says it was
+// admit's own install that stopped; and a package line dpkg no longer
+// shows installed is dropped.
+func TestAStaleInstalledClaimIsDropped(t *testing.T) {
+	header := "# Written by paisans host admit: what it installed on this host, which stays\n# when paisans host evict removes the last admitted deployment, and each\n# directory it created, which evict removes once empty.\n"
+	claim := func(h *fakeHost, lines string) *fakeHost {
+		return h.file("/etc/paisans/installed", header+lines).withFile("/etc/paisans/installed", header+lines, "644", 0)
+	}
+	// The owner installed Docker after an admit that stopped before its
+	// install: the claim goes, and the owner's Docker is left.
+	owner := claim(current().with("system-unit", "docker.service enabled active"), "installing docker-ce\npackage docker-ce-rootless-extras\npackage uidmap\npackage git\ndir /etc/systemd/system/user@.service.d\n").withPkg("git", "absent")
+	plan, err := hostadmit.Build(owner, input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := titled(plan, "record what admit installs")
+	if i < 0 || plan.Steps[i].File.Content != header+"package docker-ce-rootless-extras\npackage uidmap\ndir /etc/systemd/system/user@.service.d\n" {
+		t.Errorf("the stale claims are kept:\n%s", plan.Text())
+	}
+	if titled(plan, "disable the system Docker") >= 0 || recordWritten(t, plan).SystemDockerDisabled {
+		t.Errorf("the owner's Docker is taken for admit's:\n%s", plan.Text())
+	}
+	// An admit killed during its own install: the hold is left, so the
+	// claim stands and the daemon is disabled.
+	killed := claim(current().with("system-unit", "docker.service enabled active").with("docker-hold", "held"), "package docker-ce-rootless-extras\npackage uidmap\ninstalling docker-ce\ndir /etc/systemd/system/user@.service.d\n")
+	plan, err = hostadmit.Build(killed, input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if titled(plan, "record what admit installs") >= 0 || titled(plan, "disable the system Docker") < 0 || titled(plan, "put back /usr/sbin/policy-rc.d") < 0 {
+		t.Errorf("after an install that was killed:\n%s", plan.Text())
+	}
+}
+
+// The install step turns its "installing" claims into admit's packages
+// once apt has installed them, and only then.
+func TestTheInstallConfirmsItsClaims(t *testing.T) {
+	plan, err := hostadmit.Build(newBlank(), input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := titled(plan, "record what admit installs")
+	if record < 0 || !strings.Contains(plan.Steps[record].File.Content, "\ninstalling docker-ce\n") || strings.Contains(plan.Steps[record].File.Content, "\npackage ") {
+		t.Fatalf("the claim before the install:\n%s", plan.Steps[record].File.Content)
+	}
+	install := slices.IndexFunc(plan.Steps, func(s hostadmit.Step) bool { return strings.HasPrefix(s.Title, "install packages: docker-ce") })
+	c := plan.Steps[install].Command
+	if apt, sed := strings.LastIndex(c, "apt-get"), strings.Index(c, "sed -i 's/^installing /package /' /etc/paisans/installed"); sed < apt {
+		t.Errorf("the install does not confirm its claims after apt:\n%s", c)
 	}
 }
