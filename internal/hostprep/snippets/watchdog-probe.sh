@@ -6,4 +6,3 @@ done
 printf 'systemd %s\n' "$(systemctl show -p RuntimeWatchdogUSec --value 2>/dev/null)"
 if pgrep -x watchdog >/dev/null 2>&1; then echo "daemon running"; else echo "daemon absent"; fi
 printf 'owner %s\n' "$(stat -c %u /dev/watchdog 2>/dev/null)"
-printf 'me %s\n' "$(id -u)"
