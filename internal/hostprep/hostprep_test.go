@@ -24,6 +24,7 @@ type fakeHost struct {
 	responses map[string]string // keyed by a substring of the command
 	failures  map[string]error
 	ran       []string
+	reads     []string
 	written   []string
 }
 
@@ -45,6 +46,7 @@ func (h *fakeHost) Run(command string) (string, error) {
 }
 
 func (h *fakeHost) ReadFile(path string) (string, bool, error) {
+	h.reads = append(h.reads, path)
 	c, ok := h.files[path]
 	return c, ok, nil
 }
@@ -1421,19 +1423,27 @@ func TestAMissingUserIsRefused(t *testing.T) {
 	}
 }
 
-// The declared user is read before the login user's home and the store:
-// a missing user is refused by name, not by the passwd error of the home
-// probe, and nothing of the store is probed first.
+// The login user's passwd entry is the first thing the keys and the store
+// need, and its probe refuses a user the host lacks by name: it is the last
+// command run, and neither authorized_keys nor the sidecar is read.
 func TestAMissingUserIsRefusedBeforeTheHomeOrStoreIsRead(t *testing.T) {
 	host := preparedHost(false)
 	host.responses[probePasswd] = "__PAISANS_ABSENT__ ubuntu\n"
 	_, err := hostprep.Build("home-a", fixture(t), host)
-	if err == nil || !strings.Contains(err.Error(), "host prepare does not create users") {
+	if err == nil || !strings.Contains(err.Error(), "the login user ubuntu does not exist on fake. host prepare does not create users") {
 		t.Fatalf("got %v", err)
 	}
+	if last := host.ran[len(host.ran)-1]; !strings.Contains(last, probePasswd) {
+		t.Errorf("ran %q after the passwd probe", last)
+	}
 	for _, c := range host.ran {
-		if strings.Contains(c, `getent passwd "$(id -un)"`) || strings.Contains(c, "paisans-f2a9-config-") {
-			t.Errorf("read the home or the store before refusing the user: %s", c)
+		if strings.Contains(c, "paisans-f2a9-config-") {
+			t.Errorf("read the store before refusing the user: %s", c)
+		}
+	}
+	for _, path := range host.reads {
+		if path == authorizedKeys || path == ownedKeys {
+			t.Errorf("read %s before refusing the user", path)
 		}
 	}
 }
