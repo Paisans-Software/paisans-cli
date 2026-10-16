@@ -164,7 +164,7 @@ func TestForcedOnAnEmptyHostSaysNothingToDo(t *testing.T) {
 func TestForcedRunReportsAGatewayItCouldNotReach(t *testing.T) {
 	savedSite, savedReg := removeSiteHost, registryHost
 	t.Cleanup(func() { removeSiteHost, registryHost = savedSite, savedReg })
-	quiet := admittedRunning{runningHost{failingHost{match: "\x00"}}}
+	quiet := admittedRunning{runningHost: runningHost{failingHost{match: "\x00"}}, site: "monitor-a", roles: []string{"monitor"}}
 	removeSiteHost = func(string, config.Site) apply.Transport { return quiet }
 	registryHost = func(string, config.Site, string) registry.Runner { return &recordFake{down: true} }
 	var err error
@@ -194,7 +194,8 @@ func TestForcedOnAHostWithOnlyAKeptCaddySaysSo(t *testing.T) {
 }
 
 // idHost is an empty running host whose registry holds the fixture
-// deployment's monitor and a neighbour's entry.
+// deployment's monitor and a neighbour's entry, and whose login, ubuntu, the
+// fixture deployment's admission record names as its watch site's user.
 type idHost struct {
 	runningHost
 	registry string
@@ -204,23 +205,37 @@ func (h idHost) ReadFile(path string) (string, bool, error) {
 	if path == registry.Path {
 		return h.registry, true, nil
 	}
-	return admittedRunning{h.runningHost}.ReadFile(path)
+	return admittedRunning{runningHost: h.runningHost, site: "watch", roles: []string{"monitor"}}.ReadFile(path)
+}
+
+func (h idHost) Run(command string) (string, error) {
+	if strings.Contains(command, `echo "user $(id -un)"`) {
+		p, _ := admission.Path("f2a9")
+		return "user ubuntu\n" + p + "\n", nil
+	}
+	return h.runningHost.Run(command)
 }
 
 // admittedRunning is a running host that admitted the fixture deployment
-// as its login user, ubuntu, whom site remove cleans as.
-type admittedRunning struct{ runningHost }
+// as its login user, ubuntu, whom site remove cleans as: as site with
+// roles, or as home-a when site is empty.
+type admittedRunning struct {
+	runningHost
+	site  string
+	roles []string
+}
 
 func (h admittedRunning) ReadFile(path string) (string, bool, error) {
 	if p, _ := admission.Path("f2a9"); path == p {
-		return ubuntuRecord(), true, nil
+		return ubuntuRecord(h.site, h.roles), true, nil
 	}
 	return h.runningHost.ReadFile(path)
 }
 
 // ubuntuRecord is the fixture deployment's admission record naming ubuntu,
-// the user every fake host's passwd entry answers for the login.
-func ubuntuRecord() string {
+// the user every fake host's passwd entry answers for the login, for home-a,
+// or for site with roles when site is not empty.
+func ubuntuRecord(site string, roles []string) string {
 	cfg, err := config.Load(fixtureConfig())
 	if err != nil {
 		panic(err)
@@ -231,6 +246,9 @@ func ubuntuRecord() string {
 	}
 	rec := admission.NewRecord(req, req.Grants, "", time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC))
 	rec.User = "ubuntu"
+	if site != "" {
+		rec.Site, rec.Roles = site, roles
+	}
 	b, err := admission.EncodeRecord(rec)
 	if err != nil {
 		panic(err)
@@ -289,7 +307,7 @@ func TestForcedRemovalOfAnUndeclaredSiteMakesNoProvider(t *testing.T) {
 	savedSite, savedReg, savedDNS := removeSiteHost, registryHost, dnsProviderFor
 	t.Cleanup(func() { removeSiteHost, registryHost, dnsProviderFor = savedSite, savedReg, savedDNS })
 	removeSiteHost = func(string, config.Site) apply.Transport {
-		return admittedRunning{runningHost{failingHost{match: "\x00"}}}
+		return admittedRunning{runningHost: runningHost{failingHost{match: "\x00"}}, site: "monitor-a", roles: []string{"monitor"}}
 	}
 	registryHost = func(string, config.Site, string) registry.Runner { return &recordFake{} }
 	dnsProviderFor = func(string, string) (dns.Provider, error) {

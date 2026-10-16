@@ -101,49 +101,6 @@ type Entry struct {
 	// Roles is the site's roles, sorted and joined with commas, one string
 	// because the awk merge matches a role in it with index().
 	Roles string `json:"roles,omitempty"`
-	// Kept names what the deployment left running on the host after a site
-	// remove cleaned it, empty for nothing: KeptCaddy for a gateway's Caddy
-	// still serving the host owner's sites, KeptData for the data a removal
-	// without --delete-data left. The entry stays, because what is kept
-	// still holds the root it names, and it is what lets a later site remove
-	// find the deployment, by --id too. A claim by the same id writes the
-	// entry without it.
-	Kept string `json:"kept,omitempty"`
-}
-
-// KeptCaddy is Kept for a gateway's Caddy kept for the host owner's sites in
-// its deployment's caddy.d (docs/specs/2026-10-10-gateway-caddy-kept.md).
-const KeptCaddy = "caddy"
-
-// KeptData is Kept for a deployment whose only parts left on the host are
-// its data: files under its root and its named volumes, which a site remove
-// without --delete-data keeps.
-const KeptData = "data"
-
-// KeepCaddy is e marked as a deployment whose only part left on the host is
-// its Caddy.
-func KeepCaddy(e Entry) Entry {
-	e.Kept = KeptCaddy
-	return e
-}
-
-// Keep writes e, marked as keeping kept (KeptCaddy or KeptData), as id's
-// entry, under the claim's lock and through the claim's merge, so every
-// other entry stays as it was.
-func Keep(t Runner, id string, e Entry, kept string) error {
-	e.Kept = kept
-	command, err := ClaimCommand(id, e)
-	if err != nil {
-		return err
-	}
-	out, err := t.Run(command)
-	if err == nil {
-		return nil
-	}
-	if refusal := ParseClaim(out); refusal != nil {
-		return fmt.Errorf("%s: marking deployment %s's %s kept in %s: %w", t.Describe(), id, kept, Path, refusal)
-	}
-	return fmt.Errorf("%s: marking deployment %s's %s kept in %s: %w\n%s", t.Describe(), id, kept, Path, err, strings.TrimSpace(out))
 }
 
 // exclusiveRoles are the roles one host gives to one deployment: the gateway
@@ -775,9 +732,5 @@ func Describe(id string, e Entry) string {
 	if roles == "" {
 		roles = "none"
 	}
-	out := fmt.Sprintf("%s (token %s, %s, site %s, roles %s", id, e.Token, e.Domain, e.Site, roles)
-	if e.Kept != "" {
-		out += ", " + e.Kept + " kept"
-	}
-	return out + ")"
+	return fmt.Sprintf("%s (token %s, %s, site %s, roles %s)", id, e.Token, e.Domain, e.Site, roles)
 }

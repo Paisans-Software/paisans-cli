@@ -115,9 +115,11 @@ func TestForcedRefusesHostGone(t *testing.T) {
 }
 
 // A --ssh that reaches another declared site's host is refused: it would
-// take a live site down under another site's name.
+// take a live site down under another site's name. The site is the one the
+// host's admission record names; the registry, root's, is not read.
 func TestForcedRefusesAnotherDeclaredSitesHost(t *testing.T) {
 	w := setup(t)
+	delete(w.hosts["home-b"].files, registry.Path)
 	dest, _ := config.ParseDestination("ubuntu@192.0.2.99")
 	_, err := siteremove.BuildForced(w.cfg, w.secrets, "monitor-x", dest, w.hosts["home-b"], siteremove.Options{})
 	if err == nil || !strings.Contains(err.Error(), "home-b") {
@@ -128,10 +130,11 @@ func TestForcedRefusesAnotherDeclaredSitesHost(t *testing.T) {
 	}
 }
 
-// The site's own host is known by its registry entry, however --ssh spells
-// it.
-func TestForcedKnowsTheSitesOwnHostByItsRegistryEntry(t *testing.T) {
+// The site's own host is known by its admission record, however --ssh
+// spells it, with no registry to read.
+func TestForcedKnowsTheSitesOwnHostByItsAdmissionRecord(t *testing.T) {
 	w := setup(t)
+	delete(w.hosts["home-b"].files, registry.Path)
 	dest, _ := config.ParseDestination("root@192.0.2.12:2222")
 	p := forced(t, w, w.cfg, "home-b", dest, siteremove.Options{})
 	if !p.Current {

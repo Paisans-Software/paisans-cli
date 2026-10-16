@@ -8,11 +8,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/registry"
-	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -50,33 +50,23 @@ func ownerTransport(dest config.Destination, sudo bool) apply.SSHTransport {
 var reachOwner = func(dest config.Destination, sudo bool) apply.Transport { return ownerTransport(dest, sudo) }
 
 // deploymentsProbe lists, read only, each directory under the deployments'
-// base, each site file in a deployment's caddy.d and, where Docker is
-// installed, the deployment label, compose project and compose service of
-// every container carrying the label, tab separated. It fails,
-// saying what, rather than answer partly: a directory it may not read (the
-// registry's, which a read without sudo would take for an empty registry,
-// or the deployments' base), and docker ps failing. Its last line is "end",
-// so an answer cut short is told from a host holding nothing.
-var deploymentsProbe = fmt.Sprintf(`set -e; for d in %[1]s %[2]s; do if [ -e "$d" ] && ! { [ -r "$d" ] && [ -x "$d" ]; }; then echo "cannot read $d"; exit 3; fi; done; if [ -d %[2]s ]; then for d in %[2]s/*; do if [ -d "$d" ]; then echo "root ${d##*/}"; fi; done; fi; for f in %[2]s/*/caddy.d/*.caddy; do if [ -f "$f" ]; then echo "site ${f#%[2]s/}"; fi; done; if command -v docker >/dev/null 2>&1; then if ! out=$(docker ps -a --filter label=%[3]s --format '{{printf "container\t%%s\t%%s\t%%s" (.Label "%[3]s") (.Label "com.docker.compose.project") (.Label "com.docker.compose.service")}}' 2>&1); then echo "docker ps failed: $out"; exit 4; fi; if [ -n "$out" ]; then printf '%%s\n' "$out"; fi; fi; echo end`, registry.Dir, deployment.Base, deployment.Label)
+// base. It fails, saying what, rather than answer partly: a directory it may
+// not read (the registry's, which a read without sudo would take for an
+// empty registry, or the deployments' base). A deployment's containers are
+// in its user's own daemon, which root's docker does not reach, so none is
+// listed. Its last line is "end", so an answer cut short is told from a host
+// holding nothing.
+var deploymentsProbe = fmt.Sprintf(`set -e; for d in %[1]s %[2]s; do if [ -e "$d" ] && ! { [ -r "$d" ] && [ -x "$d" ]; }; then echo "cannot read $d"; exit 3; fi; done; if [ -d %[2]s ]; then for d in %[2]s/*; do if [ -d "$d" ]; then echo "root ${d##*/}"; fi; done; fi; echo end`, registry.Dir, deployment.Base)
+
+// hostDeploymentsAdmitted lists every admission record with its content,
+// each preceded by its path, so one read lists them all. Records are 644 in a
+// 755 directory: no sudo needed.
+var hostDeploymentsAdmitted = `for f in ` + admission.Dir + `/admitted.*.json; do [ -f "$f" ] || continue; echo "record $f"; cat -- "$f"; echo; done; echo end`
 
 // leftoverProbe is what deploymentsProbe found: the directories under the
-// base and the site files in each deployment's caddy.d, as
-// <token>/caddy.d/<file>, and each labelled container's deployment, project
-// and service.
+// base.
 type leftoverProbe struct {
-	roots, sites []string
-	containers   [][3]string
-}
-
-// sitesOf is the file names in the caddy.d of the deployment with token.
-func (p leftoverProbe) sitesOf(token string) []string {
-	var names []string
-	for _, s := range p.sites {
-		if name, ok := strings.CutPrefix(s, token+"/caddy.d/"); ok {
-			names = append(names, name)
-		}
-	}
-	return names
+	roots []string
 }
 
 func parseDeploymentsProbe(out string) (leftoverProbe, error) {
@@ -86,33 +76,80 @@ func parseDeploymentsProbe(out string) (leftoverProbe, error) {
 		return p, fmt.Errorf("its answer was cut short: %s", strings.TrimSpace(out))
 	}
 	for _, line := range lines[:len(lines)-1] {
-		switch {
-		case strings.HasPrefix(line, "root "):
-			p.roots = append(p.roots, strings.TrimPrefix(line, "root "))
-		case strings.HasPrefix(line, "site "):
-			p.sites = append(p.sites, strings.TrimPrefix(line, "site "))
-		case strings.HasPrefix(line, "container\t"):
-			fields := strings.Split(strings.TrimPrefix(line, "container\t"), "\t")
-			if len(fields) != 3 {
-				return p, fmt.Errorf("an unreadable line: %q", line)
-			}
-			p.containers = append(p.containers, [3]string{fields[0], fields[1], fields[2]})
-		default:
+		root, ok := strings.CutPrefix(line, "root ")
+		if !ok {
 			return p, fmt.Errorf("an unreadable line: %q", line)
 		}
+		p.roots = append(p.roots, root)
 	}
 	return p, nil
 }
 
-// runHostDeployments is `paisans host deployments`: what the registry of the
-// host --ssh names holds, and what of a deployment is on it with no registry
-// entry. It needs no configuration, and changes nothing. See
+// listedRecord is one admission record the listing found: its path, and
+// the record or why it does not parse.
+type listedRecord struct {
+	path string
+	rec  admission.Record
+	err  error
+}
+
+// parseAdmitted reads hostDeploymentsAdmitted's answer: each record parsed
+// by the token in its file's name. A line naming a record's path starts it,
+// which no line of a record's indented JSON can look like; the listing's
+// echo ends it with an empty line after the record's own final newline.
+func parseAdmitted(out string) ([]listedRecord, error) {
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) == 0 || lines[len(lines)-1] != "end" {
+		return nil, fmt.Errorf("its answer was cut short: %s", strings.TrimSpace(out))
+	}
+	var found []listedRecord
+	var path string
+	var content []string
+	flush := func() {
+		if path == "" {
+			return
+		}
+		if n := len(content); n > 0 && content[n-1] == "" {
+			content = content[:n-1]
+		}
+		token := strings.TrimSuffix(strings.TrimPrefix(path, admission.Dir+"/admitted."), ".json")
+		rec, err := admission.ParseRecord([]byte(strings.Join(content, "\n")+"\n"), token)
+		found = append(found, listedRecord{path: path, rec: rec, err: err})
+	}
+	for _, line := range lines[:len(lines)-1] {
+		if p, ok := strings.CutPrefix(line, "record "+admission.Dir+"/"); ok {
+			flush()
+			path, content = admission.Dir+"/"+p, nil
+			continue
+		}
+		if path == "" {
+			return nil, fmt.Errorf("an unreadable line: %q", line)
+		}
+		content = append(content, line)
+	}
+	flush()
+	return found, nil
+}
+
+// yesNo is b as the listing says it.
+func yesNo(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "no"
+}
+
+// runHostDeployments is `paisans host deployments`: every admission record
+// on the host --ssh names, then, through sudo, what its registry holds and
+// what of a deployment is on it with no registry entry. With --sudo=false it
+// lists the records alone, which any user can read. It needs no
+// configuration, and changes nothing. See
 // docs/specs/2026-10-10-remove-without-config.md.
 func runHostDeployments(args []string) error {
 	fs := newFlagSet("host deployments", flag.ContinueOnError)
 	reporter := commonFlags(fs)
 	sshFlag := fs.String("ssh", "", "the host to read, user@host[:port]")
-	sudo := fs.Bool("sudo", true, "run remote commands through sudo, since the registry is root's")
+	sudo := fs.Bool("sudo", true, "run remote commands through sudo, since the registry is root's; --sudo=false lists admission records only, which are readable without sudo")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -128,27 +165,60 @@ func runHostDeployments(args []string) error {
 	}
 	r := reporter()
 	t := reachOwner(dest, *sudo)
-	// The probe first, since it fails on a registry directory it may not
-	// read, which reading the registry would take for an empty one.
 	r.Section(fmt.Sprintf("deployments on %s", dest))
 	s := r.Step("read " + dest.String())
-	out, err := t.Run(deploymentsProbe)
+	out, err := t.Run(hostDeploymentsAdmitted)
 	if err != nil {
 		s.Fail(err)
-		return fmt.Errorf("host deployments: %s: listing %s and the labelled containers failed, so nothing is listed: %w: %s", dest, deployment.Base, err, strings.TrimSpace(out))
+		return fmt.Errorf("host deployments: %s: listing the admission records in %s failed, so nothing is listed: %w: %s", dest, admission.Dir, err, strings.TrimSpace(out))
 	}
-	found, err := parseDeploymentsProbe(out)
+	records, err := parseAdmitted(out)
 	if err != nil {
 		s.Fail(err)
-		return fmt.Errorf("host deployments: %s: listing %s and the labelled containers: %w. Nothing is listed", dest, deployment.Base, err)
+		return fmt.Errorf("host deployments: %s: listing the admission records in %s: %w. Nothing is listed", dest, admission.Dir, err)
 	}
-	reg, err := registry.Read(t)
-	if err != nil {
-		s.Fail(err)
-		return fmt.Errorf("host deployments: %w. Nothing is listed", err)
+	var found leftoverProbe
+	reg := registry.Registry{Deployments: map[string]registry.Entry{}}
+	if *sudo {
+		// The probe before the registry, since it fails on a registry
+		// directory it may not read, which reading the registry would take
+		// for an empty one.
+		out, err := t.Run(deploymentsProbe)
+		if err != nil {
+			s.Fail(err)
+			return fmt.Errorf("host deployments: %s: listing %s failed, so nothing is listed: %w: %s", dest, deployment.Base, err, strings.TrimSpace(out))
+		}
+		if found, err = parseDeploymentsProbe(out); err != nil {
+			s.Fail(err)
+			return fmt.Errorf("host deployments: %s: listing %s: %w. Nothing is listed", dest, deployment.Base, err)
+		}
+		if reg, err = registry.Read(t); err != nil {
+			s.Fail(err)
+			return fmt.Errorf("host deployments: %w. Nothing is listed", err)
+		}
+	}
+	s.Done("")
+
+	for _, a := range records {
+		if a.err != nil {
+			r.Warn(fmt.Sprintf("%s: %v", a.path, a.err), "")
+			continue
+		}
+		rec := a.rec
+		roles := strings.Join(rec.Roles, ",")
+		if roles == "" {
+			roles = "none"
+		}
+		r.Step(fmt.Sprintf("%s: admitted: %s as %s (%s), watchdog %s, public ports %s, at %s", rec.Deployment, rec.User, rec.Site, roles, yesNo(rec.Grants.Watchdog), yesNo(rec.Grants.PublicPorts), rec.AdmittedAt)).End(ui.OK, "")
+	}
+	if len(records) == 0 {
+		r.Step("no admission record in "+admission.Dir).End(ui.OK, "")
+	}
+	if !*sudo {
+		r.Result("%d admission record(s). The registry and the deployments' directories are root's: run without --sudo=false to list them.", len(records))
+		return nil
 	}
 
-	s.Done("")
 	ids := make([]string, 0, len(reg.Deployments))
 	for id := range reg.Deployments {
 		ids = append(ids, id)
@@ -158,57 +228,17 @@ func runHostDeployments(args []string) error {
 	for _, id := range ids {
 		e := reg.Deployments[id]
 		tokens[e.Token], roots[e.Root] = true, true
-		roles := e.Roles
-		if roles == "" {
-			roles = "none"
-		}
-		line := fmt.Sprintf("%s: token %s, %s, site %s, roles %s, root %s", id, e.Token, e.Domain, e.Site, roles, e.Root)
-		sitesDir := render.HostSitesDir(deployment.Deployment{ID: id})
-		sites := found.sitesOf(e.Token)
-		switch {
-		case e.Kept == registry.KeptCaddy && len(sites) > 0:
-			line += fmt.Sprintf("; caddy kept: serves %s sites (%s)", sitesDir, strings.Join(sites, ", "))
-		case e.Kept == registry.KeptCaddy:
-			line += fmt.Sprintf("; caddy kept, but %s holds no site now: paisans site remove --force --ssh %s --id %s removes it", sitesDir, *sshFlag, e.Token)
-		case e.Kept == registry.KeptData:
-			line += fmt.Sprintf("; data kept: paisans site remove --force --ssh %s --id %s --delete-data deletes it", *sshFlag, e.Token)
-		}
-		r.Step(line).End(ui.OK, "")
+		r.Step(registryLine(id, e)).End(ui.OK, "")
 	}
 	if len(ids) == 0 {
 		r.Step("none in "+registry.Path).End(ui.OK, "")
 	}
 
 	var left []string
-	seen := map[string]bool{}
 	for _, name := range found.roots {
 		dir := deployment.Base + "/" + name
 		if !tokens[name] && !roots[dir] {
 			left = append(left, dir+": no registry entry names this deployment directory")
-		}
-	}
-	for _, c := range found.containers {
-		id, project, service := c[0], c[1], c[2]
-		if _, ok := reg.Deployments[id]; ok {
-			continue
-		}
-		// A Caddy kept for the owner's sites whose entry was removed by
-		// hand still serves them, so it is named as that.
-		if service == "caddy" && deployment.ValidID(id) && project == (deployment.Deployment{ID: id}).Project("infra") && len(found.sitesOf(deployment.Deployment{ID: id}.Token())) > 0 {
-			if !seen["orphaned "+id] {
-				seen["orphaned "+id] = true
-				od := deployment.Deployment{ID: id}
-				left = append(left, fmt.Sprintf("%s orphaned Caddy: serves %s sites (%s); its registry entry was removed, so remove it by hand once those sites have moved", id, render.HostSitesDir(od), strings.Join(found.sitesOf(od.Token()), ", ")))
-			}
-			continue
-		}
-		what := "containers"
-		if project != "" {
-			what = "compose project " + project
-		}
-		if !seen[what+" "+id] {
-			seen[what+" "+id] = true
-			left = append(left, fmt.Sprintf("%s: no registry entry for deployment %q, which its containers' label names", what, id))
 		}
 	}
 	if len(left) > 0 {
@@ -222,11 +252,20 @@ func runHostDeployments(args []string) error {
 
 	switch {
 	case len(ids) > 0:
-		r.Result("%d deployment(s) in the registry. paisans site remove --force --ssh %s --id <id or token> cleans one off this host.", len(ids), *sshFlag)
+		r.Result("%d deployment(s) in the registry. paisans site remove --force --ssh <the deployment's user>@<host> --id <id or token> cleans one off this host.", len(ids))
 	case len(left) > 0:
 		r.Result("No deployment in the registry; what is listed above is removed by hand.")
 	default:
 		r.Result("No deployment in the registry, and nothing else of paisans on %s.", dest)
 	}
 	return nil
+}
+
+// registryLine is one registry entry as the listing says it.
+func registryLine(id string, e registry.Entry) string {
+	roles := e.Roles
+	if roles == "" {
+		roles = "none"
+	}
+	return fmt.Sprintf("%s: token %s, %s, site %s, roles %s, root %s", id, e.Token, e.Domain, e.Site, roles, e.Root)
 }

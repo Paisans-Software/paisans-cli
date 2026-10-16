@@ -177,7 +177,7 @@ func TestSiteRemoveRefusesARootLogin(t *testing.T) {
 				}
 			}
 			for _, c := range b.commands {
-				if c != "true" && !strings.Contains(c, "getent passwd") && !strings.Contains(c, "ip -br addr") {
+				if c != "true" && !strings.Contains(c, "getent passwd") && !strings.Contains(c, "ip -br addr") && !strings.Contains(c, "$(id -un)") {
 					t.Errorf("ran %s before refusing", c)
 				}
 			}
@@ -212,7 +212,7 @@ func TestSiteRemoveRefusesALoginThatIsNotTheDeploymentsUser(t *testing.T) {
 	quiet := func(t *testing.T, b *host) {
 		t.Helper()
 		for _, c := range b.commands {
-			if c != "true" && !strings.Contains(c, "getent passwd") && !strings.Contains(c, "ip -br addr") {
+			if c != "true" && !strings.Contains(c, "getent passwd") && !strings.Contains(c, "ip -br addr") && !strings.Contains(c, "$(id -un)") {
 				t.Errorf("ran %s before refusing", c)
 			}
 		}
@@ -239,9 +239,6 @@ func TestSiteRemoveRefusesALoginThatIsNotTheDeploymentsUser(t *testing.T) {
 			quiet(t, b)
 		})
 		t.Run(name+", no record", func(t *testing.T) {
-			if name == "by id" {
-				t.Skip("--id finds the deployment by its registry entry; Task 13 reads the record there")
-			}
 			w := setup(t)
 			b := w.hosts["home-b"]
 			delete(b.files, recordPath)

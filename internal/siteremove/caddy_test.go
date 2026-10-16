@@ -214,7 +214,7 @@ func TestAGatewaysCaddyIsKeptForTheOwnersSites(t *testing.T) {
 	if strings.Join(listed, ",") != dep.RelPath("infra", "caddy", "Caddyfile")+","+dep.RelPath("infra", "caddy", "caddy.env")+","+dep.RelPath("infra", "compose.yaml") {
 		t.Errorf("the manifest lists %v", listed)
 	}
-	if e := vmRegistry(t, w).Deployments[ourID]; e.Kept != "" || e.Roles == "" {
+	if e := vmRegistry(t, w).Deployments[ourID]; e.Roles == "" {
 		t.Errorf("the registry entry, which a kept Caddy needs no mark in: %+v", e)
 	}
 	if _, ok := vm.files[deployrecord.Path(dep)]; ok {
@@ -377,8 +377,6 @@ func TestByIDKeepsTheSameCaddyAsTheConfiguration(t *testing.T) {
 				b.WriteString(f + " " + hexSum(vm.files[f]) + "\n")
 			}
 		}
-		e := vmRegistry(t, w).Deployments[ourID]
-		b.WriteString("kept " + e.Kept + "\n")
 		results[how] = b.String()
 	}
 	if results["config"] != results["id"] {

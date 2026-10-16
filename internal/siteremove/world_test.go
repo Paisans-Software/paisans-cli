@@ -375,6 +375,23 @@ func (h *host) Run(command string) (string, error) {
 	if out, ok, err := meshfake.ChainedRead(command, h.Run); ok {
 		return out, err
 	}
+	// admission.Mine: the login's name, then every admission record.
+	if strings.HasPrefix(command, `echo "user $(id -un)"; for f in `+admission.Dir+`/admitted.`) {
+		login := "ubuntu"
+		switch {
+		case h.loginRoot:
+			login = "root"
+		case h.loginName != "":
+			login = h.loginName
+		}
+		out := "user " + login + "\n"
+		for _, p := range h.sortedFiles() {
+			if strings.HasPrefix(p, admission.Dir+"/admitted.") && strings.HasSuffix(p, ".json") {
+				out += p + "\n"
+			}
+		}
+		return out, nil
+	}
 	switch field, _ := strings.CutPrefix(command, wgHelper+"show "); field {
 	case "allowed-ips", "persistent-keepalive", "listen-port":
 		out, _ := meshfake.ShowRunning(field, h.runningWG())

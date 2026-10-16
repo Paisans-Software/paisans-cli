@@ -208,7 +208,7 @@ func TestARemovalCompletesAndKeepsWhatIsNotOurs(t *testing.T) {
 		t.Errorf("authorized_keys after:\n%s", b.files[keysAt])
 	}
 	// The data stays, and the registry, host evict's, is as it was.
-	if reg, _ := registry.Parse([]byte(b.files["/var/lib/paisans/registry.json"])); reg.Deployments[ourID].Kept != "" || reg.Deployments[ourID].Site != "home-b" || reg.Deployments[otherID].Site == "" {
+	if reg, _ := registry.Parse([]byte(b.files["/var/lib/paisans/registry.json"])); reg.Deployments[ourID].Site != "home-b" || reg.Deployments[otherID].Site == "" {
 		t.Errorf("the registry after:\n%s", b.files["/var/lib/paisans/registry.json"])
 	}
 	if !p.DataKept || !strings.Contains(strings.Join(p.Kept, "\n"), "home-b: the data in "+root+" and the deployment's volumes stay; host evict deletes them") {

@@ -362,7 +362,7 @@ type byIDArgs struct {
 var tokenShape = regexp.MustCompile(fmt.Sprintf("^[0-9a-f]{%d}$", deployment.TokenLength))
 
 // runSiteRemoveByID is `site remove --force --ssh <dest> --id <id or token>`:
-// one host cleaned of the deployment its registry names, with no
+// one host cleaned of the deployment the login's admission record names, with no
 // paisans-stack.yaml and no secrets file. See siteremove.BuildForcedByID and
 // docs/specs/2026-10-10-remove-without-config.md.
 //
@@ -374,7 +374,7 @@ func runSiteRemoveByID(r ui.Reporter, site string, a byIDArgs, stdin io.Reader, 
 	case !a.force:
 		return &ui.Problem{Hint: "--id needs --force", Explain: "--id names a deployment for --force to clean off one host, so add --force."}
 	case site != "":
-		return &ui.Problem{Hint: "--id takes no site", Explain: "The host's registry entry names the site, so drop " + site + "."}
+		return &ui.Problem{Hint: "--id takes no site", Explain: "The login's admission record on the host names the site, so drop " + site + "."}
 	case a.config:
 		return &ui.Problem{Hint: "--id takes no --config", Explain: "--id reads no " + config.FileName + ", and a configuration names its own id. Drop --config, or --id."}
 	case a.secrets:

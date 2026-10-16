@@ -172,8 +172,8 @@ var helpCommands = []helpCommand{
 		name:    "host deployments",
 		summary: "List every deployment on a host.",
 		usage:   []string{"paisans host deployments --ssh <user@host[:port]> [--sudo=false]"},
-		detail: "List every deployment in the registry of the host --ssh names (id, token, domain, site, roles and root, and a Caddy kept for its caddy.d, /srv/paisans/<token>/caddy.d), and any deployment directory or labelled compose project no registry entry names. " +
-			"Needs no " + config.FileName + "; changes nothing.",
+		detail: "List every admission record on the host --ssh names (the deployment, its user, the site and roles it was admitted as, the grants and when), every deployment in its registry (id, token, domain, site, roles and root), and any deployment directory no registry entry names. " +
+			"--sudo=false lists admission records only, which are readable without sudo. Needs no " + config.FileName + "; changes nothing.",
 	},
 	{
 		name:    "host request",
@@ -228,7 +228,7 @@ var helpCommands = []helpCommand{
 		},
 		detail: "Take a site out of the running deployment in gated stages: its data out (the Patroni leader switched to the Sync Standby, its Garage node out of the layout and the objects moved), out of the cluster (its etcd member, and the mesh, HAProxy and gateway routes on every remaining site, and each replica's patroni.env, one at a time; one data site out of two and a witness takes the witness out of etcd too), its host cleaned of everything provably this deployment's (a gateway's Caddy kept, reduced to the host owner's sites in its caddy.d, /srv/paisans/<token>/caddy.d, while there are any), the A and AAAA records dns init made for its public address deleted at the DNS provider, and its entry out of " + config.FileName + ".\n\n" +
 			"Refuses the only gateway, data or apps site, a site an app is pinned to, and an unhealthy cluster. --host-gone skips the host; --delete-data deletes its data after the site's name is typed at a terminal. Writes nothing without --execute.\n\n" +
-			"--force --ssh <host> --id <id or token>, with no " + config.FileName + ": clean that host of the deployment its registry names, as --force does, from the registry entry alone. DNS is not modified. --execute asks for the site's name at a terminal.\n\n" +
+			"--force --ssh <host> --id <id or token>, with no " + config.FileName + ": clean that host of the deployment the login's own admission record names, as --force does, from that record alone, logging in as the deployment's user. DNS is not modified. --execute asks for the site's name at a terminal.\n\n" +
 			"--evict: take out a site whose host still runs and that nobody else can reach, never reaching that host: the mesh cut first on every remaining site, then its DNS records, Patroni's own failover, its etcd member, its Garage node skipped as dead, then the rest as remove does. " +
 			"Generates the secrets of a replacement declared in the same edit, which apply then brings up. --execute asks for the site's name, and for revoked, lose writes or lose objects when they apply.",
 	},
