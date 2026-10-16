@@ -1475,6 +1475,8 @@ through both nodes. A second grows to three nodes at replication 3, one a
 the Docker tests run alone and at real timing: the fake-cluster tests, whose
 `TestMain` makes every wait instant, are left out of that build. It runs its probe in `curlimages/curl`, which it pulls.
 
+They run against a rootless Docker, the daemon a deployment runs: each calls `dockertest.RequireRootless`, which fails a test whose daemon is not rootless. Point `DOCKER_HOST` at one (`unix:///run/user/$(id -u)/docker.sock` on a Linux machine with Docker's rootless extras), or set `PAISANS_DOCKER_ROOTFUL=1` to run them against a rootful daemon, which they then say proves nothing about a deployment's.
+
 **Registry tests** read published images over the network, anonymously and
 without Docker, behind their own tag:
 

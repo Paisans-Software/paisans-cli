@@ -29,6 +29,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/dockertest"
 	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
@@ -99,9 +100,7 @@ func garageKeyID(t *testing.T) string {
 // does not have it, rather than failing in a way that looks like a real bug.
 func requireDocker(t *testing.T) {
 	t.Helper()
-	if _, err := exec.LookPath("docker"); err != nil {
-		t.Skip("docker is not on PATH; skipping the Garage integration test")
-	}
+	dockertest.RequireRootless(t)
 }
 
 // startGarage starts dxflrs/garage:v1.0.1 as a single node, replication
