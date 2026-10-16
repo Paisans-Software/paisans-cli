@@ -417,6 +417,11 @@ func (u ubuntu) AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (
 	if dockerPresent {
 		describe += ", leaving your Docker at the version it is"
 	}
+	if !dockerPresent && facts.installed["containerd.io"] {
+		// containerd.io is the owner's, and is neither held nor claimed,
+		// but docker-ce depends on a version of it, which apt installs.
+		describe += "; your containerd.io may be upgraded to the version docker-ce needs, which restarts it, though its containers run on"
+	}
 	if units := SystemUnits(added.Packages); len(units) > 0 {
 		// docker-ce's and containerd.io's scripts would start their system
 		// daemons, and dockerd changes forwarding and the firewall as it

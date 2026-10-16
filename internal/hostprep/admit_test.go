@@ -371,6 +371,8 @@ func TestTheDockerHoldRefusesACopyThatDiffers(t *testing.T) {
 
 // containerd.io already on the host is the owner's: the hold forbids only
 // Docker's units, and containerd.io is not among what the install adds.
+// apt may still upgrade it to what docker-ce depends on, and the plan says
+// so.
 func TestTheDockerHoldLeavesAnOwnersContainerd(t *testing.T) {
 	profile, err := hostprep.Select(hostprep.ParseOSRelease(ubuntu2404))
 	if err != nil {
@@ -385,6 +387,9 @@ func TestTheDockerHoldLeavesAnOwnersContainerd(t *testing.T) {
 	command := s.Steps[len(s.Steps)-1].Command
 	if slices.Contains(added.Packages, "containerd.io") {
 		t.Errorf("the owner's containerd.io is claimed: %v", added.Packages)
+	}
+	if d := s.Steps[len(s.Steps)-1].Describe; !strings.Contains(d, "your containerd.io may be upgraded to the version docker-ce needs, which restarts it") {
+		t.Errorf("the install does not name the upgrade of the owner's containerd.io: %s", d)
 	}
 	if !strings.Contains(command, "  case $a in docker|docker.service|docker.socket) exit 101 ;; esac\n") {
 		t.Errorf("the hold does not forbid Docker's units alone:\n%s", command)
