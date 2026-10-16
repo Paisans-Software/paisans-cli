@@ -46,17 +46,34 @@ func SudoRights(cfg *config.Config, probes []SudoProbe) []Finding {
 				"recover:",
 				fmt.Sprintf("  1. The host's owner runs `paisans host admit` for %s again, which installs %s and its line in /etc/sudoers.d/%s.", p.Site, helper, d.Prefix()),
 			}}
-		if helperErr != nil || strings.Contains(p.Out, "a password is required") {
+		if helperErr != nil {
+			out = append(out, Finding{Section: SectionSudo, Level: Fail,
+				Line: fmt.Sprintf("%s: cannot name the WireGuard helper to look for: %v", p.Site, helperErr),
+				More: []string{
+					"The helper is named after the deployment's WireGuard interface, which comes from the `id` in its configuration file, so this is the configuration, not the host.",
+					"recover:",
+					"  1. Restore the `id` this deployment was created with in its configuration file; every name on its hosts is derived from it.",
+					fmt.Sprintf("  2. `paisans doctor --site %s` again.", p.Site),
+				}})
+			continue
+		}
+		if strings.Contains(p.Out, "a password is required") {
 			out = append(out, missing)
 			continue
 		}
 		list, ok := admitrules.ReadSudoList(user, strings.Split(strings.TrimRight(p.Out, "\n"), "\n"))
 		if !ok {
-			out = append(out, Finding{Section: SectionSudo, Level: Fail, Line: fmt.Sprintf("%s: could not read what sudo lets %s run", p.Site, user), More: lastLines(p.Out+"\n"+p.Err, 3)})
+			more := append(lastLines(p.Out+"\n"+p.Err, 3),
+				"recover:",
+				fmt.Sprintf("  1. The host's owner runs `LC_ALL=C sudo -n -l` as %s on %s and reads the answer: a translated or unfamiliar sudo is the likely cause.", user, p.Site),
+				fmt.Sprintf("  2. If it lists %s and nothing else, report that output as a doctor bug. If not, the host's owner checks the line host admit wrote in /etc/sudoers.d/%s with `visudo -c`, or runs `paisans host admit` for %s again.", admitrules.HelperRule(helper), d.Prefix(), p.Site),
+				fmt.Sprintf("  3. `paisans doctor --site %s` again.", p.Site),
+			)
+			out = append(out, Finding{Section: SectionSudo, Level: Fail, Line: fmt.Sprintf("%s: could not read what sudo lets %s run", p.Site, user), More: more})
 			continue
 		}
 		beyond, defaults := list.BeyondHelper(helper)
-		if extra := append(beyond, defaults...); len(extra) > 0 {
+		if extra := slices.Concat(beyond, defaults); len(extra) > 0 {
 			shown := make([]string, len(extra))
 			for i, e := range extra {
 				shown[i] = ui.Visible(e)

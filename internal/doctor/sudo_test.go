@@ -39,10 +39,10 @@ func TestSudoRights(t *testing.T) {
 		{"a specific Defaults line", sudoDefaults + "Runas and Command-specific defaults for ubuntu:\n    Defaults!/usr/local/libexec/paisans/wg-psns-f2a9 setenv\n\nUser ubuntu may run the following commands on home-a:\n    " + helperEntry + "\n", "", Fail, "set for one runas user or command alone", ""},
 		{"not allowed", "Sorry, user ubuntu may not run sudo on home-a.\n", "exit status 1", Fail, "home-a: sudo does not let ubuntu run the WireGuard helper", "`paisans host admit`"},
 		{"password required", "sudo: a password is required\n", "exit status 1", Fail, "home-a: sudo does not let ubuntu run the WireGuard helper", ""},
-		{"another user refused", "Sorry, user root may not run sudo on home-a.\n", "exit status 1", Fail, "home-a: could not read what sudo lets ubuntu run", ""},
-		{"refusal beside a rule", "Sorry, user ubuntu may not run sudo on home-a.\n    (ALL : ALL) ALL\n", "", Fail, "home-a: could not read what sudo lets ubuntu run", ""},
-		{"unrecognised", "something else\n", "", Fail, "home-a: could not read what sudo lets ubuntu run", ""},
-		{"translated", "Benutzer ubuntu darf die folgenden Befehle auf home-a ausführen:\n    " + helperEntry + "\n", "", Fail, "home-a: could not read what sudo lets ubuntu run", ""},
+		{"another user refused", "Sorry, user root may not run sudo on home-a.\n", "exit status 1", Fail, "home-a: could not read what sudo lets ubuntu run", "recover:\n  1. The host's owner runs `LC_ALL=C sudo -n -l` as ubuntu"},
+		{"refusal beside a rule", "Sorry, user ubuntu may not run sudo on home-a.\n    (ALL : ALL) ALL\n", "", Fail, "home-a: could not read what sudo lets ubuntu run", "recover:\n  1. The host's owner runs `LC_ALL=C sudo -n -l` as ubuntu"},
+		{"unrecognised", "something else\n", "", Fail, "home-a: could not read what sudo lets ubuntu run", "recover:\n  1. The host's owner runs `LC_ALL=C sudo -n -l` as ubuntu"},
+		{"translated", "Benutzer ubuntu darf die folgenden Befehle auf home-a ausführen:\n    " + helperEntry + "\n", "", Fail, "home-a: could not read what sudo lets ubuntu run", "recover:\n  1. The host's owner runs `LC_ALL=C sudo -n -l` as ubuntu"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			fs := SudoRights(cfg, []SudoProbe{{Site: "home-a", Out: c.out, Err: c.err}})
@@ -54,5 +54,22 @@ func TestSudoRights(t *testing.T) {
 				t.Errorf("got %v %q\n%s", f.Level, f.Line, strings.Join(f.More, "\n"))
 			}
 		})
+	}
+}
+
+// A deployment whose id names no WireGuard helper is a configuration
+// error, reported as one, not as a host that needs admitting again.
+func TestSudoRightsWithoutAHelperName(t *testing.T) {
+	cfg := fixture(t)
+	cfg.ID = "not-hex"
+	fs := SudoRights(cfg, []SudoProbe{{Site: "home-a", Out: sudoList(helperEntry)}})
+	if len(fs) != 1 {
+		t.Fatalf("want one finding:\n%s", dump(fs))
+	}
+	f := fs[0]
+	more := strings.Join(f.More, "\n")
+	if f.Level != Fail || !strings.Contains(f.Line, "home-a: cannot name the WireGuard helper to look for") || !strings.Contains(f.Line, "is not a deployment's WireGuard interface name") ||
+		!strings.Contains(more, "`id`") || strings.Contains(more, "host admit") {
+		t.Errorf("got %v %q\n%s", f.Level, f.Line, more)
 	}
 }
