@@ -23,6 +23,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/apply/applytest"
 	"github.com/paisans-software/paisans-cli/internal/apply/meshfake"
@@ -1430,6 +1431,8 @@ func newWorld(t *testing.T, edits ...func(string) string) *world {
 		id, e := registry.For(cfg, name, mustTime())
 		reg.Deployments[id] = e
 		h.files[registry.Path] = encode(t, reg)
+		path, record := admitted(t, cfg, name)
+		h.files[path] = record
 		h.containers = append(h.containers, hostcheck.Container{Name: "paisans-f2a9-infra-etcd-1", Project: "paisans-f2a9-infra", Deployment: ourID, Image: "sha256:etcd", PID: 10})
 		h.networks = append(h.networks, hostcheck.Network{Name: "bridge"})
 	}
@@ -1549,4 +1552,23 @@ func listenServers(cfg string) [][2]string {
 		}
 	}
 	return out
+}
+
+// admitted is the path and content of the admission record host admit
+// writes for site.
+func admitted(t *testing.T, cfg *config.Config, site string) (string, string) {
+	t.Helper()
+	req, err := admission.Build(cfg, site)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := admission.EncodeRecord(admission.NewRecord(req, req.Grants, "", mustTime()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := admission.Path(cfg.Deployment().Token())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path, string(b)
 }

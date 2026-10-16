@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/apply/meshfake"
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -330,6 +331,8 @@ func newMesh(t *testing.T, edits ...func(*config.Config)) *mesh {
 			t.Fatal(err)
 		}
 		h.files[registry.Path] = string(data)
+		path, record := admitted(t, cfg, name)
+		h.files[path] = record
 		m.hosts[name] = h
 	}
 	saved := []any{sleep, handshakeWait, handshakePoll, healthWait, healthPoll}
@@ -343,7 +346,7 @@ func newMesh(t *testing.T, edits ...func(*config.Config)) *mesh {
 	return m
 }
 
-// joining makes site's host a fresh one, no claim and no files, and every
+// joining makes site's host a fresh one, no admission record and no files, and every
 // other site's mesh as an apply without it rendered it, since it has never
 // run.
 func (m *mesh) joining(site string) {
@@ -684,7 +687,7 @@ func TestARekeyLeavesASiteNotBroughtUpAlone(t *testing.T) {
 	if len(m.hosts["watch"].files) != 0 {
 		t.Error("the site not brought up was written to")
 	}
-	if _, err := m.build("watch"); err == nil || !strings.Contains(err.Error(), "holds no claim") {
+	if _, err := m.build("watch"); err == nil || !strings.Contains(err.Error(), "has not admitted this deployment") {
 		t.Errorf("naming it: %v", err)
 	}
 }
@@ -790,13 +793,33 @@ func TestAnAllRunResumesWithoutRekeyingAgain(t *testing.T) {
 	}
 }
 
-// A site whose host lost its claim, while its peers still list its key, is
-// not taken for one not brought up yet: a rekey would leave it out while it
+// A site whose host lost its admission record, while its peers still list
+// its key, is not taken for one not brought up yet: a rekey would leave it out while it
 // runs.
 func TestARekeyRefusesASiteThatOnlyLostItsClaim(t *testing.T) {
 	m := newMesh(t)
-	delete(m.hosts["watch"].files, registry.Path)
-	if _, err := m.build("vm"); err == nil || !strings.Contains(err.Error(), "watch's host holds no claim") || !strings.Contains(err.Error(), "lists its WireGuard key as a peer") {
+	path, _ := admitted(t, m.cfg, "watch")
+	delete(m.hosts["watch"].files, path)
+	if _, err := m.build("vm"); err == nil || !strings.Contains(err.Error(), "watch's host has not admitted this deployment") || !strings.Contains(err.Error(), "lists its WireGuard key as a peer") {
 		t.Errorf("err = %v", err)
 	}
+}
+
+// admitted is the path and content of the admission record host admit
+// writes for site.
+func admitted(t *testing.T, cfg *config.Config, site string) (string, string) {
+	t.Helper()
+	req, err := admission.Build(cfg, site)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := admission.EncodeRecord(admission.NewRecord(req, req.Grants, "", time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := admission.Path(cfg.Deployment().Token())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path, string(b)
 }

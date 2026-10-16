@@ -58,15 +58,15 @@ func TestInitRefersAnUnreachableSiteToDoctor(t *testing.T) {
 	}
 }
 
-// A site that answered ssh but whose registry could not be read is not
+// A site that answered ssh but whose manifest could not be read is not
 // doctor's reach finding, and gets no referral.
 func TestInitDoesNotReferASiteThatAnswered(t *testing.T) {
 	sites := fakeSites()
-	sites["home-b"].registry = "{not json"
+	sites["home-b"].broken = errors.New("cat: Input/output error")
 	path, _ := initWorld(t, nil, sites, []byte{212, 37})
 	err := runInitQuietly(t, path)
 	if err == nil {
-		t.Fatal("init read an unreadable registry")
+		t.Fatal("init read an unreadable manifest")
 	}
 	if strings.Contains(err.Error(), "paisans doctor") {
 		t.Errorf("referred to doctor:\n%v", err)

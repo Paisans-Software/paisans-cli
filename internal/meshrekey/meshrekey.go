@@ -160,7 +160,7 @@ func build(cfg *config.Config, store Store, sites []string, all bool, transports
 	}
 	for _, name := range sites {
 		if contains(p.Joining, name) {
-			return nil, fmt.Errorf("mesh rekey: %s holds no claim of this deployment yet, so it runs no key to replace. The apply that brings it up renders the key the secrets hold. Nothing was changed", name)
+			return nil, fmt.Errorf("mesh rekey: %s has not admitted this deployment yet, so it runs no key to replace. The apply that brings it up renders the key the secrets hold. Nothing was changed", name)
 		}
 	}
 	p.all = all

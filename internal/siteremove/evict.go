@@ -147,7 +147,7 @@ func (p *Plan) liveSites() []string { return p.live(p.end.SiteNames()) }
 func (p *Plan) liveEnd() *config.Config { return p.end.WithoutJoining(p.Joining()...) }
 
 // JoiningSites is the sites cfg declares, but site, that are new to this
-// deployment (meshkey.Joining): no claim on their host, and no remaining site
+// deployment (meshkey.Joining): not admitted on their host, and no remaining site
 // or gateway record that says they ever ran in it. A host that does not
 // answer is an error: whether it is new cannot be told.
 func JoiningSites(cfg *config.Config, secrets *config.Secrets, site string, transports map[string]apply.Transport) ([]string, error) {
@@ -155,7 +155,7 @@ func JoiningSites(cfg *config.Config, secrets *config.Secrets, site string, tran
 	var none *meshkey.NoAnswer
 	switch {
 	case errors.As(err, &none) && errors.Is(err, apply.ErrUnreachable):
-		return nil, fmt.Errorf("site remove %s: %s does not answer over ssh (%v). Every remaining site is read, and a site declared for the first time is read to see that its host holds no claim yet. Fix ssh and run again. Nothing was changed", site, none.Site, none.Err)
+		return nil, fmt.Errorf("site remove %s: %s does not answer over ssh (%v). Every remaining site is read, and a site declared for the first time is read to see that its host has not admitted this deployment yet. Fix ssh and run again. Nothing was changed", site, none.Site, none.Err)
 	case err != nil:
 		return nil, fmt.Errorf("site remove %s: %w", site, err)
 	}
