@@ -495,7 +495,7 @@ func (r *runner) routes(t apply.Transport) {
 // that site, with the grants its roles need. It reads as the deployment's
 // user; host admit claimed the host in its registry.
 func (r *runner) admission(t apply.Transport) {
-	rec, err := admission.ForSite(t, r.cfg.ID, r.newSite, r.cfg.Sites[r.newSite])
+	rec, err := admission.ForSite(t, r.cfg, r.newSite)
 	if err != nil {
 		r.refuse(r.newSite, "admission", "%v. Send the host's owner `paisans host request --site %s > %s.admit`", err, r.newSite, r.newSite)
 		return

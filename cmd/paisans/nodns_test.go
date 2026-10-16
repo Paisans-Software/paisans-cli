@@ -54,12 +54,13 @@ func TestMain(m *testing.M) {
 	// with every grant its roles need.
 	// The record is still read, so a test sees which hosts were checked and
 	// when; a test about the check reads and judges it (realAdmission).
-	admissionForSite = func(t admission.Reader, id, site string, s config.Site) (admission.Record, error) {
-		if p, err := admission.Path(deployment.Deployment{ID: id}.Token()); err == nil {
+	admissionForSite = func(t admission.Reader, cfg *config.Config, site string) (admission.Record, error) {
+		if p, err := admission.Path(deployment.Deployment{ID: cfg.ID}.Token()); err == nil {
 			_, _, _ = t.ReadFile(p)
 		}
+		s := cfg.Sites[site]
 		rec := admission.Record{Site: site, User: s.SSHUser(), Grants: admission.Needs(s), Forwarding: s.Endpoint != "",
-			Ports: admission.Ports{SSH: s.SSH.PortOrDefault(), WireGuard: s.ListenPort()}}
+			Ports: admission.Ports{SSH: s.SSH.PortOrDefault(), WireGuard: s.ListenPort()}, MeshSubnet: cfg.Mesh.Subnet}
 		if s.WebServerManagedBy() == config.ManagedByExternal {
 			rec.WebServer = &admission.WebServer{Server: "caddy"}
 		}

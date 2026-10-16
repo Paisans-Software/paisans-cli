@@ -153,6 +153,23 @@ func TestAMismatchedAdmissionIsRefused(t *testing.T) {
 	}
 }
 
+// A mesh subnet changed in the configuration after admission is refused up
+// front, naming both subnets and the two lines that fix it.
+func TestAChangedMeshSubnetIsRefused(t *testing.T) {
+	realAdmission(t)
+	cfg := fixture(t)
+	h := &recordedHost{files: map[string]string{admittedPath(cfg): admittedRecord(t, cfg, "home-a")}}
+	admitted := cfg.Mesh.Subnet
+	cfg.Mesh.Subnet = "10.77.33.0/24"
+	_, err := admittedHosts(&ui.Recorder{}, cfg, map[string]registry.Runner{"home-a": h})
+	hint, explain := ui.Describe(err)
+	for _, want := range []string{"home-a's admission does not match", "the host admitted mesh subnet " + admitted + ", and mesh.subnet is 10.77.33.0/24", "paisans host request --site home-a > home-a.admit", "sudo paisans host admit --request home-a.admit"} {
+		if !strings.Contains(hint+"\n"+explain, want) {
+			t.Errorf("no %q in:\n%s\n%s", want, hint, explain)
+		}
+	}
+}
+
 // Each site's check is a step, so a spinner shows while ssh answers.
 func TestAdmissionCheckIsAStep(t *testing.T) {
 	realAdmission(t)

@@ -405,6 +405,7 @@ step 27: write the admission record
     |   "data_dir": "",
     |   "bridge_netfilter": false,
     |   "mesh_lan": "",
+    |   "mesh_subnet": "10.44.0.0/24",
     |   "web_server": null,
     |   "system_docker_disabled": false
     | }

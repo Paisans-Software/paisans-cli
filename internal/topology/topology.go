@@ -132,7 +132,6 @@ func Classify(cfg *config.Config, ev Evidence) (*Classification, error) {
 		return nil
 	}
 	for _, name := range cfg.SiteNames() {
-		s := cfg.Sites[name]
 		if err := ev.Login[name]; err != nil {
 			if joined[name] {
 				c.Sites[name] = Site{Name: name, Class: Down, Why: DownLine(name)}
@@ -151,7 +150,7 @@ func Classify(cfg *config.Config, ev Evidence) (*Classification, error) {
 		case rr.Err != nil:
 			why = "its admission record cannot be read: " + rr.Err.Error()
 		default:
-			if diff := rr.Record.Differences(name, s); len(diff) > 0 {
+			if diff := rr.Record.Differences(cfg, name); len(diff) > 0 {
 				why = "its admission does not cover it: " + strings.Join(diff, "; ")
 			}
 		}

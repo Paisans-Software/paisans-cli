@@ -159,6 +159,9 @@ func TestParseRecordRefuses(t *testing.T) {
 		{"a mesh_lan wider than a /16", strings.Replace(g, `"mesh_lan": "192.168.1.0/24"`, `"mesh_lan": "10.0.0.0/8"`, 1), "f2a9", `mesh_lan: "10.0.0.0/8" is not`},
 		{"a mesh_lan not masked", strings.Replace(g, `"mesh_lan": "192.168.1.0/24"`, `"mesh_lan": "192.168.1.20/24"`, 1), "f2a9", `mesh_lan: "192.168.1.20/24" is not`},
 		{"a mesh_lan of one address", strings.Replace(g, `"mesh_lan": "192.168.1.0/24"`, `"mesh_lan": "192.168.1.1"`, 1), "f2a9", `mesh_lan: "192.168.1.1" is not`},
+		{"no mesh_subnet", strings.Replace(g, "  \"mesh_subnet\": \"10.44.0.0/24\",\n", "", 1), "f2a9", "mesh_subnet: missing"},
+		{"an empty mesh_subnet", strings.Replace(g, `"mesh_subnet": "10.44.0.0/24"`, `"mesh_subnet": ""`, 1), "f2a9", `mesh_subnet: "" is not a network`},
+		{"a public mesh_subnet", strings.Replace(g, `"mesh_subnet": "10.44.0.0/24"`, `"mesh_subnet": "8.8.8.0/24"`, 1), "f2a9", `mesh_subnet: "8.8.8.0/24" is outside the private ranges`},
 		{"an IPv6 mesh_lan", strings.Replace(g, `"mesh_lan": "192.168.1.0/24"`, `"mesh_lan": "fd00::/64"`, 1), "f2a9", `mesh_lan: "fd00::/64" is not`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -337,17 +340,40 @@ func (l *listing) Run(command string) (string, error) {
 func TestDifferences(t *testing.T) {
 	cfg := fixture(t)
 	rec := admission.NewRecord(build(t, "home-a"), admission.Grants{Watchdog: true, PublicPorts: true}, "", at)
-	if d := rec.Differences("home-a", cfg.Sites["home-a"]); len(d) != 0 {
+	if d := rec.Differences(cfg, "home-a"); len(d) != 0 {
 		t.Fatalf("an exact admission differs: %v", d)
 	}
 	rec.Grants.Watchdog = false
 	rec.Ports.SSH = 2222
-	d := rec.Differences("home-a", cfg.Sites["home-a"])
+	d := rec.Differences(cfg, "home-a")
 	if len(d) != 2 || !strings.Contains(d[0], "ssh port") || !strings.Contains(d[1], "--watchdog") {
 		t.Errorf("differences %q", d)
 	}
-	if d := rec.Differences("home-b", cfg.Sites["home-b"]); len(d) == 0 || !strings.Contains(d[0], "admitted as site home-a") {
+	if d := rec.Differences(cfg, "home-b"); len(d) == 0 || !strings.Contains(d[0], "admitted as site home-a") {
 		t.Errorf("another site's record: %q", d)
+	}
+}
+
+// A mesh subnet changed after admission is a difference, since admit baked
+// it into root's state; the site's mesh address is not, since nothing of
+// root's restricts it.
+func TestDifferencesMeshSubnet(t *testing.T) {
+	cfg := fixture(t)
+	rec := admission.NewRecord(build(t, "home-a"), admission.Grants{Watchdog: true, PublicPorts: true}, "", at)
+	if rec.MeshSubnet != "10.44.0.0/24" {
+		t.Fatalf("NewRecord's mesh subnet is %q, want the request's 10.44.0.0/24", rec.MeshSubnet)
+	}
+	cfg.Mesh.Subnet = "10.44.1.0/24"
+	want := "the host admitted mesh subnet 10.44.0.0/24, and mesh.subnet is 10.44.1.0/24"
+	if d := rec.Differences(cfg, "home-a"); len(d) != 1 || d[0] != want {
+		t.Errorf("differences %q, want [%q]", d, want)
+	}
+	cfg = fixture(t)
+	s := cfg.Sites["home-a"]
+	s.Address = "10.44.0.99"
+	cfg.Sites["home-a"] = s
+	if d := rec.Differences(cfg, "home-a"); len(d) != 0 {
+		t.Errorf("a changed mesh address differs: %q", d)
 	}
 }
 
@@ -355,13 +381,55 @@ func TestDifferences(t *testing.T) {
 func TestForSite(t *testing.T) {
 	cfg := fixture(t)
 	h := &host{files: map[string]string{}}
-	if _, err := admission.ForSite(h, cfg.ID, "home-a", cfg.Sites["home-a"]); !errors.Is(err, admission.ErrNotAdmitted) {
+	if _, err := admission.ForSite(h, cfg, "home-a"); !errors.Is(err, admission.ErrNotAdmitted) {
 		t.Errorf("no record: %v", err)
 	}
 	h.files["/etc/paisans/admitted.f2a9.json"] = string(encode(t, admission.NewRecord(build(t, "home-a"), admission.Grants{}, "", at)))
-	_, err := admission.ForSite(h, cfg.ID, "home-a", cfg.Sites["home-a"])
+	_, err := admission.ForSite(h, cfg, "home-a")
 	var se *admission.SiteError
 	if !errors.As(err, &se) || se.Site != "home-a" || len(se.Problems) != 2 {
 		t.Errorf("grants missing: %v", err)
+	}
+}
+
+// A record written before mesh_subnet joined it is refused by Read, as any
+// unreadable record is, and read by ReadToRewrite, with no mesh subnet, so
+// that host admit run again rewrites it rather than refusing. Anything else
+// wrong with it is still refused.
+func TestReadToRewriteARecordWithoutMeshSubnet(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "admitted.f2a9.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := strings.Replace(string(data), "  \"mesh_subnet\": \"10.44.0.0/24\",\n", "", 1)
+	if old == string(data) {
+		t.Fatal("the golden record has no mesh_subnet line to remove")
+	}
+	h := &host{files: map[string]string{"/etc/paisans/admitted.f2a9.json": old}}
+	if _, err := admission.Read(h, "f2a9"); err == nil || !strings.Contains(err.Error(), "mesh_subnet: missing") {
+		t.Errorf("Read: %v", err)
+	}
+	rec, err := admission.ReadToRewrite(h, "f2a9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.MeshSubnet != "" || rec.DataDir != "/srv/data/paisans-f2a9" || !rec.SystemDockerDisabled {
+		t.Errorf("got %+v", rec)
+	}
+	if rec, err := admission.ReadToRewrite(&host{files: map[string]string{"/etc/paisans/admitted.f2a9.json": string(data)}}, "f2a9"); err != nil || rec.MeshSubnet != "10.44.0.0/24" {
+		t.Errorf("a current record: %+v, %v", rec, err)
+	}
+	if _, err := admission.ReadToRewrite(&host{files: map[string]string{}}, "f2a9"); !errors.Is(err, admission.ErrNotAdmitted) {
+		t.Errorf("no record: %v", err)
+	}
+	for name, bad := range map[string]string{
+		"another field missing": strings.Replace(old, "  \"forwarding\": true,\n", "", 1),
+		"a bad data_dir":        strings.Replace(old, `"/srv/data/paisans-f2a9"`, `"srv/data"`, 1),
+		"spacing changed":       strings.Replace(old, `"site": "home-a"`, `"site":  "home-a"`, 1),
+	} {
+		h := &host{files: map[string]string{"/etc/paisans/admitted.f2a9.json": bad}}
+		if _, err := admission.ReadToRewrite(h, "f2a9"); err == nil {
+			t.Errorf("%s: read", name)
+		}
 	}
 }

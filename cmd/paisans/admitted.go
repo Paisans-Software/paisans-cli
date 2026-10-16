@@ -31,7 +31,7 @@ func admittedHosts(r ui.Reporter, cfg *config.Config, transports map[string]regi
 			name = site
 		}
 		rec, err := ui.Get(r, "check "+name+"'s admission", func() (admission.Record, error) {
-			rec, err := admissionForSite(transports[site], cfg.ID, site, cfg.Sites[site])
+			rec, err := admissionForSite(transports[site], cfg, site)
 			if err != nil {
 				return rec, admissionProblem(site, err)
 			}

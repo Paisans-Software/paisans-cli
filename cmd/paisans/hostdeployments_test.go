@@ -113,7 +113,7 @@ func admittedRecords(t *testing.T) map[string]string {
 	rec := admission.Record{
 		Version: admission.RecordVersion, Deployment: monitorID, User: "paisans-f2a9", Site: "vm", Roles: []string{"gateway"},
 		Grants: admission.Grants{PublicPorts: true}, Ports: admission.Ports{SSH: 22, WireGuard: 51820, Public: []int{80, 443}},
-		AdmittedAt: "2026-10-15T00:00:00Z",
+		AdmittedAt: "2026-10-15T00:00:00Z", MeshSubnet: "10.44.0.0/24",
 	}
 	b, err := admission.EncodeRecord(rec)
 	if err != nil {

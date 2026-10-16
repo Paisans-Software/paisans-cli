@@ -26,6 +26,7 @@
   "data_dir": "/srv/data/paisans-f2a9",
   "bridge_netfilter": false,
   "mesh_lan": "192.168.1.0/24",
+  "mesh_subnet": "10.44.0.0/24",
   "web_server": {
     "server": "caddy",
     "container": "",

@@ -1,6 +1,7 @@
 package hostadmit_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/admission"
@@ -44,4 +45,26 @@ func TestRerunPlans(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkGoldenText(t, c.name, plan.Text())
+}
+
+// A record written before mesh_subnet joined it is rewritten when the owner
+// admits again, rather than refused: the run plans that one write, of the
+// record as admit writes it now.
+func TestARerunRewritesARecordWithoutMeshSubnet(t *testing.T) {
+	flags := hostadmit.Flags{}
+	h := admittedHost(requestFor("vm"), flags)
+	const path = "/etc/paisans/admitted.f2a9.json"
+	current := h.files[path]
+	old := strings.Replace(current, "  \"mesh_subnet\": \"10.44.0.0/24\",\n", "", 1)
+	if old == current {
+		t.Fatalf("the record has no mesh_subnet to remove:\n%s", current)
+	}
+	h.file(path, old).withFile(path, old, "644", 0)
+	plan, err := hostadmit.Build(h, input(t, "vm", flags))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Steps) != 1 || plan.Steps[0].File == nil || plan.Steps[0].File.Content != current {
+		t.Errorf("the re-run plans:\n%s", plan.Text())
+	}
 }

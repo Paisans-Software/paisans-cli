@@ -287,7 +287,7 @@ func Build(site string, cfg *config.Config, t Transport, rec admission.Record) (
 	if !ok {
 		return nil, fmt.Errorf("host prepare: no site %q is declared", site)
 	}
-	if diff := rec.Differences(site, declared); len(diff) > 0 {
+	if diff := rec.Differences(cfg, site); len(diff) > 0 {
 		return nil, fmt.Errorf("host prepare: %s's admission does not match %s:\n- %s\nSend the host's owner a new request, paisans host request --site %s > %s.admit, and ask them to run sudo paisans host admit --request %s.admit", site, config.FileName, strings.Join(diff, "\n- "), site, site, site)
 	}
 	content, found, err := t.ReadFile("/etc/os-release")
