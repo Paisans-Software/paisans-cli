@@ -23,6 +23,8 @@ reasons, values and requests behind it.
 ```
 paisans create                             # a new deployment's paisans-stack.yaml, from questions
 paisans init                               # an id, a mesh subnet and the secrets for paisans-stack.yaml
+paisans host request --site vm > vm.admit  # the request the host's owner admits the site from
+sudo paisans host admit --request vm.admit --execute   # on the host, by its owner: the deployment's own user and rootless Docker
 paisans host prepare --site vm --execute   # the user's keys, configuration store and daemon settings on an admitted host
 paisans host prepare --all --execute       # the same on every site, one at a time
 paisans apply --execute                    # the whole deployment, from paisans-stack.yaml to a running stack
@@ -5494,7 +5496,8 @@ assumed* has the modes. It reports which driver it found, from
 `/sys/class/watchdog/*/identity`.
 
 On Ubuntu, `host admit` persists `softdog` with a small systemd unit that runs
-`modprobe softdog` before Docker starts, not with a line in
+`modprobe softdog` before `systemd-logind` starts the lingering users'
+managers, whose Docker starts Patroni, not with a line in
 `/etc/modules-load.d`. That would be the obvious place and it does not work:
 Ubuntu's kernel package blacklists the watchdog drivers, `softdog` among them,
 and `systemd-modules-load` honours the blacklist
@@ -9167,8 +9170,9 @@ spec (`docs/specs/2026-10-07-site-add.md`) checks them instead, because a
 derived value would change the rendered etcd flags on every member, and
 changing those on a running cluster is an operation of its own.
 
-**Docker's presence is covered indirectly**: it is part of `host prepare`'s
-plan, so "prepared" covers it.
+**Docker's presence is covered indirectly**: `host admit` installs or refuses
+it, and the host check, which the `Host` row runs, reads the deployment's own
+daemon.
 
 **Storage is judged by filesystem type, and a network one is refused.**
 Postgres acknowledges a commit, and etcd agrees a write, once fsync returns.
