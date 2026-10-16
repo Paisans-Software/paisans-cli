@@ -50,6 +50,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/mesh"
@@ -190,6 +191,39 @@ func For(cfg *config.Config, site string, now time.Time) (string, Entry) {
 	}
 }
 
+// ForRequest is the entry host admit claims a host with, from the request
+// alone, so a plan from a request and one from the configuration claim
+// alike. It carries the request's site and roles; Domain stays empty, since
+// a request names no domain. A request granted the public ports also holds
+// the gateway role, whatever its roles: 80 and 443 are one deployment's per
+// host, and a re-run without the grant deletes the deployment's 80 and 443
+// rules outright, which a second holder would lose.
+func ForRequest(req admission.Request, now time.Time) (string, Entry) {
+	d := deployment.Deployment{ID: req.Deployment}
+	roles := make([]config.Role, 0, len(req.Roles)+1)
+	for _, r := range req.Roles {
+		roles = append(roles, config.Role(r))
+	}
+	if req.Grants.PublicPorts && !hasRole(JoinRoles(roles), config.RoleGateway) {
+		roles = append(roles, config.RoleGateway)
+	}
+	return req.Deployment, Entry{
+		Token:      d.Token(),
+		Root:       d.Root(),
+		Site:       req.Site,
+		ClaimedAt:  now.UTC().Format(time.RFC3339),
+		Interface:  d.Interface(),
+		ListenPort: req.ListenPort,
+		Subnet:     req.MeshSubnet,
+		Address:    req.Address,
+		Roles:      JoinRoles(roles),
+	}
+}
+
+// Refused is the refusal a claim of e meets for why, in the words Claim
+// uses, for host admit's read-only check.
+func Refused(t Runner, e Entry, why error) error { return refused(t, e, why) }
+
 // Parse reads a registry. An empty file is an empty registry, which is what a
 // host no deployment has claimed holds.
 func Parse(data []byte) (Registry, error) {
@@ -226,7 +260,11 @@ func (c Conflict) Error() string {
 			what += " and root " + c.Entry.Root
 		}
 	}
-	return fmt.Sprintf("deployment %s (%s) already holds %s on this host", c.ID, c.Entry.Domain, what)
+	who := c.ID
+	if c.Entry.Domain != "" {
+		who += " (" + c.Entry.Domain + ")"
+	}
+	return fmt.Sprintf("deployment %s already holds %s on this host", who, what)
 }
 
 // clashes is everything theirs holds that ours needs: the same token, root,
@@ -313,10 +351,10 @@ func Meshes(r Registry, id, on string) []mesh.Taken {
 }
 
 // Merge adds or refreshes id's entry, or refuses with the first conflict and
-// returns r unchanged. id's own entry naming another site is refused as the
-// awk merge refuses it, with a Conflict naming id itself.
+// returns r unchanged. id's own entry for another site (AnotherSite) is
+// refused as the awk merge refuses it, with a Conflict naming id itself.
 func Merge(r Registry, id string, e Entry) (Registry, error) {
-	if mine, ok := r.Deployments[id]; ok && mine.Site != "" && mine.Site != e.Site {
+	if mine, ok := r.Deployments[id]; ok && AnotherSite(mine, e) {
 		return r, Conflict{ID: id, Entry: mine}
 	}
 	if c := Conflicts(r, id, e); len(c) > 0 {
@@ -328,6 +366,17 @@ func Merge(r Registry, id string, e Entry) (Registry, error) {
 	}
 	out.Deployments[id] = e
 	return out, nil
+}
+
+// AnotherSite reports whether a claim e by the deployment that holds mine
+// is for another site of it. Where both name a site, the names decide, so a
+// site whose mesh address changed is still itself; where either names none,
+// another mesh address is another site. The host is one site's machine.
+func AnotherSite(mine, e Entry) bool {
+	if mine.Site != "" && e.Site != "" {
+		return mine.Site != e.Site
+	}
+	return mine.Address != "" && e.Address != "" && mine.Address != e.Address
 }
 
 // header and footer are the first and last lines of the layout, and an entry
@@ -387,8 +436,9 @@ const (
 // mergeProgram is the claim's merge, in awk. It reads the registry in
 // Encode's layout, keeps every other deployment's line, drops id's own line
 // (the refresh), and prints the result with entry last. id's own line naming
-// another site is a conflict too: the host is that site's machine (see
-// sameMachine). A line under another
+// another site is a conflict too, and so, where either line names no site,
+// is one at another mesh address: the host is that site's machine (see
+// sameMachine and AnotherSite). A line under another
 // id holding the claimed token, root, interface or listen port, a mesh
 // subnet overlapping the claimed one, or the gateway or data role the claim
 // also holds, is a conflict: it is printed to stderr
@@ -440,7 +490,8 @@ $0 == footer { done = 1; next }
 	if (line !~ /^"[^"]+":\{.*\}$/) { bad = 1; next }
 	key = substr(line, 2, index(line, "\":") - 2)
 	if (key == id) {
-		if (str(line, "site") != "" && str(line, "site") != site) {
+		s = str(line, "site"); a = str(line, "address")
+		if ((s != "" && site != "") ? (s != site) : (a != "" && address != "" && a != address)) {
 			print marker line > "/dev/stderr"
 			conflict = 1
 		}
@@ -482,11 +533,11 @@ func awkArgs(id string, e Entry) ([]string, error) {
 	}
 	vars := map[string]string{
 		"id": id, "token": e.Token, "root": e.Root, "entry": entry,
-		"iface": e.Interface, "port": port, "subnet": e.Subnet, "roles": e.Roles, "site": e.Site,
+		"iface": e.Interface, "port": port, "subnet": e.Subnet, "roles": e.Roles, "site": e.Site, "address": e.Address,
 		"header": header, "footer": footer, "marker": conflictMarker, "unreadable": unreadableMarker,
 	}
 	var args []string
-	for _, name := range []string{"id", "token", "root", "iface", "port", "subnet", "roles", "site", "entry", "header", "footer", "marker", "unreadable"} {
+	for _, name := range []string{"id", "token", "root", "iface", "port", "subnet", "roles", "site", "address", "entry", "header", "footer", "marker", "unreadable"} {
 		args = append(args, "-v", name+"="+awkString(vars[name]))
 	}
 	return append(args, mergeProgram), nil
@@ -635,7 +686,7 @@ func refused(t Runner, e Entry, why error) error {
 	if errors.As(why, &c) && len(c.Clashes) > 0 && !strings.HasPrefix(c.Clashes[0], "token") && !strings.HasPrefix(c.Clashes[0], "root") && !strings.HasPrefix(c.Clashes[0], "WireGuard interface") {
 		switch {
 		case strings.HasPrefix(c.Clashes[0], "the gateway role"):
-			advice = "One host runs one deployment's gateway: it binds ports 80 and 443 and its Caddy imports /srv/caddy.d. Use another host for one of the gateways"
+			advice = "One host gives ports 80 and 443 to one deployment: its gateway binds them and its Caddy imports /srv/caddy.d, and a site admitted with --public-ports holds them too. Use another host for one of them"
 		case strings.HasPrefix(c.Clashes[0], "the data role"):
 			advice = "One host runs one deployment's data site: it binds the Postgres and etcd ports and holds the cluster's storage. Use another host for one of the data sites"
 		case strings.HasPrefix(c.Clashes[0], "WireGuard listen port"):
