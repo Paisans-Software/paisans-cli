@@ -34,6 +34,11 @@ func DeploymentUserProblem(user, id string) string {
 // operators, the name recorded on a host beside each of their keys.
 func ValidOperatorName(s string) bool { return keyName.MatchString(s) }
 
+// ValidSiteName reports whether s is a name a site may have under sites:
+// lowercase letters, digits and hyphens, starting with a letter or digit, at
+// most 63. The configuration's sites and a request's site are held to it.
+func ValidSiteName(s string) bool { return blueprintName.MatchString(s) }
+
 // ValidAppName reports whether s is a name an app may have under apps.
 func ValidAppName(s string) bool { return blueprintName.MatchString(s) }
 

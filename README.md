@@ -4667,7 +4667,8 @@ nothing to read twice, and the string has nowhere to put the keys.
 An owner who does not have the deployment's configuration admits a site
 from a request: `paisans host request --site <site> > <site>.admit` writes
 it, and the owner admits the site from that file. The request holds what
-admission needs and nothing secret: the deployment's id, the site's user,
+admission needs and nothing secret: the deployment's id, the site's name
+and its roles, sorted, the site's user,
 its SSH and WireGuard ports, its mesh address and the mesh subnet, whether
 it has an endpoint, the grants its roles need (the watchdog for a data site,
 ports 80 and 443 for a gateway or a monitor running the toolkit's Caddy),
@@ -4688,7 +4689,9 @@ text a forger could vary while searching for a request with a matching
 digest.
 
 A request is read as strictly as a configuration. An unknown version, a
-field missing or unknown, a user name `ssh.user` would refuse, `root`, a
+field missing or unknown, a site name or a role the configuration would
+refuse, a role listed twice or out of order, grants other than the ones its
+roles need, a user name `ssh.user` would refuse, `root`, a
 `paisans-` name other than the deployment's own, a key that is not a plain
 public key, and an address outside the subnet are each refused, and so is a
 mesh subnet overlapping `0.0.0.0/8`, loopback, link-local or multicast: the

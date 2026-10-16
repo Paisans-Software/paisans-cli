@@ -18,6 +18,7 @@ import (
 func TestBuildReadsTheSite(t *testing.T) {
 	for _, c := range []struct {
 		site       string
+		roles      []string
 		grants     admission.Grants
 		user       string
 		sshPort    int
@@ -26,19 +27,19 @@ func TestBuildReadsTheSite(t *testing.T) {
 		webServer  int
 		operators  []string
 	}{
-		{"home-a", admission.Grants{Watchdog: true, PublicPorts: true}, "paisans-f2a9", 22, 51820, true, 0, []string{"alice", "bob"}},
-		{"home-b", admission.Grants{Watchdog: true}, "community", 2222, 0, false, 0, []string{"bob"}},
-		{"vm", admission.Grants{}, "paisans-f2a9", 22, 51820, false, 0, []string{"alice"}},
-		{"status", admission.Grants{}, "paisans-f2a9", 22, 51820, false, 1, []string{"alice"}},
-		{"watch", admission.Grants{PublicPorts: true}, "paisans-f2a9", 22, 51821, true, 0, []string{"alice"}},
-		{"store", admission.Grants{}, "paisans-f2a9", 22, 0, false, 0, []string{"alice"}},
+		{"home-a", []string{"apps", "data", "gateway"}, admission.Grants{Watchdog: true, PublicPorts: true}, "paisans-f2a9", 22, 51820, true, 0, []string{"alice", "bob"}},
+		{"home-b", []string{"data"}, admission.Grants{Watchdog: true}, "community", 2222, 0, false, 0, []string{"bob"}},
+		{"vm", []string{"witness"}, admission.Grants{}, "paisans-f2a9", 22, 51820, false, 0, []string{"alice"}},
+		{"status", []string{"monitor"}, admission.Grants{}, "paisans-f2a9", 22, 51820, false, 1, []string{"alice"}},
+		{"watch", []string{"monitor"}, admission.Grants{PublicPorts: true}, "paisans-f2a9", 22, 51821, true, 0, []string{"alice"}},
+		{"store", []string{"storage"}, admission.Grants{}, "paisans-f2a9", 22, 0, false, 0, []string{"alice"}},
 	} {
 		r := build(t, c.site)
 		var names []string
 		for _, o := range r.Operators {
 			names = append(names, o.Name)
 		}
-		if r.Grants != c.grants || r.User != c.user || r.SSHPort != c.sshPort || r.ListenPort != c.listenPort || r.Endpoint != c.endpoint || len(r.WebServer) != c.webServer || strings.Join(names, ",") != strings.Join(c.operators, ",") {
+		if r.Site != c.site || strings.Join(r.Roles, ",") != strings.Join(c.roles, ",") || r.Grants != c.grants || r.User != c.user || r.SSHPort != c.sshPort || r.ListenPort != c.listenPort || r.Endpoint != c.endpoint || len(r.WebServer) != c.webServer || strings.Join(names, ",") != strings.Join(c.operators, ",") {
 			t.Errorf("%s: got %+v", c.site, r)
 		}
 	}
@@ -104,6 +105,11 @@ func TestBuildNamesTheConfigurationKey(t *testing.T) {
 			s.Address = "10.44.0.255"
 			cfg.Sites["home-a"] = s
 		}, "sites.home-a.address (address): 10.44.0.255 is the subnet's network or broadcast address"},
+		{"home-b", func(cfg *config.Config) {
+			s := cfg.Sites["home-b"]
+			s.Roles = []config.Role{config.RoleData, config.RoleData}
+			cfg.Sites["home-b"] = s
+		}, `sites.home-b.roles (roles[1]): "data" is listed twice`},
 	} {
 		cfg := fixture(t)
 		c.mutate(cfg)

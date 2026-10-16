@@ -276,6 +276,8 @@ stderr. The request holds nothing secret, so it can travel by email or chat:
 |-------|------|
 | `version` | the request format, so an older CLI refuses a newer request |
 | `deployment` | the deployment's ID |
+| `site` | the site's name in the configuration, so the owner sees which site they admit |
+| `roles` | the site's roles, sorted; the grants are what they need, and admit refuses grants that disagree |
 | `user` | `sites.<s>.ssh.user`, or the default |
 | `ssh_port`, `listen_port` | the site's SSH port and WireGuard `ListenPort` |
 | `mesh_subnet`, `address` | the mesh subnet and the site's address in it |
@@ -302,7 +304,8 @@ without regard to case, hyphens or spaces, with `i` and `l` taken as `1`
 and `o` as `0`.
 
 Admit validates a request as strictly as a configuration: every field
-present, the user name accepted by the same pattern as `ssh.user`, every
+present, the site's name and each role accepted by the configuration's own
+rules, the user name accepted by the same pattern as `ssh.user`, every
 key a public key the toolkit can parse, the address inside the subnet.
 
 ## Running on the host

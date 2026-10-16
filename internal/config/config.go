@@ -1227,7 +1227,7 @@ func (c *Config) structural(noSubnet bool) error {
 	}
 	for _, name := range c.SiteNames() {
 		site := c.Sites[name]
-		if !blueprintName.MatchString(name) {
+		if !ValidSiteName(name) {
 			add("sites.%q: %q is not a site name: lowercase letters, digits and hyphens, starting with a letter or digit, at most 63. The name is written into compose files, shell scripts and HAProxy and Patroni configuration, and names a directory of the render, so anything else could add to those files, run as a command, or write outside the directory.", name, name)
 			continue
 		}
@@ -1235,7 +1235,7 @@ func (c *Config) structural(noSubnet bool) error {
 			add("sites.%s.roles: required. Give the site at least one of data, apps, gateway, witness, storage, monitor. A site may have none only when an app is pinned to it, because then it exists to host that app.", name)
 		}
 		for _, role := range site.Roles {
-			if !knownRoles[role] {
+			if !KnownRole(role) {
 				add("sites.%s.roles: unknown role %q. Valid roles are data, apps, gateway, witness, storage, monitor.", name, role)
 			}
 		}

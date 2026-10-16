@@ -3,6 +3,9 @@
 #   sudo paisans host admit --request <this file>
 version: 1
 deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
+site: "status"
+roles:
+  - "monitor"
 user: "paisans-f2a9"
 ssh_port: 22
 listen_port: 51820

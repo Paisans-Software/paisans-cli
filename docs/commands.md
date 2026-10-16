@@ -644,7 +644,7 @@ paisans host request --site home-a > home-a.admit   # the digest is on stderr
   itself be refused.
 * **`--execute`:** not taken. It writes nothing but stdout.
 * **The request:** YAML holding nothing secret: the deployment's id, the
-  site's user, its SSH and WireGuard ports (`listen_port: 0` when no site
+  site's name and its roles, sorted, the site's user, its SSH and WireGuard ports (`listen_port: 0` when no site
   dials it), its mesh address and the subnet, whether it has an endpoint,
   the grants its roles need (`watchdog` for a data site, `public_ports` for
   a gateway or a monitor running the toolkit's Caddy), the apps a monitor
