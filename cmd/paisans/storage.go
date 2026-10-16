@@ -79,7 +79,7 @@ func runStorageAdd(args []string) error {
 	}
 	// Every Garage site, the gateway, which takes the media routes, and the
 	// monitor, which is reseeded.
-	if err := claimSites(r, cfg, *execute, sites...); err != nil {
+	if _, err := admittedSites(r, cfg, sites...); err != nil {
 		return err
 	}
 	plan, err := ui.Get(r, "read every Garage site", func() (*storageadd.Plan, error) {

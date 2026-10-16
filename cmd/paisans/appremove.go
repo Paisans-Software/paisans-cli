@@ -215,7 +215,7 @@ func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 			touched[m.Site] = registryHost(m.Site, cfg.Sites[m.Site], "")
 		}
 	}
-	if err := claimHosts(r, cfg, *execute, touched); err != nil {
+	if _, err := admittedHosts(r, cfg, touched); err != nil {
 		return err
 	}
 

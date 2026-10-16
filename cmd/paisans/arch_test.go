@@ -428,8 +428,8 @@ func TestSiteAddRefusesAnImageWithoutTheNewSitesPlatform(t *testing.T) {
 		if rec.Has("refuse", "") && strings.Contains(rec.Lines(), "home-a (") {
 			t.Errorf("checked a site other than the new one:\n%s", rec.Lines())
 		}
-		if claimed(logged(t, log)) {
-			t.Errorf("execute %v: claimed a host before refusing", execute)
+		if checked(logged(t, log)) {
+			t.Errorf("execute %v: checked a host before refusing", execute)
 		}
 	}
 }

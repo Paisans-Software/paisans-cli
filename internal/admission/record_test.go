@@ -331,3 +331,37 @@ func (l *listing) Run(command string) (string, error) {
 	slices.Sort(names)
 	return "user " + l.user + "\n" + strings.Join(names, "\n") + "\n", nil
 }
+
+// Every difference between what the owner admitted and what the
+// declaration says is named; none when they agree.
+func TestDifferences(t *testing.T) {
+	cfg := fixture(t)
+	rec := admission.NewRecord(build(t, "home-a"), admission.Grants{Watchdog: true, PublicPorts: true}, "", at)
+	if d := rec.Differences("home-a", cfg.Sites["home-a"]); len(d) != 0 {
+		t.Fatalf("an exact admission differs: %v", d)
+	}
+	rec.Grants.Watchdog = false
+	rec.Ports.SSH = 2222
+	d := rec.Differences("home-a", cfg.Sites["home-a"])
+	if len(d) != 2 || !strings.Contains(d[0], "ssh port") || !strings.Contains(d[1], "--watchdog") {
+		t.Errorf("differences %q", d)
+	}
+	if d := rec.Differences("home-b", cfg.Sites["home-b"]); len(d) == 0 || !strings.Contains(d[0], "admitted as site home-a") {
+		t.Errorf("another site's record: %q", d)
+	}
+}
+
+// ForSite reads the record as the deployment's user and judges it.
+func TestForSite(t *testing.T) {
+	cfg := fixture(t)
+	h := &host{files: map[string]string{}}
+	if _, err := admission.ForSite(h, cfg.ID, "home-a", cfg.Sites["home-a"]); !errors.Is(err, admission.ErrNotAdmitted) {
+		t.Errorf("no record: %v", err)
+	}
+	h.files["/etc/paisans/admitted.f2a9.json"] = string(encode(t, admission.NewRecord(build(t, "home-a"), admission.Grants{}, "", at)))
+	_, err := admission.ForSite(h, cfg.ID, "home-a", cfg.Sites["home-a"])
+	var se *admission.SiteError
+	if !errors.As(err, &se) || se.Site != "home-a" || len(se.Problems) != 2 {
+		t.Errorf("grants missing: %v", err)
+	}
+}

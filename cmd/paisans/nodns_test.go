@@ -12,8 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/grant"
 	"github.com/paisans-software/paisans-cli/internal/keystore"
@@ -48,6 +50,15 @@ func TestMain(m *testing.M) {
 	// SOPS_AGE_* variable from the shell running the tests decide which key
 	// sops uses; a test that wants one sets it.
 	config.AgeKeystore = keystore.NewMemory()
+	// Every host has admitted the deployment as the site it is asked about.
+	// The record is still read, so a test sees which hosts were checked and
+	// when; a test about the check reads and judges it (realAdmission).
+	admissionForSite = func(t admission.Reader, id, site string, s config.Site) (admission.Record, error) {
+		if p, err := admission.Path(deployment.Deployment{ID: id}.Token()); err == nil {
+			_, _, _ = t.ReadFile(p)
+		}
+		return admission.Record{Site: site, User: s.SSHUser()}, nil
+	}
 	// No test waits between two web server checks.
 	fakeWebServerClock()
 	// No test spends most of a second on each OAuth2 key it fills: what

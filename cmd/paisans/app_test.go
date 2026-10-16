@@ -43,7 +43,7 @@ func TestAdminSite(t *testing.T) {
 // pidFake is a Pocket ID with no users and no groups until they are created,
 // reached through curl configs.
 type pidFake struct {
-	registry    *registryFake
+	admitted    *admittedFake
 	destination string
 	sudo        bool
 	stdins      []string
@@ -96,7 +96,7 @@ func (f *pidFake) RunInput(command, stdin string) (string, error) {
 func withPIDFake(t *testing.T) *pidFake {
 	t.Helper()
 	fake := &pidFake{}
-	fake.registry = withRegistryFake(t)
+	fake.admitted = withAdmittedFake(t)
 	saved := adminTransport
 	adminTransport = func(tr apply.SSHTransport) appadmin.Transport {
 		fake.destination = tr.Describe()

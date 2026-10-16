@@ -55,7 +55,7 @@ func runPrune(args []string) error {
 	if _, err := hostGate(r, cfg, *site, transport); err != nil {
 		return err
 	}
-	if err := claimHosts(r, cfg, *execute, map[string]registry.Runner{*site: transport}); err != nil {
+	if _, err := admittedHosts(r, cfg, map[string]registry.Runner{*site: transport}); err != nil {
 		return err
 	}
 	plan, err := ui.Get(r, "read volumes", func() (*apply.VolumePrune, error) {

@@ -650,7 +650,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	// The review comes before the claim, which is the first change: an
+	// The review comes before the first change: an
 	// operator who does not approve leaves the host exactly as it was. Its
 	// images are the render's, as written, never the host's.
 	rendered, err := render.Build(cfg, secrets)
@@ -685,7 +685,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	case reviewedByRun != nil && review != nil:
 		review.version = reviewedByRun.version
 	}
-	if err := claimHosts(r, cfg, *execute, map[string]registry.Runner{*site: transport}); err != nil {
+	if _, err := admittedHosts(r, cfg, map[string]registry.Runner{*site: transport}); err != nil {
 		return err
 	}
 
@@ -1162,7 +1162,7 @@ func runStorageInit(args []string) error {
 
 	transport := siteTransport(*site, declared, *destination)
 	r.Section(fmt.Sprintf("%s (%s)", *site, transport.Describe()))
-	if err := claimHosts(r, cfg, *execute, map[string]registry.Runner{*site: transport}); err != nil {
+	if _, err := admittedHosts(r, cfg, map[string]registry.Runner{*site: transport}); err != nil {
 		return err
 	}
 	plan, err := ui.Get(r, "read Garage", func() (*garage.Plan, error) {
@@ -1324,7 +1324,7 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 	if err != nil {
 		return err
 	}
-	// The review comes before the claim, which is the first change: an
+	// The review comes before the first change: an
 	// operator who does not approve leaves the host exactly as it was.
 	g, err := grant.For(cfg, nil, o.site)
 	if err != nil {
@@ -1334,7 +1334,7 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 	if err != nil {
 		return err
 	}
-	if err := claimHosts(r, cfg, o.execute, map[string]registry.Runner{o.site: transport}); err != nil {
+	if _, err := admittedHosts(r, cfg, map[string]registry.Runner{o.site: transport}); err != nil {
 		return err
 	}
 	var options []hostprep.Option

@@ -400,10 +400,10 @@ var helpCommands = []helpCommand{
 		summary: "Replace secrets, one at a time, in gated stages.",
 		usage:   []string{"paisans secrets rotate <path>... | --all [--restart] [--replaced <path>]...\n                       [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                       [--execute]"},
 		detail: "Replace secrets, named by their paths in the secrets file (apps.<app>.<unit> for a unit of secrets an app's blueprint groups), or every one in scope with --all, one at a time in gated stages: a next value in the secrets file, the side that checks it, each site that uses it healthy before the next, then the value promoted.\n\n" +
-			"A pasted secret (the DNS token or an SMTP password) whose value every host using it runs, read line by line, is asked for at a terminal before any host is claimed: replace it at its issuer when asked and paste the new one. One already set anew with secrets set is handed on from the file. A DNS token is tried against the zone before any host gets it; an SMTP password logs in to the mail server from a site, and a pasted one sends the operators one test message. --replaced <path> lists one already replaced and applied, which every host runs, instead. Lists the secrets it keeps and why.\n\n" +
+			"A pasted secret (the DNS token or an SMTP password) whose value every host using it runs, read line by line, is asked for at a terminal before any host is reached: replace it at its issuer when asked and paste the new one. One already set anew with secrets set is handed on from the file. A DNS token is tried against the zone before any host gets it; an SMTP password logs in to the mail server from a site, and a pasted one sends the operators one test message. --replaced <path> lists one already replaced and applied, which every host runs, instead. Lists the secrets it keeps and why.\n\n" +
 			"--all refuses a file that lacks a secret init generates. A stopped --all resumes with what it left, and says so; --all --restart starts the full list again.\n\n" +
 			"Refuses while a mesh rekey is unfinished, a site does not answer, or etcd or Patroni is unhealthy; apply and every other command that renders refuse while a rotation is unfinished. " +
-			"A run that signs members out asks for sign out at a terminal, before any host is claimed. A stopped run resumes. Writes nothing without --execute.",
+			"A run that signs members out asks for sign out at a terminal, before any host is reached. A stopped run resumes. Writes nothing without --execute.",
 	},
 	{
 		name:    "app remove",
@@ -451,26 +451,31 @@ storage init, storage add, storage rotate-key, app admin create, app remove,
 oidc client create, secrets prune, secrets rotate, preflight, failover test,
 doctor, init, config, operator register, host admit and host evict
 are the only commands that reach a host. Each reads it to plan, and changes it
-only with --execute; config and operator register claim nothing, and their
---execute only starts each site's configuration sync and, for publish and
-register, adds a version to its store; host deployments, preflight and init have
-no --execute and never change it; doctor's --execute and secrets prune's change
-no host either, editing only the local files, and secrets prune only reads the
-gateways' deployment records. host admit and host evict reach a host as its
-owner, as root on it or through your own sudo. With --execute, a command first
-claims each host it writes to in /var/lib/paisans/registry.json, and refuses if
-another deployment there holds this one's token, WireGuard interface or listen
-port, or a mesh subnet overlapping this one's; host admit claims the host as a
-step of its plan, refusing the same, and host evict takes the claim away as its
-last. apply and host prepare also refuse when anything else on the host overlaps
-the mesh subnet. dns init and dns prune reach no host, only the DNS provider's
-API, and change it only with --execute; host request reaches no host and takes
-no --execute, writing only to stdout and stderr; site remove also deletes the
-removed site's records there. web-server show and web-server check change
-nothing: check looks at a monitor's public hostname as any visitor could, and
-with managed_by: external both read the monitor's web server over ssh, show
-always and check when a check fails. Everything else writes files locally and
-stops.
+only with --execute; config and operator register check no admission record,
+and their --execute only starts each site's configuration sync and, for publish
+and register, adds a version to its store; host deployments, preflight and init
+have no --execute and never change it; doctor's --execute and secrets prune's
+change no host either, editing only the local files, and secrets prune only
+reads the gateways' deployment records. host admit and host evict reach a host
+as its owner, as root on it or through your own sudo. host admit claims the host
+in /var/lib/paisans/registry.json as a step of its plan, refusing if another
+deployment there holds this one's token, WireGuard interface or listen port, or
+a mesh subnet overlapping this one's, and host evict takes the claim away as its
+last. Every other command that writes to a host first reads the host's admission
+record for this deployment and refuses, with nothing changed, a host that has
+none, or whose record does not match the site: another site name, ssh user, SSH
+or WireGuard port, forwarding, a grant its roles need, or the owner's web
+server. It names the two lines that fix it, paisans host request --site <site> >
+<site>.admit for the operator, and sudo paisans host admit --request
+<site>.admit for the host's owner. apply and host prepare also refuse when
+anything else on the host overlaps the mesh subnet. dns init and dns prune reach
+no host, only the DNS provider's API, and change it only with --execute; host
+request reaches no host and takes no --execute, writing only to stdout and
+stderr; site remove also deletes the removed site's records there. web-server
+show and web-server check change nothing: check looks at a monitor's public
+hostname as any visitor could, and with managed_by: external both read the
+monitor's web server over ssh, show always and check when a check fails.
+Everything else writes files locally and stops.
 
 Every command takes -v or --verbose. By default each step is one line; with it,
 the reasons, values, request bodies and command output behind each step show

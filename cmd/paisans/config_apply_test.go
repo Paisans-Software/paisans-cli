@@ -135,8 +135,8 @@ func TestApplyRefusesAStaleBase(t *testing.T) {
 	if err == nil || !strings.Contains(problemText(err), "not based on the sites' newest version") || !strings.Contains(problemText(err), "paisans config pull") {
 		t.Fatalf("got %v\n%s", err, rec.Lines())
 	}
-	if claimed(logged(t, log)) || f.pushed() || hosts["vm"] != nil && hosts["vm"].writes != 0 {
-		t.Errorf("changed a host: claimed %v, pushed %v", claimed(logged(t, log)), f.pushed())
+	if checked(logged(t, log)) || f.pushed() || hosts["vm"] != nil && hosts["vm"].writes != 0 {
+		t.Errorf("changed a host: checked %v, pushed %v", checked(logged(t, log)), f.pushed())
 	}
 	if rec.Has("pending", "review what paisans-stack.yaml grants") || rec.Index("step", "read what was granted") >= 0 {
 		t.Errorf("reviewed before refusing:\n%s", rec.Lines())
@@ -149,12 +149,12 @@ func TestApplyRefusesAStaleBase(t *testing.T) {
 	}
 }
 
-// publishedBeforeClaim reports whether the version was published, and
-// before the host was claimed, the first change. The fake host lets the
-// apply go no further than its mesh, which is past both.
-func publishedBeforeClaim(rec *ui.Recorder, what string) bool {
-	publish, claim := rec.Index("done", what), rec.Index("done", "claim site")
-	return publish >= 0 && claim > publish
+// publishedBeforeTheCheck reports whether the version was published, and
+// before the host's admission was checked, ahead of its first change. The
+// fake host lets the apply go no further than its mesh, which is past both.
+func publishedBeforeTheCheck(rec *ui.Recorder, what string) bool {
+	publish, check := rec.Index("done", what), rec.Index("done", "check site's admission")
+	return publish >= 0 && check > publish
 }
 
 // A workstation with no base and sites that hold nothing, every deployment
@@ -168,11 +168,11 @@ func TestApplyWithNoBasePublishesTheRoot(t *testing.T) {
 	_ = f.applySite(t, noTerminalStdin(), "--execute")
 	head, _ := f.l.Head()
 	root, _ := f.l.Root()
-	if head == "" || root != head || !f.pushed() || !claimed(logged(t, log)) {
-		t.Fatalf("head %q, root %q, pushed %v, claimed %v\n%s", head, root, f.pushed(), claimed(logged(t, log)), rec.Lines())
+	if head == "" || root != head || !f.pushed() || !checked(logged(t, log)) {
+		t.Fatalf("head %q, root %q, pushed %v, checked %v\n%s", head, root, f.pushed(), checked(logged(t, log)), rec.Lines())
 	}
-	if !publishedBeforeClaim(rec, "publish revision 1") {
-		t.Errorf("not published before the claim:\n%s", rec.Lines())
+	if !publishedBeforeTheCheck(rec, "publish revision 1") {
+		t.Errorf("not published before the admission check:\n%s", rec.Lines())
 	}
 }
 
@@ -191,7 +191,7 @@ func TestApplyPublishesTheNextRevisionFirst(t *testing.T) {
 	rec := recordConverge(t)
 	_ = f.applySite(t, noTerminalStdin(), "--execute")
 	head, _ := f.l.Head()
-	if head == f.shas[0] || !f.pushed() || !publishedBeforeClaim(rec, "publish revision 2") {
+	if head == f.shas[0] || !f.pushed() || !publishedBeforeTheCheck(rec, "publish revision 2") {
 		t.Errorf("head %s, pushed %v\n%s", head, f.pushed(), rec.Lines())
 	}
 	if b, _ := os.ReadFile(filepath.Join(f.l.Dir, ".paisans", "config-seen")); string(b) != "2 "+head+"\n" {
@@ -219,7 +219,7 @@ func TestApplyPublishesWhatSecretsRotateLeft(t *testing.T) {
 	rec := recordConverge(t)
 	_ = f.applySite(t, noTerminalStdin(), "--execute")
 	head, _ := f.l.Head()
-	if head == f.shas[0] || !f.pushed() || !publishedBeforeClaim(rec, "publish revision 2") {
+	if head == f.shas[0] || !f.pushed() || !publishedBeforeTheCheck(rec, "publish revision 2") {
 		t.Errorf("head %s, pushed %v\n%s", head, f.pushed(), rec.Lines())
 	}
 }
@@ -233,7 +233,7 @@ func TestApplyOnTheHeadPublishesNothingNew(t *testing.T) {
 	fakeGrants(t, grantedWith(t, f, nil))
 	rec := recordConverge(t)
 	_ = f.applySite(t, noTerminalStdin(), "--execute")
-	if h, _ := f.l.Head(); h != f.shas[0] || !publishedBeforeClaim(rec, "publish revision 1, "+f.shas[0][:12]) {
+	if h, _ := f.l.Head(); h != f.shas[0] || !publishedBeforeTheCheck(rec, "publish revision 1, "+f.shas[0][:12]) {
 		t.Errorf("head %s\n%s", h, rec.Lines())
 	}
 }
@@ -295,8 +295,8 @@ func TestApplyAnotherVersionAtTheSameRevisionAsks(t *testing.T) {
 	if text := problemText(err); err == nil || !strings.Contains(text, "vm holds revision 1 ("+other+"), another version at the same revision") || !strings.Contains(text, "rollback") {
 		t.Fatalf("got %v", text)
 	}
-	if claimed(logged(t, log)) || f.pushed() {
-		t.Errorf("changed a host: claimed %v, pushed %v", claimed(logged(t, log)), f.pushed())
+	if checked(logged(t, log)) || f.pushed() {
+		t.Errorf("changed a host: checked %v, pushed %v", checked(logged(t, log)), f.pushed())
 	}
 
 	log = loggingSSH(t, "")
@@ -305,7 +305,7 @@ func TestApplyAnotherVersionAtTheSameRevisionAsks(t *testing.T) {
 	captureStdout(t, func() {
 		_ = runApply([]string{"--config", f.cfgPath, "--site", "vm", "--execute"}, answering(t, "rollback\n"), &out)
 	})
-	if !strings.Contains(out.String(), "Type 'rollback' (no quotes) to proceed: ") || !claimed(logged(t, log)) {
+	if !strings.Contains(out.String(), "Type 'rollback' (no quotes) to proceed: ") || !checked(logged(t, log)) {
 		t.Errorf("not asked, or not applied: %q", out.String())
 	}
 
@@ -313,7 +313,7 @@ func TestApplyAnotherVersionAtTheSameRevisionAsks(t *testing.T) {
 	log = loggingSSH(t, "")
 	fakeGrants(t, grantedWith(t, f, &grant.ConfigPart{Hash: f.shas[0], Revision: 1}))
 	_ = f.applySite(t, noTerminalStdin(), "--execute")
-	if !claimed(logged(t, log)) {
+	if !checked(logged(t, log)) {
 		t.Error("the version a host holds was refused")
 	}
 
@@ -327,7 +327,7 @@ func TestApplyAnotherVersionAtTheSameRevisionAsks(t *testing.T) {
 	log = loggingSSH(t, "")
 	fakeGrants(t, grantedWith(t, f, &grant.ConfigPart{Hash: other, Revision: 2}))
 	err = f.applySite(t, noTerminalStdin(), "--execute")
-	if text := problemText(err); err == nil || !strings.Contains(text, "vm holds revision 2 ("+other+"), another version at the same revision") || claimed(logged(t, log)) {
+	if text := problemText(err); err == nil || !strings.Contains(text, "vm holds revision 2 ("+other+"), another version at the same revision") || checked(logged(t, log)) {
 		t.Errorf("a new version over another revision 2: %v", text)
 	}
 }
@@ -346,8 +346,8 @@ func TestApplyStopsWhenNoSiteTakesTheVersion(t *testing.T) {
 	log := loggingSSH(t, "")
 	fakeGrants(t, grantedWith(t, f, nil))
 	err := f.applySite(t, noTerminalStdin(), "--execute")
-	if err == nil || !strings.Contains(problemText(err), "no site took the version") || claimed(logged(t, log)) {
-		t.Fatalf("got %v, claimed %v", problemText(err), claimed(logged(t, log)))
+	if err == nil || !strings.Contains(problemText(err), "no site took the version") || checked(logged(t, log)) {
+		t.Fatalf("got %v, checked %v", problemText(err), checked(logged(t, log)))
 	}
 	if strings.Contains(problemText(err), "pushes it again") {
 		t.Errorf("promises a push: %s", problemText(err))
@@ -357,8 +357,8 @@ func TestApplyStopsWhenNoSiteTakesTheVersion(t *testing.T) {
 	log = loggingSSH(t, "")
 	rec := recordConverge(t)
 	_ = f.applySite(t, noTerminalStdin(), "--execute")
-	if !claimed(logged(t, log)) || !rec.Has("warn", "watch did not take the version") {
-		t.Errorf("claimed %v\n%s", claimed(logged(t, log)), rec.Lines())
+	if !checked(logged(t, log)) || !rec.Has("warn", "watch did not take the version") {
+		t.Errorf("checked %v\n%s", checked(logged(t, log)), rec.Lines())
 	}
 }
 
@@ -379,8 +379,8 @@ func TestApplySiteWithNoStoreNamesHostPrepare(t *testing.T) {
 			t.Errorf("does not name host prepare for %s: %v", site, text)
 		}
 	}
-	if claimed(logged(t, log)) || f.pushed() {
-		t.Errorf("changed a host: claimed %v, pushed %v", claimed(logged(t, log)), f.pushed())
+	if checked(logged(t, log)) || f.pushed() {
+		t.Errorf("changed a host: checked %v, pushed %v", checked(logged(t, log)), f.pushed())
 	}
 }
 
@@ -471,8 +471,8 @@ func TestAStepRefusesFilesTheRunDidNotPublish(t *testing.T) {
 	published.Paisans = append(append([]byte{}, published.Paisans...), "# published\n"...)
 	reviewedByRun = &runReview{approved: map[string]grant.Review{}, version: &appliedVersion{sha: strings.Repeat("d", 40), revision: 2, files: published}}
 	err := f.applySite(t, noTerminalStdin(), "--execute")
-	if err == nil || !strings.Contains(problemText(err), "changed after the run published it") || claimed(logged(t, log)) {
-		t.Errorf("got %v, claimed %v", problemText(err), claimed(logged(t, log)))
+	if err == nil || !strings.Contains(problemText(err), "changed after the run published it") || checked(logged(t, log)) {
+		t.Errorf("got %v, checked %v", problemText(err), checked(logged(t, log)))
 	}
 }
 
@@ -494,8 +494,8 @@ func TestApplyRollbackOnAHostAsks(t *testing.T) {
 			t.Errorf("refusal lacks %q: %v", want, text)
 		}
 	}
-	if claimed(logged(t, log)) || f.pushed() {
-		t.Errorf("changed a host: claimed %v, pushed %v", claimed(logged(t, log)), f.pushed())
+	if checked(logged(t, log)) || f.pushed() {
+		t.Errorf("changed a host: checked %v, pushed %v", checked(logged(t, log)), f.pushed())
 	}
 
 	log = loggingSSH(t, "")
@@ -504,7 +504,7 @@ func TestApplyRollbackOnAHostAsks(t *testing.T) {
 	captureStdout(t, func() {
 		_ = runApply([]string{"--config", f.cfgPath, "--site", "vm", "--execute"}, answering(t, "rollback\n"), &out)
 	})
-	if !strings.Contains(out.String(), "Type 'rollback' (no quotes) to proceed: ") || !claimed(logged(t, log)) || !f.pushed() {
+	if !strings.Contains(out.String(), "Type 'rollback' (no quotes) to proceed: ") || !checked(logged(t, log)) || !f.pushed() {
 		t.Errorf("not asked, or not applied: %q", out.String())
 	}
 }

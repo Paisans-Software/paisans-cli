@@ -168,7 +168,7 @@ func TestSecretsRotateTriesAPastedSMTPPassword(t *testing.T) {
 	}
 }
 
-// One the server refuses is refused when pasted, before any host is claimed
+// One the server refuses is refused when pasted, before any host is checked
 // and with nothing under rotations.
 func TestSecretsRotateRefusesAPastedSMTPPasswordThatDoesNotLogIn(t *testing.T) {
 	const wrong = "not-a-real-smtp-password-wrong"
@@ -185,8 +185,8 @@ func TestSecretsRotateRefusesAPastedSMTPPasswordThatDoesNotLogIn(t *testing.T) {
 	if strings.Contains(err.Error(), wrong) {
 		t.Error("the refusal shows the password")
 	}
-	if w.claimed() {
-		t.Error("a host was claimed")
+	if w.checked() {
+		t.Error("a host was checked")
 	}
 	if after, _ := os.ReadFile(secretsPath); !bytes.Equal(before, after) {
 		t.Error("the secrets file changed")
@@ -208,8 +208,8 @@ func TestSecretsRotateRefusesASetSMTPPasswordThatDoesNotLogIn(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "does not pass where it is checked") || !strings.Contains(err.Error(), "535") {
 		t.Fatalf("err = %v\n%s", err, rec.Lines())
 	}
-	if w.claimed() {
-		t.Error("a host was claimed")
+	if w.checked() {
+		t.Error("a host was checked")
 	}
 	if after, _ := os.ReadFile(secretsPath); !bytes.Equal(before, after) {
 		t.Error("the secrets file changed")

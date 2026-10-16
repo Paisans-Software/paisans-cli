@@ -167,24 +167,23 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 
 	transports := map[string]apply.Transport{}
-	var claim []string
+	var written []string
 	for _, name := range cfg.SiteNames() {
 		if name == site && *hostGone {
 			continue
 		}
 		transports[name] = removeSiteHost(name, cfg.Sites[name])
-		claim = append(claim, name)
+		written = append(written, name)
 	}
-	// A site declared for the first time is neither checked nor claimed: the
-	// eviction leaves its host to the apply that brings it up, and a claim
-	// would make it look prepared.
+	// A site declared for the first time is neither checked nor written to:
+	// the eviction leaves its host to the apply that brings it up.
 	monitors := cfg.MonitorSites()
 	if *evict {
 		joining, err := siteremove.JoiningSites(cfg, secrets, site, transports)
 		if err != nil {
 			return err
 		}
-		claim, monitors = withoutNames(claim, joining), withoutNames(monitors, joining)
+		written, monitors = withoutNames(written, joining), withoutNames(monitors, joining)
 	}
 	// The monitor's stack is applied last, with the site out of its seed,
 	// so each monitor site is host checked as apply would check it.
@@ -200,9 +199,10 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	if !*execute || r.Verbose() {
 		plan.Show(r)
 	}
-	// Every site it reaches is written to: the cluster and the mesh change
-	// on each remaining one, and the leaving host is cleaned.
-	if err := claimSites(r, cfg, *execute, claim...); err != nil {
+	// Every site it reaches is written to, so it checks the admission of
+	// each: the cluster and the mesh change on each remaining one, and the
+	// leaving host is cleaned.
+	if _, err := admittedSites(r, cfg, written...); err != nil {
 		return err
 	}
 	if filled.Changed() {
@@ -255,8 +255,8 @@ type forcedArgs struct {
 // runSiteRemoveForced is `site remove --force`: one host cleaned of this
 // deployment, nothing else read or changed. See siteremove.BuildForced.
 //
-// The host is never claimed in its registry, as other commands that write to
-// a host do: cleaning it removes this deployment's entry there.
+// The host's admission is not checked, as other commands that write to a
+// host check it: cleaning it removes this deployment from the host.
 func runSiteRemoveForced(r ui.Reporter, site string, a forcedArgs, stdin io.Reader, stdout io.Writer) error {
 	if a.hostGone {
 		return forceAndHostGone()

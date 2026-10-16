@@ -31,7 +31,7 @@ var meshRandom io.Reader = rand.Reader
 // checkMeshLive refuses when anything on the host h reaches, outside this
 // deployment's own interface, holds a network overlapping the mesh subnet:
 // a route, an address, a Docker network or one of Docker's address pools.
-// apply and host prepare run it before they claim the host, dry run or not,
+// apply and host prepare run it before they change the host, dry run or not,
 // so a clash stops them with nothing changed. See internal/mesh.
 func checkMeshLive(cfg *config.Config, site string, h mesh.Host) error {
 	subnet, err := mesh.ParsePrefix(cfg.Mesh.Subnet)

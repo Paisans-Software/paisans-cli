@@ -7,8 +7,8 @@
 // The token is only four hex digits of a random id, so a collision is
 // unlikely and not impossible, and nothing about the id alone can see one.
 // The registry can: /var/lib/paisans/registry.json lists every deployment
-// that has claimed the host, by id, with its token and root, and a command
-// that writes to a host claims it first. A claim by an id whose token or root
+// that has claimed the host, by id, with its token and root, and host admit
+// claims it, as root, before it changes anything. A claim by an id whose token or root
 // is already another id's is refused, and the host is left as it was.
 //
 // The same record keeps two deployments' meshes apart. Each entry carries the
@@ -30,9 +30,8 @@
 //
 // The claim runs as one remote shell command under flock, so two operators
 // claiming one host at once are serialised rather than both reading the old
-// file. The merge itself is awk, which a host has before host prepare has
-// installed anything, and host prepare is itself a command that claims. The
-// file therefore has a fixed layout, one deployment per line, which Encode
+// file. The merge itself is awk, which a host has before anything is
+// installed on it. The file therefore has a fixed layout, one deployment per line, which Encode
 // writes and the awk program reads; a file in any other layout is refused
 // rather than guessed at. The layout is also plain JSON.
 //
@@ -88,7 +87,7 @@ type Entry struct {
 	Domain string `json:"domain"`
 	// Site is this host's site name in that deployment.
 	Site string `json:"site"`
-	// ClaimedAt is when a command last claimed the host for it, RFC 3339.
+	// ClaimedAt is when the host was last claimed for it, RFC 3339.
 	ClaimedAt string `json:"claimed_at"`
 	// Interface is the deployment's WireGuard interface, psns-<token>.
 	Interface string `json:"interface,omitempty"`
@@ -220,8 +219,8 @@ func ForRequest(req admission.Request, now time.Time) (string, Entry) {
 	}
 }
 
-// Refused is the refusal a claim of e meets for why, in the words Claim
-// uses, for host admit's read-only check.
+// Refused is the refusal a claim of e meets for why, for host admit's
+// read-only check.
 func Refused(t Runner, e Entry, why error) error { return refused(t, e, why) }
 
 // Parse reads a registry. An empty file is an empty registry, which is what a
@@ -438,7 +437,7 @@ const (
 // (the refresh), and prints the result with entry last. id's own line naming
 // another site is a conflict too, and so, where either line names no site,
 // is one at another mesh address: the host is that site's machine (see
-// sameMachine and AnotherSite). A line under another
+// AnotherSite). A line under another
 // id holding the claimed token, root, interface or listen port, a mesh
 // subnet overlapping the claimed one, or the gateway or data role the claim
 // also holds, is a conflict: it is printed to stderr
@@ -600,66 +599,6 @@ type Runner interface {
 	Run(command string) (string, error)
 	ReadFile(path string) (content string, found bool, err error)
 	Describe() string
-}
-
-// Claim claims the host t reaches for cfg's deployment, as site. It is the
-// first thing every command that writes to a host does: a refusal stops the
-// command with nothing on the host changed.
-//
-// A host that already runs another site of this deployment is refused before
-// the claim runs, and the merge refuses it again under the lock, for two
-// claims racing.
-func Claim(t Runner, cfg *config.Config, site string, now time.Time) error {
-	id, e := For(cfg, site, now)
-	content, _, err := t.ReadFile(Path)
-	if err != nil {
-		return fmt.Errorf("%s: reading %s: %w", t.Describe(), Path, err)
-	}
-	// A registry in another layout is the merge's to refuse, in its own words.
-	var current *Registry
-	if r, err := Parse([]byte(content)); err == nil {
-		current = &r
-	}
-	if err := sameMachine(t, current, cfg, site); err != nil {
-		return err
-	}
-	command, err := ClaimCommand(id, e)
-	if err != nil {
-		return err
-	}
-	out, err := t.Run(command)
-	if err == nil {
-		return nil
-	}
-	if refusal := ParseClaim(out); refusal != nil {
-		var c Conflict
-		if errors.As(refusal, &c) && c.ID == id {
-			return otherSite(t, cfg, site, c.Entry.Site, c.Entry.Address, c.Entry.Kept)
-		}
-		if errors.As(refusal, &c) {
-			c.Clashes = clashes(c.Entry, e)
-			refusal = c
-		}
-		return refused(t, e, refusal)
-	}
-	return fmt.Errorf("%s: claiming the host in %s: %w\n%s", t.Describe(), Path, err, strings.TrimSpace(out))
-}
-
-// Check is a claim's decision without the write, for a dry run and the read
-// only commands: it reads the registry and reports a conflict as Claim would.
-func Check(t Runner, cfg *config.Config, site string) error {
-	id, e := For(cfg, site, time.Time{})
-	r, err := Read(t)
-	if err != nil {
-		return err
-	}
-	if err := sameMachine(t, &r, cfg, site); err != nil {
-		return err
-	}
-	if c := Conflicts(r, id, e); len(c) > 0 {
-		return refused(t, e, c[0])
-	}
-	return nil
 }
 
 // Read reads the registry on the host t reaches. A host no deployment has

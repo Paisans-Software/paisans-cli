@@ -106,7 +106,7 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	// Stage 4 pulls the new site's images only after the mesh, HAProxy and
 	// etcd have changed on every site, so an image with no build for its
-	// architecture is refused here, before anything is claimed.
+	// architecture is refused here, before anything changes.
 	rendered, err := render.Build(cfg, secrets)
 	if err != nil {
 		return err
@@ -124,7 +124,7 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	// The review comes before the claim, which is the first change: an
+	// The review comes before the first change: an
 	// operator who does not approve leaves every host as it was. Its images
 	// are the new site's render, as stage 4 applies it. Keys are host
 	// prepare's, which the new site has had already.
@@ -144,9 +144,9 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 		showReview(r, "review what "+config.FileName+" grants", review.review, false)
 		pending = review.review.Pending()
 	}
-	// Site add writes to every site: the mesh, HAProxy and etcd change on
-	// each, not only on the new one.
-	if err := claimSites(r, cfg, *execute, cfg.SiteNames()...); err != nil {
+	// Site add writes to every site, so it checks the admission of each: the
+	// mesh, HAProxy and etcd change on each, not only on the new one.
+	if _, err := admittedSites(r, cfg, cfg.SiteNames()...); err != nil {
 		return err
 	}
 	plan, err := ui.Get(r, "read every site", func() (*siteadd.Plan, error) {

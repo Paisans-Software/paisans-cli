@@ -13,7 +13,7 @@ import (
 // linkFake is a Pocket ID holding the fixture's declared operator alice, and
 // any other account it is told of, reached through curl configs.
 type linkFake struct {
-	registry *registryFake
+	admitted *admittedFake
 	disabled bool
 	missing  bool
 	calls    []string
@@ -50,7 +50,7 @@ func (f *linkFake) RunInput(command, stdin string) (string, error) {
 
 func withLinkFake(t *testing.T) *linkFake {
 	t.Helper()
-	fake := &linkFake{registry: withRegistryFake(t)}
+	fake := &linkFake{admitted: withAdmittedFake(t)}
 	saved, savedFailures := adminTransport, convergeEmailFailures
 	adminTransport = func(apply.SSHTransport) appadmin.Transport { return fake }
 	convergeEmailFailures = func(*config.Config, string, convergeOptions, []string) (map[string]string, error) {
@@ -65,7 +65,7 @@ func linkArgs(extra ...string) []string {
 }
 
 // A dry run finds the declared operator's account and says what it would issue,
-// and reaches nothing that changes: no link, no registry claim.
+// and reaches nothing that changes: no link, no admission check.
 func TestOperatorMagicLinkDryRunChangesNothing(t *testing.T) {
 	fake := withLinkFake(t)
 	rec := withRecorder(t, true)
@@ -77,8 +77,8 @@ func TestOperatorMagicLinkDryRunChangesNothing(t *testing.T) {
 	if stdout != "" || fake.issued || fake.emailed || fake.mutated {
 		t.Errorf("a dry run issued something: stdout %q, issued %v, emailed %v", stdout, fake.issued, fake.emailed)
 	}
-	if fake.registry.claims != 0 {
-		t.Error("a dry run claimed the host")
+	if fake.admitted.checked() {
+		t.Error("a dry run checked the host's admission")
 	}
 	if !rec.Has("pending", "issue a one-time sign-in link for alice, valid 24 hours") || !rec.Has("result", "Nothing changed") {
 		t.Errorf("output:\n%s", rec.Lines())
@@ -109,8 +109,8 @@ func TestOperatorMagicLinkIssuesTheLinkAndNothingElse(t *testing.T) {
 	if fake.mutated {
 		t.Error("it changed the account, not only issued a link")
 	}
-	if fake.registry.claims != 1 {
-		t.Errorf("claimed the host %d time(s), want once", fake.registry.claims)
+	if !rec.Has("done", "check site's admission") {
+		t.Errorf("the host's admission was not checked:\n%s", rec.Lines())
 	}
 }
 

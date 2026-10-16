@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
@@ -23,7 +24,6 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
 	"github.com/paisans-software/paisans-cli/internal/mesh"
 	"github.com/paisans-software/paisans-cli/internal/patroni"
-	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -166,7 +166,7 @@ func RunAll(cfg *config.Config, joining []string, transports map[string]apply.Tr
 		t := transports[name]
 		r.host(t)
 		r.hostPrepare(t)
-		r.registry(t)
+		r.admission(t)
 		r.archMatch(t)
 		r.wireguard(t)
 		r.watchdog(t)
@@ -488,16 +488,15 @@ func (r *runner) routes(t apply.Transport) {
 	r.pass(r.newSite, "routes", "no route overlaps the mesh subnet %s", r.cfg.Mesh.Subnet)
 }
 
-// registry checks the new site's host can be claimed for this deployment: no
-// other deployment in its registry holds this one's token or root. It reads
-// and never claims; site add claims when it runs. See internal/registry.
-func (r *runner) registry(t apply.Transport) {
-	if err := registry.Check(t, r.cfg, r.newSite); err != nil {
-		r.refuse(r.newSite, "registry", "%v", err)
+// admission checks the new site's host has admitted this deployment, as
+// that site, with the grants its roles need. It reads as the deployment's
+// user; host admit claimed the host in its registry.
+func (r *runner) admission(t apply.Transport) {
+	if _, err := admission.ForSite(t, r.cfg.ID, r.newSite, r.cfg.Sites[r.newSite]); err != nil {
+		r.refuse(r.newSite, "admission", "%v. Send the host's owner `paisans host request --site %s > %s.admit`", err, r.newSite, r.newSite)
 		return
 	}
-	d := r.cfg.Deployment()
-	r.pass(r.newSite, "registry", "no other deployment on the host holds token %s, %s, interface %s or an overlapping mesh", d.Token(), d.Root(), d.Interface())
+	r.pass(r.newSite, "admission", "the host admitted this deployment as %s", r.newSite)
 }
 
 // diskProbe reads free bytes on the deepest directory that exists on the way

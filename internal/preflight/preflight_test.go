@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
-	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -63,7 +64,7 @@ const cluster = `{"members":[{"name":"home-a","role":"leader","state":"running"}
 func healthy(name string) *fakeHost {
 	return &fakeHost{
 		name:  name,
-		files: map[string]string{"/etc/os-release": ubuntu},
+		files: map[string]string{"/etc/os-release": ubuntu, admittedPath: admittedRecord(name)},
 		rules: []rule{
 			{match: "echo paisans-answers", out: "paisans-answers\n"},
 			{match: "timedatectl", out: "yes\n"},
@@ -91,6 +92,35 @@ func healthy(name string) *fakeHost {
 			{match: "/srv/paisans/f2a9/caddy.d'", out: ""},
 		},
 	}
+}
+
+// admittedPath is where the fixture deployment's admission record is.
+var admittedPath, _ = admission.Path(mustFixture().Deployment().Token())
+
+// admittedRecord is the record host admit writes for site, with every grant
+// its roles need.
+func admittedRecord(site string) string {
+	cfg := mustFixture()
+	if _, ok := cfg.Sites[site]; !ok {
+		return ""
+	}
+	req, err := admission.Build(cfg, site)
+	if err != nil {
+		panic(err)
+	}
+	b, err := admission.EncodeRecord(admission.NewRecord(req, req.Grants, "", time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)))
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
+func mustFixture() *config.Config {
+	cfg, err := config.Load("testdata/site-add.yaml")
+	if err != nil {
+		panic(err)
+	}
+	return cfg
 }
 
 func fixture(t *testing.T) *config.Config {
@@ -515,26 +545,22 @@ func TestASharedHostIsPreparedAsShared(t *testing.T) {
 	}
 }
 
-// A host another deployment with the same token has claimed is refused, by
-// reading its registry; preflight never claims.
-func TestARegistryConflictIsRefused(t *testing.T) {
+// A host that has not admitted the deployment is refused, with the line
+// the operator sends its owner; preflight only reads the record.
+func TestAnUnadmittedHostIsRefused(t *testing.T) {
 	prepared(t)
 	h := hosts()
-	if h["home-b"].files == nil {
-		h["home-b"].files = map[string]string{}
-	}
-	h["home-b"].files[registry.Path] = `{"version":1,"deployments":{
-"f2a91111-2222-4333-8444-555566667777":{"token":"f2a9","root":"/srv/paisans/f2a9","domain":"example.net","site":"vm","claimed_at":"2026-10-01T00:00:00Z"}
-}}
-`
-	r := run(t, fixture(t), h)
-	got := refusedDetail(t, r, "home-b", "registry")
-	if !strings.Contains(got, "f2a91111-2222-4333-8444-555566667777") || !strings.Contains(got, "example.net") {
-		t.Errorf("the refusal does not name the other deployment: %q", got)
+	cfg := fixture(t)
+	path, _ := admission.Path(cfg.Deployment().Token())
+	delete(h["home-b"].files, path)
+	r := run(t, cfg, h)
+	got := refusedDetail(t, r, "home-b", "admission")
+	if !strings.Contains(got, "paisans host request --site home-b") {
+		t.Errorf("the refusal does not name the request: %q", got)
 	}
 	for _, c := range h["home-b"].ran {
-		if strings.Contains(c, "flock") {
-			t.Errorf("preflight claimed the host: %s", c)
+		if strings.Contains(c, "flock") || strings.Contains(c, "registry") {
+			t.Errorf("preflight reached the registry: %s", c)
 		}
 	}
 }

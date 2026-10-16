@@ -414,3 +414,64 @@ func Mine(t Runner) (Record, error) {
 	}
 	return Record{}, fmt.Errorf("%s: %w (%s)", Dir, ErrNotMine, user)
 }
+
+// Differences is every way r, what the owner admitted, differs from site as
+// the declaration has it: each is a root change, so each needs the owner to
+// run host admit again. None when r covers the site.
+func (r Record) Differences(site string, s config.Site) []string {
+	var out []string
+	if r.Site != site {
+		out = append(out, fmt.Sprintf("the host was admitted as site %s, and this is %s", r.Site, site))
+	}
+	if r.User != s.SSHUser() {
+		out = append(out, fmt.Sprintf("the host admitted user %s, and sites.%s.ssh.user is %s", r.User, site, s.SSHUser()))
+	}
+	if r.Ports.SSH != s.SSH.PortOrDefault() {
+		out = append(out, fmt.Sprintf("the host opened ssh port %d, and the site's is %d", r.Ports.SSH, s.SSH.PortOrDefault()))
+	}
+	if r.Ports.WireGuard != s.ListenPort() {
+		out = append(out, fmt.Sprintf("the host opened WireGuard port %d, and the site's is %d", r.Ports.WireGuard, s.ListenPort()))
+	}
+	if want := s.Endpoint != ""; r.Forwarding != want {
+		out = append(out, fmt.Sprintf("forwarding is %s on the host, and the site %s an endpoint, which relays the mesh", onOff(r.Forwarding), map[bool]string{true: "has", false: "has no"}[want]))
+	}
+	for _, g := range Needs(s).Missing(r.Grants) {
+		out = append(out, fmt.Sprintf("the site's roles need --%s, which the host's owner did not grant", g))
+	}
+	if s.WebServerManagedBy() == config.ManagedByExternal && r.WebServer == nil {
+		out = append(out, "the site is behind the owner's web server (managed_by: external), and the host was admitted without it")
+	}
+	return out
+}
+
+func onOff(b bool) string {
+	if b {
+		return "on"
+	}
+	return "off"
+}
+
+// SiteError is a host whose admission does not cover its site.
+type SiteError struct {
+	Site     string
+	Problems []string
+}
+
+func (e *SiteError) Error() string {
+	return e.Site + "'s admission does not cover it: " + strings.Join(e.Problems, "; ")
+}
+
+// ForSite reads, as the deployment's user, the admission record of the
+// deployment deploymentID on the host t reaches, and judges it against site.
+// An error wrapping ErrNotAdmitted is a host with no record; a *SiteError is
+// one whose record does not cover the site.
+func ForSite(t Reader, deploymentID, site string, s config.Site) (Record, error) {
+	rec, err := Read(t, deployment.Deployment{ID: deploymentID}.Token())
+	if err != nil {
+		return Record{}, err
+	}
+	if p := rec.Differences(site, s); len(p) > 0 {
+		return rec, &SiteError{Site: site, Problems: p}
+	}
+	return rec, nil
+}

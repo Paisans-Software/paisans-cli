@@ -253,7 +253,7 @@ func convergePlan(cfg *config.Config, st convergeState) []convergeStep {
 }
 
 // convergeRun runs one step: the existing command, in this process, so it
-// plans, gates, claims and reports as typed by hand. Tests replace it.
+// plans, gates, checks the admission and reports as typed by hand. Tests replace it.
 var convergeRun func(args []string) error
 
 // The step runner and the check are set here rather than where they are
