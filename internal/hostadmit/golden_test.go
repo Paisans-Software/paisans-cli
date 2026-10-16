@@ -59,7 +59,12 @@ func runGolden(t *testing.T, cases []goldenCase) {
 // by hand.
 func checkGoldenText(t *testing.T, name, got string) {
 	t.Helper()
-	path := filepath.Join("testdata", "plans", name+".txt")
+	checkGoldenAt(t, filepath.Join("testdata", "plans", name+".txt"), got)
+}
+
+// checkGoldenAt is checkGoldenText for a golden file at path.
+func checkGoldenAt(t *testing.T, path, got string) {
+	t.Helper()
 	if *update {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)

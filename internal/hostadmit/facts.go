@@ -63,6 +63,12 @@ type Facts struct {
 	DefaultDev, LAN            string
 	WatchdogRules              []string
 	Records                    []string
+	// MeshUnit is the deployment's wg-quick unit: enabled, at boot or at
+	// runtime, and active, or on its way up.
+	MeshUnit struct{ Enabled, Active bool }
+	// Entries is how many entries each directory evict may remove holds,
+	// by path, for a directory that exists and is not a link.
+	Entries map[string]int
 	// Data is where Docker's data would go: the nearest directory that
 	// exists. FS and Avail are not read when Unsafe; Above is the probe's
 	// data-above, safe, link-above or unsafe-above.
@@ -130,8 +136,8 @@ type DirState struct {
 
 // probeData is what probe.sh.tmpl is rendered with.
 type probeData struct {
-	User, Token, Prefix, EgressUnit, EgressTable, DataParent string
-	Files, Dirs                                              []string
+	User, Token, Prefix, EgressUnit, EgressTable, DataParent, MeshUnit string
+	Files, Dirs, Counted                                               []string
 }
 
 // probedFiles are the files admit writes as root, whose state the probe
@@ -143,9 +149,13 @@ func probedFiles(d deployment.Deployment, in Input) []string {
 		delegatePath, modulesLoadPath, sysctlPath, sysctlBeforePath,
 		helper, sudoersPath(d), egressFilePath(d), "/etc/systemd/system/" + d.EgressUnit(),
 		watchdogRulePath(d), "/etc/systemd/system/" + d.Prefix() + "-watchdog.service",
-		record,
+		record, d.WireGuardInstalled(),
 	}
 }
+
+// countedDirs are the directories admit creates for every deployment,
+// which evict removes once they hold nothing but what it removes.
+func countedDirs() []string { return []string{admission.Dir, deployment.Base, apply.HelperDir} }
 
 // probedDirs are the directories admit creates or checks.
 func probedDirs(d deployment.Deployment, in Input) []string {
@@ -187,7 +197,7 @@ func probeScript(d deployment.Deployment, in Input) (string, error) {
 	if err := tmpl.Execute(&script, probeData{
 		User: in.Request.User, Token: d.Token(), Prefix: d.Prefix(),
 		EgressUnit: d.EgressUnit(), EgressTable: d.EgressTable(), DataParent: in.Flags.DataDir,
-		Files: probedFiles(d, in), Dirs: probedDirs(d, in),
+		MeshUnit: d.WireGuardUnit(), Files: probedFiles(d, in), Dirs: probedDirs(d, in), Counted: countedDirs(),
 	}); err != nil {
 		return "", err
 	}
@@ -198,7 +208,7 @@ func probeScript(d deployment.Deployment, in Input) (string, error) {
 // numbers and names; a line it cannot read is refused rather than skipped.
 func parseFacts(out, user string) (Facts, error) {
 	f := Facts{Packages: map[string]bool{}, SubUID: map[string][]IDRange{}, SubGID: map[string][]IDRange{},
-		Files: map[string]FileState{}, Dirs: map[string]DirState{}, raw: map[string][]string{}}
+		Files: map[string]FileState{}, Dirs: map[string]DirState{}, Entries: map[string]int{}, raw: map[string][]string{}}
 	f.User.Name = user
 	var sudoL []string
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
@@ -342,6 +352,20 @@ func parseFacts(out, user string) (Facts, error) {
 			f.WatchdogRules = append(f.WatchdogRules, v)
 		case "record":
 			f.Records = append(f.Records, v)
+		case "mesh-unit":
+			enabled, active, ok := strings.Cut(v, " ")
+			if !ok {
+				return f, fmt.Errorf("unreadable mesh-unit line %q", v)
+			}
+			f.MeshUnit.Enabled = enabled == "enabled" || enabled == "enabled-runtime"
+			f.MeshUnit.Active = slices.Contains([]string{"active", "activating", "reloading"}, active)
+		case "entries":
+			count, dir, ok := strings.Cut(v, " ")
+			n, err := strconv.Atoi(count)
+			if !ok || err != nil || n < 0 || dir == "" {
+				return f, fmt.Errorf("unreadable entries line %q", v)
+			}
+			f.Entries[dir] = n
 		case "data-above":
 			f.Data.Above = v
 			switch v {

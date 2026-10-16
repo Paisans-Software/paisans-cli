@@ -132,3 +132,36 @@ func TestParseFactsMarksAPathBelowALinkOrAnotherUsersDirectory(t *testing.T) {
 		t.Error("an unknown data-above was read")
 	}
 }
+
+// Evict's facts: the mesh unit's state, as systemctl names it, and how many
+// entries each directory evict may remove holds. A line that cannot be read
+// is refused, so evict never removes a directory it miscounted.
+func TestParseEvictFacts(t *testing.T) {
+	f, err := parseFacts("mesh-unit enabled active\nentries 3 /etc/paisans\nentries 1 /srv/my data\nend\n", "paisans-f2a9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !f.MeshUnit.Enabled || !f.MeshUnit.Active {
+		t.Errorf("mesh unit: %+v", f.MeshUnit)
+	}
+	if n, ok := f.Entries["/etc/paisans"]; !ok || n != 3 || f.Entries["/srv/my data"] != 1 {
+		t.Errorf("entries: %v", f.Entries)
+	}
+	for _, c := range []struct {
+		line            string
+		enabled, active bool
+	}{{"disabled inactive", false, false}, {"enabled-runtime activating", true, true}, {"not-found failed", false, false}, {"static inactive", false, false}} {
+		f, err := parseFacts("mesh-unit "+c.line+"\nend\n", "paisans-f2a9")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if f.MeshUnit.Enabled != c.enabled || f.MeshUnit.Active != c.active {
+			t.Errorf("%q: %+v", c.line, f.MeshUnit)
+		}
+	}
+	for _, bad := range []string{"mesh-unit enabled\nend\n", "entries x /etc/paisans\nend\n", "entries 3\nend\n"} {
+		if _, err := parseFacts(bad, "paisans-f2a9"); err == nil {
+			t.Errorf("%q was read", bad)
+		}
+	}
+}

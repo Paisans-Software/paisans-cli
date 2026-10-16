@@ -85,6 +85,16 @@ for f in{{ range .Files }} {{ q . }}{{ end }} $userfiles; do
 done
 if systemctl is-enabled {{ q .EgressUnit }} >/dev/null 2>&1; then say egress-enabled yes; else say egress-enabled no; fi
 if nft list table inet {{ q .EgressTable }} >/dev/null 2>&1; then say egress-table present; else say egress-table absent; fi
+# The mesh's unit, as systemctl names its state; nothing printed is
+# neither enabled nor active.
+e=$(systemctl is-enabled {{ q .MeshUnit }} 2>/dev/null | sed -n 1p)
+a=$(systemctl is-active {{ q .MeshUnit }} 2>/dev/null | sed -n 1p)
+say mesh-unit "${e:-disabled} ${a:-inactive}"
+# How many entries each directory evict may remove holds. A name with a
+# newline in it counts twice, which only ever keeps the directory.
+for d in{{ range .Counted }} {{ q . }}{{ end }}; do
+  if [ -d "$d" ] && [ ! -L "$d" ]; then say entries "$(ls -A "$d" | wc -l | tr -d ' ') $d"; fi
+done
 # Each directory admit creates or checks, as ls -ldn prints it, so a link,
 # a non-directory and an ACL (a + after the mode) are all seen.
 for d in{{ range .Dirs }} {{ q . }}{{ end }}; do

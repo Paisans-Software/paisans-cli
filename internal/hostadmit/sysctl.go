@@ -46,6 +46,18 @@ func parseBefore(content string) before {
 	return b
 }
 
+// check refuses a before file holding anything but a value for one of
+// admit's keys, in digits: its values reach a command line run as root.
+// by is the command that read it, admit or evict.
+func (b before) check(by string) error {
+	for k, v := range b {
+		if (k != keyLowPorts && k != keyForward) || v == "" || strings.Trim(v, "0123456789") != "" {
+			return fmt.Errorf("%s holds %s, which is not a value admit wrote. Remove the line or the file and %s again. Nothing was changed", sysctlBeforePath, ui.Visible(k+" = "+v), by)
+		}
+	}
+	return nil
+}
+
 func (b before) text() string {
 	keys := make([]string, 0, len(b))
 	for k := range b {
@@ -144,10 +156,8 @@ func planSysctls(p *planner) error {
 		return shown(err)
 	}
 	was := parseBefore(beforeContent)
-	for k, v := range was {
-		if (k != keyLowPorts && k != keyForward) || v == "" || strings.Trim(v, "0123456789") != "" {
-			return fmt.Errorf("%s holds %s, which is not a value admit wrote. Remove the line or the file and admit again. Nothing was changed", sysctlBeforePath, ui.Visible(k+" = "+v))
-		}
+	if err := was.check("admit"); err != nil {
+		return err
 	}
 	b := before{}
 	for k, v := range was {
