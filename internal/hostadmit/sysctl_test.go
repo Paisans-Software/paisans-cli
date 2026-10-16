@@ -15,7 +15,7 @@ import (
 // grants and forwarding given. The fixture always encodes, so an error is
 // a broken test and panics.
 func other(public, forwarding bool) string {
-	rec := admission.Record{Version: admission.RecordVersion, Deployment: "0c0dc4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01", User: "paisans-0c0d",
+	rec := admission.Record{Version: admission.RecordVersion, Deployment: "0c0dc4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01", User: "paisans-0c0d", Site: "other", Roles: []string{"witness"},
 		Grants: admission.Grants{PublicPorts: public}, Forwarding: forwarding,
 		Ports: admission.Ports{SSH: 22, WireGuard: 51821, Public: []int{}}, AdmittedAt: "2026-10-01T09:00:00Z"}
 	if public {
