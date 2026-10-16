@@ -422,6 +422,39 @@ container's users map into that range, so the UID alone misses them):
    (`127.0.0.53` under systemd-resolved, or the LAN resolver).
 3. Drop `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`,
    `169.254.0.0/16`, `100.64.0.0/10`, `::1`, `fc00::/7` and `fe80::/10`.
+4. On a gateway, accept TCP 80 and 443 to the host's own addresses
+   (`fib daddr type local`). A site is a gateway when its grant holds
+   `public_ports`, where the deployment's own Caddy holds those ports, or
+   when its `web_server` is external, where the owner's web server fronts
+   it and the deployment reaches it by its public name. Either way the
+   ports answer the internet already. UDP 443 is not accepted.
+5. Drop every address of the host itself, its broadcast and its multicast
+   (`fib daddr type { local, broadcast, multicast }`). This keeps the
+   deployment off the owner's services bound to `0.0.0.0` or `::`, which
+   it would otherwise reach through the host's public addresses and its
+   IPv6 global addresses, and off mDNS, SSDP and broadcast UDP on the LAN.
+6. Drop the host's on-link IPv6 prefixes. A home LAN's IPv6 is global
+   address space, so rule 3 does not cover it.
+
+The order is load-bearing. Rule 4 follows rule 3, since loopback addresses
+are `local` too, and precedes rule 6, since the host's own IPv6 address
+lies in an on-link prefix. The mesh's own address stays reachable through
+rule 1, which the deployment's services need.
+
+**The on-link prefixes** are read at admit time from the main routing
+table: every IPv6 route with no gateway (`ip -6 -o route show table main`,
+no `via`), kept when it is global unicast (inside `2000::/3`) and on an
+interface of the host's own, which leaves out loopback, every WireGuard
+interface (the mesh's among them) and Docker's bridges (`docker0`,
+`br-<12 hex>`). Routes are read rather than addresses because a host
+holding a DHCPv6 `/128`, or an address added without a prefix route, still
+reaches its LAN's `/64` through an on-link route. A prefix inside another
+kept one is left out, and the rest are sorted. Each is parsed as a masked
+IPv6 prefix before it is rendered, and the probe's text never reaches the
+table. Running admit again reads them again: a changed set is a changed
+table, which admit writes and loads again in place, and an unchanged set
+plans nothing. Until that run, a prefix the ISP has rotated is not
+dropped.
 
 A deployment that needs something on the owner's network asks the owner,
 who adds an accept rule. That is deliberately outside the CLI.
@@ -446,8 +479,9 @@ mostly choose to a service on the owner's loopback or LAN. So:
   `meta mark <mark>`, after the name was resolved, so nothing can change
   between the check and the send. It drops loopback, link-local and
   multicast, every address of the host itself (`fib daddr type local`),
-  and the private and shared ranges of rule 3 above. Everything else, the
-  public endpoints a mesh normally dials, passes.
+  the private and shared ranges of rule 3 above, and the host's on-link
+  IPv6 prefixes of rule 6. Everything else, the public endpoints a mesh
+  normally dials, passes.
 * **`--mesh-lan`** lets the deployment's sites dial each other on the
   owner's LAN. With it, admit adds an accept for the private prefix of the
   host's own LAN (the route of its default interface) in the mark chain,
@@ -636,7 +670,11 @@ A rekey with sites down is in `docs/specs/2026-10-15-mesh-rekey-sites-down.md`.
 * The helper's `put`: a table of confs, every hook key refused, every
   unknown key refused, an `Address` outside the subnet refused, the
   renderer's own output accepted.
-* The egress table renders the user's UID and subordinate range.
+* The egress table renders the user's UID and subordinate range, the
+  gateway's accept only for a gateway, and the on-link prefixes in both
+  chains; a prefix that is not a masked IPv6 prefix is refused. A re-run
+  with the same on-link prefixes plans nothing, and one with changed
+  prefixes writes and reloads the table.
 * `host request`: a golden request per role mix; the digest is stable across
   runs and changes with any field. Admit refuses a request with a missing
   field, an unknown version, a bad key or a mistyped digest.
