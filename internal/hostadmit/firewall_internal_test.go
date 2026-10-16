@@ -73,8 +73,24 @@ func TestANegatedPortHoldsWhatItDoesNotName(t *testing.T) {
 		"tcp dport != 1-100 dnat to 10.0.0.2":       true,
 		"-p tcp -m tcp ! --dport 22 -j DNAT":        true,
 	} {
-		if got := ruleHoldsLow(rule); got != want {
+		if got, _ := ruleHoldsLow(rule); got != want {
 			t.Errorf("%q holds 80 or 443: %v, want %v", rule, got, want)
+		}
+	}
+}
+
+// A port in a named set or a map is not one admit can read, so the rule
+// may hold 80 or 443, and does, unresolved, so the refusal can say so.
+func TestAPortInASetOrMapHoldsUnresolved(t *testing.T) {
+	for _, rule := range []string{
+		"tcp dport @web dnat ip to 10.0.0.2",
+		"dnat ip to tcp dport map { 443 : 10.0.0.2 }",
+		"dnat ip to tcp dport map @ports",
+		"tcp dport vmap @jumps",
+		"tcp dport != @web dnat ip to 10.0.0.2",
+	} {
+		if holds, unresolved := ruleHoldsLow(rule); !holds || !unresolved {
+			t.Errorf("%q: holds %v, unresolved %v", rule, holds, unresolved)
 		}
 	}
 }

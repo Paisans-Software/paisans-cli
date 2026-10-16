@@ -176,7 +176,10 @@ func holders(p *planner) ([]holder, error) {
 			}
 			found = append(found, holder{"your Docker's stopped container " + hostText(strings.TrimPrefix(f[0], "/")) + " publishes 80 or 443 and, with restart: always, takes them again when your Docker restarts"})
 		case "dnat":
-			if ruleHoldsLow(rest) {
+			switch holds, unresolved := ruleHoldsLow(rest); {
+			case unresolved:
+				found = append(found, holder{"a NAT rule whose ports are in a set or map admit cannot read, so it may hold 80 or 443, in " + hostText(rest)})
+			case holds:
 				found = append(found, holder{"a NAT rule in " + hostText(rest)})
 			}
 		}
@@ -214,9 +217,13 @@ func publishesLow(ports string) bool {
 // as its destination port: one port, a set, a range (nft's 1-1000,
 // iptables' 1:1000), or a negation (nft's !=, iptables' ! --dport), which
 // matches every port it does not name, so it holds 80 or 443 unless it
-// names both.
-func ruleHoldsLow(rule string) bool {
+// names both. A port in a named set or a map (@name, map, vmap) is not one
+// admit can read, so the rule is taken to hold them, unresolved.
+func ruleHoldsLow(rule string) (holds, unresolved bool) {
 	for _, m := range dport.FindAllStringSubmatch(rule, -1) {
+		if op := m[3]; strings.HasPrefix(op, "@") || op == "map" || op == "vmap" {
+			return true, true
+		}
 		names := map[int]bool{}
 		for _, tok := range strings.FieldsFunc(m[3], func(r rune) bool { return strings.ContainsRune("{}, ", r) }) {
 			if s := portSpan.FindStringSubmatch(tok); s != nil {
@@ -227,10 +234,10 @@ func ruleHoldsLow(rule string) bool {
 		}
 		negated := m[1] != "" || m[2] != ""
 		if negated && !(names[80] && names[443]) || !negated && (names[80] || names[443]) {
-			return true
+			return true, false
 		}
 	}
-	return false
+	return false, false
 }
 
 // portIn reports whether the port from, or the range from to to, holds port.
