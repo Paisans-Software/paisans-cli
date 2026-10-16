@@ -31,11 +31,13 @@ type ListWarning struct {
 
 // List is a block of rows drawn once, a plan, whose rows then run in
 // place. Start runs row i under title, the row's title as the run knows
-// it, Eg: with a value filled in that the plan could not know yet; the
-// step it returns ends the row. Close ends the list once the run is over,
-// however it ended.
+// it, Eg: with a value filled in that the plan could not know yet, and
+// details, the lines --verbose shows under the run's line where the run is
+// printed after the plan; a block redrawn in place keeps the details it
+// was drawn with. The step it returns ends the row. Close ends the list
+// once the run is over, however it ended.
 type List interface {
-	Start(i int, title string) Step
+	Start(i int, title string, details ...string) Step
 	Close()
 }
 
@@ -70,18 +72,17 @@ func NewList(r Reporter, rows []ListRow, warnings []ListWarning) List {
 	for _, w := range warnings {
 		r.Warn(w.Hint, w.Detail)
 	}
-	return &stepList{r: r, rows: rows}
+	return &stepList{r: r}
 }
 
 // stepList is the list of a reporter that draws none: each run a step.
 type stepList struct {
-	r    Reporter
-	rows []ListRow
+	r Reporter
 }
 
-func (l *stepList) Start(i int, title string) Step {
+func (l *stepList) Start(_ int, title string, details ...string) Step {
 	s := l.r.Step(title)
-	for _, d := range l.rows[i].Details {
+	for _, d := range details {
 		s.Detail("%s", d)
 	}
 	return s
@@ -206,7 +207,7 @@ func (r *writer) labelLocked(label string) {
 	fmt.Fprintf(r.w, "  %s:\n", italic(r.terminal, label))
 }
 
-func (l *liveList) Start(i int, title string) Step {
+func (l *liveList) Start(i int, title string, details ...string) Step {
 	r := l.r
 	if !l.inPlace {
 		r.mu.Lock()
@@ -217,7 +218,7 @@ func (l *liveList) Start(i int, title string) Step {
 		}
 		r.mu.Unlock()
 		s := r.Step(title)
-		for _, d := range l.rows[i].Details {
+		for _, d := range details {
 			s.Detail("%s", d)
 		}
 		return s
@@ -305,7 +306,7 @@ func (l *liveList) drawRowLocked(row *liveRow) {
 	if !ok {
 		return
 	}
-	up := r.counted() - l.base + l.height - row.top
+	up := l.upTo(row)
 	if l.stale || up > r.termRows-1 {
 		l.redrawLocked()
 		return
@@ -329,6 +330,11 @@ func (l *liveList) drawRowLocked(row *liveRow) {
 		fmt.Fprintf(&b, "\x1b[%dC", col)
 	}
 	t.raw(b.String())
+}
+
+// upTo is how many rows of the terminal row's line is above the cursor.
+func (l *liveList) upTo(row *liveRow) int {
+	return l.r.counted() - l.base + l.height - row.top
 }
 
 // redrawLocked draws the rows again below, under RunLabel, as they stand,
@@ -365,8 +371,20 @@ func (l *liveList) lineOf(i int) int {
 	return n
 }
 
-// held is called by Hold: whatever uses the terminal now is not counted.
-func (l *liveList) heldLocked() { l.stale = true }
+// heldLocked is called by Hold, before the hold is in place: whatever
+// uses the terminal now is not counted. A row running is drawn once more,
+// as continued below, so the block left above the prompt shows no frozen
+// spinner; the run goes on in the block drawn again below.
+func (l *liveList) heldLocked() {
+	if row := l.running; row != nil && !l.stale && l.r.held == 0 && l.upTo(row) <= l.r.termRows-1 {
+		row.running = false
+		mark, result := row.Mark, row.Result
+		row.Mark, row.Result = Waiting, "continued below"
+		l.drawRowLocked(row)
+		row.Mark, row.Result, row.running = mark, result, true
+	}
+	l.stale = true
+}
 
 // resumedLocked is called once every hold is resumed: a run that has begun
 // is drawn again at once, so its rows are not left as they were.
@@ -452,6 +470,11 @@ func (t *tracked) count(s string) {
 		i := strings.IndexByte(s, '\n')
 		if i < 0 {
 			t.partial += s
+			// Only what follows the last carriage return is on the
+			// line, so a spinner's frames are not kept.
+			if j := strings.LastIndexByte(t.partial, '\r'); j > 0 {
+				t.partial = t.partial[j:]
+			}
 			return
 		}
 		t.rows += lineRows(t.partial+s[:i], t.cols)

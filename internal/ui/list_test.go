@@ -193,7 +193,7 @@ func TestAListAtATerminalUpdatesItsRowsInPlace(t *testing.T) {
 	rows[1].Result = "runs once the user exists"
 	l := ui.NewList(r, rows, []ui.ListWarning{{Hint: "ufw is off"}})
 	s := l.Start(0, "make the user")
-	ui.Frame(r)
+	ui.FrameList(r)
 	sameRows(t, v.all(), []string{
 		"admit paisans-f2a9 on vm",
 		"  ⠙ make the user",
@@ -355,4 +355,41 @@ func (v *lockedVT) Write(p []byte) (int, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	return v.vt.Write(p)
+}
+
+// A hold while a row runs leaves the row in the block above the prompt
+// saying the run continues below, not a frozen spinner.
+func TestAHoldMidRunMarksTheRowContinuedBelow(t *testing.T) {
+	v := newVT(60, 20)
+	r := sizedReporter(v, false)
+	l := ui.NewList(r, listRows("one", "two"), nil)
+	s := l.Start(0, "one")
+	resume := ui.Hold(r)
+	v.Write([]byte("password: \n"))
+	resume()
+	s.Done("")
+	l.Start(1, "two").Done("")
+	sameRows(t, v.all(), []string{
+		"  · one: continued below",
+		"  ○ two",
+		"password: ",
+		"  running:",
+		"  ✓ one",
+		"  ✓ two",
+	})
+}
+
+// A spinner's frames are not kept until a newline: only what follows the
+// last carriage return counts.
+func TestSpinnerFramesAreNotAccumulated(t *testing.T) {
+	var b strings.Builder
+	r := ui.NewForTestSize(&b, false, 80, 24, clock())
+	s := r.Step("long")
+	for range 100 {
+		ui.Frame(r)
+	}
+	if n := ui.PartialLen(r); n > 100 {
+		t.Errorf("the line not yet ended holds %d bytes", n)
+	}
+	s.Done("")
 }

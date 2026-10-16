@@ -64,3 +64,18 @@ func NewForTestSizeTick(w io.Writer, cols, rows int, tick time.Duration) Reporte
 	r.tick = tick
 	return r
 }
+
+// PartialLen is how much of a line not yet ended r keeps.
+func PartialLen(r Reporter) int { return len(r.(*writer).w.(*tracked).partial) }
+
+// FrameList draws one spinner frame for the row r's list runs, as the
+// list's own goroutine would.
+func FrameList(r Reporter) {
+	w := r.(*writer)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if l := w.list; l != nil && l.running != nil {
+		w.frame_++
+		l.drawRowLocked(l.running)
+	}
+}

@@ -173,15 +173,7 @@ func (r *writer) spinFrame(s *step, stop chan struct{}) {
 func (r *writer) frame() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if !r.terminal {
-		return
-	}
-	if l := r.list; l != nil && l.running != nil && r.open == nil && r.group == nil {
-		r.frame_++
-		l.drawRowLocked(l.running)
-		return
-	}
-	if r.open == nil && r.group == nil {
+	if (r.open == nil && r.group == nil) || !r.terminal {
 		return
 	}
 	r.frame_++
@@ -446,11 +438,11 @@ func (r *writer) Hold() (resume func()) {
 	if !r.terminal {
 		return func() {}
 	}
-	r.held++
-	r.interruptLocked()
 	if r.list != nil {
 		r.list.heldLocked()
 	}
+	r.held++
+	r.interruptLocked()
 	var once sync.Once
 	return func() {
 		once.Do(func() {
