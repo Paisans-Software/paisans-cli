@@ -1,6 +1,7 @@
 package hostadmit_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/hostadmit"
@@ -28,3 +29,25 @@ func homeB() *fakeHost {
 }
 
 func TestWatchdogPlans(t *testing.T) { runGolden(t, watchdogCases) }
+
+// Withdrawing the grant removes the rule and gives each device node back to
+// root, since udev never resets an owner.
+func TestWithdrawnWatchdogIsGivenBack(t *testing.T) {
+	rule := "/etc/udev/rules.d/60-paisans-f2a9-watchdog.rules"
+	h := home().withFile(rule, "x\n", "644", 0)
+	plan, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range plan.Steps {
+		if strings.Contains(s.Command, "rm -f "+rule) {
+			for _, want := range []string{"/dev/watchdog[0-9]*", "chown root:root", "chmod 600"} {
+				if !strings.Contains(s.Command, want) {
+					t.Errorf("the take-back does not run %q: %s", want, s.Command)
+				}
+			}
+			return
+		}
+	}
+	t.Fatal("the rule was not removed")
+}

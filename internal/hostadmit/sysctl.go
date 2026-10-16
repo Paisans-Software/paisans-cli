@@ -59,11 +59,13 @@ func (b before) text() string {
 	return out
 }
 
-// others is every other admitted deployment's record on the host. One
-// that cannot be read is taken to need everything, so nothing is restored
-// under a deployment admit cannot see into, and is warned about.
-func others(p *planner) ([]admission.Record, error) {
+// others is every other admitted deployment's readable record on the host,
+// and the names of the records that cannot be read, a newer paisans' among
+// them. An unreadable record is not guessed at: planSysctls keeps what
+// 60-paisans.conf holds for it and says so.
+func others(p *planner) ([]admission.Record, []string, error) {
 	var out []admission.Record
+	var unreadable []string
 	for _, file := range p.f.Records {
 		token := strings.TrimSuffix(strings.TrimPrefix(path.Base(file), "admitted."), ".json")
 		if token == p.d.Token() {
@@ -71,16 +73,28 @@ func others(p *planner) ([]admission.Record, error) {
 		}
 		content, _, err := p.t.ReadFile(file)
 		if err != nil {
-			return nil, shown(err)
+			return nil, nil, shown(err)
 		}
 		rec, err := admission.ParseRecord([]byte(content), token)
 		if err != nil {
-			p.warn(ui.Visible("sysctls: "+file+" cannot be read, so its deployment is taken to need low ports and forwarding"), visibleLines(ui.RedactError(err).Error()))
-			rec = admission.Record{Deployment: token, Grants: admission.Grants{PublicPorts: true}, Forwarding: true}
+			unreadable = append(unreadable, file)
+			p.warn(ui.Visible("sysctls: "+file+" cannot be read, so the sysctls are kept as they are for its deployment"), visibleLines(ui.RedactError(err).Error()))
+			continue
 		}
 		out = append(out, rec)
 	}
-	return out, nil
+	return out, unreadable, nil
+}
+
+// holds reports whether the sysctl file content sets key.
+func holds(content, key string) bool {
+	for _, line := range strings.Split(content, "\n") {
+		k, _, ok := strings.Cut(line, "=")
+		if ok && !strings.HasPrefix(strings.TrimSpace(line), "#") && strings.TrimSpace(k) == key {
+			return true
+		}
+	}
+	return false
 }
 
 // planSysctls keeps 60-paisans.conf holding a key while any admitted
@@ -91,10 +105,17 @@ func others(p *planner) ([]admission.Record, error) {
 func planSysctls(p *planner) error {
 	low, fwd := p.in.Flags.PublicPorts, p.in.Request.Endpoint
 	var lowFor, fwdFor []string
-	recs, err := others(p)
+	recs, unreadable, err := others(p)
 	if err != nil {
 		return err
 	}
+	current, _, err := p.t.ReadFile(sysctlPath)
+	if err != nil {
+		return shown(err)
+	}
+	// A key 60-paisans.conf sets is paisans' to keep for a record admit
+	// cannot read, and its live value is not the host's own.
+	setLow, setFwd := holds(current, keyLowPorts), holds(current, keyForward)
 	for _, r := range recs {
 		if r.Grants.PublicPorts {
 			lowFor = append(lowFor, ui.Visible(r.Deployment))
@@ -103,7 +124,8 @@ func planSysctls(p *planner) error {
 			fwdFor = append(fwdFor, ui.Visible(r.Deployment))
 		}
 	}
-	wantLow, wantFwd := low || len(lowFor) > 0, fwd || len(fwdFor) > 0
+	keep := len(unreadable) > 0
+	wantLow, wantFwd := low || len(lowFor) > 0 || keep && setLow, fwd || len(fwdFor) > 0 || keep && setFwd
 	if low {
 		p.warn("public ports: every local user on this host may bind ports 80 to 1023", keyLowPorts+" = 80 is host wide: no user's process needs root for a port from 80 up, the deployment's Caddy among them.")
 	}
@@ -131,14 +153,14 @@ func planSysctls(p *planner) error {
 	for k, v := range was {
 		b[k] = v
 	}
-	// The first admit to change a key records what it found; one that
-	// finds another deployment holding the key finds its own value.
-	if wantLow && len(lowFor) == 0 {
+	// The first admit to change a key records what it found; once
+	// 60-paisans.conf sets the key the live value is paisans', not the host's.
+	if wantLow && !setLow {
 		if _, ok := b[keyLowPorts]; !ok {
 			b[keyLowPorts] = p.f.PortStart
 		}
 	}
-	if wantFwd && len(fwdFor) == 0 {
+	if wantFwd && !setFwd {
 		if _, ok := b[keyForward]; !ok {
 			b[keyForward] = p.f.IPForward
 		}

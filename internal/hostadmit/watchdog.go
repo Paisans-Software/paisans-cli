@@ -13,6 +13,11 @@ import (
 // Observed R4).
 const udevTrigger = "udevadm control --reload && udevadm trigger --subsystem-match=watchdog --subsystem-match=misc"
 
+// giveBack makes each watchdog node root's again. udev sets an owner only
+// where a rule says so and never resets one, so removing the rule and
+// triggering leaves the device the user's until the module reloads.
+const giveBack = `for d in /dev/watchdog /dev/watchdog[0-9]*; do if [ -e "$d" ]; then chown root:root "$d" && chmod 600 "$d"; fi; done`
+
 // watchdogRule gives the device to the user, owner and group both: a
 // device whose group is root's cannot be chowned inside the user
 // namespace, and the infra compose chowns it for Patroni (Observed R4).
@@ -32,7 +37,7 @@ func planWatchdogGrant(p *planner) error {
 	if !p.in.Flags.Watchdog {
 		if p.f.Files[own].Present {
 			p.step(Step{Title: "take the watchdog back", Describe: "watchdog: this site is no longer a data site; remove " + own + " and give the device back to root",
-				Command: "rm -f " + own + " && " + udevTrigger, Kinds: []string{hostprep.KindWatchdog}})
+				Command: "rm -f " + own + " && " + udevTrigger + " && " + giveBack, Kinds: []string{hostprep.KindWatchdog}})
 		}
 		if p.f.Files[unit].Present {
 			p.step(Step{Title: "stop loading the watchdog at boot", Describe: "watchdog: remove " + unit,
