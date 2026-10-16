@@ -89,6 +89,7 @@ var evictParts = []struct {
 	{"wireguard", (*evictor).helper},
 	{"watchdog", (*evictor).watchdog},
 	{"firewall", (*evictor).firewall},
+	{"docker hold", func(e *evictor) error { return releaseHold(e.planner, "evict") }},
 	{"host wide", (*evictor).hostWide},
 	{"sysctls", (*evictor).sysctls},
 	{"installed", (*evictor).installed},

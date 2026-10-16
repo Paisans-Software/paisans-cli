@@ -99,6 +99,9 @@ var evictCases = []struct {
 	{"evict-installed-by-admit", "paisans-f2a9", func() *fakeHost {
 		return withEntries(installedByAdmit(evicted("vm", hostadmit.Flags{})()))
 	}},
+	{"evict-hold-left", "paisans-f2a9", func() *fakeHost {
+		return withEntries(withOther(evicted("vm", hostadmit.Flags{})(), false, false).with("docker-hold", "held"))
+	}},
 	{"evict-nothing-left", "paisans-f2a9", func() *fakeHost { return newBlank() }},
 }
 
@@ -604,6 +607,25 @@ func TestEvictRemovesTheDelegationDirectoryAdmitMade(t *testing.T) {
 		rmdir := stepIndex(plan, "rm -f /etc/systemd/system/user@.service.d/delegate.conf && rmdir --ignore-fail-on-non-empty /etc/systemd/system/user@.service.d && systemctl daemon-reload")
 		if made != (rmdir >= 0) {
 			t.Errorf("admit made the directory: %v; the plan:\n%s", made, plan.Text())
+		}
+	}
+}
+
+// A hold an admit stopped in left is never legitimate outside a running
+// install, so evict puts the owner's policy-rc.d back, whether or not
+// another deployment stays.
+func TestEvictPutsBackALeftHold(t *testing.T) {
+	for _, shared := range []bool{false, true} {
+		h := evicted("vm", hostadmit.Flags{})().with("docker-hold", "held")
+		if shared {
+			withOther(h, false, false)
+		}
+		plan, err := hostadmit.BuildEvict(withEntries(h), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stepIndex(plan, "release_docker_hold") < 0 {
+			t.Errorf("shared %v: evict leaves the hold:\n%s", shared, plan.Text())
 		}
 	}
 }

@@ -136,13 +136,10 @@ func planSystemDocker(p *planner, s hostprep.Section, added hostprep.Installed) 
 	}
 	p.section(s)
 	installs := slices.Contains(added.Packages, "docker-ce")
-	if p.f.Docker.Held && !installs {
-		release, err := p.profile.ReleaseDockerHold()
-		if err != nil {
+	if !installs {
+		if err := releaseHold(p, "docker"); err != nil {
 			return err
 		}
-		p.step(Step{Title: "put back /usr/sbin/policy-rc.d", Describe: "docker: an admit that stopped while it installed Docker left its own policy-rc.d there; yours, if you had one, goes back",
-			Command: release, Kinds: []string{"docker"}})
 	}
 	p.record.SystemDockerDisabled = now.dockerIsAdmits()
 	if !now.dockerIsAdmits() {
@@ -182,4 +179,21 @@ func disabledBefore(p *planner) (bool, error) {
 		return false, err
 	}
 	return slices.ContainsFunc(st.others, func(r admission.Record) bool { return r.SystemDockerDisabled }), nil
+}
+
+// releaseHold plans putting /usr/sbin/policy-rc.d back when a run that
+// stopped while admit held Docker's daemons left the hold behind: it is
+// never right outside a running install. prefix starts the step's
+// sentence.
+func releaseHold(p *planner, prefix string) error {
+	if !p.f.Docker.Held {
+		return nil
+	}
+	release, err := p.profile.ReleaseDockerHold()
+	if err != nil {
+		return err
+	}
+	p.step(Step{Title: "put back /usr/sbin/policy-rc.d", Describe: prefix + ": an admit that stopped while it installed Docker left its hold on Docker's daemons; your own policy-rc.d, if you had one, goes back",
+		Command: release, Kinds: []string{prefix}})
+	return nil
 }
