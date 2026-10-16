@@ -153,8 +153,8 @@ func (u ubuntu) ConfigStore(t Transport, d deployment.Deployment, self config.Si
 	}
 	// The daemon listens on the mesh address, which exists only while
 	// WireGuard is up. A user unit cannot be ordered after the system's
-	// wg-quick, so the daemon restarts every ten seconds until it can bind,
-	// and is started here whether or not the mesh is up yet.
+	// wg-quick, so its start waits for that address, and it is started here
+	// whether or not the mesh is up yet.
 	if unitsChanged || !(daemonEnabled && daemonActive && timerEnabled && timerActive) {
 		// reenable for a changed unit, so links its earlier [Install] made
 		// go with it.
