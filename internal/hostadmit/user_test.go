@@ -36,10 +36,10 @@ const (
 )
 
 // admittedUser is a host where admit has made paisans-f2a9 and written both
-// drop-ins, its manager running under linger, and its egress table in
-// place: a re-run changes nothing.
+// drop-ins, its manager running under linger, its egress table and ufw
+// rules in place: a re-run changes nothing.
 func admittedUser() *fakeHost {
-	return helperInstalled(egressAdmitted("")(), "vm").withDir("/srv/paisans", "drwxr-xr-x", 0, 0).withDir("/srv/paisans/f2a9", "drwxr-x---", 1001, 1001).
+	return helperInstalled(egressAdmitted("")().withAdmitRules(), "vm").withDir("/srv/paisans", "drwxr-xr-x", 0, 0).withDir("/srv/paisans/f2a9", "drwxr-x---", 1001, 1001).
 		withFile(delegatePath, delegateConf, "644", 0).withFile(meshPath, meshConf, "644", 0)
 }
 

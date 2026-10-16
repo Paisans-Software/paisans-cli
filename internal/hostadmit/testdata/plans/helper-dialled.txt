@@ -465,12 +465,37 @@ step 11: install the helper's sudoers line
   run:
     $ visudo -cqf /etc/sudoers.d/paisans-f2a9.new && chown root:root /etc/sudoers.d/paisans-f2a9.new && mv -f /etc/sudoers.d/paisans-f2a9.new /etc/sudoers.d/paisans-f2a9 || { rm -f /etc/sudoers.d/paisans-f2a9.new; echo 'visudo refused the line; nothing reached sudo'; exit 1; }
 
-step 12: load softdog
+step 12: allow 22/tcp
+  firewall: allow 22/tcp (ssh, the bootstrap route)
+  run:
+    $ ufw allow 22/tcp comment 'paisans-f2a9: ssh, the bootstrap route'
+
+step 13: allow 51820/udp
+  firewall: allow 51820/udp (WireGuard, the mesh)
+  run:
+    $ ufw allow 51820/udp comment 'paisans-f2a9: WireGuard, the mesh'
+
+step 14: allow all inbound on psns-f2a9
+  firewall: allow all inbound on psns-f2a9 (the mesh: etcd, Patroni, Garage, HAProxy)
+  run:
+    $ ufw allow in on psns-f2a9 comment 'paisans-f2a9: the mesh: etcd, Patroni, Garage, HAProxy'
+
+step 15: allow 80/tcp
+  firewall: allow 80/tcp (public ports, HTTP)
+  run:
+    $ ufw allow 80/tcp comment 'paisans-f2a9: public ports, HTTP'
+
+step 16: allow 443/tcp
+  firewall: allow 443/tcp (public ports, HTTPS)
+  run:
+    $ ufw allow 443/tcp comment 'paisans-f2a9: public ports, HTTPS'
+
+step 17: load softdog
   watchdog: load softdog now
   run:
     $ modprobe softdog
 
-step 13: load softdog at boot
+step 18: load softdog at boot
   watchdog: load softdog at every boot (paisans-f2a9-watchdog.service)
   write /etc/systemd/system/paisans-f2a9-watchdog.service mode 0644:
     | # Written by paisans host prepare. Loads softdog at boot, before Docker
@@ -494,7 +519,7 @@ step 13: load softdog at boot
   run:
     $ systemctl daemon-reload && systemctl enable paisans-f2a9-watchdog.service
 
-step 14: give the watchdog to paisans-f2a9
+step 19: give the watchdog to paisans-f2a9
   watchdog: /etc/udev/rules.d/60-paisans-f2a9-watchdog.rules makes /dev/watchdog and /dev/watchdog0 paisans-f2a9's, owner and group, mode 600
   write /etc/udev/rules.d/60-paisans-f2a9-watchdog.rules mode 0644:
     | # Written by paisans host admit: the watchdog is paisans-f2a9's, for its
@@ -503,7 +528,7 @@ step 14: give the watchdog to paisans-f2a9
   run:
     $ udevadm control --reload && udevadm trigger --subsystem-match=watchdog --subsystem-match=misc
 
-step 15: record the sysctls' values before
+step 20: record the sysctls' values before
   sysctls: /etc/paisans/sysctl.before, for host evict to restore
   write /etc/paisans/sysctl.before mode 0644:
     | # Written by paisans host admit: each value as it was before admit
@@ -511,7 +536,7 @@ step 15: record the sysctls' values before
     | net.ipv4.ip_forward = 0
     | net.ipv4.ip_unprivileged_port_start = 1024
 
-step 16: set the host's sysctls
+step 21: set the host's sysctls
   sysctls: /etc/sysctl.d/60-paisans.conf, applied with sysctl --system
   write /etc/sysctl.d/60-paisans.conf mode 0644:
     | # Written by paisans host admit, for every admitted deployment that needs
@@ -535,6 +560,8 @@ present: user: paisans-f2a9 holds 165536-231071 in /etc/subgid
 present: linger: on for paisans-f2a9
 present: linger: paisans-f2a9's manager is running
 present: mesh: nothing on this host overlaps 10.44.0.0/24
+present: public ports: nothing else answers on 80 or 443
+present: firewall: ufw active, its default policy left to the owner
 warning: delegation reaches paisans-f2a9's manager at its next start
   Its manager is running, and restarting it would restart its Docker daemon and every container in it, so admit does not. cpuset and io limits apply after the host's next reboot.
 warning: watchdog: falling back to softdog

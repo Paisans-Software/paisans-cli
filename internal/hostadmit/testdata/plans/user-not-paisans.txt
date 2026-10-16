@@ -475,12 +475,22 @@ step 13: install the helper's sudoers line
   run:
     $ visudo -cqf /etc/sudoers.d/paisans-f2a9.new && chown root:root /etc/sudoers.d/paisans-f2a9.new && mv -f /etc/sudoers.d/paisans-f2a9.new /etc/sudoers.d/paisans-f2a9 || { rm -f /etc/sudoers.d/paisans-f2a9.new; echo 'visudo refused the line; nothing reached sudo'; exit 1; }
 
-step 14: load softdog
+step 14: allow 2222/tcp
+  firewall: allow 2222/tcp (ssh, the bootstrap route)
+  run:
+    $ ufw allow 2222/tcp comment 'paisans-f2a9: ssh, the bootstrap route'
+
+step 15: allow all inbound on psns-f2a9
+  firewall: allow all inbound on psns-f2a9 (the mesh: etcd, Patroni, Garage, HAProxy)
+  run:
+    $ ufw allow in on psns-f2a9 comment 'paisans-f2a9: the mesh: etcd, Patroni, Garage, HAProxy'
+
+step 16: load softdog
   watchdog: load softdog now
   run:
     $ modprobe softdog
 
-step 15: load softdog at boot
+step 17: load softdog at boot
   watchdog: load softdog at every boot (paisans-f2a9-watchdog.service)
   write /etc/systemd/system/paisans-f2a9-watchdog.service mode 0644:
     | # Written by paisans host prepare. Loads softdog at boot, before Docker
@@ -504,7 +514,7 @@ step 15: load softdog at boot
   run:
     $ systemctl daemon-reload && systemctl enable paisans-f2a9-watchdog.service
 
-step 16: give the watchdog to community
+step 18: give the watchdog to community
   watchdog: /etc/udev/rules.d/60-paisans-f2a9-watchdog.rules makes /dev/watchdog and /dev/watchdog0 community's, owner and group, mode 600
   write /etc/udev/rules.d/60-paisans-f2a9-watchdog.rules mode 0644:
     | # Written by paisans host admit: the watchdog is community's, for its
@@ -525,6 +535,7 @@ present: user: community exists, uid 1002, in no privileged group, and sudo gran
 present: user: community holds 231072-296607 in /etc/subuid
 present: user: community holds 231072-296607 in /etc/subgid
 present: mesh: nothing on this host overlaps 10.44.0.0/24
+present: firewall: ufw active, its default policy left to the owner
 present: forwarding: not needed, this site has no endpoint
 warning: user: community already exists and is not paisans-f2a9
   admit adds the operators' keys to community's authorized_keys and runs the deployment as community: check that this account is meant for the deployment and nothing else.

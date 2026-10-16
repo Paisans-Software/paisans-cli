@@ -172,6 +172,7 @@ func newBlank() *fakeHost {
 	h.answer("docker compose version", "compose absent\npkg nftables install ok installed\nkeyring absent\narch amd64\n").
 		answer("RuntimeWatchdogUSec", "device absent\nsystemd 0\ndaemon absent\n").
 		answer("ufw show added", "ufw present\nstatus active\n").
+		answer(portsMarker, "end\n").
 		answer("is-enabled", "enabled \nactive \n").
 		answer("ip -j route", "[]").answer("ip -j addr", "[]").answer("docker network", "[]")
 	return h

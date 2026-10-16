@@ -516,8 +516,24 @@ step 17: install the helper's sudoers line
   run:
     $ visudo -cqf /etc/sudoers.d/paisans-f2a9.new && chown root:root /etc/sudoers.d/paisans-f2a9.new && mv -f /etc/sudoers.d/paisans-f2a9.new /etc/sudoers.d/paisans-f2a9 || { rm -f /etc/sudoers.d/paisans-f2a9.new; echo 'visudo refused the line; nothing reached sudo'; exit 1; }
 
+step 18: allow 22/tcp
+  firewall: allow 22/tcp (ssh, the bootstrap route)
+  run:
+    $ ufw allow 22/tcp comment 'paisans-f2a9: ssh, the bootstrap route'
+
+step 19: allow 51820/udp
+  firewall: allow 51820/udp (WireGuard, the mesh)
+  run:
+    $ ufw allow 51820/udp comment 'paisans-f2a9: WireGuard, the mesh'
+
+step 20: allow all inbound on psns-f2a9
+  firewall: allow all inbound on psns-f2a9 (the mesh: etcd, Patroni, Garage, HAProxy)
+  run:
+    $ ufw allow in on psns-f2a9 comment 'paisans-f2a9: the mesh: etcd, Patroni, Garage, HAProxy'
+
 present: package: nftables installed
 present: apparmor: rootlesskit's profile is loaded
 present: mesh: nothing on this host overlaps 10.44.0.0/24
+present: firewall: ufw active, its default policy left to the owner
 present: forwarding: not needed, this site has no endpoint
 present: web server: nginx (process nginx, config /etc/nginx/nginx.conf), certificates from certbot

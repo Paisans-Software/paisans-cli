@@ -192,10 +192,10 @@ var parts = []part{
 	{"deployment directory", planDeploymentDir}, // 10
 	{"mesh subnet", planMeshSubnet},             // 10a
 	{"wireguard", planWireGuard},                // 11
-	// 12. firewall
-	{"watchdog", planWatchdogGrant}, // 13
-	{"sysctls", planSysctls},        // 14
-	{"web server", planWebServer},   // 14a
+	{"firewall", planFirewall},                  // 12
+	{"watchdog", planWatchdogGrant},             // 13
+	{"sysctls", planSysctls},                    // 14
+	{"web server", planWebServer},               // 14a
 	// 15. record
 	// 16. keys
 	// 17. check
