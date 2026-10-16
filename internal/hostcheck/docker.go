@@ -57,9 +57,9 @@ func parseVersion(s string) ([3]int, bool) {
 	return v, true
 }
 
-// atLeast reports whether version is min or newer, and false for a version
+// AtLeast reports whether version is min or newer, and false for a version
 // that cannot be read.
-func atLeast(version, min string) bool {
+func AtLeast(version, min string) bool {
 	v, ok := parseVersion(version)
 	if !ok {
 		return false
@@ -93,13 +93,13 @@ func dockerRefusal(host string, d Docker) error {
 		return nil
 	}
 	var old []string
-	if !atLeast(d.Version, MinEngine) {
+	if !AtLeast(d.Version, MinEngine) {
 		old = append(old, fmt.Sprintf("- Docker Engine %s, and at least %s is needed", orUnknown(d.Version), MinEngine))
 	}
-	if d.Client != "" && !atLeast(d.Client, MinEngine) {
+	if d.Client != "" && !AtLeast(d.Client, MinEngine) {
 		old = append(old, fmt.Sprintf("- the docker CLI %s, and at least %s is needed", d.Client, MinEngine))
 	}
-	if d.ComposeWorks && !atLeast(d.Compose, MinCompose) {
+	if d.ComposeWorks && !AtLeast(d.Compose, MinCompose) {
 		old = append(old, fmt.Sprintf("- Docker Compose %s, and at least %s is needed", orUnknown(d.Compose), MinCompose))
 	}
 	if len(old) == 0 {

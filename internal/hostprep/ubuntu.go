@@ -38,6 +38,12 @@ var dockerConflicts = []string{"docker.io", "docker-compose", "docker-compose-v2
 // store.
 var basePackages = []string{"wireguard-tools", "ufw", "git"}
 
+// rootlessPackages are what a deployment's own rootless daemon needs
+// beside Docker: the setup tool and rootlesskit, newuidmap and newgidmap,
+// and nft for the egress table. Docker's rootless page names the first two
+// (https://docs.docker.com/engine/security/rootless/, read 2026-10-15).
+var rootlessPackages = []string{"docker-ce-rootless-extras", "uidmap", "nftables"}
+
 // packageKinds is the kind of change each package in an install makes, each
 // once, in the order the packages are named: Docker's are docker, and each
 // base package is what it is installed for.
@@ -46,7 +52,7 @@ func packageKinds(packages []string) []string {
 	for _, p := range packages {
 		kind := "packages"
 		switch {
-		case slices.Contains(dockerPackages, p):
+		case slices.Contains(dockerPackages, p), slices.Contains(rootlessPackages, p):
 			kind = KindDocker
 		case p == "wireguard-tools":
 			kind = KindWireGuard
@@ -76,7 +82,7 @@ type packageFacts struct {
 }
 
 func (u ubuntu) probePackages(t Transport) (packageFacts, error) {
-	all := append(append(append([]string{}, dockerPackages...), dockerConflicts...), basePackages...)
+	all := append(append(append(append([]string{}, dockerPackages...), dockerConflicts...), rootlessPackages...), basePackages...)
 	script, err := snippet(u.tmpl("packages-probe.sh.tmpl"), map[string]any{"Packages": all})
 	if err != nil {
 		return packageFacts{}, err
@@ -105,6 +111,48 @@ func (u ubuntu) probePackages(t Transport) (packageFacts, error) {
 		}
 	}
 	return facts, nil
+}
+
+// dockerRepo plans Docker's apt key and repository, each only when it is
+// not already as written.
+func (u ubuntu) dockerRepo(t Transport, host OSRelease, facts packageFacts) (Section, error) {
+	var out Section
+	if facts.keyring {
+		out.Present = append(out.Present, "docker: apt signing key at "+dockerKeyring)
+	} else {
+		script, err := snippet(u.tmpl("docker-keyring.sh.tmpl"), nil)
+		if err != nil {
+			return out, err
+		}
+		out.Steps = append(out.Steps, Step{Kinds: []string{KindDocker}, Title: "add docker apt key", Describe: "docker: add Docker's apt signing key at " + dockerKeyring, Command: script})
+	}
+
+	codename := host.Fields["UBUNTU_CODENAME"]
+	if codename == "" {
+		codename = host.Fields["VERSION_CODENAME"]
+	}
+	if codename == "" || facts.arch == "" {
+		return out, fmt.Errorf("docker: could not read the release codename (%q) or the dpkg architecture (%q), and Docker's apt source needs both", codename, facts.arch)
+	}
+	sources, err := snippet(u.tmpl("docker.sources.tmpl"), map[string]string{"Codename": codename, "Arch": facts.arch})
+	if err != nil {
+		return out, err
+	}
+	current, found, err := t.ReadFile(dockerSources)
+	if err != nil {
+		return out, err
+	}
+	if found && current == sources {
+		out.Present = append(out.Present, "docker: apt repository at "+dockerSources)
+	} else {
+		out.Steps = append(out.Steps, Step{
+			Kinds:    []string{KindDocker},
+			Title:    "add docker apt repo",
+			Describe: fmt.Sprintf("docker: add Docker's apt repository for %s/%s at %s", codename, facts.arch, dockerSources),
+			File:     &File{Path: dockerSources, Content: sources, Mode: 0o644},
+		})
+	}
+	return out, nil
 }
 
 // Packages leaves an existing Docker as it is when `docker compose` works
@@ -157,41 +205,11 @@ func (u ubuntu) Packages(t Transport, host OSRelease) (Section, error) {
 				strings.Join(conflicts, ", "), remove)
 		}
 
-		if facts.keyring {
-			out.Present = append(out.Present, "docker: apt signing key at "+dockerKeyring)
-		} else {
-			script, err := snippet(u.tmpl("docker-keyring.sh.tmpl"), nil)
-			if err != nil {
-				return out, err
-			}
-			out.Steps = append(out.Steps, Step{Kinds: []string{KindDocker}, Title: "add docker apt key", Describe: "docker: add Docker's apt signing key at " + dockerKeyring, Command: script})
-		}
-
-		codename := host.Fields["UBUNTU_CODENAME"]
-		if codename == "" {
-			codename = host.Fields["VERSION_CODENAME"]
-		}
-		if codename == "" || facts.arch == "" {
-			return out, fmt.Errorf("docker: could not read the release codename (%q) or the dpkg architecture (%q), and Docker's apt source needs both", codename, facts.arch)
-		}
-		sources, err := snippet(u.tmpl("docker.sources.tmpl"), map[string]string{"Codename": codename, "Arch": facts.arch})
+		repo, err := u.dockerRepo(t, host, facts)
 		if err != nil {
 			return out, err
 		}
-		current, found, err := t.ReadFile(dockerSources)
-		if err != nil {
-			return out, err
-		}
-		if found && current == sources {
-			out.Present = append(out.Present, "docker: apt repository at "+dockerSources)
-		} else {
-			out.Steps = append(out.Steps, Step{
-				Kinds:    []string{KindDocker},
-				Title:    "add docker apt repo",
-				Describe: fmt.Sprintf("docker: add Docker's apt repository for %s/%s at %s", codename, facts.arch, dockerSources),
-				File:     &File{Path: dockerSources, Content: sources, Mode: 0o644},
-			})
-		}
+		out.add(repo)
 		for _, p := range dockerPackages {
 			if !facts.installed[p] {
 				install = append(install, p)
@@ -213,6 +231,51 @@ func (u ubuntu) Packages(t Transport, host OSRelease) (Section, error) {
 		}
 		out.Steps = append(out.Steps, Step{Kinds: packageKinds(install), Title: "install packages: " + strings.Join(install, ", "), Describe: "packages: install " + strings.Join(install, " "), Command: script})
 	}
+	return out, nil
+}
+
+// AdmitPackages: see Profile.
+func (u ubuntu) AdmitPackages(t Transport, host OSRelease, dockerPresent bool) (Section, error) {
+	var out Section
+	facts, err := u.probePackages(t)
+	if err != nil {
+		return out, err
+	}
+	if facts.snapDocker {
+		return out, fmt.Errorf("docker: Docker is installed as a snap, whose confinement keeps it from bind mounting under /srv and whose refreshes restart every container on snapd's schedule. Remove it yourself (snap remove docker), after checking nothing running depends on it, and admit again")
+	}
+	var install []string
+	if !dockerPresent {
+		repo, err := u.dockerRepo(t, host, facts)
+		if err != nil {
+			return out, err
+		}
+		out.add(repo)
+		for _, p := range dockerPackages {
+			if !facts.installed[p] {
+				install = append(install, p)
+			}
+		}
+	}
+	for _, p := range append(append([]string{}, rootlessPackages...), basePackages...) {
+		if facts.installed[p] {
+			out.Present = append(out.Present, "package: "+p+" installed")
+		} else {
+			install = append(install, p)
+		}
+	}
+	if len(install) == 0 {
+		return out, nil
+	}
+	script, err := snippet(u.tmpl("apt-install.sh.tmpl"), map[string]any{"Packages": install, "NoUpgrade": dockerPresent})
+	if err != nil {
+		return out, err
+	}
+	describe := "packages: install " + strings.Join(install, " ")
+	if dockerPresent {
+		describe += ", upgrading nothing already installed"
+	}
+	out.Steps = append(out.Steps, Step{Kinds: packageKinds(install), Title: "install packages: " + strings.Join(install, ", "), Describe: describe, Command: script})
 	return out, nil
 }
 

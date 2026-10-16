@@ -168,7 +168,7 @@ func newBlank() *fakeHost {
 	h.withDir("/etc/wireguard", "absent", 0, 0).withDir("/etc/paisans", "absent", 0, 0).
 		withDir("/srv/paisans", "absent", 0, 0).withDir("/srv/paisans/f2a9", "absent", 0, 0)
 	// hostprep's probes, as host prepare's tests answer them.
-	h.answer("docker compose version", "compose absent\nkeyring absent\narch amd64\n").
+	h.answer("docker compose version", "compose absent\npkg nftables install ok installed\nkeyring absent\narch amd64\n").
 		answer("RuntimeWatchdogUSec", "device absent\nsystemd 0\ndaemon absent\n").
 		answer("ufw show added", "ufw present\nstatus inactive\n").
 		answer("is-enabled", "enabled \nactive \n").
