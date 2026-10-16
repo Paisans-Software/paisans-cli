@@ -4190,12 +4190,11 @@ kernel is exactly the case where the node cannot fence itself any other way. A
 hardware or hypervisor watchdog is better wherever one exists, and `auto` takes
 the real one when it is there.
 
-**`off` is a warning, not a refusal** (`watchdog-off-on-data-site`). Some hosts
-genuinely cannot load any driver, and a single data site has nobody to split
-brain with. It is still risky once a second data site exists, so it has to be
-chosen rather than stumbled into. `off` also drops the device mapping from the
-infrastructure compose file: compose will not create a container whose device
-does not exist, so keeping the mapping would fail the exact host `off` is for.
+**`off` is refused on a data site** (`watchdog-off-on-data-site`). A Patroni
+member without a watchdog can keep acting as leader after it has lost its
+lock, so failover is not safe without one, and the host's owner admits a data
+site only with `paisans host admit --watchdog`. `off` remains on every other
+site, where nothing maps the device.
 
 **Only one process can hold the device, and it has to be Patroni.** `host
 prepare` refuses a host where systemd's own runtime watchdog

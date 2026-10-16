@@ -81,7 +81,7 @@ func TestRulesFire(t *testing.T) {
 		{"mbin-rabbitmq-across-sites", "mbin-rabbitmq-across-sites", validate.Warn},
 		{"pocket-id-standby-marker-unknown", "pocket-id-standby-marker-unknown", validate.Warn},
 		{"image-for-absent-postgres", "image-for-absent-postgres", validate.Warn},
-		{"watchdog-off-on-data-site", "watchdog-off-on-data-site", validate.Warn},
+		{"watchdog-off-on-data-site", "watchdog-off-on-data-site", validate.Refuse},
 		{"acme-provider-needs-an-image", "acme-provider-needs-an-image", validate.Refuse},
 		{"acme-image-is-stock-caddy", "acme-image-is-stock-caddy", validate.Refuse},
 		{"acme-image-is-latest", "acme-image-is-latest", validate.Refuse},
@@ -838,11 +838,10 @@ func TestACMEImageMayMoveWithinAMajorVersion(t *testing.T) {
 	}
 }
 
-// The watchdog warning names the mechanism that is actually rendered. Spilo
-// strips every PATRONI_* variable before it starts Patroni, so the mode is set
-// in SPILO_CONFIGURATION, and a warning that sent the operator looking for
-// PATRONI_WATCHDOG_MODE in patroni.env would send them looking for nothing.
-func TestWatchdogWarningNamesSpiloConfiguration(t *testing.T) {
+// A data site's Patroni member without a watchdog can keep acting as leader
+// after it has lost its lock, so failover is not safe without one; the
+// refusal says so and names the grant the host's owner gives.
+func TestWatchdogOffRefusalSaysWhy(t *testing.T) {
 	result := validate.Check(load(t, "watchdog-off-on-data-site"))
 	found := false
 	for _, f := range result.Findings {
@@ -850,15 +849,17 @@ func TestWatchdogWarningNamesSpiloConfiguration(t *testing.T) {
 			continue
 		}
 		found = true
-		if !strings.Contains(f.Message, "SPILO_CONFIGURATION") {
-			t.Errorf("the warning does not name SPILO_CONFIGURATION: %s", f.Message)
+		if f.Level != validate.Refuse {
+			t.Errorf("watchdog: off on a data site is %v, want a refusal", f.Level)
 		}
-		if strings.Contains(f.Message, "PATRONI_WATCHDOG_MODE") {
-			t.Errorf("the warning names PATRONI_WATCHDOG_MODE, which Spilo never passes to Patroni: %s", f.Message)
+		for _, want := range []string{"lost its lock", "--watchdog"} {
+			if !strings.Contains(f.Message, want) {
+				t.Errorf("the refusal does not say %q: %s", want, f.Message)
+			}
 		}
 	}
 	if !found {
-		t.Fatalf("the watchdog warning did not fire: %v", result.Findings)
+		t.Fatal("watchdog: off on a data site was not reported")
 	}
 }
 

@@ -1788,20 +1788,18 @@ func throwawayCollisions(cfg *config.Config) ([]*render.ConfigCollision, error) 
 	return render.ConfigCollisions(cfg, &throwaway.secrets), nil
 }
 
-// watchdogOffOnDataSite warns that a data site's Patroni runs unfenced.
-//
-// It is a warning rather than a refusal because there are hosts with no device
-// and no way to load one (some container based VPS kernels), and a one node
-// cluster has nobody to split brain with. It is still risky: without a
-// watchdog, a Patroni that hangs while holding the leader key can keep
-// accepting writes after its lease expires and another node is promoted.
+// watchdogOffOnDataSite refuses a data site without a watchdog. A Patroni
+// member without one can keep acting as leader after it has lost its lock,
+// so failover is not safe without it, and host admit refuses to admit a
+// data site without the owner's --watchdog grant whatever its mode: a
+// configuration that turns it off could never be admitted.
 func (c *checker) watchdogOffOnDataSite() {
 	for _, name := range c.cfg.SiteNames() {
 		site := c.cfg.Sites[name]
 		if site.Has(config.RoleData) && site.WatchdogMode() == config.WatchdogOff {
-			c.warn("watchdog-off-on-data-site", fmt.Sprintf("sites.%s.watchdog", name),
+			c.refuse("watchdog-off-on-data-site", fmt.Sprintf("sites.%s.watchdog", name),
 				"watchdog is off on a data site",
-				"is off on a site holding the data role. patroni.env sets the watchdog mode to off inside SPILO_CONFIGURATION, so a Patroni that hangs while it is leader is not fenced and can keep taking writes after another node is promoted. Use auto unless this host genuinely cannot load any watchdog driver.")
+				"is off on a site holding the data role. A Patroni member without a watchdog can keep acting as leader after it has lost its lock, so failover is not safe without one, and the host's owner admits a data site only with paisans host admit --watchdog. Use auto, required or softdog.")
 		}
 	}
 }
