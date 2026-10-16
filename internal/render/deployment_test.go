@@ -7,7 +7,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/paisans-software/paisans-cli/internal/deployment"
-	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
 const fixtureID = "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
@@ -65,7 +64,7 @@ func TestComposeFilesNameTheTokenAndLabelTheID(t *testing.T) {
 
 // Everything apply renders lands under /srv/paisans/<token>/ or /etc, and
 // every bind mount a compose file names on the host is under the root too,
-// but the gateway's read only mount of the host's own HostSitesDir.
+// the gateway's read only mount of the deployment's HostSitesDir among them.
 func TestEveryPathIsUnderTheDeploymentRoot(t *testing.T) {
 	for _, f := range build(t).Files {
 		site, rel, _ := strings.Cut(f.Path, "/")
@@ -84,9 +83,6 @@ func TestEveryPathIsUnderTheDeploymentRoot(t *testing.T) {
 			mount, ok := strings.CutPrefix(strings.TrimSpace(line), "- /")
 			_, target, bind := strings.Cut(mount, ":")
 			if !ok || !bind || !strings.HasPrefix(target, "/") || strings.HasPrefix(mount, "dev/") {
-				continue
-			}
-			if mount == strings.TrimPrefix(render.HostSitesDir, "/")+":"+render.HostSitesMount+":ro" {
 				continue
 			}
 			if !strings.HasPrefix(mount, "srv/paisans/f2a9/") {

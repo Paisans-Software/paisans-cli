@@ -23,6 +23,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Changed
 
+- The host owner's Caddy site files beside a gateway go in `/srv/paisans/<token>/caddy.d`, which `apply` creates as the deployment's user, instead of `/srv/caddy.d`.
 - The deployment record, the grant record and a gateway move's marker live in `/srv/paisans/<token>/.paisans/`, written by the deployment's own user under one lock of the deployment's.
 - `sites.*.roles` lists each role once, so a repeated role is refused when the configuration loads, as `host request` requires.
 - Preflight compares a new data site with the existing data sites on architecture alone, so data sites may run different Ubuntu releases, since Postgres uses its container's glibc.

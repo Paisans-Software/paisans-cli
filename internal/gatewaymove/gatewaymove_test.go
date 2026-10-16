@@ -32,7 +32,7 @@ const (
 )
 
 // host is one site's machine: its files, this deployment's gateway Caddy
-// containers, and the host owner's site files in /srv/caddy.d.
+// containers, and the host owner's site files in /srv/paisans/f2a9/caddy.d.
 type host struct {
 	name   string
 	files  map[string]string
@@ -402,7 +402,7 @@ func TestTheOldGatewayIsNotStoppedWhenTheCheckFailsAtTheStop(t *testing.T) {
 
 func TestTheHostOwnersSitesKeepTheOldCaddy(t *testing.T) {
 	w := newWorld(t)
-	w.hosts["home-a"].sites = []string{"/srv/caddy.d/blog.caddy"}
+	w.hosts["home-a"].sites = []string{"/srv/paisans/f2a9/caddy.d/blog.caddy"}
 	err := w.run()
 	if err == nil || !strings.Contains(err.Error(), "stage 6 (stop)") || !strings.Contains(err.Error(), "host owner's sites") {
 		t.Fatalf("want a refusal at stage 6: %v", err)
@@ -757,7 +757,7 @@ func TestACommentInTheCaddyfileIsNotARoute(t *testing.T) {
 // stopped.
 func TestTheHostOwnersSitesNoteSpeaksOfTheHandOff(t *testing.T) {
 	sw := sharedWorld(t)
-	sw.hosts["home-a"].sites = []string{"/srv/caddy.d/blog.caddy"}
+	sw.hosts["home-a"].sites = []string{"/srv/paisans/f2a9/caddy.d/blog.caddy"}
 	notes := strings.Join(sw.mustBuild().Notes, "\n")
 	if strings.Contains(notes, "not stopped") || !strings.Contains(notes, "not handed off") {
 		t.Errorf("notes:\n%s", notes)

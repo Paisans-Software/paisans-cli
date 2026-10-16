@@ -9,6 +9,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 	"github.com/paisans-software/paisans-cli/internal/ownership"
 	"github.com/paisans-software/paisans-cli/internal/registry"
@@ -69,7 +70,8 @@ func (p *Plan) staged() string { return p.dep().Path("infra", "caddy", "snippets
 
 // keptPaths are the paths under the root the kept Caddy needs, with
 // everything under each: its compose file, Caddyfile, DNS token, data and
-// config, the snippets directory it mounts, and the manifest.
+// config, the snippets directory it mounts, the manifest, and the host
+// owner's caddy.d, which holds the sites it is kept for.
 func (p *Plan) keptPaths() []string {
 	d := p.dep()
 	return []string{
@@ -80,6 +82,7 @@ func (p *Plan) keptPaths() []string {
 		d.Path("infra", "caddy", "data"),
 		d.Path("infra", "caddy", "config"),
 		d.Path("infra", "caddy", "snippets"),
+		render.HostSitesDir(d),
 	}
 }
 
@@ -128,17 +131,17 @@ func (p *Plan) planCaddy(t apply.Transport, inv *hostcheck.Inventory) (*caddyPla
 		return nil, fmt.Errorf("site remove %s: reading %s: %w", p.Site, p.caddyfile(), err)
 	}
 	if !found {
-		return nil, fmt.Errorf("site remove %s: its Caddy serves the host owner's sites in %s, and %s is not there to reduce to them. Nothing was changed", p.Site, render.HostSitesDir, p.caddyfile())
+		return nil, fmt.Errorf("site remove %s: its Caddy serves the host owner's sites in %s, and %s is not there to reduce to them. Nothing was changed", p.Site, render.HostSitesDir(p.dep()), p.caddyfile())
 	}
 	cp.original = content
-	if cp.reduced, err = reduceCaddyfile(content, p.dep().ID); err != nil {
-		return nil, fmt.Errorf("site remove %s: its Caddy serves the host owner's sites in %s, and %s cannot be reduced to them: %v. Nothing was changed", p.Site, render.HostSitesDir, p.caddyfile(), err)
+	if cp.reduced, err = reduceCaddyfile(content, p.dep()); err != nil {
+		return nil, fmt.Errorf("site remove %s: its Caddy serves the host owner's sites in %s, and %s cannot be reduced to them: %v. Nothing was changed", p.Site, render.HostSitesDir(p.dep()), p.caddyfile(), err)
 	}
 	if cp.reduce() && c.PID == 0 {
-		return nil, fmt.Errorf("site remove %s: its Caddy, %s, serves the host owner's sites in %s and is not running, so its reduced configuration cannot be validated and loaded in it. Nothing was changed. Start it (docker start %s) and run again", p.Site, c.Name, render.HostSitesDir, c.Name)
+		return nil, fmt.Errorf("site remove %s: its Caddy, %s, serves the host owner's sites in %s and is not running, so its reduced configuration cannot be validated and loaded in it. Nothing was changed. Start it (docker start %s) and run again", p.Site, c.Name, render.HostSitesDir(p.dep()), c.Name)
 	}
 	p.CaddyKept = cp.sites
-	p.Kept = append(p.Kept, caddyKept(p.Site, c.Name, cp.sites, p.dep().Dir("infra")))
+	p.Kept = append(p.Kept, caddyKept(p.Site, c.Name, cp.sites, render.HostSitesDir(p.dep()), p.dep().Dir("infra")))
 	return cp, nil
 }
 
@@ -147,7 +150,7 @@ func (p *Plan) planCaddy(t apply.Transport, inv *hostcheck.Inventory) (*caddyPla
 // snippets their files may import, and the import of their directory. No
 // site block of the deployment's is in it. Reducing its result gives the
 // same file.
-func reduceCaddyfile(content, id string) (string, error) {
+func reduceCaddyfile(content string, d deployment.Deployment) (string, error) {
 	global, err := globalBlock(content)
 	if err != nil {
 		return "", err
@@ -163,7 +166,7 @@ func reduceCaddyfile(content, id string) (string, error) {
 	header := fmt.Sprintf(`# Reduced by paisans site remove when deployment %s left this host. This
 # Caddy is kept for the host owner's sites in %s alone, and a later
 # paisans site remove --force removes it once that directory holds none.
-`, id, render.HostSitesDir)
+`, d.ID, render.HostSitesDir(d))
 	return header + global + "\n\n" + snippets + "\n" + imp + "\n", nil
 }
 

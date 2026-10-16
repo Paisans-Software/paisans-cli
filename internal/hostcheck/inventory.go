@@ -53,7 +53,7 @@ type Inventory struct {
 	// ManifestWebServer is every file that record lists in the include
 	// directory of the operator's web server.
 	ManifestWebServer []render.ManifestWebServer
-	// HostSites are the *.caddy files in the host's own render.HostSitesDir,
+	// HostSites are the *.caddy files in the deployment's own render.HostSitesDir,
 	// by full path and sorted: site blocks somebody added to the gateway's
 	// Caddy, which no deployment owns.
 	HostSites []string
@@ -103,22 +103,28 @@ const (
 	routeProbe     = "ip -j route show table all"
 	ufwProbe       = `command -v ufw >/dev/null 2>&1 || { echo 'ufw absent'; exit 0; }; ufw status verbose`
 	firewalldProbe = "systemctl is-active firewalld || true"
-	// Each file is printed only when it is one, since an unmatched glob is
-	// left as the literal pattern.
-	// An unreadable directory fails rather than listing nothing, and a link
-	// whose target is gone is still a site file: either read as no sites
-	// would let a Caddy that serves the owner's sites be removed.
-	hostSitesProbe = `if [ -d ` + render.HostSitesDir + ` ] && ! { [ -r ` + render.HostSitesDir + ` ] && [ -x ` + render.HostSitesDir + ` ]; }; then echo "cannot read ` + render.HostSitesDir + `" >&2; exit 3; fi; for f in ` + render.HostSitesDir + `/*.caddy; do if [ -e "$f" ] || [ -L "$f" ]; then echo "$f"; fi; done; true`
 
 	cLocale = "export LC_ALL=C; "
 )
 
+// hostSitesProbe lists the *.caddy files in d's render.HostSitesDir. Each
+// file is printed only when it is one, since an unmatched glob is left as the
+// literal pattern. An unreadable directory fails rather than listing nothing,
+// and a link whose target is gone is still a site file: either read as no
+// sites would let a Caddy that serves the owner's sites be removed.
+func hostSitesProbe(d deployment.Deployment) string {
+	dir := quote(render.HostSitesDir(d))
+	return `if [ -d ` + dir + ` ] && ! { [ -r ` + dir + ` ] && [ -x ` + dir + ` ]; }; then echo "cannot read ` + render.HostSitesDir(d) + `" >&2; exit 3; fi; for f in ` + dir + `/*.caddy; do if [ -e "$f" ] || [ -L "$f" ]; then echo "$f"; fi; done; true`
+}
+
+func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
 // ReadCommands is every fixed command Inspect sends, exactly as it sends it,
 // for a caller's allow list of reads. The one command that varies is the
 // cgroup read, which starts with CgroupPrefix.
-func ReadCommands() []string {
+func ReadCommands(d deployment.Deployment) []string {
 	var out []string
-	for _, probe := range []string{rootProbe, dockerProbe, packageProbe, containerProbe, volumeProbe, networkProbe, socketProbe, linkProbe, routeProbe, ufwProbe, firewalldProbe, hostSitesProbe} {
+	for _, probe := range []string{rootProbe, dockerProbe, packageProbe, containerProbe, volumeProbe, networkProbe, socketProbe, linkProbe, routeProbe, ufwProbe, firewalldProbe, hostSitesProbe(d)} {
 		out = append(out, cLocale+probe)
 	}
 	return out
@@ -230,7 +236,7 @@ func Inspect(t Transport, d deployment.Deployment) (*Inventory, error) {
 	}
 	inv.Firewall.Firewalld = strings.TrimSpace(out) == "active"
 
-	if out, err = run("listing "+render.HostSitesDir, hostSitesProbe); err != nil {
+	if out, err = run("listing "+render.HostSitesDir(d), hostSitesProbe(d)); err != nil {
 		return nil, err
 	}
 	for _, line := range strings.Split(out, "\n") {

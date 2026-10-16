@@ -398,7 +398,7 @@ wiki.example.org {
 }
 
 # Site blocks the host's owner adds for things paisans does not run, Eg: a blog
-# beside the community. The host's /srv/caddy.d is mounted read only at
+# beside the community. The host's /srv/paisans/f2a9/caddy.d is mounted read only at
 # /etc/caddy.d, and paisans never writes, records or removes a file there.
 # Imported last and at the top level, so a block there is a whole site and can
 # import every snippet defined above. A glob that matches no file is a warning

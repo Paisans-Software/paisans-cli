@@ -185,7 +185,7 @@ func BuildForcedByID(dest config.Destination, t apply.Transport, ref string, o O
 func (p *Plan) Confirmation(dest config.Destination) (what, deletes string) {
 	out := fmt.Sprintf("This cleans deployment %s (%s), site %s, off %s, and nothing says whether it still runs.", p.cfg.ID, p.cfg.Community.Domain, p.Site, dest)
 	if len(p.CaddyKept) > 0 {
-		out += fmt.Sprintf(" Its Caddy is kept, reduced to the host owner's sites in %s: %s.", render.HostSitesDir, strings.Join(p.CaddyKept, ", "))
+		out += fmt.Sprintf(" Its Caddy is kept, reduced to the host owner's sites in %s: %s.", render.HostSitesDir(p.dep()), strings.Join(p.CaddyKept, ", "))
 	}
 	if p.DeleteData {
 		deletes = fmt.Sprintf("This permanently deletes this deployment's data on %s.", dest)

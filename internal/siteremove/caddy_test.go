@@ -18,13 +18,14 @@ import (
 const (
 	caddyID   = "c0ffee0000000000000000000000000000000000000000000000000000000001"
 	caddyfile = root + "/infra/caddy/Caddyfile"
-	blog      = render.HostSitesDir + "/blog.caddy"
+	sitesDir  = root + "/caddy.d"
+	blog      = sitesDir + "/blog.caddy"
 )
 
 // gatewayWorld has a second gateway on home-c, so vm, a gateway and the
 // witness, may go, with this deployment's Caddy running on vm and its
 // certificates there; ownerSites puts a site block of the host owner's in
-// /srv/caddy.d.
+// the deployment's caddy.d.
 func gatewayWorld(t *testing.T, ownerSites bool) *world {
 	w := newWorld(t,
 		replace("  home-c:\n    roles: [data]", "  home-c:\n    roles: [data, gateway]"),
@@ -94,7 +95,7 @@ func index(commands []string, sub string) int {
 	return -1
 }
 
-// With no site of the owner's in /srv/caddy.d, Caddy goes like everything
+// With no site of the owner's in its caddy.d, Caddy goes like everything
 // else: nothing of the deployment's is left.
 func TestAGatewayNobodyReliesOnIsRemovedCompletely(t *testing.T) {
 	w := gatewayWorld(t, false)
@@ -194,7 +195,7 @@ func TestAGatewaysCaddyIsKeptForTheOwnersSites(t *testing.T) {
 			left = append(left, strings.TrimPrefix(f, root+"/"))
 		}
 	}
-	want := []string{".paisans-manifest.json", "infra/caddy/Caddyfile", "infra/caddy/caddy.env", "infra/caddy/config/caddy/autosave.json", "infra/caddy/data/caddy/certificates/blog.example.net.crt", "infra/compose.yaml"}
+	want := []string{".paisans-manifest.json", "caddy.d/blog.caddy", "infra/caddy/Caddyfile", "infra/caddy/caddy.env", "infra/caddy/config/caddy/autosave.json", "infra/caddy/data/caddy/certificates/blog.example.net.crt", "infra/compose.yaml"}
 	if strings.Join(left, "\n") != strings.Join(want, "\n") {
 		t.Errorf("left under the root:\n%s\nwant:\n%s", strings.Join(left, "\n"), strings.Join(want, "\n"))
 	}
@@ -499,7 +500,7 @@ func TestASiteThatAppearsAfterThePlanStopsCaddysRemoval(t *testing.T) {
 	vm := w.hosts["vm"]
 	p := forced(t, w, w.cfg, "vm", vmDest(), siteremove.Options{DeleteData: true})
 	vm.files[blog] = "blog.example.net {\n}\n"
-	if err := siteremove.Execute(p); err == nil || !strings.Contains(err.Error(), render.HostSitesDir) {
+	if err := siteremove.Execute(p); err == nil || !strings.Contains(err.Error(), sitesDir) {
 		t.Fatalf("err = %v", err)
 	}
 	found := false

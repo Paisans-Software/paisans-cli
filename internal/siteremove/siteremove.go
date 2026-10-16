@@ -147,7 +147,7 @@ type Plan struct {
 	// own, which its cluster still counts on: the command asks for the
 	// site's name before cleaning it.
 	Current bool
-	// CaddyKept are the host owner's site files in /srv/caddy.d that the
+	// CaddyKept are the host owner's site files in the deployment's caddy.d that the
 	// gateway's Caddy is kept for, empty when it is not kept.
 	CaddyKept []string
 	// DataKept is whether the host keeps this deployment's data, and its

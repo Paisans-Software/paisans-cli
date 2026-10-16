@@ -20,7 +20,7 @@
 // everything else on the host.
 //
 // It also keeps the gateway and the data role to one deployment per host.
-// The gateway owns ports 80 and 443 and the Caddy that imports /srv/caddy.d;
+// The gateway owns ports 80 and 443 and the Caddy that imports its deployment's caddy.d;
 // a data site owns the Postgres and etcd ports and the storage under
 // them. Each entry carries the site's roles as one string, sorted and joined
 // with commas (Eg: "apps,data,gateway"), so the awk merge tests a role with
@@ -113,7 +113,7 @@ type Entry struct {
 }
 
 // KeptCaddy is Kept for a gateway's Caddy kept for the host owner's sites in
-// /srv/caddy.d (docs/specs/2026-10-10-gateway-caddy-kept.md).
+// its deployment's caddy.d (docs/specs/2026-10-10-gateway-caddy-kept.md).
 const KeptCaddy = "caddy"
 
 // KeptData is Kept for a deployment whose only parts left on the host are
@@ -148,7 +148,7 @@ func Keep(t Runner, id string, e Entry, kept string) error {
 }
 
 // exclusiveRoles are the roles one host gives to one deployment: the gateway
-// binds 80 and 443 and runs the Caddy that imports /srv/caddy.d, and a data
+// binds 80 and 443 and runs the Caddy that imports its deployment's caddy.d, and a data
 // site binds the Postgres and etcd ports and holds the cluster's storage.
 var exclusiveRoles = []config.Role{config.RoleData, config.RoleGateway}
 
@@ -686,7 +686,7 @@ func refused(t Runner, e Entry, why error) error {
 	if errors.As(why, &c) && len(c.Clashes) > 0 && !strings.HasPrefix(c.Clashes[0], "token") && !strings.HasPrefix(c.Clashes[0], "root") && !strings.HasPrefix(c.Clashes[0], "WireGuard interface") {
 		switch {
 		case strings.HasPrefix(c.Clashes[0], "the gateway role"):
-			advice = "One host gives ports 80 and 443 to one deployment: its gateway binds them and its Caddy imports /srv/caddy.d, and a site admitted with --public-ports holds them too. Use another host for one of them"
+			advice = "One host gives ports 80 and 443 to one deployment: its gateway binds them and its Caddy imports its deployment's caddy.d, and a site admitted with --public-ports holds them too. Use another host for one of them"
 		case strings.HasPrefix(c.Clashes[0], "the data role"):
 			advice = "One host runs one deployment's data site: it binds the Postgres and etcd ports and holds the cluster's storage. Use another host for one of the data sites"
 		case strings.HasPrefix(c.Clashes[0], "WireGuard listen port"):

@@ -338,7 +338,7 @@ func (p *planner) renderSite(site *siteView) ([]File, error) {
 		"GarageImage":             images.garage,
 		"CaddyImage":              caddy,
 		"HostSites":               HostSitesMount,
-		"HostSitesSource":         HostSitesDir,
+		"HostSitesSource":         HostSitesDir(p.dep()),
 		"EtcdClientPort":          etcdClientPort,
 		"EtcdPeerPort":            etcdPeerPort,
 		"EtcdCompactionRetention": etcdCompactionRetention,
@@ -467,7 +467,7 @@ func (p *planner) renderSite(site *siteView) ([]File, error) {
 			"TrustedProxies":  p.mesh,
 			"ACMEDirective":   acme.Directive(p.cfg.ACME.Provider),
 			"HostSites":       hostSitesMount(site),
-			"HostSitesSource": HostSitesDir,
+			"HostSitesSource": HostSitesDir(p.dep()),
 			"Token":           p.dep().Token(),
 		})
 		if err != nil {

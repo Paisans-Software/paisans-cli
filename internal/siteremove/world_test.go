@@ -322,7 +322,7 @@ func (h *host) deleteBesideKept(command string) {
 func (h *host) hostSites() []string {
 	var out []string
 	for _, p := range h.sortedFiles() {
-		if strings.HasPrefix(p, render.HostSitesDir+"/") && strings.HasSuffix(p, ".caddy") {
+		if strings.HasPrefix(p, sitesDir+"/") && strings.HasSuffix(p, ".caddy") {
 			out = append(out, p)
 		}
 	}
@@ -770,10 +770,10 @@ func (h *host) Run(command string) (string, error) {
 		}
 		return "", nil
 	case strings.Contains(command, "docker ps -aq --no-trunc --filter 'label=community.paisans.deployment="+ourID+"'"):
-		if strings.Contains(command, "ls -d "+render.HostSitesDir+"/*.caddy") && len(h.hostSites()) > 0 {
+		if strings.Contains(command, "ls -d "+sitesDir+"/*.caddy") && len(h.hostSites()) > 0 {
 			for _, c := range h.containers {
 				if c.Deployment == ourID && c.Service == "caddy" {
-					return "a site of the host owner's is in " + render.HostSitesDir + " now", errors.New("exit status 3")
+					return "a site of the host owner's is in " + sitesDir + " now", errors.New("exit status 3")
 				}
 			}
 		}
@@ -1265,7 +1265,7 @@ func (w *world) inspect(t apply.Transport, cfg *config.Config) (*hostcheck.Inven
 		inv.Links = []string{dep.Interface()}
 	}
 	for _, p := range h.sortedFiles() {
-		if strings.HasPrefix(p, render.HostSitesDir+"/") && strings.HasSuffix(p, ".caddy") {
+		if strings.HasPrefix(p, sitesDir+"/") && strings.HasSuffix(p, ".caddy") {
 			inv.HostSites = append(inv.HostSites, p)
 		}
 	}

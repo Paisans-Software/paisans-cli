@@ -49,7 +49,7 @@ services:
       - /srv/paisans/f2a9/infra/caddy/snippets:/etc/caddy/snippets:ro
       # Site blocks the host's owner adds, imported by the Caddyfile. The
       # host's directory, not this deployment's: paisans only creates it.
-      - /srv/caddy.d:/etc/caddy.d:ro
+      - /srv/paisans/f2a9/caddy.d:/etc/caddy.d:ro
       - /srv/paisans/f2a9/infra/caddy/data:/data
       - /srv/paisans/f2a9/infra/caddy/config:/config
   # This site's heartbeat: a push a minute to every monitor off this site, at

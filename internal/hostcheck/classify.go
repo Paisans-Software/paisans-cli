@@ -136,7 +136,7 @@ func (o owners) container(c Container) holder {
 
 // keptCaddy describes another deployment's Caddy kept for the host owner's
 // sites (docs/specs/2026-10-10-gateway-caddy-kept.md): its infrastructure
-// project's caddy service, while render.HostSitesDir holds a site file, and
+// project's caddy service, while its render.HostSitesDir holds a site file, and
 // either its registry entry marked kept or no entry at all. An entry not
 // marked kept is a live gateway, and a registry that cannot be read says
 // nothing either way: both keep the plain wording.
@@ -152,7 +152,7 @@ func (o owners) keptCaddy(c Container) (string, bool) {
 	if c.Project != d.Project("infra") {
 		return "", false
 	}
-	desc := fmt.Sprintf("container %s: paisans deployment %s's Caddy, kept because it serves %s sites", c.Name, d.Token(), render.HostSitesDir)
+	desc := fmt.Sprintf("container %s: paisans deployment %s's Caddy, kept because it serves %s sites", c.Name, d.Token(), render.HostSitesDir(d))
 	if registered {
 		return desc + fmt.Sprintf(". Move those sites to a Caddy of your own and remove this container, or run paisans site remove --force --ssh %s --id %s once they are gone", sshArg(o.inv.Host), d.Token()), true
 	}

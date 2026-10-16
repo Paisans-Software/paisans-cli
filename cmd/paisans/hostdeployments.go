@@ -50,21 +50,33 @@ func ownerTransport(dest config.Destination, sudo bool) apply.SSHTransport {
 var reachOwner = func(dest config.Destination, sudo bool) apply.Transport { return ownerTransport(dest, sudo) }
 
 // deploymentsProbe lists, read only, each directory under the deployments'
-// base, each site file in render.HostSitesDir and, where Docker is
+// base, each site file in a deployment's caddy.d and, where Docker is
 // installed, the deployment label, compose project and compose service of
 // every container carrying the label, tab separated. It fails,
 // saying what, rather than answer partly: a directory it may not read (the
 // registry's, which a read without sudo would take for an empty registry,
 // or the deployments' base), and docker ps failing. Its last line is "end",
 // so an answer cut short is told from a host holding nothing.
-var deploymentsProbe = fmt.Sprintf(`set -e; for d in %[1]s %[2]s %[4]s; do if [ -e "$d" ] && ! { [ -r "$d" ] && [ -x "$d" ]; }; then echo "cannot read $d"; exit 3; fi; done; if [ -d %[2]s ]; then for d in %[2]s/*; do if [ -d "$d" ]; then echo "root ${d##*/}"; fi; done; fi; if [ -d %[4]s ]; then for f in %[4]s/*.caddy; do if [ -f "$f" ]; then echo "site ${f##*/}"; fi; done; fi; if command -v docker >/dev/null 2>&1; then if ! out=$(docker ps -a --filter label=%[3]s --format '{{printf "container\t%%s\t%%s\t%%s" (.Label "%[3]s") (.Label "com.docker.compose.project") (.Label "com.docker.compose.service")}}' 2>&1); then echo "docker ps failed: $out"; exit 4; fi; if [ -n "$out" ]; then printf '%%s\n' "$out"; fi; fi; echo end`, registry.Dir, deployment.Base, deployment.Label, render.HostSitesDir)
+var deploymentsProbe = fmt.Sprintf(`set -e; for d in %[1]s %[2]s; do if [ -e "$d" ] && ! { [ -r "$d" ] && [ -x "$d" ]; }; then echo "cannot read $d"; exit 3; fi; done; if [ -d %[2]s ]; then for d in %[2]s/*; do if [ -d "$d" ]; then echo "root ${d##*/}"; fi; done; fi; for f in %[2]s/*/caddy.d/*.caddy; do if [ -f "$f" ]; then echo "site ${f#%[2]s/}"; fi; done; if command -v docker >/dev/null 2>&1; then if ! out=$(docker ps -a --filter label=%[3]s --format '{{printf "container\t%%s\t%%s\t%%s" (.Label "%[3]s") (.Label "com.docker.compose.project") (.Label "com.docker.compose.service")}}' 2>&1); then echo "docker ps failed: $out"; exit 4; fi; if [ -n "$out" ]; then printf '%%s\n' "$out"; fi; fi; echo end`, registry.Dir, deployment.Base, deployment.Label)
 
 // leftoverProbe is what deploymentsProbe found: the directories under the
-// base and the site files in render.HostSitesDir, by name, and each labelled
-// container's deployment, project and service.
+// base and the site files in each deployment's caddy.d, as
+// <token>/caddy.d/<file>, and each labelled container's deployment, project
+// and service.
 type leftoverProbe struct {
 	roots, sites []string
 	containers   [][3]string
+}
+
+// sitesOf is the file names in the caddy.d of the deployment with token.
+func (p leftoverProbe) sitesOf(token string) []string {
+	var names []string
+	for _, s := range p.sites {
+		if name, ok := strings.CutPrefix(s, token+"/caddy.d/"); ok {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 func parseDeploymentsProbe(out string) (leftoverProbe, error) {
@@ -151,11 +163,13 @@ func runHostDeployments(args []string) error {
 			roles = "none"
 		}
 		line := fmt.Sprintf("%s: token %s, %s, site %s, roles %s, root %s", id, e.Token, e.Domain, e.Site, roles, e.Root)
+		sitesDir := render.HostSitesDir(deployment.Deployment{ID: id})
+		sites := found.sitesOf(e.Token)
 		switch {
-		case e.Kept == registry.KeptCaddy && len(found.sites) > 0:
-			line += fmt.Sprintf("; caddy kept: serves %s sites (%s)", render.HostSitesDir, strings.Join(found.sites, ", "))
+		case e.Kept == registry.KeptCaddy && len(sites) > 0:
+			line += fmt.Sprintf("; caddy kept: serves %s sites (%s)", sitesDir, strings.Join(sites, ", "))
 		case e.Kept == registry.KeptCaddy:
-			line += fmt.Sprintf("; caddy kept, but %s holds no site now: paisans site remove --force --ssh %s --id %s removes it", render.HostSitesDir, *sshFlag, e.Token)
+			line += fmt.Sprintf("; caddy kept, but %s holds no site now: paisans site remove --force --ssh %s --id %s removes it", sitesDir, *sshFlag, e.Token)
 		case e.Kept == registry.KeptData:
 			line += fmt.Sprintf("; data kept: paisans site remove --force --ssh %s --id %s --delete-data deletes it", *sshFlag, e.Token)
 		}
@@ -180,10 +194,11 @@ func runHostDeployments(args []string) error {
 		}
 		// A Caddy kept for the owner's sites whose entry was removed by
 		// hand still serves them, so it is named as that.
-		if service == "caddy" && len(found.sites) > 0 && deployment.ValidID(id) && project == (deployment.Deployment{ID: id}).Project("infra") {
+		if service == "caddy" && deployment.ValidID(id) && project == (deployment.Deployment{ID: id}).Project("infra") && len(found.sitesOf(deployment.Deployment{ID: id}.Token())) > 0 {
 			if !seen["orphaned "+id] {
 				seen["orphaned "+id] = true
-				left = append(left, fmt.Sprintf("%s orphaned Caddy: serves %s sites (%s); its registry entry was removed, so remove it by hand once those sites have moved", id, render.HostSitesDir, strings.Join(found.sites, ", ")))
+				od := deployment.Deployment{ID: id}
+				left = append(left, fmt.Sprintf("%s orphaned Caddy: serves %s sites (%s); its registry entry was removed, so remove it by hand once those sites have moved", id, render.HostSitesDir(od), strings.Join(found.sitesOf(od.Token()), ", ")))
 			}
 			continue
 		}

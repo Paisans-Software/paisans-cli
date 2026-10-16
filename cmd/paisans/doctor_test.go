@@ -84,7 +84,7 @@ func readOnly(cfg *config.Config) (exact []string, prefixes []string) {
 		"if [ ! -f '/srv/paisans/f2a9/auth/compose.yaml' ]; then echo absent; ",
 		hostcheck.CgroupPrefix,
 	}
-	exact = append(exact, hostcheck.ReadCommands()...)
+	exact = append(exact, hostcheck.ReadCommands(cfg.Deployment())...)
 	exact = append(exact, "read "+cfg.Deployment().Manifest(), "read "+registry.Path)
 	// Each gated app's settings read, which blueprints.LiveSettings promises
 	// prints only the named settings.
@@ -305,7 +305,7 @@ func TestDoctorReportsLeftoversAndForeignCaddyUsers(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := cfg.Deployment().ID
-	probes := hostcheck.ReadCommands()
+	probes := hostcheck.ReadCommands(cfg.Deployment())
 	answers := map[string]string{
 		doctor.ReachCommand:                        "",
 		doctor.ClockCommand:                        "1760000000.000000000\n",
@@ -330,7 +330,7 @@ func TestDoctorReportsLeftoversAndForeignCaddyUsers(t *testing.T) {
 		probes[8]:                                "[]",
 		probes[9]:                                "ufw absent\n",
 		probes[10]:                               "inactive\n",
-		probes[11]:                               "/srv/caddy.d/blog.caddy\n",
+		probes[11]:                               "/srv/paisans/f2a9/caddy.d/blog.caddy\n",
 		doctor.CaddyLogCommand(cfg.Deployment()): quietCaddyLog,
 	}
 	var sent, writes []string
@@ -347,7 +347,7 @@ func TestDoctorReportsLeftoversAndForeignCaddyUsers(t *testing.T) {
 		"apply leaves them in place.",
 		"`paisans app remove old` takes old's off every site, once a whole apply has run on each; it keeps its data unless given --delete-data.",
 		"done: check leftovers vm 1 foreign thing(s) rely on this deployment's Caddy",
-		"site block /srv/caddy.d/blog.caddy, served by this deployment's Caddy",
+		"site block /srv/paisans/f2a9/caddy.d/blog.caddy, served by this deployment's Caddy",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)

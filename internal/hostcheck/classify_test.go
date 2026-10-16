@@ -440,7 +440,7 @@ func TestAStaleToolkitStackOnTheWebServerNetworkConflicts(t *testing.T) {
 const keptDeployment = "566c1a2b-3c4d-4e5f-8a6b-7c8d9e0f1a2b"
 
 // keptCaddyHost has another deployment's Caddy on 80 and 443, kept for the
-// host owner's site in /srv/caddy.d, with that deployment's registry entry
+// host owner's site in its caddy.d, with that deployment's registry entry
 // or without, and a container of that deployment's that is not its Caddy.
 func keptCaddyHost(t *testing.T, entry bool) *fakeHost {
 	h := cleanHost()
@@ -452,7 +452,7 @@ func keptCaddyHost(t *testing.T, entry bool) *fakeHost {
 tcp LISTEN 0 4096 *:443 *:* users:(("caddy",pid=812,fd=8))
 `
 	h.answers["/proc/"] = "812 0::/system.slice/docker-" + caddyID + ".scope \n"
-	h.answers["/srv/caddy.d/"] = "/srv/caddy.d/blog.caddy\n"
+	h.answers["/srv/paisans/f2a9/caddy.d'"] = "/srv/paisans/f2a9/caddy.d/blog.caddy\n"
 	if entry {
 		data, err := registry.Encode(registry.Registry{Version: registry.Version, Deployments: map[string]registry.Entry{
 			keptDeployment: registry.KeepCaddy(registry.Entry{Token: "566c", Root: "/srv/paisans/566c", Domain: "example.net", Site: "edge", ClaimedAt: "2026-10-01T00:00:00Z", Interface: "psns-566c", Subnet: "10.45.0.0/24", Address: "10.45.0.2", Roles: "gateway"}),
@@ -469,7 +469,7 @@ tcp LISTEN 0 4096 *:443 *:* users:(("caddy",pid=812,fd=8))
 // with what to do: the --id that removes it while its entry is there, and
 // removing it by hand once its entry is gone.
 func TestAnotherDeploymentsKeptCaddyIsNamed(t *testing.T) {
-	held := "held by container paisans-566c-infra-caddy-1: paisans deployment 566c's Caddy, kept because it serves /srv/caddy.d sites"
+	held := "held by container paisans-566c-infra-caddy-1: paisans deployment 566c's Caddy, kept because it serves /srv/paisans/566c/caddy.d sites"
 	r := check(t, "edge", keptCaddyHost(t, true))
 	wantClass(t, r, hostcheck.Conflicted)
 	wantLine(t, r, "*:443/tcp (Caddy): claimed by sites.edge.roles (gateway), "+held+". Move those sites to a Caddy of your own and remove this container, or run paisans site remove --force --ssh ubuntu@host.example.org --id 566c once they are gone")
@@ -488,7 +488,7 @@ func TestAnotherDeploymentsOtherContainersKeepThePlainWording(t *testing.T) {
 	wantLine(t, r, "held by container paisans-566c-talk-app-1 (compose project paisans-566c-talk, paisans deployment "+keptDeployment+")")
 
 	h := keptCaddyHost(t, true)
-	h.answers["/srv/caddy.d/"] = ""
+	h.answers["/srv/paisans/f2a9/caddy.d'"] = ""
 	r = check(t, "edge", h)
 	wantLine(t, r, "held by container paisans-566c-infra-caddy-1 (compose project paisans-566c-infra, paisans deployment "+keptDeployment+")")
 	if strings.Contains(printed(r), "kept because") {

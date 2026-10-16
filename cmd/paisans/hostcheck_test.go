@@ -41,19 +41,19 @@ func (h *inventoryHost) ReadFile(string) (string, bool, error) { return "", fals
 // webHost runs somebody's web server on 80 and 443, outside Docker.
 func webHost(ufw string) *inventoryHost {
 	return &inventoryHost{answers: map[string]string{
-		"id -u":                  "0\n",
-		"docker version":         "absent\n",
-		"dpkg-query":             "",
-		"ss -Hltnup":             "tcp LISTEN 0 511 0.0.0.0:80 0.0.0.0:* users:((\"nginx\",pid=900,fd=6))\ntcp LISTEN 0 511 0.0.0.0:443 0.0.0.0:* users:((\"nginx\",pid=900,fd=7))\n",
-		"/proc/":                 "900 0::/system.slice/nginx.service \n",
-		"ip -o link":             "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536\n2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500\n",
-		"ip -j route":            `[{"dst":"default","dev":"eth0"}]`,
-		"ufw status verbose":     ufw,
-		"is-active firewalld":    "inactive\n",
-		"/srv/caddy.d/":          "",
-		"docker inspect":         "",
-		"docker volume inspect":  "",
-		"docker network inspect": "",
+		"id -u":                      "0\n",
+		"docker version":             "absent\n",
+		"dpkg-query":                 "",
+		"ss -Hltnup":                 "tcp LISTEN 0 511 0.0.0.0:80 0.0.0.0:* users:((\"nginx\",pid=900,fd=6))\ntcp LISTEN 0 511 0.0.0.0:443 0.0.0.0:* users:((\"nginx\",pid=900,fd=7))\n",
+		"/proc/":                     "900 0::/system.slice/nginx.service \n",
+		"ip -o link":                 "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536\n2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500\n",
+		"ip -j route":                `[{"dst":"default","dev":"eth0"}]`,
+		"ufw status verbose":         ufw,
+		"is-active firewalld":        "inactive\n",
+		"/srv/paisans/f2a9/caddy.d'": "",
+		"docker inspect":             "",
+		"docker volume inspect":      "",
+		"docker network inspect":     "",
 	}}
 }
 
@@ -84,7 +84,7 @@ func TestTheGateRefusesAConflictHavingOnlyLooked(t *testing.T) {
 	if !rec.Has("fail", "host check") {
 		t.Errorf("the host check is not marked failed:\n%s", rec.Lines())
 	}
-	probes := []string{"id -u", "docker version", "dpkg-query", "ss -Hltnup", "/proc/", "ip -o link", "ip -j route", "ufw status verbose", "is-active firewalld", "/srv/caddy.d/"}
+	probes := []string{"id -u", "docker version", "dpkg-query", "ss -Hltnup", "/proc/", "ip -o link", "ip -j route", "ufw status verbose", "is-active firewalld", "/srv/paisans/f2a9/caddy.d'"}
 	for _, c := range h.ran {
 		known := false
 		for _, p := range probes {

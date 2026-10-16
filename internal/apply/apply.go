@@ -215,9 +215,9 @@ type Plan struct {
 	// path refuses the apply before anything is written. See VolumeCheck.
 	Volumes *VolumeCheck
 	// HostSites is set when this site's Caddy mounts the host's own
-	// render.HostSitesDir. Execute creates the directory, root's and 0755,
-	// before the first container that mounts it, when it is missing, and
-	// never touches what is inside it.
+	// render.HostSitesDir. Execute creates the directory, the deployment
+	// user's and 0755, before the first container that mounts it, when it is
+	// absent, and never touches what is inside it.
 	HostSites bool
 	// KeepImages skips pruning and the sweep for this run, as --keep-images
 	// does.
@@ -373,10 +373,11 @@ const remoteRoot = "/"
 // apply would be a blind overwrite.
 func manifestPath(d deployment.Deployment) string { return d.Manifest() }
 
-// HostSitesCommand creates render.HostSitesDir, root's and 0755, when it is
-// missing, and changes nothing when it exists.
-func HostSitesCommand() string {
-	return fmt.Sprintf("[ -d %[1]s ] || install -d -m 755 -o root -g root %[1]s", render.HostSitesDir)
+// HostSitesCommand creates render.HostSitesDir, the deployment user's and
+// 0755, when it is absent: the gateway's Caddy mounts it, and the host's
+// owner writes their site files into it.
+func HostSitesCommand(d deployment.Deployment) string {
+	return fmt.Sprintf("[ -d %[1]s ] || install -d -m 755 %[1]s", shellQuote(render.HostSitesDir(d)))
 }
 
 // gatewayCaddyfile and gatewayCompose are the two rendered files that say a
@@ -1247,8 +1248,8 @@ func execute(plan *Plan, t Transport) error {
 	// that mounts it, the validation below. An existing one is left exactly
 	// as it is, owner and mode included: it is the host's.
 	if plan.HostSites {
-		if out, err := t.Run(HostSitesCommand()); err != nil {
-			return fmt.Errorf("%s: creating %s, so the gateway was not changed:\n%s", plan.Site, render.HostSitesDir, out)
+		if out, err := t.Run(HostSitesCommand(plan.Deployment)); err != nil {
+			return fmt.Errorf("%s: creating %s, so the gateway was not changed:\n%s", plan.Site, render.HostSitesDir(plan.Deployment), out)
 		}
 	}
 

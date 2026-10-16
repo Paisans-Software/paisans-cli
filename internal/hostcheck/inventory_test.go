@@ -223,13 +223,13 @@ func TestInspectReadsWhatTheOwnershipReportNeeds(t *testing.T) {
 	h := cleanHost()
 	h.answers["docker inspect"] = fmt.Sprintf(`{"id":%q,"name":"/blog-ghost-1","pid":913,"labels":{"com.docker.compose.project":"blog","com.docker.compose.service":"ghost"},"networks":{"web":{},"blog_default":{}},"ports":{}}
 `, shopID)
-	h.answers["/srv/caddy.d/"] = "/srv/caddy.d/blog.caddy\n/srv/caddy.d/a.caddy\n"
+	h.answers["/srv/paisans/f2a9/caddy.d'"] = "/srv/paisans/f2a9/caddy.d/blog.caddy\n/srv/paisans/f2a9/caddy.d/a.caddy\n"
 	h.files["/srv/paisans/f2a9/.paisans-manifest.json"] = `{"version":1,"files":[{"path":"srv/paisans/f2a9/docs/.env","sha256":"x","mode":"0600","leftover":true,"leftover_since":"2026-10-01T00:00:00Z"}]}`
 	inv := inspect(t, h)
 	if c := inv.Containers[0]; c.Service != "ghost" || !reflect.DeepEqual(c.Networks, []string{"blog_default", "web"}) {
 		t.Errorf("container %+v", c)
 	}
-	if !reflect.DeepEqual(inv.HostSites, []string{"/srv/caddy.d/a.caddy", "/srv/caddy.d/blog.caddy"}) {
+	if !reflect.DeepEqual(inv.HostSites, []string{"/srv/paisans/f2a9/caddy.d/a.caddy", "/srv/paisans/f2a9/caddy.d/blog.caddy"}) {
 		t.Errorf("host sites %v", inv.HostSites)
 	}
 	if len(inv.ManifestFiles) != 1 || !inv.ManifestFiles[0].Leftover || inv.ManifestFiles[0].LeftoverSince != "2026-10-01T00:00:00Z" {
