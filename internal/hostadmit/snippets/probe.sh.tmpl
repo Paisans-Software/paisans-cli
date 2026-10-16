@@ -72,7 +72,8 @@ else say home "absent 0 $homepath"; fi
 awk -F: 'NF >= 3 { print "subuid " $1 ":" $2 ":" $3 }' /etc/subuid 2>/dev/null
 awk -F: 'NF >= 3 { print "subgid " $1 ":" $2 ":" $3 }' /etc/subgid 2>/dev/null
 # Each file admit writes as root: its checksum, mode and owner, so admit
-# compares with what it would write without printing what is there.
+# compares with what it would write without printing what is there. One
+# that is neither a regular file nor a link, a FIFO or a device, is other.
 # userfiles hold only the UID, which id printed, so they split safely.
 for f in{{ range .Files }} {{ q . }}{{ end }} $userfiles; do
   case $(above "$f") in
@@ -81,6 +82,7 @@ for f in{{ range .Files }} {{ q . }}{{ end }} $userfiles; do
   esac
   if [ -L "$f" ]; then say file "$f link"
   elif [ -f "$f" ]; then say file "$f $(sha256sum < "$f" | cut -c1-64) $(stat -c '%a %u %g' "$f")"
+  elif [ -e "$f" ]; then say file "$f other"
   else say file "$f absent"; fi
 done
 if systemctl is-enabled {{ q .EgressUnit }} >/dev/null 2>&1; then say egress-enabled yes; else say egress-enabled no; fi

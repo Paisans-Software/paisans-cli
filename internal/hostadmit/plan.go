@@ -272,16 +272,20 @@ func build(t apply.Transport, in Input, approved *Plan) (*planner, error) {
 
 // refuseUnsafe stops admit, or evict, as by names, before any part plans,
 // when the probe found a path it reads, writes or removes as root below a
-// link, or below a directory
-// that is not root's or that its group or others can write. What is below
-// one is not what its path names, or can be swapped between the probe and
-// the change, so no part may act there; refusing here means no part can
-// forget to.
+// link, or below a directory that is not root's or that its group or
+// others can write, or a file there that is neither a regular file nor a
+// link. What is below such a directory is not what its path names, or can
+// be swapped between the probe and the change, and a FIFO or a device is
+// no file admit wrote, so no part may act there; refusing here means no
+// part can forget to.
 func refuseUnsafe(f Facts, by string) error {
 	var bad []string
 	why := func(mode string) string {
-		if mode == "link-above" {
+		switch mode {
+		case "link-above":
 			return "a link above it"
+		case "other":
+			return "not a regular file"
 		}
 		return "a directory above it that is not root's, or that its group or others can write"
 	}
@@ -303,7 +307,7 @@ func refuseUnsafe(f Facts, by string) error {
 	}
 	act := map[string]string{"admit": "writes", "evict": "removes"}[by]
 	return &ui.Problem{Hint: "a path " + by + " " + act + " as root is not root's alone",
-		Explain: "Each of these is below a link or a directory another user could change, so what " + by + " would " + strings.TrimSuffix(act, "s") + " there is not what it names:\n" + strings.Join(bad, "\n") + "\nMake every directory above them a real directory, owned by root and writable by root alone, then run host " + by + " again. Nothing was changed."}
+		Explain: "Each of these is below a link or a directory another user could change, or is not a regular file, so what " + by + " would " + strings.TrimSuffix(act, "s") + " there is not what it names:\n" + strings.Join(bad, "\n") + "\nMake every directory above them a real directory, owned by root and writable by root alone, move aside anything that is not a regular file, then run host " + by + " again. Nothing was changed."}
 }
 
 func sortedKeys[V any](m map[string]V) []string {

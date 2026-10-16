@@ -372,7 +372,7 @@ func TestAdmitChecksTheUserOnBothPaths(t *testing.T) {
 func evictedHost(t *testing.T) *admitHost {
 	t.Helper()
 	h := withFakeLocalHost(t, "paisans-f2a9")
-	h.facts = append(h.facts, [2]string{"file", "/etc/wireguard/psns-f2a9.conf 0000 600 0 0"})
+	h.facts = append(h.facts, [2]string{"file", "/etc/wireguard/psns-f2a9.conf " + strings.Repeat("0", 64) + " 600 0 0"})
 	return h
 }
 

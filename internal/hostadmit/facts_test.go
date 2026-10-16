@@ -18,7 +18,7 @@ func TestParseFacts(t *testing.T) {
 	out := "engine 29.9.1\npkg docker-ce installed\npkg uidmap absent\n" +
 		"passwd paisans-f2a9:x:1001:1002::/home/paisans-f2a9:/bin/bash\ngroups paisans-f2a9 users\ngroup paisans-f2a9\n" +
 		"subuid ubuntu:100000:65536\nsubuid paisans-f2a9:165536:65536\n" +
-		"file /usr/local/libexec/paisans/wg-psns-f2a9 " + "ab12" + " 755 0 0\n" +
+		"file /usr/local/libexec/paisans/wg-psns-f2a9 " + sha("helper") + " 755 0 0\n" +
 		"file /etc/sudoers.d/paisans-f2a9 link\n" +
 		"dir /etc/wireguard drwx------ 0 0\ndir /srv/my data drwxr-xr-x 0 0\nbridge virbr0\nbridge docker0\nufw installed\nufw-active yes\nlan 192.168.1.20/24\n" +
 		"lan6 2001:db8:1::/64 eth0\nlan6 2001:db8:1::5 eth0\nlan6 fe80::/64 eth0\nend\n"
@@ -36,7 +36,7 @@ func TestParseFacts(t *testing.T) {
 	if r := f.SubUID["paisans-f2a9"]; len(r) != 1 || r[0].Start != 165536 || r[0].Count != 65536 {
 		t.Errorf("subuid: %+v", f.SubUID)
 	}
-	if h := f.Files["/usr/local/libexec/paisans/wg-psns-f2a9"]; !h.Present || h.Sum != "ab12" || h.Mode != "755" || h.UID != 0 {
+	if h := f.Files["/usr/local/libexec/paisans/wg-psns-f2a9"]; !h.Present || h.Sum != sha("helper") || h.Mode != "755" || h.UID != 0 {
 		t.Errorf("helper: %+v", h)
 	}
 	if s := f.Files["/etc/sudoers.d/paisans-f2a9"]; !s.Link {
@@ -66,6 +66,48 @@ func TestParseFacts(t *testing.T) {
 		if _, err := parseFacts(bad, "paisans-f2a9"); err == nil {
 			t.Errorf("%q was read", bad)
 		}
+	}
+}
+
+// A number or a checksum the probe printed is read as one or refused: a
+// garbled owner never reads as 0, which is root, a sysctl the probe could
+// not read never reaches sysctl.before as an empty value, and free space
+// never reads as none.
+func TestParseFactsRefusesWhatIsNotANumber(t *testing.T) {
+	file := "file /etc/x " + sha("x")
+	for _, bad := range []string{
+		file + " 644 x 0\n", file + " 644 0 -\n", file + " 644 -1 0\n", file + " 6x4 0 0\n", file + " 99 0 0\n",
+		"file /etc/x ab12 644 0 0\n", "file /etc/x " + strings.ToUpper(sha("x")) + " 644 0 0\n",
+		"port-start \n", "port-start 80x\n", "ip-forward \n", "data-avail \n", "data-avail 12G\n",
+	} {
+		if _, err := parseFacts(bad+"end\n", "paisans-f2a9"); err == nil {
+			t.Errorf("%q was read", bad)
+		}
+	}
+	f, err := parseFacts(file+" 2755 0 1000\nport-start 1024\nip-forward 0\ndata-avail 42\nend\n", "paisans-f2a9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if x := f.Files["/etc/x"]; x.Mode != "2755" || x.GID != 1000 || f.PortStart != "1024" || f.IPForward != "0" || f.Data.Avail != 42 {
+		t.Errorf("read %+v %q %q %d", x, f.PortStart, f.IPForward, f.Data.Avail)
+	}
+}
+
+// A file admit writes that is there but neither a regular file nor a link,
+// a FIFO, a socket or a device, is read as one, never as absent, and Build
+// refuses it as it refuses a path below a link.
+func TestParseFactsReadsAFileThatIsNotRegular(t *testing.T) {
+	f, err := parseFacts("file /etc/sudoers.d/paisans-f2a9 other\nend\n", "paisans-f2a9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := f.Files["/etc/sudoers.d/paisans-f2a9"]
+	if !s.Present || !s.Unsafe || s.Mode != "other" {
+		t.Errorf("a FIFO: %+v", s)
+	}
+	err = refuseUnsafe(f, "admit")
+	if err == nil || !strings.Contains(err.Error(), "/etc/sudoers.d/paisans-f2a9 (not a regular file)") {
+		t.Errorf("a FIFO is not refused: %v", err)
 	}
 }
 

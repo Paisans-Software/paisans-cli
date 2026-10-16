@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/netip"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -127,8 +128,9 @@ type Route6 struct {
 type IDRange struct{ Start, Count int64 }
 
 // FileState is one file admit writes, as the probe saw it. Unsafe is a
-// file below a link or another's directory: Present, with Mode link-above
-// or unsafe-above, UID and GID -1, and nothing else read.
+// file below a link or another's directory, or one that is neither a
+// regular file nor a link: Present, with Mode link-above, unsafe-above or
+// other, UID and GID -1, and nothing else read.
 type FileState struct {
 	Present, Link, Unsafe bool
 	Sum, Mode             string
@@ -302,11 +304,14 @@ func parseFacts(out, user string) (Facts, error) {
 				f.Files[fields[0]] = FileState{Present: true, Link: true}
 			case len(fields) == 2 && fields[1] == "absent":
 				f.Files[fields[0]] = FileState{}
-			case len(fields) == 2 && (fields[1] == "link-above" || fields[1] == "unsafe-above"):
+			case len(fields) == 2 && (fields[1] == "link-above" || fields[1] == "unsafe-above" || fields[1] == "other"):
 				f.Files[fields[0]] = FileState{Present: true, Unsafe: true, Mode: fields[1], UID: -1, GID: -1}
 			case len(fields) == 5:
-				uid, _ := strconv.Atoi(fields[3])
-				gid, _ := strconv.Atoi(fields[4])
+				uid, ok1 := id(fields[3])
+				gid, ok2 := id(fields[4])
+				if !ok1 || !ok2 || !fileSum.MatchString(fields[1]) || !fileMode.MatchString(fields[2]) {
+					return f, fmt.Errorf("unreadable file line %q", v)
+				}
 				f.Files[fields[0]] = FileState{Present: true, Sum: fields[1], Mode: fields[2], UID: uid, GID: gid}
 			default:
 				return f, fmt.Errorf("unreadable file line %q", v)
@@ -351,10 +356,16 @@ func parseFacts(out, user string) (Facts, error) {
 			f.UFWInstalled = v == "installed"
 		case "ufw-active":
 			f.UFWActive = v == "yes"
-		case "port-start":
-			f.PortStart = v
-		case "ip-forward":
-			f.IPForward = v
+		case "port-start", "ip-forward":
+			// Both reach sysctl.before and a sysctl -w run as root.
+			if _, ok := id(v); !ok {
+				return f, fmt.Errorf("unreadable %s line %q: the probe could not read the sysctl", key, v)
+			}
+			if key == "port-start" {
+				f.PortStart = v
+			} else {
+				f.IPForward = v
+			}
 		case "default-dev":
 			f.DefaultDev = v
 		case "lan":
@@ -397,7 +408,11 @@ func parseFacts(out, user string) (Facts, error) {
 		case "data-fs":
 			f.Data.FS = v
 		case "data-avail":
-			f.Data.Avail, _ = strconv.ParseInt(v, 10, 64)
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || n < 0 {
+				return f, fmt.Errorf("unreadable data-avail line %q", v)
+			}
+			f.Data.Avail = n
 		}
 	}
 	if f.raw["sudo"] != nil && f.raw["sudo"][len(f.raw["sudo"])-1] == "listed" {
@@ -407,6 +422,22 @@ func parseFacts(out, user string) (Facts, error) {
 		return f, fmt.Errorf("no primary group read for %s", user)
 	}
 	return f, nil
+}
+
+// fileSum is a checksum as the probe prints one, fileMode a mode as stat's
+// %a does.
+var (
+	fileSum  = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	fileMode = regexp.MustCompile(`^[0-7]{3,4}$`)
+)
+
+// id is v read as a UID, a GID or a sysctl's value: digits alone.
+func id(v string) (int, bool) {
+	if v == "" || strings.Trim(v, "0123456789") != "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(v)
+	return n, err == nil
 }
 
 // parseRoute6 reads a lan6 line, "<destination> <interface>", as ip -6
