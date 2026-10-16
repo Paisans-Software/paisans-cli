@@ -8,7 +8,6 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/registry"
-	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -134,14 +133,15 @@ func (o owners) container(c Container) holder {
 	return holder{ours: o.ours(c.Deployment), desc: "container " + c.Name + " (" + o.labelled(c.Project, c.Deployment) + ")"}
 }
 
-// keptCaddy describes another deployment's Caddy kept for the host owner's
-// sites (docs/specs/2026-10-10-gateway-caddy-kept.md): its infrastructure
-// project's caddy service, while its render.HostSitesDir holds a site file, and
-// either its registry entry marked kept or no entry at all. An entry not
-// marked kept is a live gateway, and a registry that cannot be read says
-// nothing either way: both keep the plain wording.
+// keptCaddy describes another deployment's Caddy by what the host registry
+// says of it (docs/specs/2026-10-10-gateway-caddy-kept.md): its infrastructure
+// project's caddy service, with its entry marked kept or no entry at all. It
+// never claims what that Caddy serves, because the other deployment's root is
+// its own user's and this check cannot read it. An entry not marked kept is a
+// live gateway, and a registry that cannot be read says nothing either way:
+// both keep the plain wording.
 func (o owners) keptCaddy(c Container) (string, bool) {
-	if c.Deployment == "" || o.ours(c.Deployment) || c.Service != "caddy" || len(o.inv.HostSites) == 0 || o.inv.Registered == nil {
+	if c.Deployment == "" || o.ours(c.Deployment) || c.Service != "caddy" || o.inv.Registered == nil {
 		return "", false
 	}
 	kept, registered := o.inv.Registered[c.Deployment]
@@ -152,11 +152,11 @@ func (o owners) keptCaddy(c Container) (string, bool) {
 	if c.Project != d.Project("infra") {
 		return "", false
 	}
-	desc := fmt.Sprintf("container %s: paisans deployment %s's Caddy, kept because it serves %s sites", c.Name, d.Token(), render.HostSitesDir(d))
+	list := fmt.Sprintf("Run paisans host deployments --ssh %s to see what it serves", sshArg(o.inv.Host))
 	if registered {
-		return desc + fmt.Sprintf(". Move those sites to a Caddy of your own and remove this container, or run paisans site remove --force --ssh %s --id %s once they are gone", sshArg(o.inv.Host), d.Token()), true
+		return fmt.Sprintf("container %s: paisans deployment %s's Caddy, which its registry entry marks kept for the host owner's sites. %s, move those sites to a Caddy of your own and remove this container, or run paisans site remove --force --ssh %s --id %s once they are gone", c.Name, d.Token(), list, sshArg(o.inv.Host), d.Token()), true
 	}
-	return desc + "; its registry entry was removed, so remove this container by hand once those sites have moved", true
+	return fmt.Sprintf("container %s: paisans deployment %s's Caddy, which has no registry entry and whose files this check cannot read. %s, and remove this container by hand once it serves nothing", c.Name, d.Token(), list), true
 }
 
 // sshArg is a transport's description as --ssh takes it: user@host, or
