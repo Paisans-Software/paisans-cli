@@ -111,6 +111,52 @@ func runOn(cfg *config.Config, c *topology.Classification, steps []convergeStep)
 	})
 }
 
+// joinsWait is the effective topology once every site whose join waits is
+// left out of it: while a joined site is down, a site that joins through
+// site add is pending for this run, since the join changes every joined
+// site's mesh and HAProxy files and the down one cannot take them. Dropping
+// only its site add would leave it in the topology, and every other site's
+// apply would then name a member the cluster has not admitted. A plan line
+// says why each waits, and the run ends degraded. cfg is the effective
+// topology as classified, declaration the configuration as written.
+func joinsWait(r ui.Reporter, declaration, cfg *config.Config, c *topology.Classification, st convergeState) (*config.Config, error) {
+	down := c.Down()
+	if len(down) == 0 {
+		return cfg, nil
+	}
+	var joining []string
+	for _, s := range convergePlan(cfg, st) {
+		if site := stepSite(s); s.Stage == stageJoining && c.Ready(site) {
+			joining = append(joining, site)
+		}
+	}
+	if len(joining) == 0 {
+		return cfg, nil
+	}
+	verb := " does"
+	if len(down) > 1 {
+		verb = " do"
+	}
+	why := "its join waits until every joined site answers: the join changes every joined site's mesh and HAProxy files, and " + strings.Join(down, ", ") + verb + " not answer"
+	err := c.Wait(declaration, joining, why)
+	if err == nil {
+		err = c.Refuse(declaration, "")
+	}
+	if err != nil {
+		return nil, &ui.Problem{Hint: "the run cannot go on with the sites it has", Explain: err.Error(), Cause: err}
+	}
+	r.Section("pending")
+	for _, name := range joining {
+		s := r.Step("site add " + name)
+		s.Detail("%s", c.Sites[name].Why)
+		s.End(ui.Pending, "waits until every joined site answers")
+	}
+	for _, w := range c.Warnings {
+		r.Warn(w, "")
+	}
+	return c.Effective(declaration), nil
+}
+
 // showPending opens the plan: a line per pending or down site with its
 // reason, a pending one's request line, and what the deployment is without,
 // in doctor's words. cfg is the declaration.

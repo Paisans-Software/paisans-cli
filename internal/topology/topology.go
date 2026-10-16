@@ -92,6 +92,11 @@ type Classification struct {
 	Held []string
 	// Warnings are what the run says about what it holds back.
 	Warnings []string
+
+	// joined and deployed are what Classify read, kept so that Wait can
+	// judge again what hangs on the pending set.
+	joined   map[string]bool
+	deployed []string
 }
 
 // DownLine is a down site's line. It cannot say whether the host is down or
@@ -106,8 +111,8 @@ func DownLine(site string) string {
 // covers it or whose every route into the mesh is pending, and an app the
 // deployment runs that Garage could not hold.
 func Classify(cfg *config.Config, ev Evidence) (*Classification, error) {
-	c := &Classification{Sites: map[string]Site{}}
 	joined := map[string]bool{}
+	c := &Classification{Sites: map[string]Site{}, joined: joined, deployed: ev.DeployedApps}
 	for _, sites := range ev.Joined {
 		for _, s := range sites {
 			joined[s] = true
@@ -246,6 +251,32 @@ func (c *Classification) garage(cfg *config.Config, deployed []string) error {
 		c.Warnings = append(c.Warnings, fmt.Sprintf("storage held back: Garage has %d of its sites in the run and keeps %d copies, so %s wait until the pending Garage sites are admitted", kept, g.Replication, strings.Join(c.Held, ", ")))
 	}
 	return nil
+}
+
+// Wait makes each of names pending for this run, each a ready site the
+// deployment has not joined whose join cannot go on, with why, Eg: a data
+// site whose site add waits until every joined site answers. It is left out
+// of the topology as a pending site is, and what hangs on the pending set,
+// the routes into the mesh and the storage held back, is judged again.
+func (c *Classification) Wait(cfg *config.Config, names []string, why string) error {
+	for _, name := range names {
+		switch {
+		case c.joined[name]:
+			return fmt.Errorf("%s cannot wait to join: it has joined this deployment", name)
+		case !c.Ready(name):
+			return fmt.Errorf("%s cannot wait to join: it is %s", name, c.Sites[name].Class)
+		}
+		c.Sites[name] = Site{Name: name, Class: Pending, Why: name + ": " + why}
+	}
+	pending := func(name, why string) error {
+		c.Sites[name] = Site{Name: name, Class: Pending, Why: why}
+		return nil
+	}
+	if err := c.relays(cfg, c.joined, pending); err != nil {
+		return err
+	}
+	c.Held, c.Warnings = nil, nil
+	return c.garage(cfg, c.deployed)
 }
 
 func (c *Classification) of(class Class) []string {

@@ -356,3 +356,44 @@ func TestRefusals(t *testing.T) {
 		t.Errorf("one pending data site of three: %v, degraded %v", err, c.Degraded())
 	}
 }
+
+// A ready site the deployment has not joined is made pending when its join
+// has to wait, Eg: while a joined site is down. What hangs on the pending
+// set is judged again: storage is held when Garage is left short, and an
+// app the deployment runs that Garage could then not hold refuses.
+func TestAJoinThatWaitsMakesItsSitePending(t *testing.T) {
+	cfg := fixture(t)
+	ev := everyoneAnswers(t, cfg)
+	ev.Joined["etcd's membership"] = []string{"home-a", "home-b"}
+	ev.Login["home-a"] = refused
+	delete(ev.Records, "home-a")
+	c, err := topology.Classify(cfg, ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Ready("home-c") || c.StorageHeld() {
+		t.Fatalf("before: home-c %+v, held %v", c.Sites["home-c"], c.Held)
+	}
+	const why = "its join waits until every joined site answers"
+	if err := c.Wait(cfg, []string{"home-c"}, why); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Sites["home-c"]; got.Class != topology.Pending || got.Why != "home-c: "+why {
+		t.Errorf("home-c %+v", got)
+	}
+	if !c.StorageHeld() || len(c.Warnings) != 1 {
+		t.Errorf("held %v, warnings %v", c.Held, c.Warnings)
+	}
+	if slices.Contains(c.Effective(cfg).Etcd.Members, "home-c") {
+		t.Error("home-c is still an etcd member of the run")
+	}
+
+	ev.DeployedApps = c.Held[:1]
+	c, err = topology.Classify(cfg, ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Wait(cfg, []string{"home-c"}, why); err == nil || !strings.Contains(err.Error(), ev.DeployedApps[0]) {
+		t.Errorf("a deployed app held back: %v", err)
+	}
+}

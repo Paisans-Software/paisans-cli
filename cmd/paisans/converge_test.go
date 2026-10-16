@@ -2332,6 +2332,51 @@ func TestConvergeSkipsADownSitesSteps(t *testing.T) {
 	}
 }
 
+// A data site ready to join waits while a joined site is down: the join
+// changes every joined site's mesh and HAProxy files, which the down one
+// cannot take. Its site add is dropped and the site is left out of the run
+// as a pending one is, so no other site is handed files naming a member
+// the cluster has not admitted; the plan says why, and the run goes on and
+// ends degraded.
+func TestConvergeJoinWaitsWhileASiteIsDown(t *testing.T) {
+	ran := fakeConverge(t, nil)
+	seen := stepSites(t)
+	convergeReadInitial = func(_ *config.Config, m string) (render.EtcdInitial, bool, error) {
+		if m == "home-b" {
+			return render.EtcdInitial{}, false, nil
+		}
+		return initial("home-a", "vm"), true, nil
+	}
+	classifyWith(t, classifyHosts([]string{"watch"}, "home-a", "vm", "watch"))
+	rec := recordConverge(t)
+	if err := converge(t, "--execute"); err != nil {
+		t.Fatalf("%v: %s\n%s", err, problemText(err), rec.Lines())
+	}
+	for _, line := range *ran {
+		if strings.Contains(line, "home-b") || strings.HasPrefix(line, "site add") {
+			t.Errorf("ran %s while watch is down", line)
+		}
+	}
+	if !slices.Contains(*ran, "apply --site home-a") {
+		t.Errorf("the run stopped short: %v", *ran)
+	}
+	if s := (*seen)[0]; s == nil || !slices.Equal(s.Pending(), []string{"home-b"}) || !slices.Equal(s.Down(), []string{"watch"}) {
+		t.Fatalf("classification %+v", s)
+	}
+	if conf := meshFile(t, (*seen)[0], "home-a"); strings.Contains(conf, "[Peer]\n# home-b\n") {
+		t.Errorf("home-a peers with home-b, whose join waits:\n%s", conf)
+	}
+	if !rec.Has("end", "site add home-b") && !strings.Contains(rec.Lines(), "site add home-b") {
+		t.Errorf("no line for the join that waits:\n%s", rec.Lines())
+	}
+	if !strings.Contains(rec.Lines(), "every joined site answers") {
+		t.Errorf("the plan does not say why the join waits:\n%s", rec.Lines())
+	}
+	if !rec.Has("result", "Applied, degraded: 2 sites pending or down (home-b, watch).") {
+		t.Errorf("no degraded end:\n%s", rec.Lines())
+	}
+}
+
 // everySite is the fixture's sites, as a deployment record lists them once
 // every one has joined.
 var everySite = []string{"home-a", "home-b", "vm", "watch"}

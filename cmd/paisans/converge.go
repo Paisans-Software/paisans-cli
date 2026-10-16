@@ -823,6 +823,9 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	if st.Initial, err = convergeFounded(r, cfg); err != nil {
 		return err
 	}
+	if cfg, err = joinsWait(r, declaration, cfg, sites, st); err != nil {
+		return err
+	}
 	if st.MoveGateway, err = convergeGatewayMove(cfg); err != nil {
 		return err
 	}
