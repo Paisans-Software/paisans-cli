@@ -431,7 +431,7 @@ func (h *fakeHost) applied(command string) {
 	for _, line := range strings.Split(command, "\n") {
 		if _, rest, ok := strings.Cut(line, " install -y "); ok && strings.HasPrefix(line, "apt-get ") {
 			for _, p := range strings.Fields(rest) {
-				if !strings.HasPrefix(p, "-") {
+				if !strings.HasPrefix(p, "-") && !strings.Contains(p, ">") {
 					name, _, _ := strings.Cut(p, "=")
 					h.withPkg(name, "installed")
 				}

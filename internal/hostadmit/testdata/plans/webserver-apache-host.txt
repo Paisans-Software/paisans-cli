@@ -183,8 +183,8 @@ step 6: install packages: docker-ce, docker-ce-cli, containerd.io, docker-buildx
     $ mv -f /usr/sbin/.policy-rc.d.paisans-tmp /usr/sbin/policy-rc.d
     $ set -e
     $ export DEBIAN_FRONTEND=noninteractive
-    $ apt-get -o DPkg::Lock::Timeout=300 update
-    $ apt-get -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confold install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras uidmap wireguard-tools git
+    $ apt-get -o DPkg::Lock::Timeout=300 update 8>&-
+    $ apt-get -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confold install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras uidmap wireguard-tools git 8>&-
 
 step 7: disable the system Docker
   docker: the deployments run their own rootless daemons, so the system daemons admit installed, which their packages enable, are disabled (docker.socket, docker.service, containerd.service), and were kept from starting while they installed: they never changed forwarding, docker0 or the firewall

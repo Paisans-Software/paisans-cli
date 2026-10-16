@@ -104,8 +104,8 @@ step 4: install packages: docker-ce-rootless-extras=5:29.9.1-1~ubuntu.24.04~nobl
     $ trap confirm_claims EXIT
     $ set -e
     $ export DEBIAN_FRONTEND=noninteractive
-    $ apt-get -o DPkg::Lock::Timeout=300 update
-    $ apt-get -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confold install -y --no-upgrade docker-ce-rootless-extras=5:29.9.1-1~ubuntu.24.04~noble uidmap
+    $ apt-get -o DPkg::Lock::Timeout=300 update 8>&-
+    $ apt-get -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confold install -y --no-upgrade docker-ce-rootless-extras=5:29.9.1-1~ubuntu.24.04~noble uidmap 8>&-
 
 step 5: create user paisans-f2a9
   user: create paisans-f2a9 with a home, whose subordinate ID ranges useradd allocates

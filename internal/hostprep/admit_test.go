@@ -452,3 +452,45 @@ func TestTheDockerHoldIsLocked(t *testing.T) {
 		}
 	}
 }
+
+// apt runs with the hold's lock closed, so nothing apt or a package's
+// script starts can keep /run/paisans-docker-hold.lock held after the
+// hold ends. Host prepare's install, which holds no lock, runs the same
+// apt lines unchanged in effect.
+func TestAptRunsWithoutTheHoldsLock(t *testing.T) {
+	profile, err := hostprep.Select(hostprep.ParseOSRelease(ubuntu2404))
+	if err != nil {
+		t.Fatal(err)
+	}
+	admit, _, err := profile.AdmitPackages(freshHost(), hostprep.ParseOSRelease(ubuntu2404), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepare, err := profile.Packages(freshHost(), hostprep.ParseOSRelease(ubuntu2404))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, command := range map[string]string{"admit": admit.Steps[len(admit.Steps)-1].Command, "prepare": prepare.Steps[len(prepare.Steps)-1].Command} {
+		dir := t.TempDir()
+		bin, log := filepath.Join(dir, "bin"), filepath.Join(dir, "log")
+		if err := os.Mkdir(bin, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		apt := "#!/bin/sh\nif { true >&8; } 2>/dev/null; then echo \"fd8 open: $*\" >> " + log + "; else echo \"fd8 closed: $*\" >> " + log + "; fi\n"
+		for f, s := range map[string]string{"apt-get": apt, "flock": "#!/bin/sh\nexit 0\n"} {
+			if err := os.WriteFile(filepath.Join(bin, f), []byte(s), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		script := strings.NewReplacer("/usr/sbin/", dir+"/", "/run/paisans-docker-hold.lock", filepath.Join(dir, "lock")).Replace(command)
+		cmd := exec.Command("sh", "-c", script)
+		cmd.Env = []string{"PATH=" + bin + ":/usr/bin:/bin"}
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%s: %v: %s", name, err, out)
+		}
+		got, _ := os.ReadFile(log)
+		if lines := strings.Split(strings.TrimSpace(string(got)), "\n"); len(lines) < 2 || strings.Contains(string(got), "fd8 open") {
+			t.Errorf("%s: apt ran with the lock open, or not at all:\n%s", name, got)
+		}
+	}
+}
