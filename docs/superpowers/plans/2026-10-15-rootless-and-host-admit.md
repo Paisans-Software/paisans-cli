@@ -132,13 +132,17 @@ Depends on: nothing.
 
 ## Phase 9: Documentation
 
-Depends on: phases 5 to 7.
+Depends on: phases 5 and 6; runs alongside phase 7 (founder decision), and documents doctor's checks as phase 7 lands them.
 
 * `docs/commands.md`: `host request`, `host admit`, `host evict`; `host prepare` and every former `--sudo` rewritten; `host allow`/`disallow` gone.
 * `README.md`: the sections on `host prepare`, the login user's keys and Docker's version.
 * `docs/guides/host-owners.md`: install and check the binary, compare the digest, what admit changes, each grant, evict.
 * `docs/deployment-agent-rules.md`: admit and evict are owner actions.
 * `CHANGELOG.md` bullets in the PRs that change behaviour (phases 1 to 8), not here.
+
+## Phase 10a: Admit and evict on staging
+
+Depends on: phase 5 (founder decision: run as soon as phase 5 merges, before phase 6). On site-a and site-b, fresh: `host request` on the workstation, then `sudo paisans host admit --request` on each host as its owner would, with `--watchdog`, `--public-ports` and `--data-dir` where the site's roles need them. Checks: the plan and the typed digest; every root step and its idempotence on a re-run; the egress table (a process as the deployment's user cannot reach the host's `127.0.0.1` or LAN) and the mesh mark's chain (a WireGuard endpoint moved to `127.0.0.1` or a LAN address after a handshake is dropped, and reached with `--mesh-lan`); the 80/443 check against a listener, a system Docker container and a DNAT rule with `"userland-proxy": false`; `br_netfilter` with and without another bridge; `sudo -n -l` as the user lists the helper alone; a reboot comes back with the egress table before the user's manager; `host evict` leaves each host as the owner had it, and evict of one of two deployments on one host leaves the other's shared files and sysctls. `apply` as the deployment's user waits for phase 10.
 
 ## Phase 10: Staging end to end
 
