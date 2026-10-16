@@ -1,9 +1,12 @@
 package hostadmit_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostadmit"
@@ -13,7 +16,8 @@ import (
 var wireguardCases = addCases(
 	goldenCase{name: "wgdir-absent", site: "vm", host: home},
 	goldenCase{name: "wgdir-correct", site: "vm", host: func() *fakeHost { return home().withDir("/etc/wireguard", "drwx------", 0, 0) }},
-	goldenCase{name: "wgdir-group-writable", site: "vm", host: func() *fakeHost { return home().withDir("/etc/wireguard", "drwxrwxr-x", 0, 1001) }},
+	goldenCase{name: "wgdir-group-writable-refused", site: "vm", host: func() *fakeHost { return home().withDir("/etc/wireguard", "drwxrwxr-x", 0, 1001) }},
+	goldenCase{name: "wgdir-other-owner-refused", site: "vm", host: func() *fakeHost { return home().withDir("/etc/wireguard", "drwx------", 1001, 0) }},
 	goldenCase{name: "wgdir-link-refused", site: "vm", host: func() *fakeHost { return home().withDir("/etc/wireguard", "lrwxrwxrwx", 0, 0) }},
 	goldenCase{name: "wgdir-file-refused", site: "vm", host: func() *fakeHost { return home().withDir("/etc/wireguard", "-rw-------", 0, 0) }},
 	goldenCase{name: "wgdir-acl-refused", site: "vm", host: func() *fakeHost { return home().withDir("/etc/wireguard", "drwx------+", 0, 0) }},
@@ -27,9 +31,6 @@ var wireguardCases = addCases(
 	}},
 	goldenCase{name: "srv-root-owned-refused", site: "vm", host: func() *fakeHost {
 		return home().withDir("/srv/paisans", "drwxr-xr-x", 0, 0).withDir("/srv/paisans/f2a9", "drwxr-xr-x", 0, 0)
-	}},
-	goldenCase{name: "mesh-subnet-taken-refused", site: "vm", host: func() *fakeHost {
-		return home().answer("ip -j route", `[{"dst":"10.44.0.0/16","dev":"tailscale0"}]`)
 	}},
 )
 
@@ -129,5 +130,38 @@ func TestAHelperAnotherMayWriteIsRestored(t *testing.T) {
 		if !restored {
 			t.Errorf("mode %s owner %d: the helper is not restored", c.mode, c.uid)
 		}
+	}
+}
+
+// A mesh subnet inside Tailscale's 100.64.0.0/10 is refused on a host
+// running Tailscale, whose route lives in table 52, not main: the probe
+// reads every table. The fake answers only the command that does, so a
+// probe of main alone would see no route and plan on.
+func TestAMeshInsideTailscalesRangeIsRefused(t *testing.T) {
+	const tailscale = `[{"dst":"default","gateway":"192.168.1.1","dev":"eth0"},
+{"dst":"100.64.0.0/10","dev":"tailscale0","table":"52"},
+{"dst":"100.100.100.100","dev":"tailscale0","table":"52"},
+{"dst":"192.168.1.0/24","dev":"eth0"}]`
+	h := home().answer("ip -j route show table all", tailscale)
+	in := input(t, "vm", hostadmit.Flags{})
+	in.Request.MeshSubnet = "100.88.0.0/24"
+	in.Digest = admission.Digest(admission.Encode(in.Request))
+	got := "(planned)\n"
+	if _, err := hostadmit.Build(h, in); err != nil {
+		got = "refused: " + err.Error() + "\n"
+	}
+	path := filepath.Join("testdata", "plans", "mesh-subnet-tailscale-refused.txt")
+	if *update {
+		if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("%v (run go test ./internal/hostadmit/ -update, then read the file)", err)
+	}
+	if got != string(want) {
+		t.Errorf("%s differs from what admit plans now:\n%s", path, diff(string(want), got))
 	}
 }

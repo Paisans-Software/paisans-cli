@@ -48,6 +48,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Fixed
 
+- The mesh overlap check of `apply`, `host prepare`, `doctor` and `host admit` reads every routing table, so a route another VPN keeps in its own table, such as Tailscale's table 52, is refused.
 - The configuration store's daemon starts and stops with the deployment's WireGuard unit, and `host prepare` starts it only where the mesh is up, so peers can fetch from it once `apply` starts the mesh.
 - `apply --execute` starts no peer sync on a site `host prepare` has not given a store, which has nothing to sync, rather than warning on every bare host that its sync did not complete.
 - `site remove` without `--delete-data` keeps the registry entry, marked `data` kept, while data is left, so a later `--force --id ... --delete-data` finds the deployment instead of refusing.

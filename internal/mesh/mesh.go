@@ -79,8 +79,10 @@ func Clashes(subnet netip.Prefix, taken []Taken) []Taken {
 
 // Commands a probe runs. Each prints JSON on stdout and nothing else.
 const (
-	// RouteCommand lists the main routing table.
-	RouteCommand = "ip -j route"
+	// RouteCommand lists every routing table, not main alone: another VPN
+	// may keep its routes in a table of its own (Tailscale's 52, wg-quick's
+	// 51820), and they compete for the mesh's addresses all the same.
+	RouteCommand = "ip -j route show table all"
 	// AddrCommand lists every address on every interface.
 	AddrCommand = "ip -j addr"
 	// NetworksCommand inspects every Docker network, or prints an empty list
@@ -97,27 +99,39 @@ func LinkCommand(iface string) string {
 	return "ip -j link show dev " + iface + " 2>/dev/null || echo absent"
 }
 
-// ParseRoutes reads `ip -j route` and returns every route's destination as a
-// taken network, except the default route and routes through own, the
-// deployment's own interface, which are the mesh itself.
+// ParseRoutes reads RouteCommand's output and returns every route's
+// destination as a taken network, naming its table when it is not main,
+// except the default route, routes through own, the deployment's own
+// interface, which are the mesh itself, and the local table's local and
+// broadcast entries, which are the host's own addresses and ParseAddrs
+// reads with their prefixes.
 func ParseRoutes(out, own string) ([]Taken, error) {
 	var routes []struct {
-		Dst string `json:"dst"`
-		Dev string `json:"dev"`
+		Type  string `json:"type"`
+		Dst   string `json:"dst"`
+		Dev   string `json:"dev"`
+		Table string `json:"table"`
 	}
 	if err := decode(out, &routes); err != nil {
 		return nil, fmt.Errorf("unreadable `%s` output: %w", RouteCommand, err)
 	}
 	var taken []Taken
 	for _, r := range routes {
-		if r.Dst == "default" || r.Dev == own {
+		if r.Dst == "default" || r.Dev == own || r.Type == "local" || r.Type == "broadcast" {
 			continue
 		}
 		p, err := ParsePrefix(r.Dst)
 		if err != nil || !p.Addr().Is4() {
 			continue
 		}
-		taken = append(taken, Taken{Prefix: p, What: fmt.Sprintf("route %s dev %s", r.Dst, r.Dev), Dev: r.Dev})
+		what := "route " + r.Dst + " dev " + r.Dev
+		if r.Dev == "" {
+			what = "route " + r.Dst + " (" + r.Type + ")"
+		}
+		if r.Table != "" && r.Table != "main" {
+			what += " table " + r.Table
+		}
+		taken = append(taken, Taken{Prefix: p, What: what, Dev: r.Dev})
 	}
 	return taken, nil
 }

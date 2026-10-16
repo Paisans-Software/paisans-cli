@@ -1,0 +1,1 @@
+refused: mesh subnet: the deployment's mesh subnet 100.88.0.0/24 overlaps route 100.64.0.0/10 dev tailscale0 table 52 on this host, so its mesh would route that network's traffic. The operators pick another subnet (paisans init picks one clear of every host) and send a new request. Nothing was changed

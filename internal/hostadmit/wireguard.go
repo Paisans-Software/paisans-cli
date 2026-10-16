@@ -73,7 +73,9 @@ func sudoersLine(d deployment.Deployment, user string) (string, error) {
 	return user + " ALL=(root) NOPASSWD: " + helper + "\n", nil
 }
 
-// planWireGuard makes /etc/wireguard root's alone, installs the helper and
+// planWireGuard creates /etc/wireguard root's and 700 when it is absent and
+// refuses one that is not root's alone, since a conf planted while another
+// could write there would outlive any repair. It installs the helper and
 // its sudoers line, and restores either when it finds it changed.
 func planWireGuard(p *planner) error {
 	const wg = "/etc/wireguard"
@@ -93,8 +95,7 @@ func planWireGuard(p *planner) error {
 		}
 		return fmt.Errorf("%s %s, and admit cannot make it a directory only root may write. A conf the deployment's user could plant there would run its PostUp as root at the next up. Fix it yourself (remove the link, or the ACL with setfacl -b) and admit again. Nothing was changed", wg, what)
 	case !rootsAlone(dir):
-		p.step(Step{Title: "make " + wg + " root's alone", Describe: fmt.Sprintf("wireguard: it is %s, owner %d, group %d; make it root's with no group or other write bit", dir.Mode, dir.UID, dir.GID),
-			Command: "chown root:root " + wg + " && chmod go-w " + wg, Kinds: []string{"wireguard"}})
+		return fmt.Errorf("%s is %s, owner %d, group %d: someone other than root owns it or may write it, so a conf planted there while it was so would survive any repair admit made, and wg-quick runs a conf's PostUp as root. Make it root's with no group or other write bit (chown root:root %s && chmod go-w %s), check that every file in it is one you put there, and admit again. Nothing was changed", wg, ui.Visible(dir.Mode), dir.UID, dir.GID, wg, wg)
 	default:
 		p.present("wireguard: " + wg + " is root's alone")
 	}
