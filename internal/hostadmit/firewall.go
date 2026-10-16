@@ -178,14 +178,21 @@ func holders(p *planner) ([]holder, error) {
 		case "dnat":
 			switch holds, unresolved := ruleHoldsLow(rest); {
 			case unresolved:
-				found = append(found, holder{"a NAT rule whose ports admit cannot read (a set, a map, a concatenation or a name), so it may hold 80 or 443, in " + hostText(rest)})
+				found = append(found, holder{"a NAT rule whose ports admit cannot read (a set, a map, a concatenation or a name), so it may hold 80 or 443, in " + hostText(withoutCounters(rest))})
 			case holds:
-				found = append(found, holder{"a NAT rule in " + hostText(rest)})
+				found = append(found, holder{"a NAT rule in " + hostText(withoutCounters(rest))})
 			}
 		}
 	}
 	return found, nil
 }
+
+// nftCounter is an nft rule's counter as nft lists it, with its values.
+var nftCounter = regexp.MustCompile(` counter packets [0-9]+ bytes [0-9]+`)
+
+// withoutCounters is a rule as quoted to the owner: its counter's values
+// change from one run to the next and say nothing of what the rule holds.
+func withoutCounters(rule string) string { return nftCounter.ReplaceAllString(rule, "") }
 
 // hostPort is a host port in docker inspect's PortBindings, a port or a
 // range.

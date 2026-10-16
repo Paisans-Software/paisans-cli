@@ -264,3 +264,22 @@ func TestThePublicPortsOpenUDP443(t *testing.T) {
 		t.Errorf("evict leaves 443/udp open:\n%s", evict.Text())
 	}
 }
+
+// A quoted nft rule is shown without its live counters, which change
+// between two runs and say nothing of what holds the port.
+func TestAQuotedNATRuleHasNoCounters(t *testing.T) {
+	h := home().answer(portsMarker, "dnat table ip nat chain DOCKER: iifname != \"docker0\" tcp dport 443 counter packets 12 bytes 720 dnat to 172.17.0.2:80\n"+
+		"dnat table ip nat chain PRE: tcp dport @web counter packets 3 bytes 180 dnat to 10.0.0.2\nend\n")
+	_, err := hostadmit.Build(h, input(t, "watch", hostadmit.Flags{PublicPorts: true}))
+	if err == nil {
+		t.Fatal("admit took the ports a NAT rule holds")
+	}
+	for _, want := range []string{`a NAT rule in table ip nat chain DOCKER: iifname != "docker0" tcp dport 443 dnat to 172.17.0.2:80`, "in table ip nat chain PRE: tcp dport @web dnat to 10.0.0.2"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not quote %q:\n%v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "counter packets") {
+		t.Errorf("the refusal quotes counters:\n%v", err)
+	}
+}
