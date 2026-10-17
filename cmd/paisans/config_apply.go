@@ -73,6 +73,9 @@ type gathered struct {
 	parents  []string
 	same     string
 	revision int
+	// answers is how check's rollback is answered: at the terminal, or by
+	// --yes.
+	answers answerer
 }
 
 // gatherForApply gathers as config publish does, without the side effects
@@ -85,7 +88,7 @@ type gathered struct {
 // that are not the three of a version, a fork, a base that is not the
 // sites' newest version, a key no operator lists, and, with --execute, a run
 // that reaches no site. No base at all is a deployment's first version.
-func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *configstore.Files, cfg *config.Config, execute bool, stdin io.Reader, stdout io.Writer) (storeVersion, error) {
+func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *configstore.Files, cfg *config.Config, execute bool, ans answerer, stdin io.Reader, stdout io.Writer) (storeVersion, error) {
 	l, err := workstationOf(configPath)
 	if err != nil {
 		return nil, err
@@ -107,7 +110,7 @@ func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *confi
 	}
 	r.Section("configuration store")
 	sites := configTransports(cfg)
-	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{execute: execute}, stdin, stdout)
+	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{execute: execute, answers: ans}, stdin, stdout)
 	if err != nil {
 		return nil, err
 	}
@@ -135,13 +138,13 @@ func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *confi
 		return nil, &ui.Problem{Hint: "no site answered", Explain: "apply publishes the version it applies before the first change, and no site can take it. Nothing was applied.", Cause: configstore.UnreachedError(g)}
 	}
 	if execute {
-		if err := confirmPartial(stdin, stdout, g, len(sites)); err != nil {
+		if err := confirmPartial(ans, stdin, stdout, g, len(sites)); err != nil {
 			return nil, err
 		}
 	} else if !g.Majority {
 		r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), len(sites)), "--execute asks for the word "+partialWord+" at a terminal.")
 	}
-	v := &gathered{l: l, g: g, sites: sites, key: key, files: files, parents: parents, revision: 1}
+	v := &gathered{l: l, g: g, sites: sites, key: key, files: files, parents: parents, revision: 1, answers: ans}
 	if len(parents) == 1 {
 		cache, err := l.Cache()
 		if err != nil {
@@ -184,7 +187,7 @@ func (v *gathered) held() (string, int) {
 }
 
 func (v *gathered) check(r ui.Reporter, records map[string]grant.Record, execute bool, stdin io.Reader, stdout io.Writer) error {
-	return witness(r, records, v.revision, v.same, v.what(), execute, stdin, stdout)
+	return witness(r, records, v.revision, v.same, v.what(), execute, v.answers, stdin, stdout)
 }
 
 func (v *gathered) publish(r ui.Reporter, execute bool) (*appliedVersion, error) {
@@ -254,7 +257,7 @@ func noSiteTook(pe *configstore.PushError) error {
 // hash is the version being applied, "" for one not yet published, which
 // no record can hold; what names it. A dry run reports it, and says
 // --execute asks.
-func witness(r ui.Reporter, records map[string]grant.Record, revision int, hash, what string, execute bool, stdin io.Reader, stdout io.Writer) error {
+func witness(r ui.Reporter, records map[string]grant.Record, revision int, hash, what string, execute bool, ans answerer, stdin io.Reader, stdout io.Writer) error {
 	var other []string
 	for _, site := range slices.Sorted(maps.Keys(records)) {
 		c := records[site].Config
@@ -281,7 +284,7 @@ func witness(r ui.Reporter, records map[string]grant.Record, revision int, hash,
 		r.Warn(hint, why+" --execute asks for "+rollbackWord+".")
 		return nil
 	}
-	if err := confirmWord(stdin, stdout, rollbackWord, why+" Proceed only if you know why the host's version is gone from the sites."); err != nil {
+	if err := confirmWord(ans, stdin, stdout, rollbackWord, why+" Proceed only if you know why the host's version is gone from the sites."); err != nil {
 		return &ui.Problem{Hint: hint, Explain: why + "\n" + sentence(err.Error())}
 	}
 	return nil

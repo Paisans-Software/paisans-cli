@@ -233,7 +233,7 @@ func gatherFiles(t *testing.T) **gatheredStore {
 	t.Helper()
 	var got *gatheredStore
 	saved := applyStore
-	applyStore = func(_ ui.Reporter, configPath, secretsPath string, loaded *configstore.Files, _ *config.Config, _ bool, _ io.Reader, _ io.Writer) (storeVersion, error) {
+	applyStore = func(_ ui.Reporter, configPath, secretsPath string, loaded *configstore.Files, _ *config.Config, _ bool, _ answerer, _ io.Reader, _ io.Writer) (storeVersion, error) {
 		s := &gatheredStore{}
 		if loaded != nil {
 			s.paisans, s.secrets = loaded.Paisans, loaded.Secrets

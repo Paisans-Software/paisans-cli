@@ -443,7 +443,7 @@ func TestApplyPublishesTheFilesItLoaded(t *testing.T) {
 	if err := f.l.WriteFiles(later); err != nil {
 		t.Fatal(err)
 	}
-	v, err := gatherForApply(ui.Discard, f.cfgPath, "", &loaded, cfg, true, noTerminalStdin(), io.Discard)
+	v, err := gatherForApply(ui.Discard, f.cfgPath, "", &loaded, cfg, true, answerer{}, noTerminalStdin(), io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3152,3 +3152,7 @@ could run the deployment, and stays a refusal.
   outright, which is the problem the issue names.
 * **Warn in `validate` only:** a warning shown once at `validate` is easy to
   forget; the heartbeat keeps saying it.
+
+## 2026-10-17: `--yes` answers confirmations, except the digest and the fresh SSH login
+
+Founder decision, 2026-10-17: every command that asks for a confirmation takes `--yes`, which answers each typed word and y/N question as typing it would, prints `approved by --yes: <what>` for each, and refuses unless `PAISANS_ALLOW_YES=1`; it never answers `host admit --request`'s digest, which proves the request's keys were not changed on their way (`--digest` gives it instead), nor the fresh SSH login after admit enables ufw, which proves SSH still works before the ufw fallback is stopped (`--yes` with `--request` refuses where admit would enable ufw, and `--site` proves it with its own login); a review `--yes` approves records `approved_by` as a typed approval does, so only the run's log shows it was `--yes`.

@@ -42,6 +42,7 @@ deleting DNS records, making an administrator) or a read (`doctor`,
 | `--config <path>` | `paisans-stack.yaml` | every command except `host deployments` | the deployment declaration |
 | `--secrets <path>` | `secrets.enc.yaml` beside the config | every command that reads secrets | the sops encrypted secrets file |
 | `--execute` | off | every command that changes something, as each entry says | without it, the command plans and prints and changes nothing |
+| `--yes` | off | every command that asks for a confirmation, as each entry says | answers each confirmation as typing it would; needs `PAISANS_ALLOW_YES=1` (see *`--yes` answers confirmations* below) |
 | `--sudo` | on | `host deployments` | run its remote commands through sudo, since the registry is root's; `--sudo=false` skips it (see *A sudo that wants a password is asked for once, on a terminal* in `README.md`). Every other command runs as the site's ssh user, without sudo |
 | `--ssh <destination>` | the site's `ssh` section | commands about one site's host | used verbatim in place of the site's `ssh` section, whose user, host, port and keys are then ignored (see *`--ssh` replaces the whole section* in `README.md`) |
 
@@ -58,9 +59,43 @@ With `--execute`, `apply`, `apply --site`, `host prepare` and `site add` first s
 `paisans-stack.yaml` grants on each host they reach that the host has not had (a key
 that may log in, an image that runs), and, when anything is added or changed, ask for the word `approve` at
 a terminal before the first change. Without a terminal they refuse, before any host
-changes; no flag answers the question. A run that adds or changes nothing asks
+changes, unless `--yes` answers. A run that adds or changes nothing asks
 nothing. Their dry runs show the same review and ask nothing (see *`apply` and
 `host prepare` review what `paisans-stack.yaml` grants* in `README.md`).
+
+### `--yes` answers confirmations
+
+Every command that asks for a confirmation takes `--yes`: `apply`,
+`apply --site`, `host prepare`, `host admit`, `host evict`, `site add`,
+`site remove`, `gateway move`, `config publish`, `config pull`,
+`config recover`, `operator register`, `secrets prune`, `secrets rotate` and
+`app remove`. No other command takes it.
+
+* **What it answers:** every word a command asks to have typed (`approve`,
+  `create`, `partial`, `rollback`, `prune`, `sign out`, `revoked`,
+  `lose writes`, `lose objects`, a site's, an app's or a user's name) and
+  every y/N question (`host admit`'s grants and, with `--site`, its ufw
+  question), each as typing it would. None needs a terminal on stdin.
+* **What it prints:** a line for each answer, `approved by --yes: <what>`,
+  after what the prompt would have said, so the run's log records what was
+  accepted unseen. The review gets a line per entry it approves, naming the
+  site and the key or image.
+* **The environment:** `--yes` refuses, with nothing read or changed, unless
+  `PAISANS_ALLOW_YES=1` is set. A command line copied from a log or a runbook
+  carries `--yes` and not the environment it ran in, so the copy alone never
+  approves anything.
+* **What it never answers:** `host admit --request`'s digest, which
+  `--digest <digest>` gives instead; the new SSH login `host admit --request`
+  asks for once it has enabled ufw, so `--yes` with `--request` refuses up
+  front where admit would enable ufw; a login for `--site`, so `host admit`
+  and `host evict` with `--yes` need `--ssh`; and a value to paste, which
+  `secrets set` and `secrets rotate` ask for at a terminal as they do without
+  it.
+* **Without it:** every question is asked at a terminal, and refused off one,
+  as each entry says.
+
+Apply without `--site` hands `--yes` on to its `apply` and `gateway move`
+steps, and `gateway move` to its hand-off's `apply`.
 
 A site that leaves `ssh.user` out is reached as the deployment's own user,
 `paisans-<token>`. Any run with `--execute` that logs in to it writes that
@@ -289,7 +324,8 @@ paisans secrets prune --without-record --execute   # no gateway to read; asks fo
 * **Alone:** always, after a site or an app has been removed.
 * **Flags:** `--config`, `--secrets`, `--execute`, `--without-record` (off:
   trust `paisans-stack.yaml` alone when no gateway's deployment record can be read;
-  with `--execute` it asks for the word `prune` at a terminal).
+  with `--execute` it asks for the word `prune` at a terminal), `--yes` (types
+  `prune`).
 * **Hosts:** reads each gateway's deployment record, as the ssh user, since it
   holds only names and is the deployment user's own file. Changes none.
 * **`--execute`:** removes them and writes the local secrets file, encrypted to
@@ -327,7 +363,8 @@ paisans secrets rotate --all --restart --execute           # the full list again
   first); `--replaced <path>` (repeatable: a pasted secret already replaced
   and applied, which every host using it runs; listed, not rotated, and
   refused for a generated secret or one some host does not run yet);
-  `--config`, `--secrets`, `--execute`.
+  `--config`, `--secrets`, `--execute`, `--yes` (types `sign out`; it never
+  pastes a secret).
 * **A stopped `--all`:** the secrets file records what it left
   (`rotate_remaining`), and the next `--all` does only that, saying so at
   every verbosity and in its result: the secrets the earlier run finished
@@ -337,7 +374,8 @@ paisans secrets rotate --all --restart --execute           # the full list again
   each is reached. The secrets file is read and written on this machine only.
 * **`--execute`:** rotates each secret in four gated stages, and stops at the
   first gate that fails. Asks for `sign out` at a terminal first when a rotation
-  in the run signs members out, and is refused without one. Refuses before
+  in the run signs members out, and is refused without one unless `--yes`
+  types it. Refuses before
   anything changes when a `mesh rekey` is unfinished, a site does not answer
   over ssh, or etcd or Patroni is unhealthy. `--all` also refuses a secrets
   file that lacks a secret `init` generates, naming `paisans init`.
@@ -405,6 +443,7 @@ paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty
   | `--from <user@host[:port]>` | `recover` (required, repeatable) | a host of the deployment to recover from; every site the trusted heads name is reached after it |
   | `--id <id>` | `recover` | the deployment, when the logins' admission records name more than one; it must be a deployment id |
   | `--execute` | `publish`, `pull`, `recover` | do it; `log` takes none |
+  | `--yes` | `publish`, `pull`, `recover` | type `partial` and `rollback` when asked for; `log` asks nothing and takes none |
 
   And the flags every command shares.
 * **Hosts:** every site, over ssh as the site's ssh user, and each is
@@ -443,7 +482,7 @@ paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty
   answered directly (no more than half), for `apply --execute`, `config pull`,
   `config recover`, `config publish` of a first version and `operator register`;
   `rollback` when the newest version is older than one this workstation has
-  seen. An accepted `rollback` re-bases `.paisans/config-seen` to the head
+  seen. `--yes` types either. An accepted `rollback` re-bases `.paisans/config-seen` to the head
   chosen once the command commits its change; a run that stops leaves it as it
   was. `log` asks for neither: it warns and lists. A dry run says what
   `--execute` will ask.
@@ -474,7 +513,7 @@ paisans operator register --key ~/.ssh/id_ed25519.pub --execute
   changes.
 * **Flags:** `--config`, `--key <path.pub>` (the key to sign with; the ssh-agent
   must hold its private half), `--root <sha>` (pin the first version you trust),
-  `--execute`.
+  `--execute`, `--yes` (types `partial` and `rollback`).
 * **Hosts:** every site, as `config` does.
 * **The key:** `--key`, else the one `.paisans/signing-key` records, else the
   one key in the ssh-agent that is listed under an operator of `paisans-stack.yaml`. It
@@ -490,7 +529,7 @@ paisans operator register --key ~/.ssh/id_ed25519.pub --execute
 * **`--execute`:** signs, pushes the attestation to every site it reaches, and
   writes the key to `.paisans/signing-key`; `config publish` and `apply` sign
   with it from then on. It asks for `partial` when fewer than a majority of
-  sites answered directly. Without it, nothing is signed or recorded, and no
+  sites answered directly, which `--yes` types. Without it, nothing is signed or recorded, and no
   site is changed.
 
 See *Every site keeps signed copies of the configuration* in `README.md`.
@@ -589,7 +628,7 @@ paisans host prepare --all --execute          # every site, one at a time
   host on its own: preparing a new machine before declaring the rest of a
   change, or reaching a host through `--ssh`.
 * **Flags:** `--site <name>` or `--all`, `--config`, `--ssh` (with `--site`
-  only), `--execute`. It reads no secrets.
+  only), `--execute`, `--yes` (approves the review). It reads no secrets.
 * **`--all`:** every site the configuration declares, in its order, each
   exactly as `--site` prepares it, with its own review. It stops at the first
   site that fails; re-running it resumes there, since a prepared host plans
@@ -611,7 +650,8 @@ paisans host prepare --all --execute          # every site, one at a time
   changed is a `+` or `~` line under `review what paisans-stack.yaml grants`, each
   removed one a `-` line, at every verbosity.
 * **`--execute`:** asks for `approve` at a terminal when the review adds or
-  changes anything, before the first change; then writes what the plan lists,
+  changes anything, before the first change, or `--yes` approves each entry;
+  then writes what the plan lists,
   and records the login and the keys once every step has succeeded. Without
   it, it probes and prints the plan and the review; a prepared host plans
   nothing.
@@ -708,7 +748,10 @@ paisans host admit --site home-a --ssh owner@home-a.example.org --execute   # fr
     terminal;
   * either way: the grants `--watchdog` and `--public-ports`;
     `--data-dir <path>`, `--bridge-netfilter`, `--mesh-lan`, `--enable-ufw`;
-    `--execute`.
+    `--execute`; `--yes`;
+  * with `--request`: `--digest <digest>`, the request's digest the operator
+    gave you, compared as the one typed at a terminal is: any other refuses
+    before the host is reached.
 * **Hosts:** the one it runs on, or the one `--ssh` names, through sudo. The
   host needs ufw installed; admit never installs it.
 * **ufw not active:** `--enable-ufw`, or a yes at a terminal, where admit
@@ -743,7 +786,8 @@ paisans host admit --site home-a --ssh owner@home-a.example.org --execute   # fr
   stops answering, see *If SSH stops answering after admit enables ufw* in
   [guides/host-owners.md](guides/host-owners.md).
 * **Grants:** at a terminal, admit asks for each
-  grant the site's roles need and the flags leave out, saying what it gives;
+  grant the site's roles need and the flags leave out, saying what it gives,
+  and `--yes` grants each, as typing y would;
   elsewhere a data site without `--watchdog`, or a gateway or Caddy monitor
   without `--public-ports`, stops it before the host is reached. A grant the
   site does not need stops it too. Ports 80 and 443
@@ -752,10 +796,18 @@ paisans host admit --site home-a --ssh owner@home-a.example.org --execute   # fr
 * **`--execute`:** makes the changes the plan shows, which it always prints in
   full. With `--request` it first asks for the request's digest at a
   terminal, which the owner has from an operator over another channel than
-  the one that carried the file. With `--site` it ends by logging in as the
+  the one that carried the file, or takes it as `--digest`. With `--site` it ends by logging in as the
   deployment's user with
   the operator's own key, and writes `ssh.user` back into the configuration
   when the declaration leaves it out.
+* **`--yes`:** answers the grants, and with `--site` the ufw question, whose
+  fallback admit's own login as the user stops. It never answers the digest:
+  `--yes --request --execute` without `--digest` refuses before anything is
+  read. With `--request`, where admit would enable ufw (`--enable-ufw`, or the
+  question), it refuses before anything changes, since the new SSH session
+  that shows SSH still works needs a person; run `host admit --site` from a
+  workstation instead. `--request --enable-ufw --execute` off a terminal
+  refuses the same way, with `--digest` or without it. With `--site` it needs `--ssh`.
 * **What it changes:** Docker from Docker's repository where absent (an Engine
   older than 29.5 is refused, never upgraded), with its system daemons kept
   from starting while its packages install and then disabled, so only the
@@ -810,7 +862,8 @@ paisans host evict --site home-a --ssh owner@home-a.example.org --execute
   your login alone, for the site's declared ssh host and port, or as
   `user@host[:port]`; left out, it is asked for at a terminal;
   `--data-dir <path>`, the one admit was given, needed only when the host
-  holds no admission record; `--execute`.
+  holds no admission record; `--execute`; `--yes`, which types the user's name
+  and, with `--site`, needs `--ssh`.
 * **Hosts:** the one it runs on, or the one `--ssh` names, through sudo.
   With `--site`, the user evicted is the site's `ssh.user`, the login as the
   deployment's user, defaulting to `paisans-<token>`. Evict deletes a user
@@ -883,8 +936,9 @@ images it superseded* in `README.md`).
 * **Alone:** this is the command an operator types; everything else is the
   exception.
 * **Flags:** `--config`, `--secrets`, `--execute`, `--min-free`,
-  `--keep-images` and `--require-all` (the first two handed to each `apply`
-  step, below; the pull checks free space against `--min-free` too). `--ssh`,
+  `--keep-images`, `--require-all` and `--yes` (`--min-free` and
+  `--keep-images` handed to each `apply` step, below, and `--yes` to each
+  `apply` and `gateway move` step; the pull checks free space against `--min-free` too). `--ssh`,
   `--overwrite`, `--only` and `--recreate` are about one site and are refused
   without `--site`.
 * **Hosts:** every site, and each app behind the operator's own web server
@@ -911,7 +965,8 @@ images it superseded* in `README.md`).
   files), one review of what `paisans-stack.yaml` grants on every site, under `review`, a line per site
   with each change under it: keys and images.
   With `--execute`, when anything is added or changed, it asks once for
-  `approve` at a terminal, for every site, and refuses without one; each step
+  `approve` at a terminal, for every site, and refuses without one unless
+  `--yes` approves each entry; each step
   then applies what was approved, and refuses anything that changed since.
   The dry run shows it, asks nothing, and ends saying what `--execute` will
   ask for. Each step records its part once it has succeeded.
@@ -973,6 +1028,7 @@ starts, restarts or recreates what changed.
   | `--recreate <stack>` | none | `up -d --force-recreate` every container of this stack, even if nothing changed (repeatable) |
   | `--min-free <size>` | `3G` | free space Docker's data root must have before a stack pulls an image |
   | `--keep-images` | off | leave the images this apply supersedes on the host, and skip the sweep |
+  | `--yes` | off | approve the review entry by entry, and type `create`, `partial` and `rollback` when asked for |
 
   And `--config`, `--secrets`, `--execute`.
 * **Hosts:** the site's own, and every other site's host to classify it (see
@@ -994,8 +1050,8 @@ starts, restarts or recreates what changed.
 * **Review:** the images every rendered `compose.yaml` of the site runs, and
   against what the host last recorded, under
   `review what paisans-stack.yaml grants`; `--only` narrows the images to its
-  stacks. With `--execute` it is asked for, as `approve` at a terminal, before
-  the first change, when anything is added or changed; the images are recorded once
+  stacks. With `--execute` it is asked for, as `approve` at a terminal or by
+  `--yes`, before the first change, when anything is added or changed; the images are recorded once
   the apply has succeeded.
 * **Configuration store:** gathered and checked before the review as the whole
   apply does, with `--secrets` refused when it names a file other than the
@@ -1049,13 +1105,14 @@ paisans site add home-b --execute   # runs them, stopping at the first failed ga
   has not admitted, and a witness joining beside one is joined by that run.
   Typed alone, it shows a join's stages and gates, or resumes a join.
 * **Flags:** the site, as an argument before or after the flags; `--config`,
-  `--secrets`, `--execute`. No `--ssh`, since it reaches several
+  `--secrets`, `--execute`, `--yes` (approves the review). No `--ssh`, since it reaches several
   hosts.
 * **Hosts:** every site.
 * **Review:** stage 4 applies the new site's whole render, so `site add`
   reviews the new site's images as `apply --site` does: shown under `review
   what paisans-stack.yaml grants` before the stages, asked for as `approve` at a
-  terminal with `--execute`, refused without one, and recorded once stage 4's
+  terminal with `--execute`, or answered by `--yes`, refused without either,
+  and recorded once stage 4's
   gate has passed. As a step of the whole apply it asks nothing and refuses
   an image the run's review did not approve.
 * **`--execute`:** runs the stages, stopping at the first gate that fails; a
@@ -1132,7 +1189,7 @@ paisans site remove --force --ssh admin@203.0.113.9 --id f2a9 --execute --delete
   | `--ssh <user@host[:port]>` | the site's `ssh` section | with `--force`: the host to clean |
   | `--id <id or token>` | none | with `--force` and `--ssh`, and no `paisans-stack.yaml`: the deployment to clean, found by the login's own admission record, as `host deployments` lists them |
 
-  And the site as an argument, `--config`, `--secrets`, `--execute`.
+  And the site as an argument, `--config`, `--secrets`, `--execute`, `--yes`.
 * **Hosts:** every site, and the DNS provider for the removed site's records;
   `--force` reaches the one host only and leaves DNS alone. `--host-gone`
   reaches the removed site's host not at all, so it says the reference files
@@ -1160,7 +1217,8 @@ paisans site remove --force --ssh admin@203.0.113.9 --id f2a9 --execute --delete
   gateway, once its DNS token is revoked at the provider and a new one set
   with `secrets set`; the site's name; `lose writes` when the leader has no
   streaming `Sync Standby`; `lose objects` when its Garage node's objects have
-  no other copy. No flag answers them.
+  no other copy. `--yes` types each, and the site's name for `--delete-data`
+  and `--force`.
 
 See *`site remove` takes a site out* and *Evicting a site: `--evict`* in
 `README.md`, and [guides/when-an-operator-leaves.md](guides/when-an-operator-leaves.md)
@@ -1382,7 +1440,8 @@ paisans gateway move --execute    # record, serve, dns add, dns remove, wait, st
 * **Alone:** when the new gateway has already been applied. The whole apply
   runs it last, after pass two, whenever a site without the gateway role still
   holds a gateway.
-* **Flags:** `--config`, `--secrets`, `--execute`.
+* **Flags:** `--config`, `--secrets`, `--execute`, `--yes`, handed to the
+  hand-off's `apply`.
 * **Hosts:** reads every site without the gateway role, to find the old
   gateway; writes only to the old and new gateways' hosts. Also the DNS
   provider's API, and each hostname the gateway serves over HTTPS from this
@@ -1440,8 +1499,8 @@ paisans app remove docs --delete-data --execute      # and deletes its data, aft
   leftovers and names this command.
 * **Flags:** the app, as an argument before or after the flags;
   `--delete-data` (off: also delete its database, bucket and keys, volumes and
-  data directories, after the app's name is typed at a terminal), `--config`,
-  `--secrets`, `--execute`.
+  data directories, after the app's name is typed at a terminal, or by
+  `--yes`), `--config`, `--secrets`, `--execute`, `--yes`.
 * **Hosts:** every site that holds the app, and its Pocket ID.
 * **`--execute`:** stops, removes and deletes.
 

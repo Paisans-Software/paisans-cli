@@ -98,6 +98,7 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 	restart := fs.Bool("restart", false, "with --all: discard what an earlier --all run left and rotate every secret again (refused while a rotation is pending)")
 	var replaced pathList
 	fs.Var(&replaced, "replaced", "a pasted secret already replaced at its issuer and applied, which every host using it runs: listed, not rotated (repeatable)")
+	answers := yesFlag(fs)
 	var named []string
 	for len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		named, args = append(named, args[0]), args[1:]
@@ -106,6 +107,10 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 	named = append(named, fs.Args()...)
+	ans, err := answers()
+	if err != nil {
+		return err
+	}
 	r := reporter()
 	switch {
 	case *all && len(named) > 0:
@@ -237,7 +242,7 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	// Asked before any host's admission is checked, so a refusal reaches
 	// no host.
-	confirm := func(word, what string) error { return confirmWord(stdin, stdout, word, what) }
+	confirm := func(word, what string) error { return confirmWord(ans, stdin, stdout, word, what) }
 	if *execute {
 		if err := run.ConfirmSignOut(confirm); err != nil {
 			return err

@@ -35,8 +35,8 @@ func noSiteHosts(t *testing.T) {
 	t.Cleanup(func() { reachDestination = savedDest })
 }
 
-// Deleting member data needs a person at a terminal, and there is no flag
-// standing in for one. Refused before any host is read.
+// Deleting member data needs a person at a terminal, or --yes. Refused
+// before any host is read.
 func TestSiteRemoveDeleteDataNeedsATerminal(t *testing.T) {
 	noSiteHosts(t)
 	r, w, err := os.Pipe()
@@ -79,7 +79,7 @@ func TestConfirmSiteWantsTheSitesName(t *testing.T) {
 		}
 		w.WriteString(answer)
 		w.Close()
-		err = confirmSite(r, &bytes.Buffer{}, "home-b")
+		err = confirmSite(answerer{}, r, &bytes.Buffer{}, "home-b")
 		r.Close()
 		if (err == nil) != ok {
 			t.Errorf("answer %q: %v", answer, err)
@@ -388,7 +388,7 @@ func TestConfirmEvictionAsksForEachWord(t *testing.T) {
 		w.WriteString(answers)
 		w.Close()
 		var out bytes.Buffer
-		err = confirmEviction(r, &out, questions)
+		err = confirmEviction(answerer{}, r, &out, questions)
 		r.Close()
 		switch {
 		case want == "" && err != nil:
@@ -405,7 +405,7 @@ func TestConfirmEvictionAsksForEachWord(t *testing.T) {
 	w.WriteString("revoked\n")
 	w.Close()
 	defer r.Close()
-	if err := confirmEviction(r, &bytes.Buffer{}, questions); err == nil || !strings.Contains(err.Error(), "not a terminal") {
+	if err := confirmEviction(answerer{}, r, &bytes.Buffer{}, questions); err == nil || !strings.Contains(err.Error(), "not a terminal") {
 		t.Errorf("without a terminal: %v", err)
 	}
 }

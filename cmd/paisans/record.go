@@ -109,10 +109,16 @@ func warnSecrets(r ui.Reporter, cfg *config.Config, secrets *config.Secrets, dep
 func sortedKeys(m map[string]error) []string { return slices.Sorted(maps.Keys(m)) }
 
 // confirmWord says what is about to happen and asks for word at the
-// terminal, refusing anything else. There is no flag to answer it.
-func confirmWord(stdin io.Reader, stdout io.Writer, word, what string) error {
+// terminal, refusing anything else. --yes, through a, answers it: it says
+// what is about to happen and prints the word it approved.
+func confirmWord(a answerer, stdin io.Reader, stdout io.Writer, word, what string) error {
+	if a.yes {
+		fmt.Fprintf(stdout, "\n%s\n", ui.Redact(what))
+		a.approved(stdout, word)
+		return nil
+	}
 	if !stdinIsTerminal(stdin) {
-		return fmt.Errorf("it asks for the word %s at a terminal, and stdin is not one. Run it from an interactive shell. Nothing was changed", word)
+		return fmt.Errorf("it asks for the word %s at a terminal, and stdin is not one. Run it from an interactive shell, or answer it with --yes and PAISANS_ALLOW_YES=1. Nothing was changed", word)
 	}
 	prompt(stdout, what, word)
 	answer, err := bufio.NewReader(stdin).ReadString('\n')

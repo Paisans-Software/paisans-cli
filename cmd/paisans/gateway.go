@@ -50,7 +50,12 @@ func gatewayMoveCommand(args []string) error {
 	execute := fs.Bool("execute", false, "actually run the stages, stopping at the first gate that fails")
 	keepImages := fs.Bool("keep-images", false, "passed to the hand-off's apply of a site that keeps the monitor")
 	minFree := fs.String("min-free", "", "passed to the hand-off's apply of a site that keeps the monitor")
+	answers := yesFlag(fs)
 	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	ans, err := answers()
+	if err != nil {
 		return err
 	}
 	r := reporter()
@@ -83,7 +88,7 @@ func gatewayMoveCommand(args []string) error {
 		transports[name] = gatewayTransport(name, cfg.Sites[name])
 	}
 	options := gatewayMoveOptions()
-	flags := handOffFlags{config: *configPath, secrets: *secretsPath, verbose: r.Verbose(), keepImages: *keepImages, minFree: *minFree}
+	flags := handOffFlags{config: *configPath, secrets: *secretsPath, verbose: r.Verbose(), keepImages: *keepImages, minFree: *minFree, yes: ans.yes}
 	if options.ApplySite == nil {
 		// The hand-off off a site that keeps the monitor applies its infra
 		// stack as typed by hand, with this move's own files and options, so
@@ -139,9 +144,9 @@ func gatewayMoveCommand(args []string) error {
 
 // handOffFlags are the move's own options that its hand-off's apply takes.
 type handOffFlags struct {
-	config, secrets     string
-	verbose, keepImages bool
-	minFree             string
+	config, secrets          string
+	verbose, keepImages, yes bool
+	minFree                  string
 }
 
 // handOffArgs is apply --site <site> --only infra with the move's own
@@ -159,6 +164,9 @@ func handOffArgs(site string, f handOffFlags, execute bool) []string {
 	}
 	if f.minFree != "" {
 		args = append(args, "--min-free", f.minFree)
+	}
+	if f.yes {
+		args = append(args, "--yes")
 	}
 	if execute {
 		args = append(args, "--execute")

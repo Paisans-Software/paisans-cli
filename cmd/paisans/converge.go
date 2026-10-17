@@ -505,16 +505,19 @@ type convergeOptions struct {
 	// RequireAll is --require-all: a degraded run exits 1. The run says
 	// so once, at its end, so no step takes it.
 	RequireAll bool
-	// stdin and stdout are where the run's review asks for approval. No
-	// step is handed them: the run asks once for every site.
-	stdin  io.Reader
-	stdout io.Writer
+	// answers, stdin and stdout are how the run's review asks for
+	// approval. No step is handed them: the run asks once for every site.
+	// --yes is handed on to apply and gateway move, whose steps may ask
+	// for what the review does not cover.
+	answers answerer
+	stdin   io.Reader
+	stdout  io.Writer
 }
 
 // convergeFlags is args with the flags o hands on, each to the commands that
 // take it: --config and -v to every one, --secrets to all but host prepare,
-// --execute to all but init, and --min-free and
-// --keep-images to apply alone.
+// --execute to all but init, --min-free and
+// --keep-images to apply alone, and --yes to apply and gateway move.
 func convergeFlags(args []string, o convergeOptions) []string {
 	out := append([]string(nil), args...)
 	out = append(out, "--config", o.Config)
@@ -528,6 +531,9 @@ func convergeFlags(args []string, o convergeOptions) []string {
 	}
 	if o.Verbose {
 		out = append(out, "-v")
+	}
+	if o.answers.yes && (args[0] == "apply" || args[0] == "gateway") {
+		out = append(out, "--yes")
 	}
 	// gateway move takes them for the apply its hand-off runs.
 	if args[0] == "apply" || args[0] == "gateway" {
@@ -854,7 +860,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	// The version the run applies is gathered once, before the review, so
 	// a fork or a stale base is refused before the operator is asked
 	// anything; its steps do not gather again.
-	store, err := applyStore(r, configPath, convergeSecretsPath(configPath, secretsPath), nil, cfg, execute, o.stdin, o.stdout)
+	store, err := applyStore(r, configPath, convergeSecretsPath(configPath, secretsPath), nil, cfg, execute, o.answers, o.stdin, o.stdout)
 	if err != nil {
 		return err
 	}

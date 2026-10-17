@@ -280,8 +280,8 @@ func TestAdmitRefusesAnOversizedRequest(t *testing.T) {
 	}
 }
 
-// --execute with --request asks for the digest at a terminal, so it cannot
-// be scripted past; a mistyped one changes nothing; the digest read aloud,
+// --execute with --request asks for the digest at a terminal, unless
+// --digest gives it; a mistyped one changes nothing; the digest read aloud,
 // in another case, spaced, with any 1 and 0 read as l and o, is accepted.
 func TestAdmitAsksForTheDigest(t *testing.T) {
 	path, digest := requestFile(t, "vm")
@@ -971,5 +971,202 @@ func TestThePromptsBeforeARunHoldTheReporter(t *testing.T) {
 	}
 	if !heldAtPrompt || r.held != 0 {
 		t.Errorf("evict: held at the word %v, holds left %d", heldAtPrompt, r.held)
+	}
+}
+
+// --yes grants each grant the site's roles need and the flags leave out,
+// as typing y would, with no terminal, and says so.
+func TestYesGrantsAMissingGrant(t *testing.T) {
+	allowYes(t)
+	data, _ := requestFile(t, dataSiteOf(t))
+	withFakeLocalHost(t, "ubuntu")
+	withTerminal(t, false)
+	out := new(strings.Builder)
+	if err := runHostAdmit([]string{"--request", data, "--yes"}, strings.NewReader(""), out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "approved by --yes: grant --watchdog\n") {
+		t.Errorf("the grant is not said to be approved:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "[y/N]") {
+		t.Errorf("asked anyway:\n%s", out.String())
+	}
+}
+
+// --digest takes the place of the typed digest, with or without --yes and
+// with no terminal: the right one admits, any other refuses before the
+// host is reached.
+func TestTheDigestFlag(t *testing.T) {
+	path, digest := requestFile(t, "vm")
+	allowYes(t)
+	for _, extra := range [][]string{nil, {"--yes"}} {
+		h := withFakeLocalHost(t, "ubuntu")
+		withTerminal(t, false)
+		args := append([]string{"--request", path, "--public-ports", "--execute", "--digest", digest}, extra...)
+		// The fake host does not become what the plan makes it, so the run
+		// stops part way: that it began is what shows the digest passed.
+		if err := runHostAdmit(args, strings.NewReader(""), new(strings.Builder)); !h.ranAny("useradd ") {
+			t.Errorf("%q: not executed: %v", args, err)
+		}
+
+		noHost(t)
+		args = append([]string{"--request", path, "--public-ports", "--execute", "--digest", "0000-0000-0000-0000"}, extra...)
+		if err := runHostAdmit(args, strings.NewReader(""), new(strings.Builder)); err == nil || !strings.Contains(err.Error(), "not this request's digest") || !strings.Contains(err.Error(), "Nothing was changed") {
+			t.Errorf("%q: %v", args, err)
+		}
+	}
+	// The digest read aloud is accepted as when it is typed.
+	aloud := strings.NewReplacer("-", " ", "1", "l", "0", "o").Replace(strings.ToUpper(digest))
+	h := withFakeLocalHost(t, "ubuntu")
+	if err := runHostAdmit([]string{"--request", path, "--public-ports", "--execute", "--digest", aloud}, strings.NewReader(""), new(strings.Builder)); !h.ranAny("useradd ") {
+		t.Errorf("aloud: not executed: %v", err)
+	}
+	// --digest goes with --request alone.
+	noHost(t)
+	if err := runHostAdmit([]string{"--site", "vm", "--ssh", "owner", "--config", fixtureConfig(), "--digest", digest}, strings.NewReader(""), new(strings.Builder)); err == nil || !strings.Contains(err.Error(), "--digest goes with --request") {
+		t.Errorf("--site --digest: %v", err)
+	}
+}
+
+// --yes never answers the digest: --yes --request --execute without
+// --digest refuses before anything is read, naming --digest.
+func TestYesDoesNotAnswerTheDigest(t *testing.T) {
+	allowYes(t)
+	path, _ := requestFile(t, "vm")
+	noHost(t)
+	withTerminal(t, true)
+	err := runHostAdmit([]string{"--request", path, "--public-ports", "--execute", "--yes"}, typed(t, "y\n"), new(strings.Builder))
+	if err == nil || !strings.Contains(err.Error(), "--digest") || !strings.Contains(err.Error(), "Nothing was read or changed") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// --yes with --request refuses where admit would enable ufw: given
+// --enable-ufw, before the host is reached; asked, once the host is read
+// and before anything changes. Both point to host admit --site.
+func TestYesWithRequestRefusesToEnableUFW(t *testing.T) {
+	allowYes(t)
+	path, digest := requestFile(t, "vm")
+	noHost(t)
+	err := runHostAdmit([]string{"--request", path, "--public-ports", "--enable-ufw", "--yes"}, strings.NewReader(""), new(strings.Builder))
+	if err == nil || !strings.Contains(err.Error(), "paisans host admit --site") || !strings.Contains(err.Error(), "new SSH session") {
+		t.Errorf("--enable-ufw: %v", err)
+	}
+
+	executed := false
+	saved := executeAdmit
+	executeAdmit = func(apply.Transport, hostadmit.Input, *hostadmit.Plan, ui.Reporter) error {
+		executed = true
+		return nil
+	}
+	t.Cleanup(func() { executeAdmit = saved })
+	h := withFakeLocalHost(t, "ubuntu")
+	inactiveUFW(h)
+	withTerminal(t, false)
+	out := new(strings.Builder)
+	err = runHostAdmit([]string{"--request", path, "--public-ports", "--execute", "--digest", digest, "--yes"}, strings.NewReader(""), out)
+	if err == nil || !strings.Contains(err.Error(), "paisans host admit --site") || !strings.Contains(err.Error(), "Nothing was changed") {
+		t.Errorf("asked: %v", err)
+	}
+	if executed || strings.Contains(out.String(), "approved by --yes: enable ufw") {
+		t.Errorf("executed %v, printed:\n%s", executed, out.String())
+	}
+}
+
+// With --site, --yes answers the ufw question, and admit's own login as
+// the user stops the fallback, as it does after a typed yes.
+func TestYesWithSiteEnablesUFW(t *testing.T) {
+	allowYes(t)
+	fakeExecute(t)
+	savedLogin, savedOwner := reachSiteUser, reachOwnerAdmit
+	t.Cleanup(func() { reachSiteUser, reachOwnerAdmit = savedLogin, savedOwner })
+	quietAdmit(t)
+	withTerminal(t, false)
+	owner := inactiveUFW(blankHost("ubuntu"))
+	reachOwnerAdmit = func(config.Destination) apply.Transport { return owner }
+	reachSiteUser = func(string, config.Site) apply.Transport { return blankHost("ubuntu") }
+	out := new(strings.Builder)
+	if err := runHostAdmit([]string{"--site", "vm", "--ssh", "owner", "--config", fixtureConfig(), "--public-ports", "--execute", "--yes"}, strings.NewReader(""), out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "approved by --yes: enable ufw (--enable-ufw)\n") {
+		t.Errorf("the answer is not printed:\n%s", out.String())
+	}
+	if owner.ranIndex(hostadmit.DisarmUFW) < 0 {
+		t.Errorf("the fallback was not stopped: %q", owner.ran)
+	}
+}
+
+// --yes does not choose a login: --site without --ssh refuses, naming
+// --ssh, for admit and evict, before any host is reached, even at a
+// terminal.
+func TestYesDoesNotChooseALogin(t *testing.T) {
+	allowYes(t)
+	withTerminal(t, true)
+	noHost(t)
+	if err := runHostAdmit([]string{"--site", "vm", "--config", fixtureConfig(), "--public-ports", "--yes"}, typed(t, "owner\n"), new(strings.Builder)); err == nil || !strings.Contains(err.Error(), "--ssh") || !strings.Contains(err.Error(), "Nothing was read or changed") {
+		t.Errorf("admit: %v", err)
+	}
+	noHost(t)
+	if err := runHostEvict([]string{"--site", "vm", "--config", fixtureConfig(), "--yes"}, typed(t, "owner\n"), new(strings.Builder)); err == nil || !strings.Contains(err.Error(), "--ssh") || !strings.Contains(err.Error(), "Nothing was read or changed") {
+		t.Errorf("evict: %v", err)
+	}
+}
+
+// Evict's typed user name, answered by --yes with no terminal.
+func TestYesAnswersEvict(t *testing.T) {
+	allowYes(t)
+	h := evictedHost(t)
+	withTerminal(t, false)
+	out := new(strings.Builder)
+	if err := runHostEvict([]string{"--deployment", fixtureID(t), "--user", "paisans-f2a9", "--execute", "--yes"}, strings.NewReader(""), out); err != nil || !h.ranAny("rm -f ") {
+		t.Errorf("%v, executed %v", err, h.ranAny("rm -f "))
+	}
+	if !strings.Contains(out.String(), "approved by --yes: paisans-f2a9\n") {
+		t.Errorf("printed:\n%s", out.String())
+	}
+}
+
+// Off a terminal nothing confirms the new SSH login: --request
+// --enable-ufw --execute refuses before anything changes, with --digest
+// or not, and a "yes" piped in never stops the fallback.
+func TestAPipeNeverConfirmsTheNewLogin(t *testing.T) {
+	path, digest := requestFile(t, "vm")
+	for _, extra := range [][]string{{"--digest", digest}, nil} {
+		noHost(t)
+		withTerminal(t, false)
+		args := append([]string{"--request", path, "--public-ports", "--enable-ufw", "--execute"}, extra...)
+		err := runHostAdmit(args, typed(t, digest+"\nyes\n"), new(strings.Builder))
+		if err == nil || !strings.Contains(err.Error(), "paisans host admit --site") || !strings.Contains(err.Error(), "Nothing was changed") {
+			t.Errorf("%q: %v", args, err)
+		}
+	}
+	// confirmUFW itself reads nothing off a terminal.
+	h := inactiveUFW(blankHost("ubuntu"))
+	quietAdmit(t)
+	withTerminal(t, false)
+	if err := confirmUFW(typed(t, "yes\n"), new(strings.Builder), reporterOverride, h, "ubuntu", "29.5"); err != nil {
+		t.Fatal(err)
+	}
+	if h.ranIndex(hostadmit.DisarmUFW) >= 0 {
+		t.Errorf("a pipe stopped the fallback: %q", h.ran)
+	}
+}
+
+// A --yes --request dry run that meets an inactive ufw refuses, before
+// anything changes, pointing to host admit --site.
+func TestYesRequestDryRunRefusesAnInactiveUFW(t *testing.T) {
+	allowYes(t)
+	path, _ := requestFile(t, "vm")
+	h := withFakeLocalHost(t, "ubuntu")
+	inactiveUFW(h)
+	withTerminal(t, false)
+	out := new(strings.Builder)
+	err := runHostAdmit([]string{"--request", path, "--public-ports", "--yes"}, strings.NewReader(""), out)
+	if err == nil || !strings.Contains(err.Error(), "paisans host admit --site") || !strings.Contains(err.Error(), "Nothing was changed") {
+		t.Errorf("err = %v", err)
+	}
+	if strings.Contains(out.String(), "approved by --yes: enable ufw") || h.ranAny("useradd ") {
+		t.Errorf("went on:\n%s", out.String())
 	}
 }

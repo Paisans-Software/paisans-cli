@@ -72,7 +72,12 @@ func runSecretsPrune(args []string, stdin io.Reader, stdout io.Writer) error {
 	secretsPath := fs.String("secrets", "", "path to the secrets file (default: secrets.enc.yaml beside the config)")
 	execute := fs.Bool("execute", false, "actually remove them and write the file")
 	withoutRecord := fs.Bool("without-record", false, "trust "+config.FileName+" alone, when no gateway's deployment record can be read; asks for the word prune at a terminal")
+	answers := yesFlag(fs)
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	ans, err := answers()
+	if err != nil {
 		return err
 	}
 	r := reporter()
@@ -130,7 +135,7 @@ func runSecretsPrune(args []string, stdin io.Reader, stdout io.Writer) error {
 		return fmt.Errorf("secrets prune: %s is encrypted, but no %s beside it names a recipient, so writing it back would leave it in plaintext. Nothing was written", *secretsPath, config.SOPSConfigName)
 	}
 	if *withoutRecord {
-		if err := confirmWord(stdin, stdout, "prune", ui.Danger(stdout, fmt.Sprintf("This permanently removes the %d secret(s) above, trusting "+config.FileName+" alone.", len(orphans)))); err != nil {
+		if err := confirmWord(ans, stdin, stdout, "prune", ui.Danger(stdout, fmt.Sprintf("This permanently removes the %d secret(s) above, trusting "+config.FileName+" alone.", len(orphans)))); err != nil {
 			return fmt.Errorf("secrets prune: %w", err)
 		}
 	}

@@ -24,6 +24,7 @@ changes share a bullet. Detailed notes are on the corresponding
 - `doctor` checks each site as its deployment's user: its admission record, no privileged group, rootless Docker at Engine 29.5 or later, linger after the mesh, and sudo for the WireGuard helper alone.
 - `doctor` fetches `/.well-known/paisans/<token>` from the gateway and each monitor running Paisans' Caddy, from the workstation as `apply` does, and fails when 443 or 80 does not answer as this deployment.
 - `create` offers the first operator each SSH public key in `~/.ssh/*.pub` on the workstation, so a key already there is taken with Enter rather than pasted.
+- `--yes` answers every confirmation a command asks for, printing each answer, when `PAISANS_ALLOW_YES=1` is set; `host admit --request` takes its digest as `--digest`, which `--yes` never supplies.
 
 ### Changed
 

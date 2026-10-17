@@ -2463,7 +2463,8 @@ once, before its first step, and shows each of these warnings once, under
 `secrets`; the applies it runs as steps leave them to it. `paisans secrets prune` reads every gateway's record
 and refuses when one cannot be read or has none: apply the gateway first, or
 pass `--without-record` to trust `paisans-stack.yaml` alone, which with `--execute`
-asks for the word `prune` at a terminal. It lists what it would remove and
+asks for the word `prune` at a terminal, or takes it from `--yes` (see
+*`--yes` answers confirmations in a script*). It lists what it would remove and
 changes nothing; with `--execute` it removes them and writes the file,
 encrypted to the same recipients, and refuses an encrypted file with no
 `.sops.yaml` beside it rather than writing it in plaintext. Pruning an `oidc_clients` entry does not
@@ -2709,7 +2710,7 @@ homeserver's and the gate's included, is minted by `oidc client create
 
 **A rotation that signs members out asks first.** When the plan includes one,
 `--execute` asks the operator to type `sign out` at a terminal before any host
-is reached, and without a terminal it is refused. After the eviction of a
+is reached, and without a terminal it is refused unless `--yes` types it. After the eviction of a
 gateway, which saw every session cookie, signing members out is the point
 (Founder decision).
 
@@ -4603,8 +4604,8 @@ request` can still reach names the configuration key to change beside the
 request's field.
 
 Admitting needs ufw installed: `host admit` never installs it. When ufw is
-not active, admit enables it only with `--enable-ufw` or a yes at a
-terminal, behind a timer that turns it off again unless a new SSH login gets
+not active, admit enables it only with `--enable-ufw`, a yes at a
+terminal, or `--yes` with `--site`, behind a timer that turns it off again unless a new SSH login gets
 through (see *SSH is never shut out* below, and *If SSH stops answering after
 admit enables ufw* in
 [docs/guides/host-owners.md](docs/guides/host-owners.md)). Ports 80 and 443
@@ -4914,9 +4915,9 @@ it was sent, so leaving the password out is not left to each of them.
 | refuses the user outright | sudo's own message; no password is asked for |
 | does not answer the probe | the host could not be reached, as for any probe (see *Never infer host state from a failed probe*); nothing about sudo is concluded or kept |
 
-`host evict` always asks for the deployment's user name at a terminal, and
-`host admit --request` for the request's digest, so neither runs without a
-person. `host admit --site` asks nothing once every grant is passed, `--ssh`
+`host evict` asks for the deployment's user name at a terminal unless `--yes`
+types it, and `host admit --request` for the request's digest unless
+`--digest` gives it, which `--yes` never does. `host admit --site` asks nothing once every grant is passed, `--ssh`
 is given, and ufw is active or `--enable-ufw` is passed, and `host
 deployments` asks nothing, so an unattended run of either needs a NOPASSWD
 sudoers rule for the login `--ssh` names. Whether to write one is a
@@ -5298,7 +5299,7 @@ service would otherwise be one more rule to remember on every site.
 not active and the owner passes `--enable-ufw`, every allow, SSH first, is in
 place before `ufw --force enable`, which does not stop to ask whether to
 disrupt existing connections, and a timer turns ufw off again unless a new SSH
-login gets through (see `paisans host admit` in
+login gets through, which `--yes` never confirms (see `paisans host admit` in
 [docs/commands.md](docs/commands.md)).
 
 **Nothing depends on the firewall for an app's port.** A rootless daemon's
@@ -5516,7 +5517,8 @@ machine has beyond it: the user is unprivileged and fenced off the owner's
 machine (see *A host's owner admits a site from a request*). The review (see
 *`apply` and `host prepare` review what `paisans-stack.yaml` grants*) shows
 every key a run would add, with its operator and fingerprint, and an
-`--execute` run asks for `approve` at a terminal before anything changes.
+`--execute` run asks for `approve` at a terminal before anything changes, or
+prints each key `--yes` approves.
 
 #### The watchdog
 
@@ -5711,8 +5713,10 @@ it changes no host and the images are rendered from the secrets it generates.
 
 **No terminal, no approval.** When something needs approval and standard input
 is not a terminal, the command is refused before any host changes, saying to
-run it at a terminal. No flag answers the question: a flag that could would be
-in every script within a week, and approving is the control.
+run it at a terminal. Approving is the control. `--yes` answers the question
+only where the environment sets `PAISANS_ALLOW_YES=1`, and prints a line for
+each entry it approves, naming the site and the key or image (see *`--yes`
+answers confirmations in a script*).
 
 **Nothing to approve, nothing asked.** A run that adds or changes no key and no
 image outside the foundation asks nothing, terminal or not, so routine applies
@@ -5726,6 +5730,40 @@ is the repository's history, which the toolkit cannot see.
 
 The review is the operator's check, made at the terminal of whoever runs the
 command.
+
+### `--yes` answers confirmations in a script
+
+Every command that asks for a confirmation takes `--yes`, which answers it as
+typing it would, so the command runs from a script with no terminal on stdin:
+each word a command asks to have typed (`approve`, `create`, `partial`,
+`rollback`, `prune`, `sign out`, `revoked`, `lose writes`, `lose objects`, a
+site's, an app's or a user's name), and each y/N question (`host admit`'s
+grants, and its ufw question with `--site`). `docs/commands.md` lists the
+commands. Without `--yes` every question is asked at a terminal, and refused
+off one, as the sections above say.
+
+**Each answer is printed.** After what the prompt would have said, a line
+`approved by --yes: <what>` names what was accepted unseen, so the run's log
+holds it. The review prints a line per entry, `approved by --yes: <site>:
+<entry>`, naming the key or image.
+
+**It needs the environment too.** `--yes` refuses, with nothing read or
+changed, unless `PAISANS_ALLOW_YES=1` is set. A command line copied from a
+log, a runbook or a shell history carries `--yes` and not the environment it
+ran in, so the copy alone never approves anything.
+
+**What only a person answers.** `--yes` never answers `host admit
+--request`'s digest: `--digest <digest>` gives it, compared exactly as the
+typed one, and `--yes --request --execute` without it refuses before
+anything is read. The digest is what shows the request's keys were not
+changed on their way. Nor does it answer the new SSH login admit asks for
+once `--request` has enabled ufw, which shows SSH still works before the
+fallback that turns ufw off again is stopped: with `--request`, `--yes`
+refuses up front wherever admit would enable ufw, and `host admit --site`,
+whose own login as the deployment's user proves it, is the way to run that
+from a workstation. It does not pick a login for `--site` either, so `host
+admit` and `host evict` with `--yes` need `--ssh`. A value to paste, such as
+`secrets rotate`'s or `secrets set`'s, is asked for as it is without it.
 
 ### Where WireGuard keys are generated
 
@@ -6984,8 +7022,8 @@ and `apply` creates each one missing at Pocket ID, empty, through the
 blueprint's `oidc.extra_groups_setting`. Creating an identity provider group
 beyond an app's own takes explicit approval under
 `docs/deployment-agent-rules.md`, so `apply` lists those groups and asks for
-the word `create` at a terminal; without one it holds the app back and sends
-Pocket ID nothing. They are never added to the client's allowed groups, so who
+the word `create` at a terminal, or takes it from `--yes`; without either it
+holds the app back and sends Pocket ID nothing. They are never added to the client's allowed groups, so who
 may sign in is unchanged. Permissions and page rules are set by the
 community's admins in Wiki.js: gating a set of pages by path, Eg: `/admin/` for
 the admin group only, is a page rule an admin writes.
@@ -8342,13 +8380,13 @@ declared app still uses, and a bucket another key can reach are kept the same
 way, each with the reason. The client step runs once, from the site `oidc
 client create` calls.
 
-**Deleting member data needs a person at a terminal.** `--delete-data` plans
-the deletions, and on `--execute` asks for the app's name to be typed. With
-`--execute`, stdin that is not a terminal is refused before any host is read,
-and there is no
-flag that answers for the person, because a flag in a script or a shell
-history can be run again by somebody who did not mean it, and nothing brings
-the data back.
+**Deleting member data needs a person at a terminal, or `--yes`.**
+`--delete-data` plans the deletions, and on `--execute` asks for the app's
+name to be typed. With `--execute`, stdin that is not a terminal is refused
+before any host is read, unless `--yes` types the name, which it does only
+where the environment sets `PAISANS_ALLOW_YES=1`: a command line in a script
+or a shell history can be run again by somebody who did not mean it, and
+nothing brings the data back.
 
 **Every step is safe to repeat.** On each site, in order: the containers and
 networks, the files and then their manifest entries, the directory and, with
@@ -8654,7 +8692,7 @@ the approved specification. How to run it, and its flags, are under
 | the site holds the leader and no member is a streaming `Sync Standby` | only a synchronous standby takes over without losing writes the leader acknowledged |
 | a host that does not answer over ssh | what is on it cannot be read; fix ssh, or say `--host-gone` |
 | `external.acme_dns_token` empty while a site runs the toolkit's Caddy | the same refusal as `render` and `apply`: stage 2 reloads the gateway's routes, and a Caddy without its token obtains no certificate |
-| `--delete-data` without a terminal, or with `--host-gone` | the same rule as `app remove`; and nothing is deleted on a host that is not reached |
+| `--delete-data` without a terminal or `--yes`, or with `--host-gone` | the same rule as `app remove`; and nothing is deleted on a host that is not reached |
 
 **Six stages, each ending at a gate.** Each is planned from live state, so a
 stage already done plans no steps, its gate is still checked, and a re-run
@@ -8847,8 +8885,8 @@ declared roles are used.
 its cluster still counts on it: its etcd member, its Patroni replica, its
 Garage node and its place in every other site's mesh stay until a full `site
 remove`, and its next `apply` deploys it again. The plan says so, and
-`--execute` asks for the site's name at a terminal, as `--delete-data` does.
-No flag answers either question. Any other host is not asked about.
+`--execute` asks for the site's name at a terminal, as `--delete-data` does,
+and `--yes` types it for either question. Any other host is not asked about.
 
 | Refused | Because |
 |---|---|
@@ -8858,7 +8896,7 @@ No flag answers either question. Any other host is not asked about.
 | `--ssh` naming a host whose admission record is another site `paisans-stack.yaml` still declares | the record is the proof of whose host it is; name that site instead |
 | `--force` with `--host-gone` | `--force` cleans one host, and `--host-gone` reaches none |
 | a host that does not answer over ssh | what is on it cannot be read |
-| the site's own host, or `--delete-data`, with `--execute` and no terminal | it takes a running site from under its cluster, or deletes member data |
+| the site's own host, or `--delete-data`, with `--execute`, no terminal and no `--yes` | it takes a running site from under its cluster, or deletes member data |
 
 **A lost deployment.** When the data and gateway hosts are destroyed and the
 monitors survive on hosts that also run other people's services:
@@ -8925,7 +8963,7 @@ A gateway's Caddy is kept for the owner's sites exactly as with a
 configuration, since the reduced Caddyfile is built from the one on the host.
 
 Nothing says whether the deployment still runs elsewhere, so `--execute`
-always asks for the site's name at a terminal. The question names the owner's
+always asks for the site's name at a terminal, or takes it from `--yes`. The question names the owner's
 sites a kept Caddy goes on serving, and the data `--delete-data` deletes.
 
 | Refused | Because |
@@ -8934,7 +8972,7 @@ sites a kept Caddy goes on serving, and the data `--delete-data` deletes.
 | `--id` with `--config`, `--secrets` or a site | it reads no configuration, and the admission record names the site |
 | `--id` neither an id nor four hex digits | it matches no record; Eg: `--id f2a9` |
 | the login's admission record is another deployment's, or the login has none | everything removed is named from the id and its token; the refusal names the user to log in as |
-| `--execute` without a terminal | it asks for the site's name |
+| `--execute` without a terminal or `--yes` | it asks for the site's name |
 
 #### Evicting a site: `--evict`
 
@@ -9008,11 +9046,11 @@ brings up the replacement creates its record at the new address.
 | the only data site | nothing remains to fail over to; recovery is a restore from backup |
 | a gateway whose DNS token, read from the secrets file, does not work against the provider | the evicted host holds the token it was rendered, so it is revoked at the provider and a new one set with `secrets set` first; a token that fails is most often the revoked one, still in the file, and the DNS stage could not delete the records with it |
 | a site declared for the first time whose host does not answer over ssh | whether it is new is read from its host's admission record |
-| `--execute` without a terminal | an eviction is not undone by running it again |
+| `--execute` without a terminal or `--yes` | an eviction is not undone by running it again |
 | `--force`, `--ssh`, `--id` or `--delete-data` | each names a host to change, and an eviction reaches none |
 
 **What it asks at the terminal.** `--execute` asks for each word in turn, and
-there is no flag that answers any of them:
+`--yes` types each:
 
 * `revoked`, when the site holds the gateway. The DNS token can change the
   community's records from anywhere, and the toolkit cannot revoke it: it holds

@@ -141,7 +141,7 @@ func pendingReview() []grant.Review {
 }
 
 // The prompt: typed approve goes on; anything else, end of input, and no
-// terminal at all stop it, and no flag is consulted.
+// terminal at all stop it, without --yes.
 func TestApproveReviews(t *testing.T) {
 	for name, c := range map[string]struct {
 		stdin func(t *testing.T) io.Reader
@@ -154,7 +154,7 @@ func TestApproveReviews(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			var out bytes.Buffer
-			err := approveReviews(ui.Discard, c.stdin(t), &out, pendingReview(), "paisans host prepare --site home-a --execute")
+			err := approveReviews(ui.Discard, answerer{}, c.stdin(t), &out, pendingReview(), "paisans host prepare --site home-a --execute")
 			switch {
 			case c.want == "" && err != nil:
 				t.Errorf("not approved: %v", err)
@@ -181,7 +181,7 @@ func problemText(err error) string {
 func TestNothingToApproveAsksNothing(t *testing.T) {
 	removals := []grant.Review{{Site: "home-a", Changes: []grant.Change{{Op: grant.Removed, Subject: "key SHA256:c", Text: "key SHA256:c (carol)"}}}}
 	var out bytes.Buffer
-	if err := approveReviews(ui.Discard, noTerminalStdin(), &out, removals, "x"); err != nil || out.Len() != 0 {
+	if err := approveReviews(ui.Discard, answerer{}, noTerminalStdin(), &out, removals, "x"); err != nil || out.Len() != 0 {
 		t.Errorf("err %v, printed %q", err, out.String())
 	}
 }
@@ -409,19 +409,19 @@ func TestAStepChecksTheRunsApproval(t *testing.T) {
 	t.Cleanup(func() { reviewedByRun = saved })
 
 	reviewedByRun = &runReview{approved: map[string]grant.Review{"home-a": full}, approvedBy: "alice"}
-	s, by, err := stepReview(ui.Discard, nil, nil, cfg, "home-a", g, grant.PrepareScope, nil, true, "x")
+	s, by, err := stepReview(ui.Discard, answerer{}, nil, nil, cfg, "home-a", g, grant.PrepareScope, nil, true, "x")
 	if err != nil || s == nil || by != "alice" {
 		t.Errorf("approved: %v %v %q", s, err, by)
 	}
 
 	reviewedByRun = &runReview{approved: map[string]grant.Review{}}
-	if _, _, err := stepReview(ui.Discard, nil, nil, cfg, "home-a", g, grant.PrepareScope, nil, true, "x"); err == nil || !strings.Contains(problemText(err), "changed after it was approved") {
+	if _, _, err := stepReview(ui.Discard, answerer{}, nil, nil, cfg, "home-a", g, grant.PrepareScope, nil, true, "x"); err == nil || !strings.Contains(problemText(err), "changed after it was approved") {
 		t.Errorf("not refused: %v", err)
 	}
 
 	// A dry run under the run reads nothing: the run showed the review.
 	reviewedByRun = &runReview{}
-	if s, _, err := stepReview(ui.Discard, nil, nil, cfg, "home-a", g, grant.PrepareScope, nil, false, "x"); s != nil || err != nil {
+	if s, _, err := stepReview(ui.Discard, answerer{}, nil, nil, cfg, "home-a", g, grant.PrepareScope, nil, false, "x"); s != nil || err != nil {
 		t.Errorf("dry run: %v %v", s, err)
 	}
 }
@@ -527,7 +527,7 @@ func TestFoundationImagesAreListedApart(t *testing.T) {
 		t.Errorf("only a foundation image is pending:\n%s", rec.Lines())
 	}
 	var out bytes.Buffer
-	if err := approveReviews(ui.Discard, noTerminalStdin(), &out, only, "x"); err != nil || out.Len() != 0 {
+	if err := approveReviews(ui.Discard, answerer{}, noTerminalStdin(), &out, only, "x"); err != nil || out.Len() != 0 {
 		t.Errorf("only a foundation image asked: err %v, printed %q", err, out.String())
 	}
 }

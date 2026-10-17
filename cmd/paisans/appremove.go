@@ -39,8 +39,10 @@ var removeClients = func(cfg *config.Config, site, key string) appremove.Clients
 // Like every command that changes a host, it plans from what it reads and
 // changes nothing without --execute. Deleting member data takes
 // --delete-data and the app's name typed at a terminal, because nothing
-// brings it back: a flag can sit in a script or a shell history and be run
-// again by somebody who did not mean it, and a typed name cannot.
+// brings it back: a command line can sit in a script or a shell history and
+// be run again by somebody who did not mean it, and a typed name cannot.
+// --yes types it only where the environment sets PAISANS_ALLOW_YES=1, which
+// a copied command line does not carry.
 func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("app remove", flag.ContinueOnError)
 	reporter := commonFlags(fs)
@@ -48,6 +50,7 @@ func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	secretsPath := fs.String("secrets", "", "path to the secrets file (default: secrets.enc.yaml beside the config)")
 	execute := fs.Bool("execute", false, "actually stop, remove and delete")
 	deleteData := fs.Bool("delete-data", false, "also delete the app's database, Garage bucket and keys, named volumes and data directories; asks for the app's name at a terminal")
+	answers := yesFlag(fs)
 	// The app comes first, as `app remove talk --execute`, or after the flags.
 	app := ""
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
@@ -61,6 +64,10 @@ func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 		if err := fs.Parse(fs.Args()[1:]); err != nil {
 			return err
 		}
+	}
+	ans, err := answers()
+	if err != nil {
+		return err
 	}
 	// Once every flag is read, those after the app's name included, as
 	// the reporter and the login recording take --execute and -v from them.
@@ -86,8 +93,8 @@ func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	// Refused before any host is read, so an unattended run with
 	// --delete-data stops with nothing asked of anything.
-	if *execute && *deleteData && !stdinIsTerminal(stdin) {
-		return fmt.Errorf("app remove: --delete-data deletes member data, which nothing brings back, so it asks for the app's name at a terminal and stdin is not one. Run it from an interactive shell. Nothing was changed")
+	if *execute && *deleteData && !ans.canAnswer(stdin) {
+		return fmt.Errorf("app remove: --delete-data deletes member data, which nothing brings back, so it asks for the app's name at a terminal and stdin is not one. Run it from an interactive shell, or answer it with --yes and PAISANS_ALLOW_YES=1. Nothing was changed")
 	}
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
@@ -226,7 +233,7 @@ func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 		return nil
 	}
 	if *deleteData {
-		if err := confirmName(stdin, stdout, app); err != nil {
+		if err := confirmName(ans, stdin, stdout, app); err != nil {
 			return err
 		}
 	}
@@ -245,10 +252,13 @@ func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 }
 
 // confirmName asks for the app's name at the terminal and refuses anything
-// else. There is no flag to answer it.
-func confirmName(stdin io.Reader, stdout io.Writer, app string) error {
+// else. --yes, through a, answers it with the name.
+func confirmName(a answerer, stdin io.Reader, stdout io.Writer, app string) error {
+	if a.yes {
+		return confirmWord(a, stdin, stdout, app, ui.Danger(stdout, fmt.Sprintf("This permanently deletes %s's member data above.", app)))
+	}
 	if !stdinIsTerminal(stdin) {
-		return fmt.Errorf("app remove: --delete-data asks for the app's name at a terminal, and stdin is not one. Nothing was changed")
+		return fmt.Errorf("app remove: --delete-data asks for the app's name at a terminal, and stdin is not one. Run it from an interactive shell, or answer it with --yes and PAISANS_ALLOW_YES=1. Nothing was changed")
 	}
 	prompt(stdout, ui.Danger(stdout, fmt.Sprintf("This permanently deletes %s's member data above.", app)), app)
 	answer, err := bufio.NewReader(stdin).ReadString('\n')
