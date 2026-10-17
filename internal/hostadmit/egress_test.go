@@ -41,9 +41,9 @@ func egressAdmitted(table string) func() *fakeHost {
 }
 
 var egressCases = addCases(
-	goldenCase{name: "egress-fresh-user", host: current, site: "vm"},
-	goldenCase{name: "egress-without-mesh-lan", host: home, site: "vm"},
-	goldenCase{name: "egress-with-mesh-lan", host: home, site: "vm", flags: hostadmit.Flags{MeshLAN: true}},
+	goldenCase{name: "egress-fresh-user", focus: []string{"egress"}, host: current, site: "vm"},
+	goldenCase{name: "egress-without-mesh-lan", focus: []string{"egress"}, host: home, site: "vm"},
+	goldenCase{name: "egress-with-mesh-lan", focus: []string{"egress", "admission record"}, host: home, site: "vm", flags: hostadmit.Flags{MeshLAN: true}},
 	goldenCase{name: "egress-mesh-lan-public-refused", site: "vm", flags: hostadmit.Flags{MeshLAN: true}, host: func() *fakeHost { return current().withUser() }},
 	goldenCase{name: "egress-mesh-lan-wide-refused", site: "vm", flags: hostadmit.Flags{MeshLAN: true}, host: func() *fakeHost { return home().with("lan", "10.20.30.40/8") }},
 	goldenCase{name: "egress-mesh-lan-no-route-refused", site: "vm", flags: hostadmit.Flags{MeshLAN: true}, host: func() *fakeHost {
@@ -57,22 +57,22 @@ var egressCases = addCases(
 		h.facts = kept
 		return h
 	}},
-	goldenCase{name: "egress-lan-resolver", site: "vm", host: func() *fakeHost {
+	goldenCase{name: "egress-lan-resolver", focus: []string{"egress table"}, site: "vm", host: func() *fakeHost {
 		return home().file("/etc/resolv.conf", "nameserver 192.168.1.1\nnameserver fd00::1\nnameserver fe80::1%eth0\nnameserver 192.168.1.1\n")
 	}},
-	goldenCase{name: "egress-no-resolver", site: "vm", host: func() *fakeHost { return home().file("/etc/resolv.conf", "options edns0\n") }},
+	goldenCase{name: "egress-no-resolver", focus: []string{"egress table"}, site: "vm", host: func() *fakeHost { return home().file("/etc/resolv.conf", "options edns0\n") }},
 	goldenCase{name: "egress-admitted", site: "vm", flags: hostadmit.Flags{MeshLAN: true}, host: func() *fakeHost {
 		return admittedHost(requestFor("vm"), hostadmit.Flags{MeshLAN: true})
 	}},
-	goldenCase{name: "egress-table-changed", host: egressAdmitted("table inet paisans_f2a9 {}\n"), site: "vm"},
-	goldenCase{name: "egress-table-unloaded", site: "vm", host: func() *fakeHost { return egressAdmitted("")().with("egress-table", "absent") }},
-	goldenCase{name: "egress-mesh-lan-added", site: "vm", flags: hostadmit.Flags{MeshLAN: true}, host: egressAdmitted("")},
-	goldenCase{name: "egress-gateway", host: home, site: "home-a", flags: gateway},
-	goldenCase{name: "egress-onlink6", site: "vm", host: func() *fakeHost {
+	goldenCase{name: "egress-table-changed", focus: []string{"egress table"}, host: egressAdmitted("table inet paisans_f2a9 {}\n"), site: "vm"},
+	goldenCase{name: "egress-table-unloaded", focus: []string{"egress table"}, site: "vm", host: func() *fakeHost { return egressAdmitted("")().with("egress-table", "absent") }},
+	goldenCase{name: "egress-mesh-lan-added", focus: []string{"egress table", "admission record"}, site: "vm", flags: hostadmit.Flags{MeshLAN: true}, host: egressAdmitted("")},
+	goldenCase{name: "egress-gateway", focus: []string{"egress"}, host: home, site: "home-a", flags: gateway},
+	goldenCase{name: "egress-onlink6", focus: []string{"egress table"}, site: "vm", host: func() *fakeHost {
 		return home().add("lan6", "2001:db8:9::/56 eth1").add("lan6", "2001:db8:9:1::/64 eth1").add("lan6", "2001:db8:3::/64 wg0").
 			add("lan6", "2001:db8:5::/64 docker0").add("lan6", "2001:db8:4::/64 psns-f2a9").add("lan6", "2001:db8:7::/64 lo").add("lan6", "fd00:1::/64 eth0")
 	}},
-	goldenCase{name: "egress-onlink6-changed", site: "vm", host: func() *fakeHost {
+	goldenCase{name: "egress-onlink6-changed", focus: []string{"egress table"}, site: "vm", host: func() *fakeHost {
 		return admittedHost(requestFor("vm"), hostadmit.Flags{}).with("lan6", "2001:db8:42::/64 eth0")
 	}},
 	goldenCase{name: "egress-file-link-refused", site: "vm", host: func() *fakeHost {

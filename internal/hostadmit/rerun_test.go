@@ -31,7 +31,7 @@ func TestASecondRunPlansNothing(t *testing.T) {
 // table's accept for 80 and 443 on the host, takes them out of the
 // firewall, drops the low ports from the shared file, restores the value
 // recorded before, and writes the record without the grant.
-var rerunCases = addCases(goldenCase{name: "rerun-public-ports-removed", site: "watch", flags: hostadmit.Flags{PublicPorts: true}, host: func() *fakeHost {
+var rerunCases = addCases(goldenCase{name: "rerun-public-ports-removed", focus: []string{"claim the host", "remove ufw rule", "sysctl", "restore net.ipv4", "admission record"}, site: "watch", flags: hostadmit.Flags{PublicPorts: true}, host: func() *fakeHost {
 	return admittedHost(requestFor("watch"), hostadmit.Flags{PublicPorts: true})
 }})
 
@@ -44,7 +44,7 @@ func TestRerunPlans(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	checkGoldenText(t, c.name, plan.Text())
+	checkGoldenText(t, c.name, trimmed(t, c, plan.Text(), plan))
 }
 
 // A record without mesh_subnet is refused like any record admit cannot

@@ -10,8 +10,8 @@ import (
 var dataSite = hostadmit.Flags{Watchdog: true}
 
 var watchdogCases = addCases(
-	goldenCase{name: "watchdog-softdog", site: "home-b", flags: dataSite, host: homeB},
-	goldenCase{name: "watchdog-hardware", site: "home-b", flags: dataSite, host: func() *fakeHost {
+	goldenCase{name: "watchdog-softdog", focus: []string{"watchdog", "softdog"}, site: "home-b", flags: dataSite, host: homeB},
+	goldenCase{name: "watchdog-hardware", focus: []string{"watchdog"}, site: "home-b", flags: dataSite, host: func() *fakeHost {
 		return homeB().answer("RuntimeWatchdogUSec", "device present\nidentity watchdog0 iTCO_wdt\nsystemd 0\ndaemon absent\n")
 	}},
 	goldenCase{name: "watchdog-second-holder-refused", site: "home-b", flags: dataSite, host: func() *fakeHost {
