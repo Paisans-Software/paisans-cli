@@ -50,6 +50,10 @@ func TestMain(m *testing.M) {
 	// SOPS_AGE_* variable from the shell running the tests decide which key
 	// sops uses; a test that wants one sets it.
 	config.AgeKeystore = keystore.NewMemory()
+	// Most tests keep their secrets in plaintext, so they need no age key:
+	// the explicit test mode. A test about the refusal of plaintext unsets
+	// it (realSecrets).
+	os.Setenv(config.PlaintextSecretsVariable, "1")
 	// Every host has admitted the deployment as the site it is asked about,
 	// with every grant its roles need.
 	// The record is still read, so a test sees which hosts were checked and

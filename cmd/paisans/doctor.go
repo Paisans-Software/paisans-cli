@@ -60,6 +60,15 @@ func runDoctor(args []string) error {
 	if fs.NArg() > 0 {
 		return fmt.Errorf("doctor takes flags only. Got extra argument(s): %s", strings.Join(fs.Args(), " "))
 	}
+	if *secretsPath == "" {
+		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
+	}
+	// A plaintext secrets file, or an encrypted one with no recipient in
+	// the .sops.yaml beside it, is refused before anything is changed or
+	// any site is read, as apply and publishing refuse it.
+	if err := config.CheckSecretsFile(*secretsPath); err != nil {
+		return err
+	}
 	if *execute {
 		if err := removeRedundantGateConfig(r, *configPath); err != nil {
 			return err
@@ -83,9 +92,6 @@ func runDoctor(args []string) error {
 		transports[name] = newBoundedTransport(doctorTransport(siteTransport(name, cfg.Sites[name], "")), doctorSiteCommands)
 	}
 
-	if *secretsPath == "" {
-		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
-	}
 	all := func() map[string]apply.Transport {
 		out := map[string]apply.Transport{}
 		for _, name := range cfg.SiteNames() {

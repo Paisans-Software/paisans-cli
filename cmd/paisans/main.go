@@ -224,13 +224,20 @@ func runValidate(args []string) error {
 	if result.Refused() {
 		return refused(*configPath, len(result.Refusals()), "Nothing can be rendered or applied from it until then.")
 	}
+	// The secrets file beside it, offline too: a plaintext one, or an
+	// encrypted one with no recipient in the .sops.yaml beside it, is
+	// refused, as apply and publishing refuse it. It is read without
+	// decrypting, so no age key is needed.
+	if *secretsPath == "" {
+		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
+	}
+	if err := config.CheckSecretsFile(*secretsPath); err != nil {
+		return err
+	}
 	// The mail settings are tried once the file is one a host may be
 	// reached for, and only warn: see checkMailForValidate.
 	warned := 0
 	if !*offline {
-		if *secretsPath == "" {
-			*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
-		}
 		warned = checkMailForValidate(r, cfg, *secretsPath)
 	}
 	switch {
@@ -295,6 +302,15 @@ func runInit(args []string, stdin io.Reader, stdout io.Writer) error {
 	if result.Refused() {
 		return refused(*configPath, len(result.Refusals()), "Secrets are not generated for a configuration that cannot be deployed.")
 	}
+	// A secrets file init could only write back in plaintext is refused
+	// here, before a host is read or anything is written: one encrypted
+	// with no recipient in .sops.yaml beside it, and one in plaintext.
+	if *secretsPath == "" {
+		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
+	}
+	if err := config.CheckSecretsFile(*secretsPath); err != nil {
+		return err
+	}
 	// The mesh subnet next, while nothing is deployed: it is the one value
 	// that has to be checked against every host before the first apply,
 	// and cannot change after it.
@@ -319,9 +335,6 @@ func runInit(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 	}
 
-	if *secretsPath == "" {
-		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
-	}
 	if err := ensureAgeKey(r, cfg.ID, *configPath, *secretsPath, *ageKeyFile); err != nil {
 		return err
 	}
@@ -626,6 +639,12 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	secrets, secretsBytes, err := config.LoadDeploymentSecretsWithBytes(*secretsPath, cfg.ID)
 	if err != nil {
+		return err
+	}
+	// Encrypted, with no recipient in the .sops.yaml beside it: a client
+	// recorded would be written back in plaintext, and publishing needs
+	// the file. Refused before any host is reached.
+	if err := config.CheckSecretsFile(*secretsPath); err != nil {
 		return err
 	}
 	if !secrets.Encrypted {
@@ -1715,10 +1734,11 @@ func checkWorkstationToken(r ui.Reporter, cfg *config.Config, token string) erro
 }
 
 // warnUnencrypted is the warning every command that opens the secrets gives
-// for a file that is not under sops. The file is accepted, since fixtures and
-// examples are plain, so it is a warning and not a refusal.
+// for a file that is not under sops. Only the explicit test mode reads one
+// (config.PlaintextSecretsVariable); anywhere else config.LoadDeploymentSecrets
+// refuses it.
 func warnUnencrypted(r ui.Reporter, path string) {
-	r.Warn(path+" is not encrypted", "That is accepted for fixtures and examples; a real deployment keeps its secrets under sops.")
+	r.Warn(path+" is not encrypted", config.PlaintextSecretsVariable+"=1 is set, which reads plaintext secrets for tests and fixtures. A real deployment keeps its secrets under sops.")
 }
 
 // pathList collects a repeatable flag. --overwrite takes one path each time it

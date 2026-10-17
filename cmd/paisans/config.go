@@ -349,6 +349,10 @@ func runConfigPublish(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// A version holds the secrets encrypted, and only encrypted.
+	if err := config.CheckSecretsFile(filepath.Join(l.Dir, "secrets.enc.yaml")); err != nil {
+		return err
+	}
 	r := reporter()
 	r.Section("publish " + *configPath)
 	key, err := signingKeyFor(l, cfg)

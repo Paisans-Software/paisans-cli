@@ -751,6 +751,10 @@ func publishFrom(l Local, g Gathered, sites map[string]apply.Transport, o publis
 }
 
 func publishFiles(l Local, g Gathered, f Files, sites map[string]apply.Transport, o publishOpts, push PushFunc) (string, []string, error) {
+	// A version holds the secrets encrypted, and only encrypted.
+	if err := config.CheckSecretsBytes(l.path(nameSecrets), f.Secrets); err != nil {
+		return "", nil, err
+	}
 	if _, opts, err := config.ParseKeyLine(o.keyLine); err != nil || len(opts) > 0 {
 		return "", nil, fmt.Errorf("the signing key is not a bare public key line: %q", o.keyLine)
 	}
@@ -830,6 +834,10 @@ func PublishNext(l Local, g Gathered, parent string, revision int, f Files, site
 }
 
 func publishNext(l Local, g Gathered, parent string, revision int, f Files, sites map[string]apply.Transport, o publishOpts, push PushFunc) (string, []string, error) {
+	// A version holds the secrets encrypted, and only encrypted.
+	if err := config.CheckSecretsBytes(l.path(nameSecrets), f.Secrets); err != nil {
+		return "", nil, err
+	}
 	if _, opts, err := config.ParseKeyLine(o.keyLine); err != nil || len(opts) > 0 {
 		return "", nil, fmt.Errorf("the signing key is not a bare public key line: %q", o.keyLine)
 	}

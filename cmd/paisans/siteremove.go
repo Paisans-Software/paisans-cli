@@ -650,7 +650,7 @@ func writeFilled(r ui.Reporter, path string, loaded []byte, secrets *config.Secr
 		return err
 	}
 	if secrets.Encrypted && len(recipients) == 0 {
-		return fmt.Errorf("site remove: %s is encrypted, but no %s beside it names a recipient, so writing it back would leave it in plaintext. Nothing was written or changed", path, config.SOPSConfigName)
+		return config.NoRecipientProblem(path)
 	}
 	s := r.Step("generate secrets")
 	if err := config.WriteSecrets(path, secrets, recipients); err != nil {

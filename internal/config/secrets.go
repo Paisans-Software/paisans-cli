@@ -253,6 +253,8 @@ func parseSecrets(data []byte, path, id string) (*Secrets, error) {
 // refused: its OIDC client credentials and Pocket ID group IDs name objects
 // at that deployment's services, and nothing else would notice them used
 // here. A file without an id is given this one, which its next write keeps.
+// A plaintext file is refused, unless PlaintextSecretsVariable is set to 1
+// for a test or a fixture.
 func LoadDeploymentSecrets(path, id string) (*Secrets, error) {
 	s, _, err := LoadDeploymentSecretsWithBytes(path, id)
 	return s, err
@@ -265,6 +267,9 @@ func LoadDeploymentSecretsWithBytes(path, id string) (*Secrets, []byte, error) {
 	s, data, err := loadSecretsBytes(path, id)
 	if err != nil {
 		return nil, nil, err
+	}
+	if !s.Encrypted && !PlaintextSecretsAllowed() {
+		return nil, nil, PlaintextProblem(path)
 	}
 	s, err = deploymentSecrets(s, path, id)
 	return s, data, err

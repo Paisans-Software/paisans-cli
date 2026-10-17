@@ -930,3 +930,36 @@ func TestPublishNextBuildsOnTheRunsVersion(t *testing.T) {
 		t.Fatal("published on a version that is not the head")
 	}
 }
+
+// Outside the explicit test mode a version holding plaintext secrets is
+// never published, by publishFiles or publishNext: nothing is signed or
+// pushed, and the local head does not move.
+func TestPublishRefusesPlaintextSecrets(t *testing.T) {
+	needTools(t, "git", "ssh-keygen")
+	alice := newOperator(t)
+	sites := storeSites(t, "home-a", "home-b")
+	all := reach(sites, "home-a", "home-b")
+	first := edit(testFiles(), "1", map[string]string{"alice": alice.pub})
+	l := workstation(t, first)
+	g, err := gather(l, all, 2, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := publishOpts{keyLine: alice.pub, signWith: alice.key, now: testNow}
+	v1, _, err := publishFiles(l, g, first, all, o, fakePush)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(config.PlaintextSecretsVariable, "")
+	next := first
+	next.Secrets = []byte("version: 2\n")
+	if _, _, err := publishFiles(l, g, next, all, o, fakePush); err == nil || !strings.Contains(err.Error(), "is not encrypted") {
+		t.Errorf("publishFiles = %v, want a refusal of plaintext", err)
+	}
+	if _, _, err := publishNext(l, g, v1, 1, next, all, o, fakePush); err == nil || !strings.Contains(err.Error(), "is not encrypted") {
+		t.Errorf("publishNext = %v, want a refusal of plaintext", err)
+	}
+	if head, _ := l.Head(); head != v1 {
+		t.Errorf("head moved to %s", head)
+	}
+}
