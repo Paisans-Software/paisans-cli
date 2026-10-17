@@ -250,7 +250,7 @@ func TestConfirmWordAsksOnALineOfItsOwn(t *testing.T) {
 	defer r.Close()
 	var out bytes.Buffer
 	what := "This cleans deployment 00000000-0000-4000-8000-000000000000 (example.org), site home-a, off ubuntu@192.0.2.10:22, and nothing says whether it still runs."
-	if err := confirmWord(r, &out, "home-a", what); err != nil {
+	if err := confirmWord(answerer{}, r, &out, "home-a", what); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(out.String(), "\n")

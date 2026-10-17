@@ -27,9 +27,12 @@ The `admins:` section of `paisans-stack.yaml` is `operators:`, with the same
 fields (`name`, `email`, `keys`). A site's `ssh.keys` names operators. Every
 error, help text and document that said admin for this section says operator.
 
-* **At least two.** `validate` refuses fewer than two operators whose keys are
-  on the sites that run the `pocket-id` app (`operators-fewer-than-two`). One
-  lost workstation must not leave nobody able to run the deployment.
+* **At least two, at least one.** One lost workstation must not leave nobody
+  able to run the deployment. `validate` refuses a deployment with no operator
+  whose keys are on the sites that run the `pocket-id` app (`operators-none`)
+  and warns about one (`operators-fewer-than-two`), since a deployment being
+  rolled out or a small community may have one for a while. The operator
+  reconciler fails the operators heartbeat while one is declared.
 * **Each operator is a Pocket ID user.** `apply` creates them as it creates
   declared admins today (username is the operator's key, email verified, name
   split at the first space), puts them in the group `operators` and in every
@@ -171,7 +174,7 @@ only.
 
 * `validate`: a fixture per new rule; `management` unset, `paisans` with each
   managed setting set, `paisans` without an account app or SMTP, `pocket-id`
-  with an account app; fewer than two operators.
+  with an account app; no operator, and one.
 * Render: goldens for one deployment in each mode. Under `paisans` the
   Pocket ID `.env` has `ALLOW_USER_SIGNUPS=disabled` and
   `EMAIL_ONE_TIME_ACCESS_AS_UNAUTHENTICATED_ENABLED=true` and the gateway

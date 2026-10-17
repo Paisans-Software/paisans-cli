@@ -565,7 +565,7 @@ func (c *clientStep) approveExtraGroups(app string, p oidcclient.Plan) error {
 	names := strings.Join(groups, ", ")
 	what := fmt.Sprintf("apply will create the group(s) %s at Pocket ID, which %s reads from the groups claim. They start empty.", names, app)
 	if c.confirm == nil {
-		return fmt.Errorf("%s names group(s) %s that Pocket ID does not have, and creating them asks at a terminal. Run apply from an interactive shell, or create them at Pocket ID first", app, names)
+		return fmt.Errorf("%s names group(s) %s that Pocket ID does not have, and creating them asks at a terminal. Run apply from an interactive shell, or answer it with --yes and PAISANS_ALLOW_YES=1, or create them at Pocket ID first", app, names)
 	}
 	if err := c.confirm(what); err != nil {
 		return fmt.Errorf("group(s) %s for %s: %w", names, app, err)

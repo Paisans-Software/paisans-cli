@@ -226,6 +226,27 @@ func convergePlan(cfg *config.Config, st convergeState) []convergeStep {
 		steps = append(steps, applyStep(stageOthers, s))
 	}
 
+	// Storage reads and writes Garage's layout through its container, so
+	// every Garage site is applied before it. A founded member's first apply
+	// is otherwise pass two, after storage, which left storage exec'ing into
+	// a Garage that was not running whenever that site's containers had gone
+	// (Eg: removed to free disk space). On a site already running, the apply
+	// plans nothing and pass two plans nothing again.
+	before := map[string]bool{}
+	for _, s := range steps {
+		switch {
+		case len(s.Args) == 3 && s.Args[0] == "apply" && s.Args[1] == "--site":
+			before[s.Args[2]] = true
+		case len(s.Args) == 3 && s.Args[0] == "site" && s.Args[1] == "add":
+			before[s.Args[2]] = true
+		}
+	}
+	for _, g := range cfg.Storage.Garage.Sites {
+		if !before[g] {
+			steps = append(steps, applyStep(stageOthers, g))
+		}
+	}
+
 	// Garage's layout, across its sites when there are several, and each
 	// app's bucket and key.
 	switch garage := cfg.Storage.Garage.Sites; len(garage) {
@@ -484,16 +505,19 @@ type convergeOptions struct {
 	// RequireAll is --require-all: a degraded run exits 1. The run says
 	// so once, at its end, so no step takes it.
 	RequireAll bool
-	// stdin and stdout are where the run's review asks for approval. No
-	// step is handed them: the run asks once for every site.
-	stdin  io.Reader
-	stdout io.Writer
+	// answers, stdin and stdout are how the run's review asks for
+	// approval. No step is handed them: the run asks once for every site.
+	// --yes is handed on to apply and gateway move, whose steps may ask
+	// for what the review does not cover.
+	answers answerer
+	stdin   io.Reader
+	stdout  io.Writer
 }
 
 // convergeFlags is args with the flags o hands on, each to the commands that
 // take it: --config and -v to every one, --secrets to all but host prepare,
-// --execute to all but init, and --min-free and
-// --keep-images to apply alone.
+// --execute to all but init, --min-free and
+// --keep-images to apply alone, and --yes to apply and gateway move.
 func convergeFlags(args []string, o convergeOptions) []string {
 	out := append([]string(nil), args...)
 	out = append(out, "--config", o.Config)
@@ -507,6 +531,9 @@ func convergeFlags(args []string, o convergeOptions) []string {
 	}
 	if o.Verbose {
 		out = append(out, "-v")
+	}
+	if o.answers.yes && (args[0] == "apply" || args[0] == "gateway") {
+		out = append(out, "--yes")
 	}
 	// gateway move takes them for the apply its hand-off runs.
 	if args[0] == "apply" || args[0] == "gateway" {
@@ -833,7 +860,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	// The version the run applies is gathered once, before the review, so
 	// a fork or a stale base is refused before the operator is asked
 	// anything; its steps do not gather again.
-	store, err := applyStore(r, configPath, convergeSecretsPath(configPath, secretsPath), nil, cfg, execute, o.stdin, o.stdout)
+	store, err := applyStore(r, configPath, convergeSecretsPath(configPath, secretsPath), nil, cfg, execute, o.answers, o.stdin, o.stdout)
 	if err != nil {
 		return err
 	}

@@ -38,6 +38,7 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
 	execute := fs.Bool("execute", false, "actually run the stages, stopping at the first gate that fails")
+	answers := yesFlag(fs)
 	// The site may come before or after the flags. flag stops at the first
 	// argument that is not one, so a leading name is taken off first.
 	var site string
@@ -45,6 +46,10 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 		site, args = args[0], args[1:]
 	}
 	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	ans, err := answers()
+	if err != nil {
 		return err
 	}
 	r := reporter()
@@ -147,7 +152,7 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	review, approvedBy, err := stepReview(r, stdin, stdout, cfg, site, g, grant.Scope{Images: true}, transports[site], *execute, "paisans site add "+site+" --execute")
+	review, approvedBy, err := stepReview(r, ans, stdin, stdout, cfg, site, g, grant.Scope{Images: true}, transports[site], *execute, "paisans site add "+site+" --execute")
 	if err != nil {
 		return err
 	}

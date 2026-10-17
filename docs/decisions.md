@@ -2548,7 +2548,8 @@ Founder decision. The design is
   members of the Pocket ID group `admins`. Every operator is a community
   admin; a community admin is not an operator.
 * `validate` refuses fewer than two operators with a key on every site that
-  runs Pocket ID.
+  runs Pocket ID (one is a warning from 2026-10-17, see *One operator is a
+  warning, not a refusal*).
 * The `pocket-id` app declares `management`, `paisans` or `pocket-id`,
   required and never defaulted. Under `paisans` the account service manages
   signup, bans and recovery, an account app and mail are required, the
@@ -3242,3 +3243,37 @@ it a DMARC policy, and SPF reaches that name alone.
 ### What was run
 
 `go build ./... && go vet ./... && go test ./...`.
+
+## 2026-10-17: One operator is a warning, not a refusal
+
+Founder direction, issue #365.
+
+### What was decided
+
+* `validate` refuses a deployment with no operator whose keys are on every
+  site that runs Pocket ID (`operators-none`), and warns about one
+  (`operators-fewer-than-two`).
+* `paisans create` accepts one operator and offers a second after the first.
+* The operator reconciler fails its pass while fewer than two operators are
+  declared, so the operators heartbeat keeps the monitor alerting until a
+  second is added.
+
+### Why
+
+A deployment being rolled out, or a small community, may have one operator
+for a while, and refusing it left no way to start. One operator is a risk,
+not an incoherence: a lost workstation would leave nobody able to run the
+deployment, so it stays visible on every `validate` and on the health page
+until there is a second. No operator at all is an incoherence, since nobody
+could run the deployment, and stays a refusal.
+
+### What was weighed
+
+* **Keep refusing one:** blocks the first rollout and small communities
+  outright, which is the problem the issue names.
+* **Warn in `validate` only:** a warning shown once at `validate` is easy to
+  forget; the heartbeat keeps saying it.
+
+## 2026-10-17: `--yes` answers confirmations, except the digest and the fresh SSH login
+
+Founder decision, 2026-10-17: every command that asks for a confirmation takes `--yes`, which answers each typed word and y/N question as typing it would, prints `approved by --yes: <what>` for each, and refuses unless `PAISANS_ALLOW_YES=1`; it never answers `host admit --request`'s digest, which proves the request's keys were not changed on their way (`--digest` gives it instead), nor the fresh SSH login after admit enables ufw, which proves SSH still works before the ufw fallback is stopped (`--yes` with `--request` refuses where admit would enable ufw, and `--site` proves it with its own login); a review `--yes` approves records `approved_by` as a typed approval does, so only the run's log shows it was `--yes`.

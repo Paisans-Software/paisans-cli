@@ -142,7 +142,7 @@ func (w *Wizard) community() error {
 
 func (w *Wizard) operators() error {
 	a := &w.Answers
-	w.p.Say("\nOperators: the people who run the machines. They log in to every site, hold the secrets and run apply, and each becomes a Pocket ID user and a community admin on the first apply. A deployment has at least two, so that one lost workstation does not leave nobody able to run it.")
+	w.p.Say("\nOperators: the people who run the machines. They log in to every site, hold the secrets and run apply, and each becomes a Pocket ID user and a community admin on the first apply. Declare at least two, so that one lost workstation does not leave nobody able to run it. One is allowed while you find a second: validate warns about it, and so does the health page if there is one, until you do.")
 	prev := a.Operators
 	var operators []Operator
 	for i := 0; ; i++ {
@@ -180,10 +180,9 @@ func (w *Wizard) operators() error {
 			return err
 		}
 		operators = append(operators, Operator{ID: id, Name: name, Email: email, Keys: lines})
-		if len(operators) < 2 {
-			continue
-		}
-		more, err := w.p.YesNo("Add another operator?", i+1 < len(prev))
+		// A second operator is what the deployment should have, so the
+		// question after the first defaults to adding one.
+		more, err := w.p.YesNo("Add another operator?", len(operators) < 2 || i+1 < len(prev))
 		if err != nil {
 			return err
 		}

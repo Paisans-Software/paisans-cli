@@ -39,12 +39,13 @@ A community outlives any one of its operators, the people who run its
 machines, so Paisans watches for the loss of an operator before it happens and
 has a way back after it does.
 
-* **Never one operator away from lockout.** `validate` refuses fewer than two
-  operators whose keys are on every site that runs Pocket ID, because one lost
-  workstation must not leave nobody able to run the deployment. The operator
-  reconciler reads Pocket ID and fails its health check when an operator's
-  account is missing, disabled, or outside the member group or `operators`,
-  so the monitor raises it while someone can still fix it.
+* **One operator away from lockout is never silent.** `validate` refuses a
+  deployment with no operator whose keys are on every site that runs Pocket
+  ID, and warns about one, because one lost workstation would leave nobody
+  able to run the deployment. The operator reconciler reads Pocket ID and
+  fails its health check while only one operator is declared, or when an
+  operator's account is missing, disabled, or outside the member group or
+  `operators`, so the monitor raises it while someone can still fix it.
 * **The DNS zone is held the same way.** When the zone is at Cloudflare, every
   operator must be a Super Administrator of the account holding it, and there
   must be at least two, because an account nobody can add

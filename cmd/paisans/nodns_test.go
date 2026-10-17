@@ -42,7 +42,7 @@ func TestMain(m *testing.M) {
 	convergeHoldsGateway = func(*config.Config, string) (bool, error) { return false, nil }
 	// No test's apply reaches a configuration store; a test about the
 	// store sets gatherForApply back.
-	applyStore = func(ui.Reporter, string, string, *configstore.Files, *config.Config, bool, io.Reader, io.Writer) (storeVersion, error) {
+	applyStore = func(ui.Reporter, string, string, *configstore.Files, *config.Config, bool, answerer, io.Reader, io.Writer) (storeVersion, error) {
 		return noStore{}, nil
 	}
 	// No test reaches the workstation's keystore: init makes and reads age

@@ -24,10 +24,15 @@ changes share a bullet. Detailed notes are on the corresponding
 - `doctor` checks each site as its deployment's user: its admission record, no privileged group, rootless Docker at Engine 29.5 or later, linger after the mesh, and sudo for the WireGuard helper alone.
 - `doctor` fetches `/.well-known/paisans/<token>` from the gateway and each monitor running Paisans' Caddy, from the workstation as `apply` does, and fails when 443 or 80 does not answer as this deployment.
 - `create` offers the first operator each SSH public key in `~/.ssh/*.pub` on the workstation, so a key already there is taken with Enter rather than pasted.
+- `--yes` answers every confirmation a command asks for, printing each answer, when `PAISANS_ALLOW_YES=1` is set; `host admit --request` takes its digest as `--digest`, which `--yes` never supplies.
 
 ### Changed
 
 - `dns init` writes the registrable domain's DMARC policy when nothing under it has mail, publishes SPF on `community.domain` alone, and gives a hostname DMARC of its own only where no strict policy above covers it.
+- `host evict` refuses, with nothing changed, a host any deployment of which a newer release of paisans claimed, naming the highest release to upgrade to.
+- `validate` warns about one operator instead of refusing it, and refuses a deployment with no operator (`operators-none`); `paisans create` accepts one, and the operator reconciler fails the operators heartbeat until a second is declared.
+- `paisans create` writes the file to `--config`, or `paisans-stack.yaml` in the current directory, once validate refuses nothing in it, without printing it or asking first.
+- `site remove` refuses, in every form and with nothing changed, a site a newer release of paisans applied; `apply` records its release in the manifest, and `host admit` in the registry entry.
 - `doctor` reports a site pending admission, or down after joining, as a warning naming what the deployment is without and how to admit or remove it; a gateway stays a failure.
 - `doctor`'s advice for a container whose mesh address was missing at boot is to start it again, as the deployment's user, or recreate its stack.
 - `secrets set` and `secrets rotate` try an SMTP password from the machine they run on, warning when the server cannot be reached there, and rotate tries it from every site before handing it to any.
@@ -79,6 +84,7 @@ changes share a bullet. Detailed notes are on the corresponding
 - `site remove` and `app remove` read every flag given after the name before they report, so `-v` there shows detail and `--execute` there records `ssh.user`.
 - `apply` on a site whose mesh interface is up without its file's address, key or peers restarts or syncs it, so a run stopped between writing the file and handing it over completes.
 - A deployment binds and dials only each site's mesh address, so the egress table `host admit` loads, which drops its loopback dials, stalls neither etcd's own client gateway nor Patroni's leader election.
+- `apply` starts a stack whose containers were removed or stopped though its files match the render, and applies each Garage site before storage, so a site whose containers were removed converges again.
 - `create` refuses, as it is pasted, an operator's key another operator gave, one listed twice, or one the loader refuses, rather than rendering a file that does not load.
 - `create` offers to write a file validate refuses as it stands, to fix by hand, so the answers are not lost.
 

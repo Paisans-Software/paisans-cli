@@ -25,9 +25,11 @@ import (
 // applied (internal/grant); the review compares the configuration's grant
 // with it, shows what is added, changed and removed, and, with --execute,
 // asks the operator to type approve for anything added or changed before the
-// first change. No flag answers it: a flag that could would be in every
-// script within a week, and approving is the control. A run that changes no
-// key and no image asks nothing, so routine applies stay scriptable. A
+// first change. Approving is the control: --yes answers it only where the
+// environment sets PAISANS_ALLOW_YES=1, and prints each entry it approves,
+// so a command line alone never approves a key or an image. A run that
+// changes no key and no image asks nothing, so routine applies stay
+// scriptable. A
 // foundation image is shown and not asked about, since the team reviews
 // foundation.yaml in the core catalog's pull requests.
 
@@ -211,8 +213,9 @@ const (
 
 // approveReviews asks, once, for approval of every review that needs it.
 // It asks nothing when none does. Without a terminal it refuses, before any
-// host changes, since the only answer is one typed by the operator.
-func approveReviews(r ui.Reporter, stdin io.Reader, stdout io.Writer, reviews []grant.Review, command string) error {
+// host changes, since the only answer is one typed by the operator, or
+// --yes, through a, which approves each entry and prints a line naming it.
+func approveReviews(r ui.Reporter, a answerer, stdin io.Reader, stdout io.Writer, reviews []grant.Review, command string) error {
 	pending := 0
 	for _, rev := range reviews {
 		pending += rev.Pending()
@@ -220,16 +223,26 @@ func approveReviews(r ui.Reporter, stdin io.Reader, stdout io.Writer, reviews []
 	if pending == 0 {
 		return nil
 	}
-	if !stdinIsTerminal(stdin) {
+	if !a.canAnswer(stdin) {
 		return &ui.Problem{
 			Hint:    "what " + config.FileName + " grants changed, and stdin is not a terminal",
-			Explain: fmt.Sprintf("The review above adds or changes what may log in or run on a host (%s), which only an operator at a terminal approves, and no flag answers it. Run %s from an interactive shell. Nothing was changed.", grant.Summary(reviews), command),
+			Explain: fmt.Sprintf("The review above adds or changes what may log in or run on a host (%s), which only an operator at a terminal approves. Run %s from an interactive shell, or answer it with --yes and PAISANS_ALLOW_YES=1. Nothing was changed.", grant.Summary(reviews), command),
 		}
 	}
 	resume := ui.Hold(r)
 	defer resume()
+	if a.yes {
+		for _, rev := range reviews {
+			for _, c := range rev.Changes {
+				if c.NeedsApproval() {
+					a.approved(stdout, rev.Site+": "+c.Line())
+				}
+			}
+		}
+		return nil
+	}
 	what := grant.Summary(reviews) + ". Check each key with its owner and each image with whoever chose it."
-	if err := confirmWord(stdin, stdout, approveWord, what); err != nil {
+	if err := confirmWord(a, stdin, stdout, approveWord, what); err != nil {
 		return &ui.Problem{Hint: "not approved", Explain: sentence(err.Error())}
 	}
 	return nil
@@ -307,13 +320,14 @@ var reviewedByRun *runReview
 
 // stepReview is the review of one command run for site: host prepare's or
 // apply --site's. Typed by hand, the command shows it and, with execute,
-// asks for approval when anything needs it. Run as a step of apply with no
+// asks for approval when anything needs it, which a answers. Run as a step
+// of apply with no
 // --site, which showed and approved every site's review already, a dry run
 // reviews nothing, and an execution refuses anything the run's approval
 // does not hold exactly, since that changed after the operator approved.
 // It returns what to record once the command's steps have succeeded, and
 // who approved it.
-func stepReview(r ui.Reporter, stdin io.Reader, stdout io.Writer, cfg *config.Config, site string, g grant.Grant, scope grant.Scope, host registry.Runner, execute bool, command string) (*siteReview, string, error) {
+func stepReview(r ui.Reporter, a answerer, stdin io.Reader, stdout io.Writer, cfg *config.Config, site string, g grant.Grant, scope grant.Scope, host registry.Runner, execute bool, command string) (*siteReview, string, error) {
 	run := reviewedByRun
 	if run != nil && !execute {
 		return nil, "", nil
@@ -341,7 +355,7 @@ func stepReview(r ui.Reporter, stdin io.Reader, stdout io.Writer, cfg *config.Co
 		return s, "", nil
 	}
 	showReview(r, "review what "+config.FileName+" grants", s.review, true)
-	if err := approveReviews(r, stdin, stdout, []grant.Review{s.review}, command); err != nil {
+	if err := approveReviews(r, a, stdin, stdout, []grant.Review{s.review}, command); err != nil {
 		return nil, "", err
 	}
 	by := ""

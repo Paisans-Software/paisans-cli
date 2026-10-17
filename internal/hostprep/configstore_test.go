@@ -178,7 +178,7 @@ func TestAChangedDaemonUnitRestartsTheDaemon(t *testing.T) {
 	host.files[storeDaemon] = "stale"
 	plan := storePlan(t, host, nil)
 	last := plan.Steps[len(plan.Steps)-1].Command
-	if !strings.Contains(last, hostprep.UserSystemctl+" reenable paisans-f2a9-config-daemon.service") || !strings.Contains(last, hostprep.UserSystemctl+" restart paisans-f2a9-config-daemon.service") {
+	if !strings.Contains(last, hostprep.UserSystemctl+" reenable paisans-f2a9-config-daemon.service") || !strings.Contains(last, hostprep.UserSystemctl+" restart --no-block paisans-f2a9-config-daemon.service") {
 		t.Errorf("the daemon keeps running the old unit, or its old links: %q", last)
 	}
 }
@@ -269,7 +269,9 @@ func TestTheDaemonWaitsForTheMeshAddressBeforeStarting(t *testing.T) {
 }
 
 // Enabled and started on every prepare that finds it otherwise, whether or
-// not the mesh is up: it binds the mesh address once it can.
+// not the mesh is up: it binds the mesh address once it can. The start does
+// not wait for that: its start waits for the mesh address, which comes up
+// after host prepare, so a start that waited would never return.
 func TestAStoppedDaemonIsStartedWhetherOrNotTheMeshIsUp(t *testing.T) {
 	host := settled(t, nil)
 	host.responses[probeDaemonUnit] = "enabled enabled\nactive inactive\n"
@@ -280,7 +282,7 @@ func TestAStoppedDaemonIsStartedWhetherOrNotTheMeshIsUp(t *testing.T) {
 			start = s.Command
 		}
 	}
-	want := hostprep.UserSystemctl + " daemon-reload && " + hostprep.UserSystemctl + " enable --now paisans-f2a9-config-sync.timer && " + hostprep.UserSystemctl + " enable paisans-f2a9-config-daemon.service && " + hostprep.UserSystemctl + " start paisans-f2a9-config-daemon.service"
+	want := hostprep.UserSystemctl + " daemon-reload && " + hostprep.UserSystemctl + " enable --now paisans-f2a9-config-sync.timer && " + hostprep.UserSystemctl + " enable paisans-f2a9-config-daemon.service && " + hostprep.UserSystemctl + " start --no-block paisans-f2a9-config-daemon.service"
 	if start != want {
 		t.Errorf("start is\n%s\nwant\n%s", start, want)
 	}
