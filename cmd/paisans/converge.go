@@ -172,6 +172,26 @@ func convergePlan(cfg *config.Config, st convergeState) []convergeStep {
 			steps = append(steps, applyStep(stageOthers, m))
 		}
 	}
+	// The gateway serves Pocket ID's public URL, which an app signing in
+	// through Pocket ID fetches its issuer's discovery document from as it
+	// starts. So a gateway outside etcd that holds no apps, data, witness
+	// or monitor role, and so waits on no other site, is applied before a
+	// data member is founded and starts its apps, and first among the sites
+	// outside etcd. Its Caddy starts before its upstreams answer, and
+	// answers its own /.well-known/paisans/<token>, which ends its apply. A
+	// gateway with any of those roles keeps the place they give it.
+	var gatewaysFirst []string
+	for _, g := range cfg.GatewaySites() {
+		s := cfg.Sites[g]
+		if !slices.Contains(members, g) && !s.Has(config.RoleApps) && !s.Has(config.RoleData) && !s.Has(config.RoleWitness) && !s.Has(config.RoleMonitor) {
+			gatewaysFirst = append(gatewaysFirst, g)
+		}
+	}
+	if dataFounding {
+		for _, g := range gatewaysFirst {
+			steps = append(steps, applyStep(stageOthers, g))
+		}
+	}
 	for _, m := range members {
 		if founding(m) && !witness(m) {
 			steps = append(steps, applyStep(stageFounding, m))
@@ -242,7 +262,13 @@ func convergePlan(cfg *config.Config, st convergeState) []convergeStep {
 		}
 		return append(first, last...)
 	}
-	for _, s := range ordered(func(s string) bool { return !slices.Contains(members, s) }) {
+	outside := ordered(func(s string) bool {
+		return !slices.Contains(members, s) && !slices.Contains(gatewaysFirst, s)
+	})
+	if !dataFounding {
+		outside = slices.Concat(gatewaysFirst, outside)
+	}
+	for _, s := range outside {
 		steps = append(steps, applyStep(stageOthers, s))
 	}
 

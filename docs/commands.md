@@ -936,8 +936,10 @@ that it runs, in the order and under the conditions *`paisans apply` with no
 `--site` converges the whole deployment* in `README.md` gives. In order: `init`
 when it has work; `site prepare` on every host at once; a pull of every site's
 images on every host at once, so no install waits on a download; `dns init`; the
-founding applies, `site add`, the other sites (a site that joined with the
-`apps` role first, then the gateway), storage and pass two; `gateway
+founding applies (a gateway outside `etcd.members` that holds no other role
+but storage before the data members, whose apps reach Pocket ID through it),
+`site add`, the other sites (a site that joined with the `apps` role first,
+then the gateway), storage and pass two; `gateway
 move`, when a site without the gateway role still serves as the gateway; the
 `pocket id` step, which makes each operator a user of every running Pocket ID
 app and issues a login link to one with no passkey; and, for each app behind the operator's own web

@@ -96,6 +96,7 @@ changes share a bullet. Detailed notes are on the corresponding
 - `apply` that records a Pocket ID client's credentials or a signup group's ID publishes the bytes it wrote as the next revision, which its host records, so a first apply completes.
 - `apply` ends `start pocket-id` done when its site stops for etcd or its databases, lists a failed install step's error under it, and names the member a later founding stop waits on.
 - `apply` joins a pending site declared `[data, apps]` in one run: its `site add` joins the data role, then the site is applied to start its apps, and the gateway after it.
+- `apply` applies a gateway outside `etcd.members` holding no apps, data, witness or monitor role before the data members are founded, so their apps reach Pocket ID's public URL as they start.
 
 ### Security
 

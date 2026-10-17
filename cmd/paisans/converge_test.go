@@ -276,6 +276,135 @@ func TestConvergeAppliesAFoundedGarageSiteBeforeStorage(t *testing.T) {
 	}, passTwoPhase)...)
 }
 
+// shaped is the fixture's sites renamed and given roles: each name maps to
+// the fixture site it copies, with roles of its own. Garage is left out,
+// and etcd.members and cluster.sites follow from the roles.
+func shaped(t *testing.T, sites map[string]string, roles map[string][]config.Role) *config.Config {
+	t.Helper()
+	cfg := fixture(t)
+	from := cfg.Sites
+	cfg.Sites = map[string]config.Site{}
+	for name, src := range sites {
+		s := from[src]
+		s.Roles = roles[name]
+		cfg.Sites[name] = s
+	}
+	cfg.Storage.Garage.Sites = nil
+	cfg.Etcd.Members = cfg.DerivedEtcdMembers()
+	cfg.Cluster.Sites = nil
+	for _, name := range cfg.SiteNames() {
+		if cfg.Sites[name].Has(config.RoleData) {
+			cfg.Cluster.Sites = append(cfg.Cluster.Sites, name)
+		}
+	}
+	return cfg
+}
+
+// A gateway that is only [gateway] is outside etcd, and serves Pocket ID's
+// public URL, which an app on the [data, apps] site fetches its issuer's
+// discovery document from as it starts. The gateway is applied before that
+// site's founding apply starts its apps, and the monitor, behind its own
+// web server, still last.
+func TestConvergeAppliesAGatewayOutsideEtcdBeforeTheAppsSites(t *testing.T) {
+	cfg := shaped(t,
+		map[string]string{"edge": "vm", "site-a": "home-a", "site-b": "watch"},
+		map[string][]config.Role{"edge": {config.RoleGateway}, "site-a": {config.RoleData, config.RoleApps}, "site-b": {config.RoleMonitor}})
+	b := cfg.Sites["site-b"]
+	b.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "127.0.0.1:8480"}
+	cfg.Sites["site-b"] = b
+	if got := cfg.Etcd.Members; !slices.Equal(got, []string{"site-a"}) {
+		t.Fatalf("etcd.members follow as %v, want [site-a]", got)
+	}
+	steps := convergePlan(cfg, convergeState{})
+	samePlan(t, steps,
+		"hosts: site prepare --site edge",
+		"hosts: site prepare --site site-a",
+		"hosts: site prepare --site site-b",
+		"pull: pull --site edge",
+		"pull: pull --site site-a",
+		"pull: pull --site site-b",
+		"dns: dns init",
+		"other sites: apply --site edge",
+		"founding: apply --site site-a",
+		"other sites: apply --site site-b",
+		"pass two: apply --site edge",
+		"pass two: apply --site site-a",
+		"pass two: apply --site site-b",
+	)
+	// A run that stopped once the data site's record was written applies
+	// the gateway before pass two starts that site's apps again.
+	steps = convergePlan(cfg, convergeState{Initial: map[string]render.EtcdInitial{"site-a": initial("site-a")}})
+	lines := titles(steps)
+	if g, a := slices.Index(lines, "other sites: apply --site edge"), slices.Index(lines, "pass two: apply --site site-a"); g < 0 || a < 0 || g > a {
+		t.Errorf("the gateway's apply does not come before the data site's:\n%s", strings.Join(lines, "\n"))
+	}
+}
+
+// Once the data site is founded, a gateway outside etcd is first among the
+// sites outside etcd, ahead of an [apps] site whose name sorts before it.
+func TestConvergeAppliesAGatewayOutsideEtcdFirstAmongTheOtherSites(t *testing.T) {
+	cfg := shaped(t,
+		map[string]string{"apps": "home-b", "edge": "vm", "site-a": "home-a", "site-b": "watch"},
+		map[string][]config.Role{"apps": {config.RoleApps}, "edge": {config.RoleGateway}, "site-a": {config.RoleData, config.RoleApps}, "site-b": {config.RoleMonitor}})
+	steps := convergePlan(cfg, convergeState{Initial: map[string]render.EtcdInitial{"site-a": initial("site-a")}})
+	samePlan(t, steps,
+		"hosts: site prepare --site apps",
+		"hosts: site prepare --site edge",
+		"hosts: site prepare --site site-a",
+		"hosts: site prepare --site site-b",
+		"pull: pull --site apps",
+		"pull: pull --site edge",
+		"pull: pull --site site-a",
+		"pull: pull --site site-b",
+		"dns: dns init",
+		"other sites: apply --site edge",
+		"other sites: apply --site apps",
+		"other sites: apply --site site-b",
+		"pass two: apply --site apps",
+		"pass two: apply --site edge",
+		"pass two: apply --site site-a",
+		"pass two: apply --site site-b",
+	)
+}
+
+// The dual-site shape: the gateway is a witness and the monitor, so an etcd
+// member, and is founded first, before either [data, apps] site.
+func TestConvergeFoundsAWitnessGatewayFirstOnTwoDataSites(t *testing.T) {
+	cfg := shaped(t,
+		map[string]string{"edge": "vm", "site-a": "home-a", "site-b": "home-b"},
+		map[string][]config.Role{"edge": {config.RoleGateway, config.RoleWitness, config.RoleMonitor}, "site-a": {config.RoleData, config.RoleApps}, "site-b": {config.RoleData, config.RoleApps}})
+	samePlan(t, convergePlan(cfg, convergeState{}),
+		"hosts: site prepare --site edge",
+		"hosts: site prepare --site site-a",
+		"hosts: site prepare --site site-b",
+		"pull: pull --site edge",
+		"pull: pull --site site-a",
+		"pull: pull --site site-b",
+		"dns: dns init",
+		"founding: apply --site edge",
+		"founding: apply --site site-a",
+		"founding: apply --site site-b",
+		"pass two: apply --site site-a",
+		"pass two: apply --site site-b",
+		"pass two: apply --site edge",
+	)
+}
+
+// One site holds the gateway, the data and the apps: its founding apply
+// starts Caddy with the rest, and it is applied once more in pass two.
+func TestConvergeFoundsASingleSite(t *testing.T) {
+	cfg := shaped(t,
+		map[string]string{"solo": "home-a"},
+		map[string][]config.Role{"solo": {config.RoleGateway, config.RoleData, config.RoleApps}})
+	samePlan(t, convergePlan(cfg, convergeState{}),
+		"hosts: site prepare --site solo",
+		"pull: pull --site solo",
+		"dns: dns init",
+		"founding: apply --site solo",
+		"pass two: apply --site solo",
+	)
+}
+
 // fakeConverge replaces each etcd record's read and the step runner; fail maps a
 // step's title to the error it returns the first time it runs.
 func fakeConverge(t *testing.T, fail map[string]error) *[]string {
