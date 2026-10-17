@@ -3151,7 +3151,15 @@ own.
   through public DNS; a lookup that fails other than by the name not
   existing counts as mail.
 * `dns init --execute` creates that policy after every other record, since
-  it rests on the policies the same run creates.
+  it rests on the policies the same run creates. A policy only covers once it
+  is there: the run that creates it still gives each hostname its own, and
+  `dns prune` removes them after.
+* A hostname is not covered while a name between it and the registrable
+  domain holds a weaker policy, which DMARCbis' tree walk reads first.
+* Once written, the zone is not read again. The policy is a conflict when a
+  sender the configuration names has no policy of its own, or the domain
+  itself has an MX or an SPF record naming a sender; mail added elsewhere
+  under the domain later is whoever adds it's to give a policy.
 * `dns prune` judges a covering policy without any record of this
   deployment's the same prune deletes, and `--name` reaches the registrable
   domain's policy once the configuration no longer produces it.

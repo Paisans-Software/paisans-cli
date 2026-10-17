@@ -190,12 +190,13 @@ func BuildPrune(ctx context.Context, provider Provider, cfg *config.Config, want
 	// wanted. The covering policy is judged as dns init judges it, without
 	// any record of this deployment's this prune deletes, since one
 	// covering only until it is deleted covers nothing.
-	covers := map[string]bool{}
+	covering := map[string][]Record{}
+	held := map[string][]Record{}
 	for _, w := range wants {
 		if w.CoveredBy == "" {
 			continue
 		}
-		rejecting, ok := covers[w.CoveredBy]
+		kept, ok := covering[w.CoveredBy]
 		if !ok {
 			z, err := FindZone(ctx, provider, w.CoveredBy, cache)
 			if err != nil && !errors.Is(err, errNoZone) {
@@ -206,18 +207,20 @@ func BuildPrune(ctx context.Context, provider Provider, cfg *config.Config, want
 				if err != nil {
 					return nil, err
 				}
-				var kept []Record
 				for _, r := range records {
 					if r.Comment == RecordComment(cfg.Deployment()) && isLockdown(r) && rules.wanted["TXT "+w.CoveredBy] == nil {
 						continue
 					}
 					kept = append(kept, r)
 				}
-				rejecting = rejects(Present, kept)
 			}
-			covers[w.CoveredBy] = rejecting
+			covering[w.CoveredBy] = kept
 		}
-		if rejecting {
+		holds, err := coverHolds(ctx, provider, cache, held, w.Name, w.CoveredBy, kept)
+		if err != nil {
+			return nil, err
+		}
+		if holds {
 			delete(rules.wanted, w.Type+" "+w.Name)
 		}
 	}

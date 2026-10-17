@@ -2,6 +2,8 @@ package dns
 
 import (
 	"context"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 
@@ -629,22 +631,44 @@ func TestRegistrableDomainPolicyIsWrittenWhenNothingHasMail(t *testing.T) {
 	if e, _ := entryAt(p, "_dmarc.example.org"); e.Action != Create || e.Content != dmarcParent {
 		t.Fatalf("the registrable domain's policy: %+v", e)
 	}
+	// Until it reads back, nothing says the provider let it be written, so
+	// the hostnames get their own in the same run.
 	for _, name := range stagedDMARC {
-		if e, _ := entryAt(p, name); e.Action != Covered {
-			t.Errorf("%s: got %s, want covered", name, e.Action)
+		if e, _ := entryAt(p, name); e.Action != Create {
+			t.Errorf("%s: got %s, want create", name, e.Action)
 		}
 	}
 	if err := Execute(context.Background(), c, p, ui.Discard); err != nil {
 		t.Fatal(err)
 	}
-	var dmarc []string
-	for _, rec := range fake.posts {
-		if strings.HasPrefix(rec.Name, "_dmarc.") {
-			dmarc = append(dmarc, rec.Name)
-		}
+
+	// Once it is there, dns prune removes them, and they are covered.
+	wants, err := Desired(staged())
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(dmarc) != 1 || dmarc[0] != "_dmarc.example.org" {
-		t.Errorf("created DMARC policies %v, want _dmarc.example.org alone", dmarc)
+	pruned, err := BuildPrune(context.Background(), c, staged(), wants)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var removed []string
+	for _, e := range pruned.Removes() {
+		removed = append(removed, e.Name)
+	}
+	want := slices.Clone(stagedDMARC)
+	sort.Strings(removed)
+	sort.Strings(want)
+	if strings.Join(removed, " ") != strings.Join(want, " ") {
+		t.Errorf("prune removes %v, want %v", removed, want)
+	}
+	if err := ExecutePrune(context.Background(), c, pruned, ui.Discard); err != nil {
+		t.Fatal(err)
+	}
+	again := plan(t, c, staged())
+	for _, name := range stagedDMARC {
+		if e, _ := entryAt(again, name); e.Action != Covered {
+			t.Errorf("%s after prune: got %s, want covered", name, e.Action)
+		}
 	}
 }
 
@@ -797,25 +821,51 @@ func TestRegistrableDomainPolicyIsNeverReplaced(t *testing.T) {
 	}
 }
 
-// The registrable domain's policy this deployment wrote is a note once a
-// name under it has mail and no policy of its own, and still covers the
-// hostnames below.
-func TestOwnRegistrableDomainPolicyGoverningMailIsANote(t *testing.T) {
+// The registrable domain's policy this deployment wrote is a conflict once
+// a sender the configuration names under it has no policy of its own: the
+// toolkit's own mail would be rejected under it. The rest of the zone is not
+// read again.
+func TestOwnRegistrableDomainPolicyOverAConfiguredSenderIsAConflict(t *testing.T) {
+	cfg := staged()
+	cfg.SMTP = config.SMTP{FromAddress: "noreply@news.example.org"}
 	fake := newFake()
 	fake.zones["example.org"] = "zone-1"
 	fake.records["zone-1"] = []cfRecord{
-		{ID: "parent", Type: "TXT", Name: "_dmarc.example.org", Content: dmarcLockdown, Comment: comment},
+		{ID: "parent", Type: "TXT", Name: "_dmarc.example.org", Content: dmarcParent, Comment: comment},
 		{Type: "MX", Name: "shop.example.org", Content: "mx.example.net", Priority: ptr(10)},
 	}
-	p := plan(t, fake.serve(t), staged())
+	c := fake.serve(t)
+	p := plan(t, c, cfg)
 	e, _ := entryAt(p, "_dmarc.example.org")
-	if e.Action != Warn || !strings.Contains(e.Detail, "shop.example.org") {
-		t.Fatalf("the policy this deployment wrote: got %s (%s), want a warning naming shop.example.org", e.Action, e.Detail)
+	if e.Action != Conflict || !strings.Contains(e.Detail, "news.example.org, a sender this configuration names") || strings.Contains(e.Detail, "shop") {
+		t.Fatalf("got %s (%s), want a conflict naming the sender alone", e.Action, e.Detail)
 	}
-	for _, name := range stagedDMARC {
-		if e, _ := entryAt(p, name); e.Action != Covered {
-			t.Errorf("%s: got %s, want covered", name, e.Action)
-		}
+	shown := &ui.Recorder{}
+	p.Show(shown)
+	if i := shown.Index("refuse", "TXT _dmarc.example.org conflicts"); i < 0 || !strings.Contains(shown.Events[i].Extra, "delete by hand") {
+		t.Errorf("the refusal should say to delete it by hand:\n%s", shown.Lines())
+	}
+
+	fake.records["zone-1"] = append(fake.records["zone-1"], cfRecord{Type: "TXT", Name: "_dmarc.news.example.org", Content: "v=DMARC1; p=none"})
+	if e, _ := entryAt(plan(t, c, cfg), "_dmarc.example.org"); e.Action != Present {
+		t.Errorf("with the sender's own policy: got %s (%s), want present", e.Action, e.Detail)
+	}
+}
+
+// A weaker policy between a hostname and the registrable domain is the one a
+// receiver walking up the tree reads, so the hostname is not covered.
+func TestWeakerPolicyBetweenIsNotCovered(t *testing.T) {
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{
+		{Type: "TXT", Name: "_dmarc.example.org", Content: "v=DMARC1; p=reject; sp=reject"},
+		{Type: "TXT", Name: "_dmarc.staging.example.org", Content: "v=DMARC1; p=none"},
+	}
+	cfg := staged()
+	cfg.Community.MailDomains = []string{"staging.example.org"}
+	p := plan(t, fake.serve(t), cfg)
+	if e, _ := entryAt(p, "_dmarc.talk.staging.example.org"); e.Action != Create {
+		t.Errorf("got %s, want create", e.Action)
 	}
 }
 
@@ -892,16 +942,16 @@ func TestPruneRemovesAHostnamesDMARCNothingWants(t *testing.T) {
 func ptr(n int) *int { return &n }
 
 // Mail at the registrable domain itself is governed by the policy there, so
-// the policy this deployment wrote is a note once the domain has mail.
-func TestOwnRegistrableDomainPolicyWithMailAtTheDomainIsANote(t *testing.T) {
+// the policy this deployment wrote is a conflict once the domain has mail.
+func TestOwnRegistrableDomainPolicyWithMailAtTheDomainIsAConflict(t *testing.T) {
 	fake := newFake()
 	fake.zones["example.org"] = "zone-1"
 	fake.records["zone-1"] = []cfRecord{
 		{Type: "TXT", Name: "_dmarc.example.org", Content: dmarcLockdown, Comment: comment},
 		{Type: "MX", Name: "example.org", Content: "mx.example.net", Priority: ptr(10)},
 	}
-	if e, _ := entryAt(plan(t, fake.serve(t), staged()), "_dmarc.example.org"); e.Action != Warn || !strings.Contains(e.Detail, "an MX record at example.org") {
-		t.Errorf("got %s (%s), want a warning naming the domain's MX", e.Action, e.Detail)
+	if e, _ := entryAt(plan(t, fake.serve(t), staged()), "_dmarc.example.org"); e.Action != Conflict || !strings.Contains(e.Detail, "an MX record at example.org") {
+		t.Errorf("got %s (%s), want a conflict naming the domain's MX", e.Action, e.Detail)
 	}
 }
 

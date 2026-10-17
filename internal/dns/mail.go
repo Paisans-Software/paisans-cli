@@ -206,11 +206,11 @@ func mailWants(cfg *config.Config, addresses []Want) []Want {
 		// A hostname with mail nobody listed would have it rejected by the
 		// policy that covers it, so an SPF record there naming a sender
 		// stops the run.
-		out = append(out, Want{Type: "TXT", Name: name, Content: spfLockdown, Sources: hosts[name], Guard: true})
 		org := orgDomain(name)
+		registrable := org == "" || org == name
+		out = append(out, Want{Type: "TXT", Name: name, Content: spfLockdown, Sources: hosts[name], Guard: !registrable})
 		switch {
-		case org == "" || org == name:
-			out[len(out)-1].Guard = false
+		case registrable:
 		case org == domain && !domainMail:
 		default:
 			w := Want{Type: "TXT", Name: "_dmarc." + name, Content: dmarcLockdown, Sources: hosts[name]}
@@ -287,7 +287,7 @@ func guard(w Want, records []Record) (Action, string) {
 		n++
 	}
 	if n > 1 {
-		return Conflict, fmt.Sprintf("%d SPF records exist at this name. A receiver treats more than one as an error and ignores them all; remove all but one by hand.", n)
+		return Conflict, spfMany(n)
 	}
 	return Clear, ""
 }
@@ -374,7 +374,7 @@ func parentHazards(ctx context.Context, provider Provider, z zone, w Want, own m
 			host, what = name, fmt.Sprintf("an SPF record naming senders at %s", name)
 		case typ == "CNAME" && !strings.HasPrefix(name, "_") && !strings.HasPrefix(name, "*."):
 			// A name that is a CNAME has its target's MX and SPF.
-			if lookupMail(ctx, name) {
+			if !policy[name] && lookupMail(ctx, name) {
 				host, what = name, fmt.Sprintf("a CNAME at %s to %s, which has mail", name, r.Content)
 			}
 		}
@@ -629,9 +629,14 @@ func classifyMail(w Want, records []Record) (Action, string) {
 		return Create, ""
 	}
 	if p == purposeSPF && len(same) > 1 {
-		return Conflict, fmt.Sprintf("%d SPF records exist at this name. A receiver treats more than one as an error and ignores them all; remove all but one by hand.", len(same))
+		return Conflict, spfMany(len(same))
 	}
 	return Present, ""
+}
+
+// spfMany is the conflict for n SPF records at one name.
+func spfMany(n int) string {
+	return fmt.Sprintf("%d SPF records exist at this name. A receiver treats more than one as an error and ignores them all; remove all but one by hand.", n)
 }
 
 func mailConflict(p purpose, w Want, r Record) string {

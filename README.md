@@ -3934,17 +3934,26 @@ that policy only where it changes nothing for anybody's mail. It creates
 * every zone delegated from it is held by the DNS provider, so nothing under
   the domain is out of sight.
 
-A policy there that rejects (`p=reject`, `sp=reject`, no `pct` below 100),
-whoever wrote it, and is the only one there, covers the hostnames, and `dns init` writes no
-`_dmarc.<hostname>` and no `_dmarc.<community.domain>`. A policy that is
-weaker, or a missing one that `dns init` cannot write, is a `!` note naming
-what stops it, and each hostname carries its own policy instead. So is more
-than one policy there, which a receiver applies none of, and a CNAME
-delegating the policy to a DMARC service, which `dns init` does not follow. The policy
-`dns init` wrote is a `!` note too once a name under the domain has mail and
-no policy of its own, since that mail is rejected under it: give that name
-its own policy, or delete this one by hand. A registrable domain the DNS
-provider does not hold is not read.
+A policy already there that rejects (`p=reject`, `sp=reject`, no `pct` below
+100), whoever wrote it, and is the only one there, covers the hostnames, and
+`dns init` writes no `_dmarc.<hostname>` and no `_dmarc.<community.domain>`,
+unless a name between the hostname and the registrable domain holds a weaker
+policy: a receiver walking up the tree under DMARCbis reads that one first.
+The run that creates the policy still gives each hostname its own, since
+nothing says the provider let it be written until it reads back; `dns prune
+--execute` then removes them. A policy that is weaker, or a missing one that
+`dns init` cannot write, is a `!` note naming what stops it, and each
+hostname carries its own policy instead. So is more than one policy there,
+which a receiver applies none of, and a CNAME delegating the policy to a
+DMARC service, which `dns init` does not follow.
+
+The policy `dns init` wrote is a conflict once a sender the configuration
+names under the domain has no policy of its own, or the domain itself has an
+MX record or an SPF record naming a sender, since that mail is rejected
+under it: give the sender its own policy, or delete this one by hand. The
+rest of the zone is read only before the policy is written, not on every
+run, so mail someone adds elsewhere under the domain later is theirs to give
+a policy. A registrable domain the DNS provider does not hold is not read.
 
 For `talk.example.org` with `community.domain: example.org`, and
 `talk.staging.example.org` with `community.domain: staging.example.org`, the
