@@ -3,6 +3,7 @@ package siteremove
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path"
@@ -20,6 +21,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
 	"github.com/paisans-software/paisans-cli/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/version"
 	"github.com/paisans-software/paisans-cli/internal/webserver"
 )
 
@@ -260,6 +262,57 @@ func parseDir(out string) (dirState, error) {
 	return d, nil
 }
 
+// checkToolkit refuses a site whose manifest a newer paisans wrote: what
+// is provably this deployment's is decided by this binary, and a newer
+// release may have put things on the host this one does not know, or knows
+// in an older shape. Releases are compared, not commits, so two builds of
+// one release are equal. A version this binary cannot order is refused as
+// a newer one is. A manifest written before manifests recorded the version
+// is not checked, and unversioned says so; no manifest is nothing to check.
+func (p *Plan) checkToolkit(inv *hostcheck.Inventory) (unversioned bool, err error) {
+	if !inv.Manifest {
+		return false, nil
+	}
+	if inv.ManifestToolkitVersion == "" {
+		return true, nil
+	}
+	return false, p.refuseNewer(inv.ManifestPath, inv.ManifestToolkitVersion)
+}
+
+// refuseNewer is checkToolkit's refusal of the release theirs, recorded in
+// the manifest at path.
+func (p *Plan) refuseNewer(path, theirs string) error {
+	newer, err := version.Compare(theirs, version.Version)
+	if err != nil {
+		return fmt.Errorf("site remove %s: %s records that paisans %q last applied deployment %s here, which is not a release this paisans %s can order, so it may be a newer one that put things on the host this one does not know about. Nothing was changed. Upgrade paisans, and run site remove again", p.Site, path, theirs, p.dep().ID, version.Version)
+	}
+	if newer > 0 {
+		return fmt.Errorf("site remove %s: deployment %s was last applied here by paisans %s, and this is paisans %s, so it may not know everything that release put on the host. Nothing was changed. Upgrade paisans to %s or later, and run site remove again", p.Site, p.dep().ID, theirs, version.Version, theirs)
+	}
+	return nil
+}
+
+// recheckToolkit reads the manifest again before the host stage changes
+// anything, so an apply by a newer paisans since the plan was made is
+// refused as the plan would have refused it.
+func (p *Plan) recheckToolkit(t apply.Transport) error {
+	content, found, err := t.ReadFile(p.dep().Manifest())
+	if err != nil {
+		return fmt.Errorf("%s: reading %s: %w", p.Site, p.dep().Manifest(), err)
+	}
+	if !found {
+		return nil
+	}
+	var m render.Manifest
+	if err := json.Unmarshal([]byte(content), &m); err != nil {
+		return fmt.Errorf("site remove %s: %s is not readable as a manifest, so no file there is provably this deployment's. Nothing was changed", p.Site, p.dep().Manifest())
+	}
+	if m.ToolkitVersion == "" {
+		return nil
+	}
+	return p.refuseNewer(p.dep().Manifest(), m.ToolkitVersion)
+}
+
 func sum(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:])
@@ -293,6 +346,10 @@ func (p *Plan) buildHost() (*Stage, error) {
 	}
 	if inv.Manifest && inv.ManifestFiles == nil {
 		return nil, fmt.Errorf("site remove %s: %s is not readable as a manifest, so no file there is provably this deployment's. Nothing was changed", p.Site, inv.ManifestPath)
+	}
+	unversioned, err := p.checkToolkit(inv)
+	if err != nil {
+		return nil, err
 	}
 	hp.dockerPresent = inv.Docker.Present
 	hp.manifest = inv.Manifest
@@ -390,7 +447,7 @@ func (p *Plan) buildHost() (*Stage, error) {
 		// The manifest stays, listing the kept files, which proves them
 		// this deployment's to the run that removes them.
 		hp.manifest = false
-		want, err := p.keptManifest(inv.ManifestFiles, proven, cp.reduced)
+		want, err := p.keptManifest(inv.ManifestFiles, proven, cp.reduced, inv.ManifestToolkitVersion)
 		if err != nil {
 			return nil, err
 		}
@@ -454,6 +511,9 @@ func (p *Plan) buildHost() (*Stage, error) {
 	}
 
 	p.hostSteps(st)
+	if unversioned && len(st.Steps) > 0 {
+		st.Steps = append([]Step{{Site: p.Site, Verb: "note", Title: "note the toolkit version", Text: fmt.Sprintf("%s records no paisans release, since it was written before manifests recorded one, so whether a newer paisans applied the site is not checked", inv.ManifestPath)}}, st.Steps...)
+	}
 	st.Gate = "no container, network, unit or file of this deployment's left that its user can remove, and the root empty but for what is kept"
 	if hp.caddy != nil {
 		st.Gate = "no container, network, unit or file of this deployment's left that its user can remove but its Caddy, whose Caddyfile is reduced to the host owner's sites, and the root empty but for what is kept"
@@ -680,6 +740,9 @@ func (p *Plan) runHost() error {
 			return fmt.Errorf("%s: %s: %w: %s", p.Site, what, err, lastLines(out, 3))
 		}
 		return nil
+	}
+	if err := p.recheckToolkit(t); err != nil {
+		return err
 	}
 	// The Caddy first: a failure there leaves the deployment as it was.
 	cp := hp.caddy

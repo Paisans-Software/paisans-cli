@@ -9,6 +9,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 func manifestOf(t *testing.T, host *fakeHost) map[string]render.ManifestFile {
@@ -135,5 +136,19 @@ func TestAPartialApplyMarksNothingLeftOver(t *testing.T) {
 	}
 	if len(manifestOf(t, host)) != len(before) {
 		t.Error("a scoped apply dropped or added manifest entries")
+	}
+}
+
+// The manifest records the release of the paisans that wrote it, so a
+// site remove by an older one can refuse the site.
+func TestTheManifestRecordsTheToolkitVersion(t *testing.T) {
+	host := newHost()
+	applyWhole(t, host, plan(t))
+	var m render.Manifest
+	if err := json.Unmarshal([]byte(host.files["/srv/paisans/f2a9/.paisans-manifest.json"]), &m); err != nil {
+		t.Fatal(err)
+	}
+	if m.ToolkitVersion != version.Version {
+		t.Errorf("the manifest records release %q, want %s", m.ToolkitVersion, version.Version)
 	}
 }

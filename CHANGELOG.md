@@ -26,6 +26,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Changed
 
+- `site remove` refuses, in every form and with nothing changed, a site a newer release of paisans applied; `apply` records its release in the manifest, and `host admit` in the registry entry.
 - `doctor` reports a site pending admission, or down after joining, as a warning naming what the deployment is without and how to admit or remove it; a gateway stays a failure.
 - `doctor`'s advice for a container whose mesh address was missing at boot is to start it again, as the deployment's user, or recreate its stack.
 - `secrets set` and `secrets rotate` try an SMTP password from the machine they run on, warning when the server cannot be reached there, and rotate tries it from every site before handing it to any.

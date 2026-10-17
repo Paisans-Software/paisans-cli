@@ -18,6 +18,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 // Change is what one file needs, decided before anything is written.
@@ -1628,7 +1629,7 @@ func writeManifest(plan *Plan, t Transport) error {
 		files = append(files, entry)
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
-	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files, Pins: pinRecord(plan), Arch: plan.Arch, Images: imageRecord(plan), WebServer: plan.recordedWebServer, Pending: plan.Pending}, "", "  ")
+	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files, Pins: pinRecord(plan), Arch: plan.Arch, Images: imageRecord(plan), WebServer: plan.recordedWebServer, Pending: plan.Pending, ToolkitVersion: version.Version}, "", "  ")
 	if err != nil {
 		return err
 	}
