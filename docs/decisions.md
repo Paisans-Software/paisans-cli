@@ -3287,8 +3287,8 @@ Issue #423.
 * A write of a secrets file that was encrypted, by its sops metadata on disk
   or as it was read, with no recipient in the `.sops.yaml` beside it, is
   refused before anything changes. The refusal names the recipients the
-  file's sops metadata records and the `printf` command that writes
-  `.sops.yaml` back with them.
+  file's sops metadata records and, when no `.sops.yaml` exists, the command
+  that writes one with them and refuses to overwrite a file already there.
 * Nothing is written in plaintext except in the test suite's explicit mode
   (`docs/development.md`, *Fixtures and secrets*), which never writes an
   encrypted file back in plaintext.
