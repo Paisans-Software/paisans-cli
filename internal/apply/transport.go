@@ -193,11 +193,28 @@ func (t SSHTransport) SSHArgs(keyFiles []string, command string) []string {
 	if t.Destination != "" {
 		return append(args, t.Destination, command)
 	}
-	args = append(args, "-p", strconv.Itoa(t.port()), "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout="+strconv.Itoa(t.connectTimeout()))
+	args = append(args, t.sectionOptions()...)
 	for _, f := range keyFiles {
 		args = append(args, "-i", f)
 	}
 	return append(args, t.User+"@"+t.Host, command)
+}
+
+// sectionOptions are the options a transport built from a site's ssh
+// section gives ssh before its key files.
+//
+// The deployment's own user (DefaultUser) is offered public keys alone. It
+// has no password, and on a host that has not admitted the deployment it
+// does not exist, where sshd asks for a password all the same: a prompt
+// nothing can answer, drawn over the command's output. With public keys
+// alone that host refuses the login, which authProblem reports as a host
+// that has not admitted the deployment.
+func (t SSHTransport) sectionOptions() []string {
+	opts := []string{"-p", strconv.Itoa(t.port()), "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=" + strconv.Itoa(t.connectTimeout())}
+	if t.DefaultUser {
+		opts = append(opts, "-o", "PreferredAuthentications=publickey")
+	}
+	return opts
 }
 
 // RemoteCommand is what ssh sends for command: command run by sh, whatever

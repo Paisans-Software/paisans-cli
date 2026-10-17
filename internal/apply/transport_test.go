@@ -55,6 +55,24 @@ func TestSSHArgsConnectTimeout(t *testing.T) {
 	}
 }
 
+// The deployment's own user logs in with a key or not at all. It has no
+// password, and on a host that has not admitted the deployment it does not
+// exist, where sshd still asks for one: offering only public keys makes that
+// host refuse the login, which is how it is told apart, instead of a password
+// prompt nothing can answer.
+func TestSSHArgsDefaultUserOffersOnlyKeys(t *testing.T) {
+	tr := apply.SSHTransport{Site: "home", User: "paisans-c111", Host: "vm.example.org", PublicKeys: []string{keyA}, DefaultUser: true}
+	want := []string{"-p", "22", "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=10", "-o", "PreferredAuthentications=publickey", "-i", "k1"}
+	got := tr.SSHArgs([]string{"k1"}, "true")
+	if !reflect.DeepEqual(got, append(append(apply.MuxArgs(), "-T"), append(want, "paisans-c111@vm.example.org", apply.RemoteCommand("", "true"))...)) {
+		t.Errorf("ssh args:\n got %q\nwant %q after -T", got, want)
+	}
+	fwd := tr.ForwardArgs([]string{"k1"}, "smtp.example.org:587")
+	if !reflect.DeepEqual(fwd, append(apply.MuxArgs(), append(want, "-W", "smtp.example.org:587", "paisans-c111@vm.example.org")...)) {
+		t.Errorf("forward args:\n got %q\nwant %q", fwd, want)
+	}
+}
+
 func TestSSHArgsDefaultToPort22(t *testing.T) {
 	tr := apply.SSHTransport{User: "ubuntu", Host: "vm.example.org", PublicKeys: []string{keyA}}
 	got := tr.SSHArgs([]string{"k1"}, "true")[len(apply.MuxArgs())+1:]
