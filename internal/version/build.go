@@ -61,11 +61,18 @@ var current = sync.OnceValue(func() Build {
 func Current() Build { return current() }
 
 // CheckLinked is nil unless the build set CommitVar to a value no record
-// may hold, as a short or upper-case commit: every command refuses then, so
+// may hold, as a short or upper-case commit, or to a release tag other than
+// v<Version>: every command refuses then, so
 // a packager learns of it before the binary writes anything.
 func CheckLinked() error {
 	if buildCommit == "" {
 		return nil
+	}
+	// A tag names the source the build was made from, which holds this
+	// Version: a tarball of v0.3.0-rc.1 holds 0.3.0-rc.1. Another tag names
+	// some other source, and every record would name the wrong commit.
+	if releaseTag(buildCommit) && buildCommit != "v"+Version {
+		return fmt.Errorf("this paisans %s was built with -X %s=%q, a release tag that is not this source's own, v%s. Build it again with the tag of the release it was built from, or its full commit", Version, CommitVar, buildCommit, Version)
 	}
 	// The 12 hex digits a pseudo-version carries are its own; a build that
 	// sets the commit gives it in full.

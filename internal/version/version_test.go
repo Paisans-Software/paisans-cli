@@ -141,7 +141,14 @@ func TestCheckLinked(t *testing.T) {
 			t.Errorf("%q: got %v", bad, err)
 		}
 	}
-	for _, good := range []string{"", commit, "v0.3.0", "v0.3.0-rc.1"} {
+	// A release tag is this source's own, or refused naming both.
+	for _, other := range []string{"v0.2.0", "v99.0.0-rc.1"} {
+		buildCommit = other
+		if err := CheckLinked(); err == nil || !strings.Contains(err.Error(), other) || !strings.Contains(err.Error(), "v"+Version) {
+			t.Errorf("%q: got %v", other, err)
+		}
+	}
+	for _, good := range []string{"", commit, "v" + Version} {
 		buildCommit = good
 		if err := CheckLinked(); err != nil {
 			t.Errorf("%q: %v", good, err)

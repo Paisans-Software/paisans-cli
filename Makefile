@@ -40,6 +40,10 @@ KACL ?= uvx --from python-kacl==0.7.0 kacl-cli
 # form the existing links use. The commit starts with kacl-skip: because it
 # empties [Unreleased], which changelog.yml would otherwise refuse on develop.
 #
+# A release whose pre-release was cut with every change in it has an empty
+# [Unreleased]: when a v<VERSION>-* tag exists, bump records the release as
+# that pre-release's, unchanged, rather than refusing it.
+#
 # Nothing here tags. Merging the pull request into main is what releases:
 # .github/workflows/release.yml sees a version on main with no tag, tags it
 # and publishes the GitHub Release. Tagging locally would put the tag on a
@@ -51,7 +55,12 @@ bump:
 	@if echo "$(VERSION)" | grep -Eq -- '-dev(\.|$$)'; then echo "$(VERSION) is develop's version, never a release; make dev sets it"; exit 1; fi
 	@test -z "$$(git status --porcelain)" || { echo "working tree is dirty; commit first"; exit 1; }
 	@if git rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null; then echo "tag v$(VERSION) already exists"; exit 1; fi
-	@$(KACL) get unreleased | grep -q '^- ' || { echo "[Unreleased] in CHANGELOG.md has no bullets; there is nothing to release"; exit 1; }
+	@if ! $(KACL) get unreleased | grep -q '^- '; then \
+		rc=$$(git tag --list 'v$(VERSION)-*' | sed 's/^v//' | sort -V | tail -1); \
+		case "$(VERSION)" in *-*) rc= ;; esac; \
+		if [ -z "$$rc" ]; then echo "[Unreleased] in CHANGELOG.md has no bullets; there is nothing to release"; exit 1; fi; \
+		$(KACL) add changed "The release of \`$$rc\`, unchanged since it." --modify; \
+	fi
 	@sed -i.relbak -E 's/^(const Version = ")[^"]*(")/\1$(VERSION)\2/' $(VERSION_FILE) && rm -f $(VERSION_FILE).relbak
 	@grep -q '^const Version = "$(VERSION)"' $(VERSION_FILE) || { echo "failed to update Version in $(VERSION_FILE)"; exit 1; }
 	@gofmt -l $(VERSION_FILE) | grep -q . && { echo "$(VERSION_FILE) is not gofmt-clean after the edit"; exit 1; } || true

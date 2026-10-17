@@ -31,9 +31,11 @@ the commit with
 `-ldflags "-X github.com/paisans-software/paisans-cli/internal/version.buildCommit=<commit>"`,
 which the release workflow passes as `COMMIT`. A packager building from a
 source tarball, which holds no git metadata (Eg: the Homebrew formula), sets
-it the same way, to the release's tag (Eg: `v0.3.0` or `v0.3.0-rc.1`) or its
-full 40-character lower-case commit; any other value, a short or upper-case
-commit among them, makes every command refuse to run, naming the variable.
+it the same way, to the tag of the release the tarball holds (Eg: `v0.3.0`
+or `v0.3.0-rc.1`, which is `v` and the source's own version constant) or its
+full 40-character lower-case commit; any other value, another release's tag
+or a short or upper-case commit among them, makes every command refuse to
+run, naming the variable.
 Without it, a build from a git checkout names the commit Go recorded, and a
 `go install ...@<version>` build names its module tag or the commit its
 pseudo-version carries. A build none of these names a commit for runs the

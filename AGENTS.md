@@ -249,7 +249,8 @@ head commit's message with `kacl-skip:`.
    count from the newest final release tag. It sets the constant, moves the
    `[Unreleased]` bullets into a dated section for that version, and commits
    both as `kacl-skip: release x.y.z`. It refuses a dirty tree, a version
-   already tagged and an empty `[Unreleased]`. The branch goes to `develop`
+   already tagged and an empty `[Unreleased]`, except for the release of a
+   pre-release cut with every change, whose section then says so. The branch goes to `develop`
    as a pull request titled `Release x.y.z`.
 2. A pull request from `develop` into `main`, titled `Release x.y.z to main`.
    Its body is the operator notes at the top of the GitHub Release: anything
