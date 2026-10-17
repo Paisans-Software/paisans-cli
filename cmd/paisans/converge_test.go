@@ -137,7 +137,7 @@ func initial(names ...string) render.EtcdInitial {
 // A member the founded cluster's initial-cluster does not list joins it.
 func TestConvergeJoinsAMemberTheClusterDoesNotList(t *testing.T) {
 	steps := convergePlan(fixture(t), convergeState{Initial: map[string]render.EtcdInitial{"home-a": initial("home-a", "vm"), "vm": initial("home-a", "vm")}})
-	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: apply --site watch", "storage: storage add"}, passTwoPhase)...)
+	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: apply --site watch", "other sites: apply --site home-a", "storage: storage add"}, passTwoPhase)...)
 }
 
 // One data site runs, founded alone, and the configuration adds a witness and
@@ -146,7 +146,7 @@ func TestConvergeJoinsAMemberTheClusterDoesNotList(t *testing.T) {
 // add of its own, which would refuse it as not a data site and stop the run.
 func TestConvergeJoinsAWitnessThroughTheDataSitesSiteAdd(t *testing.T) {
 	steps := convergePlan(fixture(t), convergeState{Initial: map[string]render.EtcdInitial{"home-a": initial("home-a")}})
-	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: apply --site watch", "storage: storage add"}, passTwoPhase)...)
+	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: apply --site watch", "other sites: apply --site home-a", "storage: storage add"}, passTwoPhase)...)
 }
 
 // A witness joining with no data site beside it is still planned, as its own
@@ -155,7 +155,7 @@ func TestConvergeJoinsAWitnessThroughTheDataSitesSiteAdd(t *testing.T) {
 func TestConvergePlansAWitnessJoiningAloneAsItsSiteAdd(t *testing.T) {
 	founded := initial("home-a", "home-b")
 	steps := convergePlan(fixture(t), convergeState{Initial: map[string]render.EtcdInitial{"home-a": founded, "home-b": founded}})
-	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"joining: site add vm", "other sites: apply --site watch", "storage: storage add"}, passTwoPhase)...)
+	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"joining: site add vm", "other sites: apply --site watch", "other sites: apply --site home-a", "other sites: apply --site home-b", "storage: storage add"}, passTwoPhase)...)
 }
 
 // A member a founding record lists is still being founded, though another
@@ -219,6 +219,22 @@ func TestConvergeStorageFollowsTheGarageSites(t *testing.T) {
 	samePlan(t, convergePlan(cfg, convergeState{}), slices.Concat(before, []string{"storage: storage init --site home-a"}, passTwoPhase)...)
 	cfg.Storage.Garage.Sites = nil
 	samePlan(t, convergePlan(cfg, convergeState{}), slices.Concat(before, passTwoPhase)...)
+}
+
+// A founded member's first apply is otherwise pass two, after storage, and
+// storage reads Garage's layout through its container: a Garage site whose
+// containers had gone stopped every run at storage, before the apply that
+// would start them. Each Garage site is applied before storage.
+func TestConvergeAppliesAFoundedGarageSiteBeforeStorage(t *testing.T) {
+	cfg := fixture(t)
+	cfg.Storage.Garage.Sites = []string{"home-a"}
+	founded := initial("home-a", "home-b", "vm")
+	steps := convergePlan(cfg, convergeState{Initial: map[string]render.EtcdInitial{"home-a": founded, "home-b": founded, "vm": founded}})
+	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{
+		"other sites: apply --site watch",
+		"other sites: apply --site home-a",
+		"storage: storage init --site home-a",
+	}, passTwoPhase)...)
 }
 
 // fakeConverge replaces each etcd record's read and the step runner; fail maps a
@@ -554,7 +570,7 @@ func TestConvergeReplansAfterInit(t *testing.T) {
 	if err := converge(t, "--execute"); err != nil {
 		t.Fatal(err)
 	}
-	sameLines(t, *ran, append([]string{"init"}, commands(slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: apply --site watch", "storage: storage add"}, passTwoPhase))...))
+	sameLines(t, *ran, append([]string{"init"}, commands(slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: apply --site watch", "other sites: apply --site home-a", "storage: storage add"}, passTwoPhase))...))
 }
 
 // The dry run names what is left, the declared operators among it.
@@ -778,6 +794,8 @@ func TestConvergeJoinsADerivedMember(t *testing.T) {
 		"dns: dns init",
 		"joining: site add home-c",
 		"other sites: apply --site watch",
+		"other sites: apply --site home-a",
+		"other sites: apply --site home-b",
 		"storage: storage add",
 		"pass two: apply --site home-a",
 		"pass two: apply --site home-b",
@@ -1278,6 +1296,8 @@ func TestConvergeDryRunChecksAFoundedMemberInPassTwo(t *testing.T) {
 		"✓ pull --site watch: nothing to pull",
 		"✓ dns init",
 		"✓ apply --site watch",
+		"✓ apply --site home-a",
+		"✓ apply --site home-b",
 		"○ storage add: 1 stage",
 		"· apply --site home-a: after storage add",
 		"· apply --site home-b: after storage add",
@@ -1438,6 +1458,7 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 				"✓ dns init",
 				"○ site add home-b: 4 stages",
 				"✓ apply --site watch",
+				"✓ apply --site home-a",
 				"· storage add: after site add home-b",
 				"· apply --site home-a: after storage add",
 				"· apply --site home-b: after site add home-b",
@@ -2318,7 +2339,7 @@ func TestConvergeSkipsADownSitesSteps(t *testing.T) {
 	sameLines(t, *ran, []string{
 		"host prepare --site home-a", "host prepare --site vm", "host prepare --site watch",
 		"dns init",
-		"apply --site watch",
+		"apply --site watch", "apply --site home-a",
 		"apply --site home-a", "apply --site vm", "apply --site watch",
 	})
 	if s := (*seen)[0]; s == nil || !slices.Equal(s.Down(), []string{"home-b"}) {

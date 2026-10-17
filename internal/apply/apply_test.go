@@ -18,6 +18,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
+	"gopkg.in/yaml.v3"
 )
 
 // wgHelper is the start of every command apply sends the WireGuard helper
@@ -123,6 +124,10 @@ type fakeHost struct {
 	// replicaHas is each app database, with its role, that a replica's read
 	// of its own catalogue finds.
 	replicaHas []string
+	// stopped is the state of a compose service's container, by
+	// "<stack>/<service>", in the read of which containers run: "absent" for
+	// none. Every other service a compose file on the host declares runs.
+	stopped map[string]string
 }
 
 func newHost() *fakeHost { return &fakeHost{files: map[string]string{}, leader: "home-a"} }
@@ -223,6 +228,9 @@ func (h *fakeHost) Run(command string) (string, error) {
 	}
 	if strings.HasPrefix(command, "docker image ls ") {
 		return h.images, nil
+	}
+	if strings.Contains(command, "--filter label=com.docker.compose.project") {
+		return h.stoppedProbe(), nil
 	}
 	if strings.HasPrefix(command, "docker ps -a ") {
 		return h.containers, nil
@@ -467,6 +475,40 @@ func (h *fakeHost) volumeProbe(command string) string {
 
 // networkProbe answers the loop apply sends to ask how each stack's default
 // network is addressed.
+// stoppedProbe answers the read of which containers run: one container for
+// each service of each compose file on the host, running unless stopped says
+// otherwise.
+func (h *fakeHost) stoppedProbe() string {
+	var b strings.Builder
+	for path, content := range h.files {
+		rest, ok := strings.CutPrefix(path, "/srv/paisans/f2a9/")
+		if !ok {
+			continue
+		}
+		stack, ok := strings.CutSuffix(rest, "/compose.yaml")
+		if !ok || strings.Contains(stack, "/") {
+			continue
+		}
+		var doc struct {
+			Services map[string]yaml.Node `yaml:"services"`
+		}
+		if yaml.Unmarshal([]byte(content), &doc) != nil {
+			continue
+		}
+		for service := range doc.Services {
+			state := h.stopped[stack+"/"+service]
+			switch state {
+			case "absent":
+				continue
+			case "":
+				state = "running"
+			}
+			fmt.Fprintf(&b, "paisans-f2a9-%s %s %s\n", stack, service, state)
+		}
+	}
+	return b.String()
+}
+
 func (h *fakeHost) networkProbe(command string) string {
 	list, _, _ := strings.Cut(strings.TrimPrefix(command, "for n in "), "; do")
 	var b strings.Builder
@@ -1020,9 +1062,9 @@ func TestPlanningOnlyProbesTheMesh(t *testing.T) {
 		t.Errorf("an unchanged psns-f2a9.conf on a host whose psns-f2a9 is down plans %v, want a start", p.WireGuard)
 	}
 	for _, command := range host.commands {
-		// The sweep's read of the host's images is the other probe a plan
-		// makes.
-		if !strings.HasPrefix(command, "ip -br addr show dev psns-f2a9") && !strings.Contains(command, "echo paisans-sweep-end") {
+		// The sweep's read of the host's images and the read of which
+		// containers run are the other probes a plan makes.
+		if !strings.HasPrefix(command, "ip -br addr show dev psns-f2a9") && !strings.Contains(command, "echo paisans-sweep-end") && !strings.Contains(command, "--filter label=com.docker.compose.project") {
 			t.Errorf("building a plan ran %q, which is more than a probe", command)
 		}
 	}

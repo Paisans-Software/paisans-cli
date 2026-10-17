@@ -226,6 +226,27 @@ func convergePlan(cfg *config.Config, st convergeState) []convergeStep {
 		steps = append(steps, applyStep(stageOthers, s))
 	}
 
+	// Storage reads and writes Garage's layout through its container, so
+	// every Garage site is applied before it. A founded member's first apply
+	// is otherwise pass two, after storage, which left storage exec'ing into
+	// a Garage that was not running whenever that site's containers had gone
+	// (Eg: removed to free disk space). On a site already running, the apply
+	// plans nothing and pass two plans nothing again.
+	before := map[string]bool{}
+	for _, s := range steps {
+		switch {
+		case len(s.Args) == 3 && s.Args[0] == "apply" && s.Args[1] == "--site":
+			before[s.Args[2]] = true
+		case len(s.Args) == 3 && s.Args[0] == "site" && s.Args[1] == "add":
+			before[s.Args[2]] = true
+		}
+	}
+	for _, g := range cfg.Storage.Garage.Sites {
+		if !before[g] {
+			steps = append(steps, applyStep(stageOthers, g))
+		}
+	}
+
 	// Garage's layout, across its sites when there are several, and each
 	// app's bucket and key.
 	switch garage := cfg.Storage.Garage.Sites; len(garage) {

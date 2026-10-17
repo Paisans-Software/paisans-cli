@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/apply/applytest"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 	"github.com/paisans-software/paisans-cli/internal/render"
@@ -107,6 +109,8 @@ func (h *host) Run(command string) (string, error) {
 		return `{"Service":"app","Name":"x","State":"exited","ExitCode":1}` + "\n", nil
 	case strings.Contains(command, " ps --all --format json"):
 		return `{"Service":"x","Name":"x","State":"running","Health":""}` + "\n", nil
+	case command == apply.ContainersRead:
+		return applytest.Running(h.files), nil
 	case strings.HasSuffix(command, " up -d"), strings.HasSuffix(command, " restart"), command == "docker image ls --no-trunc --format json", strings.HasPrefix(command, "docker ps -a --format"):
 		return "", nil
 	case strings.HasPrefix(command, "rm -f '"):
