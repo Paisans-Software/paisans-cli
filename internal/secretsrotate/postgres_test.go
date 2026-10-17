@@ -346,8 +346,10 @@ func TestClusterRolePasswordOnlyOnStdin(t *testing.T) {
 		}
 		if strings.Contains(c.command, "read -r PGPASSWORD") && strings.TrimSpace(c.stdin) == next {
 			sentToLogin = true
-			if !strings.Contains(c.command, "-h 127.0.0.1") {
-				t.Errorf("the login is not forced over TCP, where a password is asked for: %s", c.command)
+			// The leader's mesh address: over TCP, where a password is
+			// asked for, at the one address its Postgres listens on.
+			if !strings.Contains(c.command, "-h 10.0.0.2 ") {
+				t.Errorf("the login is not over TCP to the leader's mesh address, where a password is asked for: %s", c.command)
 			}
 		}
 	}

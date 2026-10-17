@@ -241,6 +241,12 @@ func (p *Plan) stop(err error) {
 // dep is the deployment every name and path here belongs to.
 func (p *Plan) dep() deployment.Deployment { return p.cfg.Deployment() }
 
+// etcdctl runs etcdctl against the member on the voter that controls the
+// removal, at its mesh address.
+func (p *Plan) etcdctl(args string) string {
+	return apply.Etcdctl(p.dep(), p.cfg.Sites[p.etcd.control].Address, args)
+}
+
 // now is the clock the deployment record's updates are stamped with. Tests
 // replace it.
 var now = time.Now

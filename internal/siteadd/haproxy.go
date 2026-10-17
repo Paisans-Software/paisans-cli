@@ -23,11 +23,11 @@ func (p *Plan) haproxyFile() string { return p.dep().RelPath("infra", "haproxy",
 // restart etcd and Patroni with it.
 func (p *Plan) restartHAProxy() string { return p.dep().ComposeCmd("infra") + " restart haproxy" }
 
-// statsProbe reads HAProxy's statistics as CSV from its loopback listener
-// (haproxy.cfg.tmpl, listen stats). curl is on the host: host prepare
-// installs it.
-func statsProbe() string {
-	return fmt.Sprintf("curl -fsS --max-time 5 'http://127.0.0.1:%d/stats;csv'", render.HAProxyStatsPort)
+// statsProbe reads HAProxy's statistics on site as CSV, from its listener on
+// the site's mesh address (haproxy.cfg.tmpl, listen stats). curl is on the
+// host: host prepare installs it.
+func (p *Plan) statsProbe(site string) string {
+	return fmt.Sprintf("curl -fsS --max-time 5 'http://%s:%d/stats;csv'", p.cfg.Sites[site].Address, render.HAProxyStatsPort)
 }
 
 // buildHAProxy is stage 6: every site running HAProxy gets the new backend,
@@ -191,7 +191,7 @@ func (p *Plan) restartProxy(site string, apps []string) error {
 // failed (no HAProxy answering its statistics) is still a no: that HAProxy
 // does need starting.
 func (p *Plan) servesEverySite(site string) (bool, error) {
-	out, err := p.transports[site].Run(statsProbe())
+	out, err := p.transports[site].Run(p.statsProbe(site))
 	if err != nil {
 		if errors.Is(err, apply.ErrUnreachable) {
 			return false, fmt.Errorf("site add %s: %s: could not read host state, so whether its HAProxy lists every site is unknown: %w", p.Site, site, err)
@@ -262,7 +262,7 @@ func (p *Plan) haproxyGate(sites []string) error {
 			problems = append(problems, "Patroni reports no leader")
 		}
 		for _, site := range sites {
-			out, err := p.transports[site].Run(statsProbe())
+			out, err := p.transports[site].Run(p.statsProbe(site))
 			if err != nil {
 				problems = append(problems, fmt.Sprintf("%s: HAProxy's statistics: %s", site, lastLines(out, 2)))
 				continue

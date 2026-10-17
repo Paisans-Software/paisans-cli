@@ -1872,7 +1872,10 @@ before.
 * **A clustered app has no Postgres service of its own** and connects to the
   HAProxy on its own site, at that site's mesh address and the cluster port
   (Eg: `10.44.0.1:5000`), never `127.0.0.1`, which inside the app's container
-  is the container itself. A pinned app gets its own container: an app that is
+  is the container itself. HAProxy binds that address alone, as every
+  host-networked listener does: the egress table drops the deployment's own
+  dials to loopback (`TestHostNetworkedServicesStayOffLoopback` and
+  `TestNothingTheDeploymentRunsDialsLoopback` hold it). A pinned app gets its own container: an app that is
   pinned must be pinned all the way down.
 * **Failover and the 503 live in the gateway file**, as the named snippets
   `upstream_failover` and `upstream_unavailable`, not in each kind. A kind's

@@ -466,7 +466,7 @@ func (d doctorReads) EtcdHealth(member string) (string, string) {
 }
 
 func (d doctorReads) EtcdVersion(member string) (string, string) {
-	return d.read(member, doctor.EtcdVersionCommand)
+	return d.read(member, doctor.EtcdVersionCommand(d.cfg.Sites[member].Address))
 }
 
 func (d doctorReads) PatroniCluster(site string) (string, string) {
@@ -475,7 +475,7 @@ func (d doctorReads) PatroniCluster(site string) (string, string) {
 }
 
 func (d doctorReads) Sync(member string) (string, string) {
-	return d.read(member, doctor.SyncCommand(d.cfg.Deployment()))
+	return d.read(member, doctor.SyncCommand(d.cfg.Deployment(), d.cfg.Sites[member].Address))
 }
 
 func (d doctorReads) PatroniLog(site string) string {

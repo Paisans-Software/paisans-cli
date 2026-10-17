@@ -604,7 +604,7 @@ func (p *Plan) buildEvictDatabase() *Stage {
 		}
 		if p.patroni.listed {
 			p.work("delete " + p.Site + "'s Patroni member key")
-			if out, err := p.transports[p.etcd.control].Run(apply.Etcdctl(p.dep(), "del "+p.memberKey())); err != nil {
+			if out, err := p.transports[p.etcd.control].Run(p.etcdctl("del " + p.memberKey())); err != nil {
 				return fmt.Errorf("%s: deleting %s: %w: %s", p.etcd.control, p.memberKey(), err, lastLines(out, 3))
 			}
 		}
@@ -647,11 +647,11 @@ func (p *Plan) buildEvictEtcd() *Stage {
 		return st
 	}
 	if p.etcd.member != nil {
-		st.Steps = append(st.Steps, Step{Site: p.etcd.control, Verb: "remove", Title: "remove " + p.Site + "'s etcd member", Text: fmt.Sprintf("%s's etcd member %s: %s", p.Site, p.etcd.member.HexID(), apply.Etcdctl(p.dep(), "member remove "+p.etcd.member.HexID()))})
+		st.Steps = append(st.Steps, Step{Site: p.etcd.control, Verb: "remove", Title: "remove " + p.Site + "'s etcd member", Text: fmt.Sprintf("%s's etcd member %s: %s", p.Site, p.etcd.member.HexID(), p.etcdctl("member remove "+p.etcd.member.HexID()))})
 	}
 	if p.witness != "" {
 		if p.etcd.witness != nil {
-			st.Steps = append(st.Steps, Step{Site: p.etcd.control, Verb: "remove", Title: "remove witness " + p.witness + "'s etcd member", Text: fmt.Sprintf("the witness %s's etcd member %s, leaving %s the one voter, since two voters are worse than one: %s", p.witness, p.etcd.witness.HexID(), p.end.Etcd.Members[0], apply.Etcdctl(p.dep(), "member remove "+p.etcd.witness.HexID()))})
+			st.Steps = append(st.Steps, Step{Site: p.etcd.control, Verb: "remove", Title: "remove witness " + p.witness + "'s etcd member", Text: fmt.Sprintf("the witness %s's etcd member %s, leaving %s the one voter, since two voters are worse than one: %s", p.witness, p.etcd.witness.HexID(), p.end.Etcd.Members[0], p.etcdctl("member remove "+p.etcd.witness.HexID()))})
 		}
 		if p.etcd.witnessRunning {
 			st.Steps = append(st.Steps, Step{Site: p.witness, Verb: "stop", Title: "stop etcd on " + p.witness, Text: "its etcd, which a removed member cannot rejoin: " + p.stopWitnessEtcd()})

@@ -102,7 +102,7 @@ func Gather(cfg *config.Config, transports map[string]apply.Transport) Evidence 
 	membership := false
 	for _, m := range answered(cfg.Etcd.Members) {
 		t := transports[m]
-		list, running, err := apply.ReadEtcdMembers(t, d)
+		list, running, err := apply.ReadEtcdMembers(t, d, cfg.Sites[m].Address)
 		if err == nil && running {
 			ev.Joined["etcd's membership"] = memberSites(cfg, list)
 			membership = true

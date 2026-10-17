@@ -1153,8 +1153,8 @@ func (c *checker) portCollision() {
 				if !collides(a, b) {
 					continue
 				}
-				// One finding per pair and port: a service on the mesh
-				// address and loopback is one collision, not two.
+				// One finding per pair and port, however many binds of
+				// each the pair holds.
 				pair := fmt.Sprintf("%s|%s|%d/%s", a.Owner, b.Owner, a.Port, a.Proto)
 				if reported[pair] {
 					continue
@@ -1170,9 +1170,8 @@ func (c *checker) portCollision() {
 }
 
 // collides reports whether two listeners on one site cannot both bind. The
-// same owner under the same key is one listener named twice, such as a
-// service on its mesh address and on loopback, which never overlaps anyway;
-// the same owner under two keys, such as an app published on its mesh
+// same owner under the same key is one service's own binds, which it keeps
+// apart itself; the same owner under two keys, such as an app published on its mesh
 // address and again on a web_server listen, is two binds like any others.
 func collides(a, b render.Listener) bool {
 	if a.Owner == b.Owner && a.Key == b.Key {

@@ -108,7 +108,7 @@ func (p *Plan) buildCluster() (*Stage, error) {
 	var gates []string
 	if p.etcd.control != "" {
 		if p.etcd.member != nil {
-			st.Steps = append(st.Steps, Step{Site: p.etcd.control, Verb: "remove", Title: "remove " + p.Site + "'s etcd member", Text: fmt.Sprintf("%s's etcd member %s: %s", p.Site, p.etcd.member.HexID(), apply.Etcdctl(p.dep(), "member remove "+p.etcd.member.HexID()))})
+			st.Steps = append(st.Steps, Step{Site: p.etcd.control, Verb: "remove", Title: "remove " + p.Site + "'s etcd member", Text: fmt.Sprintf("%s's etcd member %s: %s", p.Site, p.etcd.member.HexID(), p.etcdctl("member remove "+p.etcd.member.HexID()))})
 			if !p.HostGone {
 				st.Steps = append(st.Steps, Step{Site: p.Site, Verb: "stop", Title: "stop etcd on " + p.Site, Text: "its etcd, which a removed member cannot rejoin, so it does not restart in a loop: " + p.stopService("etcd")})
 			}
@@ -116,7 +116,7 @@ func (p *Plan) buildCluster() (*Stage, error) {
 		if p.witness != "" {
 			if p.etcd.witness != nil {
 				st.Steps = append(st.Steps, Step{Site: p.etcd.control, Verb: "check", Title: "check etcd voters", Text: fmt.Sprintf("etcd's voters are exactly %s, both healthy, before the second removal", strings.Join(sortedCopy(append(append([]string(nil), p.end.Etcd.Members...), p.witness)), " and "))})
-				st.Steps = append(st.Steps, Step{Site: p.etcd.control, Verb: "remove", Title: "remove witness " + p.witness + "'s etcd member", Text: fmt.Sprintf("the witness %s's etcd member %s, leaving %s the one voter, since two voters are worse than one: %s", p.witness, p.etcd.witness.HexID(), p.end.Etcd.Members[0], apply.Etcdctl(p.dep(), "member remove "+p.etcd.witness.HexID()))})
+				st.Steps = append(st.Steps, Step{Site: p.etcd.control, Verb: "remove", Title: "remove witness " + p.witness + "'s etcd member", Text: fmt.Sprintf("the witness %s's etcd member %s, leaving %s the one voter, since two voters are worse than one: %s", p.witness, p.etcd.witness.HexID(), p.end.Etcd.Members[0], p.etcdctl("member remove "+p.etcd.witness.HexID()))})
 			}
 			if p.etcd.witnessRunning {
 				st.Steps = append(st.Steps, Step{Site: p.witness, Verb: "stop", Title: "stop etcd on " + p.witness, Text: "its etcd, which a removed member cannot rejoin, found by this deployment's label and the infrastructure project's etcd service: " + p.stopWitnessEtcd()})
@@ -284,7 +284,7 @@ func (p *Plan) removeWitness() error {
 			continue
 		}
 		p.work("remove witness " + p.witness + "'s etcd member")
-		if out, err := p.transports[p.etcd.control].Run(apply.Etcdctl(p.dep(), "member remove "+m.HexID())); err != nil {
+		if out, err := p.transports[p.etcd.control].Run(p.etcdctl("member remove " + m.HexID())); err != nil {
 			return fmt.Errorf("%s: etcdctl member remove %s: %w: %s", p.etcd.control, m.HexID(), err, lastLines(out, 3))
 		}
 	}
@@ -312,7 +312,7 @@ func (p *Plan) removeEtcdMember() error {
 			continue
 		}
 		p.work("remove " + p.Site + "'s etcd member")
-		if out, err := p.transports[p.etcd.control].Run(apply.Etcdctl(p.dep(), "member remove "+m.HexID())); err != nil {
+		if out, err := p.transports[p.etcd.control].Run(p.etcdctl("member remove " + m.HexID())); err != nil {
 			return fmt.Errorf("%s: etcdctl member remove %s: %w: %s", p.etcd.control, m.HexID(), err, lastLines(out, 3))
 		}
 	}
@@ -320,7 +320,7 @@ func (p *Plan) removeEtcdMember() error {
 }
 
 func (p *Plan) etcdMembers() ([]apply.EtcdMember, error) {
-	out, err := p.transports[p.etcd.control].Run(apply.Etcdctl(p.dep(), "member list -w json"))
+	out, err := p.transports[p.etcd.control].Run(p.etcdctl("member list -w json"))
 	if err != nil {
 		return nil, fmt.Errorf("%s: etcd's member list: %w: %s", p.etcd.control, err, lastLines(out, 3))
 	}
@@ -349,7 +349,7 @@ func (p *Plan) etcdVoters(sites []string) error {
 		if strings.Join(voters, ",") != want {
 			return fmt.Errorf("the voters are %s, and they should be %s", strings.Join(voters, ", "), strings.ReplaceAll(want, ",", ", "))
 		}
-		out, err := p.transports[p.etcd.control].Run(apply.Etcdctl(p.dep(), "endpoint health --cluster -w json"))
+		out, err := p.transports[p.etcd.control].Run(p.etcdctl("endpoint health --cluster -w json"))
 		var health []endpointHealth
 		if jerr := json.Unmarshal([]byte(strings.TrimSpace(out)), &health); jerr != nil {
 			return fmt.Errorf("endpoint health: %s", lastLines(out, 3))
@@ -416,8 +416,10 @@ func reloadCaddy(d deployment.Deployment) string {
 // bind mount, which only a restart reads again (see site add's).
 func (p *Plan) restartHAProxy() string { return p.dep().ComposeCmd("infra") + " restart haproxy" }
 
-func statsProbe() string {
-	return fmt.Sprintf("curl -fsS --max-time 5 'http://127.0.0.1:%d/stats;csv'", render.HAProxyStatsPort)
+// statsProbe reads HAProxy's statistics on site as CSV, from its listener on
+// the site's mesh address (see site add's).
+func (p *Plan) statsProbe(site string) string {
+	return fmt.Sprintf("curl -fsS --max-time 5 'http://%s:%d/stats;csv'", p.cfg.Sites[site].Address, render.HAProxyStatsPort)
 }
 
 // databaseApps is the apps on site that reach the cluster's database through
@@ -436,7 +438,7 @@ func (p *Plan) databaseApps(site string) []string {
 // removed site, so a run that wrote the file and stopped before restarting
 // restarts it.
 func (p *Plan) proxyLists(site string) (bool, error) {
-	out, err := p.transports[site].Run(statsProbe())
+	out, err := p.transports[site].Run(p.statsProbe(site))
 	if err != nil {
 		if errors.Is(err, apply.ErrUnreachable) {
 			return false, fmt.Errorf("site remove %s: %s: could not read host state, so whether its HAProxy lists %s is unknown: %w", p.Site, site, p.Site, err)
@@ -542,7 +544,7 @@ func (p *Plan) haproxyGate(sites []string) error {
 			}
 		}
 		for _, site := range sites {
-			out, err := p.transports[site].Run(statsProbe())
+			out, err := p.transports[site].Run(p.statsProbe(site))
 			if err != nil {
 				return fmt.Errorf("%s: HAProxy's statistics: %w: %s", site, err, lastLines(out, 2))
 			}

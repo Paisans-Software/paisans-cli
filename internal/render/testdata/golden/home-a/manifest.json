@@ -58,7 +58,7 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/compose.yaml",
-      "sha256": "13af9664c586e926a87de404d882bc5f10ae3a989ef5b53b46dfabe7265721b0",
+      "sha256": "a4dda0d9d37ca89bccbb6c6f2358ac18a96a3214953039041bcb3ad3c9760a41",
       "mode": "0644"
     },
     {
@@ -73,7 +73,7 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/haproxy/haproxy.cfg",
-      "sha256": "3a965e692f92cae158710a13a1b77e99c4c98739b414b59b2f8b3a3a4ad80206",
+      "sha256": "03b5fa12641e0ce3a77e1299b263b1de1e35bdf42f46683ee1af9d39c86c5d4c",
       "mode": "0644"
     },
     {
@@ -88,7 +88,7 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/patroni.env",
-      "sha256": "8e0fc9cabb23d9691d199819501571d557d123453cf726e488ee7923c99ec7aa",
+      "sha256": "305df9737919a9d7f2a5f3264a20fbd2a8584749ffcbc6a5256a9e2c9e62a8ad",
       "mode": "0600"
     },
     {

@@ -144,8 +144,8 @@ const firstLoginUID = 1000
 // A listener conflicts when the ports and protocols match and either side
 // binds every address or both bind the same one, which is what stops a bind
 // (render.Listener.Overlaps). That holds for the base system too: a
-// loopback Postgres does not make a host shared, but the toolkit's own
-// loopback bind on its port would fail.
+// loopback Postgres does not make a host shared, and one on every address
+// stops the toolkit's own bind on the mesh address.
 func Classify(claims Claims, inv *Inventory) *Report {
 	r := &Report{Site: claims.Site, Host: inv.Host, Inventory: inv}
 	o := owners{inv: inv, id: claims.Deployment.ID, iface: claims.Interface, port: claims.ListenPort}

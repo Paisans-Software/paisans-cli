@@ -51,7 +51,7 @@ func (p *Plan) probeEtcd() error {
 	// founded a cluster of its own is found whichever of them comes first.
 	var views []etcdView
 	for _, name := range p.live(p.end.Etcd.Members) {
-		cluster, running, err := apply.ReadEtcdCluster(p.transports[name], p.dep())
+		cluster, running, err := apply.ReadEtcdCluster(p.transports[name], p.dep(), p.cfg.Sites[name].Address)
 		if err != nil {
 			return fmt.Errorf("site remove %s: %s: %w", p.Site, name, err)
 		}
@@ -259,7 +259,7 @@ func joinAnd(list []string) string {
 // etcdctl exits non zero when any endpoint is unhealthy and still prints
 // every endpoint, so the answer is read whatever the exit.
 func (p *Plan) etcdHealth(members []apply.EtcdMember) (map[string]bool, error) {
-	out, err := p.transports[p.etcd.control].Run(apply.Etcdctl(p.dep(), "endpoint health --cluster -w json"))
+	out, err := p.transports[p.etcd.control].Run(p.etcdctl("endpoint health --cluster -w json"))
 	var health []endpointHealth
 	if jerr := json.Unmarshal([]byte(strings.TrimSpace(out)), &health); jerr != nil {
 		if err != nil {
@@ -644,7 +644,7 @@ func (p *Plan) runData() error {
 			}
 		}
 		p.work("delete " + p.Site + "'s Patroni member key")
-		if out, err := p.transports[p.etcd.control].Run(apply.Etcdctl(p.dep(), "del "+p.memberKey())); err != nil {
+		if out, err := p.transports[p.etcd.control].Run(p.etcdctl("del " + p.memberKey())); err != nil {
 			return fmt.Errorf("%s: deleting %s: %w: %s", p.etcd.control, p.memberKey(), err, lastLines(out, 3))
 		}
 	}

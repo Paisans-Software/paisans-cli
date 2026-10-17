@@ -20,6 +20,11 @@
 	acme_dns desec {
 		token {env.ACME_DNS_TOKEN}
 	}
+	# The admin API on a socket inside this container, where `caddy reload`
+	# run in it finds it. Caddy shares the host's network, where the
+	# deployment's dials to loopback are dropped, and an admin API on TCP
+	# there would be any local user's to rewrite.
+	admin unix//run/caddy-admin.sock
 
 	servers {
 		# The mesh, never a host address, so the gateway role can move without

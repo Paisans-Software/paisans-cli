@@ -83,8 +83,9 @@ stack's own sidecars, and two kinds listening on the same port would collide.
 The Docker bridge gateway would work only if HAProxy bound an address that
 differs per compose network and does not exist until Docker creates it. The
 mesh address exists as soon as the deployment's WireGuard interface is up, before anything else starts, and
-is already declared in the configuration. HAProxy still listens on loopback as
-well, for a tool run on the host.
+is already declared in the configuration. HAProxy listens on the mesh address
+alone, for a command run on the host as much as for the applications (see
+"Egress keeps the deployment off the owner's network").
 
 Pinned stacks talk to their own database directly and are not affected — see
 rule 5.
@@ -4998,7 +4999,8 @@ A listener conflicts when the ports and protocols match and either side binds
 every address or both bind the same one, which is exactly when the second
 bind fails. That holds for a base system listener too, root's, a system
 user's or a loopback one: a loopback Postgres does not make a host shared,
-but the toolkit's own bind on 5432 would fail on it. A foreign container's published ports count whether or not
+and leaves the toolkit's bind on the mesh address free, while one on every
+address stops it. A foreign container's published ports count whether or not
 anything listens, because Docker without its userland proxy publishes with no
 listener, and a stopped container binds again when it starts. A foreign
 Docker network whose subnet overlaps the mesh conflicts, because containers
@@ -5342,6 +5344,16 @@ deployment's services need, is never caught by the drops. Rule 4 follows
 rule 3, since loopback addresses are local too, and precedes rule 5, which
 would drop the gateway's own ports, and rule 6, since the host's own IPv6
 address lies in an on-link prefix.
+
+Rule 3 drops the deployment's dials to its own loopback too, so the
+deployment stays off loopback entirely. Every listener the toolkit renders
+for etcd, Patroni, Postgres, HAProxy and Garage binds the site's mesh address
+alone, and every command `apply`, `doctor`, `site add`, `site remove`,
+`storage add` and `secrets rotate` run on a host dials a mesh address, which
+rule 1 accepts. Caddy serves its admin API on a unix socket inside its
+container, where `caddy reload` run in that container reaches it. A test
+fails any rendered file for a host-networked container, and any string in the
+CLI's code, that names loopback without a reviewed reason.
 
 WireGuard's UDP is sent by the kernel, not by the user, so the chain above
 never sees it, and the user writes each peer's endpoint. The WireGuard helper
@@ -8565,8 +8577,8 @@ of a single file keeps the inode it started with (moby/moby#15793), so a
 reloaded HAProxy would read the old file. Restarting HAProxy alone remounts it,
 and is what `apply` itself does for a changed `haproxy.cfg` (see "`apply`
 restarts only the infrastructure service whose file changed"). The gate
-reads HAProxy's statistics from a listener on `127.0.0.1:8404`, as CSV. That
-listener is new in every rendered `haproxy.cfg`, so a deployment that applies
+reads HAProxy's statistics from a listener on the site's mesh address, port
+8404 (Eg: `10.44.0.1:8404`), as CSV. That listener is new in every rendered `haproxy.cfg`, so a deployment that applies
 before growing restarts its infrastructure stack once for it.
 
 **The apps that use the database are stopped around HAProxy's restart.** On
@@ -9351,7 +9363,7 @@ closing list is usually the cause of those after it:
 | Sudo rights | `LC_ALL=C sudo -n -l` | sudo lets the user run anything but the WireGuard helper as root, carries a Defaults entry or runas line beyond admit's one rule, or does not let it run the helper. An answer doctor cannot read, such as a translated one, is a `WARN` |
 | Mesh | `ip -j link show dev psns-<token>`, then the overlap test of *Two deployments on one host never share a mesh*: `ip -j route show table all`, `ip -j addr`, `docker network inspect` and the user's `~/.config/docker/daemon.json`, on every site that answered | the interface is missing or down, or anything outside it overlaps `mesh.subnet`, named with the subnet. The advice is that the subnet is fixed once deployed and the other network moves |
 | etcd quorum | `etcdctl endpoint health -w json` in the etcd container of the first member that answers, naming every member of `etcd.members` by its mesh address | fewer than half the members plus one are healthy. One member down with quorum intact is a `WARN` |
-| etcd version | `curl` on the host to `http://127.0.0.1:2379/version`; skipped, and said so, where the host has no `curl` | the cluster version is `3.0.0` under a 3.5 server |
+| etcd version | `curl` on the host to the member's `http://<mesh address>:2379/version`; skipped, and said so, where the host has no `curl` | the cluster version is `3.0.0` under a 3.5 server |
 | Patroni | `/cluster` from every database site's Patroni, through `curl` in its container as `apply` asks it, and Patroni's `/sync` key from etcd | there is no running leader. A replica that is not `streaming`, or more than 16 MiB behind, is a `WARN`, and so is a leader with no Sync Standby while `cluster.synchronous` is true |
 | Containers | `docker ps -a --filter label=community.paisans.deployment=<id>` on every site, then `docker inspect` and the end of `docker logs` for each container not running or unhealthy | any container is not running, or runs while its healthcheck reports `unhealthy`, shown with the last lines its healthchecks printed. A healthcheck still `starting` is a `WARN`, since it has not failed but the container is not yet known to work; a container with no healthcheck is judged by running alone |
 | Settings | for each app setting `gated`, the read its kind records, run in the app's running container on each site it runs on: Mbin's environment and `MBIN_LOCKED_SETTINGS`, WriteFreely's `writefreely settings list` | a setting the gate leaves to the app (private instance mode, the allow list, authorized fetch, WriteFreely's private mode) is off or not locked. The advice is `paisans apply --site <site>`, which renders the file that writes and locks it and recreates the stack, or a newer image when the app does not honour the lock. See *The settings gating needs are checked on both sides* |

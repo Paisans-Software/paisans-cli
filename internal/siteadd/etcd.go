@@ -29,7 +29,7 @@ func (p *Plan) probeEtcd() ([]apply.EtcdMember, error) {
 	}
 	order = append(order, p.Site)
 	for _, name := range order {
-		members, running, err := apply.ReadEtcdMembers(p.transports[name], p.dep())
+		members, running, err := apply.ReadEtcdMembers(p.transports[name], p.dep(), p.cfg.Sites[name].Address)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}
@@ -155,7 +155,7 @@ func clusterString(members map[string]string) string {
 }
 
 func (p *Plan) members() ([]apply.EtcdMember, error) {
-	out, err := p.transports[p.control].Run(apply.Etcdctl(p.dep(), "member list -w json"))
+	out, err := p.transports[p.control].Run(apply.Etcdctl(p.dep(), p.cfg.Sites[p.control].Address, "member list -w json"))
 	if err != nil {
 		return nil, fmt.Errorf("%s: etcd's member list: %w", p.control, err)
 	}
@@ -195,7 +195,7 @@ func (p *Plan) joinEtcd(j string) error {
 		// learner was added moments after the first was promoted and was
 		// refused for exactly that, so the add is retried on that answer
 		// alone, the way promotion is retried while a learner catches up.
-		command := apply.Etcdctl(p.dep(), fmt.Sprintf("member add %s --peer-urls=%s --learner", j, url))
+		command := apply.Etcdctl(p.dep(), p.cfg.Sites[p.control].Address, fmt.Sprintf("member add %s --peer-urls=%s --learner", j, url))
 		delay := promoteFirstDelay
 		for i := 0; ; i++ {
 			out, err := control.Run(command)
@@ -288,7 +288,7 @@ func (p *Plan) joinEtcd(j string) error {
 	delay := promoteFirstDelay
 	var last string
 	for i := 0; i < promoteAttempts; i++ {
-		out, err := control.Run(apply.Etcdctl(p.dep(), "member promote "+m.HexID()))
+		out, err := control.Run(apply.Etcdctl(p.dep(), p.cfg.Sites[p.control].Address, "member promote "+m.HexID()))
 		if err == nil {
 			return nil
 		}
@@ -318,7 +318,7 @@ func (p *Plan) etcdGate() error {
 	n := attempts(etcdWait, etcdPoll)
 	for i := 0; i < n; i++ {
 		problems = nil
-		out, err := p.transports[p.control].Run(apply.Etcdctl(p.dep(), "endpoint health --cluster -w json"))
+		out, err := p.transports[p.control].Run(apply.Etcdctl(p.dep(), p.cfg.Sites[p.control].Address, "endpoint health --cluster -w json"))
 		var health []endpointHealth
 		if jerr := json.Unmarshal([]byte(strings.TrimSpace(out)), &health); jerr != nil {
 			problems = append(problems, "endpoint health: "+lastLines(out, 3))
