@@ -16,7 +16,8 @@ import (
 // that it did not have, each package by name and Docker's apt key and
 // source by path, for every admitted deployment, and each directory admit
 // created that evict removes once empty. Host evict names what is
-// installed once the last deployment goes: it stays installed.
+// installed once the last deployment goes: it stays installed, and this
+// list stays with it, so a later admit knows the system Docker as its own.
 //
 // A package is claimed as Installing before the install runs and becomes
 // one of Packages when dpkg shows it installed as the install exits,
@@ -177,6 +178,14 @@ func planSystemDocker(p *planner, s hostprep.Section, added hostprep.Installed) 
 	if err != nil {
 		return err
 	}
+	// A package the list already claims, which readInstalled keeps only
+	// while it is on disk and its claim under admit's hold, is admit's
+	// own, being installed again after a run that stopped part way: its
+	// units are admit's, not another source's.
+	claimed := func(pkg string) bool { return slices.Contains(was.all(), pkg) }
+	if err := refuseForeignUnits(p, slices.DeleteFunc(slices.Clone(added.Packages), claimed)); err != nil {
+		return err
+	}
 	var dirs []string
 	if !p.f.Dirs[delegateDir].Present {
 		dirs = append(dirs, delegateDir)
@@ -218,28 +227,109 @@ func planSystemDocker(p *planner, s hostprep.Section, added hostprep.Installed) 
 	if err != nil {
 		return err
 	}
-	running := slices.ContainsFunc(units, func(u string) bool {
-		s := p.f.Docker.SystemUnits[u]
-		return s.Enabled || s.Active
-	})
-	// Held disabled and never run: no unit enabled, and no network store,
-	// which a daemon the owner started and stopped again leaves.
-	p.heldDocker = slices.Contains(units, "docker.service") && !p.f.Docker.NetworkStore &&
-		!slices.ContainsFunc(units, func(u string) bool { return p.f.Docker.SystemUnits[u].Enabled })
+	// The units of a package this run installs for the first time were
+	// held while they installed: they never ran, and are disabled with
+	// --now. Those of a package an earlier run claimed are earlier ones,
+	// even when this run installs it again. Of those, one that is off
+	// (neither enabled nor running) is disabled with what this run
+	// installs, since its package's script may enable it as it installs
+	// again; it stays off either way. The rest are disabled only when no
+	// record says admit disabled them and they never ran: no unit active,
+	// no network store and no containerd root directory, as an admit that
+	// stopped between its install and the disable leaves them. One that
+	// has run may be running the owner's containers by now, or run them at
+	// the next boot, which disabling it would stop, so it is refused.
+	on := func(u string) bool { s := p.f.Docker.SystemUnits[u]; return s.Enabled || s.Active }
+	fresh := hostprep.SystemUnits(slices.DeleteFunc(slices.Clone(added.Packages), claimed))
+	earlier := slices.DeleteFunc(slices.Clone(units), func(u string) bool { return slices.Contains(fresh, u) })
+	again := slices.DeleteFunc(hostprep.SystemUnits(slices.DeleteFunc(slices.Clone(added.Packages), func(pkg string) bool { return !claimed(pkg) })), on)
+	running := slices.ContainsFunc(earlier, on)
+	ran := slices.ContainsFunc(earlier, func(u string) bool { return p.f.Docker.SystemUnits[u].Active }) ||
+		p.f.Docker.Ran() && slices.Contains(earlier, "docker.service") ||
+		p.f.Docker.ContainerdRan && slices.Contains(earlier, "containerd.service")
+	disable := slices.DeleteFunc(slices.Clone(units), func(u string) bool { return !slices.Contains(fresh, u) && !slices.Contains(again, u) })
 	switch {
-	case !installs && !recorded && running && unknown != "":
-		p.present("docker: the system daemon admit installed is running and left as it is, since " + unknown + " cannot be read and may say admit disabled it once")
-	case installs || !recorded && running:
-		p.step(Step{Title: "disable the system Docker",
-			Describe: "docker: the deployments run their own rootless daemons, so the system daemons admit installed, which their packages enable, are disabled (" + strings.Join(units, ", ") + "), and were kept from starting while they installed: they never changed forwarding, docker0 or the firewall",
-			Command:  "systemctl disable --now " + strings.Join(units, " ") + " && if ip link show docker0 >/dev/null 2>&1; then echo 'docker0 exists, so the system Docker ran and changed forwarding and the firewall as it started. It is disabled now: reboot the host, which clears what it changed, and admit again'; exit 1; fi",
-			Kinds:    []string{"docker"}})
-	case running:
+	case recorded && running:
 		p.present("docker: the system daemon admit installed and disabled has been enabled since, and is left as it is")
-	default:
+	case running && unknown != "":
+		p.present("docker: the system daemon admit installed is running and left as it is, since " + unknown + " cannot be read and may say admit disabled it once")
+	case running && ran:
+		return systemDockerRan(p, earlier, now)
+	case running:
+		disable = units
+	case len(disable) == 0:
 		p.present("docker: the system daemon admit installed is disabled")
 	}
+	// A system Docker of admit's that never ran has no networks, and its
+	// socket is gone once its units are disabled: the mesh's check reads
+	// none for it. Any other that does not answer still has its networks.
+	p.heldDocker = slices.Contains(units, "docker.service") && !p.f.Docker.Ran() &&
+		!slices.ContainsFunc(units, func(u string) bool { return p.f.Docker.SystemUnits[u].Active }) &&
+		(slices.Contains(disable, "docker.service") || !slices.ContainsFunc(units, on))
+	if len(disable) > 0 {
+		p.step(Step{Title: "disable the system Docker",
+			Describe: "docker: the deployments run their own rootless daemons, so the system daemons admit installed, which their packages enable, are disabled (" + strings.Join(disable, ", ") + "), and were kept from starting while they installed: they never changed forwarding, docker0 or the firewall",
+			Command:  "systemctl disable --now " + strings.Join(disable, " ") + " && if ip link show docker0 >/dev/null 2>&1; then echo 'docker0 exists, so the system Docker ran and changed forwarding and the firewall as it started. It is disabled now: reboot the host, which clears what it changed, and admit again'; exit 1; fi",
+			Kinds:    []string{"docker"}})
+	}
 	return nil
+}
+
+// refuseForeignUnits refuses a unit of a package this run installs that
+// is already enabled or running: no claim of admit's covers its package,
+// which is not installed, so the unit is the owner's, from another source,
+// or from an install of theirs dpkg has left unconfigured, and the disable
+// after the install would stop it. The unit file of a package on disk is
+// the package's, so that refusal says to finish or purge the package
+// rather than to remove the file.
+func refuseForeignUnits(p *planner, packages []string) error {
+	for _, pkg := range packages {
+		for _, u := range hostprep.SystemUnits([]string{pkg}) {
+			if s := p.f.Docker.SystemUnits[u]; !s.Enabled && !s.Active {
+				continue
+			}
+			if p.f.onDisk(pkg) {
+				return fmt.Errorf("%s is enabled or running, and %s is on disk but not configured, by an install admit does not claim, so it is yours. Admit would install it again and disable %s with it, which would stop it. Nothing was changed. Finish its install (dpkg --configure -a), or purge it (apt-get purge %s), and admit again", u, pkg, u, pkg)
+			}
+			return fmt.Errorf("%s is enabled or running, and %s is not installed, so it is not Docker's: it is yours, from another source. Admit installs %s, whose own %s it then disables, which would stop yours. Nothing was changed. While it is there, admit cannot install Docker on this host: once nothing needs it, disable it, remove its unit file, and admit again", u, pkg, pkg, u)
+		}
+	}
+	return nil
+}
+
+// systemDockerRan is the refusal for system daemons admit installed that
+// are enabled or running, have run, and that no admission record says
+// admit disabled: they may run the owner's containers by now, and
+// disabling them would stop those. The owner says whose they are: theirs,
+// by taking their packages off the list, or admit's again, by leaving them
+// as admit takes a daemon that never ran.
+func systemDockerRan(p *planner, units []string, list installed) error {
+	var lines []string
+	for _, pkg := range []string{"docker-ce", "containerd.io"} {
+		if !slices.ContainsFunc(units, func(u string) bool { return slices.Contains(hostprep.SystemUnits([]string{pkg}), u) }) {
+			continue
+		}
+		switch {
+		case slices.Contains(list.Packages, pkg):
+			lines = append(lines, "package "+pkg)
+		case slices.Contains(list.Installing, pkg):
+			lines = append(lines, "installing "+pkg)
+		}
+	}
+	what := "the line " + strings.Join(lines, "")
+	if len(lines) > 1 {
+		what = "the lines " + strings.Join(lines, " and ")
+	}
+	back := "systemctl disable --now " + strings.Join(units, " ")
+	if slices.Contains(units, "docker.service") {
+		store := p.f.Docker.NetworkStorePath()
+		if p.f.Docker.DataRootUnread {
+			store = "network/files/local-kv.db under the data-root /etc/docker/daemon.json sets, which admit cannot read: write it on one line, as \"data-root\": \"/absolute/path\", so admit can"
+		}
+		back += ", remove " + store
+	}
+	return fmt.Errorf("the system daemons admit installed (%s) are enabled or running and have run, and no admission record says admit disabled them, so they may be running your containers, which disabling them would stop. Nothing was changed. To keep them as yours, remove %s from %s and admit again. To give them back to admit, stop your containers on them, run %s, reboot the host, which clears what they changed to forwarding, docker0 and the firewall, and admit again",
+		strings.Join(units, ", "), what, installedPath, back)
 }
 
 // disabledBefore reports whether an admission record on the host, this

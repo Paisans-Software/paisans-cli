@@ -185,9 +185,9 @@ type planner struct {
 	record admission.Record
 	// sx caches sysctls(), which both sysctl parts plan from.
 	sx *sysctlState
-	// heldDocker is a system Docker admit installed whose units none
-	// enables and that left no network store: it has never run, so it has
-	// no networks.
+	// heldDocker is a system Docker admit installed that has never run, no
+	// unit active and no network store, and whose units none enables or
+	// this run disables: it has no networks.
 	heldDocker bool
 	// prev caches previous(): this deployment's record as the host holds it.
 	prev struct {

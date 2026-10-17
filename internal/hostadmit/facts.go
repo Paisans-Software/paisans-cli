@@ -6,11 +6,13 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/netip"
+	"path"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"text/template"
+	"unicode"
 
 	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/admitrules"
@@ -124,10 +126,38 @@ type DockerFacts struct {
 	// under which apt may have run; without it the run stopped before
 	// apt.
 	Held, HeldPolicy bool
-	// NetworkStore is the system Docker's network store being there, which
-	// only a daemon that has run leaves.
+	// NetworkStore is the system Docker's network store being there, under
+	// DataRoot, which only a daemon that has run leaves.
 	NetworkStore bool
+	// DataRoot is the data-root /etc/docker/daemon.json sets, "" for
+	// Docker's default; DataRootUnread is one set that the probe cannot
+	// read, which may hold a network store.
+	DataRoot       string
+	DataRootUnread bool
+	// ContainerdRan is containerd's root directory being there, which
+	// containerd creates as it first starts and no package ships, or a
+	// root in /etc/containerd/config.toml the probe cannot read, which may
+	// be: the system containerd may have run.
+	ContainerdRan bool
 }
+
+// defaultDataRoot is where the system Docker keeps its data with no
+// data-root set.
+const defaultDataRoot = "/var/lib/docker"
+
+// NetworkStorePath is the system Docker's network store under its
+// data-root.
+func (d DockerFacts) NetworkStorePath() string {
+	root := d.DataRoot
+	if root == "" {
+		root = defaultDataRoot
+	}
+	return root + "/network/files/local-kv.db"
+}
+
+// Ran reports whether the system Docker may have run: its network store
+// is there, or the data-root that would hold it cannot be read.
+func (d DockerFacts) Ran() bool { return d.NetworkStore || d.DataRootUnread }
 
 // UnitState is whether a system unit is enabled, and active.
 type UnitState struct{ Enabled, Active bool }
@@ -320,6 +350,17 @@ func parseFacts(out, user string) (Facts, error) {
 				Active: slices.Contains([]string{"active", "activating", "reloading"}, fields[2])}
 		case "docker-networks":
 			f.Docker.NetworkStore = v == "present"
+		case "docker-root":
+			switch {
+			case v == "unreadable":
+				f.Docker.DataRootUnread = true
+			case v != defaultDataRoot && path.IsAbs(v) && path.Clean(v) == v && !strings.ContainsFunc(v, unicode.IsControl):
+				f.Docker.DataRoot = v
+			case v != defaultDataRoot:
+				f.Docker.DataRootUnread = true
+			}
+		case "containerd-ran":
+			f.Docker.ContainerdRan = v != "absent"
 		case "docker-hold":
 			f.Docker.Held, f.Docker.HeldPolicy = v == "policy" || v == "leftover", v == "policy"
 		case "userns-restrict":

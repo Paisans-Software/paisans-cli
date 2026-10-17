@@ -5225,14 +5225,37 @@ plugin from Docker's own apt repository, as
 describes. An install needs one source, and that one gives every host the
 toolkit admits the same engine from the same source, whenever it was admitted.
 Docker's system daemons are kept from starting while its packages install and
-are then disabled, so only the deployments' rootless daemons run.
+are then disabled, so only the deployments' rootless daemons run. What admit
+installed is listed in `/etc/paisans/installed`, root's and mode 644. `site
+evict` keeps the packages and that list when the last deployment goes, so a
+later admit on the host, of any deployment, knows the system daemons as its
+own and leaves them disabled. One that has run since, with no admission
+record to say admit disabled it, may be running the owner's containers, so
+admit refuses it before changing anything and names both ways on: remove
+its lines from the list to keep it as the owner's, or disable it, remove
+Docker's network store under its data-root, reboot, and admit again. The
+data-root is read from `/etc/docker/daemon.json` written as `"data-root":
+"/absolute/path"` on one line; one admit cannot read may hold a network
+store, so the daemon is taken to have run. containerd has run when its root
+directory is there, which it creates as it first starts: `/var/lib/containerd`,
+or the `root` `/etc/containerd/config.toml` sets on one line as `root =
+"/absolute/path"`. A
+daemon admit installed that never ran, enabled by its package and held
+while it installed, is disabled; its networks are read as none, since it
+never made any. A package an admit killed part way left on the list and on
+disk is admit's: the next admit installs it again and disables its units
+with Docker's, unless one has run.
 
 Where Docker is absent and the host has packages Docker's page lists as
 conflicting (`containerd`, `runc` and the rest), they are **refused, not
 removed**: installing Docker's packages would remove them, and on a host
 already running containers from them that stops those containers, which is a
 decision for whoever started them. The refusal names the packages found, and
-leaves removing them to the owner. Every `apt-get` runs non-interactively.
+leaves removing them to the owner. A unit of a package admit is about to
+install that is already enabled or running, such as a containerd the owner
+installed from another source, is refused the same way: the disable after
+the install would stop it. When its package is on disk but not configured,
+the refusal says to finish that install or purge the package. Every `apt-get` runs non-interactively.
 
 #### The user's Docker starts after the mesh interface
 

@@ -80,32 +80,22 @@ step 16: remove /etc/modules-load.d/paisans.conf
   run:
     $ rm -f /etc/modules-load.d/paisans.conf
 
-step 17: remove /etc/paisans/installed
-  evict: the list of what admit installed, which the plan names
-  run:
-    $ rm -f /etc/paisans/installed
-
-step 18: remove the admission record
+step 17: remove the admission record
   evict: /etc/paisans/admitted.f2a9.json
   run:
     $ rm -f /etc/paisans/admitted.f2a9.json
 
-step 19: remove /etc/paisans
-  evict: it holds nothing once this deployment's files are gone
-  run:
-    $ rmdir /etc/paisans
-
-step 20: remove /srv/paisans
+step 18: remove /srv/paisans
   evict: it holds nothing once this deployment's files are gone
   run:
     $ rmdir /srv/paisans
 
-step 21: remove /usr/local/libexec/paisans
+step 19: remove /usr/local/libexec/paisans
   evict: it holds nothing once this deployment's files are gone
   run:
     $ rmdir /usr/local/libexec/paisans
 
-step 22: remove the registry entry
+step 20: remove the registry entry
   evict: deployment f2a9 from /var/lib/paisans/registry.json
   run:
     $ set -e; umask 077; [ -f /var/lib/paisans/registry.json ] || exit 0; exec 9>>/var/lib/paisans/registry.lock; flock -w 60 9 || { echo 'paisans: another command holds /var/lib/paisans/registry.lock'; exit 1; }; tmp=$(mktemp /var/lib/paisans/.registry.XXXXXX); trap 'rm -f "$tmp"' EXIT; awk '-v' 'id=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01' '-v' 'header={"version":1,"deployments":{' '-v' 'footer=}}' '-v' 'unreadable=paisans-registry-unreadable' '
@@ -132,9 +122,10 @@ step 22: remove the registry entry
     $ }
     $ ' /var/lib/paisans/registry.json > "$tmp"; chmod 600 "$tmp"; mv "$tmp" /var/lib/paisans/registry.json
 
+present: evict: /etc/paisans kept, for /etc/paisans/installed, which stays with what admit installed
 warning: firewall: the deployment's SSH allow on 22 is kept
   It may be the rule your own login arrives by. Delete it yourself once nothing else needs it.
 warning: br_netfilter: stays loaded until the next boot
   Evict removes its boot entry and does not unload it: unloading it would change what the host's FORWARD chain sees under whatever runs now.
 warning: packages: what admit installed stays: docker-ce, docker-ce-rootless-extras, uidmap; the docker group
-  Evict removes no package: something else here may use them by now. Remove them yourself once nothing does. Admit disabled Docker's system daemon when it installed it; it is left as it is now. docker-ce made the docker group.
+  Evict removes no package: something else here may use them by now. Remove them yourself once nothing does. /etc/paisans/installed, the list of them, stays with them, so a later admit knows them as its own. Admit disabled Docker's system daemon when it installed it; it is left as it is now. docker-ce made the docker group.

@@ -302,3 +302,66 @@ func TestProbeReadsWhetherApparmorShipsTheRootlesskitProfile(t *testing.T) {
 		t.Errorf("%s: package %v, shipped %v, want shipped %v", probeImage, f.AppArmor.Package, f.AppArmor.Shipped, want)
 	}
 }
+
+// The system Docker's network store is read at the data-root
+// /etc/docker/daemon.json sets, and at Docker's default with none; a
+// data-root set in a form the probe cannot read is unreadable, and taken
+// to have run.
+func TestProbeReadsTheNetworkStoreAtTheDataRoot(t *testing.T) {
+	store := func(root string) string {
+		return "mkdir -p " + root + "/network/files && touch " + root + "/network/files/local-kv.db"
+	}
+	json := func(content string) string {
+		return "mkdir -p /etc/docker && printf '%s\\n' '" + content + "' > /etc/docker/daemon.json"
+	}
+	for _, c := range []struct {
+		name, setup, root string
+		store, unread     bool
+	}{
+		{"default", store("/var/lib/docker"), "", true, false},
+		{"none", "true", "", false, false},
+		{"set", json(`{`) + " && printf '%s\\n' '  \"data-root\": \"/srv/docker\"' '}' >> /etc/docker/daemon.json && " + store("/srv/docker"), "/srv/docker", true, false},
+		{"set, default empty", json(`{`) + " && printf '%s\\n' '  \"data-root\": \"/srv/docker\"' '}' >> /etc/docker/daemon.json && " + store("/var/lib/docker"), "/srv/docker", false, false},
+		{"one line", json(`{"data-root": "/srv/docker"}`) + " && " + store("/srv/docker"), "/srv/docker", true, false},
+		{"one line, among others", json(`{"debug": true, "data-root":"/srv/docker", "log-level": "warn"}`) + " && " + store("/srv/docker"), "/srv/docker", true, false},
+		{"tabs", `mkdir -p /etc/docker && printf '{\n\t"data-root"\t:\t"/srv/docker"\n}\n' > /etc/docker/daemon.json && ` + store("/srv/docker"), "/srv/docker", true, false},
+		{"space before the colon", json(`{ "data-root" : "/srv/docker" }`) + " && " + store("/srv/docker"), "/srv/docker", true, false},
+		{"split across lines", `mkdir -p /etc/docker && printf '%s\n' '{' '  "data-root":' '    "/srv/docker"' '}' > /etc/docker/daemon.json`, "", false, true},
+	} {
+		f := probeIn(t, c.setup, "paisans-f2a9", "")
+		if d := f.Docker; d.NetworkStore != c.store || d.DataRoot != c.root || d.DataRootUnread != c.unread || d.Ran() != (c.store || c.unread) {
+			t.Errorf("%s: %+v", c.name, d)
+		}
+	}
+}
+
+// containerd's root directory is read under the root config.toml sets
+// above its first table, as root = "/absolute/path" on one line, or at
+// containerd's default; a root set in another form is unreadable, and
+// counts as may have run.
+func TestProbeReadsContainerdsRoot(t *testing.T) {
+	toml := func(lines ...string) string {
+		out := "mkdir -p /etc/containerd && printf '%s\\n'"
+		for _, l := range lines {
+			out += " '" + l + "'"
+		}
+		return out + " > /etc/containerd/config.toml"
+	}
+	for _, c := range []struct {
+		name, setup string
+		ran         bool
+	}{
+		{"none", "true", false},
+		{"default", "mkdir -p /var/lib/containerd", true},
+		{"as shipped, never ran", toml(`disabled_plugins = ["cri"]`, `#root = "/var/lib/containerd"`), false},
+		{"as shipped, ran", toml(`disabled_plugins = ["cri"]`, `#root = "/var/lib/containerd"`) + " && mkdir -p /var/lib/containerd", true},
+		{"set, ran", toml(`version = 2`, `root = "/srv/containerd"`) + " && mkdir -p /srv/containerd", true},
+		{"set, default only", toml(`root="/srv/containerd" # moved`) + " && mkdir -p /var/lib/containerd", false},
+		{"in a table", toml(`[plugins.x]`, `  root = "/srv/x"`) + " && mkdir -p /srv/x", false},
+		{"single quotes", toml(`root = '"'"'/srv/containerd'"'"'`), true},
+	} {
+		if f := probeIn(t, c.setup, "paisans-f2a9", ""); f.Docker.ContainerdRan != c.ran {
+			t.Errorf("%s: ContainerdRan = %v", c.name, f.Docker.ContainerdRan)
+		}
+	}
+}

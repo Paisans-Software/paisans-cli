@@ -51,8 +51,30 @@ for unit in docker.socket docker.service containerd.service; do
   say system-unit "$unit ${e:-disabled} ${a:-inactive}"
 done
 # The system Docker's network store, which only a daemon that has run
-# leaves.
-if [ -e /var/lib/docker/network/files/local-kv.db ]; then say docker-networks present; else say docker-networks absent; fi
+# leaves, under the data-root /etc/docker/daemon.json sets, or Docker's
+# default: "data-root", then a colon and an absolute path in quotes, on
+# one line, with any blanks between. A data-root set in a form this cannot
+# read, split across lines or relative, is unreadable.
+root=/var/lib/docker
+if [ -f /etc/docker/daemon.json ] && grep -q '"data-root"' /etc/docker/daemon.json; then
+  root=$(grep -o '"data-root"[[:space:]]*:[[:space:]]*"/[^"]*"' /etc/docker/daemon.json | head -n 1 | sed 's/.*"\(\/[^"]*\)"$/\1/')
+  [ -n "$root" ] || root=unreadable
+fi
+say docker-root "$root"
+if [ "$root" != unreadable ] && [ -e "$root/network/files/local-kv.db" ]; then say docker-networks present; else say docker-networks absent; fi
+# containerd's root directory, which containerd creates as it first starts
+# and none of Docker's packages ships, so only a containerd that has run
+# leaves: the root /etc/containerd/config.toml sets above its first table,
+# as root = "/absolute/path" on one line, or containerd's default. A root
+# set in any other form is unreadable, and may be there.
+croot=/var/lib/containerd
+if [ -f /etc/containerd/config.toml ] && awk '/^[[:space:]]*\[/ { exit } /^[[:space:]]*root[[:space:]]*=/ { f = 1; exit } END { exit !f }' /etc/containerd/config.toml; then
+  croot=$(awk '/^[[:space:]]*\[/ { exit } /^[[:space:]]*root[[:space:]]*=/ { print; exit }' /etc/containerd/config.toml | sed -n 's/^[[:space:]]*root[[:space:]]*=[[:space:]]*"\(\/[^"]*\)"[[:space:]]*\(#.*\)*$/\1/p')
+  [ -n "$croot" ] || croot=unreadable
+fi
+if [ "$croot" = unreadable ]; then say containerd-ran unreadable
+elif [ -e "$croot" ] || [ -L "$croot" ]; then say containerd-ran present
+else say containerd-ran absent; fi
 # What a run that stopped while admit held Docker's daemons can leave:
 # policy is its own /usr/sbin/policy-rc.d, under which apt may have run;
 # leftover is the copy of the owner's or a temporary file alone, from a run
