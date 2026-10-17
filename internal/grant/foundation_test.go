@@ -74,7 +74,7 @@ func TestTheRecordKeepsFoundationImages(t *testing.T) {
 	if rec.Images == nil || len(rec.Images.Entries) != 1 || !rec.Images.Entries[0].Foundation {
 		t.Errorf("record: %+v", rec.Images)
 	}
-	older, err := grant.Parse(`{"version": 3, "images": {"applied_at": "x", "entries": [{"stack": "infra", "service": "etcd", "reference": "quay.io/coreos/etcd:v3.6.*"}]}}`)
+	older, err := grant.Parse(`{"version": 3, "images": {"applied_at": "x", "entries": [{"stack": "infra", "service": "etcd", "reference": "quay.io/coreos/etcd:v3.6.*"}]}, "toolkit_version": "0.3.0", "toolkit_commit": "", "toolkit_modified": false}`)
 	if err != nil {
 		t.Fatal(err)
 	}

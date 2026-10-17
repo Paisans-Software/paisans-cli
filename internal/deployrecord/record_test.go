@@ -16,6 +16,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/deployrecord"
 	"github.com/paisans-software/paisans-cli/internal/registry"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 var dep = deployment.Deployment{ID: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}
@@ -290,7 +291,7 @@ func storedX(adds, removed string) string {
 	if removed != "" {
 		e += `,"removed":[` + removed + `]`
 	}
-	return `{"version":1,"updated_at":"","sites":{"x":{` + e + `}},"apps":{},"pocket_id_groups":{}}` + "\n"
+	return `{"version":1,"updated_at":"","sites":{"x":{` + e + `}},"apps":{},"pocket_id_groups":{},"toolkit_version":"0.3.0","toolkit_commit":"","toolkit_modified":false}` + "\n"
 }
 
 // A gateway left out of a write holds a removal of the tag compaction would
@@ -327,5 +328,33 @@ func TestCompactionSurvivesARemovalRacingTheWrite(t *testing.T) {
 	}
 	if r := view(t, a.fakeHost, b); !r.Lists("sites", "x") {
 		t.Errorf("t9, an add the removal never saw, was lost: b holds %s", b.files[deployrecord.Path(dep)])
+	}
+}
+
+// A change records the build of the paisans that made it, and a view
+// reads the latest change's.
+func TestAChangeRecordsItsBuild(t *testing.T) {
+	a, b := &fakeHost{files: map[string]string{}}, &fakeHost{files: map[string]string{}}
+	older := version.Build{Version: "0.2.0", Commit: "519299d5cb009da4904cdf53c2025f1ad609f102"}
+	b.files[deployrecord.Path(dep)] = deployrecord.Encode(deployrecord.Record{UpdatedAt: "2026-10-01T00:00:00Z", Sites: []string{"x"}, Build: older})
+	if r := view(t, b); r.Build != older {
+		t.Errorf("read %+v, want %+v", r.Build, older)
+	}
+	change(t, deployrecord.Adding(sites("vm")), a, b)
+	if r := view(t, a, b); r.Build != version.Current() {
+		t.Errorf("read %+v, want this build", r.Build)
+	}
+}
+
+// A record without every one of the build's keys is refused, and an
+// update stops on it rather than writing over it.
+func TestARecordWithNoBuildIsRefused(t *testing.T) {
+	h := &fakeHost{files: map[string]string{deployrecord.Path(dep): `{"version":1,"updated_at":"","sites":{},"apps":{},"pocket_id_groups":{},"toolkit_version":"0.3.0"}`}}
+	_, _, missing := deployrecord.Gather(gateways(h), dep)
+	if err := missing["gw1"]; !errors.Is(err, deployrecord.ErrMalformed) || !strings.Contains(err.Error(), "toolkit_commit, toolkit_modified missing") {
+		t.Errorf("got %v", err)
+	}
+	if _, err := deployrecord.Update(gateways(h), dep, deployrecord.Adding(sites("vm")), now); !errors.Is(err, deployrecord.ErrMalformed) {
+		t.Errorf("got %v", err)
 	}
 }

@@ -1,18 +1,23 @@
 package grant_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/grant"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
+
+// build is the build keys of a record, after a comma.
+const build = `, "toolkit_version": "0.3.0", "toolkit_commit": "519299d5cb009da4904cdf53c2025f1ad609f102", "toolkit_modified": true`
 
 // A record written before the configuration part existed is read as it is,
 // and one with the part is read whole; either is written back as the
 // current version.
 func TestParseReadsVersionOneAndTwo(t *testing.T) {
-	v1 := `{"version": 1, "images": {"applied_at": "x", "entries": []}}`
+	v1 := `{"version": 1, "images": {"applied_at": "x", "entries": []}` + build + `}`
 	rec, err := grant.Parse(v1)
 	if err != nil || rec.Images == nil || rec.Config != nil {
 		t.Fatalf("version 1: %+v %v", rec, err)
@@ -20,7 +25,7 @@ func TestParseReadsVersionOneAndTwo(t *testing.T) {
 	if !strings.Contains(grant.Encode(rec), `"version": 3`) {
 		t.Errorf("not written as version 3: %s", grant.Encode(rec))
 	}
-	v2 := `{"version": 2, "config": {"hash": "abc", "revision": 7, "applied_at": "2026-10-12T10:00:00Z"}}`
+	v2 := `{"version": 2, "config": {"hash": "abc", "revision": 7, "applied_at": "2026-10-12T10:00:00Z"}` + build + `}`
 	rec, err = grant.Parse(v2)
 	if err != nil || rec.Config == nil || rec.Config.Hash != "abc" || rec.Config.Revision != 7 || !rec.Config.AppliedAt.Equal(time.Date(2026, 10, 12, 10, 0, 0, 0, time.UTC)) {
 		t.Fatalf("version 2: %+v %v", rec.Config, err)
@@ -61,5 +66,29 @@ func TestWithConfigRecordsTheVersionApplied(t *testing.T) {
 	next := rec.WithConfig("def", 4, at.Add(time.Hour))
 	if next.Config.Hash != "def" || next.Config.Revision != 4 || !next.Config.AppliedAt.Equal(at.Add(time.Hour)) {
 		t.Errorf("%+v", next.Config)
+	}
+}
+
+// A record round-trips the build that wrote it.
+func TestARecordRoundTripsItsBuild(t *testing.T) {
+	want := version.Build{Version: "0.3.0-dev", Commit: "519299d5cb009da4904cdf53c2025f1ad609f102", Modified: true}
+	rec, err := grant.Parse(grant.Encode(grant.Record{Build: want}))
+	if err != nil || rec.Build != want {
+		t.Errorf("got %+v, %v", rec.Build, err)
+	}
+}
+
+// A record without every one of the build's keys is refused, and Read says
+// to delete it and apply again.
+func TestARecordWithNoBuildIsRefused(t *testing.T) {
+	content := `{"version": 3, "images": {"applied_at": "x", "entries": []}, "toolkit_version": "0.3.0"}`
+	var noBuild *version.NoBuildError
+	if _, err := grant.Parse(content); !errors.As(err, &noBuild) {
+		t.Fatalf("got %v", err)
+	}
+	h := &fakeHost{content: content, found: true}
+	_, _, _, err := grant.Read(h, testDeployment(t))
+	if !errors.Is(err, grant.ErrMalformed) || !strings.Contains(err.Error(), "toolkit_commit, toolkit_modified missing") || !strings.Contains(err.Error(), "then apply again") {
+		t.Errorf("got %v", err)
 	}
 }

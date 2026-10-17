@@ -17,6 +17,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/grant"
 	"github.com/paisans-software/paisans-cli/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/version"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -364,6 +365,9 @@ func TestWriteIsUnderTheLockAndKeepsTheOtherParts(t *testing.T) {
 	rec, err := grant.Parse(h.content)
 	if err != nil || rec.Images == nil || rec.Keys == nil {
 		t.Errorf("parts: %+v %v", rec, err)
+	}
+	if rec.Build != version.Current() {
+		t.Errorf("the write records %+v, not this build", rec.Build)
 	}
 	// Written again with nothing changed, it writes nothing.
 	if wrote, err := grant.Write(h, testDeployment(t), func(r grant.Record) grant.Record {

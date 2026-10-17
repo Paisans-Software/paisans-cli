@@ -15,6 +15,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/registry"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 // Version is the record's layout. Version 2 added the configuration part
@@ -35,6 +36,10 @@ type Record struct {
 	Blueprints *BlueprintsPart `json:"blueprints,omitempty"`
 	Config     *ConfigPart     `json:"config,omitempty"`
 	Approved   *ApprovedPart   `json:"approved,omitempty"`
+	// Build is the paisans that last wrote the record: toolkit_version,
+	// toolkit_commit and toolkit_modified. Parse refuses a record without
+	// it.
+	version.Build
 }
 
 // ApprovedPart is each entry an operator approved on the host that the
@@ -123,7 +128,8 @@ func Encode(rec Record) string {
 	return b.String()
 }
 
-// Parse reads a record.
+// Parse reads a record. One that does not say which build of paisans wrote
+// it is refused with a *version.NoBuildError.
 func Parse(content string) (Record, error) {
 	dec := json.NewDecoder(strings.NewReader(content))
 	dec.DisallowUnknownFields()
@@ -133,6 +139,9 @@ func Parse(content string) (Record, error) {
 	}
 	if rec.Version < 1 || rec.Version > Version {
 		return Record{}, fmt.Errorf("version %d, and this toolkit reads versions 1 to %d", rec.Version, Version)
+	}
+	if err := version.RequireBuild([]byte(content)); err != nil {
+		return Record{}, err
 	}
 	return rec, nil
 }
@@ -149,6 +158,10 @@ func Read(t registry.Runner, d deployment.Deployment) (Record, string, bool, err
 		return Record{Version: Version}, "", false, nil
 	}
 	rec, err := Parse(content)
+	var noBuild *version.NoBuildError
+	if errors.As(err, &noBuild) {
+		return Record{}, "", false, fmt.Errorf("%s: %s is %w: %v. Delete it with `rm %s`, then apply again, which reviews every key and image again and writes it anew", t.Describe(), Path(d), ErrMalformed, err, Path(d))
+	}
 	if err != nil {
 		return Record{}, "", false, fmt.Errorf("%s: %s is %w (%v). Delete it with `rm %s`; the next run then reviews every key and image again", t.Describe(), Path(d), ErrMalformed, err, Path(d))
 	}
@@ -160,8 +173,9 @@ func Read(t registry.Runner, d deployment.Deployment) (Record, string, bool, err
 // first and written only if the file still holds what was read, so a part
 // another command wrote meanwhile is never lost: a write that finds the file
 // changed reads it again and makes the change again, a few times. A change
-// that leaves the record as it was writes nothing. It reports whether it
-// wrote.
+// that leaves the record as it was writes nothing, and one that changes it
+// records this build of paisans as the one that wrote it. It reports
+// whether it wrote.
 func Write(t registry.Runner, d deployment.Deployment, change func(Record) Record) (bool, error) {
 	var err error
 	for range 3 {
@@ -179,6 +193,7 @@ func Write(t registry.Runner, d deployment.Deployment, change func(Record) Recor
 		if !found && Encode(next) == Encode(Record{}) {
 			return false, nil
 		}
+		next.Build = version.Current()
 		want := "none"
 		if found {
 			sum := sha256.Sum256([]byte(raw))
