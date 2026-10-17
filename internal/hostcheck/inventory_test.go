@@ -9,6 +9,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 func inspect(t *testing.T, h *fakeHost) *hostcheck.Inventory {
@@ -316,11 +317,26 @@ func TestTheInventoryReadsTheManifestsPendingSites(t *testing.T) {
 	}
 }
 
-// The release of the paisans that wrote a manifest is read with it.
-func TestTheInventoryReadsTheManifestsToolkitVersion(t *testing.T) {
+// The build of the paisans that wrote a manifest is read with it.
+func TestTheInventoryReadsTheManifestsBuild(t *testing.T) {
 	h := cleanHost()
-	h.files["/srv/paisans/f2a9/.paisans-manifest.json"] = `{"version":1,"files":[],"toolkit_version":"0.3.0"}`
-	if inv := inspect(t, h); inv.ManifestToolkitVersion != "0.3.0" {
-		t.Errorf("toolkit version %q", inv.ManifestToolkitVersion)
+	h.files["/srv/paisans/f2a9/.paisans-manifest.json"] = `{"version":1,"files":[],"toolkit_version":"0.3.0","toolkit_commit":"519299d5cb009da4904cdf53c2025f1ad609f102","toolkit_modified":true}`
+	inv := inspect(t, h)
+	if want := (version.Build{Version: "0.3.0", Commit: "519299d5cb009da4904cdf53c2025f1ad609f102", Modified: true}); inv.ManifestBuild != want || inv.ManifestErr != nil {
+		t.Errorf("build %+v, %v", inv.ManifestBuild, inv.ManifestErr)
+	}
+}
+
+// A manifest that does not say which build wrote it is refused, with apply
+// named as what writes it anew, and read all the same.
+func TestTheInventoryRefusesAManifestWithNoBuild(t *testing.T) {
+	h := cleanHost()
+	h.files["/srv/paisans/f2a9/.paisans-manifest.json"] = `{"version":1,"files":[{"path":"a","sha256":"x","mode":"0644"}],"toolkit_version":"0.3.0"}`
+	inv := inspect(t, h)
+	if inv.ManifestErr == nil || !strings.Contains(inv.ManifestErr.Error(), "toolkit_commit, toolkit_modified missing") || !strings.Contains(inv.ManifestErr.Error(), "Apply the site again") {
+		t.Errorf("got %v", inv.ManifestErr)
+	}
+	if len(inv.ManifestFiles) != 1 {
+		t.Errorf("files %v", inv.ManifestFiles)
 	}
 }

@@ -6,7 +6,8 @@ name: release
 # downloads one of those to run `paisans site admit` on the host itself.
 # Any other push to main is a no-op. The version is the constant in
 # internal/version/version.go, which `make bump` sets on develop; the
-# "Release X to main" pull request from develop brings it here.
+# "Release X to main" pull request from develop brings it here. Between
+# releases develop holds X.Y.Z-dev, which this refuses to release.
 #
 # That pull request is merged with a merge commit, never squashed or rebased.
 # A merge commit keeps main an ancestor of develop, so the next release pull
@@ -43,20 +44,34 @@ jobs:
         run: |
           version=$(sed -n 's/^const Version = "\(.*\)"/\1/p' internal/version/version.go)
           test -n "$version" || { echo "no Version in internal/version/version.go"; exit 1; }
+          # develop's own version, X.Y.Z-dev, is no release: one reaching
+          # main is a release pull request that skipped make bump. Any other
+          # pre-release (Eg: 0.3.0-rc.1) is published as a pre-release.
+          if echo "$version" | grep -Eq -- '-dev(\.|$)'; then
+            echo "::error file=internal/version/version.go::main holds ${version}, which is develop's version and no release. Cut the release on develop with make bump, and merge it to main"
+            exit 1
+          fi
+          prerelease=false
+          case "$version" in *-*) prerelease=true ;; esac
           tag="v${version}"
           if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
             echo "${tag} already exists; nothing to release"
             echo "release=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # Bounded to toolkit release tags, so the notes generator never
-          # picks an operator-reconciler-v* tag as the previous release.
-          previous=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)
+          # The newest final release tag, so the notes of a release and of
+          # its pre-releases list what changed since the last release. The
+          # pattern keeps out operator-reconciler-v* and every pre-release
+          # tag, and the numeric sort orders v0.10.0 above v0.9.0; git's own
+          # version sort puts v0.3.0-rc.1 above v0.3.0.
+          previous=$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/^v//' | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)
+          previous=${previous:+v${previous}}
           {
             echo "release=true"
             echo "version=${version}"
             echo "tag=${tag}"
             echo "previous=${previous}"
+            echo "prerelease=${prerelease}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Set the commit identity
@@ -94,9 +109,11 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # COMMIT is what each binary names as its commit in every record it
+      # writes, set with -ldflags -X; the check below reads it back.
       - name: Build the Linux binaries
         if: steps.decide.outputs.release == 'true'
-        run: make release-binaries
+        run: make release-binaries COMMIT="${GITHUB_SHA}"
 
       # QEMU, so the arm64 binary can be run on this amd64 runner.
       - name: Set up QEMU
@@ -194,14 +211,21 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.decide.outputs.tag }}
           PREVIOUS: ${{ steps.decide.outputs.previous }}
+          PRERELEASE: ${{ steps.decide.outputs.prerelease }}
           BODY: ${{ steps.pr.outputs.body }}
+        # A pre-release is published as one, and never becomes the latest
+        # release, the download a host owner fetches; a release does.
         run: |
           set -euo pipefail
+          latest=true
+          if [ "$PRERELEASE" = true ]; then latest=false; fi
           id=$(gh api "repos/${GITHUB_REPOSITORY}/releases" \
             -f "tag_name=${TAG}" \
             -f "name=${TAG}" \
             -f "body=${BODY}" \
             -F draft=true \
+            -F "prerelease=${PRERELEASE}" \
+            -f "make_latest=${latest}" \
             -F generate_release_notes=true \
             ${PREVIOUS:+-f "previous_tag_name=${PREVIOUS}"} \
             --jq .id)
@@ -228,6 +252,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ID: ${{ steps.release.outputs.id }}
+          PRERELEASE: ${{ steps.decide.outputs.prerelease }}
+        # make_latest is given again here, since GitHub decides the latest
+        # release when a draft is published.
         run: |
+          latest=true
+          if [ "$PRERELEASE" = true ]; then latest=false; fi
           gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${ID}" \
-            -F draft=false >/dev/null
+            -F draft=false -f "make_latest=${latest}" >/dev/null

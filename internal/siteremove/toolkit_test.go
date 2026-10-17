@@ -27,12 +27,12 @@ func toolkitForms(w *world) map[string]func() (*siteremove.Plan, error) {
 	}
 }
 
-// A site a newer paisans applied, or one whose manifest records a release
-// this one cannot order, is refused in every form before anything on the
-// host is changed: this binary decides what is provably the deployment's,
-// and the newer one may have put things there it does not know about.
+// A site a newer paisans applied is refused in every form before anything
+// on the host is changed: this binary decides what is provably the
+// deployment's, and the newer one may have put things there it does not
+// know about.
 func TestRefusesASiteANewerToolkitApplied(t *testing.T) {
-	for _, recorded := range []string{"99.0.0", "0.2.0 (519299d5cb00)", "next"} {
+	for _, recorded := range []string{"99.0.0", "99.0.0-dev", "99.0.0-rc.1", "next"} {
 		w := setup(t)
 		h := w.hosts["home-b"]
 		h.setToolkitVersion(t, recorded)
@@ -89,7 +89,55 @@ func TestRefusesANewerToolkitAppliedSinceThePlan(t *testing.T) {
 	}
 }
 
-// A kept Caddy's manifest keeps the release the manifest recorded, so a
+// A manifest that does not say which build of paisans wrote it is refused
+// in every form, with apply named as what writes it anew, before anything
+// on the host is changed.
+func TestRefusesAManifestWithNoBuild(t *testing.T) {
+	w := setup(t)
+	h := w.hosts["home-b"]
+	var m map[string]any
+	if err := json.Unmarshal([]byte(h.files[dep.Manifest()]), &m); err != nil {
+		t.Fatal(err)
+	}
+	delete(m, "toolkit_commit")
+	data, _ := json.Marshal(m)
+	h.files[dep.Manifest()] = string(data)
+	before := maps.Clone(h.files)
+	for name, build := range toolkitForms(w) {
+		_, err := build()
+		if err == nil || !strings.Contains(err.Error(), "toolkit_commit missing") || !strings.Contains(err.Error(), "Apply the site again") || !strings.Contains(err.Error(), "Nothing was changed") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if !maps.Equal(before, h.files) {
+		t.Error("the host changed")
+	}
+}
+
+// A manifest whose version is no version at all does not say which build
+// wrote it, and is refused in every form as one without a build is.
+func TestRefusesAManifestWhoseVersionCannotBeOrdered(t *testing.T) {
+	for _, recorded := range []string{"0.2.0 (519299d5cb00)", ""} {
+		w := setup(t)
+		h := w.hosts["home-b"]
+		h.setToolkitVersion(t, recorded)
+		before := maps.Clone(h.files)
+		for name, build := range toolkitForms(w) {
+			_, err := build()
+			if err == nil || !strings.Contains(err.Error(), "is not a version") || !strings.Contains(err.Error(), "Apply the site again") || !strings.Contains(err.Error(), "Nothing was changed") {
+				t.Errorf("%s, %q: %v", name, recorded, err)
+			}
+		}
+		if !maps.Equal(before, h.files) {
+			t.Errorf("%q: the host changed", recorded)
+		}
+	}
+}
+
+// keptCommit is the commit setToolkitVersion records beside a version.
+const keptCommit = "519299d5cb009da4904cdf53c2025f1ad609f102"
+
+// A kept Caddy's manifest keeps the build the manifest recorded, so a
 // later run checks it as this one did.
 func TestTheKeptCaddysManifestKeepsItsRelease(t *testing.T) {
 	for _, recorded := range []string{"0.0.1", version.Version} {
@@ -103,12 +151,12 @@ func TestTheKeptCaddysManifestKeepsItsRelease(t *testing.T) {
 		if err := siteremove.Execute(p); err != nil {
 			t.Fatal(err)
 		}
-		var m render.Manifest
-		if err := json.Unmarshal([]byte(vm.files[dep.Manifest()]), &m); err != nil {
+		m, err := render.ParseManifest([]byte(vm.files[dep.Manifest()]))
+		if err != nil {
 			t.Fatal(err)
 		}
-		if m.ToolkitVersion != recorded {
-			t.Errorf("the kept manifest records %q, want %q", m.ToolkitVersion, recorded)
+		if want := (version.Build{Version: recorded, Commit: keptCommit, Modified: true}); m.Build != want {
+			t.Errorf("the kept manifest records %+v, want %+v", m.Build, want)
 		}
 	}
 }

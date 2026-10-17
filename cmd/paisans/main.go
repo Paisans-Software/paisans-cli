@@ -56,6 +56,10 @@ func main() {
 		os.Exit(2)
 	}
 	os.Args = append(os.Args[:1], run...)
+	if err := buildGate(os.Args[1:]); err != nil {
+		fmt.Fprintln(os.Stderr, "paisans: "+err.Error())
+		os.Exit(2)
+	}
 	var err error
 	switch os.Args[1] {
 	case "validate":

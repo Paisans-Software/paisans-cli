@@ -51,7 +51,10 @@ step 23: write the admission record
     |   "mesh_lan": "",
     |   "mesh_subnet": "10.44.0.0/24",
     |   "web_server": null,
-    |   "system_docker_disabled": false
+    |   "system_docker_disabled": false,
+    |   "toolkit_version": "<release>",
+    |   "toolkit_commit": "0000000000000000000000000000000000000000",
+    |   "toolkit_modified": false
     | }
 
 step 24: add the operators' keys

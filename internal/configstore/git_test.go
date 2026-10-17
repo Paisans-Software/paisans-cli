@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 func needTools(t *testing.T, tools ...string) {
@@ -89,7 +91,7 @@ func TestCommitListBundleFetch(t *testing.T) {
 	byRev := map[int]Version{}
 	for _, v := range vs {
 		byRev[v.Revision] = v
-		if !v.Signed || v.SignerFP == "" || !v.TreeOK {
+		if !v.Signed || v.SignerFP == "" || !v.TreeOK || !v.BuildOK || v.Build != version.Current() {
 			t.Fatalf("version %+v", v)
 		}
 	}
@@ -271,6 +273,79 @@ func TestRevisionTrailer(t *testing.T) {
 	} {
 		if got := versionOf(t, r, rawCommit(t, r, threeFiles(), msg)).Revision; got != want {
 			t.Errorf("%q: Revision %d, want %d", msg, got, want)
+		}
+	}
+}
+
+// A version names the build of paisans that published it in three
+// trailers, each there once, and one without them all, or with one
+// malformed or repeated, names none.
+func TestBuildTrailers(t *testing.T) {
+	needTools(t, "git")
+	r := newRepo(t)
+	const commit = "519299d5cb009da4904cdf53c2025f1ad609f102"
+	dirty := version.Build{Version: "0.3.0-dev", Commit: commit, Modified: true}
+	for msg, want := range map[string]*version.Build{
+		"m\n\nPaisans-Revision: 1\n" + buildTrailers(dirty):                                                                           &dirty,
+		"m\n\nPaisans-Revision: 1\n" + buildTrailers(version.Build{Version: "0.2.0", Commit: "v0.2.0"}):                               {Version: "0.2.0", Commit: "v0.2.0"},
+		"m\n\nPaisans-Revision: 1\n":                                                                                                  nil,
+		"m\n\nPaisans-Revision: 1\nPaisans-Toolkit-Version: 0.3.0\nPaisans-Toolkit-Commit: v0.3.0\n":                                  nil,
+		"m\n\nPaisans-Revision: 1\n" + buildTrailers(version.Build{Version: "next", Commit: "v0.3.0"}):                                nil,
+		"m\n\nPaisans-Revision: 1\n" + buildTrailers(version.Build{Version: "0.3.0", Commit: "519299d5cb0"}):                          nil,
+		"m\n\nPaisans-Revision: 1\nPaisans-Toolkit-Version: 0.3.0\nPaisans-Toolkit-Commit: v0.3.0\nPaisans-Toolkit-Modified: maybe\n": nil,
+		"m\n\nPaisans-Revision: 1\n" + buildTrailers(dirty) + "Paisans-Toolkit-Version: 9.9.9\n":                                      nil,
+	} {
+		v := versionOf(t, r, rawCommit(t, r, threeFiles(), msg))
+		switch {
+		case want == nil && v.BuildOK:
+			t.Errorf("%q: read %+v", msg, v.Build)
+		case want != nil && (!v.BuildOK || v.Build != *want):
+			t.Errorf("%q: read %+v, %v, want %+v", msg, v.Build, v.BuildOK, *want)
+		}
+	}
+}
+
+// The signature covers the build trailers: a version whose trailers were
+// changed after it was signed has no good signature.
+func TestTheSignatureCoversTheBuild(t *testing.T) {
+	needTools(t, "git", "ssh-keygen")
+	key, pub := testSSHKey(t)
+	r := newRepo(t)
+	sha, err := r.Commit(testFiles(), nil, 1, key, time.Unix(1_800_000_000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := r.git(nil, nil, "cat-file", "commit", sha)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trailer := "Paisans-Toolkit-Version: " + version.Current().Version + "\n"
+	if !strings.Contains(string(raw), trailer) {
+		t.Fatalf("no %q in:\n%s", trailer, raw)
+	}
+	forged := strings.Replace(string(raw), trailer, "Paisans-Toolkit-Version: 99.0.0\n", 1)
+	out, err := r.git(strings.NewReader(forged), nil, "hash-object", "-t", "commit", "-w", "--literally", "--stdin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	forgedSHA := strings.TrimSpace(string(out))
+	if _, err := r.git(nil, nil, "update-ref", "refs/versions/"+forgedSHA, forgedSHA); err != nil {
+		t.Fatal(err)
+	}
+	vs, err := r.Versions(allowedSignersFile(t, pub))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range vs {
+		switch v.SHA {
+		case sha:
+			if !v.Signed {
+				t.Error("the signed version is not Signed")
+			}
+		case forgedSHA:
+			if v.Signed || v.Build.Version != "99.0.0" {
+				t.Errorf("the forged version: %+v", v)
+			}
 		}
 	}
 }

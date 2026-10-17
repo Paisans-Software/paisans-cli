@@ -1029,15 +1029,15 @@ func (h *host) addToManifest(t *testing.T, path, content string) {
 }
 
 // setToolkitVersion records v in the deployment's manifest on the host as
-// the release of the paisans that wrote it, empty for a manifest from before
-// manifests recorded one.
+// the version of the paisans that wrote it, with keptCommit as its commit
+// and its tree marked modified.
 func (h *host) setToolkitVersion(t *testing.T, v string) {
 	t.Helper()
 	var m render.Manifest
 	if err := json.Unmarshal([]byte(h.files[dep.Manifest()]), &m); err != nil {
 		t.Fatal(err)
 	}
-	m.ToolkitVersion = v
+	m.Build = version.Build{Version: v, Commit: keptCommit, Modified: true}
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		t.Fatal(err)
@@ -1284,11 +1284,19 @@ func (w *world) inspect(t apply.Transport, cfg *config.Config) (*hostcheck.Inven
 	inv.Volumes = append(inv.Volumes, h.volumes...)
 	if content, ok := h.files[dep.Manifest()]; ok {
 		inv.Manifest = true
-		var m render.Manifest
-		if err := json.Unmarshal([]byte(content), &m); err == nil {
+		m, err := render.ParseManifest([]byte(content))
+		var noBuild *version.NoBuildError
+		if errors.As(err, &noBuild) {
+			inv.ManifestErr = fmt.Errorf("%s: %w. Apply the site again, which writes it anew", dep.Manifest(), err)
+			err = nil
+		}
+		if version.IsNewer(err) {
+			err = nil
+		}
+		if err == nil {
 			inv.ManifestFiles = m.Files
 			inv.ManifestWebServer = m.WebServer
-			inv.ManifestToolkitVersion = m.ToolkitVersion
+			inv.ManifestBuild = m.Build
 			if inv.ManifestFiles == nil {
 				inv.ManifestFiles = []render.ManifestFile{}
 			}
@@ -1449,7 +1457,7 @@ func newWorld(t *testing.T, edits ...func(string) string) *world {
 			h.wgRun = &running
 			h.files[wgInstalled] = running
 		}
-		manifest, _ := json.MarshalIndent(render.Manifest{Version: 1, Files: entries, ToolkitVersion: version.Version}, "", "  ")
+		manifest, _ := json.MarshalIndent(render.Manifest{Version: 1, Files: entries, Build: version.Current()}, "", "  ")
 		h.files[dep.Manifest()] = string(manifest) + "\n"
 		if contains(cfg.Etcd.Members, name) {
 			h.etcdUp, h.etcdContainer = true, true
@@ -1519,7 +1527,7 @@ func newWorld(t *testing.T, edits ...func(string) string) *world {
 	reg := registry.Registry{Version: registry.Version, Deployments: map[string]registry.Entry{}}
 	id, e := claimOf(cfg, "home-b", mustTime())
 	reg.Deployments[id] = e
-	reg.Deployments[otherID] = registry.Entry{Token: "0c1d", Root: "/srv/paisans/0c1d", Domain: "example.net", Site: "x", Roles: "apps", ClaimedAt: "2026-10-01T00:00:00Z", Interface: "psns-0c1d", Subnet: "10.45.0.0/24", Address: "10.45.0.2"}
+	reg.Deployments[otherID] = registry.Entry{Token: "0c1d", Root: "/srv/paisans/0c1d", Domain: "example.net", Site: "x", Roles: "apps", ClaimedAt: "2026-10-01T00:00:00Z", Interface: "psns-0c1d", Subnet: "10.45.0.0/24", Address: "10.45.0.2", Build: version.Current()}
 	b.files[registry.Path] = encode(t, reg)
 	return w
 }
@@ -1625,5 +1633,6 @@ func claimOf(cfg *config.Config, site string, now time.Time) (string, registry.E
 		Subnet:     cfg.Mesh.Subnet,
 		Address:    declared.Address,
 		Roles:      registry.JoinRoles(declared.Roles),
+		Build:      version.Current(),
 	}
 }

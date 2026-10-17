@@ -600,6 +600,10 @@ func gatherLeftovers(cfg *config.Config, site string, t apply.Transport) doctor.
 		p.Err = firstOf(err.Error())
 		return p
 	}
+	p.Manifest, p.ManifestBuild = inv.Manifest, inv.ManifestBuild
+	if inv.ManifestErr != nil {
+		p.ManifestErr = inv.ManifestErr.Error()
+	}
 	if p.Report, err = classifyLeftovers(cfg, site, inv, inv.ManifestFiles); err != nil {
 		p.Err = err.Error()
 	}

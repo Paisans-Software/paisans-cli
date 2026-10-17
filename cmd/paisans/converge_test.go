@@ -725,12 +725,13 @@ func TestConvergeRefusesBeforeReadingAHost(t *testing.T) {
 		t.Errorf("err = %v, want the configuration refused", err)
 	}
 	// The refusal stops the run, so its count line stays.
-	// The deployment and the version open the run, with its five events
-	// (the section, and each line's start and end), and the core catalog's
-	// two when the process has read it already; the findings follow.
-	opened := 5
-	if rec.Index("step", "core catalog") == 5 {
-		opened = 7
+	// The build, the deployment and the version open the run, with its
+	// seven events (the section, and each line's start and end), and the
+	// core catalog's two when the process has read it already; the
+	// findings follow.
+	opened := 7
+	if rec.Index("step", "core catalog") == 7 {
+		opened = 9
 	}
 	if rec.Index("section", "deployment") != 0 || rec.Index("section", "configuration") != opened || !rec.Has("result", "1 refusal") {
 		t.Errorf("not under configuration, or not counted:\n%s", rec.Lines())
@@ -1200,13 +1201,13 @@ func TestConvergeFindingsOpenTheConfigurationSection(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{true, nil, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "step init", "pending init", "section sites", "step classify the sites", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section etcd members"}},
-		{false, nil, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "section sites", "step classify the sites", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section mail", "step smtp.example.org:587, starttls, as robot@example.org, from home-a", "step smtp.example.org:587, starttls, as robot@example.org, from home-b", "step smtp.example.org:587, starttls, as robot@example.org, from watch", "section etcd members"}},
-		{false, []string{"--execute"}, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "section sites", "step classify the sites", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section mail", "step smtp.example.org:587, starttls, as robot@example.org, from home-a", "step smtp.example.org:587, starttls, as robot@example.org, from home-b", "step smtp.example.org:587, starttls, as robot@example.org, from watch", "section etcd members"}},
+		{true, nil, []string{"section deployment", "step paisans", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "step init", "pending init", "section sites", "step classify the sites", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section etcd members"}},
+		{false, nil, []string{"section deployment", "step paisans", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "section sites", "step classify the sites", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section mail", "step smtp.example.org:587, starttls, as robot@example.org, from home-a", "step smtp.example.org:587, starttls, as robot@example.org, from home-b", "step smtp.example.org:587, starttls, as robot@example.org, from watch", "section etcd members"}},
+		{false, []string{"--execute"}, []string{"section deployment", "step paisans", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "section sites", "step classify the sites", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section mail", "step smtp.example.org:587, starttls, as robot@example.org, from home-a", "step smtp.example.org:587, starttls, as robot@example.org, from home-b", "step smtp.example.org:587, starttls, as robot@example.org, from watch", "section etcd members"}},
 		// init ran first and reported the findings and the secrets itself,
 		// under the file's path; they are not reported a second time.
 		// The deployment and the version open every run, ahead of both.
-		{true, []string{"--execute"}, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section sites", "step classify the sites", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section mail", "step smtp.example.org:587, starttls, as robot@example.org, from home-a", "step smtp.example.org:587, starttls, as robot@example.org, from home-b", "step smtp.example.org:587, starttls, as robot@example.org, from watch", "section etcd members"}},
+		{true, []string{"--execute"}, []string{"section deployment", "step paisans", "step id", "step configuration", "pending configuration", "step core catalog", "section sites", "step classify the sites", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section mail", "step smtp.example.org:587, starttls, as robot@example.org, from home-a", "step smtp.example.org:587, starttls, as robot@example.org, from home-b", "step smtp.example.org:587, starttls, as robot@example.org, from watch", "section etcd members"}},
 	} {
 		rec.Events = nil
 		needsInit = c.init

@@ -4,11 +4,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 // ManifestName is the record of what was rendered and what it hashed to.
@@ -56,12 +59,32 @@ type Manifest struct {
 	// rendered, sorted: the effective topology left them out, so a check
 	// comparing this site with a render uses the same view.
 	Pending []string `json:"pending,omitempty"`
-	// ToolkitVersion is the release of the paisans that wrote this
-	// manifest, MAJOR.MINOR.PATCH, without the commit, which cannot be
-	// ordered. site remove refuses a site a newer release applied, since it
-	// may not know everything that release put on the host. A manifest
-	// written before apply recorded it has none.
-	ToolkitVersion string `json:"toolkit_version,omitempty"`
+	// Build is the paisans that wrote this manifest: toolkit_version,
+	// toolkit_commit and toolkit_modified. site remove orders by its version
+	// and refuses a site a newer one applied, since it may not know
+	// everything that version put on the host. ParseManifest refuses a
+	// manifest without it.
+	version.Build
+}
+
+// ParseManifest reads a manifest. A manifest that does not say which build
+// of paisans wrote it is refused with a *version.NoBuildError, and with the
+// manifest as read beside it, for apply, which writes it again.
+func ParseManifest(data []byte) (Manifest, error) {
+	var m Manifest
+	err := json.Unmarshal(data, &m)
+	if buildErr := version.RequireBuild(data); buildErr != nil {
+		// A build key of the wrong type fails the decode too, after it has
+		// read every other field: the build's refusal is the one to give.
+		var typeErr *json.UnmarshalTypeError
+		if err == nil || errors.As(err, &typeErr) {
+			return m, buildErr
+		}
+	}
+	if err != nil {
+		return Manifest{}, err
+	}
+	return m, nil
 }
 
 // ManifestImage is one repository a site's stacks rendered, and every
@@ -172,7 +195,7 @@ func Write(plan *Plan, dir string) error {
 	for _, site := range sites {
 		entries := bySite[site]
 		sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
-		data, err := json.MarshalIndent(Manifest{Version: 1, Files: entries}, "", "  ")
+		data, err := json.MarshalIndent(Manifest{Version: 1, Files: entries, Build: version.Current()}, "", "  ")
 		if err != nil {
 			return fmt.Errorf("building the manifest for %s: %w", site, err)
 		}

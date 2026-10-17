@@ -71,7 +71,10 @@ step 30: write the admission record
     |     "admin_tcp": "",
     |     "why": "its admin API did not answer on localhost:2019"
     |   },
-    |   "system_docker_disabled": true
+    |   "system_docker_disabled": true,
+    |   "toolkit_version": "<release>",
+    |   "toolkit_commit": "0000000000000000000000000000000000000000",
+    |   "toolkit_modified": false
     | }
 
 step 31: add the operators' keys

@@ -136,5 +136,8 @@
       "sha256": "00bc0e1984fa74c77817aea9c53a76f11c8b33aa0fe4f7eb8b79a5a27ebd716a",
       "mode": "0600"
     }
-  ]
+  ],
+  "toolkit_version": "<version>",
+  "toolkit_commit": "<commit>",
+  "toolkit_modified": false
 }

@@ -14,13 +14,34 @@ go build ./cmd/paisans
 Go 1.25.8 or newer, the `go` line in `go.mod`. There is no code generation step.
 The `Makefile` holds only the release targets. `make bump` and its
 `bump-patch`, `bump-minor` and `bump-major` forms set the version constant in
-`internal/version` and cut `CHANGELOG.md`; *Releases* in `AGENTS.md` describes
-the flow. `make release-binaries` builds the Linux binaries a release
+`internal/version` and cut `CHANGELOG.md`, counting from the newest `vX.Y.Z`
+tag. After a release is cut, `make dev` moves `develop`'s version to the next
+`-dev` (Eg: `0.4.0-dev` after `v0.3.0`), which `version.Compare` orders after
+the release and before the next one; *Releases* in `AGENTS.md` describes the
+flow. `make release-binaries` builds the Linux binaries a release
 attaches, `paisans-linux-amd64` and `paisans-linux-arm64`, static with
 `CGO_ENABLED=0`, into `dist/` with a `SHA256SUMS` file beside them. The
 release workflow runs the same target, so a local run builds what a release
 ships; `dist/` is ignored, because Go marks a binary `-dirty` when the tree
 holds untracked files.
+
+Every record paisans writes names the build that wrote it: its version,
+its commit, and whether the tree was modified. `make release-binaries` sets
+the commit with
+`-ldflags "-X github.com/paisans-software/paisans-cli/internal/version.buildCommit=<commit>"`,
+which the release workflow passes as `COMMIT`. A packager building from a
+source tarball, which holds no git metadata (Eg: the Homebrew formula), sets
+it the same way, to the tag of the release the tarball holds (Eg: `v0.3.0`
+or `v0.3.0-rc.1`, which is `v` and the source's own version constant) or its
+full 40-character lower-case commit; any other value, another release's tag
+or a short or upper-case commit among them, makes every command refuse to
+run, naming the variable.
+Without it, a build from a git checkout names the commit Go recorded, and a
+`go install ...@<version>` build names its module tag or the commit its
+pseudo-version carries. A build none of these names a commit for runs the
+commands that write nothing (`version`, help, `validate`, `doctor`, a dry
+run) and refuses every one that writes a record (`--execute`, `render`),
+saying to build from git or with the flag.
 
 ## Run
 

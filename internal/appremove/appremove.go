@@ -394,6 +394,9 @@ func planSite(cfg *config.Config, app string, st SiteState) (SitePlan, error) {
 	if inv == nil {
 		return sp, fmt.Errorf("app remove: %s: the host was not read", st.Site)
 	}
+	if inv.Manifest && inv.ManifestErr != nil {
+		return sp, fmt.Errorf("app remove: %s: %w. Nothing was changed", st.Site, inv.ManifestErr)
+	}
 	if inv.Manifest && inv.ManifestFiles == nil {
 		return sp, fmt.Errorf("app remove: %s: %s is not readable as a manifest, so no file there is provably this deployment's. Nothing was changed", st.Site, inv.ManifestPath)
 	}

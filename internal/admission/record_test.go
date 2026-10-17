@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/admission"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 // host is a host's files, read as the deployment's user reads them.
@@ -48,6 +49,7 @@ func TestRecordGolden(t *testing.T) {
 	rec.MeshLAN = "192.168.1.0/24"
 	rec.WebServer = &admission.WebServer{Server: "caddy", Process: "caddy", Config: "/etc/caddy/Caddyfile", Main: "/etc/caddy/Caddyfile", Certs: "automatic", AdminTCP: "localhost:2019"}
 	rec.SystemDockerDisabled = true
+	rec.Build = goldenBuild
 	got := encode(t, rec)
 	path := filepath.Join("testdata", "admitted.f2a9.json")
 	if *update {
@@ -68,6 +70,22 @@ func TestRecordGolden(t *testing.T) {
 	}
 	if string(encode(t, back)) != string(got) {
 		t.Errorf("read back differently:\n%s", encode(t, back))
+	}
+}
+
+// goldenBuild is the build the golden record names, so the file does not
+// change with each build that reads it.
+var goldenBuild = version.Build{Version: "0.3.0-dev", Commit: "519299d5cb009da4904cdf53c2025f1ad609f102", Modified: true}
+
+// NewRecord records this build of paisans, and the record reads it back.
+func TestNewRecordRecordsTheBuild(t *testing.T) {
+	rec := admission.NewRecord(build(t, "home-a"), admission.Grants{}, "", at)
+	if rec.Build != version.Current() {
+		t.Errorf("build %+v, want %+v", rec.Build, version.Current())
+	}
+	back, err := admission.ParseRecord(encode(t, rec), "f2a9")
+	if err != nil || back.Build != rec.Build {
+		t.Errorf("read back %+v, %v", back.Build, err)
 	}
 }
 
@@ -166,6 +184,16 @@ func TestParseRecordRefuses(t *testing.T) {
 		{"a mesh_subnet that is a host address", strings.Replace(g, `"mesh_subnet": "10.44.0.0/24"`, `"mesh_subnet": "10.44.0.1/24"`, 1), "f2a9", `mesh_subnet: "10.44.0.1/24" is a host address`},
 		{"a mesh_subnet with a leading zero", strings.Replace(g, `"mesh_subnet": "10.44.0.0/24"`, `"mesh_subnet": "10.044.0.0/24"`, 1), "f2a9", `mesh_subnet: "10.044.0.0/24" is not`},
 		{"a public mesh_subnet", strings.Replace(g, `"mesh_subnet": "10.44.0.0/24"`, `"mesh_subnet": "8.8.8.0/24"`, 1), "f2a9", `mesh_subnet: "8.8.8.0/24" is outside the private ranges`},
+		{"no build", strings.Replace(strings.Replace(strings.Replace(g, ",\n  \"toolkit_version\": \"0.3.0-dev\"", "", 1), ",\n  \"toolkit_commit\": \"519299d5cb009da4904cdf53c2025f1ad609f102\"", "", 1), ",\n  \"toolkit_modified\": true", "", 1), "f2a9", "it does not say which build of paisans wrote it (toolkit_version, toolkit_commit, toolkit_modified missing). The host's owner admits the deployment again: `paisans site request`, then `paisans site admit`"},
+		{"no commit", strings.Replace(g, ",\n  \"toolkit_commit\": \"519299d5cb009da4904cdf53c2025f1ad609f102\"", "", 1), "f2a9", "toolkit_commit missing"},
+		{"an unknown field beside the build", strings.Replace(g, `"toolkit_modified": true`, `"toolkit_modified": true, "toolkit_built_by": "x"`, 1), "f2a9", "unknown field"},
+		{"a version that cannot be ordered", strings.Replace(g, `"toolkit_version": "0.3.0-dev"`, `"toolkit_version": "next"`, 1), "f2a9", `it was written by paisans "next", a version this paisans ` + version.Version + ` cannot order, so a newer paisans may have written it. Upgrade paisans`},
+		{"a version that is not one", strings.Replace(g, `"toolkit_version": "0.3.0-dev"`, `"toolkit_version": "0.3 dev"`, 1), "f2a9", `toolkit_version: "0.3 dev" is not a version`},
+		{"a short commit", strings.Replace(g, `"toolkit_commit": "519299d5cb009da4904cdf53c2025f1ad609f102"`, `"toolkit_commit": "519299d5cb0"`, 1), "f2a9", `toolkit_commit: "519299d5cb0" is not`},
+		{"an empty commit", strings.Replace(g, `"toolkit_commit": "519299d5cb009da4904cdf53c2025f1ad609f102"`, `"toolkit_commit": ""`, 1), "f2a9", `toolkit_commit: "" is not`},
+		{"a modified flag that is not a bool", strings.Replace(g, `"toolkit_modified": true`, `"toolkit_modified": "yes"`, 1), "f2a9", `toolkit_modified: "yes" is not true or false). The host's owner admits the deployment again`},
+		{"an empty version", strings.Replace(g, `"toolkit_version": "0.3.0-dev"`, `"toolkit_version": ""`, 1), "f2a9", `toolkit_version: "" is not a version`},
+		{"a null commit", strings.Replace(g, `"toolkit_commit": "519299d5cb009da4904cdf53c2025f1ad609f102"`, `"toolkit_commit": null`, 1), "f2a9", "toolkit_commit: null"},
 		{"an IPv6 mesh_lan", strings.Replace(g, `"mesh_lan": "192.168.1.0/24"`, `"mesh_lan": "fd00::/64"`, 1), "f2a9", `mesh_lan: "fd00::/64" is not`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -393,5 +421,22 @@ func TestForSite(t *testing.T) {
 	var se *admission.SiteError
 	if !errors.As(err, &se) || se.Site != "home-a" || len(se.Problems) != 2 {
 		t.Errorf("grants missing: %v", err)
+	}
+}
+
+// A record a release candidate wrote, or one a build from a tarball wrote,
+// naming its release tag, is read.
+func TestParseRecordOfAReleaseCandidate(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "admitted.f2a9.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rc := strings.Replace(string(data), `"toolkit_version": "0.3.0-dev"`, `"toolkit_version": "0.3.0-rc.1"`, 1)
+	rc = strings.Replace(rc, `"toolkit_commit": "519299d5cb009da4904cdf53c2025f1ad609f102",
+  "toolkit_modified": true`, `"toolkit_commit": "v0.3.0-rc.1",
+  "toolkit_modified": false`, 1)
+	rec, err := admission.ParseRecord([]byte(rc), "f2a9")
+	if err != nil || rec.Build != (version.Build{Version: "0.3.0-rc.1", Commit: "v0.3.0-rc.1"}) {
+		t.Errorf("got %+v, %v", rec.Build, err)
 	}
 }

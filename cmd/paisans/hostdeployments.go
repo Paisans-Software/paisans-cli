@@ -1,9 +1,11 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"net"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -178,6 +180,7 @@ func runSiteDeployments(args []string) error {
 		return fmt.Errorf("site deployments: %s: listing the admission records in %s: %w. Nothing is listed", dest, admission.Dir, err)
 	}
 	var found leftoverProbe
+	var noBuild *registry.NoBuildError
 	reg := registry.Registry{Deployments: map[string]registry.Entry{}}
 	if *sudo {
 		// The probe before the registry, since it fails on a registry
@@ -192,7 +195,13 @@ func runSiteDeployments(args []string) error {
 			s.Fail(err)
 			return fmt.Errorf("site deployments: %s: listing %s: %w. Nothing is listed", dest, deployment.Base, err)
 		}
-		if reg, err = registry.Read(t); err != nil {
+		reg, err = registry.Read(t)
+		// An entry that does not say which build claimed the host is
+		// flagged below; every other entry is listed all the same.
+		if errors.As(err, &noBuild) {
+			err = nil
+		}
+		if err != nil {
 			s.Fail(err)
 			return fmt.Errorf("site deployments: %w. Nothing is listed", err)
 		}
@@ -209,7 +218,7 @@ func runSiteDeployments(args []string) error {
 		if roles == "" {
 			roles = "none"
 		}
-		r.Step(fmt.Sprintf("%s: admitted: %s as %s (%s), watchdog %s, public ports %s, at %s", rec.Deployment, rec.User, rec.Site, roles, yesNo(rec.Grants.Watchdog), yesNo(rec.Grants.PublicPorts), rec.AdmittedAt)).End(ui.OK, "")
+		r.Step(fmt.Sprintf("%s: admitted: %s as %s (%s), watchdog %s, public ports %s, at %s, by paisans %s", rec.Deployment, rec.User, rec.Site, roles, yesNo(rec.Grants.Watchdog), yesNo(rec.Grants.PublicPorts), rec.AdmittedAt, rec.Build)).End(ui.OK, "")
 	}
 	if len(records) == 0 {
 		r.Step("no admission record in "+admission.Dir).End(ui.OK, "")
@@ -228,6 +237,11 @@ func runSiteDeployments(args []string) error {
 	for _, id := range ids {
 		e := reg.Deployments[id]
 		tokens[e.Token], roots[e.Root] = true, true
+		if noBuild != nil && slices.Contains(noBuild.IDs, id) {
+			line := strings.TrimSuffix(registryLine(id, e), ", claimed by paisans "+e.Build.String())
+			r.Warn(line+", in an entry that does not say which build of paisans claimed the host: its owner admits it again (`paisans site request`, then `paisans site admit`)", noBuild.Error())
+			continue
+		}
 		r.Step(registryLine(id, e)).End(ui.OK, "")
 	}
 	if len(ids) == 0 {
@@ -267,5 +281,5 @@ func registryLine(id string, e registry.Entry) string {
 	if roles == "" {
 		roles = "none"
 	}
-	return fmt.Sprintf("%s: token %s, %s, site %s, roles %s, root %s", id, e.Token, e.Domain, e.Site, roles, e.Root)
+	return fmt.Sprintf("%s: token %s, %s, site %s, roles %s, root %s, claimed by paisans %s", id, e.Token, e.Domain, e.Site, roles, e.Root, e.Build)
 }

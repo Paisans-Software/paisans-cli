@@ -3,7 +3,6 @@ package siteremove
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"path"
@@ -267,13 +266,16 @@ func parseDir(out string) (dirState, error) {
 // release may have put things on the host this one does not know, or knows
 // in an older shape. Releases are compared, not commits, so two builds of
 // one release are equal. A version this binary cannot order is refused as
-// a newer one is. No manifest, or one recording no release, is nothing to
-// check.
+// a newer one is. No manifest is nothing to check, and one that does not
+// say which build wrote it is refused.
 func (p *Plan) checkToolkit(inv *hostcheck.Inventory) error {
-	if !inv.Manifest || inv.ManifestToolkitVersion == "" {
+	if !inv.Manifest {
 		return nil
 	}
-	return p.refuseNewer(inv.ManifestPath, inv.ManifestToolkitVersion)
+	if inv.ManifestErr != nil {
+		return fmt.Errorf("site remove %s: %w. Nothing was changed", p.Site, inv.ManifestErr)
+	}
+	return p.refuseNewer(inv.ManifestPath, inv.ManifestBuild.Version)
 }
 
 // refuseNewer is checkToolkit's refusal of the release theirs, recorded in
@@ -300,14 +302,15 @@ func (p *Plan) recheckToolkit(t apply.Transport) error {
 	if !found {
 		return nil
 	}
-	var m render.Manifest
-	if err := json.Unmarshal([]byte(content), &m); err != nil {
+	m, err := render.ParseManifest([]byte(content))
+	var noBuild *version.NoBuildError
+	if errors.As(err, &noBuild) {
+		return fmt.Errorf("site remove %s: %s: %w. Apply the site again, which writes it anew. Nothing was changed", p.Site, p.dep().Manifest(), err)
+	}
+	if err != nil && !version.IsNewer(err) {
 		return fmt.Errorf("site remove %s: %s is not readable as a manifest, so no file there is provably this deployment's. Nothing was changed", p.Site, p.dep().Manifest())
 	}
-	if m.ToolkitVersion == "" {
-		return nil
-	}
-	return p.refuseNewer(p.dep().Manifest(), m.ToolkitVersion)
+	return p.refuseNewer(p.dep().Manifest(), m.Build.Version)
 }
 
 func sum(s string) string {
@@ -438,7 +441,7 @@ func (p *Plan) buildHost() (*Stage, error) {
 		// The manifest stays, listing the kept files, which proves them
 		// this deployment's to the run that removes them.
 		hp.manifest = false
-		want, err := p.keptManifest(inv.ManifestFiles, proven, cp.reduced, inv.ManifestToolkitVersion)
+		want, err := p.keptManifest(inv.ManifestFiles, proven, cp.reduced, inv.ManifestBuild)
 		if err != nil {
 			return nil, err
 		}

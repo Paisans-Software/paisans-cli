@@ -18,6 +18,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 const (
@@ -355,7 +356,7 @@ func (h *host) s3(config string) (string, error) {
 // the file the host holds now unless given.
 func (h *host) manifest(t *testing.T, entries ...render.ManifestFile) {
 	t.Helper()
-	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: entries}, "", "  ")
+	data, err := json.MarshalIndent(render.Manifest{Version: 1, Build: version.Current(), Files: entries}, "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}
