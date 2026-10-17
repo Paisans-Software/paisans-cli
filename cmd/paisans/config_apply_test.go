@@ -2,12 +2,18 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/paisans-software/pocketid-go"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -738,5 +744,172 @@ func TestApplySiteThatRecordsAtPocketIDLeavesTheStoreCurrent(t *testing.T) {
 	head, held := headSecrets(t, f)
 	if head == v1.sha || !bytes.Equal(held, written) || s.version.sha != head || identity.sha != head || !f.pushed() {
 		t.Errorf("head %s, version %s, identity %s", head, s.version.sha, identity.sha)
+	}
+}
+
+// pocketIDHost is every host as ssh reaches it in process: files written are
+// read back, and answer gives the reply to a command it knows, before the
+// quiet host's. It returns every command run, decoded.
+func pocketIDHost(t *testing.T, files map[string]string, answer func(host, cmd string) (string, bool)) *[]string {
+	t.Helper()
+	answerQuietly(t, "", "")
+	var mu sync.Mutex
+	var cmds []string
+	writeTarget := regexp.MustCompile(`mv -f "\$tmp" '([^']+)'`)
+	readTarget := regexp.MustCompile(`^if \[ -f '([^']+)' \]; then cat`)
+	t.Cleanup(apply.SetRunSSH(func(c *exec.Cmd) error {
+		args := c.Args
+		b := args[len(args)-1]
+		if _, after, found := strings.Cut(b, "printf %s "); found {
+			b = after
+		}
+		b, _, _ = strings.Cut(b, " |")
+		decoded, err := base64.StdEncoding.DecodeString(b)
+		cmd := strings.TrimRight(string(decoded), "\n")
+		if strings.HasPrefix(cmd, "export DOCKER_HOST=") {
+			if _, after, found := strings.Cut(cmd, "\n"); found {
+				cmd = after
+			}
+		}
+		mu.Lock()
+		cmds = append(cmds, cmd)
+		mu.Unlock()
+		reply := func(out string) error {
+			io.WriteString(c.Stdout, out)
+			return nil
+		}
+		if err == nil {
+			if m := writeTarget.FindStringSubmatch(cmd); m != nil && c.Stdin != nil {
+				in, _ := io.ReadAll(c.Stdin)
+				mu.Lock()
+				files[m[1]] = string(in)
+				mu.Unlock()
+				return nil
+			}
+			if m := readTarget.FindStringSubmatch(cmd); m != nil {
+				mu.Lock()
+				content, ok := files[m[1]]
+				mu.Unlock()
+				if ok {
+					return reply(content)
+				}
+			}
+			host := ""
+			for _, a := range args {
+				if strings.Contains(a, "@") && !strings.Contains(a, " ") {
+					host = a
+				}
+			}
+			if out, ok := answer(host, cmd); ok {
+				return reply(out)
+			}
+		}
+		out, exit, ok := quietAnswer(args, "", "")
+		if !ok {
+			return c.Run()
+		}
+		io.WriteString(c.Stdout, out)
+		if exit != 0 {
+			return sshExit(exit)
+		}
+		return nil
+	}))
+	return &cmds
+}
+
+// runningSite answers what an apply asks a site whose stacks come up:
+// names resolve, the mesh comes up when started, containers run healthy,
+// etcd and Patroni answer, and Pocket ID is active on home-a.
+func runningSite() func(host, cmd string) (string, bool) {
+	var mu sync.Mutex
+	started := false
+	return func(host, cmd string) (string, bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		return runningAnswer(host, cmd, &started)
+	}
+}
+
+// runningAnswer is runningSite's answer to cmd on host. The mesh reads as up
+// only once, right after it is started, so each pass of an apply starts it.
+func runningAnswer(host, cmd string, started *bool) (string, bool) {
+	switch {
+	case strings.HasSuffix(cmd, "wg-psns-f2a9' up"):
+		*started = true
+		return "", true
+	case strings.Contains(cmd, "member list -w json"):
+		return `{"members":[{"ID":1,"name":"home-a","peerURLs":["http://10.44.0.1:2380"],"clientURLs":["http://10.44.0.1:2379"]},{"ID":2,"name":"home-b","peerURLs":["http://10.44.0.2:2380"],"clientURLs":["http://10.44.0.2:2379"]},{"ID":3,"name":"vm","peerURLs":["http://10.44.0.3:2380"],"clientURLs":["http://10.44.0.3:2379"]}]}`, true
+	case strings.Contains(cmd, "/healthz") && strings.Contains(cmd, "echo absent"):
+		if strings.Contains(host, "home-a") {
+			return "active\n", true
+		}
+		return "absent\n", true
+	case strings.Contains(cmd, ":8008/cluster"):
+		return `{"members":[{"name":"home-a","role":"leader","state":"running"}],"scope":"fixture"}`, true
+	case strings.Contains(cmd, " ps --all --format json"):
+		return `{"Service":"app","Name":"app-1","State":"running","Health":""}` + "\n", true
+	case strings.Contains(cmd, "ps --status running"):
+		return "c0ffee\n", true
+	case strings.Contains(cmd, "getent ahosts"):
+		return "", true
+	case strings.HasPrefix(cmd, "ip -br addr show dev psns-f2a9"):
+		if !*started {
+			return "", true
+		}
+		*started = false
+		return "psns-f2a9 UNKNOWN 10.44.0.1/24\n7: psns-f2a9: <POINTOPOINT,NOARP,UP,LOWER_UP> mtu 1420 qdisc noqueue state UNKNOWN\n", true
+	}
+	return "", false
+}
+
+// apply --site on the site that runs Pocket ID, with no client yet for an
+// app there, creates the client, publishes the bytes it wrote as the next
+// revision, and only then records the grant: the host's record names that
+// revision, which holds the client's ID.
+func TestApplySiteRecordsTheRevisionItPublishedAtPocketID(t *testing.T) {
+	f := newApplyStore(t, 0)
+	secretsPath := filepath.Join(f.l.Dir, "secrets.enc.yaml")
+	secrets, err := config.LoadSecrets(secretsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(secrets.OIDCClients, "talk")
+	if err := config.WriteSecrets(secretsPath, secrets, nil); err != nil {
+		t.Fatal(err)
+	}
+	fake := newIDPFake()
+	saved := oidcTransport
+	oidcTransport = func(tr apply.SSHTransport) pocketid.Transport {
+		fake.destination = tr.Describe()
+		return fake
+	}
+	t.Cleanup(func() { oidcTransport = saved })
+	t.Setenv("PAISANS_ALLOW_YES", "1")
+	// home-a's etcd member was founded: its record is on the host, as
+	// rendered.
+	initial, err := os.ReadFile(filepath.Join("..", "..", "internal", "render", "testdata", "golden", "home-a", "srv", "paisans", "f2a9", "infra", "etcd-initial"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	founded := map[string]string{"/srv/paisans/f2a9/infra/etcd-initial": string(initial)}
+	cmds := pocketIDHost(t, founded, runningSite())
+	hosts := fakeGrants(t, func(string) *grant.Record { return nil })
+	rec := recordConverge(t)
+	captureStdout(t, func() {
+		err = runApply([]string{"--config", f.cfgPath, "--site", "home-a", "--execute", "--yes"}, noTerminalStdin(), io.Discard)
+	})
+	if err != nil {
+		t.Fatalf("%v: %v\n%s\ncommands:\n%s", problemText(err), err, rec.Lines(), strings.Join(*cmds, "\n----\n"))
+	}
+	head, held := headSecrets(t, f)
+	if !bytes.Contains(held, []byte("c-1")) {
+		t.Errorf("the head's secrets lack the client ID c-1")
+	}
+	if hosts["home-a"] == nil {
+		t.Fatalf("home-a has no record\n%s", rec.Lines())
+	}
+	got := hosts["home-a"].record(t)
+	if got.Config == nil || got.Config.Revision != 2 || got.Config.Hash != head {
+		t.Errorf("home-a records %+v, the head is %s", got.Config, head)
 	}
 }
