@@ -3939,10 +3939,10 @@ A policy already there that rejects (`p=reject`, `sp=reject`, no `pct` below
 only one there, covers the hostnames, and `dns init` writes no
 `_dmarc.<hostname>` and no `_dmarc.<community.domain>`. Relaxed alignment
 covers nothing, since a forger passes it with any sibling name's SPF. Nor
-does a policy covered by a name between the hostname and the registrable
-domain that holds a policy not as strict, delegates its policy by a CNAME, or
-is delegated to nameservers the DNS provider does not hold: a receiver
-walking up the tree under DMARCbis may read that one first.
+does the policy cover a hostname when a name between the two holds a policy
+that is not as strict, delegates its policy by a CNAME, or is delegated to
+nameservers the DNS provider does not hold: a receiver walking up the tree
+under DMARCbis may read that one first.
 The run that creates the policy still gives each hostname its own, since
 nothing says the provider let it be written until it reads back; `dns prune
 --execute` then removes them. A policy that is weaker, or a missing one that
