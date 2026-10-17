@@ -763,6 +763,19 @@ func TestARouteAllowAsUFWRecordsItKeepsAPublishReachable(t *testing.T) {
 	}
 }
 
+// A route allow out on the bridge, as ufw-docker guides write it, keeps
+// the publish reachable; an earlier route deny that matches wins over it.
+func TestRouteRulesAreReadInOrderAndOutOnAnInterface(t *testing.T) {
+	out := "tuple4 route:allow tcp 80 172.17.0.2 any 0.0.0.0/0 out_docker0\n"
+	if b := blocks(t, "rule route allow out on docker0 to 172.17.0.2 port 80 proto tcp\n"+out+web80+sshdOn22); b != nil {
+		t.Errorf("route allow out on docker0: %v", b)
+	}
+	deny := "tuple4 route:deny tcp any 172.17.0.0/16 any 0.0.0.0/0 in\n"
+	if b := blocks(t, "rule route deny proto tcp to 172.17.0.0/16\nrule route allow out on docker0 to 172.17.0.2 port 80 proto tcp\n"+deny+out+web80+sshdOn22); b == nil || !strings.Contains(b.Error(), "sudo ufw route allow proto tcp to 172.17.0.2 port 80") {
+		t.Errorf("an earlier route deny: %v", b)
+	}
+}
+
 // One listener on IPv6 alone, with ufw's IPv6 off, and one on IPv4 that
 // the owner's rule allows: the IPv6 one is listed apart, and no allow line
 // is printed for a rule that exists. A dual-stack listener allowed for one

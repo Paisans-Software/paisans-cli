@@ -815,14 +815,24 @@ func (b ufwBefore) routes(a *answering, mesh string) (ufwTuple, bool) {
 			fam = 6
 		}
 		found := false
+		// ufw applies the first route rule a packet matches: a deny or a
+		// reject that reaches d before an allow does stops it.
 		for _, t := range b.tuples {
-			if t.fam == fam && t.routes(a.proto, d, mesh) {
+			if t.fam != fam {
+				continue
+			}
+			switch t.routes(a.proto, d, mesh) {
+			case routeAllows:
 				if first.action == "" {
 					first = t
 				}
 				found = true
-				break
+			case routeDenies:
+				return ufwTuple{}, false
+			default:
+				continue
 			}
+			break
 		}
 		if !found {
 			return ufwTuple{}, false
@@ -935,29 +945,48 @@ func (t ufwTuple) lets(proto string, lo, hi int, addr, mesh string) bool {
 	return err == nil && dst == ip
 }
 
-// routes reports whether t, a route rule, lets proto in to dest, from
-// any source address and port, on any interface but mesh.
-func (t ufwTuple) routes(proto string, dest netip.AddrPort, mesh string) bool {
+// What a route rule does to traffic routed to one address and port.
+const (
+	routeMisses = iota
+	routeAllows
+	routeDenies
+)
+
+// routes is what t does to proto routed to dest. An allow or a limit,
+// inbound on any interface or outbound on one, as `ufw route allow out on
+// docker0` writes it, allows it when it is from any source address and
+// port, on no interface of mesh's (the deployment's own). A deny or a
+// reject denies it whatever its source and interfaces, since it stops
+// some of that traffic at least.
+func (t ufwTuple) routes(proto string, dest netip.AddrPort, mesh string) int {
 	action, ok := strings.CutPrefix(t.action, "route:")
 	action, _, _ = strings.Cut(action, "_")
-	if !ok || action != "allow" && action != "limit" || t.direction != "in" || t.iface == mesh || strings.HasPrefix(t.iface, mesh+"!") {
-		return false
-	}
-	if t.sport != "any" || !anyAddr(t.src) || t.proto != "any" && t.proto != proto {
-		return false
+	if !ok || t.proto != "any" && t.proto != proto {
+		return routeMisses
 	}
 	port := int(dest.Port())
 	if t.dport != "any" && !portsHold(t.dport, port, port) {
-		return false
+		return routeMisses
 	}
-	if anyAddr(t.dst) {
-		return true
+	if !anyAddr(t.dst) {
+		if pre, err := netip.ParsePrefix(t.dst); err == nil {
+			if !pre.Contains(dest.Addr()) {
+				return routeMisses
+			}
+		} else if dst, err := netip.ParseAddr(t.dst); err != nil || dst != dest.Addr() {
+			return routeMisses
+		}
 	}
-	if pre, err := netip.ParsePrefix(t.dst); err == nil {
-		return pre.Contains(dest.Addr())
+	switch action {
+	case "deny", "reject":
+		return routeDenies
+	case "allow", "limit":
+		if (t.direction == "in" || t.direction == "out") && !slices.Contains(strings.FieldsFunc(t.iface, func(r rune) bool { return r == '!' || r == '_' }), mesh) &&
+			t.sport == "any" && anyAddr(t.src) {
+			return routeAllows
+		}
 	}
-	dst, err := netip.ParseAddr(t.dst)
-	return err == nil && dst == dest.Addr()
+	return routeMisses
 }
 
 // String is t as `ufw allow` would name it.
