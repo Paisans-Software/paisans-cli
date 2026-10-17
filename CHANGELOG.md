@@ -27,6 +27,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Changed
 
+- `host evict` refuses, with nothing changed, a host any deployment of which a newer release of paisans claimed, naming the highest release to upgrade to.
 - `validate` warns about one operator instead of refusing it, and refuses a deployment with no operator (`operators-none`); `paisans create` accepts one, and the operator reconciler fails the operators heartbeat until a second is declared.
 - `paisans create` writes the file to `--config`, or `paisans-stack.yaml` in the current directory, once validate refuses nothing in it, without printing it or asking first.
 - `site remove` refuses, in every form and with nothing changed, a site a newer release of paisans applied; `apply` records its release in the manifest, and `host admit` in the registry entry.
