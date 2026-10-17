@@ -616,8 +616,9 @@ paisans host prepare --all --execute          # every site, one at a time
   bare repository `config/<token>.git`, the peers file, `bin/config-sync.sh`,
   and the user's units `paisans-<token>-config-daemon`, `-config-sync` and
   `-config-sync.timer`, enabled under linger. The daemon binds the mesh
-  address, so on a host whose mesh `apply` has not brought up it restarts every
-  ten seconds until it can. Every site's `host prepare` is also what makes the
+  address, so on a host whose mesh `apply` has not brought up the unit's start
+  waits for that address, however long it takes, and the daemon binds it once
+  it is there; a daemon that stops later is restarted after ten seconds. Every site's `host prepare` is also what makes the
   store `apply` publishes to, so `apply` refuses a version no site could take
   with this command named.
 

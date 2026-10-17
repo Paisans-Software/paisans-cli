@@ -300,10 +300,12 @@ healthy and answering through the gateway, polled for three minutes. See
 `doctor` reaches every site, or the ones `--site` names, and reports what is
 stuck with how to recover: sites that do not answer and what is lost while
 they are gone, each site's admission record, its user's groups, its rootless
-Docker, linger and sudo rights, etcd quorum and cluster version, the Patroni leader or why no
-replica promotes, containers that are down, Pocket ID's active instance,
-clock drift, and what is left over or foreign (below). It has no `--execute` and sends only reads, which its command
-level test checks against an allow list. The judgements are pure functions in
+Docker, linger and sudo rights, etcd quorum and cluster version, the
+Patroni leader or why no replica promotes, containers that are down, Pocket ID's active instance,
+clock drift, and what is left over or foreign (below). It sends only reads
+to hosts, which its command level test checks against an allow list; its
+`--execute` removes redundant `config:` keys and records `ssh.user` in the
+local `paisans-stack.yaml` and touches no host (see `README.md`). The judgements are pure functions in
 `internal/doctor`, tested with what live hosts answered; `cmd/paisans` runs the
 commands. It exits 1 on any `FAIL`.
 

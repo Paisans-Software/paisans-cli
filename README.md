@@ -4059,7 +4059,6 @@ sites:
     address: 10.44.0.1
     ssh:
       host: home-a.local
-      user: ubuntu
       keys: [alice]
     watchdog: auto   # auto | required | softdog; auto when absent
 ```
@@ -4248,8 +4247,9 @@ old, genuine version, and applying it reaches only those sites.
   firewall, and a mesh peer reads `paisans-stack.yaml` and the encrypted
   secrets, both of which a peer is trusted with already. The address exists
   only while the deployment's WireGuard unit is up, and a user unit cannot be
-  ordered after the system's `wg-quick`, so the daemon restarts every ten
-  seconds until it can bind. It is enabled under linger, so it runs without a
+  ordered after the system's `wg-quick`, so the unit's start waits for that
+  address, however long it takes, and the daemon binds it once it is there; a
+  daemon that stops later is restarted after ten seconds. It is enabled under linger, so it runs without a
   login, and `host prepare` starts it whether or not the mesh is up yet;
 * a timer, the user's `paisans-<token>-config-sync`, every 15 minutes, that
   fetches the versions each peer's mesh address serves, so a site that was
@@ -4495,7 +4495,7 @@ sites:
     public_address: 203.0.113.10
     ssh:
       host: 203.0.113.10   # optional: defaults to public_address, then endpoint's host
-      user: ubuntu         # optional: defaults to paisans-<token>, written here by the first --execute
+      user: paisans-1a2b   # optional: defaults to paisans-<token>, written here by the first --execute
       port: 22             # optional: empty or 0 means 22
       keys: [alice, bob]   # required: the operators who may log in
 ```
@@ -4988,7 +4988,7 @@ The check has three parts, in `internal/hostcheck`:
 
 | Class | When | What the command does |
 |---|---|---|
-| clean | nothing foreign; an empty Docker install is clean | what it always did, including enabling ufw with incoming denied by default |
+| clean | nothing foreign; an empty Docker install is clean | proceeds; nothing in this check reads or changes the firewall, which is `host admit`'s |
 | shared | something foreign, holding nothing the site claims | proceeds, touching only what is the toolkit's (below) |
 | conflict | something foreign holds a claim | refuses, changes nothing, one line per conflict |
 
@@ -5028,8 +5028,9 @@ On a **shared** host:
 * **No image is removed**, as with `apply --keep-images`, and nothing is
   swept, because an image the toolkit renders (`caddy`, `postgres`) may be
   what a foreign project runs.
-* **Docker is left alone**, as it is on every host where `docker compose`
-  works (see *Docker is judged by its version, not its source*).
+* **Docker is the deployment's own**: the check reads the user's rootless
+  daemon, and the owner's Docker is never touched (see *Docker is judged by
+  its version, not its source*).
 
 The class is computed on every run and never stored: a host becomes shared
 the day someone installs something beside the deployment. `apply`'s manifest
@@ -5495,7 +5496,8 @@ every key a run would add, with its operator and fingerprint, and an
 
 On a data site, `host admit --watchdog` gives the deployment's user the
 device the site's `watchdog` mode asks for, and `host prepare` reads that it
-is the user's, as Patroni needs; *A data site's watchdog is declared, not
+is the user's, or a UID in the user's subordinate range once Patroni's
+container has taken it, as Patroni needs; *A data site's watchdog is declared, not
 assumed* has the modes. It reports which driver it found, from
 `/sys/class/watchdog/*/identity`.
 
