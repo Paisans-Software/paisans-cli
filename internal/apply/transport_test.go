@@ -501,6 +501,28 @@ func TestARefusalAboveTheDisconnectNoticeIsARefusedLogin(t *testing.T) {
 	apply.ForgetContacts()
 }
 
+// A server that closes the connection after the refusal, without a
+// disconnect message, ends ssh's output with "Connection closed by", which
+// alone is a connection that never opened. Above it, the refusal is what
+// happened: a refused login, never retried and never unreachable.
+func TestARefusalAboveConnectionClosedIsARefusedLogin(t *testing.T) {
+	for _, out := range []string{
+		"paisans-f2a9@203.0.113.10: Permission denied (publickey).\nConnection closed by 203.0.113.10 port 22\n",
+		"Received disconnect from 203.0.113.10 port 22:2: Too many authentication failures\nConnection closed by 203.0.113.10 port 22\n",
+		"paisans-f2a9@203.0.113.10: Permission denied (publickey).\nConnection reset by 203.0.113.10 port 22\n",
+	} {
+		apply.ForgetContacts()
+		s := &sshScript{answers: []sshAnswer{{out, 255}, {out, 255}, {out, 255}}}
+		s.install(t)
+		tr := apply.SSHTransport{Site: "home-a", User: "paisans-f2a9", Host: "203.0.113.10", PublicKeys: []string{keyA}, DefaultUser: true}
+		_, err := tr.Run("true")
+		if s.calls != 1 || errors.Is(err, apply.ErrUnreachable) || !errors.Is(err, apply.ErrLoginNotAdmitted) {
+			t.Errorf("%q: %d calls, %v", out, s.calls, err)
+		}
+	}
+	apply.ForgetContacts()
+}
+
 // A refusal the remote command printed, with more of its output after it,
 // is the command's failure and not a refused login.
 func TestARefusalAboveOtherOutputIsNotARefusedLogin(t *testing.T) {

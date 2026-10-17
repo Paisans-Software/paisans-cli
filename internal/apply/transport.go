@@ -553,6 +553,11 @@ func connectionFailed(err error, out string) bool {
 	if strings.Contains(last, "client_loop") {
 		return false
 	}
+	// A login refused before the connection closed is a refusal, which
+	// authProblem reports, and is never retried.
+	if loginRefused(out) {
+		return false
+	}
 	for _, s := range connectionFailures {
 		if strings.Contains(last, s) {
 			return true
@@ -648,7 +653,15 @@ var loginRefusals = []string{"Permission denied (", "Too many authentication fai
 // sshDisconnects begin the lines ssh prints as the connection ends, after
 // the reason for it: "Received disconnect from <host> port 22:2: <reason>"
 // carries sshd's reason, and "Disconnected from <host> port 22" follows it.
-var sshDisconnects = []string{"Received disconnect from ", "Disconnected from ", "Connection closed by "}
+// A server that hangs up after refusing the login without a disconnect
+// message leaves "Connection closed by <host> port 22", or "Connection
+// reset by <host> port 22" when it resets the connection. Those two are
+// connectionFailures as well, and connectionFailed leaves them to
+// authProblem when a refusal comes before them. The other
+// connectionFailures (a timeout, a refused or unroutable connection, a
+// failed key exchange) all end a connection before authentication, so none
+// of them can follow a refusal.
+var sshDisconnects = []string{"Received disconnect from ", "Disconnected from ", "Connection closed by ", "Connection reset by "}
 
 // loginRefused reports whether ssh's diagnostic output ends in a refused
 // login. That is the closing run of out's lines: its last line, and the
