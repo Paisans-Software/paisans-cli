@@ -2,12 +2,15 @@ package hostadmit_test
 
 import (
 	"errors"
+	"io"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/hostadmit"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
+	"github.com/paisans-software/paisans-cli/internal/registry"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 const ufwBeforeMarker = "paisans site admit: before enabling ufw"
@@ -572,5 +575,48 @@ func TestAnActiveUFWReadsNoListeners(t *testing.T) {
 		if plan.EnablesUFW || len(plan.UFWBlocks) != 0 || slices.ContainsFunc(h.ran, func(c string) bool { return strings.Contains(c, ufwBeforeMarker) }) {
 			t.Errorf("%+v: an active ufw read what enabling it blocks:\n%s", flags, plan.Text())
 		}
+	}
+}
+
+// A listener that starts between the plan and its run is a port the
+// owner never approved blocking: Execute, reading the host again once the
+// user exists, stops before ufw is enabled and names it, although
+// --enable-ufw-block-listed accepted what the plan listed.
+func TestExecuteStopsOnAPortBlockedSinceThePlan(t *testing.T) {
+	h := newBlank().with("ufw-active", "no").answer(ufwBeforeMarker, ownerCaddy+sshdOn22)
+	in := input(t, "vm", blockListed)
+	h.onRun = func(h *fakeHost, command string) {
+		switch {
+		case strings.Contains(command, registry.LockPath):
+			h.file(registry.Path, registryOf(in.Request))
+		case strings.HasPrefix(command, "install -d -m 755 -o root -g root /etc/paisans"):
+			h.withDir("/etc/paisans", "drwxr-xr-x", 0, 0)
+		case strings.Contains(command, "docker-ce-cli") && !strings.Contains(command, "docker compose version"):
+			h.with("engine", "29.9.1").with("setuptool", "present").with("system-socket", "present").
+				dropKeyed("pkg", "docker-ce")
+			h.add("pkg", "docker-ce installed").add("pkg", "docker-ce-rootless-extras installed").add("pkg", "uidmap installed").
+				answer("docker compose version", current().answers["docker compose version"])
+		case strings.HasPrefix(command, "useradd "):
+			h.with("passwd", "paisans-f2a9:x:1001:1001::/home/paisans-f2a9:/bin/bash").with("home", "dir 1001 /home/paisans-f2a9").
+				with("groups", "paisans-f2a9").with("group", "paisans-f2a9").
+				with("linger", "no").with("manager", "inactive").
+				add("subuid", "paisans-f2a9:165536:65536").add("subgid", "paisans-f2a9:165536:65536")
+			// The owner's database starts on a public address.
+			h.answer(ufwBeforeMarker, `listen tcp LISTEN 0 4096 0.0.0.0:5432 0.0.0.0:* users:(("postgres",pid=990,fd=5)) uid:113`+"\n"+ownerCaddy+sshdOn22)
+		}
+	}
+	plan, err := hostadmit.Build(h, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(plan.UFWBlocks, "80/tcp") || slices.Contains(plan.UFWBlocks, "5432/tcp") {
+		t.Fatalf("the approved plan blocks %q", plan.UFWBlocks)
+	}
+	err = hostadmit.Execute(h, in, plan, ui.NewPlain(io.Discard, false))
+	if err == nil || !strings.Contains(err.Error(), "5432/tcp") {
+		t.Errorf("Execute = %v", err)
+	}
+	if slices.ContainsFunc(h.ran, func(c string) bool { return c == "ufw --force enable" }) {
+		t.Error("ufw was enabled over a port the owner never approved blocking")
 	}
 }

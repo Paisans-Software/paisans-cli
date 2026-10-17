@@ -46,6 +46,17 @@ func planFirewall(p *planner) error {
 		if len(b.blocked) > 0 && !p.in.Flags.EnableUFWBlockListed {
 			return &UFWBlocksError{Blocked: b.blocked}
 		}
+		if p.in.blocksApproved {
+			var more []string
+			for _, x := range b.blocked {
+				if !slices.Contains(p.in.approvedBlocks, x.Key) {
+					more = append(more, x.Key+" ("+x.What+")")
+				}
+			}
+			if len(more) > 0 {
+				return fmt.Errorf("the host changed while admit ran: enabling ufw would now also block %s, which the plan you approved did not name, so ufw was not enabled. Nothing was changed", strings.Join(more, "; "))
+			}
+		}
 		before = &b
 	}
 	if p.in.Flags.PublicPorts {

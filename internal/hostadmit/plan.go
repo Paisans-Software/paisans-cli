@@ -56,6 +56,11 @@ type Input struct {
 	// run's own `ufw --force enable` ran, so the plan it rebuilds records
 	// that admit enabled ufw although ufw is active by then.
 	enabledUFW bool
+	// approvedBlocks is set by Execute to the plan's UFWBlocks, which the
+	// owner approved, so a plan it rebuilds that would block anything else
+	// stops before ufw is enabled; blocksApproved says it is set.
+	approvedBlocks []string
+	blocksApproved bool
 }
 
 // Grant is a grant the site's roles need and the flags leave out, for the
@@ -546,6 +551,8 @@ func Execute(t apply.Transport, in Input, approved *Plan, r ui.Reporter) error {
 	p := progressOf(approved, r)
 	defer p.close()
 	steps := approved.Steps
+	// Every plan rebuilt here blocks no more than the owner approved.
+	in.approvedBlocks, in.blocksApproved = approved.UFWBlocks, true
 	// rows is the row of approved's that each of steps runs in.
 	rows := make([]int, len(steps))
 	for i := range rows {
