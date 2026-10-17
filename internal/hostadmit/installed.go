@@ -178,7 +178,12 @@ func planSystemDocker(p *planner, s hostprep.Section, added hostprep.Installed) 
 	if err != nil {
 		return err
 	}
-	if err := refuseForeignUnits(p, added.Packages); err != nil {
+	// A package the list already claims, which readInstalled keeps only
+	// while it is on disk and its claim under admit's hold, is admit's
+	// own, being installed again after a run that stopped part way: its
+	// units are admit's, not another source's.
+	claimed := func(pkg string) bool { return slices.Contains(was.all(), pkg) }
+	if err := refuseForeignUnits(p, slices.DeleteFunc(slices.Clone(added.Packages), claimed)); err != nil {
 		return err
 	}
 	var dirs []string
@@ -222,30 +227,36 @@ func planSystemDocker(p *planner, s hostprep.Section, added hostprep.Installed) 
 	if err != nil {
 		return err
 	}
-	// The units this run installs were held while they installed: they
-	// never ran, and are disabled with --now. Those an earlier run
-	// installed are disabled only when no record says admit disabled them
-	// and they never ran: no unit active, and no network store, as an
-	// admit that stopped between its install and the disable leaves them.
-	// One that has run may be running the owner's containers by now, which
-	// disabling it would stop, so it is refused.
-	fresh := hostprep.SystemUnits(added.Packages)
-	earlier := slices.DeleteFunc(slices.Clone(units), func(u string) bool { return slices.Contains(fresh, u) })
+	// The units of a package this run installs for the first time were
+	// held while they installed: they never ran, and are disabled with
+	// --now. Those of a package an earlier run claimed are earlier ones,
+	// even when this run installs it again. Of those, one that is off
+	// (neither enabled nor running) is disabled with what this run
+	// installs, since its package's script may enable it as it installs
+	// again; it stays off either way. The rest are disabled only when no
+	// record says admit disabled them and they never ran: no unit active,
+	// and no network store, as an admit that stopped between its install
+	// and the disable leaves them. One that has run may be running the
+	// owner's containers by now, which disabling it would stop, so it is
+	// refused.
 	on := func(u string) bool { s := p.f.Docker.SystemUnits[u]; return s.Enabled || s.Active }
+	fresh := hostprep.SystemUnits(slices.DeleteFunc(slices.Clone(added.Packages), claimed))
+	earlier := slices.DeleteFunc(slices.Clone(units), func(u string) bool { return slices.Contains(fresh, u) })
+	again := slices.DeleteFunc(hostprep.SystemUnits(slices.DeleteFunc(slices.Clone(added.Packages), func(pkg string) bool { return !claimed(pkg) })), on)
 	running := slices.ContainsFunc(earlier, on)
 	ran := slices.ContainsFunc(earlier, func(u string) bool { return p.f.Docker.SystemUnits[u].Active }) ||
 		p.f.Docker.Ran() && slices.Contains(earlier, "docker.service")
-	disable := fresh
+	disable := slices.DeleteFunc(slices.Clone(units), func(u string) bool { return !slices.Contains(fresh, u) && !slices.Contains(again, u) })
 	switch {
 	case recorded && running:
 		p.present("docker: the system daemon admit installed and disabled has been enabled since, and is left as it is")
 	case running && unknown != "":
 		p.present("docker: the system daemon admit installed is running and left as it is, since " + unknown + " cannot be read and may say admit disabled it once")
 	case running && ran:
-		return systemDockerRan(p, earlier, now.all())
+		return systemDockerRan(p, earlier, now)
 	case running:
 		disable = units
-	case len(fresh) == 0:
+	case len(disable) == 0:
 		p.present("docker: the system daemon admit installed is disabled")
 	}
 	// A system Docker of admit's that never ran has no networks, and its
@@ -264,15 +275,22 @@ func planSystemDocker(p *planner, s hostprep.Section, added hostprep.Installed) 
 }
 
 // refuseForeignUnits refuses a unit of a package this run installs that
-// is already enabled or running: its package is not installed, so it is
-// not Docker's but the owner's, from another source, and the disable
-// after the install would stop it.
+// is already enabled or running: no claim of admit's covers its package,
+// which is not installed, so the unit is the owner's, from another source,
+// or from an install of theirs dpkg has left unconfigured, and the disable
+// after the install would stop it. The unit file of a package on disk is
+// the package's, so that refusal says to finish or purge the package
+// rather than to remove the file.
 func refuseForeignUnits(p *planner, packages []string) error {
 	for _, pkg := range packages {
 		for _, u := range hostprep.SystemUnits([]string{pkg}) {
-			if s := p.f.Docker.SystemUnits[u]; s.Enabled || s.Active {
-				return fmt.Errorf("%s is enabled or running, and %s is not installed, so it is not Docker's: it is yours, from another source. Admit installs %s, whose own %s it then disables, which would stop yours. Nothing was changed. While it is there, admit cannot install Docker on this host: once nothing needs it, disable it, remove its unit file, and admit again", u, pkg, pkg, u)
+			if s := p.f.Docker.SystemUnits[u]; !s.Enabled && !s.Active {
+				continue
 			}
+			if p.f.onDisk(pkg) {
+				return fmt.Errorf("%s is enabled or running, and %s is on disk but not configured, by an install admit does not claim, so it is yours. Admit would install it again and disable %s with it, which would stop it. Nothing was changed. Finish its install (dpkg --configure -a), or purge it (apt-get purge %s), and admit again", u, pkg, u, pkg)
+			}
+			return fmt.Errorf("%s is enabled or running, and %s is not installed, so it is not Docker's: it is yours, from another source. Admit installs %s, whose own %s it then disables, which would stop yours. Nothing was changed. While it is there, admit cannot install Docker on this host: once nothing needs it, disable it, remove its unit file, and admit again", u, pkg, pkg, u)
 		}
 	}
 	return nil
@@ -284,11 +302,17 @@ func refuseForeignUnits(p *planner, packages []string) error {
 // disabling them would stop those. The owner says whose they are: theirs,
 // by taking their packages off the list, or admit's again, by leaving them
 // as admit takes a daemon that never ran.
-func systemDockerRan(p *planner, units, packages []string) error {
+func systemDockerRan(p *planner, units []string, list installed) error {
 	var lines []string
 	for _, pkg := range []string{"docker-ce", "containerd.io"} {
-		if slices.Contains(packages, pkg) && slices.ContainsFunc(units, func(u string) bool { return slices.Contains(hostprep.SystemUnits([]string{pkg}), u) }) {
+		if !slices.ContainsFunc(units, func(u string) bool { return slices.Contains(hostprep.SystemUnits([]string{pkg}), u) }) {
+			continue
+		}
+		switch {
+		case slices.Contains(list.Packages, pkg):
 			lines = append(lines, "package "+pkg)
+		case slices.Contains(list.Installing, pkg):
+			lines = append(lines, "installing "+pkg)
 		}
 	}
 	what := "the line " + strings.Join(lines, "")

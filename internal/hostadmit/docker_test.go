@@ -398,6 +398,47 @@ func TestAnInstallDoesNotStopAContainerdThatRan(t *testing.T) {
 	}
 }
 
+// An admit killed while apt configured containerd.io leaves it
+// half-configured and claimed, docker-ce not yet unpacked, and
+// containerd.service enabled by its postinst or not yet, never started,
+// since the hold kept it from starting. The next run installs both again
+// and converges: the claimed package's unit is admit's, not the owner's,
+// and is disabled with what this run installs, whether its postinst has
+// enabled it yet or enables it in this run. Once it has run, it is
+// refused as admit's daemon that ran, under the line the list holds.
+func TestAnAdmitKilledMidInstallConverges(t *testing.T) {
+	killed := func(unit string) *fakeHost {
+		list := "installing containerd.io\ninstalling docker-ce\n"
+		return newBlank().with("system-unit", "containerd.service "+unit).with("docker-hold", "policy").
+			answer("docker compose version", "compose absent\npkg containerd.io install ok half-configured\nkeyring present\narch amd64\n").
+			add("ondisk", "containerd.io present").add("ondisk", "docker-ce absent").
+			file("/etc/paisans/installed", list).withFile("/etc/paisans/installed", list, "644", 0)
+	}
+	for _, unit := range []string{"enabled inactive", "disabled inactive"} {
+		plan, err := hostadmit.Build(killed(unit), input(t, "vm", hostadmit.Flags{}))
+		if err != nil {
+			t.Errorf("%s: after an admit killed mid-install: %v", unit, err)
+			continue
+		}
+		i := titled(plan, "disable the system Docker")
+		if i < 0 || !strings.HasPrefix(plan.Steps[i].Command, "systemctl disable --now docker.socket docker.service containerd.service && ") {
+			t.Errorf("%s: containerd.service is not disabled with Docker:\n%s", unit, plan.Text())
+		}
+	}
+	_, err := hostadmit.Build(killed("enabled active"), input(t, "vm", hostadmit.Flags{}))
+	if err == nil || !strings.Contains(err.Error(), "have run") || !strings.Contains(err.Error(), "remove the line installing containerd.io from /etc/paisans/installed") {
+		t.Errorf("enabled active: the refusal: %v", err)
+	}
+	// Keeping it as the owner's takes the line off the list. The package
+	// is on disk, so its unit file is the package's: the refusal says to
+	// finish or purge the install, never to remove the file.
+	kept := "installing docker-ce\n"
+	_, err = hostadmit.Build(killed("enabled active").file("/etc/paisans/installed", kept).withFile("/etc/paisans/installed", kept, "644", 0), input(t, "vm", hostadmit.Flags{}))
+	if err == nil || !strings.Contains(err.Error(), "dpkg --configure -a") || strings.Contains(err.Error(), "unit file") {
+		t.Errorf("kept as the owner's: the refusal: %v", err)
+	}
+}
+
 // A unit of a package admit is about to install that is already enabled
 // or running is not Docker's: its package is not installed. Admit would
 // disable it with what it installs, so it refuses before any change.

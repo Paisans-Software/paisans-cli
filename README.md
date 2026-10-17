@@ -5239,7 +5239,9 @@ data-root is read from `/etc/docker/daemon.json` written as `"data-root":
 store, so the daemon is taken to have run. A
 daemon admit installed that never ran, enabled by its package and held
 while it installed, is disabled; its networks are read as none, since it
-never made any.
+never made any. A package an admit killed part way left on the list and on
+disk is admit's: the next admit installs it again and disables its units
+with Docker's, unless one has run.
 
 Where Docker is absent and the host has packages Docker's page lists as
 conflicting (`containerd`, `runc` and the rest), they are **refused, not
@@ -5249,7 +5251,8 @@ decision for whoever started them. The refusal names the packages found, and
 leaves removing them to the owner. A unit of a package admit is about to
 install that is already enabled or running, such as a containerd the owner
 installed from another source, is refused the same way: the disable after
-the install would stop it. Every `apt-get` runs non-interactively.
+the install would stop it. When its package is on disk but not configured,
+the refusal says to finish that install or purge the package. Every `apt-get` runs non-interactively.
 
 #### The user's Docker starts after the mesh interface
 
