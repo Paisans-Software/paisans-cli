@@ -149,14 +149,14 @@ as above, when
 * the yaml has no id;
 * there is no secrets file yet: creating it is where the deployment's
   encryption is decided, and init says so when there is no `.sops.yaml`;
-* the file is encrypted and no `.sops.yaml` recipient is found beside it: the
-  file would be written in plaintext;
 * the file holds a key the toolkit does not read: writing it back would drop
   it.
 
-In the last two the `init` line says why, after what init has to do. A file
-that is plaintext with no `.sops.yaml` beside it is written in plaintext, as
-init writes it, with init's warning.
+In the last the `init` line says why, after what init has to do. A file that
+is encrypted with no `.sops.yaml` recipient beside it is refused before
+anything is planned, dry run and `--execute` alike, naming the recipients its
+sops metadata records and the command that restores `.sops.yaml`. A plaintext
+file is refused too, outside `PAISANS_TEST_PLAINTEXT_SECRETS=1`.
 
 A secret the toolkit cannot generate stays a note naming `secrets set`, as
 before.

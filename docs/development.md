@@ -218,9 +218,13 @@ about it are load bearing:
   for its client. Pending clients are one line, not warnings, and `--verbose`
   names each one's redirect URI and PKCE. A pending secret is a key absent
   from the file, never a placeholder, so `render` reads the file as it is.
-* **Without an age recipient it writes plaintext and says so loudly.** Refusing
-  would leave an operator holding generated secrets that went nowhere, and a
-  first look at the tool must not require a key.
+* **Without an age recipient it writes nothing.** `config.WriteSecrets`
+  refuses, so the secrets exist only encrypted. A file that was encrypted, by
+  its sops metadata or as it was read, is never written back in plaintext; the
+  refusal names the recipients that metadata records and the command that
+  restores `.sops.yaml`. Only `PAISANS_TEST_PLAINTEXT_SECRETS=1`
+  (`config.PlaintextSecretsVariable`) writes plaintext, for tests and
+  fixtures, and `init` on a fresh directory makes the age key first.
 
 `secrets set <dotted.key>` writes one value read from stdin into the secrets
 file, re-encrypted to the recipients in `.sops.yaml`, and prints only `set
@@ -1640,6 +1644,15 @@ Nothing runs
 value in it is a fixed placeholder, and its WireGuard private keys are repeated
 bytes chosen so the derived public keys are stable across runs. Nothing in this
 repository is a credential, and nothing in it may become one.
+
+A plaintext secrets file is read and written only with
+`PAISANS_TEST_PLAINTEXT_SECRETS=1`. The `TestMain` of `cmd/paisans`,
+`internal/config` and `internal/configstore` sets it, and a test about the
+refusal of plaintext unsets it with `t.Setenv`. Outside that mode
+`config.LoadDeploymentSecrets` refuses a plaintext file, and `validate`,
+`doctor`, `init`, `apply` and publishing check the file with
+`config.CheckSecretsFile` or `config.CheckSecretsBytes` before they change
+anything.
 
 The encrypted path is exercised without an encrypted file ever being committed:
 `internal/config/secrets_test.go` generates an age identity, encrypts a fixture

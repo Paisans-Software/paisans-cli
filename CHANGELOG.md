@@ -17,6 +17,7 @@ changes share a bullet. Detailed notes are on the corresponding
 ### Fixed
 
 - A site whose login sshd ends with "Too many authentication failures" and then a disconnect notice reads as a refused login, so `init` and `apply` skip a site not yet admitted instead of failing.
+- An encrypted `secrets.enc.yaml` without `.sops.yaml` is never rewritten in plaintext: writes refuse, naming its recipients and the restore command, and a plaintext file is refused unless `PAISANS_TEST_PLAINTEXT_SECRETS=1`.
 
 ## [0.3.0-rc.1] - 2026-10-17
 
