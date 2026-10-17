@@ -5885,7 +5885,7 @@ it:
 | dns | `dns init` | always; a record pointing elsewhere stops it, to be changed by hand |
 | founding | `apply --site <s>`: each witness in `etcd.members`, then the other members | a member is still being founded (below); a witness that is founded already is applied here too while a data member is still being founded, since that member's apply refuses until a witness's etcd runs |
 | joining | `site add <s>` | the cluster runs and a data member has not joined it; a joining witness is joined by that `site add`, and gets one of its own only when no data member joins, which stops the run |
-| other sites | `apply --site <s>`, monitor sites last | every site not in `etcd.members` |
+| other sites | `apply --site <s>`, monitor sites last | every site not in `etcd.members`, and then every Garage site no earlier step applies or joins, since storage works through Garage's container |
 | storage | `storage init --site <g>` for one Garage site, `storage add` for several | any Garage site |
 | pass two | `apply --site <s>` for every site, monitor sites last, a monitor in `etcd.members` too | always: it resumes a founding stop or a replica's wait for the databases, and moves what earlier steps changed |
 | gateway | `gateway move` | a site without the gateway role still holds this deployment's gateway (see *Moving the gateway*) |
@@ -5937,6 +5937,14 @@ its module has to be in the binary*), and an apply resolves each tag once for
 the whole run, so the build pulled here is the one every later step plans,
 even if the tag moves in between. A registry that refuses an image,
 `unauthorized` or `denied`, is reported as a private image, with what to do.
+
+**Every Garage site is applied before storage.** `storage init` and `storage
+add` read and change Garage's layout through its running container. A
+founded member's first apply in the run is otherwise pass two, after storage,
+so a Garage site whose containers had gone (Eg: removed to free disk space)
+stopped every run at storage with "service garage is not running", before the
+apply that would start it. A Garage site no earlier step applies or joins is
+applied in *other sites*; on a site already running it plans nothing.
 
 Run again, it reads live state again and carries on, so the same command is
 the first install, the resume after a failure, and every later change. Each
