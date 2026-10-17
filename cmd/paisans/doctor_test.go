@@ -155,7 +155,7 @@ func admitHosts(t *testing.T, cfg *config.Config, hosts map[string]doctorHost) {
 			h.answers = map[string]string{}
 		}
 		for command, answer := range map[string]string{
-			doctor.UserCommand:   "uid 1000\nuser " + s.SSHUser() + "\ngroups " + s.SSHUser() + "\n",
+			doctor.UserCommand:   "uid 1000\nuser " + s.SSHUser() + "\ngroups " + s.SSHUser() + "\ngids 1000\n",
 			doctor.DockerCommand: "host unix:///run/user/1000/docker.sock\nengine 29.9.1\nsecurity [\"name=seccomp,profile=builtin\",\"name=rootless\",\"name=cgroupns\"]\n",
 			doctor.LingerCommand: "linger yes\nmesh-order yes\n",
 			doctor.SudoCommand:   sudoHelperOnly(s.SSHUser(), site, helper),

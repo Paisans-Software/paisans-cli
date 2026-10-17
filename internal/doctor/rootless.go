@@ -27,8 +27,10 @@ const (
 	SectionLinger = "linger"
 )
 
-// UserCommand prints the login user's UID, name and groups, a line each.
-const UserCommand = `printf 'uid %s\nuser %s\ngroups %s\n' "$(id -u)" "$(id -un)" "$(id -nG)"`
+// UserCommand prints the login user's UID, name, group names and group IDs,
+// a line each. The IDs are read as well as the names because a group of GID
+// 0 can carry a name of its own.
+const UserCommand = `printf 'uid %s\nuser %s\ngroups %s\ngids %s\n' "$(id -u)" "$(id -un)" "$(id -nG)" "$(id -G)"`
 
 // DockerCommand prints the DOCKER_HOST the command ran with, then asks the
 // daemon there for its Engine version and its security options, which name
@@ -70,9 +72,9 @@ func keyed(out string) map[string]string {
 }
 
 // User fails a login user that holds any group host admit refuses
-// (admitrules.PrivilegedGroups), or uid 0. Admit checks the same list once;
-// this checks it on every run, because a group can be added to the user
-// after admission and nothing else would notice.
+// (admitrules.PrivilegedGroups), any group of GID 0, or uid 0. Admit checks
+// the same list once; this checks it on every run, because a group can be
+// added to the user after admission and nothing else would notice.
 func User(probes []UserProbe) []Finding {
 	var out []Finding
 	for _, p := range probes {
@@ -101,6 +103,9 @@ func User(probes []UserProbe) []Finding {
 			if slices.Contains(admitrules.PrivilegedGroups, g) && !slices.Contains(held, g) {
 				held = append(held, g)
 			}
+		}
+		if slices.Contains(strings.Fields(f["gids"]), "0") && !slices.Contains(held, "root") {
+			held = append(held, "a group of GID 0, root's")
 		}
 		if len(held) == 0 {
 			out = append(out, Finding{Section: SectionUser, Level: OK, Line: fmt.Sprintf("%s: %s is in no privileged group", p.Site, name)})
@@ -241,6 +246,14 @@ func Linger(d deployment.Deployment, probes []LingerProbe) []Finding {
 					"recover:",
 					fmt.Sprintf("  1. The host's owner runs `paisans host admit` for %s again, which writes it; it takes effect at the next boot.", p.Site),
 				}})
+		default:
+			why := "the answer has no mesh-order line"
+			if v, ok := f["mesh-order"]; ok {
+				why = "unreadable line: mesh-order " + v
+			}
+			out = append(out, Finding{Section: SectionLinger, Level: Warn,
+				Line: fmt.Sprintf("%s: could not read whether its manager starts after the mesh", p.Site),
+				More: []string{why}})
 		}
 	}
 	return out

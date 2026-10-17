@@ -19,7 +19,11 @@ func TestUser(t *testing.T) {
 		{Site: "home-b", Out: "uid 1002\nuser paisans-f2a9\ngroups paisans-f2a9 docker sudo docker\n"},
 		{Site: "vm", Out: "uid 0\nuser root\ngroups root\n"},
 		{Site: "watch", Out: "", Err: "id: cannot find name for group ID 1003"},
+		{Site: "edge", Out: "uid 1003\nuser paisans-f2a9\ngroups paisans-f2a9 toor\ngids 1003 0\n"},
 	})
+	if f := find(t, findings, SectionUser, "edge: paisans-f2a9 is in a group of GID 0, root's"); f.Level != Fail {
+		t.Errorf("edge: level %v", f.Level)
+	}
 	if f := find(t, findings, SectionUser, "home-a: paisans-f2a9 is in no privileged group"); f.Level != OK {
 		t.Errorf("home-a: level %v", f.Level)
 	}
@@ -107,7 +111,12 @@ func TestLinger(t *testing.T) {
 		{Site: "home-a", Out: "linger yes\nmesh-order yes\n"},
 		{Site: "home-b", Out: "linger no\nmesh-order no\n"},
 		{Site: "vm", Out: "linger \nmesh-order yes\n"},
+		{Site: "watch", Out: "linger yes\n"},
 	})
+	w := find(t, findings, SectionLinger, "watch: could not read whether its manager starts after the mesh")
+	if w.Level != Warn || !strings.Contains(strings.Join(w.More, "\n"), "no mesh-order line") {
+		t.Errorf("watch order: %+v", w)
+	}
 	if f := find(t, findings, SectionLinger, "home-a: linger is on"); f.Level != OK {
 		t.Errorf("home-a: level %v", f.Level)
 	}
