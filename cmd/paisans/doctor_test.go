@@ -342,6 +342,77 @@ func stuckHosts(cfg *config.Config, sent, writes *[]string) map[string]doctorHos
 	}
 }
 
+// pendingHosts are stuckHosts with home-a leading a cluster of its own,
+// vm on the mesh alone, and home-b answering ssh while its host holds no
+// record doctor can read, which the run's classification places pending.
+// Nothing in it fails: a pending data site and the reads the fake hosts
+// were not given are warnings.
+func pendingHosts(t *testing.T, cfg *config.Config, sent, writes *[]string) map[string]doctorHost {
+	t.Helper()
+	hosts := stuckHosts(cfg, sent, writes)
+	a := hosts["home-a.local"]
+	a.answers[doctor.SyncCommand(cfg.Deployment())] = `{"leader":"home-a","quorum":0,"sync_standby":null}` + "\n"
+	a.answers[patroni.ClusterCommand(cfg.Deployment(), "10.44.0.1:8008")] = `{"members":[{"name":"home-a","role":"leader","state":"running","timeline":3}],"scope":"paisans"}`
+	a.answers[doctor.ContainersCommand(cfg.Deployment())] = `{"Names":"paisans-f2a9-infra-patroni-1","State":"running","Status":"Up 5 minutes","Labels":"community.paisans.deployment=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}`
+	a.answers["if [ ! -f '/srv/paisans/f2a9/auth/compose.yaml' ]"] = "active\n"
+	v := hosts["vm.example.org"]
+	v.answers[mesh.RouteCommand] = `[{"dst":"10.44.0.0/24","dev":"psns-f2a9"}]`
+	v.answers[mesh.AddrCommand] = `[{"ifname":"psns-f2a9","addr_info":[{"family":"inet","local":"10.44.0.3","prefixlen":24}]}]`
+	b := hosts["home-b.local"]
+	b.down = false
+	b.readErr = errors.New("cat: /etc/paisans/admitted: No such file or directory")
+	b.answers = map[string]string{doctor.ReachCommand: ""}
+	hosts["home-b.local"] = b
+	withDoctorHosts(t, cfg, hosts)
+	doctorClassify = func(*config.Config, map[string]apply.Transport) (*topology.Classification, error) {
+		return &topology.Classification{Sites: map[string]topology.Site{
+			"home-b": {Name: "home-b", Class: topology.Pending, Why: "home-b: its host has not admitted this deployment", Request: true},
+		}}, nil
+	}
+	return hosts
+}
+
+// A run whose only problems are warnings exits 0: a pending data site is
+// one, since the deployment runs without it.
+func TestDoctorExitsZeroWithAPendingDataSite(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sent, writes []string
+	pendingHosts(t, cfg, &sent, &writes)
+	rec := withRecorder(t, true)
+	runErr := runDoctor([]string{"--config", fixtureConfig()})
+	out := rec.Lines()
+	if runErr != nil {
+		t.Errorf("doctor failed with a pending data site and nothing else wrong: %v\n%s", runErr, out)
+	}
+	if !strings.Contains(out, "warned: check admission home-b pending:") {
+		t.Errorf("home-b is not reported pending:\n%s", out)
+	}
+}
+
+// An answer from sudo doctor cannot read is a warning, so doctor still
+// exits 0 for it.
+func TestDoctorWarnsOnAnUnreadableSudoAnswer(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sent, writes []string
+	hosts := pendingHosts(t, cfg, &sent, &writes)
+	hosts["home-a.local"].answers[doctor.SudoCommand] = "Benutzer ubuntu darf die folgenden Befehle auf home-a ausführen:\n"
+	rec := withRecorder(t, true)
+	runErr := runDoctor([]string{"--config", fixtureConfig()})
+	out := rec.Lines()
+	if runErr != nil {
+		t.Errorf("doctor failed on a sudo answer it could not read: %v\n%s", runErr, out)
+	}
+	if !strings.Contains(out, "warned: check sudo rights home-a could not read what sudo lets") {
+		t.Errorf("the unreadable answer is not a warning:\n%s", out)
+	}
+}
+
 // A monitor running Caddy that answers as something else fails doctor,
 // with apply's own words; a gateway with no public_address warns.
 func TestDoctorSelfChecksEachCaddySite(t *testing.T) {

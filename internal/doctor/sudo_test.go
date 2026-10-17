@@ -39,10 +39,10 @@ func TestSudoRights(t *testing.T) {
 		{"a specific Defaults line", sudoDefaults + "Runas and Command-specific defaults for ubuntu:\n    Defaults!/usr/local/libexec/paisans/wg-psns-f2a9 setenv\n\nUser ubuntu may run the following commands on home-a:\n    " + helperEntry + "\n", "", Fail, "set for one runas user or command alone", ""},
 		{"not allowed", "Sorry, user ubuntu may not run sudo on home-a.\n", "exit status 1", Fail, "home-a: sudo does not let ubuntu run the WireGuard helper", "`paisans host admit`"},
 		{"password required", "sudo: a password is required\n", "exit status 1", Fail, "home-a: sudo does not let ubuntu run the WireGuard helper", ""},
-		{"another user refused", "Sorry, user root may not run sudo on home-a.\n", "exit status 1", Fail, "home-a: could not read what sudo lets ubuntu run", "recover:\n  1. The host's owner runs `LC_ALL=C sudo -n -l` as ubuntu"},
-		{"refusal beside a rule", "Sorry, user ubuntu may not run sudo on home-a.\n    (ALL : ALL) ALL\n", "", Fail, "home-a: could not read what sudo lets ubuntu run", "recover:\n  1. The host's owner runs `LC_ALL=C sudo -n -l` as ubuntu"},
-		{"unrecognised", "something else\n", "", Fail, "home-a: could not read what sudo lets ubuntu run", "recover:\n  1. The host's owner runs `LC_ALL=C sudo -n -l` as ubuntu"},
-		{"translated", "Benutzer ubuntu darf die folgenden Befehle auf home-a ausführen:\n    " + helperEntry + "\n", "", Fail, "home-a: could not read what sudo lets ubuntu run", "recover:\n  1. The host's owner runs `LC_ALL=C sudo -n -l` as ubuntu"},
+		{"another user refused", "Sorry, user root may not run sudo on home-a.\n", "exit status 1", Warn, "home-a: could not read what sudo lets ubuntu run", "recover:\n  1. The host's owner runs `LC_ALL=C sudo -n -l` as ubuntu"},
+		{"refusal beside a rule", "Sorry, user ubuntu may not run sudo on home-a.\n    (ALL : ALL) ALL\n", "", Warn, "home-a: could not read what sudo lets ubuntu run", "recover:\n  1. The host's owner runs `LC_ALL=C sudo -n -l` as ubuntu"},
+		{"unrecognised", "something else\n", "", Warn, "home-a: could not read what sudo lets ubuntu run", "recover:\n  1. The host's owner runs `LC_ALL=C sudo -n -l` as ubuntu"},
+		{"translated", "Benutzer ubuntu darf die folgenden Befehle auf home-a ausführen:\n    " + helperEntry + "\n", "", Warn, "home-a: could not read what sudo lets ubuntu run", "recover:\n  1. The host's owner runs `LC_ALL=C sudo -n -l` as ubuntu"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			fs := SudoRights(cfg, []SudoProbe{{Site: "home-a", Out: c.out, Err: c.err}})

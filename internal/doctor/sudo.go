@@ -31,8 +31,8 @@ func (p SudoProbe) site() string { return p.Site }
 // no runas or command-specific Defaults line (admitrules.SudoList.
 // BeyondHelper). Every operator of the deployment can log in as the user,
 // so anything more is theirs too, and root on the host for anything past
-// the helper. An answer it cannot read fails too, never passing for one
-// that grants nothing.
+// the helper. An answer it cannot read is a warning that says so, never a
+// pass standing in for one that grants nothing.
 func SudoRights(cfg *config.Config, probes []SudoProbe) []Finding {
 	d := cfg.Deployment()
 	helper, helperErr := apply.WGHelper{Iface: d.Interface()}.Path()
@@ -69,7 +69,7 @@ func SudoRights(cfg *config.Config, probes []SudoProbe) []Finding {
 				fmt.Sprintf("  2. If it lists %s and nothing else, report that output as a doctor bug. If not, the host's owner checks the line host admit wrote in /etc/sudoers.d/%s with `visudo -c`, or runs `paisans host admit` for %s again.", admitrules.HelperRule(helper), d.Prefix(), p.Site),
 				fmt.Sprintf("  3. `paisans doctor --site %s` again.", p.Site),
 			)
-			out = append(out, Finding{Section: SectionSudo, Level: Fail, Line: fmt.Sprintf("%s: could not read what sudo lets %s run", p.Site, user), More: more})
+			out = append(out, Finding{Section: SectionSudo, Level: Warn, Line: fmt.Sprintf("%s: could not read what sudo lets %s run", p.Site, user), More: more})
 			continue
 		}
 		beyond, defaults := list.BeyondHelper(helper)
