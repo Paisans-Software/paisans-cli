@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -709,7 +710,9 @@ func (s sitePass) planned(hold []string, done []*apply.Plan) (*apply.Plan, error
 // are the clients ensured. Elsewhere they are ensured first. Either way the
 // site is then planned again, so each app renders with the credentials just
 // recorded, holding back what the step held back, and executed. It returns
-// every pass's plan, in order.
+// every pass's plan, in order. A planned stop in the first pass, the founding
+// stop or a replica's for its databases, ends the step around it done, with
+// what it waits on, and comes back as it is for the run to pause the site.
 func executeWithClients(c *clientStep, pass sitePass) ([]*apply.Plan, error) {
 	var plans []*apply.Plan
 	if c.pocketIDHere() {
@@ -722,7 +725,17 @@ func executeWithClients(c *clientStep, pass sitePass) ([]*apply.Plan, error) {
 		// that took.
 		s := c.reporter().Step("start pocket-id")
 		s.Detail("starting %s's Pocket ID, and what it runs on, before the apps that sign in through it", c.site)
-		if err := pass.execute(first); err != nil {
+		err = pass.execute(first)
+		switch {
+		case errors.Is(err, apply.ErrFoundingWait):
+			// A planned stop: the pass stopped after the infrastructure
+			// stack, before Pocket ID, and the run resumes the site later.
+			s.Done(foundingPause(err))
+			return nil, err
+		case errors.Is(err, apply.ErrDatabasesWait):
+			s.Done(databasesPause(err))
+			return nil, err
+		case err != nil:
 			s.Fail(err)
 			return nil, err
 		}
