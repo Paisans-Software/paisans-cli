@@ -7,6 +7,8 @@ import (
 	"io"
 	iofs "io/fs"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -21,8 +23,10 @@ import (
 //
 // It writes one local file and nothing else: no secret, since init is the one
 // command responsible for the secrets file, and no host, since the sites may
-// not exist yet. The file is written only once validate refuses nothing in it
-// and the operator has read it and said yes.
+// not exist yet. The file is written once the operator has read it and said
+// yes. One validate refuses is written only when the operator asks for it as
+// it stands, so that their answers are not lost; validate and apply go on
+// refusing it until it is fixed.
 func runCreate(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("create", flag.ExitOnError)
 	reporter := commonFlags(fs)
@@ -53,6 +57,9 @@ func runCreate(args []string, stdin io.Reader, stdout io.Writer) error {
 	p := create.NewPrompter(stdin, stdout)
 	w := create.NewWizard(p)
 	w.DefaultUser = deployment.Deployment{ID: id}.Prefix()
+	if home, err := os.UserHomeDir(); err == nil {
+		w.LocalKeys = create.FindLocalKeys(os.DirFS(filepath.Join(home, ".ssh")), "~/.ssh")
+	}
 	p.Say("paisans create writes %s for a new deployment. Enter takes the answer in brackets; nothing is written until you have read the file and said yes.", ui.ShortPath(path))
 	section := create.SectionAll
 	for {
@@ -63,11 +70,10 @@ func runCreate(args []string, stdin io.Reader, stdout io.Writer) error {
 		if err != nil {
 			return err
 		}
-		cfg, err := config.LoadBytes(data)
+		result, err := checkRendered(data)
 		if err != nil {
-			return fmt.Errorf("the file create rendered does not load, which is a bug in create: %w", err)
+			return err
 		}
-		result := validate.Check(cfg)
 
 		fmt.Fprintf(stdout, "\n%s\n", data)
 		reportValidation(r, path, result)
@@ -79,8 +85,16 @@ func runCreate(args []string, stdin io.Reader, stdout io.Writer) error {
 			if err != nil {
 				return createAborted(err)
 			}
-			if next < 0 {
+			switch next {
+			case quitCreate:
 				return notWritten(r, p, path)
+			case writeRefused:
+				if err := writeNew(path, data); err != nil {
+					return err
+				}
+				p.Say("")
+				r.Result("Wrote %s, which validate refuses. Fix what it names, then run paisans validate before paisans init.", path)
+				return nil
 			}
 			section = next
 			continue
@@ -108,9 +122,16 @@ func runCreate(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 }
 
-// againOrQuit asks which questions to answer again after a refusal: the
-// section the first refusal's key comes from, every question, or none. It
-// returns -1 for none.
+// quitCreate and writeRefused are againOrQuit's answers that are not a
+// section to ask again.
+const (
+	quitCreate   create.Section = -1
+	writeRefused create.Section = -2
+)
+
+// againOrQuit asks what to do after a refusal: answer again the section the
+// first refusal's key comes from, or every question; write the file as it
+// stands (writeRefused); or write nothing (quitCreate).
 func againOrQuit(p *create.Prompter, result validate.Result) (create.Section, error) {
 	first := create.SectionFor(result.Refusals()[0].Key)
 	options := []string{"answer " + first.String() + " again"}
@@ -119,15 +140,40 @@ func againOrQuit(p *create.Prompter, result validate.Result) (create.Section, er
 		options = append(options, "answer every question again")
 		sections = append(sections, create.SectionAll)
 	}
-	options = append(options, "quit without writing anything")
+	options = append(options, "write the file as it stands, to fix by hand (validate and apply refuse it until then)", "quit without writing anything")
+	sections = append(sections, writeRefused, quitCreate)
 	i, err := p.Choose("Validate refused the file. What next?", options, 0)
 	if err != nil {
 		return 0, err
 	}
-	if i == len(sections) {
-		return -1, nil
-	}
 	return sections[i], nil
+}
+
+// checkRendered is validate's verdict on the file create rendered. Each
+// answer is checked as it is typed, so a file the loader refuses is a check
+// the questions lack; its problems are shown as refusals all the same, so the
+// operator can answer again or write the file to fix by hand.
+func checkRendered(data []byte) (validate.Result, error) {
+	cfg, err := config.LoadBytes(data)
+	var loadErr *config.LoadError
+	if errors.As(err, &loadErr) {
+		var result validate.Result
+		for _, problem := range loadErr.Problems {
+			key, message := problem, problem
+			if i := strings.IndexAny(problem, ": "); i > 0 {
+				key, message = problem[:i], strings.TrimLeft(problem[i:], ": ")
+			}
+			result.Findings = append(result.Findings, validate.Finding{
+				Level: validate.Refuse, Rule: "config-load", Key: key,
+				Hint: "the file does not load", Message: message,
+			})
+		}
+		return result, nil
+	}
+	if err != nil {
+		return validate.Result{}, fmt.Errorf("the file create rendered does not load, which is a bug in create: %w", err)
+	}
+	return validate.Check(cfg), nil
 }
 
 // refuseExisting refuses a path that already holds a file. create writes new

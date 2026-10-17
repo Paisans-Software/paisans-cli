@@ -121,9 +121,12 @@ Asks about a new deployment at a terminal (the community and its domain, the
 DNS provider, the operators, at least two of them, how many machines and what
 each does, the apps, who manages accounts, and the mail server) and writes a commented `paisans-stack.yaml` from the answers. The
 file is checked as `validate` checks it before it is shown; a refusal offers
-the questions it came from again, and nothing is written until the file is
-refused nothing and the operator says yes. It then names `secrets set`,
-`init` and `apply`.
+the questions it came from again, every question, writing the file as it
+stands to fix by hand, or quitting. A file refused nothing is written once the
+operator says yes. It then names `secrets set`, `init` and `apply`.
+
+Each operator's keys are checked as they are pasted: a key another operator
+gave, one listed twice, and one the loader refuses are refused there.
 
 Each machine's SSH user may be left empty, which is the deployment's own
 user, `paisans-<token>`, that the host's owner's `host admit` makes.

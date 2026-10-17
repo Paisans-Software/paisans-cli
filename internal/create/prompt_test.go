@@ -225,7 +225,7 @@ func TestLinesRequiresOne(t *testing.T) {
 
 func TestLinesChecksEachLine(t *testing.T) {
 	p, out := prompter("nonsense\nssh-ed25519 AAAA a@x\n\n")
-	got, err := p.Lines("Keys", nil, func(s string) error {
+	got, err := p.Lines("Keys", nil, func(_ []string, s string) error {
 		if s == "nonsense" {
 			return errors.New("not a public key")
 		}
@@ -236,6 +236,39 @@ func TestLinesChecksEachLine(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "not a public key") {
 		t.Errorf("a bad line was not refused:\n%s", out)
+	}
+}
+
+func TestLinesChecksALineAgainstThoseBefore(t *testing.T) {
+	p, out := prompter("ssh-ed25519 AAAA a@x\nssh-ed25519 AAAA a@x\n\n")
+	got, err := p.Lines("Keys", nil, func(got []string, s string) error {
+		if slices.Contains(got, s) {
+			return errors.New("listed above")
+		}
+		return nil
+	})
+	if err != nil || !slices.Equal(got, []string{"ssh-ed25519 AAAA a@x"}) {
+		t.Fatalf("Lines = %q, %v", got, err)
+	}
+	if !strings.Contains(out.String(), "listed above") {
+		t.Errorf("the repeated line was not refused:\n%s", out)
+	}
+}
+
+// A default the check now refuses is not kept: the lines are asked again.
+func TestLinesChecksTheDefault(t *testing.T) {
+	p, out := prompter("\nssh-ed25519 BBBB b@x\n\n")
+	got, err := p.Lines("Keys", []string{"ssh-ed25519 AAAA a@x"}, func(_ []string, s string) error {
+		if strings.Contains(s, "AAAA") {
+			return errors.New("taken")
+		}
+		return nil
+	})
+	if err != nil || !slices.Equal(got, []string{"ssh-ed25519 BBBB b@x"}) {
+		t.Fatalf("Lines = %q, %v", got, err)
+	}
+	if !strings.Contains(out.String(), "the 1 given no longer do: taken") {
+		t.Errorf("the refused default was not said:\n%s", out)
 	}
 }
 

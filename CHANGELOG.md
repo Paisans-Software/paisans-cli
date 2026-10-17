@@ -23,6 +23,7 @@ changes share a bullet. Detailed notes are on the corresponding
 - Each release attaches static `paisans-linux-amd64` and `paisans-linux-arm64` binaries and a `SHA256SUMS` file, so a host owner can run the CLI on Linux without Go.
 - `doctor` checks each site as its deployment's user: its admission record, no privileged group, rootless Docker at Engine 29.5 or later, linger after the mesh, and sudo for the WireGuard helper alone.
 - `doctor` fetches `/.well-known/paisans/<token>` from the gateway and each monitor running Paisans' Caddy, from the workstation as `apply` does, and fails when 443 or 80 does not answer as this deployment.
+- `create` offers the first operator each SSH public key in `~/.ssh/*.pub` on the workstation, so a key already there is taken with Enter rather than pasted.
 
 ### Changed
 
@@ -78,6 +79,8 @@ changes share a bullet. Detailed notes are on the corresponding
 - `apply` on a site whose mesh interface is up without its file's address, key or peers restarts or syncs it, so a run stopped between writing the file and handing it over completes.
 - A deployment binds and dials only each site's mesh address, so the egress table `host admit` loads, which drops its loopback dials, stalls neither etcd's own client gateway nor Patroni's leader election.
 - `apply` starts a stack whose containers were removed or stopped though its files match the render, and applies each Garage site before storage, so a site whose containers were removed converges again.
+- `create` refuses, as it is pasted, an operator's key another operator gave, one listed twice, or one the loader refuses, rather than rendering a file that does not load.
+- `create` offers to write a file validate refuses as it stands, to fix by hand, so the answers are not lost.
 
 ### Security
 

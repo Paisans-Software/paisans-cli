@@ -62,11 +62,46 @@ func checkEmail(s string) error {
 	return nil
 }
 
-func checkKey(s string) error {
-	if _, _, _, _, err := ssh.ParseAuthorizedKey([]byte(s)); err != nil {
-		return errors.New("not an SSH public key: paste one whole line of a .pub file, Eg: ssh-ed25519 AAAA... alice@laptop")
+// keyCheck is the loader's operator key rules at the prompt: one plain key
+// of a type paisans accepts, listed once, and nobody else's. taken maps each
+// earlier operator's key fingerprints to that operator, since two operators
+// sharing a key cannot be told apart on a host.
+func keyCheck(taken map[string]string) func(got []string, s string) error {
+	return func(got []string, s string) error {
+		fp, err := checkKey(s)
+		if err != nil {
+			return err
+		}
+		if who, ok := taken[fp]; ok {
+			return fmt.Errorf("this is %s's key. A key belongs to one operator: give this operator their own", who)
+		}
+		for _, g := range got {
+			if prev, _ := checkKey(g); prev == fp {
+				return errors.New("this key is already listed above. List each key once")
+			}
+		}
+		return nil
 	}
-	return nil
+}
+
+// checkKey returns the fingerprint of one line of a .pub file, or why the
+// loader would refuse it.
+func checkKey(s string) (string, error) {
+	if _, ok := config.ControlRune(s); ok {
+		return "", errors.New("the line holds a control character: paste one whole line of a .pub file")
+	}
+	key, options, err := config.ParseKeyLine(s)
+	switch {
+	case err != nil:
+		return "", errors.New("not an SSH public key: paste one whole line of a .pub file, Eg: ssh-ed25519 AAAA... alice@laptop")
+	case len(options) > 0:
+		return "", fmt.Errorf("the line carries options (%s): paste the plain key, a whole line of a .pub file", strings.Join(options, ","))
+	}
+	pub, _, _, _, _ := ssh.ParseAuthorizedKey([]byte(s))
+	if p := config.KeyTypeProblem(pub); p != "" {
+		return "", fmt.Errorf("this is %s. Give an ed25519 key (ssh-keygen -t ed25519), an ECDSA or security key, or an RSA key of %d bits or more", p, config.MinRSABits)
+	}
+	return key.Fingerprint, nil
 }
 
 func checkSiteName(s string) error {
