@@ -518,11 +518,16 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	minFree := fs.String("min-free", "3G", "free space Docker's data root must have before a stack pulls an image, Eg: 2G")
 	keepImages := fs.Bool("keep-images", false, "leave the images this apply supersedes on the host, Eg: to keep one to roll back to")
 	mustAll := fs.Bool("require-all", false, "exit 1 when the run is degraded: a site pending or down")
+	answers := yesFlag(fs)
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
 		return fmt.Errorf("apply: %q is not a flag, and apply takes no arguments. Give the configuration with --config %s", fs.Arg(0), fs.Arg(0))
+	}
+	ans, err := answers()
+	if err != nil {
+		return err
 	}
 	r := reporter()
 	needFree, err := apply.ParseSize(*minFree)
@@ -535,7 +540,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 			return fmt.Errorf("apply: --ssh, --overwrite, --only and --recreate are about one site, and apply without --site converges every site. Name it with --site")
 		}
 		verbose := fs.Lookup("verbose").Value.(flag.Getter).Get().(bool)
-		return runConverge(r, convergeOptions{Config: *configPath, Secrets: *secretsPath, Execute: *execute, Verbose: verbose, KeepImages: *keepImages, MinFree: *minFree, RequireAll: *mustAll, stdin: stdin, stdout: stdout})
+		return runConverge(r, convergeOptions{Config: *configPath, Secrets: *secretsPath, Execute: *execute, Verbose: verbose, KeepImages: *keepImages, MinFree: *minFree, RequireAll: *mustAll, answers: ans, stdin: stdin, stdout: stdout})
 	}
 
 	// The deployment and the version open the apply. As a step of apply
@@ -624,7 +629,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	// step of apply without --site the run did this once for every site.
 	var store storeVersion
 	if reviewedByRun == nil {
-		if store, err = applyStore(r, *configPath, *secretsPath, &loaded, cfg, *execute, stdin, stdout); err != nil {
+		if store, err = applyStore(r, *configPath, *secretsPath, &loaded, cfg, *execute, ans, stdin, stdout); err != nil {
 			return err
 		}
 		identity.applied(store.held())
@@ -675,7 +680,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	review, approvedBy, err := stepReview(r, stdin, stdout, cfg, *site, g, grant.ApplyScope(only...), transport, *execute, "paisans apply --site "+*site+" --execute")
+	review, approvedBy, err := stepReview(r, ans, stdin, stdout, cfg, *site, g, grant.ApplyScope(only...), transport, *execute, "paisans apply --site "+*site+" --execute")
 	if err != nil {
 		return err
 	}
@@ -712,7 +717,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 	if clients != nil {
-		clients.confirm = func(what string) error { return confirmWord(stdin, stdout, "create", what) }
+		clients.confirm = func(what string) error { return confirmWord(ans, stdin, stdout, "create", what) }
 	}
 	options := append([]apply.Option{apply.Overwrite(overwrite...), apply.Recreate(recreate...), apply.MinFree(needFree), apply.Only(only...)}, pendingOptions(sites)...)
 	// An app this site shares with others stays on the build they run,
@@ -1231,13 +1236,18 @@ func runHostPrepare(args []string) error {
 	fs := newFlagSet("host prepare", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	o := hostPrepareFlags(fs)
+	answers := yesFlag(fs)
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 	// dryRunFound is read when it is called: apply's check sets it around
 	// the run.
 	found := func(summary string, stop error) { dryRunFound(summary, stop) }
-	return hostPrepare(prepareEnv{r: reporter(), found: found, stdin: os.Stdin, stdout: os.Stdout}, *o)
+	ans, err := answers()
+	if err != nil {
+		return err
+	}
+	return hostPrepare(prepareEnv{r: reporter(), found: found, answers: ans, stdin: os.Stdin, stdout: os.Stdout}, *o)
 }
 
 // hostPrepareOptions are host prepare's flags.
@@ -1274,11 +1284,12 @@ type prepareEnv struct {
 	// retries, when set, receives the command's ssh retries in place of
 	// the process's retry log.
 	retries io.Writer
-	// stdin and stdout are where the review asks for approval, as
+	// answers, stdin and stdout are how the review asks for approval, as
 	// runSiteRemove takes them. Under apply with no --site, which asks once
 	// for every site, they are unused.
-	stdin  io.Reader
-	stdout io.Writer
+	answers answerer
+	stdin   io.Reader
+	stdout  io.Writer
 }
 
 // runHostPrepareIn is host prepare run with args through env, on none of the
@@ -1360,7 +1371,7 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 	if err != nil {
 		return err
 	}
-	review, approvedBy, err := stepReview(r, env.stdin, env.stdout, cfg, o.site, g, grant.PrepareScope, transport, o.execute, "paisans host prepare --site "+o.site+" --execute")
+	review, approvedBy, err := stepReview(r, env.answers, env.stdin, env.stdout, cfg, o.site, g, grant.PrepareScope, transport, o.execute, "paisans host prepare --site "+o.site+" --execute")
 	if err != nil {
 		return err
 	}

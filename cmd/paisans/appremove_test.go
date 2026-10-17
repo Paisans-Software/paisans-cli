@@ -34,8 +34,8 @@ func TestAppRemoveRefusesADeclaredApp(t *testing.T) {
 	}
 }
 
-// Deleting member data needs a person at a terminal, and there is no flag
-// standing in for one. Refused before any host is read.
+// Deleting member data needs a person at a terminal, or --yes. Refused
+// before any host is read.
 func TestDeleteDataNeedsATerminal(t *testing.T) {
 	noHosts(t)
 	r, w, err := os.Pipe()
@@ -62,14 +62,14 @@ func TestConfirmNameWantsTheAppsName(t *testing.T) {
 		}
 		w.WriteString(answer)
 		w.Close()
-		err = confirmName(r, &bytes.Buffer{}, "docs")
+		err = confirmName(answerer{}, r, &bytes.Buffer{}, "docs")
 		r.Close()
 		if (err == nil) != ok {
 			t.Errorf("answer %q: %v", answer, err)
 		}
 	}
 	isTerminal = func(*os.File) bool { return false }
-	if err := confirmName(os.Stdin, &bytes.Buffer{}, "docs"); err == nil {
+	if err := confirmName(answerer{}, os.Stdin, &bytes.Buffer{}, "docs"); err == nil {
 		t.Error("a name was accepted from something that is not a terminal")
 	}
 }

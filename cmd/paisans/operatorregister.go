@@ -42,11 +42,16 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error
 	keyPath := fs.String("key", "", "the public key file (.pub) to sign with; the ssh-agent must hold it")
 	root := fs.String("root", "", "pin this version as the root, the version trust starts from")
 	execute := fs.Bool("execute", false, "sign the attestation, push it to the sites, and record the key")
+	answers := yesFlag(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
 		return &ui.Problem{Hint: "operator register takes no argument", Explain: "Got " + strings.Join(fs.Args(), " ") + "."}
+	}
+	ans, err := answers()
+	if err != nil {
+		return err
 	}
 	l, err := workstationOf(*configPath)
 	if err != nil {
@@ -75,6 +80,7 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error
 	sites := configTransports(cfg)
 	m := gatherMode{
 		execute:  *execute,
+		answers:  ans,
 		noAnchor: "Pin the first version you trust with --root <sha>; an operator who has one can read its hash from paisans config log.",
 	}
 	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, anchor, m, stdin, stdout)
@@ -124,7 +130,7 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error
 	}
 	// The attestation becomes this workstation's anchor, so it is made only
 	// from a majority, or once the operator says partial.
-	if err := confirmPartial(stdin, stdout, g, len(sites)); err != nil {
+	if err := confirmPartial(ans, stdin, stdout, g, len(sites)); err != nil {
 		return err
 	}
 	s := r.Step("sign and push the attestation, signed with " + k.Fingerprint)
