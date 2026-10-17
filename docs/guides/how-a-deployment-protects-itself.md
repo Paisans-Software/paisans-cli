@@ -52,8 +52,9 @@ machine has beyond it.
 * **The review.** Each host records what this deployment last granted it.
   `apply` and `host prepare` show every key that would be added or changed
   since, with its operator, fingerprint and comment, and an `--execute` run asks
-  the operator to type `approve` at a terminal before any host changes. No flag
-  answers it, and without a terminal the run is refused.
+  the operator to type `approve` at a terminal before any host changes, and
+  without a terminal the run is refused. `--yes` answers it only where the
+  environment sets `PAISANS_ALLOW_YES=1`, and prints each entry it approves.
 
 **Does not protect.** The review is the only check, and it is made by whoever
 runs the command. It removes no key already in `authorized_keys`.

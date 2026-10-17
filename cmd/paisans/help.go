@@ -149,23 +149,24 @@ var helpCommands = []helpCommand{
 		summary: "Take every site from " + config.FileName + " to a running stack.",
 		usage: []string{
 			"paisans apply [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n" +
-				"              [--min-free <size>] [--keep-images] [--require-all] [--execute]",
+				"              [--min-free <size>] [--keep-images] [--require-all] [--execute] [--yes]",
 			"paisans apply --site <name> [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n" +
 				"              [--ssh <destination>] [--only <stack>]... [--overwrite <path>]...\n" +
 				"              [--recreate <stack>]... [--min-free <size>] [--keep-images] [--require-all]\n" +
-				"              [--execute]",
+				"              [--execute] [--yes]",
 		},
 		detail: "Without --site: take every site from " + config.FileName + " to a running stack, running init, host prepare, apply, site add, storage and dns init in the order the deployment needs. " +
 			"With --site: compare that site's rendered artifacts with what is on its host and show what would change.\n\n" +
 			"Changes nothing on a host without --execute; without --site, the dry run may add missing generated secrets to the local secrets file, and says so when it does.\n\n" +
 			"Both, and host prepare, review the keys and images " + config.FileName + " grants against what each host last applied; --execute asks for the word approve at a terminal when anything is added or changed, and asks nothing when nothing is.\n\n" +
+			"--yes approves the review entry by entry, and types create, partial and rollback when apply asks for them. " + yesTopic + "\n\n" +
 			"Before anything changes, every app it starts logs in to its mail server from its site, sending nothing; one that does not log in refuses the apply.\n\n" +
 			"Every run, --site included, reaches every site's host to classify it, and runs on the sites it has: a site whose host has not admitted the deployment is left out, a joined site that does not answer is kept with its own steps skipped, and the run ends degraded. --require-all: exit 1 when the run is degraded: a site pending or down.",
 	},
 	{
 		name:    "host prepare",
 		summary: "Keep the deployment user's keys, configuration store and daemon settings on an admitted host.",
-		usage:   []string{"paisans host prepare --site <name> [--config " + config.FileName + "] [--ssh <destination>]\n                     [--execute]", "paisans host prepare --all [--config " + config.FileName + "] [--execute]"},
+		usage:   []string{"paisans host prepare --site <name> [--config " + config.FileName + "] [--ssh <destination>]\n                     [--execute] [--yes]", "paisans host prepare --all [--config " + config.FileName + "] [--execute] [--yes]"},
 		detail: "Run as the deployment's user on a host whose owner has admitted the deployment: check the admission record against " + config.FileName + ", refusing on any difference, read the watchdog host admit set up, and keep the user's daemon.json, its configuration store with the units that serve it, and its authorized keys from ssh.keys. " +
 			"Installs nothing and writes nothing that is root's. Writes nothing without --execute. " +
 			"--all prepares every site, one at a time in the configuration's order, each with its own review, and stops at the first that fails.",
@@ -189,52 +190,56 @@ var helpCommands = []helpCommand{
 		name:    "host admit",
 		summary: "Admit a deployment to this host, as its owner.",
 		usage: []string{
-			"sudo paisans host admit --request <file> [--watchdog] [--public-ports] [--data-dir <path>]\n                        [--bridge-netfilter] [--mesh-lan] [--enable-ufw] [--execute]",
-			"paisans host admit --site <name> [--ssh <user>|<user@host[:port]>] [--config " + config.FileName + "] [the same grants]\n                   [--execute]",
+			"sudo paisans host admit --request <file> [--watchdog] [--public-ports] [--data-dir <path>]\n                        [--bridge-netfilter] [--mesh-lan] [--enable-ufw] [--execute]\n                        [--digest <digest>] [--yes]",
+			"paisans host admit --site <name> [--ssh <user>|<user@host[:port]>] [--config " + config.FileName + "] [the same grants]\n                   [--execute] [--yes]",
 		},
 		detail: "The one root step for a deployment on a host, run by the host's owner: the deployment's own unprivileged user with its own rootless Docker, the WireGuard helper and its sudoers line, the firewall, the egress table, the grants given and the admission record. " +
 			"ufw must be installed. When it is not active, --enable-ufw, or a yes at a terminal, has admit allow every port sshd listens on, arm a timer that turns ufw off again in 10 minutes, enable ufw, and stop the timer once a new SSH login gets through: with --site, admit's own login as the user; with --request, one you open and confirm. Without it admit refuses, and prints the commands that enable ufw by hand, every allow before the enable. Admit never enables ufw while it holds a deny or reject rule of yours, or with IPV6 not yes, as ufw reads /etc/default/ufw and /etc/ufw/ufw.conf, while sshd listens on IPv6, and then asks nothing. " +
 			"--watchdog and --public-ports are the owner's to give: at a terminal, admit asks for each one the site's roles need and the flags leave out; elsewhere a data site without --watchdog, or a gateway or Caddy monitor without --public-ports, stops before the host is reached. " +
 			"With --site, --ssh may be your login alone, for the site's declared ssh host and port, and is asked for at a terminal when left out. " +
-			"--execute with --request asks for the request's digest at a terminal; with --site it ends by logging in as the user with your own key. Never run by an agent unattended.",
+			"--execute with --request asks for the request's digest at a terminal, or takes it as --digest, compared the same way; with --site it ends by logging in as the user with your own key.\n\n" +
+			"--yes grants each grant the site's roles need and answers the ufw question with --site. It never answers the digest: --yes --request --execute needs --digest. With --request it refuses where admit would enable ufw, since only a person can open the new SSH session that shows SSH still works; --site proves it with admit's own login. With --site it needs --ssh. " + yesTopic + "\n\n" +
+			"Never run by an agent unattended.",
 	},
 	{
 		name:    "host evict",
 		summary: "Remove a deployment from this host, as its owner.",
 		usage: []string{
-			"sudo paisans host evict --request <file> [--data-dir <path>] [--execute]",
-			"sudo paisans host evict --deployment <id> --user <name> [--data-dir <path>] [--execute]",
-			"paisans host evict --site <name> [--ssh <user>|<user@host[:port]>] [--config " + config.FileName + "] [--data-dir <path>]\n                   [--execute]",
+			"sudo paisans host evict --request <file> [--data-dir <path>] [--execute] [--yes]",
+			"sudo paisans host evict --deployment <id> --user <name> [--data-dir <path>] [--execute] [--yes]",
+			"paisans host evict --site <name> [--ssh <user>|<user@host[:port]>] [--config " + config.FileName + "] [--data-dir <path>]\n                   [--execute] [--yes]",
 		},
 		detail: "Undo host admit for one deployment: its mesh, its user with its home and data, the helper, the egress table, its firewall rules, the record and the registry entry. Evict never disables ufw, which stays as it is with its paisans: ssh allows when admit enabled it. Host-wide files and sysctls go only when no other deployment is admitted. " +
 			"--data-dir, the one admit was given, is needed only when the host holds no admission record. " +
 			"With --site, --ssh may be your login alone, for the site's declared ssh host and port, and is asked for at a terminal when left out. " +
-			"--execute asks for the user's name at a terminal. Never run by an agent unattended.",
+			"--execute asks for the user's name at a terminal; --yes types it, and with --site needs --ssh. " + yesTopic + " Never run by an agent unattended.",
 	},
 	{
 		name:    "site add",
 		summary: "Join a new data site to the running cluster.",
-		usage:   []string{"paisans site add <site> [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                 [--execute]"},
+		usage:   []string{"paisans site add <site> [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                 [--execute] [--yes]"},
 		detail: "Join a new data site to the running cluster in eight gated stages: preflight, mesh, etcd (learners, then promoted), the Patroni replica, synchronous mode, HAProxy, each existing replica's patroni.env, one replica restart at a time, and each monitor site's uptime stack, so it checks the new site.\n\n" +
-			"Reads every site and plans only what differs, so a re-run resumes. Writes nothing without --execute.",
+			"Reads every site and plans only what differs, so a re-run resumes. Writes nothing without --execute. --execute asks for approve when the review adds or changes an image. " + yesTopic,
 	},
 	{
 		name:    "site remove",
 		summary: "Take a site out of the running deployment.",
 		usage: []string{
 			"paisans site remove <site> [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n" +
-				"                    [--host-gone] [--delete-data] [--force --ssh <user@host[:port]>] [--execute]",
+				"                    [--host-gone] [--delete-data] [--force --ssh <user@host[:port]>] [--execute]\n" +
+				"                    [--yes]",
 			"paisans site remove <site> --evict [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n" +
-				"                    [--execute]",
+				"                    [--execute] [--yes]",
 			"paisans site remove --force --ssh <user@host[:port]> --id <id or token>\n" +
-				"                    [--delete-data] [--execute]",
+				"                    [--delete-data] [--execute] [--yes]",
 		},
 		detail: "Take a site out of the running deployment in gated stages: its data out (the Patroni leader switched to the Sync Standby, its Garage node out of the layout and the objects moved), out of the cluster (its etcd member, and the mesh, HAProxy and gateway routes on every remaining site, and each replica's patroni.env, one at a time; one data site out of two and a witness takes the witness out of etcd too), its host cleaned of everything provably this deployment's (a gateway's Caddy kept, reduced to the host owner's sites in its caddy.d, /srv/paisans/<token>/caddy.d, while there are any), the A and AAAA records dns init made for its public address deleted at the DNS provider, and its entry out of " + config.FileName + ".\n\n" +
 			"Refuses the only gateway, data or apps site, a site an app is pinned to, and an unhealthy cluster. --host-gone skips the host; --delete-data deletes its data after the site's name is typed at a terminal. Writes nothing without --execute.\n\n" +
 			"--force --ssh <host> --id <id or token>, with no " + config.FileName + ": clean that host of the deployment the login's own admission record names, as --force does, from that record alone, logging in as the deployment's user. DNS is not modified. --execute asks for the site's name at a terminal.\n\n" +
 			"The host stage runs as the deployment's user and ends with the sudo paisans host evict line the host's owner runs to remove the rest.\n\n" +
 			"--evict: take out a site whose host still runs and that nobody else can reach, never reaching that host: the mesh cut first on every remaining site, then its DNS records, Patroni's own failover, its etcd member, its Garage node skipped as dead, then the rest as remove does. " +
-			"Generates the secrets of a replacement declared in the same edit, which apply then brings up. --execute asks for the site's name, and for revoked, lose writes or lose objects when they apply.",
+			"Generates the secrets of a replacement declared in the same edit, which apply then brings up. --execute asks for the site's name, and for revoked, lose writes or lose objects when they apply.\n\n" +
+			"--yes types each word asked for. " + yesTopic,
 	},
 	{
 		name:    "mesh rekey",
@@ -246,9 +251,9 @@ var helpCommands = []helpCommand{
 	{
 		name:    "gateway move",
 		summary: "Move the gateway role to the site " + config.FileName + " gives it.",
-		usage:   []string{"paisans gateway move [--config " + config.FileName + "] [--secrets secrets.enc.yaml] [--execute]"},
+		usage:   []string{"paisans gateway move [--config " + config.FileName + "] [--secrets secrets.enc.yaml] [--execute] [--yes]"},
 		detail: "Move the gateway role to the site " + config.FileName + " gives it, from the site that still serves as the gateway, in gated stages: carry the deployment record, check the new gateway answers for every hostname through its own address, add its address records beside the old one's, delete the old one's (only after that check, and only records dns init made for it), wait out their TTL, then stop the old gateway's Caddy.\n\n" +
-			"Resumes after a fix. Writes nothing without --execute.",
+			"Resumes after a fix. Writes nothing without --execute. --yes is handed to the hand-off's apply, which may ask for confirmations of its own. " + yesTopic,
 	},
 	{
 		name:    "storage init",
@@ -330,14 +335,14 @@ var helpCommands = []helpCommand{
 	{
 		name:    "config publish",
 		summary: "Sign the local files and push them to every site.",
-		usage:   []string{"paisans config publish [--config " + config.FileName + "] [--merge] [--execute]"},
+		usage:   []string{"paisans config publish [--config " + config.FileName + "] [--merge] [--execute] [--yes]"},
 		detail: "Sign the local " + config.FileName + ", secrets.enc.yaml and .sops.yaml as a version on the sites' newest and push it to every site; --merge builds on every head of a fork." +
 			configTrust,
 	},
 	{
 		name:    "config pull",
 		summary: "Move the local files to the sites' newest version.",
-		usage:   []string{"paisans config pull [--config " + config.FileName + "] [--root <sha>] [--execute]"},
+		usage:   []string{"paisans config pull [--config " + config.FileName + "] [--root <sha>] [--execute] [--yes]"},
 		detail: "Move the local files to the sites' newest version, or, over local edits, show the difference and put its files in .paisans/incoming/." +
 			configTrust,
 	},
@@ -350,7 +355,7 @@ var helpCommands = []helpCommand{
 	{
 		name:    "config recover",
 		summary: "Write the newest configuration onto an empty directory.",
-		usage:   []string{"paisans config recover --from <user@host[:port]>... [--root <sha>] [--id <id>]\n                       [--config " + config.FileName + "] [--execute]"},
+		usage:   []string{"paisans config recover --from <user@host[:port]>... [--root <sha>] [--id <id>]\n                       [--config " + config.FileName + "] [--execute] [--yes]"},
 		detail: "Onto an empty directory, gather from the --from hosts and every site the trusted heads name, and write the head's files, or each head's in .paisans/incoming/ with a fork." +
 			configTrust,
 	},
@@ -365,11 +370,11 @@ var helpCommands = []helpCommand{
 	{
 		name:    "operator register",
 		summary: "Sign the sites' newest version with your own key.",
-		usage:   []string{"paisans operator register [--config " + config.FileName + "] [--key <path.pub>] [--root <sha>] [--execute]"},
+		usage:   []string{"paisans operator register [--config " + config.FileName + "] [--key <path.pub>] [--root <sha>]\n                          [--execute] [--yes]"},
 		detail: "Sign an attestation of the sites' newest version with your own key, so trust starts from your signature: the key in your ssh-agent listed under your entry in operators, or the one --key names. " +
 			"Signs only a version equal to your local files, or, with no files and a root pinned, the one the pin leads to, and then writes its files. " +
 			"Records the key in .paisans/signing-key, which config publish signs with from then on.\n\n" +
-			"Changes only the sites' configuration stores, and nothing without --execute. With --execute it asks for the word partial at a terminal when no more than half the sites answered directly, and for rollback when the newest version is older than one seen here before.",
+			"Changes only the sites' configuration stores, and nothing without --execute. With --execute it asks for the word partial at a terminal when no more than half the sites answered directly, and for rollback when the newest version is older than one seen here before; --yes types either. " + yesTopic,
 	},
 	{
 		name:    "secrets list",
@@ -396,26 +401,27 @@ var helpCommands = []helpCommand{
 	{
 		name:    "secrets prune",
 		summary: "Remove the secrets of what " + config.FileName + " no longer declares.",
-		usage:   []string{"paisans secrets prune [--config " + config.FileName + "] [--secrets secrets.enc.yaml] [--execute]"},
+		usage:   []string{"paisans secrets prune [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                      [--without-record] [--execute] [--yes]"},
 		detail: "Remove the secrets that name something " + config.FileName + " no longer declares: a removed site's keys, a removed app's passwords and sign-in client, a Pocket ID group nothing names. Lists them by key, never by value.\n\n" +
+			"--without-record trusts " + config.FileName + " alone, when no gateway's deployment record can be read, and --execute then asks for the word prune at a terminal; --yes types it. " + yesTopic + "\n\n" +
 			"Only reads the gateways' deployment records; its --execute writes the local secrets file, and records the ssh.user of a gateway it logs in to as the deployment's own user.",
 	},
 	{
 		name:    "secrets rotate",
 		summary: "Replace secrets, one at a time, in gated stages.",
-		usage:   []string{"paisans secrets rotate <path>... | --all [--restart] [--replaced <path>]...\n                       [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                       [--execute]"},
+		usage:   []string{"paisans secrets rotate <path>... | --all [--restart] [--replaced <path>]...\n                       [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                       [--execute] [--yes]"},
 		detail: "Replace secrets, named by their paths in the secrets file (apps.<app>.<unit> for a unit of secrets an app's blueprint groups), or every one in scope with --all, one at a time in gated stages: a next value in the secrets file, the side that checks it, each site that uses it healthy before the next, then the value promoted.\n\n" +
 			"A pasted secret (the DNS token or an SMTP password) whose value every host using it runs, read line by line, is asked for at a terminal before any host is reached: replace it at its issuer when asked and paste the new one. One already set anew with secrets set is handed on from the file. A DNS token is tried against the zone before any host gets it; an SMTP password logs in to the mail server from this machine (a server it cannot reach is a warning) and then from every site that will be handed it, none being handed it until all accept, and a pasted one sends the operators one test message. --replaced <path> lists one already replaced and applied, which every host runs, instead. Lists the secrets it keeps and why.\n\n" +
 			"--all refuses a file that lacks a secret init generates. A stopped --all resumes with what it left, and says so; --all --restart starts the full list again.\n\n" +
 			"Refuses while a mesh rekey is unfinished, a site does not answer, or etcd or Patroni is unhealthy; apply and every other command that renders refuse while a rotation is unfinished. " +
-			"A run that signs members out asks for sign out at a terminal, before any host is reached. A stopped run resumes. Writes nothing without --execute.",
+			"A run that signs members out asks for sign out at a terminal, before any host is reached; --yes types it, and never pastes a secret. " + yesTopic + " A stopped run resumes. Writes nothing without --execute.",
 	},
 	{
 		name:    "app remove",
 		summary: "Take an app that has left " + config.FileName + " off every host.",
-		usage:   []string{"paisans app remove <app> [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                   [--delete-data] [--execute]"},
+		usage:   []string{"paisans app remove <app> [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n                   [--delete-data] [--execute] [--yes]"},
 		detail: "Take an app that has left " + config.FileName + " off every host, once a whole apply on each site has marked its files left over: its containers and networks, its rendered files (one edited on the host is kept), its stack directory when nothing else is in it, and its Pocket ID client when the secrets file records that client's ID.\n\n" +
-			"--delete-data also deletes its database and role, its Garage bucket and keys, its named volumes and its data directories, after the app's name is typed at a terminal. " +
+			"--delete-data also deletes its database and role, its Garage bucket and keys, its named volumes and its data directories, after the app's name is typed at a terminal, or by --yes. " + yesTopic + " " +
 			"Leaves its secrets and DNS records, and says so. Writes nothing without --execute.",
 	},
 	{
@@ -442,11 +448,15 @@ var helpCommands = []helpCommand{
 	},
 }
 
+// yesTopic is what every command that takes --yes says of it.
+const yesTopic = "--yes answers each confirmation as typing it would, with no terminal, and prints approved by --yes: and what it approved, a line for each. It needs PAISANS_ALLOW_YES=1 in the environment, so a command line copied alone never approves anything."
+
 // configTrust is what every config subcommand shares, after its own
 // sentence.
 const configTrust = "\n\n" +
 	"The signed copies of " + config.FileName + ", secrets.enc.yaml and .sops.yaml every site keeps. Each config command gathers every site's versions first and trusts them from your own signing key or a root pinned with --root.\n\n" +
 	"With --execute, pull, recover, a publish of the first version, apply and operator register ask for the word partial at a terminal when no more than half the sites answered directly; publish, pull, recover, apply and operator register ask for rollback when the newest version is older than one seen here before, and log only warns. " +
+	"--yes types partial and rollback for each command but log, which asks nothing. " + yesTopic + " " +
 	"With --execute each site first syncs with its peers; without it, and in log, no site is changed and only .paisans/ here is written."
 
 // executeTopic is `paisans help execute`: which commands reach a host, and

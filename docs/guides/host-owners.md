@@ -101,7 +101,9 @@ a call or a message you know is theirs, and compare. A digest that travelled
 beside the file in the same email proves nothing, since whoever changed the
 file could change the digest too. When you admit with `--execute`, paisans
 asks you to type the digest at the terminal, so the comparison cannot be
-skipped; it refuses to run with `--execute` from anything but a terminal.
+skipped; from anything but a terminal it refuses to run with `--execute`
+unless you give the digest as `--digest <digest>`, which it compares the
+same way. `--yes` never answers it.
 
 A request is read as strictly as a configuration: an unknown version, a field
 missing or unknown, a user that is `root` or another deployment's, a key that
