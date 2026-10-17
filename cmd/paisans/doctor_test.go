@@ -22,6 +22,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/selfcheck"
 	"github.com/paisans-software/paisans-cli/internal/topology"
 	"github.com/paisans-software/paisans-cli/internal/validate"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 // doctorHost answers doctor's read commands from a table, records every
@@ -500,7 +501,7 @@ func TestDoctorDiagnosesTheStuckReplicaAndOnlyReads(t *testing.T) {
 		"home-b   unreachable did not answer ssh (see reach)",
 		"There is no database primary (see patroni)",
 		"Not checked because of this: admission, user, docker, docker engine, linger, sudo rights, mesh, patroni, containers, settings talk, clocks, leftovers on home-b.",
-		"done: check admission home-a admitted as ubuntu, covering its roles",
+		"done: check admission home-a admitted as ubuntu by paisans " + version.Current().String() + ", covering its roles",
 		"done: check user home-a ubuntu is in no privileged group",
 		"done: check docker home-a its rootless Docker answers at unix:///run/user/1000/docker.sock",
 		"done: check docker engine home-a Docker Engine 29.9.1",

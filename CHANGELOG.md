@@ -26,6 +26,7 @@ changes share a bullet. Detailed notes are on the corresponding
 - `doctor` fetches `/.well-known/paisans/<token>` from the gateway and each monitor running Paisans' Caddy, from the workstation as `apply` does, and fails when 443 or 80 does not answer as this deployment.
 - `create` offers the first operator each SSH public key in `~/.ssh/*.pub` on the workstation, so a key already there is taken with Enter rather than pasted.
 - `--yes` answers every confirmation a command asks for, printing each answer, when `PAISANS_ALLOW_YES=1` is set; `site admit --request` takes its digest as `--digest`, which `--yes` never supplies.
+- Every record paisans writes, from the site manifest to each configuration revision, names the version, commit and modified flag of the build that wrote it, refusing one without; develop builds report `X.Y.Z-dev`.
 
 ### Changed
 

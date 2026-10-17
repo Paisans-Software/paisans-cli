@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/paisans-software/paisans-cli/internal/ownership"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 // LeftoverProbe is one site's ownership report, or why it could not be made.
@@ -13,6 +14,12 @@ type LeftoverProbe struct {
 	Site   string
 	Report ownership.Report
 	Err    string
+	// Manifest is whether the site has the manifest apply writes, and
+	// ManifestBuild the paisans that wrote it. ManifestErr is the refusal
+	// of a manifest that does not say which build wrote it.
+	Manifest      bool
+	ManifestBuild version.Build
+	ManifestErr   string
 }
 
 // Leftovers warns about anything of this deployment left on a site that its
@@ -28,6 +35,12 @@ func Leftovers(probes []LeftoverProbe) []Finding {
 		if p.Err != "" {
 			out = append(out, Finding{Section: SectionLeftovers, Level: Skip, Line: fmt.Sprintf("%s: the host's inventory could not be read", p.Site), More: []string{p.Err}})
 			continue
+		}
+		switch {
+		case p.ManifestErr != "":
+			out = append(out, Finding{Section: SectionLeftovers, Level: Fail, Line: fmt.Sprintf("%s: its manifest does not say which build of paisans wrote it", p.Site), More: []string{p.ManifestErr}})
+		case p.Manifest:
+			out = append(out, Finding{Section: SectionLeftovers, Level: Info, Line: fmt.Sprintf("%s: last applied by paisans %s", p.Site, p.ManifestBuild)})
 		}
 		if lines := p.Report.LeftoverLines(); len(lines) > 0 {
 			more := append([]string{}, lines...)

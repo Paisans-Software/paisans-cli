@@ -8,6 +8,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/topology"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 // admittedRecord is the record site admit leaves for a site of cfg as
@@ -19,6 +20,7 @@ func admittedRecord(cfg *config.Config, site string) admission.Record {
 		panic(err)
 	}
 	rec := admission.NewRecord(req, req.Grants, "", time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC))
+	rec.Build = version.Build{Version: "0.3.0-dev", Commit: "519299d5cb009da4904cdf53c2025f1ad609f102"}
 	if cfg.Sites[site].WebServerManagedBy() == config.ManagedByExternal {
 		rec.WebServer = &admission.WebServer{Server: "nginx", Process: "nginx"}
 	}
@@ -49,7 +51,7 @@ func TestAdmission(t *testing.T) {
 		pending bool
 	}{
 		{"admitted", AdmissionProbe{Site: "home-a", Found: true, Record: admittedRecord(cfg, "home-a")}, OK,
-			"home-a: admitted as ubuntu, covering its roles", nil, false},
+			"home-a: admitted as ubuntu by paisans 0.3.0-dev (519299d5cb00), covering its roles", nil, false},
 		{"not admitted, pending", AdmissionProbe{Site: "home-b", Class: pendingClass("home-b")}, Warn,
 			"home-b: pending: this deployment is not admitted on its host",
 			[]string{"roles: data, apps", "Until it joins, the deployment is without one of 3 etcd votes", "`paisans site request --site home-b > home-b.admit`"}, true},

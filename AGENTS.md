@@ -222,7 +222,12 @@ on a shared branch unasked.
 **Versions are semantic, `MAJOR.MINOR.PATCH`, and written in one place**: the
 `Version` constant in `internal/version/version.go`. `paisans version` prints
 it, a blueprint's `requires_toolkit` is checked against it, and a release is
-tagged `vMAJOR.MINOR.PATCH` from it. `0.x` holds while command names remain
+tagged `vMAJOR.MINOR.PATCH` from it. Between releases `develop` holds the next
+pre-release, `MAJOR.MINOR.PATCH-dev` (Eg: `0.3.0-dev` after `v0.2.0`), which
+orders after the last release and before its own: a build of `develop` never
+reports a release it is not. Every record the toolkit writes carries the build
+that wrote it, `version.Build`: the version, the commit and whether the tree
+was modified. `0.x` holds while command names remain
 provisional. The operator reconciler, which the `pocket-id` blueprint runs,
 is released from its own repository,
 `Paisans-Software/paisans-operator-reconciler-service`; the core catalog's
@@ -234,7 +239,7 @@ sentence of at most 35 words. `.github/workflows/changelog.yml` checks it. A
 pull request with nothing an operator would notice opts out by starting its
 head commit's message with `kacl-skip:`.
 
-**A release is cut in three steps**, and only the first is ever yours:
+**A release is cut in four steps**; the first and the last are the only ones ever yours:
 
 1. `make bump-patch`, `make bump-minor`, `make bump-major` or
    `make bump VERSION=x.y.z` on a branch. It sets the constant, moves the
@@ -254,6 +259,10 @@ head commit's message with `kacl-skip:`.
    it and publishes the GitHub Release, with the changes since the previous
    release listed under the operator notes and the Linux binaries and
    `SHA256SUMS` that `make release-binaries` builds attached.
+4. Once the release is tagged, `make dev` on a branch from `develop` moves the
+   constant to the next minor's `-dev` (`make dev VERSION=x.y.z` for another),
+   committed as `kacl-skip: develop is x.y.z-dev`, as a pull request into
+   `develop`. `release.yml` refuses a `-dev` version that reaches `main`.
 
 **If a release step fails after the tag is pushed**, a re-run releases nothing,
 because the tag exists. A human recovers it: delete the draft release if there
@@ -262,7 +271,7 @@ job. The comment above the tag step in `release.yml` says the same. A failure
 before the tag step leaves nothing behind and needs only the re-run.
 
 **Release is a human action.** Tagging and publishing leave this repository
-and cannot be walked back. An agent may run `make bump` and open the
+and cannot be walked back. An agent may run `make bump` or `make dev` and open the
 `Release x.y.z` pull request into `develop` when asked; it never merges into
 `main`, pushes a tag, or publishes a release.
 

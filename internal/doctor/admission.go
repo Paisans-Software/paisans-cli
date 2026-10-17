@@ -74,7 +74,7 @@ func Admission(cfg *config.Config, probes []AdmissionProbe) []Finding {
 	var out []Finding
 	for _, p := range probes {
 		if p.Covered(cfg) {
-			out = append(out, Finding{Section: SectionAdmission, Level: OK, Line: fmt.Sprintf("%s: admitted as %s, covering its roles", p.Site, p.Record.User)})
+			out = append(out, Finding{Section: SectionAdmission, Level: OK, Line: fmt.Sprintf("%s: admitted as %s by paisans %s, covering its roles", p.Site, p.Record.User, p.Record.Build)})
 			continue
 		}
 		var problem string

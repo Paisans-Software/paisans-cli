@@ -14,8 +14,11 @@ go build ./cmd/paisans
 Go 1.25.8 or newer, the `go` line in `go.mod`. There is no code generation step.
 The `Makefile` holds only the release targets. `make bump` and its
 `bump-patch`, `bump-minor` and `bump-major` forms set the version constant in
-`internal/version` and cut `CHANGELOG.md`; *Releases* in `AGENTS.md` describes
-the flow. `make release-binaries` builds the Linux binaries a release
+`internal/version` and cut `CHANGELOG.md`, counting from the newest `vX.Y.Z`
+tag. After a release is cut, `make dev` moves `develop`'s version to the next
+`-dev` (Eg: `0.4.0-dev` after `v0.3.0`), which `version.Compare` orders after
+the release and before the next one; *Releases* in `AGENTS.md` describes the
+flow. `make release-binaries` builds the Linux binaries a release
 attaches, `paisans-linux-amd64` and `paisans-linux-arm64`, static with
 `CGO_ENABLED=0`, into `dist/` with a `SHA256SUMS` file beside them. The
 release workflow runs the same target, so a local run builds what a release

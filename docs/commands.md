@@ -437,7 +437,7 @@ paisans config publish --execute      # sign the local files, push to every site
 paisans config publish --merge --execute   # one version on every head of a fork
 paisans config pull                   # what would be written
 paisans config pull --execute         # move the files to the sites' newest
-paisans config log                    # every version, signer, holding sites
+paisans config log                    # every version, signer, build, holding sites
 paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty directory
 ```
 
@@ -685,8 +685,10 @@ by its version, not its source* and *`apply` and `site prepare` review what
 
 The host owner's listing of what a host holds for paisans: every admission
 record in `/etc/paisans` (the deployment id, the user, the site and roles it
-was admitted as, the grants given and when), then, through sudo, every
-deployment in the host's registry (id, token, domain, site, roles and root),
+was admitted as, the grants given, when, and the version and short commit of
+the paisans that admitted it), then, through sudo, every deployment in the
+host's registry (id, token, domain, site, roles, root, and the paisans that
+claimed the host),
 and a warning for any deployment directory under `/srv/paisans` that no
 registry entry names. A record it cannot parse is a warning.
 
@@ -883,7 +885,9 @@ paisans site evict --site home-a --ssh owner@home-a.example.org --execute
 * **Release:** refuses, with nothing changed, a host whose registry says a
   newer release of paisans claimed it for any deployment, this one or
   another, or names a release it cannot order, and names the highest
-  release to upgrade to. No flag overrides it.
+  release to upgrade to. No flag overrides it. An entry that does not say
+  which build claimed the host is refused too: the host's owner admits
+  that deployment again.
 * **`--execute`:** asks for the user's name at a terminal, then removes the
   mesh, the user with its home and Docker data, the deployment's directory,
   the helper and sudoers line, the egress table and its firewall rules except
@@ -1243,7 +1247,9 @@ paisans site remove --force --ssh admin@203.0.113.9 --id f2a9 --execute --delete
   a site whose manifest, `/srv/paisans/<token>/.paisans-manifest.json`, says
   a newer release of paisans applied it, or names a release it cannot order:
   what is provably the deployment's is decided by the binary running the
-  removal. Upgrade paisans and run it again; no flag overrides it.
+  removal. Upgrade paisans and run it again; no flag overrides it. A
+  manifest that does not say which build wrote it is refused too: apply the
+  site again.
 * **`--execute`:** runs the stages, stopping at the first gate that fails. Stage
   3 deletes the record of what the deployment granted on the host,
   `/srv/paisans/<token>/.paisans/granted.json`, last. It deletes the host's
@@ -1364,9 +1370,12 @@ paisans images --check   # exit 3 when a build would move or an override lags
 Prints the toolkit version the binary was built from and, in parentheses, its
 commit, with `-dirty` when the tree had uncommitted changes:
 `paisans 0.1.0 (519299d5cb00)`. A build with no commit recorded prints the
-version alone. The version is the constant in `internal/version`, so a build
-between releases prints the last release cut on its branch. A blueprint's
-`requires_toolkit` is checked against it.
+version alone. The version is the constant in `internal/version`: a release,
+or on `develop` the next one's pre-release, as `0.3.0-dev`, which orders after
+`0.2.0` and before `0.3.0`. A blueprint's `requires_toolkit` is checked
+against it. Every record paisans writes on a host or in the configuration's
+store names this build: the version, the commit, and whether the tree was
+modified.
 
 * **Alone:** always.
 * **Flags:** none of its own. `paisans --version` is the same command.

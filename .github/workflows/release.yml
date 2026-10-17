@@ -6,7 +6,8 @@ name: release
 # downloads one of those to run `paisans site admit` on the host itself.
 # Any other push to main is a no-op. The version is the constant in
 # internal/version/version.go, which `make bump` sets on develop; the
-# "Release X to main" pull request from develop brings it here.
+# "Release X to main" pull request from develop brings it here. Between
+# releases develop holds X.Y.Z-dev, which this refuses to release.
 #
 # That pull request is merged with a merge commit, never squashed or rebased.
 # A merge commit keeps main an ancestor of develop, so the next release pull
@@ -43,6 +44,11 @@ jobs:
         run: |
           version=$(sed -n 's/^const Version = "\(.*\)"/\1/p' internal/version/version.go)
           test -n "$version" || { echo "no Version in internal/version/version.go"; exit 1; }
+          # develop's own version, X.Y.Z-dev, is no release: one reaching
+          # main is a release pull request that skipped make bump.
+          case "$version" in
+            *-*) echo "::error file=internal/version/version.go::main holds ${version}, which is no release. Cut the release on develop with make bump, and merge it to main"; exit 1 ;;
+          esac
           tag="v${version}"
           if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
             echo "${tag} already exists; nothing to release"
