@@ -1,7 +1,6 @@
 package hostcheck
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 // Transport is how the inventory reads a host. apply.SSHTransport and the
@@ -56,9 +56,12 @@ type Inventory struct {
 	// ManifestPending is the sites that record says were pending when it
 	// was written, nil when it names none.
 	ManifestPending []string
-	// ManifestToolkitVersion is the release of the paisans that wrote that
-	// record, empty when it records none.
-	ManifestToolkitVersion string
+	// ManifestBuild is the paisans that wrote that record.
+	ManifestBuild version.Build
+	// ManifestErr is the refusal of a record that does not say which build
+	// of paisans wrote it, nil for every other. Its other fields are read
+	// all the same, for apply, which writes it again.
+	ManifestErr error
 	// HostSites are the *.caddy files in the deployment's own render.HostSitesDir,
 	// by full path and sorted: site blocks somebody added to the gateway's
 	// Caddy, which no deployment owns.
@@ -294,12 +297,17 @@ func Inspect(t Transport, d deployment.Deployment) (*Inventory, error) {
 	if found {
 		// An unreadable manifest records nothing, so a mesh interface beside
 		// it is not known to be the toolkit's. apply refuses that manifest itself.
-		var m render.Manifest
-		if json.Unmarshal([]byte(content), &m) == nil {
+		m, err := render.ParseManifest([]byte(content))
+		var noBuild *version.NoBuildError
+		if errors.As(err, &noBuild) {
+			inv.ManifestErr = fmt.Errorf("%s: %w. Apply the site again, which writes it anew", inv.ManifestPath, err)
+			err = nil
+		}
+		if err == nil {
 			inv.ManifestFiles = m.Files
 			inv.ManifestWebServer = m.WebServer
 			inv.ManifestPending = m.Pending
-			inv.ManifestToolkitVersion = m.ToolkitVersion
+			inv.ManifestBuild = m.Build
 			for _, f := range m.Files {
 				if f.Path == d.WireGuardConf() {
 					inv.ManifestWireGuard = true

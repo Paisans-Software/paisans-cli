@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"flag"
+	"fmt"
 	"io/fs"
 	"os"
 	"path"
@@ -20,6 +21,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/secretsgen"
 	"github.com/paisans-software/paisans-cli/internal/validate"
+	"github.com/paisans-software/paisans-cli/internal/version"
 	"gopkg.in/yaml.v3"
 )
 
@@ -78,6 +80,7 @@ func TestGoldenTree(t *testing.T) {
 		if err := render.Write(plan, golden); err != nil {
 			t.Fatal(err)
 		}
+		placeholdBuild(t, golden)
 		t.Log("golden tree rewritten")
 		return
 	}
@@ -86,7 +89,34 @@ func TestGoldenTree(t *testing.T) {
 	if err := render.Write(plan, dir); err != nil {
 		t.Fatal(err)
 	}
+	placeholdBuild(t, dir)
 	compareTrees(t, golden, dir)
+}
+
+// placeholdBuild replaces this build's version and commit in every manifest
+// under dir with placeholders, so the golden tree holds the build's shape
+// and not one build's values.
+func placeholdBuild(t *testing.T, dir string) {
+	t.Helper()
+	b := version.Current()
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.Name() != render.ManifestName {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		out := strings.Replace(string(data), `"toolkit_version": "`+b.Version+`"`, `"toolkit_version": "<version>"`, 1)
+		out = strings.Replace(out, `"toolkit_commit": "`+b.Commit+`"`, `"toolkit_commit": "<commit>"`, 1)
+		if out == string(data) {
+			return fmt.Errorf("%s does not record this build, %+v", path, b)
+		}
+		return os.WriteFile(path, []byte(out), 0o644)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 // The mesh file is the deployment's own, under its root, where apply writes

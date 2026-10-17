@@ -251,9 +251,10 @@ func requirement(req string) error {
 }
 
 // meets checks the requirement req, ">= MAJOR.MINOR[.PATCH]", against the
-// toolkit version have. Every build counts as the version its commit holds,
-// so a build between releases meets what the last release cut on its branch
-// meets, and nothing more.
+// toolkit version have, ordered as version.Compare orders them. Every build
+// counts as the version its commit holds, so a build of develop, a -dev
+// version, meets what the last release meets and not what its own coming
+// release does.
 func meets(req, have string) error {
 	if req == "" {
 		return nil
@@ -266,11 +267,11 @@ func meets(req, have string) error {
 	if err != nil {
 		return fmt.Errorf("requires_toolkit: %w", err)
 	}
-	is, err := parseVersion(have)
+	c, err := version.Compare(have, fmt.Sprintf("%d.%d.%d", need[0], need[1], need[2]))
 	if err != nil {
 		return fmt.Errorf("the toolkit's own version: %w", err)
 	}
-	if less(is, need) {
+	if c < 0 {
 		return fmt.Errorf("requires_toolkit: needs Paisans %s, and this is %s", strings.TrimSpace(want), have)
 	}
 	return nil

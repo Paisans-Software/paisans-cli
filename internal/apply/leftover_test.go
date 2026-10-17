@@ -139,16 +139,40 @@ func TestAPartialApplyMarksNothingLeftOver(t *testing.T) {
 	}
 }
 
-// The manifest records the release of the paisans that wrote it, so a
-// site remove by an older one can refuse the site.
-func TestTheManifestRecordsTheToolkitVersion(t *testing.T) {
+// The manifest records the build of the paisans that wrote it, so a site
+// remove by an older one can refuse the site.
+func TestTheManifestRecordsTheBuild(t *testing.T) {
 	host := newHost()
 	applyWhole(t, host, plan(t))
-	var m render.Manifest
-	if err := json.Unmarshal([]byte(host.files["/srv/paisans/f2a9/.paisans-manifest.json"]), &m); err != nil {
+	m, err := render.ParseManifest([]byte(host.files["/srv/paisans/f2a9/.paisans-manifest.json"]))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if m.ToolkitVersion != version.Version {
-		t.Errorf("the manifest records release %q, want %s", m.ToolkitVersion, version.Version)
+	if m.Build != version.Current() {
+		t.Errorf("the manifest records %+v, want %+v", m.Build, version.Current())
+	}
+}
+
+// apply reads a manifest that does not say which build wrote it, since it
+// is what writes it anew, and the manifest it writes says.
+func TestApplyWritesAManifestWithNoBuildAnew(t *testing.T) {
+	host := newHost()
+	applyWhole(t, host, plan(t))
+	path := "/srv/paisans/f2a9/.paisans-manifest.json"
+	var m map[string]any
+	if err := json.Unmarshal([]byte(host.files[path]), &m); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range version.BuildKeys {
+		delete(m, k)
+	}
+	data, _ := json.Marshal(m)
+	host.files[path] = string(data)
+	if _, err := render.ParseManifest(data); err == nil {
+		t.Fatal("the stripped manifest parsed")
+	}
+	applyWhole(t, host, plan(t))
+	if got, err := render.ParseManifest([]byte(host.files[path])); err != nil || got.Build != version.Current() {
+		t.Errorf("got %+v, %v", got.Build, err)
 	}
 }

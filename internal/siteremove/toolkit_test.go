@@ -89,7 +89,35 @@ func TestRefusesANewerToolkitAppliedSinceThePlan(t *testing.T) {
 	}
 }
 
-// A kept Caddy's manifest keeps the release the manifest recorded, so a
+// A manifest that does not say which build of paisans wrote it is refused
+// in every form, with apply named as what writes it anew, before anything
+// on the host is changed.
+func TestRefusesAManifestWithNoBuild(t *testing.T) {
+	w := setup(t)
+	h := w.hosts["home-b"]
+	var m map[string]any
+	if err := json.Unmarshal([]byte(h.files[dep.Manifest()]), &m); err != nil {
+		t.Fatal(err)
+	}
+	delete(m, "toolkit_commit")
+	data, _ := json.Marshal(m)
+	h.files[dep.Manifest()] = string(data)
+	before := maps.Clone(h.files)
+	for name, build := range toolkitForms(w) {
+		_, err := build()
+		if err == nil || !strings.Contains(err.Error(), "toolkit_commit missing") || !strings.Contains(err.Error(), "Apply the site again") || !strings.Contains(err.Error(), "Nothing was changed") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if !maps.Equal(before, h.files) {
+		t.Error("the host changed")
+	}
+}
+
+// keptCommit is the commit setToolkitVersion records beside a version.
+const keptCommit = "519299d5cb009da4904cdf53c2025f1ad609f102"
+
+// A kept Caddy's manifest keeps the build the manifest recorded, so a
 // later run checks it as this one did.
 func TestTheKeptCaddysManifestKeepsItsRelease(t *testing.T) {
 	for _, recorded := range []string{"0.0.1", version.Version} {
@@ -103,12 +131,12 @@ func TestTheKeptCaddysManifestKeepsItsRelease(t *testing.T) {
 		if err := siteremove.Execute(p); err != nil {
 			t.Fatal(err)
 		}
-		var m render.Manifest
-		if err := json.Unmarshal([]byte(vm.files[dep.Manifest()]), &m); err != nil {
+		m, err := render.ParseManifest([]byte(vm.files[dep.Manifest()]))
+		if err != nil {
 			t.Fatal(err)
 		}
-		if m.ToolkitVersion != recorded {
-			t.Errorf("the kept manifest records %q, want %q", m.ToolkitVersion, recorded)
+		if want := (version.Build{Version: recorded, Commit: keptCommit, Modified: true}); m.Build != want {
+			t.Errorf("the kept manifest records %+v, want %+v", m.Build, want)
 		}
 	}
 }

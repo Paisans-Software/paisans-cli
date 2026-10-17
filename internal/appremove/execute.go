@@ -293,8 +293,8 @@ func (e *Executor) files(h Host, d deployment.Deployment, s SitePlan) error {
 	if !found {
 		return nil
 	}
-	var m render.Manifest
-	if err := json.Unmarshal([]byte(content), &m); err != nil {
+	m, err := render.ParseManifest([]byte(content))
+	if err != nil {
 		return fmt.Errorf("%s is not readable as a manifest, so it was not rewritten: %w", d.Manifest(), err)
 	}
 	kept := m.Files[:0]

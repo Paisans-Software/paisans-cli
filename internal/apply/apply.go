@@ -1574,7 +1574,12 @@ func readManifest(t Transport, d deployment.Deployment) (map[string]render.Manif
 	if !found {
 		return map[string]render.ManifestFile{}, m, nil
 	}
-	if err := json.Unmarshal([]byte(content), &m); err != nil {
+	// A manifest that does not say which build of paisans wrote it is
+	// read all the same: this apply writes it again, with its own build,
+	// which is what every other reader's refusal of it asks for.
+	m, err = render.ParseManifest([]byte(content))
+	var noBuild *version.NoBuildError
+	if err != nil && !errors.As(err, &noBuild) {
 		return nil, m, fmt.Errorf("%s is not readable as a manifest: %w\nIt records what the last apply wrote. Delete it to treat every file on this host as somebody else's, which is the safe reading", manifestPath(d), err)
 	}
 	out := make(map[string]render.ManifestFile, len(m.Files))
@@ -1655,7 +1660,7 @@ func writeManifest(plan *Plan, t Transport) error {
 	if !plan.archRead {
 		arch = manifest.Arch
 	}
-	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files, Pins: pinRecord(plan, manifest.Pins), Arch: arch, Images: imageRecord(plan, manifest.Images), WebServer: manifest.WebServer, Pending: plan.Pending, ToolkitVersion: version.Version}, "", "  ")
+	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files, Pins: pinRecord(plan, manifest.Pins), Arch: arch, Images: imageRecord(plan, manifest.Images), WebServer: manifest.WebServer, Pending: plan.Pending, Build: version.Current()}, "", "  ")
 	if err != nil {
 		return err
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 	"github.com/paisans-software/paisans-cli/internal/ownership"
 	"github.com/paisans-software/paisans-cli/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 // What follows keeps a gateway's Caddy on the host while it serves the host
@@ -215,9 +216,9 @@ func snippetBlocks(caddyfile string, names []string) (string, error) {
 
 // keptManifest is the manifest of the kept files: each that the manifest
 // proved, as it was, and the Caddyfile with the reduced file's hash. They
-// are proven this deployment's when a later run removes them. release is
-// the paisans release the manifest recorded, kept as it was.
-func (p *Plan) keptManifest(entries []render.ManifestFile, proven map[string]bool, reduced, release string) (string, error) {
+// are proven this deployment's when a later run removes them. build is
+// the paisans the manifest recorded, kept as it was.
+func (p *Plan) keptManifest(entries []render.ManifestFile, proven map[string]bool, reduced string, build version.Build) (string, error) {
 	var files []render.ManifestFile
 	for _, e := range entries {
 		switch {
@@ -229,7 +230,7 @@ func (p *Plan) keptManifest(entries []render.ManifestFile, proven map[string]boo
 		}
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
-	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files, ToolkitVersion: release}, "", "  ")
+	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files, Build: build}, "", "  ")
 	if err != nil {
 		return "", err
 	}
