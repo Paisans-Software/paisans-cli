@@ -2,6 +2,7 @@ package dns
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"sort"
@@ -168,8 +169,34 @@ func BuildPrune(ctx context.Context, provider Provider, cfg *config.Config, want
 	for _, n := range vouched {
 		rules.vouched[normalise(n)] = true
 	}
+	cache := map[string]zone{}
 	for _, w := range wants {
+		if !w.Parent {
+			rules.names = append(rules.names, w.Name)
+			continue
+		}
+		// A registrable domain the provider does not hold has no record of
+		// this deployment's to consider. One whose policy rejects covers
+		// every no-mail policy below it, so none of those is wanted.
+		z, err := FindZone(ctx, provider, w.Name, cache)
+		if errors.Is(err, errNoZone) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
 		rules.names = append(rules.names, w.Name)
+		records, err := provider.Records(ctx, z.id, w.Name)
+		if err != nil {
+			return nil, err
+		}
+		if action, _ := classify(w, records, nil); action == Present {
+			for _, b := range wants {
+				if b.BelowParent {
+					delete(rules.wanted, b.Type+" "+b.Name)
+				}
+			}
+		}
 	}
 	for _, name := range cfg.SiteNames() {
 		for key, ip := range siteAddresses(cfg, name) {
@@ -295,7 +322,10 @@ func siteAddresses(cfg *config.Config, name string) map[string]string {
 func wantedSet(wants []Want) map[string][]string {
 	out := map[string][]string{} // type + " " + name -> sources
 	for _, w := range wants {
-		if w.Advisory || w.Leftover {
+		// The registrable domain's policy is wanted even where it is only
+		// checked: a lockdown one there is this deployment's dns init's, and
+		// the names below rely on it.
+		if w.Advisory && !w.Parent || w.Leftover {
 			continue
 		}
 		out[w.Type+" "+w.Name] = w.Sources

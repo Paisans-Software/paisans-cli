@@ -3121,3 +3121,51 @@ turns ufw off again, takes the lockout out of the owner's hands.
   overrides an owner's deliberate deny.
 * **Enable without a fallback:** a cloud firewall or a rule admit cannot see
   would still lock the owner out, with nothing to undo it.
+
+## 2026-10-17: `dns init` writes the registrable domain's DMARC policy when nothing under it has mail
+
+Founder decision. It amends *`dns init` writes DMARC for send-only names and
+for hostnames below the registrable domain* (2026-10-15), where the
+registrable domain's policy was only checked and every hostname carried its
+own.
+
+### What was decided
+
+* When `community.domain` is below its registrable domain, `dns init` creates
+  the lockdown policy at `_dmarc.<registrable domain>` when the provider holds
+  that zone, there is no DMARC policy there, every zone delegated from it is
+  held by the provider, and no name in those zones has mail and no policy of
+  its own. A name has mail when it holds an MX record other than the null MX,
+  an SPF record naming a sender, or a DKIM key at a selector under it.
+* Where the registrable domain's policy rejects, whoever wrote it, no
+  hostname gets `_dmarc.<hostname>` and `community.domain` gets no
+  `_dmarc.<community.domain>`; `dns prune` removes the ones this deployment's
+  `dns init` made. Where it does not, each still gets its own.
+* `dns prune` never removes the registrable domain's policy that `dns init`
+  wrote while the configuration still produces it.
+* That policy is a note once a name under the domain has mail and no policy
+  of its own.
+
+### Why
+
+A receiver applies the registrable domain's policy to every name under it
+with none of its own, however deep, so one record there does what a record at
+every hostname did. The objection on 2026-10-15 was that the toolkit could
+not see which names send mail. It reads every record in the zone, and in each
+delegated zone, so it can: an MX, an SPF record naming a sender and a DKIM key
+are what a name with mail publishes, and a name with its own DMARC policy is
+not governed by the registrable domain's at all. Where any of that is out of
+sight, it writes nothing there and falls back to a policy per hostname.
+
+### What was weighed
+
+* **Only the registrable domain's MX.** Not chosen: a subdomain sending
+  through a relay publishes no MX at the registrable domain, and its mail
+  would be rejected.
+* **Keeping the hostnames' policies beside it.** Not chosen: they say what
+  the registrable domain's already says, and are records to drift.
+
+### What was run
+
+`go build ./... && go vet ./... && go test ./...`; the new tests in
+`internal/dns/mail_test.go` were checked to fail before the change.

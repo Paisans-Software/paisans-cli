@@ -27,6 +27,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Changed
 
+- `dns init` writes the registrable domain's DMARC policy when nothing under it has mail without a policy of its own, and then gives hostnames below it no DMARC policy of their own.
 - `doctor` reports a site pending admission, or down after joining, as a warning naming what the deployment is without and how to admit or remove it; a gateway stays a failure.
 - `doctor`'s advice for a container whose mesh address was missing at boot is to start it again, as the deployment's user, or recreate its stack.
 - `secrets set` and `secrets rotate` try an SMTP password from the machine they run on, warning when the server cannot be reached there, and rotate tries it from every site before handing it to any.

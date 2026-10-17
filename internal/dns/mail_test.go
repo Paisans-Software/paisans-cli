@@ -555,48 +555,281 @@ func TestHostnamesBelowTheRegistrableDomainGetTheirOwnDMARC(t *testing.T) {
 	}
 }
 
-// The registrable domain above community.domain holds names the deployment
-// does not run, so its policy is only checked: a note when missing or weak,
-// never a create, and nothing at all when the provider does not hold it.
-func TestRegistrableDomainAboveIsOnlyChecked(t *testing.T) {
+// entryAt is the plan's entry for the TXT record at name, and whether there
+// is one.
+func entryAt(p *Plan, name string) (Entry, bool) {
+	for _, e := range p.Entries {
+		if e.Type == "TXT" && e.Name == name {
+			return e, true
+		}
+	}
+	return Entry{}, false
+}
+
+// stagedDMARC are the no-mail DMARC policies staged() wants below the
+// registrable domain.
+var stagedDMARC = []string{
+	"_dmarc.staging.example.org",
+	"_dmarc.talk.staging.example.org",
+	"_dmarc.talk-media.staging.example.org",
+	"_dmarc.vm.staging.example.org",
+}
+
+// The registrable domain above community.domain gets the lockdown policy
+// when it has none and nothing under it has mail that policy would govern,
+// and the hostnames below it then need no policy of their own.
+func TestRegistrableDomainPolicyIsWrittenWhenNothingHasMail(t *testing.T) {
 	w := wantsOf(t, staged())["TXT _dmarc.example.org"]
 	if !w.Advisory || !w.Parent {
-		t.Fatalf("the registrable domain's policy should be checked: %+v", w)
+		t.Fatalf("the registrable domain's policy is a parent want: %+v", w)
+	}
+	for _, name := range stagedDMARC {
+		if w := wantsOf(t, staged())["TXT "+name]; !w.BelowParent {
+			t.Errorf("%s is not marked as covered by the registrable domain: %+v", name, w)
+		}
 	}
 
 	fake := newFake()
 	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{
+		{ID: "null-mx", Type: "MX", Name: "example.org", Content: ".", Priority: new(int)},
+		{ID: "code", Type: "TXT", Name: "example.org", Content: "google-site-verification=abc"},
+		{ID: "www", Type: "A", Name: "www.example.org", Content: "198.51.100.7"},
+	}
 	c := fake.serve(t)
 	p := plan(t, c, staged())
+	if e, _ := entryAt(p, "_dmarc.example.org"); e.Action != Create || e.Content != dmarcLockdown {
+		t.Fatalf("the registrable domain's policy: %+v", e)
+	}
+	for _, name := range stagedDMARC {
+		if e, _ := entryAt(p, name); e.Action != Covered {
+			t.Errorf("%s: got %s, want covered", name, e.Action)
+		}
+	}
+	if err := Execute(context.Background(), c, p, ui.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var dmarc []string
+	for _, rec := range fake.posts {
+		if strings.HasPrefix(rec.Name, "_dmarc.") {
+			dmarc = append(dmarc, rec.Name)
+		}
+	}
+	if len(dmarc) != 1 || dmarc[0] != "_dmarc.example.org" {
+		t.Errorf("created DMARC policies %v, want _dmarc.example.org alone", dmarc)
+	}
+}
+
+// A name under the registrable domain that has mail, and no policy of its
+// own, would be governed by the one written there, so none is written, and
+// each hostname below keeps its own.
+func TestRegistrableDomainWithMailIsOnlyChecked(t *testing.T) {
+	dkim := "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC"
+	cases := map[string][]cfRecord{
+		"an MX at the domain": {
+			{Type: "MX", Name: "example.org", Content: "mx.example.net", Priority: ptr(10)},
+		},
+		"an MX below it": {
+			{Type: "MX", Name: "shop.example.org", Content: "mx.example.net", Priority: ptr(10)},
+		},
+		"a wildcard MX": {
+			{Type: "MX", Name: "*.example.org", Content: "mx.example.net", Priority: ptr(10)},
+		},
+		"an SPF record naming senders": {
+			{Type: "TXT", Name: "example.org", Content: `"v=spf1 include:_spf.example.net -all"`},
+		},
+		"a DKIM key": {
+			{Type: "TXT", Name: "s1._domainkey.news.example.org", Content: dkim},
+		},
+		"a zone delegated elsewhere": {
+			{Type: "NS", Name: "lab.example.org", Content: "ns1.example.net"},
+		},
+	}
+	for name, records := range cases {
+		t.Run(name, func(t *testing.T) {
+			fake := newFake()
+			fake.zones["example.org"] = "zone-1"
+			fake.records["zone-1"] = records
+			p := plan(t, fake.serve(t), staged())
+			e, _ := entryAt(p, "_dmarc.example.org")
+			if e.Action != Warn {
+				t.Fatalf("the registrable domain's policy: got %s, want warn", e.Action)
+			}
+			if !strings.Contains(e.Detail, records[0].Name) {
+				t.Errorf("the note does not name %s: %s", records[0].Name, e.Detail)
+			}
+			for _, name := range stagedDMARC {
+				if e, _ := entryAt(p, name); e.Action != Create {
+					t.Errorf("%s: got %s, want create", name, e.Action)
+				}
+			}
+		})
+	}
+}
+
+// A name with mail and a policy of its own is not governed by the
+// registrable domain's, so it does not stop that policy being written.
+func TestMailNameWithItsOwnPolicyLeavesTheRegistrableDomainFree(t *testing.T) {
+	dkim := "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC"
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{
+		{Type: "TXT", Name: "s1._domainkey.news.example.org", Content: dkim},
+		{Type: "TXT", Name: "_dmarc.news.example.org", Content: "v=DMARC1; p=none; rua=mailto:r@example.net"},
+		{Type: "MX", Name: "shop.example.org", Content: "mx.example.net", Priority: ptr(10)},
+		{Type: "TXT", Name: "_dmarc.shop.example.org", Content: "v=DMARC1; p=quarantine"},
+	}
+	p := plan(t, fake.serve(t), staged())
+	if e, _ := entryAt(p, "_dmarc.example.org"); e.Action != Create {
+		t.Errorf("the registrable domain's policy: got %s (%s), want create", e.Action, e.Detail)
+	}
+
+	// A send-only sender under community.domain gets its policy written in
+	// the same run, so it does not stop the registrable domain's either.
+	cfg := staged()
+	cfg.SMTP = config.SMTP{FromAddress: "noreply@send.staging.example.org"}
+	fake = newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{
+		{Type: "TXT", Name: "brevo1._domainkey.send.staging.example.org", Content: dkim},
+	}
+	p = plan(t, fake.serve(t), cfg)
+	if e, _ := entryAt(p, "_dmarc.send.staging.example.org"); e.Action != Create || e.Content != dmarcSender {
+		t.Errorf("the sender's own policy: %+v", e)
+	}
+	if e, _ := entryAt(p, "_dmarc.example.org"); e.Action != Create {
+		t.Errorf("the registrable domain's policy: got %s (%s), want create", e.Action, e.Detail)
+	}
+
+	// One outside community.domain is not dns init's to write, so with no
+	// policy of its own it stops the registrable domain's.
+	cfg.SMTP = config.SMTP{FromAddress: "noreply@send.example.org"}
+	fake = newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{
+		{Type: "TXT", Name: "brevo1._domainkey.send.example.org", Content: dkim},
+	}
+	p = plan(t, fake.serve(t), cfg)
+	if e, _ := entryAt(p, "_dmarc.example.org"); e.Action != Warn {
+		t.Errorf("the registrable domain's policy: got %s, want warn", e.Action)
+	}
+}
+
+// A policy already at the registrable domain is never replaced: one that
+// rejects covers the hostnames below, a weaker one is a note and they keep
+// their own. A registrable domain the provider does not hold is not read.
+func TestRegistrableDomainPolicyIsNeverReplaced(t *testing.T) {
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{{ID: "dmarc", Type: "TXT", Name: "_dmarc.example.org", Content: "v=DMARC1; p=reject; sp=reject; rua=mailto:r@example.net"}}
+	p := plan(t, fake.serve(t), staged())
+	if e, _ := entryAt(p, "_dmarc.example.org"); e.Action != Present {
+		t.Errorf("a strong policy there: got %s", e.Action)
+	}
+	for _, name := range stagedDMARC {
+		if e, _ := entryAt(p, name); e.Action != Covered {
+			t.Errorf("%s under a strong policy: got %s, want covered", name, e.Action)
+		}
+	}
+
+	fake = newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{{ID: "dmarc", Type: "TXT", Name: "_dmarc.example.org", Content: "v=DMARC1; p=none"}}
+	c := fake.serve(t)
+	p = plan(t, c, staged())
 	shown := &ui.Recorder{}
 	p.Show(shown)
 	if !shown.Has("note", "TXT _dmarc.example.org is not this toolkit's to write") {
-		t.Errorf("no note for the registrable domain's missing policy:\n%s", shown.Lines())
+		t.Errorf("no note for the registrable domain's weak policy:\n%s", shown.Lines())
+	}
+	for _, name := range stagedDMARC {
+		if e, _ := entryAt(p, name); e.Action != Create {
+			t.Errorf("%s under a weak policy: got %s, want create", name, e.Action)
+		}
 	}
 	if err := Execute(context.Background(), c, p, ui.Discard); err != nil {
 		t.Fatal(err)
 	}
 	for _, rec := range fake.posts {
 		if rec.Name == "_dmarc.example.org" {
-			t.Fatalf("wrote the registrable domain's DMARC policy: %+v", rec)
-		}
-	}
-
-	fake = newFake()
-	fake.zones["example.org"] = "zone-1"
-	fake.records["zone-1"] = []cfRecord{{ID: "dmarc", Type: "TXT", Name: "_dmarc.example.org", Content: "v=DMARC1; p=reject; sp=reject"}}
-	for _, e := range plan(t, fake.serve(t), staged()).Entries {
-		if e.Name == "_dmarc.example.org" && e.Action != Present {
-			t.Errorf("a strong policy there: got %s", e.Action)
+			t.Fatalf("wrote over the registrable domain's DMARC policy: %+v", rec)
 		}
 	}
 
 	fake = newFake()
 	fake.zones["staging.example.org"] = "zone-2"
-	for _, e := range plan(t, fake.serve(t), staged()).Entries {
-		if e.Name == "_dmarc.example.org" {
-			t.Errorf("checked a registrable domain the provider does not hold: %+v", e)
+	p = plan(t, fake.serve(t), staged())
+	if e, ok := entryAt(p, "_dmarc.example.org"); ok {
+		t.Errorf("checked a registrable domain the provider does not hold: %+v", e)
+	}
+	for _, name := range stagedDMARC {
+		if e, _ := entryAt(p, name); e.Action != Create {
+			t.Errorf("%s with no registrable domain held: got %s, want create", name, e.Action)
 		}
+	}
+}
+
+// The registrable domain's policy this deployment wrote is a note once a
+// name under it has mail and no policy of its own, and still covers the
+// hostnames below.
+func TestOwnRegistrableDomainPolicyGoverningMailIsANote(t *testing.T) {
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{
+		{ID: "parent", Type: "TXT", Name: "_dmarc.example.org", Content: dmarcLockdown, Comment: comment},
+		{Type: "MX", Name: "shop.example.org", Content: "mx.example.net", Priority: ptr(10)},
+	}
+	p := plan(t, fake.serve(t), staged())
+	e, _ := entryAt(p, "_dmarc.example.org")
+	if e.Action != Warn || !strings.Contains(e.Detail, "shop.example.org") {
+		t.Fatalf("the policy this deployment wrote: got %s (%s), want a warning naming shop.example.org", e.Action, e.Detail)
+	}
+	for _, name := range stagedDMARC {
+		if e, _ := entryAt(p, name); e.Action != Covered {
+			t.Errorf("%s: got %s, want covered", name, e.Action)
+		}
+	}
+}
+
+// A hostname's own policy at a name the registrable domain's covers is a
+// conflict all the same when it is weaker: a receiver reads it first.
+func TestCoveredHostnameWithAWeakPolicyIsAConflict(t *testing.T) {
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{{Type: "TXT", Name: "_dmarc.talk.staging.example.org", Content: "v=DMARC1; p=none"}}
+	p := plan(t, fake.serve(t), staged())
+	if e, _ := entryAt(p, "_dmarc.talk.staging.example.org"); e.Action != Conflict {
+		t.Errorf("got %s, want conflict", e.Action)
+	}
+}
+
+// Once the registrable domain's policy rejects, prune removes the hostnames'
+// own no-mail policies this deployment made, and never the registrable
+// domain's own.
+func TestPruneRemovesHostnamePoliciesTheRegistrableDomainCovers(t *testing.T) {
+	cfg := staged()
+	wants, err := Desired(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{
+		{ID: "parent", Type: "TXT", Name: "_dmarc.example.org", Content: dmarcLockdown, Comment: comment},
+		{ID: "talk", Type: "TXT", Name: "_dmarc.talk.staging.example.org", Content: dmarcLockdown, Comment: comment},
+		{ID: "domain", Type: "TXT", Name: "_dmarc.staging.example.org", Content: dmarcLockdown, Comment: comment},
+		{ID: "spf", Type: "TXT", Name: "talk.staging.example.org", Content: spfLockdown, Comment: comment},
+	}
+	p, err := BuildPrune(context.Background(), fake.serve(t), cfg, wants)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removes := map[string]bool{}
+	for _, e := range p.Removes() {
+		removes[e.ID] = true
+	}
+	if !removes["talk"] || !removes["domain"] || removes["parent"] || removes["spf"] {
+		t.Errorf("removes %v, want talk and domain only", removes)
 	}
 }
 
@@ -627,3 +860,5 @@ func TestPruneRemovesAHostnamesDMARCNothingWants(t *testing.T) {
 		t.Errorf("removes %v, want gone only", removes)
 	}
 }
+
+func ptr(n int) *int { return &n }

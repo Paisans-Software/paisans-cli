@@ -1,7 +1,9 @@
 package dns
 
 import (
+	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -33,12 +35,16 @@ import (
 //     with no policy at a name's own _dmarc applies the registrable
 //     domain's, so when community.domain is the registrable domain this one
 //     record covers every hostname under it.
-//   - Below the registrable domain, the same DMARC at "_dmarc" under every
-//     hostname, since community.domain's policy reaches none of them. A
-//     hostname that is itself a registrable domain gets none: its policy
-//     would govern names the deployment does not run. The registrable domain
-//     above community.domain holds such names too, so its policy is only
-//     checked, and warned about when missing or weaker than reject.
+//   - Below the registrable domain, the same DMARC at "_dmarc" under that
+//     domain, since community.domain's policy reaches none of the names
+//     under it and the registrable domain's reaches every one. That domain
+//     holds names the deployment does not run, so the policy is written only
+//     where there is none and nothing under the domain has mail without a
+//     policy of its own (parentHazards); otherwise it is checked, and warned
+//     about when missing or weaker than reject. Where it does not reject,
+//     every hostname gets the same DMARC at its own "_dmarc", and so does
+//     community.domain. A hostname that is itself a registrable domain gets
+//     none: its policy would govern names the deployment does not run.
 //
 // A name has mail of its own when community.mail_domains lists it, or when an
 // smtp from_address an app sends with is at it. The second is derived, so a
@@ -169,6 +175,12 @@ func mailWants(cfg *config.Config, addresses []Want) []Want {
 		}
 	}
 	dmarc := "_dmarc." + domain
+	// parent is the registrable domain above community.domain, or empty
+	// when community.domain is one.
+	parent := orgDomain(domain)
+	if parent == domain {
+		parent = ""
+	}
 	for _, name := range mailNames {
 		if name != domain {
 			out = append(out, Want{Type: "TXT", Name: "_dmarc." + name, Content: dmarcLockdown, Sources: mail[name], Advisory: true})
@@ -184,12 +196,12 @@ func mailWants(cfg *config.Config, addresses []Want) []Want {
 			continue
 		}
 		if org := orgDomain(name); org != "" && org != name && org != domain {
-			out = append(out, Want{Type: "TXT", Name: "_dmarc." + name, Content: dmarcLockdown, Sources: spf[name]})
+			out = append(out, Want{Type: "TXT", Name: "_dmarc." + name, Content: dmarcLockdown, Sources: spf[name], BelowParent: org == parent})
 		}
 	}
 	source := []string{"community.domain"}
-	if org := orgDomain(domain); org != "" && org != domain {
-		out = append(out, Want{Type: "TXT", Name: "_dmarc." + org, Content: dmarcLockdown, Sources: source, Advisory: true, Parent: true})
+	if parent != "" {
+		out = append(out, Want{Type: "TXT", Name: "_dmarc." + parent, Content: dmarcLockdown, Sources: source, Advisory: true, Parent: true})
 	}
 	if sources, ok := mail[domain]; ok {
 		out = append(out, Want{Type: "TXT", Name: dmarc, Content: dmarcLockdown, Sources: sources, Advisory: true})
@@ -198,9 +210,114 @@ func mailWants(cfg *config.Config, addresses []Want) []Want {
 	out = append(out,
 		Want{Type: "MX", Name: domain, Content: nullMX, Priority: 0, Sources: source},
 		Want{Type: "TXT", Name: "*._domainkey." + domain, Content: dkimLockdown, Sources: source},
-		Want{Type: "TXT", Name: dmarc, Content: dmarcLockdown, Sources: source},
+		Want{Type: "TXT", Name: dmarc, Content: dmarcLockdown, Sources: source, BelowParent: parent != ""},
 	)
 	return out
+}
+
+// hasDMARC reports whether any of records says DMARC.
+func hasDMARC(records []Record) bool {
+	for _, r := range records {
+		if competes(purposeDMARC, r) {
+			return true
+		}
+	}
+	return false
+}
+
+// parentHazards lists what in the registrable domain's zone z, and in every
+// zone delegated from it, has mail that a policy written at the domain would
+// govern: a name with no DMARC policy of its own that receives mail (an MX
+// other than the null MX), names senders in its SPF record, or publishes a
+// DKIM key. own are names that will hold a policy this run creates. A zone
+// delegated to nameservers the provider does not show is a hazard too:
+// nothing says what mail its names have.
+func parentHazards(ctx context.Context, provider Provider, z zone, own map[string]bool) ([]string, error) {
+	var records []Record
+	queue := []zone{z}
+	seen := map[string]bool{z.name: true}
+	var hazards []string
+	for len(queue) > 0 {
+		at := queue[0]
+		queue = queue[1:]
+		list, err := provider.AllRecords(ctx, at.id)
+		if err != nil {
+			return nil, fmt.Errorf("dns: listing zone %s: %w", at.name, err)
+		}
+		for _, r := range list {
+			name := normalise(r.Name)
+			if !strings.EqualFold(r.Type, "NS") || name == at.name || seen[name] {
+				continue
+			}
+			seen[name] = true
+			id, found, err := provider.LookupZone(ctx, name)
+			if err != nil {
+				return nil, fmt.Errorf("dns: looking up zone %s: %w", name, err)
+			}
+			if found {
+				queue = append(queue, zone{id: id, name: name})
+			} else {
+				hazards = append(hazards, fmt.Sprintf("%s, delegated to nameservers %s does not hold", name, provider.Name()))
+			}
+		}
+		records = append(records, list...)
+	}
+
+	policy := map[string]bool{}
+	for name := range own {
+		policy[name] = true
+	}
+	for _, r := range records {
+		name := normalise(r.Name)
+		if strings.HasPrefix(name, "_dmarc.") && competes(purposeDMARC, r) {
+			policy[strings.TrimPrefix(name, "_dmarc.")] = true
+		}
+	}
+	for _, r := range records {
+		name := normalise(r.Name)
+		typ := strings.ToUpper(r.Type)
+		var host, what string
+		switch {
+		case typ == "MX" && !(r.Priority == 0 && isRoot(r.Content)):
+			host, what = name, fmt.Sprintf("an MX record at %s", name)
+		case strings.Contains(name, "._domainkey."):
+			_, host, _ = strings.Cut(name, "._domainkey.")
+			if typ == "CNAME" || typ == "TXT" && tags(txtText(r.Content))["p"] != "" {
+				what = fmt.Sprintf("a DKIM key at %s", name)
+			}
+		case typ == "TXT" && !strings.HasPrefix(name, "_") && competes(purposeSPF, r) && !satisfies(purposeSPF, r):
+			host, what = name, fmt.Sprintf("an SPF record naming senders at %s", name)
+		}
+		if what != "" && !policy[host] {
+			hazards = append(hazards, what)
+		}
+	}
+	sort.Strings(hazards)
+	return slices.Compact(hazards), nil
+}
+
+// parentHeld is the note for a registrable domain with no DMARC policy that
+// dns init does not write one at, because of hazards.
+func parentHeld(w Want, hazards []string) string {
+	return fmt.Sprintf("%s is the registrable domain above community.domain, and has no DMARC policy. A receiver applies its policy to every name under it that has none of its own, and these have mail and no policy of their own, so the policy is whoever runs the domain's to set rather than this toolkit's to write: %s. Without p=reject and sp=reject there, each hostname this deployment publishes carries its own.",
+		strings.TrimPrefix(w.Name, "_dmarc."), strings.Join(hazards, "; "))
+}
+
+// parentGoverns is the note for a registrable domain whose policy this
+// deployment's dns init wrote, and which now governs names with mail.
+func parentGoverns(w Want, hazards []string) string {
+	return fmt.Sprintf("the DMARC policy at %s is the one this deployment's dns init wrote, when nothing under %s had mail. These have mail and no policy of their own, so a receiver rejects their mail under it: %s. Give each its own DMARC policy, or delete this one by hand and run dns init again, which then gives each hostname this deployment publishes its own.",
+		w.Name, strings.TrimPrefix(w.Name, "_dmarc."), strings.Join(hazards, "; "))
+}
+
+// satisfiesAll reports whether every DMARC policy among records rejects.
+func satisfiesAll(records []Record) bool {
+	for _, r := range records {
+		if competes(purposeDMARC, r) && !satisfies(purposeDMARC, r) {
+			return false
+		}
+	}
+	return true
 }
 
 // orgDomain is a name's registrable domain under the public suffix list,
