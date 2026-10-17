@@ -811,7 +811,8 @@ and partial plans mark nothing and keep every entry outside what they write.
 again then, not the one `Build` read. A staged command (`site add`,
 `site remove`, `storage add`) plans every stage before the first runs, so two
 scoped plans for one site are built from the same manifest; each write keeps
-what the earlier one recorded, and only its own files, pins and images change.
+what the earlier one recorded, and only its own files, pins and images change,
+with the architecture when `Build` was given one.
 `TestScopedAppliesPlannedTogetherKeepEachOthersRecord` covers it, and each
 staged command has a test that its sites' manifests match their files.
 
