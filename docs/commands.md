@@ -840,8 +840,13 @@ paisans site admit --site home-a --ssh owner@home-a.example.org --execute   # fr
   userland proxy is off. A port stays reachable when it is sshd's, the
   deployment's own (WireGuard, and 80 and 443 with `--public-ports`), one
   ufw's `before.rules` let in (DHCP, mDNS, SSDP), or one a rule of yours
-  allows, `ufw allow <port>[/<proto>]`, a list or a range, or `ufw allow to
-  any port <port> [proto <proto>]`, added while ufw is inactive or not.
+  allows, added while ufw is inactive or not. Your rules are read as ufw
+  records them in `/etc/ufw/user.rules` and `user6.rules`, so an
+  application profile or a service name counts with its ports: an inbound
+  allow or limit from any source, of a port, a list or a range, on any
+  interface, to any address or the one the listener is bound to. Each file
+  counts for its own family: a listener on IPv6 needs a rule in
+  `user6.rules`.
   Every other port enabling ufw blocks, and admit refuses before any change,
   listing each with what serves it and printing one `sudo ufw allow
   <port>/<proto>` line per port: run those whose service must stay

@@ -252,6 +252,19 @@ func loopback(addr string) bool {
 	return err == nil && a.IsLoopback()
 }
 
+// families are the address families the socket takes: 4 and 6 for *,
+// which ss prints for a socket of both, 6 for an IPv6 address, and 4 for
+// an IPv4 one, mapped into IPv6 or not.
+func (s socket) families() []int {
+	switch {
+	case strings.HasPrefix(s.Local, "*"):
+		return []int{4, 6}
+	case strings.HasPrefix(s.Local, "[") && !strings.Contains(s.Address, "."):
+		return []int{6}
+	}
+	return []int{4}
+}
+
 // v6 reports whether the socket takes IPv6: bound to an IPv6 address, or
 // to *, which ss prints for a socket of both families.
 func (s socket) v6() bool {

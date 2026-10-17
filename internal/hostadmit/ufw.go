@@ -3,6 +3,7 @@ package hostadmit
 import (
 	"cmp"
 	"fmt"
+	"net/netip"
 	"regexp"
 	"slices"
 	"strconv"
@@ -59,13 +60,20 @@ const ufwBeforeMarker = "paisans site admit: before enabling ufw"
 // ufw blocks whatever of it no rule allows (exposure). ufw's rules are
 // read with `ufw show added`, which lists them while ufw is inactive, and
 // IPV6 as ufw reads it (ipv6Read), without which ufw drops all IPv6 once
-// enabled. Whatever it cannot read it says so.
+// enabled. What the owner's rules let in is read from ufw's own record of
+// them, the tuple lines of /etc/ufw/user.rules and user6.rules, one file
+// per address family, which hold an application profile's or a service's
+// ports resolved (ufwTuple). Whatever it cannot read it says so.
 var ufwBeforeProbe = `# ` + ufwBeforeMarker + `
 ` + listenProbe("") + `
 for u in ssh.socket sshd.socket; do
   if [ "$(systemctl is-active "$u" 2>/dev/null)" = active ]; then systemctl show -p Listen --value "$u" 2>/dev/null | sed 's/^/socket /'; fi
 done
 if added=$(ufw show added 2>/dev/null); then printf '%s\n' "$added" | sed -n 's/^ufw /rule /p'; else echo 'unread rules (ufw show added)'; fi
+for fam in 4 6; do
+  f=/etc/ufw/user.rules; [ "$fam" = 6 ] && f=/etc/ufw/user6.rules
+  if [ -e "$f" ]; then if out=$(cat "$f" 2>/dev/null); then printf '%s\n' "$out" | sed -n "s/^### tuple ### /tuple$fam /p"; else echo "unread rules ($f)"; fi; fi
+done
 ` + ipv6Read("/etc/default/ufw", "/etc/ufw/ufw.conf") + natProbe + `
 if command -v systemd-run >/dev/null 2>&1; then echo 'systemd-run present'; else echo 'systemd-run absent'; fi
 echo "fallback $(systemctl show -p LoadState --value ` + FallbackUnit + `.timer 2>/dev/null) $(systemctl show -p LoadState --value ` + FallbackUnit + `.service 2>/dev/null)"
@@ -87,6 +95,7 @@ type ufwBefore struct {
 	// says what answers from off the host.
 	exposureUnread string
 	rules          []string
+	tuples         []ufwTuple
 	denies         []string
 	ipv6           string
 	systemdRun     bool
@@ -148,6 +157,10 @@ func readUFWBefore(p *planner) (ufwBefore, error) {
 		case "socket":
 			if f := strings.Fields(rest); len(f) == 2 && f[1] == "(Stream)" {
 				add(f[0])
+			}
+		case "tuple4", "tuple6":
+			if t, ok := readTuple(kind, rest); ok {
+				b.tuples = append(b.tuples, t)
 			}
 		case "rule":
 			b.rules = append(b.rules, rest)
@@ -458,6 +471,8 @@ type answering struct {
 	span
 	via, v6 []string
 	nat     bool
+	// socks are the listeners that answer on it.
+	socks []socket
 }
 
 func (a answering) key() string {
@@ -477,14 +492,14 @@ type kept struct{ key, via, why string }
 // deployment's own, run as its user or in its subordinate range, answer
 // nothing here. What stays reachable is sshd's ports, which admit allows,
 // the deployment's own allows, what ufw's before.rules let in, and what a
-// rule of the owner's allows (allowedBy), added while ufw is inactive or
+// rule of the owner's allows (ufwBefore.allows), added while ufw is inactive or
 // not.
 func (p *planner) exposure(b ufwBefore) ([]kept, []Blocked) {
 	var all []*answering
 	at := map[string]*answering{}
-	add := func(s span, via string, nat, v6 bool) {
+	add := func(s span, via string, nat, v6 bool) *answering {
 		if s.proto != "tcp" && s.proto != "udp" {
-			return
+			return nil
 		}
 		s.addr = ""
 		a := &answering{span: s}
@@ -501,6 +516,7 @@ func (p *planner) exposure(b ufwBefore) ([]kept, []Blocked) {
 			a.v6 = append(a.v6, via)
 		}
 		a.nat = a.nat || nat
+		return a
 	}
 	var unread []Blocked
 	unreadable := func(what string) {
@@ -516,7 +532,9 @@ func (p *planner) exposure(b ufwBefore) ([]kept, []Blocked) {
 			if !ok || sock.loopback() || p.ownUID(sock.UID) {
 				continue
 			}
-			add(span{proto: sock.Proto, lo: sock.Port, hi: sock.Port}, sock.what(), false, sock.v6())
+			if a := add(span{proto: sock.Proto, lo: sock.Port, hi: sock.Port}, sock.what(), false, sock.v6()); a != nil {
+				a.socks = append(a.socks, sock)
+			}
 		case "container":
 			f := strings.Split(rest, "\t")
 			if len(f) < 2 {
@@ -589,8 +607,8 @@ func (p *planner) exposure(b ufwBefore) ([]kept, []Blocked) {
 			}
 		}
 		if why == "" {
-			if rule := allowedBy(b.rules, a.proto, a.lo, a.hi); rule != "" {
-				why = "allowed by `ufw " + ui.Visible(rule) + "`"
+			if t, ok := b.allows(a, p.d.Interface()); ok {
+				why = "allowed by your rule `ufw " + t.String() + "`"
 			}
 		}
 		if why != "" {
@@ -605,54 +623,145 @@ func (p *planner) exposure(b ufwBefore) ([]kept, []Blocked) {
 	return keep, append(blocked, unread...)
 }
 
-// allowedBy is the rule of rules, as `ufw show added` prints them less
-// the leading ufw, that lets proto's ports lo to hi in from anywhere, ""
-// for none: an allow or a limit of a port, a list or a range holding
-// them, with that protocol or none, written `allow [in] [log] <ports>
-// [/<proto>]` or `allow [in] [log] [from any] to any port <ports> [proto
-// <proto>]`. Any other form, narrowed to a source, an interface or an
-// address, or naming an application profile or a service, keeps nothing
-// reachable from everywhere as admit reads it.
-func allowedBy(rules []string, proto string, lo, hi int) string {
-	for _, r := range rules {
-		body := r
-		if m := ufwRule.FindStringSubmatch(r); m != nil {
-			body = m[1]
-		}
-		f := strings.Fields(body)
-		if len(f) == 0 || f[0] != "allow" && f[0] != "limit" {
-			continue
-		}
-		f = f[1:]
-		if len(f) > 0 && f[0] == "in" {
-			f = f[1:]
-		}
-		if len(f) > 0 && (f[0] == "log" || f[0] == "log-all") {
-			f = f[1:]
-		}
-		if len(f) >= 2 && f[0] == "from" && f[1] == "any" {
-			f = f[2:]
-		}
-		var ports, rp string
-		switch {
-		case len(f) == 1:
-			ports, rp, _ = strings.Cut(f[0], "/")
-		case (len(f) == 4 || len(f) == 6 && f[4] == "proto") && f[0] == "to" && f[1] == "any" && f[2] == "port":
-			ports = f[3]
-			if len(f) == 6 {
-				rp = f[5]
+// allows is the owner's rule that keeps a reachable once ufw is on, false
+// for none. Each listener needs one for every family it takes: user.rules
+// for IPv4, user6.rules for IPv6, which ufw applies only with IPV6=yes (a
+// listener on IPv6 is listed apart then). What NAT receives is read as
+// IPv4 to any address.
+func (b ufwBefore) allows(a *answering, mesh string) (ufwTuple, bool) {
+	if len(a.socks) == 0 {
+		return letIn(b.tuples, 4, a.proto, a.lo, a.hi, "", mesh)
+	}
+	var first ufwTuple
+	for i, s := range a.socks {
+		for _, fam := range s.families() {
+			if fam == 6 && b.ipv6 != "yes" {
+				continue
 			}
-		default:
-			continue
-		}
-		if rp != "" && rp != proto {
-			continue
-		}
-		if portsHold(ports, lo, hi) {
-			return r
+			t, ok := letIn(b.tuples, fam, a.proto, a.lo, a.hi, s.Address, mesh)
+			if !ok {
+				return ufwTuple{}, false
+			}
+			if i == 0 && first.action == "" {
+				first = t
+			}
 		}
 	}
-	return ""
+	return first, first.action != ""
+}
+
+// ufwTuple is one rule as ufw records it in /etc/ufw/user.rules (fam 4)
+// or user6.rules (fam 6), a `### tuple ###` line: <action> <proto>
+// <dport> <dst> <sport> <src> [<dapp> <sapp>] <direction>[_<iface>]
+// [comment=<hex>]. The action carries _log or _log-all for a logged rule
+// and route: for a routed one; an application profile's name has its
+// spaces as %20, and its ports are resolved in dport, as a service name's
+// are.
+type ufwTuple struct {
+	fam                                         int
+	action, proto, dport, dst, sport, src, dapp string
+	direction, iface                            string
+}
+
+// readTuple reads one tuple line, without its kind.
+func readTuple(kind, rest string) (ufwTuple, bool) {
+	f := strings.Fields(rest)
+	if n := len(f); n > 0 && strings.HasPrefix(f[n-1], "comment=") {
+		f = f[:n-1]
+	}
+	t := ufwTuple{fam: 4}
+	if kind == "tuple6" {
+		t.fam = 6
+	}
+	switch len(f) {
+	case 7:
+	case 9:
+		if f[6] != "-" {
+			t.dapp = strings.ReplaceAll(f[6], "%20", " ")
+		}
+		f = append(f[:6], f[8])
+	default:
+		return t, false
+	}
+	t.action, t.proto, t.dport, t.dst, t.sport, t.src = f[0], f[1], f[2], f[3], f[4], f[5]
+	t.direction, t.iface, _ = strings.Cut(f[6], "_")
+	return t, true
+}
+
+// anyAddr reports whether a tuple's address is any address of its family.
+func anyAddr(a string) bool { return a == "0.0.0.0/0" || a == "::/0" || a == "any" }
+
+// lets reports whether t lets proto's ports lo to hi in from anywhere to
+// addr, a bound address as hostcheck.BindAddress normalises one ("" for
+// every address): an allow or a limit, logged or not, inbound, from any
+// source address and port, on any interface but mesh (the deployment's
+// own), to any address or to one holding addr, or naming one when addr is
+// every address.
+func (t ufwTuple) lets(proto string, lo, hi int, addr, mesh string) bool {
+	action, _, _ := strings.Cut(t.action, "_")
+	if action != "allow" && action != "limit" || t.direction != "in" || strings.Contains(t.iface, "!") || t.iface == mesh {
+		return false
+	}
+	if t.sport != "any" || !anyAddr(t.src) || t.proto != "any" && t.proto != proto {
+		return false
+	}
+	if t.dport != "any" && !portsHold(t.dport, lo, hi) {
+		return false
+	}
+	if anyAddr(t.dst) || addr == "" {
+		return true
+	}
+	ip, err := netip.ParseAddr(addr)
+	if err != nil {
+		return false
+	}
+	if pre, err := netip.ParsePrefix(t.dst); err == nil {
+		return pre.Contains(ip)
+	}
+	dst, err := netip.ParseAddr(t.dst)
+	return err == nil && dst == ip
+}
+
+// String is t as `ufw allow` would name it.
+func (t ufwTuple) String() string {
+	action, _, _ := strings.Cut(t.action, "_")
+	var b strings.Builder
+	b.WriteString(action)
+	if t.iface != "" {
+		b.WriteString(" in on " + t.iface)
+	}
+	switch {
+	case t.dapp != "":
+		b.WriteString(" '" + t.dapp + "'")
+	case t.iface == "" && anyAddr(t.dst):
+		b.WriteString(" " + t.dport)
+		if t.proto != "any" {
+			b.WriteString("/" + t.proto)
+		}
+	default:
+		if !anyAddr(t.dst) {
+			b.WriteString(" to " + t.dst)
+		}
+		b.WriteString(" port " + t.dport)
+		if t.proto != "any" {
+			b.WriteString(" proto " + t.proto)
+		}
+	}
+	if t.fam == 6 {
+		b.WriteString(" (IPv6)")
+	}
+	return ui.Visible(b.String())
+}
+
+// letIn is the first of tuples of family fam that lets proto's ports lo to
+// hi in to addr (ufwTuple.lets), false for none.
+func letIn(tuples []ufwTuple, fam int, proto string, lo, hi int, addr, mesh string) (ufwTuple, bool) {
+	for _, t := range tuples {
+		if t.fam == fam && t.lets(proto, lo, hi, addr, mesh) {
+			return t, true
+		}
+	}
+	return ufwTuple{}, false
 }
 
 // portsHold reports whether ports, a list of ports and ranges as ufw

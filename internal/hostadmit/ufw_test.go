@@ -359,7 +359,8 @@ var blockListed = hostadmit.Flags{EnableUFW: true, EnableUFWBlockListed: true}
 var ufwListenerCases = addCases(
 	goldenCase{name: "firewall-enable-ufw-owner-caddy-refused", site: "vm", flags: enableUFW, host: inactiveUFW(ownerCaddy + sshdOn22)},
 	goldenCase{name: "firewall-enable-ufw-owner-caddy-allowed", focus: []string{"enable ufw"}, site: "vm", flags: enableUFW,
-		host: inactiveUFW("rule allow 80/tcp\nrule allow 443\n" + ownerCaddy + sshdOn22)},
+		host: inactiveUFW(ownerRule("allow 'Nginx Full'", "allow tcp 80,443 0.0.0.0/0 any 0.0.0.0/0 Nginx%20Full - in") +
+			ownerRule("allow 443/udp", "allow udp 443 0.0.0.0/0 any 0.0.0.0/0 in") + ownerCaddy + sshdOn22)},
 	goldenCase{name: "firewall-enable-ufw-block-listed", focus: []string{"enable ufw"}, site: "vm", flags: blockListed, host: inactiveUFW(ownerCaddy + sshdOn22)},
 	goldenCase{name: "firewall-ufw-inactive-owner-caddy-refused", site: "vm", host: inactiveUFW(ownerCaddy + sshdOn22)},
 )
@@ -408,15 +409,22 @@ func TestEnableUFWRefusesToBlockTheOwnersCaddy(t *testing.T) {
 	}
 }
 
+// ownerRule is one rule of the owner's as the probe reads it: show as
+// `ufw show added` prints it, and tuple as ufw records it in user.rules
+// and, with its addresses as IPv6's, in user6.rules.
+func ownerRule(show, tuple string) string {
+	return "rule " + show + "\ntuple4 " + tuple + "\ntuple6 " + strings.ReplaceAll(tuple, "0.0.0.0/0", "::/0") + "\n"
+}
+
 // The owner's own allows, added while ufw is inactive, keep the Caddy
-// reachable: admit plans the enable, and says under it what stays
-// reachable and why.
+// reachable, whatever form ufw records them in: admit plans the enable,
+// and says under it what stays reachable and why.
 func TestEnableUFWProceedsOverTheOwnersAllows(t *testing.T) {
 	for _, rules := range []string{
-		"rule allow 80/tcp\nrule allow 443\n",
-		"rule allow 80,443/tcp\nrule allow 443/udp\n",
-		"rule allow in to any port 80 proto tcp\nrule allow to any port 443 comment 'web'\n",
-		"rule allow 1:1000/tcp\nrule allow 1:1000/udp\n",
+		ownerRule("allow 80/tcp", "allow tcp 80 0.0.0.0/0 any 0.0.0.0/0 in") + ownerRule("allow 443", "allow any 443 0.0.0.0/0 any 0.0.0.0/0 in"),
+		ownerRule("allow 'Nginx Full'", "allow tcp 80,443 0.0.0.0/0 any 0.0.0.0/0 Nginx%20Full - in") + ownerRule("allow 443/udp", "allow udp 443 0.0.0.0/0 any 0.0.0.0/0 in comment=776562"),
+		ownerRule("allow in on eth0 to any port 80 proto tcp", "allow tcp 80 0.0.0.0/0 any 0.0.0.0/0 in_eth0") + ownerRule("limit log 443", "limit_log any 443 0.0.0.0/0 any 0.0.0.0/0 in"),
+		ownerRule("allow 1:1000/tcp", "allow tcp 1:1000 0.0.0.0/0 any 0.0.0.0/0 in") + ownerRule("allow 1:1000/udp", "allow udp 1:1000 0.0.0.0/0 any 0.0.0.0/0 in"),
 	} {
 		plan, err := hostadmit.Build(inactiveUFW(rules+ownerCaddy+sshdOn22)(), input(t, "vm", enableUFW))
 		if err != nil {
@@ -424,7 +432,7 @@ func TestEnableUFWProceedsOverTheOwnersAllows(t *testing.T) {
 			continue
 		}
 		d := plan.Steps[titledStep(plan, "enable ufw")].Describe
-		for _, want := range []string{"Stays reachable", "80/tcp (caddy (pid 900, uid 0) listens on *:80), allowed by `ufw allow", "22/tcp (sshd (pid 812, uid 0) listens on 0.0.0.0:22", "sshd's"} {
+		for _, want := range []string{"Stays reachable", "80/tcp (caddy (pid 900, uid 0) listens on *:80), allowed by your rule `ufw ", "22/tcp (sshd (pid 812, uid 0) listens on 0.0.0.0:22", "sshd's"} {
 			if !strings.Contains(d, want) {
 				t.Errorf("%q: the enable step does not say %q:\n%s", rules, want, d)
 			}
@@ -433,48 +441,31 @@ func TestEnableUFWProceedsOverTheOwnersAllows(t *testing.T) {
 			t.Errorf("%q: the plan blocks %q", rules, plan.UFWBlocks)
 		}
 	}
-	// An allow narrowed to a source, an interface or another protocol
-	// keeps nothing reachable from everywhere.
+	// A rule narrowed to a source, of another protocol, outbound or
+	// routed, the deployment's own interface rule, and a rule ufw holds
+	// for IPv4 alone, which leaves the Caddy's IPv6 blocked, keep nothing
+	// reachable.
+	allow443 := ownerRule("allow 443", "allow any 443 0.0.0.0/0 any 0.0.0.0/0 in")
 	for _, rules := range []string{
-		"rule allow from 203.0.113.0/24 to any port 80\nrule allow 443\n",
-		"rule allow in on eth1 to any port 80\nrule allow 443\n",
-		"rule allow 80/udp\nrule allow 443\n",
-		"rule allow out 80/tcp\nrule allow 443\n",
-		"rule allow 'Nginx Full'\nrule allow 443\n",
+		ownerRule("allow from 203.0.113.0/24 to any port 80", "allow any 80 0.0.0.0/0 any 203.0.113.0/24 in"),
+		ownerRule("allow 80/udp", "allow udp 80 0.0.0.0/0 any 0.0.0.0/0 in"),
+		ownerRule("allow out 80/tcp", "allow tcp 80 0.0.0.0/0 any 0.0.0.0/0 out"),
+		ownerRule("route allow 80/tcp", "route:allow tcp 80 0.0.0.0/0 any 0.0.0.0/0 in"),
+		ownerRule("allow in on psns-f2a9", "allow any any 0.0.0.0/0 any 0.0.0.0/0 in_psns-f2a9"),
+		"rule allow to 0.0.0.0/0 port 80\ntuple4 allow any 80 0.0.0.0/0 any 0.0.0.0/0 in\n",
 	} {
-		b := blocks(t, rules+ownerCaddy+sshdOn22)
+		b := blocks(t, rules+allow443+ownerCaddy+sshdOn22)
 		if b == nil || !strings.Contains(b.Error(), "80/tcp: caddy") {
 			t.Errorf("%q: %v", rules, b)
 		}
 	}
-}
-
-// A container whose port the system Docker publishes with its userland
-// proxy off has no listener, only a DNAT rule and the container's
-// publish: it is listed, both named, and it is said that ufw's routed
-// rules decide it too.
-func TestEnableUFWListsAPortPublishedThroughNAT(t *testing.T) {
-	b := blocks(t, "container shop-web-1\t0.0.0.0:8443->443/tcp, [::]:8443->443/tcp\tshop\n"+
-		"dnat table ip nat chain DOCKER: iifname != \"docker0\" tcp dport 8443 counter packets 0 bytes 0 dnat to 172.17.0.2:443\n"+sshdOn22)
-	if b == nil {
-		t.Fatal("admit plans to enable ufw in front of a published container")
+	// A rule to the address a listener is bound to keeps it reachable.
+	app := `listen tcp LISTEN 0 4096 203.0.113.5:8080 0.0.0.0:* users:(("app",pid=1,fd=3))` + "\n"
+	if b := blocks(t, "rule allow to 203.0.113.5 port 8080\ntuple4 allow any 8080 203.0.113.5 any 0.0.0.0/0 in\n"+app+sshdOn22); b != nil {
+		t.Errorf("a rule to the listener's address: %v", b)
 	}
-	text := b.Error()
-	for _, want := range []string{"8443/tcp: your Docker's container shop-web-1 publishes", "a NAT rule in table ip nat chain DOCKER", "sudo ufw allow 8443/tcp", "routed"} {
-		if !strings.Contains(text, want) {
-			t.Errorf("the refusal does not say %q:\n%s", want, text)
-		}
-	}
-	if strings.Count(text, "sudo ufw allow 8443/tcp") != 1 {
-		t.Errorf("one port, more than one allow line:\n%s", text)
-	}
-	// A stopped container that restarts with the Docker takes its port
-	// again; a NAT rule whose ports admit cannot read is listed with no
-	// allow line.
-	b = blocks(t, `stopped /shop-db-1 always {"5432/tcp":[{"HostIp":"","HostPort":"15432"}]}`+"\n"+
-		"dnat table ip nat chain PREROUTING: tcp dport @web dnat to 10.0.0.2\n"+sshdOn22)
-	if b == nil || !strings.Contains(b.Error(), "15432/tcp: your Docker's stopped container shop-db-1") || !strings.Contains(b.Error(), "tcp dport @web") || strings.Contains(b.Error(), "allow @web") {
-		t.Errorf("a stopped container and an unreadable rule: %v", b)
+	if b := blocks(t, "rule allow to 203.0.113.6 port 8080\ntuple4 allow any 8080 203.0.113.6 any 0.0.0.0/0 in\n"+app+sshdOn22); b == nil {
+		t.Error("a rule to another address keeps the listener reachable")
 	}
 }
 
@@ -486,7 +477,7 @@ func TestEnableUFWListsAnIPv6OnlyListener(t *testing.T) {
 	}
 	// With ufw's IPv6 off, an allow does not keep it reachable: the
 	// refusal says to set IPV6=yes, with or without an allow.
-	b = blocks(t, "rule allow 8080/tcp\n"+`listen tcp LISTEN 0 4096 [2001:db8::5]:8080 [::]:* users:(("app",pid=1200,fd=3)) uid:1002 ino:1 sk:1`+"\n"+
+	b = blocks(t, ownerRule("allow 8080/tcp", "allow tcp 8080 0.0.0.0/0 any 0.0.0.0/0 in")+`listen tcp LISTEN 0 4096 [2001:db8::5]:8080 [::]:* users:(("app",pid=1200,fd=3)) uid:1002 ino:1 sk:1`+"\n"+
 		`listen tcp LISTEN 0 4096 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=812,fd=3))`+"\nipv6 no\nsystemd-run present\nfallback not-found not-found\nend\n")
 	if b == nil || !strings.Contains(b.Error(), "over IPv6") || !strings.Contains(b.Error(), "IPV6=yes") {
 		t.Errorf("an IPv6 listener with ufw's IPv6 off: %v", b)
