@@ -170,59 +170,17 @@ func BuildPrune(ctx context.Context, provider Provider, cfg *config.Config, want
 		rules.vouched[normalise(n)] = true
 	}
 	cache := map[string]zone{}
-	for _, w := range wants {
-		if !w.Parent {
-			rules.names = append(rules.names, w.Name)
-			continue
-		}
-		// A registrable domain the provider does not hold has no record of
-		// this deployment's to consider.
-		_, err := FindZone(ctx, provider, w.Name, cache)
-		if errors.Is(err, errNoZone) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
+	parent, rest := splitParent(wants)
+	for _, w := range rest {
 		rules.names = append(rules.names, w.Name)
 	}
-	// A no-mail DMARC policy whose name a rejecting policy covers is not
-	// wanted. The covering policy is judged as dns init judges it, without
-	// any record of this deployment's this prune deletes, since one
-	// covering only until it is deleted covers nothing.
-	covering := map[string][]Record{}
-	held := map[string][]Record{}
-	for _, w := range wants {
-		if w.CoveredBy == "" {
-			continue
-		}
-		kept, ok := covering[w.CoveredBy]
-		if !ok {
-			z, err := FindZone(ctx, provider, w.CoveredBy, cache)
-			if err != nil && !errors.Is(err, errNoZone) {
-				return nil, err
-			}
-			if err == nil {
-				records, err := provider.Records(ctx, z.id, w.CoveredBy)
-				if err != nil {
-					return nil, err
-				}
-				for _, r := range records {
-					if r.Comment == RecordComment(cfg.Deployment()) && isLockdown(r) && rules.wanted["TXT "+w.CoveredBy] == nil {
-						continue
-					}
-					kept = append(kept, r)
-				}
-			}
-			covering[w.CoveredBy] = kept
-		}
-		holds, err := coverHolds(ctx, provider, cache, held, w.Name, w.CoveredBy, kept)
-		if err != nil {
-			return nil, err
-		}
-		if holds {
-			delete(rules.wanted, w.Type+" "+w.Name)
-		}
+	if _, held, err := heldParent(ctx, provider, parent, cache); err != nil {
+		return nil, err
+	} else if held {
+		rules.names = append(rules.names, parent.Name)
+	}
+	if err := dropCovered(ctx, provider, RecordComment(cfg.Deployment()), wants, rules.wanted, cache); err != nil {
+		return nil, err
 	}
 	for _, name := range cfg.SiteNames() {
 		for key, ip := range siteAddresses(cfg, name) {
@@ -318,10 +276,9 @@ func siteRemovalRules(before *config.Config, site string, after *config.Config) 
 	// The registrable domain's policy is no address record's name, and its
 	// zone need not be the provider's.
 	if wants, err := Desired(before); err == nil {
-		for _, w := range wants {
-			if !w.Parent {
-				rules.names = append(rules.names, w.Name)
-			}
+		_, rest := splitParent(wants)
+		for _, w := range rest {
+			rules.names = append(rules.names, w.Name)
 		}
 	}
 	wants, err := Desired(after)

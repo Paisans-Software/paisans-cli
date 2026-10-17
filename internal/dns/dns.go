@@ -497,12 +497,8 @@ func Build(ctx context.Context, provider Provider, d deployment.Deployment, want
 		wantedTypes[w.Name][w.Type] = true
 	}
 	existing := map[string][]Record{}
-	var parent *Want
-	for _, w := range wants {
-		if w.Parent {
-			parent = &w
-			continue
-		}
+	parent, rest := splitParent(wants)
+	for _, w := range rest {
 		z, err := FindZone(ctx, provider, w.Name, zones)
 		if err != nil {
 			return nil, err
@@ -560,192 +556,13 @@ func Build(ctx context.Context, provider Provider, d deployment.Deployment, want
 		}
 		plan.Entries = append(plan.Entries, Entry{Want: w, Zone: z.name, zoneID: z.id, Action: action, Detail: detail, held: records})
 	}
-	if parent != nil {
-		if err := plan.addParent(ctx, provider, *parent, zones, existing); err != nil {
-			return nil, err
-		}
+	if err := plan.addParent(ctx, provider, parent, zones, existing); err != nil {
+		return nil, err
 	}
 	if err := plan.cover(ctx, provider, zones, existing); err != nil {
 		return nil, err
 	}
 	return plan, nil
-}
-
-// cover makes each no-mail DMARC policy that would be created Covered where
-// the policy a receiver reads in its place is already there and rejects. One
-// this plan creates covers nothing yet: until it reads back, nothing says
-// the provider let it be written, and dns prune removes the policies it
-// covers once it does.
-func (p *Plan) cover(ctx context.Context, provider Provider, zones map[string]zone, existing map[string][]Record) error {
-	covering := map[string]Entry{}
-	for _, e := range p.Entries {
-		if e.Type == "TXT" && wantPurpose(e.Want) == purposeDMARC {
-			covering[e.Name] = e
-		}
-	}
-	for i, e := range p.Entries {
-		if e.CoveredBy == "" || e.Action != Create {
-			continue
-		}
-		c, ok := covering[e.CoveredBy]
-		if !ok || c.Action == Create || c.Action == Conflict {
-			continue
-		}
-		holds, err := coverHolds(ctx, provider, zones, existing, e.Name, e.CoveredBy, c.held)
-		if err != nil {
-			return err
-		}
-		if holds {
-			p.Entries[i].Action, p.Entries[i].Detail = Covered, "covered by the policy at "+e.CoveredBy
-		}
-	}
-	return nil
-}
-
-// coverHolds reports whether covering, the records at coveredBy, cover the
-// no-mail DMARC policy at name: they are one policy that rejects, and no
-// name between holds a policy that does not. A receiver following RFC 7489
-// reads coveredBy for a name with no policy of its own; one following
-// DMARCbis walks up from the name and reads the first policy it finds, so a
-// weaker one between would win. records caches the records at each
-// "_dmarc" name read, and zones each zone found.
-func coverHolds(ctx context.Context, provider Provider, zones map[string]zone, records map[string][]Record, name, coveredBy string, covering []Record) (bool, error) {
-	if !oneRejecting(covering) {
-		return false, nil
-	}
-	org := strings.TrimPrefix(coveredBy, "_dmarc.")
-	host := strings.TrimPrefix(name, "_dmarc.")
-	for _, a, ok := strings.Cut(host, "."); ok && a != org && strings.HasSuffix(a, "."+org); _, a, ok = strings.Cut(a, ".") {
-		at, read := records["_dmarc."+a]
-		if !read {
-			z, err := FindZone(ctx, provider, "_dmarc."+a, zones)
-			if err != nil && !errors.Is(err, errNoZone) {
-				return false, err
-			}
-			if err == nil {
-				if at, err = provider.Records(ctx, z.id, "_dmarc."+a); err != nil {
-					return false, err
-				}
-			}
-			records["_dmarc."+a] = at
-		}
-		if hasDMARC(at) && !oneRejecting(at) {
-			return false, nil
-		}
-	}
-	return true, nil
-}
-
-// addParent plans the registrable domain's DMARC policy, after every other
-// entry, since whether it can be written depends on which names this plan
-// gives a policy of their own.
-func (p *Plan) addParent(ctx context.Context, provider Provider, w Want, zones map[string]zone, existing map[string][]Record) error {
-	z, err := FindZone(ctx, provider, w.Name, zones)
-	if errors.Is(err, errNoZone) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	records, err := provider.Records(ctx, z.id, w.Name)
-	if err != nil {
-		return err
-	}
-	existing[w.Name] = records
-	action, detail := classify(w, records, nil)
-	_, ours := ownNoMail(w, records, p.comment)
-	switch {
-	case action == Warn && noPolicy(records):
-		// The whole zone is read only before the policy is written.
-		hazards, err := parentHazards(ctx, provider, z, w, p.ownPolicies())
-		if err != nil {
-			return err
-		}
-		if len(hazards) == 0 {
-			w.Advisory = false
-			action, detail = Create, ""
-		} else {
-			detail = parentHeld(w, hazards)
-		}
-	case ours && action == Present:
-		// The policy this deployment wrote must not stand over mail it
-		// knows of: a sender the configuration names, and mail at the
-		// domain itself.
-		governed, err := p.governed(ctx, provider, z, w, zones, existing)
-		if err != nil {
-			return err
-		}
-		if len(governed) > 0 {
-			action, detail = Conflict, parentGoverns(w, governed)
-		}
-	}
-	p.Entries = append(p.Entries, Entry{Want: w, Zone: z.name, zoneID: z.id, Action: action, Detail: detail, held: records})
-	sort.SliceStable(p.Entries, func(i, j int) bool {
-		a, b := p.Entries[i], p.Entries[j]
-		return a.Name < b.Name || a.Name == b.Name && a.Type < b.Type
-	})
-	return nil
-}
-
-// governed lists the mail the registrable domain's policy w, this
-// deployment's own, governs that dns init knows of without reading the
-// zone: each of w.Senders with no policy of its own, and an MX other than
-// the null MX or an SPF record naming a sender at the domain itself.
-func (p *Plan) governed(ctx context.Context, provider Provider, z zone, w Want, zones map[string]zone, existing map[string][]Record) ([]string, error) {
-	read := func(name string) ([]Record, error) {
-		if records, ok := existing[name]; ok {
-			return records, nil
-		}
-		nz, err := FindZone(ctx, provider, name, zones)
-		if errors.Is(err, errNoZone) {
-			return nil, nil
-		}
-		if err != nil {
-			return nil, err
-		}
-		records, err := provider.Records(ctx, nz.id, name)
-		existing[name] = records
-		return records, err
-	}
-	var out []string
-	own := p.ownPolicies()
-	for _, s := range w.Senders {
-		records, err := read("_dmarc." + s)
-		if err != nil {
-			return nil, err
-		}
-		if !own[s] && noPolicy(records) {
-			out = append(out, fmt.Sprintf("%s, a sender this configuration names", s))
-		}
-	}
-	org := strings.TrimPrefix(w.Name, "_dmarc.")
-	records, err := read(org)
-	if err != nil {
-		return nil, err
-	}
-	for _, r := range records {
-		switch {
-		case strings.EqualFold(r.Type, "MX") && !(r.Priority == 0 && isRoot(r.Content)):
-			out = append(out, fmt.Sprintf("an MX record at %s", org))
-		case strings.EqualFold(r.Type, "TXT") && competes(purposeSPF, r) && !satisfies(purposeSPF, r):
-			out = append(out, fmt.Sprintf("an SPF record naming senders at %s", org))
-		}
-	}
-	return out, nil
-}
-
-// ownPolicies are the names that hold a DMARC policy of their own once this
-// plan is executed, from what it creates: a receiver reads a name's own
-// policy before the registrable domain's. A policy the registrable domain's
-// would cover is not one: written there, that one is never created.
-func (p *Plan) ownPolicies() map[string]bool {
-	out := map[string]bool{}
-	for _, e := range p.Entries {
-		if e.Action == Create && e.CoveredBy == "" && wantPurpose(e.Want) == purposeDMARC {
-			out[strings.TrimPrefix(e.Name, "_dmarc.")] = true
-		}
-	}
-	return out
 }
 
 // setAsideFormer splits the records at a want's name into the address
