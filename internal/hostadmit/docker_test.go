@@ -251,12 +251,21 @@ func installedByAdmit(h *fakeHost) *fakeHost {
 	return h.file("/etc/paisans/installed", content).withFile("/etc/paisans/installed", content, "644", 0)
 }
 
+// heldSinceInstall is h as an admit that stopped between its install and
+// the disable leaves it: Docker's units enabled by its packages, never
+// started, since the install held them, so no socket and a daemon that
+// does not answer.
+func heldSinceInstall(h *fakeHost) *fakeHost {
+	return h.with("system-unit", "docker.service enabled inactive").add("system-unit", "docker.socket enabled inactive").
+		with("system-socket", "absent").answer("unix:///var/run/docker.sock network ls", dockerDown)
+}
+
 // A run that stopped between the install and the disable left the
 // system Docker admit installed enabled, never run, since the install held
 // it, and no record: the next run disables it. Once a record says admit disabled it, admit leaves it as it
 // is, so an owner who enabled it since keeps it running.
 func TestAdmitDisablesTheSystemDockerOnceOnly(t *testing.T) {
-	stopped := installedByAdmit(current()).with("system-unit", "docker.service enabled inactive")
+	stopped := heldSinceInstall(installedByAdmit(current()))
 	plan, err := hostadmit.Build(stopped, input(t, "vm", hostadmit.Flags{}))
 	if err != nil {
 		t.Fatal(err)
@@ -301,11 +310,91 @@ func TestAdmitRefusesASystemDockerThatRanSinceEvict(t *testing.T) {
 			t.Errorf("%s: admit plans:\n%s", name, plan.Text())
 			continue
 		}
-		for _, want := range []string{"Nothing was changed", "remove the line package docker-ce from /etc/paisans/installed", "systemctl disable --now docker.socket docker.service, reboot the host"} {
+		for _, want := range []string{"Nothing was changed", "remove the line package docker-ce from /etc/paisans/installed", "systemctl disable --now docker.socket docker.service, remove /var/lib/docker/network/files/local-kv.db, reboot the host"} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("%s: the refusal does not say %q: %v", name, want, err)
 			}
 		}
+	}
+}
+
+// An admit that stopped between its install and the disable converges:
+// the next run disables the daemons that never ran, and the mesh's check
+// reads no networks for a Docker that never made any.
+func TestAnInterruptedAdmitConverges(t *testing.T) {
+	plan, err := hostadmit.Build(heldSinceInstall(installedByAdmit(current())), input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatalf("after an interrupted admit: %v", err)
+	}
+	if titled(plan, "disable the system Docker") < 0 || !slices.Contains(plan.Present, "mesh: nothing on this host overlaps 10.44.0.0/24") {
+		t.Errorf("after an interrupted admit:\n%s", plan.Text())
+	}
+}
+
+// The refusal's way to give the system Docker back to admit ends where
+// admit takes it as never run: units disabled, its network store gone at
+// the data-root daemon.json sets, the host rebooted. Admit then leaves it
+// disabled.
+func TestGivingTheSystemDockerBackConverges(t *testing.T) {
+	for _, c := range []struct{ root, store string }{
+		{"", "/var/lib/docker/network/files/local-kv.db"},
+		{"/srv/docker", "/srv/docker/network/files/local-kv.db"},
+	} {
+		ran := installedByAdmit(current()).with("system-unit", "docker.service enabled active").add("system-unit", "docker.socket enabled active").
+			with("docker-networks", "present")
+		if c.root != "" {
+			ran.with("docker-root", c.root)
+		}
+		_, err := hostadmit.Build(ran, input(t, "vm", hostadmit.Flags{}))
+		if err == nil || !strings.Contains(err.Error(), "systemctl disable --now docker.socket docker.service, remove "+c.store+", reboot the host") {
+			t.Fatalf("data-root %q: the refusal: %v", c.root, err)
+		}
+		back := installedByAdmit(current()).with("system-unit", "docker.service disabled inactive").add("system-unit", "docker.socket disabled inactive").
+			with("docker-networks", "absent").with("system-socket", "absent").answer("unix:///var/run/docker.sock network ls", dockerDown)
+		if c.root != "" {
+			back.with("docker-root", c.root)
+		}
+		plan, err := hostadmit.Build(back, input(t, "vm", hostadmit.Flags{}))
+		if err != nil {
+			t.Fatalf("data-root %q: after giving it back: %v", c.root, err)
+		}
+		if !slices.Contains(plan.Present, "docker: the system daemon admit installed is disabled") || titled(plan, "disable the system Docker") >= 0 {
+			t.Errorf("data-root %q: after giving it back:\n%s", c.root, plan.Text())
+		}
+	}
+}
+
+// A data-root in /etc/docker/daemon.json that the probe cannot read may
+// hold a network store, so the daemon is taken to have run: an enabled
+// one is refused, not disabled. The probe reads one it can at that
+// data-root (TestProbeReadsTheNetworkStoreAtTheDataRoot).
+func TestTheNetworkStoreIsReadAtTheDataRoot(t *testing.T) {
+	for name, h := range map[string]*fakeHost{
+		"unreadable": heldSinceInstall(installedByAdmit(current())).with("docker-root", "unreadable"),
+	} {
+		_, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+		if err == nil || !strings.Contains(err.Error(), "have run") || !strings.Contains(err.Error(), "remove network/files/local-kv.db under the data-root /etc/docker/daemon.json sets") {
+			t.Errorf("%s: Build = %v", name, err)
+		}
+	}
+}
+
+// A containerd.io admit installed once, which the owner runs containers
+// on since, is not stopped when a later admit installs docker-ce beside
+// it: only what this run installs is disabled with --now, and the
+// containerd that has run is refused.
+func TestAnInstallDoesNotStopAContainerdThatRan(t *testing.T) {
+	list := "package containerd.io\npackage docker-ce\n"
+	h := newBlank().with("system-unit", "containerd.service enabled active").
+		answer("docker compose version", "compose absent\npkg containerd.io install ok installed\nkeyring present\narch amd64\n").
+		with("pkg", "containerd.io installed").
+		file("/etc/paisans/installed", list).withFile("/etc/paisans/installed", list, "644", 0)
+	plan, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+	if err == nil {
+		t.Fatalf("admit plans:\n%s", plan.Text())
+	}
+	if !strings.Contains(err.Error(), "containerd.service") || !strings.Contains(err.Error(), "Nothing was changed") {
+		t.Errorf("the refusal: %v", err)
 	}
 }
 
@@ -411,7 +500,7 @@ func TestAStaleInstalledClaimIsDropped(t *testing.T) {
 	}
 	// An admit killed during its own install: the hold is left, so the
 	// claim stands and the daemon is disabled.
-	killed := claim(current().with("system-unit", "docker.service enabled inactive").with("docker-hold", "policy"), "package docker-ce-rootless-extras\npackage uidmap\ninstalling docker-ce\ndir /etc/systemd/system/user@.service.d\n")
+	killed := claim(heldSinceInstall(current()).with("docker-hold", "policy"), "package docker-ce-rootless-extras\npackage uidmap\ninstalling docker-ce\ndir /etc/systemd/system/user@.service.d\n")
 	plan, err = hostadmit.Build(killed, input(t, "vm", hostadmit.Flags{}))
 	if err != nil {
 		t.Fatal(err)
@@ -461,10 +550,21 @@ const dockerDown = "paisans: dockerd does not answer: failed to connect to the d
 // it has no networks, and the mesh's check reads none. A Docker of the
 // owner's that does not answer still has its networks, which come back
 // when it starts, so admit stops and says to start it, never a JSON
-// error; so does one admit installed that the owner has enabled since,
-// or started since, which left its network store behind.
+// error; so does one admit installed that the owner has enabled since
+// admit disabled it, as its record says, or started since, which left its
+// network store behind.
 func TestASystemDockerThatDoesNotAnswer(t *testing.T) {
 	down := func(h *fakeHost) *fakeHost { return h.answer("unix:///var/run/docker.sock network ls", dockerDown) }
+	in := input(t, "vm", hostadmit.Flags{})
+	rec := admission.NewRecord(in.Request, in.Flags.Grants(), in.Digest, in.Now)
+	rec.SystemDockerDisabled = true
+	data, err := admission.EncodeRecord(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabled := func(h *fakeHost) *fakeHost {
+		return h.add("record", "/etc/paisans/admitted.f2a9.json").file("/etc/paisans/admitted.f2a9.json", string(data))
+	}
 	plan, err := hostadmit.Build(down(installedByAdmit(current())), input(t, "vm", hostadmit.Flags{}))
 	if err != nil {
 		t.Fatalf("admit's own held Docker: %v", err)
@@ -475,7 +575,8 @@ func TestASystemDockerThatDoesNotAnswer(t *testing.T) {
 	for name, h := range map[string]*fakeHost{
 		"the owner's":            down(current()),
 		"the owner's, disabled":  down(current().with("system-unit", "docker.service disabled inactive")),
-		"admit's, enabled since": down(installedByAdmit(current()).with("system-unit", "docker.service enabled inactive")),
+		"the owner's, stopped":   down(current().with("system-unit", "docker.service enabled inactive").with("system-socket", "absent")),
+		"admit's, enabled since": down(disabled(installedByAdmit(current())).with("system-unit", "docker.service enabled inactive")),
 		"admit's, run since":     down(installedByAdmit(current()).with("docker-networks", "present")),
 	} {
 		_, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
@@ -654,7 +755,7 @@ func ownersDocker() *fakeHost {
 // disk, its units perhaps enabled: the list keeps it, and the system
 // Docker is still admit's to disable.
 func TestAnInstalledListKeepsAPackageOnDisk(t *testing.T) {
-	h := installedByAdmit(current()).with("system-unit", "docker.service enabled inactive").
+	h := heldSinceInstall(installedByAdmit(current())).
 		withPkg("docker-ce", "absent").add("ondisk", "docker-ce present")
 	plan, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
 	if err != nil {

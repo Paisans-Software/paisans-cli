@@ -51,8 +51,15 @@ for unit in docker.socket docker.service containerd.service; do
   say system-unit "$unit ${e:-disabled} ${a:-inactive}"
 done
 # The system Docker's network store, which only a daemon that has run
-# leaves.
-if [ -e /var/lib/docker/network/files/local-kv.db ]; then say docker-networks present; else say docker-networks absent; fi
+# leaves, under the data-root /etc/docker/daemon.json sets, or Docker's
+# default. A data-root set in a form this cannot read is unreadable.
+root=/var/lib/docker
+if [ -f /etc/docker/daemon.json ] && grep -q '"data-root"' /etc/docker/daemon.json; then
+  root=$(sed -n 's/^ *"data-root": *"\(\/[^"]*\)",\{0,1\} *$/\1/p' /etc/docker/daemon.json | head -n 1)
+  [ -n "$root" ] || root=unreadable
+fi
+say docker-root "$root"
+if [ "$root" != unreadable ] && [ -e "$root/network/files/local-kv.db" ]; then say docker-networks present; else say docker-networks absent; fi
 # What a run that stopped while admit held Docker's daemons can leave:
 # policy is its own /usr/sbin/policy-rc.d, under which apt may have run;
 # leftover is the copy of the owner's or a temporary file alone, from a run

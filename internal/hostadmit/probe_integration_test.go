@@ -302,3 +302,31 @@ func TestProbeReadsWhetherApparmorShipsTheRootlesskitProfile(t *testing.T) {
 		t.Errorf("%s: package %v, shipped %v, want shipped %v", probeImage, f.AppArmor.Package, f.AppArmor.Shipped, want)
 	}
 }
+
+// The system Docker's network store is read at the data-root
+// /etc/docker/daemon.json sets, and at Docker's default with none; a
+// data-root set in a form the probe cannot read is unreadable, and taken
+// to have run.
+func TestProbeReadsTheNetworkStoreAtTheDataRoot(t *testing.T) {
+	store := func(root string) string {
+		return "mkdir -p " + root + "/network/files && touch " + root + "/network/files/local-kv.db"
+	}
+	json := func(content string) string {
+		return "mkdir -p /etc/docker && printf '%s\\n' '" + content + "' > /etc/docker/daemon.json"
+	}
+	for _, c := range []struct {
+		name, setup, root string
+		store, unread     bool
+	}{
+		{"default", store("/var/lib/docker"), "", true, false},
+		{"none", "true", "", false, false},
+		{"set", json(`{`) + " && printf '%s\\n' '  \"data-root\": \"/srv/docker\"' '}' >> /etc/docker/daemon.json && " + store("/srv/docker"), "/srv/docker", true, false},
+		{"set, default empty", json(`{`) + " && printf '%s\\n' '  \"data-root\": \"/srv/docker\"' '}' >> /etc/docker/daemon.json && " + store("/var/lib/docker"), "/srv/docker", false, false},
+		{"one line", json(`{"data-root": "/srv/docker"}`) + " && " + store("/srv/docker"), "", false, true},
+	} {
+		f := probeIn(t, c.setup, "paisans-f2a9", "")
+		if d := f.Docker; d.NetworkStore != c.store || d.DataRoot != c.root || d.DataRootUnread != c.unread || d.Ran() != (c.store || c.unread) {
+			t.Errorf("%s: %+v", c.name, d)
+		}
+	}
+}

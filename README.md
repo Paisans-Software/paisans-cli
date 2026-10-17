@@ -5232,8 +5232,11 @@ later admit on the host, of any deployment, knows the system daemons as its
 own and leaves them disabled. One that has run since, with no admission
 record to say admit disabled it, may be running the owner's containers, so
 admit refuses it before changing anything and names both ways on: remove
-its lines from the list to keep it as the owner's, or disable it, reboot,
-and admit again.
+its lines from the list to keep it as the owner's, or disable it, remove
+Docker's network store under its data-root, reboot, and admit again. A
+daemon admit installed that never ran, enabled by its package and held
+while it installed, is disabled; its networks are read as none, since it
+never made any.
 
 Where Docker is absent and the host has packages Docker's page lists as
 conflicting (`containerd`, `runc` and the rest), they are **refused, not
