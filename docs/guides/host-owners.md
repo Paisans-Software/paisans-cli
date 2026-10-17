@@ -452,6 +452,12 @@ ends by printing the `site evict` line for you.
 * **`/etc/paisans/installed`**, the list of what admit installed, root's and
   mode 644, with `/etc/paisans` holding it, while the list names anything
   still installed. A later admit on this host, of any deployment, reads it,
-  knows Docker's system daemon as admit's and leaves it disabled.
+  knows Docker's system daemon as admit's and leaves it disabled. If you
+  enable or start that daemon after evicting, a later admit refuses before
+  changing anything, since disabling it would stop your containers. To keep
+  it as yours, remove the `package docker-ce` line (and `package
+  containerd.io`, if listed) from `/etc/paisans/installed`. To give it back
+  to admit, run `systemctl disable --now` on its units and reboot. Then admit
+  again.
 * A user you deleted by hand before evicting can leave an empty
   `/etc/systemd/system/user@<uid>.service.requires` behind.

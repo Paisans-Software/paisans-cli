@@ -895,7 +895,10 @@ paisans site evict --site home-a --ssh owner@home-a.example.org --execute
   extras, uidmap, wireguard-tools, the `docker` group) stays when the last
   deployment goes, and the plan names it; `/etc/paisans/installed`, the list
   of it, stays with it, so a later admit leaves Docker's system daemon
-  disabled. A hold on Docker's daemons that a
+  disabled. A later admit refuses, changing nothing, a system daemon of
+  admit's that has run since evict, naming the owner's two ways on: keep it
+  by removing its lines from the list, or disable it, reboot and admit
+  again. A hold on Docker's daemons that a
   killed admit left is put back. The SSH allow may be the rule the
   owner's own login arrives by, so it is kept and evict warns of it: the
   owner deletes it themselves once nothing else needs it. Evict never

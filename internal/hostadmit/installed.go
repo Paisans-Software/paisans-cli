@@ -227,9 +227,16 @@ func planSystemDocker(p *planner, s hostprep.Section, added hostprep.Installed) 
 	// which a daemon the owner started and stopped again leaves.
 	p.heldDocker = slices.Contains(units, "docker.service") && !p.f.Docker.NetworkStore &&
 		!slices.ContainsFunc(units, func(u string) bool { return p.f.Docker.SystemUnits[u].Enabled })
+	// Never run: no unit active and no network store, as an admit stopped
+	// between its install and the disable leaves it, held while it
+	// installed. One that has run may be the owner's now, with their
+	// containers, which disabling it would stop.
+	ran := p.f.Docker.NetworkStore || slices.ContainsFunc(units, func(u string) bool { return p.f.Docker.SystemUnits[u].Active })
 	switch {
 	case !installs && !recorded && running && unknown != "":
 		p.present("docker: the system daemon admit installed is running and left as it is, since " + unknown + " cannot be read and may say admit disabled it once")
+	case !installs && !recorded && running && ran:
+		return systemDockerRan(units, now.all())
 	case installs || !recorded && running:
 		p.step(Step{Title: "disable the system Docker",
 			Describe: "docker: the deployments run their own rootless daemons, so the system daemons admit installed, which their packages enable, are disabled (" + strings.Join(units, ", ") + "), and were kept from starting while they installed: they never changed forwarding, docker0 or the firewall",
@@ -241,6 +248,22 @@ func planSystemDocker(p *planner, s hostprep.Section, added hostprep.Installed) 
 		p.present("docker: the system daemon admit installed is disabled")
 	}
 	return nil
+}
+
+// systemDockerRan is the refusal for a system Docker admit installed that
+// is enabled or running, has run, and that no admission record says admit
+// disabled: it may run the owner's containers by now, and disabling it
+// would stop them. The owner says whose it is.
+func systemDockerRan(units, packages []string) error {
+	lines := "the line package docker-ce"
+	if slices.Contains(packages, "containerd.io") {
+		lines = "the lines package docker-ce and package containerd.io"
+		if !slices.Contains(packages, "docker-ce") {
+			lines = "the line package containerd.io"
+		}
+	}
+	return fmt.Errorf("the system Docker admit installed (%s) is enabled or running and has run, and no admission record says admit disabled it, so it may be running your containers, which disabling it would stop. Nothing was changed. To keep it as yours, remove %s from %s and admit again. To give it back to admit, run systemctl disable --now %s, reboot the host, which clears what it changed to forwarding, docker0 and the firewall, and admit again",
+		strings.Join(units, ", "), lines, installedPath, strings.Join(units, " "))
 }
 
 // disabledBefore reports whether an admission record on the host, this

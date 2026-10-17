@@ -5229,7 +5229,11 @@ are then disabled, so only the deployments' rootless daemons run. What admit
 installed is listed in `/etc/paisans/installed`, root's and mode 644. `site
 evict` keeps the packages and that list when the last deployment goes, so a
 later admit on the host, of any deployment, knows the system daemons as its
-own and leaves them disabled.
+own and leaves them disabled. One that has run since, with no admission
+record to say admit disabled it, may be running the owner's containers, so
+admit refuses it before changing anything and names both ways on: remove
+its lines from the list to keep it as the owner's, or disable it, reboot,
+and admit again.
 
 Where Docker is absent and the host has packages Docker's page lists as
 conflicting (`containerd`, `runc` and the rest), they are **refused, not
