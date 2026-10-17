@@ -1702,7 +1702,8 @@ func convergeUp(cfg *config.Config, steps []convergeStep, marks map[string]ui.Ma
 // in the order they ran: init, for every step once it has work; the site's
 // site prepare, for every step on a site, its pull included; each witness's earlier apply, for
 // a founding member that is not one, whose gate refuses it until the witness
-// runs; the site's earlier apply or site add and the storage step, for an
+// runs; a joined site's site add, for the apply that starts its apps after
+// the join; the site's earlier apply or site add and the storage step, for an
 // apply in pass two; and the site prepare and first apply of each Garage
 // site, for storage, since Garage has to be running to be asked.
 func convergeWaits(cfg *config.Config, steps []convergeStep, i int) []string {

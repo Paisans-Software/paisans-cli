@@ -140,16 +140,18 @@ func TestConvergeJoinsAMemberTheClusterDoesNotList(t *testing.T) {
 	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: apply --site home-b", "other sites: apply --site vm", "other sites: apply --site watch", "other sites: apply --site home-a", "storage: storage add"}, passTwoPhase)...)
 }
 
-// A pending site declared [data, apps] is joined in one run: its site add
-// joins the data role, then its own apply starts its app stacks, and the
-// gateway is applied after it, so Caddy routes to the new apps site. Pass
-// two follows as for any run.
-func TestConvergeJoinsADataAndAppsSiteThenStartsItsApps(t *testing.T) {
+// A site declared [data, apps] joining beside a gateway outside etcd: the
+// site's apply follows its site add, and the gateway is applied once, among
+// the sites outside etcd that come next. The fixture's gateway, a witness in
+// etcd.members, is applied straight after the new site instead
+// (TestConvergeJoinsAMemberTheClusterDoesNotList).
+func TestConvergeJoinsADataAndAppsSiteBeforeAGatewayOutsideEtcd(t *testing.T) {
 	cfg := fixture(t)
-	if !slices.Equal(cfg.Sites["home-b"].Roles, []config.Role{config.RoleData, config.RoleApps}) {
-		t.Fatalf("home-b is %v, not [data, apps]", cfg.Sites["home-b"].Roles)
-	}
-	steps := convergePlan(cfg, convergeState{Initial: map[string]render.EtcdInitial{"home-a": initial("home-a", "vm"), "vm": initial("home-a", "vm")}})
+	vm := cfg.Sites["vm"]
+	vm.Roles = []config.Role{config.RoleGateway}
+	cfg.Sites["vm"] = vm
+	cfg.Etcd.Members = []string{"home-a", "home-b"}
+	steps := convergePlan(cfg, convergeState{Initial: map[string]render.EtcdInitial{"home-a": initial("home-a")}})
 	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{
 		"joining: site add home-b",
 		"other sites: apply --site home-b",
