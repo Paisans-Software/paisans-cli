@@ -693,6 +693,8 @@ func (h *host) Run(command string) (string, error) {
 		return `{"Service":"app","Name":"x","State":"exited","ExitCode":1}` + "\n", nil
 	case strings.Contains(command, " ps --all --format json"):
 		return `{"Service":"x","Name":"x","State":"running","Health":""}` + "\n", nil
+	case command == apply.ContainersRead:
+		return applytest.Running(h.files), nil
 
 	// a gateway's Caddy kept for the host owner's sites: validated and
 	// reloaded inside its container, from a path the container mounts

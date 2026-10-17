@@ -77,6 +77,7 @@ changes share a bullet. Detailed notes are on the corresponding
 - `site remove` and `app remove` read every flag given after the name before they report, so `-v` there shows detail and `--execute` there records `ssh.user`.
 - `apply` on a site whose mesh interface is up without its file's address, key or peers restarts or syncs it, so a run stopped between writing the file and handing it over completes.
 - A deployment binds and dials only each site's mesh address, so the egress table `host admit` loads, which drops its loopback dials, stalls neither etcd's own client gateway nor Patroni's leader election.
+- `apply` starts a stack whose containers were removed or stopped though its files match the render, and applies each Garage site before storage, so a site whose containers were removed converges again.
 
 ### Security
 
