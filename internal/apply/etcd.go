@@ -115,6 +115,53 @@ func ReadEtcdCluster(t Transport, d deployment.Deployment, address string) (clus
 	return cluster, true, nil
 }
 
+// EtcdEndpointHealth is one entry of `etcdctl endpoint health -w json`. The
+// keys are etcdctl's epHealth (etcd v3.5.16,
+// etcdctl/ctlv3/command/ep_command.go).
+type EtcdEndpointHealth struct {
+	Endpoint string `json:"endpoint"`
+	Health   bool   `json:"health"`
+	Took     string `json:"took"`
+	Error    string `json:"error"`
+}
+
+// ParseEtcdEndpointHealth finds the endpoint list in the combined output of
+// `etcdctl endpoint health -w json`. etcdctl prints every endpoint, healthy
+// or not, and exits 1 with "Error: unhealthy cluster" when any is unhealthy,
+// so the list is read whatever the exit and whatever else the output holds.
+// ok is false when the output holds no list.
+func ParseEtcdEndpointHealth(out string) (list []EtcdEndpointHealth, ok bool) {
+	start := strings.Index(out, "[")
+	end := strings.LastIndex(out, "]")
+	if start < 0 || end < start {
+		return nil, false
+	}
+	if err := json.Unmarshal([]byte(out[start:end+1]), &list); err != nil {
+		return nil, false
+	}
+	return list, true
+}
+
+// EtcdHealthError is ": " and an unhealthy entry's error, or nothing when
+// etcdctl gave none, for a message that names the member first.
+func EtcdHealthError(h EtcdEndpointHealth) string {
+	if h.Error == "" {
+		return ""
+	}
+	return ": " + h.Error
+}
+
+// EtcdEndpointSite names the site whose mesh address an endpoint health
+// entry's endpoint is on, or the endpoint itself when no site's is.
+func EtcdEndpointSite(cfg *config.Config, endpoint string) string {
+	for _, name := range cfg.SiteNames() {
+		if strings.Contains(endpoint, "//"+cfg.Sites[name].Address+":") {
+			return name
+		}
+	}
+	return endpoint
+}
+
 // ParseEtcdMembers reads `etcdctl member list -w json`.
 func ParseEtcdMembers(out string) ([]EtcdMember, error) {
 	c, err := ParseEtcdCluster(out)

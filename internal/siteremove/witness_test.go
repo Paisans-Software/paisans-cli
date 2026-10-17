@@ -79,6 +79,9 @@ func TestTwoDataSitesAndAWitnessShrinkToOneVoter(t *testing.T) {
 	if vm.etcdContainer {
 		t.Error("the witness's etcd still runs")
 	}
+	if vm.etcdExited {
+		t.Error("the witness's etcd container is left behind, stopped")
+	}
 	if strings.Contains(vm.files[root+"/infra/compose.yaml"], "image: gcr.io/etcd-development/etcd") {
 		t.Error("the witness's compose file still declares etcd")
 	}
@@ -426,5 +429,19 @@ func TestTheShrinkWithDerivedLists(t *testing.T) {
 	}
 	if result := validate.Check(after); result.Refused() {
 		t.Errorf("the edited paisans-stack.yaml is refused: %v", result.Refusals())
+	}
+}
+
+// A witness etcd container an earlier run stopped and left behind is found
+// and removed, so the witness ends with none.
+func TestAStoppedWitnessEtcdLeftBehindIsRemoved(t *testing.T) {
+	w := witnessWorld(t)
+	vm := w.hosts["vm"]
+	vm.etcdContainer, vm.etcdExited = false, true
+	if err := siteremove.Execute(w.mustBuild("home-b", siteremove.Options{})); err != nil {
+		t.Fatal(err)
+	}
+	if vm.etcdExited {
+		t.Error("the witness's stopped etcd container is still there")
 	}
 }

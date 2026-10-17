@@ -97,6 +97,8 @@ changes share a bullet. Detailed notes are on the corresponding
 - `apply` ends `start pocket-id` done when its site stops for etcd or its databases, lists a failed install step's error under it, and names the member a later founding stop waits on.
 - `apply` joins a pending site declared `[data, apps]` in one run: its `site add` joins the data role, then the site is applied to start its apps, and the gateway after it.
 - `apply` brings up the Caddy of each gateway outside `etcd.members` before the data members are founded, so their apps reach Pocket ID's public URL as they start; `apply --hold-apps` starts no app stack.
+- `site remove --host-gone` proceeds when only the gone site's etcd member is unhealthy; it, `site add`, `mesh rekey` and `secrets rotate` read patronictl past its log lines and name each unhealthy or missing etcd member.
+- `site remove` that takes a witness out of etcd removes its etcd container, running or stopped, and keeps its volumes, so the witness has none for its restart policy to start.
 
 ### Security
 

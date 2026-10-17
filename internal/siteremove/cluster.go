@@ -1,7 +1,6 @@
 package siteremove
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -116,8 +115,8 @@ func (p *Plan) buildCluster() (*Stage, error) {
 				st.Steps = append(st.Steps, Step{Site: p.etcd.control, Verb: "check", Title: "check etcd voters", Text: fmt.Sprintf("etcd's voters are exactly %s, both healthy, before the second removal", strings.Join(sortedCopy(append(append([]string(nil), p.end.Etcd.Members...), p.witness)), " and "))})
 				st.Steps = append(st.Steps, Step{Site: p.etcd.control, Verb: "remove", Title: "remove witness " + p.witness + "'s etcd member", Text: fmt.Sprintf("the witness %s's etcd member %s, leaving %s the one voter, since two voters are worse than one: %s", p.witness, p.etcd.witness.HexID(), p.end.Etcd.Members[0], p.etcdctl("member remove "+p.etcd.witness.HexID()))})
 			}
-			if p.etcd.witnessRunning {
-				st.Steps = append(st.Steps, Step{Site: p.witness, Verb: "stop", Title: "stop etcd on " + p.witness, Text: "its etcd, which a removed member cannot rejoin, found by this deployment's label and the infrastructure project's etcd service: " + p.stopWitnessEtcd()})
+			if p.etcd.witnessContainer {
+				st.Steps = append(st.Steps, Step{Site: p.witness, Verb: "stop", Title: "stop and remove etcd on " + p.witness, Text: "its etcd container, which a removed member cannot rejoin, found by this deployment's label and the infrastructure project's etcd service: " + p.stopWitnessEtcd()})
 			}
 		}
 		gates = append(gates, fmt.Sprintf("etcd's voters are exactly %s and every member is healthy", strings.Join(sortedCopy(p.end.Etcd.Members), ", ")))
@@ -159,8 +158,8 @@ func (p *Plan) buildCluster() (*Stage, error) {
 				return err
 			}
 		}
-		if p.etcd.witness != nil || p.etcd.witnessRunning {
-			p.work("stop etcd on " + p.witness)
+		if p.etcd.witness != nil || p.etcd.witnessContainer {
+			p.work("stop and remove etcd on " + p.witness)
 			if out, err := p.transports[p.witness].Run(p.stopWitnessEtcd()); err != nil {
 				return fmt.Errorf("%s: stopping its etcd: %w: %s", p.witness, err, lastLines(out, 3))
 			}
@@ -246,20 +245,24 @@ func renderedContent(rendered *render.Plan, site, rel string) string {
 	return ""
 }
 
-// witnessEtcdIDs lists the running etcd containers of this deployment on the
-// leaving witness's host: its label, the infrastructure stack's compose
-// project and the etcd service, so nothing else on the host can match.
+// witnessEtcdIDs lists the etcd containers of this deployment on the leaving
+// witness's host, running or stopped: its label, the infrastructure stack's
+// compose project and the etcd service, so nothing else on the host can
+// match.
 func (p *Plan) witnessEtcdIDs() string {
 	d := p.dep()
-	return fmt.Sprintf("docker ps -q --filter %s --filter %s --filter %s",
+	return fmt.Sprintf("docker ps -aq --filter %s --filter %s --filter %s",
 		quote(d.LabelFilter()), quote("label=com.docker.compose.project="+d.Project("infra")), quote("label=com.docker.compose.service=etcd"))
 }
 
-// stopWitnessEtcd stops them. It finds the container by its labels, not by
-// the compose file, because once that file is written without etcd Compose
-// no longer knows the service.
+// stopWitnessEtcd stops and removes them, so the witness ends with no etcd
+// container: its compose file declares none, and a stopped one left behind
+// is started again by its restart policy and exits as a removed member. Its
+// volumes stay. It finds the container by its labels, not by the compose
+// file, because the compose file written without etcd does not name the
+// service.
 func (p *Plan) stopWitnessEtcd() string {
-	return fmt.Sprintf("ids=$(%s) && { [ -z \"$ids\" ] || docker stop $ids; }", p.witnessEtcdIDs())
+	return fmt.Sprintf("ids=$(%s) && { [ -z \"$ids\" ] || { docker stop $ids >/dev/null && docker rm $ids >/dev/null; }; }", p.witnessEtcdIDs())
 }
 
 // removeWitness takes the witness out of etcd once the voters are exactly the
@@ -346,13 +349,20 @@ func (p *Plan) etcdVoters(sites []string) error {
 			return fmt.Errorf("the voters are %s, and they should be %s", strings.Join(voters, ", "), strings.ReplaceAll(want, ",", ", "))
 		}
 		out, err := p.transports[p.etcd.control].Run(p.etcdctl("endpoint health --cluster -w json"))
-		var health []endpointHealth
-		if jerr := json.Unmarshal([]byte(strings.TrimSpace(out)), &health); jerr != nil {
+		health, ok := apply.ParseEtcdEndpointHealth(out)
+		if !ok {
 			return fmt.Errorf("endpoint health: %s", lastLines(out, 3))
 		}
+		listed := map[string]bool{}
 		for _, h := range health {
+			listed[apply.EtcdEndpointSite(p.cfg, h.Endpoint)] = true
 			if !h.Health {
-				return fmt.Errorf("%s is unhealthy: %s", h.Endpoint, h.Error)
+				return fmt.Errorf("%s's etcd is unhealthy%s", apply.EtcdEndpointSite(p.cfg, h.Endpoint), apply.EtcdHealthError(h))
+			}
+		}
+		for _, site := range voters {
+			if !listed[site] {
+				return fmt.Errorf("%s's etcd is not in etcd's endpoint health, so it is not known to be healthy", site)
 			}
 		}
 		if err != nil {

@@ -534,3 +534,48 @@ func TestADryRunShowsPreflightFindingsByDefault(t *testing.T) {
 		}
 	}
 }
+
+// The etcd gate wants every member healthy. A member that runs and answers
+// unhealthy holds the join there, named, rather than as etcdctl's exit.
+func TestTheEtcdGateNamesAnUnhealthyMember(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := newWorld(t)
+	w.etcdSick = map[string]bool{"vm": true}
+	err := siteadd.Execute(build(t, w))
+	if err == nil || !strings.Contains(err.Error(), "vm's etcd is unhealthy") {
+		t.Fatalf("err = %v, want vm named as unhealthy", err)
+	}
+	if strings.Contains(err.Error(), "exit status 1") || strings.Contains(err.Error(), "endpoint health:") {
+		t.Errorf("the refusal is etcdctl's exit: %v", err)
+	}
+}
+
+// patronictl logs beside its answer when it cannot reach one of etcd's
+// endpoints, and the join reads the answer past them.
+func TestPatronictlLogLinesDoNotStopTheJoin(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := newWorld(t)
+	w.patroniLog = true
+	if err := siteadd.Execute(build(t, w)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The etcd gate wants every voter in etcd's endpoint health: one left out,
+// or an empty list, holds the join, named.
+func TestTheEtcdGateWantsEveryVoterInItsHealth(t *testing.T) {
+	for name, drop := range map[string]map[string]bool{
+		"vm left out":   {"vm": true},
+		"an empty list": {"home-a": true, "home-b": true, "vm": true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			defer siteadd.SetFast()()
+			w := newWorld(t)
+			w.healthDrop = drop
+			err := siteadd.Execute(build(t, w))
+			if err == nil || !strings.Contains(err.Error(), "vm's etcd is not in etcd's endpoint health") {
+				t.Fatalf("err = %v, want vm named as missing", err)
+			}
+		})
+	}
+}

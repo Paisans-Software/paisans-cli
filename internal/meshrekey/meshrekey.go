@@ -20,7 +20,6 @@
 package meshrekey
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -28,8 +27,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/paisans-software/paisans-cli/internal/acme"
 	"github.com/paisans-software/paisans-cli/internal/apply"
@@ -611,14 +608,6 @@ func renderedFile(rendered *render.Plan, site, rel string) string {
 	return ""
 }
 
-// endpointHealth is one entry of `etcdctl endpoint health -w json` (etcd
-// v3.5.16, etcdctl/ctlv3/command/ep_command.go, epHealth).
-type endpointHealth struct {
-	Endpoint string `json:"endpoint"`
-	Health   bool   `json:"health"`
-	Error    string `json:"error"`
-}
-
 // health is nil when etcd answers healthy at every voter, and Patroni has
 // exactly one member leading and running and every other data site
 // streaming: the cluster a site's rekey may take a tunnel from. A paused
@@ -641,8 +630,10 @@ func ClusterHealth(cfg *config.Config, transports map[string]apply.Transport) er
 			return fmt.Errorf("%s: no way to reach it to read etcd's health", cfg.Etcd.Members[0])
 		}
 		out, err := at.Run(apply.Etcdctl(d, cfg.Sites[cfg.Etcd.Members[0]].Address, "endpoint health --cluster -w json"))
-		var health []endpointHealth
-		if jerr := json.Unmarshal([]byte(strings.TrimSpace(out)), &health); jerr != nil {
+		// etcdctl exits 1 when any endpoint is unhealthy and still prints
+		// every endpoint, so its list is read whatever the exit.
+		health, ok := apply.ParseEtcdEndpointHealth(out)
+		if !ok {
 			if err != nil {
 				return fmt.Errorf("%s: etcd's endpoint health: %v", cfg.Etcd.Members[0], err)
 			}
@@ -651,7 +642,7 @@ func ClusterHealth(cfg *config.Config, transports map[string]apply.Transport) er
 		var sick, missing []string
 		for _, h := range health {
 			if !h.Health {
-				sick = append(sick, h.Endpoint)
+				sick = append(sick, apply.EtcdEndpointSite(cfg, h.Endpoint))
 			}
 		}
 		sort.Strings(sick)
@@ -682,7 +673,7 @@ func ClusterHealth(cfg *config.Config, transports map[string]apply.Transport) er
 			return fmt.Errorf("%s: patronictl list: %v", at, err)
 		}
 		var members []map[string]any
-		if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &members); err != nil {
+		if err := apply.FirstJSONArray(out, &members); err != nil {
 			return fmt.Errorf("%s: patronictl list is not JSON", at)
 		}
 		// Role and State are Patroni v4.1.0's (patroni/ctl.py,
@@ -759,8 +750,8 @@ func (p *Plan) paused() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	var live map[string]any
-	if err := yaml.Unmarshal([]byte(out), &live); err != nil {
+	live, err := apply.PatroniConfig(out)
+	if err != nil {
 		return false, fmt.Errorf("%s: patronictl show-config is not YAML: %w", p.cfg.Cluster.Sites[0], err)
 	}
 	return fmt.Sprint(live["pause"]) == "true", nil

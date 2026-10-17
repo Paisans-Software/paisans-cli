@@ -30,6 +30,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
+	"github.com/paisans-software/paisans-cli/internal/patronitest"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/siteremove"
@@ -69,6 +70,17 @@ type world struct {
 	etcd     []apply.EtcdMember
 	nextID   uint64
 	etcdDown map[string]bool
+	// healthOut, when set, is what `endpoint health` prints instead of the
+	// members' health, with exit status 1.
+	healthOut string
+	// healthDrop leaves a site out of `endpoint health` once a member has
+	// been removed, as an etcdctl that answers for fewer endpoints would.
+	healthDrop func(site string) bool
+	// removed is whether any member has been removed.
+	removed bool
+	// patroniLog wraps every patronictl answer in the log lines patronictl
+	// writes when it cannot reach one of etcd's endpoints.
+	patroniLog bool
 	// clusterID is the cluster ID every etcd reports in its member list's
 	// header; 0 leaves it out, as an etcdctl that prints none would.
 	clusterID uint64
@@ -137,6 +149,9 @@ type host struct {
 	// etcdContainer is whether the etcd container runs, which a removed
 	// member's does until it is stopped.
 	etcdContainer bool
+	// etcdExited is whether a stopped etcd container is left on the host,
+	// which only `docker rm` takes away.
+	etcdExited bool
 	// etcdHosts is ETCD3_HOSTS as the running Patroni has it.
 	etcdHosts string
 	// ownCluster, when set, is the separate cluster this host's etcd
@@ -515,11 +530,15 @@ func (h *host) Run(command string) (string, error) {
 			return "starting \n", nil
 		}
 		return "running streaming\n", nil
-	case strings.HasPrefix(command, "ids=$(docker ps -q --filter") && strings.Contains(command, "service=etcd"):
+	case strings.HasPrefix(command, "ids=$(docker ps -") && strings.Contains(command, "service=etcd"):
+		all := strings.HasPrefix(command, "ids=$(docker ps -aq ")
+		if h.etcdContainer || all && h.etcdExited {
+			h.etcdExited = !strings.Contains(command, "docker rm")
+		}
 		h.etcdContainer, h.etcdUp = false, false
 		return "", nil
-	case strings.HasPrefix(command, "docker ps -q --filter") && strings.Contains(command, "service=etcd"):
-		if h.etcdContainer {
+	case strings.HasPrefix(command, "docker ps -") && strings.Contains(command, "service=etcd"):
+		if h.etcdContainer || strings.HasPrefix(command, "docker ps -aq ") && h.etcdExited {
 			return "0123456789ab\n", nil
 		}
 		return "", nil
@@ -536,23 +555,32 @@ func (h *host) Run(command string) (string, error) {
 		}
 		return w.memberList(h), nil
 	case strings.Contains(command, "endpoint health --cluster"):
-		var out []map[string]any
+		out := []map[string]any{}
 		failed := false
 		for _, m := range w.etcd {
 			site := apply.EtcdMemberSite(w.cfg, m)
+			if w.removed && w.healthDrop != nil && w.healthDrop(site) {
+				continue
+			}
 			ok := !w.etcdDown[site] && w.hosts[site] != nil && w.hosts[site].etcdUp
 			failed = failed || !ok
 			out = append(out, map[string]any{"endpoint": m.ClientURLs[0], "health": ok})
 		}
+		if w.healthOut != "" {
+			return w.healthOut, errors.New("exit status 1")
+		}
 		data, _ := json.Marshal(out)
 		if failed {
-			return string(data), errors.New("exit status 1")
+			// etcdctl prints every endpoint, then exits 1 with its error on
+			// stderr, which the transport's combined output carries too.
+			return "Error: unhealthy cluster\n" + string(data) + "\n", errors.New("exit status 1")
 		}
 		return string(data), nil
 	case strings.Contains(command, "member list -w json"):
 		return w.memberList(h), nil
 	case memberRemove.MatchString(command):
 		hex := memberRemove.FindStringSubmatch(command)[1]
+		w.removed = true
 		var kept []apply.EtcdMember
 		for _, m := range w.etcd {
 			if m.HexID() == hex {
@@ -587,7 +615,7 @@ func (h *host) Run(command string) (string, error) {
 		w.failover()
 		return w.patroniList(), nil
 	case strings.Contains(command, "show-config"):
-		return fmt.Sprintf("loop_wait: 10\nsynchronous_mode: %v\n", w.syncMode), nil
+		return w.patronictlOut(fmt.Sprintf("loop_wait: 10\nsynchronous_mode: %v\n", w.syncMode)), nil
 	case strings.Contains(command, "edit-config"):
 		w.syncMode = false
 		for _, m := range w.members {
@@ -1087,7 +1115,14 @@ func (w *world) splitEtcd(site string) {
 
 func (w *world) patroniList() string {
 	data, _ := json.Marshal(w.members)
-	return string(data)
+	return w.patronictlOut(string(data))
+}
+
+func (w *world) patronictlOut(out string) string {
+	if w.patroniLog {
+		return patronitest.Wrap(out)
+	}
+	return out
 }
 
 func (w *world) leader() string {

@@ -17,6 +17,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/apply/meshfake"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/patronitest"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -60,6 +61,9 @@ type mesh struct {
 	patroni map[string][2]string
 	// paused is Patroni's maintenance mode.
 	paused bool
+	// patroniLog wraps every patronictl answer in the log lines patronictl
+	// writes when it cannot reach one of etcd's endpoints.
+	patroniLog bool
 	// promotedAt is where in log each site's key was promoted.
 	promotedAt map[string]int
 	log        []string
@@ -218,6 +222,7 @@ func (h *host) Run(command string) (string, error) {
 		return "", nil
 	case strings.Contains(command, "endpoint health --cluster"):
 		var out []map[string]any
+		failed := false
 		for i, name := range m.cfg.Etcd.Members {
 			// A member is healthy while its tunnel to every other member is
 			// up, which a swap part way breaks.
@@ -225,15 +230,22 @@ func (h *host) Run(command string) (string, error) {
 			for _, other := range m.cfg.Etcd.Members {
 				up = up && (other == name || m.tunnel(name, other))
 			}
-			out = append(out, map[string]any{"endpoint": "http://" + m.cfg.Sites[name].Address + ":2379", "health": up && !(m.sick && i == 1)})
+			ok := up && !(m.sick && i == 1)
+			failed = failed || !ok
+			out = append(out, map[string]any{"endpoint": "http://" + m.cfg.Sites[name].Address + ":2379", "health": ok})
 		}
 		data, _ := json.Marshal(out)
+		if failed {
+			// etcdctl prints every endpoint, then exits 1 with its error on
+			// stderr, which the transport's combined output carries too.
+			return "Error: unhealthy cluster\n" + string(data) + "\n", errors.New("exit status 1")
+		}
 		return string(data), nil
 	case strings.Contains(command, "patronictl") && strings.HasSuffix(command, "show-config"):
 		if m.paused {
-			return "loop_wait: 10\npause: true\n", nil
+			return m.patronictlOut("loop_wait: 10\npause: true\n"), nil
 		}
-		return "loop_wait: 10\n", nil
+		return m.patronictlOut("loop_wait: 10\n"), nil
 	case strings.Contains(command, "patronictl") && strings.HasSuffix(command, "pause --wait"):
 		if m.paused {
 			return "Error: Cluster is already paused", errors.New("exit status 1")
@@ -259,7 +271,7 @@ func (h *host) Run(command string) (string, error) {
 			out = append(out, map[string]any{"Member": name, "Role": role, "State": state})
 		}
 		data, _ := json.Marshal(out)
-		return string(data), nil
+		return m.patronictlOut(string(data)), nil
 	}
 	// apply's own plumbing around a scoped write: what it runs is not this
 	// test's subject, and it succeeds.
@@ -539,10 +551,16 @@ func TestARekeySaysWhenSudoRefusesTheHelper(t *testing.T) {
 func TestARekeyRefuses(t *testing.T) {
 	m := newMesh(t)
 	m.sick = true
-	if _, err := m.build("vm"); err == nil || !strings.Contains(err.Error(), "etcd is unhealthy") {
-		t.Errorf("unhealthy etcd: %v", err)
+	sick := m.cfg.Etcd.Members[1]
+	if _, err := m.build("vm"); err == nil || !strings.Contains(err.Error(), "etcd is unhealthy at "+sick) {
+		t.Errorf("unhealthy etcd: %v, want %s named", err, sick)
 	}
 	m.sick = false
+	m.failOnce, m.failOut = "endpoint health", "Error: context deadline exceeded\n"
+	if _, err := m.build("vm"); err == nil || !strings.Contains(err.Error(), "etcd's endpoint health") {
+		t.Errorf("endpoint health with no list: %v", err)
+	}
+	m.failOnce, m.failOut = "", ""
 	m.hosts["watch"].down = true
 	if _, err := m.build("vm"); err == nil || !strings.Contains(err.Error(), "watch does not answer over ssh") {
 		t.Errorf("a site that does not answer: %v", err)
@@ -840,5 +858,30 @@ func claimOf(cfg *config.Config, site string, now time.Time) (string, registry.E
 		Subnet:     cfg.Mesh.Subnet,
 		Address:    declared.Address,
 		Roles:      registry.JoinRoles(declared.Roles),
+	}
+}
+
+func (m *mesh) patronictlOut(out string) string {
+	if m.patroniLog {
+		return patronitest.Wrap(out)
+	}
+	return out
+}
+
+// patronictl logs beside its answer when it cannot reach one of etcd's
+// endpoints, and the rekey reads the answer past them, through a relay's
+// pause and resume.
+func TestPatronictlLogLinesDoNotStopARekey(t *testing.T) {
+	m := newMesh(t, undialled)
+	m.patroniLog = true
+	p, err := BuildAll(m.cfg, m, m.transports())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run(t, p); err != nil {
+		t.Fatal(err)
+	}
+	if m.paused {
+		t.Error("Patroni is still paused")
 	}
 }

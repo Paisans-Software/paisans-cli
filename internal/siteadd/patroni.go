@@ -1,12 +1,9 @@
 package siteadd
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 )
@@ -57,7 +54,7 @@ func (m patroniMember) lag() (float64, bool) {
 
 func parsePatroniList(out string) ([]patroniMember, error) {
 	var list []patroniMember
-	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &list); err != nil {
+	if err := apply.FirstJSONArray(out, &list); err != nil {
 		return nil, fmt.Errorf("patronictl list is not JSON: %w\n%s", err, out)
 	}
 	return list, nil
@@ -255,8 +252,8 @@ func (p *Plan) buildClusterConfig() (*Stage, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: patronictl show-config: %s", p.patroni, lastLines(out, 3))
 	}
-	var live map[string]any
-	if err := yaml.Unmarshal([]byte(out), &live); err != nil {
+	live, err := apply.PatroniConfig(out)
+	if err != nil {
 		return nil, fmt.Errorf("%s: patronictl show-config is not YAML: %w", p.patroni, err)
 	}
 	wantStrict := strconv.FormatBool(p.cfg.Cluster.SynchronousStrict)

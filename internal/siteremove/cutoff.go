@@ -330,8 +330,9 @@ func (p *Plan) checkToken() error {
 
 // cutoffQuorum refuses when the remaining healthy voters are not a majority
 // of the voters etcd has now: `member remove` is a change the current voters
-// commit, the cut-off one counted, and it cannot answer.
-func (p *Plan) cutoffQuorum(members []apply.EtcdMember, up int) error {
+// commit, the cut-off one counted, and it cannot answer. sick is each
+// remaining member that is unhealthy, which the refusal names.
+func (p *Plan) cutoffQuorum(members []apply.EtcdMember, up int, sick []string) error {
 	voters := 0
 	for _, m := range members {
 		if !m.IsLearner {
@@ -341,7 +342,19 @@ func (p *Plan) cutoffQuorum(members []apply.EtcdMember, up int) error {
 	if voters == 0 || up*2 > voters {
 		return nil
 	}
-	return fmt.Errorf("site remove %s: without it, %d of etcd's %d voters are healthy, which is not a majority of the voters etcd has now, so removing its member could not commit. Recovery is restoring etcd from a remaining member, outside the toolkit. Nothing was changed", p.Site, up, voters)
+	named := ""
+	switch len(sick) {
+	case 0:
+	case 1:
+		named = fmt.Sprintf(" (%s's etcd is unhealthy)", sick[0])
+	default:
+		var possessive []string
+		for _, site := range sick {
+			possessive = append(possessive, site+"'s")
+		}
+		named = fmt.Sprintf(" (%s etcds are unhealthy)", joinAnd(possessive))
+	}
+	return fmt.Errorf("site remove %s: without it, %d of etcd's %d voters are healthy%s, which is not a majority of the voters etcd has now, so removing its member could not commit. Recovery is restoring etcd from a remaining member, outside the toolkit. Nothing was changed", p.Site, up, voters, named)
 }
 
 // cutoffLeader decides how the leadership leaves the cut-off site. A streaming
@@ -658,8 +671,8 @@ func (p *Plan) buildCutoffEtcd() *Stage {
 		if p.etcd.witness != nil {
 			st.Steps = append(st.Steps, Step{Site: p.etcd.control, Verb: "remove", Title: "remove witness " + p.witness + "'s etcd member", Text: fmt.Sprintf("the witness %s's etcd member %s, leaving %s the one voter, since two voters are worse than one: %s", p.witness, p.etcd.witness.HexID(), p.end.Etcd.Members[0], p.etcdctl("member remove "+p.etcd.witness.HexID()))})
 		}
-		if p.etcd.witnessRunning {
-			st.Steps = append(st.Steps, Step{Site: p.witness, Verb: "stop", Title: "stop etcd on " + p.witness, Text: "its etcd, which a removed member cannot rejoin: " + p.stopWitnessEtcd()})
+		if p.etcd.witnessContainer {
+			st.Steps = append(st.Steps, Step{Site: p.witness, Verb: "stop", Title: "stop and remove etcd on " + p.witness, Text: "its etcd container, which a removed member cannot rejoin: " + p.stopWitnessEtcd()})
 		}
 	}
 	st.Gate = fmt.Sprintf("etcd's voters are exactly %s and every member is healthy", strings.Join(sortedCopy(p.live(p.end.Etcd.Members)), ", "))
@@ -674,8 +687,8 @@ func (p *Plan) buildCutoffEtcd() *Stage {
 				return err
 			}
 		}
-		if p.etcd.witness != nil || p.etcd.witnessRunning {
-			p.work("stop etcd on " + p.witness)
+		if p.etcd.witness != nil || p.etcd.witnessContainer {
+			p.work("stop and remove etcd on " + p.witness)
 			if out, err := p.transports[p.witness].Run(p.stopWitnessEtcd()); err != nil {
 				return fmt.Errorf("%s: stopping its etcd: %w: %s", p.witness, err, lastLines(out, 3))
 			}
