@@ -927,6 +927,6 @@ func TestPublishNextBuildsOnTheRunsVersion(t *testing.T) {
 	other := next
 	other.Secrets = []byte("s, again\n")
 	if _, _, err := publishNext(l, g, v1, 1, other, all, o, fakePush); err == nil {
-		t.Fatal("published on a version that is no longer the head")
+		t.Fatal("published on a version that is not the head")
 	}
 }
