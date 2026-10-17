@@ -43,8 +43,9 @@ type evictor struct {
 	// claims the host for that have no admission record here.
 	recordless []string
 	beforeGone bool
-	// installedGone is whether the plan removes /etc/paisans/installed.
-	installedGone bool
+	// installedGone is whether the plan removes /etc/paisans/installed,
+	// and installedKept whether it keeps it with the packages it names.
+	installedGone, installedKept bool
 	// reg is the host's registry, read once before anything is planned.
 	reg registry.Registry
 }
@@ -685,8 +686,11 @@ func (e *evictor) sysctls() error {
 // installed names, once no other deployment is admitted or claims the
 // host, what admit installed here, which stays: packages other software
 // may have come to use are the owner's to remove, and the system Docker
-// admit installed and disabled is left as it is now. Then the list goes, which /etc/paisans
-// needs to go too.
+// admit installed and disabled is left as it is now. The list stays with
+// what it names, root's and mode 644 in /etc/paisans as admit wrote it,
+// so a later admit, of this deployment or another, knows the system
+// Docker as its own and keeps it disabled. A list that names nothing
+// left goes, with /etc/paisans once empty.
 func (e *evictor) installed() error {
 	if e.shared() || !e.f.Files[installedPath].Present {
 		return nil
@@ -705,17 +709,18 @@ func (e *evictor) installed() error {
 	if in.dockerIsAdmits() {
 		named = append(named, "the docker group")
 	}
-	describe := "the list of what admit created here"
 	if len(named) > 0 {
-		detail := "Evict removes no package: something else here may use them by now. Remove them yourself once nothing does."
+		detail := "Evict removes no package: something else here may use them by now. Remove them yourself once nothing does. " +
+			installedPath + ", the list of them, stays with them, so a later admit knows them as its own."
 		if in.dockerIsAdmits() {
 			detail += " Admit disabled Docker's system daemon when it installed it; it is left as it is now. docker-ce made the docker group."
 		}
 		e.warn("packages: what admit installed stays: "+strings.Join(named, "; "), detail)
-		describe = "the list of what admit installed, which the plan names"
+		e.installedKept = true
+		return nil
 	}
 	e.installedGone = true
-	e.remove("remove "+installedPath, describe, "rm -f "+installedPath)
+	e.remove("remove "+installedPath, "the list of what admit created here", "rm -f "+installedPath)
 	return nil
 }
 
@@ -768,6 +773,8 @@ func (e *evictor) emptyDirs() error {
 		case !ok:
 		case n == ours[dir]:
 			e.remove("remove "+dir, "it holds nothing once this deployment's files are gone", "rmdir "+dir)
+		case dir == admission.Dir && e.installedKept && n == ours[dir]+1:
+			e.present("evict: " + dir + " kept, for " + installedPath + ", which stays with what admit installed")
 		case dir == admission.Dir:
 			e.present("evict: " + dir + " kept, since it holds what is not this deployment's")
 		}

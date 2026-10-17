@@ -531,7 +531,9 @@ func TestEvictRemovesTheMeshConfDropIn(t *testing.T) {
 }
 
 // What admit installed stays when the last deployment goes, and evict's
-// plan names it, from /etc/paisans/installed, which it then removes with
+// plan names it, from /etc/paisans/installed, which stays with it, and
+// /etc/paisans with that, as admit wrote them; the admission record and
+// the registry entry go. A list that names nothing left goes, with
 // /etc/paisans. Beside another admitted deployment, nothing is said and
 // the file stays.
 func TestEvictNamesWhatAdmitInstalled(t *testing.T) {
@@ -557,8 +559,26 @@ func TestEvictNamesWhatAdmitInstalled(t *testing.T) {
 	if !slices.ContainsFunc(plan.Warnings, func(w hostprep.Warning) bool { return w.Hint == want }) {
 		t.Errorf("the plan does not say %q:\n%s", want, plan.Text())
 	}
+	if stepIndex(plan, "/etc/paisans/installed") >= 0 || stepIndex(plan, "rmdir /etc/paisans") >= 0 {
+		t.Errorf("the installed file or /etc/paisans goes:\n%s", plan.Text())
+	}
+	if !slices.Contains(plan.Present, "evict: /etc/paisans kept, for /etc/paisans/installed, which stays with what admit installed") {
+		t.Errorf("the plan does not say /etc/paisans is kept:\n%s", plan.Text())
+	}
+	if stepIndex(plan, "rm -f /etc/paisans/admitted.f2a9.json") < 0 || titled(plan, "remove the registry entry") < 0 {
+		t.Errorf("the admission record or the registry entry is left:\n%s", plan.Text())
+	}
+	gone := host(false)
+	for _, p := range []string{"docker-ce", "docker-ce-cli", "containerd.io", "docker-ce-rootless-extras", "uidmap", "wireguard-tools"} {
+		gone.withPkg(p, "absent")
+	}
+	gone.file("/etc/paisans/installed", "package docker-ce\n").withFile("/etc/paisans/installed", "package docker-ce\n", "644", 0)
+	plan, err = hostadmit.BuildEvict(gone, hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if stepIndex(plan, "rm -f /etc/paisans/installed") < 0 || stepIndex(plan, "rmdir /etc/paisans") < 0 {
-		t.Errorf("the installed file or /etc/paisans is left:\n%s", plan.Text())
+		t.Errorf("a list that names nothing left, or /etc/paisans, is kept:\n%s", plan.Text())
 	}
 	plan, err = hostadmit.BuildEvict(host(true), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
 	if err != nil {
@@ -566,6 +586,40 @@ func TestEvictNamesWhatAdmitInstalled(t *testing.T) {
 	}
 	if strings.Contains(plan.Text(), "what admit installed") || stepIndex(plan, "/etc/paisans/installed") >= 0 {
 		t.Errorf("beside another deployment:\n%s", plan.Text())
+	}
+}
+
+// Admit after evict on the same host finds the system Docker the first
+// admit installed and disabled as it was left: disabled, stopped, its
+// socket gone. The installed list evict keeps says it is admit's, so the
+// mesh's check reads no networks for it, and admit leaves it disabled
+// without a step that touches it.
+func TestAdmitAfterEvictKeepsTheSystemDockerDisabled(t *testing.T) {
+	before := withEntries(installedByAdmit(evicted("vm", hostadmit.Flags{})()))
+	plan, err := hostadmit.BuildEvict(before, hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := current().with("system-unit", "docker.service disabled inactive").add("system-unit", "docker.socket disabled inactive").
+		answer("unix:///var/run/docker.sock network ls", dockerDown)
+	if stepIndex(plan, "rm -f /etc/paisans/installed") < 0 {
+		content := before.files["/etc/paisans/installed"]
+		after.withDir("/etc/paisans", "drwxr-xr-x", 0, 0).file("/etc/paisans/installed", content).withFile("/etc/paisans/installed", content, "644", 0)
+	}
+	admit, err := hostadmit.Build(after, input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatalf("admit after evict: %v", err)
+	}
+	if !slices.Contains(admit.Present, "docker: the system daemon admit installed is disabled") || !slices.Contains(admit.Present, "mesh: nothing on this host overlaps 10.44.0.0/24") {
+		t.Errorf("admit after evict:\n%s", admit.Text())
+	}
+	for _, s := range admit.Steps {
+		if strings.Contains(s.Command, "systemctl disable") || strings.Contains(s.Command, "systemctl enable") || strings.Contains(s.Command, "systemctl start docker") {
+			t.Errorf("step %q touches the system Docker: %s", s.Title, s.Command)
+		}
+	}
+	if !recordWritten(t, admit).SystemDockerDisabled {
+		t.Error("the record does not say admit disabled the system Docker")
 	}
 }
 

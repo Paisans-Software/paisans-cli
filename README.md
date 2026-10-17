@@ -5225,7 +5225,11 @@ plugin from Docker's own apt repository, as
 describes. An install needs one source, and that one gives every host the
 toolkit admits the same engine from the same source, whenever it was admitted.
 Docker's system daemons are kept from starting while its packages install and
-are then disabled, so only the deployments' rootless daemons run.
+are then disabled, so only the deployments' rootless daemons run. What admit
+installed is listed in `/etc/paisans/installed`, root's and mode 644. `site
+evict` keeps the packages and that list when the last deployment goes, so a
+later admit on the host, of any deployment, knows the system daemons as its
+own and leaves them disabled.
 
 Where Docker is absent and the host has packages Docker's page lists as
 conflicting (`containerd`, `runc` and the rest), they are **refused, not

@@ -893,7 +893,9 @@ paisans site evict --site home-a --ssh owner@home-a.example.org --execute
   module stay loaded until the next boot, and the plan says so. What admit
   installed (Docker's packages and its apt key and source, the rootless
   extras, uidmap, wireguard-tools, the `docker` group) stays when the last
-  deployment goes, and the plan names it. A hold on Docker's daemons that a
+  deployment goes, and the plan names it; `/etc/paisans/installed`, the list
+  of it, stays with it, so a later admit leaves Docker's system daemon
+  disabled. A hold on Docker's daemons that a
   killed admit left is put back. The SSH allow may be the rule the
   owner's own login arrives by, so it is kept and evict warns of it: the
   owner deletes it themselves once nothing else needs it. Evict never

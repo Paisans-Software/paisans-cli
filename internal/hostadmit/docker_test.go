@@ -451,6 +451,7 @@ func TestASystemDockerThatDoesNotAnswer(t *testing.T) {
 	}
 	for name, h := range map[string]*fakeHost{
 		"the owner's":            down(current()),
+		"the owner's, disabled":  down(current().with("system-unit", "docker.service disabled inactive")),
 		"admit's, enabled since": down(installedByAdmit(current()).with("system-unit", "docker.service enabled inactive")),
 		"admit's, run since":     down(installedByAdmit(current()).with("docker-networks", "present")),
 	} {

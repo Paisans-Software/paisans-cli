@@ -448,7 +448,10 @@ ends by printing the `site evict` line for you.
   `wireguard-tools`, and any other admit installed), Docker's apt key and
   source, the `docker` group `docker-ce` made, and Docker's system daemon,
   disabled as admit left it. Something else may use them by then, so
-  removing them is yours; the plan names each before evict removes the list
-  itself.
+  removing them is yours; the plan names each.
+* **`/etc/paisans/installed`**, the list of what admit installed, root's and
+  mode 644, with `/etc/paisans` holding it, while the list names anything
+  still installed. A later admit on this host, of any deployment, reads it,
+  knows Docker's system daemon as admit's and leaves it disabled.
 * A user you deleted by hand before evicting can leave an empty
   `/etc/systemd/system/user@<uid>.service.requires` behind.

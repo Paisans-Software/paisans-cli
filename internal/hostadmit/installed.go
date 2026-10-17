@@ -16,7 +16,8 @@ import (
 // that it did not have, each package by name and Docker's apt key and
 // source by path, for every admitted deployment, and each directory admit
 // created that evict removes once empty. Host evict names what is
-// installed once the last deployment goes: it stays installed.
+// installed once the last deployment goes: it stays installed, and this
+// list stays with it, so a later admit knows the system Docker as its own.
 //
 // A package is claimed as Installing before the install runs and becomes
 // one of Packages when dpkg shows it installed as the install exits,
