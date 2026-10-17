@@ -16,43 +16,46 @@ import (
 
 // A name that publishes an address can be the sender of a forged message,
 // whether or not anybody ever sends mail from it, and a receiver has nothing
-// to refuse that forgery by unless the name says it sends none. So every name
-// dns init publishes says so, and the domain says it on behalf of every name
-// under it, unless the name has mail of its own.
+// to refuse that forgery by unless the name says it sends none. A receiver
+// enforcing DMARC reads the registrable domain's policy for every name under
+// it that has none of its own, so one policy that rejects says it for every
+// hostname, and a hostname gets a record of its own only where no policy the
+// deployment may write covers it.
 //
 // The records are the ones a DNS provider publishes for a domain that sends no
 // mail:
 //
-//   - SPF "v=spf1 -all" on the domain and on every hostname. SPF applies only
-//     to the exact name it is published at, and a wildcard TXT does not reach
-//     a name that holds any other record, so each hostname needs its own.
+//   - SPF "v=spf1 -all" on the domain.
 //   - A null MX (RFC 7505) on the domain: it accepts no mail, so nothing is
 //     delivered to it and no bounce is sent on its behalf.
 //   - An empty key at "*._domainkey" under the domain: no selector there
 //     verifies a signature.
 //   - DMARC at "_dmarc" under the domain: reject what fails, on the domain
-//     (p) and on every name under it (sp), with strict alignment. A receiver
-//     with no policy at a name's own _dmarc applies the registrable
-//     domain's, so when community.domain is the registrable domain this one
-//     record covers every hostname under it.
+//     (p) and on every name under it (sp), with strict alignment. When
+//     community.domain is the registrable domain this one record covers
+//     every hostname under it.
 //   - Below the registrable domain, the same DMARC at "_dmarc" under that
 //     domain, since community.domain's policy reaches none of the names
 //     under it and the registrable domain's reaches every one. That domain
 //     holds names the deployment does not run, so the policy is written only
 //     where there is none and nothing under the domain has mail without a
 //     policy of its own (parentHazards); otherwise it is checked, and warned
-//     about when missing or weaker than reject. Where it does not reject,
-//     every hostname gets the same DMARC at its own "_dmarc", and so does
-//     community.domain. A hostname that is itself a registrable domain gets
-//     none: its policy would govern names the deployment does not run.
+//     about when missing or weaker than reject.
+//   - Where the registrable domain's policy is one dns init only checks or
+//     may not write, and does not reject, the same DMARC at every
+//     hostname's own "_dmarc" (CoveredBy), and at community.domain's.
+//   - SPF "v=spf1 -all" on a hostname that is itself a registrable domain:
+//     a DMARC policy there would govern names the deployment does not run,
+//     and SPF applies to that exact name alone.
 //
 // A name has mail of its own when community.mail_domains lists it, or when an
 // smtp from_address an app sends with is at it. The second is derived, so a
 // sender the toolkit configures can never be locked out by the toolkit's own
 // records. A mail name gets none of these records: whoever runs its mail owns
 // its SPF, its MX, its DKIM keys and its DMARC policy. The hostnames under it
-// still get their own SPF, and dns init warns when a mail name's DMARC
-// policy, under community.domain, is missing or weaker than reject.
+// get their own DMARC policy while its policy does not reject, and dns init
+// warns when a mail name's DMARC policy, under community.domain, is missing
+// or weaker than reject.
 //
 // The one exception is a mail name that holds no MX record and no DMARC
 // policy. It sends mail, through a relay, and receives none, so nobody
@@ -124,31 +127,24 @@ func mailWants(cfg *config.Config, addresses []Want) []Want {
 	domain := normalise(cfg.Community.Domain)
 	var out []Want
 
-	spf := map[string][]string{} // name -> sources
+	// hosts are the names without mail of their own that get an address
+	// record, each with the keys that publish it.
+	hosts := map[string][]string{}
 	var names []string
-	addSPF := func(name string, sources ...string) {
-		if _, ok := mail[name]; ok {
-			return
+	for _, w := range addresses {
+		if _, ok := mail[w.Name]; ok {
+			continue
 		}
-		if _, ok := spf[name]; !ok {
-			names = append(names, name)
+		if _, ok := hosts[w.Name]; !ok {
+			names = append(names, w.Name)
 		}
-		for _, s := range sources {
-			if !contains(spf[name], s) {
-				spf[name] = append(spf[name], s)
+		for _, s := range w.Sources {
+			if !contains(hosts[w.Name], s) {
+				hosts[w.Name] = append(hosts[w.Name], s)
 			}
 		}
 	}
-	if domain != "" {
-		addSPF(domain, "community.domain")
-	}
-	for _, w := range addresses {
-		addSPF(w.Name, w.Sources...)
-	}
 	sort.Strings(names)
-	for _, name := range names {
-		out = append(out, Want{Type: "TXT", Name: name, Content: spfLockdown, Sources: spf[name]})
-	}
 
 	if domain == "" {
 		return out
@@ -187,16 +183,29 @@ func mailWants(cfg *config.Config, addresses []Want) []Want {
 		}
 	}
 	// A receiver that finds no policy at a name's own _dmarc uses the
-	// registrable domain's. Below it, community.domain's policy reaches no
-	// hostname, so each gets its own; a hostname that is itself a
-	// registrable domain is left alone, since its policy would govern names
-	// the deployment does not run.
+	// registrable domain's. Where that is community.domain's own lockdown
+	// policy, it covers the hostname. Where it is a policy dns init only
+	// checks or may not write, the hostname gets its own, Covered while that
+	// one rejects. A hostname that is itself a registrable domain gets SPF
+	// instead: a DMARC policy there would govern names the deployment does
+	// not run.
+	_, domainMail := mail[domain]
 	for _, name := range names {
 		if name == domain {
 			continue
 		}
-		if org := orgDomain(name); org != "" && org != name && org != domain {
-			out = append(out, Want{Type: "TXT", Name: "_dmarc." + name, Content: dmarcLockdown, Sources: spf[name], BelowParent: org == parent})
+		org := orgDomain(name)
+		switch {
+		case org == "":
+		case org == name:
+			out = append(out, Want{Type: "TXT", Name: name, Content: spfLockdown, Sources: hosts[name]})
+		case org == domain && !domainMail:
+		default:
+			w := Want{Type: "TXT", Name: "_dmarc." + name, Content: dmarcLockdown, Sources: hosts[name]}
+			if org == domain || org == parent {
+				w.CoveredBy = "_dmarc." + org
+			}
+			out = append(out, w)
 		}
 	}
 	source := []string{"community.domain"}
@@ -207,10 +216,15 @@ func mailWants(cfg *config.Config, addresses []Want) []Want {
 		out = append(out, Want{Type: "TXT", Name: dmarc, Content: dmarcLockdown, Sources: sources, Advisory: true})
 		return out
 	}
+	coveredBy := ""
+	if parent != "" {
+		coveredBy = "_dmarc." + parent
+	}
 	out = append(out,
+		Want{Type: "TXT", Name: domain, Content: spfLockdown, Sources: source},
 		Want{Type: "MX", Name: domain, Content: nullMX, Priority: 0, Sources: source},
 		Want{Type: "TXT", Name: "*._domainkey." + domain, Content: dkimLockdown, Sources: source},
-		Want{Type: "TXT", Name: dmarc, Content: dmarcLockdown, Sources: source, BelowParent: parent != ""},
+		Want{Type: "TXT", Name: dmarc, Content: dmarcLockdown, Sources: source, CoveredBy: coveredBy},
 	)
 	return out
 }

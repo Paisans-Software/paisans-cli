@@ -91,10 +91,10 @@ type Want struct {
 	// otherwise checks it. A provider that does not hold it means it is not
 	// checked.
 	Parent bool
-	// BelowParent is a no-mail DMARC policy at a name below the registrable
-	// domain a Parent want is for. A receiver reads that domain's policy for
-	// a name with none of its own, so where it rejects, this one is Covered.
-	BelowParent bool
+	// CoveredBy is the "_dmarc" name whose policy a receiver reads for this
+	// no-mail DMARC policy's name when the name has none of its own: the
+	// registrable domain's. Where that policy rejects, this one is Covered.
+	CoveredBy string
 	// Leftover is a record that must not be there if this deployment's dns
 	// init made it: a no-mail record at a name that has since been given mail.
 	// One found is a conflict that dns prune resolves; none is Clear. It is
@@ -430,6 +430,9 @@ type Entry struct {
 	Action Action
 	// Detail says what is in the way, for a conflict.
 	Detail string
+	// rejects is a DMARC entry whose policy, once the plan is executed,
+	// rejects on the domain and every name under it.
+	rejects bool
 }
 
 // Plan is every wanted record, compared with the provider.
@@ -543,20 +546,43 @@ func Build(ctx context.Context, provider Provider, d deployment.Deployment, want
 				}
 			}
 		}
-		plan.Entries = append(plan.Entries, Entry{Want: w, Zone: z.name, zoneID: z.id, Action: action, Detail: detail})
+		plan.Entries = append(plan.Entries, Entry{Want: w, Zone: z.name, zoneID: z.id, Action: action, Detail: detail, rejects: rejects(action, records)})
 	}
 	if parent != nil {
 		if err := plan.addParent(ctx, provider, *parent, zones); err != nil {
 			return nil, err
 		}
 	}
+	plan.cover()
 	return plan, nil
+}
+
+// rejects reports whether a DMARC policy planned as action, at a name
+// holding records, rejects once the plan is executed: one about to be
+// created does, and one already there does if every policy there rejects.
+func rejects(action Action, records []Record) bool {
+	return action == Create || action != Conflict && hasDMARC(records) && satisfiesAll(records)
+}
+
+// cover makes each no-mail DMARC policy that would be created Covered where
+// the policy a receiver reads in its place rejects.
+func (p *Plan) cover() {
+	covering := map[string]bool{}
+	for _, e := range p.Entries {
+		if e.Type == "TXT" && e.rejects && wantPurpose(e.Want) == purposeDMARC {
+			covering[e.Name] = true
+		}
+	}
+	for i, e := range p.Entries {
+		if e.CoveredBy != "" && e.Action == Create && covering[e.CoveredBy] {
+			p.Entries[i].Action, p.Entries[i].Detail = Covered, "covered by the policy at "+e.CoveredBy
+		}
+	}
 }
 
 // addParent plans the registrable domain's DMARC policy, after every other
 // entry, since whether it can be written depends on which names this plan
-// gives a policy of their own. Where it rejects, or is created, each no-mail
-// policy below it that would be created is Covered instead.
+// gives a policy of their own.
 func (p *Plan) addParent(ctx context.Context, provider Provider, w Want, zones map[string]zone) error {
 	z, err := FindZone(ctx, provider, w.Name, zones)
 	if errors.Is(err, errNoZone) {
@@ -591,14 +617,7 @@ func (p *Plan) addParent(ctx context.Context, provider Provider, w Want, zones m
 			detail = parentHeld(w, hazards)
 		}
 	}
-	if action == Create || action != Conflict && hasDMARC(records) && satisfiesAll(records) {
-		for i, e := range p.Entries {
-			if e.BelowParent && e.Action == Create {
-				p.Entries[i].Action, p.Entries[i].Detail = Covered, "covered by the policy at "+w.Name
-			}
-		}
-	}
-	entry := Entry{Want: w, Zone: z.name, zoneID: z.id, Action: action, Detail: detail}
+	entry := Entry{Want: w, Zone: z.name, zoneID: z.id, Action: action, Detail: detail, rejects: rejects(action, records)}
 	at := sort.Search(len(p.Entries), func(i int) bool {
 		e := p.Entries[i]
 		return e.Name > w.Name || e.Name == w.Name && e.Type >= w.Type

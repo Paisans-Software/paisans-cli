@@ -3896,16 +3896,21 @@ records it would have created by hand, unproxied.
 be forged as the sender of a message whether or not anybody sends mail from
 it, and a receiver refuses the forgery only when the name says it sends none.
 So `dns init` publishes, beside the address records, the records a DNS
-provider recommends for a domain that sends no mail:
+provider recommends for a domain that sends no mail. A receiver enforcing
+DMARC applies the registrable domain's policy to every name under it that has
+none of its own, so one DMARC policy covers every hostname, and a hostname
+gets no record of its own unless no policy the deployment may write covers
+it:
 
 | Name | Record | What it tells a receiver |
 |------|--------|--------------------------|
-| `community.domain` and every name that gets an address record | TXT `v=spf1 -all` | no server may send as this name. SPF applies only to the exact name it is published at, and a wildcard reaches no name that holds another record, so each hostname carries its own |
+| `community.domain` | TXT `v=spf1 -all` | no server may send as the domain |
 | `community.domain` | MX `0 .` (RFC 7505's null MX) | the domain accepts no mail, so nothing is delivered to it and no bounce is sent in its name |
 | `*._domainkey.<community.domain>` | TXT `v=DKIM1; p=` | no selector under the domain has a key to verify a signature with |
 | `_dmarc.<community.domain>` | TXT `v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s;` | reject what fails, on the domain (`p`) and on every name under it (`sp`) |
 | `_dmarc.<registrable domain>`, when `community.domain` is below it and the conditions below hold | TXT `v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s;` | a receiver finding no policy at a name's own `_dmarc` applies the registrable domain's (`example.org` for `talk.staging.example.org`), never `community.domain`'s, so this one record covers every hostname below it |
-| `_dmarc.<hostname>`, for every name that gets an address record, when `community.domain` is below its registrable domain and that domain's policy does not reject | TXT `v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s;` | each hostname carries the policy the registrable domain does not. A hostname that is itself a registrable domain gets none |
+| `_dmarc.<hostname>`, for every name that gets an address record, when the registrable domain's policy is one `dns init` only checks or may not write, and does not reject | TXT `v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s;` | each hostname carries the policy the registrable domain does not: below a registrable domain above `community.domain`, or under a `community.domain` with mail of its own |
+| a hostname that is itself a registrable domain | TXT `v=spf1 -all` | a DMARC policy there would govern names the deployment does not run, so the hostname says it sends no mail with SPF, which applies to that exact name alone |
 
 When `community.domain` is below its registrable domain, every name a policy
 there would govern is one the deployment may not run, so `dns init` writes
@@ -3953,7 +3958,8 @@ A sender in an `smtp` block makes its own domain one of these without being
 listed: the domain of `smtp.from_address`, and of every `from_address` an app
 that sends mail declares for itself, so the toolkit never locks out mail it
 configured. Every other name is locked down as above, the hostnames under a
-mail domain included. `dns init` checks the DMARC policy of every mail name
+mail domain included: each gets its own DMARC policy while the mail domain's
+does not reject, and none once it does. `dns init` checks the DMARC policy of every mail name
 under `community.domain`: a policy weaker than `p=reject` and `sp=reject` with
 no `pct` below 100 is a `!` note, never a conflict and never replaced. A
 missing policy is a note too while the name holds an MX record, since whoever

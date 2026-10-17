@@ -33,20 +33,15 @@ func wantsOf(t *testing.T, cfg *config.Config) map[string]Want {
 }
 
 // With no mail anywhere, the domain says it sends and receives none, on its
-// own behalf and every name's under it, and every name it publishes says so
-// for itself.
-func TestNoMailLocksDownTheDomainAndEveryHostname(t *testing.T) {
+// own behalf and every name's under it. Its DMARC policy covers every
+// hostname, so no hostname gets a record of its own.
+func TestNoMailLocksDownTheDomain(t *testing.T) {
 	got := wantsOf(t, declared())
 	want := map[string]string{
 		"TXT example.org":              spfLockdown,
 		"MX example.org":               nullMX,
 		"TXT *._domainkey.example.org": dkimLockdown,
 		"TXT _dmarc.example.org":       dmarcLockdown,
-		"TXT talk.example.org":         spfLockdown,
-		"TXT talk-media.example.org":   spfLockdown,
-		"TXT blog.example.org":         spfLockdown,
-		"TXT blog-media.example.org":   spfLockdown,
-		"TXT vm.example.org":           spfLockdown,
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %d mail records, want %d: %+v", len(got), len(want), got)
@@ -60,13 +55,25 @@ func TestNoMailLocksDownTheDomainAndEveryHostname(t *testing.T) {
 	if got["MX example.org"].Priority != 0 {
 		t.Errorf("a null MX has preference 0")
 	}
-	if s := got["TXT talk.example.org"].Sources; len(s) != 1 || s[0] != "apps.talk.hostname" {
-		t.Errorf("a hostname's SPF names the key that publishes the hostname: %v", s)
+}
+
+// A hostname that is itself a registrable domain is covered by no policy the
+// deployment may write, so it says it sends no mail with SPF.
+func TestRegistrableHostnameGetsSPF(t *testing.T) {
+	cfg := declared()
+	cfg.Apps["shop"] = config.App{Blueprint: config.Blueprint("writefreely"), Hostname: "example.net"}
+	got := wantsOf(t, cfg)
+	if w := got["TXT example.net"]; w.Content != spfLockdown || len(w.Sources) != 1 || w.Sources[0] != "apps.shop.hostname" {
+		t.Errorf("the registrable hostname's SPF: %+v", w)
+	}
+	if _, ok := got["TXT _dmarc.example.net"]; ok {
+		t.Errorf("a registrable hostname must get no DMARC policy")
 	}
 }
 
 // A domain whose mail somebody else runs gets none of the domain records, and
-// its DMARC policy is only checked; its hostnames still say they send none.
+// its DMARC policy is only checked; each hostname gets its own, which that
+// policy covers where it rejects.
 func TestMailDomainLeavesTheDomainAlone(t *testing.T) {
 	cfg := declared()
 	cfg.Community.MailDomains = []string{"Example.org."}
@@ -80,8 +87,27 @@ func TestMailDomainLeavesTheDomainAlone(t *testing.T) {
 	if !ok || !dmarc.Advisory || dmarc.Sources[0] != "community.mail_domains" {
 		t.Errorf("the domain's DMARC policy should be checked, not written: %+v", dmarc)
 	}
-	if _, ok := got["TXT talk.example.org"]; !ok {
-		t.Errorf("a hostname under a mail domain still says it sends no mail")
+	if w := got["TXT _dmarc.talk.example.org"]; w.Content != dmarcLockdown || w.CoveredBy != "_dmarc.example.org" {
+		t.Errorf("a hostname under a mail domain gets its own policy, covered by the domain's: %+v", w)
+	}
+	if _, ok := got["TXT talk.example.org"]; ok {
+		t.Errorf("a hostname gets no SPF of its own")
+	}
+
+	for policy, want := range map[string]Action{
+		"v=DMARC1; p=reject; rua=mailto:r@example.net": Covered,
+		"v=DMARC1; p=none": Create,
+	} {
+		fake := newFake()
+		fake.zones["example.org"] = "zone-1"
+		fake.records["zone-1"] = []cfRecord{
+			{Type: "MX", Name: "example.org", Content: "mx.example.net", Priority: ptr(10)},
+			{Type: "TXT", Name: "_dmarc.example.org", Content: policy},
+		}
+		p := plan(t, fake.serve(t), cfg)
+		if e, _ := entryAt(p, "_dmarc.talk.example.org"); e.Action != want {
+			t.Errorf("under %q: got %s, want %s", policy, e.Action, want)
+		}
 	}
 }
 
@@ -116,8 +142,11 @@ func TestSMTPSenderIsAMailDomain(t *testing.T) {
 	if !got["TXT _dmarc.example.org"].Advisory {
 		t.Errorf("the sending domain's DMARC is advisory")
 	}
-	if _, ok := got["TXT blog.example.org"]; !ok {
-		t.Errorf("blog sends no mail, so it says so")
+	if w := got["TXT _dmarc.blog.example.org"]; w.Content != dmarcLockdown || w.CoveredBy != "_dmarc.example.org" {
+		t.Errorf("blog sends no mail, so it says so: %+v", w)
+	}
+	if w := got["TXT _dmarc.talk.example.org"]; !w.Advisory {
+		t.Errorf("talk sends mail, so its DMARC policy is only checked: %+v", w)
 	}
 }
 
@@ -326,8 +355,7 @@ func TestPruneRemovesNoMailRecordsAMailDomainNoLongerWants(t *testing.T) {
 		{ID: "mx", Type: "MX", Name: "example.org", Content: ".", Priority: new(int), Comment: comment},
 		{ID: "dkim", Type: "TXT", Name: "*._domainkey.example.org", Content: dkimLockdown, Comment: comment},
 		{ID: "dmarc", Type: "TXT", Name: "_dmarc.example.org", Content: dmarcLockdown, Comment: comment},
-		// Still wanted: a hostname says it sends no mail whatever the
-		// domain does.
+		// A hostname's SPF is wanted no longer: DMARC covers it.
 		{ID: "talk", Type: "TXT", Name: "talk.example.org", Content: spfLockdown, Comment: comment},
 		// The comment, but content dns init never writes.
 		{ID: "edited", Type: "TXT", Name: "example.org", Content: "v=spf1 include:_spf.example.net -all", Comment: comment},
@@ -349,12 +377,12 @@ func TestPruneRemovesNoMailRecordsAMailDomainNoLongerWants(t *testing.T) {
 	for _, e := range p.Removes() {
 		removes[e.ID] = true
 	}
-	for _, id := range []string{"spf", "mx", "dkim", "dmarc"} {
+	for _, id := range []string{"spf", "mx", "dkim", "dmarc", "talk"} {
 		if !removes[id] {
 			t.Errorf("%s should be removed: %+v", id, p.Entries)
 		}
 	}
-	for _, id := range []string{"talk", "edited", "spf-at-dmarc", "real-mx"} {
+	for _, id := range []string{"edited", "spf-at-dmarc", "real-mx"} {
 		if removes[id] {
 			t.Errorf("%s should be kept", id)
 		}
@@ -584,7 +612,7 @@ func TestRegistrableDomainPolicyIsWrittenWhenNothingHasMail(t *testing.T) {
 		t.Fatalf("the registrable domain's policy is a parent want: %+v", w)
 	}
 	for _, name := range stagedDMARC {
-		if w := wantsOf(t, staged())["TXT "+name]; !w.BelowParent {
+		if w := wantsOf(t, staged())["TXT "+name]; w.CoveredBy != "_dmarc.example.org" {
 			t.Errorf("%s is not marked as covered by the registrable domain: %+v", name, w)
 		}
 	}
@@ -828,8 +856,8 @@ func TestPruneRemovesHostnamePoliciesTheRegistrableDomainCovers(t *testing.T) {
 	for _, e := range p.Removes() {
 		removes[e.ID] = true
 	}
-	if !removes["talk"] || !removes["domain"] || removes["parent"] || removes["spf"] {
-		t.Errorf("removes %v, want talk and domain only", removes)
+	if !removes["talk"] || !removes["domain"] || !removes["spf"] || removes["parent"] {
+		t.Errorf("removes %v, want talk, domain and spf", removes)
 	}
 }
 

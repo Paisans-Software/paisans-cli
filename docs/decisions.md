@@ -3169,3 +3169,44 @@ sight, it writes nothing there and falls back to a policy per hostname.
 
 `go build ./... && go vet ./... && go test ./...`; the new tests in
 `internal/dns/mail_test.go` were checked to fail before the change.
+
+## 2026-10-17: `dns init` publishes SPF on the domain, not on every hostname
+
+Founder decision. It amends *`dns init` publishes the no-mail records*, where
+every name that gets an address record also got `v=spf1 -all`.
+
+### What was decided
+
+* `v=spf1 -all` is published on `community.domain`, and on a hostname only
+  when the hostname is itself a registrable domain.
+* Every other hostname relies on DMARC. One whose registrable domain's
+  policy is the deployment's own lockdown policy gets nothing. One whose
+  registrable domain's policy `dns init` only checks or may not write, above
+  `community.domain` or at a `community.domain` with mail of its own, gets
+  the lockdown policy at its own `_dmarc` while that policy does not reject,
+  and none once it does.
+* `dns prune` removes the hostnames' SPF records and covered DMARC policies
+  this deployment's `dns init` made, as records nothing wants.
+
+### Why
+
+A forged message from a hostname is refused by DMARC alone at every receiver
+that enforces it: with no SPF record the SPF result is none, not a pass, and
+the forger has no aligned DKIM signature. SPF checks the envelope sender, not
+the From a person reads, so a forger who wants past SPF uses another
+envelope. A record per hostname, for every app and every media hostname,
+bought protection only at receivers that check SPF and ignore DMARC, and
+counted against the provider's per zone record quota. A hostname that is a
+registrable domain is the exception: nothing the deployment may write gives
+it a DMARC policy, and SPF reaches that name alone.
+
+### What was weighed
+
+* **A wildcard SPF record.** Not chosen: a wildcard reaches no name that
+  holds any other record, so it covers no hostname with an address.
+* **Hostnames as CNAMEs of one gateway name, inheriting its SPF.** Not
+  chosen: gateway moves add and delete address records per hostname.
+
+### What was run
+
+`go build ./... && go vet ./... && go test ./...`.

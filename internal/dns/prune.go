@@ -176,9 +176,8 @@ func BuildPrune(ctx context.Context, provider Provider, cfg *config.Config, want
 			continue
 		}
 		// A registrable domain the provider does not hold has no record of
-		// this deployment's to consider. One whose policy rejects covers
-		// every no-mail policy below it, so none of those is wanted.
-		z, err := FindZone(ctx, provider, w.Name, cache)
+		// this deployment's to consider.
+		_, err := FindZone(ctx, provider, w.Name, cache)
 		if errors.Is(err, errNoZone) {
 			continue
 		}
@@ -186,16 +185,31 @@ func BuildPrune(ctx context.Context, provider Provider, cfg *config.Config, want
 			return nil, err
 		}
 		rules.names = append(rules.names, w.Name)
-		records, err := provider.Records(ctx, z.id, w.Name)
-		if err != nil {
-			return nil, err
+	}
+	// A no-mail DMARC policy whose name a rejecting policy covers is not
+	// wanted.
+	covers := map[string]bool{}
+	for _, w := range wants {
+		if w.CoveredBy == "" {
+			continue
 		}
-		if action, _ := classify(w, records, nil); action == Present {
-			for _, b := range wants {
-				if b.BelowParent {
-					delete(rules.wanted, b.Type+" "+b.Name)
-				}
+		rejecting, ok := covers[w.CoveredBy]
+		if !ok {
+			z, err := FindZone(ctx, provider, w.CoveredBy, cache)
+			if err != nil && !errors.Is(err, errNoZone) {
+				return nil, err
 			}
+			if err == nil {
+				records, err := provider.Records(ctx, z.id, w.CoveredBy)
+				if err != nil {
+					return nil, err
+				}
+				rejecting = hasDMARC(records) && satisfiesAll(records)
+			}
+			covers[w.CoveredBy] = rejecting
+		}
+		if rejecting {
+			delete(rules.wanted, w.Type+" "+w.Name)
 		}
 	}
 	for _, name := range cfg.SiteNames() {

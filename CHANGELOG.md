@@ -27,6 +27,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Changed
 
+- `dns init` publishes `v=spf1 -all` on `community.domain` alone, not on every hostname, and gives a hostname its own DMARC policy only where no rejecting policy above it covers it.
 - `dns init` writes the registrable domain's DMARC policy when nothing under it has mail without a policy of its own, and then gives hostnames below it no DMARC policy of their own.
 - `doctor` reports a site pending admission, or down after joining, as a warning naming what the deployment is without and how to admit or remove it; a gateway stays a failure.
 - `doctor`'s advice for a container whose mesh address was missing at boot is to start it again, as the deployment's user, or recreate its stack.
