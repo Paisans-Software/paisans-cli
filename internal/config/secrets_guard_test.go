@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -186,5 +187,70 @@ func TestCheckSecretsFile(t *testing.T) {
 	}
 	if err := config.CheckSecretsBytes(plain, []byte(plaintextSecrets)); err == nil {
 		t.Error("plaintext bytes passed")
+	}
+}
+
+// The command a refusal prints for a missing .sops.yaml writes it, and run
+// again refuses rather than replace the file it wrote. A .sops.yaml that is
+// there but names no recipient Paisans reads (here, key_groups) gets no
+// command at all, so pasting nothing can replace the operator's rules.
+func TestTheRestoreCommandNeverOverwrites(t *testing.T) {
+	path, recipients := encryptedFile(t)
+	dir := filepath.Dir(path)
+	_, explain := ui.Describe(config.CheckSecretsFile(path))
+	var command string
+	for _, line := range strings.Split(explain, "\n") {
+		if strings.HasPrefix(line, "  sh -c ") {
+			command = strings.TrimSpace(line)
+		}
+	}
+	if command == "" {
+		t.Fatalf("no command in:\n%s", explain)
+	}
+	if out, err := exec.Command("sh", "-c", command).CombinedOutput(); err != nil {
+		t.Fatalf("%s: %v\n%s", command, err, out)
+	}
+	if got, err := config.Recipients(dir); err != nil || !slices.Equal(got, recipients) {
+		t.Fatalf("restored .sops.yaml names %v, %v; want %v", got, err, recipients)
+	}
+	sopsPath := filepath.Join(dir, config.SOPSConfigName)
+	keyGroups := "creation_rules:\n  - key_groups:\n      - age:\n          - " + recipients[0] + "\n"
+	if err := os.WriteFile(sopsPath, []byte(keyGroups), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("sh", "-c", command).CombinedOutput(); err == nil {
+		t.Errorf("the command ran again over an existing .sops.yaml: %s", out)
+	}
+	if data, _ := os.ReadFile(sopsPath); string(data) != keyGroups {
+		t.Fatalf("the command replaced .sops.yaml: %q", data)
+	}
+	err := config.CheckSecretsFile(path)
+	if err == nil {
+		t.Fatal("key_groups alone passed")
+	}
+	hint, explain := ui.Describe(err)
+	if !strings.Contains(hint, "names no age recipient") || strings.Contains(explain, "printf") || strings.Contains(explain, "sh -c") || !strings.Contains(explain, recipients[0]) {
+		t.Errorf("an existing .sops.yaml: %s\n%s", hint, explain)
+	}
+}
+
+// Only age public keys from a file's metadata are printed, and a file whose
+// metadata names anything else gets no command: a recipient there could
+// break out of the command's quoting.
+func TestNoRecipientProblemPrintsOnlyAgeRecipients(t *testing.T) {
+	id, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	good := id.Recipient().String()
+	const bad = "age1x' ; touch pwned ; echo '"
+	path := filepath.Join(t.TempDir(), "secrets.enc.yaml")
+	file := "version: 2\nsops:\n    age:\n        - recipient: " + good + "\n        - recipient: \"" + bad + "\"\n    mac: ENC[x]\n"
+	if err := os.WriteFile(path, []byte(file), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, explain := ui.Describe(config.NoRecipientProblem(path))
+	if strings.Contains(explain, "touch") || strings.Contains(explain, "printf") || !strings.Contains(explain, good) || !strings.Contains(explain, "1 recipient(s) that are not age public keys") {
+		t.Errorf("explain:\n%s", explain)
 	}
 }

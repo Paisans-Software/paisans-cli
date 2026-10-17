@@ -3028,12 +3028,18 @@ key; the remedy is the same.
 **`secrets.enc.yaml` exists only encrypted.** Every command that writes it
 encrypts it to the recipients in `.sops.yaml`, and with `.sops.yaml` missing or
 naming no recipient it refuses before it changes anything. For a file that is
-already encrypted, the refusal names the recipients its sops metadata records
-and prints the command that writes `.sops.yaml` back with them:
+already encrypted, the refusal names the age recipients its sops metadata
+records. When `.sops.yaml` is missing, it also prints the command that writes
+it back with them, which refuses to replace a `.sops.yaml` that exists:
 
 ```
-printf 'creation_rules:\n  - age: age1…\n' > .sops.yaml
+sh -c "set -C; printf 'creation_rules:\n  - age: age1…\n' > /path/to/.sops.yaml"
 ```
+
+When `.sops.yaml` is there but names no recipient Paisans reads (the `age`
+field of each entry under `creation_rules`), it prints no command, so nothing
+pasted can replace your rules. A recipient in the file's metadata that is not
+an age public key is never printed, and then no command is either.
 
 A plaintext `secrets.enc.yaml` is refused wherever a deployment reads it:
 `init`, `apply`, `validate`, publishing a version, pulling or recovering one,

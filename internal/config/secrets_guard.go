@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -74,17 +75,63 @@ func NoRecipientProblem(path string) error {
 func noRecipientProblem(path string, recipients []string) error {
 	name := ui.ShortPath(path)
 	sopsPath := filepath.Join(filepath.Dir(path), SOPSConfigName)
-	var explain string
-	if len(recipients) == 0 {
-		explain = fmt.Sprintf("%s is encrypted, and %s, which names who it is encrypted to, is missing or names no age recipient. Paisans never writes an encrypted secrets file back in plaintext, so nothing was written. Restore %s from where it is kept, such as git, or write it naming your age public key:\n  printf 'creation_rules:\\n  - age: %%s\\n' <your age public key> > %s\nthen run the command again.", name, SOPSConfigName, SOPSConfigName, quotePath(sopsPath))
+	_, statErr := os.Stat(sopsPath)
+	exists := statErr == nil
+	valid, invalid := ageRecipientsOnly(recipients)
+
+	var b strings.Builder
+	if len(valid) > 0 {
+		fmt.Fprintf(&b, "%s is encrypted to %s", name, strings.Join(valid, ", "))
 	} else {
-		explain = fmt.Sprintf("%s is encrypted to %s, and %s, which names who it is encrypted to, is missing or names no age recipient. Paisans never writes an encrypted secrets file back in plaintext, so nothing was written. Restore %s from where it is kept, such as git, or write it from the recipients the file records:\n  printf 'creation_rules:\\n  - age: %s\\n' > %s\nthen run the command again.", name, strings.Join(recipients, ", "), SOPSConfigName, SOPSConfigName, strings.Join(recipients, ","), quotePath(sopsPath))
+		fmt.Fprintf(&b, "%s is encrypted", name)
+	}
+	if exists {
+		fmt.Fprintf(&b, ", and %s beside it names no age recipient Paisans reads: it reads the age field of each entry under creation_rules.", SOPSConfigName)
+	} else {
+		fmt.Fprintf(&b, ", and %s, which names who it is encrypted to, is missing beside it.", SOPSConfigName)
+	}
+	b.WriteString(" Paisans never writes an encrypted secrets file back in plaintext, so nothing was written.")
+	if invalid > 0 {
+		fmt.Fprintf(&b, " Its sops metadata also names %d recipient(s) that are not age public keys, which are not repeated here.", invalid)
+	}
+	switch {
+	case exists:
+		fmt.Fprintf(&b, " Name the recipients in %s as `- age: <public key>,...` under creation_rules, then run the command again.", SOPSConfigName)
+	case len(valid) > 0 && invalid == 0 && quotePath(sopsPath) == sopsPath:
+		// set -C makes the redirection refuse a file that exists, so the
+		// command never replaces a .sops.yaml written in the meantime. It
+		// runs under sh, whatever the operator's own shell is.
+		fmt.Fprintf(&b, " Restore %s from where it is kept, such as git, or write it from the recipients the file records:\n  sh -c \"set -C; printf 'creation_rules:\\n  - age: %s\\n' > %s\"\nthen run the command again.", SOPSConfigName, strings.Join(valid, ","), sopsPath)
+	default:
+		fmt.Fprintf(&b, " Restore %s from where it is kept, such as git, or write it naming your age public key as `- age: <public key>` under creation_rules, then run the command again.", SOPSConfigName)
+	}
+	hint := "no " + SOPSConfigName + " beside " + name
+	if exists {
+		hint = SOPSConfigName + " beside " + name + " names no age recipient"
 	}
 	return &ui.Problem{
-		Hint:    "no " + SOPSConfigName + " beside " + name + " names an age recipient",
-		Explain: explain,
+		Hint:    hint,
+		Explain: b.String(),
 		Cause:   fmt.Errorf("%s: encrypted, and %s names no age recipient", path, sopsPath),
 	}
+}
+
+// ageRecipient is an age public key: bech32, under the age1 prefix, which
+// covers a plugin's recipient (age1yubikey1...) as well.
+var ageRecipient = regexp.MustCompile(`^age1[0-9a-z]+$`)
+
+// ageRecipientsOnly is every recipient that is an age public key, and how
+// many were not. Only those are ever printed into a command: the rest come
+// from a file's metadata and could break out of its quoting.
+func ageRecipientsOnly(recipients []string) (valid []string, invalid int) {
+	for _, r := range recipients {
+		if ageRecipient.MatchString(r) {
+			valid = append(valid, r)
+		} else {
+			invalid++
+		}
+	}
+	return valid, invalid
 }
 
 // PlaintextProblem is the refusal of a secrets file at path that is not
