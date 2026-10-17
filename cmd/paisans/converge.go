@@ -172,6 +172,22 @@ func convergePlan(cfg *config.Config, st convergeState) []convergeStep {
 			steps = append(steps, applyStep(stageOthers, m))
 		}
 	}
+	// The gateway serves Pocket ID's public URL, which an app signing in
+	// through Pocket ID fetches its issuer's discovery document from as it
+	// starts. A gateway outside etcd is otherwise applied after the data
+	// members, so before they are founded and start their apps, each one is
+	// applied with every app stack it runs held back: its mesh, its
+	// infrastructure and its Caddy, which starts before its upstreams answer
+	// and answers its own /.well-known/paisans/<token>. Its apps, a pinned
+	// gate or a monitor's included, wait on the data sites and Pocket ID,
+	// and start in its full apply below.
+	if dataFounding {
+		for _, g := range cfg.GatewaySites() {
+			if !slices.Contains(members, g) {
+				steps = append(steps, step(stageOthers, "apply", "--site", g, "--hold-apps"))
+			}
+		}
+	}
 	for _, m := range members {
 		if founding(m) && !witness(m) {
 			steps = append(steps, applyStep(stageFounding, m))
@@ -1713,10 +1729,11 @@ func convergeWaits(cfg *config.Config, steps []convergeStep, i int) []string {
 	}
 	s := steps[i]
 	earlier := steps[:i]
-	// first is the title of the first earlier apply or site add of site.
+	// first is the title of the first earlier apply or site add of site,
+	// leaving out an apply that holds its apps back.
 	first := func(site string) []string {
 		for _, e := range earlier {
-			if e.Stage.installs() && e.Stage != stagePassTwo && stepSite(e) == site {
+			if e.Stage.installs() && e.Stage != stagePassTwo && stepSite(e) == site && !slices.Contains(e.Args, "--hold-apps") {
 				return []string{e.Title}
 			}
 		}
@@ -1772,11 +1789,14 @@ func convergeWaits(cfg *config.Config, steps []convergeStep, i int) []string {
 	return waits
 }
 
-// stepSite is the site a step is about, or empty for one about none. Each
-// step about a site names it last.
+// stepSite is the site a step is about, or empty for one about none. An
+// apply names it after --site, and each other step about a site names it
+// last.
 func stepSite(s convergeStep) string {
 	switch strings.Join(s.Args[:min(2, len(s.Args))], " ") {
-	case "apply --site", "pull --site", "site add", "site prepare", "storage init":
+	case "apply --site":
+		return s.Args[2]
+	case "pull --site", "site add", "site prepare", "storage init":
 		return s.Args[len(s.Args)-1]
 	}
 	return ""
