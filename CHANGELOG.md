@@ -18,6 +18,7 @@ changes share a bullet. Detailed notes are on the corresponding
 - `host request --site <s>` writes the request a host's owner admits that site from, naming the site and its roles, and prints its digest on stderr for the owner to compare over a trusted channel.
 - Any run with `--execute` that logs in to a site leaving `ssh.user` out writes the deployment's user there; a run without `--execute` only says so, and a failed write is a warning.
 - `host admit` and `host evict` let a host's owner admit a deployment as its own unprivileged user with rootless Docker, from a request on the host or over their own SSH, and undo it.
+- `site list` and `host list` print every site the configuration declares, with its roles and mesh address or its SSH destination and public addresses, reading `--config` or the working directory's file.
 - `host prepare --all` prepares every site the configuration declares, one at a time in its order, each with its own review, stopping at the first failure.
 - `host admit`, `host prepare` and the rootless deployment commands support Ubuntu 22.04 beside 24.04.
 - Each release attaches static `paisans-linux-amd64` and `paisans-linux-arm64` binaries and a `SHA256SUMS` file, so a host owner can run the CLI on Linux without Go.
