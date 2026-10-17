@@ -794,3 +794,15 @@ func TestAnAllowLineIsOnlyForAFamilyNoRuleAllows(t *testing.T) {
 		t.Errorf("allowed over IPv4 alone: %v", b)
 	}
 }
+
+// A DNAT rule to one of the host's own addresses reaches a listener of
+// its own, through ufw's INPUT: no route allow line, the listener's entry
+// alone.
+func TestADNATToTheHostItselfIsLeftToItsListener(t *testing.T) {
+	b := blocks(t, "addr 203.0.113.5/24\naddr 2001:db8::5/64\n"+
+		"dnat table ip nat chain PREROUTING: tcp dport 8443 dnat to 203.0.113.5:443\n"+
+		`listen tcp LISTEN 0 4096 0.0.0.0:443 0.0.0.0:* users:(("nginx",pid=1,fd=3))`+"\n"+sshdOn22)
+	if b == nil || !strings.Contains(b.Error(), "sudo ufw allow 443/tcp") || strings.Contains(b.Error(), "route allow") || strings.Contains(b.Error(), "8443") {
+		t.Errorf("%v", b)
+	}
+}

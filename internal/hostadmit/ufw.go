@@ -63,7 +63,9 @@ const ufwBeforeMarker = "paisans site admit: before enabling ufw"
 // enabled. What the owner's rules let in is read from ufw's own record of
 // them, the tuple lines of /etc/ufw/user.rules and user6.rules, one file
 // per address family, which hold an application profile's or a service's
-// ports resolved (ufwTuple). Whatever it cannot read it says so.
+// ports resolved (ufwTuple). The host's own addresses tell a DNAT rule to
+// the host itself, which ufw's INPUT decides, from one it routes.
+// Whatever it cannot read it says so.
 var ufwBeforeProbe = `# ` + ufwBeforeMarker + `
 ` + listenProbe("") + `
 for u in ssh.socket sshd.socket; do
@@ -76,6 +78,7 @@ for fam in 4 6; do
 done
 ` + ipv6Read("/etc/default/ufw", "/etc/ufw/ufw.conf") + natProbe + `
 echo "portrange $(cat /proc/sys/net/ipv4/ip_local_port_range 2>/dev/null)"
+ip -o addr show 2>/dev/null | awk '{ print "addr " $4 }'
 if command -v systemd-run >/dev/null 2>&1; then echo 'systemd-run present'; else echo 'systemd-run absent'; fi
 echo "fallback $(systemctl show -p LoadState --value ` + FallbackUnit + `.timer 2>/dev/null) $(systemctl show -p LoadState --value ` + FallbackUnit + `.service 2>/dev/null)"
 echo end`
@@ -109,6 +112,8 @@ type ufwBefore struct {
 	dockerChains  bool
 	// ephemeral is the host's ip_local_port_range, zero when unread.
 	ephemeral span
+	// local are the host's own addresses.
+	local []netip.Addr
 	// kept and blocked are exposure's: what stays reachable once ufw is
 	// on, and what enabling it blocks.
 	kept    []kept
@@ -168,6 +173,10 @@ func readUFWBefore(p *planner) (ufwBefore, error) {
 			}
 		case "docker-chains":
 			b.dockerChains = true
+		case "addr":
+			if pre, err := netip.ParsePrefix(strings.TrimSpace(rest)); err == nil {
+				b.local = append(b.local, pre.Addr())
+			}
 		case "portrange":
 			if f := strings.Fields(rest); len(f) == 2 {
 				if r, ok := spanOf(f[0], f[1]); ok {
@@ -662,6 +671,11 @@ func (p *planner) exposure(b ufwBefore) ([]kept, []Blocked) {
 				for _, s := range m.spans {
 					for _, proto := range protos {
 						s.proto = proto
+						// To an address of the host's own, it goes through
+						// ufw's INPUT to a listener read as any other.
+						if dest, ok := translated(rest, s); ok && (dest.Addr().IsLoopback() || slices.Contains(b.local, dest.Addr().Unmap())) {
+							continue
+						}
 						a := add(s, "a NAT rule in "+rule, true, false)
 						if a == nil {
 							continue
