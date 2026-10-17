@@ -267,16 +267,13 @@ func parseDir(out string) (dirState, error) {
 // release may have put things on the host this one does not know, or knows
 // in an older shape. Releases are compared, not commits, so two builds of
 // one release are equal. A version this binary cannot order is refused as
-// a newer one is. A manifest written before manifests recorded the version
-// is not checked, and unversioned says so; no manifest is nothing to check.
-func (p *Plan) checkToolkit(inv *hostcheck.Inventory) (unversioned bool, err error) {
-	if !inv.Manifest {
-		return false, nil
+// a newer one is. No manifest, or one recording no release, is nothing to
+// check.
+func (p *Plan) checkToolkit(inv *hostcheck.Inventory) error {
+	if !inv.Manifest || inv.ManifestToolkitVersion == "" {
+		return nil
 	}
-	if inv.ManifestToolkitVersion == "" {
-		return true, nil
-	}
-	return false, p.refuseNewer(inv.ManifestPath, inv.ManifestToolkitVersion)
+	return p.refuseNewer(inv.ManifestPath, inv.ManifestToolkitVersion)
 }
 
 // refuseNewer is checkToolkit's refusal of the release theirs, recorded in
@@ -347,8 +344,7 @@ func (p *Plan) buildHost() (*Stage, error) {
 	if inv.Manifest && inv.ManifestFiles == nil {
 		return nil, fmt.Errorf("site remove %s: %s is not readable as a manifest, so no file there is provably this deployment's. Nothing was changed", p.Site, inv.ManifestPath)
 	}
-	unversioned, err := p.checkToolkit(inv)
-	if err != nil {
+	if err := p.checkToolkit(inv); err != nil {
 		return nil, err
 	}
 	hp.dockerPresent = inv.Docker.Present
@@ -511,9 +507,6 @@ func (p *Plan) buildHost() (*Stage, error) {
 	}
 
 	p.hostSteps(st)
-	if unversioned && len(st.Steps) > 0 {
-		st.Steps = append([]Step{{Site: p.Site, Verb: "note", Title: "note the toolkit version", Text: fmt.Sprintf("%s records no paisans release, since it was written before manifests recorded one, so whether a newer paisans applied the site is not checked", inv.ManifestPath)}}, st.Steps...)
-	}
 	st.Gate = "no container, network, unit or file of this deployment's left that its user can remove, and the root empty but for what is kept"
 	if hp.caddy != nil {
 		st.Gate = "no container, network, unit or file of this deployment's left that its user can remove but its Caddy, whose Caddyfile is reduced to the host owner's sites, and the root empty but for what is kept"
