@@ -235,18 +235,14 @@ type Plan struct {
 	// (see render.Plan.Images). Execute records them in the manifest. See
 	// ResolveImages, and Caddy and Moved.
 	Pins []ImagePin
-	// recordedPins is what the manifest Build read recorded of the builds
-	// the site runs, kept for a stack whose compose file this plan does not
-	// settle.
-	recordedPins []render.ManifestPin
 	// recordedArch is the architecture the manifest Build read recorded,
 	// and Arch the one this plan was made for, which Execute records.
 	recordedArch string
 	Arch         string
-	// recordedWebServer is what the manifest Build read recorded of the
-	// reference files for the host owner's web server. Apply writes them
-	// after every site is up, so every manifest write keeps them.
-	recordedWebServer []render.ManifestWebServer
+	// archRead is whether Build was given the site's architecture. A plan
+	// made without it records the architecture the manifest has when
+	// written.
+	archRead bool
 	// images is what each stack of this site renders, from its compose file.
 	images map[string][]string
 	// imageHistory is the manifest's record of every repository this site
@@ -258,13 +254,11 @@ type Plan struct {
 	// partial marks a plan built with Only: like a scoped one, its manifest
 	// write keeps every entry outside the named stacks.
 	partial bool
-	// recorded is the manifest as Build read it, which a scoped plan's own
-	// manifest write keeps for every file outside its scope.
-	recorded map[string]render.ManifestFile
 	// Leftovers are the manifest's entries for files this site no longer
-	// renders, marked left over, set only on a whole plan. Its manifest write
-	// keeps them, and nothing deletes the files: they are this deployment's,
-	// and what to do with them is the operator's decision.
+	// renders, marked left over, as Build read them, set only on a whole
+	// plan. Its manifest write keeps every such entry the manifest has when
+	// written, and nothing deletes the files: they are this deployment's, and
+	// what to do with them is the operator's decision.
 	Leftovers []render.ManifestFile
 	// rendered is every path this site renders, relative to the root of the
 	// host, for the manifest write's left over marks.
@@ -618,13 +612,11 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 	if err != nil {
 		return nil, err
 	}
-	out.recordedPins = manifest.Pins
-	out.recordedArch, out.Arch = manifest.Arch, o.arch
+	out.recordedArch, out.Arch, out.archRead = manifest.Arch, o.arch, o.arch != ""
 	if out.Arch == "" {
 		// A plan made without reading the architecture keeps the record.
 		out.Arch = manifest.Arch
 	}
-	out.recordedWebServer = manifest.WebServer
 	out.imageHistory = manifest.Images
 	recorded := make(map[string]string, len(entries))
 	for path, entry := range entries {
@@ -636,7 +628,6 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 	}
 	if len(o.scope) > 0 {
 		out.scoped = true
-		out.recorded = entries
 	}
 	var onlySet map[string]bool
 	if len(o.only) > 0 {
@@ -645,7 +636,6 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			onlySet[stack] = true
 		}
 		out.partial = true
-		out.recorded = entries
 	}
 	var exceptSet map[string]bool
 	if len(o.except) > 0 {
@@ -654,7 +644,6 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			exceptSet[stack] = true
 		}
 		out.partial = true
-		out.recorded = entries
 	}
 
 	prefix := site + "/"
@@ -1619,20 +1608,30 @@ func leftovers(recorded map[string]render.ManifestFile, rendered map[string]bool
 // writeManifest records what is now on the host, so the next apply can tell its
 // own writes from somebody's edit.
 //
+// It starts from the manifest on the host as it is when written, read again
+// here: a command that runs a site in stages plans every stage before the
+// first runs, and an earlier stage's scoped apply may have recorded files on
+// this site since Build read it. Every entry, pin, image and web server file
+// this plan does not write is kept as that manifest has it, and so is the
+// architecture, unless Build was given one.
+//
 // A whole plan records what it renders, and keeps every entry for a file it
 // no longer renders, marked left over: the file is still on the host and
 // still this deployment's, and an entry dropped here would make it look like
-// somebody else's. A scoped one starts from the manifest it read and replaces
-// only its own files, because the rest of the site is still what the last
-// whole apply wrote.
+// somebody else's. A scoped one replaces only its own files, because the rest
+// of the site is still what the last apply to write them recorded.
 func writeManifest(plan *Plan, t Transport) error {
+	current, manifest, err := readManifest(t, plan.Deployment)
+	if err != nil {
+		return err
+	}
 	entries := map[string]render.ManifestFile{}
 	if plan.scoped || plan.partial {
-		for path, entry := range plan.recorded {
+		for path, entry := range current {
 			entries[path] = entry
 		}
 	} else {
-		for _, entry := range plan.Leftovers {
+		for _, entry := range leftovers(current, plan.rendered, now()) {
 			entries[entry.Path] = entry
 		}
 	}
@@ -1652,7 +1651,11 @@ func writeManifest(plan *Plan, t Transport) error {
 		files = append(files, entry)
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
-	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files, Pins: pinRecord(plan), Arch: plan.Arch, Images: imageRecord(plan), WebServer: plan.recordedWebServer, Pending: plan.Pending, ToolkitVersion: version.Version}, "", "  ")
+	arch := plan.Arch
+	if !plan.archRead {
+		arch = manifest.Arch
+	}
+	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files, Pins: pinRecord(plan, manifest.Pins), Arch: arch, Images: imageRecord(plan, manifest.Images), WebServer: manifest.WebServer, Pending: plan.Pending, ToolkitVersion: version.Version}, "", "  ")
 	if err != nil {
 		return err
 	}

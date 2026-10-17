@@ -972,9 +972,10 @@ func names(list []string, sep string) string {
 // pinRecord is what the manifest records of the builds this site runs after
 // this plan, one entry per service: this plan's pins for each stack whose
 // compose file it wrote or confirmed, and what the last apply recorded for
-// every other stack the site still renders. A build already recorded keeps
-// the time it was first resolved, so the record says when that build went in.
-func pinRecord(plan *Plan) []render.ManifestPin {
+// every other stack the site still renders, from recorded. A build already
+// recorded keeps the time it was first resolved, so the record says when that
+// build went in.
+func pinRecord(plan *Plan, recorded []render.ManifestPin) []render.ManifestPin {
 	settled := plan.settledStacks()
 	renders := map[string]bool{}
 	for rel := range plan.rendered {
@@ -985,7 +986,7 @@ func pinRecord(plan *Plan) []render.ManifestPin {
 	type key struct{ stack, service string }
 	old := map[key]render.ManifestPin{}
 	var out []render.ManifestPin
-	for _, rec := range plan.recordedPins {
+	for _, rec := range recorded {
 		old[key{rec.Stack, rec.Service}] = rec
 		if !settled[rec.Stack] && renders[rec.Stack] {
 			out = append(out, rec)

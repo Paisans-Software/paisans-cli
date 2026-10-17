@@ -748,7 +748,7 @@ site's Caddy is its configured tag).
 **A whole apply ends with the sweep** (`internal/apply/sweep.go`). The
 manifest's `images` field (`render.ManifestImage`: a repository and every
 reference rendered from it) is the site's history: `writeManifest` writes the
-union of what `Build` read and what the plan renders, so it only grows, and a
+union of what the manifest holds and what the plan renders, so it only grows, and a
 manifest without it reads as an empty history. When `Plan.Whole()` and not
 `KeepImages`, `Build` reads the host once (`sweepRead`: other deployments' roots
 under `/srv/paisans/`, `docker image ls`, the IDs of the keep set, and every
@@ -806,6 +806,15 @@ unprovable, and the next apply would read it as somebody else's. A file
 rendered again is written with a fresh entry, which clears the mark. Scoped
 and partial plans mark nothing and keep every entry outside what they write.
 `leftover_test.go` covers all three.
+
+**`writeManifest` starts from the manifest on the host when it writes**, read
+again then, not the one `Build` read. A staged command (`site add`,
+`site remove`, `storage add`) plans every stage before the first runs, so two
+scoped plans for one site are built from the same manifest; each write keeps
+what the earlier one recorded, and only its own files, pins and images change,
+with the architecture when `Build` was given one.
+`TestScopedAppliesPlannedTogetherKeepEachOthersRecord` covers it, and each
+staged command has a test that its sites' manifests match their files.
 
 **The gateway creates `/srv/paisans/<token>/caddy.d` and never touches what is
 in it.** The gateway's Caddy mounts the deployment's `render.HostSitesDir` read only, and the
@@ -1011,8 +1020,8 @@ undo:
   `haproxy.cfg` and Caddy's routing files go through a scoped `apply` and the
   one command each needs. A replica's `patroni.env` goes through
   `apply.ReplicaEnv`, which `site add`'s stage 7 shares: a scoped `apply`
-  built at the moment it runs, so the manifest keeps what earlier scoped
-  writes on the same host recorded, then Patroni recreated alone and gated on
+  built at the moment it runs, so it compares the file with the host as
+  earlier stages left it, then Patroni recreated alone and gated on
   streaming. The leader's `patroni.env`, and every other changed file, is
   reported for a later `apply`, except the monitor's own stack, which the
   last stage applies whole.

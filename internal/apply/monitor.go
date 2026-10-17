@@ -114,10 +114,10 @@ func (m *MonitorReseed) Steps() []MonitorStep {
 	return out
 }
 
-// Execute applies the stack. It is built again rather than run as planned:
-// a partial apply keeps the manifest it read for every file outside its
-// stacks, and an earlier stage may have written this site's manifest since
-// (the mesh file, in site add and site remove).
+// Execute applies the stack. It is built again rather than run as planned,
+// so it compares the stack's files with the host as it is now: an earlier
+// stage may have written this site's files since (the mesh file, in site add
+// and site remove).
 func (m *MonitorReseed) Execute() error {
 	if err := m.build(); err != nil {
 		return err
