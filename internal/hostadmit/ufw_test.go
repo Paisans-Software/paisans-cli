@@ -469,6 +469,35 @@ func TestEnableUFWProceedsOverTheOwnersAllows(t *testing.T) {
 	}
 }
 
+// A container whose port the system Docker publishes with its userland
+// proxy off has no listener, only a DNAT rule and the container's
+// publish: it is listed, both named, and it is said that ufw's routed
+// rules decide it too.
+func TestEnableUFWListsAPortPublishedThroughNAT(t *testing.T) {
+	b := blocks(t, "container shop-web-1\t0.0.0.0:8443->443/tcp, [::]:8443->443/tcp\tshop\n"+
+		"dnat table ip nat chain DOCKER: iifname != \"docker0\" tcp dport 8443 counter packets 0 bytes 0 dnat to 172.17.0.2:443\n"+sshdOn22)
+	if b == nil {
+		t.Fatal("admit plans to enable ufw in front of a published container")
+	}
+	text := b.Error()
+	for _, want := range []string{"8443/tcp: your Docker's container shop-web-1 publishes", "a NAT rule in table ip nat chain DOCKER", "sudo ufw allow 8443/tcp", "routed"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the refusal does not say %q:\n%s", want, text)
+		}
+	}
+	if strings.Count(text, "sudo ufw allow 8443/tcp") != 1 {
+		t.Errorf("one port, more than one allow line:\n%s", text)
+	}
+	// A stopped container that restarts with the Docker takes its port
+	// again; a NAT rule whose ports admit cannot read is listed with no
+	// allow line.
+	b = blocks(t, `stopped /shop-db-1 always {"5432/tcp":[{"HostIp":"","HostPort":"15432"}]}`+"\n"+
+		"dnat table ip nat chain PREROUTING: tcp dport @web dnat to 10.0.0.2\n"+sshdOn22)
+	if b == nil || !strings.Contains(b.Error(), "15432/tcp: your Docker's stopped container shop-db-1") || !strings.Contains(b.Error(), "tcp dport @web") || strings.Contains(b.Error(), "allow @web") {
+		t.Errorf("a stopped container and an unreadable rule: %v", b)
+	}
+}
+
 // A listener on an IPv6 address alone is listed as any other.
 func TestEnableUFWListsAnIPv6OnlyListener(t *testing.T) {
 	b := blocks(t, `listen tcp LISTEN 0 4096 [2001:db8::5]:8080 [::]:* users:(("app",pid=1200,fd=3)) uid:1002 ino:1 sk:1`+"\n"+sshdOn22)
