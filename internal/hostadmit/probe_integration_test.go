@@ -322,7 +322,11 @@ func TestProbeReadsTheNetworkStoreAtTheDataRoot(t *testing.T) {
 		{"none", "true", "", false, false},
 		{"set", json(`{`) + " && printf '%s\\n' '  \"data-root\": \"/srv/docker\"' '}' >> /etc/docker/daemon.json && " + store("/srv/docker"), "/srv/docker", true, false},
 		{"set, default empty", json(`{`) + " && printf '%s\\n' '  \"data-root\": \"/srv/docker\"' '}' >> /etc/docker/daemon.json && " + store("/var/lib/docker"), "/srv/docker", false, false},
-		{"one line", json(`{"data-root": "/srv/docker"}`) + " && " + store("/srv/docker"), "", false, true},
+		{"one line", json(`{"data-root": "/srv/docker"}`) + " && " + store("/srv/docker"), "/srv/docker", true, false},
+		{"one line, among others", json(`{"debug": true, "data-root":"/srv/docker", "log-level": "warn"}`) + " && " + store("/srv/docker"), "/srv/docker", true, false},
+		{"tabs", `mkdir -p /etc/docker && printf '{\n\t"data-root"\t:\t"/srv/docker"\n}\n' > /etc/docker/daemon.json && ` + store("/srv/docker"), "/srv/docker", true, false},
+		{"space before the colon", json(`{ "data-root" : "/srv/docker" }`) + " && " + store("/srv/docker"), "/srv/docker", true, false},
+		{"split across lines", `mkdir -p /etc/docker && printf '%s\n' '{' '  "data-root":' '    "/srv/docker"' '}' > /etc/docker/daemon.json`, "", false, true},
 	} {
 		f := probeIn(t, c.setup, "paisans-f2a9", "")
 		if d := f.Docker; d.NetworkStore != c.store || d.DataRoot != c.root || d.DataRootUnread != c.unread || d.Ran() != (c.store || c.unread) {

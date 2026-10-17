@@ -52,10 +52,12 @@ for unit in docker.socket docker.service containerd.service; do
 done
 # The system Docker's network store, which only a daemon that has run
 # leaves, under the data-root /etc/docker/daemon.json sets, or Docker's
-# default. A data-root set in a form this cannot read is unreadable.
+# default: "data-root", then a colon and an absolute path in quotes, on
+# one line, with any blanks between. A data-root set in a form this cannot
+# read, split across lines or relative, is unreadable.
 root=/var/lib/docker
 if [ -f /etc/docker/daemon.json ] && grep -q '"data-root"' /etc/docker/daemon.json; then
-  root=$(sed -n 's/^ *"data-root": *"\(\/[^"]*\)",\{0,1\} *$/\1/p' /etc/docker/daemon.json | head -n 1)
+  root=$(grep -o '"data-root"[[:space:]]*:[[:space:]]*"/[^"]*"' /etc/docker/daemon.json | head -n 1 | sed 's/.*"\(\/[^"]*\)"$/\1/')
   [ -n "$root" ] || root=unreadable
 fi
 say docker-root "$root"

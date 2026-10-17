@@ -5233,7 +5233,10 @@ own and leaves them disabled. One that has run since, with no admission
 record to say admit disabled it, may be running the owner's containers, so
 admit refuses it before changing anything and names both ways on: remove
 its lines from the list to keep it as the owner's, or disable it, remove
-Docker's network store under its data-root, reboot, and admit again. A
+Docker's network store under its data-root, reboot, and admit again. The
+data-root is read from `/etc/docker/daemon.json` written as `"data-root":
+"/absolute/path"` on one line; one admit cannot read may hold a network
+store, so the daemon is taken to have run. A
 daemon admit installed that never ran, enabled by its package and held
 while it installed, is disabled; its networks are read as none, since it
 never made any.
@@ -5243,7 +5246,10 @@ conflicting (`containerd`, `runc` and the rest), they are **refused, not
 removed**: installing Docker's packages would remove them, and on a host
 already running containers from them that stops those containers, which is a
 decision for whoever started them. The refusal names the packages found, and
-leaves removing them to the owner. Every `apt-get` runs non-interactively.
+leaves removing them to the owner. A unit of a package admit is about to
+install that is already enabled or running, such as a containerd the owner
+installed from another source, is refused the same way: the disable after
+the install would stop it. Every `apt-get` runs non-interactively.
 
 #### The user's Docker starts after the mesh interface
 

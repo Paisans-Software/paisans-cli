@@ -299,7 +299,7 @@ func systemDockerRan(p *planner, units, packages []string) error {
 	if slices.Contains(units, "docker.service") {
 		store := p.f.Docker.NetworkStorePath()
 		if p.f.Docker.DataRootUnread {
-			store = "network/files/local-kv.db under the data-root /etc/docker/daemon.json sets"
+			store = "network/files/local-kv.db under the data-root /etc/docker/daemon.json sets, which admit cannot read: write it on one line, as \"data-root\": \"/absolute/path\", so admit can"
 		}
 		back += ", remove " + store
 	}

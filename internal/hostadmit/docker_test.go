@@ -373,7 +373,7 @@ func TestTheNetworkStoreIsReadAtTheDataRoot(t *testing.T) {
 		"unreadable": heldSinceInstall(installedByAdmit(current())).with("docker-root", "unreadable"),
 	} {
 		_, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
-		if err == nil || !strings.Contains(err.Error(), "have run") || !strings.Contains(err.Error(), "remove network/files/local-kv.db under the data-root /etc/docker/daemon.json sets") {
+		if err == nil || !strings.Contains(err.Error(), "have run") || !strings.Contains(err.Error(), "remove network/files/local-kv.db under the data-root /etc/docker/daemon.json sets, which admit cannot read: write it on one line, as \"data-root\": \"/absolute/path\"") {
 			t.Errorf("%s: Build = %v", name, err)
 		}
 	}

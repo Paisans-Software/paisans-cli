@@ -460,6 +460,8 @@ ends by printing the `site evict` line for you.
   to admit, stop your containers, run `systemctl disable --now` on its
   units, remove Docker's network store
   (`/var/lib/docker/network/files/local-kv.db`, or under the `data-root`
-  `/etc/docker/daemon.json` sets), and reboot. Then admit again.
+  `/etc/docker/daemon.json` sets), and reboot. Then admit again. Admit reads
+  `data-root` written as `"data-root": "/absolute/path"` on one line; one
+  it cannot read may hold a network store, so it is taken to have run.
 * A user you deleted by hand before evicting can leave an empty
   `/etc/systemd/system/user@<uid>.service.requires` behind.
