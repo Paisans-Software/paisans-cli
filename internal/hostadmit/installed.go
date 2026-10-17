@@ -178,6 +178,9 @@ func planSystemDocker(p *planner, s hostprep.Section, added hostprep.Installed) 
 	if err != nil {
 		return err
 	}
+	if err := refuseForeignUnits(p, added.Packages); err != nil {
+		return err
+	}
 	var dirs []string
 	if !p.f.Dirs[delegateDir].Present {
 		dirs = append(dirs, delegateDir)
@@ -256,6 +259,21 @@ func planSystemDocker(p *planner, s hostprep.Section, added hostprep.Installed) 
 			Describe: "docker: the deployments run their own rootless daemons, so the system daemons admit installed, which their packages enable, are disabled (" + strings.Join(disable, ", ") + "), and were kept from starting while they installed: they never changed forwarding, docker0 or the firewall",
 			Command:  "systemctl disable --now " + strings.Join(disable, " ") + " && if ip link show docker0 >/dev/null 2>&1; then echo 'docker0 exists, so the system Docker ran and changed forwarding and the firewall as it started. It is disabled now: reboot the host, which clears what it changed, and admit again'; exit 1; fi",
 			Kinds:    []string{"docker"}})
+	}
+	return nil
+}
+
+// refuseForeignUnits refuses a unit of a package this run installs that
+// is already enabled or running: its package is not installed, so it is
+// not Docker's but the owner's, from another source, and the disable
+// after the install would stop it.
+func refuseForeignUnits(p *planner, packages []string) error {
+	for _, pkg := range packages {
+		for _, u := range hostprep.SystemUnits([]string{pkg}) {
+			if s := p.f.Docker.SystemUnits[u]; s.Enabled || s.Active {
+				return fmt.Errorf("%s is enabled or running, and %s is not installed, so it is not Docker's: it is yours, from another source. Admit installs %s, whose own %s it then disables, which would stop yours. Nothing was changed. While it is there, admit cannot install Docker on this host: once nothing needs it, disable it, remove its unit file, and admit again", u, pkg, pkg, u)
+			}
+		}
 	}
 	return nil
 }

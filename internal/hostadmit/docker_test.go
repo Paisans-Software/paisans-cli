@@ -398,6 +398,24 @@ func TestAnInstallDoesNotStopAContainerdThatRan(t *testing.T) {
 	}
 }
 
+// A unit of a package admit is about to install that is already enabled
+// or running is not Docker's: its package is not installed. Admit would
+// disable it with what it installs, so it refuses before any change.
+func TestAnInstallRefusesAUnitItsPackageDoesNotHave(t *testing.T) {
+	for _, state := range []string{"enabled active", "enabled inactive", "disabled active"} {
+		plan, err := hostadmit.Build(newBlank().with("system-unit", "containerd.service "+state), input(t, "vm", hostadmit.Flags{}))
+		if err == nil {
+			t.Errorf("%s: admit plans:\n%s", state, plan.Text())
+			continue
+		}
+		for _, want := range []string{"containerd.service", "containerd.io is not installed", "Nothing was changed"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%s: the refusal does not say %q: %v", state, want, err)
+			}
+		}
+	}
+}
+
 // A run killed while it held the system Docker left admit's policy-rc.d
 // in place; with nothing left to install, the next run puts the owner's
 // back.
