@@ -268,7 +268,7 @@ func (r *runner) clock(name string) {
 // host is the host check on the new site: what already runs there, and
 // whether any of it holds something the site claims. A conflict is refused,
 // and so is a shared host without a firewall that is up and denying by
-// default, exactly as `host prepare` and `apply` would refuse them.
+// default, exactly as `site prepare` and `apply` would refuse them.
 func (r *runner) host(t apply.Transport) {
 	report, err := inspectHost(r.cfg, r.newSite, t)
 	if err != nil {
@@ -295,7 +295,7 @@ func (r *runner) host(t apply.Transport) {
 	r.pass(r.newSite, "host", "clean: nothing found that the deployment does not own")
 }
 
-// hostPrepare requires that `host prepare` would do nothing. Every check
+// hostPrepare requires that `site prepare` would do nothing. Every check
 // below assumes an admitted and prepared host, and reusing the plan rather
 // than re-checking each part keeps one definition of "prepared". The plan is
 // checked against the admission record, so a host without one is refused
@@ -306,18 +306,18 @@ func (r *runner) hostPrepare(t apply.Transport) {
 	}
 	plan, err := buildHostPrep(r.newSite, r.cfg, t, *r.record)
 	if err != nil {
-		r.refuse(r.newSite, "prepared", "host prepare could not plan: %v", err)
+		r.refuse(r.newSite, "prepared", "site prepare could not plan: %v", err)
 		return
 	}
 	if len(plan.Steps) == 0 {
-		r.pass(r.newSite, "prepared", "host prepare has nothing left to do (%s)", plan.Profile)
+		r.pass(r.newSite, "prepared", "site prepare has nothing left to do (%s)", plan.Profile)
 		return
 	}
 	var steps []string
 	for _, s := range plan.Steps {
 		steps = append(steps, s.Describe)
 	}
-	r.refuse(r.newSite, "prepared", "host prepare still has %d step(s): %s. Run `paisans host prepare --site %s --execute` first", len(steps), strings.Join(steps, "; "), r.newSite)
+	r.refuse(r.newSite, "prepared", "site prepare still has %d step(s): %s. Run `paisans site prepare --site %s --execute` first", len(steps), strings.Join(steps, "; "), r.newSite)
 }
 
 // archMatch compares the new data site's architecture with every existing
@@ -380,7 +380,7 @@ func (r *runner) watchdog(t apply.Transport) {
 	}
 	mode := r.site.WatchdogMode()
 	if out, err := t.Run("test -e /dev/watchdog"); err != nil {
-		r.refuse(r.newSite, "watchdog", "mode %s, and there is no /dev/watchdog: %s. Run `paisans host prepare --site %s`", mode, firstLine(errText(out, "absent")), r.newSite)
+		r.refuse(r.newSite, "watchdog", "mode %s, and there is no /dev/watchdog: %s. Run `paisans site prepare --site %s`", mode, firstLine(errText(out, "absent")), r.newSite)
 		return
 	}
 	r.pass(r.newSite, "watchdog", "mode %s, /dev/watchdog present", mode)
@@ -493,11 +493,11 @@ func (r *runner) routes(t apply.Transport) {
 
 // admission checks the new site's host has admitted this deployment, as
 // that site, with the grants its roles need. It reads as the deployment's
-// user; host admit claimed the host in its registry.
+// user; site admit claimed the host in its registry.
 func (r *runner) admission(t apply.Transport) {
 	rec, err := admission.ForSite(t, r.cfg, r.newSite)
 	if err != nil {
-		r.refuse(r.newSite, "admission", "%v. Send the host's owner `paisans host request --site %s > %s.admit`", err, r.newSite, r.newSite)
+		r.refuse(r.newSite, "admission", "%v. Send the host's owner `paisans site request --site %s > %s.admit`", err, r.newSite, r.newSite)
 		return
 	}
 	r.record = &rec

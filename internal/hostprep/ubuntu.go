@@ -43,7 +43,7 @@ var dockerConflicts = []string{"docker.io", "docker-compose", "docker-compose-v2
 // store.
 var basePackages = []string{"wireguard-tools", "ufw", "git"}
 
-// admitBasePackages are the base packages host admit installs: ufw is not
+// admitBasePackages are the base packages site admit installs: ufw is not
 // among them, since admit works only on a host whose owner has installed
 // and enabled it, and choosing a firewall is the owner's.
 var admitBasePackages = []string{"wireguard-tools", "git"}
@@ -260,14 +260,14 @@ func pinExtras(facts packageFacts) (string, error) {
 	return "docker-ce-rootless-extras=" + v, nil
 }
 
-// SnapDockerAdmit is host admit's refusal of a snap Docker. Admit's own
+// SnapDockerAdmit is site admit's refusal of a snap Docker. Admit's own
 // probe refuses it first; AdmitPackages refuses it too, in the same words,
 // for a caller that has not.
 const SnapDockerAdmit = "Docker is installed as a snap, whose confinement keeps it from bind mounting under /srv and whose refreshes restart every container on snapd's schedule. Remove it yourself (snap remove docker), after checking nothing running depends on it, and admit again. Nothing was changed"
 
 // HoldDockerMarker is the line that marks /usr/sbin/policy-rc.d as the one
 // admit puts there while it installs Docker (docker-hold.sh.tmpl).
-const HoldDockerMarker = "Written by paisans host admit while it installs Docker, and removed after."
+const HoldDockerMarker = "Written by paisans site admit while it installs Docker, and removed after."
 
 // Installed is what an admit install adds that the host did not have:
 // each package by name, and Docker's apt key and source by path.

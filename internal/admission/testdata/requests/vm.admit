@@ -1,6 +1,6 @@
 # A request to admit one site of a paisans deployment to this host.
 # Compare its digest with the operator who sent it before you admit it:
-#   sudo paisans host admit --request <this file>
+#   sudo paisans site admit --request <this file>
 version: 1
 deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
 site: "vm"

@@ -913,7 +913,7 @@ func recoverSites(l configstore.Local, g configstore.Gathered, id string) (map[s
 func recoverID(hosts map[string]apply.Transport, id string) (string, error) {
 	if id != "" {
 		if !deployment.ValidID(id) {
-			return "", &ui.Problem{Hint: fmt.Sprintf("--id %q is not a deployment id", id), Explain: "Give the full id, as paisans host deployments lists it."}
+			return "", &ui.Problem{Hint: fmt.Sprintf("--id %q is not a deployment id", id), Explain: "Give the full id, as paisans site deployments lists it."}
 		}
 		return id, nil
 	}

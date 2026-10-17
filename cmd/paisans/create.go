@@ -106,12 +106,12 @@ func runCreate(args []string, stdin io.Reader, stdout io.Writer) error {
 		r.Result("Wrote %s.", path)
 		p.Say("\nNext:")
 		// init creates secrets.enc.yaml, which secrets set writes into, and
-		// writes the id and subnet a host request carries, so it comes first.
-		// It skips a site not admitted yet, which host admit checks as root.
+		// writes the id and subnet a site request carries, so it comes first.
+		// It skips a site not admitted yet, which site admit checks as root.
 		// With no key, at a terminal, secrets set asks for each secret only
 		// the operator can give, whichever the file declares.
 		p.Say("  paisans init          # checks the subnet, creates secrets.enc.yaml, generates every secret")
-		p.Say("  paisans host request  # per site: --site <name> > <name>.admit, for its owner's sudo paisans host admit")
+		p.Say("  paisans site request  # per site: --site <name> > <name>.admit, for its owner's sudo paisans site admit")
 		p.Say("  paisans secrets set   # asks for each secret only you can give, such as the SMTP password")
 		p.Say("  paisans apply         # shows every step; --execute runs them")
 		return nil

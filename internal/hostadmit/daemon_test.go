@@ -8,7 +8,7 @@ import (
 )
 
 // userState answers the probe admit runs as the user.
-const userStateMarker = "paisans host admit: as the user"
+const userStateMarker = "paisans site admit: as the user"
 
 // idleUser is a user with no rootless daemon installed yet, as on a host
 // where admit has just made it.
@@ -18,7 +18,7 @@ const idleUser = "daemon inactive\nunit absent\ndaemon-json absent\ncontainers 0
 // admit writes it.
 const (
 	modulesLoadPath = "/etc/modules-load.d/paisans.conf"
-	modulesLoadConf = "# Written by paisans host admit. The rootless Docker daemons of admitted\n" +
+	modulesLoadConf = "# Written by paisans site admit. The rootless Docker daemons of admitted\n" +
 		"# deployments need br_netfilter to start with their userland proxy off,\n" +
 		"# and the module their iptables uses for the setup tool to install them.\nbr_netfilter\nnf_tables\n"
 )

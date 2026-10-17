@@ -185,7 +185,7 @@ func TestARemovalCompletesAndKeepsWhatIsNotOurs(t *testing.T) {
 	if _, ok := b.files[dep.Manifest()]; ok {
 		t.Error("the manifest is still there")
 	}
-	// The mesh file goes with the manifest; the interface, root's, is host
+	// The mesh file goes with the manifest; the interface, root's, is site
 	// evict's to stop.
 	if _, ok := b.files[wgConf]; ok {
 		t.Error("the mesh file is still there")
@@ -207,11 +207,11 @@ func TestARemovalCompletesAndKeepsWhatIsNotOurs(t *testing.T) {
 	if !strings.Contains(b.files[keysAt], alice) || !strings.Contains(b.files[keysAt], "bob@example.org") || !strings.Contains(b.files[keysAt], "# managed by hand") {
 		t.Errorf("authorized_keys after:\n%s", b.files[keysAt])
 	}
-	// The data stays, and the registry, host evict's, is as it was.
+	// The data stays, and the registry, site evict's, is as it was.
 	if reg, _ := registry.Parse([]byte(b.files["/var/lib/paisans/registry.json"])); reg.Deployments[ourID].Site != "home-b" || reg.Deployments[otherID].Site == "" {
 		t.Errorf("the registry after:\n%s", b.files["/var/lib/paisans/registry.json"])
 	}
-	if !p.DataKept || !strings.Contains(strings.Join(p.Kept, "\n"), "home-b: the data in "+root+" and the deployment's volumes stay; host evict deletes them") {
+	if !p.DataKept || !strings.Contains(strings.Join(p.Kept, "\n"), "home-b: the data in "+root+" and the deployment's volumes stay; site evict deletes them") {
 		t.Errorf("data kept %v: %q", p.DataKept, p.Kept)
 	}
 

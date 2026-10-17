@@ -125,7 +125,7 @@ func TestTheDockerKeyIsCheckedByFingerprint(t *testing.T) {
 	t.Fatal("no key step on a fresh host")
 }
 
-// On a host without Docker, admit refuses what host prepare refuses, so
+// On a host without Docker, admit refuses what site prepare refuses, so
 // installing Docker never removes Ubuntu's containerd or runc; with no
 // Docker to run compose, the reason given is the removal.
 func TestAdmitPackagesRefusesConflicts(t *testing.T) {
@@ -164,10 +164,10 @@ func TestAdmitPackagesPinsOnlyAnInstalledDockerCE(t *testing.T) {
 	}
 }
 
-// A sidecar as host prepare writes one reads back and writes out the same,
-// so admit's sidecar and host prepare's are one format.
+// A sidecar as site prepare writes one reads back and writes out the same,
+// so admit's sidecar and site prepare's are one format.
 func TestOwnedKeysRoundTrip(t *testing.T) {
-	sidecar := "# Keys host admit and host prepare added to this deployment's user's authorized_keys: <mark> <fingerprint> <name>. host prepare removes a line only when it is marked added here and ssh.keys no longer lists it.\n" +
+	sidecar := "# Keys site admit and site prepare added to this deployment's user's authorized_keys: <mark> <fingerprint> <name>. site prepare removes a line only when it is marked added here and ssh.keys no longer lists it.\n" +
 		"added SHA256:4b2Q4Jx3ZQf1XU1Vb1k0f0sYz8m9n7bq3kq0iYkQWd0 alice\n" +
 		"added SHA256:9xQ1m0bK3iYp2nWm7c8d5e4f3g2h1j0k9l8m7n6o5p4 bob\n"
 	keys := hostprep.ParseOwnedKeys(sidecar)
@@ -444,7 +444,7 @@ func TestTheDockerHoldIsLocked(t *testing.T) {
 	}
 	for name, script := range map[string]string{"hold": hold, "release": release} {
 		sbin := t.TempDir()
-		const marked = "#!/bin/sh\n# Written by paisans host admit while it installs Docker, and removed after.\nexit 101\n"
+		const marked = "#!/bin/sh\n# Written by paisans site admit while it installs Docker, and removed after.\nexit 101\n"
 		if err := os.WriteFile(filepath.Join(sbin, "policy-rc.d"), []byte(marked), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -619,7 +619,7 @@ func TestReleaseDockerHoldRunsBeforeAhead(t *testing.T) {
 func fakePgrep(t *testing.T, sbin, log string, busy int) string {
 	t.Helper()
 	dir := t.TempDir()
-	script := fmt.Sprintf("#!/bin/sh\nn=$(cat %[1]s/calls 2>/dev/null || echo 0)\necho $((n+1)) > %[1]s/calls\nheld=no; grep -q 'paisans host admit' %[2]s/policy-rc.d 2>/dev/null && held=yes\nif [ %[3]d -lt 0 ] || [ \"$n\" -lt %[3]d ]; then echo \"dpkg running, hold $held\" >> %[4]s; exit 0; fi\necho \"dpkg gone, hold $held\" >> %[4]s\nexit 1\n", dir, sbin, busy, log)
+	script := fmt.Sprintf("#!/bin/sh\nn=$(cat %[1]s/calls 2>/dev/null || echo 0)\necho $((n+1)) > %[1]s/calls\nheld=no; grep -q 'paisans site admit' %[2]s/policy-rc.d 2>/dev/null && held=yes\nif [ %[3]d -lt 0 ] || [ \"$n\" -lt %[3]d ]; then echo \"dpkg running, hold $held\" >> %[4]s; exit 0; fi\necho \"dpkg gone, hold $held\" >> %[4]s\nexit 1\n", dir, sbin, busy, log)
 	if err := os.WriteFile(filepath.Join(dir, "pgrep"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -660,7 +660,7 @@ func TestTheHoldWaitsForDpkg(t *testing.T) {
 	if strings.Contains(string(got), "systemctl") {
 		t.Errorf("the units were touched while dpkg ran:\n%s", got)
 	}
-	if p, _ := os.ReadFile(filepath.Join(sbin, "policy-rc.d")); !strings.Contains(string(p), "paisans host admit") {
+	if p, _ := os.ReadFile(filepath.Join(sbin, "policy-rc.d")); !strings.Contains(string(p), "paisans site admit") {
 		t.Errorf("the hold was released while dpkg ran: %q", p)
 	}
 }

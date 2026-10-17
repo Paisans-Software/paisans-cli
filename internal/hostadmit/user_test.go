@@ -27,11 +27,11 @@ func current() *fakeHost {
 // admit writes them.
 const (
 	delegatePath = "/etc/systemd/system/user@.service.d/delegate.conf"
-	delegateConf = "# Written by paisans host admit. Shared by every admitted deployment;\n" +
-		"# paisans host evict removes it with the last of them.\n" +
+	delegateConf = "# Written by paisans site admit. Shared by every admitted deployment;\n" +
+		"# paisans site evict removes it with the last of them.\n" +
 		"[Service]\nDelegate=cpu cpuset io memory pids\n"
 	meshPath = "/etc/systemd/system/user@1001.service.d/paisans-mesh.conf"
-	meshConf = "# Written by paisans host admit for deployment f2a9; paisans host evict\n" +
+	meshConf = "# Written by paisans site admit for deployment f2a9; paisans site evict\n" +
 		"# removes it. The user's manager, its Docker daemon and its containers\n" +
 		"# start after the mesh at boot.\n" +
 		"[Unit]\nWants=wg-quick@psns-f2a9.service\nAfter=wg-quick@psns-f2a9.service\n"
@@ -553,7 +553,7 @@ func TestEverySudoProblemIsNamedAtOnce(t *testing.T) {
 // The mesh's conf drop-in and its content, as admit writes them.
 const (
 	meshCondPath = "/etc/systemd/system/wg-quick@psns-f2a9.service.d/paisans-conf.conf"
-	meshCondConf = "# Written by paisans host admit for deployment f2a9; paisans host evict\n" +
+	meshCondConf = "# Written by paisans site admit for deployment f2a9; paisans site evict\n" +
 		"# removes it. Until paisans apply writes the mesh's conf, wg-quick has\n" +
 		"# nothing to bring up, so the unit is skipped rather than failed.\n" +
 		"[Unit]\nConditionPathExists=/etc/wireguard/psns-f2a9.conf\n"

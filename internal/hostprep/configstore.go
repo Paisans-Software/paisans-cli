@@ -58,7 +58,7 @@ func repoCommand(d deployment.Deployment) string {
 // ConfigStore gives the site a repository of signed configuration versions,
 // a daemon that serves it read only to the mesh, and a timer that fetches
 // from peers what this site lacks, all of it the login user's, whose home
-// is given: the units are its own, under the linger host admit enabled.
+// is given: the units are its own, under the linger site admit enabled.
 // Each step is planned only where the host differs from it.
 func (u ubuntu) ConfigStore(t Transport, d deployment.Deployment, self config.Site, peers []string, home string) (Section, error) {
 	var out Section
@@ -155,7 +155,7 @@ func (u ubuntu) ConfigStore(t Transport, d deployment.Deployment, self config.Si
 	// WireGuard is up. A user unit cannot be ordered after the system's
 	// wg-quick, so its start waits for that address, and it is started here
 	// whether or not the mesh is up yet, with --no-block: the mesh comes up
-	// after host prepare, so a start that waited for it would never return.
+	// after site prepare, so a start that waited for it would never return.
 	if unitsChanged || !(daemonEnabled && daemonActive && timerEnabled && timerActive) {
 		// reenable for a changed unit, so links its earlier [Install] made
 		// go with it.

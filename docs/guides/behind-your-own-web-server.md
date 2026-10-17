@@ -67,15 +67,15 @@ is handed the monitor alone and nothing would route the other.
 
 ```sh
 paisans validate
-paisans host prepare --site health           # shows what it would do
-paisans host prepare --site health --execute
+paisans site prepare --site health           # shows what it would do
+paisans site prepare --site health --execute
 paisans apply --site health                  # shows what would change
 paisans apply --site health --execute
 ```
 
-`host prepare` and `apply` start with the host check. A web server on the host
+`site prepare` and `apply` start with the host check. A web server on the host
 is fine here, whatever class the host check gives its listeners: the monitor
-claims neither 80 nor 443. The firewall is the host owner's: `host admit` leaves ufw's default
+claims neither 80 nor 443. The firewall is the host owner's: `site admit` leaves ufw's default
 policy alone and only adds the deployment's own rules, each commented
 `paisans-<token>:` with the deployment's token. It does
 not open 80 or 443 with `managed_by: external`;
@@ -89,7 +89,7 @@ of step 6. Until the check passes it ends on a warning, `!`, that names
 ## 3. Install the snippet
 
 `paisans apply --execute`, with or without `--site health`, writes the monitor's site,
-filled in for the web server `host admit` found, into
+filled in for the web server `site admit` found, into
 `/srv/paisans/<token>/web-server/health.caddy` or `health.conf`. When admit
 found no server it knows, it writes `health.caddy`, `health.nginx.conf` and
 `health.apache.conf`. The file is the deployment's, and a later apply puts it
@@ -176,7 +176,7 @@ It reads the machine's admission record over ssh, changing nothing, and prints:
 * the snippet for that web server, filled in;
 * a warning when `listen` is not loopback.
 
-The record holds the web server `host admit` detected as root: a container
+The record holds the web server `site admit` detected as root: a container
 publishing 443 or 80 first, then the process listening on 443 or 80 on the
 machine itself. What the snippet says about the certificate follows what it
 found:

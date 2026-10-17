@@ -26,7 +26,7 @@ type SudoProbe struct{ Site, Out, Err string }
 func (p SudoProbe) site() string { return p.Site }
 
 // SudoRights checks that sudo lets the deployment's user run the WireGuard
-// helper and nothing else, as host admit accepts it: its one rule, no
+// helper and nothing else, as site admit accepts it: its one rule, no
 // Defaults entry that hands the helper the user's environment or path, and
 // no runas or command-specific Defaults line (admitrules.SudoList.
 // BeyondHelper). Every operator of the deployment can log in as the user,
@@ -44,7 +44,7 @@ func SudoRights(cfg *config.Config, probes []SudoProbe) []Finding {
 			More: []string{
 				"Every change to the mesh (its file, bringing it up, syncing its peers) runs the helper with sudo -n, so apply cannot manage the mesh on this site.",
 				"recover:",
-				fmt.Sprintf("  1. The host's owner runs `paisans host admit` for %s again, which installs %s and its line in /etc/sudoers.d/%s.", p.Site, helper, d.Prefix()),
+				fmt.Sprintf("  1. The host's owner runs `paisans site admit` for %s again, which installs %s and its line in /etc/sudoers.d/%s.", p.Site, helper, d.Prefix()),
 			}}
 		if helperErr != nil {
 			out = append(out, Finding{Section: SectionSudo, Level: Fail,
@@ -66,7 +66,7 @@ func SudoRights(cfg *config.Config, probes []SudoProbe) []Finding {
 			more := append(lastLines(p.Out+"\n"+p.Err, 3),
 				"recover:",
 				fmt.Sprintf("  1. The host's owner runs `LC_ALL=C sudo -n -l` as %s on %s and reads the answer: a translated or unfamiliar sudo is the likely cause.", user, p.Site),
-				fmt.Sprintf("  2. If it lists %s and nothing else, report that output as a doctor bug. If not, the host's owner checks the line host admit wrote in /etc/sudoers.d/%s with `visudo -c`, or runs `paisans host admit` for %s again.", admitrules.HelperRule(helper), d.Prefix(), p.Site),
+				fmt.Sprintf("  2. If it lists %s and nothing else, report that output as a doctor bug. If not, the host's owner checks the line site admit wrote in /etc/sudoers.d/%s with `visudo -c`, or runs `paisans site admit` for %s again.", admitrules.HelperRule(helper), d.Prefix(), p.Site),
 				fmt.Sprintf("  3. `paisans doctor --site %s` again.", p.Site),
 			)
 			out = append(out, Finding{Section: SectionSudo, Level: Warn, Line: fmt.Sprintf("%s: could not read what sudo lets %s run", p.Site, user), More: more})
@@ -81,9 +81,9 @@ func SudoRights(cfg *config.Config, probes []SudoProbe) []Finding {
 			out = append(out, Finding{Section: SectionSudo, Level: Fail,
 				Line: fmt.Sprintf("%s: sudo lets %s reach past the WireGuard helper: %s", p.Site, user, strings.Join(shown, "; ")),
 				More: []string{
-					fmt.Sprintf("Every operator of this deployment can log in as %s, so whatever sudo allows it is theirs too, and root on the host for anything past the helper. host admit writes one line, %s, in /etc/sudoers.d/%s; the rest comes from elsewhere in the host's sudoers.", user, admitrules.HelperRule(helper), d.Prefix()),
+					fmt.Sprintf("Every operator of this deployment can log in as %s, so whatever sudo allows it is theirs too, and root on the host for anything past the helper. site admit writes one line, %s, in /etc/sudoers.d/%s; the rest comes from elsewhere in the host's sudoers.", user, admitrules.HelperRule(helper), d.Prefix()),
 					"recover:",
-					fmt.Sprintf("  1. The host's owner lists every rule and Defaults entry for the user with `sudo -l -U %s` and removes all but host admit's line with `visudo`, looking in /etc/sudoers and /etc/sudoers.d.", user),
+					fmt.Sprintf("  1. The host's owner lists every rule and Defaults entry for the user with `sudo -l -U %s` and removes all but site admit's line with `visudo`, looking in /etc/sudoers and /etc/sudoers.d.", user),
 					fmt.Sprintf("  2. `paisans doctor --site %s` again.", p.Site),
 				}})
 			continue

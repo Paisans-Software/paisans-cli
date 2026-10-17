@@ -363,8 +363,8 @@ func armWithAmd64OnlyMbin(t *testing.T) {
 func TestADryRunApplyRefusesAnImageWithoutTheSitesPlatform(t *testing.T) {
 	fakeConverge(t, nil)
 	fakeChecks(t, map[string]any{
-		"host prepare --site home-a": "install docker", "host prepare --site home-b": "install docker",
-		"host prepare --site vm": "install docker", "host prepare --site watch": "install docker",
+		"site prepare --site home-a": "install docker", "site prepare --site home-b": "install docker",
+		"site prepare --site vm": "install docker", "site prepare --site watch": "install docker",
 	})
 	recordConverge(t)
 	armWithAmd64OnlyMbin(t)
@@ -390,7 +390,7 @@ func TestAnExecutedApplyRefusesAnImageBeforeAnyHostPrepare(t *testing.T) {
 		t.Fatalf("not refused:\n%s", rec.Lines())
 	}
 	for _, step := range *ran {
-		if strings.HasPrefix(step, "host prepare") {
+		if strings.HasPrefix(step, "site prepare") {
 			t.Fatalf("prepared a host before refusing: %v", *ran)
 		}
 	}

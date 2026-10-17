@@ -80,10 +80,10 @@ func sameLines(t *testing.T, got, want []string) {
 // names must resolve before wg-quick starts.
 var (
 	hostsAndDNS = []string{
-		"hosts: host prepare --site home-a",
-		"hosts: host prepare --site home-b",
-		"hosts: host prepare --site vm",
-		"hosts: host prepare --site watch",
+		"hosts: site prepare --site home-a",
+		"hosts: site prepare --site home-b",
+		"hosts: site prepare --site vm",
+		"hosts: site prepare --site watch",
 		"pull: pull --site home-a",
 		"pull: pull --site home-b",
 		"pull: pull --site vm",
@@ -626,10 +626,10 @@ func TestConvergeFoundsAMonitorMemberAndAppliesItLast(t *testing.T) {
 	}
 	got := strings.Join(titles(convergePlan(cfg, convergeState{})), "\n")
 	want := strings.Join([]string{
-		"hosts: host prepare --site home-a",
-		"hosts: host prepare --site home-b",
-		"hosts: host prepare --site vm",
-		"hosts: host prepare --site watch",
+		"hosts: site prepare --site home-a",
+		"hosts: site prepare --site home-b",
+		"hosts: site prepare --site vm",
+		"hosts: site prepare --site watch",
 		"pull: pull --site home-a",
 		"pull: pull --site home-b",
 		"pull: pull --site vm",
@@ -717,7 +717,7 @@ func TestEveryPlannedStepParses(t *testing.T) {
 	}
 	// A pull is not a command: the run pulls a site's images itself.
 	steps = slices.DeleteFunc(steps, func(s convergeStep) bool { return s.Stage == stagePull })
-	for _, want := range []string{"init", "host prepare", "apply --site", "site add", "storage init", "storage add", "dns init"} {
+	for _, want := range []string{"init", "site prepare", "apply --site", "site add", "storage init", "storage add", "dns init"} {
 		if !commands[want] {
 			t.Fatalf("the plans hold no %s step: %v", want, commands)
 		}
@@ -781,11 +781,11 @@ func TestConvergeJoinsADerivedMember(t *testing.T) {
 	founded := initial("home-a", "home-b", "vm")
 	steps := convergePlan(cfg, convergeState{Initial: map[string]render.EtcdInitial{"home-a": founded, "home-b": founded, "vm": founded}})
 	samePlan(t, steps,
-		"hosts: host prepare --site home-a",
-		"hosts: host prepare --site home-b",
-		"hosts: host prepare --site home-c",
-		"hosts: host prepare --site vm",
-		"hosts: host prepare --site watch",
+		"hosts: site prepare --site home-a",
+		"hosts: site prepare --site home-b",
+		"hosts: site prepare --site home-c",
+		"hosts: site prepare --site vm",
+		"hosts: site prepare --site watch",
 		"pull: pull --site home-a",
 		"pull: pull --site home-b",
 		"pull: pull --site home-c",
@@ -871,7 +871,7 @@ func TestApplySiteUsageNamesEveryFlag(t *testing.T) {
 // `paisans help execute`'s list of the commands that reach a host names secrets prune,
 // which reads the gateways' deployment records over ssh.
 func TestUsageHostListNamesSecretsPrune(t *testing.T) {
-	start := strings.Index(executeTopic, "host prepare, host deployments, apply")
+	start := strings.Index(executeTopic, "site prepare, site deployments, apply")
 	entry := strings.Join(strings.Fields(executeTopic[start:start+strings.Index(executeTopic[start:], "are the only commands that")]), " ")
 	if !strings.Contains(entry, "secrets prune") {
 		t.Errorf("the commands that reach a host leave out secrets prune:\n%s", entry)
@@ -1098,7 +1098,7 @@ func fakeChecks(t *testing.T, found map[string]any) *[]string {
 
 // statuses is each plan step's status as "mark title: result", in order,
 // from the events of the dry run's steps but the etcd reads: a prepare line
-// as the host prepare it checked, a pull line as its pull, and each install line as the inner steps
+// as the site prepare it checked, a pull line as its pull, and each install line as the inner steps
 // it lists, so the install steps are grouped by line (see byLine).
 func statuses(rec *ui.Recorder) []string {
 	var out []string
@@ -1121,7 +1121,7 @@ func statuses(rec *ui.Recorder) []string {
 		title := e.Text
 		switch section {
 		case "prepare":
-			title = "host prepare --site " + title
+			title = "site prepare --site " + title
 		case "pull":
 			title = "pull --site " + title
 		}
@@ -1207,9 +1207,9 @@ func TestConvergeDryRunMarksAnUpToDateDeploymentDone(t *testing.T) {
 func TestConvergeDryRunMarksPendingWaitingAndFailed(t *testing.T) {
 	fakeConverge(t, nil)
 	checked := fakeChecks(t, map[string]any{
-		"host prepare --site home-b": "docker, firewall",
+		"site prepare --site home-b": "docker, firewall",
 		"apply --site vm":            "5 changes",
-		"host prepare --site watch":  errors.New("ssh: connect to host watch.local: timed out\nmore detail"),
+		"site prepare --site watch":  errors.New("ssh: connect to host watch.local: timed out\nmore detail"),
 		"dns init":                   "2 records to create",
 	})
 	rec := recordConverge(t)
@@ -1217,25 +1217,25 @@ func TestConvergeDryRunMarksPendingWaitingAndFailed(t *testing.T) {
 		t.Fatal(err)
 	}
 	sameLines(t, statuses(rec), byLine([]string{
-		"✓ host prepare --site home-a",
-		"○ host prepare --site home-b: docker, firewall",
-		"✓ host prepare --site vm",
-		"✗ host prepare --site watch: ssh: connect to host watch.local: timed out",
+		"✓ site prepare --site home-a",
+		"○ site prepare --site home-b: docker, firewall",
+		"✓ site prepare --site vm",
+		"✗ site prepare --site watch: ssh: connect to host watch.local: timed out",
 		// A pull line waiting on its prepare ends first, unchecked.
-		"· pull --site home-b: after host prepare --site home-b",
-		"· pull --site watch: after host prepare --site watch",
+		"· pull --site home-b: after site prepare --site home-b",
+		"· pull --site watch: after site prepare --site watch",
 		"✓ pull --site home-a: nothing to pull",
 		"✓ pull --site vm: nothing to pull",
 		"○ dns init: 2 records to create",
 		"○ apply --site vm: 5 changes",
 		"· apply --site home-a: after apply --site vm",
-		"· apply --site home-b: after host prepare --site home-b",
-		"· apply --site watch: after host prepare --site watch",
-		"· storage add: after host prepare --site home-b",
+		"· apply --site home-b: after site prepare --site home-b",
+		"· apply --site watch: after site prepare --site watch",
+		"· storage add: after site prepare --site home-b",
 		"· apply --site home-a: after the earlier apply --site home-a",
-		"· apply --site home-b: after host prepare --site home-b",
+		"· apply --site home-b: after site prepare --site home-b",
 		"· apply --site vm: after the earlier apply --site vm",
-		"· apply --site watch: after host prepare --site watch",
+		"· apply --site watch: after site prepare --site watch",
 	}))
 	for _, never := range []string{"apply --site home-a", "apply --site home-b", "apply --site watch", "storage add"} {
 		if slices.Contains(*checked, never) {
@@ -1286,10 +1286,10 @@ func TestConvergeDryRunChecksAFoundedMemberInPassTwo(t *testing.T) {
 		t.Fatal(err)
 	}
 	sameLines(t, statuses(rec), byLine([]string{
-		"✓ host prepare --site home-a",
-		"✓ host prepare --site home-b",
-		"✓ host prepare --site vm",
-		"✓ host prepare --site watch",
+		"✓ site prepare --site home-a",
+		"✓ site prepare --site home-b",
+		"✓ site prepare --site vm",
+		"✓ site prepare --site watch",
 		"✓ pull --site home-a: nothing to pull",
 		"✓ pull --site home-b: nothing to pull",
 		"✓ pull --site vm: nothing to pull",
@@ -1368,7 +1368,7 @@ func TestCheckStepFails(t *testing.T) {
 	}
 }
 
-// Each command's dry run says what it would change: host prepare on an
+// Each command's dry run says what it would change: site prepare on an
 // empty host, through the fake ssh, names each kind of change it would make,
 // in a fixed order, and storage add counts its steps.
 func TestHostPrepareDryRunSaysWhatItWouldChange(t *testing.T) {
@@ -1376,7 +1376,7 @@ func TestHostPrepareDryRunSaysWhatItWouldChange(t *testing.T) {
 	quietSSH(t)
 	o := convergeOptions{Config: fixtureConfig(), Secrets: fixtureSecretsPath()}
 	for args, want := range map[string]*regexp.Regexp{
-		"host prepare --site home-a": regexp.MustCompile(`^docker, ssh keys, configuration store$`),
+		"site prepare --site home-a": regexp.MustCompile(`^docker, ssh keys, configuration store$`),
 		"storage add":                regexp.MustCompile(`^[1-9][0-9]* [a-z]+s?$`),
 	} {
 		summary, _, err := checkStep(ui.Discard, convergeFlags(strings.Fields(args), o), runStep)
@@ -1454,7 +1454,7 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 			recorded: map[string]render.EtcdInitial{"home-a": founded, "vm": founded},
 			found:    map[string]any{"site add home-b": "4 stages"},
 			want: []string{
-				"✓ host prepare --site home-a", "✓ host prepare --site home-b", "✓ host prepare --site vm", "✓ host prepare --site watch",
+				"✓ site prepare --site home-a", "✓ site prepare --site home-b", "✓ site prepare --site vm", "✓ site prepare --site watch",
 				"✓ dns init",
 				"○ site add home-b: 4 stages",
 				"✓ apply --site watch",
@@ -1472,7 +1472,7 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 			recorded: map[string]render.EtcdInitial{"vm": initial("home-a", "home-b", "vm")},
 			found:    map[string]any{"apply --site vm": "1 change"},
 			want: []string{
-				"✓ host prepare --site home-a", "✓ host prepare --site home-b", "✓ host prepare --site vm", "✓ host prepare --site watch",
+				"✓ site prepare --site home-a", "✓ site prepare --site home-b", "✓ site prepare --site vm", "✓ site prepare --site watch",
 				"✓ dns init",
 				"○ apply --site vm: 1 change",
 				"· apply --site home-a: after apply --site vm",
@@ -1493,7 +1493,7 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 			},
 			found: map[string]any{"apply --site home-b": "2 changes", "apply --site home-a": "3 changes"},
 			want: []string{
-				"✓ host prepare --site home-a", "✓ host prepare --site home-b", "✓ host prepare --site vm", "✓ host prepare --site watch",
+				"✓ site prepare --site home-a", "✓ site prepare --site home-b", "✓ site prepare --site vm", "✓ site prepare --site watch",
 				"✓ dns init",
 				"✓ apply --site vm",
 				"○ apply --site home-a: 3 changes",
@@ -1509,18 +1509,18 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 		{
 			name:  "no etcd",
 			edit:  func(cfg *config.Config) { cfg.Etcd.Members = nil },
-			found: map[string]any{"host prepare --site vm": "ssh keys"},
+			found: map[string]any{"site prepare --site vm": "ssh keys"},
 			want: []string{
-				"✓ host prepare --site home-a", "✓ host prepare --site home-b", "○ host prepare --site vm: ssh keys", "✓ host prepare --site watch",
+				"✓ site prepare --site home-a", "✓ site prepare --site home-b", "○ site prepare --site vm: ssh keys", "✓ site prepare --site watch",
 				"✓ dns init",
 				"✓ apply --site home-a",
 				"✓ apply --site home-b",
-				"· apply --site vm: after host prepare --site vm",
+				"· apply --site vm: after site prepare --site vm",
 				"✓ apply --site watch",
 				"✓ storage add",
 				"✓ apply --site home-a",
 				"✓ apply --site home-b",
-				"· apply --site vm: after host prepare --site vm",
+				"· apply --site vm: after site prepare --site vm",
 				"✓ apply --site watch",
 			},
 		},
@@ -1538,7 +1538,7 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 			},
 			found: map[string]any{"apply --site watch": "1 change"},
 			want: []string{
-				"✓ host prepare --site home-a", "✓ host prepare --site home-b", "✓ host prepare --site vm", "✓ host prepare --site watch",
+				"✓ site prepare --site home-a", "✓ site prepare --site home-b", "✓ site prepare --site vm", "✓ site prepare --site watch",
 				"✓ dns init",
 				"✓ apply --site vm",
 				"✓ apply --site home-a",
@@ -1555,7 +1555,7 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 			edit:  func(cfg *config.Config) { cfg.Etcd.Members = []string{"home-a", "home-b", "vm", "watch"} },
 			found: map[string]any{"apply --site vm": "6 changes"},
 			want: []string{
-				"✓ host prepare --site home-a", "✓ host prepare --site home-b", "✓ host prepare --site vm", "✓ host prepare --site watch",
+				"✓ site prepare --site home-a", "✓ site prepare --site home-b", "✓ site prepare --site vm", "✓ site prepare --site watch",
 				"✓ dns init",
 				"○ apply --site vm: 6 changes",
 				"· apply --site home-a: after apply --site vm",
@@ -1590,7 +1590,7 @@ func withPulls(want []string) []string {
 	end := 0
 	for i, l := range want {
 		mark, title, _ := strings.Cut(l, " ")
-		site, isPrepare := strings.CutPrefix(title, "host prepare --site ")
+		site, isPrepare := strings.CutPrefix(title, "site prepare --site ")
 		if !isPrepare {
 			continue
 		}
@@ -1598,7 +1598,7 @@ func withPulls(want []string) []string {
 		if mark == "✓" {
 			checked = append(checked, "✓ pull --site "+site+": nothing to pull")
 		} else {
-			waiting = append(waiting, "· pull --site "+site+": after host prepare --site "+site)
+			waiting = append(waiting, "· pull --site "+site+": after site prepare --site "+site)
 		}
 		end = i + 1
 	}
@@ -1820,7 +1820,7 @@ func TestSentencesEndAHintOnce(t *testing.T) {
 func TestConvergeDryRunShowsAFailedStepsExplanation(t *testing.T) {
 	fakeConverge(t, nil)
 	fakeChecks(t, map[string]any{
-		"host prepare --site watch": &ui.Problem{Hint: "watch's etcd members differ from the running cluster's", Explain: "Run paisans site add for the site being added, then apply."},
+		"site prepare --site watch": &ui.Problem{Hint: "watch's etcd members differ from the running cluster's", Explain: "Run paisans site add for the site being added, then apply."},
 	})
 	rec := recordConverge(t)
 	if err := converge(t); err != nil {
@@ -2209,7 +2209,7 @@ func TestAFailedChecksAdviceFollowsItsLine(t *testing.T) {
 	fakeConverge(t, nil)
 	saved := convergeCheck
 	convergeCheck = func(_ ui.Reporter, args []string) (string, []checkReport, error) {
-		if strings.Join(args[:4], " ") == "host prepare --site home-a" {
+		if strings.Join(args[:4], " ") == "site prepare --site home-a" {
 			return "", nil, &ui.Problem{Hint: "mesh subnet 10.44.0.0/24 is in use", Explain: "Remove it if not in use or run paisans init to pick a free subnet."}
 		}
 		return "", nil, nil
@@ -2292,7 +2292,7 @@ func TestConvergeRunsOnTheSitesItHas(t *testing.T) {
 		t.Fatalf("%v: %s", err, problemText(err))
 	}
 	sameLines(t, *ran, []string{
-		"host prepare --site home-a", "host prepare --site vm", "host prepare --site watch",
+		"site prepare --site home-a", "site prepare --site vm", "site prepare --site watch",
 		"dns init",
 		"apply --site vm", "apply --site home-a", "apply --site watch",
 		"apply --site home-a", "apply --site vm", "apply --site watch",
@@ -2337,7 +2337,7 @@ func TestConvergeSkipsADownSitesSteps(t *testing.T) {
 		t.Fatalf("%v: %s", err, problemText(err))
 	}
 	sameLines(t, *ran, []string{
-		"host prepare --site home-a", "host prepare --site vm", "host prepare --site watch",
+		"site prepare --site home-a", "site prepare --site vm", "site prepare --site watch",
 		"dns init",
 		"apply --site watch", "apply --site home-a",
 		"apply --site home-a", "apply --site vm", "apply --site watch",

@@ -47,7 +47,7 @@ func planDeploymentDir(p *planner) error {
 // planMeshSubnet refuses a mesh subnet that overlaps a route, an address,
 // a Docker network or a Docker pool on the host, read as root: a request
 // cannot know them, and two networks on overlapping ranges route each
-// other's traffic. It is the check host prepare runs, on the same probe.
+// other's traffic. It is the check site prepare runs, on the same probe.
 func planMeshSubnet(p *planner) error {
 	subnet, err := mesh.ParsePrefix(p.in.Request.MeshSubnet)
 	if err != nil {

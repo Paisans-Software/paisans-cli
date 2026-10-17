@@ -25,8 +25,8 @@ var loopbackAllowed = map[string]string{
 	"internal/config/mesh.go reservedMesh":                "ranges the mesh subnet may not overlap",
 	"internal/hostadmit/ufw.go readUFWBefore":             "reads the host's own listeners, as root",
 	"internal/hostadmit/ufw.go sshdListener":              "reads the host's own listeners, as root",
-	"internal/hostadmit/webserver.go caddyAdminURL":       "the owner's Caddy, which host admit probes as root",
-	"internal/hostadmit/webserver.go caddyTCPAdmin":       "the owner's Caddy, which host admit probes as root",
+	"internal/hostadmit/webserver.go caddyAdminURL":       "the owner's Caddy, which site admit probes as root",
+	"internal/hostadmit/webserver.go caddyTCPAdmin":       "the owner's Caddy, which site admit probes as root",
 	"internal/hostprep/snippets/egress.nft.tmpl":          "the egress table, which drops the deployment's loopback dials",
 	"internal/hostprep/snippets/wg-helper.sh.tmpl":        "the WireGuard helper, which refuses a loopback endpoint",
 	"internal/imagedigest/imagedigest.go locate":          "an image reference's registry name",
@@ -36,12 +36,12 @@ var loopbackAllowed = map[string]string{
 	"internal/validate/monitor.go webServer":              "web_server.listen, which the owner's web server dials",
 	"internal/validate/smtp.go smtpPlaintextWithUsername": "what an app's mail library allows",
 	"internal/webserver/check.go checkUpstream":           "web_server.listen, which the owner's web server dials",
-	"internal/webserver/detect.go caddyAdmin":             "the owner's Caddy, which host admit probes as root",
-	"internal/webserver/detect.go caddy":                  "the owner's Caddy, which host admit probes as root",
+	"internal/webserver/detect.go caddyAdmin":             "the owner's Caddy, which site admit probes as root",
+	"internal/webserver/detect.go caddy":                  "the owner's Caddy, which site admit probes as root",
 	"internal/webserver/show.go ListenWarning":            "web_server.listen, which the owner's web server dials",
 }
 
-// The egress table host admit loads drops whatever the deployment's user and
+// The egress table site admit loads drops whatever the deployment's user and
 // its containers send to loopback, so every command the CLI runs as that
 // user, and every file it renders for a host-networked container, binds and
 // dials a mesh address. A string literal naming loopback anywhere else in

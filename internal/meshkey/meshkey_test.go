@@ -135,7 +135,7 @@ func TestASudoRefusalIsTheOwnersProblem(t *testing.T) {
 	refused := host{refuse: "sudo: a password is required\n"}
 	_, err := meshkey.RunningKey("home-a", refused, dep)
 	var problem *ui.Problem
-	if !errors.As(err, &problem) || !strings.Contains(problem.Hint, "could not be run on home-a") || !strings.Contains(problem.Explain, "host admit") {
+	if !errors.As(err, &problem) || !strings.Contains(problem.Hint, "could not be run on home-a") || !strings.Contains(problem.Explain, "site admit") {
 		t.Errorf("RunningKey = %v, want the helper's sudo refusal as the owner's problem", err)
 	}
 	_, err = meshkey.Peers("home-a", refused, dep)

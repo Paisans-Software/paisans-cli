@@ -52,7 +52,7 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	deleteData := fs.Bool("delete-data", false, "also delete this deployment's data on the host (its directory and named volumes); asks for the site's name at a terminal")
 	force := fs.Bool("force", false, "clean this deployment off one host and nothing else: no cluster stage or refusal, and neither "+config.FileName+" nor the secrets file edited")
 	sshFlag := fs.String("ssh", "", "with --force: the host to clean, user@host[:port], any host; only what carries this deployment's id or token is removed")
-	idFlag := fs.String("id", "", "with --force and --ssh, and no "+config.FileName+": the deployment to clean off the host, by its full id or its token, as `paisans host deployments` lists it")
+	idFlag := fs.String("id", "", "with --force and --ssh, and no "+config.FileName+": the deployment to clean off the host, by its full id or its token, as `paisans site deployments` lists it")
 	evict := fs.Bool("evict", false, "the site's host still runs and nobody else can reach it: cut it out of the mesh first, then take it out of the cluster without reaching its host; asks for the site's name at a terminal")
 	answers := yesFlag(fs)
 	var site string
@@ -391,7 +391,7 @@ func runSiteRemoveByID(r ui.Reporter, site string, a byIDArgs, stdin io.Reader, 
 	case a.ssh == "":
 		return &ui.Problem{Hint: "--id needs --ssh", Explain: "With no configuration there is no ssh section to reach the host through, so name it with --ssh user@host[:port]."}
 	case !deployment.ValidID(a.id) && !tokenShape.MatchString(a.id):
-		return &ui.Problem{Hint: fmt.Sprintf("--id %q is not a deployment id or token", a.id), Explain: fmt.Sprintf("Give the full id or its %d hex digit token, as paisans host deployments lists them, Eg: --id f2a9", deployment.TokenLength)}
+		return &ui.Problem{Hint: fmt.Sprintf("--id %q is not a deployment id or token", a.id), Explain: fmt.Sprintf("Give the full id or its %d hex digit token, as paisans site deployments lists them, Eg: --id f2a9", deployment.TokenLength)}
 	}
 	dest, err := config.ParseDestination(a.ssh)
 	if err != nil {

@@ -2,7 +2,7 @@
 // user, and keeps that user's own files: the authorized keys, the
 // configuration store and its user units, and the daemon's daemon.json.
 // What needs root, the profile's packages, the firewall and the watchdog
-// module, is what `paisans host admit` runs, and this package plans it for
+// module, is what `paisans site admit` runs, and this package plans it for
 // admit.
 //
 // It is not part of apply. apply reconciles files it rendered against a
@@ -201,7 +201,7 @@ type Profile interface {
 	// be selected, exactly: ID and VERSION_ID.
 	ID() string
 	Version() string
-	// AdmitPackages plans what host admit installs for a deployment that
+	// AdmitPackages plans what site admit installs for a deployment that
 	// runs rootless: with Docker absent, Docker's repository and packages
 	// with its rootless extras; with Docker present, the extras alone,
 	// never upgrading a package already installed; in both, uidmap,
@@ -227,7 +227,7 @@ type Profile interface {
 	// fetches from peers, the addresses of which are given, as the login
 	// user's own units under home.
 	ConfigStore(t Transport, d deployment.Deployment, self config.Site, peers []string, home string) (Section, error)
-	// Firewall plans the given inbound rules for host admit. Rules it added
+	// Firewall plans the given inbound rules for site admit. Rules it added
 	// earlier that are no longer given are removed, last; rules it did not
 	// add are never removed or changed. What it added is told apart by the
 	// owner tag of deployment d in each rule's comment, so a rule another
@@ -275,15 +275,15 @@ func UnsupportedMessage(host OSRelease) string {
 // declaration first, refusing on any difference; then the watchdog, read
 // only; daemon.json; the configuration store; the authorized keys, and last
 // the keys no longer listed. Nothing here is installed or written as root:
-// host admit did that, and a difference is the owner's to fix by admitting
+// site admit did that, and a difference is the owner's to fix by admitting
 // again.
 func Build(site string, cfg *config.Config, t Transport, rec admission.Record) (*Plan, error) {
 	declared, ok := cfg.Sites[site]
 	if !ok {
-		return nil, fmt.Errorf("host prepare: no site %q is declared", site)
+		return nil, fmt.Errorf("site prepare: no site %q is declared", site)
 	}
 	if diff := rec.Differences(cfg, site); len(diff) > 0 {
-		return nil, fmt.Errorf("host prepare: %s's admission does not match %s:\n- %s\nSend the host's owner a new request, paisans host request --site %s > %s.admit, and ask them to run sudo paisans host admit --request %s.admit", site, config.FileName, strings.Join(diff, "\n- "), site, site, site)
+		return nil, fmt.Errorf("site prepare: %s's admission does not match %s:\n- %s\nSend the host's owner a new request, paisans site request --site %s > %s.admit, and ask them to run sudo paisans site admit --request %s.admit", site, config.FileName, strings.Join(diff, "\n- "), site, site, site)
 	}
 	content, found, err := t.ReadFile("/etc/os-release")
 	if err != nil {

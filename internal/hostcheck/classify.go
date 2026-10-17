@@ -345,7 +345,7 @@ func contains(list []string, s string) bool {
 // Refusal is the reason a command must not go on, or nil. A conflict is
 // always refused, with no override: the operator moves what holds the claim
 // or changes the configuration. A shared host is not refused: its firewall
-// is host admit's.
+// is site admit's.
 //
 // Before either, a Docker the toolkit cannot run is refused: a snap, or an
 // engine or compose plugin older than MinEngine or MinCompose.
@@ -374,7 +374,7 @@ func (r *Report) Refusal() error {
 }
 
 // Show reports what the check found, under the host check's own line and
-// only with --verbose, marked the way host prepare marks its plan: the class
+// only with --verbose, marked the way site prepare marks its plan: the class
 // as a detail, then Docker, each note and, on a shared host,
 // what sharing changes as done, and each foreign thing as done and not
 // paisans. Conflicts are not among them: they are in Refusal's error, which

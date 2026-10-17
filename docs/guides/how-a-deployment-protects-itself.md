@@ -42,7 +42,7 @@ is how a site is taken out.
 
 **What could happen.** `paisans-stack.yaml` is one shared file. Bob adds his name to
 `home-a`'s `ssh.keys`, or replaces the key listed under `operators.alice`, and
-commits. Later Alice runs `paisans apply` with her own access, and `host
+commits. Later Alice runs `paisans apply` with her own access, and `site
 prepare` installs Bob's key for the login user: a shell as the deployment's
 unprivileged user, with its rootless Docker, and nothing the host owner's
 machine has beyond it.
@@ -50,7 +50,7 @@ machine has beyond it.
 **Protects.**
 
 * **The review.** Each host records what this deployment last granted it.
-  `apply` and `host prepare` show every key that would be added or changed
+  `apply` and `site prepare` show every key that would be added or changed
   since, with its operator, fingerprint and comment, and an `--execute` run asks
   the operator to type `approve` at a terminal before any host changes, and
   without a terminal the run is refused. `--yes` answers it only where the
@@ -85,7 +85,7 @@ they were a recipient of the secrets file, every secret as it was when they
 left.
 
 **Protects.** Taking them out of `operators` and every `ssh.keys`, then preparing
-each site, deletes every key `host prepare` added for them. Re-encrypting the
+each site, deletes every key `site prepare` added for them. Re-encrypting the
 secrets file under a new data key keeps every later value from them. Rotating
 secrets with `paisans secrets rotate --all`, after the mesh is rekeyed, makes
 what they already hold worthless, except the two secrets that encrypt stored

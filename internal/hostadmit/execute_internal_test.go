@@ -53,7 +53,7 @@ func (h *testHost) run(command string) (string, error) {
 	if h.onRun != nil {
 		h.onRun(command)
 	}
-	if strings.Contains(command, "paisans host admit: read only") {
+	if strings.Contains(command, "paisans site admit: read only") {
 		var b strings.Builder
 		for _, kv := range h.facts {
 			fmt.Fprintf(&b, "%s %s\n", kv[0], kv[1])
@@ -78,7 +78,7 @@ func (h *testHost) ranMatching(s string) []string {
 	for _, c := range h.ran {
 		// The probe names commands it reads with, useradd -D among them,
 		// and is not a step.
-		if strings.Contains(c, s) && !strings.Contains(c, "paisans host admit: read only") {
+		if strings.Contains(c, s) && !strings.Contains(c, "paisans site admit: read only") {
 			out = append(out, c)
 		}
 	}

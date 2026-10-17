@@ -18,7 +18,7 @@ import (
 // newer request on a partial reading of it.
 const RequestVersion = 1
 
-// Request is what host admit needs to admit one site of a deployment,
+// Request is what site admit needs to admit one site of a deployment,
 // without its configuration. It holds nothing secret.
 type Request struct {
 	Version    int    `yaml:"version"`
@@ -63,8 +63,8 @@ type Operator struct {
 func (r Request) Token() string { return deployment.Deployment{ID: r.Deployment}.Token() }
 
 // Build is the request for one site of cfg. It refuses a site cfg does not
-// declare, and a request Check refuses, so host request never prints one
-// that host admit would refuse.
+// declare, and a request Check refuses, so site request never prints one
+// that site admit would refuse.
 func Build(cfg *config.Config, site string) (Request, error) {
 	s, ok := cfg.Sites[site]
 	if !ok {
@@ -112,7 +112,7 @@ func Build(cfg *config.Config, site string) (Request, error) {
 		return Request{}, &Error{What: "the request for " + site, Problems: problems}
 	}
 	if n := len(Encode(r)); n > MaxRequestSize {
-		return Request{}, &Error{What: "the request for " + site, Problems: []string{fmt.Sprintf("sites.%s.ssh.keys: the request would be %d bytes, and host admit reads a request of at most %d. Name fewer operators in sites.%s.ssh.keys, or list fewer keys under each", site, n, MaxRequestSize, site)}}
+		return Request{}, &Error{What: "the request for " + site, Problems: []string{fmt.Sprintf("sites.%s.ssh.keys: the request would be %d bytes, and site admit reads a request of at most %d. Name fewer operators in sites.%s.ssh.keys, or list fewer keys under each", site, n, MaxRequestSize, site)}}
 	}
 	return r, nil
 }

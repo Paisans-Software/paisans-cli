@@ -122,7 +122,7 @@ func uncommented(content string) string {
 }
 
 // A host-networked container shares the host's network namespace, and the
-// egress table host admit loads drops whatever the deployment's user and its
+// egress table site admit loads drops whatever the deployment's user and its
 // subordinate range send to loopback. So nothing a host-networked service is
 // given, its own definition, its env files or a file it mounts, may name
 // loopback: a listener there is one the deployment cannot dial, and a dial

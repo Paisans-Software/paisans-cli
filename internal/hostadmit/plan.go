@@ -377,7 +377,7 @@ func rangeOf(p *planner) (string, error) {
 	}
 	r := p.f.SubUID[p.in.Request.User]
 	if len(r) != 1 {
-		return "", fmt.Errorf("%s has %d subordinate UID ranges in /etc/subuid, and admit needs exactly one: the egress table and the user's Docker name it. Give %s one range of its own with usermod --add-subuids, then run host admit again. Nothing was changed", ui.Visible(p.in.Request.User), len(r), ui.Visible(p.in.Request.User))
+		return "", fmt.Errorf("%s has %d subordinate UID ranges in /etc/subuid, and admit needs exactly one: the egress table and the user's Docker name it. Give %s one range of its own with usermod --add-subuids, then run site admit again. Nothing was changed", ui.Visible(p.in.Request.User), len(r), ui.Visible(p.in.Request.User))
 	}
 	return fmt.Sprintf("%d-%d", r[0].Start, r[0].Start+r[0].Count-1), nil
 }
@@ -487,7 +487,7 @@ func (p *Plan) ShowToRun(r ui.Reporter) {
 	p.list = ui.NewList(r, rows, warnings)
 }
 
-// Show reports the plan as host prepare's does: each step pending under
+// Show reports the plan as site prepare's does: each step pending under
 // its title, its sentence as a detail, a provisional step noted as one,
 // then under --verbose what was present and another's, then the
 // warnings. Everything it shows passes through ui.Visible, since a part
@@ -609,7 +609,7 @@ func (p progress) close() {
 func stoppedOnRebuild(user string, ran []Step, err error) error {
 	text := strings.ReplaceAll(visibleLines(err.Error()), "Nothing was changed", "Nothing more was done")
 	return &ui.Problem{Hint: "admit stopped once " + user + " existed",
-		Explain: "These steps ran:\n" + titles(ran, nil) + "\nReading the host again then found: " + text + "\nRun host admit again to see the plan.",
+		Explain: "These steps ran:\n" + titles(ran, nil) + "\nReading the host again then found: " + text + "\nRun site admit again to see the plan.",
 		Cause:   err}
 }
 
@@ -641,7 +641,7 @@ func sameSteps(approved, rebuilt []Step, fill *strings.Replacer) ([]Step, error)
 func matchSteps(approved, rebuilt []Step, fill *strings.Replacer) (done, at []int, err error) {
 	for _, s := range rebuilt {
 		if s.Provisional {
-			return nil, nil, fmt.Errorf("the host changed while admit ran: %q still needs the user, which was to exist by now. Nothing more was done. Run host admit again to see the plan", s.Title)
+			return nil, nil, fmt.Errorf("the host changed while admit ran: %q still needs the user, which was to exist by now. Nothing more was done. Run site admit again to see the plan", s.Title)
 		}
 	}
 	i := 0
@@ -660,10 +660,10 @@ func matchSteps(approved, rebuilt []Step, fill *strings.Replacer) (done, at []in
 		}
 		for _, a := range approved[i:] {
 			if fill.Replace(a.Title) == s.Title {
-				return nil, nil, fmt.Errorf("the host changed while admit ran: step %q now has a different %s from the one approved. Nothing more was done. Run host admit again to see the plan", s.Title, differs(a, s, fill))
+				return nil, nil, fmt.Errorf("the host changed while admit ran: step %q now has a different %s from the one approved. Nothing more was done. Run site admit again to see the plan", s.Title, differs(a, s, fill))
 			}
 		}
-		return nil, nil, fmt.Errorf("the host changed while admit ran: the steps left to run were\n%s\nand are now\n%s\nNothing more was done. Run host admit again to see the plan", titles(approved, fill), titles(rebuilt, nil))
+		return nil, nil, fmt.Errorf("the host changed while admit ran: the steps left to run were\n%s\nand are now\n%s\nNothing more was done. Run site admit again to see the plan", titles(approved, fill), titles(rebuilt, nil))
 	}
 	for ; i < len(approved); i++ {
 		done = append(done, i)
@@ -705,7 +705,7 @@ func differs(a, b Step, fill *strings.Replacer) string {
 	return ""
 }
 
-// run runs one step, as host prepare's Execute does, reporting to st. A
+// run runs one step, as site prepare's Execute does, reporting to st. A
 // failure names the step and quotes what the host printed, through
 // ui.Visible and redaction.
 func run(t apply.Transport, s Step, st ui.Step) error {

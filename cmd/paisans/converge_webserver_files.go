@@ -46,7 +46,7 @@ type siteFile struct {
 
 // writeWebServerFiles writes, on each monitor site with managed_by:
 // external, each external app's reference snippet into the deployment's
-// root, filled from the web server host admit recorded, removes the ones no
+// root, filled from the web server site admit recorded, removes the ones no
 // longer wanted, and records them in the manifest with their checksums, so
 // a rewrite is told apart. Nothing of the owner's is read or written: the
 // owner installs the snippet. What cannot be read or written on the host is

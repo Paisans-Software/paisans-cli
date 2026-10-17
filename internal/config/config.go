@@ -280,7 +280,7 @@ type Site struct {
 	// PublicAddress6 is the IPv6 counterpart, for AAAA records. Optional even
 	// where PublicAddress is set.
 	PublicAddress6 string `yaml:"public_address6"`
-	// Watchdog is how `host prepare` gives Patroni a /dev/watchdog on this
+	// Watchdog is how `site prepare` gives Patroni a /dev/watchdog on this
 	// site. It only matters where the site holds the data role. Empty means
 	// auto; read it through WatchdogMode rather than directly.
 	Watchdog WatchdogMode `yaml:"watchdog"`
@@ -366,7 +366,7 @@ func (i WebServer) ListenHostPort() (string, int, bool) {
 // a port ListenHostPort accepts. A monitor behind the owner's web server is
 // handed to that server on the same host, so nothing beyond the host is
 // needed, and any other address would put the app where other machines
-// reach it around the web server. validate and host request both hold
+// reach it around the web server. validate and site request both hold
 // web_server.listen to it.
 func ProxiesToThisHost(listen, address string) bool {
 	host, _, ok := WebServer{Listen: listen}.ListenHostPort()

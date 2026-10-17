@@ -129,8 +129,8 @@ change to a group that exists, stays in the tier above.
 * Changing private-network access control
 * Deleting backups
 * Removing or rotating the identity provider's API key
-* Admitting a deployment to a host or evicting one (`paisans host admit`,
-  `paisans host evict`): it is the host owner's root step on their own
+* Admitting a deployment to a host or evicting one (`paisans site admit`,
+  `paisans site evict`): it is the host owner's root step on their own
   machine
 
 The distinction between the last two tiers matters and is easy to blur.
@@ -146,11 +146,11 @@ its digest; admitting from the configuration may ask nothing, and a
 NOPASSWD sudoers rule would let it run without a person, so this rule, not a
 prompt, is what stops an agent. An agent never answers either prompt, and
 never writes a sudoers rule or anything else that would let either command
-run without a person at the terminal. An agent may run `paisans host
+run without a person at the terminal. An agent may run `paisans site
 request`, which reads the configuration and reaches no host, and hand the
 file to an operator; the digest goes to the owner over another channel than
 the file, or the comparison proves nothing. When a run reports a site
-pending or down, or `site remove` prints the `host evict` line, the agent
+pending or down, or `site remove` prints the `site evict` line, the agent
 reports it to a human with that line, and runs nothing on the owner's behalf.
 
 The exception: a host's owner may authorise an agent to run admit and

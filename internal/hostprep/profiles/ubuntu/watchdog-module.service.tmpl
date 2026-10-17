@@ -1,9 +1,9 @@
 {{- if .Admit -}}
-# Written by paisans host admit. Loads {{ .Module }} at boot, before
+# Written by paisans site admit. Loads {{ .Module }} at boot, before
 # systemd-logind starts the lingering users' managers, whose Docker starts
 # the Patroni container that maps /dev/watchdog.
 {{ else -}}
-# Written by paisans host prepare. Loads {{ .Module }} at boot, before Docker
+# Written by paisans site prepare. Loads {{ .Module }} at boot, before Docker
 # starts the Patroni container that maps /dev/watchdog.
 {{ end -}}
 #

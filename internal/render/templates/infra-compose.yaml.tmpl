@@ -20,7 +20,7 @@ services:
 {{- /* Every listener of the deployment's, here and in each file this stack
         mounts, is on the site's mesh address alone, and every dial goes to a
         mesh address. These containers share the host's network namespace,
-        and the egress table host admit loads drops whatever the deployment's
+        and the egress table site admit loads drops whatever the deployment's
         user sends to loopback, etcd's own client gateway dialling its
         listener among it. */}}
       - --listen-client-urls=http://{{ .Site.Address }}:{{ .EtcdClientPort }}

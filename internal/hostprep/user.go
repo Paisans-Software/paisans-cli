@@ -41,7 +41,7 @@ func LoginAccount(t Transport) (Account, error) {
 		return Account{}, fmt.Errorf("reading the login user's home on %s: %w", t.Describe(), err)
 	}
 	if user, absent := strings.CutPrefix(strings.TrimSpace(out), "__PAISANS_ABSENT__"); absent {
-		return Account{}, fmt.Errorf("the login user %s does not exist on %s. host prepare does not create users: create it, with sudo, and prepare again", strings.TrimSpace(user), t.Describe())
+		return Account{}, fmt.Errorf("the login user %s does not exist on %s. site prepare does not create users: create it, with sudo, and prepare again", strings.TrimSpace(user), t.Describe())
 	}
 	fields := strings.Split(strings.TrimSpace(out), ":")
 	if len(fields) < 7 || fields[0] == "" {
@@ -72,11 +72,11 @@ type unitScope struct {
 	activatingIsActive bool
 }
 
-// systemScope is the system's manager, which host admit and the root-side
+// systemScope is the system's manager, which site admit and the root-side
 // profile steps use.
 var systemScope = unitScope{systemctl: "systemctl", dir: "/etc/systemd/system"}
 
-// userScope is the login user's own manager, under the linger host admit
+// userScope is the login user's own manager, under the linger site admit
 // enabled, whose home is given.
 func userScope(home string) unitScope {
 	return unitScope{systemctl: UserSystemctl, dir: UserUnitDir(home), activatingIsActive: true}

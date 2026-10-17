@@ -61,12 +61,12 @@ step 12: remove /usr/local/libexec/paisans/wg-psns-f2a9
     $ rm -f /usr/local/libexec/paisans/wg-psns-f2a9
 
 step 13: remove ufw rule 51820/udp
-  evict: delete `allow 51820/udp comment 'paisans-f2a9: WireGuard, the mesh'`, which host admit added for the deployment
+  evict: delete `allow 51820/udp comment 'paisans-f2a9: WireGuard, the mesh'`, which site admit added for the deployment
   run:
     $ ufw delete allow 51820/udp comment 'paisans-f2a9: WireGuard, the mesh'
 
 step 14: remove ufw rule in on psns-f2a9
-  evict: delete `allow in on psns-f2a9 comment 'paisans-f2a9: the mesh: etcd, Patroni, Garage, HAProxy'`, which host admit added for the deployment
+  evict: delete `allow in on psns-f2a9 comment 'paisans-f2a9: the mesh: etcd, Patroni, Garage, HAProxy'`, which site admit added for the deployment
   run:
     $ ufw delete allow in on psns-f2a9 comment 'paisans-f2a9: the mesh: etcd, Patroni, Garage, HAProxy'
 

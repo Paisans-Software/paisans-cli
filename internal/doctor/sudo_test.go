@@ -18,7 +18,7 @@ func sudoList(entries ...string) string {
 	return sudoDefaults + "User ubuntu may run the following commands on home-a:\n    " + strings.Join(entries, "\n    ") + "\n"
 }
 
-// What sudo allows is exactly what host admit accepts, or the check fails
+// What sudo allows is exactly what site admit accepts, or the check fails
 // naming what reaches past the helper, or that the helper is missing; an
 // answer it cannot read is a failure, never a pass.
 func TestSudoRights(t *testing.T) {
@@ -37,7 +37,7 @@ func TestSudoRights(t *testing.T) {
 		{"another deployment's helper", sudoList(helperEntry, "(root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-0a0b"), "", Fail, "reach past the WireGuard helper: (root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-0a0b", ""},
 		{"setenv in the Defaults", strings.Replace(sudoList(helperEntry), "use_pty", "use_pty, setenv", 1), "", Fail, "reach past the WireGuard helper: setenv: the user's variables reach the helper", ""},
 		{"a specific Defaults line", sudoDefaults + "Runas and Command-specific defaults for ubuntu:\n    Defaults!/usr/local/libexec/paisans/wg-psns-f2a9 setenv\n\nUser ubuntu may run the following commands on home-a:\n    " + helperEntry + "\n", "", Fail, "set for one runas user or command alone", ""},
-		{"not allowed", "Sorry, user ubuntu may not run sudo on home-a.\n", "exit status 1", Fail, "home-a: sudo does not let ubuntu run the WireGuard helper", "`paisans host admit`"},
+		{"not allowed", "Sorry, user ubuntu may not run sudo on home-a.\n", "exit status 1", Fail, "home-a: sudo does not let ubuntu run the WireGuard helper", "`paisans site admit`"},
 		{"password required", "sudo: a password is required\n", "exit status 1", Fail, "home-a: sudo does not let ubuntu run the WireGuard helper", ""},
 		{"another user refused", "Sorry, user root may not run sudo on home-a.\n", "exit status 1", Warn, "home-a: could not read what sudo lets ubuntu run", "recover:\n  1. The host's owner runs `LC_ALL=C sudo -n -l` as ubuntu"},
 		{"refusal beside a rule", "Sorry, user ubuntu may not run sudo on home-a.\n    (ALL : ALL) ALL\n", "", Warn, "home-a: could not read what sudo lets ubuntu run", "recover:\n  1. The host's owner runs `LC_ALL=C sudo -n -l` as ubuntu"},
@@ -69,7 +69,7 @@ func TestSudoRightsWithoutAHelperName(t *testing.T) {
 	f := fs[0]
 	more := strings.Join(f.More, "\n")
 	if f.Level != Fail || !strings.Contains(f.Line, "home-a: cannot name the WireGuard helper to look for") || !strings.Contains(f.Line, "is not a deployment's WireGuard interface name") ||
-		!strings.Contains(more, "`id`") || strings.Contains(more, "host admit") {
+		!strings.Contains(more, "`id`") || strings.Contains(more, "site admit") {
 		t.Errorf("got %v %q\n%s", f.Level, f.Line, more)
 	}
 }

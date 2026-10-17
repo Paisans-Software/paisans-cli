@@ -84,7 +84,7 @@ func dockerRefusal(host string, d Docker) error {
 		if p == "snap" {
 			return &ui.Problem{
 				Hint:    host + " runs Docker from a snap, which the toolkit cannot use",
-				Explain: "A snap's confinement keeps Docker from bind mounting under /srv, where every stack keeps its data, and snapd refreshes it on its own schedule, restarting every container. Remove it yourself (snap remove docker), after checking nothing running depends on it, and have the host's owner run host admit again, which installs Docker from Docker's own apt repository.",
+				Explain: "A snap's confinement keeps Docker from bind mounting under /srv, where every stack keeps its data, and snapd refreshes it on its own schedule, restarting every container. Remove it yourself (snap remove docker), after checking nothing running depends on it, and have the host's owner run site admit again, which installs Docker from Docker's own apt repository.",
 			}
 		}
 	}
@@ -106,7 +106,7 @@ func dockerRefusal(host string, d Docker) error {
 	}
 	return &ui.Problem{
 		Hint:    host + "'s Docker is older than the toolkit needs, so nothing was changed",
-		Explain: strings.Join(old, "\n") + "\nUpgrade Docker from wherever it came from, or remove it, after checking nothing running depends on it, and have the host's owner run host admit again, which installs Docker from Docker's own apt repository. Then run again.",
+		Explain: strings.Join(old, "\n") + "\nUpgrade Docker from wherever it came from, or remove it, after checking nothing running depends on it, and have the host's owner run site admit again, which installs Docker from Docker's own apt repository. Then run again.",
 	}
 }
 

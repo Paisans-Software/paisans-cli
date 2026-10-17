@@ -17,7 +17,7 @@ type fakeSite struct {
 	answer string
 	// failSync makes the sync unit's start fail.
 	failSync bool
-	// bare is a site host prepare has not reached: no store, and no sync
+	// bare is a site site prepare has not reached: no store, and no sync
 	// unit, so starting the unit fails unless the command checks first.
 	bare bool
 }
@@ -118,8 +118,8 @@ func TestPullSyncsFirstAndTreatsFailureAsReported(t *testing.T) {
 	}
 }
 
-// A site host prepare has not reached has no store and no sync unit, so it
-// has nothing to sync: apply gathers before its host prepare steps, and a
+// A site site prepare has not reached has no store and no sync unit, so it
+// has nothing to sync: apply gathers before its site prepare steps, and a
 // bare site is the start of every deployment, not a failed sync.
 func TestPullSyncsNothingOnASiteWithNoStore(t *testing.T) {
 	h := &fakeSite{files: map[string]string{}, answer: "__PAISANS_EMPTY__", bare: true}
@@ -172,7 +172,7 @@ func TestPullKeepsTheBundleWhenTheSyncLogIsMalformed(t *testing.T) {
 	}
 }
 
-// A site whose store host prepare has not made yet is told apart from any
+// A site whose store site prepare has not made yet is told apart from any
 // other failure, before anything is written there, so the refusal can name
 // the command that makes it.
 func TestPushToASiteWithNoStore(t *testing.T) {

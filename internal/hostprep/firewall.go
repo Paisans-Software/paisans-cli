@@ -23,7 +23,7 @@ type Rule struct {
 }
 
 // sshWhy is the SSH rule's reason, and so part of its ownership comment on the
-// host. It must not change: it is how planRules recognises an SSH allow host
+// host. It must not change: it is how planRules recognises an SSH allow site
 // admit added for an earlier ssh.port, and keeps it.
 const sshWhy = "ssh, the bootstrap route"
 

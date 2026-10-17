@@ -133,7 +133,7 @@ func TestThePendingSection(t *testing.T) {
 	r := &ui.Recorder{Verbose_: true}
 	showPending(r, cfg, degraded(t))
 	out := r.Lines()
-	for _, want := range []string{"pending", "home-b: its host has not admitted this deployment", "paisans host request --site home-b > home-b.admit", "without"} {
+	for _, want := range []string{"pending", "home-b: its host has not admitted this deployment", "paisans site request --site home-b > home-b.admit", "without"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("no %q in:\n%s", want, out)
 		}

@@ -40,7 +40,7 @@ const (
 )
 
 // ufwBeforeMarker is a string only ufwBeforeProbe contains.
-const ufwBeforeMarker = "paisans host admit: before enabling ufw"
+const ufwBeforeMarker = "paisans site admit: before enabling ufw"
 
 // ufwBeforeProbe reads, as root, what enabling ufw depends on. The ports
 // sshd listens on are read from the sockets themselves, with ss, not from

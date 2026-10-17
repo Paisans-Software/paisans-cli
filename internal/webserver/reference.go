@@ -34,7 +34,7 @@ type Reference struct {
 	Server             Server
 }
 
-// References is app's reference files: one for the server host admit found
+// References is app's reference files: one for the server site admit found
 // in front of the site, or, when it found none it knows, one for each of
 // Caddy, nginx and Apache, so the owner has the right one either way.
 func References(d deployment.Deployment, t Target, ws WebServer) []Reference {
@@ -69,7 +69,7 @@ func FileContent(t Target, ws WebServer) string {
 	return ""
 }
 
-// FromRecord is the web server host admit detected, as the admission record
+// FromRecord is the web server site admit detected, as the admission record
 // holds it, in the form Show and the check read. A record with none is an
 // unknown server.
 func FromRecord(r *admission.WebServer) WebServer {

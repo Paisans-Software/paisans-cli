@@ -412,12 +412,12 @@ func (d doctorReads) Admission(site string) doctor.AdmissionProbe {
 	return p
 }
 
-// moveAside is how a record host admit refuses to read is set aside, so
+// moveAside is how a record site admit refuses to read is set aside, so
 // that admit writes a new one: it will not write over a record it cannot
 // read. The name it moves path to is not admitted.*.json, which every
 // command that lists the records reads.
 func moveAside(path string) string {
-	return fmt.Sprintf("host admit will not write over a record it cannot read: its owner moves it aside first, `sudo mv %[1]s %[1]s.unreadable`, then admits this deployment again.", path)
+	return fmt.Sprintf("site admit will not write over a record it cannot read: its owner moves it aside first, `sudo mv %[1]s %[1]s.unreadable`, then admits this deployment again.", path)
 }
 
 func (d doctorReads) User(site string) doctor.UserProbe {

@@ -1378,8 +1378,8 @@ func TestAHelperRefusedWhilePlanningIsExplained(t *testing.T) {
 	if !errors.As(err, &problem) || problem.Hint != "mesh: the WireGuard helper could not be run on home-a" {
 		t.Fatalf("%v", err)
 	}
-	if !strings.Contains(problem.Explain, "paisans host admit") {
-		t.Errorf("the explanation does not name host admit:\n%s", problem.Explain)
+	if !strings.Contains(problem.Explain, "paisans site admit") {
+		t.Errorf("the explanation does not name site admit:\n%s", problem.Explain)
 	}
 	if strings.Contains(problem.Explain, "Nothing that binds") || !strings.Contains(problem.Explain, "planned nothing") {
 		t.Errorf("the explanation does not say what the plan did:\n%s", problem.Explain)
@@ -1664,7 +1664,7 @@ func TestAMeshFileTheHelperRefusesStopsTheApply(t *testing.T) {
 
 // A host where sudo will not run the helper has not admitted the
 // deployment, or has lost its sudoers line: the apply says so and names
-// host admit, rather than quoting a bare exit status.
+// site admit, rather than quoting a bare exit status.
 func TestAHostWithoutTheHelperNamesHostAdmit(t *testing.T) {
 	host := newHost()
 	host.fail = wgHelper
@@ -1681,7 +1681,7 @@ func TestAHostWithoutTheHelperNamesHostAdmit(t *testing.T) {
 	if problem.Hint != "mesh: the WireGuard helper did not run on home-a" {
 		t.Errorf("hint = %q", problem.Hint)
 	}
-	for _, want := range []string{"sudo: a password is required", "paisans host admit", "/usr/local/libexec/paisans/wg-psns-f2a9"} {
+	for _, want := range []string{"sudo: a password is required", "paisans site admit", "/usr/local/libexec/paisans/wg-psns-f2a9"} {
 		if !strings.Contains(problem.Explain, want) {
 			t.Errorf("the explanation lacks %q:\n%s", want, problem.Explain)
 		}
@@ -1742,12 +1742,12 @@ func TestASudoWarningDoesNotHideAFailedStart(t *testing.T) {
 	if !host.ran(wgHelper + "log") {
 		t.Error("the helper's log was not read")
 	}
-	if strings.Contains(problem.Explain, "host admit") {
+	if strings.Contains(problem.Explain, "site admit") {
 		t.Errorf("a failed start reads as a missing admission:\n%s", problem.Explain)
 	}
 }
 
-// sudo that finds no helper at its path is a host that lost it: host admit
+// sudo that finds no helper at its path is a host that lost it: site admit
 // installs it again.
 func TestAHostThatLostTheHelperNamesHostAdmit(t *testing.T) {
 	host, err := meshFailure(t, wgHelper, "sudo: /usr/local/libexec/paisans/wg-psns-f2a9: command not found\n")
@@ -1755,7 +1755,7 @@ func TestAHostThatLostTheHelperNamesHostAdmit(t *testing.T) {
 	if !errors.As(err, &problem) || problem.Hint != "mesh: the WireGuard helper did not run on home-a" {
 		t.Fatalf("%v", err)
 	}
-	if !strings.Contains(problem.Explain, "paisans host admit") || !strings.Contains(problem.Explain, "command not found") {
+	if !strings.Contains(problem.Explain, "paisans site admit") || !strings.Contains(problem.Explain, "command not found") {
 		t.Errorf("the explanation:\n%s", problem.Explain)
 	}
 	if host.firstCompose() >= 0 {
@@ -1764,14 +1764,14 @@ func TestAHostThatLostTheHelperNamesHostAdmit(t *testing.T) {
 }
 
 // Each way sudo refuses to run the helper stops the apply as sudo's
-// refusal, with what answers it: host admit, or for a host whose sudo
+// refusal, with what answers it: site admit, or for a host whose sudo
 // wants a terminal, the owner lifting that for the helper.
 func TestEverySudoRefusalStopsTheApply(t *testing.T) {
 	for line, want := range map[string]string{
 		"sudo: sorry, you must have a tty to run sudo":                                                   "requires a terminal",
-		"sudo: unable to execute /usr/local/libexec/paisans/wg-psns-f2a9: Permission denied":             "paisans host admit",
-		"sudo: account validation failure, is your account locked?":                                      "paisans host admit",
-		"sudo: PAM account management error: Authentication service cannot retrieve authentication info": "paisans host admit",
+		"sudo: unable to execute /usr/local/libexec/paisans/wg-psns-f2a9: Permission denied":             "paisans site admit",
+		"sudo: account validation failure, is your account locked?":                                      "paisans site admit",
+		"sudo: PAM account management error: Authentication service cannot retrieve authentication info": "paisans site admit",
 	} {
 		_, err := meshFailure(t, wgHelper, line+"\n")
 		var problem *ui.Problem
@@ -1786,7 +1786,7 @@ func TestEverySudoRefusalStopsTheApply(t *testing.T) {
 }
 
 // A refusal that says the host is wrong, not the file, is answered by the
-// owner running host admit again, not by a configuration change.
+// owner running site admit again, not by a configuration change.
 func TestAHostSideRefusalNamesHostAdmitAgain(t *testing.T) {
 	for _, why := range []string{"/etc/wireguard is not a directory", "/etc/wireguard is not a directory only root may write"} {
 		_, err := meshFailure(t, wgHelper+"put", "wg-psns-f2a9: "+why+"; nothing was installed\n")
@@ -1794,7 +1794,7 @@ func TestAHostSideRefusalNamesHostAdmitAgain(t *testing.T) {
 		if !errors.As(err, &problem) || problem.Hint != "mesh: the WireGuard helper refused home-a's mesh file" {
 			t.Fatalf("%v", err)
 		}
-		for _, want := range []string{why, "runs `paisans host admit` again"} {
+		for _, want := range []string{why, "runs `paisans site admit` again"} {
 			if !strings.Contains(problem.Explain, want) {
 				t.Errorf("the explanation lacks %q:\n%s", want, problem.Explain)
 			}

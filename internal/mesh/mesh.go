@@ -92,7 +92,7 @@ const (
 	// AddrCommand lists every address on every interface.
 	AddrCommand = "ip -j addr"
 	// NetworksCommand inspects every Docker network, or prints an empty list
-	// when Docker is not installed yet: a host before `host prepare` has no
+	// when Docker is not installed yet: a host before `site prepare` has no
 	// networks, and its pools are still Docker's defaults. A Docker whose
 	// daemon does not answer prints dockerDown and the client's first line
 	// of error instead (Probed.DockerDown).
@@ -109,7 +109,7 @@ const (
 )
 
 // NetworksCommandFor is NetworksCommand with docker, the client and its
-// flags, in place of plain docker: host admit names the system socket.
+// flags, in place of plain docker: site admit names the system socket.
 func NetworksCommandFor(docker string) string {
 	return strings.ReplaceAll(NetworksCommand, "docker network ", docker+" network ")
 }
@@ -333,7 +333,7 @@ type Probed struct {
 }
 
 // Probe asks a host for its routes, addresses, Docker networks and the
-// system daemon's pools, from DaemonConfig, which `host admit` checks as
+// system daemon's pools, from DaemonConfig, which `site admit` checks as
 // root. It reads and never writes.
 func Probe(h Host) (Probed, error) { return ProbeWith(h, "docker") }
 

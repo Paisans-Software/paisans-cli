@@ -30,7 +30,7 @@ step 22: load softdog
 step 23: load softdog at boot
   watchdog: load softdog at every boot (paisans-f2a9-watchdog.service)
   write /etc/systemd/system/paisans-f2a9-watchdog.service mode 0644:
-    | # Written by paisans host admit. Loads softdog at boot, before
+    | # Written by paisans site admit. Loads softdog at boot, before
     | # systemd-logind starts the lingering users' managers, whose Docker starts
     | # the Patroni container that maps /dev/watchdog.
     | #
@@ -55,8 +55,8 @@ step 23: load softdog at boot
 step 24: give the watchdog to community
   watchdog: /etc/udev/rules.d/60-paisans-f2a9-watchdog.rules makes /dev/watchdog and /dev/watchdog0 community's, owner and group, mode 600
   write /etc/udev/rules.d/60-paisans-f2a9-watchdog.rules mode 0644:
-    | # Written by paisans host admit: the watchdog is community's, for its
-    | # Patroni. One deployment per host holds it; paisans host evict removes this.
+    | # Written by paisans site admit: the watchdog is community's, for its
+    | # Patroni. One deployment per host holds it; paisans site evict removes this.
     | SUBSYSTEM=="watchdog|misc", KERNEL=="watchdog*", OWNER="community", GROUP="community", MODE="0600"
   run:
     $ udevadm control --reload && udevadm trigger --subsystem-match=watchdog --subsystem-match=misc

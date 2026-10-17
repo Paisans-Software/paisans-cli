@@ -22,7 +22,7 @@ const allowYesVariable = "PAISANS_ALLOW_YES"
 // would, and prints a line for each, so the run's log records what was
 // accepted unseen.
 //
-// It answers nothing only a person can: a request's digest (host admit
+// It answers nothing only a person can: a request's digest (site admit
 // --request takes it as --digest), a new SSH login through ufw, a login
 // to use, or a value to paste. Each of those is asked or refused as it is
 // without --yes.

@@ -115,7 +115,7 @@ func TestAnUnadmittedHostIsRefused(t *testing.T) {
 		t.Fatal("an unadmitted host was accepted")
 	}
 	hint, explain := ui.Describe(err)
-	for _, want := range []string{"home-a is not admitted", "paisans host request --site home-a > home-a.admit", "sudo paisans host admit --request home-a.admit"} {
+	for _, want := range []string{"home-a is not admitted", "paisans site request --site home-a > home-a.admit", "sudo paisans site admit --request home-a.admit"} {
 		if !strings.Contains(hint+"\n"+explain, want) {
 			t.Errorf("no %q in:\n%s\n%s", want, hint, explain)
 		}
@@ -147,7 +147,7 @@ func TestAMismatchedAdmissionIsRefused(t *testing.T) {
 	h := &recordedHost{files: map[string]string{admittedPath(cfg): admittedRecord(t, cfg, "home-b")}}
 	_, err := admittedHosts(&ui.Recorder{}, cfg, map[string]registry.Runner{"home-a": h})
 	hint, explain := ui.Describe(err)
-	for _, want := range []string{"home-a's admission does not match", "admitted as site home-b", "sudo paisans host admit --request home-a.admit"} {
+	for _, want := range []string{"home-a's admission does not match", "admitted as site home-b", "sudo paisans site admit --request home-a.admit"} {
 		if !strings.Contains(hint+"\n"+explain, want) {
 			t.Errorf("no %q in:\n%s\n%s", want, hint, explain)
 		}
@@ -164,7 +164,7 @@ func TestAChangedMeshSubnetIsRefused(t *testing.T) {
 	cfg.Mesh.Subnet = "10.77.33.0/24"
 	_, err := admittedHosts(&ui.Recorder{}, cfg, map[string]registry.Runner{"home-a": h})
 	hint, explain := ui.Describe(err)
-	for _, want := range []string{"home-a's admission does not match", "the host admitted mesh subnet " + admitted + ", and mesh.subnet is 10.77.33.0/24", "paisans host request --site home-a > home-a.admit", "sudo paisans host admit --request home-a.admit"} {
+	for _, want := range []string{"home-a's admission does not match", "the host admitted mesh subnet " + admitted + ", and mesh.subnet is 10.77.33.0/24", "paisans site request --site home-a > home-a.admit", "sudo paisans site admit --request home-a.admit"} {
 		if !strings.Contains(hint+"\n"+explain, want) {
 			t.Errorf("no %q in:\n%s\n%s", want, hint, explain)
 		}
@@ -182,7 +182,7 @@ func TestAnUnreadableAdmissionIsRefusedWithTheFix(t *testing.T) {
 	h := &recordedHost{files: map[string]string{path: old}}
 	_, err := admittedHosts(&ui.Recorder{}, cfg, map[string]registry.Runner{"home-a": h})
 	hint, explain := ui.Describe(err)
-	for _, want := range []string{"home-a's admission record cannot be read", "mesh_subnet: missing", "move " + path + " aside", "paisans host request --site home-a > home-a.admit", "sudo paisans host admit --request home-a.admit"} {
+	for _, want := range []string{"home-a's admission record cannot be read", "mesh_subnet: missing", "move " + path + " aside", "paisans site request --site home-a > home-a.admit", "sudo paisans site admit --request home-a.admit"} {
 		if !strings.Contains(hint+"\n"+explain, want) {
 			t.Errorf("no %q in:\n%s\n%s", want, hint, explain)
 		}

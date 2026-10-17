@@ -10,9 +10,9 @@ step 6: delegate cgroups to users
 step 7: write the egress table
   egress: keep paisans-f2a9, its containers and its mesh off this host's loopback and your network (/etc/paisans/egress.f2a9.nft, checked by nft before it replaces the one there)
   write /etc/paisans/egress.f2a9.nft.new mode 0644:
-    | # Written by paisans host admit for paisans-f2a9. Keeps the
+    | # Written by paisans site admit for paisans-f2a9. Keeps the
     | # deployment's user, its containers and its mesh off this host's loopback
-    | # and the owner's network. paisans host evict removes it.
+    | # and the owner's network. paisans site evict removes it.
     | table inet paisans_f2a9
     | delete table inet paisans_f2a9
     | table inet paisans_f2a9 {
@@ -79,7 +79,7 @@ step 7: write the egress table
 step 8: install the egress unit
   egress: load the table at boot, before paisans-f2a9's manager, which requires it (paisans-f2a9-egress.service)
   write /etc/systemd/system/paisans-f2a9-egress.service mode 0644:
-    | # Written by paisans host admit. Loads the table that keeps paisans-f2a9 off
+    | # Written by paisans site admit. Loads the table that keeps paisans-f2a9 off
     | # this host's loopback and the owner's network, before paisans-f2a9's
     | # manager, and so its Docker daemon and containers, can start: the manager
     | # requires this unit, so a table that fails to load keeps them stopped.
@@ -155,7 +155,7 @@ step 23: write the admission record
     |     "wireguard": 51820,
     |     "public": []
     |   },
-    |   "digest": "aadq-v10p-2qb7-jrsq",
+    |   "digest": "z7qj-2zby-gnjs-6h5z",
     |   "admitted_at": "2026-10-15T12:00:00Z",
     |   "data_dir": "",
     |   "bridge_netfilter": false,

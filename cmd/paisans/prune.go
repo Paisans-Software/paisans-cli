@@ -13,7 +13,7 @@ import (
 )
 
 // runPrune lists a site's dangling volumes and, with --execute, removes the
-// ones a paisans container left behind. It is modelled on runHostPrepare: one
+// ones a paisans container left behind. It is modelled on runSitePrepare: one
 // site, a dry run by default, and the plan reported before anything happens.
 //
 // It exists for what accumulated before apply refused undeclared volumes:
@@ -93,7 +93,7 @@ func runPrune(args []string) error {
 	return nil
 }
 
-// showVolumePrune reports the plan, marked the way host prepare marks its
+// showVolumePrune reports the plan, marked the way site prepare marks its
 // plan: each volume it would remove as pending under its title, and under
 // --verbose each one kept as done. Every verdict carries the volume's whole
 // name, size, contents and reason as details, since the reason is what an

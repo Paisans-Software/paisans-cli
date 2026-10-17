@@ -24,7 +24,7 @@ const Version = 3
 
 // Record is the grant a deployment last applied on one host, each part
 // written by the command that applies it once its steps for the site have
-// all succeeded: the keys part by host prepare, the images and
+// all succeeded: the keys part by site prepare, the images and
 // configuration parts by apply. Approved is the one written before any step:
 // what an operator approved there and no command has applied yet. A part
 // that was never written is nil.
@@ -68,7 +68,7 @@ type ConfigPart struct {
 	AppliedAt time.Time `json:"applied_at"`
 }
 
-// KeysPart is the login user and the keys host prepare last made its
+// KeysPart is the login user and the keys site prepare last made its
 // authorized keys.
 type KeysPart struct {
 	AppliedAt string `json:"applied_at"`
@@ -216,7 +216,7 @@ func writeCommand(d deployment.Deployment, want, content string) string {
 
 func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
-// Scope is the parts of a grant one command reviews and records: host
+// Scope is the parts of a grant one command reviews and records: site
 // prepare's keys, apply's images, or all of them for apply
 // with no --site.
 type Scope struct {
@@ -231,7 +231,7 @@ func (rec Record) holds(s Scope) bool {
 	return (s.Keys && rec.Keys != nil) || (s.Images && rec.Images != nil)
 }
 
-// PrepareScope is host prepare's.
+// PrepareScope is site prepare's.
 var PrepareScope = Scope{Keys: true}
 
 // ApplyScope is apply --site's, narrowed to stacks when it names any.

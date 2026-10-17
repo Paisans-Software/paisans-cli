@@ -52,7 +52,7 @@ func TestWithdrawnWatchdogIsGivenBack(t *testing.T) {
 
 // What admit says about the watchdog is admit's: its refusals and the
 // softdog warning say to admit again, and the module's unit is written by
-// host admit and loads the module before systemd-logind starts the
+// site admit and loads the module before systemd-logind starts the
 // lingering users' managers, whose Docker starts Patroni; no system
 // docker.service is involved.
 func TestTheWatchdogIsAdmitsOwn(t *testing.T) {
@@ -62,10 +62,10 @@ func TestTheWatchdogIsAdmitsOwn(t *testing.T) {
 	}})
 	for _, text := range []string{soft, held} {
 		if strings.Contains(text, "prepare again") || !strings.Contains(text, "admit again") {
-			t.Errorf("the watchdog's words are host prepare's:\n%s", text)
+			t.Errorf("the watchdog's words are site prepare's:\n%s", text)
 		}
 	}
-	for _, want := range []string{"# Written by paisans host admit. Loads softdog at boot", "Before=systemd-logind.service"} {
+	for _, want := range []string{"# Written by paisans site admit. Loads softdog at boot", "Before=systemd-logind.service"} {
 		if !strings.Contains(soft, want) {
 			t.Errorf("the softdog unit lacks %q", want)
 		}

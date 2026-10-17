@@ -92,12 +92,12 @@ func TestCreateWritesAFileThatValidates(t *testing.T) {
 	if info, _ := os.Stat(path); info.Mode().Perm() != 0o644 {
 		t.Errorf("mode %v, want 0644: the file holds no secret and is meant to be committed", info.Mode().Perm())
 	}
-	// init creates secrets.enc.yaml and the id a host request carries, so it
+	// init creates secrets.enc.yaml and the id a site request carries, so it
 	// comes first; each host is admitted before apply reaches it; secrets set
 	// with no key asks for each secret only the operator can give.
 	next := out.String()[strings.Index(out.String(), "Next:"):]
 	at := -1
-	for _, want := range []string{"  paisans init ", "  paisans host request ", "  paisans secrets set ", "  paisans apply "} {
+	for _, want := range []string{"  paisans init ", "  paisans site request ", "  paisans secrets set ", "  paisans apply "} {
 		i := strings.Index(next, want)
 		if i < 0 {
 			t.Errorf("next steps lack %q:\n%s", want, next)

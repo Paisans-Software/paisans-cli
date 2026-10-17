@@ -8,7 +8,7 @@ step 4: skip the mesh until its conf exists
 step 5: start community's manager after the mesh
   user: order user@1002.service after wg-quick@psns-f2a9 at boot, so a container that publishes on the mesh address finds it; a manager running now is not restarted, and takes it at its next start. Until the mesh's conf is written, wg-quick@psns-f2a9 is skipped
   write /etc/systemd/system/user@1002.service.d/paisans-mesh.conf mode 0644:
-    | # Written by paisans host admit for deployment f2a9; paisans host evict
+    | # Written by paisans site admit for deployment f2a9; paisans site evict
     | # removes it. The user's manager, its Docker daemon and its containers
     | # start after the mesh at boot.
     | [Unit]
@@ -20,8 +20,8 @@ step 5: start community's manager after the mesh
 step 6: delegate cgroups to users
   delegation: let every user's manager delegate cpu cpuset io memory pids, for compose's limits; written before community's manager first starts
   write /etc/systemd/system/user@.service.d/delegate.conf mode 0644:
-    | # Written by paisans host admit. Shared by every admitted deployment;
-    | # paisans host evict removes it with the last of them.
+    | # Written by paisans site admit. Shared by every admitted deployment;
+    | # paisans site evict removes it with the last of them.
     | [Service]
     | Delegate=cpu cpuset io memory pids
   run:
@@ -102,8 +102,8 @@ step 25: load softdog at boot
 step 26: give the watchdog to community
   watchdog: /etc/udev/rules.d/60-paisans-f2a9-watchdog.rules makes /dev/watchdog and /dev/watchdog0 community's, owner and group, mode 600
   write /etc/udev/rules.d/60-paisans-f2a9-watchdog.rules mode 0644:
-    | # Written by paisans host admit: the watchdog is community's, for its
-    | # Patroni. One deployment per host holds it; paisans host evict removes this.
+    | # Written by paisans site admit: the watchdog is community's, for its
+    | # Patroni. One deployment per host holds it; paisans site evict removes this.
     | SUBSYSTEM=="watchdog|misc", KERNEL=="watchdog*", OWNER="community", GROUP="community", MODE="0600"
   run:
     $ udevadm control --reload && udevadm trigger --subsystem-match=watchdog --subsystem-match=misc

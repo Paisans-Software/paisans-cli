@@ -217,7 +217,7 @@ case "$cmd" in
 		case "$cmd" in *".Config.Volumes"*) echo "volumes $r null";; *) echo "present sha256:0123456789abcdef $r";; esac
 	done;;
 *"getent passwd"*) echo "ubuntu:x:1000:1000::/home/ubuntu:/bin/bash";;
-# host admit loaded softdog and gave /dev/watchdog to the user. It asks who
+# site admit loaded softdog and gave /dev/watchdog to the user. It asks who
 # it runs as too, so it is matched first.
 *RuntimeWatchdogUSec*) printf 'device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\nowner 1000\nuid 1000\nsubuid ubuntu:165536:65536\n';;
 # The host check's inventory asks who it runs as. The login probe, a bare
@@ -417,13 +417,13 @@ func fixtureRuns(t *testing.T) map[string]string {
 	// as a clean, empty host.
 	quietSSH(t)
 	for name, args := range map[string][]string{
-		"host prepare dry run": {"host prepare", "--config", cfg, "--site", "home-a"},
+		"site prepare dry run": {"site prepare", "--config", cfg, "--site", "home-a"},
 		"site add dry run":     {"site add", "home-b", "--config", "join.yaml", "--secrets", secrets},
 		"storage add dry run":  {"storage add", "--config", cfg, "--secrets", secrets},
 		"prune dry run":        {"prune", "--config", cfg, "--site", "home-a"},
 	} {
 		run := map[string]func([]string) error{
-			"host prepare": runHostPrepare, "site add": func(a []string) error { return runSiteAdd(a, strings.NewReader(""), io.Discard) }, "storage add": runStorageAdd, "prune": runPrune,
+			"site prepare": runSitePrepare, "site add": func(a []string) error { return runSiteAdd(a, strings.NewReader(""), io.Discard) }, "storage add": runStorageAdd, "prune": runPrune,
 		}[args[0]]
 		runs[name] = runDefault(t, name, func() error { return run(args[1:]) })
 	}

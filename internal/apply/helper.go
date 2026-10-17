@@ -10,10 +10,10 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
-// HelperDir is where host admit installs each deployment's WireGuard helper.
+// HelperDir is where site admit installs each deployment's WireGuard helper.
 const HelperDir = "/usr/local/libexec/paisans"
 
-// WGHelper runs the WireGuard helper host admit installs for one deployment's
+// WGHelper runs the WireGuard helper site admit installs for one deployment's
 // interface. Creating the interface, writing its conf and syncing its peers
 // need CAP_NET_ADMIN in the host's namespace, which the deployment's user
 // does not have, so the helper is the one command that user may run as root,

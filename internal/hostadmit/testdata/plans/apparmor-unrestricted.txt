@@ -12,7 +12,7 @@ step 6: install packages: docker-ce, docker-ce-cli, containerd.io, docker-buildx
     $ set -e
     $ if [ -z "${paisans_hold_locked:-}" ]; then
     $   exec 8>/run/paisans-docker-hold.lock
-    $   flock -n 8 || { echo 'another paisans host admit is installing Docker on this host now (it holds /run/paisans-docker-hold.lock). Run again once it is done'; exit 1; }
+    $   flock -n 8 || { echo 'another paisans site admit is installing Docker on this host now (it holds /run/paisans-docker-hold.lock). Run again once it is done'; exit 1; }
     $   paisans_hold_locked=1
     $ fi
     $ confirm_claims() {
@@ -37,12 +37,12 @@ step 6: install packages: docker-ce, docker-ce-cli, containerd.io, docker-buildx
     $ set -e
     $ if [ -z "${paisans_hold_locked:-}" ]; then
     $   exec 8>/run/paisans-docker-hold.lock
-    $   flock -n 8 || { echo 'another paisans host admit is installing Docker on this host now (it holds /run/paisans-docker-hold.lock). Run again once it is done'; exit 1; }
+    $   flock -n 8 || { echo 'another paisans site admit is installing Docker on this host now (it holds /run/paisans-docker-hold.lock). Run again once it is done'; exit 1; }
     $   paisans_hold_locked=1
     $ fi
     $ release_docker_hold() {
     $   rm -f /usr/sbin/.policy-rc.d.paisans-tmp /usr/sbin/.policy-rc.d.paisans-owner-tmp
-    $   if [ -f /usr/sbin/policy-rc.d ] && [ ! -L /usr/sbin/policy-rc.d ] && grep -qxF '# Written by paisans host admit while it installs Docker, and removed after.' /usr/sbin/policy-rc.d; then
+    $   if [ -f /usr/sbin/policy-rc.d ] && [ ! -L /usr/sbin/policy-rc.d ] && grep -qxF '# Written by paisans site admit while it installs Docker, and removed after.' /usr/sbin/policy-rc.d; then
     $     if [ -e /usr/sbin/policy-rc.d.paisans-owner ] || [ -L /usr/sbin/policy-rc.d.paisans-owner ]; then
     $       mv -f /usr/sbin/policy-rc.d.paisans-owner /usr/sbin/policy-rc.d
     $     else
@@ -65,7 +65,7 @@ step 6: install packages: docker-ce, docker-ce-cli, containerd.io, docker-buildx
     $ fi
     $ cat > /usr/sbin/.policy-rc.d.paisans-tmp <<'POLICY'
     $ #!/bin/sh
-    $ # Written by paisans host admit while it installs Docker, and removed after.
+    $ # Written by paisans site admit while it installs Docker, and removed after.
     $ for a in "$@"; do
     $   case $a in containerd|containerd.service|docker|docker.service|docker.socket) exit 101 ;; esac
     $ done
@@ -85,7 +85,7 @@ step 6: install packages: docker-ce, docker-ce-cli, containerd.io, docker-buildx
     $     n=$((n+1))
     $   done
     $ }
-    $ trap 'paisans_status=$?; if ! wait_for_dpkg; then echo "dpkg is still running after ten minutes, so the hold on the Docker daemons stays in place and its units are not yet disabled. Once dpkg is done, run host admit again, or host evict, which puts the hold back"; exit 1; fi; if command -v confirm_claims >/dev/null 2>&1; then confirm_claims || true; fi; if [ "$paisans_status" -ne 0 ]; then systemctl disable docker.socket docker.service containerd.service >/dev/null 2>&1 || true; fi; release_docker_hold; exit "$paisans_status"' EXIT
+    $ trap 'paisans_status=$?; if ! wait_for_dpkg; then echo "dpkg is still running after ten minutes, so the hold on the Docker daemons stays in place and its units are not yet disabled. Once dpkg is done, run site admit again, or site evict, which puts the hold back"; exit 1; fi; if command -v confirm_claims >/dev/null 2>&1; then confirm_claims || true; fi; if [ "$paisans_status" -ne 0 ]; then systemctl disable docker.socket docker.service containerd.service >/dev/null 2>&1 || true; fi; release_docker_hold; exit "$paisans_status"' EXIT
     $ trap 'exit 1' HUP INT TERM
     $ mv -f /usr/sbin/.policy-rc.d.paisans-tmp /usr/sbin/policy-rc.d
     $ set -e

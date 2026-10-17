@@ -247,7 +247,7 @@ func TestAdmitLeavesTheOwnersDocker(t *testing.T) {
 // installedByAdmit is h with the installed file saying admit installed
 // Docker there.
 func installedByAdmit(h *fakeHost) *fakeHost {
-	content := "# Written by paisans host admit: what it installed on this host, which stays\n# when paisans host evict removes the last admitted deployment, and each\n# directory it created, which evict removes once empty.\npackage docker-ce\npackage docker-ce-rootless-extras\npackage uidmap\ndir /etc/systemd/system/user@.service.d\n"
+	content := "# Written by paisans site admit: what it installed on this host, which stays\n# when paisans site evict removes the last admitted deployment, and each\n# directory it created, which evict removes once empty.\npackage docker-ce\npackage docker-ce-rootless-extras\npackage uidmap\ndir /etc/systemd/system/user@.service.d\n"
 	return h.file("/etc/paisans/installed", content).withFile("/etc/paisans/installed", content, "644", 0)
 }
 
@@ -368,7 +368,7 @@ func TestAnInstalledListNotRootsIsRefused(t *testing.T) {
 // admit's own install that stopped; and a package line dpkg no longer
 // shows installed is dropped.
 func TestAStaleInstalledClaimIsDropped(t *testing.T) {
-	header := "# Written by paisans host admit: what it installed on this host, which stays\n# when paisans host evict removes the last admitted deployment, and each\n# directory it created, which evict removes once empty.\n"
+	header := "# Written by paisans site admit: what it installed on this host, which stays\n# when paisans site evict removes the last admitted deployment, and each\n# directory it created, which evict removes once empty.\n"
 	claim := func(h *fakeHost, lines string) *fakeHost {
 		return h.file("/etc/paisans/installed", header+lines).withFile("/etc/paisans/installed", header+lines, "644", 0)
 	}
@@ -550,7 +550,7 @@ func TestAFailedInstallConfirmsWhatItInstalled(t *testing.T) {
 // but an "installing" claim does not stand on it, so a Docker the owner
 // installed since is not taken for admit's, and no claim is confirmed.
 func TestALeftoverBeforeThePolicyKeepsNoClaim(t *testing.T) {
-	header := "# Written by paisans host admit: what it installed on this host, which stays\n# when paisans host evict removes the last admitted deployment, and each\n# directory it created, which evict removes once empty.\n"
+	header := "# Written by paisans site admit: what it installed on this host, which stays\n# when paisans site evict removes the last admitted deployment, and each\n# directory it created, which evict removes once empty.\n"
 	lines := "package docker-ce-rootless-extras\npackage uidmap\ninstalling docker-ce\ndir /etc/systemd/system/user@.service.d\n"
 	h := current().with("system-unit", "docker.service enabled active").with("docker-hold", "leftover").
 		file("/etc/paisans/installed", header+lines).withFile("/etc/paisans/installed", header+lines, "644", 0)

@@ -22,11 +22,11 @@ type addressPool struct {
 	Size int    `json:"size"`
 }
 
-// DaemonJSON is the deployment user's daemon.json, which host admit writes
-// and host prepare keeps: the userland proxy off, so a published port
+// DaemonJSON is the deployment user's daemon.json, which site admit writes
+// and site prepare keeps: the userland proxy off, so a published port
 // carries the client's own address (spec, Observed R6); Docker's default
 // pools less any overlapping the mesh, each cut in /24s, so no network of the
-// user's takes the mesh's range; and the data root host admit's --data-dir
+// user's takes the mesh's range; and the data root site admit's --data-dir
 // gave, recorded in the admission record.
 func DaemonJSON(meshSubnet, dataDir string) (string, error) {
 	subnet, err := mesh.ParsePrefix(meshSubnet)
@@ -88,9 +88,9 @@ func planDaemonJSON(t Transport, home, meshSubnet string, rec admission.Record) 
 	}
 	out.Steps = append(out.Steps, Step{Kinds: []string{KindDocker}, Title: "write daemon.json", Describe: describe, Command: command})
 	if !idle {
-		why := "It runs containers, and host prepare never restarts a daemon under them."
+		why := "It runs containers, and site prepare never restarts a daemon under them."
 		if askErr != nil {
-			why = fmt.Sprintf("host prepare could not ask it what it runs (%v), and never restarts a daemon that may be running containers.", askErr)
+			why = fmt.Sprintf("site prepare could not ask it what it runs (%v), and never restarts a daemon that may be running containers.", askErr)
 		}
 		out.Warnings = append(out.Warnings, Warning{
 			Hint:   "docker: the deployment's Docker reads its new daemon.json at its next restart",

@@ -18,7 +18,7 @@ step 10: load br_netfilter
 step 11: load br_netfilter at boot
   daemon: list br_netfilter and nf_tables in /etc/modules-load.d/paisans.conf, shared by every admitted deployment
   write /etc/modules-load.d/paisans.conf mode 0644:
-    | # Written by paisans host admit. The rootless Docker daemons of admitted
+    | # Written by paisans site admit. The rootless Docker daemons of admitted
     | # deployments need br_netfilter to start with their userland proxy off,
     | # and the module their iptables uses for the setup tool to install them.
     | br_netfilter
@@ -57,7 +57,7 @@ step 23: write the admission record
     |     "wireguard": 51820,
     |     "public": []
     |   },
-    |   "digest": "aadq-v10p-2qb7-jrsq",
+    |   "digest": "z7qj-2zby-gnjs-6h5z",
     |   "admitted_at": "2026-10-15T12:00:00Z",
     |   "data_dir": "",
     |   "bridge_netfilter": true,

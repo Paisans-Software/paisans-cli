@@ -97,7 +97,7 @@ func OwnerBlocks(site string, entries []render.ManifestWebServer) []string {
 }
 
 // OwnerServer names the owner's web server the entries were written for:
-// the server and its configuration as host admit found them, or their web
+// the server and its configuration as site admit found them, or their web
 // server when admit found none it knows.
 func OwnerServer(entries []render.ManifestWebServer) string {
 	e := entries[0]

@@ -22,7 +22,7 @@ const RecordVersion = 1
 
 // Dir is where admission records live on a host: root's, mode DirMode, so
 // every deployment's user reads its own record and none can write one.
-// host admit creates it root-owned, and refuses to write if it is a link or
+// site admit creates it root-owned, and refuses to write if it is a link or
 // not root's.
 const Dir = "/etc/paisans"
 
@@ -70,9 +70,9 @@ const MaxSize = 64 * 1024
 // not admitted it, or has evicted it.
 var ErrNotAdmitted = errors.New("no admission record")
 
-// Record is what host admit leaves on the host for one deployment: who it
+// Record is what site admit leaves on the host for one deployment: who it
 // runs as and what the owner granted, so the deployment's commands, which
-// cannot read root's files, learn it, and host deployments lists it.
+// cannot read root's files, learn it, and site deployments lists it.
 type Record struct {
 	Version    int    `json:"version"`
 	Deployment string `json:"deployment"`
@@ -196,7 +196,7 @@ func publicPorts(g Grants) []int {
 	return []int{}
 }
 
-// dataDirFor reports whether dir is a Docker data-root host admit sets for
+// dataDirFor reports whether dir is a Docker data-root site admit sets for
 // the deployment with token: an absolute path in its clean form, with no
 // control character, ending in /paisans-<token>. The deployment's daemon is
 // started with it, so nothing else is read as one.
@@ -357,7 +357,7 @@ func ParseRecord(data []byte, token string) (Record, error) {
 	// which the decoder above reads differently from jq or a person, is
 	// refused rather than read.
 	if want, err := EncodeRecord(r); err != nil || !bytes.Equal(want, data) {
-		return refuse("it is not exactly as host admit wrote it: something changed it after it was written (a repeated or differently cased key, a null, spacing or line endings). Run host admit again")
+		return refuse("it is not exactly as site admit wrote it: something changed it after it was written (a repeated or differently cased key, a null, spacing or line endings). Run site admit again")
 	}
 	return r, nil
 }
@@ -435,7 +435,7 @@ func Mine(t Runner) (Record, error) {
 
 // Differences is every way r, what the owner admitted, differs from site as
 // cfg declares it: each is a root change, so each needs the owner to run
-// host admit again. None when r covers the site.
+// site admit again. None when r covers the site.
 func (r Record) Differences(cfg *config.Config, site string) []string {
 	s := cfg.Sites[site]
 	var out []string

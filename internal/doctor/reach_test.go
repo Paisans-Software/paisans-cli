@@ -27,7 +27,7 @@ func TestAbsentSites(t *testing.T) {
 	}{
 		{"pending", SiteReach{Site: "home-b", Destination: "ubuntu@home-b.local", Err: refused, Class: pendingB}, Warn,
 			"home-b: pending: its login is refused or it does not answer, and the deployment has not joined it",
-			[]string{"roles: data, apps", "ssh to ubuntu@home-b.local: ubuntu@home-b.local: Permission denied (publickey).", "Until it joins, the deployment is without one of 3 etcd votes", "`paisans host request --site home-b > home-b.admit`"}},
+			[]string{"roles: data, apps", "ssh to ubuntu@home-b.local: ubuntu@home-b.local: Permission denied (publickey).", "Until it joins, the deployment is without one of 3 etcd votes", "`paisans site request --site home-b > home-b.admit`"}},
 		{"down, timed out", SiteReach{Site: "home-b", Destination: "ubuntu@home-b.local", Err: timeout, Class: topology.Site{Name: "home-b", Class: topology.Down}}, Warn,
 			topology.DownLine("home-b"),
 			[]string{"roles: data, apps", "While it is down the deployment is without one of 3 etcd votes", "ssh to ubuntu@home-b.local: Operation timed out", "recover:\n  1. Start the host or fix the route to it."}},
@@ -37,7 +37,7 @@ func TestAbsentSites(t *testing.T) {
 			topology.DownLine("vm"), []string{"its gateway"}},
 		{"gateway pending", SiteReach{Site: "vm", Destination: "ubuntu@vm.example.org", Err: refused, Class: topology.Site{Name: "vm", Class: topology.Pending, Request: true}}, Fail,
 			"vm: pending: its login is refused or it does not answer, and the deployment has not joined it",
-			[]string{"`paisans host request --site vm > vm.admit`"}},
+			[]string{"`paisans site request --site vm > vm.admit`"}},
 		{"unclassified", SiteReach{Site: "home-b", Destination: "ubuntu@home-b.local", Err: timeout, Unclassified: "home-b: its login is refused or it does not answer, and whether it has joined the deployment cannot be told"}, Fail,
 			"home-b: ssh to ubuntu@home-b.local did not answer (Operation timed out)",
 			[]string{"roles: data, apps", "While it is down the deployment is without one of 3 etcd votes", "Whether it has joined the deployment could not be told: home-b: its login", "Start the host or fix the route to it."}},

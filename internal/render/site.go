@@ -806,7 +806,7 @@ func (p *planner) renderTemplate(name string, data any) (string, error) {
 // lack one cannot dial each other, so their traffic relays through a site
 // that has one. Relaying keeps this to static configuration with no daemon and no
 // coordination service. The relay forwards with the host's
-// net.ipv4.ip_forward, which host admit turns on for a site with an
+// net.ipv4.ip_forward, which site admit turns on for a site with an
 // endpoint: the file carries no PostUp, because wg-quick runs one as root
 // and the WireGuard helper refuses any.
 func (p *planner) renderWireGuard(site *siteView) (string, error) {

@@ -1,7 +1,7 @@
 // Package admission is what passes between a deployment's operators and a
 // host's owner: the request an operator sends (Build, Encode), the owner's
 // strict reading of it (Parse) and the digest both compare (Digest), and the
-// admission record host admit leaves on the host, which the deployment's own
+// admission record site admit leaves on the host, which the deployment's own
 // user reads without sudo (Read).
 package admission
 

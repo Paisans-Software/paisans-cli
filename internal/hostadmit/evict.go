@@ -51,7 +51,7 @@ type evictor struct {
 
 // claimedWithoutRecord is the token of every other deployment the host's
 // registry claims it for whose admission record is not here, an admit in
-// flight or one that failed before its record, or a deployment host
+// flight or one that failed before its record, or a deployment site
 // prepare put here. Evict keeps for them what it keeps beside a record it
 // cannot read.
 func claimedWithoutRecord(e *evictor) []string {
@@ -84,7 +84,7 @@ func refuseNewer(r registry.Registry) error {
 		}
 		newer, err := version.Compare(e.ToolkitVersion, version.Version)
 		if err != nil {
-			return fmt.Errorf("%s records that paisans %q claimed this host for deployment %s, which is not a release this paisans %s can order, so it may be a newer one that installed what this one does not know about. Nothing was changed. Upgrade paisans, and run host evict again", registry.Path, ui.Visible(e.ToolkitVersion), ui.Visible(e.Token), version.Version)
+			return fmt.Errorf("%s records that paisans %q claimed this host for deployment %s, which is not a release this paisans %s can order, so it may be a newer one that installed what this one does not know about. Nothing was changed. Upgrade paisans, and run site evict again", registry.Path, ui.Visible(e.ToolkitVersion), ui.Visible(e.Token), version.Version)
 		}
 		if newer <= 0 {
 			continue
@@ -101,7 +101,7 @@ func refuseNewer(r registry.Registry) error {
 	if len(newerOnes) > 1 {
 		which = "deployments "
 	}
-	return fmt.Errorf("%s records that a newer paisans claimed this host for %s%s, and this is paisans %s, so it may not know everything those releases installed or need. Nothing was changed. Upgrade paisans to %s or later, and run host evict again", registry.Path, which, strings.Join(newerOnes, ", "), version.Version, highest)
+	return fmt.Errorf("%s records that a newer paisans claimed this host for %s%s, and this is paisans %s, so it may not know everything those releases installed or need. Nothing was changed. Upgrade paisans to %s or later, and run site evict again", registry.Path, which, strings.Join(newerOnes, ", "), version.Version, highest)
 }
 
 // evictParts are evict's stages in the order they run. The user's manager
@@ -141,7 +141,7 @@ var evictParts = []struct {
 // cannot be read is taken to need everything it might, so beside one evict
 // keeps the host-wide files, the sysctls and /etc/paisans. Each step is
 // planned from a probe, so a re-run after a failure plans only what is
-// left, and a re-run on a host evict finished plans nothing.
+// left, and a re-run on a site evict finished plans nothing.
 //
 // The user is deleted only when it is the deployment's: the record's user,
 // or, with no record, paisans-<token>. Anything else is refused, so a
@@ -177,7 +177,7 @@ func BuildEvict(t apply.Transport, in EvictInput) (*Plan, error) {
 	switch r, err := admission.Read(t, d.Token()); {
 	case errors.Is(err, admission.ErrNotAdmitted):
 	case err != nil:
-		return nil, fmt.Errorf("this deployment's admission record: %w. Move it aside and run host evict again, and if admit was given --data-dir, give evict the same --data-dir, since the record said where the Docker data went. Nothing was changed", shown(err))
+		return nil, fmt.Errorf("this deployment's admission record: %w. Move it aside and run site evict again, and if admit was given --data-dir, give evict the same --data-dir, since the record said where the Docker data went. Nothing was changed", shown(err))
 	default:
 		rec = &r
 	}
@@ -413,7 +413,7 @@ func (e *evictor) dirs() error {
 		dirs = append(dirs, [2]string{e.dataDir, "the deployment's Docker data, on the disk --data-dir named"})
 	} else if e.rec == nil && (e.f.User.Exists || len(e.f.SubUID[e.in.Request.User]) > 0) {
 		e.warn("data: without an admission record, a data directory outside "+e.in.Request.User+"'s home cannot be found",
-			"If admit was run with --data-dir, run host evict again with the same --data-dir, so its "+e.d.Prefix()+" directory is removed. Otherwise those files stay, owned by IDs in the subordinate range evict frees, and map onto whichever user is later given that range.")
+			"If admit was run with --data-dir, run site evict again with the same --data-dir, so its "+e.d.Prefix()+" directory is removed. Otherwise those files stay, owned by IDs in the subordinate range evict frees, and map onto whichever user is later given that range.")
 	}
 	dirs = append(dirs, [2]string{e.d.Root(), "the deployment's directory"})
 	for _, dir := range dirs {
@@ -422,7 +422,7 @@ func (e *evictor) dirs() error {
 			continue
 		}
 		if !strings.HasPrefix(s.Mode, "d") {
-			return fmt.Errorf("%s is %q, not a directory, and evict removes only the directory admit made there. Look at what it is, remove it yourself if it is the deployment's, and run host evict again. Nothing was changed", ui.Visible(dir[0]), ui.Visible(s.Mode))
+			return fmt.Errorf("%s is %q, not a directory, and evict removes only the directory admit made there. Look at what it is, remove it yourself if it is the deployment's, and run site evict again. Nothing was changed", ui.Visible(dir[0]), ui.Visible(s.Mode))
 		}
 		q := apply.ShellQuote(dir[0])
 		e.remove("remove "+ui.Visible(dir[0]), dir[1], "[ ! -L "+q+" ] && rm -rf --one-file-system -- "+q)
@@ -445,9 +445,9 @@ func (e *evictor) checkDataDir() error {
 	}
 	switch {
 	case !strings.HasPrefix(s.Mode, "d"):
-		return fmt.Errorf("%s is %q, not a directory, and evict removes only the directory admit made there. Look at what it is, remove it yourself if it is the deployment's, and run host evict again. Nothing was changed", ui.Visible(e.dataDir), ui.Visible(s.Mode))
+		return fmt.Errorf("%s is %q, not a directory, and evict removes only the directory admit made there. Look at what it is, remove it yourself if it is the deployment's, and run site evict again. Nothing was changed", ui.Visible(e.dataDir), ui.Visible(s.Mode))
 	case !owned:
-		return fmt.Errorf("%s is owned by uid %d, which is neither %s's nor in its subordinate range, so with no admission record evict cannot tell it is this deployment's Docker data. Look at it, remove it yourself if it is, and run host evict again without --data-dir. Nothing was changed", ui.Visible(e.dataDir), s.UID, user)
+		return fmt.Errorf("%s is owned by uid %d, which is neither %s's nor in its subordinate range, so with no admission record evict cannot tell it is this deployment's Docker data. Look at it, remove it yourself if it is, and run site evict again without --data-dir. Nothing was changed", ui.Visible(e.dataDir), s.UID, user)
 	}
 	return nil
 }
@@ -519,7 +519,7 @@ func (e *evictor) firewall() error {
 	}
 	for _, st := range s.Steps {
 		if st.Label == "remove" {
-			e.remove(st.Title, "delete `"+strings.TrimPrefix(st.Command, "ufw delete ")+"`, which host admit added for the deployment", st.Command)
+			e.remove(st.Title, "delete `"+strings.TrimPrefix(st.Command, "ufw delete ")+"`, which site admit added for the deployment", st.Command)
 		}
 	}
 	for _, w := range s.Warnings {

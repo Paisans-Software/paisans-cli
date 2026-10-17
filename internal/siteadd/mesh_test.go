@@ -75,7 +75,7 @@ func TestTheMeshGateStopsAtOnceWhenSudoRefusesTheHelper(t *testing.T) {
 	refused := "sudo: a password is required\n"
 	w.handshakesFail = &refused
 	err := siteadd.Execute(build(t, w))
-	if !errors.Is(err, apply.ErrHelperRefused) || !strings.Contains(err.Error(), "could not be run on home-a") || !strings.Contains(err.Error(), "host admit") {
+	if !errors.Is(err, apply.ErrHelperRefused) || !strings.Contains(err.Error(), "could not be run on home-a") || !strings.Contains(err.Error(), "site admit") {
 		t.Fatalf("want the helper's sudo refusal as the owner's problem, got %v", err)
 	}
 	reads := 0

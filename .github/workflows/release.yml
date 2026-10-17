@@ -3,7 +3,7 @@ name: release
 # A push to main whose version has no tag is a release: this tags it vX.Y.Z
 # and publishes the GitHub Release, with the static Linux binaries and their
 # SHA256SUMS that `make release-binaries` builds attached to it. A host owner
-# downloads one of those to run `paisans host admit` on the host itself.
+# downloads one of those to run `paisans site admit` on the host itself.
 # Any other push to main is a no-op. The version is the constant in
 # internal/version/version.go, which `make bump` sets on develop; the
 # "Release X to main" pull request from develop brings it here.

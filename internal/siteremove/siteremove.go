@@ -19,7 +19,7 @@
 // hash matches, a unit in its user's systemd directory named for its token,
 // and its own records. Everything else found is reported as kept. What is root's,
 // the user itself, the root directory, WireGuard, the firewall and the
-// registry entry, is host evict's: the plan ends with the line the host's
+// registry entry, is site evict's: the plan ends with the line the host's
 // owner runs for it. docs/specs/2026-10-08-site-remove.md is the approved
 // design.
 package siteremove
@@ -141,7 +141,7 @@ func (st *Stage) skipTitle() string {
 // EvictLine is how the host's owner removes what a site remove left for
 // them, without the request file.
 func EvictLine(d deployment.Deployment, user string) string {
-	return fmt.Sprintf("sudo paisans host evict --deployment %s --user %s --execute", d.ID, user)
+	return fmt.Sprintf("sudo paisans site evict --deployment %s --user %s --execute", d.ID, user)
 }
 
 // Plan is a whole removal, decided from the live deployment.
@@ -166,7 +166,7 @@ type Plan struct {
 	DataKept bool
 	// Evict is the line the host's owner runs to finish: what is root's
 	// (the user, its home, the root directory, WireGuard, the firewall, the
-	// registry entry and the admission record) only host evict removes.
+	// registry entry and the admission record) only site evict removes.
 	// Empty when the plan reaches no host. It shadows Options.Evict, which
 	// the package reads as p.Options.Evict.
 	Evict string

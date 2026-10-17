@@ -161,7 +161,7 @@ func runInitQuietly(t *testing.T, path string) error {
 	return err
 }
 
-// An admitted host's subnet is the one host admit built its firewall and
+// An admitted host's subnet is the one site admit built its firewall and
 // Docker address pools around, so a subnet that overlaps something there is
 // not rolled: init refuses, naming what it overlaps, with nothing written.
 func TestInitRefusesToRollAnAdmittedSubnet(t *testing.T) {
@@ -321,7 +321,7 @@ func TestInitGivesUpAfterMaxRolls(t *testing.T) {
 	}
 }
 
-// apply and host prepare refuse a host where something outside this
+// apply and site prepare refuse a host where something outside this
 // deployment's own interface overlaps the mesh, naming it, and pass one whose
 // only mesh route is their own.
 func TestCheckMeshLive(t *testing.T) {
@@ -499,7 +499,7 @@ func TestCheckMeshLiveSaysWhoHoldsTheSubnet(t *testing.T) {
 // Each site's admission is its own step: ✓ for an admitted host, ○ for one
 // that has not admitted the deployment yet. init skips that one, with a
 // warning saying how to have it admitted, and settles the subnet and writes
-// the secrets from the others; host admit checks the subnet against it as
+// the secrets from the others; site admit checks the subnet against it as
 // root.
 func TestInitSkipsAHostNotYetAdmitted(t *testing.T) {
 	sites := fakeSites()
@@ -531,7 +531,7 @@ func TestInitSkipsAHostNotYetAdmitted(t *testing.T) {
 }
 
 // With no site admitted yet, as after paisans create, init still writes the
-// secrets: it keeps the declared subnet for host admit to check on each.
+// secrets: it keeps the declared subnet for site admit to check on each.
 func TestInitBeforeAnyAdmission(t *testing.T) {
 	sites := fakeSites()
 	for _, f := range sites {
@@ -545,7 +545,7 @@ func TestInitBeforeAnyAdmission(t *testing.T) {
 		t.Errorf("a site is marked admitted:\n%s", rec.Lines())
 	}
 	if !rec.Has("detail", "no site has admitted this deployment yet") {
-		t.Errorf("init did not say the subnet is left to host admit:\n%s", rec.Lines())
+		t.Errorf("init did not say the subnet is left to site admit:\n%s", rec.Lines())
 	}
 	// A gateway not admitted holds no deployment record, and is not asked.
 	if rec.Has("warn", "could not read the deployment record") {

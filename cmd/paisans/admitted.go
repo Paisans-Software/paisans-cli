@@ -18,7 +18,7 @@ import (
 // anything else there: it reads each named site's admission record, as the
 // deployment's user, and refuses a host that has not admitted the
 // deployment, or whose admission does not cover the site, with nothing on
-// any host changed. host admit claimed the host in its registry, which is
+// any host changed. site admit claimed the host in its registry, which is
 // root's; the record is how the deployment learns it was admitted, and as
 // what. Sites are read in name order, each a step, so a spinner shows while
 // ssh answers.
@@ -67,10 +67,10 @@ func admittedSites(r ui.Reporter, cfg *config.Config, sites ...string) (map[stri
 
 // admissionProblem is a refusal in the operator's words: what the record
 // lacks, and the two lines that fix it, the operator's and the owner's. A
-// record that cannot be read is first moved aside by the owner, since host
+// record that cannot be read is first moved aside by the owner, since site
 // admit refuses it too. token is the deployment's.
 func admissionProblem(site, token string, err error) error {
-	lines := fmt.Sprintf("Send the host's owner a new request:\n\n    paisans host request --site %[1]s > %[1]s.admit\n\nand ask them to run, on the host:\n\n    sudo paisans host admit --request %[1]s.admit", site)
+	lines := fmt.Sprintf("Send the host's owner a new request:\n\n    paisans site request --site %[1]s > %[1]s.admit\n\nand ask them to run, on the host:\n\n    sudo paisans site admit --request %[1]s.admit", site)
 	var se *admission.SiteError
 	var unreadable *admission.Error
 	switch {
@@ -80,7 +80,7 @@ func admissionProblem(site, token string, err error) error {
 		return &ui.Problem{Hint: site + "'s admission does not match " + config.FileName, Explain: "- " + strings.Join(se.Problems, "\n- ") + "\n" + lines, Cause: err}
 	case errors.As(err, &unreadable):
 		path, _ := admission.Path(token)
-		return &ui.Problem{Hint: site + "'s admission record cannot be read", Explain: "- " + strings.Join(unreadable.Problems, "\n- ") + "\nAsk the host's owner to move " + path + " aside, which host admit refuses as it is. " + lines, Cause: err}
+		return &ui.Problem{Hint: site + "'s admission record cannot be read", Explain: "- " + strings.Join(unreadable.Problems, "\n- ") + "\nAsk the host's owner to move " + path + " aside, which site admit refuses as it is. " + lines, Cause: err}
 	}
 	return err
 }

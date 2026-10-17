@@ -37,7 +37,7 @@ const (
 	garageImage = "dxflrs/garage:v1.0.1"
 	// curlImage runs the probe's requests inside the Docker network: Docker
 	// on macOS cannot route to a container address, and the Garage image
-	// has no shell or curl of its own. A real host has curl from host
+	// has no shell or curl of its own. A real host has curl from site
 	// prepare.
 	curlImage = "curlimages/curl:8.10.1"
 	// A subnet of this test's own, so it cannot collide with the Garage

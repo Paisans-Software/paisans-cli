@@ -31,7 +31,7 @@ func (h *helperHost) ReadFile(string) (string, bool, error)  { return "", false,
 func (h *helperHost) WriteFile(string, string, uint32) error { return nil }
 func (h *helperHost) Describe() string                       { return "home-a" }
 
-// Every verb is the helper host admit installs for the interface, run with
+// Every verb is the helper site admit installs for the interface, run with
 // sudo -n: the one command the deployment's user may run as root, which
 // fails at once on a host without the sudoers line rather than waiting for
 // a password.

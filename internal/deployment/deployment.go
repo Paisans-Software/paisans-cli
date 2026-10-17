@@ -139,7 +139,7 @@ func (d Deployment) WireGuardInstalled() string {
 func (d Deployment) WireGuardUnit() string { return "wg-quick@" + d.Interface() }
 
 // FwMark is the mark the deployment's WireGuard socket carries: the helper
-// host admit installs adds it to every conf it installs, and the egress
+// site admit installs adds it to every conf it installs, and the egress
 // table drops what a socket with it sends to the host itself, loopback,
 // link-local, multicast and the private ranges. Kernel WireGuard sends from
 // no user, so the table's UID match cannot see the mesh's own packets, and

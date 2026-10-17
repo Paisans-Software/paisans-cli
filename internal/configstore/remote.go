@@ -23,9 +23,9 @@ const emptyMark = "__PAISANS_EMPTY__"
 // repository.
 const noStoreMark = "__PAISANS_NO_STORE__"
 
-// ErrNoStore is a site with no configuration store yet: one host prepare
-// has not run on since the store was added. paisans host prepare makes it.
-var ErrNoStore = errors.New("no configuration store; paisans host prepare makes it")
+// ErrNoStore is a site with no configuration store yet: one site prepare
+// has not run on since the store was added. paisans site prepare makes it.
+var ErrNoStore = errors.New("no configuration store; paisans site prepare makes it")
 
 // SyncReport is what a site's last sync reached, as the sync script logged it.
 type SyncReport struct {
@@ -62,7 +62,7 @@ func Push(t apply.Transport, d deployment.Deployment, bundle []byte) error {
 		return err
 	}
 	tmp, repo := hostprep.ConfigIncoming(d), hostprep.ConfigRepo(d)
-	// A site host prepare has not given a store has nowhere to take the
+	// A site site prepare has not given a store has nowhere to take the
 	// bundle, and is told apart so the refusal can name what makes one.
 	out, err := t.Run(fmt.Sprintf("if [ -d %s ]; then echo ok; else echo %s; fi", quote(repo), noStoreMark))
 	if err != nil {
@@ -87,8 +87,8 @@ func Push(t apply.Transport, d deployment.Deployment, bundle []byte) error {
 // returns a nil bundle and no error. With syncFirst the site first fetches
 // from its peers, so the answer includes what they hold; a sync that fails is
 // recorded in the report and the site's own versions are still gathered. A
-// site host prepare has not given a store has no sync unit and nothing to
-// sync, so none is started there: apply gathers before its host prepare
+// site site prepare has not given a store has no sync unit and nothing to
+// sync, so none is started there: apply gathers before its site prepare
 // steps, and every deployment starts on bare hosts.
 func Pull(t apply.Transport, d deployment.Deployment, syncFirst bool) ([]byte, *SyncReport, error) {
 	if err := checkID(d); err != nil {

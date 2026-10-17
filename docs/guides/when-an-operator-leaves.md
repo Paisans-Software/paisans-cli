@@ -112,17 +112,17 @@ community's decision.
 3. **Prepare every site that named them.**
 
    ```sh
-   paisans host prepare --site home-a           # shows the keys it would delete
-   paisans host prepare --site home-a --execute
+   paisans site prepare --site home-a           # shows the keys it would delete
+   paisans site prepare --site home-a --execute
    ```
 
    One site at a time, or `paisans apply`, which prepares every site and,
    with `--execute`, publishes the version that removes them: from then on
    their signature stops counting.
-   Closes: ssh with every key `host prepare` added for them. Open: a key of
-   theirs that was in `authorized_keys` before `host prepare` first ran is
+   Closes: ssh with every key `site prepare` added for them. Open: a key of
+   theirs that was in `authorized_keys` before `site prepare` first ran is
    never recorded and never removed, because nothing on the host says
-   whether it is the only way in (README, *host prepare manages the login
+   whether it is the only way in (README, *site prepare manages the login
    user's authorized keys*). Read `~<user>/.ssh/authorized_keys` on each
    host, and delete such a line by hand. An account of their own on a host,
    or a key on another user, is outside the toolkit too.
@@ -313,14 +313,14 @@ included, and refuses while one does not answer.
 
    `apply` prepares the new host, applies it and creates its DNS records, adds
    it as a peer on every site, and prepares every site, which deletes from
-   each the keys of theirs `host prepare` added. It reviews every key it
+   each the keys of theirs `site prepare` added. It reviews every key it
    grants on the new host, which has no record yet, and asks for `approve` at
    the terminal (`docs/specs/2026-10-11-config-review.md`). A replacement data site is
    joined by that apply's `site add`. It also publishes the version that
    takes them out of `operators`, so from then on a version signed by any key of
    theirs is not trusted. Closes: the outage of step 5, their ssh keys on
    every remaining site, and their signature on the configuration. Open: a
-   key of theirs on a remaining host that `host prepare` never recorded (see
+   key of theirs on a remaining host that `site prepare` never recorded (see
    step 3 of the first case).
 
 8. **Take away what their Pocket ID account grants**, as in step 4 of the

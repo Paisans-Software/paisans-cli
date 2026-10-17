@@ -530,7 +530,7 @@ func TestARekeySaysWhenSudoRefusesTheHelper(t *testing.T) {
 	}
 	m.failOnce, m.failOut = "show latest-handshakes", "sudo: a password is required\n"
 	err = run(t, p)
-	if !errors.Is(err, apply.ErrHelperRefused) || !strings.Contains(err.Error(), "could not be run on home-a") || !strings.Contains(err.Error(), "host admit") {
+	if !errors.Is(err, apply.ErrHelperRefused) || !strings.Contains(err.Error(), "could not be run on home-a") || !strings.Contains(err.Error(), "site admit") {
 		t.Fatalf("want the helper's sudo refusal as the owner's problem, got %v", err)
 	}
 }
@@ -805,7 +805,7 @@ func TestARekeyRefusesASiteThatOnlyLostItsClaim(t *testing.T) {
 	}
 }
 
-// admitted is the path and content of the admission record host admit
+// admitted is the path and content of the admission record site admit
 // writes for site.
 func admitted(t *testing.T, cfg *config.Config, site string) (string, string) {
 	t.Helper()

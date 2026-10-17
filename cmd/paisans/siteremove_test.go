@@ -145,7 +145,7 @@ func TestForcedOnAnEmptyHostSaysNothingToDo(t *testing.T) {
 		t.Errorf("a dry run with a record left to clean printed:\n%s", out)
 	}
 	// A host left for its owner's evict says so on every ending.
-	plan.Evict = "sudo paisans host evict --deployment x --user deploy --execute"
+	plan.Evict = "sudo paisans site evict --deployment x --user deploy --execute"
 	for _, recordLeft := range []bool{false, true} {
 		rec = &ui.Recorder{}
 		forcedNothingToDo(rec, plan, config.Destination{User: "admin", Host: "192.0.2.1", Port: 22}, recordLeft)
@@ -322,7 +322,7 @@ func TestForcedRemovalOfAnUndeclaredSiteMakesNoProvider(t *testing.T) {
 }
 
 // An --id run that cleans the host ends on one line naming the host and the
-// deployment it was cleaned of, and the host evict line for its owner.
+// deployment it was cleaned of, and the site evict line for its owner.
 func TestSiteRemoveByIDEndsNamingTheDeployment(t *testing.T) {
 	withHost(t, &cleaningHost{idHost: idHost{runningHost{failingHost{match: "\x00"}}, twoDeployments(t)}})
 	saved := isTerminal
@@ -346,7 +346,7 @@ func TestSiteRemoveByIDEndsNamingTheDeployment(t *testing.T) {
 		t.Errorf("no result %q in:\n%s", want, rec.Lines())
 	}
 	// Then the line the host's owner runs to remove what is root's.
-	if !rec.Has("note", "the host's owner finishes on watch") || !strings.Contains(rec.Lines(), "    sudo paisans host evict --deployment "+monitorID+" --user ubuntu --execute") {
+	if !rec.Has("note", "the host's owner finishes on watch") || !strings.Contains(rec.Lines(), "    sudo paisans site evict --deployment "+monitorID+" --user ubuntu --execute") {
 		t.Errorf("no evict line in:\n%s", rec.Lines())
 	}
 }

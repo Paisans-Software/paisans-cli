@@ -29,17 +29,17 @@ command: what it does, when it is run on its own rather than through the whole
 `apply`, its flags and defaults, and what it changes. This section is how the
 code behind each one is laid out.
 
-render, `secrets list`, `site list` and `host list` touch nothing outside the
-working directory, and
+render, `secrets list` and `site list` touch nothing outside the working
+directory, and
 create writes one new file there. validate reads only the files, except that
 it tries each app's mail settings from a site running it, and `secrets set`
 tries an SMTP password from this machine before writing it; neither changes a site,
 and `validate --offline` reaches none. init writes only local files, and reads every site over ssh to settle the mesh subnet.
-`host prepare`, `apply`, `prune`, `site add`, `site remove`, `mesh rekey`,
+`site prepare`, `apply`, `prune`, `site add`, `site remove`, `mesh rekey`,
 `secrets rotate`, `storage init`, `storage add`, `storage rotate-key`, `app
 admin create`, `app remove` and `oidc client create` reach a machine, and each
 changes it only with `--execute`. `preflight` and `doctor`
-reach every site and never change one, and `host deployments` reads the one
+reach every site and never change one, and `site deployments` reads the one
 host `--ssh` names, with no `paisans-stack.yaml`, and changes nothing. `secrets
 prune` reads each gateway's deployment record and rewrites only the local
 secrets file, only with `--execute`. `failover test` changes which site
@@ -73,7 +73,7 @@ Each command that changes a host first reads the admission record
 `/etc/paisans/admitted.<token>.json` as the deployment's user, and refuses a
 host that has none (`cmd/paisans/admitted.go` and `internal/admission`); its
 dry run reads the same record. The host registry,
-`/var/lib/paisans/registry.json`, is `host admit`'s: it claims the host there as
+`/var/lib/paisans/registry.json`, is `site admit`'s: it claims the host there as
 root, and `internal/registry` holds the decision and the locked shell command. Every name and path those
 commands use comes from `internal/deployment`, derived from the `id` in
 `paisans-stack.yaml`. README.md "A deployment has an id, and a host knows every
@@ -85,7 +85,7 @@ subnet, and a claim refuses another deployment's same interface, same port or
 overlapping subnet. It carries the site's roles too (`roles`, sorted and
 comma joined so the awk matches one with `index()`), and a claim refuses
 `gateway` or `data` when another deployment on the host holds the same role.
-A site is one machine: `host admit`'s claim (`planClaim`, with
+A site is one machine: `site admit`'s claim (`planClaim`, with
 `internal/registry/machine.go`) refuses a host that runs another site of this
 deployment, read from this deployment's entry, which names the site, or with no entry from
 the `Address` line of `/srv/paisans/<token>/psns-<token>.conf`. The awk merge
@@ -94,7 +94,7 @@ mirrors it. `validate` refuses two sites with one mesh address
 (`duplicate-site-address`) and two at one ssh host and port or one dial
 endpoint (`sites-share-a-machine`), so `apply` without `--site` runs every
 site's prepare and pull at once with no host shared between them.
-`apply` and `host prepare` also read the host's routes,
+`apply` and `site prepare` also read the host's routes,
 addresses, Docker networks and Docker's address pools before their first change,
 and refuse an overlap with the mesh subnet; `internal/mesh` holds the parsing
 and the overlap test as pure functions, and the probe (`mesh.Probe`, over any
@@ -102,7 +102,7 @@ and the overlap test as pure functions, and the probe (`mesh.Probe`, over any
 (`checkMeshLive`). README.md "Two deployments on one host never share a mesh"
 has the reasoning.
 
-`apply`, `apply --site`, `host prepare` and `site add` review what
+`apply`, `apply --site`, `site prepare` and `site add` review what
 `paisans-stack.yaml` grants before their first change. `internal/grant` computes a site's grant from the
 configuration and the render (the login user, every key of the operators
 `ssh.keys` names, every rendered service's image), compares it with the host's record,
@@ -111,7 +111,7 @@ deployment's lock. `cmd/paisans/review.go` shows the review and asks for
 `approve` through `confirmWord`, refusing without a terminal;
 `cmd/paisans/converge_review.go` is `apply` with no `--site`'s one review for
 every site, which its steps check against rather than asking again. README.md
-"`apply` and `host prepare` review what `paisans-stack.yaml` grants" has the
+"`apply` and `site prepare` review what `paisans-stack.yaml` grants" has the
 reasoning.
 
 ```
@@ -119,7 +119,7 @@ paisans validate --config examples/paisans-stack.example.yaml
 paisans init     --config examples/paisans-stack.example.yaml
 paisans render   --config examples/paisans-stack.example.yaml \
                  --secrets secrets.enc.yaml --out ./out
-paisans host prepare --site home-a        # the host check, then what a blank host lacks
+paisans site prepare --site home-a        # the host check, then what a blank host lacks
 paisans apply    --site home-a            # shows what would change
 paisans apply    --site home-a --execute  # does it
 paisans prune    --site home-a            # lists dangling volumes, and which go
@@ -422,7 +422,7 @@ two sites, so uploads stop while either is down, a trade its comment explains.
 
 ## The host check, before anything changes
 
-`host prepare`, `apply`, `site add` (on the site being added) and `prune`
+`site prepare`, `apply`, `site add` (on the site being added) and `prune`
 each run `internal/hostcheck` first, and so do `storage rotate-key` (on every
 site the app runs on), `storage add` (every Garage site, the gateway and every
 monitor site), and `site add`, `site remove` and `app remove` on every monitor
@@ -481,7 +481,7 @@ What "shared" changes, and where:
 
 | Command | On a shared host |
 |---|---|
-| `host prepare` | nothing host-wide to hold back: it plans no firewall; the host check does not read the firewall, whose policy is the host owner's and whose rules for the deployment `host admit` adds |
+| `site prepare` | nothing host-wide to hold back: it plans no firewall; the host check does not read the firewall, whose policy is the host owner's and whose rules for the deployment `site admit` adds |
 | `apply` | `apply.KeepImages()`, as `--keep-images`, which also skips the sweep |
 | `site add` | `siteadd.Plan.KeepImages`, passed to the replica stage's whole apply; `siteadd.Plan.SharedSites`, the monitor sites, for the reseed's apply |
 | `site remove`, `app remove` | the monitor sites are host checked, and the reseed's apply there keeps nothing back: `apply.MonitorReseed.KeepImages` is there for a caller to set |
@@ -490,7 +490,7 @@ What "shared" changes, and where:
 | `preflight` | a `host` check line; the `prepared` check asks for the shared plan |
 
 A conflict is refused by `Report.Refusal` before anything else is asked of the
-host. A shared host is not refused: its firewall is `host admit`'s. There is
+host. A shared host is not refused: its firewall is `site admit`'s. There is
 no flag to skip the check.
 
 ## `apply`, and the gates in it
@@ -1028,17 +1028,17 @@ undo:
   `appremove.FilesCommand` (hash checked on the host), the user's units by the
   `paisans-<token>-` glob in its systemd directory. What is root's (the ufw
   rules, the registry entry by `registry.RemoveCommand`, the user and the root
-  directory) is `host evict`'s, and the plan ends with its line. A re-run
+  directory) is `site evict`'s, and the plan ends with its line. A re-run
   therefore does only what is left. `verifyHost`, the stage's gate, runs last.
 * **The SSH allow is never removed.** It is how the host is reached, and the
-  firewall is `host evict`'s: site remove reads and changes no ufw rule.
+  firewall is `site evict`'s: site remove reads and changes no ufw rule.
   `TestNoRemovalDeletesTheSSHAllow` runs the full removal, `--force` and `--id`,
   with and without `--delete-data`, and the rule survives each.
 * **Authorized keys are never removed.** A key may be the only way into the
   host, and nothing on it says whether another exists. The deployment's
-  records of the keys `host prepare` added are its own bookkeeping, so they
+  records of the keys `site prepare` added are its own bookkeeping, so they
   are deleted under the deployment's lock, with no step of their own in the plan.
-* **The registry entry is `host evict`'s.** Site remove neither reads nor
+* **The registry entry is `site evict`'s.** Site remove neither reads nor
   writes the registry; `registry.Remove` has a Go counterpart for the awk
   program that evict runs, and the tests run it against `Encode` of its result.
 * **`inspect` is a variable** standing in for `hostcheck.Inspect`, so the tests
@@ -1432,7 +1432,7 @@ Things about the code that are easy to undo by accident:
   this deployment's records at a gateway hostname point at it. A probe that
   fails is an error, never "no gateway". Stage 6 removes the marker last, so a
   run stopped part way finds the site again.
-* **`host prepare` keeps a former gateway's 80 and 443** while its Caddy is
+* **`site prepare` keeps a former gateway's 80 and 443** while its Caddy is
   there (`hostprep.GatewayCaddyProbe`), with the gateway's own comments, so
   `apply`'s first step does not cut the overlap short.
 * **`dns init`'s `moving` is not a conflict and not a create.** A wanted
@@ -1561,7 +1561,7 @@ hence the longer timeout. `PAISANS_WF_IMAGE=<reference>` runs it against
 another build, such as a local one of a release newer than the one the kind
 names.
 
-`host admit`'s read-only probe has Docker tests of its own, behind their own
+`site admit`'s read-only probe has Docker tests of its own, behind their own
 tag:
 
 ```
@@ -1628,7 +1628,7 @@ installed, on a workstation or anywhere else.
 | `internal/configmerge` | placing an app's passthrough `config` keys into a file a template has already rendered, in that file's own syntax |
 | `internal/ui` | how every command reports to the operator: one line per step by default, and every detail with `--verbose` |
 | `internal/deployment` | a deployment's id and token, and every name, path and label derived from them |
-| `internal/registry` | a host's record of the deployments on it, root's, and the locked claim `host admit` makes |
+| `internal/registry` | a host's record of the deployments on it, root's, and the locked claim `site admit` makes |
 | `internal/deployrecord` | the gateway's record of the sites, apps and Pocket ID groups the deployment has deployed, which `apply` adds to and only a removal takes from |
 | `internal/mesh` | reading a host's routes, addresses and Docker networks and pools, the overlap test, and `init`'s subnet roll |
 | `internal/validate` | the rules, and nothing else |
@@ -1659,7 +1659,7 @@ installed, on a workstation or anywhere else.
 | `internal/patroni` | reading a Patroni cluster through the Spilo container: `/cluster`, the leader, lag, database size |
 | `internal/configstore` | the signed copies of the configuration: a version as a git commit and the bare repository holding it, the rules that choose which versions to trust and which is newest, gathering from every site, pushing to them, and the key by key merge of the secrets |
 | `internal/hostprep` | taking a blank host to what `apply` assumes; one profile per operating system, its shell under `profiles/<id>-<version>/` |
-| `internal/hostadmit` | what runs on a host as its owner, as root, for one deployment: the local transport `host admit` and `host evict` use with `--request`, each command through `sh -c` and each file walked by descriptor without following a link. |
+| `internal/hostadmit` | what runs on a host as its owner, as root, for one deployment: the local transport `site admit` and `site evict` use with `--request`, each command through `sh -c` and each file walked by descriptor without following a link. |
 | `internal/render/templates` | the infrastructure templates |
 
 Templating is `text/template` from the standard library. No template engine is
@@ -1939,20 +1939,20 @@ before.
   reason a file configured application is the better case. A test asserts it
   against the fixture's placeholder credentials.
 * **Output is deterministic.** Sort before you iterate a map.
-* **host prepare removes only authorized keys it or host admit added**, as
+* **site prepare removes only authorized keys it or site admit added**, as
   recorded in `/srv/paisans/<token>/.paisans/authorized_keys.owned`, written
   under the deployment's own lock, and never rewrites a key's comment to mark
   it. Removals run last, and a plan that would leave the user
   with none of the listed keys is refused. Tests in
   `internal/hostprep/hostprep_test.go` cover add, adopt, forget, remove, a
   restricted key and that refusal.
-* **No flag answers the review.** `apply`, `host prepare` and `site add` ask for
+* **No flag answers the review.** `apply`, `site prepare` and `site add` ask for
   `approve` at a terminal when what `paisans-stack.yaml` grants adds or changes
   something, and refuse without one, before the first change. A flag that answered
   it would end up in every script, and approving is the control. Tests in
   `cmd/paisans/review_test.go` and `converge_review_test.go` drive the prompt
   through a pipe.
-* **`host admit`'s SSH allow follows `ssh.port` and is never removed**,
+* **`site admit`'s SSH allow follows `ssh.port` and is never removed**,
   including the allow for a port the site used before. A test moves the port and
   asserts the old allow is kept and noted.
 
@@ -2000,7 +2000,7 @@ in `internal/secretsrotate`, and have run only against fakes.
 
 The signed copies of the configuration have run only against fakes and local
 bare repositories standing in for sites: the trust rules against built
-histories, publishing and gathering through a fake transport, and the host
+histories, publishing and gathering through a fake transport, and the site
 prepare steps against a fake host. The shell that pushes to a store, bundles it
 for a pull, and the rendered sync script have run with a local `sh` against
 local bare repositories, with the host's paths moved into a temporary directory
@@ -2010,7 +2010,7 @@ of it as `nobody` (with `safe.directory` set for its one repository by
 environment) and the sync's fetch between real mesh addresses are reasoned from
 git's documentation, not observed; `git ls-remote` against a prepared host's
 daemon is the check to make first. Nor has `apply`'s publishing after the
-`host prepare` steps, or the witness refusal, run on a real deployment.
+`site prepare` steps, or the witness refusal, run on a real deployment.
 
 Pocket ID on more than one apps site has run only in containers on one
 machine: two real instances against one Postgres, through the rendered

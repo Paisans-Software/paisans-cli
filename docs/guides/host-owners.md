@@ -9,8 +9,8 @@ a user of its own on your machine, with its own rootless Docker, fenced off
 your network.
 
 The reasoning is in `README.md`, under *A host's owner admits a site from a
-request* and *`host prepare` keeps what is the deployment's user's*; every
-flag is under *`paisans host admit`* and *`paisans host evict`* in
+request* and *`site prepare` keeps what is the deployment's user's*; every
+flag is under *`paisans site admit`* and *`paisans site evict`* in
 [docs/commands.md](../commands.md).
 
 **Read *4. ufw* and *If SSH stops answering after admit enables ufw* before
@@ -84,7 +84,7 @@ reads, rather than read it in part.
 ## 2. Read the request and compare its digest
 
 ```sh
-sudo paisans host admit --request home-a.admit
+sudo paisans site admit --request home-a.admit
 ```
 
 Without `--execute` it changes nothing. It shows the site and its roles, the
@@ -107,7 +107,7 @@ same way. `--yes` never answers it.
 
 A request is read as strictly as a configuration: an unknown version, a field
 missing or unknown, a user that is `root` or another deployment's, a key that
-is not a plain public key, or any byte the operators' `host request` would
+is not a plain public key, or any byte the operators' `site request` would
 not have written, refuses it before anything else.
 
 ## 3. Decide what to grant
@@ -190,7 +190,7 @@ connection included, and nothing turns it off again.
 ## 5. Admit
 
 ```sh
-sudo paisans host admit --request home-a.admit --watchdog --execute
+sudo paisans site admit --request home-a.admit --watchdog --execute
 ```
 
 Pass the flags you decided on. Paisans shows the plan, asks for the digest,
@@ -201,7 +201,7 @@ operators' next command is the first to log in as the deployment's user.
 
 An owner who is also one of the deployment's operators can admit from their
 workstation instead, with the configuration and their own login to the
-machine: `paisans host admit --site home-a --ssh you --execute`. The steps
+machine: `paisans site admit --site home-a --ssh you --execute`. The steps
 are the same. There, admit ends by logging in as the deployment's user, a
 new SSH connection, and stops the ufw timer itself when that login gets
 through.
@@ -397,7 +397,7 @@ request does not need is refused.
 
 A change of the site's SSH port, WireGuard port, user, endpoint or mesh
 subnet also needs you, since each is a root change: the operators' commands
-refuse with the `host request` and `host admit` lines to run. When the
+refuse with the `site request` and `site admit` lines to run. When the
 operators move their gateway off your machine, they send a fresh request
 once DNS has moved; admitting it without `--public-ports` closes 80 and 443
 and restores the low-port setting, unless another deployment here holds it.
@@ -405,8 +405,8 @@ and restores the low-port setting, unless another deployment here holds it.
 ## Evicting
 
 ```sh
-sudo paisans host evict --request home-a.admit --execute
-sudo paisans host evict --deployment f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01 --user paisans-f2a9 --execute
+sudo paisans site evict --request home-a.admit --execute
+sudo paisans site evict --deployment f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01 --user paisans-f2a9 --execute
 ```
 
 The second is for when the request is lost. Without `--execute`,
@@ -430,7 +430,7 @@ its plan does not warn of them. The operators' `site remove` keeps that
 Caddy serving them and says so, but evict does not.
 
 The operators' `paisans site remove` does what the deployment's user can, and
-ends by printing the `host evict` line for you.
+ends by printing the `site evict` line for you.
 
 ## What stays after evicting
 

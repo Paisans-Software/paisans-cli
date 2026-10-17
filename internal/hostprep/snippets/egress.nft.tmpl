@@ -1,10 +1,10 @@
-{{- /* The egress table host admit loads for one deployment (spec, Egress).
+{{- /* The egress table site admit loads for one deployment (spec, Egress).
         The first two lines make the load atomic: the table is created if
         absent, deleted, and defined again in one transaction, so a reload
         never leaves the user unfiltered. */ -}}
-# Written by paisans host admit for paisans-{{ .Token }}. Keeps the
+# Written by paisans site admit for paisans-{{ .Token }}. Keeps the
 # deployment's user, its containers and its mesh off this host's loopback
-# and the owner's network. paisans host evict removes it.
+# and the owner's network. paisans site evict removes it.
 table inet {{ .Table }}
 delete table inet {{ .Table }}
 table inet {{ .Table }} {

@@ -28,40 +28,31 @@ func listTable(t *testing.T, run func([]string, io.Writer) error) (map[string][]
 	return rows, lines[0]
 }
 
-// site list names every declared site, sorted, with its roles and mesh
-// address, from the file --config names rather than the working directory.
-func TestSiteListNamesEverySiteWithItsRoles(t *testing.T) {
+// site list names every declared site, sorted, with its roles, its mesh
+// address and where its host is reached, defaults filled in, from the file
+// --config names rather than the working directory. A site with no public
+// address shows a dash there.
+func TestSiteListNamesEverySite(t *testing.T) {
 	rows, header := listTable(t, runSiteList)
-	if strings.Join(strings.Fields(header), " ") != "SITE ROLES ADDRESS" {
+	if strings.Join(strings.Fields(header), " ") != "SITE ROLES ADDRESS SSH PUBLIC PUBLIC6" {
 		t.Errorf("header %q", header)
 	}
 	if len(rows) != 4 {
 		t.Fatalf("want 4 sites, got %v", rows)
 	}
-	if got := rows["vm"]; len(got) != 2 || got[0] != "gateway,witness" {
-		t.Errorf("vm: %v", got)
+	want := map[string]string{
+		"vm":     "gateway,witness 10.44.0.3 ubuntu@vm.example.org:22 - -",
+		"home-a": "data,apps 10.44.0.1 ubuntu@home-a.local:22 - -",
+		"watch":  "monitor 10.44.0.4 ubuntu@watch.example.org:22 203.0.113.20 -",
 	}
-	if got := rows["home-a"]; len(got) != 2 || got[0] != "data,apps" {
-		t.Errorf("home-a: %v", got)
-	}
-}
-
-// host list shows where each site's host is reached, with the defaults
-// filled in: a site with no public address shows a dash there.
-func TestHostListShowsEachSitesDestination(t *testing.T) {
-	rows, header := listTable(t, runHostList)
-	if strings.Join(strings.Fields(header), " ") != "SITE SSH PUBLIC PUBLIC6" {
-		t.Errorf("header %q", header)
-	}
-	if got := rows["watch"]; len(got) != 3 || got[0] != "ubuntu@watch.example.org:22" || got[1] != "203.0.113.20" {
-		t.Errorf("watch: %v", got)
-	}
-	if got := rows["home-a"]; len(got) != 3 || got[0] != "ubuntu@home-a.local:22" || got[1] != "-" {
-		t.Errorf("home-a: %v", got)
+	for site, w := range want {
+		if got := strings.Join(rows[site], " "); got != w {
+			t.Errorf("%s: got %q, want %q", site, got, w)
+		}
 	}
 }
 
-// Without --config, both read paisans-stack.yaml in the working directory,
+// Without --config, site list reads paisans-stack.yaml in the working directory,
 // and a directory without one is an error rather than an empty list.
 func TestListReadsTheWorkingDirectoryByDefault(t *testing.T) {
 	configPath, _ := secretsDir(t, "version: 1\n")
@@ -76,7 +67,7 @@ func TestListReadsTheWorkingDirectoryByDefault(t *testing.T) {
 	if err := os.Remove(configPath); err != nil {
 		t.Fatal(err)
 	}
-	if err := runHostList(nil, &out); err == nil {
+	if err := runSiteList(nil, &out); err == nil {
 		t.Error("want an error with no paisans-stack.yaml")
 	}
 }

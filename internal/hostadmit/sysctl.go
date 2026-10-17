@@ -20,8 +20,8 @@ const (
 // for each key some admitted deployment needs. It is shared by every
 // admitted deployment.
 func SysctlFile(low, forward bool) string {
-	out := "# Written by paisans host admit, for every admitted deployment that needs\n" +
-		"# it; paisans host evict restores each value once none does.\n"
+	out := "# Written by paisans site admit, for every admitted deployment that needs\n" +
+		"# it; paisans site evict restores each value once none does.\n"
 	if low {
 		out += keyLowPorts + " = 80\n"
 	}
@@ -64,7 +64,7 @@ func (b before) text() string {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	out := "# Written by paisans host admit: each value as it was before admit\n# first changed it. paisans host evict restores them.\n"
+	out := "# Written by paisans site admit: each value as it was before admit\n# first changed it. paisans site evict restores them.\n"
 	for _, k := range keys {
 		out += k + " = " + b[k] + "\n"
 	}
@@ -209,7 +209,7 @@ func (p *planner) sysctls() (*sysctlState, error) {
 
 // recordBefore is the step that writes content to sysctl.before.
 func recordBefore(p *planner, content string) {
-	p.step(Step{Title: "record the sysctls' values before", Describe: "sysctls: " + sysctlBeforePath + ", for host evict to restore", File: &hostprep.File{Path: sysctlBeforePath, Content: content, Mode: 0o644}, Kinds: []string{"sysctl"}})
+	p.step(Step{Title: "record the sysctls' values before", Describe: "sysctls: " + sysctlBeforePath + ", for site evict to restore", File: &hostprep.File{Path: sysctlBeforePath, Content: content, Mode: 0o644}, Kinds: []string{"sysctl"}})
 }
 
 // planSysctlsBefore records, before anything else changes the host, the

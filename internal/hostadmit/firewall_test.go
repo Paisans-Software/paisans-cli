@@ -8,7 +8,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/hostadmit"
 )
 
-const portsMarker = "paisans host admit: who holds 80 and 443"
+const portsMarker = "paisans site admit: who holds 80 and 443"
 
 // gateway is the fixture's gateway site's flags.
 var gateway = hostadmit.Flags{Watchdog: true, PublicPorts: true}
@@ -195,7 +195,7 @@ func TestTheOwnersSSHAllowIsLeftAlone(t *testing.T) {
 	}
 }
 
-// What the shared ufw planner says in admit's plan names admit, not host
+// What the shared ufw planner says in admit's plan names admit, not site
 // prepare: a rule admit did not add, one it added and no longer gives, and
 // an old SSH allow it keeps.
 func TestFirewallTextNamesAdmit(t *testing.T) {
@@ -212,15 +212,15 @@ func TestFirewallTextNamesAdmit(t *testing.T) {
 		if !strings.Contains(line, "firewall:") {
 			continue
 		}
-		if strings.Contains(line, "host prepare") {
-			t.Errorf("admit's plan says host prepare: %s", line)
+		if strings.Contains(line, "site prepare") {
+			t.Errorf("admit's plan says site prepare: %s", line)
 		}
-		if strings.Contains(line, "host admit") {
+		if strings.Contains(line, "site admit") {
 			named++
 		}
 	}
 	if named != 3 {
-		t.Errorf("%d firewall lines name host admit, want 3:\n%s", named, plan.Text())
+		t.Errorf("%d firewall lines name site admit, want 3:\n%s", named, plan.Text())
 	}
 }
 

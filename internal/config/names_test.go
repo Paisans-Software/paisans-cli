@@ -35,7 +35,7 @@ func TestNameChecks(t *testing.T) {
 }
 
 // A listen port is written as the request writes it, without leading zeros,
-// so the loader accepts no spelling host request refuses.
+// so the loader accepts no spelling site request refuses.
 func TestListenHostPortRefusesALeadingZero(t *testing.T) {
 	for _, listen := range []string{"127.0.0.1:08480", "127.0.0.1:0", "127.0.0.1:65536", "127.0.0.1", "[::1]:8480"} {
 		if _, _, ok := (config.WebServer{Listen: listen}).ListenHostPort(); ok {

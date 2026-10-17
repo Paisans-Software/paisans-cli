@@ -13,7 +13,7 @@ import (
 
 // Cleaning a host deletes the deployment's configuration store: the
 // repository, the peers file, the sync log, a pushed bundle a push left
-// behind and the sync script's directory, and the units host prepare wrote
+// behind and the sync script's directory, and the units site prepare wrote
 // for it in its user's own systemd directory, disabled and stopped through
 // the user's manager, with nothing of it left.
 func TestCleaningAHostDeletesItsConfigurationStore(t *testing.T) {
@@ -84,7 +84,7 @@ func TestTheHostStageIsTheUsersOwn(t *testing.T) {
 			}
 		}
 	}
-	if !strings.Contains(p.Evict, "sudo paisans host evict --deployment "+dep.ID+" --user ") {
+	if !strings.Contains(p.Evict, "sudo paisans site evict --deployment "+dep.ID+" --user ") {
 		t.Errorf("evict line %q", p.Evict)
 	}
 }
@@ -171,7 +171,7 @@ func TestSiteRemoveRefusesARootLogin(t *testing.T) {
 			if err == nil {
 				t.Fatal("a root login was not refused")
 			}
-			for _, want := range []string{"logs in as root", "Nothing was changed", "--ssh", "the deployment's user", "sudo paisans host evict --deployment " + ourID} {
+			for _, want := range []string{"logs in as root", "Nothing was changed", "--ssh", "the deployment's user", "sudo paisans site evict --deployment " + ourID} {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("no %q in: %v", want, err)
 				}
@@ -231,7 +231,7 @@ func TestSiteRemoveRefusesALoginThatIsNotTheDeploymentsUser(t *testing.T) {
 			if err == nil {
 				t.Fatal("a login as admin was not refused")
 			}
-			for _, want := range []string{"logs in as admin", "not the deployment's user ubuntu", "Nothing was changed", "--ssh ubuntu@", "sudo paisans host evict --deployment " + ourID + " --user ubuntu --execute"} {
+			for _, want := range []string{"logs in as admin", "not the deployment's user ubuntu", "Nothing was changed", "--ssh ubuntu@", "sudo paisans site evict --deployment " + ourID + " --user ubuntu --execute"} {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("no %q in: %v", want, err)
 				}
@@ -246,7 +246,7 @@ func TestSiteRemoveRefusesALoginThatIsNotTheDeploymentsUser(t *testing.T) {
 			if err == nil {
 				t.Fatal("a host with no admission record was not refused")
 			}
-			for _, want := range []string{"no admission record", "Nothing was changed", "sudo paisans host evict --deployment " + ourID} {
+			for _, want := range []string{"no admission record", "Nothing was changed", "sudo paisans site evict --deployment " + ourID} {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("no %q in: %v", want, err)
 				}
@@ -287,7 +287,7 @@ func TestDeleteDataEmptiesTheRootInTheUsersNamespace(t *testing.T) {
 	}
 }
 
-// The registry is root's, and host evict's to change: site remove neither
+// The registry is root's, and site evict's to change: site remove neither
 // reads nor writes it on the host it cleans, whether it keeps the data, a
 // gateway's Caddy, or nothing.
 func TestSiteRemoveLeavesTheRegistryToEvict(t *testing.T) {
@@ -322,7 +322,7 @@ func TestSiteRemoveLeavesTheRegistryToEvict(t *testing.T) {
 
 // --delete-data leaves nothing of the deployment's under its state
 // directory, the lock file an earlier command left included: the user side
-// empties the root, and host evict removes the root itself.
+// empties the root, and site evict removes the root itself.
 func TestDeleteDataLeavesNothingUnderTheStateDir(t *testing.T) {
 	w := setup(t)
 	b := w.hosts["home-b"]
@@ -369,7 +369,7 @@ func TestTheKeyRecordIsDeletedWithoutTheLock(t *testing.T) {
 func TestThePlanCarriesTheEvictLine(t *testing.T) {
 	w := setup(t)
 	want := siteremove.EvictLine(dep, w.cfg.Sites["home-b"].SSHUser())
-	if want != "sudo paisans host evict --deployment "+ourID+" --user "+w.cfg.Sites["home-b"].SSHUser()+" --execute" {
+	if want != "sudo paisans site evict --deployment "+ourID+" --user "+w.cfg.Sites["home-b"].SSHUser()+" --execute" {
 		t.Errorf("EvictLine = %q", want)
 	}
 	if p := w.mustBuild("home-b", siteremove.Options{}); p.Evict != want {

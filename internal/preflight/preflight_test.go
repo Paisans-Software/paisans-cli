@@ -98,7 +98,7 @@ func healthy(name string) *fakeHost {
 // admittedPath is where the fixture deployment's admission record is.
 var admittedPath, _ = admission.Path(mustFixture().Deployment().Token())
 
-// admittedRecord is the record host admit writes for site, with every grant
+// admittedRecord is the record site admit writes for site, with every grant
 // its roles need.
 func admittedRecord(site string) string {
 	cfg := mustFixture()
@@ -154,7 +154,7 @@ func run(t *testing.T, cfg *config.Config, h map[string]*fakeHost) Report {
 	return report
 }
 
-// prepared stubs host prepare's plan, which hostprep's own tests cover.
+// prepared stubs site prepare's plan, which hostprep's own tests cover.
 func prepared(t *testing.T, steps ...string) {
 	old := buildHostPrep
 	buildHostPrep = func(site string, _ *config.Config, _ hostprep.Transport, _ admission.Record) (*hostprep.Plan, error) {
@@ -273,7 +273,7 @@ func TestPreflightRefuses(t *testing.T) {
 			setup: func(h map[string]*fakeHost) { h["vm"].override(rule{match: "echo paisans-answers"}) }},
 		{name: "clock", site: "vm", check: "clock", want: "not synchronised",
 			setup: func(h map[string]*fakeHost) { h["vm"].override(rule{match: "timedatectl", out: "no\n"}) }},
-		{name: "host prepare owes steps", site: "home-b", check: "prepared", want: "install Docker", steps: []string{"install Docker"}},
+		{name: "site prepare owes steps", site: "home-b", check: "prepared", want: "install Docker", steps: []string{"install Docker"}},
 		{name: "architecture differs", site: "home-b", check: "platform", want: "arm64, but home-a runs amd64",
 			setup: func(h map[string]*fakeHost) {
 				h["home-b"].override(rule{match: "dpkg --print-architecture", out: "arm64\n"})
@@ -525,7 +525,7 @@ func TestAGatewaysWebPortsAreChecked(t *testing.T) {
 	}
 }
 
-// host prepare's plan is checked against the site's admission record, so
+// site prepare's plan is checked against the site's admission record, so
 // preflight builds it with the record it read, and does not build it for a
 // host that has none: the admission check has refused that one already.
 func TestHostPrepareIsPlannedWithTheAdmissionRecord(t *testing.T) {
@@ -538,7 +538,7 @@ func TestHostPrepareIsPlannedWithTheAdmissionRecord(t *testing.T) {
 	t.Cleanup(func() { buildHostPrep = old })
 	run(t, fixture(t), hosts())
 	if len(got) != 1 || got[0] != "home-b" {
-		t.Errorf("host prepare planned with records for %v", got)
+		t.Errorf("site prepare planned with records for %v", got)
 	}
 	got = nil
 	h := hosts()
@@ -547,7 +547,7 @@ func TestHostPrepareIsPlannedWithTheAdmissionRecord(t *testing.T) {
 	delete(h["home-b"].files, path)
 	r := run(t, cfg, h)
 	if len(got) != 0 || len(find(r, "home-b", "prepared")) != 0 {
-		t.Errorf("host prepare planned for an unadmitted host: %v", got)
+		t.Errorf("site prepare planned for an unadmitted host: %v", got)
 	}
 }
 
@@ -561,7 +561,7 @@ func TestAnUnadmittedHostIsRefused(t *testing.T) {
 	delete(h["home-b"].files, path)
 	r := run(t, cfg, h)
 	got := refusedDetail(t, r, "home-b", "admission")
-	if !strings.Contains(got, "paisans host request --site home-b") {
+	if !strings.Contains(got, "paisans site request --site home-b") {
 		t.Errorf("the refusal does not name the request: %q", got)
 	}
 	for _, c := range h["home-b"].ran {

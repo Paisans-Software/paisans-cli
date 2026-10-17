@@ -535,7 +535,7 @@ func TestEvictRemovesTheMeshConfDropIn(t *testing.T) {
 // /etc/paisans. Beside another admitted deployment, nothing is said and
 // the file stays.
 func TestEvictNamesWhatAdmitInstalled(t *testing.T) {
-	content := "# Written by paisans host admit: what it installed on this host, which stays\n# when paisans host evict removes the last admitted deployment, and each\n# directory it created, which evict removes once empty.\n" +
+	content := "# Written by paisans site admit: what it installed on this host, which stays\n# when paisans site evict removes the last admitted deployment, and each\n# directory it created, which evict removes once empty.\n" +
 		"package docker-ce\npackage docker-ce-cli\npackage containerd.io\npackage docker-ce-rootless-extras\npackage uidmap\npackage wireguard-tools\n" +
 		"file /etc/apt/keyrings/docker.asc\nfile /etc/apt/sources.list.d/docker.sources\n"
 	host := func(shared bool) *fakeHost {

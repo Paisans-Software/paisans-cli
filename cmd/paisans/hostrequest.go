@@ -11,11 +11,11 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/validate"
 )
 
-// runHostRequest is `paisans host request`: the request a host's owner
+// runSiteRequest is `paisans site request`: the request a host's owner
 // admits one site from, on stdout, and its digest on stderr, so the request
 // can be redirected to a file and the digest still read. It reaches no host.
-func runHostRequest(args []string) error {
-	fs := newFlagSet("host request", flag.ContinueOnError)
+func runSiteRequest(args []string) error {
+	fs := newFlagSet("site request", flag.ContinueOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	site := fs.String("site", "", "the site to request admission for, by the name it has in the configuration")
@@ -23,10 +23,10 @@ func runHostRequest(args []string) error {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return fmt.Errorf("host request takes no argument: paisans host request --site <name> > <name>.admit. Got extra argument(s): %s", quoteAll(fs.Args()))
+		return fmt.Errorf("site request takes no argument: paisans site request --site <name> > <name>.admit. Got extra argument(s): %s", quoteAll(fs.Args()))
 	}
 	if *site == "" {
-		return fmt.Errorf("host request: name the site with --site, Eg: paisans host request --site <name> > <name>.admit")
+		return fmt.Errorf("site request: name the site with --site, Eg: paisans site request --site <name> > <name>.admit")
 	}
 	// The request goes to stdout and nothing else does.
 	r := errReporter(reporter())
@@ -41,13 +41,13 @@ func runHostRequest(args []string) error {
 	}
 	req, err := admission.Build(cfg, *site)
 	if err != nil {
-		return fmt.Errorf("host request: %w", err)
+		return fmt.Errorf("site request: %w", err)
 	}
 	data := admission.Encode(req)
 	if _, err := os.Stdout.Write(data); err != nil {
-		return fmt.Errorf("host request: writing the request: %w", err)
+		return fmt.Errorf("site request: writing the request: %w", err)
 	}
-	r.Result("digest %s: tell it to the host's owner over a channel you both trust, such as a call; host admit shows the same", admission.Digest(data))
+	r.Result("digest %s: tell it to the host's owner over a channel you both trust, such as a call; site admit shows the same", admission.Digest(data))
 	return nil
 }
 

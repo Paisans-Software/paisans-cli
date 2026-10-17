@@ -106,8 +106,8 @@ UBUNTU_CODENAME=noble
 `
 
 // freshHost is an Ubuntu 24.04 install its owner has admitted and nothing
-// of the deployment user's is on yet: to host admit's package probe it has no
-// Docker, WireGuard tools, ufw or git; to host prepare, softdog is loaded and
+// of the deployment user's is on yet: to site admit's package probe it has no
+// Docker, WireGuard tools, ufw or git; to site prepare, softdog is loaded and
 // /dev/watchdog is the user's, and the user's Docker runs no container. Its
 // login user's keys are already as prepared, so that tests of everything else
 // see no key steps; the key tests set them up themselves.
@@ -149,7 +149,7 @@ func preparedHost(gateway bool) *fakeHost {
 	}))
 }
 
-// configStored gives a host the configuration store host prepare leaves on
+// configStored gives a host the configuration store site prepare leaves on
 // it for site: the repository, the files, and the units running.
 func configStored(site string, h *fakeHost) *fakeHost {
 	cfg, err := config.Load(filepath.Join("..", "render", "testdata", "deployment.yaml"))
@@ -259,9 +259,9 @@ ID_LIKE=debian
 UBUNTU_CODENAME=jammy
 `
 
-// Ubuntu 22.04 is prepared as 24.04 is: its profile is selected, and host
+// Ubuntu 22.04 is prepared as 24.04 is: its profile is selected, and site
 // prepare plans the same user's own steps and installs nothing. Docker's
-// jammy repository is host admit's (internal/hostadmit's jammy goldens).
+// jammy repository is site admit's (internal/hostadmit's jammy goldens).
 func TestAnUbuntu2204HostIsPreparedAs2404Is(t *testing.T) {
 	jammy := freshHost()
 	jammy.files["/etc/os-release"] = ubuntu2204
@@ -281,7 +281,7 @@ func TestAnUbuntu2204HostIsPreparedAs2404Is(t *testing.T) {
 	}
 }
 
-// A host prepare already prepared plans nothing, on a data site and on a
+// A site prepare already prepared plans nothing, on a data site and on a
 // gateway, and says what it found.
 func TestAPreparedHostPlansNothing(t *testing.T) {
 	for _, tc := range []struct {
@@ -468,7 +468,7 @@ func TestWatchdogModes(t *testing.T) {
 		{name: "required refuses softdog", mode: config.WatchdogRequired, probe: softdog, refuse: "has only softdog"},
 		{name: "softdog accepts softdog without a warning", mode: config.WatchdogSoftdog, probe: softdog, present: "Software Watchdog"},
 		{name: "softdog warns of hardware", mode: config.WatchdogSoftdog, probe: hardware, present: "sp5100_tco", warn: true},
-		{name: "no device sends the owner to admit", mode: config.WatchdogAuto, probe: none, refuse: "sudo paisans host admit --request home-a.admit --watchdog again, from paisans host request --site home-a > home-a.admit"},
+		{name: "no device sends the owner to admit", mode: config.WatchdogAuto, probe: none, refuse: "sudo paisans site admit --request home-a.admit --watchdog again, from paisans site request --site home-a > home-a.admit"},
 		{name: "a root device sends the owner to admit", mode: config.WatchdogAuto, probe: roots, refuse: "is not the deployment's user's"},
 		{name: "a device the deployment's container took is the deployment's", mode: config.WatchdogAuto, probe: containers, present: "Software Watchdog", warn: true},
 		{name: "a device past the user's subordinate range sends the owner to admit", mode: config.WatchdogAuto, probe: beyond, refuse: "is not the deployment's user's"},
@@ -584,7 +584,7 @@ func TestAUserWithoutAuthorizedKeysGetsThem(t *testing.T) {
 	}
 }
 
-// host prepare adds every key ssh.keys lists, whatever a file at
+// site prepare adds every key ssh.keys lists, whatever a file at
 // /etc/paisans/ssh-allow.<user> on the host holds: it reads no such file,
 // and no step it plans mentions one.
 func TestKeysAreAddedWhateverAnSSHAllowFileHolds(t *testing.T) {
@@ -609,7 +609,7 @@ func TestKeysAreAddedWhateverAnSSHAllowFileHolds(t *testing.T) {
 }
 
 // A listed key cloud-init already put there is reported, neither added
-// again nor recorded, and a key nobody listed and host prepare never added is
+// again nor recorded, and a key nobody listed and site prepare never added is
 // not touched or mentioned.
 func TestAnExistingListedKeyIsLeftUnrecorded(t *testing.T) {
 	host := preparedHost(false)
@@ -625,12 +625,12 @@ func TestAnExistingListedKeyIsLeftUnrecorded(t *testing.T) {
 	if len(add) != 1 || len(plan.Steps) != 1 {
 		t.Fatalf("want one add:\n%s", out)
 	}
-	if !strings.Contains(out, "done: ssh: key "+fingerprint(keyAlice)+" (alice) authorized for the deployment's user, not by host prepare, which never removes it") {
+	if !strings.Contains(out, "done: ssh: key "+fingerprint(keyAlice)+" (alice) authorized for the deployment's user, not by site prepare, which never removes it") {
 		t.Errorf("alice's key reads:\n%s", out)
 	}
 	addCmd := unlocked(t, add[0].Command)
 	if strings.Contains(addCmd, fingerprint(keyAlice)) {
-		t.Errorf("the sidecar records a key host prepare did not write: %s", addCmd)
+		t.Errorf("the sidecar records a key site prepare did not write: %s", addCmd)
 	}
 	// The file's last line has no newline; the add ends it first.
 	if !strings.Contains(addCmd, `[ -n "$(tail -c1 '/home/ubuntu/.ssh/authorized_keys')" ]; then echo >>`) {
@@ -657,7 +657,7 @@ func TestAKeyHostPrepareDidNotWriteIsNeverRemoved(t *testing.T) {
 	}
 }
 
-// A key host prepare added and the configuration no longer lists is removed,
+// A key site prepare added and the configuration no longer lists is removed,
 // last, by its exact line; one it never added is not, listed or not.
 func TestAnUnlistedOwnedKeyIsRemovedLast(t *testing.T) {
 	host := preparedHost(false)
@@ -670,7 +670,7 @@ func TestAnUnlistedOwnedKeyIsRemovedLast(t *testing.T) {
 	out := printed(plan)
 	t.Logf("\n%s", out)
 	last := plan.Steps[len(plan.Steps)-1]
-	if last.Label != "remove" || !strings.Contains(last.Describe, "ssh: remove key "+fingerprint(keyCarol)+" (carol) from /home/ubuntu/.ssh/authorized_keys, which host prepare or host admit added and ssh.keys no longer lists") {
+	if last.Label != "remove" || !strings.Contains(last.Describe, "ssh: remove key "+fingerprint(keyCarol)+" (carol) from /home/ubuntu/.ssh/authorized_keys, which site prepare or site admit added and ssh.keys no longer lists") {
 		t.Fatalf("the last step is not carol's removal:\n%s", out)
 	}
 	// The exact line, trailing spaces and all, so grep -x matches it.
@@ -703,7 +703,7 @@ func TestAnUnlistedOwnedKeyIsRemovedLast(t *testing.T) {
 }
 
 // A key in the sidecar that someone already deleted is forgotten, so that a
-// later hand-added copy is never taken for host prepare's.
+// later hand-added copy is never taken for site prepare's.
 func TestAnOwnedKeyGoneFromTheFileIsForgotten(t *testing.T) {
 	host := preparedHost(false)
 	host.files[ownedKeys] += "added " + fingerprint(keyCarol) + " carol\n"
@@ -756,7 +756,7 @@ func TestAMissingUserIsRefusedBeforeTheHomeOrStoreIsRead(t *testing.T) {
 	host := preparedHost(false)
 	host.responses[probePasswd] = "__PAISANS_ABSENT__ ubuntu\n"
 	_, err := hostprep.Build("home-a", fixture(t), host, admitted(t, fixture(t), "home-a"))
-	if err == nil || !strings.Contains(err.Error(), "the login user ubuntu does not exist on fake. host prepare does not create users") {
+	if err == nil || !strings.Contains(err.Error(), "the login user ubuntu does not exist on fake. site prepare does not create users") {
 		t.Fatalf("got %v", err)
 	}
 	if last := host.ran[len(host.ran)-1]; !strings.Contains(last, probePasswd) {
@@ -991,8 +991,8 @@ func TestKeysGoToTheDefaultUserWhenSSHUserIsLeftOut(t *testing.T) {
 // daemonJSONPath is the deployment user's daemon.json on the fake hosts.
 const daemonJSONPath = "/home/ubuntu/.config/docker/daemon.json"
 
-// admitted is the record host admit leaves for site with every grant its
-// roles need: what host prepare is checked against.
+// admitted is the record site admit leaves for site with every grant its
+// roles need: what site prepare is checked against.
 func admitted(t *testing.T, cfg *config.Config, site string) admission.Record {
 	t.Helper()
 	req, err := admission.Build(cfg, site)
@@ -1006,7 +1006,7 @@ func admitted(t *testing.T, cfg *config.Config, site string) admission.Record {
 	return rec
 }
 
-// host prepare as the deployment's user: nothing it plans installs a
+// site prepare as the deployment's user: nothing it plans installs a
 // package, writes outside the user's home or the deployment's root, or runs
 // a command only root can.
 func TestHostPrepareInstallsNothing(t *testing.T) {
@@ -1035,25 +1035,25 @@ func TestHostPrepareInstallsNothing(t *testing.T) {
 	}
 }
 
-// A record that does not match the declaration refuses host prepare, naming
+// A record that does not match the declaration refuses site prepare, naming
 // each difference and the line the owner runs.
 func TestARecordThatDiffersIsRefused(t *testing.T) {
 	cfg := fixture(t)
 	rec := admitted(t, cfg, "home-a")
 	rec.Grants.Watchdog = false
 	_, err := hostprep.Build("home-a", cfg, freshHost(), rec)
-	if err == nil || !strings.Contains(err.Error(), "--watchdog") || !strings.Contains(err.Error(), "sudo paisans host admit --request home-a.admit") {
+	if err == nil || !strings.Contains(err.Error(), "--watchdog") || !strings.Contains(err.Error(), "sudo paisans site admit --request home-a.admit") {
 		t.Errorf("got %v", err)
 	}
 }
 
-// The watchdog is admit's: host prepare reads that /dev/watchdog is the
+// The watchdog is admit's: site prepare reads that /dev/watchdog is the
 // user's, and refuses with the admit line when it is not.
 func TestTheWatchdogIsOnlyRead(t *testing.T) {
 	cfg := fixture(t)
 	host := freshHost()
 	host.responses[probeWatchdog] = "device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\nowner 0\nuid 1000\nsubuid paisans-f2a9:165536:65536\n"
-	if _, err := hostprep.Build("home-a", cfg, host, admitted(t, cfg, "home-a")); err == nil || !strings.Contains(err.Error(), "host admit") {
+	if _, err := hostprep.Build("home-a", cfg, host, admitted(t, cfg, "home-a")); err == nil || !strings.Contains(err.Error(), "site admit") {
 		t.Errorf("a root-owned /dev/watchdog: %v", err)
 	}
 	host.responses[probeWatchdog] = "device present\nidentity watchdog0 Software Watchdog\nsystemd 0\ndaemon absent\nowner 1000\nuid 1000\nsubuid paisans-f2a9:165536:65536\n"
@@ -1118,7 +1118,7 @@ func TestAnIdleDaemonIsRestartedUnderItsNewDaemonJSON(t *testing.T) {
 	}
 }
 
-// A daemon host prepare cannot ask what it runs is never restarted: it
+// A daemon site prepare cannot ask what it runs is never restarted: it
 // may be running containers, so daemon.json is written and the plan warns.
 func TestADaemonThatCannotBeAskedIsNotRestarted(t *testing.T) {
 	cfg := fixture(t)

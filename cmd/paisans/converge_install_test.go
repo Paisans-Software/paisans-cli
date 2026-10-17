@@ -64,7 +64,7 @@ func sections(rec *ui.Recorder) []string {
 // mesh's endpoint names must resolve before any site's wg-quick starts.
 func TestConvergeDryRunShowsPrepareDNSAndInstall(t *testing.T) {
 	fakeConverge(t, nil)
-	fakeChecks(t, map[string]any{"host prepare --site home-b": "docker, firewall"})
+	fakeChecks(t, map[string]any{"site prepare --site home-b": "docker, firewall"})
 	rec := recordConverge(t)
 	if err := converge(t); err != nil {
 		t.Fatal(err)
@@ -125,14 +125,14 @@ func TestConvergeDryRunInstallIsALinePerSite(t *testing.T) {
 	}{
 		{"up to date", false, nil, each(func(s string) string { return "done " + s })},
 		{"work to do", false, map[string]any{"apply --site vm": "5 changes"}, each(pendingAfterVM(map[string]string{"vm": "pending vm: 5 changes"}))},
-		{"after prepare", false, map[string]any{"host prepare --site home-b": "docker", "apply --site vm": "5 changes"}, each(pendingAfterVM(map[string]string{
+		{"after prepare", false, map[string]any{"site prepare --site home-b": "docker", "apply --site vm": "5 changes"}, each(pendingAfterVM(map[string]string{
 			"vm": "pending vm: 5 changes", "home-b": "waiting home-b: after prepare", "storage": "waiting storage: after prepare",
 		}))},
 		{"after init", true, nil, each(func(s string) string { return "waiting " + s + ": after init" })},
 		{"refusal", false, map[string]any{"apply --site vm": refusal}, slices.Insert(each(pendingAfterVM(map[string]string{
 			"vm": "fail vm: vm's plan would remove a volume",
 		})), 2, "explain Mount it, then apply.")},
-		{"refusal while waiting", false, map[string]any{"host prepare --site home-b": "docker", "apply --site vm": refusal}, slices.Insert(each(pendingAfterVM(map[string]string{
+		{"refusal while waiting", false, map[string]any{"site prepare --site home-b": "docker", "apply --site vm": refusal}, slices.Insert(each(pendingAfterVM(map[string]string{
 			"vm": "fail vm: vm's plan would remove a volume", "home-b": "waiting home-b: after prepare", "storage": "waiting storage: after prepare",
 		})), 2, "explain Mount it, then apply.")},
 	} {
@@ -439,9 +439,9 @@ func TestAndList(t *testing.T) {
 
 // A prepare step that fails fails its own line, naming nothing more.
 func TestConvergeRunPrepareFailureFailsItsLine(t *testing.T) {
-	fakeConverge(t, map[string]error{"host prepare --site vm": errors.New("vm: no apt")})
+	fakeConverge(t, map[string]error{"site prepare --site vm": errors.New("vm: no apt")})
 	rec := recordConverge(t)
-	if err := converge(t, "--execute"); err == nil || !strings.Contains(err.Error(), "host prepare --site vm") {
+	if err := converge(t, "--execute"); err == nil || !strings.Contains(err.Error(), "site prepare --site vm") {
 		t.Fatalf("err = %v", err)
 	}
 	if !rec.Has("fail", "vm") || slices.Contains(sections(rec), "install") {

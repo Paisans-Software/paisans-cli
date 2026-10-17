@@ -642,7 +642,7 @@ func TestARolelessSiteStillHostsOtherBlueprints(t *testing.T) {
 // A listen address is where Docker publishes the app for the operator's web
 // server, which runs on the same host. Loopback is quiet; the site's own mesh
 // address is allowed with a warning, since the firewall lets the mesh in;
-// anything else is refused, a LAN address included, as host request refuses
+// anything else is refused, a LAN address included, as site request refuses
 // it. 10.44.0.1 is inside the
 // mesh, but it is another site's address, which nothing on this host binds.
 func TestWebServerListenAddresses(t *testing.T) {
@@ -727,7 +727,7 @@ func TestACMEProviderNeedsAnImageForAMonitorsCaddy(t *testing.T) {
 	}
 }
 
-// validate holds a listen to the rule host request does, so a listen it
+// validate holds a listen to the rule site request does, so a listen it
 // accepts is one the site's request carries, and its refusal recommends
 // loopback.
 func TestWebServerListenIsWhatTheRequestAccepts(t *testing.T) {
@@ -739,7 +739,7 @@ func TestWebServerListenIsWhatTheRequestAccepts(t *testing.T) {
 		refused := len(validate.Check(cfg).Refusals()) > 0
 		_, err := admission.Build(cfg, "watch")
 		if refused == (err == nil) {
-			t.Errorf("%s: validate refused %v, host request refused %v (%v)", listen, refused, err != nil, err)
+			t.Errorf("%s: validate refused %v, site request refused %v (%v)", listen, refused, err != nil, err)
 		}
 	}
 	cfg := load(t, "web-server-listen-not-this-host")

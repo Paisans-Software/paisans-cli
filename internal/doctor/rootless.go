@@ -11,7 +11,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 )
 
-// The rootless checks ask whether a site is still what its owner's host
+// The rootless checks ask whether a site is still what its owner's site
 // admit made it: the admission record covers the site (admission.go), the
 // deployment's user holds no group that reaches past it, its own rootless
 // Docker daemon answers and is new enough, linger keeps that daemon running
@@ -40,7 +40,7 @@ const DockerCommand = `printf 'host %s\n' "${DOCKER_HOST:-unset}" && docker vers
 
 // LingerCommand prints whether systemd keeps the login user's instance, and
 // with it the user's Docker daemon, running with no session open, and
-// whether host admit's drop-in starts that instance after the mesh at boot.
+// whether site admit's drop-in starts that instance after the mesh at boot.
 // The drop-in is root's, mode 644, so the user reads it.
 var LingerCommand = `printf 'linger %s\n' "$(loginctl show-user "$(id -un)" --property=Linger --value)"; ` +
 	`if [ -f "` + admitrules.MeshDropInPath("$(id -u)") + `" ]; then echo 'mesh-order yes'; else echo 'mesh-order no'; fi`
@@ -71,7 +71,7 @@ func keyed(out string) map[string]string {
 	return m
 }
 
-// User fails a login user that holds any group host admit refuses
+// User fails a login user that holds any group site admit refuses
 // (admitrules.PrivilegedGroups), any group of GID 0, or uid 0. Admit checks
 // the same list once; this checks it on every run, because a group can be
 // added to the user after admission and nothing else would notice.
@@ -173,7 +173,7 @@ func DockerSocket(probes []DockerProbe) []Finding {
 				More: []string{
 					"It runs as root, and a daemon running as root is root on the host to anyone who can reach its socket, which undoes what admitting the deployment to a user of its own draws.",
 					"recover:",
-					fmt.Sprintf("  1. The host's owner finds what runs a root daemon at that socket and stops it, then runs `paisans host admit` for %s again, which sets up the user's own rootless daemon.", p.Site),
+					fmt.Sprintf("  1. The host's owner finds what runs a root daemon at that socket and stops it, then runs `paisans site admit` for %s again, which sets up the user's own rootless daemon.", p.Site),
 				}})
 		default:
 			out = append(out, Finding{Section: SectionDocker, Level: OK, Line: fmt.Sprintf("%s: its rootless Docker answers at %s", p.Site, at)})
@@ -182,7 +182,7 @@ func DockerSocket(probes []DockerProbe) []Finding {
 	return out
 }
 
-// DockerEngine checks the rootless daemon's Engine against the floor host
+// DockerEngine checks the rootless daemon's Engine against the floor site
 // admit holds it to. A daemon that did not answer is DockerSocket's.
 func DockerEngine(probes []DockerProbe) []Finding {
 	var out []Finding
@@ -200,7 +200,7 @@ func DockerEngine(probes []DockerProbe) []Finding {
 			More: []string{
 				"From 29.5 a rootless container with host networking shares the host's network namespace. Every infrastructure container is network_mode: host and binds the mesh address, so on an older Engine they bind inside RootlessKit's own namespace, where no other site reaches them.",
 				"recover:",
-				"  1. The host's owner upgrades Docker; upgrading it is the owner's decision, which host admit leaves to them.",
+				"  1. The host's owner upgrades Docker; upgrading it is the owner's decision, which site admit leaves to them.",
 				fmt.Sprintf("  2. `systemctl --user restart docker`, as the deployment's user on %s, which restarts every container in it.", p.Site),
 			}})
 	}
@@ -208,7 +208,7 @@ func DockerEngine(probes []DockerProbe) []Finding {
 }
 
 // Linger checks that systemd keeps the login user's instance running with
-// nobody logged in, and that host admit's drop-in starts it after the mesh
+// nobody logged in, and that site admit's drop-in starts it after the mesh
 // at boot. Without linger the user's Docker daemon, and every container in
 // it, stops when the last login ends and does not start at boot; without
 // the drop-in it may start the containers before the mesh address exists.
@@ -225,7 +225,7 @@ func Linger(d deployment.Deployment, probes []LingerProbe) []Finding {
 				More: []string{
 					"Without it the user's systemd instance, and with it its Docker daemon and every container, stops when the last login to the user ends, and nothing of the deployment starts at boot.",
 					"recover:",
-					fmt.Sprintf("  1. The host's owner runs `paisans host admit` for %s again, which turns it on.", p.Site),
+					fmt.Sprintf("  1. The host's owner runs `paisans site admit` for %s again, which turns it on.", p.Site),
 				}})
 		default:
 			why := p.Err
@@ -242,9 +242,9 @@ func Linger(d deployment.Deployment, probes []LingerProbe) []Finding {
 			out = append(out, Finding{Section: SectionLinger, Level: Fail,
 				Line: fmt.Sprintf("%s: its manager is not ordered after the mesh at boot", p.Site),
 				More: []string{
-					fmt.Sprintf("host admit's drop-in, which starts the user's manager after %s, is missing. At boot its Docker daemon can then start a container before %s is up, and one that publishes on the mesh address fails with cannot assign requested address, which Docker does not retry.", d.WireGuardUnit(), d.Interface()),
+					fmt.Sprintf("site admit's drop-in, which starts the user's manager after %s, is missing. At boot its Docker daemon can then start a container before %s is up, and one that publishes on the mesh address fails with cannot assign requested address, which Docker does not retry.", d.WireGuardUnit(), d.Interface()),
 					"recover:",
-					fmt.Sprintf("  1. The host's owner runs `paisans host admit` for %s again, which writes it; it takes effect at the next boot.", p.Site),
+					fmt.Sprintf("  1. The host's owner runs `paisans site admit` for %s again, which writes it; it takes effect at the next boot.", p.Site),
 				}})
 		default:
 			why := "the answer has no mesh-order line"

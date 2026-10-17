@@ -31,7 +31,7 @@ var meshRandom io.Reader = rand.Reader
 // checkMeshLive refuses when anything on the host h reaches, outside this
 // deployment's own interface, holds a network overlapping the mesh subnet:
 // a route, an address, a Docker network or one of Docker's address pools.
-// apply and host prepare run it before they change the host, dry run or not,
+// apply and site prepare run it before they change the host, dry run or not,
 // so a clash stops them with nothing changed. See internal/mesh.
 func checkMeshLive(cfg *config.Config, site string, h mesh.Host) error {
 	subnet, err := mesh.ParsePrefix(cfg.Mesh.Subnet)
@@ -76,7 +76,7 @@ func holder(clash []mesh.Taken) string {
 // initAdmissions is init's first look at each site: whether its host has
 // admitted the deployment, read as settleMesh and the deployment record are,
 // as the deployment's user. Each site is a step, in name order: ✓ admitted,
-// ○ not admitted yet, which init skips and leaves to host admit, and ✗ one
+// ○ not admitted yet, which init skips and leaves to site admit, and ✗ one
 // it could not ask. A skipped site is a warning, not a refusal, since admit
 // checks the subnet against it as root, and refuses one that overlaps
 // anything there. It returns the admitted sites, in name order, and unread,
@@ -148,7 +148,7 @@ func initAdmissions(r ui.Reporter, cfg *config.Config, hosts map[string]registry
 	}
 	for _, name := range skipped {
 		r.Warn(name+" has not admitted this deployment yet, so init skipped it",
-			fmt.Sprintf("host admit checks the mesh subnet against it as root, and refuses one that overlaps anything there. Send the host's owner a request once init has run:\n\n    paisans host request --site %[1]s > %[1]s.admit\n\nand ask them to run, on the host:\n\n    sudo paisans host admit --request %[1]s.admit", name))
+			fmt.Sprintf("site admit checks the mesh subnet against it as root, and refuses one that overlaps anything there. Send the host's owner a request once init has run:\n\n    paisans site request --site %[1]s > %[1]s.admit\n\nand ask them to run, on the host:\n\n    sudo paisans site admit --request %[1]s.admit", name))
 	}
 	return admitted, unread
 }
@@ -244,7 +244,7 @@ func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]reg
 	}
 
 	if !choice.Rolled && len(admitted) == 0 {
-		s.Detail("%s: mesh.subnet %s is kept; no site has admitted this deployment yet, so host admit checks it on each.", path, subnet)
+		s.Detail("%s: mesh.subnet %s is kept; no site has admitted this deployment yet, so site admit checks it on each.", path, subnet)
 		return false, "kept", nil
 	}
 	if !choice.Rolled {
@@ -254,7 +254,7 @@ func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]reg
 	if len(admitted) > 0 {
 		return false, "", &ui.Problem{
 			Hint:    "mesh.subnet " + cfg.Mesh.Subnet + " overlaps something on " + strings.Join(admitted, ", ") + ", and is not rolled",
-			Explain: fmt.Sprintf("%s admitted this deployment with mesh.subnet %s, which host admit built the host's firewall and Docker address pools around, so a new one would break the admission. Free the overlapping network on the host, or have each host's owner evict the deployment, run paisans init again, and send them a new request. Nothing was written.", strings.Join(admitted, ", "), cfg.Mesh.Subnet),
+			Explain: fmt.Sprintf("%s admitted this deployment with mesh.subnet %s, which site admit built the host's firewall and Docker address pools around, so a new one would break the admission. Free the overlapping network on the host, or have each host's owner evict the deployment, run paisans init again, and send them a new request. Nothing was written.", strings.Join(admitted, ", "), cfg.Mesh.Subnet),
 			Cause:   fmt.Errorf("%s: %s", path, strings.Join(choice.Why, "; ")),
 		}
 	}
