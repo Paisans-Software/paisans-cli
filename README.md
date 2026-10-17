@@ -5420,8 +5420,11 @@ login gets through, which `--yes` never confirms (see `paisans site admit` in
 ufw, admit reads every listener off loopback, TCP and UDP, and every port the
 owner's Docker publishes or a NAT rule receives. A port that neither sshd, the
 deployment's own rules nor a rule of the owner's allows stops admit, which
-lists it with what serves it and the `sudo ufw allow` line that keeps it
-reachable. `--enable-ufw-block-listed`, or a second yes at a terminal, which
+lists it with what serves it and the line that keeps it reachable: `sudo
+ufw allow` for a listener, `sudo ufw route allow` to the translated address
+for what NAT receives, which ufw decides as routed traffic. The system
+Docker's publishes on its iptables backend stay reachable, its rules ahead
+of ufw's. `--enable-ufw-block-listed`, or a second yes at a terminal, which
 `--yes` never gives, enables ufw over them, and the plan names each.
 
 **Nothing depends on the firewall for an app's port.** A rootless daemon's

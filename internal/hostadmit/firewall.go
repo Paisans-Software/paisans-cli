@@ -137,8 +137,12 @@ func listenProbe(filter string) string {
 // natProbe reads, as root, what receives traffic with no listener of its
 // own: the ports the system Docker's containers publish, running
 // (container lines) and stopped (stopped lines), and the DNAT and redirect
-// rules (dnat lines), as portsProbe describes.
+// rules (dnat lines), as portsProbe describes; and which firewall backend
+// the system Docker uses, its daemon.json's firewall-backend
+// (docker-backend) and its chains in the filter table's FORWARD
+// (docker-chains), which decide whether its publishes pass ufw.
 const natProbe = `
+if [ -r /etc/docker/daemon.json ]; then grep -o '"firewall-backend"[[:space:]]*:[[:space:]]*"[a-z]*"' /etc/docker/daemon.json 2>/dev/null | sed 's/^/docker-backend /'; fi
 if [ -S /var/run/docker.sock ]; then
   if out=$(` + systemDocker + ` ps --format '{{.Names}}\t{{.Ports}}\t{{.Label "com.docker.compose.project"}}' 2>/dev/null); then printf '%s\n' "$out" | sed -n 's/^./container &/p'; else echo 'unread containers (ps of the system Docker)'; fi
   if ids=$(` + systemDocker + ` ps -aq --filter status=exited --filter status=created 2>/dev/null); then
@@ -150,6 +154,7 @@ fi
 if command -v nft >/dev/null 2>&1; then
   if out=$(nft list ruleset 2>/dev/null); then
     printf '%s\n' "$out" | awk '/^table / { t = $2 " " $3 } /^[ \t]*chain / { c = $2 } { l = $0; gsub(/ct status dnat/, "", l) } (l ~ /dnat/ || l ~ /redirect/) && l ~ /dport/ { sub(/^[ \t]+/, ""); print "dnat table " t " chain " c ": " $0 }'
+    printf '%s\n' "$out" | awk '/^table / { t = $2 " " $3 } /^[ \t]*chain / { c = $2 } t == "ip filter" && c == "FORWARD" && /jump DOCKER-(USER|FORWARD)/ { print "docker-chains nft"; exit }'
   else echo 'unread ruleset (nft list ruleset)'; fi
 else
   read=
@@ -157,6 +162,7 @@ else
     command -v $save >/dev/null 2>&1 || continue
     read=1
     if out=$($save -t nat 2>/dev/null); then printf '%s\n' "$out" | grep -E -- '-j (DNAT|REDIRECT)' | sed "s/^/dnat $save -t nat: /"; else echo "unread ruleset ($save)"; fi
+    $save -t filter 2>/dev/null | grep -qE -- '^-A FORWARD -j DOCKER-(USER|FORWARD)' && echo "docker-chains $save"
   done
   [ -n "$read" ] || echo 'unread ruleset (no nft or iptables-save)'
 fi`

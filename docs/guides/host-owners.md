@@ -172,10 +172,16 @@ inactive. A service meant to stay unreachable from outside, such as a
 database listening on a public address, needs nothing. Once you have checked
 every port listed, `--enable-ufw-block-listed` with `--enable-ufw` enables
 ufw over them, and the plan names each one it blocks; at a terminal, a
-second question asks the same, and `--yes` never answers it. A port that
-reaches a container through NAT is also decided by ufw's routed rules and
-`DEFAULT_FORWARD_POLICY`, so check it from outside once ufw is on. The plan's
+second question asks the same, and `--yes` never answers it. The plan's
 `enable ufw` step names what stays reachable, and why.
+
+A port that reaches a container or a virtual machine through NAT is routed
+traffic, which ufw decides by its route rules, after translation, and never
+by `ufw allow`. Docker on its default iptables backend puts its own rules
+ahead of ufw's, so its published ports stay reachable and admit says so.
+For any other, admit prints `sudo ufw route allow proto <proto> to
+<address> port <port>`, the address and port the traffic is translated to;
+check it from outside once ufw is on.
 
 ufw applies every rule as it is enabled, so SSH is allowed from its first
 moment. Admit then prints the time the timer fires and asks you to open a

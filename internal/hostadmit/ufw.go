@@ -101,6 +101,11 @@ type ufwBefore struct {
 	systemdRun     bool
 	fallback       string
 	answering      []string
+	// dockerBackend is the system Docker's firewall-backend in its
+	// daemon.json, "" when it sets none; dockerChains is Docker's own
+	// chains in the filter table's FORWARD.
+	dockerBackend string
+	dockerChains  bool
 	// kept and blocked are exposure's: what stays reachable once ufw is
 	// on, and what enabling it blocks.
 	kept    []kept
@@ -154,6 +159,12 @@ func readUFWBefore(p *planner) (ufwBefore, error) {
 			b.answering = append(b.answering, line)
 		case "container", "stopped", "dnat":
 			b.answering = append(b.answering, line)
+		case "docker-backend":
+			if m := firewallBackend.FindStringSubmatch(rest); m != nil {
+				b.dockerBackend = m[1]
+			}
+		case "docker-chains":
+			b.dockerChains = true
 		case "socket":
 			if f := strings.Fields(rest); len(f) == 2 && f[1] == "(Stream)" {
 				add(f[0])
@@ -376,13 +387,14 @@ func ipv6Read(defaults, conf string) string {
 // Blocked is one thing enabling ufw blocks that answers from off the host
 // now: Key names it, a port as ufw names one ("80/tcp", "7000:7001/udp"),
 // such a port with " over IPv6" for one only ufw's IPV6 setting keeps, or
-// what it is for one whose ports admit cannot read; What is what answers
-// on it, as the owner is shown it; Allow is the command that keeps it
-// reachable, "" for none.
+// What itself for one whose ports admit cannot read; What is what answers
+// on it, as the owner is shown it; Allow are the commands that keep it
+// reachable, none when admit knows of none.
 type Blocked struct {
-	Key, What, Allow string
-	// NAT is a port received through NAT, which ufw's routed rules decide
-	// too.
+	Key, What string
+	Allow     []string
+	// NAT is a port received through NAT, which ufw decides as routed
+	// traffic, after translation.
 	NAT bool
 }
 
@@ -408,7 +420,7 @@ func BlockedText(blocked []Blocked) string {
 func BlockedList(blocked []Blocked) string {
 	var b strings.Builder
 	for _, x := range blocked {
-		if x.Allow == "" && !x.v6() {
+		if x.Key == x.What {
 			fmt.Fprintf(&b, "  %s\n", x.What)
 		} else {
 			fmt.Fprintf(&b, "  %s: %s\n", x.Key, x.What)
@@ -425,11 +437,11 @@ func BlockedHelp(blocked []Blocked) string {
 	var allows []string
 	var v6, unread, nat bool
 	for _, x := range blocked {
-		if x.Allow != "" {
-			allows = append(allows, "  "+x.Allow+"\n")
+		for _, a := range x.Allow {
+			allows = append(allows, "  "+a+"\n")
 		}
 		v6 = v6 || x.v6()
-		unread = unread || x.Allow == "" && !x.v6()
+		unread = unread || x.Key == x.What
 		nat = nat || x.NAT
 	}
 	if len(allows) > 0 {
@@ -439,10 +451,10 @@ func BlockedHelp(blocked []Blocked) string {
 		b.WriteString("ufw's IPV6, read from /etc/default/ufw and then /etc/ufw/ufw.conf, is not yes, so enabling ufw drops all IPv6 traffic, allows included: for a service that must stay reachable over IPv6, set IPV6=yes in /etc/default/ufw, and in /etc/ufw/ufw.conf if it sets IPV6 too.\n")
 	}
 	if unread {
-		b.WriteString("Admit cannot read which ports a NAT rule or a stopped container listed receives on: allow those whose service must stay reachable with `sudo ufw allow <port>/<proto>`.\n")
+		b.WriteString("Admit cannot read which ports a NAT rule or a stopped container listed receives on: allow those whose service must stay reachable yourself.\n")
 	}
 	if nat {
-		b.WriteString("A port received through NAT, as a container's published port is, reaches its service as routed traffic, which ufw's route rules and its DEFAULT_FORWARD_POLICY decide as well: check it from off this host once ufw is on.\n")
+		b.WriteString("A port received through NAT reaches its service as routed traffic, which ufw decides after translation, by its route rules, and not by `ufw allow`: the line given for one allows the address and port it is translated to, and one with no line goes to an address admit cannot read. Check each from off this host once ufw is on.\n")
 	}
 	b.WriteString("A service meant to stay unreachable from off this host, such as a database on a public address, needs nothing.")
 	return b.String()
@@ -464,15 +476,35 @@ var ufwKept = map[int]string{
 // which only the host itself reaches.
 var loopbackRule = regexp.MustCompile(`(?:-d |daddr )(?:127\.|::1\b)`)
 
+// firewallBackend is daemon.json's firewall-backend as the probe prints it.
+var firewallBackend = regexp.MustCompile(`"firewall-backend"\s*:\s*"([a-z]+)"`)
+
+// redirectRule is a NAT rule that redirects to a port of the host itself:
+// ufw sees the port it redirects to, whose listener is read as any other.
+var redirectRule = regexp.MustCompile(`\bredirect\b|-j REDIRECT\b`)
+
+// dnatTo is where a DNAT rule translates to: nft's `dnat [ip|ip6] to
+// <addr>[:<port>]`, iptables' `--to-destination <addr>[:<port>]`.
+var dnatTo = regexp.MustCompile(`(?:\bdnat(?: ip6?)? to|--to-destination) (\[[0-9A-Fa-f:.]+\]|[0-9.]+|[0-9A-Fa-f:]+)(?::(\d+))?`)
+
+// dockerChain is a NAT rule in the system Docker's own chain, as nft or
+// iptables-save prints it.
+var dockerChain = regexp.MustCompile(`chain DOCKER:|-A DOCKER `)
+
 // answering is one port, or range of ports, that answers from off the
-// host now: what serves it, whether through NAT, and which of what serves
-// it takes IPv6.
+// host now: what serves it, which of what serves it takes IPv6, and,
+// received through NAT, the addresses and ports it is translated to and
+// whether the system Docker's own iptables rules accept it.
 type answering struct {
 	span
 	via, v6 []string
 	nat     bool
 	// socks are the listeners that answer on it.
 	socks []socket
+	// dests are where NAT translates it to; docker is a publish of the
+	// system Docker on its iptables backend.
+	dests  []netip.AddrPort
+	docker bool
 }
 
 func (a answering) key() string {
@@ -490,10 +522,13 @@ type kept struct{ key, via, why string }
 // now, as ufwBeforeProbe read it: what stays reachable and why, and what
 // it blocks. A listener on loopback, which ufw never filters, and the
 // deployment's own, run as its user or in its subordinate range, answer
-// nothing here. What stays reachable is sshd's ports, which admit allows,
-// the deployment's own allows, what ufw's before.rules let in, and what a
-// rule of the owner's allows (ufwBefore.allows), added while ufw is inactive or
-// not.
+// nothing here. A listener stays reachable when it is sshd's, which admit
+// allows, the deployment's own allows, what ufw's before.rules let in, or
+// what a rule of the owner's allows (ufwBefore.allows), added while ufw is
+// inactive or not. What NAT receives is routed traffic, which no `ufw
+// allow` decides: it stays reachable when the system Docker publishes it
+// on its iptables backend, whose rules come ahead of ufw's, or when a
+// `ufw route allow` of the owner's lets in where it is translated to.
 func (p *planner) exposure(b ufwBefore) ([]kept, []Blocked) {
 	var all []*answering
 	at := map[string]*answering{}
@@ -502,11 +537,15 @@ func (p *planner) exposure(b ufwBefore) ([]kept, []Blocked) {
 			return nil
 		}
 		s.addr = ""
-		a := &answering{span: s}
-		if found := at[a.key()]; found != nil {
+		a := &answering{span: s, nat: nat}
+		k := a.key()
+		if nat {
+			k = "nat " + k
+		}
+		if found := at[k]; found != nil {
 			a = found
 		} else {
-			at[a.key()] = a
+			at[k] = a
 			all = append(all, a)
 		}
 		if !slices.Contains(a.via, via) {
@@ -515,7 +554,6 @@ func (p *planner) exposure(b ufwBefore) ([]kept, []Blocked) {
 		if v6 && !slices.Contains(a.v6, via) {
 			a.v6 = append(a.v6, via)
 		}
-		a.nat = a.nat || nat
 		return a
 	}
 	var unread []Blocked
@@ -542,7 +580,9 @@ func (p *planner) exposure(b ufwBefore) ([]kept, []Blocked) {
 			}
 			for _, s := range publishes(f[1]) {
 				if !loopback(s.addr) {
-					add(s, containerWhat(f), true, false)
+					if a := add(s, containerWhat(f), true, false); a != nil {
+						a.docker = a.docker || b.dockerIptables()
+					}
 				}
 			}
 		case "stopped":
@@ -557,11 +597,13 @@ func (p *planner) exposure(b ufwBefore) ([]kept, []Blocked) {
 			}
 			for _, s := range list {
 				if !loopback(s.addr) {
-					add(s, "your Docker's stopped container "+name+", with restart: always, publishes it when your Docker restarts", true, false)
+					if a := add(s, "your Docker's stopped container "+name+", with restart: always, publishes it when your Docker restarts", true, false); a != nil {
+						a.docker = a.docker || b.dockerIptables()
+					}
 				}
 			}
 		case "dnat":
-			if loopbackRule.MatchString(rest) {
+			if loopbackRule.MatchString(rest) || redirectRule.MatchString(rest) {
 				continue
 			}
 			rule := hostText(withoutCounters(rest))
@@ -580,20 +622,55 @@ func (p *planner) exposure(b ufwBefore) ([]kept, []Blocked) {
 				for _, s := range m.spans {
 					for _, proto := range protos {
 						s.proto = proto
-						add(s, "a NAT rule in "+rule, true, false)
+						a := add(s, "a NAT rule in "+rule, true, false)
+						if a == nil {
+							continue
+						}
+						a.docker = a.docker || b.dockerIptables() && dockerChain.MatchString(rest)
+						if dest, ok := translated(rest, s); ok && !slices.Contains(a.dests, dest) {
+							a.dests = append(a.dests, dest)
+						}
 					}
 				}
 			}
 		}
 	}
+	// docker-proxy listens on a port the system Docker publishes, which NAT
+	// takes before it reaches the listener.
+	for _, a := range all {
+		if n := at["nat "+a.key()]; !a.nat && n != nil {
+			a.socks = slices.DeleteFunc(a.socks, func(s socket) bool { return s.Process == "docker-proxy" })
+			a.via = nil
+			for _, s := range a.socks {
+				a.via = append(a.via, s.what())
+			}
+		}
+	}
+	all = slices.DeleteFunc(all, func(a *answering) bool { return !a.nat && len(a.socks) == 0 })
 	slices.SortStableFunc(all, func(x, y *answering) int {
 		return cmp.Or(x.lo-y.lo, x.hi-y.hi, strings.Compare(x.proto, y.proto))
 	})
 	own := hostprep.AdmitRules(p.d, p.in.Request.SSHPort, p.in.Request.ListenPort, p.in.Flags.PublicPorts)
+	mesh := p.d.Interface()
 	var keep []kept
 	var blocked []Blocked
 	for _, a := range all {
 		via := strings.Join(a.via, " and ")
+		if a.nat {
+			switch t, ok := b.routes(a, mesh); {
+			case a.docker:
+				keep = append(keep, kept{key: a.key(), via: via, why: "your Docker's own iptables rules accept it ahead of ufw's"})
+			case ok:
+				keep = append(keep, kept{key: a.key(), via: via, why: "allowed by your rule `ufw " + t.String() + "`"})
+			default:
+				x := Blocked{Key: a.key(), What: strings.Join(a.via, "; "), NAT: true}
+				for _, d := range a.dests {
+					x.Allow = append(x.Allow, fmt.Sprintf("sudo ufw route allow proto %s to %s port %d", a.proto, d.Addr(), d.Port()))
+				}
+				blocked = append(blocked, x)
+			}
+			continue
+		}
 		why, ownPort := "", false
 		switch {
 		case a.proto == "tcp" && a.lo == a.hi && slices.Contains(b.ports, a.lo):
@@ -607,20 +684,90 @@ func (p *planner) exposure(b ufwBefore) ([]kept, []Blocked) {
 			}
 		}
 		if why == "" {
-			if t, ok := b.allows(a, p.d.Interface()); ok {
+			if t, ok := b.allows(a, mesh); ok {
 				why = "allowed by your rule `ufw " + t.String() + "`"
 			}
 		}
 		if why != "" {
 			keep = append(keep, kept{key: a.key(), via: via, why: why})
 		} else {
-			blocked = append(blocked, Blocked{Key: a.key(), What: strings.Join(a.via, "; "), Allow: "sudo ufw allow " + a.key(), NAT: a.nat})
+			blocked = append(blocked, Blocked{Key: a.key(), What: strings.Join(a.via, "; "), Allow: []string{"sudo ufw allow " + a.key()}})
 		}
 		if !ownPort && len(a.v6) > 0 && b.ipv6 != "yes" {
 			blocked = append(blocked, Blocked{Key: a.key() + " over IPv6", What: strings.Join(a.v6, "; ")})
 		}
 	}
 	return keep, append(blocked, unread...)
+}
+
+// translated is where a DNAT rule translates s, a port it matches: its
+// address, and its port, or s's own when the rule names none. False when
+// the rule names no address admit reads, or names no port for a range.
+func translated(rule string, s span) (netip.AddrPort, bool) {
+	m := dnatTo.FindStringSubmatch(rule)
+	if m == nil {
+		return netip.AddrPort{}, false
+	}
+	addr, err := netip.ParseAddr(strings.Trim(m[1], "[]"))
+	if err != nil {
+		return netip.AddrPort{}, false
+	}
+	port := s.lo
+	if m[2] != "" {
+		n, err := strconv.Atoi(m[2])
+		if err != nil || n <= 0 || n > 65535 {
+			return netip.AddrPort{}, false
+		}
+		port = n
+	} else if s.lo != s.hi {
+		return netip.AddrPort{}, false
+	}
+	return netip.AddrPortFrom(addr, uint16(port)), true
+}
+
+// dockerIptables reports whether the system Docker filters on its
+// iptables backend, as Docker itself decides: daemon.json's
+// firewall-backend, and when that is not set, its chains in the filter
+// table's FORWARD, which come ahead of ufw's, so what it publishes stays
+// reachable whatever ufw says.
+func (b ufwBefore) dockerIptables() bool {
+	switch b.dockerBackend {
+	case "iptables":
+		return true
+	case "":
+		return b.dockerChains
+	}
+	return false
+}
+
+// routes is the owner's route rule that lets a, received through NAT, in
+// to every address and port it is translated to, false for none or when
+// admit read none.
+func (b ufwBefore) routes(a *answering, mesh string) (ufwTuple, bool) {
+	if len(a.dests) == 0 {
+		return ufwTuple{}, false
+	}
+	var first ufwTuple
+	for _, d := range a.dests {
+		fam := 4
+		if d.Addr().Is6() && !d.Addr().Is4In6() {
+			fam = 6
+		}
+		found := false
+		for _, t := range b.tuples {
+			if t.fam == fam && t.routes(a.proto, d, mesh) {
+				if first.action == "" {
+					first = t
+				}
+				found = true
+				break
+			}
+		}
+		if !found {
+			return ufwTuple{}, false
+		}
+	}
+	return first, true
 }
 
 // allows is the owner's rule that keeps a reachable once ufw is on, false
@@ -722,10 +869,39 @@ func (t ufwTuple) lets(proto string, lo, hi int, addr, mesh string) bool {
 	return err == nil && dst == ip
 }
 
+// routes reports whether t, a route rule, lets proto in to dest, from
+// any source address and port, on any interface but mesh.
+func (t ufwTuple) routes(proto string, dest netip.AddrPort, mesh string) bool {
+	action, ok := strings.CutPrefix(t.action, "route:")
+	action, _, _ = strings.Cut(action, "_")
+	if !ok || action != "allow" && action != "limit" || t.direction != "in" || t.iface == mesh || strings.HasPrefix(t.iface, mesh+"!") {
+		return false
+	}
+	if t.sport != "any" || !anyAddr(t.src) || t.proto != "any" && t.proto != proto {
+		return false
+	}
+	port := int(dest.Port())
+	if t.dport != "any" && !portsHold(t.dport, port, port) {
+		return false
+	}
+	if anyAddr(t.dst) {
+		return true
+	}
+	if pre, err := netip.ParsePrefix(t.dst); err == nil {
+		return pre.Contains(dest.Addr())
+	}
+	dst, err := netip.ParseAddr(t.dst)
+	return err == nil && dst == dest.Addr()
+}
+
 // String is t as `ufw allow` would name it.
 func (t ufwTuple) String() string {
-	action, _, _ := strings.Cut(t.action, "_")
+	action, route := strings.CutPrefix(t.action, "route:")
+	action, _, _ = strings.Cut(action, "_")
 	var b strings.Builder
+	if route {
+		b.WriteString("route ")
+	}
 	b.WriteString(action)
 	if t.iface != "" {
 		b.WriteString(" in on " + t.iface)

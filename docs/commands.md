@@ -846,17 +846,26 @@ paisans site admit --site home-a --ssh owner@home-a.example.org --execute   # fr
   allow or limit from any source, of a port, a list or a range, on any
   interface, to any address or the one the listener is bound to. Each file
   counts for its own family: a listener on IPv6 needs a rule in
-  `user6.rules`.
-  Every other port enabling ufw blocks, and admit refuses before any change,
-  listing each with what serves it and printing one `sudo ufw allow
-  <port>/<proto>` line per port: run those whose service must stay
-  reachable, then admit again. A service meant to stay unreachable, such as
+  `user6.rules`. What NAT receives is routed traffic, which ufw decides
+  after translation by its route rules, never by `ufw allow`: a port the
+  system Docker publishes stays reachable when Docker filters on its
+  iptables backend (`firewall-backend` in its `daemon.json`, or, with none
+  set, its `DOCKER-USER` or `DOCKER-FORWARD` chain in `FORWARD`), whose
+  rules come ahead of ufw's; any other stays reachable only through a
+  `ufw route allow` of yours to the address and port it is translated to.
+  A redirect reaches a port of the host's own, read as that port's
+  listener. Every other port enabling ufw blocks, and admit refuses before
+  any change, listing each with what serves it and printing a line per
+  port: `sudo ufw allow <port>/<proto>` for a listener, `sudo ufw route
+  allow proto <proto> to <address> port <port>` for what NAT translates,
+  which is to be checked from off the host once ufw is on. Run those whose
+  service must stay reachable, then admit again. A service meant to stay unreachable, such as
   a database on a public address, needs nothing: once you have checked
   every port listed, `--enable-ufw-block-listed` enables ufw over them, and
   the plan's `enable ufw` step names each. That step also names what stays
   reachable, and why. With `IPV6` not `yes`, a listener on IPv6 is listed
   too, since ufw then drops IPv6 whatever it allows; a NAT rule whose ports
-  admit cannot list is listed with no allow line. At a terminal the ufw
+  or translation admit cannot read is listed with no line. At a terminal the ufw
   question lists them before it asks, and a yes asks a second question,
   whether every one listed may be blocked; `--yes` never answers it. When
   ufw is active, admit reads none of this and adds its own rules alone.
