@@ -365,7 +365,7 @@ func TestTheKeyRecordIsDeletedWithoutTheLock(t *testing.T) {
 
 // Every plan that reaches or skips a host ends with the line the host's
 // owner runs to finish, naming the site's login user; --host-gone's report
-// carries it too.
+// points to it.
 func TestThePlanCarriesTheEvictLine(t *testing.T) {
 	w := setup(t)
 	want := siteremove.EvictLine(dep, w.cfg.Sites["home-b"].SSHUser())
@@ -379,7 +379,7 @@ func TestThePlanCarriesTheEvictLine(t *testing.T) {
 	if gone.Evict != want {
 		t.Errorf("--host-gone: Evict = %q, want %q", gone.Evict, want)
 	}
-	if !strings.Contains(strings.Join(gone.Kept, "\n"), want) {
+	if !strings.Contains(strings.Join(gone.Kept, "\n"), "site evict line below") {
 		t.Errorf("--host-gone: kept %q", gone.Kept)
 	}
 	// --force names the user the admission record names, which the login

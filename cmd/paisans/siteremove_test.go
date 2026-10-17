@@ -58,7 +58,7 @@ func TestSiteRemoveRefusesBeforeReachingAHost(t *testing.T) {
 	for args, want := range map[string]string{
 		"home-a":                                 "pinned to it",
 		"home-z":                                 "declares no site",
-		"home-b --host-gone --delete-data":       "Drop one of them",
+		"home-b --host-gone --delete-data":       "cannot be used together",
 		"home-b --execute --host-gone extra-arg": "one site",
 	} {
 		err := runSiteRemove(append(strings.Fields(args), "--config", fixtureConfig()), strings.NewReader(""), &bytes.Buffer{})
@@ -115,7 +115,7 @@ func TestSiteRemoveForceRefusesBeforeReachingAHost(t *testing.T) {
 	noSiteHosts(t)
 	for args, want := range map[string]string{
 		"home-b --ssh admin@192.0.2.1":                                "only --force takes",
-		"home-b --force --host-gone":                                  "Drop one of them",
+		"home-b --force --host-gone":                                  "--host-gone cleans no host",
 		"never --force":                                               "Name its host with --ssh",
 		"home-b --force --ssh myalias":                                "not user@host",
 		"home-b --force --execute":                                    "terminal",
@@ -351,15 +351,15 @@ func TestSiteRemoveByIDEndsNamingTheDeployment(t *testing.T) {
 	}
 }
 
-// --evict refuses what would reach the host, and an unattended run, before
-// any host is read.
-func TestSiteRemoveEvictRefusesBeforeReachingAHost(t *testing.T) {
+// --host-gone refuses what would reach the host, and an unattended run,
+// before any host is read.
+func TestSiteRemoveHostGoneRefusesBeforeReachingAHost(t *testing.T) {
 	noSiteHosts(t)
 	for args, want := range map[string]string{
-		"home-b --evict --force":               "--evict cleans no host",
-		"home-b --evict --ssh admin@192.0.2.1": "--evict cleans no host",
-		"home-b --evict --delete-data":         "--evict and --delete-data cannot be used together",
-		"home-b --evict --execute":             "stdin is not a terminal",
+		"home-b --host-gone --force":               "--host-gone cleans no host",
+		"home-b --host-gone --ssh admin@192.0.2.1": "--host-gone cleans no host",
+		"home-b --host-gone --delete-data":         "--host-gone and --delete-data cannot be used together",
+		"home-b --host-gone --execute":             "stdin is not a terminal",
 	} {
 		err := runSiteRemove(append(strings.Fields(args), "--config", fixtureConfig()), strings.NewReader("home-b\n"), &bytes.Buffer{})
 		if err == nil || !strings.Contains(err.Error(), want) {
@@ -463,7 +463,7 @@ func TestAnEvictedGatewayIsAskedRevokedBeforeTheSecretsAreRead(t *testing.T) {
 	w.Close()
 	defer r.Close()
 	var out bytes.Buffer
-	err = runSiteRemove([]string{"vm", "--evict", "--execute", "--config", configPath, "--secrets", filepath.Join(dir, "missing.enc.yaml")}, r, &out)
+	err = runSiteRemove([]string{"vm", "--host-gone", "--execute", "--config", configPath, "--secrets", filepath.Join(dir, "missing.enc.yaml")}, r, &out)
 	if err == nil {
 		t.Fatal("an eviction with no secrets file went on")
 	}

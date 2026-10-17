@@ -34,7 +34,7 @@ func evictWorld(t *testing.T, site string, edits ...func(string) string) (*world
 }
 
 func evictOptions(zone *dnstest.Provider) siteremove.Options {
-	return siteremove.Options{Evict: true, DNSProvider: zone.For("cloudflare")}
+	return siteremove.Options{HostGone: true, DNSProvider: zone.For("cloudflare")}
 }
 
 // leadersAway moves what pins home-a and leads Garage's list elsewhere, so

@@ -239,7 +239,7 @@ func TestSiteRemoveByIDRefusesBeforeReachingAHost(t *testing.T) {
 		"--force --ssh admin@192.0.2.30 --id f2a":                              "Eg: --id f2a9",
 		"--force --ssh admin@192.0.2.30 --id F2A9":                             "Eg: --id f2a9",
 		"--force --ssh myalias --id f2a9":                                      "not user@host",
-		"--force --ssh admin@192.0.2.30 --id f2a9 --host-gone":                 "Drop one of them",
+		"--force --ssh admin@192.0.2.30 --id f2a9 --host-gone":                 "--host-gone cleans no host",
 		"--force --ssh admin@192.0.2.30 --id f2a9 --execute":                   "terminal",
 		"--force --ssh admin@192.0.2.30 --id f2a9 --execute --delete-data":     "terminal",
 	} {
