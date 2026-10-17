@@ -626,7 +626,7 @@ func TestRegistrableDomainPolicyIsWrittenWhenNothingHasMail(t *testing.T) {
 	}
 	c := fake.serve(t)
 	p := plan(t, c, staged())
-	if e, _ := entryAt(p, "_dmarc.example.org"); e.Action != Create || e.Content != dmarcLockdown {
+	if e, _ := entryAt(p, "_dmarc.example.org"); e.Action != Create || e.Content != dmarcParent {
 		t.Fatalf("the registrable domain's policy: %+v", e)
 	}
 	for _, name := range stagedDMARC {
@@ -1020,5 +1020,137 @@ func TestSiteRemovalBelowAnUnheldRegistrableDomain(t *testing.T) {
 	}
 	if len(p.Removes()) != 1 || p.Removes()[0].ID != "a" {
 		t.Fatalf("want the address removed: %+v", p.Entries)
+	}
+}
+
+// The registrable domain's policy is created after every policy its being
+// written rested on.
+func TestRegistrableDomainPolicyIsCreatedLast(t *testing.T) {
+	cfg := staged()
+	cfg.SMTP = config.SMTP{FromAddress: "noreply@send.staging.example.org"}
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	c := fake.serve(t)
+	p := plan(t, c, cfg)
+	if e, _ := entryAt(p, "_dmarc.example.org"); e.Action != Create {
+		t.Fatalf("the registrable domain's policy: got %s", e.Action)
+	}
+	if err := Execute(context.Background(), c, p, ui.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if last := fake.posts[len(fake.posts)-1]; last.Name != "_dmarc.example.org" {
+		t.Errorf("created last: %s, want _dmarc.example.org", last.Name)
+	}
+}
+
+// A covering policy this prune deletes covers nothing, so the policies it
+// covered are kept.
+func TestPruneKeepsPoliciesWhoseCoverItDeletes(t *testing.T) {
+	cfg := declared()
+	cfg.Community.MailDomains = []string{"example.org"}
+	wants, err := Desired(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{
+		{ID: "domain", Type: "TXT", Name: "_dmarc.example.org", Content: dmarcLockdown, Comment: comment},
+		{ID: "talk", Type: "TXT", Name: "_dmarc.talk.example.org", Content: dmarcLockdown, Comment: comment},
+	}
+	p, err := BuildPrune(context.Background(), fake.serve(t), cfg, wants)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removes := map[string]bool{}
+	for _, e := range p.Removes() {
+		removes[e.ID] = true
+	}
+	if !removes["domain"] || removes["talk"] {
+		t.Errorf("removes %v, want domain only", removes)
+	}
+}
+
+// The registrable domain's policy a former configuration wrote is outside
+// every zone this one names, and --name vouches for it.
+func TestPruneRemovesAVouchedRegistrableDomainPolicy(t *testing.T) {
+	cfg := declared()
+	cfg.Community.Domain = "example.net"
+	site := cfg.Sites["vm"]
+	site.Endpoint = "vm.example.net:51820"
+	cfg.Sites["vm"] = site
+	cfg.Apps = map[string]config.App{"talk": {Blueprint: config.Blueprint("mbin"), Hostname: "talk.example.net"}}
+	wants, err := Desired(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.zones["example.net"] = "zone-2"
+	fake.records["zone-1"] = []cfRecord{{ID: "parent", Type: "TXT", Name: "_dmarc.example.org", Content: dmarcParent, Comment: comment}}
+	c := fake.serve(t)
+	p, err := BuildPrune(context.Background(), c, cfg, wants)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Removes()) != 0 {
+		t.Fatalf("removed an unvouched record outside the domain: %+v", p.Removes())
+	}
+	p, err = BuildPrune(context.Background(), c, cfg, wants, "_dmarc.example.org")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Removes()) != 1 || p.Removes()[0].ID != "parent" {
+		t.Errorf("want the vouched policy removed: %+v", p.Entries)
+	}
+}
+
+// A name that is a CNAME has its target's mail, so a target with mail stops
+// the registrable domain's policy.
+func TestCNAMEToAHostWithMailStopsTheRegistrableDomainPolicy(t *testing.T) {
+	was := lookupMail
+	t.Cleanup(func() { lookupMail = was })
+	lookupMail = func(_ context.Context, name string) bool { return name == "news.example.org" }
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{
+		{Type: "CNAME", Name: "news.example.org", Content: "esp.example.net"},
+		{Type: "CNAME", Name: "www.example.org", Content: "host.example.net"},
+	}
+	e, _ := entryAt(plan(t, fake.serve(t), staged()), "_dmarc.example.org")
+	if e.Action != Warn || !strings.Contains(e.Detail, "news.example.org") || strings.Contains(e.Detail, "www.example.org") {
+		t.Errorf("got %s (%s), want a warning naming news.example.org alone", e.Action, e.Detail)
+	}
+}
+
+// A hostname's SPF check refuses two SPF records, and says what it checked
+// rather than what it would write.
+func TestHostnameSPFCheck(t *testing.T) {
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{
+		{Type: "TXT", Name: "talk.example.org", Content: spfLockdown},
+		{Type: "TXT", Name: "talk.example.org", Content: spfLockdown},
+		{Type: "TXT", Name: "blog.example.org", Content: "v=spf1 include:mailgun.org ~all"},
+	}
+	p := plan(t, fake.serve(t), declared())
+	if e, _ := entryAt(p, "talk.example.org"); e.Action != Conflict || !strings.Contains(e.Detail, "2 SPF records") {
+		t.Errorf("two SPF records: got %s (%s)", e.Action, e.Detail)
+	}
+	shown := &ui.Recorder{}
+	p.Show(shown)
+	i := shown.Index("refuse", "TXT blog.example.org conflicts")
+	if i < 0 || !strings.Contains(shown.Events[i].Extra, "checked: blog.example.org holds no SPF record that lets a server send") || strings.Contains(shown.Events[i].Extra, "wanted:") {
+		t.Errorf("the refusal should say what was checked:\n%s", shown.Lines())
+	}
+}
+
+// A hostname with no registrable domain under the public suffix list is
+// covered by no DMARC policy, so it says it sends no mail with SPF.
+func TestHostnameWithNoRegistrableDomainGetsSPF(t *testing.T) {
+	cfg := declared()
+	cfg.Apps["pages"] = config.App{Blueprint: config.Blueprint("writefreely"), Hostname: "github.io"}
+	if w := wantsOf(t, cfg)["TXT github.io"]; w.Content != spfLockdown || w.Guard {
+		t.Errorf("got %+v, want SPF written", w)
 	}
 }

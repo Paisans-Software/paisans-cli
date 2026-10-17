@@ -406,6 +406,9 @@ func Records(p RecordsProbe) []Finding {
 			first, more, _ := strings.Cut(e.Detail, ". ")
 			advice := "A visitor is sent there. Delete it at the provider by hand, because paisans dns init never updates a record and paisans dns prune keeps one whose name is still wanted."
 			switch {
+			case e.Guard:
+				wanted = fmt.Sprintf("checked: %s holds no SPF record that lets a server send (zone %s)", e.Name, e.Zone)
+				advice = "If the hostname sends mail, list it in community.mail_domains; otherwise remove that record at the provider."
 			case e.Leftover || e.Advisory:
 				advice = "paisans dns prune --execute removes it."
 			case strings.Contains(first, "proxied"):

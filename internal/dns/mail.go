@@ -2,7 +2,9 @@ package dns
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"slices"
 	"sort"
 	"strconv"
@@ -73,6 +75,13 @@ const (
 	// dmarcSender is the policy for a domain that sends mail and receives
 	// none. dns prune never deletes it: the domain's mail depends on it.
 	dmarcSender = "v=DMARC1; p=reject; sp=reject;"
+	// dmarcParent is the policy at the registrable domain above
+	// community.domain. Its alignment is relaxed, so that mail a name under
+	// the domain sends signed for a sibling still passes: nothing in the
+	// zone shows which names do. It still rejects every forgery, which has
+	// no signature to align. The relaxed tags are spelled out so that it is
+	// told apart from dmarcSender.
+	dmarcParent = "v=DMARC1; p=reject; sp=reject; adkim=r; aspf=r;"
 	// nullMX is RFC 7505's: preference 0, target the root.
 	nullMX = "."
 )
@@ -200,8 +209,7 @@ func mailWants(cfg *config.Config, addresses []Want) []Want {
 		out = append(out, Want{Type: "TXT", Name: name, Content: spfLockdown, Sources: hosts[name], Guard: true})
 		org := orgDomain(name)
 		switch {
-		case org == "":
-		case org == name:
+		case org == "" || org == name:
 			out[len(out)-1].Guard = false
 		case org == domain && !domainMail:
 		default:
@@ -221,7 +229,7 @@ func mailWants(cfg *config.Config, addresses []Want) []Want {
 			}
 		}
 		sort.Strings(senders)
-		out = append(out, Want{Type: "TXT", Name: "_dmarc." + parent, Content: dmarcLockdown, Sources: source, Advisory: true, Parent: true, Senders: senders})
+		out = append(out, Want{Type: "TXT", Name: "_dmarc." + parent, Content: dmarcParent, Sources: source, Advisory: true, Parent: true, Senders: senders})
 	}
 	if sources, ok := mail[domain]; ok {
 		out = append(out, Want{Type: "TXT", Name: dmarc, Content: dmarcLockdown, Sources: sources, Advisory: true})
@@ -268,10 +276,18 @@ func oneRejecting(records []Record) bool {
 
 // guard is classify for a Guard want.
 func guard(w Want, records []Record) (Action, string) {
+	n := 0
 	for _, r := range records {
-		if strings.EqualFold(r.Type, "TXT") && competes(purposeSPF, r) && !satisfies(purposeSPF, r) {
-			return Conflict, mailConflict(purposeSPF, w, r)
+		if !strings.EqualFold(r.Type, "TXT") || !competes(purposeSPF, r) {
+			continue
 		}
+		if !satisfies(purposeSPF, r) {
+			return Conflict, fmt.Sprintf("an SPF record that lets a server send already exists at this name: %q. Nothing here sends mail as %s, and the DMARC policy covering it would reject what does. If it sends mail, list it in community.mail_domains; otherwise remove that record.", txtText(r.Content), w.Name)
+		}
+		n++
+	}
+	if n > 1 {
+		return Conflict, fmt.Sprintf("%d SPF records exist at this name. A receiver treats more than one as an error and ignores them all; remove all but one by hand.", n)
 	}
 	return Clear, ""
 }
@@ -356,6 +372,11 @@ func parentHazards(ctx context.Context, provider Provider, z zone, w Want, own m
 			}
 		case typ == "TXT" && !strings.HasPrefix(name, "_") && competes(purposeSPF, r) && !satisfies(purposeSPF, r):
 			host, what = name, fmt.Sprintf("an SPF record naming senders at %s", name)
+		case typ == "CNAME" && !strings.HasPrefix(name, "_") && !strings.HasPrefix(name, "*."):
+			// A name that is a CNAME has its target's MX and SPF.
+			if lookupMail(ctx, name) {
+				host, what = name, fmt.Sprintf("a CNAME at %s to %s, which has mail", name, r.Content)
+			}
 		}
 		if what != "" && !policy[host] {
 			hazards = append(hazards, what)
@@ -363,6 +384,37 @@ func parentHazards(ctx context.Context, provider Provider, z zone, w Want, own m
 	}
 	sort.Strings(hazards)
 	return slices.Compact(hazards), nil
+}
+
+// lookupMail reports whether name, resolved through public DNS, receives mail
+// (an MX other than the null MX) or names a sender in its SPF record. A
+// lookup that fails other than by the name not existing says it might.
+var lookupMail = func(ctx context.Context, name string) bool {
+	resolver := net.DefaultResolver
+	unknown := func(err error) bool {
+		var dnsErr *net.DNSError
+		return !errors.As(err, &dnsErr) || !dnsErr.IsNotFound
+	}
+	mx, err := resolver.LookupMX(ctx, name)
+	if err != nil && unknown(err) {
+		return true
+	}
+	for _, m := range mx {
+		if !(m.Pref == 0 && isRoot(m.Host)) {
+			return true
+		}
+	}
+	txt, err := resolver.LookupTXT(ctx, name)
+	if err != nil && unknown(err) {
+		return true
+	}
+	for _, t := range txt {
+		r := Record{Type: "TXT", Content: t}
+		if competes(purposeSPF, r) && !satisfies(purposeSPF, r) {
+			return true
+		}
+	}
+	return false
 }
 
 // parentHeld is the note for a registrable domain with no DMARC policy that
@@ -633,7 +685,7 @@ func isLockdown(r Record) bool {
 		text := strings.Join(strings.Fields(txtText(r.Content)), " ")
 		switch {
 		case strings.HasPrefix(name, "_dmarc."):
-			return text == dmarcLockdown
+			return text == dmarcLockdown || text == dmarcParent
 		case strings.HasPrefix(name, "*._domainkey."):
 			return text == dkimLockdown
 		default:

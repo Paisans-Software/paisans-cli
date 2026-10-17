@@ -609,24 +609,23 @@ func (p *Plan) addParent(ctx context.Context, provider Provider, w Want, zones m
 		return err
 	}
 	action, detail := classify(w, records, nil)
-	if _, ours := ownNoMail(w, records, p.comment); ours && action == Present {
+	// Only a policy this deployment wrote, or none, is this deployment's to
+	// weigh against the zone's mail, so only then is the zone read.
+	_, ours := ownNoMail(w, records, p.comment)
+	ours = ours && action == Present
+	missing := action == Warn && noPolicy(records)
+	if ours || missing {
 		hazards, err := parentHazards(ctx, provider, z, w, p.ownPolicies())
 		if err != nil {
 			return err
 		}
-		if len(hazards) > 0 {
-			action, detail = Warn, parentGoverns(w, hazards)
-		}
-	}
-	if action == Warn && noPolicy(records) {
-		hazards, err := parentHazards(ctx, provider, z, w, p.ownPolicies())
-		if err != nil {
-			return err
-		}
-		if len(hazards) == 0 {
+		switch {
+		case len(hazards) == 0 && missing:
 			w.Advisory = false
 			action, detail = Create, ""
-		} else {
+		case len(hazards) > 0 && ours:
+			action, detail = Warn, parentGoverns(w, hazards)
+		case len(hazards) > 0:
 			detail = parentHeld(w, hazards)
 		}
 	}
@@ -766,7 +765,13 @@ func Execute(ctx context.Context, provider Provider, plan *Plan, r ui.Reporter) 
 	if conflicts := plan.Conflicts(); len(conflicts) > 0 {
 		return conflictError{len(conflicts)}
 	}
-	for _, e := range plan.Creates() {
+	// The registrable domain's policy is created last: whether it could be
+	// written rested on every other policy this plan creates being there,
+	// and a run that stops partway must not leave it governing a sender
+	// whose own policy is still missing.
+	creates := plan.Creates()
+	sort.SliceStable(creates, func(i, j int) bool { return !creates[i].Parent && creates[j].Parent })
+	for _, e := range creates {
 		step := r.Step(fmt.Sprintf("create %s %s", e.Type, e.Name))
 		step.Detail("%s, zone %s", display(e.Type, e.Content, e.Priority), e.Zone)
 		record := Record{Type: e.Type, Name: e.Name, Content: e.Content, Priority: e.Priority, Comment: plan.comment}
@@ -806,12 +811,15 @@ func (p *Plan) Show(r ui.Reporter) {
 		case Create:
 			r.Step("create "+record).End(ui.Pending, "")
 		case Conflict:
-			wanted := "wanted"
-			if e.Leftover || e.Advisory {
-				wanted = "remove with dns prune"
+			wanted := fmt.Sprintf("wanted: %s -> %s (zone %s)", e.Name, content, e.Zone)
+			switch {
+			case e.Guard:
+				wanted = fmt.Sprintf("checked: %s holds no SPF record that lets a server send (zone %s)", e.Name, e.Zone)
+			case e.Leftover || e.Advisory:
+				wanted = fmt.Sprintf("remove with dns prune: %s -> %s (zone %s)", e.Name, content, e.Zone)
 			}
 			r.Refuse(fmt.Sprintf("%s %s conflicts with a record at the provider", e.Type, e.Name),
-				fmt.Sprintf("%s\n%s: %s -> %s (zone %s)", e.Detail, wanted, e.Name, content, e.Zone))
+				fmt.Sprintf("%s\n%s", e.Detail, wanted))
 		case Clear:
 		case Moving:
 			r.Note(fmt.Sprintf("%s %s waits for paisans gateway move", e.Type, e.Name), e.Detail)

@@ -3908,7 +3908,7 @@ it:
 | `community.domain` | MX `0 .` (RFC 7505's null MX) | the domain accepts no mail, so nothing is delivered to it and no bounce is sent in its name |
 | `*._domainkey.<community.domain>` | TXT `v=DKIM1; p=` | no selector under the domain has a key to verify a signature with |
 | `_dmarc.<community.domain>` | TXT `v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s;` | reject what fails, on the domain (`p`) and on every name under it (`sp`) |
-| `_dmarc.<registrable domain>`, when `community.domain` is below it and the conditions below hold | TXT `v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s;` | a receiver finding no policy at a name's own `_dmarc` applies the registrable domain's (`example.org` for `talk.staging.example.org`), never `community.domain`'s, so this one record covers every hostname below it |
+| `_dmarc.<registrable domain>`, when `community.domain` is below it and the conditions below hold | TXT `v=DMARC1; p=reject; sp=reject; adkim=r; aspf=r;` | a receiver finding no policy at a name's own `_dmarc` applies the registrable domain's (`example.org` for `talk.staging.example.org`), never `community.domain`'s, so this one record covers every hostname below it. Its alignment is relaxed, so mail a name under the domain sends signed for a sibling still passes; a forgery has no signature to align, and is rejected all the same |
 | `_dmarc.<hostname>`, for every name that gets an address record, when the registrable domain's policy is one `dns init` only checks or may not write, and does not reject | TXT `v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s;` | each hostname carries the policy the registrable domain does not: below a registrable domain above `community.domain`, or under a `community.domain` with mail of its own |
 | a hostname that is itself a registrable domain | TXT `v=spf1 -all` | a DMARC policy there would govern names the deployment does not run, so the hostname says it sends no mail with SPF, which applies to that exact name alone |
 
@@ -3922,7 +3922,9 @@ that policy only where it changes nothing for anybody's mail. It creates
 * no name in the zone, or in a zone delegated from it, has mail and no DMARC
   policy of its own. A name has mail when it holds an MX record other than
   the null MX, an SPF record naming a sender, or a DKIM key at a selector
-  under it. A sender `dns init` gives a policy in the same run (see below)
+  under it, or when it is a CNAME to a name that receives mail or names a
+  sender, which `dns init` resolves through public DNS. A sender `dns init`
+  gives a policy in the same run (see below)
   has one of its own; a hostname whose own policy the registrable domain's
   would cover does not, since that policy is then never written. The domain
   itself never has one of its own: the policy written there is its;
@@ -3965,8 +3967,10 @@ A sender in an `smtp` block makes its own domain one of these without being
 listed: the domain of `smtp.from_address`, and of every `from_address` an app
 that sends mail declares for itself, so the toolkit never locks out mail it
 configured. Every other name is locked down as above, the hostnames under a
-mail domain included: each gets its own DMARC policy while the mail domain's
-does not reject, and none once it does. `dns init` checks the DMARC policy of every mail name
+mail domain included. Under a `community.domain` with mail of its own, each
+hostname gets its own DMARC policy while the domain's does not reject, and
+none once it does. A hostname under a mail name below the registrable domain
+is covered like any other, by the registrable domain's policy. `dns init` checks the DMARC policy of every mail name
 under `community.domain`: a policy weaker than `p=reject` and `sp=reject` with
 no `pct` below 100 is a `!` note, never a conflict and never replaced. A
 missing policy is a note too while the name holds an MX record, since whoever
@@ -4008,7 +4012,9 @@ and says so. Naming it with `--name` lifts the scope rule for that exact name
 and nothing else: the comment, the address and the not-wanted rules still
 apply, and a `--name` that matches no record `dns init` created is refused, so
 a typo cannot widen anything. The lift is per name because a zone usually
-holds more than one deployment's names.
+holds more than one deployment's names. The same holds for the registrable
+domain's DMARC policy `dns init` wrote, once `community.domain` moves out from
+under that domain: `--name _dmarc.example.org` removes it.
 
 
 A record is deleted only when every one of these holds:

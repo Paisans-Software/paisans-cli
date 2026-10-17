@@ -3143,6 +3143,18 @@ own.
 * A policy there covers only when it is the only one there and rejects. More
   than one, or a CNAME delegating the policy to a DMARC service, is a note
   and covers nothing.
+* The policy written there is `v=DMARC1; p=reject; sp=reject; adkim=r;
+  aspf=r;`. Relaxed alignment passes mail a name under the domain sends
+  signed for a sibling, which nothing in the zone shows; a forgery has no
+  signature to align, and is rejected either way.
+* A name that is a CNAME has its target's mail, which `dns init` resolves
+  through public DNS; a lookup that fails other than by the name not
+  existing counts as mail.
+* `dns init --execute` creates that policy after every other record, since
+  it rests on the policies the same run creates.
+* `dns prune` judges a covering policy without any record of this
+  deployment's the same prune deletes, and `--name` reaches the registrable
+  domain's policy once the configuration no longer produces it.
 * Where the registrable domain's policy rejects, whoever wrote it, no
   hostname gets `_dmarc.<hostname>` and `community.domain` gets no
   `_dmarc.<community.domain>`; `dns prune` removes the ones this deployment's

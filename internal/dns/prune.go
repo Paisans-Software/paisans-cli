@@ -187,7 +187,9 @@ func BuildPrune(ctx context.Context, provider Provider, cfg *config.Config, want
 		rules.names = append(rules.names, w.Name)
 	}
 	// A no-mail DMARC policy whose name a rejecting policy covers is not
-	// wanted.
+	// wanted. The covering policy is judged as dns init judges it, without
+	// any record of this deployment's this prune deletes, since one
+	// covering only until it is deleted covers nothing.
 	covers := map[string]bool{}
 	for _, w := range wants {
 		if w.CoveredBy == "" {
@@ -204,7 +206,14 @@ func BuildPrune(ctx context.Context, provider Provider, cfg *config.Config, want
 				if err != nil {
 					return nil, err
 				}
-				rejecting = oneRejecting(records)
+				var kept []Record
+				for _, r := range records {
+					if r.Comment == RecordComment(cfg.Deployment()) && isLockdown(r) && rules.wanted["TXT "+w.CoveredBy] == nil {
+						continue
+					}
+					kept = append(kept, r)
+				}
+				rejecting = rejects(Present, kept)
 			}
 			covers[w.CoveredBy] = rejecting
 		}
@@ -366,8 +375,23 @@ func planPrune(ctx context.Context, provider Provider, cfg *config.Config, rules
 	cache := map[string]zone{}
 	seen := map[string]bool{}
 	var zones []zone
-	for _, name := range append([]string{domain}, rules.names...) {
+	// A vouched name's zone is listed too, so a record outside every
+	// zone the configuration names (the registrable domain's policy once
+	// the configuration stops producing it) can still be vouched for.
+	names := append([]string{domain}, rules.names...)
+	vouchedOnly := map[string]bool{}
+	for n := range rules.vouched {
+		names = append(names, n)
+		vouchedOnly[n] = true
+	}
+	for _, n := range rules.names {
+		delete(vouchedOnly, n)
+	}
+	for _, name := range names {
 		z, err := FindZone(ctx, provider, name, cache)
+		if vouchedOnly[name] && errors.Is(err, errNoZone) {
+			continue
+		}
 		if err != nil {
 			return nil, nil, err
 		}
