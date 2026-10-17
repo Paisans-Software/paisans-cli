@@ -121,9 +121,12 @@ Asks about a new deployment at a terminal (the community and its domain, the
 DNS provider, the operators, one or more and two recommended, how many machines and what
 each does, the apps, who manages accounts, and the mail server) and writes a commented `paisans-stack.yaml` from the answers. The
 file is checked as `validate` checks it before it is shown; a refusal offers
-the questions it came from again, and nothing is written until the file is
-refused nothing and the operator says yes. It then names `secrets set`,
-`init` and `apply`.
+the questions it came from again, every question, writing the file as it
+stands to fix by hand, or quitting. A file refused nothing is written once the
+operator says yes. It then names `secrets set`, `init` and `apply`.
+
+Each operator's keys are checked as they are pasted: a key another operator
+gave, one listed twice, and one the loader refuses are refused there.
 
 Each machine's SSH user may be left empty, which is the deployment's own
 user, `paisans-<token>`, that the host's owner's `host admit` makes.
@@ -1129,6 +1132,12 @@ paisans site remove --force --ssh admin@203.0.113.9 --id f2a9 --execute --delete
   `--force` reaches the one host only and leaves DNS alone. `--host-gone`
   reaches the removed site's host not at all, so it says the reference files
   apply wrote there may still be under `/srv/paisans/<token>/web-server/`.
+* **Release:** every form that cleans a host refuses, with nothing changed,
+  a site whose manifest, `/srv/paisans/<token>/.paisans-manifest.json`, says
+  a newer release of paisans applied it, or names a release it cannot order:
+  what is provably the deployment's is decided by the binary running the
+  removal. Upgrade paisans and run it again; no flag overrides it. A
+  manifest that records no release is not checked, and the plan says so.
 * **`--execute`:** runs the stages, stopping at the first gate that fails. Stage
   3 deletes the record of what the deployment granted on the host,
   `/srv/paisans/<token>/.paisans/granted.json`, last. It deletes the host's

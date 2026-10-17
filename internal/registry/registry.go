@@ -53,6 +53,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/mesh"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 // Dir holds the registry and its lock. It is root's and 0711: others may
@@ -101,6 +102,10 @@ type Entry struct {
 	// Roles is the site's roles, sorted and joined with commas, one string
 	// because the awk merge matches a role in it with index().
 	Roles string `json:"roles,omitempty"`
+	// ToolkitVersion is the release of the paisans that made the claim,
+	// MAJOR.MINOR.PATCH, refreshed by every claim. An entry claimed before
+	// entries recorded it has none.
+	ToolkitVersion string `json:"toolkit_version,omitempty"`
 }
 
 // exclusiveRoles are the roles one host gives to one deployment: the gateway
@@ -131,11 +136,12 @@ type Registry struct {
 
 // ForRequest is the entry host admit claims a host with, from the request
 // alone, so a plan from a request and one from the configuration claim
-// alike. It carries the request's site and roles; Domain stays empty, since
-// a request names no domain. A request granted the public ports also holds
-// the gateway role, whatever its roles: 80 and 443 are one deployment's per
-// host, and a re-run without the grant deletes the deployment's 80 and 443
-// rules outright, which a second holder would lose.
+// alike. It carries the request's site and roles, and the release of this
+// paisans; Domain stays empty, since a request names no domain. A request
+// granted the public ports also holds the gateway role, whatever its roles:
+// 80 and 443 are one deployment's per host, and a re-run without the grant
+// deletes the deployment's 80 and 443 rules outright, which a second holder
+// would lose.
 func ForRequest(req admission.Request, now time.Time) (string, Entry) {
 	d := deployment.Deployment{ID: req.Deployment}
 	roles := make([]config.Role, 0, len(req.Roles)+1)
@@ -155,6 +161,8 @@ func ForRequest(req admission.Request, now time.Time) (string, Entry) {
 		Subnet:     req.MeshSubnet,
 		Address:    req.Address,
 		Roles:      JoinRoles(roles),
+
+		ToolkitVersion: version.Version,
 	}
 }
 

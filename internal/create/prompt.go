@@ -199,9 +199,11 @@ func (p *Prompter) Choose(q string, options []string, def int) (int, error) {
 
 // Lines asks for one or more lines, pasted one per line and ended by a blank
 // line: how a public key is handed over. A blank first line keeps def when
-// there is one. check judges each line as it comes; a line it refuses is
-// dropped and said so, and the rest of the paste carries on.
-func (p *Prompter) Lines(q string, def []string, check func(string) error) ([]string, error) {
+// there is one. check judges each line as it comes, given the lines kept
+// before it; a line it refuses is dropped and said so, and the rest of the
+// paste carries on. def is judged the same way when it is kept, and is asked
+// for again if any of it is refused.
+func (p *Prompter) Lines(q string, def []string, check func(got []string, s string) error) ([]string, error) {
 	if len(def) > 0 {
 		p.Say("%s, one per line, then a blank line (a blank line now keeps the %d given):", q, len(def))
 	} else {
@@ -218,17 +220,35 @@ func (p *Prompter) Lines(q string, def []string, check func(string) error) ([]st
 				return got, nil
 			}
 			if len(def) > 0 {
+				if err := checkAll(def, check); err != nil {
+					p.refuse(fmt.Sprintf("the %d given no longer do: %v. Paste them again", len(def), err))
+					def = nil
+					continue
+				}
 				return def, nil
 			}
 			p.refuse("at least one line is required")
 			continue
 		}
 		if check != nil {
-			if err := check(s); err != nil {
+			if err := check(got, s); err != nil {
 				p.refuse(err.Error())
 				continue
 			}
 		}
 		got = append(got, s)
 	}
+}
+
+// checkAll judges lines as Lines judges a paste, one after another.
+func checkAll(lines []string, check func(got []string, s string) error) error {
+	if check == nil {
+		return nil
+	}
+	for i, s := range lines {
+		if err := check(lines[:i], s); err != nil {
+			return err
+		}
+	}
+	return nil
 }

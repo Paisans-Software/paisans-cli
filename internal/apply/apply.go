@@ -18,6 +18,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 // Change is what one file needs, decided before anything is written.
@@ -929,6 +930,14 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 		stacks[action.Stack] = true
 	}
 
+	stopped, err := out.probeStopped(t)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", site, err)
+	}
+	for stack := range stopped {
+		stacks[stack] = true
+	}
+
 	forced := map[string]bool{}
 	for _, stack := range recreate {
 		if !rendered[stack] {
@@ -978,6 +987,19 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 		} else if envChanged[stack] {
 			action.Recreate = true
 			action.Reason = "an environment or compose file changed, and Compose passes environment at start, so a running container cannot be told about a new value"
+			if stack == infraStack && len(refresh) > 0 {
+				action.Refresh = sortedKeys(refresh)
+				action.Reason += "; " + strings.Join(action.Refresh, ", ") + " is restarted after it if `up -d` leaves its container in place, since a changed bind mounted file is not a reason Compose recreates one"
+			}
+		} else if why := stopped[stack]; why != "" {
+			// A restart would not do: it starts neither a removed container
+			// nor, for the infrastructure stack, a service it was narrowed
+			// away from. `up -d` creates what is missing and starts what is
+			// stopped, and leaves every running container that matches its
+			// configuration as it is, so Patroni on the primary is not
+			// restarted to start a stopped Garage beside it.
+			action.Recreate = true
+			action.Reason = why
 			if stack == infraStack && len(refresh) > 0 {
 				action.Refresh = sortedKeys(refresh)
 				action.Reason += "; " + strings.Join(action.Refresh, ", ") + " is restarted after it if `up -d` leaves its container in place, since a changed bind mounted file is not a reason Compose recreates one"
@@ -1359,9 +1381,11 @@ func execute(plan *Plan, t Transport) error {
 				return fmt.Errorf("%s: reloading the gateway: %w", plan.Site, err)
 			}
 		} else {
-			// A stopped or absent gateway has nothing to reload, and no
-			// stack action will start it, since routing alone is not one.
-			// It starts on the configuration this apply just validated.
+			// A gateway stopped or removed since the plan read the host has
+			// nothing to reload, and no stack action will start it: one
+			// stopped when the plan read it gave the infrastructure stack an
+			// `up -d` (see probeStopped), and runAction starts it there. It
+			// starts on the configuration this apply just validated.
 			done := plan.step("start gateway")
 			done.Detail("the gateway (up -d caddy)")
 			_, err := t.Run(plan.Deployment.ComposeCmd(infraStack) + " up -d caddy")
@@ -1628,7 +1652,7 @@ func writeManifest(plan *Plan, t Transport) error {
 		files = append(files, entry)
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
-	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files, Pins: pinRecord(plan), Arch: plan.Arch, Images: imageRecord(plan), WebServer: plan.recordedWebServer, Pending: plan.Pending}, "", "  ")
+	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files, Pins: pinRecord(plan), Arch: plan.Arch, Images: imageRecord(plan), WebServer: plan.recordedWebServer, Pending: plan.Pending, ToolkitVersion: version.Version}, "", "  ")
 	if err != nil {
 		return err
 	}

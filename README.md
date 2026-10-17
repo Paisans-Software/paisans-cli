@@ -1493,12 +1493,16 @@ what the client is named without one, and then nothing is written.
 
 It asks for operators, each with a username, a name, an email address and
 their public keys, and offers a second after the first, since `validate` warns
-about one (`operators-fewer-than-two`). It writes them as the `operators:` section,
-named in every site's `ssh.keys`. It then asks who manages accounts and writes
-the answer as the `pocket-id` app's `management` (see *Who manages accounts:
-`management`*), since that is never defaulted. With the account service it
-adds an `account` app, asking its hostname (`account.<domain>` by default),
-how people join (`signup: invite` or `open`), and the Markdown file that
+about one (`operators-fewer-than-two`). It writes them as the `operators:`
+section, named in every site's `ssh.keys`. The first operator, usually whoever runs
+`create`, is offered each public key in `~/.ssh/*.pub` on the workstation
+before pasting any; a certificate, or a key the loader refuses, is not offered.
+A key another operator gave is refused as it is pasted, since two operators
+sharing a key cannot be told apart on a host. It then asks who manages accounts
+and writes the answer as the `pocket-id` app's `management` (see *Who manages
+accounts: `management`*), since that is never defaulted. With the account
+service it adds an `account` app, asking its hostname (`account.<domain>` by
+default), how people join (`signup: invite` or `open`), and the Markdown file that
 holds the code of conduct, whose text it writes into `code_of_conduct`. With
 Pocket ID it asks `allow_user_signups` and the two email settings,
 `email_one_time_access_as_unauthenticated` and
@@ -1516,8 +1520,9 @@ It writes one file and nothing else. It asks for no secret, because `init` is
 the one command responsible for the secrets file, and reaches no host, because
 the sites may not exist yet. It refuses a file that exists: an existing
 deployment is edited, not recreated. The rendered bytes are checked exactly as
-`validate` checks a file before the operator sees them, and nothing is written
-while anything is refused.
+`validate` checks a file before the operator sees them. A refused file is
+written only when the operator asks for it as it stands, so that their answers
+are not lost; `validate` and `apply` refuse it until it is fixed by hand.
 
 ### The config declares intent; etcd holds truth
 
@@ -5891,7 +5896,7 @@ it:
 | dns | `dns init` | always; a record pointing elsewhere stops it, to be changed by hand |
 | founding | `apply --site <s>`: each witness in `etcd.members`, then the other members | a member is still being founded (below); a witness that is founded already is applied here too while a data member is still being founded, since that member's apply refuses until a witness's etcd runs |
 | joining | `site add <s>` | the cluster runs and a data member has not joined it; a joining witness is joined by that `site add`, and gets one of its own only when no data member joins, which stops the run |
-| other sites | `apply --site <s>`, monitor sites last | every site not in `etcd.members` |
+| other sites | `apply --site <s>`, monitor sites last | every site not in `etcd.members`, and then every Garage site no earlier step applies or joins, since storage works through Garage's container |
 | storage | `storage init --site <g>` for one Garage site, `storage add` for several | any Garage site |
 | pass two | `apply --site <s>` for every site, monitor sites last, a monitor in `etcd.members` too | always: it resumes a founding stop or a replica's wait for the databases, and moves what earlier steps changed |
 | gateway | `gateway move` | a site without the gateway role still holds this deployment's gateway (see *Moving the gateway*) |
@@ -5943,6 +5948,14 @@ its module has to be in the binary*), and an apply resolves each tag once for
 the whole run, so the build pulled here is the one every later step plans,
 even if the tag moves in between. A registry that refuses an image,
 `unauthorized` or `denied`, is reported as a private image, with what to do.
+
+**Every Garage site is applied before storage.** `storage init` and `storage
+add` read and change Garage's layout through its running container. A
+founded member's first apply in the run is otherwise pass two, after storage,
+so a Garage site whose containers had gone (Eg: removed to free disk space)
+stopped every run at storage with "service garage is not running", before the
+apply that would start it. A Garage site no earlier step applies or joins is
+applied in *other sites*; on a site already running it plans nothing.
 
 Run again, it reads live state again and carries on, so the same command is
 the first install, the resume after a failure, and every later change. Each

@@ -34,6 +34,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/siteremove"
 	"github.com/paisans-software/paisans-cli/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 const (
@@ -693,6 +694,8 @@ func (h *host) Run(command string) (string, error) {
 		return `{"Service":"app","Name":"x","State":"exited","ExitCode":1}` + "\n", nil
 	case strings.Contains(command, " ps --all --format json"):
 		return `{"Service":"x","Name":"x","State":"running","Health":""}` + "\n", nil
+	case command == apply.ContainersRead:
+		return applytest.Running(h.files), nil
 
 	// a gateway's Caddy kept for the host owner's sites: validated and
 	// reloaded inside its container, from a path the container mounts
@@ -997,6 +1000,23 @@ func (h *host) addToManifest(t *testing.T, path, content string) {
 	h.files[dep.Manifest()] = string(data) + "\n"
 }
 
+// setToolkitVersion records v in the deployment's manifest on the host as
+// the release of the paisans that wrote it, empty for a manifest from before
+// manifests recorded one.
+func (h *host) setToolkitVersion(t *testing.T, v string) {
+	t.Helper()
+	var m render.Manifest
+	if err := json.Unmarshal([]byte(h.files[dep.Manifest()]), &m); err != nil {
+		t.Fatal(err)
+	}
+	m.ToolkitVersion = v
+	data, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.files[dep.Manifest()] = string(data) + "\n"
+}
+
 func (h *host) sortedFiles() []string {
 	var out []string
 	for p := range h.files {
@@ -1233,6 +1253,7 @@ func (w *world) inspect(t apply.Transport, cfg *config.Config) (*hostcheck.Inven
 		if err := json.Unmarshal([]byte(content), &m); err == nil {
 			inv.ManifestFiles = m.Files
 			inv.ManifestWebServer = m.WebServer
+			inv.ManifestToolkitVersion = m.ToolkitVersion
 			if inv.ManifestFiles == nil {
 				inv.ManifestFiles = []render.ManifestFile{}
 			}
@@ -1393,7 +1414,7 @@ func newWorld(t *testing.T, edits ...func(string) string) *world {
 			h.wgRun = &running
 			h.files[wgInstalled] = running
 		}
-		manifest, _ := json.MarshalIndent(render.Manifest{Version: 1, Files: entries}, "", "  ")
+		manifest, _ := json.MarshalIndent(render.Manifest{Version: 1, Files: entries, ToolkitVersion: version.Version}, "", "  ")
 		h.files[dep.Manifest()] = string(manifest) + "\n"
 		if contains(cfg.Etcd.Members, name) {
 			h.etcdUp, h.etcdContainer = true, true

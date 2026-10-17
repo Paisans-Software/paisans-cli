@@ -12,6 +12,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 const (
@@ -569,17 +570,17 @@ func TestRemoveCommandShape(t *testing.T) {
 }
 
 // A claim from a request carries what the request does: token, root,
-// interface, port, subnet, address, the site and its roles. The public
-// ports are one deployment's per host, so a request granted them claims
-// the gateway role whatever its roles, and a second deployment holding
-// 80 and 443 is refused as a second gateway is.
+// interface, port, subnet, address, the site and its roles, and the release
+// of the paisans making it. The public ports are one deployment's per host,
+// so a request granted them claims the gateway role whatever its roles, and
+// a second deployment holding 80 and 443 is refused as a second gateway is.
 func TestForRequest(t *testing.T) {
 	now := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
 	req := admission.Request{Version: 1, Deployment: ours, Site: "home-a", Roles: []string{"apps", "data", "gateway"}, User: "paisans-f2a9", SSHPort: 22, ListenPort: 51820,
 		MeshSubnet: "10.44.0.0/24", Address: "10.44.0.1", Grants: admission.Grants{Watchdog: true, PublicPorts: true}}
 	id, e := ForRequest(req, now)
 	want := Entry{Token: "f2a9", Root: "/srv/paisans/f2a9", Site: "home-a", ClaimedAt: "2026-10-15T12:00:00Z", Interface: "psns-f2a9", ListenPort: 51820,
-		Subnet: "10.44.0.0/24", Address: "10.44.0.1", Roles: "apps,data,gateway"}
+		Subnet: "10.44.0.0/24", Address: "10.44.0.1", Roles: "apps,data,gateway", ToolkitVersion: version.Version}
 	if id != ours || e != want {
 		t.Errorf("ForRequest = %s %+v", id, e)
 	}
@@ -600,5 +601,37 @@ func TestForRequest(t *testing.T) {
 	monitor.Grants.PublicPorts = false
 	if _, m := ForRequest(monitor, now); m.Roles != "monitor" {
 		t.Errorf("a monitor without the public ports claims roles %q", m.Roles)
+	}
+}
+
+// A claim records the release of the paisans that made it, and a later
+// claim by the same id replaces it with its own, lower or higher: the host
+// holds what the last claim's binary admitted.
+func TestClaimRecordsTheToolkitVersion(t *testing.T) {
+	newer := entry("f2a9", "example.org", "home-a")
+	newer.ToolkitVersion = "0.3.0"
+	empty, err := Encode(Registry{Version: Version, Deployments: map[string]Entry{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, stderr, code := runMerge(t, string(empty), ours, newer)
+	if code != 0 {
+		t.Fatalf("the first claim exited %d: %s", code, stderr)
+	}
+	if !strings.Contains(out, `"toolkit_version":"0.3.0"`) {
+		t.Errorf("the claim does not record its release:\n%s", out)
+	}
+	older := newer
+	older.ToolkitVersion = "0.2.0"
+	out, stderr, code = runMerge(t, out, ours, older)
+	if code != 0 {
+		t.Fatalf("the second claim exited %d: %s", code, stderr)
+	}
+	r, err := Parse([]byte(out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := r.Deployments[ours].ToolkitVersion; got != "0.2.0" || strings.Contains(out, "0.3.0") {
+		t.Errorf("a later claim left release %q:\n%s", got, out)
 	}
 }

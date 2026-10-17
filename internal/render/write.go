@@ -56,6 +56,12 @@ type Manifest struct {
 	// rendered, sorted: the effective topology left them out, so a check
 	// comparing this site with a render uses the same view.
 	Pending []string `json:"pending,omitempty"`
+	// ToolkitVersion is the release of the paisans that wrote this
+	// manifest, MAJOR.MINOR.PATCH, without the commit, which cannot be
+	// ordered. site remove refuses a site a newer release applied, since it
+	// may not know everything that release put on the host. A manifest
+	// written before apply recorded it has none.
+	ToolkitVersion string `json:"toolkit_version,omitempty"`
 }
 
 // ManifestImage is one repository a site's stacks rendered, and every

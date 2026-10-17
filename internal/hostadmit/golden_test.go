@@ -12,6 +12,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/hostadmit"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden plans")
@@ -216,6 +217,9 @@ func checkGoldenText(t *testing.T, name, got string) {
 // checkGoldenAt is checkGoldenText for a golden file at path.
 func checkGoldenAt(t *testing.T, path, got string) {
 	t.Helper()
+	// The claim records this binary's release, which every release bump
+	// changes; the golden plans read the same across one.
+	got = strings.ReplaceAll(got, `"toolkit_version":"`+version.Version+`"`, `"toolkit_version":"<release>"`)
 	if *update {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)

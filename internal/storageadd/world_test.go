@@ -156,6 +156,8 @@ func (h *host) run(command, stdin string) (string, error) {
 		return `{"Service":"app","Name":"x","State":"exited","ExitCode":1}` + "\n", nil
 	case strings.Contains(command, " ps --all --format json"):
 		return `{"Service":"x","Name":"x","State":"running","Health":""}` + "\n", nil
+	case command == apply.ContainersRead:
+		return applytest.Running(h.files), nil
 	case strings.HasPrefix(command, "rm -f '"):
 		delete(h.files, strings.Trim(strings.TrimPrefix(command, "rm -f "), "'"))
 		return "", nil

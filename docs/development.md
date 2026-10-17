@@ -154,8 +154,9 @@ each answer meets when it is typed (`checks.go`), and the template the file is
 rendered from (`paisans-stack.yaml.tmpl`, through `render.go`, which also decides
 placement, object storage and etcd timings from the answers). The rendered
 bytes go through `config.LoadBytes` and `validate.Check` before they are
-shown, and a refusal leads back to the section its key names
-(`create.SectionFor`). `cmd/paisans/create.go` refuses an existing file and a
+shown, a load error's problems becoming refusals, and a refusal leads back to
+the section its key names (`create.SectionFor`) or writes the file as it
+stands when the operator asks. `cmd/paisans/create.go` refuses an existing file and a
 stdin that is not a terminal, and writes with `O_EXCL`. The tests in
 `internal/create` render every named shape, with no apps and with every app,
 gated and not, and require no refusal and exactly the warnings each is known
@@ -681,6 +682,21 @@ named by the operator when no record exists; it is repeatable, one stack per
 flag, a stack this site does not render is refused, and a named stack is
 planned even when nothing changed. Only those stacks are forced, because a
 forced recreate replaces every container of a stack, an outage each time.
+
+**A stack that is not running is started.** An operator removed every
+container and image to free disk space and applied: every file matched the
+render, so `apply` planned nothing for the stacks it had not changed and
+reported the deployment complete with its apps down. `Build` now reads which
+containers exist, in one `docker ps --all` filtered on Compose's project label,
+and a stack with a declared service that has no container, or one `exited`,
+`created` or `dead`, gets a plain `up -d`, with the services named in the plan.
+`up -d` creates what is missing and starts what is stopped, and leaves every
+running container that matches its configuration alone, so a stopped Garage is
+started without restarting Patroni beside it. A `restarting` container is not
+stopped, since `up -d` would leave it as it is and the health gate is what
+explains a crash loop; a `paused` one was paused by somebody. A held stack
+(`Except`) stays held, which keeps Pocket ID's first pass starting Pocket ID
+before the apps that sign in through it.
 
 **Each stack must come up healthy before the next one moves.** An apply
 reported success while Mbin's app could not reach its database, because `up -d`

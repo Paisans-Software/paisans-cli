@@ -1,6 +1,8 @@
 package create
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
 	"errors"
 	"flag"
 	"os"
@@ -8,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/ssh"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 )
@@ -593,5 +597,62 @@ func TestTheSSHUserMayBeLeftEmpty(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "      user: admin\n") {
 		t.Errorf("a given user was not written:\n%s", data)
+	}
+}
+
+// Two operators sharing a key is a file the loader refuses, so the second
+// operator's paste of the first one's key is refused at the prompt.
+func TestASecondOperatorMayNotGiveTheFirstOnesKey(t *testing.T) {
+	var out strings.Builder
+	w := NewWizard(NewPrompter(strings.NewReader(script(
+		"alice", "Alice Example", "alice@example.org", aliceKey, "",
+		"", "bob", "Bob Example", "bob@example.org", aliceKey, bobKey, "", "n",
+	)), &out))
+	if err := w.Ask(SectionOperators); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if got := w.Answers.Operators[1].Keys; !slices.Equal(got, []string{bobKey}) {
+		t.Errorf("bob's keys = %q, want his own alone", got)
+	}
+	if !strings.Contains(out.String(), "this is alice's key") {
+		t.Errorf("the shared key was not refused:\n%s", out.String())
+	}
+}
+
+func TestKeyCheck(t *testing.T) {
+	small, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, err := ssh.NewPublicKey(&small.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	weak := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(pub)))
+	aliceFP, err := checkKey(aliceKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := keyCheck(map[string]string{aliceFP: "alice"})
+	for _, tc := range []struct {
+		name, line string
+		got        []string
+		want       string
+	}{
+		{"own key", bobKey, nil, ""},
+		{"another operator's", aliceKey, nil, "alice's key"},
+		{"another operator's, another comment", strings.Replace(aliceKey, "alice@example.org", "laptop", 1), nil, "alice's key"},
+		{"listed above", bobKey, []string{bobKey}, "already listed above"},
+		{"not a key", "nonsense", nil, "not an SSH public key"},
+		{"options", `from="10.0.0.1" ` + bobKey, nil, "carries options"},
+		{"small rsa", weak, nil, "1024 bits"},
+	} {
+		err := check(tc.got, tc.line)
+		switch {
+		case tc.want == "" && err != nil:
+			t.Errorf("%s: refused: %v", tc.name, err)
+		case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+			t.Errorf("%s: err = %v, want %q", tc.name, err, tc.want)
+		}
 	}
 }
