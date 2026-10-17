@@ -151,8 +151,14 @@ func (w *Wizard) operators() error {
 			d = prev[i]
 		}
 		var taken []string
+		keys := map[string]string{}
 		for _, op := range operators {
 			taken = append(taken, op.ID)
+			for _, k := range op.Keys {
+				if fp, err := checkKey(k); err == nil {
+					keys[fp] = op.ID
+				}
+			}
 		}
 		if i > 0 {
 			w.p.Say("\nOperator %d", i+1)
@@ -169,11 +175,11 @@ func (w *Wizard) operators() error {
 		if err != nil {
 			return err
 		}
-		keys, err := w.keys(i, d.Keys)
+		lines, err := w.keys(i, d.Keys, keyCheck(keys))
 		if err != nil {
 			return err
 		}
-		operators = append(operators, Operator{ID: id, Name: name, Email: email, Keys: keys})
+		operators = append(operators, Operator{ID: id, Name: name, Email: email, Keys: lines})
 		if len(operators) < 2 {
 			continue
 		}
@@ -192,11 +198,15 @@ func (w *Wizard) operators() error {
 // keys asks for operator i's public keys. The first operator is offered each
 // key on this machine, until keys have been given, which are kept as the
 // default instead; any other, or one who takes none, pastes them.
-func (w *Wizard) keys(i int, prev []string) ([]string, error) {
+func (w *Wizard) keys(i int, prev []string, check func(got []string, s string) error) ([]string, error) {
 	if i == 0 && len(prev) == 0 && len(w.LocalKeys) > 0 {
 		w.p.Say("SSH public keys found on this machine. Take the ones that are this operator's:")
 		var chosen []string
 		for _, k := range w.LocalKeys {
+			// A key the loader would refuse is not offered.
+			if check(chosen, k.Line) != nil {
+				continue
+			}
 			use, err := w.p.YesNo(fmt.Sprintf("Use %s (%s)?", k.Name, k.About), true)
 			if err != nil {
 				return nil, err
@@ -209,7 +219,7 @@ func (w *Wizard) keys(i int, prev []string) ([]string, error) {
 			return chosen, nil
 		}
 	}
-	return w.p.Lines("SSH public keys", prev, checkKey)
+	return w.p.Lines("SSH public keys", prev, check)
 }
 
 func (w *Wizard) sites() error {

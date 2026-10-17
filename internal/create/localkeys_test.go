@@ -3,6 +3,7 @@ package create
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/rsa"
 	"slices"
 	"strings"
 	"testing"
@@ -52,6 +53,9 @@ func TestFindLocalKeys(t *testing.T) {
 	}
 }
 
+// carolKey is a third operator's key, for when alice takes both of the others.
+const carolKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC carol@example.org"
+
 func TestTheFirstOperatorIsOfferedTheKeysOnThisMachine(t *testing.T) {
 	local := []LocalKey{
 		{Name: "~/.ssh/id_ed25519.pub", Line: aliceKey, About: "ssh-ed25519 SHA256:a alice@example.org"},
@@ -63,7 +67,7 @@ func TestTheFirstOperatorIsOfferedTheKeysOnThisMachine(t *testing.T) {
 		want  []string
 	}{
 		{"both taken", []string{"alice", "Alice Example", "alice@example.org", "", "",
-			"bob", "Bob Example", "bob@example.org", bobKey, "", "n"}, []string{aliceKey, bobKey}},
+			"bob", "Bob Example", "bob@example.org", carolKey, "", "n"}, []string{aliceKey, bobKey}},
 		{"one taken", []string{"alice", "Alice Example", "alice@example.org", "y", "n",
 			"bob", "Bob Example", "bob@example.org", bobKey, "", "n"}, []string{aliceKey}},
 		{"none taken, so pasted", []string{"alice", "Alice Example", "alice@example.org", "n", "n", bobKey, "",
@@ -109,5 +113,33 @@ func TestKeysGivenAreKeptOverTheKeysOnThisMachine(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "Use ~/.ssh/") {
 		t.Errorf("keys already given were offered again:\n%s", out.String())
+	}
+}
+
+// A key on this machine the loader would refuse is not offered.
+func TestARefusedKeyOnThisMachineIsNotOffered(t *testing.T) {
+	small, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, err := ssh.NewPublicKey(&small.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	weak := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(pub)))
+	var out strings.Builder
+	w := NewWizard(NewPrompter(strings.NewReader(script(
+		"alice", "Alice Example", "alice@example.org", "",
+		"bob", "Bob Example", "bob@example.org", bobKey, "", "n",
+	)), &out))
+	w.LocalKeys = []LocalKey{{Name: "~/.ssh/old.pub", Line: weak}, {Name: "~/.ssh/work.pub", Line: aliceKey}}
+	if err := w.Ask(SectionOperators); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if strings.Contains(out.String(), "old.pub") {
+		t.Errorf("a key the loader refuses was offered:\n%s", out.String())
+	}
+	if got := w.Answers.Operators[0].Keys; !slices.Equal(got, []string{aliceKey}) {
+		t.Errorf("first operator's keys = %q, want the one offered", got)
 	}
 }
