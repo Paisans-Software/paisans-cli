@@ -91,6 +91,15 @@ type Want struct {
 	// otherwise checks it. A provider that does not hold it means it is not
 	// checked.
 	Parent bool
+	// Senders are the mail names under the registrable domain a Parent want
+	// is for, from the configuration. A policy written there would govern
+	// each one that has none of its own, before its mail's DNS exists.
+	Senders []string
+	// Guard is an SPF record at a hostname with no mail declared, checked
+	// and never written: an SPF record there naming a sender is a conflict,
+	// since the hostname has mail nobody listed, and anything else is Clear.
+	// Prune never counts it as wanted.
+	Guard bool
 	// CoveredBy is the "_dmarc" name whose policy a receiver reads for this
 	// no-mail DMARC policy's name when the name has none of its own: the
 	// registrable domain's. Where that policy rejects, this one is Covered.
@@ -495,9 +504,6 @@ func Build(ctx context.Context, provider Provider, d deployment.Deployment, want
 			continue
 		}
 		z, err := FindZone(ctx, provider, w.Name, zones)
-		if w.Parent && errors.Is(err, errNoZone) {
-			continue
-		}
 		if err != nil {
 			return nil, err
 		}
@@ -511,9 +517,12 @@ func Build(ctx context.Context, provider Provider, d deployment.Deployment, want
 		}
 		var action Action
 		var detail string
-		if w.Leftover {
+		switch {
+		case w.Leftover:
 			action = Clear
-		} else {
+		case w.Guard:
+			action, detail = guard(w, records)
+		default:
 			action, detail = classify(w, records, wantedTypes[w.Name])
 		}
 		if w.Leftover || w.Advisory {
@@ -546,6 +555,9 @@ func Build(ctx context.Context, provider Provider, d deployment.Deployment, want
 				}
 			}
 		}
+		if w.Guard && action == Clear {
+			continue
+		}
 		plan.Entries = append(plan.Entries, Entry{Want: w, Zone: z.name, zoneID: z.id, Action: action, Detail: detail, rejects: rejects(action, records)})
 	}
 	if parent != nil {
@@ -559,9 +571,10 @@ func Build(ctx context.Context, provider Provider, d deployment.Deployment, want
 
 // rejects reports whether a DMARC policy planned as action, at a name
 // holding records, rejects once the plan is executed: one about to be
-// created does, and one already there does if every policy there rejects.
+// created does, and one already there does if it is the only policy there
+// and rejects.
 func rejects(action Action, records []Record) bool {
-	return action == Create || action != Conflict && hasDMARC(records) && satisfiesAll(records)
+	return action == Create || action != Conflict && oneRejecting(records)
 }
 
 // cover makes each no-mail DMARC policy that would be created Covered where
@@ -597,7 +610,7 @@ func (p *Plan) addParent(ctx context.Context, provider Provider, w Want, zones m
 	}
 	action, detail := classify(w, records, nil)
 	if _, ours := ownNoMail(w, records, p.comment); ours && action == Present {
-		hazards, err := parentHazards(ctx, provider, z, p.ownPolicies())
+		hazards, err := parentHazards(ctx, provider, z, w, p.ownPolicies())
 		if err != nil {
 			return err
 		}
@@ -605,8 +618,8 @@ func (p *Plan) addParent(ctx context.Context, provider Provider, w Want, zones m
 			action, detail = Warn, parentGoverns(w, hazards)
 		}
 	}
-	if action == Warn && !hasDMARC(records) {
-		hazards, err := parentHazards(ctx, provider, z, p.ownPolicies())
+	if action == Warn && noPolicy(records) {
+		hazards, err := parentHazards(ctx, provider, z, w, p.ownPolicies())
 		if err != nil {
 			return err
 		}
@@ -628,11 +641,12 @@ func (p *Plan) addParent(ctx context.Context, provider Provider, w Want, zones m
 
 // ownPolicies are the names that hold a DMARC policy of their own once this
 // plan is executed, from what it creates: a receiver reads a name's own
-// policy before the registrable domain's.
+// policy before the registrable domain's. A policy the registrable domain's
+// would cover is not one: written there, that one is never created.
 func (p *Plan) ownPolicies() map[string]bool {
 	out := map[string]bool{}
 	for _, e := range p.Entries {
-		if e.Action == Create && wantPurpose(e.Want) == purposeDMARC {
+		if e.Action == Create && e.CoveredBy == "" && wantPurpose(e.Want) == purposeDMARC {
 			out[strings.TrimPrefix(e.Name, "_dmarc.")] = true
 		}
 	}

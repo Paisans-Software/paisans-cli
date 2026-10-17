@@ -204,7 +204,7 @@ func BuildPrune(ctx context.Context, provider Provider, cfg *config.Config, want
 				if err != nil {
 					return nil, err
 				}
-				rejecting = hasDMARC(records) && satisfiesAll(records)
+				rejecting = oneRejecting(records)
 			}
 			covers[w.CoveredBy] = rejecting
 		}
@@ -303,9 +303,13 @@ func siteRemovalRules(before *config.Config, site string, after *config.Config) 
 			}
 		}
 	}
+	// The registrable domain's policy is no address record's name, and its
+	// zone need not be the provider's.
 	if wants, err := Desired(before); err == nil {
 		for _, w := range wants {
-			rules.names = append(rules.names, w.Name)
+			if !w.Parent {
+				rules.names = append(rules.names, w.Name)
+			}
 		}
 	}
 	wants, err := Desired(after)
@@ -339,7 +343,7 @@ func wantedSet(wants []Want) map[string][]string {
 		// The registrable domain's policy is wanted even where it is only
 		// checked: a lockdown one there is this deployment's dns init's, and
 		// the names below rely on it.
-		if w.Advisory && !w.Parent || w.Leftover {
+		if w.Advisory && !w.Parent || w.Leftover || w.Guard {
 			continue
 		}
 		out[w.Type+" "+w.Name] = w.Sources

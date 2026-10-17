@@ -16,7 +16,7 @@ const comment = "paisans-f2a9: created by paisans dns init"
 func mailOnly(wants []Want) map[string]Want {
 	out := map[string]Want{}
 	for _, w := range wants {
-		if (w.Type == "TXT" || w.Type == "MX") && !w.Leftover {
+		if (w.Type == "TXT" || w.Type == "MX") && !w.Leftover && !w.Guard {
 			out[w.Type+" "+w.Name] = w
 		}
 	}
@@ -890,3 +890,135 @@ func TestPruneRemovesAHostnamesDMARCNothingWants(t *testing.T) {
 }
 
 func ptr(n int) *int { return &n }
+
+// Mail at the registrable domain itself is governed by the policy there, so
+// the policy this deployment wrote is a note once the domain has mail.
+func TestOwnRegistrableDomainPolicyWithMailAtTheDomainIsANote(t *testing.T) {
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{
+		{Type: "TXT", Name: "_dmarc.example.org", Content: dmarcLockdown, Comment: comment},
+		{Type: "MX", Name: "example.org", Content: "mx.example.net", Priority: ptr(10)},
+	}
+	if e, _ := entryAt(plan(t, fake.serve(t), staged()), "_dmarc.example.org"); e.Action != Warn || !strings.Contains(e.Detail, "an MX record at example.org") {
+		t.Errorf("got %s (%s), want a warning naming the domain's MX", e.Action, e.Detail)
+	}
+}
+
+// A sender the configuration names under the registrable domain, outside
+// community.domain, with no policy of its own, stops the policy being
+// written there, even before its mail's DNS exists.
+func TestConfiguredSenderStopsTheRegistrableDomainPolicy(t *testing.T) {
+	cfg := staged()
+	cfg.SMTP = config.SMTP{FromAddress: "noreply@example.org"}
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	p := plan(t, fake.serve(t), cfg)
+	if e, _ := entryAt(p, "_dmarc.example.org"); e.Action != Warn || !strings.Contains(e.Detail, "example.org, a sender this configuration names") {
+		t.Errorf("got %s (%s), want a warning naming the sender", e.Action, e.Detail)
+	}
+	for _, name := range stagedDMARC {
+		if e, _ := entryAt(p, name); e.Action != Create {
+			t.Errorf("%s: got %s, want create", name, e.Action)
+		}
+	}
+}
+
+// A hostname whose SPF record names a sender has mail nobody listed, which
+// the policy covering it would reject, so the run stops.
+func TestHostnameWithUndeclaredMailIsAConflict(t *testing.T) {
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{{Type: "TXT", Name: "talk.example.org", Content: "v=spf1 include:sendgrid.net -all"}}
+	p := plan(t, fake.serve(t), declared())
+	if e, _ := entryAt(p, "talk.example.org"); e.Action != Conflict || !strings.Contains(e.Detail, "community.mail_domains") {
+		t.Errorf("got %s (%s), want a conflict naming community.mail_domains", e.Action, e.Detail)
+	}
+	// One that says it sends none is fine, and nothing is written there.
+	fake = newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{{Type: "TXT", Name: "talk.example.org", Content: spfLockdown}}
+	if e, ok := entryAt(plan(t, fake.serve(t), declared()), "talk.example.org"); ok {
+		t.Errorf("a no-mail SPF record at a hostname: %+v", e)
+	}
+}
+
+// A hostname with mail under the registrable domain stops the policy there
+// being written, although the plan would give it its own: written there,
+// that one is covered and never created.
+func TestCoveredHostnameWithMailStopsTheRegistrableDomainPolicy(t *testing.T) {
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{{Type: "MX", Name: "talk.staging.example.org", Content: "mx.example.net", Priority: ptr(10)}}
+	p := plan(t, fake.serve(t), staged())
+	if e, _ := entryAt(p, "_dmarc.example.org"); e.Action != Warn {
+		t.Errorf("the registrable domain's policy: got %s, want warn", e.Action)
+	}
+	if e, _ := entryAt(p, "_dmarc.talk.staging.example.org"); e.Action != Create {
+		t.Errorf("the hostname's own policy: got %s, want create", e.Action)
+	}
+}
+
+// Two policies at the registrable domain are none to a receiver, and a CNAME
+// there delegates a policy this cannot read: either way it covers nothing,
+// is a note, and stops nothing.
+func TestRegistrableDomainPolicyThatCannotBeReadCoversNothing(t *testing.T) {
+	cases := map[string][]cfRecord{
+		"two policies": {
+			{Type: "TXT", Name: "_dmarc.example.org", Content: "v=DMARC1; p=reject; sp=reject"},
+			{Type: "TXT", Name: "_dmarc.example.org", Content: "v=DMARC1; p=reject; sp=reject; rua=mailto:r@example.net"},
+		},
+		"a cname": {
+			{Type: "CNAME", Name: "_dmarc.example.org", Content: "example-org._dmarc.vendor.example.net"},
+		},
+	}
+	for name, records := range cases {
+		t.Run(name, func(t *testing.T) {
+			fake := newFake()
+			fake.zones["example.org"] = "zone-1"
+			fake.records["zone-1"] = records
+			c := fake.serve(t)
+			p := plan(t, c, staged())
+			if e, _ := entryAt(p, "_dmarc.example.org"); e.Action != Warn {
+				t.Errorf("the registrable domain's policy: got %s, want warn", e.Action)
+			}
+			for _, name := range stagedDMARC {
+				if e, _ := entryAt(p, name); e.Action != Create {
+					t.Errorf("%s: got %s, want create", name, e.Action)
+				}
+			}
+			if err := Execute(context.Background(), c, p, ui.Discard); err != nil {
+				t.Fatal(err)
+			}
+			wants, err := Desired(staged())
+			if err != nil {
+				t.Fatal(err)
+			}
+			pruned, err := BuildPrune(context.Background(), c, staged(), wants)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if n := len(pruned.Removes()); n != 0 {
+				t.Errorf("prune removes %d covered policies: %+v", n, pruned.Removes())
+			}
+		})
+	}
+}
+
+// site remove reads no registrable domain the provider does not hold.
+func TestSiteRemovalBelowAnUnheldRegistrableDomain(t *testing.T) {
+	fake := newFake()
+	fake.zones["staging.example.org"] = "zone-2"
+	fake.records["zone-2"] = []cfRecord{{ID: "a", Type: "A", Name: "home-a.staging.example.org", Content: "198.51.100.20", Comment: comment}}
+	before := staged()
+	before.Sites["home-a"] = config.Site{Roles: []config.Role{config.RoleData}, Address: "10.44.0.1", Endpoint: "home-a.staging.example.org:51820", PublicAddress: "198.51.100.20"}
+	after := staged()
+	delete(after.Sites, "home-a")
+	p, err := BuildSiteRemoval(context.Background(), fake.serve(t), before, "home-a", after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Removes()) != 1 || p.Removes()[0].ID != "a" {
+		t.Fatalf("want the address removed: %+v", p.Entries)
+	}
+}

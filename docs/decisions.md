@@ -3136,7 +3136,13 @@ own.
   that zone, there is no DMARC policy there, every zone delegated from it is
   held by the provider, and no name in those zones has mail and no policy of
   its own. A name has mail when it holds an MX record other than the null MX,
-  an SPF record naming a sender, or a DKIM key at a selector under it.
+  an SPF record naming a sender, or a DKIM key at a selector under it, or
+  when the configuration names a sender there. The registrable domain never
+  has a policy of its own, and neither does a hostname whose policy the new
+  one would cover.
+* A policy there covers only when it is the only one there and rejects. More
+  than one, or a CNAME delegating the policy to a DMARC service, is a note
+  and covers nothing.
 * Where the registrable domain's policy rejects, whoever wrote it, no
   hostname gets `_dmarc.<hostname>` and `community.domain` gets no
   `_dmarc.<community.domain>`; `dns prune` removes the ones this deployment's
@@ -3187,6 +3193,9 @@ every name that gets an address record also got `v=spf1 -all`.
   and none once it does.
 * `dns prune` removes the hostnames' SPF records and covered DMARC policies
   this deployment's `dns init` made, as records nothing wants.
+* `dns init` still reads each hostname's SPF record, and one that lets a
+  server send is a conflict, as before: the hostname has mail nobody listed,
+  and the DMARC policy covering it would reject that mail.
 
 ### Why
 

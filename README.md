@@ -3923,25 +3923,32 @@ that policy only where it changes nothing for anybody's mail. It creates
   policy of its own. A name has mail when it holds an MX record other than
   the null MX, an SPF record naming a sender, or a DKIM key at a selector
   under it. A sender `dns init` gives a policy in the same run (see below)
-  has one of its own;
+  has one of its own; a hostname whose own policy the registrable domain's
+  would cover does not, since that policy is then never written. The domain
+  itself never has one of its own: the policy written there is its;
+* no sender the configuration names under the registrable domain (see
+  *A name with mail of its own* below) lacks a DMARC policy of its own, even
+  one whose mail's DNS is not there yet;
 * every zone delegated from it is held by the DNS provider, so nothing under
   the domain is out of sight.
 
 A policy there that rejects (`p=reject`, `sp=reject`, no `pct` below 100),
-whoever wrote it, covers the hostnames, and `dns init` writes no
+whoever wrote it, and is the only one there, covers the hostnames, and `dns init` writes no
 `_dmarc.<hostname>` and no `_dmarc.<community.domain>`. A policy that is
 weaker, or a missing one that `dns init` cannot write, is a `!` note naming
-what stops it, and each hostname carries its own policy instead. The policy
+what stops it, and each hostname carries its own policy instead. So is more
+than one policy there, which a receiver applies none of, and a CNAME
+delegating the policy to a DMARC service, which `dns init` does not follow. The policy
 `dns init` wrote is a `!` note too once a name under the domain has mail and
 no policy of its own, since that mail is rejected under it: give that name
 its own policy, or delete this one by hand. A registrable domain the DNS
 provider does not hold is not read.
 
-For `talk.paisans.community` with `community.domain: paisans.community`, and
-`talk.test.paisans.community` with `community.domain: test.paisans.community`,
-the whole tree's no-mail DMARC is `_dmarc.paisans.community`. A relay's
-sending name, such as a Brevo domain at `send.paisans.community`, keeps the
-policy at its own `_dmarc`, which a receiver reads first.
+For `talk.example.org` with `community.domain: example.org`, and
+`talk.staging.example.org` with `community.domain: staging.example.org`, the
+whole tree's no-mail DMARC is `_dmarc.example.org`. A relay's sending name,
+such as `send.example.org`, keeps the policy at its own `_dmarc`, which a
+receiver reads first.
 
 **A name with mail of its own gets none of them.** Some communities run mail
 at their domain through a hosted service (Eg: Google Workspace, Fastmail or
@@ -3977,7 +3984,9 @@ alone and stops nothing. A record of the same kind that says something else
 is a conflict, and so is a second SPF record, since a receiver treats two as an
 error and ignores both. A DMARC policy is compared by what it makes a receiver
 do, so one that adds a reporting address to `p=reject` is present, not a
-conflict. An SPF record that lets a server send, or an MX that receives, is the
+conflict. At a hostname, `dns init` writes no SPF record but reads the one
+there: one that lets a server send is a conflict, since the hostname has mail
+nobody listed and the DMARC policy covering it would reject that mail. An SPF record that lets a server send, or an MX that receives, is the
 likeliest conflict, and it says which line to add: the name has mail, and
 belongs in `community.mail_domains`.
 

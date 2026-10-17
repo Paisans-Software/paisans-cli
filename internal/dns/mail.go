@@ -194,11 +194,15 @@ func mailWants(cfg *config.Config, addresses []Want) []Want {
 		if name == domain {
 			continue
 		}
+		// A hostname with mail nobody listed would have it rejected by the
+		// policy that covers it, so an SPF record there naming a sender
+		// stops the run.
+		out = append(out, Want{Type: "TXT", Name: name, Content: spfLockdown, Sources: hosts[name], Guard: true})
 		org := orgDomain(name)
 		switch {
 		case org == "":
 		case org == name:
-			out = append(out, Want{Type: "TXT", Name: name, Content: spfLockdown, Sources: hosts[name]})
+			out[len(out)-1].Guard = false
 		case org == domain && !domainMail:
 		default:
 			w := Want{Type: "TXT", Name: "_dmarc." + name, Content: dmarcLockdown, Sources: hosts[name]}
@@ -210,7 +214,14 @@ func mailWants(cfg *config.Config, addresses []Want) []Want {
 	}
 	source := []string{"community.domain"}
 	if parent != "" {
-		out = append(out, Want{Type: "TXT", Name: "_dmarc." + parent, Content: dmarcLockdown, Sources: source, Advisory: true, Parent: true})
+		var senders []string
+		for name := range mail {
+			if orgDomain(name) == parent {
+				senders = append(senders, name)
+			}
+		}
+		sort.Strings(senders)
+		out = append(out, Want{Type: "TXT", Name: "_dmarc." + parent, Content: dmarcLockdown, Sources: source, Advisory: true, Parent: true, Senders: senders})
 	}
 	if sources, ok := mail[domain]; ok {
 		out = append(out, Want{Type: "TXT", Name: dmarc, Content: dmarcLockdown, Sources: sources, Advisory: true})
@@ -229,6 +240,42 @@ func mailWants(cfg *config.Config, addresses []Want) []Want {
 	return out
 }
 
+// noPolicy reports whether records hold no DMARC policy at all: none of
+// them says DMARC, and none is a CNAME delegating the policy elsewhere.
+func noPolicy(records []Record) bool {
+	for _, r := range records {
+		if strings.EqualFold(r.Type, "CNAME") {
+			return false
+		}
+	}
+	return !hasDMARC(records)
+}
+
+// oneRejecting reports whether records hold exactly one DMARC policy, and it
+// rejects. A receiver applies none where a name holds more than one.
+func oneRejecting(records []Record) bool {
+	n := 0
+	for _, r := range records {
+		if competes(purposeDMARC, r) {
+			if !satisfies(purposeDMARC, r) {
+				return false
+			}
+			n++
+		}
+	}
+	return n == 1
+}
+
+// guard is classify for a Guard want.
+func guard(w Want, records []Record) (Action, string) {
+	for _, r := range records {
+		if strings.EqualFold(r.Type, "TXT") && competes(purposeSPF, r) && !satisfies(purposeSPF, r) {
+			return Conflict, mailConflict(purposeSPF, w, r)
+		}
+	}
+	return Clear, ""
+}
+
 // hasDMARC reports whether any of records says DMARC.
 func hasDMARC(records []Record) bool {
 	for _, r := range records {
@@ -240,13 +287,15 @@ func hasDMARC(records []Record) bool {
 }
 
 // parentHazards lists what in the registrable domain's zone z, and in every
-// zone delegated from it, has mail that a policy written at the domain would
+// zone delegated from it, has mail that w, the policy at the domain, would
 // govern: a name with no DMARC policy of its own that receives mail (an MX
 // other than the null MX), names senders in its SPF record, or publishes a
-// DKIM key. own are names that will hold a policy this run creates. A zone
-// delegated to nameservers the provider does not show is a hazard too:
-// nothing says what mail its names have.
-func parentHazards(ctx context.Context, provider Provider, z zone, own map[string]bool) ([]string, error) {
+// DKIM key, and a sender the configuration names (w.Senders) with no policy
+// of its own. own are names that will hold a policy this run creates. The
+// domain itself never has a policy of its own: w is it. A zone delegated to
+// nameservers the provider does not show is a hazard too: nothing says what
+// mail its names have.
+func parentHazards(ctx context.Context, provider Provider, z zone, w Want, own map[string]bool) ([]string, error) {
 	var records []Record
 	queue := []zone{z}
 	seen := map[string]bool{z.name: true}
@@ -283,8 +332,14 @@ func parentHazards(ctx context.Context, provider Provider, z zone, own map[strin
 	}
 	for _, r := range records {
 		name := normalise(r.Name)
-		if strings.HasPrefix(name, "_dmarc.") && competes(purposeDMARC, r) {
+		if strings.HasPrefix(name, "_dmarc.") && (competes(purposeDMARC, r) || strings.EqualFold(r.Type, "CNAME")) {
 			policy[strings.TrimPrefix(name, "_dmarc.")] = true
+		}
+	}
+	delete(policy, strings.TrimPrefix(w.Name, "_dmarc."))
+	for _, name := range w.Senders {
+		if !policy[name] {
+			hazards = append(hazards, fmt.Sprintf("%s, a sender this configuration names", name))
 		}
 	}
 	for _, r := range records {
@@ -322,16 +377,6 @@ func parentHeld(w Want, hazards []string) string {
 func parentGoverns(w Want, hazards []string) string {
 	return fmt.Sprintf("the DMARC policy at %s is the one this deployment's dns init wrote, when nothing under %s had mail. These have mail and no policy of their own, so a receiver rejects their mail under it: %s. Give each its own DMARC policy, or delete this one by hand and run dns init again, which then gives each hostname this deployment publishes its own.",
 		w.Name, strings.TrimPrefix(w.Name, "_dmarc."), strings.Join(hazards, "; "))
-}
-
-// satisfiesAll reports whether every DMARC policy among records rejects.
-func satisfiesAll(records []Record) bool {
-	for _, r := range records {
-		if competes(purposeDMARC, r) && !satisfies(purposeDMARC, r) {
-			return false
-		}
-	}
-	return true
 }
 
 // orgDomain is a name's registrable domain under the public suffix list,
@@ -477,13 +522,8 @@ func isRoot(target string) bool {
 // write: nothing at its name says DMARC, and the domain it covers, whose
 // records are at, holds no MX record.
 func sendOnly(w Want, records, at []Record) bool {
-	if !w.Advisory || w.Parent || wantPurpose(w) != purposeDMARC {
+	if !w.Advisory || w.Parent || wantPurpose(w) != purposeDMARC || !noPolicy(records) {
 		return false
-	}
-	for _, r := range records {
-		if competes(purposeDMARC, r) {
-			return false
-		}
 	}
 	for _, r := range at {
 		if strings.EqualFold(r.Type, "MX") {
@@ -499,6 +539,9 @@ func classifyMail(w Want, records []Record) (Action, string) {
 	var same []Record
 	for _, r := range records {
 		if strings.EqualFold(r.Type, "CNAME") {
+			if w.Advisory && p == purposeDMARC {
+				return Warn, fmt.Sprintf("%s delegates its DMARC policy by a CNAME to %s, which this does not follow, so nothing here says whether it rejects. Every hostname under it that relies on that policy carries its own.", strings.TrimPrefix(w.Name, "_dmarc."), r.Content)
+			}
 			return Conflict, fmt.Sprintf("a CNAME to %s already exists at this name. A name with a CNAME can hold no other record, and this never removes one it did not create.", r.Content)
 		}
 		if competes(p, r) {
@@ -506,6 +549,13 @@ func classifyMail(w Want, records []Record) (Action, string) {
 		}
 	}
 	missing := len(same) == 0
+	if p == purposeDMARC && len(same) > 1 {
+		detail := fmt.Sprintf("%d DMARC policies exist at this name. A receiver applies none where there is more than one; remove all but one by hand.", len(same))
+		if w.Advisory {
+			return Warn, detail
+		}
+		return Conflict, detail
+	}
 	for _, r := range same {
 		if !satisfies(p, r) {
 			if w.Parent {
