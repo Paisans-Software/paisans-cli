@@ -383,6 +383,9 @@ func (j *judgement) shape(sha string) string {
 	if !v.Signed {
 		return "it has no good signature from a known key (shape)"
 	}
+	if !v.BuildOK {
+		return "it does not say which build of paisans published it; publish the configuration again (shape)"
+	}
 	want := 1
 	for _, p := range v.Parents {
 		pv, held := j.g.Versions[p]

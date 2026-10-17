@@ -18,6 +18,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 // storeHost answers the commands configstore.Pull runs with a fixed bundle,
@@ -627,6 +628,9 @@ func TestConfigRollbackIsReportedWithoutAsking(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), shas[1][:12]) || !strings.Contains(out.String(), shas[0][:12]) {
 		t.Errorf("log did not list the versions:\n%s", out.String())
+	}
+	if want := "  by paisans " + version.Current().String() + "  "; strings.Count(out.String(), want) != 2 {
+		t.Errorf("log does not name the build that published each version, %q:\n%s", want, out.String())
 	}
 	rep.Reset()
 	if err := runConfig([]string{"pull", "--config", cfgPath}, noTerminalStdin(), &out); err != nil {

@@ -761,7 +761,13 @@ func runConfigLog(args []string, stdin io.Reader, stdout io.Writer) error {
 		if holders == "" {
 			holders = "no site that answered"
 		}
-		fmt.Fprintf(stdout, "%d  %s  %s  %s  %s  held by %s\n", v.Revision, sha[:12], who, v.Committed.Format(time.RFC3339), state, holders)
+		// A version that does not say which build published it is not
+		// trusted, and its state says so.
+		by := ""
+		if v.BuildOK {
+			by = "  by paisans " + v.Build.String()
+		}
+		fmt.Fprintf(stdout, "%d  %s  %s  %s%s  %s  held by %s\n", v.Revision, sha[:12], who, v.Committed.Format(time.RFC3339), by, state, holders)
 	}
 	if len(shas) == 0 {
 		r.Result("no site holds a version yet")

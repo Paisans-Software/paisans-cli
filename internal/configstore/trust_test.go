@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 type fake struct {
@@ -19,7 +21,7 @@ func newFake() *fake {
 
 // add records a version listing the given operators, each by the key "fp-<name>".
 func (f *fake) add(sha string, rev int, signer string, parents []string, operators ...string) {
-	f.vs[sha] = Version{SHA: sha, Parents: parents, Revision: rev, Signed: true, SignerFP: signer, TreeOK: true}
+	f.vs[sha] = Version{SHA: sha, Parents: parents, Revision: rev, Signed: true, SignerFP: signer, TreeOK: true, Build: version.Current(), BuildOK: true}
 	m := map[string]string{}
 	for _, n := range operators {
 		m["fp-"+n] = n
@@ -297,6 +299,7 @@ func TestJudgeShape(t *testing.T) {
 		"revision": func(v *Version) { v.Revision = 5 },
 		"unsigned": func(v *Version) { v.Signed = false },
 		"tree":     func(v *Version) { v.TreeOK = false },
+		"no build": func(v *Version) { v.BuildOK = false },
 	} {
 		f := chain()
 		f.add("v4", 4, "fp-alice", on("v3"), "alice")
