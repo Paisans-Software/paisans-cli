@@ -118,7 +118,7 @@ paisans validate --offline   # the file alone; no site is reached
 ### `paisans create`
 
 Asks about a new deployment at a terminal (the community and its domain, the
-DNS provider, the operators, at least two of them, how many machines and what
+DNS provider, the operators, one or more and two recommended, how many machines and what
 each does, the apps, who manages accounts, and the mail server) and writes a commented `paisans-stack.yaml` from the answers. The
 file is checked as `validate` checks it before it is shown; a refusal offers
 the questions it came from again, and nothing is written until the file is

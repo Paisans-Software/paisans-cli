@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
@@ -15,7 +16,8 @@ import (
 // nobody able to, which is a risk rather than an incoherence: a deployment
 // being rolled out, or a small community, may have one operator for a while.
 // So it is a warning, and the operator reconciler fails the operators
-// heartbeat while only one is declared. An operator counts only with a key on
+// heartbeat while only one is declared, which the monitor shows when there is
+// one. An operator counts only with a key on
 // every site that runs a pocket-id app, since running the deployment means
 // reaching each of them; a deployment with no pocket-id app is not held to it.
 func (c *checker) operatorsFewerThanTwo() {
@@ -53,13 +55,25 @@ func (c *checker) operatorsFewerThanTwo() {
 		return
 	}
 	// The reconciler counts the operators declared, not those on these
-	// sites, so it fails the heartbeat only when one is declared.
+	// sites, so it fails the heartbeat only when one is declared, and the
+	// heartbeat is pushed only to an uptime app.
 	heartbeat := ""
-	if len(c.cfg.Operators) < 2 {
+	if len(c.cfg.Operators) < 2 && c.hasMonitor() {
 		heartbeat = " The operators heartbeat fails until there is a second."
 	}
 	c.warn("operators-fewer-than-two", "operators",
 		"only one operator can reach the identity provider",
 		"has only %s with a key on every site that runs Pocket ID (%s). One lost workstation would leave nobody able to run the deployment.%s Declare a second operator, and name both in ssh.keys on each of those sites.",
 		counted[0], strings.Join(sites, ", "), heartbeat)
+}
+
+// hasMonitor is whether an uptime app exists to receive the operators
+// heartbeat.
+func (c *checker) hasMonitor() bool {
+	for _, app := range c.cfg.Apps {
+		if app.Blueprint == config.BlueprintUptime {
+			return true
+		}
+	}
+	return false
 }

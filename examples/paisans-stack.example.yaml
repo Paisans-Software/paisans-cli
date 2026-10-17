@@ -57,9 +57,9 @@ acme:
   # image: ghcr.io/example-org/caddy-route53:2.11.4
 
 # The operators: the people who run the machines. They log in to the sites,
-# hold the secrets and run apply. validate wants at least two whose keys are on
-# every site that runs Pocket ID, so one lost workstation does not leave
-# nobody able to run the deployment. apply makes each a Pocket ID user in
+# hold the secrets and run apply. validate refuses none whose keys are on every
+# site that runs Pocket ID and warns about one, since one lost workstation
+# would leave nobody able to run the deployment. apply makes each a Pocket ID user in
 # operators, members and every app's member and admin group, so every operator
 # is a community admin as well. Each site's ssh.keys names some of them, and
 # host prepare makes every key they list an authorized key there, so an

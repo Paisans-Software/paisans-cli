@@ -61,3 +61,30 @@ func TestOperatorsWithoutPocketID(t *testing.T) {
 		t.Errorf("held a deployment with no Pocket ID app to the operators rule: %v", r.Findings)
 	}
 }
+
+// Without an uptime app nothing receives the operators heartbeat, so the
+// warning does not mention it.
+func TestOneOperatorWithoutAMonitorLeavesOutTheHeartbeat(t *testing.T) {
+	cfg := load(t, "operators-fewer-than-two")
+	for name, app := range cfg.Apps {
+		if app.Blueprint == config.BlueprintUptime {
+			delete(cfg.Apps, name)
+		}
+	}
+	if msg := operatorsWarning(t, validate.Check(cfg)); strings.Contains(msg, "heartbeat") {
+		t.Errorf("message = %q, want no heartbeat without a monitor", msg)
+	}
+}
+
+// No operator declared at all is refused, as none reaching the sites is.
+func TestNoOperatorDeclaredIsRefused(t *testing.T) {
+	cfg := load(t, "valid")
+	cfg.Operators = nil
+	for name, site := range cfg.Sites {
+		site.SSH.Operators = nil
+		cfg.Sites[name] = site
+	}
+	if got := findings(validate.Check(cfg), "operators-none"); len(got) != 1 || got[0] != "REFUSE operators" {
+		t.Errorf("operators-none = %v, want one refusal of operators", got)
+	}
+}

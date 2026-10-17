@@ -159,6 +159,27 @@ func TestOneOperatorIsAccepted(t *testing.T) {
 	}
 }
 
+// Enter after the first operator adds a second, since two is what a
+// deployment should have.
+func TestEnterAfterTheFirstOperatorAddsASecond(t *testing.T) {
+	var lines []string
+	lines = append(lines, communityAnswers...)
+	lines = append(lines, adminAnswers...)
+	lines = append(lines, shapeAnswers[ShapeOneMachine]...)
+	lines = append(lines, appAnswers(false)...)
+	lines = append(lines, mailAnswers...)
+	w, out, err := run(t, script(lines...))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if len(w.Answers.Operators) != 2 {
+		t.Errorf("operators = %v, want alice and bob", w.Answers.Operators)
+	}
+	if !strings.Contains(out, "Add another operator? [Y/n]") {
+		t.Errorf("the question after the first operator does not default to yes:\n%s", out)
+	}
+}
+
 // A named shape's machine is introduced by what it does, so the name prompt
 // does not read as a question about its roles.
 func TestNamedShapeSaysWhatEachMachineDoes(t *testing.T) {
