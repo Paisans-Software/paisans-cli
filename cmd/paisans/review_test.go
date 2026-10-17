@@ -431,14 +431,20 @@ func TestAStepChecksTheRunsApproval(t *testing.T) {
 // dials the others directly.
 func joinConfig(t *testing.T) string {
 	t.Helper()
+	return joinConfigAs(t, "[data]")
+}
+
+// joinConfigAs is joinConfig with home-b declared with roles.
+func joinConfigAs(t *testing.T, roles string) string {
+	t.Helper()
 	body, err := os.ReadFile(fixtureConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := strings.Replace(string(body), "    endpoint: vm.example.org:51820\n", "    endpoint: vm.example.org:51820\n    public_address: 203.0.113.10\n", 1)
 	s = strings.Replace(s, "  home-a:\n    roles: [data, apps]\n", "  home-a:\n    roles: [data, apps]\n    endpoint: 192.0.2.1:51820\n", 1)
-	joined := strings.Replace(s, "  home-b:\n    roles: [data, apps]", "  home-b:\n    roles: [data]", 1)
-	if joined == s {
+	joined := strings.Replace(s, "  home-b:\n    roles: [data, apps]", "  home-b:\n    roles: "+roles, 1)
+	if !strings.Contains(joined, "  home-b:\n    roles: "+roles+"\n") {
 		t.Fatal("the fixture no longer declares the sites this edit expects")
 	}
 	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
@@ -472,6 +478,150 @@ func TestSiteAddReviewsBeforeTheAdmissionCheck(t *testing.T) {
 	_ = runSiteAdd([]string{"home-b", "--config", path, "--secrets", mustAbs(t, fixtureSecretsPath())}, noTerminalStdin(), io.Discard)
 	if !rec.Has("pending", "review what paisans-stack.yaml grants") {
 		t.Errorf("the dry run does not show the review:\n%s", rec.Lines())
+	}
+}
+
+// A site declared [data, apps] is joined by apply with no --site, which
+// starts its apps with an apply of its own once the join is done. site add
+// alone refuses it, since its stages start no app stacks; as a step of
+// apply, it joins the site's data role and leaves the apps to that apply.
+func TestSiteAddJoinsTheDataRoleAsAStepOfApply(t *testing.T) {
+	path := joinConfigAs(t, "[data, apps]")
+	quietSSH(t)
+	fakeGrants(t, func(string) *grant.Record { return nil })
+	args := []string{"home-b", "--config", path, "--secrets", mustAbs(t, fixtureSecretsPath())}
+	rec := recordConverge(t)
+	err := runSiteAdd(args, noTerminalStdin(), io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "must be exactly [data]") {
+		t.Fatalf("site add alone: %v\n%s", err, rec.Lines())
+	}
+
+	saved := reviewedByRun
+	t.Cleanup(func() { reviewedByRun = saved })
+	reviewedByRun = &runReview{}
+	// The fake hosts run no etcd, so the join stops reading them, where the
+	// same join of a site declared [data] stops.
+	errText := func(err error) string {
+		if err == nil {
+			return ""
+		}
+		return err.Error()
+	}
+	asData := errText(runSiteAdd([]string{"home-b", "--config", joinConfig(t), "--secrets", mustAbs(t, fixtureSecretsPath())}, noTerminalStdin(), io.Discard))
+	rec = recordConverge(t)
+	got := errText(runSiteAdd(args, noTerminalStdin(), io.Discard))
+	if strings.Contains(got, "must be exactly [data]") || got != asData {
+		t.Errorf("as a step of apply: %s\nwant, as [data]: %s\n%s", got, asData, rec.Lines())
+	}
+}
+
+// A run that stops after its review recorded the approvals, and before
+// home-b joins, is run again: its review finds every entry approved on the
+// host and asks nothing. site add then records only the images the join
+// started, keeping the approvals for the rest of home-b's grant, so the
+// apply that follows the join starts them without a refusal. HAProxy, which
+// only the apps role puts on a data site, is one of them when infra.images
+// overrides it.
+func TestAResumedJoinKeepsTheApprovalsForItsApps(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		haproxy string
+	}{
+		{"foundation infra", ""},
+		{"haproxy overridden", "docker.io/library/haproxy:9.9"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			full := fixture(t)
+			if c.haproxy != "" {
+				full.Infra.Images = map[string]string{"haproxy": c.haproxy}
+			}
+			resumeJoin(t, full)
+		})
+	}
+}
+
+// resumeJoin is a resumed run's join of home-b, declared [data, apps] in
+// full, through site add's review and record and then apply --site's
+// review, which fails t if it refuses.
+func resumeJoin(t *testing.T, full *config.Config) {
+	t.Helper()
+	fakeGrants(t, func(string) *grant.Record { return nil })
+	secrets, err := config.LoadSecrets(fixtureSecretsPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	granted := func(cfg *config.Config) grant.Grant {
+		t.Helper()
+		plan, err := render.Build(cfg, secrets)
+		if err != nil {
+			t.Fatal(err)
+		}
+		g, err := grant.For(cfg, plan, "home-b")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return g
+	}
+	d := full.Deployment()
+	review := func(cfg *config.Config, scope grant.Scope) *siteReview {
+		t.Helper()
+		s, err := reviewSite(d, "home-b", granted(cfg), scope, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	// The first run's review, approved and recorded.
+	if err := recordApproval(ui.Discard, review(full, grant.AllScope), d, "alice"); err != nil {
+		t.Fatal(err)
+	}
+	// The run again: nothing is asked.
+	again := review(full, grant.AllScope)
+	if n := again.review.Pending(); n != 0 {
+		t.Fatalf("the resumed run asks for %d entries", n)
+	}
+	saved := reviewedByRun
+	t.Cleanup(func() { reviewedByRun = saved })
+	reviewedByRun = &runReview{approved: map[string]grant.Review{"home-b": again.review}}
+
+	joined := joinedAsData(full, "home-b")
+	g := granted(joined)
+	scope, err := siteAddScope(joined, "home-b", g, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, by, err := stepReview(ui.Discard, answerer{}, noTerminalStdin(), io.Discard, joined, "home-b", g, scope, nil, true, "paisans site add home-b --execute")
+	if err != nil {
+		t.Fatalf("site add: %s", problemText(err))
+	}
+	if err := recordGrant(ui.Discard, s, d, by); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := stepReview(ui.Discard, answerer{}, noTerminalStdin(), io.Discard, full, "home-b", granted(full), grant.ApplyScope(), nil, true, "paisans apply --site home-b --execute"); err != nil {
+		t.Errorf("apply --site home-b after the join: %s", problemText(err))
+	}
+}
+
+// The join's configuration gives the joining site the data role alone and
+// leaves the declaration as it was read.
+func TestJoinedAsDataLeavesTheDeclaration(t *testing.T) {
+	cfg := fixture(t)
+	joined := joinedAsData(cfg, "home-b")
+	if got := joined.Sites["home-b"].Roles; !slices.Equal(got, []config.Role{config.RoleData}) {
+		t.Errorf("joined as %v", got)
+	}
+	if got := cfg.Sites["home-b"].Roles; !slices.Equal(got, []config.Role{config.RoleData, config.RoleApps}) {
+		t.Errorf("the declaration changed to %v", got)
+	}
+	if pinned := cfg.PinnedTo("home-b"); len(pinned) == 0 {
+		t.Fatal("the fixture pins no app to home-b")
+	} else if left := joined.PinnedTo("home-b"); len(left) > 0 {
+		t.Errorf("the join starts %v, pinned to home-b", left)
+	} else if _, ok := cfg.Apps[pinned[0]]; !ok {
+		t.Errorf("the declaration lost %s", pinned[0])
+	}
+	if got := joinedAsData(cfg, "vm"); got != cfg {
+		t.Errorf("a site without [data, apps] was changed")
 	}
 }
 

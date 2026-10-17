@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
@@ -124,6 +125,15 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	if cfg, err = recordArchitectures(r, *configPath, cfg, read, *execute && reviewedByRun == nil); err != nil {
 		return err
 	}
+	// As a step of apply with no --site, a site declared [data, apps] joins
+	// as [data], without its pinned apps: the run applies it once the join
+	// is done, which starts its apps, and applies the gateway after that.
+	// The review and the record cover what the join starts, so the run's
+	// approvals for the apps stay recorded until that apply.
+	declared := cfg
+	if reviewedByRun != nil {
+		cfg = joinedAsData(cfg, site)
+	}
 	// Stage 4 pulls the new site's images only after the mesh, HAProxy and
 	// etcd have changed on every site, so an image with no build for its
 	// architecture is refused here, before anything changes.
@@ -152,7 +162,11 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	review, approvedBy, err := stepReview(r, ans, stdin, stdout, cfg, site, g, grant.Scope{Images: true}, transports[site], *execute, "paisans site add "+site+" --execute")
+	scope, err := siteAddScope(cfg, site, g, cfg != declared)
+	if err != nil {
+		return err
+	}
+	review, approvedBy, err := stepReview(r, ans, stdin, stdout, cfg, site, g, scope, transports[site], *execute, "paisans site add "+site+" --execute")
 	if err != nil {
 		return err
 	}
@@ -201,4 +215,53 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	reportOwedApplies(r, plan.Owed)
 	r.Result("%s joined: every gate passed.", site)
 	return nil
+}
+
+// joinedAsData is cfg with site, declared [data, apps], given the data role
+// alone and without the apps pinned to it, the configuration site add joins
+// it with as a step of apply with no --site. site add's stages start no app
+// stacks; the run's apply of the site that follows the join starts them, and
+// the gateway's apply after it routes to them. Any other site leaves cfg as
+// it is. cfg is not changed.
+func joinedAsData(cfg *config.Config, site string) *config.Config {
+	s, ok := cfg.Sites[site]
+	if !ok || len(s.Roles) != 2 || !s.Has(config.RoleData) || !s.Has(config.RoleApps) {
+		return cfg
+	}
+	joined := *cfg
+	joined.Sites = make(map[string]config.Site, len(cfg.Sites))
+	for name, other := range cfg.Sites {
+		joined.Sites[name] = other
+	}
+	s.Roles = []config.Role{config.RoleData}
+	joined.Sites[site] = s
+	pinned := cfg.PinnedTo(site)
+	joined.Apps = make(map[string]config.App, len(cfg.Apps))
+	for name, app := range cfg.Apps {
+		if !slices.Contains(pinned, name) {
+			joined.Apps[name] = app
+		}
+	}
+	return &joined
+}
+
+// siteAddScope is what site add reviews and records on site: every image of
+// its render, or, for a site joinedAsData narrowed, exactly the images and
+// blueprints of g, the narrowed render's grant. The approvals the run
+// recorded for the rest of the site's grant, its apps and the infrastructure
+// services only the apps role adds, are then kept until the apply that
+// starts them.
+func siteAddScope(cfg *config.Config, site string, g grant.Grant, narrowed bool) (grant.Scope, error) {
+	if !narrowed {
+		return grant.Scope{Images: true}, nil
+	}
+	stacks, err := render.SiteStacks(cfg, site)
+	if err != nil {
+		return grant.Scope{}, err
+	}
+	services := []string{}
+	for _, i := range g.Images {
+		services = append(services, i.Stack+"/"+i.Service)
+	}
+	return grant.Scope{Images: true, Stacks: stacks, Services: services}, nil
 }

@@ -224,6 +224,11 @@ type Scope struct {
 	// Stacks, when set, narrows the images to these stacks, as apply --only
 	// does: a stack the run leaves alone is neither reviewed nor recorded.
 	Stacks []string
+	// Services, when set, narrows the images further to these, each
+	// "<stack>/<service>": a command that starts only some of a stack's
+	// services reviews and records those alone, and the approvals for the
+	// rest stay for the command that starts them.
+	Services []string
 }
 
 // holds reports whether rec holds any part s covers.
@@ -246,6 +251,11 @@ func (s Scope) stack(name string) bool {
 	return len(s.Stacks) == 0 || slices.Contains(s.Stacks, name)
 }
 
+// image reports whether s covers the image of service in stack.
+func (s Scope) image(stack, service string) bool {
+	return s.stack(stack) && (len(s.Services) == 0 || slices.Contains(s.Services, stack+"/"+service))
+}
+
 // covers reports whether subject, a review change's, is in a part s
 // covers.
 func (s Scope) covers(subject string) bool {
@@ -254,8 +264,8 @@ func (s Scope) covers(subject string) bool {
 	case "login", "key":
 		return s.Keys
 	case "image":
-		stack, _, _ := strings.Cut(rest, "/")
-		return s.Images && s.stack(stack)
+		stack, service, _ := strings.Cut(rest, "/")
+		return s.Images && s.image(stack, service)
 	case "blueprint":
 		return s.Images && s.stack(rest)
 	}
@@ -339,7 +349,7 @@ func (s Scope) blueprints(list []Blueprint) []Blueprint {
 func (s Scope) images(list []Image) []Image {
 	var out []Image
 	for _, i := range list {
-		if s.stack(i.Stack) {
+		if s.image(i.Stack, i.Service) {
 			out = append(out, i)
 		}
 	}
@@ -376,7 +386,7 @@ func Update(rec Record, g Grant, s Scope, now time.Time, approvedBy string) Reco
 		var kept []Image
 		if rec.Images != nil {
 			for _, i := range rec.Images.Entries {
-				if !s.stack(i.Stack) {
+				if !s.image(i.Stack, i.Service) {
 					kept = append(kept, i)
 				}
 			}
