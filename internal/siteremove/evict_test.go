@@ -484,7 +484,7 @@ func TestAnEvictionSaysWhenSudoRefusesTheHelper(t *testing.T) {
 	w, zone := evictWorld(t, "home-b")
 	w.failOnce, w.failOut = "show latest-handshakes", "sudo: a password is required\n"
 	err := siteremove.Execute(w.mustBuild("home-b", evictOptions(zone)))
-	if !errors.Is(err, apply.ErrHelperRefused) || !strings.Contains(err.Error(), "could not be run on home-a") || !strings.Contains(err.Error(), "host admit") {
+	if !errors.Is(err, apply.ErrHelperRefused) || !strings.Contains(err.Error(), "could not be run on home-a") || !strings.Contains(err.Error(), "site admit") {
 		t.Fatalf("want the helper's sudo refusal as the owner's problem, got %v", err)
 	}
 }

@@ -169,7 +169,7 @@ func TestHostGoneSkipsTheHost(t *testing.T) {
 		t.Error("its member key is still in etcd")
 	}
 	remains := strings.Join(p.Remains(), "\n")
-	if !strings.Contains(remains, "--host-gone") || !strings.Contains(remains, "sudo paisans host evict --deployment "+ourID) {
+	if !strings.Contains(remains, "--host-gone") || !strings.Contains(remains, "sudo paisans site evict --deployment "+ourID) {
 		t.Errorf("the report does not say what is left:\n%s", remains)
 	}
 }

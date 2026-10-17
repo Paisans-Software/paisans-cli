@@ -203,14 +203,14 @@ func planWatchdog(t Transport, d deployment.Deployment, profile Profile, site co
 	return out, nil
 }
 
-// admitWatchdog is what fixes the watchdog on site when host prepare finds
+// admitWatchdog is what fixes the watchdog on site when site prepare finds
 // it wrong: it is a root change, the host owner's.
 func admitWatchdog(site string) string {
-	return fmt.Sprintf("The host's owner runs sudo paisans host admit --request %[1]s.admit --watchdog again, from paisans host request --site %[1]s > %[1]s.admit.", site)
+	return fmt.Sprintf("The host's owner runs sudo paisans site admit --request %[1]s.admit --watchdog again, from paisans site request --site %[1]s > %[1]s.admit.", site)
 }
 
 // checkWatchdog reads what a data site's watchdog is, as the deployment's
-// user: host admit loaded it and gave /dev/watchdog to the user. It plans
+// user: site admit loaded it and gave /dev/watchdog to the user. It plans
 // nothing; anything wrong refuses, naming what the owner runs for the site
 // called name.
 func checkWatchdog(t Transport, name string, site config.Site) (Section, error) {
@@ -243,7 +243,7 @@ func checkWatchdog(t Transport, name string, site config.Site) (Section, error) 
 		}
 	default:
 		if len(hardware) == 0 {
-			out.Warnings = append(out.Warnings, Warning{Hint: "watchdog: softdog", Detail: fmt.Sprintf(softdogWarning, "host admit")})
+			out.Warnings = append(out.Warnings, Warning{Hint: "watchdog: softdog", Detail: fmt.Sprintf(softdogWarning, "site admit")})
 		}
 	}
 	out.Present = append(out.Present, "watchdog: "+facts.describe()+", the deployment's user's")

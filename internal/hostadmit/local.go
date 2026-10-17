@@ -20,7 +20,7 @@ import (
 
 // Local is the transport for a command run on the host itself: each command
 // through sh -c on this machine, each file through the filesystem. It is how
-// host admit and host evict run from a request, by the owner, with no ssh.
+// site admit and site evict run from a request, by the owner, with no ssh.
 // It is reached only through this function, and only this package's
 // commands call it, so a mistyped flag on a workstation cannot run a host's
 // plan against the workstation.

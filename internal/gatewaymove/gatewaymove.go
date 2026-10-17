@@ -322,7 +322,7 @@ func Build(cfg *config.Config, secrets *config.Secrets, transports map[string]ap
 	} else {
 		p.Stages = append(p.Stages, p.stopStage())
 		p.Notes = append(p.Notes,
-			fmt.Sprintf("%s keeps 80 and 443 open until its next host prepare (or apply without --site) after the move, which removes them.", p.From),
+			fmt.Sprintf("%s keeps 80 and 443 open until its next site prepare (or apply without --site) after the move, which removes them.", p.From),
 			fmt.Sprintf("The old Caddy's files and certificates stay on %s, recorded as left over; the new gateway issued its own.", p.From),
 		)
 	}

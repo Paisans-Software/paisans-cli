@@ -154,16 +154,16 @@ func TestWrap(t *testing.T) {
 	}
 }
 
-// The host group prepares a host and lists what is on it; nothing in the
+// The site group prepares a host and lists what is on it; nothing in the
 // help offers a key allowlist.
-func TestHostHasNoAllowlistCommands(t *testing.T) {
-	for _, name := range []string{"host allow", "host disallow"} {
+func TestSiteHasNoAllowlistCommands(t *testing.T) {
+	for _, name := range []string{"site allow", "site disallow"} {
 		if findCommand(name) != nil {
 			t.Errorf("%s has a help page", name)
 		}
 	}
-	for what, text := range map[string]string{"the host group's summary": groupSummary["host"], "help execute": executeTopic} {
-		if strings.Contains(text, "allowlist") || strings.Contains(text, "host allow") {
+	for what, text := range map[string]string{"the site group's summary": groupSummary["site"], "help execute": executeTopic} {
+		if strings.Contains(text, "allowlist") || strings.Contains(text, "site allow") {
 			t.Errorf("%s still offers an allowlist:\n%s", what, text)
 		}
 	}

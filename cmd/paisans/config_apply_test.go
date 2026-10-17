@@ -265,7 +265,7 @@ func TestTheRecordHoldsTheVersionApplied(t *testing.T) {
 	}
 }
 
-// host prepare, as a step of apply without --site, records its keys and
+// site prepare, as a step of apply without --site, records its keys and
 // no configuration version: it applies none.
 func TestAPrepareStepRecordsNoVersion(t *testing.T) {
 	cfg := fixture(t)
@@ -369,7 +369,7 @@ func TestApplyStopsWhenNoSiteTakesTheVersion(t *testing.T) {
 }
 
 // apply --site on a deployment whose sites have no store yet refuses before
-// the first change, naming host prepare for each site.
+// the first change, naming site prepare for each site.
 func TestApplySiteWithNoStoreNamesHostPrepare(t *testing.T) {
 	f := newApplyStore(t, 0)
 	none := func() bool { return true }
@@ -381,8 +381,8 @@ func TestApplySiteWithNoStoreNamesHostPrepare(t *testing.T) {
 	err := f.applySite(t, noTerminalStdin(), "--execute")
 	text := problemText(err)
 	for _, site := range []string{"home-a", "home-b", "vm", "watch"} {
-		if err == nil || !strings.Contains(text, "paisans host prepare --site "+site+" --execute") {
-			t.Errorf("does not name host prepare for %s: %v", site, text)
+		if err == nil || !strings.Contains(text, "paisans site prepare --site "+site+" --execute") {
+			t.Errorf("does not name site prepare for %s: %v", site, text)
 		}
 	}
 	if checked(logged(t, log)) || f.pushed() {
@@ -391,7 +391,7 @@ func TestApplySiteWithNoStoreNamesHostPrepare(t *testing.T) {
 }
 
 // apply without --site on a deployment whose sites have no store yet
-// publishes once its host prepare steps have made them, before any other
+// publishes once its site prepare steps have made them, before any other
 // step, and goes on.
 func TestConvergePublishesAfterHostPrepare(t *testing.T) {
 	f := newApplyStore(t, 0)
@@ -424,7 +424,7 @@ func TestConvergePublishesAfterHostPrepare(t *testing.T) {
 	if !(prepare >= 0 && prepare < publish && publish < next) {
 		t.Errorf("order: prepare %d, publish %d, install %d\n%s", prepare, publish, next, rec.Lines())
 	}
-	if len(*ran) == 0 || !strings.HasPrefix((*ran)[0], "host prepare") {
+	if len(*ran) == 0 || !strings.HasPrefix((*ran)[0], "site prepare") {
 		t.Errorf("ran %q", *ran)
 	}
 }

@@ -7,7 +7,7 @@
 // The token is only four hex digits of a random id, so a collision is
 // unlikely and not impossible, and nothing about the id alone can see one.
 // The registry can: /var/lib/paisans/registry.json lists every deployment
-// that has claimed the host, by id, with its token and root, and host admit
+// that has claimed the host, by id, with its token and root, and site admit
 // claims it, as root, before it changes anything. A claim by an id whose token or root
 // is already another id's is refused, and the host is left as it was.
 //
@@ -134,7 +134,7 @@ type Registry struct {
 	Deployments map[string]Entry `json:"deployments"`
 }
 
-// ForRequest is the entry host admit claims a host with, from the request
+// ForRequest is the entry site admit claims a host with, from the request
 // alone, so a plan from a request and one from the configuration claim
 // alike. It carries the request's site and roles, and the release of this
 // paisans; Domain stays empty, since a request names no domain. A request
@@ -166,7 +166,7 @@ func ForRequest(req admission.Request, now time.Time) (string, Entry) {
 	}
 }
 
-// Refused is the refusal a claim of e meets for why, for host admit's
+// Refused is the refusal a claim of e meets for why, for site admit's
 // read-only check.
 func Refused(t Runner, e Entry, why error) error { return refused(t, e, why) }
 

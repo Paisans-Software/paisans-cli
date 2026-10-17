@@ -1,5 +1,5 @@
 // Package webserver helps put a monitor site's app behind the web server
-// the host's owner runs: which server it is (Detect, which host admit runs
+// the host's owner runs: which server it is (Detect, which site admit runs
 // as root and records), what that server must do, filled in for this
 // deployment (Show, and the reference files apply writes in the
 // deployment's own root), and whether it works, checked from the

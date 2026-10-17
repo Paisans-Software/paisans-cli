@@ -39,7 +39,7 @@ func TestUser(t *testing.T) {
 	}
 }
 
-// Every group host admit refuses fails here too: the two read one list.
+// Every group site admit refuses fails here too: the two read one list.
 func TestEveryPrivilegedGroupFails(t *testing.T) {
 	for _, g := range admitrules.PrivilegedGroups {
 		fs := User([]UserProbe{{Site: "home-a", Out: "uid 1001\nuser paisans-f2a9\ngroups paisans-f2a9 " + g + "\n"}})
@@ -124,7 +124,7 @@ func TestLinger(t *testing.T) {
 		t.Errorf("home-a order: level %v", f.Level)
 	}
 	b := find(t, findings, SectionLinger, "home-b: linger is off")
-	if b.Level != Fail || !strings.Contains(strings.Join(b.More, "\n"), "`paisans host admit`") {
+	if b.Level != Fail || !strings.Contains(strings.Join(b.More, "\n"), "`paisans site admit`") {
 		t.Errorf("home-b: %+v", b)
 	}
 	o := find(t, findings, SectionLinger, "home-b: its manager is not ordered after the mesh at boot")
@@ -136,7 +136,7 @@ func TestLinger(t *testing.T) {
 	}
 }
 
-// LingerCommand looks for the drop-in at host admit's own path.
+// LingerCommand looks for the drop-in at site admit's own path.
 func TestLingerCommandReadsAdmitsDropIn(t *testing.T) {
 	if !strings.Contains(LingerCommand, `"`+admitrules.MeshDropInPath("$(id -u)")+`"`) {
 		t.Errorf("LingerCommand: %s", LingerCommand)

@@ -91,7 +91,7 @@ func SyncMesh(plan *Plan, t Transport) error {
 // read first, since sudo can print a warning and still run the helper: it
 // names the line, and the usual cause is an endpoint port or mesh subnet
 // changed since the owner admitted the deployment; a refusal that says the
-// host is wrong is answered by the owner running host admit again. sudo
+// host is wrong is answered by the owner running site admit again. sudo
 // refusing to run the helper at all is a host that has not admitted this
 // deployment, or has lost the helper or its sudoers line.
 func helperProblem(site string, h WGHelper, err error) error {
@@ -101,7 +101,7 @@ func helperProblem(site string, h WGHelper, err error) error {
 	if line := refusedConf(text); line != "" {
 		advice := "The helper installs only what paisans renders, on the ListenPort and inside the mesh subnet the host's owner admitted. When the site's endpoint port or mesh.subnet has changed since, the owner admits the deployment again from a new request."
 		if hostRefusal(line) {
-			advice = "That is the host, not the mesh file: the host's owner runs `paisans host admit` again, which installs the helper and /etc/wireguard as the helper expects them, then apply again."
+			advice = "That is the host, not the mesh file: the host's owner runs `paisans site admit` again, which installs the helper and /etc/wireguard as the helper expects them, then apply again."
 		}
 		return &ui.Problem{
 			Hint:    "mesh: the WireGuard helper refused " + site + "'s mesh file",
@@ -174,7 +174,7 @@ func sudoAdvice(line string) string {
 	if strings.Contains(line, ttyRefusal) {
 		return "sudo on this host requires a terminal (requiretty), and apply has none: the host's owner removes that requirement for the helper, then apply again."
 	}
-	return "`paisans host admit` installs the helper and the one sudoers line that lets this deployment's user run it: the host's owner admits the deployment, then apply again."
+	return "`paisans site admit` installs the helper and the one sudoers line that lets this deployment's user run it: the host's owner admits the deployment, then apply again."
 }
 
 // sudoRefusals are what sudo prints when it will not run a command, as
@@ -191,7 +191,7 @@ var sudoRefusals = []string{
 }
 
 // ttyRefusal is what sudo prints when its requiretty option is set, which
-// host admit does not answer: the owner lifts it for the helper.
+// site admit does not answer: the owner lifts it for the helper.
 const ttyRefusal = "sorry, you must have a tty to run sudo"
 
 // sudoRefusal is the line sudo printed when it would not run the helper at
@@ -214,11 +214,11 @@ func sudoRefusal(out, path string) string {
 }
 
 // hostRefusals are the helper's refusals that say the host is wrong rather
-// than the file: what it installs into is not as host admit left it, or the
+// than the file: what it installs into is not as site admit left it, or the
 // helper itself was rendered wrong.
 var hostRefusals = []string{" is not a directory", " is a directory", " is not a directory only root may write"}
 
-// hostRefusal reports whether why, a refusal refusedConf read, is one host
+// hostRefusal reports whether why, a refusal refusedConf read, is one site
 // admit answers rather than a configuration change.
 func hostRefusal(why string) bool {
 	if why == "the helper was rendered with a bad subnet or port" {

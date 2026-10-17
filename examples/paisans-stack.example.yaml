@@ -62,7 +62,7 @@ acme:
 # would leave nobody able to run the deployment. apply makes each a Pocket ID user in
 # operators, members and every app's member and admin group, so every operator
 # is a community admin as well. Each site's ssh.keys names some of them, and
-# host prepare makes every key they list an authorized key there, so an
+# site prepare makes every key they list an authorized key there, so an
 # operator's keys are written once however many sites they reach. email is
 # required; name is optional.
 operators:
@@ -92,7 +92,7 @@ sites:
     # one, the gateway included. The keys are public keys, one per line,
     # every operator's: the file is shared, so it never names a private key.
     # Each operator's own ssh offers these and finds its private half in that
-    # operator's agent. `host prepare` makes them the user's authorized keys.
+    # operator's agent. `site prepare` makes them the user's authorized keys.
     ssh:
       host: home-a.local        # optional: defaults to public_address
       user: ubuntu              # optional: defaults to paisans-<token>, written here by the first --execute

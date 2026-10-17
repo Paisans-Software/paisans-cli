@@ -80,8 +80,8 @@ step 2: create /etc/paisans
 step 3: record what admit installs
   docker: /etc/paisans/installed, what admit installs on this host, which stays when the last deployment is evicted, and the directories it creates
   write /etc/paisans/installed mode 0644:
-    | # Written by paisans host admit: what it installed on this host, which stays
-    | # when paisans host evict removes the last admitted deployment, and each
+    | # Written by paisans site admit: what it installed on this host, which stays
+    | # when paisans site evict removes the last admitted deployment, and each
     | # directory it created, which evict removes once empty.
     | installing docker-ce
     | installing docker-ce-cli
@@ -132,7 +132,7 @@ step 6: install packages: docker-ce, docker-ce-cli, containerd.io, docker-buildx
     $ set -e
     $ if [ -z "${paisans_hold_locked:-}" ]; then
     $   exec 8>/run/paisans-docker-hold.lock
-    $   flock -n 8 || { echo 'another paisans host admit is installing Docker on this host now (it holds /run/paisans-docker-hold.lock). Run again once it is done'; exit 1; }
+    $   flock -n 8 || { echo 'another paisans site admit is installing Docker on this host now (it holds /run/paisans-docker-hold.lock). Run again once it is done'; exit 1; }
     $   paisans_hold_locked=1
     $ fi
     $ confirm_claims() {
@@ -157,12 +157,12 @@ step 6: install packages: docker-ce, docker-ce-cli, containerd.io, docker-buildx
     $ set -e
     $ if [ -z "${paisans_hold_locked:-}" ]; then
     $   exec 8>/run/paisans-docker-hold.lock
-    $   flock -n 8 || { echo 'another paisans host admit is installing Docker on this host now (it holds /run/paisans-docker-hold.lock). Run again once it is done'; exit 1; }
+    $   flock -n 8 || { echo 'another paisans site admit is installing Docker on this host now (it holds /run/paisans-docker-hold.lock). Run again once it is done'; exit 1; }
     $   paisans_hold_locked=1
     $ fi
     $ release_docker_hold() {
     $   rm -f /usr/sbin/.policy-rc.d.paisans-tmp /usr/sbin/.policy-rc.d.paisans-owner-tmp
-    $   if [ -f /usr/sbin/policy-rc.d ] && [ ! -L /usr/sbin/policy-rc.d ] && grep -qxF '# Written by paisans host admit while it installs Docker, and removed after.' /usr/sbin/policy-rc.d; then
+    $   if [ -f /usr/sbin/policy-rc.d ] && [ ! -L /usr/sbin/policy-rc.d ] && grep -qxF '# Written by paisans site admit while it installs Docker, and removed after.' /usr/sbin/policy-rc.d; then
     $     if [ -e /usr/sbin/policy-rc.d.paisans-owner ] || [ -L /usr/sbin/policy-rc.d.paisans-owner ]; then
     $       mv -f /usr/sbin/policy-rc.d.paisans-owner /usr/sbin/policy-rc.d
     $     else
@@ -185,7 +185,7 @@ step 6: install packages: docker-ce, docker-ce-cli, containerd.io, docker-buildx
     $ fi
     $ cat > /usr/sbin/.policy-rc.d.paisans-tmp <<'POLICY'
     $ #!/bin/sh
-    $ # Written by paisans host admit while it installs Docker, and removed after.
+    $ # Written by paisans site admit while it installs Docker, and removed after.
     $ for a in "$@"; do
     $   case $a in containerd|containerd.service|docker|docker.service|docker.socket) exit 101 ;; esac
     $ done
@@ -205,7 +205,7 @@ step 6: install packages: docker-ce, docker-ce-cli, containerd.io, docker-buildx
     $     n=$((n+1))
     $   done
     $ }
-    $ trap 'paisans_status=$?; if ! wait_for_dpkg; then echo "dpkg is still running after ten minutes, so the hold on the Docker daemons stays in place and its units are not yet disabled. Once dpkg is done, run host admit again, or host evict, which puts the hold back"; exit 1; fi; if command -v confirm_claims >/dev/null 2>&1; then confirm_claims || true; fi; if [ "$paisans_status" -ne 0 ]; then systemctl disable docker.socket docker.service containerd.service >/dev/null 2>&1 || true; fi; release_docker_hold; exit "$paisans_status"' EXIT
+    $ trap 'paisans_status=$?; if ! wait_for_dpkg; then echo "dpkg is still running after ten minutes, so the hold on the Docker daemons stays in place and its units are not yet disabled. Once dpkg is done, run site admit again, or site evict, which puts the hold back"; exit 1; fi; if command -v confirm_claims >/dev/null 2>&1; then confirm_claims || true; fi; if [ "$paisans_status" -ne 0 ]; then systemctl disable docker.socket docker.service containerd.service >/dev/null 2>&1 || true; fi; release_docker_hold; exit "$paisans_status"' EXIT
     $ trap 'exit 1' HUP INT TERM
     $ mv -f /usr/sbin/.policy-rc.d.paisans-tmp /usr/sbin/policy-rc.d
     $ set -e
@@ -227,7 +227,7 @@ step 8: create user paisans-f2a9
 step 9: skip the mesh until its conf exists
   user: wg-quick@psns-f2a9 is skipped, not failed, at boot until paisans apply writes /etc/wireguard/psns-f2a9.conf
   write /etc/systemd/system/wg-quick@psns-f2a9.service.d/paisans-conf.conf mode 0644:
-    | # Written by paisans host admit for deployment f2a9; paisans host evict
+    | # Written by paisans site admit for deployment f2a9; paisans site evict
     | # removes it. Until paisans apply writes the mesh's conf, wg-quick has
     | # nothing to bring up, so the unit is skipped rather than failed.
     | [Unit]
@@ -239,7 +239,7 @@ step 10: start paisans-f2a9's manager after the mesh
   user: order user@<uid>.service after wg-quick@psns-f2a9 at boot, so a container that publishes on the mesh address finds it; a manager running now is not restarted, and takes it at its next start. Until the mesh's conf is written, wg-quick@psns-f2a9 is skipped
   provisional: run once the user exists
   write /etc/systemd/system/user@<uid>.service.d/paisans-mesh.conf mode 0644:
-    | # Written by paisans host admit for deployment f2a9; paisans host evict
+    | # Written by paisans site admit for deployment f2a9; paisans site evict
     | # removes it. The user's manager, its Docker daemon and its containers
     | # start after the mesh at boot.
     | [Unit]
@@ -251,8 +251,8 @@ step 10: start paisans-f2a9's manager after the mesh
 step 11: delegate cgroups to users
   delegation: let every user's manager delegate cpu cpuset io memory pids, for compose's limits; written before paisans-f2a9's manager first starts
   write /etc/systemd/system/user@.service.d/delegate.conf mode 0644:
-    | # Written by paisans host admit. Shared by every admitted deployment;
-    | # paisans host evict removes it with the last of them.
+    | # Written by paisans site admit. Shared by every admitted deployment;
+    | # paisans site evict removes it with the last of them.
     | [Service]
     | Delegate=cpu cpuset io memory pids
   run:
@@ -262,9 +262,9 @@ step 12: write the egress table
   egress: keep paisans-f2a9, its containers and its mesh off this host's loopback and your network (/etc/paisans/egress.f2a9.nft, checked by nft before it replaces the one there)
   provisional: run once the user exists
   write /etc/paisans/egress.f2a9.nft.new mode 0644:
-    | # Written by paisans host admit for paisans-f2a9. Keeps the
+    | # Written by paisans site admit for paisans-f2a9. Keeps the
     | # deployment's user, its containers and its mesh off this host's loopback
-    | # and the owner's network. paisans host evict removes it.
+    | # and the owner's network. paisans site evict removes it.
     | table inet paisans_f2a9
     | delete table inet paisans_f2a9
     | table inet paisans_f2a9 {
@@ -331,7 +331,7 @@ step 13: install the egress unit
   egress: load the table at boot, before paisans-f2a9's manager, which requires it (paisans-f2a9-egress.service)
   provisional: run once the user exists
   write /etc/systemd/system/paisans-f2a9-egress.service mode 0644:
-    | # Written by paisans host admit. Loads the table that keeps paisans-f2a9 off
+    | # Written by paisans site admit. Loads the table that keeps paisans-f2a9 off
     | # this host's loopback and the owner's network, before paisans-f2a9's
     | # manager, and so its Docker daemon and containers, can start: the manager
     | # requires this unit, so a table that fails to load keeps them stopped.
@@ -392,7 +392,7 @@ step 17: load br_netfilter
 step 18: load br_netfilter at boot
   daemon: list br_netfilter and nf_tables in /etc/modules-load.d/paisans.conf, shared by every admitted deployment
   write /etc/modules-load.d/paisans.conf mode 0644:
-    | # Written by paisans host admit. The rootless Docker daemons of admitted
+    | # Written by paisans site admit. The rootless Docker daemons of admitted
     | # deployments need br_netfilter to start with their userland proxy off,
     | # and the module their iptables uses for the setup tool to install them.
     | br_netfilter
@@ -470,7 +470,7 @@ step 25: install the WireGuard helper
   write /usr/local/libexec/paisans/wg-psns-f2a9 mode 0755:
     | #!/bin/sh
     | # The WireGuard helper for psns-f2a9, rendered by paisans with this
-    | # deployment's interface, listen port and mesh subnet built in. paisans host
+    | # deployment's interface, listen port and mesh subnet built in. paisans site
     | # admit installs it as /usr/local/libexec/paisans/wg-psns-f2a9, root's and mode 755, with one sudoers line
     | # that lets the deployment's user run it, and nothing else, as root.
     | #
@@ -735,7 +735,7 @@ step 25: install the WireGuard helper
     | 	fi
     | 	# A directory the deployment's user could write would let it plant a
     | 	# conf with PostUp, which wg-quick runs as root at the next up, past
-    | 	# every check below. host admit makes it root's, 700; put checks it
+    | 	# every check below. site admit makes it root's, 700; put checks it
     | 	# each time rather than trusting that it stayed so.
     | 	if ! rootonly; then
     | 		refuse "$dir is not a directory only root may write"
@@ -853,7 +853,7 @@ step 30: write the admission record
     |     "wireguard": 51820,
     |     "public": []
     |   },
-    |   "digest": "aadq-v10p-2qb7-jrsq",
+    |   "digest": "z7qj-2zby-gnjs-6h5z",
     |   "admitted_at": "2026-10-15T12:00:00Z",
     |   "data_dir": "",
     |   "bridge_netfilter": false,
@@ -864,7 +864,7 @@ step 30: write the admission record
     | }
 
 step 31: add the operators' keys
-  keys: 1 operator key into paisans-f2a9's authorized_keys, written as paisans-f2a9, and recorded in /srv/paisans/f2a9/.paisans/authorized_keys.owned for host prepare
+  keys: 1 operator key into paisans-f2a9's authorized_keys, written as paisans-f2a9, and recorded in /srv/paisans/f2a9/.paisans/authorized_keys.owned for site prepare
   provisional: run once the user exists
   run:
     $ runuser -u paisans-f2a9 -- env -i HOME='/home/paisans-f2a9' PATH=/usr/bin:/bin:/usr/sbin:/sbin XDG_RUNTIME_DIR=/run/user/<uid> DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/<uid>/bus DOCKER_HOST=unix:///run/user/<uid>/docker.sock sh -c 'umask 077; if [ -L '\''/srv/paisans/f2a9/.paisans'\'' ]; then echo '\''paisans: the state directory is a link, so the keys is not written'\''; exit 1; fi; [ -d '\''/srv/paisans/f2a9/.paisans'\'' ] || install -d -m 700 '\''/srv/paisans/f2a9/.paisans'\''; exec 9>>'\''/srv/paisans/f2a9/.paisans/lock'\''; flock -w 60 9 || { echo '\''paisans: another command holds the deployment lock'\''; exit 1; }; set -e; umask 077; mkdir -p "$HOME/.ssh"; chmod go-w "$HOME/.ssh"
@@ -879,7 +879,7 @@ step 31: add the operators' keys
   stdin:
     | ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice
     | --- sidecar ---
-    | # Keys host admit and host prepare added to this deployment's user's authorized_keys: <mark> <fingerprint> <name>. host prepare removes a line only when it is marked added here and ssh.keys no longer lists it.
+    | # Keys site admit and site prepare added to this deployment's user's authorized_keys: <mark> <fingerprint> <name>. site prepare removes a line only when it is marked added here and ssh.keys no longer lists it.
     | added SHA256:kmYcvdi2GkPeWxB6XLjrZB8JHsy2Hm8luHMFp9GMvqk alice
 
 present: package: nftables installed

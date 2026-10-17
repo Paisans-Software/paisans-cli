@@ -714,7 +714,7 @@ func Execute(ctx context.Context, provider Provider, plan *Plan, r ui.Reporter) 
 	return nil
 }
 
-// Show reports a plan marked the way host prepare marks its plan: each
+// Show reports a plan marked the way site prepare marks its plan: each
 // record to create as pending, under --verbose each one already present as
 // done, and a conflict as a refusal, since Execute will not create anything
 // while one stands. Each line names the record's type, name, address and

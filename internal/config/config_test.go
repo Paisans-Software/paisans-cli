@@ -293,8 +293,8 @@ func TestWatchdogOffIsRefused(t *testing.T) {
 	}
 }
 
-// A role is listed once. host request carries a site's roles and refuses a
-// role listed twice, so the loader refuses it too, and validate and host
+// A role is listed once. site request carries a site's roles and refuses a
+// role listed twice, so the loader refuses it too, and validate and site
 // request agree on every configuration.
 func TestARepeatedRoleIsRefused(t *testing.T) {
 	body := strings.Replace(minimal, "roles: [data, apps]", "roles: [data, apps, data]", 1)
@@ -1116,7 +1116,7 @@ func TestMeshLargerThanA24IsRefused(t *testing.T) {
 }
 
 // An app's hostname is held to the strict DNS-name rule everywhere it is
-// declared, so a name validate accepts is one host request accepts too.
+// declared, so a name validate accepts is one site request accepts too.
 func TestAppHostnamesAreHeldToTheStrictRule(t *testing.T) {
 	for _, bad := range []string{"a..example.org", strings.Repeat("a", 64) + ".example.org", "a_b.example.org", "Talk.example.org", "talk"} {
 		got := loadErr(t, strings.Replace(validConfig, "hostname: talk.example.org", "hostname: "+bad, 1))
@@ -1173,7 +1173,7 @@ func TestSiteAddressIsNotTheMeshsNetworkOrBroadcast(t *testing.T) {
 }
 
 // ssh.user is held to the rule a request's user is: never root, and never
-// another deployment's paisans- user, whose authorized_keys host admit would
+// another deployment's paisans- user, whose authorized_keys site admit would
 // otherwise write into. The deployment's own user and a user of the
 // owner's are accepted.
 func TestSSHUserIsNotRootOrAnotherDeployments(t *testing.T) {
@@ -1191,7 +1191,7 @@ func TestSSHUserIsNotRootOrAnotherDeployments(t *testing.T) {
 }
 
 // mesh.subnet is written in its canonical form, the one spelling a request
-// carries, so a configuration validate accepts is one host request takes.
+// carries, so a configuration validate accepts is one site request takes.
 func TestMeshSubnetIsWrittenCanonically(t *testing.T) {
 	for _, c := range []struct{ subnet, want string }{
 		{"10.44.0.0/024", `mesh.subnet: "10.44.0.0/024" is not written in its canonical form, 10.44.0.0/24`},

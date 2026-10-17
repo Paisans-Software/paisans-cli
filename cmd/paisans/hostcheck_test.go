@@ -118,7 +118,7 @@ func TestTheGateIsOneStepWhoseResultIsTheClass(t *testing.T) {
 	}
 }
 
-// A shared host is let through, and read as shared: its firewall is host
+// A shared host is let through, and read as shared: its firewall is site
 // admit's.
 func TestTheGateLetsASharedHostThrough(t *testing.T) {
 	report, err := hostGate(ui.Discard, hostCheckFixture(t), "home-a", webHost())

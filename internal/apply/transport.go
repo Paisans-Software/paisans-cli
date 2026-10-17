@@ -568,7 +568,7 @@ func (t SSHTransport) authProblem(err error, out string) error {
 	case (strings.Contains(last, "Permission denied (") || strings.Contains(last, "Too many authentication failures")) && t.DefaultUser && t.Site != "":
 		return &ui.Problem{
 			Hint:    fmt.Sprintf("site %s is not admitted on %s", t.Site, host),
-			Explain: fmt.Sprintf("The site names no ssh.user, so paisans logs in as the deployment's own user, %s, and %s refused it. That user exists only once the host's owner has admitted the deployment. Send them a request:\n\n    paisans host request --site %s > %s.admit\n\nIf they have admitted it, check that your key is loaded in your ssh agent (ssh-add -l) and is under an operator the site's ssh.keys names. If the deployment logs in as another user on that host, name it in sites.%s.ssh.user.", user, host, t.Site, t.Site, t.Site),
+			Explain: fmt.Sprintf("The site names no ssh.user, so paisans logs in as the deployment's own user, %s, and %s refused it. That user exists only once the host's owner has admitted the deployment. Send them a request:\n\n    paisans site request --site %s > %s.admit\n\nIf they have admitted it, check that your key is loaded in your ssh agent (ssh-add -l) and is under an operator the site's ssh.keys names. If the deployment logs in as another user on that host, name it in sites.%s.ssh.user.", user, host, t.Site, t.Site, t.Site),
 			Cause:   fmt.Errorf("%w: %w", ErrLoginRefused, err),
 		}
 	case strings.Contains(last, "Permission denied (") || strings.Contains(last, "Too many authentication failures"):

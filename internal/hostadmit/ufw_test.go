@@ -10,7 +10,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
 )
 
-const ufwBeforeMarker = "paisans host admit: before enabling ufw"
+const ufwBeforeMarker = "paisans site admit: before enabling ufw"
 
 // sshdOn22 is what the probe before enabling ufw prints on Ubuntu 24.04
 // with sshd listening on 22, systemd-run there and no fallback loaded.

@@ -41,8 +41,7 @@ type helpSection struct {
 // groupSummary is the line the first page gives a command with
 // subcommands. A command without any is listed by its own summary.
 var groupSummary = map[string]string{
-	"host":        "Prepare a host or list it; request, admit or evict a deployment.",
-	"site":        "List the sites, add one to the running deployment, or remove one.",
+	"site":        "List, admit, prepare, add, remove and evict sites.",
 	"mesh":        "Replace sites' WireGuard keys.",
 	"gateway":     "Move the gateway role to another site.",
 	"storage":     "Provision object storage, join sites to it, replace keys.",
@@ -62,7 +61,7 @@ var groupSummary = map[string]string{
 var helpSections = []helpSection{
 	{"Most of the time", []string{"apply"}},
 	{"Start a deployment", []string{"create", "validate", "init", "render"}},
-	{"Hosts and sites", []string{"host", "site", "mesh", "gateway", "storage", "prune"}},
+	{"Sites", []string{"site", "mesh", "gateway", "storage", "prune"}},
 	{"Check", []string{"doctor", "images", "preflight", "failover", "web-server", "version"}},
 	{"Configuration and secrets", []string{"config", "operator", "secrets", "dns"}},
 	{"Apps", []string{"app", "oidc", "catalog", "blueprint"}},
@@ -155,50 +154,35 @@ var helpCommands = []helpCommand{
 				"              [--recreate <stack>]... [--min-free <size>] [--keep-images] [--require-all]\n" +
 				"              [--execute] [--yes]",
 		},
-		detail: "Without --site: take every site from " + config.FileName + " to a running stack, running init, host prepare, apply, site add, storage and dns init in the order the deployment needs. " +
+		detail: "Without --site: take every site from " + config.FileName + " to a running stack, running init, site prepare, apply, site add, storage and dns init in the order the deployment needs. " +
 			"With --site: compare that site's rendered artifacts with what is on its host and show what would change.\n\n" +
 			"Changes nothing on a host without --execute; without --site, the dry run may add missing generated secrets to the local secrets file, and says so when it does.\n\n" +
-			"Both, and host prepare, review the keys and images " + config.FileName + " grants against what each host last applied; --execute asks for the word approve at a terminal when anything is added or changed, and asks nothing when nothing is.\n\n" +
+			"Both, and site prepare, review the keys and images " + config.FileName + " grants against what each host last applied; --execute asks for the word approve at a terminal when anything is added or changed, and asks nothing when nothing is.\n\n" +
 			"--yes approves the review entry by entry, and types create, partial and rollback when apply asks for them. " + yesTopic + "\n\n" +
 			"Before anything changes, every app it starts logs in to its mail server from its site, sending nothing; one that does not log in refuses the apply.\n\n" +
 			"Every run, --site included, reaches every site's host to classify it, and runs on the sites it has: a site whose host has not admitted the deployment is left out, a joined site that does not answer is kept with its own steps skipped, and the run ends degraded. --require-all: exit 1 when the run is degraded: a site pending or down.",
 	},
 	{
-		name:    "host list",
-		summary: "List every site's host: the SSH destination it is reached at and its public addresses.",
-		usage:   []string{"paisans host list [--config " + config.FileName + "]"},
-		detail: "List every site " + config.FileName + " declares, by name, with the SSH destination every command that logs in reaches its host at, defaults filled in, and its public_address and public_address6. " +
+		name:    "site list",
+		summary: "List every site by name, with its roles, mesh address and SSH destination.",
+		usage:   []string{"paisans site list [--config " + config.FileName + "]"},
+		detail: "List every site " + config.FileName + " declares, by the name --site and site remove take, with its roles, its mesh address, the SSH destination every command that logs in reaches its host at, defaults filled in, and its public_address and public_address6. " +
 			"The table is on stdout. Reads only the local file; reaches no host and changes nothing.",
 	},
 	{
-		name:    "host prepare",
-		summary: "Keep the deployment user's keys, configuration store and daemon settings on an admitted host.",
-		usage:   []string{"paisans host prepare --site <name> [--config " + config.FileName + "] [--ssh <destination>]\n                     [--execute] [--yes]", "paisans host prepare --all [--config " + config.FileName + "] [--execute] [--yes]"},
-		detail: "Run as the deployment's user on a host whose owner has admitted the deployment: check the admission record against " + config.FileName + ", refusing on any difference, read the watchdog host admit set up, and keep the user's daemon.json, its configuration store with the units that serve it, and its authorized keys from ssh.keys. " +
-			"Installs nothing and writes nothing that is root's. Writes nothing without --execute. " +
-			"--all prepares every site, one at a time in the configuration's order, each with its own review, and stops at the first that fails.",
-	},
-	{
-		name:    "host deployments",
-		summary: "List every deployment on a host.",
-		usage:   []string{"paisans host deployments --ssh <user@host[:port]> [--sudo=false]"},
-		detail: "List every admission record on the host --ssh names (the deployment, its user, the site and roles it was admitted as, the grants and when), every deployment in its registry (id, token, domain, site, roles and root), and any deployment directory no registry entry names. " +
-			"--sudo=false lists admission records only, which are readable without sudo. Needs no " + config.FileName + "; changes nothing.",
-	},
-	{
-		name:    "host request",
+		name:    "site request",
 		summary: "Write the request a host's owner admits a site from.",
-		usage:   []string{"paisans host request --site <name> [--config " + config.FileName + "] > <name>.admit"},
+		usage:   []string{"paisans site request --site <name> [--config " + config.FileName + "] > <name>.admit"},
 		detail: "Write to stdout the request the host's owner admits the site from: the deployment's id, the site's user, SSH and WireGuard ports, mesh address and subnet, whether it has an endpoint, the grants its roles need, the apps handed to the owner's web server, and each operator's public keys. " +
 			"Print its digest, sixteen characters as xxxx-xxxx-xxxx-xxxx, to stderr, for the owner to compare over a channel you both trust, since the request carries the keys that will log in to their machine. " +
 			"Reaches no host; holds nothing secret.",
 	},
 	{
-		name:    "host admit",
+		name:    "site admit",
 		summary: "Admit a deployment to this host, as its owner.",
 		usage: []string{
-			"sudo paisans host admit --request <file> [--watchdog] [--public-ports] [--data-dir <path>]\n                        [--bridge-netfilter] [--mesh-lan] [--enable-ufw] [--execute]\n                        [--digest <digest>] [--yes]",
-			"paisans host admit --site <name> [--ssh <user>|<user@host[:port]>] [--config " + config.FileName + "] [the same grants]\n                   [--execute] [--yes]",
+			"sudo paisans site admit --request <file> [--watchdog] [--public-ports] [--data-dir <path>]\n                        [--bridge-netfilter] [--mesh-lan] [--enable-ufw] [--execute]\n                        [--digest <digest>] [--yes]",
+			"paisans site admit --site <name> [--ssh <user>|<user@host[:port]>] [--config " + config.FileName + "] [the same grants]\n                   [--execute] [--yes]",
 		},
 		detail: "The one root step for a deployment on a host, run by the host's owner: the deployment's own unprivileged user with its own rootless Docker, the WireGuard helper and its sudoers line, the firewall, the egress table, the grants given and the admission record. " +
 			"ufw must be installed. When it is not active, --enable-ufw, or a yes at a terminal, has admit allow every port sshd listens on, arm a timer that turns ufw off again in 10 minutes, enable ufw, and stop the timer once a new SSH login gets through: with --site, admit's own login as the user; with --request, one you open and confirm. Without it admit refuses, and prints the commands that enable ufw by hand, every allow before the enable. Admit never enables ufw while it holds a deny or reject rule of yours, or with IPV6 not yes, as ufw reads /etc/default/ufw and /etc/ufw/ufw.conf, while sshd listens on IPv6, and then asks nothing. " +
@@ -209,24 +193,12 @@ var helpCommands = []helpCommand{
 			"Never run by an agent unattended.",
 	},
 	{
-		name:    "host evict",
-		summary: "Remove a deployment from this host, as its owner.",
-		usage: []string{
-			"sudo paisans host evict --request <file> [--data-dir <path>] [--execute] [--yes]",
-			"sudo paisans host evict --deployment <id> --user <name> [--data-dir <path>] [--execute] [--yes]",
-			"paisans host evict --site <name> [--ssh <user>|<user@host[:port]>] [--config " + config.FileName + "] [--data-dir <path>]\n                   [--execute] [--yes]",
-		},
-		detail: "Undo host admit for one deployment: its mesh, its user with its home and data, the helper, the egress table, its firewall rules, the record and the registry entry. Evict never disables ufw, which stays as it is with its paisans: ssh allows when admit enabled it. Host-wide files and sysctls go only when no other deployment is admitted. " +
-			"--data-dir, the one admit was given, is needed only when the host holds no admission record. " +
-			"With --site, --ssh may be your login alone, for the site's declared ssh host and port, and is asked for at a terminal when left out. " +
-			"--execute asks for the user's name at a terminal; --yes types it, and with --site needs --ssh. " + yesTopic + " Never run by an agent unattended.",
-	},
-	{
-		name:    "site list",
-		summary: "List every site by name, with its roles and mesh address.",
-		usage:   []string{"paisans site list [--config " + config.FileName + "]"},
-		detail: "List every site " + config.FileName + " declares, by the name --site and site remove take, with its roles and its mesh address. " +
-			"The table is on stdout. Reads only the local file; reaches no host and changes nothing.",
+		name:    "site prepare",
+		summary: "Keep the deployment user's keys, configuration store and daemon settings on an admitted host.",
+		usage:   []string{"paisans site prepare --site <name> [--config " + config.FileName + "] [--ssh <destination>]\n                     [--execute] [--yes]", "paisans site prepare --all [--config " + config.FileName + "] [--execute] [--yes]"},
+		detail: "Run as the deployment's user on a host whose owner has admitted the deployment: check the admission record against " + config.FileName + ", refusing on any difference, read the watchdog site admit set up, and keep the user's daemon.json, its configuration store with the units that serve it, and its authorized keys from ssh.keys. " +
+			"Installs nothing and writes nothing that is root's. Writes nothing without --execute. " +
+			"--all prepares every site, one at a time in the configuration's order, each with its own review, and stops at the first that fails.",
 	},
 	{
 		name:    "site add",
@@ -250,10 +222,30 @@ var helpCommands = []helpCommand{
 		detail: "Take a site out of the running deployment in gated stages: its data out (the Patroni leader switched to the Sync Standby, its Garage node out of the layout and the objects moved), out of the cluster (its etcd member, and the mesh, HAProxy and gateway routes on every remaining site, and each replica's patroni.env, one at a time; one data site out of two and a witness takes the witness out of etcd too), its host cleaned of everything provably this deployment's (a gateway's Caddy kept, reduced to the host owner's sites in its caddy.d, /srv/paisans/<token>/caddy.d, while there are any), the A and AAAA records dns init made for its public address deleted at the DNS provider, and its entry out of " + config.FileName + ".\n\n" +
 			"Refuses the only gateway, data or apps site, a site an app is pinned to, and an unhealthy cluster. --host-gone skips the host; --delete-data deletes its data after the site's name is typed at a terminal. Writes nothing without --execute.\n\n" +
 			"--force --ssh <host> --id <id or token>, with no " + config.FileName + ": clean that host of the deployment the login's own admission record names, as --force does, from that record alone, logging in as the deployment's user. DNS is not modified. --execute asks for the site's name at a terminal.\n\n" +
-			"The host stage runs as the deployment's user and ends with the sudo paisans host evict line the host's owner runs to remove the rest.\n\n" +
+			"The host stage runs as the deployment's user and ends with the sudo paisans site evict line the host's owner runs to remove the rest.\n\n" +
 			"--evict: take out a site whose host still runs and that nobody else can reach, never reaching that host: the mesh cut first on every remaining site, then its DNS records, Patroni's own failover, its etcd member, its Garage node skipped as dead, then the rest as remove does. " +
 			"Generates the secrets of a replacement declared in the same edit, which apply then brings up. --execute asks for the site's name, and for revoked, lose writes or lose objects when they apply.\n\n" +
 			"--yes types each word asked for. " + yesTopic,
+	},
+	{
+		name:    "site evict",
+		summary: "Remove a deployment from this host, as its owner.",
+		usage: []string{
+			"sudo paisans site evict --request <file> [--data-dir <path>] [--execute] [--yes]",
+			"sudo paisans site evict --deployment <id> --user <name> [--data-dir <path>] [--execute] [--yes]",
+			"paisans site evict --site <name> [--ssh <user>|<user@host[:port]>] [--config " + config.FileName + "] [--data-dir <path>]\n                   [--execute] [--yes]",
+		},
+		detail: "Undo site admit for one deployment: its mesh, its user with its home and data, the helper, the egress table, its firewall rules, the record and the registry entry. Evict never disables ufw, which stays as it is with its paisans: ssh allows when admit enabled it. Host-wide files and sysctls go only when no other deployment is admitted. " +
+			"--data-dir, the one admit was given, is needed only when the host holds no admission record. " +
+			"With --site, --ssh may be your login alone, for the site's declared ssh host and port, and is asked for at a terminal when left out. " +
+			"--execute asks for the user's name at a terminal; --yes types it, and with --site needs --ssh. " + yesTopic + " Never run by an agent unattended.",
+	},
+	{
+		name:    "site deployments",
+		summary: "List every deployment on a host.",
+		usage:   []string{"paisans site deployments --ssh <user@host[:port]> [--sudo=false]"},
+		detail: "List every admission record on the host --ssh names (the deployment, its user, the site and roles it was admitted as, the grants and when), every deployment in its registry (id, token, domain, site, roles and root), and any deployment directory no registry entry names. " +
+			"--sudo=false lists admission records only, which are readable without sudo. Needs no " + config.FileName + "; changes nothing.",
 	},
 	{
 		name:    "mesh rekey",
@@ -475,30 +467,30 @@ const configTrust = "\n\n" +
 
 // executeTopic is `paisans help execute`: which commands reach a host, and
 // what --execute lets each of them change.
-const executeTopic = `host prepare, host deployments, apply, prune, site add, site remove, mesh rekey,
+const executeTopic = `site prepare, site deployments, apply, prune, site add, site remove, mesh rekey,
 storage init, storage add, storage rotate-key, app admin create, app remove,
 oidc client create, secrets prune, secrets rotate, preflight, failover test,
-doctor, init, config, operator register, host admit and host evict
+doctor, init, config, operator register, site admit and site evict
 are the only commands that reach a host. Each reads it to plan, and changes it
 only with --execute; config and operator register check no admission record,
 and their --execute only starts each site's configuration sync and, for publish
-and register, adds a version to its store; host deployments, preflight and init
+and register, adds a version to its store; site deployments, preflight and init
 have no --execute and never change it; doctor's --execute and secrets prune's
 change no host either, editing only the local files, and secrets prune only
-reads the gateways' deployment records. host admit and host evict reach a host
-as its owner, as root on it or through your own sudo. host admit claims the host
+reads the gateways' deployment records. site admit and site evict reach a host
+as its owner, as root on it or through your own sudo. site admit claims the host
 in /var/lib/paisans/registry.json as a step of its plan, refusing if another
 deployment there holds this one's token, WireGuard interface or listen port, or
-a mesh subnet overlapping this one's, and host evict takes the claim away as its
+a mesh subnet overlapping this one's, and site evict takes the claim away as its
 last. Every other command that writes to a host first reads the host's admission
 record for this deployment and refuses, with nothing changed, a host that has
 none, or whose record does not match the site: another site name, ssh user, SSH
 or WireGuard port, mesh subnet, forwarding, a grant its roles need, or, for
-an external web server, the owner's web server record. It names the two lines that fix it, paisans host request --site <site> >
-<site>.admit for the operator, and sudo paisans host admit --request
-<site>.admit for the host's owner. apply and host prepare also refuse when
+an external web server, the owner's web server record. It names the two lines that fix it, paisans site request --site <site> >
+<site>.admit for the operator, and sudo paisans site admit --request
+<site>.admit for the host's owner. apply and site prepare also refuse when
 anything else on the host overlaps the mesh subnet. dns init and dns prune reach
-no host, only the DNS provider's API, and change it only with --execute; host
+no host, only the DNS provider's API, and change it only with --execute; site
 request reaches no host and takes no --execute, writing only to stdout and
 stderr; site remove also deletes the removed site's records there. web-server
 show and web-server check change nothing: check looks at a monitor's public

@@ -60,8 +60,8 @@ func parseInstalled(content, by string) (installed, error) {
 // text is the file's content: a header, then each package, each package
 // being installed, each file and each directory.
 func (in installed) text() string {
-	out := "# Written by paisans host admit: what it installed on this host, which stays\n" +
-		"# when paisans host evict removes the last admitted deployment, and each\n" +
+	out := "# Written by paisans site admit: what it installed on this host, which stays\n" +
+		"# when paisans site evict removes the last admitted deployment, and each\n" +
 		"# directory it created, which evict removes once empty.\n"
 	for _, p := range in.Packages {
 		out += "package " + p + "\n"

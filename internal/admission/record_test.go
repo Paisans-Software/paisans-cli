@@ -185,7 +185,7 @@ func TestParseRecordWithoutDigest(t *testing.T) {
 	}
 }
 
-// The path, the mode and the directory host admit writes to.
+// The path, the mode and the directory site admit writes to.
 func TestRecordPlace(t *testing.T) {
 	if got, err := admission.Path("f2a9"); err != nil || got != "/etc/paisans/admitted.f2a9.json" {
 		t.Errorf("Path = %s, %v", got, err)
@@ -233,7 +233,7 @@ func TestParseRecordByteExact(t *testing.T) {
 		})
 	}
 	_, err = admission.ParseRecord([]byte(strings.Replace(g, `"version": 1`, `"version":  1`, 1)), "f2a9")
-	if err == nil || !strings.Contains(err.Error(), "not exactly as host admit wrote it") {
+	if err == nil || !strings.Contains(err.Error(), "not exactly as site admit wrote it") {
 		t.Errorf("got %v", err)
 	}
 }
@@ -280,7 +280,7 @@ func TestParseRecordSize(t *testing.T) {
 }
 
 // The record carries the request's site and roles, so a command that has
-// no configuration (site remove --force --id, host deployments) learns
+// no configuration (site remove --force --id, site deployments) learns
 // what the host was admitted as.
 func TestNewRecordCarriesTheSiteAndRoles(t *testing.T) {
 	req := build(t, "home-a")

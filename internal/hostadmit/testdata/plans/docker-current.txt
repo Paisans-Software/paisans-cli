@@ -10,7 +10,7 @@ step 4: install packages: docker-ce-rootless-extras=5:29.9.1-1~ubuntu.24.04~nobl
     $ set -e
     $ if [ -z "${paisans_hold_locked:-}" ]; then
     $   exec 8>/run/paisans-docker-hold.lock
-    $   flock -n 8 || { echo 'another paisans host admit is installing Docker on this host now (it holds /run/paisans-docker-hold.lock). Run again once it is done'; exit 1; }
+    $   flock -n 8 || { echo 'another paisans site admit is installing Docker on this host now (it holds /run/paisans-docker-hold.lock). Run again once it is done'; exit 1; }
     $   paisans_hold_locked=1
     $ fi
     $ confirm_claims() {

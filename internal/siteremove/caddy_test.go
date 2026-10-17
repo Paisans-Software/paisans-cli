@@ -116,7 +116,7 @@ func TestAGatewayNobodyReliesOnIsRemovedCompletely(t *testing.T) {
 		t.Errorf("files are left under %s: %v", root, vm.sortedFiles())
 	}
 	if _, ok := vmRegistry(t, w).Deployments[ourID]; !ok {
-		t.Error("the registry entry is gone, which is host evict's to remove")
+		t.Error("the registry entry is gone, which is site evict's to remove")
 	}
 	if len(vm.caddyLoads) != 0 {
 		t.Error("Caddy was reloaded")
@@ -345,7 +345,7 @@ func TestRunningAgainKeepsCaddyUntilTheSitesAreGone(t *testing.T) {
 		t.Errorf("files are left: %v", vm.sortedFiles())
 	}
 	if _, ok := vmRegistry(t, w).Deployments[ourID]; !ok {
-		t.Error("the registry entry is gone, which is host evict's to remove")
+		t.Error("the registry entry is gone, which is site evict's to remove")
 	}
 	if vm.images[image] {
 		t.Error("Caddy's image is left")
@@ -408,8 +408,8 @@ func TestByIDConfirmationNamesTheKeptCaddy(t *testing.T) {
 	}
 }
 
-// The rules host prepare opened 80 and 443 with stay while Caddy is kept,
-// and after: the firewall is root's, and host evict deletes every rule of
+// The rules site prepare opened 80 and 443 with stay while Caddy is kept,
+// and after: the firewall is root's, and site evict deletes every rule of
 // the deployment's, so site remove deletes none.
 func TestSiteRemoveLeavesTheFirewallToEvict(t *testing.T) {
 	w := gatewayWorld(t, true)
@@ -469,7 +469,7 @@ func TestAFailedWriteBackPutsTheOriginalBack(t *testing.T) {
 
 // A kept Caddy needs no registry entry: on a host whose registry has none
 // for the deployment, the run passes its gate and writes none, and the
-// report says host evict stops the Caddy.
+// report says site evict stops the Caddy.
 func TestAKeptCaddyNeedsNoRegistryEntry(t *testing.T) {
 	w := gatewayWorld(t, true)
 	vm := w.hosts["vm"]
@@ -484,7 +484,7 @@ func TestAKeptCaddyNeedsNoRegistryEntry(t *testing.T) {
 	if vm.files[registry.Path] != before {
 		t.Errorf("the registry changed:\n%s", vm.files[registry.Path])
 	}
-	if !strings.Contains(strings.Join(p.Kept, "\n"), "host evict stops it and deletes that directory, so the owner moves those sites first") {
+	if !strings.Contains(strings.Join(p.Kept, "\n"), "site evict stops it and deletes that directory, so the owner moves those sites first") {
 		t.Errorf("kept %q", p.Kept)
 	}
 }

@@ -51,7 +51,7 @@ step 30: write the admission record
     |     "wireguard": 51820,
     |     "public": []
     |   },
-    |   "digest": "xrqz-pzwd-0r4g-tvb3",
+    |   "digest": "xd0b-nk4k-e2cp-xk02",
     |   "admitted_at": "2026-10-15T12:00:00Z",
     |   "data_dir": "",
     |   "bridge_netfilter": false,

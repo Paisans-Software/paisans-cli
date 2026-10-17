@@ -228,7 +228,7 @@ func (h host) ReadFile(string) (string, bool, error) {
 func (h host) Describe() string { return "fake" }
 
 // ProbeWith reads the networks through the docker command it is given, so
-// host admit, which runs as root, names the system socket and no
+// site admit, which runs as root, names the system socket and no
 // DOCKER_HOST or context of root's points it elsewhere.
 func TestProbeWithNamesTheDockerItIsGiven(t *testing.T) {
 	const system = "docker -H unix:///var/run/docker.sock"

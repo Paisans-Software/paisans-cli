@@ -28,7 +28,7 @@ import (
 // applying them would undo whatever the newer version changed. After the
 // approval and before the first change: check each host's record, which
 // only reads. Then publish: apply --site before its first change, apply
-// without --site once its host prepare steps have made every site's store
+// without --site once its site prepare steps have made every site's store
 // and before any other step changes a host (see runConverge). What is
 // published is the bytes apply loaded and applies, never a second read.
 
@@ -245,7 +245,7 @@ func published(r ui.Reporter, s ui.Step, sha string, pushed []string, err error,
 // with no store is named with the command that makes one.
 func pushFailure(site string, err error) string {
 	if errors.Is(err, configstore.ErrNoStore) {
-		return site + " has no configuration store yet; paisans host prepare --site " + site + " --execute makes it."
+		return site + " has no configuration store yet; paisans site prepare --site " + site + " --execute makes it."
 	}
 	if err == nil {
 		return site + " did not answer."
@@ -254,7 +254,7 @@ func pushFailure(site string, err error) string {
 }
 
 // noSiteTook is the refusal when no site took the version: each site with
-// why, a site with no store named with the host prepare that makes it.
+// why, a site with no store named with the site prepare that makes it.
 func noSiteTook(pe *configstore.PushError) error {
 	var lines []string
 	for _, site := range slices.Sorted(maps.Keys(pe.Failed)) {

@@ -25,7 +25,7 @@ func (p *Plan) restartHAProxy() string { return p.dep().ComposeCmd("infra") + " 
 
 // statsProbe reads HAProxy's statistics on site as CSV, from its listener on
 // the site's mesh address (haproxy.cfg.tmpl, listen stats). curl is on the
-// host: host prepare installs it.
+// host: site prepare installs it.
 func (p *Plan) statsProbe(site string) string {
 	return fmt.Sprintf("curl -fsS --max-time 5 'http://%s:%d/stats;csv'", p.cfg.Sites[site].Address, render.HAProxyStatsPort)
 }

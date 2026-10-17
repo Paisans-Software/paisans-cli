@@ -136,7 +136,7 @@ func TestASiteCommandRunsAgainstTheUsersDaemon(t *testing.T) {
 	}
 }
 
-// The owner's transport, which host deployments reads the host through,
+// The owner's transport, which site deployments reads the host through,
 // points docker at no user's daemon: it sends the command as given.
 func TestTheOwnersCommandSendsNoDockerHost(t *testing.T) {
 	log := rawSSH(t)

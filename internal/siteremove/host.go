@@ -47,12 +47,12 @@ type hostPlan struct {
 	// the manifest records.
 	webServer []render.ManifestWebServer
 	manifest  bool
-	// home is the deployment's user's home, and userUnits the units host
+	// home is the deployment's user's home, and userUnits the units site
 	// prepare wrote for the deployment in its systemd directory there.
 	home      string
 	userUnits []string
-	// keyRecords is this deployment's record of the authorized keys host
-	// admit and host prepare added, when the host has one.
+	// keyRecords is this deployment's record of the authorized keys site
+	// admit and site prepare added, when the host has one.
 	keyRecords []string
 	root       dirState
 	// record is whether the host holds this deployment's record, a gateway's.
@@ -93,7 +93,7 @@ type storeRoot struct {
 	dir         bool
 }
 
-// storeRoots are the paths host prepare gives the configuration store, each
+// storeRoots are the paths site prepare gives the configuration store, each
 // probed by one file that is in it. A directory is probed by the file inside
 // it that prepare always writes, so a path is listed only when it is there.
 func (p *Plan) storeRoots() []storeRoot {
@@ -109,7 +109,7 @@ func (p *Plan) storeRoots() []storeRoot {
 }
 
 // userUnitsCommand lists the deployment's units in its user's own systemd
-// directory: the configuration store's, which host prepare writes.
+// directory: the configuration store's, which site prepare writes.
 func (p *Plan) userUnitsCommand(home string) string {
 	return fmt.Sprintf(`for f in %s/%s-*; do [ -e "$f" ] && echo "unit $f"; done; true`, hostprep.UserUnitDir(home), p.dep().Prefix())
 }
@@ -126,7 +126,7 @@ func (p *Plan) removeUserUnitsCommand(home string) string {
 // rm -rf ~/.local/share/docker): a file a container's user owns is the
 // user's to remove there. With deleteData everything goes; without, only
 // the empty directories. The root itself stays: /srv/paisans is root's, and
-// host evict removes it.
+// site evict removes it.
 func emptyRootCommand(d deployment.Deployment, deleteData bool) string {
 	root := quote(d.Root())
 	if deleteData {
@@ -500,10 +500,10 @@ func (p *Plan) buildHost() (*Stage, error) {
 	}
 	if cp == nil && !p.DeleteData && (hp.dataLeft || len(hp.volumes) > 0) {
 		hp.keepData, p.DataKept = true, true
-		p.Kept = append(p.Kept, fmt.Sprintf("%s: the data in %s and the deployment's volumes stay; host evict deletes them", p.Site, d.Root()))
+		p.Kept = append(p.Kept, fmt.Sprintf("%s: the data in %s and the deployment's volumes stay; site evict deletes them", p.Site, d.Root()))
 	}
 	if cp != nil {
-		p.Kept = append(p.Kept, fmt.Sprintf("%s: its Caddy keeps serving the host owner's sites in %s; host evict stops it and deletes that directory, so the owner moves those sites first", p.Site, render.HostSitesDir(d)))
+		p.Kept = append(p.Kept, fmt.Sprintf("%s: its Caddy keeps serving the host owner's sites in %s; site evict stops it and deletes that directory, so the owner moves those sites first", p.Site, render.HostSitesDir(d)))
 	}
 
 	p.hostSteps(st)
@@ -543,7 +543,7 @@ func (p *Plan) checkLogin(t apply.Transport) error {
 	recordPath, _ := admission.Path(d.Token())
 	switch {
 	case errors.Is(err, admission.ErrNotAdmitted):
-		return fmt.Errorf("site remove %s: %s has no admission record for this deployment (%s), so nothing says who its user is, and site remove cleans a host only as that user. Nothing was changed. If the deployment's user is still there, the host's owner removes it and everything root's with sudo paisans host evict --deployment %s --user <the deployment's user> --execute", p.Site, t.Describe(), recordPath, d.ID)
+		return fmt.Errorf("site remove %s: %s has no admission record for this deployment (%s), so nothing says who its user is, and site remove cleans a host only as that user. Nothing was changed. If the deployment's user is still there, the host's owner removes it and everything root's with sudo paisans site evict --deployment %s --user <the deployment's user> --execute", p.Site, t.Describe(), recordPath, d.ID)
 	case err != nil:
 		return fmt.Errorf("site remove %s: %w. Nothing was changed", p.Site, err)
 	}
@@ -643,8 +643,8 @@ func (p *Plan) planKeptRoot(t apply.Transport, hp *hostPlan, edited bool) error 
 	return nil
 }
 
-// probeKeys finds this deployment's record of the authorized keys host
-// admit and host prepare added. The keys themselves are never removed: they
+// probeKeys finds this deployment's record of the authorized keys site
+// admit and site prepare added. The keys themselves are never removed: they
 // may be the only way into the host, and nothing here can tell whether
 // another exists. The record is this deployment's own file, so it goes with
 // it.
@@ -713,9 +713,9 @@ func (p *Plan) hostSteps(st *Stage) {
 		add("remove", "remove empty directories", "the empty directories under %s, but never one the kept Caddy mounts", d.Root())
 	case cp != nil:
 	case hp.root.exists && hp.deleteRoot:
-		add("delete", "empty "+d.Root(), "everything in %s, through rootlesskit: %d file(s), %d bytes; %s itself stays for host evict", d.Root(), hp.root.files, hp.root.bytes, d.Root())
+		add("delete", "empty "+d.Root(), "everything in %s, through rootlesskit: %d file(s), %d bytes; %s itself stays for site evict", d.Root(), hp.root.files, hp.root.bytes, d.Root())
 	case hp.root.exists:
-		add("remove", "remove empty directories", "the empty directories under %s, which itself stays for host evict", d.Root())
+		add("remove", "remove empty directories", "the empty directories under %s, which itself stays for site evict", d.Root())
 	}
 	if hp.granted {
 		add("delete", "delete the grant record", "%s, the keys and images this deployment last granted here", grant.Path(d))

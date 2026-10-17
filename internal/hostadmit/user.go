@@ -271,7 +271,7 @@ func freeRange(ranges map[string][]IDRange) int64 {
 // it. It is the deployment's own, and evict removes it.
 func meshConf(p *planner) string {
 	unit := "wg-quick@" + p.d.Interface() + ".service"
-	return "# Written by paisans host admit for deployment " + p.d.Token() + "; paisans host evict\n" +
+	return "# Written by paisans site admit for deployment " + p.d.Token() + "; paisans site evict\n" +
 		"# removes it. The user's manager, its Docker daemon and its containers\n" +
 		"# start after the mesh at boot.\n" +
 		"[Unit]\nWants=" + unit + "\nAfter=" + unit + "\n"
@@ -287,7 +287,7 @@ func ours(f FileState, content string) bool {
 // and only paisans apply writes the conf, so without it the unit would
 // fail at every boot until then and show in systemctl --failed.
 func meshCondConf(p *planner) string {
-	return "# Written by paisans host admit for deployment " + p.d.Token() + "; paisans host evict\n" +
+	return "# Written by paisans site admit for deployment " + p.d.Token() + "; paisans site evict\n" +
 		"# removes it. Until paisans apply writes the mesh's conf, wg-quick has\n" +
 		"# nothing to bring up, so the unit is skipped rather than failed.\n" +
 		"[Unit]\nConditionPathExists=" + p.d.WireGuardInstalled() + "\n"
@@ -346,8 +346,8 @@ func planMeshDropIn(p *planner) error {
 // delegateConf is the drop-in that lets every user's manager hand cpu,
 // cpuset, io, memory and pids to the containers below it (spec, Observed
 // R5). It is host wide, shared by every admitted deployment.
-const delegateConf = "# Written by paisans host admit. Shared by every admitted deployment;\n" +
-	"# paisans host evict removes it with the last of them.\n" +
+const delegateConf = "# Written by paisans site admit. Shared by every admitted deployment;\n" +
+	"# paisans site evict removes it with the last of them.\n" +
 	"[Service]\nDelegate=cpu cpuset io memory pids\n"
 
 // delegatedByDefault is what each Ubuntu release's user@.service delegates

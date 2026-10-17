@@ -34,7 +34,7 @@ import (
 // action and comment, because that is how ufw identifies it, and adding ours
 // over someone else's would rewrite theirs.
 
-// ownerTag starts the comment on every rule host admit adds for deployment
+// ownerTag starts the comment on every rule site admit adds for deployment
 // d, paisans-<token>:. It is how a later admit or evict tells the
 // deployment's rules from an owner's and from another deployment's on the
 // same host: a rule is ours only when its comment starts with exactly this
@@ -190,16 +190,16 @@ func planRules(tag string, rules []Rule, added []addedRule) (out Section, remova
 		case r.SSH:
 			if strings.HasPrefix(a.action, "deny") || strings.HasPrefix(a.action, "reject") {
 				// Refused, not warned: it keeps the operators out.
-				return out, nil, fmt.Errorf("firewall: `ufw %s` blocks SSH, and host admit did not add it. The operators could not log in as the deployment's user, and adding the allow would replace your rule; delete or change it yourself and admit again", a.line)
+				return out, nil, fmt.Errorf("firewall: `ufw %s` blocks SSH, and site admit did not add it. The operators could not log in as the deployment's user, and adding the allow would replace your rule; delete or change it yourself and admit again", a.line)
 			}
 			fallthrough
 		default:
 			// Adding ours would replace theirs, since ufw keeps one rule per
-			// match. A rule host admit did not create is not its to rewrite.
+			// match. A rule site admit did not create is not its to rewrite.
 			out.Foreign = append(out.Foreign, fmt.Sprintf("firewall: `ufw %s`", a.line))
 			out.Warnings = append(out.Warnings, Warning{
 				Hint: "firewall: " + r.String() + " is governed by another ufw rule",
-				Detail: fmt.Sprintf("firewall: %s is governed by `ufw %s`, which host admit did not add, so it is not allowed as derived (%s). Adding the allow would replace that rule, so it is left alone; change or delete it yourself if the allow is wanted",
+				Detail: fmt.Sprintf("firewall: %s is governed by `ufw %s`, which site admit did not add, so it is not allowed as derived (%s). Adding the allow would replace that rule, so it is left alone; change or delete it yourself if the allow is wanted",
 					r, a.line, r.Why)})
 		}
 	}
@@ -223,11 +223,11 @@ func planRules(tag string, rules []Rule, added []addedRule) (out Section, remova
 		// takes a console. A stale SSH allow costs almost nothing; a wrong
 		// removal costs the host.
 		if ssh != nil && overlaps(a, *ssh) {
-			out.Present = append(out.Present, fmt.Sprintf("firewall: `ufw %s` kept; host admit never removes an SSH allow", a.line))
+			out.Present = append(out.Present, fmt.Sprintf("firewall: `ufw %s` kept; site admit never removes an SSH allow", a.line))
 			continue
 		}
 		// The same holds for the allow an earlier ssh.port was given, which
-		// is recognised by its comment. host admit cannot know that sshd
+		// is recognised by its comment. site admit cannot know that sshd
 		// already listens on the new port, and if it does not, the old allow
 		// is the only way back in.
 		if a.comment == tag+" "+sshWhy {
@@ -247,7 +247,7 @@ func planRules(tag string, rules []Rule, added []addedRule) (out Section, remova
 			Kinds:    []string{KindFirewall},
 			Label:    "remove",
 			Title:    "remove ufw rule " + a.key,
-			Describe: fmt.Sprintf("firewall: delete `ufw %s`, which host admit added and this site's roles and configuration no longer give", a.line),
+			Describe: fmt.Sprintf("firewall: delete `ufw %s`, which site admit added and this site's roles and configuration no longer give", a.line),
 			Command:  "ufw delete " + a.line,
 		})
 	}

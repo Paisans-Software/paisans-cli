@@ -86,7 +86,7 @@ func twoDeployments(t *testing.T) string {
 }
 
 // withHost stands h in for every host a command without a configuration
-// reaches: as its owner, as host deployments does, or as the deployment's
+// reaches: as its owner, as site deployments does, or as the deployment's
 // user, as site remove --id does.
 func withHost(t *testing.T, h apply.Transport) {
 	t.Helper()
@@ -123,12 +123,12 @@ func admittedRecords(t *testing.T) map[string]string {
 	return map[string]string{p: string(b)}
 }
 
-// runDeployments runs host deployments against h and returns what it printed.
+// runDeployments runs site deployments against h and returns what it printed.
 func runDeployments(t *testing.T, h *listedHost, args ...string) string {
 	t.Helper()
 	withHost(t, h)
 	out := plainOutput(t)
-	if err := runHostDeployments(args); err != nil {
+	if err := runSiteDeployments(args); err != nil {
 		t.Fatal(err)
 	}
 	return out.String()
@@ -174,7 +174,7 @@ func TestHostDeploymentsWarnsOfARecordThatDoesNotParse(t *testing.T) {
 	}
 }
 
-// host deployments lists each registry entry in full, then each deployment
+// site deployments lists each registry entry in full, then each deployment
 // directory with no entry, and changes nothing.
 func TestHostDeploymentsListsEntriesAndLeftovers(t *testing.T) {
 	h := &listedHost{t: t, registry: twoDeployments(t), probe: "root f2a9\nroot 0c1d\nroot dead\nend\n"}
@@ -219,7 +219,7 @@ func TestHostDeploymentsRefusals(t *testing.T) {
 		"--ssh myalias":            "not user@host",
 		"--ssh admin@192.0.2.30 x": "extra",
 	} {
-		err := runHostDeployments(strings.Fields(args))
+		err := runSiteDeployments(strings.Fields(args))
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%q: err = %v, want %q", args, err, want)
 		}
@@ -305,7 +305,7 @@ func TestHostDeploymentsFailsRatherThanListingPartly(t *testing.T) {
 		}
 		withHost(t, tc.h)
 		out := plainOutput(t)
-		err := runHostDeployments([]string{"--ssh", "admin@192.0.2.30"})
+		err := runSiteDeployments([]string{"--ssh", "admin@192.0.2.30"})
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: err = %v, want %q", name, err, tc.want)
 		}
@@ -319,7 +319,7 @@ func TestHostDeploymentsFailsRatherThanListingPartly(t *testing.T) {
 // A host named only by --ssh is reached the way the operator's own ssh
 // reaches it, with their agent, keys and config: there are no declared keys
 // to offer, since there is no configuration. A deployment command reaches it
-// as the deployment's user, without sudo; host deployments reaches it as its
+// as the deployment's user, without sudo; site deployments reaches it as its
 // owner, through sudo.
 func TestReachDestinationUsesTheOperatorsSSH(t *testing.T) {
 	for in, want := range map[string]string{

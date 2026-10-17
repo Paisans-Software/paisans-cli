@@ -154,7 +154,7 @@ func TestApproveReviews(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			var out bytes.Buffer
-			err := approveReviews(ui.Discard, answerer{}, c.stdin(t), &out, pendingReview(), "paisans host prepare --site home-a --execute")
+			err := approveReviews(ui.Discard, answerer{}, c.stdin(t), &out, pendingReview(), "paisans site prepare --site home-a --execute")
 			switch {
 			case c.want == "" && err != nil:
 				t.Errorf("not approved: %v", err)
@@ -241,7 +241,7 @@ func prepare(t *testing.T, stdin io.Reader, stdout io.Writer, args ...string) (*
 	return rec, err
 }
 
-// host prepare with something to approve and no terminal is refused before
+// site prepare with something to approve and no terminal is refused before
 // the host is checked or changed; the dry run shows the review and asks
 // nothing.
 func TestHostPrepareRefusesWithoutATerminal(t *testing.T) {
@@ -263,7 +263,7 @@ func TestHostPrepareRefusesWithoutATerminal(t *testing.T) {
 	}
 }
 
-// With nothing to approve host prepare runs as it always has, terminal or
+// With nothing to approve site prepare runs as it always has, terminal or
 // not, and leaves the record as it was.
 func TestHostPrepareWithNothingToApproveRuns(t *testing.T) {
 	log := loggingSSH(t, "")
@@ -280,7 +280,7 @@ func TestHostPrepareWithNothingToApproveRuns(t *testing.T) {
 	}
 }
 
-// Approved, host prepare records the keys it made authorized keys, with who
+// Approved, site prepare records the keys it made authorized keys, with who
 // approved them, once every step has succeeded; a step that fails leaves the
 // record as it was, so the next run reviews the same keys again.
 func TestHostPrepareRecordsTheKeysOnlyAfterSuccess(t *testing.T) {
@@ -311,7 +311,7 @@ func TestHostPrepareRecordsTheKeysOnlyAfterSuccess(t *testing.T) {
 				t.Errorf("record %+v", got.Keys)
 			}
 			if got.Images != nil {
-				t.Errorf("host prepare recorded images: %+v", got.Images)
+				t.Errorf("site prepare recorded images: %+v", got.Images)
 			}
 		})
 	}

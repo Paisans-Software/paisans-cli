@@ -55,7 +55,7 @@ func TestHostPrepareAllStopsAtTheFirstFailure(t *testing.T) {
 	rec, err := prepareAll(t, hostPrepareOptions{execute: true})
 	cfg, _ := config.Load(fixtureConfig())
 	first := cfg.SiteNames()[0]
-	if hint, explain := ui.Describe(err); hint != "host prepare --all stopped at "+first || !strings.Contains(explain, "paisans host prepare --all --execute") {
+	if hint, explain := ui.Describe(err); hint != "site prepare --all stopped at "+first || !strings.Contains(explain, "paisans site prepare --all --execute") {
 		t.Fatalf("got %q / %q\n%s", hint, explain, rec.Lines())
 	}
 	for _, name := range cfg.SiteNames()[1:] {

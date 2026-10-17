@@ -3,7 +3,7 @@
 //
 // validate, render and create touch nothing outside the working directory. init
 // reads every site to choose a mesh subnet, and writes only local files.
-// `host prepare`, `apply` and `storage init` reach a machine: each reads it to
+// `site prepare`, `apply` and `storage init` reach a machine: each reads it to
 // show what it would do, and changes nothing on it unless told to with
 // --execute. apply without --site may, in its dry run, add missing generated
 // secrets to the local secrets file, as init would, and says so when it does.
@@ -68,33 +68,26 @@ func main() {
 		err = runRender(os.Args[2:])
 	case "apply":
 		err = runApply(os.Args[2:], os.Stdin, os.Stdout)
-	case "host":
-		switch {
-		case len(os.Args) >= 3 && os.Args[2] == "prepare":
-			err = runHostPrepare(os.Args[3:])
-		case len(os.Args) >= 3 && os.Args[2] == "deployments":
-			err = runHostDeployments(os.Args[3:])
-		case len(os.Args) >= 3 && os.Args[2] == "request":
-			err = runHostRequest(os.Args[3:])
-		case len(os.Args) >= 3 && os.Args[2] == "admit":
-			err = runHostAdmit(os.Args[3:], os.Stdin, os.Stdout)
-		case len(os.Args) >= 3 && os.Args[2] == "evict":
-			err = runHostEvict(os.Args[3:], os.Stdin, os.Stdout)
-		case len(os.Args) >= 3 && os.Args[2] == "list":
-			err = runHostList(os.Args[3:], os.Stdout)
-		default:
-			os.Exit(groupError(os.Stderr, "host", "host takes one subcommand, list, prepare, deployments, request, admit or evict"))
-		}
 	case "site":
 		switch {
+		case len(os.Args) >= 3 && os.Args[2] == "list":
+			err = runSiteList(os.Args[3:], os.Stdout)
+		case len(os.Args) >= 3 && os.Args[2] == "request":
+			err = runSiteRequest(os.Args[3:])
+		case len(os.Args) >= 3 && os.Args[2] == "admit":
+			err = runSiteAdmit(os.Args[3:], os.Stdin, os.Stdout)
+		case len(os.Args) >= 3 && os.Args[2] == "prepare":
+			err = runSitePrepare(os.Args[3:])
 		case len(os.Args) >= 3 && os.Args[2] == "add":
 			err = runSiteAdd(os.Args[3:], os.Stdin, os.Stdout)
 		case len(os.Args) >= 3 && os.Args[2] == "remove":
 			err = runSiteRemove(os.Args[3:], os.Stdin, os.Stdout)
-		case len(os.Args) >= 3 && os.Args[2] == "list":
-			err = runSiteList(os.Args[3:], os.Stdout)
+		case len(os.Args) >= 3 && os.Args[2] == "evict":
+			err = runSiteEvict(os.Args[3:], os.Stdin, os.Stdout)
+		case len(os.Args) >= 3 && os.Args[2] == "deployments":
+			err = runSiteDeployments(os.Args[3:])
 		default:
-			os.Exit(groupError(os.Stderr, "site", "site takes one subcommand, list, add or remove"))
+			os.Exit(groupError(os.Stderr, "site", "site takes one subcommand, list, request, admit, prepare, add, remove, evict or deployments"))
 		}
 	case "mesh":
 		err = runMesh(os.Args[2:])
@@ -693,7 +686,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	// against the version and the version published, so the store holds
 	// what is applied even if the apply stops part way.
 	// As a step of apply without --site, the run published the version
-	// once, and this step records it. Only apply records it: host prepare
+	// once, and this step records it. Only apply records it: site prepare
 	// and site add apply no version.
 	switch {
 	case store != nil && review != nil:
@@ -1247,11 +1240,11 @@ func runStorageInit(args []string) error {
 	return nil
 }
 
-// runHostPrepare takes one site's host to the state apply assumes. It is
+// runSitePrepare takes one site's host to the state apply assumes. It is
 // modelled on runStorageInit: probe read only, print, and change the host only
 // with --execute. It needs no secrets; nothing it installs is a credential.
-func runHostPrepare(args []string) error {
-	fs := newFlagSet("host prepare", flag.ExitOnError)
+func runSitePrepare(args []string) error {
+	fs := newFlagSet("site prepare", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	o := hostPrepareFlags(fs)
 	answers := yesFlag(fs)
@@ -1268,7 +1261,7 @@ func runHostPrepare(args []string) error {
 	return hostPrepare(prepareEnv{r: reporter(), found: found, answers: ans, stdin: os.Stdin, stdout: os.Stdout}, *o)
 }
 
-// hostPrepareOptions are host prepare's flags.
+// hostPrepareOptions are site prepare's flags.
 type hostPrepareOptions struct {
 	config, site, ssh string
 	execute           bool
@@ -1279,7 +1272,7 @@ type hostPrepareOptions struct {
 	shown bool
 }
 
-// hostPrepareFlags registers host prepare's own flags on fs.
+// hostPrepareFlags registers site prepare's own flags on fs.
 func hostPrepareFlags(fs *flag.FlagSet) *hostPrepareOptions {
 	o := &hostPrepareOptions{}
 	fs.StringVar(&o.config, "config", config.FileName, "path to the deployment declaration")
@@ -1290,7 +1283,7 @@ func hostPrepareFlags(fs *flag.FlagSet) *hostPrepareOptions {
 	return o
 }
 
-// prepareEnv is what one run of host prepare reports through. Typed by hand
+// prepareEnv is what one run of site prepare reports through. Typed by hand
 // it is the command's reporter and the process's dryRunFound; apply without
 // --site, which prepares several hosts at once, gives each its own, so that
 // no host's run touches what another's is using.
@@ -1310,33 +1303,33 @@ type prepareEnv struct {
 	stdout  io.Writer
 }
 
-// runHostPrepareIn is host prepare run with args through env, on none of the
+// runHostPrepareIn is site prepare run with args through env, on none of the
 // process's globals: its flags parse into its own variables, and nothing is
 // routed. -v is accepted and changes nothing here; env.r is already as
 // verbose as the run.
 func runHostPrepareIn(env prepareEnv, args []string) error {
-	fs := newFlagSet("host prepare", flag.ContinueOnError)
+	fs := newFlagSet("site prepare", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var verbose bool
 	verboseFlags(fs, &verbose)
 	o := hostPrepareFlags(fs)
 	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("host prepare: %w", err)
+		return fmt.Errorf("site prepare: %w", err)
 	}
 	if fs.NArg() > 0 {
-		return fmt.Errorf("host prepare: %q is extra", fs.Arg(0))
+		return fmt.Errorf("site prepare: %q is extra", fs.Arg(0))
 	}
 	return hostPrepare(env, *o)
 }
 
-// hostPrepare is host prepare with its flags parsed, reporting through env.
+// hostPrepare is site prepare with its flags parsed, reporting through env.
 func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 	r := env.r
 	if o.all {
 		return hostPrepareAll(env, o)
 	}
 	if o.site == "" {
-		return fmt.Errorf("host prepare: name the site with --site, or pass --all for every one")
+		return fmt.Errorf("site prepare: name the site with --site, or pass --all for every one")
 	}
 
 	cfg, err := config.Load(o.config)
@@ -1352,7 +1345,7 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 	}
 	declared, ok := cfg.Sites[o.site]
 	if !ok {
-		return fmt.Errorf("host prepare: %s declares no site %q. Declared sites are %s", o.config, o.site, strings.Join(cfg.SiteNames(), ", "))
+		return fmt.Errorf("site prepare: %s declares no site %q. Declared sites are %s", o.config, o.site, strings.Join(cfg.SiteNames(), ", "))
 	}
 
 	transport := siteTransport(o.site, declared, o.ssh)
@@ -1360,7 +1353,7 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 		transport.RetryLog = env.retries
 	}
 	r.Section(fmt.Sprintf("%s (%s)", o.site, transport.Describe()))
-	// See runApply: host prepare records its own site's architecture, which
+	// See runApply: site prepare records its own site's architecture, which
 	// the next apply publishes. As a step of apply without --site, where
 	// every host prepares at once, the run recorded every key already and
 	// this never writes.
@@ -1389,7 +1382,7 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 	if err != nil {
 		return err
 	}
-	review, approvedBy, err := stepReview(r, env.answers, env.stdin, env.stdout, cfg, o.site, g, grant.PrepareScope, transport, o.execute, "paisans host prepare --site "+o.site+" --execute")
+	review, approvedBy, err := stepReview(r, env.answers, env.stdin, env.stdout, cfg, o.site, g, grant.PrepareScope, transport, o.execute, "paisans site prepare --site "+o.site+" --execute")
 	if err != nil {
 		return err
 	}
@@ -1443,8 +1436,8 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 	return nil
 }
 
-// hostPrepareAll is host prepare --all: every site the configuration
-// declares, in its order, each as host prepare --site would prepare it, with
+// hostPrepareAll is site prepare --all: every site the configuration
+// declares, in its order, each as site prepare --site would prepare it, with
 // its own review. It stops at the first site that fails, and since a prepared host
 // plans nothing, running it again resumes there.
 func hostPrepareAll(env prepareEnv, o hostPrepareOptions) error {
@@ -1465,11 +1458,11 @@ func hostPrepareAll(env prepareEnv, o hostPrepareOptions) error {
 		site := o
 		site.all, site.site, site.shown = false, name, true
 		if err := hostPrepare(env, site); err != nil {
-			next := "Run paisans host prepare --all again to resume."
+			next := "Run paisans site prepare --all again to resume."
 			if o.execute {
-				next = "Run paisans host prepare --all --execute again to resume; a prepared host plans nothing."
+				next = "Run paisans site prepare --all --execute again to resume; a prepared host plans nothing."
 			}
-			return convergeStop("host prepare --all stopped at "+name, err, next)
+			return convergeStop("site prepare --all stopped at "+name, err, next)
 		}
 	}
 	return nil

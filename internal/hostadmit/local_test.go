@@ -290,7 +290,7 @@ func TestLocalCommandsStartInTheRootWhenHomeIsMissing(t *testing.T) {
 }
 
 // The local transport runs a plan against the machine the CLI runs on, so
-// it is reached only through host admit and host evict with --request,
+// it is reached only through site admit and site evict with --request,
 // which run on the host itself. No file outside this package but theirs
 // imports it, tests included, under any name.
 func TestOnlyHostAdmitReachesTheLocalTransport(t *testing.T) {

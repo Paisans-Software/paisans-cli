@@ -13,7 +13,7 @@ import (
 
 // An operator's key is held, where the configuration declares it, to the key
 // types a request accepts: a real 2048-bit RSA key and a certificate are each
-// refused naming the operator's key line, so validate accepts no key host
+// refused naming the operator's key line, so validate accepts no key site
 // request would refuse.
 func TestOperatorKeyTypes(t *testing.T) {
 	line := func(k ssh.PublicKey) string { return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(k))) }

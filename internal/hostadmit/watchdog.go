@@ -22,12 +22,12 @@ const giveBack = `for d in /dev/watchdog /dev/watchdog[0-9]*; do if [ -e "$d" ];
 // device whose group is root's cannot be chowned inside the user
 // namespace, and the infra compose chowns it for Patroni (Observed R4).
 func watchdogRule(user, group string) string {
-	return "# Written by paisans host admit: the watchdog is " + user + "'s, for its\n" +
-		"# Patroni. One deployment per host holds it; paisans host evict removes this.\n" +
+	return "# Written by paisans site admit: the watchdog is " + user + "'s, for its\n" +
+		"# Patroni. One deployment per host holds it; paisans site evict removes this.\n" +
 		`SUBSYSTEM=="watchdog|misc", KERNEL=="watchdog*", OWNER="` + user + `", GROUP="` + group + `", MODE="0600"` + "\n"
 }
 
-// planWatchdogGrant gives the watchdog with --watchdog: the module as host
+// planWatchdogGrant gives the watchdog with --watchdog: the module as site
 // prepare loads it, then the device to the user. One deployment per host
 // holds it, so another deployment's rule refuses. Without the grant, a
 // rule an earlier admit wrote is removed, with the module's unit.

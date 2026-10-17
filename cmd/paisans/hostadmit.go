@@ -39,11 +39,11 @@ var executeAdmit = hostadmit.Execute
 // the machine it runs on: --request runs only there, as root.
 var runningAsRootOnLinux = func() bool { return runtime.GOOS == "linux" && os.Geteuid() == 0 }
 
-// runHostAdmit is `paisans host admit`: the one root step for a deployment
+// runSiteAdmit is `paisans site admit`: the one root step for a deployment
 // on a host, run by its owner, from a request on the host or from the
 // configuration over the owner's own ssh.
-func runHostAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
-	fs := newFlagSet("host admit", flag.ContinueOnError)
+func runSiteAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
+	fs := newFlagSet("site admit", flag.ContinueOnError)
 	reporter := commonFlags(fs)
 	var (
 		request, site, sshFlag, configPath, digestFlag string
@@ -67,7 +67,7 @@ func runHostAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return fmt.Errorf("host admit takes no argument. Got: %s", quoteAll(fs.Args()))
+		return fmt.Errorf("site admit takes no argument. Got: %s", quoteAll(fs.Args()))
 	}
 	ans, err := answers()
 	if err != nil {
@@ -75,36 +75,36 @@ func runHostAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	switch {
 	case request == "" && site == "":
-		return fmt.Errorf("host admit: give --request <file> on the host, or --site <name> from a workstation")
+		return fmt.Errorf("site admit: give --request <file> on the host, or --site <name> from a workstation")
 	case request != "" && site != "":
-		return fmt.Errorf("host admit: --request or --site, not both")
+		return fmt.Errorf("site admit: --request or --site, not both")
 	case request != "" && sshFlag != "":
-		return fmt.Errorf("host admit: --request runs on the host itself and takes no --ssh")
+		return fmt.Errorf("site admit: --request runs on the host itself and takes no --ssh")
 	case request != "" && !runningAsRootOnLinux():
-		return fmt.Errorf("host admit: --request runs as root on the host it admits to: copy the request there and run sudo paisans host admit --request <file>")
+		return fmt.Errorf("site admit: --request runs as root on the host it admits to: copy the request there and run sudo paisans site admit --request <file>")
 	case request == "" && digestFlag != "":
-		return fmt.Errorf("host admit: --digest goes with --request: with --site admit builds the request itself from the configuration")
+		return fmt.Errorf("site admit: --digest goes with --request: with --site admit builds the request itself from the configuration")
 	case request != "" && ans.yes && flags.EnableUFW:
 		return ufwNeedsAPerson()
 	case request != "" && execute && flags.EnableUFW && !stdinIsTerminal(stdin):
 		return ufwNeedsAPerson()
 	case request != "" && execute && ans.yes && digestFlag == "":
-		return fmt.Errorf("host admit: --yes never answers the request's digest: give it as --digest <digest>, the one the operator gave you over a channel you both trust. Nothing was read or changed")
+		return fmt.Errorf("site admit: --yes never answers the request's digest: give it as --digest <digest>, the one the operator gave you over a channel you both trust. Nothing was read or changed")
 	case request != "" && execute && digestFlag == "" && !stdinIsTerminal(stdin):
-		return fmt.Errorf("host admit: --execute with --request asks you to type the request's digest at a terminal, and stdin is not one. Run it from an interactive shell, or give the digest as --digest <digest>. Nothing was read or changed")
+		return fmt.Errorf("site admit: --execute with --request asks you to type the request's digest at a terminal, and stdin is not one. Run it from an interactive shell, or give the digest as --digest <digest>. Nothing was read or changed")
 	case site != "" && ans.yes && sshFlag == "":
-		return fmt.Errorf("host admit: --yes does not choose a login: give --ssh <user>, your own login on the site's declared host, or --ssh user@host[:port]. Nothing was read or changed")
+		return fmt.Errorf("site admit: --yes does not choose a login: give --ssh <user>, your own login on the site's declared host, or --ssh user@host[:port]. Nothing was read or changed")
 	}
 	r := reporter()
 	in := hostadmit.Input{Flags: flags, Now: time.Now()}
 	var declared config.Site
 	if request != "" {
-		data, err := readRequest("host admit", request)
+		data, err := readRequest("site admit", request)
 		if err != nil {
 			return err
 		}
 		if in.Request, err = admission.Parse(data); err != nil {
-			return fmt.Errorf("host admit: %s: %w", request, err)
+			return fmt.Errorf("site admit: %s: %w", request, err)
 		}
 		in.Digest = admission.Digest(data)
 		if digestFlag != "" {
@@ -122,7 +122,7 @@ func runHostAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 			return refused(configPath, len(result.Refusals()), "Nothing was read or changed.")
 		}
 		if in.Request, err = admission.Build(cfg, site); err != nil {
-			return fmt.Errorf("host admit: %w", err)
+			return fmt.Errorf("site admit: %w", err)
 		}
 		declared = cfg.Sites[site]
 	}
@@ -155,7 +155,7 @@ func runHostAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 		r.Result("request digest %s: compare it with the one the operator gave you, over a channel you both trust, such as a call", in.Digest)
 	} else {
 		var err error
-		if dest, err = ownerDestination("host admit", sshFlag, site, declared, stdin, stdout); err != nil {
+		if dest, err = ownerDestination("site admit", sshFlag, site, declared, stdin, stdout); err != nil {
 			return err
 		}
 		t = reachOwnerAdmit(dest)
@@ -242,20 +242,20 @@ func runHostAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 		if h := declared.SSHHost(); h != dest.Host {
 			where = fmt.Sprintf(" The login went to %s, the site's declared ssh host, and admit to %s: check that they are the same machine.", ui.Visible(h), ui.Visible(dest.Host))
 		}
-		return ufwFallbackNote(fmt.Errorf("host admit: %s is admitted and its Docker answers, but logging in as it failed: %w. Check that your key is one of sites.%s.ssh.keys.%s", user, err, site, where), plan, true)
+		return ufwFallbackNote(fmt.Errorf("site admit: %s is admitted and its Docker answers, but logging in as it failed: %w. Check that your key is one of sites.%s.ssh.keys.%s", user, err, site, where), plan, true)
 	}
 	// That login was a new SSH connection, made after ufw was enabled, so
 	// ufw lets SSH in: the fallback is stopped, through the owner's login.
 	if plan.EnablesUFW {
 		if err := ui.Run(r, "stop the ufw fallback", func() error { return hostadmit.Disarm(t) }); err != nil {
-			return fmt.Errorf("host admit: %s logs in through ufw, but %w. ufw turns itself off again by %s: run sudo %s on the host to keep it on", user, err, ufwOffAt(), hostadmit.DisarmUFW)
+			return fmt.Errorf("site admit: %s logs in through ufw, but %w. ufw turns itself off again by %s: run sudo %s on the host to keep it on", user, err, ufwOffAt(), hostadmit.DisarmUFW)
 		}
 	}
 	r.Result("Admitted: %s runs Docker %s, and logs in with the operators' keys.", user, version)
 	return nil
 }
 
-// ownerDestination is where command (host admit or host evict) --site
+// ownerDestination is where command (site admit or site evict) --site
 // logs in as the owner: --ssh as
 // user@host[:port], or a login alone for the site's declared ssh host and
 // port, or, with no --ssh, a login asked for at a terminal. Off a terminal
@@ -307,7 +307,7 @@ func askEnableUFW(a answerer, stdin io.Reader, stdout io.Writer, ports []int, by
 		"The risk: something admit cannot see, such as a cloud firewall, could still block SSH. You are then locked out until the timer turns ufw off again, at most 10 minutes later. The timer does not survive a reboot: a reboot before it fires leaves ufw enabled, so wait for it rather than reboot.\n"+hostadmit.CannotSee+"\n", strings.Join(list, ", "), confirm)
 	yes, err := a.yesNo(stdin, stdout, explain, "Enable ufw (--enable-ufw)?", "enable ufw (--enable-ufw)")
 	if err != nil {
-		return false, fmt.Errorf("host admit: reading your answer: %w. Nothing was changed", err)
+		return false, fmt.Errorf("site admit: reading your answer: %w. Nothing was changed", err)
 	}
 	return yes, nil
 }
@@ -317,7 +317,7 @@ func askEnableUFW(a answerer, stdin io.Reader, stdout io.Writer, ports []int, by
 // --execute off a terminal. Once ufw is on, only a person opening a new
 // SSH session shows that SSH gets through.
 func ufwNeedsAPerson() error {
-	return fmt.Errorf("host admit: with --request, enabling ufw needs a person at a terminal: once ufw is on, admit waits for you to open a new SSH session to this host and say it logged in, before it stops the timer that turns ufw off again, and neither --yes nor a pipe answers that. Run paisans host admit --site <site> --ssh <your login> from a workstation instead, whose own login as the deployment's user proves SSH gets through; or run this at a terminal without --yes. Nothing was changed")
+	return fmt.Errorf("site admit: with --request, enabling ufw needs a person at a terminal: once ufw is on, admit waits for you to open a new SSH session to this host and say it logged in, before it stops the timer that turns ufw off again, and neither --yes nor a pipe answers that. Run paisans site admit --site <site> --ssh <your login> from a workstation instead, whose own login as the deployment's user proves SSH gets through; or run this at a terminal without --yes. Nothing was changed")
 }
 
 // ufwOffAt is the latest the fallback armed by now turns ufw off.
@@ -355,7 +355,7 @@ func confirmUFW(stdin io.Reader, stdout io.Writer, r ui.Reporter, t apply.Transp
 		return nil
 	}
 	if err := ui.Run(r, "stop the ufw fallback", func() error { return hostadmit.Disarm(t) }); err != nil {
-		return fmt.Errorf("host admit: %w. ufw turns itself off again by %s: run sudo %s to keep it on", err, off, hostadmit.DisarmUFW)
+		return fmt.Errorf("site admit: %w. ufw turns itself off again by %s: run sudo %s to keep it on", err, off, hostadmit.DisarmUFW)
 	}
 	r.Result("Admitted: %s runs Docker %s, and ufw is on. The operators' next command logs in as %s.", user, version, user)
 	return nil
@@ -373,7 +373,7 @@ func askGrant(a answerer, stdin io.Reader, stdout io.Writer, req admission.Reque
 	explain := fmt.Sprintf("\nSite %s (roles: %s): %s.\n%s%s\n", ui.Visible(req.Site), strings.Join(req.Roles, ", "), g.Hint, g.Explain, unless)
 	yes, err := a.yesNo(stdin, stdout, explain, "Grant "+g.Flag+"?", "grant "+g.Flag)
 	if err != nil {
-		return false, fmt.Errorf("host admit: reading your answer: %w. Nothing was read or changed", err)
+		return false, fmt.Errorf("site admit: reading your answer: %w. Nothing was read or changed", err)
 	}
 	return yes, nil
 }
@@ -427,14 +427,14 @@ func confirmDigest(stdin io.Reader, stdout io.Writer, digest, given string) erro
 		return checkDigest(given, digest)
 	}
 	if !stdinIsTerminal(stdin) {
-		return fmt.Errorf("host admit: --execute with --request asks you to type the request's digest at a terminal, and stdin is not one. Run it from an interactive shell, or give the digest as --digest <digest>. Nothing was changed")
+		return fmt.Errorf("site admit: --execute with --request asks you to type the request's digest at a terminal, and stdin is not one. Run it from an interactive shell, or give the digest as --digest <digest>. Nothing was changed")
 	}
 	fmt.Fprintf(stdout, "\nThe request carries the keys that will log in to this machine. Type the digest the operator gave you, over a channel you trust: ")
 	// A byte at a time, so the confirmation of a new SSH login that admit
 	// asks for after it, once it has enabled ufw, is not read ahead.
 	line, err := readTypedLine(stdin)
 	if err != nil || line == "" {
-		return fmt.Errorf("host admit: no digest read. Nothing was changed")
+		return fmt.Errorf("site admit: no digest read. Nothing was changed")
 	}
 	return checkDigest(line, digest)
 }
@@ -444,15 +444,15 @@ func confirmDigest(stdin io.Reader, stdout io.Writer, digest, given string) erro
 func checkDigest(given, digest string) error {
 	typed, err := admission.ParseDigest(strings.TrimSpace(given))
 	if err != nil || typed != digest {
-		return fmt.Errorf("host admit: that is not this request's digest, %s. The request may have been changed on its way: ask the operator for it again. Nothing was changed", digest)
+		return fmt.Errorf("site admit: that is not this request's digest, %s. The request may have been changed on its way: ask the operator for it again. Nothing was changed", digest)
 	}
 	return nil
 }
 
-// runHostEvict is `paisans host evict`: host admit undone for one
+// runSiteEvict is `paisans site evict`: site admit undone for one
 // deployment, by the host's owner, the same two ways.
-func runHostEvict(args []string, stdin io.Reader, stdout io.Writer) error {
-	fs := newFlagSet("host evict", flag.ContinueOnError)
+func runSiteEvict(args []string, stdin io.Reader, stdout io.Writer) error {
+	fs := newFlagSet("site evict", flag.ContinueOnError)
 	reporter := commonFlags(fs)
 	request := fs.String("request", "", "the request the deployment was admitted from, on this host, as root")
 	id := fs.String("deployment", "", "the deployment's id, with --user, on this host, as root")
@@ -467,7 +467,7 @@ func runHostEvict(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return fmt.Errorf("host evict takes no argument. Got: %s", quoteAll(fs.Args()))
+		return fmt.Errorf("site evict takes no argument. Got: %s", quoteAll(fs.Args()))
 	}
 	ans, err := answers()
 	if err != nil {
@@ -481,30 +481,30 @@ func runHostEvict(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	switch {
 	case modes != 1:
-		return fmt.Errorf("host evict: give one of --request <file>, --deployment <id> --user <name> (both on the host), or --site <name> --ssh <your login>")
+		return fmt.Errorf("site evict: give one of --request <file>, --deployment <id> --user <name> (both on the host), or --site <name> --ssh <your login>")
 	case (*id == "") != (*user == ""):
-		return fmt.Errorf("host evict: --deployment and --user go together")
+		return fmt.Errorf("site evict: --deployment and --user go together")
 	case *site != "" && *sshFlag == "" && ans.yes:
-		return fmt.Errorf("host evict: --yes does not choose a login: give --ssh <user>, your own login on the site's declared host, or --ssh user@host[:port]. Nothing was read or changed")
+		return fmt.Errorf("site evict: --yes does not choose a login: give --ssh <user>, your own login on the site's declared host, or --ssh user@host[:port]. Nothing was read or changed")
 	case *site != "" && *sshFlag == "" && !stdinIsTerminal(stdin):
-		return fmt.Errorf("host evict: --site needs --ssh off a terminal, your own login on the host: --ssh <user> for the site's declared host, or --ssh user@host[:port]. Nothing was read or changed")
+		return fmt.Errorf("site evict: --site needs --ssh off a terminal, your own login on the host: --ssh <user> for the site's declared host, or --ssh user@host[:port]. Nothing was read or changed")
 	case *site == "" && *sshFlag != "":
-		return fmt.Errorf("host evict: --ssh goes with --site")
+		return fmt.Errorf("site evict: --ssh goes with --site")
 	case *site == "" && !runningAsRootOnLinux():
-		return fmt.Errorf("host evict: --request and --deployment run as root on the host itself: run sudo paisans host evict there")
+		return fmt.Errorf("site evict: --request and --deployment run as root on the host itself: run sudo paisans site evict there")
 	}
 	r := reporter()
 	in := hostadmit.EvictInput{DataDir: *dataDir}
 	var declared config.Site
 	switch {
 	case *request != "":
-		data, err := readRequest("host evict", *request)
+		data, err := readRequest("site evict", *request)
 		if err != nil {
 			return err
 		}
 		req, err := admission.Parse(data)
 		if err != nil {
-			return fmt.Errorf("host evict: %s: %w", *request, err)
+			return fmt.Errorf("site evict: %s: %w", *request, err)
 		}
 		in.Deployment, in.User = req.Deployment, req.User
 	case *id != "":
@@ -520,14 +520,14 @@ func runHostEvict(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 		s, ok := cfg.Sites[*site]
 		if !ok {
-			return fmt.Errorf("host evict: %s declares no site %q", *configPath, *site)
+			return fmt.Errorf("site evict: %s declares no site %q", *configPath, *site)
 		}
 		in.Deployment, in.User = cfg.ID, s.SSHUser()
 		declared = s
 	}
 	var t apply.Transport
 	if *site != "" {
-		dest, err := ownerDestination("host evict", *sshFlag, *site, declared, stdin, stdout)
+		dest, err := ownerDestination("site evict", *sshFlag, *site, declared, stdin, stdout)
 		if err != nil {
 			return err
 		}
@@ -558,7 +558,7 @@ func runHostEvict(args []string, stdin io.Reader, stdout io.Writer) error {
 	err = confirmWord(ans, stdin, stdout, in.User, what)
 	resume()
 	if err != nil {
-		return fmt.Errorf("host evict: %w", err)
+		return fmt.Errorf("site evict: %w", err)
 	}
 	if err := hostadmit.RunSteps(t, plan, r); err != nil {
 		return err

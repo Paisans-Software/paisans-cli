@@ -57,9 +57,9 @@ func TestTheBinaryPlansOnAStockUbuntu(t *testing.T) {
 		t.Fatal(err)
 	}
 	commands := []string{
-		"/p/paisans host admit --request /p/vm.admit --public-ports --data-dir /data",
-		"/p/paisans host evict --request /p/vm.admit",
-		"/p/paisans host evict --deployment " + req.Deployment + " --user " + req.User,
+		"/p/paisans site admit --request /p/vm.admit --public-ports --data-dir /data",
+		"/p/paisans site evict --request /p/vm.admit",
+		"/p/paisans site evict --deployment " + req.Deployment + " --user " + req.User,
 	}
 	// One container runs all three, each reporting its exit status, so the
 	// packages a stock server has are installed once.

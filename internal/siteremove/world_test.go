@@ -1384,7 +1384,7 @@ func worldConfig(t *testing.T, edits ...func(string) string) (*config.Config, *c
 
 // newWorld is the deployment before the removal: every site applied from
 // the configuration as it stands, home-a leading with home-b its Sync
-// Standby, three Garage nodes, and on home-b a host prepare's units, rules
+// Standby, three Garage nodes, and on home-b a site prepare's units, rules
 // and key record beside things that are not this deployment's.
 func newWorld(t *testing.T, edits ...func(string) string) *world {
 	t.Helper()
@@ -1480,7 +1480,7 @@ func newWorld(t *testing.T, edits ...func(string) string) *world {
 	}
 	bob := otherKey(t)
 	b.files[keysAt] = "# managed by hand\n" + alice + "\n" + bob + "\n"
-	b.files[record] = "# Keys paisans host prepare added.\n" + fingerprint(t, alice) + " alice@example.org\n"
+	b.files[record] = "# Keys paisans site prepare added.\n" + fingerprint(t, alice) + " alice@example.org\n"
 	reg := registry.Registry{Version: registry.Version, Deployments: map[string]registry.Entry{}}
 	id, e := claimOf(cfg, "home-b", mustTime())
 	reg.Deployments[id] = e
@@ -1555,7 +1555,7 @@ func listenServers(cfg string) [][2]string {
 	return out
 }
 
-// admitted is the path and content of the admission record host admit
+// admitted is the path and content of the admission record site admit
 // writes for site.
 func admitted(t *testing.T, cfg *config.Config, site string) (string, string) {
 	t.Helper()

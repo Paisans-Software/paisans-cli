@@ -12,7 +12,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/admission"
 )
 
-// One golden request per role mix in the fixture: each is the file host
+// One golden request per role mix in the fixture: each is the file site
 // request prints, byte for byte, and each reads back as itself.
 func TestGoldenRequests(t *testing.T) {
 	for _, site := range []string{"home-a", "home-b", "vm", "status", "watch", "store", "host"} {
@@ -42,7 +42,7 @@ func TestGoldenRequests(t *testing.T) {
 	}
 }
 
-// golden is the home-a request as host request writes it.
+// golden is the home-a request as site request writes it.
 func golden(t *testing.T) string {
 	t.Helper()
 	return string(admission.Encode(build(t, "home-a")))
@@ -87,7 +87,7 @@ func TestDigestKnownVectors(t *testing.T) {
 		want string
 	}{
 		{"nothing", nil, "werc-8gmr-zge1-96qv"},
-		{"home-a.admit", golden, "r7n7-wmtp-0jpj-b8je"},
+		{"home-a.admit", golden, "fvqv-wsp1-e4kt-qwm1"},
 	} {
 		if got := admission.Digest(c.data); got != c.want {
 			t.Errorf("%s: digest %s, want %s", c.name, got, c.want)
@@ -239,25 +239,25 @@ func TestParseRefuses(t *testing.T) {
 		{"a subnet over loopback", strings.NewReplacer(`"10.44.0.0/24"`, `"127.0.0.0/24"`, `address: "10.44.0.1"`, `address: "127.0.0.1"`).Replace(g), "overlaps 127.0.0.0/8"},
 		{"another deployment's user", strings.Replace(g, `user: "paisans-f2a9"`, `user: "paisans-0a0b"`, 1), "paisans-0a0b is another deployment's name"},
 		{"a web server app with a bad listen", strings.Replace(g, "web_server: []", "web_server:\n  - app: \"status\"\n    hostname: \"status.example.org\"\n    listen: \"0.0.0.0\"", 1), "web_server[0].listen"},
-		{"a comment added", g + "# fine\n", "not exactly as paisans host request wrote it"},
-		{"CRLF line endings", strings.ReplaceAll(g, "\n", "\r\n"), "not exactly as paisans host request wrote it"},
-		{"the header removed", g[strings.Index(g, "version:"):], "not exactly as paisans host request wrote it"},
-		{"a value unquoted", strings.Replace(g, `user: "paisans-f2a9"`, `user: paisans-f2a9`, 1), "not exactly as paisans host request wrote it"},
-		{"an anchor", strings.Replace(g, `user: "paisans-f2a9"`, `user: &u "paisans-f2a9"`, 1), "not exactly as paisans host request wrote it"},
-		{"a second document", g + "---\nversion: 1\n", "not exactly as paisans host request wrote it"},
-		{"a byte order mark", "\ufeff" + g, "not exactly as paisans host request wrote it"},
-		{"a trailing space", strings.Replace(g, "endpoint: true\n", "endpoint: true \n", 1), "not exactly as paisans host request wrote it"},
-		{"a tab", strings.Replace(g, "endpoint: true\n", "endpoint:\ttrue\n", 1), "not exactly as paisans host request wrote it"},
-		{"no final newline", strings.TrimSuffix(g, "\n"), "not exactly as paisans host request wrote it"},
-		{"an extra final newline", g + "\n", "not exactly as paisans host request wrote it"},
-		{"fields reordered", strings.Replace(g, "ssh_port: 22\nlisten_port: 51820\n", "listen_port: 51820\nssh_port: 22\n", 1), "not exactly as paisans host request wrote it"},
-		{"an alias of an anchor", strings.NewReplacer("  watchdog: true\n", "  watchdog: &t true\n", "  public_ports: true\n", "  public_ports: *t\n").Replace(g), "not exactly as paisans host request wrote it"},
+		{"a comment added", g + "# fine\n", "not exactly as paisans site request wrote it"},
+		{"CRLF line endings", strings.ReplaceAll(g, "\n", "\r\n"), "not exactly as paisans site request wrote it"},
+		{"the header removed", g[strings.Index(g, "version:"):], "not exactly as paisans site request wrote it"},
+		{"a value unquoted", strings.Replace(g, `user: "paisans-f2a9"`, `user: paisans-f2a9`, 1), "not exactly as paisans site request wrote it"},
+		{"an anchor", strings.Replace(g, `user: "paisans-f2a9"`, `user: &u "paisans-f2a9"`, 1), "not exactly as paisans site request wrote it"},
+		{"a second document", g + "---\nversion: 1\n", "not exactly as paisans site request wrote it"},
+		{"a byte order mark", "\ufeff" + g, "not exactly as paisans site request wrote it"},
+		{"a trailing space", strings.Replace(g, "endpoint: true\n", "endpoint: true \n", 1), "not exactly as paisans site request wrote it"},
+		{"a tab", strings.Replace(g, "endpoint: true\n", "endpoint:\ttrue\n", 1), "not exactly as paisans site request wrote it"},
+		{"no final newline", strings.TrimSuffix(g, "\n"), "not exactly as paisans site request wrote it"},
+		{"an extra final newline", g + "\n", "not exactly as paisans site request wrote it"},
+		{"fields reordered", strings.Replace(g, "ssh_port: 22\nlisten_port: 51820\n", "listen_port: 51820\nssh_port: 22\n", 1), "not exactly as paisans site request wrote it"},
+		{"an alias of an anchor", strings.NewReplacer("  watchdog: true\n", "  watchdog: &t true\n", "  public_ports: true\n", "  public_ports: *t\n").Replace(g), "not exactly as paisans site request wrote it"},
 		{"an alias with no anchor", strings.Replace(g, `address: "10.44.0.1"`, "address: *u", 1), "it is not YAML"},
 		{"a merge key", strings.Replace(g, "grants:\n", "grants:\n  <<: {watchdog: true}\n", 1), "not a field of a request"},
-		{"a tag", strings.Replace(g, `user: "paisans-f2a9"`, `user: !!str "paisans-f2a9"`, 1), "not exactly as paisans host request wrote it"},
-		{"single quotes", strings.Replace(g, `user: "paisans-f2a9"`, `user: 'paisans-f2a9'`, 1), "not exactly as paisans host request wrote it"},
-		{"flow style", strings.Replace(g, "grants:\n  watchdog: true\n  public_ports: true\n", "grants: {watchdog: true, public_ports: true}\n", 1), "not exactly as paisans host request wrote it"},
-		{"a leading document marker", "---\n" + g, "not exactly as paisans host request wrote it"},
+		{"a tag", strings.Replace(g, `user: "paisans-f2a9"`, `user: !!str "paisans-f2a9"`, 1), "not exactly as paisans site request wrote it"},
+		{"single quotes", strings.Replace(g, `user: "paisans-f2a9"`, `user: 'paisans-f2a9'`, 1), "not exactly as paisans site request wrote it"},
+		{"flow style", strings.Replace(g, "grants:\n  watchdog: true\n  public_ports: true\n", "grants: {watchdog: true, public_ports: true}\n", 1), "not exactly as paisans site request wrote it"},
+		{"a leading document marker", "---\n" + g, "not exactly as paisans site request wrote it"},
 		{"a non-scalar version", strings.Replace(g, "version: 1\n", "version: [1]\n", 1), `version: ""`},
 		{"a duplicate key", strings.Replace(g, "endpoint: true\n", "endpoint: true\nendpoint: false\n", 1), "already defined"},
 	} {

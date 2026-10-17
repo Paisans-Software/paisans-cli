@@ -18,7 +18,7 @@ import (
 )
 
 // probeMarker is a string only admit's own probe contains.
-const probeMarker = "paisans host admit: read only"
+const probeMarker = "paisans site admit: read only"
 
 // fakeHost is a host as admit's probes see it: the probe's facts as key and
 // value lines, files read with ReadFile, and an answer for each other probe,
@@ -201,7 +201,7 @@ func newBlank() *fakeHost {
 	}
 	h.withDir("/etc/wireguard", "absent", 0, 0).withDir("/etc/paisans", "absent", 0, 0).
 		withDir("/srv/paisans", "absent", 0, 0).withDir("/srv/paisans/f2a9", "absent", 0, 0)
-	// hostprep's probes, as host prepare's tests answer them.
+	// hostprep's probes, as site prepare's tests answer them.
 	h.answer("docker compose version", "compose absent\npkg nftables install ok installed\npkg ufw install ok installed\nkeyring absent\narch amd64\n").
 		answer("RuntimeWatchdogUSec", "device absent\nsystemd 0\ndaemon absent\n").
 		answer("ufw show added", "ufw present\nstatus active\n").

@@ -12,9 +12,9 @@ step 8: write the egress table
   egress: keep paisans-f2a9, its containers and its mesh off this host's loopback and your network (/etc/paisans/egress.f2a9.nft, checked by nft before it replaces the one there)
   provisional: run once the user exists
   write /etc/paisans/egress.f2a9.nft.new mode 0644:
-    | # Written by paisans host admit for paisans-f2a9. Keeps the
+    | # Written by paisans site admit for paisans-f2a9. Keeps the
     | # deployment's user, its containers and its mesh off this host's loopback
-    | # and the owner's network. paisans host evict removes it.
+    | # and the owner's network. paisans site evict removes it.
     | table inet paisans_f2a9
     | delete table inet paisans_f2a9
     | table inet paisans_f2a9 {
@@ -81,7 +81,7 @@ step 9: install the egress unit
   egress: load the table at boot, before paisans-f2a9's manager, which requires it (paisans-f2a9-egress.service)
   provisional: run once the user exists
   write /etc/systemd/system/paisans-f2a9-egress.service mode 0644:
-    | # Written by paisans host admit. Loads the table that keeps paisans-f2a9 off
+    | # Written by paisans site admit. Loads the table that keeps paisans-f2a9 off
     | # this host's loopback and the owner's network, before paisans-f2a9's
     | # manager, and so its Docker daemon and containers, can start: the manager
     | # requires this unit, so a table that fails to load keeps them stopped.

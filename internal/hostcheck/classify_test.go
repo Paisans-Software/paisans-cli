@@ -74,7 +74,7 @@ func TestAnEmptyDockerInstallIsClean(t *testing.T) {
 	wantLine(t, r, "done: docker 27.3.1")
 }
 
-// The report marks what the check found the way host prepare marks its
+// The report marks what the check found the way site prepare marks its
 // plan: done for each finding, and done and not paisans for what another
 // hand put on the host. It shows only with --verbose, under the host
 // check's own line, and never with a padded label.

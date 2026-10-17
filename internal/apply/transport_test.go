@@ -421,7 +421,7 @@ func TestARefusedDefaultUserIsNotAdmitted(t *testing.T) {
 	if p.Hint != "site home-a is not admitted on 203.0.113.10" {
 		t.Errorf("hint %q", p.Hint)
 	}
-	for _, want := range []string{"paisans-f2a9", "paisans host request --site home-a > home-a.admit", "sites.home-a.ssh.user"} {
+	for _, want := range []string{"paisans-f2a9", "paisans site request --site home-a > home-a.admit", "sites.home-a.ssh.user"} {
 		if !strings.Contains(p.Explain, want) {
 			t.Errorf("explain lacks %q:\n%s", want, p.Explain)
 		}

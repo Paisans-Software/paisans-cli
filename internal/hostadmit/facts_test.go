@@ -121,7 +121,7 @@ func TestProbeQuotesWhatItIsGiven(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(script, "# paisans host admit: read only\n") {
+	if !strings.Contains(script, "# paisans site admit: read only\n") {
 		t.Error("the probe does not carry its marker")
 	}
 	if strings.Contains(script, " /srv/a b$(touch x)") || !strings.Contains(script, `'/srv/a b$(touch x)'`) {

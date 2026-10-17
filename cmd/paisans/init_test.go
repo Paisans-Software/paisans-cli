@@ -307,7 +307,7 @@ func TestInitGivesUpAfterMaxRolls(t *testing.T) {
 	}
 }
 
-// apply and host prepare refuse a host where something outside this
+// apply and site prepare refuse a host where something outside this
 // deployment's own interface overlaps the mesh, naming it, and pass one whose
 // only mesh route is their own.
 func TestCheckMeshLive(t *testing.T) {
@@ -500,7 +500,7 @@ func TestInitSkipsAHostNotYetAdmitted(t *testing.T) {
 	if err != nil || wrote {
 		t.Fatalf("wrote %v, %v", wrote, err)
 	}
-	if !strings.Contains(r.Lines(), "home-b has not admitted this deployment yet; host admit checks the subnet against it") {
+	if !strings.Contains(r.Lines(), "home-b has not admitted this deployment yet; site admit checks the subnet against it") {
 		t.Errorf("no line for home-b:\n%s", r.Lines())
 	}
 	if r.Has("progress", "read the networks on home-b") {

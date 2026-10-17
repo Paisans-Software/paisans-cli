@@ -271,7 +271,7 @@ func TestTheDaemonWaitsForTheMeshAddressBeforeStarting(t *testing.T) {
 // Enabled and started on every prepare that finds it otherwise, whether or
 // not the mesh is up: it binds the mesh address once it can. The start does
 // not wait for that: its start waits for the mesh address, which comes up
-// after host prepare, so a start that waited would never return.
+// after site prepare, so a start that waited would never return.
 func TestAStoppedDaemonIsStartedWhetherOrNotTheMeshIsUp(t *testing.T) {
 	host := settled(t, nil)
 	host.responses[probeDaemonUnit] = "enabled enabled\nactive inactive\n"

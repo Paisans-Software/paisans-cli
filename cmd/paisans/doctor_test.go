@@ -125,7 +125,7 @@ func readOnly(cfg *config.Config) (exact []string, prefixes []string) {
 // listens.
 const vmAddress = "10.44.0.3"
 
-// sudoHelperOnly is sudo -l's answer for a user host admit gave the helper
+// sudoHelperOnly is sudo -l's answer for a user site admit gave the helper
 // and nothing else.
 func sudoHelperOnly(user, host, helper string) string {
 	return "Matching Defaults entries for " + user + " on " + host + ":\n" +
@@ -603,7 +603,7 @@ func TestDoctorSiteNarrowsTheHostsReached(t *testing.T) {
 	}
 }
 
-// A record host admit could not have written fails admission with how its
+// A record site admit could not have written fails admission with how its
 // owner recovers: move the record aside, since admit will not write over
 // one it cannot read, then request and admit again.
 func TestDoctorSaysToMoveAnUnreadableRecordAside(t *testing.T) {
@@ -622,8 +622,8 @@ func TestDoctorSaysToMoveAnUnreadableRecordAside(t *testing.T) {
 	_ = runDoctor([]string{"--config", fixtureConfig(), "--site", "vm"})
 	out := rec.Lines()
 	move := strings.Index(out, "`sudo mv "+path+" "+path+".unreadable`")
-	request := strings.Index(out, "`paisans host request --site vm > vm.admit`")
-	admit := strings.Index(out, "`sudo paisans host admit --request vm.admit`")
+	request := strings.Index(out, "`paisans site request --site vm > vm.admit`")
+	admit := strings.Index(out, "`sudo paisans site admit --request vm.admit`")
 	if !strings.Contains(out, "fail: check admission vm its admission record cannot be read") || move < 0 || !(move < request && request < admit) {
 		t.Errorf("want the failure, then move it aside, request and admit, in that order:\n%s", out)
 	}

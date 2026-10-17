@@ -482,7 +482,7 @@ func TestPruningIsReportedOnce(t *testing.T) {
 	}
 }
 
-// A site that answers but is pending is one warning, with the host request
+// A site that answers but is pending is one warning, with the site request
 // line, and nothing more is read from it.
 func TestAPendingSiteIsCheckedNoFurther(t *testing.T) {
 	cfg := fixture(t)
@@ -497,7 +497,7 @@ func TestAPendingSiteIsCheckedNoFurther(t *testing.T) {
 	report, _ := Checks(cfg, fix.Sites, reads).Run(rec, 0)
 
 	f := find(t, report.Findings, SectionAdmission, "home-b: pending: this deployment is not admitted on its host")
-	if f.Level != Warn || !strings.Contains(strings.Join(f.More, "\n"), "`paisans host request --site home-b > home-b.admit`") {
+	if f.Level != Warn || !strings.Contains(strings.Join(f.More, "\n"), "`paisans site request --site home-b > home-b.admit`") {
 		t.Errorf("home-b: %+v", f)
 	}
 	want := "Not checked because of this: user, docker, docker engine, linger, sudo rights, mesh, patroni, containers, settings talk, clocks, leftovers on home-b."

@@ -15,7 +15,7 @@ func ValidUserName(s string) bool { return unixUser.MatchString(s) }
 // DeploymentUserProblem says why user cannot be the login user of the
 // deployment whose id is id, "" when it can: a name ValidUserName accepts,
 // never root, and never another deployment's paisans-<token> user, whose
-// authorized_keys host admit would otherwise write into. sites.<s>.ssh.user,
+// authorized_keys site admit would otherwise write into. sites.<s>.ssh.user,
 // a request's user and an admission record's user are all held to it.
 func DeploymentUserProblem(user, id string) string {
 	own := deployment.Deployment{ID: id}.Prefix()

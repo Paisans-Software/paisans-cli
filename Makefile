@@ -74,7 +74,7 @@ bump-patch:
 	@"$(MAKE)" bump VERSION=$$(echo "$(DEFAULTVER)" | awk -F. '{print $$1"."$$2"."$$3+1}')
 
 # The Linux binaries a release attaches, with a SHA256SUMS file beside them,
-# in dist/. A host owner runs `paisans host admit` on the host itself and
+# in dist/. A host owner runs `paisans site admit` on the host itself and
 # needs the CLI and nothing else, so each binary is static (CGO_ENABLED=0)
 # and runs on any Linux of its architecture with no Go and no C library.
 # .github/workflows/release.yml runs this target, so a local run builds what

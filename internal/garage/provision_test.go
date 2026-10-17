@@ -549,7 +549,7 @@ func TestUnreadableBucketInfoPlansBothAndSaysSo(t *testing.T) {
 
 // A dry run marks each step still to run as pending, with its sentence for
 // --verbose, and under --verbose also marks what was already there as done,
-// the way host prepare and apply's dry run mark theirs. The command, which
+// the way site prepare and apply's dry run mark theirs. The command, which
 // may carry an S3 secret, is never shown.
 func TestShowMarksStepsPendingAndFindingsDone(t *testing.T) {
 	d := fixtureConfig(t).Deployment()

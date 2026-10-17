@@ -24,7 +24,7 @@ var webServerRecordHost = func(cfg *config.Config, site string) admission.Reader
 	return siteTransport(site, cfg.Sites[site], "")
 }
 
-// recordedWebServer is the web server host admit found in front of the
+// recordedWebServer is the web server site admit found in front of the
 // target's site, as its admission record holds it.
 func recordedWebServer(cfg *config.Config, target webserver.Target) (webserver.WebServer, error) {
 	rec, err := admission.Read(webServerRecordHost(cfg, target.Site), cfg.Deployment().Token())
@@ -36,7 +36,7 @@ func recordedWebServer(cfg *config.Config, target webserver.Target) (webserver.W
 
 // runWebServer dispatches `paisans web-server show` and `paisans web-server check`.
 // Neither changes anything. With managed_by: external, show reads the
-// site's admission record over ssh, which holds the web server host admit
+// site's admission record over ssh, which holds the web server site admit
 // found, to print only the snippet that fits it, and check, which looks at
 // the monitor from this machine as a visitor would, reads it too when a
 // check fails, to name it.

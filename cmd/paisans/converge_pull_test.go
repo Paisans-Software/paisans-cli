@@ -277,7 +277,7 @@ func TestAPullWaitsOnItsPrepare(t *testing.T) {
 	steps := convergePlan(cfg, convergeState{})
 	for i, s := range steps {
 		if s.Stage == stagePull {
-			sameLines(t, convergeWaits(cfg, steps, i), []string{"host prepare --site " + stepSite(s)})
+			sameLines(t, convergeWaits(cfg, steps, i), []string{"site prepare --site " + stepSite(s)})
 		}
 	}
 }

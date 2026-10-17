@@ -62,7 +62,7 @@ func TestBuildRefusesAnUndeclaredSite(t *testing.T) {
 	}
 }
 
-// Build checks what it builds, so host request never prints a request admit
+// Build checks what it builds, so site request never prints a request admit
 // would refuse: a mesh over loopback is refused here as in Parse.
 func TestBuildRefusesWhatParseWould(t *testing.T) {
 	cfg := fixture(t)
@@ -121,8 +121,8 @@ func TestBuildNamesTheConfigurationKey(t *testing.T) {
 	}
 }
 
-// Build refuses a request larger than Parse reads, saying why, so host
-// request never prints one host admit would refuse unread.
+// Build refuses a request larger than Parse reads, saying why, so site
+// request never prints one site admit would refuse unread.
 func TestBuildRefusesARequestOverMaxRequestSize(t *testing.T) {
 	cfg := fixture(t)
 	s := cfg.Sites["home-a"]
@@ -139,7 +139,7 @@ func TestBuildRefusesARequestOverMaxRequestSize(t *testing.T) {
 	}
 	cfg.Sites["home-a"] = s
 	_, err := admission.Build(cfg, "home-a")
-	if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("and host admit reads a request of at most %d", admission.MaxRequestSize)) {
+	if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("and site admit reads a request of at most %d", admission.MaxRequestSize)) {
 		t.Errorf("got %v", err)
 	}
 }

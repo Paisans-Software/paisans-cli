@@ -33,7 +33,7 @@ var reachDestination = func(dest config.Destination) apply.Transport {
 	return siteTransport("", config.Site{}, destinationArg(dest))
 }
 
-// ownerTransport is how host deployments reaches a host as its owner: the
+// ownerTransport is how site deployments reaches a host as its owner: the
 // operator's own ssh to the destination --ssh names, through sudo unless
 // --sudo=false, since the registry and every deployment's directories are
 // root's. It is the one transport the CLI gives sudo: every other command
@@ -46,7 +46,7 @@ func ownerTransport(dest config.Destination, sudo bool) apply.SSHTransport {
 	return t
 }
 
-// reachOwner is ownerTransport for host deployments. Tests replace it.
+// reachOwner is ownerTransport for site deployments. Tests replace it.
 var reachOwner = func(dest config.Destination, sudo bool) apply.Transport { return ownerTransport(dest, sudo) }
 
 // deploymentsProbe lists, read only, each directory under the deployments'
@@ -139,14 +139,14 @@ func yesNo(b bool) string {
 	return "no"
 }
 
-// runHostDeployments is `paisans host deployments`: every admission record
+// runSiteDeployments is `paisans site deployments`: every admission record
 // on the host --ssh names, then, through sudo, what its registry holds and
 // what of a deployment is on it with no registry entry. With --sudo=false it
 // lists the records alone, which any user can read. It needs no
 // configuration, and changes nothing. See
 // docs/specs/2026-10-10-remove-without-config.md.
-func runHostDeployments(args []string) error {
-	fs := newFlagSet("host deployments", flag.ContinueOnError)
+func runSiteDeployments(args []string) error {
+	fs := newFlagSet("site deployments", flag.ContinueOnError)
 	reporter := commonFlags(fs)
 	sshFlag := fs.String("ssh", "", "the host to read, user@host[:port]")
 	sudo := fs.Bool("sudo", true, "run remote commands through sudo, since the registry is root's; --sudo=false lists admission records only, which are readable without sudo")
@@ -154,14 +154,14 @@ func runHostDeployments(args []string) error {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return fmt.Errorf("host deployments takes no argument: paisans host deployments --ssh user@host[:port]. Got extra argument(s): %s", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("site deployments takes no argument: paisans site deployments --ssh user@host[:port]. Got extra argument(s): %s", strings.Join(fs.Args(), " "))
 	}
 	if *sshFlag == "" {
-		return fmt.Errorf("host deployments: name the host with --ssh user@host[:port], Eg: --ssh admin@203.0.113.9")
+		return fmt.Errorf("site deployments: name the host with --ssh user@host[:port], Eg: --ssh admin@203.0.113.9")
 	}
 	dest, err := config.ParseDestination(*sshFlag)
 	if err != nil {
-		return fmt.Errorf("host deployments: --ssh: %w", err)
+		return fmt.Errorf("site deployments: --ssh: %w", err)
 	}
 	r := reporter()
 	t := reachOwner(dest, *sudo)
@@ -170,12 +170,12 @@ func runHostDeployments(args []string) error {
 	out, err := t.Run(hostDeploymentsAdmitted)
 	if err != nil {
 		s.Fail(err)
-		return fmt.Errorf("host deployments: %s: listing the admission records in %s failed, so nothing is listed: %w: %s", dest, admission.Dir, err, strings.TrimSpace(out))
+		return fmt.Errorf("site deployments: %s: listing the admission records in %s failed, so nothing is listed: %w: %s", dest, admission.Dir, err, strings.TrimSpace(out))
 	}
 	records, err := parseAdmitted(out)
 	if err != nil {
 		s.Fail(err)
-		return fmt.Errorf("host deployments: %s: listing the admission records in %s: %w. Nothing is listed", dest, admission.Dir, err)
+		return fmt.Errorf("site deployments: %s: listing the admission records in %s: %w. Nothing is listed", dest, admission.Dir, err)
 	}
 	var found leftoverProbe
 	reg := registry.Registry{Deployments: map[string]registry.Entry{}}
@@ -186,15 +186,15 @@ func runHostDeployments(args []string) error {
 		out, err := t.Run(deploymentsProbe)
 		if err != nil {
 			s.Fail(err)
-			return fmt.Errorf("host deployments: %s: listing %s failed, so nothing is listed: %w: %s", dest, deployment.Base, err, strings.TrimSpace(out))
+			return fmt.Errorf("site deployments: %s: listing %s failed, so nothing is listed: %w: %s", dest, deployment.Base, err, strings.TrimSpace(out))
 		}
 		if found, err = parseDeploymentsProbe(out); err != nil {
 			s.Fail(err)
-			return fmt.Errorf("host deployments: %s: listing %s: %w. Nothing is listed", dest, deployment.Base, err)
+			return fmt.Errorf("site deployments: %s: listing %s: %w. Nothing is listed", dest, deployment.Base, err)
 		}
 		if reg, err = registry.Read(t); err != nil {
 			s.Fail(err)
-			return fmt.Errorf("host deployments: %w. Nothing is listed", err)
+			return fmt.Errorf("site deployments: %w. Nothing is listed", err)
 		}
 	}
 	s.Done("")

@@ -1,6 +1,6 @@
 #!/bin/sh
 # The WireGuard helper for {{.Interface}}, rendered by paisans with this
-# deployment's interface, listen port and mesh subnet built in. paisans host
+# deployment's interface, listen port and mesh subnet built in. paisans site
 # admit installs it as {{.Path}}, root's and mode 755, with one sudoers line
 # that lets the deployment's user run it, and nothing else, as root.
 #
@@ -265,7 +265,7 @@ put() {
 	fi
 	# A directory the deployment's user could write would let it plant a
 	# conf with PostUp, which wg-quick runs as root at the next up, past
-	# every check below. host admit makes it root's, 700; put checks it
+	# every check below. site admit makes it root's, 700; put checks it
 	# each time rather than trusting that it stayed so.
 	if ! rootonly; then
 		refuse "$dir is not a directory only root may write"

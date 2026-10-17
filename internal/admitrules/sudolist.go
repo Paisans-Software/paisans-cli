@@ -1,4 +1,4 @@
-// Package admitrules holds the read-only rules host admit and paisans doctor
+// Package admitrules holds the read-only rules site admit and paisans doctor
 // share: the groups a deployment's user must not hold, the Docker Engine
 // floor, the path of the mesh drop-in, and the reading of sudo -l. It imports
 // neither hostadmit nor apply, so doctor can read them without reaching the
@@ -81,14 +81,14 @@ func ReadSudoListAsRoot(user string, lines []string) (list SudoList, ok bool) {
 	return readSudoList(user, lines, false)
 }
 
-// HelperRule is the one rule host admit grants a deployment's user, as
+// HelperRule is the one rule site admit grants a deployment's user, as
 // sudo -l lists it: the WireGuard helper, as root, with no password.
 func HelperRule(helper string) string { return "(root) NOPASSWD: " + helper }
 
 // BeyondHelper is what in l reaches past the helper: every rule but
 // HelperRule(helper); every Defaults entry sudoDefaultProblem names, with
 // why; and every runas or command-specific Defaults line, which sudo -l
-// lists apart from the rule it changes. host admit refuses a user with any
+// lists apart from the rule it changes. site admit refuses a user with any
 // of them, and doctor fails one.
 func (l SudoList) BeyondHelper(helper string) (rules, defaults []string) {
 	for _, r := range l.Rules {

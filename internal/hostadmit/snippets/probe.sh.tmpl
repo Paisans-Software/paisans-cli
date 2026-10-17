@@ -1,8 +1,8 @@
-{{- /* paisans host admit: read only. One "key value" line per fact; a key
+{{- /* paisans site admit: read only. One "key value" line per fact; a key
         that repeats is a list. Nothing here changes the host, and nothing
         reads inside the deployment user's home, which is read as the user.
         Every value rendered in is quoted with q. */ -}}
-# paisans host admit: read only
+# paisans site admit: read only
 export LC_ALL=C PATH=/usr/sbin:/usr/bin:/sbin:/bin
 u={{ q .User }}
 say() { printf '%s %s\n' "$1" "$2"; }

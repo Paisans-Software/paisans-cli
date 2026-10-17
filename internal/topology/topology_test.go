@@ -36,7 +36,7 @@ func everyoneAnswers(t *testing.T, cfg *config.Config) topology.Evidence {
 			t.Fatal(err)
 		}
 		rec := admission.NewRecord(req, req.Grants, "", time.Unix(0, 0))
-		// host admit records the owner's web server itself, as it finds it.
+		// site admit records the owner's web server itself, as it finds it.
 		if cfg.Sites[name].WebServerManagedBy() == config.ManagedByExternal {
 			rec.WebServer = &admission.WebServer{Server: "caddy", Process: "caddy"}
 		}

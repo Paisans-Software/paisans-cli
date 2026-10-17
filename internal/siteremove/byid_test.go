@@ -54,7 +54,7 @@ func TestByIDCleansAMonitorWithNoConfiguration(t *testing.T) {
 	h := w.hosts["watch"]
 	reg, _ := registry.Parse([]byte(h.files[registry.Path]))
 	if _, ok := reg.Deployments[ourID]; !ok {
-		t.Error("the registry entry is gone, which is host evict's to remove")
+		t.Error("the registry entry is gone, which is site evict's to remove")
 	}
 	for path := range h.files {
 		if strings.HasPrefix(path, root+"/") {
@@ -67,7 +67,7 @@ func TestByIDCleansAMonitorWithNoConfiguration(t *testing.T) {
 }
 
 // A removal without --delete-data keeps the data, and the registry entry,
-// which is host evict's, stays as it was, so a later run by --id finds the
+// which is site evict's, stays as it was, so a later run by --id finds the
 // deployment and deletes the data; a run without --delete-data in between
 // keeps the data again and names no registry.
 func TestByIDDeletesDataARemovalWithoutDeleteDataKept(t *testing.T) {

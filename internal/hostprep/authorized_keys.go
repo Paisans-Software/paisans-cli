@@ -11,15 +11,15 @@ import (
 
 // What follows keeps the deployment's user's authorized_keys holding the
 // keys of the admins a site's ssh.keys names. Host admit first wrote the
-// operators' keys there; host prepare, run as that user, maintains them from
+// operators' keys there; site prepare, run as that user, maintains them from
 // ssh.keys. The user is this deployment's alone, so no other deployment
 // shares the file.
 //
 // A key someone else put there, an operator by hand, with options or
-// without, is never removed. host prepare only ever adds a listed key, and
+// without, is never removed. site prepare only ever adds a listed key, and
 // only ever removes a line marked added in the sidecar,
 // /srv/paisans/<token>/.paisans/authorized_keys.owned, which records what
-// host prepare and host admit added: one `<mark> <fingerprint> <name>` line
+// site prepare and site admit added: one `<mark> <fingerprint> <name>` line
 // per key, `added` for a line paisans appended. A line of any other shape is
 // no claim, so its key's line is never removed. A listed key that was already there is left as it is and never recorded:
 // it is often the key the operator logs in with. Every write to the sidecar
@@ -34,7 +34,7 @@ import (
 const markAdded = "added"
 
 // OwnedKeysPath is the sidecar recording which keys of the deployment
-// user's authorized_keys host admit and host prepare added.
+// user's authorized_keys site admit and site prepare added.
 func OwnedKeysPath(d deployment.Deployment) string { return d.StatePath("authorized_keys.owned") }
 
 // Locked runs command under the deployment's lock, in its state directory.
@@ -71,7 +71,7 @@ func parseOwned(content string) []ownedEntry {
 	return out
 }
 
-// userKeys is the deployment user's authorized_keys as host prepare reads
+// userKeys is the deployment user's authorized_keys as site prepare reads
 // it: where it is, and every key line it understands.
 type userKeys struct {
 	dir, file string
@@ -185,9 +185,9 @@ func planAuthorizedKeys(t Transport, d deployment.Deployment, home string, s con
 		case len(plain) > 0:
 			// Already there, put there by someone else (cloud-init, most
 			// often), and often the key this run logs in with. Neither added
-			// again nor recorded, so host prepare never removes it.
+			// again nor recorded, so site prepare never removes it.
 			remaining++
-			out.Present = append(out.Present, fmt.Sprintf("ssh: key %s authorized for the deployment's user, not by host prepare, which never removes it", label))
+			out.Present = append(out.Present, fmt.Sprintf("ssh: key %s authorized for the deployment's user, not by site prepare, which never removes it", label))
 		case len(restricted) > 0:
 			// The key is there with options someone chose. It is theirs:
 			// adding the plain key beside it would undo the restriction.
@@ -220,10 +220,10 @@ func planAuthorizedKeys(t Transport, d deployment.Deployment, home string, s con
 		switch {
 		case len(plain) == 0:
 			// Gone from the file already, or kept only with options someone
-			// added since. Either way it is no longer host prepare's line.
+			// added since. Either way it is no longer site prepare's line.
 			describe := fmt.Sprintf("ssh: forget key %s, which is no longer in %s", label, file)
 			if len(restricted) > 0 {
-				describe = fmt.Sprintf("ssh: forget key %s, which is now authorized with options by `%s` and so is no longer host prepare's", label, restricted[0].raw)
+				describe = fmt.Sprintf("ssh: forget key %s, which is now authorized with options by `%s` and so is no longer site prepare's", label, restricted[0].raw)
 			}
 			out.Steps = append(out.Steps, Step{Kinds: []string{KindSSHKeys}, Title: "forget ssh key", Describe: describe, Command: Locked(d, writeOwned(d, owned))})
 		default:
@@ -235,7 +235,7 @@ func planAuthorizedKeys(t Transport, d deployment.Deployment, home string, s con
 				Kinds:    []string{KindSSHKeys},
 				Label:    "remove",
 				Title:    "remove ssh key",
-				Describe: fmt.Sprintf("ssh: remove key %s from %s, which host prepare or host admit added and ssh.keys no longer lists", label, file),
+				Describe: fmt.Sprintf("ssh: remove key %s from %s, which site prepare or site admit added and ssh.keys no longer lists", label, file),
 				Command:  Locked(d, removeLines(file, raws)+"; "+writeOwned(d, owned)),
 			})
 		}
@@ -298,7 +298,7 @@ func writeOwned(d deployment.Deployment, entries []ownedEntry) string {
 func ownedBody(entries []ownedEntry) string {
 	sorted := append([]ownedEntry(nil), entries...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].fingerprint < sorted[j].fingerprint })
-	body := "# Keys host admit and host prepare added to this deployment's user's authorized_keys: <mark> <fingerprint> <name>. host prepare removes a line only when it is marked added here and ssh.keys no longer lists it.\n"
+	body := "# Keys site admit and site prepare added to this deployment's user's authorized_keys: <mark> <fingerprint> <name>. site prepare removes a line only when it is marked added here and ssh.keys no longer lists it.\n"
 	for _, e := range sorted {
 		body += e.mark + " " + e.fingerprint + " " + e.name + "\n"
 	}

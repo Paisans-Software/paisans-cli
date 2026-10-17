@@ -98,7 +98,7 @@ type holder struct{ What string }
 // system Docker with restart: always retakes its ports when that daemon
 // restarts, so it holds them too. Whatever it cannot read it says so, and
 // admit refuses rather than read it as nothing.
-const portsProbe = `# paisans host admit: who holds 80 and 443
+const portsProbe = `# paisans site admit: who holds 80 and 443
 if out=$(ss -Hltnpe '( sport = :80 or sport = :443 )' 2>/dev/null); then printf '%s\n' "$out" | sed -n 's/^./listen &/p'; else echo 'unread listeners (ss)'; fi
 if out=$(ss -Hlunpe '( sport = :80 or sport = :443 )' 2>/dev/null); then printf '%s\n' "$out" | sed -n 's/^./listen-udp &/p'; else echo 'unread UDP sockets (ss)'; fi
 if [ -S /var/run/docker.sock ]; then

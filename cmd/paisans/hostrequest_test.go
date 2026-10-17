@@ -17,7 +17,7 @@ import (
 func TestHostRequestWritesTheRequestAndItsDigest(t *testing.T) {
 	var err error
 	stdout, stderr := captureOutput(t, func() {
-		err = runHostRequest([]string{"--site", "vm", "--config", fixtureConfig()})
+		err = runSiteRequest([]string{"--site", "vm", "--config", fixtureConfig()})
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -43,8 +43,8 @@ func TestHostRequestWritesTheRequestAndItsDigest(t *testing.T) {
 
 // Two runs print the same bytes, so the same digest.
 func TestHostRequestIsStable(t *testing.T) {
-	first, _ := captureOutput(t, func() { _ = runHostRequest([]string{"--site", "home-a", "--config", fixtureConfig()}) })
-	second, _ := captureOutput(t, func() { _ = runHostRequest([]string{"--site", "home-a", "--config", fixtureConfig()}) })
+	first, _ := captureOutput(t, func() { _ = runSiteRequest([]string{"--site", "home-a", "--config", fixtureConfig()}) })
+	second, _ := captureOutput(t, func() { _ = runSiteRequest([]string{"--site", "home-a", "--config", fixtureConfig()}) })
 	if first == "" || first != second {
 		t.Errorf("two runs differ:\n%s\n%s", first, second)
 	}
@@ -64,7 +64,7 @@ func TestHostRequestRefuses(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			var err error
-			stdout, _ := captureOutput(t, func() { err = runHostRequest(c.args) })
+			stdout, _ := captureOutput(t, func() { err = runSiteRequest(c.args) })
 			if err == nil || !strings.Contains(err.Error(), c.want) {
 				t.Errorf("got %v, want %q", err, c.want)
 			}
@@ -78,11 +78,11 @@ func TestHostRequestRefuses(t *testing.T) {
 // The line a not-admitted login tells the operator to run is this command,
 // so its usage and the message agree.
 func TestHostRequestUsageMatchesTheNotAdmittedLine(t *testing.T) {
-	c := findCommand("host request")
+	c := findCommand("site request")
 	if c == nil {
-		t.Fatal("host request has no help page")
+		t.Fatal("site request has no help page")
 	}
-	if got := c.usage[0]; !strings.HasPrefix(got, "paisans host request --site <name>") || !strings.HasSuffix(got, "> <name>.admit") {
+	if got := c.usage[0]; !strings.HasPrefix(got, "paisans site request --site <name>") || !strings.HasSuffix(got, "> <name>.admit") {
 		t.Errorf("usage %q does not agree with the not-admitted message", got)
 	}
 }
@@ -92,7 +92,7 @@ func TestHostRequestUsageMatchesTheNotAdmittedLine(t *testing.T) {
 func TestHostRequestQuotesAStrayArgument(t *testing.T) {
 	var err error
 	captureOutput(t, func() {
-		err = runHostRequest([]string{"--site", "vm", "--config", fixtureConfig(), "a b\nc"})
+		err = runSiteRequest([]string{"--site", "vm", "--config", fixtureConfig(), "a b\nc"})
 	})
 	if err == nil || !strings.Contains(err.Error(), `"a b\nc"`) {
 		t.Errorf("got %v, want the argument quoted", err)
@@ -105,7 +105,7 @@ func TestHostRequestRefusesAConfigurationValidateRefuses(t *testing.T) {
 	path := filepath.Join("..", "..", "internal", "validate", "testdata", "duplicate-site-address.yaml")
 	var err error
 	stdout, _ := captureOutput(t, func() {
-		err = runHostRequest([]string{"--site", "home-a", "--config", path})
+		err = runSiteRequest([]string{"--site", "home-a", "--config", path})
 	})
 	var p *ui.Problem
 	if !errors.As(err, &p) || !strings.Contains(p.Hint, "was refused") {

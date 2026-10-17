@@ -440,8 +440,8 @@ func TestContainerThatStartedBeforeWg0(t *testing.T) {
 			t.Errorf("missing %q:\n%s", want, text)
 		}
 	}
-	if strings.Contains(text, "host prepare") {
-		t.Errorf("the advice names host prepare, which orders nothing at boot:\n%s", text)
+	if strings.Contains(text, "site prepare") {
+		t.Errorf("the advice names site prepare, which orders nothing at boot:\n%s", text)
 	}
 }
 

@@ -88,7 +88,7 @@ type ManifestWebServer struct {
 	SHA256 string `json:"sha256"`
 	// Server is the web server the file is for: caddy, nginx or apache.
 	Server string `json:"server"`
-	// Container is the docker container the owner's server runs in, as host
+	// Container is the docker container the owner's server runs in, as site
 	// admit found it, empty when it runs on the host itself.
 	Container string `json:"container,omitempty"`
 	// Config is the owner's server's configuration, as admit found it,

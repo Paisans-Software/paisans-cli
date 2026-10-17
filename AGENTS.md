@@ -12,7 +12,7 @@ A toolkit for installing and operating a paisans community stack, plus the
 design that toolkit follows. **The design leads and the code follows it.**
 `README.md` is the design; `cmd/` and `internal/` implement the parts of it that
 have been built: the `paisans` command, from `validate` and `render` through
-`host prepare`, `apply`, `site add` and the rest. `docs/development.md` lists what exists, under *Run*,
+`site prepare`, `apply`, `site add` and the rest. `docs/development.md` lists what exists, under *Run*,
 and what does not, under *What is not here yet*. The commands reach hosts over
 SSH and drive Docker there, and each one that changes a host does so only with
 `--execute`. The toolkit's version is the constant in `internal/version`;

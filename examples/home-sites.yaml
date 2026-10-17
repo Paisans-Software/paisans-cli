@@ -64,7 +64,7 @@ sites:
   # ssh.host is required, since there is no public address to default to: a
   # name the workstation reaches, on the home LAN or a VPN such as Tailscale.
   # A ProxyJump through vm over the mesh works too, but only once the mesh
-  # exists, so the first host prepare needs one of the other two.
+  # exists, so the first site prepare needs one of the other two.
   home-a:
     roles: [data, apps]
     address: 10.44.0.1

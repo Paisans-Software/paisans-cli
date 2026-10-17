@@ -130,11 +130,11 @@ func planRecord(p *planner) error {
 const keysMarker = "paisans-sidecar"
 
 // keysProbe reads, as the user, its authorized_keys and the sidecar admit
-// and host prepare keep of the keys they appended. awk 1 ends each file's
+// and site prepare keep of the keys they appended. awk 1 ends each file's
 // last line, so the marker is always a line of its own.
 func keysProbe(d deployment.Deployment) string {
 	side := hostprep.OwnedKeysPath(d)
-	return "# paisans host admit: keys, read as the user\n" +
+	return "# paisans site admit: keys, read as the user\n" +
 		`if [ -f "$HOME/.ssh/authorized_keys" ]; then awk 1 "$HOME/.ssh/authorized_keys"; fi` + "\n" +
 		"echo " + keysMarker + "\n" +
 		"if [ -f " + side + " ]; then awk 1 " + side + "; fi"
@@ -151,7 +151,7 @@ const keysSeparator = "--- sidecar ---"
 // before anything is replaced, so no key the owner put there is lost. A
 // ~/.ssh that was there keeps its mode but for group and other write,
 // with which sshd's StrictModes would ignore the keys. It holds the
-// deployment's lock, which makes the state directory, as host prepare's key
+// deployment's lock, which makes the state directory, as site prepare's key
 // steps do, so the two never interleave their writes.
 func keysScript(d deployment.Deployment) string {
 	side := hostprep.OwnedKeysPath(d)
@@ -174,7 +174,7 @@ func keysCommand(user, home, token string) string {
 }
 
 // planKeys adds each operator's key the user's authorized_keys lacks, and
-// records it in the sidecar as host prepare records one, so a later host
+// records it in the sidecar as site prepare records one, so a later site
 // prepare, run by the operators as the user, can take a key away. Admit
 // never removes a key: the owner may have put one there.
 func planKeys(p *planner) error {
@@ -221,7 +221,7 @@ func planKeys(p *planner) error {
 		return nil
 	}
 	p.step(Step{Title: "add the operators' keys",
-		Describe: fmt.Sprintf("keys: %d operator %s into %s's authorized_keys, written as %s, and recorded in %s for host prepare", len(add), plural(len(add), "key"), user, user, hostprep.OwnedKeysPath(p.d)),
+		Describe: fmt.Sprintf("keys: %d operator %s into %s's authorized_keys, written as %s, and recorded in %s for site prepare", len(add), plural(len(add), "key"), user, user, hostprep.OwnedKeysPath(p.d)),
 		Command:  asUser(p, keysScript(p.d)),
 		Input:    strings.Join(add, "\n") + "\n" + keysSeparator + "\n" + hostprep.OwnedKeysFile(owned),
 		Kinds:    []string{hostprep.KindSSHKeys}, Provisional: !p.f.User.Exists})

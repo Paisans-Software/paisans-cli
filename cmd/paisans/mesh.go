@@ -30,7 +30,7 @@ var meshRandom io.Reader = rand.Reader
 // checkMeshLive refuses when anything on the host h reaches, outside this
 // deployment's own interface, holds a network overlapping the mesh subnet:
 // a route, an address, a Docker network or one of Docker's address pools.
-// apply and host prepare run it before they change the host, dry run or not,
+// apply and site prepare run it before they change the host, dry run or not,
 // so a clash stops them with nothing changed. See internal/mesh.
 func checkMeshLive(cfg *config.Config, site string, h mesh.Host) error {
 	subnet, err := mesh.ParsePrefix(cfg.Mesh.Subnet)
@@ -75,7 +75,7 @@ func holder(clash []mesh.Taken) string {
 // settleMesh is init's subnet decision. It asks every site first whether it
 // holds this deployment's manifest. Once any of them does, the subnet is
 // deployed and settleMesh never changes it. A site that refuses the login
-// has not admitted the deployment yet, and is left to host admit, which
+// has not admitted the deployment yet, and is left to site admit, which
 // checks the subnet against it as root; every other site must answer, since
 // an unchecked host is exactly where a collision would go unseen. It gathers
 // everything each admitted host holds (see checkMeshLive), keeps the
@@ -111,7 +111,7 @@ func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]reg
 		h := hosts[name]
 		_, found, err := h.ReadFile(manifest)
 		if errors.Is(err, apply.ErrLoginRefused) {
-			s.Detail("%s has not admitted this deployment yet; host admit checks the subnet against it as root, and refuses one that overlaps anything there", name)
+			s.Detail("%s has not admitted this deployment yet; site admit checks the subnet against it as root, and refuses one that overlaps anything there", name)
 			continue
 		}
 		if err != nil {
@@ -188,7 +188,7 @@ func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]reg
 	}
 
 	if !choice.Rolled && len(admitted) == 0 {
-		s.Detail("%s: mesh.subnet %s is kept; no site has admitted this deployment yet, so host admit checks it on each.", path, subnet)
+		s.Detail("%s: mesh.subnet %s is kept; no site has admitted this deployment yet, so site admit checks it on each.", path, subnet)
 		return false, "kept", nil
 	}
 	if !choice.Rolled {

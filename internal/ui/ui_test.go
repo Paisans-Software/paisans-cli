@@ -409,14 +409,14 @@ func TestPlainEndMarksAreWords(t *testing.T) {
 	var b strings.Builder
 	at := time.Date(2026, 10, 9, 0, 0, 0, 0, time.UTC)
 	r := ui.NewForTest(&b, false, false, func() time.Time { return at })
-	r.Step("host prepare --site a").End(ui.OK, "")
+	r.Step("site prepare --site a").End(ui.OK, "")
 	r.Step("apply --site a").End(ui.Pending, "3 changes")
-	r.Step("apply --site b").End(ui.Waiting, "after host prepare --site b")
+	r.Step("apply --site b").End(ui.Waiting, "after site prepare --site b")
 	r.Step("dns init").End(ui.Failed, "the provider did not answer")
 	r.Step("site file for health").End(ui.Warned, "no directory to write in")
-	want := "  ok   host prepare --site a\n" +
+	want := "  ok   site prepare --site a\n" +
 		"  todo apply --site a: 3 changes\n" +
-		"  wait apply --site b: after host prepare --site b\n" +
+		"  wait apply --site b: after site prepare --site b\n" +
 		"  FAIL dns init: the provider did not answer\n" +
 		"  WARN site file for health: no directory to write in\n"
 	if b.String() != want {
@@ -487,8 +487,8 @@ func TestAResultFollowsItsTitle(t *testing.T) {
 	var b strings.Builder
 	r := ui.NewForTest(&b, false, false, clock())
 	r.Step("init").End(ui.Pending, "generated 4 secrets")
-	r.Step("host prepare --site luthen-rael").End(ui.OK, "")
-	want := "  todo init: generated 4 secrets\n  ok   host prepare --site luthen-rael\n"
+	r.Step("site prepare --site luthen-rael").End(ui.OK, "")
+	want := "  todo init: generated 4 secrets\n  ok   site prepare --site luthen-rael\n"
 	if b.String() != want {
 		t.Errorf("got:\n%q\nwant:\n%q", b.String(), want)
 	}
@@ -554,8 +554,8 @@ func TestSectionsAreSetApartByABlankLine(t *testing.T) {
 	r.Section("etcd members")
 	r.Step("read a's etcd record").End(ui.Pending, "not founded yet")
 	r.Section("hosts")
-	r.Step("host prepare --site a").End(ui.OK, "")
-	want := "etcd members\n  todo read a's etcd record: not founded yet\n\nhosts\n  ok   host prepare --site a\n"
+	r.Step("site prepare --site a").End(ui.OK, "")
+	want := "etcd members\n  todo read a's etcd record: not founded yet\n\nhosts\n  ok   site prepare --site a\n"
 	if b.String() != want {
 		t.Errorf("got:\n%q\nwant:\n%q", b.String(), want)
 	}

@@ -20,7 +20,7 @@ import (
 // R6), and the module the host's iptables uses, without which
 // dockerd-rootless-setuptool.sh refuses to install it.
 func modulesLoadConf(p *planner) string {
-	return "# Written by paisans host admit. The rootless Docker daemons of admitted\n" +
+	return "# Written by paisans site admit. The rootless Docker daemons of admitted\n" +
 		"# deployments need br_netfilter to start with their userland proxy off,\n" +
 		"# and the module their iptables uses for the setup tool to install them.\n" +
 		"br_netfilter\n" + iptablesModule(p) + "\n"
@@ -132,7 +132,7 @@ func (s UserState) holdsData() bool {
 // line admit writes it on. Each count is its own command's, and one that
 // fails is unknown, never none; then the data root the daemon named is
 // looked in as a stopped daemon's is.
-const userStateProbe = `# paisans host admit: as the user
+const userStateProbe = `# paisans site admit: as the user
 old=%s
 if systemctl --user is-active -q docker.service 2>/dev/null; then echo "daemon active"; else echo "daemon inactive"; fi
 if [ -f "$HOME/.config/systemd/user/docker.service" ]; then echo "unit present"; else echo "unit absent"; fi
@@ -255,8 +255,8 @@ func (p *planner) oldRoot() (string, error) {
 }
 
 // daemonJSON is the user's daemon.json, as hostprep.DaemonJSON has it for
-// the request's mesh and the data root --data-dir gives, so host admit and
-// host prepare never disagree on it.
+// the request's mesh and the data root --data-dir gives, so site admit and
+// site prepare never disagree on it.
 func daemonJSON(p *planner) (string, error) {
 	return hostprep.DaemonJSON(p.in.Request.MeshSubnet, p.record.DataDir)
 }

@@ -119,7 +119,7 @@ func convergePlan(cfg *config.Config, st convergeState) []convergeStep {
 	// Docker, WireGuard and the firewall on every site; a prepared host
 	// plans nothing.
 	for _, s := range cfg.SiteNames() {
-		steps = append(steps, step(stagePrepare, "host", "prepare", "--site", s))
+		steps = append(steps, step(stagePrepare, "site", "prepare", "--site", s))
 	}
 	// Every site's images, on every host at once: an install applies one
 	// site at a time, and each apply would otherwise wait on its own host's
@@ -289,12 +289,12 @@ func init() {
 	}
 }
 
-// isPrepare reports whether args are host prepare's.
+// isPrepare reports whether args are site prepare's.
 func isPrepare(args []string) bool {
-	return len(args) > 1 && args[0] == "host" && args[1] == "prepare"
+	return len(args) > 1 && args[0] == "site" && args[1] == "prepare"
 }
 
-// convergePrepare runs args, a host prepare step's command, through env:
+// convergePrepare runs args, a site prepare step's command, through env:
 // apply without --site runs every host's at once, each on its own env.
 // Tests replace it.
 var convergePrepare = func(env prepareEnv, args []string) error {
@@ -328,7 +328,7 @@ func atOnce(n int, work func(i int)) {
 	wg.Wait()
 }
 
-// prepareRun runs one host's host prepare, args, through convergePrepare,
+// prepareRun runs one host's site prepare, args, through convergePrepare,
 // quietly, as convergeQuiet runs a step: its warnings, refusals and ssh
 // retries come back as reports and its notes for after the line, and a hold
 // for a prompt reaches r, which draws the line. With verbose its own output
@@ -356,7 +356,7 @@ func prepareRun(r ui.Reporter, line ui.Step, args []string, verbose bool) (outpu
 	return b.String(), summary, found, stop, reports, err
 }
 
-// checkPrepare is a host prepare step's check, as checkStep is any other's.
+// checkPrepare is a site prepare step's check, as checkStep is any other's.
 func checkPrepare(r ui.Reporter, args []string) (string, []checkReport, error) {
 	_, summary, found, stop, reports, err := prepareRun(r, nil, args, false)
 	switch {
@@ -365,7 +365,7 @@ func checkPrepare(r ui.Reporter, args []string) (string, []checkReport, error) {
 	case stop != nil:
 		return "", reports, stop
 	case !found:
-		return "", reports, fmt.Errorf("host prepare ended without saying what it would change")
+		return "", reports, fmt.Errorf("site prepare ended without saying what it would change")
 	}
 	return summary, reports, nil
 }
@@ -374,8 +374,8 @@ func runStep(args []string) error {
 	switch {
 	case args[0] == "init":
 		return runInit(args[1:])
-	case args[0] == "host" && args[1] == "prepare":
-		return runHostPrepare(args[2:])
+	case isPrepare(args):
+		return runSitePrepare(args[2:])
 	case args[0] == "apply":
 		return runApply(args[1:], os.Stdin, os.Stdout)
 	case args[0] == "site" && args[1] == "add":
@@ -515,13 +515,13 @@ type convergeOptions struct {
 }
 
 // convergeFlags is args with the flags o hands on, each to the commands that
-// take it: --config and -v to every one, --secrets to all but host prepare,
+// take it: --config and -v to every one, --secrets to all but site prepare,
 // --execute to all but init, --min-free and
 // --keep-images to apply alone, and --yes to apply and gateway move.
 func convergeFlags(args []string, o convergeOptions) []string {
 	out := append([]string(nil), args...)
 	out = append(out, "--config", o.Config)
-	takesSecrets := !(args[0] == "host")
+	takesSecrets := !isPrepare(args)
 	takesExecute := args[0] != "init"
 	if takesSecrets && o.Secrets != "" {
 		out = append(out, "--secrets", o.Secrets)
@@ -815,7 +815,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	}
 	cfg = sites.Effective(declaration)
 	// Every site's images are checked against its architecture here, from
-	// the render: each site's apply checks them only once host prepare has
+	// the render: each site's apply checks them only once site prepare has
 	// run on every host. The render needs the secrets, so a dry run whose
 	// secrets init has yet to generate checks them once init has run, as
 	// its review does.
@@ -875,7 +875,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		// A site it could not read is shown on its line; it stops nothing.
 		reviews, pending, _ := convergeReview(r, cfg, o)
 		// What --execute checks every host's record against before its
-		// first step, and publishes once host prepare has made the stores.
+		// first step, and publishes once site prepare has made the stores.
 		if err := store.check(r, convergeRecords(reviews), false, o.stdin, o.stdout); err != nil {
 			return err
 		}
@@ -905,7 +905,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	}
 	// Approved, and before the first step: every host's record is checked
 	// against the version, which only reads. The version is published after
-	// the host prepare steps, which make every site's store, and before any
+	// the site prepare steps, which make every site's store, and before any
 	// other step changes a host, so the store holds what is applied even if
 	// the run stops part way. A step that records what it made at Pocket ID
 	// in secrets.enc.yaml publishes the bytes it wrote as the next version,
@@ -1120,7 +1120,7 @@ func convergeStatus(r ui.Reporter, cfg *config.Config, steps []convergeStep, o c
 				done[s.Title] = statuses[k]
 			}
 			// Each check pointed nothing elsewhere, but a check of a step
-			// that is not host prepare may have: the reads after draw on r.
+			// that is not site prepare may have: the reads after draw on r.
 			routeRetries(r)
 			routeHolds(r)
 			routeLoginNotes(r)
@@ -1191,7 +1191,7 @@ func installStatus(r ui.Reporter, steps []convergeStep, check func(int) stepStat
 			switch {
 			case st.after == "init":
 				c.waits = "init"
-			case strings.HasPrefix(st.after, "host prepare ") && c.waits == "":
+			case strings.HasPrefix(st.after, "site prepare ") && c.waits == "":
 				c.waits = "prepare"
 			default:
 				// It waits on another install step, which is work.
@@ -1411,12 +1411,12 @@ func convergePrepareAll(r ui.Reporter, cfg *config.Config, steps []convergeStep,
 		}
 		lines[k].Done("")
 	})
-	// A host prepare a test runs through the step runner may have pointed
+	// A site prepare a test runs through the step runner may have pointed
 	// the retries and holds elsewhere; what follows draws on r.
 	routeRetries(r)
 	routeHolds(r)
 	routeLoginNotes(r)
-	return groupStop("host prepare", steps, errs)
+	return groupStop("site prepare", steps, errs)
 }
 
 // groupStop is how a stage whose hosts ran at once stops, once every one
@@ -1680,10 +1680,10 @@ func convergeUp(cfg *config.Config, steps []convergeStep, marks map[string]ui.Ma
 
 // convergeWaits is the titles of the earlier steps that steps[i] waits on,
 // in the order they ran: init, for every step once it has work; the site's
-// host prepare, for every step on a site, its pull included; each witness's earlier apply, for
+// site prepare, for every step on a site, its pull included; each witness's earlier apply, for
 // a founding member that is not one, whose gate refuses it until the witness
 // runs; the site's earlier apply or site add and the storage step, for an
-// apply in pass two; and the host prepare and first apply of each Garage
+// apply in pass two; and the site prepare and first apply of each Garage
 // site, for storage, since Garage has to be running to be asked.
 func convergeWaits(cfg *config.Config, steps []convergeStep, i int) []string {
 	var waits []string
@@ -1701,7 +1701,7 @@ func convergeWaits(cfg *config.Config, steps []convergeStep, i int) []string {
 		}
 		return nil
 	}
-	prepare := func(site string) string { return "host prepare --site " + site }
+	prepare := func(site string) string { return "site prepare --site " + site }
 	switch {
 	case s.Args[0] == "pull":
 		waits = append(waits, prepare(stepSite(s)))
@@ -1747,7 +1747,7 @@ func convergeWaits(cfg *config.Config, steps []convergeStep, i int) []string {
 // step about a site names it last.
 func stepSite(s convergeStep) string {
 	switch strings.Join(s.Args[:min(2, len(s.Args))], " ") {
-	case "apply --site", "pull --site", "site add", "host prepare", "storage init":
+	case "apply --site", "pull --site", "site add", "site prepare", "storage init":
 		return s.Args[len(s.Args)-1]
 	}
 	return ""
@@ -1755,7 +1755,7 @@ func stepSite(s convergeStep) string {
 
 // dryRunFound is told by the dry run of each command apply without --site
 // runs as a step what it would change: a summary such as "3 changes", or
-// host prepare's kinds of change such as "docker, ssh keys", empty
+// site prepare's kinds of change such as "docker, ssh keys", empty
 // when there is nothing to do, and stop when it found something --execute
 // would stop at. checkStep sets it; otherwise it does nothing.
 var dryRunFound = func(summary string, stop error) {}

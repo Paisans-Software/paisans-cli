@@ -16,7 +16,7 @@ type wgHelperData struct {
 	ListenPort, Prefix, Owner                         int
 }
 
-// WGHelperScript is the WireGuard helper host admit installs for d at
+// WGHelperScript is the WireGuard helper site admit installs for d at
 // apply.WGHelper's Path, mode 755: a POSIX sh script whose put checks a conf
 // and installs it as d.WireGuardInstalled, and whose other verbs start,
 // restart, sync, show and read the journal of d's interface. The interface,

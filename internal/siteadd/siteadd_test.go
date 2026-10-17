@@ -330,7 +330,7 @@ func TestAJoinOutsideTheScopeIsRefused(t *testing.T) {
 	b.Roles = append(b.Roles, config.RoleApps)
 	w.cfg.Sites["home-b"] = b
 	_, err := siteadd.Build(w.cfg, w.secrets, "home-b", w.transports())
-	if err == nil || !strings.Contains(err.Error(), "give it the apps role and run host prepare and apply") {
+	if err == nil || !strings.Contains(err.Error(), "give it the apps role and run site prepare and apply") {
 		t.Errorf("a new data and apps site: %v", err)
 	}
 	if err != nil && strings.Contains(err.Error(), "placement decision") {

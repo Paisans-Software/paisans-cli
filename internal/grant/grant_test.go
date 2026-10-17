@@ -122,7 +122,7 @@ func TestFirstIsNoRecordedPartTheReviewCovers(t *testing.T) {
 	}
 	prepared := grant.Update(grant.Record{}, g, grant.PrepareScope, time.Unix(0, 0), "")
 	if grant.Compare("vm", g, prepared, grant.PrepareScope).First {
-		t.Error("host prepare's review of recorded keys is marked first")
+		t.Error("site prepare's review of recorded keys is marked first")
 	}
 	if !grant.Compare("vm", g, prepared, grant.ApplyScope()).First {
 		t.Error("the first review of the images is not marked first")
@@ -291,7 +291,7 @@ func TestUpdateKeepsAnUnchangedPart(t *testing.T) {
 		t.Errorf("%+v", fewer.Keys)
 	}
 	if rec.Images != nil {
-		t.Errorf("host prepare wrote images: %+v", rec.Images)
+		t.Errorf("site prepare wrote images: %+v", rec.Images)
 	}
 }
 

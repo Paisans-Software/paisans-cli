@@ -1,6 +1,6 @@
 // Package grant is what a deployment's configuration grants on a host: who
 // may log in to it and what code runs there. Each host records the grant this
-// deployment last applied, and apply and host prepare show what would change
+// deployment last applied, and apply and site prepare show what would change
 // from that record before they change anything, so an operator approves an
 // added key or a changed image at a terminal rather than discovering it in a
 // plan line (docs/specs/2026-10-11-config-review.md).
@@ -76,7 +76,7 @@ type Image struct {
 }
 
 // For computes site's grant from cfg and plan, plan being the render of cfg.
-// A nil plan computes the login and the keys alone, which is all host prepare
+// A nil plan computes the login and the keys alone, which is all site prepare
 // needs.
 func For(cfg *config.Config, plan *render.Plan, site string) (Grant, error) {
 	declared, ok := cfg.Sites[site]

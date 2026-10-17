@@ -20,7 +20,7 @@ import (
 // where and as whom, and nothing about which keys. The keys are the part every
 // operator shares: paisans-stack.yaml is one file for the whole deployment, so it lists
 // public keys, which are safe to share, and never a path to a private key,
-// which is one operator's and lives on one operator's machine. `host prepare` makes
+// which is one operator's and lives on one operator's machine. `site prepare` makes
 // the listed keys the user's authorized keys, so the file is also the record
 // of who can log in.
 type SSH struct {
@@ -29,7 +29,7 @@ type SSH struct {
 	Host string `yaml:"host"`
 	// User is the login user. Empty means the deployment's own user,
 	// paisans-<token>, which SSHUser returns. Either way it must already
-	// exist on the host: creating users is not something host prepare does.
+	// exist on the host: creating users is not something site prepare does.
 	User string `yaml:"user"`
 	// Port is the SSH port. Zero means 22.
 	Port int `yaml:"port"`
@@ -237,9 +237,9 @@ func ParseKeyLine(line string) (AuthorizedKey, []string, error) {
 // key listed twice.
 //
 // Options (`from=`, `command=`, `restrict` and the rest) are refused rather
-// than carried. They change what a key may do, and a line that host prepare
+// than carried. They change what a key may do, and a line that site prepare
 // writes and later compares has to mean the same thing everywhere; a
-// restricted key belongs in authorized_keys by hand, where host prepare leaves
+// restricted key belongs in authorized_keys by hand, where site prepare leaves
 // it alone.
 func (s SSH) AuthorizedKeys() ([]AuthorizedKey, []string) {
 	var keys []AuthorizedKey
@@ -256,7 +256,7 @@ func (s SSH) AuthorizedKeys() ([]AuthorizedKey, []string) {
 			problems = append(problems, fmt.Sprintf("%s: not an OpenSSH public key (%v). Paste the whole line of the .pub file, Eg: ssh-ed25519 AAAA... you@example.org", nk.Name, err))
 			continue
 		case len(options) > 0:
-			problems = append(problems, fmt.Sprintf("%s: carries options (%s). List plain keys only; a restricted key is added to authorized_keys by hand, where host prepare leaves it alone", nk.Name, strings.Join(options, ",")))
+			problems = append(problems, fmt.Sprintf("%s: carries options (%s). List plain keys only; a restricted key is added to authorized_keys by hand, where site prepare leaves it alone", nk.Name, strings.Join(options, ",")))
 			continue
 		}
 		if first, dup := seen[key.Fingerprint]; dup {
@@ -303,7 +303,7 @@ func sshProblems(name string, site Site, id string, known map[string]Operator) [
 	if s.User != "" && !unixUser.MatchString(s.User) {
 		add("sites.%s.ssh.user: %q is not a user name this toolkit accepts. Use a lowercase letter or underscore, then lowercase letters, digits, underscores or hyphens, at most 32 characters, or leave it out for the deployment's own user.", name, s.User)
 	} else if p := DeploymentUserProblem(s.User, id); s.User != "" && p != "" {
-		add("sites.%s.ssh.user: %s. host admit makes this user the deployment's and writes the operators' keys into it, so leave ssh.user out for the deployment's own user, or name another user of your own.", name, p)
+		add("sites.%s.ssh.user: %s. site admit makes this user the deployment's and writes the operators' keys into it, so leave ssh.user out for the deployment's own user, or name another user of your own.", name, p)
 	}
 	if s.Port < 0 || s.Port > 65535 {
 		add("sites.%s.ssh.port: %d is not a port. Give 1 to 65535, or leave it out for 22.", name, s.Port)
@@ -315,7 +315,7 @@ func sshProblems(name string, site Site, id string, known map[string]Operator) [
 		add("sites.%s.ssh.host: %q is neither a hostname nor an IP address. Give only the host; the user and port have keys of their own.", name, s.Host)
 	}
 	if len(s.Operators) == 0 {
-		add("sites.%s.ssh.keys: required. Name at least one operator from the operators section, Eg: keys: [alice]; host prepare makes their keys the user's authorized keys.", name)
+		add("sites.%s.ssh.keys: required. Name at least one operator from the operators section, Eg: keys: [alice]; site prepare makes their keys the user's authorized keys.", name)
 	}
 	listed := map[string]bool{}
 	for _, operator := range s.Operators {
@@ -434,7 +434,7 @@ func (c *Config) operatorProblems() []string {
 				add("operators.%s.keys: line %d is not an OpenSSH public key (%v). Paste the whole line of the .pub file, Eg: ssh-ed25519 AAAA... you@example.org.", id, n+1, err)
 				continue
 			case len(options) > 0:
-				add("operators.%s.keys: line %d carries options (%s). List plain keys only; a restricted key is added to authorized_keys by hand, where host prepare leaves it alone.", id, n+1, strings.Join(options, ","))
+				add("operators.%s.keys: line %d carries options (%s). List plain keys only; a restricted key is added to authorized_keys by hand, where site prepare leaves it alone.", id, n+1, strings.Join(options, ","))
 				continue
 			}
 			if pub, _, _, _, err := ssh.ParseAuthorizedKey([]byte(line)); err == nil {

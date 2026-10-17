@@ -11,7 +11,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/registry"
 )
 
-const keysMarker = "paisans host admit: keys, read as the user"
+const keysMarker = "paisans site admit: keys, read as the user"
 
 var recordCases = addCases(
 	goldenCase{name: "record-fresh", focus: []string{"/etc/paisans", "admission record"}, site: "vm", host: home},
@@ -100,8 +100,8 @@ func TestTheKeysScriptKeepsSSHPrivate(t *testing.T) {
 }
 
 // The keys are written under the deployment's lock, taken as the user in
-// the same shell that writes them, as host prepare's key steps take it, so
-// an admit and a host prepare never interleave their writes to
+// the same shell that writes them, as site prepare's key steps take it, so
+// an admit and a site prepare never interleave their writes to
 // authorized_keys and the sidecar.
 func TestTheKeysScriptTakesTheDeploymentsLock(t *testing.T) {
 	cmd := hostadmit.KeysCommand("paisans-f2a9", "/home/paisans-f2a9", "f2a9")

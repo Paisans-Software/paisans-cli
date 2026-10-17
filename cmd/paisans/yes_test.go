@@ -115,11 +115,11 @@ func TestYesNeedsTheEnvironmentVariable(t *testing.T) {
 	for _, value := range []string{"", "0", "yes", "true"} {
 		t.Setenv(allowYesVariable, value)
 		for name, run := range map[string]func() error{
-			"host admit": func() error {
-				return runHostAdmit([]string{"--request", path, "--public-ports", "--yes"}, strings.NewReader(""), io.Discard)
+			"site admit": func() error {
+				return runSiteAdmit([]string{"--request", path, "--public-ports", "--yes"}, strings.NewReader(""), io.Discard)
 			},
-			"host evict": func() error {
-				return runHostEvict([]string{"--deployment", fixtureID(t), "--user", "paisans-f2a9", "--yes"}, strings.NewReader(""), io.Discard)
+			"site evict": func() error {
+				return runSiteEvict([]string{"--deployment", fixtureID(t), "--user", "paisans-f2a9", "--yes"}, strings.NewReader(""), io.Discard)
 			},
 			"secrets prune": func() error {
 				return runSecretsPrune([]string{"--config", "/nonexistent/x.yaml", "--yes"}, strings.NewReader(""), io.Discard)
@@ -139,7 +139,7 @@ func TestYesNeedsTheEnvironmentVariable(t *testing.T) {
 			"apply": func() error {
 				return applyCommand([]string{"--config", "/nonexistent/x.yaml", "--yes"}, strings.NewReader(""), io.Discard)
 			},
-			"host prepare": func() error { return runHostPrepare([]string{"--config", "/nonexistent/x.yaml", "--yes"}) },
+			"site prepare": func() error { return runSitePrepare([]string{"--config", "/nonexistent/x.yaml", "--yes"}) },
 			"gateway move": func() error { return gatewayMoveCommand([]string{"--config", "/nonexistent/x.yaml", "--yes"}) },
 			"config publish": func() error {
 				return runConfigPublish([]string{"--config", "/nonexistent/x.yaml", "--yes"}, strings.NewReader(""), io.Discard)
@@ -197,7 +197,7 @@ func TestConvergeHandsOnYes(t *testing.T) {
 			t.Errorf("%q: %q", args, got)
 		}
 	}
-	for _, args := range [][]string{{"init"}, {"host", "prepare", "--site", "home-a"}, {"site", "add", "home-b"}, {"storage", "init", "--site", "home-a"}} {
+	for _, args := range [][]string{{"init"}, {"site", "prepare", "--site", "home-a"}, {"site", "add", "home-b"}, {"storage", "init", "--site", "home-a"}} {
 		if got := convergeFlags(args, o); slices.Contains(got, "--yes") {
 			t.Errorf("%q: %q", args, got)
 		}

@@ -15,7 +15,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
-// What follows is the review apply and host prepare make of what
+// What follows is the review apply and site prepare make of what
 // paisans-stack.yaml grants on a host, before they change it
 // (docs/specs/2026-10-11-config-review.md).
 //
@@ -322,7 +322,7 @@ type runReview struct {
 // reviewedByRun is set while apply with no --site runs.
 var reviewedByRun *runReview
 
-// stepReview is the review of one command run for site: host prepare's or
+// stepReview is the review of one command run for site: site prepare's or
 // apply --site's. Typed by hand, the command shows it and, with execute,
 // asks for approval when anything needs it, which a answers. Run as a step
 // of apply with no

@@ -15,7 +15,7 @@ import (
 // header opens every request, for the owner who opens the file first.
 const header = "# A request to admit one site of a paisans deployment to this host.\n" +
 	"# Compare its digest with the operator who sent it before you admit it:\n" +
-	"#   sudo paisans host admit --request <this file>\n"
+	"#   sudo paisans site admit --request <this file>\n"
 
 // Encode is r as the request's file: one form for each request, each field
 // written in a fixed order and layout, so the bytes, and so the digest,
@@ -93,7 +93,7 @@ var fields = map[string][]string{
 // larger file is refused before it is decoded.
 const MaxRequestSize = 64 * 1024
 
-// Parse reads a request as host admit does, refusing anything it would
+// Parse reads a request as site admit does, refusing anything it would
 // have to guess at: a version other than RequestVersion, a field missing
 // or unknown, any problem Check finds, and a file that is not exactly the
 // bytes Encode writes for what it holds. That last rule means nothing in
@@ -112,7 +112,7 @@ func Parse(data []byte) (Request, error) {
 		return refuse(fmt.Sprintf("it is not YAML (%s)", strconv.Quote(err.Error())))
 	}
 	if doc.Kind != yaml.DocumentNode || len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
-		return refuse("it is not a request: a request is one YAML mapping, as paisans host request writes it")
+		return refuse("it is not a request: a request is one YAML mapping, as paisans site request writes it")
 	}
 	root := doc.Content[0]
 	if v := value(root, "version"); v == nil {
@@ -133,7 +133,7 @@ func Parse(data []byte) (Request, error) {
 		return refuse(problems...)
 	}
 	if !bytes.Equal(Encode(r), data) {
-		return refuse("it is not exactly as paisans host request wrote it: something changed it after it was written (a comment, spacing, quoting or line endings). Ask the operator to send the file again, as an attachment, and compare the digest again")
+		return refuse("it is not exactly as paisans site request wrote it: something changed it after it was written (a comment, spacing, quoting or line endings). Ask the operator to send the file again, as an attachment, and compare the digest again")
 	}
 	return r, nil
 }
@@ -217,7 +217,7 @@ const (
 
 // Digest is the owner's check that a request is the one its operator sent:
 // the first 80 bits of the SHA-256 of the file in Crockford base32, four
-// groups of four, Eg: 0a1b-2c3d-4e5f-6g7h. host request prints it, host
+// groups of four, Eg: 0a1b-2c3d-4e5f-6g7h. site request prints it, site
 // admit prints it again, and the two are compared over a channel both trust.
 func Digest(data []byte) string {
 	sum := sha256.Sum256(data)
@@ -240,7 +240,7 @@ func Digest(data []byte) string {
 }
 
 // ParseDigest reads a digest as an owner types it and returns it as Digest
-// writes it, so host admit compares ParseDigest(typed) == Digest(file). It
+// writes it, so site admit compares ParseDigest(typed) == Digest(file). It
 // drops hyphens and spaces, lower-cases, reads i and l as 1 and o as 0, and
 // refuses u, any other character outside the alphabet, and any length but
 // sixteen.

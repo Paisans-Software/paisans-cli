@@ -1704,7 +1704,7 @@ func (c *checker) configKeySteersCompose() {
 // quietly undone.
 //
 // Render refuses the same keys, and keeps doing so, but a whole apply renders
-// only in its pull stage, after init and host prepare have run. Whether a
+// only in its pull stage, after init and site prepare have run. Whether a
 // template writes a key can depend on other keys (a gated Mbin's template
 // writes MBIN_USE_FEDERATION_ALLOW_LIST, an ungated one does not), so this
 // renders the deployment rather than keeping a second list: with secrets
