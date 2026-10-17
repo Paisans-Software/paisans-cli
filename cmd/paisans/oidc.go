@@ -186,6 +186,7 @@ func (r *secretsRecorder) Record(clientID, clientSecret string) error {
 	if err := config.WriteSecrets(r.path, r.secrets, r.recipients); err != nil {
 		return err
 	}
+	recordedByRun(r.path)
 	r.wrote = true
 	return nil
 }

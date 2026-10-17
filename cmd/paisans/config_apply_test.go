@@ -598,3 +598,62 @@ func TestConvergeChecksTheStoreOnceBeforeItsSteps(t *testing.T) {
 		t.Errorf("order: review %d, prepare %d, publish %d, install %d\n%s", review, prepare, publish, install, rec.Lines())
 	}
 }
+
+// A step of apply without --site that records what it made at Pocket ID
+// writes secrets.enc.yaml after the run published its version. The run
+// publishes the file as written as its next version, on its own, before the
+// next step, so that step applies what the store holds rather than refusing
+// a file the run changed itself.
+func TestConvergePublishesWhatAStepRecorded(t *testing.T) {
+	f := newApplyStore(t, 1)
+	f.based(t)
+	ran := fakeConverge(t, nil)
+	fakeRunGrants(t)
+	secretsPath := filepath.Join(f.l.Dir, "secrets.enc.yaml")
+	saved := convergeRun
+	t.Cleanup(func() { convergeRun = saved })
+	var atNext []byte
+	convergeRun = func(args []string) error {
+		title := strings.Join(args, " ")
+		switch {
+		case strings.HasPrefix(title, "apply --site home-a ") && atNext == nil:
+			secrets, err := config.LoadSecrets(secretsPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rec := &secretsRecorder{app: "talk", path: secretsPath, secrets: secrets}
+			if err := rec.Record("c-1", "not-a-real-secret-0001"); err != nil {
+				t.Fatal(err)
+			}
+			atNext = []byte{}
+		case strings.HasPrefix(title, "apply --site home-b ") && len(atNext) == 0:
+			head, _ := f.l.Head()
+			cache, _ := f.l.Cache()
+			held, err := cache.Files(head)
+			if err != nil {
+				t.Fatal(err)
+			}
+			atNext = held.Secrets
+		}
+		return saved(args)
+	}
+	rec := recordConverge(t)
+	var err error
+	captureStdout(t, func() {
+		err = runApply([]string{"--config", f.cfgPath, "--execute"}, noTerminalStdin(), io.Discard)
+	})
+	if err != nil {
+		t.Fatalf("%v\n%s", problemText(err), rec.Lines())
+	}
+	written, _ := os.ReadFile(secretsPath)
+	if !bytes.Contains(written, []byte("c-1")) || !bytes.Equal(atNext, written) {
+		t.Errorf("the store held at the next step:\n%s\nwant what home-a's step wrote:\n%s\nran %q", atNext, written, *ran)
+	}
+	ended := false
+	for _, e := range rec.Events {
+		ended = ended || e.Kind == "done" && e.Text == "configuration" && strings.HasPrefix(e.Extra, "revision 2, ")
+	}
+	if !ended {
+		t.Errorf("the run does not end on revision 2:\n%s", rec.Lines())
+	}
+}

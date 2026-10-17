@@ -52,6 +52,9 @@ type storeVersion interface {
 	// publish signs and pushes the version with execute; a dry run says
 	// it would, and returns nil.
 	publish(r ui.Reporter, execute bool) (*appliedVersion, error)
+	// next signs and pushes files as the version after prev, which publish
+	// returned earlier in the same run: what a step of the run wrote.
+	next(r ui.Reporter, prev *appliedVersion, files configstore.Files) (*appliedVersion, error)
 	// held is the version the sites hold already when the files are it,
 	// "" when the run has still to publish them.
 	held() (sha string, revision int)
@@ -202,6 +205,20 @@ func (v *gathered) publish(r ui.Reporter, execute bool) (*appliedVersion, error)
 	}
 	s := r.Step("publish " + v.what())
 	sha, pushed, err := configstore.PublishFiles(v.l, v.g, v.files, v.sites, v.key, configSignWith(v.key), false, configNow())
+	return published(r, s, sha, pushed, err, v.revision, v.files)
+}
+
+func (v *gathered) next(r ui.Reporter, prev *appliedVersion, files configstore.Files) (*appliedVersion, error) {
+	s := r.Step(fmt.Sprintf("publish revision %d", prev.revision+1))
+	s.Detail("what this run recorded in secrets.enc.yaml, on %s", prev.sha[:12])
+	sha, pushed, err := configstore.PublishNext(v.l, v.g, prev.sha, prev.revision, files, v.sites, v.key, configSignWith(v.key), configNow())
+	return published(r, s, sha, pushed, err, prev.revision+1, files)
+}
+
+// published ends s, the step that published files as revision, from what
+// the publish returned: a site that missed the version is warned about, and
+// a version no site took, or none at all, stops the apply.
+func published(r ui.Reporter, s ui.Step, sha string, pushed []string, err error, revision int, files configstore.Files) (*appliedVersion, error) {
 	var pe *configstore.PushError
 	switch {
 	case errors.As(err, &pe) && len(pushed) == 0:
@@ -221,7 +238,7 @@ func (v *gathered) publish(r ui.Reporter, execute bool) (*appliedVersion, error)
 	default:
 		s.Done(sha[:12])
 	}
-	return &appliedVersion{sha: sha, revision: v.revision, files: v.files}, nil
+	return &appliedVersion{sha: sha, revision: revision, files: files}, nil
 }
 
 // pushFailure is why site did not take a version, as a sentence: a site

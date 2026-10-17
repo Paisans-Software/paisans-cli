@@ -14,6 +14,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/gatewaymove"
 	"github.com/paisans-software/paisans-cli/internal/hostarch"
@@ -904,11 +905,13 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		return err
 	}
 	// Approved, and before the first step: every host's record is checked
-	// against the version, which only reads. The version is published once
-	// for the run, after the host prepare steps, which make every site's
-	// store, and before any other step changes a host, so the store holds
-	// what is applied even if the run stops part way. Each apply step
-	// records it, and refuses files that are not it.
+	// against the version, which only reads. The version is published after
+	// the host prepare steps, which make every site's store, and before any
+	// other step changes a host, so the store holds what is applied even if
+	// the run stops part way. A step that records what it made at Pocket ID
+	// in secrets.enc.yaml is followed by the next version, with the file as
+	// it wrote it. Each apply step records the version, and refuses files
+	// that are not it.
 	if err := store.check(r, convergeRecords(reviews), true, o.stdin, o.stdout); err != nil {
 		return err
 	}
@@ -918,6 +921,16 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 			identity.applied(v.sha, v.revision)
 		}
 		return err
+	}
+	// A step that records what it made at Pocket ID writes secrets.enc.yaml
+	// after the version was published; the run publishes it as the next
+	// version once that step ends (publishRecorded).
+	reviewedByRun.next = func(r ui.Reporter, files configstore.Files) (*appliedVersion, error) {
+		v, err := store.next(r, reviewedByRun.version, files)
+		if v != nil {
+			identity.applied(v.sha, v.revision)
+		}
+		return v, err
 	}
 	if err := convergeExecute(r, cfg, steps, o, publish); err != nil {
 		return err
@@ -1635,7 +1648,8 @@ func since(start time.Time) string {
 // warnings, refusals and ssh retries come back as details and its notes for
 // after the line, and a hold for a prompt reaches r, which draws the line's
 // spinner. While a step of its own is open, line shows it (ui.Nest). With
-// verbose the command's own output, as -v prints it, comes back too.
+// verbose the command's own output, as -v prints it, comes back too. What
+// the command recorded in secrets.enc.yaml is published once it returns.
 func convergeQuiet(r ui.Reporter, line ui.Step, args []string, verbose bool) (output string, reports []checkReport, err error) {
 	var b strings.Builder
 	inner := ui.Discard
@@ -1653,7 +1667,19 @@ func convergeQuiet(r ui.Reporter, line ui.Step, args []string, verbose bool) (ou
 		routeLoginNotes(r)
 	}()
 	err = convergeRun(args)
+	// What the step recorded is published under its line, before anything
+	// else runs. A failed publish stops the run unless the step failed
+	// first.
+	if perr := publishRecorded(reporterOverride); perr != nil && (err == nil || paused(err)) {
+		err = perr
+	}
 	return b.String(), reports, err
+}
+
+// paused reports whether err is a planned stop the run resumes later: the
+// founding stop or a replica's for its databases.
+func paused(err error) bool {
+	return errors.Is(err, apply.ErrFoundingWait) || errors.Is(err, apply.ErrDatabasesWait)
 }
 
 // convergeUp reports whether every step that brings a Pocket ID app up was

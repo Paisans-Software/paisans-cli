@@ -116,6 +116,7 @@ func (c *clientStep) ensureGroups(ctx context.Context, api *pocketid.Client, whe
 		c.groupsErr = fmt.Errorf("recording pocket_id_groups: %w", err)
 		return
 	}
+	recordedByRun(c.secretsPath)
 	for _, p := range plans {
 		if p.step != groupPresent {
 			r.Detail("recorded pocket_id_groups.%s", p.name)

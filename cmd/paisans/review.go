@@ -3,12 +3,14 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/grant"
 	"github.com/paisans-software/paisans-cli/internal/registry"
@@ -313,6 +315,44 @@ type runReview struct {
 	// version is the configuration version the run published, which each
 	// apply step records with what it applied; nil in a dry run.
 	version *appliedVersion
+	// wrote is secrets.enc.yaml as a step of the run last wrote it, when it
+	// recorded what it made at Pocket ID; nil once it is published.
+	wrote []byte
+	// next publishes files as the version after the run's, nil in a dry
+	// run.
+	next func(r ui.Reporter, files configstore.Files) (*appliedVersion, error)
+}
+
+// recordedByRun notes secrets.enc.yaml at path as a step of apply without
+// --site wrote it, for the run to publish once the step ends. Outside a run,
+// or in a dry run, it notes nothing.
+func recordedByRun(path string) {
+	run := reviewedByRun
+	if run == nil || run.version == nil {
+		return
+	}
+	if b, err := os.ReadFile(path); err == nil {
+		run.wrote = b
+	}
+}
+
+// publishRecorded publishes, as the run's next version, the secrets.enc.yaml
+// a step of the run wrote, beside the paisans-stack.yaml the run published,
+// so the store holds what the steps after it apply. A step that wrote
+// nothing publishes nothing.
+func publishRecorded(r ui.Reporter) error {
+	run := reviewedByRun
+	if run == nil || run.version == nil || run.wrote == nil || run.next == nil {
+		return nil
+	}
+	files := run.version.files
+	files.Secrets = run.wrote
+	v, err := run.next(r, files)
+	if err != nil {
+		return err
+	}
+	run.version, run.wrote = v, nil
+	return nil
 }
 
 // reviewedByRun is set while apply with no --site runs.
