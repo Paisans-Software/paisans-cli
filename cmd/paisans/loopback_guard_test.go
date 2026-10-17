@@ -117,3 +117,38 @@ func TestNothingTheDeploymentRunsDialsLoopback(t *testing.T) {
 		t.Errorf("%s is allowed to name loopback and no longer does: remove it from loopbackAllowed", where)
 	}
 }
+
+// etcdctlCommand matches an etcdctl command line the CLI runs or tells an
+// operator to run: one inside a container exec, or quoted as advice.
+var etcdctlCommand = regexp.MustCompile("(exec -T etcd |`)etcdctl")
+
+// etcdctl with no --endpoints dials 127.0.0.1:2379, which etcd does not
+// listen on, so every etcdctl command the CLI builds or advises names one.
+func TestEtcdctlAlwaysNamesItsEndpoints(t *testing.T) {
+	for _, root := range []string{"../../cmd", "../../internal"} {
+		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return err
+			}
+			file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+			if err != nil {
+				return err
+			}
+			ast.Inspect(file, func(n ast.Node) bool {
+				lit, ok := n.(*ast.BasicLit)
+				if !ok || lit.Kind != token.STRING {
+					return true
+				}
+				s, err := strconv.Unquote(lit.Value)
+				if err == nil && etcdctlCommand.MatchString(s) && !strings.Contains(s, "--endpoints") {
+					t.Errorf("%s: etcdctl without --endpoints: %.120s", strings.TrimPrefix(path, "../../"), s)
+				}
+				return true
+			})
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}

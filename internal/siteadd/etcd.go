@@ -47,7 +47,7 @@ func (p *Plan) probeEtcd() ([]apply.EtcdMember, error) {
 		}
 		for _, m := range members {
 			if site := apply.EtcdMemberSite(p.cfg, m); !contains(p.cfg.Etcd.Members, site) {
-				return nil, fmt.Errorf("site add %s: etcd has a member %s that %s does not list. Removing a member is not part of site add; list it, or remove it by hand with `etcdctl member remove %s`", p.Site, site, p.cfg.EtcdMembersKey(), m.HexID())
+				return nil, fmt.Errorf("site add %s: etcd has a member %s that %s does not list. Removing a member is not part of site add; list it, or remove it by hand on %s with `etcdctl --endpoints=http://%s:%d member remove %s`", p.Site, site, p.cfg.EtcdMembersKey(), name, p.cfg.Sites[name].Address, render.EtcdClientPort, m.HexID())
 			}
 		}
 		p.control = name
@@ -94,7 +94,7 @@ func (p *Plan) buildEtcd(live []apply.EtcdMember) *Stage {
 		Number: 3,
 		Name:   "etcd",
 		Short:  "etcd healthy, voters match",
-		Gate:   fmt.Sprintf("`etcdctl endpoint health --cluster` on %s reports every member healthy, and the voters are exactly %s", p.control, strings.Join(sortedCopy(p.cfg.Etcd.Members), ", ")),
+		Gate:   fmt.Sprintf("etcd's health across the cluster, read on %s, reports every member healthy, and the voters are exactly %s", p.control, strings.Join(sortedCopy(p.cfg.Etcd.Members), ", ")),
 	}
 	predicted := map[string]string{}
 	present := map[string]bool{}
