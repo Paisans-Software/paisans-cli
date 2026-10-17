@@ -14,7 +14,6 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
-	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/gatewaymove"
 	"github.com/paisans-software/paisans-cli/internal/hostarch"
@@ -909,9 +908,9 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	// the host prepare steps, which make every site's store, and before any
 	// other step changes a host, so the store holds what is applied even if
 	// the run stops part way. A step that records what it made at Pocket ID
-	// in secrets.enc.yaml is followed by the next version, with the file as
-	// it wrote it. Each apply step records the version, and refuses files
-	// that are not it.
+	// in secrets.enc.yaml publishes the bytes it wrote as the next version,
+	// which the steps after it apply. Each apply step records the version,
+	// and refuses files that are not it.
 	if err := store.check(r, convergeRecords(reviews), true, o.stdin, o.stdout); err != nil {
 		return err
 	}
@@ -922,16 +921,9 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		}
 		return err
 	}
-	// A step that records what it made at Pocket ID writes secrets.enc.yaml
-	// after the version was published; the run publishes it as the next
-	// version once that step ends (publishRecorded).
-	reviewedByRun.next = func(r ui.Reporter, files configstore.Files) (*appliedVersion, error) {
-		v, err := store.next(r, reviewedByRun.version, files)
-		if v != nil {
-			identity.applied(v.sha, v.revision)
-		}
-		return v, err
-	}
+	// A step that records what it made at Pocket ID publishes the next
+	// version through the run's store (siteReview.publishWritten).
+	reviewedByRun.store, reviewedByRun.identity = store, identity
 	if err := convergeExecute(r, cfg, steps, o, publish); err != nil {
 		return err
 	}
@@ -1469,10 +1461,8 @@ func groupStop(what string, steps []convergeStep, errs []error) error {
 // site resumes it; when the stop is on the site's last visit, the site is
 // applied once more after every other step, by which time the leader's site
 // has had its own last visit, and a stop then ends the run. A founding stop
-// on a later visit ends it too: every founding member's founding apply runs
-// before any later visit, so a member that runs no etcd by then has stopped
-// running it. Each step is
-// listed under its line with its own result, which -v shows with the step's
+// is a pause only on a founding apply: on any other visit it ends the run,
+// naming the members that run no etcd. Each step is listed under its line with its own result, which -v shows with the step's
 // own output; its notes follow the line at every verbosity. A failure lists
 // its error under its inner step and ends its line and the run, leaving the
 // other lines as they stand.
@@ -1525,8 +1515,7 @@ func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions) err
 		case err == nil || founding || databases:
 			line.Pause(why)
 		case errors.Is(err, apply.ErrFoundingWait):
-			// Every founding member's founding apply runs before any later
-			// visit, so this is no pause.
+			// A pause only on a founding apply, which pass two resumes.
 			line.Fail(err)
 			return convergeStop("apply stopped at "+s.Title, laterFounding(err), resumeAdvice)
 		case errors.Is(err, storageadd.ErrWaiting):
@@ -1576,21 +1565,20 @@ func revisitPause(steps []convergeStep, i int) string {
 	return "paused until " + andList(between) + " are done"
 }
 
-// laterFounding is a founding stop on a site's later visit as the run stops
-// with it. Every founding member's founding apply has run by then and started
-// its etcd, so a member err names has stopped running it since.
+// laterFounding is a founding stop on a visit other than a founding apply,
+// as the run stops with it: the members err names run no etcd.
 func laterFounding(err error) error {
-	names, verb, its := "another founding member", "runs", "its"
+	names, verb := "another founding member", "runs"
 	var wait *apply.FoundingWaitError
 	if errors.As(err, &wait) && len(wait.Unstarted) > 0 {
 		names = andList(wait.Unstarted)
 		if len(wait.Unstarted) > 1 {
-			verb, its = "run", "their"
+			verb = "run"
 		}
 	}
 	return &ui.Problem{
-		Hint:    "etcd is still being founded, and " + names + " " + verb + " no etcd after " + its + " founding apply",
-		Explain: "This run applied every founding member before this visit, and each apply starts that site's etcd, so it has stopped since. Find out why etcd stopped on " + names + ".",
+		Hint:    "etcd is still being founded, and " + names + " " + verb + " no etcd",
+		Explain: "Only a founding apply waits for the other founding members' etcd. Find out why etcd does not run on " + names + ".",
 		Cause:   err,
 	}
 }
@@ -1648,8 +1636,7 @@ func since(start time.Time) string {
 // warnings, refusals and ssh retries come back as details and its notes for
 // after the line, and a hold for a prompt reaches r, which draws the line's
 // spinner. While a step of its own is open, line shows it (ui.Nest). With
-// verbose the command's own output, as -v prints it, comes back too. What
-// the command recorded in secrets.enc.yaml is published once it returns.
+// verbose the command's own output, as -v prints it, comes back too.
 func convergeQuiet(r ui.Reporter, line ui.Step, args []string, verbose bool) (output string, reports []checkReport, err error) {
 	var b strings.Builder
 	inner := ui.Discard
@@ -1667,12 +1654,6 @@ func convergeQuiet(r ui.Reporter, line ui.Step, args []string, verbose bool) (ou
 		routeLoginNotes(r)
 	}()
 	err = convergeRun(args)
-	// What the step recorded is published under its line, before anything
-	// else runs. A failed publish stops the run unless the step failed
-	// first.
-	if perr := publishRecorded(reporterOverride); perr != nil && (err == nil || paused(err)) {
-		err = perr
-	}
 	return b.String(), reports, err
 }
 

@@ -51,6 +51,14 @@ func WriteSOPSConfig(dir, recipient string) error {
 // anything at all would leave an operator with generated secrets that went
 // nowhere.
 func WriteSecrets(path string, s *Secrets, recipients []string) error {
+	_, err := WriteSecretsBytes(path, s, recipients)
+	return err
+}
+
+// WriteSecretsBytes is WriteSecrets, returning the bytes it wrote to path. An
+// encrypted file differs on every write, so a caller that publishes what it
+// wrote keeps these rather than reading the file again.
+func WriteSecretsBytes(path string, s *Secrets, recipients []string) ([]byte, error) {
 	// Every write is at this toolkit's format, whatever was read, so that an
 	// older toolkit refuses the file rather than dropping what it does not
 	// know (SecretsVersion).
@@ -58,7 +66,7 @@ func WriteSecrets(path string, s *Secrets, recipients []string) error {
 	stamped.Version = SecretsVersion
 	plain, err := yaml.Marshal(&stamped)
 	if err != nil {
-		return fmt.Errorf("serialising secrets: %w", err)
+		return nil, fmt.Errorf("serialising secrets: %w", err)
 	}
 	out := plain
 	if len(recipients) > 0 {
@@ -68,16 +76,16 @@ func WriteSecrets(path string, s *Secrets, recipients []string) error {
 		// it looks like data.
 		out, err = encryptSOPS(plain, recipients)
 		if err != nil {
-			return fmt.Errorf("encrypting %s: %w", path, err)
+			return nil, fmt.Errorf("encrypting %s: %w", path, err)
 		}
 	} else {
 		out = append([]byte(secretsHeader), plain...)
 	}
 
 	if err := writeSecretsFile(path, out); err != nil {
-		return fmt.Errorf("writing %s: %w", path, err)
+		return nil, fmt.Errorf("writing %s: %w", path, err)
 	}
-	return nil
+	return out, nil
 }
 
 // syncFile flushes a file to disk. Tests replace it.

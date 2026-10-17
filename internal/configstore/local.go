@@ -820,11 +820,10 @@ func publishFiles(l Local, g Gathered, f Files, sites map[string]apply.Transport
 
 // PublishNext commits f as the version after parent, at revision+1, where
 // parent is the version at revision the caller published from g earlier in
-// the same run, signs it with keyLine, and pushes the cache to every site g
-// reached directly. It is how apply publishes what one of its own steps
-// wrote to the files after the run's version was published: the sites hold
-// parent as their head because the run put it there, so nothing is gathered
-// again. It refuses when the local head is not parent, and publishes nothing
+// the same apply, signs it with keyLine, and pushes the cache to every site g
+// reached directly. It is how apply publishes what it wrote to the files
+// after publishing the version it applies: the sites hold parent as their
+// head because the apply put it there, so nothing is gathered again. It refuses when the local head is not parent, and publishes nothing
 // new for files that are parent's.
 func PublishNext(l Local, g Gathered, parent string, revision int, f Files, sites map[string]apply.Transport, keyLine, signWith string, now time.Time) (string, []string, error) {
 	return publishNext(l, g, parent, revision, f, sites, publishOpts{keyLine: keyLine, signWith: signWith, now: now}, Push)

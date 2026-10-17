@@ -929,8 +929,8 @@ and `web-server check`'s checks. The version of the configuration it applies is
 published once the `host prepare` steps have made every site's store and before
 any other step changes a host (see *Every site keeps signed copies of the
 configuration* in `README.md`), and a step that records a client's credentials
-or a signup group's ID in `secrets.enc.yaml` is followed by the next revision,
-holding the file as written. Each `apply --site` it runs that covers the
+or a signup group's ID in `secrets.enc.yaml` publishes the bytes it wrote as
+the next revision before its host records it. Each `apply --site` it runs that covers the
 whole site, rather than holding apps back until their sign in clients exist,
 ends by sweeping the old images its site's stacks used (see *`apply` prunes the
 images it superseded* in `README.md`).

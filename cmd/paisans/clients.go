@@ -151,6 +151,10 @@ func listClientPlan(r ui.Reporter, app, idp, where string, plan *oidcclient.Plan
 type clientStep struct {
 	// report is where the step's plan and progress go.
 	report ui.Reporter
+	// written is secrets.enc.yaml as this apply last wrote it, when it
+	// recorded a client's credentials or a signup group's ID; nil when it
+	// wrote nothing. apply publishes these bytes (siteReview.publishWritten).
+	written []byte
 	// executing is whether the command runs with --execute. The plan is
 	// listed on a dry run, and on --execute only with --verbose, since the
 	// steps that carry it out say the same.
@@ -432,7 +436,11 @@ func (c *clientStep) ensure(execute, waiting bool) error {
 		}
 		rec := &secretsRecorder{app: p.app, path: c.secretsPath, secrets: c.secrets, recipients: c.recipients}
 		p.plan.Report = r
-		if err := oidcclient.Execute(ctx, p.plan, api, rec, secretsgen.ClientSecret); err != nil {
+		err := oidcclient.Execute(ctx, p.plan, api, rec, secretsgen.ClientSecret)
+		if rec.written != nil {
+			c.written = rec.written
+		}
+		if err != nil {
 			c.refuse(p.app, err)
 			continue
 		}

@@ -306,3 +306,34 @@ func witness(r ui.Reporter, records map[string]grant.Record, revision int, hash,
 	}
 	return nil
 }
+
+// publishWritten publishes, as the version after the one s records, the
+// secrets.enc.yaml this apply wrote when it recorded what it made at Pocket
+// ID: written, the bytes it wrote, never the file read again, beside the
+// rest of s's version. The new version is the one s records, so the host
+// that runs what was recorded holds the revision that has it; as a step of
+// apply without --site it is also the run's, which every later step applies.
+// identity names it. Nothing written, or no version to build on, publishes
+// nothing.
+func (s *siteReview) publishWritten(r ui.Reporter, written []byte, store storeVersion, identity *runIdentity) error {
+	if s == nil || s.version == nil || written == nil || store == nil {
+		return nil
+	}
+	files := s.version.files
+	files.Secrets = written
+	v, err := store.next(r, s.version, files)
+	if err != nil {
+		return err
+	}
+	if v == nil {
+		return nil
+	}
+	s.version = v
+	if run := reviewedByRun; run != nil {
+		run.version = v
+	}
+	if identity != nil {
+		identity.applied(v.sha, v.revision)
+	}
+	return nil
+}

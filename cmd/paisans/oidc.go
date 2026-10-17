@@ -169,6 +169,8 @@ type secretsRecorder struct {
 	secrets    *config.Secrets
 	recipients []string
 	wrote      bool
+	// written is the bytes the last write put in the file.
+	written []byte
 }
 
 func (r *secretsRecorder) Record(clientID, clientSecret string) error {
@@ -183,11 +185,11 @@ func (r *secretsRecorder) Record(clientID, clientSecret string) error {
 	if err := r.secrets.Set("oidc_clients."+r.app+".client_secret", clientSecret); err != nil {
 		return err
 	}
-	if err := config.WriteSecrets(r.path, r.secrets, r.recipients); err != nil {
+	written, err := config.WriteSecretsBytes(r.path, r.secrets, r.recipients)
+	if err != nil {
 		return err
 	}
-	recordedByRun(r.path)
-	r.wrote = true
+	r.wrote, r.written = true, written
 	return nil
 }
 

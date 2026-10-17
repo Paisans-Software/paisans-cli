@@ -599,61 +599,144 @@ func TestConvergeChecksTheStoreOnceBeforeItsSteps(t *testing.T) {
 	}
 }
 
-// A step of apply without --site that records what it made at Pocket ID
-// writes secrets.enc.yaml after the run published its version. The run
-// publishes the file as written as its next version, on its own, before the
-// next step, so that step applies what the store holds rather than refusing
-// a file the run changed itself.
-func TestConvergePublishesWhatAStepRecorded(t *testing.T) {
+// recordedAtPocketID is a workstation whose sites hold revision 1, published
+// as apply publishes it, the store it was gathered into, the version, and the
+// bytes an apply's client step wrote to secrets.enc.yaml after it, recording
+// a client's credentials.
+func recordedAtPocketID(t *testing.T) (*applyStoreFixture, storeVersion, *appliedVersion, []byte) {
+	t.Helper()
 	f := newApplyStore(t, 1)
 	f.based(t)
-	ran := fakeConverge(t, nil)
-	fakeRunGrants(t)
 	secretsPath := filepath.Join(f.l.Dir, "secrets.enc.yaml")
-	saved := convergeRun
-	t.Cleanup(func() { convergeRun = saved })
-	var atNext []byte
-	convergeRun = func(args []string) error {
-		title := strings.Join(args, " ")
-		switch {
-		case strings.HasPrefix(title, "apply --site home-a ") && atNext == nil:
-			secrets, err := config.LoadSecrets(secretsPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			rec := &secretsRecorder{app: "talk", path: secretsPath, secrets: secrets}
-			if err := rec.Record("c-1", "not-a-real-secret-0001"); err != nil {
-				t.Fatal(err)
-			}
-			atNext = []byte{}
-		case strings.HasPrefix(title, "apply --site home-b ") && len(atNext) == 0:
-			head, _ := f.l.Head()
-			cache, _ := f.l.Cache()
-			held, err := cache.Files(head)
-			if err != nil {
-				t.Fatal(err)
-			}
-			atNext = held.Secrets
-		}
-		return saved(args)
-	}
-	rec := recordConverge(t)
-	var err error
-	captureStdout(t, func() {
-		err = runApply([]string{"--config", f.cfgPath, "--execute"}, noTerminalStdin(), io.Discard)
-	})
+	cfg, paisans, err := config.LoadWithBytes(f.cfgPath)
 	if err != nil {
-		t.Fatalf("%v\n%s", problemText(err), rec.Lines())
+		t.Fatal(err)
 	}
-	written, _ := os.ReadFile(secretsPath)
-	if !bytes.Contains(written, []byte("c-1")) || !bytes.Equal(atNext, written) {
-		t.Errorf("the store held at the next step:\n%s\nwant what home-a's step wrote:\n%s\nran %q", atNext, written, *ran)
+	secretsBytes, err := os.ReadFile(secretsPath)
+	if err != nil {
+		t.Fatal(err)
 	}
-	ended := false
-	for _, e := range rec.Events {
-		ended = ended || e.Kind == "done" && e.Text == "configuration" && strings.HasPrefix(e.Extra, "revision 2, ")
+	loaded := configstore.Files{Paisans: paisans, Secrets: secretsBytes}
+	store, err := gatherForApply(ui.Discard, f.cfgPath, "", &loaded, cfg, true, answerer{}, noTerminalStdin(), io.Discard)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !ended {
-		t.Errorf("the run does not end on revision 2:\n%s", rec.Lines())
+	v1, err := store.publish(ui.Discard, true)
+	if err != nil || v1 == nil {
+		t.Fatalf("%v %v", v1, err)
+	}
+	secrets, err := config.LoadSecrets(secretsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &secretsRecorder{app: "talk", path: secretsPath, secrets: secrets}
+	if err := rec.Record("c-1", "not-a-real-secret-0001"); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(rec.written, []byte("c-1")) {
+		t.Fatalf("the recorder kept %q", rec.written)
+	}
+	return f, store, v1, rec.written
+}
+
+// headSecrets is the secrets.enc.yaml of the workstation's head.
+func headSecrets(t *testing.T, f *applyStoreFixture) (string, []byte) {
+	t.Helper()
+	head, _ := f.l.Head()
+	cache, err := f.l.Cache()
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := cache.Files(head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return head, files.Secrets
+}
+
+// What an apply publishes after recording at Pocket ID is the bytes it
+// wrote, not the file read again: another writer's edit made since is not
+// published as the apply's, and the run's next step refuses it.
+func TestAnApplyPublishesTheBytesItWroteNotTheFile(t *testing.T) {
+	f, store, v1, written := recordedAtPocketID(t)
+	secretsPath := filepath.Join(f.l.Dir, "secrets.enc.yaml")
+	foreign := append(append([]byte{}, written...), "# another writer\n"...)
+	if err := os.WriteFile(secretsPath, foreign, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := &siteReview{version: v1}
+	if err := s.publishWritten(ui.Discard, written, store, &runIdentity{}); err != nil {
+		t.Fatal(err)
+	}
+	head, held := headSecrets(t, f)
+	if head == v1.sha || !bytes.Equal(held, written) || s.version.sha != head || s.version.revision != 2 {
+		t.Fatalf("head %s holds the apply's bytes %v, version %s at %d", head, bytes.Equal(held, written), s.version.sha, s.version.revision)
+	}
+
+	log := loggingSSH(t, "")
+	fakeGrants(t, grantedWith(t, f, nil))
+	saved := reviewedByRun
+	t.Cleanup(func() { reviewedByRun = saved })
+	reviewedByRun = &runReview{approved: map[string]grant.Review{}, version: s.version}
+	err := f.applySite(t, noTerminalStdin(), "--execute")
+	if err == nil || !strings.Contains(problemText(err), "changed after the run published it") || checked(logged(t, log)) {
+		t.Errorf("got %v, checked %v", problemText(err), checked(logged(t, log)))
+	}
+}
+
+// A step of apply without --site that records at Pocket ID, the run's last
+// one among them, publishes the next revision before its host records its
+// version: the host records that revision, the run's version is it for any
+// step after, and the run ends naming it.
+func TestAStepThatRecordsAtPocketIDRecordsTheRevisionItPublished(t *testing.T) {
+	f, store, v1, written := recordedAtPocketID(t)
+	cfg := mustLoad(t, f.cfgPath)
+	hosts := fakeGrants(t, func(string) *grant.Record { return nil })
+	saved := reviewedByRun
+	t.Cleanup(func() { reviewedByRun = saved })
+	run := &runIdentity{}
+	run.applied(v1.sha, v1.revision)
+	reviewedByRun = &runReview{approved: map[string]grant.Review{}, version: v1, store: store, identity: run}
+	g, _ := grant.For(cfg, nil, "watch")
+	s, err := reviewSite(cfg.Deployment(), "watch", g, grant.ApplyScope(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.version = reviewedByRun.version
+	if err := s.publishWritten(ui.Discard, written, reviewedByRun.store, reviewedByRun.identity); err != nil {
+		t.Fatal(err)
+	}
+	if err := recordGrant(ui.Discard, s, cfg.Deployment(), ""); err != nil {
+		t.Fatal(err)
+	}
+	head, held := headSecrets(t, f)
+	got := hosts["watch"].record(t)
+	if got.Config == nil || got.Config.Hash != head || got.Config.Revision != 2 || !bytes.Equal(held, written) {
+		t.Errorf("the host records %+v, the head is %s", got.Config, head)
+	}
+	if v := reviewedByRun.version; v.sha != head || v.revision != 2 || run.sha != head || run.revision != 2 {
+		t.Errorf("the run's version %s at %d, its identity %s %d", v.sha, v.revision, run.sha, run.revision)
+	}
+}
+
+// apply --site alone that records at Pocket ID leaves the store current:
+// the head holds what it wrote, and the host records it. An apply that
+// wrote nothing publishes nothing.
+func TestApplySiteThatRecordsAtPocketIDLeavesTheStoreCurrent(t *testing.T) {
+	f, store, v1, written := recordedAtPocketID(t)
+	s := &siteReview{version: v1}
+	if err := s.publishWritten(ui.Discard, nil, store, &runIdentity{}); err != nil || s.version != v1 {
+		t.Fatalf("nothing written published %s, %v", s.version.sha, err)
+	}
+	if head, _ := f.l.Head(); head != v1.sha {
+		t.Fatalf("nothing written moved the head to %s", head)
+	}
+	identity := &runIdentity{}
+	if err := s.publishWritten(ui.Discard, written, store, identity); err != nil {
+		t.Fatal(err)
+	}
+	head, held := headSecrets(t, f)
+	if head == v1.sha || !bytes.Equal(held, written) || s.version.sha != head || identity.sha != head || !f.pushed() {
+		t.Errorf("head %s, version %s, identity %s", head, s.version.sha, identity.sha)
 	}
 }

@@ -634,8 +634,9 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 		identity.applied(store.held())
 	} else if v := reviewedByRun.version; v != nil && (!bytes.Equal(v.files.Paisans, loaded.Paisans) || !bytes.Equal(v.files.Secrets, loaded.Secrets)) {
-		// The run published one version and every step applies it: files
-		// edited since are not what the store holds.
+		// Every step applies the run's current version, which a step that
+		// records at Pocket ID advances: files edited otherwise are not what
+		// the store holds.
 		return &ui.Problem{Hint: "the configuration changed after the run published it", Explain: config.FileName + " or secrets.enc.yaml is not what this run published as " + v.sha[:12] + ", so applying it would put on " + *site + " a version the store does not hold. Nothing was changed on " + *site + " by this step. Run paisans apply --execute again, which publishes the files as they are now."}
 	}
 
@@ -876,7 +877,20 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 			execute: func(p *apply.Plan) error { return apply.Execute(p, transport) },
 			notes:   func(p *apply.Plan) { reportNotes(r, p, noted) },
 		}
-		if plans, err = executeWithClients(clients, pass); err != nil {
+		plans, err = executeWithClients(clients, pass)
+		// What the apply recorded at Pocket ID is published before the
+		// host records its version, whether or not the apply went on.
+		store, id := store, identity
+		if run := reviewedByRun; run != nil {
+			store, id = run.store, run.identity
+		}
+		if perr := review.publishWritten(r, clients.written, store, id); perr != nil {
+			if err == nil || paused(err) {
+				return perr
+			}
+			r.Warn("what this apply recorded at Pocket ID was not published", sentence(errLine(perr))+" The next apply publishes secrets.enc.yaml as it is then.")
+		}
+		if err != nil {
 			return err
 		}
 	}

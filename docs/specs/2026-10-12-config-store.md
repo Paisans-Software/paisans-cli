@@ -269,10 +269,12 @@ stores, and before any other step changes a host: the stores cannot receive a
 version before they exist, and prepare's own changes are reviewed already. The
 witness check still precedes everything. A run that stops between prepare and
 publish leaves keys granted without the version published, and the next run
-publishes it. `apply --site` without a store refuses naming `host prepare`. A
-step of the run that records what it made at Pocket ID in `secrets.enc.yaml`
-is followed by the next revision, the file as that step wrote it on the run's
-version, pushed to the sites the run's gather reached, before the next step.
+publishes it. `apply --site` without a store refuses naming `host prepare`. An
+apply that records what it made at Pocket ID in `secrets.enc.yaml` publishes
+the bytes it wrote, never the file read again, as the next revision on the
+version it applies, pushed to the sites its gather reached, before its host
+records the version; the host records that revision, and as a step of the run
+so does every later step.
 
 **A fork on recovery.** `recover` never picks between two heads by order. With a
 fork it writes each head's files to `.paisans/incoming/<sha>/` and refuses, and
