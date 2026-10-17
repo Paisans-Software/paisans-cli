@@ -578,6 +578,9 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	if *holdApps && len(only) > 0 {
 		return fmt.Errorf("apply: --hold-apps starts no app stack and --only names the stacks to apply. Give one of them")
 	}
+	if *holdApps && len(overwrite) > 0 {
+		return fmt.Errorf("apply: --hold-apps takes no --overwrite, since a held app's file would not be written. Give --overwrite on an apply without --hold-apps")
+	}
 	// held is every app stack --hold-apps holds back: each app that runs on
 	// the site, a pinned one included.
 	var held []string

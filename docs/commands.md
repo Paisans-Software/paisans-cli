@@ -1048,7 +1048,7 @@ starts, restarts or recreates what changed.
   | `--recreate <stack>` | none | `up -d --force-recreate` every container of this stack, even if nothing changed (repeatable) |
   | `--min-free <size>` | `3G` | free space Docker's data root must have before a stack pulls an image |
   | `--keep-images` | off | leave the images this apply supersedes on the host, and skip the sweep |
-  | `--hold-apps` | off | start none of the site's app stacks, a pinned one included: apply its mesh, its infrastructure and its Caddy, without asking Pocket ID anything; not with `--only`, and it does not sweep |
+  | `--hold-apps` | off | start none of the site's app stacks, a pinned one included: apply its mesh, its infrastructure and its Caddy, without asking Pocket ID anything; not with `--only` or `--overwrite`, and it does not sweep |
   | `--yes` | off | approve the review entry by entry, and type `create`, `partial` and `rollback` when asked for |
 
   And `--config`, `--secrets`, `--execute`.

@@ -409,12 +409,14 @@ func TestApplyHoldAppsStartsNoAppStack(t *testing.T) {
 }
 
 // apply --hold-apps is about one site, and starts no stack --only could
-// name.
+// name. It takes no --overwrite, which a held stack's file would leave
+// unapplied.
 func TestApplyHoldAppsRefusesWithoutASiteOrWithOnly(t *testing.T) {
 	quietSSH(t)
 	for _, args := range [][]string{
 		{"--hold-apps"},
 		{"--site", "vm", "--hold-apps", "--only", "infra"},
+		{"--site", "vm", "--hold-apps", "--overwrite", "/srv/paisans/f2a9/gate/.env"},
 	} {
 		var err error
 		captureStdout(t, func() {
