@@ -33,6 +33,11 @@ type Login struct {
 
 	mu         sync.Mutex
 	dockerHost string
+	// unreachable is the probe's error when its connection never opened:
+	// the destination is down for the run, and every later command to it
+	// fails with that error at once rather than waiting out ssh's connect
+	// timeout again.
+	unreachable error
 }
 
 // NewLogin returns a Login that calls connected after its first successful
@@ -40,9 +45,10 @@ type Login struct {
 func NewLogin(connected func()) *Login { return &Login{Connected: connected} }
 
 // resolve returns t's DOCKER_HOST, asking the host for the login user's UID
-// the first time. A failure is not kept: it is either ssh's, which the next
-// command meets again, or an answer that was not a UID, which a second
-// command may find fixed.
+// the first time. A probe whose connection never opened is kept: the host is
+// down for the rest of the run. Any other failure is not: a refused login or
+// an answer that was not a UID, which a second command meets again or may
+// find fixed.
 func (l *Login) resolve(t SSHTransport) (string, error) {
 	l.mu.Lock()
 	host, first, err := l.resolveLocked(t)
@@ -59,9 +65,15 @@ func (l *Login) resolveLocked(t SSHTransport) (host string, first bool, err erro
 	if l.dockerHost != "" {
 		return l.dockerHost, false, nil
 	}
+	if l.unreachable != nil {
+		return "", false, l.unreachable
+	}
 	bare := t
 	bare.Login, bare.DockerHost = nil, ""
 	out, err := bare.run(uidProbe, nil)
+	if errors.Is(err, ErrUnreachable) {
+		l.unreachable = err
+	}
 	if err != nil {
 		var p *ui.Problem
 		if errors.As(err, &p) {

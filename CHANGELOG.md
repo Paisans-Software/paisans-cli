@@ -10,6 +10,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Fixed
+
+- A site that does not answer is classified down on one connection attempt instead of three, and no later command of the run waits for its host again.
+
 ## [0.3.0-rc.2] - 2026-10-17
 
 ### Added

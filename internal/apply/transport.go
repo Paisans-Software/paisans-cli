@@ -118,6 +118,27 @@ type SSHTransport struct {
 	// of the package's (SetRetryLog), so commands run at once on several
 	// hosts each keep their own.
 	RetryLog io.Writer
+
+	// once makes a connection that never opened fail on its first attempt,
+	// with no retry. Only Reach sets it.
+	once bool
+}
+
+// Reach logs in to the host and runs nothing there, to find out whether it
+// answers. An SSHTransport is tried once, not retried as a command is: a
+// host that does not answer is down for this run, and every retry would
+// wait out ssh's connect timeout again. Its Login remembers that, so no
+// later command waits for the host either (see Login). A blip that a retry
+// would have ridden out reads as the host down, which a run takes as a site
+// it does not step on and a later run reaches again. Any other Transport
+// runs `true`.
+func Reach(t Transport) error {
+	if s, ok := t.(SSHTransport); ok {
+		s.once = true
+		t = s
+	}
+	_, err := t.Run("true")
+	return err
 }
 
 func (t SSHTransport) Describe() string {
@@ -726,6 +747,10 @@ func (t SSHTransport) run(command string, stdin *string) (string, error) {
 		}
 		t.DockerHost = host
 	}
+	retries := sshRetryDelays
+	if t.once {
+		retries = nil
+	}
 	for attempt := 1; ; attempt++ {
 		cmd, cleanup, err := t.ssh(command)
 		if err != nil {
@@ -770,22 +795,30 @@ func (t SSHTransport) run(command string, stdin *string) (string, error) {
 			}
 			return out.String(), err
 		}
-		if attempt > len(sshRetryDelays) {
+		if attempt > len(retries) {
 			return out.String(), &ui.Problem{
 				Hint:    t.Describe() + " cannot be reached over ssh",
-				Explain: fmt.Sprintf("ssh could not connect in %d attempts: %s. Check that the host is up, and that %s from this machine reaches it.", attempt, strings.TrimSuffix(lastLine(out.String()), "."), t.connectCommand()),
-				Cause:   &UnreachableError{Site: t.Site, Err: fmt.Errorf("%w after %d attempts: %w", ErrUnreachable, attempt, err)},
+				Explain: fmt.Sprintf("ssh could not connect in %s: %s. Check that the host is up, and that %s from this machine reaches it.", attempts(attempt), strings.TrimSuffix(lastLine(out.String()), "."), t.connectCommand()),
+				Cause:   &UnreachableError{Site: t.Site, Err: fmt.Errorf("%w after %s: %w", ErrUnreachable, attempts(attempt), err)},
 			}
 		}
-		delay := sshRetryDelays[attempt-1]
+		delay := retries[attempt-1]
 		log := retryLog
 		if t.RetryLog != nil {
 			log = t.RetryLog
 		}
 		fmt.Fprint(log, ui.Redact(fmt.Sprintf("%s: ssh could not connect (%s), retrying in %s (attempt %d of %d)\n",
-			t.Describe(), lastLine(out.String()), delay, attempt+1, len(sshRetryDelays)+1)))
+			t.Describe(), lastLine(out.String()), delay, attempt+1, len(retries)+1)))
 		sleep(delay)
 	}
+}
+
+// attempts is n attempts, in words.
+func attempts(n int) string {
+	if n == 1 {
+		return "1 attempt"
+	}
+	return fmt.Sprintf("%d attempts", n)
 }
 
 func (t SSHTransport) ReadFile(path string) (string, bool, error) {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // loginScript stands in for ssh: it answers id -u with uid and every other
@@ -207,5 +208,78 @@ func TestDialRefusesSudoWithADockerHostNamingTheDestination(t *testing.T) {
 	_, err := tr.Dial("127.0.0.1:80")
 	if err == nil || !strings.Contains(err.Error(), "paisans-f2a9@203.0.113.10") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+// downHost stands in for ssh to a host that is switched off: every attempt
+// times out. It counts the attempts, and lets a retry wait nothing.
+func downHost(t *testing.T) *int {
+	t.Helper()
+	apply.ForgetContacts()
+	t.Cleanup(apply.ForgetContacts)
+	blanks := 0
+	t.Cleanup(apply.FakeHostKeys(func(apply.SSHTransport) bool { return true }, &blanks))
+	tries := 0
+	t.Cleanup(apply.FakeSSH(func([]string, string) (string, int) {
+		tries++
+		return "ssh: connect to host 203.0.113.10 port 22: Operation timed out\n", 255
+	}, []time.Duration{time.Millisecond, time.Millisecond}, func(time.Duration) {}, io.Discard))
+	return &tries
+}
+
+// Reach tries a host once, where a command retries a connection that never
+// opened: each retry would wait out ssh's connect timeout again.
+func TestReachTriesAHostOnce(t *testing.T) {
+	tries := downHost(t)
+	tr := apply.SSHTransport{User: "paisans-f2a9", Host: "203.0.113.10", PublicKeys: []string{keyA}, Login: apply.NewLogin(nil)}
+	err := apply.Reach(tr)
+	if !errors.Is(err, apply.ErrUnreachable) || *tries != 1 {
+		t.Errorf("err = %v after %d tries, want ErrUnreachable after 1", err, *tries)
+	}
+	if _, explain := ui.Describe(err); !strings.Contains(explain, "in 1 attempt:") {
+		t.Errorf("explained %q, want it to say 1 attempt", explain)
+	}
+}
+
+// A destination whose first login never connected is down for the run:
+// every later command through its Login fails as unreachable at once,
+// without trying ssh again, whether or not a copy of the transport retries.
+func TestALoginThatNeverConnectedTriesNoMore(t *testing.T) {
+	tries := downHost(t)
+	login := apply.NewLogin(nil)
+	tr := apply.SSHTransport{User: "paisans-f2a9", Host: "203.0.113.10", PublicKeys: []string{keyA}, Login: login}
+	first := apply.Reach(tr)
+	if !errors.Is(first, apply.ErrUnreachable) {
+		t.Fatalf("Reach: %v", first)
+	}
+	again := apply.SSHTransport{User: "paisans-f2a9", Host: "203.0.113.10", PublicKeys: []string{keyA}, Login: login}
+	if _, err := again.Run("docker ps"); !errors.Is(err, apply.ErrUnreachable) {
+		t.Errorf("err = %v, want ErrUnreachable", err)
+	}
+	if _, _, err := again.ReadFile("/etc/hostname"); !errors.Is(err, apply.ErrUnreachable) {
+		t.Errorf("ReadFile: err = %v, want ErrUnreachable", err)
+	}
+	if *tries != 1 {
+		t.Errorf("ssh tried %d times, want once", *tries)
+	}
+}
+
+// A login that refused is not kept: a refusal is the host's answer to this
+// key, and a later command may offer one it accepts.
+func TestALoginThatWasRefusedIsAskedAgain(t *testing.T) {
+	loginScript(t, "paisans-f2a9@203.0.113.10: Permission denied (publickey).\n", 255)
+	ran := 0
+	t.Cleanup(apply.FakeSSH(func([]string, string) (string, int) {
+		ran++
+		return "paisans-f2a9@203.0.113.10: Permission denied (publickey).\n", 255
+	}, nil, func(time.Duration) {}, io.Discard))
+	tr := apply.SSHTransport{User: "paisans-f2a9", Host: "203.0.113.10", PublicKeys: []string{keyA}, Login: apply.NewLogin(nil)}
+	for range 2 {
+		if _, err := tr.Run("docker ps"); !errors.Is(err, apply.ErrLoginRefused) {
+			t.Fatalf("err = %v, want ErrLoginRefused", err)
+		}
+	}
+	if ran != 2 {
+		t.Errorf("ssh ran %d times, want twice", ran)
 	}
 }
