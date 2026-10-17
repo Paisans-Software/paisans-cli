@@ -1,7 +1,6 @@
 package siteremove
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -346,13 +345,13 @@ func (p *Plan) etcdVoters(sites []string) error {
 			return fmt.Errorf("the voters are %s, and they should be %s", strings.Join(voters, ", "), strings.ReplaceAll(want, ",", ", "))
 		}
 		out, err := p.transports[p.etcd.control].Run(p.etcdctl("endpoint health --cluster -w json"))
-		var health []endpointHealth
-		if jerr := json.Unmarshal([]byte(strings.TrimSpace(out)), &health); jerr != nil {
+		health, ok := apply.ParseEtcdEndpointHealth(out)
+		if !ok {
 			return fmt.Errorf("endpoint health: %s", lastLines(out, 3))
 		}
 		for _, h := range health {
 			if !h.Health {
-				return fmt.Errorf("%s is unhealthy: %s", h.Endpoint, h.Error)
+				return fmt.Errorf("%s's etcd is unhealthy%s", apply.EtcdEndpointSite(p.cfg, h.Endpoint), apply.EtcdHealthError(h))
 			}
 		}
 		if err != nil {

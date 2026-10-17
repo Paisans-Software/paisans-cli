@@ -69,6 +69,9 @@ type world struct {
 	etcd     []apply.EtcdMember
 	nextID   uint64
 	etcdDown map[string]bool
+	// healthOut, when set, is what `endpoint health` prints instead of the
+	// members' health, with exit status 1.
+	healthOut string
 	// clusterID is the cluster ID every etcd reports in its member list's
 	// header; 0 leaves it out, as an etcdctl that prints none would.
 	clusterID uint64
@@ -544,9 +547,14 @@ func (h *host) Run(command string) (string, error) {
 			failed = failed || !ok
 			out = append(out, map[string]any{"endpoint": m.ClientURLs[0], "health": ok})
 		}
+		if w.healthOut != "" {
+			return w.healthOut, errors.New("exit status 1")
+		}
 		data, _ := json.Marshal(out)
 		if failed {
-			return string(data), errors.New("exit status 1")
+			// etcdctl prints every endpoint, then exits 1 with its error on
+			// stderr, which the transport's combined output carries too.
+			return "Error: unhealthy cluster\n" + string(data) + "\n", errors.New("exit status 1")
 		}
 		return string(data), nil
 	case strings.Contains(command, "member list -w json"):

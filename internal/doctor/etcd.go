@@ -56,29 +56,12 @@ type EtcdProbe struct {
 	Tried []string
 }
 
-// EtcdHealth is one entry of `etcdctl endpoint health -w json`. The keys are
-// etcdctl's epHealth (etcd v3.5.16, etcdctl/ctlv3/command/ep_command.go).
-type EtcdHealth struct {
-	Endpoint string `json:"endpoint"`
-	Health   bool   `json:"health"`
-	Took     string `json:"took"`
-	Error    string `json:"error"`
-}
+// EtcdHealth is one entry of `etcdctl endpoint health -w json`.
+type EtcdHealth = apply.EtcdEndpointHealth
 
-// ParseEtcdHealth finds the JSON list in etcdctl's output, which may be
-// followed by "Error: unhealthy cluster".
-func ParseEtcdHealth(out string) ([]EtcdHealth, bool) {
-	start := strings.Index(out, "[")
-	end := strings.LastIndex(out, "]")
-	if start < 0 || end < start {
-		return nil, false
-	}
-	var list []EtcdHealth
-	if err := json.Unmarshal([]byte(out[start:end+1]), &list); err != nil {
-		return nil, false
-	}
-	return list, true
-}
+// ParseEtcdHealth finds the JSON list in etcdctl's output, which may hold
+// "Error: unhealthy cluster" beside it.
+func ParseEtcdHealth(out string) ([]EtcdHealth, bool) { return apply.ParseEtcdEndpointHealth(out) }
 
 // EtcdVersion is etcd's /version document.
 type EtcdVersion struct {

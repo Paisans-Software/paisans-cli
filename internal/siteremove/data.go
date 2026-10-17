@@ -31,14 +31,6 @@ type etcdState struct {
 	witnessRunning bool
 }
 
-// endpointHealth is one entry of `etcdctl endpoint health -w json` (etcd
-// v3.5.16, etcdctl/ctlv3/command/ep_command.go, epHealth).
-type endpointHealth struct {
-	Endpoint string `json:"endpoint"`
-	Health   bool   `json:"health"`
-	Error    string `json:"error"`
-}
-
 // probeEtcd finds a remaining voter to run etcdctl on, and refuses a removal
 // that would leave the cluster without a quorum of healthy members or that
 // starts while any other member is unhealthy: a membership change on an
@@ -116,6 +108,7 @@ func (p *Plan) probeEtcd() error {
 	// with the leaving witness still among them, and every end state member
 	// etcd does not list yet, counted as down.
 	after, up := len(missing), 0
+	var sick []string
 	for _, m := range members {
 		site := apply.EtcdMemberSite(p.cfg, m)
 		if site == p.Site || m.IsLearner {
@@ -125,6 +118,7 @@ func (p *Plan) probeEtcd() error {
 		if healthy[site] {
 			up++
 		} else {
+			sick = append(sick, site)
 			problems = append(problems, fmt.Sprintf("%s's etcd is unhealthy", site))
 		}
 	}
@@ -132,7 +126,7 @@ func (p *Plan) probeEtcd() error {
 		problems = append(problems, fmt.Sprintf("without %s, %d of %d remaining members are healthy, which is no quorum", p.Site, up, after))
 	}
 	if p.Options.HostGone {
-		if err := p.cutoffQuorum(members, up); err != nil {
+		if err := p.cutoffQuorum(members, up, sick); err != nil {
 			return err
 		}
 	}
@@ -257,11 +251,12 @@ func joinAnd(list []string) string {
 
 // etcdHealth asks the control site for every member's health, by site.
 // etcdctl exits non zero when any endpoint is unhealthy and still prints
-// every endpoint, so the answer is read whatever the exit.
+// every endpoint, so the answer is read whatever the exit, and the caller
+// judges which members have to be healthy.
 func (p *Plan) etcdHealth(members []apply.EtcdMember) (map[string]bool, error) {
 	out, err := p.transports[p.etcd.control].Run(p.etcdctl("endpoint health --cluster -w json"))
-	var health []endpointHealth
-	if jerr := json.Unmarshal([]byte(strings.TrimSpace(out)), &health); jerr != nil {
+	health, ok := apply.ParseEtcdEndpointHealth(out)
+	if !ok {
 		if err != nil {
 			return nil, fmt.Errorf("site remove %s: %s: etcd's endpoint health: %v: %s", p.Site, p.etcd.control, err, lastLines(out, 3))
 		}

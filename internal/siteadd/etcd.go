@@ -1,7 +1,6 @@
 package siteadd
 
 import (
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -304,14 +303,10 @@ func (p *Plan) joinEtcd(j string) error {
 	return fmt.Errorf("%s: etcd would not promote %s after %d attempts, so it is still a learner and the cluster still has its quorum. Last answer: %s", p.control, j, promoteAttempts, last)
 }
 
-// endpointHealth is one entry of `etcdctl endpoint health -w json` (etcd
-// v3.5.16, etcdctl/ctlv3/command/ep_command.go, epHealth).
-type endpointHealth struct {
-	Endpoint string `json:"endpoint"`
-	Health   bool   `json:"health"`
-	Error    string `json:"error"`
-}
-
+// etcdGate waits for every member of etcd.members to be a voter and every
+// member to answer healthy. etcdctl exits 1 when any endpoint is unhealthy
+// and still prints every endpoint, so its list is read whatever the exit and
+// an unhealthy member is named.
 func (p *Plan) etcdGate() error {
 	want := sortedCopy(p.cfg.Etcd.Members)
 	var problems []string
@@ -319,13 +314,12 @@ func (p *Plan) etcdGate() error {
 	for i := 0; i < n; i++ {
 		problems = nil
 		out, err := p.transports[p.control].Run(apply.Etcdctl(p.dep(), p.cfg.Sites[p.control].Address, "endpoint health --cluster -w json"))
-		var health []endpointHealth
-		if jerr := json.Unmarshal([]byte(strings.TrimSpace(out)), &health); jerr != nil {
+		if health, ok := apply.ParseEtcdEndpointHealth(out); !ok {
 			problems = append(problems, "endpoint health: "+lastLines(out, 3))
 		} else {
 			for _, h := range health {
 				if !h.Health {
-					problems = append(problems, fmt.Sprintf("%s is unhealthy: %s", h.Endpoint, h.Error))
+					problems = append(problems, apply.EtcdEndpointSite(p.cfg, h.Endpoint)+"'s etcd is unhealthy"+apply.EtcdHealthError(h))
 				}
 			}
 			if err != nil && len(problems) == 0 {

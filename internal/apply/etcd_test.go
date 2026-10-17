@@ -426,3 +426,24 @@ func TestEtcdRefusalsAreProblems(t *testing.T) {
 		}
 	}
 }
+
+// etcdctl's endpoint list is read from its combined output whatever else
+// that holds, and output with no list is not read as one.
+func TestParseEtcdEndpointHealth(t *testing.T) {
+	list := `[{"endpoint":"http://10.77.32.11:2379","health":true,"took":"2.1ms"},{"endpoint":"http://10.77.32.1:2379","health":true,"took":"2.4ms"},{"endpoint":"http://10.77.32.13:2379","health":false,"took":"5.003591384s","error":"context deadline exceeded"}]`
+	for name, out := range map[string]string{
+		"alone":       list,
+		"error first": "Error: unhealthy cluster\n" + list + "\n",
+		"error after": list + "\nError: unhealthy cluster\n",
+	} {
+		got, ok := apply.ParseEtcdEndpointHealth(out)
+		if !ok || len(got) != 3 || !got[0].Health || got[2].Health || got[2].Endpoint != "http://10.77.32.13:2379" || got[2].Error != "context deadline exceeded" {
+			t.Errorf("%s: got %+v, %v", name, got, ok)
+		}
+	}
+	for _, out := range []string{"", "Error: context deadline exceeded", "[not json]", "] then ["} {
+		if got, ok := apply.ParseEtcdEndpointHealth(out); ok {
+			t.Errorf("%q read as %+v", out, got)
+		}
+	}
+}

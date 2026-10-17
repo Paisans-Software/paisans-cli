@@ -59,7 +59,10 @@ type world struct {
 	promoteRefusals int
 	// addRefusals is how many learner adds etcd refuses as an unhealthy
 	// cluster, as it does until every voter has been connected five seconds.
-	addRefusals   int
+	addRefusals int
+	// etcdSick is each site whose etcd endpoint health reports unhealthy
+	// though it runs.
+	etcdSick      map[string]bool
 	lags          []float64
 	noSyncStandby bool
 	replicaUp     bool
@@ -278,11 +281,19 @@ func (h *host) Run(command string) (string, error) {
 		return "promoted\n", nil
 	case strings.Contains(command, "endpoint health --cluster"):
 		var out []map[string]any
+		failed := false
 		for _, m := range w.etcd {
 			site := apply.EtcdMemberSite(w.cfg, m)
-			out = append(out, map[string]any{"endpoint": "http://" + site + ":2379", "health": w.running[site]})
+			ok := w.running[site] && !w.etcdSick[site]
+			failed = failed || !ok
+			out = append(out, map[string]any{"endpoint": "http://" + w.cfg.Sites[site].Address + ":2379", "health": ok})
 		}
 		data, _ := json.Marshal(out)
+		if failed {
+			// etcdctl prints every endpoint, then exits 1 with its error on
+			// stderr, which the transport's combined output carries too.
+			return "Error: unhealthy cluster\n" + string(data) + "\n", fmt.Errorf("exit status 1")
+		}
 		return string(data), nil
 	case strings.Contains(command, "exec -T patroni printenv ETCD3_HOSTS"):
 		if !w.patroni[h.name] {

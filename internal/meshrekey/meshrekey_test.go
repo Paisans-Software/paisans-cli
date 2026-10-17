@@ -218,6 +218,7 @@ func (h *host) Run(command string) (string, error) {
 		return "", nil
 	case strings.Contains(command, "endpoint health --cluster"):
 		var out []map[string]any
+		failed := false
 		for i, name := range m.cfg.Etcd.Members {
 			// A member is healthy while its tunnel to every other member is
 			// up, which a swap part way breaks.
@@ -225,9 +226,16 @@ func (h *host) Run(command string) (string, error) {
 			for _, other := range m.cfg.Etcd.Members {
 				up = up && (other == name || m.tunnel(name, other))
 			}
-			out = append(out, map[string]any{"endpoint": "http://" + m.cfg.Sites[name].Address + ":2379", "health": up && !(m.sick && i == 1)})
+			ok := up && !(m.sick && i == 1)
+			failed = failed || !ok
+			out = append(out, map[string]any{"endpoint": "http://" + m.cfg.Sites[name].Address + ":2379", "health": ok})
 		}
 		data, _ := json.Marshal(out)
+		if failed {
+			// etcdctl prints every endpoint, then exits 1 with its error on
+			// stderr, which the transport's combined output carries too.
+			return "Error: unhealthy cluster\n" + string(data) + "\n", errors.New("exit status 1")
+		}
 		return string(data), nil
 	case strings.Contains(command, "patronictl") && strings.HasSuffix(command, "show-config"):
 		if m.paused {
@@ -539,10 +547,16 @@ func TestARekeySaysWhenSudoRefusesTheHelper(t *testing.T) {
 func TestARekeyRefuses(t *testing.T) {
 	m := newMesh(t)
 	m.sick = true
-	if _, err := m.build("vm"); err == nil || !strings.Contains(err.Error(), "etcd is unhealthy") {
-		t.Errorf("unhealthy etcd: %v", err)
+	sick := m.cfg.Etcd.Members[1]
+	if _, err := m.build("vm"); err == nil || !strings.Contains(err.Error(), "etcd is unhealthy at "+sick) {
+		t.Errorf("unhealthy etcd: %v, want %s named", err, sick)
 	}
 	m.sick = false
+	m.failOnce, m.failOut = "endpoint health", "Error: context deadline exceeded\n"
+	if _, err := m.build("vm"); err == nil || !strings.Contains(err.Error(), "etcd's endpoint health") {
+		t.Errorf("endpoint health with no list: %v", err)
+	}
+	m.failOnce, m.failOut = "", ""
 	m.hosts["watch"].down = true
 	if _, err := m.build("vm"); err == nil || !strings.Contains(err.Error(), "watch does not answer over ssh") {
 		t.Errorf("a site that does not answer: %v", err)
