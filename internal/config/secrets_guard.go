@@ -93,7 +93,7 @@ func PlaintextProblem(path string) error {
 	name := ui.ShortPath(path)
 	return &ui.Problem{
 		Hint:    name + " is not encrypted",
-		Explain: fmt.Sprintf("A deployment keeps its secrets under sops, and %s carries no sops metadata, so it is refused. With your age public key named in %s beside it, encrypt it in place:\n  sops --encrypt --in-place %s\nthen run the command again, and check that no plaintext copy of it was committed anywhere. %s=1 reads a plaintext file, and is for tests and fixtures only.", name, SOPSConfigName, quotePath(path), PlaintextSecretsVariable),
+		Explain: fmt.Sprintf("A deployment keeps its secrets under sops, and %s carries no sops metadata, so it is refused. With your age public key named in %s beside it, encrypt it in place:\n  sops --encrypt --in-place %s\nthen run the command again, and check that no plaintext copy of it was committed anywhere.", name, SOPSConfigName, quotePath(path)),
 		Cause:   fmt.Errorf("%s: no sops metadata", path),
 	}
 }
@@ -104,7 +104,7 @@ func noRecipientPlainProblem(path string) error {
 	name := ui.ShortPath(path)
 	return &ui.Problem{
 		Hint:    "no " + SOPSConfigName + " beside " + name + " names an age recipient",
-		Explain: fmt.Sprintf("Secrets are written only encrypted, and %s names who they are encrypted to, so nothing was written. Name your age public key in %s, or run paisans init in a directory with neither file to have a key made. %s=1 writes plaintext, and is for tests and fixtures only.", SOPSConfigName, quotePath(filepath.Join(filepath.Dir(path), SOPSConfigName)), PlaintextSecretsVariable),
+		Explain: fmt.Sprintf("Secrets are written only encrypted, and %s names who they are encrypted to, so nothing was written. Name your age public key in %s, or run paisans init in a directory with neither file to have a key made.", SOPSConfigName, quotePath(filepath.Join(filepath.Dir(path), SOPSConfigName))),
 		Cause:   fmt.Errorf("%s: no age recipient to encrypt to", path),
 	}
 }

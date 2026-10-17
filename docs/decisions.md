@@ -3289,11 +3289,11 @@ Issue #423.
   refused before anything changes. The refusal names the recipients the
   file's sops metadata records and the `printf` command that writes
   `.sops.yaml` back with them.
-* Nothing is written in plaintext except with
-  `PAISANS_TEST_PLAINTEXT_SECRETS=1`, and that mode never writes an encrypted
-  file back in plaintext.
+* Nothing is written in plaintext except in the test suite's explicit mode
+  (`docs/development.md`, *Fixtures and secrets*), which never writes an
+  encrypted file back in plaintext.
 * A plaintext `secrets.enc.yaml` is refused wherever a deployment reads it,
-  outside that mode.
+  outside that mode. Refusals never name the mode: they give the real fixes.
 
 ### Why
 

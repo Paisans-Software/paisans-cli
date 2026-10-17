@@ -40,7 +40,7 @@ deleting DNS records, making an administrator) or a read (`doctor`,
 |------|---------|----------|---------|
 | `-v`, `--verbose` | off | every command | the reasons, values, request bodies and command output behind each step; with it, a failure also shows the underlying error |
 | `--config <path>` | `paisans-stack.yaml` | every command except `site deployments` | the deployment declaration |
-| `--secrets <path>` | `secrets.enc.yaml` beside the config | every command that reads secrets | the sops encrypted secrets file. A plaintext one is refused, unless `PAISANS_TEST_PLAINTEXT_SECRETS=1`, which is for tests and fixtures only (see *`secrets.enc.yaml` exists only encrypted* in `README.md`) |
+| `--secrets <path>` | `secrets.enc.yaml` beside the config | every command that reads secrets | the sops encrypted secrets file. A plaintext one is refused (see *`secrets.enc.yaml` exists only encrypted* in `README.md`) |
 | `--execute` | off | every command that changes something, as each entry says | without it, the command plans and prints and changes nothing |
 | `--yes` | off | every command that asks for a confirmation, as each entry says | answers each confirmation as typing it would; needs `PAISANS_ALLOW_YES=1` (see *`--yes` answers confirmations* below) |
 | `--sudo` | on | `site deployments` | run its remote commands through sudo, since the registry is root's; `--sudo=false` skips it (see *A sudo that wants a password is asked for once, on a terminal* in `README.md`). Every other command runs as the site's ssh user, without sudo |

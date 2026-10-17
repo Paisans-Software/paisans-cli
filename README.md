@@ -3036,11 +3036,11 @@ printf 'creation_rules:\n  - age: age1…\n' > .sops.yaml
 ```
 
 A plaintext `secrets.enc.yaml` is refused wherever a deployment reads it:
-`init`, `apply`, `validate`, `doctor`, publishing a version, and every other
-command that opens the secrets. The refusal names the fix, `sops --encrypt
---in-place secrets.enc.yaml` with your age public key in `.sops.yaml`.
-`PAISANS_TEST_PLAINTEXT_SECRETS=1` reads and writes a plaintext file, for tests
-and fixtures only. It never writes an encrypted file back in plaintext.
+`init`, `apply`, `validate`, publishing a version, pulling or recovering one,
+and every other command that opens the secrets. `doctor` reports it, and a
+missing `.sops.yaml`, as a failed check and runs the rest. The refusal names
+the fix, `sops --encrypt --in-place secrets.enc.yaml` with your age public key
+in `.sops.yaml`.
 
 Every later command finds the key on its own: with no `SOPS_AGE_*` variable
 set, paisans reads the keystore item for the deployment id and decrypts with

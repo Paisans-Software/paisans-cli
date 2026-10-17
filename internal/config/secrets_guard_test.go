@@ -126,8 +126,8 @@ func TestWriteSecretsRefusesPlaintextOutsideTestMode(t *testing.T) {
 	if err == nil {
 		t.Fatal("written in plaintext")
 	}
-	if hint, explain := ui.Describe(err); !strings.Contains(hint, ".sops.yaml") || !strings.Contains(explain, config.PlaintextSecretsVariable) {
-		t.Fatalf("WriteSecrets = %v, want a refusal naming .sops.yaml and the test mode", err)
+	if hint, _ := ui.Describe(err); !strings.Contains(hint, ".sops.yaml") || strings.Contains(err.Error(), config.PlaintextSecretsVariable) {
+		t.Fatalf("WriteSecrets = %v, want a refusal naming .sops.yaml and not the test mode", err)
 	}
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("a file was written: %v", err)
@@ -151,7 +151,7 @@ func TestLoadDeploymentSecretsRefusesPlaintext(t *testing.T) {
 		t.Fatal("a plaintext file was read")
 	}
 	hint, explain := ui.Describe(err)
-	if !strings.Contains(hint, "is not encrypted") || !strings.Contains(explain, "sops --encrypt --in-place "+path) {
+	if !strings.Contains(hint, "is not encrypted") || !strings.Contains(explain, "sops --encrypt --in-place "+path) || strings.Contains(err.Error(), config.PlaintextSecretsVariable) {
 		t.Fatalf("LoadDeploymentSecrets = %v, want a refusal naming the fix", err)
 	}
 }

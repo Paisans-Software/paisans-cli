@@ -157,7 +157,7 @@ func TestAPlaintextSecretsFileIsRefused(t *testing.T) {
 				t.Fatal("no refusal")
 			}
 			hint, explain := ui.Describe(err)
-			if !strings.Contains(hint, "is not encrypted") || !strings.Contains(explain, "sops --encrypt --in-place") {
+			if !strings.Contains(hint, "is not encrypted") || !strings.Contains(explain, "sops --encrypt --in-place") || strings.Contains(err.Error(), config.PlaintextSecretsVariable) {
 				t.Fatalf("err = %v, want a refusal of plaintext naming the fix", err)
 			}
 			if now := snapshot(t, filepath.Dir(configPath)); !reflect.DeepEqual(files, now) {
@@ -238,5 +238,20 @@ func TestTheTestModeWarnsOnEveryRun(t *testing.T) {
 	stderr, err = run("")
 	if err == nil || strings.Contains(stderr, "=1 is set") || !strings.Contains(stderr, "is not encrypted") {
 		t.Errorf("without the test mode: %v\n%s", err, stderr)
+	}
+}
+
+// The test mode is for the test suite, so no document an operator reads
+// names it: a refusal points at the real fixes, and the variable is
+// documented for contributors in docs/development.md alone.
+func TestOperatorDocsDoNotNameTheTestMode(t *testing.T) {
+	for _, name := range []string{"README.md", "CHANGELOG.md", filepath.Join("docs", "commands.md")} {
+		data, err := os.ReadFile(filepath.Join("..", "..", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(data, []byte(config.PlaintextSecretsVariable)) {
+			t.Errorf("%s names %s", name, config.PlaintextSecretsVariable)
+		}
 	}
 }

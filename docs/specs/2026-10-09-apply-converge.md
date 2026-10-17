@@ -156,7 +156,7 @@ In the last the `init` line says why, after what init has to do. A file that
 is encrypted with no `.sops.yaml` recipient beside it is refused before
 anything is planned, dry run and `--execute` alike, naming the recipients its
 sops metadata records and the command that restores `.sops.yaml`. A plaintext
-file is refused too, outside `PAISANS_TEST_PLAINTEXT_SECRETS=1`.
+file is refused too.
 
 A secret the toolkit cannot generate stays a note naming `secrets set`, as
 before.
