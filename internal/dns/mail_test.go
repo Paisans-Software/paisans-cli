@@ -1299,3 +1299,31 @@ func TestPruneKeepsHostnamePoliciesWhileTheCoverIsAConflict(t *testing.T) {
 		t.Errorf("removes %+v, want nothing", p.Removes())
 	}
 }
+
+// Below a mail name with a weaker policy, a hostname gets its own, since a
+// receiver walking up the tree reads that one first.
+func TestHostnameBelowAWeakMailNameGetsItsOwnPolicy(t *testing.T) {
+	cfg := declared()
+	cfg.Community.MailDomains = []string{"news.example.org"}
+	cfg.Apps["x"] = config.App{Blueprint: config.Blueprint("writefreely"), Hostname: "x.news.example.org"}
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{
+		{Type: "MX", Name: "news.example.org", Content: "mx.example.net", Priority: ptr(10)},
+		{Type: "TXT", Name: "_dmarc.news.example.org", Content: "v=DMARC1; p=none"},
+		{Type: "TXT", Name: "_dmarc.example.org", Content: dmarcLockdown},
+	}
+	if e, _ := entryAt(plan(t, fake.serve(t), cfg), "_dmarc.x.news.example.org"); e.Action != Create {
+		t.Errorf("got %s, want create", e.Action)
+	}
+}
+
+// A policy in DMARCbis' test mode does not reject, so it covers nothing.
+func TestTestModePolicyCoversNothing(t *testing.T) {
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{{Type: "TXT", Name: "_dmarc.example.org", Content: "v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s; t=y"}}
+	if e, _ := entryAt(plan(t, fake.serve(t), staged()), "_dmarc.talk.staging.example.org"); e.Action != Create {
+		t.Errorf("got %s, want create", e.Action)
+	}
+}

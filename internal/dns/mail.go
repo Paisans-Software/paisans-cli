@@ -198,9 +198,18 @@ func mailWants(cfg *config.Config, addresses []Want) []Want {
 		org := orgDomain(name)
 		registrable := org == "" || org == name
 		out = append(out, Want{Type: "TXT", Name: name, Content: spfLockdown, Sources: hosts[name], Guard: !registrable})
+		// Below a mail name under community.domain, a receiver walking up
+		// the tree reads the mail name's policy before the domain's, so the
+		// hostname is covered only while that one is as strict.
+		belowMail := false
+		for _, m := range mailNames {
+			if m != domain && strings.HasSuffix(name, "."+m) {
+				belowMail = true
+			}
+		}
 		switch {
 		case registrable:
-		case org == domain && !domainMail:
+		case org == domain && !domainMail && !belowMail:
 		default:
 			w := Want{Type: "TXT", Name: "_dmarc." + name, Content: dmarcLockdown, Sources: hosts[name]}
 			if org == domain || org == parent {
@@ -419,8 +428,9 @@ func satisfies(p purpose, r Record) bool {
 		if !ok {
 			sp = t["p"]
 		}
+		// A policy in DMARCbis' test mode (t=y) is applied a level lower.
 		pct, ok := t["pct"]
-		return strings.EqualFold(t["p"], "reject") && strings.EqualFold(sp, "reject") && (!ok || pct == "100")
+		return strings.EqualFold(t["p"], "reject") && strings.EqualFold(sp, "reject") && (!ok || pct == "100") && !strings.EqualFold(t["t"], "y")
 	default:
 		return r.Priority == 0 && isRoot(r.Content)
 	}

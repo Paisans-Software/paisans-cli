@@ -318,7 +318,7 @@ func parentHazards(ctx context.Context, provider Provider, z zone, w Want, own m
 	}
 	for _, r := range records {
 		name := normalise(r.Name)
-		if strings.HasPrefix(name, "_dmarc.") && (competes(purposeDMARC, r) || strings.EqualFold(r.Type, "CNAME")) {
+		if strings.HasPrefix(name, "_dmarc.") && !noPolicy([]Record{r}) {
 			policy[strings.TrimPrefix(name, "_dmarc.")] = true
 		}
 	}
