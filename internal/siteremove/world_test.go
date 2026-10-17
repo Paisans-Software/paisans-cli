@@ -30,6 +30,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
+	"github.com/paisans-software/paisans-cli/internal/patronitest"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/siteremove"
@@ -72,6 +73,9 @@ type world struct {
 	// healthOut, when set, is what `endpoint health` prints instead of the
 	// members' health, with exit status 1.
 	healthOut string
+	// patroniLog wraps every patronictl answer in the log lines patronictl
+	// writes when it cannot reach one of etcd's endpoints.
+	patroniLog bool
 	// clusterID is the cluster ID every etcd reports in its member list's
 	// header; 0 leaves it out, as an etcdctl that prints none would.
 	clusterID uint64
@@ -595,7 +599,7 @@ func (h *host) Run(command string) (string, error) {
 		w.failover()
 		return w.patroniList(), nil
 	case strings.Contains(command, "show-config"):
-		return fmt.Sprintf("loop_wait: 10\nsynchronous_mode: %v\n", w.syncMode), nil
+		return w.patronictlOut(fmt.Sprintf("loop_wait: 10\nsynchronous_mode: %v\n", w.syncMode)), nil
 	case strings.Contains(command, "edit-config"):
 		w.syncMode = false
 		for _, m := range w.members {
@@ -1095,7 +1099,14 @@ func (w *world) splitEtcd(site string) {
 
 func (w *world) patroniList() string {
 	data, _ := json.Marshal(w.members)
-	return string(data)
+	return w.patronictlOut(string(data))
+}
+
+func (w *world) patronictlOut(out string) string {
+	if w.patroniLog {
+		return patronitest.Wrap(out)
+	}
+	return out
 }
 
 func (w *world) leader() string {

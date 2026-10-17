@@ -1,7 +1,6 @@
 package apply
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -280,7 +279,7 @@ func listMembers(d deployment.Deployment, at Transport) ([]listedMember, error) 
 		return nil, fmt.Errorf("%s: patronictl list: %w: %s", at.Describe(), err, lastLines(out, 3))
 	}
 	var list []listedMember
-	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &list); err != nil {
+	if err := FirstJSONArray(out, &list); err != nil {
 		return nil, fmt.Errorf("%s: patronictl list is not JSON: %w", at.Describe(), err)
 	}
 	return list, nil

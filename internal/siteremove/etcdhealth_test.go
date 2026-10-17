@@ -52,3 +52,25 @@ func TestEndpointHealthThatIsNotJSONRefuses(t *testing.T) {
 		}
 	}
 }
+
+// patronictl logs beside its answer when it tries the gone site's etcd
+// endpoint, and the removal reads the answer past them.
+func TestPatronictlLogLinesDoNotStopTheRemoval(t *testing.T) {
+	for _, hostGone := range []bool{false, true} {
+		w := setup(t)
+		w.patroniLog = true
+		if hostGone {
+			w.unreachable["home-b"] = true
+			w.etcdDown["home-b"] = true
+			w.member("home-b")["Role"], w.member("home-b")["State"] = "Replica", "stopped"
+			w.member("home-c")["Role"] = "Sync Standby"
+		}
+		p, err := w.build("home-b", siteremove.Options{HostGone: hostGone})
+		if err != nil {
+			t.Fatalf("--host-gone %v: %v", hostGone, err)
+		}
+		if err := siteremove.Execute(p); err != nil {
+			t.Fatalf("--host-gone %v: %v", hostGone, err)
+		}
+	}
+}

@@ -16,6 +16,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply/applytest"
 	"github.com/paisans-software/paisans-cli/internal/apply/meshfake"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/patronitest"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -62,7 +63,10 @@ type world struct {
 	addRefusals int
 	// etcdSick is each site whose etcd endpoint health reports unhealthy
 	// though it runs.
-	etcdSick      map[string]bool
+	etcdSick map[string]bool
+	// patroniLog wraps every patronictl answer in the log lines patronictl
+	// writes when it cannot reach one of etcd's endpoints.
+	patroniLog    bool
 	lags          []float64
 	noSyncStandby bool
 	replicaUp     bool
@@ -324,7 +328,7 @@ func (h *host) Run(command string) (string, error) {
 	case strings.Contains(command, "patronictl") && strings.Contains(command, "list -f json"):
 		return w.patroniList(), nil
 	case strings.Contains(command, "show-config"):
-		return fmt.Sprintf("loop_wait: 10\nsynchronous_mode: %v\n", w.syncMode), nil
+		return w.patronictlOut(fmt.Sprintf("loop_wait: 10\nsynchronous_mode: %v\n", w.syncMode)), nil
 	case strings.Contains(command, "edit-config"):
 		w.syncMode = true
 		if !w.noSyncStandby {
@@ -374,7 +378,14 @@ func (w *world) patroniList() string {
 		}
 	}
 	data, _ := json.Marshal(w.members)
-	return string(data)
+	return w.patronictlOut(string(data))
+}
+
+func (w *world) patronictlOut(out string) string {
+	if w.patroniLog {
+		return patronitest.Wrap(out)
+	}
+	return out
 }
 
 func (w *world) stats(site string) (string, error) {

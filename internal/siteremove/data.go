@@ -1,13 +1,10 @@
 package siteremove
 
 import (
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/failover"
@@ -321,7 +318,7 @@ func (p *Plan) patroniList() ([]member, error) {
 		return nil, fmt.Errorf("%s: patronictl list: %w: %s", p.patroni.at, err, lastLines(out, 3))
 	}
 	var list []member
-	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &list); err != nil {
+	if err := apply.FirstJSONArray(out, &list); err != nil {
 		return nil, fmt.Errorf("%s: patronictl list is not JSON: %w", p.patroni.at, err)
 	}
 	return list, nil
@@ -345,7 +342,7 @@ func (p *Plan) probePatroni() error {
 			continue
 		}
 		var list []member
-		if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &list); err != nil {
+		if err := apply.FirstJSONArray(out, &list); err != nil {
 			return fmt.Errorf("site remove %s: %s: patronictl list is not JSON: %w", p.Site, name, err)
 		}
 		p.patroni.at, p.patroni.members = name, list
@@ -417,8 +414,8 @@ func (p *Plan) probePatroni() error {
 	if err != nil {
 		return fmt.Errorf("site remove %s: %s: patronictl show-config: %w: %s", p.Site, p.patroni.at, err, lastLines(out, 3))
 	}
-	var live map[string]any
-	if err := yaml.Unmarshal([]byte(out), &live); err != nil {
+	live, err := apply.PatroniConfig(out)
+	if err != nil {
 		return fmt.Errorf("site remove %s: %s: patronictl show-config is not YAML: %w", p.Site, p.patroni.at, err)
 	}
 	p.patroni.sync = fmt.Sprint(live["synchronous_mode"]) == "true"

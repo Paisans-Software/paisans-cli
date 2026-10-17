@@ -17,6 +17,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/apply/meshfake"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/patronitest"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -60,6 +61,9 @@ type mesh struct {
 	patroni map[string][2]string
 	// paused is Patroni's maintenance mode.
 	paused bool
+	// patroniLog wraps every patronictl answer in the log lines patronictl
+	// writes when it cannot reach one of etcd's endpoints.
+	patroniLog bool
 	// promotedAt is where in log each site's key was promoted.
 	promotedAt map[string]int
 	log        []string
@@ -239,9 +243,9 @@ func (h *host) Run(command string) (string, error) {
 		return string(data), nil
 	case strings.Contains(command, "patronictl") && strings.HasSuffix(command, "show-config"):
 		if m.paused {
-			return "loop_wait: 10\npause: true\n", nil
+			return m.patronictlOut("loop_wait: 10\npause: true\n"), nil
 		}
-		return "loop_wait: 10\n", nil
+		return m.patronictlOut("loop_wait: 10\n"), nil
 	case strings.Contains(command, "patronictl") && strings.HasSuffix(command, "pause --wait"):
 		if m.paused {
 			return "Error: Cluster is already paused", errors.New("exit status 1")
@@ -267,7 +271,7 @@ func (h *host) Run(command string) (string, error) {
 			out = append(out, map[string]any{"Member": name, "Role": role, "State": state})
 		}
 		data, _ := json.Marshal(out)
-		return string(data), nil
+		return m.patronictlOut(string(data)), nil
 	}
 	// apply's own plumbing around a scoped write: what it runs is not this
 	// test's subject, and it succeeds.
@@ -854,5 +858,30 @@ func claimOf(cfg *config.Config, site string, now time.Time) (string, registry.E
 		Subnet:     cfg.Mesh.Subnet,
 		Address:    declared.Address,
 		Roles:      registry.JoinRoles(declared.Roles),
+	}
+}
+
+func (m *mesh) patronictlOut(out string) string {
+	if m.patroniLog {
+		return patronitest.Wrap(out)
+	}
+	return out
+}
+
+// patronictl logs beside its answer when it cannot reach one of etcd's
+// endpoints, and the rekey reads the answer past them, through a relay's
+// pause and resume.
+func TestPatronictlLogLinesDoNotStopARekey(t *testing.T) {
+	m := newMesh(t, undialled)
+	m.patroniLog = true
+	p, err := BuildAll(m.cfg, m, m.transports())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run(t, p); err != nil {
+		t.Fatal(err)
+	}
+	if m.paused {
+		t.Error("Patroni is still paused")
 	}
 }

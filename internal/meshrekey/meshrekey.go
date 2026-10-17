@@ -20,7 +20,6 @@
 package meshrekey
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -28,8 +27,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/paisans-software/paisans-cli/internal/acme"
 	"github.com/paisans-software/paisans-cli/internal/apply"
@@ -676,7 +673,7 @@ func ClusterHealth(cfg *config.Config, transports map[string]apply.Transport) er
 			return fmt.Errorf("%s: patronictl list: %v", at, err)
 		}
 		var members []map[string]any
-		if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &members); err != nil {
+		if err := apply.FirstJSONArray(out, &members); err != nil {
 			return fmt.Errorf("%s: patronictl list is not JSON", at)
 		}
 		// Role and State are Patroni v4.1.0's (patroni/ctl.py,
@@ -753,8 +750,8 @@ func (p *Plan) paused() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	var live map[string]any
-	if err := yaml.Unmarshal([]byte(out), &live); err != nil {
+	live, err := apply.PatroniConfig(out)
+	if err != nil {
 		return false, fmt.Errorf("%s: patronictl show-config is not YAML: %w", p.cfg.Cluster.Sites[0], err)
 	}
 	return fmt.Sprint(live["pause"]) == "true", nil

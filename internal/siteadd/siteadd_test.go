@@ -549,3 +549,14 @@ func TestTheEtcdGateNamesAnUnhealthyMember(t *testing.T) {
 		t.Errorf("the refusal is etcdctl's exit: %v", err)
 	}
 }
+
+// patronictl logs beside its answer when it cannot reach one of etcd's
+// endpoints, and the join reads the answer past them.
+func TestPatronictlLogLinesDoNotStopTheJoin(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := newWorld(t)
+	w.patroniLog = true
+	if err := siteadd.Execute(build(t, w)); err != nil {
+		t.Fatal(err)
+	}
+}
