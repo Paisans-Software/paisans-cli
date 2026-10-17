@@ -522,7 +522,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	var recreate pathList
 	var only pathList
 	fs.Var(&only, "only", "apply only this stack's files and actions, and leave the rest of the site as it is (repeatable)")
-	fs.Var(&recreate, "recreate", "replace every container of this stack with `up -d --force-recreate`, even if nothing changed (repeatable)")
+	fs.Var(&recreate, "recreate", "replace every container of this stack with up -d --force-recreate, even if nothing changed (repeatable)")
 	minFree := fs.String("min-free", "3G", "free space Docker's data root must have before a stack pulls an image, Eg: 2G")
 	keepImages := fs.Bool("keep-images", false, "leave the images this apply supersedes on the host, Eg: to keep one to roll back to")
 	mustAll := fs.Bool("require-all", false, "exit 1 when the run is degraded: a site pending or down")

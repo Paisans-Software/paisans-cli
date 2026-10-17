@@ -168,3 +168,22 @@ func TestSiteHasNoAllowlistCommands(t *testing.T) {
 		}
 	}
 }
+
+// A backquoted word in a flag's usage is read by the flag package as the
+// name of its value, so --help would print that word in place of the type.
+// No flag's usage carries one.
+func TestNoFlagUsageIsBackquoted(t *testing.T) {
+	files, _ := filepath.Glob("*.go")
+	define := regexp.MustCompile(`\bfs\.[A-Z][A-Za-z]*\(.*` + "`")
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		src, _ := os.ReadFile(f)
+		for n, line := range strings.Split(string(src), "\n") {
+			if define.MatchString(line) {
+				t.Errorf("%s:%d: a flag usage with a backquote: %s", f, n+1, strings.TrimSpace(line))
+			}
+		}
+	}
+}
