@@ -136,3 +136,64 @@ func TestAScopeNamingNoRenderedFileIsRefused(t *testing.T) {
 		t.Error("a scope naming nothing rendered was accepted")
 	}
 }
+
+// Two scoped applies of one site, both planned before either runs, as a
+// staged command plans them: each records its own file, and the later one
+// keeps what the earlier one recorded. A following apply whose render moves
+// on again finds neither file edited, and still finds a hand edit made after
+// both.
+func TestScopedAppliesPlannedTogetherKeepEachOthersRecord(t *testing.T) {
+	const haproxy = "srv/paisans/f2a9/infra/haproxy/haproxy.cfg"
+	host := appliedHost(t)
+	rendered := planWith(t, withNewPeer(t))
+	for i := range rendered.Files {
+		if rendered.Files[i].Path == "home-a/"+haproxy {
+			rendered.Files[i].Content += "# without a backend\n"
+		}
+	}
+	mesh, err := apply.Build("home-a", rendered, acmeModule(t), host, apply.Scope(wgFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy, err := apply.Build("home-a", rendered, acmeModule(t), host, apply.Scope(haproxy))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mesh.Writes()) != 1 || len(proxy.Writes()) != 1 {
+		t.Fatalf("want one write each, got %v and %v", mesh.Writes(), proxy.Writes())
+	}
+	for _, p := range []*apply.Plan{mesh, proxy} {
+		if err := apply.Execute(p, host); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	next := planWith(t, func(cfg *config.Config) {
+		withNewPeer(t)(cfg)
+		site := cfg.Sites["home-b"]
+		site.Endpoint = "198.51.100.30:51820"
+		cfg.Sites["home-b"] = site
+	})
+	for i := range next.Files {
+		if next.Files[i].Path == "home-a/"+haproxy {
+			next.Files[i].Content += "# with a new backend\n"
+		}
+	}
+	scope := apply.Scope(wgFile, haproxy)
+	again, err := apply.Build("home-a", next, acmeModule(t), host, scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := again.Conflicts(); len(c) != 0 {
+		t.Fatalf("files two scoped applies wrote read as edited on the host: %v", c)
+	}
+
+	host.files["/"+wgFile] += "# a hand edit\n"
+	edited, err := apply.Build("home-a", next, acmeModule(t), host, scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := edited.Conflicts(); len(c) != 1 || c[0].Path != "/"+wgFile {
+		t.Errorf("a hand edit after both applies is not the one conflict: %v", c)
+	}
+}

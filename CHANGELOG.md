@@ -99,6 +99,7 @@ changes share a bullet. Detailed notes are on the corresponding
 - `apply` brings up the Caddy of each gateway outside `etcd.members` before the data members are founded, so their apps reach Pocket ID's public URL as they start; `apply --hold-apps` starts no app stack.
 - `site remove --host-gone` proceeds when only the gone site's etcd member is unhealthy; it, `site add`, `mesh rekey` and `secrets rotate` read patronictl past its log lines and name each unhealthy or missing etcd member.
 - `site remove` that takes a witness out of etcd removes its etcd container, running or stopped, and keeps its volumes, so the witness has none for its restart policy to start.
+- `site add` and `storage add` record every file they write in each site's manifest, so a following `apply` or `site add` takes none of them for a hand edit.
 
 ### Security
 

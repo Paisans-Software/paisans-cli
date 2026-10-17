@@ -208,8 +208,9 @@ func imageCount(n int) string {
 }
 
 // imageRecord is the manifest's record of the images this site has rendered:
-// what Build read, with every reference this plan renders added.
-func imageRecord(plan *Plan) []render.ManifestImage {
+// history, the record as the manifest has it, with every reference this plan
+// renders added.
+func imageRecord(plan *Plan, history []render.ManifestImage) []render.ManifestImage {
 	refs := map[string]map[string]bool{}
 	add := func(repo, ref string) {
 		if refs[repo] == nil {
@@ -219,7 +220,7 @@ func imageRecord(plan *Plan) []render.ManifestImage {
 			refs[repo][ref] = true
 		}
 	}
-	for _, image := range plan.imageHistory {
+	for _, image := range history {
 		add(image.Repository, "")
 		for _, ref := range image.References {
 			add(image.Repository, ref)
