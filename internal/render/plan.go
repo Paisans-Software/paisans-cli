@@ -77,7 +77,8 @@ const patroniAPIPort = 8008
 // there. It is moved beside the Patroni API instead of moving every app.
 const bgMonPort = 8009
 
-// haproxyStatsPort is where HAProxy serves its statistics, on loopback only.
+// haproxyStatsPort is where HAProxy serves its statistics, on the site's mesh
+// address.
 // Nothing else the toolkit renders listens on 8404.
 const haproxyStatsPort = 8404
 

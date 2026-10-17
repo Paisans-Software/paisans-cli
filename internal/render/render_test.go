@@ -2448,7 +2448,7 @@ func TestPatroniEnvSpeaksSpilosVocabulary(t *testing.T) {
 	if doc.Name != "home-a" {
 		t.Errorf("the member name is %q, not the site's name, so apply cannot find the leader", doc.Name)
 	}
-	if doc.RestAPI.Listen != "10.44.0.1:8008" || doc.PostgreSQL.Listen != "10.44.0.1,127.0.0.1:5432" {
+	if doc.RestAPI.Listen != "10.44.0.1:8008" || doc.PostgreSQL.Listen != "10.44.0.1:5432" {
 		t.Errorf("listeners are not pinned to the mesh: %+v", doc)
 	}
 	if doc.PostgreSQL.Parameters["bg_mon.port"] != 8009 {

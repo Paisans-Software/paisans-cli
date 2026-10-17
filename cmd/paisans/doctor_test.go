@@ -79,8 +79,6 @@ func readOnly(cfg *config.Config) (exact []string, prefixes []string) {
 		doctor.ReachCommand,
 		doctor.ClockCommand,
 		doctor.EtcdHealthCommand(cfg),
-		doctor.EtcdVersionCommand,
-		doctor.SyncCommand(cfg.Deployment()),
 		doctor.PatroniLogCommand(cfg.Deployment()),
 		doctor.ContainersCommand(cfg.Deployment()),
 		mesh.LinkCommand(cfg.Deployment().Interface()),
@@ -116,8 +114,16 @@ func readOnly(cfg *config.Config) (exact []string, prefixes []string) {
 			exact = append(exact, doctor.SettingsCommand(cfg.Deployment(), name, live.Service(), live.ReadCommand(names)))
 		}
 	}
+	for _, member := range cfg.Etcd.Members {
+		address := cfg.Sites[member].Address
+		exact = append(exact, doctor.EtcdVersionCommand(address), doctor.SyncCommand(cfg.Deployment(), address))
+	}
 	return exact, prefixes
 }
+
+// vmAddress is the fixture's vm site's mesh address, where its etcd member
+// listens.
+const vmAddress = "10.44.0.3"
 
 // sudoHelperOnly is sudo -l's answer for a user host admit gave the helper
 // and nothing else.
@@ -303,8 +309,8 @@ func stuckHosts(cfg *config.Config, sent, writes *[]string) map[string]doctorHos
 		doctor.ReachCommand:                                        "",
 		doctor.ClockCommand:                                        "1760000000.100000000\n",
 		doctor.EtcdHealthCommand(cfg):                              `[{"endpoint":"http://10.44.0.1:2379","health":true,"took":"4ms"},{"endpoint":"http://10.44.0.2:2379","health":false,"took":"5s","error":"context deadline exceeded"},{"endpoint":"http://10.44.0.3:2379","health":true,"took":"4ms"}]`,
-		doctor.EtcdVersionCommand:                                  `{"etcdserver":"3.5.16","etcdcluster":"3.5.0"}`,
-		doctor.SyncCommand(cfg.Deployment()):                       `{"leader":"home-b","quorum":0,"sync_standby":null}` + "\n",
+		doctor.EtcdVersionCommand("10.44.0.1"):                     `{"etcdserver":"3.5.16","etcdcluster":"3.5.0"}`,
+		doctor.SyncCommand(cfg.Deployment(), "10.44.0.1"):          `{"leader":"home-b","quorum":0,"sync_standby":null}` + "\n",
 		patroni.ClusterCommand(cfg.Deployment(), "10.44.0.1:8008"): `{"members":[{"name":"home-a","role":"replica","state":"running","timeline":2,"lag":1048576}],"scope":"paisans"}`,
 		doctor.PatroniLogCommand(cfg.Deployment()):                 "patroni-1  | INFO: following a different leader because i am not the healthiest node\n",
 		doctor.ContainersCommand(cfg.Deployment()):                 `{"Names":"paisans-f2a9-infra-patroni-1","State":"running","Status":"Up 5 minutes","Labels":"community.paisans.deployment=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}` + "\n" + `{"Names":"paisans-f2a9-talk-app-1","State":"restarting","Status":"Restarting (1) 3 seconds ago","Labels":"community.paisans.deployment=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01,com.docker.compose.project=paisans-f2a9-talk"}`,
@@ -351,7 +357,7 @@ func pendingHosts(t *testing.T, cfg *config.Config, sent, writes *[]string) map[
 	t.Helper()
 	hosts := stuckHosts(cfg, sent, writes)
 	a := hosts["home-a.local"]
-	a.answers[doctor.SyncCommand(cfg.Deployment())] = `{"leader":"home-a","quorum":0,"sync_standby":null}` + "\n"
+	a.answers[doctor.SyncCommand(cfg.Deployment(), "10.44.0.1")] = `{"leader":"home-a","quorum":0,"sync_standby":null}` + "\n"
 	a.answers[patroni.ClusterCommand(cfg.Deployment(), "10.44.0.1:8008")] = `{"members":[{"name":"home-a","role":"leader","state":"running","timeline":3}],"scope":"paisans"}`
 	a.answers[doctor.ContainersCommand(cfg.Deployment())] = `{"Names":"paisans-f2a9-infra-patroni-1","State":"running","Status":"Up 5 minutes","Labels":"community.paisans.deployment=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}`
 	a.answers["if [ ! -f '/srv/paisans/f2a9/auth/compose.yaml' ]"] = "active\n"
@@ -577,7 +583,7 @@ func TestDoctorSiteNarrowsTheHostsReached(t *testing.T) {
 			doctor.ReachCommand:                        "",
 			doctor.ClockCommand:                        "1760000000.000000000\n",
 			doctor.ContainersCommand(cfg.Deployment()): `{"Names":"paisans-f2a9-infra-etcd-1","State":"running","Status":"Up","Labels":"community.paisans.deployment=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}`,
-			doctor.EtcdVersionCommand:                  `{"etcdserver":"3.5.16","etcdcluster":"3.5.0"}`,
+			doctor.EtcdVersionCommand(vmAddress):       `{"etcdserver":"3.5.16","etcdcluster":"3.5.0"}`,
 			"docker compose -f /srv/paisans/f2a9/infra/compose.yaml exec -T etcd etcdctl": `[{"endpoint":"http://10.44.0.1:2379","health":true},{"endpoint":"http://10.44.0.2:2379","health":true},{"endpoint":"http://10.44.0.3:2379","health":true}]`,
 		}},
 	})
@@ -660,7 +666,7 @@ func TestDoctorReportsLeftoversAndForeignCaddyUsers(t *testing.T) {
 		doctor.ReachCommand:                        "",
 		doctor.ClockCommand:                        "1760000000.000000000\n",
 		doctor.ContainersCommand(cfg.Deployment()): `{"Names":"paisans-f2a9-infra-etcd-1","State":"running","Status":"Up","Labels":"community.paisans.deployment=` + id + `"}`,
-		doctor.EtcdVersionCommand:                  `{"etcdserver":"3.5.16","etcdcluster":"3.5.0"}`,
+		doctor.EtcdVersionCommand(vmAddress):       `{"etcdserver":"3.5.16","etcdcluster":"3.5.0"}`,
 		"docker compose -f /srv/paisans/f2a9/infra/compose.yaml exec -T etcd etcdctl": `[{"endpoint":"http://10.44.0.1:2379","health":true},{"endpoint":"http://10.44.0.2:2379","health":true},{"endpoint":"http://10.44.0.3:2379","health":true}]`,
 		mesh.LinkCommand("psns-f2a9"): `[{"ifname":"psns-f2a9","flags":["POINTOPOINT","NOARP","UP","LOWER_UP"]}]`,
 		mesh.RouteCommand:             `[{"dst":"10.44.0.0/24","dev":"psns-f2a9"}]`,

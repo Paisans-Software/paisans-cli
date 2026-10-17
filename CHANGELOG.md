@@ -76,6 +76,7 @@ changes share a bullet. Detailed notes are on the corresponding
 - `apply --execute` starts no peer sync on a site `host prepare` has not given a store, which has nothing to sync, rather than warning on every bare host that its sync did not complete.
 - `site remove` and `app remove` read every flag given after the name before they report, so `-v` there shows detail and `--execute` there records `ssh.user`.
 - `apply` on a site whose mesh interface is up without its file's address, key or peers restarts or syncs it, so a run stopped between writing the file and handing it over completes.
+- A deployment binds and dials only each site's mesh address, so the egress table `host admit` loads, which drops its loopback dials, stalls neither etcd's own client gateway nor Patroni's leader election.
 
 ### Security
 

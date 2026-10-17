@@ -202,9 +202,9 @@ func TestAForeignCaddyConflictsWithAGateway(t *testing.T) {
 	}
 }
 
-// A Postgres another user runs on the host's 5432 conflicts with a data
-// site, on the mesh address and on loopback, which the toolkit's binds both
-// need, and makes the host shared besides.
+// A Postgres another user runs on every address at the host's 5432
+// conflicts with a data site's bind on the mesh address, and makes the host
+// shared besides.
 func TestAForeignPostgresConflictsWithADataSite(t *testing.T) {
 	h := cleanHost()
 	h.answers["ss -Hltnue"] = baseSockets + `tcp LISTEN 0 244 0.0.0.0:5432 0.0.0.0:* uid:1003 ino:1 sk:20 <->
@@ -212,7 +212,6 @@ func TestAForeignPostgresConflictsWithADataSite(t *testing.T) {
 	r := check(t, "home-a", h)
 	wantClass(t, r, hostcheck.Conflicted)
 	wantLine(t, r, "10.44.0.1:5432/tcp (Postgres): claimed by sites.home-a.roles (data), held by a listener of another user's (uid 1003)")
-	wantLine(t, r, "127.0.0.1:5432/tcp (Postgres): claimed by sites.home-a.roles (data), held by a listener of another user's (uid 1003)")
 	if len(r.Foreign) != 1 {
 		t.Errorf("foreign %q, want the Postgres", r.Foreign)
 	}
@@ -234,16 +233,16 @@ func TestASystemUsersListenerIsTheBaseSystems(t *testing.T) {
 	wantClass(t, check(t, "edge", h), hostcheck.Clean)
 }
 
-// A loopback listener does not make a host shared, but one on an address
-// and port a site binds still stops that bind.
-func TestALoopbackListenerOnAClaimIsStillAConflict(t *testing.T) {
+// A loopback listener does not make a host shared, and stops no bind of a
+// site's, since every one is on the site's mesh address or every address.
+func TestALoopbackListenerOnAClaimedPortIsNoConflict(t *testing.T) {
 	h := cleanHost()
 	h.answers["ss -Hltnue"] = baseSockets + `tcp LISTEN 0 244 127.0.0.1:5432 0.0.0.0:* uid:1003 ino:1 sk:20 <->
 `
 	r := check(t, "home-a", h)
-	wantClass(t, r, hostcheck.Conflicted)
-	if len(r.Conflicts) != 1 || !strings.HasPrefix(r.Conflicts[0].Resource, "127.0.0.1:5432/tcp") {
-		t.Errorf("conflicts %v, want the loopback bind alone", r.Conflicts)
+	wantClass(t, r, hostcheck.Clean)
+	if len(r.Conflicts) != 0 {
+		t.Errorf("conflicts %v, want none", r.Conflicts)
 	}
 	if len(r.Foreign) != 0 {
 		t.Errorf("a loopback listener was counted as foreign: %q", r.Foreign)
@@ -324,17 +323,14 @@ func TestARouteInAnotherTableConflicts(t *testing.T) {
 }
 
 // An IPv4-mapped address is the IPv4 address, so a listener ss prints as
-// [::ffff:127.0.0.1] holds 127.0.0.1 and conflicts with a claim there.
+// [::ffff:10.44.0.1] holds 10.44.0.1 and conflicts with a claim there.
 func TestAnIPv4MappedListenerIsItsIPv4Address(t *testing.T) {
 	h := cleanHost()
-	h.answers["ss -Hltnue"] = baseSockets + `tcp LISTEN 0 244 [::ffff:127.0.0.1]:5432 *:* uid:1003 ino:1 sk:20 <->
+	h.answers["ss -Hltnue"] = baseSockets + `tcp LISTEN 0 244 [::ffff:10.44.0.1]:5432 *:* uid:1003 ino:1 sk:20 <->
 `
 	r := check(t, "home-a", h)
 	wantClass(t, r, hostcheck.Conflicted)
-	wantLine(t, r, "127.0.0.1:5432/tcp (Postgres): claimed by sites.home-a.roles (data), held by a listener of another user's (uid 1003)")
-	if len(r.Foreign) != 0 {
-		t.Errorf("a mapped loopback listener was counted as foreign: %q", r.Foreign)
-	}
+	wantLine(t, r, "10.44.0.1:5432/tcp (Postgres): claimed by sites.home-a.roles (data), held by a listener of another user's (uid 1003)")
 }
 
 // Another user's Caddy on 80 and 443 is no conflict for a monitor

@@ -640,7 +640,7 @@ func ClusterHealth(cfg *config.Config, transports map[string]apply.Transport) er
 		if at == nil {
 			return fmt.Errorf("%s: no way to reach it to read etcd's health", cfg.Etcd.Members[0])
 		}
-		out, err := at.Run(apply.Etcdctl(d, "endpoint health --cluster -w json"))
+		out, err := at.Run(apply.Etcdctl(d, cfg.Sites[cfg.Etcd.Members[0]].Address, "endpoint health --cluster -w json"))
 		var health []endpointHealth
 		if jerr := json.Unmarshal([]byte(strings.TrimSpace(out)), &health); jerr != nil {
 			if err != nil {

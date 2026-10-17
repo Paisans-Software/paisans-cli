@@ -59,11 +59,12 @@ func TestAnExternalListenIsClaimed(t *testing.T) {
 	if !found {
 		t.Fatalf("no claim for listen: %v", render.SiteListeners(cfg, "watch"))
 	}
-	// On a site that also holds data, a listen on Postgres's loopback port
-	// is a collision validate reports, not a container that fails to start.
+	// On a site that also holds data, a listen on Postgres's port at the
+	// site's mesh address is a collision validate reports, not a container
+	// that fails to start.
 	site := cfg.Sites["watch"]
 	site.Roles = append(site.Roles, config.RoleData)
-	site.WebServer.Listen = "127.0.0.1:5432"
+	site.WebServer.Listen = site.Address + ":5432"
 	cfg.Sites["watch"] = site
 	if !validate.Check(cfg).Has("port-collision") {
 		t.Fatal("a listen on 5432 beside Postgres is not a collision")

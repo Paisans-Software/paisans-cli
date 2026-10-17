@@ -462,7 +462,7 @@ func loginOnLeader(e Env, role, database, password string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	ok, err := login(t, patroni.Exec(e.Cfg.Deployment()), "127.0.0.1", role, database, password)
+	ok, err := login(t, patroni.Exec(e.Cfg.Deployment()), e.Cfg.Sites[leader].Address, role, database, password)
 	if err != nil {
 		return false, fmt.Errorf("%s: %w", leader, err)
 	}
@@ -471,9 +471,11 @@ func loginOnLeader(e Env, role, database, password string) (bool, error) {
 
 // login runs psql in the container exec reaches, as role over TCP to host,
 // where pg_hba asks for a password: the local socket is trusted and would
-// take any. In Spilo that is 127.0.0.1, which its pg_hba checks with md5
+// take any. In Spilo that is the leader's mesh address, the one address its
+// Postgres listens on, which its pg_hba checks with md5 over TLS
 // (zalando/spilo, postgres-appliance/scripts/configure_spilo.py,
-// `host all all 127.0.0.1/32 md5`). The password is read from stdin into PGPASSWORD inside the
+// `hostssl all all all md5`), and psql's default sslmode, prefer, takes the
+// TLS Spilo serves. The password is read from stdin into PGPASSWORD inside the
 // container, and -w makes a missing one a failure rather than a prompt. A
 // refused password is false; anything else that stops the login is an
 // error, since it says nothing about the password.

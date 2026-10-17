@@ -257,7 +257,9 @@ func (p *Plan) readProbe(pr *probe, nodes []*node) error {
 	}
 	if p.gateway != "" && pr.media != "" {
 		host := pr.media
-		cmd := fmt.Sprintf("curl -fsS --max-time 20 --resolve %s:443:127.0.0.1 https://%s/%s", host, host, pr.key)
+		// The gateway's Caddy answers on every address, and the deployment
+		// dials its own host at the gateway's mesh address alone.
+		cmd := fmt.Sprintf("curl -fsS --max-time 20 --resolve %s:443:%s https://%s/%s", host, p.cfg.Sites[p.gateway].Address, host, pr.key)
 		got, err := p.transports[p.gateway].Run(cmd)
 		if err != nil {
 			return fmt.Errorf("reading the probe through https://%s on %s: %s", host, p.gateway, lastLines(got, 3))

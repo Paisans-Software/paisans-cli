@@ -32,11 +32,14 @@ func EtcdHealthCommand(cfg *config.Config) string {
 // noCurl is what EtcdVersionCommand prints on a host without curl.
 const noCurl = "__PAISANS_NO_CURL__"
 
-// EtcdVersionCommand reads the member's /version on the host's loopback,
-// which the rendered etcd listens on (infra-compose.yaml.tmpl,
-// --listen-client-urls). It needs curl on the host, which the toolkit does
-// not install; without it the check is skipped and says so.
-const EtcdVersionCommand = "if command -v curl >/dev/null 2>&1; then curl -s --max-time 5 http://127.0.0.1:2379/version; else echo " + noCurl + "; fi"
+// EtcdVersionCommand reads the member's /version on address, its mesh
+// address, the one address the rendered etcd listens on
+// (infra-compose.yaml.tmpl, --listen-client-urls). It needs curl on the
+// host, which the toolkit does not install; without it the check is skipped
+// and says so.
+func EtcdVersionCommand(address string) string {
+	return fmt.Sprintf("if command -v curl >/dev/null 2>&1; then curl -s --max-time 5 http://%s:%d/version; else echo %s; fi", address, render.EtcdClientPort, noCurl)
+}
 
 // EtcdProbe is what one member's host said.
 type EtcdProbe struct {
@@ -208,10 +211,10 @@ func etcdVersion(p EtcdProbe, down []string) []Finding {
 		}}}
 }
 
-// SyncCommand reads Patroni's /sync key. --consistency=s is a serializable
+// SyncCommand reads Patroni's /sync key from the member at address. --consistency=s is a serializable
 // read, answered from the local member's own copy, so it works without
 // quorum, which is when it is needed; the value may be a moment stale, and
 // /sync changes only when the leader changes who it waits for.
-func SyncCommand(d deployment.Deployment) string {
-	return apply.Etcdctl(d, "get /service/"+render.PatroniScope+"/sync --print-value-only --consistency=s")
+func SyncCommand(d deployment.Deployment, address string) string {
+	return apply.Etcdctl(d, address, "get /service/"+render.PatroniScope+"/sync --print-value-only --consistency=s")
 }

@@ -17,7 +17,13 @@ services:
       - --name={{ .Site.Name }}
       - --data-dir=/var/lib/etcd
       - --listen-peer-urls=http://{{ .Site.Address }}:{{ .EtcdPeerPort }}
-      - --listen-client-urls=http://{{ .Site.Address }}:{{ .EtcdClientPort }},http://127.0.0.1:{{ .EtcdClientPort }}
+{{- /* Every listener of the deployment's, here and in each file this stack
+        mounts, is on the site's mesh address alone, and every dial goes to a
+        mesh address. These containers share the host's network namespace,
+        and the egress table host admit loads drops whatever the deployment's
+        user sends to loopback, etcd's own client gateway dialling its
+        listener among it. */}}
+      - --listen-client-urls=http://{{ .Site.Address }}:{{ .EtcdClientPort }}
       - --initial-advertise-peer-urls=http://{{ .Site.Address }}:{{ .EtcdPeerPort }}
       - --advertise-client-urls=http://{{ .Site.Address }}:{{ .EtcdClientPort }}
 {{- /* Both flags are read on this member's first start only, and are

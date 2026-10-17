@@ -78,7 +78,6 @@ func SiteListeners(cfg *config.Config, site string) []Listener {
 		return nil
 	}
 	addr := s.Address
-	const loopback = "127.0.0.1"
 	var out []Listener
 	add := func(owner, key, proto, address string, port int) {
 		out = append(out, Listener{Owner: owner, Key: key, Proto: proto, Address: address, Port: port})
@@ -90,12 +89,10 @@ func SiteListeners(cfg *config.Config, site string) []Listener {
 	}
 	if contains(cfg.Etcd.Members, site) {
 		add("etcd client", "etcd.members", "tcp", addr, etcdClientPort)
-		add("etcd client", "etcd.members", "tcp", loopback, etcdClientPort)
 		add("etcd peer", "etcd.members", "tcp", addr, etcdPeerPort)
 	}
 	if s.Has(config.RoleData) {
 		add("Postgres", roles(config.RoleData), "tcp", addr, postgresPort)
-		add("Postgres", roles(config.RoleData), "tcp", loopback, postgresPort)
 		add("Patroni API", roles(config.RoleData), "tcp", addr, patroniAPIPort)
 		add("bg_mon", roles(config.RoleData), "tcp", addr, bgMonPort)
 	}
@@ -105,8 +102,7 @@ func SiteListeners(cfg *config.Config, site string) []Listener {
 		// fixed, so what claims it is the role that runs HAProxy at all.
 		port := ClusterPort(cfg)
 		add("HAProxy cluster port", "cluster.port", "tcp", addr, port)
-		add("HAProxy cluster port", "cluster.port", "tcp", loopback, port)
-		add("HAProxy stats", roles(config.RoleApps), "tcp", loopback, haproxyStatsPort)
+		add("HAProxy stats", roles(config.RoleApps), "tcp", addr, haproxyStatsPort)
 		// Pocket ID's API on the mesh, wherever HAProxy runs in a deployment
 		// with a pocket-id app, so that app is what claims it.
 		if idp, ok := cfg.PocketIDApp(); ok {
