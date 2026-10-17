@@ -16,5 +16,8 @@ func TestMain(m *testing.M) {
 	for _, name := range AgeVariables() {
 		os.Unsetenv(name)
 	}
+	// The explicit test mode: most tests here write and read plaintext.
+	// A test about the refusal of plaintext unsets it.
+	os.Setenv(PlaintextSecretsVariable, "1")
 	os.Exit(m.Run())
 }

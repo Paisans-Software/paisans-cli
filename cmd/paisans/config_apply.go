@@ -107,6 +107,10 @@ func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *confi
 	if err != nil {
 		return nil, &ui.Problem{Hint: "the files of a version cannot be read", Explain: "apply publishes " + config.FileName + ", secrets.enc.yaml and .sops.yaml from " + l.Dir + " as the version it applies. " + errLine(err) + ".", Cause: err}
 	}
+	// A version holds the secrets encrypted, and only encrypted.
+	if err := config.CheckSecretsBytes(beside, files.Secrets); err != nil {
+		return nil, err
+	}
 	a, err := l.Anchor()
 	if err != nil {
 		return nil, err

@@ -41,7 +41,7 @@ func (s secretsStore) Save(secrets *config.Secrets) error {
 		return err
 	}
 	if secrets.Encrypted && len(recipients) == 0 {
-		return fmt.Errorf("%s is encrypted, but no %s beside it names a recipient, so writing it back would leave it in plaintext. Nothing was written", s.path, config.SOPSConfigName)
+		return config.NoRecipientProblem(s.path)
 	}
 	return config.WriteSecrets(s.path, secrets, recipients)
 }

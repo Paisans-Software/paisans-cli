@@ -304,16 +304,8 @@ func TestConvergeDryRunLeavesTheRestToInit(t *testing.T) {
 		}
 		return configPath, secretsPath
 	}
-	noRecipients := func(t *testing.T) (string, string) {
-		configPath, secretsPath := encryptedDeployment(t, dropGenerated)
-		if err := os.Remove(filepath.Join(filepath.Dir(secretsPath), config.SOPSConfigName)); err != nil {
-			t.Fatal(err)
-		}
-		return configPath, secretsPath
-	}
 	for name, world := range map[string]func(*testing.T) (string, string){
-		"no secrets file":                 noFile,
-		"encrypted, no .sops.yaml beside": noRecipients,
+		"no secrets file": noFile,
 	} {
 		t.Run(name, func(t *testing.T) {
 			configPath, secretsPath := world(t)
@@ -322,9 +314,6 @@ func TestConvergeDryRunLeavesTheRestToInit(t *testing.T) {
 			got := initLine(rec)
 			if !strings.HasPrefix(got, "○ ") {
 				t.Errorf("init's line: %s", got)
-			}
-			if strings.HasPrefix(name, "encrypted") && !strings.Contains(got, "plaintext") {
-				t.Errorf("init's line does not say why: %s", got)
 			}
 			if len(checked) != 0 {
 				t.Errorf("checked %v", checked)

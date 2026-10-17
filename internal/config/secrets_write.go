@@ -44,12 +44,12 @@ func WriteSOPSConfig(dir, recipient string) error {
 // deployment needs; this decides who can read it afterwards, and those are
 // different questions with different failure modes.
 //
-// With no recipients the file is written in plaintext and the caller is
-// expected to say so loudly. That is not a convenience for real deployments:
-// init makes a key for a deployment built from scratch. It exists because
-// fixtures must not require an age key, and because refusing to write
-// anything at all would leave an operator with generated secrets that went
-// nowhere.
+// With no recipients nothing is written, and the refusal says why. A file
+// that was encrypted, by its own sops metadata on disk or as s was read, is
+// never written back in plaintext: the refusal names the recipients the
+// file records and how to restore .sops.yaml. Any other file is written in
+// plaintext only with PlaintextSecretsVariable set to 1, for tests and
+// fixtures that must not need an age key; the caller says so loudly.
 func WriteSecrets(path string, s *Secrets, recipients []string) error {
 	_, err := WriteSecretsBytes(path, s, recipients)
 	return err
@@ -59,6 +59,11 @@ func WriteSecrets(path string, s *Secrets, recipients []string) error {
 // encrypted file differs on every write, so a caller that publishes what it
 // wrote keeps these rather than reading the file again.
 func WriteSecretsBytes(path string, s *Secrets, recipients []string) ([]byte, error) {
+	if len(recipients) == 0 {
+		if err := plaintextWriteAllowed(path, s); err != nil {
+			return nil, err
+		}
+	}
 	// Every write is at this toolkit's format, whatever was read, so that an
 	// older toolkit refuses the file rather than dropping what it does not
 	// know (SecretsVersion).
@@ -86,6 +91,23 @@ func WriteSecretsBytes(path string, s *Secrets, recipients []string) ([]byte, er
 		return nil, fmt.Errorf("writing %s: %w", path, err)
 	}
 	return out, nil
+}
+
+// plaintextWriteAllowed is whether the secrets s may be written to path in
+// plaintext: never when s was read encrypted or the file at path is
+// encrypted, and otherwise only in the explicit test mode.
+func plaintextWriteAllowed(path string, s *Secrets) error {
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("reading %s: %w", path, err)
+	}
+	if s.Encrypted || looksEncrypted(data) {
+		return noRecipientProblem(path, FileRecipients(data))
+	}
+	if !PlaintextSecretsAllowed() {
+		return noRecipientPlainProblem(path)
+	}
+	return nil
 }
 
 // syncFile flushes a file to disk. Tests replace it.

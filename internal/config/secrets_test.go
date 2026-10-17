@@ -401,10 +401,8 @@ func TestWriteSecretsRoundTrip(t *testing.T) {
 	}
 }
 
-// Without an age recipient the file is written in plaintext rather than not at
-// all: refusing would leave an operator holding generated secrets that went
-// nowhere. The caller says so loudly, and this test pins the behaviour so that
-// nobody quietly changes which of the two it is.
+// In the explicit test mode, which TestMain sets, a file with no age
+// recipient is written in plaintext, 0600, so fixtures need no age key.
 func TestWriteSecretsWithoutRecipientsIsPlaintext(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "secrets.yaml")
 	if err := config.WriteSecrets(path, &config.Secrets{Version: 1}, nil); err != nil {

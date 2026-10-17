@@ -60,6 +60,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "paisans: "+err.Error())
 		os.Exit(2)
 	}
+	warnTestMode(os.Stderr)
 	var err error
 	switch os.Args[1] {
 	case "validate":
@@ -67,7 +68,7 @@ func main() {
 	case "create":
 		err = runCreate(os.Args[2:], os.Stdin, os.Stdout)
 	case "init":
-		err = runInit(os.Args[2:])
+		err = runInit(os.Args[2:], os.Stdin, os.Stdout)
 	case "render":
 		err = runRender(os.Args[2:])
 	case "apply":
@@ -224,13 +225,20 @@ func runValidate(args []string) error {
 	if result.Refused() {
 		return refused(*configPath, len(result.Refusals()), "Nothing can be rendered or applied from it until then.")
 	}
+	// The secrets file beside it, offline too: a plaintext one, or an
+	// encrypted one with no recipient in the .sops.yaml beside it, is
+	// refused, as apply and publishing refuse it. It is read without
+	// decrypting, so no age key is needed.
+	if *secretsPath == "" {
+		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
+	}
+	if err := config.CheckSecretsFile(*secretsPath); err != nil {
+		return err
+	}
 	// The mail settings are tried once the file is one a host may be
 	// reached for, and only warn: see checkMailForValidate.
 	warned := 0
 	if !*offline {
-		if *secretsPath == "" {
-			*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
-		}
 		warned = checkMailForValidate(r, cfg, *secretsPath)
 	}
 	switch {
@@ -250,19 +258,27 @@ func runValidate(args []string) error {
 // database password locks an application out of a role that still holds the
 // old one.
 //
-// It changes no host. It reads every site that has admitted the deployment,
-// to settle the mesh subnet before anything is deployed (see initAdmissions
-// and settleMesh), and that is all; a site that has not is skipped, with a
-// warning. Standing a
-// deployment up is `apply`, and that is a separate decision from having
-// credentials to stand it up with.
-func runInit(args []string) error {
+// It reads every site that has admitted the deployment, to settle the mesh
+// subnet before anything is deployed (see initAdmissions and settleMesh).
+// It first lists every site that has not, and why. At a terminal, without
+// --yes, it offers to admit each from this machine, with site admit's own
+// flow (see offerAdmissions), which is the one way init changes a host;
+// otherwise, and on a no, it prints what admits the site and skips it.
+// Standing a deployment up is `apply`, and that is a separate decision from
+// having credentials to stand it up with.
+func runInit(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("init", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets file (default: secrets.enc.yaml beside the config)")
 	ageKeyFile := fs.String("age-private-key-file", "", "keep a newly made age private key in this file instead of the keystore")
+	answers := yesFlag(fs)
+	fs.Lookup("yes").Usage = "ask nothing: skip each site not admitted, printing the commands that admit it. --yes never admits a host, which stays its owner's step with site admit; needs " + allowYesVariable + "=1 in the environment"
 	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	ans, err := answers()
+	if err != nil {
 		return err
 	}
 	r := reporter()
@@ -287,14 +303,29 @@ func runInit(args []string) error {
 	if result.Refused() {
 		return refused(*configPath, len(result.Refusals()), "Secrets are not generated for a configuration that cannot be deployed.")
 	}
+	// A secrets file init could only write back in plaintext is refused
+	// here, before a host is read or anything is written: one encrypted
+	// with no recipient in .sops.yaml beside it, and one in plaintext.
+	if *secretsPath == "" {
+		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
+	}
+	if err := config.CheckSecretsFile(*secretsPath); err != nil {
+		return err
+	}
 	// The mesh subnet next, while nothing is deployed: it is the one value
 	// that has to be checked against every host before the first apply,
 	// and cannot change after it.
 	// Every site is asked whether it admitted the deployment, and only an
 	// admitted one is read further: on any other the deployment's user does
 	// not exist yet, and site admit checks the subnet there.
+	// Every site not admitted is listed, with why, before init asks or
+	// settles anything; at a terminal init then offers to admit each.
 	hosts := initHosts(cfg)
-	admitted, unread := initAdmissions(r, cfg, hosts)
+	admitted, skipped, unread := initAdmissions(r, cfg, hosts)
+	listNotAdmitted(r, skipped)
+	if admitted, cfg, err = offerAdmissions(r, cfg, *configPath, hosts, admitted, skipped, ans, stdin, stdout); err != nil {
+		return err
+	}
 	wrote, err := settleMesh(r, cfg, *configPath, hosts, admitted, unread, meshRandom)
 	if err != nil {
 		return err
@@ -305,9 +336,6 @@ func runInit(args []string) error {
 		}
 	}
 
-	if *secretsPath == "" {
-		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
-	}
 	if err := ensureAgeKey(r, cfg.ID, *configPath, *secretsPath, *ageKeyFile); err != nil {
 		return err
 	}
@@ -612,6 +640,12 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	secrets, secretsBytes, err := config.LoadDeploymentSecretsWithBytes(*secretsPath, cfg.ID)
 	if err != nil {
+		return err
+	}
+	// Encrypted, with no recipient in the .sops.yaml beside it: a client
+	// recorded would be written back in plaintext, and publishing needs
+	// the file. Refused before any host is reached.
+	if err := config.CheckSecretsFile(*secretsPath); err != nil {
 		return err
 	}
 	if !secrets.Encrypted {
@@ -1700,11 +1734,26 @@ func checkWorkstationToken(r ui.Reporter, cfg *config.Config, token string) erro
 	}
 }
 
+// warnTestMode warns once, on w, before any command runs, while the test
+// mode that reads and writes plaintext secrets is set: every command passes
+// through main, so an operator who set it once is reminded on every run.
+// stderr, so it never mixes into what a command prints for a script.
+func warnTestMode(w io.Writer) {
+	if !config.PlaintextSecretsAllowed() {
+		return
+	}
+	ui.PrintError(w, &ui.Warning{Problem: ui.Problem{
+		Hint:    config.PlaintextSecretsVariable + "=1 is set: plaintext secrets are read and written",
+		Explain: "That mode is for tests and fixtures only. A real deployment keeps its secrets encrypted; unset it.",
+	}}, false)
+}
+
 // warnUnencrypted is the warning every command that opens the secrets gives
-// for a file that is not under sops. The file is accepted, since fixtures and
-// examples are plain, so it is a warning and not a refusal.
+// for a file that is not under sops. Only the explicit test mode reads one
+// (config.PlaintextSecretsVariable); anywhere else config.LoadDeploymentSecrets
+// refuses it.
 func warnUnencrypted(r ui.Reporter, path string) {
-	r.Warn(path+" is not encrypted", "That is accepted for fixtures and examples; a real deployment keeps its secrets under sops.")
+	r.Warn(path+" is not encrypted", config.PlaintextSecretsVariable+"=1 is set, which reads plaintext secrets for tests and fixtures. A real deployment keeps its secrets under sops.")
 }
 
 // pathList collects a repeatable flag. --overwrite takes one path each time it

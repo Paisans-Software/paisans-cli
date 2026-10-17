@@ -336,6 +336,11 @@ func (l Local) HasFiles() bool {
 func (l Local) WriteFiles(f Files) error { return writeFiles(l.Dir, f) }
 
 func writeFiles(dir string, f Files) error {
+	// A version's secrets reach disk only encrypted, whoever published it:
+	// refused before any of the three files is written.
+	if err := config.CheckSecretsBytes(filepath.Join(dir, nameSecrets), f.Secrets); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
@@ -751,6 +756,10 @@ func publishFrom(l Local, g Gathered, sites map[string]apply.Transport, o publis
 }
 
 func publishFiles(l Local, g Gathered, f Files, sites map[string]apply.Transport, o publishOpts, push PushFunc) (string, []string, error) {
+	// A version holds the secrets encrypted, and only encrypted.
+	if err := config.CheckSecretsBytes(l.path(nameSecrets), f.Secrets); err != nil {
+		return "", nil, err
+	}
 	if _, opts, err := config.ParseKeyLine(o.keyLine); err != nil || len(opts) > 0 {
 		return "", nil, fmt.Errorf("the signing key is not a bare public key line: %q", o.keyLine)
 	}
@@ -830,6 +839,10 @@ func PublishNext(l Local, g Gathered, parent string, revision int, f Files, site
 }
 
 func publishNext(l Local, g Gathered, parent string, revision int, f Files, sites map[string]apply.Transport, o publishOpts, push PushFunc) (string, []string, error) {
+	// A version holds the secrets encrypted, and only encrypted.
+	if err := config.CheckSecretsBytes(l.path(nameSecrets), f.Secrets); err != nil {
+		return "", nil, err
+	}
 	if _, opts, err := config.ParseKeyLine(o.keyLine); err != nil || len(opts) > 0 {
 		return "", nil, fmt.Errorf("the signing key is not a bare public key line: %q", o.keyLine)
 	}
@@ -1063,6 +1076,12 @@ func attestFrom(l Local, g Gathered, sites map[string]apply.Transport, pin, keyL
 	cfg, err := config.LoadBytes(theirs.Paisans)
 	if err != nil {
 		return "", nil, fmt.Errorf("version %s: %w", head, err)
+	}
+	// Refused before anything is signed, rather than at the write.
+	if write {
+		if err := config.CheckSecretsBytes(l.path(nameSecrets), theirs.Secrets); err != nil {
+			return "", nil, err
+		}
 	}
 	if err := CheckSigner(l, []string{head}, cfg, keyLine); err != nil {
 		return "", nil, err

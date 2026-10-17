@@ -930,3 +930,77 @@ func TestPublishNextBuildsOnTheRunsVersion(t *testing.T) {
 		t.Fatal("published on a version that is not the head")
 	}
 }
+
+// Outside the explicit test mode a version holding plaintext secrets is
+// never published, by publishFiles or publishNext: nothing is signed or
+// pushed, and the local head does not move.
+func TestPublishRefusesPlaintextSecrets(t *testing.T) {
+	needTools(t, "git", "ssh-keygen")
+	alice := newOperator(t)
+	sites := storeSites(t, "home-a", "home-b")
+	all := reach(sites, "home-a", "home-b")
+	first := edit(testFiles(), "1", map[string]string{"alice": alice.pub})
+	l := workstation(t, first)
+	g, err := gather(l, all, 2, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := publishOpts{keyLine: alice.pub, signWith: alice.key, now: testNow}
+	v1, _, err := publishFiles(l, g, first, all, o, fakePush)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(config.PlaintextSecretsVariable, "")
+	next := first
+	next.Secrets = []byte("version: 2\n")
+	if _, _, err := publishFiles(l, g, next, all, o, fakePush); err == nil || !strings.Contains(err.Error(), "is not encrypted") {
+		t.Errorf("publishFiles = %v, want a refusal of plaintext", err)
+	}
+	if _, _, err := publishNext(l, g, v1, 1, next, all, o, fakePush); err == nil || !strings.Contains(err.Error(), "is not encrypted") {
+		t.Errorf("publishNext = %v, want a refusal of plaintext", err)
+	}
+	if head, _ := l.Head(); head != v1 {
+		t.Errorf("head moved to %s", head)
+	}
+}
+
+// A version published with plaintext secrets is never written to disk
+// outside the explicit test mode: not by a checkout (pull, recover), not to
+// incoming/, and not by an attestation, which refuses before it signs.
+func TestAPlaintextVersionIsNeverWrittenToDisk(t *testing.T) {
+	_, bob, sites, v1, v2, _ := twoVersions(t)
+	all := reach(sites, "home-a", "home-b")
+	t.Setenv(config.PlaintextSecretsVariable, "")
+	l := Local{Dir: t.TempDir()}
+	g, err := gather(l, all, 2, testID, Anchor{Root: v1}, GatherOptions{Sync: true}, fakePull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Checkout(v2); err == nil || !strings.Contains(err.Error(), "is not encrypted") {
+		t.Errorf("Checkout = %v, want a refusal of plaintext", err)
+	}
+	if l.HasFiles() {
+		t.Error("a refused checkout wrote files")
+	}
+	if head, _ := l.Head(); head != "" {
+		t.Errorf("head %s", head)
+	}
+	if err := l.WriteIncoming(v2); err == nil {
+		t.Error("WriteIncoming wrote a plaintext version")
+	}
+	if err := l.WriteIncomingFor(v2); err == nil {
+		t.Error("WriteIncomingFor wrote a plaintext version")
+	}
+	if entries, _ := os.ReadDir(l.Incoming()); len(entries) != 0 {
+		t.Errorf("incoming holds %v", entries)
+	}
+	if _, _, err := attestFrom(l, g, all, v1, bob.pub, bob.key, testNow, fakePush); err == nil || !strings.Contains(err.Error(), "is not encrypted") {
+		t.Errorf("attest = %v, want a refusal of plaintext", err)
+	}
+	if l.HasFiles() {
+		t.Error("a refused attestation wrote files")
+	}
+	if head, _ := l.Head(); head != "" {
+		t.Errorf("a refused attestation moved the head to %s", head)
+	}
+}

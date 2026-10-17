@@ -159,7 +159,7 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 			return err
 		}
 		if secrets.Encrypted && len(recipients) == 0 {
-			return fmt.Errorf("secrets rotate: %s is encrypted, but no %s beside it names a recipient, so writing a next value into it would leave it in plaintext. Nothing was changed", *secretsPath, config.SOPSConfigName)
+			return config.NoRecipientProblem(*secretsPath)
 		}
 	}
 

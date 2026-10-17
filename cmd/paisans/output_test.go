@@ -304,7 +304,9 @@ func fixtureRuns(t *testing.T) map[string]string {
 	t.Run("init", func(t *testing.T) {
 		path, _ := initWorld(t, nil, fakeSites(), make([]byte, 64))
 		t.Chdir(filepath.Dir(path))
-		runs["init"] = runDefault(t, "init", func() error { return runInit([]string{"--config", "paisans-stack.yaml"}) })
+		runs["init"] = runDefault(t, "init", func() error {
+			return runInit([]string{"--config", "paisans-stack.yaml"}, strings.NewReader(""), io.Discard)
+		})
 	})
 
 	work := t.TempDir()

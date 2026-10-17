@@ -10,6 +10,17 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+## [0.3.0-rc.2] - 2026-10-17
+
+### Added
+
+- `init` lists every site not admitted, with why, then at a terminal offers to admit each with `site admit --site`'s own flow; otherwise, and with `--yes`, it prints the commands that admit it.
+
+### Fixed
+
+- A site whose login sshd ends with "Too many authentication failures" and then a disconnect notice reads as a refused login, so `init` and `apply` skip a site not yet admitted instead of failing.
+- An encrypted `secrets.enc.yaml` without `.sops.yaml` is never rewritten in plaintext: writes refuse, naming its recipients and the restore command, and a plaintext secrets file is refused wherever a deployment reads it.
+
 ## [0.3.0-rc.1] - 2026-10-17
 
 ### Added
@@ -166,7 +177,8 @@ changes share a bullet. Detailed notes are on the corresponding
 - The uptime monitor requires STARTTLS under `security: starttls`, so mail and SMTP credentials are never sent in plaintext when a relay does not offer it.
 - The gateway refuses any request to Pocket ID that carries an `X-API-Key` header with 403, so Pocket ID's API keys work only on the mesh.
 
-[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.1...develop
+[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.2...develop
+[0.3.0-rc.2]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.1...v0.3.0-rc.2
 [0.3.0-rc.1]: https://github.com/Paisans-Software/paisans-cli/compare/v0.2.0...v0.3.0-rc.1
 [0.2.0]: https://github.com/Paisans-Software/paisans-cli/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Paisans-Software/paisans-cli/tree/v0.1.0

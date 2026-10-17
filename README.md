@@ -22,7 +22,7 @@ reasons, values and requests behind it.
 
 ```
 paisans create                             # a new deployment's paisans-stack.yaml, from questions
-paisans init                               # an id, a mesh subnet and the secrets for paisans-stack.yaml
+paisans init                               # an id, a mesh subnet and the secrets; offers to admit each site not admitted
 paisans site request --site vm > vm.admit  # the request the host's owner admits the site from
 sudo paisans site admit --request vm.admit --execute   # on the host, by its owner: the deployment's own user and rootless Docker
 paisans site prepare --site vm --execute   # the user's keys, configuration store and daemon settings on an admitted host
@@ -1843,9 +1843,15 @@ site being added.
 **`init` chooses the subnet.** Until this deployment is on any site, `paisans
 init` reaches every site over ssh as the deployment's user, as the commands
 that reach a host do. A host that has not admitted the deployment yet refuses
-that login; `init` says so and goes on, because `site admit` checks the subnet
-against the registry, which is root's, and refuses one that overlaps another
-deployment's. When `mesh.subnet` is missing, or is declared but overlaps
+that login. `init` lists every such site, and why, before it settles
+anything. At a terminal, without `--yes`, it asks whether to admit each now
+from this machine, and on a yes runs `site admit --site`'s own flow, asking
+for the owner's login, each grant and the plan's approval, then goes on with
+the site admitted. Otherwise it prints the `site admit` and `site request`
+lines that admit the site, and goes on without it, because `site admit`
+checks the subnet against the registry, which is root's, and refuses one
+that overlaps another deployment's. `--yes` never admits a host. When
+`mesh.subnet` is missing, or is declared but overlaps
 something, it gathers everything the table above finds on each host it
 reached, and rolls a random `10.<a>.<b>.0/24` from
 `crypto/rand` that overlaps none of it, rolling again on a collision, up to 32
@@ -3018,6 +3024,29 @@ another operator's key or an offline backup key, and run `sops updatekeys
 secrets.enc.yaml`. With a key from a variable, `init` cannot know whether
 anything else holds it, and warns only that the file is encrypted to that one
 key; the remedy is the same.
+
+**`secrets.enc.yaml` exists only encrypted.** Every command that writes it
+encrypts it to the recipients in `.sops.yaml`, and with `.sops.yaml` missing or
+naming no recipient it refuses before it changes anything. For a file that is
+already encrypted, the refusal names the age recipients its sops metadata
+records. When `.sops.yaml` is missing, it also prints the command that writes
+it back with them, which refuses to replace a `.sops.yaml` that exists:
+
+```
+sh -c "set -C; printf 'creation_rules:\n  - age: age1…\n' > /path/to/.sops.yaml"
+```
+
+When `.sops.yaml` is there but names no recipient Paisans reads (the `age`
+field of each entry under `creation_rules`), it prints no command, so nothing
+pasted can replace your rules. A recipient in the file's metadata that is not
+an age public key is never printed, and then no command is either.
+
+A plaintext `secrets.enc.yaml` is refused wherever a deployment reads it:
+`init`, `apply`, `validate`, publishing a version, pulling or recovering one,
+and every other command that opens the secrets. `doctor` reports it, and a
+missing `.sops.yaml`, as a failed check and runs the rest. The refusal names
+the fix, `sops --encrypt --in-place secrets.enc.yaml` with your age public key
+in `.sops.yaml`.
 
 Every later command finds the key on its own: with no `SOPS_AGE_*` variable
 set, paisans reads the keystore item for the deployment id and decrypts with

@@ -409,7 +409,9 @@ func checkPrepare(r ui.Reporter, args []string) (string, []checkReport, error) {
 func runStep(args []string) error {
 	switch {
 	case args[0] == "init":
-		return runInit(args[1:])
+		// apply's own init step asks nothing: a site not admitted is
+		// skipped, with the commands that admit it.
+		return runInit(args[1:], strings.NewReader(""), os.Stdout)
 	case isPrepare(args):
 		return runSitePrepare(args[2:])
 	case args[0] == "apply":
@@ -616,6 +618,11 @@ func readConvergeState(configPath, secretsPath string) (*config.Config, converge
 		// is not init's to fix: init needs the same key. So nothing is
 		// planned and no host is read.
 		return nil, st, fmt.Errorf("apply: %w", err)
+	} else if err := config.CheckSecretsFile(secretsPath); err != nil {
+		// Encrypted, with no recipient in the .sops.yaml beside it: init
+		// would write it back in plaintext, and publishing needs the file.
+		// Refused before anything is planned or changed.
+		return nil, st, err
 	} else if err := refuseMidRekey(secrets); err != nil {
 		return nil, st, err
 	} else if err := refuseMidRotation(secrets, "apply"); err != nil {
@@ -647,8 +654,8 @@ func convergeSecretsPath(configPath, secretsPath string) string {
 // by fillSecrets, as init does. It returns their names and the recipients
 // the file was encrypted to. A file writing would harm is left to init, and
 // left says why: one holding a key this toolkit does not read, which writing
-// would drop, and one encrypted with no .sops.yaml recipient beside it,
-// which writing would leave in plaintext. Why it failed is a ui.Problem.
+// would drop. One encrypted with no .sops.yaml recipient beside it never
+// reaches here: readConvergeState refuses it. Why it failed is a ui.Problem.
 func convergeGenerate(cfg *config.Config, path string) (names, recipients []string, left string, err error) {
 	secrets, err := config.LoadDeploymentSecrets(path, cfg.ID)
 	if err != nil {
@@ -656,11 +663,6 @@ func convergeGenerate(cfg *config.Config, path string) (names, recipients []stri
 	}
 	if secrets.UnknownKeys {
 		return nil, nil, "it holds keys this toolkit does not read, which writing it would drop", nil
-	}
-	if secrets.Encrypted {
-		if r, err := config.Recipients(filepath.Dir(path)); err == nil && len(r) == 0 {
-			return nil, nil, "no " + config.SOPSConfigName + " recipient beside it, so it would be written in plaintext", nil
-		}
 	}
 	filled, recipients, err := fillSecrets(cfg, path, secrets)
 	if err != nil {

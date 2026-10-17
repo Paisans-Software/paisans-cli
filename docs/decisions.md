@@ -3277,3 +3277,36 @@ could run the deployment, and stays a refusal.
 ## 2026-10-17: `--yes` answers confirmations, except the digest and the fresh SSH login
 
 Founder decision, 2026-10-17: every command that asks for a confirmation takes `--yes`, which answers each typed word and y/N question as typing it would, prints `approved by --yes: <what>` for each, and refuses unless `PAISANS_ALLOW_YES=1`; it never answers `host admit --request`'s digest, which proves the request's keys were not changed on their way (`--digest` gives it instead), nor the fresh SSH login after admit enables ufw, which proves SSH still works before the ufw fallback is stopped (`--yes` with `--request` refuses where admit would enable ufw, and `--site` proves it with its own login); a review `--yes` approves records `approved_by` as a typed approval does, so only the run's log shows it was `--yes`.
+
+## 2026-10-17: An encrypted secrets file without `.sops.yaml` is refused, not re-encrypted
+
+Issue #423.
+
+### What was decided
+
+* A write of a secrets file that was encrypted, by its sops metadata on disk
+  or as it was read, with no recipient in the `.sops.yaml` beside it, is
+  refused before anything changes. The refusal names the recipients the
+  file's sops metadata records and, when no `.sops.yaml` exists, the command
+  that writes one with them and refuses to overwrite a file already there.
+* Nothing is written in plaintext except in the test suite's explicit mode
+  (`docs/development.md`, *Fixtures and secrets*), which never writes an
+  encrypted file back in plaintext.
+* A plaintext `secrets.enc.yaml` is refused wherever a deployment reads it,
+  outside that mode. Refusals never name the mode: they give the real fixes.
+
+### Why
+
+`.sops.yaml` says who may decrypt, and it is part of every published version,
+so a deployment directory without it cannot be applied or published anyway.
+Refusing changes nothing on disk and costs the operator one command, which
+the refusal prints. Plaintext secrets under a name ending `.enc.yaml` are one
+`git add` away from being committed, so no default may produce them.
+
+### What was weighed
+
+* **Re-encrypt to the recipients in the file's own sops metadata:** keeps the
+  file encrypted, but writes to a recipient set nobody confirmed (one removed
+  from `.sops.yaml` on purpose would be kept), and the run still stops at
+  publishing for the missing `.sops.yaml`, after secrets were generated.
+

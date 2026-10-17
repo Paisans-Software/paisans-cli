@@ -132,7 +132,7 @@ func runSecretsPrune(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 	if secrets.Encrypted && len(recipients) == 0 {
-		return fmt.Errorf("secrets prune: %s is encrypted, but no %s beside it names a recipient, so writing it back would leave it in plaintext. Nothing was written", *secretsPath, config.SOPSConfigName)
+		return config.NoRecipientProblem(*secretsPath)
 	}
 	if *withoutRecord {
 		if err := confirmWord(ans, stdin, stdout, "prune", ui.Danger(stdout, fmt.Sprintf("This permanently removes the %d secret(s) above, trusting "+config.FileName+" alone.", len(orphans)))); err != nil {
@@ -395,7 +395,7 @@ func writableRecipients(secrets *config.Secrets, secretsPath string) ([]string, 
 		return nil, err
 	}
 	if secrets.Encrypted && len(recipients) == 0 {
-		return nil, fmt.Errorf("secrets set: %s is encrypted, but no %s beside it names a recipient, so writing it back would leave it in plaintext. Nothing was written", secretsPath, config.SOPSConfigName)
+		return nil, config.NoRecipientProblem(secretsPath)
 	}
 	return recipients, nil
 }
