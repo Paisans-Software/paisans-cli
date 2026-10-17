@@ -517,12 +517,35 @@ func TestSiteAddJoinsTheDataRoleAsAStepOfApply(t *testing.T) {
 
 // A run that stops after its review recorded the approvals, and before
 // home-b joins, is run again: its review finds every entry approved on the
-// host and asks nothing. site add then records only the stacks the join
-// started, keeping the approvals for home-b's apps, so the apply that
-// follows the join starts them without a refusal.
+// host and asks nothing. site add then records only the images the join
+// started, keeping the approvals for the rest of home-b's grant, so the
+// apply that follows the join starts them without a refusal. HAProxy, which
+// only the apps role puts on a data site, is one of them when infra.images
+// overrides it.
 func TestAResumedJoinKeepsTheApprovalsForItsApps(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		haproxy string
+	}{
+		{"foundation infra", ""},
+		{"haproxy overridden", "docker.io/library/haproxy:9.9"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			full := fixture(t)
+			if c.haproxy != "" {
+				full.Infra.Images = map[string]string{"haproxy": c.haproxy}
+			}
+			resumeJoin(t, full)
+		})
+	}
+}
+
+// resumeJoin is a resumed run's join of home-b, declared [data, apps] in
+// full, through site add's review and record and then apply --site's
+// review, which fails t if it refuses.
+func resumeJoin(t *testing.T, full *config.Config) {
+	t.Helper()
 	fakeGrants(t, func(string) *grant.Record { return nil })
-	full := fixture(t)
 	secrets, err := config.LoadSecrets(fixtureSecretsPath())
 	if err != nil {
 		t.Fatal(err)
@@ -562,11 +585,12 @@ func TestAResumedJoinKeepsTheApprovalsForItsApps(t *testing.T) {
 	reviewedByRun = &runReview{approved: map[string]grant.Review{"home-b": again.review}}
 
 	joined := joinedAsData(full, "home-b")
-	scope, err := siteAddScope(joined, "home-b", true)
+	g := granted(joined)
+	scope, err := siteAddScope(joined, "home-b", g, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, by, err := stepReview(ui.Discard, answerer{}, noTerminalStdin(), io.Discard, joined, "home-b", granted(joined), scope, nil, true, "paisans site add home-b --execute")
+	s, by, err := stepReview(ui.Discard, answerer{}, noTerminalStdin(), io.Discard, joined, "home-b", g, scope, nil, true, "paisans site add home-b --execute")
 	if err != nil {
 		t.Fatalf("site add: %s", problemText(err))
 	}

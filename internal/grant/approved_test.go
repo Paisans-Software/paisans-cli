@@ -89,3 +89,25 @@ func TestParseReadsApprovals(t *testing.T) {
 		t.Errorf("not written as version 3: %s", grant.Encode(rec))
 	}
 }
+
+// A scope naming services records only those images: the approval of
+// another service in the same stack is kept, and so is its recorded image.
+func TestAScopeOfServicesKeepsTheRestOfItsStack(t *testing.T) {
+	full := grant.Grant{Images: []grant.Image{
+		{Stack: "infra", Service: "etcd", Reference: "etcd:3"},
+		{Stack: "infra", Service: "haproxy", Reference: "haproxy:9"},
+	}}
+	rec := grant.Record{}.Approve(grant.Compare("home-b", full, grant.Record{}, grant.ApplyScope()).Changes, time.Unix(100, 0), "alice")
+	etcd := grant.Grant{Images: full.Images[:1]}
+	scope := grant.Scope{Images: true, Stacks: []string{"infra"}, Services: []string{"infra/etcd"}}
+	if c := grant.Compare("home-b", etcd, rec, scope); c.Pending() != 0 || len(c.Changes) != 0 || len(c.Approved) != 1 {
+		t.Fatalf("the narrowed review %+v", c)
+	}
+	rec = grant.Update(rec, etcd, scope, time.Unix(200, 0), "")
+	if rec.Approved == nil || len(rec.Approved.Entries) != 1 || rec.Approved.Entries[0].Subject != "image infra/haproxy" {
+		t.Errorf("approvals kept %+v", rec.Approved)
+	}
+	if after := grant.Compare("home-b", full, rec, grant.ApplyScope()); after.Pending() != 0 {
+		t.Errorf("haproxy asked again: %+v", after.Changes)
+	}
+}

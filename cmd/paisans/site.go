@@ -134,10 +134,6 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	if reviewedByRun != nil {
 		cfg = joinedAsData(cfg, site)
 	}
-	scope, err := siteAddScope(cfg, site, cfg != declared)
-	if err != nil {
-		return err
-	}
 	// Stage 4 pulls the new site's images only after the mesh, HAProxy and
 	// etcd have changed on every site, so an image with no build for its
 	// architecture is refused here, before anything changes.
@@ -163,6 +159,10 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	// are the new site's render, as stage 4 applies it. Keys are site
 	// prepare's, which the new site has had already.
 	g, err := grant.For(cfg, rendered, site)
+	if err != nil {
+		return err
+	}
+	scope, err := siteAddScope(cfg, site, g, cfg != declared)
 	if err != nil {
 		return err
 	}
@@ -246,10 +246,12 @@ func joinedAsData(cfg *config.Config, site string) *config.Config {
 }
 
 // siteAddScope is what site add reviews and records on site: every image of
-// its render, or, for a site joinedAsData narrowed, only the stacks the
-// narrowed render places there. The approvals the run recorded for the
-// site's apps are then kept until the apply that starts them.
-func siteAddScope(cfg *config.Config, site string, narrowed bool) (grant.Scope, error) {
+// its render, or, for a site joinedAsData narrowed, exactly the images and
+// blueprints of g, the narrowed render's grant. The approvals the run
+// recorded for the rest of the site's grant, its apps and the infrastructure
+// services only the apps role adds, are then kept until the apply that
+// starts them.
+func siteAddScope(cfg *config.Config, site string, g grant.Grant, narrowed bool) (grant.Scope, error) {
 	if !narrowed {
 		return grant.Scope{Images: true}, nil
 	}
@@ -257,5 +259,9 @@ func siteAddScope(cfg *config.Config, site string, narrowed bool) (grant.Scope, 
 	if err != nil {
 		return grant.Scope{}, err
 	}
-	return grant.Scope{Images: true, Stacks: stacks}, nil
+	services := []string{}
+	for _, i := range g.Images {
+		services = append(services, i.Stack+"/"+i.Service)
+	}
+	return grant.Scope{Images: true, Stacks: stacks, Services: services}, nil
 }
