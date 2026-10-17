@@ -128,7 +128,7 @@ var helpCommands = []helpCommand{
 		name:    "create",
 		summary: "Write a new " + config.FileName + " by answering questions.",
 		usage:   []string{"paisans create [--config " + config.FileName + "]"},
-		detail: "For a new deployment: ask, at a terminal, about the community, its operators, its machines, its apps and its mail, and write a commented " + config.FileName + " that validate refuses nothing in, once you have read it and said yes. Refuses a file that exists. " +
+		detail: "For a new deployment: ask, at a terminal, about the community, its operators, its machines, its apps and its mail, and write a commented " + config.FileName + " once validate refuses nothing in it. Refuses a file that exists. " +
 			"Asks for no secret and reaches no host.",
 	},
 	{

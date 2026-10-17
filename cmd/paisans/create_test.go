@@ -70,10 +70,17 @@ func TestCreateWritesAFileThatValidates(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	plainReporter(t)
 	in := answersFile(t, createLines(createCommunity, createAdmin,
-		[]string{"1", "", "203.0.113.10", "", ""}, createNoApps, createMail, []string{""})...)
+		[]string{"1", "", "203.0.113.10", "", ""}, createNoApps, createMail)...)
 	var out bytes.Buffer
 	if err := runCreate([]string{"--config", path}, in, &out); err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
+	}
+	// The file goes to disk only: the terminal shows neither its contents
+	// nor a question about writing it.
+	for _, unwanted := range []string{"version:", "Write "} {
+		if strings.Contains(out.String(), unwanted) {
+			t.Errorf("output holds %q:\n%s", unwanted, out.String())
+		}
 	}
 	cfg, err := config.Load(path)
 	if err != nil {
@@ -112,7 +119,7 @@ func TestCreateOffersTheKeysInHome(t *testing.T) {
 	in := answersFile(t, createLines(createCommunity,
 		[]string{"alice", "Alice Example", "alice@example.org", "",
 			"", "bob", "Bob Example", "bob@example.org", createBobKey, "", "n"},
-		[]string{"1", "", "203.0.113.10", "", ""}, createNoApps, createMail, []string{""})...)
+		[]string{"1", "", "203.0.113.10", "", ""}, createNoApps, createMail)...)
 	ssh := filepath.Join(os.Getenv("HOME"), ".ssh")
 	if err := os.MkdirAll(ssh, 0o700); err != nil {
 		t.Fatal(err)
@@ -147,7 +154,6 @@ func TestCreateAsksAgainAfterARefusal(t *testing.T) {
 		createNoApps, createMail,
 		[]string{""}, // answer the machines again
 		[]string{"1", "", "203.0.113.10", "", ""},
-		[]string{""}, // write it
 	)...)
 	var out bytes.Buffer
 	if err := runCreate([]string{"--config", path}, in, &out); err != nil {
@@ -191,19 +197,19 @@ func TestCreateRefusesStdinThatIsNotATerminal(t *testing.T) {
 	}
 }
 
-func TestCreateWritesNothingOnNo(t *testing.T) {
+// Quitting after a refusal is the operator's choice, not a failure, and
+// writes nothing.
+func TestCreateWritesNothingOnQuit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	rec := plainReporter(t)
 	in := answersFile(t, createLines(createCommunity, createAdmin,
-		[]string{"1", "", "203.0.113.10", "", ""}, createNoApps, createMail, []string{"n"})...)
+		[]string{"4", "1", "", "data, apps, gateway, witness", "203.0.113.10", "", "", ""},
+		createNoApps, createMail,
+		[]string{"4"}, // quit without writing anything
+	)...)
 	var out bytes.Buffer
-	// Declining is the operator's choice, not a failure.
 	if err := runCreate([]string{"--config", path}, in, &out); err != nil {
 		t.Errorf("err = %v", err)
-	}
-	// A blank line parts the answer from the result.
-	if !strings.HasSuffix(out.String(), "? [Y/n]: \n") {
-		t.Errorf("no blank line after the write prompt:\n%q", out.String()[max(0, out.Len()-80):])
 	}
 	if want := "paisans-stack.yaml not written. Run paisans create again to start over."; !strings.Contains(rec.String(), want) {
 		t.Errorf("missing %q:\n%s", want, rec.String())
@@ -268,7 +274,7 @@ func TestCheckRenderedTurnsALoadErrorIntoRefusals(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	plainReporter(t)
 	in := answersFile(t, createLines(createCommunity, createAdmin,
-		[]string{"1", "", "203.0.113.10", "", ""}, createNoApps, createMail, []string{""})...)
+		[]string{"1", "", "203.0.113.10", "", ""}, createNoApps, createMail)...)
 	if err := runCreate([]string{"--config", path}, in, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}

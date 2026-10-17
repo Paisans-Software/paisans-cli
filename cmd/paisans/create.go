@@ -23,8 +23,9 @@ import (
 //
 // It writes one local file and nothing else: no secret, since init is the one
 // command responsible for the secrets file, and no host, since the sites may
-// not exist yet. The file is written once the operator has read it and said
-// yes. One validate refuses is written only when the operator asks for it as
+// not exist yet. The file is written once validate refuses nothing in it, and
+// is not printed: the operator reads it on disk, where it stays, rather than
+// scrolling back through a terminal. One validate refuses is written only when the operator asks for it as
 // it stands, so that their answers are not lost; validate and apply go on
 // refusing it until it is fixed.
 func runCreate(args []string, stdin io.Reader, stdout io.Writer) error {
@@ -60,7 +61,7 @@ func runCreate(args []string, stdin io.Reader, stdout io.Writer) error {
 	if home, err := os.UserHomeDir(); err == nil {
 		w.LocalKeys = create.FindLocalKeys(os.DirFS(filepath.Join(home, ".ssh")), "~/.ssh")
 	}
-	p.Say("paisans create writes %s for a new deployment. Enter takes the answer in brackets; nothing is written until you have read the file and said yes.", ui.ShortPath(path))
+	p.Say("paisans create writes %s for a new deployment. Enter takes the answer in brackets; nothing is written until validate refuses nothing in the file, or you ask for it as it stands.", ui.ShortPath(path))
 	section := create.SectionAll
 	for {
 		if err := w.Ask(section); err != nil {
@@ -75,7 +76,7 @@ func runCreate(args []string, stdin io.Reader, stdout io.Writer) error {
 			return err
 		}
 
-		fmt.Fprintf(stdout, "\n%s\n", data)
+		p.Say("")
 		reportValidation(r, path, result)
 		if len(result.Findings) == 0 {
 			r.Result("%s: no problems found", ui.ShortPath(path))
@@ -99,17 +100,9 @@ func runCreate(args []string, stdin io.Reader, stdout io.Writer) error {
 			section = next
 			continue
 		}
-		write, err := p.YesNo(fmt.Sprintf("Write %s?", ui.ShortPath(path)), true)
-		if err != nil {
-			return createAborted(err)
-		}
-		if !write {
-			return notWritten(r, p, path)
-		}
 		if err := writeNew(path, data); err != nil {
 			return err
 		}
-		p.Say("")
 		r.Result("Wrote %s.", path)
 		p.Say("\nNext:")
 		// init creates secrets.enc.yaml, which secrets set writes into, so it
@@ -219,8 +212,8 @@ func createAborted(err error) error {
 	return err
 }
 
-// notWritten reports an operator's choice to leave the file unwritten. It is
-// not a failure, so it is a result rather than a problem.
+// notWritten reports an operator's choice, after a refusal, to leave the file
+// unwritten. It is not a failure, so it is a result rather than a problem.
 func notWritten(r ui.Reporter, p *create.Prompter, path string) error {
 	p.Say("")
 	r.Result("%s not written. Run paisans create again to start over.", ui.ShortPath(path))

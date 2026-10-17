@@ -120,10 +120,11 @@ paisans validate --offline   # the file alone; no site is reached
 Asks about a new deployment at a terminal (the community and its domain, the
 DNS provider, the operators, one or more and two recommended, how many machines and what
 each does, the apps, who manages accounts, and the mail server) and writes a commented `paisans-stack.yaml` from the answers. The
-file is checked as `validate` checks it before it is shown; a refusal offers
+file is checked as `validate` checks it before it is written; a refusal offers
 the questions it came from again, every question, writing the file as it
-stands to fix by hand, or quitting. A file refused nothing is written once the
-operator says yes. It then names `secrets set`, `init` and `apply`.
+stands to fix by hand, or quitting. A file refused nothing is written at once,
+to `--config` or `paisans-stack.yaml` in the current directory, and is not
+printed. It then names `secrets set`, `init` and `apply`.
 
 Each operator's keys are checked as they are pasted: a key another operator
 gave, one listed twice, and one the loader refuses are refused there.
