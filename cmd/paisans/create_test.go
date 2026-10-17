@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/create"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 	"github.com/paisans-software/paisans-cli/internal/validate"
 )
@@ -199,5 +200,55 @@ func TestWriteNewRefusesAFileThatAppeared(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(path); string(data) != "theirs\n" {
 		t.Error("the file that appeared was changed")
+	}
+}
+
+// A refused file is still written when the operator asks for it as it
+// stands, so that their answers are not lost.
+func TestCreateWritesARefusedFileOnRequest(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
+	rec := plainReporter(t)
+	in := answersFile(t, createLines(createCommunity, createAdmin,
+		[]string{"4", "1", "", "data, apps, gateway, witness", "203.0.113.10", "", "", ""},
+		createNoApps, createMail,
+		[]string{"3"}, // write the file as it stands
+	)...)
+	var out bytes.Buffer
+	if err := runCreate([]string{"--config", path}, in, &out); err != nil {
+		t.Fatalf("%v\n%s\n%s", err, rec.String(), out.String())
+	}
+	if !strings.Contains(rec.String(), "which validate refuses") {
+		t.Errorf("the write did not say the file is refused:\n%s", rec.String())
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !validate.Check(cfg).Refused() {
+		t.Error("the file written as it stands is not the refused one")
+	}
+}
+
+// A file the loader refuses is shown as refusals, each under its key, rather
+// than ending create with nothing written.
+func TestCheckRenderedTurnsALoadErrorIntoRefusals(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
+	plainReporter(t)
+	in := answersFile(t, createLines(createCommunity, createAdmin,
+		[]string{"1", "", "203.0.113.10", "", ""}, createNoApps, createMail, []string{""})...)
+	if err := runCreate([]string{"--config", path}, in, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := strings.Replace(string(data), strings.Fields(createBobKey)[1], strings.Fields(createKey)[1], 1)
+	result, err := checkRendered([]byte(shared))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Refused() || create.SectionFor(result.Refusals()[0].Key) != create.SectionOperators {
+		t.Errorf("the shared key is not a refusal under the operators: %+v", result.Findings)
 	}
 }

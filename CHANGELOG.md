@@ -77,6 +77,8 @@ changes share a bullet. Detailed notes are on the corresponding
 - `site remove` and `app remove` read every flag given after the name before they report, so `-v` there shows detail and `--execute` there records `ssh.user`.
 - `apply` on a site whose mesh interface is up without its file's address, key or peers restarts or syncs it, so a run stopped between writing the file and handing it over completes.
 - A deployment binds and dials only each site's mesh address, so the egress table `host admit` loads, which drops its loopback dials, stalls neither etcd's own client gateway nor Patroni's leader election.
+- `create` refuses an operator's key that another operator gave, one listed twice, and one the loader refuses by type, size or options, when it is pasted, rather than rendering a file that does not load and writing nothing.
+- `create` offers to write a file validate refuses as it stands, to fix by hand, so the answers are not lost.
 
 ### Security
 

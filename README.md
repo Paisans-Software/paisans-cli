@@ -1492,10 +1492,12 @@ what the client is named without one, and then nothing is written.
 
 It asks for at least two operators, each with a username, a name, an email
 address and their public keys, because `validate` refuses fewer
-(`operators-fewer-than-two`), and writes them as the `operators:` section,
-named in every site's `ssh.keys`. It then asks who manages accounts and writes
-the answer as the `pocket-id` app's `management` (see *Who manages accounts:
-`management`*), since that is never defaulted. With the account service it
+(`operators-fewer-than-two`). A key another operator gave is refused as it is
+pasted, since two operators sharing a key cannot be told apart on a host. It
+writes them as the `operators:` section, named in every site's `ssh.keys`. It
+then asks who manages accounts and writes the answer as the `pocket-id` app's
+`management` (see *Who manages accounts: `management`*), since that is never
+defaulted. With the account service it
 adds an `account` app, asking its hostname (`account.<domain>` by default),
 how people join (`signup: invite` or `open`), and the Markdown file that
 holds the code of conduct, whose text it writes into `code_of_conduct`. With
@@ -1515,8 +1517,9 @@ It writes one file and nothing else. It asks for no secret, because `init` is
 the one command responsible for the secrets file, and reaches no host, because
 the sites may not exist yet. It refuses a file that exists: an existing
 deployment is edited, not recreated. The rendered bytes are checked exactly as
-`validate` checks a file before the operator sees them, and nothing is written
-while anything is refused.
+`validate` checks a file before the operator sees them. A refused file is
+written only when the operator asks for it as it stands, so that their answers
+are not lost; `validate` and `apply` refuse it until it is fixed by hand.
 
 ### The config declares intent; etcd holds truth
 

@@ -145,8 +145,14 @@ func (w *Wizard) operators() error {
 			d = prev[i]
 		}
 		var taken []string
+		keys := map[string]string{}
 		for _, op := range operators {
 			taken = append(taken, op.ID)
+			for _, k := range op.Keys {
+				if fp, err := checkKey(k); err == nil {
+					keys[fp] = op.ID
+				}
+			}
 		}
 		if i > 0 {
 			w.p.Say("\nOperator %d", i+1)
@@ -163,11 +169,11 @@ func (w *Wizard) operators() error {
 		if err != nil {
 			return err
 		}
-		keys, err := w.p.Lines("SSH public keys", d.Keys, checkKey)
+		lines, err := w.p.Lines("SSH public keys", d.Keys, keyCheck(keys))
 		if err != nil {
 			return err
 		}
-		operators = append(operators, Operator{ID: id, Name: name, Email: email, Keys: keys})
+		operators = append(operators, Operator{ID: id, Name: name, Email: email, Keys: lines})
 		if len(operators) < 2 {
 			continue
 		}

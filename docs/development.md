@@ -154,8 +154,9 @@ each answer meets when it is typed (`checks.go`), and the template the file is
 rendered from (`paisans-stack.yaml.tmpl`, through `render.go`, which also decides
 placement, object storage and etcd timings from the answers). The rendered
 bytes go through `config.LoadBytes` and `validate.Check` before they are
-shown, and a refusal leads back to the section its key names
-(`create.SectionFor`). `cmd/paisans/create.go` refuses an existing file and a
+shown, a load error's problems becoming refusals, and a refusal leads back to
+the section its key names (`create.SectionFor`) or writes the file as it
+stands when the operator asks. `cmd/paisans/create.go` refuses an existing file and a
 stdin that is not a terminal, and writes with `O_EXCL`. The tests in
 `internal/create` render every named shape, with no apps and with every app,
 gated and not, and require no refusal and exactly the warnings each is known
