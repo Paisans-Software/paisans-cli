@@ -95,7 +95,41 @@ func runSiteAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 	case site != "" && ans.yes && sshFlag == "":
 		return fmt.Errorf("site admit: --yes does not choose a login: give --ssh <user>, your own login on the site's declared host, or --ssh user@host[:port]. Nothing was read or changed")
 	}
-	r := reporter()
+	return admit(reporter(), admitRun{
+		request: request, site: site, sshFlag: sshFlag, configPath: configPath, digestFlag: digestFlag,
+		flags: flags, execute: execute,
+	}, ans, stdin, stdout)
+}
+
+// admitRun is one site admit: its flags, as runSiteAdmit has checked
+// them, and whether the owner approves the plan at a terminal before it
+// runs.
+type admitRun struct {
+	request, site, sshFlag, configPath, digestFlag string
+	flags                                          hostadmit.Flags
+	execute                                        bool
+	// approve asks the owner, once the plan is shown, whether to make its
+	// changes, and stops with errAdmitDeclined, nothing changed, on
+	// anything but a yes. init sets it when it admits a site at the
+	// operator's word (see admitFromInit).
+	approve bool
+}
+
+// errAdmitDeclined is a plan the owner did not approve (admitRun.approve).
+var errAdmitDeclined = errors.New("site admit: the plan was not approved. Nothing was changed")
+
+// admitFromInit is site admit --site site --execute, for init: admit's own
+// flow, asking at stdin's terminal for the owner's login on the host and
+// for each grant the site's roles need, then showing the plan and asking
+// before it runs. A plan the operator declines is errAdmitDeclined.
+func admitFromInit(r ui.Reporter, configPath, site string, stdin io.Reader, stdout io.Writer) error {
+	return admit(r, admitRun{site: site, configPath: configPath, execute: true, approve: true}, answerer{}, stdin, stdout)
+}
+
+// admit is site admit once its flags are checked: from a request on the
+// host, or from the configuration over the owner's own ssh.
+func admit(r ui.Reporter, run admitRun, ans answerer, stdin io.Reader, stdout io.Writer) error {
+	request, site, sshFlag, configPath, digestFlag, flags, execute := run.request, run.site, run.sshFlag, run.configPath, run.digestFlag, run.flags, run.execute
 	in := hostadmit.Input{Flags: flags, Now: time.Now()}
 	var declared config.Site
 	if request != "" {
@@ -204,6 +238,17 @@ func runSiteAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 		return nil
 	}
 	plan.ShowToRun(r)
+	if run.approve {
+		resume := ui.Hold(r)
+		yes, err := ans.yesNo(stdin, stdout, "", fmt.Sprintf("Make these changes on %s?", t.Describe()), "admit's plan")
+		resume()
+		if err != nil {
+			return fmt.Errorf("site admit: reading your answer: %w. Nothing was changed", err)
+		}
+		if !yes {
+			return errAdmitDeclined
+		}
+	}
 	if request != "" {
 		// The prompt is held as one, so the run draws the plan's rows
 		// again below it rather than reach above it.

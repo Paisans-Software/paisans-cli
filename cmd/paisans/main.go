@@ -67,7 +67,7 @@ func main() {
 	case "create":
 		err = runCreate(os.Args[2:], os.Stdin, os.Stdout)
 	case "init":
-		err = runInit(os.Args[2:])
+		err = runInit(os.Args[2:], os.Stdin, os.Stdout)
 	case "render":
 		err = runRender(os.Args[2:])
 	case "apply":
@@ -250,19 +250,27 @@ func runValidate(args []string) error {
 // database password locks an application out of a role that still holds the
 // old one.
 //
-// It changes no host. It reads every site that has admitted the deployment,
-// to settle the mesh subnet before anything is deployed (see initAdmissions
-// and settleMesh), and that is all; a site that has not is skipped, with a
-// warning. Standing a
-// deployment up is `apply`, and that is a separate decision from having
-// credentials to stand it up with.
-func runInit(args []string) error {
+// It reads every site that has admitted the deployment, to settle the mesh
+// subnet before anything is deployed (see initAdmissions and settleMesh).
+// It first lists every site that has not, and why. At a terminal, without
+// --yes, it offers to admit each from this machine, with site admit's own
+// flow (see offerAdmissions), which is the one way init changes a host;
+// otherwise, and on a no, it prints what admits the site and skips it.
+// Standing a deployment up is `apply`, and that is a separate decision from
+// having credentials to stand it up with.
+func runInit(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("init", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets file (default: secrets.enc.yaml beside the config)")
 	ageKeyFile := fs.String("age-private-key-file", "", "keep a newly made age private key in this file instead of the keystore")
+	answers := yesFlag(fs)
+	fs.Lookup("yes").Usage = "ask nothing: skip each site not admitted, printing the commands that admit it. --yes never admits a host, which stays its owner's step with site admit; needs " + allowYesVariable + "=1 in the environment"
 	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	ans, err := answers()
+	if err != nil {
 		return err
 	}
 	r := reporter()
@@ -293,8 +301,14 @@ func runInit(args []string) error {
 	// Every site is asked whether it admitted the deployment, and only an
 	// admitted one is read further: on any other the deployment's user does
 	// not exist yet, and site admit checks the subnet there.
+	// Every site not admitted is listed, with why, before init asks or
+	// settles anything; at a terminal init then offers to admit each.
 	hosts := initHosts(cfg)
-	admitted, unread := initAdmissions(r, cfg, hosts)
+	admitted, skipped, unread := initAdmissions(r, cfg, hosts)
+	listNotAdmitted(r, skipped)
+	if admitted, cfg, err = offerAdmissions(r, cfg, *configPath, hosts, admitted, skipped, ans, stdin, stdout); err != nil {
+		return err
+	}
 	wrote, err := settleMesh(r, cfg, *configPath, hosts, admitted, unread, meshRandom)
 	if err != nil {
 		return err

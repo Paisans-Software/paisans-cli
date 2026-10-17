@@ -1170,3 +1170,33 @@ func TestYesRequestDryRunRefusesAnInactiveUFW(t *testing.T) {
 		t.Errorf("went on:\n%s", out.String())
 	}
 }
+
+// fakeAdmitFromInit makes site admit --site, as init runs it, run over
+// blank hosts for user: the owner's login and the deployment user's are
+// blankHost(user), and the plan's run calls admitted in place of changing
+// anything. It returns where the owner's login went, once admit reached it.
+func fakeAdmitFromInit(t *testing.T, user string, admitted func()) *config.Destination {
+	t.Helper()
+	savedExecute, savedLogin, savedOwner := executeAdmit, reachSiteUser, reachOwnerAdmit
+	t.Cleanup(func() { executeAdmit, reachSiteUser, reachOwnerAdmit = savedExecute, savedLogin, savedOwner })
+	reached := new(config.Destination)
+	reachOwnerAdmit = func(d config.Destination) apply.Transport { *reached = d; return blankHost(user) }
+	reachSiteUser = func(string, config.Site) apply.Transport { return blankHost(user) }
+	executeAdmit = func(apply.Transport, hostadmit.Input, *hostadmit.Plan, ui.Reporter) error {
+		admitted()
+		return nil
+	}
+	return reached
+}
+
+// noAdmitFromInit fails the test if site admit reaches a host.
+func noAdmitFromInit(t *testing.T) {
+	t.Helper()
+	savedOwner, savedExecute := reachOwnerAdmit, executeAdmit
+	t.Cleanup(func() { reachOwnerAdmit, executeAdmit = savedOwner, savedExecute })
+	reachOwnerAdmit = func(config.Destination) apply.Transport { t.Fatal("site admit reached the owner's host"); return nil }
+	executeAdmit = func(apply.Transport, hostadmit.Input, *hostadmit.Plan, ui.Reporter) error {
+		t.Fatal("site admit ran a plan")
+		return nil
+	}
+}

@@ -133,8 +133,11 @@ var helpCommands = []helpCommand{
 	{
 		name:    "init",
 		summary: "Give the configuration an id, a mesh subnet and its secrets.",
-		usage:   []string{"paisans init [--config " + config.FileName + "] [--secrets secrets.enc.yaml]"},
-		detail: "Give the configuration an id if it has none; check each site's admission, skipping one not admitted yet, whose site admit checks the subnet as root, and refusing when a site does not answer, unless the deployment is already on a site; until the deployment is on any site, reach every admitted site and keep mesh.subnet only if it overlaps nothing there, else, with no site admitted, roll a random /24 that overlaps nothing and move each site's address into it; " +
+		usage:   []string{"paisans init [--config " + config.FileName + "] [--secrets secrets.enc.yaml] [--yes]"},
+		detail: "Give the configuration an id if it has none; check each site's admission and list every site not admitted, with why, refusing when a site does not answer, unless the deployment is already on a site; " +
+			"at a terminal, without --yes, ask for each site not admitted whether to admit it now from this machine, and on a yes run site admit --site's own flow, which asks for your login on the host and each grant, shows the plan and asks before it runs; " +
+			"otherwise skip the site, whose site admit checks the subnet as root, printing the site admit and site request lines that admit it. --yes never admits a host: admitting stays its owner's step; " +
+			"until the deployment is on any site, reach every admitted site and keep mesh.subnet only if it overlaps nothing there, else, with no site admitted, roll a random /24 that overlaps nothing and move each site's address into it; " +
 			"then generate the secrets it needs, filling in only what is missing, and say what is still owed from elsewhere.",
 	},
 	{
@@ -477,8 +480,9 @@ doctor, init, config, operator register, site admit and site evict
 are the only commands that reach a host. Each reads it to plan, and changes it
 only with --execute; config and operator register check no admission record,
 and their --execute only starts each site's configuration sync and, for publish
-and register, adds a version to its store; site deployments, preflight and init
-have no --execute and never change it; doctor's --execute and secrets prune's
+and register, adds a version to its store; site deployments and preflight have
+no --execute and never change it; init has none and changes a host only by a
+site admit you approve at its terminal; doctor's --execute and secrets prune's
 change no host either, editing only the local files, and secrets prune only
 reads the gateways' deployment records. site admit and site evict reach a host
 as its owner, as root on it or through your own sudo. site admit claims the host

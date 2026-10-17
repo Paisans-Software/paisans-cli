@@ -182,9 +182,10 @@ See *`paisans create` writes a new deployment's file, and only that* in
 
 ### `paisans init`
 
-Gives the declaration an `id` if it has none, checks each site's admission,
-settles `mesh.subnet` against every admitted site while the deployment is on
-none of them, generates every secret the
+Gives the declaration an `id` if it has none, checks each site's admission
+and lists every site not admitted, with why, offers at a terminal to admit
+each from this machine, settles `mesh.subnet` against every admitted site
+while the deployment is on none of them, generates every secret the
 declaration needs into the secrets file (filling only what is missing), and
 says what is still owed from elsewhere. Each owed secret is a warning, since
 only the operator can provide it. The sign in clients `apply` creates are
@@ -197,7 +198,9 @@ under `--verbose`.
   secrets for a site or app just declared without applying anything.
 * **Flags:** `--config`, `--secrets`, `--age-private-key-file <path>` (keep a
   newly made age key in this file, outside the configuration's directory,
-  instead of the keystore).
+  instead of the keystore), `--yes` (ask nothing: skip each site not
+  admitted, with the commands that admit it). `--yes` never admits a host:
+  admitting stays the host owner's explicit step.
 * **Age key:** for a deployment with no secrets file and no `.sops.yaml`, it
   makes the age key and keeps it in the keystore, or in
   `--age-private-key-file`. With a `SOPS_AGE_*` variable set it makes none:
@@ -205,18 +208,34 @@ under `--verbose`.
   on the `age key` step. Variables that hold no key or several are refused,
   and so is `--age-private-key-file` beside one.
 * **Hosts:** checks each site's admission, one line a site: ✓ admitted, ○
-  not admitted yet, ✗ not answering. It reads each admitted site, as the
-  deployment's own user, to choose the mesh subnet, and changes none. A site
-  not admitted yet is skipped with a warning naming the `site request` for
-  it, since `site admit` checks the subnet there as root; it is run before
-  any host is admitted, as `create` says. A site that does not answer, or
+  not admitted yet, ✗ not answering, then lists every site not admitted and
+  why, before it asks or settles anything. It reads each admitted site, as
+  the deployment's own user, to choose the mesh subnet. It is run before any
+  host is admitted, as `create` says.
+* **Admitting from init:** at a terminal, without `--yes`, it asks `Admit
+  <site> now from this machine? [y/N]` for each site not admitted. A yes runs
+  `site admit --site <site>`'s own flow: it asks for your login on the host,
+  which runs admit through sudo, and for each grant the site's roles need,
+  shows the plan, and asks `Make these changes on <host>?` before it runs
+  it. init then checks the site's admission again and goes on with it
+  admitted. A failed admit stops init. This is the one way init changes a
+  host. While `mesh.subnet` is missing it asks nothing, since admit checks
+  the subnet on the host.
+* **Skipping a site:** with no terminal, with `--yes`, on a no, or on a
+  declined plan, a site not admitted is skipped with a warning naming what
+  admits it: `paisans site admit --site <site> --ssh <your login>` from this
+  machine when the host is yours, or `paisans site request --site <site> >
+  <site>.admit` and then `sudo paisans site admit --request <site>.admit` on
+  the host, by an owner who is someone else. `site admit` checks the subnet
+  there as root. A site that does not answer, or
   refuses the operator's key as a user it names, refuses it with nothing
   written, unless a site already holds the deployment, whose subnet is then
   kept. An admitted site pins the subnet site admit built it around, so
   init refuses to roll one that overlaps something there.
-* **`--execute`:** not taken. It writes local files only: the `id` and the
+* **`--execute`:** not taken. It writes local files: the `id` and the
   subnet into `paisans-stack.yaml`, the secrets into the secrets file, and
-  `.sops.yaml` (and the key file, when named) for a new deployment.
+  `.sops.yaml` (and the key file, when named) for a new deployment. A host
+  changes only through a site admit the operator approved at the terminal.
 
 See *Three kinds of secret*, *Rendered configuration is a build artifact* and
 *A deployment has an id, and a host knows every deployment on it* in
@@ -720,7 +739,8 @@ paisans site request --site home-a > home-a.admit   # the digest is on stderr
 
 * **Alone:** always: it is the operator's half of admission when the host's
   owner does not have the configuration, and the message a login to a site
-  not admitted prints names this exact command.
+  not admitted prints names this exact command, as does `init` for each site
+  it skips.
 * **Flags:** `--site <name>` (required), `--config`.
 * **Hosts:** reaches none. Refuses a site the configuration does not
   declare, a configuration `validate` refuses, and a request that would
@@ -750,7 +770,9 @@ paisans site admit --site home-a --ssh owner@home-a.example.org --execute   # fr
 ```
 
 * **Alone:** always, by the host's owner, and never by an agent unattended:
-  it is the owner's root step on their own machine.
+  it is the owner's root step on their own machine. `init` at a terminal
+  offers to run `--site`'s flow for each site not admitted, asking before
+  the plan runs; its `--yes` never does.
   [guides/host-owners.md](guides/host-owners.md) is the owner's whole path,
   from installing the binary to evicting.
 * **Flags:**

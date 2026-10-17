@@ -22,7 +22,7 @@ reasons, values and requests behind it.
 
 ```
 paisans create                             # a new deployment's paisans-stack.yaml, from questions
-paisans init                               # an id, a mesh subnet and the secrets for paisans-stack.yaml
+paisans init                               # an id, a mesh subnet and the secrets; offers to admit each site not admitted
 paisans site request --site vm > vm.admit  # the request the host's owner admits the site from
 sudo paisans site admit --request vm.admit --execute   # on the host, by its owner: the deployment's own user and rootless Docker
 paisans site prepare --site vm --execute   # the user's keys, configuration store and daemon settings on an admitted host
@@ -1843,9 +1843,15 @@ site being added.
 **`init` chooses the subnet.** Until this deployment is on any site, `paisans
 init` reaches every site over ssh as the deployment's user, as the commands
 that reach a host do. A host that has not admitted the deployment yet refuses
-that login; `init` says so and goes on, because `site admit` checks the subnet
-against the registry, which is root's, and refuses one that overlaps another
-deployment's. When `mesh.subnet` is missing, or is declared but overlaps
+that login. `init` lists every such site, and why, before it settles
+anything. At a terminal, without `--yes`, it asks whether to admit each now
+from this machine, and on a yes runs `site admit --site`'s own flow, asking
+for the owner's login, each grant and the plan's approval, then goes on with
+the site admitted. Otherwise it prints the `site admit` and `site request`
+lines that admit the site, and goes on without it, because `site admit`
+checks the subnet against the registry, which is root's, and refuses one
+that overlaps another deployment's. `--yes` never admits a host. When
+`mesh.subnet` is missing, or is declared but overlaps
 something, it gathers everything the table above finds on each host it
 reached, and rolls a random `10.<a>.<b>.0/24` from
 `crypto/rand` that overlaps none of it, rolling again on a collision, up to 32
