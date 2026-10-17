@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 
+	"filippo.io/age"
+
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/dns/dnstest"
@@ -245,5 +247,62 @@ func TestDoctorCallsNothingDuringALockout(t *testing.T) {
 	if !strings.Contains(rec.Lines(), "fail: check caddy certificates vm cloudflare is locking the DNS token out") ||
 		!strings.Contains(rec.Lines(), "so as not to feed Cloudflare's lockout") {
 		t.Errorf("the lockout is not reported:\n%s", rec.Lines())
+	}
+}
+
+// A secrets file apply would refuse is a FAIL under secrets, and every
+// other check still runs: a plaintext one does not open, so the
+// workstation's check skips; an encrypted one with no .sops.yaml beside it
+// opens, so it runs.
+func TestDoctorFailsAnUnusableSecretsFileAndRunsTheRest(t *testing.T) {
+	for _, tc := range []struct {
+		name, line string
+		places     string
+	}{
+		{"plaintext", "is not encrypted", "vm"},
+		{"no .sops.yaml", "no .sops.yaml beside", "vm," + dns.WorkstationPlace + ",provider"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			configPath, secretsPath := cloudflareDoctor(t)
+			if tc.name != "plaintext" {
+				secrets, err := config.LoadSecrets(secretsPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				id, err := age.GenerateX25519Identity()
+				if err != nil {
+					t.Fatal(err)
+				}
+				keyFile := filepath.Join(t.TempDir(), "key.txt")
+				if err := os.WriteFile(keyFile, []byte(id.String()+"\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("SOPS_AGE_KEY_FILE", keyFile)
+				if err := config.WriteSecrets(secretsPath, secrets, []string{id.Recipient().String()}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			realSecrets(t)
+			cfg, err := config.Load(configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			hosts, _ := vmOnly(cfg, quietCaddyLog)
+			withDoctorHosts(t, cfg, hosts)
+			zone := dnstest.New()
+			zone.Zones["example.org"] = "zone-1"
+			calls := withTokenChecks(t, tokenPassed, func(check dns.TokenCheck, _ string) dns.TokenResult { return tokenPassed(check) }, zone)
+			rec := withRecorder(t, true)
+			err = runDoctor([]string{"--config", configPath, "--secrets", secretsPath, "--site", "vm"})
+			if err == nil || !strings.Contains(err.Error(), "FAIL") {
+				t.Errorf("doctor = %v, want it to end on its FAIL findings", err)
+			}
+			if got := strings.Join(calls.places, ","); got != tc.places {
+				t.Errorf("checked %s, want %s", got, tc.places)
+			}
+			if !strings.Contains(rec.Lines(), tc.line) || !rec.Has("step", "check caddy certificates vm") {
+				t.Errorf("no FAIL for the secrets file, or the other checks did not run:\n%s", rec.Lines())
+			}
+		})
 	}
 }

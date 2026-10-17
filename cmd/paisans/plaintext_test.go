@@ -133,7 +133,6 @@ func TestAPlaintextSecretsFileIsRefused(t *testing.T) {
 	for name, run := range map[string]func(configPath, secretsPath string) error{
 		"validate --offline": func(c, s string) error { return runValidate([]string{"--config", c, "--offline"}) },
 		"validate":           func(c, s string) error { return runValidate([]string{"--config", c}) },
-		"doctor":             func(c, s string) error { return runDoctor([]string{"--config", c}) },
 		"apply": func(c, s string) error {
 			fakeConverge(t, nil)
 			return runApply([]string{"--config", c}, strings.NewReader(""), io.Discard)

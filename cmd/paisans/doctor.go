@@ -64,11 +64,10 @@ func runDoctor(args []string) error {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
 	}
 	// A plaintext secrets file, or an encrypted one with no recipient in
-	// the .sops.yaml beside it, is refused before anything is changed or
-	// any site is read, as apply and publishing refuse it.
-	if err := config.CheckSecretsFile(*secretsPath); err != nil {
-		return err
-	}
+	// the .sops.yaml beside it, is a FAIL finding rather than a refusal:
+	// doctor reports what is wrong and runs every other check. A plaintext
+	// file does not load, so the checks that need decrypted secrets skip.
+	secretsFileErr := config.CheckSecretsFile(*secretsPath)
 	if *execute {
 		if err := removeRedundantGateConfig(r, *configPath); err != nil {
 			return err
@@ -104,6 +103,9 @@ func runDoctor(args []string) error {
 		return out
 	}
 	graph := doctor.Checks(cfg, sites, doctorReads{cfg: cfg, transports: transports, all: all, classes: &siteClasses{}, token: &workstationToken{path: *secretsPath}})
+	if secretsFileErr != nil {
+		graph.Add(secretsFileNode(secretsFileErr))
+	}
 	report, _ := graph.Run(r, doctorAtOnce)
 	report.ShowEnd(r)
 	if report.Failed() {
@@ -712,3 +714,19 @@ func restore(path string, original []byte, cause error) error {
 	}
 	return fmt.Errorf("%w; %s is restored as it was", cause, path)
 }
+
+// secretsFileNode is doctor's FAIL for a secrets file that apply and
+// publishing would refuse: plaintext, or encrypted with no recipient in the
+// .sops.yaml beside it. It reads nothing; err is CheckSecretsFile's.
+func secretsFileNode(err error) doctor.Node {
+	hint, explain := ui.Describe(err)
+	return doctor.Node{
+		Name:    doctor.SectionSecrets + " file",
+		Section: doctor.SectionSecrets,
+		Outcome: func(doctor.Input) doctor.Outcome { return doctor.Failed },
+		Judge: func(doctor.Input) []doctor.Finding {
+			return []doctor.Finding{{Section: doctor.SectionSecrets, Level: doctor.Fail, Line: hint, More: strings.Split(explain, "\n")}}
+		},
+	}
+}
+

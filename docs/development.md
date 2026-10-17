@@ -1649,8 +1649,8 @@ A plaintext secrets file is read and written only with
 `PAISANS_TEST_PLAINTEXT_SECRETS=1`. The `TestMain` of `cmd/paisans`,
 `internal/config` and `internal/configstore` sets it, and a test about the
 refusal of plaintext unsets it with `t.Setenv`. Outside that mode
-`config.LoadDeploymentSecrets` refuses a plaintext file, and `validate`,
-`doctor`, `init`, `apply` and publishing check the file with
+`config.LoadDeploymentSecrets` refuses a plaintext file, `doctor` reports
+it as a FAIL, and `validate`, `init`, `apply` and publishing check the file with
 `config.CheckSecretsFile` or `config.CheckSecretsBytes` before they change
 anything.
 

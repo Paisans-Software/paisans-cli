@@ -1368,9 +1368,10 @@ outside, and Caddy's certificates and the DNS token.
 * **Flags:** `--site <name>` (repeatable; default every site), `--config`,
   `--secrets` (default `secrets.enc.yaml` beside the config), `--execute`.
 * **Hosts:** every site, or the named ones, read only.
-* **Secrets:** before anything else, refuses a `secrets.enc.yaml` that is
-  plaintext, or encrypted with no recipient in the `.sops.yaml` beside it,
-  naming the fix.
+* **Secrets:** a `secrets.enc.yaml` that is plaintext, or encrypted with no
+  recipient in the `.sops.yaml` beside it, is a FAIL under `secrets` naming
+  the fix, and every other check still runs. A plaintext file does not open,
+  so the checks that need the secrets skip.
 * **`--execute`:** removes from `paisans-stack.yaml` each `config:` key that only
   repeats a value gating renders, before loading it, and records the `ssh.user`
   of a site it logs in to as the deployment's own user. It changes no host; the
