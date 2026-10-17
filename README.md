@@ -1493,7 +1493,9 @@ what the client is named without one, and then nothing is written.
 It asks for at least two operators, each with a username, a name, an email
 address and their public keys, because `validate` refuses fewer
 (`operators-fewer-than-two`), and writes them as the `operators:` section,
-named in every site's `ssh.keys`. It then asks who manages accounts and writes
+named in every site's `ssh.keys`. The first operator, usually whoever runs
+`create`, is offered each public key in `~/.ssh/*.pub` on the workstation
+before pasting any; a certificate is not offered. It then asks who manages accounts and writes
 the answer as the `pocket-id` app's `management` (see *Who manages accounts:
 `management`*), since that is never defaulted. With the account service it
 adds an `account` app, asking its hostname (`account.<domain>` by default),

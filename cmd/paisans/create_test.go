@@ -18,9 +18,11 @@ const (
 )
 
 // answersFile is a terminal's worth of answers, one per line, as a file
-// create reads from with isTerminal saying it is a terminal.
+// create reads from with isTerminal saying it is a terminal. HOME is an empty
+// directory, so no key of the machine running the tests is offered.
 func answersFile(t *testing.T, lines ...string) *os.File {
 	t.Helper()
+	t.Setenv("HOME", t.TempDir())
 	path := filepath.Join(t.TempDir(), "answers")
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -99,6 +101,37 @@ func TestCreateWritesAFileThatValidates(t *testing.T) {
 	}
 	if strings.Contains(next, "external.") {
 		t.Errorf("next steps name a secret's key rather than asking for each:\n%s", next)
+	}
+}
+
+func TestCreateOffersTheKeysInHome(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
+	plainReporter(t)
+	// alice takes the key found rather than pasting one.
+	in := answersFile(t, createLines(createCommunity,
+		[]string{"alice", "Alice Example", "alice@example.org", "",
+			"bob", "Bob Example", "bob@example.org", createBobKey, "", "n"},
+		[]string{"1", "", "203.0.113.10", "", ""}, createNoApps, createMail, []string{""})...)
+	ssh := filepath.Join(os.Getenv("HOME"), ".ssh")
+	if err := os.MkdirAll(ssh, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ssh, "id_ed25519.pub"), []byte(createKey+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := runCreate([]string{"--config", path}, in, &out); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "Use ~/.ssh/id_ed25519.pub (ssh-ed25519 SHA256:") {
+		t.Errorf("the key in ~/.ssh is not offered:\n%s", out.String())
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(cfg.Operators["alice"].Keys); got != createKey {
+		t.Errorf("alice's keys = %q, want the one in ~/.ssh", got)
 	}
 }
 
