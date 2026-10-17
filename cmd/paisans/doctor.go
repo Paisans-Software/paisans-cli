@@ -729,4 +729,3 @@ func secretsFileNode(err error) doctor.Node {
 		},
 	}
 }
-
