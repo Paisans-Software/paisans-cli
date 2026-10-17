@@ -154,7 +154,8 @@ func (u ubuntu) ConfigStore(t Transport, d deployment.Deployment, self config.Si
 	// The daemon listens on the mesh address, which exists only while
 	// WireGuard is up. A user unit cannot be ordered after the system's
 	// wg-quick, so its start waits for that address, and it is started here
-	// whether or not the mesh is up yet.
+	// whether or not the mesh is up yet, with --no-block: the mesh comes up
+	// after host prepare, so a start that waited for it would never return.
 	if unitsChanged || !(daemonEnabled && daemonActive && timerEnabled && timerActive) {
 		// reenable for a changed unit, so links its earlier [Install] made
 		// go with it.
@@ -162,7 +163,7 @@ func (u ubuntu) ConfigStore(t Transport, d deployment.Deployment, self config.Si
 		if daemonChanged {
 			enable, start = "reenable", "restart"
 		}
-		command := fmt.Sprintf("%[1]s daemon-reload && %[1]s enable --now %[2]s && %[1]s %[3]s %[4]s && %[1]s %[5]s %[4]s", scope.systemctl, timerUnit, enable, daemonUnit, start)
+		command := fmt.Sprintf("%[1]s daemon-reload && %[1]s enable --now %[2]s && %[1]s %[3]s %[4]s && %[1]s %[5]s --no-block %[4]s", scope.systemctl, timerUnit, enable, daemonUnit, start)
 		out.Steps = append(out.Steps, Step{
 			Kinds:    kinds,
 			Title:    "start the configuration store",
