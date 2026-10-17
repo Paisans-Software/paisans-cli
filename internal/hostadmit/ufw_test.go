@@ -743,3 +743,22 @@ func TestTheBlockListedFlagWarnsWhatItBlocks(t *testing.T) {
 		t.Errorf("no warning names what ufw blocks:\n%s", plan.Text())
 	}
 }
+
+// web80 is a container the system Docker publishes on 80, to the
+// container's 80 at 172.17.0.2, on a host whose Docker is not on its
+// iptables backend.
+const web80 = "container web-1\t0.0.0.0:80->80/tcp\tweb\n" +
+	"dnat table ip nat chain DOCKER: iifname != \"docker0\" tcp dport 80 counter packets 0 bytes 0 dnat to 172.17.0.2:80\n"
+
+// The route allow as ufw records it on a real host, comment included,
+// keeps the publish reachable.
+func TestARouteAllowAsUFWRecordsItKeepsAPublishReachable(t *testing.T) {
+	plan, err := hostadmit.Build(inactiveUFW("rule route allow proto tcp to 172.17.0.2 port 80 comment 'paisans-test'\n"+
+		"tuple4 route:allow tcp 80 172.17.0.2 any 0.0.0.0/0 in comment=70616973616e732d74657374\n"+web80+sshdOn22)(), input(t, "vm", enableUFW))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := plan.Steps[titledStep(plan, "enable ufw")].Describe; !strings.Contains(d, "80/tcp (your Docker's container web-1") || !strings.Contains(d, "`ufw route allow") {
+		t.Errorf("the enable step:\n%s", d)
+	}
+}
