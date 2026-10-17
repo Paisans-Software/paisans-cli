@@ -169,7 +169,12 @@ func (t SSHTransport) port() int {
 // Keys from the operator's own IdentityFile lines are still offered, since
 // IdentitiesOnly restricts to configured files rather than to the command
 // line's, and every other option in ~/.ssh/config (ProxyJump, known hosts)
-// still applies. A -p and a user@ given here take precedence over that file's
+// still applies. They come after the keys given here, because ssh lists -i
+// files before any it reads from a config file, so a host that holds an
+// operator's key accepts it before reaching them. Only -F leaves those lines
+// out, and it leaves out the rest of the file with them. A host that holds
+// none of the keys refuses them all, and sshd may say so as "Too many
+// authentication failures" (see loginRefused). A -p and a user@ given here take precedence over that file's
 // Port and User, because command line options are read first.
 //
 // BatchMode is not set, as before: a first connection may still ask the
@@ -558,10 +563,12 @@ func connectionFailed(err error, out string) bool {
 
 // authProblem is the Problem for a connection ssh opened and then would not
 // use: the host's key is not the one known, or is not known and ssh could
-// not ask, or the host accepted none of the operator's keys. ssh says each
-// on its own last line and exits 255, as for connectionFailed. Nil for
-// anything else. A refusal of the deployment's default user is a host that
-// has not admitted the deployment.
+// not ask, or the host accepted none of the operator's keys. ssh says the
+// first two on its own last line and exits 255, as for connectionFailed.
+// A refused login is found anywhere in ssh's closing lines (see
+// loginRefused), since sshd may hang up after it. Nil for anything else. A
+// refusal of the deployment's default user is a host that has not admitted
+// the deployment.
 func (t SSHTransport) authProblem(err error, out string) error {
 	var exit interface{ ExitCode() int }
 	if !errors.As(err, &exit) || exit.ExitCode() != 255 {
@@ -589,13 +596,13 @@ func (t SSHTransport) authProblem(err error, out string) error {
 			Explain: fmt.Sprintf("ssh could not ask whether to trust it. Connect once with %s, check the fingerprint it shows, accept it, and run again.", t.connectCommand()),
 			Cause:   err,
 		}
-	case (strings.Contains(last, "Permission denied (") || strings.Contains(last, "Too many authentication failures")) && t.DefaultUser && t.Site != "":
+	case loginRefused(out) && t.DefaultUser && t.Site != "":
 		return &ui.Problem{
 			Hint:    fmt.Sprintf("site %s is not admitted on %s", t.Site, host),
 			Explain: fmt.Sprintf("The site names no ssh.user, so paisans logs in as the deployment's own user, %s, and %s refused it. That user exists only once the host's owner has admitted the deployment. Send them a request:\n\n    paisans site request --site %s > %s.admit\n\nIf they have admitted it, check that your key is loaded in your ssh agent (ssh-add -l) and is under an operator the site's ssh.keys names. If the deployment logs in as another user on that host, name it in sites.%s.ssh.user.", user, host, t.Site, t.Site, t.Site),
 			Cause:   fmt.Errorf("%w: %w", ErrLoginNotAdmitted, err),
 		}
-	case strings.Contains(last, "Permission denied (") || strings.Contains(last, "Too many authentication failures"):
+	case loginRefused(out):
 		return &ui.Problem{
 			Hint:    t.Describe() + " did not accept your ssh key",
 			Explain: "Check that your key is loaded in your ssh agent (ssh-add -l), that its public half is under an admin the site's ssh.keys names, and that the host's authorized_keys for that user holds it.",
@@ -630,6 +637,46 @@ func (t SSHTransport) knownHostsName() string {
 		return fmt.Sprintf("[%s]:%d", t.Host, p)
 	}
 	return t.Host
+}
+
+// loginRefusals are what ssh prints when the host accepted none of the keys
+// offered: "Permission denied (publickey)." once every key was tried, or
+// sshd's "Too many authentication failures" once more keys were offered than
+// its MaxAuthTries allows.
+var loginRefusals = []string{"Permission denied (", "Too many authentication failures"}
+
+// sshDisconnects begin the lines ssh prints as the connection ends, after
+// the reason for it: "Received disconnect from <host> port 22:2: <reason>"
+// carries sshd's reason, and "Disconnected from <host> port 22" follows it.
+var sshDisconnects = []string{"Received disconnect from ", "Disconnected from ", "Connection closed by "}
+
+// loginRefused reports whether ssh's diagnostic output ends in a refused
+// login. That is the closing run of out's lines: its last line, and the
+// lines before it while each is a refusal or one of ssh's disconnect
+// notices. A refusal anywhere in that run counts, so sshd hanging up with
+// "Too many authentication failures" and ssh then printing "Disconnected
+// from" reads as the refusal it is. Anything above that run is the remote
+// command's or the session's, never read here.
+func loginRefused(out string) bool {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		for _, r := range loginRefusals {
+			if strings.Contains(line, r) {
+				return true
+			}
+		}
+		closing := false
+		for _, d := range sshDisconnects {
+			if strings.HasPrefix(line, d) {
+				closing = true
+			}
+		}
+		if !closing {
+			return false
+		}
+	}
+	return false
 }
 
 func lastLine(out string) string {

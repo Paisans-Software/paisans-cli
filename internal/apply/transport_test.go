@@ -451,6 +451,7 @@ func TestARefusedDefaultUserIsNotAdmittedWhateverSshSaid(t *testing.T) {
 	for _, out := range []string{
 		"Too many authentication failures\n",
 		"Received disconnect from 203.0.113.10 port 22:2: Too many authentication failures\n",
+		tooManyThenDisconnected,
 	} {
 		apply.ForgetContacts()
 		s := &sshScript{answers: []sshAnswer{{out, 255}}}
@@ -462,6 +463,56 @@ func TestARefusedDefaultUserIsNotAdmittedWhateverSshSaid(t *testing.T) {
 		}
 	}
 	apply.ForgetContacts()
+}
+
+// tooManyThenDisconnected is what ssh printed for a site not yet admitted
+// when it offered more keys than sshd's MaxAuthTries: the refusal, and then
+// the disconnect notice on the last line.
+const tooManyThenDisconnected = "Received disconnect from 192.255.145.38 port 22:2: Too many authentication failures\nDisconnected from 192.255.145.38 port 22\n"
+
+// The refusal ssh closed with is found above its disconnect notice: the
+// deployment's own user is not admitted, and a user the site names is a key
+// the host refused.
+func TestARefusalAboveTheDisconnectNoticeIsARefusedLogin(t *testing.T) {
+	for _, defaultUser := range []bool{true, false} {
+		apply.ForgetContacts()
+		s := &sshScript{answers: []sshAnswer{{tooManyThenDisconnected, 255}}}
+		s.install(t)
+		tr := apply.SSHTransport{Site: "home-a", User: "paisans-f2a9", Host: "192.255.145.38", PublicKeys: []string{keyA}, DefaultUser: defaultUser}
+		if !defaultUser {
+			tr.User = "ubuntu"
+		}
+		_, err := tr.Run("true")
+		if s.calls != 1 || errors.Is(err, apply.ErrUnreachable) {
+			t.Errorf("default user %v: retried or called unreachable: %d calls, %v", defaultUser, s.calls, err)
+		}
+		if !errors.Is(err, apply.ErrLoginRefused) || errors.Is(err, apply.ErrLoginNotAdmitted) != defaultUser {
+			t.Errorf("default user %v: %v", defaultUser, err)
+		}
+		p := problemOf(t, err)
+		want := "did not accept your ssh key"
+		if defaultUser {
+			want = "site home-a is not admitted on 192.255.145.38"
+		}
+		if !strings.Contains(p.Hint, want) {
+			t.Errorf("default user %v: hint %q", defaultUser, p.Hint)
+		}
+	}
+	apply.ForgetContacts()
+}
+
+// A refusal the remote command printed, with more of its output after it,
+// is the command's failure and not a refused login.
+func TestARefusalAboveOtherOutputIsNotARefusedLogin(t *testing.T) {
+	apply.ForgetContacts()
+	t.Cleanup(apply.ForgetContacts)
+	s := &sshScript{answers: []sshAnswer{{"Permission denied (publickey).\nDisconnected from 192.0.2.10 port 22\nthe command went on\n", 255}}}
+	s.install(t)
+	tr := apply.SSHTransport{Site: "home-a", User: "paisans-f2a9", Host: "203.0.113.10", PublicKeys: []string{keyA}, DefaultUser: true}
+	_, err := tr.Run("true")
+	if errors.Is(err, apply.ErrLoginRefused) {
+		t.Errorf("read as a refused login: %v", err)
+	}
 }
 
 // A transport built from a Destination names the host it reaches, never an

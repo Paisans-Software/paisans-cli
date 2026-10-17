@@ -10,6 +10,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Fixed
+
+- A site whose login sshd ends with "Too many authentication failures" and then a disconnect notice reads as a refused login, so `init` and `apply` skip a site not yet admitted instead of failing.
+
 ## [0.3.0-rc.1] - 2026-10-17
 
 ### Added
