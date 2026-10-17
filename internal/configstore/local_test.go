@@ -963,3 +963,44 @@ func TestPublishRefusesPlaintextSecrets(t *testing.T) {
 		t.Errorf("head moved to %s", head)
 	}
 }
+
+// A version published with plaintext secrets is never written to disk
+// outside the explicit test mode: not by a checkout (pull, recover), not to
+// incoming/, and not by an attestation, which refuses before it signs.
+func TestAPlaintextVersionIsNeverWrittenToDisk(t *testing.T) {
+	_, bob, sites, v1, v2, _ := twoVersions(t)
+	all := reach(sites, "home-a", "home-b")
+	t.Setenv(config.PlaintextSecretsVariable, "")
+	l := Local{Dir: t.TempDir()}
+	g, err := gather(l, all, 2, testID, Anchor{Root: v1}, GatherOptions{Sync: true}, fakePull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Checkout(v2); err == nil || !strings.Contains(err.Error(), "is not encrypted") {
+		t.Errorf("Checkout = %v, want a refusal of plaintext", err)
+	}
+	if l.HasFiles() {
+		t.Error("a refused checkout wrote files")
+	}
+	if head, _ := l.Head(); head != "" {
+		t.Errorf("head %s", head)
+	}
+	if err := l.WriteIncoming(v2); err == nil {
+		t.Error("WriteIncoming wrote a plaintext version")
+	}
+	if err := l.WriteIncomingFor(v2); err == nil {
+		t.Error("WriteIncomingFor wrote a plaintext version")
+	}
+	if entries, _ := os.ReadDir(l.Incoming()); len(entries) != 0 {
+		t.Errorf("incoming holds %v", entries)
+	}
+	if _, _, err := attestFrom(l, g, all, v1, bob.pub, bob.key, testNow, fakePush); err == nil || !strings.Contains(err.Error(), "is not encrypted") {
+		t.Errorf("attest = %v, want a refusal of plaintext", err)
+	}
+	if l.HasFiles() {
+		t.Error("a refused attestation wrote files")
+	}
+	if head, _ := l.Head(); head != "" {
+		t.Errorf("a refused attestation moved the head to %s", head)
+	}
+}

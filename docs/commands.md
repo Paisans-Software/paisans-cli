@@ -520,7 +520,9 @@ paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty
   has a `paisans secrets rotate` under way (`rotations` or `rotate_remaining`),
   naming the paths, until `secrets rotate` finishes it. `recover` refuses to
   write over files, and with a fork writes each head to
-  `.paisans/incoming/<sha>/` and refuses to choose.
+  `.paisans/incoming/<sha>/` and refuses to choose. `pull` and `recover`
+  refuse a version whose `secrets.enc.yaml` is plaintext before they write
+  any of its files or sign anything.
 * **Words typed at a terminal:** `partial` when fewer than a majority of sites
   answered directly (no more than half), for `apply --execute`, `config pull`,
   `config recover`, `config publish` of a first version and `operator register`;
