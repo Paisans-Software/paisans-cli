@@ -246,8 +246,10 @@ func runValidate(args []string) error {
 // database password locks an application out of a role that still holds the
 // old one.
 //
-// It changes no host. It reads every site, to settle the mesh subnet before
-// anything is deployed (see settleMesh), and that is all. Standing a
+// It changes no host. It reads every site that has admitted the deployment,
+// to settle the mesh subnet before anything is deployed (see initAdmissions
+// and settleMesh), and that is all; a site that has not is skipped, with a
+// warning. Standing a
 // deployment up is `apply`, and that is a separate decision from having
 // credentials to stand it up with.
 func runInit(args []string) error {
@@ -284,8 +286,12 @@ func runInit(args []string) error {
 	// The mesh subnet next, while nothing is deployed: it is the one value
 	// that has to be checked against every host before the first apply,
 	// and cannot change after it.
+	// Every site is asked whether it admitted the deployment, and only an
+	// admitted one is read further: on any other the deployment's user does
+	// not exist yet, and site admit checks the subnet there.
 	hosts := initHosts(cfg)
-	wrote, err := settleMesh(r, cfg, *configPath, hosts, meshRandom)
+	admitted, unread := initAdmissions(r, cfg, hosts)
+	wrote, err := settleMesh(r, cfg, *configPath, hosts, admitted, unread, meshRandom)
 	if err != nil {
 		return err
 	}
@@ -308,7 +314,12 @@ func runInit(args []string) error {
 	case err != nil:
 		return err
 	}
-	warnSecrets(r, cfg, secrets, recordForWarnings(r, cfg, func(gw string) registry.Runner { return hosts[gw] }))
+	warnSecrets(r, cfg, secrets, recordForWarnings(r, cfg, func(gw string) registry.Runner {
+		if !slices.Contains(admitted, gw) {
+			return notAdmittedHost{gw}
+		}
+		return hosts[gw]
+	}))
 
 	filled, recipients, err := fillSecrets(cfg, *secretsPath, secrets)
 	var failed *secretsWriteError
@@ -1303,11 +1314,11 @@ type prepareEnv struct {
 	stdout  io.Writer
 }
 
-// runHostPrepareIn is site prepare run with args through env, on none of the
+// runSitePrepareIn is site prepare run with args through env, on none of the
 // process's globals: its flags parse into its own variables, and nothing is
 // routed. -v is accepted and changes nothing here; env.r is already as
 // verbose as the run.
-func runHostPrepareIn(env prepareEnv, args []string) error {
+func runSitePrepareIn(env prepareEnv, args []string) error {
 	fs := newFlagSet("site prepare", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var verbose bool

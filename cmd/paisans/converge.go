@@ -298,7 +298,7 @@ func isPrepare(args []string) bool {
 // apply without --site runs every host's at once, each on its own env.
 // Tests replace it.
 var convergePrepare = func(env prepareEnv, args []string) error {
-	return runHostPrepareIn(env, args[2:])
+	return runSitePrepareIn(env, args[2:])
 }
 
 // defaultPrepareAtOnce is how many hosts are prepared at the same time.

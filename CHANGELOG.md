@@ -80,6 +80,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Fixed
 
+- `init` before any `site admit` no longer stops at an SSH password prompt: it marks each site admitted, skipped or unreachable, and settles the subnet from the admitted ones.
 - Every mesh overlap check reads every routing table, so a route another VPN keeps in its own table, such as Tailscale's table 52, is refused.
 - Mesh overlap refusals in `init`, `apply`, `site prepare`, `preflight` and `doctor` show control characters in names a host printed as escapes, so none is drawn on the terminal.
 - `apply --execute` starts no peer sync on a site `site prepare` has not given a store, which has nothing to sync, rather than warning on every bare host that its sync did not complete.
