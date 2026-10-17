@@ -80,8 +80,10 @@ func main() {
 			err = runHostAdmit(os.Args[3:], os.Stdin, os.Stdout)
 		case len(os.Args) >= 3 && os.Args[2] == "evict":
 			err = runHostEvict(os.Args[3:], os.Stdin, os.Stdout)
+		case len(os.Args) >= 3 && os.Args[2] == "list":
+			err = runHostList(os.Args[3:], os.Stdout)
 		default:
-			os.Exit(groupError(os.Stderr, "host", "host takes one subcommand, prepare, deployments, request, admit or evict"))
+			os.Exit(groupError(os.Stderr, "host", "host takes one subcommand, list, prepare, deployments, request, admit or evict"))
 		}
 	case "site":
 		switch {
@@ -89,8 +91,10 @@ func main() {
 			err = runSiteAdd(os.Args[3:], os.Stdin, os.Stdout)
 		case len(os.Args) >= 3 && os.Args[2] == "remove":
 			err = runSiteRemove(os.Args[3:], os.Stdin, os.Stdout)
+		case len(os.Args) >= 3 && os.Args[2] == "list":
+			err = runSiteList(os.Args[3:], os.Stdout)
 		default:
-			os.Exit(groupError(os.Stderr, "site", "site takes one subcommand, add or remove"))
+			os.Exit(groupError(os.Stderr, "site", "site takes one subcommand, list, add or remove"))
 		}
 	case "mesh":
 		err = runMesh(os.Args[2:])

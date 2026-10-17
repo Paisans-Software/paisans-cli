@@ -42,7 +42,7 @@ type helpSection struct {
 // subcommands. A command without any is listed by its own summary.
 var groupSummary = map[string]string{
 	"host":        "Prepare a host or list it; request, admit or evict a deployment.",
-	"site":        "Add a site to the running deployment, or remove one.",
+	"site":        "List the sites, add one to the running deployment, or remove one.",
 	"mesh":        "Replace sites' WireGuard keys.",
 	"gateway":     "Move the gateway role to another site.",
 	"storage":     "Provision object storage, join sites to it, replace keys.",
@@ -164,6 +164,13 @@ var helpCommands = []helpCommand{
 			"Every run, --site included, reaches every site's host to classify it, and runs on the sites it has: a site whose host has not admitted the deployment is left out, a joined site that does not answer is kept with its own steps skipped, and the run ends degraded. --require-all: exit 1 when the run is degraded: a site pending or down.",
 	},
 	{
+		name:    "host list",
+		summary: "List every site's host: the SSH destination it is reached at and its public addresses.",
+		usage:   []string{"paisans host list [--config " + config.FileName + "]"},
+		detail: "List every site " + config.FileName + " declares, by name, with the SSH destination every command that logs in reaches its host at, defaults filled in, and its public_address and public_address6. " +
+			"The table is on stdout. Reads only the local file; reaches no host and changes nothing.",
+	},
+	{
 		name:    "host prepare",
 		summary: "Keep the deployment user's keys, configuration store and daemon settings on an admitted host.",
 		usage:   []string{"paisans host prepare --site <name> [--config " + config.FileName + "] [--ssh <destination>]\n                     [--execute] [--yes]", "paisans host prepare --all [--config " + config.FileName + "] [--execute] [--yes]"},
@@ -213,6 +220,13 @@ var helpCommands = []helpCommand{
 			"--data-dir, the one admit was given, is needed only when the host holds no admission record. " +
 			"With --site, --ssh may be your login alone, for the site's declared ssh host and port, and is asked for at a terminal when left out. " +
 			"--execute asks for the user's name at a terminal; --yes types it, and with --site needs --ssh. " + yesTopic + " Never run by an agent unattended.",
+	},
+	{
+		name:    "site list",
+		summary: "List every site by name, with its roles and mesh address.",
+		usage:   []string{"paisans site list [--config " + config.FileName + "]"},
+		detail: "List every site " + config.FileName + " declares, by the name --site and site remove take, with its roles and its mesh address. " +
+			"The table is on stdout. Reads only the local file; reaches no host and changes nothing.",
 	},
 	{
 		name:    "site add",
