@@ -8616,7 +8616,7 @@ is `storage add`'s (see *More than one Garage site: `storage add`*), and
 removing a site is `site remove`'s (below). Apps on
 the new site come after the join rather than in it, since no stage starts an
 app stack. A site declared `roles: [data, apps]` joins through the whole
-apply, in one run: its `site add` joins it with the data role alone, the
+apply, in one run: its `site add` joins it with the data role alone and none of its apps, the
 site's own `apply` then starts its apps, and the gateway's apply follows,
 whose routes gain the site. `site add` typed alone refuses such a site and
 names that run.

@@ -515,6 +515,69 @@ func TestSiteAddJoinsTheDataRoleAsAStepOfApply(t *testing.T) {
 	}
 }
 
+// A run that stops after its review recorded the approvals, and before
+// home-b joins, is run again: its review finds every entry approved on the
+// host and asks nothing. site add then records only the stacks the join
+// started, keeping the approvals for home-b's apps, so the apply that
+// follows the join starts them without a refusal.
+func TestAResumedJoinKeepsTheApprovalsForItsApps(t *testing.T) {
+	fakeGrants(t, func(string) *grant.Record { return nil })
+	full := fixture(t)
+	secrets, err := config.LoadSecrets(fixtureSecretsPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	granted := func(cfg *config.Config) grant.Grant {
+		t.Helper()
+		plan, err := render.Build(cfg, secrets)
+		if err != nil {
+			t.Fatal(err)
+		}
+		g, err := grant.For(cfg, plan, "home-b")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return g
+	}
+	d := full.Deployment()
+	review := func(cfg *config.Config, scope grant.Scope) *siteReview {
+		t.Helper()
+		s, err := reviewSite(d, "home-b", granted(cfg), scope, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	// The first run's review, approved and recorded.
+	if err := recordApproval(ui.Discard, review(full, grant.AllScope), d, "alice"); err != nil {
+		t.Fatal(err)
+	}
+	// The run again: nothing is asked.
+	again := review(full, grant.AllScope)
+	if n := again.review.Pending(); n != 0 {
+		t.Fatalf("the resumed run asks for %d entries", n)
+	}
+	saved := reviewedByRun
+	t.Cleanup(func() { reviewedByRun = saved })
+	reviewedByRun = &runReview{approved: map[string]grant.Review{"home-b": again.review}}
+
+	joined := joinedAsData(full, "home-b")
+	scope, err := siteAddScope(joined, "home-b", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, by, err := stepReview(ui.Discard, answerer{}, noTerminalStdin(), io.Discard, joined, "home-b", granted(joined), scope, nil, true, "paisans site add home-b --execute")
+	if err != nil {
+		t.Fatalf("site add: %s", problemText(err))
+	}
+	if err := recordGrant(ui.Discard, s, d, by); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := stepReview(ui.Discard, answerer{}, noTerminalStdin(), io.Discard, full, "home-b", granted(full), grant.ApplyScope(), nil, true, "paisans apply --site home-b --execute"); err != nil {
+		t.Errorf("apply --site home-b after the join: %s", problemText(err))
+	}
+}
+
 // The join's configuration gives the joining site the data role alone and
 // leaves the declaration as it was read.
 func TestJoinedAsDataLeavesTheDeclaration(t *testing.T) {
@@ -525,6 +588,13 @@ func TestJoinedAsDataLeavesTheDeclaration(t *testing.T) {
 	}
 	if got := cfg.Sites["home-b"].Roles; !slices.Equal(got, []config.Role{config.RoleData, config.RoleApps}) {
 		t.Errorf("the declaration changed to %v", got)
+	}
+	if pinned := cfg.PinnedTo("home-b"); len(pinned) == 0 {
+		t.Fatal("the fixture pins no app to home-b")
+	} else if left := joined.PinnedTo("home-b"); len(left) > 0 {
+		t.Errorf("the join starts %v, pinned to home-b", left)
+	} else if _, ok := cfg.Apps[pinned[0]]; !ok {
+		t.Errorf("the declaration lost %s", pinned[0])
 	}
 	if got := joinedAsData(cfg, "vm"); got != cfg {
 		t.Errorf("a site without [data, apps] was changed")

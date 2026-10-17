@@ -1140,7 +1140,7 @@ paisans site add home-b --execute   # runs them, stopping at the first failed ga
   Typed alone, it shows a join's stages and gates, or resumes a join.
 * **Roles:** the site holds `[data]`, since no stage starts an app stack.
   As a step of the whole apply, a site declared `[data, apps]` joins with
-  its data role alone, and the run then applies the site, which starts its
+  its data role alone and none of its apps, pinned ones included, and the run then applies the site, which starts its
   apps, and the gateway, whose routes gain it. Typed alone, it refuses
   `[data, apps]` and names that run.
 * **Flags:** the site, as an argument before or after the flags; `--config`,
