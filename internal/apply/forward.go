@@ -8,7 +8,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"sync"
 )
@@ -71,7 +70,7 @@ func (t SSHTransport) ForwardArgs(keyFiles []string, address string) []string {
 	if t.Destination != "" {
 		return append(args, "-W", address, t.Destination)
 	}
-	args = append(args, "-p", strconv.Itoa(t.port()), "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout="+strconv.Itoa(t.connectTimeout()))
+	args = append(args, t.sectionOptions()...)
 	for _, f := range keyFiles {
 		args = append(args, "-i", f)
 	}
