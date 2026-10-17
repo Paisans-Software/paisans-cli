@@ -300,11 +300,38 @@ func shaped(t *testing.T, sites map[string]string, roles map[string][]config.Rol
 	return cfg
 }
 
-// A gateway that is only [gateway] is outside etcd, and serves Pocket ID's
-// public URL, which an app on the [data, apps] site fetches its issuer's
-// discovery document from as it starts. The gateway is applied before that
-// site's founding apply starts its apps, and the monitor, behind its own
-// web server, still last.
+// gatewayOutsideEtcd is the plan for edge, a gateway outside etcd, beside
+// site-a, a [data, apps] site being founded, and site-b when monitor is
+// set: edge is applied with its apps held back before site-a's founding
+// apply starts site-a's apps, and its full apply and pass two keep their
+// places. passTwo is pass two's order, which puts a monitor last.
+func gatewayOutsideEtcd(monitor bool, passTwo ...string) []string {
+	var hosts, pulls, monitored []string
+	sites := []string{"edge", "site-a"}
+	if monitor {
+		sites = append(sites, "site-b")
+		monitored = []string{"other sites: apply --site site-b"}
+	}
+	for _, s := range sites {
+		hosts = append(hosts, "hosts: site prepare --site "+s)
+		pulls = append(pulls, "pull: pull --site "+s)
+	}
+	var last []string
+	for _, s := range passTwo {
+		last = append(last, "pass two: apply --site "+s)
+	}
+	return slices.Concat(hosts, pulls, []string{
+		"dns: dns init",
+		"other sites: apply --site edge --hold-apps",
+		"founding: apply --site site-a",
+		"other sites: apply --site edge",
+	}, monitored, last)
+}
+
+// The staging shape of #407: a gateway that is only [gateway] is outside
+// etcd, and serves Pocket ID's public URL, which an app on the [data, apps]
+// site fetches its issuer's discovery document from as it starts. The
+// monitor sits behind its own web server.
 func TestConvergeAppliesAGatewayOutsideEtcdBeforeTheAppsSites(t *testing.T) {
 	cfg := shaped(t,
 		map[string]string{"edge": "vm", "site-a": "home-a", "site-b": "watch"},
@@ -315,56 +342,88 @@ func TestConvergeAppliesAGatewayOutsideEtcdBeforeTheAppsSites(t *testing.T) {
 	if got := cfg.Etcd.Members; !slices.Equal(got, []string{"site-a"}) {
 		t.Fatalf("etcd.members follow as %v, want [site-a]", got)
 	}
-	steps := convergePlan(cfg, convergeState{})
-	samePlan(t, steps,
-		"hosts: site prepare --site edge",
-		"hosts: site prepare --site site-a",
-		"hosts: site prepare --site site-b",
-		"pull: pull --site edge",
-		"pull: pull --site site-a",
-		"pull: pull --site site-b",
-		"dns: dns init",
-		"other sites: apply --site edge",
-		"founding: apply --site site-a",
-		"other sites: apply --site site-b",
-		"pass two: apply --site edge",
-		"pass two: apply --site site-a",
-		"pass two: apply --site site-b",
-	)
-	// A run that stopped once the data site's record was written applies
-	// the gateway before pass two starts that site's apps again.
-	steps = convergePlan(cfg, convergeState{Initial: map[string]render.EtcdInitial{"site-a": initial("site-a")}})
-	lines := titles(steps)
-	if g, a := slices.Index(lines, "other sites: apply --site edge"), slices.Index(lines, "pass two: apply --site site-a"); g < 0 || a < 0 || g > a {
-		t.Errorf("the gateway's apply does not come before the data site's:\n%s", strings.Join(lines, "\n"))
+	samePlan(t, convergePlan(cfg, convergeState{}), gatewayOutsideEtcd(true, "edge", "site-a", "site-b")...)
+}
+
+// A gateway outside etcd that holds the monitor or the apps role too gets
+// its Caddy up before the data site's apps start, as one with the gateway
+// role alone does. Its own apps wait on the data site and Pocket ID, so the
+// early apply holds them back.
+func TestConvergeAppliesAGatewayWithOtherRolesBeforeTheAppsSites(t *testing.T) {
+	for _, tc := range []struct {
+		also    config.Role
+		passTwo []string
+	}{
+		{config.RoleMonitor, []string{"site-a", "edge"}},
+		{config.RoleApps, []string{"edge", "site-a"}},
+	} {
+		also := tc.also
+		cfg := shaped(t,
+			map[string]string{"edge": "vm", "site-a": "home-a"},
+			map[string][]config.Role{"edge": {config.RoleGateway, also}, "site-a": {config.RoleData, config.RoleApps}})
+		if got := cfg.Etcd.Members; !slices.Equal(got, []string{"site-a"}) {
+			t.Fatalf("%s: etcd.members follow as %v, want [site-a]", also, got)
+		}
+		t.Run(string(also), func(t *testing.T) {
+			samePlan(t, convergePlan(cfg, convergeState{}), gatewayOutsideEtcd(false, tc.passTwo...)...)
+		})
 	}
 }
 
-// Once the data site is founded, a gateway outside etcd is first among the
-// sites outside etcd, ahead of an [apps] site whose name sorts before it.
-func TestConvergeAppliesAGatewayOutsideEtcdFirstAmongTheOtherSites(t *testing.T) {
-	cfg := shaped(t,
-		map[string]string{"apps": "home-b", "edge": "vm", "site-a": "home-a", "site-b": "watch"},
-		map[string][]config.Role{"apps": {config.RoleApps}, "edge": {config.RoleGateway}, "site-a": {config.RoleData, config.RoleApps}, "site-b": {config.RoleMonitor}})
-	steps := convergePlan(cfg, convergeState{Initial: map[string]render.EtcdInitial{"site-a": initial("site-a")}})
-	samePlan(t, steps,
-		"hosts: site prepare --site apps",
-		"hosts: site prepare --site edge",
-		"hosts: site prepare --site site-a",
-		"hosts: site prepare --site site-b",
-		"pull: pull --site apps",
-		"pull: pull --site edge",
-		"pull: pull --site site-a",
-		"pull: pull --site site-b",
-		"dns: dns init",
-		"other sites: apply --site edge",
-		"other sites: apply --site apps",
-		"other sites: apply --site site-b",
-		"pass two: apply --site apps",
-		"pass two: apply --site edge",
-		"pass two: apply --site site-a",
-		"pass two: apply --site site-b",
-	)
+// The gateway's early apply holds back every app stack on the site: the
+// pinned gate and a pinned app, each with its client recorded, as on a host
+// rebuilt with the secrets kept. Pocket ID is not asked, and neither stack
+// starts, so the apply does not wait on a gate whose discovery fails while
+// the data sites are still being founded. Without the flag, the same apply
+// starts both.
+func TestApplyHoldAppsStartsNoAppStack(t *testing.T) {
+	for _, hold := range []bool{false, true} {
+		quietSSH(t)
+		rec := &ui.Recorder{}
+		saved := reporterOverride
+		reporterOverride = rec
+		args := []string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "--site", "vm"}
+		if hold {
+			args = append(args, "--hold-apps")
+		}
+		var err error
+		captureStdout(t, func() { err = runApply(args, strings.NewReader(""), io.Discard) })
+		reporterOverride = saved
+		if err != nil {
+			t.Fatalf("hold %v: %v\n%s", hold, err, rec.Lines())
+		}
+		for _, app := range []string{"gate", "chat"} {
+			if got := rec.Has("step", "wait for "+app); got == hold {
+				t.Errorf("hold %v: wait for %s planned %v:\n%s", hold, app, got, rec.Lines())
+			}
+		}
+		if got := rec.Has("warn", "Pocket ID not asked"); got == hold {
+			t.Errorf("hold %v: Pocket ID asked about %v:\n%s", hold, !got, rec.Lines())
+		}
+		for _, want := range []string{"start mesh psns-f2a9", "recreate infra", "reload gateway"} {
+			if !rec.Has("step", want) {
+				t.Errorf("hold %v: no %s:\n%s", hold, want, rec.Lines())
+			}
+		}
+	}
+}
+
+// apply --hold-apps is about one site, and starts no stack --only could
+// name.
+func TestApplyHoldAppsRefusesWithoutASiteOrWithOnly(t *testing.T) {
+	quietSSH(t)
+	for _, args := range [][]string{
+		{"--hold-apps"},
+		{"--site", "vm", "--hold-apps", "--only", "infra"},
+	} {
+		var err error
+		captureStdout(t, func() {
+			err = runApply(append([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath()}, args...), strings.NewReader(""), io.Discard)
+		})
+		if err == nil || !strings.Contains(err.Error(), "--hold-apps") {
+			t.Errorf("%v: %v", args, err)
+		}
+	}
 }
 
 // The dual-site shape: the gateway is a witness and the monitor, so an etcd

@@ -151,8 +151,8 @@ var helpCommands = []helpCommand{
 				"              [--min-free <size>] [--keep-images] [--require-all] [--execute] [--yes]",
 			"paisans apply --site <name> [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n" +
 				"              [--ssh <destination>] [--only <stack>]... [--overwrite <path>]...\n" +
-				"              [--recreate <stack>]... [--min-free <size>] [--keep-images] [--require-all]\n" +
-				"              [--execute] [--yes]",
+				"              [--recreate <stack>]... [--hold-apps] [--min-free <size>] [--keep-images]\n" +
+				"              [--require-all] [--execute] [--yes]",
 		},
 		detail: "Without --site: take every site from " + config.FileName + " to a running stack, running init, site prepare, apply, site add, storage and dns init in the order the deployment needs. " +
 			"With --site: compare that site's rendered artifacts with what is on its host and show what would change.\n\n" +
@@ -160,7 +160,8 @@ var helpCommands = []helpCommand{
 			"Both, and site prepare, review the keys and images " + config.FileName + " grants against what each host last applied; --execute asks for the word approve at a terminal when anything is added or changed, and asks nothing when nothing is.\n\n" +
 			"--yes approves the review entry by entry, and types create, partial and rollback when apply asks for them. " + yesTopic + "\n\n" +
 			"Before anything changes, every app it starts logs in to its mail server from its site, sending nothing; one that does not log in refuses the apply.\n\n" +
-			"Every run, --site included, reaches every site's host to classify it, and runs on the sites it has: a site whose host has not admitted the deployment is left out, a joined site that does not answer is kept with its own steps skipped, and the run ends degraded. --require-all: exit 1 when the run is degraded: a site pending or down.",
+			"Every run, --site included, reaches every site's host to classify it, and runs on the sites it has: a site whose host has not admitted the deployment is left out, a joined site that does not answer is kept with its own steps skipped, and the run ends degraded. --require-all: exit 1 when the run is degraded: a site pending or down.\n\n" +
+			"--hold-apps: start none of the site's app stacks, a pinned one included, and apply its mesh, its infrastructure and its Caddy. Without --site, apply runs it on each gateway outside etcd.members before the data sites are founded, so their apps reach Pocket ID through the gateway as they start.",
 	},
 	{
 		name:    "site list",

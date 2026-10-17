@@ -936,9 +936,8 @@ that it runs, in the order and under the conditions *`paisans apply` with no
 `--site` converges the whole deployment* in `README.md` gives. In order: `init`
 when it has work; `site prepare` on every host at once; a pull of every site's
 images on every host at once, so no install waits on a download; `dns init`; the
-founding applies (a gateway outside `etcd.members` that holds no other role
-but storage before the data members, whose apps reach Pocket ID through it),
-`site add`, the other sites (a site that joined with the `apps` role first,
+founding applies (each gateway outside `etcd.members` with `--hold-apps`
+before the data members, whose apps reach Pocket ID through it), `site add`, the other sites (a site that joined with the `apps` role first,
 then the gateway), storage and pass two; `gateway
 move`, when a site without the gateway role still serves as the gateway; the
 `pocket id` step, which makes each operator a user of every running Pocket ID
@@ -1049,6 +1048,7 @@ starts, restarts or recreates what changed.
   | `--recreate <stack>` | none | `up -d --force-recreate` every container of this stack, even if nothing changed (repeatable) |
   | `--min-free <size>` | `3G` | free space Docker's data root must have before a stack pulls an image |
   | `--keep-images` | off | leave the images this apply supersedes on the host, and skip the sweep |
+  | `--hold-apps` | off | start none of the site's app stacks, a pinned one included: apply its mesh, its infrastructure and its Caddy, without asking Pocket ID anything; not with `--only`, and it does not sweep |
   | `--yes` | off | approve the review entry by entry, and type `create`, `partial` and `rollback` when asked for |
 
   And `--config`, `--secrets`, `--execute`.

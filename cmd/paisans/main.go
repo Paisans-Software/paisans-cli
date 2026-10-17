@@ -526,6 +526,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	minFree := fs.String("min-free", "3G", "free space Docker's data root must have before a stack pulls an image, Eg: 2G")
 	keepImages := fs.Bool("keep-images", false, "leave the images this apply supersedes on the host, Eg: to keep one to roll back to")
 	mustAll := fs.Bool("require-all", false, "exit 1 when the run is degraded: a site pending or down")
+	holdApps := fs.Bool("hold-apps", false, "start none of the site's app stacks: apply its mesh, its infrastructure and its Caddy")
 	answers := yesFlag(fs)
 	if err := parseFlags(fs, args); err != nil {
 		return err
@@ -544,8 +545,8 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	defer cacheDigests()()
 	if *site == "" {
-		if *destination != "" || len(overwrite) > 0 || len(only) > 0 || len(recreate) > 0 {
-			return fmt.Errorf("apply: --ssh, --overwrite, --only and --recreate are about one site, and apply without --site converges every site. Name it with --site")
+		if *destination != "" || len(overwrite) > 0 || len(only) > 0 || len(recreate) > 0 || *holdApps {
+			return fmt.Errorf("apply: --ssh, --overwrite, --only, --recreate and --hold-apps are about one site, and apply without --site converges every site. Name it with --site")
 		}
 		verbose := fs.Lookup("verbose").Value.(flag.Getter).Get().(bool)
 		return runConverge(r, convergeOptions{Config: *configPath, Secrets: *secretsPath, Execute: *execute, Verbose: verbose, KeepImages: *keepImages, MinFree: *minFree, RequireAll: *mustAll, answers: ans, stdin: stdin, stdout: stdout})
@@ -573,6 +574,19 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	declared, ok := cfg.Sites[*site]
 	if !ok {
 		return fmt.Errorf("apply: %s declares no site %q. Declared sites are %s", *configPath, *site, strings.Join(cfg.SiteNames(), ", "))
+	}
+	if *holdApps && len(only) > 0 {
+		return fmt.Errorf("apply: --hold-apps starts no app stack and --only names the stacks to apply. Give one of them")
+	}
+	// held is every app stack --hold-apps holds back: each app that runs on
+	// the site, a pinned one included.
+	var held []string
+	if *holdApps {
+		for _, name := range cfg.AppNames() {
+			if slices.Contains(render.AppSites(cfg)[name], *site) {
+				held = append(held, name)
+			}
+		}
 	}
 	// Every apply, --site included, classifies every site, so one site's
 	// files never disagree with another's about who is in the mesh: as a
@@ -657,8 +671,10 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 		// server from there first, and a failure refuses before anything
 		// changes. As a step of apply without --site the run tried every
 		// site's before its first step.
-		if err := checkMailForApply(r, cfg, secrets, []string{*site}, only, map[string]string{*site: *destination}); err != nil {
-			return err
+		if !*holdApps {
+			if err := checkMailForApply(r, cfg, secrets, []string{*site}, only, map[string]string{*site: *destination}); err != nil {
+				return err
+			}
 		}
 	}
 	r.Section(fmt.Sprintf("%s (%s)", *site, transport.Describe()))
@@ -721,14 +737,18 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	// Pocket ID gets its client ensured before it renders. Planned here,
 	// read only, so the dry run shows it and an app it must hold back is
 	// left out of the plan below.
-	clients, err := newClientStep(r, cfg, *site, *destination, *secretsPath, secrets, only)
-	if err != nil {
-		return err
+	// With --hold-apps no app starts, so none needs its client and Pocket
+	// ID is not asked.
+	var clients *clientStep
+	if !*holdApps {
+		if clients, err = newClientStep(r, cfg, *site, *destination, *secretsPath, secrets, only); err != nil {
+			return err
+		}
 	}
 	if clients != nil {
 		clients.confirm = func(what string) error { return confirmWord(ans, stdin, stdout, "create", what) }
 	}
-	options := append([]apply.Option{apply.Overwrite(overwrite...), apply.Recreate(recreate...), apply.MinFree(needFree), apply.Only(only...)}, pendingOptions(sites)...)
+	options := append([]apply.Option{apply.Overwrite(overwrite...), apply.Recreate(recreate...), apply.MinFree(needFree), apply.Only(only...), apply.Except(held...)}, pendingOptions(sites)...)
 	// An app this site shares with others stays on the build they run,
 	// unless the apply plans them all: as a step of apply without --site it
 	// does, and every site resolves through the run's one cache, so none is
