@@ -6170,8 +6170,9 @@ pending or down (<names>)` and exits 0, since every step it could take ran.
 While a joined site is down, a site joining through `site add` waits too, with
 the line `site add <site>: waits until every joined site answers`, and the run
 ends degraded. `--require-all` makes a degraded run, or its dry run, exit 1, for
-automation that must not pass on one. `doctor` reports a site that does not answer as a `FAIL` in its Reach
-row, with the same account of what the deployment is without.
+automation that must not pass on one. `doctor` reports a pending or down site
+as a `WARN` in its Reach row, a `FAIL` on a gateway, with the same account of
+what the deployment is without.
 
 **The declaration stays the only record.** The configuration store keeps
 `paisans-stack.yaml` as written; the effective topology is derived on every run
@@ -9281,7 +9282,12 @@ contradicts the gate, and changing it would change policy, so it is left for
 the operator. A file the edit leaves unloadable is restored.
 
 A site that does not answer is itself a finding, never a crash: every other
-check runs with the sites that did. Nothing more is asked of that site, since
+check runs with the sites that did. Whether it is pending, its host not yet
+having admitted the deployment, or down, having joined and gone quiet, is
+read from the deployment, never from the site, as `apply` reads it (see *A
+deployment with sites missing*), and either is a `WARN`, since the deployment
+runs on the sites it has; a gateway is a `FAIL`, since `apply` refuses to run
+without one. Nothing more is asked of that site, since
 a read over a connection that already failed only fails again, and the checks
 not made because of it are named once, on its line (`Not checked because of
 this: mesh, containers, clocks on home-b.`), rather than each failing in turn,
@@ -9295,7 +9301,8 @@ The checks run at once, as many as are ready, and each prints whole, naming
 its site, as it ends, so an operator in an outage reads the first answer while
 the slow ones still run, and a deployment of several sites is read in the time
 of its slowest site rather than the sum of them. A check starts only once the
-checks it needs have answered: everything on a site needs its reach, etcd
+checks it needs have answered: everything on a site needs its reach and then its admission record,
+everything that runs `docker` there needs the site's own Docker to answer, etcd
 needs a member that answered, and the containers and Pocket ID checks wait for
 Patroni's, whose verdict their advice uses. So a cause always prints before
 what it causes. A site runs at most eight commands at once, under the ten
@@ -9306,12 +9313,31 @@ listed once more at the end, under `failed, deepest first:`, in the order
 below, because in an interleaved run the first failure on screen is the first
 to end, not the first to fix.
 
+A pending site skips the rest of its checks, and a Docker daemon that does not
+answer skips every check that runs `docker` there. The checks that read across
+sites (etcd, Patroni's `/sync` and logs, Pocket ID's instances) ask only sites
+whose admission passed and that the run's classification placed neither pending
+nor down; each site they did not ask is listed with `not asked: its admission
+did not pass (see admission)` or `not asked: the run's classification found it
+pending or down, as apply would`. The classification is made once, the first
+time a site does not answer or its record does not cover it. A site that
+answers and is covered, but whose every route into the mesh is through a
+pending site, keeps its own checks; only the checks across sites leave it out.
+Warnings alone, a pending or down data site among them, leave the exit status
+at 0.
+
 The checks, from the bottom of the stack up, so that the first `FAIL` of the
 closing list is usually the cause of those after it:
 
 | Check | How | FAIL when |
 |---|---|---|
-| Reach | `true` over ssh, on every site asked | the site does not answer. The finding says what the deployment is without while it is gone: the gateway, an etcd vote, a Patroni member, a Garage node, its copy of each clustered app, the apps pinned to it |
+| Reach | `true` over ssh, on every site asked | the site does not answer and is neither pending nor down, or it is the gateway. A pending or down site is a `WARN`, saying what the deployment is without while it is gone: the gateway, an etcd vote, a Patroni member, a Garage node, its copy of each clustered app, the apps pinned to it; a pending site with the `paisans host request` line, a down one with the `site remove --host-gone` line |
+| Admission | the admission record, `/etc/paisans/admitted.<token>.json`, read as the site's ssh user | the record cannot be read, is missing, differs from `paisans-stack.yaml` or lacks a grant the site's roles need, and the deployment has joined the site. When it has not, the site is pending: a `WARN` (a `FAIL` on the gateway) with the `host request` line, and nothing more is asked of the site |
+| User | `id -u`, `id -un`, `id -nG` and `id -G` | the user has uid 0, is in a group `host admit` refuses (`admitrules.PrivilegedGroups`), or is in a group of GID 0 under any name. Groups doctor cannot read are a `WARN` |
+| Docker | `docker version` and `docker info`'s security options, against the user's own socket | the daemon does not answer or is not rootless. When it does not answer, nothing that runs `docker` on the site is checked. An answer doctor cannot read is a `WARN` |
+| Docker engine | the version `docker version` read | older than 29.5 |
+| Linger | `loginctl show-user <user> --property=Linger`, and whether the drop-in `/etc/systemd/system/user@<uid>.service.d/paisans-mesh.conf` exists | linger is off: the user's Docker stops when the last login ends and does not start at boot. Or the drop-in is missing, so the user's manager is not ordered after the mesh. An answer doctor cannot read, the mesh-order line included, is a `WARN` |
+| Sudo rights | `LC_ALL=C sudo -n -l` | sudo lets the user run anything but the WireGuard helper as root, or does not let it run the helper. An answer doctor cannot read, such as a translated one, is a `WARN` |
 | Mesh | `ip -j link show dev psns-<token>`, then the overlap test of *Two deployments on one host never share a mesh*: `ip -j route show table all`, `ip -j addr`, `docker network inspect` and the user's `~/.config/docker/daemon.json`, on every site that answered | the interface is missing or down, or anything outside it overlaps `mesh.subnet`, named with the subnet. The advice is that the subnet is fixed once deployed and the other network moves |
 | etcd quorum | `etcdctl endpoint health -w json` in the etcd container of the first member that answers, naming every member of `etcd.members` by its mesh address | fewer than half the members plus one are healthy. One member down with quorum intact is a `WARN` |
 | etcd version | `curl` on the host to `http://127.0.0.1:2379/version`; skipped, and said so, where the host has no `curl` | the cluster version is `3.0.0` under a 3.5 server |
@@ -9321,6 +9347,7 @@ closing list is usually the cause of those after it:
 | Pocket ID | the same question `apply` asks after acting on a Pocket ID stack on more than one site, asked once | no site, or more than one, has an active instance |
 | Clocks | `date +%s.%N` on each site, against the workstation's clock taken on either side of the call, less half the round trip | never; more than 1 s off is a `WARN` |
 | Leftovers | the host check's inventory (*The host check: what is already on a host decides how much is touched*) on every site that answered, and the manifest; read as the deployment's user, and skipped when the inventory cannot be read. A file is judged against the manifest's own view, which names the sites that were pending when it was rendered, so a file rendered without a pending site is not a leftover | never. Anything of this deployment's the site no longer renders (a compose project by label and name, a manifest entry marked left over) is a `WARN`, with the note that `apply` does not remove it. On the gateway, each `*.caddy` in `/srv/paisans/<token>/caddy.d` is listed as `info`: foreign, and served by this deployment's Caddy. That directory is the only way anything foreign is served by it, since the Caddyfile is this deployment's and Caddy runs in the host's network namespace |
+| Self-check | from this workstation, `/.well-known/paisans/<token>` through the public address of each site that runs Paisans' Caddy (the gateway, and a monitor with `web_server.managed_by: paisans`), on 443 and on 80, with the check `apply` runs at the end of the gateway's step. It asks once and never waits for a certificate, and needs no ssh | the site answers as something else, or does not answer on 443 or 80, naming the port and URL: something else on the host holds the port, which the deployment's user cannot see. A site with no `public_address` or no hostname of its own is a `WARN`, not asked from outside; so is a pending site, which is not asked since `apply` has not deployed its Caddy, and a down site's failure (a `FAIL` on the gateway), which points at its reach |
 | Caddy certificates | the caddy container's log on every site that runs Paisans' Caddy, `docker compose logs caddy` from the container's start or the last hour, whichever is later, kept to Caddy's `tls.obtain` lines; for each hostname the site serves, the newest outcome | the newest outcome is a failure. Hostnames failing for one cause are one finding naming them all: the provider refusing the token from this server (Cloudflare's `9109`, with the address it judged), its lockout (`10502`), the certificate authority's rate limit with when to retry, or the error's own last clause. It reads no secret and calls no provider, so it runs for every provider |
 | DNS token | from each Caddy site, with the `ACME_DNS_TOKEN` in its `caddy.env`, read there as the site's ssh user and never sent anywhere; and from the workstation, with `external.acme_dns_token` from `--secrets` (`secrets.enc.yaml` beside the configuration by default), opened with the age key as `apply` opens it. Each asks the provider for the zone holding `community.domain`, then verifies the token | the provider refuses the token from that place, does not answer, sees no zone holding the domain, or reports the token not `active`. Secrets that cannot be opened, Eg: no age key on this workstation, skip the workstation's check and the records with the reason, and every other check runs |
 | DNS records | the plan `dns init` builds, which reads and never writes, from the workstation once its token check passed | a hostname of the deployment holds a record pointing somewhere else (a visitor is sent there; delete it at the provider by hand, since `dns init` never updates a record and `dns prune` keeps one whose name is still wanted), or holds none (`paisans dns init --execute` creates it). A record waiting for `gateway move` is `info`, and a weak advisory record a `WARN`, as `dns init` shows them |
@@ -9360,11 +9387,11 @@ running; see *A new deployment is applied witness first*.
 A container that failed with `cannot assign requested address` started before
 the mesh interface at boot: it publishes its port on the mesh address, which
 exists only once `wg-quick@psns-<token>` is up, and Docker does not retry a
-container whose network setup failed. The advice is `paisans host prepare
---site <site> --execute`, which orders Docker after `wg-quick@psns-<token>`
-from the next boot on, then `docker
-start <container>` on the host or `paisans apply --site <site> --recreate
-<stack> --execute`. A container Docker keeps restarting while its log says it
+container whose network setup failed. The advice is `docker start <container>`
+on the site as the deployment's user, or `paisans apply --site <site>
+--recreate <stack> --execute`, and, if it happens at every boot, the Linger
+row, which says whether the user's manager is ordered after the mesh; see
+*The user's Docker starts after the mesh interface*. A container Docker keeps restarting while its log says it
 cannot reach the database points at the Patroni finding when there is no
 primary: it comes back on its own once there is one. When there is a primary,
 it is not waiting on Patroni, and the advice is to check the site's HAProxy and

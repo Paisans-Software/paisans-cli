@@ -1196,10 +1196,13 @@ See *`failover test`: a switchover on purpose* in `README.md`.
 
 ### `paisans doctor`
 
-Reports what is stuck and how to recover: unreachable sites, etcd quorum and
+Reports what is stuck and how to recover: sites pending admission, down or
+unreachable, each site's admission record and rootless setup (the user's
+groups, its own Docker and Engine, linger, what sudo allows), etcd quorum and
 version, the Patroni leader and why a replica will not promote, containers
-that are down or unhealthy, the settings a gated app must enforce, Pocket ID's active
-instance, clocks, and what is left over.
+that are down or unhealthy, the settings a gated app must enforce, Pocket
+ID's active instance, clocks, what is left over, each Caddy site's answer from
+outside, and Caddy's certificates and the DNS token.
 
 * **Alone:** always, in an outage or after one.
 * **Flags:** `--site <name>` (repeatable; default every site), `--config`,
