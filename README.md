@@ -5236,7 +5236,10 @@ its lines from the list to keep it as the owner's, or disable it, remove
 Docker's network store under its data-root, reboot, and admit again. The
 data-root is read from `/etc/docker/daemon.json` written as `"data-root":
 "/absolute/path"` on one line; one admit cannot read may hold a network
-store, so the daemon is taken to have run. A
+store, so the daemon is taken to have run. containerd has run when its root
+directory is there, which it creates as it first starts: `/var/lib/containerd`,
+or the `root` `/etc/containerd/config.toml` sets on one line as `root =
+"/absolute/path"`. A
 daemon admit installed that never ran, enabled by its package and held
 while it installed, is disabled; its networks are read as none, since it
 never made any. A package an admit killed part way left on the list and on

@@ -334,3 +334,34 @@ func TestProbeReadsTheNetworkStoreAtTheDataRoot(t *testing.T) {
 		}
 	}
 }
+
+// containerd's root directory is read under the root config.toml sets
+// above its first table, as root = "/absolute/path" on one line, or at
+// containerd's default; a root set in another form is unreadable, and
+// counts as may have run.
+func TestProbeReadsContainerdsRoot(t *testing.T) {
+	toml := func(lines ...string) string {
+		out := "mkdir -p /etc/containerd && printf '%s\\n'"
+		for _, l := range lines {
+			out += " '" + l + "'"
+		}
+		return out + " > /etc/containerd/config.toml"
+	}
+	for _, c := range []struct {
+		name, setup string
+		ran         bool
+	}{
+		{"none", "true", false},
+		{"default", "mkdir -p /var/lib/containerd", true},
+		{"as shipped, never ran", toml(`disabled_plugins = ["cri"]`, `#root = "/var/lib/containerd"`), false},
+		{"as shipped, ran", toml(`disabled_plugins = ["cri"]`, `#root = "/var/lib/containerd"`) + " && mkdir -p /var/lib/containerd", true},
+		{"set, ran", toml(`version = 2`, `root = "/srv/containerd"`) + " && mkdir -p /srv/containerd", true},
+		{"set, default only", toml(`root="/srv/containerd" # moved`) + " && mkdir -p /var/lib/containerd", false},
+		{"in a table", toml(`[plugins.x]`, `  root = "/srv/x"`) + " && mkdir -p /srv/x", false},
+		{"single quotes", toml(`root = '"'"'/srv/containerd'"'"'`), true},
+	} {
+		if f := probeIn(t, c.setup, "paisans-f2a9", ""); f.Docker.ContainerdRan != c.ran {
+			t.Errorf("%s: ContainerdRan = %v", c.name, f.Docker.ContainerdRan)
+		}
+	}
+}

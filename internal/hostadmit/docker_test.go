@@ -398,6 +398,41 @@ func TestAnInstallDoesNotStopAContainerdThatRan(t *testing.T) {
 	}
 }
 
+// The owner keeps admit's containerd.io after evict, runs containers on
+// it, then stops it and leaves it enabled. Its root directory, which only
+// a containerd that has run leaves, says it ran, so the admit that
+// installs docker-ce again refuses it rather than disable it, which would
+// keep it and its containers from starting at the next boot. One whose
+// root is not there never ran, and is disabled with Docker's units.
+func TestAnInstallRefusesAStoppedContainerdThatRan(t *testing.T) {
+	kept := func(ran string) *fakeHost {
+		list := "package containerd.io\npackage docker-ce\n"
+		return newBlank().with("system-unit", "containerd.service enabled inactive").with("containerd-ran", ran).
+			answer("docker compose version", "compose absent\npkg containerd.io install ok installed\nkeyring present\narch amd64\n").
+			with("pkg", "containerd.io installed").
+			file("/etc/paisans/installed", list).withFile("/etc/paisans/installed", list, "644", 0)
+	}
+	for _, ran := range []string{"present", "unreadable"} {
+		plan, err := hostadmit.Build(kept(ran), input(t, "vm", hostadmit.Flags{}))
+		if err == nil {
+			t.Errorf("%s: admit plans:\n%s", ran, plan.Text())
+			continue
+		}
+		for _, want := range []string{"containerd.service", "have run", "remove the line package containerd.io", "Nothing was changed"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%s: the refusal does not say %q: %v", ran, want, err)
+			}
+		}
+	}
+	plan, err := hostadmit.Build(kept("absent"), input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatalf("never ran: %v", err)
+	}
+	if i := titled(plan, "disable the system Docker"); i < 0 || !strings.HasPrefix(plan.Steps[i].Command, "systemctl disable --now docker.socket docker.service containerd.service && ") {
+		t.Errorf("never ran: containerd.service is not disabled with Docker:\n%s", plan.Text())
+	}
+}
+
 // An admit killed while apt configured containerd.io leaves it
 // half-configured and claimed, docker-ce not yet unpacked, and
 // containerd.service enabled by its postinst or not yet, never started,

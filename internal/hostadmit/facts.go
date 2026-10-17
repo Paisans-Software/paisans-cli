@@ -134,6 +134,11 @@ type DockerFacts struct {
 	// read, which may hold a network store.
 	DataRoot       string
 	DataRootUnread bool
+	// ContainerdRan is containerd's root directory being there, which
+	// containerd creates as it first starts and no package ships, or a
+	// root in /etc/containerd/config.toml the probe cannot read, which may
+	// be: the system containerd may have run.
+	ContainerdRan bool
 }
 
 // defaultDataRoot is where the system Docker keeps its data with no
@@ -354,6 +359,8 @@ func parseFacts(out, user string) (Facts, error) {
 			case v != defaultDataRoot:
 				f.Docker.DataRootUnread = true
 			}
+		case "containerd-ran":
+			f.Docker.ContainerdRan = v != "absent"
 		case "docker-hold":
 			f.Docker.Held, f.Docker.HeldPolicy = v == "policy" || v == "leftover", v == "policy"
 		case "userns-restrict":

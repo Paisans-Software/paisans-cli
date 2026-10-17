@@ -235,17 +235,18 @@ func planSystemDocker(p *planner, s hostprep.Section, added hostprep.Installed) 
 	// installs, since its package's script may enable it as it installs
 	// again; it stays off either way. The rest are disabled only when no
 	// record says admit disabled them and they never ran: no unit active,
-	// and no network store, as an admit that stopped between its install
-	// and the disable leaves them. One that has run may be running the
-	// owner's containers by now, which disabling it would stop, so it is
-	// refused.
+	// no network store and no containerd root directory, as an admit that
+	// stopped between its install and the disable leaves them. One that
+	// has run may be running the owner's containers by now, or run them at
+	// the next boot, which disabling it would stop, so it is refused.
 	on := func(u string) bool { s := p.f.Docker.SystemUnits[u]; return s.Enabled || s.Active }
 	fresh := hostprep.SystemUnits(slices.DeleteFunc(slices.Clone(added.Packages), claimed))
 	earlier := slices.DeleteFunc(slices.Clone(units), func(u string) bool { return slices.Contains(fresh, u) })
 	again := slices.DeleteFunc(hostprep.SystemUnits(slices.DeleteFunc(slices.Clone(added.Packages), func(pkg string) bool { return !claimed(pkg) })), on)
 	running := slices.ContainsFunc(earlier, on)
 	ran := slices.ContainsFunc(earlier, func(u string) bool { return p.f.Docker.SystemUnits[u].Active }) ||
-		p.f.Docker.Ran() && slices.Contains(earlier, "docker.service")
+		p.f.Docker.Ran() && slices.Contains(earlier, "docker.service") ||
+		p.f.Docker.ContainerdRan && slices.Contains(earlier, "containerd.service")
 	disable := slices.DeleteFunc(slices.Clone(units), func(u string) bool { return !slices.Contains(fresh, u) && !slices.Contains(again, u) })
 	switch {
 	case recorded && running:
