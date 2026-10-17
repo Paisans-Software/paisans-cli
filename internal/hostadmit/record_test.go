@@ -14,22 +14,22 @@ import (
 const keysMarker = "paisans host admit: keys, read as the user"
 
 var recordCases = addCases(
-	goldenCase{name: "record-fresh", site: "vm", host: home},
-	goldenCase{name: "record-mode-restored", site: "vm", host: func() *fakeHost {
+	goldenCase{name: "record-fresh", focus: []string{"/etc/paisans", "admission record"}, site: "vm", host: home},
+	goldenCase{name: "record-mode-restored", focus: []string{"admission record"}, site: "vm", host: func() *fakeHost {
 		h := admittedHost(requestFor("vm"), hostadmit.Flags{})
 		return h.withFile("/etc/paisans/admitted.f2a9.json", h.files["/etc/paisans/admitted.f2a9.json"], "600", 0)
 	}},
 	goldenCase{name: "record-etc-paisans-link-refused", site: "vm", host: func() *fakeHost { return home().withDir("/etc/paisans", "lrwxrwxrwx", 0, 0) }},
-	goldenCase{name: "record-etc-paisans-private", site: "vm", host: func() *fakeHost {
+	goldenCase{name: "record-etc-paisans-private", focus: []string{"/etc/paisans"}, site: "vm", host: func() *fakeHost {
 		return admittedHost(requestFor("vm"), hostadmit.Flags{}).withDir("/etc/paisans", "drwx------", 0, 0)
 	}},
-	goldenCase{name: "record-etc-paisans-wrong-owner", site: "vm", host: func() *fakeHost {
+	goldenCase{name: "record-etc-paisans-wrong-owner", focus: []string{"/etc/paisans"}, site: "vm", host: func() *fakeHost {
 		// Root's, so the files below it are safe to read, but in another
 		// group: a directory another user owns is refused before any part
 		// plans, since everything below it is then unsafe.
 		return admittedHost(requestFor("vm"), hostadmit.Flags{}).withDir("/etc/paisans", "drwxr-xr-x", 0, 1000)
 	}},
-	goldenCase{name: "record-etc-paisans-setgid", site: "vm", host: func() *fakeHost {
+	goldenCase{name: "record-etc-paisans-setgid", focus: []string{"/etc/paisans"}, site: "vm", host: func() *fakeHost {
 		return admittedHost(requestFor("vm"), hostadmit.Flags{}).withDir("/etc/paisans", "drwxr-sr-x", 0, 0)
 	}},
 	goldenCase{name: "record-etc-paisans-acl-refused", site: "vm", host: func() *fakeHost {
@@ -42,7 +42,7 @@ var recordCases = addCases(
 		return home().file("/var/lib/paisans/registry.json", `{"version":1,"deployments":{`+"\n"+
 			`"0c0dc4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01":{"token":"0c0d","root":"/srv/paisans/0c0d","domain":"","site":"edge","claimed_at":"2026-10-01T09:00:00Z","interface":"psns-0c0d","listen_port":51899,"subnet":"10.50.0.0/24","address":"10.50.0.1","roles":"gateway"}`+"\n}}\n")
 	}},
-	goldenCase{name: "keys-some-present", site: "home-a", flags: gateway, host: func() *fakeHost {
+	goldenCase{name: "keys-some-present", focus: []string{"operators' keys"}, site: "home-a", flags: gateway, host: func() *fakeHost {
 		return home().answer(keysMarker, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA owner@laptop\npaisans-sidecar\n")
 	}},
 )

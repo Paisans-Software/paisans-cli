@@ -52,10 +52,10 @@ func withUnreadable(h *fakeHost) *fakeHost {
 }
 
 var sysctlCases = addCases(
-	goldenCase{name: "sysctl-endpoint-and-low-ports", site: "watch", flags: hostadmit.Flags{PublicPorts: true}, host: home},
-	goldenCase{name: "sysctl-no-endpoint", site: "vm", host: home},
-	goldenCase{name: "sysctl-forwarding-on-already", site: "watch", flags: hostadmit.Flags{PublicPorts: true}, host: func() *fakeHost { return home().with("ip-forward", "1") }},
-	goldenCase{name: "sysctl-shared-with-another", site: "vm", host: func() *fakeHost {
+	goldenCase{name: "sysctl-endpoint-and-low-ports", focus: []string{"sysctl"}, site: "watch", flags: hostadmit.Flags{PublicPorts: true}, host: home},
+	goldenCase{name: "sysctl-no-endpoint", focus: []string{"admission record"}, site: "vm", host: home},
+	goldenCase{name: "sysctl-forwarding-on-already", focus: []string{"sysctl"}, site: "watch", flags: hostadmit.Flags{PublicPorts: true}, host: func() *fakeHost { return home().with("ip-forward", "1") }},
+	goldenCase{name: "sysctl-shared-with-another", focus: []string{"admission record"}, site: "vm", host: func() *fakeHost {
 		return withOther(home(), true, true).with("port-start", "80").with("ip-forward", "1").
 			withFile("/etc/sysctl.d/60-paisans.conf", hostadmit.SysctlFile(true, true), "644", 0).
 			file("/etc/sysctl.d/60-paisans.conf", hostadmit.SysctlFile(true, true)).file("/etc/paisans/sysctl.before", beforeFile)

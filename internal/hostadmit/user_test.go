@@ -42,10 +42,10 @@ const (
 func admittedUser() *fakeHost { return admittedHost(requestFor("vm"), hostadmit.Flags{}) }
 
 var userCases = addCases(
-	goldenCase{name: "user-fresh", host: current, site: "vm"},
-	goldenCase{name: "user-existing-running", site: "vm", host: func() *fakeHost { return current().withUser() }},
+	goldenCase{name: "user-fresh", focus: []string{"create user", "linger", "manager", "delegate cgroups"}, host: current, site: "vm"},
+	goldenCase{name: "user-existing-running", focus: []string{"manager", "delegate cgroups"}, site: "vm", host: func() *fakeHost { return current().withUser() }},
 	goldenCase{name: "user-admitted-unchanged", site: "vm", host: admittedUser},
-	goldenCase{name: "user-not-paisans", site: "home-b", flags: hostadmit.Flags{Watchdog: true}, host: func() *fakeHost {
+	goldenCase{name: "user-not-paisans", focus: []string{"community", "delegate cgroups"}, site: "home-b", flags: hostadmit.Flags{Watchdog: true}, host: func() *fakeHost {
 		return current().with("passwd", "community:x:1002:1002::/home/community:/bin/bash").with("home", "dir 1002 /home/community").with("groups", "community").
 			with("group", "community").with("linger", "no").with("manager", "inactive").
 			add("subuid", "community:231072:65536").add("subgid", "community:231072:65536")

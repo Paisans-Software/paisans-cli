@@ -14,14 +14,14 @@ const portsMarker = "paisans host admit: who holds 80 and 443"
 var gateway = hostadmit.Flags{Watchdog: true, PublicPorts: true}
 
 var firewallCases = addCases(
-	goldenCase{name: "firewall-active-ufw", site: "vm", host: home},
-	goldenCase{name: "firewall-active-ufw-with-rules", site: "vm", host: func() *fakeHost {
+	goldenCase{name: "firewall-active-ufw", focus: []string{"allow"}, site: "vm", host: home},
+	goldenCase{name: "firewall-active-ufw-with-rules", focus: []string{"allow"}, site: "vm", host: func() *fakeHost {
 		return home().answer("ufw show added", "ufw present\nstatus active\nrule allow 22/tcp\n")
 	}},
 	goldenCase{name: "firewall-ufw-absent-refused", site: "vm", host: func() *fakeHost { return home().with("ufw", "absent").with("ufw-active", "no") }},
 	goldenCase{name: "firewall-ufw-inactive-refused", site: "vm", host: inactiveUFW(sshdOn22)},
 	goldenCase{name: "firewall-admitted", site: "home-a", flags: gateway, host: func() *fakeHost { return admittedHost(requestFor("home-a"), gateway) }},
-	goldenCase{name: "ports-free", site: "home-a", flags: gateway, host: home},
+	goldenCase{name: "ports-free", focus: []string{"allow"}, site: "home-a", flags: gateway, host: home},
 	goldenCase{name: "ports-process-refused", site: "home-a", flags: gateway, host: func() *fakeHost {
 		return home().answer(portsMarker, `listen LISTEN 0 511 0.0.0.0:443 0.0.0.0:* users:(("nginx",pid=901,fd=6)) ino:1 sk:1`+"\nend\n")
 	}},
@@ -39,8 +39,8 @@ var firewallCases = addCases(
 				"container shop-web-1\t0.0.0.0:443->80/tcp\tshop\n"+
 				"dnat table ip nat chain DOCKER: tcp dport 443 counter packets 0 bytes 0 dnat to 172.18.0.2:80\nend\n")
 	}},
-	goldenCase{name: "ports-own-caddy", site: "home-a", flags: gateway, host: ownCaddy},
-	goldenCase{name: "ports-elsewhere", site: "home-a", flags: gateway, host: func() *fakeHost {
+	goldenCase{name: "ports-own-caddy", focus: []string{"allow"}, site: "home-a", flags: gateway, host: ownCaddy},
+	goldenCase{name: "ports-elsewhere", focus: []string{"allow"}, site: "home-a", flags: gateway, host: func() *fakeHost {
 		return home().answer(portsMarker, "container shop-web-1\t0.0.0.0:8443->443/tcp\tshop\n"+
 			"dnat table ip nat chain DOCKER: iifname != \"docker0\" tcp dport 8443 counter packets 0 bytes 0 dnat to 172.17.0.2:443\n"+
 			"dnat table ip nat chain DOCKER: iifname != \"docker0\" tcp dport 8080 counter packets 0 bytes 0 dnat to 172.17.0.2:80\nend\n")

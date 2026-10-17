@@ -24,6 +24,23 @@ type goldenCase struct {
 	host  func() *fakeHost
 	site  string
 	flags hostadmit.Flags
+	// focus are substrings of the titles of the steps whose bodies the
+	// golden shows, the steps the case is about. A case in fullPlans has
+	// none, and neither does a refusal.
+	focus []string
+}
+
+// fullPlans are the goldens that show every step's body, each with why it
+// is one. Every other plan's golden is trimmed to its case's focus (see
+// trimmed), so a change to one step's body churns these and the cases
+// that focus on that step, and no others.
+var fullPlans = map[string]string{
+	"model-blank-witness":   "a blank Ubuntu 24.04 host, admitted as a witness: the whole install, with the WireGuard helper's script",
+	"helper-dialled":        "a gateway (home-a, public ports and the watchdog): its allow rules, sysctls and dialled helper",
+	"helper-no-listen-port": "a storage site that listens on no WireGuard port, so its helper and claim differ from the rest",
+	"docker-blank-jammy":    "a blank Ubuntu 22.04 host: the jammy apt repository and packages",
+	"firewall-enable-ufw":   "an inactive ufw that --enable-ufw turns on, with the fallback armed before it",
+	"datadir-given":         "a data directory and the watchdog on a site whose user is community, not paisans-<token>",
 }
 
 // allCases is every golden case of every task's file, for the checks that
@@ -73,9 +90,118 @@ func runGolden(t *testing.T, cases []goldenCase) {
 	t.Helper()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, _ := golden(t, c)
-			checkGoldenText(t, c.name, got)
+			checkGoldenText(t, c.name, goldenText(t, c))
 		})
+	}
+}
+
+// goldenText is what testdata/plans/<name>.txt holds for c: a refusal or
+// a plan in fullPlans in full, any other plan trimmed to c's focus.
+func goldenText(t *testing.T, c goldenCase) string {
+	t.Helper()
+	got, plan := golden(t, c)
+	switch {
+	case plan == nil:
+		if len(c.focus) > 0 {
+			t.Errorf("%s is refused, so its focus %q has no step to match: remove it", c.name, c.focus)
+		}
+		return got
+	case fullPlans[c.name] != "":
+		if len(c.focus) > 0 {
+			t.Errorf("%s is in fullPlans, which shows every step, so its focus %q does nothing: remove it", c.name, c.focus)
+		}
+		return got
+	}
+	return trimmed(t, c, got, plan)
+}
+
+// trimmed is text, plan's Text, with the header, every step's title line,
+// the whole of each step whose title holds one of c's focus substrings,
+// and every present, foreign and warning line. The titles pin which steps
+// run and in what order at a line each; a focused step's body pins what
+// the case is about. A focus that matches no title fails the test, so a
+// renamed step does not leave a case pinning nothing.
+func trimmed(t *testing.T, c goldenCase, text string, plan *hostadmit.Plan) string {
+	t.Helper()
+	focused := func(title string) bool {
+		return slices.ContainsFunc(c.focus, func(f string) bool { return strings.Contains(title, f) })
+	}
+	for _, f := range c.focus {
+		if !slices.ContainsFunc(plan.Steps, func(s hostadmit.Step) bool { return strings.Contains(s.Title, f) }) {
+			var titles []string
+			for _, s := range plan.Steps {
+				titles = append(titles, "  "+s.Title)
+			}
+			t.Errorf("%s: focus %q matches no step's title. Its steps are:\n%s", c.name, f, strings.Join(titles, "\n"))
+		}
+	}
+	// Text separates its header, each step and each present, foreign or
+	// warning line with a blank line, and indents every line within one,
+	// so a blank line is always a boundary.
+	blocks := strings.Split(strings.TrimSuffix(text, "\n"), "\n\n")
+	var b strings.Builder
+	b.WriteString(blocks[0])
+	titleOnly := false
+	for _, block := range blocks[1:] {
+		first, _, _ := strings.Cut(block, "\n")
+		if rest, ok := strings.CutPrefix(first, "step "); ok {
+			if _, title, _ := strings.Cut(rest, ": "); !focused(title) {
+				if titleOnly {
+					b.WriteString("\n")
+				} else {
+					b.WriteString("\n\n")
+				}
+				b.WriteString(first)
+				titleOnly = true
+				continue
+			}
+		} else if !strings.HasPrefix(first, "present: ") && !strings.HasPrefix(first, "foreign: ") && !strings.HasPrefix(first, "warning: ") {
+			t.Fatalf("%s: a block of the plan's text starts %q, which is no step, present, foreign or warning line", c.name, first)
+		}
+		b.WriteString("\n\n")
+		b.WriteString(block)
+		titleOnly = false
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// Trimming a plan to every one of its steps gives its text back, so what
+// a trimmed golden holds of a focused step is all of it.
+func TestTrimmedToEveryStepIsTheWholePlan(t *testing.T) {
+	c := goldenCase{name: "model-blank-witness", host: newBlank, site: "vm"}
+	text, plan := golden(t, c)
+	for _, s := range plan.Steps {
+		c.focus = append(c.focus, s.Title)
+	}
+	if got := trimmed(t, c, text, plan); got != text {
+		t.Errorf("trimmed to every step:\n%s", diff(text, got))
+	}
+}
+
+// Every name in fullPlans is a case's, and every plan a case draws with
+// steps is either in fullPlans or focused on some of them: a new case
+// chooses which steps it is about.
+func TestEveryPlanIsFullOrFocused(t *testing.T) {
+	names := map[string]bool{}
+	for _, c := range allCases {
+		names[c.name] = true
+		if fullPlans[c.name] != "" || len(c.focus) > 0 {
+			continue
+		}
+		if _, plan := golden(t, c); plan != nil && len(plan.Steps) > 0 {
+			t.Errorf("%s plans steps but has no focus: name the steps it is about, or add it to fullPlans", c.name)
+		}
+	}
+	for name := range fullPlans {
+		if !names[name] {
+			t.Errorf("fullPlans names %s, which is no case", name)
+		}
+	}
+	for name := range helperInFull {
+		if fullPlans[name] == "" {
+			t.Errorf("helperInFull names %s, which fullPlans does not", name)
+		}
 	}
 }
 

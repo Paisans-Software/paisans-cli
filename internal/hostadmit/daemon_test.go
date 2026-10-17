@@ -81,25 +81,25 @@ func communityHome() *fakeHost {
 }
 
 var daemonCases = addCases(
-	goldenCase{name: "bridge-loaded", site: "vm", host: func() *fakeHost { return home().with("br_netfilter", "loaded").add("bridge", "docker0") }},
-	goldenCase{name: "bridge-docker-only", site: "vm", host: func() *fakeHost { return home().add("bridge", "docker0").add("bridge", "br-3f2a1c9d8e7b") }},
+	goldenCase{name: "bridge-loaded", focus: []string{"br_netfilter"}, site: "vm", host: func() *fakeHost { return home().with("br_netfilter", "loaded").add("bridge", "docker0") }},
+	goldenCase{name: "bridge-docker-only", focus: []string{"br_netfilter"}, site: "vm", host: func() *fakeHost { return home().add("bridge", "docker0").add("bridge", "br-3f2a1c9d8e7b") }},
 	goldenCase{name: "bridge-libvirt-stopped", site: "vm", host: func() *fakeHost { return home().add("bridge", "virbr0").with("forward-policy", "DROP") }},
-	goldenCase{name: "bridge-libvirt-with-flag", site: "vm", flags: hostadmit.Flags{BridgeNetfilter: true}, host: func() *fakeHost {
+	goldenCase{name: "bridge-libvirt-with-flag", focus: []string{"br_netfilter", "admission record"}, site: "vm", flags: hostadmit.Flags{BridgeNetfilter: true}, host: func() *fakeHost {
 		return home().add("bridge", "virbr0").with("forward-policy", "DROP")
 	}},
 	goldenCase{name: "bridge-lookalike-stopped", site: "vm", host: func() *fakeHost { return home().add("bridge", "br-lan") }},
-	goldenCase{name: "bridge-nf-tables-absent", site: "vm", host: func() *fakeHost { return home().with("iptables-module", "nf_tables absent") }},
-	goldenCase{name: "bridge-ip-tables-absent", site: "vm", host: func() *fakeHost { return home().with("iptables-module", "ip_tables absent") }},
-	goldenCase{name: "datadir-none", site: "vm", host: home},
+	goldenCase{name: "bridge-nf-tables-absent", focus: []string{"nf_tables", "br_netfilter"}, site: "vm", host: func() *fakeHost { return home().with("iptables-module", "nf_tables absent") }},
+	goldenCase{name: "bridge-ip-tables-absent", focus: []string{"ip_tables", "br_netfilter"}, site: "vm", host: func() *fakeHost { return home().with("iptables-module", "ip_tables absent") }},
+	goldenCase{name: "datadir-none", focus: []string{"daemon.json"}, site: "vm", host: home},
 	goldenCase{name: "datadir-given", site: "home-b", flags: hostadmit.Flags{Watchdog: true, DataDir: "/srv/data"}, host: func() *fakeHost {
 		return communityHome().withDir("/srv/data", "drwxr-xr-x", 0, 0).withDir("/srv/data/paisans-f2a9", "absent", 0, 0).
 			with("data-path", "/srv/data").with("data-fs", "xfs").with("data-avail", "500000000000")
 	}},
-	goldenCase{name: "datadir-given-mode-fixed", site: "vm", flags: hostadmit.Flags{DataDir: "/srv/data"}, host: func() *fakeHost {
+	goldenCase{name: "datadir-given-mode-fixed", focus: []string{"/srv/data", "daemon.json", "admission record"}, site: "vm", flags: hostadmit.Flags{DataDir: "/srv/data"}, host: func() *fakeHost {
 		return home().withDir("/srv/data", "drwxr-xr-x", 0, 0).withDir("/srv/data/paisans-f2a9", "drwxr-xr-x", 1001, 1001).
 			with("data-path", "/srv/data").with("data-fs", "btrfs")
 	}},
-	goldenCase{name: "datadir-given-in-use", site: "vm", flags: hostadmit.Flags{DataDir: "/srv/data"}, host: func() *fakeHost {
+	goldenCase{name: "datadir-given-in-use", focus: []string{"daemon.json", "admission record"}, site: "vm", flags: hostadmit.Flags{DataDir: "/srv/data"}, host: func() *fakeHost {
 		h := daemonInstalled(home().withDir("/srv/data", "drwxr-xr-x", 0, 0).withDir("/srv/data/paisans-f2a9", "drwx--x---", 1001, 1001).
 			with("data-path", "/srv/data").with("data-fs", "xfs"))
 		return h.answer(userStateMarker, "daemon active\nunit present\ndaemon-json x\nroot /srv/data/paisans-f2a9\ncontainers 2\nimages 3\nvolumes 1\nend\n")
@@ -108,9 +108,9 @@ var daemonCases = addCases(
 		return home().withDir("/mnt/nas", "drwxr-xr-x", 0, 0).with("data-path", "/mnt/nas").with("data-fs", "nfs")
 	}},
 	goldenCase{name: "datadir-home-on-nfs-refused", site: "vm", host: func() *fakeHost { return home().with("data-fs", "nfs4") }},
-	goldenCase{name: "datadir-short-of-space", site: "home-b", flags: hostadmit.Flags{Watchdog: true}, host: func() *fakeHost { return communityHome().with("data-avail", "8000000000") }},
-	goldenCase{name: "datadir-storage-short-of-space", site: "store", host: func() *fakeHost { return home().with("data-avail", "8000000000") }},
-	goldenCase{name: "datadir-witness-short-of-space", site: "vm", host: func() *fakeHost { return home().with("data-avail", "4000000000") }},
+	goldenCase{name: "datadir-short-of-space", focus: []string{"daemon.json"}, site: "home-b", flags: hostadmit.Flags{Watchdog: true}, host: func() *fakeHost { return communityHome().with("data-avail", "8000000000") }},
+	goldenCase{name: "datadir-storage-short-of-space", focus: []string{"daemon.json"}, site: "store", host: func() *fakeHost { return home().with("data-avail", "8000000000") }},
+	goldenCase{name: "datadir-witness-short-of-space", focus: []string{"daemon.json"}, site: "vm", host: func() *fakeHost { return home().with("data-avail", "4000000000") }},
 	goldenCase{name: "datadir-parent-writable-refused", site: "vm", flags: hostadmit.Flags{DataDir: "/srv/data"}, host: func() *fakeHost {
 		return home().withDir("/srv/data", "drwxrwxrwt", 0, 0).with("data-path", "/srv/data")
 	}},
@@ -120,8 +120,8 @@ var daemonCases = addCases(
 	goldenCase{name: "datadir-child-another-users-refused", site: "vm", flags: hostadmit.Flags{DataDir: "/srv/data"}, host: func() *fakeHost {
 		return home().withDir("/srv/data", "drwxr-xr-x", 0, 0).withDir("/srv/data/paisans-f2a9", "drwx------", 1234, 1234).with("data-path", "/srv/data")
 	}},
-	goldenCase{name: "daemon-running-with-containers", site: "vm", host: func() *fakeHost { return running(home(), 3) }},
-	goldenCase{name: "daemon-running-idle", site: "vm", host: func() *fakeHost { return running(home(), 0) }},
+	goldenCase{name: "daemon-running-with-containers", focus: []string{"daemon.json"}, site: "vm", host: func() *fakeHost { return running(home(), 3) }},
+	goldenCase{name: "daemon-running-idle", focus: []string{"daemon.json", "Docker"}, site: "vm", host: func() *fakeHost { return running(home(), 0) }},
 	goldenCase{name: "daemon-installed-unchanged", site: "home-b", flags: dataSite, host: func() *fakeHost { return admittedHost(requestFor("home-b"), dataSite) }},
 )
 

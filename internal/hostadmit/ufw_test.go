@@ -39,7 +39,7 @@ var ufwCases = addCases(
 	goldenCase{name: "firewall-ufw-owner-deny-refused", site: "vm", host: inactiveUFW("rule deny in on eth0 to any port 22\nrule reject 22:23/tcp\n" + sshdOn22And2222)},
 	goldenCase{name: "firewall-enable-ufw-ipv6-off-refused", site: "vm", flags: enableUFW, host: inactiveUFW(strings.Replace(sshdOn22, "ipv6 yes", "ipv6 no", 1))},
 	goldenCase{name: "firewall-enable-ufw", site: "vm", flags: enableUFW, host: inactiveUFW(sshdOn22And2222)},
-	goldenCase{name: "firewall-enable-ufw-owner-allow", site: "vm", flags: enableUFW, host: func() *fakeHost {
+	goldenCase{name: "firewall-enable-ufw-owner-allow", focus: []string{"allow", "ufw"}, site: "vm", flags: enableUFW, host: func() *fakeHost {
 		return inactiveUFW("rule allow 22/tcp\n"+sshdOn22)().answer("ufw show added", "ufw present\nstatus inactive\nrule allow 22/tcp\n")
 	}},
 )

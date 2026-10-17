@@ -18,8 +18,8 @@ import (
 )
 
 var wireguardCases = addCases(
-	goldenCase{name: "wgdir-absent", site: "vm", host: home},
-	goldenCase{name: "wgdir-correct", site: "vm", host: func() *fakeHost { return home().withDir("/etc/wireguard", "drwx------", 0, 0) }},
+	goldenCase{name: "wgdir-absent", focus: []string{"/etc/wireguard"}, site: "vm", host: home},
+	goldenCase{name: "wgdir-correct", focus: []string{"WireGuard helper"}, site: "vm", host: func() *fakeHost { return home().withDir("/etc/wireguard", "drwx------", 0, 0) }},
 	goldenCase{name: "wgdir-group-writable-refused", site: "vm", host: func() *fakeHost { return home().withDir("/etc/wireguard", "drwxrwxr-x", 0, 1001) }},
 	goldenCase{name: "wgdir-other-owner-refused", site: "vm", host: func() *fakeHost { return home().withDir("/etc/wireguard", "drwx------", 1001, 0) }},
 	goldenCase{name: "wgdir-link-refused", site: "vm", host: func() *fakeHost { return home().withDir("/etc/wireguard", "lrwxrwxrwx", 0, 0) }},
@@ -27,16 +27,16 @@ var wireguardCases = addCases(
 	goldenCase{name: "wgdir-acl-refused", site: "vm", host: func() *fakeHost { return home().withDir("/etc/wireguard", "drwx------+", 0, 0) }},
 	goldenCase{name: "helper-dialled", site: "home-a", flags: hostadmit.Flags{Watchdog: true, PublicPorts: true}, host: home},
 	goldenCase{name: "helper-no-listen-port", site: "store", host: home},
-	goldenCase{name: "helper-changed", site: "vm", host: func() *fakeHost {
+	goldenCase{name: "helper-changed", focus: []string{"helper"}, site: "vm", host: func() *fakeHost {
 		return helperInstalled(home(), "vm").withFile(helperPath, "#!/bin/sh\nexec sh\n", "755", 0)
 	}},
-	goldenCase{name: "sudoers-changed", site: "vm", host: func() *fakeHost {
+	goldenCase{name: "sudoers-changed", focus: []string{"sudoers"}, site: "vm", host: func() *fakeHost {
 		return helperInstalled(home(), "vm").withFile("/etc/sudoers.d/paisans-f2a9", "paisans-f2a9 ALL=(ALL) NOPASSWD: ALL\n", "440", 0)
 	}},
 	goldenCase{name: "srv-root-owned-refused", site: "vm", host: func() *fakeHost {
 		return home().withDir("/srv/paisans", "drwxr-xr-x", 0, 0).withDir("/srv/paisans/f2a9", "drwxr-xr-x", 0, 0)
 	}},
-	goldenCase{name: "srv-mode-restored", site: "vm", host: func() *fakeHost {
+	goldenCase{name: "srv-mode-restored", focus: []string{"/srv/paisans"}, site: "vm", host: func() *fakeHost {
 		return home().withDir("/srv/paisans", "drwxr-xr-x", 0, 0).withDir("/srv/paisans/f2a9", "drwxrwsrwx", 1001, 0)
 	}},
 	goldenCase{name: "srv-acl-refused", site: "vm", host: func() *fakeHost {

@@ -29,27 +29,27 @@ func inContainer(image string) func() *fakeHost {
 }
 
 var webserverCases = addCases(
-	goldenCase{name: "webserver-caddy-host-tcp-admin", site: "status", host: func() *fakeHost {
+	goldenCase{name: "webserver-caddy-host-tcp-admin", focus: []string{"admission record"}, site: "status", host: func() *fakeHost {
 		return onHost("caddy")().answer("localhost:2019/config/", caddyAPI)
 	}},
-	goldenCase{name: "webserver-caddy-host-unix-admin", site: "status", host: func() *fakeHost {
+	goldenCase{name: "webserver-caddy-host-unix-admin", focus: []string{"admission record"}, site: "status", host: func() *fakeHost {
 		return onHost("caddy")().answer("ps -o args= -C caddy", "caddy run --config /etc/caddy/Caddyfile\n").
 			answer("readlink -e -- '/etc/caddy/Caddyfile'", "{\n\tadmin unix//run/caddy-admin.sock\n}\nexample.org {\n}\n")
 	}},
-	goldenCase{name: "webserver-caddy-container-tcp-admin", site: "status", host: func() *fakeHost {
+	goldenCase{name: "webserver-caddy-container-tcp-admin", focus: []string{"admission record"}, site: "status", host: func() *fakeHost {
 		return inContainer("caddy:2")().answer("localhost:2019/config/", caddyAPI)
 	}},
-	goldenCase{name: "webserver-caddy-container-internal-admin", site: "status", host: inContainer("caddy:2")},
-	goldenCase{name: "webserver-nginx-host", site: "status", host: func() *fakeHost {
+	goldenCase{name: "webserver-caddy-container-internal-admin", focus: []string{"admission record"}, site: "status", host: inContainer("caddy:2")},
+	goldenCase{name: "webserver-nginx-host", focus: []string{"admission record"}, site: "status", host: func() *fakeHost {
 		return onHost("nginx")().answer("nginx -T", "# configuration file /etc/nginx/nginx.conf:\nserver {\n  server_name status.example.org;\n  ssl_certificate /etc/letsencrypt/live/status.example.org/fullchain.pem;\n  ssl_certificate_key /etc/letsencrypt/live/status.example.org/privkey.pem;\n}\n")
 	}},
-	goldenCase{name: "webserver-nginx-container", site: "status", host: func() *fakeHost {
+	goldenCase{name: "webserver-nginx-container", focus: []string{"admission record"}, site: "status", host: func() *fakeHost {
 		return inContainer("nginx:1.27")().answer("nginx -T", "# configuration file /etc/nginx/nginx.conf:\n")
 	}},
-	goldenCase{name: "webserver-apache-host", site: "status", host: func() *fakeHost {
+	goldenCase{name: "webserver-apache-host", focus: []string{"admission record"}, site: "status", host: func() *fakeHost {
 		return onHost("apache2")().answer("grep -rhiE", "SSLCertificateFile /etc/ssl/certs/status.pem\nSSLCertificateKeyFile /etc/ssl/private/status.key\nServerName status.example.org\n")
 	}},
-	goldenCase{name: "webserver-apache-container", site: "status", host: inContainer("httpd:2.4")},
+	goldenCase{name: "webserver-apache-container", focus: []string{"admission record"}, site: "status", host: inContainer("httpd:2.4")},
 )
 
 func TestWebServerPlans(t *testing.T) { runGolden(t, webserverCases) }
