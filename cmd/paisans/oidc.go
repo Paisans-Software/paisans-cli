@@ -107,7 +107,7 @@ func runOIDCClientCreate(args []string) error {
 	// Refused before anything is planned, because the secret is written
 	// before Pocket ID is sent it and a run that cannot write must not start.
 	if secrets.Encrypted && len(recipients) == 0 {
-		return fmt.Errorf("oidc client create: %s is encrypted, but no %s beside it names a recipient, so the client secret could not be written back encrypted. Nothing was changed", *secretsPath, config.SOPSConfigName)
+		return config.NoRecipientProblem(*secretsPath)
 	}
 	key, _ := secrets.Apps[idp]["static_api_key"].(string)
 	if key == "" {
@@ -155,10 +155,10 @@ func runOIDCClientCreate(args []string) error {
 }
 
 // warnPlaintext is the warning for secrets written to a file that no age
-// recipient beside it covers. The file is written regardless, since fixtures
-// are plain, so it is a warning and not a refusal.
+// recipient beside it covers. Only the explicit test mode writes one
+// (config.PlaintextSecretsVariable); anywhere else the write is refused.
 func warnPlaintext(r ui.Reporter, path string) {
-	r.Warn(path+" was written in plaintext", fmt.Sprintf("%s is PLAINTEXT, because no %s beside it names an age recipient. A real deployment encrypts this file. Add one and re-encrypt before committing anything.", path, config.SOPSConfigName))
+	r.Warn(path+" was written in plaintext", fmt.Sprintf("%s is PLAINTEXT, because %s=1 is set and no %s beside it names an age recipient. That mode is for tests and fixtures; a real deployment encrypts this file.", path, config.PlaintextSecretsVariable, config.SOPSConfigName))
 }
 
 // secretsRecorder writes a client's credentials into the secrets file,

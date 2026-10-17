@@ -3025,6 +3025,29 @@ secrets.enc.yaml`. With a key from a variable, `init` cannot know whether
 anything else holds it, and warns only that the file is encrypted to that one
 key; the remedy is the same.
 
+**`secrets.enc.yaml` exists only encrypted.** Every command that writes it
+encrypts it to the recipients in `.sops.yaml`, and with `.sops.yaml` missing or
+naming no recipient it refuses before it changes anything. For a file that is
+already encrypted, the refusal names the age recipients its sops metadata
+records. When `.sops.yaml` is missing, it also prints the command that writes
+it back with them, which refuses to replace a `.sops.yaml` that exists:
+
+```
+sh -c "set -C; printf 'creation_rules:\n  - age: age1…\n' > /path/to/.sops.yaml"
+```
+
+When `.sops.yaml` is there but names no recipient Paisans reads (the `age`
+field of each entry under `creation_rules`), it prints no command, so nothing
+pasted can replace your rules. A recipient in the file's metadata that is not
+an age public key is never printed, and then no command is either.
+
+A plaintext `secrets.enc.yaml` is refused wherever a deployment reads it:
+`init`, `apply`, `validate`, publishing a version, pulling or recovering one,
+and every other command that opens the secrets. `doctor` reports it, and a
+missing `.sops.yaml`, as a failed check and runs the rest. The refusal names
+the fix, `sops --encrypt --in-place secrets.enc.yaml` with your age public key
+in `.sops.yaml`.
+
 Every later command finds the key on its own: with no `SOPS_AGE_*` variable
 set, paisans reads the keystore item for the deployment id and decrypts with
 it in memory. When the item is missing, the keystore cannot be read, or the

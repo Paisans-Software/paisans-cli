@@ -373,7 +373,8 @@ func TestInitReportsStepsAndWhatIsOwed(t *testing.T) {
 	}
 }
 
-// A plaintext secrets file that already exists stays plaintext, and says so.
+// In the explicit test mode a plaintext secrets file that already exists
+// stays plaintext, and says so.
 func TestInitWarnsAboutAPlaintextFile(t *testing.T) {
 	path, rec := initWorld(t, nil, fakeSites(), nil)
 	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "secrets.enc.yaml"), []byte("version: 1\n"), 0o600); err != nil {

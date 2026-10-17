@@ -71,7 +71,7 @@ func runStorageRotateKey(args []string) error {
 		return err
 	}
 	if secrets.Encrypted && len(recipients) == 0 {
-		return fmt.Errorf("storage rotate-key: %s is encrypted, but no %s beside it names a recipient, so writing the new key into it would leave it in plaintext. Nothing was changed", *secretsPath, config.SOPSConfigName)
+		return config.NoRecipientProblem(*secretsPath)
 	}
 
 	transports := map[string]apply.Transport{}

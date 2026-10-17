@@ -40,7 +40,7 @@ deleting DNS records, making an administrator) or a read (`doctor`,
 |------|---------|----------|---------|
 | `-v`, `--verbose` | off | every command | the reasons, values, request bodies and command output behind each step; with it, a failure also shows the underlying error |
 | `--config <path>` | `paisans-stack.yaml` | every command except `site deployments` | the deployment declaration |
-| `--secrets <path>` | `secrets.enc.yaml` beside the config | every command that reads secrets | the sops encrypted secrets file |
+| `--secrets <path>` | `secrets.enc.yaml` beside the config | every command that reads secrets | the sops encrypted secrets file. A plaintext one is refused (see *`secrets.enc.yaml` exists only encrypted* in `README.md`) |
 | `--execute` | off | every command that changes something, as each entry says | without it, the command plans and prints and changes nothing |
 | `--yes` | off | every command that asks for a confirmation, as each entry says | answers each confirmation as typing it would; needs `PAISANS_ALLOW_YES=1` (see *`--yes` answers confirmations* below) |
 | `--sudo` | on | `site deployments` | run its remote commands through sudo, since the registry is root's; `--sudo=false` skips it (see *A sudo that wants a password is asked for once, on a terminal* in `README.md`). Every other command runs as the site's ssh user, without sudo |
@@ -139,6 +139,10 @@ paisans validate --offline   # the file alone; no site is reached
   through it the app's mail server. Changes none. A site that cannot be
   reached, or a secrets file that cannot be read, skips the mail check with a
   warning, so it works away from the hosts.
+* **Secrets:** with `--offline` too, refuses a `secrets.enc.yaml` that is
+  plaintext, or encrypted with no recipient in the `.sops.yaml` beside it,
+  naming the fix. It reads the file without decrypting it, so it needs no age
+  key.
 * **Images:** an `infra` override is refused under a key the infrastructure
   stack does not run (`infra.images` takes etcd, haproxy, garage and
   heartbeat), for a Postgres major the toolkit does not run, with a floating
@@ -207,6 +211,11 @@ under `--verbose`.
   it writes the variable's public key to `.sops.yaml` and names the variable
   on the `age key` step. Variables that hold no key or several are refused,
   and so is `--age-private-key-file` beside one.
+* **Secrets:** before it reads a host or writes anything, refuses a secrets
+  file that is plaintext, or encrypted with no recipient in the `.sops.yaml`
+  beside it. The second refusal names the recipients the file is encrypted to
+  and the command that writes `.sops.yaml` back with them. The secrets are
+  written only encrypted.
 * **Hosts:** checks each site's admission, one line a site: ✓ admitted, ○
   not admitted yet, ✗ not answering, then lists every site not admitted and
   why, before it asks or settles anything. It reads each admitted site, as
@@ -494,7 +503,8 @@ paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty
   site the operator cannot log in to holds arrives through one they can.
   `publish` signs with the key in `.paisans/signing-key`, or the one ssh-agent
   key that belongs to an operator the base lists, and pushes to every site it
-  reaches. It refuses when its base is not the sites' newest version (including
+  reaches. It refuses a plaintext `secrets.enc.yaml`, or an encrypted one with
+  no recipient in `.sops.yaml`, before it reaches a site, and when its base is not the sites' newest version (including
   a workstation with no base while the sites hold versions: run `config pull`
   first), when the sites hold a fork and `--merge` is not given, and when no
   site answers. `pull` moves files with no local edits to the head; over local
@@ -510,7 +520,9 @@ paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty
   has a `paisans secrets rotate` under way (`rotations` or `rotate_remaining`),
   naming the paths, until `secrets rotate` finishes it. `recover` refuses to
   write over files, and with a fork writes each head to
-  `.paisans/incoming/<sha>/` and refuses to choose.
+  `.paisans/incoming/<sha>/` and refuses to choose. `pull` and `recover`
+  refuse a version whose `secrets.enc.yaml` is plaintext before they write
+  any of its files or sign anything.
 * **Words typed at a terminal:** `partial` when fewer than a majority of sites
   answered directly (no more than half), for `apply --execute`, `config pull`,
   `config recover`, `config publish` of a first version and `operator register`;
@@ -1358,6 +1370,10 @@ outside, and Caddy's certificates and the DNS token.
 * **Flags:** `--site <name>` (repeatable; default every site), `--config`,
   `--secrets` (default `secrets.enc.yaml` beside the config), `--execute`.
 * **Hosts:** every site, or the named ones, read only.
+* **Secrets:** a `secrets.enc.yaml` that is plaintext, or encrypted with no
+  recipient in the `.sops.yaml` beside it, is a FAIL under `secrets` naming
+  the fix, and every other check still runs. A plaintext file does not open,
+  so the checks that need the secrets skip.
 * **`--execute`:** removes from `paisans-stack.yaml` each `config:` key that only
   repeats a value gating renders, before loading it, and records the `ssh.user`
   of a site it logs in to as the deployment's own user. It changes no host; the
