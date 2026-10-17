@@ -684,3 +684,29 @@ func TestExecuteStopsOnAPortBlockedSinceThePlan(t *testing.T) {
 		t.Error("ufw was enabled over a port the owner never approved blocking")
 	}
 }
+
+// A UDP socket in the host's ephemeral port range is a client's, or a
+// service's that picks its port as it starts: no allow can be added for
+// it ahead, so it is listed under one key, with no line, and the refusal
+// says the flag is the way through.
+func TestEnableUFWListsEphemeralUDPWithoutALine(t *testing.T) {
+	b := blocks(t, "portrange 32768\t60999\n"+
+		`listen udp UNCONN 0 0 0.0.0.0:41234 0.0.0.0:* users:(("avahi-daemon",pid=612,fd=14)) uid:107`+"\n"+
+		`listen udp UNCONN 0 0 0.0.0.0:51000 0.0.0.0:* users:(("rpc.statd",pid=700,fd=8))`+"\n"+sshdOn22)
+	if b == nil {
+		t.Fatal("admit plans to enable ufw over UDP sockets in the ephemeral range")
+	}
+	text := b.Error()
+	for _, want := range []string{"UDP in the ephemeral range 32768:60999: avahi-daemon (pid 612, uid 107) listens on 0.0.0.0:41234/udp; rpc.statd", "cannot be allowed ahead", "fixed port", "--enable-ufw-block-listed"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the refusal does not say %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "sudo ufw allow") {
+		t.Errorf("an allow line for an ephemeral port:\n%s", text)
+	}
+	// A UDP port below the range is listed with its line.
+	if b := blocks(t, "portrange 32768\t60999\n"+`listen udp UNCONN 0 0 0.0.0.0:5355 0.0.0.0:* users:(("systemd-resolve",pid=600,fd=14)) uid:991`+"\n"+sshdOn22); b == nil || !strings.Contains(b.Error(), "sudo ufw allow 5355/udp") {
+		t.Errorf("LLMNR: %v", b)
+	}
+}

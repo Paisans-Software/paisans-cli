@@ -75,6 +75,7 @@ for fam in 4 6; do
   if [ -e "$f" ]; then if out=$(cat "$f" 2>/dev/null); then printf '%s\n' "$out" | sed -n "s/^### tuple ### /tuple$fam /p"; else echo "unread rules ($f)"; fi; fi
 done
 ` + ipv6Read("/etc/default/ufw", "/etc/ufw/ufw.conf") + natProbe + `
+echo "portrange $(cat /proc/sys/net/ipv4/ip_local_port_range 2>/dev/null)"
 if command -v systemd-run >/dev/null 2>&1; then echo 'systemd-run present'; else echo 'systemd-run absent'; fi
 echo "fallback $(systemctl show -p LoadState --value ` + FallbackUnit + `.timer 2>/dev/null) $(systemctl show -p LoadState --value ` + FallbackUnit + `.service 2>/dev/null)"
 echo end`
@@ -106,6 +107,8 @@ type ufwBefore struct {
 	// chains in the filter table's FORWARD.
 	dockerBackend string
 	dockerChains  bool
+	// ephemeral is the host's ip_local_port_range, zero when unread.
+	ephemeral span
 	// kept and blocked are exposure's: what stays reachable once ufw is
 	// on, and what enabling it blocks.
 	kept    []kept
@@ -165,6 +168,12 @@ func readUFWBefore(p *planner) (ufwBefore, error) {
 			}
 		case "docker-chains":
 			b.dockerChains = true
+		case "portrange":
+			if f := strings.Fields(rest); len(f) == 2 {
+				if r, ok := spanOf(f[0], f[1]); ok {
+					b.ephemeral = r
+				}
+			}
 		case "socket":
 			if f := strings.Fields(rest); len(f) == 2 && f[1] == "(Stream)" {
 				add(f[0])
@@ -396,6 +405,9 @@ type Blocked struct {
 	// NAT is a port received through NAT, which ufw decides as routed
 	// traffic, after translation.
 	NAT bool
+	// Ephemeral is the UDP sockets in the host's ephemeral port range,
+	// which no allow can be added for ahead.
+	Ephemeral bool
 }
 
 // UFWBlocksError is admit's refusal, with --enable-ufw and without
@@ -435,7 +447,7 @@ func BlockedList(blocked []Blocked) string {
 func BlockedHelp(blocked []Blocked) string {
 	var b strings.Builder
 	var allows []string
-	var v6, unread, nat bool
+	var v6, unread, nat, ephemeral bool
 	for _, x := range blocked {
 		for _, a := range x.Allow {
 			allows = append(allows, "  "+a+"\n")
@@ -443,6 +455,7 @@ func BlockedHelp(blocked []Blocked) string {
 		v6 = v6 || x.v6()
 		unread = unread || x.Key == x.What
 		nat = nat || x.NAT
+		ephemeral = ephemeral || x.Ephemeral
 	}
 	if len(allows) > 0 {
 		b.WriteString("For each port whose service must stay reachable, run its line before ufw is enabled, then run admit again:\n" + strings.Join(allows, ""))
@@ -455,6 +468,9 @@ func BlockedHelp(blocked []Blocked) string {
 	}
 	if nat {
 		b.WriteString("A port received through NAT reaches its service as routed traffic, which ufw decides after translation, by its route rules, and not by `ufw allow`: the line given for one allows the address and port it is translated to, and one with no line goes to an address admit cannot read. Check each from off this host once ufw is on.\n")
+	}
+	if ephemeral {
+		b.WriteString("A UDP port in the ephemeral range cannot be allowed ahead: it is a client's socket, whose replies ufw lets in whatever its rules, or a service that picks its port as it starts, which needs a fixed port set in its own configuration before ufw can allow it. If those may be blocked, --enable-ufw-block-listed is the way through.\n")
 	}
 	b.WriteString("A service meant to stay unreachable from off this host, such as a database on a public address, needs nothing.")
 	return b.String()
@@ -654,6 +670,7 @@ func (p *planner) exposure(b ufwBefore) ([]kept, []Blocked) {
 	mesh := p.d.Interface()
 	var keep []kept
 	var blocked []Blocked
+	var ephemeral []string
 	for _, a := range all {
 		via := strings.Join(a.via, " and ")
 		if a.nat {
@@ -688,14 +705,21 @@ func (p *planner) exposure(b ufwBefore) ([]kept, []Blocked) {
 				why = "allowed by your rule `ufw " + t.String() + "`"
 			}
 		}
-		if why != "" {
+		switch {
+		case why != "":
 			keep = append(keep, kept{key: a.key(), via: via, why: why})
-		} else {
+		case a.proto == "udp" && b.ephemeral.lo > 0 && b.ephemeral.lo <= a.lo && a.hi <= b.ephemeral.hi:
+			ephemeral = append(ephemeral, a.via...)
+			continue
+		default:
 			blocked = append(blocked, Blocked{Key: a.key(), What: strings.Join(a.via, "; "), Allow: []string{"sudo ufw allow " + a.key()}})
 		}
 		if !ownPort && len(a.v6) > 0 && b.ipv6 != "yes" {
 			blocked = append(blocked, Blocked{Key: a.key() + " over IPv6", What: strings.Join(a.v6, "; ")})
 		}
+	}
+	if len(ephemeral) > 0 {
+		blocked = append(blocked, Blocked{Key: fmt.Sprintf("UDP in the ephemeral range %d:%d", b.ephemeral.lo, b.ephemeral.hi), What: strings.Join(ephemeral, "; "), Ephemeral: true})
 	}
 	return keep, append(blocked, unread...)
 }
