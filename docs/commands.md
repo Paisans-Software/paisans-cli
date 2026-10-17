@@ -125,6 +125,9 @@ the questions it came from again, and nothing is written until the file is
 refused nothing and the operator says yes. It then names `secrets set`,
 `init` and `apply`.
 
+Each machine's SSH user may be left empty, which is the deployment's own
+user, `paisans-<token>`, that the host's owner's `host admit` makes.
+
 * **Alone:** once, before anything else, for a deployment that has no
   `paisans-stack.yaml` yet. The whole apply never runs it.
 * **Flags:** `--config` (the file to write; default `paisans-stack.yaml`).
@@ -613,8 +616,9 @@ paisans host prepare --all --execute          # every site, one at a time
   bare repository `config/<token>.git`, the peers file, `bin/config-sync.sh`,
   and the user's units `paisans-<token>-config-daemon`, `-config-sync` and
   `-config-sync.timer`, enabled under linger. The daemon binds the mesh
-  address, so on a host whose mesh `apply` has not brought up it restarts every
-  ten seconds until it can. Every site's `host prepare` is also what makes the
+  address, so on a host whose mesh `apply` has not brought up the unit's start
+  waits for that address, however long it takes, and the daemon binds it once
+  it is there; a daemon that stops later is restarted after ten seconds. Every site's `host prepare` is also what makes the
   store `apply` publishes to, so `apply` refuses a version no site could take
   with this command named.
 
@@ -649,7 +653,9 @@ See *`--id` cleans a host when `paisans-stack.yaml` is lost* in `README.md`.
 
 Writes the request a host's owner admits one site from, to stdout, and its
 digest to stderr as sixteen characters in four groups, `xxxx-xxxx-xxxx-xxxx`.
-The owner compares that digest with the one the file shows them.
+The owner compares that digest with the one `host admit` shows them for the
+file; tell it to them over another channel than the one that carries the
+file, such as a call, or the comparison proves nothing.
 
 ```sh
 paisans host request --site home-a > home-a.admit   # the digest is on stderr
@@ -688,6 +694,8 @@ paisans host admit --site home-a --ssh owner@home-a.example.org --execute   # fr
 
 * **Alone:** always, by the host's owner, and never by an agent unattended:
   it is the owner's root step on their own machine.
+  [guides/host-owners.md](guides/host-owners.md) is the owner's whole path,
+  from installing the binary to evicting.
 * **Flags:**
   * from a request: `--request <file>`, on the host, as root;
   * from the configuration: `--site <name>` from a workstation, with
@@ -727,7 +735,9 @@ paisans host admit --site home-a --ssh owner@home-a.example.org --execute   # fr
   before making any change, and prints the commands that enable ufw by hand,
   numbered, every `sudo ufw allow <port>/tcp` before `sudo ufw enable`. The
   refusal for your deny rules prints the same commands after them; with no
-  sshd port read, or for `IPV6`, it prints no enable command at all.
+  sshd port read, or for `IPV6`, it prints no enable command at all. If SSH
+  stops answering, see *If SSH stops answering after admit enables ufw* in
+  [guides/host-owners.md](guides/host-owners.md).
 * **Grants:** at a terminal, admit asks for each
   grant the site's roles need and the flags leave out, saying what it gives;
   elsewhere a data site without `--watchdog`, or a gateway or Caddy monitor
@@ -737,7 +747,9 @@ paisans host admit --site home-a --ssh owner@home-a.example.org --execute   # fr
   anything else holds either of them, over TCP or UDP.
 * **`--execute`:** makes the changes the plan shows, which it always prints in
   full. With `--request` it first asks for the request's digest at a
-  terminal. With `--site` it ends by logging in as the deployment's user with
+  terminal, which the owner has from an operator over another channel than
+  the one that carried the file. With `--site` it ends by logging in as the
+  deployment's user with
   the operator's own key, and writes `ssh.user` back into the configuration
   when the declaration leaves it out.
 * **What it changes:** Docker from Docker's repository where absent (an Engine
@@ -786,7 +798,9 @@ paisans host evict --site home-a --ssh owner@home-a.example.org --execute
 ```
 
 * **Alone:** always, by the host's owner, and never by an agent unattended:
-  it deletes the deployment's user and data as root.
+  it deletes the deployment's user and data as root. `site remove` ends by
+  printing this command for them; see *Evicting* and *What stays after
+  evicting* in [guides/host-owners.md](guides/host-owners.md).
 * **Flags:** `--request <file>`, or `--deployment <id> --user <name>` (both on
   the host, as root), or `--site <name>` with `--config`, and `--ssh` as
   your login alone, for the site's declared ssh host and port, or as
@@ -1184,14 +1198,17 @@ See *`failover test`: a switchover on purpose* in `README.md`.
 
 ### `paisans doctor`
 
-Reports what is stuck and how to recover: unreachable sites, etcd quorum and
+Reports what is stuck and how to recover: sites pending admission, down or
+unreachable, each site's admission record and rootless setup (the user's
+groups, its own Docker and Engine, linger, what sudo allows), etcd quorum and
 version, the Patroni leader and why a replica will not promote, containers
-that are down or unhealthy, the settings a gated app must enforce, Pocket ID's active
-instance, clocks, and what is left over.
+that are down or unhealthy, the settings a gated app must enforce, Pocket
+ID's active instance, clocks, what is left over, each Caddy site's answer from
+outside, and Caddy's certificates and the DNS token.
 
 * **Alone:** always, in an outage or after one.
 * **Flags:** `--site <name>` (repeatable; default every site), `--config`,
-  `--execute`.
+  `--secrets` (default `secrets.enc.yaml` beside the config), `--execute`.
 * **Hosts:** every site, or the named ones, read only.
 * **`--execute`:** removes from `paisans-stack.yaml` each `config:` key that only
   repeats a value gating renders, before loading it, and records the `ssh.user`

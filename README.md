@@ -23,6 +23,8 @@ reasons, values and requests behind it.
 ```
 paisans create                             # a new deployment's paisans-stack.yaml, from questions
 paisans init                               # an id, a mesh subnet and the secrets for paisans-stack.yaml
+paisans host request --site vm > vm.admit  # the request the host's owner admits the site from
+sudo paisans host admit --request vm.admit --execute   # on the host, by its owner: the deployment's own user and rootless Docker
 paisans host prepare --site vm --execute   # the user's keys, configuration store and daemon settings on an admitted host
 paisans host prepare --all --execute       # the same on every site, one at a time
 paisans apply --execute                    # the whole deployment, from paisans-stack.yaml to a running stack
@@ -4057,7 +4059,6 @@ sites:
     address: 10.44.0.1
     ssh:
       host: home-a.local
-      user: ubuntu
       keys: [alice]
     watchdog: auto   # auto | required | softdog; auto when absent
 ```
@@ -4246,8 +4247,9 @@ old, genuine version, and applying it reaches only those sites.
   firewall, and a mesh peer reads `paisans-stack.yaml` and the encrypted
   secrets, both of which a peer is trusted with already. The address exists
   only while the deployment's WireGuard unit is up, and a user unit cannot be
-  ordered after the system's `wg-quick`, so the daemon restarts every ten
-  seconds until it can bind. It is enabled under linger, so it runs without a
+  ordered after the system's `wg-quick`, so the unit's start waits for that
+  address, however long it takes, and the daemon binds it once it is there; a
+  daemon that stops later is restarted after ten seconds. It is enabled under linger, so it runs without a
   login, and `host prepare` starts it whether or not the mesh is up yet;
 * a timer, the user's `paisans-<token>-config-sync`, every 15 minutes, that
   fetches the versions each peer's mesh address serves, so a site that was
@@ -4493,7 +4495,7 @@ sites:
     public_address: 203.0.113.10
     ssh:
       host: 203.0.113.10   # optional: defaults to public_address, then endpoint's host
-      user: ubuntu         # optional: defaults to paisans-<token>, written here by the first --execute
+      user: paisans-1a2b   # optional: defaults to paisans-<token>, written here by the first --execute
       port: 22             # optional: empty or 0 means 22
       keys: [alice, bob]   # required: the operators who may log in
 ```
@@ -4593,17 +4595,15 @@ included, so a configuration it accepts gets a request. A refusal `host
 request` can still reach names the configuration key to change beside the
 request's field.
 
-Admitting needs ufw installed and active on the host: `host admit` never
-enables it, and refuses before making any change otherwise. Ports 80 and 443
+Admitting needs ufw installed: `host admit` never installs it. When ufw is
+not active, admit enables it only with `--enable-ufw` or a yes at a
+terminal, behind a timer that turns it off again unless a new SSH login gets
+through (see *SSH is never shut out* below, and *If SSH stops answering after
+admit enables ufw* in
+[docs/guides/host-owners.md](docs/guides/host-owners.md)). Ports 80 and 443
 belong to one deployment per host. The egress table fences the deployment's
-user off the owner's machine, and one limit follows from the mesh staying
-reachable: an owner service bound to all interfaces (`0.0.0.0` or `::`) is
-reachable on the host's mesh address, by the deployment and by its other
-sites. Owners should bind admin services to `127.0.0.1` or to their LAN
-address. And the deployment's user may listen on any address and port no
-service of the owner's holds, so an owner's client may reach the deployment
-instead of a service that is down, or that is bound to the other family
-(`127.0.0.1` while the client tries `[::1]`). `paisans host admit` and
+user off the owner's machine, within the limits *Egress keeps the deployment
+off the owner's network* names. `paisans host admit` and
 `paisans host evict` are in `docs/commands.md`.
 
 #### Keys belong to operators, and sites name operators
@@ -4813,11 +4813,17 @@ file, not from the connection.
 #### A sudo that wants a password is asked for once, on a terminal
 
 Every command that acts on a deployment logs in as the site's ssh user and
-runs nothing through sudo. `host deployments` is the owner's command: it reads
-a host's registry and every deployment's directories, which are root's, so it
-runs through sudo (`--sudo`, on by default). Before its first command, the
-toolkit asks the host `sudo -n true`. `-n` makes sudo fail at once instead of
-waiting for a password, so the answer is immediate.
+runs nothing through sudo but the WireGuard helper, which its one sudoers
+line allows without a password. Three commands are the host owner's: `host
+admit` and `host evict`, which change the host as root, and `host
+deployments`, which reads the registry and every deployment's directories,
+root's. With `--request` (or, for evict, `--deployment` and `--user`),
+admit and evict run as root on the host itself,
+under the owner's own `sudo`; reached from a workstation, with `--site` and
+the owner's login in `--ssh`, they and `host deployments` run through sudo
+(`host deployments`' `--sudo`, on by default). Before the first such
+command, Paisans asks the host `sudo -n true`. `-n` makes sudo fail at
+once instead of waiting for a password, so the answer is immediate.
 
 **A host whose sudo needs no password** runs each command as
 `sudo sh -c '<command>'`, and nobody is asked anything.
@@ -4896,9 +4902,15 @@ it was sent, so leaving the password out is not left to each of them.
 | refuses the user outright | sudo's own message; no password is asked for |
 | does not answer the probe | the host could not be reached, as for any probe (see *Never infer host state from a failed probe*); nothing about sudo is concluded or kept |
 
-An unattended run of an owner's command needs a NOPASSWD sudoers rule for
-the login `--ssh` names. Whether to write one is a decision about the host,
-made by whoever owns it, and the toolkit never makes it.
+`host evict` always asks for the deployment's user name at a terminal, and
+`host admit --request` for the request's digest, so neither runs without a
+person. `host admit --site` asks nothing once every grant is passed, `--ssh`
+is given, and ufw is active or `--enable-ufw` is passed, and `host
+deployments` asks nothing, so an unattended run of either needs a NOPASSWD
+sudoers rule for the login `--ssh` names. Whether to write one is a
+decision about the host, made by whoever owns it, and Paisans never makes
+it; an agent never runs admit or evict unattended,
+whatever sudo allows (`docs/deployment-agent-rules.md`).
 
 `host deployments` reports each of these as a sudo problem
 (`apply.ErrSudo`), separately from a host that does not answer, so it
@@ -4978,7 +4990,7 @@ The check has three parts, in `internal/hostcheck`:
 
 | Class | When | What the command does |
 |---|---|---|
-| clean | nothing foreign; an empty Docker install is clean | what it always did, including enabling ufw with incoming denied by default |
+| clean | nothing foreign; an empty Docker install is clean | proceeds; nothing in this check reads or changes the firewall, which is `host admit`'s |
 | shared | something foreign, holding nothing the site claims | proceeds, touching only what is the toolkit's (below) |
 | conflict | something foreign holds a claim | refuses, changes nothing, one line per conflict |
 
@@ -5018,8 +5030,9 @@ On a **shared** host:
 * **No image is removed**, as with `apply --keep-images`, and nothing is
   swept, because an image the toolkit renders (`caddy`, `postgres`) may be
   what a foreign project runs.
-* **Docker is left alone**, as it is on every host where `docker compose`
-  works (see *Docker is judged by its version, not its source*).
+* **Docker is the deployment's own**: the check reads the user's rootless
+  daemon, and the owner's Docker is never touched (see *Docker is judged by
+  its version, not its source*).
 
 The class is computed on every run and never stored: a host becomes shared
 the day someone installs something beside the deployment. `apply`'s manifest
@@ -5042,32 +5055,37 @@ inside.
 
 #### Docker is judged by its version, not its source
 
-Besides classifying the host, the check reads Docker itself. Where it
-came from does not matter: Docker's own repository, Ubuntu's `docker.io` with
-`docker-compose-v2`, or anything else whose `docker compose` works is
-accepted, because what the toolkit depends on is what the engine and compose
-can do, and that is a version, not a package name. So the check refuses, on
-any host and whatever its class:
+Each deployment runs its own rootless Docker daemon as its own user, beside
+whatever Docker the host's owner runs, and `host admit` sets it up. What the
+Paisans depends on is what that daemon and compose can do, and that is a
+version, so admit refuses, on any host and whatever its class:
 
-* **A Docker older than the toolkit needs.** The engine (daemon and CLI) must
-  be at least 25.0.0 and the compose plugin at least 2.24.0, the first
-  releases with `healthcheck.start_interval`, which the rendered stacks use.
-  The refusal names the versions found and the versions needed: upgrade
-  Docker from wherever it came from, or remove it and have the host's owner
-  run `host admit` again, which installs it from Docker's repository.
-  [docs/specs/2026-10-11-docker-version-gate.md](docs/specs/2026-10-11-docker-version-gate.md)
-  lists every Docker feature the toolkit depends on, with the release that
-  introduced it.
+* **An Engine older than 29.5.** From 29.5 a rootless container with host
+  networking shares the host's network namespace
+  ([Docker: rootless troubleshooting](https://docs.docker.com/engine/security/rootless/troubleshoot/)).
+  Every infrastructure container is `network_mode: host`, bound to the
+  site's mesh address, so on an older Engine no other site reaches it. The
+  refusal names the version found and leaves the upgrade to the owner, since
+  upgrading Docker restarts every container the owner runs.
+* **A Docker that cannot run rootless**: one that is not Docker's own
+  `docker-ce` and has no `dockerd-rootless-setuptool.sh`, such as Ubuntu's
+  `docker.io`. The rootless extras come from Docker's repository, which
+  installs beside `docker-ce` only, and admit never replaces packages the
+  owner chose.
 * **A Docker snap, however new.** Its confinement keeps Docker from bind
   mounting under `/srv`, where every stack keeps its data, and snapd refreshes
   it, restarting the daemon and every container, on snapd's schedule rather
-  than the operator's. A version number reveals neither.
+  than the owner's. A version number reveals neither.
 
-A Docker whose `docker compose` does not work is not refused here, because
-`host admit` is what installs the plugin, or names the packages in its way
-(see *Docker comes from Docker's repository when it is absent*). Nothing is
-removed: removing Docker stops every container it runs, and that is a decision
-for whoever started them.
+The host check, which `host prepare`, `apply` and the others run as the
+deployment's user, reads the user's own daemon and refuses one older than
+engine 25.0.0 or compose 2.24.0, the first releases with
+`healthcheck.start_interval`, which the rendered stacks use; admit has
+already held it to 29.5.
+[docs/specs/2026-10-11-docker-version-gate.md](docs/specs/2026-10-11-docker-version-gate.md)
+lists every Docker feature Paisans depends on, with the release that
+introduced it. Nothing is upgraded or removed: either stops every container
+the owner runs, and that is a decision for whoever started them.
 
 ### `host prepare` keeps what is the deployment's user's
 
@@ -5123,12 +5141,11 @@ ubuntu 24.04
 
 #### Docker comes from Docker's repository when it is absent
 
-Where `docker compose` already works, Docker is left as it is, whatever its
-source: the host check has already refused a snap and anything older than the
-toolkit needs (see *Docker is judged by its version, not its source*). `host
-admit`, the owner's step, adds only the rootless extras beside it, pinned to
-the version installed so that apt has nothing to upgrade, and refuses an
-Engine older than 29.5 rather than upgrading it.
+Where Docker is there, admit leaves it as it is and adds only the rootless
+extras beside it, pinned to the version installed so that apt has nothing to
+upgrade; it refuses a Docker that cannot run rootless and an Engine older
+than 29.5, rather than upgrading or replacing either (see *Docker is judged
+by its version, not its source*).
 
 Where Docker is absent, `host admit` installs Docker Engine and the compose
 plugin from Docker's own apt repository, as
@@ -5138,15 +5155,12 @@ toolkit admits the same engine from the same source, whenever it was admitted.
 Docker's system daemons are kept from starting while its packages install and
 are then disabled, so only the deployments' rootless daemons run.
 
-Where Docker is there and `docker compose` does not work, the install would
-meet the packages that page lists as conflicting (`docker.io`,
-`docker-compose-v2`, `containerd`, `runc` and the rest), so they are **refused,
-not removed**: on a host already running containers from them, removing them
-stops those containers, and that is a decision for whoever started them. The
-refusal names them, and on a `docker.io` without `docker-compose-v2` it offers
-installing that package, Ubuntu's compose plugin, as the other way out. A
-Docker snap is refused here too, as the host check refuses it. Every `apt-get`
-runs non-interactively.
+Where Docker is absent and the host has packages Docker's page lists as
+conflicting (`containerd`, `runc` and the rest), they are **refused, not
+removed**: installing Docker's packages would remove them, and on a host
+already running containers from them that stops those containers, which is a
+decision for whoever started them. The refusal names the packages found, and
+leaves removing them to the owner. Every `apt-get` runs non-interactively.
 
 #### The user's Docker starts after the mesh interface
 
@@ -5283,6 +5297,103 @@ operator's own web server publishes on its site's `listen` instead, which
 `allow in on psns-<token>`, so the binding is what keeps an app from being
 reached on any other address.
 
+#### Egress keeps the deployment off the owner's network
+
+Every infrastructure container shares the host's network namespace, so
+without a rule it reaches the owner's services bound to `127.0.0.1`, and the
+owner's LAN. `host admit` loads an nftables table, `inet paisans_<token>`,
+from `paisans-<token>-egress.service`, which is ordered before the user's
+manager, so no container starts unfiltered at boot. Its `output` chain
+matches the user's UID and its whole subordinate range, since a container's
+users map into that range and the UID alone would miss them. A table that
+changed is written beside its file, checked with `nft -c`, and only then
+moved into place, and loaded in one transaction, so a table nft refuses
+never becomes the one the next boot loads.
+
+The chain opens with two things before the rules below. It accepts the
+replies to flows someone else opened (`ct direction reply` with bit 27 of the
+conntrack mark clear), TCP on any port, since a TCP reply reaches only its
+own socket's peer; and UDP only from port 443, with the public ports grant,
+for HTTP/3. Then it sets bit 27 on every flow the user opens, before any
+accept or drop, so a flow the user opened under an accept never counts as a
+reply. The rules, in order:
+
+1. Accept the mesh subnet.
+2. Accept port 53, TCP and UDP, to the host's resolvers, read at admit time
+   from `/etc/resolv.conf` and, under systemd-resolved, from the stub's
+   upstream list.
+3. Drop `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`,
+   `169.254.0.0/16`, `100.64.0.0/10`, `::1`, `fc00::/7` and `fe80::/10`, and
+   NAT64's translations of the same IPv4 ranges, and the local-use prefix
+   `64:ff9b:1::/48` whole, so a DNS64 host does not open the owner's LAN
+   through the translator.
+4. On a gateway (a site granted `--public-ports`, or whose `web_server` is
+   external), accept TCP 80 and 443 to the host's own addresses, and the
+   answers its own 80 and 443 send back.
+5. Drop every address of the host itself, its broadcast and its multicast.
+   This keeps the deployment off the owner's services bound to `0.0.0.0` or
+   `::`, and off mDNS, SSDP and broadcast UDP on the LAN.
+6. Drop the host's on-link IPv6 prefixes, read from the routing tables at
+   admit time: a home LAN's IPv6 is global address space, so rule 3 does not
+   cover it.
+
+The order is load-bearing. Rule 1 comes first so the mesh, which the
+deployment's services need, is never caught by the drops. Rule 4 follows
+rule 3, since loopback addresses are local too, and precedes rule 5, which
+would drop the gateway's own ports, and rule 6, since the host's own IPv6
+address lies in an on-link prefix.
+
+WireGuard's UDP is sent by the kernel, not by the user, so the chain above
+never sees it, and the user writes each peer's endpoint. The WireGuard helper
+marks the socket of every conf it installs with a mark of its own for the
+deployment, and a second chain, `mesh`, matches that mark after the
+endpoint's name is resolved. It drops loopback, link-local, multicast, the
+host's own addresses, and the private and shared ranges, as above, and the
+host's on-link IPv6 prefixes. The public endpoints a mesh normally dials
+pass. The mark's bits overlap Kubernetes's, so a host running Kubernetes is
+outside what admit supports.
+
+`--mesh-lan` adds an accept in the `mesh` chain for the private prefix of the
+host's own LAN, no wider than a /16, so a deployment's sites can dial each
+other there. The plan says plainly that the deployment can then send UDP to
+that LAN. Without it, sites on one LAN dial each other's public address,
+which needs a router that loops it back.
+
+**Known limits.**
+
+**An owner service bound to `0.0.0.0` or `::` is reachable on the mesh
+address**, by the deployment and by its other sites, since rule 1 accepts the
+mesh subnet. Owners should bind admin services to `127.0.0.1` or to their
+LAN address.
+
+**The deployment's user may listen on any address and port no owner's
+listener holds**, and answer whoever connects. An owner's client that means a
+service which is down, or bound to `127.0.0.1` while the client tries `[::1]`,
+can reach the deployment's listener instead. No table can tell such a client
+from a visitor.
+
+**Routes the table does not read.** Only on-link IPv6 routes are read, so an
+on-link public IPv4 subnet, or an owner's VPN that routes non-private IPv4
+ranges, is outside rule 3, and the deployment reaches it. Rule 1 names no
+interface: admit refuses a mesh subnet that overlaps a route at admit time,
+but a route added later on another interface would let the deployment reach
+that network through it.
+
+**Flows opened while the table is absent.** A reload of `nftables.service`
+flushes the ruleset and loads the table again, and a flow the user opens in
+between carries no mark. Its replies stay acceptable for as long as the user
+keeps it alive, which matters only for UDP from 443 with the public ports
+grant.
+
+A deployment that needs something on the owner's network asks the owner.
+There is no supported way to open the table to one service: an accept in
+another table does not override its drop, and a rule added to it is gone at
+the next load from its file (boot, an nftables reload or restart, an admit
+that reloads it). The owner serves it on the host's mesh address, which rule
+1 accepts, or at a public address on another machine. The owner's view of all this is
+*What the deployment can reach* in
+[docs/guides/host-owners.md](docs/guides/host-owners.md).
+
 #### host prepare manages the login user's authorized keys
 
 `host admit` first writes every key of every operator in `ssh.keys` as an
@@ -5388,12 +5499,14 @@ every key a run would add, with its operator and fingerprint, and an
 
 On a data site, `host admit --watchdog` gives the deployment's user the
 device the site's `watchdog` mode asks for, and `host prepare` reads that it
-is the user's, as Patroni needs; *A data site's watchdog is declared, not
+is the user's, or a UID in the user's subordinate range once Patroni's
+container has taken it, as Patroni needs; *A data site's watchdog is declared, not
 assumed* has the modes. It reports which driver it found, from
 `/sys/class/watchdog/*/identity`.
 
 On Ubuntu, `host admit` persists `softdog` with a small systemd unit that runs
-`modprobe softdog` before Docker starts, not with a line in
+`modprobe softdog` before `systemd-logind` starts the lingering users'
+managers, whose Docker starts Patroni, not with a line in
 `/etc/modules-load.d`. That would be the obvious place and it does not work:
 Ubuntu's kernel package blacklists the watchdog drivers, `softdog` among them,
 and `systemd-modules-load` honours the blacklist
@@ -6062,8 +6175,10 @@ pending or down (<names>)` and exits 0, since every step it could take ran.
 While a joined site is down, a site joining through `site add` waits too, with
 the line `site add <site>: waits until every joined site answers`, and the run
 ends degraded. `--require-all` makes a degraded run, or its dry run, exit 1, for
-automation that must not pass on one. `doctor` reports a site that does not answer as a `FAIL` in its Reach
-row, with the same account of what the deployment is without.
+automation that must not pass on one. `doctor` reports a pending or down site
+as a `WARN` in its Reach row (or its Admission row, for a pending site that
+answers), a `FAIL` on a gateway, with the same account of
+what the deployment is without.
 
 **The declaration stays the only record.** The configuration store keeps
 `paisans-stack.yaml` as written; the effective topology is derived on every run
@@ -9066,8 +9181,9 @@ spec (`docs/specs/2026-10-07-site-add.md`) checks them instead, because a
 derived value would change the rendered etcd flags on every member, and
 changing those on a running cluster is an operation of its own.
 
-**Docker's presence is covered indirectly**: it is part of `host prepare`'s
-plan, so "prepared" covers it.
+**Docker's presence is covered indirectly**: `host admit` installs or refuses
+it, and the host check, which the `Host` row runs, reads the deployment's own
+daemon.
 
 **Storage is judged by filesystem type, and a network one is refused.**
 Postgres acknowledges a commit, and etcd agrees a write, once fsync returns.
@@ -9172,7 +9288,13 @@ contradicts the gate, and changing it would change policy, so it is left for
 the operator. A file the edit leaves unloadable is restored.
 
 A site that does not answer is itself a finding, never a crash: every other
-check runs with the sites that did. Nothing more is asked of that site, since
+check runs with the sites that did. Whether it is pending, its host not yet
+having admitted the deployment, or down, having joined and gone quiet, is
+read from the deployment, never from the site, as `apply` reads it (see *A
+deployment with sites missing*), and either is a `WARN`, since the deployment
+runs on the sites it has; a gateway is a `FAIL`, since `apply` refuses to run
+without one. Nothing more is asked of that site, except the self-check,
+which asks from outside, since
 a read over a connection that already failed only fails again, and the checks
 not made because of it are named once, on its line (`Not checked because of
 this: mesh, containers, clocks on home-b.`), rather than each failing in turn,
@@ -9186,9 +9308,13 @@ The checks run at once, as many as are ready, and each prints whole, naming
 its site, as it ends, so an operator in an outage reads the first answer while
 the slow ones still run, and a deployment of several sites is read in the time
 of its slowest site rather than the sum of them. A check starts only once the
-checks it needs have answered: everything on a site needs its reach, etcd
-needs a member that answered, and the containers and Pocket ID checks wait for
-Patroni's, whose verdict their advice uses. So a cause always prints before
+checks it needs have answered: everything on a site needs its reach and then
+its admission record, except the self-check, which asks from outside and needs
+no ssh; every per-site check that runs `docker` there (Patroni, containers,
+settings, leftovers) needs the site's own Docker to answer; the checks across
+sites try each admitted member in turn; etcd needs a member that answered, and
+the containers and Pocket ID checks wait for Patroni's, whose verdict their
+advice uses. So a cause always prints before
 what it causes. A site runs at most eight commands at once, under the ten
 sessions sshd allows on the one connection Paisans shares per destination
 (`MaxSessions`, sshd_config(5)); sites are not bounded against each other,
@@ -9197,12 +9323,32 @@ listed once more at the end, under `failed, deepest first:`, in the order
 below, because in an interleaved run the first failure on screen is the first
 to end, not the first to fix.
 
+A pending site skips the rest of its checks, and a Docker daemon that does not
+answer skips the per-site checks that run `docker` there (Patroni,
+containers, settings, leftovers). The checks that read across
+sites (etcd, Patroni's `/sync` and logs, Pocket ID's instances) ask only sites
+whose admission passed and that the run's classification placed neither pending
+nor down; each site they did not ask is listed with `not asked: its admission
+did not pass (see admission)` or `not asked: the run's classification found it
+pending or down, as apply would`. The classification is made once, the first
+time a site does not answer or its record does not cover it. A site that
+answers and is covered, but whose every route into the mesh is through a
+pending site, keeps its own checks; only the checks across sites leave it out.
+Warnings alone, a pending or down data site among them, leave the exit status
+at 0.
+
 The checks, from the bottom of the stack up, so that the first `FAIL` of the
 closing list is usually the cause of those after it:
 
 | Check | How | FAIL when |
 |---|---|---|
-| Reach | `true` over ssh, on every site asked | the site does not answer. The finding says what the deployment is without while it is gone: the gateway, an etcd vote, a Patroni member, a Garage node, its copy of each clustered app, the apps pinned to it |
+| Reach | `true` over ssh, on every site asked | the site does not answer and is neither pending nor down, or it is the gateway. A pending or down site is a `WARN`, saying what the deployment is without while it is gone: the gateway, an etcd vote, a Patroni member, a Garage node, its copy of each clustered app, the apps pinned to it; a pending site with the `paisans host request` line, a down one with the `site remove --host-gone` line |
+| Admission | the admission record, `/etc/paisans/admitted.<token>.json`, read as the site's ssh user | the record cannot be read, is missing, differs from `paisans-stack.yaml` or lacks a grant the site's roles need, and the deployment has joined the site or the run cannot tell whether it has. When it has not, the site is pending: a `WARN` (a `FAIL` on the gateway) with the `host request` line, and nothing more is asked of the site |
+| User | `id -u`, `id -un`, `id -nG` and `id -G` | the user has uid 0, is in a group `host admit` refuses (`admitrules.PrivilegedGroups`), or is in a group of GID 0 under any name. Groups doctor cannot read are a `WARN` |
+| Docker | `docker version` and `docker info`'s security options, against the user's own socket | the daemon does not answer or is not rootless. When it does not answer, nothing that runs `docker` on the site is checked. An answer doctor cannot read is a `WARN` |
+| Docker engine | the version `docker version` read | older than 29.5 |
+| Linger | `loginctl show-user <user> --property=Linger --value`, and whether the drop-in `/etc/systemd/system/user@<uid>.service.d/paisans-mesh.conf` exists | linger is off: the user's Docker stops when the last login ends and does not start at boot. Or the drop-in is missing, so the user's manager is not ordered after the mesh. An answer doctor cannot read, the mesh-order line included, is a `WARN` |
+| Sudo rights | `LC_ALL=C sudo -n -l` | sudo lets the user run anything but the WireGuard helper as root, carries a Defaults entry or runas line beyond admit's one rule, or does not let it run the helper. An answer doctor cannot read, such as a translated one, is a `WARN` |
 | Mesh | `ip -j link show dev psns-<token>`, then the overlap test of *Two deployments on one host never share a mesh*: `ip -j route show table all`, `ip -j addr`, `docker network inspect` and the user's `~/.config/docker/daemon.json`, on every site that answered | the interface is missing or down, or anything outside it overlaps `mesh.subnet`, named with the subnet. The advice is that the subnet is fixed once deployed and the other network moves |
 | etcd quorum | `etcdctl endpoint health -w json` in the etcd container of the first member that answers, naming every member of `etcd.members` by its mesh address | fewer than half the members plus one are healthy. One member down with quorum intact is a `WARN` |
 | etcd version | `curl` on the host to `http://127.0.0.1:2379/version`; skipped, and said so, where the host has no `curl` | the cluster version is `3.0.0` under a 3.5 server |
@@ -9212,6 +9358,7 @@ closing list is usually the cause of those after it:
 | Pocket ID | the same question `apply` asks after acting on a Pocket ID stack on more than one site, asked once | no site, or more than one, has an active instance |
 | Clocks | `date +%s.%N` on each site, against the workstation's clock taken on either side of the call, less half the round trip | never; more than 1 s off is a `WARN` |
 | Leftovers | the host check's inventory (*The host check: what is already on a host decides how much is touched*) on every site that answered, and the manifest; read as the deployment's user, and skipped when the inventory cannot be read. A file is judged against the manifest's own view, which names the sites that were pending when it was rendered, so a file rendered without a pending site is not a leftover | never. Anything of this deployment's the site no longer renders (a compose project by label and name, a manifest entry marked left over) is a `WARN`, with the note that `apply` does not remove it. On the gateway, each `*.caddy` in `/srv/paisans/<token>/caddy.d` is listed as `info`: foreign, and served by this deployment's Caddy. That directory is the only way anything foreign is served by it, since the Caddyfile is this deployment's and Caddy runs in the host's network namespace |
+| Self-check | from this workstation, `/.well-known/paisans/<token>` through the public address of each site that runs Paisans' Caddy (the gateway, and a monitor with `web_server.managed_by: paisans`), on 443 and on 80, with the check `apply` runs at the end of the gateway's step. It asks once and never waits for a certificate, and needs no ssh | the site answers as something else, or does not answer on 443 or 80, naming the port and URL: something else on the host holds the port, which the deployment's user cannot see. A site with no `public_address` or no hostname of its own is a `WARN`, not asked from outside; so is a pending site, which is not asked since `apply` has not deployed its Caddy, and a down site's failure (a `FAIL` on the gateway), which points at its reach |
 | Caddy certificates | the caddy container's log on every site that runs Paisans' Caddy, `docker compose logs caddy` from the container's start or the last hour, whichever is later, kept to Caddy's `tls.obtain` lines; for each hostname the site serves, the newest outcome | the newest outcome is a failure. Hostnames failing for one cause are one finding naming them all: the provider refusing the token from this server (Cloudflare's `9109`, with the address it judged), its lockout (`10502`), the certificate authority's rate limit with when to retry, or the error's own last clause. It reads no secret and calls no provider, so it runs for every provider |
 | DNS token | from each Caddy site, with the `ACME_DNS_TOKEN` in its `caddy.env`, read there as the site's ssh user and never sent anywhere; and from the workstation, with `external.acme_dns_token` from `--secrets` (`secrets.enc.yaml` beside the configuration by default), opened with the age key as `apply` opens it. Each asks the provider for the zone holding `community.domain`, then verifies the token | the provider refuses the token from that place, does not answer, sees no zone holding the domain, or reports the token not `active`. Secrets that cannot be opened, Eg: no age key on this workstation, skip the workstation's check and the records with the reason, and every other check runs |
 | DNS records | the plan `dns init` builds, which reads and never writes, from the workstation once its token check passed | a hostname of the deployment holds a record pointing somewhere else (a visitor is sent there; delete it at the provider by hand, since `dns init` never updates a record and `dns prune` keeps one whose name is still wanted), or holds none (`paisans dns init --execute` creates it). A record waiting for `gateway move` is `info`, and a weak advisory record a `WARN`, as `dns init` shows them |
@@ -9251,11 +9398,12 @@ running; see *A new deployment is applied witness first*.
 A container that failed with `cannot assign requested address` started before
 the mesh interface at boot: it publishes its port on the mesh address, which
 exists only once `wg-quick@psns-<token>` is up, and Docker does not retry a
-container whose network setup failed. The advice is `paisans host prepare
---site <site> --execute`, which orders Docker after `wg-quick@psns-<token>`
-from the next boot on, then `docker
-start <container>` on the host or `paisans apply --site <site> --recreate
-<stack> --execute`. A container Docker keeps restarting while its log says it
+container whose network setup failed. The advice is `docker start <container>`
+on the site as the deployment's user, or `paisans apply --site <site>
+--recreate <stack> --execute`, and, if it happens at every boot, the Linger
+row, which says whether the user's manager is ordered after the mesh; see
+*The user's Docker starts after the mesh interface*. A container Docker
+keeps restarting while its log says it
 cannot reach the database points at the Patroni finding when there is no
 primary: it comes back on its own once there is one. When there is a primary,
 it is not waiting on Patroni, and the advice is to check the site's HAProxy and

@@ -299,10 +299,13 @@ healthy and answering through the gateway, polled for three minutes. See
 
 `doctor` reaches every site, or the ones `--site` names, and reports what is
 stuck with how to recover: sites that do not answer and what is lost while
-they are gone, etcd quorum and cluster version, the Patroni leader or why no
-replica promotes, containers that are down, Pocket ID's active instance,
-clock drift, and what is left over or foreign (below). It has no `--execute` and sends only reads, which its command
-level test checks against an allow list. The judgements are pure functions in
+they are gone, each site's admission record, its user's groups, its rootless
+Docker, linger and sudo rights, etcd quorum and cluster version, the
+Patroni leader or why no replica promotes, containers that are down, Pocket ID's active instance,
+clock drift, and what is left over or foreign (below). It sends only reads
+to hosts, which its command level test checks against an allow list; its
+`--execute` removes redundant `config:` keys and records `ssh.user` in the
+local `paisans-stack.yaml` and touches no host (see `README.md`). The judgements are pure functions in
 `internal/doctor`, tested with what live hosts answered; `cmd/paisans` runs the
 commands. It exits 1 on any `FAIL`.
 
@@ -310,7 +313,15 @@ Its checks are a graph, `doctor.Checks`: each node names what it reads, the
 nodes it needs hard (all of one, or any of several), the ones it needs only to
 have ended, and its judge, the section function `Diagnose` calls given the
 node's own probes, so the graph finds what `Diagnose` finds for the same
-`Input`. `Graph.Run` starts every node whose needs are met, records each
+`Input`. After each site's reach comes its admission record, which every other
+node on the site needs except the self-check, so a site whose host has not admitted the deployment
+is one warning; the site's `docker` node is needed by every per-site node that runs `docker`
+there (Patroni, containers, settings, leftovers), and the nodes across sites
+try each admitted member in turn. Pending and down come from the run's classification, made once,
+the first time a site does not answer or its record does not cover it
+(`doctorClassify`), and each Caddy site's answer from outside from the same
+check `apply` runs, asked once and without waiting (`doctorSelfCheck`). `Graph.Run` starts every
+node whose needs are met, records each
 node's probes into one `Input` as it ends, and prunes, transitively, every
 node a failed or skipped hard need leaves unable to run. It reports through
 `ui.Stream`, a group whose lines join it as they start. `cmd/paisans` bounds
