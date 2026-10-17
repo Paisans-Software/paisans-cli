@@ -364,6 +364,9 @@ func planEnableUFW(p *planner, b ufwBefore) error {
 			p.plan.UFWBlocks = append(p.plan.UFWBlocks, x.Key)
 		}
 		describe += " Blocks, as --enable-ufw-block-listed accepts: " + strings.Join(list, "; ") + "."
+		// A warning is printed with and without --verbose, so a script's
+		// log records what was blocked.
+		p.warn("firewall: ufw blocks "+strings.Join(p.plan.UFWBlocks, ", ")+", as --enable-ufw-block-listed accepts", strings.Join(list, "; "))
 	}
 	p.step(Step{Title: "enable ufw", Describe: describe, Command: enableUFW, Kinds: []string{"firewall"}})
 	p.plan.EnablesUFW = true

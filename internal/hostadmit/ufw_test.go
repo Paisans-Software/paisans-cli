@@ -729,3 +729,17 @@ func TestOnlyMulticastDiscoveryIsCoveredByUFW(t *testing.T) {
 		t.Errorf("DHCPv6 with ufw's IPv6 off: %v", b)
 	}
 }
+
+// With --enable-ufw-block-listed the plan warns what ufw blocks, so a
+// script's log records it.
+func TestTheBlockListedFlagWarnsWhatItBlocks(t *testing.T) {
+	plan, err := hostadmit.Build(inactiveUFW(ownerCaddy+sshdOn22)(), input(t, "vm", blockListed))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(plan.Warnings, func(w hostprep.Warning) bool {
+		return strings.Contains(w.Hint, "ufw blocks 80/tcp, 443/tcp, 443/udp") && strings.Contains(w.Detail, "caddy (pid 900")
+	}) {
+		t.Errorf("no warning names what ufw blocks:\n%s", plan.Text())
+	}
+}
