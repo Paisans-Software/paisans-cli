@@ -480,12 +480,32 @@ func BlockedHelp(blocked []Blocked) string {
 func (x Blocked) v6() bool { return strings.HasSuffix(x.Key, " over IPv6") }
 
 // ufwKept is what ufw's own before.rules let in on a UDP port whatever
-// the owner's rules say.
+// the owner's rules say: DHCP replies to a client, and for mDNS and SSDP
+// what is sent to their multicast groups alone (ufwGroups).
 var ufwKept = map[int]string{
 	68:   "ufw's before.rules accept DHCP replies to it",
 	546:  "ufw's before6.rules accept DHCPv6 replies to it",
 	1900: "ufw's before.rules accept SSDP multicast to it",
 	5353: "ufw's before.rules accept mDNS multicast to it",
+}
+
+// ufwGroups are the multicast groups ufw's before.rules and before6.rules
+// let mDNS and SSDP in to: a socket bound to one receives nothing else,
+// and one on any other address takes unicast too, which ufw blocks.
+var ufwGroups = map[int][]string{
+	1900: {"239.255.255.250", "ff02::f"},
+	5353: {"224.0.0.251", "ff02::fb"},
+}
+
+// keptByUFW is why ufw's own rules keep a reachable, "" when they do not.
+func keptByUFW(a *answering) string {
+	if a.proto != "udp" || a.lo != a.hi || ufwKept[a.lo] == "" {
+		return ""
+	}
+	if groups := ufwGroups[a.lo]; groups != nil && slices.ContainsFunc(a.socks, func(s socket) bool { return !slices.Contains(groups, s.Address) }) {
+		return ""
+	}
+	return ufwKept[a.lo]
 }
 
 // loopbackRule is a NAT rule that matches a loopback destination alone,
@@ -692,8 +712,8 @@ func (p *planner) exposure(b ufwBefore) ([]kept, []Blocked) {
 		switch {
 		case a.proto == "tcp" && a.lo == a.hi && slices.Contains(b.ports, a.lo):
 			why, ownPort = "sshd's port, which admit keeps allowed", true
-		case a.proto == "udp" && a.lo == a.hi && ufwKept[a.lo] != "":
-			why, ownPort = ufwKept[a.lo], true
+		case keptByUFW(a) != "":
+			why = keptByUFW(a)
 		}
 		for _, r := range own {
 			if why == "" && r.Port != 0 && r.Proto == a.proto && a.lo == r.Port && a.hi == r.Port {

@@ -710,3 +710,22 @@ func TestEnableUFWListsEphemeralUDPWithoutALine(t *testing.T) {
 		t.Errorf("LLMNR: %v", b)
 	}
 }
+
+// ufw's before.rules let mDNS and SSDP in to their multicast groups
+// alone: a socket bound to the group is covered, one on every address
+// takes unicast too, which ufw blocks, so it is listed. Its IPv6 is listed
+// apart when ufw's IPv6 is off, as any listener's.
+func TestOnlyMulticastDiscoveryIsCoveredByUFW(t *testing.T) {
+	group := `listen udp UNCONN 0 0 224.0.0.251:5353 0.0.0.0:* users:(("avahi-daemon",pid=612,fd=12)) uid:107` + "\n" +
+		`listen udp UNCONN 0 0 239.255.255.250:1900 0.0.0.0:* users:(("minissdpd",pid=613,fd=3))` + "\n"
+	if b := blocks(t, group+sshdOn22); b != nil {
+		t.Errorf("sockets bound to the multicast groups: %v", b)
+	}
+	if b := blocks(t, `listen udp UNCONN 0 0 0.0.0.0:5353 0.0.0.0:* users:(("avahi-daemon",pid=612,fd=12)) uid:107`+"\n"+sshdOn22); b == nil || !strings.Contains(b.Error(), "5353/udp: avahi-daemon") {
+		t.Errorf("mDNS on every address: %v", b)
+	}
+	v6off := `listen tcp LISTEN 0 4096 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=812,fd=3))` + "\nipv6 no\nsystemd-run present\nfallback not-found not-found\nend\n"
+	if b := blocks(t, `listen udp UNCONN 0 0 [fe80::1%eth0]:546 [::]:* users:(("systemd-network",pid=500,fd=21)) uid:998`+"\n"+v6off); b == nil || !strings.Contains(b.Error(), "546/udp over IPv6") {
+		t.Errorf("DHCPv6 with ufw's IPv6 off: %v", b)
+	}
+}
