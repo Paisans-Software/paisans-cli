@@ -209,9 +209,11 @@ under `--verbose`.
   deployment's own user, to choose the mesh subnet, and changes none. A site
   not admitted yet is skipped with a warning naming the `host request` for
   it, since `host admit` checks the subnet there as root; it is run before
-  any host is admitted, as `create` says. A site that does not answer
-  refuses it with nothing written, unless a site already holds the
-  deployment, whose subnet is then kept.
+  any host is admitted, as `create` says. A site that does not answer, or
+  refuses the operator's key as a user it names, refuses it with nothing
+  written, unless a site already holds the deployment, whose subnet is then
+  kept. An admitted site pins the subnet host admit built it around, so
+  init refuses to roll one that overlaps something there.
 * **`--execute`:** not taken. It writes local files only: the `id` and the
   subnet into `paisans-stack.yaml`, the secrets into the secrets file, and
   `.sops.yaml` (and the key file, when named) for a new deployment.

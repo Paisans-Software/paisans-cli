@@ -135,7 +135,7 @@ var helpCommands = []helpCommand{
 		name:    "init",
 		summary: "Give the configuration an id, a mesh subnet and its secrets.",
 		usage:   []string{"paisans init [--config " + config.FileName + "] [--secrets secrets.enc.yaml]"},
-		detail: "Give the configuration an id if it has none; check each site's admission, skipping one not admitted yet, whose host admit checks the subnet as root; until the deployment is on any site, reach every admitted site and keep mesh.subnet only if it overlaps nothing there, else roll a random /24 that overlaps nothing and move each site's address into it; " +
+		detail: "Give the configuration an id if it has none; check each site's admission, skipping one not admitted yet, whose host admit checks the subnet as root, and refusing when a site does not answer, unless the deployment is already on a site; until the deployment is on any site, reach every admitted site and keep mesh.subnet only if it overlaps nothing there, else, with no site admitted, roll a random /24 that overlaps nothing and move each site's address into it; " +
 			"then generate the secrets it needs, filling in only what is missing, and say what is still owed from elsewhere.",
 	},
 	{

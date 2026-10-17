@@ -85,9 +85,12 @@ func holder(clash []mesh.Taken) string {
 // may be admitted, and an unchecked host is exactly where a chosen subnet
 // would collide unseen.
 //
-// A site whose admission does not match the declaration is still read, and
-// warned about, since what it lacks is the host owner's to fix, and apply
-// refuses it until they have.
+// A site whose admission does not match the declaration, or whose record
+// cannot be read, is still read, and warned about, since the deployment's
+// user logs in there: what it lacks is the host owner's to fix, and apply
+// refuses the site until they have. A login refused as the deployment's own
+// user is a site not admitted (apply.ErrLoginNotAdmitted); one refused as a
+// user the site names is a key problem, and init cannot ask it.
 func initAdmissions(r ui.Reporter, cfg *config.Config, hosts map[string]registry.Runner) (admitted []string, unread error) {
 	var skipped, unreachable, advice, referrals []string
 	var failures []error
@@ -102,16 +105,19 @@ func initAdmissions(r ui.Reporter, cfg *config.Config, hosts map[string]registry
 		case err == nil:
 			admitted = append(admitted, name)
 			s.End(ui.OK, "admitted")
-		case errors.Is(err, apply.ErrLoginRefused), errors.Is(err, admission.ErrNotAdmitted):
+		case errors.Is(err, apply.ErrLoginNotAdmitted), errors.Is(err, admission.ErrNotAdmitted):
 			skipped = append(skipped, name)
 			s.Detail("%s", err)
 			s.End(ui.Pending, "not admitted, skipped")
 		case errors.As(err, &se), errors.As(err, &unreadable):
 			admitted = append(admitted, name)
-			problem := admissionProblem(name, token, err)
-			hint, explain := ui.Describe(problem)
-			s.End(ui.Warned, "admitted, does not match")
-			r.Warn(hint, explain)
+			result := "admitted, does not match"
+			if unreadable != nil {
+				result = "admission record unreadable"
+			}
+			hint, explain := ui.Describe(admissionProblem(name, token, err))
+			s.End(ui.Warned, result)
+			r.Warn(hint, explain+"\napply refuses the site until then.")
 		default:
 			err = fmt.Errorf("%s: %w", h.Describe(), err)
 			// Each site is one line in the operator's words, and what to do
@@ -177,12 +183,14 @@ func settleMesh(r ui.Reporter, cfg *config.Config, path string, hosts map[string
 func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]registry.Runner, admitted []string, unread error, random io.Reader) (bool, string, error) {
 	manifest := cfg.Deployment().Manifest()
 	var claimedOn []string
+	var failures []error
 	for _, name := range admitted {
 		s.Progress("read " + name)
 		h := hosts[name]
 		_, found, err := h.ReadFile(manifest)
 		if err != nil {
-			return false, "", fmt.Errorf("%s: reading %s: %w. Nothing was written", h.Describe(), manifest, err)
+			failures = append(failures, fmt.Errorf("%s: reading %s: %w", h.Describe(), manifest, err))
+			continue
 		}
 		if found {
 			claimedOn = append(claimedOn, name)
@@ -199,6 +207,9 @@ func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]reg
 	}
 	if unread != nil {
 		return false, "", unread
+	}
+	if len(failures) > 0 {
+		return false, "", fmt.Errorf("%w. Nothing was written", errors.Join(failures...))
 	}
 
 	iface := cfg.Deployment().Interface()
@@ -239,6 +250,13 @@ func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]reg
 	if !choice.Rolled {
 		s.Detail("%s: mesh.subnet %s overlaps nothing on %s; kept.", path, subnet, strings.Join(admitted, ", "))
 		return false, "kept", nil
+	}
+	if len(admitted) > 0 {
+		return false, "", &ui.Problem{
+			Hint:    "mesh.subnet " + cfg.Mesh.Subnet + " overlaps something on " + strings.Join(admitted, ", ") + ", and is not rolled",
+			Explain: fmt.Sprintf("%s admitted this deployment with mesh.subnet %s, which host admit built the host's firewall and Docker address pools around, so a new one would break the admission. Free the overlapping network on the host, or have each host's owner evict the deployment, run paisans init again, and send them a new request. Nothing was written.", strings.Join(admitted, ", "), cfg.Mesh.Subnet),
+			Cause:   fmt.Errorf("%s: %s", path, strings.Join(choice.Why, "; ")),
+		}
 	}
 	if err := config.SetMesh(path, subnet, addresses); err != nil {
 		return false, "", err

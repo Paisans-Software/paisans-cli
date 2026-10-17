@@ -508,6 +508,11 @@ func TestNoLogin(t *testing.T) {
 		if !errors.Is(refused, apply.ErrLoginRefused) || !apply.NoLogin(refused) {
 			t.Errorf("a refused login (default user %v): %v", defaultUser, refused)
 		}
+		// Only the deployment's own user is a host that has not admitted
+		// it; a user the site names is the operator's key problem.
+		if errors.Is(refused, apply.ErrLoginNotAdmitted) != defaultUser {
+			t.Errorf("default user %v: ErrLoginNotAdmitted is %v", defaultUser, !defaultUser)
+		}
 	}
 	if !apply.NoLogin(fmt.Errorf("x: %w", apply.ErrUnreachable)) || apply.NoLogin(errors.New("exit status 1")) {
 		t.Error("NoLogin misreads an unreachable host or a failed command")

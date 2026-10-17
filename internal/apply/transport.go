@@ -207,8 +207,8 @@ func (t SSHTransport) SSHArgs(keyFiles []string, command string) []string {
 // has no password, and on a host that has not admitted the deployment it
 // does not exist, where sshd asks for a password all the same: a prompt
 // nothing can answer, drawn over the command's output. With public keys
-// alone that host refuses the login, which authProblem reports as a host
-// that has not admitted the deployment.
+// alone that host refuses the login, which authProblem reports, on a
+// transport naming its site, as ErrLoginNotAdmitted.
 func (t SSHTransport) sectionOptions() []string {
 	opts := []string{"-p", strconv.Itoa(t.port()), "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=" + strconv.Itoa(t.connectTimeout())}
 	if t.DefaultUser {
@@ -482,6 +482,13 @@ var ErrUnreachable = errors.New("ssh could not connect to the host")
 // a host that has not admitted it.
 var ErrLoginRefused = errors.New("the host refused the login")
 
+// ErrLoginNotAdmitted is ErrLoginRefused for the deployment's own user on a
+// transport naming its site: that user exists only once the host's owner has
+// admitted the deployment, so the refusal is most likely a host that has
+// not, and otherwise a key of the operator's the host was never given. A
+// refusal of a user the site names is ErrLoginRefused alone, a key problem.
+var ErrLoginNotAdmitted = fmt.Errorf("%w: the deployment's user is not admitted there", ErrLoginRefused)
+
 // NoLogin reports whether err is a host that could not be logged into at
 // all, refused or not answering, rather than a command that failed there.
 func NoLogin(err error) bool {
@@ -586,7 +593,7 @@ func (t SSHTransport) authProblem(err error, out string) error {
 		return &ui.Problem{
 			Hint:    fmt.Sprintf("site %s is not admitted on %s", t.Site, host),
 			Explain: fmt.Sprintf("The site names no ssh.user, so paisans logs in as the deployment's own user, %s, and %s refused it. That user exists only once the host's owner has admitted the deployment. Send them a request:\n\n    paisans host request --site %s > %s.admit\n\nIf they have admitted it, check that your key is loaded in your ssh agent (ssh-add -l) and is under an operator the site's ssh.keys names. If the deployment logs in as another user on that host, name it in sites.%s.ssh.user.", user, host, t.Site, t.Site, t.Site),
-			Cause:   fmt.Errorf("%w: %w", ErrLoginRefused, err),
+			Cause:   fmt.Errorf("%w: %w", ErrLoginNotAdmitted, err),
 		}
 	case strings.Contains(last, "Permission denied (") || strings.Contains(last, "Too many authentication failures"):
 		return &ui.Problem{

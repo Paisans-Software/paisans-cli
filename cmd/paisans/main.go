@@ -293,8 +293,9 @@ func runInit(args []string) error {
 	// The mesh subnet next, while nothing is deployed: it is the one value
 	// that has to be checked against every host before the first apply,
 	// and cannot change after it.
-	// Only an admitted site is read: on any other the deployment's user
-	// does not exist yet, and host admit checks the subnet there.
+	// Every site is asked whether it admitted the deployment, and only an
+	// admitted one is read further: on any other the deployment's user does
+	// not exist yet, and host admit checks the subnet there.
 	hosts := initHosts(cfg)
 	admitted, unread := initAdmissions(r, cfg, hosts)
 	wrote, err := settleMesh(r, cfg, *configPath, hosts, admitted, unread, meshRandom)
