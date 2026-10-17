@@ -12,6 +12,12 @@ import (
 // script printing its output, on top of the system's /usr/bin and /bin.
 func runPortsProbe(t *testing.T, tools map[string]string) string {
 	t.Helper()
+	return runProbe(t, portsProbe, tools)
+}
+
+// runProbe runs probe as runPortsProbe runs portsProbe.
+func runProbe(t *testing.T, probe string, tools map[string]string) string {
+	t.Helper()
 	dir := t.TempDir()
 	for name, out := range tools {
 		script := "#!/bin/sh\ncat <<'PAISANS_EOF'\n" + out + "PAISANS_EOF\n"
@@ -19,7 +25,7 @@ func runPortsProbe(t *testing.T, tools map[string]string) string {
 			t.Fatal(err)
 		}
 	}
-	cmd := exec.Command("sh", "-c", portsProbe)
+	cmd := exec.Command("sh", "-c", probe)
 	cmd.Env = []string{"PATH=" + dir + ":/usr/bin:/bin"}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -122,5 +128,29 @@ func TestIPv6IsReadAsUFWReadsIt(t *testing.T) {
 	}
 	if !strings.Contains(ufwBeforeProbe, ipv6Read("/etc/default/ufw", "/etc/ufw/ufw.conf")) {
 		t.Error("the probe does not read IPV6 from both of ufw's files")
+	}
+}
+
+// The probe before enabling ufw reads every listener, TCP and UDP, with
+// no port filter, the owner's rules and the NAT rules, and ends with end.
+func TestTheUFWProbeReadsEveryListenerAndTheNATRules(t *testing.T) {
+	out := runProbe(t, ufwBeforeProbe, map[string]string{
+		"ss":            "LISTEN 0 4096 *:8080 *:* users:((\"app\",pid=1,fd=3))\n",
+		"ufw":           "Added user rules (see 'ufw status' for running firewall):\nufw allow 8080/tcp\n",
+		"systemctl":     "inactive\n",
+		"iptables-save": "-A DOCKER ! -i docker0 -p tcp -m tcp --dport 8443 -j DNAT --to-destination 172.17.0.2:443\n",
+	})
+	for _, want := range []string{
+		"listen LISTEN 0 4096 *:8080 ",
+		"listen-udp LISTEN 0 4096 *:8080 ",
+		"rule allow 8080/tcp\n",
+		"dnat iptables-save -t nat: -A DOCKER ! -i docker0 -p tcp -m tcp --dport 8443 -j DNAT",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the probe does not print %q:\n%s", want, out)
+		}
+	}
+	if !strings.HasSuffix(out, "\nend\n") || strings.Contains(out, "sport =") {
+		t.Errorf("the probe:\n%s", out)
 	}
 }

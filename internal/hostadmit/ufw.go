@@ -1,6 +1,7 @@
 package hostadmit
 
 import (
+	"cmp"
 	"fmt"
 	"regexp"
 	"slices"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/hostprep"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -51,18 +53,20 @@ const ufwBeforeMarker = "paisans site admit: before enabling ufw"
 // or sshd.socket adds what systemd listens on for it. Only root's sshd
 // listeners off loopback count (sshdListener): a per-session sshd holds a
 // session's X11 and remote forwards as the logged-in user or on loopback,
-// and any user can name a process sshd. ufw's rules are read
-// with `ufw show added`, which lists them while ufw is inactive, and IPV6
-// as ufw reads it (ipv6Read), without which ufw drops all IPv6 once
-// enabled.
-// Whatever it cannot read it says so.
+// and any user can name a process sshd. Every other listener, TCP and UDP,
+// and what receives traffic with no listener, a port the system Docker
+// publishes or a DNAT or redirect rule (natProbe), is read too: enabling
+// ufw blocks whatever of it no rule allows (exposure). ufw's rules are
+// read with `ufw show added`, which lists them while ufw is inactive, and
+// IPV6 as ufw reads it (ipv6Read), without which ufw drops all IPv6 once
+// enabled. Whatever it cannot read it says so.
 var ufwBeforeProbe = `# ` + ufwBeforeMarker + `
-if out=$(ss -Hltnpe 2>/dev/null); then printf '%s\n' "$out" | grep -F '("sshd",pid=' | sed 's/^/sshd /'; else echo 'unread listeners (ss -Hltnpe)'; fi
+` + listenProbe("") + `
 for u in ssh.socket sshd.socket; do
   if [ "$(systemctl is-active "$u" 2>/dev/null)" = active ]; then systemctl show -p Listen --value "$u" 2>/dev/null | sed 's/^/socket /'; fi
 done
 if added=$(ufw show added 2>/dev/null); then printf '%s\n' "$added" | sed -n 's/^ufw /rule /p'; else echo 'unread rules (ufw show added)'; fi
-` + ipv6Read("/etc/default/ufw", "/etc/ufw/ufw.conf") + `
+` + ipv6Read("/etc/default/ufw", "/etc/ufw/ufw.conf") + natProbe + `
 if command -v systemd-run >/dev/null 2>&1; then echo 'systemd-run present'; else echo 'systemd-run absent'; fi
 echo "fallback $(systemctl show -p LoadState --value ` + FallbackUnit + `.timer 2>/dev/null) $(systemctl show -p LoadState --value ` + FallbackUnit + `.service 2>/dev/null)"
 echo end`
@@ -71,17 +75,27 @@ echo end`
 // sorted, and whether one of them is on IPv6; what it could not read;
 // ufw's rules as `ufw show added` prints them without the leading ufw, and
 // those of them that deny or reject; IPV6 in /etc/default/ufw; whether
-// systemd-run is there; and the fallback units' load states.
+// systemd-run is there; the fallback units' load states; and what answers
+// from off the host, the probe's listen, listen-udp, container, stopped
+// and dnat lines, for exposure to read.
 type ufwBefore struct {
 	ports       []int
 	v6          bool
 	unread      string
 	rulesUnread string
-	rules       []string
-	denies      []string
-	ipv6        string
-	systemdRun  bool
-	fallback    string
+	// exposureUnread is the first of the rest admit could not read, which
+	// says what answers from off the host.
+	exposureUnread string
+	rules          []string
+	denies         []string
+	ipv6           string
+	systemdRun     bool
+	fallback       string
+	answering      []string
+	// kept and blocked are exposure's: what stays reachable once ufw is
+	// on, and what enabling it blocks.
+	kept    []kept
+	blocked []Blocked
 }
 
 // readUFWBefore runs ufwBeforeProbe and reads it.
@@ -114,15 +128,25 @@ func readUFWBefore(p *planner) (ufwBefore, error) {
 		kind, rest, _ := strings.Cut(line, " ")
 		switch kind {
 		case "unread":
-			if strings.HasPrefix(rest, "rules ") {
+			switch {
+			case strings.HasPrefix(rest, "rules "):
 				b.rulesUnread = hostText(rest)
-			} else if b.unread == "" {
-				b.unread = hostText(rest)
+			case strings.HasPrefix(rest, "listeners "):
+				if b.unread == "" {
+					b.unread = hostText(rest)
+				}
+			case b.exposureUnread == "":
+				b.exposureUnread = hostText(rest)
 			}
-		case "sshd":
-			if addr, ok := sshdListener(rest); ok {
-				add(addr)
+		case "listen":
+			if strings.Contains(rest, `("sshd",pid=`) {
+				if addr, ok := sshdListener(rest); ok {
+					add(addr)
+				}
 			}
+			b.answering = append(b.answering, line)
+		case "listen-udp", "container", "stopped", "dnat":
+			b.answering = append(b.answering, line)
 		case "socket":
 			if f := strings.Fields(rest); len(f) == 2 && f[1] == "(Stream)" {
 				add(f[0])
@@ -158,11 +182,10 @@ func sshdListener(line string) (string, bool) {
 			return "", false
 		}
 	}
-	addr := f[3]
-	if strings.HasPrefix(addr, "127.") || strings.HasPrefix(addr, "[::1]") || strings.HasPrefix(addr, "[::ffff:127.") {
+	if loopbackAddr(f[3]) {
 		return "", false
 	}
-	return addr, true
+	return f[3], true
 }
 
 // blocker is why admit will not enable ufw on this host, with
@@ -177,6 +200,8 @@ func (b ufwBefore) blocker() error {
 		return fmt.Errorf(head+"it could not read the %s, so it cannot tell which ports sshd listens on, and it never enables ufw without allowing every one of them. Enabling ufw without an allow for your SSH port cuts off SSH to this host: allow the port your SSH server listens on with `sudo ufw allow <port>/tcp` before anything enables ufw, then run admit again.%s", b.unread, nothing)
 	case b.rulesUnread != "":
 		return fmt.Errorf(head+"it could not read the %s, so it cannot tell whether a rule of yours stops SSH, and it never enables ufw blind.%s", b.rulesUnread, nothing)
+	case b.exposureUnread != "":
+		return fmt.Errorf(head+"it could not read the %s, so it cannot tell which of your services enabling ufw would block, and it never enables ufw blind.%s", b.exposureUnread, nothing)
 	case len(b.ports) == 0:
 		return fmt.Errorf(head+"it found no port sshd listens on, and it never enables ufw without allowing the port your own login arrives by. Enabling ufw without an allow for your SSH port cuts off SSH to this host: allow the port your SSH server listens on with `sudo ufw allow <port>/tcp` before anything enables ufw, then run admit again.%s", nothing)
 	case len(b.denies) > 0:
@@ -227,11 +252,16 @@ func byHand(ports []int) string {
 // plan again with --enable-ufw on a yes.
 type UFWInactiveError struct {
 	SSHPorts []int
+	Blocked  []Blocked
 }
 
 func (e *UFWInactiveError) Error() string {
+	blocked := ""
+	if len(e.Blocked) > 0 {
+		blocked = "Enabling ufw, by admit or by hand, would also block these, which answer from off this host now:\n" + BlockedText(e.Blocked) + "\n"
+	}
 	return fmt.Sprintf("ufw is installed but not active. The safe way: run admit again with --enable-ufw. It allows every port sshd listens on (%s), arms a timer that turns ufw off again in 10 minutes, enables ufw, and stops the timer once a new SSH login gets through.\n"+
-		"To enable it by hand instead, run these in this order:\n%s Then run admit again. Nothing was changed", portList(e.SSHPorts), byHand(e.SSHPorts))
+		"%sTo enable it by hand instead, run these in this order:\n%s Then run admit again. Nothing was changed", portList(e.SSHPorts), blocked, byHand(e.SSHPorts))
 }
 
 // portList is ports as ufw names TCP ports, comma separated.
@@ -300,9 +330,23 @@ func planEnableUFW(p *planner, b ufwBefore) error {
 	p.step(Step{Title: "arm the ufw fallback",
 		Describe: fmt.Sprintf("firewall: a timer, %s.timer, that runs ufw disable %d minutes from now, so a login ufw blocks is let back in; admit stops it once a new SSH login gets through. It does not survive a reboot: a reboot before it fires leaves ufw enabled, so wait for it rather than reboot", FallbackUnit, int(FallbackAfter/time.Minute)),
 		Command:  armFallback, Kinds: []string{"firewall"}})
-	p.step(Step{Title: "enable ufw",
-		Describe: "firewall: enable ufw, every rule above already in place, with the default policy ufw has (Ubuntu's denies incoming). " + CannotSee,
-		Command:  enableUFW, Kinds: []string{"firewall"}})
+	describe := "firewall: enable ufw, every rule above already in place, with the default policy ufw has (Ubuntu's denies incoming). " + CannotSee
+	if len(b.kept) > 0 {
+		var list []string
+		for _, k := range b.kept {
+			list = append(list, k.key+" ("+k.via+"), "+k.why)
+		}
+		describe += " Stays reachable: " + strings.Join(list, "; ") + "."
+	}
+	if len(b.blocked) > 0 {
+		var list []string
+		for _, x := range b.blocked {
+			list = append(list, x.Key+" ("+x.What+")")
+			p.plan.UFWBlocks = append(p.plan.UFWBlocks, x.Key)
+		}
+		describe += " Blocks, as --enable-ufw-block-listed accepts: " + strings.Join(list, "; ") + "."
+	}
+	p.step(Step{Title: "enable ufw", Describe: describe, Command: enableUFW, Kinds: []string{"firewall"}})
 	p.plan.EnablesUFW = true
 	p.record.UFWEnabled = true
 	return nil
@@ -319,7 +363,7 @@ func Disarm(t apply.Transport) error {
 
 // CannotSee is what admit says, in the plan and in the question, it does
 // not see before it enables ufw.
-const CannotSee = "Admit allows only the TCP ports sshd listens on, and cannot see DROP rules written by hand in /etc/ufw/before.rules, before6.rules or user.rules, nor other ways in such as sslh, dropbear or mosh: if you rely on either, enable ufw by hand after checking them."
+const CannotSee = "Admit allows only the TCP ports sshd listens on, and names every other port that answers from off this host as it reads it. It cannot see DROP rules written by hand in /etc/ufw/before.rules, before6.rules or user.rules, nor a way in that is not listening as it reads the host, such as sslh, dropbear or mosh started later: if you rely on either, enable ufw by hand after checking them."
 
 // ipv6Read is the probe's line that reads IPV6 as ufw's backend.py
 // (_get_defaults) does: defaults, then conf, each line that starts with a
@@ -328,4 +372,314 @@ const CannotSee = "Admit allows only the TCP ports sshd listens on, and cannot s
 // yes leaves ufw's IPv6 off, and admit reads it so.
 func ipv6Read(defaults, conf string) string {
 	return `v=$(grep -hE '^[Ii][Pp][Vv]6="?[A-Za-z0-9_]' ` + defaults + ` ` + conf + ` 2>/dev/null | tail -n 1 | cut -d= -f2 | tr -d "\"'" | tr '[:upper:]' '[:lower:]'); echo "ipv6 $v"`
+}
+
+// Blocked is one thing enabling ufw blocks that answers from off the host
+// now: Key names it, a port as ufw names one ("80/tcp", "7000:7001/udp"),
+// such a port with " over IPv6" for one only ufw's IPV6 setting keeps, or
+// what it is for one whose ports admit cannot read; What is what answers
+// on it, as the owner is shown it; Allow is the command that keeps it
+// reachable, "" for none.
+type Blocked struct {
+	Key, What, Allow string
+	// NAT is a port received through NAT, which ufw's routed rules decide
+	// too.
+	NAT bool
+}
+
+// UFWBlocksError is admit's refusal, with --enable-ufw and without
+// --enable-ufw-block-listed, of a host where enabling ufw blocks what
+// answers from off it now.
+type UFWBlocksError struct {
+	Blocked []Blocked
+}
+
+func (e *UFWBlocksError) Error() string {
+	return "ufw is installed but not active, and enabling it would block these, which answer from off this host now:\n" +
+		BlockedText(e.Blocked) + " Nothing was changed"
+}
+
+// BlockedText is blocked as the owner is shown it: BlockedList, then
+// BlockedHelp, then the flag that accepts them.
+func BlockedText(blocked []Blocked) string {
+	return BlockedList(blocked) + BlockedHelp(blocked) + " Once you have checked that every one listed may be blocked, pass --enable-ufw-block-listed with --enable-ufw."
+}
+
+// BlockedList is each one of blocked with what answers on it, a line each.
+func BlockedList(blocked []Blocked) string {
+	var b strings.Builder
+	for _, x := range blocked {
+		if x.Allow == "" && !x.v6() {
+			fmt.Fprintf(&b, "  %s\n", x.What)
+		} else {
+			fmt.Fprintf(&b, "  %s: %s\n", x.Key, x.What)
+		}
+	}
+	return b.String()
+}
+
+// BlockedHelp is how the owner keeps each one of blocked reachable: the
+// lines to run before ufw is enabled, then admit again, and what to do
+// with one meant to stay unreachable.
+func BlockedHelp(blocked []Blocked) string {
+	var b strings.Builder
+	var allows []string
+	var v6, unread, nat bool
+	for _, x := range blocked {
+		if x.Allow != "" {
+			allows = append(allows, "  "+x.Allow+"\n")
+		}
+		v6 = v6 || x.v6()
+		unread = unread || x.Allow == "" && !x.v6()
+		nat = nat || x.NAT
+	}
+	if len(allows) > 0 {
+		b.WriteString("For each port whose service must stay reachable, run its line before ufw is enabled, then run admit again:\n" + strings.Join(allows, ""))
+	}
+	if v6 {
+		b.WriteString("ufw's IPV6, read from /etc/default/ufw and then /etc/ufw/ufw.conf, is not yes, so enabling ufw drops all IPv6 traffic, allows included: for a service that must stay reachable over IPv6, set IPV6=yes in /etc/default/ufw, and in /etc/ufw/ufw.conf if it sets IPV6 too.\n")
+	}
+	if unread {
+		b.WriteString("Admit cannot read which ports a NAT rule or a stopped container listed receives on: allow those whose service must stay reachable with `sudo ufw allow <port>/<proto>`.\n")
+	}
+	if nat {
+		b.WriteString("A port received through NAT, as a container's published port is, reaches its service as routed traffic, which ufw's route rules and its DEFAULT_FORWARD_POLICY decide as well: check it from off this host once ufw is on.\n")
+	}
+	b.WriteString("A service meant to stay unreachable from off this host, such as a database on a public address, needs nothing.")
+	return b.String()
+}
+
+// v6 reports whether x is a port only ufw's IPV6 setting keeps.
+func (x Blocked) v6() bool { return strings.HasSuffix(x.Key, " over IPv6") }
+
+// ufwKept is what ufw's own before.rules let in on a UDP port whatever
+// the owner's rules say.
+var ufwKept = map[int]string{
+	68:   "ufw's before.rules accept DHCP replies to it",
+	546:  "ufw's before6.rules accept DHCPv6 replies to it",
+	1900: "ufw's before.rules accept SSDP multicast to it",
+	5353: "ufw's before.rules accept mDNS multicast to it",
+}
+
+// loopbackRule is a NAT rule that matches a loopback destination alone,
+// which only the host itself reaches.
+var loopbackRule = regexp.MustCompile(`(?:-d |daddr )(?:127\.|::1\b)`)
+
+// answering is one port, or range of ports, that answers from off the
+// host now: what serves it, whether through NAT, and which of what serves
+// it takes IPv6.
+type answering struct {
+	span
+	via, v6 []string
+	nat     bool
+}
+
+func (a answering) key() string {
+	if a.lo == a.hi {
+		return fmt.Sprintf("%d/%s", a.lo, a.proto)
+	}
+	return fmt.Sprintf("%d:%d/%s", a.lo, a.hi, a.proto)
+}
+
+// kept is one port that answers from off the host now and stays
+// reachable once ufw is on: what serves it, and why it stays.
+type kept struct{ key, via, why string }
+
+// exposure is what enabling ufw does to what answers from off the host
+// now, as ufwBeforeProbe read it: what stays reachable and why, and what
+// it blocks. A listener on loopback, which ufw never filters, and the
+// deployment's own, run as its user or in its subordinate range, answer
+// nothing here. What stays reachable is sshd's ports, which admit allows,
+// the deployment's own allows, what ufw's before.rules let in, and what a
+// rule of the owner's allows (allowedBy), added while ufw is inactive or
+// not.
+func (p *planner) exposure(b ufwBefore) ([]kept, []Blocked) {
+	var all []*answering
+	at := map[string]*answering{}
+	add := func(s span, via string, nat, v6 bool) {
+		if s.proto != "tcp" && s.proto != "udp" {
+			return
+		}
+		s.addr = ""
+		a := &answering{span: s}
+		if found := at[a.key()]; found != nil {
+			a = found
+		} else {
+			at[a.key()] = a
+			all = append(all, a)
+		}
+		if !slices.Contains(a.via, via) {
+			a.via = append(a.via, via)
+		}
+		if v6 && !slices.Contains(a.v6, via) {
+			a.v6 = append(a.v6, via)
+		}
+		a.nat = a.nat || nat
+	}
+	var unread []Blocked
+	unreadable := func(what string) {
+		if !slices.ContainsFunc(unread, func(x Blocked) bool { return x.Key == what }) {
+			unread = append(unread, Blocked{Key: what, What: what})
+		}
+	}
+	for _, line := range b.answering {
+		kind, rest, _ := strings.Cut(line, " ")
+		switch kind {
+		case "listen", "listen-udp":
+			sock, ok := readSocket(kind, rest)
+			if !ok || sock.loopback() || p.ownUID(sock.uid) {
+				continue
+			}
+			add(span{proto: sock.proto, lo: sock.port, hi: sock.port}, sock.what(), false, sock.v6())
+		case "container":
+			f := strings.Split(rest, "\t")
+			if len(f) < 2 {
+				continue
+			}
+			for _, s := range publishes(f[1]) {
+				if !loopbackAddr(s.addr) {
+					add(s, containerWhat(f), true, false)
+				}
+			}
+		case "stopped":
+			f := strings.Fields(rest)
+			if len(f) < 3 || f[1] != "always" {
+				continue
+			}
+			name := hostText(strings.TrimPrefix(f[0], "/"))
+			list, err := bindings(strings.Join(f[2:], " "))
+			if err != nil {
+				unreadable("your Docker's stopped container " + name + ", with restart: always, publishes ports admit cannot read, " + hostText(strings.Join(f[2:], " ")) + ", when your Docker restarts")
+			}
+			for _, s := range list {
+				if !loopbackAddr(s.addr) {
+					add(s, "your Docker's stopped container "+name+", with restart: always, publishes it when your Docker restarts", true, false)
+				}
+			}
+		case "dnat":
+			if loopbackRule.MatchString(rest) {
+				continue
+			}
+			rule := hostText(withoutCounters(rest))
+			protos := []string{"tcp", "udp"}
+			if tcp, udp := strings.Contains(rest, "tcp"), strings.Contains(rest, "udp"); tcp != udp {
+				protos = protos[:1]
+				if udp {
+					protos = []string{"udp"}
+				}
+			}
+			for _, m := range rulePorts(rest) {
+				if m.unread || m.negated {
+					unreadable("a NAT rule whose ports admit cannot list (a negation, a set, a map, a concatenation or a name), in " + rule)
+					break
+				}
+				for _, s := range m.spans {
+					for _, proto := range protos {
+						s.proto = proto
+						add(s, "a NAT rule in "+rule, true, false)
+					}
+				}
+			}
+		}
+	}
+	slices.SortStableFunc(all, func(x, y *answering) int {
+		return cmp.Or(x.lo-y.lo, x.hi-y.hi, strings.Compare(x.proto, y.proto))
+	})
+	own := hostprep.AdmitRules(p.d, p.in.Request.SSHPort, p.in.Request.ListenPort, p.in.Flags.PublicPorts)
+	var keep []kept
+	var blocked []Blocked
+	for _, a := range all {
+		via := strings.Join(a.via, " and ")
+		why, ownPort := "", false
+		switch {
+		case a.proto == "tcp" && a.lo == a.hi && slices.Contains(b.ports, a.lo):
+			why, ownPort = "sshd's port, which admit keeps allowed", true
+		case a.proto == "udp" && a.lo == a.hi && ufwKept[a.lo] != "":
+			why, ownPort = ufwKept[a.lo], true
+		}
+		for _, r := range own {
+			if why == "" && r.Port != 0 && r.Proto == a.proto && a.lo == r.Port && a.hi == r.Port {
+				why, ownPort = "the deployment's own allow ("+r.Why+")", true
+			}
+		}
+		if why == "" {
+			if rule := allowedBy(b.rules, a.proto, a.lo, a.hi); rule != "" {
+				why = "allowed by `ufw " + ui.Visible(rule) + "`"
+			}
+		}
+		if why != "" {
+			keep = append(keep, kept{key: a.key(), via: via, why: why})
+		} else {
+			blocked = append(blocked, Blocked{Key: a.key(), What: strings.Join(a.via, "; "), Allow: "sudo ufw allow " + a.key(), NAT: a.nat})
+		}
+		if !ownPort && len(a.v6) > 0 && b.ipv6 != "yes" {
+			blocked = append(blocked, Blocked{Key: a.key() + " over IPv6", What: strings.Join(a.v6, "; ")})
+		}
+	}
+	return keep, append(blocked, unread...)
+}
+
+// allowedBy is the rule of rules, as `ufw show added` prints them less
+// the leading ufw, that lets proto's ports lo to hi in from anywhere, ""
+// for none: an allow or a limit of a port, a list or a range holding
+// them, with that protocol or none, written `allow [in] [log] <ports>
+// [/<proto>]` or `allow [in] [log] [from any] to any port <ports> [proto
+// <proto>]`. Any other form, narrowed to a source, an interface or an
+// address, or naming an application profile or a service, keeps nothing
+// reachable from everywhere as admit reads it.
+func allowedBy(rules []string, proto string, lo, hi int) string {
+	for _, r := range rules {
+		body := r
+		if m := ufwRule.FindStringSubmatch(r); m != nil {
+			body = m[1]
+		}
+		f := strings.Fields(body)
+		if len(f) == 0 || f[0] != "allow" && f[0] != "limit" {
+			continue
+		}
+		f = f[1:]
+		if len(f) > 0 && f[0] == "in" {
+			f = f[1:]
+		}
+		if len(f) > 0 && (f[0] == "log" || f[0] == "log-all") {
+			f = f[1:]
+		}
+		if len(f) >= 2 && f[0] == "from" && f[1] == "any" {
+			f = f[2:]
+		}
+		var ports, rp string
+		switch {
+		case len(f) == 1:
+			ports, rp, _ = strings.Cut(f[0], "/")
+		case (len(f) == 4 || len(f) == 6 && f[4] == "proto") && f[0] == "to" && f[1] == "any" && f[2] == "port":
+			ports = f[3]
+			if len(f) == 6 {
+				rp = f[5]
+			}
+		default:
+			continue
+		}
+		if rp != "" && rp != proto {
+			continue
+		}
+		if portsHold(ports, lo, hi) {
+			return r
+		}
+	}
+	return ""
+}
+
+// portsHold reports whether ports, a list of ports and ranges as ufw
+// writes them (80,443 or 7000:7010), holds every port from lo to hi.
+func portsHold(ports string, lo, hi int) bool {
+	for _, tok := range strings.Split(ports, ",") {
+		m := portSpan.FindStringSubmatch(tok)
+		if m == nil {
+			return false
+		}
+		if s, ok := spanOf(m[1], m[2]); ok && s.lo <= lo && hi <= s.hi {
+			return true
+		}
+	}
+	return false
 }

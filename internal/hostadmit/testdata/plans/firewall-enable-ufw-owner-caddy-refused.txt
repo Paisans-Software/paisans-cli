@@ -1,0 +1,9 @@
+refused: firewall: ufw is installed but not active, and enabling it would block these, which answer from off this host now:
+  80/tcp: caddy (pid 900, uid 0) listens on *:80
+  443/tcp: caddy (pid 900, uid 0) listens on *:443
+  443/udp: caddy (pid 900, uid 0) listens on *:443/udp
+For each port whose service must stay reachable, run its line before ufw is enabled, then run admit again:
+  sudo ufw allow 80/tcp
+  sudo ufw allow 443/tcp
+  sudo ufw allow 443/udp
+A service meant to stay unreachable from off this host, such as a database on a public address, needs nothing. Once you have checked that every one listed may be blocked, pass --enable-ufw-block-listed with --enable-ufw. Nothing was changed

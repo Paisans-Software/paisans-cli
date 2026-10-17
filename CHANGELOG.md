@@ -13,6 +13,7 @@ changes share a bullet. Detailed notes are on the corresponding
 ### Fixed
 
 - A site that does not answer is classified down on one connection attempt instead of three, and no later command of the run waits for its host again.
+- `site admit --enable-ufw` refuses while enabling ufw would block a port that answers from off the host now, listing each with its `sudo ufw allow` line, unless `--enable-ufw-block-listed` accepts them.
 
 ## [0.3.0-rc.2] - 2026-10-17
 

@@ -32,6 +32,11 @@ type Flags struct {
 	// active, behind an allow for every port sshd listens on and a timer
 	// that turns it off again (planEnableUFW).
 	EnableUFW bool
+	// EnableUFWBlockListed is --enable-ufw-block-listed: with EnableUFW,
+	// enable ufw although it blocks what answers from off the host now
+	// and no rule of the owner's allows, the ports admit's refusal lists
+	// (UFWBlocksError). The plan names each one.
+	EnableUFWBlockListed bool
 }
 
 // Grants are the grants the flags give.
@@ -165,6 +170,9 @@ type Plan struct {
 	// EnablesUFW is a plan that enables ufw behind the fallback timer, which
 	// the command stops once a new SSH login gets through (DisarmUFW).
 	EnablesUFW bool
+	// UFWBlocks is what enabling ufw blocks, as --enable-ufw-block-listed
+	// accepted it: each Blocked's Key.
+	UFWBlocks []string
 	// list is the plan as ShowToRun drew it, whose rows Execute and
 	// RunSteps run; nil when it was not drawn to run.
 	list ui.List

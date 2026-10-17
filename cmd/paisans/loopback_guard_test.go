@@ -23,8 +23,9 @@ var loopbackLiteral = regexp.MustCompile(`\b127\.\d{1,3}\.\d{1,3}\.\d{1,3}\b|(?i
 var loopbackAllowed = map[string]string{
 	"internal/config/config.go structural":                "an example web_server.listen, which the owner's web server dials",
 	"internal/config/mesh.go reservedMesh":                "ranges the mesh subnet may not overlap",
+	"internal/hostadmit/firewall.go loopbackAddr":         "reads the host's own listeners and published ports, as root",
 	"internal/hostadmit/ufw.go readUFWBefore":             "reads the host's own listeners, as root",
-	"internal/hostadmit/ufw.go sshdListener":              "reads the host's own listeners, as root",
+	"internal/hostadmit/ufw.go loopbackRule":              "reads the host's own NAT rules, as root",
 	"internal/hostadmit/webserver.go caddyAdminURL":       "the owner's Caddy, which site admit probes as root",
 	"internal/hostadmit/webserver.go caddyTCPAdmin":       "the owner's Caddy, which site admit probes as root",
 	"internal/hostprep/snippets/egress.nft.tmpl":          "the egress table, which drops the deployment's loopback dials",
