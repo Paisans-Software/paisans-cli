@@ -313,7 +313,7 @@ func checkScope(cfg *config.Config, newSite string, transports map[string]apply.
 		return fmt.Errorf("site add %s: a witness has no replica, so it has no site add of its own. It joins in the site add of the data site that joins with it, whose etcd stage adds every member not yet a voter, witnesses first: run `paisans site add <data site>`, or `paisans apply`, which plans it. A witness joining with no data site makes the voters even, which validate refuses", newSite)
 	}
 	if len(site.Roles) != 1 || !site.Has(config.RoleData) {
-		return fmt.Errorf("site add %s: the site's roles must be exactly [data]. site add's stages start no app stacks, so join it as [data], then give it the apps role and run site prepare and apply on it, and apply on the gateway (Pocket ID stands by there while another site is active); a second gateway is a separate change", newSite)
+		return fmt.Errorf("site add %s: the site's roles must be exactly [data]. site add's stages start no app stacks, so join it as [data], then give it the apps role and run site prepare and apply on it, and apply on the gateway (Pocket ID stands by there while another site is active); a second gateway is a separate change. For a site declared [data, apps], `paisans apply` with no --site does all of this in one run", newSite)
 	}
 	if !contains(cfg.Cluster.Sites, newSite) {
 		return fmt.Errorf("site add %s: cluster.sites is written and does not list it, so there is no replica to add. List it there, or leave the key out so it is derived from the roles, every data site", newSite)

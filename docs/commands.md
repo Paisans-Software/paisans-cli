@@ -931,7 +931,8 @@ that it runs, in the order and under the conditions *`paisans apply` with no
 `--site` converges the whole deployment* in `README.md` gives. In order: `init`
 when it has work; `site prepare` on every host at once; a pull of every site's
 images on every host at once, so no install waits on a download; `dns init`; the
-founding applies, `site add`, the other sites, storage and pass two; `gateway
+founding applies, `site add`, the other sites (a site that joined with the
+`apps` role first, then the gateway), storage and pass two; `gateway
 move`, when a site without the gateway role still serves as the gateway; the
 `pocket id` step, which makes each operator a user of every running Pocket ID
 app and issues a login link to one with no passkey; and, for each app behind the operator's own web
@@ -1137,6 +1138,11 @@ paisans site add home-b --execute   # runs them, stopping at the first failed ga
 * **Alone:** the whole apply runs it for each data site the running cluster
   has not admitted, and a witness joining beside one is joined by that run.
   Typed alone, it shows a join's stages and gates, or resumes a join.
+* **Roles:** the site holds `[data]`, since no stage starts an app stack.
+  As a step of the whole apply, a site declared `[data, apps]` joins with
+  its data role alone, and the run then applies the site, which starts its
+  apps, and the gateway, whose routes gain it. Typed alone, it refuses
+  `[data, apps]` and names that run.
 * **Flags:** the site, as an argument before or after the flags; `--config`,
   `--secrets`, `--execute`, `--yes` (approves the review). No `--ssh`, since it reaches several
   hosts.

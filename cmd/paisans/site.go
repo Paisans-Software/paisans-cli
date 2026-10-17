@@ -124,6 +124,12 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	if cfg, err = recordArchitectures(r, *configPath, cfg, read, *execute && reviewedByRun == nil); err != nil {
 		return err
 	}
+	// As a step of apply with no --site, a site declared [data, apps] joins
+	// as [data]: the run applies it once the join is done, which starts its
+	// apps, and applies the gateway after that.
+	if reviewedByRun != nil {
+		cfg = joinedAsData(cfg, site)
+	}
 	// Stage 4 pulls the new site's images only after the mesh, HAProxy and
 	// etcd have changed on every site, so an image with no build for its
 	// architecture is refused here, before anything changes.
@@ -201,4 +207,24 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	reportOwedApplies(r, plan.Owed)
 	r.Result("%s joined: every gate passed.", site)
 	return nil
+}
+
+// joinedAsData is cfg with site, declared [data, apps], given the data role
+// alone, the configuration site add joins it with as a step of apply with no
+// --site. site add's stages start no app stacks; the run's apply of the site
+// that follows the join starts them, and the gateway's apply after it routes
+// to them. Any other site leaves cfg as it is. cfg is not changed.
+func joinedAsData(cfg *config.Config, site string) *config.Config {
+	s, ok := cfg.Sites[site]
+	if !ok || len(s.Roles) != 2 || !s.Has(config.RoleData) || !s.Has(config.RoleApps) {
+		return cfg
+	}
+	joined := *cfg
+	joined.Sites = make(map[string]config.Site, len(cfg.Sites))
+	for name, other := range cfg.Sites {
+		joined.Sites[name] = other
+	}
+	s.Roles = []config.Role{config.RoleData}
+	joined.Sites[site] = s
+	return &joined
 }

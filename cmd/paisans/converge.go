@@ -203,6 +203,26 @@ func convergePlan(cfg *config.Config, st convergeState) []convergeStep {
 	for _, m := range joining {
 		steps = append(steps, step(stageJoining, "site", "add", m))
 	}
+	// site add's stages start no app stacks, so a site joining with the
+	// apps role beside data joins as [data], and its own apply follows the
+	// join to start its apps, Pocket ID standing by there while another
+	// site's is active. The gateway is applied after it, so that Caddy
+	// routes to the new apps site: a gateway outside etcd is among the
+	// sites applied next, and one that is a member is applied here.
+	var joinedApps []string
+	for _, m := range joining {
+		if s := cfg.Sites[m]; s.Has(config.RoleData) && s.Has(config.RoleApps) {
+			joinedApps = append(joinedApps, m)
+			steps = append(steps, applyStep(stageOthers, m))
+		}
+	}
+	if len(joinedApps) > 0 {
+		for _, g := range cfg.GatewaySites() {
+			if slices.Contains(members, g) && !slices.Contains(joinedApps, g) {
+				steps = append(steps, applyStep(stageOthers, g))
+			}
+		}
+	}
 
 	// A monitor checks every other site and app, so it is applied after
 	// them, among the sites outside etcd and in pass two. One in
@@ -1711,6 +1731,14 @@ func convergeWaits(cfg *config.Config, steps []convergeStep, i int) []string {
 		if s.Stage == stageFounding && !cfg.Sites[site].Has(config.RoleWitness) {
 			for _, e := range earlier {
 				if e.Stage != stagePassTwo && e.Args[0] == "apply" && cfg.Sites[stepSite(e)].Has(config.RoleWitness) {
+					waits = append(waits, e.Title)
+				}
+			}
+		}
+		// The apply that starts a joined site's apps follows its site add.
+		if s.Stage == stageOthers {
+			for _, e := range earlier {
+				if e.Stage == stageJoining && stepSite(e) == site {
 					waits = append(waits, e.Title)
 				}
 			}

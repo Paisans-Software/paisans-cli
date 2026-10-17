@@ -137,7 +137,44 @@ func initial(names ...string) render.EtcdInitial {
 // A member the founded cluster's initial-cluster does not list joins it.
 func TestConvergeJoinsAMemberTheClusterDoesNotList(t *testing.T) {
 	steps := convergePlan(fixture(t), convergeState{Initial: map[string]render.EtcdInitial{"home-a": initial("home-a", "vm"), "vm": initial("home-a", "vm")}})
-	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: apply --site watch", "other sites: apply --site home-a", "storage: storage add"}, passTwoPhase)...)
+	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: apply --site home-b", "other sites: apply --site vm", "other sites: apply --site watch", "other sites: apply --site home-a", "storage: storage add"}, passTwoPhase)...)
+}
+
+// A pending site declared [data, apps] is joined in one run: its site add
+// joins the data role, then its own apply starts its app stacks, and the
+// gateway is applied after it, so Caddy routes to the new apps site. Pass
+// two follows as for any run.
+func TestConvergeJoinsADataAndAppsSiteThenStartsItsApps(t *testing.T) {
+	cfg := fixture(t)
+	if !slices.Equal(cfg.Sites["home-b"].Roles, []config.Role{config.RoleData, config.RoleApps}) {
+		t.Fatalf("home-b is %v, not [data, apps]", cfg.Sites["home-b"].Roles)
+	}
+	steps := convergePlan(cfg, convergeState{Initial: map[string]render.EtcdInitial{"home-a": initial("home-a", "vm"), "vm": initial("home-a", "vm")}})
+	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{
+		"joining: site add home-b",
+		"other sites: apply --site home-b",
+		"other sites: apply --site vm",
+		"other sites: apply --site watch",
+		"other sites: apply --site home-a",
+		"storage: storage add",
+	}, passTwoPhase)...)
+}
+
+// A site declared [data] alone joins through its site add and is applied
+// in pass two, with no apply of its own between: it has no app stacks to
+// start.
+func TestConvergeJoinsADataOnlySiteThroughItsSiteAdd(t *testing.T) {
+	cfg := fixture(t)
+	site := cfg.Sites["home-b"]
+	site.Roles = []config.Role{config.RoleData}
+	cfg.Sites["home-b"] = site
+	steps := convergePlan(cfg, convergeState{Initial: map[string]render.EtcdInitial{"home-a": initial("home-a", "vm"), "vm": initial("home-a", "vm")}})
+	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{
+		"joining: site add home-b",
+		"other sites: apply --site watch",
+		"other sites: apply --site home-a",
+		"storage: storage add",
+	}, passTwoPhase)...)
 }
 
 // One data site runs, founded alone, and the configuration adds a witness and
@@ -146,7 +183,7 @@ func TestConvergeJoinsAMemberTheClusterDoesNotList(t *testing.T) {
 // add of its own, which would refuse it as not a data site and stop the run.
 func TestConvergeJoinsAWitnessThroughTheDataSitesSiteAdd(t *testing.T) {
 	steps := convergePlan(fixture(t), convergeState{Initial: map[string]render.EtcdInitial{"home-a": initial("home-a")}})
-	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: apply --site watch", "other sites: apply --site home-a", "storage: storage add"}, passTwoPhase)...)
+	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: apply --site home-b", "other sites: apply --site vm", "other sites: apply --site watch", "other sites: apply --site home-a", "storage: storage add"}, passTwoPhase)...)
 }
 
 // A witness joining with no data site beside it is still planned, as its own
@@ -570,7 +607,7 @@ func TestConvergeReplansAfterInit(t *testing.T) {
 	if err := converge(t, "--execute"); err != nil {
 		t.Fatal(err)
 	}
-	sameLines(t, *ran, append([]string{"init"}, commands(slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: apply --site watch", "other sites: apply --site home-a", "storage: storage add"}, passTwoPhase))...))
+	sameLines(t, *ran, append([]string{"init"}, commands(slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: apply --site home-b", "other sites: apply --site vm", "other sites: apply --site watch", "other sites: apply --site home-a", "storage: storage add"}, passTwoPhase))...))
 }
 
 // The dry run names what is left, the declared operators among it.
@@ -1457,6 +1494,8 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 				"✓ site prepare --site home-a", "✓ site prepare --site home-b", "✓ site prepare --site vm", "✓ site prepare --site watch",
 				"✓ dns init",
 				"○ site add home-b: 4 stages",
+				"· apply --site home-b: after site add home-b",
+				"✓ apply --site vm",
 				"✓ apply --site watch",
 				"✓ apply --site home-a",
 				"· storage add: after site add home-b",
@@ -2358,8 +2397,12 @@ func TestConvergeSkipsADownSitesSteps(t *testing.T) {
 // cannot take. Its site add is dropped and the site is left out of the run
 // as a pending one is, so no other site is handed files naming a member
 // the cluster has not admitted; the plan says why, and the run goes on and
-// ends degraded.
+// ends degraded. home-b is declared [data, apps], so the apply that would
+// start its apps after the join waits with it.
 func TestConvergeJoinWaitsWhileASiteIsDown(t *testing.T) {
+	if roles := fixture(t).Sites["home-b"].Roles; !slices.Equal(roles, []config.Role{config.RoleData, config.RoleApps}) {
+		t.Fatalf("home-b is %v, not [data, apps]", roles)
+	}
 	ran := fakeConverge(t, nil)
 	seen := stepSites(t)
 	convergeReadInitial = func(_ *config.Config, m string) (render.EtcdInitial, bool, error) {

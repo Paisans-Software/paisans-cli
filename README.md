@@ -5997,7 +5997,7 @@ it:
 | dns | `dns init` | always; a record pointing elsewhere stops it, to be changed by hand |
 | founding | `apply --site <s>`: each witness in `etcd.members`, then the other members | a member is still being founded (below); a witness that is founded already is applied here too while a data member is still being founded, since that member's apply refuses until a witness's etcd runs |
 | joining | `site add <s>` | the cluster runs and a data member has not joined it; a joining witness is joined by that `site add`, and gets one of its own only when no data member joins, which stops the run |
-| other sites | `apply --site <s>`, monitor sites last | every site not in `etcd.members`, and then every Garage site no earlier step applies or joins, since storage works through Garage's container |
+| other sites | `apply --site <s>`, monitor sites last | first each site that joined with `roles: [data, apps]`, which starts its apps, and then each gateway in `etcd.members`, so its routes gain the new apps site; then every site not in `etcd.members`, and then every Garage site no earlier step applies or joins, since storage works through Garage's container |
 | storage | `storage init --site <g>` for one Garage site, `storage add` for several | any Garage site |
 | pass two | `apply --site <s>` for every site, monitor sites last, a monitor in `etcd.members` too | always: it resumes a founding stop or a replica's wait for the databases, and moves what earlier steps changed |
 | gateway | `gateway move` | a site without the gateway role still holds this deployment's gateway (see *Moving the gateway*) |
@@ -8615,8 +8615,11 @@ and `site add <witness>` refuses saying so. A second Garage node
 is `storage add`'s (see *More than one Garage site: `storage add`*), and
 removing a site is `site remove`'s (below). Apps on
 the new site come after the join rather than in it, since no stage starts an
-app stack: give the site the `apps` role, `site prepare` and `apply` it, then
-`apply` the gateway, whose routes gain the site.
+app stack. A site declared `roles: [data, apps]` joins through the whole
+apply, in one run: its `site add` joins it with the data role alone, the
+site's own `apply` then starts its apps, and the gateway's apply follows,
+whose routes gain the site. `site add` typed alone refuses such a site and
+names that run.
 Pocket ID stands by there while another site's instance is active (see
 *Pocket ID runs on every apps site, and one of them is active*). `docs/specs/2026-10-07-site-add.md` is the approved specification.
 
