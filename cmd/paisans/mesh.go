@@ -111,7 +111,7 @@ func initAdmissions(r ui.Reporter, cfg *config.Config, hosts map[string]registry
 			hint, _ := ui.Describe(err)
 			skipped = append(skipped, notAdmitted{site: name, why: hint})
 			s.Detail("%s", err)
-			s.End(ui.Pending, "not admitted, skipped")
+			s.End(ui.Pending, "not admitted")
 		case errors.As(err, &se), errors.As(err, &unreadable):
 			admitted = append(admitted, name)
 			result := "admitted, does not match"
@@ -172,7 +172,8 @@ func listNotAdmitted(r ui.Reporter, skipped []notAdmitted) {
 	if len(names) > 1 {
 		hint = strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1] + " have not admitted this deployment yet"
 	}
-	r.Warn(hint, strings.Join(lines, "\n"))
+	// A note, so the reasons show without --verbose.
+	r.Note(hint, strings.Join(lines, "\n"))
 }
 
 // offerAdmissions is what init does about each site not admitted. At a
@@ -186,14 +187,16 @@ func listNotAdmitted(r ui.Reporter, skipped []notAdmitted) {
 // It returns the admitted sites, in name order, and the configuration as
 // the file now holds it, since admit's first login as the deployment's
 // user may record ssh.user there; hosts is updated for each site admitted.
-// An admit that fails stops init with its error; a plan the operator
-// declines is a no.
+// An admit that fails once its plan runs stops init with its error; one
+// that stops before, with nothing changed (see admitStopped), is a no,
+// whose reason the skip names.
 func offerAdmissions(r ui.Reporter, cfg *config.Config, path string, hosts map[string]registry.Runner, admitted []string, skipped []notAdmitted, ans answerer, stdin io.Reader, stdout io.Writer) ([]string, *config.Config, error) {
 	ask := !ans.yes && stdinIsTerminal(stdin) && cfg.Mesh.Subnet != ""
 	if len(skipped) > 0 && !ans.yes && stdinIsTerminal(stdin) && cfg.Mesh.Subnet == "" {
-		r.Detail("mesh.subnet is not set yet, so no site can be admitted before init chooses it.")
+		r.Note("mesh.subnet is not set yet, so init offers to admit no site", "site admit checks the subnet on the host, and init chooses it in this run. Once init has run, admit each site with the commands below, or run init again.")
 	}
 	for _, n := range skipped {
+		why := ""
 		if ask {
 			resume := ui.Hold(r)
 			yes, err := ans.yesNo(stdin, stdout, "", fmt.Sprintf("Admit %s now from this machine?", n.site), "")
@@ -217,12 +220,15 @@ func offerAdmissions(r ui.Reporter, cfg *config.Config, path string, hosts map[s
 					admitted = append(admitted, n.site)
 					continue
 				}
-				if !errors.Is(err, errAdmitDeclined) {
+				if !admitStopped(err) {
 					return nil, nil, err
 				}
+				hint, explain := ui.Describe(err)
+				why = "site admit stopped with nothing changed: " + strings.TrimSpace(hint+" "+explain) + "\n\n"
 			}
 		}
-		r.Warn(n.site+" has not admitted this deployment yet, so init skipped it", admitCommands(path, n.site))
+		// A note, so the commands show without --verbose.
+		r.Note(n.site+" has not admitted this deployment yet, so init skipped it", why+admitCommands(path, n.site))
 	}
 	sort.Strings(admitted)
 	return admitted, cfg, nil
@@ -236,7 +242,7 @@ func admitCommands(path, site string) string {
 	if path != config.FileName {
 		withConfig = " --config " + shellQuote(path)
 	}
-	return fmt.Sprintf("site admit checks the mesh subnet against the host as root, and refuses one that overlaps anything there. If the host is yours, admit the site from this machine, with your own login on the host, which runs admit through sudo:\n\n    paisans site admit --site %[1]s%[2]s --ssh <your login>\n\nIf someone else owns the host, send them a request:\n\n    paisans site request --site %[1]s%[2]s > %[1]s.admit\n\nand ask them to run, on the host:\n\n    sudo paisans site admit --request %[1]s.admit", site, withConfig)
+	return fmt.Sprintf("site admit checks the mesh subnet against the host as root, and refuses one that overlaps anything there. Each command below shows its plan before it changes anything, and takes the flags init cannot pass, such as --data-dir and --bridge-netfilter. If the host is yours, admit the site from this machine, with your own login on the host, which runs admit through sudo:\n\n    paisans site admit --site %[1]s%[2]s --ssh <your login> --execute\n\nIf someone else owns the host, send them a request:\n\n    paisans site request --site %[1]s%[2]s > %[1]s.admit\n\nand ask them to run, on the host:\n\n    sudo paisans site admit --request %[1]s.admit --execute", site, withConfig)
 }
 
 // settleMesh is init's subnet decision, over the admitted sites alone (see

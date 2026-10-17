@@ -218,16 +218,19 @@ under `--verbose`.
   which runs admit through sudo, and for each grant the site's roles need,
   shows the plan, and asks `Make these changes on <host>?` before it runs
   it. init then checks the site's admission again and goes on with it
-  admitted. A failed admit stops init. This is the one way init changes a
-  host. While `mesh.subnet` is missing it asks nothing, since admit checks
-  the subnet on the host.
-* **Skipping a site:** with no terminal, with `--yes`, on a no, or on a
-  declined plan, a site not admitted is skipped with a warning naming what
-  admits it: `paisans site admit --site <site> --ssh <your login>` from this
-  machine when the host is yours, or `paisans site request --site <site> >
-  <site>.admit` and then `sudo paisans site admit --request <site>.admit` on
-  the host, by an owner who is someone else. `site admit` checks the subnet
-  there as root. A site that does not answer, or
+  admitted. An admit that fails once its plan runs stops init. This is the
+  one way init changes a host. While `mesh.subnet` is missing it asks
+  nothing, and says so, since admit checks the subnet on the host.
+* **Skipping a site:** with no terminal, with `--yes`, on a no, or when admit
+  stops before its plan runs (a declined grant, ufw question or plan, no
+  login, or a refusal of the host), a site not admitted is skipped with a
+  note naming why admit stopped, if it did, and what admits it: `paisans
+  site admit --site <site> --ssh <your login> --execute` from this machine
+  when the host is yours, or `paisans site request --site <site> >
+  <site>.admit` and then `sudo paisans site admit --request <site>.admit
+  --execute` on the host, by an owner who is someone else. Both take the
+  flags init cannot pass, such as `--data-dir`. `site admit` checks the
+  subnet there as root. A site that does not answer, or
   refuses the operator's key as a user it names, refuses it with nothing
   written, unless a site already holds the deployment, whose subnet is then
   kept. An admitted site pins the subnet site admit built it around, so

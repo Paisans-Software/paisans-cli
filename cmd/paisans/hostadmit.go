@@ -118,17 +118,42 @@ type admitRun struct {
 // errAdmitDeclined is a plan the owner did not approve (admitRun.approve).
 var errAdmitDeclined = errors.New("site admit: the plan was not approved. Nothing was changed")
 
+// admitStoppedError is admit stopping before it ran its plan: a declined
+// grant or ufw question, no login, or a refusal of the host, read only.
+// Nothing on the host was changed. Its text is the stop's own.
+type admitStoppedError struct{ err error }
+
+func (e *admitStoppedError) Error() string { return e.err.Error() }
+func (e *admitStoppedError) Unwrap() error { return e.err }
+
+// admitStopped reports whether err is admit stopping with nothing changed:
+// a declined plan, or any stop before the plan ran.
+func admitStopped(err error) bool {
+	var stopped *admitStoppedError
+	return errors.Is(err, errAdmitDeclined) || errors.As(err, &stopped)
+}
+
 // admitFromInit is site admit --site site --execute, for init: admit's own
 // flow, asking at stdin's terminal for the owner's login on the host and
 // for each grant the site's roles need, then showing the plan and asking
-// before it runs. A plan the operator declines is errAdmitDeclined.
+// before it runs. A plan the operator declines is errAdmitDeclined, and any
+// other stop before the plan runs is an admitStoppedError (see
+// admitStopped).
 func admitFromInit(r ui.Reporter, configPath, site string, stdin io.Reader, stdout io.Writer) error {
 	return admit(r, admitRun{site: site, configPath: configPath, execute: true, approve: true}, answerer{}, stdin, stdout)
 }
 
 // admit is site admit once its flags are checked: from a request on the
 // host, or from the configuration over the owner's own ssh.
-func admit(r ui.Reporter, run admitRun, ans answerer, stdin io.Reader, stdout io.Writer) error {
+func admit(r ui.Reporter, run admitRun, ans answerer, stdin io.Reader, stdout io.Writer) (err error) {
+	// Everything before executeAdmit reads the host and changes nothing,
+	// so a stop there is an admitStoppedError.
+	ran := false
+	defer func() {
+		if err != nil && !ran && !errors.Is(err, errAdmitDeclined) {
+			err = &admitStoppedError{err}
+		}
+	}()
 	request, site, sshFlag, configPath, digestFlag, flags, execute := run.request, run.site, run.sshFlag, run.configPath, run.digestFlag, run.flags, run.execute
 	in := hostadmit.Input{Flags: flags, Now: time.Now()}
 	var declared config.Site
@@ -259,6 +284,7 @@ func admit(r ui.Reporter, run admitRun, ans answerer, stdin io.Reader, stdout io
 			return err
 		}
 	}
+	ran = true
 	if err := executeAdmit(t, in, plan, r); err != nil {
 		return ufwFallbackNote(err, plan, false)
 	}
