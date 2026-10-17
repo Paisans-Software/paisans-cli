@@ -3898,21 +3898,74 @@ records it would have created by hand, unproxied.
 be forged as the sender of a message whether or not anybody sends mail from
 it, and a receiver refuses the forgery only when the name says it sends none.
 So `dns init` publishes, beside the address records, the records a DNS
-provider recommends for a domain that sends no mail:
+provider recommends for a domain that sends no mail. A receiver enforcing
+DMARC applies the registrable domain's policy to every name under it that has
+none of its own, so one DMARC policy covers every hostname, and a hostname
+gets no record of its own unless no policy the deployment may write covers
+it:
 
 | Name | Record | What it tells a receiver |
 |------|--------|--------------------------|
-| `community.domain` and every name that gets an address record | TXT `v=spf1 -all` | no server may send as this name. SPF applies only to the exact name it is published at, and a wildcard reaches no name that holds another record, so each hostname carries its own |
+| `community.domain` | TXT `v=spf1 -all` | no server may send as the domain |
 | `community.domain` | MX `0 .` (RFC 7505's null MX) | the domain accepts no mail, so nothing is delivered to it and no bounce is sent in its name |
 | `*._domainkey.<community.domain>` | TXT `v=DKIM1; p=` | no selector under the domain has a key to verify a signature with |
 | `_dmarc.<community.domain>` | TXT `v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s;` | reject what fails, on the domain (`p`) and on every name under it (`sp`) |
-| `_dmarc.<hostname>`, for every name that gets an address record, when `community.domain` is below its registrable domain | TXT `v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s;` | a receiver finding no policy at a hostname's own `_dmarc` applies the registrable domain's (`example.org` for `talk.staging.example.org`), never `community.domain`'s, so each hostname carries its own. A hostname that is itself a registrable domain gets none |
+| `_dmarc.<registrable domain>`, when `community.domain` is below it and the conditions below hold | TXT `v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s;` | a receiver finding no policy at a name's own `_dmarc` applies the registrable domain's (`example.org` for `talk.staging.example.org`), never `community.domain`'s, so this one record covers every hostname below it |
+| `_dmarc.<hostname>`, for every name that gets an address record, when the registrable domain's policy is one `dns init` only checks or may not write, and does not reject | TXT `v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s;` | each hostname carries the policy the registrable domain does not: below a registrable domain above `community.domain`, or under a `community.domain` with mail of its own |
+| a hostname that is itself a registrable domain | TXT `v=spf1 -all` | a DMARC policy there would govern names the deployment does not run, so the hostname says it sends no mail with SPF, which applies to that exact name alone |
 
-When `community.domain` is below its registrable domain, `dns init` also checks
-the registrable domain's DMARC policy and never writes it, since that domain
-holds names the deployment does not run: a policy that is missing, or weaker
-than `p=reject` and `sp=reject` with no `pct` below 100, is a `!` note. A
-registrable domain the DNS provider does not hold is not checked.
+When `community.domain` is below its registrable domain, every name a policy
+there would govern is one the deployment may not run, so `dns init` writes
+that policy only where it changes nothing for anybody's mail. It creates
+`_dmarc.<registrable domain>` when all of these hold:
+
+* the DNS provider holds the registrable domain's zone;
+* the zone has no DMARC policy there, since one is never replaced;
+* no name in the zone, or in a zone delegated from it, has mail and no DMARC
+  policy of its own. A name has mail when it holds an MX record other than
+  the null MX, an SPF record naming a sender, or a DKIM key at a selector
+  under it, or when it is a CNAME to a name that receives mail or names a
+  sender, which `dns init` resolves through public DNS. A sender `dns init`
+  gives a policy in the same run (see below)
+  has one of its own; a hostname whose own policy the registrable domain's
+  would cover does not, since that policy is then never written. The domain
+  itself never has one of its own: the policy written there is its;
+* no sender the configuration names under the registrable domain (see
+  *A name with mail of its own* below) lacks a DMARC policy of its own, even
+  one whose mail's DNS is not there yet;
+* every zone delegated from it is held by the DNS provider, so nothing under
+  the domain is out of sight.
+
+A policy already there that rejects (`p=reject`, `sp=reject`, no `pct` below
+100) with strict alignment (`adkim=s`, `aspf=s`), whoever wrote it, and is the
+only one there, covers the hostnames, and `dns init` writes no
+`_dmarc.<hostname>` and no `_dmarc.<community.domain>`. Relaxed alignment
+covers nothing, since a forger passes it with any sibling name's SPF. Nor
+does the policy cover a hostname when a name between the two holds a policy
+that is not as strict, delegates its policy by a CNAME, or is delegated to
+nameservers the DNS provider does not hold: a receiver walking up the tree
+under DMARCbis may read that one first.
+The run that creates the policy still gives each hostname its own, since
+nothing says the provider let it be written until it reads back; `dns prune
+--execute` then removes them. A policy that is weaker, or a missing one that
+`dns init` cannot write, is a `!` note naming what stops it, and each
+hostname carries its own policy instead. So is more than one policy there,
+which a receiver applies none of, and a CNAME delegating the policy to a
+DMARC service, which `dns init` does not follow.
+
+The policy `dns init` wrote is a conflict once a sender the configuration
+names under the domain has no policy of its own, or the domain itself has an
+MX record or an SPF record naming a sender, since that mail is rejected
+under it: give the sender its own policy, or delete this one by hand. The
+rest of the zone is read only before the policy is written, not on every
+run, so mail someone adds elsewhere under the domain later is theirs to give
+a policy. A registrable domain the DNS provider does not hold is not read.
+
+For `talk.example.org` with `community.domain: example.org`, and
+`talk.staging.example.org` with `community.domain: staging.example.org`, the
+whole tree's no-mail DMARC is `_dmarc.example.org`. A relay's sending name,
+such as `send.example.org`, keeps the policy at its own `_dmarc`, which a
+receiver reads first.
 
 **A name with mail of its own gets none of them.** Some communities run mail
 at their domain through a hosted service (Eg: Google Workspace, Fastmail or
@@ -3929,7 +3982,10 @@ A sender in an `smtp` block makes its own domain one of these without being
 listed: the domain of `smtp.from_address`, and of every `from_address` an app
 that sends mail declares for itself, so the toolkit never locks out mail it
 configured. Every other name is locked down as above, the hostnames under a
-mail domain included. `dns init` checks the DMARC policy of every mail name
+mail domain included. Under a `community.domain` with mail of its own, each
+hostname gets its own DMARC policy while the domain's does not reject, and
+none once it does. A hostname under a mail name below the registrable domain
+is covered like any other, by the registrable domain's policy. `dns init` checks the DMARC policy of every mail name
 under `community.domain`: a policy weaker than `p=reject` and `sp=reject` with
 no `pct` below 100 is a `!` note, never a conflict and never replaced. A
 missing policy is a note too while the name holds an MX record, since whoever
@@ -3947,14 +4003,11 @@ alone and stops nothing. A record of the same kind that says something else
 is a conflict, and so is a second SPF record, since a receiver treats two as an
 error and ignores both. A DMARC policy is compared by what it makes a receiver
 do, so one that adds a reporting address to `p=reject` is present, not a
-conflict. An SPF record that lets a server send, or an MX that receives, is the
+conflict. At a hostname, `dns init` writes no SPF record but reads the one
+there: one that lets a server send is a conflict, since the hostname has mail
+nobody listed and the DMARC policy covering it would reject that mail. An SPF record that lets a server send, or an MX that receives, is the
 likeliest conflict, and it says which line to add: the name has mail, and
 belongs in `community.mail_domains`.
-
-When `community.domain` is itself a subdomain (Eg: `staging.example.org`), a
-receiver that looks up a hostname's policy at the organisational domain
-(`example.org`) rather than at `community.domain` finds whatever that domain
-publishes. The SPF record on each hostname holds either way.
 
 **`dns prune` removes what `dns init` made and nothing wants any more.** A
 deployment that renames or drops an app's media hostname is left holding the
@@ -3974,7 +4027,9 @@ and says so. Naming it with `--name` lifts the scope rule for that exact name
 and nothing else: the comment, the address and the not-wanted rules still
 apply, and a `--name` that matches no record `dns init` created is refused, so
 a typo cannot widen anything. The lift is per name because a zone usually
-holds more than one deployment's names.
+holds more than one deployment's names. The same holds for the registrable
+domain's DMARC policy `dns init` wrote, once `community.domain` moves out from
+under that domain: `--name _dmarc.example.org` removes it.
 
 
 A record is deleted only when every one of these holds:
@@ -3985,7 +4040,7 @@ A record is deleted only when every one of these holds:
 | it is an A or AAAA record holding an address of that record's family, or a TXT or MX record holding exactly one of the no-mail contents above at the kind of name `dns init` writes it at | those are the only records `dns init` creates, an IPv4-mapped address in an AAAA record would otherwise match an IPv4 address, and a TXT or MX that says anything but "no mail here" is somebody's mail |
 | its name is `community.domain`, a name under it, or a name the configuration produces now | every media hostname, derived or declared, is under the domain, and so was the shared one per app hostnames replaced |
 | for an address record, its address is a site's `public_address` or `public_address6` | it pointed at this deployment's own host. A no-mail record points at nothing; its exact content ties it to the toolkit instead |
-| no record of its type is wanted at its name | prune removes names, it does not repoint them. A DMARC policy `dns init` only checks is not wanted |
+| no record of its type is wanted at its name | prune removes names, it does not repoint them. A DMARC policy `dns init` only checks is not wanted, except the registrable domain's, which the hostnames below rely on. A hostname's own policy is not wanted while the registrable domain's rejects |
 
 **A name given mail is a prune, then the provider.** Listing a name in
 `community.mail_domains` stops `dns init` wanting its no-mail records, and

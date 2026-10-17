@@ -2,6 +2,7 @@ package dns
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"sort"
@@ -168,8 +169,26 @@ func BuildPrune(ctx context.Context, provider Provider, cfg *config.Config, want
 	for _, n := range vouched {
 		rules.vouched[normalise(n)] = true
 	}
-	for _, w := range wants {
+	cache := map[string]zone{}
+	parent, rest := splitParent(wants)
+	for _, w := range rest {
 		rules.names = append(rules.names, w.Name)
+	}
+	if _, held, err := heldParent(ctx, provider, parent, cache); err != nil {
+		return nil, err
+	} else if held {
+		rules.names = append(rules.names, parent.Name)
+	}
+	// A no-mail DMARC policy dns init plans as Covered is not wanted: the
+	// two judge coverage the same way because prune asks dns init's plan.
+	covered, err := Build(ctx, provider, cfg.Deployment(), wants)
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range covered.Entries {
+		if e.Action == Covered {
+			delete(rules.wanted, e.Type+" "+e.Name)
+		}
 	}
 	for _, name := range cfg.SiteNames() {
 		for key, ip := range siteAddresses(cfg, name) {
@@ -262,8 +281,11 @@ func siteRemovalRules(before *config.Config, site string, after *config.Config) 
 			}
 		}
 	}
+	// The registrable domain's policy is no address record's name, and its
+	// zone need not be the provider's.
 	if wants, err := Desired(before); err == nil {
-		for _, w := range wants {
+		_, rest := splitParent(wants)
+		for _, w := range rest {
 			rules.names = append(rules.names, w.Name)
 		}
 	}
@@ -295,7 +317,10 @@ func siteAddresses(cfg *config.Config, name string) map[string]string {
 func wantedSet(wants []Want) map[string][]string {
 	out := map[string][]string{} // type + " " + name -> sources
 	for _, w := range wants {
-		if w.Advisory || w.Leftover {
+		// The registrable domain's policy is wanted even where it is only
+		// checked: a lockdown one there is this deployment's dns init's, and
+		// the names below rely on it.
+		if w.Advisory && !w.Parent || w.Leftover || w.Guard {
 			continue
 		}
 		out[w.Type+" "+w.Name] = w.Sources
@@ -318,8 +343,23 @@ func planPrune(ctx context.Context, provider Provider, cfg *config.Config, rules
 	cache := map[string]zone{}
 	seen := map[string]bool{}
 	var zones []zone
-	for _, name := range append([]string{domain}, rules.names...) {
+	// A vouched name's zone is listed too, so a record outside every
+	// zone the configuration names (the registrable domain's policy once
+	// the configuration stops producing it) can still be vouched for.
+	names := append([]string{domain}, rules.names...)
+	vouchedOnly := map[string]bool{}
+	for n := range rules.vouched {
+		names = append(names, n)
+		vouchedOnly[n] = true
+	}
+	for _, n := range rules.names {
+		delete(vouchedOnly, n)
+	}
+	for _, name := range names {
 		z, err := FindZone(ctx, provider, name, cache)
+		if vouchedOnly[name] && errors.Is(err, errNoZone) {
+			continue
+		}
 		if err != nil {
 			return nil, nil, err
 		}

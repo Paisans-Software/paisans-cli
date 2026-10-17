@@ -244,11 +244,10 @@ func TestFreshZonePlansCreatesAndExecuteReadsBack(t *testing.T) {
 	p.Show(out)
 	t.Logf("dry run:\n%s", out.Lines())
 
-	// Five address records, and the no-mail records: SPF on each of those
-	// five names and on the domain, the domain's null MX, empty DKIM key
-	// and DMARC policy.
-	if len(p.Entries) != 14 || len(p.Creates()) != 14 || len(addressEntries(p.Entries)) != 5 {
-		t.Fatalf("want 14 creates, 5 of them addresses, got %+v", p.Entries)
+	// Five address records, and the domain's no-mail records: its SPF,
+	// null MX, empty DKIM key and DMARC policy.
+	if len(p.Entries) != 9 || len(p.Creates()) != 9 || len(addressEntries(p.Entries)) != 5 {
+		t.Fatalf("want 9 creates, 5 of them addresses, got %+v", p.Entries)
 	}
 	// Each record to create is pending, its whole line in the title.
 	if !out.Has("pending", "create A talk.example.org -> 203.0.113.10 (zone example.org)") {
@@ -266,8 +265,8 @@ func TestFreshZonePlansCreatesAndExecuteReadsBack(t *testing.T) {
 	if !run.Has("done", "create A talk.example.org") {
 		t.Errorf("steps:\n%s", run.Lines())
 	}
-	if len(fake.posts) != 14 {
-		t.Fatalf("want 14 POSTs, got %d", len(fake.posts))
+	if len(fake.posts) != 9 {
+		t.Fatalf("want 9 POSTs, got %d", len(fake.posts))
 	}
 	var addresses []cfRecord
 	for _, rec := range fake.posts {
@@ -350,13 +349,8 @@ func TestConflictRefusesBeforeAnyWrite(t *testing.T) {
 			fake.records["zone-1"] = []cfRecord{existing}
 			c := fake.serve(t)
 			p := plan(t, c, declared())
-			// A CNAME stands in the way of the name's SPF record too.
-			want := 1
-			if name == "cname" {
-				want = 2
-			}
-			if len(p.Conflicts()) != want || len(addressEntries(p.Conflicts())) != 1 {
-				t.Fatalf("want %d conflict(s), one an address, got %+v", want, p.Entries)
+			if len(p.Conflicts()) != 1 || len(addressEntries(p.Conflicts())) != 1 {
+				t.Fatalf("want 1 conflict, an address, got %+v", p.Entries)
 			}
 			for _, e := range p.Conflicts() {
 				if e.Name != "talk.example.org" || e.Detail == "" {
@@ -372,13 +366,10 @@ func TestConflictRefusesBeforeAnyWrite(t *testing.T) {
 			if err == nil {
 				t.Fatal("execute should refuse a plan with a conflict")
 			}
-			if !errors.Is(err, ErrConflict) || err.Error() != fmt.Sprintf("dns: %d conflicting record(s), listed above. Nothing was created: a partial set of records is a deployment some names reach and others do not", want) {
+			if !errors.Is(err, ErrConflict) || err.Error() != fmt.Sprintf("dns: %d conflicting record(s), listed above. Nothing was created: a partial set of records is a deployment some names reach and others do not", 1) {
 				t.Errorf("err = %v, want ErrConflict with its message unchanged", err)
 			}
 			hint := "1 DNS record conflicts with the configuration"
-			if want != 1 {
-				hint = fmt.Sprintf("%d DNS records conflict with the configuration", want)
-			}
 			var q *ui.Problem
 			if !errors.As(err, &q) || q.Hint != hint || !strings.Contains(q.Explain, "Change each at your DNS provider") {
 				t.Errorf("not the Problem main prints: %#v", q)
@@ -751,5 +742,21 @@ func TestServedHostnamesSplitsGatewayAndMonitor(t *testing.T) {
 	}
 	if got := names("home-a"); len(got) != 0 {
 		t.Errorf("home-a runs no Caddy and serves %v", got)
+	}
+}
+
+// More than one conflict is counted in the refusal's hint.
+func TestConflictsAreCounted(t *testing.T) {
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{
+		{Type: "A", Name: "talk.example.org", Content: "198.51.100.7"},
+		{Type: "A", Name: "blog.example.org", Content: "198.51.100.7"},
+	}
+	c := fake.serve(t)
+	err := Execute(context.Background(), c, plan(t, c, declared()), ui.Discard)
+	var q *ui.Problem
+	if !errors.As(err, &q) || q.Hint != "2 DNS records conflict with the configuration" {
+		t.Errorf("not the counted Problem: %v", err)
 	}
 }

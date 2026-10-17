@@ -28,6 +28,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Changed
 
+- `dns init` writes the registrable domain's DMARC policy when nothing under it has mail, publishes SPF on `community.domain` alone, and gives a hostname DMARC of its own only where no strict policy above covers it.
 - `host evict` refuses, with nothing changed, a host any deployment of which a newer release of paisans claimed, naming the highest release to upgrade to.
 - `validate` warns about one operator instead of refusing it, and refuses a deployment with no operator (`operators-none`); `paisans create` accepts one, and the operator reconciler fails the operators heartbeat until a second is declared.
 - `paisans create` writes the file to `--config`, or `paisans-stack.yaml` in the current directory, once validate refuses nothing in it, without printing it or asking first.

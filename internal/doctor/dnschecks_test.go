@@ -456,3 +456,14 @@ func TestDNSGraphFindsWhatDiagnoseFinds(t *testing.T) {
 		t.Errorf("graph:\n%s\nDiagnose:\n%s", dump(got.Findings), dump(want.Findings))
 	}
 }
+
+// A hostname's SPF check that fails says what was checked, and that the
+// hostname's mail belongs in community.mail_domains.
+func TestRecordsHostnameSPFCheck(t *testing.T) {
+	e := dns.Entry{Want: dns.Want{Type: "TXT", Name: "talk.example.org", Content: "v=spf1 -all", Guard: true}, Zone: "example.org", Action: dns.Conflict, Detail: "an SPF record that lets a server send already exists at this name. More."}
+	got := Records(RecordsProbe{Asked: true, Entries: []dns.Entry{e}})
+	if len(got) == 0 || got[0].Level != Fail || len(got[0].More) != 2 ||
+		!strings.HasPrefix(got[0].More[0], "checked: talk.example.org") || !strings.Contains(got[0].More[1], "community.mail_domains") {
+		t.Errorf("got %+v", got)
+	}
+}

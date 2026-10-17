@@ -84,11 +84,26 @@ type Want struct {
 	// creates one only where it is missing at a domain that holds no MX
 	// record, as dmarcSender.
 	Advisory bool
-	// Parent is an advisory DMARC policy at the registrable domain above
+	// Parent is the DMARC policy at the registrable domain above
 	// community.domain. That domain holds names the deployment does not run,
-	// so it is never created, and a provider that does not hold it means it
-	// is not checked.
+	// so Build creates it only where it is missing and nothing in the
+	// domain's zones has mail the policy would govern (parentHazards), and
+	// otherwise checks it. A provider that does not hold it means it is not
+	// checked.
 	Parent bool
+	// Senders are the mail names under the registrable domain a Parent want
+	// is for, from the configuration. A policy written there would govern
+	// each one that has none of its own, before its mail's DNS exists.
+	Senders []string
+	// Guard is an SPF record at a hostname with no mail declared, checked
+	// and never written: an SPF record there naming a sender is a conflict,
+	// since the hostname has mail nobody listed, and anything else is Clear.
+	// Prune never counts it as wanted.
+	Guard bool
+	// CoveredBy is the "_dmarc" name whose policy a receiver reads for this
+	// no-mail DMARC policy's name when the name has none of its own: the
+	// registrable domain's. Where that policy rejects, this one is Covered.
+	CoveredBy string
 	// Leftover is a record that must not be there if this deployment's dns
 	// init made it: a no-mail record at a name that has since been given mail.
 	// One found is a conflict that dns prune resolves; none is Clear. It is
@@ -409,6 +424,11 @@ const (
 	// once it is verified, so a move is never a conflict and never a
 	// cutover.
 	Moving Action = "moving"
+	// Covered is a no-mail DMARC policy at a name below the registrable
+	// domain, missing there, where the registrable domain's policy rejects
+	// or is about to: a receiver reads that one instead, so nothing is
+	// written.
+	Covered Action = "covered"
 )
 
 // Entry is one wanted record and what will be done about it.
@@ -419,6 +439,9 @@ type Entry struct {
 	Action Action
 	// Detail says what is in the way, for a conflict.
 	Detail string
+	// held are the records at the entry's name, for a DMARC entry another
+	// may be CoveredBy.
+	held []Record
 }
 
 // Plan is every wanted record, compared with the provider.
@@ -474,11 +497,9 @@ func Build(ctx context.Context, provider Provider, d deployment.Deployment, want
 		wantedTypes[w.Name][w.Type] = true
 	}
 	existing := map[string][]Record{}
-	for _, w := range wants {
+	parent, rest := splitParent(wants)
+	for _, w := range rest {
 		z, err := FindZone(ctx, provider, w.Name, zones)
-		if w.Parent && errors.Is(err, errNoZone) {
-			continue
-		}
 		if err != nil {
 			return nil, err
 		}
@@ -492,9 +513,12 @@ func Build(ctx context.Context, provider Provider, d deployment.Deployment, want
 		}
 		var action Action
 		var detail string
-		if w.Leftover {
+		switch {
+		case w.Leftover:
 			action = Clear
-		} else {
+		case w.Guard:
+			action, detail = guard(w, records)
+		default:
 			action, detail = classify(w, records, wantedTypes[w.Name])
 		}
 		if w.Leftover || w.Advisory {
@@ -527,7 +551,20 @@ func Build(ctx context.Context, provider Provider, d deployment.Deployment, want
 				}
 			}
 		}
-		plan.Entries = append(plan.Entries, Entry{Want: w, Zone: z.name, zoneID: z.id, Action: action, Detail: detail})
+		if w.Guard && action == Clear {
+			continue
+		}
+		plan.Entries = append(plan.Entries, Entry{Want: w, Zone: z.name, zoneID: z.id, Action: action, Detail: detail, held: records})
+	}
+	if err := plan.addParent(ctx, provider, parent, zones, existing); err != nil {
+		return nil, err
+	}
+	sort.SliceStable(plan.Entries, func(i, j int) bool {
+		a, b := plan.Entries[i], plan.Entries[j]
+		return a.Name < b.Name || a.Name == b.Name && a.Type < b.Type
+	})
+	if err := plan.cover(ctx, provider, zones, existing); err != nil {
+		return nil, err
 	}
 	return plan, nil
 }
@@ -645,7 +682,13 @@ func Execute(ctx context.Context, provider Provider, plan *Plan, r ui.Reporter) 
 	if conflicts := plan.Conflicts(); len(conflicts) > 0 {
 		return conflictError{len(conflicts)}
 	}
-	for _, e := range plan.Creates() {
+	// The registrable domain's policy is created last: whether it could be
+	// written rested on every other policy this plan creates being there,
+	// and a run that stops partway must not leave it governing a sender
+	// whose own policy is still missing.
+	creates := plan.Creates()
+	sort.SliceStable(creates, func(i, j int) bool { return !creates[i].Parent && creates[j].Parent })
+	for _, e := range creates {
 		step := r.Step(fmt.Sprintf("create %s %s", e.Type, e.Name))
 		step.Detail("%s, zone %s", display(e.Type, e.Content, e.Priority), e.Zone)
 		record := Record{Type: e.Type, Name: e.Name, Content: e.Content, Priority: e.Priority, Comment: plan.comment}
@@ -685,15 +728,24 @@ func (p *Plan) Show(r ui.Reporter) {
 		case Create:
 			r.Step("create "+record).End(ui.Pending, "")
 		case Conflict:
-			wanted := "wanted"
-			if e.Leftover || e.Advisory {
-				wanted = "remove with dns prune"
+			wanted := fmt.Sprintf("wanted: %s -> %s (zone %s)", e.Name, content, e.Zone)
+			switch {
+			case e.Guard:
+				wanted = fmt.Sprintf("checked: %s holds no SPF record that lets a server send (zone %s)", e.Name, e.Zone)
+			case e.Parent:
+				wanted = fmt.Sprintf("delete by hand, or give each its own DMARC policy: %s -> %s (zone %s)", e.Name, content, e.Zone)
+			case e.Leftover || e.Advisory:
+				wanted = fmt.Sprintf("remove with dns prune: %s -> %s (zone %s)", e.Name, content, e.Zone)
 			}
 			r.Refuse(fmt.Sprintf("%s %s conflicts with a record at the provider", e.Type, e.Name),
-				fmt.Sprintf("%s\n%s: %s -> %s (zone %s)", e.Detail, wanted, e.Name, content, e.Zone))
+				fmt.Sprintf("%s\n%s", e.Detail, wanted))
 		case Clear:
 		case Moving:
 			r.Note(fmt.Sprintf("%s %s waits for paisans gateway move", e.Type, e.Name), e.Detail)
+		case Covered:
+			if r.Verbose() {
+				r.Step(record+", "+e.Detail).End(ui.OK, "")
+			}
 		case Warn:
 			r.Note(fmt.Sprintf("%s %s is not this toolkit's to write, and is missing or weak", e.Type, e.Name),
 				fmt.Sprintf("%s\nexpected at least: %s -> %s (zone %s)", e.Detail, e.Name, content, e.Zone))
