@@ -284,6 +284,37 @@ func stuckInput() Input {
 	}
 }
 
+// When the old leader answers ssh but cannot run its Patroni, the first
+// recovery names what is in the way: a Docker that does not answer, or an
+// admission that is pending or did not pass, never `up -d patroni`.
+func TestStartAdviceNamesWhatStopsTheOldLeader(t *testing.T) {
+	cfg := fixture(t)
+	for _, c := range []struct {
+		name string
+		set  func(*Input)
+		want string
+	}{
+		{"docker down", func(in *Input) {
+			in.Docker = []DockerProbe{{Site: "home-b", Err: "Cannot connect to the Docker daemon"}}
+		}, "  1. Start home-b's Docker: its host answers ssh, but its rootless Docker does not answer, and the docker section says how."},
+		{"pending", func(in *Input) {
+			in.Admission = []AdmissionProbe{{Site: "home-b", Class: pendingClass("home-b")}}
+		}, "  1. Have home-b's owner admit this deployment again: it is pending"},
+		{"admission failed", func(in *Input) {
+			in.Admission = []AdmissionProbe{{Site: "home-b", Err: "unreadable"}}
+		}, "  1. Have home-b's owner admit this deployment again: its host answers ssh, but its admission did not pass"},
+	} {
+		in := stuckInput()
+		in.Reach[1].Err = ""
+		c.set(&in)
+		f := find(t, Patroni(cfg, in), SectionPatroni, "no primary")
+		text := strings.Join(f.More, "\n")
+		if !strings.Contains(text, c.want) || strings.Contains(text, "up -d patroni") {
+			t.Errorf("%s: want %q:\n%s", c.name, c.want, text)
+		}
+	}
+}
+
 // The motivating case. home-b led with home-a as its synchronous standby;
 // home-a went down, home-b committed alone and dropped it from /sync, then
 // home-b went down. home-a came back and will not promote. The advice is to

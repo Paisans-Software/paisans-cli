@@ -488,6 +488,10 @@ func TestAPendingSiteIsCheckedNoFurther(t *testing.T) {
 	cfg := fixture(t)
 	fix := healthyInput()
 	fix.Admission = []AdmissionProbe{{Site: "home-b", Class: topology.Site{Name: "home-b", Class: topology.Pending, Why: "home-b: its host has not admitted this deployment", Request: true}}}
+	// home-a leads a cluster home-b has not joined, as it would while
+	// home-b is pending.
+	fix.Patroni.Cluster = map[string]string{"home-a": homeALeadsAlone, "home-b": homeALeadsAlone}
+	fix.Standby = []StandbyProbe{{App: "auth", Instances: []apply.Instance{{Site: "home-a", State: apply.Active}}}}
 	reads := &fixtureReads{in: fix, log: &events{}}
 	rec := &ui.Recorder{}
 	report, _ := Checks(cfg, fix.Sites, reads).Run(rec, 0)
@@ -506,9 +510,30 @@ func TestAPendingSiteIsCheckedNoFurther(t *testing.T) {
 		}
 	}
 	for _, f := range report.Findings {
-		if strings.HasPrefix(f.Line, "home-b:") && f.Level == Fail {
-			t.Errorf("a pending data site failed a check: %+v", f)
+		if f.Section == SectionReach || f.Section == SectionAdmission {
+			continue
 		}
+		if strings.Contains(f.Line+"\n"+strings.Join(f.More, "\n"), "home-b") {
+			t.Errorf("a finding past admission names the pending home-b: %+v", f)
+		}
+	}
+}
+
+// homeALeadsAlone is a cluster home-a leads with no other member.
+const homeALeadsAlone = `{"members": [{"name": "home-a", "role": "leader", "state": "running", "api_url": "http://10.44.0.1:8008/patroni", "host": "10.44.0.1", "port": 5432, "timeline": 3}], "scope": "paisans"}`
+
+// A data site whose Docker does not answer is not in the cluster because
+// of that, and Patroni says so rather than pointing at a containers check
+// that never ran there.
+func TestPatroniNamesADataSiteWhoseDockerDoesNotAnswer(t *testing.T) {
+	cfg := fixture(t)
+	fix := healthyInput()
+	fix.Patroni.Cluster = map[string]string{"home-a": homeALeadsAlone, "home-b": homeALeadsAlone}
+	fix.Docker = []DockerProbe{{Site: "home-b", Out: "host unix:///run/user/1000/docker.sock\n", Err: "Cannot connect to the Docker daemon at unix:///run/user/1000/docker.sock. Is the docker daemon running?"}}
+	report, _ := Checks(cfg, fix.Sites, &fixtureReads{in: fix, log: &events{}}).Run(&ui.Recorder{}, 0)
+	f := find(t, report.Findings, SectionPatroni, "home-b: not a cluster member")
+	if !strings.Contains(f.Line, "its Docker does not answer: see docker") {
+		t.Errorf("home-b: %+v", f)
 	}
 }
 
