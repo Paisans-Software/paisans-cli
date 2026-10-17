@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to run this plan task by task. Steps use checkbox (`- [ ]`) syntax for tracking. Nothing here changes code in this repository; every task runs commands against throwaway staging hosts and records an observation. `site admit` and `site evict` are owner actions: run them only on test hosts the operator owns, never on a host that serves anything.
 
-**Goal:** A staging run that must pass before the founder treats the rootless work as fit for a first production release. Run A starts from the shape a first production deployment takes (a gateway VPS, a monitor on a VPS whose owner already runs a web server in Docker, and one data site at home behind NAT), grows it to two data sites and three etcd voters by following the operator documentation step by step, fails a data site hard, and replaces a lost one. Backups ship off and are documented as unsupported in the first release; Run B, backup and restore, is a future section.
+**Goal:** A staging run that must pass before the founder treats the rootless work as fit for a first production release. Run A starts from the shape a first production deployment takes (a gateway VPS, a monitor on a VPS whose owner already runs a web server in Docker, and one data site at home, dialled at its public address), grows it to two data sites and three etcd voters by following the operator documentation step by step, fails a data site hard, and replaces a lost one. Backups ship off and are documented as unsupported in the first release; Run B, backup and restore, is a future section.
 
-**Architecture:** Four hosts. `g` (`[gateway]`) and `m` (`[monitor]`, behind its owner's web server) are VPSs with public addresses; `h` (`[data, apps]`) is undialled, as a home behind NAT is. Growth adds `h2` (`[data, apps]`, dialled) and gives `g` the `witness` role in the same change, through one `paisans apply`. Every command a deployment runs is as `paisans-<token>`, with that user's rootless Docker; every root step is `site admit` or `site evict`.
+**Architecture:** Four hosts. `g` (`[gateway]`) and `m` (`[monitor]`, behind its owner's web server) are VPSs with public addresses; `h` (`[data, apps]`) is a home whose public address the other sites dial. Growth adds `h2` (`[data, apps]`, dialled) and gives `g` the `witness` role in the same change, through one `paisans apply`. Every command a deployment runs is as `paisans-<token>`, with that user's rootless Docker; every root step is `site admit` or `site evict`.
 
 **Tech Stack:** Paisans built from `develop` with the prerequisites below merged, Ubuntu 24.04 (one host may be 22.04), rootless Docker Engine 29.5 or later, Docker CE as the owner's own on `m`, WireGuard, Patroni in Spilo, etcd, Pocket ID, Caddy as the owner's web server.
 
@@ -12,15 +12,14 @@
 
 ## Prerequisites
 
-* **#393** (apply cannot join a pending `[data, apps]` site) merged. Its fix (branch `fix/join-data-apps-site`) makes the whole `apply` join a site declared `[data, apps]` as `[data]` without its apps, then apply that site, which starts its apps, then apply each gateway in `etcd.members`, whose routes gain it. `site add` typed alone still refuses `[data, apps]` and names that run. Run A uses only the whole `apply`.
-* **#394** (re-admit after evict needs the system Docker started) merged, only for Task A8 Step 4, which re-admits a host after `site evict`. Every other step admits fresh hosts.
-* **A decision on Run A's blocker** (see *Blockers*): today `site add` refuses any join while a declared site has neither an `endpoint` nor a `public_address`, and `h` has neither. Task A4 carries both ways the run can go.
+* **#393** (apply cannot join a pending `[data, apps]` site), merged in #402. Its fix makes the whole `apply` join a site declared `[data, apps]` as `[data]` without its apps, then apply that site, which starts its apps, then apply each gateway in `etcd.members`, whose routes gain it. `site add` typed alone still refuses `[data, apps]` and names that run. Run A uses only the whole `apply`.
+* **#394** (re-admit after evict needs the system Docker started), in review, needed merged only for Task A8 Step 4, which re-admits a host after `site evict`. Every other step admits fresh hosts.
 
 ## Global Constraints
 
 * Every host is throwaway. Run A reboots a data host through its watchdog and powers one off, on purpose.
 * Nothing from a staging host goes into this repository: no hostname, address, key or domain. Record shapes, versions, timings and outcomes. Names used throughout: sites `g`, `m`, `h`, `h2`, `h3`; hosts `<g>`, `<m>`, `<h>`, `<h2>`, `<h3>`; the domain `example.org`; mesh `10.44.0.0/24`; the deployment's token `<token>` and user `paisans-<token>`.
-* `h` simulates a home behind NAT: no `public_address`, no `endpoint`, `ssh.host` set to the address the operator reaches it on, and inbound UDP dropped at the provider's firewall, so nothing can dial its WireGuard. Every other host has a `public_address`.
+* Every host has a `public_address`, `h` included, and no site declares an `endpoint`: the other sites dial `h` at its public address, so every site is dialled, as `site add` requires. A home behind NAT, with nothing to dial, is deferred to #403.
 * Data sites share an architecture. Ubuntu releases may differ.
 * Commands scripted with `--yes` run with `PAISANS_ALLOW_YES=1` exported in that shell only, never in a profile.
 * `site admit` runs from the workstation with `--site <name> --ssh ubuntu`, where `ubuntu` is the cloud image's login with sudo. The request and digest path was proved in phase 10a and is not repeated here.
@@ -42,13 +41,13 @@
 |------|----------------|--------------|---------|------|
 | `<g>` | `gateway` | `gateway, witness` | 1 vCPU, 1 GB RAM, 20 GB disk | 2 vCPU, 2 GB |
 | `<m>` | `monitor`, behind the owner's web server | the same | 1 vCPU, 1 GB RAM, 20 GB disk, plus what the owner's containers use | 2 vCPU, 2 GB |
-| `<h>` | `data, apps`, undialled | the same | 2 vCPU, 2 GB RAM, 30 GB disk | 2 vCPU, 4 GB |
+| `<h>` | `data, apps`, dialled | the same | 2 vCPU, 2 GB RAM, 30 GB disk | 2 vCPU, 4 GB |
 | `<h2>` | not yet declared | `data, apps`, dialled | as `<h>` | as `<h>` |
 | `<h3>` | not yet declared | `data, apps`, replacing a lost data site (A8) | as `<h>` | as `<h>` |
 
 Phase 10 found 458 MB too small for a host running etcd beside Caddy; 1 GB is the floor for any host here. `site admit` warns below 20 GB free for a data site and below 5 GB for any other; apply refuses to pull with less than 3 GB free in Docker's data root.
 
-Ports at each provider's firewall, matching what `site admit` opens in ufw: 22/tcp everywhere; 51820/udp on `<g>`, `<m>`, `<h2>` and `<h3>`; nothing else inbound on `<h>`; 80/tcp and 443/tcp on `<g>` and on `<m>` (the owner's web server, which the owner opens themselves).
+Ports at each provider's firewall, matching what `site admit` opens in ufw: 22/tcp everywhere; 51820/udp on every deployment host; 80/tcp and 443/tcp on `<g>` and on `<m>` (the owner's web server, which the owner opens themselves).
 
 ## Workstation helpers
 
@@ -140,7 +139,8 @@ sites:
     arch: amd64
     roles: [data, apps]
     address: 10.44.0.1
-    ssh: { host: 198.51.100.10, keys: [alice, bob] }   # no public_address, no endpoint: it only dials out
+    public_address: 203.0.113.10
+    ssh: { keys: [alice, bob] }
 cluster:
   port: 5000
   postgres_version: "18"
@@ -177,7 +177,7 @@ paisans site admit --site h --ssh ubuntu --watchdog --execute --yes
 Expected:
 * `g`: granted public ports; ufw opens 22/tcp, 51820/udp, 80/tcp, 443/tcp, 443/udp; the record's `ports.wireguard` is 51820.
 * `m`: no grant asked for (a monitor with `managed_by: external` runs no Caddy, so `admission.Needs` asks neither); 51820/udp opened, 80 and 443 not; the plan names the owner's web server as `caddy` in container `owner-caddy`, which `webserver.Detect` finds as a container on the host's network that publishes nothing; the plan says Caddy's admin API is not on TCP; `br_netfilter` already loaded (Docker loads it) or, if not, admit names the owner's bridges and stops unless `--bridge-netfilter`, which is then recorded. The record's `web_server` holds the server, container and config path.
-* `h`: granted the watchdog; the record's `ports.wireguard` is 0 and no UDP port is opened, since nothing dials `h`.
+* `h`: granted the watchdog; 51820/udp opened; the record's `ports.wireguard` is 51820.
 
 - [ ] **Step 2: The owner's Docker is untouched on `<m>`.** Compare with A0's baseline: the same containers `Up` with unchanged uptimes, the same listeners on 80 and 443, `systemctl is-active docker` still `active`, `https://owner.example.org/` still 200. The admission record's `system_docker_disabled` is false. Failure signal: any owner container restarted, or the system daemon disabled.
 
@@ -253,25 +253,7 @@ Table names are Pocket ID v2's and Wiki.js 2's; confirm each with `\dt` first an
 paisans validate
 ```
 
-Expected: no refusal, and `backups-off` alone. The voters derive to `g`, `h` and `h2`, two of them dialled (`g`, `h2`), so `voters-share-a-relay` passes; `h` and `h2` peer directly, since `h2` is dialled.
-
-- [ ] **Step 3: The join's own rule.** `site add` (`internal/siteadd/siteadd.go`, `checkScope`, unchanged on #393's branch) refuses a join while any declared site has neither an `endpoint` nor a `public_address` ("site add joins sites that all dial each other directly; a site behind NAT needs the relay ..., which is not built yet"), and README *`site add` is built for sites that dial each other* says the same. `h` has neither, so `paisans apply` stops at `site add h2`. Check that this is still so:
-
-```sh
-paisans apply 2>&1 | grep -n 'nothing dials it'
-```
-
-If it refuses, the run takes one of these, as the founder decides (see *Blockers*):
-* **A4a, make `h` dialled**, the way out README *The voters that survive one loss must still dial each other* gives for a home: a dynamic DNS name and one forwarded UDP port. Simulate it by declaring `endpoint: h.example.org:51820` on `h`, an A record for it to `<h>`'s address, and 51820/udp opened at its provider's firewall. This changes `h`'s WireGuard port and forwarding, which `admission.Record.Differences` compares, so `h`'s owner admits it again:
-
-  ```sh
-  paisans site prepare --site h                       # expected: refused, naming the WireGuard port (0 against 51820) and forwarding off
-  paisans site request --site h > h.admit             # the digest is on stderr
-  paisans site admit --site h --ssh ubuntu --watchdog --execute --yes
-  ```
-
-  Expected: the plan opens 51820/udp, turns forwarding on, re-renders the WireGuard helper with port 51820, and leaves the user, its Docker and its containers running; `site prepare --site h` then plans nothing.
-* **A4b, wait for the relay**, which README calls a design that "the first deployment that needs it builds". Run A stops here until it exists.
+Expected: no refusal, and `backups-off` alone. The voters derive to `g`, `h` and `h2`, all dialled, so `voters-share-a-relay` passes and every pair peers directly.
 
 ### Task A5: Does `g` need its owner again for `witness`?
 
@@ -304,7 +286,7 @@ Expected: granted the watchdog and not public ports; 51820/udp opened; the recor
 paisans apply
 ```
 
-Expected, in the order README's converge table gives on #393's branch: `init` with work (keys and secrets for `h2`); `site prepare` on every site; the pull on `h2`; `dns init`; `site add h2` with `g`'s etcd member joining first, as a learner, and `h2` after it, joined as `[data]` without its apps; then the other sites, `h2` first, which starts its apps, then `g`, the gateway in `etcd.members`, whose routes gain `h2`; `m` last; pass two. The review lists `h2`'s keys and images, its apps' included.
+Expected, in the order README's converge table gives: `init` with work (keys and secrets for `h2`); `site prepare` on every site; the pull on `h2`; `dns init`; `site add h2` with `g`'s etcd member joining first, as a learner, and `h2` after it, joined as `[data]` without its apps; then the other sites, `h2` first, which starts its apps, then `g`, the gateway in `etcd.members`, whose routes gain `h2`; `m` last; pass two. The review lists `h2`'s keys and images, its apps' included.
 
 - [ ] **Step 3: Apply.**
 
@@ -312,7 +294,7 @@ Expected, in the order README's converge table gives on #393's branch: `init` wi
 paisans apply --execute --yes
 ```
 
-Expected: `site add` passes all eight gates in order (the mesh's handshakes on both ends of every pair, etcd one to three, the replica streaming, `Sync Standby`, HAProxy, the replicas' `patroni.env`, the monitor's seed), and the run ends `Deployment complete.`. Failure signal: `site add h2: the site's roles must be exactly [data]` (#393 not merged), the `nothing dials it` refusal (A4 not settled), or any gate failing; record the stage and resume with the same command, which must start from the first unmet gate.
+Expected: `site add` passes all eight gates in order (the mesh's handshakes on both ends of every pair, etcd one to three, the replica streaming, `Sync Standby`, HAProxy, the replicas' `patroni.env`, the monitor's seed), and the run ends `Deployment complete.`. Failure signal: `site add h2: the site's roles must be exactly [data]` (#393 missing from the build), or any gate failing; record the stage and resume with the same command, which must start from the first unmet gate.
 
 ### Task A7: Checks after growth
 
@@ -416,12 +398,10 @@ The first production release ships with backups off, documented as unsupported. 
 
 ## Open
 
-* **Open: undialled data sites cannot grow.** The production shape puts the first data site at home with no endpoint, and `site add` refuses every join while it is so. Decide between A4a (the operator gives the home a dynamic DNS name and a forwarded port, and its owner re-admits) as the documented growth path, or building the relay before the first release.
 * **Open: no owner step when a gateway gains `witness`.** The code needs none (Task A5), but README *Adding the gateway and the witness* and *Adding a site, and the constraint that shapes it* do not say so, nor that an `endpoint` added at growth does need the owner. Decide whether those sections say both.
 * **Open: stale roles.** After growth, `g`'s admission record and its registry entry still list `[gateway]`, which `site deployments` shows its owner. Nothing compares roles, so nothing refuses or warns. Decide whether a role change is reported, or the owner's listing says the roles are those admitted.
 * **Open: an owner web server in a bridged container.** The guide tells the operator to use a loopback `listen` when the web server runs on the same machine, but a web server in a container that publishes 80 and 443 on a bridge network cannot reach the host's loopback, and the mesh address it could reach is warned about (`web-server-listen-bypasses-firewall`) and sits behind ufw, which admits the mesh interface and not the owner's bridge. Run A uses a container on the host's network. Decide what the guide tells an owner whose web server is bridged.
 
 ## Blockers
 
-* **Run A cannot grow the production shape today.** `checkScope` refuses `site add h2` because `h` has neither an `endpoint` nor a `public_address`, and #393's branch does not change that. A4a is the documented way out and runs today with #393; A4b waits for the relay.
-* **#393 is not merged.** Without it the whole apply stops at `site add h2: the site's roles must be exactly [data]`.
+* None for Run A with #393 merged (#402), except Task A8 Step 4, which waits for #394.
