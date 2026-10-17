@@ -14,11 +14,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
-	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 	"gopkg.in/yaml.v3"
 )
@@ -38,10 +38,9 @@ import (
 const partialWord = "partial"
 
 // configSiteTransport is how a config command reaches a site paisans-stack.yaml
-// declares: its ssh section, with sudo, since the store is root's. Tests
-// replace it.
+// declares: its ssh section. Tests replace it.
 var configSiteTransport = func(name string, site config.Site) apply.Transport {
-	return siteTransport(name, site, "", true)
+	return siteTransport(name, site, "")
 }
 
 // configSignWith is what git's user.signingKey is given to sign with the
@@ -137,6 +136,8 @@ type gatherMode struct {
 	execute, log bool
 	accepted     *configstore.SeenChange
 	noAnchor     string
+	// answers is how rollback is answered: at the terminal, or by --yes.
+	answers answerer
 }
 
 // gatherAt gathers from sites, reporting each, and explains a missing anchor.
@@ -146,10 +147,6 @@ type gatherMode struct {
 // gather carries the change (a newer head, or the accepted older one), and
 // the command records it with Local.RecordSeen once it commits its change.
 func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transport, configured int, id string, a configstore.Anchor, m gatherMode, stdin io.Reader, stdout io.Writer) (configstore.Gathered, error) {
-	names := slices.Sorted(maps.Keys(sites))
-	if err := settleSudo(r, names, func(n string) apply.Transport { return sites[n] }); err != nil {
-		return configstore.Gathered{}, err
-	}
 	s := r.Step("gather the versions every site holds")
 	g, err := configstore.GatherAnchored(l, sites, configured, id, a, configstore.GatherOptions{Sync: m.execute})
 	var rb *configstore.RollbackError
@@ -160,7 +157,7 @@ func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transpo
 		case m.execute && m.accepted != nil && m.accepted.Lower && m.accepted.Revision == rb.Revision && m.accepted.SHA == rb.SHA:
 			g.AcceptRollback(rb)
 		case m.execute:
-			if err := confirmWord(stdin, stdout, rollbackWord, why+" Proceed only if you know why the newer version is gone."); err != nil {
+			if err := confirmWord(m.answers, stdin, stdout, rollbackWord, why+" Proceed only if you know why the newer version is gone."); err != nil {
 				return g, err
 			}
 			g.AcceptRollback(rb)
@@ -227,12 +224,13 @@ func forkProblem(g configstore.Gathered, more ...string) error {
 }
 
 // confirmPartial asks for partial when fewer than a majority of the
-// configured sites answered directly, before anything is written.
-func confirmPartial(stdin io.Reader, stdout io.Writer, g configstore.Gathered, configured int) error {
+// configured sites answered directly, before anything is written. a
+// answers it, as confirmWord's does.
+func confirmPartial(a answerer, stdin io.Reader, stdout io.Writer, g configstore.Gathered, configured int) error {
 	if g.Majority {
 		return nil
 	}
-	return confirmWord(stdin, stdout, partialWord, fmt.Sprintf("Only %d of the %d sites answered directly. A site that answered could be serving an older version and hiding newer ones, which only the sites that did not answer would show.", len(g.Direct()), configured))
+	return confirmWord(a, stdin, stdout, partialWord, fmt.Sprintf("Only %d of the %d sites answered directly. A site that answered could be serving an older version and hiding newer ones, which only the sites that did not answer would show.", len(g.Direct()), configured))
 }
 
 // signingKeyFor is the public key line a publish signs with: the recorded
@@ -332,11 +330,16 @@ func runConfigPublish(args []string, stdin io.Reader, stdout io.Writer) error {
 	configPath := fs.String("config", config.FileName, configHelp)
 	merge := fs.Bool("merge", false, "publish a version whose parents are every head, after merging them by hand")
 	execute := fs.Bool("execute", false, "sign the version and push it to the sites")
+	answers := yesFlag(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
 		return &ui.Problem{Hint: "config publish takes no argument", Explain: "Got " + strings.Join(fs.Args(), " ") + "."}
+	}
+	ans, err := answers()
+	if err != nil {
+		return err
 	}
 	l, err := workstationOf(*configPath)
 	if err != nil {
@@ -397,7 +400,7 @@ func runConfigPublish(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{execute: true}, stdin, stdout)
+	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{execute: true, answers: ans}, stdin, stdout)
 	if err != nil {
 		return err
 	}
@@ -409,7 +412,7 @@ func runConfigPublish(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 	if parents, err := configstore.Parents(g, head, *merge); err == nil && len(parents) == 0 && len(g.Direct()) > 0 {
-		if err := confirmPartial(stdin, stdout, g, len(sites)); err != nil {
+		if err := confirmPartial(ans, stdin, stdout, g, len(sites)); err != nil {
 			return err
 		}
 	}
@@ -445,11 +448,16 @@ func runConfigPull(args []string, stdin io.Reader, stdout io.Writer) error {
 	configPath := fs.String("config", config.FileName, configHelp)
 	root := fs.String("root", "", "pin this version as the root, the version trust starts from")
 	execute := fs.Bool("execute", false, "write the sites' newest version to the local files")
+	answers := yesFlag(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
 		return &ui.Problem{Hint: "config pull takes no argument", Explain: "Got " + strings.Join(fs.Args(), " ") + "."}
+	}
+	ans, err := answers()
+	if err != nil {
+		return err
 	}
 	l, err := workstationOf(*configPath)
 	if err != nil {
@@ -466,7 +474,7 @@ func runConfigPull(args []string, stdin io.Reader, stdout io.Writer) error {
 	r := reporter()
 	r.Section("pull into " + *configPath)
 	sites := configTransports(cfg)
-	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{execute: *execute}, stdin, stdout)
+	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{execute: *execute, answers: ans}, stdin, stdout)
 	if err != nil {
 		return err
 	}
@@ -517,7 +525,7 @@ func runConfigPull(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 		return nil
 	case edited:
-		if handled, err := pullMergingSecrets(r, l, g, cfg.ID, head, base, *root, len(sites), localFiles, headFiles, *execute, stdin, stdout); handled {
+		if handled, err := pullMergingSecrets(r, l, g, cfg.ID, head, base, *root, len(sites), localFiles, headFiles, *execute, ans, stdin, stdout); handled {
 			return err
 		}
 		return pullOverEdits(r, l, g, head, base, localFiles, headFiles, *execute, stdout)
@@ -529,7 +537,7 @@ func runConfigPull(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 		return nil
 	}
-	if err := confirmPartial(stdin, stdout, g, len(sites)); err != nil {
+	if err := confirmPartial(ans, stdin, stdout, g, len(sites)); err != nil {
 		return err
 	}
 	if err := l.Checkout(head); err != nil {
@@ -753,7 +761,13 @@ func runConfigLog(args []string, stdin io.Reader, stdout io.Writer) error {
 		if holders == "" {
 			holders = "no site that answered"
 		}
-		fmt.Fprintf(stdout, "%d  %s  %s  %s  %s  held by %s\n", v.Revision, sha[:12], who, v.Committed.Format(time.RFC3339), state, holders)
+		// A version that does not say which build published it is not
+		// trusted, and its state says so.
+		by := ""
+		if v.BuildOK {
+			by = "  by paisans " + v.Build.String()
+		}
+		fmt.Fprintf(stdout, "%d  %s  %s  %s%s  %s  held by %s\n", v.Revision, sha[:12], who, v.Committed.Format(time.RFC3339), by, state, holders)
 	}
 	if len(shas) == 0 {
 		r.Result("no site holds a version yet")
@@ -768,13 +782,18 @@ func runConfigRecover(args []string, stdin io.Reader, stdout io.Writer) error {
 	var from pathList
 	fs.Var(&from, "from", "a host of the deployment to recover from, user@host[:port] (repeatable)")
 	root := fs.String("root", "", "pin this version as the root, the version trust starts from")
-	id := fs.String("id", "", "the deployment's id, when a host's registry names more than one")
+	id := fs.String("id", "", "the deployment's id, when the hosts' logins belong to more than one")
 	execute := fs.Bool("execute", false, "write the recovered files and state")
+	answers := yesFlag(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
 		return &ui.Problem{Hint: "config recover takes no argument", Explain: "Got " + strings.Join(fs.Args(), " ") + "."}
+	}
+	ans, err := answers()
+	if err != nil {
+		return err
 	}
 	if len(from) == 0 {
 		return &ui.Problem{Hint: "config recover needs --from", Explain: "Name a host of the deployment with --from user@host[:port], Eg: --from admin@203.0.113.9; every site the recovered configuration names is reached after it."}
@@ -798,13 +817,13 @@ func runConfigRecover(args []string, stdin io.Reader, stdout io.Writer) error {
 		if err != nil {
 			return sshFlagProblem(f, err)
 		}
-		hosts[dest.String()] = reachDestination(dest, true)
+		hosts[dest.String()] = reachDestination(dest)
 	}
 	deploymentID, err := recoverID(hosts, *id)
 	if err != nil {
 		return err
 	}
-	g, err := gatherAt(r, l, hosts, len(hosts), deploymentID, a, gatherMode{execute: *execute}, stdin, stdout)
+	g, err := gatherAt(r, l, hosts, len(hosts), deploymentID, a, gatherMode{execute: *execute, answers: ans}, stdin, stdout)
 	if err != nil {
 		return err
 	}
@@ -819,7 +838,7 @@ func runConfigRecover(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 	r.Section("every site the newest versions name")
-	g, err = gatherAt(r, l, sites, len(sites), deploymentID, a, gatherMode{execute: *execute, accepted: g.Seen}, stdin, stdout)
+	g, err = gatherAt(r, l, sites, len(sites), deploymentID, a, gatherMode{execute: *execute, accepted: g.Seen, answers: ans}, stdin, stdout)
 	if err != nil {
 		return err
 	}
@@ -848,7 +867,7 @@ func runConfigRecover(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 		return nil
 	}
-	if err := confirmPartial(stdin, stdout, g, len(sites)); err != nil {
+	if err := confirmPartial(ans, stdin, stdout, g, len(sites)); err != nil {
 		return err
 	}
 	if err := l.Checkout(head); err != nil {
@@ -892,31 +911,30 @@ func recoverSites(l configstore.Local, g configstore.Gathered, id string) (map[s
 }
 
 // recoverID is the deployment a recovery is for: id when given, else the one
-// deployment the hosts' registries name. More than one is refused, since
-// which one to recover is the operator's to say, and so is an entry that is
-// not a deployment id: whoever has root on a host can write its registry,
-// and the id becomes part of every command a recovery runs on every site.
+// deployment each login's admission record names, the record under
+// /etc/paisans whose user is the login's own. More than one is refused,
+// since which one to recover is the operator's to say. A record whose
+// deployment is not an id never parses, so it names nothing here: the id
+// becomes part of every command a recovery runs on every site.
 func recoverID(hosts map[string]apply.Transport, id string) (string, error) {
 	if id != "" {
 		if !deployment.ValidID(id) {
-			return "", &ui.Problem{Hint: fmt.Sprintf("--id %q is not a deployment id", id), Explain: "Give the full id, as paisans host deployments lists it."}
+			return "", &ui.Problem{Hint: fmt.Sprintf("--id %q is not a deployment id", id), Explain: "Give the full id, as paisans site deployments lists it."}
 		}
 		return id, nil
 	}
 	ids := map[string]bool{}
 	var errs []error
+	var why []string
 	for _, name := range slices.Sorted(maps.Keys(hosts)) {
-		reg, err := registry.Read(hosts[name])
+		rec, err := admission.Mine(hosts[name])
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", name, err))
+			hint, _ := ui.Describe(err)
+			why = append(why, fmt.Sprintf("- %s: %s", name, hint))
 			continue
 		}
-		for _, found := range slices.Sorted(maps.Keys(reg.Deployments)) {
-			if !deployment.ValidID(found) {
-				return "", &ui.Problem{Hint: name + " lists a deployment id that is not one", Explain: fmt.Sprintf("Its registry names %q, which is not a deployment id, so nothing is read from any host with it. Whoever can write that registry may not be trusted; recover from another host with --from, or name the deployment with --id.", found)}
-			}
-			ids[found] = true
-		}
+		ids[rec.Deployment] = true
 	}
 	switch len(ids) {
 	case 1:
@@ -924,8 +942,8 @@ func recoverID(hosts map[string]apply.Transport, id string) (string, error) {
 			return found, nil
 		}
 	case 0:
-		return "", &ui.Problem{Hint: "no host named lists a deployment", Explain: "Name the deployment with --id, or another host with --from.", Cause: errors.Join(errs...)}
+		return "", &ui.Problem{Hint: "no host named holds an admission record for the login", Explain: strings.Join(append(why, "Name the deployment with --id, or another host with --from."), "\n"), Cause: errors.Join(errs...)}
 	}
 	list := slices.Sorted(maps.Keys(ids))
-	return "", &ui.Problem{Hint: "the hosts list more than one deployment", Explain: "Name the one to recover with --id: " + strings.Join(list, ", ") + "."}
+	return "", &ui.Problem{Hint: "the hosts' logins belong to more than one deployment", Explain: "Name the one to recover with --id: " + strings.Join(list, ", ") + "."}
 }

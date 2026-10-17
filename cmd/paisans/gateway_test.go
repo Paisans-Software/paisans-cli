@@ -13,7 +13,7 @@ import (
 func holdsGateway(t *testing.T, site string, err error) {
 	t.Helper()
 	saved := convergeHoldsGateway
-	convergeHoldsGateway = func(_ *config.Config, s string, _ bool) (bool, error) { return s == site, err }
+	convergeHoldsGateway = func(_ *config.Config, s string) (bool, error) { return s == site, err }
 	t.Cleanup(func() { convergeHoldsGateway = saved })
 }
 
@@ -66,7 +66,7 @@ func TestConvergeGatewayMoveWaitsOnTheNewGatewaysApply(t *testing.T) {
 		t.Fatalf("last step %q", steps[last].Title)
 	}
 	waits := convergeWaits(cfg, steps, last)
-	if strings.Join(waits, ", ") != "host prepare --site vm, apply --site vm" {
+	if strings.Join(waits, ", ") != "site prepare --site vm, apply --site vm" {
 		t.Errorf("waits on %v", waits)
 	}
 }

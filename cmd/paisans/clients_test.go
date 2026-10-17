@@ -855,3 +855,38 @@ func TestExtraGroupCreationAsksFirst(t *testing.T) {
 		t.Error("a declined answer let it through")
 	}
 }
+
+// A planned stop in the pass that starts Pocket ID, the founding stop or a
+// replica's for its databases, is no failure of that pass: its step ends
+// done, saying it stopped short, nothing after it runs, and the stop comes
+// back as it is, so the run pauses the site's line as it does for a site
+// without Pocket ID.
+func TestAPlannedStopStartingPocketIDIsNoFailure(t *testing.T) {
+	for name, stop := range map[string]error{
+		"founding":  foundingWait("home-a", "home-b"),
+		"databases": databasesWait("home-a", "home-b"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			withIDPFake(t)
+			c := stepFor(t, "home-a", secretsWithout(t, "talk"))
+			rec := &ui.Recorder{}
+			c.report = rec
+			var log passLog
+			pass := log.pass(t, c, "talk")
+			pass.execute = func(*apply.Plan) error {
+				log.events = append(log.events, "execute")
+				return stop
+			}
+			plans, err := executeWithClients(c, pass)
+			if err != stop {
+				t.Fatalf("got %v, want the stop as it is", err)
+			}
+			if len(plans) != 0 || strings.Count(strings.Join(log.events, "\n"), "execute") != 1 {
+				t.Errorf("went on past the stop: %q", log.events)
+			}
+			if rec.Has("fail", "start pocket-id") || !rec.Has("done", "start pocket-id") {
+				t.Errorf("the stop read as a failure:\n%s", rec.Lines())
+			}
+		})
+	}
+}

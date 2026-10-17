@@ -254,7 +254,7 @@ func checkUpstream(ctx context.Context, t Target, p Probes) Result {
 	switch {
 	case len(open) > 0:
 		r.Detail = fmt.Sprintf("%s answers: the app is reachable around your web server", strings.Join(open, " and "))
-		r.Fix = fmt.Sprintf("Docker publishes %s in front of ufw. Set sites.%s.web_server.listen to 127.0.0.1:%d when the web server runs on this machine, or drop port %d from outside in Docker's DOCKER-USER chain", t.Listen, t.Site, t.ListenPort, t.ListenPort)
+		r.Fix = fmt.Sprintf("port %d answers from outside, so the firewall on the host, or one in front of it, lets it in. Set sites.%s.web_server.listen to 127.0.0.1:%d, since your web server runs on the same host, or close port %d in that firewall", t.ListenPort, t.Site, t.ListenPort, t.ListenPort)
 	case len(closed) == 0:
 		// Not one address answered either way, so nothing is known about
 		// the port.

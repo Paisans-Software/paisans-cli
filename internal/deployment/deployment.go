@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -116,20 +117,92 @@ const MaxInterfaceName = 15
 // under MaxInterfaceName with room to spare.
 func (d Deployment) Interface() string { return InterfacePrefix + d.Token() }
 
-// WireGuardConf is the interface's wg-quick file, as a rendered path
-// relative to the host's /: etc/wireguard/psns-<token>.conf. wg-quick names
-// the interface after the file.
+// WireGuardConf is the interface's wg-quick file as apply renders and writes
+// it, relative to the host's /: srv/paisans/<token>/psns-<token>.conf. It is
+// the deployment's own copy, in its own directory, because the deployment's
+// user can neither write /etc/wireguard nor read the file there; apply hands
+// it to the WireGuard helper, which checks it and installs it as
+// WireGuardInstalled. It sits directly under the root, so it is no stack's.
 func (d Deployment) WireGuardConf() string {
-	return "etc/wireguard/" + d.Interface() + ".conf"
+	return d.RelPath(d.Interface() + ".conf")
+}
+
+// WireGuardInstalled is where the WireGuard helper installs the interface's
+// file for wg-quick, which names the interface after it:
+// /etc/wireguard/psns-<token>.conf, root's, mode 600.
+func (d Deployment) WireGuardInstalled() string {
+	return "/etc/wireguard/" + d.Interface() + ".conf"
 }
 
 // WireGuardUnit is the systemd unit wireguard-tools ships to bring the
 // interface up from that file, wg-quick@psns-<token>.
 func (d Deployment) WireGuardUnit() string { return "wg-quick@" + d.Interface() }
 
+// FwMark is the mark the deployment's WireGuard socket carries: the helper
+// site admit installs adds it to every conf it installs, and the egress
+// table drops what a socket with it sends to the host itself, loopback,
+// link-local, multicast and the private ranges. Kernel WireGuard sends from
+// no user, so the table's UID match cannot see the mesh's own packets, and
+// the mark is how it sees them. 0x5053 ("PS") above the token: the registry
+// keeps tokens unique on a host, so marks are too. A token that is not
+// exactly TokenLength lower-case hex digits has no mark, so no bad token
+// shares token 0000's.
+//
+// The high half 0x5053 and the token in the low half are chosen for Docker
+// hosts. Kubernetes CNIs use overlapping bits (kube-proxy's 0x4000 and
+// 0x8000, Calico's 0xffff0000 mask), so a host running Kubernetes is outside
+// what admit supports.
+func (d Deployment) FwMark() (uint32, error) {
+	t := d.Token()
+	if len(t) != TokenLength || strings.Trim(t, "0123456789abcdef") != "" {
+		return 0, fmt.Errorf("deployment id %q has no token of %d lower-case hex digits to mark with", d.ID, TokenLength)
+	}
+	n, err := strconv.ParseUint(t, 16, 16)
+	if err != nil {
+		return 0, err
+	}
+	return 0x50530000 | uint32(n), nil
+}
+
+// EgressTable is the nftables table, in family inet, that keeps the
+// deployment's user off the host's loopback and the owner's network.
+func (d Deployment) EgressTable() string { return "paisans_" + d.Token() }
+
+// EgressUnit is the system unit that loads EgressTable at boot, before the
+// deployment user's manager starts.
+func (d Deployment) EgressUnit() string { return d.Prefix() + "-egress.service" }
+
 // Manifest is the toolkit's record of every file apply wrote for this
 // deployment on a host.
 func (d Deployment) Manifest() string { return d.Path(".paisans-manifest.json") }
+
+// StateDir is where the toolkit keeps its own records for this deployment on
+// a host: /srv/paisans/<token>/.paisans, the deployment user's, mode 700.
+// The deployed record, the grant record and a gateway move's marker live
+// here, so every command writes them as the deployment's user, without sudo.
+func (d Deployment) StateDir() string { return d.Path(".paisans") }
+
+// StatePath is a file in StateDir.
+func (d Deployment) StatePath(name string) string { return d.StateDir() + "/" + name }
+
+// StateLockCommand is the shell every writer of a record in StateDir runs
+// first: a umask that keeps what it creates the user's, StateDir created 700
+// when it is absent and refused when it is a link, and the deployment's one
+// lock held for the rest of the command, so two commands never interleave
+// their writes. what names the record, for the message when it is refused,
+// and is quoted, so any text is safe.
+func (d Deployment) StateLockCommand(what string) string {
+	dir, lock := shellQuote(d.StateDir()), shellQuote(d.StatePath("lock"))
+	return strings.Join([]string{
+		"umask 077",
+		fmt.Sprintf("if [ -L %s ]; then echo %s; exit 1; fi", dir, shellQuote("paisans: the state directory is a link, so "+what+" is not written")),
+		fmt.Sprintf("[ -d %[1]s ] || install -d -m 700 %[1]s", dir),
+		"exec 9>>" + lock,
+		"flock -w 60 9 || { echo 'paisans: another command holds the deployment lock'; exit 1; }",
+	}, "; ")
+}
+
+func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 // LabelFilter is the `docker ... --filter` argument selecting this
 // deployment's objects by label.
@@ -138,7 +211,8 @@ func (d Deployment) LabelFilter() string { return "label=" + Label + "=" + d.ID 
 // SplitRel splits a rendered path into its stack and the remainder within
 // that stack, when it lies under some deployment's root:
 // srv/paisans/f2a9/talk/.env is ("f2a9", "talk", ".env", true). A path
-// outside every root, such as etc/wireguard/psns-f2a9.conf, is not.
+// with no stack, such as srv/paisans/f2a9/psns-f2a9.conf, or outside every
+// root, such as etc/hosts, is not.
 func SplitRel(rel string) (token, stack, rest string, ok bool) {
 	base := strings.TrimPrefix(Base, "/") + "/"
 	if !strings.HasPrefix(rel, base) {

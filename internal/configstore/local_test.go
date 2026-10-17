@@ -885,3 +885,48 @@ func attest(l Local, sites map[string]apply.Transport, keyLine, signWith string,
 	sha, _, err := attestFrom(l, g, sites, root, keyLine, signWith, now, push)
 	return sha, err
 }
+
+// A run that publishes a version and then writes the secrets itself
+// publishes the next version on its own, from the gather it made before the
+// first: the sites hold the run's version as their head, so the next is
+// revision 2 on it, trusted and the head once gathered again.
+func TestPublishNextBuildsOnTheRunsVersion(t *testing.T) {
+	needTools(t, "git", "ssh-keygen")
+	alice := newOperator(t)
+	sites := storeSites(t, "home-a", "home-b")
+	all := reach(sites, "home-a", "home-b")
+	first := edit(testFiles(), "1", map[string]string{"alice": alice.pub})
+	l := workstation(t, first)
+	g, err := gather(l, all, 2, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := publishOpts{keyLine: alice.pub, signWith: alice.key, now: testNow}
+	v1, _, err := publishFiles(l, g, first, all, o, fakePush)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := first
+	next.Secrets = []byte("s, with what the run recorded\n")
+	v2, pushed, err := publishNext(l, g, v1, 1, next, all, o, fakePush)
+	if err != nil || v2 == v1 || len(pushed) != 2 {
+		t.Fatalf("next: %s %v %v", v2, pushed, err)
+	}
+	if head, _ := l.Head(); head != v2 || !held(t, sites["home-a"], v2) || !held(t, sites["home-b"], v2) {
+		t.Fatalf("head %s, held %v %v", head, held(t, sites["home-a"], v2), held(t, sites["home-b"], v2))
+	}
+	again, err := gather(l, all, 2, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(again.Verdict.Heads) != 1 || again.Verdict.Heads[0] != v2 || !again.Verdict.Trusted[v2] || again.Versions[v2].Revision != 2 || !slices.Equal(again.Versions[v2].Parents, []string{v1}) {
+		t.Fatalf("verdict %+v, version %+v", again.Verdict, again.Versions[v2])
+	}
+
+	// Once the head has moved past the version named, nothing is published.
+	other := next
+	other.Secrets = []byte("s, again\n")
+	if _, _, err := publishNext(l, g, v1, 1, other, all, o, fakePush); err == nil {
+		t.Fatal("published on a version that is not the head")
+	}
+}

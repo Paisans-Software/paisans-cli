@@ -1,0 +1,2 @@
+printf 'enabled %s\n' "$({{ .Systemctl }} is-enabled {{ .Unit }} 2>/dev/null || true)"
+printf 'active %s\n' "$({{ .Systemctl }} is-active {{ .Unit }} 2>/dev/null || true)"

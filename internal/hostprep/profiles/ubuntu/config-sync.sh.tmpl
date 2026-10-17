@@ -1,0 +1,18 @@
+#!/bin/sh
+# Fetches every version a peer holds that this site lacks. Never prunes, and
+# never moves a ref: paisans_receive creates only versions this site lacks,
+# each named for its own hash, and ignores every other ref a peer holds.
+set -u
+{{.Receive}}repo={{.Repo}}
+log={{.Log}}
+out=""
+while IFS= read -r peer; do
+	[ -n "$peer" ] || continue
+	if paisans_receive "$repo" "git://$peer/{{.Token}}.git" 60 </dev/null 2>/dev/null; then
+		ok=true
+	else
+		ok=false
+	fi
+	out="$out{\"peer\":\"$peer\",\"ok\":$ok},"
+done < {{.Peers}}
+printf '{"at":"%s","peers":[%s]}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${out%,}" > "$log.tmp" && mv "$log.tmp" "$log"

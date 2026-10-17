@@ -25,8 +25,8 @@ import (
 )
 
 // removeSiteHost is how `site remove` reaches a site. Tests replace it.
-var removeSiteHost = func(name string, site config.Site, sudo bool) apply.Transport {
-	return siteTransport(name, site, "", sudo)
+var removeSiteHost = func(name string, site config.Site) apply.Transport {
+	return siteTransport(name, site, "")
 }
 
 // dnsProviderFor makes the provider site remove's DNS stage deletes
@@ -48,13 +48,12 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
 	execute := fs.Bool("execute", false, "actually run the stages, stopping at the first gate that fails")
-	hostGone := fs.Bool("host-gone", false, "the site's host is never coming back: run every stage but cleaning it, and reach it not at all")
+	hostGone := fs.Bool("host-gone", false, "the site's host is not reached, dead or no longer the deployment's: cut it out of the mesh first, then take it out of the cluster without reaching it; asks for the site's name at a terminal")
 	deleteData := fs.Bool("delete-data", false, "also delete this deployment's data on the host (its directory and named volumes); asks for the site's name at a terminal")
-	sudo := fs.Bool("sudo", true, "run remote commands through sudo, since /srv, /etc and Docker are root's")
 	force := fs.Bool("force", false, "clean this deployment off one host and nothing else: no cluster stage or refusal, and neither "+config.FileName+" nor the secrets file edited")
 	sshFlag := fs.String("ssh", "", "with --force: the host to clean, user@host[:port], any host; only what carries this deployment's id or token is removed")
-	idFlag := fs.String("id", "", "with --force and --ssh, and no "+config.FileName+": the deployment to clean off the host, by its full id or its token, as `paisans host deployments` lists it")
-	evict := fs.Bool("evict", false, "the site's host still runs and nobody else can reach it: cut it out of the mesh first, then take it out of the cluster without reaching its host; asks for the site's name at a terminal")
+	idFlag := fs.String("id", "", "with --force and --ssh, and no "+config.FileName+": the deployment to clean off the host, by its full id or its token, as paisans site deployments lists it")
+	answers := yesFlag(fs)
 	var site string
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		site, args = args[0], args[1:]
@@ -62,29 +61,34 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	r := reporter()
 	if site == "" && fs.NArg() > 0 {
 		site = fs.Arg(0)
 		if err := fs.Parse(fs.Args()[1:]); err != nil {
 			return err
 		}
 	}
-	if fs.NArg() > 0 {
-		return &ui.Problem{Hint: "site remove takes one site", Explain: "Got extra argument(s): " + strings.Join(fs.Args(), " ") + ". Usage: paisans site remove <site> [--execute] [--host-gone | --evict] [--delete-data] [--force [--ssh user@host[:port]]]"}
+	ans, err := answers()
+	if err != nil {
+		return err
 	}
-	if *evict {
+	// Once every flag is read, those after the site's name included, as
+	// the reporter and the login recording take --execute and -v from them.
+	r := reporter()
+	if fs.NArg() > 0 {
+		return &ui.Problem{Hint: "site remove takes one site", Explain: "Got extra argument(s): " + strings.Join(fs.Args(), " ") + ". Usage: paisans site remove <site> [--execute] [--host-gone] [--delete-data] [--force [--ssh user@host[:port]]]"}
+	}
+	if *hostGone {
 		switch {
 		case *force || *idFlag != "" || *sshFlag != "":
-			return &ui.Problem{Hint: "--evict cleans no host", Explain: "--evict never reaches the evicted site's host, and --force, --ssh and --id name a host to clean. Drop them."}
+			return &ui.Problem{Hint: "--host-gone cleans no host", Explain: "--host-gone never reaches the site's host, and --force, --ssh and --id name a host to clean. Drop them."}
 		case *deleteData:
-			return &ui.Problem{Hint: "--evict and --delete-data cannot be used together", Explain: "--delete-data deletes data on the host, and --evict never reaches it. Drop --delete-data."}
+			return &ui.Problem{Hint: "--host-gone and --delete-data cannot be used together", Explain: "--delete-data deletes data on the host, and --host-gone never reaches it. Drop --delete-data."}
 		}
-		*hostGone = true
 	}
 	if *idFlag != "" {
 		set := map[string]bool{}
 		fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
-		return runSiteRemoveByID(r, site, byIDArgs{id: *idFlag, ssh: *sshFlag, force: *force, config: set["config"], secrets: set["secrets"], execute: *execute, hostGone: *hostGone, deleteData: *deleteData, sudo: *sudo}, stdin, stdout)
+		return runSiteRemoveByID(r, site, byIDArgs{id: *idFlag, ssh: *sshFlag, force: *force, config: set["config"], secrets: set["secrets"], execute: *execute, deleteData: *deleteData, answers: ans}, stdin, stdout)
 	}
 	if site == "" {
 		return &ui.Problem{Hint: "site remove needs a site", Explain: "Name the site to remove, Eg: paisans site remove home-b"}
@@ -93,7 +97,7 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 		return &ui.Problem{Hint: "--ssh is only for --force", Explain: "--ssh names the host to clean, which only --force takes. A full removal reaches the site through its ssh section."}
 	}
 	if *force {
-		return runSiteRemoveForced(r, site, forcedArgs{config: *configPath, secrets: *secretsPath, ssh: *sshFlag, execute: *execute, hostGone: *hostGone, deleteData: *deleteData, sudo: *sudo}, stdin, stdout)
+		return runSiteRemoveForced(r, site, forcedArgs{config: *configPath, secrets: *secretsPath, ssh: *sshFlag, execute: *execute, deleteData: *deleteData, answers: ans}, stdin, stdout)
 	}
 
 	cfg, err := config.Load(*configPath)
@@ -107,28 +111,28 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	// Refused before any host is read, so an unattended run with
 	// --delete-data stops with nothing asked of anything.
-	if *execute && *deleteData && !stdinIsTerminal(stdin) {
+	if *execute && *deleteData && !ans.canAnswer(stdin) {
 		return noTerminal("--delete-data deletes member data, which nothing brings back")
 	}
-	if *execute && *evict && !stdinIsTerminal(stdin) {
-		return noTerminal("An eviction is not undone by running it again")
+	if *execute && *hostGone && !ans.canAnswer(stdin) {
+		return noTerminal("Cutting a site off is not undone by running it again")
 	}
-	opts := siteremove.Options{HostGone: *hostGone, DeleteData: *deleteData, ConfigPath: *configPath, DNSProvider: dnsProviderFor, Evict: *evict}
+	opts := siteremove.Options{HostGone: *hostGone, DeleteData: *deleteData, ConfigPath: *configPath, DNSProvider: dnsProviderFor}
 	if err := siteremove.Refusal(cfg, site, opts); err != nil {
 		return err
 	}
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
 	}
-	// One reader for every answer an eviction asks for, so none is read
-	// ahead and lost between questions.
-	term := &terminal{stdin: stdin, out: stdout}
+	// One reader for every answer a removal with --host-gone asks for, so none
+	// is read ahead and lost between questions.
+	term := &terminal{answers: ans, stdin: stdin, out: stdout}
 	// A gateway's DNS token is revoked and replaced while `revoked` waits,
 	// with `secrets set`, which writes the secrets file. So it is asked
 	// before the file is read: the token checked and every secret written
 	// back are the ones the operator has just set.
 	asked := false
-	if *execute && *evict && cfg.Sites[site].Has(config.RoleGateway) {
+	if *execute && *hostGone && cfg.Sites[site].Has(config.RoleGateway) {
 		if err := term.ask([]question{revokedQuestion(cfg, site)}); err != nil {
 			return err
 		}
@@ -154,9 +158,9 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	// A replacement declared in the same edit has no secrets yet. They are
 	// generated here, on the workstation, by the same code init runs, so the
 	// remaining sites can be rendered with it; they are written only once the
-	// eviction is confirmed.
+	// removal is confirmed.
 	var filled secretsgen.Result
-	if *evict {
+	if *hostGone {
 		if filled, err = secretsgen.Fill(cfg, secrets); err != nil {
 			return err
 		}
@@ -166,29 +170,23 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 
 	transports := map[string]apply.Transport{}
-	var claim []string
+	var written []string
 	for _, name := range cfg.SiteNames() {
 		if name == site && *hostGone {
 			continue
 		}
-		transports[name] = removeSiteHost(name, cfg.Sites[name], *sudo)
-		claim = append(claim, name)
+		transports[name] = removeSiteHost(name, cfg.Sites[name])
+		written = append(written, name)
 	}
-	// Every host it reaches is asked for its sudo password before any is
-	// read, rather than at whichever stage first needs it.
-	if err := settleSudo(r, claim, func(name string) apply.Transport { return transports[name] }); err != nil {
-		return err
-	}
-	// A site declared for the first time is neither checked nor claimed: the
-	// eviction leaves its host to the apply that brings it up, and a claim
-	// would make it look prepared.
+	// A site declared for the first time is neither checked nor written to:
+	// the removal leaves its host to the apply that brings it up.
 	monitors := cfg.MonitorSites()
-	if *evict {
+	if *hostGone {
 		joining, err := siteremove.JoiningSites(cfg, secrets, site, transports)
 		if err != nil {
 			return err
 		}
-		claim, monitors = withoutNames(claim, joining), withoutNames(monitors, joining)
+		written, monitors = withoutNames(written, joining), withoutNames(monitors, joining)
 	}
 	// The monitor's stack is applied last, with the site out of its seed,
 	// so each monitor site is host checked as apply would check it.
@@ -204,15 +202,16 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	if !*execute || r.Verbose() {
 		plan.Show(r)
 	}
-	// Every site it reaches is written to: the cluster and the mesh change
-	// on each remaining one, and the leaving host is cleaned.
-	if err := claimSites(r, cfg, *execute, *sudo, claim...); err != nil {
+	// Every site it reaches is written to, so it checks the admission of
+	// each: the cluster and the mesh change on each remaining one, and the
+	// leaving host is cleaned.
+	if _, err := admittedSites(r, cfg, written...); err != nil {
 		return err
 	}
 	if filled.Changed() {
 		verb := "would be generated"
 		if *execute {
-			verb = "are generated before the eviction starts"
+			verb = "are generated before the site is cut off"
 		}
 		r.Note("secrets: "+strings.Join(filled.Generated, ", ")+" "+verb, "The configuration declares them and the secrets file does not hold them yet; paisans init generates them the same way")
 	}
@@ -222,13 +221,13 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 		return nil
 	}
 	if *deleteData {
-		if err := confirmSite(stdin, stdout, site); err != nil {
+		if err := confirmSite(ans, stdin, stdout, site); err != nil {
 			return err
 		}
 	}
-	if *evict {
+	if *hostGone {
 		var questions []question
-		for _, q := range evictionQuestions(cfg, site, plan) {
+		for _, q := range cutoffQuestions(cfg, site, plan) {
 			if !asked || q.word != "revoked" {
 				questions = append(questions, q)
 			}
@@ -248,23 +247,22 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	reportRemains(r, plan.Remains())
 	r.Result("%s is removed: every gate passed, and %s no longer declares it.", site, *configPath)
+	noteEvict(r, plan)
 	return nil
 }
 
 type forcedArgs struct {
-	config, secrets, ssh                string
-	execute, hostGone, deleteData, sudo bool
+	config, secrets, ssh string
+	execute, deleteData  bool
+	answers              answerer
 }
 
 // runSiteRemoveForced is `site remove --force`: one host cleaned of this
 // deployment, nothing else read or changed. See siteremove.BuildForced.
 //
-// The host is never claimed in its registry, as other commands that write to
-// a host do: cleaning it removes this deployment's entry there.
+// The host's admission is not checked, as other commands that write to a
+// host check it: cleaning it removes this deployment from the host.
 func runSiteRemoveForced(r ui.Reporter, site string, a forcedArgs, stdin io.Reader, stdout io.Writer) error {
-	if a.hostGone {
-		return forceAndHostGone()
-	}
 	cfg, err := config.Load(a.config)
 	if err != nil {
 		return err
@@ -282,7 +280,7 @@ func runSiteRemoveForced(r ui.Reporter, site string, a forcedArgs, stdin io.Read
 	own := isDeclared && declared.Destination() == dest
 	// Refused before any host is read, so an unattended run stops with
 	// nothing asked of anything.
-	if a.execute && (own || a.deleteData) && !stdinIsTerminal(stdin) {
+	if a.execute && (own || a.deleteData) && !a.answers.canAnswer(stdin) {
 		why := "--delete-data deletes member data, which nothing brings back"
 		if own {
 			why = "it cleans the host " + site + " runs on, out from under its cluster"
@@ -303,10 +301,7 @@ func runSiteRemoveForced(r ui.Reporter, site string, a forcedArgs, stdin io.Read
 	// operator logs in with; only where is dest.
 	reach := declared
 	reach.SSH.User, reach.SSH.Host, reach.SSH.Port = dest.User, dest.Host, dest.Port
-	t := removeSiteHost(site, reach, a.sudo)
-	if err := settleSudo(r, []string{site}, func(string) apply.Transport { return t }); err != nil {
-		return err
-	}
+	t := removeSiteHost(site, reach)
 	opts := siteremove.Options{DeleteData: a.deleteData, ConfigPath: a.config, DNSProvider: dnsProviderFor}
 	plan, err := ui.Get(r, "read "+dest.String(), func() (*siteremove.Plan, error) {
 		return siteremove.BuildForced(cfg, secrets, site, dest, t, opts)
@@ -317,7 +312,7 @@ func runSiteRemoveForced(r ui.Reporter, site string, a forcedArgs, stdin io.Read
 	// A site no longer declared leaves every gateway's deployment record,
 	// whatever its host held, so secrets prune may remove its secrets.
 	forget := func(execute bool) bool {
-		return !isDeclared && forgetInRecords(r, cfg, deployrecord.Record{Sites: []string{site}}, site, execute, a.sudo)
+		return !isDeclared && forgetInRecords(r, cfg, deployrecord.Record{Sites: []string{site}}, site, execute)
 	}
 	recordLeft := false
 	if !plan.Pending() {
@@ -343,7 +338,7 @@ func runSiteRemoveForced(r ui.Reporter, site string, a forcedArgs, stdin io.Read
 		what = append(what, deletesData(stdout, dest.String()))
 	}
 	if len(what) > 0 {
-		if err := confirmSiteFor(stdin, stdout, site, strings.Join(what, "\n")); err != nil {
+		if err := confirmSiteFor(a.answers, stdin, stdout, site, strings.Join(what, "\n")); err != nil {
 			return err
 		}
 	}
@@ -354,12 +349,14 @@ func runSiteRemoveForced(r ui.Reporter, site string, a forcedArgs, stdin io.Read
 	forget(true)
 	reportRemains(r, plan.Remains())
 	r.Result("%s is cleaned of this deployment. %s and the secrets file are unchanged.", dest, a.config)
+	noteEvict(r, plan)
 	return nil
 }
 
 type byIDArgs struct {
-	id, ssh                                                     string
-	force, config, secrets, execute, hostGone, deleteData, sudo bool
+	id, ssh                                     string
+	force, config, secrets, execute, deleteData bool
+	answers                                     answerer
 }
 
 // tokenShape is a token as --id takes it: deployment.TokenLength lowercase
@@ -367,7 +364,7 @@ type byIDArgs struct {
 var tokenShape = regexp.MustCompile(fmt.Sprintf("^[0-9a-f]{%d}$", deployment.TokenLength))
 
 // runSiteRemoveByID is `site remove --force --ssh <dest> --id <id or token>`:
-// one host cleaned of the deployment its registry names, with no
+// one host cleaned of the deployment the login's admission record names, with no
 // paisans-stack.yaml and no secrets file. See siteremove.BuildForcedByID and
 // docs/specs/2026-10-10-remove-without-config.md.
 //
@@ -379,17 +376,15 @@ func runSiteRemoveByID(r ui.Reporter, site string, a byIDArgs, stdin io.Reader, 
 	case !a.force:
 		return &ui.Problem{Hint: "--id needs --force", Explain: "--id names a deployment for --force to clean off one host, so add --force."}
 	case site != "":
-		return &ui.Problem{Hint: "--id takes no site", Explain: "The host's registry entry names the site, so drop " + site + "."}
+		return &ui.Problem{Hint: "--id takes no site", Explain: "The login's admission record on the host names the site, so drop " + site + "."}
 	case a.config:
 		return &ui.Problem{Hint: "--id takes no --config", Explain: "--id reads no " + config.FileName + ", and a configuration names its own id. Drop --config, or --id."}
 	case a.secrets:
 		return &ui.Problem{Hint: "--id takes no --secrets", Explain: "--id reads no secrets file. Drop --secrets."}
-	case a.hostGone:
-		return forceAndHostGone()
 	case a.ssh == "":
 		return &ui.Problem{Hint: "--id needs --ssh", Explain: "With no configuration there is no ssh section to reach the host through, so name it with --ssh user@host[:port]."}
 	case !deployment.ValidID(a.id) && !tokenShape.MatchString(a.id):
-		return &ui.Problem{Hint: fmt.Sprintf("--id %q is not a deployment id or token", a.id), Explain: fmt.Sprintf("Give the full id or its %d hex digit token, as paisans host deployments lists them, Eg: --id f2a9", deployment.TokenLength)}
+		return &ui.Problem{Hint: fmt.Sprintf("--id %q is not a deployment id or token", a.id), Explain: fmt.Sprintf("Give the full id or its %d hex digit token, as paisans site deployments lists them, Eg: --id f2a9", deployment.TokenLength)}
 	}
 	dest, err := config.ParseDestination(a.ssh)
 	if err != nil {
@@ -397,13 +392,10 @@ func runSiteRemoveByID(r ui.Reporter, site string, a byIDArgs, stdin io.Reader, 
 	}
 	// Refused before any host is read, so an unattended run stops with
 	// nothing asked of anything.
-	if a.execute && !stdinIsTerminal(stdin) {
+	if a.execute && !a.answers.canAnswer(stdin) {
 		return noTerminal("Nothing says whether this deployment still runs")
 	}
-	t := reachDestination(dest, a.sudo)
-	if err := settleSudo(r, []string{dest.String()}, func(string) apply.Transport { return t }); err != nil {
-		return err
-	}
+	t := reachDestination(dest)
 	plan, err := ui.Get(r, "read "+dest.String(), func() (*siteremove.Plan, error) {
 		return siteremove.BuildForcedByID(dest, t, a.id, siteremove.Options{DeleteData: a.deleteData})
 	})
@@ -428,7 +420,7 @@ func runSiteRemoveByID(r ui.Reporter, site string, a byIDArgs, stdin io.Reader, 
 	if deletes != "" {
 		what += "\n" + ui.Danger(stdout, deletes)
 	}
-	if err := confirmSiteFor(stdin, stdout, plan.Site, what); err != nil {
+	if err := confirmSiteFor(a.answers, stdin, stdout, plan.Site, what); err != nil {
 		return err
 	}
 	plan.Report = r
@@ -437,7 +429,17 @@ func runSiteRemoveByID(r ui.Reporter, site string, a byIDArgs, stdin io.Reader, 
 	}
 	reportRemains(r, plan.Remains())
 	r.Result("%s is cleaned of deployment %s.", dest, plan.DeploymentID())
+	noteEvict(r, plan)
 	return nil
+}
+
+// noteEvict ends a run that reached or skipped a host with the line its
+// owner runs to remove what is root's, which site remove cannot.
+func noteEvict(r ui.Reporter, plan *siteremove.Plan) {
+	if plan.Evict == "" {
+		return
+	}
+	r.Note("the host's owner finishes on "+plan.Site, "Send them this line, which removes the deployment's user and everything root's that admit made for it:\n\n    "+plan.Evict)
 }
 
 // forcedNothingToDo ends a forced run on a host that holds nothing of this
@@ -449,13 +451,24 @@ func forcedNothingToDo(r ui.Reporter, plan *siteremove.Plan, dest config.Destina
 	}
 	if len(plan.CaddyKept) > 0 {
 		r.Result("%s holds nothing of this deployment but its Caddy, kept because it serves %s. Run this again once they have moved, and it goes.", dest, strings.Join(plan.CaddyKept, ", "))
+		noteEvict(r, plan)
+		return true
+	}
+	if plan.DataKept {
+		reportRemains(r, plan.Remains())
+		r.Result("%s holds nothing of this deployment but its data. Run this again with --delete-data, and it goes.", dest)
+		noteEvict(r, plan)
 		return true
 	}
 	if recordLeft {
 		r.Result("%s holds nothing of this deployment. Re-run with --execute to take it out of the deployment record.", dest)
+		noteEvict(r, plan)
 		return true
 	}
+	// The deployment's user, its root and its admission record may still
+	// be there from an earlier run, whose evict line this repeats.
 	r.Result("%s holds nothing of this deployment. Nothing to do.", dest)
+	noteEvict(r, plan)
 	return true
 }
 
@@ -481,12 +494,8 @@ func chooseHost(cfg *config.Config, site, ssh string) (config.Destination, error
 func noTerminal(why string) error {
 	return &ui.Problem{
 		Hint:    "the site's name must be typed, and stdin is not a terminal",
-		Explain: why + ", so it asks for the site's name at a terminal. Run it from an interactive shell. Nothing was changed.",
+		Explain: why + ", so it asks for the site's name at a terminal. Run it from an interactive shell, or answer it with --yes and PAISANS_ALLOW_YES=1. Nothing was changed.",
 	}
-}
-
-func forceAndHostGone() error {
-	return &ui.Problem{Hint: "--force and --host-gone cannot be used together", Explain: "--force cleans one host, and --host-gone reaches none. Drop one of them."}
 }
 
 // sshFlagProblem is the Problem for an --ssh value that is not a
@@ -496,8 +505,8 @@ func sshFlagProblem(value string, err error) error {
 }
 
 // confirmSite asks for the site's name before --delete-data deletes its data.
-func confirmSite(stdin io.Reader, stdout io.Writer, site string) error {
-	return confirmSiteFor(stdin, stdout, site, deletesData(stdout, site))
+func confirmSite(a answerer, stdin io.Reader, stdout io.Writer, site string) error {
+	return confirmSiteFor(a, stdin, stdout, site, deletesData(stdout, site))
 }
 
 // deletesData is the sentence --delete-data's question sets off: what it
@@ -507,9 +516,9 @@ func deletesData(stdout io.Writer, where string) string {
 }
 
 // confirmSiteFor says what is about to happen, asks for the site's name at
-// the terminal, and refuses anything else. There is no flag to answer it.
-func confirmSiteFor(stdin io.Reader, stdout io.Writer, site, what string) error {
-	if err := confirmWord(stdin, stdout, site, what); err != nil {
+// the terminal, and refuses anything else. --yes, through a, answers it.
+func confirmSiteFor(a answerer, stdin io.Reader, stdout io.Writer, site, what string) error {
+	if err := confirmWord(a, stdin, stdout, site, what); err != nil {
 		return fmt.Errorf("site remove: %w", err)
 	}
 	return nil
@@ -538,17 +547,17 @@ type question struct {
 	danger     bool
 }
 
-// evictionQuestions are the words an eviction asks for, in order: revoked,
-// for a gateway, whose DNS token can change the community's records from
-// anywhere; the site's name, since an eviction is not undone by running it
-// again; lose writes, for a leader with no streaming Sync Standby; and lose
-// objects, for a Garage node whose objects nothing else holds.
-func evictionQuestions(cfg *config.Config, site string, plan *siteremove.Plan) []question {
+// cutoffQuestions are the words a removal with --host-gone asks for, in order:
+// revoked, for a gateway, whose DNS token can change the community's records
+// from anywhere; the site's name, since cutting a site off is not undone by
+// running it again; lose writes, for a leader with no streaming Sync Standby;
+// and lose objects, for a Garage node whose objects nothing else holds.
+func cutoffQuestions(cfg *config.Config, site string, plan *siteremove.Plan) []question {
 	var out []question
 	if plan.Gateway() {
 		out = append(out, revokedQuestion(cfg, site))
 	}
-	out = append(out, question{word: site, what: fmt.Sprintf("This cuts %s out of the mesh and takes it out of the cluster without reaching its host. An eviction is not undone by running it again.", site)})
+	out = append(out, question{word: site, what: fmt.Sprintf("This cuts %s out of the mesh and takes it out of the cluster without reaching its host. Cutting a site off is not undone by running it again.", site)})
 	if text := plan.LoseWritesText(); text != "" {
 		out = append(out, question{"lose writes", text, true})
 	}
@@ -558,7 +567,7 @@ func evictionQuestions(cfg *config.Config, site string, plan *siteremove.Plan) [
 	return out
 }
 
-// revokedQuestion is `revoked`, asked when the evicted site holds the
+// revokedQuestion is `revoked`, asked when the cut-off site holds the
 // gateway.
 func revokedQuestion(cfg *config.Config, site string) question {
 	provider := cfg.ACME.Provider
@@ -568,24 +577,38 @@ func revokedQuestion(cfg *config.Config, site string) question {
 	return question{word: "revoked", what: fmt.Sprintf("%s holds the gateway, and the DNS token it was rendered can change the community's records from anywhere. Revoke that token at %s, and set a new one with `paisans secrets set external.acme_dns_token` before you proceed. This command cannot revoke it: it holds the token, not a credential that manages tokens.", site, provider)}
 }
 
-// terminal is where an eviction's questions are asked: one reader for all of
-// them, however many times it asks.
+// terminal is where the questions of a removal with --host-gone are asked: one
+// reader for all of them, however many times it asks, or --yes, which answers
+// each.
 type terminal struct {
-	stdin io.Reader
-	in    *bufio.Reader
-	out   io.Writer
+	answers answerer
+	stdin   io.Reader
+	in      *bufio.Reader
+	out     io.Writer
 }
 
-// confirmEviction asks each question in turn, from one reader so that no
+// confirmCutoff asks each question in turn, from one reader so that no
 // answer is read ahead and lost, and refuses at the first wrong answer.
-// There is no flag to answer any of them.
-func confirmEviction(stdin io.Reader, stdout io.Writer, questions []question) error {
-	return (&terminal{stdin: stdin, out: stdout}).ask(questions)
+// --yes, through a, answers each with its word.
+func confirmCutoff(a answerer, stdin io.Reader, stdout io.Writer, questions []question) error {
+	return (&terminal{answers: a, stdin: stdin, out: stdout}).ask(questions)
 }
 
 func (t *terminal) ask(questions []question) error {
+	if t.answers.yes {
+		for _, q := range questions {
+			what := q.what
+			if q.danger {
+				what = ui.Danger(t.out, what)
+			}
+			if err := confirmWord(t.answers, nil, t.out, q.word, what); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	if !stdinIsTerminal(t.stdin) {
-		return noTerminal("An eviction is not undone by running it again")
+		return noTerminal("Cutting a site off is not undone by running it again")
 	}
 	if t.in == nil {
 		t.in = bufio.NewReader(t.stdin)
@@ -609,7 +632,7 @@ func (t *terminal) ask(questions []question) error {
 }
 
 // writeFilled writes the secrets init's generation filled in, encrypted to
-// the recipients beside the file, before the eviction renders anything from
+// the recipients beside the file, before the removal renders anything from
 // them. The whole file is written back from what was read, so a file that
 // changed since, loaded as its bytes then, is refused rather than
 // overwritten: the change would be lost, and the plan was rendered without
@@ -620,7 +643,7 @@ func writeFilled(r ui.Reporter, path string, loaded []byte, secrets *config.Secr
 		return err
 	}
 	if !bytes.Equal(now, loaded) {
-		return fmt.Errorf("site remove: %s changed after it was read, so writing the generated secrets back would lose that change, and the plan was made without it. Nothing was written or changed: run site remove --evict again, which reads it afresh", path)
+		return fmt.Errorf("site remove: %s changed after it was read, so writing the generated secrets back would lose that change, and the plan was made without it. Nothing was written or changed: run site remove --host-gone again, which reads it afresh", path)
 	}
 	recipients, err := config.Recipients(filepath.Dir(path))
 	if err != nil {

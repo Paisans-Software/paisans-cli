@@ -7,17 +7,29 @@ import (
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
-	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
-// handshakeProbe prints each peer's latest handshake and the host's own clock,
-// so an age is computed against the clock that wrote the timestamp. `wg show
-// <interface> latest-handshakes` prints one line per peer, its public key and
-// a Unix time, 0 for a peer that has never completed one (wireguard-tools,
-// wg(8), "latest-handshakes").
-func handshakeProbe(d deployment.Deployment) string {
-	return "wg show " + d.Interface() + ` latest-handshakes; echo "now $(date +%s)"`
+// clock reads site's own clock as a Unix time, through t. The mesh gate
+// reads it after the site's handshakes, so an age is computed against the
+// clock that wrote the timestamp. Anything but one positive integer is an
+// error that quotes what date printed: a clock that cannot be read says
+// nothing about the handshakes, and taken for 0 it would make every one
+// look as though it never completed.
+func clock(site string, t apply.Transport) (int64, error) {
+	out, err := t.Run("date +%s")
+	if err != nil {
+		if errors.Is(err, apply.ErrUnreachable) {
+			return 0, err
+		}
+		return 0, fmt.Errorf("could not read %s's clock: date +%%s failed: %s", site, lastLines(out, 2))
+	}
+	now, perr := strconv.ParseInt(strings.TrimSpace(out), 10, 64)
+	if perr != nil || now <= 0 {
+		return 0, fmt.Errorf("could not read %s's clock: date +%%s printed \"%s\"", site, ui.Visible(ui.Redact(strings.TrimSpace(out))))
+	}
+	return now, nil
 }
 
 // buildMesh is stage 2: every site's WireGuard file with the new peer, written as a
@@ -28,7 +40,7 @@ func (p *Plan) buildMesh(rendered *render.Plan) (*Stage, error) {
 		Number: 2,
 		Name:   "mesh",
 		Short:  "mesh handshakes and ping",
-		Gate: fmt.Sprintf("a handshake younger than %d seconds between every pair of sites, read from `wg show` on both ends, and %s's mesh address %s answers ping from every site",
+		Gate: fmt.Sprintf("a handshake younger than %d seconds between every pair of sites, read through the WireGuard helper on both ends, and %s's mesh address %s answers ping from every site",
 			handshakeMaxAge, p.Site, p.cfg.Sites[p.Site].Address),
 		OnFailure: "restore the previous " + p.cfg.Deployment().Interface() + ".conf on every existing site and sync it, so the running cluster is untouched; the new site's interface is left, since no existing site has it as a peer any more",
 	}
@@ -123,15 +135,32 @@ func (p *Plan) meshGate() error {
 		}
 		views := map[string]map[string]int64{}
 		for _, name := range p.cfg.SiteNames() {
-			out, err := p.transports[name].Run(handshakeProbe(p.cfg.Deployment()))
+			// The helper prints one line per peer, its public key and a
+			// Unix time, 0 for a peer that has never completed one
+			// (wireguard-tools, wg(8), "latest-handshakes").
+			h := apply.WGHelper{T: p.transports[name], Iface: p.cfg.Deployment().Interface()}
+			out, err := h.Show("latest-handshakes")
 			if err != nil {
 				if errors.Is(err, apply.ErrUnreachable) {
 					return fmt.Errorf("%s: could not read host state, so its handshakes are unknown: %w", name, err)
 				}
-				problems = append(problems, fmt.Sprintf("%s: `wg show %s` failed: %s", name, p.cfg.Deployment().Interface(), lastLines(out, 2)))
+				// sudo refusing the helper is the host's owner's to fix,
+				// and does not clear itself while the gate waits.
+				if problem := apply.HelperReadProblem(name, h, err); problem != nil {
+					return problem
+				}
+				problems = append(problems, fmt.Sprintf("%s: reading %s's handshakes failed: %s", name, h.Iface, ui.Visible(err.Error())))
 				continue
 			}
-			views[name] = handshakeAges(out)
+			now, err := clock(name, p.transports[name])
+			if err != nil {
+				if errors.Is(err, apply.ErrUnreachable) {
+					return fmt.Errorf("%s: could not read host state, so its handshakes' ages are unknown: %w", name, err)
+				}
+				problems = append(problems, fmt.Sprintf("%s: %v", name, err))
+				continue
+			}
+			views[name] = handshakeAges(out, now)
 		}
 		for _, a := range p.cfg.SiteNames() {
 			view, ok := views[a]
@@ -160,13 +189,13 @@ func (p *Plan) meshGate() error {
 			sleep(meshPoll)
 		}
 	}
-	return fmt.Errorf("the mesh is not whole after %s:\n  %s\nCheck that each endpoint's port is open to UDP and forwarded, and read `wg show %s` on the sites named", meshWait, strings.Join(problems, "\n  "), p.cfg.Deployment().Interface())
+	return fmt.Errorf("the mesh is not whole after %s:\n  %s\nCheck that each endpoint's port is open to UDP and forwarded, and read `%s` on the sites named", meshWait, strings.Join(problems, "\n  "), apply.WGHelper{Iface: p.cfg.Deployment().Interface()}.CommandLine("show latest-handshakes"))
 }
 
-// handshakeAges reads handshakeProbe's output: each peer's key and the age of
-// its latest handshake in seconds, -1 for none yet.
-func handshakeAges(out string) map[string]int64 {
-	var now int64
+// handshakeAges reads the helper's show latest-handshakes: each peer's key
+// and the age of its latest handshake in seconds against now, -1 for none
+// yet.
+func handshakeAges(out string, now int64) map[string]int64 {
 	stamps := map[string]int64{}
 	for _, line := range strings.Split(out, "\n") {
 		fields := strings.Fields(line)
@@ -175,10 +204,6 @@ func handshakeAges(out string) map[string]int64 {
 		}
 		value, err := strconv.ParseInt(fields[1], 10, 64)
 		if err != nil {
-			continue
-		}
-		if fields[0] == "now" {
-			now = value
 			continue
 		}
 		stamps[fields[0]] = value

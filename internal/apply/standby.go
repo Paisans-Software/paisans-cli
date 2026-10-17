@@ -84,8 +84,8 @@ func StandbyApps(cfg *config.Config) []string {
 // is the one asked: any second line is a container on its way out of a
 // recreate, and handing docker exec two ids would fail and read as down.
 //
-// When docker itself cannot be asked (the deploy user is not in the docker
-// group and the command runs without sudo), /healthz still decides active;
+// When docker itself cannot be asked (the deployment user's rootless daemon
+// is not running, or DOCKER_HOST does not reach it), /healthz still decides active;
 // otherwise the answer is nodocker rather than down, so the operator is told
 // the standby question went unanswered instead of being told the site failed.
 func instanceCommand(d deployment.Deployment, app, address string, port int) string {
@@ -135,7 +135,7 @@ func LookAtInstances(cfg *config.Config, app string, transports map[string]Trans
 			in.Detail = "running neither as active nor on standby"
 		case noDocker:
 			in.State = Down
-			in.Detail = fmt.Sprintf("/healthz did not answer on %s:%d, and docker could not be asked whether it stands by. Ask with sudo, or as a member of the docker group", address, port)
+			in.Detail = fmt.Sprintf("/healthz did not answer on %s:%d, and the deployment user's rootless Docker daemon did not answer whether it stands by. As that user, check `systemctl --user status docker`, and that DOCKER_HOST is unix:///run/user/<uid>/docker.sock", address, port)
 		case Absent:
 			in.Detail = fmt.Sprintf("no %s on this site yet", cfg.Deployment().Dir(app))
 		default:

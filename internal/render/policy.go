@@ -24,7 +24,6 @@ var refusedServiceKeys = map[string]string{
 	"privileged":    "a privileged container is root on the host",
 	"cap_add":       "an added capability reaches past the container",
 	"devices":       "a device is the host's hardware",
-	"security_opt":  "a security option can turn the container's confinement off",
 	"cgroup_parent": "it places the container outside its stack's control group",
 }
 
@@ -48,6 +47,9 @@ func checkComposePolicy(content, root string) error {
 			if _, ok := svc[key]; ok {
 				problems = append(problems, fmt.Sprintf("services.%s.%s: %s", name, key, why))
 			}
+		}
+		if options, present := svc["security_opt"]; present && !hardeningSecurityOptions(options) {
+			problems = append(problems, fmt.Sprintf("services.%s.security_opt: only no-new-privileges:true or no-new-privileges=true is permitted; other security options can turn the container's confinement off", name))
 		}
 		for _, key := range hostModes {
 			if v, ok := svc[key].(string); ok && (v == "host" || strings.HasPrefix(v, "container:")) {
@@ -84,6 +86,22 @@ func checkComposePolicy(content, root string) error {
 	}
 	sort.Strings(problems)
 	return fmt.Errorf("its compose.yaml asks for what a blueprint from a catalog may not:\n  %s", strings.Join(problems, "\n  "))
+}
+
+// Only explicit true values are safe here. Checking every entry also refuses
+// a later false value that would undo an earlier hardening option.
+func hardeningSecurityOptions(value any) bool {
+	options, ok := value.([]any)
+	if !ok {
+		return false
+	}
+	for _, value := range options {
+		option, ok := value.(string)
+		if !ok || (option != "no-new-privileges:true" && option != "no-new-privileges=true") {
+			return false
+		}
+	}
+	return true
 }
 
 func sortedServiceNames(m map[string]map[string]any) []string {

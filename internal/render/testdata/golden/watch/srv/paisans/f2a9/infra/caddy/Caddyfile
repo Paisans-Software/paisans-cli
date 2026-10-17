@@ -20,6 +20,11 @@
 	acme_dns desec {
 		token {env.ACME_DNS_TOKEN}
 	}
+	# The admin API on a socket inside this container, where `caddy reload`
+	# run in it finds it. Caddy shares the host's network, where the
+	# deployment's dials to loopback are dropped, and an admin API on TCP
+	# there would be any local user's to rewrite.
+	admin unix//run/caddy-admin.sock
 
 	servers {
 		# The mesh, never a host address, so the gateway role can move without
@@ -82,12 +87,32 @@
 	}
 }
 
+# The gateway answers as this deployment at a path only it serves, with its
+# token, and apply asks for it from outside after every gateway apply: a
+# server that took 80 or 443 after admission answers anything else. Every
+# host block imports it first, and holds nothing else at its top level that
+# could answer: Caddy orders redir, rewrite, basic_auth, forward_auth and
+# the like before handle, so a blueprint's routing always sits inside a
+# handle of its own. Among handle blocks Caddy matches the one with a single,
+# longest path first, so this one's one literal path wins over every other;
+# a second matcher here would lose that.
+(paisans_self) {
+	@paisans_self path /.well-known/paisans/f2a9
+	handle @paisans_self {
+		respond "f2a9" 200
+	}
+}
+
 
 health.example.org {
+	import paisans_self
 	import upstream_unavailable
 	# Stripped here as on a gated hostname: nothing that reaches an app may
 	# name a user unless the gate put the name there, and an ungated app that
 	# trusted the header would otherwise trust whoever sent the request.
 	request_header -X-Auth-Request-*
-	import /etc/caddy/snippets/health.caddy
+
+	handle {
+		import /etc/caddy/snippets/health.caddy
+	}
 }

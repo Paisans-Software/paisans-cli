@@ -9,6 +9,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 func manifestOf(t *testing.T, host *fakeHost) map[string]render.ManifestFile {
@@ -135,5 +136,43 @@ func TestAPartialApplyMarksNothingLeftOver(t *testing.T) {
 	}
 	if len(manifestOf(t, host)) != len(before) {
 		t.Error("a scoped apply dropped or added manifest entries")
+	}
+}
+
+// The manifest records the build of the paisans that wrote it, so a site
+// remove by an older one can refuse the site.
+func TestTheManifestRecordsTheBuild(t *testing.T) {
+	host := newHost()
+	applyWhole(t, host, plan(t))
+	m, err := render.ParseManifest([]byte(host.files["/srv/paisans/f2a9/.paisans-manifest.json"]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Build != version.Current() {
+		t.Errorf("the manifest records %+v, want %+v", m.Build, version.Current())
+	}
+}
+
+// apply reads a manifest that does not say which build wrote it, since it
+// is what writes it anew, and the manifest it writes says.
+func TestApplyWritesAManifestWithNoBuildAnew(t *testing.T) {
+	host := newHost()
+	applyWhole(t, host, plan(t))
+	path := "/srv/paisans/f2a9/.paisans-manifest.json"
+	var m map[string]any
+	if err := json.Unmarshal([]byte(host.files[path]), &m); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range version.BuildKeys {
+		delete(m, k)
+	}
+	data, _ := json.Marshal(m)
+	host.files[path] = string(data)
+	if _, err := render.ParseManifest(data); err == nil {
+		t.Fatal("the stripped manifest parsed")
+	}
+	applyWhole(t, host, plan(t))
+	if got, err := render.ParseManifest([]byte(host.files[path])); err != nil || got.Build != version.Current() {
+		t.Errorf("got %+v, %v", got.Build, err)
 	}
 }

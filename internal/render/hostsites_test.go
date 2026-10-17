@@ -4,24 +4,26 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
 // The gateway's Caddy imports the host's own site blocks: its compose file
-// mounts HostSitesDir read only, its Caddyfile imports every *.caddy there as
+// mounts the deployment's HostSitesDir read only, its Caddyfile imports every *.caddy there as
 // the last top level statement (after every snippet a block may import), and
 // nothing is rendered into the directory. A monitor's Caddy does neither.
 func TestGatewayImportsTheHostsOwnSites(t *testing.T) {
 	plan := build(t)
+	sitesDir := render.HostSitesDir(plan.Deployment)
 	content := map[string]string{}
 	for _, f := range plan.Files {
 		content[f.Path] = f.Content
-		if _, rel, _ := strings.Cut(f.Path, "/"); strings.HasPrefix("/"+rel, render.HostSitesDir+"/") {
-			t.Errorf("%s is rendered into the host's own %s", f.Path, render.HostSitesDir)
+		if _, rel, _ := strings.Cut(f.Path, "/"); strings.HasPrefix("/"+rel, sitesDir+"/") {
+			t.Errorf("%s is rendered into the host's own %s", f.Path, sitesDir)
 		}
 	}
 	importLine := "import " + render.HostSitesMount + "/*.caddy"
-	mountLine := "- " + render.HostSitesDir + ":" + render.HostSitesMount + ":ro"
+	mountLine := "- " + sitesDir + ":" + render.HostSitesMount + ":ro"
 
 	caddyfile := content["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"]
 	lines := strings.Split(strings.TrimRight(caddyfile, "\n"), "\n")
@@ -32,13 +34,13 @@ func TestGatewayImportsTheHostsOwnSites(t *testing.T) {
 		t.Errorf("%q comes before a snippet a host's site block may import", importLine)
 	}
 	if !strings.Contains(content["vm/srv/paisans/f2a9/infra/compose.yaml"], mountLine) {
-		t.Errorf("the gateway's Caddy does not mount %s read only", render.HostSitesDir)
+		t.Errorf("the gateway's Caddy does not mount %s read only", sitesDir)
 	}
 
 	if strings.Contains(content["watch/srv/paisans/f2a9/infra/caddy/Caddyfile"], render.HostSitesMount) {
 		t.Error("a monitor's Caddyfile imports the gateway host's own sites")
 	}
-	if strings.Contains(content["watch/srv/paisans/f2a9/infra/compose.yaml"], render.HostSitesDir) {
+	if strings.Contains(content["watch/srv/paisans/f2a9/infra/compose.yaml"], sitesDir) {
 		t.Error("a monitor's Caddy mounts the gateway host's own sites")
 	}
 }
@@ -77,5 +79,14 @@ func TestSiteStacksMatchesWhatIsRendered(t *testing.T) {
 	}
 	if _, err := render.SiteStacks(cfg, "nowhere"); err == nil {
 		t.Error("SiteStacks answered for an undeclared site")
+	}
+}
+
+// The host owner's site files are in the deployment's own root, which its
+// user creates and the gateway's Caddy mounts read only.
+func TestHostSitesDirIsTheDeployments(t *testing.T) {
+	d := deployment.Deployment{ID: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}
+	if got := render.HostSitesDir(d); got != "/srv/paisans/f2a9/caddy.d" {
+		t.Errorf("got %s", got)
 	}
 }

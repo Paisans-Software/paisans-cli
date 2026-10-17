@@ -2,11 +2,9 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -30,38 +28,19 @@ func fakeWebServerCheck(t *testing.T, failing map[string][]webserver.Result) *[]
 			{Name: webserver.CheckCertificate, OK: true, Detail: "https://" + target.Hostname + "/ answered 200"},
 		}
 	}
-	// Writing the site files reaches the monitor's host; here there is
-	// nothing to write. fakeWebServerFiles says otherwise.
+	// Writing the reference files reaches the monitor's host; here there
+	// is nothing to write. fakeWebServerFiles says otherwise.
 	savedFiles := convergeWebServerFiles
-	convergeWebServerFiles = func(ui.Reporter, *config.Config, string, bool, webServerScope) webServerFiles {
+	convergeWebServerFiles = func(ui.Reporter, *config.Config, string, webServerScope) webServerFiles {
 		return webServerFiles{}
 	}
 	t.Cleanup(func() { convergeWebServerCheck, convergeWebServerFiles = saved, savedFiles })
-	fakeWebServer(t, caddyAutomatic)
 	return &checked
 }
 
 // caddyAutomatic is a Caddy in a container that obtains its own
-// certificates, as Detect finds it.
+// certificates, as admit records it.
 var caddyAutomatic = webserver.WebServer{Server: webserver.ServerCaddy, Container: "caddy-1", Config: "/opt/caddy/Caddyfile", Certs: webserver.CertsAutomatic}
-
-// webServerAsks is each time fakeWebServer was asked: the app, and whether
-// through sudo.
-type webServerAsks []string
-
-// fakeWebServer replaces reading the web server in front of an app's host:
-// it finds ws.
-func fakeWebServer(t *testing.T, ws webserver.WebServer) *webServerAsks {
-	t.Helper()
-	var asked webServerAsks
-	saved := findWebServer
-	findWebServer = func(h webserver.Host, target webserver.Target) webserver.WebServer {
-		asked = append(asked, fmt.Sprintf("%s sudo=%v", target.App, h.Sudo != nil))
-		return ws
-	}
-	t.Cleanup(func() { findWebServer = saved })
-	return &asked
-}
 
 // externalWatch makes the fixture's monitor, watch, a site with managed_by:
 // external, which serves health through the operator's own web server.
@@ -86,6 +65,15 @@ var certificateFails = map[string][]webserver.Result{"health": {
 	{Name: webserver.CheckDNS, OK: true, Detail: "health.example.org resolves to 203.0.113.20"},
 	{Name: webserver.CheckCertificate, Detail: "the certificate is not valid for health.example.org: it names watch.example.org"},
 	{Name: webserver.CheckSignIn, OK: true, Detail: "https://health.example.org/login/oidc redirects"},
+	{Name: webserver.CheckUpstream, OK: true, Detail: "203.0.113.20:8480 refused"},
+}}
+
+// tlsInternal is the health app's checks against a Caddy with no
+// certificate for its hostname: each HTTPS request fails the same way.
+var tlsInternal = map[string][]webserver.Result{"health": {
+	{Name: webserver.CheckDNS, OK: true, Detail: "health.example.org resolves to 203.0.113.20"},
+	{Name: webserver.CheckCertificate, Detail: `https://health.example.org/healthz: Get "https://health.example.org/healthz": remote error: tls: internal error`},
+	{Name: webserver.CheckSignIn, Detail: `https://health.example.org/login/oidc: Get "https://health.example.org/login/oidc": remote error: tls: internal error`},
 	{Name: webserver.CheckUpstream, OK: true, Detail: "203.0.113.20:8480 refused"},
 }}
 
@@ -204,117 +192,29 @@ func TestConvergeFailedWebServerAndAdminFails(t *testing.T) {
 	}
 }
 
-// webServerClock is the clock every test's web server check waits on: it
-// stands still but for each wait, which moves it on at once, so no test
-// waits. TestMain installs it.
-var webServerClock time.Time
-
-func fakeWebServerClock() {
-	webServerNow = func() time.Time { return webServerClock }
-	webServerSleep = func(d time.Duration) { webServerClock = webServerClock.Add(d) }
-}
-
-// recordWaits records each wait between two web server checks.
-func recordWaits(t *testing.T) *[]time.Duration {
-	t.Helper()
-	var waits []time.Duration
-	saved := webServerSleep
-	webServerSleep = func(d time.Duration) {
-		waits = append(waits, d)
-		saved(d)
-	}
-	t.Cleanup(func() { webServerSleep = saved })
-	return &waits
-}
-
-func total(waits []time.Duration) time.Duration {
-	var sum time.Duration
-	for _, d := range waits {
-		sum += d
-	}
-	return sum
-}
-
-// A certificate the web server is still obtaining fails the check for a
-// while after its site is reloaded, so a certificate or sign in failure is
-// checked again, after 2s, then 4s, and on, until it passes. The line then
-// passes, saying how long it waited, and says while it waits what for.
-func TestConvergeWaitsForACertificate(t *testing.T) {
-	fakeConverge(t, nil)
-	externalWatch(t)
-	fakeWebServerCheck(t, nil)
-	waits := recordWaits(t)
-	checks := 0
-	convergeWebServerCheck = func(target webserver.Target) []webserver.Result {
-		checks++
-		if checks < 3 {
-			return tlsInternal["health"]
-		}
-		return []webserver.Result{{Name: webserver.CheckCertificate, OK: true, Detail: "https://health.example.org/healthz answered 200"}}
-	}
-	rec := recordConverge(t)
-	if err := converge(t, "--execute"); err != nil {
-		t.Fatalf("%v\n%s", err, rec.Lines())
-	}
-	if checks != 3 || !slices.Equal(*waits, []time.Duration{2 * time.Second, 4 * time.Second}) {
-		t.Errorf("checked %d times, waited %v", checks, *waits)
-	}
-	if !rec.Has("progress", "waiting for the certificate") {
-		t.Errorf("no progress while waiting:\n%s", rec.Lines())
-	}
-	if i := rec.Index("done", "health"); i < 0 || rec.Events[i].Extra != "health.example.org, after 6s" || !rec.Has("result", "Deployment complete.") {
-		t.Errorf("output:\n%s", rec.Lines())
-	}
-}
-
-// A certificate that never comes is checked for a minute, no longer, and
-// then fails as a check run once does.
-func TestConvergeWaitsAMinuteAtMost(t *testing.T) {
-	fakeConverge(t, nil)
-	externalWatch(t)
-	checked := fakeWebServerCheck(t, certificateFails)
-	waits := recordWaits(t)
-	rec := recordConverge(t)
-	converge(t, "--execute")
-	if total(*waits) != time.Minute || !slices.Equal(*waits, []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 30 * time.Second}) {
-		t.Errorf("waited %v", *waits)
-	}
-	if len(*checked) != len(*waits)+1 {
-		t.Errorf("checked %d times after %d waits", len(*checked), len(*waits))
-	}
-	i := rec.Index("warned", "health")
-	if i < 0 || rec.Events[i].Extra != "health.example.org" || rec.Events[i+1].Kind != "explain" ||
-		!strings.Contains(rec.Events[i+1].Text, "certificate: the certificate is not valid for health.example.org: it names watch.example.org") {
-		t.Fatalf("not the check's warning:\n%s", rec.Lines())
-	}
-}
-
-// Waiting cannot fix a name that does not resolve, or an app reachable
-// around the web server, so those fail at once, whatever else fails beside
-// them.
-func TestConvergeDoesNotWaitOnWhatWaitingCannotFix(t *testing.T) {
+// apply checks each app once and warns at once: nothing apply does makes
+// the owner's web server serve the app, so waiting on a certificate it may
+// still be obtaining would cost every run a minute while the owner has not
+// installed the snippet. web-server check is how the operator checks again.
+func TestConvergeChecksOnceAndDoesNotWait(t *testing.T) {
 	for name, results := range map[string][]webserver.Result{
+		"certificate": certificateFails["health"],
+		"tls":         tlsInternal["health"],
 		"dns": {
 			{Name: webserver.CheckDNS, Detail: "health.example.org does not resolve"},
 			{Name: webserver.CheckCertificate, Detail: "https://health.example.org/healthz: no such host"},
-		},
-		"upstream": {
-			{Name: webserver.CheckDNS, OK: true, Detail: "health.example.org resolves to 203.0.113.20"},
-			{Name: webserver.CheckCertificate, OK: true, Detail: "https://health.example.org/healthz answered 200"},
-			{Name: webserver.CheckUpstream, Detail: "203.0.113.20:8480 answers"},
 		},
 	} {
 		fakeConverge(t, nil)
 		externalWatch(t)
 		checked := fakeWebServerCheck(t, map[string][]webserver.Result{"health": results})
-		waits := recordWaits(t)
 		rec := recordConverge(t)
 		converge(t, "--execute")
-		if len(*checked) != 1 || len(*waits) != 0 {
-			t.Errorf("%s: checked %d times, waited %v", name, len(*checked), *waits)
+		if len(*checked) != 1 || rec.Has("progress", "waiting for") {
+			t.Errorf("%s: checked %d times:\n%s", name, len(*checked), rec.Lines())
 		}
-		if rec.Has("progress", "waiting for") {
-			t.Errorf("%s: said it was waiting:\n%s", name, rec.Lines())
+		if i := rec.Index("warned", "health"); i < 0 || rec.Events[i].Extra != "health.example.org" || rec.Events[i+1].Kind != "explain" {
+			t.Errorf("%s: not the check's warning:\n%s", name, rec.Lines())
 		}
 	}
 }
@@ -339,33 +239,17 @@ func TestConvergeDryRunListsTheWebServerCheck(t *testing.T) {
 	}
 }
 
-// A failed check reads the web server in front of the app, with the run's
-// sudo, and names it in the warning, so the
-// advice says what to add the configuration to. A passing one reads nothing.
+// A failed check names the web server admit recorded, which the
+// reference step read, and reaches no host for it.
 func TestConvergeFailedWebServerNamesTheWebServer(t *testing.T) {
 	fakeConverge(t, nil)
 	externalWatch(t)
-	fakeWebServerCheck(t, nil)
-	asked := fakeWebServer(t, caddyAutomatic)
-	recordConverge(t)
-	if err := converge(t, "--execute"); err != nil {
-		t.Fatal(err)
-	}
-	if len(*asked) != 0 {
-		t.Errorf("a passing check read the web server: %v", *asked)
-	}
-
 	fakeWebServerCheck(t, certificateFails)
-	asked = fakeWebServer(t, caddyAutomatic)
-	rec := recordConverge(t)
-	// The run's --sudo reaches the read: here --sudo=false, as every
-	// converge test runs, since a settled sudo would reach a real host.
-	// TestWebServerHostSharesTheRunsSudo shows a read with sudo shares the
-	// run's answer.
-	converge(t, "--execute")
-	if !slices.Equal(*asked, webServerAsks{"health sudo=false"}) {
-		t.Errorf("asked %v", *asked)
+	convergeWebServerFiles = func(ui.Reporter, *config.Config, string, webServerScope) webServerFiles {
+		return webServerFiles{apps: map[string]*siteFile{"health": {ws: caddyAutomatic, path: "/srv/paisans/f2a9/web-server/health.caddy"}}}
 	}
+	rec := recordConverge(t)
+	converge(t, "--execute")
 	i := rec.Index("warned", "health")
 	if i < 0 || !strings.Contains(rec.Events[i+1].Text, caddyAutomatic.Summary()) {
 		t.Errorf("the warning does not name the web server:\n%s", rec.Lines())

@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
+	"github.com/paisans-software/paisans-cli/internal/dockertest"
 )
 
 // fakePocketID stands in for /app/pocket-id. Each server start counts itself
@@ -86,9 +87,7 @@ func standbyImage(t *testing.T) string {
 // compose file's entrypoint, command and healthcheck, at test timing.
 func startStandbyBox(t *testing.T, label string, env ...string) *standbyBox {
 	t.Helper()
-	if _, err := exec.LookPath("docker"); err != nil {
-		t.Skip("docker is not on PATH")
-	}
+	dockertest.RequireRootless(t)
 	wrapper, ok := planFiles(build(t))["home-a/srv/paisans/f2a9/auth/paisans-standby.sh"]
 	if !ok {
 		t.Fatal("the fixture renders no wrapper for auth on home-a")
@@ -267,9 +266,7 @@ func TestStandbyWrapperReadsOnlyTheLastFiftyLines(t *testing.T) {
 // the marker against the binary rather than against the spec's reading of
 // it, so it is the test to run when the image is bumped.
 func TestStandbyWrapperWithTwoRealInstances(t *testing.T) {
-	if _, err := exec.LookPath("docker"); err != nil {
-		t.Skip("docker is not on PATH")
-	}
+	dockertest.RequireRootless(t)
 	wrapper := planFiles(build(t))["home-a/srv/paisans/f2a9/auth/paisans-standby.sh"]
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "paisans-standby.sh"), []byte(wrapper), 0o644); err != nil {

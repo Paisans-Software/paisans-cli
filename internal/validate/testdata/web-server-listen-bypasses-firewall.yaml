@@ -1,4 +1,4 @@
-# valid.yaml with a monitor that publishes its app on a LAN address.
+# valid.yaml with a monitor that publishes its app on its own mesh address.
 # A coherent three site deployment. Every fixture in this directory is a
 # variation on this one, so that a test names exactly the thing it breaks.
 version: 1
@@ -55,7 +55,7 @@ sites:
     public_address: 203.0.113.20
     web_server:
       managed_by: external
-      listen: 192.168.1.20:8480
+      listen: 10.44.0.4:8480
     ssh:
       host: watch.local
       user: ubuntu

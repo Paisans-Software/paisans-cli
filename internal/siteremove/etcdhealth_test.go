@@ -1,0 +1,99 @@
+package siteremove_test
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/paisans-software/paisans-cli/internal/siteremove"
+)
+
+// etcdctl exits 1 when any endpoint is unhealthy, and with --host-gone the
+// gone site's own member is: the members that stay are healthy, so the
+// removal goes ahead.
+func TestHostGoneProceedsPastItsOwnUnhealthyMember(t *testing.T) {
+	w := setup(t)
+	w.unreachable["home-b"] = true
+	w.etcdDown["home-b"] = true
+	w.member("home-b")["Role"], w.member("home-b")["State"] = "Replica", "stopped"
+	w.member("home-c")["Role"] = "Sync Standby"
+	p := w.mustBuild("home-b", siteremove.Options{HostGone: true})
+	if err := siteremove.Execute(p); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A member that stays and is unhealthy refuses the removal, by name, even
+// when the gone site's own member is unhealthy too.
+func TestHostGoneRefusesAnotherUnhealthyMember(t *testing.T) {
+	w := setup(t)
+	w.unreachable["home-b"] = true
+	w.etcdDown["home-b"], w.etcdDown["home-c"] = true, true
+	_, err := w.build("home-b", siteremove.Options{HostGone: true})
+	if err == nil || !strings.Contains(err.Error(), "home-c's etcd is unhealthy") {
+		t.Fatalf("err = %v, want home-c named as unhealthy", err)
+	}
+	if strings.Contains(err.Error(), "home-b's etcd is unhealthy") {
+		t.Errorf("the gone site's own member is blamed: %v", err)
+	}
+}
+
+// Output with no endpoint list in it refuses rather than guessing.
+func TestEndpointHealthThatIsNotJSONRefuses(t *testing.T) {
+	for _, hostGone := range []bool{false, true} {
+		w := setup(t)
+		w.healthOut = "Error: context deadline exceeded\n"
+		if hostGone {
+			w.unreachable["home-b"] = true
+			w.etcdDown["home-b"] = true
+		}
+		_, err := w.build("home-b", siteremove.Options{HostGone: hostGone})
+		if err == nil || !strings.Contains(err.Error(), "etcd's endpoint health") {
+			t.Fatalf("--host-gone %v: err = %v, want the endpoint health refused", hostGone, err)
+		}
+	}
+}
+
+// patronictl logs beside its answer when it tries the gone site's etcd
+// endpoint, and the removal reads the answer past them.
+func TestPatronictlLogLinesDoNotStopTheRemoval(t *testing.T) {
+	for _, hostGone := range []bool{false, true} {
+		w := setup(t)
+		w.patroniLog = true
+		if hostGone {
+			w.unreachable["home-b"] = true
+			w.etcdDown["home-b"] = true
+			w.member("home-b")["Role"], w.member("home-b")["State"] = "Replica", "stopped"
+			w.member("home-c")["Role"] = "Sync Standby"
+		}
+		p, err := w.build("home-b", siteremove.Options{HostGone: hostGone})
+		if err != nil {
+			t.Fatalf("--host-gone %v: %v", hostGone, err)
+		}
+		if err := siteremove.Execute(p); err != nil {
+			t.Fatalf("--host-gone %v: %v", hostGone, err)
+		}
+	}
+}
+
+// The check after the change wants every voter in etcd's endpoint health:
+// one left out, or an empty list, is a member not known to be healthy.
+func TestTheEtcdCheckAfterTheChangeWantsEveryVoter(t *testing.T) {
+	for name, drop := range map[string]func(string) bool{
+		"home-c left out": func(site string) bool { return site == "home-c" },
+		"an empty list":   func(string) bool { return true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Cleanup(siteremove.SetFast())
+			w := setup(t)
+			w.healthDrop = drop
+			p := w.mustBuild("home-b", siteremove.Options{})
+			err := siteremove.Execute(p)
+			if err == nil || !strings.Contains(err.Error(), "home-a's etcd is not in etcd's endpoint health") && !strings.Contains(err.Error(), "home-c's etcd is not in etcd's endpoint health") {
+				t.Fatalf("err = %v, want a voter named as missing", err)
+			}
+			if name == "home-c left out" && !strings.Contains(err.Error(), "home-c's etcd is not in") {
+				t.Errorf("home-c is not the one named: %v", err)
+			}
+		})
+	}
+}

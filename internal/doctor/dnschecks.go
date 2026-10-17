@@ -406,6 +406,12 @@ func Records(p RecordsProbe) []Finding {
 			first, more, _ := strings.Cut(e.Detail, ". ")
 			advice := "A visitor is sent there. Delete it at the provider by hand, because paisans dns init never updates a record and paisans dns prune keeps one whose name is still wanted."
 			switch {
+			case e.Parent:
+				wanted = fmt.Sprintf("this deployment's: %s -> %s (zone %s)", record, recordContent(e.Want), e.Zone)
+				advice = "Give each its own DMARC policy, or delete this one at the provider by hand; paisans dns init then gives each hostname its own."
+			case e.Guard:
+				wanted = fmt.Sprintf("checked: %s holds no SPF record that lets a server send (zone %s)", e.Name, e.Zone)
+				advice = "If the hostname sends mail, list it in community.mail_domains; otherwise remove that record at the provider."
 			case e.Leftover || e.Advisory:
 				advice = "paisans dns prune --execute removes it."
 			case strings.Contains(first, "proxied"):
@@ -469,7 +475,7 @@ func addDNS(g *Graph, cfg *config.Config, sites []string, reads DNSReads) {
 		name := SectionCaddy + " " + site
 		logs = append(logs, name)
 		g.Add(Node{Name: name, Section: SectionCaddy, Site: site, Subject: site,
-			Hard: []Need{Hard(SectionReach + " " + site)},
+			Hard: []Need{Hard(SectionDocker + " " + site)},
 			Gather: func(Input) func(*Input) {
 				p := reads.CaddyLog(site)
 				return func(in *Input) { in.Caddy = append(in.Caddy, p) }
@@ -521,7 +527,7 @@ func addDNS(g *Graph, cfg *config.Config, sites []string, reads DNSReads) {
 
 	for _, site := range caddy {
 		g.Add(Node{Name: SectionToken + " " + site, Section: SectionToken, Site: site, Subject: site,
-			Hard:   []Need{Hard(SectionReach + " " + site)},
+			Hard:   []Need{Hard(SectionAdmission + " " + site)},
 			Soft:   logs,
 			Unless: unless,
 			Gather: func(Input) func(*Input) {

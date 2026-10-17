@@ -1,0 +1,18 @@
+[Unit]
+Description=paisans {{.Token}}: serve configuration versions to mesh peers, read only
+# The daemon listens on the mesh address, which exists only while WireGuard
+# is up. A user unit cannot be ordered after the system's wg-quick, so the
+# start waits for that address, as long as it takes, and the daemon binds it
+# once it is there. Restart covers a daemon that stops later, and never gives
+# up.
+StartLimitIntervalSec=0
+
+[Service]
+ExecStartPre=/bin/sh -c 'until ip -o -4 addr show | grep -qF " {{.Address}}/"; do sleep 5; done'
+TimeoutStartSec=infinity
+ExecStart=/usr/bin/git daemon --reuseaddr --listen={{.Address}} --port=9418 --base-path={{.ConfigDir}} --export-all {{.Repo}}
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

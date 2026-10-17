@@ -3,8 +3,6 @@ package siteremove
 import (
 	"fmt"
 	"strings"
-
-	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
 // Every line a removal leaves for the operator is written here. The text
@@ -23,10 +21,6 @@ func imageKept(site, id, why string) string {
 
 func editedFileKept(site, path string) string {
 	return fmt.Sprintf("%s: an edited file kept; delete it by hand once nothing needs it. It is /%s, edited on the host since apply wrote it", site, path)
-}
-
-func reloadLeft(site, server, command string) string {
-	return fmt.Sprintf("%s: reload %s, which runs on the host itself, so that it stops serving the removed site file: its configuration validated without it, and this command does not restart a web server it does not run. Reload it with: %s", site, server, command)
 }
 
 func rootEditedKept(site, root string) string {
@@ -53,6 +47,6 @@ func ownedNote(site, owed string) string {
 	return fmt.Sprintf("%s: run `paisans apply --site %s` when that is acceptable. %s", site, site, owed)
 }
 
-func caddyKept(site, container string, sites []string, dir string) string {
-	return fmt.Sprintf("%s: Caddy kept; it serves the host owner's sites in %s. It is %s, serving %s; its compose file, Caddyfile, caddy.env, certificates and state stay in %s, with --delete-data too, and so do its ufw allows for 80 and 443. Run this again once those sites have moved, and it goes", site, render.HostSitesDir, container, strings.Join(sites, ", "), dir)
+func caddyKept(site, container string, sites []string, sitesDir, dir string) string {
+	return fmt.Sprintf("%s: Caddy kept; it serves the host owner's sites in %s. It is %s, serving %s; its compose file, Caddyfile, caddy.env, certificates and state stay in %s, with --delete-data too. Run this again once those sites have moved, and it goes", site, sitesDir, container, strings.Join(sites, ", "), dir)
 }

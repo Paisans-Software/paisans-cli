@@ -8,6 +8,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
+	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/siteremove"
 )
@@ -60,11 +61,7 @@ func TestTheDryRunPlansEveryStageAndChangesNothing(t *testing.T) {
 		{2, "home-a", "restart", "HAProxy"},
 		{2, "vm", "update", "psns-f2a9.conf"},
 		{3, "home-b", "remove", "paisans-f2a9-talk-app-1"},
-		{3, "home-b", "stop", "wg-quick@psns-f2a9"},
-		{3, "home-b", "remove", "paisans-f2a9-watchdog.service"},
-		{3, "home-b", "remove", "drop-in /etc/systemd/system/docker.service.d/paisans-f2a9-after-wireguard.conf"},
-		{3, "home-b", "delete", "allow in on psns-f2a9"},
-		{3, "home-b", "remove", "deployment " + ourID},
+		{3, "home-b", "remove", "unit " + userUnits + "/paisans-f2a9-config-daemon.service"},
 		{5, "home-b", "remove", "sites.home-b"},
 	} {
 		if !hasStep(p, want.stage, want.site, want.verb, want.text) {
@@ -86,7 +83,7 @@ func TestTheDryRunPlansEveryStageAndChangesNothing(t *testing.T) {
 	}
 	// A container, network or ufw rule without this deployment's label or tag
 	// is not this command's business.
-	for _, unwanted := range []string{"someone-elses-db", "paisans-0c1d-infra-etcd-1", "theirs_default", "allow 8080/tcp", "paisans-0c1d: wireguard"} {
+	for _, unwanted := range []string{"someone-elses-db", "paisans-0c1d-infra-etcd-1", "theirs_default", "allow 8080/tcp", "paisans-0c1d: wireguard", "paisans-0c1d-config-daemon", "/etc/systemd/system", "wg-quick@", "ufw", "registry"} {
 		if strings.Contains(out+strings.Join(p.Remains(), "\n"), unwanted) {
 			t.Errorf("the plan or report mentions %q", unwanted)
 		}
@@ -96,7 +93,7 @@ func TestTheDryRunPlansEveryStageAndChangesNothing(t *testing.T) {
 			t.Errorf("the dry run changed files on %s", name)
 		}
 		for _, c := range h.commands {
-			for _, verb := range []string{"member remove", "switchover", "stop patroni", "layout apply", "syncconf", "restart", "docker rm", "ufw delete", "rm -f", "edit-config"} {
+			for _, verb := range []string{"member remove", "switchover", "stop patroni", "layout apply", "' sync", "' put", "restart", "docker rm", "ufw delete", "rm -f", "edit-config"} {
 				if strings.Contains(c, verb) {
 					t.Errorf("the dry run ran %q on %s", c, name)
 				}
@@ -188,27 +185,34 @@ func TestARemovalCompletesAndKeepsWhatIsNotOurs(t *testing.T) {
 	if _, ok := b.files[dep.Manifest()]; ok {
 		t.Error("the manifest is still there")
 	}
-	if _, ok := b.files[wgConf]; ok || b.wgUp {
-		t.Error("the mesh interface or its file is still there")
+	// The mesh file goes with the manifest; the interface, root's, is site
+	// evict's to stop.
+	if _, ok := b.files[wgConf]; ok {
+		t.Error("the mesh file is still there")
 	}
-	for _, gone := range []string{"/etc/systemd/system/paisans-f2a9-watchdog.service", "/etc/systemd/system/docker.service.d/paisans-f2a9-after-wireguard.conf", record} {
+	for _, gone := range []string{userUnits + "/paisans-f2a9-config-daemon.service", record} {
 		if _, ok := b.files[gone]; ok {
 			t.Errorf("%s is still there", gone)
 		}
 	}
-	for _, kept := range []string{"/etc/systemd/system/paisans-0c1d-watchdog.service", "/etc/systemd/system/docker.service.d/override.conf"} {
+	// What is root's, or another deployment's, stays.
+	for _, kept := range []string{userUnits + "/paisans-0c1d-config-daemon.service", "/etc/systemd/system/paisans-f2a9-egress.service"} {
 		if _, ok := b.files[kept]; !ok {
-			t.Errorf("%s, not this deployment's, was deleted", kept)
+			t.Errorf("%s, not this user's to remove, was deleted", kept)
 		}
 	}
-	if strings.Join(b.rules, "|") != "allow 22/tcp comment 'paisans-f2a9: ssh, the bootstrap route'|allow 51821/udp comment 'paisans-0c1d: wireguard'|allow 8080/tcp" {
-		t.Errorf("ufw rules left: %v", b.rules)
+	if strings.Join(b.rules, "|") != "allow 22/tcp comment 'paisans-f2a9: ssh, the bootstrap route'|allow in on psns-f2a9 comment 'paisans-f2a9: the mesh'|allow 51821/udp comment 'paisans-0c1d: wireguard'|allow 8080/tcp" {
+		t.Errorf("ufw rules changed: %v", b.rules)
 	}
 	if !strings.Contains(b.files[keysAt], alice) || !strings.Contains(b.files[keysAt], "bob@example.org") || !strings.Contains(b.files[keysAt], "# managed by hand") {
 		t.Errorf("authorized_keys after:\n%s", b.files[keysAt])
 	}
-	if reg := b.files["/var/lib/paisans/registry.json"]; strings.Contains(reg, ourID) || !strings.Contains(reg, otherID) {
-		t.Errorf("the registry after:\n%s", reg)
+	// The data stays, and the registry, site evict's, is as it was.
+	if reg, _ := registry.Parse([]byte(b.files["/var/lib/paisans/registry.json"])); reg.Deployments[ourID].Site != "home-b" || reg.Deployments[otherID].Site == "" {
+		t.Errorf("the registry after:\n%s", b.files["/var/lib/paisans/registry.json"])
+	}
+	if !p.DataKept || !strings.Contains(strings.Join(p.Kept, "\n"), "home-b: the data in "+root+" and the deployment's volumes stay; site evict deletes them") {
+		t.Errorf("data kept %v: %q", p.DataKept, p.Kept)
 	}
 
 	cfg, err := config.Load(w.configPath)
@@ -286,6 +290,25 @@ func hasStepIn(st *siteremove.Stage, site, verb, text string) bool {
 		}
 	}
 	return false
+}
+
+// --delete-data leaves nothing under the deployment's root: the key record
+// is deleted without the deployment's lock, so no lock file or state
+// directory comes back after.
+func TestDeleteDataLeavesNothingUnderTheRoot(t *testing.T) {
+	w := setup(t)
+	b := w.hosts["home-b"]
+	if _, ok := b.files[record]; !ok {
+		t.Fatalf("home-b has no key record %s", record)
+	}
+	if err := siteremove.Execute(w.mustBuild("home-b", siteremove.Options{DeleteData: true})); err != nil {
+		t.Fatal(err)
+	}
+	for path := range b.files {
+		if strings.HasPrefix(path, root+"/") {
+			t.Errorf("%s is left under the root", path)
+		}
+	}
 }
 
 // The SSH allow is how the host is reached, so no removal deletes it: not

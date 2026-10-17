@@ -9,15 +9,13 @@
 package preflight
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
-	"net"
 	"path"
 	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
@@ -26,7 +24,6 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
 	"github.com/paisans-software/paisans-cli/internal/mesh"
 	"github.com/paisans-software/paisans-cli/internal/patroni"
-	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -162,15 +159,15 @@ func RunAll(cfg *config.Config, joining []string, transports map[string]apply.Tr
 		r.clock(name)
 	}
 	for _, name := range joining {
-		r.newSite, r.site, r.hostReport = name, cfg.Sites[name], nil
+		r.newSite, r.site, r.hostReport, r.record = name, cfg.Sites[name], nil, nil
 		if !r.reachable[name] {
 			continue
 		}
 		t := transports[name]
 		r.host(t)
+		r.admission(t)
 		r.hostPrepare(t)
-		r.registry(t)
-		r.osMatch(t)
+		r.archMatch(t)
 		r.wireguard(t)
 		r.watchdog(t)
 		r.ports()
@@ -194,6 +191,9 @@ type runner struct {
 	// hostReport is the host check's finding on the new site, nil when it
 	// could not be made.
 	hostReport *hostcheck.Report
+	// record is the new site's admission record, nil when the host has not
+	// admitted the deployment as that site.
+	record *admission.Record
 }
 
 func (r *runner) pass(site, name, format string, args ...any) {
@@ -219,33 +219,32 @@ func (r *runner) existing() []string {
 	return out
 }
 
-// ssh checks the site answers and that sudo can be used.
-//
-// One command does both: `sudo -n` fails rather than prompting, and its
-// failure says "sudo:", which is how a refused sudo is told apart from a host
-// that never answered. A transport that already runs everything through sudo
-// wraps this in another sudo, which runs it as root, where it always passes;
-// the outer sudo is then the one tested, and a host where it cannot be used
-// (a password and no terminal to ask on, a password it refused) is reported
-// with apply.ErrSudo.
+// reachProbe proves a site answers: reachWord, which only a shell that ran
+// the command prints, so a login banner is not taken for an answer.
+const (
+	reachWord  = "paisans-answers"
+	reachProbe = "echo " + reachWord
+)
+
+// ssh checks the site answers, as its ssh user, by running a command whose
+// output it knows.
 func (r *runner) ssh(name string) {
 	t, ok := r.transports[name]
 	if !ok || t == nil {
 		r.refuse(name, "ssh", "no way to reach this site was given, so nothing on it could be checked")
 		return
 	}
-	out, err := t.Run("sudo -n true")
-	switch {
-	case err == nil:
-		r.reachable[name] = true
-		r.pass(name, "ssh", "%s answers, and sudo works", t.Describe())
-	case errors.Is(err, apply.ErrSudo):
-		r.refuse(name, "ssh", "%s", firstLine(err.Error()))
-	case strings.Contains(out, "sudo:"):
-		r.refuse(name, "ssh", "%s answers, but sudo asks for a password: %s. Every command here runs through sudo; it asks for the password on a terminal, and an unattended run needs the login user given passwordless sudo", t.Describe(), firstLine(out))
-	default:
+	out, err := t.Run(reachProbe)
+	if err != nil {
 		r.refuse(name, "ssh", "%s does not answer: %s", t.Describe(), firstLine(errText(out, err)))
+		return
 	}
+	if !strings.Contains(out, reachWord) {
+		r.refuse(name, "ssh", "%s answered but did not run the command: %s printed %q, not %s. A login shell or forced command that ignores the command it is given does this", t.Describe(), reachProbe, firstLine(out), reachWord)
+		return
+	}
+	r.reachable[name] = true
+	r.pass(name, "ssh", "%s answers", t.Describe())
 }
 
 // clock checks systemd's view of time synchronisation. etcd's leases and
@@ -269,7 +268,7 @@ func (r *runner) clock(name string) {
 // host is the host check on the new site: what already runs there, and
 // whether any of it holds something the site claims. A conflict is refused,
 // and so is a shared host without a firewall that is up and denying by
-// default, exactly as `host prepare` and `apply` would refuse them.
+// default, exactly as `site prepare` and `apply` would refuse them.
 func (r *runner) host(t apply.Transport) {
 	report, err := inspectHost(r.cfg, r.newSite, t)
 	if err != nil {
@@ -296,89 +295,42 @@ func (r *runner) host(t apply.Transport) {
 	r.pass(r.newSite, "host", "clean: nothing found that the deployment does not own")
 }
 
-// hostPrepare requires that `host prepare` would do nothing. Every check
-// below assumes a prepared host (WireGuard tools, Docker, the firewall), and
-// reusing the plan rather than re-checking each part keeps one definition of
-// "prepared".
+// hostPrepare requires that `site prepare` would do nothing. Every check
+// below assumes an admitted and prepared host, and reusing the plan rather
+// than re-checking each part keeps one definition of "prepared". The plan is
+// checked against the admission record, so a host without one is refused
+// by the admission check alone.
 func (r *runner) hostPrepare(t apply.Transport) {
-	var opts []hostprep.Option
-	if r.hostReport != nil && r.hostReport.Shared() {
-		opts = append(opts, hostprep.Shared())
+	if r.record == nil {
+		return
 	}
-	plan, err := buildHostPrep(r.newSite, r.cfg, t, opts...)
+	plan, err := buildHostPrep(r.newSite, r.cfg, t, *r.record)
 	if err != nil {
-		r.refuse(r.newSite, "prepared", "host prepare could not plan: %v", err)
+		r.refuse(r.newSite, "prepared", "site prepare could not plan: %v", err)
 		return
 	}
 	if len(plan.Steps) == 0 {
-		r.pass(r.newSite, "prepared", "host prepare has nothing left to do (%s)", plan.Profile)
+		r.pass(r.newSite, "prepared", "site prepare has nothing left to do (%s)", plan.Profile)
 		return
 	}
 	var steps []string
 	for _, s := range plan.Steps {
 		steps = append(steps, s.Describe)
 	}
-	r.refuse(r.newSite, "prepared", "host prepare still has %d step(s): %s. Run `paisans host prepare --site %s --execute` first", len(steps), strings.Join(steps, "; "), r.newSite)
+	r.refuse(r.newSite, "prepared", "site prepare still has %d step(s): %s. Run `paisans site prepare --site %s --execute` first", len(steps), strings.Join(steps, "; "), r.newSite)
 }
 
-// platform is what osMatch compares.
-type platform struct {
-	id, version, glibc, arch string
-}
-
-func (p platform) String() string {
-	return fmt.Sprintf("%s, %s %s, glibc %s", p.arch, p.id, p.version, p.glibc)
-}
-
-// readPlatform reads /etc/os-release and the version `ldd --version` prints
-// at the end of its first line ("ldd (Ubuntu GLIBC 2.39-0ubuntu8.3) 2.39").
-func readPlatform(t apply.Transport) (platform, error) {
-	content, found, err := t.ReadFile("/etc/os-release")
-	if err != nil {
-		return platform{}, err
-	}
-	if !found {
-		return platform{}, fmt.Errorf("no /etc/os-release")
-	}
-	host := hostprep.ParseOSRelease(content)
-	out, err := t.Run("ldd --version")
-	if err != nil {
-		return platform{}, fmt.Errorf("ldd --version: %s", firstLine(errText(out, err)))
-	}
-	fields := strings.Fields(firstLine(strings.TrimSpace(out)))
-	if len(fields) == 0 {
-		return platform{}, fmt.Errorf("ldd --version printed nothing")
-	}
-	arch, err := hostarch.Read("this site", t)
-	if err != nil {
-		return platform{}, err
-	}
-	return platform{id: host.ID, version: host.VersionID, glibc: glibcRelease(fields[len(fields)-1]), arch: arch}, nil
-}
-
-// glibcRelease keeps the "2.N" of a glibc version. glibc has been 2.x since
-// 1997 and numbers its releases by the second part, so the "major version"
-// the collation concern is about is 2.N: collations change between 2.N
-// releases (2.28 is the well known one), never within one.
-func glibcRelease(v string) string {
-	parts := strings.SplitN(v, ".", 3)
-	if len(parts) < 2 {
-		return v
-	}
-	return parts[0] + "." + parts[1]
-}
-
-// osMatch compares the new data site's platform with every existing data
-// site. A replica's indexes are the primary's bytes, sorted by the primary's
-// collation library; a replica whose glibc sorts differently reads them as
-// corrupt once it is promoted. Its data directory is also the primary's
-// bytes, in the primary's byte order and word size, so the architecture must
-// match too.
-func (r *runner) osMatch(t apply.Transport) {
+// archMatch compares the new data site's architecture with every existing
+// data site's. A replica's data directory is the primary's bytes, in the
+// primary's byte order and word size, so the architecture must match. The
+// OS release and glibc need not: Postgres runs in a container with the
+// image's own glibc, so the host's does not decide collation, and data sites
+// may run different releases.
+func (r *runner) archMatch(t apply.Transport) {
 	if !r.site.Has(config.RoleData) {
 		return
 	}
-	mine, err := readPlatform(t)
+	mine, err := hostarch.Read("this site", t)
 	if err != nil {
 		r.refuse(r.newSite, "platform", "could not read: %v", err)
 		return
@@ -393,14 +345,12 @@ func (r *runner) osMatch(t apply.Transport) {
 			r.refuse(r.newSite, "platform", "%s, not compared with %s, which could not be reached", mine, name)
 			continue
 		}
-		theirs, err := readPlatform(r.transports[name])
+		theirs, err := hostarch.Read(name, r.transports[name])
 		switch {
 		case err != nil:
 			r.refuse(r.newSite, "platform", "could not read %s's: %v", name, err)
-		case mine.arch != theirs.arch:
-			r.refuse(r.newSite, "platform", "%s, but %s runs %s. A replica must match its primary's architecture, or Postgres cannot read the data directory it copies", mine.arch, name, theirs.arch)
 		case mine != theirs:
-			r.refuse(r.newSite, "platform", "%s, but %s runs %s. A replica must match its primary's OS and glibc release, or indexes built under one collation are read under another", mine, name, theirs)
+			r.refuse(r.newSite, "platform", "%s, but %s runs %s. A replica must match its primary's architecture, or Postgres cannot read the data directory it copies", mine, name, theirs)
 		default:
 			r.pass(r.newSite, "platform", "%s, same as %s", mine, name)
 		}
@@ -422,19 +372,15 @@ func (r *runner) wireguard(t apply.Transport) {
 }
 
 // watchdog checks /dev/watchdog on a data site whose watchdog mode wants one.
-// Patroni renders `watchdog: required` for every mode but off, and refuses to
+// Patroni renders `watchdog: required` for every mode, and refuses to
 // take the leader key without the device.
 func (r *runner) watchdog(t apply.Transport) {
 	if !r.site.Has(config.RoleData) {
 		return
 	}
 	mode := r.site.WatchdogMode()
-	if mode == config.WatchdogOff {
-		r.pass(r.newSite, "watchdog", "mode off, none needed")
-		return
-	}
 	if out, err := t.Run("test -e /dev/watchdog"); err != nil {
-		r.refuse(r.newSite, "watchdog", "mode %s, and there is no /dev/watchdog: %s. Run `paisans host prepare --site %s`", mode, firstLine(errText(out, "absent")), r.newSite)
+		r.refuse(r.newSite, "watchdog", "mode %s, and there is no /dev/watchdog: %s. Run `paisans site prepare --site %s`", mode, firstLine(errText(out, "absent")), r.newSite)
 		return
 	}
 	r.pass(r.newSite, "watchdog", "mode %s, /dev/watchdog present", mode)
@@ -492,7 +438,7 @@ func (r *runner) meshClear(t apply.Transport) {
 		r.refuse(r.newSite, "mesh", "mesh.subnet %q is not a network", r.cfg.Mesh.Subnet)
 		return
 	}
-	probed, err := mesh.Probe(t)
+	probed, err := mesh.ProbeUser(t)
 	if err != nil {
 		r.refuse(r.newSite, "mesh", "%v", err)
 		return
@@ -513,46 +459,30 @@ func (r *runner) meshClear(t apply.Transport) {
 	r.pass(r.newSite, "mesh", "nothing on the host overlaps the mesh subnet %s", r.cfg.Mesh.Subnet)
 }
 
-// routes checks the mesh subnet overlaps no route the host already has: a
-// Docker bridge, a LAN or another VPN on the same range would capture mesh
-// traffic, or have its own captured. A route through this deployment's own
-// interface is the mesh itself and is not a collision.
+// routes checks the mesh subnet overlaps no route the host already has, in
+// any routing table: a Docker bridge, a LAN or another VPN on the same
+// range, Tailscale's table 52 among them, would capture mesh traffic, or
+// have its own captured. A route through this deployment's own interface
+// is the mesh itself and is not a collision.
 func (r *runner) routes(t apply.Transport) {
-	_, mesh, err := net.ParseCIDR(r.cfg.Mesh.Subnet)
+	subnet, err := mesh.ParsePrefix(r.cfg.Mesh.Subnet)
 	if err != nil {
 		r.refuse(r.newSite, "routes", "mesh.subnet %q is not a network", r.cfg.Mesh.Subnet)
 		return
 	}
-	out, err := t.Run("ip -j route")
+	out, err := t.Run(mesh.RouteCommand)
 	if err != nil {
 		r.refuse(r.newSite, "routes", "could not list routes: %s", firstLine(errText(out, err)))
 		return
 	}
-	var routes []struct {
-		Dst string `json:"dst"`
-		Dev string `json:"dev"`
-	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &routes); err != nil {
-		r.refuse(r.newSite, "routes", "unreadable `ip -j route` output: %v", err)
+	routes, err := mesh.ParseRoutes(out, r.cfg.Deployment().Interface())
+	if err != nil {
+		r.refuse(r.newSite, "routes", "%v", err)
 		return
 	}
 	var clash []string
-	iface := r.cfg.Deployment().Interface()
-	for _, route := range routes {
-		if route.Dst == "default" || route.Dev == iface {
-			continue
-		}
-		dst := route.Dst
-		if !strings.Contains(dst, "/") {
-			dst += "/32"
-		}
-		_, network, err := net.ParseCIDR(dst)
-		if err != nil {
-			continue
-		}
-		if network.Contains(mesh.IP) || mesh.Contains(network.IP) {
-			clash = append(clash, fmt.Sprintf("%s dev %s", route.Dst, route.Dev))
-		}
+	for _, c := range mesh.Clashes(subnet, routes) {
+		clash = append(clash, c.What)
 	}
 	if len(clash) > 0 {
 		r.refuse(r.newSite, "routes", "mesh subnet %s overlaps %s", r.cfg.Mesh.Subnet, strings.Join(clash, ", "))
@@ -561,16 +491,17 @@ func (r *runner) routes(t apply.Transport) {
 	r.pass(r.newSite, "routes", "no route overlaps the mesh subnet %s", r.cfg.Mesh.Subnet)
 }
 
-// registry checks the new site's host can be claimed for this deployment: no
-// other deployment in its registry holds this one's token or root. It reads
-// and never claims; site add claims when it runs. See internal/registry.
-func (r *runner) registry(t apply.Transport) {
-	if err := registry.Check(t, r.cfg, r.newSite); err != nil {
-		r.refuse(r.newSite, "registry", "%v", err)
+// admission checks the new site's host has admitted this deployment, as
+// that site, with the grants its roles need. It reads as the deployment's
+// user; site admit claimed the host in its registry.
+func (r *runner) admission(t apply.Transport) {
+	rec, err := admission.ForSite(t, r.cfg, r.newSite)
+	if err != nil {
+		r.refuse(r.newSite, "admission", "%v. Send the host's owner `paisans site request --site %s > %s.admit`", err, r.newSite, r.newSite)
 		return
 	}
-	d := r.cfg.Deployment()
-	r.pass(r.newSite, "registry", "no other deployment on the host holds token %s, %s, interface %s or an overlapping mesh", d.Token(), d.Root(), d.Interface())
+	r.record = &rec
+	r.pass(r.newSite, "admission", "the host admitted this deployment as %s", r.newSite)
 }
 
 // diskProbe reads free bytes on the deepest directory that exists on the way

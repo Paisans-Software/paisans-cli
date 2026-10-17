@@ -6,7 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/dns"
@@ -20,21 +22,21 @@ import (
 func noSiteHosts(t *testing.T) {
 	t.Helper()
 	saved := removeSiteHost
-	removeSiteHost = func(string, config.Site, bool) apply.Transport {
+	removeSiteHost = func(string, config.Site) apply.Transport {
 		t.Fatal("a host was reached")
 		return nil
 	}
 	t.Cleanup(func() { removeSiteHost = saved })
 	savedDest := reachDestination
-	reachDestination = func(config.Destination, bool) apply.Transport {
+	reachDestination = func(config.Destination) apply.Transport {
 		t.Fatal("a host was reached")
 		return nil
 	}
 	t.Cleanup(func() { reachDestination = savedDest })
 }
 
-// Deleting member data needs a person at a terminal, and there is no flag
-// standing in for one. Refused before any host is read.
+// Deleting member data needs a person at a terminal, or --yes. Refused
+// before any host is read.
 func TestSiteRemoveDeleteDataNeedsATerminal(t *testing.T) {
 	noSiteHosts(t)
 	r, w, err := os.Pipe()
@@ -56,7 +58,7 @@ func TestSiteRemoveRefusesBeforeReachingAHost(t *testing.T) {
 	for args, want := range map[string]string{
 		"home-a":                                 "pinned to it",
 		"home-z":                                 "declares no site",
-		"home-b --host-gone --delete-data":       "Drop one of them",
+		"home-b --host-gone --delete-data":       "cannot be used together",
 		"home-b --execute --host-gone extra-arg": "one site",
 	} {
 		err := runSiteRemove(append(strings.Fields(args), "--config", fixtureConfig()), strings.NewReader(""), &bytes.Buffer{})
@@ -77,7 +79,7 @@ func TestConfirmSiteWantsTheSitesName(t *testing.T) {
 		}
 		w.WriteString(answer)
 		w.Close()
-		err = confirmSite(r, &bytes.Buffer{}, "home-b")
+		err = confirmSite(answerer{}, r, &bytes.Buffer{}, "home-b")
 		r.Close()
 		if (err == nil) != ok {
 			t.Errorf("answer %q: %v", answer, err)
@@ -113,7 +115,7 @@ func TestSiteRemoveForceRefusesBeforeReachingAHost(t *testing.T) {
 	noSiteHosts(t)
 	for args, want := range map[string]string{
 		"home-b --ssh admin@192.0.2.1":                                "only --force takes",
-		"home-b --force --host-gone":                                  "Drop one of them",
+		"home-b --force --host-gone":                                  "--host-gone cleans no host",
 		"never --force":                                               "Name its host with --ssh",
 		"home-b --force --ssh myalias":                                "not user@host",
 		"home-b --force --execute":                                    "terminal",
@@ -142,6 +144,15 @@ func TestForcedOnAnEmptyHostSaysNothingToDo(t *testing.T) {
 	if out := rec.Lines(); !strings.Contains(out, "--execute") || !strings.Contains(out, "deployment record") {
 		t.Errorf("a dry run with a record left to clean printed:\n%s", out)
 	}
+	// A host left for its owner's evict says so on every ending.
+	plan.Evict = "sudo paisans site evict --deployment x --user deploy --execute"
+	for _, recordLeft := range []bool{false, true} {
+		rec = &ui.Recorder{}
+		forcedNothingToDo(rec, plan, config.Destination{User: "admin", Host: "192.0.2.1", Port: 22}, recordLeft)
+		if !strings.Contains(rec.Lines(), plan.Evict) {
+			t.Errorf("record left %v: no evict line in:\n%s", recordLeft, rec.Lines())
+		}
+	}
 	plan.Stages[0].Steps = []siteremove.Step{{Site: "home-b", Verb: "remove"}}
 	if forcedNothingToDo(&ui.Recorder{}, plan, config.Destination{}, false) {
 		t.Error("a plan with steps was ended")
@@ -153,12 +164,12 @@ func TestForcedOnAnEmptyHostSaysNothingToDo(t *testing.T) {
 func TestForcedRunReportsAGatewayItCouldNotReach(t *testing.T) {
 	savedSite, savedReg := removeSiteHost, registryHost
 	t.Cleanup(func() { removeSiteHost, registryHost = savedSite, savedReg })
-	quiet := runningHost{failingHost{match: "\x00"}}
-	removeSiteHost = func(string, config.Site, bool) apply.Transport { return quiet }
-	registryHost = func(string, config.Site, string, bool) registry.Runner { return &recordFake{down: true} }
+	quiet := admittedRunning{runningHost: runningHost{failingHost{match: "\x00"}}, site: "monitor-a", roles: []string{"monitor"}}
+	removeSiteHost = func(string, config.Site) apply.Transport { return quiet }
+	registryHost = func(string, config.Site, string) registry.Runner { return &recordFake{down: true} }
 	var err error
 	out := captureStdout(t, func() {
-		err = runSiteRemove([]string{"monitor-a", "--force", "--ssh", "admin@192.0.2.1", "--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "--execute", "--sudo=false"}, strings.NewReader(""), &bytes.Buffer{})
+		err = runSiteRemove([]string{"monitor-a", "--force", "--ssh", "admin@192.0.2.1", "--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "--execute"}, strings.NewReader(""), &bytes.Buffer{})
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -171,19 +182,20 @@ func TestForcedRunReportsAGatewayItCouldNotReach(t *testing.T) {
 // A host whose only part of the deployment is its kept Caddy says so, and
 // names the sites it is kept for, rather than that it holds nothing.
 func TestForcedOnAHostWithOnlyAKeptCaddySaysSo(t *testing.T) {
-	plan := &siteremove.Plan{Site: "vm", Stages: []*siteremove.Stage{{Number: 3, Name: "clean the host"}}, CaddyKept: []string{"/srv/caddy.d/blog.caddy"}}
+	plan := &siteremove.Plan{Site: "vm", Stages: []*siteremove.Stage{{Number: 3, Name: "clean the host"}}, CaddyKept: []string{"/srv/paisans/f2a9/caddy.d/blog.caddy"}}
 	rec := &ui.Recorder{}
 	if !forcedNothingToDo(rec, plan, config.Destination{User: "admin", Host: "192.0.2.1", Port: 22}, false) {
 		t.Fatal("a plan with nothing to do was not ended")
 	}
 	out := rec.Lines()
-	if !strings.Contains(out, "Caddy") || !strings.Contains(out, "/srv/caddy.d/blog.caddy") || strings.Contains(out, "holds nothing of this deployment.") {
+	if !strings.Contains(out, "Caddy") || !strings.Contains(out, "/srv/paisans/f2a9/caddy.d/blog.caddy") || strings.Contains(out, "holds nothing of this deployment.") {
 		t.Errorf("printed:\n%s", out)
 	}
 }
 
 // idHost is an empty running host whose registry holds the fixture
-// deployment's monitor and a neighbour's entry.
+// deployment's monitor and a neighbour's entry, and whose login, ubuntu, the
+// fixture deployment's admission record names as its watch site's user.
 type idHost struct {
 	runningHost
 	registry string
@@ -193,37 +205,76 @@ func (h idHost) ReadFile(path string) (string, bool, error) {
 	if path == registry.Path {
 		return h.registry, true, nil
 	}
+	return admittedRunning{runningHost: h.runningHost, site: "watch", roles: []string{"monitor"}}.ReadFile(path)
+}
+
+func (h idHost) Run(command string) (string, error) {
+	if strings.Contains(command, `echo "user $(id -un)"`) {
+		p, _ := admission.Path("f2a9")
+		return "user ubuntu\n" + p + "\n", nil
+	}
+	return h.runningHost.Run(command)
+}
+
+// admittedRunning is a running host that admitted the fixture deployment
+// as its login user, ubuntu, whom site remove cleans as: as site with
+// roles, or as home-a when site is empty.
+type admittedRunning struct {
+	runningHost
+	site  string
+	roles []string
+}
+
+func (h admittedRunning) ReadFile(path string) (string, bool, error) {
+	if p, _ := admission.Path("f2a9"); path == p {
+		return ubuntuRecord(h.site, h.roles), true, nil
+	}
 	return h.runningHost.ReadFile(path)
 }
 
-// cleaningHost is an idHost that a removal empties: once its registry entry
-// is taken out, the registry no longer lists it and no unit is left.
+// ubuntuRecord is the fixture deployment's admission record naming ubuntu,
+// the user every fake host's passwd entry answers for the login, for home-a,
+// or for site with roles when site is not empty.
+func ubuntuRecord(site string, roles []string) string {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		panic(err)
+	}
+	req, err := admission.Build(cfg, "home-a")
+	if err != nil {
+		panic(err)
+	}
+	rec := admission.NewRecord(req, req.Grants, "", time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC))
+	rec.User = "ubuntu"
+	if site != "" {
+		rec.Site, rec.Roles = site, roles
+	}
+	b, err := admission.EncodeRecord(rec)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
+// cleaningHost is an idHost holding one unit of the deployment's in its
+// user's systemd directory, which a removal deletes.
 type cleaningHost struct {
 	idHost
 	removed bool
 }
 
 func (h *cleaningHost) Run(command string) (string, error) {
-	if strings.Contains(command, "awk ") && strings.Contains(command, registry.Path) {
+	if strings.Contains(command, "daemon-reload") {
 		h.removed = true
 		return "", nil
 	}
-	if h.removed && strings.Contains(command, `echo "unit $f"`) {
-		return "", nil
+	if strings.Contains(command, `echo "unit $f"`) {
+		if h.removed {
+			return "", nil
+		}
+		return "unit /home/ubuntu/.config/systemd/user/paisans-f2a9-config-daemon.service\n", nil
 	}
 	return h.idHost.Run(command)
-}
-
-func (h *cleaningHost) ReadFile(path string) (string, bool, error) {
-	if path == registry.Path && h.removed {
-		reg, err := registry.Parse([]byte(h.registry))
-		if err != nil {
-			return "", false, err
-		}
-		data, err := registry.Encode(registry.Remove(reg, monitorID))
-		return string(data), true, err
-	}
-	return h.idHost.ReadFile(path)
 }
 
 // Every --id run says DNS was not modified, in one line and the comment to
@@ -231,7 +282,7 @@ func (h *cleaningHost) ReadFile(path string) (string, bool, error) {
 func TestSiteRemoveByIDWarnsThatDNSWasNotModified(t *testing.T) {
 	withHost(t, idHost{runningHost{failingHost{match: "\x00"}}, twoDeployments(t)})
 	out := plainOutput(t)
-	if err := runSiteRemove([]string{"--force", "--ssh", "admin@192.0.2.30", "--id", "f2a9", "--sudo=false"}, strings.NewReader(""), &bytes.Buffer{}); err != nil {
+	if err := runSiteRemove([]string{"--force", "--ssh", "admin@192.0.2.30", "--id", "f2a9"}, strings.NewReader(""), &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	got := out.String()
@@ -255,21 +306,23 @@ func TestSiteRemoveByIDWarnsThatDNSWasNotModified(t *testing.T) {
 func TestForcedRemovalOfAnUndeclaredSiteMakesNoProvider(t *testing.T) {
 	savedSite, savedReg, savedDNS := removeSiteHost, registryHost, dnsProviderFor
 	t.Cleanup(func() { removeSiteHost, registryHost, dnsProviderFor = savedSite, savedReg, savedDNS })
-	removeSiteHost = func(string, config.Site, bool) apply.Transport { return runningHost{failingHost{match: "\x00"}} }
-	registryHost = func(string, config.Site, string, bool) registry.Runner { return &recordFake{} }
+	removeSiteHost = func(string, config.Site) apply.Transport {
+		return admittedRunning{runningHost: runningHost{failingHost{match: "\x00"}}, site: "monitor-a", roles: []string{"monitor"}}
+	}
+	registryHost = func(string, config.Site, string) registry.Runner { return &recordFake{} }
 	dnsProviderFor = func(string, string) (dns.Provider, error) {
 		t.Error("a DNS provider was made")
 		return nil, nil
 	}
 	plainOutput(t)
-	err := runSiteRemove([]string{"monitor-a", "--force", "--ssh", "admin@192.0.2.1", "--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "--sudo=false"}, strings.NewReader(""), &bytes.Buffer{})
+	err := runSiteRemove([]string{"monitor-a", "--force", "--ssh", "admin@192.0.2.1", "--config", fixtureConfig(), "--secrets", fixtureSecretsPath()}, strings.NewReader(""), &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
 }
 
 // An --id run that cleans the host ends on one line naming the host and the
-// deployment it was cleaned of.
+// deployment it was cleaned of, and the site evict line for its owner.
 func TestSiteRemoveByIDEndsNamingTheDeployment(t *testing.T) {
 	withHost(t, &cleaningHost{idHost: idHost{runningHost{failingHost{match: "\x00"}}, twoDeployments(t)}})
 	saved := isTerminal
@@ -285,24 +338,28 @@ func TestSiteRemoveByIDEndsNamingTheDeployment(t *testing.T) {
 	rec := &ui.Recorder{}
 	reporterOverride = rec
 	t.Cleanup(func() { reporterOverride = nil })
-	if err := runSiteRemove([]string{"--force", "--ssh", "admin@192.0.2.30", "--id", "f2a9", "--sudo=false", "--execute"}, r, &bytes.Buffer{}); err != nil {
+	if err := runSiteRemove([]string{"--force", "--ssh", "admin@192.0.2.30", "--id", "f2a9", "--execute"}, r, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	want := "admin@192.0.2.30:22 is cleaned of deployment " + monitorID + "."
 	if !rec.Has("result", want) {
 		t.Errorf("no result %q in:\n%s", want, rec.Lines())
 	}
+	// Then the line the host's owner runs to remove what is root's.
+	if !rec.Has("note", "the host's owner finishes on watch") || !strings.Contains(rec.Lines(), "    sudo paisans site evict --deployment "+monitorID+" --user ubuntu --execute") {
+		t.Errorf("no evict line in:\n%s", rec.Lines())
+	}
 }
 
-// --evict refuses what would reach the host, and an unattended run, before
-// any host is read.
-func TestSiteRemoveEvictRefusesBeforeReachingAHost(t *testing.T) {
+// --host-gone refuses what would reach the host, and an unattended run,
+// before any host is read.
+func TestSiteRemoveHostGoneRefusesBeforeReachingAHost(t *testing.T) {
 	noSiteHosts(t)
 	for args, want := range map[string]string{
-		"home-b --evict --force":               "--evict cleans no host",
-		"home-b --evict --ssh admin@192.0.2.1": "--evict cleans no host",
-		"home-b --evict --delete-data":         "--evict and --delete-data cannot be used together",
-		"home-b --evict --execute":             "stdin is not a terminal",
+		"home-b --host-gone --force":               "--host-gone cleans no host",
+		"home-b --host-gone --ssh admin@192.0.2.1": "--host-gone cleans no host",
+		"home-b --host-gone --delete-data":         "--host-gone and --delete-data cannot be used together",
+		"home-b --host-gone --execute":             "stdin is not a terminal",
 	} {
 		err := runSiteRemove(append(strings.Fields(args), "--config", fixtureConfig()), strings.NewReader("home-b\n"), &bytes.Buffer{})
 		if err == nil || !strings.Contains(err.Error(), want) {
@@ -311,9 +368,9 @@ func TestSiteRemoveEvictRefusesBeforeReachingAHost(t *testing.T) {
 	}
 }
 
-// Every word an eviction asks for is typed in turn, from one reader, and a
-// wrong one stops it.
-func TestConfirmEvictionAsksForEachWord(t *testing.T) {
+// Every word a removal with --host-gone asks for is typed in turn, from one
+// reader, and a wrong one stops it.
+func TestConfirmCutoffAsksForEachWord(t *testing.T) {
 	saved := isTerminal
 	isTerminal = func(*os.File) bool { return true }
 	t.Cleanup(func() { isTerminal = saved })
@@ -331,7 +388,7 @@ func TestConfirmEvictionAsksForEachWord(t *testing.T) {
 		w.WriteString(answers)
 		w.Close()
 		var out bytes.Buffer
-		err = confirmEviction(r, &out, questions)
+		err = confirmCutoff(answerer{}, r, &out, questions)
 		r.Close()
 		switch {
 		case want == "" && err != nil:
@@ -348,20 +405,20 @@ func TestConfirmEvictionAsksForEachWord(t *testing.T) {
 	w.WriteString("revoked\n")
 	w.Close()
 	defer r.Close()
-	if err := confirmEviction(r, &bytes.Buffer{}, questions); err == nil || !strings.Contains(err.Error(), "not a terminal") {
+	if err := confirmCutoff(answerer{}, r, &bytes.Buffer{}, questions); err == nil || !strings.Contains(err.Error(), "not a terminal") {
 		t.Errorf("without a terminal: %v", err)
 	}
 }
 
 // The questions follow the plan: revoked only for a gateway, the site's name
 // always, and the losses only when the plan has them.
-func TestEvictionQuestionsFollowThePlan(t *testing.T) {
+func TestCutoffQuestionsFollowThePlan(t *testing.T) {
 	cfg, err := config.Load(fixtureConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
 	var words []string
-	for _, q := range evictionQuestions(cfg, "home-b", &siteremove.Plan{}) {
+	for _, q := range cutoffQuestions(cfg, "home-b", &siteremove.Plan{}) {
 		words = append(words, q.word)
 	}
 	if strings.Join(words, ",") != "home-b" {
@@ -372,7 +429,7 @@ func TestEvictionQuestionsFollowThePlan(t *testing.T) {
 // `revoked` is asked before the secrets file is read: the operator sets the
 // new DNS token with `secrets set` while it waits, and the token checked and
 // every secret written back must be that file's.
-func TestAnEvictedGatewayIsAskedRevokedBeforeTheSecretsAreRead(t *testing.T) {
+func TestACutOffGatewayIsAskedRevokedBeforeTheSecretsAreRead(t *testing.T) {
 	noSiteHosts(t)
 	saved := isTerminal
 	isTerminal = func(*os.File) bool { return true }
@@ -406,9 +463,9 @@ func TestAnEvictedGatewayIsAskedRevokedBeforeTheSecretsAreRead(t *testing.T) {
 	w.Close()
 	defer r.Close()
 	var out bytes.Buffer
-	err = runSiteRemove([]string{"vm", "--evict", "--execute", "--config", configPath, "--secrets", filepath.Join(dir, "missing.enc.yaml")}, r, &out)
+	err = runSiteRemove([]string{"vm", "--host-gone", "--execute", "--config", configPath, "--secrets", filepath.Join(dir, "missing.enc.yaml")}, r, &out)
 	if err == nil {
-		t.Fatal("an eviction with no secrets file went on")
+		t.Fatal("a removal with --host-gone and no secrets file went on")
 	}
 	if !strings.Contains(out.String(), "Type 'revoked'") {
 		t.Errorf("the secrets were read before revoked was asked: %v\n%s", err, out.String())

@@ -1,21 +1,25 @@
 package hostprep_test
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 const (
-	storeRepo   = "/var/lib/paisans/config/f2a9.git"
-	storePeers  = "/var/lib/paisans/config/f2a9.peers"
-	storeScript = "/usr/local/lib/paisans-f2a9/config-sync.sh"
-	storeDaemon = "/etc/systemd/system/paisans-f2a9-config-daemon.service"
-	storeSyncSv = "/etc/systemd/system/paisans-f2a9-config-sync.service"
-	storeTimer  = "/etc/systemd/system/paisans-f2a9-config-sync.timer"
+	storeRepo   = "/srv/paisans/f2a9/.paisans/config/f2a9.git"
+	storePeers  = "/srv/paisans/f2a9/.paisans/config/f2a9.peers"
+	storeScript = "/srv/paisans/f2a9/.paisans/bin/config-sync.sh"
+	storeDaemon = "/home/ubuntu/.config/systemd/user/paisans-f2a9-config-daemon.service"
+	storeSyncSv = "/home/ubuntu/.config/systemd/user/paisans-f2a9-config-sync.service"
+	storeTimer  = "/home/ubuntu/.config/systemd/user/paisans-f2a9-config-sync.timer"
 
 	probeDaemonUnit = "is-enabled paisans-f2a9-config-daemon.service"
 	probeTimerUnit  = "is-enabled paisans-f2a9-config-sync.timer"
@@ -28,7 +32,7 @@ func storePlan(t *testing.T, host *fakeHost, peers []string) *hostprep.Plan {
 		t.Fatal(err)
 	}
 	cfg := fixture(t)
-	section, err := profile.ConfigStore(host, cfg.Deployment(), cfg.Sites["home-a"], peers)
+	section, err := profile.ConfigStore(host, cfg.Deployment(), cfg.Sites["home-a"], peers, "/home/ubuntu")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +51,8 @@ func fileSteps(p *hostprep.Plan) map[string]uint32 {
 	return out
 }
 
-// settled is a host that holds exactly what the store plans, enabled and running.
+// settled is a host that holds exactly what the store plans, enabled and
+// running.
 func settled(t *testing.T, peers []string) *fakeHost {
 	t.Helper()
 	host := freshHost()
@@ -61,6 +66,16 @@ func settled(t *testing.T, peers []string) *fakeHost {
 	host.responses[probeDaemonUnit] = "enabled enabled\nactive active\n"
 	host.responses[probeTimerUnit] = "enabled enabled\nactive active\n"
 	return host
+}
+
+// storeUnit is the content the plan writes at path.
+func storeUnit(plan *hostprep.Plan, path string) string {
+	for _, s := range plan.Steps {
+		if s.File != nil && s.File.Path == path {
+			return s.File.Content
+		}
+	}
+	return ""
 }
 
 func TestAFreshHostPlansTheWholeStore(t *testing.T) {
@@ -91,7 +106,7 @@ func TestAFreshHostPlansTheWholeStore(t *testing.T) {
 		commands = append(commands, s.Command)
 	}
 	all := strings.Join(commands, "\n")
-	for _, w := range []string{"git init --bare", storeRepo, "systemctl daemon-reload && systemctl enable --now paisans-f2a9-config-daemon.service paisans-f2a9-config-sync.timer"} {
+	for _, w := range []string{"git init --bare", storeRepo, hostprep.UserSystemctl + " daemon-reload && " + hostprep.UserSystemctl + " enable --now paisans-f2a9-config-sync.timer && " + hostprep.UserSystemctl + " reenable paisans-f2a9-config-daemon.service"} {
 		if !strings.Contains(all, w) {
 			t.Errorf("no command contains %q:\n%s", w, all)
 		}
@@ -99,7 +114,7 @@ func TestAFreshHostPlansTheWholeStore(t *testing.T) {
 	if first := plan.Steps[0]; !strings.Contains(first.Command, "git init --bare") {
 		t.Errorf("the repository is not created first: %q", first.Command)
 	}
-	if last := plan.Steps[len(plan.Steps)-1]; !strings.Contains(last.Command, "enable --now") {
+	if last := plan.Steps[len(plan.Steps)-1]; !strings.Contains(last.Command, "enable") {
 		t.Errorf("enabling is not last: %q", last.Command)
 	}
 
@@ -120,18 +135,16 @@ func TestAFreshHostPlansTheWholeStore(t *testing.T) {
 	}
 }
 
-func TestTheRepositoryIsCreatedOnlyWhereHeadIsAbsentAndStaysReadableByNobody(t *testing.T) {
+func TestTheRepositoryIsCreatedOnlyWhereHeadIsAbsent(t *testing.T) {
 	host := settled(t, []string{"10.44.0.2"})
 	delete(host.files, storeRepo+"/HEAD")
 	plan := storePlan(t, host, []string{"10.44.0.2"})
 	if len(plan.Steps) != 1 {
 		t.Fatalf("got %d steps, want only the repository", len(plan.Steps))
 	}
-	c := plan.Steps[0].Command
-	for _, w := range []string{"umask 022", "--shared=0644", "git init --bare", "chmod 0755", "chmod 0644"} {
-		if !strings.Contains(c, w) {
-			t.Errorf("the repository command lacks %q:\n%s", w, c)
-		}
+	want := "set -e; umask 077; install -d -m 700 '/srv/paisans/f2a9/.paisans' '/srv/paisans/f2a9/.paisans/config'; git init --bare --quiet '/srv/paisans/f2a9/.paisans/config/f2a9.git'"
+	if c := plan.Steps[0].Command; c != want {
+		t.Errorf("the repository command is\n%s\nwant\n%s", c, want)
 	}
 }
 
@@ -165,8 +178,113 @@ func TestAChangedDaemonUnitRestartsTheDaemon(t *testing.T) {
 	host.files[storeDaemon] = "stale"
 	plan := storePlan(t, host, nil)
 	last := plan.Steps[len(plan.Steps)-1].Command
-	if !strings.Contains(last, "systemctl restart paisans-f2a9-config-daemon.service") {
-		t.Errorf("the daemon keeps running the old unit: %q", last)
+	if !strings.Contains(last, hostprep.UserSystemctl+" reenable paisans-f2a9-config-daemon.service") || !strings.Contains(last, hostprep.UserSystemctl+" restart --no-block paisans-f2a9-config-daemon.service") {
+		t.Errorf("the daemon keeps running the old unit, or its old links: %q", last)
+	}
+}
+
+// Every file of the store is the deployment's user's: under its state
+// directory, or its own systemd user directory. Nothing goes to /etc,
+// /usr/local or /var/lib.
+func TestTheStoreIsTheUsersOwn(t *testing.T) {
+	plan := storePlan(t, freshHost(), []string{"10.44.0.2"})
+	for path := range fileSteps(plan) {
+		if !strings.HasPrefix(path, "/srv/paisans/f2a9/.paisans/") && !strings.HasPrefix(path, "/home/ubuntu/.config/systemd/user/") {
+			t.Errorf("the store writes %s, outside the user's own directories", path)
+		}
+	}
+	for _, s := range plan.Steps {
+		for _, root := range []string{"/etc/", "/usr/local/", "/var/lib/", "sudo ", "chown", " -o "} {
+			if strings.Contains(s.Command, root) {
+				t.Errorf("step %q reaches %q: %s", s.Title, root, s.Command)
+			}
+		}
+		if strings.Contains(s.Command, "systemctl ") && !strings.Contains(s.Command, hostprep.UserSystemctl) {
+			t.Errorf("step %q runs systemctl other than the user's: %s", s.Title, s.Command)
+		}
+	}
+}
+
+// A user unit cannot be ordered after the system's wg-quick, so the daemon
+// retries until the mesh address exists, and never gives up.
+func TestTheDaemonRetriesUntilTheMeshIsUp(t *testing.T) {
+	unit := storeUnit(storePlan(t, freshHost(), nil), storeDaemon)
+	for _, want := range []string{"Restart=always", "RestartSec=10", "StartLimitIntervalSec=0", "TimeoutStartSec=infinity", "WantedBy=default.target"} {
+		if !strings.Contains(unit, want) {
+			t.Errorf("the daemon unit has no %q:\n%s", want, unit)
+		}
+	}
+	for _, not := range []string{"User=", "BindsTo=", "wg-quick@", "safe.directory"} {
+		if strings.Contains(unit, not) {
+			t.Errorf("the daemon unit still has %q:\n%s", not, unit)
+		}
+	}
+}
+
+// Until the mesh address exists the daemon waits for it in one start,
+// rather than failing to bind and restarting every ten seconds: the wait
+// command loops while the address is missing and returns once it is there.
+func TestTheDaemonWaitsForTheMeshAddressBeforeStarting(t *testing.T) {
+	unit := storeUnit(storePlan(t, freshHost(), nil), storeDaemon)
+	var wait string
+	for _, line := range strings.Split(unit, "\n") {
+		if cmd, ok := strings.CutPrefix(line, "ExecStartPre=/bin/sh -c "); ok {
+			wait = strings.Trim(cmd, "'")
+		}
+	}
+	if wait == "" {
+		t.Fatalf("the daemon unit waits for nothing:\n%s", unit)
+	}
+	dir := t.TempDir()
+	flag := filepath.Join(dir, "up")
+	// A fake ip prints the mesh address only once the flag file exists.
+	fake := "#!/bin/sh\necho '1: lo    inet 127.0.0.1/8 scope host lo'\n[ -e " + flag + " ] && echo '5: psns-f2a9    inet 10.44.0.1/24 scope global psns-f2a9'\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(dir, "ip"), []byte(fake), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("/bin/sh", "-c", strings.ReplaceAll(wait, "sleep 5", "sleep 0.1"))
+	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		t.Fatalf("the wait returned with no mesh address: %v", err)
+	case <-time.After(500 * time.Millisecond):
+	}
+	if err := os.WriteFile(flag, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("the wait failed once the address was up: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		cmd.Process.Kill()
+		t.Fatal("the wait did not return once the mesh address was up")
+	}
+}
+
+// Enabled and started on every prepare that finds it otherwise, whether or
+// not the mesh is up: it binds the mesh address once it can. The start does
+// not wait for that: its start waits for the mesh address, which comes up
+// after site prepare, so a start that waited would never return.
+func TestAStoppedDaemonIsStartedWhetherOrNotTheMeshIsUp(t *testing.T) {
+	host := settled(t, nil)
+	host.responses[probeDaemonUnit] = "enabled enabled\nactive inactive\n"
+	plan := storePlan(t, host, nil)
+	var start string
+	for _, s := range plan.Steps {
+		if s.Title == "start the configuration store" {
+			start = s.Command
+		}
+	}
+	want := hostprep.UserSystemctl + " daemon-reload && " + hostprep.UserSystemctl + " enable --now paisans-f2a9-config-sync.timer && " + hostprep.UserSystemctl + " enable paisans-f2a9-config-daemon.service && " + hostprep.UserSystemctl + " start --no-block paisans-f2a9-config-daemon.service"
+	if start != want {
+		t.Errorf("start is\n%s\nwant\n%s", start, want)
 	}
 }
 
@@ -179,10 +297,8 @@ func TestTheDaemonServesOnlyThisDeploymentsRepositoryOnTheMeshAddress(t *testing
 		}
 	}
 	for _, w := range []string{
-		"--listen=10.44.0.1 ", "--port=9418", "--base-path=/var/lib/paisans/config",
-		"/var/lib/paisans/config/f2a9.git\n", "User=nobody",
-		"Environment=GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=/var/lib/paisans/config/f2a9.git\n",
-		"After=wg-quick@psns-f2a9\n", "Requires=wg-quick@psns-f2a9\n",
+		"--listen=10.44.0.1 ", "--port=9418",
+		"--base-path=/srv/paisans/f2a9/.paisans/config --export-all /srv/paisans/f2a9/.paisans/config/f2a9.git\n",
 	} {
 		if !strings.Contains(unit, w) {
 			t.Errorf("the daemon unit lacks %q:\n%s", w, unit)
@@ -195,7 +311,7 @@ func TestTheDaemonServesOnlyThisDeploymentsRepositoryOnTheMeshAddress(t *testing
 
 func TestBuildGivesEverySiteTheStoreWithTheOtherSitesAsPeers(t *testing.T) {
 	cfg := fixture(t)
-	plan, err := hostprep.Build("home-a", cfg, freshHost())
+	plan, err := hostprep.Build("home-a", cfg, freshHost(), admitted(t, cfg, "home-a"))
 	if err != nil {
 		t.Fatal(err)
 	}

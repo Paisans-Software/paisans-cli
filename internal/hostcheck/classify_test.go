@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
-	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -56,9 +55,9 @@ func wantLine(t *testing.T, r *hostcheck.Report, line string) {
 	}
 }
 
-// An Ubuntu server with Docker installed and nothing else is clean: sshd,
-// the stub resolver, chrony and the DHCP client are the base system, and
-// Docker's own networks are Docker's.
+// An Ubuntu server with Docker installed and nothing else is clean: sshd and
+// the stub resolver are root's, chrony and the DHCP client system users',
+// all the base system, and Docker's own networks are Docker's.
 func TestAnEmptyDockerInstallIsClean(t *testing.T) {
 	r := check(t, "home-a", cleanHost())
 	wantClass(t, r, hostcheck.Clean)
@@ -73,10 +72,9 @@ func TestAnEmptyDockerInstallIsClean(t *testing.T) {
 	}
 	wantLine(t, r, "detail: home-a (ubuntu@host.example.org) is clean")
 	wantLine(t, r, "done: docker 27.3.1")
-	wantLine(t, r, "done: firewall ufw inactive")
 }
 
-// The report marks what the check found the way host prepare marks its
+// The report marks what the check found the way site prepare marks its
 // plan: done for each finding, and done and not paisans for what another
 // hand put on the host. It shows only with --verbose, under the host
 // check's own line, and never with a padded label.
@@ -95,16 +93,15 @@ func TestShowMarksWhatTheCheckFound(t *testing.T) {
 	for _, want := range []string{
 		"      home-a (ubuntu@host.example.org) is shared\n",
 		"  ok   docker: 27.3.1",
-		"  ok   firewall: ufw active, incoming deny\n",
 		"  ok   container web-caddy-1 (compose project web): not paisans\n",
-		"  ok   shared: ufw's default policy",
+		"  ok   shared: superseded images are kept, and prune removes only volumes labelled with this deployment's id, as everywhere\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q", want)
 		}
 	}
 	for _, line := range strings.Split(out, "\n") {
-		for _, label := range []string{"docker ", "firewall ", "foreign ", "note ", "shared "} {
+		for _, label := range []string{"docker ", "foreign ", "note ", "shared "} {
 			if strings.HasPrefix(strings.TrimSpace(line), label) {
 				t.Errorf("a padded label: %q", line)
 			}
@@ -113,9 +110,10 @@ func TestShowMarksWhatTheCheckFound(t *testing.T) {
 }
 
 // A host already running this deployment is clean: the host network
-// Postgres is ours through its cgroup, the published app port through
-// docker-proxy and the container's binding, and the process-less WireGuard
-// socket through the psns-f2a9.conf the manifest records.
+// Postgres is ours through its owner, a user in the deployment's subordinate
+// range, the published app port through the user's own port forwarder and
+// the container's binding, and root's WireGuard socket through the
+// psns-f2a9.conf the manifest records.
 func TestOurOwnDeploymentIsClean(t *testing.T) {
 	var appPort int
 	for _, l := range claims(t, "home-a").Listeners {
@@ -124,7 +122,7 @@ func TestOurOwnDeploymentIsClean(t *testing.T) {
 		}
 	}
 	h := cleanHost()
-	h.files["/srv/paisans/f2a9/.paisans-manifest.json"] = `{"version":1,"files":[{"path":"etc/wireguard/psns-f2a9.conf","sha256":"x","mode":"0600"}]}`
+	h.files["/srv/paisans/f2a9/.paisans-manifest.json"] = `{"version":1,"files":[{"path":"srv/paisans/f2a9/psns-f2a9.conf","sha256":"x","mode":"0600"}]}`
 	h.answers["ip -o link"] += "4: psns-f2a9: <POINTOPOINT,NOARP,UP,LOWER_UP> mtu 1420 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000\\    link/none\n"
 	h.answers["ip -j route"] = `[{"dst":"default","dev":"eth0"},{"dst":"10.44.0.0/24","dev":"psns-f2a9"},{"dst":"172.18.0.0/16","dev":"br-` + id("5")[:12] + `"}]`
 	h.answers["docker inspect"] = fmt.Sprintf(`{"id":%q,"name":"/paisans-f2a9-infra-patroni-1","pid":1500,"labels":{"com.docker.compose.project":"paisans-f2a9-infra","community.paisans.deployment":"f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"},"ports":{}}
@@ -134,12 +132,11 @@ func TestOurOwnDeploymentIsClean(t *testing.T) {
 `, id("5"))
 	h.answers["docker volume inspect"] = `{"name":"` + id("9") + `","labels":{"com.docker.volume.anonymous":""}}
 `
-	h.answers["ss -Hltnup"] = baseSockets + fmt.Sprintf(`tcp LISTEN 0 4096 10.44.0.1:5432 0.0.0.0:* users:(("postgres",pid=1510,fd=5))
-tcp LISTEN 0 4096 127.0.0.1:5432 0.0.0.0:* users:(("postgres",pid=1510,fd=6))
-udp UNCONN 0 0 0.0.0.0:51820 0.0.0.0:*
-tcp LISTEN 0 4096 10.44.0.1:%d 0.0.0.0:* users:(("docker-proxy",pid=1600,fd=4))
+	h.answers["ss -Hltnue"] = baseSockets + fmt.Sprintf(`tcp LISTEN 0 4096 10.44.0.1:5432 0.0.0.0:* uid:166534 ino:1 sk:20 <->
+tcp LISTEN 0 4096 127.0.0.1:5432 0.0.0.0:* uid:166534 ino:2 sk:21 <->
+udp UNCONN 0 0 0.0.0.0:51820 0.0.0.0:* ino:0 sk:22 <->
+tcp LISTEN 0 4096 10.44.0.1:%d 0.0.0.0:* uid:1001 ino:3 sk:23 <->
 `, appPort)
-	h.answers["/proc/"] = "1510 0::/system.slice/docker-" + infraID + ".scope \n1600 0::/system.slice/docker.service \n"
 	r := check(t, "home-a", h)
 	wantClass(t, r, hostcheck.Clean)
 }
@@ -166,8 +163,8 @@ func TestAnotherDeploymentOnTheHostIsForeign(t *testing.T) {
 	}
 }
 
-// Somebody's Caddy on 80 and 443 beside a site that claims neither makes the
-// host shared, and with ufw up and denying by default that is allowed.
+// Another user's Caddy on 80 and 443 beside a site that claims neither makes
+// the host shared, which is allowed.
 func TestAForeignCaddyBesideASiteThatDoesNotClaimItIsShared(t *testing.T) {
 	r := check(t, "home-a", caddyHost())
 	wantClass(t, r, hostcheck.Shared)
@@ -177,16 +174,15 @@ func TestAForeignCaddyBesideASiteThatDoesNotClaimItIsShared(t *testing.T) {
 	for _, line := range []string{
 		"done: container web-caddy-1 (compose project web) not paisans",
 		"done: container shop-app-1 (compose project shop) not paisans",
-		"done: *:80/tcp held by container web-caddy-1 (compose project web) not paisans",
-		"done: 203.0.113.10:8081/tcp held by container shop-app-1 (compose project shop) not paisans",
+		"done: *:80/tcp held by a listener of another user's (uid 1002) not paisans",
 		"done: docker network shop_default (compose project shop) not paisans",
 		"done: volume shop_data (compose project shop) not paisans",
-		"done: shared ufw's default policy",
+		"done: shared superseded images are kept",
 	} {
 		wantLine(t, r, line)
 	}
 	if err := r.Refusal(); err != nil {
-		t.Errorf("a shared host with its firewall up is refused: %v", err)
+		t.Errorf("a shared host is refused: %v", err)
 	}
 }
 
@@ -195,8 +191,8 @@ func TestAForeignCaddyBesideASiteThatDoesNotClaimItIsShared(t *testing.T) {
 func TestAForeignCaddyConflictsWithAGateway(t *testing.T) {
 	r := check(t, "edge", caddyHost())
 	wantClass(t, r, hostcheck.Conflicted)
-	wantLine(t, r, "*:80/tcp (Caddy): claimed by sites.edge.roles (gateway), held by container web-caddy-1 (compose project web)")
-	wantLine(t, r, "*:443/tcp (Caddy): claimed by sites.edge.roles (gateway), held by container web-caddy-1 (compose project web)")
+	wantLine(t, r, "*:80/tcp (Caddy): claimed by sites.edge.roles (gateway), held by a listener of another user's (uid 1002)")
+	wantLine(t, r, "*:443/tcp (Caddy): claimed by sites.edge.roles (gateway), held by a listener of another user's (uid 1002)")
 	if len(r.Conflicts) != 2 {
 		t.Errorf("conflicts %v, want 80 and 443 once each", r.Conflicts)
 	}
@@ -206,28 +202,47 @@ func TestAForeignCaddyConflictsWithAGateway(t *testing.T) {
 	}
 }
 
-// A Postgres somebody runs on the host's 5432 conflicts with a data site,
-// on the mesh address and on loopback, which the toolkit's binds both need.
+// A Postgres another user runs on every address at the host's 5432
+// conflicts with a data site's bind on the mesh address, and makes the host
+// shared besides.
 func TestAForeignPostgresConflictsWithADataSite(t *testing.T) {
 	h := cleanHost()
-	h.answers["ss -Hltnup"] = baseSockets + `tcp LISTEN 0 244 0.0.0.0:5432 0.0.0.0:* users:(("postgres",pid=1200,fd=5))
+	h.answers["ss -Hltnue"] = baseSockets + `tcp LISTEN 0 244 0.0.0.0:5432 0.0.0.0:* uid:1003 ino:1 sk:20 <->
 `
 	r := check(t, "home-a", h)
 	wantClass(t, r, hostcheck.Conflicted)
-	wantLine(t, r, "10.44.0.1:5432/tcp (Postgres): claimed by sites.home-a.roles (data), held by process postgres (pid 1200)")
-	wantLine(t, r, "127.0.0.1:5432/tcp (Postgres): claimed by sites.home-a.roles (data), held by process postgres (pid 1200)")
+	wantLine(t, r, "10.44.0.1:5432/tcp (Postgres): claimed by sites.home-a.roles (data), held by a listener of another user's (uid 1003)")
+	if len(r.Foreign) != 1 {
+		t.Errorf("foreign %q, want the Postgres", r.Foreign)
+	}
 }
 
-// A loopback listener does not make a host shared, but one on an address
-// and port a site binds still stops that bind.
-func TestALoopbackListenerOnAClaimIsStillAConflict(t *testing.T) {
+// A system user's listener, as a distribution's own Postgres runs, is the
+// base system's: it does not make a host shared, and on a claim it is still a
+// conflict.
+func TestASystemUsersListenerIsTheBaseSystems(t *testing.T) {
 	h := cleanHost()
-	h.answers["ss -Hltnup"] = baseSockets + `tcp LISTEN 0 244 127.0.0.1:5432 0.0.0.0:* users:(("postgres",pid=1200,fd=5))
+	h.answers["ss -Hltnue"] = baseSockets + `tcp LISTEN 0 244 0.0.0.0:5432 0.0.0.0:* uid:113 ino:1 sk:20 <->
 `
 	r := check(t, "home-a", h)
 	wantClass(t, r, hostcheck.Conflicted)
-	if len(r.Conflicts) != 1 || !strings.HasPrefix(r.Conflicts[0].Resource, "127.0.0.1:5432/tcp") {
-		t.Errorf("conflicts %v, want the loopback bind alone", r.Conflicts)
+	wantLine(t, r, "10.44.0.1:5432/tcp (Postgres): claimed by sites.home-a.roles (data), held by a listener of a system user's (uid 113)")
+	if len(r.Foreign) != 0 {
+		t.Errorf("a system user's listener was counted as foreign: %q", r.Foreign)
+	}
+	wantClass(t, check(t, "edge", h), hostcheck.Clean)
+}
+
+// A loopback listener does not make a host shared, and stops no bind of a
+// site's, since every one is on the site's mesh address or every address.
+func TestALoopbackListenerOnAClaimedPortIsNoConflict(t *testing.T) {
+	h := cleanHost()
+	h.answers["ss -Hltnue"] = baseSockets + `tcp LISTEN 0 244 127.0.0.1:5432 0.0.0.0:* uid:1003 ino:1 sk:20 <->
+`
+	r := check(t, "home-a", h)
+	wantClass(t, r, hostcheck.Clean)
+	if len(r.Conflicts) != 0 {
+		t.Errorf("conflicts %v, want none", r.Conflicts)
 	}
 	if len(r.Foreign) != 0 {
 		t.Errorf("a loopback listener was counted as foreign: %q", r.Foreign)
@@ -251,11 +266,11 @@ func TestAForeignPublishedPortConflictsWithoutAListener(t *testing.T) {
 func TestAWireGuardTheToolkitDidNotWriteConflicts(t *testing.T) {
 	h := cleanHost()
 	h.answers["ip -o link"] += "4: psns-f2a9: <POINTOPOINT,NOARP,UP,LOWER_UP> mtu 1420\\    link/none\n"
-	h.answers["ss -Hltnup"] = baseSockets + "udp UNCONN 0 0 0.0.0.0:51820 0.0.0.0:*\n"
+	h.answers["ss -Hltnue"] = baseSockets + "udp UNCONN 0 0 0.0.0.0:51820 0.0.0.0:* ino:0 sk:20 <->\n"
 	r := check(t, "home-a", h)
 	wantClass(t, r, hostcheck.Conflicted)
 	wantLine(t, r, "interface psns-f2a9: claimed by mesh, held by an interface this deployment did not write")
-	wantLine(t, r, "*:51820/udp (WireGuard): claimed by mesh, held by a kernel socket (no process)")
+	wantLine(t, r, "*:51820/udp (WireGuard): claimed by mesh, held by a listener of root's")
 }
 
 // A foreign Docker network or a route over the mesh subnet would capture
@@ -271,40 +286,6 @@ func TestSomethingOverlappingTheMeshConflicts(t *testing.T) {
 	wantLine(t, r, "route 10.44.0.128/25 dev tun0: claimed by mesh.subnet, held by the host's routing table")
 	if len(r.Conflicts) != 2 {
 		t.Errorf("conflicts %v: the network's own bridge route is the network, reported once", r.Conflicts)
-	}
-}
-
-// On a shared host the toolkit never sets the firewall's default or enables
-// it, so the host must already have both, and firewalld must not be active.
-func TestASharedHostNeedsTheFirewallUp(t *testing.T) {
-	for _, tc := range []struct {
-		name, ufw, firewalld, want string
-	}{
-		{"ufw inactive", ufwInactive, "inactive\n", "ufw is inactive"},
-		{"default allow", "Status: active\nDefault: allow (incoming), allow (outgoing), disabled (routed)\n", "inactive\n", "ufw's default for incoming traffic is allow"},
-		{"no ufw", "ufw absent\n", "inactive\n", "ufw is not installed"},
-		{"firewalld", ufwActive, "active\n", "firewalld is active"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			h := caddyHost()
-			h.answers["ufw status verbose"] = tc.ufw
-			h.answers["is-active firewalld"] = tc.firewalld
-			r := check(t, "home-a", h)
-			wantClass(t, r, hostcheck.Shared)
-			err := r.Refusal()
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("refusal %v, want one saying %q", err, tc.want)
-			}
-		})
-	}
-}
-
-// A clean host's firewall is the toolkit's to set, as it always was.
-func TestACleanHostNeedsNoFirewallYet(t *testing.T) {
-	h := cleanHost()
-	h.answers["ufw status verbose"] = "ufw absent\n"
-	if err := check(t, "home-a", h).Refusal(); err != nil {
-		t.Errorf("a clean host without ufw is refused: %v", err)
 	}
 }
 
@@ -324,55 +305,35 @@ func TestABroaderRouteIsANoteNotAConflict(t *testing.T) {
 	wantClass(t, check(t, "home-a", h), hostcheck.Conflicted)
 }
 
-// reject refuses incoming traffic as deny does, only answering instead of
-// dropping, so a shared host denying by either is protected.
-func TestRejectByDefaultIsAFirewallUp(t *testing.T) {
-	h := caddyHost()
-	h.answers["ufw status verbose"] = "Status: active\nDefault: reject (incoming), allow (outgoing), disabled (routed)\n"
-	if err := check(t, "home-a", h).Refusal(); err != nil {
-		t.Errorf("reject by default is refused: %v", err)
-	}
-}
+// Routes are read from every table, so a VPN that keeps its routes in one
+// of its own, Tailscale's 52, is seen and named with its table. The local
+// table's own addresses and a table's throw routes hold no network.
+func TestARouteInAnotherTableConflicts(t *testing.T) {
+	h := cleanHost()
+	delete(h.answers, "ip -j route")
+	h.answers["ip -j route show table all"] = `[{"dst":"default","dev":"eth0"},{"type":"throw","dst":"10.44.0.0/16","table":"52"},{"type":"local","dst":"10.44.0.9","dev":"eth1","table":"local"}]`
+	wantClass(t, check(t, "home-a", h), hostcheck.Clean)
 
-// The advice for enabling ufw allows the site's SSH port first, so that an
-// operator who follows it in order keeps the session they are typing in.
-func TestTheFirewallAdviceAllowsSSHFirst(t *testing.T) {
-	cfg := fixture(t)
-	site := cfg.Sites["home-a"]
-	site.SSH.Port = 2222
-	cfg.Sites["home-a"] = site
-	h := caddyHost()
-	h.answers["ufw status verbose"] = ufwInactive
-	r, err := hostcheck.Run(cfg, "home-a", h)
-	if err != nil {
-		t.Fatal(err)
-	}
-	refusal := r.Refusal()
-	if refusal == nil {
-		t.Fatal("not refused")
-	}
-	msg := refusal.Error()
-	allow, enable := strings.Index(msg, "ufw allow 2222/tcp"), strings.Index(msg, "ufw enable")
-	if allow < 0 || enable < 0 || allow > enable {
-		t.Errorf("the advice does not allow SSH on 2222 before enabling ufw: %s", msg)
+	h.answers["ip -j route show table all"] = `[{"dst":"10.44.0.0/24","dev":"tailscale0","table":"52"}]`
+	r := check(t, "home-a", h)
+	wantClass(t, r, hostcheck.Conflicted)
+	if !strings.Contains(fmt.Sprint(r.Conflicts), "route 10.44.0.0/24 dev tailscale0 table 52") {
+		t.Errorf("the conflict does not name the table: %+v", r.Conflicts)
 	}
 }
 
 // An IPv4-mapped address is the IPv4 address, so a listener ss prints as
-// [::ffff:127.0.0.1] holds 127.0.0.1 and conflicts with a claim there.
+// [::ffff:10.44.0.1] holds 10.44.0.1 and conflicts with a claim there.
 func TestAnIPv4MappedListenerIsItsIPv4Address(t *testing.T) {
 	h := cleanHost()
-	h.answers["ss -Hltnup"] = baseSockets + `tcp LISTEN 0 244 [::ffff:127.0.0.1]:5432 *:* users:(("postgres",pid=1200,fd=5))
+	h.answers["ss -Hltnue"] = baseSockets + `tcp LISTEN 0 244 [::ffff:10.44.0.1]:5432 *:* uid:1003 ino:1 sk:20 <->
 `
 	r := check(t, "home-a", h)
 	wantClass(t, r, hostcheck.Conflicted)
-	wantLine(t, r, "127.0.0.1:5432/tcp (Postgres): claimed by sites.home-a.roles (data), held by process postgres (pid 1200)")
-	if len(r.Foreign) != 0 {
-		t.Errorf("a mapped loopback listener was counted as foreign: %q", r.Foreign)
-	}
+	wantLine(t, r, "10.44.0.1:5432/tcp (Postgres): claimed by sites.home-a.roles (data), held by a listener of another user's (uid 1003)")
 }
 
-// A foreign host network Caddy on 80 and 443 is no conflict for a monitor
+// Another user's Caddy on 80 and 443 is no conflict for a monitor
 // behind the operator's own web server, which claims neither: it may well be
 // that web server. For a monitor running the toolkit's Caddy it is a conflict
 // on both ports.
@@ -380,8 +341,8 @@ func TestAForeignCaddyAndTheTwoWebServerModes(t *testing.T) {
 	wantClass(t, check(t, "porch", caddyHost()), hostcheck.Shared)
 	r := check(t, "watch", caddyHost())
 	wantClass(t, r, hostcheck.Conflicted)
-	wantLine(t, r, "*:80/tcp (Caddy): claimed by sites.watch.roles (monitor), held by container web-caddy-1 (compose project web)")
-	wantLine(t, r, "*:443/tcp (Caddy): claimed by sites.watch.roles (monitor), held by container web-caddy-1 (compose project web)")
+	wantLine(t, r, "*:80/tcp (Caddy): claimed by sites.watch.roles (monitor), held by a listener of another user's (uid 1002)")
+	wantLine(t, r, "*:443/tcp (Caddy): claimed by sites.watch.roles (monitor), held by a listener of another user's (uid 1002)")
 }
 
 // An external monitor's compose network is pinned, so a foreign network or a
@@ -420,84 +381,38 @@ func TestAStaleToolkitStackOnTheWebServerNetworkConflicts(t *testing.T) {
 	wantClass(t, check(t, "porch", own), hostcheck.Clean)
 }
 
-const keptDeployment = "566c1a2b-3c4d-4e5f-8a6b-7c8d9e0f1a2b"
+// The deployment's own listeners, its user's UID or one in its subordinate
+// range, are ours on a re-apply; root's and another user's are taken.
+func TestTheUsersOwnListenersAreOurs(t *testing.T) {
+	inv := &hostcheck.Inventory{Host: "vm", Self: hostcheck.Self{UID: 1001, SubStart: 165536, SubCount: 65536}, Sockets: []hostcheck.Socket{
+		{Proto: "tcp", Port: 80, UID: 1001},
+		{Proto: "tcp", Port: 443, UID: 165536 + 70},
+	}}
+	if r := hostcheck.Classify(gatewayClaims(t), inv); r.Refusal() != nil {
+		t.Errorf("the deployment's own Caddy refused: %v", r.Refusal())
+	}
+	for _, uid := range []int{0, 1002, 165535, 165536 + 65536} {
+		inv.Sockets = []hostcheck.Socket{{Proto: "tcp", Port: 443, UID: uid}}
+		r := hostcheck.Classify(gatewayClaims(t), inv)
+		if r.Refusal() == nil || !strings.Contains(r.Refusal().Error(), "443") {
+			t.Errorf("uid %d on 443 was not refused: %v", uid, r.Refusal())
+		}
+	}
+}
 
-// keptCaddyHost has another deployment's Caddy on 80 and 443, kept for the
-// host owner's site in /srv/caddy.d, with that deployment's registry entry
-// or without, and a container of that deployment's that is not its Caddy.
-func keptCaddyHost(t *testing.T, entry bool) *fakeHost {
+// gatewayClaims are the claims of the fixture's gateway site.
+func gatewayClaims(t *testing.T) hostcheck.Claims { return claims(t, "edge") }
+
+// Another deployment's Caddy reads as that deployment's container, as any of
+// its containers does: its root and the host's registry are not this user's
+// to read.
+func TestAnotherDeploymentsCaddyKeepsThePlainWording(t *testing.T) {
 	h := cleanHost()
-	h.answers["ufw status verbose"] = ufwActive
-	h.answers["docker inspect"] = fmt.Sprintf(`{"id":%q,"name":"/paisans-566c-infra-caddy-1","pid":812,"labels":{"com.docker.compose.project":"paisans-566c-infra","com.docker.compose.service":"caddy","community.paisans.deployment":%q},"ports":{}}
-{"id":%q,"name":"/paisans-566c-talk-app-1","pid":913,"labels":{"com.docker.compose.project":"paisans-566c-talk","com.docker.compose.service":"app","community.paisans.deployment":%q},"ports":{"8080/tcp":[{"HostIp":"","HostPort":"5432"}]}}
-`, caddyID, keptDeployment, talkID, keptDeployment)
-	h.answers["ss -Hltnup"] = baseSockets + `tcp LISTEN 0 4096 *:80 *:* users:(("caddy",pid=812,fd=7))
-tcp LISTEN 0 4096 *:443 *:* users:(("caddy",pid=812,fd=8))
-`
-	h.answers["/proc/"] = "812 0::/system.slice/docker-" + caddyID + ".scope \n"
-	h.answers["/srv/caddy.d/"] = "/srv/caddy.d/blog.caddy\n"
-	if entry {
-		data, err := registry.Encode(registry.Registry{Version: registry.Version, Deployments: map[string]registry.Entry{
-			keptDeployment: registry.KeepCaddy(registry.Entry{Token: "566c", Root: "/srv/paisans/566c", Domain: "example.net", Site: "edge", ClaimedAt: "2026-10-01T00:00:00Z", Interface: "psns-566c", Subnet: "10.45.0.0/24", Address: "10.45.0.2", Roles: "gateway"}),
-		}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		h.files[registry.Path] = string(data)
-	}
-	return h
-}
-
-// Another deployment's Caddy kept for the owner's sites is named as that,
-// with what to do: the --id that removes it while its entry is there, and
-// removing it by hand once its entry is gone.
-func TestAnotherDeploymentsKeptCaddyIsNamed(t *testing.T) {
-	held := "held by container paisans-566c-infra-caddy-1: paisans deployment 566c's Caddy, kept because it serves /srv/caddy.d sites"
-	r := check(t, "edge", keptCaddyHost(t, true))
+	h.answers["docker inspect"] = fmt.Sprintf(`{"id":%q,"name":"/paisans-566c-infra-caddy-1","pid":812,"labels":{"com.docker.compose.project":"paisans-566c-infra","com.docker.compose.service":"caddy","community.paisans.deployment":"566c1a2b-3c4d-4e5f-8a6b-7c8d9e0f1a2b"},"ports":{"443/tcp":[{"HostIp":"","HostPort":"443"}]}}
+`, caddyID)
+	r := check(t, "edge", h)
 	wantClass(t, r, hostcheck.Conflicted)
-	wantLine(t, r, "*:443/tcp (Caddy): claimed by sites.edge.roles (gateway), "+held+". Move those sites to a Caddy of your own and remove this container, or run paisans site remove --force --ssh ubuntu@host.example.org --id 566c once they are gone")
-
-	r = check(t, "edge", keptCaddyHost(t, false))
-	wantLine(t, r, "*:443/tcp (Caddy): claimed by sites.edge.roles (gateway), "+held+"; its registry entry was removed, so remove this container by hand once those sites have moved")
-	if strings.Contains(printed(r), "--id 566c") {
-		t.Errorf("an --id is offered with no registry entry:\n%s", printed(r))
-	}
-}
-
-// That deployment's other containers, and its Caddy with no site of the
-// owner's to serve, keep the plain wording.
-func TestAnotherDeploymentsOtherContainersKeepThePlainWording(t *testing.T) {
-	r := check(t, "home-a", keptCaddyHost(t, true))
-	wantLine(t, r, "held by container paisans-566c-talk-app-1 (compose project paisans-566c-talk, paisans deployment "+keptDeployment+")")
-
-	h := keptCaddyHost(t, true)
-	h.answers["/srv/caddy.d/"] = ""
-	r = check(t, "edge", h)
-	wantLine(t, r, "held by container paisans-566c-infra-caddy-1 (compose project paisans-566c-infra, paisans deployment "+keptDeployment+")")
-	if strings.Contains(printed(r), "kept because") {
-		t.Errorf("a Caddy serving nothing of the owner's is named kept:\n%s", printed(r))
-	}
-}
-
-// Another deployment's Caddy whose entry is not marked kept is a live
-// gateway, and a registry that does not parse says nothing about entries:
-// both keep the plain wording, and the check still runs.
-func TestALiveOrUnknownCaddyKeepsThePlainWording(t *testing.T) {
-	plain := "held by container paisans-566c-infra-caddy-1 (compose project paisans-566c-infra, paisans deployment " + keptDeployment + ")"
-	live := keptCaddyHost(t, true)
-	live.files[registry.Path] = strings.Replace(live.files[registry.Path], `,"kept":"caddy"`, "", 1)
-	broken := keptCaddyHost(t, false)
-	broken.files[registry.Path] = "not a registry"
-	for name, h := range map[string]*fakeHost{"live": live, "unreadable": broken} {
-		r, err := hostcheck.Run(fixture(t), "edge", h)
-		if err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-		wantLine(t, r, "*:443/tcp (Caddy): claimed by sites.edge.roles (gateway), "+plain)
-		if strings.Contains(printed(r), "kept because") {
-			t.Errorf("%s: named kept:\n%s", name, printed(r))
-		}
-	}
+	wantLine(t, r, "*:443/tcp (Caddy): claimed by sites.edge.roles (gateway), held by container paisans-566c-infra-caddy-1 (compose project paisans-566c-infra, paisans deployment 566c1a2b-3c4d-4e5f-8a6b-7c8d9e0f1a2b)")
 }
 
 // A conflict refuses with a short hint, one line per conflict, and what to
@@ -519,25 +434,7 @@ func TestAConflictRefusalIsAProblem(t *testing.T) {
 	var b strings.Builder
 	ui.PrintError(&b, err, false)
 	out := b.String()
-	if !strings.HasPrefix(out, "FAIL "+p.Hint+"\n  - *:80/tcp (Caddy): claimed by sites.edge.roles (gateway), held by container web-caddy-1 (compose project web)\n  - *:443/tcp") {
+	if !strings.HasPrefix(out, "FAIL "+p.Hint+"\n  - *:80/tcp (Caddy): claimed by sites.edge.roles (gateway), held by a listener of another user's (uid 1002)\n  - *:443/tcp") {
 		t.Errorf("printed:\n%s", out)
-	}
-}
-
-// A shared host whose firewall is not ready refuses with a short hint, and
-// the steps in the explanation.
-func TestAFirewallRefusalIsAProblem(t *testing.T) {
-	h := caddyHost()
-	h.answers["ufw status verbose"] = ufwInactive
-	err := check(t, "home-a", h).Refusal()
-	var p *ui.Problem
-	if !errors.As(err, &p) {
-		t.Fatalf("not a ui.Problem: %v", err)
-	}
-	if !strings.HasSuffix(p.Hint, " is shared, and its firewall is not up and denying") || len(p.Hint) > 80 {
-		t.Errorf("hint: %q", p.Hint)
-	}
-	if !strings.Contains(p.Explain, "ufw is inactive") || !strings.Contains(p.Explain, "ufw enable") {
-		t.Errorf("explanation: %q", p.Explain)
 	}
 }

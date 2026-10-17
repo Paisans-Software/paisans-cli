@@ -14,8 +14,8 @@ import (
 )
 
 // rekeyHost is how `mesh rekey` reaches a site. Tests replace it.
-var rekeyHost = func(name string, site config.Site, sudo bool) apply.Transport {
-	return siteTransport(name, site, "", sudo)
+var rekeyHost = func(name string, site config.Site) apply.Transport {
+	return siteTransport(name, site, "")
 }
 
 // runMesh dispatches `paisans mesh <subcommand>`.
@@ -57,7 +57,6 @@ func runMeshRekey(args []string) error {
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
 	execute := fs.Bool("execute", false, "actually rekey, one site at a time, stopping at the first gate that fails")
 	all := fs.Bool("all", false, "rekey every site the configuration declares, in its order")
-	sudo := fs.Bool("sudo", true, "run remote commands through sudo, since /etc/wireguard and Docker are root's")
 	var sites []string
 	for len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		sites, args = append(sites, args[0]), args[1:]
@@ -104,10 +103,7 @@ func runMeshRekey(args []string) error {
 	}
 	transports := map[string]apply.Transport{}
 	for _, name := range cfg.SiteNames() {
-		transports[name] = rekeyHost(name, cfg.Sites[name], *sudo)
-	}
-	if err := settleSudo(r, cfg.SiteNames(), func(name string) apply.Transport { return transports[name] }); err != nil {
-		return err
+		transports[name] = rekeyHost(name, cfg.Sites[name])
 	}
 	plan, err := ui.Get(r, "read every site", func() (*meshrekey.Plan, error) {
 		if every {
@@ -121,9 +117,9 @@ func runMeshRekey(args []string) error {
 	if !*execute || r.Verbose() {
 		plan.Show(r)
 	}
-	// Every site is a peer of some site rekeyed, so every one is written to,
-	// but a site not brought up yet, which a claim would make look prepared.
-	if err := claimSites(r, cfg, *execute, *sudo, withoutNames(cfg.SiteNames(), plan.Joining)...); err != nil {
+	// Every site is a peer of some site rekeyed, so every one is written to
+	// and has its admission checked, but a site not brought up yet.
+	if _, err := admittedSites(r, cfg, withoutNames(cfg.SiteNames(), plan.Joining)...); err != nil {
 		return err
 	}
 	if !*execute {

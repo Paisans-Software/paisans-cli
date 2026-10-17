@@ -113,12 +113,12 @@ func TestDoctorChecksTheDNSTokenFromEveryPlace(t *testing.T) {
 		t.Fatal(err)
 	}
 	hosts, _ := vmOnly(cfg, quietCaddyLog)
-	withDoctorHosts(t, hosts)
+	withDoctorHosts(t, cfg, hosts)
 	zone := dnstest.New()
 	zone.Zones["example.org"] = "zone-1"
 	calls := withTokenChecks(t, tokenPassed, func(check dns.TokenCheck, _ string) dns.TokenResult { return tokenPassed(check) }, zone)
 	rec := withRecorder(t, true)
-	_ = runDoctor([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false", "--site", "vm"})
+	_ = runDoctor([]string{"--config", configPath, "--secrets", secretsPath, "--site", "vm"})
 
 	want := []string{"vm", dns.WorkstationPlace, "provider"}
 	if strings.Join(calls.places, ",") != strings.Join(want, ",") {
@@ -146,11 +146,11 @@ func TestDoctorWithoutSecretsChecksEveryOtherPlace(t *testing.T) {
 		t.Fatal(err)
 	}
 	hosts, _ := vmOnly(cfg, quietCaddyLog)
-	withDoctorHosts(t, hosts)
+	withDoctorHosts(t, cfg, hosts)
 	calls := withTokenChecks(t, tokenPassed, func(check dns.TokenCheck, _ string) dns.TokenResult { return tokenPassed(check) }, dnstest.New())
 	rec := withRecorder(t, true)
 	missing := filepath.Join(t.TempDir(), "secrets.enc.yaml")
-	_ = runDoctor([]string{"--config", configPath, "--secrets", missing, "--sudo=false", "--site", "vm"})
+	_ = runDoctor([]string{"--config", configPath, "--secrets", missing, "--site", "vm"})
 	if strings.Join(calls.places, ",") != "vm" {
 		t.Errorf("checked %v, want vm alone", calls.places)
 	}
@@ -186,10 +186,10 @@ func TestDoctorPrintsNoToken(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			hosts, _ := vmOnly(cfg, quietCaddyLog)
-			withDoctorHosts(t, hosts)
+			withDoctorHosts(t, cfg, hosts)
 			withTokenChecks(t, tokenPassed, workstation, echoingProvider{zone})
 			rec := withRecorder(t, true)
-			err := runDoctor([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false", "--site", "vm"})
+			err := runDoctor([]string{"--config", configPath, "--secrets", secretsPath, "--site", "vm"})
 			out := rec.Lines()
 			if !strings.Contains(out, "check dns token workstation") {
 				t.Fatalf("the workstation's check did not run:\n%s", out)
@@ -233,10 +233,10 @@ func TestDoctorCallsNothingDuringALockout(t *testing.T) {
 	}
 	locked := `{"level":"error","ts":1792024608.576382,"logger":"tls.obtain","msg":"could not get certificate from issuer","identifier":"talk.example.org","issuer":"acme.zerossl.com-v2-DV90","error":"[talk.example.org] solving challenges: presenting for challenge: adding temporary record for zone \"example.org.\": got error status: HTTP 429: [{Code:10502 Message:Too many authentication failures. Please try again later. ErrorChain:[]}] (order=https://acme.zerossl.com/v2/DV90/order/x) (ca=https://acme.zerossl.com/v2/DV90)"}`
 	hosts, _ := vmOnly(cfg, "now 1792024700\nstarted 2026-10-15T00:00:00Z\n"+locked+"\n")
-	withDoctorHosts(t, hosts)
+	withDoctorHosts(t, cfg, hosts)
 	calls := withTokenChecks(t, tokenPassed, func(check dns.TokenCheck, _ string) dns.TokenResult { return tokenPassed(check) }, dnstest.New())
 	rec := withRecorder(t, true)
-	if err := runDoctor([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false", "--site", "vm"}); err == nil {
+	if err := runDoctor([]string{"--config", configPath, "--secrets", secretsPath, "--site", "vm"}); err == nil {
 		t.Error("a lockout is not a failure")
 	}
 	if len(calls.places) != 0 {

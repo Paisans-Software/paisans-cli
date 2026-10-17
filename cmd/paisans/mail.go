@@ -20,7 +20,18 @@ import (
 // real site or mail server.
 var smtpEnv = func(cfg *config.Config, ssh map[string]string) smtpcheck.Env {
 	return smtpcheck.Env{Dial: func(site, address string) (net.Conn, error) {
-		return siteTransport(site, cfg.Sites[site], ssh[site], false).Dial(address)
+		return siteTransport(site, cfg.Sites[site], ssh[site]).Dial(address)
+	}}
+}
+
+// localSMTPEnv is how a credential is tried before it is written or handed
+// out (secrets set, secrets rotate): from this machine, dialling the mail
+// server directly, since whether the provider takes a password and a sender
+// is the same from anywhere and no site need be deployed yet. Tests replace
+// it, since none may reach a real mail server.
+var localSMTPEnv = func() smtpcheck.Env {
+	return smtpcheck.Env{Dial: func(_, address string) (net.Conn, error) {
+		return (&net.Dialer{Timeout: smtpcheck.DefaultTimeout}).Dial("tcp", address)
 	}}
 }
 
@@ -72,8 +83,35 @@ func checkMailForApply(r ui.Reporter, cfg *config.Config, secrets *config.Secret
 	if len(checks) == 0 {
 		return nil
 	}
-	env := smtpEnv(cfg, ssh)
 	r.Section("mail")
+	return tryMailFromSites(r, cfg, secrets, checks, ssh, " Then apply again. Nothing was changed.", " Nothing was changed.")
+}
+
+// checkMailForRotation is how a rotation tries the SMTP password at path
+// from site: every app among stacks there that logs in with it logs in from
+// site with the value handed holds, as apply's own check does, and nothing
+// is sent. Stage 2 runs it for every site that will be handed the password,
+// pasted or set beforehand, before stage 3 hands it to any, since this
+// machine may not have reached the server.
+func checkMailForRotation(r ui.Reporter, cfg *config.Config, handed *config.Secrets, path, site string, stacks []string) error {
+	var checks []smtpcheck.Check
+	for _, c := range mailChecks(cfg, handed, []string{site}, stacks) {
+		if c.PasswordPath == path {
+			checks = append(checks, c)
+		}
+	}
+	after := " No site was handed it."
+	return tryMailFromSites(r, cfg, handed, checks, nil, after, after)
+}
+
+// tryMailFromSites logs in with each of checks from its site, after says
+// what was left unchanged by a refusal, and reached by one that could not
+// be made.
+func tryMailFromSites(r ui.Reporter, cfg *config.Config, secrets *config.Secrets, checks []smtpcheck.Check, ssh map[string]string, after, unreached string) error {
+	if len(checks) == 0 {
+		return nil
+	}
+	env := smtpEnv(cfg, ssh)
 	for _, c := range checks {
 		step := r.Step(c.Title())
 		if c.Skip != "" {
@@ -91,9 +129,9 @@ func checkMailForApply(r ui.Reporter, cfg *config.Config, secrets *config.Secret
 			var failed *smtpcheck.Error
 			if errors.As(err, &failed) && failed.Dialled() {
 				hint, explain := mailFailure(cfg, failed)
-				return &ui.Problem{Hint: hint, Explain: explain + " Then apply again. Nothing was changed.", Cause: err}
+				return &ui.Problem{Hint: hint, Explain: explain + after, Cause: err}
 			}
-			return &ui.Problem{Hint: c.Site + " could not be reached to try " + c.Whose(), Explain: "apply tries every app's mail settings from its site before anything changes. Nothing was changed.", Cause: err}
+			return &ui.Problem{Hint: c.From() + " could not be reached to try " + c.Whose(), Explain: "every app's mail settings are tried from its site before anything there changes." + unreached, Cause: err}
 		}
 		if c.PasswordPath != "" {
 			step.Done("logs in")
@@ -170,19 +208,21 @@ func checkMailForValidate(r ui.Reporter, cfg *config.Config, secretsPath string)
 }
 
 // trySMTPPassword is how `secrets set` tries an SMTP password before writing
-// it: for each set of settings an app logs in with under key, from a site
-// running the app, it logs in with value and sends the operators the test
-// message from the app's sender (smtpcheck.ForPassword). secrets already
-// holds value at key, in memory only. The first failure refuses, and the
+// it: for each set of settings an app logs in with under key, from this
+// machine, it logs in with value and sends the operators the test message
+// from the app's sender (smtpcheck.ForPassword). secrets already holds value
+// at key, in memory only. A server that answers and refuses refuses, and the
 // caller writes nothing; done says what an interrupted walk already wrote.
-// Settings nothing can be tried from are warned about and left untried.
+// A server this machine cannot reach, and settings that cannot be tried
+// from here, are warned about and left untried: apply tries the login from
+// each site before it changes anything.
 func trySMTPPassword(r ui.Reporter, cfg *config.Config, secrets *config.Secrets, key, value, done string) error {
 	ui.Secret(value)
 	checks := smtpcheck.ForPassword(cfg, secrets, key)
 	if len(checks) == 0 {
 		return nil
 	}
-	env := smtpEnv(cfg, nil)
+	env := localSMTPEnv()
 	r.Section("mail")
 	var to []string
 	for _, c := range checks {
@@ -204,20 +244,21 @@ func trySMTPPassword(r ui.Reporter, cfg *config.Config, secrets *config.Secrets,
 			step.Done("logs in; test message sent to " + strings.Join(to, ", "))
 			continue
 		}
-		step.Fail(err)
 		var failed *smtpcheck.Error
 		if errors.As(err, &failed) && failed.Dialled() {
+			step.Fail(err)
 			return &ui.Problem{
 				Hint:    key + " does not work for " + c.Whose(),
-				Explain: fmt.Sprintf("%s logs in to %s with %s as %s. From %s the server answered: %s. Check the password at the mail provider, and the settings under %s, then set it again. %s.", c.Whose(), c.Address(), c.Security(), c.SMTP.Username, c.Site, failed.Reply(), c.Setting(cfg), done),
+				Explain: fmt.Sprintf("%s logs in to %s with %s as %s. From %s the server answered: %s. Check the password at the mail provider, and the settings under %s, then set it again. %s.", c.Whose(), c.Address(), c.Security(), c.SMTP.Username, c.From(), failed.Reply(), c.Setting(cfg), done),
 				Cause:   err,
 			}
 		}
-		return &ui.Problem{
-			Hint:    c.Site + " could not be reached to try " + key,
-			Explain: fmt.Sprintf("An SMTP password is tried from a site running %s before it is written, and %s did not answer. Run it again once the site answers. %s.", appsOf(c), c.Site, done),
-			Cause:   err,
+		step.End(ui.Warned, "not reached")
+		why := err.Error()
+		if errors.As(err, &failed) {
+			why = failed.Reply()
 		}
+		r.Explain(fmt.Sprintf("%s could not be reached from %s (%s), so %s is written untried. `paisans apply` tries it from each site running %s before it changes anything.", c.Address(), c.From(), strings.TrimSuffix(ui.Redact(why), "."), key, appsOf(c)))
 	}
 	return nil
 }

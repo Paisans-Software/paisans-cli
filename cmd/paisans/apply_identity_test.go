@@ -9,6 +9,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/grant"
 	"github.com/paisans-software/paisans-cli/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 // identityLines is each deployment section's lines, in order, as kind and
@@ -31,6 +32,10 @@ func identityLines(rec *ui.Recorder) [][]string {
 	return out
 }
 
+// built is the deployment section's first line: the build of paisans that
+// runs it, its version and short commit.
+var built = "done paisans: " + version.Current().String()
+
 // Files that are the head the sites hold name it as the run opens, once the
 // workstation holds that version, and nothing is pending, so the run does not
 // name them again. The first run gathers the version into the workstation's
@@ -45,7 +50,7 @@ func TestApplyNamesTheDeploymentAndVersionFirst(t *testing.T) {
 	rec := recordConverge(t)
 	_ = f.applySite(t, noTerminalStdin(), "--execute")
 	got := identityLines(rec)
-	want := []string{"done id: " + f.cfgID(t), "done configuration: revision 1, " + f.shas[0][:12]}
+	want := []string{built, "done id: " + f.cfgID(t), "done configuration: revision 1, " + f.shas[0][:12]}
 	if rec.Index("section", "deployment") != 0 || len(got) != 1 {
 		t.Fatalf("got %v\n%s", got, rec.Lines())
 	}
@@ -85,8 +90,8 @@ func TestApplyNamesAPublishedVersionAtTheEnd(t *testing.T) {
 	if len(got) != 2 || head == f.shas[0] {
 		t.Fatalf("head %s, got %v\n%s", head, got, rec.Lines())
 	}
-	sameLines(t, got[0], []string{"done id: " + f.cfgID(t), "pending configuration: pending: published by apply --execute"})
-	sameLines(t, got[1], []string{"done id: " + f.cfgID(t), "done configuration: revision 2, " + head[:12]})
+	sameLines(t, got[0], []string{built, "done id: " + f.cfgID(t), "pending configuration: pending: published by apply --execute"})
+	sameLines(t, got[1], []string{built, "done id: " + f.cfgID(t), "done configuration: revision 2, " + head[:12]})
 	if end := rec.Index("section", "deployment"); rec.Index("done", "publish revision 2") < end {
 		t.Errorf("named again before the publish:\n%s", rec.Lines())
 	}
@@ -107,13 +112,13 @@ func TestApplyNamesWhatIsPendingWhenItStops(t *testing.T) {
 	}
 	rec := recordConverge(t)
 	captureStdout(t, func() {
-		err = runApply([]string{"--config", path, "--secrets", fixtureSecretsPath(), "--sudo=false"}, strings.NewReader(""), nil)
+		err = runApply([]string{"--config", path, "--secrets", fixtureSecretsPath()}, strings.NewReader(""), nil)
 	})
 	got := identityLines(rec)
 	if err == nil || len(got) != 2 {
 		t.Fatalf("err %v, got %v\n%s", err, got, rec.Lines())
 	}
-	pending := []string{"done id: " + declaredID(path), "pending configuration: pending: published by apply --execute"}
+	pending := []string{built, "done id: " + declaredID(path), "pending configuration: pending: published by apply --execute"}
 	sameLines(t, got[0], pending)
 	sameLines(t, got[1], pending)
 	last := 0

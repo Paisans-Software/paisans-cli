@@ -1,0 +1,1 @@
+refused: admission directory: /etc/paisans is "lrwxrwxrwx", not a directory: it must be root's, so no deployment can write another's record. Fix it and admit again. Nothing was changed

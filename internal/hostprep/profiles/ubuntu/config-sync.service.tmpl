@@ -1,0 +1,6 @@
+[Unit]
+Description=paisans {{.Token}}: fetch configuration versions from mesh peers
+
+[Service]
+Type=oneshot
+ExecStart={{.Script}}

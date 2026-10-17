@@ -1,6 +1,8 @@
 package create
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
 	"errors"
 	"flag"
 	"os"
@@ -8,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/ssh"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 )
@@ -24,7 +28,7 @@ func script(lines ...string) string { return strings.Join(lines, "\n") + "\n" }
 
 var (
 	communityAnswers = []string{"Example Community", "example.org", ""}
-	adminAnswers     = []string{"alice", "Alice Example", "alice@example.org", aliceKey, "", "bob", "Bob Example", "bob@example.org", bobKey, "", "n"}
+	adminAnswers     = []string{"alice", "Alice Example", "alice@example.org", aliceKey, "", "", "bob", "Bob Example", "bob@example.org", bobKey, "", "n"}
 	// management: the account service, its hostname, signup by invite, and
 	// the code of conduct's file.
 	managementAnswers = []string{"", "", "", "testdata/code-of-conduct.md"}
@@ -127,6 +131,56 @@ func TestOneMachineDoesNotOfferChat(t *testing.T) {
 	}
 	if _, ok := w.Answers.App("chat"); ok {
 		t.Error("chat was declared")
+	}
+}
+
+// One operator is accepted: declining a second writes a file validate only
+// warns about, so a deployment can be rolled out while a second is found.
+func TestOneOperatorIsAccepted(t *testing.T) {
+	var lines []string
+	lines = append(lines, communityAnswers...)
+	lines = append(lines, "alice", "Alice Example", "alice@example.org", aliceKey, "", "n")
+	lines = append(lines, shapeAnswers[ShapeOneMachine]...)
+	lines = append(lines, appAnswers(false)...)
+	lines = append(lines, mailAnswers...)
+	w, out, err := run(t, script(lines...))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if len(w.Answers.Operators) != 1 {
+		t.Fatalf("operators = %v, want alice alone", w.Answers.Operators)
+	}
+	data, err := Render(w.Answers, testID, testOrigin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := check(t, data)
+	for _, f := range r.Refusals() {
+		t.Errorf("refused %s: %s: %s", f.Rule, f.Key, f.Message)
+	}
+	if !r.Has("operators-fewer-than-two") {
+		t.Error("one operator drew no operators-fewer-than-two warning")
+	}
+}
+
+// Enter after the first operator adds a second, since two is what a
+// deployment should have.
+func TestEnterAfterTheFirstOperatorAddsASecond(t *testing.T) {
+	var lines []string
+	lines = append(lines, communityAnswers...)
+	lines = append(lines, adminAnswers...)
+	lines = append(lines, shapeAnswers[ShapeOneMachine]...)
+	lines = append(lines, appAnswers(false)...)
+	lines = append(lines, mailAnswers...)
+	w, out, err := run(t, script(lines...))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if len(w.Answers.Operators) != 2 {
+		t.Errorf("operators = %v, want alice and bob", w.Answers.Operators)
+	}
+	if !strings.Contains(out, "Add another operator? [Y/n]") {
+		t.Errorf("the question after the first operator does not default to yes:\n%s", out)
 	}
 }
 
@@ -500,5 +554,105 @@ func TestWizardWritesOpenSignup(t *testing.T) {
 	}
 	for _, f := range check(t, data).Refusals() {
 		t.Errorf("refused %s: %s: %s", f.Rule, f.Key, f.Message)
+	}
+}
+
+// The SSH user may be left empty: the machine is then reached as the
+// deployment's own user, which the question names, and the file writes no
+// user for it. A name given is written.
+func TestTheSSHUserMayBeLeftEmpty(t *testing.T) {
+	var lines []string
+	lines = append(lines, communityAnswers...)
+	lines = append(lines, adminAnswers...)
+	lines = append(lines, shapeAnswers[ShapeOneMachine]...)
+	lines = append(lines, appAnswers(false)...)
+	lines = append(lines, mailAnswers...)
+	var out strings.Builder
+	w := NewWizard(NewPrompter(strings.NewReader(script(lines...)), &out))
+	w.DefaultUser = "paisans-f2a9"
+	if err := w.Ask(SectionAll); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "SSH user (blank: paisans-f2a9, the deployment's own): ") {
+		t.Errorf("the question does not offer the deployment's user:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "must already exist") {
+		t.Errorf("the question still asks for an existing user:\n%s", out.String())
+	}
+	data, err := Render(w.Answers, testID, testOrigin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "user:") {
+		t.Errorf("a user was written:\n%s", data)
+	}
+	for _, f := range check(t, data).Refusals() {
+		t.Errorf("refused %s: %s: %s", f.Rule, f.Key, f.Message)
+	}
+
+	w.Answers.Sites[0].SSHUser = "admin"
+	data, err = Render(w.Answers, testID, testOrigin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "      user: admin\n") {
+		t.Errorf("a given user was not written:\n%s", data)
+	}
+}
+
+// Two operators sharing a key is a file the loader refuses, so the second
+// operator's paste of the first one's key is refused at the prompt.
+func TestASecondOperatorMayNotGiveTheFirstOnesKey(t *testing.T) {
+	var out strings.Builder
+	w := NewWizard(NewPrompter(strings.NewReader(script(
+		"alice", "Alice Example", "alice@example.org", aliceKey, "",
+		"", "bob", "Bob Example", "bob@example.org", aliceKey, bobKey, "", "n",
+	)), &out))
+	if err := w.Ask(SectionOperators); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if got := w.Answers.Operators[1].Keys; !slices.Equal(got, []string{bobKey}) {
+		t.Errorf("bob's keys = %q, want his own alone", got)
+	}
+	if !strings.Contains(out.String(), "this is alice's key") {
+		t.Errorf("the shared key was not refused:\n%s", out.String())
+	}
+}
+
+func TestKeyCheck(t *testing.T) {
+	small, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, err := ssh.NewPublicKey(&small.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	weak := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(pub)))
+	aliceFP, err := checkKey(aliceKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := keyCheck(map[string]string{aliceFP: "alice"})
+	for _, tc := range []struct {
+		name, line string
+		got        []string
+		want       string
+	}{
+		{"own key", bobKey, nil, ""},
+		{"another operator's", aliceKey, nil, "alice's key"},
+		{"another operator's, another comment", strings.Replace(aliceKey, "alice@example.org", "laptop", 1), nil, "alice's key"},
+		{"listed above", bobKey, []string{bobKey}, "already listed above"},
+		{"not a key", "nonsense", nil, "not an SSH public key"},
+		{"options", `from="10.0.0.1" ` + bobKey, nil, "carries options"},
+		{"small rsa", weak, nil, "1024 bits"},
+	} {
+		err := check(tc.got, tc.line)
+		switch {
+		case tc.want == "" && err != nil:
+			t.Errorf("%s: refused: %v", tc.name, err)
+		case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+			t.Errorf("%s: err = %v, want %q", tc.name, err, tc.want)
+		}
 	}
 }

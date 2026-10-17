@@ -85,11 +85,10 @@ func runOIDCClientCreate(args []string) error {
 	if err != nil {
 		return err
 	}
-	// The calls need no root and a dry run reaches the host without sudo,
-	// so only a run that will change something claims it, through sudo,
-	// since the registry is root's.
+	// The calls need no root, and only a run that will change something
+	// checks the host's admission.
 	if *execute {
-		if err := claimHosts(r, cfg, true, map[string]registry.Runner{where: registryHost(where, cfg.Sites[where], *destination, true)}); err != nil {
+		if _, err := admittedHosts(r, cfg, map[string]registry.Runner{where: registryHost(where, cfg.Sites[where], *destination)}); err != nil {
 			return err
 		}
 	}
@@ -170,6 +169,8 @@ type secretsRecorder struct {
 	secrets    *config.Secrets
 	recipients []string
 	wrote      bool
+	// written is the bytes the last write put in the file.
+	written []byte
 }
 
 func (r *secretsRecorder) Record(clientID, clientSecret string) error {
@@ -184,10 +185,11 @@ func (r *secretsRecorder) Record(clientID, clientSecret string) error {
 	if err := r.secrets.Set("oidc_clients."+r.app+".client_secret", clientSecret); err != nil {
 		return err
 	}
-	if err := config.WriteSecrets(r.path, r.secrets, r.recipients); err != nil {
+	written, err := config.WriteSecretsBytes(r.path, r.secrets, r.recipients)
+	if err != nil {
 		return err
 	}
-	r.wrote = true
+	r.wrote, r.written = true, written
 	return nil
 }
 

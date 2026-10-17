@@ -1,0 +1,5 @@
+the flags given do not suit this request
+The request is for site home-a (roles: apps, data, gateway).
+- this is a data site, and admitting it needs --watchdog. Its Patroni member needs the host's watchdog to fail over safely: without one, a member that has lost its lock can keep acting as leader. The watchdog reboots the whole machine when Patroni stops renewing it. Admit it with --watchdog, or do not admit it.
+- this site runs the toolkit's Caddy, and admitting it needs --public-ports. The gateway, or a monitor with web_server.managed_by: paisans, binds ports 80 and 443. --public-ports lowers net.ipv4.ip_unprivileged_port_start to 80 for the whole host, so every local user may then bind ports 80 to 1023, and opens 80 and 443 in the firewall. Admit it with --public-ports, or do not admit it; a monitor behind your own web server (web_server.managed_by: external) needs neither.
+Nothing was read or changed.

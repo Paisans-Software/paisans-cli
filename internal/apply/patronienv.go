@@ -1,7 +1,6 @@
 package apply
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -187,9 +186,9 @@ func (r *ReplicaEnv) Execute(d deployment.Deployment, t Transport, g ReplicaEnvG
 			return fmt.Errorf("%s leads now, so its Patroni was not recreated, which would be a failover. Run again: the plan leaves the leader's patroni.env for its next restart", r.Site)
 		}
 	}
-	// Built again, not run as planned: a scoped apply keeps the manifest it
-	// read for every file outside its scope, and an earlier stage may have
-	// written this site's manifest since.
+	// Built again, not run as planned, so the file is compared with the
+	// host as it is now: an earlier stage may have written this site's
+	// files since.
 	sp, err := Build(r.Site, r.rendered, "", t, Scope(PatroniEnv(d)))
 	if err != nil {
 		return err
@@ -280,7 +279,7 @@ func listMembers(d deployment.Deployment, at Transport) ([]listedMember, error) 
 		return nil, fmt.Errorf("%s: patronictl list: %w: %s", at.Describe(), err, lastLines(out, 3))
 	}
 	var list []listedMember
-	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &list); err != nil {
+	if err := FirstJSONArray(out, &list); err != nil {
 		return nil, fmt.Errorf("%s: patronictl list is not JSON: %w", at.Describe(), err)
 	}
 	return list, nil

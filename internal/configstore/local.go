@@ -818,6 +818,56 @@ func publishFiles(l Local, g Gathered, f Files, sites map[string]apply.Transport
 	return sha, pushed, err
 }
 
+// PublishNext commits f as the version after parent, at revision+1, where
+// parent is the version at revision the caller published from g earlier in
+// the same apply, signs it with keyLine, and pushes the cache to every site g
+// reached directly. It is how apply publishes what it wrote to the files
+// after publishing the version it applies: the sites hold parent as their
+// head because the apply put it there, so nothing is gathered again. It refuses when the local head is not parent, and publishes nothing
+// new for files that are parent's.
+func PublishNext(l Local, g Gathered, parent string, revision int, f Files, sites map[string]apply.Transport, keyLine, signWith string, now time.Time) (string, []string, error) {
+	return publishNext(l, g, parent, revision, f, sites, publishOpts{keyLine: keyLine, signWith: signWith, now: now}, Push)
+}
+
+func publishNext(l Local, g Gathered, parent string, revision int, f Files, sites map[string]apply.Transport, o publishOpts, push PushFunc) (string, []string, error) {
+	if _, opts, err := config.ParseKeyLine(o.keyLine); err != nil || len(opts) > 0 {
+		return "", nil, fmt.Errorf("the signing key is not a bare public key line: %q", o.keyLine)
+	}
+	local, err := config.LoadBytes(f.Paisans)
+	if err != nil {
+		return "", nil, err
+	}
+	head, err := l.Head()
+	if err != nil {
+		return "", nil, err
+	}
+	if head != parent {
+		return "", nil, fmt.Errorf("the local head is %q, not %s, the version this run published, so nothing was published on it", head, parent)
+	}
+	cache, err := l.Cache()
+	if err != nil {
+		return "", nil, err
+	}
+	if err := CheckSigner(l, []string{parent}, local, o.keyLine); err != nil {
+		return "", nil, err
+	}
+	sha := parent
+	if pf, err := cache.Files(parent); err != nil || !pf.Equal(f) {
+		rev := revision + 1
+		if sha, err = cache.Commit(f, []string{parent}, rev, o.signWith, o.now); err != nil {
+			return "", nil, fmt.Errorf("sign the version: %w", err)
+		}
+		if err := l.raiseSeen(rev, sha); err != nil {
+			return "", nil, err
+		}
+		if err := l.SetHead(sha); err != nil {
+			return "", nil, err
+		}
+	}
+	pushed, err := pushVersion(cache, g, sites, local.ID, sha, push)
+	return sha, pushed, err
+}
+
 // pushVersion pushes the cache, which holds sha, to every site g reached
 // directly, and returns the sites that took it. Any that did not, or were
 // not reached, make a *PushError.

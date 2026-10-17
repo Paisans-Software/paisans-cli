@@ -17,6 +17,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/grant"
 	"github.com/paisans-software/paisans-cli/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/version"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -122,7 +123,7 @@ func TestFirstIsNoRecordedPartTheReviewCovers(t *testing.T) {
 	}
 	prepared := grant.Update(grant.Record{}, g, grant.PrepareScope, time.Unix(0, 0), "")
 	if grant.Compare("vm", g, prepared, grant.PrepareScope).First {
-		t.Error("host prepare's review of recorded keys is marked first")
+		t.Error("site prepare's review of recorded keys is marked first")
 	}
 	if !grant.Compare("vm", g, prepared, grant.ApplyScope()).First {
 		t.Error("the first review of the images is not marked first")
@@ -261,33 +262,6 @@ func TestAPinnedCaddyDigestIsTheReference(t *testing.T) {
 	}
 }
 
-func TestWebServerIsTheIncludeDirectory(t *testing.T) {
-	cfg := fixture(t)
-	s := cfg.Sites["watch"]
-	s.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "127.0.0.1:8480", IncludeDir: config.IncludeDir{Path: "/srv/caddy.d"}}
-	cfg.Sites["watch"] = s
-	g, err := grant.For(cfg, nil, "watch")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if g.WebServer == nil || g.WebServer.IncludeDir != "/srv/caddy.d" {
-		t.Fatalf("web server %+v", g.WebServer)
-	}
-	r := grant.Compare("watch", g, grant.Record{}, grant.ApplyScope())
-	if len(r.Changes) != 1 || r.Changes[0].Op != grant.Added {
-		t.Errorf("%+v", r.Changes)
-	}
-	r = grant.Compare("watch", grant.Grant{}, grant.Record{WebServer: &grant.WebServerPart{IncludeDir: "/srv/caddy.d"}}, grant.ApplyScope())
-	if len(r.Changes) != 1 || r.Changes[0].Op != grant.Removed || r.Pending() != 0 {
-		t.Errorf("removed: %+v", r.Changes)
-	}
-	s.WebServer.IncludeDir = config.IncludeDir{Off: true}
-	cfg.Sites["watch"] = s
-	if g, _ := grant.For(cfg, nil, "watch"); g.WebServer != nil {
-		t.Errorf("include_dir: false grants a directory: %+v", g.WebServer)
-	}
-}
-
 func TestOnlyNarrowsTheImages(t *testing.T) {
 	g := grant.Grant{Images: []grant.Image{{Stack: "talk", Service: "app", Reference: "b"}, {Stack: "blog", Service: "app", Reference: "b"}}}
 	rec := grant.Record{Images: &grant.ImagesPart{Entries: []grant.Image{{Stack: "blog", Service: "app", Reference: "a"}, {Stack: "chat", Service: "app", Reference: "a"}}}}
@@ -318,7 +292,7 @@ func TestUpdateKeepsAnUnchangedPart(t *testing.T) {
 		t.Errorf("%+v", fewer.Keys)
 	}
 	if rec.Images != nil {
-		t.Errorf("host prepare wrote images: %+v", rec.Images)
+		t.Errorf("site prepare wrote images: %+v", rec.Images)
 	}
 }
 
@@ -385,12 +359,15 @@ func TestWriteIsUnderTheLockAndKeepsTheOtherParts(t *testing.T) {
 	}
 	cmd := h.commands[0]
 	lock, mv := strings.Index(cmd, "flock -w 60 9"), strings.Index(cmd, `mv "$tmp" "$f"`)
-	if !strings.Contains(cmd, "exec 9>>/var/lib/paisans/registry.lock") || lock < 0 || mv < lock || !strings.Contains(cmd, `chmod 644 "$tmp"`) {
-		t.Errorf("not written under the registry's lock by a rename: %s", cmd)
+	if !strings.Contains(cmd, testDeployment(t).StateLockCommand("the grant record")) || lock < 0 || mv < lock || !strings.Contains(cmd, `chmod 644 "$tmp"`) {
+		t.Errorf("not written under the deployment's lock by a rename: %s", cmd)
 	}
 	rec, err := grant.Parse(h.content)
 	if err != nil || rec.Images == nil || rec.Keys == nil {
 		t.Errorf("parts: %+v %v", rec, err)
+	}
+	if rec.Build != version.Current() {
+		t.Errorf("the write records %+v, not this build", rec.Build)
 	}
 	// Written again with nothing changed, it writes nothing.
 	if wrote, err := grant.Write(h, testDeployment(t), func(r grant.Record) grant.Record {
@@ -417,14 +394,14 @@ func TestWriteReadsAgainWhenAnotherCommandWrote(t *testing.T) {
 
 func TestAMalformedRecordIsNotRewritten(t *testing.T) {
 	h := &fakeHost{content: `{"version": 9}`, found: true}
-	if _, err := grant.Write(h, testDeployment(t), func(r grant.Record) grant.Record { return r }); err == nil || !strings.Contains(err.Error(), "sudo rm /var/lib/paisans/granted.") || len(h.commands) != 0 {
+	if _, err := grant.Write(h, testDeployment(t), func(r grant.Record) grant.Record { return r }); err == nil || !strings.Contains(err.Error(), "`rm /srv/paisans/f2a9/.paisans/granted.json`") || len(h.commands) != 0 {
 		t.Errorf("err %v after %d writes", err, len(h.commands))
 	}
 }
 
 func TestRemoveCommandNamesTheRecord(t *testing.T) {
 	d := testDeployment(t)
-	if got := grant.RemoveCommand(d); got != "rm -f -- '/var/lib/paisans/granted."+d.Token()+".json'" {
+	if got := grant.RemoveCommand(d); got != "rm -f -- '/srv/paisans/f2a9/.paisans/granted.json'" {
 		t.Errorf("%s", got)
 	}
 }
@@ -460,5 +437,27 @@ func TestReviewLinesShowControlCharactersEscaped(t *testing.T) {
 		if strings.ContainsRune(c.Line(), 0x1b) || !strings.Contains(c.Line(), `\x1b[1A`) {
 			t.Errorf("printed raw: %q", c.Line())
 		}
+	}
+}
+
+// A site that leaves ssh.user out grants its keys to the user it is reached
+// as, the deployment's own.
+func TestTheLoginIsTheDefaultUserWhenSSHUserIsLeftOut(t *testing.T) {
+	cfg := fixture(t)
+	s := cfg.Sites["home-a"]
+	s.SSH.User = ""
+	cfg.Sites["home-a"] = s
+	g, err := grant.For(cfg, nil, "home-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.Login != "paisans-f2a9" {
+		t.Errorf("login is %q, want paisans-f2a9", g.Login)
+	}
+}
+
+func TestTheGrantRecordIsInTheDeploymentsStateDir(t *testing.T) {
+	if got := grant.Path(testDeployment(t)); got != "/srv/paisans/f2a9/.paisans/granted.json" {
+		t.Errorf("got %s", got)
 	}
 }

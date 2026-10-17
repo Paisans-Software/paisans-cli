@@ -1,0 +1,28 @@
+# A request to admit one site of a paisans deployment to this host.
+# Compare its digest with the operator who sent it before you admit it:
+#   sudo paisans site admit --request <this file>
+version: 1
+deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
+site: "home-a"
+roles:
+  - "apps"
+  - "data"
+  - "gateway"
+user: "paisans-f2a9"
+ssh_port: 22
+listen_port: 51820
+mesh_subnet: "10.44.0.0/24"
+address: "10.44.0.1"
+endpoint: true
+grants:
+  watchdog: true
+  public_ports: true
+web_server: []
+operators:
+  - name: "alice"
+    keys:
+      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  - name: "bob"
+    keys:
+      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"

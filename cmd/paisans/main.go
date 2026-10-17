@@ -3,7 +3,7 @@
 //
 // validate, render and create touch nothing outside the working directory. init
 // reads every site to choose a mesh subnet, and writes only local files.
-// `host prepare`, `apply` and `storage init` reach a machine: each reads it to
+// `site prepare`, `apply` and `storage init` reach a machine: each reads it to
 // show what it would do, and changes nothing on it unless told to with
 // --execute. apply without --site may, in its dry run, add missing generated
 // secrets to the local secrets file, as init would, and says so when it does.
@@ -40,6 +40,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/secretsgen"
 	"github.com/paisans-software/paisans-cli/internal/storageadd"
+	"github.com/paisans-software/paisans-cli/internal/topology"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 	"github.com/paisans-software/paisans-cli/internal/validate"
 )
@@ -55,6 +56,10 @@ func main() {
 		os.Exit(2)
 	}
 	os.Args = append(os.Args[:1], run...)
+	if err := buildGate(os.Args[1:]); err != nil {
+		fmt.Fprintln(os.Stderr, "paisans: "+err.Error())
+		os.Exit(2)
+	}
 	var err error
 	switch os.Args[1] {
 	case "validate":
@@ -67,27 +72,26 @@ func main() {
 		err = runRender(os.Args[2:])
 	case "apply":
 		err = runApply(os.Args[2:], os.Stdin, os.Stdout)
-	case "host":
-		switch {
-		case len(os.Args) >= 3 && os.Args[2] == "prepare":
-			err = runHostPrepare(os.Args[3:])
-		case len(os.Args) >= 3 && os.Args[2] == "deployments":
-			err = runHostDeployments(os.Args[3:])
-		case len(os.Args) >= 3 && os.Args[2] == "allow":
-			err = runHostAllow(os.Args[3:], os.Stdin, os.Stdout)
-		case len(os.Args) >= 3 && os.Args[2] == "disallow":
-			err = runHostDisallow(os.Args[3:], os.Stdin, os.Stdout)
-		default:
-			os.Exit(groupError(os.Stderr, "host", "host takes one subcommand, prepare, deployments, allow or disallow"))
-		}
 	case "site":
 		switch {
+		case len(os.Args) >= 3 && os.Args[2] == "list":
+			err = runSiteList(os.Args[3:], os.Stdout)
+		case len(os.Args) >= 3 && os.Args[2] == "request":
+			err = runSiteRequest(os.Args[3:])
+		case len(os.Args) >= 3 && os.Args[2] == "admit":
+			err = runSiteAdmit(os.Args[3:], os.Stdin, os.Stdout)
+		case len(os.Args) >= 3 && os.Args[2] == "prepare":
+			err = runSitePrepare(os.Args[3:])
 		case len(os.Args) >= 3 && os.Args[2] == "add":
 			err = runSiteAdd(os.Args[3:], os.Stdin, os.Stdout)
 		case len(os.Args) >= 3 && os.Args[2] == "remove":
 			err = runSiteRemove(os.Args[3:], os.Stdin, os.Stdout)
+		case len(os.Args) >= 3 && os.Args[2] == "evict":
+			err = runSiteEvict(os.Args[3:], os.Stdin, os.Stdout)
+		case len(os.Args) >= 3 && os.Args[2] == "deployments":
+			err = runSiteDeployments(os.Args[3:])
 		default:
-			os.Exit(groupError(os.Stderr, "site", "site takes one subcommand, add or remove"))
+			os.Exit(groupError(os.Stderr, "site", "site takes one subcommand, list, request, admit, prepare, add, remove, evict or deployments"))
 		}
 	case "mesh":
 		err = runMesh(os.Args[2:])
@@ -128,6 +132,8 @@ func main() {
 		err = runFailover(os.Args[2:])
 	case "doctor":
 		err = runDoctor(os.Args[2:])
+	case "images":
+		err = runImages(os.Args[2:], os.Stdout)
 	case "version", "--version":
 		err = runVersion(os.Args[2:], os.Stdout)
 	case "dns":
@@ -177,6 +183,12 @@ func groupError(w io.Writer, group, msg string) int {
 // reportError prints the error that ends a command, in the refusal's form
 // (see ui.PrintError), and returns the status to exit with.
 func reportError(w io.Writer, err error, verbose bool) int {
+	// Not a failure: --check found a build that would move or an override
+	// that lags, and the table already says which. It exits 3 so a schedule
+	// tells it from an error.
+	if errors.Is(err, errImagesMove) {
+		return 3
+	}
 	ui.PrintError(w, err, verbose)
 	// Not a failure: a gate is waiting on Garage, and the next run resumes
 	// there. EX_TEMPFAIL (sysexits.h), "try again later", so a script can
@@ -238,8 +250,10 @@ func runValidate(args []string) error {
 // database password locks an application out of a role that still holds the
 // old one.
 //
-// It changes no host. It reads every site, to settle the mesh subnet before
-// anything is deployed (see settleMesh), and that is all. Standing a
+// It changes no host. It reads every site that has admitted the deployment,
+// to settle the mesh subnet before anything is deployed (see initAdmissions
+// and settleMesh), and that is all; a site that has not is skipped, with a
+// warning. Standing a
 // deployment up is `apply`, and that is a separate decision from having
 // credentials to stand it up with.
 func runInit(args []string) error {
@@ -248,7 +262,6 @@ func runInit(args []string) error {
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets file (default: secrets.enc.yaml beside the config)")
 	ageKeyFile := fs.String("age-private-key-file", "", "keep a newly made age private key in this file instead of the keystore")
-	sudo := fs.Bool("sudo", true, "read each site through sudo, since the host registry is root's")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -277,8 +290,12 @@ func runInit(args []string) error {
 	// The mesh subnet next, while nothing is deployed: it is the one value
 	// that has to be checked against every host before the first apply,
 	// and cannot change after it.
-	hosts := initHosts(cfg, *sudo)
-	wrote, err := settleMesh(r, cfg, *configPath, hosts, meshRandom)
+	// Every site is asked whether it admitted the deployment, and only an
+	// admitted one is read further: on any other the deployment's user does
+	// not exist yet, and site admit checks the subnet there.
+	hosts := initHosts(cfg)
+	admitted, unread := initAdmissions(r, cfg, hosts)
+	wrote, err := settleMesh(r, cfg, *configPath, hosts, admitted, unread, meshRandom)
 	if err != nil {
 		return err
 	}
@@ -301,11 +318,11 @@ func runInit(args []string) error {
 	case err != nil:
 		return err
 	}
-	warnSecrets(r, cfg, secrets, recordForWarnings(r, cfg, func(gw string, elevated bool) registry.Runner {
-		if elevated {
-			return hosts[gw]
+	warnSecrets(r, cfg, secrets, recordForWarnings(r, cfg, func(gw string) registry.Runner {
+		if !slices.Contains(admitted, gw) {
+			return notAdmittedHost{gw}
 		}
-		return initHost(gw, cfg.Sites[gw], false)
+		return hosts[gw]
 	}))
 
 	filled, recipients, err := fillSecrets(cfg, *secretsPath, secrets)
@@ -317,6 +334,10 @@ func runInit(args []string) error {
 	if !filled.Changed() {
 		r.Detail("%s already has every generated secret (%d)", *secretsPath, len(filled.Kept))
 		reportOwed(r, filled)
+		if len(filled.Owed) > 0 {
+			r.Result(setOwedNext)
+			return nil
+		}
 		r.Result("Every generated secret is already present. Nothing written.")
 		return nil
 	}
@@ -332,14 +353,22 @@ func runInit(args []string) error {
 		write.Fail(failed.err)
 		return failed.err
 	}
-	write.Done(fmt.Sprintf("%d generated, %d kept", len(filled.Generated), len(filled.Kept)))
+	counts := ""
+	if r.Verbose() {
+		counts = fmt.Sprintf("%d generated, %d kept", len(filled.Generated), len(filled.Kept))
+	}
+	write.Done(counts)
 	if len(recipients) == 0 {
 		warnPlaintext(r, *secretsPath)
 	} else {
 		r.Detail("Encrypted to %d age recipient(s) from %s.", len(recipients), config.SOPSConfigName)
 	}
 	reportOwed(r, filled)
-	r.Result("Generated %s, kept %d.", plural(len(filled.Generated), "secret"), len(filled.Kept))
+	if len(filled.Owed) > 0 {
+		r.Result(setOwedNext)
+		return nil
+	}
+	r.Result("Secrets written.")
 	return nil
 }
 
@@ -373,6 +402,10 @@ type secretsWriteError struct{ err error }
 
 func (e *secretsWriteError) Error() string { return e.err.Error() }
 func (e *secretsWriteError) Unwrap() error { return e.err }
+
+// setOwedNext is init's result when a secret only the operator can provide
+// is unset: secrets set asks for each one at a terminal.
+const setOwedNext = "Next: run `paisans secrets set`."
 
 // reportOwed warns of each secret only the operator can provide. Leaving
 // these silent would let an operator believe an install is finished when
@@ -493,15 +526,21 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	var recreate pathList
 	var only pathList
 	fs.Var(&only, "only", "apply only this stack's files and actions, and leave the rest of the site as it is (repeatable)")
-	fs.Var(&recreate, "recreate", "replace every container of this stack with `up -d --force-recreate`, even if nothing changed (repeatable)")
+	fs.Var(&recreate, "recreate", "replace every container of this stack with up -d --force-recreate, even if nothing changed (repeatable)")
 	minFree := fs.String("min-free", "3G", "free space Docker's data root must have before a stack pulls an image, Eg: 2G")
 	keepImages := fs.Bool("keep-images", false, "leave the images this apply supersedes on the host, Eg: to keep one to roll back to")
-	sudo := fs.Bool("sudo", true, "run remote commands through sudo, since /srv and /etc are not the deploy user's")
+	mustAll := fs.Bool("require-all", false, "exit 1 when the run is degraded: a site pending or down")
+	holdApps := fs.Bool("hold-apps", false, "start none of the site's app stacks: apply its mesh, its infrastructure and its Caddy")
+	answers := yesFlag(fs)
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
 		return fmt.Errorf("apply: %q is not a flag, and apply takes no arguments. Give the configuration with --config %s", fs.Arg(0), fs.Arg(0))
+	}
+	ans, err := answers()
+	if err != nil {
+		return err
 	}
 	r := reporter()
 	needFree, err := apply.ParseSize(*minFree)
@@ -510,11 +549,11 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	defer cacheDigests()()
 	if *site == "" {
-		if *destination != "" || len(overwrite) > 0 || len(only) > 0 || len(recreate) > 0 {
-			return fmt.Errorf("apply: --ssh, --overwrite, --only and --recreate are about one site, and apply without --site converges every site. Name it with --site")
+		if *destination != "" || len(overwrite) > 0 || len(only) > 0 || len(recreate) > 0 || *holdApps {
+			return fmt.Errorf("apply: --ssh, --overwrite, --only, --recreate and --hold-apps are about one site, and apply without --site converges every site. Name it with --site")
 		}
 		verbose := fs.Lookup("verbose").Value.(flag.Getter).Get().(bool)
-		return runConverge(r, convergeOptions{Config: *configPath, Secrets: *secretsPath, Execute: *execute, Sudo: *sudo, Verbose: verbose, KeepImages: *keepImages, MinFree: *minFree, stdin: stdin, stdout: stdout})
+		return runConverge(r, convergeOptions{Config: *configPath, Secrets: *secretsPath, Execute: *execute, Verbose: verbose, KeepImages: *keepImages, MinFree: *minFree, RequireAll: *mustAll, answers: ans, stdin: stdin, stdout: stdout})
 	}
 
 	// The deployment and the version open the apply. As a step of apply
@@ -539,6 +578,33 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	declared, ok := cfg.Sites[*site]
 	if !ok {
 		return fmt.Errorf("apply: %s declares no site %q. Declared sites are %s", *configPath, *site, strings.Join(cfg.SiteNames(), ", "))
+	}
+	if *holdApps && len(only) > 0 {
+		return fmt.Errorf("apply: --hold-apps starts no app stack and --only names the stacks to apply. Give one of them")
+	}
+	if *holdApps && len(overwrite) > 0 {
+		return fmt.Errorf("apply: --hold-apps takes no --overwrite, since a held app's file would not be written. Give --overwrite on an apply without --hold-apps")
+	}
+	// held is every app stack --hold-apps holds back: each app that runs on
+	// the site, a pinned one included.
+	var held []string
+	if *holdApps {
+		for _, name := range cfg.AppNames() {
+			if slices.Contains(render.AppSites(cfg)[name], *site) {
+				held = append(held, name)
+			}
+		}
+	}
+	// Every apply, --site included, classifies every site, so one site's
+	// files never disagree with another's about who is in the mesh: as a
+	// step of apply without --site, by the run's classification; alone, by
+	// its own. A --site that is pending or down is refused here, before its
+	// host is reached. From here on cfg is the effective topology, and
+	// declaration the configuration as written.
+	declaration := cfg
+	cfg, sites, err := effectiveConfig(r, declaration, *site)
+	if err != nil {
+		return err
 	}
 
 	if *secretsPath == "" {
@@ -572,14 +638,15 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	// --site the run recorded it already, and the read only compares; on
 	// its own, apply --site records it, and the next apply without --site
 	// publishes it. The bytes applied are read again after a write.
-	archHost := siteTransport(*site, declared, *destination, *sudo)
+	archHost := siteTransport(*site, declared, *destination)
 	read, err := readArchitectures(r, cfg, []string{*site}, func(string) hostarch.Runner { return archHost })
 	if err != nil {
 		return err
 	}
-	if cfg, err = recordArchitectures(r, *configPath, cfg, read, *execute && reviewedByRun == nil); err != nil {
+	if declaration, err = recordArchitectures(r, *configPath, declaration, read, *execute && reviewedByRun == nil); err != nil {
 		return err
 	}
+	cfg = sites.Effective(declaration)
 	if *execute && reviewedByRun == nil {
 		if _, loaded.Paisans, err = config.LoadWithBytes(*configPath); err != nil {
 			return err
@@ -591,27 +658,30 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	// step of apply without --site the run did this once for every site.
 	var store storeVersion
 	if reviewedByRun == nil {
-		if store, err = applyStore(r, *configPath, *secretsPath, &loaded, cfg, *execute, stdin, stdout); err != nil {
+		if store, err = applyStore(r, *configPath, *secretsPath, &loaded, cfg, *execute, ans, stdin, stdout); err != nil {
 			return err
 		}
 		identity.applied(store.held())
 	} else if v := reviewedByRun.version; v != nil && (!bytes.Equal(v.files.Paisans, loaded.Paisans) || !bytes.Equal(v.files.Secrets, loaded.Secrets)) {
-		// The run published one version and every step applies it: files
-		// edited since are not what the store holds.
+		// Every step applies the run's current version, which a step that
+		// records at Pocket ID advances: files edited otherwise are not what
+		// the store holds.
 		return &ui.Problem{Hint: "the configuration changed after the run published it", Explain: config.FileName + " or secrets.enc.yaml is not what this run published as " + v.sha[:12] + ", so applying it would put on " + *site + " a version the store does not hold. Nothing was changed on " + *site + " by this step. Run paisans apply --execute again, which publishes the files as they are now."}
 	}
 
-	transport := siteTransport(*site, declared, *destination, *sudo)
+	transport := siteTransport(*site, declared, *destination)
 	// As a step of apply without --site (a checkReporter) it leaves the
 	// record and the secrets to the run, which checks them once.
 	if _, step := r.(checkReporter); !step {
-		warnSecrets(r, cfg, secrets, recordForWarnings(r, cfg, applyRecordHosts(cfg, *site, *destination, transport, *sudo)))
+		warnSecrets(r, declaration, secrets, recordForWarnings(r, cfg, applyRecordHosts(cfg, *site, *destination)))
 		// Every app this apply starts on the site logs in to its mail
 		// server from there first, and a failure refuses before anything
 		// changes. As a step of apply without --site the run tried every
 		// site's before its first step.
-		if err := checkMailForApply(r, cfg, secrets, []string{*site}, only, map[string]string{*site: *destination}); err != nil {
-			return err
+		if !*holdApps {
+			if err := checkMailForApply(r, cfg, secrets, []string{*site}, only, map[string]string{*site: *destination}); err != nil {
+				return err
+			}
 		}
 	}
 	r.Section(fmt.Sprintf("%s (%s)", *site, transport.Describe()))
@@ -631,7 +701,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	// The review comes before the claim, which is the first change: an
+	// The review comes before the first change: an
 	// operator who does not approve leaves the host exactly as it was. Its
 	// images are the render's, as written, never the host's.
 	rendered, err := render.Build(cfg, secrets)
@@ -642,7 +712,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	review, approvedBy, err := stepReview(r, stdin, stdout, cfg, *site, g, grant.ApplyScope(only...), transport, *execute, "paisans apply --site "+*site+" --execute")
+	review, approvedBy, err := stepReview(r, ans, stdin, stdout, cfg, *site, g, grant.ApplyScope(only...), transport, *execute, "paisans apply --site "+*site+" --execute")
 	if err != nil {
 		return err
 	}
@@ -650,7 +720,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	// against the version and the version published, so the store holds
 	// what is applied even if the apply stops part way.
 	// As a step of apply without --site, the run published the version
-	// once, and this step records it. Only apply records it: host prepare
+	// once, and this step records it. Only apply records it: site prepare
 	// and site add apply no version.
 	switch {
 	case store != nil && review != nil:
@@ -666,7 +736,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	case reviewedByRun != nil && review != nil:
 		review.version = reviewedByRun.version
 	}
-	if err := claimHosts(r, cfg, *execute, map[string]registry.Runner{*site: transport}); err != nil {
+	if _, err := admittedHosts(r, cfg, map[string]registry.Runner{*site: transport}); err != nil {
 		return err
 	}
 
@@ -674,20 +744,24 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	// Pocket ID gets its client ensured before it renders. Planned here,
 	// read only, so the dry run shows it and an app it must hold back is
 	// left out of the plan below.
-	clients, err := newClientStep(r, cfg, *site, *destination, *secretsPath, secrets, only)
-	if err != nil {
-		return err
+	// With --hold-apps no app starts, so none needs its client and Pocket
+	// ID is not asked.
+	var clients *clientStep
+	if !*holdApps {
+		if clients, err = newClientStep(r, cfg, *site, *destination, *secretsPath, secrets, only); err != nil {
+			return err
+		}
 	}
 	if clients != nil {
-		clients.confirm = func(what string) error { return confirmWord(stdin, stdout, "create", what) }
+		clients.confirm = func(what string) error { return confirmWord(ans, stdin, stdout, "create", what) }
 	}
-	options := []apply.Option{apply.Overwrite(overwrite...), apply.Recreate(recreate...), apply.MinFree(needFree), apply.Only(only...)}
+	options := append([]apply.Option{apply.Overwrite(overwrite...), apply.Recreate(recreate...), apply.MinFree(needFree), apply.Only(only...), apply.Except(held...)}, pendingOptions(sites)...)
 	// An app this site shares with others stays on the build they run,
 	// unless the apply plans them all: as a step of apply without --site it
 	// does, and every site resolves through the run's one cache, so none is
 	// read here. See planningEverySite.
 	if !planningEverySite {
-		peers, err := readPeers(r, cfg, *site, only, *sudo)
+		peers, err := readPeers(r, cfg, *site, only)
 		if err != nil {
 			return err
 		}
@@ -726,7 +800,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	if contains(cfg.Etcd.Members, *site) {
 		for _, name := range cfg.Etcd.Members {
 			if name != *site {
-				transports[name] = siteTransport(name, cfg.Sites[name], "", *sudo)
+				transports[name] = siteTransport(name, cfg.Sites[name], "")
 			}
 		}
 	}
@@ -761,7 +835,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	// Either way the plan's notes show, and a later pass's new ones too.
 	noted := map[string]bool{}
 	presentPlan(r, plan, *execute, noted)
-	if err := printLeftovers(r, cfg, *site, host.Inventory, plan); err != nil {
+	if err := printLeftovers(r, declaration, *site, host.Inventory, plan); err != nil {
 		return err
 	}
 
@@ -810,6 +884,11 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 		default:
 			r.Result("Nothing changed. Re-run with --execute to apply.")
 		}
+		// Alone, a degraded plan fails --require-all as the apply would;
+		// as a step, the run says so once.
+		if _, step := r.(checkReporter); !step && err == nil {
+			return requireAll(sites, *mustAll)
+		}
 		return err
 	}
 
@@ -833,7 +912,20 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 			execute: func(p *apply.Plan) error { return apply.Execute(p, transport) },
 			notes:   func(p *apply.Plan) { reportNotes(r, p, noted) },
 		}
-		if plans, err = executeWithClients(clients, pass); err != nil {
+		plans, err = executeWithClients(clients, pass)
+		// What the apply recorded at Pocket ID is published before the
+		// host records its version, whether or not the apply went on.
+		store, id := store, identity
+		if run := reviewedByRun; run != nil {
+			store, id = run.store, run.identity
+		}
+		if perr := review.publishWritten(r, clients.written, store, id); perr != nil {
+			if err == nil || paused(err) {
+				return perr
+			}
+			r.Warn("what this apply recorded at Pocket ID was not published", sentence(errLine(perr))+" The next apply publishes secrets.enc.yaml as it is then.")
+		}
+		if err != nil {
 			return err
 		}
 	}
@@ -845,36 +937,31 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 		written += len(p.Writes())
 	}
 	if err := checkStandby(r, cfg, acted, *site, transport, func(name string) apply.Transport {
-		return siteTransport(name, cfg.Sites[name], "", *sudo)
+		return siteTransport(name, cfg.Sites[name], "")
 	}); err != nil {
 		return err
 	}
-	if err := recordApplied(r, cfg, *site, func(gw string) registry.Runner {
+	if err := recordApplied(r, declaration, sites, *site, func(gw string) registry.Runner {
 		if gw == *site {
 			return transport
 		}
-		return registryHost(gw, cfg.Sites[gw], "", *sudo)
+		return registryHost(gw, cfg.Sites[gw], "")
 	}); err != nil {
 		return err
 	}
-	// What the steps applied is recorded once they have all succeeded:
-	// the images now, and the web server's directory once its step has
-	// written there. As a step of apply with no --site, the web server is
-	// the run's, which records it.
+	// The gateway is asked from outside last, once its Caddy has had the
+	// whole apply to start: a port another server holds shows nothing to
+	// the host's own checks.
+	if err := checkGatewayAnswers(r, cfg, *site); err != nil {
+		return err
+	}
+	// What the steps applied is recorded once they have all succeeded.
 	if review != nil {
-		images := *review
-		images.scope.WebServer = false
-		if err := recordGrant(r, &images, cfg.Deployment(), approvedBy); err != nil {
+		if err := recordGrant(r, review, cfg.Deployment(), approvedBy); err != nil {
 			return err
 		}
 	}
-	err = siteApplied(r, cfg, *configPath, *site, *destination, *sudo, written, clients.result())
-	if _, step := r.(checkReporter); err == nil && !step && review != nil {
-		web := *review
-		web.scope = grant.Scope{WebServer: true}
-		return recordGrant(r, &web, cfg.Deployment(), approvedBy)
-	}
-	return err
+	return siteApplied(r, cfg, *configPath, *site, *destination, written, sites, *mustAll, clients.result())
 }
 
 // planningEverySite is set while apply without --site runs, for every
@@ -903,7 +990,7 @@ func planEverySite() (restore func()) {
 // reads the apps named there alone, since no other stack moves. A site that
 // cannot be read is reported to Build, which decides what that means for the
 // app, rather than stopping here.
-func readPeers(r ui.Reporter, cfg *config.Config, site string, only []string, sudo bool) ([]apply.PeerCompose, error) {
+func readPeers(r ui.Reporter, cfg *config.Config, site string, only []string) ([]apply.PeerCompose, error) {
 	sites := render.AppSites(cfg)
 	var peers []apply.PeerCompose
 	for _, app := range cfg.AppNames() {
@@ -913,7 +1000,7 @@ func readPeers(r ui.Reporter, cfg *config.Config, site string, only []string, su
 		others := map[string]apply.Transport{}
 		for _, name := range sites[app] {
 			if name != site {
-				others[name] = siteTransport(name, cfg.Sites[name], "", sudo)
+				others[name] = siteTransport(name, cfg.Sites[name], "")
 			}
 		}
 		read, err := ui.Get(r, "read "+app+" on its other sites", func() ([]apply.PeerCompose, error) {
@@ -933,14 +1020,34 @@ func readPeers(r ui.Reporter, cfg *config.Config, site string, only []string, su
 // what the step left. err is the apply's own problem, if it has one. As a
 // step of apply without --site (a checkReporter) it leaves the web server
 // to the run, which does it once every step has run.
-func siteApplied(r ui.Reporter, cfg *config.Config, configPath, site, ssh string, sudo bool, written int, err error) error {
-	if _, step := r.(checkReporter); !step {
-		if end, broken := webServerStep(r, cfg, configPath, sudo, webServerScope{site: site, ssh: ssh}); end != nil {
-			return webServerEnd(end, broken, err)
+//
+// Alone, with sites pending or down, it ends degraded, and with required
+// (--require-all) that is a failure. As a step, the run says so once, at its
+// end.
+func siteApplied(r ui.Reporter, cfg *config.Config, configPath, site, ssh string, written int, sites *topology.Classification, required bool, err error) error {
+	_, step := r.(checkReporter)
+	degraded := sites != nil && sites.Degraded()
+	if !step {
+		if end, broken := webServerStep(r, cfg, configPath, webServerScope{site: site, ssh: ssh, degraded: degraded}); end != nil {
+			err = webServerEnd(end, broken, err)
+			if !degraded {
+				return err
+			}
+			// A warning is the run's end, under the degraded result line,
+			// which says what was applied; a failure is its own end.
+			var w *ui.Warning
+			if errors.As(err, &w) {
+				r.Result("%s. %s applied to %s.", degradedResult(sites), plural(written, "file"), site)
+			}
+			return degradedErr(sites, required, err)
 		}
 	}
-	r.Result("Applied %s to %s.", plural(written, "file"), site)
-	return err
+	if step || !degraded {
+		r.Result("Applied %s to %s.", plural(written, "file"), site)
+		return err
+	}
+	r.Result("%s. %s applied to %s.", degradedResult(sites), plural(written, "file"), site)
+	return degradedErr(sites, required, err)
 }
 
 // checkStandby is the deployment level gate after an apply that acted on a
@@ -1096,7 +1203,6 @@ func runStorageInit(args []string) error {
 	site := fs.String("site", "", "the site to provision, by the name it has in the configuration")
 	destination := fs.String("ssh", "", "ssh destination, used verbatim in place of the site's ssh section (its user, host, port and keys are then ignored)")
 	execute := fs.Bool("execute", false, "actually create what is missing")
-	sudo := fs.Bool("sudo", true, "run remote commands through sudo, since /srv and /etc are not the deploy user's")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -1118,6 +1224,9 @@ func runStorageInit(args []string) error {
 	if !ok {
 		return fmt.Errorf("storage init: %s declares no site %q. Declared sites are %s", *configPath, *site, strings.Join(cfg.SiteNames(), ", "))
 	}
+	if cfg, err = storageConfig(r, cfg, *site); err != nil {
+		return err
+	}
 
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
@@ -1136,9 +1245,9 @@ func runStorageInit(args []string) error {
 		return err
 	}
 
-	transport := siteTransport(*site, declared, *destination, *sudo)
+	transport := siteTransport(*site, declared, *destination)
 	r.Section(fmt.Sprintf("%s (%s)", *site, transport.Describe()))
-	if err := claimHosts(r, cfg, *execute, map[string]registry.Runner{*site: transport}); err != nil {
+	if _, err := admittedHosts(r, cfg, map[string]registry.Runner{*site: transport}); err != nil {
 		return err
 	}
 	plan, err := ui.Get(r, "read Garage", func() (*garage.Plan, error) {
@@ -1169,40 +1278,50 @@ func runStorageInit(args []string) error {
 	return nil
 }
 
-// runHostPrepare takes one site's host to the state apply assumes. It is
+// runSitePrepare takes one site's host to the state apply assumes. It is
 // modelled on runStorageInit: probe read only, print, and change the host only
 // with --execute. It needs no secrets; nothing it installs is a credential.
-func runHostPrepare(args []string) error {
-	fs := newFlagSet("host prepare", flag.ExitOnError)
+func runSitePrepare(args []string) error {
+	fs := newFlagSet("site prepare", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	o := hostPrepareFlags(fs)
+	answers := yesFlag(fs)
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 	// dryRunFound is read when it is called: apply's check sets it around
 	// the run.
 	found := func(summary string, stop error) { dryRunFound(summary, stop) }
-	return hostPrepare(prepareEnv{r: reporter(), found: found, stdin: os.Stdin, stdout: os.Stdout}, *o)
+	ans, err := answers()
+	if err != nil {
+		return err
+	}
+	return hostPrepare(prepareEnv{r: reporter(), found: found, answers: ans, stdin: os.Stdin, stdout: os.Stdout}, *o)
 }
 
-// hostPrepareOptions are host prepare's flags.
+// hostPrepareOptions are site prepare's flags.
 type hostPrepareOptions struct {
 	config, site, ssh string
-	execute, sudo     bool
+	execute           bool
+	// all prepares every site, one at a time: see hostPrepareAll.
+	all bool
+	// shown is set once a run of --all has shown the configuration's
+	// findings, so each later site does not show them again.
+	shown bool
 }
 
-// hostPrepareFlags registers host prepare's own flags on fs.
+// hostPrepareFlags registers site prepare's own flags on fs.
 func hostPrepareFlags(fs *flag.FlagSet) *hostPrepareOptions {
 	o := &hostPrepareOptions{}
 	fs.StringVar(&o.config, "config", config.FileName, "path to the deployment declaration")
 	fs.StringVar(&o.site, "site", "", "the site to prepare, by the name it has in the configuration")
+	fs.BoolVar(&o.all, "all", false, "prepare every site the configuration declares, one at a time, in its order")
 	fs.StringVar(&o.ssh, "ssh", "", "ssh destination, used verbatim in place of the site's ssh section (its user, host, port and keys are then ignored)")
-	fs.BoolVar(&o.execute, "execute", false, "actually install and configure what is missing")
-	fs.BoolVar(&o.sudo, "sudo", true, "run remote commands through sudo, since packages, the firewall and kernel modules are root's")
+	fs.BoolVar(&o.execute, "execute", false, "actually write what is missing")
 	return o
 }
 
-// prepareEnv is what one run of host prepare reports through. Typed by hand
+// prepareEnv is what one run of site prepare reports through. Typed by hand
 // it is the command's reporter and the process's dryRunFound; apply without
 // --site, which prepares several hosts at once, gives each its own, so that
 // no host's run touches what another's is using.
@@ -1214,37 +1333,41 @@ type prepareEnv struct {
 	// retries, when set, receives the command's ssh retries in place of
 	// the process's retry log.
 	retries io.Writer
-	// stdin and stdout are where the review asks for approval, as
+	// answers, stdin and stdout are how the review asks for approval, as
 	// runSiteRemove takes them. Under apply with no --site, which asks once
 	// for every site, they are unused.
-	stdin  io.Reader
-	stdout io.Writer
+	answers answerer
+	stdin   io.Reader
+	stdout  io.Writer
 }
 
-// runHostPrepareIn is host prepare run with args through env, on none of the
+// runSitePrepareIn is site prepare run with args through env, on none of the
 // process's globals: its flags parse into its own variables, and nothing is
 // routed. -v is accepted and changes nothing here; env.r is already as
 // verbose as the run.
-func runHostPrepareIn(env prepareEnv, args []string) error {
-	fs := newFlagSet("host prepare", flag.ContinueOnError)
+func runSitePrepareIn(env prepareEnv, args []string) error {
+	fs := newFlagSet("site prepare", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var verbose bool
 	verboseFlags(fs, &verbose)
 	o := hostPrepareFlags(fs)
 	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("host prepare: %w", err)
+		return fmt.Errorf("site prepare: %w", err)
 	}
 	if fs.NArg() > 0 {
-		return fmt.Errorf("host prepare: %q is extra", fs.Arg(0))
+		return fmt.Errorf("site prepare: %q is extra", fs.Arg(0))
 	}
 	return hostPrepare(env, *o)
 }
 
-// hostPrepare is host prepare with its flags parsed, reporting through env.
+// hostPrepare is site prepare with its flags parsed, reporting through env.
 func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 	r := env.r
+	if o.all {
+		return hostPrepareAll(env, o)
+	}
 	if o.site == "" {
-		return fmt.Errorf("host prepare: --site is required. A site at a time is deliberate, the same reason apply --site takes one")
+		return fmt.Errorf("site prepare: name the site with --site, or pass --all for every one")
 	}
 
 	cfg, err := config.Load(o.config)
@@ -1252,21 +1375,23 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 		return err
 	}
 	result := validate.Check(cfg)
-	reportFindings(r, o.config, result)
+	if !o.shown {
+		reportFindings(r, o.config, result)
+	}
 	if result.Refused() {
 		return refused(o.config, len(result.Refusals()), "")
 	}
 	declared, ok := cfg.Sites[o.site]
 	if !ok {
-		return fmt.Errorf("host prepare: %s declares no site %q. Declared sites are %s", o.config, o.site, strings.Join(cfg.SiteNames(), ", "))
+		return fmt.Errorf("site prepare: %s declares no site %q. Declared sites are %s", o.config, o.site, strings.Join(cfg.SiteNames(), ", "))
 	}
 
-	transport := siteTransport(o.site, declared, o.ssh, o.sudo)
+	transport := siteTransport(o.site, declared, o.ssh)
 	if env.retries != nil {
 		transport.RetryLog = env.retries
 	}
 	r.Section(fmt.Sprintf("%s (%s)", o.site, transport.Describe()))
-	// See runApply: host prepare records its own site's architecture, which
+	// See runApply: site prepare records its own site's architecture, which
 	// the next apply publishes. As a step of apply without --site, where
 	// every host prepares at once, the run recorded every key already and
 	// this never writes.
@@ -1286,29 +1411,25 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 	// Only once it is true: a check that could not run found nothing.
 	done.Detail("nothing on %s overlaps the mesh subnet", o.site)
 	done.Done("")
-	host, err := hostGate(r, cfg, o.site, transport)
-	if err != nil {
+	if _, err := hostGate(r, cfg, o.site, transport); err != nil {
 		return err
 	}
-	// The review comes before the claim, which is the first change: an
+	// The review comes before the first change: an
 	// operator who does not approve leaves the host exactly as it was.
 	g, err := grant.For(cfg, nil, o.site)
 	if err != nil {
 		return err
 	}
-	review, approvedBy, err := stepReview(r, env.stdin, env.stdout, cfg, o.site, g, grant.PrepareScope, transport, o.execute, "paisans host prepare --site "+o.site+" --execute")
+	review, approvedBy, err := stepReview(r, env.answers, env.stdin, env.stdout, cfg, o.site, g, grant.PrepareScope, transport, o.execute, "paisans site prepare --site "+o.site+" --execute")
 	if err != nil {
 		return err
 	}
-	if err := claimHosts(r, cfg, o.execute, map[string]registry.Runner{o.site: transport}); err != nil {
+	recs, err := admittedHosts(r, cfg, map[string]registry.Runner{o.site: transport})
+	if err != nil {
 		return err
 	}
-	var options []hostprep.Option
-	if host.Shared() {
-		options = append(options, hostprep.Shared())
-	}
 	plan, err := ui.Get(r, "read the host", func() (*hostprep.Plan, error) {
-		return hostprep.Build(o.site, cfg, transport, options...)
+		return hostprep.Build(o.site, cfg, transport, recs[o.site])
 	})
 	if err != nil {
 		return err
@@ -1330,11 +1451,8 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 			showReview(r, "review what "+config.FileName+" grants", review.review, false)
 			pending = review.review.Pending()
 		}
-		refusal := hostprep.Refusal(plan)
-		env.found(strings.Join(plan.Kinds(), ", "), refusal)
+		env.found(strings.Join(plan.Kinds(), ", "), nil)
 		switch {
-		case refusal != nil:
-			r.Result("Nothing changed. --execute would stop at the refusal above.")
 		case len(plan.Steps) == 0 && pending == 0:
 			r.Result("%s is prepared. Nothing to do.", o.site)
 		case len(plan.Steps) == 0:
@@ -1353,6 +1471,38 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 		return err
 	}
 	r.Result("Prepared %s.", o.site)
+	return nil
+}
+
+// hostPrepareAll is site prepare --all: every site the configuration
+// declares, in its order, each as site prepare --site would prepare it, with
+// its own review. It stops at the first site that fails, and since a prepared host
+// plans nothing, running it again resumes there.
+func hostPrepareAll(env prepareEnv, o hostPrepareOptions) error {
+	if o.site != "" || o.ssh != "" {
+		return &ui.Problem{Hint: "--all takes no --site or --ssh", Explain: "--all prepares every site through its own ssh section. Prepare one site with --site, reaching it through --ssh if need be, or pass --all alone."}
+	}
+	cfg, err := config.Load(o.config)
+	if err != nil {
+		return err
+	}
+	result := validate.Check(cfg)
+	reportFindings(env.r, o.config, result)
+	if result.Refused() {
+		return refused(o.config, len(result.Refusals()), "")
+	}
+	names := cfg.SiteNames()
+	for _, name := range names {
+		site := o
+		site.all, site.site, site.shown = false, name, true
+		if err := hostPrepare(env, site); err != nil {
+			next := "Run paisans site prepare --all again to resume."
+			if o.execute {
+				next = "Run paisans site prepare --all --execute again to resume; a prepared host plans nothing."
+			}
+			return convergeStop("site prepare --all stopped at "+name, err, next)
+		}
+	}
 	return nil
 }
 
@@ -1483,6 +1633,14 @@ func dnsSetup(name, executeHelp string, args []string, extra ...func(*flag.FlagS
 	if result.Refused() {
 		return nil, nil, nil, nil, false, refused(*configPath, len(result.Refusals()), "")
 	}
+	// dns init publishes the effective topology's records, so none for a
+	// pending site. dns prune is left on the declaration: it removes, and
+	// a record a run did not publish is not one to take away.
+	if name == "dns init" {
+		if cfg, _, err = effectiveConfig(r, cfg, ""); err != nil {
+			return nil, nil, nil, nil, false, err
+		}
+	}
 	wants, err := dns.Desired(cfg)
 	if err != nil {
 		return nil, nil, nil, nil, false, err
@@ -1568,13 +1726,21 @@ func (l *pathList) Set(value string) error {
 // than one part of it, so what is used is always either everything the file
 // says or exactly what the operator typed, never a blend of the two.
 //
-// name is the site's name in paisans-stack.yaml. The transport carries it so that
-// a sudo password prompt names the site it is for; it plays no part in
+// Every command that acts on a deployment reaches its sites this way, as the
+// login user and without sudo: that user is the deployment's own, and the
+// most a command can reach is what that user owns. Its first command asks
+// the user's UID, once a run (loginFor), and every command runs with
+// DOCKER_HOST at that user's rootless daemon. A site that names no user is
+// reached as the deployment's default, and its transport says so, so a
+// host that refuses it is reported as not admitted. Its first login as that
+// default, in a run with --execute, writes the name into the site's ssh.user
+// (recordSSHUser). name is the site's name in paisans-stack.yaml, for
+// messages and for the section that write goes in; it plays no part in
 // reaching the host.
-func siteTransport(name string, site config.Site, override string, sudo bool) apply.SSHTransport {
+func siteTransport(name string, site config.Site, override string) apply.SSHTransport {
 	var t apply.SSHTransport
 	if override != "" {
-		t = apply.SSHTransport{Site: name, Destination: override, Sudo: sudo}
+		t = apply.SSHTransport{Site: name, Destination: override}
 	} else {
 		// validate has already refused a bad key, so problems are empty here.
 		keys, _ := site.SSH.AuthorizedKeys()
@@ -1582,11 +1748,15 @@ func siteTransport(name string, site config.Site, override string, sudo bool) ap
 		for i, k := range keys {
 			lines[i] = k.Line
 		}
-		t = apply.SSHTransport{Site: name, User: site.SSH.User, Host: site.SSHHost(), Port: site.SSH.PortOrDefault(), PublicKeys: lines, Sudo: sudo}
+		user := site.SSHUser()
+		t = apply.SSHTransport{Site: name, User: user, Host: site.SSHHost(), Port: site.SSH.PortOrDefault(), PublicKeys: lines, DefaultUser: site.SSH.User == "" && user != ""}
 	}
-	if sudo {
-		t.Auth = sudoAuthFor(t.Describe())
+	var key string
+	var record func()
+	if path := site.SSHUserFile(); override == "" && name != "" && path != "" {
+		key, record = path+"\x00"+name, recordSSHUser(path, name, site.SSHUser())
 	}
+	t.Login = loginFor(t.Describe(), key, record)
 	return t
 }
 

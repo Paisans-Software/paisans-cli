@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/rsa"
 	"fmt"
 	"net"
 	"net/mail"
@@ -19,15 +20,16 @@ import (
 // where and as whom, and nothing about which keys. The keys are the part every
 // operator shares: paisans-stack.yaml is one file for the whole deployment, so it lists
 // public keys, which are safe to share, and never a path to a private key,
-// which is one operator's and lives on one operator's machine. `host prepare` makes
+// which is one operator's and lives on one operator's machine. `site prepare` makes
 // the listed keys the user's authorized keys, so the file is also the record
 // of who can log in.
 type SSH struct {
 	// Host is a hostname or an IP address. Empty means the site's
 	// public_address; a site with neither is refused.
 	Host string `yaml:"host"`
-	// User is the login user. It must already exist on the host: creating
-	// users is not something host prepare does.
+	// User is the login user. Empty means the deployment's own user,
+	// paisans-<token>, which SSHUser returns. Either way it must already
+	// exist on the host: creating users is not something site prepare does.
 	User string `yaml:"user"`
 	// Port is the SSH port. Zero means 22.
 	Port int `yaml:"port"`
@@ -44,6 +46,13 @@ type SSH struct {
 	// declared records that the key was present at all, so a missing
 	// section and an empty one get different messages.
 	declared bool
+	// defaultUser is the deployment's own user, paisans-<token>, which Load
+	// records on every site so that a site can name its login without the
+	// configuration it came from.
+	defaultUser string
+	// file is the declaration Load read the site from, "" for one loaded
+	// from bytes, for SSHUserFile.
+	file string
 }
 
 // DefaultSSHPort is the port used when a site's ssh section names none.
@@ -93,6 +102,30 @@ func (s SSH) PortOrDefault() int {
 	return s.Port
 }
 
+// SSHUser is the user the toolkit logs in as: ssh.user, or failing that the
+// deployment's own user, paisans-<token>. The default is the prefix every
+// name the deployment owns on a host already carries, so a deployment that
+// names no user logs in as one of its own. A site Load did not build has no
+// deployment behind it, and so no default.
+func (s Site) SSHUser() string {
+	if s.SSH.User != "" {
+		return s.SSH.User
+	}
+	return s.SSH.defaultUser
+}
+
+// SSHUserFile is the file a command records the site's login user in, with
+// SetSSHUser, once it has logged in as that user: the declaration the site
+// was loaded from, when the site leaves ssh.user out. It is "" for a site
+// that names its user, which is recorded already, and for a site not loaded
+// from a file, which has nowhere to record it.
+func (s Site) SSHUserFile() string {
+	if s.SSH.User != "" || s.SSH.defaultUser == "" {
+		return ""
+	}
+	return s.SSH.file
+}
+
 // SSHHost is the address the toolkit connects to: ssh.host, or failing that
 // the site's public_address, or failing that its endpoint's host. Defaulting
 // is because on most sites they are the same address, written twice; a site
@@ -127,6 +160,38 @@ type KeyList []NamedKey
 // keyName is what a key may be called: it goes into a command line and a
 // file on the host.
 var keyName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,31}$`)
+
+// MinRSABits is the shortest RSA key an operator may list.
+const MinRSABits = 3072
+
+// KeyTypeProblem says why pub is not a key an operator may list, "" when it
+// is one: the key types a current OpenSSH generates, and RSA only at a size
+// that is still sound, counted by the modulus's own bit length since a size
+// in bytes rounds up. A key is admission to a shell, so a certificate, whose
+// trust lies with a CA the host does not know, and an obsolete type are
+// refused by name. The loader holds operators.<name>.keys to it and a
+// request holds its operators' keys to it.
+func KeyTypeProblem(pub ssh.PublicKey) string {
+	switch pub.Type() {
+	case ssh.KeyAlgoED25519, ssh.KeyAlgoECDSA256, ssh.KeyAlgoECDSA384, ssh.KeyAlgoECDSA521,
+		ssh.KeyAlgoSKED25519, ssh.KeyAlgoSKECDSA256:
+		return ""
+	case ssh.KeyAlgoRSA:
+		cp, ok := pub.(ssh.CryptoPublicKey)
+		if !ok {
+			return "an ssh-rsa key whose size cannot be read"
+		}
+		k, ok := cp.CryptoPublicKey().(*rsa.PublicKey)
+		if !ok {
+			return "an ssh-rsa key whose size cannot be read"
+		}
+		if bits := k.N.BitLen(); bits < MinRSABits {
+			return fmt.Sprintf("an ssh-rsa key of %d bits, under %d", bits, MinRSABits)
+		}
+		return ""
+	}
+	return fmt.Sprintf("%q, not a key type paisans accepts", pub.Type())
+}
 
 // AuthorizedKey is one public key, as an authorized_keys line carries it.
 type AuthorizedKey struct {
@@ -172,9 +237,9 @@ func ParseKeyLine(line string) (AuthorizedKey, []string, error) {
 // key listed twice.
 //
 // Options (`from=`, `command=`, `restrict` and the rest) are refused rather
-// than carried. They change what a key may do, and a line that host prepare
+// than carried. They change what a key may do, and a line that site prepare
 // writes and later compares has to mean the same thing everywhere; a
-// restricted key belongs in authorized_keys by hand, where host prepare leaves
+// restricted key belongs in authorized_keys by hand, where site prepare leaves
 // it alone.
 func (s SSH) AuthorizedKeys() ([]AuthorizedKey, []string) {
 	var keys []AuthorizedKey
@@ -191,7 +256,7 @@ func (s SSH) AuthorizedKeys() ([]AuthorizedKey, []string) {
 			problems = append(problems, fmt.Sprintf("%s: not an OpenSSH public key (%v). Paste the whole line of the .pub file, Eg: ssh-ed25519 AAAA... you@example.org", nk.Name, err))
 			continue
 		case len(options) > 0:
-			problems = append(problems, fmt.Sprintf("%s: carries options (%s). List plain keys only; a restricted key is added to authorized_keys by hand, where host prepare leaves it alone", nk.Name, strings.Join(options, ",")))
+			problems = append(problems, fmt.Sprintf("%s: carries options (%s). List plain keys only; a restricted key is added to authorized_keys by hand, where site prepare leaves it alone", nk.Name, strings.Join(options, ",")))
 			continue
 		}
 		if first, dup := seen[key.Fingerprint]; dup {
@@ -225,21 +290,20 @@ func isHostname(s string) bool {
 }
 
 // sshProblems is structural's check of one site's ssh section.
-func sshProblems(name string, site Site, known map[string]Operator) []string {
+func sshProblems(name string, site Site, id string, known map[string]Operator) []string {
 	s := site.SSH
 	var problems []string
 	add := func(format string, args ...any) {
 		problems = append(problems, fmt.Sprintf(format, args...))
 	}
 	if !s.declared {
-		add("sites.%s.ssh: required. Give the section with at least user and keys: it is how the toolkit reaches the site and who may log in to it.", name)
+		add("sites.%s.ssh: required. Give the section with at least keys: it is how the toolkit reaches the site and who may log in to it.", name)
 		return problems
 	}
-	switch {
-	case s.User == "":
-		add("sites.%s.ssh.user: required. Name the login user, which must already exist on the host.", name)
-	case !unixUser.MatchString(s.User):
-		add("sites.%s.ssh.user: %q is not a user name this toolkit accepts. Use a lowercase letter or underscore, then lowercase letters, digits, underscores or hyphens, at most 32 characters.", name, s.User)
+	if s.User != "" && !unixUser.MatchString(s.User) {
+		add("sites.%s.ssh.user: %q is not a user name this toolkit accepts. Use a lowercase letter or underscore, then lowercase letters, digits, underscores or hyphens, at most 32 characters, or leave it out for the deployment's own user.", name, s.User)
+	} else if p := DeploymentUserProblem(s.User, id); s.User != "" && p != "" {
+		add("sites.%s.ssh.user: %s. site admit makes this user the deployment's and writes the operators' keys into it, so leave ssh.user out for the deployment's own user, or name another user of your own.", name, p)
 	}
 	if s.Port < 0 || s.Port > 65535 {
 		add("sites.%s.ssh.port: %d is not a port. Give 1 to 65535, or leave it out for 22.", name, s.Port)
@@ -251,7 +315,7 @@ func sshProblems(name string, site Site, known map[string]Operator) []string {
 		add("sites.%s.ssh.host: %q is neither a hostname nor an IP address. Give only the host; the user and port have keys of their own.", name, s.Host)
 	}
 	if len(s.Operators) == 0 {
-		add("sites.%s.ssh.keys: required. Name at least one operator from the operators section, Eg: keys: [alice]; host prepare makes their keys the user's authorized keys.", name)
+		add("sites.%s.ssh.keys: required. Name at least one operator from the operators section, Eg: keys: [alice]; site prepare makes their keys the user's authorized keys.", name)
 	}
 	listed := map[string]bool{}
 	for _, operator := range s.Operators {
@@ -302,6 +366,18 @@ func (c *Config) resolveKeys() {
 				site.SSH.Keys = append(site.SSH.Keys, NamedKey{Name: id, Line: line})
 			}
 		}
+		c.Sites[name] = site
+	}
+}
+
+// resolveUsers records the deployment's own user on every site's ssh section,
+// for SSHUser, and the file the configuration was read from, for
+// SSHUserFile.
+func (c *Config) resolveUsers() {
+	user := c.Deployment().Prefix()
+	for name, site := range c.Sites {
+		site.SSH.defaultUser = user
+		site.SSH.file = c.Path
 		c.Sites[name] = site
 	}
 }
@@ -358,8 +434,14 @@ func (c *Config) operatorProblems() []string {
 				add("operators.%s.keys: line %d is not an OpenSSH public key (%v). Paste the whole line of the .pub file, Eg: ssh-ed25519 AAAA... you@example.org.", id, n+1, err)
 				continue
 			case len(options) > 0:
-				add("operators.%s.keys: line %d carries options (%s). List plain keys only; a restricted key is added to authorized_keys by hand, where host prepare leaves it alone.", id, n+1, strings.Join(options, ","))
+				add("operators.%s.keys: line %d carries options (%s). List plain keys only; a restricted key is added to authorized_keys by hand, where site prepare leaves it alone.", id, n+1, strings.Join(options, ","))
 				continue
+			}
+			if pub, _, _, _, err := ssh.ParseAuthorizedKey([]byte(line)); err == nil {
+				if p := KeyTypeProblem(pub); p != "" {
+					add("operators.%s.keys: line %d is %s. Give an ed25519 key (ssh-keygen -t ed25519), an ECDSA or security key, or an RSA key of %d bits or more; a certificate's trust lies with a CA the host does not know.", id, n+1, p, MinRSABits)
+					continue
+				}
 			}
 			switch first, dup := owner[key.Fingerprint]; {
 			case dup && first == id:
@@ -424,7 +506,7 @@ func ParseDestination(s string) (Destination, error) {
 
 // Destination is where the site's ssh section reaches it.
 func (s Site) Destination() Destination {
-	return Destination{User: s.SSH.User, Host: s.SSHHost(), Port: s.SSH.PortOrDefault()}
+	return Destination{User: s.SSHUser(), Host: s.SSHHost(), Port: s.SSH.PortOrDefault()}
 }
 
 func hasOperator(operators map[string]Operator, id string) bool {
@@ -449,5 +531,5 @@ func ControlRune(s string) (rune, bool) {
 
 // controlProblem is the refusal of a field holding r, after its path.
 func controlProblem(r rune) string {
-	return fmt.Sprintf("holds a control character (U+%04X). A terminal reads one as a command, so text carrying it could redraw what the review of this file, host allow or doctor prints; remove it.", r)
+	return fmt.Sprintf("holds a control character (U+%04X). A terminal reads one as a command, so text carrying it could redraw what the review of this file or doctor prints; remove it.", r)
 }

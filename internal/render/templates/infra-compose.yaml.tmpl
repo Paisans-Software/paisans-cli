@@ -17,7 +17,13 @@ services:
       - --name={{ .Site.Name }}
       - --data-dir=/var/lib/etcd
       - --listen-peer-urls=http://{{ .Site.Address }}:{{ .EtcdPeerPort }}
-      - --listen-client-urls=http://{{ .Site.Address }}:{{ .EtcdClientPort }},http://127.0.0.1:{{ .EtcdClientPort }}
+{{- /* Every listener of the deployment's, here and in each file this stack
+        mounts, is on the site's mesh address alone, and every dial goes to a
+        mesh address. These containers share the host's network namespace,
+        and the egress table site admit loads drops whatever the deployment's
+        user sends to loopback, etcd's own client gateway dialling its
+        listener among it. */}}
+      - --listen-client-urls=http://{{ .Site.Address }}:{{ .EtcdClientPort }}
       - --initial-advertise-peer-urls=http://{{ .Site.Address }}:{{ .EtcdPeerPort }}
       - --advertise-client-urls=http://{{ .Site.Address }}:{{ .EtcdClientPort }}
 {{- /* Both flags are read on this member's first start only, and are
@@ -55,7 +61,6 @@ services:
       - patroni.env
     volumes:
       - {{ .Dir }}/postgres:/home/postgres/pgdata
-{{- if not .Site.WatchdogOff }}
     # Fencing needs the watchdog, and there is exactly one Patroni per data
     # bearing host, so there is exactly one claimant for the device.
     devices:
@@ -68,7 +73,6 @@ services:
     # rule) was tried first and rejected: chpst drops the group it relied on,
     # and any mode wide enough would let every local user arm the timer.
     command: ["/bin/sh", "-c", "chown postgres /dev/watchdog && exec /bin/sh /launch.sh init"]
-{{- end }}
 {{- end }}
 {{- if .Site.NeedsProxy }}
   haproxy:
@@ -110,7 +114,7 @@ services:
       - {{ .Dir }}/caddy/snippets:/etc/caddy/snippets:ro
 {{- if .Site.IsGateway }}
       # Site blocks the host's owner adds, imported by the Caddyfile. The
-      # host's directory, not this deployment's: paisans only creates it.
+      # deployment's own caddy.d: paisans only creates it.
       - {{ .HostSitesSource }}:{{ .HostSites }}:ro
 {{- end }}
       - {{ .Dir }}/caddy/data:/data

@@ -1,11 +1,11 @@
 # How a deployment protects itself
 
-This guide is for the operators of a paisans deployment. It walks through what can
-go wrong between the people and machines that run one, and says for each case
-what the toolkit does about it, what it does not, and what is left to you. The
-step by step response to an operator leaving or being evicted is
-[When an operator leaves](when-an-operator-leaves.md); this guide is the reasoning
-behind it.
+This guide is for the operators of a paisans deployment. It walks through what
+can go wrong between the people and machines that run one, and says for each
+case what the toolkit does about it, what it does not, and what is left to you.
+The step by step response to an operator leaving, or to their site being cut
+off, is [When an operator leaves](when-an-operator-leaves.md); this guide is
+the reasoning behind it.
 
 Each scenario ends with **Protects**, **Does not protect** and **You do**. Where
 a protection is designed but not built, it says so.
@@ -25,8 +25,11 @@ runbook is for.
 
 **A host belongs to whoever runs it.** An operator who brings their own machine to
 the deployment decides who logs in to it. The configuration names which operators
-may reach a site (its `ssh.keys`), and the host's owner can bound that list on
-the host itself. This is the one place where one operator is protected from
+may reach a site (its `ssh.keys`), and the host's owner decides whether the
+deployment runs there at all: they admit it as a user of its own, fenced off
+their machine, and can evict it (see
+[Admitting a deployment to your machine](host-owners.md)). This is the one
+place where one operator is protected from
 another: not over the deployment, but over their own machine.
 
 **The mesh is trusted completely.** etcd, Patroni, Postgres replication, Garage
@@ -39,29 +42,25 @@ is how a site is taken out.
 
 **What could happen.** `paisans-stack.yaml` is one shared file. Bob adds his name to
 `home-a`'s `ssh.keys`, or replaces the key listed under `operators.alice`, and
-commits. Later Alice runs `paisans apply` with her own access, and `host
-prepare` installs Bob's key for the login user, which has `sudo` and Docker:
-root.
+commits. Later Alice runs `paisans apply` with her own access, and `site
+prepare` installs Bob's key for the login user: a shell as the deployment's
+unprivileged user, with its rootless Docker, and nothing the host owner's
+machine has beyond it.
 
 **Protects.**
 
 * **The review.** Each host records what this deployment last granted it.
-  `apply` and `host prepare` show every key that would be added or changed
+  `apply` and `site prepare` show every key that would be added or changed
   since, with its operator, fingerprint and comment, and an `--execute` run asks
-  the operator to type `approve` at a terminal before any host changes. No flag
-  answers it, and without a terminal the run is refused.
-* **The host's allowlist.** The owner of `home-a` can run `paisans host allow
-  home-a alice` to write the fingerprints that may ever be added there, in
-  `/etc/paisans/ssh-allow.<user>` on the host. `host prepare` then refuses to
-  add any other key, whoever runs it. The list holds fingerprints, not names,
-  so a key swapped in under Alice's name is refused too.
+  the operator to type `approve` at a terminal before any host changes, and
+  without a terminal the run is refused. `--yes` answers it only where the
+  environment sets `PAISANS_ALLOW_YES=1`, and prints each entry it approves.
 
-**Does not protect.** A host with no allowlist file allows every key, by
-founder decision, so until its owner runs `host allow` the review is the only
-check. Neither control removes a key already in `authorized_keys`.
+**Does not protect.** The review is the only check, and it is made by whoever
+runs the command. It removes no key already in `authorized_keys`.
 
 **You do.** Read the review before typing `approve`, as you would read a diff
-before merging. If you own a host, run `host allow` on it.
+before merging.
 
 ## Someone changes an image
 
@@ -86,7 +85,7 @@ they were a recipient of the secrets file, every secret as it was when they
 left.
 
 **Protects.** Taking them out of `operators` and every `ssh.keys`, then preparing
-each site, deletes every key `host prepare` added for them. Re-encrypting the
+each site, deletes every key `site prepare` added for them. Re-encrypting the
 secrets file under a new data key keeps every later value from them. Rotating
 secrets with `paisans secrets rotate --all`, after the mesh is rekeyed, makes
 what they already hold worthless, except the two secrets that encrypt stored
@@ -111,8 +110,9 @@ others can no longer log in to the host they run. It is still in the mesh, so
 it is still in the cluster: possibly the Postgres leader, an etcd voter, a
 Garage node holding uploads, an apps site, or the gateway.
 
-**Protects.** `paisans site remove <site> --evict` takes the site out without
-ever reaching it, in an order chosen for a host that is alive and may resist:
+**Protects.** `paisans site remove <site> --host-gone` takes the site out
+without ever reaching it, in an order chosen for a host that may be alive and
+resisting, which also suits one that is dead:
 
 1. **The cut, first.** Every remaining site drops the site as a WireGuard peer.
    From then on its handshakes are ignored, and it can reach no cluster service.
@@ -132,27 +132,27 @@ A replacement host is declared in the same configuration edit, under a new
 name, and brought up by `apply` afterwards. Its WireGuard key and every secret
 generated for it are new.
 
-**Does not protect.** The evicted host keeps what it had: a copy of the database
+**Does not protect.** The cut-off host keeps what it had: a copy of the database
 and uploads as they were when it was cut, and every secret it was rendered.
-Eviction is refused when the remaining sites are not a majority of etcd's
+Cutting it off is refused when the remaining sites are not a majority of etcd's
 voters, or when the site is the only data site; recovery then is a restore,
 outside the toolkit.
 
-**You do.** Follow *An operator whose site is evicted* in the runbook.
+**You do.** Follow *An operator whose site is cut off* in the runbook.
 
-## The evicted site was the gateway
+## The cut-off site was the gateway
 
 **What could happen.** The gateway terminates TLS for every member and holds
 the DNS token. A hostile gateway can read every session cookie and form that
 passes through it, and can point the community's names wherever it likes.
 
-**Protects.** Evicting a gateway asks the operator to type `revoked`, confirming
-the DNS token was revoked at the provider and a new one set, and checks the new
-token works before changing anything. The replacement gateway is safe from the
-evicted operator: their keys are out of the configuration before it is prepared,
-the review shows every key it grants, its secrets are generated after the
-secrets file stopped being encrypted to them, and it never lists the evicted
-host as a peer.
+**Protects.** Cutting off a gateway asks the operator to type `revoked`,
+confirming the DNS token was revoked at the provider and a new one set, and
+checks the new token works before changing anything. The replacement gateway is
+safe from the operator who left: their keys are out of the configuration before
+it is prepared, the review shows every key it grants, its secrets are generated
+after the secrets file stopped being encrypted to them, and it never lists the
+cut-off host as a peer.
 
 **Does not protect.** The certificates the old gateway holds stay valid until
 they expire or are revoked. What it saw while it served members cannot be
@@ -178,10 +178,10 @@ from outside at all.
 
 **Does not protect.** Until the rekey finishes, the old keys work.
 
-**You do.** Rekey right after re-encrypting the secrets file, whenever an operator
-who was a recipient leaves or is evicted. Finish a rekey that stopped before
-anything else: `apply` refuses while one is unfinished, since it would render
-the old key back.
+**You do.** Rekey right after re-encrypting the secrets file, whenever an
+operator who was a recipient leaves or has their site cut off. Finish a rekey
+that stopped before anything else: `apply` refuses while one is unfinished,
+since it would render the old key back.
 
 ## A former recipient still has the secrets file
 
@@ -207,16 +207,16 @@ That host is a mesh peer, so whoever holds it reaches every cluster service and
 every app's port over the mesh, and holds the secrets rendered on it.
 
 **Protects.** They cannot decrypt `secrets.enc.yaml`, which never leaves the
-operators' workstations with a key that opens it. Eviction takes the host out the
-same way as an operator's, and the rotation that follows makes what it held
-worthless.
+operators' workstations with a key that opens it. `site remove --host-gone`
+takes the host out the same way as an operator's, and the rotation that follows
+makes what it held worthless.
 
 **Does not protect.** While it is a peer, nothing on the mesh tells it apart
 from an honest site. The README says so where it explains why every port binds
 the mesh address: a compromised peer reaches every app ungated.
 
-**You do.** Evict it, and rotate what it held with `paisans secrets rotate
---all`.
+**You do.** Cut it off with `paisans site remove <site> --host-gone`, and
+rotate what it held with `paisans secrets rotate --all`.
 
 ## Losing `paisans-stack.yaml` or the secrets file
 
@@ -291,4 +291,4 @@ deployment exists.
 
 * **A record of who owns which site.** Without it, nothing warns when one
   operator's hosts hold a majority of etcd's voters, which would let that operator
-  block an eviction.
+  keep their own site from being cut off.

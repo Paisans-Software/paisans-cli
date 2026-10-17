@@ -1,0 +1,53 @@
+admit site vm of f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01 as paisans-f2a9 on fake (ubuntu 24.04)
+
+step 1: claim the host
+step 2: create /etc/paisans
+step 3: record what admit installs
+step 4: skip the mesh until its conf exists
+step 5: start paisans-f2a9's manager after the mesh
+step 6: delegate cgroups to users
+step 7: write the egress table
+step 8: install the egress unit
+step 9: load the egress table
+step 10: load br_netfilter
+step 11: load br_netfilter at boot
+step 12: write paisans-f2a9's daemon.json
+step 13: install paisans-f2a9's rootless Docker
+step 14: create /srv/paisans
+step 15: create /srv/paisans/f2a9
+
+step 16: restore the helper's sudoers line
+  wireguard: /etc/sudoers.d/paisans-f2a9, mode 440, checked by visudo under a name sudo skips before it is moved into place
+  write /etc/sudoers.d/paisans-f2a9.new mode 0440:
+    | paisans-f2a9 ALL=(root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-f2a9
+  run:
+    $ visudo -cqf /etc/sudoers.d/paisans-f2a9.new && chown root:root /etc/sudoers.d/paisans-f2a9.new && mv -f /etc/sudoers.d/paisans-f2a9.new /etc/sudoers.d/paisans-f2a9 || { rm -f /etc/sudoers.d/paisans-f2a9.new; echo 'the line was not installed (checked by visudo, then chown and mv); nothing reached sudo'; exit 1; }
+
+step 17: allow 22/tcp
+step 18: allow 51820/udp
+step 19: allow all inbound on psns-f2a9
+step 20: write the admission record
+step 21: add the operators' keys
+
+present: docker: Engine 29.9.1
+present: package: docker-ce-rootless-extras installed
+present: package: uidmap installed
+present: package: nftables installed
+present: package: wireguard-tools installed
+present: package: git installed
+present: apparmor: rootlesskit's profile is loaded
+present: user: paisans-f2a9 exists, uid 1001, in no privileged group, and sudo grants it nothing beyond admit's helper
+present: user: paisans-f2a9 holds 165536-231071 in /etc/subuid
+present: user: paisans-f2a9 holds 165536-231071 in /etc/subgid
+present: egress: the host's on-link IPv6 prefixes, dropped: 2001:db8:1::/64
+present: linger: on for paisans-f2a9
+present: linger: paisans-f2a9's manager is running
+present: br_netfilter: nf_tables, which the host's iptables uses, is loaded
+present: daemon: /home/paisans-f2a9 (ext2/ext3) has 42.9 GB free
+present: mesh: nothing on this host overlaps 10.44.0.0/24
+present: wireguard: /etc/wireguard is root's alone
+present: wireguard: /usr/local/libexec/paisans/wg-psns-f2a9 is root's, mode 755, as admit writes it
+present: firewall: ufw active, its default policy left to the owner
+present: forwarding: not needed, this site has no endpoint
+warning: delegation reaches paisans-f2a9's manager at its next start
+  Its manager is running, and restarting it would restart its Docker daemon and every container in it, so admit does not. cpuset and io limits apply after the host's next reboot.

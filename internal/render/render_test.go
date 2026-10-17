@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"flag"
+	"fmt"
 	"io/fs"
 	"os"
 	"path"
@@ -20,6 +21,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/secretsgen"
 	"github.com/paisans-software/paisans-cli/internal/validate"
+	"github.com/paisans-software/paisans-cli/internal/version"
 	"gopkg.in/yaml.v3"
 )
 
@@ -78,6 +80,7 @@ func TestGoldenTree(t *testing.T) {
 		if err := render.Write(plan, golden); err != nil {
 			t.Fatal(err)
 		}
+		placeholdBuild(t, golden)
 		t.Log("golden tree rewritten")
 		return
 	}
@@ -86,7 +89,65 @@ func TestGoldenTree(t *testing.T) {
 	if err := render.Write(plan, dir); err != nil {
 		t.Fatal(err)
 	}
+	placeholdBuild(t, dir)
 	compareTrees(t, golden, dir)
+}
+
+// placeholdBuild replaces this build's version and commit in every manifest
+// under dir with placeholders, so the golden tree holds the build's shape
+// and not one build's values.
+func placeholdBuild(t *testing.T, dir string) {
+	t.Helper()
+	b := version.Current()
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.Name() != render.ManifestName {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		out := strings.Replace(string(data), `"toolkit_version": "`+b.Version+`"`, `"toolkit_version": "<version>"`, 1)
+		out = strings.Replace(out, `"toolkit_commit": "`+b.Commit+`"`, `"toolkit_commit": "<commit>"`, 1)
+		if out == string(data) {
+			return fmt.Errorf("%s does not record this build, %+v", path, b)
+		}
+		return os.WriteFile(path, []byte(out), 0o644)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The mesh file is the deployment's own, under its root, where apply writes
+// it as the deployment's user; the WireGuard helper installs it in
+// /etc/wireguard. It carries no hook: the helper refuses PreUp, PostUp,
+// PreDown and PostDown, since wg-quick runs them as root, and a relaying
+// site's forwarding is the host's sysctl.
+func TestTheMeshFileIsTheDeploymentsOwnAndRunsNothing(t *testing.T) {
+	plan := build(t)
+	d := fixture(t).Deployment()
+	seen := 0
+	for _, f := range plan.Files {
+		site, rel, _ := strings.Cut(f.Path, "/")
+		if !strings.HasSuffix(rel, ".conf") || !strings.Contains(rel, d.Interface()) {
+			continue
+		}
+		seen++
+		if rel != "srv/paisans/f2a9/psns-f2a9.conf" {
+			t.Errorf("%s renders its mesh file at %s", site, rel)
+		}
+		for _, line := range strings.Split(f.Content, "\n") {
+			key, _, _ := strings.Cut(strings.TrimSpace(line), "=")
+			switch strings.ToLower(strings.TrimSpace(key)) {
+			case "preup", "postup", "predown", "postdown":
+				t.Errorf("%s's mesh file runs a command: %q", site, line)
+			}
+		}
+	}
+	if seen != 4 {
+		t.Errorf("%d mesh files rendered, want one for each of the fixture's four sites", seen)
+	}
 }
 
 // Determinism is not a nicety: rendering twice must produce byte identical
@@ -566,14 +627,14 @@ func TestWireGuardInterfaceAndListenPort(t *testing.T) {
 			t.Errorf("%s is still named for wg0", f.Path)
 		}
 	}
-	vmConf, ok := files["vm/etc/wireguard/psns-f2a9.conf"]
+	vmConf, ok := files["vm/srv/paisans/f2a9/psns-f2a9.conf"]
 	if !ok {
-		t.Fatal("no vm/etc/wireguard/psns-f2a9.conf was rendered")
+		t.Fatal("no vm/srv/paisans/f2a9/psns-f2a9.conf was rendered")
 	}
 	if !strings.Contains(vmConf, "\nListenPort = 51999\n") {
 		t.Errorf("vm does not listen on its endpoint's port:\n%s", vmConf)
 	}
-	home := files["home-a/etc/wireguard/psns-f2a9.conf"]
+	home := files["home-a/srv/paisans/f2a9/psns-f2a9.conf"]
 	if home == "" || strings.Contains(home, "ListenPort") {
 		t.Errorf("home-a, which has no endpoint, has a ListenPort:\n%s", home)
 	}
@@ -2287,37 +2348,6 @@ func TestMbinNamesTheCallbackItServes(t *testing.T) {
 	}
 }
 
-// watchdog: off is the one mode that changes what is rendered. Patroni is told
-// not to want a device, and the compose file stops mapping one: compose refuses
-// to create a container whose device does not exist, so leaving the mapping in
-// would fail the very host that has no watchdog. Every other mode renders as
-// the golden tree does, required and mapped, and only the site that declared
-// off changes.
-func TestWatchdogOffRendersPatroniWithoutTheDevice(t *testing.T) {
-	cfg := fixture(t)
-	site := cfg.Sites["home-b"]
-	site.Watchdog = config.WatchdogOff
-	cfg.Sites["home-b"] = site
-	plan, err := render.Build(cfg, fixtureSecrets(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	files := planFiles(plan)
-
-	if env := files["home-b/srv/paisans/f2a9/infra/patroni.env"]; !strings.Contains(env, "watchdog: {mode: 'off'}") {
-		t.Errorf("home-b declared watchdog off and its patroni.env says otherwise:\n%s", env)
-	}
-	if compose := files["home-b/srv/paisans/f2a9/infra/compose.yaml"]; strings.Contains(compose, "/dev/watchdog:") || strings.Contains(compose, "chown postgres") {
-		t.Errorf("home-b declared watchdog off and its compose still maps the device:\n%s", compose)
-	}
-	if env := files["home-a/srv/paisans/f2a9/infra/patroni.env"]; !strings.Contains(env, "watchdog: {mode: required}") {
-		t.Errorf("home-a did not declare off and lost its watchdog:\n%s", env)
-	}
-	if compose := files["home-a/srv/paisans/f2a9/infra/compose.yaml"]; !strings.Contains(compose, "- /dev/watchdog:/dev/watchdog") {
-		t.Errorf("home-a did not declare off and lost its device mapping:\n%s", compose)
-	}
-}
-
 // Mbin's OAuth2 keypair reaches every site that runs Mbin, as two files in the
 // directory compose.yaml mounts at /app/config/oauth2, which is where the
 // .env's OAUTH_PRIVATE_KEY and OAUTH_PUBLIC_KEY point.
@@ -2448,7 +2478,7 @@ func TestPatroniEnvSpeaksSpilosVocabulary(t *testing.T) {
 	if doc.Name != "home-a" {
 		t.Errorf("the member name is %q, not the site's name, so apply cannot find the leader", doc.Name)
 	}
-	if doc.RestAPI.Listen != "10.44.0.1:8008" || doc.PostgreSQL.Listen != "10.44.0.1,127.0.0.1:5432" {
+	if doc.RestAPI.Listen != "10.44.0.1:8008" || doc.PostgreSQL.Listen != "10.44.0.1:5432" {
 		t.Errorf("listeners are not pinned to the mesh: %+v", doc)
 	}
 	if doc.PostgreSQL.Parameters["bg_mon.port"] != 8009 {
@@ -2616,7 +2646,7 @@ func TestAStorageSiteRendersGarageAlone(t *testing.T) {
 		}
 	}
 	sort.Strings(mine)
-	want := "etc/wireguard/psns-f2a9.conf,srv/paisans/f2a9/infra/compose.yaml,srv/paisans/f2a9/infra/garage/garage.toml,srv/paisans/f2a9/infra/heartbeat/heartbeat.env,srv/paisans/f2a9/infra/heartbeat/push.sh"
+	want := "srv/paisans/f2a9/infra/compose.yaml,srv/paisans/f2a9/infra/garage/garage.toml,srv/paisans/f2a9/infra/heartbeat/heartbeat.env,srv/paisans/f2a9/infra/heartbeat/push.sh,srv/paisans/f2a9/psns-f2a9.conf"
 	if got := strings.Join(mine, ","); got != want {
 		t.Fatalf("a storage site renders %s, want %s", got, want)
 	}
@@ -2631,8 +2661,8 @@ func TestAStorageSiteRendersGarageAlone(t *testing.T) {
 	}
 	// It is a peer on the mesh like any other site; which sites dial it
 	// directly is the mesh's rule, not this role's.
-	if !strings.Contains(files["vm/etc/wireguard/psns-f2a9.conf"], "# store\n") {
-		t.Errorf("the gateway's mesh has no peer for the storage site:\n%s", files["vm/etc/wireguard/psns-f2a9.conf"])
+	if !strings.Contains(files["vm/srv/paisans/f2a9/psns-f2a9.conf"], "# store\n") {
+		t.Errorf("the gateway's mesh has no peer for the storage site:\n%s", files["vm/srv/paisans/f2a9/psns-f2a9.conf"])
 	}
 }
 
@@ -2657,7 +2687,7 @@ func TestARolelessSiteRendersItsPinnedAppAndNoInfraStack(t *testing.T) {
 	for _, f := range plan.Files {
 		have[f.Path] = true
 	}
-	for _, want := range []string{"mon/etc/wireguard/psns-f2a9.conf", "mon/srv/paisans/f2a9/health/compose.yaml", "mon/srv/paisans/f2a9/health/monitors.json"} {
+	for _, want := range []string{"mon/srv/paisans/f2a9/psns-f2a9.conf", "mon/srv/paisans/f2a9/health/compose.yaml", "mon/srv/paisans/f2a9/health/monitors.json"} {
 		if !have[want] {
 			t.Errorf("%s was not rendered", want)
 		}
@@ -2788,7 +2818,9 @@ func TestAGatedHostBlockLetsPastOnlyWhatAuthenticatesItself(t *testing.T) {
 	}
 
 	web := hostBlock(t, caddyfile, "web.example.org")
-	if strings.Contains(web, "handle") || strings.Contains(web, "import gate") {
+	// Its one handle is the bare one holding the app's routing, which keeps
+	// the self check ahead of it.
+	if strings.Contains(web, "handle @") || strings.Count(web, "handle {") != 1 || strings.Contains(web, "import gate") {
 		t.Errorf("a public host block carries gate handling:\n%s", web)
 	}
 
@@ -2954,9 +2986,9 @@ func TestPeersDialTheEffectiveEndpoint(t *testing.T) {
 			var home, vmConf string
 			for _, f := range plan.Files {
 				switch f.Path {
-				case "home-a/etc/wireguard/psns-f2a9.conf":
+				case "home-a/srv/paisans/f2a9/psns-f2a9.conf":
 					home = f.Content
-				case "vm/etc/wireguard/psns-f2a9.conf":
+				case "vm/srv/paisans/f2a9/psns-f2a9.conf":
 					vmConf = f.Content
 				}
 			}

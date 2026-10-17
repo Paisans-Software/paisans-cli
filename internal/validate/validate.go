@@ -145,6 +145,7 @@ func Check(cfg *config.Config) Result {
 	c.sitesShareAMachine()
 	c.imageServices()
 	c.floatingImages()
+	c.infraImages()
 	c.clusterPlacementWithoutACluster()
 	c.acmeProviderHasAnImage()
 	c.acmeImageIsNotStockCaddy()
@@ -196,7 +197,6 @@ func Check(cfg *config.Config) Result {
 	c.evenVoters()
 	c.oneVoterNoFailover()
 	c.asyncAutomaticFailover()
-	c.meshIsNotPrivate()
 	c.pinnedOntoWitness()
 	c.gatewayOnDataSite()
 	c.pocketIDFileBackend()
@@ -208,7 +208,6 @@ func Check(cfg *config.Config) Result {
 	c.pocketIDStandbyMarkerUnknown()
 	c.imageForAbsentPostgres()
 	c.publicAddress()
-	c.watchdogOffOnDataSite()
 
 	sort.SliceStable(c.findings, func(i, j int) bool {
 		if c.findings[i].Level != c.findings[j].Level {
@@ -769,30 +768,6 @@ func sshKey(host string, port int) string {
 	return net.JoinHostPort(strings.ToLower(host), strconv.Itoa(port))
 }
 
-// meshIsNotPrivate warns about a mesh on publicly routable space.
-//
-// Preflight checks that the subnet does not collide with anything a host
-// already routes, and that check needs a host. This is the part that can be
-// checked from a file: a mesh on public address space collides with the real
-// internet everywhere at once, and the symptom is a host that can no longer
-// reach whoever actually owns those addresses.
-func (c *checker) meshIsNotPrivate() {
-	if c.cfg.Mesh.Subnet == "" {
-		return
-	}
-	_, network, err := net.ParseCIDR(c.cfg.Mesh.Subnet)
-	if err != nil {
-		return // the loader has already reported this
-	}
-	if network.IP.IsPrivate() || network.IP.IsLoopback() || network.IP.IsLinkLocalUnicast() {
-		return
-	}
-	c.warn("mesh-subnet-is-not-private", "mesh.subnet",
-		"mesh subnet is publicly routable",
-		"is %s, which is publicly routable address space. Every host would route those addresses into the tunnel instead of to whoever owns them. Use RFC 1918 space, for example 10.44.0.0/24, unless this range is genuinely yours.",
-		c.cfg.Mesh.Subnet)
-}
-
 // undeclaredSites refuses any reference to a site that does not exist. A
 // typo here renders artifacts for a machine nobody owns.
 func (c *checker) undeclaredSites() {
@@ -979,17 +954,102 @@ func (c *checker) floatingImages() {
 	for _, name := range c.cfg.AppNames() {
 		app := c.cfg.Apps[name]
 		for _, service := range sortedKeys(app.Images) {
-			ref := blueprints.ParseReference(app.Images[service])
-			why := ref.Floating()
-			if why == "" {
-				continue
-			}
-			c.refuse("floating-image-tag", fmt.Sprintf("apps.%s.images.%s", name, service),
-				"image tag is floating",
-				"is %q and %s. Two runs of `apply` would then deploy different builds from the same inputs, so the configuration and the secrets no longer reconstruct the stack. Name a version tag, or a digest, which is stronger.",
-				app.Images[service], why)
+			c.floatingImage(fmt.Sprintf("apps.%s.images.%s", name, service), app.Images[service])
 		}
 	}
+	for _, key := range sortedKeys(c.cfg.Infra.Images) {
+		c.floatingImage("infra.images."+key, c.cfg.Infra.Images[key])
+	}
+	for _, major := range sortedKeys(c.cfg.Infra.Postgres) {
+		for _, key := range sortedKeys(c.cfg.Infra.Postgres[major]) {
+			c.floatingImage(fmt.Sprintf("infra.postgres.%s.%s", major, key), c.cfg.Infra.Postgres[major][key])
+		}
+	}
+}
+
+// floatingImage refuses ref, found at key, when it does not name one build.
+func (c *checker) floatingImage(key, ref string) {
+	why := blueprints.ParseReference(ref).Floating()
+	if why == "" {
+		return
+	}
+	c.refuse("floating-image-tag", key,
+		"image tag is floating",
+		"is %q and %s. Two runs of `apply` would then deploy different builds from the same inputs, so the configuration and the secrets no longer reconstruct the stack. Name a version tag, or a digest, which is stronger.",
+		ref, why)
+}
+
+// zalandoSpilo is the repository prefix of the Spilo the toolkit is written
+// against, whose versions it can check.
+const zalandoSpilo = "ghcr.io/zalando/spilo-"
+
+// infraImages checks what infra overrides against what the toolkit's own
+// code speaks to: the versions of etcd, HAProxy, Garage and Spilo it is
+// written against, and the Postgres majors it runs.
+func (c *checker) infraImages() {
+	for _, key := range sortedKeys(c.cfg.Infra.Images) {
+		c.supportedVersion("infra.images."+key, key, c.cfg.Infra.Images[key])
+	}
+	if c.cfg.Infra.Images["heartbeat"] != "" {
+		c.warn("infra-heartbeat-covers-pocket-id", "infra.images.heartbeat",
+			"the heartbeat override covers Pocket ID's too",
+			"replaces the infrastructure stack's heartbeat and the operators heartbeat in every Pocket ID stack, which run the same image.")
+	}
+	majors := map[string]bool{}
+	for _, m := range blueprints.PostgresMajors() {
+		majors[m] = true
+	}
+	running := c.cfg.PostgresMajor()
+	for _, major := range sortedKeys(c.cfg.Infra.Postgres) {
+		key := "infra.postgres." + major
+		switch {
+		case !majors[major]:
+			c.refuse("infra-postgres-unknown-major", key,
+				"not a Postgres major the toolkit runs",
+				"is Postgres %s, and the toolkit runs %s.", major, strings.Join(blueprints.PostgresMajors(), ", "))
+			continue
+		case major != running:
+			c.warn("infra-postgres-unused-major", key,
+				"applies to no Postgres the deployment runs",
+				"is for Postgres %s, and cluster.postgres_version is %s, so nothing runs it. Remove it, or keep it only while a move to %s is planned.", major, running, major)
+		}
+		spilo := c.cfg.Infra.Postgres[major]["spilo"]
+		if spilo == "" {
+			continue
+		}
+		if strings.HasPrefix(spilo, zalandoSpilo) {
+			c.supportedVersion(key+".spilo", "spilo", spilo)
+			continue
+		}
+		c.warn("infra-spilo-unchecked", key+".spilo",
+			"the toolkit cannot check this Spilo",
+			"is %q, outside %s*. The toolkit is written against Spilo's and Patroni's environment and data path, and cannot check that this image follows them. apply's review asks for it.", spilo, zalandoSpilo)
+	}
+}
+
+// supportedVersion refuses ref as the image of the foundation's name when
+// its tag can leave the versions the toolkit's code is written against. A
+// reference with no tag cannot be checked, and is refused naming the form
+// that can. An image the toolkit's code does not speak to has no versions to
+// leave.
+func (c *checker) supportedVersion(key, name, ref string) {
+	prefixes := blueprints.SupportedTags(name)
+	r := blueprints.ParseReference(ref)
+	if len(prefixes) == 0 || r.Floating() != "" {
+		return // floating-image-tag already refuses a floating one
+	}
+	if blueprints.CheckFoundationImage(name, ref) == nil {
+		return
+	}
+	if r.Digest != "" && blueprints.ParseReference(r.Name).Tag == "" {
+		c.refuse("infra-image-unsupported-version", key,
+			"outside the versions the toolkit is written against",
+			"is %q, a digest with no tag, so its version cannot be checked. Write the tag beside the digest (Eg: %s:<tag>@%s).", ref, r.Name, r.Digest)
+		return
+	}
+	c.refuse("infra-image-unsupported-version", key,
+		"outside the versions the toolkit is written against",
+		"is %q, which can leave %s, the versions the toolkit's code is written against. Fix the first part of the tag.", ref, strings.Join(prefixes, " or "))
 }
 
 // imageForAbsentPostgres warns about an image for a database that is not
@@ -1093,8 +1153,8 @@ func (c *checker) portCollision() {
 				if !collides(a, b) {
 					continue
 				}
-				// One finding per pair and port: a service on the mesh
-				// address and loopback is one collision, not two.
+				// One finding per pair and port, however many binds of
+				// each the pair holds.
 				pair := fmt.Sprintf("%s|%s|%d/%s", a.Owner, b.Owner, a.Port, a.Proto)
 				if reported[pair] {
 					continue
@@ -1110,9 +1170,8 @@ func (c *checker) portCollision() {
 }
 
 // collides reports whether two listeners on one site cannot both bind. The
-// same owner under the same key is one listener named twice, such as a
-// service on its mesh address and on loopback, which never overlaps anyway;
-// the same owner under two keys, such as an app published on its mesh
+// same owner under the same key is one service's own binds, which it keeps
+// apart itself; the same owner under two keys, such as an app published on its mesh
 // address and again on a web_server listen, is two binds like any others.
 func collides(a, b render.Listener) bool {
 	if a.Owner == b.Owner && a.Key == b.Key {
@@ -1332,7 +1391,7 @@ func (c *checker) mediaHostnameShape() {
 		}
 		key := fmt.Sprintf("apps.%s.hostnames.%s", name, blueprints.MediaRole)
 		derived := blueprints.MediaHostnameIsDerived(c.cfg, app)
-		if problem := hostnameProblem(media); problem != "" {
+		if problem := config.HostnameProblem(media); problem != "" {
 			if derived {
 				c.refuse("media-hostname-is-not-a-hostname", key,
 					"media hostname is not a valid hostname",
@@ -1372,7 +1431,7 @@ func (c *checker) mailDomains() {
 	for i, entry := range c.cfg.Community.MailDomains {
 		key := fmt.Sprintf("community.mail_domains[%d]", i)
 		name := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(entry)), ".")
-		if problem := hostnameProblem(name); problem != "" {
+		if problem := config.HostnameProblem(name); problem != "" {
 			c.refuse("mail-domain-is-not-a-hostname", key,
 				"mail domain is not a hostname",
 				"is %q, which is not a hostname: %s. List the name mail is addressed to, the part after the @, for example %s.",
@@ -1442,48 +1501,6 @@ func (c *checker) mediaHostnameUnderAnAppHostname() {
 			break
 		}
 	}
-}
-
-// hostnameProblem says why a name is not a usable DNS hostname, or returns
-// empty when it is one. It is the RFC 1123 shape, written lowercase: labels of
-// 1 to 63 letters, digits and hyphens, not starting or ending with a hyphen,
-// at least two of them, 253 characters in all.
-//
-// Lowercase is required rather than folded. Caddy and DNS both ignore case,
-// but the name is also written into an application's configuration and from
-// there into URLs other servers store, and two spellings of one name are two
-// URLs to anything comparing them as strings.
-func hostnameProblem(host string) string {
-	switch {
-	case host == "":
-		return "it is empty"
-	case len(host) > 253:
-		return "it is longer than 253 characters"
-	case host != strings.ToLower(host):
-		return "it contains capital letters; write it lowercase"
-	case strings.Contains(host, "://") || strings.ContainsAny(host, "/:"):
-		return "it carries a scheme, a port or a path; give the name alone"
-	}
-	labels := strings.Split(host, ".")
-	if len(labels) < 2 {
-		return "it is a single label, not a name under a domain"
-	}
-	for _, label := range labels {
-		switch {
-		case label == "":
-			return "it has an empty label"
-		case len(label) > 63:
-			return fmt.Sprintf("its label %q is longer than 63 characters", label)
-		case label[0] == '-' || label[len(label)-1] == '-':
-			return fmt.Sprintf("its label %q starts or ends with a hyphen", label)
-		}
-		for _, r := range label {
-			if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-') {
-				return fmt.Sprintf("its label %q contains %q, and only letters, digits and hyphens are allowed", label, r)
-			}
-		}
-	}
-	return ""
 }
 
 // duplicateHostname refuses the same public name claimed twice.
@@ -1687,7 +1704,7 @@ func (c *checker) configKeySteersCompose() {
 // quietly undone.
 //
 // Render refuses the same keys, and keeps doing so, but a whole apply renders
-// only in its pull stage, after init and host prepare have run. Whether a
+// only in its pull stage, after init and site prepare have run. Whether a
 // template writes a key can depend on other keys (a gated Mbin's template
 // writes MBIN_USE_FEDERATION_ALLOW_LIST, an ungated one does not), so this
 // renders the deployment rather than keeping a second list: with secrets
@@ -1742,24 +1759,6 @@ func throwawayCollisions(cfg *config.Config) ([]*render.ConfigCollision, error) 
 		return nil, err
 	}
 	return render.ConfigCollisions(cfg, &throwaway.secrets), nil
-}
-
-// watchdogOffOnDataSite warns that a data site's Patroni runs unfenced.
-//
-// It is a warning rather than a refusal because there are hosts with no device
-// and no way to load one (some container based VPS kernels), and a one node
-// cluster has nobody to split brain with. It is still risky: without a
-// watchdog, a Patroni that hangs while holding the leader key can keep
-// accepting writes after its lease expires and another node is promoted.
-func (c *checker) watchdogOffOnDataSite() {
-	for _, name := range c.cfg.SiteNames() {
-		site := c.cfg.Sites[name]
-		if site.Has(config.RoleData) && site.WatchdogMode() == config.WatchdogOff {
-			c.warn("watchdog-off-on-data-site", fmt.Sprintf("sites.%s.watchdog", name),
-				"watchdog is off on a data site",
-				"is off on a site holding the data role. patroni.env sets the watchdog mode to off inside SPILO_CONFIGURATION, so a Patroni that hangs while it is leader is not fenced and can keep taking writes after another node is promoted. Use auto unless this host genuinely cannot load any watchdog driver.")
-		}
-	}
 }
 
 // adminGroupNotAdmins warns about an app that reads its administrators from

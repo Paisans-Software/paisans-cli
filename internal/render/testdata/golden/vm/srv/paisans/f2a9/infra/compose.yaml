@@ -16,7 +16,7 @@ services:
       - --name=vm
       - --data-dir=/var/lib/etcd
       - --listen-peer-urls=http://10.44.0.3:2380
-      - --listen-client-urls=http://10.44.0.3:2379,http://127.0.0.1:2379
+      - --listen-client-urls=http://10.44.0.3:2379
       - --initial-advertise-peer-urls=http://10.44.0.3:2380
       - --advertise-client-urls=http://10.44.0.3:2379
       - --initial-cluster=home-a=http://10.44.0.1:2380,home-b=http://10.44.0.2:2380,vm=http://10.44.0.3:2380
@@ -48,8 +48,8 @@ services:
       # One file per application, imported by that application's host block.
       - /srv/paisans/f2a9/infra/caddy/snippets:/etc/caddy/snippets:ro
       # Site blocks the host's owner adds, imported by the Caddyfile. The
-      # host's directory, not this deployment's: paisans only creates it.
-      - /srv/caddy.d:/etc/caddy.d:ro
+      # deployment's own caddy.d: paisans only creates it.
+      - /srv/paisans/f2a9/caddy.d:/etc/caddy.d:ro
       - /srv/paisans/f2a9/infra/caddy/data:/data
       - /srv/paisans/f2a9/infra/caddy/config:/config
   # This site's heartbeat: a push a minute to every monitor off this site, at

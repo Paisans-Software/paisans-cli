@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/grant"
 	"github.com/paisans-software/paisans-cli/internal/registry"
@@ -44,7 +45,7 @@ var grantPayload = regexp.MustCompile(`printf %s '([A-Za-z0-9+/=]+)' \| base64 -
 func (m *memGrant) Run(command string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if !strings.Contains(command, "/var/lib/paisans/granted.") || !strings.Contains(command, "flock -w 60 9") {
+	if !strings.Contains(command, "/srv/paisans/f2a9/.paisans/granted.json") || !strings.Contains(command, "flock -w 60 9") {
 		return "", fmt.Errorf("not a grant write under the lock: %s", command)
 	}
 	data, err := base64.StdEncoding.DecodeString(grantPayload.FindStringSubmatch(command)[1])
@@ -140,7 +141,7 @@ func pendingReview() []grant.Review {
 }
 
 // The prompt: typed approve goes on; anything else, end of input, and no
-// terminal at all stop it, and no flag is consulted.
+// terminal at all stop it, without --yes.
 func TestApproveReviews(t *testing.T) {
 	for name, c := range map[string]struct {
 		stdin func(t *testing.T) io.Reader
@@ -153,7 +154,7 @@ func TestApproveReviews(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			var out bytes.Buffer
-			err := approveReviews(ui.Discard, c.stdin(t), &out, pendingReview(), "paisans host prepare --site home-a --execute")
+			err := approveReviews(ui.Discard, answerer{}, c.stdin(t), &out, pendingReview(), "paisans site prepare --site home-a --execute")
 			switch {
 			case c.want == "" && err != nil:
 				t.Errorf("not approved: %v", err)
@@ -180,7 +181,7 @@ func problemText(err error) string {
 func TestNothingToApproveAsksNothing(t *testing.T) {
 	removals := []grant.Review{{Site: "home-a", Changes: []grant.Change{{Op: grant.Removed, Subject: "key SHA256:c", Text: "key SHA256:c (carol)"}}}}
 	var out bytes.Buffer
-	if err := approveReviews(ui.Discard, noTerminalStdin(), &out, removals, "x"); err != nil || out.Len() != 0 {
+	if err := approveReviews(ui.Discard, answerer{}, noTerminalStdin(), &out, removals, "x"); err != nil || out.Len() != 0 {
 		t.Errorf("err %v, printed %q", err, out.String())
 	}
 }
@@ -211,11 +212,7 @@ func TestApprover(t *testing.T) {
 func loggingSSH(t *testing.T, fail string) string {
 	t.Helper()
 	log := filepath.Join(t.TempDir(), "ssh.log")
-	script := strings.Replace(quietHost, "case \"$cmd\" in\n", "printf '%s\\n' \"$cmd\" >> '"+log+"'\ncase \"$cmd\" in\n", 1)
-	if fail != "" {
-		script = strings.Replace(script, "case \"$cmd\" in\n", "case \"$cmd\" in\n*'"+fail+"'*) echo failed; exit 1;;\n", 1)
-	}
-	sshAnswering(t, script)
+	answerQuietly(t, log, fail)
 	return log
 }
 
@@ -225,16 +222,16 @@ func logged(t *testing.T, log string) string {
 	return string(data)
 }
 
-// claimed reports whether a command in the log claims the host, which is
-// the first change any command that writes makes.
-func claimed(log string) bool {
-	return strings.Contains(log, registry.Path) && strings.Contains(log, "flock -w")
+// checked reports whether a command in the log reads the host's admission
+// record, which every command that writes does before its first change.
+func checked(log string) bool {
+	return strings.Contains(log, admission.Dir+"/admitted.")
 }
 
 func prepare(t *testing.T, stdin io.Reader, stdout io.Writer, args ...string) (*ui.Recorder, error) {
 	t.Helper()
 	rec := &ui.Recorder{Verbose_: true}
-	o := hostPrepareOptions{config: fixtureConfig(), site: "home-a", sudo: false}
+	o := hostPrepareOptions{config: fixtureConfig(), site: "home-a"}
 	for _, a := range args {
 		if a == "--execute" {
 			o.execute = true
@@ -244,8 +241,8 @@ func prepare(t *testing.T, stdin io.Reader, stdout io.Writer, args ...string) (*
 	return rec, err
 }
 
-// host prepare with something to approve and no terminal is refused before
-// the host is claimed or changed; the dry run shows the review and asks
+// site prepare with something to approve and no terminal is refused before
+// the host is checked or changed; the dry run shows the review and asks
 // nothing.
 func TestHostPrepareRefusesWithoutATerminal(t *testing.T) {
 	log := loggingSSH(t, "")
@@ -254,8 +251,8 @@ func TestHostPrepareRefusesWithoutATerminal(t *testing.T) {
 	if err == nil || !strings.Contains(problemText(err), "stdin is not a terminal") {
 		t.Fatalf("got %v\n%s", err, rec.Lines())
 	}
-	if claimed(logged(t, log)) {
-		t.Errorf("the host was claimed before the review was approved:\n%s", logged(t, log))
+	if checked(logged(t, log)) {
+		t.Errorf("the host was checked before the review was approved:\n%s", logged(t, log))
 	}
 	if !rec.Has("pending", "review what paisans-stack.yaml grants") || !strings.Contains(rec.Lines(), "explain: + key SHA256:") {
 		t.Errorf("the review is not shown:\n%s", rec.Lines())
@@ -266,7 +263,7 @@ func TestHostPrepareRefusesWithoutATerminal(t *testing.T) {
 	}
 }
 
-// With nothing to approve host prepare runs as it always has, terminal or
+// With nothing to approve site prepare runs as it always has, terminal or
 // not, and leaves the record as it was.
 func TestHostPrepareWithNothingToApproveRuns(t *testing.T) {
 	log := loggingSSH(t, "")
@@ -275,7 +272,7 @@ func TestHostPrepareWithNothingToApproveRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, rec.Lines())
 	}
-	if !claimed(logged(t, log)) || !rec.Has("result", "Prepared home-a.") {
+	if !checked(logged(t, log)) || !rec.Has("result", "Prepared home-a.") {
 		t.Errorf("not prepared:\n%s", rec.Lines())
 	}
 	if hosts["home-a"].writes != 0 {
@@ -283,13 +280,13 @@ func TestHostPrepareWithNothingToApproveRuns(t *testing.T) {
 	}
 }
 
-// Approved, host prepare records the keys it made authorized keys, with who
+// Approved, site prepare records the keys it made authorized keys, with who
 // approved them, once every step has succeeded; a step that fails leaves the
 // record as it was, so the next run reviews the same keys again.
 func TestHostPrepareRecordsTheKeysOnlyAfterSuccess(t *testing.T) {
 	cfg := fixture(t)
 	alice, _, _ := config.ParseKeyLine(cfg.Operators["alice"].KeyLines()[0])
-	for name, fail := range map[string]string{"succeeds": "", "a step fails": "awk -v fp="} {
+	for name, fail := range map[string]string{"succeeds": "", "a step fails": "tail -c1"} {
 		t.Run(name, func(t *testing.T) {
 			loggingSSH(t, fail)
 			hosts := fakeGrants(t, func(string) *grant.Record { return nil })
@@ -314,7 +311,7 @@ func TestHostPrepareRecordsTheKeysOnlyAfterSuccess(t *testing.T) {
 				t.Errorf("record %+v", got.Keys)
 			}
 			if got.Images != nil {
-				t.Errorf("host prepare recorded images: %+v", got.Images)
+				t.Errorf("site prepare recorded images: %+v", got.Images)
 			}
 		})
 	}
@@ -327,7 +324,7 @@ func TestHostPrepareRecordsTheKeysOnlyAfterSuccess(t *testing.T) {
 func TestHostPrepareDoesNotAskAgainForWhatWasApproved(t *testing.T) {
 	cfg := fixture(t)
 	alice, _, _ := config.ParseKeyLine(cfg.Operators["alice"].KeyLines()[0])
-	loggingSSH(t, "awk -v fp=")
+	loggingSSH(t, "tail -c1")
 	hosts := fakeGrants(t, func(string) *grant.Record { return nil })
 	agentFingerprints = func() []string { return []string{alice.Fingerprint} }
 	if _, err := prepare(t, answering(t, "approve\n"), io.Discard, "--execute"); err == nil {
@@ -360,16 +357,17 @@ func TestHostPrepareNotApprovedChangesNothing(t *testing.T) {
 			log := loggingSSH(t, "")
 			hosts := fakeGrants(t, func(string) *grant.Record { return nil })
 			_, err := prepare(t, answering(t, answer), io.Discard, "--execute")
-			if err == nil || claimed(logged(t, log)) || hosts["home-a"].writes != 0 {
-				t.Errorf("err %v, claimed %v, writes %d", err, claimed(logged(t, log)), hosts["home-a"].writes)
+			if err == nil || checked(logged(t, log)) || hosts["home-a"].writes != 0 {
+				t.Errorf("err %v, checked %v, writes %d", err, checked(logged(t, log)), hosts["home-a"].writes)
 			}
 		})
 	}
 }
 
 // apply --site, with something to approve and no terminal, is refused before
-// the host is claimed; with nothing to approve it goes on to the claim.
-func TestApplySiteReviewsBeforeTheClaim(t *testing.T) {
+// the host's admission is checked; with nothing to approve it goes on to the
+// check.
+func TestApplySiteReviewsBeforeTheAdmissionCheck(t *testing.T) {
 	for name, hold := range map[string]func(string) *grant.Record{
 		"something to approve": func(string) *grant.Record { return nil },
 		"nothing to approve":   grantedAlready(t, fixtureConfig(), fixtureSecretsPath()),
@@ -380,20 +378,20 @@ func TestApplySiteReviewsBeforeTheClaim(t *testing.T) {
 			rec := recordConverge(t)
 			var err error
 			captureStdout(t, func() {
-				err = runApply([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "--sudo=false", "--site", "home-a", "--execute"}, noTerminalStdin(), io.Discard)
+				err = runApply([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "--site", "home-a", "--execute"}, noTerminalStdin(), io.Discard)
 			})
 			refused := err != nil && strings.Contains(problemText(err), "stdin is not a terminal")
 			if name == "something to approve" {
-				if !refused || claimed(logged(t, log)) {
-					t.Errorf("err %v, claimed %v:\n%s", err, claimed(logged(t, log)), rec.Lines())
+				if !refused || checked(logged(t, log)) {
+					t.Errorf("err %v, checked %v:\n%s", err, checked(logged(t, log)), rec.Lines())
 				}
 				if !strings.Contains(rec.Lines(), "explain: + image infra/") {
 					t.Errorf("the images are not reviewed:\n%s", rec.Lines())
 				}
 				return
 			}
-			if refused || !claimed(logged(t, log)) {
-				t.Errorf("err %v, claimed %v:\n%s", err, claimed(logged(t, log)), rec.Lines())
+			if refused || !checked(logged(t, log)) {
+				t.Errorf("err %v, checked %v:\n%s", err, checked(logged(t, log)), rec.Lines())
 			}
 		})
 	}
@@ -411,19 +409,19 @@ func TestAStepChecksTheRunsApproval(t *testing.T) {
 	t.Cleanup(func() { reviewedByRun = saved })
 
 	reviewedByRun = &runReview{approved: map[string]grant.Review{"home-a": full}, approvedBy: "alice"}
-	s, by, err := stepReview(ui.Discard, nil, nil, cfg, "home-a", g, grant.PrepareScope, nil, true, "x")
+	s, by, err := stepReview(ui.Discard, answerer{}, nil, nil, cfg, "home-a", g, grant.PrepareScope, nil, true, "x")
 	if err != nil || s == nil || by != "alice" {
 		t.Errorf("approved: %v %v %q", s, err, by)
 	}
 
 	reviewedByRun = &runReview{approved: map[string]grant.Review{}}
-	if _, _, err := stepReview(ui.Discard, nil, nil, cfg, "home-a", g, grant.PrepareScope, nil, true, "x"); err == nil || !strings.Contains(problemText(err), "changed after it was approved") {
+	if _, _, err := stepReview(ui.Discard, answerer{}, nil, nil, cfg, "home-a", g, grant.PrepareScope, nil, true, "x"); err == nil || !strings.Contains(problemText(err), "changed after it was approved") {
 		t.Errorf("not refused: %v", err)
 	}
 
 	// A dry run under the run reads nothing: the run showed the review.
 	reviewedByRun = &runReview{}
-	if s, _, err := stepReview(ui.Discard, nil, nil, cfg, "home-a", g, grant.PrepareScope, nil, false, "x"); s != nil || err != nil {
+	if s, _, err := stepReview(ui.Discard, answerer{}, nil, nil, cfg, "home-a", g, grant.PrepareScope, nil, false, "x"); s != nil || err != nil {
 		t.Errorf("dry run: %v %v", s, err)
 	}
 }
@@ -433,14 +431,20 @@ func TestAStepChecksTheRunsApproval(t *testing.T) {
 // dials the others directly.
 func joinConfig(t *testing.T) string {
 	t.Helper()
+	return joinConfigAs(t, "[data]")
+}
+
+// joinConfigAs is joinConfig with home-b declared with roles.
+func joinConfigAs(t *testing.T, roles string) string {
+	t.Helper()
 	body, err := os.ReadFile(fixtureConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := strings.Replace(string(body), "    endpoint: vm.example.org:51820\n", "    endpoint: vm.example.org:51820\n    public_address: 203.0.113.10\n", 1)
 	s = strings.Replace(s, "  home-a:\n    roles: [data, apps]\n", "  home-a:\n    roles: [data, apps]\n    endpoint: 192.0.2.1:51820\n", 1)
-	joined := strings.Replace(s, "  home-b:\n    roles: [data, apps]", "  home-b:\n    roles: [data]", 1)
-	if joined == s {
+	joined := strings.Replace(s, "  home-b:\n    roles: [data, apps]", "  home-b:\n    roles: "+roles, 1)
+	if !strings.Contains(joined, "  home-b:\n    roles: "+roles+"\n") {
 		t.Fatal("the fixture no longer declares the sites this edit expects")
 	}
 	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
@@ -452,28 +456,172 @@ func joinConfig(t *testing.T) string {
 
 // site add applies the new site's whole render in its stage 4, so it
 // reviews the new site's images as apply --site does: with something to
-// approve and no terminal it is refused before any host is claimed, and the
+// approve and no terminal it is refused before any host's admission is checked, and the
 // dry run shows the review and asks nothing.
-func TestSiteAddReviewsBeforeTheClaim(t *testing.T) {
+func TestSiteAddReviewsBeforeTheAdmissionCheck(t *testing.T) {
 	path := joinConfig(t)
 	log := loggingSSH(t, "")
 	fakeGrants(t, func(string) *grant.Record { return nil })
 	rec := recordConverge(t)
-	err := runSiteAdd([]string{"home-b", "--config", path, "--secrets", mustAbs(t, fixtureSecretsPath()), "--sudo=false", "--execute"}, noTerminalStdin(), io.Discard)
+	err := runSiteAdd([]string{"home-b", "--config", path, "--secrets", mustAbs(t, fixtureSecretsPath()), "--execute"}, noTerminalStdin(), io.Discard)
 	if err == nil || !strings.Contains(problemText(err), "stdin is not a terminal") || !strings.Contains(problemText(err), "paisans site add home-b --execute") {
 		t.Fatalf("got %v\n%s", err, rec.Lines())
 	}
-	if claimed(logged(t, log)) {
-		t.Errorf("the hosts were claimed before the review was approved:\n%s", logged(t, log))
+	if checked(logged(t, log)) {
+		t.Errorf("the hosts were checked before the review was approved:\n%s", logged(t, log))
 	}
 	if !strings.Contains(rec.Lines(), "explain: + image infra/") || strings.Contains(rec.Lines(), "explain: + key ") {
 		t.Errorf("the review is not the new site's images:\n%s", rec.Lines())
 	}
 
 	rec = recordConverge(t)
-	_ = runSiteAdd([]string{"home-b", "--config", path, "--secrets", mustAbs(t, fixtureSecretsPath()), "--sudo=false"}, noTerminalStdin(), io.Discard)
+	_ = runSiteAdd([]string{"home-b", "--config", path, "--secrets", mustAbs(t, fixtureSecretsPath())}, noTerminalStdin(), io.Discard)
 	if !rec.Has("pending", "review what paisans-stack.yaml grants") {
 		t.Errorf("the dry run does not show the review:\n%s", rec.Lines())
+	}
+}
+
+// A site declared [data, apps] is joined by apply with no --site, which
+// starts its apps with an apply of its own once the join is done. site add
+// alone refuses it, since its stages start no app stacks; as a step of
+// apply, it joins the site's data role and leaves the apps to that apply.
+func TestSiteAddJoinsTheDataRoleAsAStepOfApply(t *testing.T) {
+	path := joinConfigAs(t, "[data, apps]")
+	quietSSH(t)
+	fakeGrants(t, func(string) *grant.Record { return nil })
+	args := []string{"home-b", "--config", path, "--secrets", mustAbs(t, fixtureSecretsPath())}
+	rec := recordConverge(t)
+	err := runSiteAdd(args, noTerminalStdin(), io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "must be exactly [data]") {
+		t.Fatalf("site add alone: %v\n%s", err, rec.Lines())
+	}
+
+	saved := reviewedByRun
+	t.Cleanup(func() { reviewedByRun = saved })
+	reviewedByRun = &runReview{}
+	// The fake hosts run no etcd, so the join stops reading them, where the
+	// same join of a site declared [data] stops.
+	errText := func(err error) string {
+		if err == nil {
+			return ""
+		}
+		return err.Error()
+	}
+	asData := errText(runSiteAdd([]string{"home-b", "--config", joinConfig(t), "--secrets", mustAbs(t, fixtureSecretsPath())}, noTerminalStdin(), io.Discard))
+	rec = recordConverge(t)
+	got := errText(runSiteAdd(args, noTerminalStdin(), io.Discard))
+	if strings.Contains(got, "must be exactly [data]") || got != asData {
+		t.Errorf("as a step of apply: %s\nwant, as [data]: %s\n%s", got, asData, rec.Lines())
+	}
+}
+
+// A run that stops after its review recorded the approvals, and before
+// home-b joins, is run again: its review finds every entry approved on the
+// host and asks nothing. site add then records only the images the join
+// started, keeping the approvals for the rest of home-b's grant, so the
+// apply that follows the join starts them without a refusal. HAProxy, which
+// only the apps role puts on a data site, is one of them when infra.images
+// overrides it.
+func TestAResumedJoinKeepsTheApprovalsForItsApps(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		haproxy string
+	}{
+		{"foundation infra", ""},
+		{"haproxy overridden", "docker.io/library/haproxy:9.9"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			full := fixture(t)
+			if c.haproxy != "" {
+				full.Infra.Images = map[string]string{"haproxy": c.haproxy}
+			}
+			resumeJoin(t, full)
+		})
+	}
+}
+
+// resumeJoin is a resumed run's join of home-b, declared [data, apps] in
+// full, through site add's review and record and then apply --site's
+// review, which fails t if it refuses.
+func resumeJoin(t *testing.T, full *config.Config) {
+	t.Helper()
+	fakeGrants(t, func(string) *grant.Record { return nil })
+	secrets, err := config.LoadSecrets(fixtureSecretsPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	granted := func(cfg *config.Config) grant.Grant {
+		t.Helper()
+		plan, err := render.Build(cfg, secrets)
+		if err != nil {
+			t.Fatal(err)
+		}
+		g, err := grant.For(cfg, plan, "home-b")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return g
+	}
+	d := full.Deployment()
+	review := func(cfg *config.Config, scope grant.Scope) *siteReview {
+		t.Helper()
+		s, err := reviewSite(d, "home-b", granted(cfg), scope, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	// The first run's review, approved and recorded.
+	if err := recordApproval(ui.Discard, review(full, grant.AllScope), d, "alice"); err != nil {
+		t.Fatal(err)
+	}
+	// The run again: nothing is asked.
+	again := review(full, grant.AllScope)
+	if n := again.review.Pending(); n != 0 {
+		t.Fatalf("the resumed run asks for %d entries", n)
+	}
+	saved := reviewedByRun
+	t.Cleanup(func() { reviewedByRun = saved })
+	reviewedByRun = &runReview{approved: map[string]grant.Review{"home-b": again.review}}
+
+	joined := joinedAsData(full, "home-b")
+	g := granted(joined)
+	scope, err := siteAddScope(joined, "home-b", g, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, by, err := stepReview(ui.Discard, answerer{}, noTerminalStdin(), io.Discard, joined, "home-b", g, scope, nil, true, "paisans site add home-b --execute")
+	if err != nil {
+		t.Fatalf("site add: %s", problemText(err))
+	}
+	if err := recordGrant(ui.Discard, s, d, by); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := stepReview(ui.Discard, answerer{}, noTerminalStdin(), io.Discard, full, "home-b", granted(full), grant.ApplyScope(), nil, true, "paisans apply --site home-b --execute"); err != nil {
+		t.Errorf("apply --site home-b after the join: %s", problemText(err))
+	}
+}
+
+// The join's configuration gives the joining site the data role alone and
+// leaves the declaration as it was read.
+func TestJoinedAsDataLeavesTheDeclaration(t *testing.T) {
+	cfg := fixture(t)
+	joined := joinedAsData(cfg, "home-b")
+	if got := joined.Sites["home-b"].Roles; !slices.Equal(got, []config.Role{config.RoleData}) {
+		t.Errorf("joined as %v", got)
+	}
+	if got := cfg.Sites["home-b"].Roles; !slices.Equal(got, []config.Role{config.RoleData, config.RoleApps}) {
+		t.Errorf("the declaration changed to %v", got)
+	}
+	if pinned := cfg.PinnedTo("home-b"); len(pinned) == 0 {
+		t.Fatal("the fixture pins no app to home-b")
+	} else if left := joined.PinnedTo("home-b"); len(left) > 0 {
+		t.Errorf("the join starts %v, pinned to home-b", left)
+	} else if _, ok := cfg.Apps[pinned[0]]; !ok {
+		t.Errorf("the declaration lost %s", pinned[0])
+	}
+	if got := joinedAsData(cfg, "vm"); got != cfg {
+		t.Errorf("a site without [data, apps] was changed")
 	}
 }
 
@@ -488,9 +636,9 @@ func TestSiteAddChecksTheRunsApproval(t *testing.T) {
 	t.Cleanup(func() { reviewedByRun = saved })
 	reviewedByRun = &runReview{approved: map[string]grant.Review{}}
 	recordConverge(t)
-	err := runSiteAdd([]string{"home-b", "--config", path, "--secrets", mustAbs(t, fixtureSecretsPath()), "--sudo=false", "--execute"}, noTerminalStdin(), io.Discard)
-	if err == nil || !strings.Contains(problemText(err), "changed after it was approved") || claimed(logged(t, log)) {
-		t.Errorf("err %v, claimed %v", err, claimed(logged(t, log)))
+	err := runSiteAdd([]string{"home-b", "--config", path, "--secrets", mustAbs(t, fixtureSecretsPath()), "--execute"}, noTerminalStdin(), io.Discard)
+	if err == nil || !strings.Contains(problemText(err), "changed after it was approved") || checked(logged(t, log)) {
+		t.Errorf("err %v, checked %v", err, checked(logged(t, log)))
 	}
 }
 
@@ -529,7 +677,7 @@ func TestFoundationImagesAreListedApart(t *testing.T) {
 		t.Errorf("only a foundation image is pending:\n%s", rec.Lines())
 	}
 	var out bytes.Buffer
-	if err := approveReviews(ui.Discard, noTerminalStdin(), &out, only, "x"); err != nil || out.Len() != 0 {
+	if err := approveReviews(ui.Discard, answerer{}, noTerminalStdin(), &out, only, "x"); err != nil || out.Len() != 0 {
 		t.Errorf("only a foundation image asked: err %v, printed %q", err, out.String())
 	}
 }

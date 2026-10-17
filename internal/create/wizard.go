@@ -2,6 +2,7 @@ package create
 
 import (
 	"cmp"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -65,6 +66,15 @@ type Wizard struct {
 	// mailAsked is set once mail has been asked, after which sending none
 	// is the default when none was chosen.
 	mailAsked bool
+	// DefaultUser is the deployment's own user, paisans-<token>, which a
+	// machine whose SSH user is left empty is reached as. create sets it
+	// from the id it made; "" names it generically.
+	DefaultUser string
+	// LocalKeys are the SSH public keys on the workstation, offered as the
+	// first operator's before any is pasted, since whoever runs create is
+	// usually the first operator named. create sets them; none asks only for
+	// pasted keys.
+	LocalKeys []LocalKey
 }
 
 // NewWizard asks its questions through p.
@@ -132,7 +142,7 @@ func (w *Wizard) community() error {
 
 func (w *Wizard) operators() error {
 	a := &w.Answers
-	w.p.Say("\nOperators: the people who run the machines. They log in to every site, hold the secrets and run apply, and each becomes a Pocket ID user and a community admin on the first apply. A deployment has at least two, so that one lost workstation does not leave nobody able to run it.")
+	w.p.Say("\nOperators: the people who run the machines. They log in to every site, hold the secrets and run apply, and each becomes a Pocket ID user and a community admin on the first apply. Declare at least two, so that one lost workstation does not leave nobody able to run it. One is allowed while you find a second: validate warns about it, and so does the health page if there is one, until you do.")
 	prev := a.Operators
 	var operators []Operator
 	for i := 0; ; i++ {
@@ -141,8 +151,14 @@ func (w *Wizard) operators() error {
 			d = prev[i]
 		}
 		var taken []string
+		keys := map[string]string{}
 		for _, op := range operators {
 			taken = append(taken, op.ID)
+			for _, k := range op.Keys {
+				if fp, err := checkKey(k); err == nil {
+					keys[fp] = op.ID
+				}
+			}
 		}
 		if i > 0 {
 			w.p.Say("\nOperator %d", i+1)
@@ -159,15 +175,14 @@ func (w *Wizard) operators() error {
 		if err != nil {
 			return err
 		}
-		keys, err := w.p.Lines("SSH public keys", d.Keys, checkKey)
+		lines, err := w.keys(i, d.Keys, keyCheck(keys))
 		if err != nil {
 			return err
 		}
-		operators = append(operators, Operator{ID: id, Name: name, Email: email, Keys: keys})
-		if len(operators) < 2 {
-			continue
-		}
-		more, err := w.p.YesNo("Add another operator?", i+1 < len(prev))
+		operators = append(operators, Operator{ID: id, Name: name, Email: email, Keys: lines})
+		// A second operator is what the deployment should have, so the
+		// question after the first defaults to adding one.
+		more, err := w.p.YesNo("Add another operator?", len(operators) < 2 || i+1 < len(prev))
 		if err != nil {
 			return err
 		}
@@ -177,6 +192,33 @@ func (w *Wizard) operators() error {
 	}
 	a.Operators = operators
 	return nil
+}
+
+// keys asks for operator i's public keys. The first operator is offered each
+// key on this machine, until keys have been given, which are kept as the
+// default instead; any other, or one who takes none, pastes them.
+func (w *Wizard) keys(i int, prev []string, check func(got []string, s string) error) ([]string, error) {
+	if i == 0 && len(prev) == 0 && len(w.LocalKeys) > 0 {
+		w.p.Say("SSH public keys found on this machine. Take the ones that are this operator's:")
+		var chosen []string
+		for _, k := range w.LocalKeys {
+			// A key the loader would refuse is not offered.
+			if check(chosen, k.Line) != nil {
+				continue
+			}
+			use, err := w.p.YesNo(fmt.Sprintf("Use %s (%s)?", k.Name, k.About), true)
+			if err != nil {
+				return nil, err
+			}
+			if use {
+				chosen = append(chosen, k.Line)
+			}
+		}
+		if len(chosen) > 0 {
+			return chosen, nil
+		}
+	}
+	return w.p.Lines("SSH public keys", prev, check)
 }
 
 func (w *Wizard) sites() error {
@@ -242,7 +284,7 @@ func (w *Wizard) siteNames(sites []Site) []string {
 func (w *Wizard) namedSites(shape Shape, prev []Site) ([]Site, error) {
 	var sites []Site
 	for i, ss := range shapes[shape].sites {
-		d := Site{Name: ss.name, SSHUser: "ubuntu"}
+		d := Site{Name: ss.name}
 		if shape == ShapeOneMachine {
 			// The one machine is the whole deployment, so it is named for it.
 			if n := cmp.Or(slug(w.Answers.Name), slug(w.Answers.Domain)); n != "" {
@@ -296,7 +338,7 @@ func (w *Wizard) customSites(prev []Site) ([]Site, error) {
 	w.p.Say("Roles: %s. The whole file is checked before it is written.", roleList(allRoles))
 	var sites []Site
 	for i := range count {
-		d := Site{Name: "site-" + strconv.Itoa(i+1), SSHUser: "ubuntu"}
+		d := Site{Name: "site-" + strconv.Itoa(i+1)}
 		if i < len(prev) {
 			d = prev[i]
 		}
@@ -329,7 +371,9 @@ func (w *Wizard) customSites(prev []Site) ([]Site, error) {
 }
 
 // ssh asks how the toolkit reaches site. The host defaults to the public
-// address, so it is asked only as an override when there is one.
+// address, so it is asked only as an override when there is one. The user may
+// be left empty: the machine is then reached as the deployment's own user,
+// which must exist on the host.
 func (w *Wizard) ssh(site *Site, d Site) error {
 	var err error
 	if site.PublicAddress != "" {
@@ -340,11 +384,11 @@ func (w *Wizard) ssh(site *Site, d Site) error {
 	if err != nil {
 		return err
 	}
-	user := d.SSHUser
-	if user == "" {
-		user = "ubuntu"
+	own := "the deployment's own user"
+	if w.DefaultUser != "" {
+		own = w.DefaultUser + ", the deployment's own"
 	}
-	site.SSHUser, err = w.p.Text("SSH user (must already exist)", user, checkUnixUser)
+	site.SSHUser, err = w.p.Optional("SSH user (blank: "+own+")", d.SSHUser, checkUnixUser)
 	return err
 }
 
@@ -563,7 +607,7 @@ func (w *Wizard) monitor() (bool, error) {
 	}
 	a.MonitorOnGateway = false
 	w.p.Say("It serves its own hostname, so it needs a public address.")
-	d := Site{Name: monitorSite, SSHUser: "ubuntu"}
+	d := Site{Name: monitorSite}
 	if a.Monitor != nil {
 		d = *a.Monitor
 	}

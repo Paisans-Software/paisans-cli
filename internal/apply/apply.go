@@ -4,8 +4,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,6 +18,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 // Change is what one file needs, decided before anything is written.
@@ -139,6 +142,9 @@ type Note struct {
 type Plan struct {
 	Site      string
 	Transport string
+	// Pending is the sites pending in this run, sorted, recorded in the
+	// manifest.
+	Pending []string
 	// Deployment is whose files these are, and so where they land.
 	Deployment deployment.Deployment
 	Changes    []Change
@@ -186,6 +192,11 @@ type Plan struct {
 	// meshAddress is the Address line of the site's rendered WireGuard file
 	// (Eg: 10.44.0.1/24), which the interface must hold once WireGuard ran.
 	meshAddress string
+	// meshConf is the site's rendered WireGuard file, as written to
+	// deployment.WireGuardConf. Every mesh step hands it to the WireGuard
+	// helper's put before it starts, syncs or restarts the interface, so the
+	// interface runs what this apply wrote.
+	meshConf string
 	// meshEndpoints are the host names among the peer endpoints of that
 	// file, which must resolve before WireGuard runs.
 	meshEndpoints []string
@@ -209,30 +220,29 @@ type Plan struct {
 	// path refuses the apply before anything is written. See VolumeCheck.
 	Volumes *VolumeCheck
 	// HostSites is set when this site's Caddy mounts the host's own
-	// render.HostSitesDir. Execute creates the directory, root's and 0755,
-	// before the first container that mounts it, when it is missing, and
-	// never touches what is inside it.
+	// render.HostSitesDir. Execute creates the directory, the deployment
+	// user's and 0755, before the first container that mounts it, when it is
+	// absent, and never touches what is inside it.
 	HostSites bool
 	// KeepImages skips pruning and the sweep for this run, as --keep-images
 	// does.
 	KeepImages bool
+	// listsImages is whether Build was given TolerateUnresolved: the plan
+	// lists images, and Execute refuses it.
+	listsImages bool
 	// Pins are the builds the images this site's compose files name are
 	// planned to run, one per image a compose file this plan read names
 	// (see render.Plan.Images). Execute records them in the manifest. See
 	// ResolveImages, and Caddy and Moved.
 	Pins []ImagePin
-	// recordedPins is what the manifest Build read recorded of the builds
-	// the site runs, kept for a stack whose compose file this plan does not
-	// settle.
-	recordedPins []render.ManifestPin
 	// recordedArch is the architecture the manifest Build read recorded,
 	// and Arch the one this plan was made for, which Execute records.
 	recordedArch string
 	Arch         string
-	// recordedWebServer is what the manifest Build read recorded of the files
-	// in the operator's web server's include directory. Apply writes them
-	// after every site is up, so every manifest write keeps them.
-	recordedWebServer []render.ManifestWebServer
+	// archRead is whether Build was given the site's architecture. A plan
+	// made without it records the architecture the manifest has when
+	// written.
+	archRead bool
 	// images is what each stack of this site renders, from its compose file.
 	images map[string][]string
 	// imageHistory is the manifest's record of every repository this site
@@ -244,13 +254,11 @@ type Plan struct {
 	// partial marks a plan built with Only: like a scoped one, its manifest
 	// write keeps every entry outside the named stacks.
 	partial bool
-	// recorded is the manifest as Build read it, which a scoped plan's own
-	// manifest write keeps for every file outside its scope.
-	recorded map[string]render.ManifestFile
 	// Leftovers are the manifest's entries for files this site no longer
-	// renders, marked left over, set only on a whole plan. Its manifest write
-	// keeps them, and nothing deletes the files: they are this deployment's,
-	// and what to do with them is the operator's decision.
+	// renders, marked left over, as Build read them, set only on a whole
+	// plan. Its manifest write keeps every such entry the manifest has when
+	// written, and nothing deletes the files: they are this deployment's, and
+	// what to do with them is the operator's decision.
 	Leftovers []render.ManifestFile
 	// rendered is every path this site renders, relative to the root of the
 	// host, for the manifest write's left over marks.
@@ -281,39 +289,21 @@ type Plan struct {
 type WireGuardStep int
 
 const (
-	// WireGuardNone means the interface is up and its file did not change.
+	// WireGuardNone means the interface is up, its file did not change, and
+	// it runs that file's address, key and peers.
 	WireGuardNone WireGuardStep = iota
-	// WireGuardStart enables the unit and starts it: a first apply, or an
-	// interface found down.
+	// WireGuardStart puts the file and enables and starts the unit through
+	// the WireGuard helper: a first apply, or an interface found down.
 	WireGuardStart
-	// WireGuardSync hands the running interface its new peers without taking
-	// it down, which is the ordinary update: a site joined or left.
+	// WireGuardSync puts the file and hands the running interface its peers
+	// without taking it down, which is the ordinary update: a site joined or
+	// left.
 	WireGuardSync
-	// WireGuardRestart takes the interface down and up again. Only a change to
-	// a line that wg-quick itself applies needs it, because `wg syncconf`
-	// never sees those lines.
+	// WireGuardRestart puts the file and restarts the interface. Only a
+	// change to a line that wg-quick itself applies needs it, because `wg
+	// syncconf`, which the helper's sync runs, never sees those lines.
 	WireGuardRestart
 )
-
-// Command is what the step runs on the host for d's interface, empty for
-// WireGuardNone.
-func (w WireGuardStep) Command(d deployment.Deployment) string {
-	iface := d.Interface()
-	switch w {
-	case WireGuardStart:
-		return "systemctl enable --now " + d.WireGuardUnit()
-	case WireGuardSync:
-		// Through a temporary file rather than a pipe. /bin/sh has no
-		// pipefail, so a `wg-quick strip` that failed would hand syncconf an
-		// empty configuration, and syncconf removes every peer it is not
-		// given: one failed command would cut this site off the mesh.
-		return "set -e; f=$(mktemp); trap 'rm -f \"$f\"' EXIT; wg-quick strip " + iface + " > \"$f\"; wg syncconf " + iface + " \"$f\""
-	case WireGuardRestart:
-		return "systemctl restart " + d.WireGuardUnit()
-	default:
-		return ""
-	}
-}
 
 // Title is the step's name in the progress output (Eg: start mesh psns-566c).
 // Describe is the same step's detail.
@@ -338,9 +328,9 @@ func (w WireGuardStep) Describe(d deployment.Deployment) string {
 	case WireGuardStart:
 		return "start " + iface + " and enable it at boot, before any stack moves"
 	case WireGuardSync:
-		return "give " + iface + " its new peers in place, without taking the mesh down"
+		return "give " + iface + " its file's key and peers in place, without taking the mesh down"
 	case WireGuardRestart:
-		return "restart " + iface + ", because a line only wg-quick applies changed"
+		return "restart " + iface + ", so it is up on its file's Address and MTU, which only wg-quick applies"
 	default:
 		return ""
 	}
@@ -382,10 +372,11 @@ const remoteRoot = "/"
 // apply would be a blind overwrite.
 func manifestPath(d deployment.Deployment) string { return d.Manifest() }
 
-// HostSitesCommand creates render.HostSitesDir, root's and 0755, when it is
-// missing, and changes nothing when it exists.
-func HostSitesCommand() string {
-	return fmt.Sprintf("[ -d %[1]s ] || install -d -m 755 -o root -g root %[1]s", render.HostSitesDir)
+// HostSitesCommand creates render.HostSitesDir, the deployment user's and
+// 0755, when it is absent: the gateway's Caddy mounts it, and the host's
+// owner writes their site files into it.
+func HostSitesCommand(d deployment.Deployment) string {
+	return fmt.Sprintf("[ -d %[1]s ] || install -d -m 755 %[1]s", shellQuote(render.HostSitesDir(d)))
 }
 
 // gatewayCaddyfile and gatewayCompose are the two rendered files that say a
@@ -402,21 +393,12 @@ const (
 	gatewayCompose   = "infra/compose.yaml"
 )
 
-// wireguardProbe asks whether d's interface exists. It reads the kernel
-// rather than the unit, because an interface somebody brought up with a bare
-// `wg-quick up` is up for every service binding to it, and `systemctl enable
-// --now` on top of it would fail on an interface that already exists. It
-// prints rather than exits non zero, so that "down" cannot be confused with
-// ssh failing. The file and the unit are deployment.WireGuardConf and
-// WireGuardUnit.
-func wireguardProbe(d deployment.Deployment) string {
-	return "if ip link show " + d.Interface() + " >/dev/null 2>&1; then echo up; else echo down; fi"
-}
-
 // Option adjusts what Build plans, on the operator's word.
 type Option func(*options)
 
 type options struct {
+	// pending is the sites pending in this run; see Pending.
+	pending    []string
 	scope      []string
 	overwrite  []string
 	recreate   []string
@@ -427,10 +409,13 @@ type options struct {
 	arch string
 	// noSweepRead leaves Plan.Sweep unread; see SkipSweepRead.
 	noSweepRead bool
-	only        []string
-	except      []string
-	after       []*Plan
-	dbApps      []string
+	// tolerateUnresolved plans an image it cannot resolve; see
+	// TolerateUnresolved.
+	tolerateUnresolved bool
+	only               []string
+	except             []string
+	after              []*Plan
+	dbApps             []string
 	// replicationChange lets a garage.toml with a different
 	// replication_factor replace the deployed one. Only `storage add
 	// --change-replication` sets it; see GarageReplication.
@@ -443,6 +428,12 @@ type options struct {
 	peers []PeerCompose
 	// served is Plan.Served; see Serves.
 	served diagnosis.Served
+}
+
+// Pending names the sites pending in this run, recorded in the manifest so
+// that what compares this site with a render later renders the same view.
+func Pending(sites ...string) Option {
+	return func(o *options) { o.pending = slices.Compact(slices.Sorted(slices.Values(sites))) }
 }
 
 // Serves gives the plan the hostnames each Caddy site serves, from
@@ -470,6 +461,15 @@ func ReplicationChange() Option {
 // nothing about what the sweep would remove. Execute sweeps all the same.
 func SkipSweepRead() Option {
 	return func(o *options) { o.noSweepRead = true }
+}
+
+// TolerateUnresolved plans an image the registry cannot resolve as a pin
+// whose Source is unresolved, with the reason in ImagePin.Unresolved and a
+// note, where Build otherwise refuses. Its line is left as rendered, a track
+// included, so the plan is one to read and never to execute: it is for
+// `paisans images`, which lists what a site runs and writes nothing.
+func TolerateUnresolved() Option {
+	return func(o *options) { o.tolerateUnresolved = true }
 }
 
 // KeepImages leaves superseded images on the host for this run, as
@@ -542,7 +542,7 @@ func DatabaseApps(apps ...string) Option {
 }
 
 // Scope restricts an apply to the named files, as paths relative to the
-// site's root (Eg: etc/wireguard/psns-f2a9.conf). It is for a staged
+// site's root (Eg: srv/paisans/f2a9/psns-f2a9.conf). It is for a staged
 // operation such as `site add`, which has to move one file on every site and
 // nothing else: the new peer goes into the WireGuard file on every site before etcd may change, and
 // HAProxy's backend list changes on a site whose patroni.env changed too,
@@ -572,7 +572,9 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 		opt(&o)
 	}
 	out.Report = o.report
+	out.Pending = o.pending
 	out.Served = o.served
+	out.listsImages = o.tolerateUnresolved
 	// An earlier pass of the same apply already carried out these. See After.
 	doneOverwrite, doneStacks := map[string]bool{}, map[string]bool{}
 	for _, p := range o.after {
@@ -610,13 +612,11 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 	if err != nil {
 		return nil, err
 	}
-	out.recordedPins = manifest.Pins
-	out.recordedArch, out.Arch = manifest.Arch, o.arch
+	out.recordedArch, out.Arch, out.archRead = manifest.Arch, o.arch, o.arch != ""
 	if out.Arch == "" {
 		// A plan made without reading the architecture keeps the record.
 		out.Arch = manifest.Arch
 	}
-	out.recordedWebServer = manifest.WebServer
 	out.imageHistory = manifest.Images
 	recorded := make(map[string]string, len(entries))
 	for path, entry := range entries {
@@ -628,7 +628,6 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 	}
 	if len(o.scope) > 0 {
 		out.scoped = true
-		out.recorded = entries
 	}
 	var onlySet map[string]bool
 	if len(o.only) > 0 {
@@ -637,7 +636,6 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			onlySet[stack] = true
 		}
 		out.partial = true
-		out.recorded = entries
 	}
 	var exceptSet map[string]bool
 	if len(o.except) > 0 {
@@ -646,7 +644,6 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			exceptSet[stack] = true
 		}
 		out.partial = true
-		out.recorded = entries
 	}
 
 	prefix := site + "/"
@@ -729,13 +726,15 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			if FreshImages != nil && !leftAlone {
 				fresh = FreshImages()
 			}
-			pinned, pins, notes, err := pinImages(site, images, file.Content, current, found, r, fresh, peers)
+			pinned, pins, notes, err := pinImages(site, images, file.Content, current, found, r, fresh, peers, o.tolerateUnresolved)
 			if err != nil {
 				finish(done, err)
 				return nil, err
 			}
 			content = pinned
-			if track := unresolvedTrack(content); track != "" && !leftAlone {
+			// A track left by an image TolerateUnresolved kept unresolved
+			// is that image's line as rendered, in a plan never executed.
+			if track := unresolvedTrack(content); track != "" && !leftAlone && !o.tolerateUnresolved {
 				err := &ui.Problem{
 					Hint:    fmt.Sprintf("%s would run %s, which runs nowhere on %s yet", rel, ui.Name(track), site),
 					Explain: "It follows a track, which a host cannot pull until `paisans apply` resolves it to a build. Run apply, then this command again.",
@@ -745,7 +744,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			}
 			if !leftAlone {
 				for _, pin := range pins {
-					if provenOn(pin, o.arch, out.recordedArch) {
+					if pin.Source == "unresolved" || provenOn(pin, o.arch, out.recordedArch) {
 						continue
 					}
 					note, err := platformCheck(site, o.arch, pin, r)
@@ -801,6 +800,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			wireguard = &copied
 			wireguardBefore = current
 			out.meshAddress = wireguardAddress(file.Content)
+			out.meshConf = content
 			out.meshEndpoints = endpointNames(file.Content)
 		}
 
@@ -876,7 +876,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 		}
 		sort.Slice(out.Changes, func(i, j int) bool { return out.Changes[i].Path < out.Changes[j].Path })
 		if wireguard != nil {
-			step, err := wireguardStep(d, *wireguard, wireguardBefore, t)
+			step, err := wireguardStep(site, d, *wireguard, wireguardBefore, t)
 			if err != nil {
 				return nil, err
 			}
@@ -917,6 +917,14 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			owed[action.Stack] = true
 		}
 		stacks[action.Stack] = true
+	}
+
+	stopped, err := out.probeStopped(t)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", site, err)
+	}
+	for stack := range stopped {
+		stacks[stack] = true
 	}
 
 	forced := map[string]bool{}
@@ -968,6 +976,19 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 		} else if envChanged[stack] {
 			action.Recreate = true
 			action.Reason = "an environment or compose file changed, and Compose passes environment at start, so a running container cannot be told about a new value"
+			if stack == infraStack && len(refresh) > 0 {
+				action.Refresh = sortedKeys(refresh)
+				action.Reason += "; " + strings.Join(action.Refresh, ", ") + " is restarted after it if `up -d` leaves its container in place, since a changed bind mounted file is not a reason Compose recreates one"
+			}
+		} else if why := stopped[stack]; why != "" {
+			// A restart would not do: it starts neither a removed container
+			// nor, for the infrastructure stack, a service it was narrowed
+			// away from. `up -d` creates what is missing and starts what is
+			// stopped, and leaves every running container that matches its
+			// configuration as it is, so Patroni on the primary is not
+			// restarted to start a stopped Garage beside it.
+			action.Recreate = true
+			action.Reason = why
 			if stack == infraStack && len(refresh) > 0 {
 				action.Refresh = sortedKeys(refresh)
 				action.Reason += "; " + strings.Join(action.Refresh, ", ") + " is restarted after it if `up -d` leaves its container in place, since a changed bind mounted file is not a reason Compose recreates one"
@@ -1051,7 +1072,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 	out.HostSites = out.GatewayChanging && plan.HostSites[site]
 
 	if wireguard != nil {
-		step, err := wireguardStep(d, *wireguard, wireguardBefore, t)
+		step, err := wireguardStep(site, d, *wireguard, wireguardBefore, t)
 		if err != nil {
 			return nil, err
 		}
@@ -1063,7 +1084,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 
 // wireguardStep decides what d's interface needs. Reading the host here is a
 // probe and changes nothing, so a dry run can show it.
-func wireguardStep(d deployment.Deployment, change Change, before string, t Transport) (WireGuardStep, error) {
+func wireguardStep(site string, d deployment.Deployment, change Change, before string, t Transport) (WireGuardStep, error) {
 	switch change.Kind {
 	case Create:
 		return WireGuardStart, nil
@@ -1071,15 +1092,19 @@ func wireguardStep(d deployment.Deployment, change Change, before string, t Tran
 		// Execute refuses before any step runs.
 		return WireGuardNone, nil
 	}
-	out, err := t.Run(wireguardProbe(d))
+	link, err := probeLink(d.Interface(), t)
 	if err != nil {
-		return WireGuardNone, fmt.Errorf("asking whether %s is up: %w", d.Interface(), err)
+		return WireGuardNone, err
 	}
-	if strings.TrimSpace(out) != "up" {
+	switch {
+	case !link.exists:
 		return WireGuardStart, nil
-	}
-	if change.Kind == Unchanged {
-		return WireGuardNone, nil
+	case link.state == "DOWN":
+		// A link that is down carries nothing whatever it holds, and a
+		// sync would leave it down.
+		return WireGuardRestart, nil
+	case change.Kind == Unchanged:
+		return runningStep(site, d, change.content, link, t)
 	}
 	if wgQuickLines(before) != wgQuickLines(change.content) {
 		return WireGuardRestart, nil
@@ -1126,11 +1151,15 @@ func Execute(plan *Plan, t Transport) error {
 	return execute(plan, t)
 }
 
-// Refusal is what Execute refuses before it writes anything: a file edited on
-// the host, too little free space for the pulls, or an image volume its
-// service does not mount. A caller that runs a site in several passes asks it
-// of the whole plan first, so nothing is written when any pass would refuse.
+// Refusal is what Execute refuses before it writes anything: a plan built
+// with TolerateUnresolved, a file edited on the host, too little free space
+// for the pulls, or an image volume its service does not mount. A caller
+// that runs a site in several passes asks it of the whole plan first, so
+// nothing is written when any pass would refuse.
 func Refusal(plan *Plan) error {
+	if plan.listsImages {
+		return errors.New("this plan was built to list images, not to apply them")
+	}
 	if conflicts := plan.Conflicts(); len(conflicts) > 0 {
 		var names []string
 		for _, c := range conflicts {
@@ -1214,13 +1243,13 @@ func execute(plan *Plan, t Transport) error {
 	// gateway gates as well, which need no mesh themselves, so that the one
 	// rule is simple: no container is started or checked on a site whose
 	// interface is down.
-	if command := plan.WireGuard.Command(plan.Deployment); command != "" {
+	if plan.WireGuard != WireGuardNone {
 		if err := resolveMeshEndpoints(plan, t); err != nil {
 			return err
 		}
 		done := plan.step(plan.WireGuard.Title(plan.Deployment))
 		done.Detail("%s", plan.WireGuard.Describe(plan.Deployment))
-		err := bringUpMesh(plan, t, command)
+		err := bringUpMesh(plan, t)
 		finish(done, err)
 		if err != nil {
 			return err
@@ -1243,8 +1272,8 @@ func execute(plan *Plan, t Transport) error {
 	// that mounts it, the validation below. An existing one is left exactly
 	// as it is, owner and mode included: it is the host's.
 	if plan.HostSites {
-		if out, err := t.Run(HostSitesCommand()); err != nil {
-			return fmt.Errorf("%s: creating %s, so the gateway was not changed:\n%s", plan.Site, render.HostSitesDir, out)
+		if out, err := t.Run(HostSitesCommand(plan.Deployment)); err != nil {
+			return fmt.Errorf("%s: creating %s, so the gateway was not changed:\n%s", plan.Site, render.HostSitesDir(plan.Deployment), out)
 		}
 	}
 
@@ -1341,9 +1370,11 @@ func execute(plan *Plan, t Transport) error {
 				return fmt.Errorf("%s: reloading the gateway: %w", plan.Site, err)
 			}
 		} else {
-			// A stopped or absent gateway has nothing to reload, and no
-			// stack action will start it, since routing alone is not one.
-			// It starts on the configuration this apply just validated.
+			// A gateway stopped or removed since the plan read the host has
+			// nothing to reload, and no stack action will start it: one
+			// stopped when the plan read it gave the infrastructure stack an
+			// `up -d` (see probeStopped), and runAction starts it there. It
+			// starts on the configuration this apply just validated.
 			done := plan.step("start gateway")
 			done.Detail("the gateway (up -d caddy)")
 			_, err := t.Run(plan.Deployment.ComposeCmd(infraStack) + " up -d caddy")
@@ -1543,7 +1574,15 @@ func readManifest(t Transport, d deployment.Deployment) (map[string]render.Manif
 	if !found {
 		return map[string]render.ManifestFile{}, m, nil
 	}
-	if err := json.Unmarshal([]byte(content), &m); err != nil {
+	// A manifest that does not say which build of paisans wrote it is
+	// read all the same: this apply writes it again, with its own build,
+	// which is what every other reader's refusal of it asks for.
+	m, err = render.ParseManifest([]byte(content))
+	var noBuild *version.NoBuildError
+	if version.IsNewer(err) {
+		return nil, m, fmt.Errorf("%s: %w", manifestPath(d), err)
+	}
+	if err != nil && !errors.As(err, &noBuild) {
 		return nil, m, fmt.Errorf("%s is not readable as a manifest: %w\nIt records what the last apply wrote. Delete it to treat every file on this host as somebody else's, which is the safe reading", manifestPath(d), err)
 	}
 	out := make(map[string]render.ManifestFile, len(m.Files))
@@ -1577,20 +1616,30 @@ func leftovers(recorded map[string]render.ManifestFile, rendered map[string]bool
 // writeManifest records what is now on the host, so the next apply can tell its
 // own writes from somebody's edit.
 //
+// It starts from the manifest on the host as it is when written, read again
+// here: a command that runs a site in stages plans every stage before the
+// first runs, and an earlier stage's scoped apply may have recorded files on
+// this site since Build read it. Every entry, pin, image and web server file
+// this plan does not write is kept as that manifest has it, and so is the
+// architecture, unless Build was given one.
+//
 // A whole plan records what it renders, and keeps every entry for a file it
 // no longer renders, marked left over: the file is still on the host and
 // still this deployment's, and an entry dropped here would make it look like
-// somebody else's. A scoped one starts from the manifest it read and replaces
-// only its own files, because the rest of the site is still what the last
-// whole apply wrote.
+// somebody else's. A scoped one replaces only its own files, because the rest
+// of the site is still what the last apply to write them recorded.
 func writeManifest(plan *Plan, t Transport) error {
+	current, manifest, err := readManifest(t, plan.Deployment)
+	if err != nil {
+		return err
+	}
 	entries := map[string]render.ManifestFile{}
 	if plan.scoped || plan.partial {
-		for path, entry := range plan.recorded {
+		for path, entry := range current {
 			entries[path] = entry
 		}
 	} else {
-		for _, entry := range plan.Leftovers {
+		for _, entry := range leftovers(current, plan.rendered, now()) {
 			entries[entry.Path] = entry
 		}
 	}
@@ -1610,7 +1659,11 @@ func writeManifest(plan *Plan, t Transport) error {
 		files = append(files, entry)
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
-	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files, Pins: pinRecord(plan), Arch: plan.Arch, Images: imageRecord(plan), WebServer: plan.recordedWebServer}, "", "  ")
+	arch := plan.Arch
+	if !plan.archRead {
+		arch = manifest.Arch
+	}
+	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files, Pins: pinRecord(plan, manifest.Pins), Arch: arch, Images: imageRecord(plan, manifest.Images), WebServer: manifest.WebServer, Pending: plan.Pending, Build: version.Current()}, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -1637,7 +1690,7 @@ func heldRoute(exceptSet map[string]bool, file render.File, change Change) bool 
 
 // stackOf returns the stack directory a rendered path belongs to, empty when it
 // belongs to none. `srv/paisans/f2a9/talk/.env` is talk;
-// `etc/wireguard/psns-f2a9.conf` is not a stack at all.
+// `srv/paisans/f2a9/psns-f2a9.conf`, directly under the root, is not a stack at all.
 func stackOf(rel string) string {
 	_, stack, _, ok := deployment.SplitRel(rel)
 	if !ok {

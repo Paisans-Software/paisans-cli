@@ -199,3 +199,39 @@ func TestSetMeshAddsAMissingSubnet(t *testing.T) {
 		})
 	}
 }
+
+// CheckMeshSubnet is the one subnet rule the loader, a request and the
+// WireGuard helper's renderer hold a mesh to: the network in its canonical
+// form, no larger than a /24, clear of every reserved range, and inside
+// RFC 1918's private ranges.
+func TestCheckMeshSubnet(t *testing.T) {
+	const private = "is outside the private ranges 10.0.0.0/8, 172.16.0.0/12 and 192.168.0.0/16 (RFC 1918): another deployment's egress table on a shared host drops these and no other range a mesh may use, so that deployment's user could reach a mesh elsewhere"
+	for subnet, want := range map[string][]string{
+		"10.44.0.0/24":    nil,
+		"10.44.0.0/28":    nil,
+		"10.44.0.5/24":    {"is a host address inside a network, not the network itself, 10.44.0.0/24"},
+		"10.44.0.0/024":   {"is not written in its canonical form, 10.44.0.0/24"},
+		"fd00::/64":       {"is not IPv4"},
+		"10.44.0.0":       {"is not a network in CIDR notation"},
+		"10.44.0.0/16":    {"is larger than a /24, the largest a mesh may be, so it cannot take in an owner's LAN"},
+		"127.0.0.0/24":    {"overlaps 127.0.0.0/8, which the deployment must never reach", private},
+		"0.0.0.0/0":       {"is larger than a /24, the largest a mesh may be, so it cannot take in an owner's LAN", "overlaps 0.0.0.0/8, which the deployment must never reach", "overlaps 127.0.0.0/8, which the deployment must never reach", "overlaps 169.254.0.0/16, which the deployment must never reach", "overlaps 224.0.0.0/3, which the deployment must never reach", private},
+		"169.254.1.0/24":  {"overlaps 169.254.0.0/16, which the deployment must never reach", private},
+		"240.0.0.0/24":    {"overlaps 224.0.0.0/3, which the deployment must never reach", private},
+		"172.16.5.0/24":   nil,
+		"172.31.255.0/24": nil,
+		"192.168.7.0/24":  nil,
+		"44.1.2.0/24":     {private},
+		"172.32.0.0/24":   {private},
+		"100.64.1.0/24":   {private},
+		"11.0.0.0/24":     {private},
+	} {
+		network, problems := config.CheckMeshSubnet(subnet)
+		if strings.Join(problems, "|") != strings.Join(want, "|") {
+			t.Errorf("CheckMeshSubnet(%q) = %q, want %q", subnet, problems, want)
+		}
+		if want == nil && (network == nil || network.String() != subnet) {
+			t.Errorf("CheckMeshSubnet(%q) network = %v", subnet, network)
+		}
+	}
+}

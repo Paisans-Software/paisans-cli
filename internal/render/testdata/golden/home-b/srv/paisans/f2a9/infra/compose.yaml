@@ -16,7 +16,7 @@ services:
       - --name=home-b
       - --data-dir=/var/lib/etcd
       - --listen-peer-urls=http://10.44.0.2:2380
-      - --listen-client-urls=http://10.44.0.2:2379,http://127.0.0.1:2379
+      - --listen-client-urls=http://10.44.0.2:2379
       - --initial-advertise-peer-urls=http://10.44.0.2:2380
       - --advertise-client-urls=http://10.44.0.2:2379
       - --initial-cluster=home-a=http://10.44.0.1:2380,home-b=http://10.44.0.2:2380,vm=http://10.44.0.3:2380

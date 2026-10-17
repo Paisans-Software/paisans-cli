@@ -21,7 +21,7 @@ import (
 func fakeRunGrants(t *testing.T, stale ...string) {
 	t.Helper()
 	saved, savedRender := convergeRecord, convergeRender
-	convergeRecord = func(_ *config.Config, site string, g grant.Grant, _ bool) (grant.Record, error) {
+	convergeRecord = func(_ *config.Config, site string, g grant.Grant) (grant.Record, error) {
 		for _, s := range stale {
 			if s == site {
 				return grant.Record{}, nil
@@ -39,7 +39,7 @@ func convergeWith(t *testing.T, stdin io.Reader, stdout io.Writer, extra ...stri
 	t.Helper()
 	var err error
 	captureStdout(t, func() {
-		err = runApply(append([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "--sudo=false"}, extra...), stdin, stdout)
+		err = runApply(append([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath()}, extra...), stdin, stdout)
 	})
 	return err
 }
@@ -143,11 +143,11 @@ func TestConvergeReviewNeedsEverySite(t *testing.T) {
 	fakeChecks(t, nil)
 	fakeRunGrants(t)
 	read := convergeRecord
-	convergeRecord = func(cfg *config.Config, site string, g grant.Grant, sudo bool) (grant.Record, error) {
+	convergeRecord = func(cfg *config.Config, site string, g grant.Grant) (grant.Record, error) {
 		if site == "watch" {
 			return grant.Record{}, errors.New("ssh: connect to host watch.example.org port 22: Connection refused")
 		}
-		return read(cfg, site, g, sudo)
+		return read(cfg, site, g)
 	}
 	rec := recordConverge(t)
 	if err := convergeWith(t, noTerminalStdin(), io.Discard); err != nil || !rec.Has("fail", "watch") {
@@ -155,25 +155,6 @@ func TestConvergeReviewNeedsEverySite(t *testing.T) {
 	}
 	if err := convergeWith(t, noTerminalStdin(), io.Discard, "--execute"); err == nil || !strings.Contains(err.Error(), "watch") || len(*ran) != 0 {
 		t.Errorf("execute: %v, ran %v", err, *ran)
-	}
-}
-
-// The run records each site's web server directory itself, once its web
-// server step has written there, with who approved it.
-func TestConvergeRecordsTheWebServerDirectory(t *testing.T) {
-	cfg := fixture(t)
-	host := &memGrant{}
-	g := grant.Grant{WebServer: &grant.WebServer{IncludeDir: "/srv/caddy.d"}}
-	reviews := map[string]*siteReview{"watch": {grant: g, scope: grant.AllScope, host: host}}
-	saved := reviewedByRun
-	reviewedByRun = &runReview{approvedBy: "alice"}
-	t.Cleanup(func() { reviewedByRun = saved })
-	if err := convergeRecordWebServer(recordConverge(t), cfg, reviews); err != nil {
-		t.Fatal(err)
-	}
-	rec := host.record(t)
-	if rec.WebServer == nil || rec.WebServer.IncludeDir != "/srv/caddy.d" || rec.WebServer.ApprovedBy != "alice" || rec.Keys != nil || rec.Images != nil {
-		t.Errorf("record %+v %+v", rec.WebServer, rec)
 	}
 }
 
@@ -191,8 +172,8 @@ func TestConvergeDoesNotAskAgainForWhatWasApproved(t *testing.T) {
 		}
 	}
 	ran := fakeConverge(t, map[string]error{"apply --site home-a": errors.New("home-a: boom")})
-	convergeGrantHost = func(_ *config.Config, site string, _ bool) registry.Runner { return hosts[site] }
-	convergeRecord = func(cfg *config.Config, site string, _ grant.Grant, _ bool) (grant.Record, error) {
+	convergeGrantHost = func(_ *config.Config, site string) registry.Runner { return hosts[site] }
+	convergeRecord = func(cfg *config.Config, site string, _ grant.Grant) (grant.Record, error) {
 		rec, _, _, err := grant.Read(hosts[site], cfg.Deployment())
 		return rec, err
 	}

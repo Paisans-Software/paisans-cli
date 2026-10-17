@@ -10,6 +10,105 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+## [0.3.0-rc.1] - 2026-10-17
+
+### Added
+
+- `apply` runs on the sites it has: a site not yet admitted is left out, a joined site that does not answer is kept, the plan lists them, and `--require-all` fails a degraded run.
+- The gateway's Caddy answers `/.well-known/paisans/<token>`, and `apply` ends a gateway's step by fetching it through the public address, failing when another server answers on 443 or 80.
+- `infra.images` and `infra.postgres.<major>.spilo` override the infrastructure stack's images without a catalog release, and `paisans images` lists each site's builds, what would move, and overrides behind their track.
+- `site request --site <s>` writes the request a host's owner admits that site from, naming the site and its roles, and prints its digest on stderr for the owner to compare over a trusted channel.
+- Any run with `--execute` that logs in to a site leaving `ssh.user` out writes the deployment's user there; a run without `--execute` only says so, and a failed write is a warning.
+- `site admit` and `site evict` let a host's owner admit a deployment as its own unprivileged user with rootless Docker, from a request on the host or over their own SSH, and undo it.
+- `site list` prints every site the configuration declares, with its roles, mesh address, SSH destination and public addresses, reading `--config` or the working directory's file.
+- `site prepare --all` prepares every site the configuration declares, one at a time in its order, each with its own review, stopping at the first failure.
+- `site admit`, `site prepare` and the rootless deployment commands support Ubuntu 22.04 beside 24.04.
+- Each release attaches static `paisans-linux-amd64` and `paisans-linux-arm64` binaries and a `SHA256SUMS` file, so a host owner can run the CLI on Linux without Go.
+- `doctor` checks each site as its deployment's user: its admission record, no privileged group, rootless Docker at Engine 29.5 or later, linger after the mesh, and sudo for the WireGuard helper alone.
+- `doctor` fetches `/.well-known/paisans/<token>` from the gateway and each monitor running Paisans' Caddy, from the workstation as `apply` does, and fails when 443 or 80 does not answer as this deployment.
+- `create` offers the first operator each SSH public key in `~/.ssh/*.pub` on the workstation, so a key already there is taken with Enter rather than pasted.
+- `--yes` answers every confirmation a command asks for, printing each answer, when `PAISANS_ALLOW_YES=1` is set; `site admit --request` takes its digest as `--digest`, which `--yes` never supplies.
+- Every record paisans writes names the version, commit and modified flag of its build, refusing one without; develop builds report `X.Y.Z-dev`, and `X.Y.Z-rc.N` cuts publish as GitHub pre-releases.
+
+### Changed
+
+- `site remove --host-gone` cuts the site out of the mesh first, waits for Patroni's own failover and skips its Garage node as dead, for a dead host or one no longer the deployment's to reach.
+- Every `host` command is under `site`: `site request`, `site admit`, `site prepare`, `site evict` and `site deployments`, beside `site list`, `site add` and `site remove`.
+- `dns init` writes the registrable domain's DMARC policy when nothing under it has mail, publishes SPF on `community.domain` alone, and gives a hostname DMARC of its own only where no strict policy above covers it.
+- `site evict` refuses, with nothing changed, a host any deployment of which a newer release of paisans claimed, naming the highest release to upgrade to.
+- `validate` warns about one operator instead of refusing it, and refuses a deployment with no operator (`operators-none`); `paisans create` accepts one, and the operator reconciler fails the operators heartbeat until a second is declared.
+- `paisans create` writes the file to `--config`, or `paisans-stack.yaml` in the current directory, once validate refuses nothing in it, without printing it or asking first.
+- `site remove` refuses, in every form and with nothing changed, a site a newer release of paisans applied; `apply` records its release in the manifest, and `site admit` in the registry entry.
+- `doctor` reports a site pending admission, or down after joining, as a warning naming what the deployment is without and how to admit or remove it; a gateway stays a failure.
+- `doctor`'s advice for a container whose mesh address was missing at boot is to start it again, as the deployment's user, or recreate its stack.
+- `secrets set` and `secrets rotate` try an SMTP password from the machine they run on, warning when the server cannot be reached there, and rotate tries it from every site before handing it to any.
+- Behind the owner's web server, `apply` writes each app's reference snippet to `/srv/paisans/<token>/web-server/` from what `site admit` detected, and warns until the owner's copy serves it; nothing of the owner's is written or reloaded.
+- `site remove` cleans a host only as the deployment's user its admission record names, empties its root through `rootlesskit`, and ends with the `site evict` line the host's owner runs to remove the rest.
+- `site deployments` lists every admission record on the host, with the user, site, grants and time, and lists only those with `--sudo=false`.
+- `paisans init` settles the mesh subnet on the hosts that have admitted the deployment and leaves the rest to `site admit`'s own check; `config recover` finds the deployment from the login's admission record.
+- `paisans prune` reads each dangling volume's size from `docker system df -v`, which the deployment's user can read for a volume a container's user owns.
+- The host check runs as the deployment's user: it reads listeners with `ss -Hltnue`, counts its own user's and containers' as this deployment's, and leaves the firewall to `site admit`.
+- Every command that changes a host checks first that the host admitted the deployment as that site, with the grants its roles need, and names the `site request` and `site admit` lines when not.
+- `site prepare` installs nothing: it checks the admission record, then keeps the deployment user's `authorized_keys`, configuration store in `.paisans/config/`, user systemd units and `daemon.json`.
+- The mesh subnet check reads the deployment's own Docker pools from `~/.config/docker/daemon.json`.
+- The host owner's Caddy site files beside a gateway go in `/srv/paisans/<token>/caddy.d`, which `apply` creates as the deployment's user, instead of `/srv/caddy.d`.
+- The deployment record, the grant record and a gateway move's marker live in `/srv/paisans/<token>/.paisans/`, written by the deployment's own user under one lock of the deployment's.
+- `sites.*.roles` lists each role once, so a repeated role is refused when the configuration loads, as `site request` requires.
+- Preflight compares a new data site with the existing data sites on architecture alone, so data sites may run different Ubuntu releases, since Postgres uses its container's glibc.
+- `watchdog: off` is refused, since a data site's Patroni needs a watchdog to fail over safely and no other site uses one.
+- `apps.*.hostname` and `apps.*.hostnames.*` must be lowercase DNS names of two labels or more, so a capital, a single label, an empty or over-long label or an underscore is refused by `validate`.
+- `sites.*.web_server.listen` must be an IPv4 loopback address or the site's own mesh address, its port written without leading zeros, as `site request` requires; `web-server-listen-not-this-host` refuses anything else.
+- `mesh.subnet` and `sites.*.address` must be written in canonical form, Eg: `10.44.0.0/24` and not `10.44.0.0/024`, as `site request` carries them.
+- `mesh.subnet` larger than a /24 or overlapping 0.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16 or 224.0.0.0/3 is refused, as is a site address on its network or broadcast address, since hosts' firewalls trust the mesh.
+- `mesh.subnet` outside 10.0.0.0/8, 172.16.0.0/12 and 192.168.0.0/16 is refused, replacing the `mesh-subnet-is-not-private` warning, so another deployment's user on a shared host cannot reach the mesh.
+- Each site's mesh file renders inside the deployment's directory, as `/srv/paisans/<token>/psns-<token>.conf`, and carries no `PostUp`: a relaying site's forwarding is the host's sysctl.
+- `apply` starts, syncs and restarts each site's mesh through its WireGuard helper, `sudo -n /usr/local/libexec/paisans/wg-psns-<token>`, which checks the mesh file before installing it in `/etc/wireguard`.
+- `doctor` advises reading a down mesh interface's journal with its WireGuard helper's `log`, which the deployment's user can run, instead of `systemctl status` and `journalctl`.
+- `site add`, `site remove` and `mesh rekey` read each site's handshakes, peers and key through the WireGuard helper, as the deployment's user, instead of running `wg show`.
+- `dns init` creates `v=DMARC1; p=reject; sp=reject;` for any mail name under `community.domain` with no MX record and no DMARC policy, instead of only warning that the policy is missing.
+- Below its registrable domain, `community.domain`'s hostnames each get their own reject DMARC policy, and the registrable domain's policy is checked and warned about, never written.
+- Docker commands on a site reach the login user's rootless daemon at `/run/user/<uid>/docker.sock`, the uid read once a run, and a refused default user is reported as a site not admitted.
+- `preflight`'s ssh check asks only that each site answers as its ssh user, and `doctor` has no sudo finding, since no command they check for runs through sudo.
+- `operators.*.keys` must be ed25519, ECDSA, a security key's `sk-` type or RSA of at least 3072 bits, as `site request` requires, so a certificate or a shorter RSA key is refused.
+- `sites.<site>.ssh.user` may not be `root` or another deployment's `paisans-<token>` user, as `site request` requires.
+- `sites.<site>.ssh.user` is optional: a site that leaves it out is reached as the deployment's own user, `paisans-<token>`, which must exist on the host.
+- `paisans create` asks each machine's SSH user as optional, offering the deployment's own user, `paisans-<token>`, when left blank.
+- `init` ends with `Next: run paisans secrets set` when a secret only the operator can give is unset, shows secret counts only with `--verbose`, and the SMTP password's reason is its login and host.
+- When sudo refuses the login outright, `site deployments` advises naming a login that has sudo with `--ssh`, since it reads no site's ssh section.
+
+### Removed
+
+- `host allow`, `host disallow` and the key allowlist in `/etc/paisans/ssh-allow.<user>` are removed, with `site prepare`'s refusal of keys it lacked and `doctor`'s allowlist check.
+- `--sudo` is removed from every command but `site deployments`: each runs as the site's ssh user, and `apply`, `site remove`, `site prepare --all` and `config` ask no sudo password before they start.
+- `web_server.include_dir`: `validate` refuses it, since `apply` writes nothing into the host owner's web server.
+
+### Fixed
+
+- `--help` for `apply --recreate` and `site remove --id` names the flag's value type, not a phrase from its description.
+- Catalog blueprints can enable `no-new-privileges` without failing the container policy check; options that disable confinement and malformed entries remain refused.
+- `init` before any `site admit` no longer stops at an SSH password prompt: it marks each site admitted, skipped or unreachable, and settles the subnet from the admitted ones.
+- Every mesh overlap check reads every routing table, so a route another VPN keeps in its own table, such as Tailscale's table 52, is refused.
+- Mesh overlap refusals in `init`, `apply`, `site prepare`, `preflight` and `doctor` show control characters in names a host printed as escapes, so none is drawn on the terminal.
+- `apply --execute` starts no peer sync on a site `site prepare` has not given a store, which has nothing to sync, rather than warning on every bare host that its sync did not complete.
+- `site remove` and `app remove` read every flag given after the name before they report, so `-v` there shows detail and `--execute` there records `ssh.user`.
+- `apply` on a site whose mesh interface is up without its file's address, key or peers restarts or syncs it, so a run stopped between writing the file and handing it over completes.
+- A deployment binds and dials only each site's mesh address, so the egress table `site admit` loads, which drops its loopback dials, stalls neither etcd's own client gateway nor Patroni's leader election.
+- `apply` starts a stack whose containers were removed or stopped though its files match the render, and applies each Garage site before storage, so a site whose containers were removed converges again.
+- `create` refuses, as it is pasted, an operator's key another operator gave, one listed twice, or one the loader refuses, rather than rendering a file that does not load.
+- `create` offers to write a file validate refuses as it stands, to fix by hand, so the answers are not lost.
+- `apply` that records a Pocket ID client's credentials or a signup group's ID publishes the bytes it wrote as the next revision, which its host records, so a first apply completes.
+- `apply` ends `start pocket-id` done when its site stops for etcd or its databases, lists a failed install step's error under it, and names the member a later founding stop waits on.
+- `apply` joins a pending site declared `[data, apps]` in one run: its `site add` joins the data role, then the site is applied to start its apps, and the gateway after it.
+- `apply` brings up the Caddy of each gateway outside `etcd.members` before the data members are founded, so their apps reach Pocket ID's public URL as they start; `apply --hold-apps` starts no app stack.
+- `site remove --host-gone` proceeds when only the gone site's etcd member is unhealthy; it, `site add`, `mesh rekey` and `secrets rotate` read patronictl past its log lines and name each unhealthy or missing etcd member.
+- `site remove` that takes a witness out of etcd removes its etcd container, running or stopped, and keeps its volumes, so the witness has none for its restart policy to start.
+- `site add` and `storage add` record every file they write in each site's manifest, so no later `apply` takes one for a hand edit; `apply --overwrite <path>` per refused file repairs an earlier record.
+
+### Security
+
+- Files written to a host are staged in a `mktemp` file beside the target, created exclusively and renamed into place, so a symlink planted at a guessable name is never written through.
+- Writing a file to a host refuses a target that is a symbolic link or a directory, rather than replacing the link or moving the file into the directory.
+
 ## [0.2.0] - 2026-10-15
 
 ### Added
@@ -67,6 +166,7 @@ changes share a bullet. Detailed notes are on the corresponding
 - The uptime monitor requires STARTTLS under `security: starttls`, so mail and SMTP credentials are never sent in plaintext when a relay does not offer it.
 - The gateway refuses any request to Pocket ID that carries an `X-API-Key` header with 403, so Pocket ID's API keys work only on the mesh.
 
-[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.2.0...develop
+[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.1...develop
+[0.3.0-rc.1]: https://github.com/Paisans-Software/paisans-cli/compare/v0.2.0...v0.3.0-rc.1
 [0.2.0]: https://github.com/Paisans-Software/paisans-cli/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Paisans-Software/paisans-cli/tree/v0.1.0

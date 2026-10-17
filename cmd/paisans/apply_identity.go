@@ -8,11 +8,13 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
-// A run of apply names what it applies before anything else: the deployment
-// id and the configuration version, revision and hash. They open the output,
-// ahead of the sudo passwords, so a log of any run says which deployment and
+// A run of apply names what it applies before anything else: the build of
+// paisans running it, the deployment id and the configuration version,
+// revision and hash. They open the output,
+// so a log of any run says which deployment and
 // which version the rest of it is about, and two runs' logs can be told
 // apart.
 //
@@ -40,7 +42,7 @@ type runIdentity struct {
 func openIdentity(r ui.Reporter, configPath string) *runIdentity {
 	v := &runIdentity{id: declaredID(configPath)}
 	// A file that is not where a version is kept, or a store that cannot
-	// be read, leaves the version pending: the gather after sudo says why.
+	// be read, leaves the version pending: the gather says why.
 	if l, err := workstationOf(configPath); err == nil {
 		v.sha, v.revision, _ = l.Current()
 	}
@@ -67,6 +69,7 @@ func (v *runIdentity) applied(sha string, revision int) {
 
 func (v *runIdentity) report(r ui.Reporter) {
 	r.Section("deployment")
+	r.Step("paisans").End(ui.OK, version.Current().String())
 	id := r.Step("id")
 	if v.id == "" {
 		id.End(ui.Pending, "pending: init writes it")

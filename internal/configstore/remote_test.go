@@ -17,12 +17,19 @@ type fakeSite struct {
 	answer string
 	// failSync makes the sync unit's start fail.
 	failSync bool
+	// bare is a site site prepare has not reached: no store, and no sync
+	// unit, so starting the unit fails unless the command checks first.
+	bare bool
 }
 
 func (f *fakeSite) Run(c string) (string, error) {
 	f.commands = append(f.commands, c)
 	switch {
-	case strings.HasPrefix(c, "systemctl start") && f.failSync:
+	case strings.Contains(c, hostprep.UserSystemctl+" start") && f.bare && strings.Contains(c, "[ -d '"+hostprep.ConfigRepo(dep)+"' ]"):
+		return "", nil
+	case strings.Contains(c, hostprep.UserSystemctl+" start") && f.bare:
+		return "Failed to start unit: Unit not found.", errors.New("exit status 5")
+	case strings.Contains(c, hostprep.UserSystemctl+" start") && f.failSync:
 		return "boom", errors.New("exit 1")
 	case strings.Contains(c, "bundle create"):
 		return f.answer, nil
@@ -48,7 +55,7 @@ func TestPushWritesThenVerifiesAndReceives(t *testing.T) {
 	if err := Push(h, dep, []byte("BUNDLE")); err != nil {
 		t.Fatal(err)
 	}
-	tmp := "/var/lib/paisans/config/" + dep.Token() + ".incoming.bundle"
+	tmp := "/srv/paisans/f2a9/.paisans/config/" + dep.Token() + ".incoming.bundle"
 	if h.files[tmp] != "BUNDLE" {
 		t.Fatalf("bundle not written at %s: %v", tmp, h.files)
 	}
@@ -81,9 +88,18 @@ func TestPullDecodesTheBundleAndTrailingNewline(t *testing.T) {
 		t.Fatalf("got %q %v", b, err)
 	}
 	for _, c := range h.commands {
-		if strings.HasPrefix(c, "systemctl") {
+		if strings.Contains(c, "systemctl") {
 			t.Fatalf("sync started without syncFirst: %q", h.commands)
 		}
+	}
+}
+
+// A pull that syncs first starts the user's own sync unit.
+func TestPullStartsTheUsersSyncUnit(t *testing.T) {
+	h := &fakeSite{files: map[string]string{}, answer: "__PAISANS_EMPTY__"}
+	_, _, _ = Pull(h, dep, true)
+	if len(h.commands) == 0 || !strings.Contains(h.commands[0], hostprep.UserSystemctl+" start 'paisans-f2a9-config-sync.service'") {
+		t.Errorf("first command %q", h.commands)
 	}
 }
 
@@ -92,7 +108,7 @@ func TestPullSyncsFirstAndTreatsFailureAsReported(t *testing.T) {
 	if _, _, err := Pull(h, dep, true); err != nil {
 		t.Fatal(err)
 	}
-	if h.commands[0] != "systemctl start '"+dep.Prefix()+"-config-sync.service'" {
+	if !strings.Contains(h.commands[0], hostprep.UserSystemctl+" start '"+dep.Prefix()+"-config-sync.service'") {
 		t.Fatalf("commands = %q", h.commands)
 	}
 	h = &fakeSite{files: map[string]string{}, answer: "__PAISANS_EMPTY__", failSync: true}
@@ -102,9 +118,20 @@ func TestPullSyncsFirstAndTreatsFailureAsReported(t *testing.T) {
 	}
 }
 
+// A site site prepare has not reached has no store and no sync unit, so it
+// has nothing to sync: apply gathers before its site prepare steps, and a
+// bare site is the start of every deployment, not a failed sync.
+func TestPullSyncsNothingOnASiteWithNoStore(t *testing.T) {
+	h := &fakeSite{files: map[string]string{}, answer: "__PAISANS_EMPTY__", bare: true}
+	b, r, err := Pull(h, dep, true)
+	if err != nil || b != nil || r != nil {
+		t.Fatalf("got %v %+v %v", b, r, err)
+	}
+}
+
 func TestPullParsesTheSyncLog(t *testing.T) {
 	h := &fakeSite{files: map[string]string{
-		"/var/lib/paisans/config/" + dep.Token() + ".sync.json": `{"at":"2026-10-12T10:00:00Z","peers":[{"peer":"10.9.0.2","ok":true},{"peer":"10.9.0.3","ok":false}]}`,
+		"/srv/paisans/f2a9/.paisans/config/" + dep.Token() + ".sync.json": `{"at":"2026-10-12T10:00:00Z","peers":[{"peer":"10.9.0.2","ok":true},{"peer":"10.9.0.3","ok":false}]}`,
 	}, answer: "__PAISANS_EMPTY__"}
 	_, r, err := Pull(h, dep, false)
 	if err != nil || r == nil {
@@ -137,7 +164,7 @@ func TestPullRefusesAnEmptyAnswer(t *testing.T) {
 
 func TestPullKeepsTheBundleWhenTheSyncLogIsMalformed(t *testing.T) {
 	h := &fakeSite{files: map[string]string{
-		"/var/lib/paisans/config/" + dep.Token() + ".sync.json": "{not json",
+		"/srv/paisans/f2a9/.paisans/config/" + dep.Token() + ".sync.json": "{not json",
 	}, answer: base64.StdEncoding.EncodeToString([]byte("PACK"))}
 	b, r, err := Pull(h, dep, false)
 	if err != nil || string(b) != "PACK" || r == nil || r.SyncErr == "" {
@@ -145,7 +172,7 @@ func TestPullKeepsTheBundleWhenTheSyncLogIsMalformed(t *testing.T) {
 	}
 }
 
-// A site whose store host prepare has not made yet is told apart from any
+// A site whose store site prepare has not made yet is told apart from any
 // other failure, before anything is written there, so the refusal can name
 // the command that makes it.
 func TestPushToASiteWithNoStore(t *testing.T) {

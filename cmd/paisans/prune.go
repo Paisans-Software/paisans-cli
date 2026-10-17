@@ -13,7 +13,7 @@ import (
 )
 
 // runPrune lists a site's dangling volumes and, with --execute, removes the
-// ones a paisans container left behind. It is modelled on runHostPrepare: one
+// ones a paisans container left behind. It is modelled on runSitePrepare: one
 // site, a dry run by default, and the plan reported before anything happens.
 //
 // It exists for what accumulated before apply refused undeclared volumes:
@@ -29,7 +29,6 @@ func runPrune(args []string) error {
 	site := fs.String("site", "", "the site to prune, by the name it has in the configuration")
 	destination := fs.String("ssh", "", "ssh destination, used verbatim in place of the site's ssh section (its user, host, port and keys are then ignored)")
 	execute := fs.Bool("execute", false, "actually remove the volumes marked remove")
-	sudo := fs.Bool("sudo", true, "run remote commands through sudo, since Docker's volume directories are root's")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -51,12 +50,12 @@ func runPrune(args []string) error {
 		return fmt.Errorf("prune: %s declares no site %q. Declared sites are %s", *configPath, *site, strings.Join(cfg.SiteNames(), ", "))
 	}
 
-	transport := siteTransport(*site, declared, *destination, *sudo)
+	transport := siteTransport(*site, declared, *destination)
 	r.Section(fmt.Sprintf("%s (%s)", *site, transport.Describe()))
 	if _, err := hostGate(r, cfg, *site, transport); err != nil {
 		return err
 	}
-	if err := claimHosts(r, cfg, *execute, map[string]registry.Runner{*site: transport}); err != nil {
+	if _, err := admittedHosts(r, cfg, map[string]registry.Runner{*site: transport}); err != nil {
 		return err
 	}
 	plan, err := ui.Get(r, "read volumes", func() (*apply.VolumePrune, error) {
@@ -94,7 +93,7 @@ func runPrune(args []string) error {
 	return nil
 }
 
-// showVolumePrune reports the plan, marked the way host prepare marks its
+// showVolumePrune reports the plan, marked the way site prepare marks its
 // plan: each volume it would remove as pending under its title, and under
 // --verbose each one kept as done. Every verdict carries the volume's whole
 // name, size, contents and reason as details, since the reason is what an
@@ -106,9 +105,14 @@ func showVolumePrune(r ui.Reporter, plan *apply.VolumePrune) {
 		return
 	}
 	var total int64
+	unknown := 0
 	for _, v := range plan.Volumes {
 		if v.Remove {
-			total += v.Size
+			if v.Size >= 0 {
+				total += v.Size
+			} else {
+				unknown++
+			}
 			showVolume(r, "remove", v, ui.Pending)
 		}
 	}
@@ -119,7 +123,11 @@ func showVolumePrune(r ui.Reporter, plan *apply.VolumePrune) {
 			}
 		}
 	}
-	r.Detail("total: %d of %d dangling volume(s), %s", len(plan.Removals()), len(plan.Volumes), apply.FormatSize(total))
+	size := apply.FormatSize(total)
+	if unknown > 0 {
+		size += fmt.Sprintf(" (plus %d of unknown size)", unknown)
+	}
+	r.Detail("total: %d of %d dangling volume(s), %s", len(plan.Removals()), len(plan.Volumes), size)
 }
 
 // showVolume is one verdict: verb and the volume's name as the title, its

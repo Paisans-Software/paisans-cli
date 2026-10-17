@@ -862,3 +862,156 @@ func endedWith(rec *ui.Recorder, text string) bool {
 	}
 	return false
 }
+
+// A mail server this machine cannot reach leaves the password untried, as
+// `secrets set` leaves it: the run is told so, naming this machine and not a
+// blank site, and goes on, since the scoped apply at each site tries it from
+// there before handing it out.
+func TestSMTPPasswordNotReachedFromThisMachineIsWarnedAndHandedOut(t *testing.T) {
+	w := newWrapWorld(t)
+	w.mail.Unreachable = map[string]error{"": errors.New("dial tcp: connection refused")}
+	s, _ := w.store.Load()
+	s.External["smtp_password"] = "fixture-not-a-secret-smtp-reissued"
+	_ = w.store.Save(s)
+	e := w.env()
+	var warned []string
+	e.Warn = func(hint, detail string) { warned = append(warned, hint+"\n"+detail) }
+	run, err := Plan(e, []Rotator{SMTPPassword("external.smtp_password")})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if err := run.Execute(e, nil); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(warned) == 0 {
+		t.Fatal("nothing was warned")
+	}
+	for _, text := range warned {
+		if !strings.Contains(text, "from this machine") || strings.HasPrefix(text, " ") || strings.Contains(text, "reach the site") {
+			t.Errorf("warning %q", text)
+		}
+	}
+	if s, _ := w.store.Load(); s.External["smtp_password"] != "fixture-not-a-secret-smtp-reissued" || len(s.Rotations) != 0 {
+		t.Errorf("after: %v", s.Rotations)
+	}
+}
+
+// Stage 3 tries an SMTP password from each site before handing it to the
+// stacks there, whether it was pasted or set beforehand, and a site that
+// refuses it is not handed it. The DNS token is handed over with no such
+// try.
+func TestSMTPPasswordIsTriedFromEachSiteBeforeItIsHandedOut(t *testing.T) {
+	w := newWrapWorld(t)
+	s, _ := w.store.Load()
+	s.External["smtp_password"] = "fixture-not-a-secret-smtp-reissued"
+	_ = w.store.Save(s)
+	e := w.env()
+	var tried []string
+	e.MailFrom = func(site, path string, s *config.Secrets, stacks []string) error {
+		v, _ := s.Get(path)
+		tried = append(tried, fmt.Sprintf("%s %s %s", site, path, v))
+		w.log = append(w.log, "mail "+site)
+		return nil
+	}
+	run, err := Plan(e, []Rotator{SMTPPassword("external.smtp_password")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Execute(e, nil); err != nil {
+		t.Fatal(err)
+	}
+	uses := run.Items[0].Uses
+	if len(tried) != len(uses) {
+		t.Fatalf("tried %v for uses %v", tried, uses)
+	}
+	for i, u := range uses {
+		if tried[i] != u.Site+" external.smtp_password fixture-not-a-secret-smtp-reissued" {
+			t.Errorf("tried %q", tried[i])
+		}
+	}
+	if len(w.log) == 0 || !strings.HasPrefix(w.log[0], "mail ") {
+		t.Errorf("handed out before it was tried: %v", w.log)
+	}
+
+	// A site that refuses it stops the rotation before that site applies.
+	w = newWrapWorld(t)
+	s, _ = w.store.Load()
+	s.External["smtp_password"] = "fixture-not-a-secret-smtp-reissued"
+	_ = w.store.Save(s)
+	e = w.env()
+	e.MailFrom = func(string, string, *config.Secrets, []string) error { return errors.New("535 5.7.8 refused") }
+	run, err = Plan(e, []Rotator{SMTPPassword("external.smtp_password")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Execute(e, nil); err == nil || !strings.Contains(err.Error(), "535") {
+		t.Errorf("err = %v", err)
+	}
+	for _, line := range w.log {
+		if strings.HasPrefix(line, "apply ") {
+			t.Errorf("applied after a refusal: %v", w.log)
+		}
+	}
+
+	// The DNS token is not tried at the sites.
+	w = newWrapWorld(t)
+	e = w.env()
+	e.MailFrom = func(string, string, *config.Secrets, []string) error {
+		t.Error("the DNS token was tried as mail")
+		return nil
+	}
+	run, err = Plan(e, []Rotator{DNSToken()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Answer(e, "external.acme_dns_token", newDNSToken); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Execute(e, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Every site is tried before any is handed the password: with two or more
+// sites, a refusal at a later one stops the rotation before the first is
+// handed it, so no site runs a password another site's server refuses.
+func TestSMTPPasswordRefusedAtALaterSiteIsHandedToNone(t *testing.T) {
+	w := newWrapWorld(t)
+	s, _ := w.store.Load()
+	s.External["smtp_password"] = "fixture-not-a-secret-smtp-reissued"
+	_ = w.store.Save(s)
+	e := w.env()
+	run, err := Plan(e, []Rotator{SMTPPassword("external.smtp_password")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	uses := run.Items[0].Uses
+	if len(uses) < 2 {
+		t.Fatalf("the fixture hands the password to %d sites, want two or more", len(uses))
+	}
+	last := uses[len(uses)-1].Site
+	var tried []string
+	e.MailFrom = func(site, _ string, _ *config.Secrets, _ []string) error {
+		tried = append(tried, site)
+		if site == last {
+			return errors.New("535 5.7.8 refused")
+		}
+		return nil
+	}
+	rec := &ui.Recorder{}
+	run.Report = rec
+	if err := run.Execute(e, nil); err == nil || !strings.Contains(err.Error(), "535") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(tried) != len(uses) {
+		t.Errorf("tried %v, want every site %v", tried, uses)
+	}
+	for _, line := range w.log {
+		if strings.HasPrefix(line, "apply ") {
+			t.Errorf("a site was handed the password: %v", w.log)
+		}
+	}
+	if !rec.Has("fail", "stage 2, where it is checked") {
+		t.Errorf("the refusal is not stage 2's:\n%s", rec.Lines())
+	}
+}

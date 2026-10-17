@@ -218,3 +218,17 @@ func ResolveProbe(names []string) string { return resolveProbe(names) }
 func WaitServing(d deployment.Deployment, site, stack string, t Transport, stopped string, served diagnosis.Served) error {
 	return waitStack(d, site, stack, t, stopped, served)
 }
+
+// ChangeContent is what a change writes.
+func ChangeContent(c Change) string { return c.content }
+
+// ListMembers is `patronictl list` as the replica env gates read it, each
+// member as "Member Role State".
+func ListMembers(d deployment.Deployment, at Transport) ([]string, error) {
+	list, err := listMembers(d, at)
+	var out []string
+	for _, m := range list {
+		out = append(out, m.Member+" "+m.Role+" "+m.State)
+	}
+	return out, err
+}

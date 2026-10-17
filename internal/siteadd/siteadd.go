@@ -313,7 +313,7 @@ func checkScope(cfg *config.Config, newSite string, transports map[string]apply.
 		return fmt.Errorf("site add %s: a witness has no replica, so it has no site add of its own. It joins in the site add of the data site that joins with it, whose etcd stage adds every member not yet a voter, witnesses first: run `paisans site add <data site>`, or `paisans apply`, which plans it. A witness joining with no data site makes the voters even, which validate refuses", newSite)
 	}
 	if len(site.Roles) != 1 || !site.Has(config.RoleData) {
-		return fmt.Errorf("site add %s: the site's roles must be exactly [data]. site add's stages start no app stacks, so join it as [data], then give it the apps role and run host prepare and apply on it, and apply on the gateway (Pocket ID stands by there while another site is active); a second gateway is a separate change", newSite)
+		return fmt.Errorf("site add %s: the site's roles must be exactly [data]. site add's stages start no app stacks, so join it as [data], then give it the apps role and run site prepare and apply on it, and apply on the gateway (Pocket ID stands by there while another site is active); a second gateway is a separate change. For a site declared [data, apps], `paisans apply` with no --site does all of this in one run", newSite)
 	}
 	if !contains(cfg.Cluster.Sites, newSite) {
 		return fmt.Errorf("site add %s: cluster.sites is written and does not list it, so there is no replica to add. List it there, or leave the key out so it is derived from the roles, every data site", newSite)
@@ -360,7 +360,7 @@ func renderedFile(rendered *render.Plan, site, rel string) string {
 }
 
 // joinStarted reports whether an earlier run got past stage 1, from what
-// only stage 2 or later leaves behind: a WireGuard file on the new site, which host
+// only stage 2 or later leaves behind: a WireGuard file on the new site, which site
 // prepare does not write and stage 2 does, or the new site in etcd's
 // membership.
 func (p *Plan) joinStarted(live []apply.EtcdMember) (bool, string, error) {
@@ -657,12 +657,15 @@ func contains(list []string, s string) bool {
 	return false
 }
 
+// lastLines is the last n lines of what a host printed, joined on one line
+// for an error or a problem: redacted whole, then made visible, since a
+// host's output is somebody else's text (see ui.Visible).
 func lastLines(s string, n int) string {
-	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	lines := strings.Split(strings.TrimRight(ui.Redact(s), "\n"), "\n")
 	if len(lines) > n {
 		lines = lines[len(lines)-n:]
 	}
-	return strings.Join(lines, " / ")
+	return ui.Visible(strings.Join(lines, " / "))
 }
 
 // runPreflight is stage 1, on the new site and every blank joiner. It is a

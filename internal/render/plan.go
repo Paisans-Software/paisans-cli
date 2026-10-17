@@ -36,7 +36,7 @@ type Plan struct {
 	// Deployment is the identity every path and name in Files derives from.
 	Deployment deployment.Deployment
 	// HostSites names the sites whose Caddy mounts the host's own
-	// HostSitesDir, which apply creates there when it is missing.
+	// HostSitesDir, which apply creates there when it is absent.
 	HostSites map[string]bool
 	// Images is, for each site, every image reference its compose files name
 	// that the configuration decides: each app stack's images, and the
@@ -77,7 +77,8 @@ const patroniAPIPort = 8008
 // there. It is moved beside the Patroni API instead of moving every app.
 const bgMonPort = 8009
 
-// haproxyStatsPort is where HAProxy serves its statistics, on loopback only.
+// haproxyStatsPort is where HAProxy serves its statistics, on the site's mesh
+// address.
 // Nothing else the toolkit renders listens on 8404.
 const haproxyStatsPort = 8404
 
@@ -130,9 +131,6 @@ type siteView struct {
 	Heartbeats []heartbeatTarget
 	Apps       []plannedApp
 	NeedsProxy bool
-	// WatchdogOff renders Patroni without fencing and drops the device
-	// mapping, which compose would otherwise refuse to start without.
-	WatchdogOff bool
 }
 
 type planner struct {
@@ -179,13 +177,15 @@ func Build(cfg *config.Config, secrets *config.Secrets, opts ...Option) (*Plan, 
 	// Two files at one path would leave one of them unwritten and the other
 	// reviewed and applied as if it were both (Eg: an app named for the
 	// infrastructure stack), so the render stops rather than choose.
-	// Nothing leaves the deployment's own directory but the WireGuard file
-	// wg-quick reads from /etc/wireguard: apply writes each file as root at
-	// its path, so a path that walks out would be written anywhere.
-	root, wg := cfg.Deployment().RelPath()+"/", cfg.Deployment().WireGuardConf()
+	// Nothing leaves the deployment's own directory, the mesh file included:
+	// apply writes each file at its path as the deployment's user, and the
+	// mesh file reaches /etc/wireguard only through the WireGuard helper,
+	// which checks it first. A path that walks out is refused here rather
+	// than written wherever it points.
+	root := cfg.Deployment().RelPath() + "/"
 	for _, f := range files {
 		_, rel := splitSite(f.Path)
-		if rel != path.Clean(rel) || path.IsAbs(rel) || (!strings.HasPrefix(rel, root) && rel != wg) {
+		if rel != path.Clean(rel) || path.IsAbs(rel) || !strings.HasPrefix(rel, root) {
 			return nil, fmt.Errorf("the configuration renders %s, outside the deployment's own directory", f.Path)
 		}
 	}
@@ -220,8 +220,6 @@ func newPlanner(cfg *config.Config, secrets *config.Secrets) *planner {
 			IsGarage:   contains(cfg.Storage.Garage.Sites, name),
 			RunsCaddy:  site.RunsCaddy(),
 			Heartbeats: heartbeatTargets(cfg, name),
-
-			WatchdogOff: site.WatchdogMode() == config.WatchdogOff,
 		}
 	}
 
@@ -330,40 +328,49 @@ func (p *planner) planApp(name string, app config.App, site *siteView, pinned bo
 // the C library that built it, and naming the release keeps a pull from
 // changing it under an existing data directory.
 func (p *planner) appImages(app config.App) (map[string]string, error) {
-	out, _, err := p.appImageOrigins(app)
-	return out, err
+	origins, err := p.appImageOrigins(app)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(origins))
+	for service, o := range origins {
+		out[service] = o.image
+	}
+	return out, nil
 }
 
-// appImageOrigins is appImages, and the services whose image it took from
-// the core catalog's foundation for the toolkit: one a reserved or core
-// blueprint names with foundation:, and the database's, which the toolkit
-// chooses for every blueprint, when the configuration declares neither. A
-// foundation: in a blueprint from any other catalog is that catalog's
-// choice, which the team that reviews foundation.yaml did not review, so it
-// is not counted.
-func (p *planner) appImageOrigins(app config.App) (map[string]string, map[string]bool, error) {
-	out, foundation := map[string]string{}, map[string]bool{}
+// appImageOrigins is where appImages took each service's image. A
+// declaration wins and replaces the default. The foundation mark is for the
+// image the core catalog's foundation chose for the toolkit: one a reserved
+// or core blueprint names with foundation:, and the database's, which the
+// toolkit chooses for every blueprint. A foundation: in a blueprint from any
+// other catalog is that catalog's choice, which the team that reviews
+// foundation.yaml did not review, so it is not marked.
+func (p *planner) appImageOrigins(app config.App) (map[string]imageOrigin, error) {
+	out := map[string]imageOrigin{}
 	toolkits := blueprints.ToolkitBlueprint(app.Blueprint)
 	for _, service := range blueprints.Services(app.Blueprint) {
 		image, err := blueprints.ServiceImage(service)
-		switch {
-		case app.Images[service.Name] != "":
-			out[service.Name] = app.Images[service.Name]
-		case err != nil:
-			return nil, nil, fmt.Errorf("the image of %s's %s: %w", app.Blueprint, service.Name, err)
-		case image != "":
-			out[service.Name] = image
-			foundation[service.Name] = service.Foundation != "" && toolkits
-		case service.Name == blueprints.PostgresService:
-			pg, err := blueprints.PostgresImage(p.postgresVersion())
-			if err != nil {
-				return nil, nil, err
+		def := imageOrigin{image: image, foundation: service.Foundation != "" && toolkits, blueprint: service.Foundation == ""}
+		if err == nil && image == "" && service.Name == blueprints.PostgresService {
+			pg, pgErr := blueprints.PostgresImage(p.postgresVersion())
+			if pgErr != nil {
+				return nil, pgErr
 			}
-			out[service.Name] = pg
-			foundation[service.Name] = true
+			def = imageOrigin{image: pg, foundation: true}
+		}
+		if declared := app.Images[service.Name]; declared != "" {
+			out[service.Name] = imageOrigin{image: declared, declared: true, replaces: def.image}
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("the image of %s's %s: %w", app.Blueprint, service.Name, err)
+		}
+		if def.image != "" {
+			out[service.Name] = def
 		}
 	}
-	return out, foundation, nil
+	return out, nil
 }
 
 // dbIdentifier keeps app names usable as Postgres identifiers without

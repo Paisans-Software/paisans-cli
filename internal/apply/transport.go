@@ -18,6 +18,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	pathpkg "path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -90,6 +91,20 @@ type SSHTransport struct {
 	// the transport so a site is asked once. Nil runs sudo as it is, which
 	// works only where it asks for no password.
 	Auth *SudoAuth
+	// DockerHost, when set, is exported as DOCKER_HOST ahead of every
+	// command (see RemoteCommand), so docker reaches the login user's own
+	// rootless daemon and never the host's system socket.
+	DockerHost string
+	// Login, when set and DockerHost is empty, finds DockerHost from the
+	// login user's UID on the transport's first command, and is shared by
+	// every copy of the transport to one destination, so the UID is asked
+	// once a run. See Login.
+	Login *Login
+	// DefaultUser reports that User is the deployment's own user because the
+	// site's ssh section names none. That user exists only on a host whose
+	// owner has admitted the deployment, so a login it refuses is reported
+	// as a host that has not (see authProblem).
+	DefaultUser bool
 	// ConnectTimeout, in seconds, is ssh's -o ConnectTimeout. Zero is
 	// DefaultConnectTimeout. ssh's own is the operating system's TCP connect
 	// timeout, which is 75 seconds on macOS for a host that is switched off
@@ -171,18 +186,35 @@ func (t SSHTransport) port() int {
 // WriteFile's content, so with one every command run with a password would
 // print it.
 //
-// The command is sent as RemoteCommand wraps it, on both routes.
+// The command is sent as RemoteCommand wraps it, with DockerHost, on both routes.
 func (t SSHTransport) SSHArgs(keyFiles []string, command string) []string {
-	command = RemoteCommand(command)
+	command = RemoteCommand(t.DockerHost, command)
 	args := append(muxArgs(), "-T")
 	if t.Destination != "" {
 		return append(args, t.Destination, command)
 	}
-	args = append(args, "-p", strconv.Itoa(t.port()), "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout="+strconv.Itoa(t.connectTimeout()))
+	args = append(args, t.sectionOptions()...)
 	for _, f := range keyFiles {
 		args = append(args, "-i", f)
 	}
 	return append(args, t.User+"@"+t.Host, command)
+}
+
+// sectionOptions are the options a transport built from a site's ssh
+// section gives ssh before its key files.
+//
+// The deployment's own user (DefaultUser) is offered public keys alone. It
+// has no password, and on a host that has not admitted the deployment it
+// does not exist, where sshd asks for a password all the same: a prompt
+// nothing can answer, drawn over the command's output. With public keys
+// alone that host refuses the login, which authProblem reports, on a
+// transport naming its site, as ErrLoginNotAdmitted.
+func (t SSHTransport) sectionOptions() []string {
+	opts := []string{"-p", strconv.Itoa(t.port()), "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=" + strconv.Itoa(t.connectTimeout())}
+	if t.DefaultUser {
+		opts = append(opts, "-o", "PreferredAuthentications=publickey")
+	}
+	return opts
 }
 
 // RemoteCommand is what ssh sends for command: command run by sh, whatever
@@ -203,7 +235,15 @@ func (t SSHTransport) SSHArgs(keyFiles []string, command string) []string {
 // The string is a third longer than the command, and it is still one
 // argument: Linux allows 128 KiB in one (MAX_ARG_STRLEN), and anything large
 // here (rendered files, SQL) goes on stdin, not in the command.
-func RemoteCommand(command string) string {
+//
+// With dockerHost, the command runs after `export DOCKER_HOST=<dockerHost>`,
+// inside the same encoded word, so every docker the command starts, in a
+// pipeline or a subshell as much as at its head, reaches the login user's
+// own daemon.
+func RemoteCommand(dockerHost, command string) string {
+	if dockerHost != "" {
+		command = "export DOCKER_HOST=" + shellQuote(dockerHost) + "\n" + command
+	}
 	return `sh -c 'eval "$(printf %s ` + base64.StdEncoding.EncodeToString([]byte(command)) + ` | base64 -d)"'`
 }
 
@@ -263,6 +303,9 @@ func writeKeyFiles(dir string, keys []string) ([]string, error) {
 // The output itself is returned as the host printed it, since it is data a
 // caller parses; what is shown of it is redacted where it is shown.
 func (t SSHTransport) Run(command string) (string, error) {
+	if err := t.refuseSudoDocker(); err != nil {
+		return "", err
+	}
 	wrapped, stdin, err := t.sudo(command, nil)
 	if err != nil {
 		return "", ui.RedactError(err)
@@ -289,9 +332,32 @@ func (t SSHTransport) named(command string) string {
 // test can shrink them.
 var sshRetryDelays = []time.Duration{2 * time.Second, 4 * time.Second}
 
+// SetSleep makes every wait in this package, the one before an ssh retry
+// among them, call sleep instead, and returns a function restoring the one
+// before. It is for tests in other packages, which drive a retry to see how
+// it is reported and need not wait the seconds it waits.
+func SetSleep(sleeper func(time.Duration)) (restore func()) {
+	old := sleep
+	sleep = sleeper
+	return func() { sleep = old }
+}
+
 // runSSH runs one built ssh command. A package variable so that a test can
 // stand in for the ssh binary and choose its output and exit status.
 var runSSH = func(cmd *exec.Cmd) error { return cmd.Run() }
+
+// SetRunSSH runs each built ssh command with run instead, or with ssh itself
+// for nil, and returns a function restoring the one before. It is runSSH for
+// tests in other packages: a fake host answered in process costs nothing,
+// where an ssh script on PATH costs a fork and an exec for every command.
+func SetRunSSH(run func(cmd *exec.Cmd) error) (restore func()) {
+	old := runSSH
+	if run == nil {
+		run = func(cmd *exec.Cmd) error { return cmd.Run() }
+	}
+	runSSH = run
+	return func() { runSSH = old }
+}
 
 // retryLog receives one line per retry. Nothing by default: a retry that
 // then succeeds is not news, and one that runs out is reported in full by the
@@ -411,6 +477,24 @@ var blankLineOnTerminal = func() {
 // never read the second as an answer.
 var ErrUnreachable = errors.New("ssh could not connect to the host")
 
+// ErrLoginRefused is a host that answered and would not let the login in:
+// no key it accepts, or no such user, which for the deployment's own user is
+// a host that has not admitted it.
+var ErrLoginRefused = errors.New("the host refused the login")
+
+// ErrLoginNotAdmitted is ErrLoginRefused for the deployment's own user on a
+// transport naming its site: that user exists only once the host's owner has
+// admitted the deployment, so the refusal is most likely a host that has
+// not, and otherwise a key of the operator's the host was never given. A
+// refusal of a user the site names is ErrLoginRefused alone, a key problem.
+var ErrLoginNotAdmitted = fmt.Errorf("%w: the deployment's user is not admitted there", ErrLoginRefused)
+
+// NoLogin reports whether err is a host that could not be logged into at
+// all, refused or not answering, rather than a command that failed there.
+func NoLogin(err error) bool {
+	return errors.Is(err, ErrLoginRefused) || errors.Is(err, ErrUnreachable)
+}
+
 // UnreachableError is ErrUnreachable for one site, so a command that reads
 // several can say which one did not answer and refer the operator to
 // doctor for it. Site is the transport's, empty when it reaches no site.
@@ -476,13 +560,22 @@ func connectionFailed(err error, out string) bool {
 // use: the host's key is not the one known, or is not known and ssh could
 // not ask, or the host accepted none of the operator's keys. ssh says each
 // on its own last line and exits 255, as for connectionFailed. Nil for
-// anything else.
+// anything else. A refusal of the deployment's default user is a host that
+// has not admitted the deployment.
 func (t SSHTransport) authProblem(err error, out string) error {
 	var exit interface{ ExitCode() int }
 	if !errors.As(err, &exit) || exit.ExitCode() != 255 {
 		return nil
 	}
 	last := lastLine(out)
+	user, host := t.User, t.Host
+	if t.Destination != "" {
+		if u, h, found := strings.Cut(t.Destination, "@"); found {
+			user, host = u, h
+		} else {
+			host = t.Destination
+		}
+	}
 	switch {
 	case strings.Contains(last, "Host key verification failed") && strings.Contains(out, "REMOTE HOST IDENTIFICATION HAS CHANGED"):
 		return &ui.Problem{
@@ -496,11 +589,17 @@ func (t SSHTransport) authProblem(err error, out string) error {
 			Explain: fmt.Sprintf("ssh could not ask whether to trust it. Connect once with %s, check the fingerprint it shows, accept it, and run again.", t.connectCommand()),
 			Cause:   err,
 		}
+	case (strings.Contains(last, "Permission denied (") || strings.Contains(last, "Too many authentication failures")) && t.DefaultUser && t.Site != "":
+		return &ui.Problem{
+			Hint:    fmt.Sprintf("site %s is not admitted on %s", t.Site, host),
+			Explain: fmt.Sprintf("The site names no ssh.user, so paisans logs in as the deployment's own user, %s, and %s refused it. That user exists only once the host's owner has admitted the deployment. Send them a request:\n\n    paisans site request --site %s > %s.admit\n\nIf they have admitted it, check that your key is loaded in your ssh agent (ssh-add -l) and is under an operator the site's ssh.keys names. If the deployment logs in as another user on that host, name it in sites.%s.ssh.user.", user, host, t.Site, t.Site, t.Site),
+			Cause:   fmt.Errorf("%w: %w", ErrLoginNotAdmitted, err),
+		}
 	case strings.Contains(last, "Permission denied (") || strings.Contains(last, "Too many authentication failures"):
 		return &ui.Problem{
 			Hint:    t.Describe() + " did not accept your ssh key",
 			Explain: "Check that your key is loaded in your ssh agent (ssh-add -l), that its public half is under an admin the site's ssh.keys names, and that the host's authorized_keys for that user holds it.",
-			Cause:   err,
+			Cause:   fmt.Errorf("%w: %w", ErrLoginRefused, err),
 		}
 	}
 	return nil
@@ -551,10 +650,22 @@ func lastLine(out string) string {
 // temporary file and renames it, so even a transfer cut off part way leaves
 // the old file whole and a second attempt starts over.
 //
+// A transport with a Login asks its UID first, once a run (see Login).
+//
 // Three attempts, two and four seconds apart, is enough for a blip and short
 // enough that a host which is really down is reported within seconds rather
 // than hidden behind a long wait.
 func (t SSHTransport) run(command string, stdin *string) (string, error) {
+	if err := t.refuseSudoDocker(); err != nil {
+		return "", err
+	}
+	if t.Login != nil && t.DockerHost == "" {
+		host, err := t.Login.resolve(t)
+		if err != nil {
+			return "", err
+		}
+		t.DockerHost = host
+	}
 	for attempt := 1; ; attempt++ {
 		cmd, cleanup, err := t.ssh(command)
 		if err != nil {
@@ -635,11 +746,32 @@ func (t SSHTransport) ReadFile(path string) (string, bool, error) {
 // keeps it out of the process table, and writing to a temporary file first
 // means a failed transfer leaves the previous file intact rather than a
 // truncated one that an application will happily read.
+//
+// The temporary file is made by mktemp beside the target, which creates it
+// exclusively with mode 600. A fixed, guessable name would let anyone who can
+// write the directory plant a link there for a privileged write to follow, and
+// would make two writes of one path share a file. The rename onto the target
+// replaces a link at the target instead of writing through it, and the trap
+// removes the temporary file if any step before the rename fails.
+//
+// A target that is a link or a directory is refused before the rename, since
+// mv would move the temporary file into a linked directory. The check and the
+// mv are two steps, so a link planted between them is not caught. That is
+// acceptable because this transport is never used under sudo to write into a
+// directory another user can write: files in the deployment user's own tree
+// are written as that user.
 func (t SSHTransport) WriteFile(path, content string, mode uint32) error {
+	if err := t.refuseSudoDocker(); err != nil {
+		return err
+	}
 	dir := parentDir(path)
+	template := strings.TrimSuffix(dir, "/") + "/." + pathpkg.Base(path) + ".XXXXXX"
 	script := fmt.Sprintf(
-		"set -e; mkdir -p %s; tmp=%s.paisans-tmp; cat > $tmp; chmod %04o $tmp; mv $tmp %s",
-		shellQuote(dir), shellQuote(path), mode, shellQuote(path))
+		`set -e; mkdir -p %[1]s; tmp=$(mktemp %[2]s); trap 'rm -f "$tmp"' EXIT; cat > "$tmp"; chmod %04[3]o "$tmp"; `+
+			`if [ -L %[4]s ]; then printf '%%s is a symbolic link, not a file\n' %[4]s >&2; exit 1; fi; `+
+			`if [ -d %[4]s ]; then printf '%%s is a directory, not a file\n' %[4]s >&2; exit 1; fi; `+
+			`mv -f "$tmp" %[4]s; trap - EXIT`,
+		shellQuote(dir), shellQuote(template), mode, shellQuote(path))
 	script, stdin, err := t.sudo(script, &content)
 	if err != nil {
 		return ui.RedactError(err)
@@ -654,6 +786,9 @@ func (t SSHTransport) WriteFile(path, content string, mode uint32) error {
 // content that way: what goes in carries credentials, and only the command
 // line is visible in the process table.
 func (t SSHTransport) RunInput(command, stdin string) (string, error) {
+	if err := t.refuseSudoDocker(); err != nil {
+		return "", err
+	}
 	wrapped, in, err := t.sudo(command, &stdin)
 	if err != nil {
 		return "", ui.RedactError(err)
@@ -689,4 +824,15 @@ func firstLine(s string) string {
 		return s[:i] + " ..."
 	}
 	return s
+}
+
+// refuseSudoDocker refuses a transport that both sets DOCKER_HOST and runs
+// through sudo: sudo resets the environment, so docker would reach the
+// host's system daemon instead of the user's own. It names the destination
+// itself, because Dial and the probes report run's error unwrapped.
+func (t SSHTransport) refuseSudoDocker() error {
+	if t.Sudo && (t.DockerHost != "" || t.Login != nil) {
+		return fmt.Errorf("%s: a transport with a Docker host cannot use sudo: sudo resets the environment, so docker would reach the host's system daemon instead of the user's own", t.Describe())
+	}
+	return nil
 }

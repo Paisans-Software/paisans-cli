@@ -4,11 +4,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 // ManifestName is the record of what was rendered and what it hashed to.
@@ -45,12 +48,43 @@ type Manifest struct {
 	// manifest written before apply recorded it has none, and its history
 	// starts with the next apply.
 	Images []ManifestImage `json:"images,omitempty"`
-	// WebServer are the files apply wrote into the include directory of the
-	// operator's web server, on a monitor site with managed_by: external.
-	// They are outside the deployment root, so they are listed apart from
-	// Files, with what removing one needs: the server to validate and
-	// reload once it is gone.
+	// WebServer are the reference files apply wrote, under the deployment
+	// root's web-server directory, for the host owner's web server on a
+	// monitor site with managed_by: external. apply writes them after the
+	// render, from the admission record, so they are listed apart from
+	// Files, with the app and hostname whose block the owner removes once
+	// one is gone.
 	WebServer []ManifestWebServer `json:"web_server,omitempty"`
+	// Pending is the sites that were pending when these files were
+	// rendered, sorted: the effective topology left them out, so a check
+	// comparing this site with a render uses the same view.
+	Pending []string `json:"pending,omitempty"`
+	// Build is the paisans that wrote this manifest: toolkit_version,
+	// toolkit_commit and toolkit_modified. site remove orders by its version
+	// and refuses a site a newer one applied, since it may not know
+	// everything that version put on the host. ParseManifest refuses a
+	// manifest without it.
+	version.Build
+}
+
+// ParseManifest reads a manifest. A manifest that does not say which build
+// of paisans wrote it is refused with a *version.NoBuildError, and with the
+// manifest as read beside it, for apply, which writes it again.
+func ParseManifest(data []byte) (Manifest, error) {
+	var m Manifest
+	err := json.Unmarshal(data, &m)
+	if buildErr := version.RequireBuild(data); buildErr != nil {
+		// A build key of the wrong type fails the decode too, after it has
+		// read every other field: the build's refusal is the one to give.
+		var typeErr *json.UnmarshalTypeError
+		if err == nil || errors.As(err, &typeErr) {
+			return m, buildErr
+		}
+	}
+	if err != nil {
+		return Manifest{}, err
+	}
+	return m, nil
 }
 
 // ManifestImage is one repository a site's stacks rendered, and every
@@ -62,21 +96,26 @@ type ManifestImage struct {
 	References []string `json:"references"`
 }
 
-// ManifestWebServer is one file apply wrote for the operator's web server,
-// which proves it this deployment's to the command that removes it.
+// ManifestWebServer is one reference file apply wrote, in the deployment's
+// root, for the host owner's web server: its checksum tells a rewrite apart,
+// and the entry proves the file this deployment's to the command that
+// removes it.
 type ManifestWebServer struct {
-	// App is the app the file serves.
-	App string `json:"app"`
-	// Path is the file on the host, absolute.
+	// App is the app the file serves, and Hostname the name the owner's
+	// web server serves it at.
+	App      string `json:"app"`
+	Hostname string `json:"hostname,omitempty"`
+	// Path is the reference file on the host, absolute, in the
+	// deployment's root.
 	Path   string `json:"path"`
 	SHA256 string `json:"sha256"`
-	// Server is the web server that includes it: caddy, nginx or apache.
+	// Server is the web server the file is for: caddy, nginx or apache.
 	Server string `json:"server"`
-	// Container is the docker container the server runs in, empty when it
-	// runs on the host itself.
+	// Container is the docker container the owner's server runs in, as site
+	// admit found it, empty when it runs on the host itself.
 	Container string `json:"container,omitempty"`
-	// Config is the server's main configuration, as the server reads it:
-	// inside the container, for one in a container.
+	// Config is the owner's server's configuration, as admit found it,
+	// empty when it found none.
 	Config string `json:"config"`
 }
 
@@ -156,7 +195,7 @@ func Write(plan *Plan, dir string) error {
 	for _, site := range sites {
 		entries := bySite[site]
 		sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
-		data, err := json.MarshalIndent(Manifest{Version: 1, Files: entries}, "", "  ")
+		data, err := json.MarshalIndent(Manifest{Version: 1, Files: entries, Build: version.Current()}, "", "  ")
 		if err != nil {
 			return fmt.Errorf("building the manifest for %s: %w", site, err)
 		}

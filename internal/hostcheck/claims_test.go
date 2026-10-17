@@ -41,7 +41,6 @@ func TestClaimsFollowRoles(t *testing.T) {
 	for spec, key := range map[string]string{
 		"*:51820/udp":        "mesh",
 		"10.44.0.1:5432/tcp": "sites.home-a.roles (data)",
-		"127.0.0.1:5432/tcp": "sites.home-a.roles (data)",
 		"10.44.0.1:3900/tcp": "storage.garage.sites",
 		"10.44.0.1:2379/tcp": "etcd.members",
 		"10.44.0.1:5000/tcp": "cluster.port",
@@ -53,6 +52,9 @@ func TestClaimsFollowRoles(t *testing.T) {
 	for _, l := range data.Listeners {
 		if l.Port == 80 || l.Port == 443 {
 			t.Errorf("a site without the gateway role claims %s", l)
+		}
+		if l.Address == "127.0.0.1" {
+			t.Errorf("home-a claims %s on loopback, which the deployment cannot dial", l)
 		}
 	}
 	gateway := claims(t, "edge")

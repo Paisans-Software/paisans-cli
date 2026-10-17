@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -21,8 +20,8 @@ var gatewayMoveOptions = func() gatewaymove.Options {
 }
 
 // gatewayTransport is how a gateway move reaches a site. Tests replace it.
-var gatewayTransport = func(name string, site config.Site, sudo bool) apply.Transport {
-	return siteTransport(name, site, "", sudo)
+var gatewayTransport = func(name string, site config.Site) apply.Transport {
+	return siteTransport(name, site, "")
 }
 
 // runGateway dispatches `paisans gateway move`.
@@ -49,10 +48,14 @@ func gatewayMoveCommand(args []string) error {
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
 	execute := fs.Bool("execute", false, "actually run the stages, stopping at the first gate that fails")
-	sudo := fs.Bool("sudo", true, "run remote commands through sudo, since /var/lib/paisans is root's")
 	keepImages := fs.Bool("keep-images", false, "passed to the hand-off's apply of a site that keeps the monitor")
 	minFree := fs.String("min-free", "", "passed to the hand-off's apply of a site that keeps the monitor")
+	answers := yesFlag(fs)
 	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	ans, err := answers()
+	if err != nil {
 		return err
 	}
 	r := reporter()
@@ -82,14 +85,14 @@ func gatewayMoveCommand(args []string) error {
 	}
 	transports := map[string]apply.Transport{}
 	for _, name := range cfg.SiteNames() {
-		transports[name] = gatewayTransport(name, cfg.Sites[name], *sudo)
+		transports[name] = gatewayTransport(name, cfg.Sites[name])
 	}
 	options := gatewayMoveOptions()
-	flags := handOffFlags{config: *configPath, secrets: *secretsPath, sudo: *sudo, verbose: r.Verbose(), keepImages: *keepImages, minFree: *minFree}
+	flags := handOffFlags{config: *configPath, secrets: *secretsPath, verbose: r.Verbose(), keepImages: *keepImages, minFree: *minFree, yes: ans.yes}
 	if options.ApplySite == nil {
 		// The hand-off off a site that keeps the monitor applies its infra
 		// stack as typed by hand, with this move's own files and options, so
-		// it claims, reviews and gates exactly as apply does. Only an executed
+		// it checks the admission, reviews and gates exactly as apply does. Only an executed
 		// move reaches it, after its dry run has passed before the first
 		// stage.
 		options.ApplySite = func(site string) error {
@@ -115,9 +118,9 @@ func gatewayMoveCommand(args []string) error {
 		}
 		return nil
 	}
-	// The move writes to both gateways' hosts: the record and the marker,
-	// and the old Caddy stopped.
-	if err := claimSites(r, cfg, *execute, *sudo, plan.From, plan.To); err != nil {
+	// The move writes to both gateways' hosts, so it checks the admission
+	// of each: the record and the marker, and the old Caddy stopped.
+	if _, err := admittedSites(r, cfg, plan.From, plan.To); err != nil {
 		return err
 	}
 	if !*execute || r.Verbose() {
@@ -141,9 +144,9 @@ func gatewayMoveCommand(args []string) error {
 
 // handOffFlags are the move's own options that its hand-off's apply takes.
 type handOffFlags struct {
-	config, secrets           string
-	sudo, verbose, keepImages bool
-	minFree                   string
+	config, secrets          string
+	verbose, keepImages, yes bool
+	minFree                  string
 }
 
 // handOffArgs is apply --site <site> --only infra with the move's own
@@ -153,7 +156,6 @@ func handOffArgs(site string, f handOffFlags, execute bool) []string {
 	if f.secrets != "" {
 		args = append(args, "--secrets", f.secrets)
 	}
-	args = append(args, "--sudo="+strconv.FormatBool(f.sudo))
 	if f.verbose {
 		args = append(args, "-v")
 	}
@@ -162,6 +164,9 @@ func handOffArgs(site string, f handOffFlags, execute bool) []string {
 	}
 	if f.minFree != "" {
 		args = append(args, "--min-free", f.minFree)
+	}
+	if f.yes {
+		args = append(args, "--yes")
 	}
 	if execute {
 		args = append(args, "--execute")

@@ -112,10 +112,12 @@ func (c *clientStep) ensureGroups(ctx context.Context, api *pocketid.Client, whe
 		c.groupsErr = fmt.Errorf("%s is encrypted, but no %s beside it names a recipient, so the signup group IDs could not be written back encrypted", c.secretsPath, config.SOPSConfigName)
 		return
 	}
-	if err := config.WriteSecrets(c.secretsPath, c.secrets, c.recipients); err != nil {
+	written, err := config.WriteSecretsBytes(c.secretsPath, c.secrets, c.recipients)
+	if err != nil {
 		c.groupsErr = fmt.Errorf("recording pocket_id_groups: %w", err)
 		return
 	}
+	c.written = written
 	for _, p := range plans {
 		if p.step != groupPresent {
 			r.Detail("recorded pocket_id_groups.%s", p.name)

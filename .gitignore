@@ -29,9 +29,12 @@
 secrets/
 
 # A real deployment's config names real hosts. The toolkit repo ships only
-# examples; a deployment keeps its own config directory elsewhere.
+# examples, plus test fixtures of placeholders (the exceptions below); a
+# deployment keeps its own config directory elsewhere.
 paisans-stack.yaml
 !examples/paisans-stack.example.yaml
+!internal/admission/testdata/paisans-stack.yaml
+!internal/topology/testdata/paisans-stack.yaml
 
 # secrets.enc.yaml IS meant to be committed — but only ever encrypted. Refuse
 # the decrypted form outright: it is the one mistake with no undo once pushed.
@@ -53,3 +56,9 @@ archive/
 /paisans
 /cmd/paisans/paisans
 /bin/
+
+# make release-binaries writes the release's Linux binaries and SHA256SUMS
+# here. Ignoring it is load-bearing: Go stamps a binary -dirty when the tree
+# holds untracked files, so an unignored dist/ marks every binary after the
+# first one built.
+/dist/

@@ -1,9 +1,9 @@
 package siteremove
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -29,8 +29,11 @@ type siteChange struct {
 	// stopped around its restart.
 	dbApps []string
 	// sync hands the running interface the mesh file already on the host,
-	// which a run that stopped after writing it left unsynced.
+	// which a run that stopped after writing it left unsynced. mesh is the
+	// plan that carries that file for the WireGuard helper's put: plan when
+	// it holds the file, otherwise one scoped to it (see meshPlan).
 	sync bool
+	mesh *apply.Plan
 }
 
 // haproxyFile is HAProxy's configuration, in rendered form.
@@ -104,18 +107,16 @@ func (p *Plan) buildCluster() (*Stage, error) {
 	var gates []string
 	if p.etcd.control != "" {
 		if p.etcd.member != nil {
-			st.Steps = append(st.Steps, Step{Site: p.etcd.control, Verb: "remove", Title: "remove " + p.Site + "'s etcd member", Text: fmt.Sprintf("%s's etcd member %s: %s", p.Site, p.etcd.member.HexID(), apply.Etcdctl(p.dep(), "member remove "+p.etcd.member.HexID()))})
-			if !p.HostGone {
-				st.Steps = append(st.Steps, Step{Site: p.Site, Verb: "stop", Title: "stop etcd on " + p.Site, Text: "its etcd, which a removed member cannot rejoin, so it does not restart in a loop: " + p.stopService("etcd")})
-			}
+			st.Steps = append(st.Steps, Step{Site: p.etcd.control, Verb: "remove", Title: "remove " + p.Site + "'s etcd member", Text: fmt.Sprintf("%s's etcd member %s: %s", p.Site, p.etcd.member.HexID(), p.etcdctl("member remove "+p.etcd.member.HexID()))})
+			st.Steps = append(st.Steps, Step{Site: p.Site, Verb: "stop", Title: "stop etcd on " + p.Site, Text: "its etcd, which a removed member cannot rejoin, so it does not restart in a loop: " + p.stopService("etcd")})
 		}
 		if p.witness != "" {
 			if p.etcd.witness != nil {
 				st.Steps = append(st.Steps, Step{Site: p.etcd.control, Verb: "check", Title: "check etcd voters", Text: fmt.Sprintf("etcd's voters are exactly %s, both healthy, before the second removal", strings.Join(sortedCopy(append(append([]string(nil), p.end.Etcd.Members...), p.witness)), " and "))})
-				st.Steps = append(st.Steps, Step{Site: p.etcd.control, Verb: "remove", Title: "remove witness " + p.witness + "'s etcd member", Text: fmt.Sprintf("the witness %s's etcd member %s, leaving %s the one voter, since two voters are worse than one: %s", p.witness, p.etcd.witness.HexID(), p.end.Etcd.Members[0], apply.Etcdctl(p.dep(), "member remove "+p.etcd.witness.HexID()))})
+				st.Steps = append(st.Steps, Step{Site: p.etcd.control, Verb: "remove", Title: "remove witness " + p.witness + "'s etcd member", Text: fmt.Sprintf("the witness %s's etcd member %s, leaving %s the one voter, since two voters are worse than one: %s", p.witness, p.etcd.witness.HexID(), p.end.Etcd.Members[0], p.etcdctl("member remove "+p.etcd.witness.HexID()))})
 			}
-			if p.etcd.witnessRunning {
-				st.Steps = append(st.Steps, Step{Site: p.witness, Verb: "stop", Title: "stop etcd on " + p.witness, Text: "its etcd, which a removed member cannot rejoin, found by this deployment's label and the infrastructure project's etcd service: " + p.stopWitnessEtcd()})
+			if p.etcd.witnessContainer {
+				st.Steps = append(st.Steps, Step{Site: p.witness, Verb: "stop", Title: "stop and remove etcd on " + p.witness, Text: "its etcd container, which a removed member cannot rejoin, found by this deployment's label and the infrastructure project's etcd service: " + p.stopWitnessEtcd()})
 			}
 		}
 		gates = append(gates, fmt.Sprintf("etcd's voters are exactly %s and every member is healthy", strings.Join(sortedCopy(p.end.Etcd.Members), ", ")))
@@ -147,11 +148,9 @@ func (p *Plan) buildCluster() (*Stage, error) {
 			if err := p.removeEtcdMember(); err != nil {
 				return err
 			}
-			if !p.HostGone {
-				p.work("stop etcd on " + p.Site)
-				if out, err := p.transports[p.Site].Run(p.stopService("etcd")); err != nil {
-					return fmt.Errorf("%s: stopping etcd: %w: %s", p.Site, err, lastLines(out, 3))
-				}
+			p.work("stop etcd on " + p.Site)
+			if out, err := p.transports[p.Site].Run(p.stopService("etcd")); err != nil {
+				return fmt.Errorf("%s: stopping etcd: %w: %s", p.Site, err, lastLines(out, 3))
 			}
 		}
 		if p.etcd.witness != nil {
@@ -159,8 +158,8 @@ func (p *Plan) buildCluster() (*Stage, error) {
 				return err
 			}
 		}
-		if p.etcd.witness != nil || p.etcd.witnessRunning {
-			p.work("stop etcd on " + p.witness)
+		if p.etcd.witness != nil || p.etcd.witnessContainer {
+			p.work("stop and remove etcd on " + p.witness)
 			if out, err := p.transports[p.witness].Run(p.stopWitnessEtcd()); err != nil {
 				return fmt.Errorf("%s: stopping its etcd: %w: %s", p.witness, err, lastLines(out, 3))
 			}
@@ -246,20 +245,24 @@ func renderedContent(rendered *render.Plan, site, rel string) string {
 	return ""
 }
 
-// witnessEtcdIDs lists the running etcd containers of this deployment on the
-// leaving witness's host: its label, the infrastructure stack's compose
-// project and the etcd service, so nothing else on the host can match.
+// witnessEtcdIDs lists the etcd containers of this deployment on the leaving
+// witness's host, running or stopped: its label, the infrastructure stack's
+// compose project and the etcd service, so nothing else on the host can
+// match.
 func (p *Plan) witnessEtcdIDs() string {
 	d := p.dep()
-	return fmt.Sprintf("docker ps -q --filter %s --filter %s --filter %s",
+	return fmt.Sprintf("docker ps -aq --filter %s --filter %s --filter %s",
 		quote(d.LabelFilter()), quote("label=com.docker.compose.project="+d.Project("infra")), quote("label=com.docker.compose.service=etcd"))
 }
 
-// stopWitnessEtcd stops them. It finds the container by its labels, not by
-// the compose file, because once that file is written without etcd Compose
-// no longer knows the service.
+// stopWitnessEtcd stops and removes them, so the witness ends with no etcd
+// container: its compose file declares none, and a stopped one left behind
+// is started again by its restart policy and exits as a removed member. Its
+// volumes stay. It finds the container by its labels, not by the compose
+// file, because the compose file written without etcd does not name the
+// service.
 func (p *Plan) stopWitnessEtcd() string {
-	return fmt.Sprintf("ids=$(%s) && { [ -z \"$ids\" ] || docker stop $ids; }", p.witnessEtcdIDs())
+	return fmt.Sprintf("ids=$(%s) && { [ -z \"$ids\" ] || { docker stop $ids >/dev/null && docker rm $ids >/dev/null; }; }", p.witnessEtcdIDs())
 }
 
 // removeWitness takes the witness out of etcd once the voters are exactly the
@@ -280,7 +283,7 @@ func (p *Plan) removeWitness() error {
 			continue
 		}
 		p.work("remove witness " + p.witness + "'s etcd member")
-		if out, err := p.transports[p.etcd.control].Run(apply.Etcdctl(p.dep(), "member remove "+m.HexID())); err != nil {
+		if out, err := p.transports[p.etcd.control].Run(p.etcdctl("member remove " + m.HexID())); err != nil {
 			return fmt.Errorf("%s: etcdctl member remove %s: %w: %s", p.etcd.control, m.HexID(), err, lastLines(out, 3))
 		}
 	}
@@ -308,7 +311,7 @@ func (p *Plan) removeEtcdMember() error {
 			continue
 		}
 		p.work("remove " + p.Site + "'s etcd member")
-		if out, err := p.transports[p.etcd.control].Run(apply.Etcdctl(p.dep(), "member remove "+m.HexID())); err != nil {
+		if out, err := p.transports[p.etcd.control].Run(p.etcdctl("member remove " + m.HexID())); err != nil {
 			return fmt.Errorf("%s: etcdctl member remove %s: %w: %s", p.etcd.control, m.HexID(), err, lastLines(out, 3))
 		}
 	}
@@ -316,7 +319,7 @@ func (p *Plan) removeEtcdMember() error {
 }
 
 func (p *Plan) etcdMembers() ([]apply.EtcdMember, error) {
-	out, err := p.transports[p.etcd.control].Run(apply.Etcdctl(p.dep(), "member list -w json"))
+	out, err := p.transports[p.etcd.control].Run(p.etcdctl("member list -w json"))
 	if err != nil {
 		return nil, fmt.Errorf("%s: etcd's member list: %w: %s", p.etcd.control, err, lastLines(out, 3))
 	}
@@ -345,14 +348,21 @@ func (p *Plan) etcdVoters(sites []string) error {
 		if strings.Join(voters, ",") != want {
 			return fmt.Errorf("the voters are %s, and they should be %s", strings.Join(voters, ", "), strings.ReplaceAll(want, ",", ", "))
 		}
-		out, err := p.transports[p.etcd.control].Run(apply.Etcdctl(p.dep(), "endpoint health --cluster -w json"))
-		var health []endpointHealth
-		if jerr := json.Unmarshal([]byte(strings.TrimSpace(out)), &health); jerr != nil {
+		out, err := p.transports[p.etcd.control].Run(p.etcdctl("endpoint health --cluster -w json"))
+		health, ok := apply.ParseEtcdEndpointHealth(out)
+		if !ok {
 			return fmt.Errorf("endpoint health: %s", lastLines(out, 3))
 		}
+		listed := map[string]bool{}
 		for _, h := range health {
+			listed[apply.EtcdEndpointSite(p.cfg, h.Endpoint)] = true
 			if !h.Health {
-				return fmt.Errorf("%s is unhealthy: %s", h.Endpoint, h.Error)
+				return fmt.Errorf("%s's etcd is unhealthy%s", apply.EtcdEndpointSite(p.cfg, h.Endpoint), apply.EtcdHealthError(h))
+			}
+		}
+		for _, site := range voters {
+			if !listed[site] {
+				return fmt.Errorf("%s's etcd is not in etcd's endpoint health, so it is not known to be healthy", site)
 			}
 		}
 		if err != nil {
@@ -379,8 +389,8 @@ func (p *Plan) applyChange(c *siteChange) error {
 	}
 	if c.sync {
 		p.work("update files on " + c.site)
-		if out, err := t.Run(apply.WireGuardSync.Command(p.dep())); err != nil {
-			return fmt.Errorf("%s: %s: %w: %s", c.site, apply.WireGuardSync.Title(p.dep()), err, lastLines(out, 3))
+		if err := apply.SyncMesh(c.mesh, t); err != nil {
+			return fmt.Errorf("%s: %s: %w", c.site, apply.WireGuardSync.Title(p.dep()), err)
 		}
 	}
 	if c.haproxy {
@@ -412,8 +422,10 @@ func reloadCaddy(d deployment.Deployment) string {
 // bind mount, which only a restart reads again (see site add's).
 func (p *Plan) restartHAProxy() string { return p.dep().ComposeCmd("infra") + " restart haproxy" }
 
-func statsProbe() string {
-	return fmt.Sprintf("curl -fsS --max-time 5 'http://127.0.0.1:%d/stats;csv'", render.HAProxyStatsPort)
+// statsProbe reads HAProxy's statistics on site as CSV, from its listener on
+// the site's mesh address (see site add's).
+func (p *Plan) statsProbe(site string) string {
+	return fmt.Sprintf("curl -fsS --max-time 5 'http://%s:%d/stats;csv'", p.cfg.Sites[site].Address, render.HAProxyStatsPort)
 }
 
 // databaseApps is the apps on site that reach the cluster's database through
@@ -432,7 +444,7 @@ func (p *Plan) databaseApps(site string) []string {
 // removed site, so a run that wrote the file and stopped before restarting
 // restarts it.
 func (p *Plan) proxyLists(site string) (bool, error) {
-	out, err := p.transports[site].Run(statsProbe())
+	out, err := p.transports[site].Run(p.statsProbe(site))
 	if err != nil {
 		if errors.Is(err, apply.ErrUnreachable) {
 			return false, fmt.Errorf("site remove %s: %s: could not read host state, so whether its HAProxy lists %s is unknown: %w", p.Site, site, p.Site, err)
@@ -538,7 +550,7 @@ func (p *Plan) haproxyGate(sites []string) error {
 			}
 		}
 		for _, site := range sites {
-			out, err := p.transports[site].Run(statsProbe())
+			out, err := p.transports[site].Run(p.statsProbe(site))
 			if err != nil {
 				return fmt.Errorf("%s: HAProxy's statistics: %w: %s", site, err, lastLines(out, 2))
 			}
@@ -564,16 +576,16 @@ func (p *Plan) haproxyGate(sites []string) error {
 }
 
 // meshGate passes when no remaining site has the removed site's key as a
-// WireGuard peer. `wg show <interface> peers` prints one public key per line
-// (wireguard-tools, wg(8)).
+// WireGuard peer. The WireGuard helper's show peers prints one public key per
+// line (wireguard-tools, wg(8)).
 func (p *Plan) meshGate(keys ...string) error {
 	for _, name := range p.liveSites() {
-		out, err := p.transports[name].Run("wg show " + p.dep().Interface() + " peers")
+		peers, err := meshkey.Peers(name, p.transports[name], p.dep())
 		if err != nil {
-			return fmt.Errorf("%s: `wg show %s peers`: %w: %s", name, p.dep().Interface(), err, lastLines(out, 2))
+			return err
 		}
-		for _, line := range strings.Split(out, "\n") {
-			if contains(keys, strings.TrimSpace(line)) {
+		for _, peer := range peers {
+			if contains(keys, peer) {
 				return fmt.Errorf("%s still has %s as a WireGuard peer", name, p.Site)
 			}
 		}
@@ -617,7 +629,7 @@ func (p *Plan) planSiteChanges(st *Stage, names []string, rendered *render.Plan,
 				return nil, nil, err
 			}
 			if conflicts := sp.Conflicts(); len(conflicts) > 0 {
-				return nil, nil, fmt.Errorf("site remove %s: %s's %s differs from what the last apply recorded, so somebody edited it on the host. Nothing was changed. Restore it, or copy what is wanted into the configuration, and run site remove again", p.Site, name, conflicts[0].Path)
+				return nil, nil, hostEdited(p.Site, name, conflicts[0].Path)
 			}
 			c.plan, c.paths = sp, moved
 			for _, w := range sp.Writes() {
@@ -659,10 +671,17 @@ func (p *Plan) planSiteChanges(st *Stage, names []string, rendered *render.Plan,
 				Step{Site: name, Verb: "validate", Title: "validate Caddy routes on " + name, Text: "the routes without " + p.Site + ": " + validateCaddy(p.dep())},
 				Step{Site: name, Verb: "reload", Title: "reload Caddy on " + name, Text: "Caddy: " + reloadCaddy(p.dep())})
 		}
-		if sync, ok := p.evict.stillPeers[name]; ok && sync && keep(p.dep().WireGuardConf()) && (c.plan == nil || c.plan.WireGuard == apply.WireGuardNone) {
+		if sync, ok := p.cutoff.stillPeers[name]; ok && sync && keep(p.dep().WireGuardConf()) && (c.plan == nil || c.plan.WireGuard == apply.WireGuardNone) {
 			// The file was written by a run that stopped before the running
 			// interface was handed it.
-			c.sync = true
+			conf := p.dep().WireGuardConf()
+			mesh, err := meshPlan(p.Site, name, c, conf, func() (*apply.Plan, error) {
+				return apply.Build(name, rendered, acme.Module(p.cfg.ACME.Provider), t, apply.Scope(conf))
+			})
+			if err != nil {
+				return nil, nil, err
+			}
+			c.sync, c.mesh = true, mesh
 			st.Steps = append(st.Steps, Step{Site: name, Verb: "mesh", Title: "update files on " + name, Text: apply.WireGuardSync.Describe(p.dep())})
 		}
 		if c.plan != nil || c.sync {
@@ -710,4 +729,29 @@ func (p *Plan) runForget(records map[string]registry.Runner) error {
 		p.Notes = append(p.Notes, recordMissed(gw, res.Missed[gw].Error()))
 	}
 	return nil
+}
+
+// meshPlan is the plan whose mesh file a resumed sync on name hands the
+// WireGuard helper: the site's own scoped apply when its scope holds the
+// file, otherwise one built scoped to the file alone, refused as the site's
+// own is when somebody edited the file on the host, since the helper would
+// install the render while the edit stayed in place.
+func meshPlan(site, name string, c *siteChange, conf string, build func() (*apply.Plan, error)) (*apply.Plan, error) {
+	if c.plan != nil && slices.Contains(c.paths, conf) {
+		return c.plan, nil
+	}
+	mesh, err := build()
+	if err != nil {
+		return nil, err
+	}
+	if conflicts := mesh.Conflicts(); len(conflicts) > 0 {
+		return nil, hostEdited(site, name, conflicts[0].Path)
+	}
+	return mesh, nil
+}
+
+// hostEdited refuses a scoped apply of name's files because somebody edited
+// path on the host.
+func hostEdited(site, name, path string) error {
+	return fmt.Errorf("site remove %s: %s's %s differs from what the last apply recorded, so somebody edited it on the host. Nothing was changed. Restore it, or copy what is wanted into the configuration, and run site remove again", site, name, path)
 }

@@ -1,16 +1,15 @@
-// Package webserver helps an operator put a monitor site's app behind a web
-// server: what that server must do, filled in for this deployment (Show),
-// which server it is (Detect), the file that does it written into a
-// directory the server includes (Sync), and whether it works, checked from
-// the operator's machine (Check).
+// Package webserver helps put a monitor site's app behind the web server
+// the host's owner runs: which server it is (Detect, which site admit runs
+// as root and records), what that server must do, filled in for this
+// deployment (Show, and the reference files apply writes in the
+// deployment's own root), and whether it works, checked from the
+// operator's machine (Check).
 //
-// Show reads paisans-stack.yaml alone, and Detect only reads the host. Check
-// resolves a name, makes two HTTPS requests and opens one TCP connection, as
-// any visitor could. Sync and Remove are the one part that changes a host,
-// and they change only the toolkit's own files in the include directory,
-// each recorded in the deployment's manifest, never the server's own
-// configuration: the operator adds the one line that includes the
-// directory.
+// Show and the reference files read paisans-stack.yaml and the admission
+// record alone, and Detect only reads the host. Check resolves a name,
+// makes two HTTPS requests and opens one TCP connection, as any visitor
+// could. Nothing here writes, tests or reloads the owner's web server: the
+// toolkit renders, the owner installs.
 package webserver
 
 import (

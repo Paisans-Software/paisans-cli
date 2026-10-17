@@ -26,8 +26,8 @@ import (
 )
 
 // rotateHost is how `secrets rotate` reaches a site. Tests replace it.
-var rotateHost = func(name string, site config.Site, sudo bool) apply.Transport {
-	return siteTransport(name, site, "", sudo)
+var rotateHost = func(name string, site config.Site) apply.Transport {
+	return siteTransport(name, site, "")
 }
 
 // rotateDNSProvider makes the provider a next DNS token is tried against, the
@@ -61,7 +61,7 @@ const wireguardKept = "a WireGuard key is replaced by `paisans mesh rekey`, whic
 // backupKeyKept is why the restic password and WAL-G's key are kept. restic
 // wraps its repository's master key in each password, so a new password
 // leaves the key it opens unchanged, and WAL-G has no re-encryption at all.
-const backupKeyKept = "it encrypts every backup already taken, and a new one would not re-encrypt them: whoever held the old one can still read any copy they made, so rotating it would take nothing back. What keeps an evicted operator out of the backups is the destinations' credentials"
+const backupKeyKept = "it encrypts every backup already taken, and a new one would not re-encrypt them: whoever held the old one can still read any copy they made, so rotating it would take nothing back. What keeps an operator who left out of the backups is the destinations' credentials"
 
 // destinationKept is why a backup destination's credentials are kept.
 const destinationKept = "it is issued by the provider behind the destination: issue a new key there, pipe it in with `paisans secrets set`, apply, then delete the old key at the provider"
@@ -96,9 +96,9 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 	execute := fs.Bool("execute", false, "actually rotate, one secret at a time, stopping at the first gate that fails")
 	all := fs.Bool("all", false, "rotate every secret in scope the deployment has, in the order the spec gives")
 	restart := fs.Bool("restart", false, "with --all: discard what an earlier --all run left and rotate every secret again (refused while a rotation is pending)")
-	sudo := fs.Bool("sudo", true, "run remote commands through sudo, since /srv and Docker are root's")
 	var replaced pathList
 	fs.Var(&replaced, "replaced", "a pasted secret already replaced at its issuer and applied, which every host using it runs: listed, not rotated (repeatable)")
+	answers := yesFlag(fs)
 	var named []string
 	for len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		named, args = append(named, args[0]), args[1:]
@@ -107,6 +107,10 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 	named = append(named, fs.Args()...)
+	ans, err := answers()
+	if err != nil {
+		return err
+	}
 	r := reporter()
 	switch {
 	case *all && len(named) > 0:
@@ -166,7 +170,7 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 		},
 		oidcRetire: func(app string) error { return retireClientSecrets(r, cfg, store, app) },
 		s3Run: func(app string) error {
-			return runStorageRotateKey(subcommandArgs(r, "--config", *configPath, "--secrets", *secretsPath, "--app", app, "--execute", fmt.Sprintf("--sudo=%t", *sudo)))
+			return runStorageRotateKey(subcommandArgs(r, "--config", *configPath, "--secrets", *secretsPath, "--app", app, "--execute"))
 		},
 	}
 	targets, kept, err := rotateTargets(cfg, secrets, named, *all, wiring)
@@ -180,10 +184,7 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 
 	transports := map[string]apply.Transport{}
 	for _, name := range cfg.SiteNames() {
-		transports[name] = rotateHost(name, cfg.Sites[name], *sudo)
-	}
-	if err := settleSudo(r, cfg.SiteNames(), func(name string) apply.Transport { return transports[name] }); err != nil {
-		return err
+		transports[name] = rotateHost(name, cfg.Sites[name])
 	}
 	if err := reachEverySite(r, cfg, transports); err != nil {
 		return err
@@ -199,6 +200,9 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 		Apply: func(site string, s *config.Secrets, stacks []string) error {
 			return rotateApply(r, cfg, transports[site], site, s, stacks)
 		},
+		MailFrom: func(site, path string, s *config.Secrets, stacks []string) error {
+			return checkMailForRotation(r, cfg, s, path, site, stacks)
+		},
 		Healthy: func(site string, stacks []string) error {
 			for _, stack := range stacks {
 				if err := apply.WaitHealthy(cfg.Deployment(), site, stack, transports[site], rotateStopped); err != nil {
@@ -209,7 +213,8 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 		},
 		Now:         time.Now,
 		DNSProvider: rotateDNSProvider,
-		Mail:        smtpEnv(cfg, nil),
+		Mail:        localSMTPEnv(),
+		Warn:        onceEach(r.Note),
 	}
 	run, err := ui.Get(r, "read where each secret stands", func() (*secretsrotate.Run, error) {
 		if err := checkReplaced(env, replacedRs); err != nil {
@@ -235,9 +240,9 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 	if len(run.Items) == 0 {
 		return nothingToRotate(r, env, run, *execute)
 	}
-	// Asked before the hosts are claimed, so a refusal leaves even the
-	// registries as they were.
-	confirm := func(word, what string) error { return confirmWord(stdin, stdout, word, what) }
+	// Asked before any host's admission is checked, so a refusal reaches
+	// no host.
+	confirm := func(word, what string) error { return confirmWord(ans, stdin, stdout, word, what) }
 	if *execute {
 		if err := run.ConfirmSignOut(confirm); err != nil {
 			return err
@@ -246,13 +251,13 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 			return err
 		}
 	}
-	// Every site may be handed a value, and each is written to only through
-	// a claim, as apply's are.
+	// Every site may be handed a value, and each is written to only once its
+	// admission is checked, as apply's are.
 	runners := map[string]registry.Runner{}
 	for name, t := range transports {
 		runners[name] = t
 	}
-	if err := claimHosts(r, cfg, *execute, runners); err != nil {
+	if _, err := admittedHosts(r, cfg, runners); err != nil {
 		return err
 	}
 	if !*execute {
@@ -296,7 +301,7 @@ func nothingToRotate(r ui.Reporter, env secretsrotate.Env, run *secretsrotate.Ru
 }
 
 // askPasted asks for the next value of every pasted secret in the run whose
-// value every host using it runs, all before any host is claimed, so the run
+// value every host using it runs, all before any host is reached, so the run
 // never stops part way to wait on a person. Each answer is refused, with
 // nothing changed, when it is empty, unchanged, too long to be a credential,
 // or not accepted where the secret is checked (secretsrotate.Run.Answer). Run
@@ -634,7 +639,7 @@ func costOf(cfg *config.Config, app, key string) secretsrotate.Cost {
 
 // refuseUnfilled refuses --all on a secrets file that lacks a secret init
 // generates: --all is every secret the deployment has, and a run that
-// skipped one would leave it as the evicted operator knew it, or never made.
+// skipped one would leave it as the operator who left knew it, or never made.
 func refuseUnfilled(cfg *config.Config, store secretsrotate.Store, path string) error {
 	fresh, err := store.Load()
 	if err != nil {
@@ -880,3 +885,15 @@ func refuseMidRotation(secrets *config.Secrets, command string) error {
 // cannotFinish is where a refusal over a rotation that cannot finish sends
 // the operator.
 const cannotFinish = secretsrotate.CannotFinish
+
+// onceEach is note, saying each hint once however often it is given: the
+// plan and stage 2 both try a value, and both find the same thing untried.
+func onceEach(note func(hint, detail string)) func(hint, detail string) {
+	said := map[string]bool{}
+	return func(hint, detail string) {
+		if !said[hint] {
+			said[hint] = true
+			note(hint, detail)
+		}
+	}
+}

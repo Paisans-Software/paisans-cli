@@ -66,21 +66,23 @@ func (m EtcdMember) HexID() string { return strconv.FormatUint(m.ID, 16) }
 func (m EtcdMember) Started() bool { return m.Name != "" }
 
 // Etcdctl is how every etcd command reaches the cluster: through the etcd
-// container on a member's own host, against its loopback listener, which is
-// rendered for exactly this (infra-compose.yaml.tmpl, --listen-client-urls).
-// The image ships etcdctl beside etcd, so the host needs nothing.
-func Etcdctl(d deployment.Deployment, args string) string {
-	return d.ComposeCmd(infraStack) + " exec -T etcd etcdctl --endpoints=http://127.0.0.1:2379 " + args
+// container on a member's own host, against its client listener on address,
+// that member's mesh address, the one address it listens on
+// (infra-compose.yaml.tmpl, --listen-client-urls). The image ships etcdctl
+// beside etcd, so the host needs nothing.
+func Etcdctl(d deployment.Deployment, address, args string) string {
+	return fmt.Sprintf("%s exec -T etcd etcdctl --endpoints=http://%s:%d %s", d.ComposeCmd(infraStack), address, render.EtcdClientPort, args)
 }
 
 // noEtcd is what the membership probe prints on a host with no etcd running,
 // so that "not here" is an answer rather than a failed command.
 const noEtcd = "__PAISANS_NO_ETCD__"
 
-// ReadEtcdMembers asks this host's etcd for the cluster's membership. running
-// is false when no etcd container runs here, which is an answer, not an error.
-func ReadEtcdMembers(t Transport, d deployment.Deployment) (members []EtcdMember, running bool, err error) {
-	c, running, err := ReadEtcdCluster(t, d)
+// ReadEtcdMembers asks this host's etcd, on its mesh address, for the
+// cluster's membership. running is false when no etcd container runs here,
+// which is an answer, not an error.
+func ReadEtcdMembers(t Transport, d deployment.Deployment, address string) (members []EtcdMember, running bool, err error) {
+	c, running, err := ReadEtcdCluster(t, d, address)
 	return c.Members, running, err
 }
 
@@ -92,13 +94,13 @@ type EtcdCluster struct {
 	Members []EtcdMember
 }
 
-// ReadEtcdCluster asks this host's etcd which cluster it belongs to and
-// that cluster's membership. running is false when no etcd container runs
-// here, which is an answer, not an error.
-func ReadEtcdCluster(t Transport, d deployment.Deployment) (cluster EtcdCluster, running bool, err error) {
+// ReadEtcdCluster asks this host's etcd, on its mesh address, which cluster
+// it belongs to and that cluster's membership. running is false when no etcd
+// container runs here, which is an answer, not an error.
+func ReadEtcdCluster(t Transport, d deployment.Deployment, address string) (cluster EtcdCluster, running bool, err error) {
 	command := fmt.Sprintf(
 		"if %s ps --status running --quiet etcd 2>/dev/null | grep -q .; then %s; else echo %s; fi",
-		d.ComposeCmd(infraStack), Etcdctl(d, "member list -w json"), noEtcd)
+		d.ComposeCmd(infraStack), Etcdctl(d, address, "member list -w json"), noEtcd)
 	out, err := t.Run(command)
 	if err != nil {
 		return EtcdCluster{}, false, fmt.Errorf("asking etcd for its members: %w", err)
@@ -111,6 +113,53 @@ func ReadEtcdCluster(t Transport, d deployment.Deployment) (cluster EtcdCluster,
 		return EtcdCluster{}, false, err
 	}
 	return cluster, true, nil
+}
+
+// EtcdEndpointHealth is one entry of `etcdctl endpoint health -w json`. The
+// keys are etcdctl's epHealth (etcd v3.5.16,
+// etcdctl/ctlv3/command/ep_command.go).
+type EtcdEndpointHealth struct {
+	Endpoint string `json:"endpoint"`
+	Health   bool   `json:"health"`
+	Took     string `json:"took"`
+	Error    string `json:"error"`
+}
+
+// ParseEtcdEndpointHealth finds the endpoint list in the combined output of
+// `etcdctl endpoint health -w json`. etcdctl prints every endpoint, healthy
+// or not, and exits 1 with "Error: unhealthy cluster" when any is unhealthy,
+// so the list is read whatever the exit and whatever else the output holds.
+// ok is false when the output holds no list.
+func ParseEtcdEndpointHealth(out string) (list []EtcdEndpointHealth, ok bool) {
+	start := strings.Index(out, "[")
+	end := strings.LastIndex(out, "]")
+	if start < 0 || end < start {
+		return nil, false
+	}
+	if err := json.Unmarshal([]byte(out[start:end+1]), &list); err != nil {
+		return nil, false
+	}
+	return list, true
+}
+
+// EtcdHealthError is ": " and an unhealthy entry's error, or nothing when
+// etcdctl gave none, for a message that names the member first.
+func EtcdHealthError(h EtcdEndpointHealth) string {
+	if h.Error == "" {
+		return ""
+	}
+	return ": " + h.Error
+}
+
+// EtcdEndpointSite names the site whose mesh address an endpoint health
+// entry's endpoint is on, or the endpoint itself when no site's is.
+func EtcdEndpointSite(cfg *config.Config, endpoint string) string {
+	for _, name := range cfg.SiteNames() {
+		if strings.Contains(endpoint, "//"+cfg.Sites[name].Address+":") {
+			return name
+		}
+	}
+	return endpoint
 }
 
 // ParseEtcdMembers reads `etcdctl member list -w json`.
@@ -182,7 +231,7 @@ func ProbeEtcdMembers(cfg *config.Config, site string, transports map[string]Tra
 		if !ok {
 			continue
 		}
-		members, running, err := ReadEtcdMembers(t, cfg.Deployment())
+		members, running, err := ReadEtcdMembers(t, cfg.Deployment(), cfg.Sites[name].Address)
 		if err != nil {
 			if founding {
 				if founders, ok := foundingMembers(t, cfg.Deployment()); ok {

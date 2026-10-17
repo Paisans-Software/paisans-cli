@@ -41,10 +41,6 @@ func ExternalListen(cfg *config.Config, app string) (string, int, bool) {
 	return s.WebServer.ListenHostPort()
 }
 
-// privateBlocks are the RFC 1918 ranges and carrier grade NAT space, for
-// naming the network a LAN listen address sits in.
-var privateBlocks = []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10"}
-
 // WebServerNetwork is the compose network an app on a monitor with managed_by:
 // external runs on, pinned so that the address the operator's web server
 // reaches it from is known, and WebServerGateway that network's gateway, which
@@ -101,9 +97,9 @@ func SiteNetworks(cfg *config.Config, site string) []Network {
 // reaching a loopback listen goes through Docker's publish, which hands the
 // connection to the container from the compose network's gateway
 // (docker-proxy, or with the userland proxy off a masqueraded hairpin), and
-// that network is pinned (WebServerNetwork). A LAN or mesh listen is reached
-// by the web server's own address, which Docker's forwarding keeps; the
-// toolkit knows only the network it lies in.
+// that network is pinned (WebServerNetwork). A listen on the site's mesh
+// address is reached by the web server's own address, which Docker's
+// forwarding keeps; the toolkit knows only that it lies in the mesh.
 func trustProxy(cfg *config.Config, app string) string {
 	if site, ok := ServedBy(cfg, app); ok && cfg.Sites[site].WebServerManagedBy() == config.ManagedByPaisans {
 		return cfg.Sites[site].Address + "/32"
@@ -112,20 +108,11 @@ func trustProxy(cfg *config.Config, app string) string {
 	if !ok {
 		return cfg.Mesh.Subnet
 	}
-	ip := net.ParseIP(host)
-	switch {
-	case ip.IsLoopback():
+	if net.ParseIP(host).IsLoopback() {
 		return WebServerGateway + "/32"
-	case cfg.Mesh.Contains(host):
-		return cfg.Mesh.Subnet
 	}
-	for _, block := range privateBlocks {
-		if _, network, err := net.ParseCIDR(block); err == nil && network.Contains(ip) {
-			return block
-		}
-	}
-	// validate refuses any other listen (web-server-listen-public), so this is
-	// only reached by a caller that rendered without validating.
+	// The site's mesh address: validate refuses any other listen
+	// (web-server-listen-not-this-host).
 	return cfg.Mesh.Subnet
 }
 

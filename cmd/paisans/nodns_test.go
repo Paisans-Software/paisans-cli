@@ -1,17 +1,26 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/grant"
 	"github.com/paisans-software/paisans-cli/internal/keystore"
+	"github.com/paisans-software/paisans-cli/internal/secretsgen"
+	"github.com/paisans-software/paisans-cli/internal/selfcheck"
 	"github.com/paisans-software/paisans-cli/internal/smtpcheck"
 	"github.com/paisans-software/paisans-cli/internal/smtpcheck/smtptest"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -30,10 +39,10 @@ func TestMain(m *testing.M) {
 	}
 	// No test reaches a host to ask whether it was the gateway; a test
 	// about the move says otherwise.
-	convergeHoldsGateway = func(*config.Config, string, bool) (bool, error) { return false, nil }
+	convergeHoldsGateway = func(*config.Config, string) (bool, error) { return false, nil }
 	// No test's apply reaches a configuration store; a test about the
 	// store sets gatherForApply back.
-	applyStore = func(ui.Reporter, string, string, *configstore.Files, *config.Config, bool, io.Reader, io.Writer) (storeVersion, error) {
+	applyStore = func(ui.Reporter, string, string, *configstore.Files, *config.Config, bool, answerer, io.Reader, io.Writer) (storeVersion, error) {
 		return noStore{}, nil
 	}
 	// No test reaches the workstation's keystore: init makes and reads age
@@ -41,13 +50,46 @@ func TestMain(m *testing.M) {
 	// SOPS_AGE_* variable from the shell running the tests decide which key
 	// sops uses; a test that wants one sets it.
 	config.AgeKeystore = keystore.NewMemory()
-	// No test waits between two web server checks.
-	fakeWebServerClock()
+	// Every host has admitted the deployment as the site it is asked about,
+	// with every grant its roles need.
+	// The record is still read, so a test sees which hosts were checked and
+	// when; a test about the check reads and judges it (realAdmission).
+	admissionForSite = func(t admission.Reader, cfg *config.Config, site string) (admission.Record, error) {
+		if p, err := admission.Path(deployment.Deployment{ID: cfg.ID}.Token()); err == nil {
+			_, _, _ = t.ReadFile(p)
+		}
+		s := cfg.Sites[site]
+		rec := admission.Record{Site: site, User: s.SSHUser(), Grants: admission.Needs(s), Forwarding: s.Endpoint != "",
+			Ports: admission.Ports{SSH: s.SSH.PortOrDefault(), WireGuard: s.ListenPort()}, MeshSubnet: cfg.Mesh.Subnet}
+		if s.WebServerManagedBy() == config.ManagedByExternal {
+			rec.WebServer = &admission.WebServer{Server: "caddy"}
+		}
+		return rec, nil
+	}
+	// Every run classifies every site: here each host lets the run in and
+	// has admitted the deployment as its site, so every site is ready. A
+	// test about a site missing sets its own (classifyWith).
+	classifyTransports = classifyHosts(nil)
+	// No test spends most of a second on each OAuth2 key it fills: what
+	// they test is that a key is filled, opens with its passphrase and
+	// stays put, and secretsgen's tests hold the key to 4096 bits.
+	secretsgen.SetOAuthKeyBits(1024)
+	// No test reaches a gateway from outside: every gateway answers as the
+	// deployment it is asked about. A test about the check sets its own.
+	gatewayProbe = func() selfcheck.Probe {
+		return selfcheck.Probe{Fetch: func(_ context.Context, scheme, _, host, path string) (selfcheck.Answer, error) {
+			if scheme == "http" {
+				return selfcheck.Answer{Status: 308, Location: "https://" + host + path}, nil
+			}
+			return selfcheck.Answer{Status: 200, Body: path[strings.LastIndex(path, "/")+1:]}, nil
+		}, Now: time.Now, Sleep: func(time.Duration) {}}
+	}
 	// No test reaches a site or a mail server to try mail settings: every
 	// check is answered by an in-process server that takes any login. A
 	// test about the check sets its own (fakeSMTP).
 	acceptAll := smtptest.New()
 	smtpEnv = func(*config.Config, map[string]string) smtpcheck.Env { return acceptAll.Env() }
+	localSMTPEnv = func() smtpcheck.Env { return acceptAll.Env() }
 	for _, name := range config.AgeVariables() {
 		os.Unsetenv(name)
 	}
@@ -69,9 +111,34 @@ func TestMain(m *testing.M) {
 		os.RemoveAll(dir)
 		os.Exit(1)
 	}
+	gitDirect(dir)
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)
+}
+
+// gitDirect puts the git that /usr/bin/git stands for first on PATH, linked
+// from a directory of its own in dir, when /usr/bin/git is the git on PATH
+// on macOS. That one is Xcode's stub, which asks xcrun where git is on every
+// call, and that doubles what each of the thousands of git commands these
+// tests run costs. The git that runs is the same one.
+func gitDirect(dir string) {
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	if found, err := exec.LookPath("git"); err != nil || found != "/usr/bin/git" {
+		return
+	}
+	out, err := exec.Command("xcrun", "--find", "git").Output()
+	real := strings.TrimSpace(string(out))
+	if err != nil || !filepath.IsAbs(real) {
+		return
+	}
+	bin := filepath.Join(dir, "git-bin")
+	if os.Mkdir(bin, 0o700) != nil || os.Symlink(real, filepath.Join(bin, "git")) != nil {
+		return
+	}
+	os.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 // noStore is a configuration store that checks nothing and publishes
@@ -83,6 +150,10 @@ func (noStore) check(ui.Reporter, map[string]grant.Record, bool, io.Reader, io.W
 }
 
 func (noStore) publish(ui.Reporter, bool) (*appliedVersion, error) { return nil, nil }
+
+func (noStore) next(ui.Reporter, *appliedVersion, configstore.Files) (*appliedVersion, error) {
+	return nil, nil
+}
 
 func (noStore) held() (string, int) { return "", 0 }
 

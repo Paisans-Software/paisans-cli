@@ -15,16 +15,15 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/registry"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
-// Version is the record's layout. Version 2 added the configuration part
-// and version 3 the approvals; an older record is read as one with neither
-// yet, and written back as version 3.
+// Version is the record's layout. A record of any other layout is refused.
 const Version = 3
 
 // Record is the grant a deployment last applied on one host, each part
 // written by the command that applies it once its steps for the site have
-// all succeeded: the keys part by host prepare, the images, web server and
+// all succeeded: the keys part by site prepare, the images and
 // configuration parts by apply. Approved is the one written before any step:
 // what an operator approved there and no command has applied yet. A part
 // that was never written is nil.
@@ -32,10 +31,13 @@ type Record struct {
 	Version    int             `json:"version"`
 	Keys       *KeysPart       `json:"keys,omitempty"`
 	Images     *ImagesPart     `json:"images,omitempty"`
-	WebServer  *WebServerPart  `json:"web_server,omitempty"`
 	Blueprints *BlueprintsPart `json:"blueprints,omitempty"`
 	Config     *ConfigPart     `json:"config,omitempty"`
 	Approved   *ApprovedPart   `json:"approved,omitempty"`
+	// Build is the paisans that last wrote the record: toolkit_version,
+	// toolkit_commit and toolkit_modified. Parse refuses a record without
+	// it.
+	version.Build
 }
 
 // ApprovedPart is each entry an operator approved on the host that the
@@ -69,7 +71,7 @@ type ConfigPart struct {
 	AppliedAt time.Time `json:"applied_at"`
 }
 
-// KeysPart is the login user and the keys host prepare last made its
+// KeysPart is the login user and the keys site prepare last made its
 // authorized keys.
 type KeysPart struct {
 	AppliedAt string `json:"applied_at"`
@@ -95,13 +97,6 @@ type BlueprintsPart struct {
 	Entries    []Blueprint `json:"entries"`
 }
 
-// WebServerPart is the include directory apply last wrote into.
-type WebServerPart struct {
-	AppliedAt  string `json:"applied_at"`
-	ApprovedBy string `json:"approved_by,omitempty"`
-	IncludeDir string `json:"include_dir"`
-}
-
 // ErrMalformed is a record that cannot be read as one: corrupt, or written
 // by a toolkit with a newer layout. It is not rewritten, since what it held
 // is unknown; deleting it by hand makes the next run review everything
@@ -114,21 +109,21 @@ var ErrChanged = errors.New(changedMarker)
 
 const changedMarker = "paisans: the grant record changed while it was read"
 
-// Path is the record on a host, named by the deployment's token, beside the
-// registry. It is root's and 0644: it holds fingerprints and image references,
-// nothing secret, so it is readable without sudo, and only root writes it,
-// so the login user alone cannot rewrite the baseline a review compares with.
-func Path(d deployment.Deployment) string {
-	return registry.Dir + "/granted." + d.Token() + ".json"
-}
+// Path is the record on a host, the deployment user's, in its state
+// directory. It holds fingerprints and image references, nothing secret.
+func Path(d deployment.Deployment) string { return d.StatePath("granted.json") }
 
-// RemoveCommand deletes the record, for site remove's stage 3, which deletes
-// the deployment's registry entry beside it.
+// RemoveCommand deletes the record, for site remove's host stage.
 func RemoveCommand(d deployment.Deployment) string { return "rm -f -- " + quote(Path(d)) }
 
-// Encode is the record as written.
+// Encode is the record as written: in the current layout, and with this
+// build of paisans when it names none, since no record is written without
+// one.
 func Encode(rec Record) string {
 	rec.Version = Version
+	if rec.Build == (version.Build{}) {
+		rec.Build = version.Current()
+	}
 	var b bytes.Buffer
 	enc := json.NewEncoder(&b)
 	enc.SetIndent("", "  ")
@@ -136,16 +131,20 @@ func Encode(rec Record) string {
 	return b.String()
 }
 
-// Parse reads a record.
+// Parse reads a record. One that does not say which build of paisans wrote
+// it is refused with a *version.NoBuildError.
 func Parse(content string) (Record, error) {
+	if err := version.RequireBuild([]byte(content)); err != nil {
+		return Record{}, err
+	}
 	dec := json.NewDecoder(strings.NewReader(content))
 	dec.DisallowUnknownFields()
 	var rec Record
 	if err := dec.Decode(&rec); err != nil {
 		return Record{}, err
 	}
-	if rec.Version < 1 || rec.Version > Version {
-		return Record{}, fmt.Errorf("version %d, and this toolkit reads versions 1 to %d", rec.Version, Version)
+	if rec.Version != Version {
+		return Record{}, fmt.Errorf("version %d, and this toolkit reads version %d", rec.Version, Version)
 	}
 	return rec, nil
 }
@@ -162,8 +161,15 @@ func Read(t registry.Runner, d deployment.Deployment) (Record, string, bool, err
 		return Record{Version: Version}, "", false, nil
 	}
 	rec, err := Parse(content)
+	if version.IsNewer(err) {
+		return Record{}, "", false, fmt.Errorf("%s: %s: %w", t.Describe(), Path(d), err)
+	}
+	var noBuild *version.NoBuildError
+	if errors.As(err, &noBuild) {
+		return Record{}, "", false, fmt.Errorf("%s: %s is %w: %v. Delete it with `rm %s`, then apply again, which reviews every key and image again and writes it anew", t.Describe(), Path(d), ErrMalformed, err, Path(d))
+	}
 	if err != nil {
-		return Record{}, "", false, fmt.Errorf("%s: %s is %w (%v). Delete it with `sudo rm %s`; the next run then reviews every key and image again", t.Describe(), Path(d), ErrMalformed, err, Path(d))
+		return Record{}, "", false, fmt.Errorf("%s: %s is %w (%v). Delete it with `rm %s`; the next run then reviews every key and image again", t.Describe(), Path(d), ErrMalformed, err, Path(d))
 	}
 	return rec, content, true, nil
 }
@@ -173,8 +179,9 @@ func Read(t registry.Runner, d deployment.Deployment) (Record, string, bool, err
 // first and written only if the file still holds what was read, so a part
 // another command wrote meanwhile is never lost: a write that finds the file
 // changed reads it again and makes the change again, a few times. A change
-// that leaves the record as it was writes nothing. It reports whether it
-// wrote.
+// that leaves the record as it was writes nothing, and one that changes it
+// records this build of paisans as the one that wrote it. It reports
+// whether it wrote.
 func Write(t registry.Runner, d deployment.Deployment, change func(Record) Record) (bool, error) {
 	var err error
 	for range 3 {
@@ -192,6 +199,7 @@ func Write(t registry.Runner, d deployment.Deployment, change func(Record) Recor
 		if !found && Encode(next) == Encode(Record{}) {
 			return false, nil
 		}
+		next.Build = version.Current()
 		want := "none"
 		if found {
 			sum := sha256.Sum256([]byte(raw))
@@ -210,21 +218,16 @@ func Write(t registry.Runner, d deployment.Deployment, change func(Record) Recor
 }
 
 // writeCommand replaces the record with content if the file still hashes to
-// want ("none" for no file), under the lock the registry and the deployment
-// record take.
+// want ("none" for no file), under the deployment's lock.
 func writeCommand(d deployment.Deployment, want, content string) string {
 	return strings.Join([]string{
 		"set -e",
-		"umask 077",
-		"mkdir -p " + registry.Dir,
-		"chmod 711 " + registry.Dir,
-		"exec 9>>" + registry.LockPath,
-		fmt.Sprintf("flock -w 60 9 || { echo 'paisans: another command holds %s'; exit 1; }", registry.LockPath),
+		d.StateLockCommand("the grant record"),
 		"f=" + quote(Path(d)),
 		"cur=none",
 		`if [ -f "$f" ]; then cur=$(sha256sum "$f" | cut -d' ' -f1); fi`,
 		`[ "$cur" = ` + quote(want) + ` ] || { echo ` + quote(changedMarker) + `; exit 1; }`,
-		"tmp=$(mktemp " + registry.Dir + "/.granted.XXXXXX)",
+		"tmp=$(mktemp " + quote(d.StatePath(".granted.XXXXXX")) + ")",
 		`trap 'rm -f "$tmp"' EXIT`,
 		"printf %s " + quote(base64.StdEncoding.EncodeToString([]byte(content))) + ` | base64 -d > "$tmp"`,
 		`chmod 644 "$tmp"`,
@@ -234,34 +237,44 @@ func writeCommand(d deployment.Deployment, want, content string) string {
 
 func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
-// Scope is the parts of a grant one command reviews and records: host
-// prepare's keys, apply's images and web server, or all of them for apply
+// Scope is the parts of a grant one command reviews and records: site
+// prepare's keys, apply's images, or all of them for apply
 // with no --site.
 type Scope struct {
-	Keys, Images, WebServer bool
+	Keys, Images bool
 	// Stacks, when set, narrows the images to these stacks, as apply --only
 	// does: a stack the run leaves alone is neither reviewed nor recorded.
 	Stacks []string
+	// Services, when set, narrows the images further to these, each
+	// "<stack>/<service>": a command that starts only some of a stack's
+	// services reviews and records those alone, and the approvals for the
+	// rest stay for the command that starts them.
+	Services []string
 }
 
 // holds reports whether rec holds any part s covers.
 func (rec Record) holds(s Scope) bool {
-	return (s.Keys && rec.Keys != nil) || (s.Images && rec.Images != nil) || (s.WebServer && rec.WebServer != nil)
+	return (s.Keys && rec.Keys != nil) || (s.Images && rec.Images != nil)
 }
 
-// PrepareScope is host prepare's.
+// PrepareScope is site prepare's.
 var PrepareScope = Scope{Keys: true}
 
 // ApplyScope is apply --site's, narrowed to stacks when it names any.
 func ApplyScope(stacks ...string) Scope {
-	return Scope{Images: true, WebServer: true, Stacks: stacks}
+	return Scope{Images: true, Stacks: stacks}
 }
 
 // AllScope is every part, for apply with no --site.
-var AllScope = Scope{Keys: true, Images: true, WebServer: true}
+var AllScope = Scope{Keys: true, Images: true}
 
 func (s Scope) stack(name string) bool {
 	return len(s.Stacks) == 0 || slices.Contains(s.Stacks, name)
+}
+
+// image reports whether s covers the image of service in stack.
+func (s Scope) image(stack, service string) bool {
+	return s.stack(stack) && (len(s.Services) == 0 || slices.Contains(s.Services, stack+"/"+service))
 }
 
 // covers reports whether subject, a review change's, is in a part s
@@ -272,12 +285,10 @@ func (s Scope) covers(subject string) bool {
 	case "login", "key":
 		return s.Keys
 	case "image":
-		stack, _, _ := strings.Cut(rest, "/")
-		return s.Images && s.stack(stack)
+		stack, service, _ := strings.Cut(rest, "/")
+		return s.Images && s.image(stack, service)
 	case "blueprint":
 		return s.Images && s.stack(rest)
-	case "web":
-		return s.WebServer
 	}
 	return false
 }
@@ -359,7 +370,7 @@ func (s Scope) blueprints(list []Blueprint) []Blueprint {
 func (s Scope) images(list []Image) []Image {
 	var out []Image
 	for _, i := range list {
-		if s.stack(i.Stack) {
+		if s.image(i.Stack, i.Service) {
 			out = append(out, i)
 		}
 	}
@@ -396,7 +407,7 @@ func Update(rec Record, g Grant, s Scope, now time.Time, approvedBy string) Reco
 		var kept []Image
 		if rec.Images != nil {
 			for _, i := range rec.Images.Entries {
-				if !s.stack(i.Stack) {
+				if !s.image(i.Stack, i.Service) {
 					kept = append(kept, i)
 				}
 			}
@@ -437,14 +448,6 @@ func Update(rec Record, g Grant, s Scope, now time.Time, approvedBy string) Reco
 				part.ApprovedBy = rec.Blueprints.ApprovedBy
 			}
 			out.Blueprints = part
-		}
-	}
-	if s.WebServer {
-		switch {
-		case g.WebServer == nil:
-			out.WebServer = nil
-		case rec.WebServer == nil || rec.WebServer.IncludeDir != g.WebServer.IncludeDir:
-			out.WebServer = &WebServerPart{AppliedAt: at, ApprovedBy: approvedBy, IncludeDir: g.WebServer.IncludeDir}
 		}
 	}
 	return out

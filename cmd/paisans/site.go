@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
@@ -15,6 +16,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/secretsgen"
 	"github.com/paisans-software/paisans-cli/internal/siteadd"
+	"github.com/paisans-software/paisans-cli/internal/topology"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 	"github.com/paisans-software/paisans-cli/internal/validate"
 )
@@ -37,7 +39,7 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
 	execute := fs.Bool("execute", false, "actually run the stages, stopping at the first gate that fails")
-	sudo := fs.Bool("sudo", true, "run remote commands through sudo, since /srv and /etc are not the deploy user's")
+	answers := yesFlag(fs)
 	// The site may come before or after the flags. flag stops at the first
 	// argument that is not one, so a leading name is taken off first.
 	var site string
@@ -45,6 +47,10 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 		site, args = args[0], args[1:]
 	}
 	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	ans, err := answers()
+	if err != nil {
 		return err
 	}
 	r := reporter()
@@ -88,7 +94,7 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 
 	transports := map[string]apply.Transport{}
 	for _, name := range cfg.SiteNames() {
-		transports[name] = siteTransport(name, cfg.Sites[name], "", *sudo)
+		transports[name] = siteTransport(name, cfg.Sites[name], "")
 	}
 	// The site being added is the one whose host the join changes from
 	// nothing; every other site already runs the deployment, and each is
@@ -96,7 +102,21 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	if _, ok := cfg.Sites[site]; !ok {
 		return fmt.Errorf("site add: %s declares no site %q. Declared sites are %s", *configPath, site, strings.Join(cfg.SiteNames(), ", "))
 	}
-	// The new site's architecture is recorded as host prepare records it;
+	// The site added must be ready, and the rest is joined as the run
+	// sees it: the effective topology, without the sites still pending. A
+	// join changes the mesh and HAProxy files of every joined site, which a
+	// down one cannot take, so it waits until every joined site answers.
+	var sites *topology.Classification
+	if cfg, sites, err = effectiveConfig(r, cfg, ""); err != nil {
+		return err
+	}
+	if !sites.Ready(site) {
+		return &ui.Problem{Hint: "site add " + site + ": it is " + sites.Sites[site].Class.String(), Explain: sites.Sites[site].Why + "."}
+	}
+	if down := sites.Down(); len(down) > 0 {
+		return &ui.Problem{Hint: "site add " + site + ": a site joins once every joined site answers", Explain: "The join changes every joined site's mesh and HAProxy files, and " + strings.Join(down, ", ") + " does not answer:\n" + topology.DownLine(down[0]) + "\nNothing was changed."}
+	}
+	// The new site's architecture is recorded as site prepare records it;
 	// preflight compares it with the data sites'.
 	read, err := readArchitectures(r, cfg, []string{site}, func(name string) hostarch.Runner { return transports[name] })
 	if err != nil {
@@ -105,9 +125,18 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	if cfg, err = recordArchitectures(r, *configPath, cfg, read, *execute && reviewedByRun == nil); err != nil {
 		return err
 	}
+	// As a step of apply with no --site, a site declared [data, apps] joins
+	// as [data], without its pinned apps: the run applies it once the join
+	// is done, which starts its apps, and applies the gateway after that.
+	// The review and the record cover what the join starts, so the run's
+	// approvals for the apps stay recorded until that apply.
+	declared := cfg
+	if reviewedByRun != nil {
+		cfg = joinedAsData(cfg, site)
+	}
 	// Stage 4 pulls the new site's images only after the mesh, HAProxy and
 	// etcd have changed on every site, so an image with no build for its
-	// architecture is refused here, before anything is claimed.
+	// architecture is refused here, before anything changes.
 	rendered, err := render.Build(cfg, secrets)
 	if err != nil {
 		return err
@@ -125,15 +154,19 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	// The review comes before the claim, which is the first change: an
+	// The review comes before the first change: an
 	// operator who does not approve leaves every host as it was. Its images
-	// are the new site's render, as stage 4 applies it. Keys are host
+	// are the new site's render, as stage 4 applies it. Keys are site
 	// prepare's, which the new site has had already.
 	g, err := grant.For(cfg, rendered, site)
 	if err != nil {
 		return err
 	}
-	review, approvedBy, err := stepReview(r, stdin, stdout, cfg, site, g, grant.Scope{Images: true}, transports[site], *execute, "paisans site add "+site+" --execute")
+	scope, err := siteAddScope(cfg, site, g, cfg != declared)
+	if err != nil {
+		return err
+	}
+	review, approvedBy, err := stepReview(r, ans, stdin, stdout, cfg, site, g, scope, transports[site], *execute, "paisans site add "+site+" --execute")
 	if err != nil {
 		return err
 	}
@@ -145,9 +178,9 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 		showReview(r, "review what "+config.FileName+" grants", review.review, false)
 		pending = review.review.Pending()
 	}
-	// Site add writes to every site: the mesh, HAProxy and etcd change on
-	// each, not only on the new one.
-	if err := claimSites(r, cfg, *execute, *sudo, cfg.SiteNames()...); err != nil {
+	// Site add writes to every site, so it checks the admission of each: the
+	// mesh, HAProxy and etcd change on each, not only on the new one.
+	if _, err := admittedSites(r, cfg, cfg.SiteNames()...); err != nil {
 		return err
 	}
 	plan, err := ui.Get(r, "read every site", func() (*siteadd.Plan, error) {
@@ -182,4 +215,53 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	reportOwedApplies(r, plan.Owed)
 	r.Result("%s joined: every gate passed.", site)
 	return nil
+}
+
+// joinedAsData is cfg with site, declared [data, apps], given the data role
+// alone and without the apps pinned to it, the configuration site add joins
+// it with as a step of apply with no --site. site add's stages start no app
+// stacks; the run's apply of the site that follows the join starts them, and
+// the gateway's apply after it routes to them. Any other site leaves cfg as
+// it is. cfg is not changed.
+func joinedAsData(cfg *config.Config, site string) *config.Config {
+	s, ok := cfg.Sites[site]
+	if !ok || len(s.Roles) != 2 || !s.Has(config.RoleData) || !s.Has(config.RoleApps) {
+		return cfg
+	}
+	joined := *cfg
+	joined.Sites = make(map[string]config.Site, len(cfg.Sites))
+	for name, other := range cfg.Sites {
+		joined.Sites[name] = other
+	}
+	s.Roles = []config.Role{config.RoleData}
+	joined.Sites[site] = s
+	pinned := cfg.PinnedTo(site)
+	joined.Apps = make(map[string]config.App, len(cfg.Apps))
+	for name, app := range cfg.Apps {
+		if !slices.Contains(pinned, name) {
+			joined.Apps[name] = app
+		}
+	}
+	return &joined
+}
+
+// siteAddScope is what site add reviews and records on site: every image of
+// its render, or, for a site joinedAsData narrowed, exactly the images and
+// blueprints of g, the narrowed render's grant. The approvals the run
+// recorded for the rest of the site's grant, its apps and the infrastructure
+// services only the apps role adds, are then kept until the apply that
+// starts them.
+func siteAddScope(cfg *config.Config, site string, g grant.Grant, narrowed bool) (grant.Scope, error) {
+	if !narrowed {
+		return grant.Scope{Images: true}, nil
+	}
+	stacks, err := render.SiteStacks(cfg, site)
+	if err != nil {
+		return grant.Scope{}, err
+	}
+	services := []string{}
+	for _, i := range g.Images {
+		services = append(services, i.Stack+"/"+i.Service)
+	}
+	return grant.Scope{Images: true, Stacks: stacks, Services: services}, nil
 }

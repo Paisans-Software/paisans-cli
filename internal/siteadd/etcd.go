@@ -1,7 +1,6 @@
 package siteadd
 
 import (
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -29,7 +28,7 @@ func (p *Plan) probeEtcd() ([]apply.EtcdMember, error) {
 	}
 	order = append(order, p.Site)
 	for _, name := range order {
-		members, running, err := apply.ReadEtcdMembers(p.transports[name], p.dep())
+		members, running, err := apply.ReadEtcdMembers(p.transports[name], p.dep(), p.cfg.Sites[name].Address)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}
@@ -47,7 +46,7 @@ func (p *Plan) probeEtcd() ([]apply.EtcdMember, error) {
 		}
 		for _, m := range members {
 			if site := apply.EtcdMemberSite(p.cfg, m); !contains(p.cfg.Etcd.Members, site) {
-				return nil, fmt.Errorf("site add %s: etcd has a member %s that %s does not list. Removing a member is not part of site add; list it, or remove it by hand with `etcdctl member remove %s`", p.Site, site, p.cfg.EtcdMembersKey(), m.HexID())
+				return nil, fmt.Errorf("site add %s: etcd has a member %s that %s does not list. Removing a member is not part of site add; list it, or remove it by hand on %s with `etcdctl --endpoints=http://%s:%d member remove %s`", p.Site, site, p.cfg.EtcdMembersKey(), name, p.cfg.Sites[name].Address, render.EtcdClientPort, m.HexID())
 			}
 		}
 		p.control = name
@@ -94,7 +93,7 @@ func (p *Plan) buildEtcd(live []apply.EtcdMember) *Stage {
 		Number: 3,
 		Name:   "etcd",
 		Short:  "etcd healthy, voters match",
-		Gate:   fmt.Sprintf("`etcdctl endpoint health --cluster` on %s reports every member healthy, and the voters are exactly %s", p.control, strings.Join(sortedCopy(p.cfg.Etcd.Members), ", ")),
+		Gate:   fmt.Sprintf("etcd's health across the cluster, read on %s, reports every member healthy, and the voters are exactly %s", p.control, strings.Join(sortedCopy(p.cfg.Etcd.Members), ", ")),
 	}
 	predicted := map[string]string{}
 	present := map[string]bool{}
@@ -155,7 +154,7 @@ func clusterString(members map[string]string) string {
 }
 
 func (p *Plan) members() ([]apply.EtcdMember, error) {
-	out, err := p.transports[p.control].Run(apply.Etcdctl(p.dep(), "member list -w json"))
+	out, err := p.transports[p.control].Run(apply.Etcdctl(p.dep(), p.cfg.Sites[p.control].Address, "member list -w json"))
 	if err != nil {
 		return nil, fmt.Errorf("%s: etcd's member list: %w", p.control, err)
 	}
@@ -195,7 +194,7 @@ func (p *Plan) joinEtcd(j string) error {
 		// learner was added moments after the first was promoted and was
 		// refused for exactly that, so the add is retried on that answer
 		// alone, the way promotion is retried while a learner catches up.
-		command := apply.Etcdctl(p.dep(), fmt.Sprintf("member add %s --peer-urls=%s --learner", j, url))
+		command := apply.Etcdctl(p.dep(), p.cfg.Sites[p.control].Address, fmt.Sprintf("member add %s --peer-urls=%s --learner", j, url))
 		delay := promoteFirstDelay
 		for i := 0; ; i++ {
 			out, err := control.Run(command)
@@ -288,7 +287,7 @@ func (p *Plan) joinEtcd(j string) error {
 	delay := promoteFirstDelay
 	var last string
 	for i := 0; i < promoteAttempts; i++ {
-		out, err := control.Run(apply.Etcdctl(p.dep(), "member promote "+m.HexID()))
+		out, err := control.Run(apply.Etcdctl(p.dep(), p.cfg.Sites[p.control].Address, "member promote "+m.HexID()))
 		if err == nil {
 			return nil
 		}
@@ -304,28 +303,30 @@ func (p *Plan) joinEtcd(j string) error {
 	return fmt.Errorf("%s: etcd would not promote %s after %d attempts, so it is still a learner and the cluster still has its quorum. Last answer: %s", p.control, j, promoteAttempts, last)
 }
 
-// endpointHealth is one entry of `etcdctl endpoint health -w json` (etcd
-// v3.5.16, etcdctl/ctlv3/command/ep_command.go, epHealth).
-type endpointHealth struct {
-	Endpoint string `json:"endpoint"`
-	Health   bool   `json:"health"`
-	Error    string `json:"error"`
-}
-
+// etcdGate waits for every member of etcd.members to be a voter and every
+// member to answer healthy. etcdctl exits 1 when any endpoint is unhealthy
+// and still prints every endpoint, so its list is read whatever the exit and
+// an unhealthy member is named.
 func (p *Plan) etcdGate() error {
 	want := sortedCopy(p.cfg.Etcd.Members)
 	var problems []string
 	n := attempts(etcdWait, etcdPoll)
 	for i := 0; i < n; i++ {
 		problems = nil
-		out, err := p.transports[p.control].Run(apply.Etcdctl(p.dep(), "endpoint health --cluster -w json"))
-		var health []endpointHealth
-		if jerr := json.Unmarshal([]byte(strings.TrimSpace(out)), &health); jerr != nil {
+		out, err := p.transports[p.control].Run(apply.Etcdctl(p.dep(), p.cfg.Sites[p.control].Address, "endpoint health --cluster -w json"))
+		if health, ok := apply.ParseEtcdEndpointHealth(out); !ok {
 			problems = append(problems, "endpoint health: "+lastLines(out, 3))
 		} else {
+			listed := map[string]bool{}
 			for _, h := range health {
+				listed[apply.EtcdEndpointSite(p.cfg, h.Endpoint)] = true
 				if !h.Health {
-					problems = append(problems, fmt.Sprintf("%s is unhealthy: %s", h.Endpoint, h.Error))
+					problems = append(problems, apply.EtcdEndpointSite(p.cfg, h.Endpoint)+"'s etcd is unhealthy"+apply.EtcdHealthError(h))
+				}
+			}
+			for _, site := range want {
+				if !listed[site] {
+					problems = append(problems, site+"'s etcd is not in etcd's endpoint health, so it is not known to be healthy")
 				}
 			}
 			if err != nil && len(problems) == 0 {

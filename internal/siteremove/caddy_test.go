@@ -18,13 +18,14 @@ import (
 const (
 	caddyID   = "c0ffee0000000000000000000000000000000000000000000000000000000001"
 	caddyfile = root + "/infra/caddy/Caddyfile"
-	blog      = render.HostSitesDir + "/blog.caddy"
+	sitesDir  = root + "/caddy.d"
+	blog      = sitesDir + "/blog.caddy"
 )
 
 // gatewayWorld has a second gateway on home-c, so vm, a gateway and the
 // witness, may go, with this deployment's Caddy running on vm and its
 // certificates there; ownerSites puts a site block of the host owner's in
-// /srv/caddy.d.
+// the deployment's caddy.d.
 func gatewayWorld(t *testing.T, ownerSites bool) *world {
 	w := newWorld(t,
 		replace("  home-c:\n    roles: [data]", "  home-c:\n    roles: [data, gateway]"),
@@ -94,7 +95,7 @@ func index(commands []string, sub string) int {
 	return -1
 }
 
-// With no site of the owner's in /srv/caddy.d, Caddy goes like everything
+// With no site of the owner's in its caddy.d, Caddy goes like everything
 // else: nothing of the deployment's is left.
 func TestAGatewayNobodyReliesOnIsRemovedCompletely(t *testing.T) {
 	w := gatewayWorld(t, false)
@@ -114,8 +115,8 @@ func TestAGatewayNobodyReliesOnIsRemovedCompletely(t *testing.T) {
 	if vm.under(root) {
 		t.Errorf("files are left under %s: %v", root, vm.sortedFiles())
 	}
-	if _, ok := vmRegistry(t, w).Deployments[ourID]; ok {
-		t.Error("the registry entry is left")
+	if _, ok := vmRegistry(t, w).Deployments[ourID]; !ok {
+		t.Error("the registry entry is gone, which is site evict's to remove")
 	}
 	if len(vm.caddyLoads) != 0 {
 		t.Error("Caddy was reloaded")
@@ -194,7 +195,7 @@ func TestAGatewaysCaddyIsKeptForTheOwnersSites(t *testing.T) {
 			left = append(left, strings.TrimPrefix(f, root+"/"))
 		}
 	}
-	want := []string{".paisans-manifest.json", "infra/caddy/Caddyfile", "infra/caddy/caddy.env", "infra/caddy/config/caddy/autosave.json", "infra/caddy/data/caddy/certificates/blog.example.net.crt", "infra/compose.yaml"}
+	want := []string{".paisans-manifest.json", "caddy.d/blog.caddy", "infra/caddy/Caddyfile", "infra/caddy/caddy.env", "infra/caddy/config/caddy/autosave.json", "infra/caddy/data/caddy/certificates/blog.example.net.crt", "infra/compose.yaml"}
 	if strings.Join(left, "\n") != strings.Join(want, "\n") {
 		t.Errorf("left under the root:\n%s\nwant:\n%s", strings.Join(left, "\n"), strings.Join(want, "\n"))
 	}
@@ -213,8 +214,8 @@ func TestAGatewaysCaddyIsKeptForTheOwnersSites(t *testing.T) {
 	if strings.Join(listed, ",") != dep.RelPath("infra", "caddy", "Caddyfile")+","+dep.RelPath("infra", "caddy", "caddy.env")+","+dep.RelPath("infra", "compose.yaml") {
 		t.Errorf("the manifest lists %v", listed)
 	}
-	if e := vmRegistry(t, w).Deployments[ourID]; e.Kept != registry.KeptCaddy || e.Roles == "" {
-		t.Errorf("the registry entry: %+v", e)
+	if e := vmRegistry(t, w).Deployments[ourID]; e.Roles == "" {
+		t.Errorf("the registry entry, which a kept Caddy needs no mark in: %+v", e)
 	}
 	if _, ok := vm.files[deployrecord.Path(dep)]; ok {
 		t.Error("the deployment record is left")
@@ -343,8 +344,8 @@ func TestRunningAgainKeepsCaddyUntilTheSitesAreGone(t *testing.T) {
 	if vm.under(root) {
 		t.Errorf("files are left: %v", vm.sortedFiles())
 	}
-	if _, ok := vmRegistry(t, w).Deployments[ourID]; ok {
-		t.Error("the registry entry is left")
+	if _, ok := vmRegistry(t, w).Deployments[ourID]; !ok {
+		t.Error("the registry entry is gone, which is site evict's to remove")
 	}
 	if vm.images[image] {
 		t.Error("Caddy's image is left")
@@ -376,8 +377,6 @@ func TestByIDKeepsTheSameCaddyAsTheConfiguration(t *testing.T) {
 				b.WriteString(f + " " + hexSum(vm.files[f]) + "\n")
 			}
 		}
-		e := vmRegistry(t, w).Deployments[ourID]
-		b.WriteString("kept " + e.Kept + "\n")
 		results[how] = b.String()
 	}
 	if results["config"] != results["id"] {
@@ -409,40 +408,32 @@ func TestByIDConfirmationNamesTheKeptCaddy(t *testing.T) {
 	}
 }
 
-// The rules host prepare opened 80 and 443 with stay while Caddy is kept:
-// ufw denies incoming by default, so without them nothing from outside
-// reaches the owner's sites. The run that removes Caddy deletes them.
-func TestAKeptCaddyKeepsItsWebRules(t *testing.T) {
+// The rules site prepare opened 80 and 443 with stay while Caddy is kept,
+// and after: the firewall is root's, and site evict deletes every rule of
+// the deployment's, so site remove deletes none.
+func TestSiteRemoveLeavesTheFirewallToEvict(t *testing.T) {
 	w := gatewayWorld(t, true)
 	vm := w.hosts["vm"]
-	web := []string{
+	rules := []string{
+		"allow 22/tcp comment 'paisans-f2a9: ssh, the bootstrap route'",
+		"allow in on psns-f2a9 comment 'paisans-f2a9: the mesh: etcd, Patroni, Garage, HAProxy'",
 		"allow 80/tcp comment 'paisans-f2a9: the gateway, HTTP'",
 		"allow 443/tcp comment 'paisans-f2a9: the gateway, HTTPS'",
 	}
-	mesh := "allow in on psns-f2a9 comment 'paisans-f2a9: the mesh: etcd, Patroni, Garage, HAProxy'"
-	vm.rules = append([]string{"allow 22/tcp comment 'paisans-f2a9: ssh, the bootstrap route'", mesh}, web...)
+	vm.rules = append([]string(nil), rules...)
 	if err := siteremove.Execute(forced(t, w, w.cfg, "vm", vmDest(), siteremove.Options{})); err != nil {
 		t.Fatal(err)
-	}
-	for _, r := range web {
-		if !contains(vm.rules, r) {
-			t.Errorf("%s was deleted with Caddy kept", r)
-		}
-	}
-	if contains(vm.rules, mesh) {
-		t.Error("the mesh rule is left")
-	}
-	again := forced(t, w, w.cfg, "vm", vmDest(), siteremove.Options{})
-	if again.Pending() {
-		t.Errorf("the kept rules make a second run plan something:\n%s", printed(again))
 	}
 	delete(vm.files, blog)
 	if err := siteremove.Execute(forced(t, w, w.cfg, "vm", vmDest(), siteremove.Options{})); err != nil {
 		t.Fatal(err)
 	}
-	for _, r := range web {
-		if contains(vm.rules, r) {
-			t.Errorf("%s is left once Caddy has gone", r)
+	if strings.Join(vm.rules, "|") != strings.Join(rules, "|") {
+		t.Errorf("the rules changed: %v", vm.rules)
+	}
+	for _, c := range vm.commands {
+		if strings.Contains(c, "ufw ") {
+			t.Errorf("ran %s", c)
 		}
 	}
 }
@@ -476,19 +467,25 @@ func TestAFailedWriteBackPutsTheOriginalBack(t *testing.T) {
 	}
 }
 
-// A kept Caddy on a host whose registry has no entry for the deployment
-// gets one, marked kept, so the gate can pass.
-func TestAKeptCaddyWithNoEntryGetsOne(t *testing.T) {
+// A kept Caddy needs no registry entry: on a host whose registry has none
+// for the deployment, the run passes its gate and writes none, and the
+// report says site evict stops the Caddy.
+func TestAKeptCaddyNeedsNoRegistryEntry(t *testing.T) {
 	w := gatewayWorld(t, true)
 	vm := w.hosts["vm"]
 	r := vmRegistry(t, w)
 	delete(r.Deployments, ourID)
 	vm.files[registry.Path] = encode(t, r)
-	if err := siteremove.Execute(forced(t, w, w.cfg, "vm", vmDest(), siteremove.Options{})); err != nil {
+	before := vm.files[registry.Path]
+	p := forced(t, w, w.cfg, "vm", vmDest(), siteremove.Options{})
+	if err := siteremove.Execute(p); err != nil {
 		t.Fatal(err)
 	}
-	if e, ok := vmRegistry(t, w).Deployments[ourID]; !ok || e.Kept != registry.KeptCaddy || e.Site != "vm" {
-		t.Errorf("the entry: %+v, %v", e, ok)
+	if vm.files[registry.Path] != before {
+		t.Errorf("the registry changed:\n%s", vm.files[registry.Path])
+	}
+	if !strings.Contains(strings.Join(p.Kept, "\n"), "site evict stops it and deletes that directory, so the owner moves those sites first") {
+		t.Errorf("kept %q", p.Kept)
 	}
 }
 
@@ -499,7 +496,7 @@ func TestASiteThatAppearsAfterThePlanStopsCaddysRemoval(t *testing.T) {
 	vm := w.hosts["vm"]
 	p := forced(t, w, w.cfg, "vm", vmDest(), siteremove.Options{DeleteData: true})
 	vm.files[blog] = "blog.example.net {\n}\n"
-	if err := siteremove.Execute(p); err == nil || !strings.Contains(err.Error(), render.HostSitesDir) {
+	if err := siteremove.Execute(p); err == nil || !strings.Contains(err.Error(), sitesDir) {
 		t.Fatalf("err = %v", err)
 	}
 	found := false

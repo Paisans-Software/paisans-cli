@@ -112,7 +112,7 @@ func (p *puller) plan(site string, mu *sync.Mutex, reports *[]checkReport) (*app
 	if err := p.load(); err != nil {
 		return nil, nil, err
 	}
-	t := siteTransport(site, p.cfg.Sites[site], "", p.o.Sudo)
+	t := siteTransport(site, p.cfg.Sites[site], "")
 	t.RetryLog = reportLog{mu, reports}
 	plan, err := convergePullPlan(p.cfg, p.secrets, site, t, p.options...)
 	if err != nil {

@@ -1,0 +1,1 @@
+refused: daemon: /srv/data/paisans-f2a9 exists and is not a directory of paisans-f2a9's (its listing is "drwx------", owner 1234). Remove it, or give another --data-dir, and admit again. Nothing was changed

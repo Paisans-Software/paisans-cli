@@ -90,7 +90,7 @@ func TestADryRunChecksEveryHostAtOnce(t *testing.T) {
 	rec := recordConverge(t)
 	wait := barrier(t, len(preparedSites))
 	convergeCheck = func(_ ui.Reporter, args []string) (string, []checkReport, error) {
-		if args[0] == "host" {
+		if isPrepare(args) {
 			wait()
 			return "docker", nil, nil
 		}
@@ -174,7 +174,7 @@ func TestOneFailedHostStopsAtItsPrepare(t *testing.T) {
 		return nil
 	}
 	err := converge(t, "--execute")
-	if hint, _ := ui.Describe(err); hint != "apply stopped at host prepare --site vm" {
+	if hint, _ := ui.Describe(err); hint != "apply stopped at site prepare --site vm" {
 		t.Errorf("hint %q", hint)
 	}
 }
@@ -318,7 +318,7 @@ func (l *lockedWriter) Write(p []byte) (int, error) {
 	return l.w.Write(p)
 }
 
-// The real host prepare, run on every host at once through a fake ssh, as a
+// The real site prepare, run on every host at once through a fake ssh, as a
 // dry run and with --execute: under -race this is what proves the hosts'
 // runs share nothing unguarded.
 func TestRealHostPreparesRunTogether(t *testing.T) {
@@ -347,7 +347,7 @@ func TestRealHostPreparesRunTogether(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				output, _, found, _, _, err := prepareRun(r, nil, convergeFlags([]string{"host", "prepare", "--site", site}, o), true)
+				output, _, found, _, _, err := prepareRun(r, nil, convergeFlags([]string{"site", "prepare", "--site", site}, o), true)
 				switch {
 				case err != nil:
 					t.Errorf("execute %v: %s: %v", execute, site, err)

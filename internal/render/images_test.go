@@ -84,14 +84,20 @@ func TestTheSharedMbinImageIsListedOnceWithItsLines(t *testing.T) {
 		t.Errorf("the gate lists %+v (%d times)", gate, n)
 	}
 	// The infrastructure stack's images are listed too, since each follows
-	// a track apply resolves, and no setting of the configuration decides
-	// any but the gateway's Caddy.
+	// a track apply resolves, each under the infra key that decides it.
 	infra := 0
 	for _, img := range plan.Images["home-a"] {
 		if img.Stack == "infra" {
 			infra++
-			if img.Setting() != "" || len(img.Services) == 0 {
-				t.Errorf("home-a lists its infrastructure's %+v, setting %q", img, img.Setting())
+			if len(img.Services) != 1 {
+				t.Fatalf("home-a lists its infrastructure's %+v", img)
+			}
+			want := "infra.images." + img.Services[0]
+			if img.Services[0] == "patroni" {
+				want = "infra.postgres.18.spilo"
+			}
+			if img.Setting() != want || img.Origin != render.OriginFoundation {
+				t.Errorf("home-a lists its infrastructure's %+v, setting %q, want %q", img, img.Setting(), want)
 			}
 		}
 	}

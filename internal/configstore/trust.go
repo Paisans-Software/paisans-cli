@@ -362,7 +362,7 @@ func (j *judgement) goodRoot(sha string) string {
 	case len(v.Parents) > 0:
 		return "is not a root"
 	case j.shape(sha) != "":
-		return "fails shape"
+		return "fails shape: " + j.shape(sha)
 	}
 	own := j.operatorsOf(sha)
 	if own.err != nil {
@@ -382,6 +382,14 @@ func (j *judgement) shape(sha string) string {
 	}
 	if !v.Signed {
 		return "it has no good signature from a known key (shape)"
+	}
+	switch {
+	case v.BuildNewer:
+		return fmt.Sprintf("it was published by paisans %q, a version this paisans cannot order, so a newer paisans may have published it; upgrade paisans (shape)", v.Build.Version)
+	case !v.BuildOK && len(v.Parents) == 0:
+		return "it is a root that does not say which build of paisans published it, so no version can be published on it and the sites keep it: redeploy, by each host's owner running `paisans site evict` and admitting the deployment again, then `paisans apply --execute` publishes a new first version (shape)"
+	case !v.BuildOK:
+		return "it does not say which build of paisans published it; publish the configuration again, with `paisans config publish --execute` (shape)"
 	}
 	want := 1
 	for _, p := range v.Parents {

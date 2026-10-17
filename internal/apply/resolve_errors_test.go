@@ -167,3 +167,21 @@ func TestWithoutAListingTheAdviceShowsTheShape(t *testing.T) {
 		}
 	}
 }
+
+// A foundation image of the infrastructure stack whose track the registry
+// does not have is the core catalog's to fix, and its infra setting holds a
+// build until the catalog's release does.
+func TestAMissingFoundationTrackNamesTheReleaseAndItsSetting(t *testing.T) {
+	etcd, err := blueprints.FoundationImage(blueprints.FoundationEtcd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A host running nothing, so there is no build of etcd to keep.
+	r := &registry{digest: buildA, fail: map[string]error{etcd: missing(etcd)}}
+	_, err = apply.Build("home-a", plan(t), acmeModule(t), newHost(), apply.ResolveImages(r))
+	if err == nil {
+		t.Fatal("planned an etcd track the registry does not have")
+	}
+	_, explain := ui.Describe(err)
+	says(t, explain, "A release of the core catalog fixes it", "So does setting `infra.images.etcd` to a published tag.")
+}

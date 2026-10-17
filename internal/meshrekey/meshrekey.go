@@ -11,24 +11,22 @@
 // until every peer knows the new key, and two sites down at once can cost
 // etcd its quorum. Each site goes through four stages, each ending at a
 // gate: the new key written to the secrets file as the site's next key; the
-// peers' mesh files and then the site's own handed the new key with `wg
-// syncconf`; the cluster's health; and the next key promoted. A run that
-// stops part way resumes: a next key in the file says a rekey is under way,
-// and which key the host runs, read with `wg show`, says whether its swap is
-// done. docs/specs/2026-10-11-site-evict.md, "Rekeying the mesh", is the
-// approved design.
+// peers' mesh files and then the site's own handed the new key by the
+// WireGuard helper's sync; the cluster's health; and the next key promoted.
+// A run that stops part way resumes: a next key in the file says a rekey is
+// under way, and which key the host runs, read through the WireGuard helper,
+// says whether its swap is done. docs/specs/2026-10-11-site-evict.md,
+// "Rekeying the mesh", is the approved design.
 package meshrekey
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/paisans-software/paisans-cli/internal/acme"
 	"github.com/paisans-software/paisans-cli/internal/apply"
@@ -86,8 +84,8 @@ type Plan struct {
 	Sites  []Site
 	Report ui.Reporter
 	// Joining are the sites the configuration declares whose hosts hold no
-	// claim of this deployment yet, Eg: a replacement declared before an
-	// eviction. They are no site's peer until the apply that brings them up,
+	// claim of this deployment yet, Eg: a replacement declared before a site is
+	// cut off. They are no site's peer until the apply that brings them up,
 	// so a rekey neither writes to them nor renders them.
 	Joining []string
 
@@ -159,7 +157,7 @@ func build(cfg *config.Config, store Store, sites []string, all bool, transports
 	}
 	for _, name := range sites {
 		if contains(p.Joining, name) {
-			return nil, fmt.Errorf("mesh rekey: %s holds no claim of this deployment yet, so it runs no key to replace. The apply that brings it up renders the key the secrets hold. Nothing was changed", name)
+			return nil, fmt.Errorf("mesh rekey: %s has not admitted this deployment yet, so it runs no key to replace. The apply that brings it up renders the key the secrets hold. Nothing was changed", name)
 		}
 	}
 	p.all = all
@@ -323,7 +321,7 @@ func (p *Plan) stages(s Site) []stageText {
 		all = append(all, stageText{Swap, "pause Patroni", fmt.Sprintf("`patronictl pause --wait`: %s reach each other only through %s, so its swap cuts them apart for a moment, which can cost etcd its quorum; paused, Patroni fails nothing over for a partition that heals in seconds", joinAnd(s.Relays), s.Name), "Patroni reports itself paused"})
 	}
 	all = append(all,
-		stageText{Swap, "swap " + s.Name + "'s key", "every peer's mesh file with the new public key in place of the old, then " + s.Name + "'s own with the new private key, each handed to its interface with `wg syncconf`; the peers at once and " + s.Name + " last", "every peer has a handshake with " + s.Name + " under the new key"},
+		stageText{Swap, "swap " + s.Name + "'s key", "every peer's mesh file with the new public key in place of the old, then " + s.Name + "'s own with the new private key, each handed to its interface by the WireGuard helper's sync; the peers at once and " + s.Name + " last", "every peer has a handshake with " + s.Name + " under the new key"},
 		stageText{Health, "check the cluster", "nothing changes", fmt.Sprintf("etcd healthy at every voter; exactly one Patroni member leading and running, and every other data site streaming; within %s", healthWait)},
 	)
 	if len(s.Relays) > 0 {
@@ -563,28 +561,33 @@ func (p *Plan) handTo(name string, sp *apply.Plan, site, newPublic string) error
 		}
 		runs = key == newPublic
 	} else {
-		out, err := t.Run("wg show " + p.dep().Interface() + " peers")
+		peers, err := meshkey.Peers(name, t, p.dep())
 		if err != nil {
-			return fmt.Errorf("%s: `wg show %s peers`: %w: %s", name, p.dep().Interface(), err, strings.TrimSpace(out))
+			return err
 		}
-		runs = strings.Contains(out, newPublic)
+		runs = slices.Contains(peers, newPublic)
 	}
 	if runs {
 		return nil
 	}
-	if out, err := t.Run(apply.WireGuardSync.Command(p.dep())); err != nil {
-		return fmt.Errorf("%s: %s: %w: %s", name, apply.WireGuardSync.Title(p.dep()), err, strings.TrimSpace(out))
+	if err := apply.SyncMesh(sp, t); err != nil {
+		return fmt.Errorf("%s: %s: %w", name, apply.WireGuardSync.Title(p.dep()), err)
 	}
 	return nil
 }
 
 // handshake reports whether site's interface has had a handshake with key.
-// `wg show <interface> latest-handshakes` prints each peer's public key and
-// the time of its last handshake, 0 for none (wireguard-tools, wg(8)).
+// The helper's show latest-handshakes prints, as `wg show <interface>
+// latest-handshakes` does, each peer's public key and the time of its last
+// handshake, 0 for none (wireguard-tools, wg(8)).
 func (p *Plan) handshake(site, key string) (bool, error) {
-	out, err := p.transports[site].Run("wg show " + p.dep().Interface() + " latest-handshakes")
+	h := apply.WGHelper{T: p.transports[site], Iface: p.dep().Interface()}
+	out, err := h.Show("latest-handshakes")
+	if problem := apply.HelperReadProblem(site, h, err); problem != nil {
+		return false, problem
+	}
 	if err != nil {
-		return false, fmt.Errorf("%s: `wg show %s latest-handshakes`: %w: %s", site, p.dep().Interface(), err, strings.TrimSpace(out))
+		return false, fmt.Errorf("%s: reading %s's handshakes through the WireGuard helper: %w", site, p.dep().Interface(), err)
 	}
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Fields(line)
@@ -603,14 +606,6 @@ func renderedFile(rendered *render.Plan, site, rel string) string {
 		}
 	}
 	return ""
-}
-
-// endpointHealth is one entry of `etcdctl endpoint health -w json` (etcd
-// v3.5.16, etcdctl/ctlv3/command/ep_command.go, epHealth).
-type endpointHealth struct {
-	Endpoint string `json:"endpoint"`
-	Health   bool   `json:"health"`
-	Error    string `json:"error"`
 }
 
 // health is nil when etcd answers healthy at every voter, and Patroni has
@@ -634,9 +629,11 @@ func ClusterHealth(cfg *config.Config, transports map[string]apply.Transport) er
 		if at == nil {
 			return fmt.Errorf("%s: no way to reach it to read etcd's health", cfg.Etcd.Members[0])
 		}
-		out, err := at.Run(apply.Etcdctl(d, "endpoint health --cluster -w json"))
-		var health []endpointHealth
-		if jerr := json.Unmarshal([]byte(strings.TrimSpace(out)), &health); jerr != nil {
+		out, err := at.Run(apply.Etcdctl(d, cfg.Sites[cfg.Etcd.Members[0]].Address, "endpoint health --cluster -w json"))
+		// etcdctl exits 1 when any endpoint is unhealthy and still prints
+		// every endpoint, so its list is read whatever the exit.
+		health, ok := apply.ParseEtcdEndpointHealth(out)
+		if !ok {
 			if err != nil {
 				return fmt.Errorf("%s: etcd's endpoint health: %v", cfg.Etcd.Members[0], err)
 			}
@@ -645,7 +642,7 @@ func ClusterHealth(cfg *config.Config, transports map[string]apply.Transport) er
 		var sick, missing []string
 		for _, h := range health {
 			if !h.Health {
-				sick = append(sick, h.Endpoint)
+				sick = append(sick, apply.EtcdEndpointSite(cfg, h.Endpoint))
 			}
 		}
 		sort.Strings(sick)
@@ -676,7 +673,7 @@ func ClusterHealth(cfg *config.Config, transports map[string]apply.Transport) er
 			return fmt.Errorf("%s: patronictl list: %v", at, err)
 		}
 		var members []map[string]any
-		if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &members); err != nil {
+		if err := apply.FirstJSONArray(out, &members); err != nil {
 			return fmt.Errorf("%s: patronictl list is not JSON", at)
 		}
 		// Role and State are Patroni v4.1.0's (patroni/ctl.py,
@@ -753,8 +750,8 @@ func (p *Plan) paused() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	var live map[string]any
-	if err := yaml.Unmarshal([]byte(out), &live); err != nil {
+	live, err := apply.PatroniConfig(out)
+	if err != nil {
 		return false, fmt.Errorf("%s: patronictl show-config is not YAML: %w", p.cfg.Cluster.Sites[0], err)
 	}
 	return fmt.Sprint(live["pause"]) == "true", nil
@@ -825,7 +822,9 @@ func poll(wait, every time.Duration, check func() error) error {
 		if err = check(); err == nil {
 			return nil
 		}
-		if errors.Is(err, apply.ErrUnreachable) {
+		// Neither ssh failing after its retries nor sudo refusing the
+		// helper clears itself while a gate waits.
+		if errors.Is(err, apply.ErrUnreachable) || errors.Is(err, apply.ErrHelperRefused) {
 			return err
 		}
 		if i < n-1 {

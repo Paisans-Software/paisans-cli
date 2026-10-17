@@ -67,7 +67,7 @@ func runOperatorMagicLink(args []string) error {
 	}
 	req := operatorRequest(cfg, pid, id)
 	req.APIKey, req.APIBase, req.APINetworks = key, pocketIDBase(cfg, where), meshNetworks(cfg)
-	transport := adminTransport(siteTransport(where, cfg.Sites[where], *destination, false))
+	transport := adminTransport(siteTransport(where, cfg.Sites[where], *destination))
 
 	r.Section(fmt.Sprintf("%s on %s", pid, where))
 	what := fmt.Sprintf("a one-time sign-in link for %s, valid %s and for one sign in", id, humanTTL(operatorLinkTTL))
@@ -84,9 +84,9 @@ func runOperatorMagicLink(args []string) error {
 		r.Result("Nothing changed. Re-run with --execute to issue it.")
 		return nil
 	}
-	// The calls need no root, but the registry a run that changes something
-	// claims its host in is root's.
-	if err := claimHosts(r, cfg, true, map[string]registry.Runner{where: registryHost(where, cfg.Sites[where], *destination, true)}); err != nil {
+	// The calls need no root, and a run that changes something checks its
+	// host's admission.
+	if _, err := admittedHosts(r, cfg, map[string]registry.Runner{where: registryHost(where, cfg.Sites[where], *destination)}); err != nil {
 		return err
 	}
 	s := r.Step("issue " + what)

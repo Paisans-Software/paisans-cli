@@ -2,28 +2,23 @@
   "version": 1,
   "files": [
     {
-      "path": "etc/wireguard/psns-f2a9.conf",
-      "sha256": "dda464d7c0af8594e3ccf85eeb55fb53b8f9f94910eee0162dd36d8ef380022b",
-      "mode": "0600"
-    },
-    {
       "path": "srv/paisans/f2a9/health/.env",
       "sha256": "0817453ab7e1334e19d91465280751f16b0e9518fa316fea6ea6ff284274d1b0",
       "mode": "0600"
     },
     {
       "path": "srv/paisans/f2a9/health/compose.yaml",
-      "sha256": "0883c50e0bbe6281ece9753fe3b30fca2a1daad65d85bfa8d5c61f5525a492ad",
+      "sha256": "05073fbf2717d083b0211bbce3891688cc60b759f9e19e4c13a4cc9841707983",
       "mode": "0644"
     },
     {
       "path": "srv/paisans/f2a9/health/monitors.json",
-      "sha256": "2addd5eec64c0fc582df2c22d5e63defefd702991f756496fc16f660e1479bd1",
+      "sha256": "f4f6311a9876189e6dbea11fdb8622563bb784193894d5c597e2a8812c42b7df",
       "mode": "0600"
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/Caddyfile",
-      "sha256": "b6608effd0b2e45d1735bc4dd17b05bed6e85ab42975efcf3f363a979795cdcc",
+      "sha256": "352f6ca81efaf0518ea8a05843fa04260922d9d956ba41e7879cfe17f445f4e7",
       "mode": "0644"
     },
     {
@@ -40,6 +35,14 @@
       "path": "srv/paisans/f2a9/infra/compose.yaml",
       "sha256": "08d813aab28144ae3b167a2d91759fd37a5a4d55d55822edadd51d6931d47d5d",
       "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/psns-f2a9.conf",
+      "sha256": "8553386c2e6770de48b7ba7d45585507cf146b060ddddefeecbbbd7c0ebbdaf1",
+      "mode": "0600"
     }
-  ]
+  ],
+  "toolkit_version": "<version>",
+  "toolkit_commit": "<commit>",
+  "toolkit_modified": false
 }

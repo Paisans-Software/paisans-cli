@@ -13,14 +13,25 @@ import (
 	"testing"
 	"time"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/apply/meshfake"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/patronitest"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
-const wgConf = "/etc/wireguard/psns-f2a9.conf"
+const wgConf = "/srv/paisans/f2a9/psns-f2a9.conf"
+
+// wgHelper is the start of every command sent to the WireGuard helper for
+// the fixture's interface, and wgInstalled is where its put installs the
+// mesh file on a real host.
+const (
+	wgHelper    = "sudo -n '/usr/local/libexec/paisans/wg-psns-f2a9' "
+	wgInstalled = "/etc/wireguard/psns-f2a9.conf"
+)
 
 var (
 	privateRe = regexp.MustCompile(`(?m)^PrivateKey = (\S+)`)
@@ -42,12 +53,17 @@ type mesh struct {
 	failOnce string
 	failSkip int
 	failHost string
+	// failOut is what the failed command prints, when set.
+	failOut string
 	// sick makes etcd answer one endpoint unhealthy.
 	sick bool
 	// patroni overrides a data site's role and state in `patronictl list`.
 	patroni map[string][2]string
 	// paused is Patroni's maintenance mode.
 	paused bool
+	// patroniLog wraps every patronictl answer in the log lines patronictl
+	// writes when it cannot reach one of etcd's endpoints.
+	patroniLog bool
 	// promotedAt is where in log each site's key was promoted.
 	promotedAt map[string]int
 	log        []string
@@ -111,6 +127,13 @@ func (h *host) RunInput(command, stdin string) (string, error) {
 		h.files[strings.TrimSuffix(path, "'")] = stdin
 		return "", nil
 	}
+	if command == wgHelper+"put" {
+		out, err := h.Run(command)
+		if err == nil {
+			h.files[wgInstalled] = stdin
+		}
+		return out, err
+	}
 	return h.Run(command)
 }
 
@@ -150,20 +173,31 @@ func (h *host) Run(command string) (string, error) {
 			m.failSkip--
 		} else {
 			m.failOnce = ""
+			if m.failOut != "" {
+				return m.failOut, errors.New("exit status 1")
+			}
 			return "failed by the test", errors.New("exit status 1")
 		}
 	}
+	if out, ok, err := meshfake.ChainedRead(command, h.Run); ok {
+		return out, err
+	}
+	if field, ok := strings.CutPrefix(command, wgHelper+"show "); ok && field != "latest-handshakes" {
+		if out, ok := meshfake.ShowRunning(field, h.run); ok {
+			return out, nil
+		}
+	}
 	switch {
+	case strings.HasPrefix(command, "wg "), strings.HasPrefix(command, "wg-quick "), strings.Contains(command, "wg syncconf"):
+		return "", fmt.Errorf("%s: %q reached the mesh without the WireGuard helper", h.name, command)
 	case command == "true":
 		return "", nil
-	case strings.Contains(command, "wg syncconf"):
-		h.run = h.files[wgConf]
+	case command == wgHelper+"put":
 		return "", nil
-	case command == "wg show psns-f2a9 public-key":
-		return h.runsKey() + "\n", nil
-	case command == "wg show psns-f2a9 peers":
-		return strings.Join(h.peers(), "\n") + "\n", nil
-	case command == "wg show psns-f2a9 latest-handshakes":
+	case command == wgHelper+"sync", command == wgHelper+"up", command == wgHelper+"restart":
+		h.run = h.files[wgInstalled]
+		return "", nil
+	case command == wgHelper+"show latest-handshakes":
 		var b strings.Builder
 		mine := h.runsKey()
 		for _, key := range h.peers() {
@@ -184,12 +218,11 @@ func (h *host) Run(command string) (string, error) {
 			}
 		}
 		return "psns-f2a9        UNKNOWN        " + address + "\n", nil
-	case strings.Contains(command, "ip link show psns-f2a9"):
-		return "up\n", nil
 	case strings.Contains(command, "getent ahosts"):
 		return "", nil
 	case strings.Contains(command, "endpoint health --cluster"):
 		var out []map[string]any
+		failed := false
 		for i, name := range m.cfg.Etcd.Members {
 			// A member is healthy while its tunnel to every other member is
 			// up, which a swap part way breaks.
@@ -197,15 +230,22 @@ func (h *host) Run(command string) (string, error) {
 			for _, other := range m.cfg.Etcd.Members {
 				up = up && (other == name || m.tunnel(name, other))
 			}
-			out = append(out, map[string]any{"endpoint": "http://" + m.cfg.Sites[name].Address + ":2379", "health": up && !(m.sick && i == 1)})
+			ok := up && !(m.sick && i == 1)
+			failed = failed || !ok
+			out = append(out, map[string]any{"endpoint": "http://" + m.cfg.Sites[name].Address + ":2379", "health": ok})
 		}
 		data, _ := json.Marshal(out)
+		if failed {
+			// etcdctl prints every endpoint, then exits 1 with its error on
+			// stderr, which the transport's combined output carries too.
+			return "Error: unhealthy cluster\n" + string(data) + "\n", errors.New("exit status 1")
+		}
 		return string(data), nil
 	case strings.Contains(command, "patronictl") && strings.HasSuffix(command, "show-config"):
 		if m.paused {
-			return "loop_wait: 10\npause: true\n", nil
+			return m.patronictlOut("loop_wait: 10\npause: true\n"), nil
 		}
-		return "loop_wait: 10\n", nil
+		return m.patronictlOut("loop_wait: 10\n"), nil
 	case strings.Contains(command, "patronictl") && strings.HasSuffix(command, "pause --wait"):
 		if m.paused {
 			return "Error: Cluster is already paused", errors.New("exit status 1")
@@ -231,7 +271,7 @@ func (h *host) Run(command string) (string, error) {
 			out = append(out, map[string]any{"Member": name, "Role": role, "State": state})
 		}
 		data, _ := json.Marshal(out)
-		return string(data), nil
+		return m.patronictlOut(string(data)), nil
 	}
 	// apply's own plumbing around a scoped write: what it runs is not this
 	// test's subject, and it succeeds.
@@ -294,15 +334,17 @@ func newMesh(t *testing.T, edits ...func(*config.Config)) *mesh {
 		sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
 		manifest, _ := json.MarshalIndent(render.Manifest{Version: 1, Files: entries}, "", "  ")
 		h.files[d.Manifest()] = string(manifest) + "\n"
-		h.run = h.files[wgConf]
+		h.files[wgInstalled], h.run = h.files[wgConf], h.files[wgConf]
 		reg := registry.Registry{Version: registry.Version, Deployments: map[string]registry.Entry{}}
-		id, e := registry.For(cfg, name, time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC))
+		id, e := claimOf(cfg, name, time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC))
 		reg.Deployments[id] = e
 		data, err := registry.Encode(reg)
 		if err != nil {
 			t.Fatal(err)
 		}
 		h.files[registry.Path] = string(data)
+		path, record := admitted(t, cfg, name)
+		h.files[path] = record
 		m.hosts[name] = h
 	}
 	saved := []any{sleep, handshakeWait, handshakePoll, healthWait, healthPoll}
@@ -316,7 +358,7 @@ func newMesh(t *testing.T, edits ...func(*config.Config)) *mesh {
 	return m
 }
 
-// joining makes site's host a fresh one, no claim and no files, and every
+// joining makes site's host a fresh one, no admission record and no files, and every
 // other site's mesh as an apply without it rendered it, since it has never
 // run.
 func (m *mesh) joining(site string) {
@@ -331,7 +373,7 @@ func (m *mesh) joining(site string) {
 		if name == site || content == "" {
 			continue
 		}
-		h.files[wgConf], h.run = content, content
+		h.files[wgConf], h.files[wgInstalled], h.run = content, content, content
 		var man render.Manifest
 		if err := json.Unmarshal([]byte(h.files[d.Manifest()]), &man); err != nil {
 			m.t.Fatal(err)
@@ -445,7 +487,7 @@ func TestARekeyResumes(t *testing.T) {
 		fail string
 		from Stage
 	}{
-		{"wg syncconf", Swap},
+		{"' sync", Swap},
 		{"endpoint health", Health},
 	} {
 		t.Run(tc.fail, func(t *testing.T) {
@@ -490,14 +532,35 @@ func TestARekeyResumes(t *testing.T) {
 	}
 }
 
+// sudo refusing the helper while a rekey reads its handshakes is the host's
+// owner's problem, said as such.
+func TestARekeySaysWhenSudoRefusesTheHelper(t *testing.T) {
+	m := newMesh(t)
+	p, err := m.build("vm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.failOnce, m.failOut = "show latest-handshakes", "sudo: a password is required\n"
+	err = run(t, p)
+	if !errors.Is(err, apply.ErrHelperRefused) || !strings.Contains(err.Error(), "could not be run on home-a") || !strings.Contains(err.Error(), "site admit") {
+		t.Fatalf("want the helper's sudo refusal as the owner's problem, got %v", err)
+	}
+}
+
 // Refused before anything changes.
 func TestARekeyRefuses(t *testing.T) {
 	m := newMesh(t)
 	m.sick = true
-	if _, err := m.build("vm"); err == nil || !strings.Contains(err.Error(), "etcd is unhealthy") {
-		t.Errorf("unhealthy etcd: %v", err)
+	sick := m.cfg.Etcd.Members[1]
+	if _, err := m.build("vm"); err == nil || !strings.Contains(err.Error(), "etcd is unhealthy at "+sick) {
+		t.Errorf("unhealthy etcd: %v, want %s named", err, sick)
 	}
 	m.sick = false
+	m.failOnce, m.failOut = "endpoint health", "Error: context deadline exceeded\n"
+	if _, err := m.build("vm"); err == nil || !strings.Contains(err.Error(), "etcd's endpoint health") {
+		t.Errorf("endpoint health with no list: %v", err)
+	}
+	m.failOnce, m.failOut = "", ""
 	m.hosts["watch"].down = true
 	if _, err := m.build("vm"); err == nil || !strings.Contains(err.Error(), "watch does not answer over ssh") {
 		t.Errorf("a site that does not answer: %v", err)
@@ -570,7 +633,7 @@ func TestARelaysRekeyPausesPatroni(t *testing.T) {
 			pause = i
 		case strings.Contains(line, "patronictl") && strings.HasSuffix(line, "resume --wait"):
 			resume = i
-		case vmSync < 0 && pause >= 0 && strings.HasPrefix(line, "vm: ") && strings.Contains(line, "wg syncconf"):
+		case vmSync < 0 && pause >= 0 && strings.HasPrefix(line, "vm: ") && strings.Contains(line, "' sync"):
 			vmSync = i
 		}
 	}
@@ -591,7 +654,7 @@ func TestAStoppedRelaySwapResumesPatroni(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.failOnce, m.failHost = "wg syncconf", "vm"
+	m.failOnce, m.failHost = "' sync", "vm"
 	if err := run(t, p); err == nil || !strings.Contains(err.Error(), "Patroni stays paused") {
 		t.Fatalf("err = %v", err)
 	}
@@ -642,7 +705,7 @@ func TestARekeyLeavesASiteNotBroughtUpAlone(t *testing.T) {
 	if len(m.hosts["watch"].files) != 0 {
 		t.Error("the site not brought up was written to")
 	}
-	if _, err := m.build("watch"); err == nil || !strings.Contains(err.Error(), "holds no claim") {
+	if _, err := m.build("watch"); err == nil || !strings.Contains(err.Error(), "has not admitted this deployment") {
 		t.Errorf("naming it: %v", err)
 	}
 }
@@ -683,7 +746,7 @@ func TestAPartialSwapResumesOnAnUnhealthyCluster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.failOnce, m.failHost = "wg syncconf", "vm"
+	m.failOnce, m.failHost = "' sync", "vm"
 	if err := run(t, p); err == nil {
 		t.Fatal("the swap that missed vm passed")
 	}
@@ -748,13 +811,77 @@ func TestAnAllRunResumesWithoutRekeyingAgain(t *testing.T) {
 	}
 }
 
-// A site whose host lost its claim, while its peers still list its key, is
-// not taken for one not brought up yet: a rekey would leave it out while it
+// A site whose host lost its admission record, while its peers still list
+// its key, is not taken for one not brought up yet: a rekey would leave it out while it
 // runs.
 func TestARekeyRefusesASiteThatOnlyLostItsClaim(t *testing.T) {
 	m := newMesh(t)
-	delete(m.hosts["watch"].files, registry.Path)
-	if _, err := m.build("vm"); err == nil || !strings.Contains(err.Error(), "watch's host holds no claim") || !strings.Contains(err.Error(), "lists its WireGuard key as a peer") {
+	path, _ := admitted(t, m.cfg, "watch")
+	delete(m.hosts["watch"].files, path)
+	if _, err := m.build("vm"); err == nil || !strings.Contains(err.Error(), "watch's host has not admitted this deployment") || !strings.Contains(err.Error(), "lists its WireGuard key as a peer") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+// admitted is the path and content of the admission record site admit
+// writes for site.
+func admitted(t *testing.T, cfg *config.Config, site string) (string, string) {
+	t.Helper()
+	req, err := admission.Build(cfg, site)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := admission.EncodeRecord(admission.NewRecord(req, req.Grants, "", time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := admission.Path(cfg.Deployment().Token())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path, string(b)
+}
+
+// claimOf is the registry entry the fixture's deployment holds a site's host
+// with, read from the configuration.
+func claimOf(cfg *config.Config, site string, now time.Time) (string, registry.Entry) {
+	d := cfg.Deployment()
+	declared := cfg.Sites[site]
+	return d.ID, registry.Entry{
+		Token:      d.Token(),
+		Root:       d.Root(),
+		Domain:     cfg.Community.Domain,
+		Site:       site,
+		ClaimedAt:  now.UTC().Format(time.RFC3339),
+		Interface:  d.Interface(),
+		ListenPort: declared.ListenPort(),
+		Subnet:     cfg.Mesh.Subnet,
+		Address:    declared.Address,
+		Roles:      registry.JoinRoles(declared.Roles),
+	}
+}
+
+func (m *mesh) patronictlOut(out string) string {
+	if m.patroniLog {
+		return patronitest.Wrap(out)
+	}
+	return out
+}
+
+// patronictl logs beside its answer when it cannot reach one of etcd's
+// endpoints, and the rekey reads the answer past them, through a relay's
+// pause and resume.
+func TestPatronictlLogLinesDoNotStopARekey(t *testing.T) {
+	m := newMesh(t, undialled)
+	m.patroniLog = true
+	p, err := BuildAll(m.cfg, m, m.transports())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run(t, p); err != nil {
+		t.Fatal(err)
+	}
+	if m.paused {
+		t.Error("Patroni is still paused")
 	}
 }

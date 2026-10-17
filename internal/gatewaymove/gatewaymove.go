@@ -16,6 +16,7 @@ package gatewaymove
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -95,8 +96,8 @@ type Evidence struct {
 	// Marker is the move's own record of when the old gateway's DNS records
 	// were deleted, nil for none.
 	Marker *Marker
-	// HostSites are the files in /srv/caddy.d the Caddy serves for the
-	// host's owner.
+	// HostSites are the files in the deployment's caddy.d the Caddy serves
+	// for the host's owner.
 	HostSites []string
 	// Routes is whether the site's Caddyfile names a hostname the gateway
 	// serves. It is read only on a site whose roles run Caddy, where the
@@ -129,9 +130,31 @@ func CaddyfilePath(d deployment.Deployment) string {
 }
 
 // MarkerPath is the marker on the old gateway's host, beside the deployment
-// record and named by the token the same way.
-func MarkerPath(d deployment.Deployment) string {
-	return registry.Dir + "/gateway-move." + d.Token() + ".json"
+// record in the deployment's state directory.
+func MarkerPath(d deployment.Deployment) string { return d.StatePath("gateway-move.json") }
+
+// markerWriteCommand replaces the marker as every record in StateDir is
+// written: under the deployment's lock, StateDir made 700 when absent, and
+// by a rename so a reader never sees half of it.
+func markerWriteCommand(d deployment.Deployment, content string) string {
+	return strings.Join([]string{
+		"set -e",
+		d.StateLockCommand("the gateway move marker"),
+		"f=" + quote(MarkerPath(d)),
+		"tmp=$(mktemp " + quote(d.StatePath(".gateway-move.XXXXXX")) + ")",
+		`trap 'rm -f "$tmp"' EXIT`,
+		"printf %s " + quote(base64.StdEncoding.EncodeToString([]byte(content))) + ` | base64 -d > "$tmp"`,
+		`mv "$tmp" "$f"`,
+	}, "; ")
+}
+
+// removeRecordsCommand deletes the deployment record and the marker from
+// the old gateway under the deployment's lock, so the delete never lands
+// between an apply's read of the record and its write. It always runs as
+// the deployment's user on its own StateDir, where the lock prelude is
+// that user's to run.
+func removeRecordsCommand(d deployment.Deployment) string {
+	return d.StateLockCommand("the gateway move's records") + "; rm -f -- " + quote(deployrecord.Path(d)) + " " + quote(MarkerPath(d))
 }
 
 // Plan is a whole move, decided from the live deployment.
@@ -299,7 +322,7 @@ func Build(cfg *config.Config, secrets *config.Secrets, transports map[string]ap
 	} else {
 		p.Stages = append(p.Stages, p.stopStage())
 		p.Notes = append(p.Notes,
-			fmt.Sprintf("%s keeps 80 and 443 open until its next host prepare (or apply without --site) after the move, which removes them.", p.From),
+			fmt.Sprintf("%s keeps 80 and 443 open until its next site prepare (or apply without --site) after the move, which removes them.", p.From),
 			fmt.Sprintf("The old Caddy's files and certificates stay on %s, recorded as left over; the new gateway issued its own.", p.From),
 		)
 	}
@@ -308,16 +331,16 @@ func Build(cfg *config.Config, secrets *config.Secrets, transports map[string]ap
 		if p.shared {
 			held = p.From + " is not handed off while it does, since a monitor's Caddy does not serve them"
 		}
-		p.Notes = append(p.Notes, fmt.Sprintf("%s's /srv/caddy.d holds %s. %s: move those files to %s's /srv/caddy.d, or delete them, then run the move again.", p.From, strings.Join(p.evidence.HostSites, ", "), held, p.To))
+		p.Notes = append(p.Notes, fmt.Sprintf("%s's %[2]s holds %[3]s. %[4]s: move those files to %[5]s's %[2]s, or delete them, then run the move again.", p.From, render.HostSitesDir(p.dep()), strings.Join(p.evidence.HostSites, ", "), held, p.To))
 	}
 	return p, nil
 }
 
 // inspectCommand prints the gateway Caddy's containers and the files in
-// /srv/caddy.d. set -e makes a Docker that cannot be asked a failure, never
+// the deployment's caddy.d. set -e makes a Docker that cannot be asked a failure, never
 // an empty answer.
 func inspectCommand(d deployment.Deployment) string {
-	return "set -e; " + hostprep.GatewayCaddyProbe(d) + "; for f in " + render.HostSitesDir + `/*.caddy; do if [ -e "$f" ]; then echo "site $f"; fi; done`
+	return "set -e; " + hostprep.GatewayCaddyProbe(d) + "; for f in " + quote(render.HostSitesDir(d)) + `/*.caddy; do if [ -e "$f" ]; then echo "site $f"; fi; done`
 }
 
 // inspect reads what a site's host holds of a gateway.
@@ -622,7 +645,10 @@ func (p *Plan) removeStage(mp *dns.MovePlan) *Stage {
 		}
 		m := Marker{From: p.From, To: p.To, DeletedAt: p.probes.Now().UTC(), TTL: ttl}
 		data, _ := json.Marshal(m)
-		return p.from().WriteFile(MarkerPath(p.dep()), string(data)+"\n", 0o600)
+		if out, err := p.from().Run(markerWriteCommand(p.dep(), string(data)+"\n")); err != nil {
+			return fmt.Errorf("%s: writing %s: %w: %s", p.From, MarkerPath(p.dep()), err, strings.TrimSpace(out))
+		}
+		return nil
 	}
 	st.gate = func() error {
 		fresh, err := p.planDNS()
@@ -702,7 +728,7 @@ func (p *Plan) waitStage(mp *dns.MovePlan) *Stage {
 // stopStage stops and removes the old gateway's Caddy, and then what marks
 // it as the old gateway: its deployment record and the marker. It refuses
 // unless the new gateway answers for every hostname, on this run, and while
-// the host's owner still has sites in /srv/caddy.d that only this Caddy
+// the host's owner still has sites in the deployment's caddy.d that only this Caddy
 // serves.
 func (p *Plan) stopStage() *Stage {
 	d := p.dep()
@@ -730,7 +756,7 @@ func (p *Plan) stopStage() *Stage {
 			return err
 		}
 		if len(ev.HostSites) > 0 {
-			return refuse(fmt.Sprintf("%s's Caddy still serves the host owner's sites", p.From), fmt.Sprintf("%s holds %s, which only this Caddy serves. Move them to %s's %s, or delete them, then run the move again.", render.HostSitesDir, strings.Join(ev.HostSites, ", "), p.To, render.HostSitesDir))
+			return refuse(fmt.Sprintf("%s's Caddy still serves the host owner's sites", p.From), fmt.Sprintf("%s holds %s, which only this Caddy serves. Move them to %s's %s, or delete them, then run the move again.", render.HostSitesDir(d), strings.Join(ev.HostSites, ", "), p.To, render.HostSitesDir(d)))
 		}
 		for _, c := range ev.Caddy {
 			s := p.reporter().Step("stop " + p.From + "'s gateway Caddy")
@@ -744,7 +770,7 @@ func (p *Plan) stopStage() *Stage {
 		// The marker goes last: until it does, a run finds this site again
 		// and resumes here.
 		s := p.reporter().Step("forget " + p.From + " as a gateway")
-		if out, err := p.from().Run("rm -f -- " + quote(deployrecord.Path(d)) + " " + quote(MarkerPath(d))); err != nil {
+		if out, err := p.from().Run(removeRecordsCommand(d)); err != nil {
 			err = fmt.Errorf("%s: %w: %s", p.From, err, strings.TrimSpace(out))
 			s.Fail(err)
 			return err
@@ -769,7 +795,7 @@ func (p *Plan) stopStage() *Stage {
 // Caddy keeps running, since the monitor needs it, and what marks it as the
 // old gateway goes, so that applying it renders the monitor it now is. The
 // host owner's sites refuse it as they refuse a stop: a monitor's Caddy does
-// not serve /srv/caddy.d, so the hand-off would take them dark.
+// not serve the deployment's caddy.d, so the hand-off would take them dark.
 func (p *Plan) releaseStage() *Stage {
 	d := p.dep()
 	st := &Stage{
@@ -793,10 +819,10 @@ func (p *Plan) releaseStage() *Stage {
 			return err
 		}
 		if len(ev.HostSites) > 0 {
-			return refuse(fmt.Sprintf("%s's Caddy still serves the host owner's sites", p.From), fmt.Sprintf("%s holds %s, which a monitor's Caddy does not serve, so handing %s off would take them dark. Move them to %s's %s, or delete them, then run the move again.", render.HostSitesDir, strings.Join(ev.HostSites, ", "), p.From, p.To, render.HostSitesDir))
+			return refuse(fmt.Sprintf("%s's Caddy still serves the host owner's sites", p.From), fmt.Sprintf("%s holds %s, which a monitor's Caddy does not serve, so handing %s off would take them dark. Move them to %s's %s, or delete them, then run the move again.", render.HostSitesDir(d), strings.Join(ev.HostSites, ", "), p.From, p.To, render.HostSitesDir(d)))
 		}
 		s := p.reporter().Step("forget " + p.From + " as a gateway")
-		if out, err := p.from().Run("rm -f -- " + quote(deployrecord.Path(d)) + " " + quote(MarkerPath(d))); err != nil {
+		if out, err := p.from().Run(removeRecordsCommand(d)); err != nil {
 			err = fmt.Errorf("%s: %w: %s", p.From, err, strings.TrimSpace(out))
 			s.Fail(err)
 			return err
@@ -885,7 +911,7 @@ func (p *Plan) Show(r ui.Reporter) {
 		for _, k := range st.Kept {
 			why := "The move deletes only records this deployment's dns init made for the old gateway. While this one points there the old gateway is not stopped."
 			if st.Number == stageStop {
-				why = fmt.Sprintf("Move it to %s's %s, or delete it, before this stage runs.", p.To, render.HostSitesDir)
+				why = fmt.Sprintf("Move it to %s's %s, or delete it, before this stage runs.", p.To, render.HostSitesDir(p.dep()))
 			}
 			r.Refuse("keep "+k, why)
 		}

@@ -119,7 +119,7 @@ func convergePlan(cfg *config.Config, st convergeState) []convergeStep {
 	// Docker, WireGuard and the firewall on every site; a prepared host
 	// plans nothing.
 	for _, s := range cfg.SiteNames() {
-		steps = append(steps, step(stagePrepare, "host", "prepare", "--site", s))
+		steps = append(steps, step(stagePrepare, "site", "prepare", "--site", s))
 	}
 	// Every site's images, on every host at once: an install applies one
 	// site at a time, and each apply would otherwise wait on its own host's
@@ -172,6 +172,22 @@ func convergePlan(cfg *config.Config, st convergeState) []convergeStep {
 			steps = append(steps, applyStep(stageOthers, m))
 		}
 	}
+	// The gateway serves Pocket ID's public URL, which an app signing in
+	// through Pocket ID fetches its issuer's discovery document from as it
+	// starts. A gateway outside etcd is otherwise applied after the data
+	// members, so before they are founded and start their apps, each one is
+	// applied with every app stack it runs held back: its mesh, its
+	// infrastructure and its Caddy, which starts before its upstreams answer
+	// and answers its own /.well-known/paisans/<token>. Its apps, a pinned
+	// gate or a monitor's included, wait on the data sites and Pocket ID,
+	// and start in its full apply below.
+	if dataFounding {
+		for _, g := range cfg.GatewaySites() {
+			if !slices.Contains(members, g) {
+				steps = append(steps, step(stageOthers, "apply", "--site", g, "--hold-apps"))
+			}
+		}
+	}
 	for _, m := range members {
 		if founding(m) && !witness(m) {
 			steps = append(steps, applyStep(stageFounding, m))
@@ -203,6 +219,26 @@ func convergePlan(cfg *config.Config, st convergeState) []convergeStep {
 	for _, m := range joining {
 		steps = append(steps, step(stageJoining, "site", "add", m))
 	}
+	// site add's stages start no app stacks, so a site joining with the
+	// apps role beside data joins as [data], and its own apply follows the
+	// join to start its apps, Pocket ID standing by there while another
+	// site's is active. The gateway is applied after it, so that Caddy
+	// routes to the new apps site: a gateway outside etcd is among the
+	// sites applied next, and one that is a member is applied here.
+	var joinedApps []string
+	for _, m := range joining {
+		if s := cfg.Sites[m]; s.Has(config.RoleData) && s.Has(config.RoleApps) {
+			joinedApps = append(joinedApps, m)
+			steps = append(steps, applyStep(stageOthers, m))
+		}
+	}
+	if len(joinedApps) > 0 {
+		for _, g := range cfg.GatewaySites() {
+			if slices.Contains(members, g) && !slices.Contains(joinedApps, g) {
+				steps = append(steps, applyStep(stageOthers, g))
+			}
+		}
+	}
 
 	// A monitor checks every other site and app, so it is applied after
 	// them, among the sites outside etcd and in pass two. One in
@@ -224,6 +260,27 @@ func convergePlan(cfg *config.Config, st convergeState) []convergeStep {
 	}
 	for _, s := range ordered(func(s string) bool { return !slices.Contains(members, s) }) {
 		steps = append(steps, applyStep(stageOthers, s))
+	}
+
+	// Storage reads and writes Garage's layout through its container, so
+	// every Garage site is applied before it. A founded member's first apply
+	// is otherwise pass two, after storage, which left storage exec'ing into
+	// a Garage that was not running whenever that site's containers had gone
+	// (Eg: removed to free disk space). On a site already running, the apply
+	// plans nothing and pass two plans nothing again.
+	before := map[string]bool{}
+	for _, s := range steps {
+		switch {
+		case len(s.Args) == 3 && s.Args[0] == "apply" && s.Args[1] == "--site":
+			before[s.Args[2]] = true
+		case len(s.Args) == 3 && s.Args[0] == "site" && s.Args[1] == "add":
+			before[s.Args[2]] = true
+		}
+	}
+	for _, g := range cfg.Storage.Garage.Sites {
+		if !before[g] {
+			steps = append(steps, applyStep(stageOthers, g))
+		}
 	}
 
 	// Garage's layout, across its sites when there are several, and each
@@ -253,8 +310,7 @@ func convergePlan(cfg *config.Config, st convergeState) []convergeStep {
 }
 
 // convergeRun runs one step: the existing command, in this process, so it
-// plans, gates, claims and reports as typed by hand, and the sudo password
-// each host asked for is asked once for the whole run. Tests replace it.
+// plans, gates, checks the admission and reports as typed by hand. Tests replace it.
 var convergeRun func(args []string) error
 
 // The step runner and the check are set here rather than where they are
@@ -269,16 +325,16 @@ func init() {
 	}
 }
 
-// isPrepare reports whether args are host prepare's.
+// isPrepare reports whether args are site prepare's.
 func isPrepare(args []string) bool {
-	return len(args) > 1 && args[0] == "host" && args[1] == "prepare"
+	return len(args) > 1 && args[0] == "site" && args[1] == "prepare"
 }
 
-// convergePrepare runs args, a host prepare step's command, through env:
+// convergePrepare runs args, a site prepare step's command, through env:
 // apply without --site runs every host's at once, each on its own env.
 // Tests replace it.
 var convergePrepare = func(env prepareEnv, args []string) error {
-	return runHostPrepareIn(env, args[2:])
+	return runSitePrepareIn(env, args[2:])
 }
 
 // defaultPrepareAtOnce is how many hosts are prepared at the same time.
@@ -308,7 +364,7 @@ func atOnce(n int, work func(i int)) {
 	wg.Wait()
 }
 
-// prepareRun runs one host's host prepare, args, through convergePrepare,
+// prepareRun runs one host's site prepare, args, through convergePrepare,
 // quietly, as convergeQuiet runs a step: its warnings, refusals and ssh
 // retries come back as reports and its notes for after the line, and a hold
 // for a prompt reaches r, which draws the line. With verbose its own output
@@ -336,7 +392,7 @@ func prepareRun(r ui.Reporter, line ui.Step, args []string, verbose bool) (outpu
 	return b.String(), summary, found, stop, reports, err
 }
 
-// checkPrepare is a host prepare step's check, as checkStep is any other's.
+// checkPrepare is a site prepare step's check, as checkStep is any other's.
 func checkPrepare(r ui.Reporter, args []string) (string, []checkReport, error) {
 	_, summary, found, stop, reports, err := prepareRun(r, nil, args, false)
 	switch {
@@ -345,7 +401,7 @@ func checkPrepare(r ui.Reporter, args []string) (string, []checkReport, error) {
 	case stop != nil:
 		return "", reports, stop
 	case !found:
-		return "", reports, fmt.Errorf("host prepare ended without saying what it would change")
+		return "", reports, fmt.Errorf("site prepare ended without saying what it would change")
 	}
 	return summary, reports, nil
 }
@@ -354,8 +410,8 @@ func runStep(args []string) error {
 	switch {
 	case args[0] == "init":
 		return runInit(args[1:])
-	case args[0] == "host" && args[1] == "prepare":
-		return runHostPrepare(args[2:])
+	case isPrepare(args):
+		return runSitePrepare(args[2:])
 	case args[0] == "apply":
 		return runApply(args[1:], os.Stdin, os.Stdout)
 	case args[0] == "site" && args[1] == "add":
@@ -374,16 +430,16 @@ func runStep(args []string) error {
 
 // convergeReadInitial reads one etcd member's infra/etcd-initial record
 // through its ssh section. Tests replace it.
-var convergeReadInitial = func(cfg *config.Config, member string, sudo bool) (render.EtcdInitial, bool, error) {
-	return apply.ReadEtcdInitial(siteTransport(member, cfg.Sites[member], "", sudo), cfg.Deployment())
+var convergeReadInitial = func(cfg *config.Config, member string) (render.EtcdInitial, bool, error) {
+	return apply.ReadEtcdInitial(siteTransport(member, cfg.Sites[member], ""), cfg.Deployment())
 }
 
 // convergeHoldsGateway reads whether a site's host holds this deployment's
 // gateway Caddy, record or move marker. On a site whose roles run Caddy for a
 // monitor, the Caddy is not evidence; the record, the marker and a Caddyfile
 // still naming the gateway's hostnames are. Tests replace it.
-var convergeHoldsGateway = func(cfg *config.Config, site string, sudo bool) (bool, error) {
-	return holdsGatewayOn(cfg, site, siteTransport(site, cfg.Sites[site], "", sudo))
+var convergeHoldsGateway = func(cfg *config.Config, site string) (bool, error) {
+	return holdsGatewayOn(cfg, site, siteTransport(site, cfg.Sites[site], ""))
 }
 
 // holdsGatewayOn is convergeHoldsGateway over a transport already made.
@@ -400,16 +456,16 @@ func holdsGatewayOn(cfg *config.Config, site string, t apply.Transport) (bool, e
 // which is what a move goes to. A site that does not answer is an error,
 // as for the etcd reads: a move left unfinished keeps an old gateway
 // running.
-func convergeGatewayMove(cfg *config.Config, sudo bool) (bool, error) {
+func convergeGatewayMove(cfg *config.Config) (bool, error) {
 	gateways := cfg.GatewaySites()
 	if len(gateways) != 1 {
 		return false, nil
 	}
-	for _, site := range cfg.SiteNames() {
+	for _, site := range runReady(cfg) {
 		if site == gateways[0] {
 			continue
 		}
-		held, err := convergeHoldsGateway(cfg, site, sudo)
+		held, err := convergeHoldsGateway(cfg, site)
 		if err != nil {
 			return false, convergeStop("apply could not read "+site, err, "A site that was the gateway keeps serving until paisans gateway move stops it, so every site is asked. Make it reachable and run again.")
 		}
@@ -424,14 +480,22 @@ func convergeGatewayMove(cfg *config.Config, sudo bool) (bool, error) {
 // a step of its own so a spinner shows while ssh works. A member that does
 // not answer is an error: whether the cluster is founded decides between
 // founding and joining.
-func convergeFounded(r ui.Reporter, cfg *config.Config, sudo bool) (map[string]render.EtcdInitial, error) {
+func convergeFounded(r ui.Reporter, cfg *config.Config) (map[string]render.EtcdInitial, error) {
 	records := map[string]render.EtcdInitial{}
 	if len(cfg.Etcd.Members) > 0 {
 		r.Section("etcd members")
 	}
 	for _, m := range cfg.Etcd.Members {
 		s := r.Step("read " + m + "'s etcd record")
-		in, recorded, err := convergeReadInitial(cfg, m, sudo)
+		// A down member is not read. Only a joined site is down, and a
+		// joined member has founded or joined the cluster, so it counts as
+		// recorded: the run neither founds nor joins it.
+		if runSites != nil && !runSites.Ready(m) {
+			records[m] = render.EtcdInitial{}
+			s.End(ui.Warned, "down, not read")
+			continue
+		}
+		in, recorded, err := convergeReadInitial(cfg, m)
 		if err != nil {
 			s.Fail(err)
 			return nil, fmt.Errorf("apply: reading whether %s's etcd member has been founded: %w. Every etcd member is read before anything runs", m, err)
@@ -452,7 +516,7 @@ func convergeFounded(r ui.Reporter, cfg *config.Config, sudo bool) (map[string]r
 // read once, and each secret and recorded name paisans-stack.yaml no longer uses
 // warned about once. The applies it runs as steps skip theirs (a
 // checkReporter). A secrets file not written yet has nothing to check.
-func convergeSecrets(r ui.Reporter, cfg *config.Config, path string, sudo bool) {
+func convergeSecrets(r ui.Reporter, cfg *config.Config, path string) {
 	secrets, err := config.LoadDeploymentSecrets(path, cfg.ID)
 	if err != nil {
 		return
@@ -461,48 +525,51 @@ func convergeSecrets(r ui.Reporter, cfg *config.Config, path string, sudo bool) 
 		return
 	}
 	r.Section("secrets")
-	warnSecrets(r, cfg, secrets, recordForWarnings(r, cfg, func(gw string, elevated bool) registry.Runner {
-		return registryHost(gw, cfg.Sites[gw], "", elevated && sudo)
-	}))
+	warnSecrets(r, cfg, secrets, recordForWarnings(r, cfg, func(gw string) registry.Runner { return registryHost(gw, cfg.Sites[gw], "") }))
 }
 
 // convergeOptions is what apply without --site hands on to its steps: the
 // flags every command takes, and apply's own that are not about one site.
 type convergeOptions struct {
 	Config, Secrets string
-	Execute, Sudo   bool
+	Execute         bool
 	// Verbose is -v, which every command takes.
 	Verbose bool
 	// KeepImages and MinFree are apply's, so each apply step takes them.
 	KeepImages bool
 	MinFree    string
-	// stdin and stdout are where the run's review asks for approval. No
-	// step is handed them: the run asks once for every site.
-	stdin  io.Reader
-	stdout io.Writer
+	// RequireAll is --require-all: a degraded run exits 1. The run says
+	// so once, at its end, so no step takes it.
+	RequireAll bool
+	// answers, stdin and stdout are how the run's review asks for
+	// approval. No step is handed them: the run asks once for every site.
+	// --yes is handed on to apply and gateway move, whose steps may ask
+	// for what the review does not cover.
+	answers answerer
+	stdin   io.Reader
+	stdout  io.Writer
 }
 
 // convergeFlags is args with the flags o hands on, each to the commands that
-// take it: --config and -v to every one, --secrets to all but host prepare,
-// --execute to all but init, --sudo to all but dns, and --min-free and
-// --keep-images to apply alone.
+// take it: --config and -v to every one, --secrets to all but site prepare,
+// --execute to all but init, --min-free and
+// --keep-images to apply alone, and --yes to apply and gateway move.
 func convergeFlags(args []string, o convergeOptions) []string {
 	out := append([]string(nil), args...)
 	out = append(out, "--config", o.Config)
-	takesSecrets := !(args[0] == "host")
+	takesSecrets := !isPrepare(args)
 	takesExecute := args[0] != "init"
-	takesSudo := !(args[0] == "dns")
 	if takesSecrets && o.Secrets != "" {
 		out = append(out, "--secrets", o.Secrets)
 	}
 	if takesExecute && o.Execute {
 		out = append(out, "--execute")
 	}
-	if takesSudo {
-		out = append(out, fmt.Sprintf("--sudo=%t", o.Sudo))
-	}
 	if o.Verbose {
 		out = append(out, "-v")
+	}
+	if o.answers.yes && (args[0] == "apply" || args[0] == "gateway") {
+		out = append(out, "--yes")
 	}
 	// gateway move takes them for the apply its hand-off runs.
 	if args[0] == "apply" || args[0] == "gateway" {
@@ -668,38 +735,16 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	savedReview := reviewedByRun
 	reviewedByRun = &runReview{}
 	defer func() { reviewedByRun = savedReview }()
-	configPath, secretsPath, execute, sudo := o.Config, o.Secrets, o.Execute, o.Sudo
-	// The deployment and the version open the run, ahead of sudo. See
-	// apply_identity.go.
+	configPath, secretsPath, execute := o.Config, o.Secrets, o.Execute
+	// The deployment and the version open the run. See apply_identity.go.
 	identity := openIdentity(r, configPath)
 	defer identity.closeIdentity(r)
 	cfg, st, err := convergeRead(configPath, secretsPath)
 	if err != nil {
 		return err
 	}
-	// Every sudo password is asked before the first step that reaches a
-	// host, once the configuration is one a host may be reached for.
-	settled := false
-	settle := func(cfg *config.Config) error {
-		if settled {
-			return nil
-		}
-		settled = true
-		return settleSudo(r, cfg.SiteNames(), func(name string) apply.Transport {
-			return convergeHost(name, cfg.Sites[name], sudo)
-		})
-	}
 	initRan := false
 	if st.NeedsInit && execute {
-		// init reads every host for the mesh subnet, so the passwords are
-		// asked ahead of it. A file init cannot read yet, with no id, or
-		// one it would refuse, reaches no host here: init asks for them in
-		// its own first read of the hosts.
-		if pre, err := config.LoadForInit(configPath); err == nil && !validate.Check(pre).Refused() {
-			if err := settle(pre); err != nil {
-				return err
-			}
-		}
 		// init writes the id, the subnet and the secrets the rest is
 		// planned from, so the state is read again once it has run.
 		if err := convergeRun(convergeFlags([]string{"init"}, o)); err != nil {
@@ -709,6 +754,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		// and holds at it; the reads below draw on r.
 		routeRetries(r)
 		routeHolds(r)
+		routeLoginNotes(r)
 		if cfg, st, err = convergeRead(configPath, secretsPath); err != nil {
 			return err
 		}
@@ -770,26 +816,42 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 			line.End(ui.Pending, initWhy(st))
 		}
 	}
-	if err := settle(cfg); err != nil {
+	// The run classifies every site once, here, and every step reads that
+	// classification (runSites): the run plans and renders the effective
+	// topology, the declaration less its pending sites and the apps held
+	// back, and runs no step of a site that is down. A refusal stops the
+	// run. The plan opens with what it is without. From here on cfg is the
+	// effective topology and declaration the configuration as written.
+	// See the spec's "A deployment with sites missing".
+	savedSites := runSites
+	defer func() { runSites = savedSites }()
+	runSites = nil
+	declaration := cfg
+	cfg, sites, err := effectiveConfig(r, declaration, "")
+	if err != nil {
 		return err
 	}
+	runSites = sites
+	showPending(r, declaration, sites)
 	// Every site's architecture is read before anything is planned, and a
 	// missing one is recorded before the file is gathered and published:
 	// each step of the run refuses bytes changed after the publish. See
-	// recordArchitectures. The read has a section of its own, as the sudo
-	// before it does, rather than ending whichever section came last.
+	// recordArchitectures. The read has a section of its own, rather than
+	// ending whichever section came last. A down site is not read: it was
+	// joined, so its architecture is recorded already.
 	r.Section("architecture")
-	read, err := readArchitectures(r, cfg, cfg.SiteNames(), func(name string) hostarch.Runner {
-		return convergeHost(name, cfg.Sites[name], sudo)
+	read, err := readArchitectures(r, cfg, readySites(cfg, sites), func(name string) hostarch.Runner {
+		return convergeHost(name, cfg.Sites[name])
 	})
 	if err != nil {
 		return err
 	}
-	if cfg, err = recordArchitectures(r, configPath, cfg, read, execute); err != nil {
+	if declaration, err = recordArchitectures(r, configPath, declaration, read, execute); err != nil {
 		return err
 	}
+	cfg = sites.Effective(declaration)
 	// Every site's images are checked against its architecture here, from
-	// the render: each site's apply checks them only once host prepare has
+	// the render: each site's apply checks them only once site prepare has
 	// run on every host. The render needs the secrets, so a dry run whose
 	// secrets init has yet to generate checks them once init has run, as
 	// its review does.
@@ -807,29 +869,34 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		return err
 	}
 	// An init that has just run warned about the secrets itself.
+	// It reads the declaration: a secret of an app held back, or pinned to
+	// a pending site, is still used.
 	if !initRan {
-		convergeSecrets(r, cfg, convergeSecretsPath(configPath, secretsPath), sudo)
+		convergeSecrets(r, declaration, convergeSecretsPath(configPath, secretsPath))
 	}
 	// Every app's mail settings are tried from its site before the first
 	// step, so a password that does not log in refuses the run with every
 	// host as it was. A dry run whose init still has work tries them once
 	// init has run, as its later steps wait on it.
 	if secrets != nil && !st.NeedsInit {
-		if err := checkMailForApply(r, cfg, secrets, nil, nil, nil); err != nil {
+		if err := checkMailForApply(r, cfg, secrets, readySites(cfg, sites), nil, nil); err != nil {
 			return err
 		}
 	}
-	if st.Initial, err = convergeFounded(r, cfg, sudo); err != nil {
+	if st.Initial, err = convergeFounded(r, cfg); err != nil {
 		return err
 	}
-	if st.MoveGateway, err = convergeGatewayMove(cfg, sudo); err != nil {
+	if cfg, err = joinsWait(r, declaration, cfg, sites, st); err != nil {
 		return err
 	}
-	steps := convergePlan(cfg, st)
+	if st.MoveGateway, err = convergeGatewayMove(cfg); err != nil {
+		return err
+	}
+	steps := runOn(cfg, sites, convergePlan(cfg, st))
 	// The version the run applies is gathered once, before the review, so
 	// a fork or a stale base is refused before the operator is asked
 	// anything; its steps do not gather again.
-	store, err := applyStore(r, configPath, convergeSecretsPath(configPath, secretsPath), nil, cfg, execute, o.stdin, o.stdout)
+	store, err := applyStore(r, configPath, convergeSecretsPath(configPath, secretsPath), nil, cfg, execute, o.answers, o.stdin, o.stdout)
 	if err != nil {
 		return err
 	}
@@ -837,13 +904,14 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	if !execute {
 		marks := convergeStatus(r, cfg, steps, o)
 		// A dry run's operator problem is shown on its line; it stops nothing.
-		_, _ = convergeOperators(r, cfg, o, false, func(app string) bool { return convergeUp(cfg, steps, marks, app) })
-		convergeWebServerPending(r, cfg, webServerScope{})
+		pocketUp := pocketIDUp(r, cfg, sites)
+		_, _ = convergeOperators(r, cfg, o, false, func(app string) bool { return pocketUp(app) && convergeUp(cfg, steps, marks, app) })
+		convergeWebServerPending(r, cfg, webServerScope{down: sites.Down()})
 		// The review ends the plan, with what --execute asks approval for.
 		// A site it could not read is shown on its line; it stops nothing.
 		reviews, pending, _ := convergeReview(r, cfg, o)
 		// What --execute checks every host's record against before its
-		// first step, and publishes once host prepare has made the stores.
+		// first step, and publishes once site prepare has made the stores.
 		if err := store.check(r, convergeRecords(reviews), false, o.stdin, o.stdout); err != nil {
 			return err
 		}
@@ -855,12 +923,14 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		if pending > 0 {
 			next = "Re-run with --execute to apply; it asks you to type " + approveWord + " for the review above."
 		}
+		// A degraded plan fails --require-all as the run would, so
+		// automation gating on a dry run does not pass on one.
 		if len(generated) > 0 {
 			r.Result("Nothing changed on the servers. Added %s to %s. %s", plural(len(generated), "generated secret"), filepath.Base(convergeSecretsPath(configPath, secretsPath)), next)
-			return nil
+			return requireAll(sites, o.RequireAll)
 		}
 		r.Result("Nothing changed. %s", next)
-		return nil
+		return requireAll(sites, o.RequireAll)
 	}
 	// One review for every site, asked once, before the first step that
 	// changes a host. init, which may have run above, writes only local
@@ -870,11 +940,13 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		return err
 	}
 	// Approved, and before the first step: every host's record is checked
-	// against the version, which only reads. The version is published once
-	// for the run, after the host prepare steps, which make every site's
-	// store, and before any other step changes a host, so the store holds
-	// what is applied even if the run stops part way. Each apply step
-	// records it, and refuses files that are not it.
+	// against the version, which only reads. The version is published after
+	// the site prepare steps, which make every site's store, and before any
+	// other step changes a host, so the store holds what is applied even if
+	// the run stops part way. A step that records what it made at Pocket ID
+	// in secrets.enc.yaml publishes the bytes it wrote as the next version,
+	// which the steps after it apply. Each apply step records the version,
+	// and refuses files that are not it.
 	if err := store.check(r, convergeRecords(reviews), true, o.stdin, o.stdout); err != nil {
 		return err
 	}
@@ -885,14 +957,18 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		}
 		return err
 	}
+	// A step that records what it made at Pocket ID publishes the next
+	// version through the run's store (siteReview.publishWritten).
+	reviewedByRun.store, reviewedByRun.identity = store, identity
 	if err := convergeExecute(r, cfg, steps, o, publish); err != nil {
 		return err
 	}
-	// Each step pointed the retries and holds at its own reporter; the
-	// check draws on r.
+	// Each step pointed the retries, holds and login notes at its own
+	// reporter; the check draws on r.
 	routeRetries(r)
 	routeHolds(r)
-	links, adminErr := convergeOperators(r, cfg, o, true, func(string) bool { return true })
+	routeLoginNotes(r)
+	links, adminErr := convergeOperators(r, cfg, o, true, pocketIDUp(r, cfg, sites))
 	// The links are printed last, after the result, whatever it is: a run
 	// that fails after issuing them has still issued them.
 	// The deployment and the version are named again ahead of them.
@@ -902,18 +978,25 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	}()
 	// An app the operator's own web server serves is running, but not yet
 	// known to be reachable: the run is complete only once it is.
-	end, broken := webServerStep(r, cfg, configPath, sudo, webServerScope{})
-	if end == nil {
-		if err := convergeRecordWebServer(r, cfg, reviews); err != nil {
-			return err
-		}
-	}
+	// A down site's web server is left alone, as its other steps are.
+	noteDownWebServers(r, cfg, sites)
+	end, broken := webServerStep(r, cfg, configPath, webServerScope{down: sites.Down(), degraded: sites.Degraded()})
 	convergeLeft(r, cfg, secretsPath, configPath)
-	if end != nil || adminErr != nil {
-		return webServerEnd(end, broken, adminErr)
+	if end == nil && adminErr == nil && !sites.Degraded() {
+		r.Result("Deployment complete.")
+		return nil
 	}
-	r.Result("Deployment complete.")
-	return nil
+	return degradedEnd(r, sites, o.RequireAll, webServerEnd(end, broken, adminErr))
+}
+
+// runReady is the sites of cfg a step of the run reaches: every one but
+// those the run's classification does not have ready, or every one outside
+// a run.
+func runReady(cfg *config.Config) []string {
+	if runSites == nil {
+		return cfg.SiteNames()
+	}
+	return readySites(cfg, runSites)
 }
 
 // convergeStop is the error a run stops with at a step: the step named in
@@ -1073,9 +1156,10 @@ func convergeStatus(r ui.Reporter, cfg *config.Config, steps []convergeStep, o c
 				done[s.Title] = statuses[k]
 			}
 			// Each check pointed nothing elsewhere, but a check of a step
-			// that is not host prepare may have: the reads after draw on r.
+			// that is not site prepare may have: the reads after draw on r.
 			routeRetries(r)
 			routeHolds(r)
+			routeLoginNotes(r)
 			i = j
 		default:
 			title := s.Title
@@ -1143,7 +1227,7 @@ func installStatus(r ui.Reporter, steps []convergeStep, check func(int) stepStat
 			switch {
 			case st.after == "init":
 				c.waits = "init"
-			case strings.HasPrefix(st.after, "host prepare ") && c.waits == "":
+			case strings.HasPrefix(st.after, "site prepare ") && c.waits == "":
 				c.waits = "prepare"
 			default:
 				// It waits on another install step, which is work.
@@ -1363,11 +1447,12 @@ func convergePrepareAll(r ui.Reporter, cfg *config.Config, steps []convergeStep,
 		}
 		lines[k].Done("")
 	})
-	// A host prepare a test runs through the step runner may have pointed
+	// A site prepare a test runs through the step runner may have pointed
 	// the retries and holds elsewhere; what follows draws on r.
 	routeRetries(r)
 	routeHolds(r)
-	return groupStop("host prepare", steps, errs)
+	routeLoginNotes(r)
+	return groupStop("site prepare", steps, errs)
 }
 
 // groupStop is how a stage whose hosts ran at once stops, once every one
@@ -1411,10 +1496,12 @@ func groupStop(what string, steps []convergeStep, errs []error) error {
 // and which site leads is known only once Patroni runs. A later visit to the
 // site resumes it; when the stop is on the site's last visit, the site is
 // applied once more after every other step, by which time the leader's site
-// has had its own last visit, and a stop then ends the run. Each step is
-// listed under its line with its own result, which -v shows with the step's
-// own output; its notes follow the line at every verbosity. A failure ends
-// its line and the run, leaving the other lines as they stand.
+// has had its own last visit, and a stop then ends the run. A founding stop
+// is a pause only on a founding apply: on any other visit it ends the run,
+// naming the members that run no etcd. Each step is listed under its line with its own result, which -v shows with the step's
+// own output; its notes follow the line at every verbosity. A failure lists
+// its error under its inner step and ends its line and the run, leaving the
+// other lines as they stand.
 func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions) error {
 	r.Section("install")
 	places := installPlaces(steps)
@@ -1450,6 +1537,7 @@ func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions) err
 			line.Detail("  %s", strings.ReplaceAll(sentences(err), "\n", "\n  "))
 		default:
 			line.Detail("%s", innerLine(ui.Failed, s.Title, since(start)))
+			line.Detail("  %s", strings.ReplaceAll(sentences(err), "\n", "\n  "))
 		}
 		for _, n := range lineDetails(line, "  ", output, reports) {
 			line.Note(n.Text, n.Detail)
@@ -1462,6 +1550,10 @@ func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions) err
 			line.Done("")
 		case err == nil || founding || databases:
 			line.Pause(why)
+		case errors.Is(err, apply.ErrFoundingWait):
+			// A pause only on a founding apply, which pass two resumes.
+			line.Fail(err)
+			return convergeStop("apply stopped at "+s.Title, laterFounding(err), resumeAdvice)
 		case errors.Is(err, storageadd.ErrWaiting):
 			// Not a failure, and main exits 75 for it as storage add does.
 			line.End(ui.Pending, "waiting on Garage")
@@ -1507,6 +1599,24 @@ func revisitPause(steps []convergeStep, i int) string {
 		return "paused until " + between[0] + " is done"
 	}
 	return "paused until " + andList(between) + " are done"
+}
+
+// laterFounding is a founding stop on a visit other than a founding apply,
+// as the run stops with it: the members err names run no etcd.
+func laterFounding(err error) error {
+	names, verb := "another founding member", "runs"
+	var wait *apply.FoundingWaitError
+	if errors.As(err, &wait) && len(wait.Unstarted) > 0 {
+		names = andList(wait.Unstarted)
+		if len(wait.Unstarted) > 1 {
+			verb = "run"
+		}
+	}
+	return &ui.Problem{
+		Hint:    "etcd is still being founded, and " + names + " " + verb + " no etcd",
+		Explain: "Only a founding apply waits for the other founding members' etcd. Find out why etcd does not run on " + names + ".",
+		Cause:   err,
+	}
 }
 
 // foundingPause is why a founding stop pauses its line: until the founding
@@ -1577,9 +1687,16 @@ func convergeQuiet(r ui.Reporter, line ui.Step, args []string, verbose bool) (ou
 		reporterOverride = saved
 		routeRetries(r)
 		routeHolds(r)
+		routeLoginNotes(r)
 	}()
 	err = convergeRun(args)
 	return b.String(), reports, err
+}
+
+// paused reports whether err is a planned stop the run resumes later: the
+// founding stop or a replica's for its databases.
+func paused(err error) bool {
+	return errors.Is(err, apply.ErrFoundingWait) || errors.Is(err, apply.ErrDatabasesWait)
 }
 
 // convergeUp reports whether every step that brings a Pocket ID app up was
@@ -1599,10 +1716,11 @@ func convergeUp(cfg *config.Config, steps []convergeStep, marks map[string]ui.Ma
 
 // convergeWaits is the titles of the earlier steps that steps[i] waits on,
 // in the order they ran: init, for every step once it has work; the site's
-// host prepare, for every step on a site, its pull included; each witness's earlier apply, for
+// site prepare, for every step on a site, its pull included; each witness's earlier apply, for
 // a founding member that is not one, whose gate refuses it until the witness
-// runs; the site's earlier apply or site add and the storage step, for an
-// apply in pass two; and the host prepare and first apply of each Garage
+// runs; a joined site's site add, for the apply that starts its apps after
+// the join; the site's earlier apply or site add and the storage step, for an
+// apply in pass two; and the site prepare and first apply of each Garage
 // site, for storage, since Garage has to be running to be asked.
 func convergeWaits(cfg *config.Config, steps []convergeStep, i int) []string {
 	var waits []string
@@ -1611,16 +1729,17 @@ func convergeWaits(cfg *config.Config, steps []convergeStep, i int) []string {
 	}
 	s := steps[i]
 	earlier := steps[:i]
-	// first is the title of the first earlier apply or site add of site.
+	// first is the title of the first earlier apply or site add of site,
+	// leaving out an apply that holds its apps back.
 	first := func(site string) []string {
 		for _, e := range earlier {
-			if e.Stage.installs() && e.Stage != stagePassTwo && stepSite(e) == site {
+			if e.Stage.installs() && e.Stage != stagePassTwo && stepSite(e) == site && !slices.Contains(e.Args, "--hold-apps") {
 				return []string{e.Title}
 			}
 		}
 		return nil
 	}
-	prepare := func(site string) string { return "host prepare --site " + site }
+	prepare := func(site string) string { return "site prepare --site " + site }
 	switch {
 	case s.Args[0] == "pull":
 		waits = append(waits, prepare(stepSite(s)))
@@ -1630,6 +1749,14 @@ func convergeWaits(cfg *config.Config, steps []convergeStep, i int) []string {
 		if s.Stage == stageFounding && !cfg.Sites[site].Has(config.RoleWitness) {
 			for _, e := range earlier {
 				if e.Stage != stagePassTwo && e.Args[0] == "apply" && cfg.Sites[stepSite(e)].Has(config.RoleWitness) {
+					waits = append(waits, e.Title)
+				}
+			}
+		}
+		// The apply that starts a joined site's apps follows its site add.
+		if s.Stage == stageOthers {
+			for _, e := range earlier {
+				if e.Stage == stageJoining && stepSite(e) == site {
 					waits = append(waits, e.Title)
 				}
 			}
@@ -1662,11 +1789,14 @@ func convergeWaits(cfg *config.Config, steps []convergeStep, i int) []string {
 	return waits
 }
 
-// stepSite is the site a step is about, or empty for one about none. Each
-// step about a site names it last.
+// stepSite is the site a step is about, or empty for one about none. An
+// apply names it after --site, and each other step about a site names it
+// last.
 func stepSite(s convergeStep) string {
 	switch strings.Join(s.Args[:min(2, len(s.Args))], " ") {
-	case "apply --site", "pull --site", "site add", "host prepare", "storage init":
+	case "apply --site":
+		return s.Args[2]
+	case "pull --site", "site add", "site prepare", "storage init":
 		return s.Args[len(s.Args)-1]
 	}
 	return ""
@@ -1674,7 +1804,7 @@ func stepSite(s convergeStep) string {
 
 // dryRunFound is told by the dry run of each command apply without --site
 // runs as a step what it would change: a summary such as "3 changes", or
-// host prepare's kinds of change such as "docker, firewall", empty
+// site prepare's kinds of change such as "docker, ssh keys", empty
 // when there is nothing to do, and stop when it found something --execute
 // would stop at. checkStep sets it; otherwise it does nothing.
 var dryRunFound = func(summary string, stop error) {}
@@ -1758,7 +1888,8 @@ func joinDetail(hint, detail string) string {
 
 // checkStep runs args, a step's command without --execute, through run, in
 // this process and quietly, and returns what its dry run told dryRunFound.
-// Its reports, retries and holds are routed back to r once it returns.
+// Its reports, retries, holds and login notes are routed back to r once it
+// returns.
 func checkStep(r ui.Reporter, args []string, run func([]string) error) (string, []checkReport, error) {
 	found := false
 	var summary string
@@ -1771,6 +1902,7 @@ func checkStep(r ui.Reporter, args []string, run func([]string) error) (string, 
 		dryRunFound, reporterOverride = savedFound, savedOverride
 		routeRetries(r)
 		routeHolds(r)
+		routeLoginNotes(r)
 	}()
 	if err := run(args); err != nil {
 		return "", reports, err
@@ -1807,9 +1939,9 @@ func errLine(err error) string {
 	return strings.TrimRight(strings.TrimSpace(line), ":.")
 }
 
-// convergeHost is how apply without --site reaches a site to settle its
-// sudo: the transport every step builds for it, so the answer is the one
-// they find. Tests replace it.
-var convergeHost = func(name string, site config.Site, sudo bool) apply.Transport {
-	return siteTransport(name, site, "", sudo)
+// convergeHost is how apply without --site reaches a site to read it, as its
+// login: the deployment's own user, unless ssh.user names another. Tests
+// replace it.
+var convergeHost = func(name string, site config.Site) apply.Transport {
+	return siteTransport(name, site, "")
 }

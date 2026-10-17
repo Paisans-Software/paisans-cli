@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/create"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 	"github.com/paisans-software/paisans-cli/internal/validate"
 )
@@ -18,9 +19,11 @@ const (
 )
 
 // answersFile is a terminal's worth of answers, one per line, as a file
-// create reads from with isTerminal saying it is a terminal.
+// create reads from with isTerminal saying it is a terminal. HOME is an empty
+// directory, so no key of the machine running the tests is offered.
 func answersFile(t *testing.T, lines ...string) *os.File {
 	t.Helper()
+	t.Setenv("HOME", t.TempDir())
 	path := filepath.Join(t.TempDir(), "answers")
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -46,7 +49,7 @@ func plainReporter(t *testing.T) *bytes.Buffer {
 
 var (
 	createCommunity = []string{"Example Community", "example.org", ""}
-	createAdmin     = []string{"alice", "Alice Example", "alice@example.org", createKey, "",
+	createAdmin     = []string{"alice", "Alice Example", "alice@example.org", createKey, "", "",
 		"bob", "Bob Example", "bob@example.org", createBobKey, "", "n"}
 	// sign in; the account service manages accounts, on its default
 	// hostname, with open signup and the code of conduct the wizard's own
@@ -67,10 +70,17 @@ func TestCreateWritesAFileThatValidates(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	plainReporter(t)
 	in := answersFile(t, createLines(createCommunity, createAdmin,
-		[]string{"1", "", "203.0.113.10", "", ""}, createNoApps, createMail, []string{""})...)
+		[]string{"1", "", "203.0.113.10", "", ""}, createNoApps, createMail)...)
 	var out bytes.Buffer
 	if err := runCreate([]string{"--config", path}, in, &out); err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
+	}
+	// The file goes to disk only: the terminal shows neither its contents
+	// nor a question about writing it.
+	for _, unwanted := range []string{"version:", "Write "} {
+		if strings.Contains(out.String(), unwanted) {
+			t.Errorf("output holds %q:\n%s", unwanted, out.String())
+		}
 	}
 	cfg, err := config.Load(path)
 	if err != nil {
@@ -82,11 +92,12 @@ func TestCreateWritesAFileThatValidates(t *testing.T) {
 	if info, _ := os.Stat(path); info.Mode().Perm() != 0o644 {
 		t.Errorf("mode %v, want 0644: the file holds no secret and is meant to be committed", info.Mode().Perm())
 	}
-	// init creates secrets.enc.yaml, so it comes first; secrets set with no
-	// key then asks for each secret only the operator can give.
+	// init creates secrets.enc.yaml and the id a site request carries, so it
+	// comes first; each host is admitted before apply reaches it; secrets set
+	// with no key asks for each secret only the operator can give.
 	next := out.String()[strings.Index(out.String(), "Next:"):]
 	at := -1
-	for _, want := range []string{"  paisans init ", "  paisans secrets set ", "  paisans apply "} {
+	for _, want := range []string{"  paisans init ", "  paisans site request ", "  paisans secrets set ", "  paisans apply "} {
 		i := strings.Index(next, want)
 		if i < 0 {
 			t.Errorf("next steps lack %q:\n%s", want, next)
@@ -102,6 +113,37 @@ func TestCreateWritesAFileThatValidates(t *testing.T) {
 	}
 }
 
+func TestCreateOffersTheKeysInHome(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
+	plainReporter(t)
+	// alice takes the key found rather than pasting one.
+	in := answersFile(t, createLines(createCommunity,
+		[]string{"alice", "Alice Example", "alice@example.org", "",
+			"", "bob", "Bob Example", "bob@example.org", createBobKey, "", "n"},
+		[]string{"1", "", "203.0.113.10", "", ""}, createNoApps, createMail)...)
+	ssh := filepath.Join(os.Getenv("HOME"), ".ssh")
+	if err := os.MkdirAll(ssh, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ssh, "id_ed25519.pub"), []byte(createKey+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := runCreate([]string{"--config", path}, in, &out); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "Use ~/.ssh/id_ed25519.pub (ssh-ed25519 SHA256:") {
+		t.Errorf("the key in ~/.ssh is not offered:\n%s", out.String())
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(cfg.Operators["alice"].Keys); got != createKey {
+		t.Errorf("alice's keys = %q, want the one in ~/.ssh", got)
+	}
+}
+
 // A custom shape is the one place validate judges the roles: data and a
 // witness on one machine is refused, the machines are asked again, and the
 // corrected answers write the file.
@@ -113,7 +155,6 @@ func TestCreateAsksAgainAfterARefusal(t *testing.T) {
 		createNoApps, createMail,
 		[]string{""}, // answer the machines again
 		[]string{"1", "", "203.0.113.10", "", ""},
-		[]string{""}, // write it
 	)...)
 	var out bytes.Buffer
 	if err := runCreate([]string{"--config", path}, in, &out); err != nil {
@@ -157,19 +198,19 @@ func TestCreateRefusesStdinThatIsNotATerminal(t *testing.T) {
 	}
 }
 
-func TestCreateWritesNothingOnNo(t *testing.T) {
+// Quitting after a refusal is the operator's choice, not a failure, and
+// writes nothing.
+func TestCreateWritesNothingOnQuit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
 	rec := plainReporter(t)
 	in := answersFile(t, createLines(createCommunity, createAdmin,
-		[]string{"1", "", "203.0.113.10", "", ""}, createNoApps, createMail, []string{"n"})...)
+		[]string{"4", "1", "", "data, apps, gateway, witness", "203.0.113.10", "", "", ""},
+		createNoApps, createMail,
+		[]string{"4"}, // quit without writing anything
+	)...)
 	var out bytes.Buffer
-	// Declining is the operator's choice, not a failure.
 	if err := runCreate([]string{"--config", path}, in, &out); err != nil {
 		t.Errorf("err = %v", err)
-	}
-	// A blank line parts the answer from the result.
-	if !strings.HasSuffix(out.String(), "? [Y/n]: \n") {
-		t.Errorf("no blank line after the write prompt:\n%q", out.String()[max(0, out.Len()-80):])
 	}
 	if want := "paisans-stack.yaml not written. Run paisans create again to start over."; !strings.Contains(rec.String(), want) {
 		t.Errorf("missing %q:\n%s", want, rec.String())
@@ -199,5 +240,55 @@ func TestWriteNewRefusesAFileThatAppeared(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(path); string(data) != "theirs\n" {
 		t.Error("the file that appeared was changed")
+	}
+}
+
+// A refused file is still written when the operator asks for it as it
+// stands, so that their answers are not lost.
+func TestCreateWritesARefusedFileOnRequest(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
+	rec := plainReporter(t)
+	in := answersFile(t, createLines(createCommunity, createAdmin,
+		[]string{"4", "1", "", "data, apps, gateway, witness", "203.0.113.10", "", "", ""},
+		createNoApps, createMail,
+		[]string{"3"}, // write the file as it stands
+	)...)
+	var out bytes.Buffer
+	if err := runCreate([]string{"--config", path}, in, &out); err != nil {
+		t.Fatalf("%v\n%s\n%s", err, rec.String(), out.String())
+	}
+	if !strings.Contains(rec.String(), "which validate refuses") {
+		t.Errorf("the write did not say the file is refused:\n%s", rec.String())
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !validate.Check(cfg).Refused() {
+		t.Error("the file written as it stands is not the refused one")
+	}
+}
+
+// A file the loader refuses is shown as refusals, each under its key, rather
+// than ending create with nothing written.
+func TestCheckRenderedTurnsALoadErrorIntoRefusals(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")
+	plainReporter(t)
+	in := answersFile(t, createLines(createCommunity, createAdmin,
+		[]string{"1", "", "203.0.113.10", "", ""}, createNoApps, createMail)...)
+	if err := runCreate([]string{"--config", path}, in, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := strings.Replace(string(data), strings.Fields(createBobKey)[1], strings.Fields(createKey)[1], 1)
+	result, err := checkRendered([]byte(shared))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Refused() || create.SectionFor(result.Refusals()[0].Key) != create.SectionOperators {
+		t.Errorf("the shared key is not a refusal under the operators: %+v", result.Findings)
 	}
 }

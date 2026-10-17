@@ -6,10 +6,11 @@ import (
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/topology"
 )
 
 // ReachCommand is the trivial command that proves a site answers: ssh
-// connected, the login worked, and, through a sudo transport, sudo did too.
+// connected and the login worked.
 const ReachCommand = "true"
 
 // SiteReach is one site's answer to ReachCommand.
@@ -19,32 +20,43 @@ type SiteReach struct {
 	Destination string
 	// Err is what failed, empty when the site answered.
 	Err string
-	// Sudo is true when the site answered ssh but sudo could not be used,
-	// which leaves it unreadable: Docker and /srv are root's.
-	Sudo bool
+	// Class is the run's classification of a site that did not answer,
+	// filled only then (cmd/paisans, doctorReads.Reach); Unclassified is
+	// why the classification refused, when it did.
+	Class        topology.Site
+	Unclassified string
 }
 
 // Answered reports whether the rest of the checks can ask this site.
 func (r SiteReach) Answered() bool { return r.Err == "" }
 
-// Reach is one line per site. A site that did not answer is a Fail, never a
-// crash: the rest of the report is made from the sites that did, and this
-// says what the deployment is missing while it is gone, so an operator can
-// tell an inconvenience from an outage at a glance.
+// Reach is one line per site. A site that did not answer is never a crash:
+// the rest of the report is made from the sites that did, and this says
+// what the deployment is without while it is gone, so an operator can tell
+// an inconvenience from an outage at a glance. A site the run's
+// classification found pending or down is a warning, since the deployment
+// runs on the sites it has; a gateway is a failure, since apply refuses to
+// run without it, and so is a site the classification did not place.
 func Reach(cfg *config.Config, list []SiteReach) []Finding {
 	var out []Finding
 	for _, r := range list {
+		ssh := "ssh to " + r.Destination + ": " + sshReason(firstLine(r.Err))
 		switch {
 		case r.Answered():
 			out = append(out, Finding{Section: SectionReach, Level: OK, Line: fmt.Sprintf("%s: %s answers", r.Site, r.Destination)})
-		case r.Sudo:
-			out = append(out, Finding{Section: SectionReach, Level: Fail,
-				Line: fmt.Sprintf("%s: %s answers, but sudo cannot be used, so nothing on it could be read (%s)", r.Site, r.Destination, firstLine(r.Err)),
-				More: []string{"Every check reads Docker and /srv, which are root's. Fix sudo for the login user, or run doctor with --sudo=false where that user is in the docker group."}})
+		case r.Class.Class == topology.Pending:
+			out = append(out, pending(cfg, SectionReach, r.Site,
+				fmt.Sprintf("%s: pending: its login is refused or it does not answer, and the deployment has not joined it", r.Site), ssh))
+		case r.Class.Class == topology.Down:
+			more := append(whileDown(cfg, r.Site), ssh, "recover:", "  1. Start the host or fix the route to it.")
+			out = append(out, Finding{Section: SectionReach, Level: absentLevel(cfg, r.Site), Line: topology.DownLine(r.Site), More: more})
 		default:
-			more := []string{roleLine(cfg, r.Site)}
-			if lost := losses(cfg, r.Site); lost != "" {
-				more = append(more, "While it is down the deployment is without "+lost+".")
+			more := whileDown(cfg, r.Site)
+			switch {
+			case r.Unclassified != "":
+				more = append(more, "Whether it has joined the deployment could not be told: "+r.Unclassified)
+			case r.Class.Class == topology.Ready:
+				more = append(more, "The run's classification found it ready, yet it did not answer here: its login fails some of the time.")
 			}
 			more = append(more, "Start the host or fix the route to it. Every other check ran with the sites that answered.")
 			out = append(out, Finding{Section: SectionReach, Level: Fail,
@@ -53,6 +65,16 @@ func Reach(cfg *config.Config, list []SiteReach) []Finding {
 		}
 	}
 	return out
+}
+
+// whileDown is a site's roles and what the deployment is without while it
+// does not answer.
+func whileDown(cfg *config.Config, site string) []string {
+	more := []string{roleLine(cfg, site)}
+	if lost := Losses(cfg, site); lost != "" {
+		more = append(more, "While it is down the deployment is without "+lost+".")
+	}
+	return more
 }
 
 func roleLine(cfg *config.Config, site string) string {
@@ -77,11 +99,12 @@ func monitorElsewhere(cfg *config.Config, site string) bool {
 	return false
 }
 
-// losses is what a site's absence takes away, from its roles and its place
+// Losses is what a site's absence takes away, from its roles and its place
 // in the configuration rather than from its roles alone: a data site that is
 // not in etcd.members holds no etcd vote, and a gateway that is not the only
-// one is not every hostname.
-func losses(cfg *config.Config, site string) string {
+// one is not every hostname. apply's pending section words what a pending or
+// down site's absence takes away the same way.
+func Losses(cfg *config.Config, site string) string {
 	declared := cfg.Sites[site]
 	var lost []string
 	if declared.Has(config.RoleGateway) {

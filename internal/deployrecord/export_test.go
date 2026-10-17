@@ -11,9 +11,3 @@ func SetTags(tags ...string) func() {
 	}
 	return func() { newTag = saved }
 }
-
-// UserReadCommand is the command ReadAsUser runs as the ssh user.
-var UserReadCommand = userReadCommand
-
-// DeniedMarker is what UserReadCommand prints for a record it may not read.
-const DeniedMarker = deniedMarker

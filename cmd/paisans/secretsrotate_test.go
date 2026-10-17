@@ -17,6 +17,7 @@ import (
 
 	"filippo.io/age"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/blueprints/coretest"
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -123,7 +124,13 @@ func (f rotateFake) Run(command string) (string, error) {
 func (f rotateFake) RunInput(command, stdin string) (string, error) { return f.Run(command) }
 
 func (f rotateFake) ReadFile(path string) (string, bool, error) {
-	if path == registry.Path || strings.Contains(path, "wireguard") {
+	if strings.HasPrefix(path, admission.Dir+"/admitted.") {
+		f.w.mu.Lock()
+		f.w.commands = append(f.w.commands, "read "+path)
+		f.w.mu.Unlock()
+		return "", false, nil
+	}
+	if path == registry.Path || strings.HasSuffix(path, "/psns-f2a9.conf") {
 		return "", false, nil
 	}
 	return "", false, errors.New("fake: no file here")
@@ -143,7 +150,7 @@ func fakeRotateHosts(t *testing.T) (*rotateWorld, *ui.Recorder) {
 		t.Fatal(err)
 	}
 	savedHost, savedReporter := rotateHost, reporterOverride
-	rotateHost = func(name string, site config.Site, sudo bool) apply.Transport {
+	rotateHost = func(name string, site config.Site) apply.Transport {
 		return rotateFake{name: name, cfg: cfg, w: w}
 	}
 	rec := &ui.Recorder{}
@@ -156,7 +163,7 @@ func fakeRotateHosts(t *testing.T) (*rotateWorld, *ui.Recorder) {
 func noRotateHost(t *testing.T) {
 	t.Helper()
 	saved := rotateHost
-	rotateHost = func(string, config.Site, bool) apply.Transport {
+	rotateHost = func(string, config.Site) apply.Transport {
 		t.Fatal("a host was reached")
 		return nil
 	}
@@ -181,7 +188,7 @@ func terminalStdin(t *testing.T, answer string, terminal bool) *os.File {
 }
 
 func rotateArgs(configPath, secretsPath string, extra ...string) []string {
-	return append(extra, "--config", configPath, "--secrets", secretsPath, "--sudo=false")
+	return append(extra, "--config", configPath, "--secrets", secretsPath)
 }
 
 func paths(rs []secretsrotate.Rotator) []string {
@@ -259,6 +266,7 @@ func TestSecretsRotateAllOrder(t *testing.T) {
 		"apps.auth.operators_heartbeat_token",
 		"apps.auth.dns_super_admins_heartbeat_token",
 		"apps.auth.dns_2fa_heartbeat_token",
+		"apps.wiki.heartbeat_token",
 	}
 	if got := paths(rs); !slices.Equal(got, want) {
 		t.Errorf("--all order:\n got  %s\n want %s", strings.Join(got, "\n      "), strings.Join(want, "\n      "))
@@ -350,7 +358,7 @@ func TestApplyRefusesMidRotation(t *testing.T) {
 	for _, extra := range [][]string{{"--site", "home-a"}, nil} {
 		var err error
 		captureStdout(t, func() {
-			err = runApply(append([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false"}, extra...), strings.NewReader(""), io.Discard)
+			err = runApply(append([]string{"--config", configPath, "--secrets", secretsPath}, extra...), strings.NewReader(""), io.Discard)
 		})
 		if err == nil || !strings.Contains(err.Error(), "paisans secrets rotate") || !strings.Contains(err.Error(), "apps.gate.cookie_secret") {
 			t.Errorf("apply %v: err = %v", extra, err)
@@ -417,10 +425,8 @@ func TestSecretsRotateAsksSignOut(t *testing.T) {
 			if strings.Count(err.Error(), "Nothing was changed") != 1 {
 				t.Errorf("err = %v", err)
 			}
-			for _, c := range w.commands {
-				if strings.Contains(c, registry.Path) {
-					t.Errorf("a host was claimed before sign out was answered: %s", c)
-				}
+			if w.checked() {
+				t.Errorf("a host was checked before sign out was answered:\n%s", strings.Join(w.commands, "\n"))
 			}
 			if after, _ := os.ReadFile(secretsPath); !bytes.Equal(before, after) {
 				t.Error("a refused run changed the secrets file")
@@ -447,12 +453,8 @@ func TestSecretsRotateAsksSignOut(t *testing.T) {
 	if next := s.Rotations["apps.gate.cookie_secret"]; next == "" || next == "fixture-not-a-secret-gate-cookie" {
 		t.Errorf("stage 1 did not write a next value: %v", s.Rotations)
 	}
-	claimed := false
-	for _, c := range w.commands {
-		claimed = claimed || strings.Contains(c, registry.Path)
-	}
-	if !claimed {
-		t.Errorf("no host was claimed before it was written to:\n%s", strings.Join(w.commands, "\n"))
+	if !w.checked() {
+		t.Errorf("no host's admission was checked before it was written to:\n%s", strings.Join(w.commands, "\n"))
 	}
 }
 
@@ -796,12 +798,12 @@ func pastedAtTerminal(t *testing.T, answers map[string]string) *[]string {
 	return asked
 }
 
-// claimed reports whether any host's registry was touched.
-func (w *rotateWorld) claimed() bool {
+// checked reports whether any host's admission record was read.
+func (w *rotateWorld) checked() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for _, c := range w.commands {
-		if strings.Contains(c, registry.Path) {
+		if strings.Contains(c, admission.Dir+"/admitted.") {
 			return true
 		}
 	}
@@ -809,7 +811,7 @@ func (w *rotateWorld) claimed() bool {
 }
 
 // A pasted secret every host runs is asked for at --execute, before any host
-// is claimed, and the answer is stage 1's next value, written under
+// is checked, and the answer is stage 1's next value, written under
 // rotations; nothing shows it.
 func TestSecretsRotateAsksForAPastedSecret(t *testing.T) {
 	w, rec := fakeRotateHosts(t)
@@ -826,8 +828,8 @@ func TestSecretsRotateAsksForAPastedSecret(t *testing.T) {
 	if !slices.Equal(*asked, []string{"external.acme_dns_token at desec"}) {
 		t.Errorf("asked %v", *asked)
 	}
-	if !w.claimed() {
-		t.Error("no host was claimed")
+	if !w.checked() {
+		t.Error("no host's admission was checked")
 	}
 	s, lerr := config.LoadDeploymentSecrets(secretsPath, "")
 	if lerr != nil {
@@ -841,7 +843,7 @@ func TestSecretsRotateAsksForAPastedSecret(t *testing.T) {
 	}
 }
 
-// Every refusal of the ask happens before any host is claimed and leaves the
+// Every refusal of the ask happens before any host is checked and leaves the
 // secrets file as it was: an answer equal to the value the hosts run, an
 // empty one, and a run with no terminal, which says how to set it instead.
 func TestSecretsRotatePastedRefusals(t *testing.T) {
@@ -876,8 +878,8 @@ func TestSecretsRotatePastedRefusals(t *testing.T) {
 			if !tc.terminal && len(*asked) != 0 {
 				t.Errorf("asked without a terminal: %v", *asked)
 			}
-			if w.claimed() {
-				t.Error("a host was claimed before the answer was taken")
+			if w.checked() {
+				t.Error("a host was checked before the answer was taken")
 			}
 			if after, _ := os.ReadFile(secretsPath); !bytes.Equal(before, after) {
 				t.Error("a refused run changed the secrets file")
@@ -966,7 +968,7 @@ func TestSecretsRotateDryRunSaysItAsks(t *testing.T) {
 
 // The DNS token pasted is tried against the zone at the provider rotate
 // reaches through rotateDNSProvider, and one that cannot see it is refused
-// before any host is claimed.
+// before any host is checked.
 func TestSecretsRotatePastedTokenIsTriedAgainstTheZone(t *testing.T) {
 	w, rec := fakeRotateHosts(t)
 	configPath, secretsPath := rotateDeployment(t, nil)
@@ -989,8 +991,8 @@ func TestSecretsRotatePastedTokenIsTriedAgainstTheZone(t *testing.T) {
 	if provider.Token != next {
 		t.Error("the pasted token was not the one tried")
 	}
-	if w.claimed() {
-		t.Error("a host was claimed")
+	if w.checked() {
+		t.Error("a host was checked")
 	}
 	if after, _ := os.ReadFile(secretsPath); !bytes.Equal(before, after) {
 		t.Error("the secrets file changed")
@@ -1081,19 +1083,19 @@ func TestRenderingCommandsRefuseMidRotation(t *testing.T) {
 	const pending = "cluster.standby_password"
 	for name, run := range map[string]func(configPath, secretsPath string) error{
 		"site add": func(c, s string) error {
-			return runSiteAdd([]string{"home-b", "--config", c, "--secrets", s, "--sudo=false"}, strings.NewReader(""), io.Discard)
+			return runSiteAdd([]string{"home-b", "--config", c, "--secrets", s}, strings.NewReader(""), io.Discard)
 		},
 		"storage add": func(c, s string) error {
-			return runStorageAdd([]string{"--config", c, "--secrets", s, "--sudo=false"})
+			return runStorageAdd([]string{"--config", c, "--secrets", s})
 		},
 		"storage rotate-key": func(c, s string) error {
-			return runStorageRotateKey([]string{"--app", "talk", "--config", c, "--secrets", s, "--sudo=false"})
+			return runStorageRotateKey([]string{"--app", "talk", "--config", c, "--secrets", s})
 		},
 		"app remove": func(c, s string) error {
-			return runAppRemove([]string{"retired", "--config", c, "--secrets", s, "--sudo=false"}, strings.NewReader(""), &bytes.Buffer{})
+			return runAppRemove([]string{"retired", "--config", c, "--secrets", s}, strings.NewReader(""), &bytes.Buffer{})
 		},
 		"mesh rekey": func(c, s string) error {
-			return runMeshRekey([]string{"home-a", "--config", c, "--secrets", s, "--sudo=false"})
+			return runMeshRekey([]string{"home-a", "--config", c, "--secrets", s})
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -1142,7 +1144,7 @@ func TestSecretsRotatePendingWithoutRotationNamesTheWayOut(t *testing.T) {
 	}
 	var applyErr error
 	captureStdout(t, func() {
-		applyErr = runApply([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false", "--site", "home-a"}, strings.NewReader(""), io.Discard)
+		applyErr = runApply([]string{"--config", configPath, "--secrets", secretsPath, "--site", "home-a"}, strings.NewReader(""), io.Discard)
 	})
 	if applyErr == nil || !strings.Contains(applyErr.Error(), `"A rotation that cannot finish"`) {
 		t.Errorf("apply: err = %v", applyErr)
@@ -1151,7 +1153,7 @@ func TestSecretsRotatePendingWithoutRotationNamesTheWayOut(t *testing.T) {
 
 // Every secret init generates, for every blueprint the fixture declares, is
 // either rotated by --all or listed as kept with a reason. A generated key
-// that is neither is one an evicted admin keeps after a rotation that
+// that is neither is one an admin who left keeps after a rotation that
 // claimed to be everything, with nothing said.
 func TestSecretsRotateAllCoversEveryGeneratedSecret(t *testing.T) {
 	cfg, err := config.Load(fixtureConfig())
@@ -1365,8 +1367,11 @@ func TestSecretsRotateTakesABlueprintsHeartbeatToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The core's wikijs declares a heartbeat too, so wiki's token is rotated
+	// beside notes'.
 	got := paths(rs)
-	if len(got) < 2 || got[len(got)-1] != "apps.notes.heartbeat_token" || got[len(got)-2] != "apps.auth.dns_2fa_heartbeat_token" {
-		t.Errorf("--all does not end with notes' heartbeat token after the continuity tokens: %v", got)
+	tail := []string{"apps.auth.dns_2fa_heartbeat_token", "apps.notes.heartbeat_token", "apps.wiki.heartbeat_token"}
+	if len(got) < len(tail) || !slices.Equal(got[len(got)-len(tail):], tail) {
+		t.Errorf("--all does not end with the blueprints' heartbeat tokens after the continuity tokens: %v", got)
 	}
 }

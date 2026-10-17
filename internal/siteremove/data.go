@@ -1,13 +1,10 @@
 package siteremove
 
 import (
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/failover"
@@ -26,17 +23,9 @@ type etcdState struct {
 	// witness is the leaving witness's member, nil once it has none or when
 	// no witness leaves (see EndState).
 	witness *apply.EtcdMember
-	// witnessRunning is whether an etcd container of this deployment still
-	// runs on the leaving witness's host.
-	witnessRunning bool
-}
-
-// endpointHealth is one entry of `etcdctl endpoint health -w json` (etcd
-// v3.5.16, etcdctl/ctlv3/command/ep_command.go, epHealth).
-type endpointHealth struct {
-	Endpoint string `json:"endpoint"`
-	Health   bool   `json:"health"`
-	Error    string `json:"error"`
+	// witnessContainer is whether an etcd container of this deployment, running
+	// or stopped, is on the leaving witness's host.
+	witnessContainer bool
 }
 
 // probeEtcd finds a remaining voter to run etcdctl on, and refuses a removal
@@ -51,7 +40,7 @@ func (p *Plan) probeEtcd() error {
 	// founded a cluster of its own is found whichever of them comes first.
 	var views []etcdView
 	for _, name := range p.live(p.end.Etcd.Members) {
-		cluster, running, err := apply.ReadEtcdCluster(p.transports[name], p.dep())
+		cluster, running, err := apply.ReadEtcdCluster(p.transports[name], p.dep(), p.cfg.Sites[name].Address)
 		if err != nil {
 			return fmt.Errorf("site remove %s: %s: %w", p.Site, name, err)
 		}
@@ -116,6 +105,7 @@ func (p *Plan) probeEtcd() error {
 	// with the leaving witness still among them, and every end state member
 	// etcd does not list yet, counted as down.
 	after, up := len(missing), 0
+	var sick []string
 	for _, m := range members {
 		site := apply.EtcdMemberSite(p.cfg, m)
 		if site == p.Site || m.IsLearner {
@@ -125,14 +115,15 @@ func (p *Plan) probeEtcd() error {
 		if healthy[site] {
 			up++
 		} else {
+			sick = append(sick, site)
 			problems = append(problems, fmt.Sprintf("%s's etcd is unhealthy", site))
 		}
 	}
 	if after > 0 && up*2 <= after {
 		problems = append(problems, fmt.Sprintf("without %s, %d of %d remaining members are healthy, which is no quorum", p.Site, up, after))
 	}
-	if p.Evict {
-		if err := p.evictQuorum(members, up); err != nil {
+	if p.Options.HostGone {
+		if err := p.cutoffQuorum(members, up, sick); err != nil {
 			return err
 		}
 	}
@@ -144,7 +135,7 @@ func (p *Plan) probeEtcd() error {
 		if err != nil {
 			return fmt.Errorf("site remove %s: %s: looking for its etcd container: %w: %s", p.Site, p.witness, err, lastLines(out, 3))
 		}
-		p.etcd.witnessRunning = strings.TrimSpace(out) != ""
+		p.etcd.witnessContainer = strings.TrimSpace(out) != ""
 	}
 	if len(problems) > 0 {
 		return fmt.Errorf("site remove %s: etcd is not healthy enough to change its membership:\n  %s\nFix the members named (`paisans doctor` says how) and run again. Nothing was changed", p.Site, strings.Join(problems, "\n  "))
@@ -257,11 +248,12 @@ func joinAnd(list []string) string {
 
 // etcdHealth asks the control site for every member's health, by site.
 // etcdctl exits non zero when any endpoint is unhealthy and still prints
-// every endpoint, so the answer is read whatever the exit.
+// every endpoint, so the answer is read whatever the exit, and the caller
+// judges which members have to be healthy.
 func (p *Plan) etcdHealth(members []apply.EtcdMember) (map[string]bool, error) {
-	out, err := p.transports[p.etcd.control].Run(apply.Etcdctl(p.dep(), "endpoint health --cluster -w json"))
-	var health []endpointHealth
-	if jerr := json.Unmarshal([]byte(strings.TrimSpace(out)), &health); jerr != nil {
+	out, err := p.transports[p.etcd.control].Run(p.etcdctl("endpoint health --cluster -w json"))
+	health, ok := apply.ParseEtcdEndpointHealth(out)
+	if !ok {
 		if err != nil {
 			return nil, fmt.Errorf("site remove %s: %s: etcd's endpoint health: %v: %s", p.Site, p.etcd.control, err, lastLines(out, 3))
 		}
@@ -326,7 +318,7 @@ func (p *Plan) patroniList() ([]member, error) {
 		return nil, fmt.Errorf("%s: patronictl list: %w: %s", p.patroni.at, err, lastLines(out, 3))
 	}
 	var list []member
-	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &list); err != nil {
+	if err := apply.FirstJSONArray(out, &list); err != nil {
 		return nil, fmt.Errorf("%s: patronictl list is not JSON: %w", p.patroni.at, err)
 	}
 	return list, nil
@@ -350,7 +342,7 @@ func (p *Plan) probePatroni() error {
 			continue
 		}
 		var list []member
-		if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &list); err != nil {
+		if err := apply.FirstJSONArray(out, &list); err != nil {
 			return fmt.Errorf("site remove %s: %s: patronictl list is not JSON: %w", p.Site, name, err)
 		}
 		p.patroni.at, p.patroni.members = name, list
@@ -359,13 +351,13 @@ func (p *Plan) probePatroni() error {
 	if p.patroni.at == "" {
 		return fmt.Errorf("site remove %s: no Patroni runs on any of %s, so the cluster cannot be changed. Run `paisans doctor` to see why", p.Site, strings.Join(p.live(p.end.Cluster.Sites), ", "))
 	}
-	// An evicted leader decides what its replicas do: a hostile one can stop
-	// them streaming, and would block its own eviction if that were refused.
+	// A cut-off leader decides what its replicas do: a hostile one can stop
+	// them streaming, and would block its own cutoff if that were refused.
 	// Their lag is what the operator weighs instead, when typing `lose
 	// writes`.
-	evictedLeads := false
+	cutoffLeads := false
 	for _, m := range p.patroni.members {
-		evictedLeads = evictedLeads || p.Evict && m.name() == p.Site && m.role() == "Leader"
+		cutoffLeads = cutoffLeads || p.Options.HostGone && m.name() == p.Site && m.role() == "Leader"
 	}
 	var problems []string
 	seen := map[string]bool{}
@@ -382,7 +374,7 @@ func (p *Plan) probePatroni() error {
 			if m.state() != "running" {
 				problems = append(problems, fmt.Sprintf("the leader %s is %s", m.name(), m.state()))
 			}
-		case m.state() != "streaming" && !evictedLeads:
+		case m.state() != "streaming" && !cutoffLeads:
 			problems = append(problems, fmt.Sprintf("%s is %s, not streaming", m.name(), m.state()))
 		}
 	}
@@ -398,16 +390,16 @@ func (p *Plan) probePatroni() error {
 	// failover may be under way, and the members that stay are read as they
 	// move: the database stage waits for it, and its gate is what has to
 	// hold. A re-run after a partial cut completes it.
-	if p.Evict && (p.evict.cutDone || p.evict.cutStarted) {
+	if p.Options.HostGone && (p.cutoff.cutDone || p.cutoff.cutStarted) {
 		problems = nil
 	}
 	if len(problems) > 0 {
 		return fmt.Errorf("site remove %s: the Patroni cluster is not healthy enough to change:\n  %s\nFix the members named (`paisans doctor` says how) and run again. Nothing was changed", p.Site, strings.Join(problems, "\n  "))
 	}
-	if p.patroni.leader == p.Site && p.Evict {
-		p.evictLeader()
+	if p.patroni.leader == p.Site && p.Options.HostGone {
+		p.cutoffLeader()
 	}
-	if p.patroni.leader == p.Site && !p.Evict {
+	if p.patroni.leader == p.Site && !p.Options.HostGone {
 		for _, m := range p.patroni.members {
 			if m.role() == "Sync Standby" && m.state() == "streaming" && contains(p.end.Cluster.Sites, m.name()) {
 				p.patroni.candidate = m.name()
@@ -422,8 +414,8 @@ func (p *Plan) probePatroni() error {
 	if err != nil {
 		return fmt.Errorf("site remove %s: %s: patronictl show-config: %w: %s", p.Site, p.patroni.at, err, lastLines(out, 3))
 	}
-	var live map[string]any
-	if err := yaml.Unmarshal([]byte(out), &live); err != nil {
+	live, err := apply.PatroniConfig(out)
+	if err != nil {
 		return fmt.Errorf("site remove %s: %s: patronictl show-config is not YAML: %w", p.Site, p.patroni.at, err)
 	}
 	p.patroni.sync = fmt.Sprint(live["synchronous_mode"]) == "true"
@@ -491,7 +483,7 @@ func (p *Plan) probeGarage() error {
 	if nodes < p.cfg.Storage.Garage.Replication {
 		return fmt.Errorf("site remove %s: %d node(s) in Garage's layout would stay without %s, fewer than storage.garage.replication %d, so Garage would refuse the new layout. Run paisans storage add for the sites missing from it first. Nothing was changed", p.Site, nodes, p.Site, p.cfg.Storage.Garage.Replication)
 	}
-	if p.Evict {
+	if p.Options.HostGone {
 		if err := p.probeDeadNode(t, nodes); err != nil {
 			return err
 		}
@@ -562,9 +554,7 @@ func (p *Plan) buildData() *Stage {
 			st.Steps = append(st.Steps, Step{Site: p.patroni.at, Verb: "set", Title: "turn synchronous mode off", Text: "synchronous_mode=false in Patroni's dynamic configuration: one data site remains, and a leader that waits for a standby that is leaving stops taking writes"})
 		}
 		if p.patroni.listed {
-			if !p.HostGone {
-				st.Steps = append(st.Steps, Step{Site: p.Site, Verb: "stop", Title: "stop Patroni on " + p.Site, Text: "Patroni: " + p.stopPatroni()})
-			}
+			st.Steps = append(st.Steps, Step{Site: p.Site, Verb: "stop", Title: "stop Patroni on " + p.Site, Text: "Patroni: " + p.stopPatroni()})
 			st.Steps = append(st.Steps, Step{Site: p.etcd.control, Verb: "delete", Title: "delete " + p.Site + "'s Patroni member key", Text: fmt.Sprintf("%s's member key, %s, so Patroni stops listing it", p.Site, p.memberKey())})
 		}
 		gate := fmt.Sprintf("`patronictl list` on %s shows another site leading and no %s", p.patroni.at, p.Site)
@@ -637,14 +627,12 @@ func (p *Plan) runData() error {
 		}
 	}
 	if p.patroni.listed {
-		if !p.HostGone {
-			p.work("stop Patroni on " + p.Site)
-			if out, err := p.transports[p.Site].Run(p.stopPatroni()); err != nil {
-				return fmt.Errorf("%s: stopping Patroni: %w: %s", p.Site, err, lastLines(out, 3))
-			}
+		p.work("stop Patroni on " + p.Site)
+		if out, err := p.transports[p.Site].Run(p.stopPatroni()); err != nil {
+			return fmt.Errorf("%s: stopping Patroni: %w: %s", p.Site, err, lastLines(out, 3))
 		}
 		p.work("delete " + p.Site + "'s Patroni member key")
-		if out, err := p.transports[p.etcd.control].Run(apply.Etcdctl(p.dep(), "del "+p.memberKey())); err != nil {
+		if out, err := p.transports[p.etcd.control].Run(p.etcdctl("del " + p.memberKey())); err != nil {
 			return fmt.Errorf("%s: deleting %s: %w: %s", p.etcd.control, p.memberKey(), err, lastLines(out, 3))
 		}
 	}
@@ -724,10 +712,10 @@ func (p *Plan) garageGate() error {
 				return fmt.Errorf("%s reports more than one live layout version, so metadata is still moving", site)
 			}
 		}
-		// Objects only the evicted node held are gone, and their blocks are
+		// Objects only the cut-off node held are gone, and their blocks are
 		// retried and fail for as long as anything references them, so the
 		// queue is not waited on once the operator has accepted the loss.
-		for i := 0; i < garageSamples && !p.evict.loseObjects; i++ {
+		for i := 0; i < garageSamples && !p.cutoff.loseObjects; i++ {
 			if i > 0 {
 				sleep(garageGap)
 			}

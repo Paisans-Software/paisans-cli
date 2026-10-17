@@ -90,8 +90,8 @@ const (
 // that allows it.
 func New(w io.Writer, verbose bool) Reporter {
 	r := newWriter(w, verbose, isTerminal(w))
-	cols := terminalWidth(w)
-	r.termCols, r.cols = cols, cols
+	cols, rows := terminalSize(w)
+	r.setSize(cols, rows)
 	return r
 }
 
@@ -108,6 +108,17 @@ func NewTerminalForTest(w io.Writer, verbose bool, clock func() time.Time) Repor
 	r := newWriter(w, verbose, true)
 	r.now = clock
 	r.tick = 0
+	return r
+}
+
+// NewTerminalSizeForTest is NewTerminalForTest on a terminal cols wide and
+// rows high, as New would find it: for a test outside this package that
+// asserts on what a list redrawn in place leaves on the screen.
+func NewTerminalSizeForTest(w io.Writer, verbose bool, cols, rows int, clock func() time.Time) Reporter {
+	r := newWriter(w, verbose, true)
+	r.now = clock
+	r.tick = 0
+	r.setSize(cols, rows)
 	return r
 }
 
@@ -181,15 +192,21 @@ func TerminalWidth(w io.Writer) int { return terminalWidth(w) }
 // terminal drawn on without colour (NO_COLOR, TERM=dumb) is still as wide as
 // it is.
 func terminalWidth(w io.Writer) int {
+	cols, _ := terminalSize(w)
+	return cols
+}
+
+// terminalSize is w's width and height when w is a terminal, or 0, 0.
+func terminalSize(w io.Writer) (cols, rows int) {
 	f, ok := w.(*os.File)
 	if !ok || !term.IsTerminal(int(f.Fd())) {
-		return 0
+		return 0, 0
 	}
-	cols, _, err := term.GetSize(int(f.Fd()))
+	cols, rows, err := term.GetSize(int(f.Fd()))
 	if err != nil {
-		return 0
+		return 0, 0
 	}
-	return cols
+	return cols, rows
 }
 
 type discard struct{}

@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -59,6 +59,11 @@ var knownRoles = map[Role]bool{RoleData: true, RoleApps: true, RoleGateway: true
 // KnownRole reports whether r is a site role.
 func KnownRole(r Role) bool { return knownRoles[r] }
 
+// RoleRepeated reports whether roles[i] is listed earlier in roles. A site
+// lists each role once, and a request carries a site's roles as written, so
+// the loader and a request's Check refuse a repeat by this one rule.
+func RoleRepeated(roles []Role, i int) bool { return slices.Contains(roles[:i], roles[i]) }
+
 // Blueprint names an application the toolkit knows how to render, qualified
 // by its catalog unless it is the core catalog's.
 type Blueprint string
@@ -87,6 +92,9 @@ type Config struct {
 	// a property of the gateway site, because the gateway role moves between
 	// machines by design and certificates do not move with it.
 	ACME ACME `yaml:"acme"`
+	// Infra overrides the images the infrastructure stack runs, each of
+	// which is otherwise the core catalog foundation's.
+	Infra Infra `yaml:"infra"`
 	// Operators is the people who may log in to the sites, under the name a
 	// site's ssh.keys lists them by.
 	Operators map[string]Operator `yaml:"operators"`
@@ -155,6 +163,83 @@ func (m Mesh) Contains(address string) bool {
 	return ip != nil && network.Contains(ip)
 }
 
+// Infra overrides the infrastructure stack's images. Each key is optional,
+// and an unset one takes the core catalog foundation's image. A value is one
+// full reference, exact or a track, for the reason App.Images gives.
+type Infra struct {
+	// Images is keyed by InfraImageKeys, the names foundation.yaml gives
+	// the images they replace. The heartbeat key replaces the image both the
+	// infrastructure stack's heartbeat and every Pocket ID stack's operators
+	// heartbeat run.
+	Images map[string]string `yaml:"images"`
+	// Postgres is keyed by Postgres major, then by InfraPostgresKeys. An
+	// entry applies only while cluster.postgres_version is its major, so a
+	// build of one major never follows the cluster onto another.
+	Postgres map[string]map[string]string `yaml:"postgres"`
+}
+
+// InfraImageKeys are the keys infra.images takes.
+var InfraImageKeys = []string{"etcd", "garage", "haproxy", "heartbeat"}
+
+// InfraPostgresKeys are the keys infra.postgres.<major> takes.
+var InfraPostgresKeys = []string{"spilo"}
+
+// DefaultPostgresVersion is the major a deployment runs when
+// cluster.postgres_version is left out.
+const DefaultPostgresVersion = "18"
+
+// PostgresMajor is the Postgres major the deployment runs.
+func (c *Config) PostgresMajor() string {
+	if c.Cluster.PostgresVersion == "" {
+		return DefaultPostgresVersion
+	}
+	return c.Cluster.PostgresVersion
+}
+
+// SpiloImage is the Spilo image infra.postgres declares for the major the
+// deployment runs, empty when it declares none.
+func (c *Config) SpiloImage() string {
+	return c.Infra.Postgres[c.PostgresMajor()]["spilo"]
+}
+
+// problems are infra's keys and references that cannot be rendered: a key
+// the toolkit does not run, or a value that is not one image reference.
+func (i Infra) problems() []string {
+	var out []string
+	add := func(format string, args ...any) { out = append(out, fmt.Sprintf(format, args...)) }
+	for _, key := range sortedKeys(i.Images) {
+		if !slices.Contains(InfraImageKeys, key) {
+			add("infra.images.%s: not an image the infrastructure stack runs. infra.images takes %s; the gateway's Caddy is acme.image.", keyPath(key), strings.Join(InfraImageKeys, ", "))
+			continue
+		}
+		imageProblem(add, "infra.images."+keyPath(key), i.Images[key])
+	}
+	for _, major := range sortedKeys(i.Postgres) {
+		for _, key := range sortedKeys(i.Postgres[major]) {
+			path := fmt.Sprintf("infra.postgres.%s.%s", keyPath(major), keyPath(key))
+			if !slices.Contains(InfraPostgresKeys, key) {
+				add("%s: infra.postgres.<major> takes %s. A pinned app's own database is apps.<name>.images.", path, strings.Join(InfraPostgresKeys, ", "))
+				continue
+			}
+			imageProblem(add, path, i.Postgres[major][key])
+		}
+	}
+	return out
+}
+
+// imageProblem adds what is wrong with ref as the image at path: a control
+// character, nothing, or something no image reference holds.
+func imageProblem(add func(string, ...any), path, ref string) {
+	switch r, ok := ControlRune(ref); {
+	case ok:
+		add("%s %s", path, controlProblem(r))
+	case strings.TrimSpace(ref) == "":
+		add("%s: empty. Give a full image reference, or remove the key to take the core catalog's.", path)
+	case !imageRef.MatchString(ref):
+		add("%s: %s", path, imageRefProblem(ref))
+	}
+}
+
 // ACME is the certificate story: which DNS provider answers the challenge, and
 // optionally which Caddy image carries that provider's module.
 //
@@ -195,7 +280,7 @@ type Site struct {
 	// PublicAddress6 is the IPv6 counterpart, for AAAA records. Optional even
 	// where PublicAddress is set.
 	PublicAddress6 string `yaml:"public_address6"`
-	// Watchdog is how `host prepare` gives Patroni a /dev/watchdog on this
+	// Watchdog is how `site prepare` gives Patroni a /dev/watchdog on this
 	// site. It only matters where the site holds the data role. Empty means
 	// auto; read it through WatchdogMode rather than directly.
 	Watchdog WatchdogMode `yaml:"watchdog"`
@@ -237,73 +322,59 @@ type WebServer struct {
 	// an IPv4 address and a port. Required with managed_by external, refused with
 	// managed_by paisans.
 	Listen string `yaml:"listen"`
-	// IncludeDir is the directory on the host the toolkit writes its own
-	// files in for the operator's web server, which includes them with one
-	// wildcard line. Unset, apply derives it beside the web server's
-	// configuration and writes it here; false writes nothing there.
+	// IncludeDir is read only so that validate can refuse it by name
+	// (web-server-include-dir) rather than the load failing on an unknown
+	// key. Nothing reads what it holds.
 	IncludeDir IncludeDir `yaml:"include_dir"`
 }
 
-// IncludeDir is sites.<site>.web_server.include_dir: a path, false, or unset.
+// IncludeDir is sites.<site>.web_server.include_dir, which is not a setting:
+// whether it is written at all.
 type IncludeDir struct {
-	Path string
-	// Off is include_dir: false.
-	Off bool
+	Set bool
 }
 
 // Unset reports whether include_dir is not written at all.
-func (d IncludeDir) Unset() bool { return d.Path == "" && !d.Off }
+func (d IncludeDir) Unset() bool { return !d.Set }
 
-// UnmarshalYAML reads a path or false. true means nothing, so it is refused
-// rather than read as either.
-func (d *IncludeDir) UnmarshalYAML(node *yaml.Node) error {
-	if node.Kind == yaml.ScalarNode && node.Tag == "!!bool" {
-		var on bool
-		if err := node.Decode(&on); err != nil {
-			return err
-		}
-		if on {
-			return fmt.Errorf("line %d: include_dir is true, which names no directory. Write the directory, or false to have the toolkit write nothing for your web server", node.Line)
-		}
-		*d = IncludeDir{Off: true}
-		return nil
-	}
-	if node.Kind != yaml.ScalarNode {
-		return fmt.Errorf("line %d: include_dir is %s, not a directory or false", node.Line, describeNode(node))
-	}
-	*d = IncludeDir{Path: node.Value}
+// UnmarshalYAML reads any value as include_dir written, and says nothing
+// about it: validate's refusal is the one message.
+func (d *IncludeDir) UnmarshalYAML(*yaml.Node) error {
+	*d = IncludeDir{Set: true}
 	return nil
 }
 
-// IncludeDirProblem says what is wrong with an include_dir path, empty when
-// nothing is. It is written into the web server's configuration and into
-// shell commands, so it is held to plain absolute paths.
-func IncludeDirProblem(dir string) string {
-	switch {
-	case !strings.HasPrefix(dir, "/"):
-		return "is not an absolute path"
-	case dir == "/":
-		return "is the root directory"
-	case path.Clean(dir) != dir:
-		return "is not written in its clean form, " + path.Clean(dir)
-	case strings.ContainsAny(dir, " \t\n'\"\\$`;#*?[]{}"):
-		return "holds a space, a quote or a character a shell or a web server's glob reads specially"
-	}
-	return ""
-}
-
 // ListenHostPort splits Listen into an IPv4 address and a port, false when it
-// is not one.
+// is not one. The port is 1 to 65535 written without leading zeros, the one
+// spelling a request carries, so the file and the request cannot disagree on
+// whether 08480 is 8480.
 func (i WebServer) ListenHostPort() (string, int, bool) {
 	host, port, err := net.SplitHostPort(i.Listen)
 	if err != nil || !isIPv4(host) {
 		return "", 0, false
 	}
 	n, err := strconv.Atoi(port)
-	if err != nil || n < 1 || n > 65535 {
+	if err != nil || n < 1 || n > 65535 || strconv.Itoa(n) != port {
 		return "", 0, false
 	}
 	return host, n, true
+}
+
+// ProxiesToThisHost reports whether listen is an address the owner's web
+// server may be handed for a site whose mesh address is address: an IPv4
+// loopback address or the site's own mesh address, in plain dotted form, with
+// a port ListenHostPort accepts. A monitor behind the owner's web server is
+// handed to that server on the same host, so nothing beyond the host is
+// needed, and any other address would put the app where other machines
+// reach it around the web server. validate and site request both hold
+// web_server.listen to it.
+func ProxiesToThisHost(listen, address string) bool {
+	host, _, ok := WebServer{Listen: listen}.ListenHostPort()
+	if !ok {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip.String() == host && (ip.IsLoopback() || host == address)
 }
 
 // WebServerManagedBy returns the site's declared web_server.managed_by, paisans when none is
@@ -339,12 +410,9 @@ const (
 	// WatchdogSoftdog loads and persists softdog because the operator chose
 	// it, so no warning is printed.
 	WatchdogSoftdog WatchdogMode = "softdog"
-	// WatchdogOff leaves the host alone and renders Patroni without a
-	// watchdog at all.
-	WatchdogOff WatchdogMode = "off"
 )
 
-var knownWatchdogModes = map[WatchdogMode]bool{WatchdogAuto: true, WatchdogRequired: true, WatchdogSoftdog: true, WatchdogOff: true}
+var knownWatchdogModes = map[WatchdogMode]bool{WatchdogAuto: true, WatchdogRequired: true, WatchdogSoftdog: true}
 
 // WatchdogMode returns the site's declared mode, auto when none is declared.
 func (s Site) WatchdogMode() WatchdogMode {
@@ -847,6 +915,7 @@ func LoadBytes(data []byte) (*Config, error) {
 		return nil, err
 	}
 	cfg.Path = ""
+	cfg.resolveUsers()
 	return cfg, nil
 }
 
@@ -889,6 +958,7 @@ func parse(data []byte, path string, noSubnet bool) (*Config, error) {
 	}
 	cfg.deriveGate()
 	cfg.resolveKeys()
+	cfg.resolveUsers()
 	if cfg.Storage.Garage.Capacity == "" {
 		cfg.Storage.Garage.Capacity = "100G"
 	}
@@ -1110,14 +1180,18 @@ func (c *Config) structural(noSubnet bool) error {
 	case c.Mesh.Subnet == "":
 		add("mesh.subnet: required. Run `paisans init`, which reaches every site, picks a /24 that overlaps nothing on any of them, and writes it here with each site's address moved into it. It is what applications trust for forwarded client addresses, so once a site is deployed it never changes.")
 	default:
-		ip, network, err := net.ParseCIDR(c.Mesh.Subnet)
-		switch {
-		case err != nil:
-			add("mesh.subnet: %q is not a network in CIDR notation. Write it as an address and a prefix length, for example 10.44.0.0/24.", c.Mesh.Subnet)
-		case ip.To4() == nil:
-			add("mesh.subnet: %q is IPv6. The mesh is IPv4 only for now.", c.Mesh.Subnet)
-		case !ip.Equal(network.IP):
-			add("mesh.subnet: %q is a host address inside a network, not the network itself. Write %s.", c.Mesh.Subnet, network.String())
+		network, problems := CheckMeshSubnet(c.Mesh.Subnet)
+		for _, p := range problems {
+			advice := "Write it as an IPv4 network address and a prefix length, for example 10.44.0.0/24."
+			switch {
+			case network != nil && strings.HasPrefix(p, "is outside the private ranges"):
+				advice = "Choose a /24 inside one of them; `paisans init` picks a /24 in 10.0.0.0/8."
+			case network != nil && strings.HasPrefix(p, "overlaps "):
+				advice = "A host's firewall lets the deployment reach the mesh before it stops it reaching loopback, link-local and other reserved ranges, so the mesh must lie outside them; `paisans init` picks a /24 in private space."
+			case network != nil:
+				advice = "The mesh is what the hosts' firewalls trust, so a larger one could cover a LAN; `paisans init` picks a /24."
+			}
+			add("mesh.subnet: %q %s. %s", c.Mesh.Subnet, p, advice)
 		}
 	}
 
@@ -1126,16 +1200,19 @@ func (c *Config) structural(noSubnet bool) error {
 	}
 	for _, name := range c.SiteNames() {
 		site := c.Sites[name]
-		if !blueprintName.MatchString(name) {
+		if !ValidSiteName(name) {
 			add("sites.%q: %q is not a site name: lowercase letters, digits and hyphens, starting with a letter or digit, at most 63. The name is written into compose files, shell scripts and HAProxy and Patroni configuration, and names a directory of the render, so anything else could add to those files, run as a command, or write outside the directory.", name, name)
 			continue
 		}
 		if len(site.Roles) == 0 && len(c.PinnedTo(name)) == 0 {
 			add("sites.%s.roles: required. Give the site at least one of data, apps, gateway, witness, storage, monitor. A site may have none only when an app is pinned to it, because then it exists to host that app.", name)
 		}
-		for _, role := range site.Roles {
-			if !knownRoles[role] {
+		for i, role := range site.Roles {
+			switch {
+			case !KnownRole(role):
 				add("sites.%s.roles: unknown role %q. Valid roles are data, apps, gateway, witness, storage, monitor.", name, role)
+			case RoleRepeated(site.Roles, i):
+				add("sites.%s.roles: %q is listed twice. List each role once.", name, role)
 			}
 		}
 		if in := site.WebServer; in != nil {
@@ -1144,7 +1221,7 @@ func (c *Config) structural(noSubnet bool) error {
 			}
 			if in.Listen != "" {
 				if _, _, ok := in.ListenHostPort(); !ok {
-					add("sites.%s.web_server.listen: %q is not an IPv4 address and a port. Write it as the address your web server proxies to, for example 127.0.0.1:8480.", name, in.Listen)
+					add("sites.%s.web_server.listen: %q is not an IPv4 address and a port from 1 to 65535 written without leading zeros. Write it as the address your web server proxies to, for example 127.0.0.1:8480.", name, in.Listen)
 				}
 			}
 		}
@@ -1152,6 +1229,10 @@ func (c *Config) structural(noSubnet bool) error {
 			add("sites.%s.address: required. Every site needs a mesh address, and it never changes.", name)
 		} else if !isIPv4(site.Address) {
 			add("sites.%s.address: %q is not an IPv4 address. Use the site's WireGuard address, for example 10.44.0.1.", name, site.Address)
+		} else if a := net.ParseIP(site.Address).To4().String(); a != site.Address {
+			add("sites.%s.address: %q is not written as plain dotted IPv4, %s. Write it as four dotted numbers, for example 10.44.0.1.", name, site.Address, a)
+		} else if _, mesh, err := net.ParseCIDR(c.Mesh.Subnet); err == nil && IsNetworkOrBroadcast(net.ParseIP(site.Address), mesh) {
+			add("sites.%s.address: %s is mesh.subnet %s's network or broadcast address, which no host may hold. Give the site another address inside the mesh.", name, site.Address, c.Mesh.Subnet)
 		}
 		if site.Endpoint != "" {
 			if _, err := ParseEndpointPort(site.Endpoint); err != nil {
@@ -1170,12 +1251,12 @@ func (c *Config) structural(noSubnet bool) error {
 			}
 		}
 		if site.Watchdog != "" && !knownWatchdogModes[site.Watchdog] {
-			add("sites.%s.watchdog: unknown value %q. Valid values are auto, required, softdog and off.", name, site.Watchdog)
+			add("sites.%s.watchdog: unknown value %q. Valid values are auto, required and softdog.", name, site.Watchdog)
 		}
 		if site.Arch != "" && !hostarch.Supported(site.Arch) {
 			add("sites.%s.arch: unknown value %q. The toolkit supports amd64 and arm64, and writes this line itself: delete it, and the next apply records what the host reports.", name, site.Arch)
 		}
-		problems = append(problems, sshProblems(name, site, c.Operators)...)
+		problems = append(problems, sshProblems(name, site, c.ID, c.Operators)...)
 	}
 	problems = append(problems, c.operatorProblems()...)
 	for _, name := range c.AppNames() {
@@ -1192,8 +1273,8 @@ func (c *Config) structural(noSubnet bool) error {
 		}
 		if app.Hostname == "" {
 			add("apps.%s.hostname: required. It is the public name the gateway routes to.", name)
-		} else if !nameChars(app.Hostname) {
-			add("apps.%s.hostname: %q holds characters no DNS name has: a name is letters, digits, hyphens and dots. It is written into the gateway's Caddyfile and the app's env file as it is, so anything else could add to them.", name, app.Hostname)
+		} else if p := HostnameProblem(app.Hostname); p != "" {
+			add("apps.%s.hostname: %q is not a hostname: %s. It is written into the gateway's Caddyfile and the app's env file as it is, so anything else could add to them.", name, app.Hostname, p)
 		}
 		for _, service := range sortedKeys(app.Images) {
 			if r, ok := ControlRune(app.Images[service]); ok {
@@ -1210,8 +1291,8 @@ func (c *Config) structural(noSubnet bool) error {
 			}
 			if strings.TrimSpace(app.Hostnames[role]) == "" {
 				add("apps.%s.hostnames.%s: empty. Give a hostname, or remove the role.", name, keyPath(role))
-			} else if !nameChars(app.Hostnames[role]) {
-				add("apps.%s.hostnames.%s: %q holds characters no DNS name has: a name is letters, digits, hyphens and dots. It is written into the gateway's Caddyfile as it is, so anything else could add to it.", name, keyPath(role), app.Hostnames[role])
+			} else if p := HostnameProblem(app.Hostnames[role]); p != "" {
+				add("apps.%s.hostnames.%s: %q is not a hostname: %s. It is written into the gateway's Caddyfile as it is, so anything else could add to it.", name, keyPath(role), app.Hostnames[role], p)
 			}
 		}
 		for _, key := range sortedKeys(app.Settings) {
@@ -1241,6 +1322,7 @@ func (c *Config) structural(noSubnet bool) error {
 		}
 	}
 	problems = append(problems, smtpProblems("smtp", c.SMTP)...)
+	problems = append(problems, c.Infra.problems()...)
 	if !c.Etcd.MembersDerived && len(c.Etcd.Members) == 0 {
 		add("etcd.members: empty. No site would run etcd, so Patroni on every data site would have nowhere to keep its leader. Remove the key, and the voters are derived from the roles (every witness, then every data site), or list at least one site.")
 	}

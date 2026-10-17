@@ -1,0 +1,168 @@
+admit site vm of f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01 as paisans-f2a9 on fake (ubuntu 24.04)
+
+step 1: claim the host
+step 2: create /etc/paisans
+step 3: record what admit installs
+
+step 4: add docker apt key
+  docker: add Docker's apt signing key at /etc/apt/keyrings/docker.asc
+  run:
+    $ set -e
+    $ export DEBIAN_FRONTEND=noninteractive
+    $ apt-get -o DPkg::Lock::Timeout=300 update
+    $ apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl gnupg
+    $ install -m 0755 -d /etc/apt/keyrings
+    $ curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc.paisans-tmp
+    $ home=$(mktemp -d)
+    $ fpr=$(GNUPGHOME="$home" gpg --show-keys --with-colons /etc/apt/keyrings/docker.asc.paisans-tmp 2>/dev/null | awk -F: '$1 == "pub" || $1 == "sec" { n++; take = 1; next } $1 == "fpr" && take { fpr = $10; take = 0 } END { if (n == 1) print fpr }')
+    $ rm -rf "$home"
+    $ if [ "$fpr" != 9DC858229FC7DD38854AE2D88D81803C0EBFCD88 ]; then
+    $   rm -f /etc/apt/keyrings/docker.asc.paisans-tmp
+    $   echo "the download from download.docker.com is not Docker's release key 9DC858229FC7DD38854AE2D88D81803C0EBFCD88 alone (its one primary key: ${fpr:-none, or more than one}); nothing reached apt" >&2
+    $   exit 1
+    $ fi
+    $ chmod a+r /etc/apt/keyrings/docker.asc.paisans-tmp
+    $ mv /etc/apt/keyrings/docker.asc.paisans-tmp /etc/apt/keyrings/docker.asc
+
+step 5: add docker apt repo
+  docker: add Docker's apt repository for noble/amd64 at /etc/apt/sources.list.d/docker.sources
+  write /etc/apt/sources.list.d/docker.sources mode 0644:
+    | Types: deb
+    | URIs: https://download.docker.com/linux/ubuntu
+    | Suites: noble
+    | Components: stable
+    | Architectures: amd64
+    | Signed-By: /etc/apt/keyrings/docker.asc
+
+step 6: install packages: docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin, docker-compose-plugin, docker-ce-rootless-extras, uidmap, wireguard-tools, git
+  packages: install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras uidmap wireguard-tools git; Docker's system daemon is kept from starting while its packages install, by a /usr/sbin/policy-rc.d of admit's that asks yours, if you have one, about every other service and is replaced by yours again after
+  run:
+    $ set -e
+    $ if [ -z "${paisans_hold_locked:-}" ]; then
+    $   exec 8>/run/paisans-docker-hold.lock
+    $   flock -n 8 || { echo 'another paisans site admit is installing Docker on this host now (it holds /run/paisans-docker-hold.lock). Run again once it is done'; exit 1; }
+    $   paisans_hold_locked=1
+    $ fi
+    $ confirm_claims() {
+    $   f=/etc/paisans/installed
+    $   { [ -f "$f" ] && [ ! -L "$f" ]; } || return 0
+    $   ok=
+    $   for p in $(awk 'NF == 2 && $1 == "installing" && $2 ~ /^[a-z0-9][a-z0-9.+-]+$/ { print $2 }' "$f"); do
+    $     s=$(dpkg-query -W -f='${Status}' "$p" 2>/dev/null) || continue
+    $     case $s in *" not-installed"|*" config-files"|"") ;; *) ok="$ok $p" ;; esac
+    $   done
+    $   [ -n "$ok" ] || return 0
+    $   t=$(mktemp "$f.XXXXXX") || return 1
+    $   if awk -v ok="$ok " 'NF == 2 && $1 == "installing" && index(ok, " " $2 " ") { print "package " $2; next } { print }' "$f" > "$t" && chmod 644 "$t"; then
+    $     mv -f "$t" "$f"
+    $   else
+    $     rm -f "$t"
+    $     return 1
+    $   fi
+    $ }
+    $ trap confirm_claims EXIT
+    $ trap 'exit 1' HUP INT TERM
+    $ set -e
+    $ if [ -z "${paisans_hold_locked:-}" ]; then
+    $   exec 8>/run/paisans-docker-hold.lock
+    $   flock -n 8 || { echo 'another paisans site admit is installing Docker on this host now (it holds /run/paisans-docker-hold.lock). Run again once it is done'; exit 1; }
+    $   paisans_hold_locked=1
+    $ fi
+    $ release_docker_hold() {
+    $   rm -f /usr/sbin/.policy-rc.d.paisans-tmp /usr/sbin/.policy-rc.d.paisans-owner-tmp
+    $   if [ -f /usr/sbin/policy-rc.d ] && [ ! -L /usr/sbin/policy-rc.d ] && grep -qxF '# Written by paisans site admit while it installs Docker, and removed after.' /usr/sbin/policy-rc.d; then
+    $     if [ -e /usr/sbin/policy-rc.d.paisans-owner ] || [ -L /usr/sbin/policy-rc.d.paisans-owner ]; then
+    $       mv -f /usr/sbin/policy-rc.d.paisans-owner /usr/sbin/policy-rc.d
+    $     else
+    $       rm -f /usr/sbin/policy-rc.d
+    $     fi
+    $   elif [ -e /usr/sbin/policy-rc.d.paisans-owner ] || [ -L /usr/sbin/policy-rc.d.paisans-owner ]; then
+    $     if [ ! -e /usr/sbin/policy-rc.d ] && [ ! -L /usr/sbin/policy-rc.d ]; then
+    $       mv -f /usr/sbin/policy-rc.d.paisans-owner /usr/sbin/policy-rc.d
+    $     elif [ -L /usr/sbin/policy-rc.d ] && [ -L /usr/sbin/policy-rc.d.paisans-owner ] && [ "$(readlink /usr/sbin/policy-rc.d)" = "$(readlink /usr/sbin/policy-rc.d.paisans-owner)" ]; then
+    $       rm -f /usr/sbin/policy-rc.d.paisans-owner
+    $     elif [ ! -L /usr/sbin/policy-rc.d ] && [ ! -L /usr/sbin/policy-rc.d.paisans-owner ] && cmp -s /usr/sbin/policy-rc.d /usr/sbin/policy-rc.d.paisans-owner; then
+    $       rm -f /usr/sbin/policy-rc.d.paisans-owner
+    $     fi
+    $   fi
+    $ }
+    $ release_docker_hold
+    $ if [ -e /usr/sbin/policy-rc.d.paisans-owner ] || [ -L /usr/sbin/policy-rc.d.paisans-owner ]; then
+    $   echo '/usr/sbin/policy-rc.d.paisans-owner is there beside a /usr/sbin/policy-rc.d that differs from it, and admit copies your own policy-rc.d to that name while it installs Docker. Keep the one you want as /usr/sbin/policy-rc.d, remove the other, and admit again'
+    $   exit 1
+    $ fi
+    $ cat > /usr/sbin/.policy-rc.d.paisans-tmp <<'POLICY'
+    $ #!/bin/sh
+    $ # Written by paisans site admit while it installs Docker, and removed after.
+    $ for a in "$@"; do
+    $   case $a in containerd|containerd.service|docker|docker.service|docker.socket) exit 101 ;; esac
+    $ done
+    $ if [ -x /usr/sbin/policy-rc.d.paisans-owner ]; then exec /usr/sbin/policy-rc.d.paisans-owner "$@"; fi
+    $ exit 0
+    $ POLICY
+    $ chmod 755 /usr/sbin/.policy-rc.d.paisans-tmp
+    $ if [ -e /usr/sbin/policy-rc.d ] || [ -L /usr/sbin/policy-rc.d ]; then
+    $   cp -pP /usr/sbin/policy-rc.d /usr/sbin/.policy-rc.d.paisans-owner-tmp
+    $   mv -f /usr/sbin/.policy-rc.d.paisans-owner-tmp /usr/sbin/policy-rc.d.paisans-owner
+    $ fi
+    $ wait_for_dpkg() {
+    $   n=0
+    $   while pgrep -x dpkg >/dev/null 2>&1; do
+    $     [ "$n" -lt 600 ] || return 1
+    $     sleep 1
+    $     n=$((n+1))
+    $   done
+    $ }
+    $ trap 'paisans_status=$?; if ! wait_for_dpkg; then echo "dpkg is still running after ten minutes, so the hold on the Docker daemons stays in place and its units are not yet disabled. Once dpkg is done, run site admit again, or site evict, which puts the hold back"; exit 1; fi; if command -v confirm_claims >/dev/null 2>&1; then confirm_claims || true; fi; if [ "$paisans_status" -ne 0 ]; then systemctl disable docker.socket docker.service containerd.service >/dev/null 2>&1 || true; fi; release_docker_hold; exit "$paisans_status"' EXIT
+    $ trap 'exit 1' HUP INT TERM
+    $ mv -f /usr/sbin/.policy-rc.d.paisans-tmp /usr/sbin/policy-rc.d
+    $ set -e
+    $ export DEBIAN_FRONTEND=noninteractive
+    $ apt-get -o DPkg::Lock::Timeout=300 update 8>&-
+    $ apt-get -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confold install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras uidmap git 8>&-
+    $ apt-get -o DPkg::Lock::Timeout=300 -o Dpkg::Options::=--force-confold install -y --no-install-recommends wireguard-tools 8>&-
+
+step 7: disable the system Docker
+  docker: the deployments run their own rootless daemons, so the system daemons admit installed, which their packages enable, are disabled (docker.socket, docker.service, containerd.service), and were kept from starting while they installed: they never changed forwarding, docker0 or the firewall
+  run:
+    $ systemctl disable --now docker.socket docker.service containerd.service && if ip link show docker0 >/dev/null 2>&1; then echo 'docker0 exists, so the system Docker ran and changed forwarding and the firewall as it started. It is disabled now: reboot the host, which clears what it changed, and admit again'; exit 1; fi
+
+step 8: create user paisans-f2a9
+step 9: skip the mesh until its conf exists
+step 10: start paisans-f2a9's manager after the mesh
+step 11: delegate cgroups to users
+step 12: write the egress table
+step 13: install the egress unit
+step 14: load the egress table
+step 15: enable linger for paisans-f2a9
+step 16: start paisans-f2a9's manager
+step 17: load br_netfilter
+step 18: load br_netfilter at boot
+step 19: write paisans-f2a9's daemon.json
+
+step 20: install paisans-f2a9's rootless Docker
+  daemon: dockerd-rootless-setuptool.sh install --force, as paisans-f2a9, which starts the daemon reading its daemon.json; --force because a system daemon may run beside it
+  provisional: run once the user exists
+  run:
+    $ runuser -u paisans-f2a9 -- env -i HOME='/home/paisans-f2a9' PATH=/usr/bin:/bin:/usr/sbin:/sbin XDG_RUNTIME_DIR=/run/user/<uid> DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/<uid>/bus DOCKER_HOST=unix:///run/user/<uid>/docker.sock sh -c 'dockerd-rootless-setuptool.sh install --force'
+
+step 21: create /srv/paisans
+step 22: create /srv/paisans/f2a9
+step 23: create /etc/wireguard
+step 24: create /usr/local/libexec/paisans
+step 25: install the WireGuard helper
+step 26: install the helper's sudoers line
+step 27: allow 22/tcp
+step 28: allow 51820/udp
+step 29: allow all inbound on psns-f2a9
+step 30: write the admission record
+step 31: add the operators' keys
+
+present: package: nftables installed
+present: apparmor: rootlesskit's profile is loaded
+present: egress: the host's on-link IPv6 prefixes, dropped: 2001:db8:1::/64
+present: br_netfilter: nf_tables, which the host's iptables uses, is loaded
+present: daemon: /home (ext2/ext3) has 42.9 GB free
+present: mesh: nothing on this host overlaps 10.44.0.0/24
+present: firewall: ufw active, its default policy left to the owner
+present: forwarding: not needed, this site has no endpoint

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployrecord"
@@ -18,23 +19,30 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
-// initFake is one site as init sees it: its registry, its networks, or no
+// initFake is one site as init sees it: its files, its networks, or no
 // answer at all.
 type initFake struct {
-	name     string
-	registry string
-	routes   string
-	down     bool
+	name   string
+	routes string
+	down   bool
+	// broken is what ReadFile fails with on a host that answered.
+	broken error
 	// files are answered to ReadFile by path.
 	files map[string]string
+	// unadmitted is a host whose owner has not admitted the deployment: it
+	// refuses the deployment's login.
+	unadmitted bool
+	// admission is what its admission check fails with on a host that
+	// answers, Eg: a record that does not match.
+	admission error
 }
 
 func (f *initFake) Run(command string) (string, error) {
 	if f.down {
 		return "ssh: connect to host " + f.name + " port 22: Operation timed out", errors.New("exit status 255")
 	}
-	if out, ok := userRead(f.files, command); ok {
-		return out, nil
+	if f.unadmitted {
+		return "", fmt.Errorf("ssh: %w", apply.ErrLoginNotAdmitted)
 	}
 	switch command {
 	case mesh.RouteCommand:
@@ -44,6 +52,8 @@ func (f *initFake) Run(command string) (string, error) {
 		return `[{"dst":"default","dev":"eth0"}]`, nil
 	case mesh.AddrCommand, mesh.NetworksCommand:
 		return "[]", nil
+	case mesh.UserDaemonCommand:
+		return "absent\n", nil
 	}
 	return "", errors.New("unexpected command " + command)
 }
@@ -52,11 +62,14 @@ func (f *initFake) ReadFile(path string) (string, bool, error) {
 	if f.down {
 		return "", false, f.unreachable()
 	}
+	if f.unadmitted {
+		return "", false, fmt.Errorf("ssh: %w", apply.ErrLoginNotAdmitted)
+	}
+	if f.broken != nil {
+		return "", false, f.broken
+	}
 	if c, ok := f.files[path]; ok && c != "" {
 		return c, true, nil
-	}
-	if path == registry.Path && f.registry != "" {
-		return f.registry, true, nil
 	}
 	return "", false, nil
 }
@@ -78,18 +91,6 @@ const (
 	otherID   = "0c1d2e3f-4a5b-4c6d-8e7f-8091a2b3c4d5"
 )
 
-// registryHolding is a registry with one deployment on it.
-func registryHolding(t *testing.T, id, token, subnet string) string {
-	t.Helper()
-	data, err := registry.Encode(registry.Registry{Version: registry.Version, Deployments: map[string]registry.Entry{
-		id: {Token: token, Root: "/srv/paisans/" + token, Domain: "example.net", Site: "home-a", Roles: "apps", ClaimedAt: "2026-10-01T00:00:00Z", Interface: "psns-" + token, Subnet: subnet},
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(data)
-}
-
 // initWorld copies the example declaration into a directory of its own and
 // points init at fakes for its sites and at random.
 func initWorld(t *testing.T, edit func(string) string, sites map[string]*initFake, random []byte) (string, *ui.Recorder) {
@@ -106,8 +107,8 @@ func initWorld(t *testing.T, edit func(string) string, sites map[string]*initFak
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	savedHost, savedRandom := initHost, meshRandom
-	initHost = func(_ string, site config.Site, _ bool) registry.Runner {
+	savedHost, savedRandom, savedAdmission := initHost, meshRandom, admissionForSite
+	initHost = func(_ string, site config.Site) registry.Runner {
 		for _, f := range sites {
 			if f.name == site.SSH.Host {
 				return f
@@ -117,7 +118,21 @@ func initWorld(t *testing.T, edit func(string) string, sites map[string]*initFak
 		return nil
 	}
 	meshRandom = bytes.NewReader(random)
-	t.Cleanup(func() { initHost, meshRandom = savedHost, savedRandom })
+	// A fake answers its admission as it answers everything else: a record
+	// for an admitted host, none for one that is not, and the fake's own
+	// failure for one that does not answer.
+	admissionForSite = func(h admission.Reader, _ *config.Config, _ string) (admission.Record, error) {
+		f := h.(*initFake)
+		switch {
+		case f.down, f.unadmitted:
+			_, _, err := f.ReadFile("/etc/paisans/admitted.json")
+			return admission.Record{}, err
+		case f.admission != nil:
+			return admission.Record{}, f.admission
+		}
+		return admission.Record{}, nil
+	}
+	t.Cleanup(func() { initHost, meshRandom, admissionForSite = savedHost, savedRandom, savedAdmission })
 	// Every init makes an age key under the example id, and the package's
 	// keystore outlives the test: put its items back as they were.
 	if m, ok := config.AgeKeystore.(*keystore.Memory); ok {
@@ -142,59 +157,47 @@ func fakeSites() map[string]*initFake {
 func runInitQuietly(t *testing.T, path string) error {
 	t.Helper()
 	var err error
-	captureStdout(t, func() { err = runInit([]string{"--config", path, "--sudo=false"}) })
+	captureStdout(t, func() { err = runInit([]string{"--config", path}) })
 	return err
 }
 
-// The declared subnet overlaps another deployment's mesh on home-a, so init
-// rolls; the first roll lands inside a route on vm and the second is clear.
-// mesh.subnet and every address move, host numbers and every comment stay,
-// and the output says why.
-func TestInitRollsASubnetClearOfEveryHost(t *testing.T) {
+// An admitted host's subnet is the one site admit built its firewall and
+// Docker address pools around, so a subnet that overlaps something there is
+// not rolled: init refuses, naming what it overlaps, with nothing written.
+func TestInitRefusesToRollAnAdmittedSubnet(t *testing.T) {
 	sites := fakeSites()
-	sites["home-a"].registry = registryHolding(t, otherID, "0c1d", "10.44.0.0/24")
-	sites["vm"].routes = `[{"dst":"10.1.0.0/16","dev":"tun0"}]`
-	path, out := initWorld(t, nil, sites, []byte{1, 2, 212, 37})
+	sites["home-a"].routes = `[{"dst":"10.44.0.0/24","dev":"psns-0c1d"}]`
+	path, _ := initWorld(t, nil, sites, []byte{212, 37})
 	before, _ := os.ReadFile(path)
-
-	if err := runInitQuietly(t, path); err != nil {
-		t.Fatal(err)
+	err := runInitQuietly(t, path)
+	hint, explain := ui.Describe(err)
+	if err == nil || !strings.Contains(hint, "is not rolled") || !strings.Contains(explain, "evict") {
+		t.Fatalf("init = %v, want a refusal to roll an admitted subnet", err)
+	}
+	if !strings.Contains(fmt.Sprintf("%+v", errors.Unwrap(err)), "route 10.44.0.0/24 dev psns-0c1d on home-a") {
+		t.Errorf("the refusal does not name what the subnet overlaps: %v", errors.Unwrap(err))
 	}
 	after, _ := os.ReadFile(path)
-	want := strings.NewReplacer(
-		"subnet: 10.44.0.0/24", "subnet: 10.212.37.0/24",
-		"address: 10.44.0.1 ", "address: 10.212.37.1 ",
-		"address: 10.44.0.2\n", "address: 10.212.37.2\n",
-		"address: 10.44.0.3\n", "address: 10.212.37.3\n",
-		"address: 10.44.0.4\n", "address: 10.212.37.4\n",
-	).Replace(string(before))
-	if string(after) != want {
-		t.Errorf("init wrote:\n%s", after)
+	if !bytes.Equal(before, after) {
+		t.Error("init changed paisans-stack.yaml although it refused")
 	}
-	for _, line := range []string{
-		"rolled mesh.subnet 10.212.37.0/24 (10.44.0.0/24 overlapped deployment " + otherID + " (example.net)'s mesh 10.44.0.0/24 on home-a; 10.1.2.0/24 overlapped route 10.1.0.0/16 dev tun0 on vm)",
-		"sites.home-a.address 10.44.0.1 -> 10.212.37.1",
-	} {
-		if !strings.Contains(out.Lines(), line) {
-			t.Errorf("init did not say %q:\n%s", line, out.Lines())
-		}
-	}
-	cfg, err := config.Load(path)
-	if err != nil || cfg.Mesh.Subnet != "10.212.37.0/24" {
-		t.Fatalf("the rewritten file loads as %v, %v", cfg, err)
-	}
-	if _, err := os.Stat(filepath.Join(filepath.Dir(path), "secrets.enc.yaml")); err != nil {
-		t.Errorf("secrets were not generated after the roll: %v", err)
+	if _, err := os.Stat(filepath.Join(filepath.Dir(path), "secrets.enc.yaml")); err == nil {
+		t.Error("init generated secrets although it refused")
 	}
 }
 
-// With no subnet declared, init rolls one and adds it.
+// With no subnet declared, and no site admitted yet to have one, init rolls
+// one and adds it, moving each address into it.
 func TestInitAddsAMissingSubnet(t *testing.T) {
+	sites := fakeSites()
+	for _, f := range sites {
+		f.unadmitted = true
+	}
 	path, out := initWorld(t, func(s string) string {
 		i := strings.Index(s, "mesh:\n")
 		j := strings.Index(s, "  subnet: 10.44.0.0/24\n")
 		return s[:i] + s[j+len("  subnet: 10.44.0.0/24\n"):]
-	}, fakeSites(), []byte{212, 37})
+	}, sites, []byte{212, 37})
 	if err := runInitQuietly(t, path); err != nil {
 		t.Fatal(err)
 	}
@@ -275,15 +278,19 @@ func TestInitSaysWhichSiteItIsReading(t *testing.T) {
 	}
 }
 
-// Once any site's registry records this deployment, its subnet is deployed:
+// Once any site holds this deployment's manifest, its subnet is deployed:
 // init leaves it alone even where it now overlaps something, and an
 // unreachable site no longer matters to it.
 func TestInitLeavesADeployedSubnetAlone(t *testing.T) {
 	sites := fakeSites()
-	sites["vm"].registry = registryHolding(t, exampleID, "f2a9", "10.44.0.0/24")
 	sites["home-a"].routes = `[{"dst":"10.44.0.0/16","dev":"eth1"}]`
 	sites["home-b"].down = true
 	path, out := initWorld(t, nil, sites, []byte{212, 37})
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sites["vm"].files = map[string]string{cfg.Deployment().Manifest(): `{"version":1,"files":[]}`}
 	before, _ := os.ReadFile(path)
 	if err := runInitQuietly(t, path); err != nil {
 		t.Fatal(err)
@@ -292,7 +299,7 @@ func TestInitLeavesADeployedSubnetAlone(t *testing.T) {
 	if !bytes.Equal(before, after) {
 		t.Errorf("init changed a deployed subnet:\n%s", after)
 	}
-	if !strings.Contains(out.Lines(), "is deployed (this deployment is on vm)") {
+	if !strings.Contains(out.Lines(), "is deployed (vm holds this deployment's manifest)") {
 		t.Errorf("init did not say the subnet is deployed:\n%s", out.Lines())
 	}
 }
@@ -314,7 +321,7 @@ func TestInitGivesUpAfterMaxRolls(t *testing.T) {
 	}
 }
 
-// apply and host prepare refuse a host where something outside this
+// apply and site prepare refuse a host where something outside this
 // deployment's own interface overlaps the mesh, naming it, and pass one whose
 // only mesh route is their own.
 func TestCheckMeshLive(t *testing.T) {
@@ -331,6 +338,12 @@ func TestCheckMeshLive(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "route 10.44.0.0/23 dev psns-0c1d on home-a") || !strings.Contains(err.Error(), "nothing was changed") {
 		t.Errorf("checkMeshLive = %v, want a refusal naming the other route", err)
 	}
+	// Tailscale keeps its routes in table 52, which the probe reads too.
+	tailscale := &initFake{name: "home-a.local", routes: `[{"dst":"10.44.0.0/16","dev":"tailscale0","table":"52"}]`}
+	err = checkMeshLive(cfg, "home-a", tailscale)
+	if err == nil || !strings.Contains(err.Error(), "route 10.44.0.0/16 dev tailscale0 table 52 on home-a") {
+		t.Errorf("checkMeshLive = %v, want a refusal naming Tailscale's route", err)
+	}
 }
 
 // init reports the subnet decision as one step with its result, each secret
@@ -344,7 +357,7 @@ func TestInitReportsStepsAndWhatIsOwed(t *testing.T) {
 	if !rec.Has("done", "settle mesh subnet") {
 		t.Errorf("no settled subnet step:\n%s", rec.Lines())
 	}
-	if !rec.Has("done", "write secrets") || !rec.Has("detail", "+ ") || !rec.Has("result", "Generated ") {
+	if !rec.Has("done", "write secrets") || !rec.Has("detail", "+ ") || !rec.Has("result", "Next: run `paisans secrets set`.") {
 		t.Errorf("no created secrets:\n%s", rec.Lines())
 	}
 	if !rec.Has("done", "make age key") || rec.Has("warn", "was written in plaintext") {
@@ -354,8 +367,8 @@ func TestInitReportsStepsAndWhatIsOwed(t *testing.T) {
 	if err := runInitQuietly(t, path); err != nil {
 		t.Fatal(err)
 	}
-	if !again.Has("result", "already present") {
-		t.Errorf("a second run does not say nothing was written:\n%s", again.Lines())
+	if again.Has("done", "write secrets") || !again.Has("result", "Next: run `paisans secrets set`.") {
+		t.Errorf("a second run wrote secrets, or does not name what is next:\n%s", again.Lines())
 	}
 }
 
@@ -457,30 +470,20 @@ func TestInitFailsItsWriteStep(t *testing.T) {
 }
 
 // A clash with another paisans deployment's interface names that
-// deployment, from the host's registry when it lists it; a clash with
-// anything else names what holds the subnet. Either way the advice is one
-// line.
+// deployment by its token; a clash with anything else names what holds the
+// subnet. Either way the advice is one line.
 func TestCheckMeshLiveSaysWhoHoldsTheSubnet(t *testing.T) {
 	cfg, err := config.Load(fixtureConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
 	advice := "Remove it if not in use or run paisans init to pick a free subnet."
-	// The other deployment's site name is shown only where it differs from
-	// the site being checked, which the line already names.
-	other := &initFake{name: "home-a.local", routes: `[{"dst":"10.44.0.0/23","dev":"psns-0c1d"}]`, registry: registryHolding(t, otherID, "0c1d", "10.44.0.0/23")}
-	var p *ui.Problem
-	if err := checkMeshLive(cfg, "home-b", other); !errors.As(err, &p) || p.Hint != "mesh subnet 10.44.0.0/24 is in use by paisans deployment 0c1d (example.net, as site home-a)" {
-		t.Errorf("a different site name: %#v", err)
-	}
 	for _, c := range []struct {
 		name string
 		host *initFake
 		hint string
 	}{
-		{"paisans, registered", &initFake{name: "home-a.local", routes: `[{"dst":"10.44.0.0/23","dev":"psns-0c1d"}]`, registry: registryHolding(t, otherID, "0c1d", "10.44.0.0/23")},
-			"mesh subnet 10.44.0.0/24 is in use by paisans deployment 0c1d (example.net)"},
-		{"paisans, unregistered", &initFake{name: "home-a.local", routes: `[{"dst":"10.44.0.0/23","dev":"psns-0c1d"}]`},
+		{"paisans", &initFake{name: "home-a.local", routes: `[{"dst":"10.44.0.0/23","dev":"psns-0c1d"}]`},
 			"mesh subnet 10.44.0.0/24 is in use by paisans deployment 0c1d"},
 		{"something else", &initFake{name: "home-a.local", routes: `[{"dst":"10.44.0.0/23","dev":"tun0"}]`},
 			"mesh subnet 10.44.0.0/24 is in use (route 10.44.0.0/23 dev tun0 on home-a)"},
@@ -490,6 +493,127 @@ func TestCheckMeshLiveSaysWhoHoldsTheSubnet(t *testing.T) {
 		if !errors.As(err, &p) || p.Hint != c.hint || p.Explain != advice {
 			t.Errorf("%s: %#v", c.name, err)
 		}
+	}
+}
+
+// Each site's admission is its own step: ✓ for an admitted host, ○ for one
+// that has not admitted the deployment yet. init skips that one, with a
+// warning saying how to have it admitted, and settles the subnet and writes
+// the secrets from the others; site admit checks the subnet against it as
+// root.
+func TestInitSkipsAHostNotYetAdmitted(t *testing.T) {
+	sites := fakeSites()
+	sites["home-b"].unadmitted = true
+	path, rec := initWorld(t, nil, sites, nil)
+	if err := runInitQuietly(t, path); err != nil {
+		t.Fatal(err)
+	}
+	for _, site := range []string{"health", "home-a", "vm"} {
+		if !rec.Has("done", "check "+site+"'s admission") {
+			t.Errorf("%s is not marked admitted:\n%s", site, rec.Lines())
+		}
+	}
+	if !rec.Has("pending", "check home-b's admission") {
+		t.Errorf("home-b is not marked as skipped:\n%s", rec.Lines())
+	}
+	if !rec.Has("warn", "home-b has not admitted this deployment yet, so init skipped it") {
+		t.Errorf("no warning for home-b:\n%s", rec.Lines())
+	}
+	if rec.Has("progress", "read home-b") || rec.Has("progress", "read the networks on home-b") {
+		t.Errorf("init read home-b although it is not admitted:\n%s", rec.Lines())
+	}
+	if !rec.Has("detail", "overlaps nothing on health, home-a, vm; kept") {
+		t.Errorf("the subnet was not checked against the admitted sites alone:\n%s", rec.Lines())
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(path), "secrets.enc.yaml")); err != nil {
+		t.Errorf("init wrote no secrets although only home-b is unadmitted: %v", err)
+	}
+}
+
+// With no site admitted yet, as after paisans create, init still writes the
+// secrets: it keeps the declared subnet for site admit to check on each.
+func TestInitBeforeAnyAdmission(t *testing.T) {
+	sites := fakeSites()
+	for _, f := range sites {
+		f.unadmitted = true
+	}
+	path, rec := initWorld(t, nil, sites, nil)
+	if err := runInitQuietly(t, path); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Has("done", "'s admission") {
+		t.Errorf("a site is marked admitted:\n%s", rec.Lines())
+	}
+	if !rec.Has("detail", "no site has admitted this deployment yet") {
+		t.Errorf("init did not say the subnet is left to site admit:\n%s", rec.Lines())
+	}
+	// A gateway not admitted holds no deployment record, and is not asked.
+	if rec.Has("warn", "could not read the deployment record") {
+		t.Errorf("init asked an unadmitted gateway for its record:\n%s", rec.Lines())
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(path), "secrets.enc.yaml")); err != nil {
+		t.Errorf("init wrote no secrets: %v", err)
+	}
+}
+
+// A site whose admission does not cover it is still read, since the
+// deployment's user logs in there, and warned about, since apply refuses it
+// until its owner admits it again; an unreadable record says so.
+func TestInitWarnsAboutAnAdmissionThatDoesNotMatch(t *testing.T) {
+	sites := fakeSites()
+	sites["vm"].admission = &admission.SiteError{Site: "vm", Problems: []string{"the host opened ssh port 22, and the site's is 2222"}}
+	sites["health"].admission = &admission.Error{Problems: []string{"not JSON"}}
+	path, rec := initWorld(t, nil, sites, nil)
+	if err := runInitQuietly(t, path); err != nil {
+		t.Fatal(err)
+	}
+	if !rec.Has("warned", "check vm's admission") || !rec.Has("warn", "vm's admission does not match") {
+		t.Errorf("vm's mismatch is not marked and warned:\n%s", rec.Lines())
+	}
+	if !rec.Has("warned", "check health's admission") || !rec.Has("warn", "health's admission record cannot be read") {
+		t.Errorf("health's unreadable record is not marked and warned:\n%s", rec.Lines())
+	}
+	if !rec.Has("progress", "read the networks on vm") || !rec.Has("progress", "read the networks on health") {
+		t.Errorf("a site admitted with problems was not read:\n%s", rec.Lines())
+	}
+}
+
+// A login refused as a user the site names is the operator's key problem,
+// not a host that has not admitted the deployment: init cannot ask it, and
+// refuses with nothing written.
+func TestInitRefusesWhenASiteRefusesTheOperatorsKey(t *testing.T) {
+	sites := fakeSites()
+	sites["vm"].admission = fmt.Errorf("ssh: %w", apply.ErrLoginRefused)
+	path, rec := initWorld(t, nil, sites, nil)
+	err := runInitQuietly(t, path)
+	if hint, _ := ui.Describe(err); !strings.Contains(hint, "could not read every site") {
+		t.Fatalf("init = %v, want a refusal naming vm", err)
+	}
+	if !rec.Has("fail", "check vm's admission") || rec.Has("pending", "check vm's admission") {
+		t.Errorf("vm is not marked as failed:\n%s", rec.Lines())
+	}
+}
+
+// One admitted site whose manifest cannot be read does not refuse init when
+// another holds the manifest: the subnet is deployed, and is kept.
+func TestInitKeepsADeployedSubnetPastAFailedRead(t *testing.T) {
+	sites := fakeSites()
+	sites["home-a"].broken = errors.New("permission denied")
+	path, out := initWorld(t, nil, sites, nil)
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sites["vm"].files = map[string]string{cfg.Deployment().Manifest(): `{"version":1,"files":[]}`}
+	if err := runInitQuietly(t, path); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.Lines(), "is deployed (vm holds this deployment's manifest)") {
+		t.Errorf("init did not keep the deployed subnet:\n%s", out.Lines())
+	}
+	sites["vm"].files = nil
+	if err := runInitQuietly(t, path); err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Errorf("with no manifest anywhere, init = %v, want the failed read", err)
 	}
 }
 
@@ -506,6 +630,9 @@ func TestInitNamesPendingClientsWithoutWarning(t *testing.T) {
 	}
 	if !rec.Has("warn", "Secret for external.acme_dns_token needs to be set") {
 		t.Errorf("an owed secret is no longer warned about:\n%s", rec.Lines())
+	}
+	if !rec.Has("result", "Next: run `paisans secrets set`.") {
+		t.Errorf("init does not say how to set what is owed:\n%s", rec.Lines())
 	}
 	want := "7 sign in clients (account, blog, chat, gate, health, talk, wiki) are created by apply"
 	if !rec.Has("pending", want) {

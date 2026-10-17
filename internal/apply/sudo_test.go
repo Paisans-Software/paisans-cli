@@ -329,7 +329,7 @@ func TestSudoRefusalsAreProblems(t *testing.T) {
 		{"no terminal", &sudoHost{password: "hunter2"}, nil, "sudo on box needs a password and there is no terminal", "NOPASSWD"},
 		{"wrong password", &sudoHost{password: "hunter2"}, (&prompter{answer: "wrong"}).prompt, "sudo on box did not accept the password", "not tried again"},
 		{"no password", &sudoHost{password: "hunter2"}, (&prompter{answer: ""}).prompt, "no sudo password was given for box", "Run again"},
-		{"not a sudoer", &sudoHost{refuse: "ubuntu is not in the sudoers file.\n"}, (&prompter{answer: "x"}).prompt, "sudo on box refused the ssh user", "not in the sudoers file"},
+		{"not a sudoer", &sudoHost{refuse: "ubuntu is not in the sudoers file.\n"}, (&prompter{answer: "x"}).prompt, "sudo on box refused the ssh user", "ubuntu is not in the sudoers file.\nGive the ssh user sudo on the host, or name a login that has it with --ssh."},
 	} {
 		c.host.install(t)
 		_, err := sudoTransport(apply.NewSudoAuth(c.prompt)).Run("true")
@@ -343,71 +343,6 @@ func TestSudoRefusalsAreProblems(t *testing.T) {
 		if strings.Contains(err.Error(), "hunter2") || c.name == "wrong password" && strings.Contains(err.Error(), "wrong") {
 			t.Errorf("%s: the error carries a password: %v", c.name, err)
 		}
-	}
-}
-
-// PrepareSudo settles sudo before any command: the probe and, where sudo
-// wants one, the password are asked then, and the commands after run on the
-// answer without asking again.
-func TestPrepareSudoAsksBeforeTheFirstCommand(t *testing.T) {
-	h := &sudoHost{password: "hunter2"}
-	h.install(t)
-	p := &prompter{answer: "hunter2"}
-	tr := sudoTransport(apply.NewSudoAuth(p.prompt))
-
-	if err := apply.PrepareSudo(tr); err != nil {
-		t.Fatal(err)
-	}
-	if len(p.asked) != 1 {
-		t.Fatalf("asked %d times by PrepareSudo, want once: %q", len(p.asked), p.asked)
-	}
-	if want := []string{"sudo -n true", "uname -n", "sudo -k -S -p '' sh -c 'true'"}; !equalPrefix(h.commands, want) || len(h.commands) != len(want) {
-		t.Errorf("PrepareSudo ran %q, want %q", h.commands, want)
-	}
-	if _, err := tr.Run("echo one"); err != nil {
-		t.Fatal(err)
-	}
-	if len(p.asked) != 1 {
-		t.Errorf("asked again after PrepareSudo: %q", p.asked)
-	}
-}
-
-// A host whose sudo needs no password is settled by PrepareSudo with the
-// probe alone, and nobody is asked.
-func TestPrepareSudoNeverAsksAHostThatWantsNoPassword(t *testing.T) {
-	h := &sudoHost{}
-	h.install(t)
-	p := &prompter{answer: "unused"}
-	tr := sudoTransport(apply.NewSudoAuth(p.prompt))
-	if err := apply.PrepareSudo(tr); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tr.Run("echo one"); err != nil {
-		t.Fatal(err)
-	}
-	if len(p.asked) != 0 {
-		t.Errorf("asked on a host that wants no password: %q", p.asked)
-	}
-	if want := []string{"sudo -n true", "sudo sh -c 'echo one'"}; !equalPrefix(h.commands, want) || len(h.commands) != len(want) {
-		t.Errorf("ran %q, want %q", h.commands, want)
-	}
-}
-
-// A password sudo does not accept is ErrSudo from PrepareSudo, and is kept:
-// the command after it is refused without asking a second time.
-func TestPrepareSudoKeepsARefusedPassword(t *testing.T) {
-	h := &sudoHost{password: "hunter2"}
-	h.install(t)
-	p := &prompter{answer: "wrong"}
-	tr := sudoTransport(apply.NewSudoAuth(p.prompt))
-	if err := apply.PrepareSudo(tr); !errors.Is(err, apply.ErrSudo) {
-		t.Fatalf("want ErrSudo, got %v", err)
-	}
-	if _, err := tr.Run("echo one"); !errors.Is(err, apply.ErrSudo) {
-		t.Fatalf("want ErrSudo again, got %v", err)
-	}
-	if len(p.asked) != 1 {
-		t.Errorf("asked %d times, want once: %q", len(p.asked), p.asked)
 	}
 }
 
@@ -426,48 +361,5 @@ func TestAnUnreachableProbeSaysSoOnce(t *testing.T) {
 	}
 	if n := strings.Count(msg, "cannot be reached over ssh"); n != 1 {
 		t.Errorf("the host is said to be unreachable %d times, want once:\n%s", n, msg)
-	}
-}
-
-// A host PrepareSudo cannot reach is ErrUnreachable and concludes nothing:
-// the first command that reaches it asks then.
-func TestPrepareSudoOnAnUnreachableHostConcludesNothing(t *testing.T) {
-	s := &sshScript{answers: []sshAnswer{{sshTimeout, 255}, {sshTimeout, 255}, {sshTimeout, 255}, {"", 0}}}
-	s.install(t)
-	p := &prompter{answer: "x"}
-	tr := sudoTransport(apply.NewSudoAuth(p.prompt))
-	if err := apply.PrepareSudo(tr); !errors.Is(err, apply.ErrUnreachable) {
-		t.Fatalf("want ErrUnreachable, got %v", err)
-	}
-	if errors.Is(apply.PrepareSudo(tr), apply.ErrSudo) {
-		t.Error("an unreachable host was kept as refused")
-	}
-	if s.calls != 4 {
-		t.Errorf("the second PrepareSudo did not probe again: %d calls", s.calls)
-	}
-}
-
-// A transport that does not run through sudo, or has nothing to ask with,
-// has nothing to settle: PrepareSudo reaches no host.
-func TestPrepareSudoWithoutSudoReachesNoHost(t *testing.T) {
-	h := &sudoHost{password: "hunter2"}
-	h.install(t)
-	for _, tr := range []apply.Transport{
-		apply.SSHTransport{Destination: "box"},
-		apply.SSHTransport{Destination: "box", Sudo: true},
-		apply.SSHTransport{Destination: "box", Auth: apply.NewSudoAuth(nil)},
-	} {
-		if apply.SettlesSudo(tr) {
-			t.Errorf("%+v: reported as having sudo to settle", tr)
-		}
-		if err := apply.PrepareSudo(tr); err != nil {
-			t.Errorf("%+v: %v", tr, err)
-		}
-	}
-	if !apply.SettlesSudo(sudoTransport(apply.NewSudoAuth(nil))) {
-		t.Error("a transport with sudo and an Auth is not reported as having sudo to settle")
-	}
-	if len(h.commands) != 0 {
-		t.Errorf("reached the host: %q", h.commands)
 	}
 }

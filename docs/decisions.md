@@ -2548,7 +2548,8 @@ Founder decision. The design is
   members of the Pocket ID group `admins`. Every operator is a community
   admin; a community admin is not an operator.
 * `validate` refuses fewer than two operators with a key on every site that
-  runs Pocket ID.
+  runs Pocket ID (one is a warning from 2026-10-17, see *One operator is a
+  warning, not a refusal*).
 * The `pocket-id` app declares `management`, `paisans` or `pocket-id`,
   required and never defaulted. Under `paisans` the account service manages
   signup, bans and recovery, an account app and mail are required, the
@@ -2962,3 +2963,317 @@ decides which one is right.
   short of memory, for a process that already runs and holds the state.
 * **Drift making the container unhealthy.** Not chosen: `apply`'s health gate
   would then fail an `apply` that left a drifted bootstrap running.
+
+## 2026-10-15: A removal that keeps data keeps the registry entry
+
+Founder decision. It amends `docs/specs/2026-10-10-remove-without-config.md`,
+which left a deployment with no registry entry out of `--id`'s scope.
+
+### What was decided
+
+* A host stage of `site remove` that keeps data, files under
+  `/srv/paisans/<token>` that apply did not write or named volumes, because
+  `--delete-data` was not given, keeps the deployment's registry entry,
+  marked `"kept": "data"`, instead of deleting it. A host with no entry gets
+  one.
+* A later run with `--delete-data`, by `--id` or with a configuration,
+  deletes the data and then the entry. A later run without it leaves the
+  entry as it is.
+* `host deployments` shows the entry as `data kept`, with the command that
+  deletes it. A claim by the same id writes the entry without the mark, as
+  for a kept Caddy.
+
+### Why
+
+Every removal that kept data said `--delete-data deletes it`. With no
+configuration that was false: `--id` finds the deployment by its registry
+entry, and the first run had deleted it, so the second was refused with
+`no deployment ... has id or token`, and the data could only be deleted by
+hand. The entry is the proof the host was claimed by that id, and the data is
+still the deployment's, so the claim is not over while the data is there.
+Keeping it also stops another site of the same deployment being deployed
+onto the data unannounced: the claim check names what the removal kept.
+
+## 2026-10-15: `dns init` writes DMARC for send-only names and for hostnames below the registrable domain
+
+Founder decision. It amends *`dns init` publishes the no-mail records* above,
+where a domain with mail had its DMARC policy checked and never written, and
+where the domain's `sp=reject` was taken to cover every hostname.
+
+### What was decided
+
+* Every mail name under `community.domain`, not only the domain itself, has
+  its DMARC policy checked.
+* A mail name with no MX record and no DMARC policy gets
+  `v=DMARC1; p=reject; sp=reject;` written at its `_dmarc`. An existing
+  policy, however weak, is still a note and never replaced; a missing one at
+  a name with an MX record is still a note. `dns prune` never deletes it.
+* When `community.domain` is below its registrable domain under the public
+  suffix list, every hostname that gets an address record also gets the
+  lockdown DMARC policy at its own `_dmarc`, except one that is itself a
+  registrable domain. `dns prune` treats it like the hostname's SPF.
+* The registrable domain above `community.domain` has its DMARC policy
+  checked and warned about, never written, and not checked at all when the
+  DNS provider does not hold it.
+
+### Why
+
+A name with no MX receives no mail, so its mail is a relay sending in its
+name, and nobody runs a mail service there whose policy `dns init` would be
+overriding. The note asked the operator to write by hand a record the toolkit
+could write itself. Relaxed alignment is what keeps the deployment's own mail
+delivered: a relay commonly signs with a subdomain it has verified, which
+relaxed alignment accepts for any name under the same registrable domain.
+Prune keeps it because the deployment's mail depends on it, and removing a
+reject policy only weakens the name.
+
+A receiver following RFC 7489 that finds no policy at a name's own `_dmarc`
+looks at the registrable domain, never at the names between. A staging
+deployment at `staging.example.org` therefore had its hostnames governed by
+`example.org`'s policy, which the toolkit neither writes nor checked, and
+its own `sp=reject` reached none of them. A record per hostname is within the
+names the toolkit already writes SPF at. The registrable domain is not: it
+holds names other services send from, and a missing MX there says nothing
+about them, so a reject policy written there could refuse their mail.
+
+### What was weighed
+
+* **Writing the registrable domain's policy when it has no MX.** Not chosen:
+  the toolkit cannot see which names under it send mail.
+* **The zone apex as the registrable domain.** Not chosen: a delegated
+  subzone's apex is not a registrable domain, and receivers use the public
+  suffix list.
+* **Strict alignment for a send-only name.** Not chosen: a relay signing as
+  a sibling name would have the deployment's own mail rejected.
+
+### What was run
+
+`go build ./... && go vet ./... && go test ./...`; the new tests in
+`internal/dns/mail_test.go` were checked to fail before the change.
+
+## 2026-10-15: An operator overrides the infrastructure stack's images
+
+Founder decision, 2026-10-15. Spec: `docs/specs/2026-10-15-infra-image-overrides.md`.
+
+### What was decided
+
+* `infra.images` (etcd, haproxy, garage, heartbeat) and
+  `infra.postgres.<major>.spilo` override the core catalog foundation's
+  images, with `apps.<name>.images`' semantics.
+* Spilo's override is keyed by Postgres major, so a build of one major never
+  follows the cluster onto another, and any provider works.
+* An override is always reviewed at apply.
+* `paisans images` lists each site's builds and what would move; an override
+  behind the release it replaced is a warning.
+
+### Why
+
+A security fix outside a foundation track waited for a core catalog release,
+and an operator had nothing to write that moved the infrastructure sooner.
+
+### What was weighed
+
+* **One key per subsystem** (`etcd.image`, `storage.garage.image`, ...): next
+  to related settings, but scattered, with no one place to audit.
+* **An operator-side overlay of `foundation.yaml`:** complete, but a second
+  path beside `apps.<name>.images` and `acme.image` for the same images.
+* **One flat `infra.images.spilo`, checked by reading the major from the
+  repository name:** works for Zalando's naming only.
+* **An override for a pinned app's own Postgres:** left out.
+* **The stale-override check in validate:** validate reads the file alone and
+  reaches no registry.
+
+## 2026-10-16: `host admit` enables ufw when the owner says so
+
+Founder decision, 2026-10-16. Spec: `docs/specs/2026-10-15-rootless-and-host-admit.md`, step 9.
+
+### What was decided
+
+* With `--enable-ufw`, or a yes at a terminal, admit enables an installed,
+  inactive ufw: an allow for every TCP port sshd listens on, tagged
+  `paisans: ssh`, after the deployment's own rules; a 10 minute
+  `systemd-run` timer that runs `ufw disable`; `ufw --force enable`; and the
+  timer stopped once a new SSH login gets through.
+* Without it, admit refuses, naming `--enable-ufw` first, then the commands
+  that enable ufw by hand, numbered, every allow before the enable.
+* Admit does not enable ufw while it holds any deny or reject rule of the
+  owner's, in any form, nor with `IPV6` other than `yes` in
+  `/etc/default/ufw` while sshd listens on IPv6; the refusal says why, and
+  no question is asked.
+* Evict never disables ufw and never removes a `paisans: ssh` allow.
+
+### Why
+
+Admit used to refuse an inactive ufw and tell the owner to allow their SSH
+port and run `sudo ufw enable`. An owner who ran only the enable was locked
+out of SSH. Allowing the ports sshd actually listens on, with a fallback that
+turns ufw off again, takes the lockout out of the owner's hands.
+
+### What was weighed
+
+* **Keep refusing, with better instructions:** the instructions stay, for
+  the owner who wants to do it by hand, but a refusal is still a step to get
+  wrong.
+* **The ports from `sshd -T`:** under socket activation, Ubuntu 24.04's
+  default, systemd holds the listening socket and sshd's Port lines say
+  nothing of it, so the sockets are read with `ss` instead.
+* **Parse the owner's deny rules, or insert admit's allows first (`ufw
+  insert 1`):** parsing every rule form is open-ended, and inserting first
+  overrides an owner's deliberate deny.
+* **Enable without a fallback:** a cloud firewall or a rule admit cannot see
+  would still lock the owner out, with nothing to undo it.
+
+## 2026-10-17: `dns init` writes the registrable domain's DMARC policy when nothing under it has mail
+
+Founder decision. It amends *`dns init` writes DMARC for send-only names and
+for hostnames below the registrable domain* (2026-10-15), where the
+registrable domain's policy was only checked and every hostname carried its
+own.
+
+### What was decided
+
+* When `community.domain` is below its registrable domain, `dns init` creates
+  the lockdown policy at `_dmarc.<registrable domain>` when the provider holds
+  that zone, there is no DMARC policy there, every zone delegated from it is
+  held by the provider, and no name in those zones has mail and no policy of
+  its own. A name has mail when it holds an MX record other than the null MX,
+  an SPF record naming a sender, or a DKIM key at a selector under it, or
+  when the configuration names a sender there. The registrable domain never
+  has a policy of its own, and neither does a hostname whose policy the new
+  one would cover.
+* A policy there covers only when it is the only one there and rejects. More
+  than one, or a CNAME delegating the policy to a DMARC service, is a note
+  and covers nothing.
+* A policy there covers only with strict alignment, as the hostnames' own
+  have: under relaxed alignment a forger passes with any sibling name's SPF,
+  such as a relay's include on a name that sends mail. A name between that
+  holds a policy not as strict, delegates it by a CNAME, or is delegated to
+  nameservers the provider does not hold, covers nothing either.
+* `dns prune` asks `dns init`'s plan which hostname policies are covered, so
+  the two never disagree.
+* A name that is a CNAME has its target's mail, which `dns init` resolves
+  through public DNS; a lookup that fails other than by the name not
+  existing counts as mail.
+* `dns init --execute` creates that policy after every other record, since
+  it rests on the policies the same run creates. A policy only covers once it
+  is there: the run that creates it still gives each hostname its own, and
+  `dns prune` removes them after.
+* A hostname is not covered while a name between it and the registrable
+  domain holds a weaker policy, which DMARCbis' tree walk reads first.
+* Once written, the zone is not read again. The policy is a conflict when a
+  sender the configuration names has no policy of its own, or the domain
+  itself has an MX or an SPF record naming a sender; mail added elsewhere
+  under the domain later is whoever adds it's to give a policy.
+* `dns prune` judges a covering policy without any record of this
+  deployment's the same prune deletes, and `--name` reaches the registrable
+  domain's policy once the configuration no longer produces it.
+* Where the registrable domain's policy rejects, whoever wrote it, no
+  hostname gets `_dmarc.<hostname>` and `community.domain` gets no
+  `_dmarc.<community.domain>`; `dns prune` removes the ones this deployment's
+  `dns init` made. Where it does not, each still gets its own.
+* `dns prune` never removes the registrable domain's policy that `dns init`
+  wrote while the configuration still produces it.
+* That policy is a note once a name under the domain has mail and no policy
+  of its own.
+
+### Why
+
+A receiver applies the registrable domain's policy to every name under it
+with none of its own, however deep, so one record there does what a record at
+every hostname did. The objection on 2026-10-15 was that the toolkit could
+not see which names send mail. It reads every record in the zone, and in each
+delegated zone, so it can: an MX, an SPF record naming a sender and a DKIM key
+are what a name with mail publishes, and a name with its own DMARC policy is
+not governed by the registrable domain's at all. Where any of that is out of
+sight, it writes nothing there and falls back to a policy per hostname.
+
+### What was weighed
+
+* **Only the registrable domain's MX.** Not chosen: a subdomain sending
+  through a relay publishes no MX at the registrable domain, and its mail
+  would be rejected.
+* **Keeping the hostnames' policies beside it.** Not chosen: they say what
+  the registrable domain's already says, and are records to drift.
+
+### What was run
+
+`go build ./... && go vet ./... && go test ./...`; the new tests in
+`internal/dns/mail_test.go` were checked to fail before the change.
+
+## 2026-10-17: `dns init` publishes SPF on the domain, not on every hostname
+
+Founder decision. It amends *`dns init` publishes the no-mail records*, where
+every name that gets an address record also got `v=spf1 -all`.
+
+### What was decided
+
+* `v=spf1 -all` is published on `community.domain`, and on a hostname only
+  when the hostname is itself a registrable domain.
+* Every other hostname relies on DMARC. One whose registrable domain's
+  policy is the deployment's own lockdown policy gets nothing. One whose
+  registrable domain's policy `dns init` only checks or may not write, above
+  `community.domain` or at a `community.domain` with mail of its own, gets
+  the lockdown policy at its own `_dmarc` while that policy does not reject,
+  and none once it does.
+* `dns prune` removes the hostnames' SPF records and covered DMARC policies
+  this deployment's `dns init` made, as records nothing wants.
+* `dns init` still reads each hostname's SPF record, and one that lets a
+  server send is a conflict, as before: the hostname has mail nobody listed,
+  and the DMARC policy covering it would reject that mail.
+
+### Why
+
+A forged message from a hostname is refused by DMARC alone at every receiver
+that enforces it: with no SPF record the SPF result is none, not a pass, and
+the forger has no aligned DKIM signature. SPF checks the envelope sender, not
+the From a person reads, so a forger who wants past SPF uses another
+envelope. A record per hostname, for every app and every media hostname,
+bought protection only at receivers that check SPF and ignore DMARC, and
+counted against the provider's per zone record quota. A hostname that is a
+registrable domain is the exception: nothing the deployment may write gives
+it a DMARC policy, and SPF reaches that name alone.
+
+### What was weighed
+
+* **A wildcard SPF record.** Not chosen: a wildcard reaches no name that
+  holds any other record, so it covers no hostname with an address.
+* **Hostnames as CNAMEs of one gateway name, inheriting its SPF.** Not
+  chosen: gateway moves add and delete address records per hostname.
+
+### What was run
+
+`go build ./... && go vet ./... && go test ./...`.
+
+## 2026-10-17: One operator is a warning, not a refusal
+
+Founder direction, issue #365.
+
+### What was decided
+
+* `validate` refuses a deployment with no operator whose keys are on every
+  site that runs Pocket ID (`operators-none`), and warns about one
+  (`operators-fewer-than-two`).
+* `paisans create` accepts one operator and offers a second after the first.
+* The operator reconciler fails its pass while fewer than two operators are
+  declared, so the operators heartbeat keeps the monitor alerting until a
+  second is added.
+
+### Why
+
+A deployment being rolled out, or a small community, may have one operator
+for a while, and refusing it left no way to start. One operator is a risk,
+not an incoherence: a lost workstation would leave nobody able to run the
+deployment, so it stays visible on every `validate` and on the health page
+until there is a second. No operator at all is an incoherence, since nobody
+could run the deployment, and stays a refusal.
+
+### What was weighed
+
+* **Keep refusing one:** blocks the first rollout and small communities
+  outright, which is the problem the issue names.
+* **Warn in `validate` only:** a warning shown once at `validate` is easy to
+  forget; the heartbeat keeps saying it.
+
+## 2026-10-17: `--yes` answers confirmations, except the digest and the fresh SSH login
+
+Founder decision, 2026-10-17: every command that asks for a confirmation takes `--yes`, which answers each typed word and y/N question as typing it would, prints `approved by --yes: <what>` for each, and refuses unless `PAISANS_ALLOW_YES=1`; it never answers `host admit --request`'s digest, which proves the request's keys were not changed on their way (`--digest` gives it instead), nor the fresh SSH login after admit enables ufw, which proves SSH still works before the ufw fallback is stopped (`--yes` with `--request` refuses where admit would enable ufw, and `--site` proves it with its own login); a review `--yes` approves records `approved_by` as a typed approval does, so only the run's log shows it was `--yes`.

@@ -38,7 +38,7 @@ mesh:
   # every site before the first apply, and rolls a random 10.x.y.0/24 (moving
   # each site's address with it) when it overlaps another deployment's mesh,
   # a route, an address or a Docker network on any of them. Once deployed it
-  # never changes.
+  # never changes. It lies inside 10.0.0.0/8, 172.16.0.0/12 or 192.168.0.0/16.
   subnet: 10.44.0.0/24
 
 # Certificates are issued over DNS-01, always. A gateway has to be able to hold
@@ -57,12 +57,12 @@ acme:
   # image: ghcr.io/example-org/caddy-route53:2.11.4
 
 # The operators: the people who run the machines. They log in to the sites,
-# hold the secrets and run apply. validate wants at least two whose keys are on
-# every site that runs Pocket ID, so one lost workstation does not leave
-# nobody able to run the deployment. apply makes each a Pocket ID user in
+# hold the secrets and run apply. validate refuses none whose keys are on every
+# site that runs Pocket ID and warns about one, since one lost workstation
+# would leave nobody able to run the deployment. apply makes each a Pocket ID user in
 # operators, members and every app's member and admin group, so every operator
 # is a community admin as well. Each site's ssh.keys names some of them, and
-# host prepare makes every key they list an authorized key there, so an
+# site prepare makes every key they list an authorized key there, so an
 # operator's keys are written once however many sites they reach. email is
 # required; name is optional.
 operators:
@@ -92,10 +92,10 @@ sites:
     # one, the gateway included. The keys are public keys, one per line,
     # every operator's: the file is shared, so it never names a private key.
     # Each operator's own ssh offers these and finds its private half in that
-    # operator's agent. `host prepare` makes them the user's authorized keys.
+    # operator's agent. `site prepare` makes them the user's authorized keys.
     ssh:
       host: home-a.local        # optional: defaults to public_address
-      user: ubuntu              # must already exist on the host
+      user: ubuntu              # optional: defaults to paisans-<token>, written here by the first --execute
       port: 22                  # optional: defaults to 22
       keys: [alice, bob]
 

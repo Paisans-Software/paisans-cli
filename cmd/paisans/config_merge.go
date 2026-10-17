@@ -34,7 +34,7 @@ func secretsOnlyEdits(local, base, head configstore.Files) bool {
 //
 // handled is false when this is not that case, and the caller refuses as it
 // always has.
-func pullMergingSecrets(r ui.Reporter, l configstore.Local, g configstore.Gathered, id, head, base, root string, configured int, local, theirs configstore.Files, execute bool, stdin io.Reader, stdout io.Writer) (handled bool, err error) {
+func pullMergingSecrets(r ui.Reporter, l configstore.Local, g configstore.Gathered, id, head, base, root string, configured int, local, theirs configstore.Files, execute bool, ans answerer, stdin io.Reader, stdout io.Writer) (handled bool, err error) {
 	if base == "" {
 		return false, nil
 	}
@@ -81,7 +81,7 @@ func pullMergingSecrets(r ui.Reporter, l configstore.Local, g configstore.Gather
 		}
 		return true, nil
 	}
-	if err := confirmPartial(stdin, stdout, g, configured); err != nil {
+	if err := confirmPartial(ans, stdin, stdout, g, configured); err != nil {
 		return true, err
 	}
 	// The recipients are the ones the head's .sops.yaml names, read from a

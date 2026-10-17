@@ -1,6 +1,10 @@
 package deployment_test
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/deployment"
@@ -54,7 +58,8 @@ func TestNamesAndPathsDeriveFromTheToken(t *testing.T) {
 		d.RelPath("talk", ".env"): "srv/paisans/f2a9/talk/.env",
 		d.LabelFilter():           "label=community.paisans.deployment=" + fixtureID,
 		d.Interface():             "psns-f2a9",
-		d.WireGuardConf():         "etc/wireguard/psns-f2a9.conf",
+		d.WireGuardConf():         "srv/paisans/f2a9/psns-f2a9.conf",
+		d.WireGuardInstalled():    "/etc/wireguard/psns-f2a9.conf",
 		d.WireGuardUnit():         "wg-quick@psns-f2a9",
 	} {
 		if got != want {
@@ -68,7 +73,7 @@ func TestSplitRel(t *testing.T) {
 	if !ok || token != "f2a9" || stack != "talk" || rest != "config/x.yaml" {
 		t.Errorf("SplitRel = %q %q %q %v", token, stack, rest, ok)
 	}
-	for _, rel := range []string{"etc/wireguard/psns-f2a9.conf", "srv/talk/.env", "srv/paisans/f2a9/talk", "srv/paisans/f2a9/.paisans-manifest.json"} {
+	for _, rel := range []string{"srv/paisans/f2a9/psns-f2a9.conf", "srv/talk/.env", "srv/paisans/f2a9/talk", "srv/paisans/f2a9/.paisans-manifest.json"} {
 		if _, _, _, ok := deployment.SplitRel(rel); ok {
 			t.Errorf("SplitRel(%q) reported a stack", rel)
 		}
@@ -85,5 +90,78 @@ func TestInterfaceFitsIFNAMSIZ(t *testing.T) {
 	name := deployment.Deployment{ID: id}.Interface()
 	if len(name) != 9 || len(name) > deployment.MaxInterfaceName {
 		t.Errorf("Interface() = %q, %d characters, want 9 and at most %d", name, len(name), deployment.MaxInterfaceName)
+	}
+}
+
+// The mark is the token in the low sixteen bits under a fixed "PS" in the
+// high sixteen, so two deployments on a host, whose tokens the registry
+// keeps apart, never share one, and the helper and the egress table read
+// the same value.
+func TestFwMark(t *testing.T) {
+	for _, c := range []struct {
+		id   string
+		want uint32
+	}{
+		{"f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01", 0x5053f2a9},
+		{"0000c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01", 0x50530000},
+		{"ffffc4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01", 0x5053ffff},
+	} {
+		d := deployment.Deployment{ID: c.id}
+		if got, err := d.FwMark(); err != nil || got != c.want {
+			t.Errorf("%s: FwMark() = %#x, %v, want %#x", c.id, got, err, c.want)
+		}
+	}
+	d := deployment.Deployment{ID: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}
+	if d.EgressTable() != "paisans_f2a9" || d.EgressUnit() != "paisans-f2a9-egress.service" {
+		t.Errorf("EgressTable() = %q, EgressUnit() = %q", d.EgressTable(), d.EgressUnit())
+	}
+}
+
+// A token that is not exactly TokenLength lower-case hex digits has no mark,
+// so it can never share token 0000's.
+func TestFwMarkRefusesABadToken(t *testing.T) {
+	for _, id := range []string{"", "f2a", "zzzz", "F2A9c4e1", "f2a 9", "+2a9c4e1", "0x2a9c4e1"} {
+		d := deployment.Deployment{ID: id}
+		if got, err := d.FwMark(); err == nil {
+			t.Errorf("ID %q: FwMark() = %#x, want an error", id, got)
+		}
+	}
+}
+
+// The toolkit's own records on a host sit in the deployment's root, where
+// its user writes them without sudo.
+func TestStateDir(t *testing.T) {
+	d := deployment.Deployment{ID: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}
+	if d.StateDir() != "/srv/paisans/f2a9/.paisans" || d.StatePath("deployed.json") != "/srv/paisans/f2a9/.paisans/deployed.json" {
+		t.Errorf("StateDir %s, StatePath %s", d.StateDir(), d.StatePath("deployed.json"))
+	}
+	lock := d.StateLockCommand("the deployment record")
+	for _, want := range []string{"umask 077", "[ -L '/srv/paisans/f2a9/.paisans' ]", "install -d -m 700 '/srv/paisans/f2a9/.paisans'", "exec 9>>'/srv/paisans/f2a9/.paisans/lock'", "flock -w 60 9"} {
+		if !strings.Contains(lock, want) {
+			t.Errorf("the lock prelude has no %q:\n%s", want, lock)
+		}
+	}
+	if strings.Contains(lock, "/var/lib/paisans") || strings.Contains(lock, "sudo") {
+		t.Errorf("the prelude reaches root's directory: %s", lock)
+	}
+}
+
+// A label is quoted for the shell, so one with an apostrophe still runs, and
+// the refusal of a linked state directory names it as given. The prelude
+// runs in a real sh, its state directory swapped for a link in a temporary
+// directory.
+func TestStateLockCommandQuotesItsLabel(t *testing.T) {
+	d := deployment.Deployment{ID: fixtureID}
+	dir := t.TempDir()
+	link := filepath.Join(dir, "state")
+	if err := os.Symlink(dir, link); err != nil {
+		t.Fatal(err)
+	}
+	what := "the gateway move's records"
+	cmd := strings.ReplaceAll(d.StateLockCommand(what), d.StateDir(), link)
+	out, err := exec.Command("sh", "-c", cmd).CombinedOutput()
+	want := "paisans: the state directory is a link, so " + what + " is not written\n"
+	if err == nil || string(out) != want {
+		t.Errorf("got %v, %q, want exit 1 and %q", err, out, want)
 	}
 }

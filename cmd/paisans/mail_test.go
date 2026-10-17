@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"slices"
 	"strings"
@@ -26,9 +27,10 @@ func fakeSMTP(t *testing.T, users map[string]string) *smtptest.Server {
 	t.Helper()
 	server := smtptest.New()
 	server.Users = users
-	saved := smtpEnv
+	saved, savedLocal := smtpEnv, localSMTPEnv
 	smtpEnv = func(*config.Config, map[string]string) smtpcheck.Env { return server.Env() }
-	t.Cleanup(func() { smtpEnv = saved })
+	localSMTPEnv = func() smtpcheck.Env { return server.Env() }
+	t.Cleanup(func() { smtpEnv, localSMTPEnv = saved, savedLocal })
 	return server
 }
 
@@ -36,8 +38,7 @@ func fakeSMTP(t *testing.T, users map[string]string) *smtptest.Server {
 var fixtureOperators = []string{"alice@example.org", "bob@example.org"}
 
 // An SMTP password set with secrets set logs in and sends the operators one
-// test message from each sender, from a site running the apps, before it is
-// written.
+// test message from each sender, from this machine, before it is written.
 func TestSecretsSetTriesAnSMTPPassword(t *testing.T) {
 	const next = "not-a-real-smtp-password-0001"
 	server := fakeSMTP(t, map[string]string{"robot@example.org": next})
@@ -61,7 +62,7 @@ func TestSecretsSetTriesAnSMTPPassword(t *testing.T) {
 	if !strings.Contains(msgs[0].Data, "`paisans secrets set` is changing external.smtp_password") {
 		t.Errorf("message:\n%s", msgs[0].Data)
 	}
-	if !rec.Has("done", "smtp.example.org:587, starttls, as robot@example.org, from home-a") {
+	if !rec.Has("done", "smtp.example.org:587, starttls, as robot@example.org, from this machine") {
 		t.Errorf("the check is not shown:\n%s", rec.Lines())
 	}
 	if strings.Contains(rec.Lines()+msgs[0].Data, next) {
@@ -97,19 +98,49 @@ func TestSecretsSetRefusesAnSMTPPasswordThatDoesNotLogIn(t *testing.T) {
 	}
 }
 
-// A site that cannot be reached leaves the password untried, and so unwritten.
-func TestSecretsSetRefusesWhenTheSiteIsNotReached(t *testing.T) {
-	server := fakeSMTP(t, nil)
-	server.Unreachable = map[string]error{"home-a": errors.New("ssh could not connect to the host")}
+// The password is tried from this machine, so it is set before any site is
+// deployed: no site is dialled, and one that cannot be reached does not
+// matter.
+func TestSecretsSetTriesFromThisMachineWithNoSiteReached(t *testing.T) {
+	const next = "not-a-real-smtp-password-0002"
+	server := fakeSMTP(t, map[string]string{"robot@example.org": next})
+	// Any dial through a site fails, as before a deployment: only this
+	// machine's own dial reaches the server.
+	smtpEnv = func(*config.Config, map[string]string) smtpcheck.Env {
+		return smtpcheck.Env{Dial: func(site, _ string) (net.Conn, error) {
+			return nil, errors.New("ssh could not connect to " + site)
+		}}
+	}
 	configPath, secretsPath := rotateDeployment(t, nil)
 	withRecorder(t, false)
-	before, _ := os.ReadFile(secretsPath)
-	_, err := set(t, configPath, secretsPath, "external.smtp_password", "not-a-real-smtp-password-0002")
-	if err == nil || !strings.Contains(err.Error(), "home-a could not be reached") || !strings.Contains(err.Error(), "Nothing was written") {
+	if _, err := set(t, configPath, secretsPath, "external.smtp_password", next); err != nil {
 		t.Fatalf("err = %v", err)
 	}
-	if after, _ := os.ReadFile(secretsPath); !bytes.Equal(before, after) {
-		t.Error("the secrets file changed")
+	if got := mustSecrets(t, secretsPath).External["smtp_password"]; got != next {
+		t.Errorf("stored %q", got)
+	}
+	if len(server.Messages()) == 0 {
+		t.Error("no test message was sent")
+	}
+}
+
+// A mail server this machine cannot reach leaves the password untried:
+// it is written with a warning, since whether it works is the server's to
+// say, and apply tries it from each site.
+func TestSecretsSetWritesWhenThisMachineCannotReachTheServer(t *testing.T) {
+	const next = "not-a-real-smtp-password-0003"
+	server := fakeSMTP(t, nil)
+	server.Unreachable = map[string]error{"": errors.New("dial tcp: connection refused")}
+	configPath, secretsPath := rotateDeployment(t, nil)
+	rec := withRecorder(t, false)
+	if _, err := set(t, configPath, secretsPath, "external.smtp_password", next); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if got := mustSecrets(t, secretsPath).External["smtp_password"]; got != next {
+		t.Errorf("stored %q", got)
+	}
+	if !strings.Contains(rec.Lines(), "paisans apply") {
+		t.Errorf("the warning does not say apply tries it:\n%s", rec.Lines())
 	}
 }
 
@@ -168,7 +199,137 @@ func TestSecretsRotateTriesAPastedSMTPPassword(t *testing.T) {
 	}
 }
 
-// One the server refuses is refused when pasted, before any host is claimed
+// refuseLocalDial makes this machine's own dial to the mail server fail, as
+// an ISP blocking outbound 587 does. Dials through a site still work.
+func refuseLocalDial(t *testing.T) {
+	t.Helper()
+	saved := localSMTPEnv
+	localSMTPEnv = func() smtpcheck.Env {
+		return smtpcheck.Env{Dial: func(string, string) (net.Conn, error) {
+			return nil, errors.New("dial tcp 192.0.2.25:587: connect: connection refused")
+		}}
+	}
+	t.Cleanup(func() { localSMTPEnv = saved })
+}
+
+// A mail server this machine cannot reach leaves a pasted SMTP password
+// untried here, as `secrets set` leaves it: the run warns, naming this
+// machine, and goes on. Before a site is handed the password, the password
+// logs in from that site.
+func TestSecretsRotateGoesOnWhenThisMachineCannotReachTheServer(t *testing.T) {
+	const next = "not-a-real-smtp-password-0004"
+	server := fakeSMTP(t, map[string]string{"robot@example.org": next})
+	refuseLocalDial(t)
+	w, rec := fakeRotateHosts(t)
+	configPath, secretsPath := rotateDeployment(t, nil)
+	w.applied(t, configPath, secretsPath, nil)
+	pastedAtTerminal(t, map[string]string{"external.smtp_password": next})
+	err := runSecretsRotate(rotateArgs(configPath, secretsPath, "external.smtp_password", "--execute"), terminalStdin(t, "", true), &bytes.Buffer{})
+	// The fake host refuses the apply after stage 2.
+	if err == nil {
+		t.Fatal("the fake host took an apply")
+	}
+	lines := rec.Lines()
+	if !rec.Has("done", "stage 2, where it is checked") {
+		t.Errorf("stage 2 did not pass:\n%s", lines)
+	}
+	for _, want := range []string{"from this machine", "connection refused", "tries it from there"} {
+		if !strings.Contains(lines, want) {
+			t.Errorf("the warning lacks %q:\n%s", want, lines)
+		}
+	}
+	for _, bad := range []string{"reach the site", " could not be reached to try"} {
+		if strings.Contains(lines+err.Error(), bad) {
+			t.Errorf("output says %q:\n%s\n%v", bad, lines, err)
+		}
+	}
+	var fromSite bool
+	for _, d := range server.Dials() {
+		fromSite = fromSite || d.Site != ""
+	}
+	if !fromSite || len(server.Logins()) == 0 {
+		t.Errorf("the password was not tried from a site: dials %+v, logins %v", server.Dials(), server.Logins())
+	}
+	if got := mustSecrets(t, secretsPath).Rotations["external.smtp_password"]; got != next {
+		t.Errorf("rotations hold %q", got)
+	}
+}
+
+// When this machine cannot reach the server and a site's login is refused,
+// the site is not handed the password, and the refusal names the reply.
+func TestSecretsRotateStopsWhenTheSiteRefusesAnUntriedPassword(t *testing.T) {
+	const next = "not-a-real-smtp-password-0005"
+	fakeSMTP(t, map[string]string{"robot@example.org": "the-right-one"})
+	refuseLocalDial(t)
+	w, rec := fakeRotateHosts(t)
+	configPath, secretsPath := rotateDeployment(t, nil)
+	w.applied(t, configPath, secretsPath, nil)
+	pastedAtTerminal(t, map[string]string{"external.smtp_password": next})
+	err := runSecretsRotate(rotateArgs(configPath, secretsPath, "external.smtp_password", "--execute"), terminalStdin(t, "", true), &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "535") {
+		t.Fatalf("err = %v\n%s", err, rec.Lines())
+	}
+	if strings.Contains(err.Error()+rec.Lines(), next) {
+		t.Error("the password was shown")
+	}
+	if strings.Contains(err.Error(), "fake: ") {
+		t.Errorf("the site was handed the password: %v", err)
+	}
+}
+
+// A password set beforehand, with secrets set, is the file's own value, yet
+// it is still being handed out: when this machine could not try it, each
+// site tries it before it is handed it, and a site that refuses it is not.
+func TestSecretsRotateTriesASetPasswordFromTheSiteWhenThisMachineCannotReachTheServer(t *testing.T) {
+	const next = "not-a-real-smtp-password-0007"
+	server := fakeSMTP(t, map[string]string{"robot@example.org": "the-right-one"})
+	refuseLocalDial(t)
+	w, rec := fakeRotateHosts(t)
+	configPath, secretsPath := rotateDeployment(t, nil)
+	w.applied(t, configPath, secretsPath, nil)
+	configPath, secretsPath = rewriteSecrets(t, configPath, secretsPath, func(text string) string {
+		return strings.Replace(text, fixtureSMTPPassword, next, 1)
+	})
+	err := runSecretsRotate(rotateArgs(configPath, secretsPath, "external.smtp_password", "--execute"), terminalStdin(t, "", false), &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "535") {
+		t.Fatalf("err = %v\n%s", err, rec.Lines())
+	}
+	if strings.Contains(err.Error(), "fake: ") {
+		t.Errorf("the site was handed the password: %v", err)
+	}
+	var fromSite bool
+	for _, d := range server.Dials() {
+		fromSite = fromSite || d.Site != ""
+	}
+	if !fromSite {
+		t.Errorf("not tried from a site: %+v", server.Dials())
+	}
+	if strings.Contains(err.Error()+rec.Lines(), next) {
+		t.Error("the password was shown")
+	}
+}
+
+// The same warning from secrets set names the connect stage and this
+// machine, not a site.
+func TestSecretsSetNamesThisMachineWhenItCannotReachTheServer(t *testing.T) {
+	const next = "not-a-real-smtp-password-0006"
+	fakeSMTP(t, nil)
+	refuseLocalDial(t)
+	configPath, secretsPath := rotateDeployment(t, nil)
+	rec := withRecorder(t, false)
+	if _, err := set(t, configPath, secretsPath, "external.smtp_password", next); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	lines := rec.Lines()
+	if !strings.Contains(lines, "from this machine (connect: dial tcp") || strings.Contains(lines, "reach the site") {
+		t.Errorf("the warning:\n%s", lines)
+	}
+	if got := mustSecrets(t, secretsPath).External["smtp_password"]; got != next {
+		t.Errorf("stored %q", got)
+	}
+}
+
+// One the server refuses is refused when pasted, before any host is checked
 // and with nothing under rotations.
 func TestSecretsRotateRefusesAPastedSMTPPasswordThatDoesNotLogIn(t *testing.T) {
 	const wrong = "not-a-real-smtp-password-wrong"
@@ -185,8 +346,8 @@ func TestSecretsRotateRefusesAPastedSMTPPasswordThatDoesNotLogIn(t *testing.T) {
 	if strings.Contains(err.Error(), wrong) {
 		t.Error("the refusal shows the password")
 	}
-	if w.claimed() {
-		t.Error("a host was claimed")
+	if w.checked() {
+		t.Error("a host was checked")
 	}
 	if after, _ := os.ReadFile(secretsPath); !bytes.Equal(before, after) {
 		t.Error("the secrets file changed")
@@ -208,8 +369,8 @@ func TestSecretsRotateRefusesASetSMTPPasswordThatDoesNotLogIn(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "does not pass where it is checked") || !strings.Contains(err.Error(), "535") {
 		t.Fatalf("err = %v\n%s", err, rec.Lines())
 	}
-	if w.claimed() {
-		t.Error("a host was claimed")
+	if w.checked() {
+		t.Error("a host was checked")
 	}
 	if after, _ := os.ReadFile(secretsPath); !bytes.Equal(before, after) {
 		t.Error("the secrets file changed")
@@ -225,7 +386,7 @@ func TestApplyRefusesMailThatDoesNotLogIn(t *testing.T) {
 	log := failingSSH(t)
 	withRecorder(t, false)
 	for _, extra := range [][]string{{"--site", "home-a"}, nil} {
-		err := runApply(append([]string{"--config", configPath, "--secrets", secretsPath, "--sudo=false", "--execute"}, extra...), strings.NewReader(""), io.Discard)
+		err := runApply(append([]string{"--config", configPath, "--secrets", secretsPath, "--execute"}, extra...), strings.NewReader(""), io.Discard)
 		if err == nil {
 			t.Fatalf("apply %v was not refused", extra)
 		}

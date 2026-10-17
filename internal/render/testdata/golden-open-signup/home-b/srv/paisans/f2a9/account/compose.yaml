@@ -9,16 +9,15 @@ services:
   app:
     labels:
       community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
-    image: "ghcr.io/paisans-software/paisans-account-service:0.2.*"
+    image: "ghcr.io/paisans-software/paisans-account-service:0.4.*"
     restart: unless-stopped
     # The image declares its own healthcheck, the binary probing /healthz on
     # ACCOUNT_LISTEN_ADDR's port, which apply's health gate reads.
     env_file:
       - .env
-    # The mesh address only. Docker's own iptables rules bypass a host
-    # firewall, so a port published on every interface of a host with a
-    # public address is reachable from the internet whatever ufw says. The
-    # gateway, over the mesh, is the only thing that should reach it.
+    # The mesh address only. The gateway, over the mesh, is the only thing
+    # that should reach it, and a port published on every interface would
+    # answer anything the host's firewall lets in.
     ports:
       - "10.44.0.2:8082:8082"
     # The code of conduct, rendered from apps.account.settings.code_of_conduct,

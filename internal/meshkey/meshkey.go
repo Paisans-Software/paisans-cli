@@ -5,16 +5,19 @@
 // key beside it. The swap hands the host the next key before the file
 // promotes it, so for a while the host runs a key the file does not call
 // current. Every command that renders mesh files and writes them to a host
-// mid rekey renders that site with the key its host runs, read with `wg show`
-// as the rekey's own resume reads it: rendering the file's current key would
-// hand the old key back to every peer and cut the site's tunnels.
+// mid rekey renders that site with the key its host runs, read through the
+// WireGuard helper's show as the rekey's own resume reads it: rendering the
+// file's current key would hand the old key back to every peer and cut the
+// site's tunnels.
 package meshkey
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
@@ -23,31 +26,37 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
-// RunningKey is the public key site's interface runs, reached through t.
-// `wg show <interface> public-key` prints it (wireguard-tools, wg(8)).
+// RunningKey is the public key site's interface runs, empty for none,
+// reached through t and the WireGuard helper's show public-key, which prints
+// it as `wg show <interface> public-key` does (wireguard-tools, wg(8)). It
+// is read as apply reads it back: what sudo warns before running the helper
+// is not the key, so a host that already runs a site's next key is never
+// taken for one that does not.
 func RunningKey(site string, t apply.Transport, d deployment.Deployment) (string, error) {
-	out, err := t.Run("wg show " + d.Interface() + " public-key")
-	if err != nil {
-		return "", fmt.Errorf("%s: `wg show %s public-key`: %w: %s", site, d.Interface(), err, strings.TrimSpace(out))
+	h := apply.WGHelper{T: t, Iface: d.Interface()}
+	out, err := h.Show("public-key")
+	if p := apply.HelperReadProblem(site, h, err); p != nil {
+		return "", p
 	}
-	return strings.TrimSpace(out), nil
+	if err != nil {
+		return "", fmt.Errorf("%s: reading %s's key through the WireGuard helper: %w", site, d.Interface(), err)
+	}
+	return apply.ReadMeshKey(site, out)
 }
 
 // Peers is the public keys site's interface lists as peers, reached through
-// t. `wg show <interface> peers` prints one per line (wireguard-tools,
-// wg(8)).
+// t and the helper's show peers, one per line (wireguard-tools, wg(8)), read
+// as strictly as RunningKey.
 func Peers(site string, t apply.Transport, d deployment.Deployment) ([]string, error) {
-	out, err := t.Run("wg show " + d.Interface() + " peers")
+	h := apply.WGHelper{T: t, Iface: d.Interface()}
+	out, err := h.Show("peers")
+	if p := apply.HelperReadProblem(site, h, err); p != nil {
+		return nil, p
+	}
 	if err != nil {
-		return nil, fmt.Errorf("%s: `wg show %s peers`: %w: %s", site, d.Interface(), err, strings.TrimSpace(out))
+		return nil, fmt.Errorf("%s: reading %s's peers through the WireGuard helper: %w", site, d.Interface(), err)
 	}
-	var keys []string
-	for _, line := range strings.Split(out, "\n") {
-		if key := strings.TrimSpace(line); key != "" {
-			keys = append(keys, key)
-		}
-	}
-	return keys, nil
+	return apply.ReadMeshPeers(site, out)
 }
 
 // AsRunning is secrets as the mesh runs them: a copy in which every site
@@ -119,12 +128,13 @@ func (e *NoAnswer) Error() string { return e.Site + ": " + e.Err.Error() }
 func (e *NoAnswer) Unwrap() error { return e.Err }
 
 // Joining is the sites cfg declares, but skip, that are new to this
-// deployment, Eg: a replacement declared in the same edit as an eviction.
-// Their hosts hold no claim of this deployment in their registry, and
-// nothing else says they ever ran in it: no remaining site lists their key as
-// a WireGuard peer, and no gateway's deployment record lists them. A missing
-// registry entry alone is not enough, since a claim can be lost, or a site's
-// ssh section can reach the wrong host; a site that ran and is taken for new
+// deployment, Eg: a replacement declared in the same edit that cuts a site off.
+// Their hosts have not admitted this deployment, holding no admission record
+// of it or refusing its login, and nothing else says they ever ran in it: no
+// remaining site lists their key as a WireGuard peer, and no gateway's
+// deployment record lists them. A missing record alone is not enough, since
+// an owner can evict the deployment, or a site's ssh section can reach the
+// wrong host; a site that ran and is taken for new
 // would be left out of a cut or a rekey while its peers still talk to it, so
 // that is refused, naming the site and the evidence.
 func Joining(cfg *config.Config, secrets *config.Secrets, skip string, transports map[string]apply.Transport) ([]string, error) {
@@ -137,14 +147,14 @@ func Joining(cfg *config.Config, secrets *config.Secrets, skip string, transport
 		if !ok {
 			return nil, &NoAnswer{Site: name, Err: fmt.Errorf("no way to reach it")}
 		}
-		reg, err := registry.Read(t)
-		if err != nil {
-			return nil, &NoAnswer{Site: name, Err: err}
-		}
-		if _, ok := reg.Deployments[cfg.ID]; ok {
+		_, err := admission.Read(t, cfg.Deployment().Token())
+		switch {
+		case err == nil:
 			claimed = append(claimed, name)
-		} else {
+		case errors.Is(err, admission.ErrNotAdmitted), errors.Is(err, apply.ErrLoginRefused):
 			unclaimed = append(unclaimed, name)
+		default:
+			return nil, &NoAnswer{Site: name, Err: err}
 		}
 	}
 	if len(unclaimed) == 0 {
@@ -193,7 +203,7 @@ func Joining(cfg *config.Config, secrets *config.Secrets, skip string, transport
 	}
 	for _, site := range unclaimed {
 		if len(evidence[site]) > 0 {
-			return nil, fmt.Errorf("%s's host holds no claim of this deployment in %s, yet %s, so it has run in this deployment and is not a new site. Check that its ssh section reaches the host it runs on, and that the host's registry still holds this deployment's entry. Nothing was changed", site, registry.Path, strings.Join(evidence[site], ", and "))
+			return nil, fmt.Errorf("%s's host has not admitted this deployment, yet %s, so it has run in this deployment and is not a new site. Check that its ssh section reaches the host it runs on, and that the host's owner has not evicted this deployment. Nothing was changed", site, strings.Join(evidence[site], ", and "))
 		}
 	}
 	return unclaimed, nil

@@ -1,0 +1,1 @@
+refused: egress: /etc/paisans/egress.f2a9.nft is a symbolic link, and admit writes it as root. Remove the link and admit again. Nothing was changed

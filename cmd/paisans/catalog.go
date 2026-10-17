@@ -455,7 +455,7 @@ func runBlueprintLint(args []string) error {
 func readFile(parts ...string) ([]byte, error) { return os.ReadFile(filepath.Join(parts...)) }
 
 // parseAll parses fs over args with positional arguments anywhere among the
-// flags, as host allow does, and returns the positional ones in order.
+// flags, and returns the positional ones in order.
 func parseAll(fs *flag.FlagSet, args []string) ([]string, error) {
 	var positional []string
 	for {

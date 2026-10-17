@@ -274,11 +274,32 @@ func TestUnknownWatchdogModeIsRefused(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "sites.home-a.watchdog") {
 		t.Fatalf("an unknown watchdog mode loaded: %v", err)
 	}
-	for _, mode := range []string{"auto", "required", "softdog", "off"} {
+	for _, mode := range []string{"auto", "required", "softdog"} {
 		body := strings.Replace(minimal, "    address: 10.44.0.1\n", "    address: 10.44.0.1\n    watchdog: "+mode+"\n", 1)
 		if _, err := config.Load(write(t, body)); err != nil {
 			t.Errorf("watchdog %s was refused: %v", mode, err)
 		}
+	}
+}
+
+// watchdog: off is not a mode. A data site's Patroni needs a watchdog to fail
+// over safely and no other site uses one, so the loader refuses it on any
+// site and names the modes that exist.
+func TestWatchdogOffIsRefused(t *testing.T) {
+	body := strings.Replace(minimal, "    address: 10.44.0.1\n", "    address: 10.44.0.1\n    watchdog: off\n", 1)
+	_, err := config.Load(write(t, body))
+	if err == nil || !strings.Contains(err.Error(), "sites.home-a.watchdog") || !strings.Contains(err.Error(), "auto, required and softdog") {
+		t.Fatalf("watchdog: off loaded or was refused without naming the modes: %v", err)
+	}
+}
+
+// A role is listed once. site request carries a site's roles and refuses a
+// role listed twice, so the loader refuses it too, and validate and site
+// request agree on every configuration.
+func TestARepeatedRoleIsRefused(t *testing.T) {
+	body := strings.Replace(minimal, "roles: [data, apps]", "roles: [data, apps, data]", 1)
+	if got := loadErr(t, body); !strings.Contains(got, `sites.home-a.roles: "data" is listed twice`) {
+		t.Fatalf("a repeated role loaded or was refused without naming it: %q", got)
 	}
 }
 
@@ -342,6 +363,81 @@ func TestSSHSectionLoads(t *testing.T) {
 	}
 	if keys[2].Line != fakeKeyC || keys[2].Name != "alice" {
 		t.Errorf("third key read as %+v, want alice's second", keys[2])
+	}
+}
+
+// ssh.user may be left out, or written empty: the site is then reached as
+// the deployment's own user, paisans-<token>. The default is not written
+// into ssh.user, so the file's own value stays apart from it.
+func TestSSHUserDefaultsToTheDeploymentsOwnUser(t *testing.T) {
+	for name, section := range map[string]string{
+		"left out":      "    ssh:\n      host: home-a.local\n      keys: [alice]\n",
+		"written empty": "    ssh:\n      host: home-a.local\n      user: \"\"\n      keys: [alice]\n",
+		"written as ~":  "    ssh:\n      host: home-a.local\n      user: ~\n      keys: [alice]\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := config.Load(write(t, withSSH(section)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			site := cfg.Sites["home-a"]
+			if site.SSH.User != "" {
+				t.Errorf("ssh.user read as %q, want it empty", site.SSH.User)
+			}
+			if got := site.SSHUser(); got != "paisans-f2a9" {
+				t.Errorf("user is %q, want paisans-f2a9", got)
+			}
+			if got := site.Destination().String(); got != "paisans-f2a9@home-a.local:22" {
+				t.Errorf("destination is %q, want paisans-f2a9@home-a.local:22", got)
+			}
+		})
+	}
+}
+
+// A declared ssh.user is the user the site is reached as.
+func TestSSHUserIsTheDeclaredName(t *testing.T) {
+	cfg, err := config.Load(write(t, minimal))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Sites["home-a"].SSHUser(); got != "ubuntu" {
+		t.Errorf("user is %q, want ubuntu", got)
+	}
+}
+
+// A site that leaves ssh.user out names the file it was loaded from, where a
+// command records the user it logged in as. A site naming its user names
+// none, and so does one loaded from bytes or built by hand, which have no
+// file to record it in.
+func TestSSHUserFileIsWhereTheDefaultUserIsRecorded(t *testing.T) {
+	path := write(t, withSSH("    ssh:\n      host: home-a.local\n      keys: [alice]\n"))
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Sites["home-a"].SSHUserFile(); got != path {
+		t.Errorf("SSHUserFile() = %q, want %q", got, path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromBytes, err := config.LoadBytes(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fromBytes.Sites["home-a"].SSHUserFile(); got != "" {
+		t.Errorf("loaded from bytes: SSHUserFile() = %q, want none", got)
+	}
+	declared, err := config.Load(write(t, minimal))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := declared.Sites["home-a"].SSHUserFile(); got != "" {
+		t.Errorf("a declared user: SSHUserFile() = %q, want none", got)
+	}
+	if got := (config.Site{}).SSHUserFile(); got != "" {
+		t.Errorf("a site built by hand: SSHUserFile() = %q, want none", got)
 	}
 }
 
@@ -421,7 +517,6 @@ func TestSSHSectionRefusals(t *testing.T) {
 		name, section, want string
 	}{
 		{"missing", "", "sites.home-a.ssh: required"},
-		{"no user", "    ssh:\n      host: home-a.local\n" + key, "ssh.user: required"},
 		{"bad user", "    ssh:\n      host: home-a.local\n      user: \"bob; rm\"\n" + key, "is not a user name"},
 		{"port too high", "    ssh:\n      host: home-a.local\n      user: ubuntu\n      port: 70000\n" + key, "ssh.port: 70000 is not a port"},
 		{"negative port", "    ssh:\n      host: home-a.local\n      user: ubuntu\n      port: -1\n" + key, "ssh.port: -1 is not a port"},
@@ -710,7 +805,7 @@ func TestTheOldGateKeysAreRefused(t *testing.T) {
 	}
 }
 
-// A control character in what the review and host allow print is refused
+// A control character in what the review prints is refused
 // where it is written, naming the field: a terminal reads ESC and its kin as
 // commands, so a key comment carrying one could redraw the review's lines.
 func TestControlCharactersAreRefused(t *testing.T) {
@@ -920,5 +1015,199 @@ func TestASettingHoldsNoControlCharacter(t *testing.T) {
 		if _, err := config.Load(write(t, doc)); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: loaded, or refused without naming it: %v", c.want, err)
 		}
+	}
+}
+
+// SetSSHUser writes the file in place, keeping its mode, and Load then reads
+// the name as declared; a second call with the same name changes nothing.
+func TestSetSSHUserWritesTheFile(t *testing.T) {
+	path := write(t, withSSH("    ssh:\n      host: home-a.local\n      keys: [alice]\n"))
+	if err := config.SetSSHUser(path, "home-a", "paisans-f2a9"); err != nil {
+		t.Fatal(err)
+	}
+	first, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Sites["home-a"].SSH.User; got != "paisans-f2a9" {
+		t.Errorf("ssh.user read as %q, want paisans-f2a9", got)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("mode %v, want 0600", info.Mode().Perm())
+	}
+	if err := config.SetSSHUser(path, "home-a", "paisans-f2a9"); err != nil {
+		t.Fatal(err)
+	}
+	if second, _ := os.ReadFile(path); string(second) != string(first) {
+		t.Errorf("a second call changed the file:\n%s", second)
+	}
+}
+
+// infra overrides the infrastructure stack's images. Its keys are the
+// foundation's names for the images it replaces, so a key the toolkit does
+// not run is refused rather than silently ignored.
+func TestInfraImagesLoad(t *testing.T) {
+	doc := validConfig + "infra:\n  images:\n    etcd: \"gcr.io/etcd-development/etcd:v3.5.21\"\n  postgres:\n    \"17\":\n      spilo: \"example.org/pg-ha:17.4-1\"\n"
+	cfg, err := config.Load(write(t, doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Infra.Images["etcd"]; got != "gcr.io/etcd-development/etcd:v3.5.21" {
+		t.Errorf("infra.images.etcd is %q", got)
+	}
+	if got := cfg.Infra.Postgres["17"]["spilo"]; got != "example.org/pg-ha:17.4-1" {
+		t.Errorf("infra.postgres.17.spilo is %q", got)
+	}
+}
+
+func TestInfraImagesAreChecked(t *testing.T) {
+	const payload = "ghcr.io/x/etcd:v3.5.1     privileged: true"
+	cases := []struct{ body, want string }{
+		{"infra:\n  images:\n    caddy: \"ghcr.io/x/caddy:2.1.0\"\n", "infra.images.caddy"},
+		{"infra:\n  images:\n    etcd: \"\"\n", "infra.images.etcd: empty"},
+		{"infra:\n  images:\n    etcd: \"" + payload + "\"\n", "infra.images.etcd"},
+		{"infra:\n  images:\n    etcd: \"ghcr.io/x/etcd:v3 #\"\n", "infra.images.etcd"},
+		{"infra:\n  postgres:\n    \"17\":\n      app: \"postgres:17.1\"\n", "infra.postgres.17.app"},
+		{"infra:\n  postgres:\n    \"17\":\n      spilo: \"\"\n", "infra.postgres.17.spilo: empty"},
+	}
+	for _, c := range cases {
+		msg := loadErr(t, validConfig+c.body)
+		if !strings.Contains(msg, c.want) {
+			t.Errorf("%q: loaded, or refused without naming %s: %q", c.body, c.want, msg)
+		}
+	}
+}
+
+// The major a deployment runs is cluster.postgres_version, 18 when unset,
+// and the Spilo it declares is the entry for that major alone.
+func TestSpiloImageIsTheRunningMajors(t *testing.T) {
+	cfg := &config.Config{Infra: config.Infra{Postgres: map[string]map[string]string{"17": {"spilo": "a:17"}, "18": {"spilo": "a:18"}}}}
+	if got := cfg.PostgresMajor(); got != config.DefaultPostgresVersion {
+		t.Errorf("an unset postgres_version is %q", got)
+	}
+	if got := cfg.SpiloImage(); got != "a:18" {
+		t.Errorf("SpiloImage is %q, want the 18 entry", got)
+	}
+	cfg.Cluster.PostgresVersion = "17"
+	if got := cfg.SpiloImage(); got != "a:17" {
+		t.Errorf("SpiloImage is %q, want the 17 entry", got)
+	}
+	cfg.Cluster.PostgresVersion = "16"
+	if got := cfg.SpiloImage(); got != "" {
+		t.Errorf("SpiloImage is %q for a major with no entry", got)
+	}
+}
+
+// A mesh larger than a /24 would let the rules that treat the mesh as
+// trusted cover an owner's LAN, so it is refused where it is declared.
+func TestMeshLargerThanA24IsRefused(t *testing.T) {
+	got := loadErr(t, strings.Replace(validConfig, "subnet: 10.44.0.0/24", "subnet: 10.44.0.0/16", 1))
+	if !strings.Contains(got, "mesh.subnet") || !strings.Contains(got, "larger than a /24") {
+		t.Errorf("got %q", got)
+	}
+}
+
+// An app's hostname is held to the strict DNS-name rule everywhere it is
+// declared, so a name validate accepts is one site request accepts too.
+func TestAppHostnamesAreHeldToTheStrictRule(t *testing.T) {
+	for _, bad := range []string{"a..example.org", strings.Repeat("a", 64) + ".example.org", "a_b.example.org", "Talk.example.org", "talk"} {
+		got := loadErr(t, strings.Replace(validConfig, "hostname: talk.example.org", "hostname: "+bad, 1))
+		if !strings.Contains(got, "apps.talk.hostname") {
+			t.Errorf("hostname %q: got %q", bad, got)
+		}
+		got = loadErr(t, strings.Replace(validConfig, "hostname: talk.example.org", "hostname: talk.example.org\n    hostnames:\n      media: "+bad, 1))
+		if !strings.Contains(got, "apps.talk.hostnames.media") {
+			t.Errorf("hostnames.media %q: got %q", bad, got)
+		}
+	}
+}
+
+// A mesh over this network, loopback, link-local or multicast is refused
+// where it is declared, by the rule a request is held to: the egress table
+// on an admitted host accepts the mesh before it drops those ranges.
+func TestMeshOverAReservedRangeIsRefused(t *testing.T) {
+	for _, c := range []struct{ subnet, address, overlaps string }{
+		{"0.0.0.0/24", "0.0.0.1", "0.0.0.0/8"},
+		{"127.44.0.0/24", "127.44.0.1", "127.0.0.0/8"},
+		{"169.254.44.0/24", "169.254.44.1", "169.254.0.0/16"},
+		{"239.1.0.0/24", "239.1.0.1", "224.0.0.0/3"},
+	} {
+		body := strings.Replace(validConfig, "subnet: 10.44.0.0/24", "subnet: "+c.subnet, 1)
+		body = strings.Replace(body, "address: 10.44.0.1", "address: "+c.address, 1)
+		got := loadErr(t, body)
+		if !strings.Contains(got, "mesh.subnet") || !strings.Contains(got, "overlaps "+c.overlaps) {
+			t.Errorf("%s: got %q", c.subnet, got)
+		}
+	}
+}
+
+// A mesh outside RFC 1918's private ranges is refused where it is
+// declared: another deployment's egress table on a shared host drops only
+// those, so its user could reach this mesh's sites.
+func TestMeshOutsideThePrivateRangesIsRefused(t *testing.T) {
+	body := strings.Replace(validConfig, "subnet: 10.44.0.0/24", "subnet: 44.1.2.0/24", 1)
+	body = strings.Replace(body, "address: 10.44.0.1", "address: 44.1.2.1", 1)
+	got := loadErr(t, body)
+	if !strings.Contains(got, `mesh.subnet: "44.1.2.0/24" is outside the private ranges`) || !strings.Contains(got, "`paisans init` picks a /24 in 10.0.0.0/8") {
+		t.Errorf("got %q", got)
+	}
+}
+
+// A site address that is the mesh's network or broadcast address is
+// refused, as a request refuses it.
+func TestSiteAddressIsNotTheMeshsNetworkOrBroadcast(t *testing.T) {
+	for _, a := range []string{"10.44.0.0", "10.44.0.255"} {
+		got := loadErr(t, strings.Replace(validConfig, "address: 10.44.0.1", "address: "+a, 1))
+		if !strings.Contains(got, "sites.home-a.address") || !strings.Contains(got, "network or broadcast address") {
+			t.Errorf("%s: got %q", a, got)
+		}
+	}
+}
+
+// ssh.user is held to the rule a request's user is: never root, and never
+// another deployment's paisans- user, whose authorized_keys site admit would
+// otherwise write into. The deployment's own user and a user of the
+// owner's are accepted.
+func TestSSHUserIsNotRootOrAnotherDeployments(t *testing.T) {
+	for _, c := range []struct{ user, want string }{
+		{"root", "sites.home-a.ssh.user: root is never a deployment's user"},
+		{"paisans-0a0b", "sites.home-a.ssh.user: paisans-0a0b is another deployment's name; this deployment's own user is paisans-f2a9"},
+		{"paisans-f2a9", ""},
+		{"ubuntu", ""},
+	} {
+		got := loadErr(t, strings.Replace(validConfig, "user: ubuntu", "user: "+c.user, 1))
+		if c.want == "" && got != "" || !strings.Contains(got, c.want) {
+			t.Errorf("%s: got %q", c.user, got)
+		}
+	}
+}
+
+// mesh.subnet is written in its canonical form, the one spelling a request
+// carries, so a configuration validate accepts is one site request takes.
+func TestMeshSubnetIsWrittenCanonically(t *testing.T) {
+	for _, c := range []struct{ subnet, want string }{
+		{"10.44.0.0/024", `mesh.subnet: "10.44.0.0/024" is not written in its canonical form, 10.44.0.0/24`},
+		{"::ffff:10.44.0.0/120", `mesh.subnet: "::ffff:10.44.0.0/120" is not written in its canonical form`},
+	} {
+		got := loadErr(t, strings.Replace(validConfig, "subnet: 10.44.0.0/24", "subnet: "+c.subnet, 1))
+		if !strings.Contains(got, c.want) {
+			t.Errorf("%s: got %q\nwant it to say %q", c.subnet, got, c.want)
+		}
+	}
+}
+
+// A site address is written as plain dotted IPv4, as a request carries it.
+func TestSiteAddressIsWrittenCanonically(t *testing.T) {
+	got := loadErr(t, strings.Replace(validConfig, "address: 10.44.0.1", "address: ::ffff:10.44.0.1", 1))
+	if !strings.Contains(got, `sites.home-a.address: "::ffff:10.44.0.1" is not written as plain dotted IPv4, 10.44.0.1`) {
+		t.Errorf("got %q", got)
 	}
 }

@@ -7,14 +7,18 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
-// hostSites runs the host sites probe against dir in place of
-// render.HostSitesDir.
+// fixtureDeployment is the example configuration's deployment.
+var fixtureDeployment = deployment.Deployment{ID: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}
+
+// hostSites runs the host sites probe against dir in place of the fixture
+// deployment's render.HostSitesDir.
 func hostSites(t *testing.T, dir string) (string, error) {
 	t.Helper()
-	out, err := exec.Command("sh", "-c", strings.ReplaceAll(hostSitesProbe, render.HostSitesDir, dir)).CombinedOutput()
+	out, err := exec.Command("sh", "-c", strings.ReplaceAll(hostSitesProbe(fixtureDeployment), quote(render.HostSitesDir(fixtureDeployment)), quote(dir))).CombinedOutput()
 	return string(out), err
 }
 

@@ -1,0 +1,2 @@
+--public-ports is not needed: this site binds no port below 1024
+The request is for site status (roles: monitor). --public-ports lets every local user bind ports 80 to 1023 and is given only to a site that runs the toolkit's Caddy. Drop --public-ports. Nothing was read or changed.

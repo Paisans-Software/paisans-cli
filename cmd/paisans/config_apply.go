@@ -28,7 +28,7 @@ import (
 // applying them would undo whatever the newer version changed. After the
 // approval and before the first change: check each host's record, which
 // only reads. Then publish: apply --site before its first change, apply
-// without --site once its host prepare steps have made every site's store
+// without --site once its site prepare steps have made every site's store
 // and before any other step changes a host (see runConverge). What is
 // published is the bytes apply loaded and applies, never a second read.
 
@@ -52,6 +52,9 @@ type storeVersion interface {
 	// publish signs and pushes the version with execute; a dry run says
 	// it would, and returns nil.
 	publish(r ui.Reporter, execute bool) (*appliedVersion, error)
+	// next signs and pushes files as the version after prev, which publish
+	// returned earlier in the same run: what a step of the run wrote.
+	next(r ui.Reporter, prev *appliedVersion, files configstore.Files) (*appliedVersion, error)
 	// held is the version the sites hold already when the files are it,
 	// "" when the run has still to publish them.
 	held() (sha string, revision int)
@@ -73,6 +76,9 @@ type gathered struct {
 	parents  []string
 	same     string
 	revision int
+	// answers is how check's rollback is answered: at the terminal, or by
+	// --yes.
+	answers answerer
 }
 
 // gatherForApply gathers as config publish does, without the side effects
@@ -85,7 +91,7 @@ type gathered struct {
 // that are not the three of a version, a fork, a base that is not the
 // sites' newest version, a key no operator lists, and, with --execute, a run
 // that reaches no site. No base at all is a deployment's first version.
-func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *configstore.Files, cfg *config.Config, execute bool, stdin io.Reader, stdout io.Writer) (storeVersion, error) {
+func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *configstore.Files, cfg *config.Config, execute bool, ans answerer, stdin io.Reader, stdout io.Writer) (storeVersion, error) {
 	l, err := workstationOf(configPath)
 	if err != nil {
 		return nil, err
@@ -107,7 +113,7 @@ func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *confi
 	}
 	r.Section("configuration store")
 	sites := configTransports(cfg)
-	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{execute: execute}, stdin, stdout)
+	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{execute: execute, answers: ans}, stdin, stdout)
 	if err != nil {
 		return nil, err
 	}
@@ -135,13 +141,13 @@ func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *confi
 		return nil, &ui.Problem{Hint: "no site answered", Explain: "apply publishes the version it applies before the first change, and no site can take it. Nothing was applied.", Cause: configstore.UnreachedError(g)}
 	}
 	if execute {
-		if err := confirmPartial(stdin, stdout, g, len(sites)); err != nil {
+		if err := confirmPartial(ans, stdin, stdout, g, len(sites)); err != nil {
 			return nil, err
 		}
 	} else if !g.Majority {
 		r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), len(sites)), "--execute asks for the word "+partialWord+" at a terminal.")
 	}
-	v := &gathered{l: l, g: g, sites: sites, key: key, files: files, parents: parents, revision: 1}
+	v := &gathered{l: l, g: g, sites: sites, key: key, files: files, parents: parents, revision: 1, answers: ans}
 	if len(parents) == 1 {
 		cache, err := l.Cache()
 		if err != nil {
@@ -184,7 +190,7 @@ func (v *gathered) held() (string, int) {
 }
 
 func (v *gathered) check(r ui.Reporter, records map[string]grant.Record, execute bool, stdin io.Reader, stdout io.Writer) error {
-	return witness(r, records, v.revision, v.same, v.what(), execute, stdin, stdout)
+	return witness(r, records, v.revision, v.same, v.what(), execute, v.answers, stdin, stdout)
 }
 
 func (v *gathered) publish(r ui.Reporter, execute bool) (*appliedVersion, error) {
@@ -199,6 +205,20 @@ func (v *gathered) publish(r ui.Reporter, execute bool) (*appliedVersion, error)
 	}
 	s := r.Step("publish " + v.what())
 	sha, pushed, err := configstore.PublishFiles(v.l, v.g, v.files, v.sites, v.key, configSignWith(v.key), false, configNow())
+	return published(r, s, sha, pushed, err, v.revision, v.files)
+}
+
+func (v *gathered) next(r ui.Reporter, prev *appliedVersion, files configstore.Files) (*appliedVersion, error) {
+	s := r.Step(fmt.Sprintf("publish revision %d", prev.revision+1))
+	s.Detail("what this run recorded in secrets.enc.yaml, on %s", prev.sha[:12])
+	sha, pushed, err := configstore.PublishNext(v.l, v.g, prev.sha, prev.revision, files, v.sites, v.key, configSignWith(v.key), configNow())
+	return published(r, s, sha, pushed, err, prev.revision+1, files)
+}
+
+// published ends s, the step that published files as revision, from what
+// the publish returned: a site that missed the version is warned about, and
+// a version no site took, or none at all, stops the apply.
+func published(r ui.Reporter, s ui.Step, sha string, pushed []string, err error, revision int, files configstore.Files) (*appliedVersion, error) {
 	var pe *configstore.PushError
 	switch {
 	case errors.As(err, &pe) && len(pushed) == 0:
@@ -218,14 +238,14 @@ func (v *gathered) publish(r ui.Reporter, execute bool) (*appliedVersion, error)
 	default:
 		s.Done(sha[:12])
 	}
-	return &appliedVersion{sha: sha, revision: v.revision, files: v.files}, nil
+	return &appliedVersion{sha: sha, revision: revision, files: files}, nil
 }
 
 // pushFailure is why site did not take a version, as a sentence: a site
 // with no store is named with the command that makes one.
 func pushFailure(site string, err error) string {
 	if errors.Is(err, configstore.ErrNoStore) {
-		return site + " has no configuration store yet; paisans host prepare --site " + site + " --execute makes it."
+		return site + " has no configuration store yet; paisans site prepare --site " + site + " --execute makes it."
 	}
 	if err == nil {
 		return site + " did not answer."
@@ -234,7 +254,7 @@ func pushFailure(site string, err error) string {
 }
 
 // noSiteTook is the refusal when no site took the version: each site with
-// why, a site with no store named with the host prepare that makes it.
+// why, a site with no store named with the site prepare that makes it.
 func noSiteTook(pe *configstore.PushError) error {
 	var lines []string
 	for _, site := range slices.Sorted(maps.Keys(pe.Failed)) {
@@ -254,7 +274,7 @@ func noSiteTook(pe *configstore.PushError) error {
 // hash is the version being applied, "" for one not yet published, which
 // no record can hold; what names it. A dry run reports it, and says
 // --execute asks.
-func witness(r ui.Reporter, records map[string]grant.Record, revision int, hash, what string, execute bool, stdin io.Reader, stdout io.Writer) error {
+func witness(r ui.Reporter, records map[string]grant.Record, revision int, hash, what string, execute bool, ans answerer, stdin io.Reader, stdout io.Writer) error {
 	var other []string
 	for _, site := range slices.Sorted(maps.Keys(records)) {
 		c := records[site].Config
@@ -281,8 +301,39 @@ func witness(r ui.Reporter, records map[string]grant.Record, revision int, hash,
 		r.Warn(hint, why+" --execute asks for "+rollbackWord+".")
 		return nil
 	}
-	if err := confirmWord(stdin, stdout, rollbackWord, why+" Proceed only if you know why the host's version is gone from the sites."); err != nil {
+	if err := confirmWord(ans, stdin, stdout, rollbackWord, why+" Proceed only if you know why the host's version is gone from the sites."); err != nil {
 		return &ui.Problem{Hint: hint, Explain: why + "\n" + sentence(err.Error())}
+	}
+	return nil
+}
+
+// publishWritten publishes, as the version after the one s records, the
+// secrets.enc.yaml this apply wrote when it recorded what it made at Pocket
+// ID: written, the bytes it wrote, never the file read again, beside the
+// rest of s's version. The new version is the one s records, so the host
+// that runs what was recorded holds the revision that has it; as a step of
+// apply without --site it is also the run's, which every later step applies.
+// identity names it. Nothing written, or no version to build on, publishes
+// nothing.
+func (s *siteReview) publishWritten(r ui.Reporter, written []byte, store storeVersion, identity *runIdentity) error {
+	if s == nil || s.version == nil || written == nil || store == nil {
+		return nil
+	}
+	files := s.version.files
+	files.Secrets = written
+	v, err := store.next(r, s.version, files)
+	if err != nil {
+		return err
+	}
+	if v == nil {
+		return nil
+	}
+	s.version = v
+	if run := reviewedByRun; run != nil {
+		run.version = v
+	}
+	if identity != nil {
+		identity.applied(v.sha, v.revision)
 	}
 	return nil
 }

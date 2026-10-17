@@ -85,7 +85,7 @@ func TestLeftoversAreOnlyWhatIsProvablyOurs(t *testing.T) {
 func TestForeignUsersOfTheGatewaysCaddy(t *testing.T) {
 	cfg := fixture(t)
 	inv := &hostcheck.Inventory{
-		HostSites: []string{"/srv/caddy.d/blog.caddy"},
+		HostSites: []string{"/srv/paisans/f2a9/caddy.d/blog.caddy"},
 		Containers: []hostcheck.Container{
 			container("paisans-f2a9-infra-caddy-1", ours, "paisans-f2a9-infra", "caddy", 10, "host", "web"),
 			container("paisans-f2a9-chat-app-1", ours, "paisans-f2a9-chat", "app", 11, "web"),
@@ -102,11 +102,11 @@ func TestForeignUsersOfTheGatewaysCaddy(t *testing.T) {
 	if r.Leftover() {
 		t.Errorf("the gateway's own stacks read as left over: %+v", r.Stacks)
 	}
-	if !reflect.DeepEqual(r.HostSites, []string{"/srv/caddy.d/blog.caddy"}) {
+	if !reflect.DeepEqual(r.HostSites, []string{"/srv/paisans/f2a9/caddy.d/blog.caddy"}) {
 		t.Errorf("host sites = %v", r.HostSites)
 	}
 	lines := r.ForeignLines()
-	if want := []string{"site block /srv/caddy.d/blog.caddy, served by this deployment's Caddy"}; !reflect.DeepEqual(lines, want) {
+	if want := []string{"site block /srv/paisans/f2a9/caddy.d/blog.caddy, served by this deployment's Caddy"}; !reflect.DeepEqual(lines, want) {
 		t.Errorf("foreign lines = %q, want %q", lines, want)
 	}
 

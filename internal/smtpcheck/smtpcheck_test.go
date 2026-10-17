@@ -79,11 +79,16 @@ func TestForPasswordIsOneCheckPerSender(t *testing.T) {
 	if len(checks) != 2 {
 		t.Fatalf("checks = %+v, want one per sender", checks)
 	}
-	if c := checks[0]; c.Site != "home-a" || !slices.Equal(c.Apps, []string{"account", "health"}) {
+	if c := checks[0]; c.Site != "" || !slices.Equal(c.Apps, []string{"account", "health"}) {
 		t.Errorf("first = %+v", c)
 	}
-	if c := checks[1]; c.Site != "home-b" || c.SMTP.FromAddress != "id@example.org" {
+	if c := checks[1]; c.Site != "" || c.SMTP.FromAddress != "id@example.org" {
 		t.Errorf("second = %+v", c)
+	}
+	// A password is tried from the machine the command runs on, not a
+	// site: no site need be deployed, or even reachable, to set one.
+	if title := checks[0].Title(); !strings.HasSuffix(title, ", from this machine") {
+		t.Errorf("title = %q", title)
 	}
 	// An app's own password, once set, is its own path's alone.
 	secrets.Apps = map[string]map[string]any{"id": {"smtp_password": "own"}}
@@ -92,6 +97,21 @@ func TestForPasswordIsOneCheckPerSender(t *testing.T) {
 	}
 	if shared := smtpcheck.ForPassword(cfg, secrets, "external.smtp_password"); len(shared) != 1 {
 		t.Errorf("external.smtp_password still checks id: %+v", shared)
+	}
+}
+
+// An app placed on no site still has its password tried, since the try
+// runs from this machine.
+func TestForPasswordTriesAnAppOnNoSite(t *testing.T) {
+	cfg, secrets := deployment()
+	for name, app := range cfg.Apps {
+		app.Placement = config.Placement{Mode: config.PlacementPinned, Site: "nowhere"}
+		cfg.Apps[name] = app
+	}
+	for _, c := range smtpcheck.ForPassword(cfg, secrets, "external.smtp_password") {
+		if c.Skip != "" || c.Site != "" {
+			t.Errorf("check = %+v, want one tried from this machine", c)
+		}
 	}
 }
 
@@ -180,6 +200,33 @@ func TestSiteNotReached(t *testing.T) {
 	var e *smtpcheck.Error
 	if !errors.As(err, &e) || e.Dialled() {
 		t.Fatalf("err = %v, want one that never dialled", err)
+	}
+	// The stage reads the same from a site and from this machine, where
+	// there is no site to reach.
+	if got := e.Reply(); !strings.HasPrefix(got, "connect: ") {
+		t.Errorf("reply %q, want the connect stage", got)
+	}
+}
+
+// TryPassword goes past a check whose server cannot be reached from where it
+// is dialled, and says which ones: nothing was learned there, so it is not a
+// failure. Every other check is still made.
+func TestTryPasswordGoesPastAServerNotReached(t *testing.T) {
+	server := smtptest.New()
+	server.Users = map[string]string{"robot@example.org": password}
+	server.Unreachable = map[string]error{"": errors.New("dial tcp: connection refused")}
+	cfg, s := deployment()
+	tried, err := smtpcheck.TryPassword(server.Env(), cfg, s, "external.smtp_password", password, "paisans secrets rotate", false)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if len(tried.Unreached) == 0 || len(tried.Made) != 0 {
+		t.Fatalf("tried %+v", tried)
+	}
+	for _, u := range tried.Unreached {
+		if u.Dialled() || u.Check.From() != "this machine" {
+			t.Errorf("unreached %v", u)
+		}
 	}
 }
 

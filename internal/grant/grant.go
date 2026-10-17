@@ -1,6 +1,6 @@
 // Package grant is what a deployment's configuration grants on a host: who
 // may log in to it and what code runs there. Each host records the grant this
-// deployment last applied, and apply and host prepare show what would change
+// deployment last applied, and apply and site prepare show what would change
 // from that record before they change anything, so an operator approves an
 // added key or a changed image at a terminal rather than discovering it in a
 // plan line (docs/specs/2026-10-11-config-review.md).
@@ -26,7 +26,9 @@ import (
 
 // Grant is one site's grant.
 type Grant struct {
-	// Login is ssh.user, the account every key in Keys may log in as.
+	// Login is the login user from SSHUser(): the declared ssh.user, or the
+	// deployment's own user when none is declared. Every key in Keys may log
+	// in as it.
 	Login string
 	// Keys is one entry per key of every admin ssh.keys names, sorted by
 	// fingerprint.
@@ -34,9 +36,6 @@ type Grant struct {
 	// Images is one entry per service of every compose file the render
 	// writes for the site, sorted by stack and service.
 	Images []Image
-	// WebServer is the directory apply writes the operator's web server's
-	// files into, nil on a site with none.
-	WebServer *WebServer
 	// Blueprints is one entry per app on the site whose blueprint comes from
 	// a catalog, sorted by app: what decides the rest of that stack, since a
 	// catalog's author wrote its templates.
@@ -76,22 +75,15 @@ type Image struct {
 	Foundation bool `json:"foundation,omitempty"`
 }
 
-// WebServer is where apply writes the files the operator's web server
-// includes. It is a directory root writes into outside the deployment's own,
-// which is why it is reviewed.
-type WebServer struct {
-	IncludeDir string `json:"include_dir"`
-}
-
 // For computes site's grant from cfg and plan, plan being the render of cfg.
-// A nil plan computes the login and the keys alone, which is all host prepare
+// A nil plan computes the login and the keys alone, which is all site prepare
 // needs.
 func For(cfg *config.Config, plan *render.Plan, site string) (Grant, error) {
 	declared, ok := cfg.Sites[site]
 	if !ok {
 		return Grant{}, fmt.Errorf("no site %q is declared", site)
 	}
-	g := Grant{Login: declared.SSH.User, Keys: KeysOf(declared.SSH), WebServer: WebServerOf(declared)}
+	g := Grant{Login: declared.SSHUser(), Keys: KeysOf(declared.SSH)}
 	if plan != nil {
 		images, err := ImagesOf(plan, site)
 		if err != nil {
@@ -197,15 +189,4 @@ func sortImages(list []Image) {
 		}
 		return list[i].Service < list[j].Service
 	})
-}
-
-// WebServerOf is the include directory of a site whose apps the operator's
-// own web server serves, when paisans-stack.yaml names one. An include_dir left
-// unset is derived on the host by apply and written into paisans-stack.yaml, so
-// it is reviewed from the run after that; false writes nothing there.
-func WebServerOf(s config.Site) *WebServer {
-	if !s.Has(config.RoleMonitor) || s.WebServerManagedBy() != config.ManagedByExternal || s.WebServer == nil || s.WebServer.IncludeDir.Path == "" {
-		return nil
-	}
-	return &WebServer{IncludeDir: s.WebServer.IncludeDir.Path}
 }

@@ -1,0 +1,82 @@
+admit site home-a of f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01 as paisans-f2a9 on fake (ubuntu 24.04)
+
+step 1: claim the host
+step 2: create /etc/paisans
+step 3: record the sysctls' values before
+step 4: record what admit installs
+step 5: skip the mesh until its conf exists
+step 6: start paisans-f2a9's manager after the mesh
+step 7: delegate cgroups to users
+step 8: write the egress table
+step 9: install the egress unit
+step 10: load the egress table
+step 11: load br_netfilter
+step 12: load br_netfilter at boot
+step 13: write paisans-f2a9's daemon.json
+step 14: install paisans-f2a9's rootless Docker
+step 15: create /srv/paisans
+step 16: create /srv/paisans/f2a9
+step 17: create /etc/wireguard
+step 18: create /usr/local/libexec/paisans
+step 19: install the WireGuard helper
+step 20: install the helper's sudoers line
+step 21: allow 22/tcp
+step 22: allow 51820/udp
+step 23: allow all inbound on psns-f2a9
+step 24: allow 80/tcp
+step 25: allow 443/tcp
+step 26: allow 443/udp
+step 27: load softdog
+step 28: load softdog at boot
+step 29: give the watchdog to paisans-f2a9
+step 30: set the host's sysctls
+step 31: write the admission record
+
+step 32: add the operators' keys
+  keys: 2 operator keys into paisans-f2a9's authorized_keys, written as paisans-f2a9, and recorded in /srv/paisans/f2a9/.paisans/authorized_keys.owned for site prepare
+  run:
+    $ runuser -u paisans-f2a9 -- env -i HOME='/home/paisans-f2a9' PATH=/usr/bin:/bin:/usr/sbin:/sbin XDG_RUNTIME_DIR=/run/user/1001 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1001/bus DOCKER_HOST=unix:///run/user/1001/docker.sock sh -c 'umask 077; if [ -L '\''/srv/paisans/f2a9/.paisans'\'' ]; then echo '\''paisans: the state directory is a link, so the keys is not written'\''; exit 1; fi; [ -d '\''/srv/paisans/f2a9/.paisans'\'' ] || install -d -m 700 '\''/srv/paisans/f2a9/.paisans'\''; exec 9>>'\''/srv/paisans/f2a9/.paisans/lock'\''; flock -w 60 9 || { echo '\''paisans: another command holds the deployment lock'\''; exit 1; }; set -e; umask 077; mkdir -p "$HOME/.ssh"; chmod go-w "$HOME/.ssh"
+    $ tmp=$(mktemp -d); trap '\''rm -rf "$tmp"'\'' EXIT
+    $ awk -v k="$tmp/keys" -v s="$tmp/sidecar" '\''$0 == "--- sidecar ---" { out = 1; next } { if (out) print > s; else print > k }'\''
+    $ touch "$tmp/keys" "$tmp/sidecar"
+    $ f="$HOME/.ssh/authorized_keys"
+    $ { if [ -e "$f" ] || [ -L "$f" ]; then awk 1 "$f"; fi; cat "$tmp/keys"; } > "$HOME/.ssh/.authorized_keys.paisans-tmp"
+    $ mv -f "$HOME/.ssh/.authorized_keys.paisans-tmp" "$f"
+    $ cat "$tmp/sidecar" > /srv/paisans/f2a9/.paisans/authorized_keys.owned.paisans-tmp
+    $ mv -f /srv/paisans/f2a9/.paisans/authorized_keys.owned.paisans-tmp /srv/paisans/f2a9/.paisans/authorized_keys.owned'
+  stdin:
+    | ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB bob
+    | ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC bob
+    | --- sidecar ---
+    | # Keys site admit and site prepare added to this deployment's user's authorized_keys: <mark> <fingerprint> <name>. site prepare removes a line only when it is marked added here and ssh.keys no longer lists it.
+    | added SHA256:X75Mb3nqVpJG3UuCRMIO94EyEAtegd44QTYVIRv99HI bob
+    | added SHA256:zpa+NMqw+6z5XIib6AyyKOtOnilzIda0f4kqtWRHm88 bob
+
+present: docker: Engine 29.9.1
+present: package: docker-ce-rootless-extras installed
+present: package: uidmap installed
+present: package: nftables installed
+present: package: wireguard-tools installed
+present: package: git installed
+present: apparmor: rootlesskit's profile is loaded
+present: user: paisans-f2a9 exists, uid 1001, in no privileged group, and sudo grants it nothing beyond admit's helper
+present: user: paisans-f2a9 holds 165536-231071 in /etc/subuid
+present: user: paisans-f2a9 holds 165536-231071 in /etc/subgid
+present: egress: the host's on-link IPv6 prefixes, dropped: 2001:db8:1::/64
+present: linger: on for paisans-f2a9
+present: linger: paisans-f2a9's manager is running
+present: br_netfilter: nf_tables, which the host's iptables uses, is loaded
+present: daemon: /home/paisans-f2a9 (ext2/ext3) has 42.9 GB free
+present: mesh: nothing on this host overlaps 10.44.0.0/24
+present: public ports: nothing else answers on 80 or 443
+present: firewall: ufw active, its default policy left to the owner
+warning: delegation reaches paisans-f2a9's manager at its next start
+  Its manager is running, and restarting it would restart its Docker daemon and every container in it, so admit does not. cpuset and io limits apply after the host's next reboot.
+warning: watchdog: falling back to softdog
+  the watchdog will be softdog. It reboots the host when Patroni hangs, but not when the kernel does, and a hung kernel cannot fence itself any other way. A hardware or hypervisor watchdog is better: enable one in the firmware or the VM's settings, and admit again.
+warning: watchdog: paisans-f2a9's Patroni can reboot this machine
+  Patroni arms the watchdog and reboots the whole host when it stops renewing it, which is what makes its failover safe.
+warning: public ports: every local user on this host may bind ports 80 to 1023
+  net.ipv4.ip_unprivileged_port_start = 80 is host wide: no user's process needs root for a port from 80 up, the deployment's Caddy among them.
+warning: forwarding: this turns on routing between every interface on this host
+  The site has an endpoint, so it relays mesh traffic between sites behind NAT, which cannot dial each other. The firewall's forward policy governs what is routed.

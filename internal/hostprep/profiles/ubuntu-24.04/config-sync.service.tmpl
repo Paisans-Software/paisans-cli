@@ -1,7 +1,0 @@
-[Unit]
-Description=paisans {{.Token}}: fetch configuration versions from mesh peers
-After={{.WireGuardUnit}}
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/lib/{{.Prefix}}/config-sync.sh

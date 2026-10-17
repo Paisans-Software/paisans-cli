@@ -129,8 +129,8 @@ type SitePlan struct {
 	Networks   []string
 	Volumes    []string
 	Files      []File
-	// WebServer are the app's files in the include directory of the
-	// operator's web server, as the manifest records them.
+	// WebServer are the app's reference files for the host owner's web
+	// server, in the deployment's root, as the manifest records them.
 	WebServer []render.ManifestWebServer
 	Dir       Dir
 	// DataEntries are the stack directory's top level entries that hold no
@@ -393,6 +393,9 @@ func planSite(cfg *config.Config, app string, st SiteState) (SitePlan, error) {
 	inv := st.Inventory
 	if inv == nil {
 		return sp, fmt.Errorf("app remove: %s: the host was not read", st.Site)
+	}
+	if inv.Manifest && inv.ManifestErr != nil {
+		return sp, fmt.Errorf("app remove: %s: %w. Nothing was changed", st.Site, inv.ManifestErr)
 	}
 	if inv.Manifest && inv.ManifestFiles == nil {
 		return sp, fmt.Errorf("app remove: %s: %s is not readable as a manifest, so no file there is provably this deployment's. Nothing was changed", st.Site, inv.ManifestPath)

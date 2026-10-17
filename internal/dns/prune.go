@@ -2,6 +2,7 @@ package dns
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"sort"
@@ -168,8 +169,26 @@ func BuildPrune(ctx context.Context, provider Provider, cfg *config.Config, want
 	for _, n := range vouched {
 		rules.vouched[normalise(n)] = true
 	}
-	for _, w := range wants {
+	cache := map[string]zone{}
+	parent, rest := splitParent(wants)
+	for _, w := range rest {
 		rules.names = append(rules.names, w.Name)
+	}
+	if _, held, err := heldParent(ctx, provider, parent, cache); err != nil {
+		return nil, err
+	} else if held {
+		rules.names = append(rules.names, parent.Name)
+	}
+	// A no-mail DMARC policy dns init plans as Covered is not wanted: the
+	// two judge coverage the same way because prune asks dns init's plan.
+	covered, err := Build(ctx, provider, cfg.Deployment(), wants)
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range covered.Entries {
+		if e.Action == Covered {
+			delete(rules.wanted, e.Type+" "+e.Name)
+		}
 	}
 	for _, name := range cfg.SiteNames() {
 		for key, ip := range siteAddresses(cfg, name) {
@@ -213,16 +232,16 @@ func BuildSiteRemoval(ctx context.Context, provider Provider, before *config.Con
 	return plan, err
 }
 
-// BuildSiteEviction plans an eviction's DNS stage: BuildSiteRemoval's rules,
-// except that a record at a name the configuration without the site still
-// wants is deleted too. An evicted host may be hostile, and every visitor a
-// record sends it is one whose session it can read; a name still wanted
-// answers nothing until the apply that brings up the replacement creates its
-// record at the new address. Rules 1 to 4 still tie each record to the
-// evicted host alone: this deployment's comment, an address record, a name
-// of this deployment's, and the evicted site's own address, which no
-// remaining site shares.
-func BuildSiteEviction(ctx context.Context, provider Provider, before *config.Config, site string, after *config.Config) (*PrunePlan, error) {
+// BuildSiteCutoff plans the DNS stage of a removal with --host-gone:
+// BuildSiteRemoval's rules, except that a record at a name the configuration
+// without the site still wants is deleted too. A cut-off host may be hostile,
+// and every visitor a record sends it is one whose session it can read; a name
+// still wanted answers nothing until the apply that brings up the replacement
+// creates its record at the new address. Rules 1 to 4 still tie each record to
+// the cut-off host alone: this deployment's comment, an address record, a name
+// of this deployment's, and the cut-off site's own address, which no remaining
+// site shares.
+func BuildSiteCutoff(ctx context.Context, provider Provider, before *config.Config, site string, after *config.Config) (*PrunePlan, error) {
 	rules, err := siteRemovalRules(before, site, after)
 	if err != nil {
 		return nil, err
@@ -262,8 +281,11 @@ func siteRemovalRules(before *config.Config, site string, after *config.Config) 
 			}
 		}
 	}
+	// The registrable domain's policy is no address record's name, and its
+	// zone need not be the provider's.
 	if wants, err := Desired(before); err == nil {
-		for _, w := range wants {
+		_, rest := splitParent(wants)
+		for _, w := range rest {
 			rules.names = append(rules.names, w.Name)
 		}
 	}
@@ -295,7 +317,10 @@ func siteAddresses(cfg *config.Config, name string) map[string]string {
 func wantedSet(wants []Want) map[string][]string {
 	out := map[string][]string{} // type + " " + name -> sources
 	for _, w := range wants {
-		if w.Advisory || w.Leftover {
+		// The registrable domain's policy is wanted even where it is only
+		// checked: a lockdown one there is this deployment's dns init's, and
+		// the names below rely on it.
+		if w.Advisory && !w.Parent || w.Leftover || w.Guard {
 			continue
 		}
 		out[w.Type+" "+w.Name] = w.Sources
@@ -318,8 +343,23 @@ func planPrune(ctx context.Context, provider Provider, cfg *config.Config, rules
 	cache := map[string]zone{}
 	seen := map[string]bool{}
 	var zones []zone
-	for _, name := range append([]string{domain}, rules.names...) {
+	// A vouched name's zone is listed too, so a record outside every
+	// zone the configuration names (the registrable domain's policy once
+	// the configuration stops producing it) can still be vouched for.
+	names := append([]string{domain}, rules.names...)
+	vouchedOnly := map[string]bool{}
+	for n := range rules.vouched {
+		names = append(names, n)
+		vouchedOnly[n] = true
+	}
+	for _, n := range rules.names {
+		delete(vouchedOnly, n)
+	}
+	for _, name := range names {
 		z, err := FindZone(ctx, provider, name, cache)
+		if vouchedOnly[name] && errors.Is(err, errNoZone) {
+			continue
+		}
 		if err != nil {
 			return nil, nil, err
 		}
@@ -348,6 +388,8 @@ func planPrune(ctx context.Context, provider Provider, cfg *config.Config, rules
 			case address:
 			case !rules.mail:
 				reasons = append(reasons, fmt.Sprintf("it is a %s record; site remove removes only A and AAAA records, and dns prune removes a no-mail record nothing wants any more", typ))
+			case typ == "TXT" && strings.HasPrefix(name, "_dmarc.") && strings.Join(strings.Fields(txtText(r.Content)), " ") == dmarcSender:
+				reasons = append(reasons, "it is the DMARC policy dns init writes for a domain that sends mail and receives none, and that mail depends on it")
 			case !isLockdown(r):
 				reasons = append(reasons, fmt.Sprintf("it is a %s record holding something other than the no-mail content dns init writes at this kind of name; prune removes only A and AAAA records and those", typ))
 			}

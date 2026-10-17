@@ -610,8 +610,8 @@ func TestSMTPPasswordIsOwedOnlyWhenNothingCoversIt(t *testing.T) {
 		t.Error("owed with no smtp host declared")
 	}
 	why, ok := owedBy(t, withUptime(t, smtp), &config.Secrets{})["external.smtp_password"]
-	if !ok || !strings.Contains(why, "smtp.example.org") {
-		t.Errorf("not owed, or the reason does not name the host: %q", why)
+	if !ok || why != "for robot@example.org on smtp.example.org" {
+		t.Errorf("not owed, or the reason does not name the login and host: %q", why)
 	}
 	if _, ok := owedBy(t, withUptime(t, smtp), &config.Secrets{External: map[string]string{"smtp_password": "x"}})["external.smtp_password"]; ok {
 		t.Error("owed although external.smtp_password is set")
@@ -624,12 +624,12 @@ func TestSMTPPasswordIsOwedOnlyWhenNothingCoversIt(t *testing.T) {
 	}
 	allButMbin := &config.Secrets{Apps: map[string]map[string]any{"health": {"smtp_password": "x"}, "auth": {"smtp_password": "x"}, "account": {"smtp_password": "x"}}}
 	why, ok = owedBy(t, withUptime(t, smtp), allButMbin)["external.smtp_password"]
-	if !ok || !strings.Contains(why, "talk") {
+	if !ok {
 		t.Errorf("not owed for Mbin, which has no smtp_password of its own: %q", why)
 	}
 	uptimeAndAccount := &config.Secrets{Apps: map[string]map[string]any{"health": {"smtp_password": "x"}, "account": {"smtp_password": "x"}}}
 	why, ok = owedBy(t, withUptime(t, smtp), uptimeAndAccount)["external.smtp_password"]
-	if !ok || !strings.Contains(why, "auth") {
+	if !ok {
 		t.Errorf("not owed for Pocket ID, which has no smtp_password of its own: %q", why)
 	}
 }
@@ -654,7 +654,7 @@ func TestSMTPPasswordIsOwedOnlyWithAUsername(t *testing.T) {
 	talk.SMTP = &config.SMTP{Username: "talk@example.org"}
 	cfg.Apps["talk"] = talk
 	why, ok := owedBy(t, cfg, &config.Secrets{})["external.smtp_password"]
-	if !ok || !strings.Contains(why, "talk") {
+	if !ok {
 		t.Errorf("not owed for talk, whose own smtp block sets a username: %q", why)
 	}
 	own := &config.Secrets{Apps: map[string]map[string]any{"talk": {"smtp_password": "x"}}}

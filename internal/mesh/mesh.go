@@ -19,11 +19,14 @@ package mesh
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/netip"
 	"sort"
 	"strings"
+
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // Taken is a network something on a host already holds, and what holds it,
@@ -66,11 +69,14 @@ func Overlap(a, b netip.Prefix) bool {
 	return a.Contains(b.Addr()) || b.Contains(a.Addr())
 }
 
-// Clashes is every taken network that overlaps subnet, in the order given.
+// Clashes is every taken network that overlaps subnet, in the order given,
+// each What made visible: every caller quotes it in a refusal, and it
+// holds names a host printed.
 func Clashes(subnet netip.Prefix, taken []Taken) []Taken {
 	var out []Taken
 	for _, t := range taken {
 		if Overlap(subnet, t.Prefix) {
+			t.What = ui.Visible(t.What)
 			out = append(out, t)
 		}
 	}
@@ -79,45 +85,102 @@ func Clashes(subnet netip.Prefix, taken []Taken) []Taken {
 
 // Commands a probe runs. Each prints JSON on stdout and nothing else.
 const (
-	// RouteCommand lists the main routing table.
-	RouteCommand = "ip -j route"
+	// RouteCommand lists every routing table, not main alone: another VPN
+	// may keep its routes in a table of its own (Tailscale's 52, wg-quick's
+	// 51820), and they compete for the mesh's addresses all the same.
+	RouteCommand = "ip -j route show table all"
 	// AddrCommand lists every address on every interface.
 	AddrCommand = "ip -j addr"
 	// NetworksCommand inspects every Docker network, or prints an empty list
-	// when Docker is not installed yet: a host before `host prepare` has no
-	// networks, and its pools are still Docker's defaults.
-	NetworksCommand = `command -v docker >/dev/null 2>&1 || { echo '[]'; exit 0; }; ids=$(docker network ls -q); if [ -z "$ids" ]; then echo '[]'; else docker network inspect $ids; fi`
+	// when Docker is not installed yet: a host before `site prepare` has no
+	// networks, and its pools are still Docker's defaults. A Docker whose
+	// daemon does not answer prints dockerDown and the client's first line
+	// of error instead (Probed.DockerDown).
+	NetworksCommand = `command -v docker >/dev/null 2>&1 || { echo '[]'; exit 0; }; if ! ids=$(docker network ls -q 2>&1); then printf '` + dockerDown + `%s\n' "$(printf '%s\n' "$ids" | sed -n 1p)"; exit 0; fi; if [ -z "$ids" ]; then echo '[]'; else docker network inspect $ids; fi`
 	// DaemonConfig is Docker's daemon configuration, where
 	// default-address-pools is set when it is.
 	DaemonConfig = "/etc/docker/daemon.json"
+	// UserDaemonConfig names the deployment user's daemon configuration in
+	// messages: its rootless Docker reads ~/.config/docker/daemon.json.
+	UserDaemonConfig = "~/.config/docker/daemon.json"
+	// UserDaemonCommand prints whether the user's daemon.json is there and
+	// then its content, through the user's own shell, so $HOME is its home.
+	UserDaemonCommand = `f="$HOME/.config/docker/daemon.json"; if [ -f "$f" ]; then echo present; cat -- "$f"; else echo absent; fi`
 )
+
+// NetworksCommandFor is NetworksCommand with docker, the client and its
+// flags, in place of plain docker: site admit names the system socket.
+func NetworksCommandFor(docker string) string {
+	return strings.ReplaceAll(NetworksCommand, "docker network ", docker+" network ")
+}
+
+// dockerDown starts what NetworksCommand prints for a Docker that is
+// installed and whose daemon does not answer.
+const dockerDown = "paisans: dockerd does not answer: "
+
+// ErrDockerDown is a Docker that is installed and whose daemon does not
+// answer: its networks still exist and come back when it starts, so they
+// are not read as none.
+var ErrDockerDown = errors.New("Docker is installed and its daemon does not answer")
+
+// DockerDown reports whether the networks were not read because the Docker
+// installed on the host does not answer.
+func (p Probed) DockerDown() bool {
+	return strings.HasPrefix(strings.TrimSpace(p.Networks), dockerDown)
+}
 
 // LinkCommand prints iface's link as JSON, or "absent" when there is none.
 func LinkCommand(iface string) string {
 	return "ip -j link show dev " + iface + " 2>/dev/null || echo absent"
 }
 
-// ParseRoutes reads `ip -j route` and returns every route's destination as a
-// taken network, except the default route and routes through own, the
-// deployment's own interface, which are the mesh itself.
+// ParseRoutes reads RouteCommand's output and returns every route's
+// destination as a taken network, naming its table when it is not main,
+// except the default route, routes through own, the deployment's own
+// interface, which are the mesh itself, the local table's local and
+// broadcast entries, which are the host's own addresses and ParseAddrs
+// reads with their prefixes, and throw routes, which send a lookup on to
+// the next table and hold no address (Tailscale's table 52 throws the
+// host's own ranges). A multipath route names each of its interfaces.
 func ParseRoutes(out, own string) ([]Taken, error) {
 	var routes []struct {
-		Dst string `json:"dst"`
-		Dev string `json:"dev"`
+		Type     string `json:"type"`
+		Dst      string `json:"dst"`
+		Dev      string `json:"dev"`
+		Table    string `json:"table"`
+		Nexthops []struct {
+			Dev string `json:"dev"`
+		} `json:"nexthops"`
 	}
 	if err := decode(out, &routes); err != nil {
 		return nil, fmt.Errorf("unreadable `%s` output: %w", RouteCommand, err)
 	}
 	var taken []Taken
 	for _, r := range routes {
-		if r.Dst == "default" || r.Dev == own {
+		if r.Dst == "default" || r.Dev == own || r.Type == "local" || r.Type == "broadcast" || r.Type == "throw" {
 			continue
 		}
 		p, err := ParsePrefix(r.Dst)
 		if err != nil || !p.Addr().Is4() {
 			continue
 		}
-		taken = append(taken, Taken{Prefix: p, What: fmt.Sprintf("route %s dev %s", r.Dst, r.Dev), Dev: r.Dev})
+		var devs []string
+		for _, h := range r.Nexthops {
+			devs = append(devs, h.Dev)
+		}
+		what := "route " + r.Dst + " dev " + r.Dev
+		switch {
+		case r.Dev == "" && len(devs) > 0:
+			what = "route " + r.Dst + " dev " + strings.Join(devs, ", ")
+		case r.Dev == "" && r.Type != "":
+			what = "route " + r.Dst + " (" + r.Type + ")"
+		case r.Dev == "":
+			what = "route " + r.Dst
+		}
+		if r.Table != "" && r.Table != "main" {
+			what += " table " + r.Table
+		}
+		taken = append(taken, Taken{Prefix: p, What: what, Dev: r.Dev})
 	}
 	return taken, nil
 }
@@ -170,6 +233,9 @@ func ParseNetworks(out string) ([]Taken, error) {
 			} `json:"Config"`
 		} `json:"IPAM"`
 	}
+	if said, ok := strings.CutPrefix(strings.TrimSpace(out), dockerDown); ok {
+		return nil, fmt.Errorf("%w (%s), so its networks, which still exist and come back when it starts, cannot be read for what the mesh may overlap. Start it (systemctl start docker, or systemctl --user start docker as the user whose rootless daemon it is), or check why it does not answer, and run again", ErrDockerDown, said)
+	}
 	if err := decode(out, &networks); err != nil {
 		return nil, fmt.Errorf("unreadable `docker network inspect` output: %w", err)
 	}
@@ -201,7 +267,10 @@ var DefaultPools = []string{
 // Pools reads Docker's daemon.json and returns the address pools it will
 // allocate from: default-address-pools when the file sets it, and
 // DefaultPools otherwise.
-func Pools(daemonJSON string, found bool) ([]Taken, error) {
+func Pools(daemonJSON string, found bool, path string) ([]Taken, error) {
+	if path == "" {
+		path = DaemonConfig
+	}
 	var bases []string
 	configured := false
 	if found && strings.TrimSpace(daemonJSON) != "" {
@@ -211,7 +280,7 @@ func Pools(daemonJSON string, found bool) ([]Taken, error) {
 			} `json:"default-address-pools"`
 		}
 		if err := json.Unmarshal([]byte(daemonJSON), &daemon); err != nil {
-			return nil, fmt.Errorf("unreadable %s: %w", DaemonConfig, err)
+			return nil, fmt.Errorf("unreadable %s: %w", path, err)
 		}
 		for _, p := range daemon.Pools {
 			bases = append(bases, p.Base)
@@ -222,13 +291,13 @@ func Pools(daemonJSON string, found bool) ([]Taken, error) {
 	if !configured {
 		bases = DefaultPools
 	} else {
-		what = "Docker's address pool %s (" + DaemonConfig + ")"
+		what = "Docker's address pool %s (" + path + ")"
 	}
 	var taken []Taken
 	for _, b := range bases {
 		p, err := ParsePrefix(b)
 		if err != nil {
-			return nil, fmt.Errorf("%s: pool %q is not a network", DaemonConfig, b)
+			return nil, fmt.Errorf("%s: pool %q is not a network", path, b)
 		}
 		if p.Addr().Is4() {
 			taken = append(taken, Taken{Prefix: p, What: fmt.Sprintf(what, b)})
@@ -258,11 +327,19 @@ type Probed struct {
 	Routes, Addrs, Networks string
 	Daemon                  string
 	DaemonFound             bool
+	// DaemonPath is the file the pools came from, which Taken and Pools
+	// name; empty means DaemonConfig.
+	DaemonPath string
 }
 
-// Probe asks a host for its routes, addresses, Docker networks and Docker's
-// pools. It reads and never writes.
-func Probe(h Host) (Probed, error) {
+// Probe asks a host for its routes, addresses, Docker networks and the
+// system daemon's pools, from DaemonConfig, which `site admit` checks as
+// root. It reads and never writes.
+func Probe(h Host) (Probed, error) { return ProbeWith(h, "docker") }
+
+// ProbeWith is Probe with docker, the client and its flags, reading the
+// networks.
+func ProbeWith(h Host, docker string) (Probed, error) {
 	var p Probed
 	var err error
 	for _, step := range []struct {
@@ -271,7 +348,7 @@ func Probe(h Host) (Probed, error) {
 	}{
 		{RouteCommand, RouteCommand, &p.Routes},
 		{AddrCommand, AddrCommand, &p.Addrs},
-		{"docker network inspect", NetworksCommand, &p.Networks},
+		{"docker network inspect", NetworksCommandFor(docker), &p.Networks},
 	} {
 		out, runErr := h.Run(step.command)
 		if runErr != nil {
@@ -279,8 +356,43 @@ func Probe(h Host) (Probed, error) {
 		}
 		*step.into = out
 	}
+	p.DaemonPath = DaemonConfig
 	if p.Daemon, p.DaemonFound, err = h.ReadFile(DaemonConfig); err != nil {
 		return p, fmt.Errorf("%s: reading %s: %w", h.Describe(), DaemonConfig, err)
+	}
+	return p, nil
+}
+
+// ProbeUser is Probe for the deployment's user: its routes and addresses,
+// which are the host's, its own daemon's networks (the transport points
+// docker at it), and its own daemon's pools, from UserDaemonConfig. A
+// daemon that does not answer is marked down in Networks, as in Probe, and
+// Taken refuses it rather than reading it as no networks.
+func ProbeUser(h Host) (Probed, error) {
+	var p Probed
+	for _, step := range []struct {
+		name, command string
+		into          *string
+	}{
+		{RouteCommand, RouteCommand, &p.Routes},
+		{AddrCommand, AddrCommand, &p.Addrs},
+		{"docker network inspect", NetworksCommand, &p.Networks},
+	} {
+		out, err := h.Run(step.command)
+		if err != nil {
+			return p, fmt.Errorf("%s: `%s` failed: %v: %s", h.Describe(), step.name, err, strings.TrimSpace(out))
+		}
+		*step.into = out
+	}
+	out, err := h.Run(UserDaemonCommand)
+	if err != nil {
+		return p, fmt.Errorf("%s: reading %s: %v: %s", h.Describe(), UserDaemonConfig, err, strings.TrimSpace(out))
+	}
+	state, content, _ := strings.Cut(out, "\n")
+	p.DaemonPath = UserDaemonConfig
+	p.DaemonFound = strings.TrimSpace(state) == "present"
+	if p.DaemonFound {
+		p.Daemon = content
 	}
 	return p, nil
 }
@@ -301,7 +413,7 @@ func (p Probed) Taken(own, on string) ([]Taken, error) {
 	if err != nil {
 		return nil, err
 	}
-	pools, err := Pools(p.Daemon, p.DaemonFound)
+	pools, err := Pools(p.Daemon, p.DaemonFound, p.DaemonPath)
 	if err != nil {
 		return nil, err
 	}

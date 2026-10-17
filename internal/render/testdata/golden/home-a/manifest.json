@@ -2,11 +2,6 @@
   "version": 1,
   "files": [
     {
-      "path": "etc/wireguard/psns-f2a9.conf",
-      "sha256": "dc79aeeb2b36716c538422bc938fb6410be0462feaab9114bad0d738f2fad5bb",
-      "mode": "0600"
-    },
-    {
       "path": "srv/paisans/f2a9/account/.env",
       "sha256": "59f51255bc622dca25c3f1d12b5bee4a2ddca040a76e2fe9d3279946d5e32dc2",
       "mode": "0600"
@@ -18,7 +13,7 @@
     },
     {
       "path": "srv/paisans/f2a9/account/compose.yaml",
-      "sha256": "e9712659c085d69b21e23ff93e18d2ee2d28f9472528d9f0a41b8696df717d34",
+      "sha256": "6310b21c054937de1f69c7aae6560ba7d18cb7c38d16b14b49fbefea50fd6a61",
       "mode": "0644"
     },
     {
@@ -28,7 +23,7 @@
     },
     {
       "path": "srv/paisans/f2a9/auth/compose.yaml",
-      "sha256": "d54443a95effa0edf8b2825f4aac1107b5a526f0ad67e210cb83489826db3e51",
+      "sha256": "5ac9c98fb53a2db671614343b4315ee7272c6ded6ceb87a1a2db129238d5fdf7",
       "mode": "0644"
     },
     {
@@ -58,12 +53,12 @@
     },
     {
       "path": "srv/paisans/f2a9/blog/config.ini",
-      "sha256": "b130fefc4db9f9a0fa0ec04db6d94e4a3c8a754690dfb94af26e7cd6035c94ef",
+      "sha256": "a08a6a314f7e72af5fcd879b0a048bad2fd43ec024af534bbebd54ed2658bca0",
       "mode": "0600"
     },
     {
       "path": "srv/paisans/f2a9/infra/compose.yaml",
-      "sha256": "13af9664c586e926a87de404d882bc5f10ae3a989ef5b53b46dfabe7265721b0",
+      "sha256": "a4dda0d9d37ca89bccbb6c6f2358ac18a96a3214953039041bcb3ad3c9760a41",
       "mode": "0644"
     },
     {
@@ -78,7 +73,7 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/haproxy/haproxy.cfg",
-      "sha256": "3a965e692f92cae158710a13a1b77e99c4c98739b414b59b2f8b3a3a4ad80206",
+      "sha256": "03b5fa12641e0ce3a77e1299b263b1de1e35bdf42f46683ee1af9d39c86c5d4c",
       "mode": "0644"
     },
     {
@@ -93,12 +88,17 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/patroni.env",
-      "sha256": "8e0fc9cabb23d9691d199819501571d557d123453cf726e488ee7923c99ec7aa",
+      "sha256": "305df9737919a9d7f2a5f3264a20fbd2a8584749ffcbc6a5256a9e2c9e62a8ad",
+      "mode": "0600"
+    },
+    {
+      "path": "srv/paisans/f2a9/psns-f2a9.conf",
+      "sha256": "dc79aeeb2b36716c538422bc938fb6410be0462feaab9114bad0d738f2fad5bb",
       "mode": "0600"
     },
     {
       "path": "srv/paisans/f2a9/talk/.env",
-      "sha256": "eca09d45555e06fdadc104969e9d7f1821c0f67afbb41af1874aede9e051a017",
+      "sha256": "334192d719a36aad7f395888a66aea672dbc347f18f0afb3ca32aff050b1b4d8",
       "mode": "0600"
     },
     {
@@ -128,13 +128,16 @@
     },
     {
       "path": "srv/paisans/f2a9/wiki/bootstrap.env",
-      "sha256": "c22b0eb6702007f8225be30f75ba98fbdaeb362bfc540f807d936017b08a600e",
+      "sha256": "598495c332a5a1d45e5c9dae461c368fb90d2085a1d7286595242656ce2af0d3",
       "mode": "0600"
     },
     {
       "path": "srv/paisans/f2a9/wiki/compose.yaml",
-      "sha256": "08c6a063f3e1a51e3e2faf92aa2dcf44eb1eca15a652b856a0ffdf4cdcdf2746",
+      "sha256": "c7f3b291f8dbdc9a6ba6a67ba575089cca6915520c2dfa77a1e3adaeb53aced6",
       "mode": "0644"
     }
-  ]
+  ],
+  "toolkit_version": "<version>",
+  "toolkit_commit": "<commit>",
+  "toolkit_modified": false
 }

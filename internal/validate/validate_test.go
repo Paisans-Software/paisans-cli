@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/validate"
 )
@@ -34,7 +35,8 @@ func TestRulesFire(t *testing.T) {
 		{"account-without-pocket-id", "account-without-pocket-id", validate.Refuse},
 		{"account-login-link-disabled", "account-login-link-disabled", validate.Refuse},
 		{"account-under-pocket-id-management", "account-under-pocket-id-management", validate.Refuse},
-		{"operators-fewer-than-two", "operators-fewer-than-two", validate.Refuse},
+		{"operators-fewer-than-two", "operators-fewer-than-two", validate.Warn},
+		{"operators-none", "operators-none", validate.Refuse},
 		{"pocket-id-management-unset", "pocket-id-management-unset", validate.Refuse},
 		{"pocket-id-setting-managed", "pocket-id-setting-managed", validate.Refuse},
 		{"pocket-id-without-account", "pocket-id-without-account", validate.Refuse},
@@ -71,7 +73,6 @@ func TestRulesFire(t *testing.T) {
 		{"floating-image-tag", "floating-image-tag", validate.Refuse},
 		{"cluster-placement-without-a-cluster", "cluster-placement-without-a-cluster", validate.Refuse},
 		{"even-etcd-voters", "even-etcd-voters", validate.Warn},
-		{"mesh-subnet-is-not-private", "mesh-subnet-is-not-private", validate.Warn},
 		{"pinned-app-on-witness", "pinned-app-on-witness", validate.Warn},
 		{"gateway-on-data-site", "gateway-on-data-site", validate.Warn},
 		{"pocket-id-file-backend", "pocket-id-file-backend", validate.Warn},
@@ -80,7 +81,6 @@ func TestRulesFire(t *testing.T) {
 		{"mbin-rabbitmq-across-sites", "mbin-rabbitmq-across-sites", validate.Warn},
 		{"pocket-id-standby-marker-unknown", "pocket-id-standby-marker-unknown", validate.Warn},
 		{"image-for-absent-postgres", "image-for-absent-postgres", validate.Warn},
-		{"watchdog-off-on-data-site", "watchdog-off-on-data-site", validate.Warn},
 		{"acme-provider-needs-an-image", "acme-provider-needs-an-image", validate.Refuse},
 		{"acme-image-is-stock-caddy", "acme-image-is-stock-caddy", validate.Refuse},
 		{"acme-image-is-latest", "acme-image-is-latest", validate.Refuse},
@@ -132,7 +132,7 @@ func TestRulesFire(t *testing.T) {
 		{"monitor-without-public-address", "monitor-without-public-address", validate.Refuse},
 		{"web-server-outside-monitor", "web-server-outside-monitor", validate.Refuse},
 		{"web-server-listen-managed-by", "web-server-listen-managed-by", validate.Refuse},
-		{"web-server-listen-public", "web-server-listen-public", validate.Refuse},
+		{"web-server-listen-not-this-host", "web-server-listen-not-this-host", validate.Refuse},
 		{"web-server-listen-bypasses-firewall", "web-server-listen-bypasses-firewall", validate.Warn},
 		{"web-server-external-serves-one-app", "web-server-external-serves-one-app", validate.Refuse},
 		{"voters-share-a-relay", "voters-share-a-relay", validate.Refuse},
@@ -640,9 +640,10 @@ func TestARolelessSiteStillHostsOtherBlueprints(t *testing.T) {
 }
 
 // A listen address is where Docker publishes the app for the operator's web
-// server. Loopback is quiet; a LAN address or the site's own mesh address is
-// allowed with the firewall warning; anything the internet or another host
-// could be reached on is refused. 10.44.0.1 is RFC 1918 as well as inside the
+// server, which runs on the same host. Loopback is quiet; the site's own mesh
+// address is allowed with a warning, since the firewall lets the mesh in;
+// anything else is refused, a LAN address included, as site request refuses
+// it. 10.44.0.1 is inside the
 // mesh, but it is another site's address, which nothing on this host binds.
 func TestWebServerListenAddresses(t *testing.T) {
 	for _, tc := range []struct {
@@ -650,7 +651,8 @@ func TestWebServerListenAddresses(t *testing.T) {
 		refused, warns bool
 	}{
 		{"127.0.0.1:8480", false, false},
-		{"192.168.1.20:8480", false, true},
+		{"192.168.1.20:8480", true, false},
+		{"100.101.102.103:8480", true, false},
 		{"10.44.0.4:8480", false, true},
 		{"10.44.0.1:8480", true, false},
 		{"203.0.113.20:8480", true, false},
@@ -661,8 +663,23 @@ func TestWebServerListenAddresses(t *testing.T) {
 		site.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: tc.listen}
 		cfg.Sites["watch"] = site
 		result := validate.Check(cfg)
-		if result.Has("web-server-listen-public") != tc.refused || result.Has("web-server-listen-bypasses-firewall") != tc.warns {
+		if result.Has("web-server-listen-not-this-host") != tc.refused || result.Has("web-server-listen-bypasses-firewall") != tc.warns {
 			t.Errorf("%s: %v", tc.listen, result.Findings)
+		}
+		// Rootless Docker publishes through rootlesskit, on the host's own
+		// network stack, so ufw does apply: the reason is the route around
+		// the web server, and for the mesh address the firewall letting
+		// the mesh in whole.
+		for _, f := range result.Findings {
+			text := f.Hint + " " + f.Message
+			switch {
+			case strings.Contains(text, "iptables") || strings.Contains(text, "in front of ufw") || strings.Contains(text, "firewall misses"):
+				t.Errorf("%s: %s says Docker bypasses the firewall: %s", tc.listen, f.Rule, text)
+			case f.Rule == "web-server-listen-not-this-host" && !strings.Contains(f.Message, "around your web server"):
+				t.Errorf("%s: %s", tc.listen, text)
+			case f.Rule == "web-server-listen-bypasses-firewall" && !strings.Contains(f.Message, "lets the mesh in"):
+				t.Errorf("%s: %s", tc.listen, text)
+			}
 		}
 	}
 }
@@ -678,31 +695,20 @@ func TestExternalWebServerNeedsListen(t *testing.T) {
 	}
 }
 
-// include_dir is where apply writes for the operator's web server: it fits
-// mode external alone, and must be a plain absolute path. false fits either.
-func TestWebServerIncludeDir(t *testing.T) {
-	for _, tc := range []struct {
-		mode config.ManagedBy
-		dir  config.IncludeDir
-		rule string
-	}{
-		{config.ManagedByExternal, config.IncludeDir{Path: "/opt/caddy/paisans.d"}, ""},
-		{config.ManagedByExternal, config.IncludeDir{Off: true}, ""},
-		{config.ManagedByExternal, config.IncludeDir{Path: "paisans.d"}, "web-server-include-dir-path"},
-		{config.ManagedByExternal, config.IncludeDir{Path: "/etc/nginx/*"}, "web-server-include-dir-path"},
-		{config.ManagedByPaisans, config.IncludeDir{Path: "/opt/caddy/paisans.d"}, "web-server-include-dir-managed-by"},
-	} {
-		cfg := load(t, "uptime-without-smtp")
-		site := cfg.Sites["watch"]
-		site.WebServer = &config.WebServer{ManagedBy: tc.mode, IncludeDir: tc.dir}
-		if tc.mode == config.ManagedByExternal {
-			site.WebServer.Listen = "127.0.0.1:8480"
-		}
-		cfg.Sites["watch"] = site
-		result := validate.Check(cfg)
-		for _, rule := range []string{"web-server-include-dir-path", "web-server-include-dir-managed-by"} {
-			if want := rule == tc.rule; refusedFor(result, rule, "sites.watch.web_server.include_dir") != want {
-				t.Errorf("%s %+v: %s refused %v, want %v: %v", tc.mode, tc.dir, rule, !want, want, result.Findings)
+// include_dir is refused by name, whatever it holds: nothing is written into
+// the owner's web server, so there is nothing for it to name.
+func TestIncludeDirIsRefused(t *testing.T) {
+	for _, dir := range []config.IncludeDir{{Set: true}} {
+		for _, mode := range []config.ManagedBy{config.ManagedByExternal, config.ManagedByPaisans} {
+			cfg := load(t, "uptime-without-smtp")
+			site := cfg.Sites["watch"]
+			site.WebServer = &config.WebServer{ManagedBy: mode, IncludeDir: dir}
+			if mode == config.ManagedByExternal {
+				site.WebServer.Listen = "127.0.0.1:8480"
+			}
+			cfg.Sites["watch"] = site
+			if !refusedFor(validate.Check(cfg), "web-server-include-dir", "sites.watch.web_server.include_dir") {
+				t.Errorf("%s include_dir %+v accepted: %v", mode, dir, validate.Check(cfg).Findings)
 			}
 		}
 	}
@@ -721,16 +727,26 @@ func TestACMEProviderNeedsAnImageForAMonitorsCaddy(t *testing.T) {
 	}
 }
 
-// Carrier grade NAT space, which Tailscale uses, is as private to the site as
-// RFC 1918: allowed as a listen address, with the firewall warning.
-func TestACGNATListenIsWarnedNotRefused(t *testing.T) {
-	cfg := load(t, "uptime-without-smtp")
-	site := cfg.Sites["watch"]
-	site.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "100.101.102.103:8480"}
-	cfg.Sites["watch"] = site
-	result := validate.Check(cfg)
-	if result.Has("web-server-listen-public") || !result.Has("web-server-listen-bypasses-firewall") {
-		t.Fatalf("%v", result.Findings)
+// validate holds a listen to the rule site request does, so a listen it
+// accepts is one the site's request carries, and its refusal recommends
+// loopback.
+func TestWebServerListenIsWhatTheRequestAccepts(t *testing.T) {
+	for _, listen := range []string{"127.0.0.1:8480", "10.44.0.4:8480", "192.168.1.20:8480", "100.101.102.103:8480", "127.0.0.1:08480"} {
+		cfg := load(t, "uptime-without-smtp")
+		site := cfg.Sites["watch"]
+		site.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: listen}
+		cfg.Sites["watch"] = site
+		refused := len(validate.Check(cfg).Refusals()) > 0
+		_, err := admission.Build(cfg, "watch")
+		if refused == (err == nil) {
+			t.Errorf("%s: validate refused %v, site request refused %v (%v)", listen, refused, err != nil, err)
+		}
+	}
+	cfg := load(t, "web-server-listen-not-this-host")
+	for _, f := range validate.Check(cfg).Refusals() {
+		if f.Rule == "web-server-listen-not-this-host" && !strings.Contains(f.Message, "Use loopback, 127.0.0.1") {
+			t.Errorf("the hint does not recommend loopback: %s", f)
+		}
 	}
 }
 
@@ -823,30 +839,6 @@ func TestACMEImageMayMoveWithinAMajorVersion(t *testing.T) {
 		if !refusedFor(validate.Check(cfg), "acme-image-is-latest", "acme.image") {
 			t.Errorf("%s was not refused, and it crosses Caddy major versions", image)
 		}
-	}
-}
-
-// The watchdog warning names the mechanism that is actually rendered. Spilo
-// strips every PATRONI_* variable before it starts Patroni, so the mode is set
-// in SPILO_CONFIGURATION, and a warning that sent the operator looking for
-// PATRONI_WATCHDOG_MODE in patroni.env would send them looking for nothing.
-func TestWatchdogWarningNamesSpiloConfiguration(t *testing.T) {
-	result := validate.Check(load(t, "watchdog-off-on-data-site"))
-	found := false
-	for _, f := range result.Findings {
-		if f.Rule != "watchdog-off-on-data-site" {
-			continue
-		}
-		found = true
-		if !strings.Contains(f.Message, "SPILO_CONFIGURATION") {
-			t.Errorf("the warning does not name SPILO_CONFIGURATION: %s", f.Message)
-		}
-		if strings.Contains(f.Message, "PATRONI_WATCHDOG_MODE") {
-			t.Errorf("the warning names PATRONI_WATCHDOG_MODE, which Spilo never passes to Patroni: %s", f.Message)
-		}
-	}
-	if !found {
-		t.Fatalf("the watchdog warning did not fire: %v", result.Findings)
 	}
 }
 
@@ -944,4 +936,132 @@ func TestAKeyTheTemplateWritesIsRefusedBeforeRender(t *testing.T) {
 			t.Errorf("public talk: %s refused, but its template does not write it", f.Key)
 		}
 	}
+}
+
+// warnedFor reports whether rule warned about exactly the given key.
+func warnedFor(result validate.Result, rule, key string) bool {
+	for _, f := range result.Warnings() {
+		if f.Rule == rule && f.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
+func withInfra(t *testing.T, infra config.Infra) *config.Config {
+	t.Helper()
+	cfg := load(t, "valid")
+	cfg.Infra = infra
+	return cfg
+}
+
+// An override of an image the toolkit's code speaks to stays inside the
+// versions that code is written against, as the foundation's own track must.
+func TestAnInfraOverrideStaysOnASupportedVersion(t *testing.T) {
+	for key, ref := range map[string]string{
+		"etcd":    "gcr.io/etcd-development/etcd:v3.6.*",
+		"haproxy": "docker.io/library/haproxy:3.2.1-alpine",
+		"garage":  "docker.io/dxflrs/garage:v1.1.0",
+	} {
+		cfg := withInfra(t, config.Infra{Images: map[string]string{key: ref}})
+		if validate.Check(cfg).Has("infra-image-unsupported-version") {
+			t.Errorf("%s: %s was refused", key, ref)
+		}
+	}
+	for key, ref := range map[string]string{
+		"etcd":    "gcr.io/etcd-development/etcd:v4.0.0",
+		"haproxy": "docker.io/library/haproxy:*.0.1-alpine",
+		"garage":  "docker.io/dxflrs/garage:v2.0.0",
+	} {
+		cfg := withInfra(t, config.Infra{Images: map[string]string{key: ref}})
+		if !refusedFor(validate.Check(cfg), "infra-image-unsupported-version", "infra.images."+key) {
+			t.Errorf("%s: %s was not refused", key, ref)
+		}
+	}
+}
+
+func TestADigestOnlyInfraOverrideIsRefused(t *testing.T) {
+	cfg := withInfra(t, config.Infra{Images: map[string]string{"etcd": "gcr.io/etcd-development/etcd@sha256:" + strings.Repeat("a", 64)}})
+	if !refusedFor(validate.Check(cfg), "infra-image-unsupported-version", "infra.images.etcd") {
+		t.Error("a digest with no tag was accepted, and its version cannot be checked")
+	}
+	cfg = withInfra(t, config.Infra{Images: map[string]string{"etcd": "gcr.io/etcd-development/etcd:v3.5.21@sha256:" + strings.Repeat("a", 64)}})
+	if validate.Check(cfg).Has("infra-image-unsupported-version") {
+		t.Error("a tag with its digest beside it was refused")
+	}
+}
+
+func TestAnInfraOverrideIsNotLatest(t *testing.T) {
+	for _, ref := range []string{"gcr.io/etcd-development/etcd:latest", "gcr.io/etcd-development/etcd"} {
+		cfg := withInfra(t, config.Infra{Images: map[string]string{"etcd": ref}})
+		if !refusedFor(validate.Check(cfg), "floating-image-tag", "infra.images.etcd") {
+			t.Errorf("%s was not refused", ref)
+		}
+	}
+}
+
+func TestSpiloOverridesAreCheckedByMajor(t *testing.T) {
+	spilo := func(major, ref string) config.Infra {
+		return config.Infra{Postgres: map[string]map[string]string{major: {"spilo": ref}}}
+	}
+	// valid.yaml runs Postgres 18.
+	if !refusedFor(validate.Check(withInfra(t, spilo("15", "ghcr.io/zalando/spilo-15:3.2-p1"))), "infra-postgres-unknown-major", "infra.postgres.15") {
+		t.Error("a major the toolkit does not run was accepted")
+	}
+	if !warnedFor(validate.Check(withInfra(t, spilo("17", "ghcr.io/zalando/spilo-17:4.0-p3"))), "infra-postgres-unused-major", "infra.postgres.17") {
+		t.Error("an entry for a major the deployment does not run was not warned about")
+	}
+	if !refusedFor(validate.Check(withInfra(t, spilo("18", "ghcr.io/zalando/spilo-18:5.0-p1"))), "infra-image-unsupported-version", "infra.postgres.18.spilo") {
+		t.Error("a Zalando Spilo outside the supported lines was accepted")
+	}
+	result := validate.Check(withInfra(t, spilo("18", "example.org/pg-ha:18.0-1")))
+	if !warnedFor(result, "infra-spilo-unchecked", "infra.postgres.18.spilo") {
+		t.Error("another provider's Spilo was not warned about")
+	}
+	if result.Has("infra-image-unsupported-version") {
+		t.Error("another provider's tag was held to Spilo's versions")
+	}
+}
+
+func TestAHeartbeatOverrideSaysItCoversPocketID(t *testing.T) {
+	cfg := withInfra(t, config.Infra{Images: map[string]string{"heartbeat": "docker.io/curlimages/curl:8.11.1"}})
+	if !warnedFor(validate.Check(cfg), "infra-heartbeat-covers-pocket-id", "infra.images.heartbeat") {
+		t.Error("the heartbeat override did not say it replaces the operators heartbeat too")
+	}
+}
+
+// The heartbeat image is not one the toolkit's code speaks to, so a digest
+// alone names it well enough.
+func TestADigestOnlyHeartbeatOverrideIsAccepted(t *testing.T) {
+	cfg := withInfra(t, config.Infra{Images: map[string]string{"heartbeat": "docker.io/curlimages/curl@sha256:" + strings.Repeat("a", 64)}})
+	if validate.Check(cfg).Has("infra-image-unsupported-version") {
+		t.Error("a digest-only heartbeat override was refused")
+	}
+}
+
+func TestAFloatingSpiloOverrideIsNotLatest(t *testing.T) {
+	cfg := withInfra(t, config.Infra{Postgres: map[string]map[string]string{"18": {"spilo": "ghcr.io/zalando/spilo-18:latest"}}})
+	if !refusedFor(validate.Check(cfg), "floating-image-tag", "infra.postgres.18.spilo") {
+		t.Error("a floating Spilo was not refused")
+	}
+}
+
+func TestASupportedZalandoSpiloIsAccepted(t *testing.T) {
+	cfg := withInfra(t, config.Infra{Postgres: map[string]map[string]string{"18": {"spilo": "ghcr.io/zalando/spilo-18:4.1-p3"}}})
+	if validate.Check(cfg).Has("infra-image-unsupported-version") {
+		t.Error("a Zalando Spilo on a supported line was refused")
+	}
+}
+
+func TestAnUnsupportedVersionRefusalNamesTheSupportedPrefix(t *testing.T) {
+	cfg := withInfra(t, config.Infra{Images: map[string]string{"etcd": "gcr.io/etcd-development/etcd:v4.0.0"}})
+	for _, f := range validate.Check(cfg).Findings {
+		if f.Rule == "infra-image-unsupported-version" {
+			if !strings.Contains(f.Message, "v3.") {
+				t.Errorf("the message does not name the supported prefix: %s", f.Message)
+			}
+			return
+		}
+	}
+	t.Error("not refused")
 }

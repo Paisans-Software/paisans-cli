@@ -12,7 +12,9 @@ import (
 // What follows is how the Ubuntu profile reads and writes ufw rules. Every
 // claim about ufw's behaviour is from its source at tag 0.36.2, the version
 // Ubuntu 24.04 ships (0.36.2-6), at https://git.launchpad.net/ufw/tree/src
-// (read 2026-10-06):
+// (read 2026-10-06). Ubuntu 22.04's 0.36.1 printed the same `ufw show added`
+// and `ufw status numbered` for all four rule shapes written here (observed
+// 2026-10-16):
 //
 //   - parser.py, UFWCommandRule.parse: `comment '<text>'` is accepted on an
 //     allow rule, and a comment containing a single quote is refused
@@ -28,15 +30,15 @@ import (
 //     place* rather than adding a second; deleting with no comment removes a
 //     rule that has one ("Allow removing a rule if the comment is empty").
 //
-// The last point decides two things here. A rule is identified by everything
-// except its action and comment, because that is how ufw identifies it, and
-// adding ours over someone else's would rewrite theirs. And adopting a rule an
-// earlier prepare added without a comment is one command, not two.
+// The last point decides how a rule is identified: by everything except its
+// action and comment, because that is how ufw identifies it, and adding ours
+// over someone else's would rewrite theirs.
 
-// ownerTag starts the comment on every rule host prepare adds for deployment
-// d, paisans-<token>:. It is how a later prepare tells its own rules from an
-// operator's and from another deployment's on the same host: a rule is ours
-// only when its comment starts with exactly this tag.
+// ownerTag starts the comment on every rule site admit adds for deployment
+// d, paisans-<token>:. It is how a later admit or evict tells the
+// deployment's rules from an owner's and from another deployment's on the
+// same host: a rule is ours only when its comment starts with exactly this
+// tag.
 func ownerTag(d deployment.Deployment) string { return d.Prefix() + ":" }
 
 // ufwSpec is a rule as ufw prints it back, without the comment.
@@ -147,8 +149,7 @@ func overlaps(a addedRule, r Rule) bool {
 }
 
 // planRules compares the rules a site derives with what ufw holds. It returns
-// the additions, which go before the default policy and enabling, and the
-// removals, which go after everything else.
+// the additions and the removals, which go after everything else.
 func planRules(tag string, rules []Rule, added []addedRule) (out Section, removals []Step, err error) {
 	var ssh *Rule
 	for i := range rules {
@@ -180,35 +181,25 @@ func planRules(tag string, rules []Rule, added []addedRule) (out Section, remova
 			// Ours, changed by hand since. Adding it again replaces it.
 			out.Steps = append(out.Steps, Step{Kinds: []string{KindFirewall}, Title: "allow " + r.String(), Describe: fmt.Sprintf("firewall: allow %s (%s), replacing `ufw %s`", r, r.Why, a.line), Command: "ufw " + ufwArgs(tag, r)})
 		case a.comment == "" && a.action == action:
-			// What an earlier version of host prepare added, before rules
-			// carried a comment. ufw replaces it in place when the commented
-			// rule is added, so there is no moment without it, and no second
-			// command: `ufw delete` of the uncommented form would match the
-			// commented rule too, and remove the very rule just adopted.
+			// The owner's, most often the SSH allow they added before
+			// enabling ufw. Adding ours would rewrite it in place, so it is
+			// left as it is.
 			out.Present = append(out.Present, fmt.Sprintf("firewall: %s allowed, by a rule without the paisans comment", r))
-			out.Steps = append(out.Steps, Step{
-				Kinds:    []string{KindFirewall},
-				Label:    "adopt",
-				Title:    "adopt rule " + r.String(),
-				Describe: fmt.Sprintf("firewall: mark `ufw %s` as host prepare's (%s); ufw rewrites it in place", a.line, r.Why),
-				Command:  "ufw " + ufwArgs(tag, r),
-			})
 		case a.action == action:
 			out.Foreign = append(out.Foreign, fmt.Sprintf("firewall: %s allowed by `ufw %s`", r, a.line))
 		case r.SSH:
 			if strings.HasPrefix(a.action, "deny") || strings.HasPrefix(a.action, "reject") {
-				// Refused, not warned: enabling the firewall with this in
-				// place shuts out the connection prepare runs over.
-				return out, nil, fmt.Errorf("firewall: `ufw %s` blocks SSH, and host prepare did not add it. Enabling the firewall with it in place would lock out the next connection; delete or change it yourself and prepare again", a.line)
+				// Refused, not warned: it keeps the operators out.
+				return out, nil, fmt.Errorf("firewall: `ufw %s` blocks SSH, and site admit did not add it. The operators could not log in as the deployment's user, and adding the allow would replace your rule; delete or change it yourself and admit again", a.line)
 			}
 			fallthrough
 		default:
 			// Adding ours would replace theirs, since ufw keeps one rule per
-			// match. A rule host prepare did not create is not its to rewrite.
+			// match. A rule site admit did not create is not its to rewrite.
 			out.Foreign = append(out.Foreign, fmt.Sprintf("firewall: `ufw %s`", a.line))
 			out.Warnings = append(out.Warnings, Warning{
 				Hint: "firewall: " + r.String() + " is governed by another ufw rule",
-				Detail: fmt.Sprintf("firewall: %s is governed by `ufw %s`, which host prepare did not add, so it is not allowed as derived (%s). Adding the allow would replace that rule, so it is left alone; change or delete it yourself if the allow is wanted",
+				Detail: fmt.Sprintf("firewall: %s is governed by `ufw %s`, which site admit did not add, so it is not allowed as derived (%s). Adding the allow would replace that rule, so it is left alone; change or delete it yourself if the allow is wanted",
 					r, a.line, r.Why)})
 		}
 	}
@@ -232,11 +223,11 @@ func planRules(tag string, rules []Rule, added []addedRule) (out Section, remova
 		// takes a console. A stale SSH allow costs almost nothing; a wrong
 		// removal costs the host.
 		if ssh != nil && overlaps(a, *ssh) {
-			out.Present = append(out.Present, fmt.Sprintf("firewall: `ufw %s` kept; host prepare never removes an SSH allow", a.line))
+			out.Present = append(out.Present, fmt.Sprintf("firewall: `ufw %s` kept; site admit never removes an SSH allow", a.line))
 			continue
 		}
 		// The same holds for the allow an earlier ssh.port was given, which
-		// is recognised by its comment. host prepare cannot know that sshd
+		// is recognised by its comment. site admit cannot know that sshd
 		// already listens on the new port, and if it does not, the old allow
 		// is the only way back in.
 		if a.comment == tag+" "+sshWhy {
@@ -249,14 +240,14 @@ func planRules(tag string, rules []Rule, added []addedRule) (out Section, remova
 				to = strconv.Itoa(ssh.Port)
 			}
 			// A warning, not a finding: deleting it is the operator's.
-			out.Warnings = append(out.Warnings, Warning{Hint: fmt.Sprintf("firewall: old SSH allow %s kept; delete it yourself once SSH on %s works", old, to)})
+			out.Warnings = append(out.Warnings, Warning{Hint: fmt.Sprintf("firewall: old SSH allow %s kept; delete it yourself once SSH on %s works", old, to), KeptSSH: old})
 			continue
 		}
 		removals = append(removals, Step{
 			Kinds:    []string{KindFirewall},
 			Label:    "remove",
 			Title:    "remove ufw rule " + a.key,
-			Describe: fmt.Sprintf("firewall: delete `ufw %s`, which host prepare added and this site's roles and configuration no longer give", a.line),
+			Describe: fmt.Sprintf("firewall: delete `ufw %s`, which site admit added and this site's roles and configuration no longer give", a.line),
 			Command:  "ufw delete " + a.line,
 		})
 	}

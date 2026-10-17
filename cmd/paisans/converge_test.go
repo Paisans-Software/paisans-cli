@@ -22,8 +22,10 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/storageadd"
+	"github.com/paisans-software/paisans-cli/internal/topology"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 	"github.com/paisans-software/paisans-cli/internal/validate"
+	"github.com/paisans-software/paisans-cli/internal/webserver"
 )
 
 // stageLabels names each stage for a test's plan lines. The run shows none
@@ -78,10 +80,10 @@ func sameLines(t *testing.T, got, want []string) {
 // names must resolve before wg-quick starts.
 var (
 	hostsAndDNS = []string{
-		"hosts: host prepare --site home-a",
-		"hosts: host prepare --site home-b",
-		"hosts: host prepare --site vm",
-		"hosts: host prepare --site watch",
+		"hosts: site prepare --site home-a",
+		"hosts: site prepare --site home-b",
+		"hosts: site prepare --site vm",
+		"hosts: site prepare --site watch",
 		"pull: pull --site home-a",
 		"pull: pull --site home-b",
 		"pull: pull --site vm",
@@ -135,7 +137,46 @@ func initial(names ...string) render.EtcdInitial {
 // A member the founded cluster's initial-cluster does not list joins it.
 func TestConvergeJoinsAMemberTheClusterDoesNotList(t *testing.T) {
 	steps := convergePlan(fixture(t), convergeState{Initial: map[string]render.EtcdInitial{"home-a": initial("home-a", "vm"), "vm": initial("home-a", "vm")}})
-	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: apply --site watch", "storage: storage add"}, passTwoPhase)...)
+	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: apply --site home-b", "other sites: apply --site vm", "other sites: apply --site watch", "other sites: apply --site home-a", "storage: storage add"}, passTwoPhase)...)
+}
+
+// A site declared [data, apps] joining beside a gateway outside etcd: the
+// site's apply follows its site add, and the gateway is applied once, among
+// the sites outside etcd that come next. The fixture's gateway, a witness in
+// etcd.members, is applied straight after the new site instead
+// (TestConvergeJoinsAMemberTheClusterDoesNotList).
+func TestConvergeJoinsADataAndAppsSiteBeforeAGatewayOutsideEtcd(t *testing.T) {
+	cfg := fixture(t)
+	vm := cfg.Sites["vm"]
+	vm.Roles = []config.Role{config.RoleGateway}
+	cfg.Sites["vm"] = vm
+	cfg.Etcd.Members = []string{"home-a", "home-b"}
+	steps := convergePlan(cfg, convergeState{Initial: map[string]render.EtcdInitial{"home-a": initial("home-a")}})
+	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{
+		"joining: site add home-b",
+		"other sites: apply --site home-b",
+		"other sites: apply --site vm",
+		"other sites: apply --site watch",
+		"other sites: apply --site home-a",
+		"storage: storage add",
+	}, passTwoPhase)...)
+}
+
+// A site declared [data] alone joins through its site add and is applied
+// in pass two, with no apply of its own between: it has no app stacks to
+// start.
+func TestConvergeJoinsADataOnlySiteThroughItsSiteAdd(t *testing.T) {
+	cfg := fixture(t)
+	site := cfg.Sites["home-b"]
+	site.Roles = []config.Role{config.RoleData}
+	cfg.Sites["home-b"] = site
+	steps := convergePlan(cfg, convergeState{Initial: map[string]render.EtcdInitial{"home-a": initial("home-a", "vm"), "vm": initial("home-a", "vm")}})
+	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{
+		"joining: site add home-b",
+		"other sites: apply --site watch",
+		"other sites: apply --site home-a",
+		"storage: storage add",
+	}, passTwoPhase)...)
 }
 
 // One data site runs, founded alone, and the configuration adds a witness and
@@ -144,7 +185,7 @@ func TestConvergeJoinsAMemberTheClusterDoesNotList(t *testing.T) {
 // add of its own, which would refuse it as not a data site and stop the run.
 func TestConvergeJoinsAWitnessThroughTheDataSitesSiteAdd(t *testing.T) {
 	steps := convergePlan(fixture(t), convergeState{Initial: map[string]render.EtcdInitial{"home-a": initial("home-a")}})
-	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: apply --site watch", "storage: storage add"}, passTwoPhase)...)
+	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: apply --site home-b", "other sites: apply --site vm", "other sites: apply --site watch", "other sites: apply --site home-a", "storage: storage add"}, passTwoPhase)...)
 }
 
 // A witness joining with no data site beside it is still planned, as its own
@@ -153,7 +194,7 @@ func TestConvergeJoinsAWitnessThroughTheDataSitesSiteAdd(t *testing.T) {
 func TestConvergePlansAWitnessJoiningAloneAsItsSiteAdd(t *testing.T) {
 	founded := initial("home-a", "home-b")
 	steps := convergePlan(fixture(t), convergeState{Initial: map[string]render.EtcdInitial{"home-a": founded, "home-b": founded}})
-	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"joining: site add vm", "other sites: apply --site watch", "storage: storage add"}, passTwoPhase)...)
+	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"joining: site add vm", "other sites: apply --site watch", "other sites: apply --site home-a", "other sites: apply --site home-b", "storage: storage add"}, passTwoPhase)...)
 }
 
 // A member a founding record lists is still being founded, though another
@@ -219,6 +260,212 @@ func TestConvergeStorageFollowsTheGarageSites(t *testing.T) {
 	samePlan(t, convergePlan(cfg, convergeState{}), slices.Concat(before, passTwoPhase)...)
 }
 
+// A founded member's first apply is otherwise pass two, after storage, and
+// storage reads Garage's layout through its container: a Garage site whose
+// containers had gone stopped every run at storage, before the apply that
+// would start them. Each Garage site is applied before storage.
+func TestConvergeAppliesAFoundedGarageSiteBeforeStorage(t *testing.T) {
+	cfg := fixture(t)
+	cfg.Storage.Garage.Sites = []string{"home-a"}
+	founded := initial("home-a", "home-b", "vm")
+	steps := convergePlan(cfg, convergeState{Initial: map[string]render.EtcdInitial{"home-a": founded, "home-b": founded, "vm": founded}})
+	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{
+		"other sites: apply --site watch",
+		"other sites: apply --site home-a",
+		"storage: storage init --site home-a",
+	}, passTwoPhase)...)
+}
+
+// shaped is the fixture's sites renamed and given roles: each name maps to
+// the fixture site it copies, with roles of its own. Garage is left out,
+// and etcd.members and cluster.sites follow from the roles.
+func shaped(t *testing.T, sites map[string]string, roles map[string][]config.Role) *config.Config {
+	t.Helper()
+	cfg := fixture(t)
+	from := cfg.Sites
+	cfg.Sites = map[string]config.Site{}
+	for name, src := range sites {
+		s := from[src]
+		s.Roles = roles[name]
+		cfg.Sites[name] = s
+	}
+	cfg.Storage.Garage.Sites = nil
+	cfg.Etcd.Members = cfg.DerivedEtcdMembers()
+	cfg.Cluster.Sites = nil
+	for _, name := range cfg.SiteNames() {
+		if cfg.Sites[name].Has(config.RoleData) {
+			cfg.Cluster.Sites = append(cfg.Cluster.Sites, name)
+		}
+	}
+	return cfg
+}
+
+// gatewayOutsideEtcd is the plan for edge, a gateway outside etcd, beside
+// site-a, a [data, apps] site being founded, and site-b when monitor is
+// set: edge is applied with its apps held back before site-a's founding
+// apply starts site-a's apps, and its full apply and pass two keep their
+// places. passTwo is pass two's order, which puts a monitor last.
+func gatewayOutsideEtcd(monitor bool, passTwo ...string) []string {
+	var hosts, pulls, monitored []string
+	sites := []string{"edge", "site-a"}
+	if monitor {
+		sites = append(sites, "site-b")
+		monitored = []string{"other sites: apply --site site-b"}
+	}
+	for _, s := range sites {
+		hosts = append(hosts, "hosts: site prepare --site "+s)
+		pulls = append(pulls, "pull: pull --site "+s)
+	}
+	var last []string
+	for _, s := range passTwo {
+		last = append(last, "pass two: apply --site "+s)
+	}
+	return slices.Concat(hosts, pulls, []string{
+		"dns: dns init",
+		"other sites: apply --site edge --hold-apps",
+		"founding: apply --site site-a",
+		"other sites: apply --site edge",
+	}, monitored, last)
+}
+
+// The staging shape of #407: a gateway that is only [gateway] is outside
+// etcd, and serves Pocket ID's public URL, which an app on the [data, apps]
+// site fetches its issuer's discovery document from as it starts. The
+// monitor sits behind its own web server.
+func TestConvergeAppliesAGatewayOutsideEtcdBeforeTheAppsSites(t *testing.T) {
+	cfg := shaped(t,
+		map[string]string{"edge": "vm", "site-a": "home-a", "site-b": "watch"},
+		map[string][]config.Role{"edge": {config.RoleGateway}, "site-a": {config.RoleData, config.RoleApps}, "site-b": {config.RoleMonitor}})
+	b := cfg.Sites["site-b"]
+	b.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "127.0.0.1:8480"}
+	cfg.Sites["site-b"] = b
+	if got := cfg.Etcd.Members; !slices.Equal(got, []string{"site-a"}) {
+		t.Fatalf("etcd.members follow as %v, want [site-a]", got)
+	}
+	samePlan(t, convergePlan(cfg, convergeState{}), gatewayOutsideEtcd(true, "edge", "site-a", "site-b")...)
+}
+
+// A gateway outside etcd that holds the monitor or the apps role too gets
+// its Caddy up before the data site's apps start, as one with the gateway
+// role alone does. Its own apps wait on the data site and Pocket ID, so the
+// early apply holds them back.
+func TestConvergeAppliesAGatewayWithOtherRolesBeforeTheAppsSites(t *testing.T) {
+	for _, tc := range []struct {
+		also    config.Role
+		passTwo []string
+	}{
+		{config.RoleMonitor, []string{"site-a", "edge"}},
+		{config.RoleApps, []string{"edge", "site-a"}},
+	} {
+		also := tc.also
+		cfg := shaped(t,
+			map[string]string{"edge": "vm", "site-a": "home-a"},
+			map[string][]config.Role{"edge": {config.RoleGateway, also}, "site-a": {config.RoleData, config.RoleApps}})
+		if got := cfg.Etcd.Members; !slices.Equal(got, []string{"site-a"}) {
+			t.Fatalf("%s: etcd.members follow as %v, want [site-a]", also, got)
+		}
+		t.Run(string(also), func(t *testing.T) {
+			samePlan(t, convergePlan(cfg, convergeState{}), gatewayOutsideEtcd(false, tc.passTwo...)...)
+		})
+	}
+}
+
+// The gateway's early apply holds back every app stack on the site: the
+// pinned gate and a pinned app, each with its client recorded, as on a host
+// rebuilt with the secrets kept. Pocket ID is not asked, and neither stack
+// starts, so the apply does not wait on a gate whose discovery fails while
+// the data sites are still being founded. Without the flag, the same apply
+// starts both.
+func TestApplyHoldAppsStartsNoAppStack(t *testing.T) {
+	for _, hold := range []bool{false, true} {
+		quietSSH(t)
+		rec := &ui.Recorder{}
+		saved := reporterOverride
+		reporterOverride = rec
+		args := []string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "--site", "vm"}
+		if hold {
+			args = append(args, "--hold-apps")
+		}
+		var err error
+		captureStdout(t, func() { err = runApply(args, strings.NewReader(""), io.Discard) })
+		reporterOverride = saved
+		if err != nil {
+			t.Fatalf("hold %v: %v\n%s", hold, err, rec.Lines())
+		}
+		for _, app := range []string{"gate", "chat"} {
+			if got := rec.Has("step", "wait for "+app); got == hold {
+				t.Errorf("hold %v: wait for %s planned %v:\n%s", hold, app, got, rec.Lines())
+			}
+		}
+		if got := rec.Has("warn", "Pocket ID not asked"); got == hold {
+			t.Errorf("hold %v: Pocket ID asked about %v:\n%s", hold, !got, rec.Lines())
+		}
+		for _, want := range []string{"start mesh psns-f2a9", "recreate infra", "reload gateway"} {
+			if !rec.Has("step", want) {
+				t.Errorf("hold %v: no %s:\n%s", hold, want, rec.Lines())
+			}
+		}
+	}
+}
+
+// apply --hold-apps is about one site, and starts no stack --only could
+// name. It takes no --overwrite, which a held stack's file would leave
+// unapplied.
+func TestApplyHoldAppsRefusesWithoutASiteOrWithOnly(t *testing.T) {
+	quietSSH(t)
+	for _, args := range [][]string{
+		{"--hold-apps"},
+		{"--site", "vm", "--hold-apps", "--only", "infra"},
+		{"--site", "vm", "--hold-apps", "--overwrite", "/srv/paisans/f2a9/gate/.env"},
+	} {
+		var err error
+		captureStdout(t, func() {
+			err = runApply(append([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath()}, args...), strings.NewReader(""), io.Discard)
+		})
+		if err == nil || !strings.Contains(err.Error(), "--hold-apps") {
+			t.Errorf("%v: %v", args, err)
+		}
+	}
+}
+
+// The dual-site shape: the gateway is a witness and the monitor, so an etcd
+// member, and is founded first, before either [data, apps] site.
+func TestConvergeFoundsAWitnessGatewayFirstOnTwoDataSites(t *testing.T) {
+	cfg := shaped(t,
+		map[string]string{"edge": "vm", "site-a": "home-a", "site-b": "home-b"},
+		map[string][]config.Role{"edge": {config.RoleGateway, config.RoleWitness, config.RoleMonitor}, "site-a": {config.RoleData, config.RoleApps}, "site-b": {config.RoleData, config.RoleApps}})
+	samePlan(t, convergePlan(cfg, convergeState{}),
+		"hosts: site prepare --site edge",
+		"hosts: site prepare --site site-a",
+		"hosts: site prepare --site site-b",
+		"pull: pull --site edge",
+		"pull: pull --site site-a",
+		"pull: pull --site site-b",
+		"dns: dns init",
+		"founding: apply --site edge",
+		"founding: apply --site site-a",
+		"founding: apply --site site-b",
+		"pass two: apply --site site-a",
+		"pass two: apply --site site-b",
+		"pass two: apply --site edge",
+	)
+}
+
+// One site holds the gateway, the data and the apps: its founding apply
+// starts Caddy with the rest, and it is applied once more in pass two.
+func TestConvergeFoundsASingleSite(t *testing.T) {
+	cfg := shaped(t,
+		map[string]string{"solo": "home-a"},
+		map[string][]config.Role{"solo": {config.RoleGateway, config.RoleData, config.RoleApps}})
+	samePlan(t, convergePlan(cfg, convergeState{}),
+		"hosts: site prepare --site solo",
+		"pull: pull --site solo",
+		"dns: dns init",
+		"founding: apply --site solo",
+		"pass two: apply --site solo",
+	)
+}
+
 // fakeConverge replaces each etcd record's read and the step runner; fail maps a
 // step's title to the error it returns the first time it runs.
 func fakeConverge(t *testing.T, fail map[string]error) *[]string {
@@ -260,7 +507,7 @@ func fakeConvergeArgs(t *testing.T, fail map[string]error) (*[]string, *[][]stri
 	// The run reads each gateway's deployment record once; here none has
 	// one yet. fakeGatewayReads says otherwise.
 	savedRegistry := registryHost
-	registryHost = func(string, config.Site, string, bool) registry.Runner { return noRecord{} }
+	registryHost = func(string, config.Site, string) registry.Runner { return noRecord{} }
 	// Making each declared operator reaches a host too; here every one has
 	// registered. fakeDeclaredOperators says otherwise.
 	fakeDeclaredOperators(t, registered)
@@ -271,7 +518,7 @@ func fakeConvergeArgs(t *testing.T, fail map[string]error) (*[]string, *[][]stri
 	convergeRun = func(args []string) error {
 		full = append(full, args)
 		title := strings.Join(args, " ")
-		for _, f := range []string{" --config", " --secrets", " --execute", " --sudo"} {
+		for _, f := range []string{" --config", " --secrets", " --execute"} {
 			if i := strings.Index(title, f); i >= 0 {
 				title = title[:i]
 			}
@@ -281,17 +528,17 @@ func fakeConvergeArgs(t *testing.T, fail map[string]error) (*[]string, *[][]stri
 		delete(fail, title)
 		return err
 	}
-	convergeReadInitial = func(*config.Config, string, bool) (render.EtcdInitial, bool, error) {
+	convergeReadInitial = func(*config.Config, string) (render.EtcdInitial, bool, error) {
 		return render.EtcdInitial{}, false, nil
 	}
 	// The run's review reads each site's grant record; here each already
 	// holds what the configuration grants, so nothing asks for approval.
 	// fakeRunGrants says otherwise.
 	savedRecord, savedGrantHost := convergeRecord, convergeGrantHost
-	convergeRecord = func(_ *config.Config, _ string, g grant.Grant, _ bool) (grant.Record, error) {
+	convergeRecord = func(_ *config.Config, _ string, g grant.Grant) (grant.Record, error) {
 		return grant.Update(grant.Record{}, g, grant.AllScope, time.Unix(0, 0), ""), nil
 	}
-	convergeGrantHost = func(*config.Config, string, bool) registry.Runner { return &memGrant{} }
+	convergeGrantHost = func(*config.Config, string) registry.Runner { return &memGrant{} }
 	// The review renders what the run applies, from secrets init may have
 	// generated; here init is a fake that generates nothing, so the render
 	// is one with no files, and so no images.
@@ -301,8 +548,8 @@ func fakeConvergeArgs(t *testing.T, fail map[string]error) (*[]string, *[][]stri
 	// reach; here every host is amd64, and everything else goes on to the
 	// host the test set.
 	savedHost := convergeHost
-	convergeHost = func(name string, site config.Site, sudo bool) apply.Transport {
-		return archTransport{savedHost(name, site, sudo), "amd64"}
+	convergeHost = func(name string, site config.Site) apply.Transport {
+		return archTransport{savedHost(name, site), "amd64"}
 	}
 	t.Cleanup(func() {
 		convergeHost = savedHost
@@ -319,7 +566,7 @@ func converge(t *testing.T, extra ...string) error {
 	t.Helper()
 	var err error
 	captureStdout(t, func() {
-		err = runApply(append([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "--sudo=false"}, extra...), strings.NewReader(""), io.Discard)
+		err = runApply(append([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath()}, extra...), strings.NewReader(""), io.Discard)
 	})
 	return err
 }
@@ -454,7 +701,7 @@ func TestConvergeRefusesSSH(t *testing.T) {
 func TestConvergeRefusesBeforeReadingAHost(t *testing.T) {
 	ran := fakeConverge(t, nil)
 	read := false
-	convergeReadInitial = func(*config.Config, string, bool) (render.EtcdInitial, bool, error) {
+	convergeReadInitial = func(*config.Config, string) (render.EtcdInitial, bool, error) {
 		read = true
 		return render.EtcdInitial{}, false, errors.New("no host should be read")
 	}
@@ -472,18 +719,19 @@ func TestConvergeRefusesBeforeReadingAHost(t *testing.T) {
 	}
 	rec := recordConverge(t)
 	captureStdout(t, func() {
-		err = runApply([]string{"--config", path, "--secrets", fixtureSecretsPath(), "--sudo=false"}, strings.NewReader(""), io.Discard)
+		err = runApply([]string{"--config", path, "--secrets", fixtureSecretsPath()}, strings.NewReader(""), io.Discard)
 	})
 	if err == nil || !strings.Contains(err.Error(), "was refused") {
 		t.Errorf("err = %v, want the configuration refused", err)
 	}
 	// The refusal stops the run, so its count line stays.
-	// The deployment and the version open the run, with its five events
-	// (the section, and each line's start and end), and the core catalog's
-	// two when the process has read it already; the findings follow.
-	opened := 5
-	if rec.Index("step", "core catalog") == 5 {
-		opened = 7
+	// The build, the deployment and the version open the run, with its
+	// seven events (the section, and each line's start and end), and the
+	// core catalog's two when the process has read it already; the
+	// findings follow.
+	opened := 7
+	if rec.Index("step", "core catalog") == 7 {
+		opened = 9
 	}
 	if rec.Index("section", "deployment") != 0 || rec.Index("section", "configuration") != opened || !rec.Has("result", "1 refusal") {
 		t.Errorf("not under configuration, or not counted:\n%s", rec.Lines())
@@ -522,7 +770,7 @@ func TestConvergeWithoutAnIDPlansInit(t *testing.T) {
 	fakeConverge(t, nil)
 	path := noID(t)
 	var err error
-	out := captureStdout(t, func() { err = runApply([]string{"--config", path, "--sudo=false"}, strings.NewReader(""), io.Discard) })
+	out := captureStdout(t, func() { err = runApply([]string{"--config", path}, strings.NewReader(""), io.Discard) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -543,7 +791,7 @@ func TestConvergeReplansAfterInit(t *testing.T) {
 	}
 	t.Cleanup(func() { convergeRead = saved })
 	founded := initial("home-a", "vm")
-	convergeReadInitial = func(_ *config.Config, m string, _ bool) (render.EtcdInitial, bool, error) {
+	convergeReadInitial = func(_ *config.Config, m string) (render.EtcdInitial, bool, error) {
 		if reads == 1 {
 			t.Errorf("%s's record read before init ran", m)
 		}
@@ -552,7 +800,7 @@ func TestConvergeReplansAfterInit(t *testing.T) {
 	if err := converge(t, "--execute"); err != nil {
 		t.Fatal(err)
 	}
-	sameLines(t, *ran, append([]string{"init"}, commands(slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: apply --site watch", "storage: storage add"}, passTwoPhase))...))
+	sameLines(t, *ran, append([]string{"init"}, commands(slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: apply --site home-b", "other sites: apply --site vm", "other sites: apply --site watch", "other sites: apply --site home-a", "storage: storage add"}, passTwoPhase))...))
 }
 
 // The dry run names what is left, the declared operators among it.
@@ -561,7 +809,7 @@ func TestConvergeSaysWhatIsLeft(t *testing.T) {
 	out := ""
 	captureStdout(t, func() {})
 	out = captureStdout(t, func() {
-		if err := runApply([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath(), "--sudo=false"}, strings.NewReader(""), io.Discard); err != nil {
+		if err := runApply([]string{"--config", fixtureConfig(), "--secrets", fixtureSecretsPath()}, strings.NewReader(""), io.Discard); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -608,10 +856,10 @@ func TestConvergeFoundsAMonitorMemberAndAppliesItLast(t *testing.T) {
 	}
 	got := strings.Join(titles(convergePlan(cfg, convergeState{})), "\n")
 	want := strings.Join([]string{
-		"hosts: host prepare --site home-a",
-		"hosts: host prepare --site home-b",
-		"hosts: host prepare --site vm",
-		"hosts: host prepare --site watch",
+		"hosts: site prepare --site home-a",
+		"hosts: site prepare --site home-b",
+		"hosts: site prepare --site vm",
+		"hosts: site prepare --site watch",
 		"pull: pull --site home-a",
 		"pull: pull --site home-b",
 		"pull: pull --site vm",
@@ -672,7 +920,7 @@ func TestNothingSaysApplyTakesOneSite(t *testing.T) {
 	if !strings.Contains(entry, "Without --site") {
 		t.Errorf("apply's usage entry does not say what it does without --site:%s", entry)
 	}
-	for name, run := range map[string]func([]string) error{"host prepare": runHostPrepare, "storage init": runStorageInit, "prune": runPrune} {
+	for name, run := range map[string]func([]string) error{"storage init": runStorageInit, "prune": runPrune} {
 		var err error
 		captureStdout(t, func() { err = run([]string{"--config", fixtureConfig()}) })
 		if err == nil || !strings.Contains(err.Error(), "the same reason apply --site takes one") {
@@ -699,7 +947,7 @@ func TestEveryPlannedStepParses(t *testing.T) {
 	}
 	// A pull is not a command: the run pulls a site's images itself.
 	steps = slices.DeleteFunc(steps, func(s convergeStep) bool { return s.Stage == stagePull })
-	for _, want := range []string{"init", "host prepare", "apply --site", "site add", "storage init", "storage add", "dns init"} {
+	for _, want := range []string{"init", "site prepare", "apply --site", "site add", "storage init", "storage add", "dns init"} {
 		if !commands[want] {
 			t.Fatalf("the plans hold no %s step: %v", want, commands)
 		}
@@ -710,7 +958,7 @@ func TestEveryPlannedStepParses(t *testing.T) {
 	t.Cleanup(func() { flagsOnly = saved })
 	for _, o := range []convergeOptions{
 		{Config: fixtureConfig()},
-		{Config: fixtureConfig(), Secrets: fixtureSecretsPath(), Execute: true, Sudo: true, Verbose: true, KeepImages: true, MinFree: "2G"},
+		{Config: fixtureConfig(), Secrets: fixtureSecretsPath(), Execute: true, Verbose: true, KeepImages: true, MinFree: "2G"},
 	} {
 		for _, s := range steps {
 			args := convergeFlags(s.Args, o)
@@ -763,11 +1011,11 @@ func TestConvergeJoinsADerivedMember(t *testing.T) {
 	founded := initial("home-a", "home-b", "vm")
 	steps := convergePlan(cfg, convergeState{Initial: map[string]render.EtcdInitial{"home-a": founded, "home-b": founded, "vm": founded}})
 	samePlan(t, steps,
-		"hosts: host prepare --site home-a",
-		"hosts: host prepare --site home-b",
-		"hosts: host prepare --site home-c",
-		"hosts: host prepare --site vm",
-		"hosts: host prepare --site watch",
+		"hosts: site prepare --site home-a",
+		"hosts: site prepare --site home-b",
+		"hosts: site prepare --site home-c",
+		"hosts: site prepare --site vm",
+		"hosts: site prepare --site watch",
 		"pull: pull --site home-a",
 		"pull: pull --site home-b",
 		"pull: pull --site home-c",
@@ -776,6 +1024,8 @@ func TestConvergeJoinsADerivedMember(t *testing.T) {
 		"dns: dns init",
 		"joining: site add home-c",
 		"other sites: apply --site watch",
+		"other sites: apply --site home-a",
+		"other sites: apply --site home-b",
 		"storage: storage add",
 		"pass two: apply --site home-a",
 		"pass two: apply --site home-b",
@@ -822,7 +1072,7 @@ func TestInitWhyNamesMissingSecrets(t *testing.T) {
 // ignored for the default paisans-stack.yaml.
 func TestApplyRefusesAStrayArgument(t *testing.T) {
 	fakeConverge(t, nil)
-	err := runApply([]string{"--sudo=false", "staging/paisans-stack.yaml"}, strings.NewReader(""), io.Discard)
+	err := runApply([]string{"staging/paisans-stack.yaml"}, strings.NewReader(""), io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "--config staging/paisans-stack.yaml") {
 		t.Errorf("err = %v", err)
 	}
@@ -851,8 +1101,8 @@ func TestApplySiteUsageNamesEveryFlag(t *testing.T) {
 // `paisans help execute`'s list of the commands that reach a host names secrets prune,
 // which reads the gateways' deployment records over ssh.
 func TestUsageHostListNamesSecretsPrune(t *testing.T) {
-	start := strings.Index(executeTopic, "host prepare, host deployments, host allow, host disallow, apply")
-	entry := strings.Join(strings.Fields(executeTopic[start:start+strings.Index(executeTopic[start:], "reach a host.")]), " ")
+	start := strings.Index(executeTopic, "site prepare, site deployments, apply")
+	entry := strings.Join(strings.Fields(executeTopic[start:start+strings.Index(executeTopic[start:], "are the only commands that")]), " ")
 	if !strings.Contains(entry, "secrets prune") {
 		t.Errorf("the commands that reach a host leave out secrets prune:\n%s", entry)
 	}
@@ -875,7 +1125,7 @@ func TestConvergeReadsEachEtcdRecordInAStep(t *testing.T) {
 	fakeConverge(t, nil)
 	rec := recordConverge(t)
 	var read []string
-	convergeReadInitial = func(_ *config.Config, m string, _ bool) (render.EtcdInitial, bool, error) {
+	convergeReadInitial = func(_ *config.Config, m string) (render.EtcdInitial, bool, error) {
 		last := rec.Events[len(rec.Events)-1]
 		if last.Kind != "step" || last.Text != "read "+m+"'s etcd record" {
 			t.Errorf("%s read outside its step; last event %+v", m, last)
@@ -909,7 +1159,7 @@ func TestEtcdReadsMarkAnUnfoundedMemberPending(t *testing.T) {
 	fakeConverge(t, nil)
 	rec := recordConverge(t)
 	founded := initial("home-a", "vm")
-	convergeReadInitial = func(_ *config.Config, m string, _ bool) (render.EtcdInitial, bool, error) {
+	convergeReadInitial = func(_ *config.Config, m string) (render.EtcdInitial, bool, error) {
 		return founded, m == "home-a", nil
 	}
 	if err := converge(t); err != nil {
@@ -951,13 +1201,13 @@ func TestConvergeFindingsOpenTheConfigurationSection(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{true, nil, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "step init", "pending init", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section etcd members"}},
-		{false, nil, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section mail", "step smtp.example.org:587, starttls, as robot@example.org, from home-a", "step smtp.example.org:587, starttls, as robot@example.org, from home-b", "step smtp.example.org:587, starttls, as robot@example.org, from watch", "section etcd members"}},
-		{false, []string{"--execute"}, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section mail", "step smtp.example.org:587, starttls, as robot@example.org, from home-a", "step smtp.example.org:587, starttls, as robot@example.org, from home-b", "step smtp.example.org:587, starttls, as robot@example.org, from watch", "section etcd members"}},
+		{true, nil, []string{"section deployment", "step paisans", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "step init", "pending init", "section sites", "step classify the sites", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section etcd members"}},
+		{false, nil, []string{"section deployment", "step paisans", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "section sites", "step classify the sites", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section mail", "step smtp.example.org:587, starttls, as robot@example.org, from home-a", "step smtp.example.org:587, starttls, as robot@example.org, from home-b", "step smtp.example.org:587, starttls, as robot@example.org, from watch", "section etcd members"}},
+		{false, []string{"--execute"}, []string{"section deployment", "step paisans", "step id", "step configuration", "pending configuration", "step core catalog", "section configuration", "warn", "section sites", "step classify the sites", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section secrets", "step read the deployment record", "section mail", "step smtp.example.org:587, starttls, as robot@example.org, from home-a", "step smtp.example.org:587, starttls, as robot@example.org, from home-b", "step smtp.example.org:587, starttls, as robot@example.org, from watch", "section etcd members"}},
 		// init ran first and reported the findings and the secrets itself,
 		// under the file's path; they are not reported a second time.
 		// The deployment and the version open every run, ahead of both.
-		{true, []string{"--execute"}, []string{"section deployment", "step id", "step configuration", "pending configuration", "step core catalog", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section mail", "step smtp.example.org:587, starttls, as robot@example.org, from home-a", "step smtp.example.org:587, starttls, as robot@example.org, from home-b", "step smtp.example.org:587, starttls, as robot@example.org, from watch", "section etcd members"}},
+		{true, []string{"--execute"}, []string{"section deployment", "step paisans", "step id", "step configuration", "pending configuration", "step core catalog", "section sites", "step classify the sites", "section architecture", "step read each site's architecture", "step check every image has a build for its site", "section mail", "step smtp.example.org:587, starttls, as robot@example.org, from home-a", "step smtp.example.org:587, starttls, as robot@example.org, from home-b", "step smtp.example.org:587, starttls, as robot@example.org, from watch", "section etcd members"}},
 	} {
 		rec.Events = nil
 		needsInit = c.init
@@ -1016,7 +1266,7 @@ func recordHolds(t *testing.T) holdRecorder {
 func TestAHoldDuringAnEtcdReadPausesItsSpinner(t *testing.T) {
 	fakeConverge(t, nil)
 	h := recordHolds(t)
-	convergeReadInitial = func(_ *config.Config, m string, _ bool) (render.EtcdInitial, bool, error) {
+	convergeReadInitial = func(_ *config.Config, m string) (render.EtcdInitial, bool, error) {
 		holdOutput()()
 		return render.EtcdInitial{}, false, nil
 	}
@@ -1036,7 +1286,7 @@ func TestAHoldDuringAnEtcdReadPausesItsSpinner(t *testing.T) {
 func TestAnEtcdMemberThatDoesNotAnswerStopsThePlan(t *testing.T) {
 	ran := fakeConverge(t, nil)
 	rec := recordConverge(t)
-	convergeReadInitial = func(_ *config.Config, m string, _ bool) (render.EtcdInitial, bool, error) {
+	convergeReadInitial = func(_ *config.Config, m string) (render.EtcdInitial, bool, error) {
 		return render.EtcdInitial{}, false, errors.New("ssh: connect timed out")
 	}
 	err := converge(t, "--execute")
@@ -1078,7 +1328,7 @@ func fakeChecks(t *testing.T, found map[string]any) *[]string {
 
 // statuses is each plan step's status as "mark title: result", in order,
 // from the events of the dry run's steps but the etcd reads: a prepare line
-// as the host prepare it checked, a pull line as its pull, and each install line as the inner steps
+// as the site prepare it checked, a pull line as its pull, and each install line as the inner steps
 // it lists, so the install steps are grouped by line (see byLine).
 func statuses(rec *ui.Recorder) []string {
 	var out []string
@@ -1095,13 +1345,13 @@ func statuses(rec *ui.Recorder) []string {
 			continue
 		}
 		mark := map[string]string{"done": "✓", "pending": "○", "waiting": "·", "fail": "✗"}[e.Kind]
-		if mark == "" || section == "deployment" || section == "architecture" || section == "pocket id" || section == "secrets" || section == "mail" || section == "review" || strings.Contains(e.Text, "etcd record") || strings.HasSuffix(e.Text, "for an admin") {
+		if mark == "" || section == "deployment" || section == "sites" || section == "architecture" || section == "pocket id" || section == "secrets" || section == "mail" || section == "review" || strings.Contains(e.Text, "etcd record") || strings.HasSuffix(e.Text, "for an admin") {
 			continue
 		}
 		title := e.Text
 		switch section {
 		case "prepare":
-			title = "host prepare --site " + title
+			title = "site prepare --site " + title
 		case "pull":
 			title = "pull --site " + title
 		}
@@ -1187,9 +1437,9 @@ func TestConvergeDryRunMarksAnUpToDateDeploymentDone(t *testing.T) {
 func TestConvergeDryRunMarksPendingWaitingAndFailed(t *testing.T) {
 	fakeConverge(t, nil)
 	checked := fakeChecks(t, map[string]any{
-		"host prepare --site home-b": "docker, firewall",
+		"site prepare --site home-b": "docker, firewall",
 		"apply --site vm":            "5 changes",
-		"host prepare --site watch":  errors.New("ssh: connect to host watch.local: timed out\nmore detail"),
+		"site prepare --site watch":  errors.New("ssh: connect to host watch.local: timed out\nmore detail"),
 		"dns init":                   "2 records to create",
 	})
 	rec := recordConverge(t)
@@ -1197,25 +1447,25 @@ func TestConvergeDryRunMarksPendingWaitingAndFailed(t *testing.T) {
 		t.Fatal(err)
 	}
 	sameLines(t, statuses(rec), byLine([]string{
-		"✓ host prepare --site home-a",
-		"○ host prepare --site home-b: docker, firewall",
-		"✓ host prepare --site vm",
-		"✗ host prepare --site watch: ssh: connect to host watch.local: timed out",
+		"✓ site prepare --site home-a",
+		"○ site prepare --site home-b: docker, firewall",
+		"✓ site prepare --site vm",
+		"✗ site prepare --site watch: ssh: connect to host watch.local: timed out",
 		// A pull line waiting on its prepare ends first, unchecked.
-		"· pull --site home-b: after host prepare --site home-b",
-		"· pull --site watch: after host prepare --site watch",
+		"· pull --site home-b: after site prepare --site home-b",
+		"· pull --site watch: after site prepare --site watch",
 		"✓ pull --site home-a: nothing to pull",
 		"✓ pull --site vm: nothing to pull",
 		"○ dns init: 2 records to create",
 		"○ apply --site vm: 5 changes",
 		"· apply --site home-a: after apply --site vm",
-		"· apply --site home-b: after host prepare --site home-b",
-		"· apply --site watch: after host prepare --site watch",
-		"· storage add: after host prepare --site home-b",
+		"· apply --site home-b: after site prepare --site home-b",
+		"· apply --site watch: after site prepare --site watch",
+		"· storage add: after site prepare --site home-b",
 		"· apply --site home-a: after the earlier apply --site home-a",
-		"· apply --site home-b: after host prepare --site home-b",
+		"· apply --site home-b: after site prepare --site home-b",
 		"· apply --site vm: after the earlier apply --site vm",
-		"· apply --site watch: after host prepare --site watch",
+		"· apply --site watch: after site prepare --site watch",
 	}))
 	for _, never := range []string{"apply --site home-a", "apply --site home-b", "apply --site watch", "storage add"} {
 		if slices.Contains(*checked, never) {
@@ -1259,23 +1509,25 @@ func TestConvergeDryRunChecksAFoundedMemberInPassTwo(t *testing.T) {
 	ran := fakeConverge(t, nil)
 	_ = ran
 	founded := initial("home-a", "home-b", "vm")
-	convergeReadInitial = func(*config.Config, string, bool) (render.EtcdInitial, bool, error) { return founded, true, nil }
+	convergeReadInitial = func(*config.Config, string) (render.EtcdInitial, bool, error) { return founded, true, nil }
 	checked := fakeChecks(t, map[string]any{"storage add": "1 stage"})
 	rec := recordConverge(t)
 	if err := converge(t); err != nil {
 		t.Fatal(err)
 	}
 	sameLines(t, statuses(rec), byLine([]string{
-		"✓ host prepare --site home-a",
-		"✓ host prepare --site home-b",
-		"✓ host prepare --site vm",
-		"✓ host prepare --site watch",
+		"✓ site prepare --site home-a",
+		"✓ site prepare --site home-b",
+		"✓ site prepare --site vm",
+		"✓ site prepare --site watch",
 		"✓ pull --site home-a: nothing to pull",
 		"✓ pull --site home-b: nothing to pull",
 		"✓ pull --site vm: nothing to pull",
 		"✓ pull --site watch: nothing to pull",
 		"✓ dns init",
 		"✓ apply --site watch",
+		"✓ apply --site home-a",
+		"✓ apply --site home-b",
 		"○ storage add: 1 stage",
 		"· apply --site home-a: after storage add",
 		"· apply --site home-b: after storage add",
@@ -1346,7 +1598,7 @@ func TestCheckStepFails(t *testing.T) {
 	}
 }
 
-// Each command's dry run says what it would change: host prepare on an
+// Each command's dry run says what it would change: site prepare on an
 // empty host, through the fake ssh, names each kind of change it would make,
 // in a fixed order, and storage add counts its steps.
 func TestHostPrepareDryRunSaysWhatItWouldChange(t *testing.T) {
@@ -1354,7 +1606,7 @@ func TestHostPrepareDryRunSaysWhatItWouldChange(t *testing.T) {
 	quietSSH(t)
 	o := convergeOptions{Config: fixtureConfig(), Secrets: fixtureSecretsPath()}
 	for args, want := range map[string]*regexp.Regexp{
-		"host prepare --site home-a": regexp.MustCompile(`^docker, wireguard, firewall, ssh keys, watchdog, configuration store$`),
+		"site prepare --site home-a": regexp.MustCompile(`^docker, ssh keys, configuration store$`),
 		"storage add":                regexp.MustCompile(`^[1-9][0-9]* [a-z]+s?$`),
 	} {
 		summary, _, err := checkStep(ui.Discard, convergeFlags(strings.Fields(args), o), runStep)
@@ -1406,7 +1658,7 @@ func convergeShaped(t *testing.T, edit func(*config.Config), recorded map[string
 		return cfg, convergeState{}, err
 	}
 	t.Cleanup(func() { convergeRead = saved })
-	convergeReadInitial = func(_ *config.Config, m string, _ bool) (render.EtcdInitial, bool, error) {
+	convergeReadInitial = func(_ *config.Config, m string) (render.EtcdInitial, bool, error) {
 		in, ok := recorded[m]
 		return in, ok, nil
 	}
@@ -1432,10 +1684,13 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 			recorded: map[string]render.EtcdInitial{"home-a": founded, "vm": founded},
 			found:    map[string]any{"site add home-b": "4 stages"},
 			want: []string{
-				"✓ host prepare --site home-a", "✓ host prepare --site home-b", "✓ host prepare --site vm", "✓ host prepare --site watch",
+				"✓ site prepare --site home-a", "✓ site prepare --site home-b", "✓ site prepare --site vm", "✓ site prepare --site watch",
 				"✓ dns init",
 				"○ site add home-b: 4 stages",
+				"· apply --site home-b: after site add home-b",
+				"✓ apply --site vm",
 				"✓ apply --site watch",
+				"✓ apply --site home-a",
 				"· storage add: after site add home-b",
 				"· apply --site home-a: after storage add",
 				"· apply --site home-b: after site add home-b",
@@ -1449,7 +1704,7 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 			recorded: map[string]render.EtcdInitial{"vm": initial("home-a", "home-b", "vm")},
 			found:    map[string]any{"apply --site vm": "1 change"},
 			want: []string{
-				"✓ host prepare --site home-a", "✓ host prepare --site home-b", "✓ host prepare --site vm", "✓ host prepare --site watch",
+				"✓ site prepare --site home-a", "✓ site prepare --site home-b", "✓ site prepare --site vm", "✓ site prepare --site watch",
 				"✓ dns init",
 				"○ apply --site vm: 1 change",
 				"· apply --site home-a: after apply --site vm",
@@ -1470,7 +1725,7 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 			},
 			found: map[string]any{"apply --site home-b": "2 changes", "apply --site home-a": "3 changes"},
 			want: []string{
-				"✓ host prepare --site home-a", "✓ host prepare --site home-b", "✓ host prepare --site vm", "✓ host prepare --site watch",
+				"✓ site prepare --site home-a", "✓ site prepare --site home-b", "✓ site prepare --site vm", "✓ site prepare --site watch",
 				"✓ dns init",
 				"✓ apply --site vm",
 				"○ apply --site home-a: 3 changes",
@@ -1486,18 +1741,18 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 		{
 			name:  "no etcd",
 			edit:  func(cfg *config.Config) { cfg.Etcd.Members = nil },
-			found: map[string]any{"host prepare --site vm": "ssh keys"},
+			found: map[string]any{"site prepare --site vm": "ssh keys"},
 			want: []string{
-				"✓ host prepare --site home-a", "✓ host prepare --site home-b", "○ host prepare --site vm: ssh keys", "✓ host prepare --site watch",
+				"✓ site prepare --site home-a", "✓ site prepare --site home-b", "○ site prepare --site vm: ssh keys", "✓ site prepare --site watch",
 				"✓ dns init",
 				"✓ apply --site home-a",
 				"✓ apply --site home-b",
-				"· apply --site vm: after host prepare --site vm",
+				"· apply --site vm: after site prepare --site vm",
 				"✓ apply --site watch",
 				"✓ storage add",
 				"✓ apply --site home-a",
 				"✓ apply --site home-b",
-				"· apply --site vm: after host prepare --site vm",
+				"· apply --site vm: after site prepare --site vm",
 				"✓ apply --site watch",
 			},
 		},
@@ -1515,7 +1770,7 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 			},
 			found: map[string]any{"apply --site watch": "1 change"},
 			want: []string{
-				"✓ host prepare --site home-a", "✓ host prepare --site home-b", "✓ host prepare --site vm", "✓ host prepare --site watch",
+				"✓ site prepare --site home-a", "✓ site prepare --site home-b", "✓ site prepare --site vm", "✓ site prepare --site watch",
 				"✓ dns init",
 				"✓ apply --site vm",
 				"✓ apply --site home-a",
@@ -1532,7 +1787,7 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 			edit:  func(cfg *config.Config) { cfg.Etcd.Members = []string{"home-a", "home-b", "vm", "watch"} },
 			found: map[string]any{"apply --site vm": "6 changes"},
 			want: []string{
-				"✓ host prepare --site home-a", "✓ host prepare --site home-b", "✓ host prepare --site vm", "✓ host prepare --site watch",
+				"✓ site prepare --site home-a", "✓ site prepare --site home-b", "✓ site prepare --site vm", "✓ site prepare --site watch",
 				"✓ dns init",
 				"○ apply --site vm: 6 changes",
 				"· apply --site home-a: after apply --site vm",
@@ -1567,7 +1822,7 @@ func withPulls(want []string) []string {
 	end := 0
 	for i, l := range want {
 		mark, title, _ := strings.Cut(l, " ")
-		site, isPrepare := strings.CutPrefix(title, "host prepare --site ")
+		site, isPrepare := strings.CutPrefix(title, "site prepare --site ")
 		if !isPrepare {
 			continue
 		}
@@ -1575,7 +1830,7 @@ func withPulls(want []string) []string {
 		if mark == "✓" {
 			checked = append(checked, "✓ pull --site "+site+": nothing to pull")
 		} else {
-			waiting = append(waiting, "· pull --site "+site+": after host prepare --site "+site)
+			waiting = append(waiting, "· pull --site "+site+": after site prepare --site "+site)
 		}
 		end = i + 1
 	}
@@ -1645,7 +1900,7 @@ func TestHoldsReturnToTheRunAfterInit(t *testing.T) {
 		return nil
 	}
 	t.Cleanup(func() { convergeRead, convergeRun = saved, savedRun })
-	convergeReadInitial = func(*config.Config, string, bool) (render.EtcdInitial, bool, error) {
+	convergeReadInitial = func(*config.Config, string) (render.EtcdInitial, bool, error) {
 		holdOutput()()
 		return render.EtcdInitial{}, false, nil
 	}
@@ -1724,14 +1979,14 @@ func TestCheckReportsShowUnderTheStep(t *testing.T) {
 func TestConvergeStopsOnASecretsFileThatDoesNotRead(t *testing.T) {
 	fakeConverge(t, nil)
 	read := false
-	convergeReadInitial = func(*config.Config, string, bool) (render.EtcdInitial, bool, error) {
+	convergeReadInitial = func(*config.Config, string) (render.EtcdInitial, bool, error) {
 		read = true
 		return render.EtcdInitial{}, false, nil
 	}
 	unreadable := t.TempDir() // a directory: present, and not a secrets file
 	var err error
 	captureStdout(t, func() {
-		err = runApply([]string{"--config", fixtureConfig(), "--secrets", unreadable, "--sudo=false"}, strings.NewReader(""), io.Discard)
+		err = runApply([]string{"--config", fixtureConfig(), "--secrets", unreadable}, strings.NewReader(""), io.Discard)
 	})
 	if err == nil || !strings.Contains(err.Error(), unreadable) {
 		t.Errorf("err = %v, want it to name %s", err, unreadable)
@@ -1797,7 +2052,7 @@ func TestSentencesEndAHintOnce(t *testing.T) {
 func TestConvergeDryRunShowsAFailedStepsExplanation(t *testing.T) {
 	fakeConverge(t, nil)
 	fakeChecks(t, map[string]any{
-		"host prepare --site watch": &ui.Problem{Hint: "watch's etcd members differ from the running cluster's", Explain: "Run paisans site add for the site being added, then apply."},
+		"site prepare --site watch": &ui.Problem{Hint: "watch's etcd members differ from the running cluster's", Explain: "Run paisans site add for the site being added, then apply."},
 	})
 	rec := recordConverge(t)
 	if err := converge(t); err != nil {
@@ -2186,7 +2441,7 @@ func TestAFailedChecksAdviceFollowsItsLine(t *testing.T) {
 	fakeConverge(t, nil)
 	saved := convergeCheck
 	convergeCheck = func(_ ui.Reporter, args []string) (string, []checkReport, error) {
-		if strings.Join(args[:4], " ") == "host prepare --site home-a" {
+		if strings.Join(args[:4], " ") == "site prepare --site home-a" {
 			return "", nil, &ui.Problem{Hint: "mesh subnet 10.44.0.0/24 is in use", Explain: "Remove it if not in use or run paisans init to pick a free subnet."}
 		}
 		return "", nil, nil
@@ -2218,5 +2473,379 @@ func TestPrintLoginLinksAlignsEachLink(t *testing.T) {
 		"  bob on auth-staff  https://staff.example.org/lc/tok-b\n\n"
 	if links.String() != want {
 		t.Errorf("links %q\nwant %q", links.String(), want)
+	}
+}
+
+// meshFile is site's WireGuard file as the step that applies it renders it,
+// from the run's classification.
+func meshFile(t *testing.T, sites *topology.Classification, site string) string {
+	t.Helper()
+	declared := fixture(t)
+	secrets, err := config.LoadDeploymentSecrets(fixtureSecretsPath(), declared.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := render.Build(sites.Effective(declared), secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range plan.Files {
+		if strings.HasPrefix(f.Path, site+"/") && strings.Contains(f.Path, "/psns-") && strings.HasSuffix(f.Path, ".conf") {
+			return f.Content
+		}
+	}
+	t.Fatalf("no WireGuard file for %s", site)
+	return ""
+}
+
+// stepSites keeps the classification each step of the run sees.
+func stepSites(t *testing.T) *[]*topology.Classification {
+	t.Helper()
+	var seen []*topology.Classification
+	saved := convergeRun
+	convergeRun = func(args []string) error {
+		seen = append(seen, runSites)
+		return saved(args)
+	}
+	t.Cleanup(func() { convergeRun = saved })
+	return &seen
+}
+
+// With one data site pending, the run plans no step for it, renders every
+// other site without it, hands each apply its pending list, and ends
+// degraded, exit 0; with --require-all, exit 1. Garage has one of its two
+// nodes, so storage is held back and no storage step runs.
+func TestConvergeRunsOnTheSitesItHas(t *testing.T) {
+	ran := fakeConverge(t, nil)
+	seen := stepSites(t)
+	classifyWith(t, classifyHosts([]string{"home-b"}))
+	rec := recordConverge(t)
+	if err := converge(t, "--execute"); err != nil {
+		t.Fatalf("%v: %s", err, problemText(err))
+	}
+	sameLines(t, *ran, []string{
+		"site prepare --site home-a", "site prepare --site vm", "site prepare --site watch",
+		"dns init",
+		"apply --site vm", "apply --site home-a", "apply --site watch",
+		"apply --site home-a", "apply --site vm", "apply --site watch",
+	})
+	for _, s := range *seen {
+		if s == nil || !slices.Equal(s.Pending(), []string{"home-b"}) {
+			t.Fatalf("a step did not see the run's classification: %+v", s)
+		}
+	}
+	if conf := meshFile(t, (*seen)[0], "home-a"); strings.Contains(conf, "[Peer]\n# home-b\n") {
+		t.Errorf("home-a peers with pending home-b:\n%s", conf)
+	}
+	if !rec.Has("section", "pending") || !rec.Has("result", "Applied, degraded: 1 site pending or down (home-b).") {
+		t.Errorf("no pending section or degraded end:\n%s", rec.Lines())
+	}
+	if runSites != nil {
+		t.Error("the run left its classification behind")
+	}
+
+	*ran = nil
+	err := converge(t, "--execute", "--require-all")
+	var w *ui.Warning
+	if err == nil || errors.As(err, &w) || !strings.Contains(problemText(err), "--require-all") {
+		t.Errorf("--require-all: %v", err)
+	}
+}
+
+// A down site keeps its place in the rendered mesh but none of its own
+// steps run, and storage, one of whose nodes it is, waits.
+func TestConvergeSkipsADownSitesSteps(t *testing.T) {
+	ran := fakeConverge(t, nil)
+	seen := stepSites(t)
+	convergeReadInitial = func(_ *config.Config, m string) (render.EtcdInitial, bool, error) {
+		if m == "home-b" {
+			t.Errorf("down home-b's etcd record was read")
+		}
+		return initial("home-a", "home-b", "vm"), true, nil
+	}
+	classifyWith(t, classifyHosts([]string{"home-b"}, "home-a", "home-b", "vm", "watch"))
+	rec := recordConverge(t)
+	if err := converge(t, "--execute"); err != nil {
+		t.Fatalf("%v: %s", err, problemText(err))
+	}
+	sameLines(t, *ran, []string{
+		"site prepare --site home-a", "site prepare --site vm", "site prepare --site watch",
+		"dns init",
+		"apply --site watch", "apply --site home-a",
+		"apply --site home-a", "apply --site vm", "apply --site watch",
+	})
+	if s := (*seen)[0]; s == nil || !slices.Equal(s.Down(), []string{"home-b"}) {
+		t.Fatalf("classification %+v", s)
+	}
+	if conf := meshFile(t, (*seen)[0], "home-a"); !strings.Contains(conf, "[Peer]\n# home-b\n") {
+		t.Errorf("home-a lost its peer, down home-b:\n%s", conf)
+	}
+	if !rec.Has("result", "Applied, degraded: 1 site pending or down (home-b).") {
+		t.Errorf("no degraded end:\n%s", rec.Lines())
+	}
+}
+
+// A data site ready to join waits while a joined site is down: the join
+// changes every joined site's mesh and HAProxy files, which the down one
+// cannot take. Its site add is dropped and the site is left out of the run
+// as a pending one is, so no other site is handed files naming a member
+// the cluster has not admitted; the plan says why, and the run goes on and
+// ends degraded. home-b is declared [data, apps], so the apply that would
+// start its apps after the join waits with it.
+func TestConvergeJoinWaitsWhileASiteIsDown(t *testing.T) {
+	if roles := fixture(t).Sites["home-b"].Roles; !slices.Equal(roles, []config.Role{config.RoleData, config.RoleApps}) {
+		t.Fatalf("home-b is %v, not [data, apps]", roles)
+	}
+	ran := fakeConverge(t, nil)
+	seen := stepSites(t)
+	convergeReadInitial = func(_ *config.Config, m string) (render.EtcdInitial, bool, error) {
+		if m == "home-b" {
+			return render.EtcdInitial{}, false, nil
+		}
+		return initial("home-a", "vm"), true, nil
+	}
+	classifyWith(t, classifyHosts([]string{"watch"}, "home-a", "vm", "watch"))
+	rec := recordConverge(t)
+	if err := converge(t, "--execute"); err != nil {
+		t.Fatalf("%v: %s\n%s", err, problemText(err), rec.Lines())
+	}
+	for _, line := range *ran {
+		if strings.Contains(line, "home-b") || strings.HasPrefix(line, "site add") {
+			t.Errorf("ran %s while watch is down", line)
+		}
+	}
+	if !slices.Contains(*ran, "apply --site home-a") {
+		t.Errorf("the run stopped short: %v", *ran)
+	}
+	if s := (*seen)[0]; s == nil || !slices.Equal(s.Pending(), []string{"home-b"}) || !slices.Equal(s.Down(), []string{"watch"}) {
+		t.Fatalf("classification %+v", s)
+	}
+	if conf := meshFile(t, (*seen)[0], "home-a"); strings.Contains(conf, "[Peer]\n# home-b\n") {
+		t.Errorf("home-a peers with home-b, whose join waits:\n%s", conf)
+	}
+	if !rec.Has("end", "site add home-b") && !strings.Contains(rec.Lines(), "site add home-b") {
+		t.Errorf("no line for the join that waits:\n%s", rec.Lines())
+	}
+	if !strings.Contains(rec.Lines(), "every joined site answers") {
+		t.Errorf("the plan does not say why the join waits:\n%s", rec.Lines())
+	}
+	if !rec.Has("result", "Applied, degraded: 2 sites pending or down (home-b, watch).") {
+		t.Errorf("no degraded end:\n%s", rec.Lines())
+	}
+}
+
+// everySite is the fixture's sites, as a deployment record lists them once
+// every one has joined.
+var everySite = []string{"home-a", "home-b", "vm", "watch"}
+
+// A Pocket ID on a down site is not asked to make its operators: the run
+// warns that they wait, and ends degraded, exit 0.
+func TestConvergeLeavesOperatorsOfADownPocketID(t *testing.T) {
+	fakeConverge(t, nil)
+	path := editedFixture(t, "hostname: id.example.org\n    placement: cluster", "hostname: id.example.org\n    placement: { pinned: home-b }")
+	convergeReadInitial = func(*config.Config, string) (render.EtcdInitial, bool, error) {
+		return initial("home-a", "home-b", "vm"), true, nil
+	}
+	asked := fakeDeclaredOperators(t, func(app, id string, execute bool) (declaredOperator, error) {
+		if app == "auth" {
+			return declaredOperator{}, errors.New("home-b: the host refused the login")
+		}
+		return declaredOperator{}, nil
+	})
+	classifyWith(t, classifyHosts([]string{"home-b"}, everySite...))
+	rec := recordConverge(t)
+	if err := convergeAt(t, path, "--execute"); err != nil {
+		t.Fatalf("%v: %s", err, problemText(err))
+	}
+	for _, a := range *asked {
+		if strings.HasPrefix(a, "auth/") {
+			t.Errorf("asked %s of down home-b", a)
+		}
+	}
+	if !rec.Has("warn", "auth") || !rec.Has("result", "Applied, degraded: 1 site pending or down (home-b).") {
+		t.Errorf("no warning or degraded end:\n%s", rec.Lines())
+	}
+}
+
+// The web server step does not reach a down monitor: its site files are
+// neither written nor checked, a note says so, and the run ends degraded.
+func TestConvergeLeavesTheWebServerOfADownSite(t *testing.T) {
+	fakeConverge(t, nil)
+	checked := fakeWebServerCheck(t, nil)
+	reached := false
+	convergeWebServerFiles = func(_ ui.Reporter, _ *config.Config, _ string, scope webServerScope) webServerFiles {
+		if scope.covers("watch") {
+			reached = true
+			return webServerFiles{failed: []string{"site files on watch"}}
+		}
+		return webServerFiles{}
+	}
+	classifyWith(t, classifyHosts([]string{"watch"}, everySite...))
+	rec := recordConverge(t)
+	if err := convergeAt(t, externalFixture(t), "--execute"); err != nil {
+		t.Fatalf("%v: %s", err, problemText(err))
+	}
+	if reached || slices.Contains(*checked, "health") {
+		t.Errorf("the web server step reached down watch: files %v, checked %v", reached, *checked)
+	}
+	if !rec.Has("note", "watch") || !rec.Has("result", "Applied, degraded: 1 site pending or down (watch).") {
+		t.Errorf("no note or degraded end:\n%s", rec.Lines())
+	}
+
+	// The dry run does not promise a check --execute will skip.
+	rec = recordConverge(t)
+	if err := convergeAt(t, externalFixture(t)); err != nil {
+		t.Fatalf("dry run: %v: %s", err, problemText(err))
+	}
+	if strings.Contains(rec.Lines(), "checked with --execute") {
+		t.Errorf("the dry run lists down watch's app as checked with --execute:\n%s", rec.Lines())
+	}
+}
+
+// A degraded run that ends on the operator's web server still says it is
+// degraded, and --require-all still fails it; so does one that ends on an
+// operator's error.
+func TestEveryDegradedEndHonoursRequireAll(t *testing.T) {
+	fakeConverge(t, nil)
+	fakeWebServerCheck(t, map[string][]webserver.Result{"health": {{Name: webserver.CheckDNS, Detail: "health.example.org does not resolve"}}})
+	classifyWith(t, classifyHosts([]string{"home-b"}))
+	rec := recordConverge(t)
+	path := externalFixture(t)
+	err := convergeAt(t, path, "--execute")
+	var w *ui.Warning
+	if !errors.As(err, &w) || !strings.HasPrefix(w.Hint, "Applied, but 1 app failed its web server check") {
+		t.Fatalf("not the degraded run's warning: %v", err)
+	}
+	if !rec.Has("result", "Applied, degraded: 1 site pending or down (home-b).") {
+		t.Errorf("no degraded end beside the web server's warning:\n%s", rec.Lines())
+	}
+	err = convergeAt(t, path, "--execute", "--require-all")
+	if err == nil || errors.As(err, &w) || !strings.Contains(problemText(err), "--require-all") {
+		t.Errorf("--require-all with the web server's warning: %v", err)
+	}
+
+	fakeWebServerCheck(t, nil)
+	fakeDeclaredOperators(t, func(string, string, bool) (declaredOperator, error) {
+		return declaredOperator{}, errors.New("pocket id did not answer")
+	})
+	err = convergeAt(t, path, "--execute", "--require-all")
+	if err == nil || !strings.Contains(problemText(err), "--require-all") {
+		t.Errorf("--require-all with an operator's error: %v: %s", err, problemText(err))
+	}
+}
+
+// dualSite is a deployment of two data sites and an edge that is the
+// gateway, the witness and the monitor, every one an etcd member: the
+// staging topology.
+func dualSite() *config.Config {
+	return &config.Config{
+		Sites: map[string]config.Site{
+			"edge":   {Roles: []config.Role{config.RoleGateway, config.RoleWitness, config.RoleMonitor}},
+			"site-a": {Roles: []config.Role{config.RoleData, config.RoleApps}},
+			"site-b": {Roles: []config.Role{config.RoleData, config.RoleApps}},
+		},
+		Etcd: config.Etcd{Members: []string{"edge", "site-a", "site-b"}},
+	}
+}
+
+// foundingEtcd is a convergeRun for the founding of members: each apply of
+// a member starts its etcd, and a data member's apply stops for the founding
+// members whose etcd does not run yet, as apply does. It records each apply.
+func foundingEtcd(t *testing.T, cfg *config.Config) *[]string {
+	t.Helper()
+	var ran []string
+	running := map[string]bool{}
+	saved := convergeRun
+	convergeRun = func(args []string) error {
+		title := strings.Join(args[:3], " ")
+		ran = append(ran, title)
+		site := strings.TrimPrefix(title, "apply --site ")
+		running[site] = true
+		if cfg.Sites[site].Has(config.RoleWitness) {
+			return nil
+		}
+		var unstarted []string
+		for _, m := range cfg.Etcd.Members {
+			if !running[m] {
+				unstarted = append(unstarted, m)
+			}
+		}
+		if len(unstarted) > 0 {
+			return foundingWait(site, unstarted...)
+		}
+		return nil
+	}
+	t.Cleanup(func() { convergeRun = saved })
+	return &ran
+}
+
+// On a fresh dual-site deployment every founding member's founding apply runs
+// before any site is applied again: site-a stops for site-b's etcd, site-b's
+// founding apply comes next and finds every member running, and site-a's
+// next apply resumes it. The run completes.
+func TestADualSiteFoundingRunsEveryFoundingApplyBeforeARevisit(t *testing.T) {
+	cfg := dualSite()
+	steps := convergePlan(cfg, convergeState{})
+	var install []convergeStep
+	for _, s := range steps {
+		if s.Stage.installs() {
+			install = append(install, s)
+		}
+	}
+	samePlan(t, install,
+		"founding: apply --site edge",
+		"founding: apply --site site-a",
+		"founding: apply --site site-b",
+		"pass two: apply --site site-a",
+		"pass two: apply --site site-b",
+		"pass two: apply --site edge",
+	)
+	ran := foundingEtcd(t, cfg)
+	rec := &ui.Recorder{}
+	if err := convergeInstall(rec, install, convergeOptions{}); err != nil {
+		t.Fatalf("%v\n%s", err, rec.Lines())
+	}
+	sameLines(t, *ran, []string{
+		"apply --site edge",
+		"apply --site site-a",
+		"apply --site site-b",
+		"apply --site site-a",
+		"apply --site site-b",
+		"apply --site edge",
+	})
+	if rec.Has("fail", "") {
+		t.Errorf("a line failed:\n%s", rec.Lines())
+	}
+	for _, site := range []string{"edge", "site-a", "site-b"} {
+		if !rec.Has("done", site) {
+			t.Errorf("%s did not end done:\n%s", site, rec.Lines())
+		}
+	}
+}
+
+// A founding stop is a pause only on a founding apply. On a later visit the
+// run stops, naming the member that runs no etcd.
+func TestAFoundingStopOnALaterVisitStopsTheRunNamingTheCause(t *testing.T) {
+	ran := fakeConverge(t, nil)
+	saved := convergeRun
+	visits := 0
+	convergeRun = func(args []string) error {
+		err := saved(args)
+		if strings.HasPrefix(strings.Join(args, " "), "apply --site home-a ") {
+			if visits++; visits == 2 {
+				return foundingWait("home-a", "home-b")
+			}
+		}
+		return err
+	}
+	t.Cleanup(func() { convergeRun = saved })
+	rec := recordConverge(t)
+	err := converge(t, "--execute")
+	text := problemText(err)
+	if err == nil || !strings.Contains(text, "apply stopped at apply --site home-a") || !strings.Contains(text, "home-b runs no etcd.") || !errors.Is(err, apply.ErrFoundingWait) {
+		t.Fatalf("got %v\n%s", text, rec.Lines())
+	}
+	if (*ran)[len(*ran)-1] != "apply --site home-a" || !rec.Has("fail", "home-a") {
+		t.Errorf("ran on, or the line did not fail: %v\n%s", *ran, rec.Lines())
 	}
 }

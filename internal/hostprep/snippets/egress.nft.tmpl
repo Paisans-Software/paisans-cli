@@ -1,0 +1,88 @@
+{{- /* The egress table site admit loads for one deployment (spec, Egress).
+        The first two lines make the load atomic: the table is created if
+        absent, deleted, and defined again in one transaction, so a reload
+        never leaves the user unfiltered. */ -}}
+# Written by paisans site admit for paisans-{{ .Token }}. Keeps the
+# deployment's user, its containers and its mesh off this host's loopback
+# and the owner's network. paisans site evict removes it.
+table inet {{ .Table }}
+delete table inet {{ .Table }}
+table inet {{ .Table }} {
+	# What the user and its containers send: a container's users map into
+	# the user's subordinate range, so the UID alone would miss them.
+	chain output {
+		type filter hook output priority 0; policy accept;
+		# Replies to flows someone else opened pass where the deployment can
+		# be the server: the host side of each port it publishes runs as its
+		# user, and its answers to a visitor on loopback, the LAN or this
+		# host must pass. TCP on any port, since a TCP reply reaches only
+		# its own socket's peer, a client that connected to the user's
+		# socket. A known limit: an owner's client can reach the user while
+		# the service it means is down or bound to the other family alone
+		# (127.0.0.1 and not [::1]), since the user may listen on the
+		# address that service left free. UDP only from 443 with the public
+		# ports grant, HTTP/3: admit found no other process holding 443,
+		# and the grant is one deployment's per host. Elsewhere a user
+		# sharing an owner's UDP port through SO_REUSEADDR could answer the
+		# owner's own clients, and an owner's web server may hold UDP 443.
+		# The mesh's UDP passes by its accept below.
+		ct direction reply ct mark and 0x08000000 == 0 meta l4proto tcp accept
+{{- if .PublicPorts }}
+		ct direction reply ct mark and 0x08000000 == 0 udp sport 443 accept
+{{- end }}
+		# Every flow the user opens is marked before any accept or drop, so
+		# a flow it opened under an accept below never carries a "reply".
+		# Bit 27 of the ct mark: clear of Tailscale's connmark mask
+		# 0xff0000, of the mesh's packet mark 0x5053<token>, whose hex digit
+		# for bits 24-27 is always 0, and of kube-proxy's and Docker's low
+		# bits (0x4000, 0x8000). A host rule that copies a packet mark over
+		# the whole ct mark (CONNMARK save with no mask) clears it. Each
+		# deployment's table sets the same bit, which only narrows accepts.
+		meta skuid { {{ .Users }} } ct direction original ct mark set ct mark or 0x08000000
+		meta skuid { {{ .Users }} } ip daddr {{ .Mesh }} accept
+{{- if .Resolvers4 }}
+		meta skuid { {{ .Users }} } ip daddr { {{ join .Resolvers4 ", " }} } meta l4proto { tcp, udp } th dport 53 accept
+{{- end }}
+{{- if .Resolvers6 }}
+		meta skuid { {{ .Users }} } ip6 daddr { {{ join .Resolvers6 ", " }} } meta l4proto { tcp, udp } th dport 53 accept
+{{- end }}
+		meta skuid { {{ .Users }} } ip daddr { 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 } drop
+		meta skuid { {{ .Users }} } ip6 daddr { ::1, fc00::/7, fe80::/10 } drop
+		# NAT64 reaches IPv4 through IPv6, so the same ranges as the
+		# well-known prefix writes them, and the local-use prefix whole. The
+		# well-known prefix's public translations stay: an IPv6-only host
+		# reaches the IPv4 internet only through them.
+		meta skuid { {{ .Users }} } ip6 daddr { 64:ff9b::7f00:0/104, 64:ff9b::a00:0/104, 64:ff9b::ac10:0/108, 64:ff9b::c0a8:0/112, 64:ff9b::a9fe:0/112, 64:ff9b::6440:0/106, 64:ff9b:1::/48 } drop
+		# The host's own addresses, public ones too, and its broadcast and
+		# multicast. A gateway's 80 and 443 answer the internet already; its
+		# accept follows the loopback drop, since loopback is local too, and
+		# precedes the on-link drop, which holds the host's own IPv6.
+{{- if .Gateway }}
+		meta skuid { {{ .Users }} } fib daddr type local tcp dport { 80, 443 } accept
+		# The answer its own 80 and 443 send back, to a flow the user
+		# opened and so marked above. TCP only: a TCP reply reaches only its
+		# own socket's peer, here the user's own client.
+		meta skuid { {{ .Users }} } ct direction reply fib daddr type local tcp sport { 80, 443 } accept
+{{- end }}
+		meta skuid { {{ .Users }} } fib daddr type { local, broadcast, multicast } drop
+{{- if .OnLink6 }}
+		# The host's on-link IPv6 prefixes: a home LAN's IPv6 is global.
+		meta skuid { {{ .Users }} } ip6 daddr { {{ join .OnLink6 ", " }} } drop
+{{- end }}
+	}
+	# What the mesh's own socket sends, which no UID matches: the kernel
+	# sends it, to each Endpoint the user wrote, resolved as root.
+	chain mesh {
+		type filter hook output priority 0; policy accept;
+		meta mark {{ .Mark }} fib daddr type { local, broadcast, multicast } drop
+{{- if .LAN }}
+		meta mark {{ .Mark }} ip daddr {{ .LAN }} accept
+{{- end }}
+		meta mark {{ .Mark }} ip daddr { 127.0.0.0/8, 169.254.0.0/16, 224.0.0.0/4, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10 } drop
+		meta mark {{ .Mark }} ip6 daddr { ::1, fe80::/10, ff00::/8, fc00::/7 } drop
+		meta mark {{ .Mark }} ip6 daddr { 64:ff9b::7f00:0/104, 64:ff9b::a9fe:0/112, 64:ff9b::e000:0/100, 64:ff9b::a00:0/104, 64:ff9b::ac10:0/108, 64:ff9b::c0a8:0/112, 64:ff9b::6440:0/106, 64:ff9b:1::/48 } drop
+{{- if .OnLink6 }}
+		meta mark {{ .Mark }} ip6 daddr { {{ join .OnLink6 ", " }} } drop
+{{- end }}
+	}
+}

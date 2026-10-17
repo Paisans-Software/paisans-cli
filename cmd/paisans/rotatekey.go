@@ -27,7 +27,6 @@ func runStorageRotateKey(args []string) error {
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
 	appName := fs.String("app", "", "the app whose S3 key to replace, by the name it has in the configuration")
 	execute := fs.Bool("execute", false, "actually run the stages, stopping at the first gate that fails")
-	sudo := fs.Bool("sudo", true, "run remote commands through sudo, since /srv and docker are root's")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -77,7 +76,7 @@ func runStorageRotateKey(args []string) error {
 
 	transports := map[string]apply.Transport{}
 	for _, name := range cfg.SiteNames() {
-		transports[name] = siteTransport(name, cfg.Sites[name], "", *sudo)
+		transports[name] = siteTransport(name, cfg.Sites[name], "")
 	}
 	// The switch is an apply of the app on every site it runs on, so each
 	// of those is host checked first, as apply checks it.
@@ -90,7 +89,7 @@ func runStorageRotateKey(args []string) error {
 	// Garage's first site, where the key is imported and deleted, and every
 	// site the app runs on, where the switch applies it.
 	if len(cfg.Storage.Garage.Sites) > 0 {
-		if err := claimSites(r, cfg, *execute, *sudo, union(cfg.Storage.Garage.Sites[:1], render.AppSites(cfg)[*appName])...); err != nil {
+		if _, err := admittedSites(r, cfg, union(cfg.Storage.Garage.Sites[:1], render.AppSites(cfg)[*appName])...); err != nil {
 			return err
 		}
 	}

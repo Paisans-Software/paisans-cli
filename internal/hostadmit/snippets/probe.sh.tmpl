@@ -1,0 +1,230 @@
+{{- /* paisans site admit: read only. One "key value" line per fact; a key
+        that repeats is a list. Nothing here changes the host, and nothing
+        reads inside the deployment user's home, which is read as the user.
+        Every value rendered in is quoted with q. */ -}}
+# paisans site admit: read only
+export LC_ALL=C PATH=/usr/sbin:/usr/bin:/sbin:/bin
+u={{ q .User }}
+say() { printf '%s %s\n' "$1" "$2"; }
+# above is how the directories above $1 stand, from / down to its parent:
+# link when one is a link, unsafe when one is not root's or is group or
+# other writable, safe otherwise. Below such a directory a path is not
+# what it names, or can be swapped between this read and admit's change,
+# so nothing below it is read.
+above() {
+  _r=${1#/} _a=
+  set -- /
+  while :; do
+    if [ -L "$1" ]; then echo link; return; fi
+    if [ ! -e "$1" ]; then echo safe; return; fi
+    _s=$(stat -c '%u %a' "$1") || { echo unsafe; return; }
+    if [ "${_s%% *}" != 0 ] || [ $((0${_s#* } & 022)) -ne 0 ]; then echo unsafe; return; fi
+    case $_r in */*) ;; *) echo safe; return ;; esac
+    _a=$_a/${_r%%/*} _r=${_r#*/}
+    set -- "$_a"
+  done
+}
+# Docker, judged by its binary so a stopped daemon is judged too.
+if command -v dockerd >/dev/null 2>&1; then say engine "$(dockerd --version 2>/dev/null | sed -n 's/^Docker version \([^,]*\),.*/\1/p')"; else say engine absent; fi
+for p in docker-ce docker.io docker-ce-rootless-extras uidmap nftables; do
+  if dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q 'ok installed$'; then say pkg "$p installed"; else say pkg "$p absent"; fi
+done
+# Every package /etc/paisans/installed names, which admit keeps as its own
+# only while dpkg shows it installed.
+if [ -f /etc/paisans/installed ] && [ ! -L /etc/paisans/installed ]; then
+  for p in $(awk 'NF == 2 && ($1 == "package" || $1 == "installing") && $2 ~ /^[a-z0-9][a-z0-9.+-]+$/ { print $2 }' /etc/paisans/installed); do
+    if dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q 'ok installed$'; then say pkg "$p installed"; else say pkg "$p absent"; fi
+    # On disk: dpkg has its files, installed or left unpacked or
+    # half-configured by an install that failed.
+    s=$(dpkg-query -W -f='${Status}' "$p" 2>/dev/null || true)
+    case $s in *" not-installed"|*" config-files"|"") say ondisk "$p absent" ;; *) say ondisk "$p present" ;; esac
+  done
+fi
+if command -v dockerd-rootless-setuptool.sh >/dev/null 2>&1; then say setuptool present; else say setuptool absent; fi
+if command -v snap >/dev/null 2>&1 && snap list docker >/dev/null 2>&1; then say snap docker; else say snap absent; fi
+if [ -S /var/run/docker.sock ]; then say system-socket present; else say system-socket absent; fi
+# Docker's system units, each as systemctl names its state; nothing
+# printed is neither enabled nor active.
+for unit in docker.socket docker.service containerd.service; do
+  e=$(systemctl is-enabled "$unit" 2>/dev/null | sed -n 1p)
+  a=$(systemctl is-active "$unit" 2>/dev/null | sed -n 1p)
+  say system-unit "$unit ${e:-disabled} ${a:-inactive}"
+done
+# The system Docker's network store, which only a daemon that has run
+# leaves, under the data-root /etc/docker/daemon.json sets, or Docker's
+# default: "data-root", then a colon and an absolute path in quotes, on
+# one line, with any blanks between. A data-root set in a form this cannot
+# read, split across lines or relative, is unreadable.
+root=/var/lib/docker
+if [ -f /etc/docker/daemon.json ] && grep -q '"data-root"' /etc/docker/daemon.json; then
+  root=$(grep -o '"data-root"[[:space:]]*:[[:space:]]*"/[^"]*"' /etc/docker/daemon.json | head -n 1 | sed 's/.*"\(\/[^"]*\)"$/\1/')
+  [ -n "$root" ] || root=unreadable
+fi
+say docker-root "$root"
+if [ "$root" != unreadable ] && [ -e "$root/network/files/local-kv.db" ]; then say docker-networks present; else say docker-networks absent; fi
+# containerd's root directory, which containerd creates as it first starts
+# and none of Docker's packages ships, so only a containerd that has run
+# leaves: the root /etc/containerd/config.toml sets above its first table,
+# as root = "/absolute/path" on one line, or containerd's default. A root
+# set in any other form is unreadable, and may be there.
+croot=/var/lib/containerd
+if [ -f /etc/containerd/config.toml ] && awk '/^[[:space:]]*\[/ { exit } /^[[:space:]]*root[[:space:]]*=/ { f = 1; exit } END { exit !f }' /etc/containerd/config.toml; then
+  croot=$(awk '/^[[:space:]]*\[/ { exit } /^[[:space:]]*root[[:space:]]*=/ { print; exit }' /etc/containerd/config.toml | sed -n 's/^[[:space:]]*root[[:space:]]*=[[:space:]]*"\(\/[^"]*\)"[[:space:]]*\(#.*\)*$/\1/p')
+  [ -n "$croot" ] || croot=unreadable
+fi
+if [ "$croot" = unreadable ]; then say containerd-ran unreadable
+elif [ -e "$croot" ] || [ -L "$croot" ]; then say containerd-ran present
+else say containerd-ran absent; fi
+# What a run that stopped while admit held Docker's daemons can leave:
+# policy is its own /usr/sbin/policy-rc.d, under which apt may have run;
+# leftover is the copy of the owner's or a temporary file alone, from a run
+# that stopped before its policy was in place.
+if [ -f /usr/sbin/policy-rc.d ] && [ ! -L /usr/sbin/policy-rc.d ] && grep -qxF {{ q (printf "# %s" .HoldMarker) }} /usr/sbin/policy-rc.d; then say docker-hold policy
+elif [ -e /usr/sbin/policy-rc.d.paisans-owner ] || [ -L /usr/sbin/policy-rc.d.paisans-owner ] ||
+  [ -e /usr/sbin/.policy-rc.d.paisans-tmp ] || [ -L /usr/sbin/.policy-rc.d.paisans-tmp ] ||
+  [ -e /usr/sbin/.policy-rc.d.paisans-owner-tmp ] || [ -L /usr/sbin/.policy-rc.d.paisans-owner-tmp ]; then say docker-hold leftover
+else say docker-hold none; fi
+# AppArmor's restriction on unprivileged user namespaces, the rootlesskit
+# profile Ubuntu's apparmor package loads at boot, and whether that package
+# ships it at all: Ubuntu 24.04's does, 22.04's does not, and a host
+# without the package has none to ship it.
+say userns-restrict "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)"
+if grep -q rootlesskit /sys/kernel/security/apparmor/profiles 2>/dev/null; then say rootlesskit-profile loaded; else say rootlesskit-profile absent; fi
+if ! dpkg-query -W -f='${Status}' apparmor 2>/dev/null | grep -q 'ok installed$'; then say rootlesskit-shipped no-package
+elif dpkg-query -L apparmor 2>/dev/null | grep -qx /etc/apparmor.d/rootlesskit; then say rootlesskit-shipped yes
+else say rootlesskit-shipped no; fi
+# The user, and every user's subordinate ranges. userfiles are the files
+# admit writes as root whose paths hold the user's UID.
+home= userfiles=
+if line=$(getent passwd "$u"); then
+  say passwd "$line"
+  say groups "$(id -Gn "$u")"
+  say gids "$(id -G "$u")"
+  say group "$(id -gn "$u")"
+  uid=$(id -u "$u")
+  userfiles="$userfiles /etc/systemd/system/user@$uid.service.d/paisans-mesh.conf"
+  home=$(printf '%s' "$line" | cut -d: -f6)
+  if [ -e "/var/lib/systemd/linger/$u" ]; then say linger yes; else say linger no; fi
+  say manager "$(systemctl is-active "user@$uid.service" 2>/dev/null || true)"
+  # Everything sudo -l lists for the user: its rules, by name or by any
+  # group, and the Defaults that apply to it, its runas users and its
+  # commands. admit reads them. With no sudo installed there is none.
+  if command -v sudo >/dev/null 2>&1; then
+    say sudo listed
+    sudo -n -l -U "$u" 2>&1 | sed 's/^/sudo-l /'
+  else
+    say sudo absent
+  fi
+  homepath=$home
+else
+  say passwd absent
+  homepath=$(useradd -D 2>/dev/null | sed -n 's/^HOME=//p')
+  homepath=${homepath:-/home}/$u
+  # What useradd would trip over or hand the new user: a group of its
+  # name, which useradd makes for it, and a sudoers file, admit's own
+  # aside, that names it already.
+  if getent group "$u" >/dev/null 2>&1; then say group-taken yes; fi
+  # A mesh drop-in of this deployment's whose user was deleted by hand:
+  # its path holds a UID no one has now, so it is found by its content.
+  for f in /etc/systemd/system/user@*.service.d/paisans-mesh.conf; do
+    if [ -f "$f" ] && [ ! -L "$f" ] && grep -qF {{ q (printf "for deployment %s;" .Token) }} "$f"; then say orphan-dropin "$f"; fi
+  done
+  for f in /etc/sudoers /etc/sudoers.d/*; do
+    if [ -f "$f" ] && [ "$f" != {{ q .Sudoers }} ] && grep -qwF -- "$u" "$f" 2>/dev/null; then say sudo-names "$f"; fi
+  done
+fi
+# sudo-rs lists no Defaults under sudo -l, so admit cannot read them.
+if command -v sudo >/dev/null 2>&1 && sudo -V 2>/dev/null | sed -n 1p | grep -q '^sudo-rs'; then say sudo-kind rs; fi
+# The user's home, or the one useradd would give a user not made yet: it
+# is stat'ed, never read inside, and read without a trailing slash, which
+# would follow a link there.
+while [ "$homepath" != / ] && [ "${homepath%/}" != "$homepath" ]; do homepath=${homepath%/}; done
+say home-above "$(above "$homepath")"
+if [ -L "$homepath" ]; then say home "link 0 $homepath"
+elif [ -d "$homepath" ]; then say home "dir $(stat -c %u -- "$homepath") $homepath"
+elif [ -e "$homepath" ]; then say home "other 0 $homepath"
+else say home "absent 0 $homepath"; fi
+awk -F: 'NF >= 3 { print "subuid " $1 ":" $2 ":" $3 }' /etc/subuid 2>/dev/null
+awk -F: 'NF >= 3 { print "subgid " $1 ":" $2 ":" $3 }' /etc/subgid 2>/dev/null
+# Each file admit writes as root: its checksum, mode and owner, so admit
+# compares with what it would write without printing what is there. One
+# that is neither a regular file nor a link, a FIFO or a device, is other.
+# userfiles hold only the UID, which id printed, so they split safely.
+for f in{{ range .Files }} {{ q . }}{{ end }} $userfiles; do
+  case $(above "$f") in
+    link) say file "$f link-above"; continue ;;
+    unsafe) say file "$f unsafe-above"; continue ;;
+  esac
+  if [ -L "$f" ]; then say file "$f link"
+  elif [ -f "$f" ]; then say file "$f $(sha256sum < "$f" | cut -c1-64) $(stat -c '%a %u %g' "$f")"
+  elif [ -e "$f" ]; then say file "$f other"
+  else say file "$f absent"; fi
+done
+if systemctl is-enabled {{ q .EgressUnit }} >/dev/null 2>&1; then say egress-enabled yes; else say egress-enabled no; fi
+# The egress table, and how many rules it holds: nft -a ends each rule's
+# line with its handle, as it does the table's and each chain's.
+if nft list table inet {{ q .EgressTable }} >/dev/null 2>&1; then
+  say egress-table "present $(nft -a list table inet {{ q .EgressTable }} | grep -E '# handle [0-9]+$' | grep -cvE '^[[:space:]]*(table|chain) ')"
+else say egress-table absent; fi
+# The mesh's unit, as systemctl names its state; nothing printed is
+# neither enabled nor active.
+e=$(systemctl is-enabled {{ q .MeshUnit }} 2>/dev/null | sed -n 1p)
+a=$(systemctl is-active {{ q .MeshUnit }} 2>/dev/null | sed -n 1p)
+say mesh-unit "${e:-disabled} ${a:-inactive}"
+# How many entries each directory evict may remove holds. A name with a
+# newline in it counts twice, which only ever keeps the directory.
+for d in{{ range .Counted }} {{ q . }}{{ end }}; do
+  if [ -d "$d" ] && [ ! -L "$d" ]; then say entries "$(ls -A "$d" | wc -l | tr -d ' ') $d"; fi
+done
+# Each directory admit creates or checks, as ls -ldn prints it, so a link,
+# a non-directory and an ACL (a + after the mode) are all seen.
+for d in{{ range .Dirs }} {{ q . }}{{ end }}; do
+  case $(above "$d") in
+    link) say dir "$d link-above 0 0"; continue ;;
+    unsafe) say dir "$d unsafe-above 0 0"; continue ;;
+  esac
+  if [ -e "$d" ] || [ -L "$d" ]; then say dir "$d $(ls -ldn "$d" | awk '{ print $1, $3, $4 }')"; else say dir "$d absent 0 0"; fi
+done
+# The kernel and the network.
+if [ -d /sys/module/br_netfilter ]; then say br_netfilter loaded; else say br_netfilter absent; fi
+# The module the host's iptables uses, and whether it is loaded or built
+# in, judged as dockerd-rootless-setuptool.sh judges it before it installs.
+case $(iptables --version 2>/dev/null) in *legacy*) m=ip_tables ;; *) m=nf_tables ;; esac
+if grep -q "$m" /proc/modules 2>/dev/null || grep -q "$m" "/lib/modules/$(uname -r)/modules.builtin" 2>/dev/null; then say iptables-module "$m loaded"; else say iptables-module "$m absent"; fi
+ip -d -o link show type bridge 2>/dev/null | awk -F': ' '{ sub(/@.*/, "", $2); print "bridge " $2 }'
+say forward-policy "$(iptables -S FORWARD 2>/dev/null | awk '$1 == "-P" { print $3; exit }')"
+say port-start "$(sysctl -n net.ipv4.ip_unprivileged_port_start)"
+say ip-forward "$(sysctl -n net.ipv4.ip_forward)"
+dev=$(ip -4 -o route show default 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }')
+say default-dev "${dev:-absent}"
+if [ -n "$dev" ]; then ip -4 -o addr show dev "$dev" scope global | awk '{ print "lan " $4; exit }'; fi
+# Every IPv6 route of every table with no gateway: a destination the host
+# reaches directly, on its interface, policy routing's tables among them. A
+# route of another type (local, unreachable, throw) starts with that word,
+# not an address. admit keeps the global ones on every interface but
+# loopback and the mesh's.
+ip -6 -o route show table all 2>/dev/null | awk '$1 ~ /:/ && !/ via / { for (i = 2; i < NF; i++) if ($i == "dev") { print "lan6 " $1 " " $(i + 1); break } }'
+# ufw: whether it is installed, and whether its first status line, read as
+# root, says active. Anything else, including a status that cannot be read,
+# is not active, so the answer fails closed.
+if command -v ufw >/dev/null 2>&1; then say ufw installed; else say ufw absent; fi
+if [ "$(ufw status 2>/dev/null | sed -n 1p)" = "Status: active" ]; then say ufw-active yes; else say ufw-active no; fi
+for f in /etc/udev/rules.d/60-paisans-*-watchdog.rules; do [ -e "$f" ] && say watchdog-rule "$f"; done
+# Who owns each watchdog node, which the rule gives the user.
+for d in /dev/watchdog /dev/watchdog[0-9]*; do [ -e "$d" ] && say watchdog-dev "$(stat -c %u "$d") $d"; done
+for f in /etc/paisans/admitted.*.json; do [ -e "$f" ] && say record "$f"; done
+# Where Docker's data will live: --data-dir, or the user's home, or /home
+# for a user not made yet; the nearest directory that exists.
+target={{ if .DataParent }}{{ q .DataParent }}{{ else }}"${home:-/home}"{{ end }}
+while [ ! -e "$target" ] && [ ! -L "$target" ]; do target=$(dirname "$target"); done
+# Its filesystem and free space are read only when nothing above it, and
+# not the path itself, is a link or another user's.
+above=$(above "$target")
+if [ -L "$target" ]; then above=link; fi
+say data-above "$above$([ "$above" = safe ] || echo -above)"
+say data-path "$target"
+if [ "$above" = safe ]; then
+  say data-fs "$(stat -f -c %T "$target")"
+  say data-avail "$(df -P -B1 "$target" | awk 'NR == 2 { print $4 }')"
+fi
+echo end

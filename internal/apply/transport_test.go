@@ -3,8 +3,10 @@ package apply_test
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -26,7 +28,7 @@ const (
 func TestSSHArgsForASection(t *testing.T) {
 	tr := apply.SSHTransport{User: "ubuntu", Host: "203.0.113.10", Port: 2222, PublicKeys: []string{keyA, keyB}}
 	got := tr.SSHArgs([]string{"/tmp/k/key-1.pub", "/tmp/k/key-2.pub"}, "uptime")
-	want := append(apply.MuxArgs(), "-T", "-p", "2222", "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=10", "-i", "/tmp/k/key-1.pub", "-i", "/tmp/k/key-2.pub", "ubuntu@203.0.113.10", apply.RemoteCommand("uptime"))
+	want := append(apply.MuxArgs(), "-T", "-p", "2222", "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=10", "-i", "/tmp/k/key-1.pub", "-i", "/tmp/k/key-2.pub", "ubuntu@203.0.113.10", apply.RemoteCommand("", "uptime"))
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ssh args:\n got %q\nwant %q", got, want)
 	}
@@ -46,10 +48,28 @@ func TestSSHArgsConnectTimeout(t *testing.T) {
 	}{{0, "ConnectTimeout=10"}, {30, "ConnectTimeout=30"}} {
 		tr := apply.SSHTransport{User: "ubuntu", Host: "vm.example.org", PublicKeys: []string{keyA}, ConnectTimeout: c.timeout}
 		got := tr.SSHArgs([]string{"k1"}, "true")
-		want := append(apply.MuxArgs(), "-T", "-p", "22", "-o", "IdentitiesOnly=yes", "-o", c.want, "-i", "k1", "ubuntu@vm.example.org", apply.RemoteCommand("true"))
+		want := append(apply.MuxArgs(), "-T", "-p", "22", "-o", "IdentitiesOnly=yes", "-o", c.want, "-i", "k1", "ubuntu@vm.example.org", apply.RemoteCommand("", "true"))
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("ConnectTimeout %d, ssh args:\n got %q\nwant %q", c.timeout, got, want)
 		}
+	}
+}
+
+// The deployment's own user logs in with a key or not at all. It has no
+// password, and on a host that has not admitted the deployment it does not
+// exist, where sshd still asks for one: offering only public keys makes that
+// host refuse the login, which is how it is told apart, instead of a password
+// prompt nothing can answer.
+func TestSSHArgsDefaultUserOffersOnlyKeys(t *testing.T) {
+	tr := apply.SSHTransport{Site: "home", User: "paisans-c111", Host: "vm.example.org", PublicKeys: []string{keyA}, DefaultUser: true}
+	want := []string{"-p", "22", "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=10", "-o", "PreferredAuthentications=publickey", "-i", "k1"}
+	got := tr.SSHArgs([]string{"k1"}, "true")
+	if !reflect.DeepEqual(got, append(append(apply.MuxArgs(), "-T"), append(want, "paisans-c111@vm.example.org", apply.RemoteCommand("", "true"))...)) {
+		t.Errorf("ssh args:\n got %q\nwant %q after -T", got, want)
+	}
+	fwd := tr.ForwardArgs([]string{"k1"}, "smtp.example.org:587")
+	if !reflect.DeepEqual(fwd, append(apply.MuxArgs(), append(want, "-W", "smtp.example.org:587", "paisans-c111@vm.example.org")...)) {
+		t.Errorf("forward args:\n got %q\nwant %q", fwd, want)
 	}
 }
 
@@ -68,7 +88,7 @@ func TestSSHArgsDefaultToPort22(t *testing.T) {
 // added. Only the connection sharing options and -T go before it.
 func TestSSHArgsDestinationOverrideIsVerbatim(t *testing.T) {
 	tr := apply.SSHTransport{Destination: "jump-alias", User: "ubuntu", Host: "203.0.113.10", Port: 2222, PublicKeys: []string{keyA}}
-	if got, want := tr.SSHArgs(nil, "true"), append(apply.MuxArgs(), "-T", "jump-alias", apply.RemoteCommand("true")); !reflect.DeepEqual(got, want) {
+	if got, want := tr.SSHArgs(nil, "true"), append(apply.MuxArgs(), "-T", "jump-alias", apply.RemoteCommand("", "true")); !reflect.DeepEqual(got, want) {
 		t.Fatalf("override args: got %q, want %q", got, want)
 	}
 	args, cleanup, err := apply.SSHCommand(tr, "true")
@@ -76,7 +96,7 @@ func TestSSHArgsDestinationOverrideIsVerbatim(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer cleanup()
-	if want := append(append([]string{"ssh"}, apply.MuxArgs()...), "-T", "jump-alias", apply.RemoteCommand("true")); !reflect.DeepEqual(args, want) {
+	if want := append(append([]string{"ssh"}, apply.MuxArgs()...), "-T", "jump-alias", apply.RemoteCommand("", "true")); !reflect.DeepEqual(args, want) {
 		t.Fatalf("override command: got %q, want %q", args, want)
 	}
 }
@@ -401,6 +421,123 @@ func TestSSHAuthenticationFailuresAreProblems(t *testing.T) {
 	apply.ForgetContacts()
 }
 
+// A site that names no ssh.user is reached as the deployment's own user,
+// which exists on a host only once its owner has admitted the deployment.
+// A host that refuses that login is said to be one that has not admitted
+// it, with the request to send its owner, rather than as a key problem.
+func TestARefusedDefaultUserIsNotAdmitted(t *testing.T) {
+	apply.ForgetContacts()
+	t.Cleanup(apply.ForgetContacts)
+	s := &sshScript{answers: []sshAnswer{{"paisans-f2a9@203.0.113.10: Permission denied (publickey).\n", 255}}}
+	s.install(t)
+	tr := apply.SSHTransport{Site: "home-a", User: "paisans-f2a9", Host: "203.0.113.10", PublicKeys: []string{keyA}, DefaultUser: true}
+	_, err := tr.Run("true")
+	if s.calls != 1 || errors.Is(err, apply.ErrUnreachable) {
+		t.Errorf("retried or called unreachable: %d calls, %v", s.calls, err)
+	}
+	p := problemOf(t, err)
+	if p.Hint != "site home-a is not admitted on 203.0.113.10" {
+		t.Errorf("hint %q", p.Hint)
+	}
+	for _, want := range []string{"paisans-f2a9", "paisans site request --site home-a > home-a.admit", "sites.home-a.ssh.user"} {
+		if !strings.Contains(p.Explain, want) {
+			t.Errorf("explain lacks %q:\n%s", want, p.Explain)
+		}
+	}
+}
+
+// The other refusal ssh gives for a key it will not take reads the same.
+func TestARefusedDefaultUserIsNotAdmittedWhateverSshSaid(t *testing.T) {
+	for _, out := range []string{
+		"Too many authentication failures\n",
+		"Received disconnect from 203.0.113.10 port 22:2: Too many authentication failures\n",
+	} {
+		apply.ForgetContacts()
+		s := &sshScript{answers: []sshAnswer{{out, 255}}}
+		s.install(t)
+		tr := apply.SSHTransport{Site: "home-a", User: "paisans-f2a9", Host: "203.0.113.10", PublicKeys: []string{keyA}, DefaultUser: true}
+		_, err := tr.Run("true")
+		if p := problemOf(t, err); p.Hint != "site home-a is not admitted on 203.0.113.10" {
+			t.Errorf("%q: hint %q", out, p.Hint)
+		}
+	}
+	apply.ForgetContacts()
+}
+
+// A transport built from a Destination names the host it reaches, never an
+// empty one.
+func TestANotAdmittedDestinationNamesItsHost(t *testing.T) {
+	apply.ForgetContacts()
+	t.Cleanup(apply.ForgetContacts)
+	s := &sshScript{answers: []sshAnswer{{"Permission denied (publickey).\n", 255}}}
+	s.install(t)
+	tr := apply.SSHTransport{Site: "home-a", Destination: "paisans-f2a9@203.0.113.10", PublicKeys: []string{keyA}, DefaultUser: true}
+	_, err := tr.Run("true")
+	p := problemOf(t, err)
+	if p.Hint != "site home-a is not admitted on 203.0.113.10" {
+		t.Errorf("hint %q", p.Hint)
+	}
+	for _, bad := range []string{" on .", " on ,", "user, and "} {
+		if strings.Contains(p.Explain, bad) {
+			t.Errorf("explain has empty text %q:\n%s", bad, p.Explain)
+		}
+	}
+	if !strings.Contains(p.Explain, "paisans-f2a9, and 203.0.113.10 refused it") {
+		t.Errorf("explain:\n%s", p.Explain)
+	}
+}
+
+// runRefused is a login ssh refused, as the deployment's own user when
+// defaultUser is set and as a user the site names otherwise.
+func runRefused(t *testing.T, defaultUser bool) error {
+	t.Helper()
+	apply.ForgetContacts()
+	t.Cleanup(apply.ForgetContacts)
+	s := &sshScript{answers: []sshAnswer{{"paisans-f2a9@203.0.113.10: Permission denied (publickey).\n", 255}}}
+	s.install(t)
+	tr := apply.SSHTransport{Site: "home-a", User: "paisans-f2a9", Host: "203.0.113.10", PublicKeys: []string{keyA}, DefaultUser: defaultUser}
+	_, err := tr.Run("true")
+	return err
+}
+
+// A refused login is told apart from a failed command, whichever words ssh
+// used, and so is a host that does not answer.
+func TestNoLogin(t *testing.T) {
+	for _, defaultUser := range []bool{true, false} {
+		refused := runRefused(t, defaultUser)
+		if !errors.Is(refused, apply.ErrLoginRefused) || !apply.NoLogin(refused) {
+			t.Errorf("a refused login (default user %v): %v", defaultUser, refused)
+		}
+		// Only the deployment's own user is a host that has not admitted
+		// it; a user the site names is the operator's key problem.
+		if errors.Is(refused, apply.ErrLoginNotAdmitted) != defaultUser {
+			t.Errorf("default user %v: ErrLoginNotAdmitted is %v", defaultUser, !defaultUser)
+		}
+	}
+	if !apply.NoLogin(fmt.Errorf("x: %w", apply.ErrUnreachable)) || apply.NoLogin(errors.New("exit status 1")) {
+		t.Error("NoLogin misreads an unreachable host or a failed command")
+	}
+}
+
+// A user the site names is the operator's choice, so its refusal is a key
+// problem; so is a default user on a transport that names no site, which has
+// no request to send.
+func TestARefusedDeclaredUserIsAKeyProblem(t *testing.T) {
+	for _, tr := range []apply.SSHTransport{
+		{Site: "home-a", User: "ubuntu", Host: "203.0.113.10", PublicKeys: []string{keyA}},
+		{User: "paisans-f2a9", Host: "203.0.113.10", PublicKeys: []string{keyA}, DefaultUser: true},
+	} {
+		apply.ForgetContacts()
+		s := &sshScript{answers: []sshAnswer{{"Permission denied (publickey).\n", 255}}}
+		s.install(t)
+		_, err := tr.Run("true")
+		if p := problemOf(t, err); !strings.Contains(p.Hint, "did not accept your ssh key") {
+			t.Errorf("%+v: hint %q", tr, p.Hint)
+		}
+	}
+	apply.ForgetContacts()
+}
+
 // A sudo probe that never reached ssh (here: no key to offer) is that
 // failure, not sudo refusing the user, which it never asked.
 func TestASudoProbeThatNeverRanIsNotARefusal(t *testing.T) {
@@ -423,5 +560,159 @@ func TestAnSSHFailureInTheSudoProbeIsNotARefusal(t *testing.T) {
 	_, err := tr.Run("true")
 	if err == nil || strings.Contains(err.Error(), "sudo") || !strings.Contains(err.Error(), "did not accept your ssh key") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+// writeFileScript runs WriteFile through a stand-in for ssh that executes the
+// remote command locally under sh, with the content on its stdin, and returns
+// the script the host would have run.
+func writeFileScript(t *testing.T, path, content string, mode uint32) (script string, err error) {
+	t.Helper()
+	restore := apply.FakeSSH(func(args []string, stdin string) (string, int) {
+		script = args[len(args)-1]
+		cmd := exec.Command("sh", "-c", script)
+		cmd.Stdin = strings.NewReader(stdin)
+		out, rerr := cmd.CombinedOutput()
+		if rerr != nil {
+			return string(out), 1
+		}
+		return string(out), 0
+	}, nil, func(time.Duration) {}, io.Discard)
+	defer restore()
+	err = apply.SSHTransport{Destination: "vm"}.WriteFile(path, content, mode)
+	return script, err
+}
+
+// The temporary file is made by mktemp in the target's directory: created
+// exclusively with mode 600, so a link planted at a guessable name is never
+// followed, and a fresh name per write, so two writes of one path do not meet.
+func TestWriteFileTempFileComesFromMktempBesideTheTarget(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("no sh")
+	}
+	dir := t.TempDir()
+	script, err := writeFileScript(t, filepath.Join(dir, "app.env"), "A=1\n", 0o640)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(script, ".paisans-tmp") {
+		t.Errorf("a fixed temporary name is still used:\n%s", script)
+	}
+	want := "mktemp '" + dir + "/.app.env.XXXXXX'"
+	if !strings.Contains(script, want) {
+		t.Errorf("script lacks %q:\n%s", want, script)
+	}
+	if !strings.Contains(script, "mv -f") {
+		t.Errorf("the temporary file is not moved with mv -f:\n%s", script)
+	}
+}
+
+// Links planted where the old fixed name was, and where a temporary name
+// would be guessed, are left alone, and the target still gets the content.
+func TestWriteFileDoesNotFollowPlantedLinks(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("no sh")
+	}
+	dir := t.TempDir()
+	victim := filepath.Join(dir, "victim")
+	if err := os.WriteFile(victim, []byte("precious"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(dir, "app.env")
+	for _, name := range []string{"app.env.paisans-tmp", ".app.env.XXXXXX", ".app.env.000000", ".app.env.tmp"} {
+		if err := os.Symlink(victim, filepath.Join(dir, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := writeFileScript(t, target, "A=1\n", 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(victim); string(got) != "precious" {
+		t.Errorf("a planted link was written through: %q", got)
+	}
+	if fi, _ := os.Stat(victim); fi.Mode().Perm() != 0o644 {
+		t.Errorf("a planted link was chmodded: %v", fi.Mode().Perm())
+	}
+	got, err := os.ReadFile(target)
+	if err != nil || string(got) != "A=1\n" {
+		t.Fatalf("target = %q, %v", got, err)
+	}
+	if li, _ := os.Lstat(target); li.Mode()&os.ModeSymlink != 0 || li.Mode().Perm() != 0o640 {
+		t.Errorf("target mode %v", li.Mode())
+	}
+	left, _ := filepath.Glob(filepath.Join(dir, ".app.env.*"))
+	if len(left) != 3 {
+		t.Errorf("a temporary file was left behind: %v", left)
+	}
+}
+
+// A write that fails part way leaves no temporary file. The mv is made to
+// fail by a stand-in earlier on the PATH.
+func TestWriteFileRemovesItsTempFileOnFailure(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("no sh")
+	}
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "mv"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	dir := t.TempDir()
+	if _, err := writeFileScript(t, filepath.Join(dir, "app.env"), "A=1\n", 0o600); err == nil {
+		t.Fatal("a failing mv was reported as success")
+	}
+	left, _ := filepath.Glob(filepath.Join(dir, "*app.env*"))
+	if len(left) != 0 {
+		t.Errorf("temporary file left behind: %v", left)
+	}
+}
+
+// A target that is a link or a directory is refused before the rename, so mv
+// can never move the temporary file into a linked directory or write through
+// a linked file; the temporary file is removed.
+func TestWriteFileRefusesALinkOrDirectoryTarget(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("no sh")
+	}
+	dir := t.TempDir()
+	linkedDir := filepath.Join(dir, "linked-dir")
+	linkedFile := filepath.Join(dir, "linked-file")
+	plainDir := filepath.Join(dir, "plain-dir")
+	for _, d := range []string{linkedDir, plainDir} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(linkedFile, []byte("precious"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]struct{ target, link, want string }{
+		"symlink to a directory": {filepath.Join(dir, "t-dirlink"), linkedDir, "symbolic link"},
+		"symlink to a file":      {filepath.Join(dir, "t-filelink"), linkedFile, "symbolic link"},
+		"directory":              {plainDir, "", "directory"},
+	} {
+		if c.link != "" {
+			if err := os.Symlink(c.link, c.target); err != nil {
+				t.Fatal(err)
+			}
+		}
+		err := func() error { _, err := writeFileScript(t, c.target, "A=1\n", 0o600); return err }()
+		if err == nil || !strings.Contains(err.Error(), c.target) || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: want a refusal naming the path and %q, got %v", name, c.want, err)
+		}
+	}
+	if got, _ := os.ReadFile(linkedFile); string(got) != "precious" {
+		t.Errorf("linked file changed: %q", got)
+	}
+	// Neither the directory written at nor the one a link names gained an
+	// entry: mv moves a file into a directory it is given.
+	for _, d := range []string{linkedDir, plainDir} {
+		if e, _ := os.ReadDir(d); len(e) != 0 {
+			t.Errorf("%s gained %d entries", filepath.Base(d), len(e))
+		}
+	}
+	left, _ := filepath.Glob(filepath.Join(dir, ".*"))
+	if len(left) != 0 {
+		t.Errorf("temporary files left behind: %v", left)
 	}
 }

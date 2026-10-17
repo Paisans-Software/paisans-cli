@@ -1,0 +1,90 @@
+admit site status of f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01 as paisans-f2a9 on fake (ubuntu 24.04)
+
+step 1: claim the host
+step 2: create /etc/paisans
+step 3: record what admit installs
+step 4: add docker apt key
+step 5: add docker apt repo
+step 6: install packages: docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin, docker-compose-plugin, docker-ce-rootless-extras, uidmap, wireguard-tools, git
+step 7: disable the system Docker
+step 8: create user paisans-f2a9
+step 9: skip the mesh until its conf exists
+step 10: start paisans-f2a9's manager after the mesh
+step 11: delegate cgroups to users
+step 12: write the egress table
+step 13: install the egress unit
+step 14: load the egress table
+step 15: enable linger for paisans-f2a9
+step 16: start paisans-f2a9's manager
+step 17: load br_netfilter
+step 18: load br_netfilter at boot
+step 19: write paisans-f2a9's daemon.json
+step 20: install paisans-f2a9's rootless Docker
+step 21: create /srv/paisans
+step 22: create /srv/paisans/f2a9
+step 23: create /etc/wireguard
+step 24: create /usr/local/libexec/paisans
+step 25: install the WireGuard helper
+step 26: install the helper's sudoers line
+step 27: allow 22/tcp
+step 28: allow 51820/udp
+step 29: allow all inbound on psns-f2a9
+
+step 30: write the admission record
+  record: who the deployment runs as and what you granted, which its own commands read
+  write /etc/paisans/admitted.f2a9.json mode 0644:
+    | {
+    |   "version": 1,
+    |   "deployment": "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01",
+    |   "user": "paisans-f2a9",
+    |   "site": "status",
+    |   "roles": [
+    |     "monitor"
+    |   ],
+    |   "grants": {
+    |     "watchdog": false,
+    |     "public_ports": false
+    |   },
+    |   "forwarding": false,
+    |   "ports": {
+    |     "ssh": 22,
+    |     "wireguard": 51820,
+    |     "public": []
+    |   },
+    |   "digest": "xd0b-nk4k-e2cp-xk02",
+    |   "admitted_at": "2026-10-15T12:00:00Z",
+    |   "data_dir": "",
+    |   "bridge_netfilter": false,
+    |   "mesh_lan": "",
+    |   "mesh_subnet": "10.44.0.0/24",
+    |   "web_server": {
+    |     "server": "nginx",
+    |     "container": "",
+    |     "process": "nginx",
+    |     "config": "/etc/nginx/nginx.conf",
+    |     "main": "/etc/nginx/nginx.conf",
+    |     "certs": "files",
+    |     "cert_file": "/etc/letsencrypt/live/status.example.org/fullchain.pem",
+    |     "key_file": "/etc/letsencrypt/live/status.example.org/privkey.pem",
+    |     "folder": "",
+    |     "certbot": "certbot certonly --nginx -d status.example.org",
+    |     "admin_tcp": "",
+    |     "why": ""
+    |   },
+    |   "system_docker_disabled": true,
+    |   "toolkit_version": "<release>",
+    |   "toolkit_commit": "0000000000000000000000000000000000000000",
+    |   "toolkit_modified": false
+    | }
+
+step 31: add the operators' keys
+
+present: package: nftables installed
+present: apparmor: rootlesskit's profile is loaded
+present: egress: the host's on-link IPv6 prefixes, dropped: 2001:db8:1::/64
+present: br_netfilter: nf_tables, which the host's iptables uses, is loaded
+present: daemon: /home (ext2/ext3) has 42.9 GB free
+present: mesh: nothing on this host overlaps 10.44.0.0/24
+present: firewall: ufw active, its default policy left to the owner
+present: forwarding: not needed, this site has no endpoint
+present: web server: nginx (process nginx, config /etc/nginx/nginx.conf), certificates from certbot

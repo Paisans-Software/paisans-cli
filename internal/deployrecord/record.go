@@ -15,7 +15,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"path"
 	"slices"
 	"sort"
 	"strings"
@@ -25,6 +24,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/registry"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 // Version is the record's layout.
@@ -49,13 +49,14 @@ type Record struct {
 	Sites          []string `json:"sites"`
 	Apps           []string `json:"apps"`
 	PocketIDGroups []string `json:"pocket_id_groups"`
+	// Build is the paisans that made the latest change: toolkit_version,
+	// toolkit_commit and toolkit_modified.
+	version.Build
 }
 
-// Path is the record on a gateway, named by the deployment's token, which is
-// what proves it this deployment's.
-func Path(d deployment.Deployment) string {
-	return registry.Dir + "/deployed." + d.Token() + ".json"
-}
+// Path is the record on a gateway, in the deployment's state directory,
+// which only the deployment's user writes.
+func Path(d deployment.Deployment) string { return d.StatePath("deployed.json") }
 
 // FromConfig is everything cfg declares.
 func FromConfig(cfg *config.Config) Record {
@@ -106,7 +107,7 @@ func normal(r Record) Record {
 		sort.Strings(out)
 		return out
 	}
-	return Record{Version: Version, UpdatedAt: r.UpdatedAt, Sites: clean(r.Sites), Apps: clean(r.Apps), PocketIDGroups: clean(r.PocketIDGroups)}
+	return Record{Version: Version, UpdatedAt: r.UpdatedAt, Sites: clean(r.Sites), Apps: clean(r.Apps), PocketIDGroups: clean(r.PocketIDGroups), Build: r.Build}
 }
 
 // entry is one name's history: a tag for every add of it, and the tags of
@@ -139,6 +140,9 @@ type doc struct {
 	Sites          map[string]entry `json:"sites"`
 	Apps           map[string]entry `json:"apps"`
 	PocketIDGroups map[string]entry `json:"pocket_id_groups"`
+	// Build is the paisans that made the latest change, which parseDoc
+	// requires.
+	version.Build
 }
 
 var kindNames = []string{"sites", "apps", "pocket_id_groups"}
@@ -159,7 +163,7 @@ func (m *doc) kind(kind string) map[string]entry {
 
 // view is the deployed names of m.
 func view(m doc) Record {
-	r := Record{UpdatedAt: m.UpdatedAt}
+	r := Record{UpdatedAt: m.UpdatedAt, Build: m.Build}
 	lists := map[string]*[]string{"sites": &r.Sites, "apps": &r.Apps, "pocket_id_groups": &r.PocketIDGroups}
 	for _, kind := range kindNames {
 		for name, e := range m.kind(kind) {
@@ -186,10 +190,13 @@ func tagSet(lists ...[]string) []string {
 
 // merge is, for every name, every add tag and every removed tag any of ds
 // holds: no add one record alone saw, and no removal one alone saw, is lost.
+// Its time and build are the latest change's.
 func merge(ds ...doc) doc {
 	out := newDoc()
-	for _, m := range ds {
-		out.UpdatedAt = max(out.UpdatedAt, m.UpdatedAt)
+	for i, m := range ds {
+		if i == 0 || m.UpdatedAt > out.UpdatedAt {
+			out.UpdatedAt, out.Build = m.UpdatedAt, m.Build
+		}
 		for _, kind := range kindNames {
 			into := out.kind(kind)
 			for name, e := range m.kind(kind) {
@@ -210,7 +217,7 @@ func merge(ds ...doc) doc {
 // tags it drops are, as far as this write can tell, held nowhere else.
 func compact(m doc) doc {
 	out := newDoc()
-	out.UpdatedAt = m.UpdatedAt
+	out.UpdatedAt, out.Build = m.UpdatedAt, m.Build
 	for _, kind := range kindNames {
 		for name, e := range m.kind(kind) {
 			switch live := e.live(); {
@@ -232,6 +239,9 @@ func encodeDoc(m doc) string {
 }
 
 func parseDoc(content string) (doc, error) {
+	if err := version.RequireBuild([]byte(content)); err != nil {
+		return doc{}, err
+	}
 	dec := json.NewDecoder(strings.NewReader(content))
 	dec.DisallowUnknownFields()
 	m := newDoc()
@@ -258,6 +268,10 @@ var newTag = func() string {
 // through Update.
 func Encode(r Record) string {
 	m := newDoc()
+	m.UpdatedAt, m.Build = r.UpdatedAt, r.Build
+	if m.Build == (version.Build{}) {
+		m.Build = version.Current()
+	}
 	for _, kind := range kindNames {
 		for _, name := range r.List(kind) {
 			m.kind(kind)[name] = entry{Adds: []string{"t-" + name}}
@@ -275,6 +289,9 @@ func read(t registry.Runner, d deployment.Deployment) (doc, string, bool, error)
 		return newDoc(), "", false, nil
 	}
 	m, err := parseDoc(content)
+	if version.IsNewer(err) {
+		return doc{}, "", false, fmt.Errorf("%s: %s: %w", t.Describe(), Path(d), err)
+	}
 	if err != nil {
 		return doc{}, "", false, fmt.Errorf("%s: %s is %w: %v", t.Describe(), Path(d), ErrMalformed, err)
 	}
@@ -369,7 +386,7 @@ func Update(hosts map[string]registry.Runner, d deployment.Deployment, ch Change
 	for _, gw := range slices.Sorted(maps.Keys(hosts)) {
 		m, raw, ok, err := read(hosts[gw], d)
 		switch {
-		case errors.Is(err, ErrMalformed):
+		case errors.Is(err, ErrMalformed), version.IsNewer(err):
 			return res, err
 		case err != nil:
 			res.Missed[gw] = err
@@ -388,7 +405,7 @@ func Update(hosts map[string]registry.Runner, d deployment.Deployment, ch Change
 	}
 	res.Changed = !sameNames(view(target), view(base))
 	if encodeDoc(target) != encodeDoc(base) {
-		target.UpdatedAt = now.UTC().Format(time.RFC3339)
+		target.UpdatedAt, target.Build = now.UTC().Format(time.RFC3339), version.Current()
 	}
 	if len(res.Missed) == 0 {
 		target = compact(target)
@@ -412,7 +429,7 @@ func sameNames(a, b Record) bool {
 	return slices.Equal(a.Sites, b.Sites) && slices.Equal(a.Apps, b.Apps) && slices.Equal(a.PocketIDGroups, b.PocketIDGroups)
 }
 
-// write replaces the record with content, under the registry's lock, only if
+// write replaces the record with content, under the deployment's lock, only if
 // the file still hashes to what was read: a record another command changed
 // meanwhile is refused rather than overwritten.
 func write(t registry.Runner, d deployment.Deployment, raw string, found bool, content string) error {
@@ -431,24 +448,19 @@ func write(t registry.Runner, d deployment.Deployment, raw string, found bool, c
 	return nil
 }
 
-// writeCommand leaves the record 0644 in a directory others may enter, so
-// that a command which only reads it, Eg: an apply of a site that is not a
-// gateway, needs no sudo on the gateway. It holds the names of sites, apps and
-// Pocket ID groups and nothing else. The directory is not listable, for the
-// registry beside it (see registry.Dir).
+// writeCommand replaces the record, which is the deployment user's and sits
+// in its state directory, under the deployment's lock. The record is left
+// 0644 inside that 700 directory by a rename. It holds the names of sites,
+// apps and Pocket ID groups and nothing else.
 func writeCommand(d deployment.Deployment, want, content string) string {
 	return strings.Join([]string{
 		"set -e",
-		"umask 077",
-		"mkdir -p " + registry.Dir,
-		"chmod 711 " + registry.Dir,
-		"exec 9>>" + registry.LockPath,
-		fmt.Sprintf("flock -w 60 9 || { echo 'paisans: another command holds %s'; exit 1; }", registry.LockPath),
+		d.StateLockCommand("the deployment record"),
 		"f=" + quote(Path(d)),
 		"cur=none",
 		`if [ -f "$f" ]; then cur=$(sha256sum "$f" | cut -d' ' -f1); fi`,
 		`[ "$cur" = ` + quote(want) + ` ] || { echo ` + quote(ChangedMarker) + `; exit 1; }`,
-		"tmp=$(mktemp " + registry.Dir + "/.deployed.XXXXXX)",
+		"tmp=$(mktemp " + quote(d.StatePath(".deployed.XXXXXX")) + ")",
 		`trap 'rm -f "$tmp"' EXIT`,
 		"printf %s " + quote(base64.StdEncoding.EncodeToString([]byte(content))) + ` | base64 -d > "$tmp"`,
 		`chmod 644 "$tmp"`,
@@ -460,50 +472,3 @@ func writeCommand(d deployment.Deployment, want, content string) string {
 func RemoveCommand(d deployment.Deployment) string { return "rm -f -- " + quote(Path(d)) }
 
 func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
-
-// The markers ReadAsUser's command prints in place of the record.
-const (
-	absentMarker = "__PAISANS_ABSENT__"
-	deniedMarker = "__PAISANS_DENIED__"
-)
-
-// ReadAsUser is gateway user for reading the record as the ssh user, without
-// sudo, which the modes a write leaves allow. A record the ssh user may not
-// read, one written with other modes, is read through elevated instead,
-// which is made only then, so that a read which needs no sudo asks for no
-// sudo password. The next write leaves the record readable. Run is for
-// writes, and goes through elevated.
-func ReadAsUser(user registry.Runner, elevated func() registry.Runner) registry.Runner {
-	return userReader{user: user, elevated: elevated}
-}
-
-type userReader struct {
-	user     registry.Runner
-	elevated func() registry.Runner
-}
-
-func (u userReader) Describe() string { return u.user.Describe() }
-
-func (u userReader) Run(command string) (string, error) { return u.elevated().Run(command) }
-
-func (u userReader) ReadFile(p string) (string, bool, error) {
-	out, err := u.user.Run(userReadCommand(p))
-	if err != nil {
-		return "", false, err
-	}
-	switch strings.TrimSpace(out) {
-	case absentMarker:
-		return "", false, nil
-	case deniedMarker:
-		return u.elevated().ReadFile(p)
-	}
-	return out, true, nil
-}
-
-// userReadCommand prints the file at p, or a marker: denied for a file the
-// user may not read, or one in a directory the user may not enter, which
-// hides whether the file is there at all; absent otherwise.
-func userReadCommand(p string) string {
-	f, dir := quote(p), quote(path.Dir(p))
-	return fmt.Sprintf(`if [ -f %[1]s ] && [ -r %[1]s ]; then cat %[1]s; elif [ -e %[1]s ] || { [ -d %[2]s ] && ! [ -x %[2]s ]; }; then echo %[3]s; else echo %[4]s; fi`, f, dir, deniedMarker, absentMarker)
-}

@@ -1,0 +1,9 @@
+{{- /* Takes the hold's lock for the rest of the shell, so one run alone
+        holds Docker's daemons, and no other run puts back a hold that is
+        live under a running install. A shell that took it already, as site
+        admit's install does ahead of the hold, keeps the lock it holds. */ -}}
+if [ -z "${paisans_hold_locked:-}" ]; then
+  exec 8>/run/paisans-docker-hold.lock
+  flock -n 8 || { echo 'another paisans site admit is installing Docker on this host now (it holds /run/paisans-docker-hold.lock). Run again once it is done'; exit 1; }
+  paisans_hold_locked=1
+fi

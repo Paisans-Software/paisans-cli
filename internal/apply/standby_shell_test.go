@@ -15,11 +15,11 @@ import (
 // deploy user without sudo. `docker compose` fails before it reaches the
 // daemon, as Compose v2 does when a service's env_file is the root owned 0600
 // .env apply writes: it loads every env_file to build the project, even for
-// exec. `docker ps` and `docker exec` work, as they do for a member of the
-// docker group. FAKE_RUNNING and FAKE_STANDBY say what the container is doing;
+// exec. `docker ps` and `docker exec` work, as they do for the deployment
+// user against its own daemon. FAKE_RUNNING and FAKE_STANDBY say what the container is doing;
 // FAKE_LEFTOVER lists a second, older container after it, as a recreate in
-// progress does; FAKE_NODOCKER makes docker unreachable, as it is for a deploy
-// user outside the docker group.
+// progress does; FAKE_NODOCKER makes docker unreachable, as it is when the
+// deployment user's rootless daemon is not running.
 const fakeDocker = `#!/bin/sh
 case "$1" in
 compose)

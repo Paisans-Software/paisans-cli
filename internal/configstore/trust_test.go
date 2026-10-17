@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 type fake struct {
@@ -19,7 +21,7 @@ func newFake() *fake {
 
 // add records a version listing the given operators, each by the key "fp-<name>".
 func (f *fake) add(sha string, rev int, signer string, parents []string, operators ...string) {
-	f.vs[sha] = Version{SHA: sha, Parents: parents, Revision: rev, Signed: true, SignerFP: signer, TreeOK: true}
+	f.vs[sha] = Version{SHA: sha, Parents: parents, Revision: rev, Signed: true, SignerFP: signer, TreeOK: true, Build: version.Current(), BuildOK: true}
 	m := map[string]string{}
 	for _, n := range operators {
 		m["fp-"+n] = n
@@ -297,6 +299,7 @@ func TestJudgeShape(t *testing.T) {
 		"revision": func(v *Version) { v.Revision = 5 },
 		"unsigned": func(v *Version) { v.Signed = false },
 		"tree":     func(v *Version) { v.TreeOK = false },
+		"no build": func(v *Version) { v.BuildOK = false },
 	} {
 		f := chain()
 		f.add("v4", 4, "fp-alice", on("v3"), "alice")
@@ -537,5 +540,31 @@ func TestJudgeRemovedThenReaddedWithNewKey(t *testing.T) {
 		wantUntrusted(t, v, "s2", "removal")
 		wantTrusted(t, v, "v4", "v5")
 		wantHeads(t, v, "v5")
+	}
+}
+
+// A version a newer paisans may have published is untrusted with the
+// upgrade remedy, one without a build with the publish remedy, and a pinned
+// root without a build says how a new first version is made.
+func TestJudgeBuildReasons(t *testing.T) {
+	f := chain()
+	f.add("v4", 4, "fp-alice", on("v3"), "alice")
+	x := f.vs["v4"]
+	x.BuildOK, x.BuildNewer, x.Build = false, true, version.Build{Version: "1.0", Commit: "v1.0"}
+	f.vs["v4"] = x
+	if v := judgeOK(t, f, Anchor{Root: "v1"}); v.Trusted["v4"] || !strings.Contains(v.Reasons["v4"], "upgrade paisans") {
+		t.Errorf("newer: %q", v.Reasons["v4"])
+	}
+	x.BuildNewer = false
+	f.vs["v4"] = x
+	if v := judgeOK(t, f, Anchor{Root: "v1"}); !strings.Contains(v.Reasons["v4"], "`paisans config publish --execute`") {
+		t.Errorf("no build: %q", v.Reasons["v4"])
+	}
+	f = chain()
+	root := f.vs["v1"]
+	root.BuildOK = false
+	f.vs["v1"] = root
+	if _, err := Judge(f.graph(), Anchor{Root: "v1"}); err == nil || !strings.Contains(err.Error(), "`paisans apply --execute` publishes a new first version") {
+		t.Errorf("root: %v", err)
 	}
 }

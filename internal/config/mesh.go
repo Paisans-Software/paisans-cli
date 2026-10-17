@@ -13,6 +13,116 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// ParseMeshSubnet is subnet as a network, or what is wrong with how it is
+// written: not CIDR, not IPv4, a host address rather than the network, or
+// any spelling but the canonical one net.IPNet prints, so a leading zero or
+// an IPv4-mapped IPv6 form never reaches a host as a second spelling of one
+// mesh. The loader holds mesh.subnet to it and a request its mesh_subnet.
+func ParseMeshSubnet(subnet string) (*net.IPNet, string) {
+	ip, network, err := net.ParseCIDR(subnet)
+	switch {
+	case err != nil:
+		return nil, "is not a network in CIDR notation"
+	case ip.To4() == nil:
+		return nil, "is not IPv4"
+	case !ip.Equal(network.IP):
+		return nil, "is a host address inside a network, not the network itself, " + network.String()
+	case network.String() != subnet:
+		return nil, "is not written in its canonical form, " + network.String()
+	}
+	return network, ""
+}
+
+// MeshMinPrefix is the shortest prefix mesh.subnet may have: no larger than a
+// /24, which is what init picks. The hosts' firewalls trust the whole mesh,
+// so a larger one could cover an owner's LAN.
+const MeshMinPrefix = 24
+
+// reservedMesh is what a mesh subnet may not overlap. An admitted host's
+// egress table accepts the mesh subnet before it drops loopback and
+// link-local, so a subnet over either would let the deployment reach the
+// owner's local services and the cloud metadata address; this network,
+// multicast and the reserved range route nothing a mesh could use.
+var reservedMesh = []string{"0.0.0.0/8", "127.0.0.0/8", "169.254.0.0/16", "224.0.0.0/3"}
+
+// MeshReservedOverlaps is each range in reservedMesh that mesh overlaps, in
+// that order, empty when it overlaps none. The loader refuses mesh.subnet
+// and a request refuses mesh_subnet by it.
+func MeshReservedOverlaps(mesh *net.IPNet) []string {
+	var out []string
+	for _, r := range reservedMesh {
+		_, n, _ := net.ParseCIDR(r)
+		if n.Contains(mesh.IP) || mesh.Contains(n.IP) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// privateMesh are the ranges a mesh subnet must lie inside: RFC 1918's.
+// Every admitted host's egress table drops them, and only them among
+// routed addresses, for the deployment's user. On a host two deployments
+// share, a mesh outside them is one the other deployment's user can send
+// to through this mesh's interface, as this mesh's own address, and so
+// reach its sites. The mesh is IPv4 alone (ParseMeshSubnet), so fc00::/7,
+// IPv6's private range, does not arise.
+var privateMesh = []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"}
+
+// meshIsPrivate reports whether mesh lies wholly inside one of privateMesh.
+func meshIsPrivate(mesh *net.IPNet) bool {
+	ones, _ := mesh.Mask.Size()
+	for _, r := range privateMesh {
+		_, n, _ := net.ParseCIDR(r)
+		if rOnes, _ := n.Mask.Size(); n.Contains(mesh.IP) && ones >= rOnes {
+			return true
+		}
+	}
+	return false
+}
+
+// CheckMeshSubnet is the one rule a mesh subnet is held to, by the loader
+// for mesh.subnet, by a request for mesh_subnet and by the WireGuard
+// helper's renderer: subnet as a network, and what is wrong with it. A
+// subnet ParseMeshSubnet refuses gives its phrase alone and no network;
+// otherwise each problem is one phrase, "is larger than a /24, ..." for a
+// prefix shorter than MeshMinPrefix, "overlaps 127.0.0.0/8, ..." for each
+// reserved range it overlaps, and "is outside the private ranges ..." for
+// one not inside privateMesh, each saying why. No problems means the
+// subnet may be a mesh.
+func CheckMeshSubnet(subnet string) (*net.IPNet, []string) {
+	network, p := ParseMeshSubnet(subnet)
+	if p != "" {
+		return nil, []string{p}
+	}
+	var problems []string
+	if ones, _ := network.Mask.Size(); ones < MeshMinPrefix {
+		problems = append(problems, fmt.Sprintf("is larger than a /%d, the largest a mesh may be, so it cannot take in an owner's LAN", MeshMinPrefix))
+	}
+	for _, r := range MeshReservedOverlaps(network) {
+		problems = append(problems, "overlaps "+r+", which the deployment must never reach")
+	}
+	if !meshIsPrivate(network) {
+		problems = append(problems, "is outside the private ranges 10.0.0.0/8, 172.16.0.0/12 and 192.168.0.0/16 (RFC 1918): another deployment's egress table on a shared host drops these and no other range a mesh may use, so that deployment's user could reach a mesh elsewhere")
+	}
+	return network, problems
+}
+
+// IsNetworkOrBroadcast reports whether a is mesh's network or broadcast
+// address, which no site may hold: the first names the subnet and the last
+// reaches every host on it.
+func IsNetworkOrBroadcast(a net.IP, mesh *net.IPNet) bool {
+	a, network := a.To4(), mesh.IP.To4()
+	if a == nil || network == nil {
+		return false
+	}
+	mask := mesh.Mask[len(mesh.Mask)-4:]
+	last := make(net.IP, 4)
+	for i := range last {
+		last[i] = network[i] | ^mask[i]
+	}
+	return a.Equal(network) || a.Equal(last)
+}
+
 // ParseEndpointPort is the port of an endpoint written host:port.
 func ParseEndpointPort(endpoint string) (int, error) {
 	_, port, err := net.SplitHostPort(endpoint)

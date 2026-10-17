@@ -284,6 +284,37 @@ func stuckInput() Input {
 	}
 }
 
+// When the old leader answers ssh but cannot run its Patroni, the first
+// recovery names what is in the way: a Docker that does not answer, or an
+// admission that is pending or did not pass, never `up -d patroni`.
+func TestStartAdviceNamesWhatStopsTheOldLeader(t *testing.T) {
+	cfg := fixture(t)
+	for _, c := range []struct {
+		name string
+		set  func(*Input)
+		want string
+	}{
+		{"docker down", func(in *Input) {
+			in.Docker = []DockerProbe{{Site: "home-b", Err: "Cannot connect to the Docker daemon"}}
+		}, "  1. Start home-b's Docker: its host answers ssh, but its rootless Docker does not answer, and the docker section says how."},
+		{"pending", func(in *Input) {
+			in.Admission = []AdmissionProbe{{Site: "home-b", Class: pendingClass("home-b")}}
+		}, "  1. Have home-b's owner admit this deployment again: it is pending"},
+		{"admission failed", func(in *Input) {
+			in.Admission = []AdmissionProbe{{Site: "home-b", Err: "unreadable"}}
+		}, "  1. Have home-b's owner admit this deployment again: its host answers ssh, but its admission did not pass"},
+	} {
+		in := stuckInput()
+		in.Reach[1].Err = ""
+		c.set(&in)
+		f := find(t, Patroni(cfg, in), SectionPatroni, "no primary")
+		text := strings.Join(f.More, "\n")
+		if !strings.Contains(text, c.want) || strings.Contains(text, "up -d patroni") {
+			t.Errorf("%s: want %q:\n%s", c.name, c.want, text)
+		}
+	}
+}
+
 // The motivating case. home-b led with home-a as its synchronous standby;
 // home-a went down, home-b committed alone and dropped it from /sync, then
 // home-b went down. home-a came back and will not promote. The advice is to
@@ -404,10 +435,13 @@ func TestContainerThatStartedBeforeWg0(t *testing.T) {
 		t.Fatalf("level %v", f.Level)
 	}
 	text := strings.Join(f.More, "\n")
-	for _, want := range []string{"Docker started before psns-f2a9 at boot", "`paisans host prepare --site home-b --execute`", "`docker start paisans-f2a9-talk-app-1` on home-b", "`paisans apply --site home-b --recreate talk --execute`"} {
+	for _, want := range []string{"Its Docker daemon started it before psns-f2a9 was up", "`docker start paisans-f2a9-talk-app-1` on home-b, as the deployment's user", "`paisans apply --site home-b --recreate talk --execute`", "`paisans doctor --site home-b`"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q:\n%s", want, text)
 		}
+	}
+	if strings.Contains(text, "site prepare") {
+		t.Errorf("the advice names site prepare, which orders nothing at boot:\n%s", text)
 	}
 }
 
@@ -631,80 +665,6 @@ func TestUnreachableLineNamesTheHostOnce(t *testing.T) {
 	}
 }
 
-// The allowlist: no list is information, a list says how many keys it holds,
-// and each key ssh.keys names that it lacks is the refusal the next host
-// prepare would give, as a warning naming the command that allows it.
-func TestAllowlist(t *testing.T) {
-	cfg := fixture(t)
-	keys, _ := cfg.Sites["home-a"].SSH.AuthorizedKeys()
-	if len(keys) == 0 {
-		t.Fatal("the fixture's home-a lists no key")
-	}
-	alice := keys[0].Fingerprint
-	got := Allowlist(cfg, []AllowlistProbe{
-		{Site: "home-a"},
-		{Site: "home-b", Found: true, Content: "# owner's\n" + alice + " alice\n"},
-		{Site: "vm", Found: true, Content: "# empty\n", KeysRead: true},
-		{Site: "watch", Err: "ssh: connection refused"},
-	})
-	var lines []string
-	for _, f := range got {
-		lines = append(lines, f.Level.String()+" "+f.Line)
-	}
-	want := []string{
-		"info home-a: no list for ubuntu; host prepare adds any key ssh.keys names",
-		"ok home-b: ubuntu's list holds 1 key",
-		"ok vm: ubuntu's list holds 0 keys",
-		"WARN vm: " + alice + " (alice) is not on ubuntu's list, and host prepare would add it",
-		"skip watch: could not read /etc/paisans/ssh-allow.ubuntu",
-	}
-	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
-		t.Errorf("got:\n%s\nwant:\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
-	}
-	if more := strings.Join(got[3].More, " "); !strings.Contains(more, "paisans host allow vm alice") {
-		t.Errorf("no command to allow it: %s", more)
-	}
-}
-
-// What doctor prints of a host's list and its error shows a control
-// character as an escape.
-func TestAllowlistShowsControlCharactersEscaped(t *testing.T) {
-	cfg := fixture(t)
-	got := Allowlist(cfg, []AllowlistProbe{{Site: "watch", Err: "refused \x1b[2K\x1b[1Aok"}})
-	for _, f := range got {
-		text := f.Line + strings.Join(f.More, " ")
-		if strings.ContainsRune(text, 0x1b) || !strings.Contains(text, `\x1b[2K`) {
-			t.Errorf("printed raw: %q", text)
-		}
-	}
-}
-
-// A key ssh.keys names that is already in authorized_keys is never added,
-// so the list's lacking it is no warning; one doctor could not read
-// authorized_keys for is warned about as what host prepare would refuse if
-// it had to add it.
-func TestAllowlistWarnsOnlyForKeysHostPrepareWouldAdd(t *testing.T) {
-	cfg := fixture(t)
-	keys, _ := cfg.Sites["home-a"].SSH.AuthorizedKeys()
-	alice := keys[0].Fingerprint
-	got := Allowlist(cfg, []AllowlistProbe{
-		{Site: "home-a", Found: true, Content: "# empty\n", KeysRead: true, Authorized: []string{alice}},
-		{Site: "home-b", Found: true, Content: "# empty\n"},
-	})
-	var lines []string
-	for _, f := range got {
-		lines = append(lines, f.Level.String()+" "+f.Line)
-	}
-	want := []string{
-		"ok home-a: ubuntu's list holds 0 keys",
-		"ok home-b: ubuntu's list holds 0 keys",
-		"WARN home-b: " + alice + " (alice) is not on ubuntu's list, and host prepare would refuse it if it had to add it",
-	}
-	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
-		t.Errorf("got:\n%s\nwant:\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
-	}
-}
-
 // A gateway that also runs the monitor takes every public hostname with it,
 // the monitor's included.
 func TestASharedGatewaysLossIsEveryHostname(t *testing.T) {
@@ -713,7 +673,7 @@ func TestASharedGatewaysLossIsEveryHostname(t *testing.T) {
 	vm := cfg.Sites["vm"]
 	vm.Roles = append(vm.Roles, config.RoleMonitor)
 	cfg.Sites["vm"] = vm
-	got := losses(cfg, "vm")
+	got := Losses(cfg, "vm")
 	for _, want := range []string{"its gateway, which every public hostname goes through", "the uptime monitor"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("vm's loss lacks %q: %s", want, got)
@@ -731,7 +691,7 @@ func TestASharedGatewaysLossExceptsAnotherMonitor(t *testing.T) {
 	vm := cfg.Sites["vm"]
 	vm.Roles = append(vm.Roles, config.RoleMonitor)
 	cfg.Sites["vm"] = vm
-	if got := losses(cfg, "vm"); !strings.Contains(got, "every public hostname but the monitor's goes through") {
+	if got := Losses(cfg, "vm"); !strings.Contains(got, "every public hostname but the monitor's goes through") {
 		t.Errorf("vm's loss does not except watch's monitor: %s", got)
 	}
 }

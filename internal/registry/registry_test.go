@@ -8,8 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 const (
@@ -19,7 +22,7 @@ const (
 )
 
 func entry(token, domain, site string) Entry {
-	return Entry{Token: token, Root: "/srv/paisans/" + token, Domain: domain, Site: site, ClaimedAt: "2026-10-01T00:00:00Z", Interface: "psns-" + token}
+	return Entry{Token: token, Root: "/srv/paisans/" + token, Domain: domain, Site: site, ClaimedAt: "2026-10-01T00:00:00Z", Interface: "psns-" + token, Build: version.Build{Version: "0.3.0-dev", Commit: "519299d5cb009da4904cdf53c2025f1ad609f102"}}
 }
 
 func TestParseEmptyIsAnEmptyRegistry(t *testing.T) {
@@ -264,6 +267,35 @@ func TestClaimMergeAgreesWithMerge(t *testing.T) {
 		t.Error("Merge took what the awk merge refused")
 	}
 
+	// The same deployment at another mesh address is another site of it
+	// when the claim names no site; at the same address with no site
+	// named, it is a refresh, and so is the same site at a new address.
+	at := func(site, address string) Entry {
+		e := entry("f2a9", "example.org", site)
+		e.Address = address
+		return e
+	}
+	addressed, err := Encode(Registry{Version: Version, Deployments: map[string]Entry{ours: at("home-a", "10.44.0.2")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, code = runMerge(t, string(addressed), ours, at("", "10.44.0.1"))
+	if code != 3 || stdout != "" || !strings.Contains(stderr, conflictMarker) {
+		t.Errorf("a second address of one deployment was not refused: exit %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	if _, err := Merge(Registry{Version: Version, Deployments: map[string]Entry{ours: at("home-a", "10.44.0.2")}}, ours, at("", "10.44.0.1")); err == nil {
+		t.Error("Merge took a second address the awk merge refused")
+	}
+	if _, stderr, code := runMerge(t, string(addressed), ours, at("", "10.44.0.2")); code != 0 {
+		t.Errorf("the same address with no site named was refused: exit %d, %s", code, stderr)
+	}
+	if _, stderr, code := runMerge(t, string(addressed), ours, at("home-a", "10.44.0.1")); code != 0 {
+		t.Errorf("the same site at a new address was refused: exit %d, %s", code, stderr)
+	}
+	if _, err := Merge(Registry{Version: Version, Deployments: map[string]Entry{ours: at("home-a", "10.44.0.2")}}, ours, at("home-a", "10.44.0.1")); err != nil {
+		t.Errorf("Merge refused the same site at a new address: %v", err)
+	}
+
 	if _, _, code := runMerge(t, "{\"something\":\"else\"}\n", ours, entry("f2a9", "example.org", "home-a")); code != 4 {
 		t.Errorf("a registry in another layout exited %d, want 4", code)
 	}
@@ -353,18 +385,6 @@ func TestMeshConflicts(t *testing.T) {
 	})
 }
 
-func TestMeshesListsOtherDeploymentsSubnets(t *testing.T) {
-	r := Registry{Version: Version, Deployments: map[string]Entry{
-		ours:   meshEntry("f2a9", "example.org", "home-a", 0, "10.44.0.0/24"),
-		other:  meshEntry("0c1d", "example.net", "home-a", 0, "10.45.0.0/24"),
-		theirs: entry("f2a9", "example.com", "home-a"),
-	}}
-	got := Meshes(r, ours, "home-a")
-	if len(got) != 1 || got[0].Prefix.String() != "10.45.0.0/24" || !strings.Contains(got[0].What, other) || !strings.Contains(got[0].What, "on home-a") {
-		t.Errorf("Meshes = %+v", got)
-	}
-}
-
 // roleEntry is meshEntry on disjoint meshes, with roles.
 func roleEntry(token, domain string, port int, subnet, roles string) Entry {
 	e := meshEntry(token, domain, "vm", port, subnet)
@@ -384,7 +404,7 @@ func TestRoleConflicts(t *testing.T) {
 	for _, tc := range []struct {
 		name, roles, clash, advice string
 	}{
-		{"a second gateway", "gateway", "the gateway role", "Use another host for one of the gateways"},
+		{"a second gateway", "gateway", "the gateway role", "ports 80 and 443 to one deployment"},
 		{"a second data site", "apps,data", "the data role", "Use another host for one of the data sites"},
 		{"both", "data,gateway", "the data role", "Use another host for one of the data sites"},
 	} {
@@ -484,7 +504,7 @@ func runRemove(t *testing.T, input, id string) (string, string, int) {
 // The awk removal writes exactly what Encode writes for Remove's result, for
 // an entry first, last, alone and absent, and refuses a file in another
 // layout.
-func TestUnclaimAgreesWithRemove(t *testing.T) {
+func TestTheAwkRemovalAgreesWithRemove(t *testing.T) {
 	three := Registry{Version: Version, Deployments: map[string]Entry{
 		ours:   entry("f2a9", "example.org", "home-a"),
 		other:  entry("0c1d", "example.net", "vm"),
@@ -549,61 +569,105 @@ func TestRemoveCommandShape(t *testing.T) {
 	}
 }
 
-// Find names one entry by its full id or by its token, and refuses no match
-// and several, listing what the host holds either way.
-func TestFind(t *testing.T) {
-	r := Registry{Version: Version, Deployments: map[string]Entry{
-		ours:  entry("f2a9", "example.org", "watch"),
-		other: entry("0c1d", "example.net", "x"),
-	}}
-	for _, ref := range []string{ours, "f2a9"} {
-		id, e, err := Find(r, ref)
-		if err != nil || id != ours || e.Site != "watch" {
-			t.Errorf("Find(%s) = %s, %+v, %v", ref, id, e, err)
-		}
+// A claim from a request carries what the request does: token, root,
+// interface, port, subnet, address, the site and its roles, and the release
+// of the paisans making it. The public ports are one deployment's per host,
+// so a request granted them claims the gateway role whatever its roles, and
+// a second deployment holding 80 and 443 is refused as a second gateway is.
+func TestForRequest(t *testing.T) {
+	now := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+	req := admission.Request{Version: 1, Deployment: ours, Site: "home-a", Roles: []string{"apps", "data", "gateway"}, User: "paisans-f2a9", SSHPort: 22, ListenPort: 51820,
+		MeshSubnet: "10.44.0.0/24", Address: "10.44.0.1", Grants: admission.Grants{Watchdog: true, PublicPorts: true}}
+	id, e := ForRequest(req, now)
+	want := Entry{Token: "f2a9", Root: "/srv/paisans/f2a9", Site: "home-a", ClaimedAt: "2026-10-15T12:00:00Z", Interface: "psns-f2a9", ListenPort: 51820,
+		Subnet: "10.44.0.0/24", Address: "10.44.0.1", Roles: "apps,data,gateway", Build: version.Current()}
+	if id != ours || e != want {
+		t.Errorf("ForRequest = %s %+v", id, e)
 	}
-	lists := func(err error) bool {
-		return err != nil && strings.Contains(err.Error(), ours) && strings.Contains(err.Error(), "example.net") && strings.Contains(err.Error(), "site x")
+
+	monitor := admission.Request{Version: 1, Deployment: theirs, Site: "watch", Roles: []string{"monitor"}, User: "paisans-f2a9", SSHPort: 22,
+		MeshSubnet: "10.45.0.0/24", Address: "10.45.0.5", Grants: admission.Grants{PublicPorts: true}}
+	_, m := ForRequest(monitor, now)
+	if m.Roles != "gateway,monitor" {
+		t.Errorf("a monitor granted the public ports claims roles %q", m.Roles)
 	}
-	if _, _, err := Find(r, "beef"); !lists(err) || !strings.Contains(err.Error(), "no deployment") {
-		t.Errorf("no match: %v", err)
+	gw := entry("0c1d", "example.net", "edge")
+	gw.Roles = "gateway"
+	c := Conflicts(Registry{Version: Version, Deployments: map[string]Entry{other: gw}}, theirs, m)
+	if len(c) != 1 || !strings.Contains(c[0].Error(), "the gateway role") {
+		t.Errorf("a second holder of 80 and 443 was not refused: %v", c)
 	}
-	r.Deployments[theirs] = entry("f2a9", "example.com", "y")
-	if _, _, err := Find(r, "f2a9"); !lists(err) || !strings.Contains(err.Error(), theirs) || !strings.Contains(err.Error(), "full id") {
-		t.Errorf("ambiguous: %v", err)
-	}
-	if id, _, err := Find(r, theirs); err != nil || id != theirs {
-		t.Errorf("a full id is never ambiguous: %s, %v", id, err)
-	}
-	if _, _, err := Find(Registry{Deployments: map[string]Entry{}}, "f2a9"); err == nil || !strings.Contains(err.Error(), "holds none") {
-		t.Errorf("empty registry: %v", err)
+
+	monitor.Grants.PublicPorts = false
+	if _, m := ForRequest(monitor, now); m.Roles != "monitor" {
+		t.Errorf("a monitor without the public ports claims roles %q", m.Roles)
 	}
 }
 
-// Kept marks an entry whose deployment left something running on the host:
-// the merge writes it, and a claim by the same id, which For makes, drops it.
-func TestKeptCaddyEntry(t *testing.T) {
-	base := Registry{Version: Version, Deployments: map[string]Entry{ours: entry("f2a9", "example.org", "vm")}}
-	input, _ := Encode(base)
-	kept := KeepCaddy(base.Deployments[ours])
-	if kept.Kept != KeptCaddy || kept.Token != "f2a9" {
-		t.Fatalf("KeepCaddy = %+v", kept)
+// A claim records the release of the paisans that made it, and a later
+// claim by the same id replaces it with its own, lower or higher: the host
+// holds what the last claim's binary admitted.
+func TestClaimRecordsTheToolkitVersion(t *testing.T) {
+	newer := entry("f2a9", "example.org", "home-a")
+	newer.Build.Version = "0.3.0"
+	empty, err := Encode(Registry{Version: Version, Deployments: map[string]Entry{}})
+	if err != nil {
+		t.Fatal(err)
 	}
-	stdout, stderr, code := runMerge(t, string(input), ours, kept)
+	out, stderr, code := runMerge(t, string(empty), ours, newer)
 	if code != 0 {
-		t.Fatalf("exit %d: %s", code, stderr)
+		t.Fatalf("the first claim exited %d: %s", code, stderr)
 	}
-	got, err := Parse([]byte(stdout))
-	if err != nil || got.Deployments[ours] != kept {
-		t.Fatalf("got %+v, %v", got.Deployments[ours], err)
+	if !strings.Contains(out, `"toolkit_version":"0.3.0"`) {
+		t.Errorf("the claim does not record its release:\n%s", out)
 	}
-	if !strings.Contains(stdout, `"kept":"caddy"`) {
-		t.Errorf("the entry does not say what is kept:\n%s", stdout)
+	older := newer
+	older.Build.Version = "0.2.0"
+	out, stderr, code = runMerge(t, out, ours, older)
+	if code != 0 {
+		t.Fatalf("the second claim exited %d: %s", code, stderr)
 	}
-	if !strings.Contains(Describe(ours, kept), "caddy kept") {
-		t.Errorf("Describe = %s", Describe(ours, kept))
+	r, err := Parse([]byte(out))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(Describe(ours, base.Deployments[ours]), "kept") {
-		t.Errorf("Describe of an entry with nothing kept = %s", Describe(ours, base.Deployments[ours]))
+	if got := r.Deployments[ours].Build.Version; got != "0.2.0" || strings.Contains(out, "0.3.0") {
+		t.Errorf("a later claim left release %q:\n%s", got, out)
+	}
+}
+
+// An entry records the build of the paisans that claimed the host, and
+// reads it back.
+func TestAnEntryRoundTripsItsBuild(t *testing.T) {
+	e := entry("f2a9", "example.org", "home-a")
+	e.Build = version.Build{Version: "0.3.0-dev", Commit: "519299d5cb009da4904cdf53c2025f1ad609f102", Modified: true}
+	data, err := Encode(Registry{Version: Version, Deployments: map[string]Entry{ours: e}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := Parse(data)
+	if err != nil || r.Deployments[ours] != e {
+		t.Errorf("got %+v, %v", r.Deployments[ours], err)
+	}
+}
+
+// A registry with an entry that does not say which build claimed the host
+// is refused, naming the deployment and that its owner admits it again,
+// and comes with what was read.
+func TestAnEntryWithNoBuildIsRefused(t *testing.T) {
+	data := `{"version":1,"deployments":{
+"` + ours + `":{"token":"f2a9","root":"/srv/paisans/f2a9","domain":"","site":"home-a","claimed_at":"2026-10-01T00:00:00Z","toolkit_version":"0.2.0"},
+"` + theirs + `":{"token":"0c1d","root":"/srv/paisans/0c1d","domain":"","site":"edge","claimed_at":"2026-10-01T00:00:00Z","toolkit_version":"0.3.0","toolkit_commit":"v0.3.0","toolkit_modified":false}
+}}`
+	r, err := Parse([]byte(data))
+	var nb *NoBuildError
+	if !errors.As(err, &nb) || len(nb.IDs) != 1 || nb.IDs[0] != ours {
+		t.Fatalf("got %v", err)
+	}
+	if !strings.Contains(err.Error(), "deployment "+ours+" does not say which build") || !strings.Contains(err.Error(), "`paisans site request`, then `paisans site admit`") {
+		t.Errorf("got %v", err)
+	}
+	if len(r.Deployments) != 2 {
+		t.Errorf("read %+v", r)
 	}
 }

@@ -1,0 +1,166 @@
+evict f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01 as paisans-f2a9 on fake (ubuntu 24.04)
+
+step 1: stop paisans-f2a9's manager
+  evict: expire paisans-f2a9 so no login starts it again, disable linger, and stop user@1001.service, which stops its Docker daemon and every container
+  run:
+    $ usermod --expiredate 1 paisans-f2a9 && loginctl disable-linger paisans-f2a9 && systemctl stop user@1001.service && { loginctl terminate-user paisans-f2a9 2>/dev/null || true; }
+
+step 2: kill paisans-f2a9's processes
+  evict: expire paisans-f2a9, kill every process of uid 1001 or of its subordinate range and check that none is left, before anything that fences it goes
+  run:
+    $ usermod --expiredate 1 paisans-f2a9 && { procs() { ps -eo pid=,ruid=,euid=,suid= | awk '$2 == 1001 || $3 == 1001 || $4 == 1001 || $2 >= 165536 && $2 < 231072 || $3 >= 165536 && $3 < 231072 || $4 >= 165536 && $4 < 231072 { print $1 }'; }; n=0; while [ -n "$(procs)" ] && [ $n -lt 10 ]; do procs | xargs -r kill -KILL 2>/dev/null; n=$((n+1)); sleep 0.5; done; [ -z "$(procs)" ] || { echo 'processes of uid 1001 or its subordinate range survived SIGKILL:'; procs | xargs -r ps -o pid=,uid=,args= -p; false; }; }
+
+step 3: stop the mesh
+  evict: stop and disable wg-quick@psns-f2a9, the deployment's mesh interface
+  run:
+    $ systemctl disable --now wg-quick@psns-f2a9
+
+step 4: remove /etc/wireguard/psns-f2a9.conf
+  evict: the mesh's conf, which holds the site's private key
+  run:
+    $ rm -f /etc/wireguard/psns-f2a9.conf
+
+step 5: remove /etc/systemd/system/wg-quick@psns-f2a9.service.d/paisans-conf.conf
+  evict: the drop-in that skipped the mesh until its conf existed, and its directory once empty
+  run:
+    $ rm -f /etc/systemd/system/wg-quick@psns-f2a9.service.d/paisans-conf.conf && rmdir --ignore-fail-on-non-empty /etc/systemd/system/wg-quick@psns-f2a9.service.d && systemctl daemon-reload
+
+step 6: remove /etc/systemd/system/user@1001.service.d/paisans-mesh.conf
+  evict: the drop-in that started paisans-f2a9's manager after the mesh, and its directory once empty
+  run:
+    $ rm -f /etc/systemd/system/user@1001.service.d/paisans-mesh.conf && rmdir --ignore-fail-on-non-empty /etc/systemd/system/user@1001.service.d && systemctl daemon-reload
+
+step 7: remove the egress table
+  evict: unload paisans_f2a9 and remove paisans-f2a9-egress.service and /etc/paisans/egress.f2a9.nft
+  run:
+    $ { systemctl disable --now paisans-f2a9-egress.service 2>/dev/null || true; } && { ! nft list table inet paisans_f2a9 >/dev/null 2>&1 || nft delete table inet paisans_f2a9; } && rm -f /etc/systemd/system/paisans-f2a9-egress.service /etc/paisans/egress.f2a9.nft /etc/paisans/egress.f2a9.nft.new && { [ ! -d /etc/systemd/system/user@1001.service.requires ] || rmdir --ignore-fail-on-non-empty /etc/systemd/system/user@1001.service.requires; } && systemctl daemon-reload
+
+step 8: remove /srv/paisans/f2a9
+  evict: the deployment's directory
+  run:
+    $ [ ! -L '/srv/paisans/f2a9' ] && rm -rf --one-file-system -- '/srv/paisans/f2a9'
+
+step 9: delete user paisans-f2a9
+  evict: delete paisans-f2a9 with its home, /home/paisans-f2a9
+  run:
+    $ usermod --expiredate 1 paisans-f2a9 && { procs() { ps -eo pid=,ruid=,euid=,suid= | awk '$2 == 1001 || $3 == 1001 || $4 == 1001 || $2 >= 165536 && $2 < 231072 || $3 >= 165536 && $3 < 231072 || $4 >= 165536 && $4 < 231072 { print $1 }'; }; n=0; while [ -n "$(procs)" ] && [ $n -lt 10 ]; do procs | xargs -r kill -KILL 2>/dev/null; n=$((n+1)); sleep 0.5; done; [ -z "$(procs)" ] || { echo 'processes of uid 1001 or its subordinate range survived SIGKILL:'; procs | xargs -r ps -o pid=,uid=,args= -p; false; }; } && userdel --remove paisans-f2a9
+
+step 10: remove paisans-f2a9's subordinate ranges
+  evict: its lines in /etc/subuid and /etc/subgid, which no other user may then be given by accident
+  run:
+    $ sed -i '/^paisans-f2a9:/d' /etc/subuid /etc/subgid
+
+step 11: remove /etc/sudoers.d/paisans-f2a9
+  evict: the line that let paisans-f2a9 run the WireGuard helper as root
+  run:
+    $ rm -f /etc/sudoers.d/paisans-f2a9 /etc/sudoers.d/paisans-f2a9.new
+
+step 12: remove /usr/local/libexec/paisans/wg-psns-f2a9
+  evict: the WireGuard helper
+  run:
+    $ rm -f /usr/local/libexec/paisans/wg-psns-f2a9
+
+step 13: remove ufw rule 51820/udp
+  evict: delete `allow 51820/udp comment 'paisans-f2a9: WireGuard, the mesh'`, which site admit added for the deployment
+  run:
+    $ ufw delete allow 51820/udp comment 'paisans-f2a9: WireGuard, the mesh'
+
+step 14: remove ufw rule in on psns-f2a9
+  evict: delete `allow in on psns-f2a9 comment 'paisans-f2a9: the mesh: etcd, Patroni, Garage, HAProxy'`, which site admit added for the deployment
+  run:
+    $ ufw delete allow in on psns-f2a9 comment 'paisans-f2a9: the mesh: etcd, Patroni, Garage, HAProxy'
+
+step 15: put back /usr/sbin/policy-rc.d
+  evict: an admit that stopped while it installed Docker left its hold on Docker's daemons; your own policy-rc.d, if you had one, goes back, and what that install claimed is recorded as installed
+  run:
+    $ set -e
+    $ if [ -z "${paisans_hold_locked:-}" ]; then
+    $   exec 8>/run/paisans-docker-hold.lock
+    $   flock -n 8 || { echo 'another paisans site admit is installing Docker on this host now (it holds /run/paisans-docker-hold.lock). Run again once it is done'; exit 1; }
+    $   paisans_hold_locked=1
+    $ fi
+    $ release_docker_hold() {
+    $   rm -f /usr/sbin/.policy-rc.d.paisans-tmp /usr/sbin/.policy-rc.d.paisans-owner-tmp
+    $   if [ -f /usr/sbin/policy-rc.d ] && [ ! -L /usr/sbin/policy-rc.d ] && grep -qxF '# Written by paisans site admit while it installs Docker, and removed after.' /usr/sbin/policy-rc.d; then
+    $     if [ -e /usr/sbin/policy-rc.d.paisans-owner ] || [ -L /usr/sbin/policy-rc.d.paisans-owner ]; then
+    $       mv -f /usr/sbin/policy-rc.d.paisans-owner /usr/sbin/policy-rc.d
+    $     else
+    $       rm -f /usr/sbin/policy-rc.d
+    $     fi
+    $   elif [ -e /usr/sbin/policy-rc.d.paisans-owner ] || [ -L /usr/sbin/policy-rc.d.paisans-owner ]; then
+    $     if [ ! -e /usr/sbin/policy-rc.d ] && [ ! -L /usr/sbin/policy-rc.d ]; then
+    $       mv -f /usr/sbin/policy-rc.d.paisans-owner /usr/sbin/policy-rc.d
+    $     elif [ -L /usr/sbin/policy-rc.d ] && [ -L /usr/sbin/policy-rc.d.paisans-owner ] && [ "$(readlink /usr/sbin/policy-rc.d)" = "$(readlink /usr/sbin/policy-rc.d.paisans-owner)" ]; then
+    $       rm -f /usr/sbin/policy-rc.d.paisans-owner
+    $     elif [ ! -L /usr/sbin/policy-rc.d ] && [ ! -L /usr/sbin/policy-rc.d.paisans-owner ] && cmp -s /usr/sbin/policy-rc.d /usr/sbin/policy-rc.d.paisans-owner; then
+    $       rm -f /usr/sbin/policy-rc.d.paisans-owner
+    $     fi
+    $   fi
+    $ }
+    $ confirm_claims() {
+    $   f=/etc/paisans/installed
+    $   { [ -f "$f" ] && [ ! -L "$f" ]; } || return 0
+    $   ok=
+    $   for p in $(awk 'NF == 2 && $1 == "installing" && $2 ~ /^[a-z0-9][a-z0-9.+-]+$/ { print $2 }' "$f"); do
+    $     s=$(dpkg-query -W -f='${Status}' "$p" 2>/dev/null) || continue
+    $     case $s in *" not-installed"|*" config-files"|"") ;; *) ok="$ok $p" ;; esac
+    $   done
+    $   [ -n "$ok" ] || return 0
+    $   t=$(mktemp "$f.XXXXXX") || return 1
+    $   if awk -v ok="$ok " 'NF == 2 && $1 == "installing" && index(ok, " " $2 " ") { print "package " $2; next } { print }' "$f" > "$t" && chmod 644 "$t"; then
+    $     mv -f "$t" "$f"
+    $   else
+    $     rm -f "$t"
+    $     return 1
+    $   fi
+    $ }
+    $ confirm_claims
+    $ release_docker_hold
+    $ if [ -e /usr/sbin/policy-rc.d.paisans-owner ] || [ -L /usr/sbin/policy-rc.d.paisans-owner ]; then echo '/usr/sbin/policy-rc.d.paisans-owner, a copy of your policy-rc.d admit made while it installed Docker, differs from the /usr/sbin/policy-rc.d there now. Keep the one you want as /usr/sbin/policy-rc.d, remove the other, and run again'; exit 1; fi
+
+step 16: remove the admission record
+  evict: /etc/paisans/admitted.f2a9.json
+  run:
+    $ rm -f /etc/paisans/admitted.f2a9.json
+
+step 17: remove /srv/paisans
+  evict: it holds nothing once this deployment's files are gone
+  run:
+    $ rmdir /srv/paisans
+
+step 18: remove /usr/local/libexec/paisans
+  evict: it holds nothing once this deployment's files are gone
+  run:
+    $ rmdir /usr/local/libexec/paisans
+
+step 19: remove the registry entry
+  evict: deployment f2a9 from /var/lib/paisans/registry.json
+  run:
+    $ set -e; umask 077; [ -f /var/lib/paisans/registry.json ] || exit 0; exec 9>>/var/lib/paisans/registry.lock; flock -w 60 9 || { echo 'paisans: another command holds /var/lib/paisans/registry.lock'; exit 1; }; tmp=$(mktemp /var/lib/paisans/.registry.XXXXXX); trap 'rm -f "$tmp"' EXIT; awk '-v' 'id=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01' '-v' 'header={"version":1,"deployments":{' '-v' 'footer=}}' '-v' 'unreadable=paisans-registry-unreadable' '
+    $ NR == 1 { if ($0 != header) bad = 1; next }
+    $ done { if ($0 != "") bad = 1; next }
+    $ $0 == footer { done = 1; next }
+    $ {
+    $ 	line = $0
+    $ 	sub(/,$/, "", line)
+    $ 	if (line !~ /^"[^"]+":\{.*\}$/) { bad = 1; next }
+    $ 	key = substr(line, 2, index(line, "\":") - 2)
+    $ 	if (key == id) next
+    $ 	kept[++n] = line
+    $ }
+    $ END {
+    $ 	if (NR > 0 && !done) bad = 1
+    $ 	if (bad) { print unreadable > "/dev/stderr"; exit 4 }
+    $ 	print header
+    $ 	for (i = 1; i <= n; i++) {
+    $ 		if (i < n) print kept[i] ","
+    $ 		else print kept[i]
+    $ 	}
+    $ 	print footer
+    $ }
+    $ ' /var/lib/paisans/registry.json > "$tmp"; chmod 600 "$tmp"; mv "$tmp" /var/lib/paisans/registry.json
+
+present: host wide: delegate.conf and br_netfilter kept for deployment 0c0dc4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01
+present: evict: /etc/paisans kept, since it holds what is not this deployment's
+warning: firewall: the deployment's SSH allow on 22 is kept
+  It may be the rule your own login arrives by. Delete it yourself once nothing else needs it.

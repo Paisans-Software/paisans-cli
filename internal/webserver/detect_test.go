@@ -149,15 +149,15 @@ func TestDetectAsksDockerThroughSudoWhenDenied(t *testing.T) {
 	}
 }
 
-// docker refused with no sudo to ask leaves the server undetermined, and
-// says why.
-func TestDetectWithoutSudoSaysDockerNeedsIt(t *testing.T) {
+// docker refusing the ssh user leaves the server undetermined, and says why,
+// naming no flag.
+func TestDetectSaysDockerRefusesTheSSHUser(t *testing.T) {
 	plain := &fakeHost{answers: []answer{
 		{key: "docker", out: "permission denied while trying to connect to the Docker daemon socket", err: errors.New("exit status 1")},
 		{key: "ss -ltnp", out: "State Recv-Q Send-Q Local Address:Port Peer Address:Port Process\n"},
 	}}
 	ws := webserver.Detect(webserver.Host{Plain: plain}, external(t, "127.0.0.1:8480"))
-	if ws.Server != "" || !strings.Contains(ws.Why, "sudo") {
+	if ws.Server != "" || !strings.Contains(ws.Why, "docker refuses the ssh user") || strings.Contains(ws.Why, "--sudo") {
 		t.Fatalf("got %+v", ws)
 	}
 }
@@ -316,5 +316,24 @@ func TestDetectReadsTheGlobalDNSChallenge(t *testing.T) {
 				t.Errorf("summary\n got %q\nwant %q", got, c.summary)
 			}
 		})
+	}
+}
+
+// With Host.Docker set, every docker command Detect runs starts with it;
+// without, with plain docker.
+func TestDetectDockerCommand(t *testing.T) {
+	for docker, prefix := range map[string]string{"": "docker", "docker -H unix:///run/x.sock": "docker -H unix:///run/x.sock"} {
+		plain := &fakeHost{answers: []answer{
+			{key: " ps --format", out: caddyPS},
+			{key: " inspect --format", out: caddyMounts},
+			{key: "curl", err: errors.New("exit status 7")},
+			{key: " exec caddy-1 wget", out: caddyAutomatic},
+		}}
+		webserver.Detect(webserver.Host{Plain: plain, Docker: docker}, external(t, "127.0.0.1:8480"))
+		for _, want := range []string{prefix + " ps --format", prefix + " inspect --format", prefix + " exec caddy-1"} {
+			if !plain.ran(want) {
+				t.Errorf("Docker %q: no command contains %q in %q", docker, want, plain.asked)
+			}
+		}
 	}
 }

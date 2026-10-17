@@ -1,0 +1,3 @@
+refused: firewall: --public-ports cannot be granted: something else answers on 80 or 443, so the deployment's Caddy could never take them:
+- a NAT rule in table ip nat chain DOCKER: iifname != "docker0" tcp dport 443 dnat to 172.17.0.2:443
+Stop it, or run this site behind it with web_server.managed_by: external in the deployment's configuration, which needs no low port. Nothing was changed

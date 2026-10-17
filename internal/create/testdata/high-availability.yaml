@@ -29,8 +29,8 @@ acme:
 # The people who run the machines: they log in to every site, hold the
 # secrets and run apply. Each becomes a Pocket ID user and a community admin
 # on the first apply, and each key below an authorized key on every site that
-# names them. At least two, so that one lost workstation does not leave
-# nobody able to run the deployment.
+# names them. Declare at least two, so that one lost workstation does not
+# leave nobody able to run the deployment; validate warns about one.
 operators:
   alice:
     name: Alice Example
@@ -54,14 +54,12 @@ sites:
     endpoint: home-a.example.org:51820
     ssh:
       host: home-a.local
-      user: ubuntu
       keys: [alice, bob]
   home-b:
     roles: [data, apps]
     address: 10.44.0.2
     ssh:
       host: home-b.local
-      user: ubuntu
       keys: [alice, bob]
   gateway:
     roles: [gateway, witness]
@@ -70,7 +68,6 @@ sites:
     # hostnames at it, and the other sites dial it.
     public_address: 203.0.113.10
     ssh:
-      user: ubuntu
       keys: [alice, bob]
   health:
     roles: [monitor]
@@ -79,7 +76,6 @@ sites:
     # hostnames at it, and the other sites dial it.
     public_address: 203.0.113.50
     ssh:
-      user: ubuntu
       keys: [alice, bob]
 
 # Every data site holds the database, and Patroni fails it over between them.

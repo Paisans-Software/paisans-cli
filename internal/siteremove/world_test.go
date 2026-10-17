@@ -23,27 +23,34 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/apply/applytest"
+	"github.com/paisans-software/paisans-cli/internal/apply/meshfake"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
-	"github.com/paisans-software/paisans-cli/internal/hostprep"
+	"github.com/paisans-software/paisans-cli/internal/patronitest"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/siteremove"
 	"github.com/paisans-software/paisans-cli/internal/ui"
-	"github.com/paisans-software/paisans-cli/internal/webserver/webservertest"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 const (
 	ourID   = "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
 	otherID = "0c1d2e3f-4a5b-4c6d-8e7f-8091a2b3c4d5"
 	root    = "/srv/paisans/f2a9"
-	wgConf  = "/etc/wireguard/psns-f2a9.conf"
-	record  = "/etc/paisans/authorized_keys.ubuntu.paisans-f2a9.owned"
-	keysAt  = "/home/ubuntu/.ssh/authorized_keys"
-	alice   = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org"
+	wgConf  = "/srv/paisans/f2a9/psns-f2a9.conf"
+	// wgHelper is the start of every command sent to the WireGuard helper
+	// for the fixture's interface, and wgInstalled is where its put
+	// installs the mesh file on a real host.
+	wgHelper    = "sudo -n '/usr/local/libexec/paisans/wg-psns-f2a9' "
+	wgInstalled = "/etc/wireguard/psns-f2a9.conf"
+	record      = "/srv/paisans/f2a9/.paisans/authorized_keys.owned"
+	keysAt      = "/home/ubuntu/.ssh/authorized_keys"
+	alice       = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA alice@example.org"
 )
 
 var dep = deployment.Deployment{ID: ourID}
@@ -63,6 +70,17 @@ type world struct {
 	etcd     []apply.EtcdMember
 	nextID   uint64
 	etcdDown map[string]bool
+	// healthOut, when set, is what `endpoint health` prints instead of the
+	// members' health, with exit status 1.
+	healthOut string
+	// healthDrop leaves a site out of `endpoint health` once a member has
+	// been removed, as an etcdctl that answers for fewer endpoints would.
+	healthDrop func(site string) bool
+	// removed is whether any member has been removed.
+	removed bool
+	// patroniLog wraps every patronictl answer in the log lines patronictl
+	// writes when it cannot reach one of etcd's endpoints.
+	patroniLog bool
 	// clusterID is the cluster ID every etcd reports in its member list's
 	// header; 0 leaves it out, as an etcdctl that prints none would.
 	clusterID uint64
@@ -97,7 +115,9 @@ type world struct {
 	activePocket string
 
 	// Knobs that break one thing.
-	failOnce    string
+	failOnce string
+	// failOut is what the command failOnce fails prints, when set.
+	failOut     string
 	unreachable map[string]bool
 	caddyBroken bool
 	// neverStreams is a site whose recreated Patroni never streams again,
@@ -107,10 +127,10 @@ type world struct {
 	// unhealthy names an app stack whose container has exited.
 	unhealthy string
 
-	// evicted is the site an eviction cuts off: once no other host's running
-	// interface lists its key, a leader it held fails over, as Patroni's does
-	// when the leader key expires.
-	evicted string
+	// cutoff is the site a removal with --host-gone cuts off: once no other
+	// host's running interface lists its key, a leader it held fails over, as
+	// Patroni's does when the leader key expires.
+	cutoff string
 	// skips is every `garage layout skip-dead-nodes` run, its arguments.
 	skips []string
 }
@@ -121,14 +141,17 @@ type host struct {
 	files    map[string]string
 	commands []string
 	wgUp     bool
-	// wgRun is the mesh file the running interface was last handed by `wg
-	// syncconf`, nil while it runs the file on disk.
+	// wgRun is the mesh file the running interface was last handed by the
+	// WireGuard helper, nil while it runs the file on disk.
 	wgRun     *string
 	patroniUp bool
 	etcdUp    bool
 	// etcdContainer is whether the etcd container runs, which a removed
 	// member's does until it is stopped.
 	etcdContainer bool
+	// etcdExited is whether a stopped etcd container is left on the host,
+	// which only `docker rm` takes away.
+	etcdExited bool
 	// etcdHosts is ETCD3_HOSTS as the running Patroni has it.
 	etcdHosts string
 	// ownCluster, when set, is the separate cluster this host's etcd
@@ -154,23 +177,14 @@ type host struct {
 	// filesAnswer, when set, rewrites the answer to the probe that reads the
 	// manifest's files.
 	filesAnswer func(string) (string, error)
-	// web is the operator's web server, when the host runs one: the
-	// commands writing or removing a file under webDir, those run in its
-	// container and its own on the host go to it.
-	web *webservertest.Server
+	// loginRoot makes the login user root, as --ssh root@host does, and
+	// loginName another unprivileged user than the deployment's.
+	loginRoot bool
+	loginName string
 }
 
-// webDir is where the operator's web server's include directory is.
-const webDir = "/opt/caddy/"
-
-func (h *host) webCommand(command string) bool {
-	if h.web == nil {
-		return false
-	}
-	return strings.HasPrefix(command, "if [ -e '"+webDir) || strings.HasPrefix(command, "rm -f -- '"+webDir) ||
-		strings.Contains(command, "mkdir -p '"+webDir) || strings.HasPrefix(command, "docker exec 'caddy-1' sh -c") ||
-		strings.HasPrefix(command, "caddy validate") || strings.HasPrefix(command, "systemctl is-active")
-}
+// userUnits is the systemd directory of the world's login user, ubuntu.
+const userUnits = "/home/ubuntu/.config/systemd/user"
 
 func (h *host) Describe() string { return h.name }
 
@@ -197,6 +211,12 @@ func (h *host) RunInput(command, stdin string) (string, error) {
 		h.commands = append(h.commands, command)
 		h.w.log = append(h.w.log, h.name+": "+command)
 		h.files[strings.TrimSuffix(path, "'")] = stdin
+		return "", nil
+	}
+	if command == wgHelper+"put" {
+		h.commands = append(h.commands, command)
+		h.w.log = append(h.w.log, h.name+": "+command)
+		h.files[wgInstalled] = stdin
 		return "", nil
 	}
 	return h.Run(command)
@@ -308,7 +328,7 @@ func (h *host) deleteBesideKept(command string) {
 func (h *host) hostSites() []string {
 	var out []string
 	for _, p := range h.sortedFiles() {
-		if strings.HasPrefix(p, render.HostSitesDir+"/") && strings.HasSuffix(p, ".caddy") {
+		if strings.HasPrefix(p, sitesDir+"/") && strings.HasSuffix(p, ".caddy") {
 			out = append(out, p)
 		}
 	}
@@ -346,14 +366,42 @@ func (h *host) Run(command string) (string, error) {
 	}
 	if w.failOnce != "" && strings.Contains(command, w.failOnce) {
 		w.failOnce = ""
+		if w.failOut != "" {
+			return w.failOut, errors.New("exit status 1")
+		}
 		return "failed by the test", errors.New("exit status 1")
 	}
-	if h.webCommand(command) {
-		return h.web.Plain().Run(command)
+	if out, ok, err := meshfake.ChainedRead(command, h.Run); ok {
+		return out, err
 	}
-	// host prepare's key lock: the command inside it is what runs.
-	if inner, ok := strings.CutPrefix(command, "mkdir -p /etc/paisans && flock '/etc/paisans/authorized_keys.lock' sh -c '"); ok {
-		command = strings.ReplaceAll(strings.TrimSuffix(inner, "'"), `'\''`, "'")
+	// admission.Mine: the login's name, then every admission record.
+	if strings.HasPrefix(command, `echo "user $(id -un)"; for f in `+admission.Dir+`/admitted.`) {
+		login := "ubuntu"
+		switch {
+		case h.loginRoot:
+			login = "root"
+		case h.loginName != "":
+			login = h.loginName
+		}
+		out := "user " + login + "\n"
+		for _, p := range h.sortedFiles() {
+			if strings.HasPrefix(p, admission.Dir+"/admitted.") && strings.HasSuffix(p, ".json") {
+				out += p + "\n"
+			}
+		}
+		return out, nil
+	}
+	switch field, _ := strings.CutPrefix(command, wgHelper+"show "); field {
+	case "allowed-ips", "persistent-keepalive", "listen-port":
+		out, _ := meshfake.ShowRunning(field, h.runningWG())
+		return out, nil
+	}
+	// the deployment's lock, which the keys take: it leaves its lock file
+	// in the state directory, as on a host, and the command after it is
+	// what runs.
+	if dep := (deployment.Deployment{ID: "f2a9"}); strings.HasPrefix(command, dep.StateLockCommand("the keys")+"; ") {
+		h.files[dep.StatePath("lock")] = ""
+		command = strings.TrimPrefix(command, dep.StateLockCommand("the keys")+"; ")
 	}
 	quoted := func(s string) []string {
 		var out []string
@@ -482,11 +530,15 @@ func (h *host) Run(command string) (string, error) {
 			return "starting \n", nil
 		}
 		return "running streaming\n", nil
-	case strings.HasPrefix(command, "ids=$(docker ps -q --filter") && strings.Contains(command, "service=etcd"):
+	case strings.HasPrefix(command, "ids=$(docker ps -") && strings.Contains(command, "service=etcd"):
+		all := strings.HasPrefix(command, "ids=$(docker ps -aq ")
+		if h.etcdContainer || all && h.etcdExited {
+			h.etcdExited = !strings.Contains(command, "docker rm")
+		}
 		h.etcdContainer, h.etcdUp = false, false
 		return "", nil
-	case strings.HasPrefix(command, "docker ps -q --filter") && strings.Contains(command, "service=etcd"):
-		if h.etcdContainer {
+	case strings.HasPrefix(command, "docker ps -") && strings.Contains(command, "service=etcd"):
+		if h.etcdContainer || strings.HasPrefix(command, "docker ps -aq ") && h.etcdExited {
 			return "0123456789ab\n", nil
 		}
 		return "", nil
@@ -503,23 +555,32 @@ func (h *host) Run(command string) (string, error) {
 		}
 		return w.memberList(h), nil
 	case strings.Contains(command, "endpoint health --cluster"):
-		var out []map[string]any
+		out := []map[string]any{}
 		failed := false
 		for _, m := range w.etcd {
 			site := apply.EtcdMemberSite(w.cfg, m)
+			if w.removed && w.healthDrop != nil && w.healthDrop(site) {
+				continue
+			}
 			ok := !w.etcdDown[site] && w.hosts[site] != nil && w.hosts[site].etcdUp
 			failed = failed || !ok
 			out = append(out, map[string]any{"endpoint": m.ClientURLs[0], "health": ok})
 		}
+		if w.healthOut != "" {
+			return w.healthOut, errors.New("exit status 1")
+		}
 		data, _ := json.Marshal(out)
 		if failed {
-			return string(data), errors.New("exit status 1")
+			// etcdctl prints every endpoint, then exits 1 with its error on
+			// stderr, which the transport's combined output carries too.
+			return "Error: unhealthy cluster\n" + string(data) + "\n", errors.New("exit status 1")
 		}
 		return string(data), nil
 	case strings.Contains(command, "member list -w json"):
 		return w.memberList(h), nil
 	case memberRemove.MatchString(command):
 		hex := memberRemove.FindStringSubmatch(command)[1]
+		w.removed = true
 		var kept []apply.EtcdMember
 		for _, m := range w.etcd {
 			if m.HexID() == hex {
@@ -554,7 +615,7 @@ func (h *host) Run(command string) (string, error) {
 		w.failover()
 		return w.patroniList(), nil
 	case strings.Contains(command, "show-config"):
-		return fmt.Sprintf("loop_wait: 10\nsynchronous_mode: %v\n", w.syncMode), nil
+		return w.patronictlOut(fmt.Sprintf("loop_wait: 10\nsynchronous_mode: %v\n", w.syncMode)), nil
 	case strings.Contains(command, "edit-config"):
 		w.syncMode = false
 		for _, m := range w.members {
@@ -610,25 +671,23 @@ func (h *host) Run(command string) (string, error) {
 			return "", nil
 		}
 		address := ""
-		for _, line := range strings.Split(h.files["/etc/wireguard/psns-f2a9.conf"], "\n") {
+		for _, line := range strings.Split(h.files["/srv/paisans/f2a9/psns-f2a9.conf"], "\n") {
 			if v, ok := strings.CutPrefix(line, "Address = "); ok {
 				address = v
 			}
 		}
 		return "psns-f2a9        UNKNOWN        " + address + "\n", nil
-	case strings.Contains(command, "ip link show psns-f2a9"):
-		if h.wgUp {
-			return "up\n", nil
-		}
-		return "down\n", nil
-	case strings.Contains(command, "wg syncconf"):
-		running := h.files[wgConf]
+	case command == wgHelper+"sync", command == wgHelper+"up", command == wgHelper+"restart":
+		running := h.files[wgInstalled]
 		h.wgRun = &running
+		if command != wgHelper+"sync" {
+			h.wgUp = true
+		}
 		return "", nil
 	case strings.Contains(command, "getent ahosts"):
 		// Every peer's endpoint name resolves.
 		return "", nil
-	case command == "wg show psns-f2a9 public-key":
+	case command == wgHelper+"show public-key":
 		m := regexp.MustCompile(`(?m)^PrivateKey = (\S+)`).FindStringSubmatch(h.runningWG())
 		if m == nil {
 			return "", fmt.Errorf("%s: unable to access interface: No such device", h.name)
@@ -638,13 +697,13 @@ func (h *host) Run(command string) (string, error) {
 			return "", err
 		}
 		return key + "\n", nil
-	case command == "wg show psns-f2a9 peers":
+	case command == wgHelper+"show peers":
 		var b strings.Builder
 		for _, m := range peerRe.FindAllStringSubmatch(h.runningWG(), -1) {
 			b.WriteString(m[1] + "\n")
 		}
 		return b.String(), nil
-	case command == "wg show psns-f2a9 latest-handshakes":
+	case command == wgHelper+"show latest-handshakes":
 		var b strings.Builder
 		for _, m := range peerRe.FindAllStringSubmatch(h.runningWG(), -1) {
 			b.WriteString(m[1] + "\t1760000000\n")
@@ -663,6 +722,8 @@ func (h *host) Run(command string) (string, error) {
 		return `{"Service":"app","Name":"x","State":"exited","ExitCode":1}` + "\n", nil
 	case strings.Contains(command, " ps --all --format json"):
 		return `{"Service":"x","Name":"x","State":"running","Health":""}` + "\n", nil
+	case command == apply.ContainersRead:
+		return applytest.Running(h.files), nil
 
 	// a gateway's Caddy kept for the host owner's sites: validated and
 	// reloaded inside its container, from a path the container mounts
@@ -692,47 +753,41 @@ func (h *host) Run(command string) (string, error) {
 		return "", nil
 
 	// the host stage
-	case strings.Contains(command, `/etc/systemd/system/paisans-f2a9-*; do [ -e "$f" ] && echo`):
+	case strings.Contains(command, `getent passwd "$u"`):
+		if h.loginRoot {
+			return "root:x:0:0:root:/root:/bin/bash\n", nil
+		}
+		if h.loginName != "" {
+			return h.loginName + ":x:1001:1001::/home/" + h.loginName + ":/bin/bash\n", nil
+		}
+		return "ubuntu:x:1000:1000::/home/ubuntu:/bin/bash\n", nil
+	case strings.Contains(command, `for f in `+userUnits+`/paisans-f2a9-*; do [ -e "$f" ] && echo`):
 		var b strings.Builder
 		for _, p := range h.sortedFiles() {
-			if strings.HasPrefix(p, "/etc/systemd/system/paisans-f2a9-") {
+			if strings.HasPrefix(p, userUnits+"/paisans-f2a9-") {
 				b.WriteString("unit " + p + "\n")
-			} else if strings.HasPrefix(p, "/etc/systemd/system/") && strings.Contains(p, ".d/paisans-f2a9-") {
-				b.WriteString("dropin " + p + "\n")
 			}
 		}
 		return b.String(), nil
-	case strings.Contains(command, `/etc/systemd/system/paisans-f2a9-*; do [ -e "$f" ] || continue`):
+	case strings.Contains(command, `for f in `+userUnits+`/paisans-f2a9-*; do [ -e "$f" ] || continue`):
 		for p := range h.files {
-			if strings.HasPrefix(p, "/etc/systemd/system/paisans-f2a9-") || strings.HasPrefix(p, "/etc/systemd/system/") && strings.Contains(p, ".d/paisans-f2a9-") {
+			if strings.HasPrefix(p, userUnits+"/paisans-f2a9-") {
 				delete(h.files, p)
 			}
 		}
 		return "", nil
-	case command == hostprep.AddedRulesProbe:
-		var b strings.Builder
-		for _, r := range h.rules {
-			b.WriteString("rule " + r + "\n")
-		}
-		return b.String(), nil
-	case strings.HasPrefix(command, "ufw delete "):
-		line := strings.TrimPrefix(command, "ufw delete ")
-		var kept []string
-		for _, r := range h.rules {
-			if r != line {
-				kept = append(kept, r)
+	case strings.HasPrefix(command, "if [ -d '") && strings.Contains(command, "rootlesskit find '"):
+		// Files hold the directories, so the empty-directories form has
+		// nothing to delete.
+		if !strings.Contains(command, "-type d -empty") {
+			dir := quoted(command)[0]
+			for p := range h.files {
+				if strings.HasPrefix(p, dir+"/") {
+					delete(h.files, p)
+				}
 			}
 		}
-		h.rules = kept
-		return "Rule deleted\n", nil
-	case strings.Contains(command, "/etc/paisans/authorized_keys.*.paisans-f2a9.owned"):
-		var b strings.Builder
-		for _, p := range h.sortedFiles() {
-			if strings.HasPrefix(p, "/etc/paisans/authorized_keys.") && strings.HasSuffix(p, ".paisans-f2a9.owned") {
-				b.WriteString(p + "\n")
-			}
-		}
-		return b.String(), nil
+		return "", nil
 	case strings.HasPrefix(command, "d='") && strings.Contains(command, "du -sb"):
 		dir := strings.TrimSuffix(strings.TrimPrefix(strings.SplitN(command, ";", 2)[0], "d='"), "'")
 		return h.dirAnswer(dir), nil
@@ -747,10 +802,10 @@ func (h *host) Run(command string) (string, error) {
 		}
 		return "", nil
 	case strings.Contains(command, "docker ps -aq --no-trunc --filter 'label=community.paisans.deployment="+ourID+"'"):
-		if strings.Contains(command, "ls -d "+render.HostSitesDir+"/*.caddy") && len(h.hostSites()) > 0 {
+		if strings.Contains(command, "ls -d "+sitesDir+"/*.caddy") && len(h.hostSites()) > 0 {
 			for _, c := range h.containers {
 				if c.Deployment == ourID && c.Service == "caddy" {
-					return "a site of the host owner's is in " + render.HostSitesDir + " now", errors.New("exit status 3")
+					return "a site of the host owner's is in " + sitesDir + " now", errors.New("exit status 3")
 				}
 			}
 		}
@@ -790,7 +845,7 @@ func (h *host) Run(command string) (string, error) {
 		data, _ := base64.StdEncoding.DecodeString(regexp.MustCompile(`printf %s '([^']*)' \| base64 -d`).FindStringSubmatch(command)[1])
 		h.files[path] = string(data)
 		return "", nil
-	case strings.HasPrefix(command, "rm -f -- '/var/lib/paisans/deployed."):
+	case strings.HasPrefix(command, "rm -f -- '/srv/paisans/") && strings.HasSuffix(command, "/.paisans/deployed.json'"):
 		delete(h.files, strings.TrimSuffix(strings.TrimPrefix(command, "rm -f -- '"), "'"))
 		return "", nil
 	case strings.HasPrefix(command, "for i in ") && strings.Contains(command, "docker image rm"):
@@ -815,9 +870,6 @@ func (h *host) Run(command string) (string, error) {
 			}
 		}
 		return b.String(), nil
-	case strings.HasPrefix(command, "systemctl disable --now wg-quick@psns-f2a9"):
-		h.wgUp = false
-		return "", nil
 	case strings.HasPrefix(command, "f='"):
 		var out strings.Builder
 		for _, line := range strings.Split(strings.TrimSpace(command), "\n") {
@@ -840,41 +892,6 @@ func (h *host) Run(command string) (string, error) {
 	case strings.HasPrefix(command, "rm -f -- '"):
 		delete(h.files, strings.TrimSuffix(strings.TrimPrefix(command, "rm -f -- '"), "'"))
 		return "", nil
-	case strings.Contains(command, "awk ") && strings.Contains(command, registry.Path) && strings.Contains(command, `"kept":"caddy"`):
-		r, err := registry.Parse([]byte(h.files[registry.Path]))
-		if err != nil {
-			return "paisans-registry-unreadable", errors.New("exit status 4")
-		}
-		m := regexp.MustCompile(`'entry="` + ourID + `":(\{[^']*\})'`).FindStringSubmatch(command)
-		var e registry.Entry
-		if m == nil || json.Unmarshal([]byte(m[1]), &e) != nil || e.Kept != registry.KeptCaddy {
-			return "", fmt.Errorf("not this deployment's entry marked kept: %s", command)
-		}
-		if old, ok := r.Deployments[ourID]; ok && registry.KeepCaddy(old) != e {
-			return "", fmt.Errorf("the entry marked kept is not the one there: %+v", e)
-		}
-		if want, _ := registry.ClaimCommand(ourID, e); command != want {
-			return "", fmt.Errorf("not a claim's merge: %s", command)
-		}
-		r.Deployments[ourID] = e
-		data, _ := registry.Encode(r)
-		h.files[registry.Path] = string(data)
-		return "", nil
-	case strings.Contains(command, "awk ") && strings.Contains(command, registry.Path):
-		if command != registry.RemoveCommand(ourID) {
-			return "", fmt.Errorf("not the removal: %s", command)
-		}
-		content, ok := h.files[registry.Path]
-		if !ok {
-			return "", nil
-		}
-		r, err := registry.Parse([]byte(content))
-		if err != nil {
-			return "paisans-registry-unreadable", errors.New("exit status 4")
-		}
-		data, _ := registry.Encode(registry.Remove(r, ourID))
-		h.files[registry.Path] = string(data)
-		return "", nil
 	case strings.HasSuffix(command, " stop"), strings.HasSuffix(command, " up -d"):
 		return "", nil
 	}
@@ -889,17 +906,17 @@ func (h *host) runningWG() string {
 	return h.files[wgConf]
 }
 
-// failover promotes a remaining member once the evicted leader is cut off:
+// failover promotes a remaining member once the leader is cut off:
 // the Sync Standby, or else the first streaming replica.
 func (w *world) failover() {
-	if w.evicted == "" {
+	if w.cutoff == "" {
 		return
 	}
 	defer w.keepSync()
-	if w.member(w.evicted) == nil {
+	if w.member(w.cutoff) == nil {
 		return
 	}
-	for _, private := range []string{w.secrets.Sites[w.evicted].WireGuardPrivateKey, w.secrets.Sites[w.evicted].WireGuardNextPrivateKey} {
+	for _, private := range []string{w.secrets.Sites[w.cutoff].WireGuardPrivateKey, w.secrets.Sites[w.cutoff].WireGuardNextPrivateKey} {
 		if private == "" {
 			continue
 		}
@@ -908,14 +925,14 @@ func (w *world) failover() {
 			w.t.Fatal(err)
 		}
 		for name, h := range w.hosts {
-			if name != w.evicted && strings.Contains(h.runningWG(), key) {
+			if name != w.cutoff && strings.Contains(h.runningWG(), key) {
 				return
 			}
 		}
 	}
-	if w.leader() != w.evicted {
+	if w.leader() != w.cutoff {
 		// A cut Sync Standby stops streaming, and the leader names another.
-		gone := w.member(w.evicted)
+		gone := w.member(w.cutoff)
 		if gone["State"] == "stopped" {
 			return
 		}
@@ -936,14 +953,14 @@ func (w *world) failover() {
 		}
 	}
 	for _, m := range w.members {
-		if next == nil && m["Member"] != w.evicted && m["State"] == "streaming" {
+		if next == nil && m["Member"] != w.cutoff && m["State"] == "streaming" {
 			next = m
 		}
 	}
 	// Replicas a hostile leader stopped streaming still run Postgres, and
 	// Patroni promotes one when it is within maximum_lag_on_failover.
 	for _, m := range w.members {
-		if next == nil && m["Member"] != w.evicted && m["State"] == "running" {
+		if next == nil && m["Member"] != w.cutoff && m["State"] == "running" {
 			next = m
 		}
 	}
@@ -952,7 +969,7 @@ func (w *world) failover() {
 	}
 	for _, m := range w.members {
 		switch {
-		case m["Member"] == w.evicted:
+		case m["Member"] == w.cutoff:
 			m["Role"], m["State"] = "Replica", "stopped"
 		case m["State"] == "running":
 			// It follows the new leader.
@@ -991,6 +1008,42 @@ func envLine(content, key string) string {
 }
 
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+// addToManifest writes a file on the host and lists it, with its checksum,
+// in the deployment's manifest there, as apply would have. path is relative
+// to the host's /, as manifest entries are.
+func (h *host) addToManifest(t *testing.T, path, content string) {
+	t.Helper()
+	var m render.Manifest
+	if err := json.Unmarshal([]byte(h.files[dep.Manifest()]), &m); err != nil {
+		t.Fatal(err)
+	}
+	h.files["/"+path] = content
+	m.Files = append(m.Files, render.ManifestFile{Path: path, SHA256: hexSum(content), Mode: "0644"})
+	sort.Slice(m.Files, func(i, j int) bool { return m.Files[i].Path < m.Files[j].Path })
+	data, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.files[dep.Manifest()] = string(data) + "\n"
+}
+
+// setToolkitVersion records v in the deployment's manifest on the host as
+// the version of the paisans that wrote it, with keptCommit as its commit
+// and its tree marked modified.
+func (h *host) setToolkitVersion(t *testing.T, v string) {
+	t.Helper()
+	var m render.Manifest
+	if err := json.Unmarshal([]byte(h.files[dep.Manifest()]), &m); err != nil {
+		t.Fatal(err)
+	}
+	m.Build = version.Build{Version: v, Commit: keptCommit, Modified: true}
+	data, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.files[dep.Manifest()] = string(data) + "\n"
+}
 
 func (h *host) sortedFiles() []string {
 	var out []string
@@ -1062,7 +1115,14 @@ func (w *world) splitEtcd(site string) {
 
 func (w *world) patroniList() string {
 	data, _ := json.Marshal(w.members)
-	return string(data)
+	return w.patronictlOut(string(data))
+}
+
+func (w *world) patronictlOut(out string) string {
+	if w.patroniLog {
+		return patronitest.Wrap(out)
+	}
+	return out
 }
 
 func (w *world) leader() string {
@@ -1224,10 +1284,19 @@ func (w *world) inspect(t apply.Transport, cfg *config.Config) (*hostcheck.Inven
 	inv.Volumes = append(inv.Volumes, h.volumes...)
 	if content, ok := h.files[dep.Manifest()]; ok {
 		inv.Manifest = true
-		var m render.Manifest
-		if err := json.Unmarshal([]byte(content), &m); err == nil {
+		m, err := render.ParseManifest([]byte(content))
+		var noBuild *version.NoBuildError
+		if errors.As(err, &noBuild) {
+			inv.ManifestErr = fmt.Errorf("%s: %w. Apply the site again, which writes it anew", dep.Manifest(), err)
+			err = nil
+		}
+		if version.IsNewer(err) {
+			err = nil
+		}
+		if err == nil {
 			inv.ManifestFiles = m.Files
 			inv.ManifestWebServer = m.WebServer
+			inv.ManifestBuild = m.Build
 			if inv.ManifestFiles == nil {
 				inv.ManifestFiles = []render.ManifestFile{}
 			}
@@ -1242,7 +1311,7 @@ func (w *world) inspect(t apply.Transport, cfg *config.Config) (*hostcheck.Inven
 		inv.Links = []string{dep.Interface()}
 	}
 	for _, p := range h.sortedFiles() {
-		if strings.HasPrefix(p, render.HostSitesDir+"/") && strings.HasSuffix(p, ".caddy") {
+		if strings.HasPrefix(p, sitesDir+"/") && strings.HasSuffix(p, ".caddy") {
 			inv.HostSites = append(inv.HostSites, p)
 		}
 	}
@@ -1358,7 +1427,7 @@ func worldConfig(t *testing.T, edits ...func(string) string) (*config.Config, *c
 
 // newWorld is the deployment before the removal: every site applied from
 // the configuration as it stands, home-a leading with home-b its Sync
-// Standby, three Garage nodes, and on home-b a host prepare's units, rules
+// Standby, three Garage nodes, and on home-b a site prepare's units, rules
 // and key record beside things that are not this deployment's.
 func newWorld(t *testing.T, edits ...func(string) string) *world {
 	t.Helper()
@@ -1386,8 +1455,9 @@ func newWorld(t *testing.T, edits ...func(string) string) *world {
 		sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
 		if running, ok := h.files[wgConf]; ok {
 			h.wgRun = &running
+			h.files[wgInstalled] = running
 		}
-		manifest, _ := json.MarshalIndent(render.Manifest{Version: 1, Files: entries}, "", "  ")
+		manifest, _ := json.MarshalIndent(render.Manifest{Version: 1, Files: entries, Build: version.Current()}, "", "  ")
 		h.files[dep.Manifest()] = string(manifest) + "\n"
 		if contains(cfg.Etcd.Members, name) {
 			h.etcdUp, h.etcdContainer = true, true
@@ -1403,9 +1473,11 @@ func newWorld(t *testing.T, edits ...func(string) string) *world {
 			w.served[name] = proxy
 		}
 		reg := registry.Registry{Version: registry.Version, Deployments: map[string]registry.Entry{}}
-		id, e := registry.For(cfg, name, mustTime())
+		id, e := claimOf(cfg, name, mustTime())
 		reg.Deployments[id] = e
 		h.files[registry.Path] = encode(t, reg)
+		path, record := admitted(t, cfg, name)
+		h.files[path] = record
 		h.containers = append(h.containers, hostcheck.Container{Name: "paisans-f2a9-infra-etcd-1", Project: "paisans-f2a9-infra", Deployment: ourID, Image: "sha256:etcd", PID: 10})
 		h.networks = append(h.networks, hostcheck.Network{Name: "bridge"})
 	}
@@ -1440,10 +1512,9 @@ func newWorld(t *testing.T, edits ...func(string) string) *world {
 	b.images["sha256:talk"], b.images["sha256:theirs"] = true, true
 	b.volumes = append(b.volumes, hostcheck.Volume{Name: "paisans-f2a9-talk_media", Project: "paisans-f2a9-talk", Deployment: ourID})
 	b.files[root+"/infra/postgres/PG_VERSION"] = "18\n"
-	b.files["/etc/systemd/system/paisans-f2a9-watchdog.service"] = "[Unit]\n"
-	b.files["/etc/systemd/system/docker.service.d/paisans-f2a9-after-wireguard.conf"] = "[Unit]\n"
-	b.files["/etc/systemd/system/paisans-0c1d-watchdog.service"] = "[Unit]\n"
-	b.files["/etc/systemd/system/docker.service.d/override.conf"] = "[Service]\n"
+	b.files[userUnits+"/paisans-f2a9-config-daemon.service"] = "[Unit]\n"
+	b.files[userUnits+"/paisans-0c1d-config-daemon.service"] = "[Unit]\n"
+	b.files["/etc/systemd/system/paisans-f2a9-egress.service"] = "[Unit]\n"
 	b.rules = []string{
 		"allow 22/tcp comment 'paisans-f2a9: ssh, the bootstrap route'",
 		"allow in on psns-f2a9 comment 'paisans-f2a9: the mesh'",
@@ -1452,11 +1523,11 @@ func newWorld(t *testing.T, edits ...func(string) string) *world {
 	}
 	bob := otherKey(t)
 	b.files[keysAt] = "# managed by hand\n" + alice + "\n" + bob + "\n"
-	b.files[record] = "# Keys paisans host prepare added.\n" + fingerprint(t, alice) + " alice@example.org\n"
+	b.files[record] = "# Keys paisans site prepare added.\n" + fingerprint(t, alice) + " alice@example.org\n"
 	reg := registry.Registry{Version: registry.Version, Deployments: map[string]registry.Entry{}}
-	id, e := registry.For(cfg, "home-b", mustTime())
+	id, e := claimOf(cfg, "home-b", mustTime())
 	reg.Deployments[id] = e
-	reg.Deployments[otherID] = registry.Entry{Token: "0c1d", Root: "/srv/paisans/0c1d", Domain: "example.net", Site: "x", Roles: "apps", ClaimedAt: "2026-10-01T00:00:00Z", Interface: "psns-0c1d", Subnet: "10.45.0.0/24", Address: "10.45.0.2"}
+	reg.Deployments[otherID] = registry.Entry{Token: "0c1d", Root: "/srv/paisans/0c1d", Domain: "example.net", Site: "x", Roles: "apps", ClaimedAt: "2026-10-01T00:00:00Z", Interface: "psns-0c1d", Subnet: "10.45.0.0/24", Address: "10.45.0.2", Build: version.Current()}
 	b.files[registry.Path] = encode(t, reg)
 	return w
 }
@@ -1525,4 +1596,43 @@ func listenServers(cfg string) [][2]string {
 		}
 	}
 	return out
+}
+
+// admitted is the path and content of the admission record site admit
+// writes for site.
+func admitted(t *testing.T, cfg *config.Config, site string) (string, string) {
+	t.Helper()
+	req, err := admission.Build(cfg, site)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := admission.EncodeRecord(admission.NewRecord(req, req.Grants, "", mustTime()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := admission.Path(cfg.Deployment().Token())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path, string(b)
+}
+
+// claimOf is the registry entry the fixture's deployment holds a site's host
+// with, read from the configuration.
+func claimOf(cfg *config.Config, site string, now time.Time) (string, registry.Entry) {
+	d := cfg.Deployment()
+	declared := cfg.Sites[site]
+	return d.ID, registry.Entry{
+		Token:      d.Token(),
+		Root:       d.Root(),
+		Domain:     cfg.Community.Domain,
+		Site:       site,
+		ClaimedAt:  now.UTC().Format(time.RFC3339),
+		Interface:  d.Interface(),
+		ListenPort: declared.ListenPort(),
+		Subnet:     cfg.Mesh.Subnet,
+		Address:    declared.Address,
+		Roles:      registry.JoinRoles(declared.Roles),
+		Build:      version.Current(),
+	}
 }

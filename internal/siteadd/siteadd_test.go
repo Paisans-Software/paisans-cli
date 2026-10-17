@@ -77,7 +77,7 @@ func TestTheDryRunPlansEveryStageAndChangesNothing(t *testing.T) {
 			t.Errorf("the dry run wrote %d file(s) on %s", h.writes, h.name)
 		}
 		for _, c := range h.commands {
-			for _, verb := range []string{"member add", "promote", "syncconf", "up -d", "restart", "edit-config"} {
+			for _, verb := range []string{"member add", "promote", "' sync", "' put", "up -d", "restart", "edit-config"} {
 				if strings.Contains(c, verb) {
 					t.Errorf("the dry run ran %q on %s", c, h.name)
 				}
@@ -156,12 +156,12 @@ func TestAFailedMeshGateRollsBack(t *testing.T) {
 	defer siteadd.SetFast()()
 	w := newWorld(t)
 	w.noPing = true
-	before := w.hosts["home-a"].files["/etc/wireguard/psns-f2a9.conf"]
+	before := w.hosts["home-a"].files["/srv/paisans/f2a9/psns-f2a9.conf"]
 	err := siteadd.Execute(build(t, w))
 	if err == nil || !strings.Contains(err.Error(), "stage 2") {
 		t.Fatalf("want a stage 2 failure, got %v", err)
 	}
-	if w.hosts["home-a"].files["/etc/wireguard/psns-f2a9.conf"] != before {
+	if w.hosts["home-a"].files["/srv/paisans/f2a9/psns-f2a9.conf"] != before {
 		t.Error("home-a's psns-f2a9.conf was not restored")
 	}
 	if w.hosts["home-a"].ran("member add") > 0 {
@@ -330,7 +330,7 @@ func TestAJoinOutsideTheScopeIsRefused(t *testing.T) {
 	b.Roles = append(b.Roles, config.RoleApps)
 	w.cfg.Sites["home-b"] = b
 	_, err := siteadd.Build(w.cfg, w.secrets, "home-b", w.transports())
-	if err == nil || !strings.Contains(err.Error(), "give it the apps role and run host prepare and apply") {
+	if err == nil || !strings.Contains(err.Error(), "give it the apps role and run site prepare and apply") {
 		t.Errorf("a new data and apps site: %v", err)
 	}
 	if err != nil && strings.Contains(err.Error(), "placement decision") {
@@ -532,5 +532,50 @@ func TestADryRunShowsPreflightFindingsByDefault(t *testing.T) {
 		if e.Kind == "refuse" && !strings.Contains(e.Extra, "51820/udp") {
 			t.Errorf("the refusal lacks its explanation: %+v", e)
 		}
+	}
+}
+
+// The etcd gate wants every member healthy. A member that runs and answers
+// unhealthy holds the join there, named, rather than as etcdctl's exit.
+func TestTheEtcdGateNamesAnUnhealthyMember(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := newWorld(t)
+	w.etcdSick = map[string]bool{"vm": true}
+	err := siteadd.Execute(build(t, w))
+	if err == nil || !strings.Contains(err.Error(), "vm's etcd is unhealthy") {
+		t.Fatalf("err = %v, want vm named as unhealthy", err)
+	}
+	if strings.Contains(err.Error(), "exit status 1") || strings.Contains(err.Error(), "endpoint health:") {
+		t.Errorf("the refusal is etcdctl's exit: %v", err)
+	}
+}
+
+// patronictl logs beside its answer when it cannot reach one of etcd's
+// endpoints, and the join reads the answer past them.
+func TestPatronictlLogLinesDoNotStopTheJoin(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := newWorld(t)
+	w.patroniLog = true
+	if err := siteadd.Execute(build(t, w)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The etcd gate wants every voter in etcd's endpoint health: one left out,
+// or an empty list, holds the join, named.
+func TestTheEtcdGateWantsEveryVoterInItsHealth(t *testing.T) {
+	for name, drop := range map[string]map[string]bool{
+		"vm left out":   {"vm": true},
+		"an empty list": {"home-a": true, "home-b": true, "vm": true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			defer siteadd.SetFast()()
+			w := newWorld(t)
+			w.healthDrop = drop
+			err := siteadd.Execute(build(t, w))
+			if err == nil || !strings.Contains(err.Error(), "vm's etcd is not in etcd's endpoint health") {
+				t.Fatalf("err = %v, want vm named as missing", err)
+			}
+		})
 	}
 }

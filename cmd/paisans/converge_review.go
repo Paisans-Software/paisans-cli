@@ -11,15 +11,15 @@ import (
 // convergeGrantHost is how apply with no --site reaches a site's grant
 // record, to read it for the review and to write the web server's part.
 // Tests replace it.
-var convergeGrantHost = func(cfg *config.Config, site string, sudo bool) registry.Runner {
-	return grantRunner(site, convergeHost(site, cfg.Sites[site], sudo))
+var convergeGrantHost = func(cfg *config.Config, site string) registry.Runner {
+	return grantRunner(site, convergeHost(site, cfg.Sites[site]))
 }
 
 // convergeRecord reads a site's grant record for the run's review. g is the
 // grant it is compared with, which the real read has no use for. Tests
 // replace it.
-var convergeRecord = func(cfg *config.Config, site string, g grant.Grant, sudo bool) (grant.Record, error) {
-	rec, _, _, err := grant.Read(convergeGrantHost(cfg, site, sudo), cfg.Deployment())
+var convergeRecord = func(cfg *config.Config, site string, g grant.Grant) (grant.Record, error) {
+	rec, _, _, err := grant.Read(convergeGrantHost(cfg, site), cfg.Deployment())
 	return rec, err
 }
 
@@ -53,7 +53,8 @@ func convergeReview(r ui.Reporter, cfg *config.Config, o convergeOptions) (map[s
 		}
 		scope.Images = false
 	}
-	sites := cfg.SiteNames()
+	// A down site is not read: its own steps are skipped, its review too.
+	sites := runReady(cfg)
 	reviews := make([]*siteReview, len(sites))
 	errs := make([]error, len(sites))
 	r.Section("review")
@@ -62,7 +63,7 @@ func convergeReview(r ui.Reporter, cfg *config.Config, o convergeOptions) (map[s
 		g, err := grant.For(cfg, rendered, site)
 		var rec grant.Record
 		if err == nil {
-			rec, err = convergeRecord(cfg, site, g, o.Sudo)
+			rec, err = convergeRecord(cfg, site, g)
 		}
 		if err != nil {
 			errs[i] = err
@@ -72,7 +73,7 @@ func convergeReview(r ui.Reporter, cfg *config.Config, o convergeOptions) (map[s
 			}
 			continue
 		}
-		reviews[i] = &siteReview{grant: g, scope: scope, review: grant.Compare(site, g, rec, scope), host: convergeGrantHost(cfg, site, o.Sudo), record: rec}
+		reviews[i] = &siteReview{grant: g, scope: scope, review: grant.Compare(site, g, rec, scope), host: convergeGrantHost(cfg, site), record: rec}
 		endReview(r, line, reviews[i].review, o.Execute)
 	}
 	out := map[string]*siteReview{}
@@ -98,7 +99,7 @@ func convergeReview(r ui.Reporter, cfg *config.Config, o convergeOptions) (map[s
 	if !o.Execute {
 		return out, pending, nil
 	}
-	if err := approveReviews(r, o.stdin, o.stdout, all, "paisans apply --execute"); err != nil {
+	if err := approveReviews(r, o.answers, o.stdin, o.stdout, all, "paisans apply --execute"); err != nil {
 		return nil, 0, err
 	}
 	run := &runReview{approved: map[string]grant.Review{}}
@@ -115,28 +116,6 @@ func convergeReview(r ui.Reporter, cfg *config.Config, o convergeOptions) (map[s
 	}
 	reviewedByRun = run
 	return out, pending, nil
-}
-
-// convergeRecordWebServer records each site's web server part once the
-// run's web server step has succeeded, since that step is what writes into
-// the directory.
-func convergeRecordWebServer(r ui.Reporter, cfg *config.Config, reviews map[string]*siteReview) error {
-	by := ""
-	if reviewedByRun != nil {
-		by = reviewedByRun.approvedBy
-	}
-	for _, site := range cfg.SiteNames() {
-		s := reviews[site]
-		if s == nil {
-			continue
-		}
-		web := *s
-		web.scope = grant.Scope{WebServer: true}
-		if err := recordGrant(r, &web, cfg.Deployment(), by); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // convergeRecords is each reviewed site's grant record, by site.

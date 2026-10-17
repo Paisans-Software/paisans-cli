@@ -3,20 +3,24 @@ package siteremove
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/appremove"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/deployrecord"
 	"github.com/paisans-software/paisans-cli/internal/grant"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
-	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/version"
 	"github.com/paisans-software/paisans-cli/internal/webserver"
 )
 
@@ -38,29 +42,34 @@ type hostPlan struct {
 	// run, sorted.
 	images []string
 	files  []appremove.File
-	// webServer are the files the manifest records in the include directory
-	// of the operator's web server.
+	// webServer are the reference files for the host owner's web server
+	// the manifest records.
 	webServer []render.ManifestWebServer
 	manifest  bool
-	wireguard bool
-	units     []string
-	dropins   []string
-	rules     []string
-	// keyRecords are this deployment's records of the authorized keys
-	// host prepare added, one per login user.
+	// home is the deployment's user's home, and userUnits the units site
+	// prepare wrote for the deployment in its systemd directory there.
+	home      string
+	userUnits []string
+	// keyRecords is this deployment's record of the authorized keys site
+	// admit and site prepare added, when the host has one.
 	keyRecords []string
-	registry   bool
 	root       dirState
 	// record is whether the host holds this deployment's record, a gateway's.
 	record bool
 	// granted is whether the host holds the record of what this deployment
-	// last granted there, which goes with the registry entry.
+	// last granted there.
 	granted bool
 	// deleteRoot is --delete-data with no edited file under the root.
 	deleteRoot bool
 	// caddy is the gateway's Caddy kept for the host owner's sites, nil
 	// when it goes like everything else.
 	caddy *caddyPlan
+	// dataLeft is whether, without --delete-data, the root keeps files
+	// apply did not write.
+	dataLeft bool
+	// keepData is whether data is left, without --delete-data: files in the
+	// root apply did not write, or the deployment's volumes.
+	keepData bool
 	// store is what the host holds of the deployment's configuration store:
 	// the repository, the peers file, the sync log and the script directory.
 	store []storeRoot
@@ -83,7 +92,7 @@ type storeRoot struct {
 	dir         bool
 }
 
-// storeRoots are the paths host prepare gives the configuration store, each
+// storeRoots are the paths site prepare gives the configuration store, each
 // probed by one file that is in it. A directory is probed by the file inside
 // it that prepare always writes, so a path is listed only when it is there.
 func (p *Plan) storeRoots() []storeRoot {
@@ -98,29 +107,31 @@ func (p *Plan) storeRoots() []storeRoot {
 	}
 }
 
-// unitsCommand lists every unit and drop-in named for this deployment's
-// token under /etc/systemd/system: what host prepare writes there is all
-// named paisans-<token>-*. A glob that matches nothing is left as the
-// pattern, so each match is printed only when it exists.
-func (p *Plan) unitsCommand() string {
-	prefix := p.dep().Prefix() + "-"
-	return fmt.Sprintf(`for f in /etc/systemd/system/%[1]s*; do [ -e "$f" ] && echo "unit $f"; done; for f in /etc/systemd/system/*.d/%[1]s*; do [ -e "$f" ] && echo "dropin $f"; done; true`, prefix)
+// userUnitsCommand lists the deployment's units in its user's own systemd
+// directory: the configuration store's, which site prepare writes.
+func (p *Plan) userUnitsCommand(home string) string {
+	return fmt.Sprintf(`for f in %s/%s-*; do [ -e "$f" ] && echo "unit $f"; done; true`, hostprep.UserUnitDir(home), p.dep().Prefix())
 }
 
-// removeUnitsCommand disables, stops and deletes each unit, deletes each
-// drop-in and its directory once empty, and reloads systemd, reading the
-// same globs again so a re-run finds nothing left.
-func (p *Plan) removeUnitsCommand() string {
-	prefix := p.dep().Prefix() + "-"
-	return fmt.Sprintf(`for f in /etc/systemd/system/%[1]s*; do [ -e "$f" ] || continue; systemctl disable --now "$(basename "$f")" >/dev/null 2>&1 || true; rm -f -- "$f"; done; for f in /etc/systemd/system/*.d/%[1]s*; do [ -e "$f" ] || continue; rm -f -- "$f"; rmdir "$(dirname "$f")" 2>/dev/null || true; done; systemctl daemon-reload`, prefix)
+// removeUserUnitsCommand disables, stops and deletes each, then reloads the
+// user's manager.
+func (p *Plan) removeUserUnitsCommand(home string) string {
+	return fmt.Sprintf(`for f in %[1]s/%[2]s-*; do [ -e "$f" ] || continue; %[3]s disable --now "$(basename "$f")" >/dev/null 2>&1 || true; rm -f -- "$f"; done; %[3]s daemon-reload`, hostprep.UserUnitDir(home), p.dep().Prefix(), hostprep.UserSystemctl)
 }
 
-// wireguardCommand stops this deployment's mesh interface and keeps it from
-// starting at boot. The unit is wireguard-tools' template, named for the
-// interface, so disabling the instance touches no other deployment's.
-func (p *Plan) wireguardCommand() string {
-	unit := p.dep().WireGuardUnit()
-	return fmt.Sprintf(`systemctl disable --now %[1]s >/dev/null 2>&1 || true; if systemctl is-active --quiet %[1]s; then echo "%[1]s is still active"; exit 1; fi`, unit)
+// emptyRootCommand empties the deployment's root, as root of a new user
+// namespace that maps the user's subordinate range, which is what rootlesskit
+// runs a command as (Docker's rootless documentation, Uninstall: rootlesskit
+// rm -rf ~/.local/share/docker): a file a container's user owns is the
+// user's to remove there. With deleteData everything goes; without, only
+// the empty directories. The root itself stays: /srv/paisans is root's, and
+// site evict removes it.
+func emptyRootCommand(d deployment.Deployment, deleteData bool) string {
+	root := quote(d.Root())
+	if deleteData {
+		return fmt.Sprintf("if [ -d %[1]s ]; then rootlesskit find %[1]s -mindepth 1 -delete; fi", root)
+	}
+	return fmt.Sprintf("if [ -d %[1]s ]; then rootlesskit find %[1]s -mindepth 1 -depth -type d -empty -delete; fi", root)
 }
 
 // containersCommand stops and removes every container and network carrying
@@ -143,7 +154,7 @@ func (p *Plan) containersCommand() string {
 		// The plan removes the Caddy. A site of the host owner's that
 		// appeared since would lose it, so the run stops before anything.
 		guard = fmt.Sprintf(`if { { [ -d %[1]s ] && ! { [ -r %[1]s ] && [ -x %[1]s ]; }; } || ls -d %[1]s/*.caddy >/dev/null 2>&1; } && [ -n "$(docker ps -aq %[2]s --filter %[3]s --filter %[4]s)" ]; then echo "a site of the host owner's is in %[1]s now, served by this deployment's Caddy, which this plan removes. Nothing was removed; run again, and the Caddy is kept for it"; exit 3; fi; `,
-			render.HostSitesDir, filter, quote("label=com.docker.compose.project="+d.Project("infra")), quote("label=com.docker.compose.service=caddy"))
+			render.HostSitesDir(d), filter, quote("label=com.docker.compose.project="+d.Project("infra")), quote("label=com.docker.compose.service=caddy"))
 	}
 	return fmt.Sprintf(`set -e; %[4]sids=$(docker ps -aq --no-trunc %[1]s); %[3]sif [ -n "$ids" ]; then docker stop $ids >/dev/null; %[2]s $ids >/dev/null; fi; nets=$(docker network ls -q --no-trunc %[1]s); if [ -n "$nets" ]; then docker network rm $nets >/dev/null; fi`, filter, rm, keep, guard)
 }
@@ -250,6 +261,58 @@ func parseDir(out string) (dirState, error) {
 	return d, nil
 }
 
+// checkToolkit refuses a site whose manifest a newer paisans wrote: what
+// is provably this deployment's is decided by this binary, and a newer
+// release may have put things on the host this one does not know, or knows
+// in an older shape. Releases are compared, not commits, so two builds of
+// one release are equal. A version this binary cannot order is refused as
+// a newer one is. No manifest is nothing to check, and one that does not
+// say which build wrote it is refused.
+func (p *Plan) checkToolkit(inv *hostcheck.Inventory) error {
+	if !inv.Manifest {
+		return nil
+	}
+	if inv.ManifestErr != nil {
+		return fmt.Errorf("site remove %s: %w. Nothing was changed", p.Site, inv.ManifestErr)
+	}
+	return p.refuseNewer(inv.ManifestPath, inv.ManifestBuild.Version)
+}
+
+// refuseNewer is checkToolkit's refusal of the release theirs, recorded in
+// the manifest at path.
+func (p *Plan) refuseNewer(path, theirs string) error {
+	newer, err := version.Compare(theirs, version.Version)
+	if err != nil {
+		return fmt.Errorf("site remove %s: %s records that paisans %q last applied deployment %s here, which is not a release this paisans %s can order, so it may be a newer one that put things on the host this one does not know about. Nothing was changed. Upgrade paisans, and run site remove again", p.Site, path, theirs, p.dep().ID, version.Version)
+	}
+	if newer > 0 {
+		return fmt.Errorf("site remove %s: deployment %s was last applied here by paisans %s, and this is paisans %s, so it may not know everything that release put on the host. Nothing was changed. Upgrade paisans to %s or later, and run site remove again", p.Site, p.dep().ID, theirs, version.Version, theirs)
+	}
+	return nil
+}
+
+// recheckToolkit reads the manifest again before the host stage changes
+// anything, so an apply by a newer paisans since the plan was made is
+// refused as the plan would have refused it.
+func (p *Plan) recheckToolkit(t apply.Transport) error {
+	content, found, err := t.ReadFile(p.dep().Manifest())
+	if err != nil {
+		return fmt.Errorf("%s: reading %s: %w", p.Site, p.dep().Manifest(), err)
+	}
+	if !found {
+		return nil
+	}
+	m, err := render.ParseManifest([]byte(content))
+	var noBuild *version.NoBuildError
+	if errors.As(err, &noBuild) {
+		return fmt.Errorf("site remove %s: %s: %w. Apply the site again, which writes it anew. Nothing was changed", p.Site, p.dep().Manifest(), err)
+	}
+	if err != nil && !version.IsNewer(err) {
+		return fmt.Errorf("site remove %s: %s is not readable as a manifest, so no file there is provably this deployment's. Nothing was changed", p.Site, p.dep().Manifest())
+	}
+	return p.refuseNewer(p.dep().Manifest(), m.Build.Version)
+}
+
 func sum(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:])
@@ -259,15 +322,18 @@ func sum(s string) string {
 // proven this deployment's, and lists what it keeps.
 func (p *Plan) buildHost() (*Stage, error) {
 	st := &Stage{Number: 3, Name: "clean the host", Short: "nothing of this deployment is left"}
-	if p.HostGone {
-		st.Skipped = "--host-gone: " + p.Site + "'s host is not reached"
-		p.Kept = append(p.Kept, p.hostGoneLeft())
-		return st, nil
-	}
-	t := p.transports[p.Site]
 	d := p.dep()
+	user := p.cfg.Sites[p.Site].SSHUser()
+	p.Evict = EvictLine(d, user)
+	t := p.transports[p.Site]
 	hp := &hostPlan{}
 	p.host = hp
+
+	if err := p.checkLogin(t); err != nil {
+		return nil, err
+	}
+	hp.home = p.home
+	p.Evict = EvictLine(d, p.loginUser)
 
 	inv, err := inspect(t, p.cfg)
 	if err != nil {
@@ -276,9 +342,20 @@ func (p *Plan) buildHost() (*Stage, error) {
 	if inv.Manifest && inv.ManifestFiles == nil {
 		return nil, fmt.Errorf("site remove %s: %s is not readable as a manifest, so no file there is provably this deployment's. Nothing was changed", p.Site, inv.ManifestPath)
 	}
+	if err := p.checkToolkit(inv); err != nil {
+		return nil, err
+	}
 	hp.dockerPresent = inv.Docker.Present
 	hp.manifest = inv.Manifest
-	hp.webServer = inv.ManifestWebServer
+	for _, e := range inv.ManifestWebServer {
+		// The manifest is the user's own file: an entry that is not one of
+		// the deployment's reference files is never read or deleted.
+		if !webserver.OwnReference(p.dep(), e.Path) {
+			p.Kept = append(p.Kept, fmt.Sprintf("%s: %s: not a reference file of this deployment's, so site remove leaves it; the host's owner removes it if it is this deployment's", p.Site, e.Path))
+			continue
+		}
+		hp.webServer = append(hp.webServer, e)
+	}
 	// Before anything else is planned: a kept Caddy changes what goes.
 	if hp.caddy, err = p.planCaddy(t, inv); err != nil {
 		return nil, err
@@ -309,16 +386,31 @@ func (p *Plan) buildHost() (*Stage, error) {
 	edited := false
 	var refs []string
 	proven := map[string]bool{}
+	var inside []render.ManifestFile
 	for _, e := range inv.ManifestFiles {
 		if strings.ContainsAny(e.Path, "'\n") {
 			return nil, fmt.Errorf("site remove %s: the manifest names %q, which this command will not put in a command line", p.Site, e.Path)
 		}
+		// The manifest is the user's own file: a path that is not clean can
+		// name a file anywhere while it starts with the root, so it is
+		// never read or deleted.
+		if !cleanRel(e.Path) {
+			p.Kept = append(p.Kept, fmt.Sprintf("%s: /%s: not a clean path under %s, so site remove leaves it; the host's owner removes it if it is this deployment's", p.Site, e.Path, d.Root()))
+			continue
+		}
+		// The user can remove nothing outside the root, and nothing there is
+		// provably this deployment's to the host's owner.
+		if !strings.HasPrefix(e.Path, d.Rel()+"/") {
+			p.Kept = append(p.Kept, fmt.Sprintf("%s: /%s: outside %s, so site remove leaves it; the host's owner removes it if it is this deployment's", p.Site, e.Path, d.Root()))
+			continue
+		}
+		inside = append(inside, e)
 	}
-	read, err := readManifestFiles(t, inv.ManifestFiles)
+	read, err := readManifestFiles(t, inside)
 	if err != nil {
 		return nil, fmt.Errorf("site remove %s: %w", p.Site, err)
 	}
-	for i, e := range inv.ManifestFiles {
+	for i, e := range inside {
 		f := appremove.File{Entry: e}
 		switch r := read[i]; {
 		case !r.found:
@@ -349,7 +441,7 @@ func (p *Plan) buildHost() (*Stage, error) {
 		// The manifest stays, listing the kept files, which proves them
 		// this deployment's to the run that removes them.
 		hp.manifest = false
-		want, err := p.keptManifest(inv.ManifestFiles, proven, cp.reduced)
+		want, err := p.keptManifest(inv.ManifestFiles, proven, cp.reduced, inv.ManifestBuild)
 		if err != nil {
 			return nil, err
 		}
@@ -365,7 +457,6 @@ func (p *Plan) buildHost() (*Stage, error) {
 	if err := p.planImages(t, hp, inv, refs); err != nil {
 		return nil, err
 	}
-	hp.wireguard = inv.ManifestWireGuard || contains(inv.Links, d.Interface())
 	if _, hp.record, err = t.ReadFile(deployrecord.Path(d)); err != nil {
 		return nil, fmt.Errorf("site remove %s: reading %s: %w", p.Site, deployrecord.Path(d), err)
 	}
@@ -383,34 +474,13 @@ func (p *Plan) buildHost() (*Stage, error) {
 		}
 	}
 
-	out, err := t.Run(p.unitsCommand())
+	out, err := t.Run(p.userUnitsCommand(hp.home))
 	if err != nil {
 		return nil, fmt.Errorf("site remove %s: listing its units: %w: %s", p.Site, err, lastLines(out, 2))
 	}
 	for _, line := range strings.Split(out, "\n") {
-		kind, path, _ := strings.Cut(strings.TrimSpace(line), " ")
-		switch kind {
-		case "unit":
-			hp.units = append(hp.units, path)
-		case "dropin":
-			hp.dropins = append(hp.dropins, path)
-		}
-	}
-
-	out, err = t.Run(hostprep.AddedRulesProbe)
-	if err != nil {
-		return nil, fmt.Errorf("site remove %s: reading ufw's rules: %w: %s", p.Site, err, lastLines(out, 2))
-	}
-	rules, _ := hostprep.ParseAddedRules(d, out)
-	for _, r := range rules {
-		switch {
-		case r.Owned && r.Web && cp != nil:
-			// The kept Caddy's way in: ufw denies incoming by default.
-		case r.Owned && r.SSH:
-			// Always kept, and not reported: with incoming denied, deleting
-			// it would cut the host off.
-		case r.Owned:
-			hp.rules = append(hp.rules, r.Line)
+		if path, ok := strings.CutPrefix(strings.TrimSpace(line), "unit "); ok {
+			hp.userUnits = append(hp.userUnits, path)
 		}
 	}
 
@@ -418,22 +488,7 @@ func (p *Plan) buildHost() (*Stage, error) {
 		return nil, err
 	}
 
-	reg, err := registry.Read(t)
-	if err != nil {
-		return nil, fmt.Errorf("site remove %s: %w", p.Site, err)
-	}
-	entry, registered := reg.Deployments[d.ID]
-	hp.registry = registered
 	if cp != nil {
-		// The entry stays, marked kept: the Caddy still holds the gateway
-		// role and the root.
-		hp.registry = false
-		cp.entry, cp.mark = entry, entry.Kept != registry.KeptCaddy
-		if !registered {
-			// A host whose entry is gone gets one: the kept Caddy holds the
-			// gateway role and the root.
-			_, cp.entry = registry.For(p.cfg, p.Site, now())
-		}
 		err = p.planKeptRoot(t, hp, edited)
 	} else {
 		err = p.planRoot(t, hp, inv, edited)
@@ -441,11 +496,18 @@ func (p *Plan) buildHost() (*Stage, error) {
 	if err != nil {
 		return nil, err
 	}
+	if cp == nil && !p.DeleteData && (hp.dataLeft || len(hp.volumes) > 0) {
+		hp.keepData, p.DataKept = true, true
+		p.Kept = append(p.Kept, fmt.Sprintf("%s: the data in %s and the deployment's volumes stay; site evict deletes them", p.Site, d.Root()))
+	}
+	if cp != nil {
+		p.Kept = append(p.Kept, fmt.Sprintf("%s: its Caddy keeps serving the host owner's sites in %s; site evict stops it and deletes that directory, so the owner moves those sites first", p.Site, render.HostSitesDir(d)))
+	}
 
 	p.hostSteps(st)
-	st.Gate = "no container, network or unit of this deployment's on the host, no manifest, no ufw rule with its tag but the SSH allow, no registry entry"
+	st.Gate = "no container, network, unit or file of this deployment's left that its user can remove, and the root empty but for what is kept"
 	if hp.caddy != nil {
-		st.Gate = "no container, network or unit of this deployment's on the host but its Caddy, whose Caddyfile is reduced to the host owner's sites, no ufw rule with its tag but the SSH allow, and its registry entry marked kept"
+		st.Gate = "no container, network, unit or file of this deployment's left that its user can remove but its Caddy, whose Caddyfile is reduced to the host owner's sites, and the root empty but for what is kept"
 	}
 	st.run = p.runHost
 	// The run checks the host last and records that it did; a run with
@@ -457,6 +519,58 @@ func (p *Plan) buildHost() (*Stage, error) {
 		return p.verifyHost(t)
 	}
 	return st, nil
+}
+
+// checkLogin confirms, once a run and before anything else on the host is
+// read, that the login is the deployment's user: the one its admission
+// record names, which is never root. As anyone else, root above all, a link
+// the user planted under the root could steer a deletion into what that
+// login may delete and the user may not, and the units, the containers and
+// the evict line would be the login's, not the user's. The record is root's,
+// in root's own directory, so reading it is safe whoever logs in.
+func (p *Plan) checkLogin(t apply.Transport) error {
+	if p.home != "" {
+		return nil
+	}
+	d := p.dep()
+	account, err := hostprep.LoginAccount(t)
+	if err != nil {
+		return fmt.Errorf("site remove %s: %w", p.Site, err)
+	}
+	rec, err := admission.Read(t, d.Token())
+	recordPath, _ := admission.Path(d.Token())
+	switch {
+	case errors.Is(err, admission.ErrNotAdmitted):
+		return fmt.Errorf("site remove %s: %s has no admission record for this deployment (%s), so nothing says who its user is, and site remove cleans a host only as that user. Nothing was changed. If the deployment's user is still there, the host's owner removes it and everything root's with sudo paisans site evict --deployment %s --user <the deployment's user> --execute", p.Site, t.Describe(), recordPath, d.ID)
+	case err != nil:
+		return fmt.Errorf("site remove %s: %w. Nothing was changed", p.Site, err)
+	}
+	if account.UID == 0 || account.Name != rec.User {
+		who := account.Name
+		if account.UID == 0 {
+			who = "root"
+		}
+		dest := p.cfg.Sites[p.Site].Destination()
+		dest.User = rec.User
+		return fmt.Errorf("site remove %s: %s logs in as %s, not the deployment's user %s that %s names, and site remove cleans a host only as that user, so that nothing the user planted under %s can steer a deletion past what that user may delete. Nothing was changed. Run it again with --ssh %s; the host's owner then removes what is root's with %s", p.Site, t.Describe(), who, rec.User, recordPath, d.Root(), dest, EvictLine(d, rec.User))
+	}
+	p.home, p.loginUser = account.Home, rec.User
+	return nil
+}
+
+// cleanRel reports whether a manifest path is relative and clean: no
+// leading slash, no empty, . or .. element, so the root it starts with is
+// the directory it is in.
+func cleanRel(p string) bool {
+	if p == "" || path.IsAbs(p) || path.Clean(p) != p {
+		return false
+	}
+	for _, e := range strings.Split(p, "/") {
+		if e == ".." {
+			return false
+		}
+	}
+	return true
 }
 
 // planRoot plans the deployment's directory: its empty directories, or with
@@ -486,6 +600,7 @@ func (p *Plan) planRoot(t apply.Transport, hp *hostPlan, inv *hostcheck.Inventor
 			rendered++
 		}
 		if hp.root.files > rendered {
+			hp.dataLeft = true
 			p.Kept = append(p.Kept, dataLeft(p.Site, d.Root()))
 		}
 	}
@@ -526,16 +641,21 @@ func (p *Plan) planKeptRoot(t apply.Transport, hp *hostPlan, edited bool) error 
 	return nil
 }
 
-// probeKeys finds this deployment's records of the authorized keys host
-// prepare added. The keys themselves are never removed: they may be the only
-// way into the host, and nothing here can tell whether another exists. The
-// records are this deployment's own files, so they go with it.
+// probeKeys finds this deployment's record of the authorized keys site
+// admit and site prepare added. The keys themselves are never removed: they
+// may be the only way into the host, and nothing here can tell whether
+// another exists. The record is this deployment's own file, so it goes with
+// it.
 func (p *Plan) probeKeys(t apply.Transport, hp *hostPlan) error {
-	out, err := t.Run(fmt.Sprintf(`for f in %s; do [ -f "$f" ] && echo "$f"; done; true`, hostprep.OwnedKeysPrefixGlob(p.dep())))
+	path := hostprep.OwnedKeysPath(p.dep())
+	_, found, err := t.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("site remove %s: listing this deployment's key records: %w", p.Site, err)
+		return fmt.Errorf("site remove %s: reading this deployment's key record: %w", p.Site, err)
 	}
-	hp.keyRecords = strings.Fields(out)
+	hp.keyRecords = nil
+	if found {
+		hp.keyRecords = []string{path}
+	}
 	return nil
 }
 
@@ -550,7 +670,7 @@ func (p *Plan) hostSteps(st *Stage) {
 		add("reduce", "reduce Caddy to the host's sites", "Caddy %s, kept because it serves the host owner's sites (%s): its Caddyfile reduced to the global options, the snippets they may import and `import %s/*.caddy`, staged where the container sees it, validated in it and loaded with caddy reload, then written over %s in place; a failure puts the original back and removes nothing else. Its compose file, Caddyfile, caddy.env, data and config stay, kept with --delete-data too", cp.container.Name, strings.Join(cp.sites, ", "), render.HostSitesMount, p.caddyfile())
 	}
 	for _, f := range hp.webServer {
-		add("remove", "remove site files", "%s, from the include directory of %s, which is then validated, and reloaded when it runs in a container; the directory and every other file in it stay", f.Path, f.Server)
+		add("remove", "remove reference files", "%s; the host's owner removes the block from %s", f.Path, appremove.OwnerServer([]render.ManifestWebServer{f}))
 	}
 	if len(hp.containers) > 0 || len(hp.networks) > 0 {
 		add("remove", "remove containers and networks", "every container and network with this deployment's label: %s", strings.Join(append(append([]string{}, hp.containers...), hp.networks...), ", "))
@@ -560,9 +680,6 @@ func (p *Plan) hostSteps(st *Stage) {
 	}
 	if len(hp.images) > 0 {
 		add("remove", "remove images", "images %s, which only this deployment's containers ran, by ID and without -f, so Docker refuses one in use", strings.Join(hp.images, ", "))
-	}
-	if hp.wireguard {
-		add("stop", "stop "+d.WireGuardUnit(), "%s, and disable it at boot", d.WireGuardUnit())
 	}
 	for _, f := range hp.files {
 		switch f.State {
@@ -581,37 +698,25 @@ func (p *Plan) hostSteps(st *Stage) {
 	if hp.record {
 		add("delete", "delete the deployment record", "%s, this deployment's record of what it deployed", deployrecord.Path(d))
 	}
-	for _, u := range hp.units {
+	for _, u := range hp.userUnits {
 		add("remove", "remove units", "unit %s, disabled and stopped first", u)
-	}
-	for _, u := range hp.dropins {
-		add("remove", "remove units", "drop-in %s", u)
 	}
 	for _, r := range hp.store {
 		add("delete", "delete the configuration store", "%s, part of this deployment's configuration store", r.path)
 	}
-	for _, r := range hp.rules {
-		add("delete", "delete ufw rules", "ufw rule `%s`", r)
-	}
 	switch {
 	case cp != nil && hp.deleteRoot && len(cp.others) > 0:
-		add("delete", "delete "+d.Root()+" but Caddy's files", "everything in %s but the kept Caddy's files, which are kept with --delete-data: %s", d.Root(), strings.Join(cp.others, ", "))
+		add("delete", "delete "+d.Root()+" but Caddy's files", "everything in %s but the kept Caddy's files, which are kept with --delete-data, through rootlesskit: %s", d.Root(), strings.Join(cp.others, ", "))
 	case cp != nil && !p.DeleteData && (len(cp.empty) > 0 || len(hp.files) > 0):
 		add("remove", "remove empty directories", "the empty directories under %s, but never one the kept Caddy mounts", d.Root())
 	case cp != nil:
 	case hp.root.exists && hp.deleteRoot:
-		add("delete", "delete "+d.Root(), "%s and everything in it: %d file(s), %d bytes", d.Root(), hp.root.files, hp.root.bytes)
+		add("delete", "empty "+d.Root(), "everything in %s, through rootlesskit: %d file(s), %d bytes; %s itself stays for site evict", d.Root(), hp.root.files, hp.root.bytes, d.Root())
 	case hp.root.exists:
-		add("remove", "remove empty directories", "the empty directories under %s", d.Root())
+		add("remove", "remove empty directories", "the empty directories under %s, which itself stays for site evict", d.Root())
 	}
 	if hp.granted {
 		add("delete", "delete the grant record", "%s, the keys and images this deployment last granted here", grant.Path(d))
-	}
-	if hp.registry {
-		add("remove", "remove registry entry", "deployment %s from %s", d.ID, registry.Path)
-	}
-	if cp != nil && cp.mark {
-		add("mark", "mark the registry entry kept", "deployment %s in %s, as %q: the kept Caddy still holds the gateway role and %s", d.ID, registry.Path, "kept: "+registry.KeptCaddy, d.Root())
 	}
 }
 
@@ -627,6 +732,9 @@ func (p *Plan) runHost() error {
 		}
 		return nil
 	}
+	if err := p.recheckToolkit(t); err != nil {
+		return err
+	}
 	// The Caddy first: a failure there leaves the deployment as it was.
 	cp := hp.caddy
 	if cp != nil && cp.reduce() {
@@ -634,23 +742,17 @@ func (p *Plan) runHost() error {
 			return err
 		}
 	}
-	// The operator's web server next, so one in a container stops serving
-	// the app before the app goes; one on the host itself is left for the
-	// operator to reload. A removal it refuses puts the file back and stops here,
-	// with the manifest that proves the file this deployment's still there.
+	// The reference files next: apply wrote them in the deployment's root
+	// for the host's owner, who copied them into their web server. That
+	// server is theirs, so nothing here touches it; what is left names the
+	// block they remove.
 	for _, f := range hp.webServer {
-		p.work("remove site files")
-		switch o := webserver.Remove(webserver.Host{Plain: t}, f); o.Kind {
-		case webserver.Removed, webserver.Gone:
-			if o.Reload.Kind == webserver.OperatorReloads {
-				p.Kept = append(p.Kept, reloadLeft(p.Site, f.Server, o.Reload.Command))
-			}
-		case webserver.Edited:
-			p.Kept = append(p.Kept, editedFileKept(p.Site, f.Path))
-		default:
-			return fmt.Errorf("%s: removing %s: %s. The file is back, and the web server runs its previous configuration", p.Site, f.Path, o.Why)
+		p.work("remove reference files")
+		if err := run("removing "+f.Path, "rm -f -- "+quote(f.Path)); err != nil {
+			return err
 		}
 	}
+	p.Kept = append(p.Kept, appremove.OwnerBlocks(p.Site, hp.webServer)...)
 	if hp.dockerPresent {
 		p.work("remove containers and networks")
 		if err := run("removing this deployment's containers and networks", p.containersCommand()); err != nil {
@@ -674,12 +776,6 @@ func (p *Plan) runHost() error {
 					p.Kept = append(p.Kept, imageKept(p.Site, id, "Docker refused: "+why))
 				}
 			}
-		}
-	}
-	if hp.wireguard {
-		p.work("stop " + d.WireGuardUnit())
-		if err := run("stopping "+d.WireGuardUnit(), p.wireguardCommand()); err != nil {
-			return err
 		}
 	}
 	if len(hp.files) > 0 {
@@ -718,9 +814,16 @@ func (p *Plan) runHost() error {
 			return err
 		}
 	}
-	if len(hp.units) > 0 || len(hp.dropins) > 0 {
+	// A plain rm, as the deployment and grant records go, and no lock: the
+	// lock would create a lock file in the state directory again.
+	for _, r := range hp.keyRecords {
+		if err := run("deleting the key record", "rm -f -- "+quote(r)); err != nil {
+			return err
+		}
+	}
+	if len(hp.userUnits) > 0 {
 		p.work("remove units")
-		if err := run("removing units", p.removeUnitsCommand()); err != nil {
+		if err := run("removing units", p.removeUserUnitsCommand(hp.home)); err != nil {
 			return err
 		}
 	}
@@ -733,21 +836,6 @@ func (p *Plan) runHost() error {
 		}
 		if err := run("deleting "+r.path, command); err != nil {
 			return err
-		}
-	}
-	if len(hp.rules) > 0 {
-		p.work("delete ufw rules")
-		out, err := t.Run(hostprep.AddedRulesProbe)
-		if err != nil {
-			return fmt.Errorf("%s: reading ufw's rules: %w: %s", p.Site, err, lastLines(out, 2))
-		}
-		rules, _ := hostprep.ParseAddedRules(d, out)
-		for _, r := range rules {
-			if r.Owned && !r.SSH && !(r.Web && cp != nil) {
-				if err := run("deleting a ufw rule", "ufw delete "+r.Line); err != nil {
-					return err
-				}
-			}
 		}
 	}
 	switch {
@@ -764,41 +852,19 @@ func (p *Plan) runHost() error {
 	case cp != nil:
 	case hp.root.exists:
 		if hp.deleteRoot {
-			p.work("delete " + d.Root())
+			p.work("empty " + d.Root())
 		} else {
 			p.work("remove empty directories")
 		}
-		if err := run("removing "+d.Root(), appremove.DirCommandFor(d.Root(), hp.deleteRoot)); err != nil {
+		if err := run("emptying "+d.Root(), emptyRootCommand(d, hp.deleteRoot)); err != nil {
 			return err
 		}
 	}
-	// The grant record goes with the registry entry: a later deployment
-	// with this token would otherwise be reviewed against a baseline it
-	// never applied.
+	// The grant record goes: a later deployment with this token would
+	// otherwise be reviewed against a baseline it never applied.
 	if hp.granted {
 		p.work("delete the grant record")
 		if err := run("deleting the grant record", grant.RemoveCommand(d)); err != nil {
-			return err
-		}
-	}
-	if hp.registry {
-		p.work("remove registry entry")
-		if err := registry.Unclaim(t, d.ID); err != nil {
-			return err
-		}
-	}
-	if cp != nil && cp.mark {
-		p.work("mark the registry entry kept")
-		if err := registry.Keep(t, d.ID, cp.entry); err != nil {
-			return err
-		}
-	}
-	if len(hp.keyRecords) > 0 {
-		q := make([]string, len(hp.keyRecords))
-		for i, r := range hp.keyRecords {
-			q[i] = quote(r)
-		}
-		if err := run("deleting the key records", hostprep.Locked("rm -f -- "+strings.Join(q, " "))); err != nil {
 			return err
 		}
 	}
@@ -849,33 +915,12 @@ func (p *Plan) verifyHost(t apply.Transport) error {
 			left = append(left, r.path)
 		}
 	}
-	out, err := t.Run(p.unitsCommand())
+	out, err := t.Run(p.userUnitsCommand(p.host.home))
 	if err != nil {
 		return err
 	}
 	if s := strings.TrimSpace(out); s != "" {
 		left = append(left, strings.Split(s, "\n")...)
-	}
-	out, err = t.Run(hostprep.AddedRulesProbe)
-	if err != nil {
-		return err
-	}
-	rules, _ := hostprep.ParseAddedRules(d, out)
-	for _, r := range rules {
-		if r.Owned && !r.SSH && !(r.Web && cp != nil) {
-			left = append(left, "ufw rule "+r.Line)
-		}
-	}
-	reg, err := registry.Read(t)
-	if err != nil {
-		return err
-	}
-	e, ok := reg.Deployments[d.ID]
-	switch {
-	case cp == nil && ok:
-		left = append(left, "its registry entry")
-	case cp != nil && (!ok || e.Kept != registry.KeptCaddy):
-		left = append(left, "its registry entry, marked kept")
 	}
 	if cp != nil {
 		left = append(left, p.verifyCaddy(t, cp)...)
@@ -891,9 +936,9 @@ func (p *Plan) verifyHost(t apply.Transport) error {
 func (p *Plan) hostGoneLeft() string {
 	d := p.dep()
 	web := ""
-	if in := p.cfg.Sites[p.Site].WebServer; in != nil && in.IncludeDir.Path != "" {
-		web = fmt.Sprintf(" Its web server may still include site files named %s-* in %s, which apply wrote: delete them and reload it, or it keeps routing this deployment's hostnames to apps that no longer run.", d.Prefix(), in.IncludeDir.Path)
+	if p.cfg.Sites[p.Site].WebServerManagedBy() == config.ManagedByExternal {
+		web = fmt.Sprintf(" Its web server is its owner's: the host's owner removes the blocks apply's reference files in %s held, or it keeps routing this deployment's hostnames to apps that no longer run.", webserver.ReferenceDir(d))
 	}
-	return fmt.Sprintf("%s: host not reached (--host-gone); clean it by hand, or reinstall it. If it ever comes back it still holds this deployment's containers and networks (label %s), %s and its manifest, %s and /%s, units and drop-ins named %s-* under /etc/systemd/system, its configuration store (%s, %s, %s, %s and %s), ufw rules commented %s:, the keys %s lists and that record, %s, and its entry in %s. Nothing it runs can reach the cluster: no remaining site has it as a WireGuard peer, and its etcd member is gone",
-		p.Site, d.LabelFilter(), d.Root(), d.WireGuardUnit(), d.WireGuardConf(), d.Prefix(), hostprep.ConfigRepo(d), hostprep.ConfigPeers(d), hostprep.ConfigSyncLog(d), hostprep.ConfigIncoming(d), hostprep.ConfigScriptDir(d), d.Prefix(), hostprep.OwnedKeysPath(d, p.cfg.Sites[p.Site].SSH.User), grant.Path(d), registry.Path) + web
+	return fmt.Sprintf("%s: host not reached (--host-gone). It keeps the deployment's user %s with its containers, volumes and units, %s, and its admission record until its owner runs the site evict line below. Nothing it runs can reach the cluster: no remaining site has it as a WireGuard peer, and its etcd member is gone",
+		p.Site, p.cfg.Sites[p.Site].SSHUser(), d.Root()) + web
 }

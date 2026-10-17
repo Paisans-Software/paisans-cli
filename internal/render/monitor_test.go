@@ -59,11 +59,12 @@ func TestAnExternalListenIsClaimed(t *testing.T) {
 	if !found {
 		t.Fatalf("no claim for listen: %v", render.SiteListeners(cfg, "watch"))
 	}
-	// On a site that also holds data, a listen on Postgres's loopback port
-	// is a collision validate reports, not a container that fails to start.
+	// On a site that also holds data, a listen on Postgres's port at the
+	// site's mesh address is a collision validate reports, not a container
+	// that fails to start.
 	site := cfg.Sites["watch"]
 	site.Roles = append(site.Roles, config.RoleData)
-	site.WebServer.Listen = "127.0.0.1:5432"
+	site.WebServer.Listen = site.Address + ":5432"
 	cfg.Sites["watch"] = site
 	if !validate.Check(cfg).Has("port-collision") {
 		t.Fatal("a listen on 5432 beside Postgres is not a collision")
@@ -180,8 +181,9 @@ func TestAMonitorCarriesTheGateOnlyWhenItsAppIsGated(t *testing.T) {
 // only a trusted proxy's X-Forwarded-For is read. The monitor's own Caddy
 // dials the app on the site's mesh address from the host itself. A port
 // Docker publishes on 127.0.0.1 reaches the container from its compose
-// network's gateway, which the template pins. A LAN or mesh listen keeps
-// the proxy's own address, which is known only to lie in that network.
+// network's gateway, which the template pins. A listen on the site's mesh
+// address keeps the proxy's own address, which is known only to lie in the
+// mesh.
 func TestTrustProxyFollowsWhereTheProxyConnectsFrom(t *testing.T) {
 	for _, tc := range []struct {
 		webServer *config.WebServer
@@ -189,9 +191,6 @@ func TestTrustProxyFollowsWhereTheProxyConnectsFrom(t *testing.T) {
 	}{
 		{nil, "TRUST_PROXY=10.44.0.4/32"},
 		{&config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "127.0.0.1:8480"}, "TRUST_PROXY=10.255.255.1/32"},
-		{&config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "192.168.1.20:8480"}, "TRUST_PROXY=192.168.0.0/16"},
-		{&config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "172.20.0.5:8480"}, "TRUST_PROXY=172.16.0.0/12"},
-		{&config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "100.101.102.103:8480"}, "TRUST_PROXY=100.64.0.0/10"},
 		{&config.WebServer{ManagedBy: config.ManagedByExternal, Listen: "10.44.0.4:8480"}, "TRUST_PROXY=10.44.0.0/24"},
 	} {
 		env := planFiles(mustBuild(t, monitorConfig(t, tc.webServer)))["watch/srv/paisans/f2a9/health/.env"]
@@ -349,7 +348,7 @@ func TestADepartingGatewayMountsTheHostOwnersSites(t *testing.T) {
 		t.Fatal(err)
 	}
 	compose := planFiles(plan)["watch/srv/paisans/f2a9/infra/compose.yaml"]
-	if mount := "- " + render.HostSitesDir + ":" + render.HostSitesMount + ":ro"; !strings.Contains(compose, mount) {
+	if mount := "- " + render.HostSitesDir(plan.Deployment) + ":" + render.HostSitesMount + ":ro"; !strings.Contains(compose, mount) {
 		t.Errorf("the departing gateway's Caddy lacks %q:\n%s", mount, compose)
 	}
 }

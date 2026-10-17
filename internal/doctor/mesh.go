@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/mesh"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // MeshProbe is what one site said about the mesh: its interface's link, and
@@ -45,7 +47,7 @@ func Mesh(cfg *config.Config, probes []MeshProbe) []Finding {
 					More: []string{
 						"Every service on the site binds its mesh address, which exists only while the interface is up, so nothing on this site can reach another one.",
 						"recover:",
-						fmt.Sprintf("  1. `systemctl status %s` and `journalctl -u %s` on %s say why it did not come up.", d.WireGuardUnit(), d.WireGuardUnit(), p.Site),
+						journalAdvice(iface, p.Site, d.WireGuardUnit()),
 						fmt.Sprintf("  2. `paisans apply --site %s --execute` starts it and enables it at boot.", p.Site),
 					}})
 			default:
@@ -80,9 +82,22 @@ func Mesh(cfg *config.Config, probes []MeshProbe) []Finding {
 				"Whichever route the kernel prefers takes the other network's traffic, so mesh packets can leave by the wrong interface, or the other network's arrive on the mesh.",
 				"The mesh subnet is fixed once deployed: every app trusts it for forwarded client addresses and every service binds an address in it. The other network has to move.",
 				"recover:",
-				"  1. Move it to a range clear of " + cfg.Mesh.Subnet + ": a LAN or VPN in its own configuration; a Docker network by recreating it with another subnet; Docker's pools with default-address-pools in " + mesh.DaemonConfig + " and a restart of Docker.",
+				"  1. Move it to a range clear of " + cfg.Mesh.Subnet + ": a LAN or VPN in its own configuration; a Docker network by recreating it with another subnet; Docker's pools with default-address-pools in " + mesh.UserDaemonConfig + " and a restart of the deployment's Docker.",
 				fmt.Sprintf("  2. `paisans doctor --site %s` again.", p.Site),
 			}})
 	}
 	return out
+}
+
+// journalAdvice is the first step of a down interface's recovery: the
+// WireGuard helper's log command, which prints the unit's journal, for the
+// operator to type as the deployment's user. An interface name that is no
+// deployment's has no helper, so that is said in words instead, with no
+// command to type.
+func journalAdvice(iface, site, unit string) string {
+	h := apply.WGHelper{Iface: iface}
+	if _, err := h.Path(); err != nil {
+		return fmt.Sprintf("  1. %s is not a deployment's interface name, so there is no WireGuard helper on %s to print %s's journal; check the deployment's id, which the name is made from.", ui.Visible(iface), site, unit)
+	}
+	return fmt.Sprintf("  1. `%s`, as the deployment's user on %s, prints %s's journal, which says why it did not come up.", h.CommandLine("log"), site, unit)
 }

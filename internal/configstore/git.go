@@ -2,6 +2,7 @@ package configstore
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 // The three files of a version, by their names in the tree, sorted as git's
@@ -50,6 +52,16 @@ type Version struct {
 	SignerFP  string    // %GF, the signing key's SHA256 fingerprint
 	Committed time.Time // for display only
 	TreeOK    bool      // the tree holds exactly the three files, and a sound snapshot
+	// Build is the paisans that published the version, from its
+	// Paisans-Toolkit-Version, Paisans-Toolkit-Commit and
+	// Paisans-Toolkit-Modified trailers, which its signature covers.
+	// BuildOK is whether the message holds each of them once, as Commit
+	// writes them; a version without is refused as shape.
+	// BuildNewer is whether they would, but for a version this paisans
+	// cannot order: a newer paisans may have published it.
+	Build      version.Build
+	BuildOK    bool
+	BuildNewer bool
 }
 
 // git runs git in the repository with the user's and the system's
@@ -102,7 +114,8 @@ func InitRepo(dir string) (Repo, error) {
 }
 
 // Commit stores f as a signed commit on the given parents, records its
-// revision in a trailer, and names it with refs/versions/<sha>.
+// revision and this build of paisans in trailers, which the signature
+// covers, and names it with refs/versions/<sha>.
 func (r Repo) Commit(f Files, parents []string, revision int, signingKey string, when time.Time) (string, error) {
 	for _, p := range parents {
 		if err := checkSHA(p); err != nil {
@@ -121,7 +134,7 @@ func (r Repo) Commit(f Files, parents []string, revision int, signingKey string,
 	for _, p := range parents {
 		args = append(args, "-p", p)
 	}
-	args = append(args, "-m", fmt.Sprintf("paisans configuration\n\nPaisans-Revision: %d\n", revision))
+	args = append(args, "-m", fmt.Sprintf("paisans configuration\n\nPaisans-Revision: %d\n%s", revision, buildTrailers(version.Current())))
 	date := when.UTC().Format(time.RFC3339)
 	out, err := r.git(nil, []string{"GIT_COMMITTER_DATE=" + date, "GIT_AUTHOR_DATE=" + date}, args...)
 	if err != nil {
@@ -377,6 +390,54 @@ func (r Repo) revision(sha string) int {
 	return 0
 }
 
+// buildTrailers is b as the three trailers Commit writes, each on its own
+// line.
+func buildTrailers(b version.Build) string {
+	return fmt.Sprintf("Paisans-Toolkit-Version: %s\nPaisans-Toolkit-Commit: %s\nPaisans-Toolkit-Modified: %t\n", b.Version, b.Commit, b.Modified)
+}
+
+// build reads the build trailers of a commit on its own, as revision reads
+// its revision, and judges them with version.CheckBuild, the check every
+// record's build passes. ok is whether each trailer is there once and the
+// three make a build paisans records; newer is whether they would, but for
+// a version this paisans cannot order.
+func (r Repo) build(sha string) (b version.Build, ok, newer bool) {
+	out, err := r.git(nil, nil, "show", "-s", "--format=%(trailers:key=Paisans-Toolkit-Version,valueonly)%x00%(trailers:key=Paisans-Toolkit-Commit,valueonly)%x00%(trailers:key=Paisans-Toolkit-Modified,valueonly)", sha)
+	if err != nil {
+		return version.Build{}, false, false
+	}
+	fields := strings.Split(strings.TrimSuffix(string(out), "\n"), "\x00")
+	if len(fields) != 3 {
+		return version.Build{}, false, false
+	}
+	for i, f := range fields {
+		f, ok := strings.CutSuffix(f, "\n")
+		if !ok || strings.Contains(f, "\n") {
+			return version.Build{}, false, false
+		}
+		fields[i] = f
+	}
+	if fields[2] != "true" && fields[2] != "false" {
+		return version.Build{}, false, false
+	}
+	obj := map[string]json.RawMessage{"toolkit_modified": json.RawMessage(fields[2])}
+	for i, k := range []string{"toolkit_version", "toolkit_commit"} {
+		raw, err := json.Marshal(fields[i])
+		if err != nil {
+			return version.Build{}, false, false
+		}
+		obj[k] = raw
+	}
+	b, err = version.CheckBuild(obj)
+	switch {
+	case err == nil:
+		return b, true, false
+	case version.IsNewer(err):
+		return b, false, true
+	}
+	return version.Build{}, false, false
+}
+
 // Versions lists every version in the repository with git's verdict on its
 // signature, checked against the allowed-signers file at allowedSigners.
 func (r Repo) Versions(allowedSigners string) ([]Version, error) {
@@ -403,6 +464,7 @@ func (r Repo) Versions(allowedSigners string) ([]Version, error) {
 			v.Committed = time.Unix(secs, 0).UTC()
 		}
 		v.Revision = r.revision(v.SHA)
+		v.Build, v.BuildOK, v.BuildNewer = r.build(v.SHA)
 		if v.TreeOK, err = r.treeOK(v.SHA); err != nil {
 			return nil, err
 		}

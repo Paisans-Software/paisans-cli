@@ -23,7 +23,6 @@ func runPreflight(args []string) error {
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	site := fs.String("site", "", "the site being added, by the name it has in the configuration")
-	sudo := fs.Bool("sudo", true, "run remote commands through sudo")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -40,7 +39,7 @@ func runPreflight(args []string) error {
 	}
 	r.Section("preflight " + *site)
 	report, err := ui.Get(r, "check every site", func() (preflight.Report, error) {
-		return preflight.Run(cfg, *site, allSiteTransports(cfg, *sudo))
+		return preflight.Run(cfg, *site, allSiteTransports(cfg))
 	})
 	if err != nil {
 		return err
@@ -69,10 +68,10 @@ func loadChecked(r ui.Reporter, path string) (*config.Config, error) {
 }
 
 // allSiteTransports reaches every declared site through its ssh section.
-func allSiteTransports(cfg *config.Config, sudo bool) map[string]apply.Transport {
+func allSiteTransports(cfg *config.Config) map[string]apply.Transport {
 	out := map[string]apply.Transport{}
 	for _, name := range cfg.SiteNames() {
-		out[name] = siteTransport(name, cfg.Sites[name], "", sudo)
+		out[name] = siteTransport(name, cfg.Sites[name], "")
 	}
 	return out
 }

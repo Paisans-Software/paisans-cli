@@ -42,3 +42,32 @@ func TestTheComposePolicy(t *testing.T) {
 		}
 	}
 }
+
+func TestCatalogSecurityOptions(t *testing.T) {
+	for _, options := range []string{
+		`["no-new-privileges:true"]`,
+		`["no-new-privileges=true"]`,
+		`["no-new-privileges:true", "no-new-privileges=true"]`,
+	} {
+		if err := checkComposePolicy("services:\n  app:\n    security_opt: "+options+"\n", "/srv/paisans/test/app"); err != nil {
+			t.Errorf("hardening option %s was refused: %v", options, err)
+		}
+	}
+	for _, options := range []string{
+		`["no-new-privileges:false"]`,
+		`["no-new-privileges=false"]`,
+		`["no-new-privileges:true", "seccomp=unconfined"]`,
+		`["no-new-privileges:true", "no-new-privileges:false"]`,
+		`["apparmor=unconfined"]`,
+		`["label=disable"]`,
+		`["unknown=true"]`,
+		`[true]`,
+		`[{no-new-privileges: true}]`,
+		`"no-new-privileges:true"`,
+		`null`,
+	} {
+		if err := checkComposePolicy("services:\n  app:\n    security_opt: "+options+"\n", "/srv/paisans/test/app"); err == nil || !strings.Contains(err.Error(), "services.app.security_opt") {
+			t.Errorf("unsafe or malformed options %s: got %v, want security_opt refusal", options, err)
+		}
+	}
+}
