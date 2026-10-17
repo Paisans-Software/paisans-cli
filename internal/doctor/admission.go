@@ -50,6 +50,18 @@ var grantWhy = map[string]string{
 	"public-ports": "--public-ports lets the deployment bind ports 80 and 443, which the gateway and a monitor running Paisans' Caddy serve on; every local user can then bind ports below 1024.",
 }
 
+// grantLines is what each missing grant gives, for the grants grantWhy
+// knows; one it does not know is named by Differences already.
+func grantLines(missing []string) []string {
+	var out []string
+	for _, g := range missing {
+		if why, ok := grantWhy[g]; ok {
+			out = append(out, why)
+		}
+	}
+	return out
+}
+
 // Admission checks each site's admission record against its declaration. A
 // site the record does not cover (none, unreadable, or differing, a
 // missing grant included) is pending when the run's classification says
@@ -76,10 +88,7 @@ func Admission(cfg *config.Config, probes []AdmissionProbe) []Finding {
 			more = []string{fmt.Sprintf("Its login as %s works, and the host holds no admission record for this deployment: its owner has not admitted it, or has evicted it.", cfg.Sites[p.Site].SSHUser())}
 		default:
 			problem = "its admission does not cover it"
-			more = p.Record.Differences(cfg, p.Site)
-			for _, g := range admission.Needs(cfg.Sites[p.Site]).Missing(p.Record.Grants) {
-				more = append(more, grantWhy[g])
-			}
+			more = append(p.Record.Differences(cfg, p.Site), grantLines(admission.Needs(cfg.Sites[p.Site]).Missing(p.Record.Grants))...)
 		}
 		if p.Pending() {
 			out = append(out, pending(cfg, SectionAdmission, p.Site, fmt.Sprintf("%s: pending: %s", p.Site, problem), more...))

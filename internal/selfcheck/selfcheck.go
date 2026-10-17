@@ -1,8 +1,8 @@
-// Package selfcheck asks a site that runs the toolkit's Caddy, from outside,
-// whether it answers as this deployment. The deployment's user cannot read the host's ruleset or
-// another user's sockets, so a port another server took after admission,
-// and above all one a DNAT rule takes with no listener, is invisible from
-// the host. That Caddy answers /.well-known/paisans/<token> with the token;
+// Package selfcheck asks a site that runs the toolkit's Caddy, from
+// outside, whether it answers as this deployment. The deployment's user
+// cannot read the host's ruleset or another user's sockets, so a port
+// another server took after admission, and above all one a DNAT rule takes
+// with no listener, is invisible from the host. That Caddy answers /.well-known/paisans/<token> with the token;
 // anything else that answers there is another server.
 package selfcheck
 
@@ -90,8 +90,8 @@ func fetch(ctx context.Context, scheme, address, host, path string) (Answer, err
 	return Answer{Status: resp.StatusCode, Body: string(body), Location: resp.Header.Get("Location")}, nil
 }
 
-// Target is one gateway, asked through its public address for one of the
-// hostnames it serves.
+// Target is one site running the toolkit's Caddy, asked through its public
+// address for one of the hostnames it serves.
 type Target struct {
 	Deployment          deployment.Deployment
 	Site, Address, Host string

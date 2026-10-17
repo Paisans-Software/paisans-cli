@@ -70,9 +70,10 @@ type Reads interface {
 // reads across sites (etcd, Patroni's /sync and logs, Pocket ID's
 // instances) needs the admission of any of its sites, and asks only those
 // in Input.Admitted; it does not need their Docker, so a stopped daemon on
-// the member it asks is that check's own failure rather than a prune. Each check's judge is the
-// section function Diagnose calls, given the probes of the check's own
-// subject, so the graph's findings for a complete Input are Diagnose's.
+// the member it asks is that check's own failure rather than a prune.
+// Each check's judge is the section function Diagnose calls, given the
+// probes of the check's own subject, so the graph's findings for a
+// complete Input are Diagnose's.
 //
 // Reads that answer DNSReads as well get the DNS checks after the rest:
 // Caddy's certificates on each Caddy site, the DNS token from each place

@@ -62,6 +62,9 @@ func TestAdmission(t *testing.T) {
 		{"differs, joined", AdmissionProbe{Site: "home-a", Found: true, Record: moved, Unclassified: joined}, Fail,
 			"home-a: its admission does not cover it",
 			[]string{"the host opened ssh port 2222, and the site's is 22", "The run's classification of the sites refuses: home-a has joined", "`paisans host request --site home-a > home-a.admit`"}, false},
+		{"unreadable, pending", AdmissionProbe{Site: "home-b", Err: `the admission record for "f2a9" is refused:`, More: []string{"- version: \"2\""}, Class: pendingClass("home-b")}, Warn,
+			"home-b: pending: its admission record cannot be read",
+			[]string{"roles: data, apps", `- version: "2"`, "`paisans host request --site home-b > home-b.admit`"}, true},
 		{"unreadable", AdmissionProbe{Site: "home-a", Err: `the admission record for "f2a9" is refused:`, More: []string{"- version: \"2\""}}, Fail,
 			"home-a: its admission record cannot be read",
 			[]string{`- version: "2"`, "`paisans host request --site home-a > home-a.admit`"}, false},
@@ -85,5 +88,14 @@ func TestAdmission(t *testing.T) {
 				t.Errorf("Pending %v, want %v", got, c.pending)
 			}
 		})
+	}
+}
+
+// Each missing grant adds what it gives, and a grant with no words of its
+// own adds no empty line.
+func TestGrantLines(t *testing.T) {
+	got := grantLines([]string{"watchdog", "something-new"})
+	if len(got) != 1 || !strings.HasPrefix(got[0], "--watchdog grants") {
+		t.Errorf("grantLines: %q", got)
 	}
 }

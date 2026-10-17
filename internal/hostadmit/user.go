@@ -182,12 +182,12 @@ func ownHome(user string, u UserFacts) error {
 
 // sudoRules refuses a user sudo grants any rule to but admit's own line
 // for the WireGuard helper, which a re-run finds: a rule by name, or by a
-// group PrivilegedGroups does not list, reaches past the user as surely as
-// sudo's own group does. It refuses too a Defaults entry that lets the
-// user hand the helper an environment or another root (sudoDefaultProblem),
-// and any entry set for a runas user or a command alone: sudo -l lists
-// only admit's line while setenv lets the user pass LD_PRELOAD to the
-// helper, which runs as root.
+// group admitrules.PrivilegedGroups does not list, reaches past the user as
+// surely as sudo's own group does. It refuses too a Defaults entry that
+// lets the user hand the helper an environment or another root
+// (admitrules.SudoList.BeyondHelper names each), and any entry set for a
+// runas user or a command alone: sudo -l lists only admit's line while
+// setenv lets the user pass LD_PRELOAD to the helper, which runs as root.
 func sudoRules(p *planner) error {
 	user := p.in.Request.User
 	u := p.f.User

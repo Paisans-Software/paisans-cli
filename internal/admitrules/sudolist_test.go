@@ -60,6 +60,18 @@ func TestReadSudoList(t *testing.T) {
 	}
 }
 
+// As root, sudo -l -U answers "is not allowed" for a user with no rules;
+// "Sorry, ... may not run sudo" is the user's own answer, which root never
+// gets, so ReadSudoListAsRoot does not read it as a list of nothing.
+func TestReadSudoListAsRoot(t *testing.T) {
+	if l, ok := admitrules.ReadSudoListAsRoot(user, []string{"User paisans-f2a9 is not allowed to run sudo on host."}); !ok || len(l.Rules)+len(l.Defaults)+len(l.Specific) != 0 {
+		t.Errorf("not allowed: %+v, %v", l, ok)
+	}
+	if l, ok := admitrules.ReadSudoListAsRoot("ubuntu", []string{"Sorry, user ubuntu may not run sudo on h."}); ok {
+		t.Errorf("the user's own refusal read as root's: %+v", l)
+	}
+}
+
 // BeyondHelper is every rule but the helper's, every Defaults entry that
 // hands the helper the user's environment or path, and every specific line.
 func TestBeyondHelper(t *testing.T) {

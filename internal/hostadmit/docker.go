@@ -14,9 +14,9 @@ import (
 const systemDocker = "docker -H unix:///var/run/docker.sock"
 
 // planDocker refuses a snap Docker and an Engine older than
-// MinRootlessEngine, since upgrading the owner's Docker is not admit's
-// decision, and a present Docker that cannot run rootless; then plans the
-// packages, and keeps a system Docker admit installs disabled.
+// admitrules.MinRootlessEngine, since upgrading the owner's Docker is not
+// admit's decision, and a present Docker that cannot run rootless; then
+// plans the packages, and keeps a system Docker admit installs disabled.
 func planDocker(p *planner) error {
 	dk := p.f.Docker
 	if dk.Snap {
