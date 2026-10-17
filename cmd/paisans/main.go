@@ -60,6 +60,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "paisans: "+err.Error())
 		os.Exit(2)
 	}
+	warnTestMode(os.Stderr)
 	var err error
 	switch os.Args[1] {
 	case "validate":
@@ -1731,6 +1732,20 @@ func checkWorkstationToken(r ui.Reporter, cfg *config.Config, token string) erro
 		Hint:    result.Finding,
 		Explain: result.Advice + " No record was read or changed.\n`paisans doctor` checks the token from every place that uses it.",
 	}
+}
+
+// warnTestMode warns once, on w, before any command runs, while the test
+// mode that reads and writes plaintext secrets is set: every command passes
+// through main, so an operator who set it once is reminded on every run.
+// stderr, so it never mixes into what a command prints for a script.
+func warnTestMode(w io.Writer) {
+	if !config.PlaintextSecretsAllowed() {
+		return
+	}
+	ui.PrintError(w, &ui.Warning{Problem: ui.Problem{
+		Hint:    config.PlaintextSecretsVariable + "=1 is set: plaintext secrets are read and written",
+		Explain: "That mode is for tests and fixtures only. A real deployment keeps its secrets encrypted; unset it.",
+	}}, false)
 }
 
 // warnUnencrypted is the warning every command that opens the secrets gives

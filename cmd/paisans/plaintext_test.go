@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -200,5 +201,42 @@ func TestInitOnAFreshDirectoryEncrypts(t *testing.T) {
 	wantEncrypted(t, filepath.Join(dir, "secrets.enc.yaml"))
 	if !rec.Has("done", "make age key") || rec.Has("warn", "was written in plaintext") {
 		t.Errorf("unexpected report:\n%s", rec.Lines())
+	}
+}
+
+// The test mode is announced once on every run, from main, whatever the
+// command: validate --offline with the variable set warns on stderr, and
+// without it a plaintext file is refused and nothing warns of the mode.
+func TestTheTestModeWarnsOnEveryRun(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds the binary")
+	}
+	bin := filepath.Join(t.TempDir(), "paisans")
+	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	plain, err := os.ReadFile(fixtureSecretsPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	configPath, _ := secretsDir(t, string(plain))
+	run := func(mode string) (string, error) {
+		cmd := exec.Command(bin, "validate", "--offline", "--config", configPath)
+		cmd.Env = append(os.Environ(), config.PlaintextSecretsVariable+"="+mode)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		err := cmd.Run()
+		return stderr.String(), err
+	}
+	stderr, err := run("1")
+	if err != nil {
+		t.Fatalf("validate in the test mode: %v\n%s", err, stderr)
+	}
+	if strings.Count(stderr, config.PlaintextSecretsVariable+"=1 is set") != 1 {
+		t.Errorf("stderr does not warn of the test mode once:\n%s", stderr)
+	}
+	stderr, err = run("")
+	if err == nil || strings.Contains(stderr, "=1 is set") || !strings.Contains(stderr, "is not encrypted") {
+		t.Errorf("without the test mode: %v\n%s", err, stderr)
 	}
 }
