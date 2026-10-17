@@ -5629,12 +5629,17 @@ already covers, and choose no code. A field added later that does choose code
 
 **A catalog blueprint's compose file is held to what a stack may ask of its
 host.** The render refuses one that sets `privileged`, `cap_add`, `devices`,
-`security_opt` or `cgroup_parent`; that shares the host's network, process,
+`cgroup_parent` or a `security_opt` entry other than `no-new-privileges:true` or
+`no-new-privileges=true`; that shares the host's network, process,
 IPC, UTS, user or cgroup namespace, or another container's; or that mounts the
 Docker socket or any host path outside the stack's own directory. Each is a way
 past the stack, into the deployment's user and its rootless daemon. The blueprints built
 into the toolkit are reviewed with its code instead, which is how the uptime
 monitor keeps the capability its ping needs.
+The two explicit true forms of `no-new-privileges` are allowed because they
+[prevent processes gaining additional privileges](https://docs.docker.com/reference/cli/docker/container/run/#security-opt).
+Every entry is checked, so mixing a hardening option with an option that disables
+confinement is refused.
 
 **The review prints only what it can show.** A key comment, an operator's name or
 email, or an image reference holding a control character (Eg: ESC, DEL, or a
