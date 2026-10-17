@@ -53,7 +53,7 @@ step 23: write the admission record
     |   "web_server": null,
     |   "system_docker_disabled": false,
     |   "toolkit_version": "<release>",
-    |   "toolkit_commit": "",
+    |   "toolkit_commit": "unknown",
     |   "toolkit_modified": false
     | }
 

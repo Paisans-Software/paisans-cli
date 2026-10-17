@@ -386,18 +386,10 @@ func (r Repo) revision(sha string) int {
 	return 0
 }
 
-// noCommit is the Paisans-Toolkit-Commit of a build that recorded no
-// commit: git reads a trailer with no value as none at all.
-const noCommit = "none"
-
 // buildTrailers is b as the three trailers Commit writes, each on its own
 // line.
 func buildTrailers(b version.Build) string {
-	commit := b.Commit
-	if commit == "" {
-		commit = noCommit
-	}
-	return fmt.Sprintf("Paisans-Toolkit-Version: %s\nPaisans-Toolkit-Commit: %s\nPaisans-Toolkit-Modified: %t\n", b.Version, commit, b.Modified)
+	return fmt.Sprintf("Paisans-Toolkit-Version: %s\nPaisans-Toolkit-Commit: %s\nPaisans-Toolkit-Modified: %t\n", b.Version, b.Commit, b.Modified)
 }
 
 // build reads the build trailers of a commit on its own, as revision reads
@@ -420,12 +412,6 @@ func (r Repo) build(sha string) (version.Build, bool) {
 		fields[i] = f
 	}
 	b := version.Build{Version: fields[0], Commit: fields[1]}
-	switch fields[1] {
-	case noCommit:
-		b.Commit = ""
-	case "":
-		return version.Build{}, false
-	}
 	switch fields[2] {
 	case "true":
 		b.Modified = true

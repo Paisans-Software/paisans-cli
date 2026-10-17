@@ -13,24 +13,20 @@ import (
 // build is the build keys of a record, after a comma.
 const build = `, "toolkit_version": "0.3.0", "toolkit_commit": "519299d5cb009da4904cdf53c2025f1ad609f102", "toolkit_modified": true`
 
-// A record written before the configuration part existed is read as it is,
-// and one with the part is read whole; either is written back as the
-// current version.
-func TestParseReadsVersionOneAndTwo(t *testing.T) {
-	v1 := `{"version": 1, "images": {"applied_at": "x", "entries": []}` + build + `}`
-	rec, err := grant.Parse(v1)
-	if err != nil || rec.Images == nil || rec.Config != nil {
-		t.Fatalf("version 1: %+v %v", rec, err)
-	}
-	if !strings.Contains(grant.Encode(rec), `"version": 3`) {
-		t.Errorf("not written as version 3: %s", grant.Encode(rec))
-	}
-	v2 := `{"version": 2, "config": {"hash": "abc", "revision": 7, "applied_at": "2026-10-12T10:00:00Z"}` + build + `}`
-	rec, err = grant.Parse(v2)
+// A record of the current layout is read whole, and one of any other
+// layout is refused.
+func TestParseReadsTheCurrentLayoutOnly(t *testing.T) {
+	v3 := `{"version": 3, "config": {"hash": "abc", "revision": 7, "applied_at": "2026-10-12T10:00:00Z"}` + build + `}`
+	rec, err := grant.Parse(v3)
 	if err != nil || rec.Config == nil || rec.Config.Hash != "abc" || rec.Config.Revision != 7 || !rec.Config.AppliedAt.Equal(time.Date(2026, 10, 12, 10, 0, 0, 0, time.UTC)) {
-		t.Fatalf("version 2: %+v %v", rec.Config, err)
+		t.Fatalf("version 3: %+v %v", rec.Config, err)
 	}
-	for _, bad := range []string{`{"version": 4}`, `{"version": 0}`, `{"version": 2, "config": {"hash": "a", "extra": 1}}`} {
+	for _, bad := range []string{
+		`{"version": 1, "images": {"applied_at": "x", "entries": []}` + build + `}`,
+		`{"version": 2, "config": {"hash": "abc", "revision": 7, "applied_at": "2026-10-12T10:00:00Z"}` + build + `}`,
+		`{"version": 4}`, `{"version": 0}`,
+		`{"version": 3, "config": {"hash": "a", "extra": 1}` + build + `}`,
+	} {
 		if _, err := grant.Parse(bad); err == nil {
 			t.Errorf("read %s", bad)
 		}
@@ -81,6 +77,14 @@ func TestARecordRoundTripsItsBuild(t *testing.T) {
 // A record without every one of the build's keys is refused, and Read says
 // to delete it and apply again.
 func TestARecordWithNoBuildIsRefused(t *testing.T) {
+	for _, bad := range []string{
+		`{"version": 3, "images": {"applied_at": "x", "entries": []}, "toolkit_version": "", "toolkit_commit": "", "toolkit_modified": false}`,
+		`{"version": 3, "images": {"applied_at": "x", "entries": []}, "toolkit_version": "0.3.0", "toolkit_commit": "abc", "toolkit_modified": false}`,
+	} {
+		if _, err := grant.Parse(bad); err == nil {
+			t.Errorf("read %s", bad)
+		}
+	}
 	content := `{"version": 3, "images": {"applied_at": "x", "entries": []}, "toolkit_version": "0.3.0"}`
 	var noBuild *version.NoBuildError
 	if _, err := grant.Parse(content); !errors.As(err, &noBuild) {

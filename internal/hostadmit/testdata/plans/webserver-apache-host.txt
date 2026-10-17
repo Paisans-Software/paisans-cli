@@ -73,7 +73,7 @@ step 30: write the admission record
     |   },
     |   "system_docker_disabled": true,
     |   "toolkit_version": "<release>",
-    |   "toolkit_commit": "",
+    |   "toolkit_commit": "unknown",
     |   "toolkit_modified": false
     | }
 

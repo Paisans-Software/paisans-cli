@@ -8,6 +8,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 // webHost is a monitor that records every command it runs and keeps the
@@ -41,7 +42,7 @@ func TestAppRemoveNamesTheBlockTheOwnerRemoves(t *testing.T) {
 	d := cfg.Deployment()
 	health := render.ManifestWebServer{App: "health", Hostname: "health.example.org", Path: "/srv/paisans/f2a9/web-server/health.caddy", SHA256: "ab", Server: "caddy", Config: "/etc/caddy/Caddyfile"}
 	other := render.ManifestWebServer{App: "other", Hostname: "other.example.org", Path: "/srv/paisans/f2a9/web-server/other.caddy", SHA256: "cd", Server: "caddy", Config: "/etc/caddy/Caddyfile"}
-	m, _ := json.Marshal(render.Manifest{Version: 1, Files: []render.ManifestFile{{Path: "srv/paisans/f2a9/health/compose.yaml", SHA256: "cd"}}, WebServer: []render.ManifestWebServer{other, health}})
+	m, _ := json.Marshal(render.Manifest{Version: 1, Build: version.Current(), Files: []render.ManifestFile{{Path: "srv/paisans/f2a9/health/compose.yaml", SHA256: "cd"}}, WebServer: []render.ManifestWebServer{other, health}})
 	var ran []string
 	h := webHost{&ran, map[string]string{manifestPath: string(m)}}
 
@@ -90,7 +91,7 @@ func TestAppRemoveKeepsAnEntryOutsideTheReferenceDirectory(t *testing.T) {
 	d := cfg.Deployment()
 	for _, p := range []string{"/srv/paisans/f2a9/web-server/../../../etc/passwd", "/etc/passwd", "/srv/paisans/f2a9/health/compose.yaml", "srv/paisans/f2a9/web-server/health.caddy"} {
 		entry := render.ManifestWebServer{App: "health", Hostname: "health.example.org", Path: p, SHA256: "ab", Server: "caddy"}
-		m, _ := json.Marshal(render.Manifest{Version: 1, WebServer: []render.ManifestWebServer{entry}})
+		m, _ := json.Marshal(render.Manifest{Version: 1, Build: version.Current(), WebServer: []render.ManifestWebServer{entry}})
 		var ran []string
 		h := webHost{&ran, map[string]string{manifestPath: string(m)}}
 		e := &Executor{}

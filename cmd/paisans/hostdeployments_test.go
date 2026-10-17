@@ -77,7 +77,7 @@ func (h *listedHost) Run(command string) (string, error) {
 
 func twoDeployments(t *testing.T) string {
 	data, err := registry.Encode(registry.Registry{Version: registry.Version, Deployments: map[string]registry.Entry{
-		monitorID: {Token: "f2a9", Root: "/srv/paisans/f2a9", Domain: "example.org", Site: "watch", Roles: "monitor", ClaimedAt: "2026-10-01T00:00:00Z", Interface: "psns-f2a9", Subnet: "10.44.0.0/24", Address: "10.44.0.6"},
+		monitorID: {Token: "f2a9", Root: "/srv/paisans/f2a9", Domain: "example.org", Site: "watch", Roles: "monitor", ClaimedAt: "2026-10-01T00:00:00Z", Interface: "psns-f2a9", Subnet: "10.44.0.0/24", Address: "10.44.0.6", Build: version.Build{Version: "0.3.0-dev", Commit: version.Unknown}},
 		neighbour: {Token: "0c1d", Root: "/srv/paisans/0c1d", Domain: "example.net", Site: "edge", Roles: "apps,gateway", ClaimedAt: "2026-10-01T00:00:00Z", Interface: "psns-0c1d", Subnet: "10.45.0.0/24", Address: "10.45.0.2", Build: version.Build{Version: "0.2.0", Commit: "4b4846760000000000000000000000000000beef"}},
 	}})
 	if err != nil {

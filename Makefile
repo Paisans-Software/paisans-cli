@@ -111,6 +111,8 @@ dev:
 # .github/workflows/release.yml runs this target, so a local run builds what
 # a release ships.
 #
+# The -X flag sets the commit the binary names (see COMMIT below).
+#
 # dist/ is emptied first, so SHA256SUMS lists only what this run built.
 # SHA256SUMS names the files without a directory, so `sha256sum -c` works in
 # whatever directory they were downloaded to. -trimpath keeps the builder's
@@ -118,13 +120,24 @@ dev:
 # release binary has no use for.
 RELEASE_PLATFORMS := linux/amd64 linux/arm64
 
+# The commit a binary names in every record it writes. Go stamps it from a
+# git checkout by itself; it is also set here with -X, so the binary names
+# it whatever builds it, and a packager building from a source tarball,
+# which has no git metadata, gives it the same way:
+#
+#   go build -ldflags "-X github.com/paisans-software/paisans-cli/internal/version.buildCommit=<full commit>" ./cmd/paisans
+#
+# COMMIT=<full commit> overrides it here.
+COMMIT_VAR := github.com/paisans-software/paisans-cli/internal/version.buildCommit
+COMMIT ?= $(shell git rev-parse HEAD)
+
 release-binaries:
 	rm -rf dist
 	mkdir -p dist
 	@for p in $(RELEASE_PLATFORMS); do \
 		os=$${p%/*}; arch=$${p#*/}; \
 		echo "building dist/paisans-$$os-$$arch"; \
-		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags="-s -w" \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags="-s -w -X $(COMMIT_VAR)=$(COMMIT)" \
 			-o dist/paisans-$$os-$$arch ./cmd/paisans || exit 1; \
 	done
 	cd dist && shasum -a 256 paisans-* > SHA256SUMS

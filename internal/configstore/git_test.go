@@ -286,14 +286,14 @@ func TestBuildTrailers(t *testing.T) {
 	const commit = "519299d5cb009da4904cdf53c2025f1ad609f102"
 	dirty := version.Build{Version: "0.3.0-dev", Commit: commit, Modified: true}
 	for msg, want := range map[string]*version.Build{
-		"m\n\nPaisans-Revision: 1\n" + buildTrailers(dirty):                                                                         &dirty,
-		"m\n\nPaisans-Revision: 1\n" + buildTrailers(version.Build{Version: "0.2.0"}):                                               {Version: "0.2.0"},
-		"m\n\nPaisans-Revision: 1\n":                                                                                                nil,
-		"m\n\nPaisans-Revision: 1\nPaisans-Toolkit-Version: 0.3.0\nPaisans-Toolkit-Commit: none\n":                                  nil,
-		"m\n\nPaisans-Revision: 1\n" + buildTrailers(version.Build{Version: "next"}):                                                nil,
-		"m\n\nPaisans-Revision: 1\n" + buildTrailers(version.Build{Version: "0.3.0", Commit: "519299d5cb00"}):                       nil,
-		"m\n\nPaisans-Revision: 1\nPaisans-Toolkit-Version: 0.3.0\nPaisans-Toolkit-Commit: none\nPaisans-Toolkit-Modified: maybe\n": nil,
-		"m\n\nPaisans-Revision: 1\n" + buildTrailers(dirty) + "Paisans-Toolkit-Version: 9.9.9\n":                                    nil,
+		"m\n\nPaisans-Revision: 1\n" + buildTrailers(dirty):                                                                            &dirty,
+		"m\n\nPaisans-Revision: 1\n" + buildTrailers(version.Build{Version: "0.2.0", Commit: "v0.2.0"}):                                {Version: "0.2.0", Commit: "v0.2.0"},
+		"m\n\nPaisans-Revision: 1\n":                                                                                                   nil,
+		"m\n\nPaisans-Revision: 1\nPaisans-Toolkit-Version: 0.3.0\nPaisans-Toolkit-Commit: unknown\n":                                  nil,
+		"m\n\nPaisans-Revision: 1\n" + buildTrailers(version.Build{Version: "next", Commit: version.Unknown}):                          nil,
+		"m\n\nPaisans-Revision: 1\n" + buildTrailers(version.Build{Version: "0.3.0", Commit: "519299d5cb0"}):                           nil,
+		"m\n\nPaisans-Revision: 1\nPaisans-Toolkit-Version: 0.3.0\nPaisans-Toolkit-Commit: unknown\nPaisans-Toolkit-Modified: maybe\n": nil,
+		"m\n\nPaisans-Revision: 1\n" + buildTrailers(dirty) + "Paisans-Toolkit-Version: 9.9.9\n":                                       nil,
 	} {
 		v := versionOf(t, r, rawCommit(t, r, threeFiles(), msg))
 		switch {

@@ -194,23 +194,28 @@ func Parse(data []byte) (Registry, error) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return Registry{}, fmt.Errorf("%s is not readable: %w", Path, err)
 	}
-	var without []string
+	refused := &NoBuildError{}
 	for id, entry := range raw.Deployments {
-		if len(version.MissingBuild(entry)) > 0 {
-			without = append(without, id)
+		var noBuild *version.NoBuildError
+		if _, err := version.CheckBuild(entry); errors.As(err, &noBuild) {
+			refused.IDs = append(refused.IDs, id)
+			refused.Why = append(refused.Why, id+": "+noBuild.Detail())
 		}
 	}
-	if len(without) > 0 {
-		sort.Strings(without)
-		return r, &NoBuildError{IDs: without}
+	if len(refused.IDs) > 0 {
+		sort.Strings(refused.IDs)
+		sort.Strings(refused.Why)
+		return r, refused
 	}
 	return r, nil
 }
 
 // NoBuildError is a registry whose entries for IDs do not say which build of
-// paisans claimed the host for them.
+// paisans claimed the host for them, with why for each, as
+// version.CheckBuild says it.
 type NoBuildError struct {
 	IDs []string
+	Why []string
 }
 
 func (e *NoBuildError) Error() string {
@@ -218,7 +223,7 @@ func (e *NoBuildError) Error() string {
 	if len(e.IDs) > 1 {
 		which = "the entries of deployments " + strings.Join(e.IDs, ", ") + " do"
 	}
-	return fmt.Sprintf("%s: %s not say which build of paisans claimed the host (%s missing). The host's owner admits each again: `paisans site request`, then `paisans site admit`", Path, which, strings.Join(version.BuildKeys, ", "))
+	return fmt.Sprintf("%s: %s not say which build of paisans claimed the host (%s). The host's owner admits each again: `paisans site request`, then `paisans site admit`", Path, which, strings.Join(e.Why, "; "))
 }
 
 // Conflict is another deployment holding what a claim needs.

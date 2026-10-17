@@ -1524,7 +1524,7 @@ func newWorld(t *testing.T, edits ...func(string) string) *world {
 	reg := registry.Registry{Version: registry.Version, Deployments: map[string]registry.Entry{}}
 	id, e := claimOf(cfg, "home-b", mustTime())
 	reg.Deployments[id] = e
-	reg.Deployments[otherID] = registry.Entry{Token: "0c1d", Root: "/srv/paisans/0c1d", Domain: "example.net", Site: "x", Roles: "apps", ClaimedAt: "2026-10-01T00:00:00Z", Interface: "psns-0c1d", Subnet: "10.45.0.0/24", Address: "10.45.0.2"}
+	reg.Deployments[otherID] = registry.Entry{Token: "0c1d", Root: "/srv/paisans/0c1d", Domain: "example.net", Site: "x", Roles: "apps", ClaimedAt: "2026-10-01T00:00:00Z", Interface: "psns-0c1d", Subnet: "10.45.0.0/24", Address: "10.45.0.2", Build: version.Current()}
 	b.files[registry.Path] = encode(t, reg)
 	return w
 }
@@ -1630,5 +1630,6 @@ func claimOf(cfg *config.Config, site string, now time.Time) (string, registry.E
 		Subnet:     cfg.Mesh.Subnet,
 		Address:    declared.Address,
 		Roles:      registry.JoinRoles(declared.Roles),
+		Build:      version.Current(),
 	}
 }

@@ -100,9 +100,11 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # COMMIT is what each binary names as its commit in every record it
+      # writes, set with -ldflags -X; the check below reads it back.
       - name: Build the Linux binaries
         if: steps.decide.outputs.release == 'true'
-        run: make release-binaries
+        run: make release-binaries COMMIT="${GITHUB_SHA}"
 
       # QEMU, so the arm64 binary can be run on this amd64 runner.
       - name: Set up QEMU

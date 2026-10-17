@@ -239,6 +239,9 @@ func encodeDoc(m doc) string {
 }
 
 func parseDoc(content string) (doc, error) {
+	if err := version.RequireBuild([]byte(content)); err != nil {
+		return doc{}, err
+	}
 	dec := json.NewDecoder(strings.NewReader(content))
 	dec.DisallowUnknownFields()
 	m := newDoc()
@@ -247,9 +250,6 @@ func parseDoc(content string) (doc, error) {
 	}
 	if m.Version != Version {
 		return doc{}, fmt.Errorf("version %d, and this toolkit reads version %d", m.Version, Version)
-	}
-	if err := version.RequireBuild([]byte(content)); err != nil {
-		return doc{}, err
 	}
 	return merge(m), nil
 }
@@ -269,6 +269,9 @@ var newTag = func() string {
 func Encode(r Record) string {
 	m := newDoc()
 	m.UpdatedAt, m.Build = r.UpdatedAt, r.Build
+	if m.Build == (version.Build{}) {
+		m.Build = version.Current()
+	}
 	for _, kind := range kindNames {
 		for _, name := range r.List(kind) {
 			m.kind(kind)[name] = entry{Adds: []string{"t-" + name}}

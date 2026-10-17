@@ -13,6 +13,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/hostarch"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 // manifestHost is a monitor's host as far as the reference files go: files
@@ -181,7 +182,7 @@ func TestAChangedReferenceSaysTheOwnersCopyNeedsReplacing(t *testing.T) {
 	fakeWebServerCheck(t, certificateFails)
 	path := externalFixture(t)
 	h := fakeWebServerFiles(t, path)
-	stale, _ := json.Marshal(render.Manifest{Version: 1, WebServer: []render.ManifestWebServer{{App: "health", Hostname: "health.example.org", Path: healthReference, SHA256: sha("an older snippet"), Server: "caddy"}}})
+	stale, _ := json.Marshal(render.Manifest{Version: 1, Build: version.Current(), WebServer: []render.ManifestWebServer{{App: "health", Hostname: "health.example.org", Path: healthReference, SHA256: sha("an older snippet"), Server: "caddy"}}})
 	h.files[manifestFile] = string(stale)
 	h.files[healthReference] = "an older snippet"
 	rec := recordConverge(t)
@@ -211,7 +212,7 @@ func TestApplyRemovesAReferenceFileNoLongerWanted(t *testing.T) {
 	path := externalFixture(t)
 	h := fakeWebServerFiles(t, path)
 	gone := "/srv/paisans/f2a9/web-server/blog.caddy"
-	m, _ := json.Marshal(render.Manifest{Version: 1, WebServer: []render.ManifestWebServer{{App: "blog", Hostname: "blog.example.org", Path: gone, SHA256: sha("x"), Server: "caddy"}}})
+	m, _ := json.Marshal(render.Manifest{Version: 1, Build: version.Current(), WebServer: []render.ManifestWebServer{{App: "blog", Hostname: "blog.example.org", Path: gone, SHA256: sha("x"), Server: "caddy"}}})
 	h.files[manifestFile] = string(m)
 	h.files[gone] = "x"
 	rec := recordConverge(t)
@@ -291,7 +292,7 @@ func TestApplyKeepsAForeignReferenceEntry(t *testing.T) {
 		fakeWebServerCheck(t, nil)
 		path := externalFixture(t)
 		h := fakeWebServerFiles(t, path)
-		m, _ := json.Marshal(render.Manifest{Version: 1, WebServer: []render.ManifestWebServer{{App: "blog", Path: bad, SHA256: sha("x"), Server: "caddy"}}})
+		m, _ := json.Marshal(render.Manifest{Version: 1, Build: version.Current(), WebServer: []render.ManifestWebServer{{App: "blog", Path: bad, SHA256: sha("x"), Server: "caddy"}}})
 		h.files[manifestFile] = string(m)
 		h.files[bad] = "x"
 		rec := recordConverge(t)

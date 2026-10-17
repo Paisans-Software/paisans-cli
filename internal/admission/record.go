@@ -290,8 +290,8 @@ func ParseRecord(data []byte, token string) (Record, error) {
 			problems = append(problems, k+": missing")
 		}
 	}
-	if missing := version.MissingBuild(keys); len(missing) > 0 {
-		problems = append(problems, strings.Join(missing, ", ")+": missing, so it does not say which build of paisans wrote it. The host's owner admits the deployment again: `paisans site request`, then `paisans site admit`")
+	if _, err := version.CheckBuild(keys); err != nil {
+		problems = append(problems, err.Error()+". The host's owner admits the deployment again: `paisans site request`, then `paisans site admit`")
 	}
 	if len(problems) > 0 {
 		return refuse(problems...)
@@ -357,7 +357,6 @@ func ParseRecord(data []byte, token string) (Record, error) {
 	if _, p := config.CheckMeshSubnet(r.MeshSubnet); len(p) > 0 {
 		problems = append(problems, fmt.Sprintf("mesh_subnet: %q %s", r.MeshSubnet, strings.Join(p, ", ")))
 	}
-	problems = append(problems, r.Build.Problems()...)
 	if len(problems) > 0 {
 		return refuse(problems...)
 	}

@@ -22,7 +22,7 @@ const (
 )
 
 func entry(token, domain, site string) Entry {
-	return Entry{Token: token, Root: "/srv/paisans/" + token, Domain: domain, Site: site, ClaimedAt: "2026-10-01T00:00:00Z", Interface: "psns-" + token}
+	return Entry{Token: token, Root: "/srv/paisans/" + token, Domain: domain, Site: site, ClaimedAt: "2026-10-01T00:00:00Z", Interface: "psns-" + token, Build: version.Build{Version: "0.3.0-dev", Commit: version.Unknown}}
 }
 
 func TestParseEmptyIsAnEmptyRegistry(t *testing.T) {
@@ -657,7 +657,7 @@ func TestAnEntryRoundTripsItsBuild(t *testing.T) {
 func TestAnEntryWithNoBuildIsRefused(t *testing.T) {
 	data := `{"version":1,"deployments":{
 "` + ours + `":{"token":"f2a9","root":"/srv/paisans/f2a9","domain":"","site":"home-a","claimed_at":"2026-10-01T00:00:00Z","toolkit_version":"0.2.0"},
-"` + theirs + `":{"token":"0c1d","root":"/srv/paisans/0c1d","domain":"","site":"edge","claimed_at":"2026-10-01T00:00:00Z","toolkit_version":"0.3.0","toolkit_commit":"","toolkit_modified":false}
+"` + theirs + `":{"token":"0c1d","root":"/srv/paisans/0c1d","domain":"","site":"edge","claimed_at":"2026-10-01T00:00:00Z","toolkit_version":"0.3.0","toolkit_commit":"unknown","toolkit_modified":false}
 }}`
 	r, err := Parse([]byte(data))
 	var nb *NoBuildError

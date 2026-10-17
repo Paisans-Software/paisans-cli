@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -71,11 +72,17 @@ type Manifest struct {
 // manifest as read beside it, for apply, which writes it again.
 func ParseManifest(data []byte) (Manifest, error) {
 	var m Manifest
-	if err := json.Unmarshal(data, &m); err != nil {
-		return Manifest{}, err
+	err := json.Unmarshal(data, &m)
+	if buildErr := version.RequireBuild(data); buildErr != nil {
+		// A build key of the wrong type fails the decode too, after it has
+		// read every other field: the build's refusal is the one to give.
+		var typeErr *json.UnmarshalTypeError
+		if err == nil || errors.As(err, &typeErr) {
+			return m, buildErr
+		}
 	}
-	if err := version.RequireBuild(data); err != nil {
-		return m, err
+	if err != nil {
+		return Manifest{}, err
 	}
 	return m, nil
 }

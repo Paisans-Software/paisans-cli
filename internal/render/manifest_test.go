@@ -35,3 +35,18 @@ func TestAManifestWithNoBuildIsRefused(t *testing.T) {
 		t.Errorf("files %v", m.Files)
 	}
 }
+
+// A manifest whose build holds a value paisans never records is refused
+// as one without a build is.
+func TestAManifestWithABadBuildIsRefused(t *testing.T) {
+	for _, bad := range []string{
+		`{"version":1,"files":[],"toolkit_version":"","toolkit_commit":"unknown","toolkit_modified":false}`,
+		`{"version":1,"files":[],"toolkit_version":"0.3.0","toolkit_commit":"","toolkit_modified":false}`,
+		`{"version":1,"files":[],"toolkit_version":"0.3.0","toolkit_commit":"unknown","toolkit_modified":"no"}`,
+	} {
+		var noBuild *version.NoBuildError
+		if _, err := render.ParseManifest([]byte(bad)); !errors.As(err, &noBuild) {
+			t.Errorf("%s: got %v", bad, err)
+		}
+	}
+}

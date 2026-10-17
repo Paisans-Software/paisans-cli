@@ -25,6 +25,16 @@ release workflow runs the same target, so a local run builds what a release
 ships; `dist/` is ignored, because Go marks a binary `-dirty` when the tree
 holds untracked files.
 
+Every record paisans writes names the build that wrote it, so a binary
+always names its commit. `make release-binaries` sets it with
+`-ldflags "-X github.com/paisans-software/paisans-cli/internal/version.buildCommit=<full commit>"`,
+which the release workflow passes as `COMMIT`. A packager building from a
+source tarball, which holds no git metadata (Eg: the Homebrew formula), sets
+the release's commit the same way. Without it, a build from a git checkout
+names the commit Go recorded, a `go install ...@<version>` build names its
+module tag or the commit its pseudo-version carries, and a build with none of
+these names `unknown`.
+
 ## Run
 
 [`docs/commands.md`](commands.md) is the operator's reference for every

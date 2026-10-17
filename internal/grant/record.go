@@ -18,9 +18,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
-// Version is the record's layout. Version 2 added the configuration part
-// and version 3 the approvals; an older record is read as one with neither
-// yet, and written back as version 3.
+// Version is the record's layout. A record of any other layout is refused.
 const Version = 3
 
 // Record is the grant a deployment last applied on one host, each part
@@ -118,9 +116,14 @@ func Path(d deployment.Deployment) string { return d.StatePath("granted.json") }
 // RemoveCommand deletes the record, for site remove's host stage.
 func RemoveCommand(d deployment.Deployment) string { return "rm -f -- " + quote(Path(d)) }
 
-// Encode is the record as written.
+// Encode is the record as written: in the current layout, and with this
+// build of paisans when it names none, since no record is written without
+// one.
 func Encode(rec Record) string {
 	rec.Version = Version
+	if rec.Build == (version.Build{}) {
+		rec.Build = version.Current()
+	}
 	var b bytes.Buffer
 	enc := json.NewEncoder(&b)
 	enc.SetIndent("", "  ")
@@ -131,17 +134,17 @@ func Encode(rec Record) string {
 // Parse reads a record. One that does not say which build of paisans wrote
 // it is refused with a *version.NoBuildError.
 func Parse(content string) (Record, error) {
+	if err := version.RequireBuild([]byte(content)); err != nil {
+		return Record{}, err
+	}
 	dec := json.NewDecoder(strings.NewReader(content))
 	dec.DisallowUnknownFields()
 	var rec Record
 	if err := dec.Decode(&rec); err != nil {
 		return Record{}, err
 	}
-	if rec.Version < 1 || rec.Version > Version {
-		return Record{}, fmt.Errorf("version %d, and this toolkit reads versions 1 to %d", rec.Version, Version)
-	}
-	if err := version.RequireBuild([]byte(content)); err != nil {
-		return Record{}, err
+	if rec.Version != Version {
+		return Record{}, fmt.Errorf("version %d, and this toolkit reads version %d", rec.Version, Version)
 	}
 	return rec, nil
 }

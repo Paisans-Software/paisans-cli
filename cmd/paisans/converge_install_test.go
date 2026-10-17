@@ -656,7 +656,9 @@ func TestConvergeLinesShowTheirInnerStep(t *testing.T) {
 		t.Errorf("another site shows home-b's step:\n%q", out)
 	}
 	for _, ended := range regexp.MustCompile(`✓\x1b\[0m [^\n]*`).FindAllString(out, -1) {
-		if strings.Contains(ended, "(") {
+		// The deployment section's paisans line names its build's commit
+		// in parentheses, which is no step.
+		if strings.Contains(ended, "(") && !strings.Contains(ended, " paisans: ") {
 			t.Errorf("a finished line shows an inner step: %q", ended)
 		}
 	}
