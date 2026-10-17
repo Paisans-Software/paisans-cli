@@ -1455,7 +1455,10 @@ func groupStop(what string, steps []convergeStep, errs []error) error {
 // and which site leads is known only once Patroni runs. A later visit to the
 // site resumes it; when the stop is on the site's last visit, the site is
 // applied once more after every other step, by which time the leader's site
-// has had its own last visit, and a stop then ends the run. Each step is
+// has had its own last visit, and a stop then ends the run. A founding stop
+// on a later visit ends it too: every founding member's founding apply runs
+// before any later visit, so a member that runs no etcd by then has stopped
+// running it. Each step is
 // listed under its line with its own result, which -v shows with the step's
 // own output; its notes follow the line at every verbosity. A failure lists
 // its error under its inner step and ends its line and the run, leaving the
@@ -1508,6 +1511,11 @@ func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions) err
 			line.Done("")
 		case err == nil || founding || databases:
 			line.Pause(why)
+		case errors.Is(err, apply.ErrFoundingWait):
+			// Every founding member's founding apply runs before any later
+			// visit, so this is no pause.
+			line.Fail(err)
+			return convergeStop("apply stopped at "+s.Title, laterFounding(err), resumeAdvice)
 		case errors.Is(err, storageadd.ErrWaiting):
 			// Not a failure, and main exits 75 for it as storage add does.
 			line.End(ui.Pending, "waiting on Garage")
@@ -1553,6 +1561,25 @@ func revisitPause(steps []convergeStep, i int) string {
 		return "paused until " + between[0] + " is done"
 	}
 	return "paused until " + andList(between) + " are done"
+}
+
+// laterFounding is a founding stop on a site's later visit as the run stops
+// with it. Every founding member's founding apply has run by then and started
+// its etcd, so a member err names has stopped running it since.
+func laterFounding(err error) error {
+	names, verb, its := "another founding member", "runs", "its"
+	var wait *apply.FoundingWaitError
+	if errors.As(err, &wait) && len(wait.Unstarted) > 0 {
+		names = andList(wait.Unstarted)
+		if len(wait.Unstarted) > 1 {
+			verb, its = "run", "their"
+		}
+	}
+	return &ui.Problem{
+		Hint:    "etcd is still being founded, and " + names + " " + verb + " no etcd after " + its + " founding apply",
+		Explain: "This run applied every founding member before this visit, and each apply starts that site's etcd, so it has stopped since. Find out why etcd stopped on " + names + ".",
+		Cause:   err,
+	}
 }
 
 // foundingPause is why a founding stop pauses its line: until the founding

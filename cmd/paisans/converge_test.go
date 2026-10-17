@@ -2586,3 +2586,31 @@ func TestADualSiteFoundingRunsEveryFoundingApplyBeforeARevisit(t *testing.T) {
 		}
 	}
 }
+
+// A founding stop on a site's later visit is no pause: every founding
+// member's founding apply ran before it, so the member it waits on has
+// stopped running etcd since. The run stops, naming that member and why.
+func TestAFoundingStopOnALaterVisitStopsTheRunNamingTheCause(t *testing.T) {
+	ran := fakeConverge(t, nil)
+	saved := convergeRun
+	visits := 0
+	convergeRun = func(args []string) error {
+		err := saved(args)
+		if strings.HasPrefix(strings.Join(args, " "), "apply --site home-a ") {
+			if visits++; visits == 2 {
+				return foundingWait("home-a", "home-b")
+			}
+		}
+		return err
+	}
+	t.Cleanup(func() { convergeRun = saved })
+	rec := recordConverge(t)
+	err := converge(t, "--execute")
+	text := problemText(err)
+	if err == nil || !strings.Contains(text, "apply stopped at apply --site home-a") || !strings.Contains(text, "home-b runs no etcd after its founding apply") || !errors.Is(err, apply.ErrFoundingWait) {
+		t.Fatalf("got %v\n%s", text, rec.Lines())
+	}
+	if (*ran)[len(*ran)-1] != "apply --site home-a" || !rec.Has("fail", "home-a") {
+		t.Errorf("ran on, or the line did not fail: %v\n%s", *ran, rec.Lines())
+	}
+}
