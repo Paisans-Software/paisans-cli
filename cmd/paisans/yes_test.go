@@ -56,7 +56,7 @@ func TestWithoutYesTheWordIsStillTyped(t *testing.T) {
 }
 
 // The words that go through helpers of their own: the partial gather, the
-// app's name, the site's name, and each of an eviction's questions.
+// app's name, the site's name, and each question of a removal with --host-gone.
 func TestYesAnswersTheWordsBehindTheirHelpers(t *testing.T) {
 	withTerminal(t, false)
 	var out bytes.Buffer
@@ -73,12 +73,12 @@ func TestYesAnswersTheWordsBehindTheirHelpers(t *testing.T) {
 	}
 	out.Reset()
 	questions := []question{{word: "revoked", what: "a"}, {word: "home-b", what: "b"}, {word: "lose writes", what: "c", danger: true}, {word: "lose objects", what: "d", danger: true}}
-	if err := confirmEviction(yes, nil, &out, questions); err != nil {
+	if err := confirmCutoff(yes, nil, &out, questions); err != nil {
 		t.Fatal(err)
 	}
 	for _, q := range questions {
 		if !strings.Contains(out.String(), "approved by --yes: "+q.word+"\n") {
-			t.Errorf("eviction: %s not answered: %q", q.word, out.String())
+			t.Errorf("--host-gone: %s not answered: %q", q.word, out.String())
 		}
 	}
 }
@@ -220,7 +220,7 @@ func TestNoTerminalRefusalsNameYes(t *testing.T) {
 		"typed word":  confirmWord(answerer{}, noTerminalStdin(), &b, "prune", "x"),
 		"review":      approveReviews(ui.Discard, answerer{}, noTerminalStdin(), &b, pendingReview(), "x"),
 		"app name":    confirmName(answerer{}, noTerminalStdin(), &b, "talk"),
-		"eviction":    confirmEviction(answerer{}, noTerminalStdin(), &b, []question{{word: "home-b", what: "x"}}),
+		"cutoff":      confirmCutoff(answerer{}, noTerminalStdin(), &b, []question{{word: "home-b", what: "x"}}),
 		"site remove": noTerminal("x"),
 	} {
 		if err == nil || !strings.Contains(err.Error()+" "+problemText(err), want) {

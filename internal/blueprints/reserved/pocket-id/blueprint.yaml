@@ -58,7 +58,7 @@ secrets:
   # whichever instance is active.
   generate:
     - name: encryption_key
-      never_rotate: "it encrypts data already stored, so changing it makes that data unreadable, and Pocket ID offers no re-encryption the toolkit could drive. An evicted admin who held it also holds a copy of the data it protects, so rotating it would take nothing back"
+      never_rotate: "it encrypts data already stored, so changing it makes that data unreadable, and Pocket ID offers no re-encryption the toolkit could drive. An admin who left and held it also holds a copy of the data it protects, so rotating it would take nothing back"
     # Its users are the toolkit, the operator reconciler and the account
     # service, not members.
     - static_api_key

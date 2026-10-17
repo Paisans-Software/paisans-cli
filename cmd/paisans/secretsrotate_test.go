@@ -1153,7 +1153,7 @@ func TestSecretsRotatePendingWithoutRotationNamesTheWayOut(t *testing.T) {
 
 // Every secret init generates, for every blueprint the fixture declares, is
 // either rotated by --all or listed as kept with a reason. A generated key
-// that is neither is one an evicted admin keeps after a rotation that
+// that is neither is one an admin who left keeps after a rotation that
 // claimed to be everything, with nothing said.
 func TestSecretsRotateAllCoversEveryGeneratedSecret(t *testing.T) {
 	cfg, err := config.Load(fixtureConfig())

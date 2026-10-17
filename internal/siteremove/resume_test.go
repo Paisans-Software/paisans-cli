@@ -156,7 +156,7 @@ func TestHostGoneSkipsTheHost(t *testing.T) {
 	w.member("home-b")["Role"], w.member("home-b")["State"] = "Replica", "stopped"
 	w.member("home-c")["Role"] = "Sync Standby"
 	p := w.mustBuild("home-b", siteremove.Options{HostGone: true})
-	if p.Stages[2].Skipped == "" || hasStep(p, 1, "home-b", "stop", "Patroni") {
+	if stageNamed(p, "clean the host") != nil || hasStep(p, 3, "home-b", "stop", "Patroni") {
 		t.Fatalf("the host is planned for:\n%s", printed(p))
 	}
 	if err := siteremove.Execute(p); err != nil {
@@ -169,7 +169,7 @@ func TestHostGoneSkipsTheHost(t *testing.T) {
 		t.Error("its member key is still in etcd")
 	}
 	remains := strings.Join(p.Remains(), "\n")
-	if !strings.Contains(remains, "--host-gone") || !strings.Contains(remains, "sudo paisans site evict --deployment "+ourID) {
+	if !strings.Contains(remains, "--host-gone") || p.Evict != siteremove.EvictLine(dep, w.cfg.Sites["home-b"].SSHUser()) {
 		t.Errorf("the report does not say what is left:\n%s", remains)
 	}
 }

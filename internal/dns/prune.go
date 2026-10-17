@@ -232,16 +232,16 @@ func BuildSiteRemoval(ctx context.Context, provider Provider, before *config.Con
 	return plan, err
 }
 
-// BuildSiteEviction plans an eviction's DNS stage: BuildSiteRemoval's rules,
-// except that a record at a name the configuration without the site still
-// wants is deleted too. An evicted host may be hostile, and every visitor a
-// record sends it is one whose session it can read; a name still wanted
-// answers nothing until the apply that brings up the replacement creates its
-// record at the new address. Rules 1 to 4 still tie each record to the
-// evicted host alone: this deployment's comment, an address record, a name
-// of this deployment's, and the evicted site's own address, which no
-// remaining site shares.
-func BuildSiteEviction(ctx context.Context, provider Provider, before *config.Config, site string, after *config.Config) (*PrunePlan, error) {
+// BuildSiteCutoff plans the DNS stage of a removal with --host-gone:
+// BuildSiteRemoval's rules, except that a record at a name the configuration
+// without the site still wants is deleted too. A cut-off host may be hostile,
+// and every visitor a record sends it is one whose session it can read; a name
+// still wanted answers nothing until the apply that brings up the replacement
+// creates its record at the new address. Rules 1 to 4 still tie each record to
+// the cut-off host alone: this deployment's comment, an address record, a name
+// of this deployment's, and the cut-off site's own address, which no remaining
+// site shares.
+func BuildSiteCutoff(ctx context.Context, provider Provider, before *config.Config, site string, after *config.Config) (*PrunePlan, error) {
 	rules, err := siteRemovalRules(before, site, after)
 	if err != nil {
 		return nil, err

@@ -1,11 +1,11 @@
 # How a deployment protects itself
 
-This guide is for the operators of a paisans deployment. It walks through what can
-go wrong between the people and machines that run one, and says for each case
-what the toolkit does about it, what it does not, and what is left to you. The
-step by step response to an operator leaving or being evicted is
-[When an operator leaves](when-an-operator-leaves.md); this guide is the reasoning
-behind it.
+This guide is for the operators of a paisans deployment. It walks through what
+can go wrong between the people and machines that run one, and says for each
+case what the toolkit does about it, what it does not, and what is left to you.
+The step by step response to an operator leaving, or to their site being cut
+off, is [When an operator leaves](when-an-operator-leaves.md); this guide is
+the reasoning behind it.
 
 Each scenario ends with **Protects**, **Does not protect** and **You do**. Where
 a protection is designed but not built, it says so.
@@ -110,8 +110,9 @@ others can no longer log in to the host they run. It is still in the mesh, so
 it is still in the cluster: possibly the Postgres leader, an etcd voter, a
 Garage node holding uploads, an apps site, or the gateway.
 
-**Protects.** `paisans site remove <site> --evict` takes the site out without
-ever reaching it, in an order chosen for a host that is alive and may resist:
+**Protects.** `paisans site remove <site> --host-gone` takes the site out
+without ever reaching it, in an order chosen for a host that may be alive and
+resisting, which also suits one that is dead:
 
 1. **The cut, first.** Every remaining site drops the site as a WireGuard peer.
    From then on its handshakes are ignored, and it can reach no cluster service.
@@ -131,27 +132,27 @@ A replacement host is declared in the same configuration edit, under a new
 name, and brought up by `apply` afterwards. Its WireGuard key and every secret
 generated for it are new.
 
-**Does not protect.** The evicted host keeps what it had: a copy of the database
+**Does not protect.** The cut-off host keeps what it had: a copy of the database
 and uploads as they were when it was cut, and every secret it was rendered.
-Eviction is refused when the remaining sites are not a majority of etcd's
+Cutting it off is refused when the remaining sites are not a majority of etcd's
 voters, or when the site is the only data site; recovery then is a restore,
 outside the toolkit.
 
-**You do.** Follow *An operator whose site is evicted* in the runbook.
+**You do.** Follow *An operator whose site is cut off* in the runbook.
 
-## The evicted site was the gateway
+## The cut-off site was the gateway
 
 **What could happen.** The gateway terminates TLS for every member and holds
 the DNS token. A hostile gateway can read every session cookie and form that
 passes through it, and can point the community's names wherever it likes.
 
-**Protects.** Evicting a gateway asks the operator to type `revoked`, confirming
-the DNS token was revoked at the provider and a new one set, and checks the new
-token works before changing anything. The replacement gateway is safe from the
-evicted operator: their keys are out of the configuration before it is prepared,
-the review shows every key it grants, its secrets are generated after the
-secrets file stopped being encrypted to them, and it never lists the evicted
-host as a peer.
+**Protects.** Cutting off a gateway asks the operator to type `revoked`,
+confirming the DNS token was revoked at the provider and a new one set, and
+checks the new token works before changing anything. The replacement gateway is
+safe from the operator who left: their keys are out of the configuration before
+it is prepared, the review shows every key it grants, its secrets are generated
+after the secrets file stopped being encrypted to them, and it never lists the
+cut-off host as a peer.
 
 **Does not protect.** The certificates the old gateway holds stay valid until
 they expire or are revoked. What it saw while it served members cannot be
@@ -177,10 +178,10 @@ from outside at all.
 
 **Does not protect.** Until the rekey finishes, the old keys work.
 
-**You do.** Rekey right after re-encrypting the secrets file, whenever an operator
-who was a recipient leaves or is evicted. Finish a rekey that stopped before
-anything else: `apply` refuses while one is unfinished, since it would render
-the old key back.
+**You do.** Rekey right after re-encrypting the secrets file, whenever an
+operator who was a recipient leaves or has their site cut off. Finish a rekey
+that stopped before anything else: `apply` refuses while one is unfinished,
+since it would render the old key back.
 
 ## A former recipient still has the secrets file
 
@@ -206,16 +207,16 @@ That host is a mesh peer, so whoever holds it reaches every cluster service and
 every app's port over the mesh, and holds the secrets rendered on it.
 
 **Protects.** They cannot decrypt `secrets.enc.yaml`, which never leaves the
-operators' workstations with a key that opens it. Eviction takes the host out the
-same way as an operator's, and the rotation that follows makes what it held
-worthless.
+operators' workstations with a key that opens it. `site remove --host-gone`
+takes the host out the same way as an operator's, and the rotation that follows
+makes what it held worthless.
 
 **Does not protect.** While it is a peer, nothing on the mesh tells it apart
 from an honest site. The README says so where it explains why every port binds
 the mesh address: a compromised peer reaches every app ungated.
 
-**You do.** Evict it, and rotate what it held with `paisans secrets rotate
---all`.
+**You do.** Cut it off with `paisans site remove <site> --host-gone`, and
+rotate what it held with `paisans secrets rotate --all`.
 
 ## Losing `paisans-stack.yaml` or the secrets file
 
@@ -290,4 +291,4 @@ deployment exists.
 
 * **A record of who owns which site.** Without it, nothing warns when one
   operator's hosts hold a majority of etcd's voters, which would let that operator
-  block an eviction.
+  keep their own site from being cut off.

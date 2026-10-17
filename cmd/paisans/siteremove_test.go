@@ -58,7 +58,7 @@ func TestSiteRemoveRefusesBeforeReachingAHost(t *testing.T) {
 	for args, want := range map[string]string{
 		"home-a":                                 "pinned to it",
 		"home-z":                                 "declares no site",
-		"home-b --host-gone --delete-data":       "Drop one of them",
+		"home-b --host-gone --delete-data":       "cannot be used together",
 		"home-b --execute --host-gone extra-arg": "one site",
 	} {
 		err := runSiteRemove(append(strings.Fields(args), "--config", fixtureConfig()), strings.NewReader(""), &bytes.Buffer{})
@@ -115,7 +115,7 @@ func TestSiteRemoveForceRefusesBeforeReachingAHost(t *testing.T) {
 	noSiteHosts(t)
 	for args, want := range map[string]string{
 		"home-b --ssh admin@192.0.2.1":                                "only --force takes",
-		"home-b --force --host-gone":                                  "Drop one of them",
+		"home-b --force --host-gone":                                  "--host-gone cleans no host",
 		"never --force":                                               "Name its host with --ssh",
 		"home-b --force --ssh myalias":                                "not user@host",
 		"home-b --force --execute":                                    "terminal",
@@ -351,15 +351,15 @@ func TestSiteRemoveByIDEndsNamingTheDeployment(t *testing.T) {
 	}
 }
 
-// --evict refuses what would reach the host, and an unattended run, before
-// any host is read.
-func TestSiteRemoveEvictRefusesBeforeReachingAHost(t *testing.T) {
+// --host-gone refuses what would reach the host, and an unattended run,
+// before any host is read.
+func TestSiteRemoveHostGoneRefusesBeforeReachingAHost(t *testing.T) {
 	noSiteHosts(t)
 	for args, want := range map[string]string{
-		"home-b --evict --force":               "--evict cleans no host",
-		"home-b --evict --ssh admin@192.0.2.1": "--evict cleans no host",
-		"home-b --evict --delete-data":         "--evict and --delete-data cannot be used together",
-		"home-b --evict --execute":             "stdin is not a terminal",
+		"home-b --host-gone --force":               "--host-gone cleans no host",
+		"home-b --host-gone --ssh admin@192.0.2.1": "--host-gone cleans no host",
+		"home-b --host-gone --delete-data":         "--host-gone and --delete-data cannot be used together",
+		"home-b --host-gone --execute":             "stdin is not a terminal",
 	} {
 		err := runSiteRemove(append(strings.Fields(args), "--config", fixtureConfig()), strings.NewReader("home-b\n"), &bytes.Buffer{})
 		if err == nil || !strings.Contains(err.Error(), want) {
@@ -368,9 +368,9 @@ func TestSiteRemoveEvictRefusesBeforeReachingAHost(t *testing.T) {
 	}
 }
 
-// Every word an eviction asks for is typed in turn, from one reader, and a
-// wrong one stops it.
-func TestConfirmEvictionAsksForEachWord(t *testing.T) {
+// Every word a removal with --host-gone asks for is typed in turn, from one
+// reader, and a wrong one stops it.
+func TestConfirmCutoffAsksForEachWord(t *testing.T) {
 	saved := isTerminal
 	isTerminal = func(*os.File) bool { return true }
 	t.Cleanup(func() { isTerminal = saved })
@@ -388,7 +388,7 @@ func TestConfirmEvictionAsksForEachWord(t *testing.T) {
 		w.WriteString(answers)
 		w.Close()
 		var out bytes.Buffer
-		err = confirmEviction(answerer{}, r, &out, questions)
+		err = confirmCutoff(answerer{}, r, &out, questions)
 		r.Close()
 		switch {
 		case want == "" && err != nil:
@@ -405,20 +405,20 @@ func TestConfirmEvictionAsksForEachWord(t *testing.T) {
 	w.WriteString("revoked\n")
 	w.Close()
 	defer r.Close()
-	if err := confirmEviction(answerer{}, r, &bytes.Buffer{}, questions); err == nil || !strings.Contains(err.Error(), "not a terminal") {
+	if err := confirmCutoff(answerer{}, r, &bytes.Buffer{}, questions); err == nil || !strings.Contains(err.Error(), "not a terminal") {
 		t.Errorf("without a terminal: %v", err)
 	}
 }
 
 // The questions follow the plan: revoked only for a gateway, the site's name
 // always, and the losses only when the plan has them.
-func TestEvictionQuestionsFollowThePlan(t *testing.T) {
+func TestCutoffQuestionsFollowThePlan(t *testing.T) {
 	cfg, err := config.Load(fixtureConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
 	var words []string
-	for _, q := range evictionQuestions(cfg, "home-b", &siteremove.Plan{}) {
+	for _, q := range cutoffQuestions(cfg, "home-b", &siteremove.Plan{}) {
 		words = append(words, q.word)
 	}
 	if strings.Join(words, ",") != "home-b" {
@@ -429,7 +429,7 @@ func TestEvictionQuestionsFollowThePlan(t *testing.T) {
 // `revoked` is asked before the secrets file is read: the operator sets the
 // new DNS token with `secrets set` while it waits, and the token checked and
 // every secret written back must be that file's.
-func TestAnEvictedGatewayIsAskedRevokedBeforeTheSecretsAreRead(t *testing.T) {
+func TestACutOffGatewayIsAskedRevokedBeforeTheSecretsAreRead(t *testing.T) {
 	noSiteHosts(t)
 	saved := isTerminal
 	isTerminal = func(*os.File) bool { return true }
@@ -463,9 +463,9 @@ func TestAnEvictedGatewayIsAskedRevokedBeforeTheSecretsAreRead(t *testing.T) {
 	w.Close()
 	defer r.Close()
 	var out bytes.Buffer
-	err = runSiteRemove([]string{"vm", "--evict", "--execute", "--config", configPath, "--secrets", filepath.Join(dir, "missing.enc.yaml")}, r, &out)
+	err = runSiteRemove([]string{"vm", "--host-gone", "--execute", "--config", configPath, "--secrets", filepath.Join(dir, "missing.enc.yaml")}, r, &out)
 	if err == nil {
-		t.Fatal("an eviction with no secrets file went on")
+		t.Fatal("a removal with --host-gone and no secrets file went on")
 	}
 	if !strings.Contains(out.String(), "Type 'revoked'") {
 		t.Errorf("the secrets were read before revoked was asked: %v\n%s", err, out.String())

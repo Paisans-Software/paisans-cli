@@ -359,12 +359,13 @@ paisans secrets rotate apps.talk.oauth --execute           # Mbin's OAuth2 keys,
 paisans secrets rotate external.acme_dns_token --execute   # asks for the new token, then hands it to every site using it
 security find-generic-password -s acme -w | paisans secrets set external.acme_dns_token
 paisans secrets rotate external.acme_dns_token --execute   # without a terminal: hands on the token set above
-paisans secrets rotate --all --replaced external.acme_dns_token --execute   # the token an eviction already applied
+paisans secrets rotate --all --replaced external.acme_dns_token --execute   # the token a site remove --host-gone already applied
 paisans secrets rotate --all --restart --execute           # the full list again, whatever a stopped --all left
 ```
 
 * **Alone:** always; after an operator who could read the secrets file leaves,
-  or a site is evicted, once the file is re-encrypted and the mesh rekeyed.
+  or a site is cut off with `site remove --host-gone`, once the file is
+  re-encrypted and the mesh rekeyed.
 * **Flags:** the secrets' paths in the secrets file as arguments, or `--all`
   (every secret in scope, in the order *`secrets rotate` replaces a secret
   where it is checked and where it is used* gives); `--restart` (with
@@ -1179,20 +1180,20 @@ its entry out of `paisans-stack.yaml`.
 paisans site remove home-b                             # refusals, then every stage and its gate
 paisans site remove home-b --execute                   # runs them, stopping at the first failed gate
 paisans site remove home-b --delete-data --execute     # and deletes its data, after asking
-paisans site remove home-b --host-gone --execute       # the host is never coming back
 ```
 
-`--evict` takes out a site whose host still runs and that nobody else can
-reach. It never reaches that host: the mesh is cut on every remaining site
+`--host-gone` takes out a site whose host is not reached: one that is dead, or
+one that still runs and that nobody else can reach. It never reaches that
+host: the mesh is cut on every remaining site
 first, then its DNS records go, Patroni fails over by itself, its etcd member
 is removed and its Garage node is skipped as dead. A replacement declared in
 the same edit of `paisans-stack.yaml` is left alone and brought up by `paisans
 apply` afterwards; its secrets are generated first if the file lacks them.
 
 ```sh
-paisans site remove home-b --evict             # refusals, then every stage, what it would ask, and what the host keeps
-paisans site remove home-b --evict --execute   # asks for the site's name, and revoked, lose writes or lose objects when they apply
-paisans apply                                  # brings up the replacement the configuration declares
+paisans site remove home-b --host-gone             # refusals, then every stage, what it would ask, and what the host keeps
+paisans site remove home-b --host-gone --execute   # asks for the site's name, and revoked, lose writes or lose objects when they apply
+paisans apply                                      # brings up the replacement the configuration declares
 ```
 
 `--force` cleans one host and nothing else, and `--id` does it with no
@@ -1214,8 +1215,7 @@ paisans site remove --force --ssh admin@203.0.113.9 --id f2a9 --execute --delete
 
   | Flag | Default | Meaning |
   |------|---------|---------|
-  | `--host-gone` | off | run every stage but cleaning the host, and reach it not at all |
-  | `--evict` | off | the host still runs and nobody else can reach it: cut it out of the mesh first and take it out of the cluster without reaching it; implies `--host-gone`, and refuses `--force`, `--ssh`, `--id` and `--delete-data` |
+  | `--host-gone` | off | the host is dead, or still runs and nobody else can reach it: cut it out of the mesh first and take it out of the cluster without reaching it; refuses `--force`, `--ssh`, `--id` and `--delete-data` |
   | `--delete-data` | off | also delete this deployment's data on the host; asks for the site's name at a terminal |
   | `--force` | off | clean this deployment off one host and nothing else; no cluster stage, and neither file edited |
   | `--ssh <user@host[:port]>` | the site's `ssh` section | with `--force`: the host to clean |
@@ -1245,16 +1245,17 @@ paisans site remove --force --ssh admin@203.0.113.9 --id f2a9 --execute --delete
   and `site evict` stops it.
   `--id` finds the deployment by the login's admission record, not by the
   registry.
-  With `--evict` it needs a terminal, and asks, in order: `revoked` for a
+  With `--host-gone` it needs a terminal, and asks, in order: `revoked` for a
   gateway, once its DNS token is revoked at the provider and a new one set
   with `secrets set`; the site's name; `lose writes` when the leader has no
   streaming `Sync Standby`; `lose objects` when its Garage node's objects have
   no other copy. `--yes` types each, and the site's name for `--delete-data`
   and `--force`.
 
-See *`site remove` takes a site out* and *Evicting a site: `--evict`* in
-`README.md`, and [guides/when-an-operator-leaves.md](guides/when-an-operator-leaves.md)
-for the order around an eviction.
+See *`site remove` takes a site out* and *Removing a site whose host is not
+reached: `--host-gone`* in `README.md`, and
+[guides/when-an-operator-leaves.md](guides/when-an-operator-leaves.md) for the
+order around cutting a site off.
 
 ### `paisans mesh rekey`
 

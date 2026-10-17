@@ -109,9 +109,7 @@ func (p *Plan) buildCluster() (*Stage, error) {
 	if p.etcd.control != "" {
 		if p.etcd.member != nil {
 			st.Steps = append(st.Steps, Step{Site: p.etcd.control, Verb: "remove", Title: "remove " + p.Site + "'s etcd member", Text: fmt.Sprintf("%s's etcd member %s: %s", p.Site, p.etcd.member.HexID(), p.etcdctl("member remove "+p.etcd.member.HexID()))})
-			if !p.HostGone {
-				st.Steps = append(st.Steps, Step{Site: p.Site, Verb: "stop", Title: "stop etcd on " + p.Site, Text: "its etcd, which a removed member cannot rejoin, so it does not restart in a loop: " + p.stopService("etcd")})
-			}
+			st.Steps = append(st.Steps, Step{Site: p.Site, Verb: "stop", Title: "stop etcd on " + p.Site, Text: "its etcd, which a removed member cannot rejoin, so it does not restart in a loop: " + p.stopService("etcd")})
 		}
 		if p.witness != "" {
 			if p.etcd.witness != nil {
@@ -151,11 +149,9 @@ func (p *Plan) buildCluster() (*Stage, error) {
 			if err := p.removeEtcdMember(); err != nil {
 				return err
 			}
-			if !p.HostGone {
-				p.work("stop etcd on " + p.Site)
-				if out, err := p.transports[p.Site].Run(p.stopService("etcd")); err != nil {
-					return fmt.Errorf("%s: stopping etcd: %w: %s", p.Site, err, lastLines(out, 3))
-				}
+			p.work("stop etcd on " + p.Site)
+			if out, err := p.transports[p.Site].Run(p.stopService("etcd")); err != nil {
+				return fmt.Errorf("%s: stopping etcd: %w: %s", p.Site, err, lastLines(out, 3))
 			}
 		}
 		if p.etcd.witness != nil {
@@ -665,7 +661,7 @@ func (p *Plan) planSiteChanges(st *Stage, names []string, rendered *render.Plan,
 				Step{Site: name, Verb: "validate", Title: "validate Caddy routes on " + name, Text: "the routes without " + p.Site + ": " + validateCaddy(p.dep())},
 				Step{Site: name, Verb: "reload", Title: "reload Caddy on " + name, Text: "Caddy: " + reloadCaddy(p.dep())})
 		}
-		if sync, ok := p.evict.stillPeers[name]; ok && sync && keep(p.dep().WireGuardConf()) && (c.plan == nil || c.plan.WireGuard == apply.WireGuardNone) {
+		if sync, ok := p.cutoff.stillPeers[name]; ok && sync && keep(p.dep().WireGuardConf()) && (c.plan == nil || c.plan.WireGuard == apply.WireGuardNone) {
 			// The file was written by a run that stopped before the running
 			// interface was handed it.
 			conf := p.dep().WireGuardConf()

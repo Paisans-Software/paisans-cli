@@ -322,11 +322,6 @@ func (p *Plan) buildHost() (*Stage, error) {
 	d := p.dep()
 	user := p.cfg.Sites[p.Site].SSHUser()
 	p.Evict = EvictLine(d, user)
-	if p.HostGone {
-		st.Skipped = "--host-gone: " + p.Site + "'s host is not reached"
-		p.Kept = append(p.Kept, p.hostGoneLeft())
-		return st, nil
-	}
 	t := p.transports[p.Site]
 	hp := &hostPlan{}
 	p.host = hp
@@ -941,7 +936,6 @@ func (p *Plan) hostGoneLeft() string {
 	if p.cfg.Sites[p.Site].WebServerManagedBy() == config.ManagedByExternal {
 		web = fmt.Sprintf(" Its web server is its owner's: the host's owner removes the blocks apply's reference files in %s held, or it keeps routing this deployment's hostnames to apps that no longer run.", webserver.ReferenceDir(d))
 	}
-	user := p.cfg.Sites[p.Site].SSHUser()
-	return fmt.Sprintf("%s: host not reached (--host-gone). If it ever comes back it still holds the deployment's user %s with its containers, volumes and units, %s, and its admission record; its owner removes all of it with %s. Nothing it runs can reach the cluster: no remaining site has it as a WireGuard peer, and its etcd member is gone",
-		p.Site, user, d.Root(), EvictLine(d, user)) + web
+	return fmt.Sprintf("%s: host not reached (--host-gone). It keeps the deployment's user %s with its containers, volumes and units, %s, and its admission record until its owner runs the site evict line below. Nothing it runs can reach the cluster: no remaining site has it as a WireGuard peer, and its etcd member is gone",
+		p.Site, p.cfg.Sites[p.Site].SSHUser(), d.Root()) + web
 }

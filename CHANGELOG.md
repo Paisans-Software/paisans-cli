@@ -29,6 +29,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Changed
 
+- `site remove --host-gone` cuts the site out of the mesh first, waits for Patroni's own failover and skips its Garage node as dead, for a dead host or one no longer the deployment's to reach.
 - Every `host` command is under `site`: `site request`, `site admit`, `site prepare`, `site evict` and `site deployments`, beside `site list`, `site add` and `site remove`.
 - `dns init` writes the registrable domain's DMARC policy when nothing under it has mail, publishes SPF on `community.domain` alone, and gives a hostname DMARC of its own only where no strict policy above covers it.
 - `site evict` refuses, with nothing changed, a host any deployment of which a newer release of paisans claimed, naming the highest release to upgrade to.

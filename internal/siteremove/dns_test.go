@@ -228,8 +228,9 @@ func TestTheDNSStageSkipsWithoutAProvider(t *testing.T) {
 	}
 }
 
-// --host-gone does not reach the host, and still deletes its records: they
-// point at a host that is gone.
+// --host-gone does not reach the host, and still deletes its records, at
+// names the remaining sites still want too: a host that is not reached may
+// be in someone else's hands, and nothing should send visitors to it.
 func TestTheDNSStageRunsWithHostGone(t *testing.T) {
 	w, zone := dnsWorld(t, ownAddress)
 	w.unreachable["home-b"] = true
@@ -237,13 +238,13 @@ func TestTheDNSStageRunsWithHostGone(t *testing.T) {
 	w.member("home-b")["Role"], w.member("home-b")["State"] = "Replica", "stopped"
 	w.member("home-c")["Role"] = "Sync Standby"
 	p := w.mustBuild("home-b", siteremove.Options{HostGone: true, DNSProvider: zone.For("cloudflare")})
-	if st := stageNamed(p, "dns"); st == nil || st.Skipped != "" || len(st.Steps) != 2 {
+	if st := stageNamed(p, "dns"); st == nil || st.Skipped != "" || len(st.Steps) != 3 {
 		t.Fatalf("want the DNS stage planned: %+v", st)
 	}
 	if err := siteremove.Execute(p); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(zone.Deletes, ","); got != "rec-blog,rec-blog6" {
+	if got := strings.Join(zone.Deletes, ","); got != "rec-blog,rec-blog6,rec-wanted" {
 		t.Errorf("deletes = %s", got)
 	}
 }

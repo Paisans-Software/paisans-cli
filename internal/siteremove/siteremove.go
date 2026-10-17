@@ -44,7 +44,10 @@ import (
 
 // Options is what the operator asked for besides the site.
 type Options struct {
-	// HostGone skips cleaning the site's host, which is not reached at all.
+	// HostGone takes out a site whose host is not reached at all: dead, or
+	// still running and no longer the deployment's to reach. The mesh is cut
+	// first (see cutoff.go), so a host that still runs is out of the cluster
+	// before anything else changes. docs/specs/2026-10-11-site-evict.md.
 	HostGone bool
 	// DeleteData deletes the deployment root and the named volumes on the
 	// host. The caller asks for the site's name at a terminal first.
@@ -54,10 +57,6 @@ type Options struct {
 	// DNSProvider makes the provider the DNS stage deletes through, from
 	// acme.provider and the token. Nil is dns.For; tests hand in a fake.
 	DNSProvider func(name, token string) (dns.Provider, error)
-	// Evict takes out a site whose host still runs and that nobody else can
-	// reach: the host is never reached, as with HostGone, and the mesh is cut
-	// first (see evict.go). docs/specs/2026-10-11-site-evict.md.
-	Evict bool
 }
 
 // Step is one thing a stage will do, for the plan an operator reads.
@@ -167,8 +166,7 @@ type Plan struct {
 	// Evict is the line the host's owner runs to finish: what is root's
 	// (the user, its home, the root directory, WireGuard, the firewall, the
 	// registry entry and the admission record) only site evict removes.
-	// Empty when the plan reaches no host. It shadows Options.Evict, which
-	// the package reads as p.Options.Evict.
+	// Empty when the plan reaches no host.
 	Evict string
 	// forced is a plan BuildForced or BuildForcedByID made, and declared
 	// whether paisans-stack.yaml still declares its site.
@@ -199,7 +197,7 @@ type Plan struct {
 	// home is the login user's home on the site's host, and loginUser its
 	// name, the deployment's user, read once a run by checkLogin.
 	home, loginUser string
-	evict           evictState
+	cutoff          cutoffState
 	// open is the step the running stage is in the middle of, ended when the
 	// next one starts or the stage's work does.
 	open ui.Step
@@ -326,15 +324,12 @@ func Refusal(cfg *config.Config, site string, o Options) error {
 		}
 		return refuse(fmt.Sprintf("%s declares no site %s", name, site), "Declared sites are "+strings.Join(cfg.SiteNames(), ", ")+".")
 	}
-	if o.Evict {
-		o.HostGone = true
-	}
 	if o.HostGone && o.DeleteData {
 		return refuse("--host-gone and --delete-data cannot be used together", "--delete-data deletes data on the host, and --host-gone does not reach it. Drop one of them.")
 	}
 	if s.Has(config.RoleGateway) && len(cfg.GatewaySites()) == 1 {
-		if o.Evict {
-			return refuse(site+" is the only gateway", "Nothing would answer for the community's hostnames. Declare its replacement, a new site with the gateway role, in the same edit of the configuration, then run this again (README, \"Evicting a site: `--evict`\").")
+		if o.HostGone {
+			return refuse(site+" is the only gateway", "Nothing would answer for the community's hostnames. Declare its replacement, a new site with the gateway role, in the same edit of the configuration, then run this again (README, \"Removing a site whose host is not reached: `--host-gone`\").")
 		}
 		return refuse(site+" is the only gateway", "Nothing would answer for the community's hostnames. Give another site the gateway role and apply it first (README, \"Moving the gateway\").")
 	}
@@ -346,7 +341,7 @@ func Refusal(cfg *config.Config, site string, o Options) error {
 			}
 		}
 		if len(placed) > 0 {
-			if o.Evict {
+			if o.HostGone {
 				return refuse(site+" is the only apps site", fmt.Sprintf("%s placed cluster would run nowhere. Declare its replacement, a new site with the apps role, in the same edit of the configuration, then run this again.", strings.Join(placed, ", ")))
 			}
 			return refuse(site+" is the only apps site", fmt.Sprintf("%s placed cluster would run nowhere. Give another site the apps role and apply it first.", strings.Join(placed, ", ")))
@@ -356,7 +351,7 @@ func Refusal(cfg *config.Config, site string, o Options) error {
 		return refuse("apps are pinned to "+site, fmt.Sprintf("%s pinned to it, and would run nowhere. Move each first (README, \"Moving a pinned app\").", strings.Join(pinned, ", ")))
 	}
 	if contains(cfg.Cluster.Sites, site) && len(cfg.Cluster.Sites) == 1 || s.Has(config.RoleData) && len(cfg.DataSites()) == 1 {
-		if o.Evict {
+		if o.HostGone {
 			return refuse(site+" is the only data site", "Nothing remains to fail over to, so the database cannot be taken off it. Recovery is a restore from backup onto a new host.")
 		}
 		return refuse(site+" is the only data site", "The database would have nowhere to live. Add another data site first (paisans site add).")
@@ -441,9 +436,6 @@ func EndState(cfg *config.Config, site string) (*config.Config, string, error) {
 // changing none. transports maps every remaining site's name to how it is
 // reached, and the site's own unless o.HostGone.
 func Build(cfg *config.Config, secrets *config.Secrets, site string, transports map[string]apply.Transport, o Options) (*Plan, error) {
-	if o.Evict {
-		o.HostGone = true
-	}
 	if err := Refusal(cfg, site, o); err != nil {
 		return nil, err
 	}
@@ -485,7 +477,7 @@ func Build(cfg *config.Config, secrets *config.Secrets, site string, transports 
 		p.transports[site] = t
 	}
 
-	if o.Evict {
+	if o.HostGone {
 		if err := p.readJoining(); err != nil {
 			return nil, err
 		}
@@ -516,8 +508,8 @@ func Build(cfg *config.Config, secrets *config.Secrets, site string, transports 
 	if p.rendered, err = p.render(p.end); err != nil {
 		return nil, err
 	}
-	if o.Evict {
-		if err := p.probeEvict(); err != nil {
+	if o.HostGone {
+		if err := p.probeCutoff(); err != nil {
 			return nil, err
 		}
 	}
@@ -531,8 +523,8 @@ func Build(cfg *config.Config, secrets *config.Secrets, site string, transports 
 	if err := p.probeGarage(); err != nil {
 		return nil, err
 	}
-	if o.Evict {
-		if err := p.buildEvict(); err != nil {
+	if o.HostGone {
+		if err := p.buildCutoff(); err != nil {
 			return nil, err
 		}
 		return p, nil
@@ -572,7 +564,7 @@ func Build(cfg *config.Config, secrets *config.Secrets, site string, transports 
 // cleanly leaves its registration to age for 90 seconds first. Only the site's own
 // instance is asked, since it is the only one this stops.
 func (p *Plan) notePocketID(st *Stage) {
-	if p.HostGone || st.Skipped != "" {
+	if st.Skipped != "" {
 		return
 	}
 	var notes []Step
@@ -659,7 +651,7 @@ func (p *Plan) writtenLists() string {
 // before moving past it.
 func Execute(p *Plan) error {
 	r := p.reporter()
-	if p.Options.Evict {
+	if p.Options.HostGone {
 		if err := p.recheckLeader(); err != nil {
 			return err
 		}
@@ -712,8 +704,8 @@ func (p *Plan) fail(st *Stage, err error) error {
 		return fmt.Errorf("%s: %v", head, err)
 	}
 	next := "Fix the cause and run site remove again: it resumes at the first stage with anything left to do"
-	if p.Options.Evict {
-		next = "Fix the cause and run site remove --evict again: it resumes at the first stage with anything left to do"
+	if p.Options.HostGone {
+		next = "Fix the cause and run site remove --host-gone again: it resumes at the first stage with anything left to do"
 	}
 	// A Problem, Eg: the health gate's, keeps its cause for --verbose.
 	if pr := ui.Around(head, err, "Nothing after it ran.\n"+next); pr != nil {
@@ -771,8 +763,8 @@ func (p *Plan) Remains() []string {
 	}
 	out = append(out, p.Notes...)
 	out = append(out, p.Kept...)
-	if p.Options.Evict {
-		out = append(out, p.EvictReport()...)
+	if p.Options.HostGone {
+		out = append(out, p.CutoffReport()...)
 	}
 	return out
 }

@@ -46,7 +46,7 @@ secrets file, only with `--execute`. `failover test` changes which site
 is primary, only with `--execute`. `dns init` and `dns prune` reach no
 machine, only the DNS provider's API, and change it only with `--execute`;
 `site remove` also deletes there the A and AAAA records `dns init` made for the
-removed site. `site remove --evict`, `mesh rekey` and `secrets rotate` also
+removed site. `site remove --host-gone`, `mesh rekey` and `secrets rotate` also
 write the local secrets file: the replacement's generated secrets, a site's
 next and promoted WireGuard key, the sites a `mesh rekey --all` run has left,
 and a secret's next and promoted value with the secrets a `secrets rotate
@@ -128,7 +128,7 @@ paisans storage add                       # every Garage stage, from live state
 paisans storage rotate-key --app talk     # replaces one app's S3 key, staged
 paisans app remove docs                   # an app out of paisans-stack.yaml, off every host
 paisans site remove home-b                # a site out of the deployment, staged
-paisans site remove home-b --evict        # a site nobody else can reach, cut out first
+paisans site remove home-b --host-gone    # a site whose host is not reached, cut off first
 paisans mesh rekey home-a                 # one site's WireGuard key replaced, staged
 paisans secrets list                      # every secret's path, set or unset, never a value
 paisans secrets rotate --all              # every secret's rotation, in order, with its cost
@@ -1055,13 +1055,14 @@ key rules, and the gateway hand over: done, not needed, undone on a failed
 gate, stopped by an invalid configuration, and refused into a `/srv/caddy`
 that is somebody else's.
 
-### `--evict`, and why its order differs
+### `--host-gone`, and why its order differs
 
-`siteremove.Build` with `Options.Evict` builds the eviction from the same
-probes and the same pieces as a removal, in another order: `buildEvict` in
-`internal/siteremove/evict.go`. README.md's *Evicting a site: `--evict`* has
-the design, and `docs/specs/2026-10-11-site-evict.md` the approved
-specification. What the code relies on:
+`siteremove.Build` with `Options.HostGone` builds the cutoff from the same
+probes and the same pieces as a removal, in another order: `buildCutoff` in
+`internal/siteremove/cutoff.go`. README.md's *Removing a site whose host is not
+reached: `--host-gone`* has the design, and
+`docs/specs/2026-10-11-site-evict.md` the approved specification. What the code
+relies on:
 
 * **Joining sites are read, then left alone.** `JoiningSites` reads each
   remaining host's admission and deployment records; a site no record admits
@@ -1078,12 +1079,12 @@ specification. What the code relies on:
 * **Patroni's health is not refused once the cut is done.** A failover is
   under way, so a resumed run reads the members as they move; stage 3's gate
   is what has to hold.
-* **Which replica leads is read at stage 6, not at Build**, when the evicted
+* **Which replica leads is read at stage 6, not at Build**, when the cut-off
   site led: its successor is Patroni's choice in stage 3.
 
-The tests in `evict_test.go` run the same world, with a failover that
+The tests in `cutoff_test.go` run the same world, with a failover that
 promotes the `Sync Standby`, or the first streaming replica, once no
-remaining host's running interface lists the evicted key, and a running mesh
+remaining host's running interface lists the cut-off key, and a running mesh
 file per host that only the helper's `sync` changes. They cover the order, the host
 never reached, a leader with and without a `Sync Standby`, objects lost at
 replication 1, a gateway replaced in the same edit, the token check, every
@@ -1961,24 +1962,23 @@ before.
 No `backup`. `site add` exists for sites that all declare an endpoint; the
 relay for sites behind NAT is still design. `storage add` joins Garage nodes,
 changes the replication factor, sizes each node and can stop one to prove
-failover, and has run against containers; replacing a Garage node is not
-built, and removing one goes with its site, in `site remove`, where an evicted
-site's node is skipped as dead. `site add`'s first stage is `preflight`, and
-`failover test` exists; both are described above. `apply`
-pushes files, brings up the mesh interface, creates clustered apps' roles and databases, and
-takes the narrowest action that makes the rest live. `site add` has never been
-run against a real host, so every command it sends is reasoned from upstream
-source and documentation, not observed. Nor has `site remove`, whose commands are reasoned
-the same way.
-Nor have the review of what `paisans-stack.yaml` grants and its record on each
-host: the shell they send is run against local files in the tests, not
-observed on a host. Nor `site remove --evict` and `mesh rekey`: Patroni's failover
-once its leader is cut off, `garage layout skip-dead-nodes` on a node that
-is down, a WireGuard key swapped by the helper's `sync`, and `patronictl pause
---wait` and `resume --wait` around a relay's swap, with the pause read back as
-`pause: true` in `patronictl show-config`, are read from upstream source
-(Patroni v4.1.0, `patroni/ctl.py`) and documentation, and have run only
-against fakes.
+failover, and has run against containers; replacing a Garage node is not built,
+and removing one goes with its site, in `site remove`, where the node of a site
+removed with `--host-gone` is skipped as dead. `site add`'s first stage is
+`preflight`, and `failover test` exists; both are described above. `apply`
+pushes files, brings up the mesh interface, creates clustered apps' roles and
+databases, and takes the narrowest action that makes the rest live. `site add`
+has never been run against a real host, so every command it sends is reasoned
+from upstream source and documentation, not observed. Nor has `site remove`,
+whose commands are reasoned the same way. Nor have the review of what
+`paisans-stack.yaml` grants and its record on each host: the shell they send is
+run against local files in the tests, not observed on a host. Nor `site remove
+--host-gone` and `mesh rekey`: Patroni's failover once its leader is cut off,
+`garage layout skip-dead-nodes` on a node that is down, a WireGuard key swapped
+by the helper's `sync`, and `patronictl pause --wait` and `resume --wait`
+around a relay's swap, with the pause read back as `pause: true` in `patronictl
+show-config`, are read from upstream source (Patroni v4.1.0, `patroni/ctl.py`)
+and documentation, and have run only against fakes.
 
 HAProxy's `listen pocket-id`, which the account service reaches Pocket ID's
 API through, has not run against a real Pocket ID: that its `/healthz` check

@@ -128,7 +128,7 @@ func (e *NoAnswer) Error() string { return e.Site + ": " + e.Err.Error() }
 func (e *NoAnswer) Unwrap() error { return e.Err }
 
 // Joining is the sites cfg declares, but skip, that are new to this
-// deployment, Eg: a replacement declared in the same edit as an eviction.
+// deployment, Eg: a replacement declared in the same edit that cuts a site off.
 // Their hosts have not admitted this deployment, holding no admission record
 // of it or refusing its login, and nothing else says they ever ran in it: no
 // remaining site lists their key as a WireGuard peer, and no gateway's

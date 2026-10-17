@@ -12,7 +12,7 @@ import (
 
 // monitorStage is the stage number of the monitor's reseed, the last, and
 // monitorName its name, by which a failure in it is told apart whatever its
-// number: an eviction numbers it later.
+// number: a removal with --host-gone numbers it later.
 const (
 	monitorStage = 6
 	monitorName  = "monitor"
