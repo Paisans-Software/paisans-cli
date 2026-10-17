@@ -77,7 +77,7 @@ func (h *listedHost) Run(command string) (string, error) {
 
 func twoDeployments(t *testing.T) string {
 	data, err := registry.Encode(registry.Registry{Version: registry.Version, Deployments: map[string]registry.Entry{
-		monitorID: {Token: "f2a9", Root: "/srv/paisans/f2a9", Domain: "example.org", Site: "watch", Roles: "monitor", ClaimedAt: "2026-10-01T00:00:00Z", Interface: "psns-f2a9", Subnet: "10.44.0.0/24", Address: "10.44.0.6", Build: version.Build{Version: "0.3.0-dev", Commit: version.Unknown}},
+		monitorID: {Token: "f2a9", Root: "/srv/paisans/f2a9", Domain: "example.org", Site: "watch", Roles: "monitor", ClaimedAt: "2026-10-01T00:00:00Z", Interface: "psns-f2a9", Subnet: "10.44.0.0/24", Address: "10.44.0.6", Build: version.Build{Version: "0.3.0-dev", Commit: "v0.3.0"}},
 		neighbour: {Token: "0c1d", Root: "/srv/paisans/0c1d", Domain: "example.net", Site: "edge", Roles: "apps,gateway", ClaimedAt: "2026-10-01T00:00:00Z", Interface: "psns-0c1d", Subnet: "10.45.0.0/24", Address: "10.45.0.2", Build: version.Build{Version: "0.2.0", Commit: "4b4846760000000000000000000000000000beef"}},
 	}})
 	if err != nil {
@@ -350,5 +350,18 @@ func TestReachDestinationUsesTheOperatorsSSH(t *testing.T) {
 		if plain := ownerTransport(dest, false); plain.Sudo || plain.Auth != nil {
 			t.Errorf("%s: owner with --sudo=false %+v", in, plain)
 		}
+	}
+}
+
+// An entry that does not say which build claimed the host is flagged, and
+// every other entry is listed all the same.
+func TestHostDeploymentsFlagsAnEntryWithNoBuild(t *testing.T) {
+	reg := strings.Replace(twoDeployments(t), `,"toolkit_version":"0.3.0-dev","toolkit_commit":"v0.3.0","toolkit_modified":false`, "", 1)
+	if reg == twoDeployments(t) {
+		t.Fatal("the fixture did not change")
+	}
+	out := runDeployments(t, &listedHost{t: t, registry: reg, probe: "end\n"}, "--ssh", "owner@vm.example.org")
+	if !strings.Contains(out, "WARN "+monitorID+": token f2a9") || !strings.Contains(out, "does not say which build of paisans claimed the host") || !strings.Contains(out, "ok   "+neighbour+": token 0c1d") {
+		t.Errorf("printed:\n%s", out)
 	}
 }

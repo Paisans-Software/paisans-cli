@@ -303,6 +303,11 @@ func Inspect(t Transport, d deployment.Deployment) (*Inventory, error) {
 			inv.ManifestErr = fmt.Errorf("%s: %w. Apply the site again, which writes it anew", inv.ManifestPath, err)
 			err = nil
 		}
+		// A newer paisans' manifest is read, its version with it, for the
+		// commands that refuse it to say to upgrade.
+		if version.IsNewer(err) {
+			err = nil
+		}
 		if err == nil {
 			inv.ManifestFiles = m.Files
 			inv.ManifestWebServer = m.WebServer

@@ -161,6 +161,9 @@ func Read(t registry.Runner, d deployment.Deployment) (Record, string, bool, err
 		return Record{Version: Version}, "", false, nil
 	}
 	rec, err := Parse(content)
+	if version.IsNewer(err) {
+		return Record{}, "", false, fmt.Errorf("%s: %s: %w", t.Describe(), Path(d), err)
+	}
 	var noBuild *version.NoBuildError
 	if errors.As(err, &noBuild) {
 		return Record{}, "", false, fmt.Errorf("%s: %s is %w: %v. Delete it with `rm %s`, then apply again, which reviews every key and image again and writes it anew", t.Describe(), Path(d), ErrMalformed, err, Path(d))

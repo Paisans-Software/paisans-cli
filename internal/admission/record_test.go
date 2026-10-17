@@ -187,7 +187,8 @@ func TestParseRecordRefuses(t *testing.T) {
 		{"no build", strings.Replace(strings.Replace(strings.Replace(g, ",\n  \"toolkit_version\": \"0.3.0-dev\"", "", 1), ",\n  \"toolkit_commit\": \"519299d5cb009da4904cdf53c2025f1ad609f102\"", "", 1), ",\n  \"toolkit_modified\": true", "", 1), "f2a9", "it does not say which build of paisans wrote it (toolkit_version, toolkit_commit, toolkit_modified missing). The host's owner admits the deployment again: `paisans site request`, then `paisans site admit`"},
 		{"no commit", strings.Replace(g, ",\n  \"toolkit_commit\": \"519299d5cb009da4904cdf53c2025f1ad609f102\"", "", 1), "f2a9", "toolkit_commit missing"},
 		{"an unknown field beside the build", strings.Replace(g, `"toolkit_modified": true`, `"toolkit_modified": true, "toolkit_built_by": "x"`, 1), "f2a9", "unknown field"},
-		{"a version that cannot be ordered", strings.Replace(g, `"toolkit_version": "0.3.0-dev"`, `"toolkit_version": "next"`, 1), "f2a9", `toolkit_version: "next" is not a version`},
+		{"a version that cannot be ordered", strings.Replace(g, `"toolkit_version": "0.3.0-dev"`, `"toolkit_version": "next"`, 1), "f2a9", `it was written by paisans "next", a version this paisans ` + version.Version + ` cannot order, so a newer paisans may have written it. Upgrade paisans`},
+		{"a version that is not one", strings.Replace(g, `"toolkit_version": "0.3.0-dev"`, `"toolkit_version": "0.3 dev"`, 1), "f2a9", `toolkit_version: "0.3 dev" is not a version`},
 		{"a short commit", strings.Replace(g, `"toolkit_commit": "519299d5cb009da4904cdf53c2025f1ad609f102"`, `"toolkit_commit": "519299d5cb0"`, 1), "f2a9", `toolkit_commit: "519299d5cb0" is not`},
 		{"an empty commit", strings.Replace(g, `"toolkit_commit": "519299d5cb009da4904cdf53c2025f1ad609f102"`, `"toolkit_commit": ""`, 1), "f2a9", `toolkit_commit: "" is not`},
 		{"a modified flag that is not a bool", strings.Replace(g, `"toolkit_modified": true`, `"toolkit_modified": "yes"`, 1), "f2a9", `toolkit_modified: "yes" is not true or false). The host's owner admits the deployment again`},
@@ -420,5 +421,22 @@ func TestForSite(t *testing.T) {
 	var se *admission.SiteError
 	if !errors.As(err, &se) || se.Site != "home-a" || len(se.Problems) != 2 {
 		t.Errorf("grants missing: %v", err)
+	}
+}
+
+// A record a release candidate wrote, or one a build from a tarball wrote,
+// naming its release tag, is read.
+func TestParseRecordOfAReleaseCandidate(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "admitted.f2a9.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rc := strings.Replace(string(data), `"toolkit_version": "0.3.0-dev"`, `"toolkit_version": "0.3.0-rc.1"`, 1)
+	rc = strings.Replace(rc, `"toolkit_commit": "519299d5cb009da4904cdf53c2025f1ad609f102",
+  "toolkit_modified": true`, `"toolkit_commit": "v0.3.0-rc.1",
+  "toolkit_modified": false`, 1)
+	rec, err := admission.ParseRecord([]byte(rc), "f2a9")
+	if err != nil || rec.Build != (version.Build{Version: "0.3.0-rc.1", Commit: "v0.3.0-rc.1"}) {
+		t.Errorf("got %+v, %v", rec.Build, err)
 	}
 }

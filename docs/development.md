@@ -25,15 +25,21 @@ release workflow runs the same target, so a local run builds what a release
 ships; `dist/` is ignored, because Go marks a binary `-dirty` when the tree
 holds untracked files.
 
-Every record paisans writes names the build that wrote it, so a binary
-always names its commit. `make release-binaries` sets it with
-`-ldflags "-X github.com/paisans-software/paisans-cli/internal/version.buildCommit=<full commit>"`,
+Every record paisans writes names the build that wrote it: its version,
+its commit, and whether the tree was modified. `make release-binaries` sets
+the commit with
+`-ldflags "-X github.com/paisans-software/paisans-cli/internal/version.buildCommit=<commit>"`,
 which the release workflow passes as `COMMIT`. A packager building from a
 source tarball, which holds no git metadata (Eg: the Homebrew formula), sets
-the release's commit the same way. Without it, a build from a git checkout
-names the commit Go recorded, a `go install ...@<version>` build names its
-module tag or the commit its pseudo-version carries, and a build with none of
-these names `unknown`.
+it the same way, to the release's tag (Eg: `v0.3.0` or `v0.3.0-rc.1`) or its
+full 40-character lower-case commit; any other value, a short or upper-case
+commit among them, makes every command refuse to run, naming the variable.
+Without it, a build from a git checkout names the commit Go recorded, and a
+`go install ...@<version>` build names its module tag or the commit its
+pseudo-version carries. A build none of these names a commit for runs the
+commands that write nothing (`version`, help, `validate`, `doctor`, a dry
+run) and refuses every one that writes a record (`--execute`, `render`),
+saying to build from git or with the flag.
 
 ## Run
 

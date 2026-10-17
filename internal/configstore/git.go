@@ -2,6 +2,7 @@ package configstore
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -56,8 +57,11 @@ type Version struct {
 	// Paisans-Toolkit-Modified trailers, which its signature covers.
 	// BuildOK is whether the message holds each of them once, as Commit
 	// writes them; a version without is refused as shape.
-	Build   version.Build
-	BuildOK bool
+	// BuildNewer is whether they would, but for a version this paisans
+	// cannot order: a newer paisans may have published it.
+	Build      version.Build
+	BuildOK    bool
+	BuildNewer bool
 }
 
 // git runs git in the repository with the user's and the system's
@@ -393,36 +397,45 @@ func buildTrailers(b version.Build) string {
 }
 
 // build reads the build trailers of a commit on its own, as revision reads
-// its revision. It is ok only when each trailer is there once and the
-// three make a build paisans records.
-func (r Repo) build(sha string) (version.Build, bool) {
+// its revision, and judges them with version.CheckBuild, the check every
+// record's build passes. ok is whether each trailer is there once and the
+// three make a build paisans records; newer is whether they would, but for
+// a version this paisans cannot order.
+func (r Repo) build(sha string) (b version.Build, ok, newer bool) {
 	out, err := r.git(nil, nil, "show", "-s", "--format=%(trailers:key=Paisans-Toolkit-Version,valueonly)%x00%(trailers:key=Paisans-Toolkit-Commit,valueonly)%x00%(trailers:key=Paisans-Toolkit-Modified,valueonly)", sha)
 	if err != nil {
-		return version.Build{}, false
+		return version.Build{}, false, false
 	}
 	fields := strings.Split(strings.TrimSuffix(string(out), "\n"), "\x00")
 	if len(fields) != 3 {
-		return version.Build{}, false
+		return version.Build{}, false, false
 	}
 	for i, f := range fields {
 		f, ok := strings.CutSuffix(f, "\n")
 		if !ok || strings.Contains(f, "\n") {
-			return version.Build{}, false
+			return version.Build{}, false, false
 		}
 		fields[i] = f
 	}
-	b := version.Build{Version: fields[0], Commit: fields[1]}
-	switch fields[2] {
-	case "true":
-		b.Modified = true
-	case "false":
-	default:
-		return version.Build{}, false
+	if fields[2] != "true" && fields[2] != "false" {
+		return version.Build{}, false, false
 	}
-	if len(b.Problems()) > 0 {
-		return version.Build{}, false
+	obj := map[string]json.RawMessage{"toolkit_modified": json.RawMessage(fields[2])}
+	for i, k := range []string{"toolkit_version", "toolkit_commit"} {
+		raw, err := json.Marshal(fields[i])
+		if err != nil {
+			return version.Build{}, false, false
+		}
+		obj[k] = raw
 	}
-	return b, true
+	b, err = version.CheckBuild(obj)
+	switch {
+	case err == nil:
+		return b, true, false
+	case version.IsNewer(err):
+		return b, false, true
+	}
+	return version.Build{}, false, false
 }
 
 // Versions lists every version in the repository with git's verdict on its
@@ -451,7 +464,7 @@ func (r Repo) Versions(allowedSigners string) ([]Version, error) {
 			v.Committed = time.Unix(secs, 0).UTC()
 		}
 		v.Revision = r.revision(v.SHA)
-		v.Build, v.BuildOK = r.build(v.SHA)
+		v.Build, v.BuildOK, v.BuildNewer = r.build(v.SHA)
 		if v.TreeOK, err = r.treeOK(v.SHA); err != nil {
 			return nil, err
 		}

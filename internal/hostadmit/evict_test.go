@@ -770,3 +770,29 @@ func TestEvictProceedsWhereNoNewerToolkitClaimed(t *testing.T) {
 		}
 	}
 }
+
+// Another deployment's registry entry that does not say which build
+// claimed the host does not stop evict: the plan names it for its owner,
+// and evicts this deployment.
+func TestEvictGoesOnPastAnotherEntryWithNoBuild(t *testing.T) {
+	h := evicted("watch", hostadmit.Flags{PublicPorts: true})()
+	_, mine := registry.ForRequest(requestFor("watch"), admitted)
+	data, err := registry.Encode(registry.Registry{Version: registry.Version, Deployments: map[string]registry.Entry{id: mine}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := `"0c0dc4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01":{"token":"0c0d","root":"/srv/paisans/0c0d","domain":"","site":"edge","claimed_at":"2026-10-01T09:00:00Z","interface":"psns-0c0d","listen_port":51899,"subnet":"10.50.0.0/24","address":"10.50.0.1","roles":""},`
+	withOther := strings.Replace(string(data), "{\"version\":1,\"deployments\":{\n", "{\"version\":1,\"deployments\":{\n"+other+"\n", 1)
+	plan, err := hostadmit.BuildEvict(withEntries(h.file(registry.Path, withOther)), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(plan.Warnings, func(w hostprep.Warning) bool {
+		return strings.Contains(w.Hint, "0c0dc4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01's entry does not say which build") && strings.Contains(w.Detail, "`paisans site evict`")
+	}) {
+		t.Errorf("the other entry is not named:\n%s", plan.Text())
+	}
+	if len(plan.Steps) == 0 {
+		t.Error("nothing was planned")
+	}
+}

@@ -40,7 +40,7 @@ var recordCases = addCases(
 	}},
 	goldenCase{name: "claim-public-ports-held-refused", site: "watch", flags: hostadmit.Flags{PublicPorts: true}, host: func() *fakeHost {
 		return home().file("/var/lib/paisans/registry.json", `{"version":1,"deployments":{`+"\n"+
-			`"0c0dc4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01":{"token":"0c0d","root":"/srv/paisans/0c0d","domain":"","site":"edge","claimed_at":"2026-10-01T09:00:00Z","interface":"psns-0c0d","listen_port":51899,"subnet":"10.50.0.0/24","address":"10.50.0.1","roles":"gateway","toolkit_version":"0.3.0-dev","toolkit_commit":"unknown","toolkit_modified":false}`+"\n}}\n")
+			`"0c0dc4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01":{"token":"0c0d","root":"/srv/paisans/0c0d","domain":"","site":"edge","claimed_at":"2026-10-01T09:00:00Z","interface":"psns-0c0d","listen_port":51899,"subnet":"10.50.0.0/24","address":"10.50.0.1","roles":"gateway","toolkit_version":"0.3.0-dev","toolkit_commit":"v0.3.0","toolkit_modified":false}`+"\n}}\n")
 	}},
 	goldenCase{name: "keys-some-present", focus: []string{"operators' keys"}, site: "home-a", flags: gateway, host: func() *fakeHost {
 		return home().answer(keysMarker, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA owner@laptop\npaisans-sidecar\n")

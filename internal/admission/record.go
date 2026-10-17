@@ -290,7 +290,10 @@ func ParseRecord(data []byte, token string) (Record, error) {
 			problems = append(problems, k+": missing")
 		}
 	}
-	if _, err := version.CheckBuild(keys); err != nil {
+	switch _, err := version.CheckBuild(keys); {
+	case version.IsNewer(err):
+		problems = append(problems, err.Error())
+	case err != nil:
 		problems = append(problems, err.Error()+". The host's owner admits the deployment again: `paisans site request`, then `paisans site admit`")
 	}
 	if len(problems) > 0 {

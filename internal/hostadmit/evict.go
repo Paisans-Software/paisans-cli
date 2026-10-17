@@ -75,11 +75,16 @@ func claimedWithoutRecord(e *evictor) []string {
 // admit installed and decides what host-wide is still needed from what
 // this binary knows, and a newer release may have installed or need what
 // it does not. The refusal names the highest release, the one to upgrade
-// to. A release this binary cannot order is refused as a newer one is.
-func refuseNewer(r registry.Registry) error {
+// to. A release this binary cannot order is refused as a newer one is. An
+// entry that does not say which build claimed the host (noBuild) orders
+// nothing, and is skipped.
+func refuseNewer(r registry.Registry, noBuild *registry.NoBuildError) error {
 	highest, newerOnes := "", []string{}
 	for _, id := range sortedKeys(r.Deployments) {
 		e := r.Deployments[id]
+		if noBuild != nil && slices.Contains(noBuild.IDs, id) {
+			continue
+		}
 		newer, err := version.Compare(e.Build.Version, version.Version)
 		if err != nil {
 			return fmt.Errorf("%s records that paisans %q claimed this host for deployment %s, which is not a release this paisans %s can order, so it may be a newer one that installed what this one does not know about. Nothing was changed. Upgrade paisans, and run site evict again", registry.Path, ui.Visible(e.Build.Version), ui.Visible(e.Token), version.Version)
@@ -153,10 +158,18 @@ func BuildEvict(t apply.Transport, in EvictInput) (*Plan, error) {
 	}
 	d := deployment.Deployment{ID: in.Deployment}
 	reg, err := registry.Read(t)
+	// An entry that does not say which build claimed the host, this
+	// deployment's or another's, does not stop evict: this one's goes with
+	// the evict, and another's is named below for its owner to admit again
+	// or evict, which is what that refusal elsewhere asks for.
+	var noBuild *registry.NoBuildError
+	if errors.As(err, &noBuild) {
+		err = nil
+	}
 	if err != nil {
 		return nil, shown(err)
 	}
-	if err := refuseNewer(reg); err != nil {
+	if err := refuseNewer(reg, noBuild); err != nil {
 		return nil, err
 	}
 	content, found, err := t.ReadFile("/etc/os-release")
@@ -240,6 +253,13 @@ func BuildEvict(t apply.Transport, in EvictInput) (*Plan, error) {
 	}
 	e := &evictor{reg: reg, rec: rec, dataDir: dataDir, fromFlag: fromFlag, planner: &planner{t: t, in: ain, d: d, f: f, profile: profile, host: host,
 		plan: &Plan{Deployment: in.Deployment, User: in.User, Profile: profile.ID() + " " + profile.Version(), Host: t.Describe()}}}
+	if noBuild != nil {
+		for _, id := range noBuild.IDs {
+			if id != in.Deployment {
+				e.warn(ui.Visible("registry: deployment "+id+"'s entry does not say which build of paisans claimed this host; evict leaves it"), "Its deployment's owner admits it again (`paisans site request`, then `paisans site admit`), or this host's owner evicts it with `paisans site evict`.")
+			}
+		}
+	}
 	if e.others, e.unreadable, err = others(e.planner); err != nil {
 		return nil, err
 	}

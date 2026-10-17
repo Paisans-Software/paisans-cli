@@ -1372,7 +1372,8 @@ commit, with `-dirty` when the tree had uncommitted changes:
 `paisans 0.1.0 (519299d5cb00)`. The commit comes from the first source that
 gives one: the one set at build time with `-ldflags -X`, the one Go recorded
 from the git checkout, or, for `go install ...@<version>`, the module's tag or
-the commit its pseudo-version carries. A build with none prints `(unknown)`. The version is the constant in `internal/version`: a release,
+the commit its pseudo-version carries. A build with none prints the version
+alone, and refuses every command that writes a record. The version is the constant in `internal/version`: a release,
 or on `develop` the next one's pre-release, as `0.3.0-dev`, which orders after
 `0.2.0` and before `0.3.0`. A blueprint's `requires_toolkit` is checked
 against it. Every record paisans writes on a host or in the configuration's

@@ -1,9 +1,11 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"net"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -178,6 +180,7 @@ func runSiteDeployments(args []string) error {
 		return fmt.Errorf("site deployments: %s: listing the admission records in %s: %w. Nothing is listed", dest, admission.Dir, err)
 	}
 	var found leftoverProbe
+	var noBuild *registry.NoBuildError
 	reg := registry.Registry{Deployments: map[string]registry.Entry{}}
 	if *sudo {
 		// The probe before the registry, since it fails on a registry
@@ -192,7 +195,13 @@ func runSiteDeployments(args []string) error {
 			s.Fail(err)
 			return fmt.Errorf("site deployments: %s: listing %s: %w. Nothing is listed", dest, deployment.Base, err)
 		}
-		if reg, err = registry.Read(t); err != nil {
+		reg, err = registry.Read(t)
+		// An entry that does not say which build claimed the host is
+		// flagged below; every other entry is listed all the same.
+		if errors.As(err, &noBuild) {
+			err = nil
+		}
+		if err != nil {
 			s.Fail(err)
 			return fmt.Errorf("site deployments: %w. Nothing is listed", err)
 		}
@@ -228,6 +237,11 @@ func runSiteDeployments(args []string) error {
 	for _, id := range ids {
 		e := reg.Deployments[id]
 		tokens[e.Token], roots[e.Root] = true, true
+		if noBuild != nil && slices.Contains(noBuild.IDs, id) {
+			line := strings.TrimSuffix(registryLine(id, e), ", claimed by paisans "+e.Build.String())
+			r.Warn(line+", in an entry that does not say which build of paisans claimed the host: its owner admits it again (`paisans site request`, then `paisans site admit`)", noBuild.Error())
+			continue
+		}
 		r.Step(registryLine(id, e)).End(ui.OK, "")
 	}
 	if len(ids) == 0 {

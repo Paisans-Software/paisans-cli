@@ -1,11 +1,19 @@
 # The toolkit's version: the constant in internal/version/version.go, the one
 # place it is written. The binary reports it, blueprints' requires_toolkit is
 # checked against it, and the release job tags whatever value reaches main.
-# Between releases develop holds the next minor's -dev (Eg: 0.3.0-dev), so
-# the release a bump target counts from is the newest vX.Y.Z tag.
+# Between releases develop holds the next release's -dev (Eg: 0.3.0-dev), so
+# the release a bump target counts from is the newest final vX.Y.Z tag.
+#
+# Tags are ordered by their numbers alone, and pre-release tags (Eg:
+# v0.3.0-rc.1) never count as a release: git's own version sort puts
+# v0.3.0-rc.1 above v0.3.0. LASTRELEASE is the newest final release, and
+# PRERELEASED the newest release a pre-release tag was cut for, whether or
+# not that release has been cut since.
 VERSION ?=
 VERSION_FILE := internal/version/version.go
-LASTRELEASE := $(shell git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1 | sed 's/^v//')
+SEMVER_SORT := sort -t. -k1,1n -k2,2n -k3,3n
+LASTRELEASE := $(shell git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$$' | sed 's/^v//' | $(SEMVER_SORT) | tail -1)
+PRERELEASED := $(shell git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-' | sed -E 's/^v([0-9]+\.[0-9]+\.[0-9]+)-.*/\1/' | sort -u | $(SEMVER_SORT) | tail -1)
 # kacl-cli, the changelog tool CI runs, at the version CI pins.
 KACL ?= uvx --from python-kacl==0.7.0 kacl-cli
 
@@ -17,6 +25,7 @@ KACL ?= uvx --from python-kacl==0.7.0 kacl-cli
 # feature work gates it.
 #
 #   make bump VERSION=0.2.1
+#   make bump VERSION=0.3.0-rc.1   a pre-release, published as one
 #   make bump-patch     last release 0.2.0 -> 0.2.1
 #   make bump-minor     last release 0.2.0 -> 0.3.0
 #   make bump-major     last release 0.2.0 -> 1.0.0
@@ -37,8 +46,9 @@ KACL ?= uvx --from python-kacl==0.7.0 kacl-cli
 # commit no review has passed yet, and a tag on the wrong commit is the
 # painful part to undo.
 bump:
-	@if [ -z "$(VERSION)" ]; then echo "usage: make bump VERSION=x.y.z"; exit 1; fi
-	@echo "$(VERSION)" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$$' || { echo "VERSION must look like x.y.z"; exit 1; }
+	@if [ -z "$(VERSION)" ]; then echo "usage: make bump VERSION=x.y.z or x.y.z-rc.N"; exit 1; fi
+	@echo "$(VERSION)" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?$$' || { echo "VERSION must look like x.y.z or x.y.z-<pre-release> (Eg: 0.3.0-rc.1)"; exit 1; }
+	@if echo "$(VERSION)" | grep -Eq -- '-dev(\.|$$)'; then echo "$(VERSION) is develop's version, never a release; make dev sets it"; exit 1; fi
 	@test -z "$$(git status --porcelain)" || { echo "working tree is dirty; commit first"; exit 1; }
 	@if git rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null; then echo "tag v$(VERSION) already exists"; exit 1; fi
 	@$(KACL) get unreleased | grep -q '^- ' || { echo "[Unreleased] in CHANGELOG.md has no bullets; there is nothing to release"; exit 1; }
@@ -64,10 +74,10 @@ bump:
 	@echo "change to an existing deployment) in the body of the pull request into"
 	@echo "main: it becomes the top of the release notes."
 
-# Derive the next version from the newest release tag, then hand off to
-# bump so its tag, changelog and working tree checks all still apply. The
-# constant on develop is a -dev version, which names no release to count
-# from.
+# Derive the next version from the newest final release tag, then hand off
+# to bump so its tag, changelog and working tree checks all still apply.
+# The constant on develop is a -dev version, which names no release to
+# count from, and a pre-release tag is no release either.
 bump-major:
 	@test -n "$(LASTRELEASE)" || { echo "no vX.Y.Z tag here; fetch the tags, or give make bump VERSION=x.y.z"; exit 1; }
 	@"$(MAKE)" bump VERSION=$$(echo "$(LASTRELEASE)" | awk -F. '{print $$1+1".0.0"}')
@@ -80,19 +90,23 @@ bump-patch:
 	@test -n "$(LASTRELEASE)" || { echo "no vX.Y.Z tag here; fetch the tags, or give make bump VERSION=x.y.z"; exit 1; }
 	@"$(MAKE)" bump VERSION=$$(echo "$(LASTRELEASE)" | awk -F. '{print $$1"."$$2"."$$3+1}')
 
-# After a release is tagged, move develop to the next pre-release, so no
-# build of develop reports a release it is not. The default is the next
-# minor after the newest release tag, as -dev; VERSION=x.y.z names another.
-# The commit starts with kacl-skip: because it changes nothing an operator
-# would notice.
+# After a release or a pre-release is tagged, move develop to the next
+# -dev, so no build of develop reports a release it is not. After a
+# pre-release whose release is not cut yet, that is the release's -dev,
+# which orders below its pre-releases; otherwise it is the next minor after
+# the newest final release. VERSION=x.y.z names another. The commit starts
+# with kacl-skip: because it changes nothing an operator would notice.
 #
 #   make dev                  last release 0.3.0 -> 0.4.0-dev
+#   make dev                  after v0.3.0-rc.1, before v0.3.0 -> 0.3.0-dev
 #   make dev VERSION=0.3.1    -> 0.3.1-dev
 dev:
 	@test -z "$$(git status --porcelain)" || { echo "working tree is dirty; commit first"; exit 1; }
-	@test -n "$(LASTRELEASE)" || { echo "no vX.Y.Z tag here; fetch the tags first"; exit 1; }
-	@next="$(VERSION)"; \
-	if [ -z "$$next" ]; then next=$$(echo "$(LASTRELEASE)" | awk -F. '{print $$1"."$$2+1".0"}'); fi; \
+	@test -n "$(LASTRELEASE)$(PRERELEASED)" || { echo "no vX.Y.Z tag here; fetch the tags first"; exit 1; }
+	@next="$(VERSION)"; last="$(LASTRELEASE)"; pre="$(PRERELEASED)"; \
+	if [ -z "$$next" ] && [ -n "$$pre" ] && ! git rev-parse -q --verify "refs/tags/v$$pre" >/dev/null && \
+		[ "$$(printf '%s\n%s\n' "$${last:-0.0.0}" "$$pre" | $(SEMVER_SORT) | tail -1)" = "$$pre" ]; then next="$$pre"; fi; \
+	if [ -z "$$next" ]; then next=$$(echo "$$last" | awk -F. '{print $$1"."$$2+1".0"}'); fi; \
 	echo "$$next" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$$' || { echo "VERSION must look like x.y.z"; exit 1; }; \
 	if git rev-parse -q --verify "refs/tags/v$$next" >/dev/null; then echo "v$$next is released already; develop moves past it"; exit 1; fi; \
 	sed -i.relbak -E "s/^(const Version = \")[^\"]*(\")/\1$$next-dev\2/" $(VERSION_FILE) && rm -f $(VERSION_FILE).relbak; \

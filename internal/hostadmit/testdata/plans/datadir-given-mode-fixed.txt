@@ -98,7 +98,7 @@ step 24: write the admission record
     |   "web_server": null,
     |   "system_docker_disabled": false,
     |   "toolkit_version": "<release>",
-    |   "toolkit_commit": "unknown",
+    |   "toolkit_commit": "0000000000000000000000000000000000000000",
     |   "toolkit_modified": false
     | }
 

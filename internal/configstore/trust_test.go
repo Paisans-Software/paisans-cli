@@ -542,3 +542,29 @@ func TestJudgeRemovedThenReaddedWithNewKey(t *testing.T) {
 		wantHeads(t, v, "v5")
 	}
 }
+
+// A version a newer paisans may have published is untrusted with the
+// upgrade remedy, one without a build with the publish remedy, and a pinned
+// root without a build says how a new first version is made.
+func TestJudgeBuildReasons(t *testing.T) {
+	f := chain()
+	f.add("v4", 4, "fp-alice", on("v3"), "alice")
+	x := f.vs["v4"]
+	x.BuildOK, x.BuildNewer, x.Build = false, true, version.Build{Version: "1.0", Commit: "v1.0"}
+	f.vs["v4"] = x
+	if v := judgeOK(t, f, Anchor{Root: "v1"}); v.Trusted["v4"] || !strings.Contains(v.Reasons["v4"], "upgrade paisans") {
+		t.Errorf("newer: %q", v.Reasons["v4"])
+	}
+	x.BuildNewer = false
+	f.vs["v4"] = x
+	if v := judgeOK(t, f, Anchor{Root: "v1"}); !strings.Contains(v.Reasons["v4"], "`paisans config publish --execute`") {
+		t.Errorf("no build: %q", v.Reasons["v4"])
+	}
+	f = chain()
+	root := f.vs["v1"]
+	root.BuildOK = false
+	f.vs["v1"] = root
+	if _, err := Judge(f.graph(), Anchor{Root: "v1"}); err == nil || !strings.Contains(err.Error(), "`paisans apply --execute` publishes a new first version") {
+		t.Errorf("root: %v", err)
+	}
+}

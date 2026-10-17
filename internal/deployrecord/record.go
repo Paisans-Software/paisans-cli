@@ -289,6 +289,9 @@ func read(t registry.Runner, d deployment.Deployment) (doc, string, bool, error)
 		return newDoc(), "", false, nil
 	}
 	m, err := parseDoc(content)
+	if version.IsNewer(err) {
+		return doc{}, "", false, fmt.Errorf("%s: %s: %w", t.Describe(), Path(d), err)
+	}
 	if err != nil {
 		return doc{}, "", false, fmt.Errorf("%s: %s is %w: %v", t.Describe(), Path(d), ErrMalformed, err)
 	}
@@ -383,7 +386,7 @@ func Update(hosts map[string]registry.Runner, d deployment.Deployment, ch Change
 	for _, gw := range slices.Sorted(maps.Keys(hosts)) {
 		m, raw, ok, err := read(hosts[gw], d)
 		switch {
-		case errors.Is(err, ErrMalformed):
+		case errors.Is(err, ErrMalformed), version.IsNewer(err):
 			return res, err
 		case err != nil:
 			res.Missed[gw] = err

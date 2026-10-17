@@ -37,6 +37,14 @@ func TestMeets(t *testing.T) {
 		{">= 0.2", "0.3.0-dev", true},
 		{">= 0.3", "0.3.0-dev", false},
 		{">= 0.3.0", "0.3.0-dev", false},
+		{">= 0.3", "0.3.0-rc.1", false},
+		{">= 0.2", "0.3.0-rc.1", true},
+		{">= 0.3.0-rc.1", "0.3.0-rc.1", true},
+		{">= 0.3.0-rc.2", "0.3.0-rc.1", false},
+		{">= 0.3.0-rc.1", "0.3.0", true},
+		{">= 0.3.0-rc.1", "0.3.0-dev", false},
+		{">= 0.3-rc.1", "0.3.0", false},
+		{">= 0.3.x", "0.3.0", false},
 	} {
 		err := meets(c.req, c.have)
 		if (err == nil) != c.ok {

@@ -250,11 +250,11 @@ func requirement(req string) error {
 	return meets(req, version.Version)
 }
 
-// meets checks the requirement req, ">= MAJOR.MINOR[.PATCH]", against the
-// toolkit version have, ordered as version.Compare orders them. Every build
-// counts as the version its commit holds, so a build of develop, a -dev
-// version, meets what the last release meets and not what its own coming
-// release does.
+// meets checks the requirement req, ">= MAJOR.MINOR[.PATCH[-<pre-release>]]",
+// against the toolkit version have, ordered as version.Compare orders them.
+// Every build counts as the version its commit holds, so a build of
+// develop, a -dev version, meets what the last release meets and not what
+// its own coming release does, and a release candidate meets what it names.
 func meets(req, have string) error {
 	if req == "" {
 		return nil
@@ -263,16 +263,20 @@ func meets(req, have string) error {
 	if !ok {
 		return fmt.Errorf("requires_toolkit: is %q; write it as >= MAJOR.MINOR", req)
 	}
-	need, err := parseVersion(strings.TrimSpace(want))
-	if err != nil {
-		return fmt.Errorf("requires_toolkit: %w", err)
+	want = strings.TrimSpace(want)
+	need := strings.TrimPrefix(want, "v")
+	if core, _, _ := strings.Cut(need, "-"); strings.Count(core, ".") == 1 && !strings.Contains(need, "-") {
+		need += ".0"
 	}
-	c, err := version.Compare(have, fmt.Sprintf("%d.%d.%d", need[0], need[1], need[2]))
+	if !version.Valid(need) {
+		return fmt.Errorf("requires_toolkit: %q is not MAJOR.MINOR, MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-<pre-release>", want)
+	}
+	c, err := version.Compare(have, need)
 	if err != nil {
 		return fmt.Errorf("the toolkit's own version: %w", err)
 	}
 	if c < 0 {
-		return fmt.Errorf("requires_toolkit: needs Paisans %s, and this is %s", strings.TrimSpace(want), have)
+		return fmt.Errorf("requires_toolkit: needs Paisans %s, and this is %s", want, have)
 	}
 	return nil
 }

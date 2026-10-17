@@ -26,13 +26,21 @@ func TestCompare(t *testing.T) {
 		{"0.3.0-dev", "0.3.1", -1},
 		{"0.4.0-dev", "0.3.0-dev", 1},
 		{"1.0.0-dev", "0.99.0", 1},
+		{"0.3.0-dev", "0.3.0-rc.1", -1},
+		{"0.3.0-rc.1", "0.3.0-rc.2", -1},
+		{"0.3.0-rc.2", "0.3.0-rc.10", -1},
+		{"0.3.0-rc.10", "0.3.0", -1},
+		{"0.3.0-rc.1", "0.2.0", 1},
+		{"0.3.0-rc", "0.3.0-rc.1", -1},
+		{"0.3.0-1", "0.3.0-alpha", -1},
+		{"0.3.0-rc.1", "0.3.0-rc.1", 0},
 	} {
 		got, err := Compare(c.a, c.b)
 		if err != nil || got != c.want {
 			t.Errorf("Compare(%s, %s) = %d, %v, want %d", c.a, c.b, got, err, c.want)
 		}
 	}
-	for _, bad := range []string{"", "0.2", "v0.2.0", "0.2.0 (519299d5cb00)", "0.2.x", "0.-1.0", "0.02.0", "0.2.0.1", "+1.0.0", "1.2.3-rc1", "1.2.3 ", "1.2.3-dev-dev", "1.2.3-DEV", "-dev"} {
+	for _, bad := range []string{"", "0.2", "v0.2.0", "0.2.0 (519299d5cb00)", "0.2.x", "0.-1.0", "0.02.0", "0.2.0.1", "+1.0.0", "1.2.3 ", "-dev", "1.2.3-", "1.2.3-rc..1", "1.2.3-rc.01", "1.2.3+build", "1.2.3-rc.1+build", "1.2.3-r c"} {
 		if _, err := Compare(bad, "0.2.0"); err == nil {
 			t.Errorf("Compare(%q) ordered it", bad)
 		}
@@ -41,6 +49,21 @@ func TestCompare(t *testing.T) {
 
 // The constant is a version Compare orders, so every record a build
 // writes can be ordered.
+// The chain a release passes through orders as each step is cut.
+func TestAReleaseChainOrders(t *testing.T) {
+	chain := []string{"0.2.0", "0.3.0-dev", "0.3.0-rc.1", "0.3.0-rc.2", "0.3.0-rc.10", "0.3.0", "0.3.1-dev", "0.4.0-dev"}
+	for i := 1; i < len(chain); i++ {
+		if c, err := Compare(chain[i-1], chain[i]); err != nil || c >= 0 {
+			t.Errorf("%s against %s: %d, %v", chain[i-1], chain[i], c, err)
+		}
+	}
+	for _, v := range []string{"0.3.0-rc.1", "1.2.3-rc1", "1.2.3-DEV"} {
+		if !Valid(v) {
+			t.Errorf("%s is not valid", v)
+		}
+	}
+}
+
 func TestTheVersionConstantIsOrderable(t *testing.T) {
 	if !Valid(Version) {
 		t.Errorf("Version %q cannot be ordered", Version)
@@ -76,8 +99,7 @@ func TestFromBuildInfo(t *testing.T) {
 		{"module pseudo-version", "", module("v0.0.0-20261017120000-519299d5cb00"), Build{"0.3.0", "519299d5cb00", false}, "0.3.0 (519299d5cb00)"},
 		{"module pseudo-version after a pre-release", "", module("v0.3.0-rc.1.0.20261017120000-519299d5cb00"), Build{"0.3.0", "519299d5cb00", false}, "0.3.0 (519299d5cb00)"},
 		{"module pseudo-version after a release", "", module("v0.3.1-0.20261017120000-519299d5cb00+dirty"), Build{"0.3.0", "519299d5cb00", false}, "0.3.0 (519299d5cb00)"},
-		{"a devel build with no commit", "", module("(devel)"), Build{"0.3.0", Unknown, false}, "0.3.0 (unknown)"},
-		{"no build information", "", nil, Build{"0.3.0", Unknown, false}, "0.3.0 (unknown)"},
+		{"ldflags, a release tag", "v0.3.0-rc.1", nil, Build{"0.3.0", "v0.3.0-rc.1", false}, "0.3.0 (v0.3.0-rc.1)"},
 	} {
 		got := FromBuildInfo("0.3.0", c.ldCommit, c.info)
 		if got != c.want {
@@ -90,13 +112,40 @@ func TestFromBuildInfo(t *testing.T) {
 			t.Errorf("%s: %v", c.name, p)
 		}
 	}
+	// No source names a commit: a devel build outside git, or no build
+	// information at all. Such a build names none, and writes nothing.
+	for name, info := range map[string]*debug.BuildInfo{"a devel build": module("(devel)"), "no build information": nil} {
+		got := FromBuildInfo("0.3.0", "", info)
+		if got != (Build{Version: "0.3.0"}) || got.String() != "0.3.0" || len(got.Problems()) == 0 {
+			t.Errorf("%s: got %+v", name, got)
+		}
+	}
 }
 
-// This binary's build is complete whatever built it: its commit is never
-// empty.
+// A test binary, which go test builds without VCS information, names
+// TestCommit, so the records tests write are sound; it can write them.
 func TestCurrentIsComplete(t *testing.T) {
-	if b := Current(); b.Commit == "" || len(b.Problems()) > 0 {
+	if b := Current(); b.Commit == "" || len(b.Problems()) > 0 || Writable() != nil {
 		t.Errorf("%+v: %v", b, b.Problems())
+	}
+}
+
+// A commit set with -ldflags -X that no record may hold is refused, naming
+// the variable; a full commit or a release tag is not.
+func TestCheckLinked(t *testing.T) {
+	saved := buildCommit
+	t.Cleanup(func() { buildCommit = saved })
+	for _, bad := range []string{"519299d", "519299d5cb00", "519299D5CB009DA4904CDF53C2025F1AD609F102", "main", "0.3.0"} {
+		buildCommit = bad
+		if err := CheckLinked(); err == nil || !strings.Contains(err.Error(), CommitVar) || !strings.Contains(err.Error(), bad) {
+			t.Errorf("%q: got %v", bad, err)
+		}
+	}
+	for _, good := range []string{"", commit, "v0.3.0", "v0.3.0-rc.1"} {
+		buildCommit = good
+		if err := CheckLinked(); err != nil {
+			t.Errorf("%q: %v", good, err)
+		}
 	}
 }
 
@@ -107,7 +156,8 @@ func TestBuildProblems(t *testing.T) {
 		{Version: "0.3.0", Commit: "519299d5cb0"},
 		{Version: "0.3.0", Commit: "519299D5CB009DA4904CDF53C2025F1AD609F102"},
 		{Version: "0.3.0", Commit: "main"},
-		{Version: "0.3.0", Commit: Unknown, Modified: true},
+		{Version: "0.3.0", Commit: "unknown"},
+		{Version: "0.3.0", Commit: "v0.3"},
 		{Version: "0.3.0", Commit: "v0.3.0", Modified: true},
 	} {
 		if len(b.Problems()) == 0 {
@@ -155,21 +205,51 @@ func TestCheckBuild(t *testing.T) {
 		t.Errorf("got %+v, %v", b, err)
 	}
 	for bad, want := range map[string]string{
-		`{"toolkit_version":"","toolkit_commit":"unknown","toolkit_modified":false}`:      `toolkit_version: "" is not a version`,
-		`{"toolkit_version":"next","toolkit_commit":"unknown","toolkit_modified":false}`:  `toolkit_version: "next" is not a version`,
-		`{"toolkit_version":null,"toolkit_commit":"unknown","toolkit_modified":false}`:    "toolkit_version: null",
-		`{"toolkit_version":"0.3.0","toolkit_commit":null,"toolkit_modified":false}`:      "toolkit_commit: null",
-		`{"toolkit_version":"0.3.0","toolkit_commit":"","toolkit_modified":false}`:        `toolkit_commit: "" is not`,
-		`{"toolkit_version":"0.3.0","toolkit_commit":"abc","toolkit_modified":false}`:     `toolkit_commit: "abc" is not`,
-		`{"toolkit_version":"0.3.0","toolkit_commit":7,"toolkit_modified":false}`:         "toolkit_commit: 7 is not a string",
-		`{"toolkit_version":"0.3.0","toolkit_commit":"unknown","toolkit_modified":"yes"}`: `toolkit_modified: "yes" is not true or false`,
-		`{"toolkit_version":"0.3.0","toolkit_commit":"unknown","toolkit_modified":true}`:  `toolkit_modified: true, and toolkit_commit "unknown" is no tree`,
-		`{"toolkit_version":"0.3.0","toolkit_modified":true}`:                             "toolkit_commit missing",
+		`{"toolkit_version":"","toolkit_commit":"v0.3.0","toolkit_modified":false}`:          `toolkit_version: "" is not a version`,
+		`{"toolkit_version":"0.3.0 (x)","toolkit_commit":"v0.3.0","toolkit_modified":false}`: `toolkit_version: "0.3.0 (x)" is not a version`,
+		`{"toolkit_version":null,"toolkit_commit":"v0.3.0","toolkit_modified":false}`:        "toolkit_version: null",
+		`{"toolkit_version":"0.3.0","toolkit_commit":null,"toolkit_modified":false}`:         "toolkit_commit: null",
+		`{"toolkit_version":"0.3.0","toolkit_commit":"","toolkit_modified":false}`:           `toolkit_commit: "" is not`,
+		`{"toolkit_version":"0.3.0","toolkit_commit":"abc","toolkit_modified":false}`:        `toolkit_commit: "abc" is not`,
+		`{"toolkit_version":"0.3.0","toolkit_commit":7,"toolkit_modified":false}`:            "toolkit_commit: 7 is not a string",
+		`{"toolkit_version":"0.3.0","toolkit_commit":"v0.3.0","toolkit_modified":"yes"}`:     `toolkit_modified: "yes" is not true or false`,
+		`{"toolkit_version":"0.3.0","toolkit_commit":"v0.3.0","toolkit_modified":true}`:      `toolkit_modified: true, and toolkit_commit "v0.3.0" is no tree`,
+		`{"toolkit_version":"0.3.0","toolkit_modified":true}`:                                "toolkit_commit missing",
 	} {
 		var nb *NoBuildError
 		err := RequireBuild([]byte(bad))
 		if !errors.As(err, &nb) || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: got %v, want %q", bad, err, want)
 		}
+	}
+}
+
+// A version this paisans cannot order, beside an otherwise sound build, is
+// a newer paisans' record, refused with the upgrade remedy and the build
+// read.
+func TestCheckBuildNewer(t *testing.T) {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(`{"toolkit_version":"1.0","toolkit_commit":"`+commit+`","toolkit_modified":false}`), &obj); err != nil {
+		t.Fatal(err)
+	}
+	b, err := CheckBuild(obj)
+	var newer *NewerError
+	if !errors.As(err, &newer) || !IsNewer(err) || b.Version != "1.0" || !strings.Contains(err.Error(), "Upgrade paisans") {
+		t.Errorf("got %+v, %v", b, err)
+	}
+	if err := RequireBuild([]byte(`{"toolkit_version":"1.0","toolkit_commit":"main","toolkit_modified":false}`)); IsNewer(err) {
+		t.Errorf("a bad commit beside it is no newer build: %v", err)
+	}
+}
+
+// A build that names no commit refuses to write, saying how to build one
+// that does; a build that names one writes.
+func TestWritable(t *testing.T) {
+	err := FromBuildInfo("0.3.0", "", nil).Writable()
+	if err == nil || !strings.Contains(err.Error(), "git checkout") || !strings.Contains(err.Error(), "-X "+CommitVar+"=") {
+		t.Errorf("got %v", err)
+	}
+	if err := FromBuildInfo("0.3.0", "v0.3.0", nil).Writable(); err != nil {
+		t.Error(err)
 	}
 }

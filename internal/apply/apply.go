@@ -1579,6 +1579,9 @@ func readManifest(t Transport, d deployment.Deployment) (map[string]render.Manif
 	// which is what every other reader's refusal of it asks for.
 	m, err = render.ParseManifest([]byte(content))
 	var noBuild *version.NoBuildError
+	if version.IsNewer(err) {
+		return nil, m, fmt.Errorf("%s: %w", manifestPath(d), err)
+	}
 	if err != nil && !errors.As(err, &noBuild) {
 		return nil, m, fmt.Errorf("%s is not readable as a manifest: %w\nIt records what the last apply wrote. Delete it to treat every file on this host as somebody else's, which is the safe reading", manifestPath(d), err)
 	}

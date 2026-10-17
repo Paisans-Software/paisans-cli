@@ -291,7 +291,7 @@ func storedX(adds, removed string) string {
 	if removed != "" {
 		e += `,"removed":[` + removed + `]`
 	}
-	return `{"version":1,"updated_at":"","sites":{"x":{` + e + `}},"apps":{},"pocket_id_groups":{},"toolkit_version":"0.3.0","toolkit_commit":"unknown","toolkit_modified":false}` + "\n"
+	return `{"version":1,"updated_at":"","sites":{"x":{` + e + `}},"apps":{},"pocket_id_groups":{},"toolkit_version":"0.3.0","toolkit_commit":"v0.3.0","toolkit_modified":false}` + "\n"
 }
 
 // A gateway left out of a write holds a removal of the tag compaction would

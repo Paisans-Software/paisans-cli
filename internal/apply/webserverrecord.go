@@ -34,6 +34,9 @@ func manifestRefused(d deployment.Deployment, err error) error {
 	if errors.As(err, &noBuild) {
 		return fmt.Errorf("%s: %w. Apply the site again, which writes it anew", manifestPath(d), err)
 	}
+	if version.IsNewer(err) {
+		return fmt.Errorf("%s: %w", manifestPath(d), err)
+	}
 	return fmt.Errorf("%s is not readable as a manifest: %w\nIt records what the last apply wrote. Delete it to treat every file on this host as somebody else's, which is the safe reading", manifestPath(d), err)
 }
 

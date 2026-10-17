@@ -1290,6 +1290,9 @@ func (w *world) inspect(t apply.Transport, cfg *config.Config) (*hostcheck.Inven
 			inv.ManifestErr = fmt.Errorf("%s: %w. Apply the site again, which writes it anew", dep.Manifest(), err)
 			err = nil
 		}
+		if version.IsNewer(err) {
+			err = nil
+		}
 		if err == nil {
 			inv.ManifestFiles = m.Files
 			inv.ManifestWebServer = m.WebServer

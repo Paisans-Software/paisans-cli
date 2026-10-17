@@ -223,9 +223,12 @@ on a shared branch unasked.
 `Version` constant in `internal/version/version.go`. `paisans version` prints
 it, a blueprint's `requires_toolkit` is checked against it, and a release is
 tagged `vMAJOR.MINOR.PATCH` from it. Between releases `develop` holds the next
-pre-release, `MAJOR.MINOR.PATCH-dev` (Eg: `0.3.0-dev` after `v0.2.0`), which
-orders after the last release and before its own: a build of `develop` never
-reports a release it is not. Every record the toolkit writes carries the build
+release's `-dev` (Eg: `0.3.0-dev` after `v0.2.0`), which orders after the last
+release and below the next one's pre-releases: a build of `develop` never
+reports a release it is not. A pre-release, `make bump VERSION=0.3.0-rc.1`,
+is released like a release, as a GitHub pre-release that never becomes the
+latest; `0.3.0-dev < 0.3.0-rc.1 < 0.3.0-rc.2 < 0.3.0`, as semantic versioning
+orders them. Every record the toolkit writes carries the build
 that wrote it, `version.Build`: the version, the commit and whether the tree
 was modified. `0.x` holds while command names remain
 provisional. The operator reconciler, which the `pocket-id` blueprint runs,
@@ -242,7 +245,8 @@ head commit's message with `kacl-skip:`.
 **A release is cut in four steps**; the first and the last are the only ones ever yours:
 
 1. `make bump-patch`, `make bump-minor`, `make bump-major` or
-   `make bump VERSION=x.y.z` on a branch. It sets the constant, moves the
+   `make bump VERSION=x.y.z` (or `x.y.z-rc.N`) on a branch. The bump targets
+   count from the newest final release tag. It sets the constant, moves the
    `[Unreleased]` bullets into a dated section for that version, and commits
    both as `kacl-skip: release x.y.z`. It refuses a dirty tree, a version
    already tagged and an empty `[Unreleased]`. The branch goes to `develop`
@@ -256,11 +260,13 @@ head commit's message with `kacl-skip:`.
 3. The founder merges that pull request **with a merge commit, never a squash
    or a rebase**, which keeps `main` an ancestor of `develop`.
    `.github/workflows/release.yml` sees a version on `main` with no tag, tags
-   it and publishes the GitHub Release, with the changes since the previous
-   release listed under the operator notes and the Linux binaries and
+   it and publishes the GitHub Release (a pre-release for an `-rc.N`), with the
+   changes since the previous final release listed under the operator notes and the Linux binaries and
    `SHA256SUMS` that `make release-binaries` builds attached.
 4. Once the release is tagged, `make dev` on a branch from `develop` moves the
-   constant to the next minor's `-dev` (`make dev VERSION=x.y.z` for another),
+   constant to the next minor's `-dev`, or, after a pre-release whose release
+   is not cut yet, back to that release's `-dev` (`make dev VERSION=x.y.z` for
+   another),
    committed as `kacl-skip: develop is x.y.z-dev`, as a pull request into
    `develop`. `release.yml` refuses a `-dev` version that reaches `main`.
 

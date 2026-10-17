@@ -307,7 +307,7 @@ func (p *Plan) recheckToolkit(t apply.Transport) error {
 	if errors.As(err, &noBuild) {
 		return fmt.Errorf("site remove %s: %s: %w. Apply the site again, which writes it anew. Nothing was changed", p.Site, p.dep().Manifest(), err)
 	}
-	if err != nil {
+	if err != nil && !version.IsNewer(err) {
 		return fmt.Errorf("site remove %s: %s is not readable as a manifest, so no file there is provably this deployment's. Nothing was changed", p.Site, p.dep().Manifest())
 	}
 	return p.refuseNewer(p.dep().Manifest(), m.Build.Version)

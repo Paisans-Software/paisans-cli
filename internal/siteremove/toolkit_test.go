@@ -32,7 +32,7 @@ func toolkitForms(w *world) map[string]func() (*siteremove.Plan, error) {
 // deployment's, and the newer one may have put things there it does not
 // know about.
 func TestRefusesASiteANewerToolkitApplied(t *testing.T) {
-	for _, recorded := range []string{"99.0.0", "99.0.0-dev"} {
+	for _, recorded := range []string{"99.0.0", "99.0.0-dev", "99.0.0-rc.1", "next"} {
 		w := setup(t)
 		h := w.hosts["home-b"]
 		h.setToolkitVersion(t, recorded)
@@ -114,10 +114,10 @@ func TestRefusesAManifestWithNoBuild(t *testing.T) {
 	}
 }
 
-// A manifest whose version cannot be ordered does not say which build
+// A manifest whose version is no version at all does not say which build
 // wrote it, and is refused in every form as one without a build is.
 func TestRefusesAManifestWhoseVersionCannotBeOrdered(t *testing.T) {
-	for _, recorded := range []string{"0.2.0 (519299d5cb00)", "next", ""} {
+	for _, recorded := range []string{"0.2.0 (519299d5cb00)", ""} {
 		w := setup(t)
 		h := w.hosts["home-b"]
 		h.setToolkitVersion(t, recorded)
