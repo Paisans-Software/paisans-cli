@@ -1141,8 +1141,7 @@ paisans site remove --force --ssh admin@203.0.113.9 --id f2a9 --execute --delete
   a site whose manifest, `/srv/paisans/<token>/.paisans-manifest.json`, says
   a newer release of paisans applied it, or names a release it cannot order:
   what is provably the deployment's is decided by the binary running the
-  removal. Upgrade paisans and run it again; no flag overrides it. A
-  manifest that records no release is not checked, and the plan says so.
+  removal. Upgrade paisans and run it again; no flag overrides it.
 * **`--execute`:** runs the stages, stopping at the first gate that fails. Stage
   3 deletes the record of what the deployment granted on the host,
   `/srv/paisans/<token>/.paisans/granted.json`, last. It deletes the host's

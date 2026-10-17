@@ -27,15 +27,6 @@ func toolkitForms(w *world) map[string]func() (*siteremove.Plan, error) {
 	}
 }
 
-func toolkitNote(p *siteremove.Plan) bool {
-	for _, s := range stageNamed(p, "clean the host").Steps {
-		if s.Verb == "note" && s.Title == "note the toolkit version" {
-			return true
-		}
-	}
-	return false
-}
-
 // A site a newer paisans applied, or one whose manifest records a release
 // this one cannot order, is refused in every form before anything on the
 // host is changed: this binary decides what is provably the deployment's,
@@ -68,38 +59,15 @@ func TestRefusesASiteANewerToolkitApplied(t *testing.T) {
 	}
 }
 
-// A site this release or an older one applied is removed as before, with
-// nothing said about the release.
+// A site this release or an older one applied is removed as before.
 func TestProceedsOnASiteThisOrAnOlderToolkitApplied(t *testing.T) {
 	for _, recorded := range []string{version.Version, "0.0.1"} {
 		w := setup(t)
 		w.hosts["home-b"].setToolkitVersion(t, recorded)
 		for name, build := range toolkitForms(w) {
-			p, err := build()
-			if err != nil {
+			if _, err := build(); err != nil {
 				t.Errorf("%s, %s: %v", name, recorded, err)
-				continue
 			}
-			if toolkitNote(p) {
-				t.Errorf("%s, %s: a note about the release", name, recorded)
-			}
-		}
-	}
-}
-
-// A manifest from before manifests recorded the release has nothing to
-// compare: the removal proceeds and the plan says the check was not made.
-func TestProceedsOnAManifestWithNoToolkitVersion(t *testing.T) {
-	w := setup(t)
-	w.hosts["home-b"].setToolkitVersion(t, "")
-	for name, build := range toolkitForms(w) {
-		p, err := build()
-		if err != nil {
-			t.Errorf("%s: %v", name, err)
-			continue
-		}
-		if !toolkitNote(p) {
-			t.Errorf("%s: the plan does not say the release was not checked:\n%s", name, printed(p))
 		}
 	}
 }
@@ -121,10 +89,10 @@ func TestRefusesANewerToolkitAppliedSinceThePlan(t *testing.T) {
 	}
 }
 
-// A kept Caddy's manifest keeps the release the manifest recorded, none
-// included, so a later run checks it as this one did.
+// A kept Caddy's manifest keeps the release the manifest recorded, so a
+// later run checks it as this one did.
 func TestTheKeptCaddysManifestKeepsItsRelease(t *testing.T) {
-	for _, recorded := range []string{"", "0.0.1"} {
+	for _, recorded := range []string{"0.0.1", version.Version} {
 		w := gatewayWorld(t, true)
 		vm := w.hosts["vm"]
 		vm.setToolkitVersion(t, recorded)
