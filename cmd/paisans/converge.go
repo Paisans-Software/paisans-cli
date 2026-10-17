@@ -1457,8 +1457,9 @@ func groupStop(what string, steps []convergeStep, errs []error) error {
 // applied once more after every other step, by which time the leader's site
 // has had its own last visit, and a stop then ends the run. Each step is
 // listed under its line with its own result, which -v shows with the step's
-// own output; its notes follow the line at every verbosity. A failure ends
-// its line and the run, leaving the other lines as they stand.
+// own output; its notes follow the line at every verbosity. A failure lists
+// its error under its inner step and ends its line and the run, leaving the
+// other lines as they stand.
 func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions) error {
 	r.Section("install")
 	places := installPlaces(steps)
@@ -1494,6 +1495,7 @@ func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions) err
 			line.Detail("  %s", strings.ReplaceAll(sentences(err), "\n", "\n  "))
 		default:
 			line.Detail("%s", innerLine(ui.Failed, s.Title, since(start)))
+			line.Detail("  %s", strings.ReplaceAll(sentences(err), "\n", "\n  "))
 		}
 		for _, n := range lineDetails(line, "  ", output, reports) {
 			line.Note(n.Text, n.Detail)

@@ -661,3 +661,19 @@ func TestConvergeLinesShowTheirInnerStep(t *testing.T) {
 		}
 	}
 }
+
+// A failed inner step lists its error under it, as a founding stop lists its
+// reason, so -v shows why the line failed where it failed.
+func TestAFailedInnerStepShowsItsError(t *testing.T) {
+	fakeConverge(t, map[string]error{"apply --site home-a": &ui.Problem{Hint: "the configuration changed after the run published it", Explain: "Nothing was changed on home-a by this step."}})
+	rec := recordConverge(t)
+	if err := converge(t, "--execute"); err == nil {
+		t.Fatal("no error")
+	}
+	i := slices.IndexFunc(rec.Events, func(e ui.Event) bool {
+		return e.Kind == "detail" && e.Extra == "home-a" && strings.HasPrefix(e.Text, "✗ apply --site home-a")
+	})
+	if i < 0 || rec.Events[i+1].Text != "  the configuration changed after the run published it.\n  Nothing was changed on home-a by this step." {
+		t.Errorf("the failure's error is not under its inner step:\n%s", rec.Lines())
+	}
+}
