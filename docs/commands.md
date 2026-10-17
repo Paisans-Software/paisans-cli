@@ -806,7 +806,8 @@ paisans host admit --site home-a --ssh owner@home-a.example.org --execute   # fr
   read. With `--request`, where admit would enable ufw (`--enable-ufw`, or the
   question), it refuses before anything changes, since the new SSH session
   that shows SSH still works needs a person; run `host admit --site` from a
-  workstation instead. With `--site` it needs `--ssh`.
+  workstation instead. `--request --enable-ufw --execute` off a terminal
+  refuses the same way, with `--digest` or without it. With `--site` it needs `--ssh`.
 * **What it changes:** Docker from Docker's repository where absent (an Engine
   older than 29.5 is refused, never upgraded), with its system daemons kept
   from starting while its packages install and then disabled, so only the

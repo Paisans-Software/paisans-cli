@@ -86,6 +86,8 @@ func runHostAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 		return fmt.Errorf("host admit: --digest goes with --request: with --site admit builds the request itself from the configuration")
 	case request != "" && ans.yes && flags.EnableUFW:
 		return ufwNeedsAPerson()
+	case request != "" && execute && flags.EnableUFW && !stdinIsTerminal(stdin):
+		return ufwNeedsAPerson()
 	case request != "" && execute && ans.yes && digestFlag == "":
 		return fmt.Errorf("host admit: --yes never answers the request's digest: give it as --digest <digest>, the one the operator gave you over a channel you both trust. Nothing was read or changed")
 	case request != "" && execute && digestFlag == "" && !stdinIsTerminal(stdin):
@@ -310,11 +312,12 @@ func askEnableUFW(a answerer, stdin io.Reader, stdout io.Writer, ports []int, by
 	return yes, nil
 }
 
-// ufwNeedsAPerson refuses --yes with --request where admit would enable
-// ufw: once ufw is on, only a person opening a new SSH session shows that
-// SSH gets through, and --yes never answers that.
+// ufwNeedsAPerson refuses --request where admit would enable ufw and no
+// person is there to confirm a new SSH login: with --yes, or with
+// --execute off a terminal. Once ufw is on, only a person opening a new
+// SSH session shows that SSH gets through.
 func ufwNeedsAPerson() error {
-	return fmt.Errorf("host admit: --yes with --request cannot enable ufw: once ufw is on, admit waits for a person to open a new SSH session to this host and say it logged in, before it stops the timer that turns ufw off again, and --yes never answers that. Run paisans host admit --site <site> --ssh <your login> --yes from a workstation instead, whose own login as the deployment's user proves SSH gets through; or run this without --yes. Nothing was changed")
+	return fmt.Errorf("host admit: with --request, enabling ufw needs a person at a terminal: once ufw is on, admit waits for you to open a new SSH session to this host and say it logged in, before it stops the timer that turns ufw off again, and neither --yes nor a pipe answers that. Run paisans host admit --site <site> --ssh <your login> from a workstation instead, whose own login as the deployment's user proves SSH gets through; or run this at a terminal without --yes. Nothing was changed")
 }
 
 // ufwOffAt is the latest the fallback armed by now turns ufw off.
@@ -336,11 +339,15 @@ func ufwFallbackNote(err error, plan *hostadmit.Plan, armed bool) error {
 
 // confirmUFW, on the host with --request once admit has enabled ufw, asks
 // the owner to open a new SSH session and stops the fallback only on a
-// typed yes. Anything else leaves the timer to turn ufw off, and says so.
+// yes typed at a terminal. Anything else, and any stdin that is not a
+// terminal, leaves the timer to turn ufw off, and says so.
 func confirmUFW(stdin io.Reader, stdout io.Writer, r ui.Reporter, t apply.Transport, user, version string) error {
 	off := ufwOffAt()
-	fmt.Fprintf(stdout, "\nufw is on, and turns itself off again by %s unless a new SSH login gets through. Open a new SSH session to this host now. Type yes once it logs in: ", off)
-	line, err := readTypedLine(stdin)
+	line, err := "", error(nil)
+	if stdinIsTerminal(stdin) {
+		fmt.Fprintf(stdout, "\nufw is on, and turns itself off again by %s unless a new SSH login gets through. Open a new SSH session to this host now. Type yes once it logs in: ", off)
+		line, err = readTypedLine(stdin)
+	}
 	if err != nil || strings.ToLower(strings.TrimSpace(line)) != "yes" {
 		r.Warn("ufw turns itself off again by "+off,
 			"No new SSH login was confirmed, so the timer admit armed is left to run ufw disable. If a new login works before then, run sudo "+hostadmit.DisarmUFW+" to keep ufw on; otherwise run admit again with --enable-ufw once you know why SSH was blocked. The timer does not survive a reboot: a reboot before it fires leaves ufw enabled, so wait for it rather than reboot.")

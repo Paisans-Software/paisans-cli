@@ -1126,3 +1126,47 @@ func TestYesAnswersEvict(t *testing.T) {
 		t.Errorf("printed:\n%s", out.String())
 	}
 }
+
+// Off a terminal nothing confirms the new SSH login: --request
+// --enable-ufw --execute refuses before anything changes, with --digest
+// or not, and a "yes" piped in never stops the fallback.
+func TestAPipeNeverConfirmsTheNewLogin(t *testing.T) {
+	path, digest := requestFile(t, "vm")
+	for _, extra := range [][]string{{"--digest", digest}, nil} {
+		noHost(t)
+		withTerminal(t, false)
+		args := append([]string{"--request", path, "--public-ports", "--enable-ufw", "--execute"}, extra...)
+		err := runHostAdmit(args, typed(t, digest+"\nyes\n"), new(strings.Builder))
+		if err == nil || !strings.Contains(err.Error(), "paisans host admit --site") || !strings.Contains(err.Error(), "Nothing was changed") {
+			t.Errorf("%q: %v", args, err)
+		}
+	}
+	// confirmUFW itself reads nothing off a terminal.
+	h := inactiveUFW(blankHost("ubuntu"))
+	quietAdmit(t)
+	withTerminal(t, false)
+	if err := confirmUFW(typed(t, "yes\n"), new(strings.Builder), reporterOverride, h, "ubuntu", "29.5"); err != nil {
+		t.Fatal(err)
+	}
+	if h.ranIndex(hostadmit.DisarmUFW) >= 0 {
+		t.Errorf("a pipe stopped the fallback: %q", h.ran)
+	}
+}
+
+// A --yes --request dry run that meets an inactive ufw refuses, before
+// anything changes, pointing to host admit --site.
+func TestYesRequestDryRunRefusesAnInactiveUFW(t *testing.T) {
+	allowYes(t)
+	path, _ := requestFile(t, "vm")
+	h := withFakeLocalHost(t, "ubuntu")
+	inactiveUFW(h)
+	withTerminal(t, false)
+	out := new(strings.Builder)
+	err := runHostAdmit([]string{"--request", path, "--public-ports", "--yes"}, strings.NewReader(""), out)
+	if err == nil || !strings.Contains(err.Error(), "paisans host admit --site") || !strings.Contains(err.Error(), "Nothing was changed") {
+		t.Errorf("err = %v", err)
+	}
+	if strings.Contains(out.String(), "approved by --yes: enable ufw") || h.ranAny("useradd ") {
+		t.Errorf("went on:\n%s", out.String())
+	}
+}
