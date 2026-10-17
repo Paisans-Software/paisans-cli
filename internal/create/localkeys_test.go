@@ -67,11 +67,11 @@ func TestTheFirstOperatorIsOfferedTheKeysOnThisMachine(t *testing.T) {
 		want  []string
 	}{
 		{"both taken", []string{"alice", "Alice Example", "alice@example.org", "", "",
-			"bob", "Bob Example", "bob@example.org", carolKey, "", "n"}, []string{aliceKey, bobKey}},
+			"", "bob", "Bob Example", "bob@example.org", carolKey, "", "n"}, []string{aliceKey, bobKey}},
 		{"one taken", []string{"alice", "Alice Example", "alice@example.org", "y", "n",
-			"bob", "Bob Example", "bob@example.org", bobKey, "", "n"}, []string{aliceKey}},
+			"", "bob", "Bob Example", "bob@example.org", bobKey, "", "n"}, []string{aliceKey}},
 		{"none taken, so pasted", []string{"alice", "Alice Example", "alice@example.org", "n", "n", bobKey, "",
-			"bob", "Bob Example", "bob@example.org", aliceKey, "", "n"}, []string{bobKey}},
+			"", "bob", "Bob Example", "bob@example.org", aliceKey, "", "n"}, []string{bobKey}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out strings.Builder
@@ -130,7 +130,7 @@ func TestARefusedKeyOnThisMachineIsNotOffered(t *testing.T) {
 	var out strings.Builder
 	w := NewWizard(NewPrompter(strings.NewReader(script(
 		"alice", "Alice Example", "alice@example.org", "",
-		"bob", "Bob Example", "bob@example.org", bobKey, "", "n",
+		"", "bob", "Bob Example", "bob@example.org", bobKey, "", "n",
 	)), &out))
 	w.LocalKeys = []LocalKey{{Name: "~/.ssh/old.pub", Line: weak}, {Name: "~/.ssh/work.pub", Line: aliceKey}}
 	if err := w.Ask(SectionOperators); err != nil {

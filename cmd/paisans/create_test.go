@@ -49,7 +49,7 @@ func plainReporter(t *testing.T) *bytes.Buffer {
 
 var (
 	createCommunity = []string{"Example Community", "example.org", ""}
-	createAdmin     = []string{"alice", "Alice Example", "alice@example.org", createKey, "",
+	createAdmin     = []string{"alice", "Alice Example", "alice@example.org", createKey, "", "",
 		"bob", "Bob Example", "bob@example.org", createBobKey, "", "n"}
 	// sign in; the account service manages accounts, on its default
 	// hostname, with open signup and the code of conduct the wizard's own
@@ -111,7 +111,7 @@ func TestCreateOffersTheKeysInHome(t *testing.T) {
 	// alice takes the key found rather than pasting one.
 	in := answersFile(t, createLines(createCommunity,
 		[]string{"alice", "Alice Example", "alice@example.org", "",
-			"bob", "Bob Example", "bob@example.org", createBobKey, "", "n"},
+			"", "bob", "Bob Example", "bob@example.org", createBobKey, "", "n"},
 		[]string{"1", "", "203.0.113.10", "", ""}, createNoApps, createMail, []string{""})...)
 	ssh := filepath.Join(os.Getenv("HOME"), ".ssh")
 	if err := os.MkdirAll(ssh, 0o700); err != nil {

@@ -2548,7 +2548,8 @@ Founder decision. The design is
   members of the Pocket ID group `admins`. Every operator is a community
   admin; a community admin is not an operator.
 * `validate` refuses fewer than two operators with a key on every site that
-  runs Pocket ID.
+  runs Pocket ID (one is a warning from 2026-10-17, see *One operator is a
+  warning, not a refusal*).
 * The `pocket-id` app declares `management`, `paisans` or `pocket-id`,
   required and never defaulted. Under `paisans` the account service manages
   signup, bans and recovery, an account app and mail are required, the
@@ -3121,3 +3122,33 @@ turns ufw off again, takes the lockout out of the owner's hands.
   overrides an owner's deliberate deny.
 * **Enable without a fallback:** a cloud firewall or a rule admit cannot see
   would still lock the owner out, with nothing to undo it.
+
+## 2026-10-17: One operator is a warning, not a refusal
+
+Founder direction, issue #365.
+
+### What was decided
+
+* `validate` refuses a deployment with no operator whose keys are on every
+  site that runs Pocket ID (`operators-none`), and warns about one
+  (`operators-fewer-than-two`).
+* `paisans create` accepts one operator and offers a second after the first.
+* The operator reconciler fails its pass while fewer than two operators are
+  declared, so the operators heartbeat keeps the monitor alerting until a
+  second is added.
+
+### Why
+
+A deployment being rolled out, or a small community, may have one operator
+for a while, and refusing it left no way to start. One operator is a risk,
+not an incoherence: a lost workstation would leave nobody able to run the
+deployment, so it stays visible on every `validate` and on the health page
+until there is a second. No operator at all is an incoherence, since nobody
+could run the deployment, and stays a refusal.
+
+### What was weighed
+
+* **Keep refusing one:** blocks the first rollout and small communities
+  outright, which is the problem the issue names.
+* **Warn in `validate` only:** a warning shown once at `validate` is easy to
+  forget; the heartbeat keeps saying it.

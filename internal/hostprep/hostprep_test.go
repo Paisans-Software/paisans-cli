@@ -182,7 +182,7 @@ func configStored(site string, h *fakeHost) *fakeHost {
 }
 
 // fixture is the render fixture with every site logging in with alice's key
-// alone: the fixture declares a second operator, bob, whom validate requires,
+// alone: the fixture declares a second operator, bob, so validate is quiet,
 // and these tests add bob's key themselves where they are about one.
 func fixture(t *testing.T) *config.Config {
 	t.Helper()

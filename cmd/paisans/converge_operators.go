@@ -156,7 +156,7 @@ var convergeEmailFailures = func(cfg *config.Config, app string, o convergeOptio
 // convergeOperators makes every operator the configuration declares a user of
 // each Pocket ID app up says is running, and returns the login links issued.
 // A dry run only plans, reading Pocket ID and changing nothing. A deployment
-// with a Pocket ID app declares at least two operators, which validate holds
+// with a Pocket ID app declares at least one operator, which validate holds
 // it to, so one that declares none has nothing to make.
 //
 // An operator who could not be made fails the run, since the deployment cannot
