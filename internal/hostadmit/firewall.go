@@ -138,11 +138,18 @@ func listenProbe(filter string) string {
 // own: the ports the system Docker's containers publish, running
 // (container lines) and stopped (stopped lines), and the DNAT and redirect
 // rules (dnat lines), as portsProbe describes, those in iptables-legacy's
-// tables too, which nft does not show; and which firewall backend
+// tables too, which nft does not show, and only the tables the kernel
+// holds already, since naming another to iptables-legacy-save loads its
+// module; and which firewall backend
 // the system Docker uses, its daemon.json's firewall-backend
 // (docker-backend) and its chains in the filter table's FORWARD
 // (docker-chains), which decide whether its publishes pass ufw.
-const natProbe = `
+var natProbe = natProbeAt("/proc/net")
+
+// natProbeAt is natProbe reading the legacy tables the kernel holds from
+// proc's ip_tables_names and ip6_tables_names.
+func natProbeAt(proc string) string {
+	return `
 if [ -r /etc/docker/daemon.json ]; then grep -o '"firewall-backend"[[:space:]]*:[[:space:]]*"[a-z]*"' /etc/docker/daemon.json 2>/dev/null | sed 's/^/docker-backend /'; fi
 if [ -S /var/run/docker.sock ]; then
   if out=$(` + systemDocker + ` ps --format '{{.Names}}\t{{.Ports}}\t{{.Label "com.docker.compose.project"}}' 2>/dev/null); then printf '%s\n' "$out" | sed -n 's/^./container &/p'; else echo 'unread containers (ps of the system Docker)'; fi
@@ -159,8 +166,14 @@ if command -v nft >/dev/null 2>&1; then
   else echo 'unread ruleset (nft list ruleset)'; fi
   for save in iptables-legacy-save ip6tables-legacy-save; do
     command -v $save >/dev/null 2>&1 || continue
-    if out=$($save -t nat 2>/dev/null); then printf '%s\n' "$out" | grep -E -- '-j (DNAT|REDIRECT)' | sed "s/^/dnat $save -t nat: /"; else echo "unread ruleset ($save)"; fi
-    $save -t filter 2>/dev/null | grep -qE -- '^-A FORWARD -j DOCKER-(USER|FORWARD)' && echo "docker-chains $save"
+    names=` + proc + `/ip_tables_names; [ $save = ip6tables-legacy-save ] && names=` + proc + `/ip6_tables_names
+    held=$(cat "$names" 2>/dev/null)
+    if printf '%s\n' "$held" | grep -qx nat; then
+      if out=$($save -t nat 2>/dev/null); then printf '%s\n' "$out" | grep -E -- '-j (DNAT|REDIRECT)' | sed "s/^/dnat $save -t nat: /"; else echo "unread ruleset ($save)"; fi
+    fi
+    if printf '%s\n' "$held" | grep -qx filter; then
+      $save -t filter 2>/dev/null | grep -qE -- '^-A FORWARD -j DOCKER-(USER|FORWARD)' && echo "docker-chains $save"
+    fi
   done
 else
   read=
@@ -172,6 +185,7 @@ else
   done
   [ -n "$read" ] || echo 'unread ruleset (no nft or iptables-save)'
 fi`
+}
 
 var (
 	ssUID    = regexp.MustCompile(`\buid:(\d+)`)

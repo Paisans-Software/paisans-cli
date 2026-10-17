@@ -158,13 +158,47 @@ func TestTheUFWProbeReadsEveryListenerAndTheNATRules(t *testing.T) {
 // On a host with nft, the NAT rules iptables-legacy holds are read too:
 // nft list ruleset does not show them.
 func TestThePortsProbeReadsLegacyTablesBesideNft(t *testing.T) {
-	out := runProbe(t, ufwBeforeProbe, map[string]string{
+	proc := t.TempDir()
+	os.WriteFile(filepath.Join(proc, "ip_tables_names"), []byte("filter\nnat\n"), 0o644)
+	out := runProbe(t, natProbeAt(proc), map[string]string{
 		"nft":                  "table ip nat {\n}\n",
 		"iptables-legacy-save": "*nat\n-A PREROUTING -p tcp -m tcp --dport 2222 -j DNAT --to-destination 192.168.122.5:22\n*filter\n-A FORWARD -j DOCKER-USER\n",
 	})
 	for _, want := range []string{"dnat iptables-legacy-save -t nat: -A PREROUTING -p tcp -m tcp --dport 2222 -j DNAT", "docker-chains iptables-legacy-save"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the probe does not print %q:\n%s", want, out)
+		}
+	}
+}
+
+// The legacy tables are dumped only when the kernel holds them already,
+// as /proc/net/ip_tables_names lists them: naming a table to
+// iptables-legacy-save loads its module, which a read must never do.
+func TestTheLegacyReadLoadsNoModule(t *testing.T) {
+	for _, c := range []struct {
+		names *string
+		want  string
+	}{
+		{nil, ""},
+		{new(string), ""},
+		{func() *string { s := "nat\n"; return &s }(), "-t nat\n"},
+		{func() *string { s := "filter\nnat\n"; return &s }(), "-t nat\n-t filter\n"},
+	} {
+		dir, proc := t.TempDir(), t.TempDir()
+		log := filepath.Join(dir, "calls")
+		os.WriteFile(filepath.Join(dir, "nft"), []byte("#!/bin/sh\necho 'table ip nat {'\necho '}'\n"), 0o755)
+		os.WriteFile(filepath.Join(dir, "iptables-legacy-save"), []byte("#!/bin/sh\necho \"$*\" >> "+log+"\n"), 0o755)
+		if c.names != nil {
+			os.WriteFile(filepath.Join(proc, "ip_tables_names"), []byte(*c.names), 0o644)
+		}
+		cmd := exec.Command("sh", "-c", natProbeAt(proc))
+		cmd.Env = []string{"PATH=" + dir + ":/usr/bin:/bin"}
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		got, _ := os.ReadFile(log)
+		if string(got) != c.want {
+			t.Errorf("names %v: iptables-legacy-save ran with %q, want %q", c.names, got, c.want)
 		}
 	}
 }
