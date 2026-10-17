@@ -671,7 +671,7 @@ func inactiveUFW(h *admitHost) *admitHost {
 			h.facts[i][1] = "no"
 		}
 	}
-	h.answers["paisans site admit: before enabling ufw"] = `listen LISTEN 0 4096 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=812,fd=3))` + "\nipv6 yes\nsystemd-run present\nfallback not-found not-found\nend\n"
+	h.answers["paisans site admit: before enabling ufw"] = `listen tcp LISTEN 0 4096 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=812,fd=3))` + "\nipv6 yes\nsystemd-run present\nfallback not-found not-found\nend\n"
 	return h
 }
 
@@ -1205,7 +1205,7 @@ func noAdmitFromInit(t *testing.T) {
 // answering on 8080, which no ufw rule allows.
 func ownerApp(h *admitHost) *admitHost {
 	const marker = "paisans site admit: before enabling ufw"
-	h.answers[marker] = `listen LISTEN 0 4096 0.0.0.0:8080 0.0.0.0:* users:(("app",pid=950,fd=3))` + "\n" + h.answers[marker]
+	h.answers[marker] = `listen tcp LISTEN 0 4096 0.0.0.0:8080 0.0.0.0:* users:(("app",pid=950,fd=3))` + "\n" + h.answers[marker]
 	return h
 }
 

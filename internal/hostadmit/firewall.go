@@ -1,15 +1,15 @@
 package hostadmit
 
 import (
-	"cmp"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
 )
 
@@ -115,13 +115,12 @@ echo end`
 
 // listenProbe reads, as root, every TCP listener and every bound UDP
 // socket ss's filter keeps (every one for ""), with its process and uid,
-// as listen and listen-udp lines (readSocket).
+// as listen lines, each a line hostcheck.ParseSocketLine reads.
 func listenProbe(filter string) string {
 	if filter != "" {
 		filter = " " + filter
 	}
-	return `if out=$(ss -Hltnpe` + filter + ` 2>/dev/null); then printf '%s\n' "$out" | sed -n 's/^./listen &/p'; else echo 'unread listeners (ss -Hltnpe)'; fi
-if out=$(ss -Hlunpe` + filter + ` 2>/dev/null); then printf '%s\n' "$out" | sed -n 's/^./listen-udp &/p'; else echo 'unread UDP sockets (ss -Hlunpe)'; fi`
+	return `if out=$(ss -Hltunpe` + filter + ` 2>/dev/null); then printf '%s\n' "$out" | sed -n 's/^./listen &/p'; else echo 'unread listeners (ss -Hltunpe)'; fi`
 }
 
 // natProbe reads, as root, what receives traffic with no listener of its
@@ -178,9 +177,9 @@ func holders(p *planner) ([]holder, error) {
 		switch kind {
 		case "unread":
 			return nil, fmt.Errorf("reading what answers on 80 and 443: admit could not read the %s, so it cannot tell whether something else holds them. Nothing was changed", hostText(rest))
-		case "listen", "listen-udp":
-			sock, ok := readSocket(kind, rest)
-			if !ok || !lowPort.MatchString(sock.addr) || p.ownUID(sock.uid) {
+		case "listen":
+			sock, ok := readSocket(rest)
+			if !ok || sock.Port != 80 && sock.Port != 443 || p.ownUID(sock.UID) {
 				continue
 			}
 			found = append(found, holder{sock.what()})
@@ -208,72 +207,44 @@ func holders(p *planner) ([]holder, error) {
 	return found, nil
 }
 
-// socket is one listen or listen-udp line of a probe: ss's line for a TCP
-// listener or a bound UDP socket, with its local address as ss prints it,
-// its port, its owner (0 for root, whom ss prints no uid for) and its
-// process, "" when ss names none.
-type socket struct {
-	proto, addr string
-	port, uid   int
-	proc, pid   string
-}
+// socket is one listen line of a probe, as hostcheck reads it.
+type socket struct{ hostcheck.SocketLine }
 
-// readSocket reads one listen or listen-udp line, without its kind.
-func readSocket(kind, rest string) (socket, bool) {
-	f := strings.Fields(rest)
-	if len(f) < 4 {
-		return socket{}, false
-	}
-	s := socket{proto: "tcp", addr: f[3]}
-	if kind == "listen-udp" {
-		s.proto = "udp"
-	}
-	i := strings.LastIndex(s.addr, ":")
-	if i < 0 {
-		return socket{}, false
-	}
-	port, err := strconv.Atoi(s.addr[i+1:])
-	if err != nil || port <= 0 || port > 65535 {
-		return socket{}, false
-	}
-	s.port = port
-	if m := ssUID.FindStringSubmatch(rest); m != nil {
-		s.uid, _ = strconv.Atoi(m[1])
-	}
-	if m := ssProc.FindStringSubmatch(rest); m != nil {
-		s.proc, s.pid = m[1], m[2]
-	}
-	return s, true
+// readSocket reads one listen line, without its kind.
+func readSocket(rest string) (socket, bool) {
+	s, ok, err := hostcheck.ParseSocketLine(rest)
+	return socket{s}, ok && err == nil && s.Port > 0 && s.Port <= 65535
 }
 
 // what is the socket as the owner is shown it, quoted from the host.
 func (s socket) what() string {
-	on := hostText(s.addr)
-	if s.proto == "udp" {
+	on := hostText(s.Local)
+	if s.Proto == "udp" {
 		on += "/udp"
 	}
-	if s.proc == "" {
-		return fmt.Sprintf("a process (uid %d) listens on %s", s.uid, on)
+	if s.Process == "" {
+		return fmt.Sprintf("a process (uid %d) listens on %s", s.UID, on)
 	}
-	return fmt.Sprintf("%s (pid %s, uid %d) listens on %s", hostText(s.proc), s.pid, s.uid, on)
+	return fmt.Sprintf("%s (pid %d, uid %d) listens on %s", hostText(s.Process), s.PID, s.UID, on)
 }
 
 // loopback reports whether the socket is bound to loopback alone, which
 // ufw never filters: a loopback address, or the lo device.
 func (s socket) loopback() bool {
-	return loopbackAddr(s.addr) || strings.Contains(s.addr, "%lo:")
+	return loopback(s.Address) || strings.Contains(s.Local, "%lo:")
 }
 
-// loopbackAddr reports whether addr, as ss or docker ps prints one, is a
-// loopback address.
-func loopbackAddr(addr string) bool {
-	return strings.HasPrefix(addr, "127.") || strings.HasPrefix(addr, "[::1]") || addr == "::1" || strings.HasPrefix(addr, "[::ffff:127.")
+// loopback reports whether addr, as hostcheck.BindAddress normalises one,
+// is a loopback address.
+func loopback(addr string) bool {
+	a, err := netip.ParseAddr(addr)
+	return err == nil && a.IsLoopback()
 }
 
 // v6 reports whether the socket takes IPv6: bound to an IPv6 address, or
 // to *, which ss prints for a socket of both families.
 func (s socket) v6() bool {
-	return strings.HasPrefix(s.addr, "*") || strings.HasPrefix(s.addr, "[") && !strings.HasPrefix(s.addr, "[::ffff:")
+	return strings.HasPrefix(s.Local, "*") || strings.HasPrefix(s.Local, "[") && !strings.Contains(s.Address, ".")
 }
 
 // containerWhat is a container line's fields as the owner is shown them.
@@ -325,35 +296,24 @@ func publishes(ports string) []span {
 	var out []span
 	for _, m := range published.FindAllStringSubmatch(ports, -1) {
 		if s, ok := spanOf(m[2], m[3]); ok {
-			s.addr, s.proto = m[1], m[4]
+			s.addr, s.proto = hostcheck.BindAddress(m[1]), m[4]
 			out = append(out, s)
 		}
 	}
 	return out
 }
 
-// bindings is the host ports docker inspect's PortBindings bind; a binding
-// with no host port, which Docker picks when the container starts, is
-// none admit can name.
+// bindings is the host ports docker inspect's PortBindings bind
+// (hostcheck.ParseBindings).
 func bindings(raw string) ([]span, error) {
-	var m map[string][]struct{ HostIP, HostPort string }
-	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+	list, err := hostcheck.ParseBindings(raw)
+	if err != nil {
 		return nil, err
 	}
-	var out []span
-	for key, list := range m {
-		_, proto, _ := strings.Cut(key, "/")
-		for _, b := range list {
-			from, to, _ := strings.Cut(b.HostPort, "-")
-			if s, ok := spanOf(from, to); ok {
-				s.addr, s.proto = b.HostIP, proto
-				out = append(out, s)
-			}
-		}
+	out := make([]span, 0, len(list))
+	for _, b := range list {
+		out = append(out, span{proto: b.Proto, addr: b.Address, lo: b.Lo, hi: b.Hi})
 	}
-	slices.SortFunc(out, func(a, b span) int {
-		return cmp.Or(a.lo-b.lo, strings.Compare(a.proto, b.proto), strings.Compare(a.addr, b.addr))
-	})
 	return out, nil
 }
 

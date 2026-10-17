@@ -14,8 +14,8 @@ const ufwBeforeMarker = "paisans site admit: before enabling ufw"
 
 // sshdOn22 is what the probe before enabling ufw prints on Ubuntu 24.04
 // with sshd listening on 22, systemd-run there and no fallback loaded.
-const sshdOn22 = `listen LISTEN 0 4096 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=812,fd=3))` + "\n" +
-	`listen LISTEN 0 4096 [::]:22 [::]:* users:(("sshd",pid=812,fd=4))` + "\n" +
+const sshdOn22 = `listen tcp LISTEN 0 4096 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=812,fd=3))` + "\n" +
+	`listen tcp LISTEN 0 4096 [::]:22 [::]:* users:(("sshd",pid=812,fd=4))` + "\n" +
 	"ipv6 yes\nsystemd-run present\nfallback not-found not-found\nend\n"
 
 // sshdOn22And2222 adds 2222, which a socket-activated ssh.socket listens
@@ -249,7 +249,7 @@ func TestAnOwnersDenyInAnyFormStopsTheEnable(t *testing.T) {
 func TestIPv6OffStopsTheEnableWhenSSHDListensOnIPv6(t *testing.T) {
 	v6 := strings.Replace(sshdOn22, "ipv6 yes", "ipv6 no", 1) // sshdOn22 listens on [::]:22
 	for _, answer := range []string{v6, "socket [::]:22 (Stream)\nipv6 no\nsystemd-run present\nfallback not-found not-found\nend\n",
-		`listen LISTEN 0 4096 *:22 *:* users:(("sshd",pid=1,fd=3))` + "\n" + "ipv6\nsystemd-run present\nfallback not-found not-found\nend\n"} {
+		`listen tcp LISTEN 0 4096 *:22 *:* users:(("sshd",pid=1,fd=3))` + "\n" + "ipv6\nsystemd-run present\nfallback not-found not-found\nend\n"} {
 		for _, flags := range []hostadmit.Flags{enableUFW, {}} {
 			_, err := hostadmit.Build(inactiveUFW(answer)(), input(t, "vm", flags))
 			if err == nil || !strings.Contains(err.Error(), "IPV6=yes") || !strings.Contains(err.Error(), "/etc/default/ufw") || !strings.Contains(err.Error(), "SSH over IPv6") || strings.Contains(err.Error(), "sudo ufw enable") {
@@ -257,7 +257,7 @@ func TestIPv6OffStopsTheEnableWhenSSHDListensOnIPv6(t *testing.T) {
 			}
 		}
 	}
-	v4 := `listen LISTEN 0 4096 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=812,fd=3))` + "\nipv6 no\nsystemd-run present\nfallback not-found not-found\nend\n"
+	v4 := `listen tcp LISTEN 0 4096 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=812,fd=3))` + "\nipv6 no\nsystemd-run present\nfallback not-found not-found\nend\n"
 	if _, err := hostadmit.Build(inactiveUFW(v4)(), input(t, "vm", enableUFW)); err != nil {
 		t.Errorf("sshd on IPv4 alone with IPV6=no: %v", err)
 	}
@@ -326,10 +326,10 @@ func TestTheEnableSaysWhatAdmitCannotSee(t *testing.T) {
 // logged-in user or on loopback, and any process a user names sshd, are not.
 // ss -e prints uid:N for every owner but root.
 func TestOnlyRootsSSHDListenersOffLoopbackAreAllowed(t *testing.T) {
-	answer := `listen LISTEN 0 128 127.0.0.1:6010 0.0.0.0:* users:(("sshd",pid=4410,fd=9)) uid:1000 ino:91 sk:3` + "\n" +
-		`listen LISTEN 0 128 [::1]:6010 [::]:* users:(("sshd",pid=4410,fd=10)) uid:1000 ino:92 sk:4` + "\n" +
-		`listen LISTEN 0 128 127.0.0.1:6011 0.0.0.0:* users:(("sshd",pid=4411,fd=9)) ino:93 sk:5` + "\n" +
-		`listen LISTEN 0 128 0.0.0.0:2200 0.0.0.0:* users:(("sshd",pid=4500,fd=3)) uid:1001 ino:94 sk:6` + "\n" +
+	answer := `listen tcp LISTEN 0 128 127.0.0.1:6010 0.0.0.0:* users:(("sshd",pid=4410,fd=9)) uid:1000 ino:91 sk:3` + "\n" +
+		`listen tcp LISTEN 0 128 [::1]:6010 [::]:* users:(("sshd",pid=4410,fd=10)) uid:1000 ino:92 sk:4` + "\n" +
+		`listen tcp LISTEN 0 128 127.0.0.1:6011 0.0.0.0:* users:(("sshd",pid=4411,fd=9)) ino:93 sk:5` + "\n" +
+		`listen tcp LISTEN 0 128 0.0.0.0:2200 0.0.0.0:* users:(("sshd",pid=4500,fd=3)) uid:1001 ino:94 sk:6` + "\n" +
 		sshdOn22
 	h := inactiveUFW(answer)()
 	_, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
@@ -338,7 +338,7 @@ func TestOnlyRootsSSHDListenersOffLoopbackAreAllowed(t *testing.T) {
 		t.Fatalf("ports %v: %v", inactive, err)
 	}
 	for _, c := range h.ran {
-		if strings.Contains(c, ufwBeforeMarker) && !strings.Contains(c, "ss -Hltnpe") {
+		if strings.Contains(c, ufwBeforeMarker) && !strings.Contains(c, "ss -Hltunpe") {
 			t.Errorf("the probe does not read the listeners' owners: %s", c)
 		}
 	}
@@ -346,9 +346,9 @@ func TestOnlyRootsSSHDListenersOffLoopbackAreAllowed(t *testing.T) {
 
 // ownerCaddy is the owner's Caddy on the host network, run as root,
 // answering on 80 and 443 over TCP and on 443 over UDP for HTTP/3.
-const ownerCaddy = `listen LISTEN 0 4096 *:80 *:* users:(("caddy",pid=900,fd=7)) ino:11 sk:1` + "\n" +
-	`listen LISTEN 0 4096 *:443 *:* users:(("caddy",pid=900,fd=8)) ino:12 sk:2` + "\n" +
-	`listen-udp UNCONN 0 0 *:443 *:* users:(("caddy",pid=900,fd=9)) ino:13 sk:3` + "\n"
+const ownerCaddy = `listen tcp LISTEN 0 4096 *:80 *:* users:(("caddy",pid=900,fd=7)) ino:11 sk:1` + "\n" +
+	`listen tcp LISTEN 0 4096 *:443 *:* users:(("caddy",pid=900,fd=8)) ino:12 sk:2` + "\n" +
+	`listen udp UNCONN 0 0 *:443 *:* users:(("caddy",pid=900,fd=9)) ino:13 sk:3` + "\n"
 
 // blockListed is --enable-ufw with --enable-ufw-block-listed.
 var blockListed = hostadmit.Flags{EnableUFW: true, EnableUFWBlockListed: true}
@@ -477,14 +477,14 @@ func TestEnableUFWListsAPortPublishedThroughNAT(t *testing.T) {
 
 // A listener on an IPv6 address alone is listed as any other.
 func TestEnableUFWListsAnIPv6OnlyListener(t *testing.T) {
-	b := blocks(t, `listen LISTEN 0 4096 [2001:db8::5]:8080 [::]:* users:(("app",pid=1200,fd=3)) uid:1002 ino:1 sk:1`+"\n"+sshdOn22)
+	b := blocks(t, `listen tcp LISTEN 0 4096 [2001:db8::5]:8080 [::]:* users:(("app",pid=1200,fd=3)) uid:1002 ino:1 sk:1`+"\n"+sshdOn22)
 	if b == nil || !strings.Contains(b.Error(), "8080/tcp: app (pid 1200, uid 1002) listens on [2001:db8::5]:8080") || !strings.Contains(b.Error(), "sudo ufw allow 8080/tcp") {
 		t.Errorf("an IPv6-only listener: %v", b)
 	}
 	// With ufw's IPv6 off, an allow does not keep it reachable: the
 	// refusal says to set IPV6=yes, with or without an allow.
-	b = blocks(t, "rule allow 8080/tcp\n"+`listen LISTEN 0 4096 [2001:db8::5]:8080 [::]:* users:(("app",pid=1200,fd=3)) uid:1002 ino:1 sk:1`+"\n"+
-		`listen LISTEN 0 4096 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=812,fd=3))`+"\nipv6 no\nsystemd-run present\nfallback not-found not-found\nend\n")
+	b = blocks(t, "rule allow 8080/tcp\n"+`listen tcp LISTEN 0 4096 [2001:db8::5]:8080 [::]:* users:(("app",pid=1200,fd=3)) uid:1002 ino:1 sk:1`+"\n"+
+		`listen tcp LISTEN 0 4096 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=812,fd=3))`+"\nipv6 no\nsystemd-run present\nfallback not-found not-found\nend\n")
 	if b == nil || !strings.Contains(b.Error(), "over IPv6") || !strings.Contains(b.Error(), "IPV6=yes") {
 		t.Errorf("an IPv6 listener with ufw's IPv6 off: %v", b)
 	}
@@ -494,14 +494,14 @@ func TestEnableUFWListsAnIPv6OnlyListener(t *testing.T) {
 // before.rules let in (a DHCP client's port), the deployment's own
 // WireGuard port and its own user's listeners are not listed.
 func TestEnableUFWIgnoresWhatStaysReachableOrIsLocal(t *testing.T) {
-	answer := `listen LISTEN 0 4096 127.0.0.1:5432 0.0.0.0:* users:(("postgres",pid=700,fd=5)) uid:113 ino:1 sk:1` + "\n" +
-		`listen LISTEN 0 4096 [::1]:6379 [::]:* users:(("redis-server",pid=701,fd=6)) uid:114 ino:2 sk:2` + "\n" +
-		`listen LISTEN 0 4096 [::ffff:127.0.0.1]:9000 *:* users:(("app",pid=702,fd=6)) ino:3 sk:3` + "\n" +
-		`listen-udp UNCONN 0 0 127.0.0.53%lo:53 0.0.0.0:* users:(("systemd-resolve",pid=600,fd=13)) uid:991 ino:4 sk:4` + "\n" +
-		`listen-udp UNCONN 0 0 0.0.0.0%lo:5355 0.0.0.0:* users:(("systemd-resolve",pid=600,fd=14)) uid:991 ino:5 sk:5` + "\n" +
-		`listen-udp UNCONN 0 0 10.0.0.5%eth0:68 0.0.0.0:* users:(("systemd-network",pid=500,fd=20)) uid:998 ino:6 sk:6` + "\n" +
-		`listen-udp UNCONN 0 0 0.0.0.0:51820 0.0.0.0:* ino:7 sk:7` + "\n" +
-		`listen LISTEN 0 4096 0.0.0.0:2375 0.0.0.0:* users:(("rootlesskit",pid=703,fd=6)) uid:1001 ino:8 sk:8` + "\n" +
+	answer := `listen tcp LISTEN 0 4096 127.0.0.1:5432 0.0.0.0:* users:(("postgres",pid=700,fd=5)) uid:113 ino:1 sk:1` + "\n" +
+		`listen tcp LISTEN 0 4096 [::1]:6379 [::]:* users:(("redis-server",pid=701,fd=6)) uid:114 ino:2 sk:2` + "\n" +
+		`listen tcp LISTEN 0 4096 [::ffff:127.0.0.1]:9000 *:* users:(("app",pid=702,fd=6)) ino:3 sk:3` + "\n" +
+		`listen udp UNCONN 0 0 127.0.0.53%lo:53 0.0.0.0:* users:(("systemd-resolve",pid=600,fd=13)) uid:991 ino:4 sk:4` + "\n" +
+		`listen udp UNCONN 0 0 0.0.0.0%lo:5355 0.0.0.0:* users:(("systemd-resolve",pid=600,fd=14)) uid:991 ino:5 sk:5` + "\n" +
+		`listen udp UNCONN 0 0 10.0.0.5%eth0:68 0.0.0.0:* users:(("systemd-network",pid=500,fd=20)) uid:998 ino:6 sk:6` + "\n" +
+		`listen udp UNCONN 0 0 0.0.0.0:51820 0.0.0.0:* ino:7 sk:7` + "\n" +
+		`listen tcp LISTEN 0 4096 0.0.0.0:2375 0.0.0.0:* users:(("rootlesskit",pid=703,fd=6)) uid:1001 ino:8 sk:8` + "\n" +
 		"container shop-db-1\t127.0.0.1:15432->5432/tcp\tshop\n" +
 		"dnat iptables-save -t nat: -A DOCKER -d 127.0.0.1/32 ! -i docker0 -p tcp -m tcp --dport 15432 -j DNAT --to-destination 172.17.0.2:5432\n" +
 		sshdOn22
@@ -552,7 +552,7 @@ func TestTheInactiveRefusalNamesWhatEnablingBlocks(t *testing.T) {
 // What admit cannot read before enabling ufw stops it: it never enables
 // ufw without knowing what it blocks.
 func TestEnableUFWRefusesWhatItCannotRead(t *testing.T) {
-	for _, unread := range []string{"unread UDP sockets (ss -Hlunpe)", "unread containers (ps of the system Docker)", "unread ruleset (nft list ruleset)"} {
+	for _, unread := range []string{"unread containers (ps of the system Docker)", "unread ruleset (nft list ruleset)"} {
 		_, err := hostadmit.Build(inactiveUFW(unread+"\n"+sshdOn22)(), input(t, "vm", blockListed))
 		if err == nil || !strings.Contains(err.Error(), "could not read the "+strings.TrimPrefix(unread, "unread ")) || !strings.Contains(err.Error(), "Nothing was changed") {
 			t.Errorf("%s: %v", unread, err)

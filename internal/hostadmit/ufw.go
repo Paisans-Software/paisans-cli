@@ -76,7 +76,7 @@ echo end`
 // ufw's rules as `ufw show added` prints them without the leading ufw, and
 // those of them that deny or reject; IPV6 in /etc/default/ufw; whether
 // systemd-run is there; the fallback units' load states; and what answers
-// from off the host, the probe's listen, listen-udp, container, stopped
+// from off the host, the probe's listen, listen, container, stopped
 // and dnat lines, for exposure to read.
 type ufwBefore struct {
 	ports       []int
@@ -139,13 +139,11 @@ func readUFWBefore(p *planner) (ufwBefore, error) {
 				b.exposureUnread = hostText(rest)
 			}
 		case "listen":
-			if strings.Contains(rest, `("sshd",pid=`) {
-				if addr, ok := sshdListener(rest); ok {
-					add(addr)
-				}
+			if s, ok := readSocket(rest); ok && strings.Contains(rest, `("sshd",pid=`) && sshdListener(s) {
+				add(s.Local)
 			}
 			b.answering = append(b.answering, line)
-		case "listen-udp", "container", "stopped", "dnat":
+		case "container", "stopped", "dnat":
 			b.answering = append(b.answering, line)
 		case "socket":
 			if f := strings.Fields(rest); len(f) == 2 && f[1] == "(Stream)" {
@@ -169,23 +167,11 @@ func readUFWBefore(p *planner) (ufwBefore, error) {
 	return b, nil
 }
 
-// sshdListener is the local address of one `ss -Hltnpe` line of an sshd
-// listener, when it is one a login arrives by: root's, since ss -e prints
-// uid:N for every other owner, and off loopback, which ufw never filters.
-func sshdListener(line string) (string, bool) {
-	f := strings.Fields(line)
-	if len(f) < 4 {
-		return "", false
-	}
-	for _, field := range f[4:] {
-		if strings.HasPrefix(field, "uid:") {
-			return "", false
-		}
-	}
-	if loopbackAddr(f[3]) {
-		return "", false
-	}
-	return f[3], true
+// sshdListener reports whether s, a listener of sshd's, is one a login
+// arrives by: TCP, root's, since ss -e prints uid:N for every other owner,
+// and off loopback, which ufw never filters.
+func sshdListener(s socket) bool {
+	return s.Proto == "tcp" && s.UID == 0 && !s.loopback()
 }
 
 // blocker is why admit will not enable ufw on this host, with
@@ -525,19 +511,19 @@ func (p *planner) exposure(b ufwBefore) ([]kept, []Blocked) {
 	for _, line := range b.answering {
 		kind, rest, _ := strings.Cut(line, " ")
 		switch kind {
-		case "listen", "listen-udp":
-			sock, ok := readSocket(kind, rest)
-			if !ok || sock.loopback() || p.ownUID(sock.uid) {
+		case "listen":
+			sock, ok := readSocket(rest)
+			if !ok || sock.loopback() || p.ownUID(sock.UID) {
 				continue
 			}
-			add(span{proto: sock.proto, lo: sock.port, hi: sock.port}, sock.what(), false, sock.v6())
+			add(span{proto: sock.Proto, lo: sock.Port, hi: sock.Port}, sock.what(), false, sock.v6())
 		case "container":
 			f := strings.Split(rest, "\t")
 			if len(f) < 2 {
 				continue
 			}
 			for _, s := range publishes(f[1]) {
-				if !loopbackAddr(s.addr) {
+				if !loopback(s.addr) {
 					add(s, containerWhat(f), true, false)
 				}
 			}
@@ -552,7 +538,7 @@ func (p *planner) exposure(b ufwBefore) ([]kept, []Blocked) {
 				unreadable("your Docker's stopped container " + name + ", with restart: always, publishes ports admit cannot read, " + hostText(strings.Join(f[2:], " ")) + ", when your Docker restarts")
 			}
 			for _, s := range list {
-				if !loopbackAddr(s.addr) {
+				if !loopback(s.addr) {
 					add(s, "your Docker's stopped container "+name+", with restart: always, publishes it when your Docker restarts", true, false)
 				}
 			}

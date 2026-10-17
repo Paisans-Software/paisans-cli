@@ -135,14 +135,14 @@ func TestIPv6IsReadAsUFWReadsIt(t *testing.T) {
 // no port filter, the owner's rules and the NAT rules, and ends with end.
 func TestTheUFWProbeReadsEveryListenerAndTheNATRules(t *testing.T) {
 	out := runProbe(t, ufwBeforeProbe, map[string]string{
-		"ss":            "LISTEN 0 4096 *:8080 *:* users:((\"app\",pid=1,fd=3))\n",
+		"ss":            "tcp LISTEN 0 4096 *:8080 *:* users:((\"app\",pid=1,fd=3))\nudp UNCONN 0 0 *:8080 *:* users:((\"app\",pid=1,fd=4))\n",
 		"ufw":           "Added user rules (see 'ufw status' for running firewall):\nufw allow 8080/tcp\n",
 		"systemctl":     "inactive\n",
 		"iptables-save": "-A DOCKER ! -i docker0 -p tcp -m tcp --dport 8443 -j DNAT --to-destination 172.17.0.2:443\n",
 	})
 	for _, want := range []string{
-		"listen LISTEN 0 4096 *:8080 ",
-		"listen-udp LISTEN 0 4096 *:8080 ",
+		"listen tcp LISTEN 0 4096 *:8080 ",
+		"listen udp UNCONN 0 0 *:8080 ",
 		"rule allow 8080/tcp\n",
 		"dnat iptables-save -t nat: -A DOCKER ! -i docker0 -p tcp -m tcp --dport 8443 -j DNAT",
 	} {
