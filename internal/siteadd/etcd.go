@@ -317,9 +317,16 @@ func (p *Plan) etcdGate() error {
 		if health, ok := apply.ParseEtcdEndpointHealth(out); !ok {
 			problems = append(problems, "endpoint health: "+lastLines(out, 3))
 		} else {
+			listed := map[string]bool{}
 			for _, h := range health {
+				listed[apply.EtcdEndpointSite(p.cfg, h.Endpoint)] = true
 				if !h.Health {
 					problems = append(problems, apply.EtcdEndpointSite(p.cfg, h.Endpoint)+"'s etcd is unhealthy"+apply.EtcdHealthError(h))
+				}
+			}
+			for _, site := range want {
+				if !listed[site] {
+					problems = append(problems, site+"'s etcd is not in etcd's endpoint health, so it is not known to be healthy")
 				}
 			}
 			if err != nil && len(problems) == 0 {

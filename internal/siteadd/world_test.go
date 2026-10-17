@@ -64,6 +64,9 @@ type world struct {
 	// etcdSick is each site whose etcd endpoint health reports unhealthy
 	// though it runs.
 	etcdSick map[string]bool
+	// healthDrop is each site `endpoint health` leaves out, as an etcdctl
+	// that answers for fewer endpoints would.
+	healthDrop map[string]bool
 	// patroniLog wraps every patronictl answer in the log lines patronictl
 	// writes when it cannot reach one of etcd's endpoints.
 	patroniLog    bool
@@ -284,10 +287,13 @@ func (h *host) Run(command string) (string, error) {
 		}
 		return "promoted\n", nil
 	case strings.Contains(command, "endpoint health --cluster"):
-		var out []map[string]any
+		out := []map[string]any{}
 		failed := false
 		for _, m := range w.etcd {
 			site := apply.EtcdMemberSite(w.cfg, m)
+			if w.healthDrop[site] {
+				continue
+			}
 			ok := w.running[site] && !w.etcdSick[site]
 			failed = failed || !ok
 			out = append(out, map[string]any{"endpoint": "http://" + w.cfg.Sites[site].Address + ":2379", "health": ok})

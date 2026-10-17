@@ -73,6 +73,11 @@ type world struct {
 	// healthOut, when set, is what `endpoint health` prints instead of the
 	// members' health, with exit status 1.
 	healthOut string
+	// healthDrop leaves a site out of `endpoint health` once a member has
+	// been removed, as an etcdctl that answers for fewer endpoints would.
+	healthDrop func(site string) bool
+	// removed is whether any member has been removed.
+	removed bool
 	// patroniLog wraps every patronictl answer in the log lines patronictl
 	// writes when it cannot reach one of etcd's endpoints.
 	patroniLog bool
@@ -543,10 +548,13 @@ func (h *host) Run(command string) (string, error) {
 		}
 		return w.memberList(h), nil
 	case strings.Contains(command, "endpoint health --cluster"):
-		var out []map[string]any
+		out := []map[string]any{}
 		failed := false
 		for _, m := range w.etcd {
 			site := apply.EtcdMemberSite(w.cfg, m)
+			if w.removed && w.healthDrop != nil && w.healthDrop(site) {
+				continue
+			}
 			ok := !w.etcdDown[site] && w.hosts[site] != nil && w.hosts[site].etcdUp
 			failed = failed || !ok
 			out = append(out, map[string]any{"endpoint": m.ClientURLs[0], "health": ok})
@@ -565,6 +573,7 @@ func (h *host) Run(command string) (string, error) {
 		return w.memberList(h), nil
 	case memberRemove.MatchString(command):
 		hex := memberRemove.FindStringSubmatch(command)[1]
+		w.removed = true
 		var kept []apply.EtcdMember
 		for _, m := range w.etcd {
 			if m.HexID() == hex {

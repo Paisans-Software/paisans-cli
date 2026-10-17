@@ -349,9 +349,16 @@ func (p *Plan) etcdVoters(sites []string) error {
 		if !ok {
 			return fmt.Errorf("endpoint health: %s", lastLines(out, 3))
 		}
+		listed := map[string]bool{}
 		for _, h := range health {
+			listed[apply.EtcdEndpointSite(p.cfg, h.Endpoint)] = true
 			if !h.Health {
 				return fmt.Errorf("%s's etcd is unhealthy%s", apply.EtcdEndpointSite(p.cfg, h.Endpoint), apply.EtcdHealthError(h))
+			}
+		}
+		for _, site := range voters {
+			if !listed[site] {
+				return fmt.Errorf("%s's etcd is not in etcd's endpoint health, so it is not known to be healthy", site)
 			}
 		}
 		if err != nil {

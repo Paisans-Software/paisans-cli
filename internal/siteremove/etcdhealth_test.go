@@ -74,3 +74,26 @@ func TestPatronictlLogLinesDoNotStopTheRemoval(t *testing.T) {
 		}
 	}
 }
+
+// The check after the change wants every voter in etcd's endpoint health:
+// one left out, or an empty list, is a member not known to be healthy.
+func TestTheEtcdCheckAfterTheChangeWantsEveryVoter(t *testing.T) {
+	for name, drop := range map[string]func(string) bool{
+		"home-c left out": func(site string) bool { return site == "home-c" },
+		"an empty list":   func(string) bool { return true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Cleanup(siteremove.SetFast())
+			w := setup(t)
+			w.healthDrop = drop
+			p := w.mustBuild("home-b", siteremove.Options{})
+			err := siteremove.Execute(p)
+			if err == nil || !strings.Contains(err.Error(), "home-a's etcd is not in etcd's endpoint health") && !strings.Contains(err.Error(), "home-c's etcd is not in etcd's endpoint health") {
+				t.Fatalf("err = %v, want a voter named as missing", err)
+			}
+			if name == "home-c left out" && !strings.Contains(err.Error(), "home-c's etcd is not in") {
+				t.Errorf("home-c is not the one named: %v", err)
+			}
+		})
+	}
+}
