@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/admission"
+	"github.com/paisans-software/paisans-cli/internal/admitrules"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
 )
@@ -85,12 +86,12 @@ func TestProbeReadsTheMeshDropIn(t *testing.T) {
 		"printf '" + strings.ReplaceAll(content, "\n", "\\n") + "' > /etc/systemd/system/user@1001.service.d/paisans-mesh.conf && " +
 		"chmod 644 /etc/systemd/system/user@1001.service.d/paisans-mesh.conf"
 	f := probeIn(t, setup, "paisans-f2a9", "")
-	got := f.Files[meshDropInPath("1001")]
+	got := f.Files[admitrules.MeshDropInPath("1001")]
 	if !got.Present || got.Link || got.Sum != sha(content) || got.Mode != "644" || got.UID != 0 {
 		t.Errorf("mesh drop-in: %+v", got)
 	}
 	f = probeIn(t, "useradd -u 1001 paisans-f2a9 && mkdir -p /etc/systemd/system/user@1001.service.d && ln -s /etc/shadow /etc/systemd/system/user@1001.service.d/paisans-mesh.conf", "paisans-f2a9", "")
-	if got := f.Files[meshDropInPath("1001")]; !got.Link {
+	if got := f.Files[admitrules.MeshDropInPath("1001")]; !got.Link {
 		t.Errorf("a linked mesh drop-in: %+v", got)
 	}
 }

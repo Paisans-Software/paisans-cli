@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-cli/internal/admitrules"
 	"github.com/paisans-software/paisans-cli/internal/hostadmit"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -83,7 +84,7 @@ func TestUserPlans(t *testing.T) { runGolden(t, userCases) }
 // whatever else it is: docker is the owner's system daemon, sudo and the
 // rest reach root or every user's logs.
 func TestAPrivilegedUserIsRefused(t *testing.T) {
-	for _, group := range hostadmit.PrivilegedGroups {
+	for _, group := range admitrules.PrivilegedGroups {
 		h := current().withUser().with("groups", "paisans-f2a9 "+group)
 		_, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
 		if err == nil || !strings.Contains(err.Error(), group) {
@@ -390,6 +391,8 @@ func TestAUserWithSudoRulesIsRefused(t *testing.T) {
 		{"a rule", withSudo(current().withUser(), sudoFixture("stock")+"    (ALL : ALL) ALL\n"), "sudo grants paisans-f2a9 a rule"},
 		{"a rule beside admit's", withSudo(current().withUser(), sudoFixture("stock")+"    (root) /usr/bin/apt\n"), "(root) /usr/bin/apt"},
 		{"output it cannot read", withSudo(current().withUser(), "sudo: unable to resolve host\n"), "sudo's rules for paisans-f2a9 could not be read"},
+		{"sudo's refusal as the user sees it", withSudo(current().withUser(), "Sorry, user paisans-f2a9 may not run sudo on host.\n"), "sudo's rules for paisans-f2a9 could not be read"},
+		{"sudo's refusal of root", withSudo(current().withUser(), "Sorry, user root may not run sudo on host.\n"), "sudo's rules for paisans-f2a9 could not be read"},
 		{"no sudo line", func() *fakeHost {
 			h := current().withUser()
 			var kept [][2]string
@@ -442,7 +445,7 @@ func TestASudoDefaultThatReachesTheHelperIsRefused(t *testing.T) {
 // The groups added for Ubuntu 24.04 are refused like the rest.
 func TestTheRootEquivalentGroupsAreListed(t *testing.T) {
 	for _, g := range []string{"disk", "shadow", "kmem", "libvirt", "incus-admin", "lxd"} {
-		if !slices.Contains(hostadmit.PrivilegedGroups, g) {
+		if !slices.Contains(admitrules.PrivilegedGroups, g) {
 			t.Errorf("%s is not in PrivilegedGroups", g)
 		}
 	}

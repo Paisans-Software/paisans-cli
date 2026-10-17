@@ -13,6 +13,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/ui"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -23,6 +24,8 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/mesh"
 	"github.com/paisans-software/paisans-cli/internal/patroni"
 	"github.com/paisans-software/paisans-cli/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/selfcheck"
+	"github.com/paisans-software/paisans-cli/internal/topology"
 )
 
 // doctorTransport is how doctor reaches a site. Tests replace it.
@@ -83,7 +86,18 @@ func runDoctor(args []string) error {
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
 	}
-	graph := doctor.Checks(cfg, sites, doctorReads{cfg: cfg, transports: transports, token: &workstationToken{path: *secretsPath}})
+	all := func() map[string]apply.Transport {
+		out := map[string]apply.Transport{}
+		for _, name := range cfg.SiteNames() {
+			if t, ok := transports[name]; ok {
+				out[name] = t
+				continue
+			}
+			out[name] = newBoundedTransport(doctorTransport(siteTransport(name, cfg.Sites[name], "")), doctorSiteCommands)
+		}
+		return out
+	}
+	graph := doctor.Checks(cfg, sites, doctorReads{cfg: cfg, transports: transports, all: all, classes: &siteClasses{}, token: &workstationToken{path: *secretsPath}})
 	report, _ := graph.Run(r, doctorAtOnce)
 	report.ShowEnd(r)
 	if report.Failed() {
@@ -157,12 +171,64 @@ func (b boundedTransport) timed(command string) (out string, before, after time.
 // doctorReads makes doctor's reads over each site's transport. Every
 // command here is one of internal/doctor's read commands, patroni's
 // ClusterCommand, apply.LookAtInstances' question, or the host check's
-// inventory (hostcheck.Inspect); none writes.
+// inventory (hostcheck.Inspect), and it reads the admission record; none
+// writes.
 type doctorReads struct {
 	cfg        *config.Config
 	transports map[string]apply.Transport
+	// all makes a transport for every declared site, which the
+	// classification reads beyond the sites --site names; it is called only
+	// when the classification runs, so a site outside --site is never
+	// contacted otherwise. classes is the classification's answer.
+	all     func() map[string]apply.Transport
+	classes *siteClasses
 	// token is the workstation's DNS token, once Secrets has read it.
 	token *workstationToken
+}
+
+// siteClasses is the run's classification of its sites, made the first
+// time a site does not answer or its record does not cover it, and never
+// otherwise, so a healthy run never pays for it.
+type siteClasses struct {
+	once sync.Once
+	c    *topology.Classification
+	err  error
+}
+
+// class is how the run's classification placed site, or why it refused;
+// nothing, for reads made without one (a test's).
+func (d doctorReads) class(site string) (topology.Site, string) {
+	if d.classes == nil {
+		return topology.Site{}, ""
+	}
+	d.classes.once.Do(func() { d.classes.c, d.classes.err = doctorClassify(d.cfg, d.all()) })
+	if d.classes.err != nil {
+		return topology.Site{}, d.classes.err.Error()
+	}
+	s, ok := d.classes.c.Sites[site]
+	if !ok {
+		return topology.Site{}, site + ": the run's classification did not place it"
+	}
+	return s, ""
+}
+
+// Classification is the run's classification, nil when none was made. It
+// never makes one: doctor's classification node asks it once every site's
+// reach and admission have ended, and those are what make it, so by then
+// it is made or never will be.
+func (d doctorReads) Classification() *topology.Classification {
+	if d.classes == nil {
+		return nil
+	}
+	return d.classes.c
+}
+
+// doctorClassify is the run's classification of every declared site, as
+// apply makes it at its start: topology reads each site's login and
+// record, the gateways' deployment record and the cluster's members, all
+// reads. Tests replace it.
+var doctorClassify = func(cfg *config.Config, all map[string]apply.Transport) (*topology.Classification, error) {
+	return topology.Classify(cfg, topology.Gather(cfg, all))
 }
 
 // workstationToken is the DNS token from the secrets file. It stays here,
@@ -312,8 +378,66 @@ func (d doctorReads) Reach(site string) doctor.SiteReach {
 	r := doctor.SiteReach{Site: site, Destination: t.Describe()}
 	if out, err := t.Run(doctor.ReachCommand); err != nil {
 		r.Err = errText(out, err)
+		r.Class, r.Unclassified = d.class(site)
 	}
 	return r
+}
+
+// Admission reads the site's admission record as the login user, who may:
+// it is root's, mode 644, in a directory every user lists.
+func (d doctorReads) Admission(site string) doctor.AdmissionProbe {
+	p := doctor.AdmissionProbe{Site: site}
+	token := d.cfg.Deployment().Token()
+	rec, err := admission.Read(d.transports[site], token)
+	var refused *admission.Error
+	switch {
+	case errors.Is(err, admission.ErrNotAdmitted):
+	case errors.As(err, &refused):
+		lines := strings.Split(strings.TrimSpace(err.Error()), "\n")
+		p.Err, p.More = lines[0], lines[1:]
+		// Read found the file at this path before refusing what it holds,
+		// so the path is there to move; with no path there is no advice.
+		if path, perr := admission.Path(token); perr == nil {
+			p.More = append(p.More, moveAside(path))
+		}
+	case err != nil:
+		lines := strings.Split(strings.TrimSpace(err.Error()), "\n")
+		p.Err, p.More = lines[0], lines[1:]
+	default:
+		p.Found, p.Record = true, rec
+	}
+	if !p.Covered(d.cfg) {
+		p.Class, p.Unclassified = d.class(site)
+	}
+	return p
+}
+
+// moveAside is how a record host admit refuses to read is set aside, so
+// that admit writes a new one: it will not write over a record it cannot
+// read. The name it moves path to is not admitted.*.json, which every
+// command that lists the records reads.
+func moveAside(path string) string {
+	return fmt.Sprintf("host admit will not write over a record it cannot read: its owner moves it aside first, `sudo mv %[1]s %[1]s.unreadable`, then admits this deployment again.", path)
+}
+
+func (d doctorReads) User(site string) doctor.UserProbe {
+	out, failure := d.read(site, doctor.UserCommand)
+	return doctor.UserProbe{Site: site, Out: out, Err: failure}
+}
+
+func (d doctorReads) Docker(site string) doctor.DockerProbe {
+	out, failure := d.read(site, doctor.DockerCommand)
+	return doctor.DockerProbe{Site: site, Out: out, Err: failure}
+}
+
+func (d doctorReads) Linger(site string) doctor.LingerProbe {
+	out, failure := d.read(site, doctor.LingerCommand)
+	return doctor.LingerProbe{Site: site, Out: out, Err: failure}
+}
+
+func (d doctorReads) Sudo(site string) doctor.SudoProbe {
+	out, failure := d.read(site, doctor.SudoCommand)
+	return doctor.SudoProbe{Site: site, Out: out, Err: failure}
 }
 
 func (d doctorReads) Mesh(site string) doctor.MeshProbe {
@@ -387,9 +511,9 @@ func (d doctorReads) Settings(site, app string) doctor.SettingsProbe {
 
 // Standby asks Pocket ID only of the sites that answered: a site that did
 // not is listed as unreachable rather than asked again.
-func (d doctorReads) Standby(app string, reached map[string]bool) doctor.StandbyProbe {
+func (d doctorReads) Standby(app string, admitted map[string]bool) doctor.StandbyProbe {
 	answering := map[string]apply.Transport{}
-	for name := range reached {
+	for name := range admitted {
 		answering[name] = d.transports[name]
 	}
 	list := apply.LookAtInstances(d.cfg, app, answering)
@@ -426,6 +550,45 @@ func (d doctorReads) Clock(site string) doctor.ClockSample {
 
 func (d doctorReads) Leftovers(site string) doctor.LeftoverProbe {
 	return gatherLeftovers(d.cfg, site, d.transports[site])
+}
+
+// doctorSelfCheck asks t from this workstation with the check apply runs at
+// the end of the gateway's step, so the two cannot disagree about what
+// answers as this deployment. It asks once: doctor does not wait for a
+// certificate. Tests replace it, since no test may reach a real address.
+var doctorSelfCheck = func(ctx context.Context, t selfcheck.Target) error {
+	p := selfcheck.DefaultProbe()
+	p.Wait = 0
+	return selfcheck.Check(ctx, p, t)
+}
+
+// SelfCheck asks the site from outside, with a minute for both fetches.
+func (d doctorReads) SelfCheck(site string) doctor.SelfCheckProbe {
+	p := doctor.SelfCheckProbe{Site: site}
+	t, ok := selfcheck.TargetFor(d.cfg, site)
+	if !ok {
+		p.Unchecked = "no hostname to ask for"
+		if d.cfg.Sites[site].PublicAddress == "" {
+			p.Unchecked = "no public_address to ask through"
+		}
+		return p
+	}
+	p.Host, p.Address = t.Host, t.Address
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	err := doctorSelfCheck(ctx, t)
+	var c *selfcheck.Conflict
+	if errors.As(err, &c) {
+		p.Conflict = c.Port
+	}
+	var u *selfcheck.Unanswered
+	if errors.As(err, &u) {
+		p.Silent, p.URL = u.Port, u.URL
+	}
+	if err != nil {
+		p.Err = err.Error()
+	}
+	return p
 }
 
 // gatherLeftovers takes one site's inventory with the host check's probes,

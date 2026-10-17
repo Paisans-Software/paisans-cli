@@ -21,9 +21,13 @@ changes share a bullet. Detailed notes are on the corresponding
 - `host prepare --all` prepares every site the configuration declares, one at a time in its order, each with its own review, stopping at the first failure.
 - `host admit`, `host prepare` and the rootless deployment commands support Ubuntu 22.04 beside 24.04.
 - Each release attaches static `paisans-linux-amd64` and `paisans-linux-arm64` binaries and a `SHA256SUMS` file, so a host owner can run the CLI on Linux without Go.
+- `doctor` checks each site as its deployment's user: its admission record, no privileged group, rootless Docker at Engine 29.5 or later, linger after the mesh, and sudo for the WireGuard helper alone.
+- `doctor` fetches `/.well-known/paisans/<token>` from the gateway and each monitor running Paisans' Caddy, from the workstation as `apply` does, and fails when 443 or 80 does not answer as this deployment.
 
 ### Changed
 
+- `doctor` reports a site pending admission, or down after joining, as a warning naming what the deployment is without and how to admit or remove it; a gateway stays a failure.
+- `doctor`'s advice for a container whose mesh address was missing at boot is to start it again, as the deployment's user, or recreate its stack.
 - `secrets set` and `secrets rotate` try an SMTP password from the machine they run on, warning when the server cannot be reached there, and rotate tries it from every site before handing it to any.
 - Behind the owner's web server, `apply` writes each app's reference snippet to `/srv/paisans/<token>/web-server/` from what `host admit` detected, and warns until the owner's copy serves it; nothing of the owner's is written or reloaded.
 - `site remove` cleans a host only as the deployment's user its admission record names, empties its root through `rootlesskit`, and ends with the `host evict` line the host's owner runs to remove the rest.

@@ -4,25 +4,19 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/paisans-software/paisans-cli/internal/admitrules"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
 )
-
-// MinRootlessEngine is the oldest Docker Engine admit accepts: from 29.5 a
-// rootless container with host networking shares the real host's network
-// namespace, which every infrastructure container needs to bind the mesh
-// address (Docker's rootless troubleshooting page, read 2026-10-15; spec,
-// Observed R1).
-const MinRootlessEngine = "29.5.0"
 
 // systemDocker starts every command admit runs against the owner's system
 // daemon, so an owner's DOCKER_HOST or docker context never redirects it.
 const systemDocker = "docker -H unix:///var/run/docker.sock"
 
 // planDocker refuses a snap Docker and an Engine older than
-// MinRootlessEngine, since upgrading the owner's Docker is not admit's
-// decision, and a present Docker that cannot run rootless; then plans the
-// packages, and keeps a system Docker admit installs disabled.
+// admitrules.MinRootlessEngine, since upgrading the owner's Docker is not
+// admit's decision, and a present Docker that cannot run rootless; then
+// plans the packages, and keeps a system Docker admit installs disabled.
 func planDocker(p *planner) error {
 	dk := p.f.Docker
 	if dk.Snap {
@@ -33,8 +27,8 @@ func planDocker(p *planner) error {
 	}
 	present := dk.Engine != ""
 	if present {
-		if !hostcheck.AtLeast(dk.Engine, MinRootlessEngine) {
-			return fmt.Errorf("Docker Engine %s is installed, and admitting a deployment needs %s or later: from 29.5 a rootless container with host networking shares the host's network namespace, which every infrastructure container needs. Upgrade Docker yourself and admit again; upgrading your Docker is not admit's decision. Nothing was changed", dk.Engine, MinRootlessEngine)
+		if !hostcheck.AtLeast(dk.Engine, admitrules.MinRootlessEngine) {
+			return fmt.Errorf("Docker Engine %s is installed, and admitting a deployment needs %s or later: from 29.5 a rootless container with host networking shares the host's network namespace, which every infrastructure container needs. Upgrade Docker yourself and admit again; upgrading your Docker is not admit's decision. Nothing was changed", dk.Engine, admitrules.MinRootlessEngine)
 		}
 		if !p.f.Packages["docker-ce"] && !dk.Setuptool {
 			return fmt.Errorf("Docker %s here is not Docker's own docker-ce and has no dockerd-rootless-setuptool.sh. The rootless extras come from Docker's apt repository, which installs beside docker-ce only. Install Docker from Docker's repository yourself, or admit on another host. Nothing was changed", dk.Engine)

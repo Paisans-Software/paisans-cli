@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/paisans-software/paisans-cli/internal/admitrules"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -17,6 +19,8 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 	"github.com/paisans-software/paisans-cli/internal/mesh"
 	"github.com/paisans-software/paisans-cli/internal/patroni"
+	"github.com/paisans-software/paisans-cli/internal/selfcheck"
+	"github.com/paisans-software/paisans-cli/internal/topology"
 	"github.com/paisans-software/paisans-cli/internal/validate"
 )
 
@@ -26,6 +30,10 @@ type doctorHost struct {
 	name    string
 	down    bool
 	answers map[string]string
+	files   map[string]string
+	// readErr, when set, is every file read's error, on a host that still
+	// answers commands.
+	readErr error
 	sent    *[]string
 	writes  *[]string
 }
@@ -50,7 +58,14 @@ func (h doctorHost) RunInput(command, _ string) (string, error) {
 }
 func (h doctorHost) ReadFile(path string) (string, bool, error) {
 	*h.sent = append(*h.sent, h.name+": read "+path)
-	return "", false, nil
+	if h.down {
+		return "", false, fmt.Errorf("%w after 3 attempts: exit status 255", apply.ErrUnreachable)
+	}
+	if h.readErr != nil {
+		return "", false, h.readErr
+	}
+	content, ok := h.files[path]
+	return content, ok, nil
 }
 func (h doctorHost) WriteFile(path string, _ string, _ uint32) error {
 	*h.writes = append(*h.writes, "WriteFile "+path)
@@ -76,6 +91,10 @@ func readOnly(cfg *config.Config) (exact []string, prefixes []string) {
 		patroni.ClusterCommand(cfg.Deployment(), "10.44.0.1:8008"),
 		patroni.ClusterCommand(cfg.Deployment(), "10.44.0.2:8008"),
 		doctor.CaddyLogCommand(cfg.Deployment()),
+		doctor.UserCommand,
+		doctor.DockerCommand,
+		doctor.LingerCommand,
+		doctor.SudoCommand,
 	}
 	prefixes = []string{
 		"docker inspect --format '{\"State\":{{json .State}},\"RestartCount\":{{.RestartCount}}}' ",
@@ -83,7 +102,7 @@ func readOnly(cfg *config.Config) (exact []string, prefixes []string) {
 		"if [ ! -f '/srv/paisans/f2a9/auth/compose.yaml' ]; then echo absent; ",
 	}
 	exact = append(exact, hostcheck.ReadCommands(cfg.Deployment())...)
-	exact = append(exact, "read "+cfg.Deployment().Manifest())
+	exact = append(exact, "read "+cfg.Deployment().Manifest(), "read "+admittedPath(cfg))
 	// Each gated app's settings read, which blueprints.LiveSettings promises
 	// prints only the named settings.
 	for _, name := range cfg.AppNames() {
@@ -100,8 +119,58 @@ func readOnly(cfg *config.Config) (exact []string, prefixes []string) {
 	return exact, prefixes
 }
 
-func withDoctorHosts(t *testing.T, hosts map[string]doctorHost) {
+// sudoHelperOnly is sudo -l's answer for a user host admit gave the helper
+// and nothing else.
+func sudoHelperOnly(user, host, helper string) string {
+	return "Matching Defaults entries for " + user + " on " + host + ":\n" +
+		"    env_reset, mail_badpass, use_pty\n\n" +
+		"User " + user + " may run the following commands on " + host + ":\n" +
+		"    " + admitrules.HelperRule(helper) + "\n"
+}
+
+// admitHosts makes each fake host one whose owner admitted its site as the
+// configuration declares it, with a sound rootless setup, unless the test
+// gave it another answer already: the record, a user in no privileged
+// group, its own rootless Docker 29.9.1, linger on with the manager after
+// the mesh, and sudo for the WireGuard helper alone.
+func admitHosts(t *testing.T, cfg *config.Config, hosts map[string]doctorHost) {
 	t.Helper()
+	helper, err := apply.WGHelper{Iface: cfg.Deployment().Interface()}.Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, site := range cfg.SiteNames() {
+		s := cfg.Sites[site]
+		h, ok := hosts[s.SSHHost()]
+		if !ok {
+			continue
+		}
+		if h.files == nil {
+			h.files = map[string]string{}
+		}
+		if _, given := h.files[admittedPath(cfg)]; !given {
+			h.files[admittedPath(cfg)] = admittedRecord(t, cfg, site)
+		}
+		if h.answers == nil {
+			h.answers = map[string]string{}
+		}
+		for command, answer := range map[string]string{
+			doctor.UserCommand:   "uid 1000\nuser " + s.SSHUser() + "\ngroups " + s.SSHUser() + "\ngids 1000\n",
+			doctor.DockerCommand: "host unix:///run/user/1000/docker.sock\nengine 29.9.1\nsecurity [\"name=seccomp,profile=builtin\",\"name=rootless\",\"name=cgroupns\"]\n",
+			doctor.LingerCommand: "linger yes\nmesh-order yes\n",
+			doctor.SudoCommand:   sudoHelperOnly(s.SSHUser(), site, helper),
+		} {
+			if _, given := h.answers[command]; !given {
+				h.answers[command] = answer
+			}
+		}
+		hosts[s.SSHHost()] = h
+	}
+}
+
+func withDoctorHosts(t *testing.T, cfg *config.Config, hosts map[string]doctorHost) {
+	t.Helper()
+	admitHosts(t, cfg, hosts)
 	saved, savedNow, savedAtOnce := doctorTransport, doctorNow, doctorAtOnce
 	// One check at a time, in the graph's order, so the hosts' shared
 	// record of what they were sent is written by one goroutine.
@@ -109,13 +178,119 @@ func withDoctorHosts(t *testing.T, hosts map[string]doctorHost) {
 	doctorTransport = func(tr apply.SSHTransport) apply.Transport {
 		h, ok := hosts[tr.Host]
 		if !ok {
-			t.Fatalf("doctor reached an unexpected host %q", tr.Host)
+			// Making a transport is not reaching the host: the
+			// classification is handed one for every declared site, and a
+			// test's replacement of it may never use them. Using one is.
+			return unexpectedHost{t: t, name: tr.Host}
 		}
 		return h
 	}
 	doctorNow = func() time.Time { return time.Unix(1_760_000_000, 0) }
+	savedSelfCheck := doctorSelfCheck
+	doctorSelfCheck = func(context.Context, selfcheck.Target) error { return nil }
+	t.Cleanup(func() { doctorSelfCheck = savedSelfCheck })
+	savedClassify := doctorClassify
+	doctorClassify = func(*config.Config, map[string]apply.Transport) (*topology.Classification, error) {
+		return &topology.Classification{Sites: map[string]topology.Site{}}, nil
+	}
+	t.Cleanup(func() { doctorClassify = savedClassify })
 	t.Cleanup(func() { doctorTransport, doctorNow, doctorAtOnce = saved, savedNow, savedAtOnce })
 }
+
+// A site that does not answer is classified once, and only then: a run
+// where every site answers and is admitted never asks.
+func TestDoctorClassifiesOnlyWhenASiteIsNotCovered(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sent, writes []string
+	withDoctorHosts(t, cfg, stuckHosts(cfg, &sent, &writes))
+	// After withDoctorHosts, whose own replacement this one overrides; its
+	// cleanup restores the original.
+	asked := 0
+	doctorClassify = func(c *config.Config, all map[string]apply.Transport) (*topology.Classification, error) {
+		asked++
+		if len(all) != len(c.Sites) {
+			t.Errorf("classification got %d transports, want one per declared site", len(all))
+		}
+		return &topology.Classification{Sites: map[string]topology.Site{"home-b": {Name: "home-b", Class: topology.Down, Why: topology.DownLine("home-b")}}}, nil
+	}
+	rec := withRecorder(t, true)
+	_ = runDoctor([]string{"--config", fixtureConfig(), "--site", "home-a", "--site", "home-b"})
+	if asked != 1 {
+		t.Errorf("classified %d times, want once", asked)
+	}
+	if out := rec.Lines(); !strings.Contains(out, "warned: check reach home-b its login is refused or it does not answer") {
+		t.Errorf("home-b is not reported down:\n%s", out)
+	}
+
+	asked = 0
+	_ = runDoctor([]string{"--config", fixtureConfig(), "--site", "home-a"})
+	if asked != 0 {
+		t.Errorf("a run where every site is covered classified %d times", asked)
+	}
+}
+
+// A site that does not answer and that the classification did not place
+// says so, rather than leave the operator to guess why.
+func TestDoctorSaysASiteWasNotPlaced(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sent, writes []string
+	withDoctorHosts(t, cfg, stuckHosts(cfg, &sent, &writes))
+	rec := withRecorder(t, true)
+	_ = runDoctor([]string{"--config", fixtureConfig(), "--site", "home-a", "--site", "home-b"})
+	if out := rec.Lines(); !strings.Contains(out, "home-b: the run's classification did not place it") {
+		t.Errorf("home-b does not say the classification left it out:\n%s", out)
+	}
+}
+
+// A site the classification places pending although it answers and its
+// record covers it, as a site whose every route into the mesh is pending
+// is, is asked nothing across sites: the classification reaches every
+// such check, whichever site's read made it.
+func TestDoctorAsksNoClassifiedPendingSiteAcrossSites(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sent, writes []string
+	withDoctorHosts(t, cfg, stuckHosts(cfg, &sent, &writes))
+	doctorClassify = func(*config.Config, map[string]apply.Transport) (*topology.Classification, error) {
+		return &topology.Classification{Sites: map[string]topology.Site{
+			"home-a": {Name: "home-a", Class: topology.Pending},
+			"home-b": {Name: "home-b", Class: topology.Down, Why: topology.DownLine("home-b")},
+		}}, nil
+	}
+	_ = withRecorder(t, true)
+	_ = runDoctor([]string{"--config", fixtureConfig(), "--site", "home-a", "--site", "home-b"})
+	for _, s := range sent {
+		if strings.HasPrefix(s, "home-a.local: "+doctor.EtcdHealthCommand(cfg)) {
+			t.Errorf("asked pending home-a for etcd's health: %s", s)
+		}
+	}
+}
+
+// unexpectedHost is a host a test did not give: anything sent to it fails
+// the test. Errorf, not Fatalf, since doctor's checks run on their own
+// goroutines.
+type unexpectedHost struct {
+	t    *testing.T
+	name string
+}
+
+func (h unexpectedHost) Describe() string { return "ubuntu@" + h.name }
+func (h unexpectedHost) err() error {
+	h.t.Errorf("doctor reached an unexpected host %q", h.name)
+	return fmt.Errorf("unexpected host %q", h.name)
+}
+func (h unexpectedHost) Run(string) (string, error)              { return "", h.err() }
+func (h unexpectedHost) RunInput(string, string) (string, error) { return "", h.err() }
+func (h unexpectedHost) ReadFile(string) (string, bool, error)   { return "", false, h.err() }
+func (h unexpectedHost) WriteFile(string, string, uint32) error  { return h.err() }
 
 // quietCaddyLog is a caddy container with no certificate line in its log.
 const quietCaddyLog = "now 1760000000\nstarted 2025-10-09T08:00:00Z\n"
@@ -167,6 +342,125 @@ func stuckHosts(cfg *config.Config, sent, writes *[]string) map[string]doctorHos
 	}
 }
 
+// pendingHosts are stuckHosts with home-a leading a cluster of its own,
+// vm on the mesh alone, and home-b answering ssh while its host holds no
+// record doctor can read, which the run's classification places pending.
+// Nothing in it fails: a pending data site and the reads the fake hosts
+// were not given are warnings.
+func pendingHosts(t *testing.T, cfg *config.Config, sent, writes *[]string) map[string]doctorHost {
+	t.Helper()
+	hosts := stuckHosts(cfg, sent, writes)
+	a := hosts["home-a.local"]
+	a.answers[doctor.SyncCommand(cfg.Deployment())] = `{"leader":"home-a","quorum":0,"sync_standby":null}` + "\n"
+	a.answers[patroni.ClusterCommand(cfg.Deployment(), "10.44.0.1:8008")] = `{"members":[{"name":"home-a","role":"leader","state":"running","timeline":3}],"scope":"paisans"}`
+	a.answers[doctor.ContainersCommand(cfg.Deployment())] = `{"Names":"paisans-f2a9-infra-patroni-1","State":"running","Status":"Up 5 minutes","Labels":"community.paisans.deployment=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"}`
+	a.answers["if [ ! -f '/srv/paisans/f2a9/auth/compose.yaml' ]"] = "active\n"
+	v := hosts["vm.example.org"]
+	v.answers[mesh.RouteCommand] = `[{"dst":"10.44.0.0/24","dev":"psns-f2a9"}]`
+	v.answers[mesh.AddrCommand] = `[{"ifname":"psns-f2a9","addr_info":[{"family":"inet","local":"10.44.0.3","prefixlen":24}]}]`
+	b := hosts["home-b.local"]
+	b.down = false
+	b.readErr = errors.New("cat: /etc/paisans/admitted: No such file or directory")
+	b.answers = map[string]string{doctor.ReachCommand: ""}
+	hosts["home-b.local"] = b
+	withDoctorHosts(t, cfg, hosts)
+	doctorClassify = func(*config.Config, map[string]apply.Transport) (*topology.Classification, error) {
+		return &topology.Classification{Sites: map[string]topology.Site{
+			"home-b": {Name: "home-b", Class: topology.Pending, Why: "home-b: its host has not admitted this deployment", Request: true},
+		}}, nil
+	}
+	return hosts
+}
+
+// A run whose only problems are warnings exits 0: a pending data site is
+// one, since the deployment runs without it.
+func TestDoctorExitsZeroWithAPendingDataSite(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sent, writes []string
+	pendingHosts(t, cfg, &sent, &writes)
+	rec := withRecorder(t, true)
+	runErr := runDoctor([]string{"--config", fixtureConfig()})
+	out := rec.Lines()
+	if runErr != nil {
+		t.Errorf("doctor failed with a pending data site and nothing else wrong: %v\n%s", runErr, out)
+	}
+	if !strings.Contains(out, "warned: check admission home-b pending:") {
+		t.Errorf("home-b is not reported pending:\n%s", out)
+	}
+}
+
+// An answer from sudo doctor cannot read is a warning, so doctor still
+// exits 0 for it.
+func TestDoctorWarnsOnAnUnreadableSudoAnswer(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sent, writes []string
+	hosts := pendingHosts(t, cfg, &sent, &writes)
+	hosts["home-a.local"].answers[doctor.SudoCommand] = "Benutzer ubuntu darf die folgenden Befehle auf home-a ausführen:\n"
+	rec := withRecorder(t, true)
+	runErr := runDoctor([]string{"--config", fixtureConfig()})
+	out := rec.Lines()
+	if runErr != nil {
+		t.Errorf("doctor failed on a sudo answer it could not read: %v\n%s", runErr, out)
+	}
+	if !strings.Contains(out, "warned: check sudo rights home-a could not read what sudo lets") {
+		t.Errorf("the unreadable answer is not a warning:\n%s", out)
+	}
+}
+
+// A monitor running Caddy that answers as something else fails doctor,
+// with apply's own words; a gateway with no public_address warns.
+func TestDoctorSelfChecksEachCaddySite(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sent, writes []string
+	withDoctorHosts(t, cfg, stuckHosts(cfg, &sent, &writes))
+	doctorSelfCheck = func(_ context.Context, target selfcheck.Target) error {
+		return &selfcheck.Conflict{Port: 443, Site: target.Site, Detail: `status 200, body "hello"`}
+	}
+	rec := withRecorder(t, true)
+	runErr := runDoctor([]string{"--config", fixtureConfig(), "--site", "vm", "--site", "watch"})
+	out := rec.Lines()
+	if runErr == nil {
+		t.Errorf("doctor passed with a monitor answering as something else:\n%s", out)
+	}
+	if !strings.Contains(out, "fail: check self-check watch 443 on watch answers, but not as this deployment") {
+		t.Errorf("the monitor's answer is not a failure:\n%s", out)
+	}
+	if !strings.Contains(out, "warned: check self-check vm not asked from outside: no public_address to ask through") {
+		t.Errorf("the gateway with no public_address does not say it was not asked:\n%s", out)
+	}
+}
+
+// A Caddy site with a public_address but no hostname of its own is not
+// asked, and says it has no hostname to ask for.
+func TestDoctorSelfCheckWithNoHostname(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	health := cfg.Apps["health"]
+	health.Hostname = ""
+	cfg.Apps["health"] = health
+	saved := doctorSelfCheck
+	t.Cleanup(func() { doctorSelfCheck = saved })
+	doctorSelfCheck = func(context.Context, selfcheck.Target) error {
+		t.Error("asked a site with no hostname to ask for")
+		return nil
+	}
+	p := doctorReads{cfg: cfg}.SelfCheck("watch")
+	if p.Unchecked != "no hostname to ask for" {
+		t.Errorf("watch with no hostname: %+v", p)
+	}
+}
+
 // The stuck case, end to end: home-b led and is switched off, home-a is a
 // replica /sync no longer names. doctor says so, puts starting home-b first
 // and the forced failover second, exits non zero, and every command any host
@@ -177,7 +471,7 @@ func TestDoctorDiagnosesTheStuckReplicaAndOnlyReads(t *testing.T) {
 		t.Fatal(err)
 	}
 	var sent, writes []string
-	withDoctorHosts(t, stuckHosts(cfg, &sent, &writes))
+	withDoctorHosts(t, cfg, stuckHosts(cfg, &sent, &writes))
 
 	rec := withRecorder(t, true)
 	runErr := runDoctor([]string{"--config", fixtureConfig()})
@@ -199,9 +493,17 @@ func TestDoctorDiagnosesTheStuckReplicaAndOnlyReads(t *testing.T) {
 		"fail: check pocket-id auth no active instance, so sign in is down",
 		"home-b   unreachable did not answer ssh (see reach)",
 		"There is no database primary (see patroni)",
-		"Not checked because of this: mesh, patroni, containers, settings talk, clocks, leftovers on home-b.",
+		"Not checked because of this: admission, user, docker, docker engine, linger, sudo rights, mesh, patroni, containers, settings talk, clocks, leftovers on home-b.",
+		"done: check admission home-a admitted as ubuntu, covering its roles",
+		"done: check user home-a ubuntu is in no privileged group",
+		"done: check docker home-a its rootless Docker answers at unix:///run/user/1000/docker.sock",
+		"done: check docker engine home-a Docker Engine 29.9.1",
+		"done: check linger home-a its manager starts after the mesh at boot",
+		"done: check sudo rights home-a sudo lets ubuntu run the WireGuard helper and nothing else",
 		"section: failed, deepest first:",
 		"doctor changes nothing",
+		"done: check self-check watch answers as this deployment on 443 and 80, asked for health.example.org through 203.0.113.20",
+		"warned: check self-check vm not asked from outside: no public_address to ask through",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
@@ -270,7 +572,7 @@ func TestDoctorSiteNarrowsTheHostsReached(t *testing.T) {
 		t.Fatal(err)
 	}
 	var sent, writes []string
-	withDoctorHosts(t, map[string]doctorHost{
+	withDoctorHosts(t, cfg, map[string]doctorHost{
 		"vm.example.org": {name: "vm.example.org", sent: &sent, writes: &writes, answers: map[string]string{
 			doctor.ReachCommand:                        "",
 			doctor.ClockCommand:                        "1760000000.000000000\n",
@@ -292,6 +594,54 @@ func TestDoctorSiteNarrowsTheHostsReached(t *testing.T) {
 	}
 	if runErr == nil {
 		t.Error("a deployment whose database could not be read is not a pass")
+	}
+}
+
+// A record host admit could not have written fails admission with how its
+// owner recovers: move the record aside, since admit will not write over
+// one it cannot read, then request and admit again.
+func TestDoctorSaysToMoveAnUnreadableRecordAside(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := admittedPath(cfg)
+	var sent, writes []string
+	withDoctorHosts(t, cfg, map[string]doctorHost{
+		"vm.example.org": {name: "vm.example.org", sent: &sent, writes: &writes,
+			answers: map[string]string{doctor.ReachCommand: ""},
+			files:   map[string]string{path: "{not a record"}},
+	})
+	rec := withRecorder(t, true)
+	_ = runDoctor([]string{"--config", fixtureConfig(), "--site", "vm"})
+	out := rec.Lines()
+	move := strings.Index(out, "`sudo mv "+path+" "+path+".unreadable`")
+	request := strings.Index(out, "`paisans host request --site vm > vm.admit`")
+	admit := strings.Index(out, "`sudo paisans host admit --request vm.admit`")
+	if !strings.Contains(out, "fail: check admission vm its admission record cannot be read") || move < 0 || !(move < request && request < admit) {
+		t.Errorf("want the failure, then move it aside, request and admit, in that order:\n%s", out)
+	}
+}
+
+// A record that could not be read at all, the host answering commands but
+// the read failing, fails admission with why, and with no word of moving
+// the record aside: nothing says it is there to move.
+func TestDoctorMovesNoRecordItCouldNotRead(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sent, writes []string
+	withDoctorHosts(t, cfg, map[string]doctorHost{
+		"vm.example.org": {name: "vm.example.org", sent: &sent, writes: &writes,
+			answers: map[string]string{doctor.ReachCommand: ""},
+			readErr: errors.New("connection reset by peer")},
+	})
+	rec := withRecorder(t, true)
+	_ = runDoctor([]string{"--config", fixtureConfig(), "--site", "vm"})
+	out := rec.Lines()
+	if !strings.Contains(out, "fail: check admission vm its admission record cannot be read") || !strings.Contains(out, "connection reset by peer") || strings.Contains(out, "sudo mv") {
+		t.Errorf("want the failure with the read's error and no move aside:\n%s", out)
 	}
 }
 
@@ -333,7 +683,7 @@ func TestDoctorReportsLeftoversAndForeignCaddyUsers(t *testing.T) {
 		doctor.CaddyLogCommand(cfg.Deployment()): quietCaddyLog,
 	}
 	var sent, writes []string
-	withDoctorHosts(t, map[string]doctorHost{
+	withDoctorHosts(t, cfg, map[string]doctorHost{
 		"vm.example.org": {name: "vm.example.org", sent: &sent, writes: &writes, answers: answers},
 	})
 	rec := withRecorder(t, true)
@@ -464,9 +814,13 @@ func (h busyHost) WriteFile(string, string, uint32) error { return errors.New("d
 // per site bound, which keeps under sshd's sessions per connection, and
 // sites are not bounded against each other.
 func TestDoctorBoundsCommandsPerSiteOnly(t *testing.T) {
-	saved, savedBound, savedAtOnce := doctorTransport, doctorSiteCommands, doctorAtOnce
-	t.Cleanup(func() { doctorTransport, doctorSiteCommands, doctorAtOnce = saved, savedBound, savedAtOnce })
+	saved, savedBound, savedAtOnce, savedSelfCheck := doctorTransport, doctorSiteCommands, doctorAtOnce, doctorSelfCheck
+	t.Cleanup(func() {
+		doctorTransport, doctorSiteCommands, doctorAtOnce, doctorSelfCheck = saved, savedBound, savedAtOnce, savedSelfCheck
+	})
 	doctorSiteCommands, doctorAtOnce = 2, 0
+	// No test reaches a real address: every Caddy site answers as itself.
+	doctorSelfCheck = func(context.Context, selfcheck.Target) error { return nil }
 	var mu sync.Mutex
 	all, top := 0, 0
 	hosts := map[string]busyHost{}
@@ -476,7 +830,10 @@ func TestDoctorBoundsCommandsPerSiteOnly(t *testing.T) {
 	doctorTransport = func(tr apply.SSHTransport) apply.Transport {
 		h, ok := hosts[tr.Host]
 		if !ok {
-			t.Fatalf("doctor reached an unexpected host %q", tr.Host)
+			// Making a transport is not reaching the host: the
+			// classification is handed one for every declared site, and a
+			// test's replacement of it may never use them. Using one is.
+			return unexpectedHost{t: t, name: tr.Host}
 		}
 		return h
 	}

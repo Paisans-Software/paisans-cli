@@ -3,6 +3,7 @@ package doctor
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -188,16 +189,24 @@ func firstCluster(p PatroniProbe, sites []string) (patroni.Cluster, string, []st
 
 func withLeader(cfg *config.Config, in Input, c patroni.Cluster, leader patroni.Member, from string) []Finding {
 	out := []Finding{{Section: SectionPatroni, Level: OK, Line: fmt.Sprintf("leader: %s, running on timeline %d (asked %s)", leader.Name, leader.Timeline, from)}}
-	reached := in.Reached()
 	for _, name := range cfg.Cluster.Sites {
 		if name == leader.Name {
 			continue
 		}
 		m, ok := c.Member(name)
 		if !ok {
-			why := "its Patroni is not running or not registered: see the containers section"
-			if !reached[name] {
+			var why string
+			switch in.memberGap(cfg, name) {
+			case gapPending:
+				continue
+			case gapReach:
 				why = "its site did not answer ssh: see reach"
+			case gapAdmission:
+				why = "its admission did not pass: see admission"
+			case gapDocker:
+				why = "its Docker does not answer: see docker"
+			default:
+				why = "its Patroni is not running or not registered: see the containers section"
 			}
 			out = append(out, Finding{Section: SectionPatroni, Level: Warn, Line: fmt.Sprintf("%s: not a cluster member, so %s has no replica there; %s", name, leader.Name, why)})
 			continue
@@ -332,13 +341,67 @@ func via(in Input, site string) string {
 	return ""
 }
 
+// A gap is why a data site's Patroni was not read, as the check that
+// already reports it says.
+type gap int
+
+const (
+	// gapNone: the site answered, was admitted and its Docker answers, so
+	// only its Patroni is at fault, which the containers section explains.
+	gapNone gap = iota
+	// gapPending: admission's one line says everything about the site.
+	gapPending
+	// gapReach: the site did not answer ssh, or was found down.
+	gapReach
+	// gapAdmission: its admission failed, though the deployment has joined it.
+	gapAdmission
+	// gapDocker: its rootless Docker does not answer, so nothing that runs
+	// docker there was asked.
+	gapDocker
+)
+
+// memberGap is why site's Patroni could not be read, from the checks
+// that ran before Patroni's.
+func (in Input) memberGap(cfg *config.Config, site string) gap {
+	for _, p := range in.Admission {
+		if p.Site == site && p.Pending() {
+			return gapPending
+		}
+	}
+	switch {
+	case slices.Contains(in.Pending, site):
+		return gapPending
+	case slices.Contains(in.Down, site) || !in.Reached()[site]:
+		return gapReach
+	}
+	for _, p := range in.Admission {
+		if p.Site == site && !p.Covered(cfg) {
+			return gapAdmission
+		}
+	}
+	for _, p := range in.Docker {
+		if p.Site == site && !p.Answered() {
+			return gapDocker
+		}
+	}
+	return gapNone
+}
+
 // startAdvice is the first, lossless recovery: bring the old leader back.
 func startAdvice(cfg *config.Config, in Input, x, all string) []string {
 	how := fmt.Sprintf("Start %s", x)
-	switch _, declared := cfg.Sites[x]; {
+	_, declared := cfg.Sites[x]
+	gap := in.memberGap(cfg, x)
+	switch {
 	case !declared:
 		how = fmt.Sprintf("Start the Patroni member %s, which no site in this configuration is named", x)
-	case in.Reached()[x]:
+	case gap == gapPending:
+		how = fmt.Sprintf("Have %s's owner admit this deployment again: it is pending, and the admission section says what its host lacks", x)
+	case gap == gapAdmission:
+		how = fmt.Sprintf("Have %s's owner admit this deployment again: its host answers ssh, but its admission did not pass, and the admission section says why", x)
+	case gap == gapDocker:
+		how = fmt.Sprintf("Start %s's Docker: its host answers ssh, but its rootless Docker does not answer, and the docker section says how", x)
+	case gap == gapNone:
 		how = fmt.Sprintf("Start %s's Patroni: its host answers ssh, but its Patroni is not in the cluster. `%s up -d patroni` on %s%s starts it; the containers section says why it stopped", x, infraCompose(cfg), x, via(in, x))
 	case in.destination(x) != "":
 		how = fmt.Sprintf("Start %s (ssh %s)", x, in.destination(x))

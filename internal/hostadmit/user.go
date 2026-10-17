@@ -5,23 +5,12 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/admitrules"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
-
-// PrivilegedGroups are the groups a deployment's user must not be in: each
-// reaches past the user, to root (sudo, wheel, admin, lxd), to every user's
-// logs (adm, systemd-journal), or to the owner's system Docker daemon,
-// which is root on the host (docker).
-//
-// Each is root-equivalent or reads root's secrets: disk writes the raw
-// block devices, kmem reads the kernel's memory, shadow reads every
-// password hash, and libvirt, incus-admin and lxd start machines and
-// containers as root with the host's disks in reach.
-var PrivilegedGroups = []string{"root", "sudo", "wheel", "admin", "adm", "docker", "lxd", "systemd-journal",
-	"disk", "shadow", "kmem", "libvirt", "incus-admin"}
 
 // minSubIDs is the subordinate range a rootless daemon needs (Docker's
 // rootless page: "at least 65,536").
@@ -110,7 +99,7 @@ func planUser(p *planner) error {
 	}
 	var privileged []string
 	for _, g := range append([]string{u.Group}, u.Groups...) {
-		if slices.Contains(PrivilegedGroups, g) && !slices.Contains(privileged, g) {
+		if slices.Contains(admitrules.PrivilegedGroups, g) && !slices.Contains(privileged, g) {
 			privileged = append(privileged, g)
 		}
 	}
@@ -193,12 +182,12 @@ func ownHome(user string, u UserFacts) error {
 
 // sudoRules refuses a user sudo grants any rule to but admit's own line
 // for the WireGuard helper, which a re-run finds: a rule by name, or by a
-// group PrivilegedGroups does not list, reaches past the user as surely as
-// sudo's own group does. It refuses too a Defaults entry that lets the
-// user hand the helper an environment or another root (sudoDefaultProblem),
-// and any entry set for a runas user or a command alone: sudo -l lists
-// only admit's line while setenv lets the user pass LD_PRELOAD to the
-// helper, which runs as root.
+// group admitrules.PrivilegedGroups does not list, reaches past the user as
+// surely as sudo's own group does. It refuses too a Defaults entry that
+// lets the user hand the helper an environment or another root
+// (admitrules.SudoList.BeyondHelper names each), and any entry set for a
+// runas user or a command alone: sudo -l lists only admit's line while
+// setenv lets the user pass LD_PRELOAD to the helper, which runs as root.
 func sudoRules(p *planner) error {
 	user := p.in.Request.User
 	u := p.f.User
@@ -209,19 +198,13 @@ func sudoRules(p *planner) error {
 	if err != nil {
 		return err
 	}
+	extra, reach := admitrules.SudoList{Rules: u.SudoRules, Defaults: u.SudoDefaults, Specific: u.SudoSpecific}.BeyondHelper(helper)
 	var rules, defaults []string
-	for _, r := range u.SudoRules {
-		if r != "(root) NOPASSWD: "+helper {
-			rules = append(rules, "- "+ui.Visible(r))
-		}
+	for _, r := range extra {
+		rules = append(rules, "- "+ui.Visible(r))
 	}
-	for _, d := range u.SudoDefaults {
-		if why := sudoDefaultProblem(d); why != "" {
-			defaults = append(defaults, "- "+ui.Visible(d)+": "+why)
-		}
-	}
-	for _, d := range u.SudoSpecific {
-		defaults = append(defaults, "- "+ui.Visible(d)+": set for one runas user or command alone")
+	for _, d := range reach {
+		defaults = append(defaults, "- "+ui.Visible(d))
 	}
 	var found []string
 	if len(rules) > 0 {
@@ -234,52 +217,6 @@ func sudoRules(p *planner) error {
 		return nil
 	}
 	return fmt.Errorf("%s\nRemove them (sudo -l -U %s names them; look in /etc/sudoers and /etc/sudoers.d, and for a Defaults:%s line), or name another user in the request, and admit again. Nothing was changed", strings.Join(found, "\n"), user, user)
-}
-
-// stockSecurePath is the directories of Ubuntu's secure_path, each
-// root's alone; a secure_path of any of them passes.
-var stockSecurePath = []string{"/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/sbin", "/bin", "/snap/bin"}
-
-// sudoDefaultProblem says why one entry of the Defaults sudo applies to
-// the user lets it reach past the helper's fixed environment, or "":
-// keeping or setting variables (env_keep, env_check, env_file, setenv,
-// restricted_env_file, !env_reset), a PATH of its choosing (!secure_path,
-// a secure_path outside root's directories, exempt_group), a root
-// directory or working directory of its choosing (runchroot, runcwd), or
-// open descriptors (closefrom_override). Stock Ubuntu's env_reset,
-// mail_badpass, secure_path and use_pty pass, as does env_delete, which
-// only takes variables away, and anything else.
-func sudoDefaultProblem(entry string) string {
-	name := strings.TrimPrefix(entry, "!")
-	value := ""
-	if i := strings.IndexAny(name, "+-="); i >= 0 {
-		name, value = name[:i], strings.TrimLeft(name[i:], "+-=")
-	}
-	negated := strings.HasPrefix(entry, "!")
-	switch name {
-	case "env_reset":
-		if negated {
-			return "the user's whole environment reaches the helper"
-		}
-	case "env_keep", "env_check", "env_file", "setenv", "restricted_env_file":
-		return "the user's variables reach the helper"
-	case "secure_path":
-		if negated {
-			return "the user's PATH reaches the helper"
-		}
-		for _, d := range strings.Split(strings.ReplaceAll(value, `\:`, ":"), ":") {
-			if !slices.Contains(stockSecurePath, d) {
-				return "the helper's PATH holds " + ui.Visible(d) + ", which is not root's alone"
-			}
-		}
-	case "exempt_group":
-		return "its members' PATH reaches the helper"
-	case "runchroot", "runcwd":
-		return "the user chooses the helper's root or working directory"
-	case "closefrom_override":
-		return "the user's open files reach the helper"
-	}
-	return ""
 }
 
 // misplaced says why r cannot be a deployment's subordinate range, or "":
@@ -386,7 +323,7 @@ func planMeshDropIn(p *planner) error {
 			Kinds:    []string{"user"},
 		})
 	}
-	path, content := meshDropInPath(uidOf(p)), meshConf(p)
+	path, content := admitrules.MeshDropInPath(uidOf(p)), meshConf(p)
 	f := p.f.Files[path]
 	switch {
 	case f.Link:

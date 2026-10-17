@@ -1,9 +1,10 @@
-// Package selfcheck asks a gateway, from outside, whether it answers as this
-// deployment. The deployment's user cannot read the host's ruleset or
-// another user's sockets, so a port another server took after admission,
-// and above all one a DNAT rule takes with no listener, is invisible from
-// the host. The gateway's Caddy answers /.well-known/paisans/<token> with
-// the token; anything else that answers there is another server.
+// Package selfcheck asks a site that runs the toolkit's Caddy, from
+// outside, whether it answers as this deployment. The deployment's user
+// cannot read the host's ruleset or another user's sockets, so a port
+// another server took after admission, and above all one a DNAT rule takes
+// with no listener, is invisible from the host. That Caddy answers
+// /.well-known/paisans/<token> with the token; anything else that answers
+// there is another server.
 package selfcheck
 
 import (
@@ -90,22 +91,26 @@ func fetch(ctx context.Context, scheme, address, host, path string) (Answer, err
 	return Answer{Status: resp.StatusCode, Body: string(body), Location: resp.Header.Get("Location")}, nil
 }
 
-// Target is one gateway, asked through its public address for one of the
-// hostnames it serves.
+// Target is one site running the toolkit's Caddy, asked through its public
+// address for one of the hostnames it serves.
 type Target struct {
 	Deployment          deployment.Deployment
 	Site, Address, Host string
 }
 
-// TargetFor is site's check: its public_address, and the first hostname the
-// gateway serves. false for a site that is not a gateway, a gateway with no
+// TargetFor is site's check: its public_address, and the first hostname its
+// Caddy serves, a gateway's for the deployment and a monitor's its own.
+// false for a site that runs no Caddy of the toolkit's, one with no
 // public_address to ask through, or one with no hostname to ask for.
 func TargetFor(cfg *config.Config, site string) (Target, bool) {
 	s, ok := cfg.Sites[site]
-	if !ok || !s.Has(config.RoleGateway) || s.PublicAddress == "" {
+	if !ok || !s.RunsCaddy() || s.PublicAddress == "" {
 		return Target{}, false
 	}
 	names := dns.GatewayHostnames(cfg)
+	if !s.Has(config.RoleGateway) {
+		names = dns.ServedHostnames(cfg, site)
+	}
 	if len(names) == 0 {
 		return Target{}, false
 	}
@@ -121,6 +126,20 @@ type Conflict struct {
 func (c *Conflict) Error() string {
 	return fmt.Sprintf("%d on %s answers, but not as this deployment: %s", c.Port, c.Site, c.Detail)
 }
+
+// Unanswered is a port that gave no answer at all: URL asked through
+// Address, and why the request failed.
+type Unanswered struct {
+	Port               int
+	Site, URL, Address string
+	Err                error
+}
+
+func (u *Unanswered) Error() string {
+	return fmt.Sprintf("%d on %s does not answer %s through %s: %v", u.Port, u.Site, u.URL, u.Address, u.Err)
+}
+
+func (u *Unanswered) Unwrap() error { return u.Err }
 
 // notYet is an answer worth waiting for: nothing listening, nothing
 // answering, or a handshake the server fails, as Caddy fails every one
@@ -159,14 +178,14 @@ func Check(ctx context.Context, p Probe, t Target) error {
 		p.Sleep(5 * time.Second)
 	}
 	if err != nil {
-		return fmt.Errorf("443 on %s does not answer https://%s%s through %s: %w", t.Site, t.Host, path, t.Address, err)
+		return &Unanswered{Port: 443, Site: t.Site, URL: "https://" + t.Host + path, Address: t.Address, Err: err}
 	}
 	if a.Status != http.StatusOK || strings.TrimSpace(a.Body) != want {
 		return &Conflict{Port: 443, Site: t.Site, Detail: describe(a)}
 	}
 	a, err = p.Fetch(ctx, "http", t.Address, t.Host, path)
 	if err != nil {
-		return fmt.Errorf("80 on %s does not answer http://%s%s through %s: %w", t.Site, t.Host, path, t.Address, err)
+		return &Unanswered{Port: 80, Site: t.Site, URL: "http://" + t.Host + path, Address: t.Address, Err: err}
 	}
 	if a.Status < 300 || a.Status > 399 || a.Location != "https://"+t.Host+path {
 		return &Conflict{Port: 80, Site: t.Site, Detail: describe(a) + ", where this deployment's Caddy redirects to https://" + t.Host + path}

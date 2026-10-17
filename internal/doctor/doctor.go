@@ -16,6 +16,7 @@ package doctor
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -71,7 +72,7 @@ const (
 	SectionLeftovers  = "leftovers"
 )
 
-var sections = []string{SectionReach, SectionMesh, SectionEtcd, SectionPatroni, SectionContainers, SectionSettings, SectionPocketID, SectionClocks, SectionLeftovers, SectionCaddy, SectionSecrets, SectionToken, SectionRecords}
+var sections = []string{SectionReach, SectionAdmission, SectionUser, SectionDocker, SectionLinger, SectionSudo, SectionMesh, SectionEtcd, SectionPatroni, SectionContainers, SectionSettings, SectionPocketID, SectionClocks, SectionLeftovers, SectionSelfCheck, SectionCaddy, SectionSecrets, SectionToken, SectionRecords}
 
 // Finding is one line of the report, with any explanation, recovery advice or
 // evidence under it.
@@ -215,8 +216,17 @@ func plural(n int, word string) string {
 type Input struct {
 	// Sites are the sites asked, in order: every declared site, or the ones
 	// --site named.
-	Sites      []string
-	Reach      []SiteReach
+	Sites []string
+	Reach []SiteReach
+	// Admission, Users, Docker, Linger and SudoRights are each site's
+	// rootless checks (admission.go, rootless.go, sudo.go). SudoRights is
+	// not named Sudo, which the guard against commands reaching for root
+	// refuses to see assigned (cmd/paisans/sudo_guard_test.go).
+	Admission  []AdmissionProbe
+	Users      []UserProbe
+	Docker     []DockerProbe
+	Linger     []LingerProbe
+	SudoRights []SudoProbe
 	Mesh       []MeshProbe
 	Etcd       EtcdProbe
 	Patroni    PatroniProbe
@@ -225,6 +235,8 @@ type Input struct {
 	Clocks     []ClockSample
 	Leftovers  []LeftoverProbe
 	Settings   []SettingsProbe
+	// SelfChecks is each Caddy site's own answer, asked from outside (selfcheck.go).
+	SelfChecks []SelfCheckProbe
 	// Caddy is each Caddy site's certificate log, Secrets whether the
 	// secrets opened, Tokens each place's DNS token check, and Records
 	// the zone compared with what the deployment needs (see dnschecks.go).
@@ -233,6 +245,14 @@ type Input struct {
 	Secrets SecretsProbe
 	Tokens  []dns.TokenResult
 	Records RecordsProbe
+	// Pending and Down are the sites the run's classification placed
+	// pending or down, once every site's reach and admission have ended,
+	// when it was made (see ClassReads). A site that answers with a record
+	// covering it is pending when its every route into the mesh is through
+	// a pending site, and one whose login failed only for the
+	// classification's own read is down.
+	Pending []string
+	Down    []string
 }
 
 // Reached is the set of sites that answered ssh, and can be asked the rest.
@@ -244,6 +264,36 @@ func (in Input) Reached() map[string]bool {
 		}
 	}
 	return out
+}
+
+// Admitted is the set of sites whose admission check passed: the record
+// was read and covers the site as cfg declares it, and the run's
+// classification, when one was made, placed it neither pending nor down. A
+// check that reads across sites asks only these, never a pending or down
+// site or one whose admission failed.
+func (in Input) Admitted(cfg *config.Config) map[string]bool {
+	out := map[string]bool{}
+	for _, p := range in.Admission {
+		if p.Covered(cfg) && !in.classedOut(p.Site) {
+			out[p.Site] = true
+		}
+	}
+	return out
+}
+
+// classedOut reports whether the run's classification placed site pending
+// or down.
+func (in Input) classedOut(site string) bool {
+	return slices.Contains(in.Pending, site) || slices.Contains(in.Down, site)
+}
+
+// notAsked is why a check that reads across sites did not ask a site that
+// answered ssh.
+func (in Input) notAsked(site string) string {
+	if in.classedOut(site) {
+		return notClassified
+	}
+	return notAdmitted
 }
 
 // Asked is the set of sites doctor was told to look at.
@@ -270,6 +320,12 @@ func Diagnose(cfg *config.Config, in Input) Report {
 	reached := in.Reached()
 	var findings []Finding
 	findings = append(findings, Reach(cfg, in.Reach)...)
+	findings = append(findings, Admission(cfg, in.Admission)...)
+	findings = append(findings, User(in.Users)...)
+	findings = append(findings, DockerSocket(in.Docker)...)
+	findings = append(findings, DockerEngine(in.Docker)...)
+	findings = append(findings, Linger(cfg.Deployment(), in.Linger)...)
+	findings = append(findings, SudoRights(cfg, in.SudoRights)...)
 	findings = append(findings, Mesh(cfg, in.Mesh)...)
 	findings = append(findings, Etcd(cfg, in)...)
 	findings = append(findings, Patroni(cfg, in)...)
@@ -280,6 +336,7 @@ func Diagnose(cfg *config.Config, in Input) Report {
 	findings = append(findings, Standby(cfg.Deployment(), in.Standby, noPrimary)...)
 	findings = append(findings, Clocks(in.Clocks)...)
 	findings = append(findings, Leftovers(in.Leftovers)...)
+	findings = append(findings, SelfChecks(cfg, in.SelfChecks)...)
 	findings = append(findings, CaddyCertificates(cfg, in.Caddy)...)
 	findings = append(findings, Secrets(in.Secrets)...)
 	findings = append(findings, Tokens(in)...)

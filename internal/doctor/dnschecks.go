@@ -469,7 +469,7 @@ func addDNS(g *Graph, cfg *config.Config, sites []string, reads DNSReads) {
 		name := SectionCaddy + " " + site
 		logs = append(logs, name)
 		g.Add(Node{Name: name, Section: SectionCaddy, Site: site, Subject: site,
-			Hard: []Need{Hard(SectionReach + " " + site)},
+			Hard: []Need{Hard(SectionDocker + " " + site)},
 			Gather: func(Input) func(*Input) {
 				p := reads.CaddyLog(site)
 				return func(in *Input) { in.Caddy = append(in.Caddy, p) }
@@ -521,7 +521,7 @@ func addDNS(g *Graph, cfg *config.Config, sites []string, reads DNSReads) {
 
 	for _, site := range caddy {
 		g.Add(Node{Name: SectionToken + " " + site, Section: SectionToken, Site: site, Subject: site,
-			Hard:   []Need{Hard(SectionReach + " " + site)},
+			Hard:   []Need{Hard(SectionAdmission + " " + site)},
 			Soft:   logs,
 			Unless: unless,
 			Gather: func(Input) func(*Input) {

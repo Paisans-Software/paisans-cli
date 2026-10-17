@@ -13,6 +13,7 @@ import (
 	"text/template"
 
 	"github.com/paisans-software/paisans-cli/internal/admission"
+	"github.com/paisans-software/paisans-cli/internal/admitrules"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
@@ -536,7 +537,9 @@ func parseFacts(out, user string) (Facts, error) {
 		}
 	}
 	if f.raw["sudo"] != nil && f.raw["sudo"][len(f.raw["sudo"])-1] == "listed" {
-		readSudo(&f.User, sudoL)
+		if list, ok := admitrules.ReadSudoListAsRoot(user, sudoL); ok {
+			f.User.SudoRules, f.User.SudoDefaults, f.User.SudoSpecific, f.User.SudoRead = list.Rules, list.Defaults, list.Specific, true
+		}
 	}
 	if f.User.Exists && f.User.Group == "" {
 		return f, fmt.Errorf("no primary group read for %s", user)
@@ -545,7 +548,7 @@ func parseFacts(out, user string) (Facts, error) {
 }
 
 // fileSum is a checksum as the probe prints one, fileMode a mode as stat's
-// %a does, and orphanDropIn the path of a mesh drop-in, meshDropInPath's.
+// %a does, and orphanDropIn the path of a mesh drop-in, MeshDropInPath's.
 var (
 	fileSum      = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	fileMode     = regexp.MustCompile(`^[0-7]{3,4}$`)
@@ -581,63 +584,6 @@ func parseRoute6(v string) (Route6, error) {
 	return Route6{Prefix: p, Dev: fields[1]}, nil
 }
 
-// readSudo reads what sudo -n -l -U printed for the user under LC_ALL=C:
-// a header line per section, each entry indented below it, long lines
-// wrapped onto more indented lines. A line it does not know, or a listing
-// with neither the user's rules nor sudo's "is not allowed", leaves
-// SudoRead false, so admit refuses rather than guess.
-func readSudo(u *UserFacts, lines []string) {
-	section, understood := "", false
-	var defaults []string
-	for _, l := range lines {
-		indented := strings.HasPrefix(l, " ") || strings.HasPrefix(l, "\t")
-		entry := strings.TrimSpace(l)
-		switch {
-		case entry == "":
-			section = ""
-		case !indented && strings.HasPrefix(l, "Matching Defaults entries for "):
-			section = "defaults"
-		case !indented && strings.HasPrefix(l, "Runas and Command-specific defaults for "):
-			section = "specific"
-		case !indented && strings.Contains(l, " may run the following commands on "):
-			section, understood = "rules", true
-		case !indented && strings.Contains(l, " is not allowed to run sudo on "):
-			section, understood = "", true
-		case indented && section == "defaults":
-			defaults = append(defaults, entry)
-		case indented && section == "specific":
-			u.SudoSpecific = append(u.SudoSpecific, entry)
-		case indented && section == "rules":
-			u.SudoRules = append(u.SudoRules, entry)
-		default:
-			return
-		}
-	}
-	// Defaults wrap after a comma, and a comma inside a value is escaped.
-	for _, e := range splitUnescaped(strings.Join(defaults, " "), ',') {
-		if e = strings.TrimSpace(e); e != "" {
-			u.SudoDefaults = append(u.SudoDefaults, e)
-		}
-	}
-	u.SudoRead = understood
-}
-
-// splitUnescaped splits s at each sep that no backslash escapes.
-func splitUnescaped(s string, sep byte) []string {
-	var out []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		switch s[i] {
-		case '\\':
-			i++
-		case sep:
-			out = append(out, s[start:i])
-			start = i + 1
-		}
-	}
-	return append(out, s[start:])
-}
-
 // The files admit writes as root that the probe reads. Each is what the
 // task that writes it writes; they live here, beside the probe, because the
 // probe is what reads them.
@@ -649,13 +595,6 @@ const (
 	sysctlBeforePath = admission.Dir + "/sysctl.before"
 	installedPath    = admission.Dir + "/installed"
 )
-
-// meshDropInPath is the user's drop-in that orders its manager after the
-// mesh. Its path holds the user's UID, which the probe learns, so the probe
-// reads it from its own list (userfiles) rather than from probedFiles.
-func meshDropInPath(uid string) string {
-	return "/etc/systemd/system/user@" + uid + ".service.d/paisans-mesh.conf"
-}
 
 // sudoersPath is the deployment's sudoers line, egressFilePath its egress
 // table's file, watchdogRulePath its watchdog's udev rule.

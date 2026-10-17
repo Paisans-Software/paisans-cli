@@ -71,6 +71,7 @@ func TestSelfCheckRefusesAnotherServer(t *testing.T) {
 		"a redirect on 443":     {https: []result{{a: selfcheck.Answer{Status: 302, Location: "https://elsewhere.example/f2a9"}}}, http: []result{redirect}},
 		"80 elsewhere":          {https: []result{ours}, http: []result{{a: selfcheck.Answer{Status: 301, Location: "https://other.example.org/"}}}},
 		"80 serves no redirect": {https: []result{ours}, http: []result{ours}},
+		"an echo of the path":   {https: []result{{a: selfcheck.Answer{Status: 200, Body: "/.well-known/paisans/f2a9\n"}}}, http: []result{redirect}},
 	} {
 		err := selfcheck.Check(context.Background(), probe(w), target)
 		var c *selfcheck.Conflict
@@ -91,5 +92,15 @@ func TestSelfCheckWaitsForTheCertificateThenGivesUp(t *testing.T) {
 	err := selfcheck.Check(context.Background(), probe(w), target)
 	if err == nil || !strings.Contains(err.Error(), "443 on vm does not answer") {
 		t.Errorf("a gateway that never answers: %v", err)
+	}
+}
+
+// A port that gives no answer is named, with what it was asked for.
+func TestSelfCheckNamesTheSilentPort(t *testing.T) {
+	w := &answers{https: []result{ours}, http: []result{refused}}
+	err := selfcheck.Check(context.Background(), probe(w), target)
+	var u *selfcheck.Unanswered
+	if !errors.As(err, &u) || u.Port != 80 || !strings.HasPrefix(u.URL, "http://") || !strings.HasPrefix(err.Error(), "80 on vm does not answer http://") {
+		t.Errorf("80 refused: %v", err)
 	}
 }

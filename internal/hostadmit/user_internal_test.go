@@ -1,11 +1,10 @@
 package hostadmit
 
 import (
-	"os"
-	"slices"
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-cli/internal/admitrules"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
 )
@@ -39,37 +38,8 @@ func TestTheProbeReadsTheMeshDropIn(t *testing.T) {
 		!strings.Contains(script, " $userfiles; do") {
 		t.Errorf("the probe does not read the mesh drop-in:\n%s", script)
 	}
-	if got := meshDropInPath("1001"); got != "/etc/systemd/system/user@1001.service.d/paisans-mesh.conf" {
-		t.Errorf("meshDropInPath: %s", got)
-	}
-}
-
-// readSudo reads sudo -l as ubuntu:24.04 prints it off a terminal, its
-// Defaults on one line, into each entry, each rule and each specific
-// line; and as it prints them on a terminal, wrapped after a comma.
-func TestReadSudoReadsUbuntusListing(t *testing.T) {
-	b, err := os.ReadFile("testdata/sudo/setenv-helper.txt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var u UserFacts
-	readSudo(&u, strings.Split(strings.TrimRight(string(b), "\n"), "\n"))
-	if !u.SudoRead ||
-		!slices.Equal(u.SudoDefaults, []string{"env_reset", "mail_badpass", `secure_path=/usr/local/sbin\:/usr/local/bin\:/usr/sbin\:/usr/bin\:/sbin\:/bin\:/snap/bin`, "use_pty"}) ||
-		!slices.Equal(u.SudoRules, []string{"(root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-f2a9"}) ||
-		!slices.Equal(u.SudoSpecific, []string{"Defaults!/usr/local/libexec/paisans/wg-psns-f2a9 setenv"}) {
-		t.Errorf("%+v", u)
-	}
-	u = UserFacts{}
-	readSudo(&u, []string{"Matching Defaults entries for paisans-f2a9 on host:", "    env_reset, mail_badpass,", `    secure_path=/usr/bin\:/bin,`, "    use_pty", "",
-		"User paisans-f2a9 may run the following commands on host:", "    (root) NOPASSWD: /usr/local/libexec/paisans/wg-psns-f2a9"})
-	if !u.SudoRead || !slices.Equal(u.SudoDefaults, []string{"env_reset", "mail_badpass", `secure_path=/usr/bin\:/bin`, "use_pty"}) {
-		t.Errorf("wrapped Defaults: %+v", u)
-	}
-	u = UserFacts{}
-	readSudo(&u, []string{"Matching Defaults entries for paisans-f2a9 on host:", "    env_reset", "Something sudo never printed"})
-	if u.SudoRead {
-		t.Errorf("an unknown line is read: %+v", u)
+	if got := admitrules.MeshDropInPath("1001"); got != "/etc/systemd/system/user@1001.service.d/paisans-mesh.conf" {
+		t.Errorf("MeshDropInPath: %s", got)
 	}
 }
 
