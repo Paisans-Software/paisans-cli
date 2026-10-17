@@ -13,6 +13,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 const (
@@ -77,7 +78,7 @@ func (h *listedHost) Run(command string) (string, error) {
 func twoDeployments(t *testing.T) string {
 	data, err := registry.Encode(registry.Registry{Version: registry.Version, Deployments: map[string]registry.Entry{
 		monitorID: {Token: "f2a9", Root: "/srv/paisans/f2a9", Domain: "example.org", Site: "watch", Roles: "monitor", ClaimedAt: "2026-10-01T00:00:00Z", Interface: "psns-f2a9", Subnet: "10.44.0.0/24", Address: "10.44.0.6"},
-		neighbour: {Token: "0c1d", Root: "/srv/paisans/0c1d", Domain: "example.net", Site: "edge", Roles: "apps,gateway", ClaimedAt: "2026-10-01T00:00:00Z", Interface: "psns-0c1d", Subnet: "10.45.0.0/24", Address: "10.45.0.2"},
+		neighbour: {Token: "0c1d", Root: "/srv/paisans/0c1d", Domain: "example.net", Site: "edge", Roles: "apps,gateway", ClaimedAt: "2026-10-01T00:00:00Z", Interface: "psns-0c1d", Subnet: "10.45.0.0/24", Address: "10.45.0.2", Build: version.Build{Version: "0.2.0", Commit: "4b4846760000000000000000000000000000beef"}},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -114,6 +115,7 @@ func admittedRecords(t *testing.T) map[string]string {
 		Version: admission.RecordVersion, Deployment: monitorID, User: "paisans-f2a9", Site: "vm", Roles: []string{"gateway"},
 		Grants: admission.Grants{PublicPorts: true}, Ports: admission.Ports{SSH: 22, WireGuard: 51820, Public: []int{80, 443}},
 		AdmittedAt: "2026-10-15T00:00:00Z", MeshSubnet: "10.44.0.0/24",
+		Build: version.Build{Version: "0.3.0-dev", Commit: "519299d5cb009da4904cdf53c2025f1ad609f102", Modified: true},
 	}
 	b, err := admission.EncodeRecord(rec)
 	if err != nil {
@@ -139,7 +141,7 @@ func runDeployments(t *testing.T, h *listedHost, args ...string) string {
 func TestHostDeploymentsListsAdmissionRecords(t *testing.T) {
 	h := &listedHost{t: t, registry: twoDeployments(t), records: admittedRecords(t), probe: "end\n"}
 	out := runDeployments(t, h, "--ssh", "owner@vm.example.org")
-	for _, want := range []string{monitorID + ": admitted: paisans-f2a9 as vm (gateway), watchdog no, public ports yes, at 2026-10-15T00:00:00Z", "token 0c1d"} {
+	for _, want := range []string{monitorID + ": admitted: paisans-f2a9 as vm (gateway), watchdog no, public ports yes, at 2026-10-15T00:00:00Z, by paisans 0.3.0-dev (519299d5cb00-dirty)", "token 0c1d", "root /srv/paisans/0c1d, claimed by paisans 0.2.0 (4b4846760000)"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("no %q in:\n%s", want, out)
 		}

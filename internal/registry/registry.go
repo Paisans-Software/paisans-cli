@@ -102,10 +102,10 @@ type Entry struct {
 	// Roles is the site's roles, sorted and joined with commas, one string
 	// because the awk merge matches a role in it with index().
 	Roles string `json:"roles,omitempty"`
-	// ToolkitVersion is the release of the paisans that made the claim,
-	// MAJOR.MINOR.PATCH, refreshed by every claim. An entry claimed before
-	// entries recorded it has none.
-	ToolkitVersion string `json:"toolkit_version,omitempty"`
+	// Build is the paisans that made the claim, refreshed by every claim:
+	// toolkit_version, toolkit_commit and toolkit_modified. Parse refuses
+	// an entry without it.
+	version.Build
 }
 
 // exclusiveRoles are the roles one host gives to one deployment: the gateway
@@ -136,7 +136,7 @@ type Registry struct {
 
 // ForRequest is the entry site admit claims a host with, from the request
 // alone, so a plan from a request and one from the configuration claim
-// alike. It carries the request's site and roles, and the release of this
+// alike. It carries the request's site and roles, and this build of
 // paisans; Domain stays empty, since a request names no domain. A request
 // granted the public ports also holds the gateway role, whatever its roles:
 // 80 and 443 are one deployment's per host, and a re-run without the grant
@@ -161,8 +161,7 @@ func ForRequest(req admission.Request, now time.Time) (string, Entry) {
 		Subnet:     req.MeshSubnet,
 		Address:    req.Address,
 		Roles:      JoinRoles(roles),
-
-		ToolkitVersion: version.Version,
+		Build:      version.Current(),
 	}
 }
 
@@ -171,7 +170,10 @@ func ForRequest(req admission.Request, now time.Time) (string, Entry) {
 func Refused(t Runner, e Entry, why error) error { return refused(t, e, why) }
 
 // Parse reads a registry. An empty file is an empty registry, which is what a
-// host no deployment has claimed holds.
+// host no deployment has claimed holds. A registry with an entry that does
+// not say which build of paisans claimed the host is refused with a
+// *NoBuildError, and with the registry as read beside it, for site admit,
+// which claims its own deployment's entry anew.
 func Parse(data []byte) (Registry, error) {
 	r := Registry{Version: Version, Deployments: map[string]Entry{}}
 	if len(bytes.TrimSpace(data)) == 0 {
@@ -186,7 +188,37 @@ func Parse(data []byte) (Registry, error) {
 	if r.Deployments == nil {
 		r.Deployments = map[string]Entry{}
 	}
+	var raw struct {
+		Deployments map[string]map[string]json.RawMessage `json:"deployments"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return Registry{}, fmt.Errorf("%s is not readable: %w", Path, err)
+	}
+	var without []string
+	for id, entry := range raw.Deployments {
+		if len(version.MissingBuild(entry)) > 0 {
+			without = append(without, id)
+		}
+	}
+	if len(without) > 0 {
+		sort.Strings(without)
+		return r, &NoBuildError{IDs: without}
+	}
 	return r, nil
+}
+
+// NoBuildError is a registry whose entries for IDs do not say which build of
+// paisans claimed the host for them.
+type NoBuildError struct {
+	IDs []string
+}
+
+func (e *NoBuildError) Error() string {
+	which := "the entry of deployment " + e.IDs[0] + " does"
+	if len(e.IDs) > 1 {
+		which = "the entries of deployments " + strings.Join(e.IDs, ", ") + " do"
+	}
+	return fmt.Sprintf("%s: %s not say which build of paisans claimed the host (%s missing). The host's owner admits each again: `paisans site request`, then `paisans site admit`", Path, which, strings.Join(version.BuildKeys, ", "))
 }
 
 // Conflict is another deployment holding what a claim needs.
@@ -525,7 +557,8 @@ type Runner interface {
 }
 
 // Read reads the registry on the host t reaches. A host no deployment has
-// claimed has none, which is an empty registry.
+// claimed has none, which is an empty registry. Parse's *NoBuildError comes
+// with the registry as read, as Parse returns it.
 func Read(t Runner) (Registry, error) {
 	content, _, err := t.ReadFile(Path)
 	if err != nil {
@@ -533,7 +566,7 @@ func Read(t Runner) (Registry, error) {
 	}
 	r, err := Parse([]byte(content))
 	if err != nil {
-		return Registry{}, fmt.Errorf("%s: %w", t.Describe(), err)
+		return r, fmt.Errorf("%s: %w", t.Describe(), err)
 	}
 	return r, nil
 }

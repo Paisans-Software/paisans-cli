@@ -41,5 +41,8 @@
     "admin_tcp": "localhost:2019",
     "why": ""
   },
-  "system_docker_disabled": true
+  "system_docker_disabled": true,
+  "toolkit_version": "0.3.0-dev",
+  "toolkit_commit": "519299d5cb009da4904cdf53c2025f1ad609f102",
+  "toolkit_modified": true
 }

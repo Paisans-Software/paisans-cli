@@ -3,7 +3,7 @@ admit site watch of f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01 as paisans-f2a9 on fake
 step 1: claim the host
   registry: record deployment f2a9 in /var/lib/paisans/registry.json, so no other deployment here takes its token, directory, interface, port, subnet or roles (monitor)
   run:
-    $ set -e; umask 077; mkdir -p /var/lib/paisans; chmod 711 /var/lib/paisans; exec 9>>/var/lib/paisans/registry.lock; flock -w 60 9 || { echo 'paisans: another command holds /var/lib/paisans/registry.lock'; exit 1; }; tmp=$(mktemp /var/lib/paisans/.registry.XXXXXX); trap 'rm -f "$tmp"' EXIT; src=/var/lib/paisans/registry.json; [ -f "$src" ] || src=/dev/null; awk '-v' 'id=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01' '-v' 'token=f2a9' '-v' 'root=/srv/paisans/f2a9' '-v' 'iface=psns-f2a9' '-v' 'port=51821' '-v' 'subnet=10.44.0.0/24' '-v' 'roles=monitor' '-v' 'site=watch' '-v' 'address=10.44.0.5' '-v' 'entry="f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01":{"token":"f2a9","root":"/srv/paisans/f2a9","domain":"","site":"watch","claimed_at":"2026-10-15T12:00:00Z","interface":"psns-f2a9","listen_port":51821,"subnet":"10.44.0.0/24","address":"10.44.0.5","roles":"monitor","toolkit_version":"<release>"}' '-v' 'header={"version":1,"deployments":{' '-v' 'footer=}}' '-v' 'marker=paisans-registry-conflict ' '-v' 'unreadable=paisans-registry-unreadable' '
+    $ set -e; umask 077; mkdir -p /var/lib/paisans; chmod 711 /var/lib/paisans; exec 9>>/var/lib/paisans/registry.lock; flock -w 60 9 || { echo 'paisans: another command holds /var/lib/paisans/registry.lock'; exit 1; }; tmp=$(mktemp /var/lib/paisans/.registry.XXXXXX); trap 'rm -f "$tmp"' EXIT; src=/var/lib/paisans/registry.json; [ -f "$src" ] || src=/dev/null; awk '-v' 'id=f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01' '-v' 'token=f2a9' '-v' 'root=/srv/paisans/f2a9' '-v' 'iface=psns-f2a9' '-v' 'port=51821' '-v' 'subnet=10.44.0.0/24' '-v' 'roles=monitor' '-v' 'site=watch' '-v' 'address=10.44.0.5' '-v' 'entry="f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01":{"token":"f2a9","root":"/srv/paisans/f2a9","domain":"","site":"watch","claimed_at":"2026-10-15T12:00:00Z","interface":"psns-f2a9","listen_port":51821,"subnet":"10.44.0.0/24","address":"10.44.0.5","roles":"monitor","toolkit_version":"<release>","toolkit_commit":"","toolkit_modified":false}' '-v' 'header={"version":1,"deployments":{' '-v' 'footer=}}' '-v' 'marker=paisans-registry-conflict ' '-v' 'unreadable=paisans-registry-unreadable' '
     $ function str(line, name,   key, i, rest) {
     $ 	key = "\"" name "\":\""
     $ 	i = index(line, key)
@@ -139,7 +139,10 @@ step 10: write the admission record
     |   "mesh_lan": "",
     |   "mesh_subnet": "10.44.0.0/24",
     |   "web_server": null,
-    |   "system_docker_disabled": false
+    |   "system_docker_disabled": false,
+    |   "toolkit_version": "<release>",
+    |   "toolkit_commit": "",
+    |   "toolkit_modified": false
     | }
 
 present: docker: Engine 29.9.1

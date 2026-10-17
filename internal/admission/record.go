@@ -14,6 +14,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 // RecordVersion is the record's layout. A record of another version is
@@ -127,6 +128,9 @@ type Record struct {
 	// leaves ufw enabled and says so. It is written only when true, so the
 	// record of a host whose ufw was active already reads as before.
 	UFWEnabled bool `json:"ufw_enabled,omitempty"`
+	// Build is the paisans whose site admit wrote the record:
+	// toolkit_version, toolkit_commit and toolkit_modified.
+	version.Build
 }
 
 // Ports are the ports the firewall opened: the SSH port, the WireGuard port
@@ -167,7 +171,7 @@ type WebServer struct {
 }
 
 // NewRecord is the record admit writes for req, with the grants the owner
-// gave, at at. The ports follow from req and the grants; forwarding follows
+// gave, at at, by this build of paisans. The ports follow from req and the grants; forwarding follows
 // the endpoint. Admit sets DataDir, BridgeNetfilter, MeshLAN and WebServer
 // itself.
 func NewRecord(req Request, granted Grants, digest string, at time.Time) Record {
@@ -184,6 +188,7 @@ func NewRecord(req Request, granted Grants, digest string, at time.Time) Record 
 		Digest:     digest,
 		AdmittedAt: at.UTC().Format(time.RFC3339),
 		MeshSubnet: req.MeshSubnet,
+		Build:      version.Current(),
 	}
 }
 
@@ -248,12 +253,12 @@ func EncodeRecord(r Record) ([]byte, error) {
 }
 
 // recordFields is every key a record holds but ufw_enabled, which is
-// written only when true; a record missing one was not
-// written by a toolkit of its version.
+// written only when true, and the build's keys, version.BuildKeys; a record
+// missing one was not written by a toolkit of its version.
 var recordFields = []string{"version", "deployment", "user", "site", "roles", "grants", "forwarding", "ports", "digest", "admitted_at", "data_dir", "bridge_netfilter", "mesh_lan", "mesh_subnet", "web_server", "system_docker_disabled"}
 
 // ParseRecord reads a record strictly: its version, every field present and
-// none unknown, a deployment whose token is token, the user a request for it
+// none unknown, the build of paisans that wrote it, a deployment whose token is token, the user a request for it
 // may name, the public ports its grant opens, a data_dir that is empty or
 // this deployment's, a mesh_lan that is empty or a LAN --mesh-lan may open,
 // and a mesh_subnet a mesh may have.
@@ -275,8 +280,8 @@ func ParseRecord(data []byte, token string) (Record, error) {
 	if !ok {
 		return refuse("version: missing")
 	}
-	var version int
-	if err := json.Unmarshal(raw, &version); err != nil || version != RecordVersion {
+	var layout int
+	if err := json.Unmarshal(raw, &layout); err != nil || layout != RecordVersion {
 		return refuse(fmt.Sprintf("version: %s, and this paisans reads version %d records. Run the paisans release the host's owner admitted it with", strconv.Quote(string(raw)), RecordVersion))
 	}
 	var problems []string
@@ -284,6 +289,9 @@ func ParseRecord(data []byte, token string) (Record, error) {
 		if _, ok := keys[k]; !ok {
 			problems = append(problems, k+": missing")
 		}
+	}
+	if missing := version.MissingBuild(keys); len(missing) > 0 {
+		problems = append(problems, strings.Join(missing, ", ")+": missing, so it does not say which build of paisans wrote it. The host's owner admits the deployment again: `paisans site request`, then `paisans site admit`")
 	}
 	if len(problems) > 0 {
 		return refuse(problems...)
@@ -349,6 +357,7 @@ func ParseRecord(data []byte, token string) (Record, error) {
 	if _, p := config.CheckMeshSubnet(r.MeshSubnet); len(p) > 0 {
 		problems = append(problems, fmt.Sprintf("mesh_subnet: %q %s", r.MeshSubnet, strings.Join(p, ", ")))
 	}
+	problems = append(problems, r.Build.Problems()...)
 	if len(problems) > 0 {
 		return refuse(problems...)
 	}

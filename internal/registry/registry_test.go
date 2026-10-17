@@ -580,7 +580,7 @@ func TestForRequest(t *testing.T) {
 		MeshSubnet: "10.44.0.0/24", Address: "10.44.0.1", Grants: admission.Grants{Watchdog: true, PublicPorts: true}}
 	id, e := ForRequest(req, now)
 	want := Entry{Token: "f2a9", Root: "/srv/paisans/f2a9", Site: "home-a", ClaimedAt: "2026-10-15T12:00:00Z", Interface: "psns-f2a9", ListenPort: 51820,
-		Subnet: "10.44.0.0/24", Address: "10.44.0.1", Roles: "apps,data,gateway", ToolkitVersion: version.Version}
+		Subnet: "10.44.0.0/24", Address: "10.44.0.1", Roles: "apps,data,gateway", Build: version.Current()}
 	if id != ours || e != want {
 		t.Errorf("ForRequest = %s %+v", id, e)
 	}
@@ -609,7 +609,7 @@ func TestForRequest(t *testing.T) {
 // holds what the last claim's binary admitted.
 func TestClaimRecordsTheToolkitVersion(t *testing.T) {
 	newer := entry("f2a9", "example.org", "home-a")
-	newer.ToolkitVersion = "0.3.0"
+	newer.Build.Version = "0.3.0"
 	empty, err := Encode(Registry{Version: Version, Deployments: map[string]Entry{}})
 	if err != nil {
 		t.Fatal(err)
@@ -622,7 +622,7 @@ func TestClaimRecordsTheToolkitVersion(t *testing.T) {
 		t.Errorf("the claim does not record its release:\n%s", out)
 	}
 	older := newer
-	older.ToolkitVersion = "0.2.0"
+	older.Build.Version = "0.2.0"
 	out, stderr, code = runMerge(t, out, ours, older)
 	if code != 0 {
 		t.Fatalf("the second claim exited %d: %s", code, stderr)
@@ -631,7 +631,43 @@ func TestClaimRecordsTheToolkitVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := r.Deployments[ours].ToolkitVersion; got != "0.2.0" || strings.Contains(out, "0.3.0") {
+	if got := r.Deployments[ours].Build.Version; got != "0.2.0" || strings.Contains(out, "0.3.0") {
 		t.Errorf("a later claim left release %q:\n%s", got, out)
+	}
+}
+
+// An entry records the build of the paisans that claimed the host, and
+// reads it back.
+func TestAnEntryRoundTripsItsBuild(t *testing.T) {
+	e := entry("f2a9", "example.org", "home-a")
+	e.Build = version.Build{Version: "0.3.0-dev", Commit: "519299d5cb009da4904cdf53c2025f1ad609f102", Modified: true}
+	data, err := Encode(Registry{Version: Version, Deployments: map[string]Entry{ours: e}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := Parse(data)
+	if err != nil || r.Deployments[ours] != e {
+		t.Errorf("got %+v, %v", r.Deployments[ours], err)
+	}
+}
+
+// A registry with an entry that does not say which build claimed the host
+// is refused, naming the deployment and that its owner admits it again,
+// and comes with what was read.
+func TestAnEntryWithNoBuildIsRefused(t *testing.T) {
+	data := `{"version":1,"deployments":{
+"` + ours + `":{"token":"f2a9","root":"/srv/paisans/f2a9","domain":"","site":"home-a","claimed_at":"2026-10-01T00:00:00Z","toolkit_version":"0.2.0"},
+"` + theirs + `":{"token":"0c1d","root":"/srv/paisans/0c1d","domain":"","site":"edge","claimed_at":"2026-10-01T00:00:00Z","toolkit_version":"0.3.0","toolkit_commit":"","toolkit_modified":false}
+}}`
+	r, err := Parse([]byte(data))
+	var nb *NoBuildError
+	if !errors.As(err, &nb) || len(nb.IDs) != 1 || nb.IDs[0] != ours {
+		t.Fatalf("got %v", err)
+	}
+	if !strings.Contains(err.Error(), "deployment "+ours+" does not say which build") || !strings.Contains(err.Error(), "`paisans site request`, then `paisans site admit`") {
+		t.Errorf("got %v", err)
+	}
+	if len(r.Deployments) != 2 {
+		t.Errorf("read %+v", r)
 	}
 }

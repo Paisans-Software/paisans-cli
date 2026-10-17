@@ -80,19 +80,16 @@ func refuseNewer(r registry.Registry) error {
 	highest, newerOnes := "", []string{}
 	for _, id := range sortedKeys(r.Deployments) {
 		e := r.Deployments[id]
-		if e.ToolkitVersion == "" {
-			continue
-		}
-		newer, err := version.Compare(e.ToolkitVersion, version.Version)
+		newer, err := version.Compare(e.Build.Version, version.Version)
 		if err != nil {
-			return fmt.Errorf("%s records that paisans %q claimed this host for deployment %s, which is not a release this paisans %s can order, so it may be a newer one that installed what this one does not know about. Nothing was changed. Upgrade paisans, and run site evict again", registry.Path, ui.Visible(e.ToolkitVersion), ui.Visible(e.Token), version.Version)
+			return fmt.Errorf("%s records that paisans %q claimed this host for deployment %s, which is not a release this paisans %s can order, so it may be a newer one that installed what this one does not know about. Nothing was changed. Upgrade paisans, and run site evict again", registry.Path, ui.Visible(e.Build.Version), ui.Visible(e.Token), version.Version)
 		}
 		if newer <= 0 {
 			continue
 		}
-		newerOnes = append(newerOnes, ui.Visible(e.Token)+" ("+e.ToolkitVersion+")")
-		if c, _ := version.Compare(e.ToolkitVersion, highest); highest == "" || c > 0 {
-			highest = e.ToolkitVersion
+		newerOnes = append(newerOnes, ui.Visible(e.Token)+" ("+e.Build.Version+")")
+		if c, _ := version.Compare(e.Build.Version, highest); highest == "" || c > 0 {
+			highest = e.Build.Version
 		}
 	}
 	if highest == "" {

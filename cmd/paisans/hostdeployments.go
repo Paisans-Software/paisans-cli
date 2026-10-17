@@ -209,7 +209,7 @@ func runSiteDeployments(args []string) error {
 		if roles == "" {
 			roles = "none"
 		}
-		r.Step(fmt.Sprintf("%s: admitted: %s as %s (%s), watchdog %s, public ports %s, at %s", rec.Deployment, rec.User, rec.Site, roles, yesNo(rec.Grants.Watchdog), yesNo(rec.Grants.PublicPorts), rec.AdmittedAt)).End(ui.OK, "")
+		r.Step(fmt.Sprintf("%s: admitted: %s as %s (%s), watchdog %s, public ports %s, at %s, by paisans %s", rec.Deployment, rec.User, rec.Site, roles, yesNo(rec.Grants.Watchdog), yesNo(rec.Grants.PublicPorts), rec.AdmittedAt, rec.Build)).End(ui.OK, "")
 	}
 	if len(records) == 0 {
 		r.Step("no admission record in "+admission.Dir).End(ui.OK, "")
@@ -267,5 +267,5 @@ func registryLine(id string, e registry.Entry) string {
 	if roles == "" {
 		roles = "none"
 	}
-	return fmt.Sprintf("%s: token %s, %s, site %s, roles %s, root %s", id, e.Token, e.Domain, e.Site, roles, e.Root)
+	return fmt.Sprintf("%s: token %s, %s, site %s, roles %s, root %s, claimed by paisans %s", id, e.Token, e.Domain, e.Site, roles, e.Root, e.Build)
 }

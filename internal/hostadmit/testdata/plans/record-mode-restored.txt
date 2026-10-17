@@ -28,7 +28,10 @@ step 1: write the admission record
     |   "mesh_lan": "",
     |   "mesh_subnet": "10.44.0.0/24",
     |   "web_server": null,
-    |   "system_docker_disabled": false
+    |   "system_docker_disabled": false,
+    |   "toolkit_version": "<release>",
+    |   "toolkit_commit": "",
+    |   "toolkit_modified": false
     | }
 
 present: registry: this host is claimed for deployment f2a9

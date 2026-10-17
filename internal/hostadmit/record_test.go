@@ -40,7 +40,7 @@ var recordCases = addCases(
 	}},
 	goldenCase{name: "claim-public-ports-held-refused", site: "watch", flags: hostadmit.Flags{PublicPorts: true}, host: func() *fakeHost {
 		return home().file("/var/lib/paisans/registry.json", `{"version":1,"deployments":{`+"\n"+
-			`"0c0dc4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01":{"token":"0c0d","root":"/srv/paisans/0c0d","domain":"","site":"edge","claimed_at":"2026-10-01T09:00:00Z","interface":"psns-0c0d","listen_port":51899,"subnet":"10.50.0.0/24","address":"10.50.0.1","roles":"gateway"}`+"\n}}\n")
+			`"0c0dc4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01":{"token":"0c0d","root":"/srv/paisans/0c0d","domain":"","site":"edge","claimed_at":"2026-10-01T09:00:00Z","interface":"psns-0c0d","listen_port":51899,"subnet":"10.50.0.0/24","address":"10.50.0.1","roles":"gateway","toolkit_version":"0.3.0-dev","toolkit_commit":"","toolkit_modified":false}`+"\n}}\n")
 	}},
 	goldenCase{name: "keys-some-present", focus: []string{"operators' keys"}, site: "home-a", flags: gateway, host: func() *fakeHost {
 		return home().answer(keysMarker, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA owner@laptop\npaisans-sidecar\n")
@@ -224,5 +224,35 @@ func TestCheckUser(t *testing.T) {
 	}
 	if !strings.HasPrefix(ran, "runuser -u ") {
 		t.Errorf("the check does not run as the user: %s", ran)
+	}
+}
+
+// noBuildEntry is a registry line for deployment id, token token, that does
+// not say which build of paisans claimed the host.
+func noBuildEntry(id, token, site string) string {
+	return `"` + id + `":{"token":"` + token + `","root":"/srv/paisans/` + token + `","domain":"","site":"` + site + `","claimed_at":"2026-10-01T09:00:00Z","interface":"psns-` + token + `","listen_port":51899,"subnet":"10.50.0.0/24","address":"10.50.0.1","roles":"apps"}`
+}
+
+// This deployment's own entry that does not say which build claimed the
+// host is claimed anew, which is what admitting again is for.
+func TestAdmitClaimsItsOwnEntryWithNoBuildAnew(t *testing.T) {
+	h := home().file(registry.Path, `{"version":1,"deployments":{`+"\n"+noBuildEntry("f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01", "f2a9", "vm")+"\n}}\n")
+	plan, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if titled(plan, "claim the host") < 0 {
+		t.Errorf("the host is not claimed anew:\n%s", plan.Text())
+	}
+}
+
+// Another deployment's entry that does not say which build claimed the
+// host is refused, naming that deployment and that its owner admits it
+// again.
+func TestAdmitRefusesAnotherEntryWithNoBuild(t *testing.T) {
+	h := home().file(registry.Path, `{"version":1,"deployments":{`+"\n"+noBuildEntry("0c0dc4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01", "0c0d", "edge")+"\n}}\n")
+	_, err := hostadmit.Build(h, input(t, "vm", hostadmit.Flags{}))
+	if err == nil || !strings.Contains(err.Error(), "deployment 0c0dc4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01 does not say which build") || !strings.Contains(err.Error(), "`paisans site admit`") {
+		t.Errorf("got %v", err)
 	}
 }

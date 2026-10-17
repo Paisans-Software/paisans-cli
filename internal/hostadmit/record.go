@@ -1,6 +1,7 @@
 package hostadmit
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -24,6 +25,13 @@ import (
 func planClaim(p *planner) error {
 	id, e := registry.ForRequest(p.in.Request, p.in.Now)
 	r, err := registry.Read(p.t)
+	// An entry that does not say which build claimed the host is refused,
+	// and admitting its deployment again is what writes it anew: this
+	// claim replaces this deployment's own.
+	var noBuild *registry.NoBuildError
+	if errors.As(err, &noBuild) && len(noBuild.IDs) == 1 && noBuild.IDs[0] == id {
+		err = nil
+	}
 	if err != nil {
 		return shown(err)
 	}

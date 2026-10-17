@@ -722,10 +722,10 @@ func evictBeside(t *testing.T, ours, theirs string) error {
 	t.Helper()
 	h := evicted("watch", hostadmit.Flags{PublicPorts: true})()
 	_, mine := registry.ForRequest(requestFor("watch"), admitted)
-	mine.ToolkitVersion = ours
+	mine.Build.Version = ours
 	_, other := registry.ForRequest(requestFor("home-a"), admitted)
 	other.Token, other.Root, other.Interface, other.ListenPort, other.Subnet, other.Address, other.Roles = "0c0d", "/srv/paisans/0c0d", "psns-0c0d", 51899, "10.50.0.0/24", "10.50.0.1", ""
-	other.ToolkitVersion = theirs
+	other.Build.Version = theirs
 	data, err := registry.Encode(registry.Registry{Version: registry.Version, Deployments: map[string]registry.Entry{
 		id:                                     mine,
 		"0c0dc4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01": other,
