@@ -137,7 +137,8 @@ func listenProbe(filter string) string {
 // natProbe reads, as root, what receives traffic with no listener of its
 // own: the ports the system Docker's containers publish, running
 // (container lines) and stopped (stopped lines), and the DNAT and redirect
-// rules (dnat lines), as portsProbe describes; and which firewall backend
+// rules (dnat lines), as portsProbe describes, those in iptables-legacy's
+// tables too, which nft does not show; and which firewall backend
 // the system Docker uses, its daemon.json's firewall-backend
 // (docker-backend) and its chains in the filter table's FORWARD
 // (docker-chains), which decide whether its publishes pass ufw.
@@ -156,6 +157,11 @@ if command -v nft >/dev/null 2>&1; then
     printf '%s\n' "$out" | awk '/^table / { t = $2 " " $3 } /^[ \t]*chain / { c = $2 } { l = $0; gsub(/ct status dnat/, "", l) } (l ~ /dnat/ || l ~ /redirect/) && l ~ /dport/ { sub(/^[ \t]+/, ""); print "dnat table " t " chain " c ": " $0 }'
     printf '%s\n' "$out" | awk '/^table / { t = $2 " " $3 } /^[ \t]*chain / { c = $2 } t == "ip filter" && c == "FORWARD" && /jump DOCKER-(USER|FORWARD)/ { print "docker-chains nft"; exit }'
   else echo 'unread ruleset (nft list ruleset)'; fi
+  for save in iptables-legacy-save ip6tables-legacy-save; do
+    command -v $save >/dev/null 2>&1 || continue
+    if out=$($save -t nat 2>/dev/null); then printf '%s\n' "$out" | grep -E -- '-j (DNAT|REDIRECT)' | sed "s/^/dnat $save -t nat: /"; else echo "unread ruleset ($save)"; fi
+    $save -t filter 2>/dev/null | grep -qE -- '^-A FORWARD -j DOCKER-(USER|FORWARD)' && echo "docker-chains $save"
+  done
 else
   read=
   for save in iptables-save ip6tables-save; do

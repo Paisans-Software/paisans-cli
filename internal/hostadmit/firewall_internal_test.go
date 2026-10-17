@@ -154,3 +154,17 @@ func TestTheUFWProbeReadsEveryListenerAndTheNATRules(t *testing.T) {
 		t.Errorf("the probe:\n%s", out)
 	}
 }
+
+// On a host with nft, the NAT rules iptables-legacy holds are read too:
+// nft list ruleset does not show them.
+func TestThePortsProbeReadsLegacyTablesBesideNft(t *testing.T) {
+	out := runProbe(t, ufwBeforeProbe, map[string]string{
+		"nft":                  "table ip nat {\n}\n",
+		"iptables-legacy-save": "*nat\n-A PREROUTING -p tcp -m tcp --dport 2222 -j DNAT --to-destination 192.168.122.5:22\n*filter\n-A FORWARD -j DOCKER-USER\n",
+	})
+	for _, want := range []string{"dnat iptables-legacy-save -t nat: -A PREROUTING -p tcp -m tcp --dport 2222 -j DNAT", "docker-chains iptables-legacy-save"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the probe does not print %q:\n%s", want, out)
+		}
+	}
+}
