@@ -368,9 +368,9 @@ func TestSiteRemoveHostGoneRefusesBeforeReachingAHost(t *testing.T) {
 	}
 }
 
-// Every word an eviction asks for is typed in turn, from one reader, and a
-// wrong one stops it.
-func TestConfirmEvictionAsksForEachWord(t *testing.T) {
+// Every word a removal with --host-gone asks for is typed in turn, from one
+// reader, and a wrong one stops it.
+func TestConfirmCutoffAsksForEachWord(t *testing.T) {
 	saved := isTerminal
 	isTerminal = func(*os.File) bool { return true }
 	t.Cleanup(func() { isTerminal = saved })
@@ -388,7 +388,7 @@ func TestConfirmEvictionAsksForEachWord(t *testing.T) {
 		w.WriteString(answers)
 		w.Close()
 		var out bytes.Buffer
-		err = confirmEviction(answerer{}, r, &out, questions)
+		err = confirmCutoff(answerer{}, r, &out, questions)
 		r.Close()
 		switch {
 		case want == "" && err != nil:
@@ -405,20 +405,20 @@ func TestConfirmEvictionAsksForEachWord(t *testing.T) {
 	w.WriteString("revoked\n")
 	w.Close()
 	defer r.Close()
-	if err := confirmEviction(answerer{}, r, &bytes.Buffer{}, questions); err == nil || !strings.Contains(err.Error(), "not a terminal") {
+	if err := confirmCutoff(answerer{}, r, &bytes.Buffer{}, questions); err == nil || !strings.Contains(err.Error(), "not a terminal") {
 		t.Errorf("without a terminal: %v", err)
 	}
 }
 
 // The questions follow the plan: revoked only for a gateway, the site's name
 // always, and the losses only when the plan has them.
-func TestEvictionQuestionsFollowThePlan(t *testing.T) {
+func TestCutoffQuestionsFollowThePlan(t *testing.T) {
 	cfg, err := config.Load(fixtureConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
 	var words []string
-	for _, q := range evictionQuestions(cfg, "home-b", &siteremove.Plan{}) {
+	for _, q := range cutoffQuestions(cfg, "home-b", &siteremove.Plan{}) {
 		words = append(words, q.word)
 	}
 	if strings.Join(words, ",") != "home-b" {
@@ -429,7 +429,7 @@ func TestEvictionQuestionsFollowThePlan(t *testing.T) {
 // `revoked` is asked before the secrets file is read: the operator sets the
 // new DNS token with `secrets set` while it waits, and the token checked and
 // every secret written back must be that file's.
-func TestAnEvictedGatewayIsAskedRevokedBeforeTheSecretsAreRead(t *testing.T) {
+func TestACutOffGatewayIsAskedRevokedBeforeTheSecretsAreRead(t *testing.T) {
 	noSiteHosts(t)
 	saved := isTerminal
 	isTerminal = func(*os.File) bool { return true }
@@ -465,7 +465,7 @@ func TestAnEvictedGatewayIsAskedRevokedBeforeTheSecretsAreRead(t *testing.T) {
 	var out bytes.Buffer
 	err = runSiteRemove([]string{"vm", "--host-gone", "--execute", "--config", configPath, "--secrets", filepath.Join(dir, "missing.enc.yaml")}, r, &out)
 	if err == nil {
-		t.Fatal("an eviction with no secrets file went on")
+		t.Fatal("a removal with --host-gone and no secrets file went on")
 	}
 	if !strings.Contains(out.String(), "Type 'revoked'") {
 		t.Errorf("the secrets were read before revoked was asked: %v\n%s", err, out.String())

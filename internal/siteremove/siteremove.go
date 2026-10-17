@@ -46,7 +46,7 @@ import (
 type Options struct {
 	// HostGone takes out a site whose host is not reached at all: dead, or
 	// still running and no longer the deployment's to reach. The mesh is cut
-	// first (see evict.go), so a host that still runs is out of the cluster
+	// first (see cutoff.go), so a host that still runs is out of the cluster
 	// before anything else changes. docs/specs/2026-10-11-site-evict.md.
 	HostGone bool
 	// DeleteData deletes the deployment root and the named volumes on the
@@ -166,8 +166,7 @@ type Plan struct {
 	// Evict is the line the host's owner runs to finish: what is root's
 	// (the user, its home, the root directory, WireGuard, the firewall, the
 	// registry entry and the admission record) only site evict removes.
-	// Empty when the plan reaches no host. It shadows Options.Evict, which
-	// the package reads as p.Options.HostGone.
+	// Empty when the plan reaches no host.
 	Evict string
 	// forced is a plan BuildForced or BuildForcedByID made, and declared
 	// whether paisans-stack.yaml still declares its site.
@@ -198,7 +197,7 @@ type Plan struct {
 	// home is the login user's home on the site's host, and loginUser its
 	// name, the deployment's user, read once a run by checkLogin.
 	home, loginUser string
-	evict           evictState
+	cutoff          cutoffState
 	// open is the step the running stage is in the middle of, ended when the
 	// next one starts or the stage's work does.
 	open ui.Step
@@ -330,7 +329,7 @@ func Refusal(cfg *config.Config, site string, o Options) error {
 	}
 	if s.Has(config.RoleGateway) && len(cfg.GatewaySites()) == 1 {
 		if o.HostGone {
-			return refuse(site+" is the only gateway", "Nothing would answer for the community's hostnames. Declare its replacement, a new site with the gateway role, in the same edit of the configuration, then run this again (README, \"Evicting a site: `--evict`\").")
+			return refuse(site+" is the only gateway", "Nothing would answer for the community's hostnames. Declare its replacement, a new site with the gateway role, in the same edit of the configuration, then run this again (README, \"Removing a site whose host is not reached: `--host-gone`\").")
 		}
 		return refuse(site+" is the only gateway", "Nothing would answer for the community's hostnames. Give another site the gateway role and apply it first (README, \"Moving the gateway\").")
 	}
@@ -510,7 +509,7 @@ func Build(cfg *config.Config, secrets *config.Secrets, site string, transports 
 		return nil, err
 	}
 	if o.HostGone {
-		if err := p.probeEvict(); err != nil {
+		if err := p.probeCutoff(); err != nil {
 			return nil, err
 		}
 	}
@@ -525,7 +524,7 @@ func Build(cfg *config.Config, secrets *config.Secrets, site string, transports 
 		return nil, err
 	}
 	if o.HostGone {
-		if err := p.buildEvict(); err != nil {
+		if err := p.buildCutoff(); err != nil {
 			return nil, err
 		}
 		return p, nil
@@ -706,7 +705,7 @@ func (p *Plan) fail(st *Stage, err error) error {
 	}
 	next := "Fix the cause and run site remove again: it resumes at the first stage with anything left to do"
 	if p.Options.HostGone {
-		next = "Fix the cause and run site remove --evict again: it resumes at the first stage with anything left to do"
+		next = "Fix the cause and run site remove --host-gone again: it resumes at the first stage with anything left to do"
 	}
 	// A Problem, Eg: the health gate's, keeps its cause for --verbose.
 	if pr := ui.Around(head, err, "Nothing after it ran.\n"+next); pr != nil {
@@ -765,7 +764,7 @@ func (p *Plan) Remains() []string {
 	out = append(out, p.Notes...)
 	out = append(out, p.Kept...)
 	if p.Options.HostGone {
-		out = append(out, p.EvictReport()...)
+		out = append(out, p.CutoffReport()...)
 	}
 	return out
 }

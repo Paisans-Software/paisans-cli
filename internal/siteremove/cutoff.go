@@ -1,9 +1,10 @@
 package siteremove
 
-// `site remove --evict`: a site whose host still runs and that the other
-// operators can no longer reach. Every cluster service trusts the mesh and
-// nothing else, so being a WireGuard peer of the remaining sites is being in
-// the cluster, and cutting the peer is what evicts. The cut comes first, and
+// `site remove --host-gone`: a site whose host is not reached, because it is
+// dead or because it still runs in the hands of an operator the others can no
+// longer reach. Every cluster service trusts the mesh and nothing else, so
+// being a WireGuard peer of the remaining sites is being in the cluster, and
+// cutting the peer is what cuts the site off. The cut comes first, and
 // everything after it follows from the cut: Patroni fails over by itself once
 // the cut leader cannot renew its key, etcd's member is removed by the
 // remaining voters, and Garage's layout is told to stop waiting for a node
@@ -26,15 +27,15 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/storageadd"
 )
 
-// Stage numbers of an eviction after the cut and the DNS stage. The report
-// that closes it is Remains, not a stage: it changes nothing.
+// Stage numbers of a removal with --host-gone after the cut and the DNS stage.
+// The report that closes it is Remains, not a stage: it changes nothing.
 const (
-	evictDatabase = 3
-	evictEtcd     = 4
-	evictStorage  = 5
-	evictRest     = 6
-	evictConfig   = 7
-	evictMonitor  = 8
+	cutoffDatabase = 3
+	cutoffEtcd     = 4
+	cutoffStorage  = 5
+	cutoffRest     = 6
+	cutoffConfig   = 7
+	cutoffMonitor  = 8
 )
 
 var (
@@ -47,16 +48,17 @@ var (
 
 	// A remaining site hands its interface the new mesh file at once; the
 	// gate reads each one once.
-	evictTimeout = 2 * time.Minute
+	cutoffTimeout = 2 * time.Minute
 )
 
-// evictState is what an eviction read besides what every removal reads.
-type evictState struct {
+// cutoffState is what a removal with --host-gone reads besides what every
+// removal reads.
+type cutoffState struct {
 	// joining are the sites the configuration declares whose hosts hold no
 	// claim of this deployment yet: a replacement declared in the same edit,
-	// which the eviction neither dials nor gates, and `apply` brings up.
+	// which the removal neither dials nor gates, and `apply` brings up.
 	joining map[string]bool
-	// keys are the evicted site's WireGuard public keys: its current one,
+	// keys are the cut-off site's WireGuard public keys: its current one,
 	// and its next one when a rekey of it stopped part way, since a peer may
 	// list either.
 	keys []string
@@ -78,7 +80,7 @@ type evictState struct {
 	// loseWrites is the most current replica, when the site leads and no
 	// remaining member is a streaming Sync Standby.
 	loseWrites *Lag
-	// loseObjects is whether objects only the evicted Garage node held are
+	// loseObjects is whether objects only the cut-off Garage node held are
 	// lost when it is skipped.
 	loseObjects bool
 	// multiVersion is whether Garage's layout history has more than one live
@@ -88,7 +90,7 @@ type evictState struct {
 	// why its DNS token could not be checked, empty when it was.
 	gateway        bool
 	tokenUnchecked string
-	// dark names what answers nothing between the eviction and the apply that
+	// dark names what answers nothing between the cut and the apply that
 	// brings up the replacement, empty when something still answers.
 	dark []string
 }
@@ -101,38 +103,38 @@ type Lag struct {
 	Known   bool
 }
 
-// Joining is the sites an eviction leaves alone because their hosts hold no
-// claim of this deployment yet, sorted.
+// Joining is the sites a removal with --host-gone leaves alone because their
+// hosts hold no claim of this deployment yet, sorted.
 func (p *Plan) Joining() []string {
 	var out []string
-	for name := range p.evict.joining {
+	for name := range p.cutoff.joining {
 		out = append(out, name)
 	}
 	sort.Strings(out)
 	return out
 }
 
-// LoseWrites is the replica a failover would promote when the evicted site
+// LoseWrites is the replica a failover would promote when the cut-off site
 // leads and no remaining member is a streaming Sync Standby, nil otherwise.
-// The operator types `lose writes` before the eviction goes on.
-func (p *Plan) LoseWrites() *Lag { return p.evict.loseWrites }
+// The operator types `lose writes` before the removal goes on.
+func (p *Plan) LoseWrites() *Lag { return p.cutoff.loseWrites }
 
-// LoseObjects is whether skipping the evicted Garage node loses objects only
-// it held. The operator types `lose objects` before the eviction goes on.
-func (p *Plan) LoseObjects() bool { return p.evict.loseObjects }
+// LoseObjects is whether skipping the cut-off Garage node loses objects only
+// it held. The operator types `lose objects` before the removal goes on.
+func (p *Plan) LoseObjects() bool { return p.cutoff.loseObjects }
 
-// Gateway is whether the evicted site holds the gateway role, whose DNS token
+// Gateway is whether the cut-off site holds the gateway role, whose DNS token
 // the operator confirms revoked by typing `revoked`.
-func (p *Plan) Gateway() bool { return p.evict.gateway }
+func (p *Plan) Gateway() bool { return p.cutoff.gateway }
 
 // live is list without the joining sites.
 func (p *Plan) live(list []string) []string {
-	if len(p.evict.joining) == 0 {
+	if len(p.cutoff.joining) == 0 {
 		return list
 	}
 	var out []string
 	for _, name := range list {
-		if !p.evict.joining[name] {
+		if !p.cutoff.joining[name] {
 			out = append(out, name)
 		}
 	}
@@ -163,52 +165,52 @@ func JoiningSites(cfg *config.Config, secrets *config.Secrets, site string, tran
 }
 
 // readJoining finds the joining sites, and takes them out of the transports,
-// so that nothing in the eviction reaches them.
+// so that nothing in the removal reaches them.
 func (p *Plan) readJoining() error {
 	names, err := JoiningSites(p.cfg, p.secrets, p.Site, p.transports)
 	if err != nil {
 		return err
 	}
-	p.evict.joining = map[string]bool{}
+	p.cutoff.joining = map[string]bool{}
 	for _, name := range names {
-		p.evict.joining[name] = true
+		p.cutoff.joining[name] = true
 		delete(p.transports, name)
 	}
 	return nil
 }
 
-// probeEvict reads what only an eviction needs before the cluster is probed:
-// the site's key on every remaining interface, the relays the remaining sites
-// need, and the gateway's DNS token.
-func (p *Plan) probeEvict() error {
+// probeCutoff reads what only a removal with --host-gone needs before the
+// cluster is probed: the site's key on every remaining interface, the relays
+// the remaining sites need, and the gateway's DNS token.
+func (p *Plan) probeCutoff() error {
 	keys, err := meshkey.Keys(p.secrets, p.Site)
 	if err != nil {
 		return err
 	}
-	p.evict.keys = keys
+	p.cutoff.keys = keys
 	if err := p.refuseLostRelay(); err != nil {
 		return err
 	}
-	p.evict.gateway = p.cfg.Sites[p.Site].Has(config.RoleGateway)
-	if p.evict.gateway {
+	p.cutoff.gateway = p.cfg.Sites[p.Site].Has(config.RoleGateway)
+	if p.cutoff.gateway {
 		if err := p.checkToken(); err != nil {
 			return err
 		}
 	}
-	p.evict.stillPeers = map[string]bool{}
-	p.evict.cutDone = true
+	p.cutoff.stillPeers = map[string]bool{}
+	p.cutoff.cutDone = true
 	for _, name := range p.liveSites() {
 		listed, err := p.listsPeer(name, keys...)
 		if err != nil {
 			return fmt.Errorf("site remove %s: %w", p.Site, err)
 		}
-		p.evict.stillPeers[name] = listed
-		p.evict.cutDone = p.evict.cutDone && !listed
+		p.cutoff.stillPeers[name] = listed
+		p.cutoff.cutDone = p.cutoff.cutDone && !listed
 		if !listed && listsAny(renderedContent(p.full, name, p.dep().WireGuardConf()), keys) {
-			p.evict.cutStarted = true
+			p.cutoff.cutStarted = true
 		}
 	}
-	if p.evict.cutRendered, err = p.render(p.liveEnd()); err != nil {
+	if p.cutoff.cutRendered, err = p.render(p.liveEnd()); err != nil {
 		return err
 	}
 	for _, role := range []config.Role{config.RoleGateway, config.RoleApps} {
@@ -222,7 +224,7 @@ func (p *Plan) probeEvict() error {
 			}
 		}
 		if len(still) == 0 {
-			p.evict.dark = append(p.evict.dark, string(role))
+			p.cutoff.dark = append(p.cutoff.dark, string(role))
 		}
 	}
 	return nil
@@ -253,8 +255,8 @@ func listsAny(conf string, keys []string) bool {
 	return false
 }
 
-// refuseLostRelay refuses an eviction that would cut a remaining site off
-// the mesh along with the evicted one.
+// refuseLostRelay refuses a removal with --host-gone that would cut a
+// remaining site off the mesh along with the cut-off one.
 func (p *Plan) refuseLostRelay() error {
 	return lostRelay(p.cfg, p.Site, p.end, p.liveSites())
 }
@@ -268,7 +270,7 @@ func RefuseLostRelay(cfg *config.Config, site string) error {
 
 // lostRelay is the refusal itself. A site with no dial endpoint peers only
 // with sites that have one, and relays everything else through them (render,
-// renderWireGuard). When the evicted site is the only dialled site left, two
+// renderWireGuard). When the cut-off site is the only dialled site left, two
 // remaining sites with no endpoint could reach nothing.
 func lostRelay(cfg *config.Config, site string, end *config.Config, live []string) error {
 	if cfg.Sites[site].DialEndpoint() == "" {
@@ -289,7 +291,7 @@ func lostRelay(cfg *config.Config, site string, end *config.Config, live []strin
 }
 
 // checkToken checks, before anything changes, that the DNS token in the
-// secrets file works against the provider: the evicted gateway holds the one
+// secrets file works against the provider: the cut-off gateway holds the one
 // it was rendered, and the operator replaces it with `secrets set` after
 // revoking it. A token that does not work is most often the revoked one,
 // still in the file, and the DNS stage could not delete the records with it.
@@ -301,13 +303,13 @@ func (p *Plan) checkToken() error {
 	}
 	switch {
 	case name == "":
-		p.evict.tokenUnchecked = "no DNS provider is declared"
+		p.cutoff.tokenUnchecked = "no DNS provider is declared"
 		return nil
 	case !contains(dns.Implemented(), name):
-		p.evict.tokenUnchecked = name + " record management is not implemented"
+		p.cutoff.tokenUnchecked = name + " record management is not implemented"
 		return nil
 	case strings.TrimSpace(token) == "":
-		p.evict.tokenUnchecked = "the secrets hold no DNS token"
+		p.cutoff.tokenUnchecked = "the secrets hold no DNS token"
 		return nil
 	}
 	providerFor := p.DNSProvider
@@ -321,15 +323,15 @@ func (p *Plan) checkToken() error {
 	ctx, cancel := context.WithTimeout(context.Background(), dnsTimeout)
 	defer cancel()
 	if _, err := dns.FindZone(ctx, provider, strings.TrimSuffix(strings.ToLower(strings.TrimSpace(p.cfg.Community.Domain)), "."), nil); err != nil {
-		return fmt.Errorf("site remove %s: the DNS token in the secrets file does not work against %s: %v. %s held the token as it was rendered, so it is revoked at %s and a new one set before the eviction: paisans secrets set external.acme_dns_token < token-file. Nothing was changed", p.Site, name, err, p.Site, name)
+		return fmt.Errorf("site remove %s: the DNS token in the secrets file does not work against %s: %v. %s held the token as it was rendered, so it is revoked at %s and a new one set before the site is cut off: paisans secrets set external.acme_dns_token < token-file. Nothing was changed", p.Site, name, err, p.Site, name)
 	}
 	return nil
 }
 
-// evictQuorum refuses when the remaining healthy voters are not a majority
+// cutoffQuorum refuses when the remaining healthy voters are not a majority
 // of the voters etcd has now: `member remove` is a change the current voters
-// commit, the evicted one counted, and it cannot answer.
-func (p *Plan) evictQuorum(members []apply.EtcdMember, up int) error {
+// commit, the cut-off one counted, and it cannot answer.
+func (p *Plan) cutoffQuorum(members []apply.EtcdMember, up int) error {
 	voters := 0
 	for _, m := range members {
 		if !m.IsLearner {
@@ -342,18 +344,18 @@ func (p *Plan) evictQuorum(members []apply.EtcdMember, up int) error {
 	return fmt.Errorf("site remove %s: without it, %d of etcd's %d voters are healthy, which is not a majority of the voters etcd has now, so removing its member could not commit. Recovery is restoring etcd from a remaining member, outside the toolkit. Nothing was changed", p.Site, up, voters)
 }
 
-// evictLeader decides how the leadership leaves the evicted site. A streaming
+// cutoffLeader decides how the leadership leaves the cut-off site. A streaming
 // Sync Standby takes it over losing nothing. Without one, the most current
-// replica is promoted, and any commit the evicted leader acknowledged after
+// replica is promoted, and any commit the cut-off leader acknowledged after
 // that replica's last received WAL is lost, which the operator accepts by
 // typing `lose writes`. The cut leader steps down on its own: it can no
 // longer renew its leader key.
-func (p *Plan) evictLeader() {
-	p.evict.failover = true
-	p.patroni.candidate, p.evict.loseWrites = p.succession(p.patroni.members)
+func (p *Plan) cutoffLeader() {
+	p.cutoff.failover = true
+	p.patroni.candidate, p.cutoff.loseWrites = p.succession(p.patroni.members)
 }
 
-// succession is who takes over from the evicted leader in members: the
+// succession is who takes over from the cut-off leader in members: the
 // streaming Sync Standby, or else no candidate and the most current replica
 // that a failover promotes, losing what it had not received.
 func (p *Plan) succession(members []member) (string, *Lag) {
@@ -390,7 +392,7 @@ func (p *Plan) succession(members []member) (string, *Lag) {
 // changes. Once a cut has started, a failover may be under way, and the
 // database stage's gate decides instead.
 func (p *Plan) recheckLeader() error {
-	if p.evict.cutDone || p.evict.cutStarted || p.patroni.at == "" {
+	if p.cutoff.cutDone || p.cutoff.cutStarted || p.patroni.at == "" {
 		return nil
 	}
 	list, err := p.patroniList()
@@ -411,7 +413,7 @@ func (p *Plan) recheckLeader() error {
 		changed = fmt.Sprintf("%s no longer holds the Patroni leader, %s does", p.Site, leader)
 	case now:
 		candidate, lose := p.succession(list)
-		before := p.evict.loseWrites
+		before := p.cutoff.loseWrites
 		switch {
 		case candidate != p.patroni.candidate:
 			changed = "the streaming Sync Standby that would take over changed"
@@ -420,7 +422,7 @@ func (p *Plan) recheckLeader() error {
 		}
 	}
 	if changed != "" {
-		return fmt.Errorf("site remove %s: %s, and the answers given rest on it. Nothing was changed: run site remove %s --evict again, which reads it afresh", p.Site, changed, p.Site)
+		return fmt.Errorf("site remove %s: %s, and the answers given rest on it. Nothing was changed: run site remove %s --host-gone again, which reads it afresh", p.Site, changed, p.Site)
 	}
 	return nil
 }
@@ -438,12 +440,12 @@ func receivedLag(m member) (float64, bool) {
 	return 0, false
 }
 
-// probeDeadNode reads what skipping the evicted Garage node needs. Objects
+// probeDeadNode reads what skipping the cut-off Garage node needs. Objects
 // are kept when the remaining nodes still hold a copy of every partition:
 // replication of 2 or more, and at least that many nodes remaining.
 func (p *Plan) probeDeadNode(t apply.Transport, nodes int) error {
 	r := p.cfg.Storage.Garage.Replication
-	p.evict.loseObjects = !(r >= 2 && nodes >= r)
+	p.cutoff.loseObjects = !(r >= 2 && nodes >= r)
 	if p.garage.node != "" {
 		return nil
 	}
@@ -451,12 +453,13 @@ func (p *Plan) probeDeadNode(t apply.Transport, nodes int) error {
 	if err != nil {
 		return fmt.Errorf("site remove %s: %s: `garage layout history`: %w: %s", p.Site, p.garage.anchor, err, lastLines(out, 3))
 	}
-	p.evict.multiVersion = !strings.Contains(out, storageadd.StableLayout)
+	p.cutoff.multiVersion = !strings.Contains(out, storageadd.StableLayout)
 	return nil
 }
 
-// buildEvict plans the eviction's stages, in the order the cut decides.
-func (p *Plan) buildEvict() error {
+// buildCutoff plans the stages of a removal with --host-gone, in the order the
+// cut decides.
+func (p *Plan) buildCutoff() error {
 	p.Evict = EvictLine(p.dep(), p.cfg.Sites[p.Site].SSHUser())
 	p.Kept = append(p.Kept, p.hostGoneLeft())
 	cut, err := p.buildCut()
@@ -469,20 +472,20 @@ func (p *Plan) buildEvict() error {
 		return err
 	}
 	dnsSt.Number = 2
-	p.Stages = append(p.Stages, dnsSt, p.buildEvictDatabase(), p.buildEvictEtcd(), p.buildEvictStorage())
+	p.Stages = append(p.Stages, dnsSt, p.buildCutoffDatabase(), p.buildCutoffEtcd(), p.buildCutoffStorage())
 	rest, err := p.buildRest()
 	if err != nil {
 		return err
 	}
 	p.Stages = append(p.Stages, rest)
 	cfgSt := p.buildConfig()
-	cfgSt.Number = evictConfig
+	cfgSt.Number = cutoffConfig
 	p.Stages = append(p.Stages, cfgSt)
 	monitor, err := p.buildMonitor()
 	if err != nil {
 		return err
 	}
-	monitor.Number = evictMonitor
+	monitor.Number = cutoffMonitor
 	p.Stages = append(p.Stages, monitor)
 	return nil
 }
@@ -495,12 +498,12 @@ func (p *Plan) buildEvict() error {
 func (p *Plan) buildCut() (*Stage, error) {
 	st := &Stage{Number: 1, Name: "cut", Short: p.Site + " is no remaining site's peer"}
 	keep := func(rel string) bool { return rel == p.dep().WireGuardConf() || p.isCaddyRouting(rel) }
-	changes, _, err := p.planSiteChanges(st, p.liveSites(), p.evict.cutRendered, keep, false)
+	changes, _, err := p.planSiteChanges(st, p.liveSites(), p.cutoff.cutRendered, keep, false)
 	if err != nil {
 		return nil, err
 	}
 	st.Gate = fmt.Sprintf("no remaining site lists %s's WireGuard key as a peer, and the WireGuard helper's show on each has no handshake from it", p.Site)
-	if len(p.evict.joining) > 0 {
+	if len(p.cutoff.joining) > 0 {
 		st.Gate += fmt.Sprintf("; %s, not prepared yet, is neither dialled nor gated", joinAnd(p.Joining()))
 	}
 	st.run = func() error {
@@ -517,10 +520,10 @@ func (p *Plan) buildCut() (*Stage, error) {
 		return nil
 	}
 	st.gate = func() error {
-		if err := p.meshGate(p.evict.keys...); err != nil {
+		if err := p.meshGate(p.cutoff.keys...); err != nil {
 			return err
 		}
-		return p.handshakeGate(p.evict.keys...)
+		return p.handshakeGate(p.cutoff.keys...)
 	}
 	return st, nil
 }
@@ -548,11 +551,11 @@ func (p *Plan) handshakeGate(keys ...string) error {
 	return nil
 }
 
-// buildEvictDatabase is stage 3: Patroni's own failover once the cut leader
+// buildCutoffDatabase is stage 3: Patroni's own failover once the cut leader
 // cannot renew its key, then the site's member key deleted from etcd, which
 // it can no longer rewrite.
-func (p *Plan) buildEvictDatabase() *Stage {
-	st := &Stage{Number: evictDatabase, Name: "database", Short: "a remaining site leads, without " + p.Site}
+func (p *Plan) buildCutoffDatabase() *Stage {
+	st := &Stage{Number: cutoffDatabase, Name: "database", Short: "a remaining site leads, without " + p.Site}
 	if !contains(p.cfg.Cluster.Sites, p.Site) {
 		st.Short = "no database here"
 		st.Gate = fmt.Sprintf("none: %s holds no database", p.Site)
@@ -564,7 +567,7 @@ func (p *Plan) buildEvictDatabase() *Stage {
 		switch {
 		case p.patroni.candidate != "":
 			text += fmt.Sprintf("; the streaming Sync Standby %s takes it over, losing no acknowledged write", p.patroni.candidate)
-		case p.evict.loseWrites != nil:
+		case p.cutoff.loseWrites != nil:
 			text += "; " + p.loseWritesText()
 		}
 		st.Steps = append(st.Steps, Step{Site: p.patroni.at, Verb: "wait", Title: "wait for a remaining site to lead", Text: text})
@@ -618,7 +621,7 @@ func (p *Plan) buildEvictDatabase() *Stage {
 
 // loseWritesText says what a failover with no Sync Standby loses.
 func (p *Plan) loseWritesText() string {
-	l := p.evict.loseWrites
+	l := p.cutoff.loseWrites
 	if l.Replica == "" {
 		return "no remaining replica is listed, so none can take over"
 	}
@@ -632,17 +635,17 @@ func (p *Plan) loseWritesText() string {
 // LoseWritesText is the plan's account of what a failover with no Sync
 // Standby loses, for the question asked before `lose writes` is typed.
 func (p *Plan) LoseWritesText() string {
-	if p.evict.loseWrites == nil {
+	if p.cutoff.loseWrites == nil {
 		return ""
 	}
 	return strings.ToUpper(p.loseWritesText()[:1]) + p.loseWritesText()[1:] + "."
 }
 
-// buildEvictEtcd is stage 4: the site's etcd member removed by the remaining
+// buildCutoffEtcd is stage 4: the site's etcd member removed by the remaining
 // voters, and with two data sites and a witness the witness's too, as site
 // remove's stage 2 removes them.
-func (p *Plan) buildEvictEtcd() *Stage {
-	st := &Stage{Number: evictEtcd, Name: "etcd", Short: "etcd's voters are the end state's"}
+func (p *Plan) buildCutoffEtcd() *Stage {
+	st := &Stage{Number: cutoffEtcd, Name: "etcd", Short: "etcd's voters are the end state's"}
 	if p.etcd.control == "" {
 		st.Short = "no etcd here"
 		st.Gate = "none: the deployment runs no etcd"
@@ -687,21 +690,21 @@ func (p *Plan) buildEvictEtcd() *Stage {
 // version, losing what only it held when lose is set.
 func (p *Plan) skipCommand(version int) string {
 	args := fmt.Sprintf("layout skip-dead-nodes --version %d", version)
-	if p.evict.loseObjects {
+	if p.cutoff.loseObjects {
 		args += " --allow-missing-data"
 	}
 	return gcmd(p, args)
 }
 
-// buildEvictStorage is stage 5: the site's Garage node out of the layout as
+// buildCutoffStorage is stage 5: the site's Garage node out of the layout as
 // a dead node. Garage keeps an old layout version live until every node in
-// it has acknowledged and synced the new one, and an evicted node never
+// it has acknowledged and synced the new one, and a cut-off node never
 // will, so `layout skip-dead-nodes` marks it as having done so (Garage
 // v1.0.1, src/garage/cli/layout.rs, cmd_layout_skip_dead_nodes). With
 // --allow-missing-data it also marks every node synced, which is the
 // decision to lose what only the dead node held.
-func (p *Plan) buildEvictStorage() *Stage {
-	st := &Stage{Number: evictStorage, Name: "storage", Short: "no layout row for " + p.Site}
+func (p *Plan) buildCutoffStorage() *Stage {
+	st := &Stage{Number: cutoffStorage, Name: "storage", Short: "no layout row for " + p.Site}
 	if p.garage.anchor == "" {
 		st.Short = "no objects here"
 		st.Gate = fmt.Sprintf("none: %s is not a Garage node", p.Site)
@@ -714,18 +717,18 @@ func (p *Plan) buildEvictStorage() *Stage {
 			Step{Site: p.garage.anchor, Verb: "remove", Title: "remove " + p.Site + " from the Garage layout", Text: fmt.Sprintf("%s's node %s from Garage's layout: %s", p.Site, p.garage.node, gcmd(p, "layout remove "+p.garage.node))},
 			Step{Site: p.garage.anchor, Verb: "apply", Title: "apply the Garage layout", Text: "the layout: " + gcmd(p, fmt.Sprintf("layout apply --version %d", skipAt))},
 		)
-	} else if p.evict.multiVersion {
+	} else if p.cutoff.multiVersion {
 		skipAt = p.garage.version
 	}
 	if skipAt > 0 {
 		text := fmt.Sprintf("%s's node as dead, so the layout stops waiting for it to acknowledge version %d: %s", p.Site, skipAt, p.skipCommand(skipAt))
-		if p.evict.loseObjects {
+		if p.cutoff.loseObjects {
 			text += fmt.Sprintf(". Objects only %s held are lost: storage.garage.replication is %d, and the nodes that remain hold no other copy of them", p.Site, p.cfg.Storage.Garage.Replication)
 		}
 		st.Steps = append(st.Steps, Step{Site: p.garage.anchor, Verb: "skip", Title: "skip " + p.Site + " as a dead Garage node", Text: text})
 	}
 	st.Gate = fmt.Sprintf("no layout row for %s, and on every remaining Garage site one live layout version", p.Site)
-	if !p.evict.loseObjects {
+	if !p.cutoff.loseObjects {
 		st.Gate += fmt.Sprintf(" and an empty resync queue with no errors, %d reads in a row", garageSamples)
 	}
 	st.Gate += fmt.Sprintf(", within %s", garageWait)
@@ -772,7 +775,7 @@ func (p *Plan) buildEvictStorage() *Stage {
 // has let the site go: HAProxy without its backend, each remaining replica's
 // patroni.env, and the deployment record.
 func (p *Plan) buildRest() (*Stage, error) {
-	st := &Stage{Number: evictRest, Name: "the rest of the cluster", Short: "HAProxy and replicas without " + p.Site}
+	st := &Stage{Number: cutoffRest, Name: "the rest of the cluster", Short: "HAProxy and replicas without " + p.Site}
 	keep := func(rel string) bool { return rel != p.dep().WireGuardConf() && !p.isCaddyRouting(rel) }
 	changes, proxies, err := p.planSiteChanges(st, p.liveSites(), p.rendered, keep, true)
 	if err != nil {
@@ -805,7 +808,7 @@ func (p *Plan) buildRest() (*Stage, error) {
 			}
 		}
 		if len(replicas) > 0 {
-			if err := p.evictReplicas(replicas); err != nil {
+			if err := p.cutoffReplicas(replicas); err != nil {
 				return err
 			}
 		}
@@ -823,11 +826,11 @@ func (p *Plan) buildRest() (*Stage, error) {
 	return st, nil
 }
 
-// evictReplicas applies each remaining replica's patroni.env, one at a
+// cutoffReplicas applies each remaining replica's patroni.env, one at a
 // time, as site remove does. Which member leads is read now, not when the
-// plan was made: when the evicted site led, Patroni chose its successor in
+// plan was made: when the cut-off site led, Patroni chose its successor in
 // stage 3, and recreating the leader's Patroni would be another failover.
-func (p *Plan) evictReplicas(replicas []*apply.ReplicaEnv) error {
+func (p *Plan) cutoffReplicas(replicas []*apply.ReplicaEnv) error {
 	list, err := p.patroniList()
 	if err != nil {
 		return err
@@ -856,19 +859,20 @@ func (p *Plan) evictReplicas(replicas []*apply.ReplicaEnv) error {
 	return nil
 }
 
-// EvictReport is what an eviction leaves for the operator: what the host
-// still holds, which secrets to rotate and in what order, and the apply that
-// brings up a replacement. Nothing here is changed by this command.
-func (p *Plan) EvictReport() []string {
+// CutoffReport is what a removal with --host-gone leaves for the operator:
+// what the host still holds, which secrets to rotate and in what order, and
+// the apply that brings up a replacement. Nothing here is changed by this
+// command.
+func (p *Plan) CutoffReport() []string {
 	var out []string
-	if p.evict.tokenUnchecked != "" {
-		out = append(out, fmt.Sprintf("dns: the DNS token was not checked; check it yourself. %s held the token it was rendered, and %s, so this command could not try the one in the secrets file. Revoke the old one at the provider", p.Site, p.evict.tokenUnchecked))
+	if p.cutoff.tokenUnchecked != "" {
+		out = append(out, fmt.Sprintf("dns: the DNS token was not checked; check it yourself. %s held the token it was rendered, and %s, so this command could not try the one in the secrets file. Revoke the old one at the provider", p.Site, p.cutoff.tokenUnchecked))
 	}
 	if joining := p.Joining(); len(joining) > 0 {
 		out = append(out, fmt.Sprintf("apply: run `paisans apply` to bring up %s. It prepares the new host, applies it, creates its DNS records, and adds it as a peer on every remaining site; until then it is in "+config.FileName+" and nowhere else", joinAnd(joining)))
 	}
-	if len(p.evict.dark) > 0 {
-		out = append(out, fmt.Sprintf("names: the community answers nothing until that apply. %s was the only remaining %s site", p.Site, strings.Join(p.evict.dark, " and ")))
+	if len(p.cutoff.dark) > 0 {
+		out = append(out, fmt.Sprintf("names: the community answers nothing until that apply. %s was the only remaining %s site", p.Site, strings.Join(p.cutoff.dark, " and ")))
 	}
 	out = append(out,
 		fmt.Sprintf("%s: the host still holds what it was rendered. Its WireGuard key no longer works on any remaining site. Rotate the rest in this order: the DNS token first (secrets set, and revoked at the provider), since it can point the community's names anywhere; the OIDC client secrets (oidc client create --rotate-secret); the apps' S3 keys (storage rotate-key --app); then the Postgres, Garage and heartbeat secrets, which secrets rotate will change where they are checked and where they are used together", p.Site),

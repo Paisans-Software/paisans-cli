@@ -8,17 +8,17 @@ key is a recipient of `secrets.enc.yaml`, every secret of every site. Each is
 closed a different way, and some cannot be closed at all, only made worthless
 by rotating what they unlock. This guide is the order to close them in, for
 two cases: an operator who leaves on good terms, and an operator whose site is
-evicted because the others can no longer reach it.
+cut off because the others can no longer reach it.
 
 Each step says what it closes and what is still open after it. Why each
-protection works, and the scenarios behind them, are in
-[How a deployment protects itself](how-a-deployment-protects-itself.md). The examples
-use `alice` for the operator who leaves, `home-b` for a site, and `vm` for the
-gateway. The reasoning is in `README.md`, under *Keys belong to operators, and
-sites name operators*, *The operator reconciler checks Pocket ID against the
-operators*, *Evicting a site: `--evict`*, *Rekeying the mesh: `mesh
-rekey`* and *`secrets rotate` replaces a secret where it is checked and where
-it is used*.
+protection works, and the scenarios behind them, are in [How a deployment
+protects itself](how-a-deployment-protects-itself.md). The examples use `alice`
+for the operator who leaves, `home-b` for a site, and `vm` for the gateway. The
+reasoning is in `README.md`, under *Keys belong to operators, and sites name
+operators*, *The operator reconciler checks Pocket ID against the operators*,
+*Removing a site whose host is not reached: `--host-gone`*, *Rekeying the mesh:
+`mesh rekey`* and *`secrets rotate` replaces a secret where it is checked and
+where it is used*.
 
 Both cases end the same way: the secrets file re-encrypted without them, then
 the mesh rekeyed, then every other secret rotated with `paisans secrets
@@ -208,28 +208,29 @@ community's decision.
    secret signs, Pocket ID's own among them, and Mbin's open sessions, until
    they expire.
 
-## An operator whose site is evicted
+## An operator whose site is cut off
 
 The operator stopped cooperating, and the others can no longer log in to their
 host. It still runs and is still a member of the deployment: possibly a data
 site, a Garage node, an apps site, or the gateway. `paisans site remove
---evict` takes it out without ever reaching it, and a replacement declared in
-the same edit takes its roles over (README, *Evicting a site: `--evict`*).
+--host-gone` takes it out without ever reaching it, as it does a host that is
+dead, and a replacement declared in the same edit takes its roles over
+(README, *Removing a site whose host is not reached: `--host-gone`*).
 `home-b` is the site here; where the gateway differs, the step says so.
 
 The order matters: what can redirect the community's names closes first, the
 secrets file is re-encrypted before any new site's secrets are generated, the
-mesh is rekeyed after the eviction and before the replacement joins, and
+mesh is rekeyed after the cut and before the replacement joins, and
 everything else is rotated once the replacement runs: `secrets rotate` hands
 each new value to every site the configuration declares, the replacement's
 included, and refuses while one does not answer.
 
 1. **When the site holds the gateway, revoke the DNS token at the provider,
    and issue a new one scoped to the zone.** Do not set it yet if step 2
-   applies. The evicted host holds a working copy of the old token in its
+   applies. The cut-off host holds a working copy of the old token in its
    Caddy's environment, and can point the community's names back at itself
    until it is revoked. A monitor with `managed_by: paisans` holds the same
-   token, so do this for one of those too. Closes: the evicted host's control
+   token, so do this for one of those too. Closes: the cut-off host's control
    of DNS. Open: the certificates it already holds (step 9).
 
 2. **If they were a recipient of the secrets file, re-encrypt it without
@@ -256,10 +257,10 @@ included, and refuses while one does not answer.
    security find-generic-password -s acme -w | paisans secrets set external.acme_dns_token
    ```
 
-   The eviction checks this token against the provider before it changes
-   anything, and refuses while it does not work: the revoked one still in the
-   file is the usual reason. Closes nothing new; it is what the DNS stage
-   deletes the evicted host's records with.
+   `site remove --host-gone` checks this token against the provider before it
+   changes anything, and refuses while it does not work: the revoked one still
+   in the file is the usual reason. Closes nothing new; it is what the DNS
+   stage deletes the cut-off host's records with.
 
 4. **In one edit of `paisans-stack.yaml`:** take them out of `operators` and every
    site's `ssh.keys`; declare the replacement as a new site, under a new
@@ -268,11 +269,11 @@ included, and refuses while one does not answer.
    secrets, in etcd, Patroni and Garage, in DNS and in every log. Closes
    nothing yet.
 
-5. **Evict the site.**
+5. **Cut the site off.**
 
    ```sh
-   paisans site remove home-b --evict             # the plan, what it will ask, what the host keeps
-   paisans site remove home-b --evict --execute   # from a terminal
+   paisans site remove home-b --host-gone             # the plan, what it will ask, what the host keeps
+   paisans site remove home-b --host-gone --execute   # from a terminal
    ```
 
    It asks for `revoked` when `home-b` holds the gateway, then the site's
@@ -327,7 +328,7 @@ included, and refuses while one does not answer.
    first case. Closes: their administration of Pocket ID where they held it,
    of the health page, and of every app whose admin group they left.
 
-9. **Revoke the old gateway's certificates.** The evicted host keeps the
+9. **Revoke the old gateway's certificates.** The cut-off host keeps the
    certificates it obtained for the community's names, with their private
    keys, valid until they expire. Let's Encrypt lets an account other than
    the one that issued a certificate revoke it, once that account proves
@@ -361,22 +362,22 @@ included, and refuses while one does not answer.
 
     The plan lists the token as replaced earlier and rotates everything else.
 
-    It asks for `sign out`: after a gateway's eviction, signing members out
-    is the point, since the evicted host saw every session cookie. A run
+    It asks for `sign out`: after a gateway is cut off, signing members out
+    is the point, since the cut-off host saw every session cookie. A run
     that stops resumes when run again, and `apply`, like every command that
     renders, refuses until it finishes. When the plan says it is resuming an
     earlier `--all` run that was not this one, add `--restart`, so every
     secret is rotated again. A rotation that cannot finish is ended by hand:
     README, *A rotation that cannot finish*. The WireGuard keys were step 6.
 
-11. **Remove the evicted site's secrets**, now that no site names it:
+11. **Remove the cut-off site's secrets**, now that no site names it:
 
     ```sh
     paisans secrets prune             # lists them
     paisans secrets prune --execute
     ```
 
-**What stays with the evicted host**, whatever is done here:
+**What stays with the cut-off host**, whatever is done here:
 
 * a copy of the database and of the objects, as they were when it was cut;
 * everything it saw while it terminated TLS, when it was the gateway:

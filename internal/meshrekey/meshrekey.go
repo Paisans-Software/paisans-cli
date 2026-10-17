@@ -87,8 +87,8 @@ type Plan struct {
 	Sites  []Site
 	Report ui.Reporter
 	// Joining are the sites the configuration declares whose hosts hold no
-	// claim of this deployment yet, Eg: a replacement declared before an
-	// eviction. They are no site's peer until the apply that brings them up,
+	// claim of this deployment yet, Eg: a replacement declared before a site is
+	// cut off. They are no site's peer until the apply that brings them up,
 	// so a rekey neither writes to them nor renders them.
 	Joining []string
 

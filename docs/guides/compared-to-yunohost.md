@@ -27,7 +27,7 @@ full-time sysadmins. They answer different questions.
 | Machines | One | One or more sites, joined by a WireGuard mesh |
 | Database | Each app's own, on the server | Postgres under Patroni from the first install, a cluster of one until a second site joins |
 | Files | Local disk | Garage object storage from the first install, replicated when a site is added |
-| Losing a machine | The server is the deployment | A site can be added, removed or evicted while the rest keep running |
+| Losing a machine | The server is the deployment | A site can be added, or removed even when its host is not reached, while the rest keep running |
 | Packaging | Install scripts that run on the host | Docker Compose blueprints, with no scripts on the host. A third party blueprint runs code only inside the containers it declares |
 | Catalog | Hundreds of apps of every kind | A core catalog of blueprints for private or public federated communities. Any person or organisation can publish a catalog of their own |
 | Mail | A full mail server | None; apps send through an existing, external SMTP server such as Brevo or Mailgun, unless a third party blueprint provides one |
@@ -57,8 +57,8 @@ has a way back after it does.
   operator a fresh one-time sign-in link.
 * **An operator who leaves is closed out.** The secrets file is re-encrypted
   without them, the mesh is rekeyed, and every other secret is rotated.
-  A site whose host the others can no longer reach is evicted and its role
-  handed to a new host.
+  A site whose host the others can no longer reach is cut off with `site
+  remove --host-gone` and its role handed to a new host.
 
 ## Why Paisans is built this way
 

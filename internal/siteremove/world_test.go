@@ -115,10 +115,10 @@ type world struct {
 	// unhealthy names an app stack whose container has exited.
 	unhealthy string
 
-	// evicted is the site an eviction cuts off: once no other host's running
-	// interface lists its key, a leader it held fails over, as Patroni's does
-	// when the leader key expires.
-	evicted string
+	// cutoff is the site a removal with --host-gone cuts off: once no other
+	// host's running interface lists its key, a leader it held fails over, as
+	// Patroni's does when the leader key expires.
+	cutoff string
 	// skips is every `garage layout skip-dead-nodes` run, its arguments.
 	skips []string
 }
@@ -878,17 +878,17 @@ func (h *host) runningWG() string {
 	return h.files[wgConf]
 }
 
-// failover promotes a remaining member once the evicted leader is cut off:
+// failover promotes a remaining member once the leader is cut off:
 // the Sync Standby, or else the first streaming replica.
 func (w *world) failover() {
-	if w.evicted == "" {
+	if w.cutoff == "" {
 		return
 	}
 	defer w.keepSync()
-	if w.member(w.evicted) == nil {
+	if w.member(w.cutoff) == nil {
 		return
 	}
-	for _, private := range []string{w.secrets.Sites[w.evicted].WireGuardPrivateKey, w.secrets.Sites[w.evicted].WireGuardNextPrivateKey} {
+	for _, private := range []string{w.secrets.Sites[w.cutoff].WireGuardPrivateKey, w.secrets.Sites[w.cutoff].WireGuardNextPrivateKey} {
 		if private == "" {
 			continue
 		}
@@ -897,14 +897,14 @@ func (w *world) failover() {
 			w.t.Fatal(err)
 		}
 		for name, h := range w.hosts {
-			if name != w.evicted && strings.Contains(h.runningWG(), key) {
+			if name != w.cutoff && strings.Contains(h.runningWG(), key) {
 				return
 			}
 		}
 	}
-	if w.leader() != w.evicted {
+	if w.leader() != w.cutoff {
 		// A cut Sync Standby stops streaming, and the leader names another.
-		gone := w.member(w.evicted)
+		gone := w.member(w.cutoff)
 		if gone["State"] == "stopped" {
 			return
 		}
@@ -925,14 +925,14 @@ func (w *world) failover() {
 		}
 	}
 	for _, m := range w.members {
-		if next == nil && m["Member"] != w.evicted && m["State"] == "streaming" {
+		if next == nil && m["Member"] != w.cutoff && m["State"] == "streaming" {
 			next = m
 		}
 	}
 	// Replicas a hostile leader stopped streaming still run Postgres, and
 	// Patroni promotes one when it is within maximum_lag_on_failover.
 	for _, m := range w.members {
-		if next == nil && m["Member"] != w.evicted && m["State"] == "running" {
+		if next == nil && m["Member"] != w.cutoff && m["State"] == "running" {
 			next = m
 		}
 	}
@@ -941,7 +941,7 @@ func (w *world) failover() {
 	}
 	for _, m := range w.members {
 		switch {
-		case m["Member"] == w.evicted:
+		case m["Member"] == w.cutoff:
 			m["Role"], m["State"] = "Replica", "stopped"
 		case m["State"] == "running":
 			// It follows the new leader.

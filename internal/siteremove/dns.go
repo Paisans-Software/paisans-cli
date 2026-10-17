@@ -85,7 +85,7 @@ func (p *Plan) buildDNS(before, after *config.Config) (*Stage, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), dnsTimeout)
 		defer cancel()
 		if p.Options.HostGone {
-			return dns.BuildSiteEviction(ctx, provider, before, p.Site, after)
+			return dns.BuildSiteCutoff(ctx, provider, before, p.Site, after)
 		}
 		return dns.BuildSiteRemoval(ctx, provider, before, p.Site, after)
 	}

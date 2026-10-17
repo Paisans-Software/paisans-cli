@@ -15,8 +15,8 @@ var meshRel = strings.TrimPrefix(wgConf, "/")
 // A resumed sync hands the helper the mesh file of the site's own scoped
 // apply when that apply holds it, without building another plan.
 func TestAResumedSyncReusesThePlanThatHoldsTheMeshFile(t *testing.T) {
-	w, zone := evictWorld(t, "home-b")
-	p := w.mustBuild("home-b", evictOptions(zone))
+	w, zone := cutoffWorld(t, "home-b")
+	p := w.mustBuild("home-b", cutoffOptions(zone))
 	held, err := apply.Build("home-a", p.Rendered(), acme.Module("cloudflare"), w.hosts["home-a"], apply.Scope(meshRel))
 	if err != nil {
 		t.Fatal(err)
@@ -34,8 +34,8 @@ func TestAResumedSyncReusesThePlanThatHoldsTheMeshFile(t *testing.T) {
 // is when somebody edited the file on the host: the helper would install
 // the render while the edit stayed in /srv.
 func TestAResumedSyncRefusesAnEditedMeshFile(t *testing.T) {
-	w, zone := evictWorld(t, "home-b")
-	p := w.mustBuild("home-b", evictOptions(zone))
+	w, zone := cutoffWorld(t, "home-b")
+	p := w.mustBuild("home-b", cutoffOptions(zone))
 	build := func() (*apply.Plan, error) {
 		return apply.Build("home-a", p.Rendered(), acme.Module("cloudflare"), w.hosts["home-a"], apply.Scope(meshRel))
 	}

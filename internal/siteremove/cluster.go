@@ -661,7 +661,7 @@ func (p *Plan) planSiteChanges(st *Stage, names []string, rendered *render.Plan,
 				Step{Site: name, Verb: "validate", Title: "validate Caddy routes on " + name, Text: "the routes without " + p.Site + ": " + validateCaddy(p.dep())},
 				Step{Site: name, Verb: "reload", Title: "reload Caddy on " + name, Text: "Caddy: " + reloadCaddy(p.dep())})
 		}
-		if sync, ok := p.evict.stillPeers[name]; ok && sync && keep(p.dep().WireGuardConf()) && (c.plan == nil || c.plan.WireGuard == apply.WireGuardNone) {
+		if sync, ok := p.cutoff.stillPeers[name]; ok && sync && keep(p.dep().WireGuardConf()) && (c.plan == nil || c.plan.WireGuard == apply.WireGuardNone) {
 			// The file was written by a run that stopped before the running
 			// interface was handed it.
 			conf := p.dep().WireGuardConf()

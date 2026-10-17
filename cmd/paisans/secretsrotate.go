@@ -61,7 +61,7 @@ const wireguardKept = "a WireGuard key is replaced by `paisans mesh rekey`, whic
 // backupKeyKept is why the restic password and WAL-G's key are kept. restic
 // wraps its repository's master key in each password, so a new password
 // leaves the key it opens unchanged, and WAL-G has no re-encryption at all.
-const backupKeyKept = "it encrypts every backup already taken, and a new one would not re-encrypt them: whoever held the old one can still read any copy they made, so rotating it would take nothing back. What keeps an evicted operator out of the backups is the destinations' credentials"
+const backupKeyKept = "it encrypts every backup already taken, and a new one would not re-encrypt them: whoever held the old one can still read any copy they made, so rotating it would take nothing back. What keeps an operator who left out of the backups is the destinations' credentials"
 
 // destinationKept is why a backup destination's credentials are kept.
 const destinationKept = "it is issued by the provider behind the destination: issue a new key there, pipe it in with `paisans secrets set`, apply, then delete the old key at the provider"
@@ -639,7 +639,7 @@ func costOf(cfg *config.Config, app, key string) secretsrotate.Cost {
 
 // refuseUnfilled refuses --all on a secrets file that lacks a secret init
 // generates: --all is every secret the deployment has, and a run that
-// skipped one would leave it as the evicted operator knew it, or never made.
+// skipped one would leave it as the operator who left knew it, or never made.
 func refuseUnfilled(cfg *config.Config, store secretsrotate.Store, path string) error {
 	fresh, err := store.Load()
 	if err != nil {

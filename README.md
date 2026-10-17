@@ -2506,15 +2506,16 @@ the next render.
 
 ### `secrets rotate` replaces a secret where it is checked and where it is used
 
-After an operator who could read `secrets.enc.yaml` leaves, or a site is
-evicted, every secret they could read has to change, or their copy of it keeps
-working. **`paisans secrets rotate <path>... | --all`** does it without anyone
-editing a file on a host. A secret is named by its path in the secrets file,
-Eg: `cluster.standby_password`; Mbin's OAuth2 passphrase, encryption key and
-keypair are one unit, named `apps.<app>.oauth`, because a private key the
-passphrase beside it does not open is an Mbin that cannot sign a token.
-`--all` is every secret in scope the deployment has. How to run it is under
-*`paisans secrets rotate`* in [docs/commands.md](docs/commands.md);
+After an operator who could read `secrets.enc.yaml` leaves, or a site is cut
+off with `site remove --host-gone`, every secret they could read has to change,
+or their copy of it keeps working. **`paisans secrets rotate <path>... |
+--all`** does it without anyone editing a file on a host. A secret is named by
+its path in the secrets file, Eg: `cluster.standby_password`; Mbin's OAuth2
+passphrase, encryption key and keypair are one unit, named `apps.<app>.oauth`,
+because a private key the passphrase beside it does not open is an Mbin that
+cannot sign a token. `--all` is every secret in scope the deployment has. How
+to run it is under *`paisans secrets rotate`* in
+[docs/commands.md](docs/commands.md);
 [docs/specs/2026-10-12-secrets-rotate.md](docs/specs/2026-10-12-secrets-rotate.md)
 is the approved design.
 
@@ -2698,21 +2699,21 @@ cross ssh and nothing secret is on a command line; and the host runs the value
 when every carrying line's hash is among them. A file that differs only
 elsewhere, Eg: a comment an upgrade changed in `caddy.env`, or an app setting
 not yet applied, would otherwise pass for a secret replaced, and its old value
-be handed out again. A secret replaced and then applied, as an eviction does
-with the DNS token, reads the same as one never replaced, so the operator says
-which: **`--replaced <path>`** names a pasted secret every host using it
-already runs from the file. It is checked the same way, and refused for a
-generated secret, for one some host does not run yet, and for one whose
-rotation is under way; a path it accepts is listed in the plan as replaced
-earlier and not rotated. No OIDC client secret is pasted: every one, the
-homeserver's and the gate's included, is minted by `oidc client create
+be handed out again. A secret replaced and then applied, as a removal with
+`--host-gone` does with the DNS token, reads the same as one never replaced, so
+the operator says which: **`--replaced <path>`** names a pasted secret every
+host using it already runs from the file. It is checked the same way, and
+refused for a generated secret, for one some host does not run yet, and for one
+whose rotation is under way; a path it accepts is listed in the plan as
+replaced earlier and not rotated. No OIDC client secret is pasted: every one,
+the homeserver's and the gate's included, is minted by `oidc client create
 --rotate-secret`.
 
 **A rotation that signs members out asks first.** When the plan includes one,
 `--execute` asks the operator to type `sign out` at a terminal before any host
-is reached, and without a terminal it is refused unless `--yes` types it. After the eviction of a
-gateway, which saw every session cookie, signing members out is the point
-(Founder decision).
+is reached, and without a terminal it is refused unless `--yes` types it. After
+a gateway is cut off, since it saw every session cookie, signing members out is
+the point (Founder decision).
 
 **A secret every node must share cannot be held in two values at once.**
 Garage's `rpc_secret` is the key of every node's RPC handshake, so a node on
@@ -2748,7 +2749,7 @@ includes it (Founder decision).
   rekey`*).
 * **`backup.restic_password` and `backup.walg_libsodium_key`** encrypt every
   backup already taken, and a new one would not re-encrypt them: whoever held
-  the old one can still read any copy they made. What keeps an evicted operator
+  the old one can still read any copy they made. What keeps an operator who left
   out of the backups is the destinations' credentials.
 * **Each backup destination's credentials**, which its provider issued. Issue a
   new key there, pipe it in with `paisans secrets set`, apply, then delete the
@@ -3738,31 +3739,33 @@ down: replication 3 on three or more sites, or replication 2 or more at
 about a minute. Elsewhere it is refused before anything stops. Founder
 decision.
 
-**Removing or replacing a node is not built**, by founder decision, except
-for a node whose site is evicted, which is skipped as dead (founder decision,
-2026-10-11; below). After `garage layout remove` the old node must stay online
-until its data has moved, because Garage does not track block migration: a
-removed node's blocks become deletable only ten minutes after their references
-drop, and were observed leaving between about 10 and 20 minutes after the
-apply. A dead node needs `layout skip-dead-nodes`, possibly with
-`--allow-missing-data`. Both are decisions about losing data, and each gets its
-own gate; `docs/specs/2026-10-07-garage-gaps.md` records what was learned.
+**Removing or replacing a node is not built**, by founder decision, except for
+the node of a site removed with `site remove --host-gone`, which is skipped as
+dead (founder decision, 2026-10-11; below). After `garage layout remove` the
+old node must stay online until its data has moved, because Garage does not
+track block migration: a removed node's blocks become deletable only ten
+minutes after their references drop, and were observed leaving between about 10
+and 20 minutes after the apply. A dead node needs `layout skip-dead-nodes`,
+possibly with `--allow-missing-data`. Both are decisions about losing data, and
+each gets its own gate; `docs/specs/2026-10-07-garage-gaps.md` records what was
+learned.
 
-**An evicted Garage node is skipped as dead.** Garage keeps an old layout
+**A cut-off Garage node is skipped as dead.** Garage keeps an old layout
 version live until every node in it has acknowledged and synced the new one,
-and an evicted node never will. So `site remove --evict` removes the node from
-the layout, applies it, and runs `garage layout skip-dead-nodes --version <n>`,
-which raises the acknowledgement of every node that is down to that version
-(Garage v1.0.1, `src/garage/cli/layout.rs`, `cmd_layout_skip_dead_nodes`). The
-remaining nodes still sync from each other. When they hold a copy of every
-partition, which needs `storage.garage.replication` of 2 or more and at least
-that many nodes remaining, nothing is lost and nothing is asked. Otherwise the
-objects only the evicted node held are lost: the plan says so, the operator
-types `lose objects`, and the command passes `--allow-missing-data`, which
-raises every node's sync too. The gate waits for one live layout version on
-every remaining node, and for an empty resync queue unless objects were given
-up, since their blocks are retried and fail for as long as anything references
-them. Founder decision.
+and a node whose host is not reached never will. So `site remove --host-gone`
+removes the node from the layout, applies it, and runs `garage layout
+skip-dead-nodes --version <n>`, which raises the acknowledgement of every node
+that is down to that version (Garage v1.0.1, `src/garage/cli/layout.rs`,
+`cmd_layout_skip_dead_nodes`). The remaining nodes still sync from each other.
+When they hold a copy of every partition, which needs
+`storage.garage.replication` of 2 or more and at least that many nodes
+remaining, nothing is lost and nothing is asked. Otherwise the objects only the
+cut-off node held are lost: the plan says so, the operator types `lose
+objects`, and the command passes `--allow-missing-data`, which raises every
+node's sync too. The gate waits for one live layout version on every remaining
+node, and for an empty resync queue unless objects were given up, since their
+blocks are retried and fail for as long as anything references them. Founder
+decision.
 
 #### Replacing an app's key: `storage rotate-key`
 
@@ -8754,17 +8757,19 @@ the approved specification. How to run it, and its flags, are under
 | `external.acme_dns_token` empty while a site runs the toolkit's Caddy | the same refusal as `render` and `apply`: stage 2 reloads the gateway's routes, and a Caddy without its token obtains no certificate |
 | `--delete-data` without a terminal or `--yes`, or with `--host-gone` | the same rule as `app remove`; and nothing is deleted on a host that is not reached |
 
-**Six stages, each ending at a gate.** Each is planned from live state, so a
-stage already done plans no steps, its gate is still checked, and a re-run
-after a fixed problem resumes at the first stage with anything left to do.
-The last one is the exception, since the stage before it is what makes a
-re-run impossible: a failure there names the `apply` that finishes it.
+**Six stages, each ending at a gate.** A removal with `--host-gone` runs its
+own stages instead, the mesh cut first (see *Removing a site whose host is not
+reached: `--host-gone`*). Each is planned from live state, so a stage already
+done plans no steps, its gate is still checked, and a re-run after a fixed
+problem resumes at the first stage with anything left to do. The last one is
+the exception, since the stage before it is what makes a re-run impossible: a
+failure there names the `apply` that finishes it.
 
 | Stage | What runs | Gate |
 |-------|-----------|------|
 | 1. Data out of the site | the leader switched over to the `Sync Standby` when the site holds it; `synchronous_mode` turned off when one data site remains, since a leader waiting on a standby that is leaving stops taking writes; Patroni stopped on the site and its member key deleted from etcd; its Garage node removed from the layout and the layout applied | another site leads and `patronictl list` no longer lists the site, with a `Sync Standby` when the end state wants one; no layout row for the site, and every remaining node settled (one live layout version, an empty resync queue) within an hour, and a run that times out resumes at this gate while Garage carries on copying |
 | 2. Out of the cluster | `etcdctl member remove`, then the site's etcd stopped; with two data sites and a witness, the witness's member next (below); on every remaining site, the files whose render changes with the site gone, by scoped `apply`: `psns-<token>.conf` (the helper's `sync`), `haproxy.cfg` (HAProxy restarted with its database apps stopped around it, as `site add` does) and the gateway's routes (validated, then Caddy reloaded); then each remaining replica's `patroni.env`, one at a time, as `site add`'s stage 7 does; last, the site taken out of every remaining gateway's deployment record | the voters are exactly the end state's and all healthy; no remaining site has the site's key as a WireGuard peer; HAProxy lists exactly the end state's cluster sites with the leader `UP`; each replica streaming again before the next |
-| 3. Clean the host | below; skipped with `--host-gone`. When the site holds the active Pocket ID instance, the plan says that once this stage stops it, sign in is unavailable for a few seconds while a standby takes over, up to about 90 seconds if the instance does not stop cleanly | checked last: nothing of this deployment's left but what the plan said it keeps |
+| 3. Clean the host | below. When the site holds the active Pocket ID instance, the plan says that once this stage stops it, sign in is unavailable for a few seconds while a standby takes over, up to about 90 seconds if the instance does not stop cleanly | checked last: nothing of this deployment's left but what the plan said it keeps |
 | 4. DNS | the address records this deployment's `dns init` made for the site, deleted at the provider (below, *The site's DNS records go with it*); skipped, saying why in one line, when `acme.provider` is not set, its token is not in the secrets, or the site has no public address | listing the zones again finds nothing left to delete |
 | 5. Config | the site taken out of `paisans-stack.yaml`: its block, its name in `cluster.sites`, `etcd.members` and `storage.garage.sites` where the file writes them, its capacity; with two data sites and a witness, the witness out of a written `etcd.members` and its `witness` role, in the same write; every other byte as it was | the file loads and no longer declares it |
 | 6. Monitor | every remaining monitor site's `uptime` stack applied on its own, so its `monitors.json`, rendered from the end state, no longer names the site and the restarted monitor deletes its ping and direct checks; skipped when no site holds the monitor role (see *Topology commands reseed the monitor*). The monitor site itself is never the one removed, since its app is pinned to it | the seed on the host matches the render and the stack is healthy; a failure here comes after the removal and names the `apply` that finishes it |
@@ -8863,14 +8868,10 @@ approved specification.
   `--public-ports` for another one. The owner moves the sites and runs
   `site evict` for the old deployment.
 
-**`--host-gone` is for a host that is never coming back.** The host is not
-reached at all: stages 1, 2, 4, 5 and 6 run and stage 3 is skipped. The DNS
-stage runs: the records point at a host that is gone, which is when they
-should go. The report lists
-what the host still holds if it ever returns, by name, with the `site evict`
-line its owner removes all of it with, and nothing it runs can
-reach the cluster again, since no remaining site has it as a WireGuard peer
-and its etcd member is gone.
+**`--host-gone` never reaches the host.** It is for a host that is dead, and
+for one that still runs but that the other operators can no longer reach, and
+it cuts the site off the mesh before anything else changes (see *Removing a
+site whose host is not reached: `--host-gone`*).
 
 **The site's DNS records go with it.** Stage 4 deletes the A and AAAA
 records this deployment's `dns init` made for the site, through the same
@@ -8954,7 +8955,7 @@ and `--yes` types it for either question. Any other host is not asked about.
 | `--ssh` not of the form `user@host[:port]` | the user is who the command logs in as; Eg: `admin@203.0.113.9` |
 | `--ssh` without `--force` | a full removal reaches the site through its `ssh` section |
 | `--ssh` naming a host whose admission record is another site `paisans-stack.yaml` still declares | the record is the proof of whose host it is; name that site instead |
-| `--force` with `--host-gone` | `--force` cleans one host, and `--host-gone` reaches none |
+| `--force`, `--ssh` or `--id` with `--host-gone` | they name a host to clean, and `--host-gone` reaches none |
 | a host that does not answer over ssh | what is on it cannot be read |
 | the site's own host, or `--delete-data`, with `--execute`, no terminal and no `--yes` | it takes a running site from under its cluster, or deletes member data |
 
@@ -9034,15 +9035,17 @@ sites a kept Caddy goes on serving, and the data `--delete-data` deletes.
 | the login's admission record is another deployment's, or the login has none | everything removed is named from the id and its token; the refusal names the user to log in as |
 | `--execute` without a terminal or `--yes` | it asks for the site's name |
 
-#### Evicting a site: `--evict`
+#### Removing a site whose host is not reached: `--host-gone`
 
-`--host-gone` is for a host that is dead. `--evict` is for one that still runs
-and that the other operators can no longer log in to: an operator stopped
-cooperating, and their host is still a data site, a Garage node, an apps site
-or the gateway. `docs/specs/2026-10-11-site-evict.md` is the approved
-specification. How to run it is under *`paisans site remove`* in
-[docs/commands.md](docs/commands.md), and the order of everything around it
-is in [docs/guides/when-an-operator-leaves.md](docs/guides/when-an-operator-leaves.md).
+`--host-gone` takes a site out without ever reaching its host. It covers two
+cases, which look the same to the cluster: a host that is dead and is never
+coming back, and one that still runs and that the other operators can no longer
+log in to, because an operator stopped cooperating and their host is still a
+data site, a Garage node, an apps site or the gateway.
+`docs/specs/2026-10-11-site-evict.md` is the approved specification. How to run
+it is under *`paisans site remove`* in [docs/commands.md](docs/commands.md),
+and the order of everything around it is in
+[docs/guides/when-an-operator-leaves.md](docs/guides/when-an-operator-leaves.md).
 
 **Being a WireGuard peer of the remaining sites is being in the cluster.**
 etcd listens on plain `http://` with no client certificates, Patroni's REST
@@ -9053,14 +9056,14 @@ address*). Each site has its own WireGuard key, each peer entry is a `/32`, and
 there is no preshared key, so removing the site's public key from every
 remaining site's mesh file and syncing it through the helper drops it: no remaining
 site accepts a handshake from that key or routes anything to its address.
-Cutting the peer is what evicts.
+Cutting the peer is what takes the site out of the cluster.
 
 **So the cut comes first, and the host is never reached.** A plain removal
-cuts the mesh last, which a dead host does not mind; a live one is still a
-peer through stage 1, its Patroni keeps writing its member key, and a
-switchover needs the leader to step down, which a host run by someone else
-does not do. `--evict` implies `--host-gone`, and orders the stages from the
-cut:
+cuts the mesh last, after the host has handed over its data. A host that still
+runs is a peer until it is cut, its Patroni keeps writing its member key, and
+a switchover needs the leader to step down, which neither a dead host nor one
+run by someone else does; a dead Garage node never acknowledges a new layout
+either. So `--host-gone` orders the stages from the cut:
 
 | Stage | What runs | Gate |
 |---|---|---|
@@ -9068,7 +9071,7 @@ cut:
 | 2. DNS | the site's address records deleted, as `site remove`'s DNS stage does, and also at names the configuration still wants (below) | listing the zones again finds nothing left to delete |
 | 3. Database | when the site leads, a wait for Patroni's own failover: the cut leader cannot renew its leader key, the key expires with Patroni's `ttl` (30 seconds by default), and a remaining member takes over; then `synchronous_mode` off when one data site remains, and the site's member key deleted from etcd, which it can no longer rewrite | a remaining site leads, and `patronictl list` no longer lists the site |
 | 4. etcd | `etcdctl member remove` from the remaining voters, and with two data sites and a witness the witness's member too, as `site remove` does | the voters are exactly the end state's and all healthy |
-| 5. Storage | the site's Garage node out of the layout, then `garage layout skip-dead-nodes` (below, *An evicted Garage node is skipped as dead*) | no layout row for the site, and every remaining node settled |
+| 5. Storage | the site's Garage node out of the layout, then `garage layout skip-dead-nodes` (below, *A cut-off Garage node is skipped as dead*) | no layout row for the site, and every remaining node settled |
 | 6. The rest of the cluster | HAProxy without its backend, each remaining replica's `patroni.env` one at a time, and the site out of every remaining gateway's deployment record, as `site remove`'s stage 2 does | HAProxy lists exactly the end state's cluster sites with the leader `UP`; each replica streams again |
 | 7. Config | the site taken out of `paisans-stack.yaml`, as `site remove`'s stage 5 | the file loads without it |
 | 8. Monitor | every monitor reseeded, as `site remove`'s stage 6 | as there |
@@ -9081,33 +9084,34 @@ resumes; a remaining site whose mesh file was written by a run that stopped
 before its interface took it is handed the file again.
 
 **Patroni's health is required of the members that stay, as in any removal,
-with two exceptions.** When the evicted site leads, its replicas' streaming
+with two exceptions.** When the cut-off site leads, its replicas' streaming
 state is its to decide: a leader in hostile hands can stop them streaming, and
-refusing on that would let it block its own eviction. Their lag is shown
+refusing on that would let it block its own removal. Their lag is shown
 instead, and is what `lose writes` weighs. And once the cut has started on any
 remaining site, a failover may be under way and the members are read as they
 move; the database stage waits for it and its gate is what has to hold, which
 is what lets a re-run complete a partial cut.
 
-**The DNS stage deletes the records at names still wanted, too.** A removed
-host is gone, but an evicted one may be hostile, and every visitor a record
-sends it is one whose session cookie it can read. So rule 5 of *The site's DNS
-records go with it* is lifted: a record at a name the configuration without the
-site still wants is deleted as long as the other rules hold, which tie it to
-the evicted host alone. That name answers nothing until the `apply` that
-brings up the replacement creates its record at the new address.
+**The DNS stage deletes the records at names still wanted, too.** A host that
+is not reached may be in hostile hands, and every visitor a record sends it is
+one whose session cookie it can read; a dead one answers nothing at those names
+either way. So rule 5 of *The site's DNS records go with it* is lifted: a
+record at a name the configuration without the site still wants is deleted as
+long as the other rules hold, which tie it to the cut-off host alone. That name
+answers nothing until the `apply` that brings up the replacement creates its
+record at the new address.
 
 **Refused before anything changes**, besides `site remove`'s own refusals:
 
 | Refused | Because |
 |---|---|
-| the remaining healthy etcd voters are not a majority of the voters etcd has now | `member remove` needs a quorum of the current voters, the evicted one counted; recovery is restoring etcd from a remaining member, outside the toolkit |
+| the remaining healthy etcd voters are not a majority of the voters etcd has now | `member remove` needs a quorum of the current voters, the cut-off one counted; recovery is restoring etcd from a remaining member, outside the toolkit |
 | two or more remaining sites with no dial endpoint, and the site the only remaining one with an endpoint | they peer only with a dialled site and relay everything else through it, so cutting it cuts them; give one an endpoint first |
 | the only data site | nothing remains to fail over to; recovery is a restore from backup |
-| a gateway whose DNS token, read from the secrets file, does not work against the provider | the evicted host holds the token it was rendered, so it is revoked at the provider and a new one set with `secrets set` first; a token that fails is most often the revoked one, still in the file, and the DNS stage could not delete the records with it |
+| a gateway whose DNS token, read from the secrets file, does not work against the provider | the cut-off host holds the token it was rendered, on its disk if it is dead, so it is revoked at the provider and a new one set with `secrets set` first; a token that fails is most often the revoked one, still in the file, and the DNS stage could not delete the records with it |
 | a site declared for the first time whose host does not answer over ssh | whether it is new is read from its host's admission record |
-| `--execute` without a terminal or `--yes` | an eviction is not undone by running it again |
-| `--force`, `--ssh`, `--id` or `--delete-data` | each names a host to change, and an eviction reaches none |
+| `--execute` without a terminal or `--yes` | cutting a site off is not undone by running it again |
+| `--force`, `--ssh`, `--id` or `--delete-data` | each names a host to change, and `--host-gone` reaches none |
 
 **What it asks at the terminal.** `--execute` asks for each word in turn, and
 `--yes` types each:
@@ -9123,7 +9127,7 @@ brings up the replacement creates its record at the new address.
 * the site's name, always.
 * `lose writes`, when the site leads and no remaining member is a streaming
   `Sync Standby`. The plan names the most current replica and its lag in
-  received WAL, since a failover promotes it and any commit the evicted leader
+  received WAL, since a failover promotes it and any commit the cut-off leader
   acknowledged after its last received WAL is lost. Replication is
   asynchronous unless `cluster.synchronous` is set, so this is the usual case
   for a leader. With a streaming `Sync Standby` nothing is asked: it takes over
@@ -9134,29 +9138,29 @@ brings up the replacement creates its record at the new address.
 Patroni is read again immediately before the cut, after the answers: which
 site leads, and who would take over from it, decide whether `lose writes` is
 asked and what it agrees to, and either can change while the questions wait
-at a terminal. When the evicted site has taken or lost the leader, or the
+at a terminal. When the cut-off site has taken or lost the leader, or the
 Sync Standby or the replica a failover would promote is another, the run stops
 before anything changes and says to run it again, which reads it afresh.
 
-**A replacement is a new site, declared in the same edit, and the eviction
-comes first.** The site's name keys its WireGuard key and heartbeat token in
+**A replacement is a new site, declared in the same edit, and the old site is
+cut off first.** The site's name keys its WireGuard key and heartbeat token in
 the secrets, its etcd and Patroni member names, its Garage zone, its DNS
 records and every host's records of it, so a new name keeps the old host and
 the new one apart in all of them and in every log. One edit of
-`paisans-stack.yaml` declares the new site with the roles it takes over and pins to
-it any app pinned to the evicted one; then `site remove <old> --evict
+`paisans-stack.yaml` declares the new site with the roles it takes over and
+pins to it any app pinned to the old one; then `site remove <old> --host-gone
 --execute`, then `paisans apply`, which prepares the new host, applies it and
-creates its records. Evicting first means nothing waits on a site that will not
-answer, and the old host is out of the mesh before the new one joins. Founder
-decision.
+creates its records. Cutting the old site off first means nothing waits on a
+site that will not answer, and the old host is out of the mesh before the new
+one joins. Founder decision.
 
 * A site the configuration declares whose host holds no claim of this
-  deployment is the replacement. The eviction neither reaches it, nor claims
+  deployment is the replacement. The removal neither reaches it, nor claims
   it, nor gates on it. A missing claim alone is not enough: a claim can be
   lost, and an `ssh` section can reach the wrong host, and a site that ran
   taken for new would be left out of the cut while its peers still talk to it.
   So when a remaining site lists its key as a WireGuard peer, or a gateway's
-  deployment record lists it, the eviction refuses, naming the site and what
+  deployment record lists it, the removal refuses, naming the site and what
   says it ran. `mesh rekey` decides which sites are not brought up yet the
   same way.
 * Its secrets are generated first when the secrets file does not hold them,
@@ -9169,20 +9173,21 @@ decision.
   a peer's endpoint name does not resolve; the `apply` that brings it up adds
   it as a peer on every site.
 * The only gateway or the only apps site is not refused when the
-  configuration declares its replacement. Between the eviction and that
+  configuration declares its replacement. Between the cut and that
   `apply` the community's names answer nothing, and the report says so. The
   only data site and the etcd majority are refused: a replacement there is a
   restore, outside the toolkit.
 
-**What the host still holds** is in the closing report: everything it was
-rendered, valid until rotated. Its own WireGuard key no longer works anywhere.
-The DNS token goes first, since it can point the community's names anywhere.
-The rest is `secrets rotate --all` once the mesh is rekeyed, which takes what
-works from the internet first (the OIDC client secrets, signing keys and the
-apps' S3 keys), then the Postgres, Garage and heartbeat secrets, which only
-the mesh reaches once it is closed (*`secrets rotate` replaces a secret where
-it is checked and where it is used*). A copy of the database and of the
-objects cannot be taken back.
+**What the host still holds** is in the closing report, by name, with the `site
+evict` line its owner removes all of it with if the host ever runs again:
+everything it was rendered, valid until rotated. Its own WireGuard key no
+longer works anywhere. The DNS token goes first, since it can point the
+community's names anywhere. The rest is `secrets rotate --all` once the mesh is
+rekeyed, which takes what works from the internet first (the OIDC client
+secrets, signing keys and the apps' S3 keys), then the Postgres, Garage and
+heartbeat secrets, which only the mesh reaches once it is closed (*`secrets
+rotate` replaces a secret where it is checked and where it is used*). A copy of
+the database and of the objects cannot be taken back.
 
 **An operator who could decrypt the secrets file holds every site's secrets,**
 including every other site's WireGuard private key, and WireGuard accepts a
@@ -9227,26 +9232,27 @@ next key in the secrets file and names the `mesh rekey` that finishes it: an
 tunnels, and a refusal costs nothing but the rekey's resume.
 
 **A relay's swap pauses Patroni.** A site with no dial endpoint routes
-everything it has no peer for through the first site that has one (*`site
-add`: a second data site, and the one hard problem*), so two undialled sites
-reach each other only through that relay. Swapping the relay's key cuts them
-apart for the moment it takes, and the relay itself with them. `validate`
-keeps two voters dialled, but etcd can still be left without a leader while
-it re-forms when several voters have no endpoint, and a Patroni leader that
-cannot renew its key then demotes itself and another member can be promoted,
-for a partition that heals in seconds. So around a relay's swap the cluster is put in
+everything it has no peer for through the first site that has one (*`site add`:
+a second data site, and the one hard problem*), so two undialled sites reach
+each other only through that relay. Swapping the relay's key cuts them apart
+for the moment it takes, and the relay itself with them. `validate` keeps two
+voters dialled, but etcd can still be left without a leader while it re-forms
+when several voters have no endpoint, and a Patroni leader that cannot renew
+its key then demotes itself and another member can be promoted, for a partition
+that heals in seconds. So around a relay's swap the cluster is put in
 maintenance mode with `patronictl pause --wait`, which returns once every
 member has seen it (Patroni v4.1.0, `patroni/ctl.py`); paused, Patroni keeps
 the roles it has and still reports them. The pause is read back from
 `patronictl show-config`, since patronictl reports a failed request without
 failing. etcd re-forms on its own once the tunnels are back, and the health
-gate waits for it, bounded; only then does `patronictl resume --wait` run.
-A run that stops in between leaves Patroni paused, on purpose, since resuming
-it before etcd has its voters back is the failover the pause exists to
-prevent, and the run that resumes the swap resumes Patroni after it. The plan
-says which sites relay through the site and that the cluster pauses for its
-swap. A deployment of one dialled VM and homes with no endpoint can therefore
-rekey every site, its relay included, which the eviction's runbook depends on.
+gate waits for it, bounded; only then does `patronictl resume --wait` run. A
+run that stops in between leaves Patroni paused, on purpose, since resuming it
+before etcd has its voters back is the failover the pause exists to prevent,
+and the run that resumes the swap resumes Patroni after it. The plan says which
+sites relay through the site and that the cluster pauses for its swap. A
+deployment of one dialled VM and homes with no endpoint can therefore rekey
+every site, its relay included, which the runbook for an operator who leaves
+depends on.
 
 **Refused before anything changes:** an unhealthy etcd or Patroni, since every
 site's swap takes its tunnels down for a moment; a Patroni paused by anything

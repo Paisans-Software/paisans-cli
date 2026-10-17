@@ -18,27 +18,27 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
-// evictWorld is the world with a zone the gateway's DNS token can see, the
-// site to evict marked as cut off when its peers drop it.
-func evictWorld(t *testing.T, site string, edits ...func(string) string) (*world, *dnstest.Provider) {
+// cutoffWorld is the world with a zone the gateway's DNS token can see, the
+// site to cut off marked as cut off when its peers drop it.
+func cutoffWorld(t *testing.T, site string, edits ...func(string) string) (*world, *dnstest.Provider) {
 	t.Helper()
 	w := newWorld(t, append([]func(string) string{func(text string) string {
 		return strings.Replace(text, "  provider: desec", "  provider: cloudflare", 1)
 	}}, edits...)...)
 	t.Cleanup(siteremove.SetFast())
 	t.Cleanup(siteremove.SetInspect(w.inspect))
-	w.evicted = site
+	w.cutoff = site
 	zone := dnstest.New()
 	zone.Zones["example.org"] = "zone-1"
 	return w, zone
 }
 
-func evictOptions(zone *dnstest.Provider) siteremove.Options {
+func cutoffOptions(zone *dnstest.Provider) siteremove.Options {
 	return siteremove.Options{HostGone: true, DNSProvider: zone.For("cloudflare")}
 }
 
 // leadersAway moves what pins home-a and leads Garage's list elsewhere, so
-// home-a, the leader, can be evicted.
+// home-a, the leader, can be cut off.
 func leadersAway(text string) string {
 	text = strings.ReplaceAll(text, "placement: { pinned: home-a }", "placement: { pinned: home-c }")
 	return strings.Replace(text, "    sites: [home-a, home-b, home-c]\n", "    sites: [home-c, home-b, home-a]\n", 1)
@@ -128,11 +128,11 @@ func execute(t *testing.T, p *siteremove.Plan) {
 	}
 }
 
-// An eviction cuts first, then waits for the cluster to let go, and never
-// reaches the evicted host.
-func TestAnEvictionCutsFirstAndNeverReachesTheHost(t *testing.T) {
-	w, zone := evictWorld(t, "home-b")
-	p := w.mustBuild("home-b", evictOptions(zone))
+// A removal with --host-gone cuts first, then waits for the cluster to let go,
+// and never reaches the cut-off site's host.
+func TestACutoffCutsFirstAndNeverReachesTheHost(t *testing.T) {
+	w, zone := cutoffWorld(t, "home-b")
+	p := w.mustBuild("home-b", cutoffOptions(zone))
 	var names []string
 	for _, st := range p.Stages {
 		names = append(names, st.Name)
@@ -171,7 +171,7 @@ func TestAnEvictionCutsFirstAndNeverReachesTheHost(t *testing.T) {
 		}
 	}
 	if n := w.hosts["home-b"].calls(); n != 0 {
-		t.Errorf("the evicted host was reached %d times", n)
+		t.Errorf("the cut-off site's host was reached %d times", n)
 	}
 	if w.member("home-b") != nil {
 		t.Error("home-b is still a Patroni member")
@@ -217,11 +217,11 @@ func TestAnEvictionCutsFirstAndNeverReachesTheHost(t *testing.T) {
 	}
 }
 
-// When the evicted site leads, a streaming Sync Standby takes over by itself
+// When the cut-off site leads, a streaming Sync Standby takes over by itself
 // once the leader is cut off, and nothing is asked.
-func TestAnEvictedLeaderFailsOverToTheSyncStandby(t *testing.T) {
-	w, zone := evictWorld(t, "home-a", leadersAway)
-	p := w.mustBuild("home-a", evictOptions(zone))
+func TestACutOffLeaderFailsOverToTheSyncStandby(t *testing.T) {
+	w, zone := cutoffWorld(t, "home-a", leadersAway)
+	p := w.mustBuild("home-a", cutoffOptions(zone))
 	if p.LoseWrites() != nil {
 		t.Fatalf("a Sync Standby streams, and the plan asks to lose writes: %+v", p.LoseWrites())
 	}
@@ -233,14 +233,14 @@ func TestAnEvictedLeaderFailsOverToTheSyncStandby(t *testing.T) {
 		t.Errorf("the leader is %s", w.leader())
 	}
 	if n := w.hosts["home-a"].calls(); n != 0 {
-		t.Errorf("the evicted host was reached %d times", n)
+		t.Errorf("the cut-off site's host was reached %d times", n)
 	}
 }
 
 // Without a streaming Sync Standby the most current replica is promoted, and
 // the plan says how far behind it is so the operator can type lose writes.
-func TestAnEvictedLeaderWithoutASyncStandbyNamesTheLag(t *testing.T) {
-	w, zone := evictWorld(t, "home-a", leadersAway, func(text string) string {
+func TestACutOffLeaderWithoutASyncStandbyNamesTheLag(t *testing.T) {
+	w, zone := cutoffWorld(t, "home-a", leadersAway, func(text string) string {
 		return strings.Replace(text, "  synchronous: true", "  synchronous: false", 1)
 	})
 	w.syncMode = false
@@ -251,7 +251,7 @@ func TestAnEvictedLeaderWithoutASyncStandbyNamesTheLag(t *testing.T) {
 	}
 	w.member("home-b")["Receive Lag"] = 4.0
 	w.member("home-c")["Receive Lag"] = 1.5
-	p := w.mustBuild("home-a", evictOptions(zone))
+	p := w.mustBuild("home-a", cutoffOptions(zone))
 	lag := p.LoseWrites()
 	if lag == nil || lag.Replica != "home-c" || !lag.Known || lag.MB != 1.5 {
 		t.Fatalf("lose writes = %+v", lag)
@@ -265,14 +265,14 @@ func TestAnEvictedLeaderWithoutASyncStandbyNamesTheLag(t *testing.T) {
 	}
 }
 
-// A replica of 1 holds each object once, so skipping the evicted node loses
+// A replica of 1 holds each object once, so skipping the cut-off node loses
 // what only it held: the plan says so and passes --allow-missing-data.
-func TestAnEvictedGarageNodeAtReplicationOneLosesObjects(t *testing.T) {
+func TestACutOffGarageNodeAtReplicationOneLosesObjects(t *testing.T) {
 	one := func(text string) string {
 		return strings.Replace(text, "    sites: [home-a, home-b, home-c]\n    replication: 2", "    sites: [home-a, home-b, home-c]\n    replication: 1", 1)
 	}
-	w, zone := evictWorld(t, "home-b", one)
-	p := w.mustBuild("home-b", evictOptions(zone))
+	w, zone := cutoffWorld(t, "home-b", one)
+	p := w.mustBuild("home-b", cutoffOptions(zone))
 	if !p.LoseObjects() {
 		t.Fatal("replication 1 loses objects, and the plan does not say so")
 	}
@@ -285,17 +285,17 @@ func TestAnEvictedGarageNodeAtReplicationOneLosesObjects(t *testing.T) {
 	}
 }
 
-// The replacement is declared in the same edit: the eviction leaves its host
+// The replacement is declared in the same edit: the removal leaves its host
 // alone, its peer out of the cut, and the gateway's records pointing at the
-// evicted host go even at names the replacement will answer.
-func TestAnEvictedGatewayWithItsReplacementDeclared(t *testing.T) {
-	w, zone := evictWorld(t, "vm", replacement)
+// cut-off site's host go even at names the replacement will answer.
+func TestACutOffGatewayWithItsReplacementDeclared(t *testing.T) {
+	w, zone := cutoffWorld(t, "vm", replacement)
 	w.joining("home-d")
 	zone.InZone["zone-1"] = []dns.Record{
 		{ID: "rec-talk", Type: "A", Name: "talk.example.org", Content: "203.0.113.10", Comment: comment},
 		{ID: "rec-hand", Type: "A", Name: "hand.example.org", Content: "203.0.113.10"},
 	}
-	p := w.mustBuild("vm", evictOptions(zone))
+	p := w.mustBuild("vm", cutoffOptions(zone))
 	if got := strings.Join(p.Joining(), ","); got != "home-d" {
 		t.Fatalf("joining: %s", got)
 	}
@@ -321,17 +321,17 @@ func TestAnEvictedGatewayWithItsReplacementDeclared(t *testing.T) {
 		t.Errorf("no apply, or no dark names, in the report:\n%s", report)
 	}
 	if n := w.hosts["vm"].calls(); n != 0 {
-		t.Errorf("the evicted host was reached %d times", n)
+		t.Errorf("the cut-off site's host was reached %d times", n)
 	}
 }
 
-// A gateway's eviction refuses before anything changes while the token in
+// Cutting off a gateway refuses before anything changes while the token in
 // the secrets file does not work: the revoked one is still there.
-func TestAnEvictedGatewayNeedsAWorkingToken(t *testing.T) {
-	w, _ := evictWorld(t, "vm", replacement)
+func TestACutOffGatewayNeedsAWorkingToken(t *testing.T) {
+	w, _ := cutoffWorld(t, "vm", replacement)
 	w.joining("home-d")
 	revoked := dnstest.New()
-	_, err := w.build("vm", evictOptions(revoked))
+	_, err := w.build("vm", cutoffOptions(revoked))
 	if err == nil || !strings.Contains(err.Error(), "does not work against cloudflare") || !strings.Contains(err.Error(), "secrets set external.acme_dns_token") {
 		t.Fatalf("err = %v", err)
 	}
@@ -345,38 +345,38 @@ func TestAnEvictedGatewayNeedsAWorkingToken(t *testing.T) {
 }
 
 // Refusals that need live state, each before anything changes.
-func TestAnEvictionRefuses(t *testing.T) {
+func TestACutoffRefuses(t *testing.T) {
 	t.Run("quorum", func(t *testing.T) {
-		w, zone := evictWorld(t, "home-b")
+		w, zone := cutoffWorld(t, "home-b")
 		w.etcdDown["home-a"], w.etcdDown["home-c"] = true, true
-		_, err := w.build("home-b", evictOptions(zone))
+		_, err := w.build("home-b", cutoffOptions(zone))
 		if err == nil || !strings.Contains(err.Error(), "not a majority of the voters etcd has now") {
 			t.Errorf("err = %v", err)
 		}
 	})
 	t.Run("a joining host that does not answer", func(t *testing.T) {
-		w, zone := evictWorld(t, "vm", replacement)
+		w, zone := cutoffWorld(t, "vm", replacement)
 		w.joining("home-d")
 		w.unreachable["home-d"] = true
-		_, err := w.build("vm", evictOptions(zone))
+		_, err := w.build("vm", cutoffOptions(zone))
 		if err == nil || !strings.Contains(err.Error(), "home-d does not answer over ssh") {
 			t.Errorf("err = %v", err)
 		}
 	})
 	t.Run("the only gateway with no replacement", func(t *testing.T) {
-		w, zone := evictWorld(t, "vm", func(text string) string {
+		w, zone := cutoffWorld(t, "vm", func(text string) string {
 			return strings.ReplaceAll(text, "placement: { pinned: vm }", "placement: { pinned: home-c }")
 		})
-		_, err := w.build("vm", evictOptions(zone))
+		_, err := w.build("vm", cutoffOptions(zone))
 		if err == nil || !strings.Contains(err.Error(), "Declare its replacement") {
 			t.Errorf("err = %v", err)
 		}
 	})
 }
 
-// Two remaining sites with no endpoint peer only through the evicted site,
+// Two remaining sites with no endpoint peer only through the cut-off site,
 // their one relay: cutting it cuts them.
-func TestAnEvictionRefusesToCutTheOnlyRelay(t *testing.T) {
+func TestACutoffRefusesToCutTheOnlyRelay(t *testing.T) {
 	text := `version: 1
 id: f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01
 community: { name: Relay, domain: example.org }
@@ -422,7 +422,7 @@ sites:
 
 // A run stopped at any stage resumes there: the next Build plans nothing for
 // what is done, and the run completes.
-func TestAnEvictionResumesFromEachStage(t *testing.T) {
+func TestACutoffResumesFromEachStage(t *testing.T) {
 	for _, tc := range []struct {
 		fail string
 		// stage is where the run stops; done are steps a resumed plan must
@@ -452,27 +452,27 @@ func TestAnEvictionResumesFromEachStage(t *testing.T) {
 		}{{5, "home-a", "skip", "skip-dead-nodes"}}},
 	} {
 		t.Run(tc.fail, func(t *testing.T) {
-			w, zone := evictWorld(t, "home-b")
+			w, zone := cutoffWorld(t, "home-b")
 			w.failOnce = tc.fail
-			err := siteremove.Execute(w.mustBuild("home-b", evictOptions(zone)))
-			if err == nil || !strings.Contains(err.Error(), "stopped at stage") || !strings.Contains(err.Error(), "--evict again") {
+			err := siteremove.Execute(w.mustBuild("home-b", cutoffOptions(zone)))
+			if err == nil || !strings.Contains(err.Error(), "stopped at stage") || !strings.Contains(err.Error(), "--host-gone again") {
 				t.Fatalf("err = %v", err)
 			}
-			again := w.mustBuild("home-b", evictOptions(zone))
+			again := w.mustBuild("home-b", cutoffOptions(zone))
 			for _, d := range tc.done {
 				if hasStep(again, d.stage, d.site, d.verb, d.text) {
 					t.Errorf("the resumed plan does %s %s %q again:\n%s", d.verb, d.site, d.text, printed(again))
 				}
 			}
 			if !again.Pending() {
-				t.Error("a stopped eviction has nothing left to do")
+				t.Error("a stopped cutoff has nothing left to do")
 			}
 			execute(t, again)
 			if w.member("home-b") != nil || len(w.layout) != 2 {
-				t.Error("the resumed eviction did not finish")
+				t.Error("the resumed cutoff did not finish")
 			}
 			if n := w.hosts["home-b"].calls(); n != 0 {
-				t.Errorf("the evicted host was reached %d times", n)
+				t.Errorf("the cut-off site's host was reached %d times", n)
 			}
 		})
 	}
@@ -480,10 +480,10 @@ func TestAnEvictionResumesFromEachStage(t *testing.T) {
 
 // sudo refusing the helper while the cut's gate reads handshakes is the
 // host's owner's problem, said as such.
-func TestAnEvictionSaysWhenSudoRefusesTheHelper(t *testing.T) {
-	w, zone := evictWorld(t, "home-b")
+func TestACutoffSaysWhenSudoRefusesTheHelper(t *testing.T) {
+	w, zone := cutoffWorld(t, "home-b")
 	w.failOnce, w.failOut = "show latest-handshakes", "sudo: a password is required\n"
-	err := siteremove.Execute(w.mustBuild("home-b", evictOptions(zone)))
+	err := siteremove.Execute(w.mustBuild("home-b", cutoffOptions(zone)))
 	if !errors.Is(err, apply.ErrHelperRefused) || !strings.Contains(err.Error(), "could not be run on home-a") || !strings.Contains(err.Error(), "site admit") {
 		t.Fatalf("want the helper's sudo refusal as the owner's problem, got %v", err)
 	}
@@ -492,9 +492,9 @@ func TestAnEvictionSaysWhenSudoRefusesTheHelper(t *testing.T) {
 // A site whose mesh file was written by a run that stopped before its
 // interface took it is handed the file again, and nothing else is.
 func TestAPartialCutCompletesOnTheSiteThatMissedIt(t *testing.T) {
-	w, zone := evictWorld(t, "home-b")
+	w, zone := cutoffWorld(t, "home-b")
 	w.failOnce = "' sync"
-	err := siteremove.Execute(w.mustBuild("home-b", evictOptions(zone)))
+	err := siteremove.Execute(w.mustBuild("home-b", cutoffOptions(zone)))
 	if err == nil || !strings.Contains(err.Error(), "did not take on every remaining site") {
 		t.Fatalf("err = %v", err)
 	}
@@ -508,7 +508,7 @@ func TestAPartialCutCompletesOnTheSiteThatMissedIt(t *testing.T) {
 	if len(missed) != 1 {
 		t.Fatalf("want one site to have missed the cut, got %v", missed)
 	}
-	again := w.mustBuild("home-b", evictOptions(zone))
+	again := w.mustBuild("home-b", cutoffOptions(zone))
 	var cut []string
 	for _, s := range steps(again, 1) {
 		if s.Verb == "mesh" || s.Verb == "update" {
@@ -524,7 +524,7 @@ func TestAPartialCutCompletesOnTheSiteThatMissedIt(t *testing.T) {
 // already on its next key, keeps that key through the cut: the cut renders
 // it with the key its host runs, not the one the secrets call current.
 func TestTheCutKeepsAPeerMidRekeyOnItsNewKey(t *testing.T) {
-	w, zone := evictWorld(t, "home-b")
+	w, zone := cutoffWorld(t, "home-b")
 	// Every host was rendered with home-c's key as it is now; the secrets
 	// say that key is the next one, as a rekey stopped after its swap
 	// leaves them.
@@ -536,7 +536,7 @@ func TestTheCutKeepsAPeerMidRekeyOnItsNewKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := w.mustBuild("home-b", evictOptions(zone))
+	p := w.mustBuild("home-b", cutoffOptions(zone))
 	execute(t, p)
 	for _, name := range []string{"home-a", "vm", "watch"} {
 		if !strings.Contains(w.hosts[name].runningWG(), nextPublic) {
@@ -548,11 +548,11 @@ func TestTheCutKeepsAPeerMidRekeyOnItsNewKey(t *testing.T) {
 	}
 }
 
-// A site evicted part way through its own rekey may be listed by its next
+// A site cut off part way through its own rekey may be listed by its next
 // key: a cut that stopped part way is completed on the site that missed it,
 // and the gate looks for either key.
 func TestAPartialCutOfASiteMidRekeyCompletes(t *testing.T) {
-	w, zone := evictWorld(t, "home-b")
+	w, zone := cutoffWorld(t, "home-b")
 	b := w.secrets.Sites["home-b"]
 	running := b.WireGuardPrivateKey
 	b.WireGuardPrivateKey, b.WireGuardNextPrivateKey = "SUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUk=", running
@@ -562,10 +562,10 @@ func TestAPartialCutOfASiteMidRekeyCompletes(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.failOnce = "' sync"
-	if err := siteremove.Execute(w.mustBuild("home-b", evictOptions(zone))); err == nil {
+	if err := siteremove.Execute(w.mustBuild("home-b", cutoffOptions(zone))); err == nil {
 		t.Fatal("the cut that missed a site passed")
 	}
-	execute(t, w.mustBuild("home-b", evictOptions(zone)))
+	execute(t, w.mustBuild("home-b", cutoffOptions(zone)))
 	for name, h := range w.hosts {
 		if name != "home-b" && strings.Contains(h.runningWG(), key) {
 			t.Errorf("%s still runs home-b as a peer", name)
@@ -576,7 +576,7 @@ func TestAPartialCutOfASiteMidRekeyCompletes(t *testing.T) {
 // hostileLeader is home-a leading with its replicas stopped from streaming,
 // as a leader in hostile hands can make them.
 func hostileLeader(t *testing.T) (*world, *dnstest.Provider) {
-	w, zone := evictWorld(t, "home-a", leadersAway)
+	w, zone := cutoffWorld(t, "home-a", leadersAway)
 	for _, name := range []string{"home-b", "home-c"} {
 		w.member(name)["Role"], w.member(name)["State"] = "Replica", "running"
 	}
@@ -584,10 +584,10 @@ func hostileLeader(t *testing.T) (*world, *dnstest.Provider) {
 }
 
 // A leader that stops its replicas streaming does not block its own
-// eviction: the plan asks to lose writes instead, and goes on.
-func TestAHostileLeaderCannotBlockItsEviction(t *testing.T) {
+// cutoff: the plan asks to lose writes instead, and goes on.
+func TestAHostileLeaderCannotBlockItsCutoff(t *testing.T) {
 	w, zone := hostileLeader(t)
-	p, err := w.build("home-a", evictOptions(zone))
+	p, err := w.build("home-a", cutoffOptions(zone))
 	if err != nil {
 		t.Fatalf("refused: %v", err)
 	}
@@ -601,30 +601,30 @@ func TestAHostileLeaderCannotBlockItsEviction(t *testing.T) {
 }
 
 // A cut that stopped part way, the replicas not streaming, resumes: both
-// while the evicted site still leads, and once another has taken over and
+// while the cut-off site still leads, and once another has taken over and
 // the replicas have not caught up with it yet.
 func TestAPartialCutResumesWithReplicasNotStreaming(t *testing.T) {
-	t.Run("the evicted site leads", func(t *testing.T) {
+	t.Run("the cut-off site leads", func(t *testing.T) {
 		w, zone := hostileLeader(t)
 		w.failOnce = "' sync"
-		if err := siteremove.Execute(w.mustBuild("home-a", evictOptions(zone))); err == nil {
+		if err := siteremove.Execute(w.mustBuild("home-a", cutoffOptions(zone))); err == nil {
 			t.Fatal("the partial cut passed")
 		}
-		execute(t, w.mustBuild("home-a", evictOptions(zone)))
+		execute(t, w.mustBuild("home-a", cutoffOptions(zone)))
 		if w.member("home-a") != nil {
 			t.Error("home-a is still a member")
 		}
 	})
 	t.Run("another site leads", func(t *testing.T) {
-		w, zone := evictWorld(t, "home-a", leadersAway)
+		w, zone := cutoffWorld(t, "home-a", leadersAway)
 		w.failOnce = "' sync"
-		if err := siteremove.Execute(w.mustBuild("home-a", evictOptions(zone))); err == nil {
+		if err := siteremove.Execute(w.mustBuild("home-a", cutoffOptions(zone))); err == nil {
 			t.Fatal("the partial cut passed")
 		}
 		w.member("home-a")["Role"], w.member("home-a")["State"] = "Replica", "stopped"
 		w.member("home-b")["Role"], w.member("home-b")["State"] = "Leader", "running"
 		w.member("home-c")["Role"], w.member("home-c")["State"] = "Replica", "running"
-		p, err := w.build("home-a", evictOptions(zone))
+		p, err := w.build("home-a", cutoffOptions(zone))
 		if err != nil {
 			t.Fatalf("a partial cut does not resume: %v", err)
 		}
@@ -633,12 +633,12 @@ func TestAPartialCutResumesWithReplicasNotStreaming(t *testing.T) {
 	})
 }
 
-// When the evicted site does not lead, the members that stay must still be
+// When the cut-off site does not lead, the members that stay must still be
 // healthy before anything changes.
-func TestAnEvictedReplicaNeedsTheRestStreaming(t *testing.T) {
-	w, zone := evictWorld(t, "home-c")
+func TestACutOffReplicaNeedsTheRestStreaming(t *testing.T) {
+	w, zone := cutoffWorld(t, "home-c")
 	w.member("home-b")["State"] = "running"
-	if _, err := w.build("home-c", evictOptions(zone)); err == nil || !strings.Contains(err.Error(), "home-b is running, not streaming") {
+	if _, err := w.build("home-c", cutoffOptions(zone)); err == nil || !strings.Contains(err.Error(), "home-b is running, not streaming") {
 		t.Errorf("err = %v", err)
 	}
 }
@@ -647,7 +647,7 @@ func TestAnEvictedReplicaNeedsTheRestStreaming(t *testing.T) {
 // would take over from it, decide what the operator agreed to, and either
 // having changed since the plan was read stops the run before anything
 // changes.
-func TestAnEvictionRereadsTheLeaderBeforeTheCut(t *testing.T) {
+func TestACutoffRereadsTheLeaderBeforeTheCut(t *testing.T) {
 	noSync := func(w *world) {
 		w.syncMode = false
 		for _, m := range w.members {
@@ -669,11 +669,11 @@ func TestAnEvictionRereadsTheLeaderBeforeTheCut(t *testing.T) {
 		after  func(*world)
 		want   string
 	}{
-		{"the evicted site took the leader", "home-b", nil, nil, func(w *world) {
+		{"the cut-off site took the leader", "home-b", nil, nil, func(w *world) {
 			w.member("home-a")["Role"], w.member("home-a")["State"] = "Replica", "streaming"
 			w.member("home-b")["Role"], w.member("home-b")["State"] = "Leader", "running"
 		}, "home-b took the Patroni leader"},
-		{"the evicted site lost the leader", "home-a", []func(string) string{leadersAway}, nil, func(w *world) {
+		{"the cut-off site lost the leader", "home-a", []func(string) string{leadersAway}, nil, func(w *world) {
 			w.member("home-a")["Role"], w.member("home-a")["State"] = "Replica", "streaming"
 			w.member("home-b")["Role"], w.member("home-b")["State"] = "Leader", "running"
 		}, "home-a no longer holds the Patroni leader"},
@@ -685,11 +685,11 @@ func TestAnEvictionRereadsTheLeaderBeforeTheCut(t *testing.T) {
 		}, "Sync Standby that would take over changed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			w, zone := evictWorld(t, tc.site, tc.edits...)
+			w, zone := cutoffWorld(t, tc.site, tc.edits...)
 			if tc.before != nil {
 				tc.before(w)
 			}
-			p := w.mustBuild(tc.site, evictOptions(zone))
+			p := w.mustBuild(tc.site, cutoffOptions(zone))
 			tc.after(w)
 			err := siteremove.Execute(p)
 			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "Nothing was changed") {
@@ -710,29 +710,29 @@ func TestAnEvictionRereadsTheLeaderBeforeTheCut(t *testing.T) {
 // says it ran in this deployment: a remaining site listing its key, or a
 // gateway's deployment record listing it. Taken for new, it would be left out
 // of the cut while its peers still talk to it.
-func TestAnEvictionRefusesASiteThatOnlyLostItsClaim(t *testing.T) {
+func TestACutoffRefusesASiteThatOnlyLostItsClaim(t *testing.T) {
 	t.Run("a peer lists its key", func(t *testing.T) {
-		w, zone := evictWorld(t, "home-b")
+		w, zone := cutoffWorld(t, "home-b")
 		path, _ := admitted(t, w.cfg, "home-c")
 		delete(w.hosts["home-c"].files, path)
-		_, err := w.build("home-b", evictOptions(zone))
+		_, err := w.build("home-b", cutoffOptions(zone))
 		if err == nil || !strings.Contains(err.Error(), "home-c's host has not admitted this deployment") || !strings.Contains(err.Error(), "home-a lists its WireGuard key as a peer") {
 			t.Fatalf("err = %v", err)
 		}
 	})
 	t.Run("the gateway's record lists it", func(t *testing.T) {
-		w, zone := evictWorld(t, "home-b", replacement)
+		w, zone := cutoffWorld(t, "home-b", replacement)
 		w.joining("home-d")
 		w.hosts["vm"].files[deployrecord.Path(dep)] = deployrecord.Encode(deployrecord.Record{Sites: []string{"home-a", "home-b", "home-c", "home-d", "vm", "watch"}})
-		_, err := w.build("home-b", evictOptions(zone))
+		_, err := w.build("home-b", cutoffOptions(zone))
 		if err == nil || !strings.Contains(err.Error(), "home-d's host has not admitted this deployment") || !strings.Contains(err.Error(), "deployment record on the gateway lists it") {
 			t.Fatalf("err = %v", err)
 		}
 	})
 	t.Run("nothing does", func(t *testing.T) {
-		w, zone := evictWorld(t, "home-b", replacement)
+		w, zone := cutoffWorld(t, "home-b", replacement)
 		w.joining("home-d")
-		p, err := w.build("home-b", evictOptions(zone))
+		p, err := w.build("home-b", cutoffOptions(zone))
 		if err != nil {
 			t.Fatal(err)
 		}
