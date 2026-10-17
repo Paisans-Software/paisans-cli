@@ -7,6 +7,7 @@ import (
 	"io"
 	iofs "io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -56,6 +57,9 @@ func runCreate(args []string, stdin io.Reader, stdout io.Writer) error {
 	p := create.NewPrompter(stdin, stdout)
 	w := create.NewWizard(p)
 	w.DefaultUser = deployment.Deployment{ID: id}.Prefix()
+	if home, err := os.UserHomeDir(); err == nil {
+		w.LocalKeys = create.FindLocalKeys(os.DirFS(filepath.Join(home, ".ssh")), "~/.ssh")
+	}
 	p.Say("paisans create writes %s for a new deployment. Enter takes the answer in brackets; nothing is written until you have read the file and said yes.", ui.ShortPath(path))
 	section := create.SectionAll
 	for {

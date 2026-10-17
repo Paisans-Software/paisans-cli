@@ -2,6 +2,7 @@ package create
 
 import (
 	"cmp"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -69,6 +70,11 @@ type Wizard struct {
 	// machine whose SSH user is left empty is reached as. create sets it
 	// from the id it made; "" names it generically.
 	DefaultUser string
+	// LocalKeys are the SSH public keys on the workstation, offered as the
+	// first operator's before any is pasted, since whoever runs create is
+	// usually the first operator named. create sets them; none asks only for
+	// pasted keys.
+	LocalKeys []LocalKey
 }
 
 // NewWizard asks its questions through p.
@@ -169,7 +175,7 @@ func (w *Wizard) operators() error {
 		if err != nil {
 			return err
 		}
-		lines, err := w.p.Lines("SSH public keys", d.Keys, keyCheck(keys))
+		lines, err := w.keys(i, d.Keys, keyCheck(keys))
 		if err != nil {
 			return err
 		}
@@ -187,6 +193,33 @@ func (w *Wizard) operators() error {
 	}
 	a.Operators = operators
 	return nil
+}
+
+// keys asks for operator i's public keys. The first operator is offered each
+// key on this machine, until keys have been given, which are kept as the
+// default instead; any other, or one who takes none, pastes them.
+func (w *Wizard) keys(i int, prev []string, check func(got []string, s string) error) ([]string, error) {
+	if i == 0 && len(prev) == 0 && len(w.LocalKeys) > 0 {
+		w.p.Say("SSH public keys found on this machine. Take the ones that are this operator's:")
+		var chosen []string
+		for _, k := range w.LocalKeys {
+			// A key the loader would refuse is not offered.
+			if check(chosen, k.Line) != nil {
+				continue
+			}
+			use, err := w.p.YesNo(fmt.Sprintf("Use %s (%s)?", k.Name, k.About), true)
+			if err != nil {
+				return nil, err
+			}
+			if use {
+				chosen = append(chosen, k.Line)
+			}
+		}
+		if len(chosen) > 0 {
+			return chosen, nil
+		}
+	}
+	return w.p.Lines("SSH public keys", prev, check)
 }
 
 func (w *Wizard) sites() error {
