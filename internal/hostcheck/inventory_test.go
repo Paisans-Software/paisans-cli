@@ -315,3 +315,12 @@ func TestTheInventoryReadsTheManifestsPendingSites(t *testing.T) {
 		t.Errorf("pending %v", inv.ManifestPending)
 	}
 }
+
+// The release of the paisans that wrote a manifest is read with it.
+func TestTheInventoryReadsTheManifestsToolkitVersion(t *testing.T) {
+	h := cleanHost()
+	h.files["/srv/paisans/f2a9/.paisans-manifest.json"] = `{"version":1,"files":[],"toolkit_version":"0.3.0"}`
+	if inv := inspect(t, h); inv.ManifestToolkitVersion != "0.3.0" {
+		t.Errorf("toolkit version %q", inv.ManifestToolkitVersion)
+	}
+}

@@ -215,8 +215,9 @@ func snippetBlocks(caddyfile string, names []string) (string, error) {
 
 // keptManifest is the manifest of the kept files: each that the manifest
 // proved, as it was, and the Caddyfile with the reduced file's hash. They
-// are proven this deployment's when a later run removes them.
-func (p *Plan) keptManifest(entries []render.ManifestFile, proven map[string]bool, reduced string) (string, error) {
+// are proven this deployment's when a later run removes them. release is
+// the paisans release the manifest recorded, kept as it was.
+func (p *Plan) keptManifest(entries []render.ManifestFile, proven map[string]bool, reduced, release string) (string, error) {
 	var files []render.ManifestFile
 	for _, e := range entries {
 		switch {
@@ -228,7 +229,7 @@ func (p *Plan) keptManifest(entries []render.ManifestFile, proven map[string]boo
 		}
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
-	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files}, "", "  ")
+	data, err := json.MarshalIndent(render.Manifest{Version: 1, Files: files, ToolkitVersion: release}, "", "  ")
 	if err != nil {
 		return "", err
 	}

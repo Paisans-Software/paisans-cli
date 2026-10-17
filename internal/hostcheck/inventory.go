@@ -56,6 +56,9 @@ type Inventory struct {
 	// ManifestPending is the sites that record says were pending when it
 	// was written, nil when it names none.
 	ManifestPending []string
+	// ManifestToolkitVersion is the release of the paisans that wrote that
+	// record, empty when it records none.
+	ManifestToolkitVersion string
 	// HostSites are the *.caddy files in the deployment's own render.HostSitesDir,
 	// by full path and sorted: site blocks somebody added to the gateway's
 	// Caddy, which no deployment owns.
@@ -296,6 +299,7 @@ func Inspect(t Transport, d deployment.Deployment) (*Inventory, error) {
 			inv.ManifestFiles = m.Files
 			inv.ManifestWebServer = m.WebServer
 			inv.ManifestPending = m.Pending
+			inv.ManifestToolkitVersion = m.ToolkitVersion
 			for _, f := range m.Files {
 				if f.Path == d.WireGuardConf() {
 					inv.ManifestWireGuard = true
