@@ -420,7 +420,7 @@ func confirmDigest(stdin io.Reader, stdout io.Writer, digest, given string) erro
 		return checkDigest(given, digest)
 	}
 	if !stdinIsTerminal(stdin) {
-		return fmt.Errorf("host admit: --execute with --request asks you to type the request's digest at a terminal, and stdin is not one. Run it from an interactive shell. Nothing was changed")
+		return fmt.Errorf("host admit: --execute with --request asks you to type the request's digest at a terminal, and stdin is not one. Run it from an interactive shell, or give the digest as --digest <digest>. Nothing was changed")
 	}
 	fmt.Fprintf(stdout, "\nThe request carries the keys that will log in to this machine. Type the digest the operator gave you, over a channel you trust: ")
 	// A byte at a time, so the confirmation of a new SSH login that admit

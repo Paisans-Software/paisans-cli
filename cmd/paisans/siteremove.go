@@ -501,7 +501,7 @@ func chooseHost(cfg *config.Config, site, ssh string) (config.Destination, error
 func noTerminal(why string) error {
 	return &ui.Problem{
 		Hint:    "the site's name must be typed, and stdin is not a terminal",
-		Explain: why + ", so it asks for the site's name at a terminal. Run it from an interactive shell. Nothing was changed.",
+		Explain: why + ", so it asks for the site's name at a terminal. Run it from an interactive shell, or answer it with --yes and PAISANS_ALLOW_YES=1. Nothing was changed.",
 	}
 }
 

@@ -209,3 +209,22 @@ func TestConvergeHandsOnYes(t *testing.T) {
 		t.Errorf("hand-off: %q", got)
 	}
 }
+
+// Each refusal of a confirmation for want of a terminal says --yes with
+// PAISANS_ALLOW_YES=1 answers it.
+func TestNoTerminalRefusalsNameYes(t *testing.T) {
+	withTerminal(t, false)
+	const want = "--yes and " + allowYesVariable + "=1"
+	var b bytes.Buffer
+	for name, err := range map[string]error{
+		"typed word":  confirmWord(answerer{}, noTerminalStdin(), &b, "prune", "x"),
+		"review":      approveReviews(ui.Discard, answerer{}, noTerminalStdin(), &b, pendingReview(), "x"),
+		"app name":    confirmName(answerer{}, noTerminalStdin(), &b, "talk"),
+		"eviction":    confirmEviction(answerer{}, noTerminalStdin(), &b, []question{{word: "home-b", what: "x"}}),
+		"site remove": noTerminal("x"),
+	} {
+		if err == nil || !strings.Contains(err.Error()+" "+problemText(err), want) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}

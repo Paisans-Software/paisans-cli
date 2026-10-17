@@ -226,7 +226,7 @@ func approveReviews(r ui.Reporter, a answerer, stdin io.Reader, stdout io.Writer
 	if !a.canAnswer(stdin) {
 		return &ui.Problem{
 			Hint:    "what " + config.FileName + " grants changed, and stdin is not a terminal",
-			Explain: fmt.Sprintf("The review above adds or changes what may log in or run on a host (%s), which only an operator at a terminal approves. Run %s from an interactive shell. Nothing was changed.", grant.Summary(reviews), command),
+			Explain: fmt.Sprintf("The review above adds or changes what may log in or run on a host (%s), which only an operator at a terminal approves. Run %s from an interactive shell, or answer it with --yes and PAISANS_ALLOW_YES=1. Nothing was changed.", grant.Summary(reviews), command),
 		}
 	}
 	resume := ui.Hold(r)

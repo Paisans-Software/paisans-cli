@@ -118,7 +118,7 @@ func confirmWord(a answerer, stdin io.Reader, stdout io.Writer, word, what strin
 		return nil
 	}
 	if !stdinIsTerminal(stdin) {
-		return fmt.Errorf("it asks for the word %s at a terminal, and stdin is not one. Run it from an interactive shell. Nothing was changed", word)
+		return fmt.Errorf("it asks for the word %s at a terminal, and stdin is not one. Run it from an interactive shell, or answer it with --yes and PAISANS_ALLOW_YES=1. Nothing was changed", word)
 	}
 	prompt(stdout, what, word)
 	answer, err := bufio.NewReader(stdin).ReadString('\n')

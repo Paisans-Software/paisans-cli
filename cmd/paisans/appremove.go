@@ -94,7 +94,7 @@ func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	// Refused before any host is read, so an unattended run with
 	// --delete-data stops with nothing asked of anything.
 	if *execute && *deleteData && !ans.canAnswer(stdin) {
-		return fmt.Errorf("app remove: --delete-data deletes member data, which nothing brings back, so it asks for the app's name at a terminal and stdin is not one. Run it from an interactive shell. Nothing was changed")
+		return fmt.Errorf("app remove: --delete-data deletes member data, which nothing brings back, so it asks for the app's name at a terminal and stdin is not one. Run it from an interactive shell, or answer it with --yes and PAISANS_ALLOW_YES=1. Nothing was changed")
 	}
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
@@ -258,7 +258,7 @@ func confirmName(a answerer, stdin io.Reader, stdout io.Writer, app string) erro
 		return confirmWord(a, stdin, stdout, app, ui.Danger(stdout, fmt.Sprintf("This permanently deletes %s's member data above.", app)))
 	}
 	if !stdinIsTerminal(stdin) {
-		return fmt.Errorf("app remove: --delete-data asks for the app's name at a terminal, and stdin is not one. Nothing was changed")
+		return fmt.Errorf("app remove: --delete-data asks for the app's name at a terminal, and stdin is not one. Run it from an interactive shell, or answer it with --yes and PAISANS_ALLOW_YES=1. Nothing was changed")
 	}
 	prompt(stdout, ui.Danger(stdout, fmt.Sprintf("This permanently deletes %s's member data above.", app)), app)
 	answer, err := bufio.NewReader(stdin).ReadString('\n')
