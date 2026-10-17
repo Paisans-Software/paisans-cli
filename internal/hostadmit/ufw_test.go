@@ -455,7 +455,7 @@ func TestEnableUFWProceedsOverTheOwnersAllows(t *testing.T) {
 		"rule allow 80\ntuple4 allow any 80 0.0.0.0/0 any 0.0.0.0/0 in\n",
 	} {
 		b := blocks(t, rules+allow443+ownerCaddy+sshdOn22)
-		if b == nil || !strings.Contains(b.Error(), "80/tcp: caddy") {
+		if b == nil || !strings.Contains(b.Error(), "80/tcp: caddy") && !strings.Contains(b.Error(), "80/tcp over IPv6: caddy") {
 			t.Errorf("%q: %v", rules, b)
 		}
 	}
@@ -760,5 +760,24 @@ func TestARouteAllowAsUFWRecordsItKeepsAPublishReachable(t *testing.T) {
 	}
 	if d := plan.Steps[titledStep(plan, "enable ufw")].Describe; !strings.Contains(d, "80/tcp (your Docker's container web-1") || !strings.Contains(d, "`ufw route allow") {
 		t.Errorf("the enable step:\n%s", d)
+	}
+}
+
+// One listener on IPv6 alone, with ufw's IPv6 off, and one on IPv4 that
+// the owner's rule allows: the IPv6 one is listed apart, and no allow line
+// is printed for a rule that exists. A dual-stack listener allowed for one
+// family gets the line for the other alone.
+func TestAnAllowLineIsOnlyForAFamilyNoRuleAllows(t *testing.T) {
+	v6off := `listen tcp LISTEN 0 4096 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=812,fd=3))` + "\nipv6 no\nsystemd-run present\nfallback not-found not-found\nend\n"
+	b := blocks(t, "rule allow 8080/tcp\ntuple4 allow tcp 8080 0.0.0.0/0 any 0.0.0.0/0 in\n"+
+		`listen tcp LISTEN 0 4096 [2001:db8::5]:8080 [::]:* users:(("app",pid=1,fd=3))`+"\n"+
+		`listen tcp LISTEN 0 4096 0.0.0.0:8080 0.0.0.0:* users:(("app",pid=1,fd=4))`+"\n"+v6off)
+	if b == nil || !strings.Contains(b.Error(), "8080/tcp over IPv6") || strings.Contains(b.Error(), "sudo ufw allow") {
+		t.Errorf("IPv6 off: %v", b)
+	}
+	b = blocks(t, "rule allow to 0.0.0.0/0 port 8080 proto tcp\ntuple4 allow tcp 8080 0.0.0.0/0 any 0.0.0.0/0 in\n"+
+		`listen tcp LISTEN 0 4096 *:8080 *:* users:(("app",pid=1,fd=3))`+"\n"+sshdOn22)
+	if b == nil || !strings.Contains(b.Error(), "  sudo ufw allow proto tcp to ::/0 port 8080\n") || strings.Contains(b.Error(), "sudo ufw allow 8080/tcp") {
+		t.Errorf("allowed over IPv4 alone: %v", b)
 	}
 }

@@ -479,8 +479,9 @@ func BlockedHelp(blocked []Blocked) string {
 	return b.String()
 }
 
-// v6 reports whether x is a port only ufw's IPV6 setting keeps.
-func (x Blocked) v6() bool { return strings.HasSuffix(x.Key, " over IPv6") }
+// v6 reports whether x is a port only ufw's IPV6 setting keeps: one over
+// IPv6 that no line keeps.
+func (x Blocked) v6() bool { return strings.HasSuffix(x.Key, " over IPv6") && len(x.Allow) == 0 }
 
 // ufwKept is what ufw's own before.rules let in on a UDP port whatever
 // the owner's rules say: DHCP replies to a client, and for mDNS and SSDP
@@ -723,19 +724,32 @@ func (p *planner) exposure(b ufwBefore) ([]kept, []Blocked) {
 				why, ownPort = "the deployment's own allow ("+r.Why+")", true
 			}
 		}
+		var missing []int
 		if why == "" {
-			if t, ok := b.allows(a, mesh); ok {
+			var t ufwTuple
+			if t, missing = b.allows(a, mesh); t.action != "" {
 				why = "allowed by your rule `ufw " + t.String() + "`"
 			}
 		}
 		switch {
-		case why != "":
+		case why != "" && len(missing) == 0:
 			keep = append(keep, kept{key: a.key(), via: via, why: why})
 		case a.proto == "udp" && b.ephemeral.lo > 0 && b.ephemeral.lo <= a.lo && a.hi <= b.ephemeral.hi:
 			ephemeral = append(ephemeral, a.via...)
 			continue
+		case why == "" && len(missing) == 0:
+			// Every socket takes IPv6 alone, which ufw's IPV6 setting
+			// decides: listed apart below.
+		case len(missing) == 2 || why == "":
+			blocked = append(blocked, Blocked{Key: a.key(), What: via, Allow: []string{"sudo ufw allow " + a.key()}})
 		default:
-			blocked = append(blocked, Blocked{Key: a.key(), What: strings.Join(a.via, "; "), Allow: []string{"sudo ufw allow " + a.key()}})
+			// One family is allowed already: the line adds the other alone.
+			fam, to := "IPv4", "0.0.0.0/0"
+			if missing[0] == 6 {
+				fam, to = "IPv6", "::/0"
+			}
+			port := strings.TrimSuffix(a.key(), "/"+a.proto)
+			blocked = append(blocked, Blocked{Key: a.key() + " over " + fam, What: via, Allow: []string{"sudo ufw allow proto " + a.proto + " to " + to + " port " + port}})
 		}
 		if !ownPort && len(a.v6) > 0 && b.ipv6 != "yes" {
 			blocked = append(blocked, Blocked{Key: a.key() + " over IPv6", What: strings.Join(a.v6, "; ")})
@@ -817,31 +831,36 @@ func (b ufwBefore) routes(a *answering, mesh string) (ufwTuple, bool) {
 	return first, true
 }
 
-// allows is the owner's rule that keeps a reachable once ufw is on, false
-// for none. Each listener needs one for every family it takes: user.rules
+// allows is the first of the owner's rules that keep a reachable once
+// ufw is on, and the families, 4 and 6, that no rule of the owner's lets
+// a in by. Each listener needs one for every family it takes: user.rules
 // for IPv4, user6.rules for IPv6, which ufw applies only with IPV6=yes (a
 // listener on IPv6 is listed apart then). What NAT receives is read as
 // IPv4 to any address.
-func (b ufwBefore) allows(a *answering, mesh string) (ufwTuple, bool) {
+func (b ufwBefore) allows(a *answering, mesh string) (first ufwTuple, missing []int) {
 	if len(a.socks) == 0 {
-		return letIn(b.tuples, 4, a.proto, a.lo, a.hi, "", mesh)
+		t, ok := letIn(b.tuples, 4, a.proto, a.lo, a.hi, "", mesh)
+		if !ok {
+			return ufwTuple{}, []int{4}
+		}
+		return t, nil
 	}
-	var first ufwTuple
-	for i, s := range a.socks {
+	for _, s := range a.socks {
 		for _, fam := range s.families() {
 			if fam == 6 && b.ipv6 != "yes" {
 				continue
 			}
 			t, ok := letIn(b.tuples, fam, a.proto, a.lo, a.hi, s.Address, mesh)
-			if !ok {
-				return ufwTuple{}, false
-			}
-			if i == 0 && first.action == "" {
+			switch {
+			case !ok && !slices.Contains(missing, fam):
+				missing = append(missing, fam)
+			case ok && first.action == "":
 				first = t
 			}
 		}
 	}
-	return first, first.action != ""
+	slices.Sort(missing)
+	return first, missing
 }
 
 // ufwTuple is one rule as ufw records it in /etc/ufw/user.rules (fam 4)
