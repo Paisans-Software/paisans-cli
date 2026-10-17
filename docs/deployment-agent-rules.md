@@ -140,8 +140,8 @@ consequences reach people who are not in the room.
 
 **Admitting and evicting are the host owner's.** A host's owner is often not
 one of the deployment's operators, and the machine is theirs, so these are
-never an agent's to run, whoever asks, except as follows. Evicting always asks for the
-deployment's user name at a terminal, and admitting from a request asks for
+never an agent's to run, whoever asks, except as follows. Evicting always asks for
+the deployment's user name at a terminal, and admitting from a request asks for
 its digest; admitting from the configuration may ask nothing, and a
 NOPASSWD sudoers rule would let it run without a person, so this rule, not a
 prompt, is what stops an agent. An agent never answers either prompt, and

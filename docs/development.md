@@ -314,12 +314,14 @@ nodes it needs hard (all of one, or any of several), the ones it needs only to
 have ended, and its judge, the section function `Diagnose` calls given the
 node's own probes, so the graph finds what `Diagnose` finds for the same
 `Input`. After each site's reach comes its admission record, which every other
-node on the site needs, so a site whose host has not admitted the deployment
-is one warning; the site's `docker` node is needed by every node that runs
-`docker` there. Pending and down come from the run's classification, made once,
+node on the site needs except the self-check, so a site whose host has not admitted the deployment
+is one warning; the site's `docker` node is needed by every per-site node that runs `docker`
+there (Patroni, containers, settings, leftovers), and the nodes across sites
+try each admitted member in turn. Pending and down come from the run's classification, made once,
 the first time a site does not answer or its record does not cover it
 (`doctorClassify`), and each Caddy site's answer from outside from the same
-check `apply` runs, asked once and without waiting (`doctorSelfCheck`). `Graph.Run` starts every node whose needs are met, records each
+check `apply` runs, asked once and without waiting (`doctorSelfCheck`). `Graph.Run` starts every
+node whose needs are met, records each
 node's probes into one `Input` as it ends, and prunes, transitively, every
 node a failed or skipped hard need leaves unable to run. It reports through
 `ui.Stream`, a group whose lines join it as they start. `cmd/paisans` bounds

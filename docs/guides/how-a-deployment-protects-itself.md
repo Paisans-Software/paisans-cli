@@ -28,7 +28,8 @@ the deployment decides who logs in to it. The configuration names which operator
 may reach a site (its `ssh.keys`), and the host's owner decides whether the
 deployment runs there at all: they admit it as a user of its own, fenced off
 their machine, and can evict it (see
-[Admitting a deployment to your machine](host-owners.md)). This is the one place where one operator is protected from
+[Admitting a deployment to your machine](host-owners.md)). This is the one
+place where one operator is protected from
 another: not over the deployment, but over their own machine.
 
 **The mesh is trusted completely.** etcd, Patroni, Postgres replication, Garage

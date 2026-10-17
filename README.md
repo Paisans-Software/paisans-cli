@@ -4817,11 +4817,12 @@ runs nothing through sudo but the WireGuard helper, which its one sudoers
 line allows without a password. Three commands are the host owner's: `host
 admit` and `host evict`, which change the host as root, and `host
 deployments`, which reads the registry and every deployment's directories,
-root's. With `--request`, admit and evict run as root on the host itself,
+root's. With `--request` (or, for evict, `--deployment` and `--user`),
+admit and evict run as root on the host itself,
 under the owner's own `sudo`; reached from a workstation, with `--site` and
 the owner's login in `--ssh`, they and `host deployments` run through sudo
 (`host deployments`' `--sudo`, on by default). Before the first such
-command, the toolkit asks the host `sudo -n true`. `-n` makes sudo fail at
+command, Paisans asks the host `sudo -n true`. `-n` makes sudo fail at
 once instead of waiting for a password, so the answer is immediate.
 
 **A host whose sudo needs no password** runs each command as
@@ -4906,8 +4907,9 @@ it was sent, so leaving the password out is not left to each of them.
 person. `host admit --site` asks nothing once every grant is passed, `--ssh`
 is given, and ufw is active or `--enable-ufw` is passed, and `host
 deployments` asks nothing, so an unattended run of either needs a NOPASSWD
-sudoers rule for the login `--ssh` names. Whether to write one is a decision about the host, made by whoever owns it, and the
-toolkit never makes it; an agent never runs admit or evict unattended,
+sudoers rule for the login `--ssh` names. Whether to write one is a
+decision about the host, made by whoever owns it, and Paisans never makes
+it; an agent never runs admit or evict unattended,
 whatever sudo allows (`docs/deployment-agent-rules.md`).
 
 `host deployments` reports each of these as a sudo problem
@@ -5055,7 +5057,7 @@ inside.
 
 Each deployment runs its own rootless Docker daemon as its own user, beside
 whatever Docker the host's owner runs, and `host admit` sets it up. What the
-toolkit depends on is what that daemon and compose can do, and that is a
+Paisans depends on is what that daemon and compose can do, and that is a
 version, so admit refuses, on any host and whatever its class:
 
 * **An Engine older than 29.5.** From 29.5 a rootless container with host
@@ -5081,7 +5083,7 @@ engine 25.0.0 or compose 2.24.0, the first releases with
 `healthcheck.start_interval`, which the rendered stacks use; admit has
 already held it to 29.5.
 [docs/specs/2026-10-11-docker-version-gate.md](docs/specs/2026-10-11-docker-version-gate.md)
-lists every Docker feature the toolkit depends on, with the release that
+lists every Docker feature Paisans depends on, with the release that
 introduced it. Nothing is upgraded or removed: either stops every container
 the owner runs, and that is a decision for whoever started them.
 
@@ -5388,7 +5390,8 @@ There is no supported way to open the table to one service: an accept in
 another table does not override its drop, and a rule added to it is gone at
 the next load from its file (boot, an nftables reload or restart, an admit
 that reloads it). The owner serves it on the host's mesh address, which rule
-1 accepts, or at a public address on another machine. The owner's view of all this is *What the deployment can reach* in
+1 accepts, or at a public address on another machine. The owner's view of all this is
+*What the deployment can reach* in
 [docs/guides/host-owners.md](docs/guides/host-owners.md).
 
 #### host prepare manages the login user's authorized keys
@@ -6173,7 +6176,8 @@ While a joined site is down, a site joining through `site add` waits too, with
 the line `site add <site>: waits until every joined site answers`, and the run
 ends degraded. `--require-all` makes a degraded run, or its dry run, exit 1, for
 automation that must not pass on one. `doctor` reports a pending or down site
-as a `WARN` in its Reach row, a `FAIL` on a gateway, with the same account of
+as a `WARN` in its Reach row (or its Admission row, for a pending site that
+answers), a `FAIL` on a gateway, with the same account of
 what the deployment is without.
 
 **The declaration stays the only record.** The configuration store keeps
@@ -9289,7 +9293,8 @@ having admitted the deployment, or down, having joined and gone quiet, is
 read from the deployment, never from the site, as `apply` reads it (see *A
 deployment with sites missing*), and either is a `WARN`, since the deployment
 runs on the sites it has; a gateway is a `FAIL`, since `apply` refuses to run
-without one. Nothing more is asked of that site, since
+without one. Nothing more is asked of that site, except the self-check,
+which asks from outside, since
 a read over a connection that already failed only fails again, and the checks
 not made because of it are named once, on its line (`Not checked because of
 this: mesh, containers, clocks on home-b.`), rather than each failing in turn,
@@ -9303,10 +9308,13 @@ The checks run at once, as many as are ready, and each prints whole, naming
 its site, as it ends, so an operator in an outage reads the first answer while
 the slow ones still run, and a deployment of several sites is read in the time
 of its slowest site rather than the sum of them. A check starts only once the
-checks it needs have answered: everything on a site needs its reach and then its admission record,
-everything that runs `docker` there needs the site's own Docker to answer, etcd
-needs a member that answered, and the containers and Pocket ID checks wait for
-Patroni's, whose verdict their advice uses. So a cause always prints before
+checks it needs have answered: everything on a site needs its reach and then
+its admission record, except the self-check, which asks from outside and needs
+no ssh; every per-site check that runs `docker` there (Patroni, containers,
+settings, leftovers) needs the site's own Docker to answer; the checks across
+sites try each admitted member in turn; etcd needs a member that answered, and
+the containers and Pocket ID checks wait for Patroni's, whose verdict their
+advice uses. So a cause always prints before
 what it causes. A site runs at most eight commands at once, under the ten
 sessions sshd allows on the one connection Paisans shares per destination
 (`MaxSessions`, sshd_config(5)); sites are not bounded against each other,
@@ -9316,7 +9324,8 @@ below, because in an interleaved run the first failure on screen is the first
 to end, not the first to fix.
 
 A pending site skips the rest of its checks, and a Docker daemon that does not
-answer skips every check that runs `docker` there. The checks that read across
+answer skips the per-site checks that run `docker` there (Patroni,
+containers, settings, leftovers). The checks that read across
 sites (etcd, Patroni's `/sync` and logs, Pocket ID's instances) ask only sites
 whose admission passed and that the run's classification placed neither pending
 nor down; each site they did not ask is listed with `not asked: its admission
@@ -9334,12 +9343,12 @@ closing list is usually the cause of those after it:
 | Check | How | FAIL when |
 |---|---|---|
 | Reach | `true` over ssh, on every site asked | the site does not answer and is neither pending nor down, or it is the gateway. A pending or down site is a `WARN`, saying what the deployment is without while it is gone: the gateway, an etcd vote, a Patroni member, a Garage node, its copy of each clustered app, the apps pinned to it; a pending site with the `paisans host request` line, a down one with the `site remove --host-gone` line |
-| Admission | the admission record, `/etc/paisans/admitted.<token>.json`, read as the site's ssh user | the record cannot be read, is missing, differs from `paisans-stack.yaml` or lacks a grant the site's roles need, and the deployment has joined the site. When it has not, the site is pending: a `WARN` (a `FAIL` on the gateway) with the `host request` line, and nothing more is asked of the site |
+| Admission | the admission record, `/etc/paisans/admitted.<token>.json`, read as the site's ssh user | the record cannot be read, is missing, differs from `paisans-stack.yaml` or lacks a grant the site's roles need, and the deployment has joined the site or the run cannot tell whether it has. When it has not, the site is pending: a `WARN` (a `FAIL` on the gateway) with the `host request` line, and nothing more is asked of the site |
 | User | `id -u`, `id -un`, `id -nG` and `id -G` | the user has uid 0, is in a group `host admit` refuses (`admitrules.PrivilegedGroups`), or is in a group of GID 0 under any name. Groups doctor cannot read are a `WARN` |
 | Docker | `docker version` and `docker info`'s security options, against the user's own socket | the daemon does not answer or is not rootless. When it does not answer, nothing that runs `docker` on the site is checked. An answer doctor cannot read is a `WARN` |
 | Docker engine | the version `docker version` read | older than 29.5 |
-| Linger | `loginctl show-user <user> --property=Linger`, and whether the drop-in `/etc/systemd/system/user@<uid>.service.d/paisans-mesh.conf` exists | linger is off: the user's Docker stops when the last login ends and does not start at boot. Or the drop-in is missing, so the user's manager is not ordered after the mesh. An answer doctor cannot read, the mesh-order line included, is a `WARN` |
-| Sudo rights | `LC_ALL=C sudo -n -l` | sudo lets the user run anything but the WireGuard helper as root, or does not let it run the helper. An answer doctor cannot read, such as a translated one, is a `WARN` |
+| Linger | `loginctl show-user <user> --property=Linger --value`, and whether the drop-in `/etc/systemd/system/user@<uid>.service.d/paisans-mesh.conf` exists | linger is off: the user's Docker stops when the last login ends and does not start at boot. Or the drop-in is missing, so the user's manager is not ordered after the mesh. An answer doctor cannot read, the mesh-order line included, is a `WARN` |
+| Sudo rights | `LC_ALL=C sudo -n -l` | sudo lets the user run anything but the WireGuard helper as root, carries a Defaults entry or runas line beyond admit's one rule, or does not let it run the helper. An answer doctor cannot read, such as a translated one, is a `WARN` |
 | Mesh | `ip -j link show dev psns-<token>`, then the overlap test of *Two deployments on one host never share a mesh*: `ip -j route show table all`, `ip -j addr`, `docker network inspect` and the user's `~/.config/docker/daemon.json`, on every site that answered | the interface is missing or down, or anything outside it overlaps `mesh.subnet`, named with the subnet. The advice is that the subnet is fixed once deployed and the other network moves |
 | etcd quorum | `etcdctl endpoint health -w json` in the etcd container of the first member that answers, naming every member of `etcd.members` by its mesh address | fewer than half the members plus one are healthy. One member down with quorum intact is a `WARN` |
 | etcd version | `curl` on the host to `http://127.0.0.1:2379/version`; skipped, and said so, where the host has no `curl` | the cluster version is `3.0.0` under a 3.5 server |
@@ -9393,7 +9402,8 @@ container whose network setup failed. The advice is `docker start <container>`
 on the site as the deployment's user, or `paisans apply --site <site>
 --recreate <stack> --execute`, and, if it happens at every boot, the Linger
 row, which says whether the user's manager is ordered after the mesh; see
-*The user's Docker starts after the mesh interface*. A container Docker keeps restarting while its log says it
+*The user's Docker starts after the mesh interface*. A container Docker
+keeps restarting while its log says it
 cannot reach the database points at the Patroni finding when there is no
 primary: it comes back on its own once there is one. When there is a primary,
 it is not waiting on Patroni, and the advice is to check the site's HAProxy and

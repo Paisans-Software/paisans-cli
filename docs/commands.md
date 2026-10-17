@@ -748,7 +748,8 @@ paisans host admit --site home-a --ssh owner@home-a.example.org --execute   # fr
 * **`--execute`:** makes the changes the plan shows, which it always prints in
   full. With `--request` it first asks for the request's digest at a
   terminal, which the owner has from an operator over another channel than
-  the one that carried the file. With `--site` it ends by logging in as the deployment's user with
+  the one that carried the file. With `--site` it ends by logging in as the
+  deployment's user with
   the operator's own key, and writes `ssh.user` back into the configuration
   when the declaration leaves it out.
 * **What it changes:** Docker from Docker's repository where absent (an Engine
@@ -1207,7 +1208,7 @@ outside, and Caddy's certificates and the DNS token.
 
 * **Alone:** always, in an outage or after one.
 * **Flags:** `--site <name>` (repeatable; default every site), `--config`,
-  `--execute`.
+  `--secrets` (default `secrets.enc.yaml` beside the config), `--execute`.
 * **Hosts:** every site, or the named ones, read only.
 * **`--execute`:** removes from `paisans-stack.yaml` each `config:` key that only
   repeats a value gating renders, before loading it, and records the `ssh.user`

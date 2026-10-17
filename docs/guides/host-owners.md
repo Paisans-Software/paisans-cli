@@ -73,8 +73,8 @@ release names its binaries, so the block downloads the one for your machine;
 `echo` shows which. Each step after it runs only when the one before
 succeeded, so nothing is installed unless the download is whole and
 `sha256sum` prints `paisans-linux-<arch>: OK`. Anything else, delete the
-file and download it again. The check proves the file arrived whole and is the one
-the release lists. Both files come from the same release page, so it proves
+file and download it again. The check proves the file arrived whole and is
+the one the release lists. Both files come from the same release page, so it proves
 nothing about who published the release.
 
 Use the release the operators name. A paisans that reads another request
@@ -281,7 +281,7 @@ sudo -l -U paisans-1a2b                       # the helper, and nothing else
 sudo nft list table inet paisans_1a2b
 sudo ufw status | grep paisans-1a2b
 cat /etc/paisans/admitted.1a2b.json
-ls /etc/paisans/                              # one admitted.<token>.json per deployment
+ls /etc/paisans/                              # the records, admitted.<token>.json, beside admit's own files
 ```
 
 **Anyone the operators trust gets a shell as that user.** Adding or removing a
@@ -303,8 +303,8 @@ packets, which the kernel sends, are filtered the same way; with
 What it cannot do, and what you do about it:
 
 * **Bind your admin services to `127.0.0.1` (or `::1`) or to your LAN
-  address.** A service of yours bound to every interface (`0.0.0.0` or `::`) is also
-  bound to the machine's mesh address, which the deployment must reach and
+  address.** A service of yours bound to every interface (`0.0.0.0` or `::`) is
+  also bound to the machine's mesh address, which the deployment must reach and
   so is not dropped: the deployment, and its other sites over the mesh, can
   reach it there.
 * **The deployment's user can listen on any port no service of yours
