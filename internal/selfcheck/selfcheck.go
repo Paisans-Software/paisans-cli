@@ -2,8 +2,9 @@
 // outside, whether it answers as this deployment. The deployment's user
 // cannot read the host's ruleset or another user's sockets, so a port
 // another server took after admission, and above all one a DNAT rule takes
-// with no listener, is invisible from the host. That Caddy answers /.well-known/paisans/<token> with the token;
-// anything else that answers there is another server.
+// with no listener, is invisible from the host. That Caddy answers
+// /.well-known/paisans/<token> with the token; anything else that answers
+// there is another server.
 package selfcheck
 
 import (
