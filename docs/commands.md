@@ -839,7 +839,8 @@ paisans site admit --site home-a --ssh owner@home-a.example.org --execute   # fr
   redirect rule, which receive traffic with no listener when Docker's
   userland proxy is off. A port stays reachable when it is sshd's, the
   deployment's own (WireGuard, and 80 and 443 with `--public-ports`), one
-  ufw's `before.rules` let in (DHCP, mDNS, SSDP), or one a rule of yours
+  ufw's `before.rules` let in (a DHCP client's, and mDNS and SSDP on a
+  socket bound to their multicast group), or one a rule of yours
   allows, added while ufw is inactive or not. Your rules are read as ufw
   records them in `/etc/ufw/user.rules` and `user6.rules`, so an
   application profile or a service name counts with its ports: an inbound
@@ -859,10 +860,13 @@ paisans site admit --site home-a --ssh owner@home-a.example.org --execute   # fr
   port: `sudo ufw allow <port>/<proto>` for a listener, `sudo ufw route
   allow proto <proto> to <address> port <port>` for what NAT translates,
   which is to be checked from off the host once ufw is on. Run those whose
-  service must stay reachable, then admit again. A service meant to stay unreachable, such as
+  service must stay reachable, then admit again. UDP sockets in the host's
+  `ip_local_port_range` are listed together with no line: a client's, or a
+  service's that picks its port as it starts, which no allow can be added
+  for ahead. A service meant to stay unreachable, such as
   a database on a public address, needs nothing: once you have checked
   every port listed, `--enable-ufw-block-listed` enables ufw over them, and
-  the plan's `enable ufw` step names each. That step also names what stays
+  the plan's `enable ufw` step and a warning name each. That step also names what stays
   reachable, and why. With `IPV6` not `yes`, a listener on IPv6 is listed
   too, since ufw then drops IPv6 whatever it allows; a NAT rule whose ports
   or translation admit cannot read is listed with no line. At a terminal the ufw

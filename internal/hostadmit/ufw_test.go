@@ -422,7 +422,7 @@ func ownerRule(show, tuple string) string {
 func TestEnableUFWProceedsOverTheOwnersAllows(t *testing.T) {
 	for _, rules := range []string{
 		ownerRule("allow 80/tcp", "allow tcp 80 0.0.0.0/0 any 0.0.0.0/0 in") + ownerRule("allow 443", "allow any 443 0.0.0.0/0 any 0.0.0.0/0 in"),
-		ownerRule("allow 'Nginx Full'", "allow tcp 80,443 0.0.0.0/0 any 0.0.0.0/0 Nginx%20Full - in") + ownerRule("allow 443/udp", "allow udp 443 0.0.0.0/0 any 0.0.0.0/0 in comment=776562"),
+		ownerRule("allow 'Nginx Full'", "allow tcp 80,443 0.0.0.0/0 any 0.0.0.0/0 Nginx%20Full - in") + ownerRule("allow 443/udp comment 'web'", "allow udp 443 0.0.0.0/0 any 0.0.0.0/0 in comment=776562"),
 		ownerRule("allow in on eth0 to any port 80 proto tcp", "allow tcp 80 0.0.0.0/0 any 0.0.0.0/0 in_eth0") + ownerRule("limit log 443", "limit_log any 443 0.0.0.0/0 any 0.0.0.0/0 in"),
 		ownerRule("allow 1:1000/tcp", "allow tcp 1:1000 0.0.0.0/0 any 0.0.0.0/0 in") + ownerRule("allow 1:1000/udp", "allow udp 1:1000 0.0.0.0/0 any 0.0.0.0/0 in"),
 	} {
@@ -452,7 +452,7 @@ func TestEnableUFWProceedsOverTheOwnersAllows(t *testing.T) {
 		ownerRule("allow out 80/tcp", "allow tcp 80 0.0.0.0/0 any 0.0.0.0/0 out"),
 		ownerRule("route allow 80/tcp", "route:allow tcp 80 0.0.0.0/0 any 0.0.0.0/0 in"),
 		ownerRule("allow in on psns-f2a9", "allow any any 0.0.0.0/0 any 0.0.0.0/0 in_psns-f2a9"),
-		"rule allow to 0.0.0.0/0 port 80\ntuple4 allow any 80 0.0.0.0/0 any 0.0.0.0/0 in\n",
+		"rule allow 80\ntuple4 allow any 80 0.0.0.0/0 any 0.0.0.0/0 in\n",
 	} {
 		b := blocks(t, rules+allow443+ownerCaddy+sshdOn22)
 		if b == nil || !strings.Contains(b.Error(), "80/tcp: caddy") {
@@ -565,7 +565,7 @@ func TestEnableUFWIgnoresWhatStaysReachableOrIsLocal(t *testing.T) {
 		`listen tcp LISTEN 0 4096 [::1]:6379 [::]:* users:(("redis-server",pid=701,fd=6)) uid:114 ino:2 sk:2` + "\n" +
 		`listen tcp LISTEN 0 4096 [::ffff:127.0.0.1]:9000 *:* users:(("app",pid=702,fd=6)) ino:3 sk:3` + "\n" +
 		`listen udp UNCONN 0 0 127.0.0.53%lo:53 0.0.0.0:* users:(("systemd-resolve",pid=600,fd=13)) uid:991 ino:4 sk:4` + "\n" +
-		`listen udp UNCONN 0 0 0.0.0.0%lo:5355 0.0.0.0:* users:(("systemd-resolve",pid=600,fd=14)) uid:991 ino:5 sk:5` + "\n" +
+		`listen udp UNCONN 0 0 127.0.0.54:53 0.0.0.0:* users:(("systemd-resolve",pid=600,fd=14)) uid:991 ino:5 sk:5` + "\n" +
 		`listen udp UNCONN 0 0 10.0.0.5%eth0:68 0.0.0.0:* users:(("systemd-network",pid=500,fd=20)) uid:998 ino:6 sk:6` + "\n" +
 		`listen udp UNCONN 0 0 0.0.0.0:51820 0.0.0.0:* ino:7 sk:7` + "\n" +
 		`listen tcp LISTEN 0 4096 0.0.0.0:2375 0.0.0.0:* users:(("rootlesskit",pid=703,fd=6)) uid:1001 ino:8 sk:8` + "\n" +
@@ -725,7 +725,7 @@ func TestOnlyMulticastDiscoveryIsCoveredByUFW(t *testing.T) {
 		t.Errorf("mDNS on every address: %v", b)
 	}
 	v6off := `listen tcp LISTEN 0 4096 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=812,fd=3))` + "\nipv6 no\nsystemd-run present\nfallback not-found not-found\nend\n"
-	if b := blocks(t, `listen udp UNCONN 0 0 [fe80::1%eth0]:546 [::]:* users:(("systemd-network",pid=500,fd=21)) uid:998`+"\n"+v6off); b == nil || !strings.Contains(b.Error(), "546/udp over IPv6") {
+	if b := blocks(t, `listen udp UNCONN 0 0 [fe80::5054:ff:fe12:3456]%eth0:546 [::]:* users:(("systemd-network",pid=500,fd=21)) uid:998`+"\n"+v6off); b == nil || !strings.Contains(b.Error(), "546/udp over IPv6") {
 		t.Errorf("DHCPv6 with ufw's IPv6 off: %v", b)
 	}
 }

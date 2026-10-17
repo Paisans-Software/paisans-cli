@@ -155,15 +155,19 @@ IPv6, and every port your Docker publishes or a NAT rule receives. A port
 stays reachable when it is sshd's, the deployment's own, or one a rule of
 yours allows; every other port ufw would block. If there is one, admit
 refuses and changes nothing, listing each port with what serves it, and the
-lines that keep each reachable:
+lines that keep each reachable. For a Caddy of yours serving 80 and 443,
+with no allow of yours for them, the refusal is, in full:
 
 ```text
-ufw is installed but not active, and enabling it would block these, which answer from off this host now:
+firewall: ufw is installed but not active, and enabling it would block these, which answer from off this host now:
   80/tcp: caddy (pid 900, uid 0) listens on *:80
   443/tcp: caddy (pid 900, uid 0) listens on *:443
+  443/udp: caddy (pid 900, uid 0) listens on *:443/udp
 For each port whose service must stay reachable, run its line before ufw is enabled, then run admit again:
   sudo ufw allow 80/tcp
   sudo ufw allow 443/tcp
+  sudo ufw allow 443/udp
+A service meant to stay unreachable from off this host, such as a database on a public address, needs nothing. Once you have checked that every one listed may be blocked, pass --enable-ufw-block-listed with --enable-ufw. Nothing was changed
 ```
 
 Run the lines for the services that must stay reachable, such as your own
