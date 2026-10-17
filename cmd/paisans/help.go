@@ -209,7 +209,7 @@ var helpCommands = []helpCommand{
 	},
 	{
 		name:    "site remove",
-		summary: "Take a site out of the running deployment.",
+		summary: "Take a site out of the running deployment, reaching its host or not.",
 		usage: []string{
 			"paisans site remove <site> [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n" +
 				"                    [--delete-data] [--force --ssh <user@host[:port]>] [--execute] [--yes]",
@@ -222,9 +222,9 @@ var helpCommands = []helpCommand{
 			"Refuses the only gateway, data or apps site, a site an app is pinned to, and an unhealthy cluster. --host-gone never reaches the host, as below; --delete-data deletes its data after the site's name is typed at a terminal. Writes nothing without --execute.\n\n" +
 			"--force --ssh <host> --id <id or token>, with no " + config.FileName + ": clean that host of the deployment the login's own admission record names, as --force does, from that record alone, logging in as the deployment's user. DNS is not modified. --execute asks for the site's name at a terminal.\n\n" +
 			"The host stage runs as the deployment's user and ends with the sudo paisans site evict line the host's owner runs to remove the rest.\n\n" +
-			"--host-gone: cut off a site whose host is not reached, dead or still running in hands nobody else can reach, never reaching that host: the mesh cut first on every remaining site, then its DNS records, Patroni's own failover, its etcd member, its Garage node skipped as dead, then the rest as remove does. Refuses --force, --ssh, --id and --delete-data, which reach a host. " +
+			"--host-gone is for a site whose host is not reached: dead, or still running but no longer the deployment's to reach. It never reaches that host, and cuts the site off in this order: the mesh first on every remaining site, then its DNS records, Patroni's own failover, its etcd member, its Garage node skipped as dead, then the rest as remove does. Refuses --force, --ssh, --id and --delete-data, which reach a host. " +
 			"Generates the secrets of a replacement declared in the same edit, which apply then brings up. --execute asks for the site's name, and for revoked, lose writes or lose objects when they apply.\n\n" +
-			"--yes types each word asked for. " + yesTopic,
+			yesTopic,
 	},
 	{
 		name:    "site evict",
@@ -234,10 +234,13 @@ var helpCommands = []helpCommand{
 			"sudo paisans site evict --deployment <id> --user <name> [--data-dir <path>] [--execute] [--yes]",
 			"paisans site evict --site <name> [--ssh <user>|<user@host[:port]>] [--config " + config.FileName + "] [--data-dir <path>]\n                   [--execute] [--yes]",
 		},
-		detail: "Undo site admit for one deployment: its mesh, its user with its home and data, the helper, the egress table, its firewall rules, the record and the registry entry. Evict never disables ufw, which stays as it is with its paisans: ssh allows when admit enabled it. Host-wide files and sysctls go only when no other deployment is admitted. " +
-			"--data-dir, the one admit was given, is needed only when the host holds no admission record. " +
-			"With --site, --ssh may be your login alone, for the site's declared ssh host and port, and is asked for at a terminal when left out. " +
-			"--execute asks for the user's name at a terminal; --yes types it, and with --site needs --ssh. " + yesTopic + " Never run by an agent unattended.",
+		detail: "Undo site admit for one deployment: its mesh, its user with its home and data, the helper, the egress table, its firewall rules, the record and the registry entry. " +
+			"Host-wide files and sysctls go only when no other deployment is admitted. Evict never disables ufw, which stays as it is with its paisans: ssh allows when admit enabled it. " +
+			"--data-dir, the one admit was given, is needed only when the host holds no admission record.\n\n" +
+			"Run it as root on the host with --request or --deployment and --user, or from a workstation with --site, which reads the site from " + config.FileName + ". With --site, --ssh may be your login alone, for the site's declared ssh host and port, and is asked for at a terminal when left out. " +
+			"After site remove has taken the site out of " + config.FileName + ", use the --deployment and --user line it printed.\n\n" +
+			"--execute asks for the user's name at a terminal; --yes types it, and with --site needs --ssh. " + yesTopic + "\n\n" +
+			"Never run by an agent unattended.",
 	},
 	{
 		name:    "site deployments",
