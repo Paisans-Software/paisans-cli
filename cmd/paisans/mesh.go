@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
@@ -72,54 +73,52 @@ func holder(clash []mesh.Taken) string {
 	return " (" + clash[0].What + ")"
 }
 
-// settleMesh is init's subnet decision. It asks every site first whether it
-// holds this deployment's manifest. Once any of them does, the subnet is
-// deployed and settleMesh never changes it. A site that refuses the login
-// has not admitted the deployment yet, and is left to host admit, which
-// checks the subnet against it as root; every other site must answer, since
-// an unchecked host is exactly where a collision would go unseen. It gathers
-// everything each admitted host holds (see checkMeshLive), keeps the
-// declared subnet if it overlaps none of it, and otherwise rolls a random
-// /24 that overlaps none, moving each site's address into it with its host
-// number kept. It writes paisans-stack.yaml only when it rolled, and says
-// why. It reports whether it wrote.
+// initAdmissions is init's first look at each site: whether its host has
+// admitted the deployment, read as settleMesh and the deployment record are,
+// as the deployment's user. Each site is a step, in name order: ✓ admitted,
+// ○ not admitted yet, which init skips and leaves to host admit, and ✗ one
+// it could not ask. A skipped site is a warning, not a refusal, since admit
+// checks the subnet against it as root, and refuses one that overlaps
+// anything there. It returns the admitted sites, in name order, and unread,
+// the refusal for the sites it could not ask: settleMesh refuses with it,
+// nothing written, unless the subnet is already deployed, since such a site
+// may be admitted, and an unchecked host is exactly where a chosen subnet
+// would collide unseen.
 //
-// The decision is one step, "settle mesh subnet", whose result is what
-// happened to the subnet; why is its details. Its progress names the site
-// being read, since a site that does not answer is waited on for its connect
-// timeout on each of ssh's attempts.
-func settleMesh(r ui.Reporter, cfg *config.Config, path string, hosts map[string]registry.Runner, random io.Reader) (bool, error) {
-	s := r.Step("settle mesh subnet")
-	wrote, result, err := chooseMesh(s, cfg, path, hosts, random)
-	if err != nil {
-		s.Fail(err)
-		return false, err
-	}
-	s.Done(result)
-	return wrote, nil
-}
-
-// chooseMesh is settleMesh's decision, reporting what it finds to s, and
-// returning whether it wrote and the short result for the step.
-func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]registry.Runner, random io.Reader) (bool, string, error) {
-	manifest := cfg.Deployment().Manifest()
-	var admitted, unreachable, advice, referrals []string
+// A site whose admission does not match the declaration is still read, and
+// warned about, since what it lacks is the host owner's to fix, and apply
+// refuses it until they have.
+func initAdmissions(r ui.Reporter, cfg *config.Config, hosts map[string]registry.Runner) (admitted []string, unread error) {
+	var skipped, unreachable, advice, referrals []string
 	var failures []error
-	var claimedOn []string
+	token := cfg.Deployment().Token()
 	for _, name := range cfg.SiteNames() {
-		s.Progress("read " + name)
+		s := r.Step("check " + name + "'s admission")
 		h := hosts[name]
-		_, found, err := h.ReadFile(manifest)
-		if errors.Is(err, apply.ErrLoginRefused) {
-			s.Detail("%s has not admitted this deployment yet; host admit checks the subnet against it as root, and refuses one that overlaps anything there", name)
-			continue
-		}
-		if err != nil {
-			err = fmt.Errorf("%s: reading %s: %w", h.Describe(), manifest, err)
+		_, err := admissionForSite(h, cfg, name)
+		var se *admission.SiteError
+		var unreadable *admission.Error
+		switch {
+		case err == nil:
+			admitted = append(admitted, name)
+			s.End(ui.OK, "admitted")
+		case errors.Is(err, apply.ErrLoginRefused), errors.Is(err, admission.ErrNotAdmitted):
+			skipped = append(skipped, name)
+			s.Detail("%s", err)
+			s.End(ui.Pending, "not admitted, skipped")
+		case errors.As(err, &se), errors.As(err, &unreadable):
+			admitted = append(admitted, name)
+			problem := admissionProblem(name, token, err)
+			hint, explain := ui.Describe(problem)
+			s.End(ui.Warned, "admitted, does not match")
+			r.Warn(hint, explain)
+		default:
+			err = fmt.Errorf("%s: %w", h.Describe(), err)
 			// Each site is one line in the operator's words, and what to do
 			// about it follows the list. The full chain, with the file it
 			// failed at, is the cause, for --verbose.
 			hint, explain := ui.Describe(err)
+			s.End(ui.Failed, hint)
 			unreachable = append(unreachable, fmt.Sprintf("- %s: %s", name, hint))
 			if explain != "" {
 				advice = append(advice, explain)
@@ -131,9 +130,60 @@ func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]reg
 				referrals = append(referrals, diagnosis.Unreachable(name).Sentence)
 			}
 			failures = append(failures, fmt.Errorf("%s: %w", name, err))
-			continue
 		}
-		admitted = append(admitted, name)
+	}
+	if len(unreachable) > 0 {
+		explain := slices.Concat(unreachable, advice, referrals)
+		unread = &ui.Problem{
+			Hint:    "init could not read every site, so mesh.subnet is not settled",
+			Explain: strings.Join(append(explain, "Nothing was written. Every host has to be checked, since a subnet chosen without one is a subnet that may collide on it."), "\n"),
+			Cause:   errors.Join(failures...),
+		}
+	}
+	for _, name := range skipped {
+		r.Warn(name+" has not admitted this deployment yet, so init skipped it",
+			fmt.Sprintf("host admit checks the mesh subnet against it as root, and refuses one that overlaps anything there. Send the host's owner a request once init has run:\n\n    paisans host request --site %[1]s > %[1]s.admit\n\nand ask them to run, on the host:\n\n    sudo paisans host admit --request %[1]s.admit", name))
+	}
+	return admitted, unread
+}
+
+// settleMesh is init's subnet decision, over the admitted sites alone (see
+// initAdmissions). It asks each first whether it holds this deployment's
+// manifest. Once any of them does, the subnet is deployed and settleMesh
+// never changes it. Otherwise it refuses with unread, the sites
+// initAdmissions could not ask, and with none it gathers everything each
+// admitted host holds (see checkMeshLive), keeps the declared subnet if it
+// overlaps none of it, and otherwise rolls a random /24 that overlaps none,
+// moving each site's address into it with its host number kept. It writes
+// paisans-stack.yaml only when it rolled, and says why. It reports whether
+// it wrote.
+//
+// The decision is one step, "settle mesh subnet", whose result is what
+// happened to the subnet; why is its details. Its progress names the site
+// being read.
+func settleMesh(r ui.Reporter, cfg *config.Config, path string, hosts map[string]registry.Runner, admitted []string, unread error, random io.Reader) (bool, error) {
+	s := r.Step("settle mesh subnet")
+	wrote, result, err := chooseMesh(s, cfg, path, hosts, admitted, unread, random)
+	if err != nil {
+		s.Fail(err)
+		return false, err
+	}
+	s.Done(result)
+	return wrote, nil
+}
+
+// chooseMesh is settleMesh's decision, reporting what it finds to s, and
+// returning whether it wrote and the short result for the step.
+func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]registry.Runner, admitted []string, unread error, random io.Reader) (bool, string, error) {
+	manifest := cfg.Deployment().Manifest()
+	var claimedOn []string
+	for _, name := range admitted {
+		s.Progress("read " + name)
+		h := hosts[name]
+		_, found, err := h.ReadFile(manifest)
+		if err != nil {
+			return false, "", fmt.Errorf("%s: reading %s: %w. Nothing was written", h.Describe(), manifest, err)
+		}
 		if found {
 			claimedOn = append(claimedOn, name)
 			s.Detail("%s holds this deployment's manifest", name)
@@ -147,13 +197,8 @@ func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]reg
 		s.Detail("%s: mesh.subnet %s is deployed (%s holds this deployment's manifest), so it is kept as it is.", path, cfg.Mesh.Subnet, strings.Join(claimedOn, ", "))
 		return false, "deployed, kept", nil
 	}
-	if len(unreachable) > 0 {
-		explain := slices.Concat(unreachable, advice, referrals)
-		return false, "", &ui.Problem{
-			Hint:    "init could not read every site, so mesh.subnet is not settled",
-			Explain: strings.Join(append(explain, "Nothing was written. Every host has to be checked, since a subnet chosen without one is a subnet that may collide on it."), "\n"),
-			Cause:   errors.Join(failures...),
-		}
+	if unread != nil {
+		return false, "", unread
 	}
 
 	iface := cfg.Deployment().Interface()
@@ -219,3 +264,14 @@ func initHosts(cfg *config.Config) map[string]registry.Runner {
 	}
 	return hosts
 }
+
+// notAdmittedHost is a site init skipped as not admitted, as the deployment
+// record is read from it: it holds no file, since the deployment has never
+// been there, and runs nothing.
+type notAdmittedHost struct{ site string }
+
+func (h notAdmittedHost) Run(string) (string, error) {
+	return "", fmt.Errorf("%s has not admitted this deployment: %w", h.site, apply.ErrLoginRefused)
+}
+func (notAdmittedHost) ReadFile(string) (string, bool, error) { return "", false, nil }
+func (h notAdmittedHost) Describe() string                    { return h.site }

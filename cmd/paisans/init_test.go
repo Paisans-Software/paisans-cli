@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployrecord"
@@ -29,11 +29,17 @@ type initFake struct {
 	broken error
 	// files are answered to ReadFile by path.
 	files map[string]string
+	// unadmitted is a host whose owner has not admitted the deployment: it
+	// refuses the deployment's login.
+	unadmitted bool
 }
 
 func (f *initFake) Run(command string) (string, error) {
 	if f.down {
 		return "ssh: connect to host " + f.name + " port 22: Operation timed out", errors.New("exit status 255")
+	}
+	if f.unadmitted {
+		return "", fmt.Errorf("ssh: %w", apply.ErrLoginRefused)
 	}
 	switch command {
 	case mesh.RouteCommand:
@@ -52,6 +58,9 @@ func (f *initFake) Run(command string) (string, error) {
 func (f *initFake) ReadFile(path string) (string, bool, error) {
 	if f.down {
 		return "", false, f.unreachable()
+	}
+	if f.unadmitted {
+		return "", false, fmt.Errorf("ssh: %w", apply.ErrLoginRefused)
 	}
 	if f.broken != nil {
 		return "", false, f.broken
@@ -95,7 +104,7 @@ func initWorld(t *testing.T, edit func(string) string, sites map[string]*initFak
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	savedHost, savedRandom := initHost, meshRandom
+	savedHost, savedRandom, savedAdmission := initHost, meshRandom, admissionForSite
 	initHost = func(_ string, site config.Site) registry.Runner {
 		for _, f := range sites {
 			if f.name == site.SSH.Host {
@@ -106,7 +115,16 @@ func initWorld(t *testing.T, edit func(string) string, sites map[string]*initFak
 		return nil
 	}
 	meshRandom = bytes.NewReader(random)
-	t.Cleanup(func() { initHost, meshRandom = savedHost, savedRandom })
+	// A fake answers its admission as it answers everything else: a record
+	// for an admitted host, none for one that is not, and the fake's own
+	// failure for one that does not answer.
+	admissionForSite = func(h admission.Reader, _ *config.Config, _ string) (admission.Record, error) {
+		if _, _, err := h.ReadFile("/etc/paisans/admitted.json"); err != nil {
+			return admission.Record{}, err
+		}
+		return admission.Record{}, nil
+	}
+	t.Cleanup(func() { initHost, meshRandom, admissionForSite = savedHost, savedRandom, savedAdmission })
 	// Every init makes an age key under the example id, and the package's
 	// keystore outlives the test: put its items back as they were.
 	if m, ok := config.AgeKeystore.(*keystore.Memory); ok {
@@ -482,38 +500,61 @@ func TestCheckMeshLiveSaysWhoHoldsTheSubnet(t *testing.T) {
 	}
 }
 
-// A host that has not admitted the deployment is not read: admit checks the
-// subnet against it as root. One that answers is, and a manifest on any of
-// them means the subnet is deployed.
+// Each site's admission is its own step: ✓ for an admitted host, ○ for one
+// that has not admitted the deployment yet. init skips that one, with a
+// warning saying how to have it admitted, and settles the subnet and writes
+// the secrets from the others; host admit checks the subnet against it as
+// root.
 func TestInitSkipsAHostNotYetAdmitted(t *testing.T) {
-	cfg, err := config.Load(fixtureConfig())
-	if err != nil {
+	sites := fakeSites()
+	sites["home-b"].unadmitted = true
+	path, rec := initWorld(t, nil, sites, nil)
+	if err := runInitQuietly(t, path); err != nil {
 		t.Fatal(err)
 	}
-	hosts := map[string]registry.Runner{}
-	for _, name := range cfg.SiteNames() {
-		hosts[name] = &initFake{name: name}
+	for _, site := range []string{"health", "home-a", "vm"} {
+		if !rec.Has("done", "check "+site+"'s admission") {
+			t.Errorf("%s is not marked admitted:\n%s", site, rec.Lines())
+		}
 	}
-	hosts["home-b"] = unadmittedHost{err: fmt.Errorf("ssh: %w", apply.ErrLoginRefused)}
-	r := &ui.Recorder{Verbose_: true}
-	wrote, err := settleMesh(r, cfg, "unused.yaml", hosts, rand.New(rand.NewSource(1)))
-	if err != nil || wrote {
-		t.Fatalf("wrote %v, %v", wrote, err)
+	if !rec.Has("pending", "check home-b's admission") {
+		t.Errorf("home-b is not marked as skipped:\n%s", rec.Lines())
 	}
-	if !strings.Contains(r.Lines(), "home-b has not admitted this deployment yet; host admit checks the subnet against it") {
-		t.Errorf("no line for home-b:\n%s", r.Lines())
+	if !rec.Has("warn", "home-b has not admitted this deployment yet, so init skipped it") {
+		t.Errorf("no warning for home-b:\n%s", rec.Lines())
 	}
-	if r.Has("progress", "read the networks on home-b") {
-		t.Errorf("init probed home-b's networks:\n%s", r.Lines())
+	if rec.Has("progress", "read home-b") || rec.Has("progress", "read the networks on home-b") {
+		t.Errorf("init read home-b although it is not admitted:\n%s", rec.Lines())
+	}
+	if !rec.Has("detail", "overlaps nothing on health, home-a, vm; kept") {
+		t.Errorf("the subnet was not checked against the admitted sites alone:\n%s", rec.Lines())
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(path), "secrets.enc.yaml")); err != nil {
+		t.Errorf("init wrote no secrets although only home-b is unadmitted: %v", err)
 	}
 }
 
-// unadmittedHost refuses the login for everything init asks of it.
-type unadmittedHost struct{ err error }
-
-func (h unadmittedHost) Run(string) (string, error)            { return "", h.err }
-func (h unadmittedHost) ReadFile(string) (string, bool, error) { return "", false, h.err }
-func (h unadmittedHost) Describe() string                      { return "unadmitted" }
+// With no site admitted yet, as after paisans create, init still writes the
+// secrets: it keeps the declared subnet for host admit to check on each.
+func TestInitBeforeAnyAdmission(t *testing.T) {
+	sites := fakeSites()
+	for _, f := range sites {
+		f.unadmitted = true
+	}
+	path, rec := initWorld(t, nil, sites, nil)
+	if err := runInitQuietly(t, path); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Has("done", "'s admission") {
+		t.Errorf("a site is marked admitted:\n%s", rec.Lines())
+	}
+	if !rec.Has("detail", "no site has admitted this deployment yet") {
+		t.Errorf("init did not say the subnet is left to host admit:\n%s", rec.Lines())
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(path), "secrets.enc.yaml")); err != nil {
+		t.Errorf("init wrote no secrets: %v", err)
+	}
+}
 
 // A sign in client is not the operator's to provide: apply creates it at
 // Pocket ID and records it. init names the clients apply will create on one

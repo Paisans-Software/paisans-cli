@@ -159,7 +159,7 @@ file is checked as `validate` checks it before it is written; a refusal offers
 the questions it came from again, every question, writing the file as it
 stands to fix by hand, or quitting. A file refused nothing is written at once,
 to `--config` or `paisans-stack.yaml` in the current directory, and is not
-printed. It then names `secrets set`, `init` and `apply`.
+printed. It then names `init`, `host request`, `secrets set` and `apply`.
 
 Each operator's keys are checked as they are pasted: a key another operator
 gave, one listed twice, and one the loader refuses are refused there.
@@ -182,8 +182,9 @@ See *`paisans create` writes a new deployment's file, and only that* in
 
 ### `paisans init`
 
-Gives the declaration an `id` if it has none, settles `mesh.subnet` against
-every site while the deployment is on none of them, generates every secret the
+Gives the declaration an `id` if it has none, checks each site's admission,
+settles `mesh.subnet` against every admitted site while the deployment is on
+none of them, generates every secret the
 declaration needs into the secrets file (filling only what is missing), and
 says what is still owed from elsewhere. Each owed secret is a warning, since
 only the operator can provide it. The sign in clients `apply` creates are
@@ -203,7 +204,14 @@ under `--verbose`.
   it writes the variable's public key to `.sops.yaml` and names the variable
   on the `age key` step. Variables that hold no key or several are refused,
   and so is `--age-private-key-file` beside one.
-* **Hosts:** reads every site, to choose the mesh subnet. Changes none.
+* **Hosts:** checks each site's admission, one line a site: ✓ admitted, ○
+  not admitted yet, ✗ not answering. It reads each admitted site, as the
+  deployment's own user, to choose the mesh subnet, and changes none. A site
+  not admitted yet is skipped with a warning naming the `host request` for
+  it, since `host admit` checks the subnet there as root; it is run before
+  any host is admitted, as `create` says. A site that does not answer
+  refuses it with nothing written, unless a site already holds the
+  deployment, whose subnet is then kept.
 * **`--execute`:** not taken. It writes local files only: the `id` and the
   subnet into `paisans-stack.yaml`, the secrets into the secrets file, and
   `.sops.yaml` (and the key file, when named) for a new deployment.
