@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,7 +26,7 @@ func withKeystore(t *testing.T, s keystore.Store) {
 func runInitShowing(t *testing.T, args ...string) (error, string) {
 	t.Helper()
 	var err error
-	out := captureStdout(t, func() { err = runInit(args) })
+	out := captureStdout(t, func() { err = runInit(args, strings.NewReader(""), io.Discard) })
 	return err, out
 }
 

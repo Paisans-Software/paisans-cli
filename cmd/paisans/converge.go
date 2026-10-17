@@ -409,7 +409,9 @@ func checkPrepare(r ui.Reporter, args []string) (string, []checkReport, error) {
 func runStep(args []string) error {
 	switch {
 	case args[0] == "init":
-		return runInit(args[1:])
+		// apply's own init step asks nothing: a site not admitted is
+		// skipped, with the commands that admit it.
+		return runInit(args[1:], strings.NewReader(""), os.Stdout)
 	case isPrepare(args):
 		return runSitePrepare(args[2:])
 	case args[0] == "apply":

@@ -76,10 +76,12 @@ func holder(clash []mesh.Taken) string {
 // initAdmissions is init's first look at each site: whether its host has
 // admitted the deployment, read as settleMesh and the deployment record are,
 // as the deployment's user. Each site is a step, in name order: ✓ admitted,
-// ○ not admitted yet, which init skips and leaves to site admit, and ✗ one
-// it could not ask. A skipped site is a warning, not a refusal, since admit
-// checks the subnet against it as root, and refuses one that overlaps
-// anything there. It returns the admitted sites, in name order, and unread,
+// ○ not admitted yet, which init lists with why (see listNotAdmitted) and
+// offers to admit or skips (see offerAdmissions), and ✗ one it could not
+// ask. A skipped site is a warning, not a refusal, since admit checks the
+// subnet against it as root, and refuses one that overlaps anything there.
+// It returns the admitted sites, in name order, the sites not admitted,
+// and unread,
 // the refusal for the sites it could not ask: settleMesh refuses with it,
 // nothing written, unless the subnet is already deployed, since such a site
 // may be admitted, and an unchecked host is exactly where a chosen subnet
@@ -91,8 +93,8 @@ func holder(clash []mesh.Taken) string {
 // refuses the site until they have. A login refused as the deployment's own
 // user is a site not admitted (apply.ErrLoginNotAdmitted); one refused as a
 // user the site names is a key problem, and init cannot ask it.
-func initAdmissions(r ui.Reporter, cfg *config.Config, hosts map[string]registry.Runner) (admitted []string, unread error) {
-	var skipped, unreachable, advice, referrals []string
+func initAdmissions(r ui.Reporter, cfg *config.Config, hosts map[string]registry.Runner) (admitted []string, skipped []notAdmitted, unread error) {
+	var unreachable, advice, referrals []string
 	var failures []error
 	token := cfg.Deployment().Token()
 	for _, name := range cfg.SiteNames() {
@@ -106,9 +108,10 @@ func initAdmissions(r ui.Reporter, cfg *config.Config, hosts map[string]registry
 			admitted = append(admitted, name)
 			s.End(ui.OK, "admitted")
 		case errors.Is(err, apply.ErrLoginNotAdmitted), errors.Is(err, admission.ErrNotAdmitted):
-			skipped = append(skipped, name)
+			hint, _ := ui.Describe(err)
+			skipped = append(skipped, notAdmitted{site: name, why: hint})
 			s.Detail("%s", err)
-			s.End(ui.Pending, "not admitted, skipped")
+			s.End(ui.Pending, "not admitted")
 		case errors.As(err, &se), errors.As(err, &unreadable):
 			admitted = append(admitted, name)
 			result := "admitted, does not match"
@@ -146,11 +149,100 @@ func initAdmissions(r ui.Reporter, cfg *config.Config, hosts map[string]registry
 			Cause:   errors.Join(failures...),
 		}
 	}
-	for _, name := range skipped {
-		r.Warn(name+" has not admitted this deployment yet, so init skipped it",
-			fmt.Sprintf("site admit checks the mesh subnet against it as root, and refuses one that overlaps anything there. Send the host's owner a request once init has run:\n\n    paisans site request --site %[1]s > %[1]s.admit\n\nand ask them to run, on the host:\n\n    sudo paisans site admit --request %[1]s.admit", name))
+	return admitted, skipped, unread
+}
+
+// notAdmitted is a site whose host has not admitted the deployment, and
+// why init reads it so: what its admission check said.
+type notAdmitted struct{ site, why string }
+
+// listNotAdmitted is the list, before init asks or settles anything, of
+// every site not admitted and why, as one warning.
+func listNotAdmitted(r ui.Reporter, skipped []notAdmitted) {
+	if len(skipped) == 0 {
+		return
 	}
-	return admitted, unread
+	names := make([]string, 0, len(skipped))
+	lines := make([]string, 0, len(skipped))
+	for _, n := range skipped {
+		names = append(names, n.site)
+		lines = append(lines, fmt.Sprintf("- %s: %s", n.site, n.why))
+	}
+	hint := names[0] + " has not admitted this deployment yet"
+	if len(names) > 1 {
+		hint = strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1] + " have not admitted this deployment yet"
+	}
+	// A note, so the reasons show without --verbose.
+	r.Note(hint, strings.Join(lines, "\n"))
+}
+
+// offerAdmissions is what init does about each site not admitted. At a
+// terminal, without --yes, it asks whether to admit the site now from this
+// machine, and on a yes runs site admit --site's own flow (admitFromInit),
+// then checks the site's admission again and counts it admitted. With no
+// terminal, with --yes, on a no, or before mesh.subnet is set, which every
+// admission is checked against, it prints the commands that admit the site
+// and skips it. --yes never admits a host: admitting is the owner's step.
+//
+// It returns the admitted sites, in name order, and the configuration as
+// the file now holds it, since admit's first login as the deployment's
+// user may record ssh.user there; hosts is updated for each site admitted.
+// An admit that fails once its plan runs stops init with its error; one
+// that stops before, with nothing changed (see admitStopped), is a no,
+// whose reason the skip names.
+func offerAdmissions(r ui.Reporter, cfg *config.Config, path string, hosts map[string]registry.Runner, admitted []string, skipped []notAdmitted, ans answerer, stdin io.Reader, stdout io.Writer) ([]string, *config.Config, error) {
+	ask := !ans.yes && stdinIsTerminal(stdin) && cfg.Mesh.Subnet != ""
+	if len(skipped) > 0 && !ans.yes && stdinIsTerminal(stdin) && cfg.Mesh.Subnet == "" {
+		r.Note("mesh.subnet is not set yet, so init offers to admit no site", "site admit checks the subnet on the host, and init chooses it in this run. Once init has run, admit each site with the commands below, or run init again.")
+	}
+	for _, n := range skipped {
+		why := ""
+		if ask {
+			resume := ui.Hold(r)
+			yes, err := ans.yesNo(stdin, stdout, "", fmt.Sprintf("Admit %s now from this machine?", n.site), "")
+			resume()
+			if err != nil {
+				return nil, nil, fmt.Errorf("init: reading your answer: %w", err)
+			}
+			if yes {
+				err := admitFromInit(r, path, n.site, stdin, stdout)
+				if err == nil {
+					if cfg, err = config.LoadForInit(path); err != nil {
+						return nil, nil, err
+					}
+					hosts[n.site] = initHost(n.site, cfg.Sites[n.site])
+					s := r.Step("check " + n.site + "'s admission")
+					if _, err := admissionForSite(hosts[n.site], cfg, n.site); err != nil {
+						s.Fail(err)
+						return nil, nil, fmt.Errorf("init: %s was admitted, but its admission does not read back: %w", n.site, err)
+					}
+					s.End(ui.OK, "admitted")
+					admitted = append(admitted, n.site)
+					continue
+				}
+				if !admitStopped(err) {
+					return nil, nil, err
+				}
+				hint, explain := ui.Describe(err)
+				why = "site admit stopped with nothing changed: " + strings.TrimSpace(hint+" "+explain) + "\n\n"
+			}
+		}
+		// A note, so the commands show without --verbose.
+		r.Note(n.site+" has not admitted this deployment yet, so init skipped it", why+admitCommands(path, n.site))
+	}
+	sort.Strings(admitted)
+	return admitted, cfg, nil
+}
+
+// admitCommands is what admits site, for init to print: site admit from
+// this machine for an owner who is the operator, or site request and
+// site admit --request on the host for one who is not.
+func admitCommands(path, site string) string {
+	withConfig := ""
+	if path != config.FileName {
+		withConfig = " --config " + shellQuote(path)
+	}
+	return fmt.Sprintf("site admit checks the mesh subnet against the host as root, and refuses one that overlaps anything there. Each command below shows its plan before it changes anything, and takes the flags init cannot pass, such as --data-dir and --bridge-netfilter. If the host is yours, admit the site from this machine, with your own login on the host, which runs admit through sudo:\n\n    paisans site admit --site %[1]s%[2]s --ssh <your login> --execute\n\nIf someone else owns the host, send them a request:\n\n    paisans site request --site %[1]s%[2]s > %[1]s.admit\n\nand ask them to run, on the host:\n\n    sudo paisans site admit --request %[1]s.admit --execute", site, withConfig)
 }
 
 // settleMesh is init's subnet decision, over the admitted sites alone (see

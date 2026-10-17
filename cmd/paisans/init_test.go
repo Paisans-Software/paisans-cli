@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -157,7 +158,7 @@ func fakeSites() map[string]*initFake {
 func runInitQuietly(t *testing.T, path string) error {
 	t.Helper()
 	var err error
-	captureStdout(t, func() { err = runInit([]string{"--config", path}) })
+	captureStdout(t, func() { err = runInit([]string{"--config", path}, strings.NewReader(""), io.Discard) })
 	return err
 }
 
@@ -516,7 +517,7 @@ func TestInitSkipsAHostNotYetAdmitted(t *testing.T) {
 	if !rec.Has("pending", "check home-b's admission") {
 		t.Errorf("home-b is not marked as skipped:\n%s", rec.Lines())
 	}
-	if !rec.Has("warn", "home-b has not admitted this deployment yet, so init skipped it") {
+	if !rec.Has("note", "home-b has not admitted this deployment yet, so init skipped it") {
 		t.Errorf("no warning for home-b:\n%s", rec.Lines())
 	}
 	if rec.Has("progress", "read home-b") || rec.Has("progress", "read the networks on home-b") {
@@ -640,5 +641,261 @@ func TestInitNamesPendingClientsWithoutWarning(t *testing.T) {
 	}
 	if !rec.Has("detail", "https://talk.example.org/") {
 		t.Errorf("--verbose does not say what apply creates for each client:\n%s", rec.Lines())
+	}
+}
+
+// runInitAt runs init with stdin typed, at a terminal or not, and returns
+// what it wrote to stdout, where its questions go.
+func runInitAt(t *testing.T, path string, terminal bool, stdin string, extra ...string) (string, error) {
+	t.Helper()
+	withTerminal(t, terminal)
+	out := new(strings.Builder)
+	var err error
+	captureStdout(t, func() { err = runInit(append([]string{"--config", path}, extra...), typed(t, stdin), out) })
+	return out.String(), err
+}
+
+// The commands that admit a skipped site, from this machine or by request.
+func hasAdmitCommands(rec *ui.Recorder, site string) bool {
+	i := rec.Index("note", site+" has not admitted this deployment yet, so init skipped it")
+	if i < 0 {
+		return false
+	}
+	explain := rec.Events[i].Extra
+	for _, want := range []string{
+		"paisans site admit --site " + site + " --config ",
+		"--ssh <your login> --execute",
+		"paisans site request --site " + site + " --config ",
+		"sudo paisans site admit --request " + site + ".admit --execute",
+	} {
+		if !strings.Contains(explain, want) {
+			return false
+		}
+	}
+	return true
+}
+
+// At a terminal init lists every site not admitted, with why, before it
+// asks anything, then asks whether to admit each. A no prints the commands
+// that admit it and skips it, as before any admission; nothing reaches the
+// host as its owner.
+func TestInitAnsweredNoListsTheCommandsAndSkips(t *testing.T) {
+	sites := fakeSites()
+	sites["home-b"].unadmitted = true
+	sites["vm"].unadmitted = true
+	path, rec := initWorld(t, nil, sites, nil)
+	noAdmitFromInit(t)
+	out, err := runInitAt(t, path, true, "n\nn\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, site := range []string{"home-b", "vm"} {
+		if !strings.Contains(out, "Admit "+site+" now from this machine? [y/N]") {
+			t.Errorf("init did not ask about %s:\n%s", site, out)
+		}
+		if !hasAdmitCommands(rec, site) {
+			t.Errorf("no commands for %s:\n%s", site, rec.Lines())
+		}
+	}
+	list := rec.Index("note", "home-b and vm have not admitted this deployment yet")
+	if list < 0 || !strings.Contains(rec.Events[list].Extra, "- home-b: ") || !strings.Contains(rec.Events[list].Extra, "- vm: ") {
+		t.Fatalf("the sites not admitted are not listed with why:\n%s", rec.Lines())
+	}
+	if settle := rec.Index("step", "settle mesh subnet"); settle < list {
+		t.Errorf("the list does not come before the subnet is settled:\n%s", rec.Lines())
+	}
+	if !rec.Has("detail", "overlaps nothing on health, home-a; kept") {
+		t.Errorf("the subnet was not checked against the admitted sites alone:\n%s", rec.Lines())
+	}
+}
+
+// A yes runs site admit --site's own flow: it asks for the grant the site's
+// roles need and for the owner's login, shows the plan and asks before it
+// runs it. init then reads the site's admission again and goes on with it
+// admitted.
+func TestInitAnsweredYesAdmitsTheSiteAndGoesOn(t *testing.T) {
+	sites := fakeSites()
+	sites["home-b"].unadmitted = true
+	path, rec := initWorld(t, nil, sites, nil)
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reached := fakeAdmitFromInit(t, cfg.Sites["home-b"].SSHUser(), func() { sites["home-b"].unadmitted = false })
+	out, err := runInitAt(t, path, true, "y\ny\nowner\ny\n")
+	if err != nil {
+		t.Fatalf("%v\n%s\n%s", err, out, rec.Lines())
+	}
+	for _, want := range []string{"Admit home-b now from this machine? [y/N]", "Grant --watchdog?", "Existing username on home-b.local (site home-b)", "Make these changes on"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("init did not ask %q:\n%s", want, out)
+		}
+	}
+	if reached.User != "owner" || reached.Host != "home-b.local" {
+		t.Errorf("admit logged in as %+v", *reached)
+	}
+	if !rec.Has("done", "check home-b's admission") {
+		t.Errorf("home-b is not marked admitted after admit:\n%s", rec.Lines())
+	}
+	if rec.Has("note", "home-b has not admitted this deployment yet, so init skipped it") {
+		t.Errorf("init skipped home-b although it admitted it:\n%s", rec.Lines())
+	}
+	if !rec.Has("detail", "overlaps nothing on health, home-a, home-b, vm; kept") {
+		t.Errorf("the subnet was not checked against home-b:\n%s", rec.Lines())
+	}
+}
+
+// A plan the operator declines changes nothing, and is a no: init prints
+// the commands and skips the site.
+func TestInitDecliningAdmitsPlanSkipsTheSite(t *testing.T) {
+	sites := fakeSites()
+	sites["home-b"].unadmitted = true
+	path, rec := initWorld(t, nil, sites, nil)
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fakeAdmitFromInit(t, cfg.Sites["home-b"].SSHUser(), func() { t.Error("a declined plan ran") })
+	if _, err := runInitAt(t, path, true, "y\ny\nowner\nn\n"); err != nil {
+		t.Fatal(err)
+	}
+	if !hasAdmitCommands(rec, "home-b") {
+		t.Errorf("no commands for home-b:\n%s", rec.Lines())
+	}
+}
+
+// With --yes, or with no terminal, init asks nothing and never admits a
+// host: it prints the commands and skips the site.
+func TestInitWithYesOrNoTerminalNeverAsks(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		terminal bool
+		args     []string
+	}{
+		{"no terminal", false, nil},
+		{"--yes", true, []string{"--yes"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv(allowYesVariable, "1")
+			sites := fakeSites()
+			sites["home-b"].unadmitted = true
+			path, rec := initWorld(t, nil, sites, nil)
+			noAdmitFromInit(t)
+			out, err := runInitAt(t, path, c.terminal, "y\ny\nowner\ny\n", c.args...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(out, "[y/N]") {
+				t.Errorf("init asked:\n%s", out)
+			}
+			if !hasAdmitCommands(rec, "home-b") {
+				t.Errorf("no commands for home-b:\n%s", rec.Lines())
+			}
+		})
+	}
+}
+
+// plainInit makes init report as a plain run without --verbose does, into
+// the returned buffer, which is what an operator reads.
+func plainInit(t *testing.T) *strings.Builder {
+	t.Helper()
+	b := new(strings.Builder)
+	reporterOverride = ui.NewPlain(b, false)
+	return b
+}
+
+// Without --verbose, init still prints why each site is not admitted, and
+// the commands that admit each site it skips, each with --execute, since
+// without it site admit only shows its plan.
+func TestInitPrintsWhyAndTheCommandsWithoutVerbose(t *testing.T) {
+	sites := fakeSites()
+	sites["home-b"].unadmitted = true
+	sites["vm"].unadmitted = true
+	path, _ := initWorld(t, nil, sites, nil)
+	plain := plainInit(t)
+	if _, err := runInitAt(t, path, false, ""); err != nil {
+		t.Fatal(err)
+	}
+	out := plain.String()
+	for _, want := range []string{
+		"- home-b: ", "- vm: ",
+		"paisans site admit --site home-b --config ",
+		"--ssh <your login> --execute",
+		"paisans site request --site home-b --config ",
+		"sudo paisans site admit --request home-b.admit --execute",
+		"paisans site admit --site vm --config ",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("a plain run does not print %q:\n%s", want, out)
+		}
+	}
+}
+
+// A site's admission step says it is not admitted, not that it was
+// skipped: init has yet to offer to admit it.
+func TestInitDoesNotCallASiteSkippedBeforeItAsks(t *testing.T) {
+	sites := fakeSites()
+	sites["home-b"].unadmitted = true
+	path, rec := initWorld(t, nil, sites, nil)
+	noAdmitFromInit(t)
+	if _, err := runInitAt(t, path, true, "n\n"); err != nil {
+		t.Fatal(err)
+	}
+	i := rec.Index("pending", "check home-b's admission")
+	if i < 0 || strings.Contains(rec.Events[i].Extra, "skipped") {
+		t.Errorf("home-b's admission step:\n%s", rec.Lines())
+	}
+}
+
+// A grant the operator declines at admit's question changes nothing, as a
+// declined plan does, so it is a no too: init prints the commands, naming
+// site admit --site for the flags init cannot pass, and goes on.
+func TestInitDecliningAGrantSkipsTheSite(t *testing.T) {
+	sites := fakeSites()
+	sites["home-b"].unadmitted = true
+	path, rec := initWorld(t, nil, sites, nil)
+	noAdmitFromInit(t)
+	out, err := runInitAt(t, path, true, "y\nn\n")
+	if err != nil {
+		t.Fatalf("init stopped: %v", err)
+	}
+	if !strings.Contains(out, "Grant --watchdog?") {
+		t.Errorf("admit did not ask for the grant:\n%s", out)
+	}
+	if !hasAdmitCommands(rec, "home-b") {
+		t.Errorf("no commands for home-b:\n%s", rec.Lines())
+	}
+	i := rec.Index("note", "home-b has not admitted this deployment yet, so init skipped it")
+	if i < 0 || !strings.Contains(rec.Events[i].Extra, "--watchdog") {
+		t.Errorf("the skip does not say why admit stopped:\n%s", rec.Lines())
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(path), "secrets.enc.yaml")); err != nil {
+		t.Errorf("init did not go on to the secrets: %v", err)
+	}
+}
+
+// Before mesh.subnet is set, init offers no admission at a terminal, and
+// says why without --verbose.
+func TestInitSaysWhyItOffersNoAdmissionWithoutASubnet(t *testing.T) {
+	sites := fakeSites()
+	for _, f := range sites {
+		f.unadmitted = true
+	}
+	path, _ := initWorld(t, func(s string) string {
+		i := strings.Index(s, "mesh:\n")
+		j := strings.Index(s, "  subnet: 10.44.0.0/24\n")
+		return s[:i] + s[j+len("  subnet: 10.44.0.0/24\n"):]
+	}, sites, []byte{212, 37})
+	noAdmitFromInit(t)
+	plain := plainInit(t)
+	out, err := runInitAt(t, path, true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "[y/N]") {
+		t.Errorf("init asked without a subnet:\n%s", out)
+	}
+	if !strings.Contains(plain.String(), "mesh.subnet is not set yet") {
+		t.Errorf("a plain run does not say why nothing was offered:\n%s", plain.String())
 	}
 }
