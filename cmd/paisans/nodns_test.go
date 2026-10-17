@@ -151,6 +151,10 @@ func (noStore) check(ui.Reporter, map[string]grant.Record, bool, io.Reader, io.W
 
 func (noStore) publish(ui.Reporter, bool) (*appliedVersion, error) { return nil, nil }
 
+func (noStore) next(ui.Reporter, *appliedVersion, configstore.Files) (*appliedVersion, error) {
+	return nil, nil
+}
+
 func (noStore) held() (string, int) { return "", 0 }
 
 // testCaddyDigest is the build every test's registry says Caddy's tag names.

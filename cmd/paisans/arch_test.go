@@ -224,6 +224,10 @@ func (s *gatheredStore) publish(_ ui.Reporter, execute bool) (*appliedVersion, e
 	return &appliedVersion{sha: strings.Repeat("d", 40), revision: 1, files: snapshotted(configstore.Files{Paisans: s.paisans, Secrets: s.secrets})}, nil
 }
 
+func (s *gatheredStore) next(_ ui.Reporter, prev *appliedVersion, files configstore.Files) (*appliedVersion, error) {
+	return &appliedVersion{sha: strings.Repeat("e", 40), revision: prev.revision + 1, files: files}, nil
+}
+
 func (s *gatheredStore) held() (string, int) { return "", 0 }
 
 // gatherFiles replaces applyStore with one that takes the bytes the real one

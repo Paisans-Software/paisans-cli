@@ -87,6 +87,8 @@ changes share a bullet. Detailed notes are on the corresponding
 - `apply` starts a stack whose containers were removed or stopped though its files match the render, and applies each Garage site before storage, so a site whose containers were removed converges again.
 - `create` refuses, as it is pasted, an operator's key another operator gave, one listed twice, or one the loader refuses, rather than rendering a file that does not load.
 - `create` offers to write a file validate refuses as it stands, to fix by hand, so the answers are not lost.
+- `apply` that records a Pocket ID client's credentials or a signup group's ID publishes the bytes it wrote as the next revision, which its host records, so a first apply completes.
+- `apply` ends `start pocket-id` done when its site stops for etcd or its databases, lists a failed install step's error under it, and names the member a later founding stop waits on.
 
 ### Security
 

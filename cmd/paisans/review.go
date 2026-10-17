@@ -313,6 +313,10 @@ type runReview struct {
 	// version is the configuration version the run published, which each
 	// apply step records with what it applied; nil in a dry run.
 	version *appliedVersion
+	// store is the configuration store the run published version to, and
+	// identity what names the version the run applies; nil in a dry run.
+	store    storeVersion
+	identity *runIdentity
 }
 
 // reviewedByRun is set while apply with no --site runs.

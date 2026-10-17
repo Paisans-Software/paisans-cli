@@ -6006,6 +6006,11 @@ way. A run that stops between prepare and publish has granted keys without
 publishing the version, and the next run publishes it. A version that reaches no
 site is refused, naming `host prepare`, because the hosts are checked against
 what the store holds. `apply --site` without a store refuses in the same words.
+An apply that records what it made at Pocket ID, a client's credentials or a
+signup group's ID, writes `secrets.enc.yaml` after the version was published.
+Before its host records the version applied, it publishes the bytes it wrote
+as the next revision, which the host records; as a step of `apply` without
+`--site`, every later step applies that revision.
 Gathering reaches every site as the deployment's user and needs the standard file names
 beside `paisans-stack.yaml`, so a deployment with renamed files cannot use `apply`
 until they are renamed; and a dry run needs an operator's key in the ssh-agent too,

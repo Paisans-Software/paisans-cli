@@ -2497,3 +2497,119 @@ func TestEveryDegradedEndHonoursRequireAll(t *testing.T) {
 		t.Errorf("--require-all with an operator's error: %v: %s", err, problemText(err))
 	}
 }
+
+// dualSite is a deployment of two data sites and an edge that is the
+// gateway, the witness and the monitor, every one an etcd member: the
+// staging topology.
+func dualSite() *config.Config {
+	return &config.Config{
+		Sites: map[string]config.Site{
+			"edge":   {Roles: []config.Role{config.RoleGateway, config.RoleWitness, config.RoleMonitor}},
+			"site-a": {Roles: []config.Role{config.RoleData, config.RoleApps}},
+			"site-b": {Roles: []config.Role{config.RoleData, config.RoleApps}},
+		},
+		Etcd: config.Etcd{Members: []string{"edge", "site-a", "site-b"}},
+	}
+}
+
+// foundingEtcd is a convergeRun for the founding of members: each apply of
+// a member starts its etcd, and a data member's apply stops for the founding
+// members whose etcd does not run yet, as apply does. It records each apply.
+func foundingEtcd(t *testing.T, cfg *config.Config) *[]string {
+	t.Helper()
+	var ran []string
+	running := map[string]bool{}
+	saved := convergeRun
+	convergeRun = func(args []string) error {
+		title := strings.Join(args[:3], " ")
+		ran = append(ran, title)
+		site := strings.TrimPrefix(title, "apply --site ")
+		running[site] = true
+		if cfg.Sites[site].Has(config.RoleWitness) {
+			return nil
+		}
+		var unstarted []string
+		for _, m := range cfg.Etcd.Members {
+			if !running[m] {
+				unstarted = append(unstarted, m)
+			}
+		}
+		if len(unstarted) > 0 {
+			return foundingWait(site, unstarted...)
+		}
+		return nil
+	}
+	t.Cleanup(func() { convergeRun = saved })
+	return &ran
+}
+
+// On a fresh dual-site deployment every founding member's founding apply runs
+// before any site is applied again: site-a stops for site-b's etcd, site-b's
+// founding apply comes next and finds every member running, and site-a's
+// next apply resumes it. The run completes.
+func TestADualSiteFoundingRunsEveryFoundingApplyBeforeARevisit(t *testing.T) {
+	cfg := dualSite()
+	steps := convergePlan(cfg, convergeState{})
+	var install []convergeStep
+	for _, s := range steps {
+		if s.Stage.installs() {
+			install = append(install, s)
+		}
+	}
+	samePlan(t, install,
+		"founding: apply --site edge",
+		"founding: apply --site site-a",
+		"founding: apply --site site-b",
+		"pass two: apply --site site-a",
+		"pass two: apply --site site-b",
+		"pass two: apply --site edge",
+	)
+	ran := foundingEtcd(t, cfg)
+	rec := &ui.Recorder{}
+	if err := convergeInstall(rec, install, convergeOptions{}); err != nil {
+		t.Fatalf("%v\n%s", err, rec.Lines())
+	}
+	sameLines(t, *ran, []string{
+		"apply --site edge",
+		"apply --site site-a",
+		"apply --site site-b",
+		"apply --site site-a",
+		"apply --site site-b",
+		"apply --site edge",
+	})
+	if rec.Has("fail", "") {
+		t.Errorf("a line failed:\n%s", rec.Lines())
+	}
+	for _, site := range []string{"edge", "site-a", "site-b"} {
+		if !rec.Has("done", site) {
+			t.Errorf("%s did not end done:\n%s", site, rec.Lines())
+		}
+	}
+}
+
+// A founding stop is a pause only on a founding apply. On a later visit the
+// run stops, naming the member that runs no etcd.
+func TestAFoundingStopOnALaterVisitStopsTheRunNamingTheCause(t *testing.T) {
+	ran := fakeConverge(t, nil)
+	saved := convergeRun
+	visits := 0
+	convergeRun = func(args []string) error {
+		err := saved(args)
+		if strings.HasPrefix(strings.Join(args, " "), "apply --site home-a ") {
+			if visits++; visits == 2 {
+				return foundingWait("home-a", "home-b")
+			}
+		}
+		return err
+	}
+	t.Cleanup(func() { convergeRun = saved })
+	rec := recordConverge(t)
+	err := converge(t, "--execute")
+	text := problemText(err)
+	if err == nil || !strings.Contains(text, "apply stopped at apply --site home-a") || !strings.Contains(text, "home-b runs no etcd.") || !errors.Is(err, apply.ErrFoundingWait) {
+		t.Fatalf("got %v\n%s", text, rec.Lines())
+	}
+	if (*ran)[len(*ran)-1] != "apply --site home-a" || !rec.Has("fail", "home-a") {
+		t.Errorf("ran on, or the line did not fail: %v\n%s", *ran, rec.Lines())
+	}
+}

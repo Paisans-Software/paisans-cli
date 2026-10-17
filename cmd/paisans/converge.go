@@ -904,11 +904,13 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		return err
 	}
 	// Approved, and before the first step: every host's record is checked
-	// against the version, which only reads. The version is published once
-	// for the run, after the host prepare steps, which make every site's
-	// store, and before any other step changes a host, so the store holds
-	// what is applied even if the run stops part way. Each apply step
-	// records it, and refuses files that are not it.
+	// against the version, which only reads. The version is published after
+	// the host prepare steps, which make every site's store, and before any
+	// other step changes a host, so the store holds what is applied even if
+	// the run stops part way. A step that records what it made at Pocket ID
+	// in secrets.enc.yaml publishes the bytes it wrote as the next version,
+	// which the steps after it apply. Each apply step records the version,
+	// and refuses files that are not it.
 	if err := store.check(r, convergeRecords(reviews), true, o.stdin, o.stdout); err != nil {
 		return err
 	}
@@ -919,6 +921,9 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		}
 		return err
 	}
+	// A step that records what it made at Pocket ID publishes the next
+	// version through the run's store (siteReview.publishWritten).
+	reviewedByRun.store, reviewedByRun.identity = store, identity
 	if err := convergeExecute(r, cfg, steps, o, publish); err != nil {
 		return err
 	}
@@ -1455,10 +1460,12 @@ func groupStop(what string, steps []convergeStep, errs []error) error {
 // and which site leads is known only once Patroni runs. A later visit to the
 // site resumes it; when the stop is on the site's last visit, the site is
 // applied once more after every other step, by which time the leader's site
-// has had its own last visit, and a stop then ends the run. Each step is
-// listed under its line with its own result, which -v shows with the step's
-// own output; its notes follow the line at every verbosity. A failure ends
-// its line and the run, leaving the other lines as they stand.
+// has had its own last visit, and a stop then ends the run. A founding stop
+// is a pause only on a founding apply: on any other visit it ends the run,
+// naming the members that run no etcd. Each step is listed under its line with its own result, which -v shows with the step's
+// own output; its notes follow the line at every verbosity. A failure lists
+// its error under its inner step and ends its line and the run, leaving the
+// other lines as they stand.
 func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions) error {
 	r.Section("install")
 	places := installPlaces(steps)
@@ -1494,6 +1501,7 @@ func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions) err
 			line.Detail("  %s", strings.ReplaceAll(sentences(err), "\n", "\n  "))
 		default:
 			line.Detail("%s", innerLine(ui.Failed, s.Title, since(start)))
+			line.Detail("  %s", strings.ReplaceAll(sentences(err), "\n", "\n  "))
 		}
 		for _, n := range lineDetails(line, "  ", output, reports) {
 			line.Note(n.Text, n.Detail)
@@ -1506,6 +1514,10 @@ func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions) err
 			line.Done("")
 		case err == nil || founding || databases:
 			line.Pause(why)
+		case errors.Is(err, apply.ErrFoundingWait):
+			// A pause only on a founding apply, which pass two resumes.
+			line.Fail(err)
+			return convergeStop("apply stopped at "+s.Title, laterFounding(err), resumeAdvice)
 		case errors.Is(err, storageadd.ErrWaiting):
 			// Not a failure, and main exits 75 for it as storage add does.
 			line.End(ui.Pending, "waiting on Garage")
@@ -1551,6 +1563,24 @@ func revisitPause(steps []convergeStep, i int) string {
 		return "paused until " + between[0] + " is done"
 	}
 	return "paused until " + andList(between) + " are done"
+}
+
+// laterFounding is a founding stop on a visit other than a founding apply,
+// as the run stops with it: the members err names run no etcd.
+func laterFounding(err error) error {
+	names, verb := "another founding member", "runs"
+	var wait *apply.FoundingWaitError
+	if errors.As(err, &wait) && len(wait.Unstarted) > 0 {
+		names = andList(wait.Unstarted)
+		if len(wait.Unstarted) > 1 {
+			verb = "run"
+		}
+	}
+	return &ui.Problem{
+		Hint:    "etcd is still being founded, and " + names + " " + verb + " no etcd",
+		Explain: "Only a founding apply waits for the other founding members' etcd. Find out why etcd does not run on " + names + ".",
+		Cause:   err,
+	}
 }
 
 // foundingPause is why a founding stop pauses its line: until the founding
@@ -1625,6 +1655,12 @@ func convergeQuiet(r ui.Reporter, line ui.Step, args []string, verbose bool) (ou
 	}()
 	err = convergeRun(args)
 	return b.String(), reports, err
+}
+
+// paused reports whether err is a planned stop the run resumes later: the
+// founding stop or a replica's for its databases.
+func paused(err error) bool {
+	return errors.Is(err, apply.ErrFoundingWait) || errors.Is(err, apply.ErrDatabasesWait)
 }
 
 // convergeUp reports whether every step that brings a Pocket ID app up was
