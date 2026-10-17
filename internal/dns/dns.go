@@ -559,6 +559,10 @@ func Build(ctx context.Context, provider Provider, d deployment.Deployment, want
 	if err := plan.addParent(ctx, provider, parent, zones, existing); err != nil {
 		return nil, err
 	}
+	sort.SliceStable(plan.Entries, func(i, j int) bool {
+		a, b := plan.Entries[i], plan.Entries[j]
+		return a.Name < b.Name || a.Name == b.Name && a.Type < b.Type
+	})
 	if err := plan.cover(ctx, provider, zones, existing); err != nil {
 		return nil, err
 	}

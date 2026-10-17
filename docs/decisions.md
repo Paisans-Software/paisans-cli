@@ -3143,10 +3143,13 @@ own.
 * A policy there covers only when it is the only one there and rejects. More
   than one, or a CNAME delegating the policy to a DMARC service, is a note
   and covers nothing.
-* The policy written there is `v=DMARC1; p=reject; sp=reject; adkim=r;
-  aspf=r;`. Relaxed alignment passes mail a name under the domain sends
-  signed for a sibling, which nothing in the zone shows; a forgery has no
-  signature to align, and is rejected either way.
+* A policy there covers only with strict alignment, as the hostnames' own
+  have: under relaxed alignment a forger passes with any sibling name's SPF,
+  such as a relay's include on a name that sends mail. A name between that
+  holds a policy not as strict, delegates it by a CNAME, or is delegated to
+  nameservers the provider does not hold, covers nothing either.
+* `dns prune` asks `dns init`'s plan which hostname policies are covered, so
+  the two never disagree.
 * A name that is a CNAME has its target's mail, which `dns init` resolves
   through public DNS; a lookup that fails other than by the name not
   existing counts as mail.

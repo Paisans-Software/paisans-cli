@@ -71,13 +71,6 @@ const (
 	// dmarcSender is the policy for a domain that sends mail and receives
 	// none. dns prune never deletes it: the domain's mail depends on it.
 	dmarcSender = "v=DMARC1; p=reject; sp=reject;"
-	// dmarcParent is the policy at the registrable domain above
-	// community.domain. Its alignment is relaxed, so that mail a name under
-	// the domain sends signed for a sibling still passes: nothing in the
-	// zone shows which names do. It still rejects every forgery, which has
-	// no signature to align. The relaxed tags are spelled out so that it is
-	// told apart from dmarcSender.
-	dmarcParent = "v=DMARC1; p=reject; sp=reject; adkim=r; aspf=r;"
 	// nullMX is RFC 7505's: preference 0, target the root.
 	nullMX = "."
 )
@@ -225,7 +218,7 @@ func mailWants(cfg *config.Config, addresses []Want) []Want {
 			}
 		}
 		sort.Strings(senders)
-		out = append(out, Want{Type: "TXT", Name: "_dmarc." + parent, Content: dmarcParent, Sources: source, Advisory: true, Parent: true, Senders: senders})
+		out = append(out, Want{Type: "TXT", Name: "_dmarc." + parent, Content: dmarcLockdown, Sources: source, Advisory: true, Parent: true, Senders: senders})
 	}
 	if sources, ok := mail[domain]; ok {
 		out = append(out, Want{Type: "TXT", Name: dmarc, Content: dmarcLockdown, Sources: sources, Advisory: true})
@@ -557,7 +550,7 @@ func isLockdown(r Record) bool {
 		text := strings.Join(strings.Fields(txtText(r.Content)), " ")
 		switch {
 		case strings.HasPrefix(name, "_dmarc."):
-			return text == dmarcLockdown || text == dmarcParent
+			return text == dmarcLockdown
 		case strings.HasPrefix(name, "*._domainkey."):
 			return text == dkimLockdown
 		default:

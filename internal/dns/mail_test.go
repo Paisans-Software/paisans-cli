@@ -97,7 +97,8 @@ func TestMailDomainLeavesTheDomainAlone(t *testing.T) {
 	}
 
 	for policy, want := range map[string]Action{
-		"v=DMARC1; p=reject; rua=mailto:r@example.net": Covered,
+		"v=DMARC1; p=reject; adkim=s; aspf=s; rua=mailto:r@example.net": Covered,
+		"v=DMARC1; p=reject; rua=mailto:r@example.net":                  Create,
 		"v=DMARC1; p=none": Create,
 	} {
 		fake := newFake()
@@ -628,7 +629,7 @@ func TestRegistrableDomainPolicyIsWrittenWhenNothingHasMail(t *testing.T) {
 	}
 	c := fake.serve(t)
 	p := plan(t, c, staged())
-	if e, _ := entryAt(p, "_dmarc.example.org"); e.Action != Create || e.Content != dmarcParent {
+	if e, _ := entryAt(p, "_dmarc.example.org"); e.Action != Create || e.Content != dmarcLockdown {
 		t.Fatalf("the registrable domain's policy: %+v", e)
 	}
 	// Until it reads back, nothing says the provider let it be written, so
@@ -773,7 +774,7 @@ func TestMailNameWithItsOwnPolicyLeavesTheRegistrableDomainFree(t *testing.T) {
 func TestRegistrableDomainPolicyIsNeverReplaced(t *testing.T) {
 	fake := newFake()
 	fake.zones["example.org"] = "zone-1"
-	fake.records["zone-1"] = []cfRecord{{ID: "dmarc", Type: "TXT", Name: "_dmarc.example.org", Content: "v=DMARC1; p=reject; sp=reject; rua=mailto:r@example.net"}}
+	fake.records["zone-1"] = []cfRecord{{ID: "dmarc", Type: "TXT", Name: "_dmarc.example.org", Content: "v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s; rua=mailto:r@example.net"}}
 	p := plan(t, fake.serve(t), staged())
 	if e, _ := entryAt(p, "_dmarc.example.org"); e.Action != Present {
 		t.Errorf("a strong policy there: got %s", e.Action)
@@ -831,7 +832,7 @@ func TestOwnRegistrableDomainPolicyOverAConfiguredSenderIsAConflict(t *testing.T
 	fake := newFake()
 	fake.zones["example.org"] = "zone-1"
 	fake.records["zone-1"] = []cfRecord{
-		{ID: "parent", Type: "TXT", Name: "_dmarc.example.org", Content: dmarcParent, Comment: comment},
+		{ID: "parent", Type: "TXT", Name: "_dmarc.example.org", Content: dmarcLockdown, Comment: comment},
 		{Type: "MX", Name: "shop.example.org", Content: "mx.example.net", Priority: ptr(10)},
 	}
 	c := fake.serve(t)
@@ -1137,7 +1138,7 @@ func TestPruneRemovesAVouchedRegistrableDomainPolicy(t *testing.T) {
 	fake := newFake()
 	fake.zones["example.org"] = "zone-1"
 	fake.zones["example.net"] = "zone-2"
-	fake.records["zone-1"] = []cfRecord{{ID: "parent", Type: "TXT", Name: "_dmarc.example.org", Content: dmarcParent, Comment: comment}}
+	fake.records["zone-1"] = []cfRecord{{ID: "parent", Type: "TXT", Name: "_dmarc.example.org", Content: dmarcLockdown, Comment: comment}}
 	c := fake.serve(t)
 	p, err := BuildPrune(context.Background(), c, cfg, wants)
 	if err != nil {
@@ -1160,7 +1161,7 @@ func TestPruneRemovesAVouchedRegistrableDomainPolicy(t *testing.T) {
 func TestCNAMEToAHostWithMailStopsTheRegistrableDomainPolicy(t *testing.T) {
 	was := lookupMail
 	t.Cleanup(func() { lookupMail = was })
-	lookupMail = func(_ context.Context, name string) bool { return name == "news.example.org" }
+	lookupMail = func(_ context.Context, name string) bool { return name == "esp.example.net" }
 	fake := newFake()
 	fake.zones["example.org"] = "zone-1"
 	fake.records["zone-1"] = []cfRecord{
@@ -1202,5 +1203,99 @@ func TestHostnameWithNoRegistrableDomainGetsSPF(t *testing.T) {
 	cfg.Apps["pages"] = config.App{Blueprint: config.Blueprint("writefreely"), Hostname: "github.io"}
 	if w := wantsOf(t, cfg)["TXT github.io"]; w.Content != spfLockdown || w.Guard {
 		t.Errorf("got %+v, want SPF written", w)
+	}
+}
+
+// A name between a hostname and the registrable domain covers nothing when
+// it delegates its DMARC policy by a CNAME, or is a zone the provider does
+// not hold: a receiver walking up the tree may read a weaker policy there.
+func TestNameBetweenOutOfSightIsNotCovered(t *testing.T) {
+	cases := map[string]cfRecord{
+		"a cname policy": {Type: "CNAME", Name: "_dmarc.staging.example.org", Content: "staging._dmarc.vendor.example.net"},
+		"a delegation":   {Type: "NS", Name: "staging.example.org", Content: "ns1.example.net"},
+	}
+	for name, between := range cases {
+		t.Run(name, func(t *testing.T) {
+			fake := newFake()
+			fake.zones["example.org"] = "zone-1"
+			fake.records["zone-1"] = []cfRecord{{Type: "TXT", Name: "_dmarc.example.org", Content: dmarcLockdown}, between}
+			if e, _ := entryAt(plan(t, fake.serve(t), staged()), "_dmarc.talk.staging.example.org"); e.Action != Create {
+				t.Errorf("got %s, want create", e.Action)
+			}
+		})
+	}
+	// A delegation to a zone the provider holds is in sight.
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.zones["staging.example.org"] = "zone-2"
+	fake.records["zone-1"] = []cfRecord{{Type: "TXT", Name: "_dmarc.example.org", Content: dmarcLockdown}, {Type: "NS", Name: "staging.example.org", Content: "ns1.example.net"}}
+	fake.records["zone-2"] = []cfRecord{{Type: "NS", Name: "staging.example.org", Content: "ns1.example.net"}}
+	if e, _ := entryAt(plan(t, fake.serve(t), staged()), "_dmarc.talk.staging.example.org"); e.Action != Covered {
+		t.Errorf("held delegation: got %s, want covered", e.Action)
+	}
+}
+
+// A rejecting policy with relaxed alignment covers nothing: a forger passes
+// it with any sibling name's SPF.
+func TestRelaxedRegistrableDomainPolicyCoversNothing(t *testing.T) {
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{{Type: "TXT", Name: "_dmarc.example.org", Content: "v=DMARC1; p=reject; sp=reject"}}
+	p := plan(t, fake.serve(t), staged())
+	if e, _ := entryAt(p, "_dmarc.example.org"); e.Action != Present {
+		t.Errorf("the policy: got %s, want present", e.Action)
+	}
+	if e, _ := entryAt(p, "_dmarc.talk.staging.example.org"); e.Action != Create {
+		t.Errorf("the hostname: got %s, want create", e.Action)
+	}
+}
+
+// A sender at the registrable domain itself is governed by the policy this
+// deployment wrote there.
+func TestOwnRegistrableDomainPolicyOverASenderAtTheDomain(t *testing.T) {
+	cfg := staged()
+	cfg.SMTP = config.SMTP{FromAddress: "noreply@example.org"}
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{{Type: "TXT", Name: "_dmarc.example.org", Content: dmarcLockdown, Comment: comment}}
+	if e, _ := entryAt(plan(t, fake.serve(t), cfg), "_dmarc.example.org"); e.Action != Conflict || !strings.Contains(e.Detail, "example.org, a sender this configuration names") {
+		t.Errorf("got %s (%s), want a conflict naming the sender", e.Action, e.Detail)
+	}
+}
+
+// A wildcard CNAME gives every name it reaches its target's mail.
+func TestWildcardCNAMEToAHostWithMailStopsTheRegistrableDomainPolicy(t *testing.T) {
+	was := lookupMail
+	t.Cleanup(func() { lookupMail = was })
+	lookupMail = func(_ context.Context, name string) bool { return name == "mail.example.net" }
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{{Type: "CNAME", Name: "*.example.org", Content: "mail.example.net"}}
+	if e, _ := entryAt(plan(t, fake.serve(t), staged()), "_dmarc.example.org"); e.Action != Warn || !strings.Contains(e.Detail, "*.example.org") {
+		t.Errorf("got %s (%s), want a warning naming the wildcard", e.Action, e.Detail)
+	}
+}
+
+// While the policy this deployment wrote is a conflict, prune keeps the
+// hostnames' own policies, as dns init wants them.
+func TestPruneKeepsHostnamePoliciesWhileTheCoverIsAConflict(t *testing.T) {
+	cfg := staged()
+	cfg.SMTP = config.SMTP{FromAddress: "noreply@news.example.org"}
+	wants, err := Desired(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{
+		{ID: "parent", Type: "TXT", Name: "_dmarc.example.org", Content: dmarcLockdown, Comment: comment},
+		{ID: "talk", Type: "TXT", Name: "_dmarc.talk.staging.example.org", Content: dmarcLockdown, Comment: comment},
+	}
+	p, err := BuildPrune(context.Background(), fake.serve(t), cfg, wants)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(p.Removes()); n != 0 {
+		t.Errorf("removes %+v, want nothing", p.Removes())
 	}
 }

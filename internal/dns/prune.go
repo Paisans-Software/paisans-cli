@@ -179,8 +179,16 @@ func BuildPrune(ctx context.Context, provider Provider, cfg *config.Config, want
 	} else if held {
 		rules.names = append(rules.names, parent.Name)
 	}
-	if err := dropCovered(ctx, provider, RecordComment(cfg.Deployment()), wants, rules.wanted, cache); err != nil {
+	// A no-mail DMARC policy dns init plans as Covered is not wanted: the
+	// two judge coverage the same way because prune asks dns init's plan.
+	covered, err := Build(ctx, provider, cfg.Deployment(), wants)
+	if err != nil {
 		return nil, err
+	}
+	for _, e := range covered.Entries {
+		if e.Action == Covered {
+			delete(rules.wanted, e.Type+" "+e.Name)
+		}
 	}
 	for _, name := range cfg.SiteNames() {
 		for key, ip := range siteAddresses(cfg, name) {

@@ -3908,7 +3908,7 @@ it:
 | `community.domain` | MX `0 .` (RFC 7505's null MX) | the domain accepts no mail, so nothing is delivered to it and no bounce is sent in its name |
 | `*._domainkey.<community.domain>` | TXT `v=DKIM1; p=` | no selector under the domain has a key to verify a signature with |
 | `_dmarc.<community.domain>` | TXT `v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s;` | reject what fails, on the domain (`p`) and on every name under it (`sp`) |
-| `_dmarc.<registrable domain>`, when `community.domain` is below it and the conditions below hold | TXT `v=DMARC1; p=reject; sp=reject; adkim=r; aspf=r;` | a receiver finding no policy at a name's own `_dmarc` applies the registrable domain's (`example.org` for `talk.staging.example.org`), never `community.domain`'s, so this one record covers every hostname below it. Its alignment is relaxed, so mail a name under the domain sends signed for a sibling still passes; a forgery has no signature to align, and is rejected all the same |
+| `_dmarc.<registrable domain>`, when `community.domain` is below it and the conditions below hold | TXT `v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s;` | a receiver finding no policy at a name's own `_dmarc` applies the registrable domain's (`example.org` for `talk.staging.example.org`), never `community.domain`'s, so this one record covers every hostname below it |
 | `_dmarc.<hostname>`, for every name that gets an address record, when the registrable domain's policy is one `dns init` only checks or may not write, and does not reject | TXT `v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s;` | each hostname carries the policy the registrable domain does not: below a registrable domain above `community.domain`, or under a `community.domain` with mail of its own |
 | a hostname that is itself a registrable domain | TXT `v=spf1 -all` | a DMARC policy there would govern names the deployment does not run, so the hostname says it sends no mail with SPF, which applies to that exact name alone |
 
@@ -3935,10 +3935,14 @@ that policy only where it changes nothing for anybody's mail. It creates
   the domain is out of sight.
 
 A policy already there that rejects (`p=reject`, `sp=reject`, no `pct` below
-100), whoever wrote it, and is the only one there, covers the hostnames, and
-`dns init` writes no `_dmarc.<hostname>` and no `_dmarc.<community.domain>`,
-unless a name between the hostname and the registrable domain holds a weaker
-policy: a receiver walking up the tree under DMARCbis reads that one first.
+100) with strict alignment (`adkim=s`, `aspf=s`), whoever wrote it, and is the
+only one there, covers the hostnames, and `dns init` writes no
+`_dmarc.<hostname>` and no `_dmarc.<community.domain>`. Relaxed alignment
+covers nothing, since a forger passes it with any sibling name's SPF. Nor
+does a policy covered by a name between the hostname and the registrable
+domain that holds a policy not as strict, delegates its policy by a CNAME, or
+is delegated to nameservers the DNS provider does not hold: a receiver
+walking up the tree under DMARCbis may read that one first.
 The run that creates the policy still gives each hostname its own, since
 nothing says the provider let it be written until it reads back; `dns prune
 --execute` then removes them. A policy that is weaker, or a missing one that
