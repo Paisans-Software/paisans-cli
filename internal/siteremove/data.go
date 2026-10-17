@@ -23,9 +23,9 @@ type etcdState struct {
 	// witness is the leaving witness's member, nil once it has none or when
 	// no witness leaves (see EndState).
 	witness *apply.EtcdMember
-	// witnessRunning is whether an etcd container of this deployment still
-	// runs on the leaving witness's host.
-	witnessRunning bool
+	// witnessContainer is whether an etcd container of this deployment, running
+	// or stopped, is on the leaving witness's host.
+	witnessContainer bool
 }
 
 // probeEtcd finds a remaining voter to run etcdctl on, and refuses a removal
@@ -135,7 +135,7 @@ func (p *Plan) probeEtcd() error {
 		if err != nil {
 			return fmt.Errorf("site remove %s: %s: looking for its etcd container: %w: %s", p.Site, p.witness, err, lastLines(out, 3))
 		}
-		p.etcd.witnessRunning = strings.TrimSpace(out) != ""
+		p.etcd.witnessContainer = strings.TrimSpace(out) != ""
 	}
 	if len(problems) > 0 {
 		return fmt.Errorf("site remove %s: etcd is not healthy enough to change its membership:\n  %s\nFix the members named (`paisans doctor` says how) and run again. Nothing was changed", p.Site, strings.Join(problems, "\n  "))

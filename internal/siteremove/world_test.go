@@ -149,6 +149,9 @@ type host struct {
 	// etcdContainer is whether the etcd container runs, which a removed
 	// member's does until it is stopped.
 	etcdContainer bool
+	// etcdExited is whether a stopped etcd container is left on the host,
+	// which only `docker rm` takes away.
+	etcdExited bool
 	// etcdHosts is ETCD3_HOSTS as the running Patroni has it.
 	etcdHosts string
 	// ownCluster, when set, is the separate cluster this host's etcd
@@ -527,11 +530,15 @@ func (h *host) Run(command string) (string, error) {
 			return "starting \n", nil
 		}
 		return "running streaming\n", nil
-	case strings.HasPrefix(command, "ids=$(docker ps -q --filter") && strings.Contains(command, "service=etcd"):
+	case strings.HasPrefix(command, "ids=$(docker ps -") && strings.Contains(command, "service=etcd"):
+		all := strings.HasPrefix(command, "ids=$(docker ps -aq ")
+		if h.etcdContainer || all && h.etcdExited {
+			h.etcdExited = !strings.Contains(command, "docker rm")
+		}
 		h.etcdContainer, h.etcdUp = false, false
 		return "", nil
-	case strings.HasPrefix(command, "docker ps -q --filter") && strings.Contains(command, "service=etcd"):
-		if h.etcdContainer {
+	case strings.HasPrefix(command, "docker ps -") && strings.Contains(command, "service=etcd"):
+		if h.etcdContainer || strings.HasPrefix(command, "docker ps -aq ") && h.etcdExited {
 			return "0123456789ab\n", nil
 		}
 		return "", nil

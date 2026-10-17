@@ -671,8 +671,8 @@ func (p *Plan) buildCutoffEtcd() *Stage {
 		if p.etcd.witness != nil {
 			st.Steps = append(st.Steps, Step{Site: p.etcd.control, Verb: "remove", Title: "remove witness " + p.witness + "'s etcd member", Text: fmt.Sprintf("the witness %s's etcd member %s, leaving %s the one voter, since two voters are worse than one: %s", p.witness, p.etcd.witness.HexID(), p.end.Etcd.Members[0], p.etcdctl("member remove "+p.etcd.witness.HexID()))})
 		}
-		if p.etcd.witnessRunning {
-			st.Steps = append(st.Steps, Step{Site: p.witness, Verb: "stop", Title: "stop etcd on " + p.witness, Text: "its etcd, which a removed member cannot rejoin: " + p.stopWitnessEtcd()})
+		if p.etcd.witnessContainer {
+			st.Steps = append(st.Steps, Step{Site: p.witness, Verb: "stop", Title: "stop and remove etcd on " + p.witness, Text: "its etcd container, which a removed member cannot rejoin: " + p.stopWitnessEtcd()})
 		}
 	}
 	st.Gate = fmt.Sprintf("etcd's voters are exactly %s and every member is healthy", strings.Join(sortedCopy(p.live(p.end.Etcd.Members)), ", "))
@@ -687,8 +687,8 @@ func (p *Plan) buildCutoffEtcd() *Stage {
 				return err
 			}
 		}
-		if p.etcd.witness != nil || p.etcd.witnessRunning {
-			p.work("stop etcd on " + p.witness)
+		if p.etcd.witness != nil || p.etcd.witnessContainer {
+			p.work("stop and remove etcd on " + p.witness)
 			if out, err := p.transports[p.witness].Run(p.stopWitnessEtcd()); err != nil {
 				return fmt.Errorf("%s: stopping its etcd: %w: %s", p.witness, err, lastLines(out, 3))
 			}
