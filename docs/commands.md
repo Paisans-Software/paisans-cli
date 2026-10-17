@@ -816,6 +816,10 @@ paisans host evict --site home-a --ssh owner@home-a.example.org --execute
   deployment's user, defaulting to `paisans-<token>`. Evict deletes a user
   only when it is the deployment's: the admission record's, or, with no
   record, `paisans-<token>`; any other account is refused.
+* **Release:** refuses, with nothing changed, a host whose registry says a
+  newer release of paisans claimed it for any deployment, this one or
+  another, or names a release it cannot order, and names the highest
+  release to upgrade to. No flag overrides it.
 * **`--execute`:** asks for the user's name at a terminal, then removes the
   mesh, the user with its home and Docker data, the deployment's directory,
   the helper and sudoers line, the egress table and its firewall rules except

@@ -12,6 +12,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 const id = "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
@@ -658,5 +659,60 @@ func TestABadInstalledListStopsOnlyTheLastEvict(t *testing.T) {
 	h.file("/etc/paisans/installed", "rm -rf /\n").withFile("/etc/paisans/installed", "rm -rf /\n", "644", 0)
 	if _, err := hostadmit.BuildEvict(withEntries(h), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"}); err != nil {
 		t.Errorf("BuildEvict beside another deployment = %v", err)
+	}
+}
+
+// evictBeside is evict of watch on a host whose registry also holds 0c0d,
+// with the releases that claimed each.
+func evictBeside(t *testing.T, ours, theirs string) error {
+	t.Helper()
+	h := evicted("watch", hostadmit.Flags{PublicPorts: true})()
+	_, mine := registry.ForRequest(requestFor("watch"), admitted)
+	mine.ToolkitVersion = ours
+	_, other := registry.ForRequest(requestFor("home-a"), admitted)
+	other.Token, other.Root, other.Interface, other.ListenPort, other.Subnet, other.Address, other.Roles = "0c0d", "/srv/paisans/0c0d", "psns-0c0d", 51899, "10.50.0.0/24", "10.50.0.1", ""
+	other.ToolkitVersion = theirs
+	data, err := registry.Encode(registry.Registry{Version: registry.Version, Deployments: map[string]registry.Entry{
+		id:                                     mine,
+		"0c0dc4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01": other,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = hostadmit.BuildEvict(withEntries(h.file(registry.Path, string(data))), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	return err
+}
+
+// A host any deployment of which a newer paisans claimed, this one or
+// another, is refused before anything is planned, naming the highest
+// release to upgrade to.
+func TestEvictRefusesAHostANewerToolkitClaimed(t *testing.T) {
+	for _, c := range []struct{ ours, theirs, highest string }{
+		{"99.0.0", version.Version, "99.0.0"},
+		{version.Version, "99.1.0", "99.1.0"},
+		{"99.0.0", "99.10.0", "99.10.0"},
+		{"99.10.0", "99.2.0", "99.10.0"},
+	} {
+		err := evictBeside(t, c.ours, c.theirs)
+		if err == nil {
+			t.Errorf("%s beside %s: evict was planned", c.ours, c.theirs)
+			continue
+		}
+		if !strings.Contains(err.Error(), "Upgrade paisans to "+c.highest+" or later") || !strings.Contains(err.Error(), "Nothing was changed") {
+			t.Errorf("%s beside %s: %v", c.ours, c.theirs, err)
+		}
+	}
+	if err := evictBeside(t, version.Version, "next"); err == nil || !strings.Contains(err.Error(), `"next"`) {
+		t.Errorf("a release evict cannot order was not refused: %v", err)
+	}
+}
+
+// This release, or an older one, claiming every deployment is evicted as
+// before.
+func TestEvictProceedsWhereNoNewerToolkitClaimed(t *testing.T) {
+	for _, theirs := range []string{version.Version, "0.0.1"} {
+		if err := evictBeside(t, "0.0.1", theirs); err != nil {
+			t.Errorf("beside %s: %v", theirs, err)
+		}
 	}
 }

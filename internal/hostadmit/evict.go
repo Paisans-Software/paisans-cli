@@ -16,6 +16,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/ui"
+	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
 // EvictInput is what evict is given: the deployment, the user the owner
@@ -44,6 +45,8 @@ type evictor struct {
 	beforeGone bool
 	// installedGone is whether the plan removes /etc/paisans/installed.
 	installedGone bool
+	// reg is the host's registry, read once before anything is planned.
+	reg registry.Registry
 }
 
 // claimedWithoutRecord is the token of every other deployment the host's
@@ -51,11 +54,8 @@ type evictor struct {
 // flight or one that failed before its record, or a deployment host
 // prepare put here. Evict keeps for them what it keeps beside a record it
 // cannot read.
-func claimedWithoutRecord(e *evictor) ([]string, error) {
-	r, err := registry.Read(e.t)
-	if err != nil {
-		return nil, shown(err)
-	}
+func claimedWithoutRecord(e *evictor) []string {
+	r := e.reg
 	recorded := map[string]bool{}
 	for _, file := range e.f.Records {
 		recorded[strings.TrimSuffix(strings.TrimPrefix(path.Base(file), "admitted."), ".json")] = true
@@ -66,7 +66,42 @@ func claimedWithoutRecord(e *evictor) ([]string, error) {
 			out = append(out, ui.Visible(t))
 		}
 	}
-	return out, nil
+	return out
+}
+
+// refuseNewer refuses a host where any deployment's registry entry, this
+// one's or another's, was claimed by a newer paisans: evict removes what
+// admit installed and decides what host-wide is still needed from what
+// this binary knows, and a newer release may have installed or need what
+// it does not. The refusal names the highest release, the one to upgrade
+// to. A release this binary cannot order is refused as a newer one is.
+func refuseNewer(r registry.Registry) error {
+	highest, newerOnes := "", []string{}
+	for _, id := range sortedKeys(r.Deployments) {
+		e := r.Deployments[id]
+		if e.ToolkitVersion == "" {
+			continue
+		}
+		newer, err := version.Compare(e.ToolkitVersion, version.Version)
+		if err != nil {
+			return fmt.Errorf("%s records that paisans %q claimed this host for deployment %s, which is not a release this paisans %s can order, so it may be a newer one that installed what this one does not know about. Nothing was changed. Upgrade paisans, and run host evict again", registry.Path, ui.Visible(e.ToolkitVersion), ui.Visible(e.Token), version.Version)
+		}
+		if newer <= 0 {
+			continue
+		}
+		newerOnes = append(newerOnes, ui.Visible(e.Token)+" ("+e.ToolkitVersion+")")
+		if c, _ := version.Compare(e.ToolkitVersion, highest); highest == "" || c > 0 {
+			highest = e.ToolkitVersion
+		}
+	}
+	if highest == "" {
+		return nil
+	}
+	which := "deployment "
+	if len(newerOnes) > 1 {
+		which = "deployments "
+	}
+	return fmt.Errorf("%s records that a newer paisans claimed this host for %s%s, and this is paisans %s, so it may not know everything those releases installed or need. Nothing was changed. Upgrade paisans to %s or later, and run host evict again", registry.Path, which, strings.Join(newerOnes, ", "), version.Version, highest)
 }
 
 // evictParts are evict's stages in the order they run. The user's manager
@@ -119,6 +154,13 @@ func BuildEvict(t apply.Transport, in EvictInput) (*Plan, error) {
 		return nil, fmt.Errorf("--user: %s. Nothing was changed", prob)
 	}
 	d := deployment.Deployment{ID: in.Deployment}
+	reg, err := registry.Read(t)
+	if err != nil {
+		return nil, shown(err)
+	}
+	if err := refuseNewer(reg); err != nil {
+		return nil, err
+	}
 	content, found, err := t.ReadFile("/etc/os-release")
 	if err != nil {
 		return nil, fmt.Errorf("reading /etc/os-release on %s: %w", t.Describe(), shown(err))
@@ -198,14 +240,12 @@ func BuildEvict(t apply.Transport, in EvictInput) (*Plan, error) {
 			return nil, fmt.Errorf("%s has %s, which admit never gives a deployment's user, so it is not this deployment's to delete. Nothing was changed", in.User, strings.Join(privileged, ", "))
 		}
 	}
-	e := &evictor{rec: rec, dataDir: dataDir, fromFlag: fromFlag, planner: &planner{t: t, in: ain, d: d, f: f, profile: profile, host: host,
+	e := &evictor{reg: reg, rec: rec, dataDir: dataDir, fromFlag: fromFlag, planner: &planner{t: t, in: ain, d: d, f: f, profile: profile, host: host,
 		plan: &Plan{Deployment: in.Deployment, User: in.User, Profile: profile.ID() + " " + profile.Version(), Host: t.Describe()}}}
 	if e.others, e.unreadable, err = others(e.planner); err != nil {
 		return nil, err
 	}
-	if e.recordless, err = claimedWithoutRecord(e); err != nil {
-		return nil, err
-	}
+	e.recordless = claimedWithoutRecord(e)
 	for _, pt := range evictParts {
 		if err := pt.plan(e); err != nil {
 			return nil, fmt.Errorf("%s: %w", pt.name, err)
@@ -738,11 +778,7 @@ func (e *evictor) emptyDirs() error {
 // registry takes the deployment's entry out of the host's registry, last:
 // until then the host still says the deployment is here.
 func (e *evictor) registry() error {
-	r, err := registry.Read(e.t)
-	if err != nil {
-		return shown(err)
-	}
-	if _, ok := r.Deployments[e.in.Request.Deployment]; ok {
+	if _, ok := e.reg.Deployments[e.in.Request.Deployment]; ok {
 		e.remove("remove the registry entry", "deployment "+e.d.Token()+" from "+registry.Path, registry.RemoveCommand(e.in.Request.Deployment))
 	}
 	return nil
