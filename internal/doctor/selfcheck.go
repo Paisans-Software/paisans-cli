@@ -15,14 +15,15 @@ const SectionSelfCheck = "self-check"
 // /.well-known/paisans/<token> as this deployment, fetched from the
 // workstation with the check apply runs at the end of the gateway's step.
 // Host and Address are what was asked; Unchecked is why nothing was. Err
-// is the check's error, and Conflict the port that answered as something
-// else, 0 when nothing answered. Pending and Down are the run's
+// is the check's error, Conflict the port that answered as something
+// else, and Silent the port that gave no answer, with URL what it was
+// asked for; each 0 when it does not apply. Pending and Down are the run's
 // classification of the site: a pending site is not asked, and a down one
 // is asked with its absence in mind.
 type SelfCheckProbe struct {
 	Site, Host, Address, Unchecked string
-	Conflict                       int
-	Err                            string
+	Conflict, Silent               int
+	URL, Err                       string
 	Pending, Down                  bool
 }
 
@@ -52,7 +53,7 @@ func SelfChecks(cfg *config.Config, probes []SelfCheckProbe) []Finding {
 			out = append(out, Finding{Section: SectionSelfCheck, Level: OK,
 				Line: fmt.Sprintf("%s: answers as this deployment on 443 and 80, asked for %s through %s", p.Site, p.Host, p.Address)})
 		case p.Down:
-			asked := fmt.Sprintf("doctor asked %s for https://%s%s from this workstation, once, and nothing answered.", p.Address, p.Host, path)
+			asked := p.silence(path)
 			if p.Conflict != 0 {
 				asked = fmt.Sprintf("doctor asked %s for https://%s%s from this workstation, once, and another server answered on %d.", p.Address, p.Host, path, p.Conflict)
 			}
@@ -75,11 +76,21 @@ func SelfChecks(cfg *config.Config, probes []SelfCheckProbe) []Finding {
 			out = append(out, Finding{Section: SectionSelfCheck, Level: Fail,
 				Line: fmt.Sprintf("%s: %s", p.Site, firstLine(p.Err)),
 				More: []string{
-					fmt.Sprintf("doctor asked %s for https://%s%s from this workstation, once, and nothing answered.", p.Address, p.Host, path),
+					p.silence(path),
 					"When the site is at home behind NAT and doctor runs from the same network, the router has to send its own public address back inside (hairpin NAT, or NAT loopback); many do not, and then doctor is run from outside that network.",
 					fmt.Sprintf("Otherwise check that the router or the provider's firewall forwards 80 and 443 to %s, that public_address is the address they arrive on, and that its Caddy runs (containers %s).", p.Site, p.Site),
 				}})
 		}
 	}
 	return out
+}
+
+// silence says what doctor asked that gave no answer: the URL of the port
+// that was silent, the HTTPS one when the check did not say.
+func (p SelfCheckProbe) silence(path string) string {
+	url := p.URL
+	if url == "" {
+		url = "https://" + p.Host + path
+	}
+	return fmt.Sprintf("doctor asked %s for %s from this workstation, once, and nothing answered.", p.Address, url)
 }

@@ -126,6 +126,20 @@ func (c *Conflict) Error() string {
 	return fmt.Sprintf("%d on %s answers, but not as this deployment: %s", c.Port, c.Site, c.Detail)
 }
 
+// Unanswered is a port that gave no answer at all: URL asked through
+// Address, and why the request failed.
+type Unanswered struct {
+	Port               int
+	Site, URL, Address string
+	Err                error
+}
+
+func (u *Unanswered) Error() string {
+	return fmt.Sprintf("%d on %s does not answer %s through %s: %v", u.Port, u.Site, u.URL, u.Address, u.Err)
+}
+
+func (u *Unanswered) Unwrap() error { return u.Err }
+
 // notYet is an answer worth waiting for: nothing listening, nothing
 // answering, or a handshake the server fails, as Caddy fails every one
 // while it has no certificate. Over TCP, Go reports an alert the server
@@ -163,14 +177,14 @@ func Check(ctx context.Context, p Probe, t Target) error {
 		p.Sleep(5 * time.Second)
 	}
 	if err != nil {
-		return fmt.Errorf("443 on %s does not answer https://%s%s through %s: %w", t.Site, t.Host, path, t.Address, err)
+		return &Unanswered{Port: 443, Site: t.Site, URL: "https://" + t.Host + path, Address: t.Address, Err: err}
 	}
 	if a.Status != http.StatusOK || strings.TrimSpace(a.Body) != want {
 		return &Conflict{Port: 443, Site: t.Site, Detail: describe(a)}
 	}
 	a, err = p.Fetch(ctx, "http", t.Address, t.Host, path)
 	if err != nil {
-		return fmt.Errorf("80 on %s does not answer http://%s%s through %s: %w", t.Site, t.Host, path, t.Address, err)
+		return &Unanswered{Port: 80, Site: t.Site, URL: "http://" + t.Host + path, Address: t.Address, Err: err}
 	}
 	if a.Status < 300 || a.Status > 399 || a.Location != "https://"+t.Host+path {
 		return &Conflict{Port: 80, Site: t.Site, Detail: describe(a) + ", where this deployment's Caddy redirects to https://" + t.Host + path}

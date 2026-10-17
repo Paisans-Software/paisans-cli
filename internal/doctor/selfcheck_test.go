@@ -40,3 +40,20 @@ func TestSelfChecks(t *testing.T) {
 		}
 	}
 }
+
+// When 443 answers as this deployment and 80 does not, the advice names
+// the HTTP request that got no answer.
+func TestSelfCheckNamesThePortThatWasSilent(t *testing.T) {
+	cfg := fixture(t)
+	silent := ourCaddy
+	silent.Silent, silent.URL = 80, "http://health.example.org/.well-known/paisans/f2a9"
+	silent.Err = "80 on watch does not answer http://health.example.org/.well-known/paisans/f2a9 through 203.0.113.20: connection refused"
+	for _, down := range []bool{false, true} {
+		silent.Down = down
+		f := SelfChecks(cfg, []SelfCheckProbe{silent})[0]
+		text := strings.Join(f.More, "\n")
+		if !strings.Contains(text, "203.0.113.20 for http://health.example.org/.well-known/paisans/f2a9 from this workstation, once, and nothing answered") || strings.Contains(text, "https://") {
+			t.Errorf("down %v:\n%s", down, text)
+		}
+	}
+}

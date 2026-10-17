@@ -581,6 +581,10 @@ func (d doctorReads) SelfCheck(site string) doctor.SelfCheckProbe {
 	if errors.As(err, &c) {
 		p.Conflict = c.Port
 	}
+	var u *selfcheck.Unanswered
+	if errors.As(err, &u) {
+		p.Silent, p.URL = u.Port, u.URL
+	}
 	if err != nil {
 		p.Err = err.Error()
 	}

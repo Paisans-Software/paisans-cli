@@ -94,3 +94,13 @@ func TestSelfCheckWaitsForTheCertificateThenGivesUp(t *testing.T) {
 		t.Errorf("a gateway that never answers: %v", err)
 	}
 }
+
+// A port that gives no answer is named, with what it was asked for.
+func TestSelfCheckNamesTheSilentPort(t *testing.T) {
+	w := &answers{https: []result{ours}, http: []result{refused}}
+	err := selfcheck.Check(context.Background(), probe(w), target)
+	var u *selfcheck.Unanswered
+	if !errors.As(err, &u) || u.Port != 80 || !strings.HasPrefix(u.URL, "http://") || !strings.HasPrefix(err.Error(), "80 on vm does not answer http://") {
+		t.Errorf("80 refused: %v", err)
+	}
+}
