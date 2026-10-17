@@ -526,7 +526,7 @@ them apart because they hold different things.
 | Declared in | `operators:` in `paisans-stack.yaml` | membership of the Pocket ID group `admins` |
 | Hold | SSH keys on the sites, the age keys that decrypt the secrets, the right to sign a configuration version | administrator rights in every app that reads `admins` |
 | Do | `host prepare`, `apply`, `secrets`, `config publish` | moderate, approve applications, administer the apps |
-| At least | two (`operators-fewer-than-two`) | none required |
+| At least | one, and two to keep a lost workstation from stopping the deployment (`operators-none`, `operators-fewer-than-two`) | none required |
 
 **Every operator is also a community admin**, so that a new deployment has
 someone to run it: `apply` puts each operator in every app's admin group (see
@@ -1100,7 +1100,8 @@ from this configuration and the fork reconciles it at every start:
 * every Pocket ID app gets one **operators heartbeat**, `operator continuity`:
   a push monitor its active instance feeds from the reconciler's `/healthz`,
   so it fails while an operator is not an enabled member in the member group
-  and in `operators`, or a Pocket ID administrator is not an operator (see
+  and in `operators`, a Pocket ID administrator is not an operator, or only
+  one operator is declared (see
   *The operator reconciler checks Pocket ID against the operators*), and
   follows whichever site is active across a failover with one history
   (below). It is named for the community, not the app, because every
@@ -1490,9 +1491,9 @@ sign in, which becomes the app's `display_name` (see *`oidc client create`
 makes an app's client at Pocket ID*). Enter takes the app's key, which is
 what the client is named without one, and then nothing is written.
 
-It asks for at least two operators, each with a username, a name, an email
-address and their public keys, because `validate` refuses fewer
-(`operators-fewer-than-two`), and writes them as the `operators:` section,
+It asks for operators, each with a username, a name, an email address and
+their public keys, and offers a second after the first, since `validate` warns
+about one (`operators-fewer-than-two`). It writes them as the `operators:` section,
 named in every site's `ssh.keys`. It then asks who manages accounts and writes
 the answer as the `pocket-id` app's `management` (see *Who manages accounts:
 `management`*), since that is never defaulted. With the account service it
@@ -4615,13 +4616,18 @@ written out per site is a key that gets rotated on some sites and missed on
 others; written once, rotating it is one edit and a `host prepare` of each site
 that names the operator.
 
-**At least two operators must reach the identity provider.** `validate`
-refuses a deployment with fewer than two operators whose keys are on every
-site that runs a `pocket-id` app (`operators-fewer-than-two`), because one lost
+**At least two operators should reach the identity provider.** One lost
 workstation must not leave nobody able to run `apply`, sign a configuration
-version or reach the identity provider's hosts. An operator counts only with a
-key on each of those sites, since running the deployment means reaching every
-one of them. A deployment with no `pocket-id` app is not held to it.
+version or reach the identity provider's hosts. `validate` refuses a deployment
+with no operator whose keys are on every site that runs a `pocket-id` app
+(`operators-none`), since nobody could run it, and warns about one
+(`operators-fewer-than-two`). One is a warning rather than a refusal because a
+deployment being rolled out, or a small community, may have one operator until
+a second is found; the operator reconciler fails the operators heartbeat while
+only one is declared, so the monitor keeps saying so (see *The operator
+reconciler checks Pocket ID against the operators*). An operator counts only
+with a key on each of those sites, since running the deployment means reaching
+every one of them. A deployment with no `pocket-id` app is not held to it.
 
 `email` is required so that every key in the file leads to somebody who can
 say whether it is still theirs. `name` is required because the operator's
@@ -7210,7 +7216,7 @@ reconciler reports when it disagrees with the yaml rather than changing
 either one. Its only requests are `GET`s, and its tests fail on any other
 method. Every two hours, and once when it starts, it reads Pocket ID's users
 and the groups it checks (after one minute instead when it could not read
-Pocket ID, which starts alongside it), and holds them to three checks:
+Pocket ID, which starts alongside it), and holds them to four checks:
 
 1. **Every operator in the yaml is a member.** For each operator, a Pocket ID
    user with that username exists, is not disabled, and is in the community's
@@ -7233,6 +7239,11 @@ Pocket ID, which starts alongside it), and holds them to three checks:
    someone removes it at Pocket ID, and every app that reads `operators` for
    operator access goes on granting it, so the pass says so rather than
    letting the yaml and the group drift apart.
+4. **At least two operators are declared.** A yaml with one operator fails,
+   Eg: `only one operator, alice: declare a second so one lost workstation
+   cannot stop the deployment`. `validate` only warns about one, so that a
+   deployment can run while a second is found, and this check keeps the
+   monitor saying so until one is.
 
 **An operator banned or removed at Pocket ID fails check 1 until they are
 taken out of the yaml.** That is a manual step by design: removing an operator

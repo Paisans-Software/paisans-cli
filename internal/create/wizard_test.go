@@ -24,7 +24,7 @@ func script(lines ...string) string { return strings.Join(lines, "\n") + "\n" }
 
 var (
 	communityAnswers = []string{"Example Community", "example.org", ""}
-	adminAnswers     = []string{"alice", "Alice Example", "alice@example.org", aliceKey, "", "bob", "Bob Example", "bob@example.org", bobKey, "", "n"}
+	adminAnswers     = []string{"alice", "Alice Example", "alice@example.org", aliceKey, "", "", "bob", "Bob Example", "bob@example.org", bobKey, "", "n"}
 	// management: the account service, its hostname, signup by invite, and
 	// the code of conduct's file.
 	managementAnswers = []string{"", "", "", "testdata/code-of-conduct.md"}
@@ -127,6 +127,35 @@ func TestOneMachineDoesNotOfferChat(t *testing.T) {
 	}
 	if _, ok := w.Answers.App("chat"); ok {
 		t.Error("chat was declared")
+	}
+}
+
+// One operator is accepted: declining a second writes a file validate only
+// warns about, so a deployment can be rolled out while a second is found.
+func TestOneOperatorIsAccepted(t *testing.T) {
+	var lines []string
+	lines = append(lines, communityAnswers...)
+	lines = append(lines, "alice", "Alice Example", "alice@example.org", aliceKey, "", "n")
+	lines = append(lines, shapeAnswers[ShapeOneMachine]...)
+	lines = append(lines, appAnswers(false)...)
+	lines = append(lines, mailAnswers...)
+	w, out, err := run(t, script(lines...))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if len(w.Answers.Operators) != 1 {
+		t.Fatalf("operators = %v, want alice alone", w.Answers.Operators)
+	}
+	data, err := Render(w.Answers, testID, testOrigin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := check(t, data)
+	for _, f := range r.Refusals() {
+		t.Errorf("refused %s: %s: %s", f.Rule, f.Key, f.Message)
+	}
+	if !r.Has("operators-fewer-than-two") {
+		t.Error("one operator drew no operators-fewer-than-two warning")
 	}
 }
 

@@ -46,7 +46,7 @@ func plainReporter(t *testing.T) *bytes.Buffer {
 
 var (
 	createCommunity = []string{"Example Community", "example.org", ""}
-	createAdmin     = []string{"alice", "Alice Example", "alice@example.org", createKey, "",
+	createAdmin     = []string{"alice", "Alice Example", "alice@example.org", createKey, "", "",
 		"bob", "Bob Example", "bob@example.org", createBobKey, "", "n"}
 	// sign in; the account service manages accounts, on its default
 	// hostname, with open signup and the code of conduct the wizard's own
