@@ -88,7 +88,9 @@ Every command that asks for a confirmation takes `--yes`: `apply`,
   `--digest <digest>` gives instead; the new SSH login `site admit --request`
   asks for once it has enabled ufw, so `--yes` with `--request` refuses up
   front where admit would enable ufw; a login for `--site`, so `site admit`
-  and `site evict` with `--yes` need `--ssh`; and a value to paste, which
+  and `site evict` with `--yes` need `--ssh`; whether enabling ufw may
+  block the ports `site admit` lists, which `--enable-ufw-block-listed`
+  gives instead; and a value to paste, which
   `secrets set` and `secrets rotate` ask for at a terminal as they do without
   it.
 * **Without it:** every question is asked at a terminal, and refused off one,
@@ -797,8 +799,9 @@ paisans site admit --site home-a --ssh owner@home-a.example.org --execute   # fr
     host and port, or as `user@host[:port]`; left out, it is asked for at a
     terminal;
   * either way: the grants `--watchdog` and `--public-ports`;
-    `--data-dir <path>`, `--bridge-netfilter`, `--mesh-lan`, `--enable-ufw`;
-    `--execute`; `--yes`;
+    `--data-dir <path>`, `--bridge-netfilter`, `--mesh-lan`, `--enable-ufw`,
+    `--enable-ufw-block-listed` (with `--enable-ufw` alone); `--execute`;
+    `--yes`;
   * with `--request`: `--digest <digest>`, the request's digest the operator
     gave you, compared as the one typed at a terminal is: any other refuses
     before the host is reached.
@@ -822,11 +825,56 @@ paisans site admit --site home-a --ssh owner@home-a.example.org --execute   # fr
   which it lists, since those decide what reaches SSH; when
   `IPV6`, read as ufw reads it from `/etc/default/ufw` then
   `/etc/ufw/ufw.conf`, is not `yes` and sshd listens on IPv6, since ufw
-  would then drop SSH over IPv6; or when the timer cannot be armed. Admit
-  allows only the TCP ports sshd listens on, and cannot see DROP rules
-  written by hand in `/etc/ufw/before.rules`, `before6.rules` or
-  `user.rules`, nor other ways in such as sslh, dropbear or mosh: if you
-  rely on either, enable ufw by hand after checking them.
+  would then drop SSH over IPv6; when the timer cannot be armed; or when it
+  cannot read the host's UDP sockets, its system Docker's containers or its
+  NAT rules. Admit allows only the TCP ports sshd listens on, and cannot see
+  DROP rules written by hand in `/etc/ufw/before.rules`, `before6.rules` or
+  `user.rules`, nor a way in that is not listening as it reads the host,
+  such as sslh, dropbear or mosh started later: if you rely on either,
+  enable ufw by hand after checking them.
+* **What enabling ufw blocks:** before it enables ufw, admit reads, with the
+  same probe, every listener off loopback, TCP and UDP, IPv4 and IPv6, with
+  its process, PID and UID, every port the system Docker's containers
+  publish, running or stopped with `restart: always`, and every DNAT or
+  redirect rule, which receive traffic with no listener when Docker's
+  userland proxy is off. A port stays reachable when it is sshd's, the
+  deployment's own (WireGuard, and 80 and 443 with `--public-ports`), one
+  ufw's `before.rules` let in (a DHCP client's, and mDNS and SSDP on a
+  socket bound to their multicast group), or one a rule of yours
+  allows, added while ufw is inactive or not. Your rules are read as ufw
+  records them in `/etc/ufw/user.rules` and `user6.rules`, so an
+  application profile or a service name counts with its ports: an inbound
+  allow or limit from any source, of a port, a list or a range, on any
+  interface, to any address or the one the listener is bound to. Each file
+  counts for its own family: a listener on IPv6 needs a rule in
+  `user6.rules`. What NAT receives is routed traffic, which ufw decides
+  after translation by its route rules, never by `ufw allow`: a port the
+  system Docker publishes stays reachable when Docker filters on its
+  iptables backend (`firewall-backend` in its `daemon.json`, or, with none
+  set, its `DOCKER-USER` or `DOCKER-FORWARD` chain in `FORWARD`), whose
+  rules come ahead of ufw's; any other stays reachable only through a
+  `ufw route allow` of yours to the address and port it is translated to.
+  A route allow counts inbound or out on an interface, from any source,
+  unless a route deny or reject matching the same traffic comes before it.
+  A redirect, or a DNAT rule to one of the host's own addresses, reaches a
+  port of the host's own, read as that port's listener. Every other port enabling ufw blocks, and admit refuses before
+  any change, listing each with what serves it and printing a line per
+  port: `sudo ufw allow <port>/<proto>` for a listener, `sudo ufw route
+  allow proto <proto> to <address> port <port>` for what NAT translates,
+  which is to be checked from off the host once ufw is on. Run those whose
+  service must stay reachable, then admit again. UDP sockets in the host's
+  `ip_local_port_range` are listed together with no line: a client's, or a
+  service's that picks its port as it starts, which no allow can be added
+  for ahead. A service meant to stay unreachable, such as
+  a database on a public address, needs nothing: once you have checked
+  every port listed, `--enable-ufw-block-listed` enables ufw over them, and
+  the plan's `enable ufw` step and a warning name each. That step also names what stays
+  reachable, and why. With `IPV6` not `yes`, a listener on IPv6 is listed
+  too, since ufw then drops IPv6 whatever it allows; a NAT rule whose ports
+  or translation admit cannot read is listed with no line. At a terminal the ufw
+  question lists them before it asks, and a yes asks a second question,
+  whether every one listed may be blocked; `--yes` never answers it. When
+  ufw is active, admit reads none of this and adds its own rules alone.
   These refuse with `--enable-ufw` and without it, and admit asks nothing
   then. Otherwise, without `--enable-ufw` and off a terminal, it refuses
   before making any change, and prints the commands that enable ufw by hand,

@@ -671,7 +671,7 @@ func inactiveUFW(h *admitHost) *admitHost {
 			h.facts[i][1] = "no"
 		}
 	}
-	h.answers["paisans site admit: before enabling ufw"] = `sshd LISTEN 0 4096 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=812,fd=3))` + "\nipv6 yes\nsystemd-run present\nfallback not-found not-found\nend\n"
+	h.answers["paisans site admit: before enabling ufw"] = `listen tcp LISTEN 0 4096 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=812,fd=3))` + "\nipv6 yes\nsystemd-run present\nfallback not-found not-found\nend\n"
 	return h
 }
 
@@ -1198,5 +1198,88 @@ func noAdmitFromInit(t *testing.T) {
 	executeAdmit = func(apply.Transport, hostadmit.Input, *hostadmit.Plan, ui.Reporter) error {
 		t.Fatal("site admit ran a plan")
 		return nil
+	}
+}
+
+// ownerApp makes h's inactive ufw one in front of an app of the owner's
+// answering on 8080, which no ufw rule allows.
+func ownerApp(h *admitHost) *admitHost {
+	const marker = "paisans site admit: before enabling ufw"
+	h.answers[marker] = `listen tcp LISTEN 0 4096 0.0.0.0:8080 0.0.0.0:* users:(("app",pid=950,fd=3))` + "\n" + h.answers[marker]
+	return h
+}
+
+// At a terminal, the ufw question lists what enabling ufw blocks before it
+// asks, and a yes needs a second yes that those may be blocked; a no to
+// either refuses, the second with the allow lines. With --enable-ufw the
+// second question alone is asked; off a terminal only
+// --enable-ufw-block-listed enables ufw over them.
+func TestAdmitAsksWhetherUFWMayBlockWhatAnswers(t *testing.T) {
+	path, _ := requestFile(t, "vm")
+	for _, c := range []struct {
+		args     []string
+		typed    string
+		terminal bool
+		plans    bool
+		want     string
+	}{
+		{nil, "y\ny\n", true, true, ""},
+		{nil, "y\nn\n", true, false, "  sudo ufw allow 8080/tcp\n"},
+		{nil, "y\n", true, false, "  sudo ufw allow 8080/tcp\n"},
+		{nil, "n\n", true, false, "--enable-ufw"},
+		{[]string{"--enable-ufw"}, "y\n", true, true, ""},
+		{[]string{"--enable-ufw"}, "n\n", true, false, "  sudo ufw allow 8080/tcp\n"},
+		{[]string{"--enable-ufw"}, "", false, false, "  sudo ufw allow 8080/tcp\n"},
+		{[]string{"--enable-ufw", "--enable-ufw-block-listed"}, "", false, true, ""},
+	} {
+		ownerApp(inactiveUFW(withFakeLocalHost(t, "ubuntu")))
+		withTerminal(t, c.terminal)
+		out := new(strings.Builder)
+		err := runSiteAdmit(append([]string{"--request", path, "--public-ports"}, c.args...), typed(t, c.typed), out)
+		name := fmt.Sprintf("%q typed %q", c.args, c.typed)
+		if planned := err == nil && strings.Contains(admitReport.String(), "arm the ufw fallback"); planned != c.plans {
+			t.Errorf("%s: planned the enable %v (%v)", name, planned, err)
+		}
+		if !c.plans && (err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), "8080/tcp: app (pid 950, uid 0) listens on 0.0.0.0:8080")) {
+			t.Errorf("%s: %v", name, err)
+		}
+		if !c.terminal {
+			continue
+		}
+		text := out.String()
+		if c.args == nil && (strings.Index(text, "8080/tcp: app") < 0 || strings.Index(text, "8080/tcp: app") > strings.Index(text, "Enable ufw (--enable-ufw)?")) {
+			t.Errorf("%s: the ufw question does not list 8080 before it asks:\n%s", name, text)
+		}
+		if asked := strings.Contains(text, "Block every one listed (--enable-ufw-block-listed)?"); asked != (c.typed != "n\n" || c.args != nil) {
+			t.Errorf("%s: asked whether to block %v:\n%s", name, asked, text)
+		}
+	}
+}
+
+// --enable-ufw-block-listed enables nothing alone.
+func TestTheBlockListedFlagGoesWithEnableUFW(t *testing.T) {
+	path, _ := requestFile(t, "vm")
+	noHost(t)
+	err := runSiteAdmit([]string{"--request", path, "--enable-ufw-block-listed"}, strings.NewReader(""), new(strings.Builder))
+	if err == nil || !strings.Contains(err.Error(), "goes with --enable-ufw") {
+		t.Errorf("%v", err)
+	}
+}
+
+// --yes never answers whether ufw may block what answers from off the
+// host: with --site it refuses, naming the flag, and approves nothing.
+func TestYesNeverBlocksWhatAnswers(t *testing.T) {
+	allowYes(t)
+	fakeExecute(t)
+	savedOwner := reachOwnerAdmit
+	t.Cleanup(func() { reachOwnerAdmit = savedOwner })
+	quietAdmit(t)
+	withTerminal(t, false)
+	owner := ownerApp(inactiveUFW(blankHost("ubuntu")))
+	reachOwnerAdmit = func(config.Destination) apply.Transport { return owner }
+	out := new(strings.Builder)
+	err := runSiteAdmit([]string{"--site", "vm", "--ssh", "owner", "--config", fixtureConfig(), "--public-ports", "--execute", "--yes"}, strings.NewReader(""), out)
+	if err == nil || !strings.Contains(err.Error(), "--enable-ufw-block-listed") || strings.Contains(out.String(), "approved by --yes") || owner.ranIndex("ufw --force enable") >= 0 {
+		t.Errorf("%v\n%s", err, out.String())
 	}
 }

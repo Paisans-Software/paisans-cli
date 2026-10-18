@@ -1,0 +1,14 @@
+refused: firewall: ufw is installed but not active. The safe way: run admit again with --enable-ufw. It allows every port sshd listens on (22/tcp), arms a timer that turns ufw off again in 10 minutes, enables ufw, and stops the timer once a new SSH login gets through.
+Enabling ufw, by admit or by hand, would also block these, which answer from off this host now:
+  80/tcp: caddy (pid 900, uid 0) listens on *:80
+  443/tcp: caddy (pid 900, uid 0) listens on *:443
+  443/udp: caddy (pid 900, uid 0) listens on *:443/udp
+For each port whose service must stay reachable, run its line before ufw is enabled, then run admit again:
+  sudo ufw allow 80/tcp
+  sudo ufw allow 443/tcp
+  sudo ufw allow 443/udp
+A service meant to stay unreachable from off this host, such as a database on a public address, needs nothing. Once you have checked that every one listed may be blocked, pass --enable-ufw-block-listed with --enable-ufw.
+To enable it by hand instead, run these in this order:
+  1. sudo ufw allow 22/tcp
+  2. sudo ufw enable
+Enabling ufw without step 1 cuts off SSH to this host, your own login included. Then run admit again. Nothing was changed

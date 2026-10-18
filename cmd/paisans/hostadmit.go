@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -60,6 +61,7 @@ func runSiteAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs.BoolVar(&flags.BridgeNetfilter, "bridge-netfilter", false, "load br_netfilter although this host has bridges of its own")
 	fs.BoolVar(&flags.MeshLAN, "mesh-lan", false, "let the mesh dial this host's own LAN")
 	fs.BoolVar(&flags.EnableUFW, "enable-ufw", false, "enable ufw when it is installed and not active: allow every port sshd listens on, arm a timer that turns ufw off again in 10 minutes, enable it, and stop the timer once a new SSH login gets through")
+	fs.BoolVar(&flags.EnableUFWBlockListed, "enable-ufw-block-listed", false, "with --enable-ufw: enable ufw although it blocks the ports admit lists, which answer from off the host now and no ufw rule allows, once you have checked each may be blocked")
 	fs.BoolVar(&execute, "execute", false, "make the changes the plan shows")
 	fs.StringVar(&digestFlag, "digest", "", "with --request: the request's digest the operator gave you, compared as the one typed at a terminal is")
 	answers := yesFlag(fs)
@@ -84,6 +86,8 @@ func runSiteAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 		return fmt.Errorf("site admit: --request runs as root on the host it admits to: copy the request there and run sudo paisans site admit --request <file>")
 	case request == "" && digestFlag != "":
 		return fmt.Errorf("site admit: --digest goes with --request: with --site admit builds the request itself from the configuration")
+	case flags.EnableUFWBlockListed && !flags.EnableUFW:
+		return fmt.Errorf("site admit: --enable-ufw-block-listed goes with --enable-ufw: it lets admit enable ufw over the ports it lists, and enables nothing alone. Nothing was read or changed")
 	case request != "" && ans.yes && flags.EnableUFW:
 		return ufwNeedsAPerson()
 	case request != "" && execute && flags.EnableUFW && !stdinIsTerminal(stdin):
@@ -225,7 +229,10 @@ func admit(r ui.Reporter, run admitRun, ans answerer, stdin io.Reader, stdout io
 	// refuses, naming --enable-ufw and the commands that enable it safely.
 	// --yes answers it with --site, whose own login proves SSH gets
 	// through; with --request only a person can, so it refuses.
+	// What enabling ufw would block, of what answers from off the host,
+	// is a second question at a terminal, which --yes never answers.
 	var inactive *hostadmit.UFWInactiveError
+	var blocks *hostadmit.UFWBlocksError
 	var refusal error
 	plan, err := ui.Get(r, "read the host", func() (*hostadmit.Plan, error) {
 		p, err := hostadmit.Build(t, in)
@@ -236,22 +243,52 @@ func admit(r ui.Reporter, run admitRun, ans answerer, stdin io.Reader, stdout io
 			refusal = err
 			return nil, nil
 		}
+		inactive = nil
+		if errors.As(err, &blocks) && !ans.yes && stdinIsTerminal(stdin) {
+			refusal = err
+			return nil, nil
+		}
 		return p, err
 	})
 	if err != nil {
 		return err
 	}
 	if plan == nil {
-		yes, err := askEnableUFW(ans, stdin, stdout, inactive.SSHPorts, site != "")
-		if err != nil {
-			return err
+		shown, listed := []hostadmit.Blocked(nil), false
+		if inactive != nil {
+			if ans.yes && len(inactive.Blocked) > 0 {
+				return &hostadmit.UFWBlocksError{Blocked: inactive.Blocked}
+			}
+			yes, err := askEnableUFW(ans, stdin, stdout, inactive.SSHPorts, inactive.Blocked, site != "")
+			if err != nil {
+				return err
+			}
+			if !yes {
+				return refusal
+			}
+			in.Flags.EnableUFW = true
+			shown, listed = inactive.Blocked, true
+		} else {
+			shown = blocks.Blocked
 		}
-		if !yes {
-			return refusal
+		if len(shown) > 0 {
+			yes, err := askBlockListed(stdin, stdout, shown, listed)
+			if err != nil {
+				return err
+			}
+			if !yes && blocks != nil {
+				return refusal
+			}
+			if !yes {
+				return &hostadmit.UFWBlocksError{Blocked: shown}
+			}
+			in.Flags.EnableUFWBlockListed = true
 		}
-		in.Flags.EnableUFW = true
 		if plan, err = ui.Get(r, "read the host again, to enable ufw", func() (*hostadmit.Plan, error) { return hostadmit.Build(t, in) }); err != nil {
 			return err
+		}
+		if more := unshown(plan.UFWBlocks, shown); len(more) > 0 {
+			return fmt.Errorf("site admit: the host changed since admit asked: enabling ufw now blocks %s as well, which you were not shown. Run admit again to see what it blocks. Nothing was changed", strings.Join(more, ", "))
 		}
 	}
 	// The whole plan, always: with --execute the owner approves it here,
@@ -361,7 +398,7 @@ func ownerDestination(command, sshFlag, site string, declared config.Site, stdin
 // askEnableUFW asks the owner at a terminal whether admit may enable ufw,
 // saying what it does, in order, and the risk. Only y or yes says so, or
 // --yes, through a, which only --site reaches.
-func askEnableUFW(a answerer, stdin io.Reader, stdout io.Writer, ports []int, bySite bool) (bool, error) {
+func askEnableUFW(a answerer, stdin io.Reader, stdout io.Writer, ports []int, blocked []hostadmit.Blocked, bySite bool) (bool, error) {
 	var list []string
 	for _, port := range ports {
 		list = append(list, strconv.Itoa(port)+"/tcp")
@@ -376,11 +413,43 @@ func askEnableUFW(a answerer, stdin io.Reader, stdout io.Writer, ports []int, by
 		"  3. enable ufw, the deployment's own rules already in place\n"+
 		"  4. stop the timer once a new SSH login gets through: %s\n"+
 		"The risk: something admit cannot see, such as a cloud firewall, could still block SSH. You are then locked out until the timer turns ufw off again, at most 10 minutes later. The timer does not survive a reboot: a reboot before it fires leaves ufw enabled, so wait for it rather than reboot.\n"+hostadmit.CannotSee+"\n", strings.Join(list, ", "), confirm)
+	if len(blocked) > 0 {
+		explain += "Enabling ufw also blocks these, which answer from off this host now and no ufw rule allows:\n" + hostadmit.BlockedList(blocked) +
+			"On a yes, admit asks next whether every one of them may be blocked.\n"
+	}
 	yes, err := a.yesNo(stdin, stdout, explain, "Enable ufw (--enable-ufw)?", "enable ufw (--enable-ufw)")
 	if err != nil {
 		return false, fmt.Errorf("site admit: reading your answer: %w. Nothing was changed", err)
 	}
 	return yes, nil
+}
+
+// askBlockListed asks the owner at a terminal whether admit may enable ufw
+// over blocked, what answers from off the host and no ufw rule allows,
+// listing them unless the question before did (listed). Only y or yes
+// says so; --yes never reaches it.
+func askBlockListed(stdin io.Reader, stdout io.Writer, blocked []hostadmit.Blocked, listed bool) (bool, error) {
+	explain := "\n"
+	if !listed {
+		explain += "Enabling ufw blocks these, which answer from off this host now and no ufw rule allows:\n" + hostadmit.BlockedList(blocked)
+	}
+	explain += hostadmit.BlockedHelp(blocked) + "\n"
+	yes, err := answerer{}.yesNo(stdin, stdout, explain, "Block every one listed (--enable-ufw-block-listed)? Answer no to allow them first", "")
+	if err != nil {
+		return false, fmt.Errorf("site admit: reading your answer: %w. Nothing was changed", err)
+	}
+	return yes, nil
+}
+
+// unshown is each of keys that is no Key of shown.
+func unshown(keys []string, shown []hostadmit.Blocked) []string {
+	var out []string
+	for _, k := range keys {
+		if !slices.ContainsFunc(shown, func(b hostadmit.Blocked) bool { return b.Key == k }) {
+			out = append(out, k)
+		}
+	}
+	return out
 }
 
 // ufwNeedsAPerson refuses --request where admit would enable ufw and no

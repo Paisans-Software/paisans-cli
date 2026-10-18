@@ -23,7 +23,7 @@ var firewallCases = addCases(
 	goldenCase{name: "firewall-admitted", site: "home-a", flags: gateway, host: func() *fakeHost { return admittedHost(requestFor("home-a"), gateway) }},
 	goldenCase{name: "ports-free", focus: []string{"allow"}, site: "home-a", flags: gateway, host: home},
 	goldenCase{name: "ports-process-refused", site: "home-a", flags: gateway, host: func() *fakeHost {
-		return home().answer(portsMarker, `listen LISTEN 0 511 0.0.0.0:443 0.0.0.0:* users:(("nginx",pid=901,fd=6)) ino:1 sk:1`+"\nend\n")
+		return home().answer(portsMarker, `listen tcp LISTEN 0 511 0.0.0.0:443 0.0.0.0:* users:(("nginx",pid=901,fd=6)) ino:1 sk:1`+"\nend\n")
 	}},
 	goldenCase{name: "ports-container-refused", site: "home-a", flags: gateway, host: func() *fakeHost {
 		return home().with("system-socket", "present").answer(portsMarker, "container shop-web-1\t0.0.0.0:443->443/tcp, [::]:443->443/tcp\tshop\nend\n")
@@ -35,7 +35,7 @@ var firewallCases = addCases(
 	// userland proxy is off, publishing 443 for compose project shop.
 	goldenCase{name: "ports-docker-without-proxy-refused", site: "home-a", flags: gateway, host: func() *fakeHost {
 		return home().with("system-socket", "present").answer(portsMarker,
-			`listen LISTEN 0      4096   0.0.0.0:443 0.0.0.0:* users:(("dockerd",pid=3848,fd=37)) ino:3382880 sk:1 cgroup:/ <->`+"\n"+
+			`listen tcp LISTEN 0      4096   0.0.0.0:443 0.0.0.0:* users:(("dockerd",pid=3848,fd=37)) ino:3382880 sk:1 cgroup:/ <->`+"\n"+
 				"container shop-web-1\t0.0.0.0:443->80/tcp\tshop\n"+
 				"dnat table ip nat chain DOCKER: tcp dport 443 counter packets 0 bytes 0 dnat to 172.18.0.2:80\nend\n")
 	}},
@@ -51,8 +51,8 @@ var firewallCases = addCases(
 // as its user (uid 1001) on 443 and in its subordinate range on 80, as
 // admit finds it on a re-run.
 func ownCaddy() *fakeHost {
-	return home().answer(portsMarker, `listen LISTEN 0 4096 *:443 *:* users:(("caddy",pid=2201,fd=9)) uid:1001 ino:2 sk:2`+"\n"+
-		`listen LISTEN 0 4096 *:80 *:* users:(("caddy",pid=2201,fd=8)) uid:165536 ino:3 sk:3`+"\nend\n")
+	return home().answer(portsMarker, `listen tcp LISTEN 0 4096 *:443 *:* users:(("caddy",pid=2201,fd=9)) uid:1001 ino:2 sk:2`+"\n"+
+		`listen tcp LISTEN 0 4096 *:80 *:* users:(("caddy",pid=2201,fd=8)) uid:165536 ino:3 sk:3`+"\nend\n")
 }
 
 func TestFirewallPlans(t *testing.T) { runGolden(t, firewallCases) }
@@ -63,7 +63,7 @@ func TestOwnListenerIsNotAHolder(t *testing.T) {
 	if _, err := hostadmit.Build(ownCaddy(), input(t, "home-a", gateway)); err != nil {
 		t.Fatalf("the deployment's own Caddy refused the grant: %v", err)
 	}
-	other := home().answer(portsMarker, `listen LISTEN 0 4096 *:443 *:* users:(("caddy",pid=2301,fd=9)) uid:1002 ino:2 sk:2`+"\nend\n")
+	other := home().answer(portsMarker, `listen tcp LISTEN 0 4096 *:443 *:* users:(("caddy",pid=2301,fd=9)) uid:1002 ino:2 sk:2`+"\nend\n")
 	_, err := hostadmit.Build(other, input(t, "home-a", gateway))
 	if err == nil || !strings.Contains(err.Error(), "caddy") || !strings.Contains(err.Error(), "managed_by: external") {
 		t.Fatalf("another user's Caddy on 443: %v", err)
@@ -80,9 +80,9 @@ func TestEveryHolderShapeRefuses(t *testing.T) {
 		"dnat range":      "dnat table ip nat chain DOCKER: tcp dport 1-1000 dnat to 10.0.0.2\n",
 		"redirect":        "dnat table ip nat chain PREROUTING: tcp dport 80 redirect to :8080\n",
 		"iptables":        "dnat iptables-save -t nat: -A DOCKER ! -i docker0 -p tcp -m tcp --dport 443 -j DNAT --to-destination 172.17.0.2:443\n",
-		"root listener":   `listen LISTEN 0 511 [::]:80 [::]:* users:(("apache2",pid=7,fd=4)) ino:1 sk:1` + "\n",
-		// As ss -Hlunpe printed it on Debian, for a UDP socket bound to 443.
-		"udp listener": `listen-udp UNCONN 0      0      0.0.0.0:443 0.0.0.0:* users:(("openvpn",pid=331,fd=3)) ino:3663985 sk:3001 cgroup:/ <->` + "\n",
+		"root listener":   `listen tcp LISTEN 0 511 [::]:80 [::]:* users:(("apache2",pid=7,fd=4)) ino:1 sk:1` + "\n",
+		// As ss -Hltunpe prints it on Debian, for a UDP socket bound to 443.
+		"udp listener": `listen udp UNCONN 0      0      0.0.0.0:443 0.0.0.0:* users:(("openvpn",pid=331,fd=3)) ino:3663985 sk:3001 cgroup:/ <->` + "\n",
 		"udp dnat":     "dnat table ip nat chain PREROUTING: udp dport 443 dnat to 10.0.0.2\n",
 		// As docker inspect prints a stopped container's restart policy
 		// and bindings, which it takes again when the daemon restarts.
@@ -147,7 +147,7 @@ func TestTheHolderProbeReadsUDP(t *testing.T) {
 	}
 	for _, c := range h.ran {
 		if strings.Contains(c, portsMarker) {
-			for _, want := range []string{"ss -Hltnpe '( sport = :80 or sport = :443 )'", "ss -Hlunpe '( sport = :80 or sport = :443 )'", "listen-udp"} {
+			for _, want := range []string{"ss -Hltunpe '( sport = :80 or sport = :443 )'"} {
 				if !strings.Contains(c, want) {
 					t.Errorf("the probe does not carry %q:\n%s", want, c)
 				}
@@ -161,7 +161,7 @@ func TestTheHolderProbeReadsUDP(t *testing.T) {
 // The deployment's own Caddy answers HTTP/3 on UDP 443 as its user, and is
 // not a holder.
 func TestOwnUDPListenerIsNotAHolder(t *testing.T) {
-	h := home().answer(portsMarker, `listen-udp UNCONN 0 0 *:443 *:* users:(("caddy",pid=2201,fd=10)) uid:1001 ino:4 sk:4`+"\nend\n")
+	h := home().answer(portsMarker, `listen udp UNCONN 0 0 *:443 *:* users:(("caddy",pid=2201,fd=10)) uid:1001 ino:4 sk:4`+"\nend\n")
 	if _, err := hostadmit.Build(h, input(t, "home-a", gateway)); err != nil {
 		t.Fatalf("the deployment's own Caddy on UDP 443 refused the grant: %v", err)
 	}

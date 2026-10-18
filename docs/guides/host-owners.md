@@ -149,6 +149,44 @@ plan. In order, it:
    later;
 4. enables ufw.
 
+Before any of that, admit checks what enabling ufw would block. It reads
+every listener on an address other than loopback, TCP and UDP, IPv4 and
+IPv6, and every port your Docker publishes or a NAT rule receives. A port
+stays reachable when it is sshd's, the deployment's own, or one a rule of
+yours allows; every other port ufw would block. If there is one, admit
+refuses and changes nothing, listing each port with what serves it, and the
+lines that keep each reachable. For a Caddy of yours serving 80 and 443,
+with no allow of yours for them, the refusal is, in full:
+
+```text
+firewall: ufw is installed but not active, and enabling it would block these, which answer from off this host now:
+  80/tcp: caddy (pid 900, uid 0) listens on *:80
+  443/tcp: caddy (pid 900, uid 0) listens on *:443
+  443/udp: caddy (pid 900, uid 0) listens on *:443/udp
+For each port whose service must stay reachable, run its line before ufw is enabled, then run admit again:
+  sudo ufw allow 80/tcp
+  sudo ufw allow 443/tcp
+  sudo ufw allow 443/udp
+A service meant to stay unreachable from off this host, such as a database on a public address, needs nothing. Once you have checked that every one listed may be blocked, pass --enable-ufw-block-listed with --enable-ufw. Nothing was changed
+```
+
+Run the lines for the services that must stay reachable, such as your own
+web server, then run admit again: ufw keeps a rule added while it is
+inactive. A service meant to stay unreachable from outside, such as a
+database listening on a public address, needs nothing. Once you have checked
+every port listed, `--enable-ufw-block-listed` with `--enable-ufw` enables
+ufw over them, and the plan names each one it blocks; at a terminal, a
+second question asks the same, and `--yes` never answers it. The plan's
+`enable ufw` step names what stays reachable, and why.
+
+A port that reaches a container or a virtual machine through NAT is routed
+traffic, which ufw decides by its route rules, after translation, and never
+by `ufw allow`. Docker on its default iptables backend puts its own rules
+ahead of ufw's, so its published ports stay reachable and admit says so.
+For any other, admit prints `sudo ufw route allow proto <proto> to
+<address> port <port>`, the address and port the traffic is translated to;
+check it from outside once ufw is on.
+
 ufw applies every rule as it is enabled, so SSH is allowed from its first
 moment. Admit then prints the time the timer fires and asks you to open a
 **new** SSH session to the machine and type `yes` once it logs in. That
@@ -158,14 +196,17 @@ ufw off at the time printed; the deployment is admitted either way.
 Admit reads the ports from the sockets sshd and systemd listen on, not from
 `sshd_config`, so it allows what a new login connects to now. It allows
 only those TCP ports, and cannot see DROP rules written by hand in
-`/etc/ufw/before.rules`, `before6.rules` or `user.rules`, nor another way in
-such as sslh, dropbear or mosh, nor a firewall at your provider. If you rely
-on any of them, enable ufw yourself after checking them.
+`/etc/ufw/before.rules`, `before6.rules` or `user.rules`, nor a way in that
+is not listening as it reads the machine, such as sslh, dropbear or mosh
+started later, nor a firewall at your provider. If you rely on any of them,
+enable ufw yourself after checking them.
 
 Admit refuses to enable ufw, with or without the flag and without asking,
 and changes nothing, when:
 
-* it cannot read the ports sshd listens on, or ufw's own rules;
+* it cannot read the ports sshd listens on, ufw's own rules, or what else
+  answers from outside (the UDP sockets, your Docker's containers or the NAT
+  rules);
 * it finds no port sshd listens on;
 * ufw holds a deny or reject rule of yours, in any form, which it lists:
   ufw applies the first rule a connection matches, and admit neither reads
@@ -180,12 +221,14 @@ and changes nothing, when:
 
 Without `--enable-ufw` and off a terminal, admit refuses before changing
 anything and prints the commands that enable ufw by hand, numbered, each
-`sudo ufw allow <port>/tcp` before `sudo ufw enable`.
+`sudo ufw allow <port>/tcp` before `sudo ufw enable`, after the ports
+enabling ufw would block, if any, with their allow lines.
 
 **Never run `sudo ufw enable` by hand without the allow lines first.**
 Ubuntu's ufw denies incoming connections by default, so enabling it with no
 allow for your SSH port cuts off SSH at once, your own session's next
-connection included, and nothing turns it off again.
+connection included, and nothing turns it off again. The same holds for
+every other service of yours that answers from outside: allow it first.
 
 ## 5. Admit
 
