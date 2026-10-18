@@ -555,7 +555,7 @@ func TestEverySudoProblemIsNamedAtOnce(t *testing.T) {
 const (
 	meshCondPath = "/etc/systemd/system/wg-quick@psns-f2a9.service.d/paisans-conf.conf"
 	meshCondConf = "# Written by paisans site admit for deployment f2a9; paisans site evict\n" +
-		"# removes it. Until paisans apply writes the mesh's conf, wg-quick has\n" +
+		"# removes it. Until paisans deployment apply writes the mesh's conf, wg-quick has\n" +
 		"# nothing to bring up, so the unit is skipped rather than failed.\n" +
 		"[Unit]\nConditionPathExists=/etc/wireguard/psns-f2a9.conf\n"
 )

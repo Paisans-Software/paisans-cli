@@ -1,5 +1,5 @@
 #!/bin/sh
-# Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+# Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
 #
 # The operators heartbeat of auth, from its instance on home-b.
 # Once a minute it asks the operator reconciler beside this instance whether

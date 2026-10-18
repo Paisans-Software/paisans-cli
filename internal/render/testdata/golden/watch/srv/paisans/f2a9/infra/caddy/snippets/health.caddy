@@ -1,4 +1,4 @@
-# Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+# Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
 #
 # Routing for health, imported by the host block for
 # health.example.org in the Caddy on the monitor's own site. The UI, sign in,
