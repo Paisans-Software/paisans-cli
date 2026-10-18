@@ -3310,3 +3310,6 @@ the refusal prints. Plaintext secrets under a name ending `.enc.yaml` are one
   from `.sops.yaml` on purpose would be kept), and the run still stops at
   publishing for the missing `.sops.yaml`, after secrets were generated.
 
+## 2026-10-17: Ubuntu 26.04 is supported, with the original sudo
+
+Founder request, 2026-10-17: `site admit`, `site prepare` and the rootless commands accept Ubuntu 26.04 through the shared `ubuntu` profile, checked in an `ubuntu:26.04` container (systemd 259 delegates cpu, memory and pids as 24.04's does, apparmor ships the rootlesskit profile, Docker publishes a `resolute` suite); 26.04 makes sudo-rs `sudo`, which honours `Defaults` env_keep and setenv for a user without listing them under `sudo -l`, so admit keeps refusing it and its refusal names `update-alternatives --set sudo /usr/bin/sudo.ws` where the original is installed.
