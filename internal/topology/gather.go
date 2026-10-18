@@ -22,6 +22,8 @@ import (
 // gateway answered or any gateway's could not be read; etcd's membership,
 // for etcd's voters, and Patroni's, for the cluster's sites that are no
 // voter, when none that answered could be read and one of them has run it.
+// A login is tried once (apply.Reach): a site that does not answer is not
+// asked again, here or later in the run.
 func Gather(cfg *config.Config, transports map[string]apply.Transport) Evidence {
 	d := cfg.Deployment()
 	ev := Evidence{Login: map[string]error{}, Records: map[string]RecordRead{}, Joined: map[string][]string{}}
@@ -31,7 +33,7 @@ func Gather(cfg *config.Config, transports map[string]apply.Transport) Evidence 
 			ev.Login[name] = fmt.Errorf("no way to reach it")
 			continue
 		}
-		if _, err := t.Run("true"); err != nil {
+		if err := apply.Reach(t); err != nil {
 			ev.Login[name] = err
 			continue
 		}

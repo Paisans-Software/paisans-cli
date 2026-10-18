@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os/exec"
 	"slices"
 	"strings"
 	"testing"
@@ -396,5 +397,56 @@ func TestADryRunHonoursRequireAll(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(problemText(err), "--require-all") || !rec.Has("result", "Nothing changed") {
 		t.Errorf("apply --site: %v: %s\n%s", err, problemText(err), rec.Lines())
+	}
+}
+
+// A site whose host is switched off is classified down on one connection
+// attempt, not three each waiting out ssh's connect timeout, and no later
+// command of the run to it tries ssh again.
+func TestASwitchedOffSiteIsTriedOnceARun(t *testing.T) {
+	cfg := fixture(t)
+	resetLogins(t)
+	answerQuietly(t, "", "")
+	t.Cleanup(apply.SetSleep(func(time.Duration) {}))
+	tries := 0
+	t.Cleanup(apply.SetRunSSH(func(cmd *exec.Cmd) error {
+		if strings.Contains(strings.Join(cmd.Args, " "), "@home-b.local") {
+			tries++
+			io.WriteString(cmd.Stdout, "ssh: connect to host home-b.local port 22: Operation timed out\n")
+			return sshExit(255)
+		}
+		out, exit, ok := quietAnswer(cmd.Args, "", "")
+		if !ok {
+			return cmd.Run()
+		}
+		io.WriteString(cmd.Stdout, out)
+		if exit != 0 {
+			return sshExit(exit)
+		}
+		return nil
+	}))
+	classifyWith(t, func(cfg *config.Config) map[string]apply.Transport {
+		out := map[string]apply.Transport{}
+		for _, name := range cfg.SiteNames() {
+			out[name] = siteTransport(name, cfg.Sites[name], "")
+		}
+		return out
+	})
+	classified(t, nil)
+	c, err := classifySites(ui.NewPlain(io.Discard, false), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Sites["home-b"]; got.Class == topology.Ready {
+		t.Errorf("home-b is %s, want it not ready", got.Class)
+	}
+	if tries != 1 {
+		t.Errorf("classification tried home-b %d times, want once", tries)
+	}
+	if _, err := siteTransport("home-b", cfg.Sites["home-b"], "").Run("true"); !errors.Is(err, apply.ErrUnreachable) {
+		t.Errorf("a later command: %v, want ErrUnreachable", err)
+	}
+	if tries != 1 {
+		t.Errorf("home-b was tried %d times in the run, want once", tries)
 	}
 }
