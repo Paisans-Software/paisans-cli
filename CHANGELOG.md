@@ -17,7 +17,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Fixed
 
-- `init` rolls the mesh subnet clear of one `site admit` refused on a host it cannot read, and admit's refusal advises on a clashing role before an overlapping subnet, which no subnet change frees.
+- `init` moves a never-applied mesh subnet clear of one `site admit` refused, admitting each site again on it instead of requiring evictions, and admit advises on a clashing role before the subnet.
 
 ## [0.3.0-rc.4] - 2026-10-17
 

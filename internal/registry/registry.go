@@ -594,7 +594,7 @@ func refused(t Runner, e Entry, why error) error {
 		case c.Holds("WireGuard listen port"):
 			advice = "Two WireGuard interfaces cannot listen on one port. Give this site's endpoint another port in " + config.FileName + ", and forward that port where the host is behind NAT"
 		default:
-			advice = fmt.Sprintf("Two meshes on overlapping subnets would route each other's traffic. A deployed mesh subnet never changes, so the deployment not yet applied here moves: if this one has never been applied, admit this site from `paisans init`, which rolls a subnet clear of %s while no site has admitted the deployment, or give mesh.subnet in %s one clear of it. A site already admitted was admitted around the old subnet, so its owner evicts the deployment before the subnet moves", c.Entry.Subnet, config.FileName)
+			advice = fmt.Sprintf("Two meshes on overlapping subnets would route each other's traffic. A deployed mesh subnet never changes, so the deployment not yet applied here moves: if this one has never been applied, admit this site from `paisans init`, which rolls a subnet clear of %s and admits again each site that has admitted the deployment. With a request, the operators send a new one", c.Entry.Subnet)
 		}
 	}
 	return fmt.Errorf("%s: %w, so this deployment (token %s, interface %s, mesh %s, roles %s) cannot share the host with it, and nothing was changed. %s", t.Describe(), why, e.Token, e.Interface, e.Subnet, roles, advice)

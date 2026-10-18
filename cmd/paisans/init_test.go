@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -173,7 +174,7 @@ func TestInitRefusesToRollAnAdmittedSubnet(t *testing.T) {
 	before, _ := os.ReadFile(path)
 	err := runInitQuietly(t, path)
 	hint, explain := ui.Describe(err)
-	if err == nil || !strings.Contains(hint, "is not rolled") || !strings.Contains(explain, "evict") {
+	if err == nil || !strings.Contains(hint, "is not rolled") || !strings.Contains(explain, "at a terminal") {
 		t.Fatalf("init = %v, want a refusal to roll an admitted subnet", err)
 	}
 	if !strings.Contains(fmt.Sprintf("%+v", errors.Unwrap(err)), "route 10.44.0.0/24 dev psns-0c1d on home-a") {
@@ -913,18 +914,29 @@ func TestAdmitStopReasonKeepsTheExplanationsLines(t *testing.T) {
 	}
 }
 
-// stopAdmitFromInit makes site admit, run from init, stop at site with
-// err and nothing changed, as admit does when the host refuses the claim.
-func stopAdmitFromInit(t *testing.T, site string, err error) {
+// scriptAdmitFromInit makes site admit, run from init, answer each site
+// from its script in turn: nil admits it, marking its fake admitted, and an
+// error stops admit with nothing changed, as a host refusing the claim
+// does. It returns the sites admit ran for, in order.
+func scriptAdmitFromInit(t *testing.T, sites map[string]*initFake, script map[string][]error) *[]string {
 	t.Helper()
 	saved := admitFromInit
 	t.Cleanup(func() { admitFromInit = saved })
-	admitFromInit = func(_ ui.Reporter, _, s string, _ io.Reader, _ io.Writer) error {
-		if s != site {
-			t.Fatalf("site admit ran for %s", s)
+	ran := new([]string)
+	admitFromInit = func(_ ui.Reporter, _, site string, _ io.Reader, _ io.Writer) error {
+		*ran = append(*ran, site)
+		if len(script[site]) == 0 {
+			t.Fatalf("site admit ran for %s once more than scripted", site)
 		}
-		return &admitStoppedError{err}
+		err := script[site][0]
+		script[site] = script[site][1:]
+		if err != nil {
+			return &admitStoppedError{err}
+		}
+		sites[site].unadmitted = false
+		return nil
 	}
+	return ran
 }
 
 // claimRefused is the refusal a host gives a claim that clashes with
@@ -938,14 +950,14 @@ func claimRefused(roles string, what ...string) error {
 // A host that refuses admit because another deployment there holds an
 // overlapping mesh subnet is a network init could not read, since the
 // deployment's user cannot log in there: with no site admitted yet, init
-// rolls a subnet clear of it, so admitting the site again succeeds.
+// rolls a subnet clear of it and admits the site again on it.
 func TestInitRollsClearOfASubnetAdmitRefused(t *testing.T) {
 	sites := fakeSites()
 	for _, f := range sites {
 		f.unadmitted = true
 	}
 	path, rec := initWorld(t, nil, sites, []byte{212, 37})
-	stopAdmitFromInit(t, "home-b", claimRefused("apps", "mesh subnet 10.44.0.0/24"))
+	ran := scriptAdmitFromInit(t, sites, map[string][]error{"home-b": {claimRefused("apps", "mesh subnet 10.44.0.0/24"), nil}})
 	if _, err := runInitAt(t, path, true, "n\nn\ny\nn\n"); err != nil {
 		t.Fatalf("%v\n%s", err, rec.Lines())
 	}
@@ -959,21 +971,72 @@ func TestInitRollsClearOfASubnetAdmitRefused(t *testing.T) {
 	if !strings.Contains(rec.Lines(), "10.44.0.0/24 overlapped deployment "+otherID+"'s mesh subnet 10.44.0.0/24 on home-b") {
 		t.Errorf("init did not say why it rolled:\n%s", rec.Lines())
 	}
+	if strings.Join(*ran, ",") != "home-b,home-b" || rec.Has("note", "home-b has not admitted this deployment yet, so init skipped it") {
+		t.Errorf("home-b was not admitted again on the new subnet: admit ran for %v\n%s", *ran, rec.Lines())
+	}
 }
 
-// Once a site has admitted the deployment, init does not roll clear of a
-// subnet admit refused elsewhere: it refuses, naming the host that holds
-// it, and writes nothing.
-func TestInitRefusesToRollPastAnAdmittedSiteForAnotherHost(t *testing.T) {
+// A network on a host admit refused the subnet for moves the subnet even
+// when other sites have admitted the deployment, as long as it has never
+// been applied: init admits every site again on the new one, rather than
+// have each host's owner evict the deployment.
+func TestInitMovesAnAdmittedSubnetAndAdmitsEachSiteAgain(t *testing.T) {
 	sites := fakeSites()
 	sites["home-b"].unadmitted = true
 	path, rec := initWorld(t, nil, sites, []byte{212, 37})
+	refused := &mesh.OverlapError{Subnet: "10.44.0.0/24", Taken: []mesh.Taken{{Prefix: netip.MustParsePrefix("10.44.0.0/16"), What: "route 10.44.0.0/16 dev tailscale0"}}}
+	ran := scriptAdmitFromInit(t, sites, map[string][]error{
+		"health": {nil}, "home-a": {nil}, "home-b": {refused, nil}, "vm": {nil},
+	})
+	if _, err := runInitAt(t, path, true, "y\n"); err != nil {
+		t.Fatalf("%v\n%s", err, rec.Lines())
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Mesh.Subnet != "10.212.37.0/24" || cfg.Sites["vm"].Address != "10.212.37.3" {
+		t.Errorf("subnet %s, vm %s, want both moved:\n%s", cfg.Mesh.Subnet, cfg.Sites["vm"].Address, rec.Lines())
+	}
+	if strings.Join(*ran, ",") != "home-b,health,home-a,home-b,vm" {
+		t.Errorf("admit ran for %v, want home-b, then every site again", *ran)
+	}
+	if !rec.Has("note", "mesh.subnet is 10.212.37.0/24 now, so init admits health, home-a, home-b, vm on it") {
+		t.Errorf("init did not say why it admits each site again:\n%s", rec.Lines())
+	}
+	if !strings.Contains(rec.Lines(), "route 10.44.0.0/16 dev tailscale0 on home-b") {
+		t.Errorf("init did not name what it moved clear of:\n%s", rec.Lines())
+	}
+}
+
+// A site admitted on the old subnet that is not admitted again is warned
+// about: apply refuses it until it is.
+func TestInitWarnsAboutASiteLeftOnTheOldSubnet(t *testing.T) {
+	sites := fakeSites()
+	sites["home-b"].unadmitted = true
+	path, rec := initWorld(t, nil, sites, []byte{212, 37})
+	scriptAdmitFromInit(t, sites, map[string][]error{
+		"health": {nil}, "home-a": {errAdmitDeclined}, "home-b": {claimRefused("apps", "mesh subnet 10.44.0.0/24"), nil}, "vm": {nil},
+	})
+	if _, err := runInitAt(t, path, true, "y\n"); err != nil {
+		t.Fatalf("%v\n%s", err, rec.Lines())
+	}
+	if !rec.Has("warn", "home-a is still admitted on the old mesh.subnet") {
+		t.Errorf("no warning for home-a:\n%s", rec.Lines())
+	}
+}
+
+// Off a terminal, init cannot admit a site again, so it does not move a
+// subnet some site has admitted: it refuses, saying to run it at one.
+func TestInitRefusesToMoveAnAdmittedSubnetOffATerminal(t *testing.T) {
+	sites := fakeSites()
+	sites["home-a"].routes = `[{"dst":"10.44.0.0/24","dev":"psns-0c1d"}]`
+	path, _ := initWorld(t, nil, sites, []byte{212, 37})
 	before, _ := os.ReadFile(path)
-	stopAdmitFromInit(t, "home-b", claimRefused("apps", "mesh subnet 10.44.0.0/24"))
-	_, err := runInitAt(t, path, true, "y\n")
+	_, err := runInitAt(t, path, false, "")
 	hint, explain := ui.Describe(err)
-	if err == nil || !strings.Contains(hint, "overlaps deployment "+otherID+"'s mesh subnet 10.44.0.0/24 on home-b, and is not rolled") || !strings.Contains(explain, "evict") {
-		t.Fatalf("init = %v, want a refusal to roll naming home-b\n%s", err, rec.Lines())
+	if err == nil || !strings.Contains(hint, "overlaps route 10.44.0.0/24 dev psns-0c1d on home-a, and is not rolled") || !strings.Contains(explain, "at a terminal") {
+		t.Fatalf("init = %v, want a refusal to move an admitted subnet", err)
 	}
 	if after, _ := os.ReadFile(path); !bytes.Equal(before, after) {
 		t.Error("init changed paisans-stack.yaml although it refused")
@@ -990,7 +1053,7 @@ func TestInitKeepsTheSubnetWhenAdmitRefusedARole(t *testing.T) {
 	}
 	path, rec := initWorld(t, nil, sites, []byte{212, 37})
 	before, _ := os.ReadFile(path)
-	stopAdmitFromInit(t, "home-b", claimRefused("apps,data", "mesh subnet 10.44.0.0/24", "the data role"))
+	scriptAdmitFromInit(t, sites, map[string][]error{"home-b": {claimRefused("apps,data", "mesh subnet 10.44.0.0/24", "the data role")}})
 	if _, err := runInitAt(t, path, true, "n\nn\ny\nn\n"); err != nil {
 		t.Fatalf("%v\n%s", err, rec.Lines())
 	}
