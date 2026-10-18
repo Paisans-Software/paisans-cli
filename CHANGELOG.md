@@ -15,6 +15,10 @@ changes share a bullet. Detailed notes are on the corresponding
 - Where sudo is sudo-rs, `site admit` and `doctor` read the sudoers Defaults from the original sudo installed beside it as `sudo.ws`, so a stock Ubuntu 26.04 host is admitted without switching sudo.
 - A dry run says what `--execute` will do in the future tense, so a note such as `ssh.user paisans-c111, --execute will record it` reads as yet to happen.
 
+### Fixed
+
+- `init` rolls the mesh subnet clear of one `site admit` refused on a host it cannot read, and admit's refusal advises on a clashing role before an overlapping subnet, which no subnet change frees.
+
 ## [0.3.0-rc.4] - 2026-10-17
 
 ### Added

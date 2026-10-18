@@ -142,8 +142,8 @@ func admitStopped(err error) bool {
 // for each grant the site's roles need, then showing the plan and asking
 // before it runs. A plan the operator declines is errAdmitDeclined, and any
 // other stop before the plan runs is an admitStoppedError (see
-// admitStopped).
-func admitFromInit(r ui.Reporter, configPath, site string, stdin io.Reader, stdout io.Writer) error {
+// admitStopped). A test replaces it.
+var admitFromInit = func(r ui.Reporter, configPath, site string, stdin io.Reader, stdout io.Writer) error {
 	return admit(r, admitRun{site: site, configPath: configPath, execute: true, approve: true}, answerer{}, stdin, stdout)
 }
 

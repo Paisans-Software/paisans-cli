@@ -912,3 +912,93 @@ func TestAdmitStopReasonKeepsTheExplanationsLines(t *testing.T) {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
 	}
 }
+
+// stopAdmitFromInit makes site admit, run from init, stop at site with
+// err and nothing changed, as admit does when the host refuses the claim.
+func stopAdmitFromInit(t *testing.T, site string, err error) {
+	t.Helper()
+	saved := admitFromInit
+	t.Cleanup(func() { admitFromInit = saved })
+	admitFromInit = func(_ ui.Reporter, _, s string, _ io.Reader, _ io.Writer) error {
+		if s != site {
+			t.Fatalf("site admit ran for %s", s)
+		}
+		return &admitStoppedError{err}
+	}
+}
+
+// claimRefused is the refusal a host gives a claim that clashes with
+// another deployment there on what.
+func claimRefused(roles string, what ...string) error {
+	theirs := registry.Entry{Token: "0c1d", Interface: "psns-0c1d", Subnet: "10.44.0.0/24", Roles: roles}
+	ours := registry.Entry{Token: "f2a9", Interface: "psns-f2a9", Subnet: "10.44.0.0/24", Roles: "apps,data"}
+	return registry.Refused(&initFake{name: "home-b.local"}, ours, registry.Conflict{ID: otherID, Entry: theirs, Clashes: what})
+}
+
+// A host that refuses admit because another deployment there holds an
+// overlapping mesh subnet is a network init could not read, since the
+// deployment's user cannot log in there: with no site admitted yet, init
+// rolls a subnet clear of it, so admitting the site again succeeds.
+func TestInitRollsClearOfASubnetAdmitRefused(t *testing.T) {
+	sites := fakeSites()
+	for _, f := range sites {
+		f.unadmitted = true
+	}
+	path, rec := initWorld(t, nil, sites, []byte{212, 37})
+	stopAdmitFromInit(t, "home-b", claimRefused("apps", "mesh subnet 10.44.0.0/24"))
+	if _, err := runInitAt(t, path, true, "n\nn\ny\nn\n"); err != nil {
+		t.Fatalf("%v\n%s", err, rec.Lines())
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Mesh.Subnet != "10.212.37.0/24" {
+		t.Errorf("subnet %s, want it rolled clear of home-b:\n%s", cfg.Mesh.Subnet, rec.Lines())
+	}
+	if !strings.Contains(rec.Lines(), "10.44.0.0/24 overlapped deployment "+otherID+"'s mesh subnet 10.44.0.0/24 on home-b") {
+		t.Errorf("init did not say why it rolled:\n%s", rec.Lines())
+	}
+}
+
+// Once a site has admitted the deployment, init does not roll clear of a
+// subnet admit refused elsewhere: it refuses, naming the host that holds
+// it, and writes nothing.
+func TestInitRefusesToRollPastAnAdmittedSiteForAnotherHost(t *testing.T) {
+	sites := fakeSites()
+	sites["home-b"].unadmitted = true
+	path, rec := initWorld(t, nil, sites, []byte{212, 37})
+	before, _ := os.ReadFile(path)
+	stopAdmitFromInit(t, "home-b", claimRefused("apps", "mesh subnet 10.44.0.0/24"))
+	_, err := runInitAt(t, path, true, "y\n")
+	hint, explain := ui.Describe(err)
+	if err == nil || !strings.Contains(hint, "overlaps deployment "+otherID+"'s mesh subnet 10.44.0.0/24 on home-b, and is not rolled") || !strings.Contains(explain, "evict") {
+		t.Fatalf("init = %v, want a refusal to roll naming home-b\n%s", err, rec.Lines())
+	}
+	if after, _ := os.ReadFile(path); !bytes.Equal(before, after) {
+		t.Error("init changed paisans-stack.yaml although it refused")
+	}
+}
+
+// A host whose other deployment also holds a role this site needs cannot
+// take the site on any subnet, so init keeps the subnet and skips the site
+// with admit's advice to use another host.
+func TestInitKeepsTheSubnetWhenAdmitRefusedARole(t *testing.T) {
+	sites := fakeSites()
+	for _, f := range sites {
+		f.unadmitted = true
+	}
+	path, rec := initWorld(t, nil, sites, []byte{212, 37})
+	before, _ := os.ReadFile(path)
+	stopAdmitFromInit(t, "home-b", claimRefused("apps,data", "mesh subnet 10.44.0.0/24", "the data role"))
+	if _, err := runInitAt(t, path, true, "n\nn\ny\nn\n"); err != nil {
+		t.Fatalf("%v\n%s", err, rec.Lines())
+	}
+	if after, _ := os.ReadFile(path); !bytes.Equal(before, after) {
+		t.Errorf("init rolled the subnet for a host it cannot use:\n%s", rec.Lines())
+	}
+	i := rec.Index("note", "home-b has not admitted this deployment yet, so init skipped it")
+	if i < 0 || !strings.Contains(rec.Events[i].Extra, "Use another host for one of the data sites") {
+		t.Errorf("the skip does not give admit's advice:\n%s", rec.Lines())
+	}
+}

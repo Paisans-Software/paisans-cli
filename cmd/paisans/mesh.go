@@ -184,13 +184,15 @@ func listNotAdmitted(r ui.Reporter, skipped []notAdmitted) {
 // admission is checked against, it prints the commands that admit the site
 // and skips it. --yes never admits a host: admitting is the owner's step.
 //
-// It returns the admitted sites, in name order, and the configuration as
-// the file now holds it, since admit's first login as the deployment's
-// user may record ssh.user there; hosts is updated for each site admitted.
-// An admit that fails once its plan runs stops init with its error; one
-// that stops before, with nothing changed (see admitStopped), is a no,
-// whose reason the skip names.
-func offerAdmissions(r ui.Reporter, cfg *config.Config, path string, hosts map[string]registry.Runner, admitted []string, skipped []notAdmitted, ans answerer, stdin io.Reader, stdout io.Writer) ([]string, *config.Config, error) {
+// It returns the admitted sites, in name order, the mesh subnets admit
+// refused on the others (see subnetBlocked), and the configuration as the
+// file now holds it, since admit's first login as the deployment's user may
+// record ssh.user there; hosts is updated for each site admitted. An admit
+// that fails once its plan runs stops init with its error; one that stops
+// before, with nothing changed (see admitStopped), is a no, whose reason
+// the skip names.
+func offerAdmissions(r ui.Reporter, cfg *config.Config, path string, hosts map[string]registry.Runner, admitted []string, skipped []notAdmitted, ans answerer, stdin io.Reader, stdout io.Writer) ([]string, []mesh.Taken, *config.Config, error) {
+	var blocked []mesh.Taken
 	ask := !ans.yes && stdinIsTerminal(stdin) && cfg.Mesh.Subnet != ""
 	if len(skipped) > 0 && !ans.yes && stdinIsTerminal(stdin) && cfg.Mesh.Subnet == "" {
 		r.Note("mesh.subnet is not set yet, so init offers to admit no site", "site admit checks the subnet on the host, and init chooses it in this run. Once init has run, admit each site with the commands below, or run init again.")
@@ -202,26 +204,29 @@ func offerAdmissions(r ui.Reporter, cfg *config.Config, path string, hosts map[s
 			yes, err := ans.yesNo(stdin, stdout, "", fmt.Sprintf("Admit %s now from this machine?", n.site), "")
 			resume()
 			if err != nil {
-				return nil, nil, fmt.Errorf("init: reading your answer: %w", err)
+				return nil, nil, nil, fmt.Errorf("init: reading your answer: %w", err)
 			}
 			if yes {
 				err := admitFromInit(r, path, n.site, stdin, stdout)
 				if err == nil {
 					if cfg, err = config.LoadForInit(path); err != nil {
-						return nil, nil, err
+						return nil, nil, nil, err
 					}
 					hosts[n.site] = initHost(n.site, cfg.Sites[n.site])
 					s := r.Step("check " + n.site + "'s admission")
 					if _, err := admissionForSite(hosts[n.site], cfg, n.site); err != nil {
 						s.Fail(err)
-						return nil, nil, fmt.Errorf("init: %s was admitted, but its admission does not read back: %w", n.site, err)
+						return nil, nil, nil, fmt.Errorf("init: %s was admitted, but its admission does not read back: %w", n.site, err)
 					}
 					s.End(ui.OK, "admitted")
 					admitted = append(admitted, n.site)
 					continue
 				}
 				if !admitStopped(err) {
-					return nil, nil, err
+					return nil, nil, nil, err
+				}
+				if t, ok := subnetBlocked(n.site, err); ok {
+					blocked = append(blocked, t)
 				}
 				why = admitStopReason(err) + "\n\n"
 			}
@@ -230,7 +235,30 @@ func offerAdmissions(r ui.Reporter, cfg *config.Config, path string, hosts map[s
 		r.Note(n.site+" has not admitted this deployment yet, so init skipped it", why+admitCommands(path, n.site))
 	}
 	sort.Strings(admitted)
-	return admitted, cfg, nil
+	return admitted, blocked, cfg, nil
+}
+
+// subnetBlocked is the mesh subnet another deployment holds on site's host,
+// when admit refused the claim for it and for nothing a subnet cannot free:
+// a network init cannot read itself, since the deployment's user cannot log
+// in there, and which settleMesh then steers clear of. A refusal for a role,
+// the token, the root or the interface leaves the host unusable on any
+// subnet, so it blocks none.
+func subnetBlocked(site string, err error) (mesh.Taken, bool) {
+	var c registry.Conflict
+	if !errors.As(err, &c) || !c.Holds("mesh subnet") {
+		return mesh.Taken{}, false
+	}
+	for _, fixed := range []string{"token", "root", "WireGuard interface", "the gateway role", "the data role"} {
+		if c.Holds(fixed) {
+			return mesh.Taken{}, false
+		}
+	}
+	p, err := mesh.ParsePrefix(c.Entry.Subnet)
+	if err != nil {
+		return mesh.Taken{}, false
+	}
+	return mesh.Taken{Prefix: p, What: fmt.Sprintf("deployment %s's mesh subnet %s on %s", c.ID, c.Entry.Subnet, site)}, true
 }
 
 // admitStopReason is why site admit stopped with nothing changed, for
@@ -256,8 +284,8 @@ func admitCommands(path, site string) string {
 	return fmt.Sprintf("site admit checks the mesh subnet against the host as root, and refuses one that overlaps anything there. Each command below shows its plan before it changes anything, and takes the flags init cannot pass, such as --data-dir and --bridge-netfilter. If the host is yours, admit the site from this machine, with your own login on the host, which runs admit through sudo:\n\n    paisans site admit --site %[1]s%[2]s --ssh <your login> --execute\n\nIf someone else owns the host, send them a request:\n\n    paisans site request --site %[1]s%[2]s > %[1]s.admit\n\nand ask them to run, on the host:\n\n    sudo paisans site admit --request %[1]s.admit --execute", site, withConfig)
 }
 
-// settleMesh is init's subnet decision, over the admitted sites alone (see
-// initAdmissions). It asks each first whether it holds this deployment's
+// settleMesh is init's subnet decision, over the admitted sites and the
+// subnets admit refused on the others (see subnetBlocked). It asks each first whether it holds this deployment's
 // manifest. Once any of them does, the subnet is deployed and settleMesh
 // never changes it. Otherwise it refuses with unread, the sites
 // initAdmissions could not ask, and with none it gathers everything each
@@ -270,9 +298,9 @@ func admitCommands(path, site string) string {
 // The decision is one step, "settle mesh subnet", whose result is what
 // happened to the subnet; why is its details. Its progress names the site
 // being read.
-func settleMesh(r ui.Reporter, cfg *config.Config, path string, hosts map[string]registry.Runner, admitted []string, unread error, random io.Reader) (bool, error) {
+func settleMesh(r ui.Reporter, cfg *config.Config, path string, hosts map[string]registry.Runner, admitted []string, blocked []mesh.Taken, unread error, random io.Reader) (bool, error) {
 	s := r.Step("settle mesh subnet")
-	wrote, result, err := chooseMesh(s, cfg, path, hosts, admitted, unread, random)
+	wrote, result, err := chooseMesh(s, cfg, path, hosts, admitted, blocked, unread, random)
 	if err != nil {
 		s.Fail(err)
 		return false, err
@@ -283,7 +311,7 @@ func settleMesh(r ui.Reporter, cfg *config.Config, path string, hosts map[string
 
 // chooseMesh is settleMesh's decision, reporting what it finds to s, and
 // returning whether it wrote and the short result for the step.
-func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]registry.Runner, admitted []string, unread error, random io.Reader) (bool, string, error) {
+func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]registry.Runner, admitted []string, blocked []mesh.Taken, unread error, random io.Reader) (bool, string, error) {
 	manifest := cfg.Deployment().Manifest()
 	var claimedOn []string
 	var failures []error
@@ -316,7 +344,7 @@ func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]reg
 	}
 
 	iface := cfg.Deployment().Interface()
-	var taken []mesh.Taken
+	taken := slices.Clone(blocked)
 	for _, name := range admitted {
 		s.Progress("read the networks on " + name)
 		probed, err := mesh.ProbeUser(hosts[name])
@@ -355,8 +383,18 @@ func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]reg
 		return false, "kept", nil
 	}
 	if len(admitted) > 0 {
+		overlaps := "something on " + strings.Join(admitted, ", ")
+		if current, err := mesh.ParsePrefix(cfg.Mesh.Subnet); err == nil {
+			if hits := mesh.Clashes(current, taken); len(hits) > 0 {
+				whats := make([]string, len(hits))
+				for i, h := range hits {
+					whats[i] = h.What
+				}
+				overlaps = strings.Join(whats, ", ")
+			}
+		}
 		return false, "", &ui.Problem{
-			Hint:    "mesh.subnet " + cfg.Mesh.Subnet + " overlaps something on " + strings.Join(admitted, ", ") + ", and is not rolled",
+			Hint:    "mesh.subnet " + cfg.Mesh.Subnet + " overlaps " + overlaps + ", and is not rolled",
 			Explain: fmt.Sprintf("%s admitted this deployment with mesh.subnet %s, which site admit built the host's firewall and Docker address pools around, so a new one would break the admission. Free the overlapping network on the host, or have each host's owner evict the deployment, run paisans init again, and send them a new request. Nothing was written.", strings.Join(admitted, ", "), cfg.Mesh.Subnet),
 			Cause:   fmt.Errorf("%s: %s", path, strings.Join(choice.Why, "; ")),
 		}

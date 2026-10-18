@@ -323,10 +323,11 @@ func runInit(args []string, stdin io.Reader, stdout io.Writer) error {
 	hosts := initHosts(cfg)
 	admitted, skipped, unread := initAdmissions(r, cfg, hosts)
 	listNotAdmitted(r, skipped)
-	if admitted, cfg, err = offerAdmissions(r, cfg, *configPath, hosts, admitted, skipped, ans, stdin, stdout); err != nil {
+	admitted, blocked, cfg, err := offerAdmissions(r, cfg, *configPath, hosts, admitted, skipped, ans, stdin, stdout)
+	if err != nil {
 		return err
 	}
-	wrote, err := settleMesh(r, cfg, *configPath, hosts, admitted, unread, meshRandom)
+	wrote, err := settleMesh(r, cfg, *configPath, hosts, admitted, blocked, unread, meshRandom)
 	if err != nil {
 		return err
 	}
