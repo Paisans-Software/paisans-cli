@@ -325,7 +325,7 @@ func TestThePullAndTheInstallShareOneDigest(t *testing.T) {
 	}
 	run := convergeRun
 	convergeRun = func(args []string) error {
-		if args[0] == "apply" {
+		if isApply(args) {
 			resolve()
 		}
 		return run(args)

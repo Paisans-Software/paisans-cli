@@ -7,7 +7,7 @@ import (
 // Reference is a container image reference, split far enough to tell a pinned
 // one from a floating one. It is deliberately not a full parser: the toolkit
 // pulls nothing and resolves nothing, so the only question it has to answer is
-// whether two runs of `apply` would get the same bytes.
+// whether two runs of `deployment apply` would get the same bytes.
 type Reference struct {
 	// Name is everything before the tag or digest.
 	Name string

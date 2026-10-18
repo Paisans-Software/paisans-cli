@@ -272,7 +272,7 @@ func TestAnExecutedApplyRecordsEveryArchBeforeItPublishes(t *testing.T) {
 	fake := convergeRun
 	var stepErrs []error
 	convergeRun = func(args []string) error {
-		if args[0] == "apply" {
+		if isApply(args) {
 			if err := runStep(args); err != nil {
 				stepErrs = append(stepErrs, err)
 			}
@@ -304,7 +304,7 @@ func TestAnExecutedApplyRecordsEveryArchBeforeItPublishes(t *testing.T) {
 	}
 }
 
-// apply --site on its own records its site's architecture, and the version
+// deployment apply --site on its own records its site's architecture, and the version
 // it publishes is the file as written, not as first loaded.
 func TestAnExecutedApplySitePublishesTheRecordedArch(t *testing.T) {
 	path := fixtureWithoutArch(t)

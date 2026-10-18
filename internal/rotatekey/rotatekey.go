@@ -43,7 +43,7 @@ const (
 )
 
 // Switch is how a rotation moves an app onto the new key: the same as
-// `paisans apply --site <site> --only <app>`, which renders the app's .env from
+// `paisans deployment apply --site <site> --only <app>`, which renders the app's .env from
 // the secrets, writes it, recreates the app and holds it to apply's health
 // gate. It is an interface so that this package does not render or reach a
 // host's files itself, and so the order of a rotation can be tested on its own.
@@ -388,14 +388,14 @@ func (p *Plan) buildSwitch() (*Stage, error) {
 	st := &Stage{
 		Name:  fmt.Sprintf("switch %s to the new key", p.App),
 		Short: fmt.Sprintf("%s runs on the new key", p.App),
-		Gate:  fmt.Sprintf("`apply --only %s` has nothing left to do on %s: the app runs with the rendered .env and passed apply's health gate", p.App, strings.Join(p.Sites, ", ")),
+		Gate:  fmt.Sprintf("`deployment apply --only %s` has nothing left to do on %s: the app runs with the rendered .env and passed apply's health gate", p.App, strings.Join(p.Sites, ", ")),
 	}
 	var todo []string
 	for _, site := range p.Sites {
 		if !p.InProgress {
 			// The .env changes once stage 1 has run; with the secrets as
 			// they are, apply would find nothing to do.
-			st.Steps = append(st.Steps, Step{"switch " + p.App + " on " + site, fmt.Sprintf("%s: as `paisans apply --site %s --only %s`: write its .env with %s, recreate it, health gate", site, site, p.App, p.newName())})
+			st.Steps = append(st.Steps, Step{"switch " + p.App + " on " + site, fmt.Sprintf("%s: as `paisans deployment apply --site %s --only %s`: write its .env with %s, recreate it, health gate", site, site, p.App, p.newName())})
 			todo = append(todo, site)
 			continue
 		}
@@ -404,7 +404,7 @@ func (p *Plan) buildSwitch() (*Stage, error) {
 			return nil, err
 		}
 		if len(pending) > 0 {
-			st.Steps = append(st.Steps, Step{"switch " + p.App + " on " + site, fmt.Sprintf("%s: as `paisans apply --site %s --only %s`: %s", site, site, p.App, strings.Join(pending, "; "))})
+			st.Steps = append(st.Steps, Step{"switch " + p.App + " on " + site, fmt.Sprintf("%s: as `paisans deployment apply --site %s --only %s`: %s", site, site, p.App, strings.Join(pending, "; "))})
 			todo = append(todo, site)
 		}
 	}

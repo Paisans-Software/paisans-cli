@@ -124,7 +124,7 @@ func runStorageRotateKey(args []string) error {
 	return nil
 }
 
-// scopedApplyPlan is `paisans apply --site <site> --only <stack>...`
+// scopedApplyPlan is `paisans deployment apply --site <site> --only <stack>...`
 // planned with secrets, for a rotation's switch: the same plan, refusal on a
 // host edit and health gate, scoped to stacks. A rotation rewrites an
 // environment, not an image: no resolver, so each site keeps the build it
@@ -138,7 +138,7 @@ func scopedApplyPlan(cfg *config.Config, secrets *config.Secrets, site string, t
 	return planSiteApply(cfg, secrets, site, t, options...)
 }
 
-// applySwitch is rotatekey.Switch as `paisans apply --site <site> --only
+// applySwitch is rotatekey.Switch as `paisans deployment apply --site <site> --only
 // <app>`: the same plan, the same refusal on a host edit, the same health
 // gate.
 type applySwitch struct {
@@ -156,7 +156,7 @@ func (a applySwitch) plan(site string, secrets *config.Secrets) (*apply.Plan, er
 		return nil, err
 	}
 	if c := plan.Conflicts(); len(c) > 0 {
-		return nil, fmt.Errorf("%s's %s differs from what the last apply recorded, so somebody edited it on the host. Nothing was changed on %s. Restore it, or run `paisans apply --site %s --only %s --overwrite %s`, then run rotate-key again", site, c[0].Path, site, site, a.app, c[0].Path)
+		return nil, fmt.Errorf("%s's %s differs from what the last apply recorded, so somebody edited it on the host. Nothing was changed on %s. Restore it, or run `paisans deployment apply --site %s --only %s --overwrite %s`, then run rotate-key again", site, c[0].Path, site, site, a.app, c[0].Path)
 	}
 	return plan, nil
 }

@@ -430,7 +430,7 @@ func appConfigNote(site string, files []string) string {
 		last := len(files) - 1
 		what = fmt.Sprintf("%d files, %s and %s: they differ from the render, and the apply brings them up to date and recreates their apps", len(files), strings.Join(files[:last], ", "), files[last])
 	}
-	return fmt.Sprintf("%s: run `paisans apply --site %s` when acceptable. Its apps are out of date in %s", site, site, what)
+	return fmt.Sprintf("%s: run `paisans deployment apply --site %s` when acceptable. Its apps are out of date in %s", site, site, what)
 }
 
 // appEnvFiles is every app .env the render places on site.

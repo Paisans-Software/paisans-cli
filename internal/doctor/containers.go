@@ -271,9 +271,9 @@ func containerFinding(dep deployment.Deployment, site string, d ContainerProbe, 
 
 	switch {
 	case strings.Contains(in.State.Error, "cannot assign requested address"):
-		recreate := "`paisans apply --site " + site + " --execute`"
+		recreate := "`paisans deployment apply --site " + site + " --execute`"
 		if stack := d.Entry.Stack(dep); stack != "" {
-			recreate = "`paisans apply --site " + site + " --recreate " + stack + " --execute`"
+			recreate = "`paisans deployment apply --site " + site + " --recreate " + stack + " --execute`"
 		}
 		f.More = []string{
 			fmt.Sprintf("Its Docker daemon started it before %s was up. The container publishes its port on the site's mesh address, which exists only once %s has brought %s up, and Docker does not retry a container whose network setup failed.", dep.Interface(), dep.WireGuardUnit(), dep.Interface()),
@@ -372,7 +372,7 @@ func indent(lines []string) []string {
 // site, touching nothing else there.
 func recreateCommand(site, stack string) string {
 	if stack == "" {
-		return "`paisans apply --site " + site + " --execute`"
+		return "`paisans deployment apply --site " + site + " --execute`"
 	}
-	return "`paisans apply --site " + site + " --only " + stack + " --recreate " + stack + " --execute`"
+	return "`paisans deployment apply --site " + site + " --only " + stack + " --recreate " + stack + " --execute`"
 }

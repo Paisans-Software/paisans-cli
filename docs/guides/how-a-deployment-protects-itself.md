@@ -42,7 +42,7 @@ is how a site is taken out.
 
 **What could happen.** `paisans-stack.yaml` is one shared file. Bob adds his name to
 `home-a`'s `ssh.keys`, or replaces the key listed under `operators.alice`, and
-commits. Later Alice runs `paisans apply` with her own access, and `site
+commits. Later Alice runs `paisans deployment apply` with her own access, and `site
 prepare` installs Bob's key for the login user: a shell as the deployment's
 unprivileged user, with its rootless Docker, and nothing the host owner's
 machine has beyond it.
@@ -50,7 +50,7 @@ machine has beyond it.
 **Protects.**
 
 * **The review.** Each host records what this deployment last granted it.
-  `apply` and `site prepare` show every key that would be added or changed
+  `deployment apply` and `site prepare` show every key that would be added or changed
   since, with its operator, fingerprint and comment, and an `--execute` run asks
   the operator to type `approve` at a terminal before any host changes, and
   without a terminal the run is refused. `--yes` answers it only where the
@@ -65,7 +65,7 @@ before merging.
 ## Someone changes an image
 
 **What could happen.** Bob changes an app's image in `paisans-stack.yaml` to one he
-controls. The next `apply` pulls and runs it on every site that runs the app,
+controls. The next `deployment apply` pulls and runs it on every site that runs the app,
 on the mesh, with the app's secrets.
 
 **Protects.** The review covers every image the render runs, infrastructure and
@@ -95,7 +95,7 @@ data, which it keeps.
 the secrets file still open with their key. A key of theirs that was in
 `authorized_keys` before the toolkit first ran is never removed by it, because
 nothing on the host says whether it is the only way in. Nothing changes their
-Pocket ID account either: `apply` never deletes, disables or demotes one, and
+Pocket ID account either: `deployment apply` never deletes, disables or demotes one, and
 the operator reconciler only reads, so the account keeps its groups, and under
 `management: pocket-id` its admin flag, which the reconciler reports at every
 pass, until someone takes them away.
@@ -129,7 +129,7 @@ resisting, which also suits one that is dead:
    configuration, `paisans-stack.yaml`, the monitor.
 
 A replacement host is declared in the same configuration edit, under a new
-name, and brought up by `apply` afterwards. Its WireGuard key and every secret
+name, and brought up by `deployment apply` afterwards. Its WireGuard key and every secret
 generated for it are new.
 
 **Does not protect.** The cut-off host keeps what it had: a copy of the database
@@ -180,7 +180,7 @@ from outside at all.
 
 **You do.** Rekey right after re-encrypting the secrets file, whenever an
 operator who was a recipient leaves or has their site cut off. Finish a rekey
-that stopped before anything else: `apply` refuses while one is unfinished,
+that stopped before anything else: `deployment apply` refuses while one is unfinished,
 since it would render the old key back.
 
 ## A former recipient still has the secrets file
@@ -227,8 +227,8 @@ again.
 
 **Protects.** Every site keeps every version of `paisans-stack.yaml`,
 `secrets.enc.yaml` and `.sops.yaml`, each a git commit of exactly those three
-files signed with the SSH key of the operator who published it. `paisans config
-publish` pushes a version to every site, and `apply --execute` publishes the
+files signed with the SSH key of the operator who published it. `paisans deployment
+publish` pushes a version to every site, and `deployment apply --execute` publishes the
 version it applies, so the copies follow what was actually run. Each site
 fetches from its peers over the mesh every 15 minutes, so one that was down
 catches up. A version is tens of kilobytes and nothing is pruned.
@@ -256,18 +256,18 @@ an old one visible instead:
 
 * **The workstation** remembers the newest revision it has seen, and refuses an
   older head until the operator types `rollback`.
-* **A majority of sites.** `config pull`, `config recover`, `operator register`,
-  the publish of a first version and `apply --execute` count the sites they
+* **A majority of sites.** `deployment pull`, `deployment recover`, `operator register`,
+  the publish of a first version and `deployment apply --execute` count the sites they
   reached directly over ssh, and ask for `partial` when that is no more than
   half. A lying site can hide newer versions only from a workstation that
   reaches no honest one.
-* **The hosts.** Each host records the version last applied to it, and `apply`
+* **The hosts.** Each host records the version last applied to it, and `deployment apply`
   asks for `rollback` before giving it an older one.
 
-When the workstation is gone, `paisans config recover --from <user@host>
+When the workstation is gone, `paisans deployment recover --from <user@host>
 --root <sha> --execute` in an empty directory gathers from the hosts named and
 then every site the trusted heads name, and writes the three files. The root is
-the hash of a version the operator trusts, as `paisans config log` prints it;
+the hash of a version the operator trusts, as `paisans deployment log` prints it;
 an empty workstation holds no signature of its own, so keep that hash
 somewhere other than the workstation, or commit `.paisans/config-root`, which
 the operators may share. When the sites hold two heads, `recover` writes each to

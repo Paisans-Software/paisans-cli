@@ -53,11 +53,11 @@ func TestAroundKeepsTheProblemShortAndItsCauseForVerbose(t *testing.T) {
 // With no hint of its own, the advice is added to the Problem's own, and
 // --verbose does not repeat its hint.
 func TestAroundWithNoHintExtendsTheProblem(t *testing.T) {
-	p := ui.Around("", healthProblem(), "Run paisans apply to finish.")
+	p := ui.Around("", healthProblem(), "Run paisans deployment apply to finish.")
 	var plain bytes.Buffer
 	ui.PrintError(&plain, p, false)
 	out := plain.String()
-	if !strings.HasPrefix(out, "FAIL home-a: stack talk is not healthy") || !strings.Contains(out, "Run paisans apply to finish.") {
+	if !strings.HasPrefix(out, "FAIL home-a: stack talk is not healthy") || !strings.Contains(out, "Run paisans deployment apply to finish.") {
 		t.Errorf("got:\n%s", out)
 	}
 	var verbose bytes.Buffer

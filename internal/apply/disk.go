@@ -339,7 +339,7 @@ func ProbeImages(refs []string, t Transport) (map[string]string, error) {
 
 // DiskRefusal is the error Execute stops with when plan's host is short of
 // space, for a caller that checks the plan's disk before Execute does:
-// `paisans apply` without --site pulls every site's images ahead of the
+// `paisans deployment apply` without --site pulls every site's images ahead of the
 // install, and refuses a short host with the words its apply would use.
 func DiskRefusal(plan *Plan) error { return diskRefusal(plan) }
 

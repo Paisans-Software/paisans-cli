@@ -155,7 +155,7 @@ func (s site) ReadFile(string) (string, bool, error)  { return "", false, nil }
 func (s site) WriteFile(string, string, uint32) error { return nil }
 func (s site) Describe() string                       { return s.name }
 
-// switcher is `apply --only talk`: a site is pending while its talk runs a key
+// switcher is `deployment apply --only talk`: a site is pending while its talk runs a key
 // other than the one the secrets name.
 type switcher struct{ w *world }
 
@@ -381,7 +381,7 @@ func TestADryRunChangesNothing(t *testing.T) {
 			t.Errorf("building the plan ran %s", line)
 		}
 	}
-	for _, want := range []string{"retiring " + oldID, "generated at stage 1", "garage key delete --yes " + oldID, "home-b: as `paisans apply --site home-b --only talk`"} {
+	for _, want := range []string{"retiring " + oldID, "generated at stage 1", "garage key delete --yes " + oldID, "home-b: as `paisans deployment apply --site home-b --only talk`"} {
 		if !strings.Contains(out.Lines(), want) {
 			t.Errorf("the plan lacks %q:\n%s", want, out.Lines())
 		}

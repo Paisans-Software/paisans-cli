@@ -3,7 +3,7 @@
 //
 // validate, render and create touch nothing outside the working directory. init
 // reads every site to choose a mesh subnet, and writes only local files.
-// `site prepare`, `apply` and `storage init` reach a machine: each reads it to
+// `site prepare`, `deployment apply` and `storage init` reach a machine: each reads it to
 // show what it would do, and changes nothing on it unless told to with
 // --execute. apply without --site may, in its dry run, add missing generated
 // secrets to the local secrets file, as init would, and says so when it does.
@@ -71,8 +71,6 @@ func main() {
 		err = runInit(os.Args[2:], os.Stdin, os.Stdout)
 	case "render":
 		err = runRender(os.Args[2:])
-	case "apply":
-		err = runApply(os.Args[2:], os.Stdin, os.Stdout)
 	case "site":
 		switch {
 		case len(os.Args) >= 3 && os.Args[2] == "list":
@@ -98,8 +96,11 @@ func main() {
 		err = runMesh(os.Args[2:])
 	case "gateway":
 		err = runGateway(os.Args[2:])
-	case "config":
-		err = runConfig(os.Args[2:], os.Stdin, os.Stdout)
+	case "deployment":
+		if len(os.Args) < 3 {
+			os.Exit(groupError(os.Stderr, "deployment", "deployment takes one subcommand, apply, list, fetch, publish, pull, log or recover"))
+		}
+		err = runDeployment(os.Args[2:], os.Stdin, os.Stdout)
 	case "operator":
 		err = runOperator(os.Args[2:], os.Stdin, os.Stdout)
 	case "secrets":
@@ -266,7 +267,7 @@ func runValidate(args []string) error {
 // otherwise, and on a no, it prints what admits the site and skips it. A
 // subnet admit refuses on a host moves, before the first apply, and every
 // site admitted on the old one is admitted again (see settleAndReadmit).
-// Standing a deployment up is `apply`, and that is a separate decision from
+// Standing a deployment up is `deployment apply`, and that is a separate decision from
 // having credentials to stand it up with.
 func runInit(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("init", flag.ExitOnError)
@@ -545,7 +546,7 @@ func runApply(args []string, stdin io.Reader, stdout io.Writer) error {
 // applyCommand is runApply before an unreachable site's referral to doctor
 // is added to its error.
 func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
-	fs := newFlagSet("apply", flag.ExitOnError)
+	fs := newFlagSet("deployment apply", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration")
 	secretsPath := fs.String("secrets", "", "path to the secrets (default: secrets.enc.yaml beside the config)")
@@ -673,7 +674,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	// The site's architecture is read first of all that reaches the host,
 	// once nothing above refuses the files. As a step of apply without
 	// --site the run recorded it already, and the read only compares; on
-	// its own, apply --site records it, and the next apply without --site
+	// its own, deployment apply --site records it, and the next apply without --site
 	// publishes it. The bytes applied are read again after a write.
 	archHost := siteTransport(*site, declared, *destination)
 	read, err := readArchitectures(r, cfg, []string{*site}, func(string) hostarch.Runner { return archHost })
@@ -703,7 +704,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 		// Every step applies the run's current version, which a step that
 		// records at Pocket ID advances: files edited otherwise are not what
 		// the store holds.
-		return &ui.Problem{Hint: "the configuration changed after the run published it", Explain: config.FileName + " or secrets.enc.yaml is not what this run published as " + v.sha[:12] + ", so applying it would put on " + *site + " a version the store does not hold. Nothing was changed on " + *site + " by this step. Run paisans apply --execute again, which publishes the files as they are now."}
+		return &ui.Problem{Hint: "the configuration changed after the run published it", Explain: config.FileName + " or secrets.enc.yaml is not what this run published as " + v.sha[:12] + ", so applying it would put on " + *site + " a version the store does not hold. Nothing was changed on " + *site + " by this step. Run paisans deployment apply --execute again, which publishes the files as they are now."}
 	}
 
 	transport := siteTransport(*site, declared, *destination)
@@ -749,7 +750,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	review, approvedBy, err := stepReview(r, ans, stdin, stdout, cfg, *site, g, grant.ApplyScope(only...), transport, *execute, "paisans apply --site "+*site+" --execute")
+	review, approvedBy, err := stepReview(r, ans, stdin, stdout, cfg, *site, g, grant.ApplyScope(only...), transport, *execute, "paisans deployment apply --site "+*site+" --execute")
 	if err != nil {
 		return err
 	}
@@ -1002,14 +1003,14 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 }
 
 // planningEverySite is set while apply without --site runs, for every
-// `apply --site` step it runs: the run plans every site, so a clustered app
+// `deployment apply --site` step it runs: the run plans every site, so a clustered app
 // moves on all of them together, through the run's one digest cache, and no
 // step holds it on the build the others run. It is the run that says so, not
 // how a step reports, since a step reporting quietly is not a step covering
 // every site.
 //
 // A run that stops after some sites of a clustered app moved leaves them on
-// two builds; an `apply --site` then refuses, naming each site's, and the
+// two builds; an `deployment apply --site` then refuses, naming each site's, and the
 // next apply without --site moves the rest.
 var planningEverySite bool
 
@@ -1051,7 +1052,7 @@ func readPeers(r ui.Reporter, cfg *config.Config, site string, only []string) ([
 	return peers, nil
 }
 
-// siteApplied is how apply --site --execute ends once site's stacks are up:
+// siteApplied is how deployment apply --site --execute ends once site's stacks are up:
 // the web server step for the apps served by site's web server, when it has
 // managed_by: external, reaching site as the apply did, then the result, or
 // what the step left. err is the apply's own problem, if it has one. As a
@@ -1245,7 +1246,7 @@ func runStorageInit(args []string) error {
 	}
 	r := reporter()
 	if *site == "" {
-		return fmt.Errorf("storage init: --site is required. A site at a time is deliberate, the same reason apply --site takes one")
+		return fmt.Errorf("storage init: --site is required. A site at a time is deliberate, the same reason deployment apply --site takes one")
 	}
 
 	cfg, err := config.Load(*configPath)

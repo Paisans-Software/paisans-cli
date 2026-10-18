@@ -3,7 +3,7 @@ package blueprints
 import "github.com/paisans-software/paisans-cli/internal/config"
 
 // OIDCClientSpec is what an app's client at the identity provider has to look
-// like for the app to sign anyone in. `paisans apply` and `paisans oidc client
+// like for the app to sign anyone in. `paisans deployment apply` and `paisans oidc client
 // create` create a client to it and refuse an existing one that differs.
 type OIDCClientSpec struct {
 	// CallbackURL is the one redirect URI the client must allow.

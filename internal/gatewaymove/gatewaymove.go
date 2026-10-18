@@ -43,7 +43,7 @@ type Options struct {
 	// Probes reach the new gateway over HTTPS, tell the time and wait. The
 	// zero value is DefaultProbes.
 	Probes Probes
-	// ApplySite applies a site's infra stack, as apply --site <site> --only
+	// ApplySite applies a site's infra stack, as deployment apply --site <site> --only
 	// infra --execute. The hand-off off a site that keeps the monitor calls
 	// it once the site no longer holds the gateway's record, so that its
 	// Caddy reloads with the monitor's routes alone.
@@ -980,7 +980,7 @@ func (p *Plan) fail(st *Stage, err error) error {
 	if st.Number == stageHandOff {
 		// The record and the marker are gone by now, so the old site applies
 		// like any other, with whatever flags its own refusal asks for.
-		next = fmt.Sprintf("Fix the cause, then apply %s directly: paisans apply --site %s --only infra --execute (add the --overwrite it names if a file was edited on the host). paisans gateway move --execute also resumes here", p.From, p.From)
+		next = fmt.Sprintf("Fix the cause, then apply %s directly: paisans deployment apply --site %s --only infra --execute (add the --overwrite it names if a file was edited on the host). paisans gateway move --execute also resumes here", p.From, p.From)
 	}
 	if pr := ui.Around(head, err, "Nothing after it ran.\n"+next); pr != nil {
 		return pr

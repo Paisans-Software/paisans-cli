@@ -248,7 +248,7 @@ func noteDownWebServers(r ui.Reporter, cfg *config.Config, c *topology.Classific
 	}
 }
 
-// degradedEnd is how a run, or apply --site alone, ends on the sites it
+// degradedEnd is how a run, or deployment apply --site alone, ends on the sites it
 // has, err being what it would end on otherwise. A run that is degraded says
 // so whenever it applied, a warning left for the operator included, and with
 // required (--require-all) fails, whatever else it ends on: a warning would

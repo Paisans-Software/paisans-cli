@@ -28,8 +28,8 @@ import (
 // its own ssh section.
 //
 // Its stage 4 applies the new site's whole render, every app and
-// infrastructure image, as apply --site would, so it reviews the new site's
-// images as apply --site does (review.go): shown before the first change,
+// infrastructure image, as deployment apply --site would, so it reviews the new site's
+// images as deployment apply --site does (review.go): shown before the first change,
 // approved at a terminal with --execute when anything is added or changed,
 // checked against the run's approval as a step of apply with no --site, and
 // recorded once stage 4's gate has passed.

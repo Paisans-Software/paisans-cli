@@ -48,7 +48,7 @@ func TestAFailedReseedNamesTheApplyAndKeepsTheJoin(t *testing.T) {
 	w := newWorld(t)
 	w.failOnce = "/srv/paisans/f2a9/health/compose.yaml restart"
 	err := siteadd.Execute(build(t, w))
-	if err == nil || !strings.Contains(err.Error(), "stage 8") || !strings.Contains(err.Error(), "paisans apply --site watch --only health --execute") {
+	if err == nil || !strings.Contains(err.Error(), "stage 8") || !strings.Contains(err.Error(), "paisans deployment apply --site watch --only health --execute") {
 		t.Fatalf("want a stage 8 failure naming the apply, got %v", err)
 	}
 	if got := strings.Join(w.voters(), ","); got != "home-a,home-b,vm" {
@@ -67,7 +67,7 @@ func TestAnUnhealthyMonitorNamesItsCauseAndTheApply(t *testing.T) {
 	if err == nil {
 		t.Fatal("an unhealthy monitor passed")
 	}
-	shortAndVerbose(t, err, "stopped at stage 8 (monitor)", "stack health is not healthy", "The join itself is done", "paisans apply --site watch --only health --execute")
+	shortAndVerbose(t, err, "stopped at stage 8 (monitor)", "stack health is not healthy", "The join itself is done", "paisans deployment apply --site watch --only health --execute")
 }
 
 // A deployment with no monitor site skips the stage.

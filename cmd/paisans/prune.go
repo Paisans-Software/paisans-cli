@@ -34,7 +34,7 @@ func runPrune(args []string) error {
 	}
 	r := reporter()
 	if *site == "" {
-		return fmt.Errorf("prune: --site is required. A site at a time is deliberate, the same reason apply --site takes one")
+		return fmt.Errorf("prune: --site is required. A site at a time is deliberate, the same reason deployment apply --site takes one")
 	}
 	cfg, err := config.Load(*configPath)
 	if err != nil {

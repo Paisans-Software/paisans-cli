@@ -557,14 +557,14 @@ func TestJudgeBuildReasons(t *testing.T) {
 	}
 	x.BuildNewer = false
 	f.vs["v4"] = x
-	if v := judgeOK(t, f, Anchor{Root: "v1"}); !strings.Contains(v.Reasons["v4"], "`paisans config publish --execute`") {
+	if v := judgeOK(t, f, Anchor{Root: "v1"}); !strings.Contains(v.Reasons["v4"], "`paisans deployment publish --execute`") {
 		t.Errorf("no build: %q", v.Reasons["v4"])
 	}
 	f = chain()
 	root := f.vs["v1"]
 	root.BuildOK = false
 	f.vs["v1"] = root
-	if _, err := Judge(f.graph(), Anchor{Root: "v1"}); err == nil || !strings.Contains(err.Error(), "`paisans apply --execute` publishes a new first version") {
+	if _, err := Judge(f.graph(), Anchor{Root: "v1"}); err == nil || !strings.Contains(err.Error(), "`paisans deployment apply --execute` publishes a new first version") {
 		t.Errorf("root: %v", err)
 	}
 }

@@ -107,7 +107,7 @@ func (f *applyStoreFixture) pushed() bool {
 	return false
 }
 
-// applySite runs apply --site vm on the fixture, every host fake.
+// applySite runs deployment apply --site vm on the fixture, every host fake.
 func (f *applyStoreFixture) applySite(t *testing.T, stdin io.Reader, extra ...string) error {
 	t.Helper()
 	var err error
@@ -130,7 +130,7 @@ func grantedWith(t *testing.T, f *applyStoreFixture, c *grant.ConfigPart) func(s
 }
 
 // Local files on an older base than the sites' newest version are refused
-// before the review and before any host changes, naming config pull.
+// before the review and before any host changes, naming deployment pull.
 func TestApplyRefusesAStaleBase(t *testing.T) {
 	f := newApplyStore(t, 2)
 	f.based(t)
@@ -138,7 +138,7 @@ func TestApplyRefusesAStaleBase(t *testing.T) {
 	hosts := fakeGrants(t, grantedWith(t, f, nil))
 	rec := recordConverge(t)
 	err := f.applySite(t, noTerminalStdin(), "--execute")
-	if err == nil || !strings.Contains(problemText(err), "not based on the sites' newest version") || !strings.Contains(problemText(err), "paisans config pull") {
+	if err == nil || !strings.Contains(problemText(err), "not based on the sites' newest version") || !strings.Contains(problemText(err), "paisans deployment pull") {
 		t.Fatalf("got %v\n%s", err, rec.Lines())
 	}
 	if checked(logged(t, log)) || f.pushed() || hosts["vm"] != nil && hosts["vm"].writes != 0 {
@@ -368,7 +368,7 @@ func TestApplyStopsWhenNoSiteTakesTheVersion(t *testing.T) {
 	}
 }
 
-// apply --site on a deployment whose sites have no store yet refuses before
+// deployment apply --site on a deployment whose sites have no store yet refuses before
 // the first change, naming site prepare for each site.
 func TestApplySiteWithNoStoreNamesHostPrepare(t *testing.T) {
 	f := newApplyStore(t, 0)
@@ -562,7 +562,7 @@ func TestConvergeChecksTheStoreOnceBeforeItsSteps(t *testing.T) {
 		return err
 	}
 	err := converge(noTerminalStdin())
-	if err == nil || !strings.Contains(problemText(err), "not based on the sites' newest version") || !strings.Contains(problemText(err), "paisans config pull") || len(*ran) != 0 || rec.Index("section", "review") >= 0 {
+	if err == nil || !strings.Contains(problemText(err), "not based on the sites' newest version") || !strings.Contains(problemText(err), "paisans deployment pull") || len(*ran) != 0 || rec.Index("section", "review") >= 0 {
 		t.Fatalf("stale: %v, ran %q\n%s", err, *ran, rec.Lines())
 	}
 
@@ -725,7 +725,7 @@ func TestAStepThatRecordsAtPocketIDRecordsTheRevisionItPublished(t *testing.T) {
 	}
 }
 
-// apply --site alone that records at Pocket ID leaves the store current:
+// deployment apply --site alone that records at Pocket ID leaves the store current:
 // the head holds what it wrote, and the host records it. An apply that
 // wrote nothing publishes nothing.
 func TestApplySiteThatRecordsAtPocketIDLeavesTheStoreCurrent(t *testing.T) {
@@ -862,7 +862,7 @@ func runningAnswer(host, cmd string, started *bool) (string, bool) {
 	return "", false
 }
 
-// apply --site on the site that runs Pocket ID, with no client yet for an
+// deployment apply --site on the site that runs Pocket ID, with no client yet for an
 // app there, creates the client, publishes the bytes it wrote as the next
 // revision, and only then records the grant: the host's record names that
 // revision, which holds the client's ID.

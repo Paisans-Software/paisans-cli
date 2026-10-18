@@ -37,7 +37,7 @@ func runOIDC(args []string) error {
 // Every step is a Pocket ID mutation a human approves, so the command prints
 // each one with what it sends and changes nothing without --execute. The
 // client secret is generated here, written into the secrets file, and only
-// then sent; it is never printed. `paisans apply` then renders it into the
+// then sent; it is never printed. `paisans deployment apply` then renders it into the
 // app like any other secret.
 func runOIDCClientCreate(args []string) error {
 	fs := newFlagSet("oidc client create", flag.ContinueOnError)
@@ -111,7 +111,7 @@ func runOIDCClientCreate(args []string) error {
 	}
 	key, _ := secrets.Apps[idp]["static_api_key"].(string)
 	if key == "" {
-		return fmt.Errorf("oidc client create: secrets apps.%s.static_api_key is empty. Run `paisans init` to generate it and `paisans apply` to render it into Pocket ID, then re-run", idp)
+		return fmt.Errorf("oidc client create: secrets apps.%s.static_api_key is empty. Run `paisans init` to generate it and `paisans deployment apply` to render it into Pocket ID, then re-run", idp)
 	}
 
 	ctx := context.Background()
@@ -149,7 +149,7 @@ func runOIDCClientCreate(args []string) error {
 			warnPlaintext(r, *secretsPath)
 		}
 	}
-	r.Detail("`paisans apply --site <site> --execute` on each site running %s renders the client", *appName)
+	r.Detail("`paisans deployment apply --site <site> --execute` on each site running %s renders the client", *appName)
 	r.Result("%s's client is in place.", *appName)
 	return nil
 }

@@ -102,7 +102,7 @@ func TestAnUnmarkedEntryRefuses(t *testing.T) {
 	vm := hosts["vm"]
 	vm.manifest(t, vm.entry(blogRoute, false), vm.entry(blogMedia, true), vm.entry(talkRoute, false))
 	_, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, false))
-	if err == nil || !strings.Contains(err.Error(), "vm: "+blogRoute) || !strings.Contains(err.Error(), "paisans apply") {
+	if err == nil || !strings.Contains(err.Error(), "vm: "+blogRoute) || !strings.Contains(err.Error(), "paisans deployment apply") {
 		t.Fatalf("Build = %v", err)
 	}
 	if strings.Contains(err.Error(), "talk") {

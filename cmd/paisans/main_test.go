@@ -15,7 +15,7 @@ import (
 )
 
 // garage-key-is-malformed has to stop `render`, not only `init`: `render` and
-// `apply` both call config.LoadSecrets directly and never call
+// `deployment apply` both call config.LoadSecrets directly and never call
 // secretsgen.Fill, so a key hand edited into the secrets file after the last
 // `init` would otherwise reach the rendered artifacts, and from there a host,
 // with nothing ever having looked at it. This test proves the wiring, not

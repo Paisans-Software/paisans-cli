@@ -410,13 +410,13 @@ func TestPlainEndMarksAreWords(t *testing.T) {
 	at := time.Date(2026, 10, 9, 0, 0, 0, 0, time.UTC)
 	r := ui.NewForTest(&b, false, false, func() time.Time { return at })
 	r.Step("site prepare --site a").End(ui.OK, "")
-	r.Step("apply --site a").End(ui.Pending, "3 changes")
-	r.Step("apply --site b").End(ui.Waiting, "after site prepare --site b")
+	r.Step("deployment apply --site a").End(ui.Pending, "3 changes")
+	r.Step("deployment apply --site b").End(ui.Waiting, "after site prepare --site b")
 	r.Step("dns init").End(ui.Failed, "the provider did not answer")
 	r.Step("site file for health").End(ui.Warned, "no directory to write in")
 	want := "  ok   site prepare --site a\n" +
-		"  todo apply --site a: 3 changes\n" +
-		"  wait apply --site b: after site prepare --site b\n" +
+		"  todo deployment apply --site a: 3 changes\n" +
+		"  wait deployment apply --site b: after site prepare --site b\n" +
 		"  FAIL dns init: the provider did not answer\n" +
 		"  WARN site file for health: no directory to write in\n"
 	if b.String() != want {

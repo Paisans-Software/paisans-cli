@@ -620,7 +620,7 @@ func TestAFailedHandOffNamesTheApplyThatFinishesIt(t *testing.T) {
 	sw := sharedWorld(t)
 	sw.failApply = true
 	err := sw.run()
-	if want := "paisans apply --site home-a --only infra --execute"; err == nil || !strings.Contains(err.Error(), want) {
+	if want := "paisans deployment apply --site home-a --only infra --execute"; err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("want %q in: %v", want, err)
 	}
 }

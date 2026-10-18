@@ -322,7 +322,7 @@ func (p pasted) hostsRun(e Env) (bool, []string, error) {
 			return false, nil, fmt.Errorf("%s: reading the lines of %s: %w", f.site, f.rel, err)
 		}
 		if !found {
-			return false, nil, fmt.Errorf("%s renders %s into %s and has no copy of it, so which value it holds cannot be told. Run `paisans apply --site %s` first", f.site, p.path, f.rel, f.site)
+			return false, nil, fmt.Errorf("%s renders %s into %s and has no copy of it, so which value it holds cannot be told. Run `paisans deployment apply --site %s` first", f.site, p.path, f.rel, f.site)
 		}
 		for _, line := range f.lines {
 			if !held[line] {

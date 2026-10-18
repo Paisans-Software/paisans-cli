@@ -66,7 +66,7 @@ func TestConvergeGatewayMoveWaitsOnTheNewGatewaysApply(t *testing.T) {
 		t.Fatalf("last step %q", steps[last].Title)
 	}
 	waits := convergeWaits(cfg, steps, last)
-	if strings.Join(waits, ", ") != "site prepare --site vm, apply --site vm" {
+	if strings.Join(waits, ", ") != "site prepare --site vm, deployment apply --site vm" {
 		t.Errorf("waits on %v", waits)
 	}
 }

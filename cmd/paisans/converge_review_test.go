@@ -171,7 +171,7 @@ func TestConvergeDoesNotAskAgainForWhatWasApproved(t *testing.T) {
 			hosts[site].content, hosts[site].found = grant.Encode(*held(site)), true
 		}
 	}
-	ran := fakeConverge(t, map[string]error{"apply --site home-a": errors.New("home-a: boom")})
+	ran := fakeConverge(t, map[string]error{"deployment apply --site home-a": errors.New("home-a: boom")})
 	convergeGrantHost = func(_ *config.Config, site string) registry.Runner { return hosts[site] }
 	convergeRecord = func(cfg *config.Config, site string, _ grant.Grant) (grant.Record, error) {
 		rec, _, _, err := grant.Read(hosts[site], cfg.Deployment())

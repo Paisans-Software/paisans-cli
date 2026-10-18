@@ -951,24 +951,24 @@ func Parents(g Gathered, head string, merge bool) ([]string, error) {
 	heads := g.Verdict.Heads
 	switch {
 	case len(heads) == 0 && head != "":
-		return nil, fmt.Errorf("your base %s is held by no site that answered and is not in the local store; run paisans config pull", head)
+		return nil, fmt.Errorf("your base %s is held by no site that answered and is not in the local store; run paisans deployment pull", head)
 	case len(heads) == 0 && merge:
 		return nil, errors.New("there is nothing to merge: no site holds a version")
 	case len(heads) == 0:
 		return nil, nil
 	case merge && (head == "" || !g.Verdict.Trusted[head]):
-		return nil, fmt.Errorf("a merge needs a trusted base, and your base %q is not one; run paisans config pull", head)
+		return nil, fmt.Errorf("a merge needs a trusted base, and your base %q is not one; run paisans deployment pull", head)
 	case merge:
 		return heads, nil
 	case g.Verdict.Fork:
-		return nil, fmt.Errorf("the sites hold a fork, %s; merge the heads' files by hand and publish with paisans config publish --merge", strings.Join(heads, " and "))
+		return nil, fmt.Errorf("the sites hold a fork, %s; merge the heads' files by hand and publish with paisans deployment publish --merge", strings.Join(heads, " and "))
 	case head != heads[0]:
 		v := g.Versions[heads[0]]
 		signer := g.Signers[heads[0]]
 		if signer == "" {
 			signer = v.SignerFP
 		}
-		return nil, fmt.Errorf("stale: the sites hold %s (revision %d, signed by %s); run paisans config pull", heads[0], v.Revision, signer)
+		return nil, fmt.Errorf("stale: the sites hold %s (revision %d, signed by %s); run paisans deployment pull", heads[0], v.Revision, signer)
 	}
 	return heads[:1], nil
 }
@@ -1009,9 +1009,9 @@ func AttestTarget(l Local, g Gathered, pin string) (head string, write bool, err
 	heads := g.Verdict.Heads
 	switch {
 	case len(heads) == 0:
-		return "", false, errors.New("the sites hold no version to attest; paisans config publish makes the first")
+		return "", false, errors.New("the sites hold no version to attest; paisans deployment publish makes the first")
 	case g.Verdict.Fork:
-		return "", false, fmt.Errorf("the sites hold a fork, %s; merge the heads' files by hand and publish with paisans config publish --merge", strings.Join(heads, " and "))
+		return "", false, fmt.Errorf("the sites hold a fork, %s; merge the heads' files by hand and publish with paisans deployment publish --merge", strings.Join(heads, " and "))
 	}
 	head = heads[0]
 	if !l.HasFiles() {
@@ -1126,3 +1126,8 @@ func attestFrom(l Local, g Gathered, sites map[string]apply.Transport, pin, keyL
 	pushed, err := pushVersion(cache, g, sites, cfg.ID, sha, push)
 	return sha, pushed, err
 }
+
+// Remember raises the newest revision this workstation has seen to rev at
+// sha, for a copy made from a version another workstation directory already
+// judged: the copy then refuses an older head as that directory would.
+func (l Local) Remember(rev int, sha string) error { return l.raiseSeen(rev, sha) }

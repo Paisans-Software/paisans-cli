@@ -711,7 +711,7 @@ func (s sitePass) planned(hold []string, done []*apply.Plan) (*apply.Plan, error
 	return p, err
 }
 
-// executeWithClients is apply --execute on a site with an identity step.
+// executeWithClients is deployment apply --execute on a site with an identity step.
 //
 // On a site that runs Pocket ID, a first pass applies everything but the
 // other app stacks, Pocket ID is waited on until it answers, and only then

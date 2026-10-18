@@ -242,7 +242,7 @@ func TestAHomeserversPendingClientNamesItsRedirectURI(t *testing.T) {
 	if strings.Contains(why, "https://"+cfg.Apps["chat"].Hostname+"/oauth/callback") {
 		t.Errorf("the pending client offers a callback the authentication service does not serve:\n%s", why)
 	}
-	for _, want := range []string{"paisans apply", "PKCE enabled"} {
+	for _, want := range []string{"paisans deployment apply", "PKCE enabled"} {
 		if !strings.Contains(why, want) {
 			t.Errorf("the pending client does not say %q:\n%s", want, why)
 		}
@@ -268,7 +268,7 @@ func TestEveryPendingClientSaysWhatApplyMakes(t *testing.T) {
 			}
 			continue
 		}
-		for _, want := range []string{"paisans apply", spec.CallbackURL, "PKCE"} {
+		for _, want := range []string{"paisans deployment apply", spec.CallbackURL, "PKCE"} {
 			if !strings.Contains(why, want) {
 				t.Errorf("%s (%s): the pending client does not say %q:\n%s", name, app.Blueprint, want, why)
 			}
@@ -283,7 +283,7 @@ func TestTheGatesPendingClientNamesItsRedirectURI(t *testing.T) {
 	cfg := load(t)
 	cfg.Apps["gate"] = config.App{Blueprint: config.BlueprintOAuth2Proxy, Hostname: "auth-gate.example.org"}
 	why := pendingBy(t, cfg, &config.Secrets{})["oidc_clients.gate"]
-	for _, want := range []string{"https://auth-gate.example.org/oauth2/callback", "paisans apply", "PKCE enabled", "the groups " + blueprints.MembersGroup + " and " + blueprints.AdminsGroup} {
+	for _, want := range []string{"https://auth-gate.example.org/oauth2/callback", "paisans deployment apply", "PKCE enabled", "the groups " + blueprints.MembersGroup + " and " + blueprints.AdminsGroup} {
 		if !strings.Contains(why, want) {
 			t.Errorf("the pending client does not say %q:\n%s", want, why)
 		}
@@ -309,7 +309,7 @@ func TestAnMbinPendingClientNamesItsRedirectURIAndPKCE(t *testing.T) {
 	if why == "" {
 		t.Fatal("the Mbin app's client was not reported as pending at all")
 	}
-	for _, want := range []string{"https://" + cfg.Apps["talk"].Hostname + "/oauth/oidc/verify", "PKCE", "paisans apply", "paisans oidc client create --app talk"} {
+	for _, want := range []string{"https://" + cfg.Apps["talk"].Hostname + "/oauth/oidc/verify", "PKCE", "paisans deployment apply", "paisans oidc client create --app talk"} {
 		if !strings.Contains(why, want) {
 			t.Errorf("the pending client does not name %q:\n%s", want, why)
 		}
@@ -670,7 +670,7 @@ func TestAnUptimePendingClientNamesItsRedirectURI(t *testing.T) {
 	if !strings.Contains(why, "https://health.example.org/login/oidc/callback") {
 		t.Errorf("the pending client does not name the redirect URI:\n%s", why)
 	}
-	if !strings.Contains(why, "paisans apply") {
+	if !strings.Contains(why, "paisans deployment apply") {
 		t.Errorf("the pending client does not say apply creates it:\n%s", why)
 	}
 }
@@ -728,8 +728,8 @@ func TestTheDNSTokenIsOwedForAMonitorsOwnCaddy(t *testing.T) {
 func TestWikiAndWriteFreelyPendingClientsNameTheirCallbackAndRestriction(t *testing.T) {
 	pending := pendingBy(t, load(t), &config.Secrets{})
 	cases := map[string][]string{
-		"oidc_clients.wiki": {"https://wiki.example.org/login/pocketid/callback", "PKCE off", "paisans apply", "restricted", "reads from the groups claim"},
-		"oidc_clients.blog": {"https://blog.example.org/oauth/callback/generic", "PKCE off", "paisans apply", "restricted", "reads no groups claim"},
+		"oidc_clients.wiki": {"https://wiki.example.org/login/pocketid/callback", "PKCE off", "paisans deployment apply", "restricted", "reads from the groups claim"},
+		"oidc_clients.blog": {"https://blog.example.org/oauth/callback/generic", "PKCE off", "paisans deployment apply", "restricted", "reads no groups claim"},
 	}
 	for name, wants := range cases {
 		why, ok := pending[name]

@@ -32,14 +32,14 @@ func TestResolveHelp(t *testing.T) {
 		{args: []string{"site", "add", "help"}, asked: true, run: []string{"site", "add", "--help"}},
 		{args: []string{"help", "site", "add"}, asked: true, run: []string{"site", "add", "--help"}},
 		{args: []string{"site", "add", "home-b", "--execute", "--help"}, asked: true, run: []string{"site", "add", "--help"}},
-		{args: []string{"apply", "-h"}, asked: true, run: []string{"apply", "--help"}},
+		{args: []string{"deployment", "apply", "-h"}, asked: true, run: []string{"deployment", "apply", "--help"}},
 		{args: []string{"oidc", "client", "create", "help"}, asked: true, run: []string{"oidc", "client", "create", "--help"}},
 		{args: []string{"secrets", "set", "help"}, asked: true, run: []string{"secrets", "set", "--help"}},
 		// help after the first argument is an argument: a site may be named
 		// help, and the command says what it makes of it.
 		{args: []string{"site", "add", "home-b", "help"}, run: []string{"site", "add", "home-b", "help"}},
 		{args: []string{"secrets", "set", "x", "--", "--help"}, run: []string{"secrets", "set", "x", "--", "--help"}},
-		{args: []string{"apply", "--site", "home-a"}, run: []string{"apply", "--site", "home-a"}},
+		{args: []string{"deployment", "apply", "--site", "home-a"}, run: []string{"deployment", "apply", "--site", "home-a"}},
 		{args: []string{"bogus"}, run: []string{"bogus"}},
 		{args: []string{"site", "bogus"}, run: []string{"site", "bogus"}},
 	} {

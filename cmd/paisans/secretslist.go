@@ -99,7 +99,7 @@ func runSecretsList(args []string, stdout io.Writer) error {
 	if orphans > 0 {
 		r.Note(fmt.Sprintf("secrets: %d more path(s) in the file name something %s does not declare, and are not listed", orphans, config.FileName), "`paisans secrets prune` lists them")
 	}
-	r.Result("%d secret(s), %d unset. A generated one is filled by `paisans init`, a pasted one by `paisans secrets set`, and a captured one by `paisans apply --execute`.", len(rows), unset)
+	r.Result("%d secret(s), %d unset. A generated one is filled by `paisans init`, a pasted one by `paisans secrets set`, and a captured one by `paisans deployment apply --execute`.", len(rows), unset)
 	return nil
 }
 
