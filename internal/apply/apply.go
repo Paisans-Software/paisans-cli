@@ -496,7 +496,7 @@ func Recreate(stacks ...string) Option {
 	return func(o *options) { o.recreate = append(o.recreate, stacks...) }
 }
 
-// Only restricts an apply to the named stacks, as `apply --only` does: their
+// Only restricts an apply to the named stacks, as `deployment apply --only` does: their
 // files are compared and written, their actions and health gates run, and
 // nothing else on the site moves. The first real `site add` needed it: its
 // HAProxy restart broke Mbin's database connections, and the only way to
@@ -737,7 +737,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			if track := unresolvedTrack(content); track != "" && !leftAlone && !o.tolerateUnresolved {
 				err := &ui.Problem{
 					Hint:    fmt.Sprintf("%s would run %s, which runs nowhere on %s yet", rel, ui.Name(track), site),
-					Explain: "It follows a track, which a host cannot pull until `paisans apply` resolves it to a build. Run apply, then this command again.",
+					Explain: "It follows a track, which a host cannot pull until `paisans deployment apply` resolves it to a build. Run apply, then this command again.",
 				}
 				finish(done, err)
 				return nil, err
@@ -1336,7 +1336,7 @@ func execute(plan *Plan, t Transport) error {
 		// `exec`. Nothing has started the infrastructure stack at this point:
 		// the Actions loop below is what does that, and on a first apply to a
 		// fresh host there is no container to exec into at all, so validating
-		// through exec made `apply` unable to complete a first install of a
+		// through exec made `deployment apply` unable to complete a first install of a
 		// gateway site. It also made recovery impossible after a gateway died,
 		// since every later apply would refuse at this step. `run` starts a
 		// throwaway container with the service's own image and bind mounts,

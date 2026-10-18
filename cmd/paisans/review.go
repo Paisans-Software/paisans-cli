@@ -323,7 +323,7 @@ type runReview struct {
 var reviewedByRun *runReview
 
 // stepReview is the review of one command run for site: site prepare's or
-// apply --site's. Typed by hand, the command shows it and, with execute,
+// deployment apply --site's. Typed by hand, the command shows it and, with execute,
 // asks for approval when anything needs it, which a answers. Run as a step
 // of apply with no
 // --site, which showed and approved every site's review already, a dry run
@@ -350,7 +350,7 @@ func stepReview(r ui.Reporter, a answerer, stdin io.Reader, stdout io.Writer, cf
 			}
 			return nil, "", &ui.Problem{
 				Hint:    "what " + config.FileName + " grants on " + site + " changed after it was approved",
-				Explain: strings.Join(lines, "\n") + "\nThese were not in the review the run asked you to approve. Nothing was changed on " + site + " by this step. Run paisans apply --execute again to review them.",
+				Explain: strings.Join(lines, "\n") + "\nThese were not in the review the run asked you to approve. Nothing was changed on " + site + " by this step. Run paisans deployment apply --execute again to review them.",
 			}
 		}
 		return s, run.approvedBy, nil

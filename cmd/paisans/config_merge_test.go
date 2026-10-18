@@ -105,7 +105,7 @@ func (m mergeCase) pull(t *testing.T, execute bool) (string, error) {
 		args = append(args, "--execute")
 	}
 	var out bytes.Buffer
-	err := runConfig(args, noTerminalStdin(), &out)
+	err := runDeployment(args, noTerminalStdin(), &out)
 	return out.String(), err
 }
 

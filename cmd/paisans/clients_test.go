@@ -696,7 +696,7 @@ func TestApplyReportsAnOverwriteItHeldBack(t *testing.T) {
 	}
 }
 
-// apply --execute does not list the client plan: the read only planning call
+// deployment apply --execute does not list the client plan: the read only planning call
 // lists nothing without --verbose, the executing call reports its mutations
 // as steps, and a plan warning shows once although both calls plan.
 func TestApplyExecuteListsNoClientPlanAndWarnsOnce(t *testing.T) {

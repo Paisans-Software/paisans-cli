@@ -805,7 +805,7 @@ func TestAGatewayWithoutItsProviderModuleIsNotReloaded(t *testing.T) {
 // A first apply to a fresh host has nothing running: every file is a create,
 // and the container that would serve them is started by the Actions loop at
 // the very end. Validating or reloading through `exec` there asks a container
-// that does not exist yet, which made `paisans apply` unable to complete a
+// that does not exist yet, which made `paisans deployment apply` unable to complete a
 // first install of a gateway site, and made recovery impossible afterwards,
 // since a dead gateway makes every later apply refuse at the same step.
 func TestAFirstApplyToAFreshHostCompletes(t *testing.T) {

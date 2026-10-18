@@ -88,7 +88,7 @@ func pocketIDKey(cfg *config.Config, configPath, secretsPath, app string) (strin
 	}
 	key, _ := secrets.Apps[app]["static_api_key"].(string)
 	if key == "" {
-		return "", fmt.Errorf("secrets apps.%s.static_api_key is empty. Run `paisans init` to generate it and `paisans apply` to render it into Pocket ID, then re-run", app)
+		return "", fmt.Errorf("secrets apps.%s.static_api_key is empty. Run `paisans init` to generate it and `paisans deployment apply` to render it into Pocket ID, then re-run", app)
 	}
 	return key, nil
 }

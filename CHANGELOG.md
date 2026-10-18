@@ -10,8 +10,13 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Added
+
+- `deployment apply --execute` and `deployment recover --execute` save the version to this workstation's data directory, `deployment list` lists saved deployments, and `deployment fetch --ssh` saves every deployment a host's registry holds.
+
 ### Changed
 
+- `apply` and the `config` subcommands moved under `deployment`: `paisans deployment apply`, `deployment publish`, `deployment pull`, `deployment log` and `deployment recover`; `paisans apply` and `paisans config` are gone.
 - Where sudo is sudo-rs, `site admit` and `doctor` read the sudoers Defaults from the original sudo installed beside it as `sudo.ws`, so a stock Ubuntu 26.04 host is admitted without switching sudo.
 - A dry run says what `--execute` will do in the future tense, so a note such as `ssh.user paisans-c111, --execute will record it` reads as yet to happen.
 

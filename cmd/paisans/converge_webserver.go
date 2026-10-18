@@ -45,7 +45,7 @@ func scopedApps(cfg *config.Config, scope webServerScope) []string {
 // webServerStep is the web server step for the sites scope covers: each
 // external app's reference file written (convergeWebServerFiles), then the
 // app checked (convergeWebServer). apply without --site runs it once, after
-// every other step; apply --site runs it for its own site. It returns what
+// every other step; deployment apply --site runs it for its own site. It returns what
 // the run ends on when something is left: broken when what apply needed on
 // a host could not be done, otherwise the operator's web server.
 func webServerStep(r ui.Reporter, cfg *config.Config, configPath string, scope webServerScope) (end *ui.Problem, broken bool) {
@@ -233,7 +233,7 @@ func webServerFailed(checked []string, files webServerFiles, degraded bool) *ui.
 func webServerBroken(steps []string) *ui.Problem {
 	return &ui.Problem{
 		Hint:    fmt.Sprintf("Deployment not complete: %s failed: %s", plural(len(steps), "web server step"), andList(steps)),
-		Explain: "Every other step ran. Fix what is noted above, then run paisans apply --execute again.",
+		Explain: "Every other step ran. Fix what is noted above, then run paisans deployment apply --execute again.",
 	}
 }
 

@@ -15,7 +15,7 @@ import (
 // The seed is rendered from the whole deployment (render's uptimeSeed): a
 // ping per site, a direct check per site an app runs on, and a check per
 // app. It is correct whenever the monitor site is applied, and nothing else
-// applies it: `apply --site` is one site at a time, and a command that joins or
+// applies it: `deployment apply --site` is one site at a time, and a command that joins or
 // removes a site, or an app, moves files on the sites it changes and not on
 // the monitor's. Without this the monitor keeps checking a site that is gone,
 // alerting for as long as nobody applies it by hand, and never checks a site
@@ -154,7 +154,7 @@ func (m *MonitorReseed) Gate() error {
 // Command is the apply that does the same as the reseed, for a failure to
 // name: the one command that brings the monitor up to date on its own.
 func (m *MonitorReseed) Command() string {
-	return fmt.Sprintf("paisans apply --site %s --only %s --execute", m.Site, m.App)
+	return fmt.Sprintf("paisans deployment apply --site %s --only %s --execute", m.Site, m.App)
 }
 
 // MonitorCommands is every reseed's Command, joined for a message.

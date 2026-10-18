@@ -268,7 +268,7 @@ func (r *runner) clock(name string) {
 // host is the host check on the new site: what already runs there, and
 // whether any of it holds something the site claims. A conflict is refused,
 // and so is a shared host without a firewall that is up and denying by
-// default, exactly as `site prepare` and `apply` would refuse them.
+// default, exactly as `site prepare` and `deployment apply` would refuse them.
 func (r *runner) host(t apply.Transport) {
 	report, err := inspectHost(r.cfg, r.newSite, t)
 	if err != nil {

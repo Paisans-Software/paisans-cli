@@ -78,7 +78,7 @@ func (v *runIdentity) report(r ui.Reporter) {
 	}
 	version := r.Step("configuration")
 	if v.sha == "" {
-		version.End(ui.Pending, "pending: apply --execute will publish it")
+		version.End(ui.Pending, "pending: deployment apply --execute will publish it")
 	} else {
 		version.End(ui.OK, fmt.Sprintf("revision %d, %s", v.revision, v.sha[:12]))
 	}

@@ -96,7 +96,7 @@ func promptErasable() bool {
 }
 
 // outputsAreTerminals reports whether stdout and stderr both write straight
-// to a terminal. Piped (paisans apply | tee log), they reach it through
+// to a terminal. Piped (paisans deployment apply | tee log), they reach it through
 // another process at its own pace, so what is on the rows above the cursor
 // when the prompt is answered is not known, and erasing could take a line of
 // the report. Tests replace it.

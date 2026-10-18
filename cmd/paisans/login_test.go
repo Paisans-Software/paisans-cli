@@ -224,8 +224,8 @@ func TestOnlyARunWithExecuteRecords(t *testing.T) {
 		want    bool
 	}{
 		{"apply", true, true}, {"apply", false, false}, {"preflight", false, false},
-		{"doctor", true, true}, {"doctor", false, false}, {"config pull", true, true},
-		{"config recover", true, true}, {"secrets prune", true, true}, {"secrets prune", false, false},
+		{"doctor", true, true}, {"doctor", false, false}, {"deployment pull", true, true},
+		{"deployment recover", true, true}, {"secrets prune", true, true}, {"secrets prune", false, false},
 	} {
 		fs := flag.NewFlagSet(c.name, flag.ContinueOnError)
 		if c.name != "preflight" {
@@ -280,9 +280,9 @@ func TestALoginAfterAStepIsToldOnTheRunsReporter(t *testing.T) {
 				savedRun := convergeRun
 				convergeRun = step
 				t.Cleanup(func() { convergeRun = savedRun })
-				_, _, _ = convergeQuiet(run, run.Step("a step"), []string{"apply"}, false)
+				_, _, _ = convergeQuiet(run, run.Step("a step"), []string{"deployment", "apply"}, false)
 			} else {
-				_, _, _ = checkStep(run, []string{"apply"}, step)
+				_, _, _ = checkStep(run, []string{"deployment", "apply"}, step)
 			}
 			siteTransport("home-a", cfg.Sites["home-a"], "").Login.Connected()
 			if !run.Has("note", "home-a: ssh.user paisans-f2a9 recorded in paisans-stack.yaml") {
@@ -318,7 +318,7 @@ func TestAnApplyRecordsEveryUserBeforeItPublishes(t *testing.T) {
 	fake := convergeRun
 	var stepErrs []error
 	convergeRun = func(args []string) error {
-		if args[0] == "apply" {
+		if isApply(args) {
 			if err := runStep(args); err != nil {
 				stepErrs = append(stepErrs, err)
 			}
@@ -350,7 +350,7 @@ func TestAnApplyRecordsEveryUserBeforeItPublishes(t *testing.T) {
 	}
 }
 
-// apply --site without --execute leaves the file as it was, and previews
+// deployment apply --site without --execute leaves the file as it was, and previews
 // the version from the file on disk.
 func TestADryRunApplySiteLeavesTheFile(t *testing.T) {
 	path := fixtureWithoutUsers(t)

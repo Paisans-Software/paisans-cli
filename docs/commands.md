@@ -12,19 +12,19 @@ reasoning.
 
 ## Most of the time, one command
 
-`paisans apply` without `--site` takes `paisans-stack.yaml` to a complete, running
-stack. It runs `init`, `site prepare`, `dns init`, `apply --site`, `site add`,
+`paisans deployment apply` without `--site` takes `paisans-stack.yaml` to a complete, running
+stack. It runs `init`, `site prepare`, `dns init`, `deployment apply --site`, `site add`,
 `storage init`, `storage add` and, when the gateway role has moved, `gateway
 move` itself, in the order the deployment needs them, each exactly as it runs when typed, pulls every site's images on every
 host at once before the first of them installs anything, and ends by running
 `web-server check`'s checks for each app behind the operator's own web server
-(see *`paisans apply` with no `--site` converges the whole deployment* in
+(see *`paisans deployment apply` with no `--site` converges the whole deployment* in
 `README.md`). So the usual way to make any change is to edit `paisans-stack.yaml`
 and run:
 
 ```sh
-paisans apply             # every step it would run, and what each would change
-paisans apply --execute   # runs them, stopping at the first failure
+paisans deployment apply             # every step it would run, and what each would change
+paisans deployment apply --execute   # runs them, stopping at the first failure
 ```
 
 Running one of those commands on its own is for a narrower job: looking at one
@@ -39,11 +39,11 @@ deleting DNS records, making an administrator) or a read (`doctor`,
 | Flag | Default | Taken by | Meaning |
 |------|---------|----------|---------|
 | `-v`, `--verbose` | off | every command | the reasons, values, request bodies and command output behind each step; with it, a failure also shows the underlying error |
-| `--config <path>` | `paisans-stack.yaml` | every command except `site deployments` | the deployment declaration |
+| `--config <path>` | `paisans-stack.yaml` | every command except `site deployments`, `deployment list` and `deployment fetch` | the deployment declaration |
 | `--secrets <path>` | `secrets.enc.yaml` beside the config | every command that reads secrets | the sops encrypted secrets file. A plaintext one is refused (see *`secrets.enc.yaml` exists only encrypted* in `README.md`) |
 | `--execute` | off | every command that changes something, as each entry says | without it, the command plans and prints and changes nothing |
 | `--yes` | off | every command that asks for a confirmation, as each entry says | answers each confirmation as typing it would; needs `PAISANS_ALLOW_YES=1` (see *`--yes` answers confirmations* below) |
-| `--sudo` | on | `site deployments` | run its remote commands through sudo, since the registry is root's; `--sudo=false` skips it (see *A sudo that wants a password is asked for once, on a terminal* in `README.md`). Every other command runs as the site's ssh user, without sudo |
+| `--sudo` | on | `site deployments` | run its remote commands through sudo, since the registry is root's (`deployment fetch` always does); `--sudo=false` skips it (see *A sudo that wants a password is asked for once, on a terminal* in `README.md`). Every other command runs as the site's ssh user, without sudo |
 | `--ssh <destination>` | the site's `ssh` section | commands about one site's host | used verbatim in place of the site's `ssh` section, whose user, host, port and keys are then ignored (see *`--ssh` replaces the whole section* in `README.md`) |
 
 Every command that changes a host first reads, as the site's ssh user, the
@@ -55,20 +55,20 @@ deployment there held this one's token, WireGuard interface or listen port, or
 an overlapping mesh subnet (see *A deployment has an id, and a host knows every
 deployment on it* in `README.md`).
 
-With `--execute`, `apply`, `apply --site`, `site prepare` and `site add` first show what
+With `--execute`, `deployment apply`, `deployment apply --site`, `site prepare` and `site add` first show what
 `paisans-stack.yaml` grants on each host they reach that the host has not had (a key
 that may log in, an image that runs), and, when anything is added or changed, ask for the word `approve` at
 a terminal before the first change. Without a terminal they refuse, before any host
 changes, unless `--yes` answers. A run that adds or changes nothing asks
-nothing. Their dry runs show the same review and ask nothing (see *`apply` and
+nothing. Their dry runs show the same review and ask nothing (see *`deployment apply` and
 `site prepare` review what `paisans-stack.yaml` grants* in `README.md`).
 
 ### `--yes` answers confirmations
 
-Every command that asks for a confirmation takes `--yes`: `apply`,
-`apply --site`, `site prepare`, `site admit`, `site evict`, `site add`,
-`site remove`, `gateway move`, `config publish`, `config pull`,
-`config recover`, `operator register`, `secrets prune`, `secrets rotate` and
+Every command that asks for a confirmation takes `--yes`: `deployment apply`,
+`deployment apply --site`, `site prepare`, `site admit`, `site evict`, `site add`,
+`site remove`, `gateway move`, `deployment publish`, `deployment pull`,
+`deployment recover`, `operator register`, `secrets prune`, `secrets rotate` and
 `app remove`. No other command takes it.
 
 * **What it answers:** every word a command asks to have typed (`approve`,
@@ -96,8 +96,8 @@ Every command that asks for a confirmation takes `--yes`: `apply`,
 * **Without it:** every question is asked at a terminal, and refused off one,
   as each entry says.
 
-Apply without `--site` hands `--yes` on to its `apply` and `gateway move`
-steps, and `gateway move` to its hand-off's `apply`.
+Apply without `--site` hands `--yes` on to its `deployment apply` and `gateway move`
+steps, and `gateway move` to its hand-off's `deployment apply`.
 
 A site that leaves `ssh.user` out is reached as the deployment's own user,
 `paisans-<token>`. Any run with `--execute` that logs in to it writes that
@@ -165,7 +165,7 @@ file is checked as `validate` checks it before it is written; a refusal offers
 the questions it came from again, every question, writing the file as it
 stands to fix by hand, or quitting. A file refused nothing is written at once,
 to `--config` or `paisans-stack.yaml` in the current directory, and is not
-printed. It then names `init`, `site request`, `secrets set` and `apply`.
+printed. It then names `init`, `site request`, `secrets set` and `deployment apply`.
 
 Each operator's keys are checked as they are pasted: a key another operator
 gave, one listed twice, and one the loader refuses are refused there.
@@ -194,7 +194,7 @@ each from this machine, settles `mesh.subnet` against every admitted site
 while the deployment is on none of them, generates every secret the
 declaration needs into the secrets file (filling only what is missing), and
 says what is still owed from elsewhere. Each owed secret is a warning, since
-only the operator can provide it. The sign in clients `apply` creates are
+only the operator can provide it. The sign in clients `deployment apply` creates are
 pending rather than owed, and are one line, Eg: `4 sign in clients (blog,
 docs, gate, health) are created by apply`, with what apply makes for each
 under `--verbose`.
@@ -261,7 +261,7 @@ See *Three kinds of secret*, *Rendered configuration is a build artifact* and
 
 Validates, then writes every site's artifacts under a local directory.
 
-* **Alone:** to read what `apply` would push, file by file. `apply` renders
+* **Alone:** to read what `deployment apply` would push, file by file. `deployment apply` renders
   for itself and never runs this as a step.
 * **Flags:** `--config`, `--secrets`, `--out <dir>` (required).
 * **Hosts:** none.
@@ -285,7 +285,7 @@ sites.home-a.wireguard_private_key  set    generated  mesh rekey
 * **`STATE`:** `set` when the file holds a value there, `unset` when it does
   not.
 * **`SOURCE`:** `generated` by `init`, `pasted` with `secrets set`, or
-  `captured` by `apply --execute` from a running service (see *Three kinds of
+  `captured` by `deployment apply --execute` from a running service (see *Three kinds of
   secret* in `README.md`).
 * **`ROTATE`:** the path `secrets rotate` takes for a set secret: its own, or
   its unit's for one an app's blueprint rotates as a unit; `kept` for one
@@ -319,7 +319,7 @@ from this machine, it logs in to the mail server and sends one test message to
 every operator's email, so no site need be deployed yet. A server that answers
 and refuses writes nothing, and says its reply, never the password; a server
 this machine cannot reach is warned about and the password written untried,
-for `apply` to try from each site (see *Mail settings are tried before they
+for `deployment apply` to try from each site (see *Mail settings are tried before they
 are used* in `README.md`).
 
 ```
@@ -346,7 +346,7 @@ paisans secrets set
 
 * **Flags:** the key, as the first argument, or none to be asked for each owed
   secret; `--config`, `--secrets`.
-* **Hosts:** none. An SMTP password is tried from this machine, and `apply`
+* **Hosts:** none. An SMTP password is tried from this machine, and `deployment apply`
   tries it from each site running an app that uses it.
 * **`--execute`:** not taken. It writes the local file at once. Given no key
   it refuses anything but a terminal on stdin.
@@ -382,7 +382,7 @@ Replaces secrets where they are checked and where they are used, one secret at
 a time: a next value written to the secrets file, the side that checks it
 taught it, every site that presents it applied in turn and healthy before the
 next, then the next value promoted. Lists the secrets it keeps, each with why.
-A stopped run resumes where it stopped; `apply`, and every other command that
+A stopped run resumes where it stopped; `deployment apply`, and every other command that
 renders from the secrets file and reaches a host, refuses until it finishes,
 since each renders the old value.
 
@@ -459,24 +459,24 @@ where it is used* there too, and
 [guides/when-an-operator-leaves.md](guides/when-an-operator-leaves.md) for the order
 around it.
 
-### `paisans config`
+### `paisans deployment publish`, `pull`, `log` and `recover`
 
 The signed copies of `paisans-stack.yaml`, `secrets.enc.yaml` and `.sops.yaml` that
-every site keeps. Four subcommands, each gathering every site's versions first
+every site keeps. Four subcommands of `deployment`, each gathering every site's versions first
 and trusting them only from the operator's own signature or a root pinned with
 `--root`.
 
 ```sh
-paisans config publish                # what would be signed, with which key
-paisans config publish --execute      # sign the local files, push to every site
-paisans config publish --merge --execute   # one version on every head of a fork
-paisans config pull                   # what would be written
-paisans config pull --execute         # move the files to the sites' newest
-paisans config log                    # every version, signer, build, holding sites
-paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty directory
+paisans deployment publish                # what would be signed, with which key
+paisans deployment publish --execute      # sign the local files, push to every site
+paisans deployment publish --merge --execute   # one version on every head of a fork
+paisans deployment pull                   # what would be written
+paisans deployment pull --execute         # move the files to the sites' newest
+paisans deployment log                    # every version, signer, build, holding sites
+paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # empty directory
 ```
 
-* **Alone:** always, except as `apply` runs its part (below). Each is an
+* **Alone:** always, except as `deployment apply` runs its part (below). Each is an
   operator's decision: what to publish, when to take the sites' version, and
   where to recover.
 * **Flags:**
@@ -509,7 +509,7 @@ paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty
   key that belongs to an operator the base lists, and pushes to every site it
   reaches. It refuses a plaintext `secrets.enc.yaml`, or an encrypted one with
   no recipient in `.sops.yaml`, before it reaches a site, and when its base is not the sites' newest version (including
-  a workstation with no base while the sites hold versions: run `config pull`
+  a workstation with no base while the sites hold versions: run `deployment pull`
   first), when the sites hold a fork and `--merge` is not given, and when no
   site answers. `pull` moves files with no local edits to the head; over local
   edits on an older base it refuses, shows how they differ, and writes the
@@ -528,29 +528,85 @@ paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty
   refuse a version whose `secrets.enc.yaml` is plaintext before they write
   any of its files or sign anything.
 * **Words typed at a terminal:** `partial` when fewer than a majority of sites
-  answered directly (no more than half), for `apply --execute`, `config pull`,
-  `config recover`, `config publish` of a first version and `operator register`;
+  answered directly (no more than half), for `deployment apply --execute`, `deployment pull`,
+  `deployment recover`, `deployment publish` of a first version and `operator register`;
   `rollback` when the newest version is older than one this workstation has
   seen. `--yes` types either. An accepted `rollback` re-bases `.paisans/config-seen` to the head
   chosen once the command commits its change; a run that stops leaves it as it
   was. `log` asks for neither: it warns and lists. A dry run says what
   `--execute` will ask.
-* **In `apply`:** `apply` gathers before its review and refuses a fork or a base
-  older than the sites' newest version, naming `config pull`. With `--execute`
+* **In `deployment apply`:** `deployment apply` gathers before its review and refuses a fork or a base
+  older than the sites' newest version, naming `deployment pull`. With `--execute`
   it publishes the version it applies and each host records it; a host whose
   record holds a newer revision, or another version at the same revision, makes
-  `apply` ask for `rollback`. It needs the standard file names beside
+  `deployment apply` ask for `rollback`. It needs the standard file names beside
   `paisans-stack.yaml` (a `--secrets` naming another file is refused), an operator's key in
   the ssh-agent even for a dry run.
 
 See *Every site keeps signed copies of the configuration* in `README.md` and
 `docs/specs/2026-10-12-config-store.md`.
 
+### `paisans deployment list`
+
+Lists the deployments saved on this workstation: id, domain, revision, version,
+status, when and where from. `deployment apply --execute` saves the version it
+publishes, `deployment recover --execute` the version it recovers, and
+`deployment fetch` what a host holds, so every deployment an operator runs is
+found here, wherever its own files are.
+
+```sh
+paisans deployment list
+```
+
+* **Alone:** always, and without `paisans-stack.yaml`.
+* **Flags:** none but `-v`.
+* **Where:** `~/Library/Application Support/Paisans/deployments/<id>/` on macOS,
+  `$XDG_DATA_HOME/paisans/deployments/<id>/` (`~/.local/share/paisans/...`
+  when it is unset) elsewhere, or under `$PAISANS_DATA_DIR` when set. Each
+  directory holds `paisans-stack.yaml`, `secrets.enc.yaml` (encrypted, as
+  always) and `.sops.yaml` with their `.paisans/` state, so any command takes
+  it with `--config`. The directories are `0700`.
+* **Status:** `verified` is a version the trust rules chose; `unverified` is
+  one a host served for a deployment this workstation never applied or
+  recovered, kept only in `.paisans/incoming/<sha>/`; `fork` is two trusted
+  heads, each there.
+* **Hosts:** none. Changes nothing.
+
+See *This workstation keeps every deployment it applies* in `README.md`.
+
+### `paisans deployment fetch`
+
+Saves, for every deployment in the registry of the host `--ssh` names, the
+newest version of its configuration the host keeps.
+
+```sh
+paisans deployment fetch --ssh admin@203.0.113.9
+```
+
+* **Alone:** always, and without `paisans-stack.yaml`: on a new workstation, or
+  to bring the saved copies up to date.
+* **Flags:** `--ssh <user@host[:port]>` (required).
+* **Hosts:** the one host named, as its owner, through sudo, since the registry
+  and the configuration stores are root's. It asks no site to sync and changes
+  nothing on the host.
+* **Trust:** a deployment saved here before is judged from its saved anchor
+  (the key that signed what was applied, or the pinned root), as `deployment
+  pull` judges, and the newest trusted version becomes the saved copy. One
+  older than this workstation has seen is not saved. A deployment never saved
+  here has no anchor: its newest versions go to `.paisans/incoming/<sha>/`,
+  never to the copy's own files, and it is listed `unverified`, with the
+  `deployment recover --root <sha>` line that pins one once its hash is checked
+  with another operator.
+* **Exit:** non-zero when any deployment could not be fetched; the rest are
+  saved.
+
+See *This workstation keeps every deployment it applies* in `README.md`.
+
 ### `paisans operator register`
 
 Gives an operator an anchor of their own: the point on their workstation from which
 the sites' versions are trusted. An operator who has never published has signed
-nothing, so `config pull` has nothing of theirs to start from.
+nothing, so `deployment pull` has nothing of theirs to start from.
 
 ```sh
 paisans operator register                # the key and the head it would attest
@@ -563,7 +619,7 @@ paisans operator register --key ~/.ssh/id_ed25519.pub --execute
 * **Flags:** `--config`, `--key <path.pub>` (the key to sign with; the ssh-agent
   must hold its private half), `--root <sha>` (pin the first version you trust),
   `--execute`, `--yes` (types `partial` and `rollback`).
-* **Hosts:** every site, as `config` does.
+* **Hosts:** every site, as `deployment pull` does.
 * **The key:** `--key`, else the one `.paisans/signing-key` records, else the
   one key in the ssh-agent that is listed under an operator of `paisans-stack.yaml`. It
   refuses when none matches, saying the key goes under your own entry in
@@ -576,7 +632,7 @@ paisans operator register --key ~/.ssh/id_ed25519.pub --execute
   the pin leads to and writes its files. A head your key signed already is
   pushed again, not attested again.
 * **`--execute`:** signs, pushes the attestation to every site it reaches, and
-  writes the key to `.paisans/signing-key`; `config publish` and `apply` sign
+  writes the key to `.paisans/signing-key`; `deployment publish` and `deployment apply` sign
   with it from then on. It asks for `partial` when fewer than a majority of
   sites answered directly, which `--yes` types. Without it, nothing is signed or recorded, and no
   site is changed.
@@ -709,14 +765,14 @@ paisans site prepare --all --execute          # every site, one at a time
   bare repository `config/<token>.git`, the peers file, `bin/config-sync.sh`,
   and the user's units `paisans-<token>-config-daemon`, `-config-sync` and
   `-config-sync.timer`, enabled under linger. The daemon binds the mesh
-  address, so on a host whose mesh `apply` has not brought up the unit's start
+  address, so on a host whose mesh `deployment apply` has not brought up the unit's start
   waits for that address, however long it takes, and the daemon binds it once
   it is there; a daemon that stops later is restarted after ten seconds. Every site's `site prepare` is also what makes the
-  store `apply` publishes to, so `apply` refuses a version no site could take
+  store `deployment apply` publishes to, so `deployment apply` refuses a version no site could take
   with this command named.
 
 See *`site prepare` keeps what is the deployment's user's*, *Docker is judged
-by its version, not its source* and *`apply` and `site prepare` review what
+by its version, not its source* and *`deployment apply` and `site prepare` review what
 `paisans-stack.yaml` grants* in `README.md`.
 
 ### `paisans site deployments`
@@ -916,7 +972,7 @@ paisans site admit --site home-a --ssh owner@home-a.example.org --execute   # fr
   created; the user, with linger and its rootless daemon; the cgroup
   delegation drop-in; the egress table; `/srv/paisans/<token>`;
   `/etc/wireguard`; the WireGuard helper and its sudoers line; a drop-in that
-  skips `wg-quick@psns-<token>` at boot until `apply` writes its conf; ufw
+  skips `wg-quick@psns-<token>` at boot until `deployment apply` writes its conf; ufw
   rules tagged `paisans-<token>:`; with `--watchdog`, the device for the user;
   with `--public-ports`, `ip_unprivileged_port_start` of 80 and 80/tcp,
   443/tcp and 443/udp open; for a site with an endpoint, forwarding; the
@@ -1007,7 +1063,7 @@ See *A host's owner admits a site from a request* in `README.md`.
 Lists one site's dangling Docker volumes, with size and top level entries, and
 says which carry this deployment's label.
 
-* **Alone:** always, for volumes that accumulated before `apply` removed its
+* **Alone:** always, for volumes that accumulated before `deployment apply` removed its
   own. Sizes are Docker's own accounting (`docker system df -v`), since the
   deployment's user cannot read a directory a container's user owns.
 * **Flags:** `--site <name>` (required), `--config`, `--ssh`, `--execute`.
@@ -1015,15 +1071,15 @@ says which carry this deployment's label.
 * **`--execute`:** removes the volumes labelled with this deployment's id;
   every other volume is kept.
 
-See *Every volume an image declares is mounted, and `apply` checks it* in
+See *Every volume an image declares is mounted, and `deployment apply` checks it* in
 `README.md`.
 
 ## Applying
 
-### `paisans apply` without `--site`
+### `paisans deployment apply` without `--site`
 
 Every site, from `paisans-stack.yaml` to a running stack: the commands in this file
-that it runs, in the order and under the conditions *`paisans apply` with no
+that it runs, in the order and under the conditions *`paisans deployment apply` with no
 `--site` converges the whole deployment* in `README.md` gives. In order: `init`
 when it has work; `site prepare` on every host at once; a pull of every site's
 images on every host at once, so no install waits on a download; `dns init`; the
@@ -1039,17 +1095,17 @@ published once the `site prepare` steps have made every site's store and before
 any other step changes a host (see *Every site keeps signed copies of the
 configuration* in `README.md`), and a step that records a client's credentials
 or a signup group's ID in `secrets.enc.yaml` publishes the bytes it wrote as
-the next revision before its host records it. Each `apply --site` it runs that covers the
+the next revision before its host records it. Each `deployment apply --site` it runs that covers the
 whole site, rather than holding apps back until their sign in clients exist,
-ends by sweeping the old images its site's stacks used (see *`apply` prunes the
+ends by sweeping the old images its site's stacks used (see *`deployment apply` prunes the
 images it superseded* in `README.md`).
 
 * **Alone:** this is the command an operator types; everything else is the
   exception.
 * **Flags:** `--config`, `--secrets`, `--execute`, `--min-free`,
   `--keep-images`, `--require-all` and `--yes` (`--min-free` and
-  `--keep-images` handed to each `apply` step, below, and `--yes` to each
-  `apply` and `gateway move` step; the pull checks free space against `--min-free` too). `--ssh`,
+  `--keep-images` handed to each `deployment apply` step, below, and `--yes` to each
+  `deployment apply` and `gateway move` step; the pull checks free space against `--min-free` too). `--ssh`,
   `--overwrite`, `--only` and `--recreate` are about one site and are refused
   without `--site`.
 * **Hosts:** every site, and each app behind the operator's own web server
@@ -1083,7 +1139,7 @@ images it superseded* in `README.md`).
   ask for. Each step records its part once it has succeeded.
 * **Configuration store:** before the review, every site's versions are gathered
   (under `configuration store`) and a fork, a base older than the sites' newest
-  version, or a key no operator lists is refused, naming `config pull` or `config
+  version, or a key no operator lists is refused, naming `deployment pull` or `deployment
   publish --merge`. With `--execute`, it asks for `partial` when fewer than a
   majority of sites answered directly. A dry run changes no site and starts no
   sync. After the approval, a host whose record holds a newer revision, or
@@ -1093,14 +1149,14 @@ images it superseded* in `README.md`).
   `paisans config`.
 * **Secrets:** each gateway's deployment record is read once, and each
   secret or recorded name `paisans-stack.yaml` no longer uses is
-  warned about once, by key, under `secrets`, dry run or not. The `apply`
+  warned about once, by key, under `secrets`, dry run or not. The `deployment apply`
   steps it runs do not read the record or warn again. An `init` it runs warns
   in its place.
 * **Mail:** before the first step, every app that sends mail logs in to its
   mail server from each site it runs on, under `mail`, and nothing is sent;
   a dry run whose `init` still has work tries them once `init` has run. A failure refuses the run with every host as it was,
   naming the app, where its settings are declared and the server's reply. The
-  `apply` steps it runs do not try again. See *Mail settings are tried before
+  `deployment apply` steps it runs do not try again. See *Mail settings are tried before
   they are used* in `README.md`.
 * **`--execute`:** runs the steps, stopping at the first failure; run again,
   it reads live state again and carries on. It ends `Deployment complete.`
@@ -1119,7 +1175,7 @@ images it superseded* in `README.md`).
   --execute`, and the generated secrets the file lacks may be added to the
   local secrets file, as `init` would add them, which it says when it does.
 
-### `paisans apply --site`
+### `paisans deployment apply --site`
 
 Compares one site's rendered artifacts with what is on its host, shows what
 would change, and with `--execute` writes the files, brings the mesh up and
@@ -1192,7 +1248,7 @@ starts, restarts or recreates what changed.
   lists the check as `--execute will check it`. The applies the whole apply
   runs as its steps leave the step to it, so it runs once.
 
-See *Rendered configuration is a build artifact* and the `apply` sections under
+See *Rendered configuration is a build artifact* and the `deployment apply` sections under
 *Bootstrapping a site* in `README.md`.
 
 ## Sites
@@ -1246,7 +1302,7 @@ paisans site add home-b --execute   # runs them, stopping at the first failed ga
   hosts.
 * **Hosts:** every site.
 * **Review:** stage 4 applies the new site's whole render, so `site add`
-  reviews the new site's images as `apply --site` does: shown under `review
+  reviews the new site's images as `deployment apply --site` does: shown under `review
   what paisans-stack.yaml grants` before the stages, asked for as `approve` at a
   terminal with `--execute`, or answered by `--yes`, refused without either,
   and recorded once stage 4's
@@ -1297,7 +1353,7 @@ apply` afterwards; its secrets are generated first if the file lacks them.
 ```sh
 paisans site remove home-b --host-gone             # refusals, then every stage, what it would ask, and what the host keeps
 paisans site remove home-b --host-gone --execute   # asks for the site's name, and revoked, lose writes or lose objects when they apply
-paisans apply                                      # brings up the replacement the configuration declares
+paisans deployment apply                                      # brings up the replacement the configuration declares
 ```
 
 `--force` cleans one host and nothing else, and `--id` does it with no
@@ -1369,7 +1425,7 @@ Replaces sites' WireGuard keys, one site at a time: a new key written to the
 secrets file as the site's next key, every peer's mesh file and then the
 site's own synced with it, a handshake under it from every peer, etcd and
 Patroni healthy, then the next key promoted. A stopped run resumes where it
-stopped; `apply` refuses until it finishes, since an apply renders the old key.
+stopped; `deployment apply` refuses until it finishes, since an apply renders the old key.
 
 ```sh
 paisans mesh rekey home-a              # dry run: where each site's rekey stands, and every stage
@@ -1435,7 +1491,7 @@ See *`paisans doctor` reports what is stuck and how to recover* in `README.md`.
 
 Lists, for every site, each image its stacks run: where the reference comes
 from (`foundation`, `blueprint`, or the configuration key that declares it),
-the build the site runs, the build the next `apply` would run, and a note
+the build the site runs, the build the next `deployment apply` would run, and a note
 when it moves or when an override is behind the release it replaced.
 
 ```sh
@@ -1449,7 +1505,7 @@ paisans images --check   # exit 3 when a build would move or an override lags
   would move; on: exit 3 when a build would move or an override lags, with no
   error line).
 * **Hosts:** reads every site's compose files over ssh, as a dry run of
-  `apply` does, and the registries. Changes none, and asks for no sudo. A
+  `deployment apply` does, and the registries. Changes none, and asks for no sudo. A
   registry that cannot be reached shows `unknown` under newest for each image
   it could not resolve, and the command carries on. A site that cannot be
   read has `unknown` builds in the table, which is printed whole, and the
@@ -1485,7 +1541,7 @@ keeps its files on its own disk and is skipped: no key, no bucket.
 
 * **Alone:** the whole apply runs it after every site is up when
   `storage.garage.sites` lists one site. Typed alone, it provisions an app's
-  bucket after an `apply --site`.
+  bucket after an `deployment apply --site`.
 * **Flags:** `--site <name>` (required), `--config`, `--secrets`, `--ssh`,
   `--execute`.
 * **Hosts:** the one site's Garage.
@@ -1590,7 +1646,7 @@ paisans gateway move --execute    # record, serve, dns add, dns remove, wait, st
   runs it last, after pass two, whenever a site without the gateway role still
   holds a gateway.
 * **Flags:** `--config`, `--secrets`, `--execute`, `--yes`, handed to the
-  hand-off's `apply`.
+  hand-off's `deployment apply`.
 * **Hosts:** reads every site without the gateway role, to find the old
   gateway; writes only to the old and new gateways' hosts. Also the DNS
   provider's API, and each hostname the gateway serves over HTTPS from this
@@ -1618,8 +1674,8 @@ paisans oidc client create --app talk --execute   # does it
 paisans oidc client create --app talk --rotate-secret --execute
 ```
 
-* **Alone:** `apply` runs the same step for every app it starts, so it is typed
-  alone to rotate a secret, or to create or re-record a client `apply`
+* **Alone:** `deployment apply` runs the same step for every app it starts, so it is typed
+  alone to rotate a secret, or to create or re-record a client `deployment apply`
   refused to replace.
 * **Flags:** `--app <name>` (required), `--rotate-secret` (off: add a new secret
   even when the recorded one is live), `--site` (default: the pinned site, or

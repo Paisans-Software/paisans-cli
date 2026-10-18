@@ -141,14 +141,14 @@ func TestYesNeedsTheEnvironmentVariable(t *testing.T) {
 			},
 			"site prepare": func() error { return runSitePrepare([]string{"--config", "/nonexistent/x.yaml", "--yes"}) },
 			"gateway move": func() error { return gatewayMoveCommand([]string{"--config", "/nonexistent/x.yaml", "--yes"}) },
-			"config publish": func() error {
-				return runConfigPublish([]string{"--config", "/nonexistent/x.yaml", "--yes"}, strings.NewReader(""), io.Discard)
+			"deployment publish": func() error {
+				return runDeploymentPublish([]string{"--config", "/nonexistent/x.yaml", "--yes"}, strings.NewReader(""), io.Discard)
 			},
-			"config pull": func() error {
-				return runConfigPull([]string{"--config", "/nonexistent/x.yaml", "--yes"}, strings.NewReader(""), io.Discard)
+			"deployment pull": func() error {
+				return runDeploymentPull([]string{"--config", "/nonexistent/x.yaml", "--yes"}, strings.NewReader(""), io.Discard)
 			},
-			"config recover": func() error {
-				return runConfigRecover([]string{"--config", "/nonexistent/x.yaml", "--yes"}, strings.NewReader(""), io.Discard)
+			"deployment recover": func() error {
+				return runDeploymentRecover([]string{"--config", "/nonexistent/x.yaml", "--yes"}, strings.NewReader(""), io.Discard)
 			},
 			"operator register": func() error {
 				return runOperatorRegister([]string{"--config", "/nonexistent/x.yaml", "--yes"}, strings.NewReader(""), io.Discard)
@@ -192,7 +192,7 @@ func TestYesAnswersPrune(t *testing.T) {
 // steps, and to no other.
 func TestConvergeHandsOnYes(t *testing.T) {
 	o := convergeOptions{Config: "c.yaml", answers: yes}
-	for _, args := range [][]string{{"apply", "--site", "home-a"}, {"gateway", "move"}} {
+	for _, args := range [][]string{{"deployment", "apply", "--site", "home-a"}, {"gateway", "move"}} {
 		if got := convergeFlags(args, o); !slices.Contains(got, "--yes") {
 			t.Errorf("%q: %q", args, got)
 		}
@@ -202,7 +202,7 @@ func TestConvergeHandsOnYes(t *testing.T) {
 			t.Errorf("%q: %q", args, got)
 		}
 	}
-	if got := convergeFlags([]string{"apply", "--site", "home-a"}, convergeOptions{Config: "c.yaml"}); slices.Contains(got, "--yes") {
+	if got := convergeFlags([]string{"deployment", "apply", "--site", "home-a"}, convergeOptions{Config: "c.yaml"}); slices.Contains(got, "--yes") {
 		t.Errorf("without --yes: %q", got)
 	}
 	if got := handOffArgs("home-a", handOffFlags{config: "c.yaml", yes: true}, true); !slices.Contains(got, "--yes") {

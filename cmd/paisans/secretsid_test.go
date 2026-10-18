@@ -68,7 +68,7 @@ func TestCommandsRefuseAnotherDeploymentsSecrets(t *testing.T) {
 		"apply": func(c, s string) error {
 			return runApply([]string{"--config", c, "--secrets", s}, strings.NewReader(""), io.Discard)
 		},
-		"apply --site": func(c, s string) error {
+		"deployment apply --site": func(c, s string) error {
 			return runApply([]string{"--config", c, "--secrets", s, "--site", "home-a", "--ssh", "nonexistent.invalid"}, strings.NewReader(""), io.Discard)
 		},
 		"storage init": func(c, s string) error {

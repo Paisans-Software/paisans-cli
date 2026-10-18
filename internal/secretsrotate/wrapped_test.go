@@ -470,7 +470,7 @@ func TestDNSTokenACaddyNeverAppliedIsRefused(t *testing.T) {
 	w.setToken(newDNSToken)
 	w.hosts["watch"].files = nil
 	_, err := Plan(w.env(), []Rotator{DNSToken()})
-	if err == nil || !strings.Contains(err.Error(), "watch") || !strings.Contains(err.Error(), "paisans apply") {
+	if err == nil || !strings.Contains(err.Error(), "watch") || !strings.Contains(err.Error(), "paisans deployment apply") {
 		t.Fatalf("got %v", err)
 	}
 }

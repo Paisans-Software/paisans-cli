@@ -139,7 +139,7 @@ func TestSecretsSetWritesWhenThisMachineCannotReachTheServer(t *testing.T) {
 	if got := mustSecrets(t, secretsPath).External["smtp_password"]; got != next {
 		t.Errorf("stored %q", got)
 	}
-	if !strings.Contains(rec.Lines(), "paisans apply") {
+	if !strings.Contains(rec.Lines(), "paisans deployment apply") {
 		t.Errorf("the warning does not say apply tries it:\n%s", rec.Lines())
 	}
 }
@@ -410,7 +410,7 @@ func TestApplyRefusesMailThatDoesNotLogIn(t *testing.T) {
 	}
 }
 
-// apply --site --only tries only the apps in scope.
+// deployment apply --site --only tries only the apps in scope.
 func TestApplyTriesOnlyTheAppsInScope(t *testing.T) {
 	cfg := mustLoad(t, fixtureConfig())
 	secrets := mustSecrets(t, fixtureSecretsPath())

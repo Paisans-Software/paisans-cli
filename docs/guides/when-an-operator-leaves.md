@@ -57,8 +57,8 @@ secret makes their copy of it worthless.
 
 ## Every version is signed, and a removal is final
 
-`paisans apply --execute` publishes the files it applies to every site as a
-signed version, and `paisans config publish` does the same without applying.
+`paisans deployment apply --execute` publishes the files it applies to every site as a
+signed version, and `paisans deployment publish` does the same without applying.
 The version that drops the operator from `operators` is the one that removes them:
 from then on a version signed by any key of theirs is not trusted, so they
 cannot publish one that puts them back (README, *Trust starts from the
@@ -75,7 +75,7 @@ paisans operator register --execute
 ```
 
 A workstation with neither its own signature nor a pinned root trusts nothing
-the sites hold, so `apply` and `config pull` refuse there. Registering signs the
+the sites hold, so `deployment apply` and `deployment pull` refuse there. Registering signs the
 version the operator already holds, so trust starts from their own key and not from
 any history the leaving operator could have written. It signs only a version equal
 to the local files, which is why it comes before the edit in step 1.
@@ -88,7 +88,7 @@ community's decision.
 
 1. **Take them out of `paisans-stack.yaml`.** Delete their entry under `operators`,
    and their name from every site's `ssh.keys`. Taking the operator out of
-   `operators` changes nothing at Pocket ID, since `apply` never deletes,
+   `operators` changes nothing at Pocket ID, since `deployment apply` never deletes,
    disables or demotes an account; steps 3 and 4 do the rest.
    Nothing is published yet. Closes nothing yet. Open: everything.
 
@@ -100,7 +100,7 @@ community's decision.
    sops rotate --in-place --rm-age age1... secrets.enc.yaml
    ```
 
-   Commit both files. This comes before any `apply --execute` or `config
+   Commit both files. This comes before any `deployment apply --execute` or `deployment
    publish`, since each publishes the files to every site as a version, and
    the one that drops them from `operators` would otherwise carry a secrets file
    still encrypted to them. Until this runs they hold the file's data key, so
@@ -116,7 +116,7 @@ community's decision.
    paisans site prepare --site home-a --execute
    ```
 
-   One site at a time, or `paisans apply`, which prepares every site and,
+   One site at a time, or `paisans deployment apply`, which prepares every site and,
    with `--execute`, publishes the version that removes them: from then on
    their signature stops counting.
    Closes: ssh with every key `site prepare` added for them. Open: a key of
@@ -168,12 +168,12 @@ community's decision.
       security find-generic-password -s acme -w | paisans secrets set external.acme_dns_token
       ```
 
-      If an `apply` hands one out first, name it in step 3 with `--replaced
+      If an `deployment apply` hands one out first, name it in step 3 with `--replaced
       <path>`: every host then runs it, and rotate would otherwise ask for
       another.
 
    2. Every site's WireGuard key: `paisans mesh rekey --all --execute`, one
-      site at a time. `apply` refuses until it finishes, and a run that stops
+      site at a time. `deployment apply` refuses until it finishes, and a run that stops
       resumes when run again.
 
    3. Everything else:
@@ -188,7 +188,7 @@ community's decision.
       apps' session secrets, the S3 keys, then the Postgres, RabbitMQ, Valkey,
       Mercure, Garage and heartbeat secrets. It asks for `sign out` at the
       terminal, since some of these end members' sessions; the plan says
-      which. A run that stops resumes when run again, and `apply`, like
+      which. A run that stops resumes when run again, and `deployment apply`, like
       every command that renders, refuses until it finishes. A plan that
       says it is resuming an earlier `--all` run that was not this one
       would leave the secrets that run finished as the departed operator knew
@@ -243,7 +243,7 @@ included, and refuses while one does not answer.
 
    This comes before the new token is set and before the replacement is
    declared, so that neither the new token nor any secret generated for the
-   new site is ever encrypted to them. It comes before the `apply --execute`
+   new site is ever encrypted to them. It comes before the `deployment apply --execute`
    of step 7 for the same reason: that apply publishes the files to every
    site as the version that removes them, and until this runs they hold the
    file's data key, which would open it. Closes: every value written from now
@@ -299,7 +299,7 @@ included, and refuses while one does not answer.
    One site at a time; the replacement is not brought up yet, so it is left
    out. Around the swap of a site others relay through, Eg: the one VM the
    homes reach each other through, Patroni is paused and then resumed, and the
-   plan says so. A run that stops resumes when run again, and `apply` refuses
+   plan says so. A run that stops resumes when run again, and `deployment apply` refuses
    until it finishes. Closes: every remaining site's
    WireGuard key, which an operator who could read the secrets file holds, and
    which WireGuard accepts from any address that proves it. Skip it only when
@@ -309,10 +309,10 @@ included, and refuses while one does not answer.
 7. **Bring up the replacement.**
 
    ```sh
-   paisans apply --execute
+   paisans deployment apply --execute
    ```
 
-   `apply` prepares the new host, applies it and creates its DNS records, adds
+   `deployment apply` prepares the new host, applies it and creates its DNS records, adds
    it as a peer on every site, and prepares every site, which deletes from
    each the keys of theirs `site prepare` added. It reviews every key it
    grants on the new host, which has no record yet, and asks for `approve` at
@@ -364,7 +364,7 @@ included, and refuses while one does not answer.
 
     It asks for `sign out`: after a gateway is cut off, signing members out
     is the point, since the cut-off host saw every session cookie. A run
-    that stops resumes when run again, and `apply`, like every command that
+    that stops resumes when run again, and `deployment apply`, like every command that
     renders, refuses until it finishes. When the plan says it is resuming an
     earlier `--all` run that was not this one, add `--restart`, so every
     secret is rotated again. A rotation that cannot finish is ended by hand:

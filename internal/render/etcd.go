@@ -14,7 +14,7 @@ import (
 // first start, when its data directory is empty, and ignores both forever
 // after (etcd v3.5, "Clustering Guide", and server/etcdmain/etcd.go, which
 // skips bootstrap when the member directory exists). So the flags are inert on
-// a running member, and the only thing a change to them can do is make `apply`
+// a running member, and the only thing a change to them can do is make `deployment apply`
 // see a changed compose.yaml and recreate a healthy member for nothing. A
 // cluster that grows would otherwise change every member's flags on every
 // growth step.

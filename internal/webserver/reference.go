@@ -57,7 +57,7 @@ func References(d deployment.Deployment, t Target, ws WebServer) []Reference {
 // FileContent is a reference file for t: a header saying whose it is and
 // what the owner does with it, then the snippet web-server show prints.
 func FileContent(t Target, ws WebServer) string {
-	header := fmt.Sprintf("# %s, the paisans app %s, written by paisans apply for the host's owner.\n# Copy it into %s's configuration. apply rewrites it when "+config.FileName+" changes, and says so: then replace your copy.\n", t.Hostname, t.App, ws.Server)
+	header := fmt.Sprintf("# %s, the paisans app %s, written by paisans deployment apply for the host's owner.\n# Copy it into %s's configuration. apply rewrites it when "+config.FileName+" changes, and says so: then replace your copy.\n", t.Hostname, t.App, ws.Server)
 	switch ws.Server {
 	case ServerCaddy:
 		return header + caddySnippet(t, ws)

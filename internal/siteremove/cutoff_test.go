@@ -317,7 +317,7 @@ func TestACutOffGatewayWithItsReplacementDeclared(t *testing.T) {
 		}
 	}
 	report := strings.Join(p.Remains(), "\n")
-	if !strings.Contains(report, "run `paisans apply` to bring up home-d") || !strings.Contains(report, "answers nothing until that apply") {
+	if !strings.Contains(report, "run `paisans deployment apply` to bring up home-d") || !strings.Contains(report, "answers nothing until that apply") {
 		t.Errorf("no apply, or no dark names, in the report:\n%s", report)
 	}
 	if n := w.hosts["vm"].calls(); n != 0 {

@@ -252,7 +252,7 @@ func TestPublishFromAStaleHeadIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _, err = bob.publish(t, lb, all, false)
-	if err == nil || !strings.Contains(err.Error(), "stale") || !strings.Contains(err.Error(), v2[:12]) || !strings.Contains(err.Error(), "paisans config pull") {
+	if err == nil || !strings.Contains(err.Error(), "stale") || !strings.Contains(err.Error(), v2[:12]) || !strings.Contains(err.Error(), "paisans deployment pull") {
 		t.Fatalf("stale publish: %v", err)
 	}
 	if head, _ := lb.Head(); head != v1 {

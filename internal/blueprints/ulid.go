@@ -11,7 +11,7 @@ import (
 // identity provider it signs in at with one, and that ULID is in the
 // callback registered at the provider, so the operator has to know it.
 // Deriving it rather than generating one keeps rendering deterministic, which
-// is what stops a second `apply` from inventing a provider the registered
+// is what stops a second `deployment apply` from inventing a provider the registered
 // callback no longer matches.
 //
 // A ULID is 26 Crockford base32 characters over 128 bits, which leaves two

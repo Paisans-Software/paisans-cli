@@ -23,7 +23,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// What follows is `paisans config`: the signed copies of the configuration
+// What follows is `paisans deployment`: the signed copies of the configuration
 // every site keeps (docs/specs/2026-10-12-config-store.md). publish puts the
 // local files on the sites as a new version, pull brings the sites' newest
 // trusted version to the local files, log lists every version, and recover
@@ -52,21 +52,27 @@ var configSignWith = func(line string) string { return "key::" + line }
 // replace it.
 var configNow = time.Now
 
-func runConfig(args []string, stdin io.Reader, stdout io.Writer) error {
+func runDeployment(args []string, stdin io.Reader, stdout io.Writer) error {
 	if len(args) == 0 {
-		return &ui.Problem{Hint: "config takes one subcommand", Explain: "Use publish, pull, log or recover."}
+		return &ui.Problem{Hint: "deployment takes one subcommand", Explain: "Use apply, list, fetch, publish, pull, log or recover."}
 	}
 	switch args[0] {
+	case "apply":
+		return runApply(args[1:], stdin, stdout)
+	case "list":
+		return runDeploymentList(args[1:], stdout)
+	case "fetch":
+		return runDeploymentFetch(args[1:])
 	case "publish":
-		return runConfigPublish(args[1:], stdin, stdout)
+		return runDeploymentPublish(args[1:], stdin, stdout)
 	case "pull":
-		return runConfigPull(args[1:], stdin, stdout)
+		return runDeploymentPull(args[1:], stdin, stdout)
 	case "log":
-		return runConfigLog(args[1:], stdin, stdout)
+		return runDeploymentLog(args[1:], stdin, stdout)
 	case "recover":
-		return runConfigRecover(args[1:], stdin, stdout)
+		return runDeploymentRecover(args[1:], stdin, stdout)
 	}
-	return &ui.Problem{Hint: fmt.Sprintf("config has no subcommand %q", args[0]), Explain: "Use publish, pull, log or recover."}
+	return &ui.Problem{Hint: fmt.Sprintf("deployment has no subcommand %q", args[0]), Explain: "Use apply, list, fetch, publish, pull, log or recover."}
 }
 
 // configHelp is the --config flag's help, the same for every subcommand.
@@ -104,7 +110,7 @@ func anchorFor(l configstore.Local, root string) (configstore.Anchor, error) {
 		return a, nil
 	}
 	if !shaShape(root) {
-		return a, &ui.Problem{Hint: fmt.Sprintf("--root %q is not a commit id", root), Explain: "Give the full hash of the version to pin, as paisans config log prints it on a workstation that has it."}
+		return a, &ui.Problem{Hint: fmt.Sprintf("--root %q is not a commit id", root), Explain: "Give the full hash of the version to pin, as paisans deployment log prints it on a workstation that has it."}
 	}
 	if a.Root != "" && a.Root != root {
 		return a, &ui.Problem{Hint: "--root differs from the pinned root", Explain: fmt.Sprintf("This workstation pinned %s in .paisans/config-root. Drop --root, or remove that file if the pin is wrong.", a.Root)}
@@ -220,7 +226,7 @@ func forkProblem(g configstore.Gathered, more ...string) error {
 	for _, h := range g.Verdict.Heads {
 		heads = append(heads, "- "+describe(g, h))
 	}
-	return &ui.Problem{Hint: "the sites hold a fork", Explain: "Two trusted versions build on one parent:\n" + strings.Join(heads, "\n") + "\nMerge their files by hand, then publish with paisans config publish --merge." + strings.Join(append([]string{""}, more...), " ")}
+	return &ui.Problem{Hint: "the sites hold a fork", Explain: "Two trusted versions build on one parent:\n" + strings.Join(heads, "\n") + "\nMerge their files by hand, then publish with paisans deployment publish --merge." + strings.Join(append([]string{""}, more...), " ")}
 }
 
 // confirmPartial asks for partial when fewer than a majority of the
@@ -254,7 +260,7 @@ func signingKeyFor(l configstore.Local, local *config.Config) (string, error) {
 		}
 		f, err := cache.Files(head)
 		if err != nil {
-			return "", &ui.Problem{Hint: "the base version is not in the local store", Explain: "Run paisans config pull, which gathers it again.", Cause: err}
+			return "", &ui.Problem{Hint: "the base version is not in the local store", Explain: "Run paisans deployment pull, which gathers it again.", Cause: err}
 		}
 		if base, err = config.LoadBytes(f.Paisans); err != nil {
 			return "", err
@@ -324,8 +330,8 @@ func operatorsHolding(cfg *config.Config, held []string) map[string][]string {
 	return out
 }
 
-func runConfigPublish(args []string, stdin io.Reader, stdout io.Writer) error {
-	fs := newFlagSet("config publish", flag.ExitOnError)
+func runDeploymentPublish(args []string, stdin io.Reader, stdout io.Writer) error {
+	fs := newFlagSet("deployment publish", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, configHelp)
 	merge := fs.Bool("merge", false, "publish a version whose parents are every head, after merging them by hand")
@@ -335,7 +341,7 @@ func runConfigPublish(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return &ui.Problem{Hint: "config publish takes no argument", Explain: "Got " + strings.Join(fs.Args(), " ") + "."}
+		return &ui.Problem{Hint: "deployment publish takes no argument", Explain: "Got " + strings.Join(fs.Args(), " ") + "."}
 	}
 	ans, err := answers()
 	if err != nil {
@@ -433,10 +439,10 @@ func runConfigPublish(args []string, stdin io.Reader, stdout io.Writer) error {
 		s.Fail(err)
 		var rb *configstore.RollbackError
 		if errors.As(err, &rb) {
-			return &ui.Problem{Hint: "the sites' newest version is older than one seen here", Explain: rb.Error() + ". Nothing was published: a version on it would build on an old one. Find out why the newer version is gone; paisans config log shows what each site holds.", Cause: err}
+			return &ui.Problem{Hint: "the sites' newest version is older than one seen here", Explain: rb.Error() + ". Nothing was published: a version on it would build on an old one. Find out why the newer version is gone; paisans deployment log shows what each site holds.", Cause: err}
 		}
 		if errors.Is(err, configstore.ErrNoAnchor) {
-			return &ui.Problem{Hint: "no version to start trusting from", Explain: err.Error() + ". Run paisans config pull --root <sha>, or paisans operator register.", Cause: err}
+			return &ui.Problem{Hint: "no version to start trusting from", Explain: err.Error() + ". Run paisans deployment pull --root <sha>, or paisans operator register.", Cause: err}
 		}
 		return err
 	default:
@@ -446,8 +452,8 @@ func runConfigPublish(args []string, stdin io.Reader, stdout io.Writer) error {
 	return nil
 }
 
-func runConfigPull(args []string, stdin io.Reader, stdout io.Writer) error {
-	fs := newFlagSet("config pull", flag.ExitOnError)
+func runDeploymentPull(args []string, stdin io.Reader, stdout io.Writer) error {
+	fs := newFlagSet("deployment pull", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, configHelp)
 	root := fs.String("root", "", "pin this version as the root, the version trust starts from")
@@ -457,7 +463,7 @@ func runConfigPull(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return &ui.Problem{Hint: "config pull takes no argument", Explain: "Got " + strings.Join(fs.Args(), " ") + "."}
+		return &ui.Problem{Hint: "deployment pull takes no argument", Explain: "Got " + strings.Join(fs.Args(), " ") + "."}
 	}
 	ans, err := answers()
 	if err != nil {
@@ -489,7 +495,7 @@ func runConfigPull(args []string, stdin io.Reader, stdout io.Writer) error {
 		return forkProblem(g)
 	}
 	if len(g.Verdict.Heads) == 0 {
-		r.Result("the sites hold no version yet; paisans config publish makes the first")
+		r.Result("the sites hold no version yet; paisans deployment publish makes the first")
 		return nil
 	}
 	head := g.Verdict.Heads[0]
@@ -588,7 +594,7 @@ func pullOverEdits(r ui.Reporter, l configstore.Local, g configstore.Gathered, h
 	}
 	return &ui.Problem{
 		Hint:    "the local files have edits the sites' newest version lacks",
-		Explain: fmt.Sprintf("They were edited from %s, and the sites hold %s. %s Merge them by hand, then publish with paisans config publish --merge.", from, describe(g, head), where),
+		Explain: fmt.Sprintf("They were edited from %s, and the sites hold %s. %s Merge them by hand, then publish with paisans deployment publish --merge.", from, describe(g, head), where),
 	}
 }
 
@@ -707,8 +713,8 @@ func flatKeys(data []byte) (map[string]string, error) {
 	return out, nil
 }
 
-func runConfigLog(args []string, stdin io.Reader, stdout io.Writer) error {
-	fs := newFlagSet("config log", flag.ExitOnError)
+func runDeploymentLog(args []string, stdin io.Reader, stdout io.Writer) error {
+	fs := newFlagSet("deployment log", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, configHelp)
 	root := fs.String("root", "", "judge from this root, as if pinned, without recording it")
@@ -716,7 +722,7 @@ func runConfigLog(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return &ui.Problem{Hint: "config log takes no argument", Explain: "Got " + strings.Join(fs.Args(), " ") + "."}
+		return &ui.Problem{Hint: "deployment log takes no argument", Explain: "Got " + strings.Join(fs.Args(), " ") + "."}
 	}
 	l, err := workstationOf(*configPath)
 	if err != nil {
@@ -779,8 +785,8 @@ func runConfigLog(args []string, stdin io.Reader, stdout io.Writer) error {
 	return nil
 }
 
-func runConfigRecover(args []string, stdin io.Reader, stdout io.Writer) error {
-	fs := newFlagSet("config recover", flag.ExitOnError)
+func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) error {
+	fs := newFlagSet("deployment recover", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, configHelp)
 	var from pathList
@@ -793,21 +799,21 @@ func runConfigRecover(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return &ui.Problem{Hint: "config recover takes no argument", Explain: "Got " + strings.Join(fs.Args(), " ") + "."}
+		return &ui.Problem{Hint: "deployment recover takes no argument", Explain: "Got " + strings.Join(fs.Args(), " ") + "."}
 	}
 	ans, err := answers()
 	if err != nil {
 		return err
 	}
 	if len(from) == 0 {
-		return &ui.Problem{Hint: "config recover needs --from", Explain: "Name a host of the deployment with --from user@host[:port], Eg: --from admin@203.0.113.9; every site the recovered configuration names is reached after it."}
+		return &ui.Problem{Hint: "deployment recover needs --from", Explain: "Name a host of the deployment with --from user@host[:port], Eg: --from admin@203.0.113.9; every site the recovered configuration names is reached after it."}
 	}
 	l, err := workstationOf(*configPath)
 	if err != nil {
 		return err
 	}
 	if l.HasFiles() {
-		return &ui.Problem{Hint: "there are configuration files here already", Explain: "Recovery writes onto a workstation with nothing, so it never overwrites a file. Use paisans config pull where the files exist, or recover into an empty directory with --config."}
+		return &ui.Problem{Hint: "there are configuration files here already", Explain: "Recovery writes onto a workstation with nothing, so it never overwrites a file. Use paisans deployment pull where the files exist, or recover into an empty directory with --config."}
 	}
 	a, err := anchorFor(l, *root)
 	if err != nil {
@@ -879,6 +885,10 @@ func runConfigRecover(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	if err := recordPull(l, g, pin); err != nil {
 		return err
+	}
+	if files, err := l.Files(); err == nil {
+		key, _ := l.SigningKey()
+		saveVersion(r, l, head, g.Versions[head].Revision, files, key, "recovered into "+l.Dir)
 	}
 	r.Result("recovered %s into %s", describe(g, head), l.Dir)
 	return nil

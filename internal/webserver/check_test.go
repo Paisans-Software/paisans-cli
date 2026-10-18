@@ -235,7 +235,7 @@ func TestCheckFailsAnHTTPCallback(t *testing.T) {
 	w := good()
 	w.location = "https://id.example.org/authorize?redirect_uri=http%3A%2F%2Fhealth.example.org%2Flogin%2Foidc%2Fcallback"
 	r := result(t, run(t, w, external(t, "127.0.0.1:8480")), webserver.CheckSignIn)
-	if r.OK || !strings.Contains(r.Detail, "http://health.example.org/login/oidc/callback") || !strings.Contains(r.Fix, "paisans apply --site watch") {
+	if r.OK || !strings.Contains(r.Detail, "http://health.example.org/login/oidc/callback") || !strings.Contains(r.Fix, "paisans deployment apply --site watch") {
 		t.Fatalf("%+v", r)
 	}
 }

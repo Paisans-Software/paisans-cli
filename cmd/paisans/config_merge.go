@@ -119,7 +119,7 @@ func pullMergingSecrets(r ui.Reporter, l configstore.Local, g configstore.Gather
 	if err := recordPull(l, g, root); err != nil {
 		return true, err
 	}
-	r.Result("merged the local secrets into %s; paisans config publish makes the merge a version", describe(g, head))
+	r.Result("merged the local secrets into %s; paisans deployment publish makes the merge a version", describe(g, head))
 	return true, nil
 }
 

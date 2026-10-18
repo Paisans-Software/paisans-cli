@@ -48,7 +48,7 @@ func Mesh(cfg *config.Config, probes []MeshProbe) []Finding {
 						"Every service on the site binds its mesh address, which exists only while the interface is up, so nothing on this site can reach another one.",
 						"recover:",
 						journalAdvice(iface, p.Site, d.WireGuardUnit()),
-						fmt.Sprintf("  2. `paisans apply --site %s --execute` starts it and enables it at boot.", p.Site),
+						fmt.Sprintf("  2. `paisans deployment apply --site %s --execute` starts it and enables it at boot.", p.Site),
 					}})
 			default:
 				out = append(out, Finding{Section: SectionMesh, Level: OK, Line: fmt.Sprintf("%s: %s is up", p.Site, iface)})

@@ -474,7 +474,7 @@ func WitnessFirstRefusal(cfg *config.Config, plan *Plan, founding bool, running 
 	}
 	var commands []string
 	for _, name := range waiting {
-		commands = append(commands, "paisans apply --site "+name)
+		commands = append(commands, "paisans deployment apply --site "+name)
 	}
 	return &ui.Problem{
 		Hint: fmt.Sprintf("%s would found etcd while the witness %s runs none", plan.Site, strings.Join(waiting, ", ")),

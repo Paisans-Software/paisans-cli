@@ -30,7 +30,7 @@ import (
 // because an app may pin an older image than the cluster's (the fixture's
 // Synapse runs postgres:17-trixie beside a cluster at 18), and the mount has
 // to match what the container runs. Any other image falls back to the
-// cluster's version; `paisans apply` checks the result against what that
+// cluster's version; `paisans deployment apply` checks the result against what that
 // image really declares.
 func PostgresDataMount(image, clusterMajor string) string {
 	major := clusterMajor

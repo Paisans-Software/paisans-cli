@@ -33,7 +33,7 @@ var update = flag.Bool("update", false, "rewrite the golden tree from the curren
 // This is not belt and braces. Build does not validate, so for six tasks the
 // fixture declared two apps under cluster placement that
 // cluster-placement-without-a-cluster refuses outright, and the golden tree
-// grew routing for a shape `paisans apply` would never have produced. A golden
+// grew routing for a shape `paisans deployment apply` would never have produced. A golden
 // file is only a specification of what an operator receives if the input is
 // something an operator could have written, so the check belongs here, ahead of
 // every test, rather than in one test somebody might not run.

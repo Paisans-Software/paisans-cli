@@ -91,21 +91,21 @@ var (
 		"dns: dns init",
 	}
 	foundingPhase = []string{
-		"founding: apply --site vm",
-		"founding: apply --site home-a",
-		"founding: apply --site home-b",
+		"founding: deployment apply --site vm",
+		"founding: deployment apply --site home-a",
+		"founding: deployment apply --site home-b",
 	}
 	passTwoPhase = []string{
-		"pass two: apply --site home-a",
-		"pass two: apply --site home-b",
-		"pass two: apply --site vm",
-		"pass two: apply --site watch",
+		"pass two: deployment apply --site home-a",
+		"pass two: deployment apply --site home-b",
+		"pass two: deployment apply --site vm",
+		"pass two: deployment apply --site watch",
 	}
 )
 
 // blankPlan is the fixture's plan with no member founded.
 func blankPlan() []string {
-	return slices.Concat(hostsAndDNS, foundingPhase, []string{"other sites: apply --site watch", "storage: storage add"}, passTwoPhase)
+	return slices.Concat(hostsAndDNS, foundingPhase, []string{"other sites: deployment apply --site watch", "storage: storage add"}, passTwoPhase)
 }
 
 // commands is plan lines as the commands a run runs: no phase, no init,
@@ -137,7 +137,7 @@ func initial(names ...string) render.EtcdInitial {
 // A member the founded cluster's initial-cluster does not list joins it.
 func TestConvergeJoinsAMemberTheClusterDoesNotList(t *testing.T) {
 	steps := convergePlan(fixture(t), convergeState{Initial: map[string]render.EtcdInitial{"home-a": initial("home-a", "vm"), "vm": initial("home-a", "vm")}})
-	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: apply --site home-b", "other sites: apply --site vm", "other sites: apply --site watch", "other sites: apply --site home-a", "storage: storage add"}, passTwoPhase)...)
+	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: deployment apply --site home-b", "other sites: deployment apply --site vm", "other sites: deployment apply --site watch", "other sites: deployment apply --site home-a", "storage: storage add"}, passTwoPhase)...)
 }
 
 // A site declared [data, apps] joining beside a gateway outside etcd: the
@@ -154,10 +154,10 @@ func TestConvergeJoinsADataAndAppsSiteBeforeAGatewayOutsideEtcd(t *testing.T) {
 	steps := convergePlan(cfg, convergeState{Initial: map[string]render.EtcdInitial{"home-a": initial("home-a")}})
 	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{
 		"joining: site add home-b",
-		"other sites: apply --site home-b",
-		"other sites: apply --site vm",
-		"other sites: apply --site watch",
-		"other sites: apply --site home-a",
+		"other sites: deployment apply --site home-b",
+		"other sites: deployment apply --site vm",
+		"other sites: deployment apply --site watch",
+		"other sites: deployment apply --site home-a",
 		"storage: storage add",
 	}, passTwoPhase)...)
 }
@@ -173,8 +173,8 @@ func TestConvergeJoinsADataOnlySiteThroughItsSiteAdd(t *testing.T) {
 	steps := convergePlan(cfg, convergeState{Initial: map[string]render.EtcdInitial{"home-a": initial("home-a", "vm"), "vm": initial("home-a", "vm")}})
 	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{
 		"joining: site add home-b",
-		"other sites: apply --site watch",
-		"other sites: apply --site home-a",
+		"other sites: deployment apply --site watch",
+		"other sites: deployment apply --site home-a",
 		"storage: storage add",
 	}, passTwoPhase)...)
 }
@@ -185,7 +185,7 @@ func TestConvergeJoinsADataOnlySiteThroughItsSiteAdd(t *testing.T) {
 // add of its own, which would refuse it as not a data site and stop the run.
 func TestConvergeJoinsAWitnessThroughTheDataSitesSiteAdd(t *testing.T) {
 	steps := convergePlan(fixture(t), convergeState{Initial: map[string]render.EtcdInitial{"home-a": initial("home-a")}})
-	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: apply --site home-b", "other sites: apply --site vm", "other sites: apply --site watch", "other sites: apply --site home-a", "storage: storage add"}, passTwoPhase)...)
+	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: deployment apply --site home-b", "other sites: deployment apply --site vm", "other sites: deployment apply --site watch", "other sites: deployment apply --site home-a", "storage: storage add"}, passTwoPhase)...)
 }
 
 // A witness joining with no data site beside it is still planned, as its own
@@ -194,14 +194,14 @@ func TestConvergeJoinsAWitnessThroughTheDataSitesSiteAdd(t *testing.T) {
 func TestConvergePlansAWitnessJoiningAloneAsItsSiteAdd(t *testing.T) {
 	founded := initial("home-a", "home-b")
 	steps := convergePlan(fixture(t), convergeState{Initial: map[string]render.EtcdInitial{"home-a": founded, "home-b": founded}})
-	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"joining: site add vm", "other sites: apply --site watch", "other sites: apply --site home-a", "other sites: apply --site home-b", "storage: storage add"}, passTwoPhase)...)
+	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"joining: site add vm", "other sites: deployment apply --site watch", "other sites: deployment apply --site home-a", "other sites: deployment apply --site home-b", "storage: storage add"}, passTwoPhase)...)
 }
 
 // A member a founding record lists is still being founded, though another
 // member has its record: it is applied, not added.
 func TestConvergeResumesAFoundingAfterAFailure(t *testing.T) {
 	steps := convergePlan(fixture(t), convergeState{Initial: map[string]render.EtcdInitial{"vm": initial("home-a", "home-b", "vm")}})
-	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"other sites: apply --site vm", "founding: apply --site home-a", "founding: apply --site home-b", "other sites: apply --site watch", "storage: storage add"}, passTwoPhase)...)
+	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{"other sites: deployment apply --site vm", "founding: deployment apply --site home-a", "founding: deployment apply --site home-b", "other sites: deployment apply --site watch", "storage: storage add"}, passTwoPhase)...)
 }
 
 // A witness that has its record, though no data member it lists has one, is
@@ -209,8 +209,8 @@ func TestConvergeResumesAFoundingAfterAFailure(t *testing.T) {
 func TestConvergeAppliesARecordedWitnessBeforeTheFoundingMembers(t *testing.T) {
 	steps := convergePlan(fixture(t), convergeState{Initial: map[string]render.EtcdInitial{"vm": initial("home-a", "home-b", "vm")}})
 	lines := titles(steps)
-	witness := slices.IndexFunc(lines, func(l string) bool { return strings.HasSuffix(l, "apply --site vm") })
-	for _, data := range []string{"founding: apply --site home-a", "founding: apply --site home-b"} {
+	witness := slices.IndexFunc(lines, func(l string) bool { return strings.HasSuffix(l, "deployment apply --site vm") })
+	for _, data := range []string{"founding: deployment apply --site home-a", "founding: deployment apply --site home-b"} {
 		if i := slices.Index(lines, data); i < 0 || witness < 0 || witness > i {
 			t.Errorf("the witness's apply does not come before %q:\n%s", data, strings.Join(lines, "\n"))
 		}
@@ -228,7 +228,7 @@ func TestConvergeAppliesEachSiteOnceBeforePassTwo(t *testing.T) {
 	steps := convergePlan(fixture(t), convergeState{})
 	seen := map[string]int{}
 	for _, s := range steps {
-		if s.Stage != stagePassTwo && len(s.Args) > 0 && s.Args[0] == "apply" {
+		if s.Stage != stagePassTwo && len(s.Args) > 0 && isApply(s.Args) {
 			seen[s.Title]++
 		}
 	}
@@ -243,17 +243,17 @@ func TestConvergeWithoutEtcdAppliesEverySiteInPhaseThree(t *testing.T) {
 	cfg := fixture(t)
 	cfg.Etcd.Members = nil
 	samePlan(t, convergePlan(cfg, convergeState{}), slices.Concat(hostsAndDNS, []string{
-		"other sites: apply --site home-a",
-		"other sites: apply --site home-b",
-		"other sites: apply --site vm",
-		"other sites: apply --site watch",
+		"other sites: deployment apply --site home-a",
+		"other sites: deployment apply --site home-b",
+		"other sites: deployment apply --site vm",
+		"other sites: deployment apply --site watch",
 		"storage: storage add",
 	}, passTwoPhase)...)
 }
 
 func TestConvergeStorageFollowsTheGarageSites(t *testing.T) {
 	cfg := fixture(t)
-	before := slices.Concat(hostsAndDNS, foundingPhase, []string{"other sites: apply --site watch"})
+	before := slices.Concat(hostsAndDNS, foundingPhase, []string{"other sites: deployment apply --site watch"})
 	cfg.Storage.Garage.Sites = []string{"home-a"}
 	samePlan(t, convergePlan(cfg, convergeState{}), slices.Concat(before, []string{"storage: storage init --site home-a"}, passTwoPhase)...)
 	cfg.Storage.Garage.Sites = nil
@@ -270,8 +270,8 @@ func TestConvergeAppliesAFoundedGarageSiteBeforeStorage(t *testing.T) {
 	founded := initial("home-a", "home-b", "vm")
 	steps := convergePlan(cfg, convergeState{Initial: map[string]render.EtcdInitial{"home-a": founded, "home-b": founded, "vm": founded}})
 	samePlan(t, steps, slices.Concat(hostsAndDNS, []string{
-		"other sites: apply --site watch",
-		"other sites: apply --site home-a",
+		"other sites: deployment apply --site watch",
+		"other sites: deployment apply --site home-a",
 		"storage: storage init --site home-a",
 	}, passTwoPhase)...)
 }
@@ -310,7 +310,7 @@ func gatewayOutsideEtcd(monitor bool, passTwo ...string) []string {
 	sites := []string{"edge", "site-a"}
 	if monitor {
 		sites = append(sites, "site-b")
-		monitored = []string{"other sites: apply --site site-b"}
+		monitored = []string{"other sites: deployment apply --site site-b"}
 	}
 	for _, s := range sites {
 		hosts = append(hosts, "hosts: site prepare --site "+s)
@@ -318,13 +318,13 @@ func gatewayOutsideEtcd(monitor bool, passTwo ...string) []string {
 	}
 	var last []string
 	for _, s := range passTwo {
-		last = append(last, "pass two: apply --site "+s)
+		last = append(last, "pass two: deployment apply --site "+s)
 	}
 	return slices.Concat(hosts, pulls, []string{
 		"dns: dns init",
-		"other sites: apply --site edge --hold-apps",
-		"founding: apply --site site-a",
-		"other sites: apply --site edge",
+		"other sites: deployment apply --site edge --hold-apps",
+		"founding: deployment apply --site site-a",
+		"other sites: deployment apply --site edge",
 	}, monitored, last)
 }
 
@@ -442,12 +442,12 @@ func TestConvergeFoundsAWitnessGatewayFirstOnTwoDataSites(t *testing.T) {
 		"pull: pull --site site-a",
 		"pull: pull --site site-b",
 		"dns: dns init",
-		"founding: apply --site edge",
-		"founding: apply --site site-a",
-		"founding: apply --site site-b",
-		"pass two: apply --site site-a",
-		"pass two: apply --site site-b",
-		"pass two: apply --site edge",
+		"founding: deployment apply --site edge",
+		"founding: deployment apply --site site-a",
+		"founding: deployment apply --site site-b",
+		"pass two: deployment apply --site site-a",
+		"pass two: deployment apply --site site-b",
+		"pass two: deployment apply --site edge",
 	)
 }
 
@@ -461,8 +461,8 @@ func TestConvergeFoundsASingleSite(t *testing.T) {
 		"hosts: site prepare --site solo",
 		"pull: pull --site solo",
 		"dns: dns init",
-		"founding: apply --site solo",
-		"pass two: apply --site solo",
+		"founding: deployment apply --site solo",
+		"pass two: deployment apply --site solo",
 	)
 }
 
@@ -590,7 +590,7 @@ func TestConvergeDryRunRunsNothing(t *testing.T) {
 }
 
 func TestTheFoundingStopDoesNotStopTheRun(t *testing.T) {
-	ran := fakeConverge(t, map[string]error{"apply --site home-a": foundingWait("home-a", "home-b")})
+	ran := fakeConverge(t, map[string]error{"deployment apply --site home-a": foundingWait("home-a", "home-b")})
 	if err := converge(t, "--execute"); err != nil {
 		t.Fatalf("the run stopped at the founding stop: %v", err)
 	}
@@ -625,7 +625,7 @@ func waitsFor(t *testing.T, site, leader string, n int) {
 		if err := saved(args); err != nil {
 			return err
 		}
-		if title := strings.Join(args, " "); strings.HasPrefix(title, "apply --site "+site+" ") {
+		if title := strings.Join(args, " "); strings.HasPrefix(title, "deployment apply --site "+site+" ") {
 			if runs++; runs <= n {
 				return databasesWait(site, leader)
 			}
@@ -640,14 +640,14 @@ func waitsFor(t *testing.T, site, leader string, n int) {
 // stop ends the run, and pass two, home-a first, creates the databases and
 // then starts home-b's apps.
 func TestTheDatabasesWaitDoesNotStopTheRun(t *testing.T) {
-	ran := fakeConverge(t, map[string]error{"apply --site home-a": foundingWait("home-a", "home-b")})
+	ran := fakeConverge(t, map[string]error{"deployment apply --site home-a": foundingWait("home-a", "home-b")})
 	waitsFor(t, "home-b", "home-a", 1)
 	rec := recordConverge(t)
 	if err := converge(t, "--execute"); err != nil {
 		t.Fatalf("the run stopped at the databases wait: %v", err)
 	}
 	sameLines(t, *ran, commands(blankPlan()))
-	if !rec.Has("detail", "✓ apply --site home-b: paused until home-a creates its databases") || rec.Has("fail", "") || !rec.Has("done", "home-b") {
+	if !rec.Has("detail", "✓ deployment apply --site home-b: paused until home-a creates its databases") || rec.Has("fail", "") || !rec.Has("done", "home-b") {
 		t.Errorf("the databases wait read as a failure:\n%s", rec.Lines())
 	}
 }
@@ -662,7 +662,7 @@ func TestTheDatabasesWaitOnTheLastVisitIsAppliedAgain(t *testing.T) {
 	if err := converge(t, "--execute"); err != nil {
 		t.Fatalf("the run stopped at the databases wait: %v", err)
 	}
-	sameLines(t, *ran, append(commands(blankPlan()), "apply --site home-a"))
+	sameLines(t, *ran, append(commands(blankPlan()), "deployment apply --site home-a"))
 	if rec.Has("fail", "") || !rec.Has("done", "home-a") {
 		t.Errorf("home-a's line did not end done:\n%s", rec.Lines())
 	}
@@ -674,16 +674,16 @@ func TestTheDatabasesWaitAfterEveryStepStopsTheRun(t *testing.T) {
 	ran := fakeConverge(t, nil)
 	waitsFor(t, "home-a", "home-b", 3)
 	err := converge(t, "--execute")
-	if !errors.Is(err, apply.ErrDatabasesWait) || !strings.Contains(err.Error(), "apply --site home-a") || !strings.Contains(err.Error(), "Run paisans apply --execute again to resume") {
+	if !errors.Is(err, apply.ErrDatabasesWait) || !strings.Contains(err.Error(), "deployment apply --site home-a") || !strings.Contains(err.Error(), "Run paisans deployment apply --execute again to resume") {
 		t.Fatalf("err = %v", err)
 	}
-	sameLines(t, *ran, append(commands(blankPlan()), "apply --site home-a"))
+	sameLines(t, *ran, append(commands(blankPlan()), "deployment apply --site home-a"))
 }
 
 func TestAFailingStepStopsTheRun(t *testing.T) {
-	ran := fakeConverge(t, map[string]error{"apply --site vm": errors.New("vm: boom")})
+	ran := fakeConverge(t, map[string]error{"deployment apply --site vm": errors.New("vm: boom")})
 	err := converge(t, "--execute")
-	if err == nil || !strings.Contains(err.Error(), "apply --site vm") || !strings.Contains(err.Error(), "Run paisans apply --execute again to resume") {
+	if err == nil || !strings.Contains(err.Error(), "deployment apply --site vm") || !strings.Contains(err.Error(), "Run paisans deployment apply --execute again to resume") {
 		t.Fatalf("err = %v", err)
 	}
 	sameLines(t, *ran, commands(slices.Concat(hostsAndDNS, foundingPhase[:1])))
@@ -800,7 +800,7 @@ func TestConvergeReplansAfterInit(t *testing.T) {
 	if err := converge(t, "--execute"); err != nil {
 		t.Fatal(err)
 	}
-	sameLines(t, *ran, append([]string{"init"}, commands(slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: apply --site home-b", "other sites: apply --site vm", "other sites: apply --site watch", "other sites: apply --site home-a", "storage: storage add"}, passTwoPhase))...))
+	sameLines(t, *ran, append([]string{"init"}, commands(slices.Concat(hostsAndDNS, []string{"joining: site add home-b", "other sites: deployment apply --site home-b", "other sites: deployment apply --site vm", "other sites: deployment apply --site watch", "other sites: deployment apply --site home-a", "storage: storage add"}, passTwoPhase))...))
 }
 
 // The dry run names what is left, the declared operators among it.
@@ -832,7 +832,7 @@ func TestConvergePassesItsFlagsToEachStep(t *testing.T) {
 		if !slices.Contains(args, "-v") {
 			t.Errorf("no -v: %s", got)
 		}
-		isApply := args[0] == "apply"
+		isApply := isApply(args)
 		if slices.Contains(args, "--keep-images") != isApply {
 			t.Errorf("--keep-images where apply's flags are not, or missing where they are: %s", got)
 		}
@@ -865,15 +865,15 @@ func TestConvergeFoundsAMonitorMemberAndAppliesItLast(t *testing.T) {
 		"pull: pull --site vm",
 		"pull: pull --site watch",
 		"dns: dns init",
-		"founding: apply --site vm",
-		"founding: apply --site home-a",
-		"founding: apply --site home-b",
-		"founding: apply --site watch",
+		"founding: deployment apply --site vm",
+		"founding: deployment apply --site home-a",
+		"founding: deployment apply --site home-b",
+		"founding: deployment apply --site watch",
 		"storage: storage add",
-		"pass two: apply --site home-a",
-		"pass two: apply --site home-b",
-		"pass two: apply --site vm",
-		"pass two: apply --site watch",
+		"pass two: deployment apply --site home-a",
+		"pass two: deployment apply --site home-b",
+		"pass two: deployment apply --site vm",
+		"pass two: deployment apply --site watch",
 	}, "\n")
 	if got != want {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
@@ -891,9 +891,9 @@ func TestConvergeStopsWithTheHintThatFits(t *testing.T) {
 		err  error
 		want string
 	}{
-		{"dns init", conflict, "Resolve each DNS conflict above as it says, then run paisans apply --execute again."},
-		{"storage add", waiting, "Nothing failed: Garage is still moving data. Run paisans apply --execute again later."},
-		{"apply --site vm", errors.New("vm: boom"), "Run paisans apply --execute again to resume."},
+		{"dns init", conflict, "Resolve each DNS conflict above as it says, then run paisans deployment apply --execute again."},
+		{"storage add", waiting, "Nothing failed: Garage is still moving data. Run paisans deployment apply --execute again later."},
+		{"deployment apply --site vm", errors.New("vm: boom"), "Run paisans deployment apply --execute again to resume."},
 	} {
 		fakeConverge(t, map[string]error{tc.step: tc.err})
 		err := converge(t, "--execute")
@@ -916,14 +916,14 @@ func TestConvergeStopsWithTheHintThatFits(t *testing.T) {
 // apply takes a site only when given --site, so nothing says it needs one:
 // not its usage, and not the commands that compare themselves with it.
 func TestNothingSaysApplyTakesOneSite(t *testing.T) {
-	entry := findCommand("apply").detail
+	entry := findCommand("deployment apply").detail
 	if !strings.Contains(entry, "Without --site") {
 		t.Errorf("apply's usage entry does not say what it does without --site:%s", entry)
 	}
 	for name, run := range map[string]func([]string) error{"storage init": runStorageInit, "prune": runPrune} {
 		var err error
 		captureStdout(t, func() { err = run([]string{"--config", fixtureConfig()}) })
-		if err == nil || !strings.Contains(err.Error(), "the same reason apply --site takes one") {
+		if err == nil || !strings.Contains(err.Error(), "the same reason deployment apply --site takes one") {
 			t.Errorf("%s: err = %v", name, err)
 		}
 	}
@@ -947,7 +947,7 @@ func TestEveryPlannedStepParses(t *testing.T) {
 	}
 	// A pull is not a command: the run pulls a site's images itself.
 	steps = slices.DeleteFunc(steps, func(s convergeStep) bool { return s.Stage == stagePull })
-	for _, want := range []string{"init", "site prepare", "apply --site", "site add", "storage init", "storage add", "dns init"} {
+	for _, want := range []string{"init", "site prepare", "deployment apply", "site add", "storage init", "storage add", "dns init"} {
 		if !commands[want] {
 			t.Fatalf("the plans hold no %s step: %v", want, commands)
 		}
@@ -1023,15 +1023,15 @@ func TestConvergeJoinsADerivedMember(t *testing.T) {
 		"pull: pull --site watch",
 		"dns: dns init",
 		"joining: site add home-c",
-		"other sites: apply --site watch",
-		"other sites: apply --site home-a",
-		"other sites: apply --site home-b",
+		"other sites: deployment apply --site watch",
+		"other sites: deployment apply --site home-a",
+		"other sites: deployment apply --site home-b",
 		"storage: storage add",
-		"pass two: apply --site home-a",
-		"pass two: apply --site home-b",
-		"pass two: apply --site home-c",
-		"pass two: apply --site vm",
-		"pass two: apply --site watch",
+		"pass two: deployment apply --site home-a",
+		"pass two: deployment apply --site home-b",
+		"pass two: deployment apply --site home-c",
+		"pass two: deployment apply --site vm",
+		"pass two: deployment apply --site watch",
 	)
 }
 
@@ -1088,12 +1088,12 @@ func TestSiteRemoveUsageNamesForceAndSSH(t *testing.T) {
 	}
 }
 
-// apply --site's usage entry names every flag about one site.
+// deployment apply --site's usage entry names every flag about one site.
 func TestApplySiteUsageNamesEveryFlag(t *testing.T) {
-	entry := findCommand("apply").usage[1]
+	entry := findCommand("deployment apply").usage[1]
 	for _, flag := range []string{"--ssh", "--only", "--overwrite", "--recreate", "--min-free", "--keep-images", "--execute"} {
 		if !strings.Contains(entry, flag) {
-			t.Errorf("apply --site's usage leaves out %s:\n%s", flag, entry)
+			t.Errorf("deployment apply --site's usage leaves out %s:\n%s", flag, entry)
 		}
 	}
 }
@@ -1375,7 +1375,7 @@ func byLine(want []string) []string {
 		switch {
 		case f[0] == "storage":
 			return "storage"
-		case f[0] == "apply" || (f[0] == "site" && f[1] == "add"):
+		case f[0] == "deployment" || (f[0] == "site" && f[1] == "add"):
 			return f[len(f)-1]
 		}
 		return ""
@@ -1438,7 +1438,7 @@ func TestConvergeDryRunMarksPendingWaitingAndFailed(t *testing.T) {
 	fakeConverge(t, nil)
 	checked := fakeChecks(t, map[string]any{
 		"site prepare --site home-b": "docker, firewall",
-		"apply --site vm":            "5 changes",
+		"deployment apply --site vm": "5 changes",
 		"site prepare --site watch":  errors.New("ssh: connect to host watch.local: timed out\nmore detail"),
 		"dns init":                   "2 records to create",
 	})
@@ -1457,17 +1457,17 @@ func TestConvergeDryRunMarksPendingWaitingAndFailed(t *testing.T) {
 		"✓ pull --site home-a: nothing to pull",
 		"✓ pull --site vm: nothing to pull",
 		"○ dns init: 2 records to create",
-		"○ apply --site vm: 5 changes",
-		"· apply --site home-a: after apply --site vm",
-		"· apply --site home-b: after site prepare --site home-b",
-		"· apply --site watch: after site prepare --site watch",
+		"○ deployment apply --site vm: 5 changes",
+		"· deployment apply --site home-a: after deployment apply --site vm",
+		"· deployment apply --site home-b: after site prepare --site home-b",
+		"· deployment apply --site watch: after site prepare --site watch",
 		"· storage add: after site prepare --site home-b",
-		"· apply --site home-a: after the earlier apply --site home-a",
-		"· apply --site home-b: after site prepare --site home-b",
-		"· apply --site vm: after the earlier apply --site vm",
-		"· apply --site watch: after site prepare --site watch",
+		"· deployment apply --site home-a: after the earlier deployment apply --site home-a",
+		"· deployment apply --site home-b: after site prepare --site home-b",
+		"· deployment apply --site vm: after the earlier deployment apply --site vm",
+		"· deployment apply --site watch: after site prepare --site watch",
 	}))
-	for _, never := range []string{"apply --site home-a", "apply --site home-b", "apply --site watch", "storage add"} {
+	for _, never := range []string{"deployment apply --site home-a", "deployment apply --site home-b", "deployment apply --site watch", "storage add"} {
 		if slices.Contains(*checked, never) {
 			t.Errorf("%s was checked while it waits", never)
 		}
@@ -1525,14 +1525,14 @@ func TestConvergeDryRunChecksAFoundedMemberInPassTwo(t *testing.T) {
 		"✓ pull --site vm: nothing to pull",
 		"✓ pull --site watch: nothing to pull",
 		"✓ dns init",
-		"✓ apply --site watch",
-		"✓ apply --site home-a",
-		"✓ apply --site home-b",
+		"✓ deployment apply --site watch",
+		"✓ deployment apply --site home-a",
+		"✓ deployment apply --site home-b",
 		"○ storage add: 1 stage",
-		"· apply --site home-a: after storage add",
-		"· apply --site home-b: after storage add",
-		"· apply --site vm: after storage add",
-		"· apply --site watch: after storage add",
+		"· deployment apply --site home-a: after storage add",
+		"· deployment apply --site home-b: after storage add",
+		"· deployment apply --site vm: after storage add",
+		"· deployment apply --site watch: after storage add",
 	}))
 	if !slices.Contains(*checked, "storage add") {
 		t.Errorf("storage add not checked: %v", *checked)
@@ -1559,7 +1559,7 @@ func TestCheckStepIsQuietAndHoldsTheRunsSpinner(t *testing.T) {
 		r.Result("Nothing changed.")
 		return nil
 	}
-	summary, _, err := checkStep(h, []string{"apply"}, run)
+	summary, _, err := checkStep(h, []string{"deployment", "apply"}, run)
 	if err != nil || summary != "8 changes" {
 		t.Fatalf("summary %q, err %v", summary, err)
 	}
@@ -1626,7 +1626,7 @@ func TestApplyDryRunSaysWhatItWouldChangeOrRefuse(t *testing.T) {
 	recordConverge(t)
 	quietSSH(t)
 	o := convergeOptions{Config: fixtureConfig(), Secrets: fixtureSecretsPath()}
-	args := []string{"apply", "--site", "watch"}
+	args := []string{"deployment", "apply", "--site", "watch"}
 	summary, _, err := checkStep(ui.Discard, convergeFlags(args, o), runStep)
 	if err != nil || !regexp.MustCompile(`^[1-9][0-9]* changes?$`).MatchString(summary) {
 		t.Errorf("summary %q, err %v", summary, err)
@@ -1687,34 +1687,34 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 				"✓ site prepare --site home-a", "✓ site prepare --site home-b", "✓ site prepare --site vm", "✓ site prepare --site watch",
 				"✓ dns init",
 				"○ site add home-b: 4 stages",
-				"· apply --site home-b: after site add home-b",
-				"✓ apply --site vm",
-				"✓ apply --site watch",
-				"✓ apply --site home-a",
+				"· deployment apply --site home-b: after site add home-b",
+				"✓ deployment apply --site vm",
+				"✓ deployment apply --site watch",
+				"✓ deployment apply --site home-a",
 				"· storage add: after site add home-b",
-				"· apply --site home-a: after storage add",
-				"· apply --site home-b: after site add home-b",
-				"· apply --site vm: after storage add",
-				"· apply --site watch: after storage add",
+				"· deployment apply --site home-a: after storage add",
+				"· deployment apply --site home-b: after site add home-b",
+				"· deployment apply --site vm: after storage add",
+				"· deployment apply --site watch: after storage add",
 			},
 		},
 		{
 			name:     "a recorded witness",
 			edit:     func(*config.Config) {},
 			recorded: map[string]render.EtcdInitial{"vm": initial("home-a", "home-b", "vm")},
-			found:    map[string]any{"apply --site vm": "1 change"},
+			found:    map[string]any{"deployment apply --site vm": "1 change"},
 			want: []string{
 				"✓ site prepare --site home-a", "✓ site prepare --site home-b", "✓ site prepare --site vm", "✓ site prepare --site watch",
 				"✓ dns init",
-				"○ apply --site vm: 1 change",
-				"· apply --site home-a: after apply --site vm",
-				"· apply --site home-b: after apply --site vm",
-				"✓ apply --site watch",
-				"· storage add: after apply --site home-a",
-				"· apply --site home-a: after the earlier apply --site home-a",
-				"· apply --site home-b: after the earlier apply --site home-b",
-				"· apply --site vm: after the earlier apply --site vm",
-				"· apply --site watch: after storage add",
+				"○ deployment apply --site vm: 1 change",
+				"· deployment apply --site home-a: after deployment apply --site vm",
+				"· deployment apply --site home-b: after deployment apply --site vm",
+				"✓ deployment apply --site watch",
+				"· storage add: after deployment apply --site home-a",
+				"· deployment apply --site home-a: after the earlier deployment apply --site home-a",
+				"· deployment apply --site home-b: after the earlier deployment apply --site home-b",
+				"· deployment apply --site vm: after the earlier deployment apply --site vm",
+				"· deployment apply --site watch: after storage add",
 			},
 		},
 		{
@@ -1723,19 +1723,19 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 				cfg.Storage.Garage.Sites = []string{"home-a"}
 				cfg.Storage.Garage.Replication = 1
 			},
-			found: map[string]any{"apply --site home-b": "2 changes", "apply --site home-a": "3 changes"},
+			found: map[string]any{"deployment apply --site home-b": "2 changes", "deployment apply --site home-a": "3 changes"},
 			want: []string{
 				"✓ site prepare --site home-a", "✓ site prepare --site home-b", "✓ site prepare --site vm", "✓ site prepare --site watch",
 				"✓ dns init",
-				"✓ apply --site vm",
-				"○ apply --site home-a: 3 changes",
-				"○ apply --site home-b: 2 changes",
-				"✓ apply --site watch",
-				"· storage init --site home-a: after apply --site home-a",
-				"· apply --site home-a: after the earlier apply --site home-a",
-				"· apply --site home-b: after the earlier apply --site home-b",
-				"· apply --site vm: after storage init --site home-a",
-				"· apply --site watch: after storage init --site home-a",
+				"✓ deployment apply --site vm",
+				"○ deployment apply --site home-a: 3 changes",
+				"○ deployment apply --site home-b: 2 changes",
+				"✓ deployment apply --site watch",
+				"· storage init --site home-a: after deployment apply --site home-a",
+				"· deployment apply --site home-a: after the earlier deployment apply --site home-a",
+				"· deployment apply --site home-b: after the earlier deployment apply --site home-b",
+				"· deployment apply --site vm: after storage init --site home-a",
+				"· deployment apply --site watch: after storage init --site home-a",
 			},
 		},
 		{
@@ -1745,15 +1745,15 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 			want: []string{
 				"✓ site prepare --site home-a", "✓ site prepare --site home-b", "○ site prepare --site vm: ssh keys", "✓ site prepare --site watch",
 				"✓ dns init",
-				"✓ apply --site home-a",
-				"✓ apply --site home-b",
-				"· apply --site vm: after site prepare --site vm",
-				"✓ apply --site watch",
+				"✓ deployment apply --site home-a",
+				"✓ deployment apply --site home-b",
+				"· deployment apply --site vm: after site prepare --site vm",
+				"✓ deployment apply --site watch",
 				"✓ storage add",
-				"✓ apply --site home-a",
-				"✓ apply --site home-b",
-				"· apply --site vm: after site prepare --site vm",
-				"✓ apply --site watch",
+				"✓ deployment apply --site home-a",
+				"✓ deployment apply --site home-b",
+				"· deployment apply --site vm: after site prepare --site vm",
+				"✓ deployment apply --site watch",
 			},
 		},
 		{
@@ -1768,36 +1768,36 @@ func TestConvergeDryRunWaitsFollowTheDeployment(t *testing.T) {
 					cfg.Apps[name] = app
 				}
 			},
-			found: map[string]any{"apply --site watch": "1 change"},
+			found: map[string]any{"deployment apply --site watch": "1 change"},
 			want: []string{
 				"✓ site prepare --site home-a", "✓ site prepare --site home-b", "✓ site prepare --site vm", "✓ site prepare --site watch",
 				"✓ dns init",
-				"✓ apply --site vm",
-				"✓ apply --site home-a",
-				"✓ apply --site home-b",
-				"○ apply --site watch: 1 change",
-				"✓ apply --site home-a",
-				"✓ apply --site home-b",
-				"✓ apply --site vm",
-				"· apply --site watch: after the earlier apply --site watch",
+				"✓ deployment apply --site vm",
+				"✓ deployment apply --site home-a",
+				"✓ deployment apply --site home-b",
+				"○ deployment apply --site watch: 1 change",
+				"✓ deployment apply --site home-a",
+				"✓ deployment apply --site home-b",
+				"✓ deployment apply --site vm",
+				"· deployment apply --site watch: after the earlier deployment apply --site watch",
 			},
 		},
 		{
 			name:  "a monitor in etcd.members",
 			edit:  func(cfg *config.Config) { cfg.Etcd.Members = []string{"home-a", "home-b", "vm", "watch"} },
-			found: map[string]any{"apply --site vm": "6 changes"},
+			found: map[string]any{"deployment apply --site vm": "6 changes"},
 			want: []string{
 				"✓ site prepare --site home-a", "✓ site prepare --site home-b", "✓ site prepare --site vm", "✓ site prepare --site watch",
 				"✓ dns init",
-				"○ apply --site vm: 6 changes",
-				"· apply --site home-a: after apply --site vm",
-				"· apply --site home-b: after apply --site vm",
-				"· apply --site watch: after apply --site vm",
-				"· storage add: after apply --site home-a",
-				"· apply --site home-a: after the earlier apply --site home-a",
-				"· apply --site home-b: after the earlier apply --site home-b",
-				"· apply --site vm: after the earlier apply --site vm",
-				"· apply --site watch: after the earlier apply --site watch",
+				"○ deployment apply --site vm: 6 changes",
+				"· deployment apply --site home-a: after deployment apply --site vm",
+				"· deployment apply --site home-b: after deployment apply --site vm",
+				"· deployment apply --site watch: after deployment apply --site vm",
+				"· storage add: after deployment apply --site home-a",
+				"· deployment apply --site home-a: after the earlier deployment apply --site home-a",
+				"· deployment apply --site home-b: after the earlier deployment apply --site home-b",
+				"· deployment apply --site vm: after the earlier deployment apply --site vm",
+				"· deployment apply --site watch: after the earlier deployment apply --site watch",
 			},
 		},
 	} {
@@ -1917,7 +1917,7 @@ func TestHoldsReturnToTheRunAfterInit(t *testing.T) {
 func TestCheckStepCollectsWhatTheDryRunReports(t *testing.T) {
 	t.Cleanup(func() { apply.SetRetryLog(nil) })
 	rec := &ui.Recorder{Verbose_: true}
-	summary, reports, err := checkStep(rec, []string{"apply", "--site", "home-a"}, func([]string) error {
+	summary, reports, err := checkStep(rec, []string{"deployment", "apply", "--site", "home-a"}, func([]string) error {
 		inner := reporterOverride
 		inner.Warn("held back from this apply", "talk's image is newer than its pin")
 		inner.Note("secrets: smtp.password is owed", "paisans secrets set smtp.password < value")
@@ -1950,7 +1950,7 @@ func TestCheckReportsShowUnderTheStep(t *testing.T) {
 	fakeConverge(t, nil)
 	saved := convergeCheck
 	convergeCheck = func(_ ui.Reporter, args []string) (string, []checkReport, error) {
-		if strings.Join(args[:3], " ") == "apply --site vm" {
+		if strings.Join(args[:4], " ") == "deployment apply --site vm" {
 			return "5 changes", []checkReport{{Text: "! held back from this apply"}, {Note: true, Text: "owed", Detail: "paisans secrets set x"}}, nil
 		}
 		return "", nil, nil
@@ -1962,7 +1962,7 @@ func TestCheckReportsShowUnderTheStep(t *testing.T) {
 	}
 	pending := slices.IndexFunc(rec.Events, func(e ui.Event) bool { return e.Kind == "pending" && e.Text == "vm" })
 	inner := slices.IndexFunc(rec.Events, func(e ui.Event) bool {
-		return e.Kind == "detail" && e.Extra == "vm" && e.Text == "○ apply --site vm: 5 changes"
+		return e.Kind == "detail" && e.Extra == "vm" && e.Text == "○ deployment apply --site vm: 5 changes"
 	})
 	detail := slices.IndexFunc(rec.Events, func(e ui.Event) bool {
 		return e.Kind == "detail" && e.Extra == "vm" && e.Text == "  ! held back from this apply"
@@ -2009,10 +2009,10 @@ func TestConvergeStopIsAProblem(t *testing.T) {
 		explain []string
 		code    int
 	}{
-		{"apply --site vm", unreachable, "apply stopped at apply --site vm", []string{"ubuntu@203.0.113.10 cannot be reached over ssh.", "Check that the host is up.", "Run paisans apply --execute again to resume."}, 1},
-		{"apply --site vm", errors.New("vm: boom"), "apply stopped at apply --site vm", []string{"vm: boom.", "Run paisans apply --execute again to resume."}, 1},
-		{"apply --site vm", errors.New("apply: the rest of vm was applied, but talk was refused, and stays held back until its client at Pocket ID is fixed:\n  talk: no client"), "apply stopped at apply --site vm", []string{"apply: the rest of vm was applied, but talk was refused, and stays held back until its client at Pocket ID is fixed:", "  talk: no client", "Run paisans apply --execute again to resume."}, 1},
-		{"storage add", waiting, "apply is waiting at storage add", []string{"storage add is waiting on Garage at stage 3 (sync): blocks are still moving.", "Nothing failed: Garage is still moving data. Run paisans apply --execute again later."}, 75},
+		{"deployment apply --site vm", unreachable, "apply stopped at deployment apply --site vm", []string{"ubuntu@203.0.113.10 cannot be reached over ssh.", "Check that the host is up.", "Run paisans deployment apply --execute again to resume."}, 1},
+		{"deployment apply --site vm", errors.New("vm: boom"), "apply stopped at deployment apply --site vm", []string{"vm: boom.", "Run paisans deployment apply --execute again to resume."}, 1},
+		{"deployment apply --site vm", errors.New("apply: the rest of vm was applied, but talk was refused, and stays held back until its client at Pocket ID is fixed:\n  talk: no client"), "apply stopped at deployment apply --site vm", []string{"apply: the rest of vm was applied, but talk was refused, and stays held back until its client at Pocket ID is fixed:", "  talk: no client", "Run paisans deployment apply --execute again to resume."}, 1},
+		{"storage add", waiting, "apply is waiting at storage add", []string{"storage add is waiting on Garage at stage 3 (sync): blocks are still moving.", "Nothing failed: Garage is still moving data. Run paisans deployment apply --execute again later."}, 75},
 	} {
 		fakeConverge(t, map[string]error{tc.step: tc.err})
 		err := converge(t, "--execute")
@@ -2071,13 +2071,13 @@ func TestConvergeDryRunShowsAFailedStepsExplanation(t *testing.T) {
 // install line lists it as its inner step's result, and its reason under it,
 // without a doubled stop or a trailing blank.
 func TestTheFoundingStopIsAnInnerResult(t *testing.T) {
-	fakeConverge(t, map[string]error{"apply --site home-a": foundingWait("home-a", "home-b")})
+	fakeConverge(t, map[string]error{"deployment apply --site home-a": foundingWait("home-a", "home-b")})
 	rec := recordConverge(t)
 	if err := converge(t, "--execute"); err != nil {
 		t.Fatal(err)
 	}
 	i := slices.IndexFunc(rec.Events, func(e ui.Event) bool {
-		return e.Kind == "detail" && e.Extra == "home-a" && e.Text == "✓ apply --site home-a: paused until home-b runs etcd"
+		return e.Kind == "detail" && e.Extra == "home-a" && e.Text == "✓ deployment apply --site home-a: paused until home-b runs etcd"
 	})
 	if i < 0 || rec.Events[i+1].Text != "  home-a is waiting on home-b to start etcd." {
 		t.Errorf("inner result:\n%s", rec.Lines())
@@ -2160,7 +2160,7 @@ func recordLinks(t *testing.T) *strings.Builder {
 // nothing about its admins: the app is not running yet.
 func TestConvergeDryRunAsksNoAdminBeforePocketIDRuns(t *testing.T) {
 	fakeConverge(t, nil)
-	fakeChecks(t, map[string]any{"apply --site home-b": "2 changes"})
+	fakeChecks(t, map[string]any{"deployment apply --site home-b": "2 changes"})
 	asked := fakeDeclaredOperators(t, unregistered(false))
 	rec := recordConverge(t)
 	if err := converge(t); err != nil {
@@ -2196,7 +2196,7 @@ func TestConvergeDryRunAsksNoAdminWhileInitHasWork(t *testing.T) {
 // own, pending with what would happen, and issues nothing.
 func TestConvergeDryRunPlansEachDeclaredAdmin(t *testing.T) {
 	fakeConverge(t, nil)
-	fakeChecks(t, map[string]any{"apply --site watch": "1 change"})
+	fakeChecks(t, map[string]any{"deployment apply --site watch": "1 change"})
 	asked := fakeDeclaredOperators(t, unregistered(false))
 	links := recordLinks(t)
 	rec := recordConverge(t)
@@ -2364,7 +2364,7 @@ func TestConvergeRunFailsOnAnAdminAndStillPrintsLinks(t *testing.T) {
 
 // A run that stopped asks about no admin.
 func TestConvergeStoppedRunAsksNoAdmin(t *testing.T) {
-	fakeConverge(t, map[string]error{"apply --site vm": errors.New("vm: boom")})
+	fakeConverge(t, map[string]error{"deployment apply --site vm": errors.New("vm: boom")})
 	asked := fakeDeclaredOperators(t, unregistered(false))
 	if err := converge(t, "--execute"); err == nil {
 		t.Fatal("the run did not stop")
@@ -2526,8 +2526,8 @@ func TestConvergeRunsOnTheSitesItHas(t *testing.T) {
 	sameLines(t, *ran, []string{
 		"site prepare --site home-a", "site prepare --site vm", "site prepare --site watch",
 		"dns init",
-		"apply --site vm", "apply --site home-a", "apply --site watch",
-		"apply --site home-a", "apply --site vm", "apply --site watch",
+		"deployment apply --site vm", "deployment apply --site home-a", "deployment apply --site watch",
+		"deployment apply --site home-a", "deployment apply --site vm", "deployment apply --site watch",
 	})
 	for _, s := range *seen {
 		if s == nil || !slices.Equal(s.Pending(), []string{"home-b"}) {
@@ -2571,8 +2571,8 @@ func TestConvergeSkipsADownSitesSteps(t *testing.T) {
 	sameLines(t, *ran, []string{
 		"site prepare --site home-a", "site prepare --site vm", "site prepare --site watch",
 		"dns init",
-		"apply --site watch", "apply --site home-a",
-		"apply --site home-a", "apply --site vm", "apply --site watch",
+		"deployment apply --site watch", "deployment apply --site home-a",
+		"deployment apply --site home-a", "deployment apply --site vm", "deployment apply --site watch",
 	})
 	if s := (*seen)[0]; s == nil || !slices.Equal(s.Down(), []string{"home-b"}) {
 		t.Fatalf("classification %+v", s)
@@ -2614,7 +2614,7 @@ func TestConvergeJoinWaitsWhileASiteIsDown(t *testing.T) {
 			t.Errorf("ran %s while watch is down", line)
 		}
 	}
-	if !slices.Contains(*ran, "apply --site home-a") {
+	if !slices.Contains(*ran, "deployment apply --site home-a") {
 		t.Errorf("the run stopped short: %v", *ran)
 	}
 	if s := (*seen)[0]; s == nil || !slices.Equal(s.Pending(), []string{"home-b"}) || !slices.Equal(s.Down(), []string{"watch"}) {
@@ -2757,9 +2757,9 @@ func foundingEtcd(t *testing.T, cfg *config.Config) *[]string {
 	running := map[string]bool{}
 	saved := convergeRun
 	convergeRun = func(args []string) error {
-		title := strings.Join(args[:3], " ")
+		title := strings.Join(args[:4], " ")
 		ran = append(ran, title)
-		site := strings.TrimPrefix(title, "apply --site ")
+		site := strings.TrimPrefix(title, "deployment apply --site ")
 		running[site] = true
 		if cfg.Sites[site].Has(config.RoleWitness) {
 			return nil
@@ -2793,12 +2793,12 @@ func TestADualSiteFoundingRunsEveryFoundingApplyBeforeARevisit(t *testing.T) {
 		}
 	}
 	samePlan(t, install,
-		"founding: apply --site edge",
-		"founding: apply --site site-a",
-		"founding: apply --site site-b",
-		"pass two: apply --site site-a",
-		"pass two: apply --site site-b",
-		"pass two: apply --site edge",
+		"founding: deployment apply --site edge",
+		"founding: deployment apply --site site-a",
+		"founding: deployment apply --site site-b",
+		"pass two: deployment apply --site site-a",
+		"pass two: deployment apply --site site-b",
+		"pass two: deployment apply --site edge",
 	)
 	ran := foundingEtcd(t, cfg)
 	rec := &ui.Recorder{}
@@ -2806,12 +2806,12 @@ func TestADualSiteFoundingRunsEveryFoundingApplyBeforeARevisit(t *testing.T) {
 		t.Fatalf("%v\n%s", err, rec.Lines())
 	}
 	sameLines(t, *ran, []string{
-		"apply --site edge",
-		"apply --site site-a",
-		"apply --site site-b",
-		"apply --site site-a",
-		"apply --site site-b",
-		"apply --site edge",
+		"deployment apply --site edge",
+		"deployment apply --site site-a",
+		"deployment apply --site site-b",
+		"deployment apply --site site-a",
+		"deployment apply --site site-b",
+		"deployment apply --site edge",
 	})
 	if rec.Has("fail", "") {
 		t.Errorf("a line failed:\n%s", rec.Lines())
@@ -2831,7 +2831,7 @@ func TestAFoundingStopOnALaterVisitStopsTheRunNamingTheCause(t *testing.T) {
 	visits := 0
 	convergeRun = func(args []string) error {
 		err := saved(args)
-		if strings.HasPrefix(strings.Join(args, " "), "apply --site home-a ") {
+		if strings.HasPrefix(strings.Join(args, " "), "deployment apply --site home-a ") {
 			if visits++; visits == 2 {
 				return foundingWait("home-a", "home-b")
 			}
@@ -2842,10 +2842,10 @@ func TestAFoundingStopOnALaterVisitStopsTheRunNamingTheCause(t *testing.T) {
 	rec := recordConverge(t)
 	err := converge(t, "--execute")
 	text := problemText(err)
-	if err == nil || !strings.Contains(text, "apply stopped at apply --site home-a") || !strings.Contains(text, "home-b runs no etcd.") || !errors.Is(err, apply.ErrFoundingWait) {
+	if err == nil || !strings.Contains(text, "apply stopped at deployment apply --site home-a") || !strings.Contains(text, "home-b runs no etcd.") || !errors.Is(err, apply.ErrFoundingWait) {
 		t.Fatalf("got %v\n%s", text, rec.Lines())
 	}
-	if (*ran)[len(*ran)-1] != "apply --site home-a" || !rec.Has("fail", "home-a") {
+	if (*ran)[len(*ran)-1] != "deployment apply --site home-a" || !rec.Has("fail", "home-a") {
 		t.Errorf("ran on, or the line did not fail: %v\n%s", *ran, rec.Lines())
 	}
 }

@@ -143,7 +143,7 @@ func mustRun(t *testing.T, name string, args ...string) string {
 }
 
 // renderFor renders cfg and puts each named site's garage.toml on its host,
-// with the manifest apply would have left, as `paisans apply` would.
+// with the manifest apply would have left, as `paisans deployment apply` would.
 func renderFor(t *testing.T, cfg *config.Config, secrets *config.Secrets, hosts map[string]*dockerHost, sites ...string) *render.Plan {
 	t.Helper()
 	rendered, err := render.Build(cfg, secrets)

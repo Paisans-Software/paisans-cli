@@ -46,7 +46,7 @@ func TestAnOrderedGroupKeepsItsLinesInPlace(t *testing.T) {
 	c.add(22 * time.Second)
 	ui.Frame(r)
 	sameRows(t, s.lines(), []string{"install", "  ⠙ home-a: 22s", "  · home-b", "  · storage"})
-	lines[0].Detail("✓ apply --site home-a: paused until home-b runs etcd")
+	lines[0].Detail("✓ deployment apply --site home-a: paused until home-b runs etcd")
 	lines[0].Pause("paused until home-b runs etcd")
 	c.add(5 * time.Second)
 	ui.Frame(r)
@@ -65,13 +65,13 @@ func TestAnOrderedGroupKeepsItsLinesInPlace(t *testing.T) {
 	c.add(48 * time.Second)
 	ui.Frame(r)
 	sameRows(t, s.lines(), []string{"install", "  ⠸ home-a: 70s", "  · home-b: 3.0s, paused until storage is done", "  ✓ storage: 4.0s"})
-	lines[0].Detail("✓ apply --site home-a: 48.0s")
+	lines[0].Detail("✓ deployment apply --site home-a: 48.0s")
 	lines[0].Done("")
 	sameRows(t, s.lines(), []string{
 		"install",
 		"  ✓ home-a: 70.0s",
-		"      ✓ apply --site home-a: paused until home-b runs etcd",
-		"      ✓ apply --site home-a: 48.0s",
+		"      ✓ deployment apply --site home-a: paused until home-b runs etcd",
+		"      ✓ deployment apply --site home-a: 48.0s",
 		"  · home-b: 3.0s, paused until storage is done",
 		"  ✓ storage: 4.0s",
 	})
@@ -82,8 +82,8 @@ func TestAnOrderedGroupKeepsItsLinesInPlace(t *testing.T) {
 	sameRows(t, s.lines(), []string{
 		"install",
 		"  ✓ home-a: 70.0s",
-		"      ✓ apply --site home-a: paused until home-b runs etcd",
-		"      ✓ apply --site home-a: 48.0s",
+		"      ✓ deployment apply --site home-a: paused until home-b runs etcd",
+		"      ✓ deployment apply --site home-a: 48.0s",
 		"  ✓ home-b: 4.0s",
 		"  ✓ storage: 4.0s",
 	})

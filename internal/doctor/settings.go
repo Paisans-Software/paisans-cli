@@ -92,7 +92,7 @@ func Settings(cfg *config.Config, probes []SettingsProbe) []Finding {
 			continue
 		}
 		more := append(wrong,
-			fmt.Sprintf("Each is written and locked by the file the toolkit renders for %s. `paisans apply --site %s` renders it and recreates the stack; if the setting is still unlocked afterwards, the image predates the lock and needs a newer one (apps.%s.images).", p.App, p.Site, p.App))
+			fmt.Sprintf("Each is written and locked by the file the toolkit renders for %s. `paisans deployment apply --site %s` renders it and recreates the stack; if the setting is still unlocked afterwards, the image predates the lock and needs a newer one (apps.%s.images).", p.App, p.Site, p.App))
 		out = append(out, Finding{Section: SectionSettings, Level: Fail, Line: fmt.Sprintf("%s: %d gate setting(s) not enforced", where, len(wrong)), More: more})
 	}
 	return out

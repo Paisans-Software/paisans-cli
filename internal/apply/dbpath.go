@@ -44,7 +44,7 @@ const databasePathReason = "its database path changed (HAProxy/Patroni moved), a
 // bootstrap, because Execute runs actions in order and the bootstrap before
 // the first app.
 //
-// --only applies to what the operator changes, not to this. An `apply --only
+// --only applies to what the operator changes, not to this. An `deployment apply --only
 // infra` that restarts HAProxy and leaves Mbin on dead connections is the
 // incident this exists for; an --only that excludes infra moves nothing under
 // the apps and triggers nothing.

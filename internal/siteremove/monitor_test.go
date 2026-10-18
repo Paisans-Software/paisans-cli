@@ -45,7 +45,7 @@ func TestAFailedReseedNamesTheApply(t *testing.T) {
 	w := setup(t)
 	w.failOnce = root + "/health/compose.yaml restart"
 	err := siteremove.Execute(w.mustBuild("home-b", siteremove.Options{}))
-	if err == nil || !strings.Contains(err.Error(), "stage 6") || !strings.Contains(err.Error(), "paisans apply --site watch --only health --execute") {
+	if err == nil || !strings.Contains(err.Error(), "stage 6") || !strings.Contains(err.Error(), "paisans deployment apply --site watch --only health --execute") {
 		t.Fatalf("want a stage 6 failure naming the apply, got %v", err)
 	}
 	if strings.Contains(err.Error(), "run site remove again") {
@@ -68,7 +68,7 @@ func TestAnUnhealthyMonitorNamesItsCauseAndTheApply(t *testing.T) {
 	if err == nil {
 		t.Fatal("an unhealthy monitor passed")
 	}
-	shortAndVerbose(t, err, "site remove home-b stopped at stage 6 (monitor)", "stack health is not healthy", "The removal itself is done", "paisans apply --site watch --only health --execute")
+	shortAndVerbose(t, err, "site remove home-b stopped at stage 6 (monitor)", "stack health is not healthy", "The removal itself is done", "paisans deployment apply --site watch --only health --execute")
 	if strings.Contains(err.Error(), "run site remove again") {
 		t.Errorf("the failure says to run site remove again, which no longer declares the site: %v", err)
 	}
