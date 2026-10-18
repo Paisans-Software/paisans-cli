@@ -40,6 +40,9 @@ type Target struct {
 	// statuses that mean it is up, from blueprints.HealthFor.
 	HealthPath   string
 	HealthExpect string
+	// PublicStatusPage is an uptime app whose public status page is on
+	// (blueprints.PublicStatusPage), so /status* is not refused.
+	PublicStatusPage bool
 }
 
 // External reports whether a web server the operator runs is in front of
@@ -67,6 +70,7 @@ func For(cfg *config.Config, app string) (Target, error) {
 		App: app, Site: site, Hostname: a.Hostname, Mode: s.WebServerManagedBy(),
 		PublicAddress: s.PublicAddress, PublicAddress6: s.PublicAddress6,
 		HealthPath: health.Path, HealthExpect: health.Expect,
+		PublicStatusPage: a.Blueprint == config.BlueprintUptime && blueprints.PublicStatusPage(a),
 	}
 	if t.HealthPath == "" {
 		t.HealthPath, t.HealthExpect = "/", "200"

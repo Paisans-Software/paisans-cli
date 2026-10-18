@@ -35,13 +35,19 @@ func Show(w io.Writer, t Target, ws WebServer) {
 	fmt.Fprintf(w, "Your web server must:\n")
 	fmt.Fprintf(w, "  * terminate TLS for %s, with a certificate you obtain and renew;\n", t.Hostname)
 	fmt.Fprintf(w, "    the monitor checks https://%s%s and warns 14 days before it expires\n", t.Hostname, t.HealthPath)
-	fmt.Fprintf(w, "  * proxy every path to %s, but for the four refused below\n", t.Upstream())
+	fmt.Fprintf(w, "  * proxy every path to %s, but for those refused below\n", t.Upstream())
 	fmt.Fprintf(w, "  * pass the Host header through unchanged\n")
 	fmt.Fprintf(w, "  * set X-Forwarded-For to the client's address and X-Forwarded-Proto to https;\n")
 	fmt.Fprintf(w, "    the monitor's sign in rate limit is keyed on the client's address\n")
-	fmt.Fprintf(w, "  * refuse /status*, /badge/*, /metrics and /api/v1/*: the health page lists\n")
-	fmt.Fprintf(w, "    every monitor, mesh addresses included, and /metrics is public whenever\n")
-	fmt.Fprintf(w, "    no API token exists, which under this toolkit is always\n\n")
+	if t.PublicStatusPage {
+		fmt.Fprintf(w, "  * refuse /badge/*, /metrics and /api/v1/*: /metrics is public whenever no\n")
+		fmt.Fprintf(w, "    API token exists, which under this toolkit is always. The public status\n")
+		fmt.Fprintf(w, "    page passes, and shows only each app's check at its public hostname\n\n")
+	} else {
+		fmt.Fprintf(w, "  * refuse /status*, /badge/*, /metrics and /api/v1/*: the public status\n")
+		fmt.Fprintf(w, "    page is off, and /metrics is public whenever no API token exists, which\n")
+		fmt.Fprintf(w, "    under this toolkit is always\n\n")
+	}
 
 	fmt.Fprintf(w, "%s\n\n", ws.Summary())
 	if ws.Certbot != "" {
@@ -200,11 +206,20 @@ func caddySnippet(t Target, ws WebServer) string {
 		tls = fmt.Sprintf("\t# %s: if this Caddy obtains its certificates itself, leave this\n\t# out; otherwise uncomment it and name your own files.\n", certificateMarker) + generic
 	}
 	return head + fmt.Sprintf(`%s {
-%s	@refused path /status* /badge/* /metrics /metrics/ /api/v1/*
+%s	@refused path %s/badge/* /metrics /metrics/ /api/v1/*
 	respond @refused 404
 	reverse_proxy %s
 }
-`, t.Hostname, tls, t.Listen)
+`, t.Hostname, tls, t.statusPath("/status* "), t.Listen)
+}
+
+// statusPath is refused, the status page's part of a refusal, when the
+// public status page is off, and nothing when it is on.
+func (t Target) statusPath(refused string) string {
+	if t.PublicStatusPage {
+		return ""
+	}
+	return refused
 }
 
 // certLines is the certificate's lines in an nginx or Apache snippet, each
@@ -226,7 +241,7 @@ func nginxSnippet(t Target, ws WebServer) string {
 
     %s
 
-    location ~* ^/(status|badge/|metrics/?$|api/v1/) {
+    location ~* ^/(%sbadge/|metrics/?$|api/v1/) {
         return 404;
     }
 
@@ -237,7 +252,7 @@ func nginxSnippet(t Target, ws WebServer) string {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
-`, t.Hostname, certs, t.Upstream())
+`, t.Hostname, certs, t.statusPath("status|"), t.Upstream())
 }
 
 func apacheSnippet(t Target, ws WebServer) string {
@@ -248,7 +263,7 @@ func apacheSnippet(t Target, ws WebServer) string {
     SSLEngine on
     %s
 
-    <LocationMatch "(?i)^/(status|badge/|metrics/?$|api/v1/)">
+    <LocationMatch "(?i)^/(%sbadge/|metrics/?$|api/v1/)">
         Require all denied
     </LocationMatch>
 
@@ -257,7 +272,7 @@ func apacheSnippet(t Target, ws WebServer) string {
     ProxyPass        / %s/
     ProxyPassReverse / %s/
 </VirtualHost>
-`, t.Hostname, certs, t.Upstream(), t.Upstream())
+`, t.Hostname, certs, t.statusPath("status|"), t.Upstream(), t.Upstream())
 }
 
 // addresses is where the hostname must resolve, as a phrase.

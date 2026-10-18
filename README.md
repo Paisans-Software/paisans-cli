@@ -1246,18 +1246,28 @@ milliseconds, and at steady state it reclaims nothing that SQLite would not
 reuse anyway. It matters wherever the monitor shares a machine with an etcd
 member, which `monitor-shares-a-site` warns about on a data site.
 
-**At the edge** the monitor's Caddy refuses `/status*`, `/badge/*`, `/metrics`
-and the token API `/api/v1/*` with 404 whatever the app's own settings say,
-and `web-server show` carries the same refusal into each snippet for an
+**At the edge** the monitor's Caddy refuses `/badge/*`, `/metrics` and the
+token API `/api/v1/*` with 404 whatever the app's own settings say, and
+`web-server show` carries the same refusal into each snippet for an
 operator's own web server. The app is Express with its default routing, which
 ignores case and a trailing slash, so every refusal does too: `/metrics/` and
-`/STATUS` are refused as well. The
-UI's own session authenticated JSON under `/api/sites` passes, because the
-dashboard's live refresh and the response time chart fetch it. The health page would
-list every monitor, mesh addresses included, and `/metrics` is public whenever
-no API token exists, which here is always. `/ping/*` stays open: it is where
-every site's heartbeat arrives, and where a heartbeat monitor added by hand
-is pinged.
+`/Metrics` are refused as well. `/metrics` is public whenever no API token
+exists, which here is always. The UI's own session authenticated JSON under
+`/api/sites` passes, because the dashboard's live refresh and the response
+time chart fetch it. `/ping/*` stays open: it is where every site's heartbeat
+arrives, and where a heartbeat monitor added by hand is pinged.
+
+**The public status page** at `https://<hostname>/status` (with
+`/status.json` and the `/status.rss` feed) is on by default, so members can
+see whether an app is down without an account. It shows each app's check at
+its public hostname, `<app> — public`, and nothing else: every other check
+names a mesh address, a site or a token, so the seed marks each one hidden.
+Every entry in the seed names whether it is shown, so the file decides it at
+every boot. A monitor an admin adds by hand starts hidden too (the fork's
+default from `1.1.0-oidc.6`), and is shown only by unticking **Hide from
+public status page**. `settings.public_status_page: false` turns the page off
+in the monitor and refuses `/status*` at the edge and in `web-server show`'s
+snippets.
 
 **Sign in** is the identity provider, admitting exactly the group named in
 `settings.admin_group`, `operators` when unset. The health page is a tool

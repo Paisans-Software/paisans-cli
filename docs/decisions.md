@@ -3317,3 +3317,35 @@ Founder request, 2026-10-17: `site admit`, `site prepare` and the rootless comma
 ## 2026-10-17: Where sudo is sudo-rs, admit and doctor read sudo.ws's listing
 
 Founder decision, 2026-10-17: where `sudo` is sudo-rs, `site admit` and `doctor` read the rules and Defaults that apply to the deployment's user from `/usr/bin/sudo.ws -n -l`, the original sudo, which Ubuntu 26.04's `sudo` package installs beside sudo-rs and which reads the same sudoers files; with no `sudo.ws`, admit refuses and doctor warns. It rests on `sudo.ws` listing every Defaults entry sudo-rs applies, observed in an `ubuntu:26.04` container (sudo-rs 0.2.13): sudo-rs applied a user's `setenv` and `env_keep`, which `sudo.ws` listed, did not apply a command-specific `env_keep` of `LD_PRELOAD`, which `sudo.ws` also listed, and with the stock sudoers passed none of the variables a root shell script trusts. A probe integration test checks this against the image's sudo-rs. Owners no longer switch `sudo` with `update-alternatives`.
+
+## 2026-10-18: The uptime monitor's public status page is on, and shows only public checks
+
+Founder decision, 2026-10-18.
+
+### What was decided
+
+* The uptime blueprint serves the fork's public status page by default:
+  the seed sets `status_page_enabled` true and the edge passes `/status*`.
+* Only each app's check at its public hostname is shown. Every seed entry
+  names `status_page_excluded`, so a check that names a mesh address, a site
+  or a token is hidden at every boot.
+* A monitor made by hand starts hidden: the fork defaults
+  `status_page_excluded` to 1 wherever the maker does not say otherwise.
+* `settings.public_status_page: false` turns the page off in the monitor and
+  at the edge.
+
+### Why
+
+A community's members are the people who notice an app is down, and the page
+answers "is it just me" without an account or an operator. What made the
+page unsafe was its content, every monitor with its URL, mesh addresses
+included, not the page itself. Public checks request names already in public
+DNS. A hand made monitor can point anywhere, so it is hidden until an admin
+decides otherwise.
+
+### What was weighed
+
+* **Keep the page refused:** safe, but members learn of an outage only from
+  an operator.
+* **Show every monitor and leave hiding to the admins:** publishes the mesh
+  layout the moment the page is on, before anyone has hidden anything.

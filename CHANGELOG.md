@@ -12,6 +12,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Added
 
+- The uptime monitor's public status page is on by default, showing only each app's check at its public hostname; `settings.public_status_page: false` turns it off.
 - `deployment apply --execute` and `deployment recover --execute` save the version to this workstation's data directory, `deployment list` lists saved deployments, and `deployment fetch --ssh` saves every deployment a host's registry holds.
 
 ### Changed
