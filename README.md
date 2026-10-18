@@ -7024,7 +7024,7 @@ page. With `false` the `.env` renders `MBIN_SSO_AVATAR_OVERRIDE=false` and
 locks it, so a member signed in through the provider cannot upload or remove
 an avatar and an admin cannot reopen it. Anything but `true` or `false` is
 refused, `avatar-override-not-a-boolean`. It needs the fork at
-`v1.16.0+paisans` or later.
+`v1.15.4+paisans` or later.
 
 ```yaml
 apps:
