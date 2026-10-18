@@ -34,6 +34,7 @@ changes share a bullet. Detailed notes are on the corresponding
 - `site admit` says each clash with another deployment on a host in one short sentence naming its id and domain or site, and `init`'s skip of that host omits admit commands.
 - `init` moves the mesh subnet clear of one `site admit` refused beside a role, skipping that site, instead of keeping the subnet until the role clash is fixed.
 - A command without `--execute`, such as `init` or `validate`, says nothing of what `--execute` records about a login user, since that flag belongs to other commands.
+- `create` writes `cluster.synchronous: true` for any layout with two or more data sites, a custom one included, instead of only the high availability shape, so a failover loses no acknowledged write.
 
 ## [0.3.0-rc.4] - 2026-10-17
 
