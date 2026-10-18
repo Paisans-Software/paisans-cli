@@ -100,6 +100,13 @@ func routeLoginNotes(r ui.Reporter) { loginReporter = r }
 // --execute records, as an architecture read does. Founder decision.
 var recordLogins bool
 
+// offersExecute is whether the run is one that --execute is a choice for:
+// true once a command that takes --execute has started, set by commonFlags,
+// and left so for the steps it runs in this process. A command without the
+// flag, such as init, records no login user and says nothing of --execute,
+// which belongs to a command it is not.
+var offersExecute bool
+
 // executes reports whether fs, parsed, is a command run with --execute.
 func executes(fs *flag.FlagSet) bool {
 	f := fs.Lookup("execute")
@@ -123,8 +130,8 @@ var recordMu sync.Mutex
 // user, the deployment's own, which the declaration at path leaves out of
 // ssh.user. In a run with --execute it writes the name there, so the file
 // says who logs in, and a later run reads it as declared. Any other run
-// writes nothing and says what --execute records; the run goes on as user
-// either way, which is already what the file means. The login it records
+// writes nothing and, in a command that takes --execute, says what that
+// records; the run goes on as user either way, which is already what the file means. The login it records
 // has already worked, so a write that fails is said and is never the
 // command's failure.
 func recordSSHUser(path, site, user string) func() {
@@ -133,7 +140,7 @@ func recordSSHUser(path, site, user string) func() {
 		defer recordMu.Unlock()
 		r := loginReporter
 		if !recordLogins {
-			if r != nil {
+			if r != nil && offersExecute {
 				r.Note(fmt.Sprintf("%s: ssh.user %s, --execute will record it in %s", site, user, config.FileName), "")
 			}
 			return

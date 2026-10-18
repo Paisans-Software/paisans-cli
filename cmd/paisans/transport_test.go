@@ -17,13 +17,13 @@ import (
 func resetLogins(t *testing.T) {
 	t.Helper()
 	loginsMu.Lock()
-	saved, savedRecord := logins, recordLogins
+	saved, savedRecord, savedOffers := logins, recordLogins, offersExecute
 	logins = map[string]*destinationLogin{}
-	recordLogins = false
+	recordLogins, offersExecute = false, false
 	loginsMu.Unlock()
 	t.Cleanup(func() {
 		loginsMu.Lock()
-		logins, recordLogins = saved, savedRecord
+		logins, recordLogins, offersExecute = saved, savedRecord, savedOffers
 		loginsMu.Unlock()
 	})
 }
