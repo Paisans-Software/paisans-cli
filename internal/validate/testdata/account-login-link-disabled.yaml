@@ -86,6 +86,7 @@ apps:
     placement: cluster
     settings:
       management: paisans
+      signup_default_groups: [members]
       file_backend: database
       email_one_time_access_as_admin: false
   account:

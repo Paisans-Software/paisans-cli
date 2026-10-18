@@ -92,6 +92,7 @@ apps:
     placement: cluster
     settings:
       management: paisans
+      signup_default_groups: [members]
       allow_user_signups: withToken
       file_backend: database
   account:

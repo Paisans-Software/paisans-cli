@@ -569,6 +569,7 @@ to make by omission.
 | `email_one_time_access_as_unauthenticated` | refused if set (`pocket-id-setting-managed`); rendered `true` | the operator's choice |
 | `email_one_time_access_as_admin` | refused if `false` (`account-login-link-disabled`) | the operator's choice |
 | SMTP host and sender | required (`pocket-id-paisans-without-smtp`) | optional |
+| `signup_default_groups` | must name each account app's member group (`pocket-id-signup-groups-lack-member-group`) | the operator's choice |
 | Operators' `isAdmin` at Pocket ID | never set by `deployment apply` | set by `deployment apply` |
 | Signup, bans, recovery | the account service | Pocket ID's admin pages |
 
@@ -584,6 +585,11 @@ Each row has its reason:
   open, since that is how a member whose sign-in link expired signs in again.
 * **Mail is required under `paisans`** because recovery is an email code, and
   the account service will not start without a mail server either.
+* **`signup_default_groups` must hold the account app's member group under
+  `paisans`**, `members` unless the account app sets `member_group`. The
+  account service creates every account with no group and Pocket ID puts it in
+  these, so without the member group an accepted invite or application makes
+  an account that is a member of nothing.
 * **An account app is refused under `pocket-id`**, because two places that
   each think they decide who joins would disagree.
 * **Under `pocket-id` the operators are Pocket ID's administrators**, because
