@@ -103,6 +103,19 @@ type Facts struct {
 		Avail           int64
 		Unsafe          bool
 	}
+	// Swap is the host's swap, in any form, and what a swapfile would need.
+	// MemTotal is its RAM in bytes, 0 when unread. Active is any entry in
+	// /proc/swaps; Partition a block device formatted as swap, FSTab a swap
+	// line in /etc/fstab, ZRAM a zram-generator configuration and File
+	// something at /swapfile, each whether it is on or not. RootFS and
+	// RootAvail are the filesystem of / and its free bytes, counting what a
+	// swapfile step that stopped part way left at /swapfile.paisans-tmp,
+	// which the next one removes first.
+	Swap struct {
+		MemTotal, RootAvail                  int64
+		Active, Partition, FSTab, ZRAM, File bool
+		RootFS                               string
+	}
 	// raw is every line, by key, for what no field above carries.
 	raw map[string][]string
 }
@@ -580,6 +593,32 @@ func parseFacts(out, user string) (Facts, error) {
 				return f, fmt.Errorf("unreadable data-avail line %q", v)
 			}
 			f.Data.Avail = n
+		case "mem-total", "root-avail", "swap-tmp":
+			var n int64
+			if v != "" {
+				var err error
+				if n, err = strconv.ParseInt(v, 10, 64); err != nil || n < 0 {
+					return f, fmt.Errorf("unreadable %s line %q", key, v)
+				}
+			}
+			switch key {
+			case "mem-total":
+				f.Swap.MemTotal = n
+			default:
+				f.Swap.RootAvail += n
+			}
+		case "swap-active":
+			f.Swap.Active = v == "yes"
+		case "swap-partition":
+			f.Swap.Partition = v == "yes"
+		case "swap-fstab":
+			f.Swap.FSTab = v == "yes"
+		case "swap-zram":
+			f.Swap.ZRAM = v == "yes"
+		case "swapfile":
+			f.Swap.File = v == "present"
+		case "root-fs":
+			f.Swap.RootFS = v
 		}
 	}
 	if f.raw["sudo"] != nil && f.raw["sudo"][len(f.raw["sudo"])-1] == "listed" {

@@ -236,4 +236,22 @@ if [ "$above" = safe ]; then
   say data-fs "$(stat -f -c %T "$target")"
   say data-avail "$(df -P -B1 "$target" | awk 'NR == 2 { print $4 }')"
 fi
+# Swap in any form, on or not, the host's RAM, and the filesystem a
+# swapfile at /swapfile would be made on.
+say mem-total "$(awk '$1 == "MemTotal:" { printf "%.0f", $2 * 1024 }' /proc/meminfo)"
+if [ "$(awk 'NR > 1' /proc/swaps 2>/dev/null | wc -l)" -gt 0 ]; then say swap-active yes; else say swap-active no; fi
+if command -v lsblk >/dev/null 2>&1 && lsblk -nro FSTYPE 2>/dev/null | grep -qx swap; then say swap-partition yes; else say swap-partition no; fi
+if awk '$1 !~ /^#/ && $3 == "swap"' /etc/fstab 2>/dev/null | grep -q .; then say swap-fstab yes; else say swap-fstab no; fi
+z=no
+for f in /etc/systemd/zram-generator.conf /usr/lib/systemd/zram-generator.conf /run/systemd/zram-generator.conf \
+  /etc/systemd/zram-generator.conf.d/*.conf /usr/lib/systemd/zram-generator.conf.d/*.conf /run/systemd/zram-generator.conf.d/*.conf; do
+  [ -e "$f" ] && z=yes
+done
+say swap-zram "$z"
+if [ -e /swapfile ] || [ -L /swapfile ]; then say swapfile present; else say swapfile absent; fi
+# What a swapfile step that stopped part way left, which the next one
+# removes before it starts: its space is free to the swapfile.
+if [ -f /swapfile.paisans-tmp ] && [ ! -L /swapfile.paisans-tmp ]; then say swap-tmp "$(stat -c %s /swapfile.paisans-tmp)"; fi
+say root-fs "$(stat -f -c %T /)"
+say root-avail "$(df -P -B1 / | awk 'NR == 2 { print $4 }')"
 echo end

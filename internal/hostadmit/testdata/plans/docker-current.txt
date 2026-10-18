@@ -68,6 +68,7 @@ step 26: allow all inbound on psns-f2a9
 step 27: write the admission record
 step 28: add the operators' keys
 
+present: swap: on
 present: docker: Engine 29.9.1
 present: package: nftables installed
 present: package: wireguard-tools installed

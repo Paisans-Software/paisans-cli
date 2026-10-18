@@ -79,6 +79,7 @@ func TestParseFactsRefusesWhatIsNotANumber(t *testing.T) {
 		file + " 644 x 0\n", file + " 644 0 -\n", file + " 644 -1 0\n", file + " 6x4 0 0\n", file + " 99 0 0\n",
 		"file /etc/x ab12 644 0 0\n", "file /etc/x " + strings.ToUpper(sha("x")) + " 644 0 0\n",
 		"port-start \n", "port-start 80x\n", "ip-forward \n", "data-avail \n", "data-avail 12G\n",
+		"mem-total 4G\n", "mem-total -1\n", "root-avail 1.5e9\n",
 	} {
 		if _, err := parseFacts(bad+"end\n", "paisans-f2a9"); err == nil {
 			t.Errorf("%q was read", bad)
@@ -228,6 +229,31 @@ func TestParseEvictFacts(t *testing.T) {
 	for _, bad := range []string{"mesh-unit enabled\nend\n", "entries x /etc/paisans\nend\n", "entries 3\nend\n"} {
 		if _, err := parseFacts(bad, "paisans-f2a9"); err == nil {
 			t.Errorf("%q was read", bad)
+		}
+	}
+}
+
+// Swap in each form is read whether or not it is on, and RAM or free space
+// the probe printed nothing for is 0, unread, rather than a refusal. A
+// stopped swapfile step's temporary file counts as free.
+func TestParseFactsReadsSwap(t *testing.T) {
+	f, err := parseFacts("mem-total 4113297408\nswap-active no\nswap-partition yes\nswap-fstab no\nswap-zram yes\nswapfile absent\nroot-fs xfs\nroot-avail \nswap-tmp 5\nend\n", "paisans-f2a9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := f.Swap; s.MemTotal != 4113297408 || s.Active || !s.Partition || s.FSTab || !s.ZRAM || s.File || s.RootFS != "xfs" || s.RootAvail != 5 {
+		t.Errorf("swap: %+v", s)
+	}
+}
+
+// The swapfile is twice the RAM to the nearest GiB, at least one, up to
+// 16 GiB: a 4 GB VPS reports a little under 4 GiB and gets 8.
+func TestSwapSize(t *testing.T) {
+	for _, c := range []struct{ mem, want int64 }{
+		{4113297408, 8 << 30}, {1 << 30, 2 << 30}, {300 << 20, 1 << 30}, {6 << 30, 12 << 30}, {8 << 30, 16 << 30}, {64 << 30, 16 << 30},
+	} {
+		if got := swapSize(c.mem); got != c.want {
+			t.Errorf("swapSize(%d) = %d GiB, want %d GiB", c.mem, got>>30, c.want>>30)
 		}
 	}
 }

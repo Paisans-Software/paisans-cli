@@ -403,6 +403,7 @@ step 27: add the operators' keys
     | # Keys site admit and site prepare added to this deployment's user's authorized_keys: <mark> <fingerprint> <name>. site prepare removes a line only when it is marked added here and ssh.keys no longer lists it.
     | added SHA256:kmYcvdi2GkPeWxB6XLjrZB8JHsy2Hm8luHMFp9GMvqk alice
 
+present: swap: on
 present: docker: Engine 29.9.1
 present: package: docker-ce-rootless-extras installed
 present: package: uidmap installed

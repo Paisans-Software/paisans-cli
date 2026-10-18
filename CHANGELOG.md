@@ -15,6 +15,7 @@ changes share a bullet. Detailed notes are on the corresponding
 - The mbin blueprint renders and locks every Meta, Instance and Federation setting from `apps.<app>.settings`, titling the instance from `display_name` and `community.name`; it needs Mbin `1.16.0+paisans`.
 - Blueprint format `paisans.blueprint/v3` gives templates `.DisplayName` and `.CommunityName`, so a catalog release using them is skipped by older binaries.
 - The uptime monitor's public status page is on by default, showing only each app's check at its public hostname; `settings.public_status_page: false` turns it off.
+- `site admit` and `site prepare` warn about a host with no swap, and `site admit --swapfile`, or a yes at a terminal with `--execute`, makes a swapfile of twice its RAM, up to 16 GiB.
 - `deployment apply --execute` and `deployment recover --execute` save the version to this workstation's data directory, `deployment list` lists saved deployments, and `deployment fetch --ssh` saves every deployment a host's registry holds.
 
 ### Changed
