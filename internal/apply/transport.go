@@ -108,8 +108,8 @@ type SSHTransport struct {
 	// ConnectTimeout, in seconds, is ssh's -o ConnectTimeout. Zero is
 	// DefaultConnectTimeout. ssh's own is the operating system's TCP connect
 	// timeout, which is 75 seconds on macOS for a host that is switched off
-	// or a VM that has been deleted, and a connection is tried three times,
-	// so without one a dead site holds a command for minutes before it can
+	// or a VM that has been deleted, and a command's connection is tried
+	// three times, so without one a dead site holds a command for minutes before it can
 	// say so. It is given on the command line, so it takes precedence over
 	// ~/.ssh/config. Like every other field here it is not used with
 	// Destination, which stays verbatim.
@@ -127,8 +127,9 @@ type SSHTransport struct {
 // Reach logs in to the host and runs nothing there, to find out whether it
 // answers. An SSHTransport is tried once, not retried as a command is: a
 // host that does not answer is down for this run, and every retry would
-// wait out ssh's connect timeout again. Its Login remembers that, so no
-// later command waits for the host either (see Login). A blip that a retry
+// wait out ssh's connect timeout again. A Login whose first probe this was
+// remembers it, so no later command through it waits for the host either
+// (see Login). A blip that a retry
 // would have ridden out reads as the host down, which a run takes as a site
 // it does not step on and a later run reaches again. Any other Transport
 // runs `true`.
@@ -155,7 +156,8 @@ func (t SSHTransport) Describe() string {
 // DefaultConnectTimeout is the ConnectTimeout, in seconds, of a transport
 // that sets none. A host that answers at all opens its TCP connection in well
 // under a second, so ten is room for a slow link and still lets a dead site be
-// reported, after three attempts, within a minute.
+// reported, after three attempts, within a minute, and after Reach's one
+// within seconds.
 const DefaultConnectTimeout = 10
 
 func (t SSHTransport) connectTimeout() int {
@@ -354,8 +356,8 @@ func (t SSHTransport) named(command string) string {
 }
 
 // How often a connection that never opened is tried again, and how long to
-// wait before each retry: three attempts in all. Package variables so that a
-// test can shrink them.
+// wait before each retry: three attempts in all, but one for Reach. Package
+// variables so that a test can shrink them.
 var sshRetryDelays = []time.Duration{2 * time.Second, 4 * time.Second}
 
 // SetSleep makes every wait in this package, the one before an ssh retry
@@ -735,7 +737,7 @@ func lastLine(out string) string {
 //
 // Three attempts, two and four seconds apart, is enough for a blip and short
 // enough that a host which is really down is reported within seconds rather
-// than hidden behind a long wait.
+// than hidden behind a long wait. A transport Reach made tries once.
 func (t SSHTransport) run(command string, stdin *string) (string, error) {
 	if err := t.refuseSudoDocker(); err != nil {
 		return "", err

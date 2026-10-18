@@ -433,8 +433,12 @@ func TestASwitchedOffSiteIsTriedOnceARun(t *testing.T) {
 		return out
 	})
 	classified(t, nil)
-	if _, err := classifySites(ui.NewPlain(io.Discard, false), cfg); err != nil {
-		t.Logf("classify: %v", err)
+	c, err := classifySites(ui.NewPlain(io.Discard, false), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Sites["home-b"]; got.Class == topology.Ready {
+		t.Errorf("home-b is %s, want it not ready", got.Class)
 	}
 	if tries != 1 {
 		t.Errorf("classification tried home-b %d times, want once", tries)

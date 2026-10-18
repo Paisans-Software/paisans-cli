@@ -33,10 +33,12 @@ type Login struct {
 
 	mu         sync.Mutex
 	dockerHost string
-	// unreachable is the probe's error when its connection never opened:
-	// the destination is down for the run, and every later command to it
-	// fails with that error at once rather than waiting out ssh's connect
-	// timeout again.
+	// unreachable is the probe's error when Reach made it and its
+	// connection never opened: the destination is down for the run, and
+	// every later command through this Login fails with that error at once
+	// rather than waiting out ssh's connect timeout again. Only Reach's is
+	// kept: a command's first contact failing after its retries leaves the
+	// next command, a wait loop's among them, to try again.
 	unreachable error
 }
 
@@ -45,10 +47,10 @@ type Login struct {
 func NewLogin(connected func()) *Login { return &Login{Connected: connected} }
 
 // resolve returns t's DOCKER_HOST, asking the host for the login user's UID
-// the first time. A probe whose connection never opened is kept: the host is
-// down for the rest of the run. Any other failure is not: a refused login or
-// an answer that was not a UID, which a second command meets again or may
-// find fixed.
+// the first time. A probe made by Reach whose connection never opened is
+// kept: the host is down for the rest of the run. Any other failure is not:
+// ssh's for a command, which the next command meets again, a refused login,
+// or an answer that was not a UID, which a second command may find fixed.
 func (l *Login) resolve(t SSHTransport) (string, error) {
 	l.mu.Lock()
 	host, first, err := l.resolveLocked(t)
@@ -71,8 +73,15 @@ func (l *Login) resolveLocked(t SSHTransport) (host string, first bool, err erro
 	bare := t
 	bare.Login, bare.DockerHost = nil, ""
 	out, err := bare.run(uidProbe, nil)
-	if errors.Is(err, ErrUnreachable) {
-		l.unreachable = err
+	var down *ui.Problem
+	if t.once && errors.Is(err, ErrUnreachable) && errors.As(err, &down) {
+		// Later commands say they were not tried, rather than repeat the
+		// probe's count of attempts as if they were their own.
+		l.unreachable = &ui.Problem{
+			Hint:    down.Hint,
+			Explain: "It did not answer the run's first login, so this run does not try it again. " + down.Explain,
+			Cause:   down.Cause,
+		}
 	}
 	if err != nil {
 		var p *ui.Problem

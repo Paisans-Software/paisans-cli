@@ -6335,8 +6335,10 @@ answers.
 makes one connection attempt, not the three a command makes (see *A connection
 that never opened is tried again*): a host that is switched off waits out ssh's
 connect timeout on every attempt, so the retries would only multiply the wait.
-A destination whose first login never connected is down for the rest of the
-run, and every later command to it fails at once. A blip that a retry would
+A site whose classification login never connected is down for the rest of the
+run, and every later command to it through the site's transport fails at once.
+A command's own first contact failing is not kept: the next command, a wait
+for Patroni's primary among them, tries again. A blip that a retry would
 have ridden out reads as the site not answering, and the next run reaches it.
 
 A down site is never removed by a run. The cluster keeps its member, as etcd

@@ -262,6 +262,10 @@ func TestALoginThatNeverConnectedTriesNoMore(t *testing.T) {
 	if *tries != 1 {
 		t.Errorf("ssh tried %d times, want once", *tries)
 	}
+	_, err := again.Run("docker ps")
+	if _, explain := ui.Describe(err); !strings.HasPrefix(explain, "It did not answer the run's first login, so this run does not try it again.") {
+		t.Errorf("explained %q, want it to say the command was not tried", explain)
+	}
 }
 
 // A login that refused is not kept: a refusal is the host's answer to this
@@ -281,5 +285,21 @@ func TestALoginThatWasRefusedIsAskedAgain(t *testing.T) {
 	}
 	if ran != 2 {
 		t.Errorf("ssh ran %d times, want twice", ran)
+	}
+}
+
+// A command's first contact that never connected is not kept: only Reach
+// decides a host is down for the run, and the next command, a wait loop's
+// among them, tries the host again with its own retries.
+func TestACommandThatNeverConnectedLeavesTheNextToTryAgain(t *testing.T) {
+	tries := downHost(t)
+	tr := apply.SSHTransport{User: "paisans-f2a9", Host: "203.0.113.10", PublicKeys: []string{keyA}, Login: apply.NewLogin(nil)}
+	for range 2 {
+		if _, err := tr.Run("docker ps"); !errors.Is(err, apply.ErrUnreachable) {
+			t.Fatalf("err = %v, want ErrUnreachable", err)
+		}
+	}
+	if *tries != 6 {
+		t.Errorf("ssh tried %d times, want three for each command", *tries)
 	}
 }
