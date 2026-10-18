@@ -18,7 +18,7 @@ changes share a bullet. Detailed notes are on the corresponding
 ### Fixed
 
 - `init` moves a never-applied mesh subnet clear of one `site admit` refused, admitting each site again on it instead of requiring evictions, and admit advises on a clashing role before the subnet.
-- `site admit`'s refusal of a host another deployment holds gives each clash, mesh subnet or role, one short sentence naming that deployment's id and domain or site, and `init`'s skip of that host leaves out the admit commands it would refuse again.
+- `site admit` says each clash with another deployment on a host in one short sentence naming its id and domain or site, and `init`'s skip of that host omits admit commands.
 - `init` moves the mesh subnet clear of one `site admit` refused beside a role, skipping that site, instead of keeping the subnet until the role clash is fixed.
 
 ## [0.3.0-rc.4] - 2026-10-17
