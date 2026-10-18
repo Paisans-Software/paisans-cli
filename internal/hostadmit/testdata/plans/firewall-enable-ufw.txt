@@ -346,7 +346,7 @@ step 24: arm the ufw fallback
     $ systemd-run --on-active=600 --timer-property=AccuracySec=1s --unit=paisans-ufw-fallback ufw disable
 
 step 25: enable ufw
-  firewall: enable ufw, every rule above already in place, with the default policy ufw has (Ubuntu's denies incoming). Admit allows only the TCP ports sshd listens on, and cannot see DROP rules written by hand in /etc/ufw/before.rules, before6.rules or user.rules, nor other ways in such as sslh, dropbear or mosh: if you rely on either, enable ufw by hand after checking them.
+  firewall: enable ufw, every rule above already in place, with the default policy ufw has (Ubuntu's denies incoming). Admit allows only the TCP ports sshd listens on, and names every other port that answers from off this host as it reads it. It cannot see DROP rules written by hand in /etc/ufw/before.rules, before6.rules or user.rules, nor a way in that is not listening as it reads the host, such as sslh, dropbear or mosh started later: if you rely on either, enable ufw by hand after checking them. Stays reachable: 22/tcp (sshd (pid 812, uid 0) listens on 0.0.0.0:22 and sshd (pid 812, uid 0) listens on [::]:22), sshd's port, which admit keeps allowed.
   run:
     $ ufw --force enable
 

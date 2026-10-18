@@ -4693,7 +4693,8 @@ request's field.
 Admitting needs ufw installed: `site admit` never installs it. When ufw is
 not active, admit enables it only with `--enable-ufw`, a yes at a
 terminal, or `--yes` with `--site`, behind a timer that turns it off again unless a new SSH login gets
-through (see *SSH is never shut out* below, and *If SSH stops answering after
+through, and only once nothing of the owner's that answers from off the host
+would be blocked, or the owner has said it may be (see *SSH is never shut out* below, and *If SSH stops answering after
 admit enables ufw* in
 [docs/guides/host-owners.md](docs/guides/host-owners.md)). Ports 80 and 443
 belong to one deployment per host. The egress table fences the deployment's
@@ -4850,7 +4851,9 @@ opened is tried again: three attempts in all, two and then four seconds apart,
 with one line on stderr per retry naming the destination, shown only with
 `--verbose`: a retry that succeeds is not news. After the third, the
 error says the host could not be reached, and a caller never reads that as an
-answer about the host (see *Never infer host state from a failed probe*).
+answer about the host (see *Never infer host state from a failed probe*). The
+one exception is a run's classification of its sites, which tries each once
+(see *A deployment with sites missing*).
 
 Only that failure is retried, and it is recognised by both of two signs. ssh
 "exits with the exit status of the remote command or with 255 if an error
@@ -5005,7 +5008,8 @@ it was sent, so leaving the password out is not left to each of them.
 `site evict` asks for the deployment's user name at a terminal unless `--yes`
 types it, and `site admit --request` for the request's digest unless
 `--digest` gives it, which `--yes` never does. `site admit --site` asks nothing once every grant is passed, `--ssh`
-is given, and ufw is active or `--enable-ufw` is passed, and `site
+is given, and ufw is active or `--enable-ufw` is passed, with
+`--enable-ufw-block-listed` where enabling it blocks a port that answers now, and `site
 deployments` asks nothing, so an unattended run of either needs a NOPASSWD
 sudoers rule for the login `--ssh` names. Whether to write one is a
 decision about the host, made by whoever owns it, and Paisans never makes
@@ -5411,6 +5415,17 @@ place before `ufw --force enable`, which does not stop to ask whether to
 disrupt existing connections, and a timer turns ufw off again unless a new SSH
 login gets through, which `--yes` never confirms (see `paisans site admit` in
 [docs/commands.md](docs/commands.md)).
+
+**Enabling ufw never silently blocks the owner's services.** Before it enables
+ufw, admit reads every listener off loopback, TCP and UDP, and every port the
+owner's Docker publishes or a NAT rule receives. A port that neither sshd, the
+deployment's own rules nor a rule of the owner's allows stops admit, which
+lists it with what serves it and the line that keeps it reachable: `sudo
+ufw allow` for a listener, `sudo ufw route allow` to the translated address
+for what NAT receives, which ufw decides as routed traffic. The system
+Docker's publishes on its iptables backend stay reachable, its rules ahead
+of ufw's. `--enable-ufw-block-listed`, or a second yes at a terminal, which
+`--yes` never gives, enables ufw over them, and the plan names each.
 
 **Nothing depends on the firewall for an app's port.** A rootless daemon's
 published port is a listener of its port forwarder, under the deployment user's
@@ -6328,6 +6343,16 @@ answers.
 | answers, and its admission record covers its roles | either | **ready** | as declared | normal |
 | refuses the login, does not answer, or is admitted without a grant its roles need | no | **pending** | left out: no mesh peer, no etcd or Patroni member, no Garage node, no DNS record, and its apps held back | goes on, degraded |
 | refuses the login or does not answer | yes | **down** | kept as declared: still a peer and a member, its records kept | goes on, degraded, without that site's steps |
+
+**A site that does not answer is tried once.** The classification's login
+makes one connection attempt, not the three a command makes (see *A connection
+that never opened is tried again*): a host that is switched off waits out ssh's
+connect timeout on every attempt, so the retries would only multiply the wait.
+A site whose classification login never connected is down for the rest of the
+run, and every later command to it through the site's transport fails at once.
+A command's own first contact failing is not kept: the next command, a wait
+for Patroni's primary among them, tries again. A blip that a retry would
+have ridden out reads as the site not answering, and the next run reaches it.
 
 A down site is never removed by a run. The cluster keeps its member, as etcd
 and Patroni keep any member that is down, and only `site remove` takes it out.

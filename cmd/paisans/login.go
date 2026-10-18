@@ -16,7 +16,8 @@ import (
 //
 // The map lives for one process run, keyed by destination (the transport's
 // Describe), and nothing in it is ever dropped: a cached UID is trusted for
-// the rest of the process. Any code that creates or removes a user and then
+// the rest of the process, and so is a destination the run's classification
+// found unreachable (apply.Reach). Any code that creates or removes a user and then
 // reaches that user in the same process must empty the map first, as the
 // tests' resetLogins does, so the first command after it asks the UID again.
 var (

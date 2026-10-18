@@ -3,10 +3,13 @@ package hostadmit
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
 )
 
@@ -14,7 +17,9 @@ import (
 // public ports are granted, then plans the deployment's tagged ufw rules
 // through the host profile. ufw that is installed but not active is
 // enabled only with --enable-ufw (planEnableUFW), after every rule; without
-// it admit refuses, naming the commands that enable it safely. Admit never
+// it admit refuses, naming the commands that enable it safely. Enabling it
+// over what answers from off the host and no rule allows needs
+// --enable-ufw-block-listed as well (exposure). Admit never
 // sets ufw's defaults: choosing the policy is the owner's.
 func planFirewall(p *planner) error {
 	req := p.in.Request
@@ -32,8 +37,25 @@ func planFirewall(p *planner) error {
 		if err := b.blocker(); err != nil {
 			return err
 		}
+		// What enabling ufw would block that answers from off the host
+		// now stops it, unless the owner has checked it may be blocked.
+		b.kept, b.blocked = p.exposure(b)
 		if !p.in.Flags.EnableUFW {
-			return &UFWInactiveError{SSHPorts: b.ports}
+			return &UFWInactiveError{SSHPorts: b.ports, Blocked: b.blocked}
+		}
+		if len(b.blocked) > 0 && !p.in.Flags.EnableUFWBlockListed {
+			return &UFWBlocksError{Blocked: b.blocked}
+		}
+		if p.in.blocksApproved {
+			var more []string
+			for _, x := range b.blocked {
+				if !slices.Contains(p.in.approvedBlocks, x.Key) {
+					more = append(more, x.Key+" ("+x.What+")")
+				}
+			}
+			if len(more) > 0 {
+				return fmt.Errorf("the host changed while admit ran: enabling ufw would now also block %s, which the plan you approved did not name, so ufw was not enabled. Nothing was changed", strings.Join(more, "; "))
+			}
 		}
 		before = &b
 	}
@@ -98,9 +120,37 @@ type holder struct{ What string }
 // system Docker with restart: always retakes its ports when that daemon
 // restarts, so it holds them too. Whatever it cannot read it says so, and
 // admit refuses rather than read it as nothing.
-const portsProbe = `# paisans site admit: who holds 80 and 443
-if out=$(ss -Hltnpe '( sport = :80 or sport = :443 )' 2>/dev/null); then printf '%s\n' "$out" | sed -n 's/^./listen &/p'; else echo 'unread listeners (ss)'; fi
-if out=$(ss -Hlunpe '( sport = :80 or sport = :443 )' 2>/dev/null); then printf '%s\n' "$out" | sed -n 's/^./listen-udp &/p'; else echo 'unread UDP sockets (ss)'; fi
+var portsProbe = `# paisans site admit: who holds 80 and 443
+` + listenProbe("'( sport = :80 or sport = :443 )'") + natProbe + `
+echo end`
+
+// listenProbe reads, as root, every TCP listener and every bound UDP
+// socket ss's filter keeps (every one for ""), with its process and uid,
+// as listen lines, each a line hostcheck.ParseSocketLine reads.
+func listenProbe(filter string) string {
+	if filter != "" {
+		filter = " " + filter
+	}
+	return `if out=$(ss -Hltunpe` + filter + ` 2>/dev/null); then printf '%s\n' "$out" | sed -n 's/^./listen &/p'; else echo 'unread listeners (ss -Hltunpe)'; fi`
+}
+
+// natProbe reads, as root, what receives traffic with no listener of its
+// own: the ports the system Docker's containers publish, running
+// (container lines) and stopped (stopped lines), and the DNAT and redirect
+// rules (dnat lines), as portsProbe describes, those in iptables-legacy's
+// tables too, which nft does not show, and only the tables the kernel
+// holds already, since naming another to a legacy iptables-save loads its
+// module, and a names file that cannot be read is a failed read; and which firewall backend
+// the system Docker uses, its daemon.json's firewall-backend
+// (docker-backend) and its chains in the filter table's FORWARD
+// (docker-chains), which decide whether its publishes pass ufw.
+var natProbe = natProbeAt("/proc/net")
+
+// natProbeAt is natProbe reading the legacy tables the kernel holds from
+// proc's ip_tables_names and ip6_tables_names.
+func natProbeAt(proc string) string {
+	return `
+if [ -r /etc/docker/daemon.json ]; then grep -o '"firewall-backend"[[:space:]]*:[[:space:]]*"[a-z]*"' /etc/docker/daemon.json 2>/dev/null | sed 's/^/docker-backend /'; fi
 if [ -S /var/run/docker.sock ]; then
   if out=$(` + systemDocker + ` ps --format '{{.Names}}\t{{.Ports}}\t{{.Label "com.docker.compose.project"}}' 2>/dev/null); then printf '%s\n' "$out" | sed -n 's/^./container &/p'; else echo 'unread containers (ps of the system Docker)'; fi
   if ids=$(` + systemDocker + ` ps -aq --filter status=exited --filter status=created 2>/dev/null); then
@@ -112,25 +162,49 @@ fi
 if command -v nft >/dev/null 2>&1; then
   if out=$(nft list ruleset 2>/dev/null); then
     printf '%s\n' "$out" | awk '/^table / { t = $2 " " $3 } /^[ \t]*chain / { c = $2 } { l = $0; gsub(/ct status dnat/, "", l) } (l ~ /dnat/ || l ~ /redirect/) && l ~ /dport/ { sub(/^[ \t]+/, ""); print "dnat table " t " chain " c ": " $0 }'
+    printf '%s\n' "$out" | awk '/^table / { t = $2 " " $3 } /^[ \t]*chain / { c = $2 } t == "ip filter" && c == "FORWARD" && /jump DOCKER-(USER|FORWARD)/ { print "docker-chains nft"; exit }'
   else echo 'unread ruleset (nft list ruleset)'; fi
+  for save in iptables-legacy-save ip6tables-legacy-save; do
+    command -v $save >/dev/null 2>&1 || continue
+    names=` + proc + `/ip_tables_names; [ $save = ip6tables-legacy-save ] && names=` + proc + `/ip6_tables_names
+    if [ -e "$names" ] && ! [ -r "$names" ]; then echo "unread ruleset ($names)"; continue; fi
+    held=$(cat "$names" 2>/dev/null)
+    if printf '%s\n' "$held" | grep -qx nat; then
+      if out=$($save -t nat 2>/dev/null); then printf '%s\n' "$out" | grep -E -- '-j (DNAT|REDIRECT)' | sed "s/^/dnat $save -t nat: /"; else echo "unread ruleset ($save)"; fi
+    fi
+    if printf '%s\n' "$held" | grep -qx filter; then
+      $save -t filter 2>/dev/null | grep -qE -- '^-A FORWARD -j DOCKER-(USER|FORWARD)' && echo "docker-chains $save"
+    fi
+  done
 else
   read=
   for save in iptables-save ip6tables-save; do
     command -v $save >/dev/null 2>&1 || continue
     read=1
-    if out=$($save -t nat 2>/dev/null); then printf '%s\n' "$out" | grep -E -- '-j (DNAT|REDIRECT)' | sed "s/^/dnat $save -t nat: /"; else echo "unread ruleset ($save)"; fi
+    held='nat
+filter'
+    case "$($save --version 2>/dev/null)" in *legacy*)
+      names=` + proc + `/ip_tables_names; [ $save = ip6tables-save ] && names=` + proc + `/ip6_tables_names
+      if [ -e "$names" ] && ! [ -r "$names" ]; then echo "unread ruleset ($names)"; continue; fi
+      held=$(cat "$names" 2>/dev/null) ;;
+    esac
+    if printf '%s\n' "$held" | grep -qx nat; then
+      if out=$($save -t nat 2>/dev/null); then printf '%s\n' "$out" | grep -E -- '-j (DNAT|REDIRECT)' | sed "s/^/dnat $save -t nat: /"; else echo "unread ruleset ($save)"; fi
+    fi
+    if printf '%s\n' "$held" | grep -qx filter; then
+      $save -t filter 2>/dev/null | grep -qE -- '^-A FORWARD -j DOCKER-(USER|FORWARD)' && echo "docker-chains $save"
+    fi
   done
   [ -n "$read" ] || echo 'unread ruleset (no nft or iptables-save)'
-fi
-echo end`
+fi`
+}
 
 var (
-	ssUID     = regexp.MustCompile(`\buid:(\d+)`)
-	ssProc    = regexp.MustCompile(`users:\(\("([^"]+)",pid=(\d+)`)
-	published = regexp.MustCompile(`:(\d+)(?:-(\d+))?->`)
-	dport     = regexp.MustCompile(`(! )?(?:--)?dports? (!= )?(\{[^}]*\}|\S+)`)
-	lowPort   = regexp.MustCompile(`:(80|443)$`)
-	portSpan  = regexp.MustCompile(`^(\d+)(?:[-:](\d+))?$`)
+	ssUID    = regexp.MustCompile(`\buid:(\d+)`)
+	ssProc   = regexp.MustCompile(`users:\(\("([^"]+)",pid=(\d+)`)
+	dport    = regexp.MustCompile(`(! )?(?:--)?dports? (!= )?(\{[^}]*\}|\S+)`)
+	lowPort  = regexp.MustCompile(`:(80|443)$`)
+	portSpan = regexp.MustCompile(`^(\d+)(?:[-:](\d+))?$`)
 )
 
 // holders is everything portsProbe found that is not the deployment's own:
@@ -152,38 +226,18 @@ func holders(p *planner) ([]holder, error) {
 		switch kind {
 		case "unread":
 			return nil, fmt.Errorf("reading what answers on 80 and 443: admit could not read the %s, so it cannot tell whether something else holds them. Nothing was changed", hostText(rest))
-		case "listen", "listen-udp":
-			f := strings.Fields(rest)
-			if len(f) < 4 || !lowPort.MatchString(f[3]) {
+		case "listen":
+			sock, ok := readSocket(rest)
+			if !ok || sock.Port != 80 && sock.Port != 443 || p.ownUID(sock.UID) {
 				continue
 			}
-			// ss prints no uid for a socket root holds.
-			uid := 0
-			if m := ssUID.FindStringSubmatch(rest); m != nil {
-				uid, _ = strconv.Atoi(m[1])
-			}
-			if p.ownUID(uid) {
-				continue
-			}
-			on := hostText(f[3])
-			if kind == "listen-udp" {
-				on += "/udp"
-			}
-			what := fmt.Sprintf("a process (uid %d) listens on %s", uid, on)
-			if m := ssProc.FindStringSubmatch(rest); m != nil {
-				what = fmt.Sprintf("%s (pid %s, uid %d) listens on %s", hostText(m[1]), m[2], uid, on)
-			}
-			found = append(found, holder{what})
+			found = append(found, holder{sock.what()})
 		case "container":
 			f := strings.Split(rest, "\t")
 			if len(f) < 2 || !publishesLow(f[1]) {
 				continue
 			}
-			what := "your Docker's container " + hostText(f[0]) + " publishes " + hostText(f[1])
-			if len(f) > 2 && f[2] != "" {
-				what += ", in compose project " + hostText(f[2])
-			}
-			found = append(found, holder{what})
+			found = append(found, holder{containerWhat(f)})
 		case "stopped":
 			f := strings.Fields(rest)
 			if len(f) < 3 || f[1] != "always" || !bindsLow(strings.Join(f[2:], " ")) {
@@ -202,6 +256,68 @@ func holders(p *planner) ([]holder, error) {
 	return found, nil
 }
 
+// socket is one listen line of a probe, as hostcheck reads it.
+type socket struct{ hostcheck.SocketLine }
+
+// readSocket reads one listen line, without its kind.
+func readSocket(rest string) (socket, bool) {
+	s, ok, err := hostcheck.ParseSocketLine(rest)
+	return socket{s}, ok && err == nil && s.Port > 0 && s.Port <= 65535
+}
+
+// what is the socket as the owner is shown it, quoted from the host.
+func (s socket) what() string {
+	on := hostText(s.Local)
+	if s.Proto == "udp" {
+		on += "/udp"
+	}
+	if s.Process == "" {
+		return fmt.Sprintf("a process (uid %d) listens on %s", s.UID, on)
+	}
+	return fmt.Sprintf("%s (pid %d, uid %d) listens on %s", hostText(s.Process), s.PID, s.UID, on)
+}
+
+// loopback reports whether the socket is bound to loopback alone, which
+// ufw never filters: a loopback address, or the lo device.
+func (s socket) loopback() bool {
+	return loopback(s.Address) || strings.Contains(s.Local, "%lo:")
+}
+
+// loopback reports whether addr, as hostcheck.BindAddress normalises one,
+// is a loopback address.
+func loopback(addr string) bool {
+	a, err := netip.ParseAddr(addr)
+	return err == nil && a.IsLoopback()
+}
+
+// families are the address families the socket takes: 4 and 6 for *,
+// which ss prints for a socket of both, 6 for an IPv6 address, and 4 for
+// an IPv4 one, mapped into IPv6 or not.
+func (s socket) families() []int {
+	switch {
+	case strings.HasPrefix(s.Local, "*"):
+		return []int{4, 6}
+	case strings.HasPrefix(s.Local, "[") && !strings.Contains(s.Address, "."):
+		return []int{6}
+	}
+	return []int{4}
+}
+
+// v6 reports whether the socket takes IPv6: bound to an IPv6 address, or
+// to *, which ss prints for a socket of both families.
+func (s socket) v6() bool {
+	return strings.HasPrefix(s.Local, "*") || strings.HasPrefix(s.Local, "[") && !strings.Contains(s.Address, ".")
+}
+
+// containerWhat is a container line's fields as the owner is shown them.
+func containerWhat(f []string) string {
+	what := "your Docker's container " + hostText(f[0]) + " publishes " + hostText(f[1])
+	if len(f) > 2 && f[2] != "" {
+		what += ", in compose project " + hostText(f[2])
+	}
+	return what
+}
+
 // nftCounter is an nft rule's counter as nft lists it, with its values.
 var nftCounter = regexp.MustCompile(` counter packets [0-9]+ bytes [0-9]+`)
 
@@ -209,81 +325,127 @@ var nftCounter = regexp.MustCompile(` counter packets [0-9]+ bytes [0-9]+`)
 // change from one run to the next and say nothing of what the rule holds.
 func withoutCounters(rule string) string { return nftCounter.ReplaceAllString(rule, "") }
 
-// hostPort is a host port in docker inspect's PortBindings, a port or a
-// range.
-var hostPort = regexp.MustCompile(`"HostPort":"(\d+)(?:-(\d+))?"`)
+// span is a port, or a range of ports from lo to hi, with its protocol
+// and, for a published one, the address it is published on.
+type span struct {
+	proto, addr string
+	lo, hi      int
+}
 
-// bindsLow reports whether docker inspect's PortBindings bind 80 or 443 on
-// the host.
-func bindsLow(bindings string) bool {
-	for _, m := range hostPort.FindAllStringSubmatch(bindings, -1) {
-		if holdsLow(m[1], m[2]) {
-			return true
+func (s span) has(port int) bool { return s.lo <= port && port <= s.hi }
+
+// spanOf is the span a port or a range as text names, false for neither.
+func spanOf(from, to string) (span, bool) {
+	lo, err := strconv.Atoi(from)
+	if err != nil || lo <= 0 || lo > 65535 {
+		return span{}, false
+	}
+	hi := lo
+	if to != "" {
+		if hi, err = strconv.Atoi(to); err != nil || hi < lo || hi > 65535 {
+			return span{}, false
 		}
 	}
-	return false
+	return span{lo: lo, hi: hi}, true
+}
+
+// published is one host port, or range, in docker ps's Ports column, with
+// the address it is published on and its protocol.
+var published = regexp.MustCompile(`([^\s,]*):(\d+)(?:-(\d+))?->[^\s,]*?/(\w+)`)
+
+// publishes is the host ports docker ps's Ports column publishes.
+func publishes(ports string) []span {
+	var out []span
+	for _, m := range published.FindAllStringSubmatch(ports, -1) {
+		if s, ok := spanOf(m[2], m[3]); ok {
+			s.addr, s.proto = hostcheck.BindAddress(m[1]), m[4]
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// bindings is the host ports docker inspect's PortBindings bind
+// (hostcheck.ParseBindings).
+func bindings(raw string) ([]span, error) {
+	list, err := hostcheck.ParseBindings(raw)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]span, 0, len(list))
+	for _, b := range list {
+		out = append(out, span{proto: b.Proto, addr: b.Address, lo: b.Lo, hi: b.Hi})
+	}
+	return out, nil
+}
+
+// bindsLow reports whether docker inspect's PortBindings bind 80 or 443 on
+// the host; bindings admit cannot read may.
+func bindsLow(raw string) bool {
+	list, err := bindings(raw)
+	return err != nil || slices.ContainsFunc(list, holdsLow)
 }
 
 // publishesLow reports whether docker ps's Ports column publishes 80 or
 // 443 on the host, alone or within a range.
-func publishesLow(ports string) bool {
-	for _, m := range published.FindAllStringSubmatch(ports, -1) {
-		if holdsLow(m[1], m[2]) {
-			return true
-		}
-	}
-	return false
+func publishesLow(ports string) bool { return slices.ContainsFunc(publishes(ports), holdsLow) }
+
+// portMatch is one destination port match of a NAT rule: the spans it
+// names, whether it is negated, and unread when its operand is anything
+// but ports and ranges (a named set, a map, a concatenation or a
+// service's name).
+type portMatch struct {
+	spans           []span
+	negated, unread bool
 }
 
-// ruleHoldsLow reports whether a DNAT or redirect rule matches 80 or 443
-// as its destination port: one port, a set, a range (nft's 1-1000,
-// iptables' 1:1000), or a negation (nft's !=, iptables' ! --dport), which
-// matches every port it does not name, so it holds 80 or 443 unless it
-// names both. An operand that is anything but ports and ranges, a named
-// set, a map, a concatenation or a service's name, is not one admit can
-// read, so the rule is taken to hold them, unresolved.
-func ruleHoldsLow(rule string) (holds, unresolved bool) {
+// rulePorts is every destination port match of a DNAT or redirect rule:
+// one port, a set, a range (nft's 1-1000, iptables' 1:1000), or a
+// negation (nft's !=, iptables' ! --dport), which matches every port it
+// does not name.
+func rulePorts(rule string) []portMatch {
+	var out []portMatch
 	for _, m := range dport.FindAllStringSubmatch(rule, -1) {
-		names := map[int]bool{}
+		pm := portMatch{negated: m[1] != "" || m[2] != ""}
 		tokens := strings.FieldsFunc(m[3], func(r rune) bool { return strings.ContainsRune("{}, ", r) })
-		if len(tokens) == 0 {
-			return true, true
-		}
+		pm.unread = len(tokens) == 0
 		for _, tok := range tokens {
 			s := portSpan.FindStringSubmatch(tok)
 			if s == nil {
-				return true, true
+				pm.unread = true
+				break
 			}
-			for _, port := range []int{80, 443} {
-				names[port] = names[port] || portIn(s[1], s[2], port)
+			if sp, ok := spanOf(s[1], s[2]); ok {
+				pm.spans = append(pm.spans, sp)
+			} else {
+				pm.unread = true
+				break
 			}
 		}
-		negated := m[1] != "" || m[2] != ""
-		if negated && !(names[80] && names[443]) || !negated && (names[80] || names[443]) {
+		out = append(out, pm)
+	}
+	return out
+}
+
+// ruleHoldsLow reports whether a DNAT or redirect rule matches 80 or 443
+// as its destination port (rulePorts). A negation holds 80 or 443 unless
+// it names both. A match admit cannot read is taken to hold them,
+// unresolved.
+func ruleHoldsLow(rule string) (holds, unresolved bool) {
+	for _, m := range rulePorts(rule) {
+		if m.unread {
+			return true, true
+		}
+		names := func(port int) bool { return slices.ContainsFunc(m.spans, func(s span) bool { return s.has(port) }) }
+		if m.negated && !(names(80) && names(443)) || !m.negated && (names(80) || names(443)) {
 			return true, false
 		}
 	}
 	return false, false
 }
 
-// portIn reports whether the port from, or the range from to to, holds port.
-func portIn(from, to string, port int) bool {
-	lo, err := strconv.Atoi(from)
-	if err != nil {
-		return false
-	}
-	hi := lo
-	if to != "" {
-		if hi, err = strconv.Atoi(to); err != nil {
-			return false
-		}
-	}
-	return lo <= port && port <= hi
-}
-
-// holdsLow reports whether the port from, or the range from to to, holds 80
-// or 443.
-func holdsLow(from, to string) bool { return portIn(from, to, 80) || portIn(from, to, 443) }
+// holdsLow reports whether s holds 80 or 443.
+func holdsLow(s span) bool { return s.has(80) || s.has(443) }
 
 // ownUID reports whether uid is the deployment's user or in its
 // subordinate range.

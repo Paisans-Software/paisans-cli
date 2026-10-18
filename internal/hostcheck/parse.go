@@ -46,39 +46,72 @@ func (s Socket) Listener() render.Listener {
 	return render.Listener{Proto: s.Proto, Address: s.Address, Port: s.Port}
 }
 
-// parseSockets reads `ss -Hltnue`: Netid, State, Recv-Q, Send-Q, Local
-// Address:Port, Peer Address:Port, then the details, uid:N among them. The port is after the
-// last colon, which holds for "*:22", "[::]:22" and "127.0.0.53%lo:53".
+// parseSockets reads `ss -Hltnue`, a SocketLine each (ParseSocketLine).
 func parseSockets(out string) ([]Socket, error) {
 	var list []Socket
 	for _, line := range strings.Split(out, "\n") {
-		f := strings.Fields(line)
-		if len(f) < 5 || (f[0] != "tcp" && f[0] != "udp") {
-			continue
-		}
-		local := f[4]
-		i := strings.LastIndex(local, ":")
-		if i < 0 {
-			return nil, fmt.Errorf("unreadable ss address %q", local)
-		}
-		port, err := strconv.Atoi(local[i+1:])
+		s, ok, err := ParseSocketLine(line)
 		if err != nil {
-			return nil, fmt.Errorf("unreadable ss port in %q", local)
+			return nil, err
 		}
-		s := Socket{Proto: f[0], Address: bindAddress(local[:i]), Port: port}
-		if m := uidField.FindStringSubmatch(line); m != nil {
-			s.UID, _ = strconv.Atoi(m[1])
+		if ok {
+			list = append(list, s.Socket)
 		}
-		list = append(list, s)
 	}
 	return list, nil
 }
 
-// bindAddress normalises an address as ss or Docker prints it: the interface
+// SocketLine is one line of `ss -Hl` with both -t and -u, so its first
+// field is the Netid: the socket, its local address as ss printed it, and
+// its process, when -p named one.
+type SocketLine struct {
+	Socket
+	// Local is the local address and port as ss printed them: *:80,
+	// [::1]:6379, 127.0.0.53%lo:53.
+	Local string
+	// Process and PID are the first process ss -p names, "" and 0 for none.
+	Process string
+	PID     int
+}
+
+// ssProcess is the first process `ss -p` names.
+var ssProcess = regexp.MustCompile(`users:\(\("([^"]+)",pid=(\d+)`)
+
+// ParseSocketLine reads one line of `ss -Hl` with -t and -u: Netid, State,
+// Recv-Q, Send-Q, Local Address:Port, Peer Address:Port, then the details,
+// uid:N and users:((...)) among them. The port is after the last colon,
+// which holds for "*:22", "[::]:22" and "127.0.0.53%lo:53". ok is false
+// for a line that is no TCP or UDP socket.
+func ParseSocketLine(line string) (s SocketLine, ok bool, err error) {
+	f := strings.Fields(line)
+	if len(f) < 5 || (f[0] != "tcp" && f[0] != "udp") {
+		return s, false, nil
+	}
+	local := f[4]
+	i := strings.LastIndex(local, ":")
+	if i < 0 {
+		return s, false, fmt.Errorf("unreadable ss address %q", local)
+	}
+	port, err := strconv.Atoi(local[i+1:])
+	if err != nil {
+		return s, false, fmt.Errorf("unreadable ss port in %q", local)
+	}
+	s = SocketLine{Socket: Socket{Proto: f[0], Address: BindAddress(local[:i]), Port: port}, Local: local}
+	if m := uidField.FindStringSubmatch(line); m != nil {
+		s.UID, _ = strconv.Atoi(m[1])
+	}
+	if m := ssProcess.FindStringSubmatch(line); m != nil {
+		s.Process = m[1]
+		s.PID, _ = strconv.Atoi(m[2])
+	}
+	return s, true, nil
+}
+
+// BindAddress normalises an address as ss or Docker prints it: the interface
 // scope and brackets dropped, an IPv4-mapped IPv6 address read as the IPv4
 // address it is ([::ffff:127.0.0.1] is 127.0.0.1), and every spelling of
 // "any address" made "", as render.Listener has it.
-func bindAddress(a string) string {
+func BindAddress(a string) string {
 	if i := strings.Index(a, "%"); i >= 0 {
 		a = a[:i]
 	}
@@ -125,10 +158,7 @@ type inspectedContainer struct {
 	PID      int                        `json:"pid"`
 	Labels   map[string]string          `json:"labels"`
 	Networks map[string]json.RawMessage `json:"networks"`
-	Ports    map[string][]struct {
-		HostIP   string `json:"HostIp"`
-		HostPort string `json:"HostPort"`
-	} `json:"ports"`
+	Ports    portBindings               `json:"ports"`
 }
 
 func parseContainers(out string) ([]Container, error) {
@@ -143,22 +173,10 @@ func parseContainers(out string) ([]Container, error) {
 			c.Networks = append(c.Networks, name)
 		}
 		sort.Strings(c.Networks)
-		ports := make([]string, 0, len(in.Ports))
-		for p := range in.Ports {
-			ports = append(ports, p)
-		}
-		sort.Strings(ports)
-		for _, p := range ports {
-			proto := "tcp"
-			if _, after, ok := strings.Cut(p, "/"); ok {
-				proto = after
-			}
-			for _, b := range in.Ports[p] {
-				port, err := strconv.Atoi(b.HostPort)
-				if err != nil || port == 0 {
-					continue // an ephemeral port, which no claim can name
-				}
-				c.Bindings = append(c.Bindings, render.Listener{Owner: c.Name, Proto: proto, Address: bindAddress(b.HostIP), Port: port})
+		for _, b := range bindingsOf(in.Ports) {
+			// A range no claim names, as an ephemeral port is not.
+			if b.Lo == b.Hi {
+				c.Bindings = append(c.Bindings, render.Listener{Owner: c.Name, Proto: b.Proto, Address: b.Address, Port: b.Lo})
 			}
 		}
 		list = append(list, c)
@@ -289,4 +307,62 @@ func parsePackages(out string) []string {
 		}
 	}
 	return found
+}
+
+// portBindings is a container's HostConfig.PortBindings as docker inspect
+// prints it: {"443/tcp":[{"HostIp":"","HostPort":"8443"}]}.
+type portBindings map[string][]struct {
+	HostIP   string `json:"HostIp"`
+	HostPort string `json:"HostPort"`
+}
+
+// Binding is one host port, or range of ports from Lo to Hi, a container
+// publishes, with its protocol and its bound address ("" for every
+// address).
+type Binding struct {
+	Proto, Address string
+	Lo, Hi         int
+}
+
+// ParseBindings reads a container's PortBindings as `docker inspect
+// --format '{{json .HostConfig.PortBindings}}'` prints them.
+func ParseBindings(raw string) ([]Binding, error) {
+	var in portBindings
+	if err := json.Unmarshal([]byte(raw), &in); err != nil {
+		return nil, err
+	}
+	return bindingsOf(in), nil
+}
+
+// bindingsOf is in's host ports, in the order of their container ports. A
+// binding with no host port, which Docker picks when the container
+// starts, is an ephemeral port none names, and is left out.
+func bindingsOf(in portBindings) []Binding {
+	ports := make([]string, 0, len(in))
+	for p := range in {
+		ports = append(ports, p)
+	}
+	sort.Strings(ports)
+	var out []Binding
+	for _, p := range ports {
+		proto := "tcp"
+		if _, after, ok := strings.Cut(p, "/"); ok {
+			proto = after
+		}
+		for _, b := range in[p] {
+			from, to, ranged := strings.Cut(b.HostPort, "-")
+			lo, err := strconv.Atoi(from)
+			if err != nil || lo <= 0 {
+				continue
+			}
+			hi := lo
+			if ranged {
+				if hi, err = strconv.Atoi(to); err != nil || hi < lo {
+					continue
+				}
+			}
+			out = append(out, Binding{Proto: proto, Address: BindAddress(b.HostIP), Lo: lo, Hi: hi})
+		}
+	}
+	return out
 }
