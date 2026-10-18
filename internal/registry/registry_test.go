@@ -457,7 +457,7 @@ func TestRoleConflicts(t *testing.T) {
 		theirs.Site = "tank"
 		e := roleEntry("f2a9", "", 51821, "10.44.0.0/24", "apps,data")
 		c := Conflict{ID: other, Entry: theirs, Clashes: clashes(theirs, e)}
-		want := "vm: mesh subnet 10.44.0.0/24 conflicts with deployment " + other + " (site tank). Deployment " + other + " (site tank) holds the data role on this host. One host runs one deployment's data site: it binds the Postgres and etcd ports and holds the cluster's storage. Use another host for one of the data sites. Nothing was changed"
+		want := "vm: mesh subnet 10.44.0.0/24 conflicts with deployment " + other + " (site tank). Deployment " + other + " (site tank) holds the data role on this host. Its Patroni holds the host's watchdog, which one deployment at a time can hold. Use another host for one of the data sites. Nothing was changed"
 		if got := refused(fakeHost{}, e, c).Error(); got != want {
 			t.Errorf("got:\n%s\nwant:\n%s", got, want)
 		}

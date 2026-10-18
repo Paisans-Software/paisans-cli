@@ -1696,10 +1696,12 @@ refused with the request line the owner needs. Nothing on any host has
 changed when it refuses.
 
 **A host runs one deployment's gateway and one deployment's data site.** The
-gateway binds ports 80 and 443, and its Caddy imports `/srv/paisans/<token>/caddy.d`; a data
-site binds the Postgres and etcd ports and holds the cluster's storage. None
-of these can be split between two deployments, so each entry records the
-site's `roles`, sorted and joined with commas, and the claim refuses a
+gateway binds ports 80 and 443 on every interface, and its Caddy imports
+`/srv/paisans/<token>/caddy.d`; a data site's Patroni holds the host's
+`/dev/watchdog`, which has one claimant (see *There is one HA cluster, and
+that is deliberate*). Neither can be split between two deployments, so each
+entry records the site's `roles`, sorted and joined with commas, and the
+claim refuses a
 deployment claiming `gateway` on a host where another already holds
 `gateway`, and the same for `data`. The refusal says to use another host for
 one of them. Every other role shares a host freely.

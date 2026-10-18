@@ -21,8 +21,8 @@
 //
 // It also keeps the gateway and the data role to one deployment per host.
 // The gateway owns ports 80 and 443 and the Caddy that imports its deployment's caddy.d;
-// a data site owns the Postgres and etcd ports and the storage under
-// them. Each entry carries the site's roles as one string, sorted and joined
+// a data site's Patroni holds the host's watchdog, which one deployment at
+// a time can hold. Each entry carries the site's roles as one string, sorted and joined
 // with commas (Eg: "apps,data,gateway"), so the awk merge tests a role with
 // one index() on the list wrapped in commas, and a claim is refused when
 // another deployment holds gateway and this one claims gateway, or data and
@@ -111,7 +111,7 @@ type Entry struct {
 
 // exclusiveRoles are the roles one host gives to one deployment: the gateway
 // binds 80 and 443 and runs the Caddy that imports its deployment's caddy.d, and a data
-// site binds the Postgres and etcd ports and holds the cluster's storage.
+// site's Patroni holds the host's watchdog, which has one claimant.
 var exclusiveRoles = []config.Role{config.RoleData, config.RoleGateway}
 
 // JoinRoles is roles in an entry's form: sorted, joined with commas.
@@ -618,7 +618,7 @@ func (r clashError) Error() string {
 				s += ", whose mesh subnet is " + r.c.Entry.Subnet
 			}
 		case clash == "the data role":
-			s = who + " holds the data role on this host. One host runs one deployment's data site: it binds the Postgres and etcd ports and holds the cluster's storage. Use another host for one of the data sites"
+			s = who + " holds the data role on this host. Its Patroni holds the host's watchdog, which one deployment at a time can hold. Use another host for one of the data sites"
 		case clash == "the gateway role":
 			s = who + " holds the gateway role on this host. One host gives ports 80 and 443 to one deployment: its gateway binds them and its Caddy imports its deployment's caddy.d, and a site admitted with --public-ports holds them too. Use another host for one of them"
 		default:
