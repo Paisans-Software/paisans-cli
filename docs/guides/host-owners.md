@@ -19,12 +19,18 @@ reach only over SSH is the one step here that can lock you out.
 
 ## What you need
 
-* **Ubuntu 22.04 or 24.04, amd64 or arm64.** Admit refuses any other
+* **Ubuntu 22.04, 24.04 or 26.04, amd64 or arm64.** Admit refuses any other
   release, naming the ones it supports; the binary exists for amd64 and
   arm64 only. If your machine will hold the deployment's database (a data
   site), it must have the same architecture as the deployment's other data
   sites, which the operators' `site add` checks; the Ubuntu release may
   differ.
+* **sudo, not sudo-rs.** Admit reads with `sudo -l` whether a `Defaults`
+  line passes the deployment user's environment to the WireGuard helper,
+  which runs as root, and sudo-rs does not list them, so admit refuses it.
+  Ubuntu 26.04 makes sudo-rs `sudo` and installs the original beside it as
+  `/usr/bin/sudo.ws`; make that `sudo` before admitting, with
+  `sudo update-alternatives --set sudo /usr/bin/sudo.ws`.
 * **ufw installed.** Admit adds the deployment's rules to ufw and never
   installs it. If ufw is installed and not active, see step 4.
 * **Docker Engine 29.5 or later from Docker's repository, or no Docker.**
@@ -35,7 +41,7 @@ reach only over SSH is the one step here that can lock you out.
   `dockerd-rootless-setuptool.sh` (Ubuntu's `docker.io`, for one) is refused,
   with the reason. Your own Docker keeps running beside the deployment's,
   untouched.
-* **User namespaces that rootless Docker may use.** Ubuntu 24.04 restricts
+* **User namespaces that rootless Docker may use.** Ubuntu 24.04 and 26.04 restrict
   unprivileged user namespaces and ships the AppArmor profile,
   `/etc/apparmor.d/rootlesskit`, that lets rootless Docker past the
   restriction; admit checks that it is loaded. Ubuntu 22.04 has neither the
@@ -286,8 +292,8 @@ it fires leaves ufw enabled, and you locked out.
 * **cgroup delegation**, `/etc/systemd/system/user@.service.d/delegate.conf`,
   a drop-in for every user's systemd manager that delegates cpu, cpuset,
   io, memory and pids, so the deployment's containers can be limited. Ubuntu
-  24.04 delegates cpu, memory and pids without it, 22.04 only memory and
-  pids. It is shared by every deployment admitted here. A manager already
+  24.04 and 26.04 delegate cpu, memory and pids without it, 22.04 only
+  memory and pids. It is shared by every deployment admitted here. A manager already
   running takes it at its next start, which the plan warns of, since admit
   never restarts it.
 * **The deployment's own Docker**, running as its user, and `br_netfilter`,

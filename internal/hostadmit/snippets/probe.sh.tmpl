@@ -134,7 +134,9 @@ else
   done
 fi
 # sudo-rs lists no Defaults under sudo -l, so admit cannot read them.
+# Ubuntu 26.04 makes it sudo, with the original beside it as sudo.ws.
 if command -v sudo >/dev/null 2>&1 && sudo -V 2>/dev/null | sed -n 1p | grep -q '^sudo-rs'; then say sudo-kind rs; fi
+if [ -x /usr/bin/sudo.ws ]; then say sudo-ws yes; fi
 # The user's home, or the one useradd would give a user not made yet: it
 # is stat'ed, never read inside, and read without a trailing slash, which
 # would follow a link there.
