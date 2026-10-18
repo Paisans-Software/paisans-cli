@@ -139,8 +139,8 @@ func listenProbe(filter string) string {
 // (container lines) and stopped (stopped lines), and the DNAT and redirect
 // rules (dnat lines), as portsProbe describes, those in iptables-legacy's
 // tables too, which nft does not show, and only the tables the kernel
-// holds already, since naming another to iptables-legacy-save loads its
-// module; and which firewall backend
+// holds already, since naming another to a legacy iptables-save loads its
+// module, and a names file that cannot be read is a failed read; and which firewall backend
 // the system Docker uses, its daemon.json's firewall-backend
 // (docker-backend) and its chains in the filter table's FORWARD
 // (docker-chains), which decide whether its publishes pass ufw.
@@ -167,6 +167,7 @@ if command -v nft >/dev/null 2>&1; then
   for save in iptables-legacy-save ip6tables-legacy-save; do
     command -v $save >/dev/null 2>&1 || continue
     names=` + proc + `/ip_tables_names; [ $save = ip6tables-legacy-save ] && names=` + proc + `/ip6_tables_names
+    if [ -e "$names" ] && ! [ -r "$names" ]; then echo "unread ruleset ($names)"; continue; fi
     held=$(cat "$names" 2>/dev/null)
     if printf '%s\n' "$held" | grep -qx nat; then
       if out=$($save -t nat 2>/dev/null); then printf '%s\n' "$out" | grep -E -- '-j (DNAT|REDIRECT)' | sed "s/^/dnat $save -t nat: /"; else echo "unread ruleset ($save)"; fi
@@ -180,8 +181,19 @@ else
   for save in iptables-save ip6tables-save; do
     command -v $save >/dev/null 2>&1 || continue
     read=1
-    if out=$($save -t nat 2>/dev/null); then printf '%s\n' "$out" | grep -E -- '-j (DNAT|REDIRECT)' | sed "s/^/dnat $save -t nat: /"; else echo "unread ruleset ($save)"; fi
-    $save -t filter 2>/dev/null | grep -qE -- '^-A FORWARD -j DOCKER-(USER|FORWARD)' && echo "docker-chains $save"
+    held='nat
+filter'
+    case "$($save --version 2>/dev/null)" in *legacy*)
+      names=` + proc + `/ip_tables_names; [ $save = ip6tables-save ] && names=` + proc + `/ip6_tables_names
+      if [ -e "$names" ] && ! [ -r "$names" ]; then echo "unread ruleset ($names)"; continue; fi
+      held=$(cat "$names" 2>/dev/null) ;;
+    esac
+    if printf '%s\n' "$held" | grep -qx nat; then
+      if out=$($save -t nat 2>/dev/null); then printf '%s\n' "$out" | grep -E -- '-j (DNAT|REDIRECT)' | sed "s/^/dnat $save -t nat: /"; else echo "unread ruleset ($save)"; fi
+    fi
+    if printf '%s\n' "$held" | grep -qx filter; then
+      $save -t filter 2>/dev/null | grep -qE -- '^-A FORWARD -j DOCKER-(USER|FORWARD)' && echo "docker-chains $save"
+    fi
   done
   [ -n "$read" ] || echo 'unread ruleset (no nft or iptables-save)'
 fi`
