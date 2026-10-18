@@ -14,11 +14,14 @@ import (
 )
 
 // APIVersion is the newest blueprint format this toolkit reads, and
-// APIVersionV1 the one before it, read as well. v2 is v1 with heartbeat: a
-// blueprint that declares one names v2, so a toolkit that cannot read it
-// refuses the format by name and uses an older catalog release.
+// APIVersionV2 and APIVersionV1 the ones before it, read as well. v2 is v1
+// with heartbeat, and v3 is v2 whose templates may read .DisplayName and
+// .CommunityName. A blueprint that uses either names its format, so a toolkit
+// that cannot read it refuses the format by name and uses an older catalog
+// release.
 const (
-	APIVersion   = "paisans.blueprint/v2"
+	APIVersion   = "paisans.blueprint/v3"
+	APIVersionV2 = "paisans.blueprint/v2"
 	APIVersionV1 = "paisans.blueprint/v1"
 )
 
@@ -177,8 +180,8 @@ func Parse(name string, content []byte, hasTemplate func(string) bool) (*Def, er
 }
 
 func (s spec) def(name string, hasTemplate func(string) bool) (*Def, error) {
-	if s.APIVersion != APIVersion && s.APIVersion != APIVersionV1 {
-		return nil, fmt.Errorf("apiVersion: is %q, and this toolkit reads %s and %s", s.APIVersion, APIVersionV1, APIVersion)
+	if s.APIVersion != APIVersion && s.APIVersion != APIVersionV2 && s.APIVersion != APIVersionV1 {
+		return nil, fmt.Errorf("apiVersion: is %q, and this toolkit reads %s, %s and %s", s.APIVersion, APIVersionV1, APIVersionV2, APIVersion)
 	}
 	if s.Name != name {
 		return nil, fmt.Errorf("name: is %q, but the blueprint's directory is %s", s.Name, name)

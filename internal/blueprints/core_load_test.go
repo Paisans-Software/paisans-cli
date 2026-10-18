@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -97,7 +98,7 @@ func TestACoreReleaseThisBinaryCannotReadIsSkipped(t *testing.T) {
 			os.WriteFile(f, []byte(strings.Replace(string(raw), "pocket-id:v*.*.*", "pocket-id:v2.*.*", 1)), 0o644)
 			p := filepath.Join(dir, "blueprints", "mbin", "blueprint.yaml")
 			raw, _ = os.ReadFile(p)
-			os.WriteFile(p, []byte(strings.Replace(string(raw), "paisans.blueprint/v1", "paisans.blueprint/v3", 1)), 0o644)
+			os.WriteFile(p, []byte(regexp.MustCompile(`paisans\.blueprint/v[0-9]+`).ReplaceAllString(string(raw), "paisans.blueprint/v99")), 0o644)
 		},
 	})
 	t.Setenv("PAISANS_CORE_CATALOG", url)
