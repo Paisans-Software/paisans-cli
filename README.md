@@ -6137,27 +6137,29 @@ host's to 1 for a reverse path workaround of its own
 that runs Tailscale for its owner gives the deployment the wait.
 
 **`deployment apply` sets it to 0 in the namespace, as the deployment's user.**
-The namespace belongs to that user's user namespace, so writing its
-`/proc/sys/net/ipv4/conf/all/src_valid_mark` and `default/src_valid_mark` needs
-no root, and the host's own value, which Tailscale needs, is not touched. A
-restart of the daemon makes the namespace afresh with the host's value, so
-`deployment apply` also installs
+It writes 0 to every `/proc/sys/net/ipv4/conf/*/src_valid_mark` there: `all`,
+which the kernel ORs with each device's own value, each device's, and
+`default`, which a device made later starts with. The namespace belongs to
+that user's user namespace, so this needs no root, and the host's own value,
+which Tailscale needs, is not touched. A restart of the daemon makes the
+namespace afresh with the host's values, so `deployment apply` also installs
 `~/.config/systemd/user/docker.service.d/paisans-src-valid-mark.conf`, whose
-`ExecStartPost` sets both again at every start, and has the user's manager
+`ExecStartPost` writes them again at every start, and has the user's manager
 reload it. Its command starts with `-`, so a failure there never stops the
 daemon from starting: the daemon then runs with the wait, and `paisans doctor`
 says so.
 
 Before any stack moves, after the mesh, `deployment apply` reads the drop-in
-and the namespace's value. It installs the drop-in when it is absent or
-differs, then sets the value when it reads 1, and stops the apply if either
+and the namespace's highest value. It installs the drop-in when it is absent
+or differs, then writes the values when one reads 1, and stops the apply if either
 fails, so no container is started into a namespace with the wait. A read that
 fails asks for nothing: it is not a gate, and `paisans doctor` reports a
 namespace it cannot read. A scoped plan, which leaves every stack to its
 caller, does not read it.
 
-`paisans doctor` reads the value with its rootless Docker check and fails a
-site whose namespace holds 1, naming Tailscale and `paisans deployment apply`.
+`paisans doctor` reads the highest value with its rootless Docker check and
+fails a site whose namespace holds 1, naming Tailscale and
+`paisans deployment apply`.
 
 ### `paisans deployment apply` with no `--site` converges the whole deployment
 
@@ -9752,7 +9754,7 @@ closing list is usually the cause of those after it:
 | User | `id -u`, `id -un`, `id -nG` and `id -G` | the user has uid 0, is in a group `site admit` refuses (`admitrules.PrivilegedGroups`), or is in a group of GID 0 under any name. Groups doctor cannot read are a `WARN` |
 | Docker | `docker version` and `docker info`'s security options, against the user's own socket | the daemon does not answer or is not rootless. When it does not answer, nothing that runs `docker` on the site is checked. An answer doctor cannot read is a `WARN` |
 | Docker engine | the version `docker version` read | older than 29.5 |
-| Docker source mark | `net.ipv4.conf.all.src_valid_mark` in RootlessKit's network namespace, read with the Docker check by entering the namespace as the user | it is 1, so every new connection to an app waits a second and the app sees the bridge's address: the recovery is `paisans deployment apply --execute`. See *`deployment apply` keeps the rootless namespace's `src_valid_mark` at 0*. A value doctor cannot read is a `WARN` |
+| Docker source mark | the highest `src_valid_mark` under `/proc/sys/net/ipv4/conf` in RootlessKit's network namespace, read with the Docker check by entering the namespace as the user | it is 1, so every new connection to an app waits a second and the app sees the bridge's address: the recovery is `paisans deployment apply --execute`. See *`deployment apply` keeps the rootless namespace's `src_valid_mark` at 0*. A value doctor cannot read is a `WARN` |
 | Linger | `loginctl show-user <user> --property=Linger --value`, and whether the drop-in `/etc/systemd/system/user@<uid>.service.d/paisans-mesh.conf` exists | linger is off: the user's Docker stops when the last login ends and does not start at boot. Or the drop-in is missing, so the user's manager is not ordered after the mesh. An answer doctor cannot read, the mesh-order line included, is a `WARN` |
 | Sudo rights | `LC_ALL=C sudo -n -l`, or `/usr/bin/sudo.ws -n -l` where sudo is sudo-rs | sudo lets the user run anything but the WireGuard helper as root, carries a Defaults entry or runas line beyond admit's one rule, or does not let it run the helper. An answer doctor cannot read, such as a translated one, is a `WARN` |
 | Mesh | `ip -j link show dev psns-<token>`, then the overlap test of *Two deployments on one host never share a mesh*: `ip -j route show table all`, `ip -j addr`, `docker network inspect` and the user's `~/.config/docker/daemon.json`, on every site that answered | the interface is missing or down, or anything outside it overlaps `mesh.subnet`, named with the subnet. The advice is that the subnet is fixed once deployed and the other network moves |

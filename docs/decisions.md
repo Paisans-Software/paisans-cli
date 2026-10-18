@@ -3356,11 +3356,12 @@ Founder direction, 2026-10-18.
 
 ### What was decided
 
-* `deployment apply` sets `net.ipv4.conf.all.src_valid_mark` and
-  `default/src_valid_mark` to 0 in RootlessKit's network namespace, as the
-  deployment's user, when it reads 1, before any stack moves.
-* It installs a user drop-in for `docker.service` whose `ExecStartPost` sets
-  both again at every start of the daemon, prefixed `-` so it can never fail
+* `deployment apply` writes 0 to every `src_valid_mark` under
+  `/proc/sys/net/ipv4/conf` in RootlessKit's network namespace (`all`, each
+  device's and `default`), as the deployment's user, when one reads 1, before
+  any stack moves.
+* It installs a user drop-in for `docker.service` whose `ExecStartPost` writes
+  them again at every start of the daemon, prefixed `-` so it can never fail
   the start.
 * `paisans doctor` fails a site whose namespace holds 1, with apply as the
   recovery.

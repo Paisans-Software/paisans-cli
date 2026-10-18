@@ -40,7 +40,7 @@ func TestApplySetsTheRootlessNamespacesSourceMarkBeforeAnyStack(t *testing.T) {
 	if err := apply.Execute(p, host); err != nil {
 		t.Fatal(err)
 	}
-	install, reset, up := host.index("daemon-reload"), host.index("echo 0 > /proc/sys/net/ipv4/conf/all/src_valid_mark"), host.index("up -d")
+	install, reset, up := host.index("daemon-reload"), host.index("echo 0 | tee /proc/sys/net/ipv4/conf/*/src_valid_mark"), host.index("up -d")
 	if install < 0 || reset < 0 || up < 0 || install > reset || reset > up {
 		t.Fatalf("the drop-in, the reset and the first stack ran out of order (%d, %d, %d): %q", install, reset, up, host.commands)
 	}
@@ -72,7 +72,7 @@ func TestApplyLeavesARightNamespaceAlone(t *testing.T) {
 	if err := apply.Execute(p, host); err != nil {
 		t.Fatal(err)
 	}
-	if host.ran("echo 0 > /proc/sys") || host.ran("daemon-reload") {
+	if host.ran("echo 0 | tee") || host.ran("daemon-reload") {
 		t.Errorf("apply changed a namespace that needed nothing: %q", host.commands)
 	}
 }
@@ -123,7 +123,7 @@ func TestAFailedResetStopsTheApplyBeforeAnyStack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	host.fail = "echo 0 > /proc/sys/net/ipv4/conf/all/src_valid_mark"
+	host.fail = "echo 0 | tee /proc/sys/net/ipv4/conf/*/src_valid_mark"
 	err = apply.Execute(p, host)
 	if err == nil || !strings.Contains(err.Error(), "src_valid_mark") {
 		t.Fatalf("got %v", err)

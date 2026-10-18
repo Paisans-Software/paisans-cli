@@ -30,10 +30,15 @@ import (
 // SourceMarkDropIn is the drop-in, relative to the deployment user's home.
 const SourceMarkDropIn = ".config/systemd/user/docker.service.d/paisans-src-valid-mark.conf"
 
-// sourceMarkCommand writes 0 to the namespace's all and default values. A
-// device's own value is ORed with all's, and default is what a bridge made
-// later starts with.
-const sourceMarkCommand = "echo 0 > /proc/sys/net/ipv4/conf/all/src_valid_mark && echo 0 > /proc/sys/net/ipv4/conf/default/src_valid_mark"
+// sourceMarkCommand writes 0 to every value in the namespace: all's, which
+// the kernel ORs with each device's own, each device's, and default's, which
+// a device made later starts with.
+// It holds no variable or quote, so the drop-in carries it as it is.
+const sourceMarkCommand = "echo 0 | tee /proc/sys/net/ipv4/conf/*/src_valid_mark > /dev/null"
+
+// SourceMarkRead prints the highest value in the namespace, 1 when any one
+// device, all or default holds 1. doctor reads it too.
+const SourceMarkRead = "cat /proc/sys/net/ipv4/conf/*/src_valid_mark | sort -n | tail -n 1"
 
 // SourceMarkDropInContent is the drop-in apply installs. %t is the user
 // manager's runtime directory, where RootlessKit keeps its state, and $$ is a
@@ -56,17 +61,18 @@ func InRootlessNamespace(command string) string {
 }
 
 // SourceMarkProbe prints the drop-in's checksum, or absent, and the
-// namespace's src_valid_mark, or unknown when the namespace cannot be read.
+// namespace's highest src_valid_mark, or unknown when the namespace cannot be
+// read.
 var SourceMarkProbe = `f="$HOME/` + SourceMarkDropIn + `"; ` +
 	`if [ -f "$f" ]; then echo "dropin $(sha256sum < "$f" | cut -c1-64)"; else echo "dropin absent"; fi; ` +
-	`if v=$(` + InRootlessNamespace("cat /proc/sys/net/ipv4/conf/all/src_valid_mark") + ` 2>/dev/null); then echo "mark $v"; else echo "mark unknown"; fi`
+	`if v=$(` + InRootlessNamespace(SourceMarkRead) + ` 2>/dev/null); then echo "mark $v"; else echo "mark unknown"; fi`
 
 // SourceMarkStep is what the deployment user's rootless namespace needs.
 type SourceMarkStep struct {
 	// DropIn installs SourceMarkDropInContent: the host has none, or one
 	// that differs.
 	DropIn bool
-	// Reset sets the running namespace's value to 0: it reads 1.
+	// Reset sets every value in the running namespace to 0: one reads 1.
 	Reset bool
 }
 

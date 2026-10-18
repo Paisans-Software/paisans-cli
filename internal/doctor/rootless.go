@@ -38,11 +38,10 @@ const UserCommand = `printf 'uid %s\nuser %s\ngroups %s\ngids %s\n' "$(id -u)" "
 // daemon there for its Engine version and its security options, which name
 // rootless for a daemon running as its user. The transport exports
 // DOCKER_HOST as the login user's own socket ahead of every command. Last it
-// prints net.ipv4.conf.all.src_valid_mark in RootlessKit's network
-// namespace, or unknown, a read that never fails the command (see
-// SourceMark).
+// prints the highest src_valid_mark in RootlessKit's network namespace, or
+// unknown, a read that never fails the command (see SourceMark).
 var DockerCommand = `printf 'host %s\n' "${DOCKER_HOST:-unset}" && docker version --format 'engine {{.Server.Version}}' && docker info --format 'security {{json .SecurityOptions}}' && ` +
-	`printf 'source-mark %s\n' "$(` + apply.InRootlessNamespace("cat /proc/sys/net/ipv4/conf/all/src_valid_mark") + ` 2>/dev/null || echo unknown)"`
+	`printf 'source-mark %s\n' "$(` + apply.InRootlessNamespace(apply.SourceMarkRead) + ` 2>/dev/null || echo unknown)"`
 
 // LingerCommand prints whether systemd keeps the login user's instance, and
 // with it the user's Docker daemon, running with no session open, and
@@ -213,8 +212,8 @@ func DockerEngine(probes []DockerProbe) []Finding {
 	return out
 }
 
-// SourceMark checks that src_valid_mark is 0 in the rootless daemon's
-// RootlessKit namespace. At 1, which the namespace copies from a host
+// SourceMark checks that src_valid_mark is 0 throughout the rootless
+// daemon's RootlessKit namespace: all, default and every device. At 1, which the namespace copies from a host
 // running Tailscale, RootlessKit's dial of each connection to a published
 // port is dropped, and it dials again a second later without the client's
 // address: every new connection to an app waits a second, and the app sees
@@ -242,7 +241,7 @@ func SourceMark(probes []DockerProbe) []Finding {
 		default:
 			out = append(out, Finding{Section: SectionDocker, Level: Warn,
 				Line: fmt.Sprintf("%s: src_valid_mark in its RootlessKit namespace could not be read", p.Site),
-				More: []string{fmt.Sprintf("At 1, every new connection to an app waits a second. As the deployment's user on %s, `nsenter -U --preserve-credentials -t \"$(cat /run/user/$(id -u)/dockerd-rootless/child_pid)\" -m nsenter --net=/run/user/$(id -u)/dockerd-rootless/netns cat /proc/sys/net/ipv4/conf/all/src_valid_mark` reads it.", p.Site)}})
+				More: []string{fmt.Sprintf("At 1, every new connection to an app waits a second. As the deployment's user on %s, `nsenter -U --preserve-credentials -t \"$(cat /run/user/$(id -u)/dockerd-rootless/child_pid)\" -m nsenter --net=/run/user/$(id -u)/dockerd-rootless/netns sh -c 'grep . /proc/sys/net/ipv4/conf/*/src_valid_mark'` reads it.", p.Site)}})
 		}
 	}
 	return out
