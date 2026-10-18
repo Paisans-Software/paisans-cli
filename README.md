@@ -7031,6 +7031,25 @@ apps:
       contact_email: admins@example.org
 ```
 
+**`settings.avatar_override: false` keeps each member's picture the identity
+provider's.** The fork fetches the `picture` claim again on every sign in and
+replaces the avatar when the image has changed. With the default, `true`, a
+member may upload a picture of their own instead, which stops the refetch for
+them until they remove it, and an admin may turn that off on Mbin's settings
+page. With `false` the `.env` renders `MBIN_SSO_AVATAR_OVERRIDE=false` and
+locks it, so a member signed in through the provider cannot upload or remove
+an avatar and an admin cannot reopen it. Anything but `true` or `false` is
+refused, `avatar-override-not-a-boolean`. It needs the fork at
+`v1.15.4+paisans` or later.
+
+```yaml
+apps:
+  talk:
+    blueprint: mbin
+    settings:
+      avatar_override: false
+```
+
 **These settings are the configuration's, and an admin cannot change them in
 Mbin.** Mbin keeps them, like most of its settings, as database rows once an
 admin saves its settings page, and from then on its `SettingsManager` reads
@@ -7040,7 +7059,7 @@ the row and ignores the environment. The `.env` therefore also renders
 `MBIN_AUTHORIZED_FETCH` always, `MBIN_SSO_ONLY_MODE` (rendered as
 `SSO_ONLY_MODE`) when the app has a client at the identity provider, and
 `MBIN_PRIVATE_INSTANCE` and `MBIN_USE_FEDERATION_ALLOW_LIST` when the app is
-gated. See *Mbin and WriteFreely lock what the toolkit renders*.
+gated, and `MBIN_SSO_AVATAR_OVERRIDE` when `avatar_override` is `false`. See *Mbin and WriteFreely lock what the toolkit renders*.
 `MAILER_DSN` is not a database setting and always follows the configuration.
 
 ### Mbin and WriteFreely lock what the toolkit renders

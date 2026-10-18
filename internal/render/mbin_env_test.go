@@ -118,7 +118,7 @@ var mbinDatabaseSettings = []string{
 	"MBIN_SIDEBAR_SECTIONS_RANDOM_LOCAL_ONLY", "MBIN_SIDEBAR_SECTIONS_USERS_LOCAL_ONLY",
 	"MBIN_SSO_REGISTRATIONS_ENABLED", "MBIN_RESTRICT_MAGAZINE_CREATION", "MBIN_SSO_SHOW_FIRST",
 	"MBIN_DOWNVOTES_MODE", "MBIN_NEW_USERS_NEED_APPROVAL", "MBIN_USE_FEDERATION_ALLOW_LIST",
-	"MBIN_AUTHORIZED_FETCH",
+	"MBIN_AUTHORIZED_FETCH", "MBIN_SSO_AVATAR_OVERRIDE",
 }
 
 // mbinLockableSettings are the settings the fork can lock, the ones that fall
@@ -131,7 +131,7 @@ var mbinLockableSettings = []string{
 	"KBIN_FEDERATION_ENABLED", "KBIN_REGISTRATIONS_ENABLED", "KBIN_HEADER_LOGO", "KBIN_CAPTCHA_ENABLED",
 	"KBIN_FEDERATION_PAGE_ENABLED", "KBIN_ADMIN_ONLY_OAUTH_CLIENTS", "MBIN_SSO_ONLY_MODE",
 	"MBIN_PRIVATE_INSTANCE", "MBIN_DOWNVOTES_MODE", "MBIN_NEW_USERS_NEED_APPROVAL",
-	"MBIN_USE_FEDERATION_ALLOW_LIST", "MBIN_AUTHORIZED_FETCH",
+	"MBIN_USE_FEDERATION_ALLOW_LIST", "MBIN_AUTHORIZED_FETCH", "MBIN_SSO_AVATAR_OVERRIDE",
 }
 
 // mbinSettingEnv maps a Mbin database setting to the environment variable
@@ -142,9 +142,9 @@ var mbinSettingEnv = map[string]string{
 }
 
 // MBIN_LOCKED_SETTINGS is exactly the database settings the template renders,
-// gated and not, with authorized fetch on and off: every name in it is a key
-// the .env sets and one the fork can lock, and every key the .env sets that
-// Mbin keeps in its database is in it. Passthrough keys are left out, since
+// gated and not, with authorized fetch on and off and avatar override off:
+// every name in it is a key the .env sets and one the fork can lock, and every
+// key the .env sets that Mbin keeps in its database is in it. Passthrough keys are left out, since
 // only the template is the toolkit's.
 func TestMbinLockedSettingsAreRendered(t *testing.T) {
 	// Keyed by the environment variable that feeds each setting, which is the
@@ -162,21 +162,25 @@ func TestMbinLockedSettingsAreRendered(t *testing.T) {
 		lockable[name] = true
 	}
 	for _, c := range []struct {
-		gate  bool
-		fetch any
-	}{{true, nil}, {false, nil}, {false, false}, {false, true}} {
+		gate   bool
+		fetch  any
+		avatar any
+	}{{true, nil, nil}, {false, nil, nil}, {false, false, nil}, {false, true, nil}, {false, nil, false}} {
 		gate := c.gate
 		env := renderTalk(t, fixtureSMTP, nil, func(a *config.App) {
 			a.Gated = gate
 			a.Config = nil
-			if c.fetch != nil {
-				settings := map[string]any{}
-				for k, v := range a.Settings {
-					settings[k] = v
-				}
-				settings["authorized_fetch"] = c.fetch
-				a.Settings = settings
+			settings := map[string]any{}
+			for k, v := range a.Settings {
+				settings[k] = v
 			}
+			if c.fetch != nil {
+				settings["authorized_fetch"] = c.fetch
+			}
+			if c.avatar != nil {
+				settings["avatar_override"] = c.avatar
+			}
+			a.Settings = settings
 		})
 		wantFetch := "true"
 		if c.fetch == false {
