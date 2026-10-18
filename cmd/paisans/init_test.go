@@ -14,6 +14,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployrecord"
+	"github.com/paisans-software/paisans-cli/internal/hostprep"
 	"github.com/paisans-software/paisans-cli/internal/keystore"
 	"github.com/paisans-software/paisans-cli/internal/mesh"
 	"github.com/paisans-software/paisans-cli/internal/registry"
@@ -898,5 +899,16 @@ func TestInitSaysWhyItOffersNoAdmissionWithoutASubnet(t *testing.T) {
 	}
 	if !strings.Contains(plain.String(), "mesh.subnet is not set yet") {
 		t.Errorf("a plain run does not say why nothing was offered:\n%s", plain.String())
+	}
+}
+
+// Why admit stopped keeps the explanation's lines: a host no profile
+// matches lists every supported release on a line of its own, none
+// joined to the sentence before it.
+func TestAdmitStopReasonKeepsTheExplanationsLines(t *testing.T) {
+	err := &admitStoppedError{errors.New(hostprep.UnsupportedMessage(hostprep.OSRelease{ID: "ubuntu", VersionID: "20.04"}))}
+	want := "site admit stopped with nothing changed: ubuntu 20.04 is not supported. Use one of the following:\n" + strings.Join(hostprep.Supported(), "\n")
+	if got := admitStopReason(err); got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
 	}
 }
