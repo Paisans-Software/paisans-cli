@@ -121,10 +121,9 @@ func TestProbeReadsTheHome(t *testing.T) {
 // Every rule sudo grants the user is read, by name and by group, with
 // admit's own helper line as sudo -l prints it. It installs sudo from
 // Ubuntu's archive, so it needs the network; where that makes sudo-rs
-// sudo, as on 26.04, the original is made sudo in its place.
+// sudo, as on 26.04, the same rules and Defaults are read from sudo.ws.
 func TestProbeReadsTheUsersSudoRules(t *testing.T) {
 	setup := "apt-get update -qq >/dev/null 2>&1 && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo >/dev/null 2>&1 || exit 1\n" +
-		"if [ -x /usr/bin/sudo.ws ]; then update-alternatives --set sudo /usr/bin/sudo.ws >/dev/null || exit 1; fi\n" +
 		"useradd -u 1001 --create-home paisans-f2a9 && groupadd ops && usermod -aG ops paisans-f2a9\n"
 	f := probeIn(t, setup, "paisans-f2a9", "")
 	if u := f.User; !u.SudoRead || len(u.SudoRules) != 0 {
@@ -159,6 +158,47 @@ func TestProbeReadsSudoRS(t *testing.T) {
 	}
 	if u := probeIn(t, setup+"\nupdate-alternatives --set sudo /usr/bin/sudo.ws >/dev/null || exit 1", "paisans-f2a9", "").User; u.SudoRS || !u.SudoWS {
 		t.Errorf("sudo.ws made sudo: %+v", u)
+	}
+}
+
+// Reading sudo.ws in sudo-rs's place rests on sudo.ws listing every
+// Defaults entry sudo-rs applies from the same sudoers: here a user's
+// env_keep and setenv, which sudo-rs honours, as the variable reaching the
+// command shows, and the probe lists. With the stock sudoers sudo-rs
+// passes none of the variables a root shell script would trust.
+func TestSudoWSListsWhatSudoRSApplies(t *testing.T) {
+	if probeImage != "ubuntu:26.04" {
+		t.Skipf("%s's sudo is not sudo-rs", probeImage)
+	}
+	setup := "apt-get update -qq >/dev/null 2>&1 && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo >/dev/null 2>&1 || exit 1\n" +
+		"useradd -u 1001 --create-home paisans-f2a9\n" +
+		"echo 'paisans-f2a9 ALL=(root) NOPASSWD: /usr/bin/env' > /etc/sudoers.d/paisans-f2a9 && chmod 440 /etc/sudoers.d/paisans-f2a9\n"
+	hostile := "FOO=1 LD_PRELOAD=/x BASH_ENV=/x ENV=/x SHELLOPTS=xtrace PATH=/tmp:/usr/bin:/bin"
+	run := func(extra string) string {
+		t.Helper()
+		out, err := exec.Command("docker", "run", "--rm", "--user", "0", probeImage, "sh", "-c",
+			setup+extra+"runuser -u paisans-f2a9 -- env "+hostile+" sudo -n /usr/bin/env").CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		return string(out)
+	}
+	passes := func(out, v string) bool {
+		return slices.ContainsFunc(strings.Split(out, "\n"), func(l string) bool { return strings.HasPrefix(l, v) })
+	}
+	stock := run("")
+	for _, v := range []string{"FOO=", "LD_PRELOAD=", "BASH_ENV=", "ENV=", "SHELLOPTS=", "PATH=/tmp"} {
+		if passes(stock, v) {
+			t.Errorf("stock sudo-rs passes %s:\n%s", v, stock)
+		}
+	}
+	defaults := "printf 'Defaults:paisans-f2a9 setenv\\nDefaults:paisans-f2a9 env_keep += \"FOO\"\\n' > /etc/sudoers.d/zz && chmod 440 /etc/sudoers.d/zz\n"
+	if out := run(defaults); !passes(out, "FOO=1") {
+		t.Errorf("sudo-rs does not apply the user's env_keep, so this test proves nothing:\n%s", out)
+	}
+	u := probeIn(t, setup+defaults, "paisans-f2a9", "").User
+	if !u.SudoRS || !u.SudoRead || !slices.Contains(u.SudoDefaults, "setenv") || !slices.Contains(u.SudoDefaults, "env_keep+=FOO") {
+		t.Errorf("sudo.ws does not list what sudo-rs applies: %+v", u)
 	}
 }
 

@@ -109,9 +109,16 @@ if line=$(getent passwd "$u"); then
   # Everything sudo -l lists for the user: its rules, by name or by any
   # group, and the Defaults that apply to it, its runas users and its
   # commands. admit reads them. With no sudo installed there is none.
+  # sudo-rs's -l lists no Defaults, so where sudo is sudo-rs the original,
+  # installed beside it as sudo.ws, lists what the same sudoers grant;
+  # with no sudo.ws nothing is listed, and admit refuses.
   if command -v sudo >/dev/null 2>&1; then
     say sudo listed
-    sudo -n -l -U "$u" 2>&1 | sed 's/^/sudo-l /'
+    if ! sudo -V 2>/dev/null | sed -n 1p | grep -q '^sudo-rs'; then
+      sudo -n -l -U "$u" 2>&1 | sed 's/^/sudo-l /'
+    elif [ -x /usr/bin/sudo.ws ]; then
+      /usr/bin/sudo.ws -n -l -U "$u" 2>&1 | sed 's/^/sudo-l /'
+    fi
   else
     say sudo absent
   fi
@@ -133,8 +140,8 @@ else
     if [ -f "$f" ] && [ "$f" != {{ q .Sudoers }} ] && grep -qwF -- "$u" "$f" 2>/dev/null; then say sudo-names "$f"; fi
   done
 fi
-# sudo-rs lists no Defaults under sudo -l, so admit cannot read them.
-# Ubuntu 26.04 makes it sudo, with the original beside it as sudo.ws.
+# sudo-rs lists no Defaults under sudo -l, so admit reads them from
+# sudo.ws, the original, which Ubuntu 26.04 installs beside it.
 if command -v sudo >/dev/null 2>&1 && sudo -V 2>/dev/null | sed -n 1p | grep -q '^sudo-rs'; then say sudo-kind rs; fi
 if [ -x /usr/bin/sudo.ws ]; then say sudo-ws yes; fi
 # The user's home, or the one useradd would give a user not made yet: it
