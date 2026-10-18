@@ -339,6 +339,8 @@ func (p *planner) renderSite(site *siteView) ([]File, error) {
 		"CaddyImage":              caddy,
 		"HostSites":               HostSitesMount,
 		"HostSitesSource":         HostSitesDir(p.dep()),
+		"CaddyConfig":             CaddyConfigMount,
+		"CaddyConfigSource":       "/" + CaddyConfigDir(p.dep()),
 		"EtcdClientPort":          etcdClientPort,
 		"EtcdPeerPort":            etcdPeerPort,
 		"EtcdCompactionRetention": etcdCompactionRetention,
@@ -473,7 +475,7 @@ func (p *planner) renderSite(site *siteView) ([]File, error) {
 		if err != nil {
 			return nil, err
 		}
-		files = append(files, File{Path: base + p.dep().RelPath("infra", "caddy", "Caddyfile"), Content: caddyfile, Mode: 0o644})
+		files = append(files, File{Path: base + Caddyfile(p.dep()), Content: caddyfile, Mode: 0o644})
 
 		snippets, err := p.renderSnippets(base, site, routes)
 		if err != nil {
@@ -546,7 +548,7 @@ const (
 // snippetMount is the directory snippets land in, as the Caddy container sees
 // it. The Caddyfile imports by it, because Caddy reads it from inside the
 // container.
-const snippetMount = "/etc/caddy/snippets/"
+const snippetMount = CaddyConfigMount + "/snippets/"
 
 // snippetDir is the same directory on the gateway, in the rendered tree.
 func (p *planner) snippetDir() string { return SnippetsDir(p.dep()) + "/" }
@@ -610,9 +612,25 @@ const gateSnippetTemplate = "caddy.snippet.gates.tmpl"
 // suffixed with on the gateway: <app>-gates.caddy, beside its routes.
 const GatesSnippet = "gates"
 
+// CaddyConfigDir is where a site's Caddyfile and snippets land, relative to
+// the host's /: <root>/infra/caddy/etc, which the Caddy container mounts
+// whole at CaddyConfigMount. A directory, never the Caddyfile on its own: a
+// file is replaced by renaming a new one over it, and a single file bind
+// mount keeps the file the container was created with, so a reload would
+// read the Caddyfile of the apply before. Nothing else is rendered into it,
+// because the container sees all of it: caddy.env, data and config stay
+// beside it.
+func CaddyConfigDir(d deployment.Deployment) string { return d.RelPath("infra", "caddy", "etc") }
+
+// Caddyfile is the Caddyfile in CaddyConfigDir, relative to the host's /.
+func Caddyfile(d deployment.Deployment) string { return CaddyConfigDir(d) + "/Caddyfile" }
+
+// CaddyConfigMount is CaddyConfigDir as the Caddy container sees it.
+const CaddyConfigMount = "/etc/caddy"
+
 // SnippetsDir is where a site's Caddy snippets land, relative to the host's
-// /: <root>/infra/caddy/snippets.
-func SnippetsDir(d deployment.Deployment) string { return d.RelPath("infra", "caddy", "snippets") }
+// /: CaddyConfigDir's snippets.
+func SnippetsDir(d deployment.Deployment) string { return CaddyConfigDir(d) + "/snippets" }
 
 // renderGateSnippets renders every oauth2-proxy app's named gate snippets onto
 // the gateway. It walks every app in the configuration, not just this site's

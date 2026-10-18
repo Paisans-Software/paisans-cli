@@ -1803,7 +1803,7 @@ writefreely, configure their application by a file rather than environment at
 all.
 
 One file in a set is not rendered beside the app: `caddy.snippet.tmpl` lands on
-every gateway, at `/srv/paisans/<token>/infra/caddy/snippets/<app>.caddy`, because that is where
+every gateway, at `/srv/paisans/<token>/infra/caddy/etc/snippets/<app>.caddy`, because that is where
 it is read. An app pinned to a monitor site is the exception: its snippet
 lands on that monitor instead, with `managed_by: paisans`, and on no site at all
 with managed_by: external (`routesFor` in `internal/render/site.go`). The gateway's own `Caddyfile` keeps only what is cross cutting,

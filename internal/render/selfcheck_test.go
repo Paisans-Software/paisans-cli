@@ -10,7 +10,7 @@ import (
 // Every host block of the gateway's Caddyfile answers the self check first,
 // with the deployment's token.
 func TestEveryRouteAnswersAsTheDeployment(t *testing.T) {
-	b, err := os.ReadFile(filepath.Join("testdata", "golden", "vm", "srv", "paisans", "f2a9", "infra", "caddy", "Caddyfile"))
+	b, err := os.ReadFile(filepath.Join("testdata", "golden", "vm", "srv", "paisans", "f2a9", "infra", "caddy", "etc", "Caddyfile"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func TestEveryRouteAnswersAsTheDeployment(t *testing.T) {
 // stripping, matchers and handle blocks: a blueprint's routing is always
 // inside a handle, which the self check's single path outranks.
 func TestNoRoutingSitsBesideTheSelfCheck(t *testing.T) {
-	files, err := filepath.Glob(filepath.Join("testdata", "golden*", "*", "srv", "paisans", "f2a9", "infra", "caddy", "Caddyfile"))
+	files, err := filepath.Glob(filepath.Join("testdata", "golden*", "*", "srv", "paisans", "f2a9", "infra", "caddy", "etc", "Caddyfile"))
 	if err != nil || len(files) == 0 {
 		t.Fatalf("no golden Caddyfiles: %v", err)
 	}

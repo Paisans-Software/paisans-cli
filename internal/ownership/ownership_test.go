@@ -135,8 +135,8 @@ func TestLeftoversNameTheirApps(t *testing.T) {
 		Stacks: []ownership.Stack{{Name: "old"}, {Name: "infra"}},
 		Files: []render.ManifestFile{
 			{Path: "srv/paisans/f2a9/docs/.env"},
-			{Path: "srv/paisans/f2a9/infra/caddy/snippets/wiki-media.caddy"},
-			{Path: "srv/paisans/f2a9/infra/caddy/snippets/gate-gates.caddy"},
+			{Path: "srv/paisans/f2a9/infra/caddy/etc/snippets/wiki-media.caddy"},
+			{Path: "srv/paisans/f2a9/infra/caddy/etc/snippets/gate-gates.caddy"},
 			{Path: "srv/paisans/f2a9/infra/haproxy/haproxy.cfg"},
 		},
 	}

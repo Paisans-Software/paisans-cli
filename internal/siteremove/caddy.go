@@ -60,9 +60,13 @@ type caddyPlan struct {
 // reduce reports whether the Caddyfile is still to be reduced.
 func (c *caddyPlan) reduce() bool { return c.original != c.reduced }
 
-func (p *Plan) caddyfile() string { return p.dep().Path("infra", "caddy", "Caddyfile") }
+func (p *Plan) caddyfile() string { return "/" + render.Caddyfile(p.dep()) }
 
-func (p *Plan) staged() string { return p.dep().Path("infra", "caddy", "snippets", stagedName) }
+func (p *Plan) staged() string { return "/" + render.SnippetsDir(p.dep()) + "/" + stagedName }
+
+// legacyCaddyfile is where an apply before the Caddyfile moved into
+// render.CaddyConfigDir wrote it, mounted into the container on its own.
+func (p *Plan) legacyCaddyfile() string { return p.dep().Path("infra", "caddy", "Caddyfile") }
 
 // keptPaths are the paths under the root the kept Caddy needs, with
 // everything under each: its compose file, Caddyfile, DNS token, data and
@@ -77,7 +81,7 @@ func (p *Plan) keptPaths() []string {
 		d.Path("infra", "caddy", "caddy.env"),
 		d.Path("infra", "caddy", "data"),
 		d.Path("infra", "caddy", "config"),
-		d.Path("infra", "caddy", "snippets"),
+		"/" + render.SnippetsDir(d),
 		render.HostSitesDir(d),
 	}
 }
@@ -127,6 +131,13 @@ func (p *Plan) planCaddy(t apply.Transport, inv *hostcheck.Inventory) (*caddyPla
 		return nil, fmt.Errorf("site remove %s: reading %s: %w", p.Site, p.caddyfile(), err)
 	}
 	if !found {
+		// A Caddy still reading the old layout's Caddyfile would never see a
+		// reduced file staged in the new one, and the old file is a single
+		// file bind mount, which only an in place write reaches. An apply
+		// moves it, so that is what to run.
+		if _, legacy, lerr := t.ReadFile(p.legacyCaddyfile()); lerr == nil && legacy {
+			return nil, fmt.Errorf("site remove %s: its Caddy serves the host owner's sites in %s, and still reads %s, where a toolkit before this one wrote it. Run `paisans deployment apply --site %s --execute` first, which moves it to %s, then run this again. Nothing was changed", p.Site, render.HostSitesDir(p.dep()), p.legacyCaddyfile(), p.Site, p.caddyfile())
+		}
 		return nil, fmt.Errorf("site remove %s: its Caddy serves the host owner's sites in %s, and %s is not there to reduce to them. Nothing was changed", p.Site, render.HostSitesDir(p.dep()), p.caddyfile())
 	}
 	cp.original = content
@@ -292,7 +303,7 @@ func (p *Plan) deleteBesideKept() string {
 			keep[parent][path.Base(child)] = true
 		}
 	}
-	snippets := p.dep().Path("infra", "caddy", "snippets")
+	snippets := "/" + render.SnippetsDir(p.dep())
 	keep[snippets] = map[string]bool{}
 	dirs := make([]string, 0, len(keep))
 	for dir := range keep {
@@ -345,9 +356,8 @@ func caddyCommand(container hostcheck.Container, verb, config string) string {
 // moment in which they are not served: the reduced file is staged where the
 // container sees it, validated in it, and loaded with caddy reload, which
 // leaves the running configuration as it was if it fails. Only then is it
-// copied over the Caddyfile on the host, in place, since that is a single
-// file bind mount and a new file renamed over it would not reach the
-// container, with the original copied aside first, and read back. A failure
+// copied over the Caddyfile on the host, in place, with the original copied
+// aside first, and read back. A failure
 // at any point puts the original back, loaded, and touches nothing else of
 // the deployment's.
 func (p *Plan) reduceCaddy(t apply.Transport, cp *caddyPlan) error {

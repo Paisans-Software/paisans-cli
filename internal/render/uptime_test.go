@@ -334,7 +334,7 @@ func TestTheEdgeRefusesTheTokenAPIButNotTheUIsOwnJSON(t *testing.T) {
 	}
 	var snippet string
 	for _, f := range plan.Files {
-		if f.Path == "watch/srv/paisans/f2a9/infra/caddy/snippets/health.caddy" {
+		if f.Path == "watch/srv/paisans/f2a9/infra/caddy/etc/snippets/health.caddy" {
 			snippet = f.Content
 		}
 	}
@@ -367,7 +367,7 @@ func TestTheEdgeRefusesTheStatusPageWhenItIsOff(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, f := range plan.Files {
-		if f.Path == "watch/srv/paisans/f2a9/infra/caddy/snippets/health.caddy" {
+		if f.Path == "watch/srv/paisans/f2a9/infra/caddy/etc/snippets/health.caddy" {
 			if !strings.Contains(f.Content, "@refused path /status* /badge/* /metrics /metrics/ /api/v1/*") {
 				t.Fatalf("%s", f.Content)
 			}
@@ -527,7 +527,7 @@ func TestTheEdgeRefusesMetricsWithATrailingSlash(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, f := range plan.Files {
-		if f.Path == "watch/srv/paisans/f2a9/infra/caddy/snippets/health.caddy" {
+		if f.Path == "watch/srv/paisans/f2a9/infra/caddy/etc/snippets/health.caddy" {
 			if !strings.Contains(f.Content, "@refused path /badge/* /metrics /metrics/ /api/v1/*") {
 				t.Fatalf("%s", f.Content)
 			}

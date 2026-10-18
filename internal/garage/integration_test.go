@@ -712,7 +712,7 @@ func startMediaCluster(t *testing.T) *mediaCluster {
 	caddyfile := "{\n\tadmin off\n\tauto_https off\n}\n"
 	for _, app := range []string{"blog", "talk"} {
 		file := app + "-media.caddy"
-		snippet := renderedFile(t, "vm/srv/paisans/f2a9/infra/caddy/snippets/"+file)
+		snippet := renderedFile(t, "vm/srv/paisans/f2a9/infra/caddy/etc/snippets/"+file)
 		if err := os.WriteFile(filepath.Join(snippets, file), []byte(snippet), 0o644); err != nil {
 			t.Fatalf("writing the rendered %s: %v", file, err)
 		}

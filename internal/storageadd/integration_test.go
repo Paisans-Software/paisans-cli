@@ -153,7 +153,7 @@ func renderFor(t *testing.T, cfg *config.Config, secrets *config.Secrets, hosts 
 	for _, site := range sites {
 		h := hosts[site]
 		for _, f := range rendered.Files {
-			if f.Path == site+"/"+"srv/paisans/f2a9/infra/garage/garage.toml" || (strings.HasPrefix(f.Path, site+"/srv/paisans/f2a9/infra/caddy/snippets/") && strings.HasSuffix(f.Path, "-media.caddy")) {
+			if f.Path == site+"/"+"srv/paisans/f2a9/infra/garage/garage.toml" || (strings.HasPrefix(f.Path, site+"/srv/paisans/f2a9/infra/caddy/etc/snippets/") && strings.HasSuffix(f.Path, "-media.caddy")) {
 				rel := strings.TrimPrefix(f.Path, site+"/")
 				if err := h.WriteFile("/"+rel, f.Content, 0o600); err != nil {
 					t.Fatal(err)

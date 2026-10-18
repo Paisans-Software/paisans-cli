@@ -89,26 +89,26 @@ func TestServedBy(t *testing.T) {
 // its host block nor its snippet, and the monitor's Caddy carries only it.
 func TestMonitorAppsLeaveTheGatewayCaddyfile(t *testing.T) {
 	files := planFiles(build(t))
-	gateway := files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"]
+	gateway := files["vm/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"]
 	if strings.Contains(gateway, "health.example.org") {
 		t.Fatalf("the gateway routes the monitor:\n%s", gateway)
 	}
-	if _, ok := files["vm/srv/paisans/f2a9/infra/caddy/snippets/health.caddy"]; ok {
+	if _, ok := files["vm/srv/paisans/f2a9/infra/caddy/etc/snippets/health.caddy"]; ok {
 		t.Fatal("the gateway carries the monitor's snippet")
 	}
 	if !strings.Contains(gateway, "talk.example.org {") {
 		t.Fatal("the gateway lost an ordinary app")
 	}
-	monitor := files["watch/srv/paisans/f2a9/infra/caddy/Caddyfile"]
+	monitor := files["watch/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"]
 	if !strings.Contains(monitor, "health.example.org {") || strings.Contains(monitor, "talk.example.org") {
 		t.Fatalf("the monitor's Caddyfile:\n%s", monitor)
 	}
 	for path := range files {
-		if strings.HasPrefix(path, "watch/srv/paisans/f2a9/infra/caddy/snippets/") && path != "watch/srv/paisans/f2a9/infra/caddy/snippets/health.caddy" {
+		if strings.HasPrefix(path, "watch/srv/paisans/f2a9/infra/caddy/etc/snippets/") && path != "watch/srv/paisans/f2a9/infra/caddy/etc/snippets/health.caddy" {
 			t.Errorf("the monitor carries %s", path)
 		}
 	}
-	snippet := files["watch/srv/paisans/f2a9/infra/caddy/snippets/health.caddy"]
+	snippet := files["watch/srv/paisans/f2a9/infra/caddy/etc/snippets/health.caddy"]
 	if !strings.Contains(snippet, "reverse_proxy 10.44.0.4:3001") {
 		t.Fatalf("the monitor's snippet does not reach the app on its own mesh address:\n%s", snippet)
 	}
@@ -138,7 +138,7 @@ func TestAPaisansMonitorRunsTheGatewaysCaddy(t *testing.T) {
 	if !strings.Contains(compose, "network_mode: host") || strings.Contains(compose, "etcd:") || strings.Contains(compose, "patroni:") {
 		t.Fatalf("the monitor's infra stack:\n%s", compose)
 	}
-	if !strings.Contains(files["watch/srv/paisans/f2a9/infra/caddy/Caddyfile"], "acme_dns desec") {
+	if !strings.Contains(files["watch/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"], "acme_dns desec") {
 		t.Fatal("the monitor's Caddy does not use DNS-01")
 	}
 	if !strings.Contains(files["watch/srv/paisans/f2a9/infra/caddy/caddy.env"], "ACME_DNS_TOKEN=") {
@@ -154,7 +154,7 @@ func TestAnExternalMonitorRunsNoCaddy(t *testing.T) {
 			t.Errorf("an external monitor renders %s", path)
 		}
 	}
-	if strings.Contains(files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"], "health.example.org") {
+	if strings.Contains(files["vm/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"], "health.example.org") {
 		t.Error("the gateway routes an external monitor's app")
 	}
 }
@@ -163,7 +163,7 @@ func TestAnExternalMonitorRunsNoCaddy(t *testing.T) {
 // and an ungated one does not carry them.
 func TestAMonitorCarriesTheGateOnlyWhenItsAppIsGated(t *testing.T) {
 	files := planFiles(build(t))
-	if strings.Contains(files["watch/srv/paisans/f2a9/infra/caddy/Caddyfile"], "-gates.caddy") {
+	if strings.Contains(files["watch/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"], "-gates.caddy") {
 		t.Error("an ungated monitor imports the gate snippets")
 	}
 	cfg := fixture(t)
@@ -171,8 +171,8 @@ func TestAMonitorCarriesTheGateOnlyWhenItsAppIsGated(t *testing.T) {
 	health.Gated = true
 	cfg.Apps["health"] = health
 	files = planFiles(mustBuild(t, cfg))
-	if !strings.Contains(files["watch/srv/paisans/f2a9/infra/caddy/Caddyfile"], "import /etc/caddy/snippets/gate-gates.caddy") || files["watch/srv/paisans/f2a9/infra/caddy/snippets/gate-gates.caddy"] == "" {
-		t.Fatalf("a gated monitor lacks the gate snippets:\n%s", files["watch/srv/paisans/f2a9/infra/caddy/Caddyfile"])
+	if !strings.Contains(files["watch/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"], "import /etc/caddy/snippets/gate-gates.caddy") || files["watch/srv/paisans/f2a9/infra/caddy/etc/snippets/gate-gates.caddy"] == "" {
+		t.Fatalf("a gated monitor lacks the gate snippets:\n%s", files["watch/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"])
 	}
 }
 
@@ -263,13 +263,13 @@ func monitorOnGateway(t *testing.T) *config.Config {
 func TestAMonitorOnTheGatewayIsServedByTheGatewaysCaddy(t *testing.T) {
 	cfg := monitorOnGateway(t)
 	files := planFiles(mustBuild(t, cfg))
-	gateway := files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"]
+	gateway := files["vm/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"]
 	for _, host := range []string{"health.example.org {", "talk.example.org {"} {
 		if !strings.Contains(gateway, host) {
 			t.Errorf("the gateway's Caddyfile lacks %q:\n%s", host, gateway)
 		}
 	}
-	if _, ok := files["vm/srv/paisans/f2a9/infra/caddy/snippets/health.caddy"]; !ok {
+	if _, ok := files["vm/srv/paisans/f2a9/infra/caddy/etc/snippets/health.caddy"]; !ok {
 		t.Error("the gateway carries no snippet for the monitor")
 	}
 	claims := map[int]int{}
@@ -317,7 +317,7 @@ func TestADepartingGatewayKeepsEveryRoute(t *testing.T) {
 	cfg := monitorConfig(t, nil)
 	importLine := "import " + render.HostSitesMount + "/*.caddy"
 	plain := planFiles(mustBuild(t, cfg))
-	if watch := plain["watch/srv/paisans/f2a9/infra/caddy/Caddyfile"]; strings.Contains(watch, "talk.example.org") || strings.Contains(watch, importLine) {
+	if watch := plain["watch/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"]; strings.Contains(watch, "talk.example.org") || strings.Contains(watch, importLine) {
 		t.Fatalf("a plain monitor routes the gateway's hostnames:\n%s", watch)
 	}
 	plan, err := render.Build(cfg, fixtureSecrets(t), render.WithDepartingGateway("watch"), render.WithDepartingGateway("home-a"))
@@ -325,16 +325,16 @@ func TestADepartingGatewayKeepsEveryRoute(t *testing.T) {
 		t.Fatal(err)
 	}
 	files := planFiles(plan)
-	watch := files["watch/srv/paisans/f2a9/infra/caddy/Caddyfile"]
+	watch := files["watch/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"]
 	for _, want := range []string{"talk.example.org {", "health.example.org {", importLine} {
 		if !strings.Contains(watch, want) {
 			t.Errorf("the departing gateway's Caddyfile lacks %q:\n%s", want, watch)
 		}
 	}
-	if strings.Contains(files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"], "health.example.org") {
+	if strings.Contains(files["vm/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"], "health.example.org") {
 		t.Error("the new gateway routes the departing monitor's hostname")
 	}
-	if _, ok := files["home-a/srv/paisans/f2a9/infra/caddy/Caddyfile"]; ok {
+	if _, ok := files["home-a/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"]; ok {
 		t.Error("a site that runs no Caddy was given one")
 	}
 }
@@ -363,10 +363,10 @@ func TestAMonitorOnOneOfTwoGatewaysIsServedByThatOneAlone(t *testing.T) {
 	b.PublicAddress = "203.0.113.30"
 	cfg.Sites["home-b"] = b
 	files := planFiles(mustBuild(t, cfg))
-	if vm := files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"]; !strings.Contains(vm, "health.example.org {") {
+	if vm := files["vm/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"]; !strings.Contains(vm, "health.example.org {") {
 		t.Errorf("vm, the monitor's gateway, does not serve it:\n%s", vm)
 	}
-	other := files["home-b/srv/paisans/f2a9/infra/caddy/Caddyfile"]
+	other := files["home-b/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"]
 	if !strings.Contains(other, "talk.example.org {") {
 		t.Fatalf("home-b is not rendered as a gateway:\n%s", other)
 	}
@@ -387,14 +387,14 @@ func TestADepartingGatewayBoundsItsRoutesToTheNewGateway(t *testing.T) {
 		t.Fatal(err)
 	}
 	files := planFiles(plan)
-	departing := files["watch/srv/paisans/f2a9/infra/caddy/snippets/gate.caddy"]
+	departing := files["watch/srv/paisans/f2a9/infra/caddy/etc/snippets/gate.caddy"]
 	if departing == "" {
 		t.Fatal("the departing gateway renders no route to the gate")
 	}
 	if !strings.Contains(departing, "import upstream_single") {
 		t.Errorf("the departing gateway's route to the gate, on vm, is unbounded:\n%s", departing)
 	}
-	if local := files["vm/srv/paisans/f2a9/infra/caddy/snippets/gate.caddy"]; local == "" || strings.Contains(local, "import upstream_single") {
+	if local := files["vm/srv/paisans/f2a9/infra/caddy/etc/snippets/gate.caddy"]; local == "" || strings.Contains(local, "import upstream_single") {
 		t.Errorf("the new gateway bounds the gate, which runs beside it:\n%s", local)
 	}
 }

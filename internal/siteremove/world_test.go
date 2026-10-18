@@ -240,9 +240,9 @@ func (h *host) caddyFile(command string) (string, error) {
 	var hostPath string
 	switch {
 	case m[2] == "/etc/caddy/Caddyfile":
-		hostPath = root + "/infra/caddy/Caddyfile"
+		hostPath = root + "/infra/caddy/etc/Caddyfile"
 	case strings.HasPrefix(m[2], "/etc/caddy/snippets/"):
-		hostPath = root + "/infra/caddy/snippets/" + strings.TrimPrefix(m[2], "/etc/caddy/snippets/")
+		hostPath = root + "/infra/caddy/etc/snippets/" + strings.TrimPrefix(m[2], "/etc/caddy/snippets/")
 	default:
 		return "", fmt.Errorf("%s is not mounted", m[2])
 	}

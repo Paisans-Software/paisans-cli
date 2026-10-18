@@ -324,7 +324,7 @@ func pocketIDOnWatch(t *testing.T, change func(*config.Config)) *render.Plan {
 	})
 }
 
-const healthSnippet = "/srv/paisans/f2a9/infra/caddy/snippets/health.caddy"
+const healthSnippet = "/srv/paisans/f2a9/infra/caddy/etc/snippets/health.caddy"
 
 // A held app's route on the site's Caddy is held with it. Written in the
 // first pass, Caddy would be reloaded with a route to an app still running
@@ -467,7 +467,7 @@ func TestAFailedReloadIsOwedToTheNextApply(t *testing.T) {
 	changed := plan(t)
 	found := false
 	for i, file := range changed.Files {
-		if file.Path == "vm/srv/paisans/f2a9/infra/caddy/snippets/chat.caddy" {
+		if file.Path == "vm/srv/paisans/f2a9/infra/caddy/etc/snippets/chat.caddy" {
 			changed.Files[i].Content += "# a later change\n"
 			found = true
 		}

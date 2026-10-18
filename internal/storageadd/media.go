@@ -13,13 +13,14 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/garage"
+	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
 // mediaSnippetDir is where render places each app's media routing on the
 // gateway, relative to a site's root, one <app>-media.caddy per app that
 // stores objects.
 func mediaSnippetDir(d deployment.Deployment) string {
-	return d.RelPath("infra", "caddy", "snippets") + "/"
+	return render.SnippetsDir(d) + "/"
 }
 
 // webSuffix is the internal suffix Garage's web endpoint resolves a bucket

@@ -42,83 +42,83 @@
       "mode": "0644"
     },
     {
-      "path": "srv/paisans/f2a9/infra/caddy/Caddyfile",
-      "sha256": "4bb40eb83176c34db13f4a2350e4e08430cf4ab60214d987c0024038cfd80aaa",
-      "mode": "0644"
-    },
-    {
       "path": "srv/paisans/f2a9/infra/caddy/caddy.env",
       "sha256": "e4524ec782161f97cf1daad5745e4c59d5bf37815622a70442ec33e1b684ee31",
       "mode": "0600"
     },
     {
-      "path": "srv/paisans/f2a9/infra/caddy/snippets/account-join.caddy",
+      "path": "srv/paisans/f2a9/infra/caddy/etc/Caddyfile",
+      "sha256": "4bb40eb83176c34db13f4a2350e4e08430cf4ab60214d987c0024038cfd80aaa",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/infra/caddy/etc/snippets/account-join.caddy",
       "sha256": "9026eae153bfb571e07e058f7966d5a798fe9493d925fcf73d48ba998003bd5c",
       "mode": "0644"
     },
     {
-      "path": "srv/paisans/f2a9/infra/caddy/snippets/account.caddy",
+      "path": "srv/paisans/f2a9/infra/caddy/etc/snippets/account.caddy",
       "sha256": "ef075da5f16f319430d1a904e277ccb100d53368e166ab47de21af29883bc42c",
       "mode": "0644"
     },
     {
-      "path": "srv/paisans/f2a9/infra/caddy/snippets/auth.caddy",
+      "path": "srv/paisans/f2a9/infra/caddy/etc/snippets/auth.caddy",
       "sha256": "5267216b86b8dcd224410c3c90ad88b14adcbe012333c09dd8804b3f32f2b6f8",
       "mode": "0644"
     },
     {
-      "path": "srv/paisans/f2a9/infra/caddy/snippets/blog-media.caddy",
+      "path": "srv/paisans/f2a9/infra/caddy/etc/snippets/blog-media.caddy",
       "sha256": "2bfe53e3ef0da8593ed619365f20dcf04386516e5714c807c519b2b5cde7a06f",
       "mode": "0644"
     },
     {
-      "path": "srv/paisans/f2a9/infra/caddy/snippets/blog.caddy",
+      "path": "srv/paisans/f2a9/infra/caddy/etc/snippets/blog.caddy",
       "sha256": "174e39b7d642a2f50e7a81f1fdf8dafdc3e9c166fe63aa5dae225f72c6dbb3de",
       "mode": "0644"
     },
     {
-      "path": "srv/paisans/f2a9/infra/caddy/snippets/chat-wellknown.caddy",
+      "path": "srv/paisans/f2a9/infra/caddy/etc/snippets/chat-wellknown.caddy",
       "sha256": "8934146816f39a239984854154b8949596849c73f1cb0b4f6db65171dc252617",
       "mode": "0644"
     },
     {
-      "path": "srv/paisans/f2a9/infra/caddy/snippets/chat.caddy",
+      "path": "srv/paisans/f2a9/infra/caddy/etc/snippets/chat.caddy",
       "sha256": "08c8e1b75c3b1456a8ac812ed22e079730058b443ab93c4e46f992da0bf5338e",
       "mode": "0644"
     },
     {
-      "path": "srv/paisans/f2a9/infra/caddy/snippets/gate-gates.caddy",
+      "path": "srv/paisans/f2a9/infra/caddy/etc/snippets/gate-gates.caddy",
       "sha256": "7e5aa20a7e31def98bb232fc898d49f46fe6cd91b4be80c65d289615381b07df",
       "mode": "0644"
     },
     {
-      "path": "srv/paisans/f2a9/infra/caddy/snippets/gate.caddy",
+      "path": "srv/paisans/f2a9/infra/caddy/etc/snippets/gate.caddy",
       "sha256": "8cc3ab897ea559beeddf59d38153f3054040ea833eb105f0cffde29cfa0cfc98",
       "mode": "0644"
     },
     {
-      "path": "srv/paisans/f2a9/infra/caddy/snippets/talk-media.caddy",
+      "path": "srv/paisans/f2a9/infra/caddy/etc/snippets/talk-media.caddy",
       "sha256": "90b976d0607b542e59fe1a1598149bc1660334462c7dc13a84a16b512fa7e8d3",
       "mode": "0644"
     },
     {
-      "path": "srv/paisans/f2a9/infra/caddy/snippets/talk.caddy",
+      "path": "srv/paisans/f2a9/infra/caddy/etc/snippets/talk.caddy",
       "sha256": "b03fa6cd5d71c3cc8fe1ee1f5d3940cf8231573c70c2ae71180e82bc3ff83285",
       "mode": "0644"
     },
     {
-      "path": "srv/paisans/f2a9/infra/caddy/snippets/web.caddy",
+      "path": "srv/paisans/f2a9/infra/caddy/etc/snippets/web.caddy",
       "sha256": "17a7151cae4ac1a0069ca41e7af3d4f1fcf9db7f99bd47d28677ebe9f17e6429",
       "mode": "0644"
     },
     {
-      "path": "srv/paisans/f2a9/infra/caddy/snippets/wiki.caddy",
+      "path": "srv/paisans/f2a9/infra/caddy/etc/snippets/wiki.caddy",
       "sha256": "330a2bec033fd26e43329ea9cac2e3f45bd656c0ac10c6eb67d680b6b943ceb4",
       "mode": "0644"
     },
     {
       "path": "srv/paisans/f2a9/infra/compose.yaml",
-      "sha256": "e328a4a8c1834bb281d9c09b6c925803567096a2271b82cbddfc286186ca7f87",
+      "sha256": "dc856a269b59e076560997bfa71fe46023b417ea7b7231d3495cc07c81089e4e",
       "mode": "0644"
     },
     {

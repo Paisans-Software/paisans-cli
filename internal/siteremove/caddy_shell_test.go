@@ -75,30 +75,30 @@ const r = "srv/paisans/f2a9/"
 
 func TestDeleteBesideKeptKeepsCaddysPathsAlone(t *testing.T) {
 	base := shellTree(t, map[string]string{
-		r + ".paisans-manifest.json":          "{}",
-		r + "infra/compose.yaml":              "services: {}",
-		r + "infra/caddy/Caddyfile":           "{\n}\n",
-		r + "infra/caddy/caddy.env":           "TOKEN=x",
-		r + "infra/caddy/data/caddy/cert.crt": "CERT",
-		r + "infra/caddy/snippets/talk.caddy": "route",
-		r + "infra/caddy/snippets/.staged":    "x",
-		r + "infra/caddy/other":               "x",
-		r + "infra/patroni.env":               "x",
-		r + "infra/postgres/PG_VERSION":       "18",
-		r + "talk/.env":                       "x",
-		r + ".hidden":                         "x",
-		"outside/keep.txt":                    "owner",
-		"srv/paisans/f2a9/caddy.d/blog.caddy": "blog",
+		r + ".paisans-manifest.json":              "{}",
+		r + "infra/compose.yaml":                  "services: {}",
+		r + "infra/caddy/etc/Caddyfile":           "{\n}\n",
+		r + "infra/caddy/caddy.env":               "TOKEN=x",
+		r + "infra/caddy/data/caddy/cert.crt":     "CERT",
+		r + "infra/caddy/etc/snippets/talk.caddy": "route",
+		r + "infra/caddy/etc/snippets/.staged":    "x",
+		r + "infra/caddy/other":                   "x",
+		r + "infra/patroni.env":                   "x",
+		r + "infra/postgres/PG_VERSION":           "18",
+		r + "talk/.env":                           "x",
+		r + ".hidden":                             "x",
+		"outside/keep.txt":                        "owner",
+		"srv/paisans/f2a9/caddy.d/blog.caddy":     "blog",
 	}, []string{r + "infra/caddy/config"}, []string{r + "link", "outside"})
 	if err := runUnder(t, base, shellPlan().deleteBesideKept()); err != nil {
 		t.Fatal(err)
 	}
-	for _, rel := range []string{".paisans-manifest.json", "infra/compose.yaml", "infra/caddy/Caddyfile", "infra/caddy/caddy.env", "infra/caddy/data/caddy/cert.crt", "infra/caddy/config", "infra/caddy/snippets"} {
+	for _, rel := range []string{".paisans-manifest.json", "infra/compose.yaml", "infra/caddy/etc/Caddyfile", "infra/caddy/caddy.env", "infra/caddy/data/caddy/cert.crt", "infra/caddy/config", "infra/caddy/etc/snippets"} {
 		if !exists(base, r+rel) {
 			t.Errorf("%s was deleted", rel)
 		}
 	}
-	for _, rel := range []string{"infra/caddy/snippets/talk.caddy", "infra/caddy/snippets/.staged", "infra/caddy/other", "infra/patroni.env", "infra/postgres", "talk", ".hidden", "link"} {
+	for _, rel := range []string{"infra/caddy/etc/snippets/talk.caddy", "infra/caddy/etc/snippets/.staged", "infra/caddy/other", "infra/patroni.env", "infra/postgres", "talk", ".hidden", "link"} {
 		if exists(base, r+rel) {
 			t.Errorf("%s is left", rel)
 		}
@@ -114,10 +114,10 @@ func TestDeleteBesideKeptKeepsCaddysPathsAlone(t *testing.T) {
 // outside the root: it stops before deleting anything.
 func TestDeleteBesideKeptRefusesASymlinkedDirectory(t *testing.T) {
 	base := shellTree(t, map[string]string{
-		r + "infra/caddy/Caddyfile":           "{\n}\n",
+		r + "infra/caddy/etc/Caddyfile":       "{\n}\n",
 		r + "talk/.env":                       "x",
 		"srv/paisans/f2a9/caddy.d/blog.caddy": "blog",
-	}, nil, []string{r + "infra/caddy/snippets", "srv/paisans/f2a9/caddy.d"})
+	}, nil, []string{r + "infra/caddy/etc/snippets", "srv/paisans/f2a9/caddy.d"})
 	if err := runUnder(t, base, shellPlan().deleteBesideKept()); err == nil {
 		t.Error("a symlinked snippets directory was walked")
 	}
@@ -131,13 +131,13 @@ func TestDeleteBesideKeptRefusesASymlinkedDirectory(t *testing.T) {
 
 func TestEmptyBesideKeptKeepsCaddysEmptyDirectories(t *testing.T) {
 	base := shellTree(t, map[string]string{
-		r + "infra/caddy/Caddyfile": "{\n}\n",
-		r + "postgres/PG_VERSION":   "18",
-	}, []string{r + "infra/caddy/config", r + "infra/caddy/snippets", r + "infra/caddy/data/caddy/locks", r + "talk/empty", r + "infra/etcd"}, nil)
+		r + "infra/caddy/etc/Caddyfile": "{\n}\n",
+		r + "postgres/PG_VERSION":       "18",
+	}, []string{r + "infra/caddy/config", r + "infra/caddy/etc/snippets", r + "infra/caddy/data/caddy/locks", r + "talk/empty", r + "infra/etcd"}, nil)
 	if err := runUnder(t, base, shellPlan().emptyBesideKept()); err != nil {
 		t.Fatal(err)
 	}
-	for _, rel := range []string{"infra/caddy/config", "infra/caddy/snippets", "infra/caddy/data/caddy/locks", "postgres/PG_VERSION"} {
+	for _, rel := range []string{"infra/caddy/config", "infra/caddy/etc/snippets", "infra/caddy/data/caddy/locks", "postgres/PG_VERSION"} {
 		if !exists(base, r+rel) {
 			t.Errorf("%s was deleted", rel)
 		}
@@ -156,10 +156,10 @@ func TestKeptProbeListsWhatIsNotCaddys(t *testing.T) {
 		t.Skip("find has no -printf here")
 	}
 	base := shellTree(t, map[string]string{
-		r + "infra/caddy/Caddyfile":           "{\n}\n",
-		r + "infra/caddy/data/caddy/c.crt":    "CERT",
-		r + "infra/caddy/snippets/talk.caddy": "route",
-		r + "talk/.env":                       "x",
+		r + "infra/caddy/etc/Caddyfile":           "{\n}\n",
+		r + "infra/caddy/data/caddy/c.crt":        "CERT",
+		r + "infra/caddy/etc/snippets/talk.caddy": "route",
+		r + "talk/.env":                           "x",
 	}, []string{r + "postgres/empty"}, nil)
 	p := shellPlan()
 	command := strings.ReplaceAll(p.keptProbe(), "'/srv/paisans/", "'"+base+"/srv/paisans/")

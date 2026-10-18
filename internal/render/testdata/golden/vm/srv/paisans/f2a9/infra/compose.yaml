@@ -44,9 +44,11 @@ services:
     env_file:
       - caddy/caddy.env
     volumes:
-      - /srv/paisans/f2a9/infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      # One file per application, imported by that application's host block.
-      - /srv/paisans/f2a9/infra/caddy/snippets:/etc/caddy/snippets:ro
+      # The Caddyfile, and in snippets/ one file per application, imported by
+      # that application's host block. The directory, not the files: apply
+      # renames a new file over the old one, which a reload only reads through
+      # a directory mount.
+      - /srv/paisans/f2a9/infra/caddy/etc:/etc/caddy:ro
       # Site blocks the host's owner adds, imported by the Caddyfile. The
       # deployment's own caddy.d: paisans only creates it.
       - /srv/paisans/f2a9/caddy.d:/etc/caddy.d:ro
