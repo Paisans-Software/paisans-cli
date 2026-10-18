@@ -58,9 +58,10 @@ Founder decisions, 2026-10-15:
   `net.ipv4.ip_forward` for it and says so in the plan. There is no flag.
 * **Hosts that will not run a second Docker daemon are not supported.**
   Rootless runs beside a system daemon the owner already has.
-* **Ubuntu 22.04 and 24.04 are supported** (founder decision, 2026-10-16).
-  Both use the same host profile; where admit differs between them (the
-  AppArmor refusal, what cgroup delegation adds) is said in its step. Data
+* **Ubuntu 22.04, 24.04 and 26.04 are supported** (founder decisions,
+  2026-10-16 and 2026-10-17). All use the same host profile; where admit
+  differs between them (the AppArmor refusal, what cgroup delegation adds,
+  26.04's sudo-rs) is said in its step. Data
   sites may run different releases, since Postgres's glibc is its image's.
 * **A system Docker admit installs never runs.** Where Docker is absent,
   admit installs Docker's packages for the rootless daemons and keeps the

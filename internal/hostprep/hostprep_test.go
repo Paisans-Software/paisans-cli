@@ -228,7 +228,7 @@ func TestAnUnsupportedHostIsNamedWithWhatIsSupported(t *testing.T) {
 	host := freshHost()
 	host.files["/etc/os-release"] = "ID=debian\nVERSION_ID=\"12\"\n"
 	_, err := hostprep.Build("home-a", fixture(t), host, admitted(t, fixture(t), "home-a"))
-	want := "debian 12 is not supported. Use one of the following:\nubuntu 22.04\nubuntu 24.04"
+	want := "debian 12 is not supported. Use one of the following:\nubuntu 22.04\nubuntu 24.04\nubuntu 26.04"
 	if err == nil || err.Error() != want {
 		t.Fatalf("got %v, want exactly:\n%s", err, want)
 	}
@@ -259,25 +259,38 @@ ID_LIKE=debian
 UBUNTU_CODENAME=jammy
 `
 
-// Ubuntu 22.04 is prepared as 24.04 is: its profile is selected, and site
-// prepare plans the same user's own steps and installs nothing. Docker's
-// jammy repository is site admit's (internal/hostadmit's jammy goldens).
-func TestAnUbuntu2204HostIsPreparedAs2404Is(t *testing.T) {
-	jammy := freshHost()
-	jammy.files["/etc/os-release"] = ubuntu2204
-	plan, err := hostprep.Build("home-a", fixture(t), jammy, admitted(t, fixture(t), "home-a"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if plan.Profile != "ubuntu 22.04" {
-		t.Errorf("profile is %q", plan.Profile)
-	}
+const ubuntu2604 = `PRETTY_NAME="Ubuntu 26.04.1 LTS"
+NAME="Ubuntu"
+VERSION_ID="26.04"
+VERSION="26.04.1 LTS (Resolute Raccoon)"
+VERSION_CODENAME=resolute
+ID=ubuntu
+ID_LIKE=debian
+UBUNTU_CODENAME=resolute
+`
+
+// Ubuntu 22.04 and 26.04 are prepared as 24.04 is: each one's profile is
+// selected, and site prepare plans the same user's own steps and installs
+// nothing. Docker's jammy and resolute repositories are site admit's
+// (internal/hostadmit's jammy and resolute goldens).
+func TestOtherUbuntuReleasesArePreparedAs2404Is(t *testing.T) {
 	noble, err := hostprep.Build("home-a", fixture(t), freshHost(), admitted(t, fixture(t), "home-a"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := describes(plan), describes(noble); got != want {
-		t.Errorf("22.04 plans:\n%s\n24.04 plans:\n%s", got, want)
+	for version, release := range map[string]string{"22.04": ubuntu2204, "26.04": ubuntu2604} {
+		host := freshHost()
+		host.files["/etc/os-release"] = release
+		plan, err := hostprep.Build("home-a", fixture(t), host, admitted(t, fixture(t), "home-a"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if plan.Profile != "ubuntu "+version {
+			t.Errorf("profile is %q", plan.Profile)
+		}
+		if got, want := describes(plan), describes(noble); got != want {
+			t.Errorf("%s plans:\n%s\n24.04 plans:\n%s", version, got, want)
+		}
 	}
 }
 

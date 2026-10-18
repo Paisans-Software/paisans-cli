@@ -22,6 +22,7 @@ type ubuntu struct {
 func init() {
 	register(ubuntu{version: "22.04"})
 	register(ubuntu{version: "24.04"})
+	register(ubuntu{version: "26.04"})
 }
 
 func (u ubuntu) ID() string      { return "ubuntu" }

@@ -5231,7 +5231,7 @@ run the user's configuration store units, and how to hold Docker's packages. Its
 `internal/hostprep/profiles/`. Adding Debian or Fedora is adding a directory
 and a registration, not editing the command.
 
-`ubuntu 22.04` and `ubuntu 24.04` ship, and share the templates in
+`ubuntu 22.04`, `ubuntu 24.04` and `ubuntu 26.04` ship, and share the templates in
 `profiles/ubuntu/`: what differs between them, such as the codename Docker's
 apt source names, is read from the host's `/etc/os-release`. A profile matches
 the release as well as `ID`, so a release nobody has checked the templates
@@ -5242,6 +5242,7 @@ profile matches is refused, naming what is supported:
 debian 12 is not supported. Use one of the following:
 ubuntu 22.04
 ubuntu 24.04
+ubuntu 26.04
 ```
 
 #### Docker comes from Docker's repository when it is absent
