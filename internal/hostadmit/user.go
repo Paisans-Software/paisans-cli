@@ -62,12 +62,8 @@ func planUser(p *planner) error {
 		return fmt.Errorf("user %s", prob)
 	}
 	u := p.f.User
-	if u.SudoRS {
-		fix := ""
-		if u.SudoWS {
-			fix = " The original sudo is installed here as /usr/bin/sudo.ws: make it sudo with update-alternatives --set sudo /usr/bin/sudo.ws, and admit again."
-		}
-		return fmt.Errorf("sudo on this host is sudo-rs, whose sudo -l does not list the Defaults that apply to a user, so admit cannot tell whether one passes %s's environment to the WireGuard helper, which runs as root.%s Nothing was changed", req.User, fix)
+	if u.SudoRS && !u.SudoWS {
+		return fmt.Errorf("sudo on this host is sudo-rs, whose sudo -l does not list the Defaults that apply to a user, and the original sudo, which admit reads them from in its place, is not installed as /usr/bin/sudo.ws, so admit cannot tell whether one passes %s's environment to the WireGuard helper, which runs as root. Install Ubuntu's sudo package, which installs it, and admit again. Nothing was changed", req.User)
 	}
 	if u.HomeAbove == "link" || u.HomeAbove == "unsafe" {
 		what := map[string]string{"link": "a link", "unsafe": "a directory that is not root's, or that its group or others can write"}[u.HomeAbove]

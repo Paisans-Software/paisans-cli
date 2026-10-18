@@ -25,12 +25,13 @@ reach only over SSH is the one step here that can lock you out.
   site), it must have the same architecture as the deployment's other data
   sites, which the operators' `site add` checks; the Ubuntu release may
   differ.
-* **sudo, not sudo-rs.** Admit reads with `sudo -l` whether a `Defaults`
-  line passes the deployment user's environment to the WireGuard helper,
-  which runs as root, and sudo-rs does not list them, so admit refuses it.
-  Ubuntu 26.04 makes sudo-rs `sudo` and installs the original beside it as
-  `/usr/bin/sudo.ws`; make that `sudo` before admitting, with
-  `sudo update-alternatives --set sudo /usr/bin/sudo.ws`.
+* **The original sudo installed, if sudo is sudo-rs.** Admit reads with
+  `sudo -l` whether a `Defaults` line passes the deployment user's
+  environment to the WireGuard helper, which runs as root. sudo-rs's
+  `sudo -l` does not list them, so where sudo is sudo-rs, as Ubuntu 26.04
+  makes it, admit reads them from the original, which Ubuntu's `sudo`
+  package installs beside it as `/usr/bin/sudo.ws`. With sudo-rs and no
+  `sudo.ws`, admit refuses.
 * **ufw installed.** Admit adds the deployment's rules to ufw and never
   installs it. If ufw is installed and not active, see step 4.
 * **Docker Engine 29.5 or later from Docker's repository, or no Docker.**
@@ -328,7 +329,7 @@ it fires leaves ufw enabled, and you locked out.
 To see it afterwards, with your deployment's token in place of `1a2b`:
 
 ```sh
-sudo -l -U paisans-1a2b                       # the helper, and nothing else
+sudo -l -U paisans-1a2b                       # the helper, and nothing else (sudo.ws -l -U where sudo is sudo-rs)
 sudo nft list table inet paisans_1a2b
 sudo ufw status | grep paisans-1a2b
 cat /etc/paisans/admitted.1a2b.json

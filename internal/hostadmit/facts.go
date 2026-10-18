@@ -184,8 +184,8 @@ type UserFacts struct {
 	GroupTaken bool
 	SudoNames  []string
 	// SudoRS is sudo being sudo-rs, whose sudo -l lists no Defaults;
-	// SudoWS the original sudo installed as /usr/bin/sudo.ws, which
-	// update-alternatives can make sudo in its place.
+	// SudoWS the original sudo installed as /usr/bin/sudo.ws, whose -l
+	// the probe reads in sudo-rs's place.
 	SudoRS        bool
 	SudoWS        bool
 	Linger        bool

@@ -1612,8 +1612,11 @@ so it needs the network: ufw installed and not enabled reads as installed and
 not active, and enabled as both. On the blank image, which has no ufw, both
 read false. Another installs apparmor the same way, and reads whether it ships
 rootlesskit's profile: 24.04's and 26.04's do, 22.04's does not. Where
-installing sudo makes sudo-rs `sudo`, as on 26.04, the sudo test makes the
-original `sudo.ws` `sudo` first, and one more reads sudo-rs as sudo-rs.
+installing sudo makes sudo-rs `sudo`, as on 26.04, the sudo test reads the
+same rules and Defaults through `sudo.ws`; another reads sudo-rs as sudo-rs,
+and one more checks that `sudo.ws` lists the `env_keep` and `setenv` sudo-rs
+applies and that stock sudo-rs passes none of the variables a root script
+trusts.
 
 `PAISANS_PROBE_IMAGE` runs the same tests in another image, such as the other
 releases admit supports:
