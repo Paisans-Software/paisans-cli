@@ -98,7 +98,7 @@ func (p *planner) etcdInitialFor(site string) EtcdInitial {
 
 // FormatEtcdInitial is the record's content.
 func FormatEtcdInitial(in EtcdInitial) string {
-	return fmt.Sprintf(`# Rendered by paisans. Do not edit: `+"`paisans apply`"+` overwrites this file.
+	return fmt.Sprintf(`# Rendered by paisans. Do not edit: `+"`paisans deployment apply`"+` overwrites this file.
 #
 # The flags this etcd member was first started with. etcd ignores both once
 # its data directory exists, so they never change after the first start, and

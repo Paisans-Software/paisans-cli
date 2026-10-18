@@ -8,7 +8,7 @@
     },
     {
       "path": "srv/paisans/f2a9/health/compose.yaml",
-      "sha256": "05073fbf2717d083b0211bbce3891688cc60b759f9e19e4c13a4cc9841707983",
+      "sha256": "ffbfdf2ddf916ee0a5254986f1c1853fda0b2e1c8fdefda9742943ccdec9b888",
       "mode": "0644"
     },
     {
@@ -18,27 +18,27 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/Caddyfile",
-      "sha256": "352f6ca81efaf0518ea8a05843fa04260922d9d956ba41e7879cfe17f445f4e7",
+      "sha256": "ebbb2a3b50e910ace2faa789f448cc03d6d8421a9277052d94f29a139471a526",
       "mode": "0644"
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/caddy.env",
-      "sha256": "63c1ee176d77ecd7518a773aff4acfc7b4075ecc3ebe659f00909a0167bcdd44",
+      "sha256": "e4524ec782161f97cf1daad5745e4c59d5bf37815622a70442ec33e1b684ee31",
       "mode": "0600"
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/snippets/health.caddy",
-      "sha256": "8727c8870e0d8431a8dff8e742b3c7bfce5031d160b12f27db4abece4b72f8bf",
+      "sha256": "ae0f535bf16ba5393345bc96c3890a48e45124b87b54c424dc16675888b55fba",
       "mode": "0644"
     },
     {
       "path": "srv/paisans/f2a9/infra/compose.yaml",
-      "sha256": "08d813aab28144ae3b167a2d91759fd37a5a4d55d55822edadd51d6931d47d5d",
+      "sha256": "ad002e4adfee8ec66221109fc1959da6d9105f4cee00a9e6af609fb04e676312",
       "mode": "0644"
     },
     {
       "path": "srv/paisans/f2a9/psns-f2a9.conf",
-      "sha256": "8553386c2e6770de48b7ba7d45585507cf146b060ddddefeecbbbd7c0ebbdaf1",
+      "sha256": "4ba1cede133fa71b48112f99482ce5a560829722c5454723c86e895031fb56d2",
       "mode": "0600"
     }
   ],

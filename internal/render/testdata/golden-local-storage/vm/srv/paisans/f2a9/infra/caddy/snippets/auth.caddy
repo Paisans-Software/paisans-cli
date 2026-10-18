@@ -1,4 +1,4 @@
-# Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+# Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
 #
 # Routing for auth, imported by the gateway's block for
 # id.example.org.
@@ -19,7 +19,7 @@ respond @api_key 403
 # administrator, answering with an admin session (usersignup/module.go:86-87
 # at v2.14.0). It is open while Pocket ID has no user besides its static API
 # key's (usersignup/service.go:220-229), which is the case from the moment a
-# new deployment starts until `apply` makes the declared operators, and again
+# new deployment starts until `deployment apply` makes the declared operators, and again
 # after a restore that holds no users. Whoever reaches it first in that window
 # owns the identity provider. Nothing in Pocket ID turns it off, and the
 # toolkit makes its admins through the static API key, so the gateway refuses

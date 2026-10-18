@@ -284,11 +284,11 @@ func ours(f FileState, content string) bool {
 
 // meshCondConf is the mesh unit's drop-in that skips it while its conf
 // does not exist: the user's manager wants the unit from its first start,
-// and only paisans apply writes the conf, so without it the unit would
+// and only paisans deployment apply writes the conf, so without it the unit would
 // fail at every boot until then and show in systemctl --failed.
 func meshCondConf(p *planner) string {
 	return "# Written by paisans site admit for deployment " + p.d.Token() + "; paisans site evict\n" +
-		"# removes it. Until paisans apply writes the mesh's conf, wg-quick has\n" +
+		"# removes it. Until paisans deployment apply writes the mesh's conf, wg-quick has\n" +
 		"# nothing to bring up, so the unit is skipped rather than failed.\n" +
 		"[Unit]\nConditionPathExists=" + p.d.WireGuardInstalled() + "\n"
 }
@@ -317,7 +317,7 @@ func planMeshDropIn(p *planner) error {
 	default:
 		p.step(Step{
 			Title:    "skip the mesh until its conf exists",
-			Describe: "user: " + p.d.WireGuardUnit() + " is skipped, not failed, at boot until paisans apply writes " + p.d.WireGuardInstalled(),
+			Describe: "user: " + p.d.WireGuardUnit() + " is skipped, not failed, at boot until paisans deployment apply writes " + p.d.WireGuardInstalled(),
 			File:     &hostprep.File{Path: cond, Content: condContent, Mode: 0o644},
 			Command:  "systemctl daemon-reload",
 			Kinds:    []string{"user"},

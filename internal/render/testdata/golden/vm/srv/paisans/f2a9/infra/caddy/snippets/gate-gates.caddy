@@ -1,4 +1,4 @@
-# Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+# Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
 #
 # Named Caddy snippets for the gate, imported by NAME (`import gate`,
 # `import gate_autologin ...`, `import gate_signin ...`), never by path:

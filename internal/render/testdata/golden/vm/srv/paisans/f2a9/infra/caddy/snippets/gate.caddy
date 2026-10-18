@@ -1,4 +1,4 @@
-# Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+# Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
 #
 # Routing for gate, imported by the gateway's block for
 # gate.example.org. This is the one hostname the identity provider's callback

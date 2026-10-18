@@ -1,4 +1,4 @@
-# Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+# Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
 #
 # The identity provider gates every other application, so it holds no state of
 # its own that a promoted site would lack: its uploads go in the database

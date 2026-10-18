@@ -1,4 +1,4 @@
-# Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+# Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
 #
 # Infrastructure for site vm. Bind mounts under /srv/paisans/f2a9/infra, never named
 # volumes, so relocating a stack is a tar rather than a volumes-from dance.

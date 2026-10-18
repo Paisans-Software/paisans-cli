@@ -1,4 +1,4 @@
-# Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+# Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
 #
 # account has cluster placement: no Postgres service of its own, and a
 # connection to the local HAProxy on 10.44.0.1:5000. Its state is

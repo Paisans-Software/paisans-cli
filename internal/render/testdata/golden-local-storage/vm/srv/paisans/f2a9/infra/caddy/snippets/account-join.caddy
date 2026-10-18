@@ -1,4 +1,4 @@
-# Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+# Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
 #
 # People with no account yet, on join.example.org, for account:
 # signup is invite, so the invite pages, /i/<token>, and the static files,
