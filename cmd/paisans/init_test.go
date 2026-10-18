@@ -1044,25 +1044,65 @@ func TestInitRefusesToMoveAnAdmittedSubnetOffATerminal(t *testing.T) {
 }
 
 // A host whose other deployment also holds a role this site needs cannot
-// take the site on any subnet, so init keeps the subnet and skips the site
-// with admit's advice to use another host.
-func TestInitKeepsTheSubnetWhenAdmitRefusedARole(t *testing.T) {
+// take the site on any subnet, so init skips the site with admit's advice
+// to use another host, admitting it no more. The subnet still rolls clear
+// of the mesh subnet that deployment holds, rather than be kept on it.
+func TestInitRollsClearOfASubnetAdmitRefusedBesideARole(t *testing.T) {
 	sites := fakeSites()
 	for _, f := range sites {
 		f.unadmitted = true
 	}
 	path, rec := initWorld(t, nil, sites, []byte{212, 37})
-	before, _ := os.ReadFile(path)
-	scriptAdmitFromInit(t, sites, map[string][]error{"home-b": {claimRefused("apps,data", "mesh subnet 10.44.0.0/24", "the data role")}})
+	ran := scriptAdmitFromInit(t, sites, map[string][]error{"home-b": {claimRefused("apps,data", "mesh subnet 10.44.0.0/24", "the data role")}})
 	if _, err := runInitAt(t, path, true, "n\nn\ny\nn\n"); err != nil {
 		t.Fatalf("%v\n%s", err, rec.Lines())
 	}
-	if after, _ := os.ReadFile(path); !bytes.Equal(before, after) {
-		t.Errorf("init rolled the subnet for a host it cannot use:\n%s", rec.Lines())
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Mesh.Subnet != "10.212.37.0/24" {
+		t.Errorf("subnet %s, want it rolled clear of home-b:\n%s", cfg.Mesh.Subnet, rec.Lines())
+	}
+	if strings.Join(*ran, ",") != "home-b" {
+		t.Errorf("admit ran for %v, want home-b once", *ran)
 	}
 	i := rec.Index("note", "home-b has not admitted this deployment yet, so init skipped it")
 	if i < 0 || !strings.Contains(rec.Events[i].Extra, "Use another host for one of the data sites") {
 		t.Errorf("the skip does not give admit's advice:\n%s", rec.Lines())
+	}
+	// Admitting the site again is refused the same way, so the skip gives
+	// no commands that admit it.
+	if i >= 0 && strings.Contains(rec.Events[i].Extra, "paisans site") {
+		t.Errorf("the skip gives commands no admit gets past:\n%s", rec.Events[i].Extra)
+	}
+}
+
+// With other sites admitted, the subnet moves clear of a mesh subnet held
+// beside a role as well: every admitted site is admitted again on the new
+// one, and the site refused for the role is skipped, not admitted again.
+func TestInitMovesAnAdmittedSubnetClearOfOneHeldBesideARole(t *testing.T) {
+	sites := fakeSites()
+	sites["home-b"].unadmitted = true
+	path, rec := initWorld(t, nil, sites, []byte{212, 37})
+	ran := scriptAdmitFromInit(t, sites, map[string][]error{
+		"health": {nil}, "home-a": {nil}, "home-b": {claimRefused("apps,data", "mesh subnet 10.44.0.0/24", "the data role")}, "vm": {nil},
+	})
+	if _, err := runInitAt(t, path, true, "y\n"); err != nil {
+		t.Fatalf("%v\n%s", err, rec.Lines())
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Mesh.Subnet != "10.212.37.0/24" {
+		t.Errorf("subnet %s, want it moved clear of home-b:\n%s", cfg.Mesh.Subnet, rec.Lines())
+	}
+	if strings.Join(*ran, ",") != "home-b,health,home-a,vm" {
+		t.Errorf("admit ran for %v, want home-b, then every admitted site again", *ran)
+	}
+	if !rec.Has("note", "home-b has not admitted this deployment yet, so init skipped it") {
+		t.Errorf("home-b was not skipped:\n%s", rec.Lines())
 	}
 }
 
