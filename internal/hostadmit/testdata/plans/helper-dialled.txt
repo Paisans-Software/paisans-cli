@@ -814,6 +814,7 @@ step 32: add the operators' keys
     | added SHA256:kmYcvdi2GkPeWxB6XLjrZB8JHsy2Hm8luHMFp9GMvqk alice
     | added SHA256:zpa+NMqw+6z5XIib6AyyKOtOnilzIda0f4kqtWRHm88 bob
 
+present: swap: on
 present: docker: Engine 29.9.1
 present: package: docker-ce-rootless-extras installed
 present: package: uidmap installed
@@ -832,7 +833,6 @@ present: daemon: /home/paisans-f2a9 (ext2/ext3) has 42.9 GB free
 present: mesh: nothing on this host overlaps 10.44.0.0/24
 present: public ports: nothing else answers on 80 or 443
 present: firewall: ufw active, its default policy left to the owner
-present: swap: on
 warning: delegation reaches paisans-f2a9's manager at its next start
   Its manager is running, and restarting it would restart its Docker daemon and every container in it, so admit does not. cpuset and io limits apply after the host's next reboot.
 warning: watchdog: falling back to softdog

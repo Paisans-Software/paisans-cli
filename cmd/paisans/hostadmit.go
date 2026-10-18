@@ -443,8 +443,8 @@ func askEnableUFW(a answerer, stdin io.Reader, stdout io.Writer, ports []int, bl
 // swapfile of size bytes on a host with no swap. Only y or yes says so, or
 // --yes, through a. A no admits the host without one.
 func askSwapfile(a answerer, stdin io.Reader, stdout io.Writer, size int64) (bool, error) {
-	explain := fmt.Sprintf("\nThis host has no swap. Without it, a host that runs short of memory has the kernel kill a process, which may be the database, instead of slowing down.\n"+
-		"Admit can make a swapfile of %d GiB at /swapfile, twice the host's RAM up to 16 GiB, and turn it on at boot through /etc/fstab.\n", size>>30)
+	explain := fmt.Sprintf("\nThis host has no swap. %s\n"+
+		"Admit can make a swapfile of %s at /swapfile, twice the host's RAM up to %s, and turn it on at boot through /etc/fstab.\n", hostadmit.SwapNeeded, hostadmit.GiB(size), hostadmit.GiB(hostadmit.SwapMax))
 	yes, err := a.yesNo(stdin, stdout, explain, "Make the swapfile (--swapfile)?", "make a swapfile (--swapfile)")
 	if err != nil {
 		return false, fmt.Errorf("site admit: reading your answer: %w. Nothing was changed", err)

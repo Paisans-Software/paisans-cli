@@ -253,6 +253,7 @@ type part struct {
 var parts = []part{
 	{"claim", planClaim}, // 1
 	{"admission directory", planAdmissionDir},
+	{"swap", planSwap},
 	{"sysctls before", planSysctlsBefore},
 	{"docker", planDocker},
 	{"apparmor", planAppArmor},
@@ -275,7 +276,6 @@ var parts = []part{
 	{"watchdog", planWatchdogGrant},             // 13
 	{"sysctls", planSysctls},                    // 14
 	{"web server", planWebServer},               // 14a
-	{"swap", planSwap},                          // 14b
 	{"record", planRecord},                      // 15
 	{"keys", planKeys},                          // 16
 	// 17. the check, CheckUser, runs after Execute, on both paths.

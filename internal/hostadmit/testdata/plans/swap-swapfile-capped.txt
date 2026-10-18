@@ -2,35 +2,43 @@ admit site vm of f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01 as paisans-f2a9 on fake (u
 
 step 1: claim the host
 step 2: create /etc/paisans
-step 3: record what admit installs
-step 4: skip the mesh until its conf exists
-step 5: start paisans-f2a9's manager after the mesh
-step 6: delegate cgroups to users
-step 7: write the egress table
-step 8: install the egress unit
-step 9: load the egress table
-step 10: load br_netfilter
-step 11: load br_netfilter at boot
-step 12: write paisans-f2a9's daemon.json
-step 13: install paisans-f2a9's rootless Docker
-step 14: create /srv/paisans
-step 15: create /srv/paisans/f2a9
-step 16: create /etc/wireguard
-step 17: create /usr/local/libexec/paisans
-step 18: install the WireGuard helper
-step 19: install the helper's sudoers line
-step 20: allow 22/tcp
-step 21: allow 51820/udp
-step 22: allow all inbound on psns-f2a9
 
-step 23: create a swapfile of 16 GiB
+step 3: create a swapfile of 16 GiB
   swap: /swapfile, 16 GiB, twice the host's RAM up to 16 GiB, on at boot through /etc/fstab
   run:
-    $ set -e; umask 077; rm -f /swapfile.paisans-tmp
+    $ set -e; umask 077
+    $ trap 'rm -f /swapfile.paisans-tmp' EXIT; trap 'exit 1' HUP INT TERM
+    $ rm -f /swapfile.paisans-tmp
     $ fallocate -l 17179869184 /swapfile.paisans-tmp || { rm -f /swapfile.paisans-tmp; dd if=/dev/zero of=/swapfile.paisans-tmp bs=1M count=16384 status=none; }
-    $ chmod 600 /swapfile.paisans-tmp; mkswap /swapfile.paisans-tmp >/dev/null; mv /swapfile.paisans-tmp /swapfile; swapon /swapfile
-    $ grep -qs '^/swapfile[[:space:]]' /etc/fstab || printf '%s\n' '/swapfile none swap sw 0 0' >> /etc/fstab
+    $ chmod 600 /swapfile.paisans-tmp; mkswap /swapfile.paisans-tmp >/dev/null
+    $ if [ -e /swapfile ] || [ -L /swapfile ]; then echo '/swapfile appeared since admit read the host; nothing was moved over it' >&2; exit 1; fi
+    $ mv /swapfile.paisans-tmp /swapfile
+    $ if ! grep -qs '^/swapfile[[:space:]]' /etc/fstab; then
+    $   if [ -s /etc/fstab ] && [ -n "$(tail -c1 /etc/fstab)" ]; then echo >> /etc/fstab; fi
+    $   printf '%s\n' '/swapfile none swap sw 0 0' >> /etc/fstab
+    $ fi
+    $ swapon /swapfile
 
+step 4: record what admit installs
+step 5: skip the mesh until its conf exists
+step 6: start paisans-f2a9's manager after the mesh
+step 7: delegate cgroups to users
+step 8: write the egress table
+step 9: install the egress unit
+step 10: load the egress table
+step 11: load br_netfilter
+step 12: load br_netfilter at boot
+step 13: write paisans-f2a9's daemon.json
+step 14: install paisans-f2a9's rootless Docker
+step 15: create /srv/paisans
+step 16: create /srv/paisans/f2a9
+step 17: create /etc/wireguard
+step 18: create /usr/local/libexec/paisans
+step 19: install the WireGuard helper
+step 20: install the helper's sudoers line
+step 21: allow 22/tcp
+step 22: allow 51820/udp
+step 23: allow all inbound on psns-f2a9
 step 24: write the admission record
 step 25: add the operators' keys
 

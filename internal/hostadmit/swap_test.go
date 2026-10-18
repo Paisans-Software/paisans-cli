@@ -22,8 +22,14 @@ var swapCases = addCases(
 	goldenCase{name: "swap-swapfile-capped", focus: []string{"swapfile"}, site: "vm", flags: hostadmit.Flags{Swapfile: true}, host: func() *fakeHost {
 		return noSwap(home()).with("mem-total", "34359738368")
 	}},
-	goldenCase{name: "swap-configured-not-on", site: "vm", flags: hostadmit.Flags{Swapfile: true}, host: func() *fakeHost {
+	goldenCase{name: "swap-configured-not-on", site: "vm", host: func() *fakeHost {
 		return noSwap(vmAdmitted()).with("swap-partition", "yes").with("swap-fstab", "yes")
+	}},
+	goldenCase{name: "swap-configured-not-on-refused", site: "vm", flags: hostadmit.Flags{Swapfile: true}, host: func() *fakeHost {
+		return noSwap(vmAdmitted()).with("swap-zram", "yes")
+	}},
+	goldenCase{name: "swap-ram-unread-refused", site: "vm", flags: hostadmit.Flags{Swapfile: true}, host: func() *fakeHost {
+		return noSwap(vmAdmitted()).with("mem-total", "")
 	}},
 	goldenCase{name: "swap-btrfs", site: "vm", host: func() *fakeHost { return noSwap(vmAdmitted()).with("root-fs", "btrfs") }},
 	goldenCase{name: "swap-btrfs-refused", site: "vm", flags: hostadmit.Flags{Swapfile: true}, host: func() *fakeHost { return noSwap(home()).with("root-fs", "btrfs") }},
@@ -52,6 +58,8 @@ func TestSwapOffer(t *testing.T) {
 		{"xfs", noSwap(home()).with("root-fs", "xfs"), hostadmit.Flags{}, 8 << 30, true},
 		{"zfs", noSwap(home()).with("root-fs", "zfs"), hostadmit.Flags{}, 0, true},
 		{"RAM unread", noSwap(home()).with("mem-total", ""), hostadmit.Flags{}, 0, true},
+		{"short of space", noSwap(home()).with("root-avail", "10000000000"), hostadmit.Flags{}, 0, true},
+		{"short but for a stopped step's file", noSwap(home()).with("root-avail", "10000000000").with("swap-tmp", "8589934592"), hostadmit.Flags{}, 8 << 30, true},
 	} {
 		plan, err := hostadmit.Build(c.host, input(t, "vm", c.flags))
 		if err != nil {

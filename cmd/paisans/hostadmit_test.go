@@ -1297,7 +1297,7 @@ func noSwapHost() *admitHost {
 }
 
 // With --execute at a terminal, a host with no swap has admit ask whether
-// to make a swapfile, and only a yes, or --swapfile, plans one. Off a
+// to make a swapfile, and only a yes, --yes or --swapfile plans one. Off a
 // terminal nothing is asked and the host is admitted without one.
 func TestAdmitAsksToMakeASwapfile(t *testing.T) {
 	savedExecute, savedLogin, savedOwner := executeAdmit, reachSiteUser, reachOwnerAdmit
@@ -1313,13 +1313,15 @@ func TestAdmitAsksToMakeASwapfile(t *testing.T) {
 		typed    string
 		terminal bool
 		flag     bool
+		yes      bool
 		makes    bool
 	}{
-		{"y\n", true, false, true},
-		{"n\n", true, false, false},
-		{"", true, false, false},
-		{"", false, false, false},
-		{"", false, true, true},
+		{"y\n", true, false, false, true},
+		{"n\n", true, false, false, false},
+		{"", true, false, false, false},
+		{"", false, false, false, false},
+		{"", false, true, false, true},
+		{"", false, false, true, true},
 	} {
 		quietAdmit(t)
 		withTerminal(t, c.terminal)
@@ -1327,6 +1329,10 @@ func TestAdmitAsksToMakeASwapfile(t *testing.T) {
 		args := []string{"--site", "vm", "--ssh", "owner@vm.example.org", "--config", fixtureConfig(), "--public-ports", "--execute"}
 		if c.flag {
 			args = append(args, "--swapfile")
+		}
+		if c.yes {
+			t.Setenv("PAISANS_ALLOW_YES", "1")
+			args = append(args, "--yes")
 		}
 		out := new(strings.Builder)
 		if err := runSiteAdmit(args, typed(t, c.typed), out); err != nil {
@@ -1339,7 +1345,7 @@ func TestAdmitAsksToMakeASwapfile(t *testing.T) {
 		if makes != c.makes {
 			t.Errorf("typed %q at a terminal %v, --swapfile %v: makes a swapfile %v", c.typed, c.terminal, c.flag, makes)
 		}
-		if asked := strings.Contains(out.String(), "Make the swapfile (--swapfile)?"); asked != (c.terminal && !c.flag) {
+		if asked := strings.Contains(out.String(), "Make the swapfile (--swapfile)?") || strings.Contains(out.String(), "approved by --yes: make a swapfile"); asked != (c.terminal && !c.flag || c.yes) {
 			t.Errorf("typed %q at a terminal %v, --swapfile %v: asked %v", c.typed, c.terminal, c.flag, asked)
 		}
 	}

@@ -108,7 +108,9 @@ type Facts struct {
 	// /proc/swaps; Partition a block device formatted as swap, FSTab a swap
 	// line in /etc/fstab, ZRAM a zram-generator configuration and File
 	// something at /swapfile, each whether it is on or not. RootFS and
-	// RootAvail are the filesystem of / and its free bytes.
+	// RootAvail are the filesystem of / and its free bytes, counting what a
+	// swapfile step that stopped part way left at /swapfile.paisans-tmp,
+	// which the next one removes first.
 	Swap struct {
 		MemTotal, RootAvail                  int64
 		Active, Partition, FSTab, ZRAM, File bool
@@ -591,7 +593,7 @@ func parseFacts(out, user string) (Facts, error) {
 				return f, fmt.Errorf("unreadable data-avail line %q", v)
 			}
 			f.Data.Avail = n
-		case "mem-total", "root-avail":
+		case "mem-total", "root-avail", "swap-tmp":
 			var n int64
 			if v != "" {
 				var err error
@@ -599,10 +601,11 @@ func parseFacts(out, user string) (Facts, error) {
 					return f, fmt.Errorf("unreadable %s line %q", key, v)
 				}
 			}
-			if key == "mem-total" {
+			switch key {
+			case "mem-total":
 				f.Swap.MemTotal = n
-			} else {
-				f.Swap.RootAvail = n
+			default:
+				f.Swap.RootAvail += n
 			}
 		case "swap-active":
 			f.Swap.Active = v == "yes"

@@ -234,13 +234,14 @@ func TestParseEvictFacts(t *testing.T) {
 }
 
 // Swap in each form is read whether or not it is on, and RAM or free space
-// the probe printed nothing for is 0, unread, rather than a refusal.
+// the probe printed nothing for is 0, unread, rather than a refusal. A
+// stopped swapfile step's temporary file counts as free.
 func TestParseFactsReadsSwap(t *testing.T) {
-	f, err := parseFacts("mem-total 4113297408\nswap-active no\nswap-partition yes\nswap-fstab no\nswap-zram yes\nswapfile absent\nroot-fs xfs\nroot-avail \nend\n", "paisans-f2a9")
+	f, err := parseFacts("mem-total 4113297408\nswap-active no\nswap-partition yes\nswap-fstab no\nswap-zram yes\nswapfile absent\nroot-fs xfs\nroot-avail \nswap-tmp 5\nend\n", "paisans-f2a9")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s := f.Swap; s.MemTotal != 4113297408 || s.Active || !s.Partition || s.FSTab || !s.ZRAM || s.File || s.RootFS != "xfs" || s.RootAvail != 0 {
+	if s := f.Swap; s.MemTotal != 4113297408 || s.Active || !s.Partition || s.FSTab || !s.ZRAM || s.File || s.RootFS != "xfs" || s.RootAvail != 5 {
 		t.Errorf("swap: %+v", s)
 	}
 }
