@@ -244,11 +244,20 @@ func (c Conflict) Error() string {
 			what += " and root " + c.Entry.Root
 		}
 	}
-	who := c.ID
-	if c.Entry.Domain != "" {
-		who += " (" + c.Entry.Domain + ")"
+	return fmt.Sprintf("deployment %s already holds %s on this host", c.who(), what)
+}
+
+// who is the other deployment's id, with the name a person knows it by:
+// its community's domain, or, for an entry claimed from a request, which
+// names no domain, its site's name on this host.
+func (c Conflict) who() string {
+	switch {
+	case c.Entry.Domain != "":
+		return c.ID + " (" + c.Entry.Domain + ")"
+	case c.Entry.Site != "":
+		return c.ID + " (site " + c.Entry.Site + ")"
 	}
-	return fmt.Sprintf("deployment %s already holds %s on this host", who, what)
+	return c.ID
 }
 
 // clashes is everything theirs holds that ours needs: the same token, root,
@@ -578,27 +587,52 @@ func Read(t Runner) (Registry, error) {
 }
 
 func refused(t Runner, e Entry, why error) error {
+	var c Conflict
+	if errors.As(why, &c) && len(c.Clashes) > 0 && !c.Holds("token") && !c.Holds("root") && !c.Holds("WireGuard interface") {
+		return fmt.Errorf("%s: %w. Nothing was changed", t.Describe(), clashError{c: c, ours: e})
+	}
 	roles := e.Roles
 	if roles == "" {
 		roles = "none"
 	}
-	advice := "Two deployments with one token would share every name, directory and WireGuard interface. Use another host for one of them"
-	var c Conflict
-	if errors.As(why, &c) && len(c.Clashes) > 0 && !c.Holds("token") && !c.Holds("root") && !c.Holds("WireGuard interface") {
-		// A role is advised on first: no port or subnet frees it.
-		switch {
-		case c.Holds("the data role"):
-			advice = "One host runs one deployment's data site: it binds the Postgres and etcd ports and holds the cluster's storage. Use another host for one of the data sites"
-		case c.Holds("the gateway role"):
-			advice = "One host gives ports 80 and 443 to one deployment: its gateway binds them and its Caddy imports its deployment's caddy.d, and a site admitted with --public-ports holds them too. Use another host for one of them"
-		case c.Holds("WireGuard listen port"):
-			advice = "Two WireGuard interfaces cannot listen on one port. Give this site's endpoint another port in " + config.FileName + ", and forward that port where the host is behind NAT"
-		default:
-			advice = "Two meshes on overlapping subnets would route each other's traffic. A deployed mesh subnet never changes, so the deployment not yet applied here moves: if this one has never been applied, admit this site from `paisans init`, which rolls a subnet clear of what this host holds and admits again each site that has admitted the deployment. With a request, the operators send a new one"
-		}
-	}
-	return fmt.Errorf("%s: %w, so this deployment (token %s, interface %s, mesh %s, roles %s) cannot share the host with it, and nothing was changed. %s", t.Describe(), why, e.Token, e.Interface, e.Subnet, roles, advice)
+	return fmt.Errorf("%s: %w, so this deployment (token %s, interface %s, mesh %s, roles %s) cannot share the host with it, and nothing was changed. Two deployments with one token would share every name, directory and WireGuard interface. Use another host for one of them", t.Describe(), why, e.Token, e.Interface, e.Subnet, roles)
 }
+
+// clashError is a Conflict over what two deployments cannot share on a
+// host, the listen port, the mesh subnet or a role, said one short sentence
+// a clash: a role or a port with what frees it, the mesh subnet alone.
+type clashError struct {
+	c    Conflict
+	ours Entry
+}
+
+func (r clashError) Error() string {
+	who := "deployment " + r.c.who()
+	out := make([]string, 0, len(r.c.Clashes))
+	for _, clash := range r.c.Clashes {
+		var s string
+		switch {
+		case strings.HasPrefix(clash, "mesh subnet"):
+			s = "mesh subnet " + r.ours.Subnet + " conflicts with " + who
+			if r.c.Entry.Subnet != r.ours.Subnet {
+				s += ", whose mesh subnet is " + r.c.Entry.Subnet
+			}
+		case clash == "the data role":
+			s = who + " holds the data role on this host. One host runs one deployment's data site: it binds the Postgres and etcd ports and holds the cluster's storage. Use another host for one of the data sites"
+		case clash == "the gateway role":
+			s = who + " holds the gateway role on this host. One host gives ports 80 and 443 to one deployment: its gateway binds them and its Caddy imports its deployment's caddy.d, and a site admitted with --public-ports holds them too. Use another host for one of them"
+		default:
+			s = who + " holds " + clash + " on this host. Two WireGuard interfaces cannot listen on one port. Give this site's endpoint another port in " + config.FileName + ", and forward that port where the host is behind NAT"
+		}
+		if len(out) > 0 {
+			s = strings.ToUpper(s[:1]) + s[1:]
+		}
+		out = append(out, s)
+	}
+	return strings.Join(out, ". ")
+}
+
+func (r clashError) Unwrap() error { return r.c }
 
 // Holds reports whether c names a clash starting with what, Eg: "the data
 // role" or "mesh subnet".

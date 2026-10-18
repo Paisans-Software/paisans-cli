@@ -241,7 +241,9 @@ under `--verbose`.
   <site>.admit` and then `sudo paisans site admit --request <site>.admit
   --execute` on the host, by an owner who is someone else. Both take the
   flags init cannot pass, such as `--data-dir`. `site admit` checks the
-  subnet there as root. A site that does not answer, or
+  subnet there as root. A host where another deployment holds what the
+  site needs is skipped with the clash alone, since admit refuses it again
+  whoever runs it. A site that does not answer, or
   refuses the operator's key as a user it names, refuses it with nothing
   written, unless a site already holds the deployment, whose subnet is then
   kept. An admitted site pins the subnet site admit built it around, so

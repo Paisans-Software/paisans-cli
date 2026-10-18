@@ -1064,6 +1064,11 @@ func TestInitKeepsTheSubnetWhenAdmitRefusedARole(t *testing.T) {
 	if i < 0 || !strings.Contains(rec.Events[i].Extra, "Use another host for one of the data sites") {
 		t.Errorf("the skip does not give admit's advice:\n%s", rec.Lines())
 	}
+	// Admitting the site again is refused the same way, so the skip gives
+	// no commands that admit it.
+	if i >= 0 && strings.Contains(rec.Events[i].Extra, "paisans site") {
+		t.Errorf("the skip gives commands no admit gets past:\n%s", rec.Events[i].Extra)
+	}
 }
 
 // overlapsOn is admit's refusal of a subnet that overlaps a network on the

@@ -1668,7 +1668,8 @@ id already holds this deployment's token or root (or its WireGuard interface,
 listen port or an overlapping mesh subnet, see the next section, or the
 gateway or data role, see below), and otherwise adds this deployment's entry,
 or refreshes it, in a temporary file it then moves over the registry. A
-refusal names the other deployment's id and domain and changes nothing, on
+refusal names the other deployment's id and domain, or its site where its
+entry has no domain, and changes nothing, on
 that host or any other. The lock is what serialises two admissions of one
 host at once, and the move is what keeps a registry from ever being half
 written. The merge is done with awk, which a host has before anything is
@@ -1819,8 +1820,8 @@ it two different ports, with `endpoint: ":<port>"` where the host has a
 `site admit` makes, described above, refuses, in the same locked command, when another deployment
 on the host holds the same interface, the same listen port, or a mesh subnet
 overlapping this one's in either direction (one inside the other, or equal).
-The refusal names the other deployment's id, its domain and the value that
-clashes.
+The refusal is one short sentence a clash, naming the other deployment's id,
+its domain or site and the value that clashes.
 
 **The host itself is checked too.** A mesh subnet also collides with networks
 no registry knows about: a LAN, another VPN, a Docker network, or a range

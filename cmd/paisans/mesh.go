@@ -198,7 +198,7 @@ func offerAdmissions(r ui.Reporter, cfg *config.Config, path string, hosts map[s
 		r.Note("mesh.subnet is not set yet, so init offers to admit no site", "site admit checks the subnet on the host, and init chooses it in this run. Once init has run, admit each site with the commands below, or run init again.")
 	}
 	for _, n := range skipped {
-		why := ""
+		var why admitStop
 		if ask {
 			resume := ui.Hold(r)
 			yes, err := ans.yesNo(stdin, stdout, "", fmt.Sprintf("Admit %s now from this machine?", n.site), "")
@@ -233,14 +233,32 @@ func offerAdmissions(r ui.Reporter, cfg *config.Config, path string, hosts map[s
 type blockedSite struct {
 	site  string
 	taken []mesh.Taken
-	why   string
+	why   admitStop
+}
+
+// admitStop is why site admit stopped with nothing changed, empty when it
+// did not run. held is a host where another deployment holds what the site
+// needs, which admitting the site again from the commands init prints is
+// refused for in turn.
+type admitStop struct {
+	why  string
+	held bool
+}
+
+// commands is what follows why admit stopped, for site: the commands that
+// admit it, unless the host is held.
+func (s admitStop) commands(path, site string) string {
+	if s.held {
+		return ""
+	}
+	return admitCommands(path, site)
 }
 
 // skipNote says init skipped site, with why admit stopped, if it ran, and
 // the commands that admit it. A note, so the commands show without
 // --verbose.
-func skipNote(r ui.Reporter, path, site, why string) {
-	r.Note(site+" has not admitted this deployment yet, so init skipped it", why+admitCommands(path, site))
+func skipNote(r ui.Reporter, path, site string, why admitStop) {
+	r.Note(site+" has not admitted this deployment yet, so init skipped it", strings.TrimSpace(why.why+why.commands(path, site)))
 }
 
 // admitSite runs site admit --site's own flow for site (admitFromInit),
@@ -250,29 +268,29 @@ func skipNote(r ui.Reporter, path, site, why string) {
 // admit refused the mesh subnet alone, or why it stopped, for the skip. An
 // admit that fails once its plan runs, or whose admission does not read
 // back, is the error.
-func admitSite(r ui.Reporter, cfg *config.Config, path string, hosts map[string]registry.Runner, site string, stdin io.Reader, stdout io.Writer) (*config.Config, bool, *blockedSite, string, error) {
+func admitSite(r ui.Reporter, cfg *config.Config, path string, hosts map[string]registry.Runner, site string, stdin io.Reader, stdout io.Writer) (*config.Config, bool, *blockedSite, admitStop, error) {
 	err := admitFromInit(r, path, site, stdin, stdout)
 	if err != nil {
 		if !admitStopped(err) {
-			return cfg, false, nil, "", err
+			return cfg, false, nil, admitStop{}, err
 		}
-		why := admitStopReason(err) + "\n\n"
+		why := admitStop{why: admitStopReason(err) + "\n\n", held: errors.As(err, new(registry.Conflict))}
 		if taken, ok := subnetBlocked(site, err); ok {
-			return cfg, false, &blockedSite{site: site, taken: taken, why: why}, "", nil
+			return cfg, false, &blockedSite{site: site, taken: taken, why: why}, admitStop{}, nil
 		}
 		return cfg, false, nil, why, nil
 	}
 	if cfg, err = config.LoadForInit(path); err != nil {
-		return cfg, false, nil, "", err
+		return cfg, false, nil, admitStop{}, err
 	}
 	hosts[site] = initHost(site, cfg.Sites[site])
 	s := r.Step("check " + site + "'s admission")
 	if _, err := admissionForSite(hosts[site], cfg, site); err != nil {
 		s.Fail(err)
-		return cfg, false, nil, "", fmt.Errorf("init: %s was admitted, but its admission does not read back: %w", site, err)
+		return cfg, false, nil, admitStop{}, fmt.Errorf("init: %s was admitted, but its admission does not read back: %w", site, err)
 	}
 	s.End(ui.OK, "admitted")
-	return cfg, true, nil, "", nil
+	return cfg, true, nil, admitStop{}, nil
 }
 
 // subnetBlocked is what admit refused the mesh subnet for on site's host,
@@ -333,7 +351,7 @@ func settleAndReadmit(r ui.Reporter, cfg *config.Config, path string, hosts map[
 	var taken []mesh.Taken
 	// stale is each site admitted on an old subnet and not yet on the
 	// current one, with why its last admit stopped.
-	stale := map[string]string{}
+	stale := map[string]admitStop{}
 	settled := func() {
 		for _, b := range blocked {
 			if _, ok := stale[b.site]; ok {
@@ -348,7 +366,7 @@ func settleAndReadmit(r ui.Reporter, cfg *config.Config, path string, hosts map[
 		}
 		sort.Strings(names)
 		for _, site := range names {
-			r.Warn(site+" is still admitted on an old mesh.subnet", stale[site]+"apply refuses it until it is admitted again on "+cfg.Mesh.Subnet+". "+admitCommands(path, site))
+			r.Warn(site+" is still admitted on an old mesh.subnet", strings.TrimSpace(stale[site].why+"apply refuses it until it is admitted again on "+cfg.Mesh.Subnet+". "+stale[site].commands(path, site)))
 		}
 	}
 	for moves := 0; ; moves++ {
@@ -376,7 +394,7 @@ func settleAndReadmit(r ui.Reporter, cfg *config.Config, path string, hosts map[
 		}
 		again := slices.Clone(admitted)
 		for _, site := range admitted {
-			stale[site] = ""
+			stale[site] = admitStop{}
 		}
 		for _, b := range blocked {
 			again = append(again, b.site)
@@ -390,7 +408,7 @@ func settleAndReadmit(r ui.Reporter, cfg *config.Config, path string, hosts map[
 		for _, site := range again {
 			var ok bool
 			var b *blockedSite
-			var why string
+			var why admitStop
 			if cfg, ok, b, why, err = admitSite(r, cfg, path, hosts, site, stdin, stdout); err != nil {
 				return nil, nil, false, err
 			}
