@@ -854,8 +854,10 @@ paisans site admit --site home-a --ssh owner@home-a.example.org --execute   # fr
   set, its `DOCKER-USER` or `DOCKER-FORWARD` chain in `FORWARD`), whose
   rules come ahead of ufw's; any other stays reachable only through a
   `ufw route allow` of yours to the address and port it is translated to.
-  A redirect reaches a port of the host's own, read as that port's
-  listener. Every other port enabling ufw blocks, and admit refuses before
+  A route allow counts inbound or out on an interface, from any source,
+  unless a route deny or reject matching the same traffic comes before it.
+  A redirect, or a DNAT rule to one of the host's own addresses, reaches a
+  port of the host's own, read as that port's listener. Every other port enabling ufw blocks, and admit refuses before
   any change, listing each with what serves it and printing a line per
   port: `sudo ufw allow <port>/<proto>` for a listener, `sudo ufw route
   allow proto <proto> to <address> port <port>` for what NAT translates,
