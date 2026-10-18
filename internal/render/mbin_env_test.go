@@ -1,6 +1,7 @@
 package render_test
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"testing"
@@ -123,7 +124,7 @@ var mbinDatabaseSettings = []string{
 
 // mbinLockableSettings are the settings the fork can lock, the ones that fall
 // back to an environment variable (docs/02-admin/03-optional-features/
-// 11-locked_settings.md at v1.15.0+paisans). Naming any other setting in
+// 11-locked_settings.md at v1.16.0+paisans, where it is every setting). Naming any other setting in
 // MBIN_LOCKED_SETTINGS makes Mbin answer every request with an error.
 var mbinLockableSettings = []string{
 	"KBIN_DOMAIN", "KBIN_TITLE", "KBIN_META_TITLE", "KBIN_META_KEYWORDS", "KBIN_META_DESCRIPTION",
@@ -132,7 +133,14 @@ var mbinLockableSettings = []string{
 	"KBIN_FEDERATION_PAGE_ENABLED", "KBIN_ADMIN_ONLY_OAUTH_CLIENTS", "MBIN_SSO_ONLY_MODE",
 	"MBIN_PRIVATE_INSTANCE", "MBIN_DOWNVOTES_MODE", "MBIN_NEW_USERS_NEED_APPROVAL",
 	"MBIN_USE_FEDERATION_ALLOW_LIST", "MBIN_AUTHORIZED_FETCH", "MBIN_SSO_AVATAR_OVERRIDE",
+	"KBIN_MERCURE_ENABLED", "KBIN_FEDERATED_SEARCH_ONLY_LOGGEDIN", "MBIN_SIDEBAR_SECTIONS_RANDOM_LOCAL_ONLY",
+	"MBIN_SIDEBAR_SECTIONS_USERS_LOCAL_ONLY", "MBIN_SSO_REGISTRATIONS_ENABLED", "MBIN_RESTRICT_MAGAZINE_CREATION",
+	"MBIN_SSO_SHOW_FIRST",
 }
+
+// mbinGeneralSettings are the settings of the General section of Mbin's
+// admin settings that the blueprint leaves to the admin.
+var mbinGeneralSettings = map[string]bool{"KBIN_DEFAULT_LANG": true, "MBIN_DEFAULT_THEME": true, "KBIN_JS_ENABLED": true}
 
 // mbinSettingEnv maps a Mbin database setting to the environment variable
 // that feeds it, where the two names differ (config/services.yaml:135 at
@@ -216,8 +224,20 @@ func TestMbinLockedSettingsAreRendered(t *testing.T) {
 		if strings.Join(locked, ",") != strings.Join(want, ",") {
 			t.Errorf("gated %v: locked %v, want every rendered database setting %v", gate, locked, want)
 		}
-		if gated := rendered["MBIN_PRIVATE_INSTANCE"]; gated != gate {
-			t.Errorf("gated %v: MBIN_PRIVATE_INSTANCE rendered = %v", gate, gated)
+		if got := envValue(env, "MBIN_PRIVATE_INSTANCE"); got != fmt.Sprint(gate) {
+			t.Errorf("gated %v: MBIN_PRIVATE_INSTANCE = %q", gate, got)
+		}
+		// Every setting of the Meta, Instance and Federation sections is
+		// locked; the General section's language, theme and JavaScript
+		// switch are left to the admin.
+		isLocked := map[string]bool{}
+		for _, name := range locked {
+			isLocked[name] = true
+		}
+		for _, name := range mbinDatabaseSettings {
+			if !isLocked[name] && !mbinGeneralSettings[name] {
+				t.Errorf("gated %v: %s is not locked", gate, name)
+			}
 		}
 		// The fixture's talk has a Pocket ID client, so sign in is the
 		// provider's alone and password registration is closed.

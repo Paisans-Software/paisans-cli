@@ -531,7 +531,7 @@ func TestTheGatewayImportsEachAppsOwnSnippet(t *testing.T) {
 	// A snippet never hardcodes where its app runs: a pinned app gets one
 	// upstream and a clustered one gets every apps site, both from inventory.
 	pinned := files["vm/srv/paisans/f2a9/infra/caddy/snippets/chat.caddy"].Content
-	if !strings.Contains(pinned, "10.44.0.3:8008") {
+	if !strings.Contains(pinned, "10.44.0.3:18008") {
 		t.Errorf("a pinned app's snippet does not point at its site:\n%s", pinned)
 	}
 	clustered := files["vm/srv/paisans/f2a9/infra/caddy/snippets/talk.caddy"].Content
@@ -1406,7 +1406,7 @@ func TestAHomeserverWithNoDelegationServesItsOwnWellKnown(t *testing.T) {
 	}
 	// Anywhere is not good enough: MAS does not serve them, and the bare
 	// handle at the end of the snippet is MAS's.
-	homeserverUpstream := "10.44.0.3:8008"
+	homeserverUpstream := "10.44.0.3:18008"
 	rest := snippet[at:]
 	end := strings.Index(rest, "\n}")
 	if end < 0 {
@@ -1734,7 +1734,7 @@ func TestAPassthroughKeyReachesTheRenderedFile(t *testing.T) {
 	files := planFiles(build(t))
 
 	env := files["home-a/srv/paisans/f2a9/talk/.env"]
-	if !strings.Contains(env, "\nKBIN_META_TITLE=A place to talk\n") {
+	if !strings.Contains(env, "\nMBIN_DEFAULT_THEME=dark\n") {
 		t.Errorf("mbin reads an environment:\n%s", env)
 	}
 
@@ -1768,7 +1768,7 @@ func TestAPassthroughKeyReachesTheRenderedFile(t *testing.T) {
 var passthroughFixtureKeys = []struct {
 	app, key, needle, file string
 }{
-	{"talk", "KBIN_META_TITLE", "KBIN_META_TITLE", ".env"},
+	{"talk", "MBIN_DEFAULT_THEME", "MBIN_DEFAULT_THEME", ".env"},
 	{"blog", "app.max_blogs", "max_blogs", "config.ini"},
 	{"chat", "require_auth_for_profile_requests", "require_auth_for_profile_requests", "homeserver.yaml"},
 	{"web", "default_theme", "default_theme", "config.json"},
@@ -1969,6 +1969,11 @@ func TestEverySettingThatOwnsAKeyReallyControlsIt(t *testing.T) {
 			// itself, so each is checked where the operator's value holds.
 			if o.Blueprint == config.BlueprintPocketID {
 				settings[blueprints.PocketIDManagementSetting] = blueprints.ManagementPocketID
+			}
+			// A gated Mbin is forced private and onto its allow list, so
+			// those two are checked on a public one.
+			if o.Blueprint == "mbin" && (o.Setting == "private_instance" || o.Setting == "federation_allow_list") {
+				a.Gated, a.AutoLogin = false, false
 			}
 			a.Settings = settings
 			c.Apps[app] = a

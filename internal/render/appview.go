@@ -56,6 +56,13 @@ type appValues struct {
 	// COOKIE_DOMAINS.
 	Domain string
 
+	// DisplayName is the app's display name, the name of its client at the
+	// identity provider (config.Config.ClientName), and CommunityName is
+	// community.name, empty when the configuration gives none. Templates of
+	// blueprint format v3 read them.
+	DisplayName   string
+	CommunityName string
+
 	// Gated is the app's gated key. A gated app that federates turns on its
 	// blueprint's signed fetch, because the gate leaves ActivityPub to the app.
 	Gated bool
@@ -408,6 +415,8 @@ func (p *planner) values(planned plannedApp, app config.App) (appValues, error) 
 		Hostname:        planned.Hostname,
 		PublicURL:       "https://" + planned.Hostname,
 		Domain:          p.cfg.Community.Domain,
+		DisplayName:     p.cfg.ClientName(planned.Name),
+		CommunityName:   p.cfg.Community.Name,
 		Gated:           app.Gated,
 		TrustedProxies:  p.mesh,
 		DBHost:          dbHost,

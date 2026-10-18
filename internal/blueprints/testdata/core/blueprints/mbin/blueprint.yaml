@@ -1,6 +1,6 @@
 # The mbin blueprint, in the core catalog.
 # Paisans reads it; internal/blueprints.Parse in paisans-cli documents every key.
-apiVersion: paisans.blueprint/v1
+apiVersion: paisans.blueprint/v3
 name: mbin
 services:
   # The paisans fork, not upstream: it carries the generic OIDC
@@ -12,10 +12,11 @@ services:
   # A track: Paisans runs the newest of the fork's 1.x releases,
   # published as image tags like 1.15.1-paisans for the release
   # 1.15.1+paisans (linux/amd64 only, so an arm64 apps site cannot run
-  # it). This blueprint's templates need four things the fork has carried
-  # since 1.15.0+paisans: MBIN_LOCKED_SETTINGS, MBIN_AUTHORIZED_FETCH,
-  # MBIN_PRIVATE_INSTANCE read from the environment, and the /healthz
-  # route the monitor checks. The newest 1.x always carries them.
+  # it). This blueprint's templates need what the fork has carried since
+  # 1.16.0+paisans: MBIN_LOCKED_SETTINGS able to lock every instance
+  # setting, each read from the environment, and the /healthz route the
+  # monitor checks. An older image answers every request with an error on
+  # a locked setting it cannot lock. The newest 1.x always carries them.
   - {name: "app", image: "ghcr.io/paisans-software/mbin:1.*.*-paisans", purpose: "the application, and its messenger consumers"}
   # The three sidecars upstream's compose.yaml runs beside it. The
   # messenger consumers are not here: they run the application's own
@@ -41,16 +42,62 @@ config:
   # when an admin saves, shows it disabled, and refuses it through the
   # settings API; a name it cannot lock makes it answer every request with
   # an error, so each must be one the fork lists as lockable.
+  #
+  # Every setting of the Meta, Instance and Federation sections is rendered
+  # in every case and locked, so the configuration is their only source. The
+  # last seven of them became lockable at 1.16.0+paisans.
   locked_settings:
     - KBIN_DOMAIN
     - KBIN_SENDER_EMAIL
     - KBIN_CONTACT_EMAIL
     - MBIN_AUTHORIZED_FETCH
-    - {name: MBIN_SSO_ONLY_MODE, when: "app.oidc"}
-    - {name: MBIN_PRIVATE_INSTANCE, when: "app.gated"}
-    - {name: MBIN_USE_FEDERATION_ALLOW_LIST, when: "app.gated"}
+    - MBIN_SSO_ONLY_MODE
+    - MBIN_PRIVATE_INSTANCE
+    - MBIN_USE_FEDERATION_ALLOW_LIST
+    - KBIN_TITLE
+    - KBIN_META_TITLE
+    - KBIN_META_DESCRIPTION
+    - KBIN_META_KEYWORDS
+    - MBIN_DOWNVOTES_MODE
+    - KBIN_HEADER_LOGO
+    - KBIN_REGISTRATIONS_ENABLED
+    - KBIN_CAPTCHA_ENABLED
+    - KBIN_ADMIN_ONLY_OAUTH_CLIENTS
+    - MBIN_NEW_USERS_NEED_APPROVAL
+    - KBIN_FEDERATION_ENABLED
+    - KBIN_FEDERATION_PAGE_ENABLED
+    - MBIN_SSO_AVATAR_OVERRIDE
+    - KBIN_MERCURE_ENABLED
+    - KBIN_FEDERATED_SEARCH_ONLY_LOGGEDIN
+    - MBIN_SIDEBAR_SECTIONS_RANDOM_LOCAL_ONLY
+    - MBIN_SIDEBAR_SECTIONS_USERS_LOCAL_ONLY
+    - MBIN_SSO_REGISTRATIONS_ENABLED
+    - MBIN_RESTRICT_MAGAZINE_CREATION
+    - MBIN_SSO_SHOW_FIRST
   setting_keys:
     - {key: "MBIN_AUTHORIZED_FETCH", file: ".env", setting: "authorized_fetch"}
+    - {key: "KBIN_TITLE", file: ".env", setting: "title"}
+    - {key: "KBIN_META_TITLE", file: ".env", setting: "meta_title"}
+    - {key: "KBIN_META_DESCRIPTION", file: ".env", setting: "meta_description"}
+    - {key: "KBIN_META_KEYWORDS", file: ".env", setting: "meta_keywords"}
+    - {key: "MBIN_DOWNVOTES_MODE", file: ".env", setting: "downvotes_mode"}
+    - {key: "KBIN_HEADER_LOGO", file: ".env", setting: "header_logo"}
+    - {key: "KBIN_REGISTRATIONS_ENABLED", file: ".env", setting: "registrations"}
+    - {key: "MBIN_SSO_REGISTRATIONS_ENABLED", file: ".env", setting: "sso_registrations"}
+    - {key: "MBIN_SSO_SHOW_FIRST", file: ".env", setting: "sso_show_first"}
+    - {key: "MBIN_SSO_AVATAR_OVERRIDE", file: ".env", setting: "avatar_override"}
+    - {key: "KBIN_CAPTCHA_ENABLED", file: ".env", setting: "captcha"}
+    - {key: "KBIN_MERCURE_ENABLED", file: ".env", setting: "mercure"}
+    - {key: "KBIN_ADMIN_ONLY_OAUTH_CLIENTS", file: ".env", setting: "admin_only_oauth_clients"}
+    - {key: "KBIN_FEDERATED_SEARCH_ONLY_LOGGEDIN", file: ".env", setting: "federated_search_only_logged_in"}
+    - {key: "MBIN_RESTRICT_MAGAZINE_CREATION", file: ".env", setting: "restrict_magazine_creation"}
+    - {key: "MBIN_SIDEBAR_SECTIONS_RANDOM_LOCAL_ONLY", file: ".env", setting: "sidebar_random_local_only"}
+    - {key: "MBIN_SIDEBAR_SECTIONS_USERS_LOCAL_ONLY", file: ".env", setting: "sidebar_users_local_only"}
+    - {key: "MBIN_NEW_USERS_NEED_APPROVAL", file: ".env", setting: "new_users_need_approval"}
+    - {key: "MBIN_PRIVATE_INSTANCE", file: ".env", setting: "private_instance"}
+    - {key: "KBIN_FEDERATION_ENABLED", file: ".env", setting: "federation"}
+    - {key: "KBIN_FEDERATION_PAGE_ENABLED", file: ".env", setting: "federation_page"}
+    - {key: "MBIN_USE_FEDERATION_ALLOW_LIST", file: ".env", setting: "federation_allow_list"}
     - {key: "OAUTH_OIDC_ADMIN_GROUP", file: ".env", setting: "admin_group"}
     - {key: "OAUTH_OIDC_MEMBER_GROUP", file: ".env", setting: "member_group"}
     - {key: "S3_BUCKET", file: ".env", setting: "s3_bucket"}
@@ -183,8 +230,11 @@ gate:
       setting: "authorized_fetch"
   live: {action: env-lock-list, service: app, lock_variable: MBIN_LOCKED_SETTINGS}
 federation:
-  # Mbin always federates.
+  # Mbin federates unless settings.federation is false, which renders
+  # KBIN_FEDERATION_ENABLED=false; the toolkit then treats it as an app that
+  # does not federate.
   federates: true
+  setting: federation
 # Every blueprint that stores objects serves them on a hostname of its own.
 # The set has to agree with UsesObjectStorage, and a test holds it to
 # that: a blueprint that stores objects without this role would publish URLs
@@ -298,6 +348,208 @@ checks:
       !has(app.settings.authorized_fetch) || type(app.settings.authorized_fetch) == bool
     message_expr: |-
       'is ' + (type(app.settings.authorized_fetch) == string ? '"' + app.settings.authorized_fetch + '"' : string(app.settings.authorized_fetch)) + '. Write true or false, unquoted, or leave it out for the default, true.'
+  # The settings below are rendered into Mbin's admin settings and locked
+  # there, so a value read as on that the operator meant as off would be both
+  # wrong and out of reach of the admin page.
+  - id: mbin-header-logo-not-a-boolean
+    level: refuse
+    hint: header_logo is not true or false
+    key: settings.header_logo
+    rule: |-
+      !has(app.settings.header_logo) || type(app.settings.header_logo) == bool
+    message_expr: |-
+      'is ' + (type(app.settings.header_logo) == string ? '"' + app.settings.header_logo + '"' : string(app.settings.header_logo)) + '. Write true or false, unquoted, or leave it out for the default, false.'
+  - id: mbin-registrations-not-a-boolean
+    level: refuse
+    hint: registrations is not true or false
+    key: settings.registrations
+    rule: |-
+      !has(app.settings.registrations) || type(app.settings.registrations) == bool
+    message_expr: |-
+      'is ' + (type(app.settings.registrations) == string ? '"' + app.settings.registrations + '"' : string(app.settings.registrations)) + '. Write true or false, unquoted, or leave it out for the default, false.'
+  - id: mbin-sso-registrations-not-a-boolean
+    level: refuse
+    hint: sso_registrations is not true or false
+    key: settings.sso_registrations
+    rule: |-
+      !has(app.settings.sso_registrations) || type(app.settings.sso_registrations) == bool
+    message_expr: |-
+      'is ' + (type(app.settings.sso_registrations) == string ? '"' + app.settings.sso_registrations + '"' : string(app.settings.sso_registrations)) + '. Write true or false, unquoted, or leave it out for the default, true.'
+  - id: mbin-sso-show-first-not-a-boolean
+    level: refuse
+    hint: sso_show_first is not true or false
+    key: settings.sso_show_first
+    rule: |-
+      !has(app.settings.sso_show_first) || type(app.settings.sso_show_first) == bool
+    message_expr: |-
+      'is ' + (type(app.settings.sso_show_first) == string ? '"' + app.settings.sso_show_first + '"' : string(app.settings.sso_show_first)) + '. Write true or false, unquoted, or leave it out for the default, false.'
+  - id: mbin-captcha-not-a-boolean
+    level: refuse
+    hint: captcha is not true or false
+    key: settings.captcha
+    rule: |-
+      !has(app.settings.captcha) || type(app.settings.captcha) == bool
+    message_expr: |-
+      'is ' + (type(app.settings.captcha) == string ? '"' + app.settings.captcha + '"' : string(app.settings.captcha)) + '. Write true or false, unquoted, or leave it out for the default, false.'
+  - id: mbin-mercure-not-a-boolean
+    level: refuse
+    hint: mercure is not true or false
+    key: settings.mercure
+    rule: |-
+      !has(app.settings.mercure) || type(app.settings.mercure) == bool
+    message_expr: |-
+      'is ' + (type(app.settings.mercure) == string ? '"' + app.settings.mercure + '"' : string(app.settings.mercure)) + '. Write true or false, unquoted, or leave it out for the default, false.'
+  - id: mbin-admin-only-oauth-clients-not-a-boolean
+    level: refuse
+    hint: admin_only_oauth_clients is not true or false
+    key: settings.admin_only_oauth_clients
+    rule: |-
+      !has(app.settings.admin_only_oauth_clients) || type(app.settings.admin_only_oauth_clients) == bool
+    message_expr: |-
+      'is ' + (type(app.settings.admin_only_oauth_clients) == string ? '"' + app.settings.admin_only_oauth_clients + '"' : string(app.settings.admin_only_oauth_clients)) + '. Write true or false, unquoted, or leave it out for the default, false.'
+  - id: mbin-federated-search-only-logged-in-not-a-boolean
+    level: refuse
+    hint: federated_search_only_logged_in is not true or false
+    key: settings.federated_search_only_logged_in
+    rule: |-
+      !has(app.settings.federated_search_only_logged_in) || type(app.settings.federated_search_only_logged_in) == bool
+    message_expr: |-
+      'is ' + (type(app.settings.federated_search_only_logged_in) == string ? '"' + app.settings.federated_search_only_logged_in + '"' : string(app.settings.federated_search_only_logged_in)) + '. Write true or false, unquoted, or leave it out for the default, true.'
+  - id: mbin-restrict-magazine-creation-not-a-boolean
+    level: refuse
+    hint: restrict_magazine_creation is not true or false
+    key: settings.restrict_magazine_creation
+    rule: |-
+      !has(app.settings.restrict_magazine_creation) || type(app.settings.restrict_magazine_creation) == bool
+    message_expr: |-
+      'is ' + (type(app.settings.restrict_magazine_creation) == string ? '"' + app.settings.restrict_magazine_creation + '"' : string(app.settings.restrict_magazine_creation)) + '. Write true or false, unquoted, or leave it out for the default, false.'
+  - id: mbin-sidebar-random-local-only-not-a-boolean
+    level: refuse
+    hint: sidebar_random_local_only is not true or false
+    key: settings.sidebar_random_local_only
+    rule: |-
+      !has(app.settings.sidebar_random_local_only) || type(app.settings.sidebar_random_local_only) == bool
+    message_expr: |-
+      'is ' + (type(app.settings.sidebar_random_local_only) == string ? '"' + app.settings.sidebar_random_local_only + '"' : string(app.settings.sidebar_random_local_only)) + '. Write true or false, unquoted, or leave it out for the default, false.'
+  - id: mbin-sidebar-users-local-only-not-a-boolean
+    level: refuse
+    hint: sidebar_users_local_only is not true or false
+    key: settings.sidebar_users_local_only
+    rule: |-
+      !has(app.settings.sidebar_users_local_only) || type(app.settings.sidebar_users_local_only) == bool
+    message_expr: |-
+      'is ' + (type(app.settings.sidebar_users_local_only) == string ? '"' + app.settings.sidebar_users_local_only + '"' : string(app.settings.sidebar_users_local_only)) + '. Write true or false, unquoted, or leave it out for the default, false.'
+  - id: mbin-new-users-need-approval-not-a-boolean
+    level: refuse
+    hint: new_users_need_approval is not true or false
+    key: settings.new_users_need_approval
+    rule: |-
+      !has(app.settings.new_users_need_approval) || type(app.settings.new_users_need_approval) == bool
+    message_expr: |-
+      'is ' + (type(app.settings.new_users_need_approval) == string ? '"' + app.settings.new_users_need_approval + '"' : string(app.settings.new_users_need_approval)) + '. Write true or false, unquoted, or leave it out for the default, false.'
+  - id: mbin-private-instance-not-a-boolean
+    level: refuse
+    hint: private_instance is not true or false
+    key: settings.private_instance
+    rule: |-
+      !has(app.settings.private_instance) || type(app.settings.private_instance) == bool
+    message_expr: |-
+      'is ' + (type(app.settings.private_instance) == string ? '"' + app.settings.private_instance + '"' : string(app.settings.private_instance)) + '. Write true or false, unquoted, or leave it out for the default, false.'
+  - id: mbin-federation-not-a-boolean
+    level: refuse
+    hint: federation is not true or false
+    key: settings.federation
+    rule: |-
+      !has(app.settings.federation) || type(app.settings.federation) == bool
+    message_expr: |-
+      'is ' + (type(app.settings.federation) == string ? '"' + app.settings.federation + '"' : string(app.settings.federation)) + '. Write true or false, unquoted, or leave it out for the default, true.'
+  - id: mbin-federation-page-not-a-boolean
+    level: refuse
+    hint: federation_page is not true or false
+    key: settings.federation_page
+    rule: |-
+      !has(app.settings.federation_page) || type(app.settings.federation_page) == bool
+    message_expr: |-
+      'is ' + (type(app.settings.federation_page) == string ? '"' + app.settings.federation_page + '"' : string(app.settings.federation_page)) + '. Write true or false, unquoted, or leave it out for the default, true.'
+  - id: mbin-federation-allow-list-not-a-boolean
+    level: refuse
+    hint: federation_allow_list is not true or false
+    key: settings.federation_allow_list
+    rule: |-
+      !has(app.settings.federation_allow_list) || type(app.settings.federation_allow_list) == bool
+    message_expr: |-
+      'is ' + (type(app.settings.federation_allow_list) == string ? '"' + app.settings.federation_allow_list + '"' : string(app.settings.federation_allow_list)) + '. Write true or false, unquoted, or leave it out for the default, false.'
+  - id: mbin-title-not-text
+    level: refuse
+    hint: title is not text
+    key: settings.title
+    rule: |-
+      !has(app.settings.title) || type(app.settings.title) == string
+    message_expr: |-
+      'is ' + string(app.settings.title) + '. Write it as text, quoted if it could read as a number or true or false.'
+  - id: mbin-meta-title-not-text
+    level: refuse
+    hint: meta_title is not text
+    key: settings.meta_title
+    rule: |-
+      !has(app.settings.meta_title) || type(app.settings.meta_title) == string
+    message_expr: |-
+      'is ' + string(app.settings.meta_title) + '. Write it as text, quoted if it could read as a number or true or false.'
+  - id: mbin-meta-description-not-text
+    level: refuse
+    hint: meta_description is not text
+    key: settings.meta_description
+    rule: |-
+      !has(app.settings.meta_description) || type(app.settings.meta_description) == string
+    message_expr: |-
+      'is ' + string(app.settings.meta_description) + '. Write it as text, quoted if it could read as a number or true or false.'
+  - id: mbin-meta-keywords-not-text
+    level: refuse
+    hint: meta_keywords is not text
+    key: settings.meta_keywords
+    rule: |-
+      !has(app.settings.meta_keywords) || type(app.settings.meta_keywords) == string
+    message_expr: |-
+      'is ' + string(app.settings.meta_keywords) + '. Write it as text, quoted if it could read as a number or true or false.'
+  # Mbin reads it as one of its DownvotesMode values and fails to boot on
+  # any other (src/Utils/DownvotesMode.php at v1.16.0+paisans).
+  - id: mbin-downvotes-mode-unknown
+    level: refuse
+    hint: downvotes_mode is not enabled, hidden or disabled
+    key: settings.downvotes_mode
+    rule: |-
+      !has(app.settings.downvotes_mode) || (type(app.settings.downvotes_mode) == string && app.settings.downvotes_mode in ['enabled', 'hidden', 'disabled'])
+    message_expr: |-
+      'is ' + string(app.settings.downvotes_mode) + '. Choose enabled (the default), hidden or disabled.'
+  # A gated Mbin is always a private instance on an allow list (see gate
+  # below), so setting either false would contradict what is rendered.
+  - id: mbin-gated-needs-private-instance
+    level: refuse
+    hint: a gated mbin sets private_instance false
+    key: settings.private_instance
+    rule: |-
+      !app.gated || !has(app.settings.private_instance) || app.settings.private_instance != false
+    message_expr: |-
+      'is false, but ' + app.name + ' is gated, and a gated Mbin is always a private instance: the gate lets a request with a bearer token reach /api/*, and without private instance mode Mbin answers its API reads with no user at all. Remove the key, or set gated false.'
+  - id: mbin-gated-needs-federation-allow-list
+    level: refuse
+    hint: a gated mbin sets federation_allow_list false
+    key: settings.federation_allow_list
+    rule: |-
+      !app.gated || !has(app.settings.federation_allow_list) || app.settings.federation_allow_list != false
+    message_expr: |-
+      'is false, but ' + app.name + ' is gated, and a gated Mbin always federates only with its allow list: the gate leaves ActivityPub to Mbin, and without the allow list Mbin answers a signed read from any instance. Remove the key, or set gated false.'
+  # The toolkit renders avatar_override and locks it, so a value meant as
+  # off, such as the string "no", would leave uploads open and out of the
+  # configuration's reach.
+  - id: avatar-override-not-a-boolean
+    level: refuse
+    hint: avatar_override is not true or false
+    key: settings.avatar_override
+    rule: |-
+      !has(app.settings.avatar_override) || type(app.settings.avatar_override) == bool
+    message_expr: |-
+      'is ' + (type(app.settings.avatar_override) == string ? '"' + app.settings.avatar_override + '"' : string(app.settings.avatar_override)) + '. Write true or false, unquoted, or leave it out for the default, true.'
   # With no mail server Mbin renders Symfony's null transport, so nothing
   # errors and the app works; what is lost is every contact form message
   # and the few account mails it still sends.

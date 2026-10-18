@@ -1,4 +1,4 @@
-# Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+# Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
 #
 # The whole Mbin stack, in the shape upstream's own compose.yaml has (read at
 # the paisans fork's tag v1.13.3+paisans): the web application, its messenger

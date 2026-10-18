@@ -8,22 +8,27 @@
     },
     {
       "path": "srv/paisans/f2a9/chat/compose.yaml",
-      "sha256": "7d661bb671fbe34d5e53237895b090b98d0f6cc3c1d7358a220c67aa57608e26",
+      "sha256": "7181e3962abf7b34ea2d06fe028fe5b0dda30206e9e6650679d5b2a8fbd827ad",
       "mode": "0644"
     },
     {
       "path": "srv/paisans/f2a9/chat/homeserver.yaml",
-      "sha256": "2cce2bd9d6fb190291506eff8d884e86aaba1d1871e4d2a61db52726d92cbf7c",
+      "sha256": "8d835fe1563168731a671527885dc6a2253e3de95b55cd28bc0bd2d03459cb49",
       "mode": "0600"
     },
     {
       "path": "srv/paisans/f2a9/chat/initdb.d/01-mas-database.sql",
-      "sha256": "0b50e0350faeb83af9f86267071be6b8735e6645e27d6ab154233e889c2e44ce",
+      "sha256": "f8df8f2b89bbe41558d4c129bffdbde01a37d79be2967d2a93b22fbac892e62b",
+      "mode": "0644"
+    },
+    {
+      "path": "srv/paisans/f2a9/chat/log.config",
+      "sha256": "63288096290e6927fecbfec557b6118c3b9a6c6a3638176eb25058d7d40a8087",
       "mode": "0644"
     },
     {
       "path": "srv/paisans/f2a9/chat/mas.yaml",
-      "sha256": "aa717a9872d2c4dd5bb05b7defc8410917b14c50dd628572bb6bb031fe11d107",
+      "sha256": "537a58c899a8b8f99248fd772410ccc979a53721ad97837b4d5262d3dba93583",
       "mode": "0600"
     },
     {
@@ -63,22 +68,22 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/snippets/blog-media.caddy",
-      "sha256": "a86a4ca2490ae64dbf50d8d4019347156fb5822f6feec2622dd0634fb125d0f7",
+      "sha256": "2bfe53e3ef0da8593ed619365f20dcf04386516e5714c807c519b2b5cde7a06f",
       "mode": "0644"
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/snippets/blog.caddy",
-      "sha256": "f8c20ca6b67c492430925b5d74ec986b6167f08be8cea95fb2169af90dfa3e49",
+      "sha256": "174e39b7d642a2f50e7a81f1fdf8dafdc3e9c166fe63aa5dae225f72c6dbb3de",
       "mode": "0644"
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/snippets/chat-wellknown.caddy",
-      "sha256": "3c99f5f2d8ca959da822af723e1c7d2957e2463acbb0e6604fc7946de342aa47",
+      "sha256": "8934146816f39a239984854154b8949596849c73f1cb0b4f6db65171dc252617",
       "mode": "0644"
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/snippets/chat.caddy",
-      "sha256": "dc8a179f543b18289e217cae24d4b255f486a9798e26f0777bfcb28c43c8fa22",
+      "sha256": "08c8e1b75c3b1456a8ac812ed22e079730058b443ab93c4e46f992da0bf5338e",
       "mode": "0644"
     },
     {
@@ -93,22 +98,22 @@
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/snippets/talk-media.caddy",
-      "sha256": "e9294a3439525cc3cc9cd86edb3ececb9c79e28ae0c5086809dca5e9dbebfa36",
+      "sha256": "90b976d0607b542e59fe1a1598149bc1660334462c7dc13a84a16b512fa7e8d3",
       "mode": "0644"
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/snippets/talk.caddy",
-      "sha256": "db0ec1436233c51821486ac4c685ac69c9be041dfee804f7ed7c1e37c2e5bbcd",
+      "sha256": "b03fa6cd5d71c3cc8fe1ee1f5d3940cf8231573c70c2ae71180e82bc3ff83285",
       "mode": "0644"
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/snippets/web.caddy",
-      "sha256": "4be04cb8ce4acf3e0945ac16eeed26dc2791d19eb9f220bb10c29667a75a56f6",
+      "sha256": "17a7151cae4ac1a0069ca41e7af3d4f1fcf9db7f99bd47d28677ebe9f17e6429",
       "mode": "0644"
     },
     {
       "path": "srv/paisans/f2a9/infra/caddy/snippets/wiki.caddy",
-      "sha256": "2d6ca0fc88459922f5b0e5ffc30d97b3fe3012afc7f971c46854338bc8a910d3",
+      "sha256": "330a2bec033fd26e43329ea9cac2e3f45bd656c0ac10c6eb67d680b6b943ceb4",
       "mode": "0644"
     },
     {

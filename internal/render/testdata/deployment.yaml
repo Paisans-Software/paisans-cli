@@ -103,7 +103,7 @@ apps:
     # One passthrough key per format, so each merge is visible in the golden
     # tree. Mbin reads its environment, so the key is a variable name.
     config:
-      KBIN_META_TITLE: A place to talk
+      MBIN_DEFAULT_THEME: dark
   wiki:
     blueprint: wikijs
     hostname: wiki.example.org

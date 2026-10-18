@@ -95,6 +95,11 @@ func TestRulesFire(t *testing.T) {
 		{"config-key-already-rendered", "config-key-already-rendered", validate.Refuse},
 		{"uses-gate-outside-the-domain", "uses-gate-outside-the-domain", validate.Refuse},
 		{"authorized-fetch-not-a-boolean", "authorized-fetch-not-a-boolean", validate.Refuse},
+		{"mbin-registrations-not-a-boolean", "mbin-registrations-not-a-boolean", validate.Refuse},
+		{"mbin-downvotes-mode-unknown", "mbin-downvotes-mode-unknown", validate.Refuse},
+		{"mbin-meta-title-not-text", "mbin-meta-title-not-text", validate.Refuse},
+		{"mbin-gated-needs-private-instance", "mbin-gated-needs-private-instance", validate.Refuse},
+		{"mbin-gated-needs-federation-allow-list", "mbin-gated-needs-federation-allow-list", validate.Refuse},
 		{"writefreely-setting-invalid", "writefreely-setting-invalid", validate.Refuse},
 		{"gated-on-pocket-id", "gated-on-ungateable-blueprint", validate.Refuse},
 		{"gated-on-the-monitor", "gated-on-ungateable-blueprint", validate.Refuse},
@@ -917,7 +922,7 @@ func TestAKeyTheTemplateWritesIsRefusedBeforeRender(t *testing.T) {
 		t.Fatal(err)
 	}
 	talk := cfg.Apps["talk"]
-	talk.Config = map[string]any{"MBIN_USE_FEDERATION_ALLOW_LIST": true, "MBIN_PRIVATE_INSTANCE": true, "KBIN_META_TITLE": "A place to talk"}
+	talk.Config = map[string]any{"MBIN_USE_FEDERATION_ALLOW_LIST": true, "MBIN_PRIVATE_INSTANCE": true, "MBIN_DEFAULT_THEME": "dark"}
 	cfg.Apps["talk"] = talk
 	var keys []string
 	for _, f := range validate.Check(cfg).Refusals() {
@@ -931,12 +936,19 @@ func TestAKeyTheTemplateWritesIsRefusedBeforeRender(t *testing.T) {
 		t.Errorf("gated talk: refused %v, want %v", keys, want)
 	}
 
+	// The template writes both on a public Mbin too, from its settings, and
+	// never writes the theme.
 	talk.Gated, talk.AutoLogin = false, false
 	cfg.Apps["talk"] = talk
+	keys = nil
 	for _, f := range validate.Check(cfg).Refusals() {
 		if f.Rule == "config-key-already-rendered" {
-			t.Errorf("public talk: %s refused, but its template does not write it", f.Key)
+			keys = append(keys, f.Key)
 		}
+	}
+	sort.Strings(keys)
+	if strings.Join(keys, ",") != strings.Join(want, ",") {
+		t.Errorf("public talk: refused %v, want %v", keys, want)
 	}
 }
 
@@ -1066,4 +1078,13 @@ func TestAnUnsupportedVersionRefusalNamesTheSupportedPrefix(t *testing.T) {
 		}
 	}
 	t.Error("not refused")
+}
+
+// A gated Mbin with federation off does not federate, so nothing about
+// signed fetch applies to it and the configuration is accepted.
+func TestAGatedMbinWithFederationOffIsAccepted(t *testing.T) {
+	result := validate.Check(load(t, "mbin-federation-off-when-gated"))
+	if result.Refused() {
+		t.Fatalf("refused: %v", result.Refusals())
+	}
 }

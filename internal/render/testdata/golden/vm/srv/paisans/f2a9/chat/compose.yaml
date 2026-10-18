@@ -1,4 +1,4 @@
-# Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+# Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
 #
 # Three containers, and the split between the first two is the whole design:
 # `mas` owns authentication and `app` is a resource server that introspects the
@@ -15,6 +15,13 @@ name: paisans-f2a9-chat
 
 services:
   app:
+    # Rootless container UID 0 is the deployment user on the host. Rendered
+    # secret mounts are 0600 for that owner, so the image must not drop to
+    # its unrelated UID 991 before opening them.
+    user: "0:0"
+    environment:
+      UID: "0"
+      GID: "0"
     labels:
       community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
     image: ghcr.io/element-hq/synapse:v1.*.*
@@ -26,7 +33,9 @@ services:
     # public address is reachable from the internet whatever ufw says. The
     # gateway, over the mesh, is the only thing that should reach it.
     ports:
-      - "10.44.0.3:8008:8008"
+      - "10.44.0.3:18008:18008"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:18008/health"]
     volumes:
       - /srv/paisans/f2a9/chat/data:/data
       # Synapse reads a file. The database password and the secret it shares
@@ -34,10 +43,14 @@ services:
       # passed as environment: `docker inspect` and /proc/<pid>/environ would
       # show the latter.
       - /srv/paisans/f2a9/chat/homeserver.yaml:/data/homeserver.yaml:ro
+      - /srv/paisans/f2a9/chat/log.config:/data/log.config:ro
     depends_on:
       - postgres
 
   mas:
+    # The image defaults to UID 65532, which cannot read the deployment
+    # user's 0600 secret mount. This remains the unprivileged host user.
+    user: "0:0"
     labels:
       community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
     image: ghcr.io/element-hq/matrix-authentication-service:1.*.*
@@ -52,7 +65,7 @@ services:
     # public address is reachable from the internet whatever ufw says. The
     # gateway, over the mesh, is the only thing that should reach it.
     ports:
-      - "10.44.0.3:8009:8009"
+      - "10.44.0.3:18009:18009"
     volumes:
       # 0600, and for a stronger reason than the homeserver's file: this one
       # carries the signing key, the encryption secret and the identity

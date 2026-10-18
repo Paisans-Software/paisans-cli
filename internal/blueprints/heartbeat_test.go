@@ -5,8 +5,12 @@ import (
 	"testing"
 )
 
-// minimalV2 is minimal in the format that reads heartbeat.
-var minimalV2 = strings.Replace(minimal, APIVersionV1, APIVersion, 1)
+// minimalV2 is minimal in the format that reads heartbeat, and minimalV3 in
+// the newest.
+var (
+	minimalV2 = strings.Replace(minimal, APIVersionV1, APIVersionV2, 1)
+	minimalV3 = strings.Replace(minimal, APIVersionV1, APIVersion, 1)
+)
 
 // A blueprint that declares a heartbeat gets the monitor's name and a
 // generated token in the site heartbeat token's shape, beside its own
@@ -44,7 +48,7 @@ func TestABlueprintWithoutHeartbeatHasNoToken(t *testing.T) {
 // Each mistake in a heartbeat is refused by name when the blueprint is read.
 func TestABlueprintHeartbeatMistakeIsRefused(t *testing.T) {
 	cases := []struct{ name, doc, want string }{
-		{"in the first format", minimal + "heartbeat: {name: settings}\n", "heartbeat: needs apiVersion " + APIVersion},
+		{"in the first format", minimal + "heartbeat: {name: settings}\n", "heartbeat: needs apiVersion " + APIVersionV2},
 		{"no name", minimalV2 + "heartbeat: {}\n", "heartbeat.name"},
 		{"a name with capitals", minimalV2 + "heartbeat: {name: Settings}\n", "heartbeat.name"},
 		{"a name with a dash", minimalV2 + "heartbeat: {name: \"a — b\"}\n", "heartbeat.name"},
@@ -60,15 +64,15 @@ func TestABlueprintHeartbeatMistakeIsRefused(t *testing.T) {
 	}
 }
 
-// Both formats are read; any other is refused naming both.
-func TestBothBlueprintFormatsAreRead(t *testing.T) {
-	for _, doc := range []string{minimal, minimalV2} {
+// Every format is read; any other is refused naming each.
+func TestEveryBlueprintFormatIsRead(t *testing.T) {
+	for _, doc := range []string{minimal, minimalV2, minimalV3, minimalV3 + "heartbeat: {name: settings}\nsecrets:\n  generate: [api_key]\n"} {
 		if _, err := Parse("example", []byte(doc), always); err != nil {
 			t.Error(err)
 		}
 	}
 	_, err := Parse("example", []byte(strings.Replace(minimal, APIVersionV1, "paisans.blueprint/v9", 1)), always)
-	if err == nil || !strings.Contains(err.Error(), APIVersionV1) || !strings.Contains(err.Error(), APIVersion) {
+	if err == nil || !strings.Contains(err.Error(), APIVersionV1) || !strings.Contains(err.Error(), APIVersionV2) || !strings.Contains(err.Error(), APIVersion) {
 		t.Errorf("%v", err)
 	}
 }

@@ -739,7 +739,7 @@ func TestDoctorExecuteRemovesOnlyRedundantGateConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const anchor = "      KBIN_META_TITLE: A place to talk\n"
+	const anchor = "      MBIN_DEFAULT_THEME: dark\n"
 	if !strings.Contains(string(data), anchor) {
 		t.Fatal("the fixture's talk config moved; update this test")
 	}

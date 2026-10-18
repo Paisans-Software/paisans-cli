@@ -166,7 +166,7 @@
     {
       "name": "chat — direct (vm)",
       "monitor_type": "active",
-      "url": "http://10.44.0.3:8008/_matrix/client/versions",
+      "url": "http://10.44.0.3:18008/_matrix/client/versions",
       "method": "GET",
       "check_type": "status",
       "expected_status": "200",

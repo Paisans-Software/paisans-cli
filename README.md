@@ -2161,7 +2161,7 @@ apps:
   talk:
     blueprint: mbin
     config:
-      KBIN_META_TITLE: A place to talk          # env: a variable in .env
+      MBIN_DEFAULT_THEME: dark                  # env: a variable in .env
   blog:
     blueprint: writefreely
     config:
@@ -7031,35 +7031,82 @@ apps:
       contact_email: admins@example.org
 ```
 
-**`settings.avatar_override: false` keeps each member's picture the identity
+**Every setting on Mbin's Meta, Instance and Federation admin pages is the
+configuration's.** Each is a key under `apps.<app>.settings`, rendered into the
+`.env` and locked, so a value left out takes the default below rather than
+whatever an admin last saved. Changing one is an edit to `paisans-stack.yaml`
+and `paisans deployment apply`. Admins keep the federation allow list's
+contents: which instances are allowed stays theirs to edit in Mbin. The
+General section's language, theme and JavaScript switch stay theirs as well.
+
+| Setting | Mbin setting | Default |
+|---|---|---|
+| `title` | `KBIN_TITLE` | the app's `display_name`, else the app's name |
+| `meta_title` | `KBIN_META_TITLE` | `<display name> · <community.name>`, or the display name alone with no community name |
+| `meta_description` | `KBIN_META_DESCRIPTION` | empty |
+| `meta_keywords` | `KBIN_META_KEYWORDS` | empty |
+| `downvotes_mode` | `MBIN_DOWNVOTES_MODE` | `enabled`; also `hidden` or `disabled` |
+| `header_logo` | `KBIN_HEADER_LOGO` | `false` |
+| `registrations` | `KBIN_REGISTRATIONS_ENABLED` | `false`: members join through the account service and the identity provider |
+| `sso_registrations` | `MBIN_SSO_REGISTRATIONS_ENABLED` | `true`: a member's first sign in makes their account |
+| `sso_show_first` | `MBIN_SSO_SHOW_FIRST` | `false` |
+| `avatar_override` | `MBIN_SSO_AVATAR_OVERRIDE` | `true` |
+| `captcha` | `KBIN_CAPTCHA_ENABLED` | `false` |
+| `mercure` | `KBIN_MERCURE_ENABLED` | `false` |
+| `admin_only_oauth_clients` | `KBIN_ADMIN_ONLY_OAUTH_CLIENTS` | `false` |
+| `federated_search_only_logged_in` | `KBIN_FEDERATED_SEARCH_ONLY_LOGGEDIN` | `true` |
+| `restrict_magazine_creation` | `MBIN_RESTRICT_MAGAZINE_CREATION` | `false` |
+| `sidebar_random_local_only` | `MBIN_SIDEBAR_SECTIONS_RANDOM_LOCAL_ONLY` | `false` |
+| `sidebar_users_local_only` | `MBIN_SIDEBAR_SECTIONS_USERS_LOCAL_ONLY` | `false` |
+| `new_users_need_approval` | `MBIN_NEW_USERS_NEED_APPROVAL` | `false`: the account service already vets them |
+| `private_instance` | `MBIN_PRIVATE_INSTANCE` | `true` when gated, which cannot be turned off; `false` otherwise |
+| `federation` | `KBIN_FEDERATION_ENABLED` | `true` |
+| `federation_page` | `KBIN_FEDERATION_PAGE_ENABLED` | `true` |
+| `federation_allow_list` | `MBIN_USE_FEDERATION_ALLOW_LIST` | `true` when gated, which cannot be turned off; `false` otherwise |
+
+The instance title sits beside the logo, and matches what the identity
+provider shows at sign in. The meta title is the browser tab, the feed title
+and nodeinfo's `nodeName`, what other servers and directories call the
+instance. A boolean written as anything but `true` or `false` is refused
+(`mbin-<setting>-not-a-boolean`, `avatar-override-not-a-boolean`), a title
+that is not text likewise, and so is an unknown `downvotes_mode`
+(`mbin-downvotes-mode-unknown`). A gated app that sets `private_instance` or
+`federation_allow_list` false is refused (`mbin-gated-needs-private-instance`,
+`mbin-gated-needs-federation-allow-list`).
+
+**`federation: false` turns federation off**, and the toolkit then treats the
+app as one that does not federate: authorized fetch is no longer required of
+it when gated, and the monitor runs no signed fetch check against it.
+
+**`avatar_override: false` keeps each member's picture the identity
 provider's.** The fork fetches the `picture` claim again on every sign in and
 replaces the avatar when the image has changed. With the default, `true`, a
 member may upload a picture of their own instead, which stops the refetch for
-them until they remove it, and an admin may turn that off on Mbin's settings
-page. With `false` the `.env` renders `MBIN_SSO_AVATAR_OVERRIDE=false` and
-locks it, so a member signed in through the provider cannot upload or remove
-an avatar and an admin cannot reopen it. Anything but `true` or `false` is
-refused, `avatar-override-not-a-boolean`. It needs the fork at
-`v1.15.4+paisans` or later.
+them until they remove it. With `false` a member signed in through the
+provider cannot upload or remove an avatar.
 
 ```yaml
 apps:
   talk:
     blueprint: mbin
+    display_name: Talk
     settings:
+      meta_description: Where the community talks.
       avatar_override: false
 ```
+
+These need the fork at `v1.16.0+paisans` or later, the first that can lock
+every one of them.
 
 **These settings are the configuration's, and an admin cannot change them in
 Mbin.** Mbin keeps them, like most of its settings, as database rows once an
 admin saves its settings page, and from then on its `SettingsManager` reads
 the row and ignores the environment. The `.env` therefore also renders
 `MBIN_LOCKED_SETTINGS`, naming every Mbin database setting it sets:
-`KBIN_DOMAIN`, `KBIN_SENDER_EMAIL`, `KBIN_CONTACT_EMAIL` and
-`MBIN_AUTHORIZED_FETCH` always, `MBIN_SSO_ONLY_MODE` (rendered as
-`SSO_ONLY_MODE`) when the app has a client at the identity provider, and
-`MBIN_PRIVATE_INSTANCE` and `MBIN_USE_FEDERATION_ALLOW_LIST` when the app is
-gated, and `MBIN_SSO_AVATAR_OVERRIDE` when `avatar_override` is `false`. See *Mbin and WriteFreely lock what the toolkit renders*.
+`KBIN_DOMAIN`, `KBIN_SENDER_EMAIL`, `KBIN_CONTACT_EMAIL`,
+`MBIN_AUTHORIZED_FETCH`, `MBIN_SSO_ONLY_MODE` (rendered as `SSO_ONLY_MODE`,
+true when the app has a client at the identity provider) and every setting in
+the table above. See *Mbin and WriteFreely lock what the toolkit renders*.
 `MAILER_DSN` is not a database setting and always follows the configuration.
 
 ### Mbin and WriteFreely lock what the toolkit renders

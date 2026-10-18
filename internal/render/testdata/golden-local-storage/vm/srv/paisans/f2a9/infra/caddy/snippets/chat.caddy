@@ -1,4 +1,4 @@
-# Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+# Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
 #
 # Routing for chat, imported by the gateway's block for
 # chat.example.org. Two services answer on this one hostname: the homeserver and
@@ -40,22 +40,22 @@
 # login rather than protecting anything. Access control belongs at the identity
 # provider, where the group restriction decides who may be provisioned at all.
 handle /_matrix/client/*/login {
-	reverse_proxy 10.44.0.3:8009 {
+	reverse_proxy 10.44.0.3:18009 {
 		header_up X-Forwarded-Proto https
 	}
 }
 handle /_matrix/client/*/logout {
-	reverse_proxy 10.44.0.3:8009 {
+	reverse_proxy 10.44.0.3:18009 {
 		header_up X-Forwarded-Proto https
 	}
 }
 handle /_matrix/client/*/refresh {
-	reverse_proxy 10.44.0.3:8009 {
+	reverse_proxy 10.44.0.3:18009 {
 		header_up X-Forwarded-Proto https
 	}
 }
 handle /_matrix/* {
-	reverse_proxy 10.44.0.3:8008 {
+	reverse_proxy 10.44.0.3:18008 {
 		header_up X-Forwarded-Proto https
 		# Media and event uploads are larger than a default proxy read allows
 		# for.
@@ -65,7 +65,7 @@ handle /_matrix/* {
 	}
 }
 handle /_synapse/* {
-	reverse_proxy 10.44.0.3:8008 {
+	reverse_proxy 10.44.0.3:18008 {
 		header_up X-Forwarded-Proto https
 		# Media and event uploads are larger than a default proxy read allows
 		# for.
@@ -75,7 +75,7 @@ handle /_synapse/* {
 	}
 }
 handle {
-	reverse_proxy 10.44.0.3:8009 {
+	reverse_proxy 10.44.0.3:18009 {
 		header_up X-Forwarded-Proto https
 	}
 }

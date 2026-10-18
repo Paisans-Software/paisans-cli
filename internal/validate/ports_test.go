@@ -54,17 +54,6 @@ func TestPortCollisionRefuses(t *testing.T) {
 			want: []string{"app forum (mbin)", "app talk (mbin)", "10.44.0.1:8080/tcp", "sites.home-a"},
 		},
 		{
-			// The homeserver publishes 8008, where Patroni's API listens on
-			// a data site, and MAS publishes 8009, where bg_mon does.
-			name: "a homeserver pinned to a data site",
-			change: func(cfg *config.Config) {
-				app := cfg.Apps["chat"]
-				app.Placement = config.Placement{Mode: config.PlacementPinned, Site: "home-b", Literal: "home-b"}
-				cfg.Apps["chat"] = app
-			},
-			want: []string{"Patroni API", "app chat (synapse)", "10.44.0.2:8008/tcp", "bg_mon", "10.44.0.2:8009/tcp"},
-		},
-		{
 			// Caddy binds 80 on every address of the gateway.
 			name: "element pinned to the gateway",
 			change: func(cfg *config.Config) {
@@ -117,6 +106,18 @@ func TestPortCollisionRefuses(t *testing.T) {
 
 // A service on the mesh address and on loopback that collides on both is one
 // finding, not two.
+// The homeserver publishes 18008 and MAS 18009, clear of Patroni's API on
+// 8008 and bg_mon on 8009, so a homeserver may share a data site.
+func TestAHomeserverOnADataSiteHasNoPortCollision(t *testing.T) {
+	cfg := example(t)
+	app := cfg.Apps["chat"]
+	app.Placement = config.Placement{Mode: config.PlacementPinned, Site: "home-b", Literal: "home-b"}
+	cfg.Apps["chat"] = app
+	if found := portCollisions(cfg); len(found) != 0 {
+		t.Errorf("collisions: %v", found)
+	}
+}
+
 func TestPortCollisionReportsAPairOnce(t *testing.T) {
 	cfg := example(t)
 	cfg.Cluster.Port = 5432

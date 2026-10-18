@@ -1,6 +1,6 @@
 # Rendered by paisans. Do not edit.
 #
-# A build artifact: `paisans apply` renders it and refuses to overwrite one
+# A build artifact: `paisans deployment apply` renders it and refuses to overwrite one
 # that has been modified locally. Change paisans-stack.yaml or secrets.enc.yaml.
 #
 # A changed file needs a restart at most, not a recreate.
@@ -31,7 +31,7 @@ log_config: "/data/log.config"
 signing_key_path: "/data/signing.key"
 
 listeners:
-  - port: 8008
+  - port: 18008
     tls: false
     type: http
     # The gateway terminates TLS and forwards, so the client address arrives in
@@ -77,7 +77,7 @@ enable_registration: false
 # where both containers start and every request between them is refused.
 matrix_authentication_service:
   enabled: true
-  endpoint: "http://mas:8009/"
+  endpoint: "http://mas:18009/"
   secret: "fixture-not-a-secret-chat-mas-matrix"
 
 # An allowlist posture starts with trusting no third party key server. Add one

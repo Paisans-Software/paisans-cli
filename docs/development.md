@@ -1745,11 +1745,16 @@ providing the role says of that hostname (`kinds.LinkValuesAt`).
 A change to the catalog that an older binary cannot read changes the
 `apiVersion` of what it changes, a blueprint's or the foundation's: an older
 binary then skips that release for the newest it reads. A new key counts,
-since both are decoded strictly. Blueprints are read in two formats,
-`paisans.blueprint/v1` and `paisans.blueprint/v2` (`blueprints.APIVersionV1`
-and `blueprints.APIVersion`); v2 adds `heartbeat`, and `Parse` refuses that key
-in a v1 blueprint, so a blueprint that declares one also names the format an
-older binary skips. A heartbeat adds `heartbeat_token` to the blueprint's
+since both are decoded strictly, and so does a new value a template reads.
+Blueprints are read in three formats, `paisans.blueprint/v1`,
+`paisans.blueprint/v2` and `paisans.blueprint/v3` (`blueprints.APIVersionV1`,
+`blueprints.APIVersionV2` and `blueprints.APIVersion`). v2 adds `heartbeat`,
+and `Parse` refuses that key in a v1 blueprint, so a blueprint that declares
+one also names the format an older binary skips. v3 adds two template values,
+`.DisplayName` (the app's client name at the identity provider,
+`Config.ClientName`) and `.CommunityName` (`community.name`), which an older
+binary's templates cannot read; a blueprint whose templates read either names
+v3. A heartbeat adds `heartbeat_token` to the blueprint's
 generated secrets in `Parse` (`internal/blueprints/heartbeat.go`), so `init`,
 `secrets list` and the replacement generator need nothing of their own for it;
 the seed, `.HeartbeatURLs` (`internal/render/appheartbeat.go`) and its
