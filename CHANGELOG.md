@@ -14,6 +14,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 - `site admit`, `site prepare` and the rootless deployment commands support Ubuntu 26.04, and admit's sudo-rs refusal says how to make the original sudo, installed as `sudo.ws`, `sudo` instead.
 
+### Fixed
+
+- `init`'s skip keeps the lines of why `site admit` stopped, so a refused release lists every supported release on its own line instead of joining the first to the sentence.
+
 ## [0.3.0-rc.3] - 2026-10-17
 
 ### Fixed

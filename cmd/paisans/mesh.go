@@ -223,8 +223,7 @@ func offerAdmissions(r ui.Reporter, cfg *config.Config, path string, hosts map[s
 				if !admitStopped(err) {
 					return nil, nil, err
 				}
-				hint, explain := ui.Describe(err)
-				why = "site admit stopped with nothing changed: " + strings.TrimSpace(hint+" "+explain) + "\n\n"
+				why = admitStopReason(err) + "\n\n"
 			}
 		}
 		// A note, so the commands show without --verbose.
@@ -232,6 +231,18 @@ func offerAdmissions(r ui.Reporter, cfg *config.Config, path string, hosts map[s
 	}
 	sort.Strings(admitted)
 	return admitted, cfg, nil
+}
+
+// admitStopReason is why site admit stopped with nothing changed, for
+// init's skip: the hint, then the explanation on lines of its own, so a
+// list such as the releases admit supports keeps one item to a line.
+func admitStopReason(err error) string {
+	hint, explain := ui.Describe(err)
+	why := "site admit stopped with nothing changed: " + hint
+	if explain != "" {
+		why += "\n" + explain
+	}
+	return why
 }
 
 // admitCommands is what admits site, for init to print: site admit from
