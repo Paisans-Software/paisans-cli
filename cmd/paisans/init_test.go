@@ -1021,7 +1021,7 @@ func TestInitWarnsAboutASiteLeftOnTheOldSubnet(t *testing.T) {
 	if _, err := runInitAt(t, path, true, "y\n"); err != nil {
 		t.Fatalf("%v\n%s", err, rec.Lines())
 	}
-	if !rec.Has("warn", "home-a is still admitted on the old mesh.subnet") {
+	if !rec.Has("warn", "home-a is still admitted on an old mesh.subnet") {
 		t.Errorf("no warning for home-a:\n%s", rec.Lines())
 	}
 }
@@ -1063,5 +1063,57 @@ func TestInitKeepsTheSubnetWhenAdmitRefusedARole(t *testing.T) {
 	i := rec.Index("note", "home-b has not admitted this deployment yet, so init skipped it")
 	if i < 0 || !strings.Contains(rec.Events[i].Extra, "Use another host for one of the data sites") {
 		t.Errorf("the skip does not give admit's advice:\n%s", rec.Lines())
+	}
+}
+
+// overlapsOn is admit's refusal of a subnet that overlaps a network on the
+// host.
+func overlapsOn(subnet string) error {
+	return &mesh.OverlapError{Subnet: subnet, Taken: []mesh.Taken{{Prefix: netip.MustParsePrefix(subnet), What: "route " + subnet + " dev eth1"}}}
+}
+
+// init moves the subnet at most maxMoves times in a run, and then skips the
+// site still refusing it, leaving every other site admitted on the subnet
+// in the file.
+func TestInitStopsMovingTheSubnetAfterMaxMoves(t *testing.T) {
+	sites := fakeSites()
+	sites["home-b"].unadmitted = true
+	path, rec := initWorld(t, nil, sites, []byte{212, 37, 1, 2, 3, 4})
+	ran := scriptAdmitFromInit(t, sites, map[string][]error{
+		"health": {nil, nil, nil}, "home-a": {nil, nil, nil}, "vm": {nil, nil, nil},
+		"home-b": {overlapsOn("10.44.0.0/24"), overlapsOn("10.212.37.0/24"), overlapsOn("10.1.2.0/24"), overlapsOn("10.3.4.0/24")},
+	})
+	if _, err := runInitAt(t, path, true, "y\n"); err != nil {
+		t.Fatalf("%v\n%s", err, rec.Lines())
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Mesh.Subnet != "10.3.4.0/24" || len(*ran) != 13 {
+		t.Errorf("subnet %s after %d admits, want 10.3.4.0/24 after 13:\n%s", cfg.Mesh.Subnet, len(*ran), rec.Lines())
+	}
+	if !rec.Has("note", "home-b has not admitted this deployment yet, so init skipped it") {
+		t.Errorf("home-b is not skipped:\n%s", rec.Lines())
+	}
+}
+
+// A site admitted on the old subnet whose admit refuses the new one keeps
+// its old admission: init warns that it is still admitted on an old subnet,
+// and never says it has not admitted the deployment.
+func TestInitWarnsAboutABlockedSiteStillOnAnOldSubnet(t *testing.T) {
+	sites := fakeSites()
+	sites["home-b"].unadmitted = true
+	path, rec := initWorld(t, nil, sites, []byte{212, 37, 1, 2})
+	scriptAdmitFromInit(t, sites, map[string][]error{
+		"health": {nil, nil}, "vm": {nil, nil},
+		"home-b": {overlapsOn("10.44.0.0/24"), nil, nil},
+		"home-a": {overlapsOn("10.212.37.0/24"), overlapsOn("10.44.0.0/24")},
+	})
+	if _, err := runInitAt(t, path, true, "y\n"); err != nil {
+		t.Fatalf("%v\n%s", err, rec.Lines())
+	}
+	if !rec.Has("warn", "home-a is still admitted on an old mesh.subnet") || rec.Has("note", "home-a has not admitted this deployment yet, so init skipped it") {
+		t.Errorf("home-a is not warned about as still admitted:\n%s", rec.Lines())
 	}
 }

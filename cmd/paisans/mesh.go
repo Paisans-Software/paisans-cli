@@ -279,8 +279,9 @@ func admitSite(r ui.Reporter, cfg *config.Config, path string, hosts map[string]
 // when that is all it refused: a mesh subnet another deployment holds
 // there, or a network the host holds. These are networks init cannot read
 // itself, since the deployment's user cannot log in there, and settleMesh
-// steers clear of them. A refusal for a role, the token, the root or the
-// interface leaves the host unusable on any subnet, so it blocks none.
+// steers clear of them. A refusal for a role, the token, the root, the
+// interface or the listen port is not freed by any subnet, so it blocks
+// none.
 func subnetBlocked(site string, err error) ([]mesh.Taken, bool) {
 	var overlap *mesh.OverlapError
 	if errors.As(err, &overlap) {
@@ -295,7 +296,7 @@ func subnetBlocked(site string, err error) ([]mesh.Taken, bool) {
 	if !errors.As(err, &c) || !c.Holds("mesh subnet") {
 		return nil, false
 	}
-	for _, fixed := range []string{"token", "root", "WireGuard interface", "the gateway role", "the data role"} {
+	for _, fixed := range []string{"token", "root", "WireGuard interface", "WireGuard listen port", "the gateway role", "the data role"} {
 		if c.Holds(fixed) {
 			return nil, false
 		}
@@ -307,59 +308,84 @@ func subnetBlocked(site string, err error) ([]mesh.Taken, bool) {
 	return []mesh.Taken{{Prefix: p, What: fmt.Sprintf("deployment %s's mesh subnet %s on %s", c.ID, c.Entry.Subnet, site)}}, true
 }
 
-// maxReadmits is how many times init moves the subnet and admits its sites
-// again in one run. Each move steers clear of everything the admits before
-// it were refused for, so a second is already rare.
-const maxReadmits = 3
+// maxMoves is how many times init moves the subnet in one run. Each move
+// steers clear of everything the admits before it were refused for, so a
+// second is already rare.
+const maxMoves = 3
 
 // settleAndReadmit settles the mesh subnet (see settleMesh) clear of every
 // network the blocked sites' admits were refused for. Once it moves the
 // subnet, every site admitted on the old one, and every blocked site, is
 // admitted on the new one (see admitSite), since site admit built each
 // host's firewall and Docker address pools around the subnet; a site
-// refused the new subnet in turn moves it again, up to maxReadmits times.
+// refused the new subnet in turn moves it again, up to maxMoves times.
 // Moving a subnet some site has admitted needs those admits, so it is done
 // only when move, at a terminal; without it settleMesh refuses. A blocked
-// site whose subnet is not moved, since it is deployed, is skipped with why.
+// site the subnet is not moved for, since it is deployed or init has moved
+// it maxMoves times, is skipped with why.
 //
 // It returns the configuration as the file now holds it, the admitted
-// sites, in name order, and whether it moved the subnet. An admitted site that is not admitted again, on a
-// no or a stop, is warned about: its admission no longer matches, and apply
-// refuses it until it is admitted again.
+// sites, in name order, and whether it moved the subnet. A site admitted
+// on an old subnet and not admitted on the one init leaves, on a no or a
+// stop, is warned about once settled: its admission no longer matches, and
+// apply refuses it until it is admitted again.
 func settleAndReadmit(r ui.Reporter, cfg *config.Config, path string, hosts map[string]registry.Runner, admitted []string, blocked []blockedSite, unread error, move bool, stdin io.Reader, stdout io.Writer) (*config.Config, []string, bool, error) {
 	var taken []mesh.Taken
-	moved := false
-	for round := 1; ; round++ {
+	// stale is each site admitted on an old subnet and not yet on the
+	// current one, with why its last admit stopped.
+	stale := map[string]string{}
+	settled := func() {
 		for _, b := range blocked {
-			taken = append(taken, b.taken...)
+			if _, ok := stale[b.site]; ok {
+				stale[b.site] = b.why
+				continue
+			}
+			skipNote(r, path, b.site, b.why)
+		}
+		names := make([]string, 0, len(stale))
+		for site := range stale {
+			names = append(names, site)
+		}
+		sort.Strings(names)
+		for _, site := range names {
+			r.Warn(site+" is still admitted on an old mesh.subnet", stale[site]+"apply refuses it until it is admitted again on "+cfg.Mesh.Subnet+". "+admitCommands(path, site))
+		}
+	}
+	for moves := 0; ; moves++ {
+		for _, b := range blocked {
+			for _, t := range b.taken {
+				if !slices.Contains(taken, t) {
+					taken = append(taken, t)
+				}
+			}
+		}
+		if moves == maxMoves {
+			settled()
+			return cfg, admitted, true, nil
 		}
 		wrote, err := settleMesh(r, cfg, path, hosts, admitted, taken, move, unread, meshRandom)
 		if err != nil {
 			return nil, nil, false, err
 		}
 		if !wrote {
-			for _, b := range blocked {
-				skipNote(r, path, b.site, b.why)
-			}
-			return cfg, admitted, moved, nil
+			settled()
+			return cfg, admitted, moves > 0, nil
 		}
-		moved = true
 		if cfg, err = config.LoadForInit(path); err != nil {
 			return nil, nil, false, err
 		}
 		again := slices.Clone(admitted)
+		for _, site := range admitted {
+			stale[site] = ""
+		}
 		for _, b := range blocked {
 			again = append(again, b.site)
 		}
 		sort.Strings(again)
 		if len(again) == 0 {
-			return cfg, admitted, moved, nil
-		}
-		if round > maxReadmits {
-			return nil, nil, false, fmt.Errorf("init: moved mesh.subnet %d times, and site admit refused it on %s each time. Admit them with the commands site admit prints, which name what each host holds", maxReadmits, strings.Join(again, ", "))
+			return cfg, admitted, true, nil
 		}
 		r.Note("mesh.subnet is "+cfg.Mesh.Subnet+" now, so init admits "+strings.Join(again, ", ")+" on it", "site admit builds a host's firewall and Docker address pools around the subnet, so each site is admitted again on the new one, as before, with its plan shown first. A site admitted on the old one and not admitted again is refused by apply until it is.")
-		previously := admitted
 		admitted, blocked = nil, nil
 		for _, site := range again {
 			var ok bool
@@ -368,19 +394,22 @@ func settleAndReadmit(r ui.Reporter, cfg *config.Config, path string, hosts map[
 			if cfg, ok, b, why, err = admitSite(r, cfg, path, hosts, site, stdin, stdout); err != nil {
 				return nil, nil, false, err
 			}
+			_, wasAdmitted := stale[site]
 			switch {
 			case ok:
 				admitted = append(admitted, site)
+				delete(stale, site)
 			case b != nil:
 				blocked = append(blocked, *b)
-			case slices.Contains(previously, site):
-				r.Warn(site+" is still admitted on the old mesh.subnet", why+"apply refuses it until it is admitted again on "+cfg.Mesh.Subnet+". "+admitCommands(path, site))
+			case wasAdmitted:
+				stale[site] = why
 			default:
 				skipNote(r, path, site, why)
 			}
 		}
 		if len(blocked) == 0 {
-			return cfg, admitted, moved, nil
+			settled()
+			return cfg, admitted, true, nil
 		}
 	}
 }
