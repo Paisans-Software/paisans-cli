@@ -39,9 +39,12 @@ const UserCommand = `printf 'uid %s\nuser %s\ngroups %s\ngids %s\n' "$(id -u)" "
 // rootless for a daemon running as its user. The transport exports
 // DOCKER_HOST as the login user's own socket ahead of every command. Last it
 // prints the highest src_valid_mark in RootlessKit's network namespace, or
-// unknown, a read that never fails the command (see SourceMark).
+// unknown, the host's own, and whether the user's manager loaded apply's
+// drop-in, reads that never fail the command (see SourceMark).
 var DockerCommand = `printf 'host %s\n' "${DOCKER_HOST:-unset}" && docker version --format 'engine {{.Server.Version}}' && docker info --format 'security {{json .SecurityOptions}}' && ` +
-	`printf 'source-mark %s\n' "$(` + apply.InRootlessNamespace(apply.SourceMarkRead) + ` 2>/dev/null || echo unknown)"`
+	`printf 'source-mark %s\n' "$(` + apply.InRootlessNamespace(apply.SourceMarkRead) + ` 2>/dev/null || echo unknown)" && ` +
+	`printf 'source-mark-host %s\n' "$(cat /proc/sys/net/ipv4/conf/all/src_valid_mark 2>/dev/null || echo unknown)" && ` +
+	`printf 'source-mark-dropin %s\n' "$(` + apply.DropInLoaded + `)"`
 
 // LingerCommand prints whether systemd keeps the login user's instance, and
 // with it the user's Docker daemon, running with no session open, and
@@ -220,15 +223,27 @@ func DockerEngine(probes []DockerProbe) []Finding {
 // the bridge's gateway, outside the range it trusts a forwarded address from.
 // Apply sets it to 0 and installs the drop-in that keeps it there. A daemon
 // that did not answer is DockerSocket's; a value that could not be read is a
-// warning.
+// warning, and so is a 0 on a host at 1 whose drop-in the user's manager has
+// not loaded, since the daemon's next start copies the host's 1 again.
 func SourceMark(probes []DockerProbe) []Finding {
 	var out []Finding
 	for _, p := range probes {
 		if !p.Answered() {
 			continue
 		}
-		switch v := keyed(p.Out)["source-mark"]; v {
+		f := keyed(p.Out)
+		switch v := f["source-mark"]; v {
 		case "0":
+			if f["source-mark-host"] == "1" && f["source-mark-dropin"] == "absent" {
+				out = append(out, Finding{Section: SectionDocker, Level: Warn,
+					Line: fmt.Sprintf("%s: src_valid_mark is 0 in its RootlessKit namespace, and goes back to 1 at the daemon's next start", p.Site),
+					More: []string{
+						"The host's own value is 1, which a new namespace copies, and the user's manager has not loaded the drop-in apply installs to set it to 0 at every start of the daemon. At 1 every new connection to an app waits a second.",
+						"recover:",
+						fmt.Sprintf("  1. `paisans deployment apply --execute`, which installs the drop-in on %s and has the user's manager reload it.", p.Site),
+					}})
+				break
+			}
 			out = append(out, Finding{Section: SectionDocker, Level: OK, Line: fmt.Sprintf("%s: src_valid_mark is 0 in its RootlessKit namespace", p.Site)})
 		case "1":
 			out = append(out, Finding{Section: SectionDocker, Level: Fail,

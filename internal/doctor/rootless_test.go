@@ -106,7 +106,8 @@ func TestDockerEngine(t *testing.T) {
 	}
 }
 
-// src_valid_mark 0 in the namespace passes; 1 fails, with apply as the
+// src_valid_mark 0 in the namespace passes, unless the host is at 1 and no
+// drop-in is loaded to keep it 0, which warns; 1 fails, with apply as the
 // recovery; a value the probe could not read, or none, is a warning; a
 // daemon that did not answer says nothing.
 func TestSourceMark(t *testing.T) {
@@ -116,9 +117,18 @@ func TestSourceMark(t *testing.T) {
 		{Site: "vm", Out: beforeSourceMark + "source-mark unknown\n"},
 		{Site: "edge", Out: beforeSourceMark},
 		{Site: "watch", Out: "source-mark 1\n", Err: "Cannot connect to the Docker daemon"},
+		{Site: "lab", Out: rootlessDocker + "source-mark-host 1\nsource-mark-dropin absent\n"},
+		{Site: "kept", Out: rootlessDocker + "source-mark-host 1\nsource-mark-dropin loaded\n"},
 	})
-	if len(findings) != 4 {
-		t.Fatalf("want 4 findings, watch's left out:\n%s", dump(findings))
+	if len(findings) != 6 {
+		t.Fatalf("want 6 findings, watch's left out:\n%s", dump(findings))
+	}
+	l := find(t, findings, SectionDocker, "lab: src_valid_mark is 0 in its RootlessKit namespace, and goes back to 1 at the daemon's next start")
+	if l.Level != Warn || !strings.Contains(strings.Join(l.More, "\n"), "installs the drop-in") {
+		t.Errorf("lab: %+v", l)
+	}
+	if f := find(t, findings, SectionDocker, "kept: src_valid_mark is 0 in its RootlessKit namespace"); f.Level != OK {
+		t.Errorf("kept: level %v", f.Level)
 	}
 	if f := find(t, findings, SectionDocker, "home-a: src_valid_mark is 0 in its RootlessKit namespace"); f.Level != OK {
 		t.Errorf("home-a: level %v", f.Level)

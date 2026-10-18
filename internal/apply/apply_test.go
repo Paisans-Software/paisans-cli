@@ -1634,6 +1634,11 @@ func TestTheMeshFileIsPutBeforeTheInterfaceStarts(t *testing.T) {
 		t.Error("the helper was handed something other than the file apply wrote")
 	}
 	for _, c := range host.commands {
+		// The rootless namespace's probe asks the user's own manager about
+		// docker.service, never the mesh's unit.
+		if c == apply.SourceMarkProbe {
+			continue
+		}
 		if strings.HasPrefix(c, "wg ") || strings.Contains(c, "wg-quick") || strings.Contains(c, "journalctl") || strings.Contains(c, "systemctl") {
 			t.Errorf("%q reached the mesh without the helper", c)
 		}

@@ -222,7 +222,9 @@ type Plan struct {
 	// SourceMark is what the deployment user's rootless network namespace
 	// needs so that a connection to a published port waits for nothing and
 	// keeps the client's address. Execute runs it after the mesh and before
-	// any stack moves. Zero on a scoped plan. See sourcemark.go.
+	// any stack moves. Zero on a plan built with Scope or Only, whose caller
+	// moves only what it names; a plan built with Except, which holds a few
+	// stacks back from a site wide apply, still runs it. See sourcemark.go.
 	SourceMark SourceMarkStep
 	// HostSites is set when this site's Caddy mounts the host's own
 	// render.HostSitesDir. Execute creates the directory, the deployment
@@ -1072,7 +1074,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 		out.DNSToken = &dns.TokenCheck{Provider: plan.ACMEProvider, Domain: plan.Domain, Place: site, From: "this server"}
 	}
 	out.HostSites = out.GatewayChanging && plan.HostSites[site]
-	if !out.scoped {
+	if !out.scoped && onlySet == nil {
 		out.SourceMark = sourceMarkStep(t)
 	}
 

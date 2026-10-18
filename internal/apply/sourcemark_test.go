@@ -61,7 +61,7 @@ func TestApplySetsTheRootlessNamespacesSourceMarkBeforeAnyStack(t *testing.T) {
 // A host with the drop-in in place and the value at 0 is left alone.
 func TestApplyLeavesARightNamespaceAlone(t *testing.T) {
 	host := newHost()
-	host.sourceMark = "dropin " + dropInSum() + "\nmark 0\n"
+	host.sourceMark = "dropin " + dropInSum() + "\ndropin-loaded loaded\nmark 0\n"
 	p, err := apply.Build("home-a", plan(t), acmeModule(t), host)
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +80,7 @@ func TestApplyLeavesARightNamespaceAlone(t *testing.T) {
 // A drop-in somebody changed is replaced, and a value at 0 is not written.
 func TestApplyReplacesADifferentDropIn(t *testing.T) {
 	host := newHost()
-	host.sourceMark = "dropin " + strings.Repeat("0", 64) + "\nmark 0\n"
+	host.sourceMark = "dropin " + strings.Repeat("0", 64) + "\ndropin-loaded loaded\nmark 0\n"
 	p, err := apply.Build("home-a", plan(t), acmeModule(t), host)
 	if err != nil {
 		t.Fatal(err)
@@ -93,7 +93,7 @@ func TestApplyReplacesADifferentDropIn(t *testing.T) {
 // The probe is not a gate. A namespace it cannot read, or a probe that
 // fails, asks for nothing and stops nothing: doctor reports it.
 func TestAnUnreadableNamespaceAsksForNothing(t *testing.T) {
-	for _, out := range []string{"", "dropin " + dropInSum() + "\nmark unknown\n"} {
+	for _, out := range []string{"", "dropin " + dropInSum() + "\ndropin-loaded loaded\nmark unknown\n"} {
 		host := newHost()
 		host.sourceMark = out
 		p, err := apply.Build("home-a", plan(t), acmeModule(t), host)
@@ -115,10 +115,25 @@ func TestAnUnreadableNamespaceAsksForNothing(t *testing.T) {
 	}
 }
 
+// A drop-in on disk that the user's manager never loaded, as when a reload
+// failed after the file was moved into place, is installed and reloaded
+// again.
+func TestAnUnloadedDropInIsReloaded(t *testing.T) {
+	host := newHost()
+	host.sourceMark = "dropin " + dropInSum() + "\ndropin-loaded absent\nmark 0\n"
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.SourceMark != (apply.SourceMarkStep{DropIn: true}) {
+		t.Fatalf("the plan is %+v", p.SourceMark)
+	}
+}
+
 // A namespace that cannot be set stops the apply before any stack moves.
 func TestAFailedResetStopsTheApplyBeforeAnyStack(t *testing.T) {
 	host := newHost()
-	host.sourceMark = "dropin " + dropInSum() + "\nmark 1\n"
+	host.sourceMark = "dropin " + dropInSum() + "\ndropin-loaded loaded\nmark 1\n"
 	p, err := apply.Build("home-a", plan(t), acmeModule(t), host)
 	if err != nil {
 		t.Fatal(err)
@@ -133,17 +148,33 @@ func TestAFailedResetStopsTheApplyBeforeAnyStack(t *testing.T) {
 	}
 }
 
-// A scoped plan, which leaves every stack to its caller, never reads or
-// changes the namespace.
-func TestAScopedPlanLeavesTheNamespaceAlone(t *testing.T) {
-	host := newHost()
-	host.sourceMark = "dropin absent\nmark 1\n"
-	p, err := apply.Build("home-a", plan(t), acmeModule(t), host, apply.Scope("srv/paisans/f2a9/psns-f2a9.conf"))
+// A plan built with Scope or Only, whose caller moves only what it names,
+// never reads or changes the namespace. One built with Except, which an
+// ordinary apply uses to hold an app back until its sign-in client exists,
+// still does.
+func TestAScopedOrOnlyPlanLeavesTheNamespaceAlone(t *testing.T) {
+	held := newHost()
+	held.sourceMark = "dropin absent\nmark 1\n"
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), held, apply.Except("talk"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.SourceMark.Needed() || host.ran("src_valid_mark") {
-		t.Errorf("a scoped plan read or planned the namespace: %+v", p.SourceMark)
+	if p.SourceMark != (apply.SourceMarkStep{DropIn: true, Reset: true}) {
+		t.Errorf("a plan holding talk back skipped the namespace: %+v", p.SourceMark)
+	}
+	for name, opt := range map[string]apply.Option{
+		"scoped": apply.Scope("srv/paisans/f2a9/psns-f2a9.conf"),
+		"only":   apply.Only("talk"),
+	} {
+		host := newHost()
+		host.sourceMark = "dropin absent\nmark 1\n"
+		p, err := apply.Build("home-a", plan(t), acmeModule(t), host, opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.SourceMark.Needed() || host.ran("src_valid_mark") {
+			t.Errorf("a %s plan read or planned the namespace: %+v", name, p.SourceMark)
+		}
 	}
 }
 

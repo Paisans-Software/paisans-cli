@@ -60,17 +60,24 @@ func InRootlessNamespace(command string) string {
 	return `r=/run/user/$(id -u)/dockerd-rootless && nsenter -U --preserve-credentials -t "$(cat "$r/child_pid")" -m nsenter --net="$r/netns" sh -c ` + shellQuote(command)
 }
 
-// SourceMarkProbe prints the drop-in's checksum, or absent, and the
-// namespace's highest src_valid_mark, or unknown when the namespace cannot be
-// read.
+// DropInLoaded prints loaded when the user's manager has read the drop-in
+// for docker.service, absent otherwise. A file written whose reload failed
+// is on disk and not loaded.
+const DropInLoaded = `systemctl --user show docker.service -p DropInPaths --value 2>/dev/null | grep -q paisans-src-valid-mark.conf && echo loaded || echo absent`
+
+// SourceMarkProbe prints the drop-in's checksum, or absent, whether the
+// user's manager has loaded it, and the namespace's highest src_valid_mark,
+// or unknown when the namespace cannot be read.
 var SourceMarkProbe = `f="$HOME/` + SourceMarkDropIn + `"; ` +
 	`if [ -f "$f" ]; then echo "dropin $(sha256sum < "$f" | cut -c1-64)"; else echo "dropin absent"; fi; ` +
+	`echo "dropin-loaded $(` + DropInLoaded + `)"; ` +
 	`if v=$(` + InRootlessNamespace(SourceMarkRead) + ` 2>/dev/null); then echo "mark $v"; else echo "mark unknown"; fi`
 
 // SourceMarkStep is what the deployment user's rootless namespace needs.
 type SourceMarkStep struct {
-	// DropIn installs SourceMarkDropInContent: the host has none, or one
-	// that differs.
+	// DropIn installs SourceMarkDropInContent and reloads the user's
+	// manager: the host has none, one that differs, or one the manager has
+	// not loaded.
 	DropIn bool
 	// Reset sets every value in the running namespace to 0: one reads 1.
 	Reset bool
@@ -124,7 +131,9 @@ func sourceMarkStep(t Transport) SourceMarkStep {
 		key, value, _ := strings.Cut(strings.TrimSpace(line), " ")
 		switch key {
 		case "dropin":
-			s.DropIn = value == "absent" || len(value) == 64 && value != sum(SourceMarkDropInContent)
+			s.DropIn = s.DropIn || value == "absent" || len(value) == 64 && value != sum(SourceMarkDropInContent)
+		case "dropin-loaded":
+			s.DropIn = s.DropIn || value == "absent"
 		case "mark":
 			s.Reset = value == "1"
 		}

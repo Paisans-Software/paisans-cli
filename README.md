@@ -6169,12 +6169,16 @@ and the namespace's highest value. It installs the drop-in when it is absent
 or differs, then writes the values when one reads 1, and stops the apply if either
 fails, so no container is started into a namespace with the wait. A read that
 fails asks for nothing: it is not a gate, and `paisans doctor` reports a
-namespace it cannot read. A scoped plan, which leaves every stack to its
-caller, does not read it.
+namespace it cannot read. An apply narrowed with `--only`, and a plan another
+command scopes to a few files, does not read it: each moves only what it names.
+The drop-in counts as missing when the user's manager has not loaded it, as
+after a reload that failed once the file was in place.
 
 `paisans doctor` reads the highest value with its rootless Docker check and
 fails a site whose namespace holds 1, naming Tailscale and
-`paisans deployment apply`.
+`paisans deployment apply`. It warns when the namespace holds 0 but the host
+holds 1 and the user's manager has not loaded the drop-in, since the daemon's
+next start copies the 1 again.
 
 ### `paisans deployment apply` with no `--site` converges the whole deployment
 
