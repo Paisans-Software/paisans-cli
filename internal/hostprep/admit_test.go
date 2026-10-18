@@ -673,7 +673,7 @@ func TestTheHoldWaitsForDpkg(t *testing.T) {
 // calls close the hold's lock, whether admit installs Docker or finds it,
 // and with Docker present both keep --no-upgrade.
 func TestWireGuardToolsIsInstalledWithoutRecommends(t *testing.T) {
-	for _, ubuntu := range []string{ubuntu2204, ubuntu2404} {
+	for _, ubuntu := range []string{ubuntu2204, ubuntu2404, ubuntu2604} {
 		profile, err := hostprep.Select(hostprep.ParseOSRelease(ubuntu))
 		if err != nil {
 			t.Fatal(err)

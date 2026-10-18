@@ -472,6 +472,7 @@ func TestWhatTheNewUserWouldInheritIsRefusedFirst(t *testing.T) {
 		{"a home below another's directory", current().with("home-above", "unsafe"), "/home/paisans-f2a9 is below a directory"},
 		{"sudo-rs", current().with("sudo-kind", "rs"), "sudo-rs"},
 		{"sudo-rs for a user that exists", current().withUser().with("sudo-kind", "rs"), "sudo-rs"},
+		{"sudo-rs beside sudo.ws", current().with("sudo-kind", "rs").with("sudo-ws", "yes"), "update-alternatives --set sudo /usr/bin/sudo.ws"},
 		{"an existing user's home below a link", current().withUser().with("home-above", "link"), "/home/paisans-f2a9 is below a link"},
 	} {
 		h := c.host

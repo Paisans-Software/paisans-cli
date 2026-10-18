@@ -63,7 +63,11 @@ func planUser(p *planner) error {
 	}
 	u := p.f.User
 	if u.SudoRS {
-		return fmt.Errorf("sudo on this host is sudo-rs, whose sudo -l does not list the Defaults that apply to a user, so admit cannot tell whether one passes %s's environment to the WireGuard helper, which runs as root. Nothing was changed", req.User)
+		fix := ""
+		if u.SudoWS {
+			fix = " The original sudo is installed here as /usr/bin/sudo.ws: make it sudo with update-alternatives --set sudo /usr/bin/sudo.ws, and admit again."
+		}
+		return fmt.Errorf("sudo on this host is sudo-rs, whose sudo -l does not list the Defaults that apply to a user, so admit cannot tell whether one passes %s's environment to the WireGuard helper, which runs as root.%s Nothing was changed", req.User, fix)
 	}
 	if u.HomeAbove == "link" || u.HomeAbove == "unsafe" {
 		what := map[string]string{"link": "a link", "unsafe": "a directory that is not root's, or that its group or others can write"}[u.HomeAbove]
@@ -351,11 +355,13 @@ const delegateConf = "# Written by paisans site admit. Shared by every admitted 
 	"[Service]\nDelegate=cpu cpuset io memory pids\n"
 
 // delegatedByDefault is what each Ubuntu release's user@.service delegates
-// with no drop-in: systemd 255 on 24.04 delegates cpu, memory and pids,
-// systemd 249 on 22.04 only memory and pids (both observed).
+// with no drop-in: systemd 259 on 26.04 and 255 on 24.04 delegate cpu,
+// memory and pids, systemd 249 on 22.04 only memory and pids (all
+// observed).
 var delegatedByDefault = map[string][]string{
 	"22.04": {"memory", "pids"},
 	"24.04": {"cpu", "memory", "pids"},
+	"26.04": {"cpu", "memory", "pids"},
 }
 
 // fallbackDelegated is what a release missing from delegatedByDefault is

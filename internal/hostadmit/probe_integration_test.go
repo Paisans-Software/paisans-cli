@@ -1,8 +1,8 @@
 //go:build hostadmit_integration
 
 // These tests run admit's probe, as root, in a real ubuntu:24.04 container,
-// or the image PAISANS_PROBE_IMAGE names (ubuntu:22.04 is the other
-// release admit supports), and read what it prints with parseFacts: a blank
+// or the image PAISANS_PROBE_IMAGE names (ubuntu:22.04 and ubuntu:26.04 are
+// the other releases admit supports), and read what it prints with parseFacts: a blank
 // image, and the hostile layouts the probe must not be fooled by. They need
 // Docker, and pull the image when it is absent.
 package hostadmit
@@ -120,9 +120,11 @@ func TestProbeReadsTheHome(t *testing.T) {
 
 // Every rule sudo grants the user is read, by name and by group, with
 // admit's own helper line as sudo -l prints it. It installs sudo from
-// Ubuntu's archive, so it needs the network.
+// Ubuntu's archive, so it needs the network; where that makes sudo-rs
+// sudo, as on 26.04, the original is made sudo in its place.
 func TestProbeReadsTheUsersSudoRules(t *testing.T) {
 	setup := "apt-get update -qq >/dev/null 2>&1 && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo >/dev/null 2>&1 || exit 1\n" +
+		"if [ -x /usr/bin/sudo.ws ]; then update-alternatives --set sudo /usr/bin/sudo.ws >/dev/null || exit 1; fi\n" +
 		"useradd -u 1001 --create-home paisans-f2a9 && groupadd ops && usermod -aG ops paisans-f2a9\n"
 	f := probeIn(t, setup, "paisans-f2a9", "")
 	if u := f.User; !u.SudoRead || len(u.SudoRules) != 0 {
@@ -141,6 +143,22 @@ func TestProbeReadsTheUsersSudoRules(t *testing.T) {
 	if u := f.User; !u.SudoRead || !slices.Contains(u.SudoDefaults, "setenv") || !slices.Contains(u.SudoDefaults, "env_reset") ||
 		!slices.Equal(u.SudoSpecific, []string{`Defaults!/usr/local/libexec/paisans/wg-psns-f2a9 env_keep+=LD_PRELOAD`}) {
 		t.Errorf("defaults: %+v", u)
+	}
+}
+
+// sudo-rs is read as sudo-rs, and the original sudo beside it as sudo.ws.
+// Only a release whose sudo package brings sudo-rs, 26.04 of those admit
+// supports, has both; it needs the network, as above.
+func TestProbeReadsSudoRS(t *testing.T) {
+	if probeImage != "ubuntu:26.04" {
+		t.Skipf("%s's sudo is not sudo-rs", probeImage)
+	}
+	setup := "apt-get update -qq >/dev/null 2>&1 && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo >/dev/null 2>&1 || exit 1"
+	if u := probeIn(t, setup, "paisans-f2a9", "").User; !u.SudoRS || !u.SudoWS {
+		t.Errorf("sudo-rs beside sudo.ws: %+v", u)
+	}
+	if u := probeIn(t, setup+"\nupdate-alternatives --set sudo /usr/bin/sudo.ws >/dev/null || exit 1", "paisans-f2a9", "").User; u.SudoRS || !u.SudoWS {
+		t.Errorf("sudo.ws made sudo: %+v", u)
 	}
 }
 
@@ -286,11 +304,11 @@ func TestTheUserProbeReadsTheDataRootOfItsDaemonJSON(t *testing.T) {
 }
 
 // Whether the apparmor package ships rootlesskit's profile is read from
-// its file list: Ubuntu 24.04's does, 22.04's does not, and the AppArmor
+// its file list: Ubuntu 24.04's and 26.04's do, 22.04's does not, and the AppArmor
 // refusal's advice follows it. It installs apparmor from Ubuntu's archive,
 // so it needs the network.
 func TestProbeReadsWhetherApparmorShipsTheRootlesskitProfile(t *testing.T) {
-	want, known := map[string]bool{"ubuntu:24.04": true, "ubuntu:22.04": false}[probeImage]
+	want, known := map[string]bool{"ubuntu:24.04": true, "ubuntu:26.04": true, "ubuntu:22.04": false}[probeImage]
 	if !known {
 		t.Skipf("no expectation for %s", probeImage)
 	}
