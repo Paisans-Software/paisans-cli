@@ -912,7 +912,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 		case changes == 0 && len(plan.Sweep) == 0 && pending == 0:
 			r.Result("%s is up to date. Nothing to apply.", *site)
 		case changes == 0 && len(plan.Sweep) == 0:
-			r.Result("%s is up to date. Nothing changed; --execute asks you to approve the review above and records it.", *site)
+			r.Result("%s is up to date. Nothing changed; --execute will ask you to approve the review above and record it.", *site)
 		case pending > 0:
 			r.Result("Nothing changed. Re-run with --execute to apply; it asks you to type %s for the review above.", approveWord)
 		default:
@@ -1490,7 +1490,7 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 		case len(plan.Steps) == 0 && pending == 0:
 			r.Result("%s is prepared. Nothing to do.", o.site)
 		case len(plan.Steps) == 0:
-			r.Result("%s is prepared. Nothing changed; --execute asks you to approve the review above and records it.", o.site)
+			r.Result("%s is prepared. Nothing changed; --execute will ask you to approve the review above and record it.", o.site)
 		case pending > 0:
 			r.Result("Nothing changed. Re-run with --execute to apply; it asks you to type %s for the review above.", approveWord)
 		default:

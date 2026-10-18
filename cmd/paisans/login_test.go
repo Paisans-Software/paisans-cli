@@ -210,7 +210,7 @@ func TestALoginWithoutExecuteRecordsNothing(t *testing.T) {
 	if string(after) != string(before) {
 		t.Errorf("the file changed:\n%s", after)
 	}
-	if !rec.Has("note", "home-a: ssh.user paisans-f2a9, recorded in paisans-stack.yaml by --execute") {
+	if !rec.Has("note", "home-a: ssh.user paisans-f2a9, --execute will record it in paisans-stack.yaml") {
 		t.Errorf("no note of what --execute records: %+v", rec.Events)
 	}
 }

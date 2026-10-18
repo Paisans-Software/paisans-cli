@@ -178,7 +178,7 @@ func TestDNSTokenUnchangedSinceTheLastApplyIsAskedFor(t *testing.T) {
 	}
 	rec := &ui.Recorder{}
 	run.Show(rec)
-	if !rec.Has("pending", "stage 1, next value") || !endedWith(rec, "replace it at desec when asked") || !rec.Has("note", "this run asks for external.acme_dns_token") {
+	if !rec.Has("pending", "stage 1, next value") || !endedWith(rec, "replace it at desec when asked") || !rec.Has("note", "this run will ask for external.acme_dns_token") {
 		t.Errorf("the plan does not say it asks:\n%s", rec.Lines())
 	}
 	err = run.Execute(e, nil)

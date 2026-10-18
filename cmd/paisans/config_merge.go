@@ -75,9 +75,9 @@ func pullMergingSecrets(r ui.Reporter, l configstore.Local, g configstore.Gather
 		fmt.Fprintln(stdout, "secrets: "+p+" merges")
 	}
 	if !execute {
-		r.Step("merge the local secrets into "+describe(g, head)).End(ui.Pending, "--execute writes them")
+		r.Step("merge the local secrets into "+describe(g, head)).End(ui.Pending, "--execute will write them")
 		if !g.Majority {
-			r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), configured), "--execute asks for the word "+partialWord+" at a terminal.")
+			r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), configured), "--execute will ask for the word "+partialWord+" at a terminal.")
 		}
 		return true, nil
 	}

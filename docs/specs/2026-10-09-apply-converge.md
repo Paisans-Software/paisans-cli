@@ -208,9 +208,9 @@ disk are that version.
 | Line | Named |
 |---|---|
 | `✓ id` | the deployment id |
-| `○ id` `pending: init writes it` | a file with no id yet |
+| `○ id` `pending: init will write it` | a file with no id yet |
 | `✓ configuration` | `revision <n>, <hash>`, the version the files are |
-| `○ configuration` `pending: published by apply --execute` | files no version holds yet: none published, or edited since |
+| `○ configuration` `pending: apply --execute will publish it` | files no version holds yet: none published, or edited since |
 
 A run that opens with either pending names both again as it ends, whether it
 finished or stopped, with what it learned on the way: the id init wrote, the

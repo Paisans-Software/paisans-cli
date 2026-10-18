@@ -121,10 +121,10 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error
 			r.Step("attest "+describe(g, head)).End(ui.Pending, fmt.Sprintf("revision %d, signed with %s", g.Versions[head].Revision+1, k.Fingerprint))
 		}
 		if write {
-			r.Step("write the files of "+describe(g, head)).End(ui.Pending, "--execute writes them")
+			r.Step("write the files of "+describe(g, head)).End(ui.Pending, "--execute will write them")
 		}
 		if !g.Majority {
-			r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), len(sites)), "--execute asks for the word "+partialWord+" at a terminal.")
+			r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), len(sites)), "--execute will ask for the word "+partialWord+" at a terminal.")
 		}
 		return nil
 	}

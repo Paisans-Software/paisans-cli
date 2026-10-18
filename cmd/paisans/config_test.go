@@ -636,7 +636,7 @@ func TestConfigRollbackIsReportedWithoutAsking(t *testing.T) {
 	if err := runConfig([]string{"pull", "--config", cfgPath}, noTerminalStdin(), &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(rep.String(), "--execute asks for rollback") {
+	if !strings.Contains(rep.String(), "--execute will ask for rollback") {
 		t.Errorf("dry run report:\n%s", rep.String())
 	}
 	if b, _ := os.ReadFile(filepath.Join(l.Dir, ".paisans", "config-seen")); string(b) != seen+"\n" {

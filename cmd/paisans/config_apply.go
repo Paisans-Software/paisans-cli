@@ -149,7 +149,7 @@ func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *confi
 			return nil, err
 		}
 	} else if !g.Majority {
-		r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), len(sites)), "--execute asks for the word "+partialWord+" at a terminal.")
+		r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), len(sites)), "--execute will ask for the word "+partialWord+" at a terminal.")
 	}
 	v := &gathered{l: l, g: g, sites: sites, key: key, files: files, parents: parents, revision: 1, answers: ans}
 	if len(parents) == 1 {
@@ -249,7 +249,7 @@ func published(r ui.Reporter, s ui.Step, sha string, pushed []string, err error,
 // with no store is named with the command that makes one.
 func pushFailure(site string, err error) string {
 	if errors.Is(err, configstore.ErrNoStore) {
-		return site + " has no configuration store yet; paisans site prepare --site " + site + " --execute makes it."
+		return site + " has no configuration store yet; paisans site prepare --site " + site + " --execute will make it."
 	}
 	if err == nil {
 		return site + " did not answer."
@@ -302,7 +302,7 @@ func witness(r ui.Reporter, records map[string]grant.Record, revision int, hash,
 	hint := "a host holds another version than the one you are applying"
 	why := "This apply puts " + what + " on hosts whose record holds another version:\n" + strings.Join(other, "\n") + "\nA site that deleted the newer versions can serve an old one, and applying it would put back old secrets."
 	if !execute {
-		r.Warn(hint, why+" --execute asks for "+rollbackWord+".")
+		r.Warn(hint, why+" --execute will ask for "+rollbackWord+".")
 		return nil
 	}
 	if err := confirmWord(ans, stdin, stdout, rollbackWord, why+" Proceed only if you know why the host's version is gone from the sites."); err != nil {

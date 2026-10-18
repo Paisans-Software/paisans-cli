@@ -247,6 +247,6 @@ func convergeWebServerPending(r ui.Reporter, cfg *config.Config, scope webServer
 	}
 	r.Section("web server")
 	for _, app := range apps {
-		r.Step(app).End(ui.Waiting, "checked with --execute")
+		r.Step(app).End(ui.Waiting, "--execute will check it")
 	}
 }

@@ -86,7 +86,7 @@ func recordArchitectures(r ui.Reporter, path string, cfg *config.Config, read ma
 				site := cfg.Sites[name]
 				site.Arch = missing[name]
 				cfg.Sites[name] = site
-				r.Note(fmt.Sprintf("%s: arch %s, recorded in %s by --execute", name, missing[name], config.FileName), "")
+				r.Note(fmt.Sprintf("%s: arch %s, --execute will record it in %s", name, missing[name], config.FileName), "")
 			}
 		}
 	}
