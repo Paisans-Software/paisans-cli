@@ -6126,6 +6126,60 @@ not resolve stops the apply before the interface is touched, with
 record with `paisans dns init` and apply again. A mesh with nothing to do, or
 whose peers are all addresses, resolves nothing.
 
+### `deployment apply` keeps the rootless namespace's `src_valid_mark` at 0
+
+The deployment user's rootless Docker keeps its bridges in a network namespace
+of RootlessKit's, and RootlessKit's port driver hands each connection to a
+published port into it with a transparent dial: a socket bound to the real
+client's address, so that an app sees the gateway's mesh address and trusts
+its `X-Forwarded-For`, which every app's trusted proxy range (the mesh subnet)
+depends on. The dial's replies come home by a mark, `0x64`, and a routing table
+of RootlessKit's own whose one route is local
+(rootless-containers/rootlesskit, `pkg/port/builtin/child/child.go`).
+
+**At `net.ipv4.conf.all.src_valid_mark` 1 that dial fails.** The kernel then
+checks a reply's source address with the reply's mark, finds the container's
+address in that local table, takes it for one of the namespace's own, and drops
+the reply (`ip_route_input_noref` returns `-EINVAL`). RootlessKit gives the dial
+one second and dials again without the client's address. So every new
+connection to every app waits a second, which a gateway's kept alive
+connections hide until a browser opens several at once, and the app sees the
+Docker bridge's gateway, outside the range it trusts a forwarded address from:
+Pocket ID's rate limit and audit log see one address for every member. A
+namespace copies the host's values when it is made, and Tailscale sets the
+host's to 1 for a reverse path workaround of its own
+(tailscale/tailscale, `wgengine/router/osrouter/router_linux.go`), so a host
+that runs Tailscale for its owner gives the deployment the wait.
+
+**`deployment apply` sets it to 0 in the namespace, as the deployment's user.**
+It writes 0 to every `/proc/sys/net/ipv4/conf/*/src_valid_mark` there: `all`,
+which the kernel ORs with each device's own value, each device's, and
+`default`, which a device made later starts with. The namespace belongs to
+that user's user namespace, so this needs no root, and the host's own value,
+which Tailscale needs, is not touched. A restart of the daemon makes the
+namespace afresh with the host's values, so `deployment apply` also installs
+`~/.config/systemd/user/docker.service.d/paisans-src-valid-mark.conf`, whose
+`ExecStartPost` writes them again at every start, and has the user's manager
+reload it. Its command starts with `-`, so a failure there never stops the
+daemon from starting: the daemon then runs with the wait, and `paisans doctor`
+says so.
+
+Before any stack moves, after the mesh, `deployment apply` reads the drop-in
+and the namespace's highest value. It installs the drop-in when it is absent
+or differs, then writes the values when one reads 1, and stops the apply if either
+fails, so no container is started into a namespace with the wait. A read that
+fails asks for nothing: it is not a gate, and `paisans doctor` reports a
+namespace it cannot read. An apply narrowed with `--only`, and a plan another
+command scopes to a few files, does not read it: each moves only what it names.
+The drop-in counts as missing when the user's manager has not loaded it, as
+after a reload that failed once the file was in place.
+
+`paisans doctor` reads the highest value with its rootless Docker check and
+fails a site whose namespace holds 1, naming Tailscale and
+`paisans deployment apply`. It warns when the namespace holds 0 but the host
+holds 1 and the user's manager has not loaded the drop-in, since the daemon's
+next start copies the 1 again.
+
 ### `paisans deployment apply` with no `--site` converges the whole deployment
 
 `paisans deployment apply` without `--site` takes `paisans-stack.yaml` to a complete, running
@@ -9719,6 +9773,7 @@ closing list is usually the cause of those after it:
 | User | `id -u`, `id -un`, `id -nG` and `id -G` | the user has uid 0, is in a group `site admit` refuses (`admitrules.PrivilegedGroups`), or is in a group of GID 0 under any name. Groups doctor cannot read are a `WARN` |
 | Docker | `docker version` and `docker info`'s security options, against the user's own socket | the daemon does not answer or is not rootless. When it does not answer, nothing that runs `docker` on the site is checked. An answer doctor cannot read is a `WARN` |
 | Docker engine | the version `docker version` read | older than 29.5 |
+| Docker source mark | the highest `src_valid_mark` under `/proc/sys/net/ipv4/conf` in RootlessKit's network namespace, read with the Docker check by entering the namespace as the user | it is 1, so every new connection to an app waits a second and the app sees the bridge's address: the recovery is `paisans deployment apply --execute`. See *`deployment apply` keeps the rootless namespace's `src_valid_mark` at 0*. A value doctor cannot read is a `WARN` |
 | Linger | `loginctl show-user <user> --property=Linger --value`, and whether the drop-in `/etc/systemd/system/user@<uid>.service.d/paisans-mesh.conf` exists | linger is off: the user's Docker stops when the last login ends and does not start at boot. Or the drop-in is missing, so the user's manager is not ordered after the mesh. An answer doctor cannot read, the mesh-order line included, is a `WARN` |
 | Sudo rights | `LC_ALL=C sudo -n -l`, or `/usr/bin/sudo.ws -n -l` where sudo is sudo-rs | sudo lets the user run anything but the WireGuard helper as root, carries a Defaults entry or runas line beyond admit's one rule, or does not let it run the helper. An answer doctor cannot read, such as a translated one, is a `WARN` |
 | Mesh | `ip -j link show dev psns-<token>`, then the overlap test of *Two deployments on one host never share a mesh*: `ip -j route show table all`, `ip -j addr`, `docker network inspect` and the user's `~/.config/docker/daemon.json`, on every site that answered | the interface is missing or down, or anything outside it overlaps `mesh.subnet`, named with the subnet. The advice is that the subnet is fixed once deployed and the other network moves |

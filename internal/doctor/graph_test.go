@@ -460,7 +460,7 @@ func TestPruningIsReportedOnce(t *testing.T) {
 	if !reflect.DeepEqual(lines, []string{"check reach home-b"}) {
 		t.Errorf("home-b's lines are %v, want reach alone:\n%s", lines, rec.Lines())
 	}
-	want := "Not checked because of this: admission, user, docker, docker engine, linger, sudo rights, mesh, patroni, containers, settings talk, clocks, leftovers on home-b."
+	want := "Not checked because of this: admission, user, docker, docker engine, docker source mark, linger, sudo rights, mesh, patroni, containers, settings talk, clocks, leftovers on home-b."
 	if !rec.Has("explain", want) {
 		t.Errorf("reach home-b does not say what it kept from running, want %q:\n%s", want, rec.Lines())
 	}
@@ -472,7 +472,7 @@ func TestPruningIsReportedOnce(t *testing.T) {
 			listed += strings.Count(list, ",") + strings.Count(list, ";") + 1
 		}
 	}
-	if report.Pruned != 13 || listed != report.Pruned || report.Count(Skip) != 1 || !strings.Contains(report.Summary(), "14 skipped") {
+	if report.Pruned != 14 || listed != report.Pruned || report.Count(Skip) != 1 || !strings.Contains(report.Summary(), "15 skipped") {
 		t.Errorf("pruned %d, listed %d, summary %q", report.Pruned, listed, report.Summary())
 	}
 	for _, read := range reads.log.list {
@@ -500,7 +500,7 @@ func TestAPendingSiteIsCheckedNoFurther(t *testing.T) {
 	if f.Level != Warn || !strings.Contains(strings.Join(f.More, "\n"), "`paisans site request --site home-b > home-b.admit`") {
 		t.Errorf("home-b: %+v", f)
 	}
-	want := "Not checked because of this: user, docker, docker engine, linger, sudo rights, mesh, patroni, containers, settings talk, clocks, leftovers on home-b."
+	want := "Not checked because of this: user, docker, docker engine, docker source mark, linger, sudo rights, mesh, patroni, containers, settings talk, clocks, leftovers on home-b."
 	if !rec.Has("explain", want) {
 		t.Errorf("admission home-b does not say what it kept from running, want %q:\n%s", want, rec.Lines())
 	}
@@ -650,7 +650,7 @@ func TestDockerDownStopsWhatRunsDocker(t *testing.T) {
 			t.Errorf("%s did not run", read)
 		}
 	}
-	if !rec.Has("explain", "Not checked because of this: docker engine, patroni, containers, settings talk, leftovers on home-a.") {
+	if !rec.Has("explain", "Not checked because of this: docker engine, docker source mark, patroni, containers, settings talk, leftovers on home-a.") {
 		t.Errorf("docker home-a does not say what it kept from running:\n%s", rec.Lines())
 	}
 }

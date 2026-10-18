@@ -887,6 +887,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 		if plan.WireGuard != apply.WireGuardNone {
 			changes++
 		}
+		changes += len(plan.SourceMark.Steps())
 		if clients != nil {
 			changes += clients.steps
 		}

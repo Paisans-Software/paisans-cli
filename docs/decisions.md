@@ -3349,3 +3349,42 @@ decides otherwise.
   an operator.
 * **Show every monitor and leave hiding to the admins:** publishes the mesh
   layout the moment the page is on, before anyone has hidden anything.
+
+## 2026-10-18: Apply keeps src_valid_mark at 0 in the rootless namespace
+
+Founder direction, 2026-10-18.
+
+### What was decided
+
+* `deployment apply` writes 0 to every `src_valid_mark` under
+  `/proc/sys/net/ipv4/conf` in RootlessKit's network namespace (`all`, each
+  device's and `default`), as the deployment's user, when one reads 1, before
+  any stack moves.
+* It installs a user drop-in for `docker.service` whose `ExecStartPost` writes
+  them again at every start of the daemon, prefixed `-` so it can never fail
+  the start.
+* `paisans doctor` fails a site whose namespace holds 1, with apply as the
+  recovery.
+
+### Why
+
+Observed on two hosts running Tailscale, which sets the host's value to 1. The
+namespace copies it, RootlessKit's transparent dial then loses every reply,
+and each new connection to a published port waited one second before a plain
+dial took over (traced with bpftrace: `ip_route_input_noref` returned
+`-EINVAL` for the marked SYN-ACK). The plain dial also hid the client, so apps
+saw the bridge's gateway and ignored `X-Forwarded-For`. Setting the value to 0
+in the namespace alone fixed both, from 1.003 s to 0.003 s per connection,
+and leaves the host's value, which Tailscale needs, as it is. The namespace is
+the user's, so no root and no admit is needed, and the apply the operators
+already run fixes a site.
+
+### What was weighed
+
+* **Raise the Docker floor to the release with RootlessKit 3.2:** tried on
+  the affected host; RootlessKit 3.3.0 waited the same second, since the
+  cause is the inherited value, not the firewall backend.
+* **Turn RootlessKit's transparent mode off:** ends the wait but leaves every
+  app seeing the bridge's address as every client.
+* **Have site admit write the drop-in:** needs the host's owner for a change
+  inside the deployment's own namespace.

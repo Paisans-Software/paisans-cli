@@ -324,6 +324,7 @@ func Diagnose(cfg *config.Config, in Input) Report {
 	findings = append(findings, User(in.Users)...)
 	findings = append(findings, DockerSocket(in.Docker)...)
 	findings = append(findings, DockerEngine(in.Docker)...)
+	findings = append(findings, SourceMark(in.Docker)...)
 	findings = append(findings, Linger(cfg.Deployment(), in.Linger)...)
 	findings = append(findings, SudoRights(cfg, in.SudoRights)...)
 	findings = append(findings, Mesh(cfg, in.Mesh)...)

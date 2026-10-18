@@ -198,6 +198,12 @@ func Checks(cfg *config.Config, sites []string, reads Reads) *Graph {
 		})
 	}
 	for _, site := range sites {
+		g.Add(Node{Name: SectionDocker + " source mark " + site, Section: SectionDocker, Site: site, Subject: site,
+			Hard:  []Need{Hard(docker(site))},
+			Judge: func(in Input) []Finding { return SourceMark(bySite(in.Docker, site, DockerProbe.site)) },
+		})
+	}
+	for _, site := range sites {
 		g.Add(Node{Name: SectionLinger + " " + site, Section: SectionLinger, Site: site, Subject: site,
 			Hard: []Need{Hard(admitted(site))},
 			Gather: func(Input) func(*Input) {
