@@ -6176,7 +6176,7 @@ a passkey, what the run made otherwise, and in a dry run what it would make.
 Then, when an app is served behind the operator's own web
 server, a `web server` section: with `--execute` a line for each reference
 snippet written and a line per app for its web server check, and in a
-dry run a line per app, `checked with --execute` (see *The monitor has a site
+dry run a line per app, `--execute will check it` (see *The monitor has a site
 of its own*). Last, a note names `secrets set` for each credential still owed,
 since only the operator can supply it. A run with `--execute` ends
 `Deployment complete.`; one where an app failed its web server check, or its site

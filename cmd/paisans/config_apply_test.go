@@ -540,7 +540,7 @@ func TestApplyDryRunChangesNoStore(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(f.l.Dir, ".paisans", "config-seen")); !os.IsNotExist(err) {
 		t.Errorf("a dry run remembered a revision: %v", err)
 	}
-	if !rec.Has("pending", "publish revision 2") || !strings.Contains(rec.Lines(), "--execute asks for rollback") {
+	if !rec.Has("pending", "publish revision 2") || !strings.Contains(rec.Lines(), "--execute will ask for rollback") {
 		t.Errorf("the dry run does not say what --execute does:\n%s", rec.Lines())
 	}
 }

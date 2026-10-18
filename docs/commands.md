@@ -1187,7 +1187,7 @@ starts, restarts or recreates what changed.
   whole apply's warning with exit status 0, in place of `Applied <n> files to
   <site>.`; one apply could not do on the host, such as reading or writing the
   reference file, ends it failed with exit status 1. Its dry run
-  lists the check as `checked with --execute`. The applies the whole apply
+  lists the check as `--execute will check it`. The applies the whole apply
   runs as its steps leave the step to it, so it runs once.
 
 See *Rendered configuration is a build artifact* and the `apply` sections under

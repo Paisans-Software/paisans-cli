@@ -202,7 +202,7 @@ func TestApplySiteDryRunListsTheWebServerStep(t *testing.T) {
 		})
 		reporterOverride = saved
 		got := lines(inSection(rec, "web server"))
-		if tc.want && !slices.Equal(got, []string{"step health", "waiting health: checked with --execute", "result Nothing changed. Re-run with --execute to apply."}) {
+		if tc.want && !slices.Equal(got, []string{"step health", "waiting health: --execute will check it", "result Nothing changed. Re-run with --execute to apply."}) {
 			t.Errorf("%s: web server section:\n%s\n\n%s", tc.site, strings.Join(got, "\n"), rec.Lines())
 		}
 		if !tc.want && rec.Has("section", "web server") {

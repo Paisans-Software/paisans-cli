@@ -164,7 +164,7 @@ func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transpo
 		case m.log:
 			r.Note("the newest version is older than one seen here", why)
 		default:
-			r.Note("--execute asks for rollback", why)
+			r.Note("--execute will ask for rollback", why)
 		}
 		s = r.Step("proceed from the older version")
 		err = nil
@@ -187,7 +187,7 @@ func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transpo
 	s.Done(fmt.Sprintf("%d of %d sites answered directly", len(g.Direct()), configured))
 	// A stack of one site has no peers, so a sync would bring nothing.
 	if !m.execute && configured > 1 {
-		r.Note("the sites were not asked to sync with their peers first", "A dry run changes no site. --execute starts each site's sync before reading it, so versions only its peers hold arrive too.")
+		r.Note("the sites were not asked to sync with their peers first", "A dry run changes no site. --execute will start each site's sync before reading it, so versions only its peers hold arrive too.")
 	}
 	for _, rc := range g.Reached {
 		switch {
@@ -388,7 +388,7 @@ func runConfigPublish(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 		what := "the first version"
 		if len(parents) == 0 && !g.Majority {
-			r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), len(sites)), "A first version starts the deployment's history, so --execute asks for the word "+partialWord+" at a terminal.")
+			r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), len(sites)), "A first version starts the deployment's history, so --execute will ask for the word "+partialWord+" at a terminal.")
 		}
 		if len(parents) > 0 {
 			var on []string
@@ -535,9 +535,9 @@ func runConfigPull(args []string, stdin io.Reader, stdout io.Writer) error {
 		return pullOverEdits(r, l, g, head, base, localFiles, headFiles, *execute, stdout)
 	}
 	if !*execute {
-		r.Step("move the local files to "+describe(g, head)).End(ui.Pending, "--execute writes them")
+		r.Step("move the local files to "+describe(g, head)).End(ui.Pending, "--execute will write them")
 		if !g.Majority {
-			r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), len(sites)), "--execute asks for the word "+partialWord+" at a terminal.")
+			r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), len(sites)), "--execute will ask for the word "+partialWord+" at a terminal.")
 		}
 		return nil
 	}
@@ -575,7 +575,7 @@ func pullOverEdits(r ui.Reporter, l configstore.Local, g configstore.Gathered, h
 	if err := showDifference(stdout, local, theirs); err != nil {
 		return err
 	}
-	where := "--execute writes the head's files to " + l.Incoming() + " to merge from"
+	where := "--execute will write the head's files to " + l.Incoming() + " to merge from"
 	if execute {
 		if err := l.WriteIncoming(head); err != nil {
 			return err
@@ -848,7 +848,7 @@ func runConfigRecover(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	if g.Verdict.Fork {
 		if !*execute {
-			return forkProblem(g, "--execute writes each head's files to "+l.Incoming()+"/<sha>/.")
+			return forkProblem(g, "--execute will write each head's files to "+l.Incoming()+"/<sha>/.")
 		}
 		for _, h := range g.Verdict.Heads {
 			if err := l.WriteIncomingFor(h); err != nil {
@@ -865,9 +865,9 @@ func runConfigRecover(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 	}
 	if !*execute {
-		r.Step("write the files of "+describe(g, head)).End(ui.Pending, "--execute writes them")
+		r.Step("write the files of "+describe(g, head)).End(ui.Pending, "--execute will write them")
 		if !g.Majority {
-			r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), len(sites)), "--execute asks for the word "+partialWord+" at a terminal.")
+			r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), len(sites)), "--execute will ask for the word "+partialWord+" at a terminal.")
 		}
 		return nil
 	}

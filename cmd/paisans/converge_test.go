@@ -1311,7 +1311,7 @@ func fakeChecks(t *testing.T, found map[string]any) *[]string {
 			title = title[:i]
 		}
 		if slices.Contains(args, "--execute") {
-			t.Errorf("%s checked with --execute", title)
+			t.Errorf("%s is listed as one --execute will check", title)
 		}
 		checked = append(checked, title)
 		switch f := found[title].(type) {
@@ -2697,8 +2697,8 @@ func TestConvergeLeavesTheWebServerOfADownSite(t *testing.T) {
 	if err := convergeAt(t, externalFixture(t)); err != nil {
 		t.Fatalf("dry run: %v: %s", err, problemText(err))
 	}
-	if strings.Contains(rec.Lines(), "checked with --execute") {
-		t.Errorf("the dry run lists down watch's app as checked with --execute:\n%s", rec.Lines())
+	if strings.Contains(rec.Lines(), "--execute will check it") {
+		t.Errorf("the dry run lists down watch's app as one --execute will check:\n%s", rec.Lines())
 	}
 }
 

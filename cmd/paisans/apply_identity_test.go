@@ -90,7 +90,7 @@ func TestApplyNamesAPublishedVersionAtTheEnd(t *testing.T) {
 	if len(got) != 2 || head == f.shas[0] {
 		t.Fatalf("head %s, got %v\n%s", head, got, rec.Lines())
 	}
-	sameLines(t, got[0], []string{built, "done id: " + f.cfgID(t), "pending configuration: pending: published by apply --execute"})
+	sameLines(t, got[0], []string{built, "done id: " + f.cfgID(t), "pending configuration: pending: apply --execute will publish it"})
 	sameLines(t, got[1], []string{built, "done id: " + f.cfgID(t), "done configuration: revision 2, " + head[:12]})
 	if end := rec.Index("section", "deployment"); rec.Index("done", "publish revision 2") < end {
 		t.Errorf("named again before the publish:\n%s", rec.Lines())
@@ -118,7 +118,7 @@ func TestApplyNamesWhatIsPendingWhenItStops(t *testing.T) {
 	if err == nil || len(got) != 2 {
 		t.Fatalf("err %v, got %v\n%s", err, got, rec.Lines())
 	}
-	pending := []string{built, "done id: " + declaredID(path), "pending configuration: pending: published by apply --execute"}
+	pending := []string{built, "done id: " + declaredID(path), "pending configuration: pending: apply --execute will publish it"}
 	sameLines(t, got[0], pending)
 	sameLines(t, got[1], pending)
 	last := 0

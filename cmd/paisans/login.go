@@ -134,7 +134,7 @@ func recordSSHUser(path, site, user string) func() {
 		r := loginReporter
 		if !recordLogins {
 			if r != nil {
-				r.Note(fmt.Sprintf("%s: ssh.user %s, recorded in %s by --execute", site, user, config.FileName), "")
+				r.Note(fmt.Sprintf("%s: ssh.user %s, --execute will record it in %s", site, user, config.FileName), "")
 			}
 			return
 		}
