@@ -61,6 +61,9 @@ func commonFlags(fs *flag.FlagSet) func() ui.Reporter {
 		if executes(fs) {
 			recordLogins = true
 		}
+		if fs.Lookup("execute") != nil {
+			offersExecute = true
+		}
 		return r
 	}
 }

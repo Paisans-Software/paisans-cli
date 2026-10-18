@@ -202,6 +202,7 @@ func TestAUserThatCannotBeRecordedIsAWarning(t *testing.T) {
 // means.
 func TestALoginWithoutExecuteRecordsNothing(t *testing.T) {
 	resetLogins(t)
+	offersExecute = true
 	rec := loginNotes(t)
 	path, cfg := archFixture(t, twoDataSitesWithoutUsers)
 	before, _ := os.ReadFile(path)
@@ -212,6 +213,32 @@ func TestALoginWithoutExecuteRecordsNothing(t *testing.T) {
 	}
 	if !rec.Has("note", "home-a: ssh.user paisans-f2a9, --execute will record it in paisans-stack.yaml") {
 		t.Errorf("no note of what --execute records: %+v", rec.Events)
+	}
+}
+
+// A command that takes no --execute, such as init, records nothing and
+// says nothing of --execute: the flag is another command's.
+func TestALoginInACommandWithoutExecuteSaysNothingOfIt(t *testing.T) {
+	resetLogins(t)
+	loginNotes(t)
+	rec := withRecorder(t, false)
+	fs := flag.NewFlagSet("init", flag.ContinueOnError)
+	reporter := commonFlags(fs)
+	if err := fs.Parse(nil); err != nil {
+		t.Fatal(err)
+	}
+	reporter()
+	path, cfg := archFixture(t, twoDataSitesWithoutUsers)
+	before, _ := os.ReadFile(path)
+	siteTransport("home-a", cfg.Sites["home-a"], "").Login.Connected()
+	after, _ := os.ReadFile(path)
+	if string(after) != string(before) {
+		t.Errorf("the file changed:\n%s", after)
+	}
+	for _, e := range rec.Events {
+		if strings.Contains(e.Text+e.Extra, "--execute") {
+			t.Errorf("init spoke of --execute: %+v", e)
+		}
 	}
 }
 
