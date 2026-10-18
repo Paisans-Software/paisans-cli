@@ -1,0 +1,1 @@
+refused: user: sudo on this host is sudo-rs, whose sudo -l does not list the Defaults that apply to a user, so admit cannot tell whether one passes paisans-f2a9's environment to the WireGuard helper, which runs as root. The original sudo is installed here as /usr/bin/sudo.ws: make it sudo with update-alternatives --set sudo /usr/bin/sudo.ws, and admit again. Nothing was changed

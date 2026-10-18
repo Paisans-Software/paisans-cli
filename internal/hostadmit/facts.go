@@ -183,8 +183,11 @@ type UserFacts struct {
 	// SudoNames each sudoers file, admit's own aside, that names it then.
 	GroupTaken bool
 	SudoNames  []string
-	// SudoRS is sudo being sudo-rs, whose sudo -l lists no Defaults.
+	// SudoRS is sudo being sudo-rs, whose sudo -l lists no Defaults;
+	// SudoWS the original sudo installed as /usr/bin/sudo.ws, which
+	// update-alternatives can make sudo in its place.
 	SudoRS        bool
+	SudoWS        bool
 	Linger        bool
 	ManagerActive bool
 	// SudoRead is sudo -l -U read for the user, or sudo absent. From
@@ -411,6 +414,8 @@ func parseFacts(out, user string) (Facts, error) {
 			f.User.SudoNames = append(f.User.SudoNames, v)
 		case "sudo-kind":
 			f.User.SudoRS = v == "rs"
+		case "sudo-ws":
+			f.User.SudoWS = v == "yes"
 		case "home-above":
 			if !slices.Contains([]string{"safe", "link", "unsafe"}, v) {
 				return f, fmt.Errorf("unreadable home-above line %q", v)

@@ -164,6 +164,17 @@ const ubuntu2404 = "PRETTY_NAME=\"Ubuntu 24.04.1 LTS\"\nNAME=\"Ubuntu\"\nVERSION
 
 const ubuntu2204 = "PRETTY_NAME=\"Ubuntu 22.04.5 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"22.04\"\nVERSION_CODENAME=jammy\nID=ubuntu\nID_LIKE=debian\nUBUNTU_CODENAME=jammy\n"
 
+const ubuntu2604 = "PRETTY_NAME=\"Ubuntu 26.04.1 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"26.04\"\nVERSION_CODENAME=resolute\nID=ubuntu\nID_LIKE=debian\nUBUNTU_CODENAME=resolute\n"
+
+// newResolute is newBlank on Ubuntu 26.04 whose owner has made the
+// original sudo, which 26.04 installs as sudo.ws, sudo in sudo-rs's place:
+// a VPS fresh from it has sudo-rs as sudo, which admit refuses.
+func newResolute() *fakeHost {
+	h := newBlank().with("sudo-ws", "yes")
+	h.files["/etc/os-release"] = ubuntu2604
+	return h
+}
+
 // newJammy is newBlank on Ubuntu 22.04, as a VPS fresh from it probes:
 // the kernel has no apparmor_restrict_unprivileged_userns sysctl, so the
 // probe prints 0, and Ubuntu's apparmor package ships no rootlesskit
