@@ -326,6 +326,14 @@ it fires leaves ufw enabled, and you locked out.
 * **The operators' keys**, in the user's `~/.ssh/authorized_keys`. From then
   on the operators maintain them themselves, as that user.
 
+One thing changes later, on the operators' `deployment apply` and as the user,
+inside the deployment's own Docker: `net.ipv4.conf.all.src_valid_mark` is set
+to 0 in its RootlessKit network namespace, and a drop-in in the user's home,
+`~/.config/systemd/user/docker.service.d/paisans-src-valid-mark.conf`, sets it
+again at every start of that Docker. Tailscale sets your machine's value to 1,
+which the namespace copies, and at 1 every connection to the deployment's apps
+waits a second. Your machine's own value is left as it is.
+
 To see it afterwards, with your deployment's token in place of `1a2b`:
 
 ```sh

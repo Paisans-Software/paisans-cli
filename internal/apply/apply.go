@@ -219,6 +219,11 @@ type Plan struct {
 	// against what its service mounts, nil when no stack moves. Any uncovered
 	// path refuses the apply before anything is written. See VolumeCheck.
 	Volumes *VolumeCheck
+	// SourceMark is what the deployment user's rootless network namespace
+	// needs so that a connection to a published port waits for nothing and
+	// keeps the client's address. Execute runs it after the mesh and before
+	// any stack moves. Zero on a scoped plan. See sourcemark.go.
+	SourceMark SourceMarkStep
 	// HostSites is set when this site's Caddy mounts the host's own
 	// render.HostSitesDir. Execute creates the directory, the deployment
 	// user's and 0755, before the first container that mounts it, when it is
@@ -1070,6 +1075,9 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 		out.DNSToken = &dns.TokenCheck{Provider: plan.ACMEProvider, Domain: plan.Domain, Place: site, From: "this server"}
 	}
 	out.HostSites = out.GatewayChanging && plan.HostSites[site]
+	if !out.scoped {
+		out.SourceMark = sourceMarkStep(t)
+	}
 
 	if wireguard != nil {
 		step, err := wireguardStep(site, d, *wireguard, wireguardBefore, t)
@@ -1252,6 +1260,12 @@ func execute(plan *Plan, t Transport) error {
 		err := bringUpMesh(plan, t)
 		finish(done, err)
 		if err != nil {
+			return err
+		}
+	}
+
+	if plan.SourceMark.Needed() {
+		if err := fixSourceMark(plan, t); err != nil {
 			return err
 		}
 	}

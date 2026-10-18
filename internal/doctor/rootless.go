@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/admitrules"
+	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 )
@@ -14,7 +15,8 @@ import (
 // The rootless checks ask whether a site is still what its owner's site
 // admit made it: the admission record covers the site (admission.go), the
 // deployment's user holds no group that reaches past it, its own rootless
-// Docker daemon answers and is new enough, linger keeps that daemon running
+// Docker daemon answers, is new enough and hands connections in without a
+// wait (SourceMark), linger keeps that daemon running
 // with nobody logged in and its manager starts after the mesh, and sudo
 // lets the user run the WireGuard helper and nothing else (sudo.go). Each
 // is read as the login user, with nothing that user may not read. See
@@ -35,8 +37,12 @@ const UserCommand = `printf 'uid %s\nuser %s\ngroups %s\ngids %s\n' "$(id -u)" "
 // DockerCommand prints the DOCKER_HOST the command ran with, then asks the
 // daemon there for its Engine version and its security options, which name
 // rootless for a daemon running as its user. The transport exports
-// DOCKER_HOST as the login user's own socket ahead of every command.
-const DockerCommand = `printf 'host %s\n' "${DOCKER_HOST:-unset}" && docker version --format 'engine {{.Server.Version}}' && docker info --format 'security {{json .SecurityOptions}}'`
+// DOCKER_HOST as the login user's own socket ahead of every command. Last it
+// prints net.ipv4.conf.all.src_valid_mark in RootlessKit's network
+// namespace, or unknown, a read that never fails the command (see
+// SourceMark).
+var DockerCommand = `printf 'host %s\n' "${DOCKER_HOST:-unset}" && docker version --format 'engine {{.Server.Version}}' && docker info --format 'security {{json .SecurityOptions}}' && ` +
+	`printf 'source-mark %s\n' "$(` + apply.InRootlessNamespace("cat /proc/sys/net/ipv4/conf/all/src_valid_mark") + ` 2>/dev/null || echo unknown)"`
 
 // LingerCommand prints whether systemd keeps the login user's instance, and
 // with it the user's Docker daemon, running with no session open, and
@@ -203,6 +209,41 @@ func DockerEngine(probes []DockerProbe) []Finding {
 				"  1. The host's owner upgrades Docker; upgrading it is the owner's decision, which site admit leaves to them.",
 				fmt.Sprintf("  2. `systemctl --user restart docker`, as the deployment's user on %s, which restarts every container in it.", p.Site),
 			}})
+	}
+	return out
+}
+
+// SourceMark checks that src_valid_mark is 0 in the rootless daemon's
+// RootlessKit namespace. At 1, which the namespace copies from a host
+// running Tailscale, RootlessKit's dial of each connection to a published
+// port is dropped, and it dials again a second later without the client's
+// address: every new connection to an app waits a second, and the app sees
+// the bridge's gateway, outside the range it trusts a forwarded address from.
+// Apply sets it to 0 and installs the drop-in that keeps it there. A daemon
+// that did not answer is DockerSocket's; a value that could not be read is a
+// warning.
+func SourceMark(probes []DockerProbe) []Finding {
+	var out []Finding
+	for _, p := range probes {
+		if !p.Answered() {
+			continue
+		}
+		switch v := keyed(p.Out)["source-mark"]; v {
+		case "0":
+			out = append(out, Finding{Section: SectionDocker, Level: OK, Line: fmt.Sprintf("%s: src_valid_mark is 0 in its RootlessKit namespace", p.Site)})
+		case "1":
+			out = append(out, Finding{Section: SectionDocker, Level: Fail,
+				Line: fmt.Sprintf("%s: src_valid_mark is 1 in its RootlessKit namespace, so every new connection to an app waits a second", p.Site),
+				More: []string{
+					"RootlessKit hands each connection to a published port in with the client's address, and at 1 the kernel drops the replies as coming from one of the namespace's own addresses. RootlessKit dials again a second later without the address, so the app also sees the Docker bridge's gateway, not the client. The namespace copies the value from its host, and Tailscale sets the host's to 1.",
+					"recover:",
+					fmt.Sprintf("  1. `paisans deployment apply --execute`, which sets it to 0 in the namespace as the deployment's user on %s, and installs the drop-in that sets it again at every start of the daemon. The host's own value, which Tailscale needs, is left as it is.", p.Site),
+				}})
+		default:
+			out = append(out, Finding{Section: SectionDocker, Level: Warn,
+				Line: fmt.Sprintf("%s: src_valid_mark in its RootlessKit namespace could not be read", p.Site),
+				More: []string{fmt.Sprintf("At 1, every new connection to an app waits a second. As the deployment's user on %s, `nsenter -U --preserve-credentials -t \"$(cat /run/user/$(id -u)/dockerd-rootless/child_pid)\" -m nsenter --net=/run/user/$(id -u)/dockerd-rootless/netns cat /proc/sys/net/ipv4/conf/all/src_valid_mark` reads it.", p.Site)}})
+		}
 	}
 	return out
 }

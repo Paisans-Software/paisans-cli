@@ -104,6 +104,10 @@ func listPlan(r ui.Reporter, plan *apply.Plan) {
 		r.Step(plan.WireGuard.Title(plan.Deployment)).End(ui.Pending, "")
 		r.Detail("%s", plan.WireGuard.Describe(plan.Deployment))
 	}
+	for _, step := range plan.SourceMark.Steps() {
+		r.Step(step.Title).End(ui.Pending, "")
+		r.Detail("%s", step.Describe)
+	}
 
 	bootstrapped := plan.Bootstrap == nil
 	for _, action := range plan.Actions {
