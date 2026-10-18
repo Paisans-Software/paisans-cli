@@ -189,7 +189,8 @@ func newJammy() *fakeHost {
 // restricting unprivileged user namespaces with the rootlesskit profile
 // Ubuntu's apparmor package loads, no
 // deployment user, no file admit writes, ufw installed and active, one
-// public interface, its IPv6 /64 on-link, systemd-resolved, and nothing on 80 or 443.
+// public interface, its IPv6 /64 on-link, systemd-resolved, nothing on 80 or 443,
+// and 4 GB of RAM with its swapfile on.
 func newBlank() *fakeHost {
 	h := &fakeHost{files: map[string]string{
 		"/etc/os-release":  ubuntu2404,
@@ -207,6 +208,8 @@ func newBlank() *fakeHost {
 		{"ufw", "installed"}, {"ufw-active", "yes"},
 		{"egress-enabled", "no"}, {"egress-table", "absent"},
 		{"data-path", "/home"}, {"data-fs", "ext2/ext3"}, {"data-avail", "42949672960"},
+		{"mem-total", "4113297408"}, {"swap-active", "yes"}, {"swap-partition", "no"}, {"swap-fstab", "yes"},
+		{"swap-zram", "no"}, {"swapfile", "present"}, {"root-fs", "ext2/ext3"}, {"root-avail", "42949672960"},
 	} {
 		h.add(kv[0], kv[1])
 	}

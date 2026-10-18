@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -1281,5 +1282,65 @@ func TestYesNeverBlocksWhatAnswers(t *testing.T) {
 	err := runSiteAdmit([]string{"--site", "vm", "--ssh", "owner", "--config", fixtureConfig(), "--public-ports", "--execute", "--yes"}, strings.NewReader(""), out)
 	if err == nil || !strings.Contains(err.Error(), "--enable-ufw-block-listed") || strings.Contains(out.String(), "approved by --yes") || owner.ranIndex("ufw --force enable") >= 0 {
 		t.Errorf("%v\n%s", err, out.String())
+	}
+}
+
+// noSwapHost is a blank host with 4 GB of RAM and no swap in any form, its
+// root on ext4 with room for a swapfile.
+func noSwapHost() *admitHost {
+	h := blankHost("ubuntu")
+	h.facts = append(h.facts, [][2]string{
+		{"mem-total", "4113297408"}, {"swap-active", "no"}, {"swap-partition", "no"}, {"swap-fstab", "no"},
+		{"swap-zram", "no"}, {"swapfile", "absent"}, {"root-fs", "ext2/ext3"}, {"root-avail", "42949672960"},
+	}...)
+	return h
+}
+
+// With --execute at a terminal, a host with no swap has admit ask whether
+// to make a swapfile, and only a yes, or --swapfile, plans one. Off a
+// terminal nothing is asked and the host is admitted without one.
+func TestAdmitAsksToMakeASwapfile(t *testing.T) {
+	savedExecute, savedLogin, savedOwner := executeAdmit, reachSiteUser, reachOwnerAdmit
+	t.Cleanup(func() { executeAdmit, reachSiteUser, reachOwnerAdmit = savedExecute, savedLogin, savedOwner })
+	var executed *hostadmit.Plan
+	executeAdmit = func(_ apply.Transport, _ hostadmit.Input, plan *hostadmit.Plan, _ ui.Reporter) error {
+		executed = plan
+		return nil
+	}
+	reachSiteUser = func(string, config.Site) apply.Transport { return blankHost("ubuntu") }
+	reachOwnerAdmit = func(config.Destination) apply.Transport { return noSwapHost() }
+	for _, c := range []struct {
+		typed    string
+		terminal bool
+		flag     bool
+		makes    bool
+	}{
+		{"y\n", true, false, true},
+		{"n\n", true, false, false},
+		{"", true, false, false},
+		{"", false, false, false},
+		{"", false, true, true},
+	} {
+		quietAdmit(t)
+		withTerminal(t, c.terminal)
+		executed = nil
+		args := []string{"--site", "vm", "--ssh", "owner@vm.example.org", "--config", fixtureConfig(), "--public-ports", "--execute"}
+		if c.flag {
+			args = append(args, "--swapfile")
+		}
+		out := new(strings.Builder)
+		if err := runSiteAdmit(args, typed(t, c.typed), out); err != nil {
+			t.Fatalf("typed %q at a terminal %v: %v", c.typed, c.terminal, err)
+		}
+		if executed == nil {
+			t.Fatalf("typed %q at a terminal %v: nothing executed", c.typed, c.terminal)
+		}
+		makes := slices.ContainsFunc(executed.Steps, func(s hostadmit.Step) bool { return s.Title == "create a swapfile of 8 GiB" })
+		if makes != c.makes {
+			t.Errorf("typed %q at a terminal %v, --swapfile %v: makes a swapfile %v", c.typed, c.terminal, c.flag, makes)
+		}
+		if asked := strings.Contains(out.String(), "Make the swapfile (--swapfile)?"); asked != (c.terminal && !c.flag) {
+			t.Errorf("typed %q at a terminal %v, --swapfile %v: asked %v", c.typed, c.terminal, c.flag, asked)
+		}
 	}
 }

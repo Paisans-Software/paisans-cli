@@ -1,0 +1,1 @@
+refused: swap: --swapfile: / is on btrfs, and admit makes swapfiles on ext4 and xfs alone. Nothing was changed

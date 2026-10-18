@@ -422,5 +422,6 @@ present: mesh: nothing on this host overlaps 10.44.0.0/24
 present: firewall: ufw's default policy left to the owner
 present: firewall: 22/tcp allowed by the paisans: ssh rule, in place of the deployment's own SSH allow
 present: forwarding: not needed, this site has no endpoint
+present: swap: on
 warning: delegation reaches paisans-f2a9's manager at its next start
   Its manager is running, and restarting it would restart its Docker daemon and every container in it, so admit does not. cpuset and io limits apply after the host's next reboot.

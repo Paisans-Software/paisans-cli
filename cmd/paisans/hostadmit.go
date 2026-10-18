@@ -62,6 +62,7 @@ func runSiteAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs.BoolVar(&flags.MeshLAN, "mesh-lan", false, "let the mesh dial this host's own LAN")
 	fs.BoolVar(&flags.EnableUFW, "enable-ufw", false, "enable ufw when it is installed and not active: allow every port sshd listens on, arm a timer that turns ufw off again in 10 minutes, enable it, and stop the timer once a new SSH login gets through")
 	fs.BoolVar(&flags.EnableUFWBlockListed, "enable-ufw-block-listed", false, "with --enable-ufw: enable ufw although it blocks the ports admit lists, which answer from off the host now and no ufw rule allows, once you have checked each may be blocked")
+	fs.BoolVar(&flags.Swapfile, "swapfile", false, "make a swapfile at /swapfile, twice the host's RAM up to 16 GiB, when the host has no swap in any form; asked at a terminal with --execute")
 	fs.BoolVar(&execute, "execute", false, "make the changes the plan shows")
 	fs.StringVar(&digestFlag, "digest", "", "with --request: the request's digest the operator gave you, compared as the one typed at a terminal is")
 	answers := yesFlag(fs)
@@ -291,6 +292,20 @@ func admit(r ui.Reporter, run admitRun, ans answerer, stdin io.Reader, stdout io
 			return fmt.Errorf("site admit: the host changed since admit asked: enabling ufw now blocks %s as well, which you were not shown. Run admit again to see what it blocks. Nothing was changed", strings.Join(more, ", "))
 		}
 	}
+	// A host with no swap: with --execute, the owner is asked whether to
+	// make a swapfile, and the plan is read again to make it.
+	if execute && plan.SwapOffer > 0 && ans.canAnswer(stdin) {
+		yes, err := askSwapfile(ans, stdin, stdout, plan.SwapOffer)
+		if err != nil {
+			return err
+		}
+		if yes {
+			in.Flags.Swapfile = true
+			if plan, err = ui.Get(r, "read the host again, to make a swapfile", func() (*hostadmit.Plan, error) { return hostadmit.Build(t, in) }); err != nil {
+				return err
+			}
+		}
+	}
 	// The whole plan, always: with --execute the owner approves it here,
 	// before the digest and before anything runs, and its rows then show
 	// the run.
@@ -418,6 +433,19 @@ func askEnableUFW(a answerer, stdin io.Reader, stdout io.Writer, ports []int, bl
 			"On a yes, admit asks next whether every one of them may be blocked.\n"
 	}
 	yes, err := a.yesNo(stdin, stdout, explain, "Enable ufw (--enable-ufw)?", "enable ufw (--enable-ufw)")
+	if err != nil {
+		return false, fmt.Errorf("site admit: reading your answer: %w. Nothing was changed", err)
+	}
+	return yes, nil
+}
+
+// askSwapfile asks the owner at a terminal whether admit may make a
+// swapfile of size bytes on a host with no swap. Only y or yes says so, or
+// --yes, through a. A no admits the host without one.
+func askSwapfile(a answerer, stdin io.Reader, stdout io.Writer, size int64) (bool, error) {
+	explain := fmt.Sprintf("\nThis host has no swap. Without it, a host that runs short of memory has the kernel kill a process, which may be the database, instead of slowing down.\n"+
+		"Admit can make a swapfile of %d GiB at /swapfile, twice the host's RAM up to 16 GiB, and turn it on at boot through /etc/fstab.\n", size>>30)
+	yes, err := a.yesNo(stdin, stdout, explain, "Make the swapfile (--swapfile)?", "make a swapfile (--swapfile)")
 	if err != nil {
 		return false, fmt.Errorf("site admit: reading your answer: %w. Nothing was changed", err)
 	}

@@ -36,6 +36,7 @@ present: firewall: 51820/udp allowed
 present: firewall: all inbound on psns-f2a9 allowed
 present: firewall: ufw active, its default policy left to the owner
 present: forwarding: not needed, this site has no endpoint
+present: swap: on
 present: record: /etc/paisans/admitted.f2a9.json as admitted at 2026-10-15T12:00:00Z
 present: keys: every operator's key is in paisans-f2a9's authorized_keys
 warning: --mesh-lan: the deployment can send UDP to 192.168.1.0/24

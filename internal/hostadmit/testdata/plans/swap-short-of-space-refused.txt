@@ -1,0 +1,1 @@
+refused: swap: --swapfile: / has 10.0 GB free, and a swapfile of 8 GiB must leave 5 GB. Nothing was changed

@@ -272,9 +272,9 @@ func UnsupportedMessage(host OSRelease) string {
 
 // Build checks the site's host as the deployment's user and returns only
 // what is missing of the user's own: the admission record compared with the
-// declaration first, refusing on any difference; then the watchdog, read
-// only; daemon.json; the configuration store; the authorized keys, and last
-// the keys no longer listed. Nothing here is installed or written as root:
+// declaration first, refusing on any difference; then the watchdog and
+// swap, read only; daemon.json; the configuration store; the authorized
+// keys, and last the keys no longer listed. Nothing here is installed or written as root:
 // site admit did that, and a difference is the owner's to fix by admitting
 // again.
 func Build(site string, cfg *config.Config, t Transport, rec admission.Record) (*Plan, error) {
@@ -304,6 +304,11 @@ func Build(site string, cfg *config.Config, t Transport, rec admission.Record) (
 		return nil, err
 	}
 	plan.add(watchdog)
+	swap, err := checkSwap(t)
+	if err != nil {
+		return nil, err
+	}
+	plan.add(swap)
 
 	// The home is read before the keys and the store, both of which need it:
 	// its probe refuses a login user the host lacks by name.

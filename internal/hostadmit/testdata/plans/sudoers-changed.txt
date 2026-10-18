@@ -49,5 +49,6 @@ present: wireguard: /etc/wireguard is root's alone
 present: wireguard: /usr/local/libexec/paisans/wg-psns-f2a9 is root's, mode 755, as admit writes it
 present: firewall: ufw active, its default policy left to the owner
 present: forwarding: not needed, this site has no endpoint
+present: swap: on
 warning: delegation reaches paisans-f2a9's manager at its next start
   Its manager is running, and restarting it would restart its Docker daemon and every container in it, so admit does not. cpuset and io limits apply after the host's next reboot.

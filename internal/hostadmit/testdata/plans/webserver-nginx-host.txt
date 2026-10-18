@@ -88,3 +88,4 @@ present: mesh: nothing on this host overlaps 10.44.0.0/24
 present: firewall: ufw active, its default policy left to the owner
 present: forwarding: not needed, this site has no endpoint
 present: web server: nginx (process nginx, config /etc/nginx/nginx.conf), certificates from certbot
+present: swap: on

@@ -87,5 +87,6 @@ present: daemon: /home (ext2/ext3) has 42.9 GB free
 present: mesh: nothing on this host overlaps 10.44.0.0/24
 present: firewall: ufw active, its default policy left to the owner
 present: forwarding: not needed, this site has no endpoint
+present: swap: on
 warning: web server: its admin API did not answer on localhost:2019
   Admit records what it could tell; paisans web-server show asks you for the rest when the operators run it.

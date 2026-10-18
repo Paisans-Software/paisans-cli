@@ -750,6 +750,8 @@ paisans site prepare --all --execute          # every site, one at a time
   <name>.admit`.
 * **Docker:** left as it is. Installing it, or naming the packages in its way,
   is `site admit`'s.
+* **Swap:** a host with no swap on, as `/proc/swaps` lists it, is warned
+  about; making a swapfile is `site admit --swapfile`'s.
 * **Review:** the login user and the keys, against what the host last
   recorded in `/srv/paisans/<token>/.paisans/granted.json`: each key added or
   changed is a `+` or `~` line under `review what paisans-stack.yaml grants`, each
@@ -858,13 +860,22 @@ paisans site admit --site home-a --ssh owner@home-a.example.org --execute   # fr
     terminal;
   * either way: the grants `--watchdog` and `--public-ports`;
     `--data-dir <path>`, `--bridge-netfilter`, `--mesh-lan`, `--enable-ufw`,
-    `--enable-ufw-block-listed` (with `--enable-ufw` alone); `--execute`;
-    `--yes`;
+    `--enable-ufw-block-listed` (with `--enable-ufw` alone), `--swapfile`;
+    `--execute`; `--yes`;
   * with `--request`: `--digest <digest>`, the request's digest the operator
     gave you, compared as the one typed at a terminal is: any other refuses
     before the host is reached.
 * **Hosts:** the one it runs on, or the one `--ssh` names, through sudo. The
   host needs ufw installed; admit never installs it.
+* **Swap:** a host with no swap in any form, on or not, is warned about.
+  `--swapfile`, or a yes at a terminal with `--execute`, where admit asks,
+  makes a swapfile at `/swapfile` of twice the host's RAM, to the nearest
+  GiB, up to 16 GiB, turns it on and adds it to `/etc/fstab`. Swap the host
+  has but has not turned on (a swap partition, a swap line in `/etc/fstab`,
+  a zram-generator configuration or a `/swapfile`) is warned about and left
+  alone, never sized. Admit makes a swapfile only where `/` is ext4 or xfs
+  and keeps 5 GB free beside it; elsewhere it warns, and `--swapfile`
+  refuses.
 * **ufw not active:** `--enable-ufw`, or a yes at a terminal, where admit
   asks, adds these steps after the deployment's own rules, in this order:
   an allow for every TCP port sshd listens on (read from its sockets with

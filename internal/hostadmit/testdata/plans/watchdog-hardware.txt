@@ -53,6 +53,7 @@ present: mesh: nothing on this host overlaps 10.44.0.0/24
 present: firewall: ufw active, its default policy left to the owner
 present: watchdog: watchdog0 is iTCO_wdt
 present: forwarding: not needed, this site has no endpoint
+present: swap: on
 warning: user: community already exists and is not paisans-f2a9
   admit adds the operators' keys to community's authorized_keys and runs the deployment as community: check that this account is meant for the deployment and nothing else.
 warning: delegation reaches community's manager at its next start
