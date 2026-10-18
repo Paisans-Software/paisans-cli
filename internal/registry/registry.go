@@ -45,6 +45,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -583,19 +584,26 @@ func refused(t Runner, e Entry, why error) error {
 	}
 	advice := "Two deployments with one token would share every name, directory and WireGuard interface. Use another host for one of them"
 	var c Conflict
-	if errors.As(why, &c) && len(c.Clashes) > 0 && !strings.HasPrefix(c.Clashes[0], "token") && !strings.HasPrefix(c.Clashes[0], "root") && !strings.HasPrefix(c.Clashes[0], "WireGuard interface") {
+	if errors.As(why, &c) && len(c.Clashes) > 0 && !c.Holds("token") && !c.Holds("root") && !c.Holds("WireGuard interface") {
+		// A role is advised on first: no port or subnet frees it.
 		switch {
-		case strings.HasPrefix(c.Clashes[0], "the gateway role"):
-			advice = "One host gives ports 80 and 443 to one deployment: its gateway binds them and its Caddy imports its deployment's caddy.d, and a site admitted with --public-ports holds them too. Use another host for one of them"
-		case strings.HasPrefix(c.Clashes[0], "the data role"):
+		case c.Holds("the data role"):
 			advice = "One host runs one deployment's data site: it binds the Postgres and etcd ports and holds the cluster's storage. Use another host for one of the data sites"
-		case strings.HasPrefix(c.Clashes[0], "WireGuard listen port"):
+		case c.Holds("the gateway role"):
+			advice = "One host gives ports 80 and 443 to one deployment: its gateway binds them and its Caddy imports its deployment's caddy.d, and a site admitted with --public-ports holds them too. Use another host for one of them"
+		case c.Holds("WireGuard listen port"):
 			advice = "Two WireGuard interfaces cannot listen on one port. Give this site's endpoint another port in " + config.FileName + ", and forward that port where the host is behind NAT"
 		default:
-			advice = "Two meshes on overlapping subnets would route each other's traffic. A deployed mesh subnet never changes, so the deployment not yet applied here moves: if this one has never been applied, run `paisans init`, which picks a subnet clear of every host"
+			advice = "Two meshes on overlapping subnets would route each other's traffic. A deployed mesh subnet never changes, so the deployment not yet applied here moves: if this one has never been applied, admit this site from `paisans init`, which rolls a subnet clear of what this host holds and admits again each site that has admitted the deployment. With a request, the operators send a new one"
 		}
 	}
-	return fmt.Errorf("%s: %v, so this deployment (token %s, interface %s, mesh %s, roles %s) cannot share the host with it, and nothing was changed. %s", t.Describe(), why, e.Token, e.Interface, e.Subnet, roles, advice)
+	return fmt.Errorf("%s: %w, so this deployment (token %s, interface %s, mesh %s, roles %s) cannot share the host with it, and nothing was changed. %s", t.Describe(), why, e.Token, e.Interface, e.Subnet, roles, advice)
+}
+
+// Holds reports whether c names a clash starting with what, Eg: "the data
+// role" or "mesh subnet".
+func (c Conflict) Holds(what string) bool {
+	return slices.ContainsFunc(c.Clashes, func(s string) bool { return strings.HasPrefix(s, what) })
 }
 
 // awkString escapes a value for an awk -v assignment, which processes

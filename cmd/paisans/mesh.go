@@ -178,19 +178,21 @@ func listNotAdmitted(r ui.Reporter, skipped []notAdmitted) {
 
 // offerAdmissions is what init does about each site not admitted. At a
 // terminal, without --yes, it asks whether to admit the site now from this
-// machine, and on a yes runs site admit --site's own flow (admitFromInit),
-// then checks the site's admission again and counts it admitted. With no
-// terminal, with --yes, on a no, or before mesh.subnet is set, which every
-// admission is checked against, it prints the commands that admit the site
-// and skips it. --yes never admits a host: admitting is the owner's step.
+// machine, and on a yes admits it (see admitSite). With no terminal, with
+// --yes, on a no, or before mesh.subnet is set, which every admission is
+// checked against, it prints the commands that admit the site and skips it.
+// --yes never admits a host: admitting is the owner's step.
 //
-// It returns the admitted sites, in name order, and the configuration as
-// the file now holds it, since admit's first login as the deployment's
-// user may record ssh.user there; hosts is updated for each site admitted.
-// An admit that fails once its plan runs stops init with its error; one
-// that stops before, with nothing changed (see admitStopped), is a no,
-// whose reason the skip names.
-func offerAdmissions(r ui.Reporter, cfg *config.Config, path string, hosts map[string]registry.Runner, admitted []string, skipped []notAdmitted, ans answerer, stdin io.Reader, stdout io.Writer) ([]string, *config.Config, error) {
+// It returns the admitted sites, in name order, the sites admit refused
+// over the mesh subnet alone (see subnetBlocked), which settleMesh moves the
+// subnet clear of and readmit admits again, and the configuration as the
+// file now holds it, since admit's first login as the deployment's user may
+// record ssh.user there; hosts is updated for each site admitted. An admit
+// that fails once its plan runs stops init with its error; one that stops
+// before for anything else, with nothing changed (see admitStopped), is a
+// no, whose reason the skip names.
+func offerAdmissions(r ui.Reporter, cfg *config.Config, path string, hosts map[string]registry.Runner, admitted []string, skipped []notAdmitted, ans answerer, stdin io.Reader, stdout io.Writer) ([]string, []blockedSite, *config.Config, error) {
+	var blocked []blockedSite
 	ask := !ans.yes && stdinIsTerminal(stdin) && cfg.Mesh.Subnet != ""
 	if len(skipped) > 0 && !ans.yes && stdinIsTerminal(stdin) && cfg.Mesh.Subnet == "" {
 		r.Note("mesh.subnet is not set yet, so init offers to admit no site", "site admit checks the subnet on the host, and init chooses it in this run. Once init has run, admit each site with the commands below, or run init again.")
@@ -202,35 +204,214 @@ func offerAdmissions(r ui.Reporter, cfg *config.Config, path string, hosts map[s
 			yes, err := ans.yesNo(stdin, stdout, "", fmt.Sprintf("Admit %s now from this machine?", n.site), "")
 			resume()
 			if err != nil {
-				return nil, nil, fmt.Errorf("init: reading your answer: %w", err)
+				return nil, nil, nil, fmt.Errorf("init: reading your answer: %w", err)
 			}
 			if yes {
-				err := admitFromInit(r, path, n.site, stdin, stdout)
-				if err == nil {
-					if cfg, err = config.LoadForInit(path); err != nil {
-						return nil, nil, err
-					}
-					hosts[n.site] = initHost(n.site, cfg.Sites[n.site])
-					s := r.Step("check " + n.site + "'s admission")
-					if _, err := admissionForSite(hosts[n.site], cfg, n.site); err != nil {
-						s.Fail(err)
-						return nil, nil, fmt.Errorf("init: %s was admitted, but its admission does not read back: %w", n.site, err)
-					}
-					s.End(ui.OK, "admitted")
+				var b *blockedSite
+				var ok bool
+				if cfg, ok, b, why, err = admitSite(r, cfg, path, hosts, n.site, stdin, stdout); err != nil {
+					return nil, nil, nil, err
+				}
+				if ok {
 					admitted = append(admitted, n.site)
 					continue
 				}
-				if !admitStopped(err) {
-					return nil, nil, err
+				if b != nil {
+					blocked = append(blocked, *b)
+					continue
 				}
-				why = admitStopReason(err) + "\n\n"
 			}
 		}
-		// A note, so the commands show without --verbose.
-		r.Note(n.site+" has not admitted this deployment yet, so init skipped it", why+admitCommands(path, n.site))
+		skipNote(r, path, n.site, why)
 	}
 	sort.Strings(admitted)
-	return admitted, cfg, nil
+	return admitted, blocked, cfg, nil
+}
+
+// blockedSite is a site whose admit refused the mesh subnet, with the
+// networks on its host that the subnet overlaps, and why admit stopped.
+type blockedSite struct {
+	site  string
+	taken []mesh.Taken
+	why   string
+}
+
+// skipNote says init skipped site, with why admit stopped, if it ran, and
+// the commands that admit it. A note, so the commands show without
+// --verbose.
+func skipNote(r ui.Reporter, path, site, why string) {
+	r.Note(site+" has not admitted this deployment yet, so init skipped it", why+admitCommands(path, site))
+}
+
+// admitSite runs site admit --site's own flow for site (admitFromInit),
+// then checks the site's admission again. It returns the configuration as
+// the file now holds it, whether the site is admitted, and otherwise, for
+// an admit that stopped with nothing changed, the site as blocked when
+// admit refused the mesh subnet alone, or why it stopped, for the skip. An
+// admit that fails once its plan runs, or whose admission does not read
+// back, is the error.
+func admitSite(r ui.Reporter, cfg *config.Config, path string, hosts map[string]registry.Runner, site string, stdin io.Reader, stdout io.Writer) (*config.Config, bool, *blockedSite, string, error) {
+	err := admitFromInit(r, path, site, stdin, stdout)
+	if err != nil {
+		if !admitStopped(err) {
+			return cfg, false, nil, "", err
+		}
+		why := admitStopReason(err) + "\n\n"
+		if taken, ok := subnetBlocked(site, err); ok {
+			return cfg, false, &blockedSite{site: site, taken: taken, why: why}, "", nil
+		}
+		return cfg, false, nil, why, nil
+	}
+	if cfg, err = config.LoadForInit(path); err != nil {
+		return cfg, false, nil, "", err
+	}
+	hosts[site] = initHost(site, cfg.Sites[site])
+	s := r.Step("check " + site + "'s admission")
+	if _, err := admissionForSite(hosts[site], cfg, site); err != nil {
+		s.Fail(err)
+		return cfg, false, nil, "", fmt.Errorf("init: %s was admitted, but its admission does not read back: %w", site, err)
+	}
+	s.End(ui.OK, "admitted")
+	return cfg, true, nil, "", nil
+}
+
+// subnetBlocked is what admit refused the mesh subnet for on site's host,
+// when that is all it refused: a mesh subnet another deployment holds
+// there, or a network the host holds. These are networks init cannot read
+// itself, since the deployment's user cannot log in there, and settleMesh
+// steers clear of them. A refusal for a role, the token, the root, the
+// interface or the listen port is not freed by any subnet, so it blocks
+// none.
+func subnetBlocked(site string, err error) ([]mesh.Taken, bool) {
+	var overlap *mesh.OverlapError
+	if errors.As(err, &overlap) {
+		taken := make([]mesh.Taken, len(overlap.Taken))
+		for i, t := range overlap.Taken {
+			t.What += " on " + site
+			taken[i] = t
+		}
+		return taken, true
+	}
+	var c registry.Conflict
+	if !errors.As(err, &c) || !c.Holds("mesh subnet") {
+		return nil, false
+	}
+	for _, fixed := range []string{"token", "root", "WireGuard interface", "WireGuard listen port", "the gateway role", "the data role"} {
+		if c.Holds(fixed) {
+			return nil, false
+		}
+	}
+	p, err := mesh.ParsePrefix(c.Entry.Subnet)
+	if err != nil {
+		return nil, false
+	}
+	return []mesh.Taken{{Prefix: p, What: fmt.Sprintf("deployment %s's mesh subnet %s on %s", c.ID, c.Entry.Subnet, site)}}, true
+}
+
+// maxMoves is how many times init moves the subnet in one run. Each move
+// steers clear of everything the admits before it were refused for, so a
+// second is already rare.
+const maxMoves = 3
+
+// settleAndReadmit settles the mesh subnet (see settleMesh) clear of every
+// network the blocked sites' admits were refused for. Once it moves the
+// subnet, every site admitted on the old one, and every blocked site, is
+// admitted on the new one (see admitSite), since site admit built each
+// host's firewall and Docker address pools around the subnet; a site
+// refused the new subnet in turn moves it again, up to maxMoves times.
+// Moving a subnet some site has admitted needs those admits, so it is done
+// only when move, at a terminal; without it settleMesh refuses. A blocked
+// site the subnet is not moved for, since it is deployed or init has moved
+// it maxMoves times, is skipped with why.
+//
+// It returns the configuration as the file now holds it, the admitted
+// sites, in name order, and whether it moved the subnet. A site admitted
+// on an old subnet and not admitted on the one init leaves, on a no or a
+// stop, is warned about once settled: its admission no longer matches, and
+// apply refuses it until it is admitted again.
+func settleAndReadmit(r ui.Reporter, cfg *config.Config, path string, hosts map[string]registry.Runner, admitted []string, blocked []blockedSite, unread error, move bool, stdin io.Reader, stdout io.Writer) (*config.Config, []string, bool, error) {
+	var taken []mesh.Taken
+	// stale is each site admitted on an old subnet and not yet on the
+	// current one, with why its last admit stopped.
+	stale := map[string]string{}
+	settled := func() {
+		for _, b := range blocked {
+			if _, ok := stale[b.site]; ok {
+				stale[b.site] = b.why
+				continue
+			}
+			skipNote(r, path, b.site, b.why)
+		}
+		names := make([]string, 0, len(stale))
+		for site := range stale {
+			names = append(names, site)
+		}
+		sort.Strings(names)
+		for _, site := range names {
+			r.Warn(site+" is still admitted on an old mesh.subnet", stale[site]+"apply refuses it until it is admitted again on "+cfg.Mesh.Subnet+". "+admitCommands(path, site))
+		}
+	}
+	for moves := 0; ; moves++ {
+		for _, b := range blocked {
+			for _, t := range b.taken {
+				if !slices.Contains(taken, t) {
+					taken = append(taken, t)
+				}
+			}
+		}
+		if moves == maxMoves {
+			settled()
+			return cfg, admitted, true, nil
+		}
+		wrote, err := settleMesh(r, cfg, path, hosts, admitted, taken, move, unread, meshRandom)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		if !wrote {
+			settled()
+			return cfg, admitted, moves > 0, nil
+		}
+		if cfg, err = config.LoadForInit(path); err != nil {
+			return nil, nil, false, err
+		}
+		again := slices.Clone(admitted)
+		for _, site := range admitted {
+			stale[site] = ""
+		}
+		for _, b := range blocked {
+			again = append(again, b.site)
+		}
+		sort.Strings(again)
+		if len(again) == 0 {
+			return cfg, admitted, true, nil
+		}
+		r.Note("mesh.subnet is "+cfg.Mesh.Subnet+" now, so init admits "+strings.Join(again, ", ")+" on it", "site admit builds a host's firewall and Docker address pools around the subnet, so each site is admitted again on the new one, as before, with its plan shown first. A site admitted on the old one and not admitted again is refused by apply until it is.")
+		admitted, blocked = nil, nil
+		for _, site := range again {
+			var ok bool
+			var b *blockedSite
+			var why string
+			if cfg, ok, b, why, err = admitSite(r, cfg, path, hosts, site, stdin, stdout); err != nil {
+				return nil, nil, false, err
+			}
+			_, wasAdmitted := stale[site]
+			switch {
+			case ok:
+				admitted = append(admitted, site)
+				delete(stale, site)
+			case b != nil:
+				blocked = append(blocked, *b)
+			case wasAdmitted:
+				stale[site] = why
+			default:
+				skipNote(r, path, site, why)
+			}
+		}
+		if len(blocked) == 0 {
+			settled()
+			return cfg, admitted, true, nil
+		}
+	}
 }
 
 // admitStopReason is why site admit stopped with nothing changed, for
@@ -256,23 +437,26 @@ func admitCommands(path, site string) string {
 	return fmt.Sprintf("site admit checks the mesh subnet against the host as root, and refuses one that overlaps anything there. Each command below shows its plan before it changes anything, and takes the flags init cannot pass, such as --data-dir and --bridge-netfilter. If the host is yours, admit the site from this machine, with your own login on the host, which runs admit through sudo:\n\n    paisans site admit --site %[1]s%[2]s --ssh <your login> --execute\n\nIf someone else owns the host, send them a request:\n\n    paisans site request --site %[1]s%[2]s > %[1]s.admit\n\nand ask them to run, on the host:\n\n    sudo paisans site admit --request %[1]s.admit --execute", site, withConfig)
 }
 
-// settleMesh is init's subnet decision, over the admitted sites alone (see
-// initAdmissions). It asks each first whether it holds this deployment's
-// manifest. Once any of them does, the subnet is deployed and settleMesh
-// never changes it. Otherwise it refuses with unread, the sites
-// initAdmissions could not ask, and with none it gathers everything each
-// admitted host holds (see checkMeshLive), keeps the declared subnet if it
-// overlaps none of it, and otherwise rolls a random /24 that overlaps none,
-// moving each site's address into it with its host number kept. It writes
+// settleMesh is init's subnet decision, over the admitted sites and the
+// networks admit refused on the others (see subnetBlocked). It asks each
+// admitted site first whether it holds this deployment's manifest. Once any
+// of them does, the subnet is deployed and settleMesh never changes it.
+// Otherwise it refuses with unread, the sites initAdmissions could not ask,
+// and with none it gathers everything each admitted host holds (see
+// checkMeshLive) beside blocked, keeps the declared subnet if it overlaps
+// none of it, and otherwise rolls a random /24 that overlaps none, moving
+// each site's address into it with its host number kept. A roll with a site
+// admitted needs move, since each such site is admitted again on the new
+// subnet (see settleAndReadmit); without it settleMesh refuses. It writes
 // paisans-stack.yaml only when it rolled, and says why. It reports whether
 // it wrote.
 //
 // The decision is one step, "settle mesh subnet", whose result is what
 // happened to the subnet; why is its details. Its progress names the site
 // being read.
-func settleMesh(r ui.Reporter, cfg *config.Config, path string, hosts map[string]registry.Runner, admitted []string, unread error, random io.Reader) (bool, error) {
+func settleMesh(r ui.Reporter, cfg *config.Config, path string, hosts map[string]registry.Runner, admitted []string, blocked []mesh.Taken, move bool, unread error, random io.Reader) (bool, error) {
 	s := r.Step("settle mesh subnet")
-	wrote, result, err := chooseMesh(s, cfg, path, hosts, admitted, unread, random)
+	wrote, result, err := chooseMesh(s, cfg, path, hosts, admitted, blocked, move, unread, random)
 	if err != nil {
 		s.Fail(err)
 		return false, err
@@ -283,7 +467,7 @@ func settleMesh(r ui.Reporter, cfg *config.Config, path string, hosts map[string
 
 // chooseMesh is settleMesh's decision, reporting what it finds to s, and
 // returning whether it wrote and the short result for the step.
-func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]registry.Runner, admitted []string, unread error, random io.Reader) (bool, string, error) {
+func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]registry.Runner, admitted []string, blocked []mesh.Taken, move bool, unread error, random io.Reader) (bool, string, error) {
 	manifest := cfg.Deployment().Manifest()
 	var claimedOn []string
 	var failures []error
@@ -316,7 +500,7 @@ func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]reg
 	}
 
 	iface := cfg.Deployment().Interface()
-	var taken []mesh.Taken
+	taken := slices.Clone(blocked)
 	for _, name := range admitted {
 		s.Progress("read the networks on " + name)
 		probed, err := mesh.ProbeUser(hosts[name])
@@ -354,10 +538,20 @@ func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]reg
 		s.Detail("%s: mesh.subnet %s overlaps nothing on %s; kept.", path, subnet, strings.Join(admitted, ", "))
 		return false, "kept", nil
 	}
-	if len(admitted) > 0 {
+	if len(admitted) > 0 && !move {
+		overlaps := "something on " + strings.Join(admitted, ", ")
+		if current, err := mesh.ParsePrefix(cfg.Mesh.Subnet); err == nil {
+			if hits := mesh.Clashes(current, taken); len(hits) > 0 {
+				whats := make([]string, len(hits))
+				for i, h := range hits {
+					whats[i] = h.What
+				}
+				overlaps = strings.Join(whats, ", ")
+			}
+		}
 		return false, "", &ui.Problem{
-			Hint:    "mesh.subnet " + cfg.Mesh.Subnet + " overlaps something on " + strings.Join(admitted, ", ") + ", and is not rolled",
-			Explain: fmt.Sprintf("%s admitted this deployment with mesh.subnet %s, which site admit built the host's firewall and Docker address pools around, so a new one would break the admission. Free the overlapping network on the host, or have each host's owner evict the deployment, run paisans init again, and send them a new request. Nothing was written.", strings.Join(admitted, ", "), cfg.Mesh.Subnet),
+			Hint:    "mesh.subnet " + cfg.Mesh.Subnet + " overlaps " + overlaps + ", and is not rolled",
+			Explain: fmt.Sprintf("%s admitted this deployment with mesh.subnet %s, which site admit built the host's firewall and Docker address pools around, so a new one means admitting each again. Run paisans init at a terminal, without --yes, which moves the subnet and admits each site again, or free the overlapping network on the host. Nothing was written.", strings.Join(admitted, ", "), cfg.Mesh.Subnet),
 			Cause:   fmt.Errorf("%s: %s", path, strings.Join(choice.Why, "; ")),
 		}
 	}

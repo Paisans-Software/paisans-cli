@@ -263,7 +263,9 @@ func runValidate(args []string) error {
 // It first lists every site that has not, and why. At a terminal, without
 // --yes, it offers to admit each from this machine, with site admit's own
 // flow (see offerAdmissions), which is the one way init changes a host;
-// otherwise, and on a no, it prints what admits the site and skips it.
+// otherwise, and on a no, it prints what admits the site and skips it. A
+// subnet admit refuses on a host moves, before the first apply, and every
+// site admitted on the old one is admitted again (see settleAndReadmit).
 // Standing a deployment up is `apply`, and that is a separate decision from
 // having credentials to stand it up with.
 func runInit(args []string, stdin io.Reader, stdout io.Writer) error {
@@ -323,10 +325,11 @@ func runInit(args []string, stdin io.Reader, stdout io.Writer) error {
 	hosts := initHosts(cfg)
 	admitted, skipped, unread := initAdmissions(r, cfg, hosts)
 	listNotAdmitted(r, skipped)
-	if admitted, cfg, err = offerAdmissions(r, cfg, *configPath, hosts, admitted, skipped, ans, stdin, stdout); err != nil {
+	admitted, blocked, cfg, err := offerAdmissions(r, cfg, *configPath, hosts, admitted, skipped, ans, stdin, stdout)
+	if err != nil {
 		return err
 	}
-	wrote, err := settleMesh(r, cfg, *configPath, hosts, admitted, unread, meshRandom)
+	cfg, admitted, wrote, err := settleAndReadmit(r, cfg, *configPath, hosts, admitted, blocked, unread, !ans.yes && stdinIsTerminal(stdin), stdin, stdout)
 	if err != nil {
 		return err
 	}

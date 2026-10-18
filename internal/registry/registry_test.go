@@ -430,6 +430,25 @@ func TestRoleConflicts(t *testing.T) {
 		})
 	}
 
+	// A role clash is advised on before a mesh subnet clash beside it, since
+	// no subnet clears the role: moving the mesh would leave the host refused.
+	t.Run("a data site on an overlapping mesh", func(t *testing.T) {
+		e := roleEntry("f2a9", "example.org", 51821, "10.44.0.0/24", "apps,data")
+		_, err := Merge(base, ours, e)
+		var c Conflict
+		if !errors.As(err, &c) || len(c.Clashes) < 2 || !strings.HasPrefix(c.Clashes[0], "mesh subnet") {
+			t.Fatalf("Merge = %v, want a conflict on the mesh subnet first, then the data role", err)
+		}
+		refusal := refused(fakeHost{}, e, c)
+		if !errors.As(refusal, new(Conflict)) {
+			t.Errorf("the refusal %v does not unwrap to its Conflict", refusal)
+		}
+		msg := refusal.Error()
+		if !strings.Contains(msg, "Use another host for one of the data sites") || strings.Contains(msg, "paisans init") {
+			t.Errorf("the refusal %q does not advise on the data role alone", msg)
+		}
+	})
+
 	for _, tc := range []struct {
 		name   string
 		theirs string

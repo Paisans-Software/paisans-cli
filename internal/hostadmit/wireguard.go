@@ -69,11 +69,7 @@ func planMeshSubnet(p *planner) error {
 		return shown(err)
 	}
 	if clash := mesh.Clashes(subnet, taken); len(clash) > 0 {
-		var what []string
-		for _, c := range clash {
-			what = append(what, ui.Visible(c.What))
-		}
-		return fmt.Errorf("the deployment's mesh subnet %s overlaps %s on this host, so its mesh would route that network's traffic. The operators pick another subnet (paisans init picks one clear of every host) and send a new request. Nothing was changed", p.in.Request.MeshSubnet, strings.Join(what, ", "))
+		return &mesh.OverlapError{Subnet: p.in.Request.MeshSubnet, Taken: clash}
 	}
 	p.present("mesh: nothing on this host overlaps " + p.in.Request.MeshSubnet)
 	return nil
