@@ -25,7 +25,7 @@ func TestGatewayImportsTheHostsOwnSites(t *testing.T) {
 	importLine := "import " + render.HostSitesMount + "/*.caddy"
 	mountLine := "- " + sitesDir + ":" + render.HostSitesMount + ":ro"
 
-	caddyfile := content["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"]
+	caddyfile := content["vm/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"]
 	lines := strings.Split(strings.TrimRight(caddyfile, "\n"), "\n")
 	if lines[len(lines)-1] != importLine {
 		t.Errorf("the gateway's Caddyfile does not end with %q:\n%s", importLine, caddyfile)
@@ -37,7 +37,7 @@ func TestGatewayImportsTheHostsOwnSites(t *testing.T) {
 		t.Errorf("the gateway's Caddy does not mount %s read only", sitesDir)
 	}
 
-	if strings.Contains(content["watch/srv/paisans/f2a9/infra/caddy/Caddyfile"], render.HostSitesMount) {
+	if strings.Contains(content["watch/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"], render.HostSitesMount) {
 		t.Error("a monitor's Caddyfile imports the gateway host's own sites")
 	}
 	if strings.Contains(content["watch/srv/paisans/f2a9/infra/compose.yaml"], sitesDir) {

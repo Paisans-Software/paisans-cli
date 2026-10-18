@@ -126,6 +126,13 @@ func (m Marker) Until() time.Time { return m.DeletedAt.Add(time.Duration(m.TTL) 
 // CaddyfilePath is the Caddyfile on a site's host that runs the toolkit's
 // Caddy.
 func CaddyfilePath(d deployment.Deployment) string {
+	return "/" + render.Caddyfile(d)
+}
+
+// legacyCaddyfilePath is where a toolkit before the Caddyfile moved into
+// render.CaddyConfigDir wrote it. An apply leaves it behind, so it is read
+// only on a host that has no Caddyfile at CaddyfilePath.
+func legacyCaddyfilePath(d deployment.Deployment) string {
 	return d.Path("infra", "caddy", "Caddyfile")
 }
 
@@ -437,13 +444,20 @@ func inspectDeparting(t apply.Transport, cfg *config.Config) (Evidence, error) {
 }
 
 // gatewayRoutes are the hostnames the gateway serves that the Caddyfile on
-// the host t reaches names as a site block, sorted. A missing Caddyfile names
-// none.
+// the host t reaches names as a site block, sorted: the one at CaddyfilePath,
+// or on a host last applied before it moved there, the one at
+// legacyCaddyfilePath. A missing Caddyfile names none.
 func gatewayRoutes(t apply.Transport, cfg *config.Config) ([]string, error) {
-	path := CaddyfilePath(cfg.Deployment())
-	content, found, err := t.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("%s: reading %s: %w", t.Describe(), path, err)
+	var content string
+	found := false
+	for _, path := range []string{CaddyfilePath(cfg.Deployment()), legacyCaddyfilePath(cfg.Deployment())} {
+		var err error
+		if content, found, err = t.ReadFile(path); err != nil {
+			return nil, fmt.Errorf("%s: reading %s: %w", t.Describe(), path, err)
+		}
+		if found {
+			break
+		}
 	}
 	if !found {
 		return nil, nil

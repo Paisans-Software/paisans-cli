@@ -67,7 +67,7 @@ func TestPocketIDStandsByOnEveryAppsSite(t *testing.T) {
 // rejects active checks for every app; this pins it for the one app where
 // every site but one refuses by design.
 func TestPocketIDRouteHasNoActiveHealthCheck(t *testing.T) {
-	snippet := planFiles(build(t))["vm/srv/paisans/f2a9/infra/caddy/snippets/auth.caddy"]
+	snippet := planFiles(build(t))["vm/srv/paisans/f2a9/infra/caddy/etc/snippets/auth.caddy"]
 	if !strings.Contains(snippet, "10.44.0.1:1411 10.44.0.2:1411") {
 		t.Fatalf("auth is not routed to both apps sites in order:\n%s", snippet)
 	}

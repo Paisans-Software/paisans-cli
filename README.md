@@ -3260,7 +3260,7 @@ the application expects at a path inside its own image is bind-mounted there by
 that kind's `compose.yaml`. The name carries the rest: `.secret` before `.tmpl`
 is dropped from the rendered name and makes the file 0600, every other file is
 0644 so the container's own user can read it, and a `caddy.snippet.*` template
-is rendered onto the gateway under `infra/caddy/snippets/`, because that is
+is rendered onto the gateway under `infra/caddy/etc/snippets/`, because that is
 where Caddy reads it.
 
 Nothing in the secrets path is env-specific: every rule above holds file by
@@ -3366,6 +3366,21 @@ Caddy `up -d` replaced started on the new routing and is not reloaded, and one
 is reloaded afterwards, told apart by its container ID. A stopped Caddy has
 nothing to reload and is started instead. The reload comes second so that it is
 never spent on a container about to be replaced.
+
+**Caddy mounts its configuration as one directory, never a file in it.** The
+Caddyfile and the snippets are rendered into `infra/caddy/etc/`, which the
+container mounts read only at `/etc/caddy`. `deployment apply` replaces a file
+by renaming a new one over it, and a bind mount of a single file keeps the
+inode it started with (moby/moby#15793), so a Caddy that mounted its Caddyfile
+on its own reloaded the file it was created with: the reload reported "config
+is unchanged", and a hostname added since had no site block, so its TLS
+handshake failed. A directory mount resolves each name when it is opened, so
+the reload reads what the apply wrote. Only the Caddyfile and snippets are in
+that directory, because the container sees all of it: `caddy.env`, `data` and
+`config` stay beside it. A gateway applied before the move keeps its old
+`infra/caddy/Caddyfile` and `infra/caddy/snippets/` as left over files, which
+nothing mounts any more: the first apply after it replaces the Caddy, since its
+compose file changed, and the files are the operator's to delete.
 
 #### An app may answer on more than one hostname
 
@@ -9059,17 +9074,17 @@ approved specification.
   (`upstream_unavailable`, `upstream_failover`, `upstream_single`) and `import
   /etc/caddy.d/*.caddy`, and no site block of the deployment's. A Caddyfile
   lacking any of these is refused, and nothing is changed.
-* **It goes first, and without a gap.** The reduced file is staged beside the
-  snippets, validated inside the running container and loaded with `caddy
+* **It goes first, and without a gap.** The reduced file is staged in the
+  snippets directory, validated inside the running container and loaded with `caddy
   reload`, which keeps the running configuration if it fails. Only then is it
   written over `Caddyfile`, in place, and read back. Any failure puts the
   original back, reloads it, and stops before anything else is removed. A
   Caddy that is not running is refused: start it and run again.
 * **What stays:** the container and its image, and under
-  `/srv/paisans/<token>/infra/` its `compose.yaml`, `caddy/Caddyfile`,
+  `/srv/paisans/<token>/infra/` its `compose.yaml`, `caddy/etc/Caddyfile`,
   `caddy/caddy.env` (the DNS token, for renewals), `caddy/data` and
-  `caddy/config` (the certificates) and the `caddy/snippets` directory it
-  mounts, emptied; and the ufw allows for 80 and 443, which are `site admit`'s. These stay with `--delete-data` too, and the plan says so.
+  `caddy/config` (the certificates) and the `caddy/etc/snippets` directory,
+  emptied; and the ufw allows for 80 and 443, which are `site admit`'s. These stay with `--delete-data` too, and the plan says so.
   The manifest stays, listing exactly those files. Everything else goes as in
   the table above.
 * **The admission and the registry entry stay**, still holding the gateway role

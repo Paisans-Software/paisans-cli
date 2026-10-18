@@ -497,12 +497,12 @@ func TestTheGatewayImportsEachAppsOwnSnippet(t *testing.T) {
 		files[f.Path] = f
 	}
 
-	caddyfile, ok := files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"]
+	caddyfile, ok := files["vm/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"]
 	if !ok {
 		t.Fatal("the gateway rendered no Caddyfile")
 	}
 	for _, app := range []string{"talk", "wiki", "auth", "blog", "chat"} {
-		snippet := "vm/srv/paisans/f2a9/infra/caddy/snippets/" + app + ".caddy"
+		snippet := "vm/srv/paisans/f2a9/infra/caddy/etc/snippets/" + app + ".caddy"
 		if _, ok := files[snippet]; !ok {
 			t.Errorf("%s was not rendered onto the gateway", snippet)
 		}
@@ -530,11 +530,11 @@ func TestTheGatewayImportsEachAppsOwnSnippet(t *testing.T) {
 
 	// A snippet never hardcodes where its app runs: a pinned app gets one
 	// upstream and a clustered one gets every apps site, both from inventory.
-	pinned := files["vm/srv/paisans/f2a9/infra/caddy/snippets/chat.caddy"].Content
+	pinned := files["vm/srv/paisans/f2a9/infra/caddy/etc/snippets/chat.caddy"].Content
 	if !strings.Contains(pinned, "10.44.0.3:18008") {
 		t.Errorf("a pinned app's snippet does not point at its site:\n%s", pinned)
 	}
-	clustered := files["vm/srv/paisans/f2a9/infra/caddy/snippets/talk.caddy"].Content
+	clustered := files["vm/srv/paisans/f2a9/infra/caddy/etc/snippets/talk.caddy"].Content
 	if !strings.Contains(clustered, "10.44.0.1:8080 10.44.0.2:8080") {
 		t.Errorf("a clustered app's snippet does not point at both apps sites:\n%s", clustered)
 	}
@@ -785,7 +785,7 @@ func TestGatewayUsesDNSChallenge(t *testing.T) {
 	for _, f := range build(t).Files {
 		files[f.Path] = f.Content
 	}
-	caddyfile, ok := files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"]
+	caddyfile, ok := files["vm/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"]
 	if !ok {
 		t.Fatal("no Caddyfile was rendered for the gateway")
 	}
@@ -962,7 +962,7 @@ func TestTheDeclaredProviderIsRendered(t *testing.T) {
 		files[f.Path] = f.Content
 	}
 
-	caddyfile := files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"]
+	caddyfile := files["vm/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"]
 	if !strings.Contains(caddyfile, "acme_dns desec {") {
 		t.Errorf("the gateway does not use the declared provider:\n%s", caddyfile)
 	}
@@ -1038,7 +1038,7 @@ func TestADeclaredImageReachesTheGateway(t *testing.T) {
 	if strings.Contains(infra, published) {
 		t.Errorf("the published image survived a declared one:\n%s", infra)
 	}
-	if caddyfile := files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"]; !strings.Contains(caddyfile, "acme_dns route53") {
+	if caddyfile := files["vm/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"]; !strings.Contains(caddyfile, "acme_dns route53") {
 		t.Errorf("an unpublished provider does not reach the directive:\n%s", caddyfile)
 	}
 }
@@ -1121,7 +1121,7 @@ func TestAnAppCanHoldSeveralHostnames(t *testing.T) {
 		files[f.Path] = f
 	}
 
-	caddyfile, ok := files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"]
+	caddyfile, ok := files["vm/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"]
 	if !ok {
 		t.Fatal("no gateway configuration was rendered")
 	}
@@ -1133,10 +1133,10 @@ func TestAnAppCanHoldSeveralHostnames(t *testing.T) {
 
 	// Each hostname imports its own snippet, because the apex serves only the
 	// delegation documents while the primary serves the whole API.
-	if _, ok := files["vm/srv/paisans/f2a9/infra/caddy/snippets/chat.caddy"]; !ok {
+	if _, ok := files["vm/srv/paisans/f2a9/infra/caddy/etc/snippets/chat.caddy"]; !ok {
 		t.Error("the primary hostname has no snippet")
 	}
-	if _, ok := files["vm/srv/paisans/f2a9/infra/caddy/snippets/chat-wellknown.caddy"]; !ok {
+	if _, ok := files["vm/srv/paisans/f2a9/infra/caddy/etc/snippets/chat-wellknown.caddy"]; !ok {
 		t.Error("the extra hostname has no snippet of its own")
 	}
 }
@@ -1178,7 +1178,7 @@ func TestTheAuthGateShipsNamedSnippets(t *testing.T) {
 		files[f.Path] = f
 	}
 
-	gates, ok := files["vm/srv/paisans/f2a9/infra/caddy/snippets/gate-gates.caddy"]
+	gates, ok := files["vm/srv/paisans/f2a9/infra/caddy/etc/snippets/gate-gates.caddy"]
 	if !ok {
 		t.Fatal("the gate's named snippets were not rendered onto the gateway")
 	}
@@ -1188,7 +1188,7 @@ func TestTheAuthGateShipsNamedSnippets(t *testing.T) {
 		}
 	}
 
-	caddyfile, ok := files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"]
+	caddyfile, ok := files["vm/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"]
 	if !ok {
 		t.Fatal("no gateway configuration was rendered")
 	}
@@ -1204,7 +1204,7 @@ func TestTheGateIsDeclaredPerApp(t *testing.T) {
 	for _, f := range build(t).Files {
 		files[f.Path] = f
 	}
-	caddyfile := files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"].Content
+	caddyfile := files["vm/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"].Content
 
 	// talk sits behind the gate in the fixture.
 	if !strings.Contains(hostBlock(t, caddyfile, "talk.example.org"), "import gate\n") {
@@ -1301,7 +1301,7 @@ func TestTheLoginSplitOutranksTheCatchAllByMatcherLength(t *testing.T) {
 	for _, f := range build(t).Files {
 		files[f.Path] = f
 	}
-	snippet, ok := files["vm/srv/paisans/f2a9/infra/caddy/snippets/chat.caddy"]
+	snippet, ok := files["vm/srv/paisans/f2a9/infra/caddy/etc/snippets/chat.caddy"]
 	if !ok {
 		t.Fatal("the homeserver has no snippet")
 	}
@@ -1337,7 +1337,7 @@ func TestTheApexServesOnlyDelegation(t *testing.T) {
 	for _, f := range build(t).Files {
 		files[f.Path] = f
 	}
-	snippet, ok := files["vm/srv/paisans/f2a9/infra/caddy/snippets/chat-wellknown.caddy"]
+	snippet, ok := files["vm/srv/paisans/f2a9/infra/caddy/etc/snippets/chat-wellknown.caddy"]
 	if !ok {
 		t.Fatal("the apex has no snippet")
 	}
@@ -1387,7 +1387,7 @@ func TestAHomeserverWithNoDelegationServesItsOwnWellKnown(t *testing.T) {
 		files[f.Path] = f
 	}
 
-	if _, ok := files["vm/srv/paisans/f2a9/infra/caddy/snippets/chat-wellknown.caddy"]; ok {
+	if _, ok := files["vm/srv/paisans/f2a9/infra/caddy/etc/snippets/chat-wellknown.caddy"]; ok {
 		t.Error("a snippet was rendered for a hostname role nobody declared")
 	}
 
@@ -1399,7 +1399,7 @@ func TestAHomeserverWithNoDelegationServesItsOwnWellKnown(t *testing.T) {
 		t.Errorf("server_name is not the only hostname this app has:\n%s", homeserver)
 	}
 
-	snippet := files["vm/srv/paisans/f2a9/infra/caddy/snippets/chat.caddy"].Content
+	snippet := files["vm/srv/paisans/f2a9/infra/caddy/etc/snippets/chat.caddy"].Content
 	at := strings.Index(snippet, "handle /.well-known/matrix/* {")
 	if at < 0 {
 		t.Fatalf("the gateway does not route the delegation documents anywhere:\n%s", snippet)
@@ -1478,7 +1478,7 @@ func TestEachAppPublishesItsOwnMediaHostname(t *testing.T) {
 		t.Errorf("the fork serves every image from image_url_base, which must be the blog's own media hostname, got:\n%s", blog)
 	}
 
-	caddyfile := files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"]
+	caddyfile := files["vm/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"]
 	for app, host := range map[string]string{
 		"talk": "talk-media.example.org",
 		"blog": "blog-media.example.org",
@@ -1492,7 +1492,7 @@ func TestEachAppPublishesItsOwnMediaHostname(t *testing.T) {
 		if !strings.Contains(block, "import /etc/caddy/snippets/"+app+"-media.caddy") {
 			t.Errorf("%s should import %s's own media snippet:\n%s", host, app, block)
 		}
-		if _, ok := files["vm/srv/paisans/f2a9/infra/caddy/snippets/"+app+"-media.caddy"]; !ok {
+		if _, ok := files["vm/srv/paisans/f2a9/infra/caddy/etc/snippets/"+app+"-media.caddy"]; !ok {
 			t.Errorf("no media snippet rendered for %s", app)
 		}
 	}
@@ -1504,12 +1504,12 @@ func TestEachAppPublishesItsOwnMediaHostname(t *testing.T) {
 	if strings.Contains(caddyfile, "\nmedia.example.org {") {
 		t.Errorf("there is no deployment wide media hostname any more:\n%s", caddyfile)
 	}
-	if _, ok := files["vm/srv/paisans/f2a9/infra/caddy/snippets/media.caddy"]; ok {
+	if _, ok := files["vm/srv/paisans/f2a9/infra/caddy/etc/snippets/media.caddy"]; ok {
 		t.Error("the deployment wide media snippet should no longer be rendered")
 	}
 	// Only blueprints that store objects get one.
 	for _, app := range []string{"auth", "chat", "web", "gate"} {
-		if _, ok := files["vm/srv/paisans/f2a9/infra/caddy/snippets/"+app+"-media.caddy"]; ok {
+		if _, ok := files["vm/srv/paisans/f2a9/infra/caddy/etc/snippets/"+app+"-media.caddy"]; ok {
 			t.Errorf("%s stores no objects, so it has no media hostname", app)
 		}
 	}
@@ -1531,7 +1531,7 @@ func TestADeclaredMediaHostnameReplacesTheDerivedOne(t *testing.T) {
 	}
 	files := planFiles(plan)
 
-	caddyfile := files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"]
+	caddyfile := files["vm/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"]
 	block := hostBlock(t, caddyfile, "attachments.example.org")
 	if !strings.Contains(block, "import /etc/caddy/snippets/blog-media.caddy") {
 		t.Errorf("the declared name should import blog's media snippet:\n%s", block)
@@ -1557,7 +1557,7 @@ const publicMediaPolicy = `Content-Security-Policy "default-src 'none'; style-sr
 func TestAPublicMediaHostnameGoesToTheWebEndpoint(t *testing.T) {
 	files := planFiles(build(t))
 	for app, bucket := range map[string]string{"talk": "talk-uploads", "blog": "blog-uploads"} {
-		snippet := files["vm/srv/paisans/f2a9/infra/caddy/snippets/"+app+"-media.caddy"]
+		snippet := files["vm/srv/paisans/f2a9/infra/caddy/etc/snippets/"+app+"-media.caddy"]
 		for _, want := range []string{
 			// Every Garage node, in storage.garage.sites order, the first
 			// serving while it is up.
@@ -2079,7 +2079,7 @@ func TestMbinRendersItsWholeStack(t *testing.T) {
 	if strings.Contains(env, "SERVER_NAME=") {
 		t.Errorf("SERVER_NAME belongs to compose.yaml, where a hostname cannot replace the plain listener:\n%s", env)
 	}
-	snippet := files["vm/srv/paisans/f2a9/infra/caddy/snippets/talk.caddy"]
+	snippet := files["vm/srv/paisans/f2a9/infra/caddy/etc/snippets/talk.caddy"]
 	if !strings.Contains(snippet, "10.44.0.1:8080") || !strings.Contains(snippet, "10.44.0.2:8080") {
 		t.Errorf("the gateway does not route to the port the app publishes:\n%s", snippet)
 	}
@@ -2225,7 +2225,7 @@ func TestPinnedMbinRunsItsOwnDatabase(t *testing.T) {
 // the delivery for good. Every host block imports the same handler, so no app,
 // media hostname included, is left out.
 func TestEveryHostBlockAnswers503WhenNoSiteCan(t *testing.T) {
-	caddyfile := planFiles(build(t))["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"]
+	caddyfile := planFiles(build(t))["vm/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"]
 	for _, want := range []string{
 		"(upstream_unavailable) {",
 		"handle_errors 502 503 504 {",
@@ -2253,14 +2253,14 @@ func TestEveryHostBlockAnswers503WhenNoSiteCan(t *testing.T) {
 // a refused dial is retried on the next site inside the same request.
 func TestMultiSiteAppsShareOneFailoverSetting(t *testing.T) {
 	files := planFiles(build(t))
-	caddyfile := files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"]
+	caddyfile := files["vm/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"]
 	for _, want := range []string{"(upstream_failover) {", "lb_policy first", "lb_try_duration 5s", "fail_duration 30s", "dial_timeout 2s"} {
 		if !strings.Contains(caddyfile, want) {
 			t.Errorf("the gateway Caddyfile's upstream_failover does not carry %q:\n%s", want, caddyfile)
 		}
 	}
 	for _, app := range []string{"talk", "wiki", "auth"} {
-		snippet := files["vm/srv/paisans/f2a9/infra/caddy/snippets/"+app+".caddy"]
+		snippet := files["vm/srv/paisans/f2a9/infra/caddy/etc/snippets/"+app+".caddy"]
 		if !strings.Contains(snippet, "10.44.0.1:") || !strings.Contains(snippet, "10.44.0.2:") {
 			t.Fatalf("%s is not on both apps sites in the fixture, so it proves nothing:\n%s", app, snippet)
 		}
@@ -2272,7 +2272,7 @@ func TestMultiSiteAppsShareOneFailoverSetting(t *testing.T) {
 		}
 	}
 	for _, app := range []string{"blog", "chat", "web", "gate"} {
-		if snippet := files["vm/srv/paisans/f2a9/infra/caddy/snippets/"+app+".caddy"]; strings.Contains(snippet, "upstream_failover") {
+		if snippet := files["vm/srv/paisans/f2a9/infra/caddy/etc/snippets/"+app+".caddy"]; strings.Contains(snippet, "upstream_failover") {
 			t.Errorf("pinned %s imports upstream_failover with one upstream:\n%s", app, snippet)
 		}
 	}
@@ -2716,7 +2716,7 @@ func TestRoutesBoundTheWaitOnAnotherMachine(t *testing.T) {
 		files[f.Path] = f.Content
 	}
 	snippet := func(app string) string {
-		path := "vm/srv/paisans/f2a9/infra/caddy/snippets/" + app + ".caddy"
+		path := "vm/srv/paisans/f2a9/infra/caddy/etc/snippets/" + app + ".caddy"
 		content, ok := files[path]
 		if !ok {
 			t.Fatalf("no %s", path)
@@ -2740,10 +2740,10 @@ func TestRoutesBoundTheWaitOnAnotherMachine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(planFiles(plan)["vm/srv/paisans/f2a9/infra/caddy/snippets/web.caddy"], "upstream_single") {
+	if strings.Contains(planFiles(plan)["vm/srv/paisans/f2a9/infra/caddy/etc/snippets/web.caddy"], "upstream_single") {
 		t.Error("web, on the gateway itself, imports upstream_single")
 	}
-	caddyfile := files["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"]
+	caddyfile := files["vm/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"]
 	for _, name := range []string{"(upstream_failover) {", "(upstream_single) {"} {
 		i := strings.Index(caddyfile, name)
 		if i < 0 {
@@ -2769,7 +2769,7 @@ func TestAGatedHostBlockLetsPastOnlyWhatAuthenticatesItself(t *testing.T) {
 		app.Gated = true
 		cfg.Apps[name] = app
 	}
-	caddyfile := planFiles(mustBuild(t, cfg))["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"]
+	caddyfile := planFiles(mustBuild(t, cfg))["vm/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"]
 
 	talk := hostBlock(t, caddyfile, "talk.example.org")
 	order := []string{
@@ -2832,7 +2832,7 @@ func TestAGatedHostBlockLetsPastOnlyWhatAuthenticatesItself(t *testing.T) {
 	talkApp := cfg.Apps["talk"]
 	talkApp.AutoLogin = false
 	cfg.Apps["talk"] = talkApp
-	talk = hostBlock(t, planFiles(mustBuild(t, cfg))["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"], "talk.example.org")
+	talk = hostBlock(t, planFiles(mustBuild(t, cfg))["vm/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"], "talk.example.org")
 	if strings.Contains(talk, "@autologin") || !strings.Contains(talk, "import gate\n") {
 		t.Errorf("gated without auto_login should carry the gate and no auto-login:\n%s", talk)
 	}
@@ -2842,7 +2842,7 @@ func TestAGatedHostBlockLetsPastOnlyWhatAuthenticatesItself(t *testing.T) {
 // only on the auto-login paths, and a visitor on its sign-in page with no
 // session signs in at the gate first. Nothing else meets the gate.
 func TestAPublicHostBlockWithAutoLoginStaysPublic(t *testing.T) {
-	caddyfile := planFiles(build(t))["vm/srv/paisans/f2a9/infra/caddy/Caddyfile"]
+	caddyfile := planFiles(build(t))["vm/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"]
 	blog := hostBlock(t, caddyfile, "blog.example.org")
 	order := []string{
 		"request_header -X-Auth-Request-*",
@@ -2878,7 +2878,7 @@ func TestAPublicHostBlockWithAutoLoginStaysPublic(t *testing.T) {
 // The gate turns a request with no session into a redirect a person can
 // follow, carrying the marker the monitor looks for.
 func TestTheGateRedirectsRatherThanAnsweringRaw(t *testing.T) {
-	gates := planFiles(build(t))["vm/srv/paisans/f2a9/infra/caddy/snippets/gate-gates.caddy"]
+	gates := planFiles(build(t))["vm/srv/paisans/f2a9/infra/caddy/etc/snippets/gate-gates.caddy"]
 	for _, want := range []string{
 		`header Location "https://gate.example.org/oauth2/start?rd=`,
 		`respond "` + render.GateMarker + `" 302`,

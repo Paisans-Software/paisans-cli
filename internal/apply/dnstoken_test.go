@@ -60,7 +60,7 @@ func TestTheDNSTokenGateStopsARefusal(t *testing.T) {
 			host.running = true
 			host.dns = answer
 			rec := &hostRecorder{host: host}
-			p, err := apply.Build("vm", withCloudflare(planChangingOn(t, "vm", "srv/paisans/f2a9/infra/caddy/Caddyfile", "srv/paisans/f2a9/infra/compose.yaml")), acmeModule(t), host, apply.Report(rec))
+			p, err := apply.Build("vm", withCloudflare(planChangingOn(t, "vm", "srv/paisans/f2a9/infra/caddy/etc/Caddyfile", "srv/paisans/f2a9/infra/compose.yaml")), acmeModule(t), host, apply.Report(rec))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -96,7 +96,7 @@ func TestTheDNSTokenGateComesBeforeValidate(t *testing.T) {
 	host.running = true
 	host.dns = cloudflareAnswers(zoneFound)
 	rec := &hostRecorder{host: host}
-	p, err := apply.Build("vm", withCloudflare(planChangingOn(t, "vm", "srv/paisans/f2a9/infra/caddy/Caddyfile")), acmeModule(t), host, apply.Report(rec))
+	p, err := apply.Build("vm", withCloudflare(planChangingOn(t, "vm", "srv/paisans/f2a9/infra/caddy/etc/Caddyfile")), acmeModule(t), host, apply.Report(rec))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestTheDNSTokenGateSaysWhenItHasNoCheck(t *testing.T) {
 	host := applied(t, "vm")
 	host.running = true
 	rec := &hostRecorder{host: host}
-	p, err := apply.Build("vm", planChangingOn(t, "vm", "srv/paisans/f2a9/infra/caddy/Caddyfile"), acmeModule(t), host, apply.Report(rec))
+	p, err := apply.Build("vm", planChangingOn(t, "vm", "srv/paisans/f2a9/infra/caddy/etc/Caddyfile"), acmeModule(t), host, apply.Report(rec))
 	if err != nil {
 		t.Fatal(err)
 	}
