@@ -48,7 +48,7 @@ var formats = []struct {
 	golden string
 	key    string // a key that is valid for the format and absent from its golden
 }{
-	{"env", configmerge.Env, goldenEnv, "KBIN_META_DESCRIPTION"},
+	{"env", configmerge.Env, goldenEnv, "KBIN_DEFAULT_LANG"},
 	{"ini", configmerge.INI, goldenINI, "app.open_deletion"},
 	{"yaml", configmerge.YAML, goldenYAML, "url_preview_enabled"},
 	{"json", configmerge.JSON, goldenJSON, "show_labs_settings_extra"},
@@ -106,14 +106,14 @@ func TestEnvSeesThroughExportAndIndentation(t *testing.T) {
 // The rendered file is left exactly as it was: the merge only appends.
 func TestEnvKeepsTheRenderedFileByteForByte(t *testing.T) {
 	rendered := readGolden(t, goldenEnv)
-	out, err := configmerge.Env(rendered, map[string]any{"KBIN_META_DESCRIPTION": "A place"})
+	out, err := configmerge.Env(rendered, map[string]any{"KBIN_DEFAULT_LANG": "en"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(out, rendered) {
 		t.Errorf("the rendered file, comments and blank lines included, must be a prefix of the output:\n%s", out)
 	}
-	if !strings.HasSuffix(out, "KBIN_META_DESCRIPTION=A place\n") {
+	if !strings.HasSuffix(out, "KBIN_DEFAULT_LANG=en\n") {
 		t.Errorf("the key belongs at the end, newline terminated:\n%s", out)
 	}
 	if _, err := configmerge.Env(rendered, map[string]any{"DATABASE_URL": "x"}); err == nil {

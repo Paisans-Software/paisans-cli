@@ -9,7 +9,7 @@ services:
   app:
     labels:
       community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
-    image: "ghcr.io/paisans-software/paisans-account-service:0.4.*"
+    image: "ghcr.io/paisans-software/paisans-account-service:0.5.*"
     restart: unless-stopped
     # The image declares its own healthcheck, the binary probing /healthz on
     # ACCOUNT_LISTEN_ADDR's port, which apply's health gate reads.

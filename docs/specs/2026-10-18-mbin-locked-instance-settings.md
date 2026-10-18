@@ -76,6 +76,7 @@ Agreed in session, 2026-10-18:
 | `MBIN_SSO_REGISTRATIONS_ENABLED` | Instance | `sso_registrations` | **true**: an invited member's first sign in creates their Mbin account |
 | `MBIN_SSO_ONLY_MODE` | Instance | (forced) | true with OIDC, as today; false without, since there is no SSO to restrict to |
 | `MBIN_SSO_SHOW_FIRST` | Instance | `sso_show_first` | false |
+| `MBIN_SSO_AVATAR_OVERRIDE` | Instance | `avatar_override` | true |
 | `KBIN_CAPTCHA_ENABLED` | Instance | `captcha` | false |
 | `KBIN_MERCURE_ENABLED` | Instance | `mercure` | false |
 | `KBIN_ADMIN_ONLY_OAUTH_CLIENTS` | Instance | `admin_only_oauth_clients` | false |

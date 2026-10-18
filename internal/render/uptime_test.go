@@ -317,7 +317,7 @@ func TestTheHomeserversChecksUseARouteTheGatewaySendsToSynapse(t *testing.T) {
 	if got := monitors["chat — public"]["url"]; got != "https://chat.example.org/_matrix/client/versions" {
 		t.Errorf("chat public url %v", got)
 	}
-	if got := monitors["chat — direct (vm)"]["url"]; got != "http://"+cfg.Sites["vm"].Address+":8008/_matrix/client/versions" {
+	if got := monitors["chat — direct (vm)"]["url"]; got != "http://"+cfg.Sites["vm"].Address+":18008/_matrix/client/versions" {
 		t.Errorf("chat direct url %v", got)
 	}
 }

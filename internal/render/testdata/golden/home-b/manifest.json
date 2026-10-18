@@ -13,7 +13,7 @@
     },
     {
       "path": "srv/paisans/f2a9/account/compose.yaml",
-      "sha256": "b21a92d4d57dedbb10108e46b2d44ff14b72ea8abf9ccb41f505e4f21bfb793c",
+      "sha256": "bab0e6f131829af9f7609c65d38d803277bcbeaefe77de8e883ea4dcdc5463b3",
       "mode": "0644"
     },
     {
@@ -83,12 +83,12 @@
     },
     {
       "path": "srv/paisans/f2a9/talk/.env",
-      "sha256": "e872691c3827133566e7f5f57c9a17acefe8ce8d4e7668334b672a30d13eeb69",
+      "sha256": "c44e39b43ea37a99d1c23a9350194d179a5d675dd48b9c5e9c5d48ce7fd23d08",
       "mode": "0600"
     },
     {
       "path": "srv/paisans/f2a9/talk/compose.yaml",
-      "sha256": "4294bdbd636ae069e62449cc18c560a28c201040c7a5a2e0b2a0bcecf1fe81de",
+      "sha256": "d34daa8b83e9642aebc6d439816ec2c484343570b750c35297d72825314a91c6",
       "mode": "0644"
     },
     {
@@ -103,12 +103,12 @@
     },
     {
       "path": "srv/paisans/f2a9/talk/valkey.conf",
-      "sha256": "b297524a011668e3be21f50075ada0b5bcc7229ba49dfed6cd13abf420045094",
+      "sha256": "60034b15157684334d7ac4474fe935c6a476ed67b48328e98e47dfc5e68b630a",
       "mode": "0644"
     },
     {
       "path": "srv/paisans/f2a9/web/compose.yaml",
-      "sha256": "e83e582beb943b418f54df1bb52b396fdbb6e04f502d50c63a620bbd3766207e",
+      "sha256": "7bc9c25995236bb038f44a7cc985fd6b8373e54ba0fdcc8f87b1e832089fd047",
       "mode": "0644"
     },
     {
@@ -118,17 +118,17 @@
     },
     {
       "path": "srv/paisans/f2a9/wiki/.env",
-      "sha256": "f83cd24057b9d53ccb43455ffa2ee2d028cf83dedf1d1ddf5f2feb4c093065ee",
+      "sha256": "5fcaedc22a7c1fced135416e25bee6d9748ea6ff45facdc05d2947e93664581f",
       "mode": "0600"
     },
     {
       "path": "srv/paisans/f2a9/wiki/bootstrap.env",
-      "sha256": "247230d867ebac540dcf30e5ce3fcd34fae3ce7830cf804c75fb4523c101e781",
+      "sha256": "4216a7263814704731f8bcaadd65c5fd8bd2a81bc08dbb6fa497cff611e66d5d",
       "mode": "0600"
     },
     {
       "path": "srv/paisans/f2a9/wiki/compose.yaml",
-      "sha256": "41ec9dc5d81a0ac8e44b1121f324ca9b48acb3452f71120c178f4e517d2282a1",
+      "sha256": "5c76e7e53aae718ab8c7ab2f9c36aa1dd32fb857fcd8002abc7a8d426ab16c12",
       "mode": "0644"
     }
   ],
