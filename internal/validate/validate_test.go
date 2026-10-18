@@ -41,6 +41,7 @@ func TestRulesFire(t *testing.T) {
 		{"pocket-id-setting-managed", "pocket-id-setting-managed", validate.Refuse},
 		{"pocket-id-without-account", "pocket-id-without-account", validate.Refuse},
 		{"pocket-id-paisans-without-smtp", "pocket-id-paisans-without-smtp", validate.Refuse},
+		{"pocket-id-signup-groups-lack-member-group", "pocket-id-signup-groups-lack-member-group", validate.Refuse},
 		{"account-without-smtp", "account-without-smtp", validate.Refuse},
 		{"account-code-of-conduct-missing", "account-code-of-conduct-missing", validate.Refuse},
 		{"account-setting-invalid", "account-setting-invalid", validate.Refuse},

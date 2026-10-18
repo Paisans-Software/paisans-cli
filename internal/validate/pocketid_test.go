@@ -227,3 +227,41 @@ func TestPocketIDOperatorUsername(t *testing.T) {
 		t.Errorf("refused the fixture's operators: %v", findings(r, "pocket-id-operator-username"))
 	}
 }
+
+// Under management: paisans the account service creates accounts with no
+// group, so Pocket ID's signup default groups must hold the account app's
+// member group, its own member_group when set, or nobody it admits is a member.
+func TestSignupGroupsHoldTheAccountMemberGroup(t *testing.T) {
+	cases := []struct {
+		name   string
+		member any
+		signup []any
+		want   int
+	}{
+		{"default member group present", nil, []any{"members"}, 0},
+		{"default member group beside another", nil, []any{"provisional", "members"}, 0},
+		{"default member group absent", nil, []any{"provisional"}, 1},
+		{"own member group present", "paisans", []any{"paisans"}, 0},
+		{"own member group absent", "paisans", []any{"members"}, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := load(t, "valid")
+			auth := cfg.Apps["auth"]
+			auth.Settings["signup_default_groups"] = tc.signup
+			cfg.Apps["auth"] = auth
+			if tc.member != nil {
+				account := cfg.Apps["account"]
+				account.Settings["member_group"] = tc.member
+				cfg.Apps["account"] = account
+			}
+			got := findings(validate.Check(cfg), "pocket-id-signup-groups-lack-member-group")
+			if len(got) != tc.want {
+				t.Fatalf("findings = %v, want %d", got, tc.want)
+			}
+			if tc.want == 1 && got[0] != "REFUSE apps.auth.settings.signup_default_groups" {
+				t.Errorf("finding = %q", got[0])
+			}
+		})
+	}
+}

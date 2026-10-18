@@ -23,6 +23,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Fixed
 
+- Under `management: paisans`, `validate` refuses `signup_default_groups` without the account app's member group and `create` writes `[members]`, so an accepted invite makes a member rather than an account in no group.
 - `init` moves a never-applied mesh subnet clear of one `site admit` refused, admitting each site again on it instead of requiring evictions, and admit advises on a clashing role before the subnet.
 - `site admit` says each clash with another deployment on a host in one short sentence naming its id and domain or site, and `init`'s skip of that host omits admit commands.
 - `init` moves the mesh subnet clear of one `site admit` refused beside a role, skipping that site, instead of keeping the subnet until the role clash is fixed.
