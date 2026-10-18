@@ -31,6 +31,14 @@ health: {path: "/healthz", status: [200]}
 # OIDC client admits only settings.admin_group, so the gate would add no
 # access control, only a dependency.
 gate: {gateable: false}
+settings:
+  # The Pocket ID group whose members administer the monitor; see oidc
+  # below.
+  admin_group: {type: string, default: "operators"}
+  # The public status page at /status: the check of each app at its public
+  # hostname, and nothing that names a mesh address or a site. False
+  # refuses /status at the edge and turns the page off in the monitor.
+  public_status_page: {type: bool, default: true}
 storage:
   local_only: true
   local_only_reason: the monitor keeps everything, its SQLite database included, under /data

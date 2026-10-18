@@ -77,6 +77,7 @@ func TestRulesFire(t *testing.T) {
 		{"gateway-on-data-site", "gateway-on-data-site", validate.Warn},
 		{"pocket-id-file-backend", "pocket-id-file-backend", validate.Warn},
 		{"admin-group-not-admins", "admin-group-not-admins", validate.Warn},
+		{"uptime-public-status-page-not-a-boolean", "blueprint-setting-invalid", validate.Refuse},
 		{"mbin-queue-unknown", "mbin-queue-unknown", validate.Refuse},
 		{"mbin-rabbitmq-across-sites", "mbin-rabbitmq-across-sites", validate.Warn},
 		{"pocket-id-standby-marker-unknown", "pocket-id-standby-marker-unknown", validate.Warn},

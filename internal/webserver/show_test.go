@@ -2,6 +2,7 @@ package webserver_test
 
 import (
 	"bytes"
+	"fmt"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -42,6 +43,7 @@ func TestForReadsTheMonitor(t *testing.T) {
 		App: "health", Site: "watch", Hostname: "health.example.org",
 		Mode: config.ManagedByExternal, Listen: "127.0.0.1:8480", ListenHost: "127.0.0.1", ListenPort: 8480,
 		PublicAddress: "203.0.113.20", HealthPath: "/healthz", HealthExpect: "200",
+		PublicStatusPage: true,
 	}
 	if target != want {
 		t.Fatalf("got  %+v\nwant %+v", target, want)
@@ -121,13 +123,28 @@ func TestShowHasNothingToHandOffInPaisansMode(t *testing.T) {
 	}
 }
 
-// The toolkit's own edge refuses the monitor's health page, badges, /metrics
-// and token API whatever the app's settings say. Behind the operator's web
-// server that edge is theirs, so each snippet carries the same refusals.
+// The toolkit's own edge refuses the monitor's badges, /metrics and token
+// API whatever the app's settings say, and its public status page when
+// settings.public_status_page is false. Behind the operator's web server
+// that edge is theirs, so each snippet carries the same refusals.
 func TestEverySnippetRefusesWhatTheToolkitsEdgeRefuses(t *testing.T) {
 	var buf bytes.Buffer
 	webserver.Show(&buf, external(t, "127.0.0.1:8480"), webserver.WebServer{})
 	out := buf.String()
+	for _, want := range []string{
+		"@refused path /badge/* /metrics /metrics/ /api/v1/*",
+		"location ~* ^/(badge/|metrics/?$|api/v1/) {",
+		`<LocationMatch "(?i)^/(badge/|metrics/?$|api/v1/)">`,
+		"refuse /badge/*, /metrics and /api/v1/*",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q:\n%s", want, out)
+		}
+	}
+
+	buf.Reset()
+	webserver.Show(&buf, statusPageOff(t), webserver.WebServer{})
+	out = buf.String()
 	for _, want := range []string{
 		"@refused path /status* /badge/* /metrics /metrics/ /api/v1/*",
 		"location ~* ^/(status|badge/|metrics/?$|api/v1/) {",
@@ -135,16 +152,28 @@ func TestEverySnippetRefusesWhatTheToolkitsEdgeRefuses(t *testing.T) {
 		"refuse /status*, /badge/*, /metrics and /api/v1/*",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("missing %q:\n%s", want, out)
+			t.Errorf("with the status page off, missing %q:\n%s", want, out)
 		}
 	}
 }
 
-// refusalCases are paths the monitor's Express app routes to its health
-// page, badges, metrics or token API, in the forms its non strict, case
-// insensitive routing still accepts, and paths that must pass.
+// statusPageOff is external's monitor with settings.public_status_page false.
+func statusPageOff(t *testing.T) webserver.Target {
+	t.Helper()
+	target := external(t, "127.0.0.1:8480")
+	target.PublicStatusPage = false
+	return target
+}
+
+// statusCases are the public status page's paths, in the forms the monitor's
+// non strict, case insensitive routing still accepts.
+var statusCases = []string{"/status", "/STATUS", "/status/x", "/status.json"}
+
+// refusalCases are paths the monitor's Express app routes to its badges,
+// metrics or token API, in the forms its routing still accepts, and paths
+// that must pass.
 var refusalCases = map[string]bool{
-	"/status": true, "/STATUS": true, "/status/x": true, "/badge/1": true, "/Badge/1": true,
+	"/badge/1": true, "/Badge/1": true,
 	"/metrics": true, "/metrics/": true, "/Metrics": true, "/api/v1/x": true, "/api/V1/x": true,
 	"/": false, "/healthz": false, "/login/oidc": false, "/api/sites": false, "/metricsx": false,
 }
@@ -165,8 +194,23 @@ func caddyPathMatches(patterns []string, path string) bool {
 }
 
 func TestEachSnippetRefusesEveryFormOfTheRefusedPaths(t *testing.T) {
+	for _, on := range []bool{true, false} {
+		target := external(t, "127.0.0.1:8480")
+		target.PublicStatusPage = on
+		cases := map[string]bool{}
+		for path, refused := range refusalCases {
+			cases[path] = refused
+		}
+		for _, path := range statusCases {
+			cases[path] = !on
+		}
+		t.Run(fmt.Sprintf("public_status_page=%v", on), func(t *testing.T) { checkRefusals(t, target, cases) })
+	}
+}
+
+func checkRefusals(t *testing.T, target webserver.Target, cases map[string]bool) {
 	var buf bytes.Buffer
-	webserver.Show(&buf, external(t, "127.0.0.1:8480"), webserver.WebServer{})
+	webserver.Show(&buf, target, webserver.WebServer{})
 	out := buf.String()
 
 	caddy := regexp.MustCompile(`@refused path (.+)`).FindStringSubmatch(out)
@@ -178,7 +222,7 @@ func TestEachSnippetRefusesEveryFormOfTheRefusedPaths(t *testing.T) {
 	// nginx's ~* is a case insensitive match.
 	nginxRe := regexp.MustCompile("(?i)" + nginx[1])
 	apacheRe := regexp.MustCompile(apache[1])
-	for path, refused := range refusalCases {
+	for path, refused := range cases {
 		if got := caddyPathMatches(strings.Fields(caddy[1]), path); got != refused {
 			t.Errorf("caddy: %s refused %v, want %v", path, got, refused)
 		}
