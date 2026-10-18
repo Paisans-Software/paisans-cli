@@ -15,8 +15,8 @@ services:
   # it). This blueprint's templates need what the fork has carried since
   # 1.16.0+paisans: MBIN_LOCKED_SETTINGS able to lock every instance
   # setting, each read from the environment, and the /healthz route the
-  # monitor checks. An older image refuses to boot on a locked setting it
-  # cannot lock. The newest 1.x always carries them.
+  # monitor checks. An older image answers every request with an error on
+  # a locked setting it cannot lock. The newest 1.x always carries them.
   - {name: "app", image: "ghcr.io/paisans-software/mbin:1.*.*-paisans", purpose: "the application, and its messenger consumers"}
   # The three sidecars upstream's compose.yaml runs beside it. The
   # messenger consumers are not here: they run the application's own
