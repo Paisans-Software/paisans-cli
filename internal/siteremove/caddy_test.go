@@ -17,7 +17,7 @@ import (
 
 const (
 	caddyID   = "c0ffee0000000000000000000000000000000000000000000000000000000001"
-	caddyfile = root + "/infra/caddy/Caddyfile"
+	caddyfile = root + "/infra/caddy/etc/Caddyfile"
 	sitesDir  = root + "/caddy.d"
 	blog      = sitesDir + "/blog.caddy"
 )
@@ -170,7 +170,7 @@ func TestAGatewaysCaddyIsKeptForTheOwnersSites(t *testing.T) {
 	if !(validate >= 0 && validate < reload && reload < write && write < removal) {
 		t.Errorf("validate %d, reload %d, write %d, first removal %d: want them in that order", validate, reload, write, removal)
 	}
-	if _, ok := vm.files[root+"/infra/caddy/snippets/.paisans-kept-Caddyfile"]; ok {
+	if _, ok := vm.files[root+"/infra/caddy/etc/snippets/.paisans-kept-Caddyfile"]; ok {
 		t.Error("the staged file is left")
 	}
 
@@ -195,7 +195,7 @@ func TestAGatewaysCaddyIsKeptForTheOwnersSites(t *testing.T) {
 			left = append(left, strings.TrimPrefix(f, root+"/"))
 		}
 	}
-	want := []string{".paisans-manifest.json", "caddy.d/blog.caddy", "infra/caddy/Caddyfile", "infra/caddy/caddy.env", "infra/caddy/config/caddy/autosave.json", "infra/caddy/data/caddy/certificates/blog.example.net.crt", "infra/compose.yaml"}
+	want := []string{".paisans-manifest.json", "caddy.d/blog.caddy", "infra/caddy/caddy.env", "infra/caddy/config/caddy/autosave.json", "infra/caddy/data/caddy/certificates/blog.example.net.crt", "infra/caddy/etc/Caddyfile", "infra/compose.yaml"}
 	if strings.Join(left, "\n") != strings.Join(want, "\n") {
 		t.Errorf("left under the root:\n%s\nwant:\n%s", strings.Join(left, "\n"), strings.Join(want, "\n"))
 	}
@@ -211,7 +211,7 @@ func TestAGatewaysCaddyIsKeptForTheOwnersSites(t *testing.T) {
 		}
 	}
 	sort.Strings(listed)
-	if strings.Join(listed, ",") != dep.RelPath("infra", "caddy", "Caddyfile")+","+dep.RelPath("infra", "caddy", "caddy.env")+","+dep.RelPath("infra", "compose.yaml") {
+	if strings.Join(listed, ",") != dep.RelPath("infra", "caddy", "caddy.env")+","+render.Caddyfile(dep)+","+dep.RelPath("infra", "compose.yaml") {
 		t.Errorf("the manifest lists %v", listed)
 	}
 	if e := vmRegistry(t, w).Deployments[ourID]; e.Roles == "" {
@@ -446,7 +446,7 @@ func TestAFailedWriteBackPutsTheOriginalBack(t *testing.T) {
 	original := vm.files[caddyfile]
 	containers := len(vm.containers)
 	p := forced(t, w, w.cfg, "vm", vmDest(), siteremove.Options{DeleteData: true})
-	w.failOnce = "cat -- '" + root + "/infra/caddy/snippets/.paisans-kept-Caddyfile' > "
+	w.failOnce = "cat -- '" + root + "/infra/caddy/etc/snippets/.paisans-kept-Caddyfile' > "
 	err := siteremove.Execute(p)
 	if err == nil || !strings.Contains(err.Error(), "nothing else was removed") {
 		t.Fatalf("err = %v", err)
@@ -508,5 +508,20 @@ func TestASiteThatAppearsAfterThePlanStopsCaddysRemoval(t *testing.T) {
 	}
 	if !vm.under(root + "/infra/caddy/data") {
 		t.Error("Caddy's certificates were deleted")
+	}
+}
+
+// A gateway last applied before the Caddyfile moved into infra/caddy/etc has
+// it at infra/caddy/Caddyfile, mounted on its own, so a reduced file staged
+// beside the new path would never reach the container. site remove refuses
+// it, naming the apply that moves it, and changes nothing.
+func TestAGatewayStillOnTheOldLayoutIsAppliedFirst(t *testing.T) {
+	w := gatewayWorld(t, true)
+	vm := w.hosts["vm"]
+	vm.files[root+"/infra/caddy/Caddyfile"] = vm.files[caddyfile]
+	delete(vm.files, caddyfile)
+	_, err := siteremove.BuildForced(w.cfg, w.secrets, "vm", vmDest(), vm, siteremove.Options{DeleteData: true})
+	if err == nil || !strings.Contains(err.Error(), "paisans deployment apply") || !strings.Contains(err.Error(), root+"/infra/caddy/Caddyfile") {
+		t.Fatalf("err = %v", err)
 	}
 }

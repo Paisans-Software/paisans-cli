@@ -26,7 +26,7 @@ func openSignupFiles(t *testing.T) map[string]string {
 	}
 	out := map[string]string{}
 	for _, f := range plan.Files {
-		if strings.HasPrefix(f.Path, "vm/") && (strings.HasSuffix(f.Path, "/infra/caddy/Caddyfile") || strings.Contains(f.Path, "/infra/caddy/snippets/account")) ||
+		if strings.HasPrefix(f.Path, "vm/") && (strings.HasSuffix(f.Path, "/infra/caddy/etc/Caddyfile") || strings.Contains(f.Path, "/infra/caddy/etc/snippets/account")) ||
 			strings.Contains(f.Path, "/srv/paisans/f2a9/account/") {
 			out[f.Path] = f.Content
 		}

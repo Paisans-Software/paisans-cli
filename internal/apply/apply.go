@@ -384,19 +384,16 @@ func HostSitesCommand(d deployment.Deployment) string {
 	return fmt.Sprintf("[ -d %[1]s ] || install -d -m 755 %[1]s", shellQuote(render.HostSitesDir(d)))
 }
 
-// gatewayCaddyfile and gatewayCompose are the two rendered files that say a
-// site runs the gateway and that its Caddy is about to be replaced, as paths
-// relative to the deployment's root.
+// render.Caddyfile and gatewayCompose are the two rendered files that say a
+// site runs the gateway and that its Caddy is about to be replaced;
+// gatewayCompose is relative to the deployment's root.
 //
 // gatewayCompose is the whole infrastructure stack's compose file rather than
 // a Caddy specific one: the gateway shares it with etcd and Patroni, so a
 // change to it may or may not be the Caddy image. The check is cheap and
 // wrongly running it costs one container start, while wrongly skipping it
 // costs the public address of every application.
-const (
-	gatewayCaddyfile = "infra/caddy/Caddyfile"
-	gatewayCompose   = "infra/compose.yaml"
-)
+const gatewayCompose = "infra/compose.yaml"
 
 // Option adjusts what Build plans, on the operator's word.
 type Option func(*options)
@@ -702,7 +699,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 		}
 		remote := remoteRoot + rel
 
-		if rel == d.RelPath(gatewayCaddyfile) {
+		if rel == render.Caddyfile(d) {
 			isGateway = true
 		}
 
