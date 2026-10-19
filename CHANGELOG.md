@@ -10,6 +10,8 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+## [0.3.0-rc.5] - 2026-10-19
+
 ### Added
 
 - `paisans operator grants --ssh <alias or user@host>` lists each site's grants and flags on a host, yes or no, and the `site admit` command that admitted it, read without sudo.
@@ -223,7 +225,8 @@ changes share a bullet. Detailed notes are on the corresponding
 - The uptime monitor requires STARTTLS under `security: starttls`, so mail and SMTP credentials are never sent in plaintext when a relay does not offer it.
 - The gateway refuses any request to Pocket ID that carries an `X-API-Key` header with 403, so Pocket ID's API keys work only on the mesh.
 
-[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.4...develop
+[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.5...develop
+[0.3.0-rc.5]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.4...v0.3.0-rc.5
 [0.3.0-rc.4]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.3...v0.3.0-rc.4
 [0.3.0-rc.3]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.2...v0.3.0-rc.3
 [0.3.0-rc.2]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.1...v0.3.0-rc.2
