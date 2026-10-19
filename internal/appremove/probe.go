@@ -70,8 +70,14 @@ func ProbeSite(cfg *config.Config, app, site string, h Host) (SiteState, error) 
 // DirCommand prints, for a directory that exists, a marker, its size in
 // bytes, how many files and links are under it, and its top level entries.
 // It prints nothing for one that does not.
+//
+// du and find run under rootlesskit, as root of a new user namespace that
+// maps the user's subordinate range as the rootless daemon's does: a
+// container's non-root user writes files the user's own uid cannot read,
+// such as FreshRSS's data/, written by www-data with mode 0770, which the
+// user sees as uid 165568. There they are the namespace root's to read.
 func DirCommand(dir string) string {
-	return fmt.Sprintf(`d=%s; if [ -d "$d" ]; then echo present; du -sb "$d" | cut -f1; find "$d" -mindepth 1 \( -type f -o -type l \) | wc -l; find "$d" -mindepth 1 -maxdepth 1 -printf '%%P\n' | sort; fi`, quote(dir))
+	return fmt.Sprintf(`d=%s; if [ -d "$d" ]; then echo present; rootlesskit du -sb "$d" | cut -f1; rootlesskit find "$d" -mindepth 1 \( -type f -o -type l \) | wc -l; rootlesskit find "$d" -mindepth 1 -maxdepth 1 -printf '%%P\n' | sort; fi`, quote(dir))
 }
 
 func probeDir(h Host, dir string) (Dir, error) {

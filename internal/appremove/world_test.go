@@ -188,8 +188,8 @@ func (h *host) Run(command string) (string, error) {
 			}
 		}
 		return out.String(), nil
-	case strings.HasPrefix(command, "rm -rf -- '"):
-		dir := strings.TrimSuffix(strings.TrimPrefix(command, "rm -rf -- '"), "'")
+	case strings.HasPrefix(command, "rootlesskit rm -rf -- '"):
+		dir := strings.TrimSuffix(strings.TrimPrefix(command, "rootlesskit rm -rf -- '"), "'")
 		for p := range h.files {
 			if strings.HasPrefix(p, dir+"/") {
 				delete(h.files, p)

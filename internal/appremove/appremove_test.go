@@ -526,3 +526,35 @@ func TestTheLeftForYouHintsStayShort(t *testing.T) {
 		}
 	}
 }
+
+// A container's non-root user writes files the deployment's user cannot read
+// or remove under rootless Docker (FreshRSS's data/, mode 0770 as www-data),
+// so every du, find and rm under an app's directory runs as root of
+// rootlesskit's user namespace. Observed on a host: plain du was denied
+// there, and app remove stopped before reaching any site.
+func TestTheDataDirectoryIsReadAndRemovedInTheUserNamespace(t *testing.T) {
+	const dir = "/srv/paisans/f2a9/blog"
+	for name, command := range map[string]string{
+		"probe":       DirCommand(dir),
+		"delete data": DirCommandFor(dir, true),
+		"empty dirs":  DirCommandFor(dir, false),
+	} {
+		for _, tool := range []string{"du ", "find ", "rm "} {
+			for i := 0; ; {
+				j := strings.Index(command[i:], tool)
+				if j < 0 {
+					break
+				}
+				at := i + j
+				if at > 0 && command[at-1] != ' ' && command[at-1] != ';' {
+					i = at + len(tool)
+					continue
+				}
+				if !strings.HasSuffix(command[:at], "rootlesskit ") {
+					t.Errorf("%s runs %q outside rootlesskit: %s", name, strings.TrimSpace(tool), command)
+				}
+				i = at + len(tool)
+			}
+		}
+	}
+}

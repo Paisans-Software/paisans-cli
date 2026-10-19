@@ -29,6 +29,7 @@ changes share a bullet. Detailed notes are on the corresponding
 - `dns init` updates an A or AAAA record it made for this deployment to the address now declared, so a gateway whose public address changed needs no records deleted by hand.
 - `site add` deletes a rejoining site's old etcd data before adding its learner, so a site an earlier removal took out of etcd rejoins instead of crash-looping; `site remove` empties a leaving member's too.
 - `deployment apply` keeps Patroni's leader through a join by writing a `patroni.env` whose only change is `ETCD3_HOSTS` without recreating Patroni, and warns whenever a recreate may move, or has moved, the leader.
+- `app remove` reads and deletes an app's directory under rootlesskit, so files a container's non-root user wrote, such as FreshRSS's `data/`, no longer stop it, or `site remove`'s probe.
 - `deployment recover --from` takes any login that reaches the host, the owner's too, and reaches it again as the deployment's user its admission record names, so a recovery needs no name the lost workstation held.
 - `deployment recover`, `deployment pull`, `init --age-private-key-file` and the saved version's `applied from` note of `deployment apply` name the configuration's directory as a full path, not `.`.
 - `deployment recover`, `pull` and `log` take `--key <path.pub>` to anchor an unpinned workstation on versions you signed, `log` prints full root hashes, and a pin the sites serve none of refuses.

@@ -29,7 +29,7 @@ func TestARemovalResumesFromEachStage(t *testing.T) {
 			stage            int
 			site, verb, text string
 		}{{1, "home-a", "remove", "bbbbbbbbbbbbbbbb"}, {2, "home-a", "remove", "etcd member"}, {2, "home-a", "update", "haproxy.cfg"}}},
-		{3, "rootlesskit find", []struct {
+		{3, "then rootlesskit find", []struct {
 			stage            int
 			site, verb, text string
 		}{{2, "home-a", "remove", "etcd member"}, {3, "home-b", "remove", "every container"}, {3, "home-b", "delete", "the manifest"}}},
@@ -55,7 +55,7 @@ func TestARemovalResumesFromEachStage(t *testing.T) {
 			if err := siteremove.Execute(again); err != nil {
 				t.Fatalf("resuming: %v\n%s", err, rec.Lines())
 			}
-			if _, manifest := w.hosts["home-b"].files[dep.Manifest()]; w.member("home-b") != nil || manifest || w.hosts["home-b"].ran("rootlesskit find") == 0 {
+			if _, manifest := w.hosts["home-b"].files[dep.Manifest()]; w.member("home-b") != nil || manifest || w.hosts["home-b"].ran("then rootlesskit find") == 0 {
 				t.Error("the resumed removal did not finish")
 			}
 		})
