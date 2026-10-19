@@ -4453,8 +4453,11 @@ paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # e
   named hosts and every site the trusted heads name. It needs `--root` with the
   hash of a version the operator trusts, kept somewhere other than the
   workstation that was lost, because a history found only on the sites is
-  never trusted on its own. `--id` names the
-  deployment when the logins' admission records name more than one. With a fork it writes
+  never trusted on its own. `--from` takes any login that reaches the host,
+  the owner's as well as the deployment's: the admission records under
+  `/etc/paisans` are readable by every login, so recover learns the deployment
+  and its user from them and reaches the host again as that user. `--id` names
+  the deployment when the records name more than one. With a fork it writes
   each head to `.paisans/incoming/<sha>/` and refuses to choose, because which
   head wins is for an operator to decide, never an order.
 * **`deployment apply`** gathers before the review, so a fork or files older than the

@@ -406,17 +406,34 @@ type Runner interface {
 }
 
 // mineCommand prints the login's name, then every record's path. /etc/paisans
-// is 755 and every record 644, so the deployment's user lists and reads them.
+// is 755 and every record 644, so any login lists and reads them.
 const mineCommand = `echo "user $(id -un)"; for f in ` + Dir + `/admitted.*.json; do [ -f "$f" ] && echo "$f"; done; true`
 
 // Mine is the admission record of the deployment the login belongs to: the
 // one whose user is the login's own name. A deployment's commands that run
-// without its configuration (deployment recover) learn the deployment from it.
-// A record that does not parse is skipped, since it cannot name the login.
+// without its configuration learn the deployment from it.
 func Mine(t Runner) (Record, error) {
+	user, recs, err := Listed(t)
+	if err != nil {
+		return Record{}, err
+	}
+	for _, rec := range recs {
+		if rec.User == user {
+			return rec, nil
+		}
+	}
+	return Record{}, fmt.Errorf("%s: %w (%s)", Dir, ErrNotMine, user)
+}
+
+// Listed is the login's name and every admission record on the host, in
+// the order of their paths. Any login reads them: /etc/paisans is 755 and
+// every record 644, so a recovery that reaches the host as its owner learns
+// which deployments it runs and as whom. A record that does not parse is
+// skipped, since nothing it says can be relied on.
+func Listed(t Runner) (string, []Record, error) {
 	out, err := t.Run(mineCommand)
 	if err != nil {
-		return Record{}, fmt.Errorf("listing %s: %w", Dir, err)
+		return "", nil, fmt.Errorf("listing %s: %w", Dir, err)
 	}
 	var user string
 	var paths []string
@@ -428,6 +445,7 @@ func Mine(t Runner) (Record, error) {
 			paths = append(paths, line)
 		}
 	}
+	var recs []Record
 	for _, p := range paths {
 		token := strings.TrimSuffix(strings.TrimPrefix(p, Dir+"/admitted."), ".json")
 		if !ValidToken(token) {
@@ -437,11 +455,11 @@ func Mine(t Runner) (Record, error) {
 		if err != nil || !found {
 			continue
 		}
-		if rec, err := ParseRecord([]byte(content), token); err == nil && rec.User == user {
-			return rec, nil
+		if rec, err := ParseRecord([]byte(content), token); err == nil {
+			recs = append(recs, rec)
 		}
 	}
-	return Record{}, fmt.Errorf("%s: %w (%s)", Dir, ErrNotMine, user)
+	return user, recs, nil
 }
 
 // Differences is every way r, what the owner admitted, differs from site as

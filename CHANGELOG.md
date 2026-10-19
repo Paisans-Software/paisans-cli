@@ -10,6 +10,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Fixed
+
+- `deployment recover --from` takes any login that reaches the host, the owner's too, and reaches it again as the deployment's user its admission record names, so a recovery needs no name the lost workstation held.
+
 ## [0.3.0-rc.5] - 2026-10-19
 
 ### Added

@@ -821,15 +821,15 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 	}
 	r := reporter()
 	r.Section("recover into " + l.Dir)
-	hosts := map[string]apply.Transport{}
+	var dests []config.Destination
 	for _, f := range from {
 		dest, err := config.ParseDestination(f)
 		if err != nil {
 			return sshFlagProblem(f, err)
 		}
-		hosts[dest.String()] = reachDestination(dest)
+		dests = append(dests, dest)
 	}
-	deploymentID, err := recoverID(hosts, *id)
+	deploymentID, hosts, err := recoverID(r, dests, *id)
 	if err != nil {
 		return err
 	}
@@ -924,40 +924,76 @@ func recoverSites(l configstore.Local, g configstore.Gathered, id string) (map[s
 	return sites, nil
 }
 
-// recoverID is the deployment a recovery is for: id when given, else the one
-// deployment each login's admission record names, the record under
-// /etc/paisans whose user is the login's own. More than one is refused,
-// since which one to recover is the operator's to say. A record whose
-// deployment is not an id never parses, so it names nothing here: the id
-// becomes part of every command a recovery runs on every site.
-func recoverID(hosts map[string]apply.Transport, id string) (string, error) {
-	if id != "" {
-		if !deployment.ValidID(id) {
-			return "", &ui.Problem{Hint: fmt.Sprintf("--id %q is not a deployment id", id), Explain: "Give the full id, as paisans site deployments lists it."}
-		}
-		return id, nil
+// recoverID is the deployment a recovery is for, and each host reached as
+// its user: id when given, else the one deployment the hosts' admission
+// records under /etc/paisans name. A login with a record of its own names
+// that record's deployment; any other login, the host's owner's, names every
+// deployment the host admits, since an operator recovering a lost workstation
+// knows how they reach the host and not the deployment's user, whose name
+// comes from the id that was lost. More than one is refused, since which one
+// to recover is the operator's to say. A record whose deployment is not an id
+// never parses, so it names nothing here: the id becomes part of every
+// command a recovery runs on every site.
+//
+// A host whose login is not the user its record of the deployment names is
+// reached again as that user, at the same address and port: the store is
+// that user's, and admit gave it the operators' keys. A host with no such
+// record is kept as named, so the gather says what it holds.
+func recoverID(r ui.Reporter, dests []config.Destination, id string) (string, map[string]apply.Transport, error) {
+	if id != "" && !deployment.ValidID(id) {
+		return "", nil, &ui.Problem{Hint: fmt.Sprintf("--id %q is not a deployment id", id), Explain: "Give the full id, as paisans site deployments lists it."}
 	}
+	hosts := map[string]apply.Transport{}
+	listed := map[string][]admission.Record{}
 	ids := map[string]bool{}
 	var errs []error
 	var why []string
-	for _, name := range slices.Sorted(maps.Keys(hosts)) {
-		rec, err := admission.Mine(hosts[name])
+	slices.SortFunc(dests, func(a, b config.Destination) int { return strings.Compare(a.String(), b.String()) })
+	for _, dest := range dests {
+		name := dest.String()
+		hosts[name] = reachDestination(dest)
+		login, recs, err := admission.Listed(hosts[name])
+		if err == nil && len(recs) == 0 {
+			err = fmt.Errorf("%s: %w for any deployment", admission.Dir, admission.ErrNotAdmitted)
+		}
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", name, err))
 			hint, _ := ui.Describe(err)
 			why = append(why, fmt.Sprintf("- %s: %s", name, hint))
 			continue
 		}
-		ids[rec.Deployment] = true
-	}
-	switch len(ids) {
-	case 1:
-		for found := range ids {
-			return found, nil
+		listed[name] = recs
+		if i := slices.IndexFunc(recs, func(rec admission.Record) bool { return rec.User == login }); i >= 0 {
+			recs = recs[i : i+1]
 		}
-	case 0:
-		return "", &ui.Problem{Hint: "no host named holds an admission record for the login", Explain: strings.Join(append(why, "Name the deployment with --id, or another host with --from."), "\n"), Cause: errors.Join(errs...)}
+		for _, rec := range recs {
+			ids[rec.Deployment] = true
+		}
 	}
-	list := slices.Sorted(maps.Keys(ids))
-	return "", &ui.Problem{Hint: "the hosts' logins belong to more than one deployment", Explain: "Name the one to recover with --id: " + strings.Join(list, ", ") + "."}
+	if id == "" {
+		switch len(ids) {
+		case 0:
+			return "", nil, &ui.Problem{Hint: "no host named holds an admission record", Explain: strings.Join(append(why, "Name another host of the deployment with --from."), "\n"), Cause: errors.Join(errs...)}
+		case 1:
+			for found := range ids {
+				id = found
+			}
+		default:
+			list := slices.Sorted(maps.Keys(ids))
+			return "", nil, &ui.Problem{Hint: "the hosts admit more than one deployment", Explain: "Name the one to recover with --id: " + strings.Join(list, ", ") + "."}
+		}
+	}
+	for _, dest := range dests {
+		name := dest.String()
+		i := slices.IndexFunc(listed[name], func(rec admission.Record) bool { return rec.Deployment == id })
+		if i < 0 || listed[name][i].User == dest.User {
+			continue
+		}
+		as := dest
+		as.User = listed[name][i].User
+		delete(hosts, name)
+		hosts[as.String()] = reachDestination(as)
+		r.Note(fmt.Sprintf("%s: reached as %s", name, as.User), "the deployment's user, as the host's admission record names it")
+	}
+	return id, hosts, nil
 }
