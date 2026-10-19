@@ -12,6 +12,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Added
 
+- `paisans operator grants --ssh <alias or user@host>` prints the `site admit` command, grants and flags, that admitted each site on a host, read without sudo or a configuration.
 - The mbin blueprint renders and locks every Meta, Instance and Federation setting from `apps.<app>.settings`, titling the instance from `display_name` and `community.name`; it needs Mbin `1.16.0+paisans`.
 - Blueprint format `paisans.blueprint/v3` gives templates `.DisplayName` and `.CommunityName`, so a catalog release using them is skipped by older binaries.
 - The uptime monitor's public status page is on by default, showing only each app's check at its public hostname; `settings.public_status_page: false` turns it off.

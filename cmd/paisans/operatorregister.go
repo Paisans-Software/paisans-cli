@@ -29,10 +29,13 @@ func runOperator(args []string, stdin io.Reader, stdout io.Writer) error {
 	if len(args) > 0 && args[0] == "magic-link" {
 		return runOperatorMagicLink(args[1:])
 	}
-	if len(args) == 0 {
-		return &ui.Problem{Hint: "operator takes one subcommand", Explain: "Use register or magic-link."}
+	if len(args) > 0 && args[0] == "grants" {
+		return runOperatorGrants(args[1:])
 	}
-	return &ui.Problem{Hint: fmt.Sprintf("operator has no subcommand %q", args[0]), Explain: "Use register or magic-link."}
+	if len(args) == 0 {
+		return &ui.Problem{Hint: "operator takes one subcommand", Explain: "Use register, magic-link or grants."}
+	}
+	return &ui.Problem{Hint: fmt.Sprintf("operator has no subcommand %q", args[0]), Explain: "Use register, magic-link or grants."}
 }
 
 func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error {

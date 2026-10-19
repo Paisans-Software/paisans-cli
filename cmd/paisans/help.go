@@ -399,6 +399,13 @@ var helpCommands = []helpCommand{
 			"Changes nothing else: apply makes the account and its groups, and an operator with no account yet is pointed there. Writes nothing without --execute.",
 	},
 	{
+		name:    "operator grants",
+		summary: "List the site admit flags each deployment on a host was admitted with.",
+		usage:   []string{"paisans operator grants --ssh <user@host[:port] or ssh alias>"},
+		detail: "Read each admission record on the host --ssh names, an alias of your ssh config or user@host[:port], and print the site admit command that admitted each site: its grants (--watchdog, --public-ports) and --data-dir, --bridge-netfilter and --mesh-lan. " +
+			"Admitting the site again with those flags plans nothing more, so add --ssh and anything new, such as --swapfile. Needs no " + config.FileName + " and no sudo, since the records are readable by any user; changes nothing.",
+	},
+	{
 		name:    "operator register",
 		summary: "Sign the sites' newest version with your own key.",
 		usage:   []string{"paisans operator register [--config " + config.FileName + "] [--key <path.pub>] [--root <sha>]\n                          [--execute] [--yes]"},
