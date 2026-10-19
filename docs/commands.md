@@ -663,6 +663,33 @@ paisans operator magic-link alice --execute    # issues the link, prints it once
 See *`operator magic-link` gives a declared operator a fresh sign-in link* in
 `README.md`.
 
+### `paisans operator grants`
+
+Prints, for each deployment admitted to a host, the `site admit` command that
+admitted its site: its grants and the flags admit records. Admit takes the
+rest of a site's admission (its roles, ports, mesh subnet and web server) from
+the configuration, so the command is the base for admitting the site again
+with something new, such as `--swapfile`: read its dry run before
+`--execute`.
+
+```sh
+paisans operator grants --ssh home-a                 # an alias of your ssh config
+paisans operator grants --ssh admin@203.0.113.9      # or user@host[:port]
+```
+
+* **Alone:** always. It needs no `paisans-stack.yaml` and changes nothing.
+* **Flags:** `--ssh`, required: an alias of your ssh config, which ssh
+  resolves to its host, user and port, or `user@host[:port]`.
+* **Hosts:** the one `--ssh` names, through your own ssh, with no sudo: the
+  admission records in `/etc/paisans` are readable by any user.
+* **What it prints:** `--watchdog` and `--public-ports` as granted,
+  `--data-dir` as the directory given (the record keeps
+  `<path>/paisans-<token>`), `--bridge-netfilter`, and `--enable-ufw` where
+  admit enabled ufw, which changes nothing while ufw is active. `--mesh-lan`
+  comes with the LAN prefix recorded, since admit reads the LAN again from
+  the host. A record that does not parse is a warning, and the rest are
+  printed.
+
 ### `paisans catalog`
 
 Pins the catalogs of blueprints the deployment's apps may name, in
