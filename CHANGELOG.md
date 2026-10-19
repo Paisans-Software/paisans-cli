@@ -28,6 +28,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Fixed
 
+- `deployment apply` names, under each site's pull line in a dry run and with `--execute`, every image whose build the apply moves, with the versions and digests it goes between.
 - A first ssh connection to a host whose key is known runs in batch mode, so its spinner and timer show; only a login that needs a password or passphrase pauses them.
 - `deployment apply` sets `src_valid_mark` to 0 in the rootless Docker namespace, which copies Tailscale's 1, ending a one second wait per connection and the apps' wrong client addresses; `doctor` checks it.
 - Caddy mounts its Caddyfile and snippets as one directory, `infra/caddy/etc`, so a reload after `deployment apply` reads the new routes; the old files are left over, and the next apply replaces Caddy once.
