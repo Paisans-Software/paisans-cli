@@ -1500,7 +1500,9 @@ joins it when any site holds data, so that adding a data site later is an
 addition rather than a move; Garage runs on the data sites whenever a
 clustered app stores objects, since a clustered app may not keep files on one
 disk; the chat server goes where no database is, since it binds Patroni's
-ports.
+ports; and any layout with two or more data sites, a custom one included, is
+written with `cluster.synchronous: true` and `synchronous_strict: false`, so a
+failover loses no acknowledged write.
 
 For each app that signs in through Pocket ID it also asks the name shown at
 sign in, which becomes the app's `display_name` (see *`oidc client create`

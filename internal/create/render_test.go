@@ -241,3 +241,44 @@ func TestPocketIDManagementWithoutMailValidates(t *testing.T) {
 		t.Errorf("refused %s: %s: %s", f.Rule, f.Key, f.Message)
 	}
 }
+
+// TestCustomShapeIsSynchronousWithTwoDataSites holds that synchronous
+// replication follows the data sites rather than the shape: a custom layout
+// with two of them is written synchronous, as the high availability shape is,
+// and one with a single data site has nothing to replicate to.
+func TestCustomShapeIsSynchronousWithTwoDataSites(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		sites []Site
+		want  bool
+	}{
+		{"two data sites", []Site{
+			{Name: "east", Roles: []config.Role{config.RoleData, config.RoleApps}, SSHHost: "east.local", SSHUser: "ubuntu", Endpoint: "east.example.org:51820"},
+			{Name: "west", Roles: []config.Role{config.RoleData, config.RoleApps}, SSHHost: "west.local", SSHUser: "ubuntu"},
+			{Name: "edge", Roles: []config.Role{config.RoleGateway, config.RoleWitness}, PublicAddress: "203.0.113.10", SSHUser: "ubuntu"},
+		}, true},
+		{"one data site", []Site{
+			{Name: "home", Roles: []config.Role{config.RoleData, config.RoleApps}, SSHHost: "home.local", SSHUser: "ubuntu"},
+			{Name: "edge", Roles: []config.Role{config.RoleGateway}, PublicAddress: "203.0.113.10", SSHUser: "ubuntu"},
+		}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			a := answersFor(ShapeCustom, false, false)
+			a.Sites = c.sites
+			data, err := Render(a, testID, testOrigin)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := config.LoadBytes(data)
+			if err != nil {
+				t.Fatalf("the rendered file does not load: %v\n%s", err, data)
+			}
+			if cfg.Cluster.Synchronous != c.want || cfg.Cluster.SynchronousStrict {
+				t.Errorf("synchronous %v, strict %v; want synchronous %v, strict false\n%s", cfg.Cluster.Synchronous, cfg.Cluster.SynchronousStrict, c.want, data)
+			}
+			if got := rules(validate.Check(cfg).Warnings()); slices.Contains(got, "async-automatic-failover") {
+				t.Errorf("warns async-automatic-failover\n%s", data)
+			}
+		})
+	}
+}
