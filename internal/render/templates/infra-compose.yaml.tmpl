@@ -1,4 +1,4 @@
-# Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+# Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
 #
 # Infrastructure for site {{ .Site.Name }}. Bind mounts under {{ .Dir }}, never named
 # volumes, so relocating a stack is a tar rather than a volumes-from dance.
@@ -109,9 +109,11 @@ services:
     env_file:
       - caddy/caddy.env
     volumes:
-      - {{ .Dir }}/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      # One file per application, imported by that application's host block.
-      - {{ .Dir }}/caddy/snippets:/etc/caddy/snippets:ro
+      # The Caddyfile, and in snippets/ one file per application, imported by
+      # that application's host block. The directory, not the files: apply
+      # renames a new file over the old one, which a reload only reads through
+      # a directory mount.
+      - {{ .CaddyConfigSource }}:{{ .CaddyConfig }}:ro
 {{- if .Site.IsGateway }}
       # Site blocks the host's owner adds, imported by the Caddyfile. The
       # deployment's own caddy.d: paisans only creates it.

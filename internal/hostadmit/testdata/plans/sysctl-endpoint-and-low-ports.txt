@@ -48,6 +48,7 @@ step 27: set the host's sysctls
 step 28: write the admission record
 step 29: add the operators' keys
 
+present: swap: on
 present: docker: Engine 29.9.1
 present: package: docker-ce-rootless-extras installed
 present: package: uidmap installed

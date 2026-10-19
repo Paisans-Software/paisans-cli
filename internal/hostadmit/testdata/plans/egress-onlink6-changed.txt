@@ -74,6 +74,7 @@ step 2: reload the egress table
     $ systemctl start paisans-f2a9-egress.service && nft -f /etc/paisans/egress.f2a9.nft
 
 present: registry: this host is claimed for deployment f2a9
+present: swap: on
 present: docker: Engine 29.9.1
 present: package: docker-ce-rootless-extras installed
 present: package: uidmap installed

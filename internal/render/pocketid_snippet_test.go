@@ -10,7 +10,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
-const authSnippet = "vm/srv/paisans/f2a9/infra/caddy/snippets/auth.caddy"
+const authSnippet = "vm/srv/paisans/f2a9/infra/caddy/etc/snippets/auth.caddy"
 
 // refusedPaths reads every `@name path ...` matcher that a `respond @name
 // 404` uses in a rendered snippet and returns its patterns.

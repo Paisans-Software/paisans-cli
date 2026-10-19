@@ -191,9 +191,9 @@ func writeWebServerFiles(r ui.Reporter, cfg *config.Config, configPath string, s
 }
 
 // webServerScope is which monitor sites the web server step covers: every
-// one, or with site set that one alone, as apply --site applies it, reached
+// one, or with site set that one alone, as deployment apply --site applies it, reached
 // through ssh, verbatim, in place of its ssh section when that is set, as
-// apply --site --ssh reaches it.
+// deployment apply --site --ssh reaches it.
 //
 // down is the sites a run has down: the step never reaches them, since a
 // down site's own steps are skipped (see sites.go).

@@ -128,6 +128,9 @@ type fakeHost struct {
 	// "<stack>/<service>", in the read of which containers run: "absent" for
 	// none. Every other service a compose file on the host declares runs.
 	stopped map[string]string
+	// sourceMark is what apply.SourceMarkProbe prints. Empty prints nothing,
+	// which asks apply for nothing.
+	sourceMark string
 }
 
 func newHost() *fakeHost { return &fakeHost{files: map[string]string{}, leader: "home-a"} }
@@ -147,6 +150,9 @@ func (h *fakeHost) Describe() string { return "fake" }
 
 func (h *fakeHost) Run(command string) (string, error) {
 	h.commands = append(h.commands, command)
+	if command == apply.SourceMarkProbe {
+		return h.sourceMark, nil
+	}
 	if h.dns != nil && strings.Contains(command, "ACME_DNS_TOKEN") {
 		return h.dns(command)
 	}
@@ -805,7 +811,7 @@ func TestAGatewayWithoutItsProviderModuleIsNotReloaded(t *testing.T) {
 // A first apply to a fresh host has nothing running: every file is a create,
 // and the container that would serve them is started by the Actions loop at
 // the very end. Validating or reloading through `exec` there asks a container
-// that does not exist yet, which made `paisans apply` unable to complete a
+// that does not exist yet, which made `paisans deployment apply` unable to complete a
 // first install of a gateway site, and made recovery impossible afterwards,
 // since a dead gateway makes every later apply refuse at the same step.
 func TestAFirstApplyToAFreshHostCompletes(t *testing.T) {
@@ -1062,9 +1068,10 @@ func TestPlanningOnlyProbesTheMesh(t *testing.T) {
 		t.Errorf("an unchanged psns-f2a9.conf on a host whose psns-f2a9 is down plans %v, want a start", p.WireGuard)
 	}
 	for _, command := range host.commands {
-		// The sweep's read of the host's images and the read of which
-		// containers run are the other probes a plan makes.
-		if !strings.HasPrefix(command, "ip -br addr show dev psns-f2a9") && !strings.Contains(command, "echo paisans-sweep-end") && !strings.Contains(command, "--filter label=com.docker.compose.project") {
+		// The sweep's read of the host's images, the read of which
+		// containers run and the read of the rootless namespace's
+		// src_valid_mark are the other probes a plan makes.
+		if !strings.HasPrefix(command, "ip -br addr show dev psns-f2a9") && !strings.Contains(command, "echo paisans-sweep-end") && !strings.Contains(command, "--filter label=com.docker.compose.project") && command != apply.SourceMarkProbe {
 			t.Errorf("building a plan ran %q, which is more than a probe", command)
 		}
 	}
@@ -1627,6 +1634,11 @@ func TestTheMeshFileIsPutBeforeTheInterfaceStarts(t *testing.T) {
 		t.Error("the helper was handed something other than the file apply wrote")
 	}
 	for _, c := range host.commands {
+		// The rootless namespace's probe asks the user's own manager about
+		// docker.service, never the mesh's unit.
+		if c == apply.SourceMarkProbe {
+			continue
+		}
 		if strings.HasPrefix(c, "wg ") || strings.Contains(c, "wg-quick") || strings.Contains(c, "journalctl") || strings.Contains(c, "systemctl") {
 			t.Errorf("%q reached the mesh without the helper", c)
 		}

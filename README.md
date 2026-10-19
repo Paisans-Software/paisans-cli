@@ -27,8 +27,8 @@ paisans site request --site vm > vm.admit  # the request the host's owner admits
 sudo paisans site admit --request vm.admit --execute   # on the host, by its owner: the deployment's own user and rootless Docker
 paisans site prepare --site vm --execute   # the user's keys, configuration store and daemon settings on an admitted host
 paisans site prepare --all --execute       # the same on every site, one at a time
-paisans apply --execute                    # the whole deployment, from paisans-stack.yaml to a running stack
-paisans apply --site vm --execute          # render the site and bring it up
+paisans deployment apply --execute                    # the whole deployment, from paisans-stack.yaml to a running stack
+paisans deployment apply --site vm --execute          # render the site and bring it up
 paisans site add home-b --execute          # join another data site to the running cluster
 paisans app remove blog --execute          # take an app that has left paisans-stack.yaml off its hosts
 paisans site remove home-b --execute       # take a site out of the deployment
@@ -38,7 +38,7 @@ paisans doctor                             # what is unhealthy, and how to recov
 `paisans help` lists every command in a line each, `paisans help <command>`
 (or `paisans <command> --help`) gives one command's usage, details and flags,
 and [docs/commands.md](docs/commands.md) describes each one: what it does,
-when to run it on its own rather than through `paisans apply`, its flags, and
+when to run it on its own rather than through `paisans deployment apply`, its flags, and
 what it changes.
 
 ## How Paisans differs from YunoHost
@@ -93,7 +93,7 @@ rule 5.
 ### Rule 3: object storage from the first install
 
 The same logic as rule 1, applied to files. **Garage ships out of the box**,
-single-node on the first install (`storage init`, which a whole `apply` runs),
+single-node on the first install (`storage init`, which a whole `deployment apply` runs),
 replicated across sites when one is added (`storage add`).
 
 Starting with media on local disk and moving it later is a migration, not an
@@ -264,7 +264,7 @@ holds sessions, and talks to the identity provider on the homeserver's
 behalf. The identity provider itself sits upstream of MAS, one hop further
 out than every other application's OIDC client, which is why its client
 takes a different redirect URI, in the form
-`https://<hostname>/upstream/callback/<ulid>`. `apply` creates the client with
+`https://<hostname>/upstream/callback/<ulid>`. `deployment apply` creates the client with
 that URI, as it does every other app's, and `paisans init --verbose` prints it
 under the line naming the sign in clients apply will create, because a client
 with the wrong path fails at the end of the first sign in rather than when it
@@ -525,12 +525,12 @@ them apart because they hold different things.
 | Run | the machines | the community |
 | Declared in | `operators:` in `paisans-stack.yaml` | membership of the Pocket ID group `admins` |
 | Hold | SSH keys on the sites, the age keys that decrypt the secrets, the right to sign a configuration version | administrator rights in every app that reads `admins` |
-| Do | `site prepare`, `apply`, `secrets`, `config publish` | moderate, approve applications, administer the apps |
+| Do | `site prepare`, `deployment apply`, `secrets`, `deployment publish` | moderate, approve applications, administer the apps |
 | At least | one, and two to keep a lost workstation from stopping the deployment (`operators-none`, `operators-fewer-than-two`) | none required |
 
 **Every operator is also a community admin**, so that a new deployment has
-someone to run it: `apply` puts each operator in every app's admin group (see
-*`apply` makes the declared operators and hands each a login link*).
+someone to run it: `deployment apply` puts each operator in every app's admin group (see
+*`deployment apply` makes the declared operators and hands each a login link*).
 **A community admin is not an operator**, because running the community needs
 no shell on a host and no secret, and handing those out with moderation rights
 would put every admin's workstation inside the deployment's blast radius.
@@ -569,7 +569,8 @@ to make by omission.
 | `email_one_time_access_as_unauthenticated` | refused if set (`pocket-id-setting-managed`); rendered `true` | the operator's choice |
 | `email_one_time_access_as_admin` | refused if `false` (`account-login-link-disabled`) | the operator's choice |
 | SMTP host and sender | required (`pocket-id-paisans-without-smtp`) | optional |
-| Operators' `isAdmin` at Pocket ID | never set by `apply` | set by `apply` |
+| `signup_default_groups` | must name each account app's member group (`pocket-id-signup-groups-lack-member-group`) | the operator's choice |
+| Operators' `isAdmin` at Pocket ID | never set by `deployment apply` | set by `deployment apply` |
 | Signup, bans, recovery | the account service | Pocket ID's admin pages |
 
 Each row has its reason:
@@ -584,6 +585,11 @@ Each row has its reason:
   open, since that is how a member whose sign-in link expired signs in again.
 * **Mail is required under `paisans`** because recovery is an email code, and
   the account service will not start without a mail server either.
+* **`signup_default_groups` must hold the account app's member group under
+  `paisans`**, `members` unless the account app sets `member_group`. The
+  account service creates every account with no group and Pocket ID puts it in
+  these, so without the member group an accepted invite or application makes
+  an account that is a member of nothing.
 * **An account app is refused under `pocket-id`**, because two places that
   each think they decide who joins would disagree.
 * **Under `pocket-id` the operators are Pocket ID's administrators**, because
@@ -626,7 +632,7 @@ recovered, so that none of it needs a Pocket ID administrator.
   because there is one tier of community admin. The exception is
   `operators`, shown but never changed there, since `paisans-stack.yaml`
   alone says who is an operator; an operator's other groups can be changed,
-  and the next `apply` puts them back in the groups it gives every operator.
+  and the next `deployment apply` puts them back in the groups it gives every operator.
   A change takes effect at the user's next sign in: a session an app already
   holds keeps the groups it was given until it expires.
 
@@ -721,7 +727,7 @@ app, and its two Pocket ID addresses differ:
 | `ACCOUNT_IDP_PRIVATE_NETWORKS` | `mesh.subnet` | The networks the service accepts `ACCOUNT_IDP_URL` in besides the private ranges, set to the mesh. |
 
 Renaming the identity hostname re-renders the account service's `.env`, and
-the next `apply` recreates the account stack. The account app is cluster
+the next `deployment apply` recreates the account stack. The account app is cluster
 only, so every site it runs on runs HAProxy and has the listener (see
 *Pocket ID runs on every apps site, and one of them is active*).
 
@@ -901,9 +907,9 @@ sites:
   off it no longer runs the toolkit's Caddy, so `paisans gateway move` treats
   it as an ordinary old gateway and stops that Caddy: the health page is down
   until the operator's web server serves it. Move the gateway first, then
-  switch the web server in an apply of its own. `paisans apply` without `--site` writes each such app's reference snippet and
+  switch the web server in an apply of its own. `paisans deployment apply` without `--site` writes each such app's reference snippet and
   checks it with `paisans web-server check`'s checks once every step has run, and
-  `paisans apply --site` on such a monitor does the same for the apps the monitor
+  `paisans deployment apply --site` on such a monitor does the same for the apps the monitor
   serves once its stacks are up. Each app has a line in a `web server` section,
   and each is checked once, without waiting. A line that fails is a warning, `!`,
   with the checks that failed under it, an error several of them share said
@@ -913,12 +919,12 @@ sites:
   status 0: every step ran, and the web server is the owner's. What apply
   itself could not do, such as reaching the monitor's host over ssh or writing
   a reference file, is a failure, `✗`, and the run ends failed with exit
-  status 1. A dry run lists the check without running it. `apply --site` ends
+  status 1. A dry run lists the check without running it. `deployment apply --site` ends
   the same way in place of `Applied <n> files to <site>.`.
   `docs/guides/behind-your-own-web-server.md` walks through it.
 
 **The toolkit renders, the owner installs.** On a site with `managed_by:
-external`, `apply` runs the app on `listen` and writes the snippet for the web
+external`, `deployment apply` runs the app on `listen` and writes the snippet for the web
 server in front of it to `/srv/paisans/<token>/web-server/<app>.caddy` or
 `<app>.conf`, filled in from what `site admit` detected as root: the server,
 its configuration and how it obtains certificates. When admit found no server
@@ -930,7 +936,7 @@ the owner copies the snippet in; `paisans web-server show --app <app>` prints
 it with the rest of the hand-off sheet, read from the same admission record.
 
 **apply checks from outside and warns until the owner's copy serves.** After
-writing the snippet, `apply` runs `web-server check` for the app once, without
+writing the snippet, `deployment apply` runs `web-server check` for the app once, without
 waiting. Until the check passes, the web server step ends on a warning naming
 `paisans web-server show --app <app>` for the owner. When a change to
 `paisans-stack.yaml` rewrites the snippet, the warning says so, because the
@@ -967,7 +973,7 @@ which the toolkit knows only by its network, so it is the mesh subnet.
 
 Switching an existing site between the two `managed_by` values moves that pin, and the
 network on the host has to move with it, or `TRUST_PROXY` names a gateway the
-web server's connections no longer come from. `apply` therefore asks the host
+web server's connections no longer come from. `deployment apply` therefore asks the host
 how each stack it recreates has its compose network addressed, and where that
 differs from the compose file (a pin the file declares and the network lacks,
 or `10.255.255.0/29` left on a network the file no longer pins), it plans a
@@ -982,7 +988,7 @@ together; a mismatch there is a note in the plan telling the operator to
 take it down at a time the site can be out and apply with `--recreate
 infra`. A probe Docker cannot answer stops the plan. Compose 2.31 and
 later recreates a network whose recorded configuration changed, but leaves
-one with no record alone (created by an older Compose or by hand), so `apply`
+one with no record alone (created by an older Compose or by hand), so `deployment apply`
 reads the network itself rather than relying on that. A dry run only reads.
 
 **Helping an operator behind their own web server.** Two commands, `web-server
@@ -1020,7 +1026,7 @@ issuer replaces a global `cert_issuer acme { dns … }`, but not a global
 its own, the site's included (`fillInGlobalACMEDefaults` in
 `caddyconfig/httpcaddyfile/tlsapp.go`, Caddy v2.11.7), and then uses the DNS
 challenge alone. Admit does not record the Caddyfile's global options, so
-neither `show` nor `apply` warns about it: an owner whose global options set
+neither `show` nor `deployment apply` warns about it: an owner whose global options set
 `acme_dns` needs that token to cover the hostname's zone, or rewrites it as a
 `cert_issuer acme { dns … }`, which lets the site use HTTP-01 and drops
 Caddy's default ZeroSSL fallback issuer for the sites without one of their
@@ -1047,7 +1053,7 @@ app moves to a monitor site, because `dns init` never updates a record, and
 `dns prune` keeps it too, since the name is still wanted. Change that record
 by hand at the provider, then run `dns init` again.
 
-**What it checks is generated, never typed.** `apply` renders `monitors.json`
+**What it checks is generated, never typed.** `deployment apply` renders `monitors.json`
 from this configuration and the fork reconciles it at every start:
 
 * every app gets a **public** check at its hostname, through DNS, the gateway
@@ -1166,33 +1172,33 @@ already gives it one). With two monitors on two sites every site pushes to
 both, each monitor site pushes to the other, and each seed expects the
 other's site, which is what notices a monitor's host dying. Declaring a
 monitor changes `heartbeat.env` on every site, so a new one reaches a host at
-that host's next `apply`; `apply` recreates the `heartbeat` service alone for
+that host's next `deployment apply`; `deployment apply` recreates the `heartbeat` service alone for
 it, as `up -d` replaces only the service whose configuration changed, and on
 the gateway no gate is engaged for it. A deployment with no monitor renders
 no pusher.
 
 **Topology commands reseed the monitor.** The seed is correct whenever the
-monitor site is applied, and nothing else applies it: `apply --site` is one site at
+monitor site is applied, and nothing else applies it: `deployment apply --site` is one site at
 a time, and `site add`, `site remove`, `storage add` and `app remove` move
 files on the sites they change, which the monitor's is not. Left there, a
 monitor keeps pinging a site that is gone and alerting for it until somebody
 applies the monitor by hand, and never pings a site that joined. So each of
 those commands ends with one more stage, the monitor: every monitor site's
-`uptime` stack applied on its own (`apply --only <app>`), which writes the
+`uptime` stack applied on its own (`deployment apply --only <app>`), which writes the
 seed rendered from the configuration as it now stands and restarts the
 monitor on it, and the fork then adds the checks that are new and deletes
 the ones whose site or app is gone; a joining site's heartbeat rides the same
 reseed, and its pusher comes with its own infrastructure stack, which the
 join applies. The stage's gate reads the seed back and
-holds the stack to `apply`'s health gate. It is the last stage on purpose:
+holds the stack to `deployment apply`'s health gate. It is the last stage on purpose:
 the change itself is done without it, and an out of date monitor is a
 nuisance, not a wrong cluster, so a failure there stops nothing that already
-passed and names the exact `apply` that finishes it. A deployment with no
+passed and names the exact `deployment apply` that finishes it. A deployment with no
 monitor site skips the stage, and `validate` warns that nothing watches it
 (`no-uptime-monitor`): a first install may have one machine, and the monitor
 needs a second, so it is a warning rather than a refusal. Every one of these
 commands therefore has to reach the monitor's host, and host checks it as
-`apply` would.
+`deployment apply` would.
 
 **The operators heartbeat is a service beside the reconciler.** Each Pocket
 ID stack, on every site the app runs on, runs `operators-heartbeat`: the
@@ -1204,7 +1210,7 @@ answers 200 when every check passes, pushed as success to
 wrong, pushed to `.../ping/<token>/fail` with that line as a plain text body.
 No answer, or any other status, pushes nothing. Every instance pushes to the
 same token, `apps.<app>.operators_heartbeat_token`, generated at `init` (and by
-`apply`'s dry run, with the other generated secrets) in the site heartbeat
+`deployment apply`'s dry run, with the other generated secrets) in the site heartbeat
 token's shape and refused by `render` the same way, so the one monitor hears
 whichever instance is active, and silence past the grace means no instance is.
 It pushes to every monitor, the one on its own site included: what it carries
@@ -1240,22 +1246,32 @@ milliseconds, and at steady state it reclaims nothing that SQLite would not
 reuse anyway. It matters wherever the monitor shares a machine with an etcd
 member, which `monitor-shares-a-site` warns about on a data site.
 
-**At the edge** the monitor's Caddy refuses `/status*`, `/badge/*`, `/metrics`
-and the token API `/api/v1/*` with 404 whatever the app's own settings say,
-and `web-server show` carries the same refusal into each snippet for an
+**At the edge** the monitor's Caddy refuses `/badge/*`, `/metrics` and the
+token API `/api/v1/*` with 404 whatever the app's own settings say, and
+`web-server show` carries the same refusal into each snippet for an
 operator's own web server. The app is Express with its default routing, which
 ignores case and a trailing slash, so every refusal does too: `/metrics/` and
-`/STATUS` are refused as well. The
-UI's own session authenticated JSON under `/api/sites` passes, because the
-dashboard's live refresh and the response time chart fetch it. The health page would
-list every monitor, mesh addresses included, and `/metrics` is public whenever
-no API token exists, which here is always. `/ping/*` stays open: it is where
-every site's heartbeat arrives, and where a heartbeat monitor added by hand
-is pinged.
+`/Metrics` are refused as well. `/metrics` is public whenever no API token
+exists, which here is always. The UI's own session authenticated JSON under
+`/api/sites` passes, because the dashboard's live refresh and the response
+time chart fetch it. `/ping/*` stays open: it is where every site's heartbeat
+arrives, and where a heartbeat monitor added by hand is pinged.
+
+**The public status page** at `https://<hostname>/status` (with
+`/status.json` and the `/status.rss` feed) is on by default, so members can
+see whether an app is down without an account. It shows each app's check at
+its public hostname, `<app> — public`, and nothing else: every other check
+names a mesh address, a site or a token, so the seed marks each one hidden.
+Every entry in the seed names whether it is shown, so the file decides it at
+every boot. A monitor an admin adds by hand starts hidden too (the fork's
+default from `1.1.0-oidc.6`), and is shown only by unticking **Hide from
+public status page**. `settings.public_status_page: false` turns the page off
+in the monitor and refuses `/status*` at the edge and in `web-server show`'s
+snippets.
 
 **Sign in** is the identity provider, admitting exactly the group named in
 `settings.admin_group`, `operators` when unset. The health page is a tool
-for the people who run the machines, and `apply` puts every operator in
+for the people who run the machines, and `deployment apply` puts every operator in
 `operators`, so a new deployment's monitor admits its operators with nothing
 declared. A community that wants its community admins in too names `admins`,
 which every operator is also in; `validate` warns (`admin-group-not-admins`)
@@ -1270,7 +1286,7 @@ cannot open while it is down is no use. To use it, open
 (`gated-on-ungateable-blueprint`): the gate signs in through Pocket ID,
 and would put the break glass behind the sign-in it is the fallback for.
 
-**It starts as root of its container and drops.** `apply` writes the seed as
+**It starts as root of its container and drops.** `deployment apply` writes the seed as
 the deployment's user, 0600, because it carries the SMTP password; the data
 directory is a bind mount the user's rootless Docker creates. The fork's
 entrypoint, root of the container's user namespace, hands both to `node` and
@@ -1374,7 +1390,7 @@ for traffic that can wait out an outage and never fine for quorum.
 
 The `data` role says a site runs Patroni and stores the database.
 `cluster.sites` is the list every HAProxy's backends are rendered from, the
-list `apply` waits on for a leader, and the membership `doctor` and `site
+list `deployment apply` waits on for a leader, and the membership `doctor` and `site
 add` check against. A site in one and not the other is a replica the
 deployment half has.
 
@@ -1484,7 +1500,9 @@ joins it when any site holds data, so that adding a data site later is an
 addition rather than a move; Garage runs on the data sites whenever a
 clustered app stores objects, since a clustered app may not keep files on one
 disk; the chat server goes where no database is, since it binds Patroni's
-ports.
+ports; and any layout with two or more data sites, a custom one included, is
+written with `cluster.synchronous: true` and `synchronous_strict: false`, so a
+failover loses no acknowledged write.
 
 For each app that signs in through Pocket ID it also asks the name shown at
 sign in, which becomes the app's `display_name` (see *`oidc client create`
@@ -1522,7 +1540,7 @@ the sites may not exist yet. It refuses a file that exists: an existing
 deployment is edited, not recreated. The rendered bytes are checked exactly as
 `validate` checks a file before the operator sees them. A refused file is
 written only when the operator asks for it as it stands, so that their answers
-are not lost; `validate` and `apply` refuse it until it is fixed by hand.
+are not lost; `validate` and `deployment apply` refuse it until it is fixed by hand.
 
 ### The config declares intent; etcd holds truth
 
@@ -1544,7 +1562,7 @@ accept new hardware, delete the line, and the next run records what the host
 reports.
 
 A whole apply reads every site's architecture before it plans, and records
-the missing keys before it publishes the signed configuration. `apply
+the missing keys before it publishes the signed configuration. `deployment apply
 --site`, `site prepare --site` and `site add` record their own site's key
 when run on their own, not as a step of a whole apply. A dry run records
 nothing. A host that contradicts its recorded value is refused: "<site>:
@@ -1632,7 +1650,7 @@ every container name is noise. With the id above the token is `f2a9`, and:
 | everything apply renders on a host | under `/srv/paisans/<token>/`: `/srv/paisans/f2a9/<stack>/`, `/srv/paisans/f2a9/.paisans-manifest.json` |
 | every service and every compose network | the Docker label `community.paisans.deployment=<id>`, the full id |
 | a firewall rule `site admit` adds | the ufw comment `paisans-<token>: <why>` |
-| the WireGuard interface | `psns-<token>`, Eg: `psns-f2a9`, from `/etc/wireguard/psns-f2a9.conf` by `wg-quick@psns-f2a9`; `apply` renders that file as `/srv/paisans/f2a9/psns-f2a9.conf` and the WireGuard helper `/usr/local/libexec/paisans/wg-psns-f2a9` installs it (see *Two deployments on one host never share a mesh*) |
+| the WireGuard interface | `psns-<token>`, Eg: `psns-f2a9`, from `/etc/wireguard/psns-f2a9.conf` by `wg-quick@psns-f2a9`; `deployment apply` renders that file as `/srv/paisans/f2a9/psns-f2a9.conf` and the WireGuard helper `/usr/local/libexec/paisans/wg-psns-f2a9` installs it (see *Two deployments on one host never share a mesh*) |
 | `site admit`'s own files | the admission record `/etc/paisans/admitted.<token>.json`, `paisans-<token>-watchdog.service` and, ufw rules tagged `paisans-<token>:` |
 | `site prepare`'s own files | under `/srv/paisans/<token>/.paisans/`: the authorized keys sidecar `authorized_keys.owned`, the configuration store `config/<token>.git` with its `.peers` and `.sync.json`, and `bin/config-sync.sh`; and the user's units `paisans-<token>-config-daemon.service`, `-config-sync.service` and `-config-sync.timer` |
 | a DNS record `dns init` creates | the comment `paisans-<token>: created by paisans dns init` |
@@ -1668,7 +1686,8 @@ id already holds this deployment's token or root (or its WireGuard interface,
 listen port or an overlapping mesh subnet, see the next section, or the
 gateway or data role, see below), and otherwise adds this deployment's entry,
 or refreshes it, in a temporary file it then moves over the registry. A
-refusal names the other deployment's id and domain and changes nothing, on
+refusal names the other deployment's id and domain, or its site where its
+entry has no domain, and changes nothing, on
 that host or any other. The lock is what serialises two admissions of one
 host at once, and the move is what keeps a registry from ever being half
 written. The merge is done with awk, which a host has before anything is
@@ -1684,7 +1703,7 @@ The registry is root's, so a deployment never reads or writes it. What a
 deployment learns about its host it learns from its **admission record**,
 `/etc/paisans/admitted.<token>.json`, which `site admit` writes beside the
 claim: root's and 0644, in a directory the deployment's user lists and reads
-but cannot write. Every command that changes a host, `apply`, `site prepare`,
+but cannot write. Every command that changes a host, `deployment apply`, `site prepare`,
 `storage init`, `storage add`, `storage rotate-key`, `site add`, `site
 remove`, `prune`, `operator magic-link`, `app remove`, `oidc client create`,
 `secrets rotate` and `failover test`, reads the record of each site it will
@@ -1695,10 +1714,12 @@ refused with the request line the owner needs. Nothing on any host has
 changed when it refuses.
 
 **A host runs one deployment's gateway and one deployment's data site.** The
-gateway binds ports 80 and 443, and its Caddy imports `/srv/paisans/<token>/caddy.d`; a data
-site binds the Postgres and etcd ports and holds the cluster's storage. None
-of these can be split between two deployments, so each entry records the
-site's `roles`, sorted and joined with commas, and the claim refuses a
+gateway binds ports 80 and 443 on every interface, and its Caddy imports
+`/srv/paisans/<token>/caddy.d`; a data site's Patroni holds the host's
+`/dev/watchdog`, which has one claimant (see *There is one HA cluster, and
+that is deliberate*). Neither can be split between two deployments, so each
+entry records the site's `roles`, sorted and joined with commas, and the
+claim refuses a
 deployment claiming `gateway` on a host where another already holds
 `gateway`, and the same for `data`. The refusal says to use another host for
 one of them. Every other role shares a host freely.
@@ -1718,8 +1739,8 @@ Which site a host runs is read from this deployment's admission record, which
 names it; on a host with no record, from the `Address` in
 `/srv/paisans/<token>/psns-<token>.conf`, matched to the site
 `paisans-stack.yaml` gives that address. Reading the name first is what lets a site's address change: the
-record still names the site, and `apply` restarts the interface with the new
-`Address` (see *`apply` brings the mesh interface up before anything binds to
+record still names the site, and `deployment apply` restarts the interface with the new
+`Address` (see *`deployment apply` brings the mesh interface up before anything binds to
 it*). A host left by a site that `paisans-stack.yaml` no longer declares is cleaned
 with `site remove --force` before another site takes it.
 
@@ -1819,13 +1840,13 @@ it two different ports, with `endpoint: ":<port>"` where the host has a
 `site admit` makes, described above, refuses, in the same locked command, when another deployment
 on the host holds the same interface, the same listen port, or a mesh subnet
 overlapping this one's in either direction (one inside the other, or equal).
-The refusal names the other deployment's id, its domain and the value that
-clashes.
+The refusal is one short sentence a clash, naming the other deployment's id,
+its domain or site and the value that clashes.
 
 **The host itself is checked too.** A mesh subnet also collides with networks
 no registry knows about: a LAN, another VPN, a Docker network, or a range
 Docker will hand to its next network. Whichever route the kernel prefers takes
-the other side's traffic. So `apply` and `site prepare`, dry run or not, read
+the other side's traffic. So `deployment apply` and `site prepare`, dry run or not, read
 the host as the deployment's user before they change it, and refuse naming the
 clash when the mesh subnet overlaps:
 
@@ -1875,7 +1896,7 @@ written.
 
 **Once any site holds this deployment's manifest, the subnet is fixed.**
 `init` never changes it again, and an unreachable site no longer stops it; it
-says the subnet is deployed. From then on `apply` and `site prepare` only
+says the subnet is deployed. From then on `deployment apply` and `site prepare` only
 check it, and the advice on a clash is that the other network moves: every
 app trusts the mesh subnet and every service binds an address in it, so moving
 it is a rebuild of every site.
@@ -1937,16 +1958,16 @@ build of the same software, and pointing it at software that merely resembles
 the original produces a stack that renders and then fails at boot.
 
 **Floating tags are refused, not warned about.** `latest` makes two runs of
-`apply` produce different deployments from identical inputs, which contradicts
+`deployment apply` produce different deployments from identical inputs, which contradicts
 the premise that the config plus the secrets reconstruct the stack. That is
 incoherent rather than risky, so it takes a refusal by the rule above. A digest
 (`@sha256:...`) is accepted and is the stronger form.
 
 **An image named by a tag runs the build the tag named when apply planned.**
-`apply` asks the registry, while it plans, which build each tag an app's stack
+`deployment apply` asks the registry, while it plans, which build each tag an app's stack
 names points at now, and renders that digest beside the tag on every line
 naming it (Eg: `ghcr.io/example-org/mbin:v1.2.3@sha256:...`). A tag written
-into a compose file never changes, and `apply` recreates a stack only when its
+into a compose file never changes, and `deployment apply` recreates a stack only when its
 file changes, so without this a new build behind a tag, a series tag moved to
 a new release or a version tag rebuilt for a security fix, would never reach a
 host. With it, a new build is a changed compose file: the dry run
@@ -2003,7 +2024,7 @@ changes it. Commands that rewrite a compose file for a narrower reason
 rotate`) resolve
 nothing and keep whatever each stack runs, whatever the configuration now
 names (another tag, a moved tag, another repository), so none of them
-moves an image nobody planned; the next `apply` shows and makes that move.
+moves an image nobody planned; the next `deployment apply` shows and makes that move.
 The one image they resolve is a track that runs nowhere on the host yet,
 such as a new site's etcd in `site add`, since a host cannot pull a pattern:
 it starts on the newest build on the track.
@@ -2023,7 +2044,7 @@ pocket-id: "ghcr.io/pocket-id/pocket-id:v2.*.*"
 haproxy: "docker.io/library/haproxy:3.0.*-alpine"
 ```
 
-`apply` and `init` list the repository's tags, take the newest that matches the
+`deployment apply` and `init` list the repository's tags, take the newest that matches the
 whole pattern, and render it with its digest, once per run, so every site in a
 run gets the same build. A patch or a minor release therefore reaches a
 deployment on its next apply, with no toolkit release and nobody editing
@@ -2073,8 +2094,8 @@ site's rows `unknown`.
 
 **An app on several sites moves to a new build on all of them at once.** A
 clustered app runs one database from every site it is on, and two builds
-against one database is how a migration runs twice or not at all. `apply`
-without `--site` plans every site and moves them together. `apply --site`
+against one database is how a migration runs twice or not at all. `deployment apply`
+without `--site` plans every site and moves them together. `deployment apply --site`
 reads the app's compose file on its other sites, keeps the app on the build
 they run, and says so, naming a newer build when the tag points at one; moving
 the app takes an apply that covers all its sites. Sites that already run
@@ -2110,7 +2131,7 @@ An app takes two maps that look alike and are not.
 **`settings` is input the toolkit reasons about.** A template asks for each key
 by name, and some are validated or acted on: `s3_bucket` is a setting because
 `storage init` creates it, and
-`sso_dashboard_link` is one because `apply` and `oidc client create` send it
+`sso_dashboard_link` is one because `deployment apply` and `oidc client create` send it
 to the identity provider (see *`oidc client create` makes an app's client at Pocket
 ID*). An Mbin app's `queue` is one because it decides which services the stack
 runs (see *Mbin's queues are in Postgres by default*). A key no template asks
@@ -2142,7 +2163,7 @@ apps:
   talk:
     blueprint: mbin
     config:
-      KBIN_META_TITLE: A place to talk          # env: a variable in .env
+      MBIN_DEFAULT_THEME: dark                  # env: a variable in .env
   blog:
     blueprint: writefreely
     config:
@@ -2197,7 +2218,7 @@ login off, and it is refused because its name contains `password`. Such a key
 needs a `settings` key or a template change.
 
 **An env key starting `COMPOSE_` or `DOCKER_` is refused as
-`config-key-steers-compose`.** `apply` runs `docker compose -f
+`config-key-steers-compose`.** `deployment apply` runs `docker compose -f
 /srv/paisans/<token>/<app>/compose.yaml up -d`, and compose reads the `.env` beside that file
 for its own settings as well as handing it to the application. With
 `docker compose config` on Docker Compose v5.4.0, run on the operator's Mac
@@ -2293,7 +2314,7 @@ Most of `secrets.enc.yaml` is machine-authored. Nobody invents forty passwords.
 |------|----------|--------|
 | **Generated** | Postgres superuser/admin/replication passwords, Garage keys, WireGuard private keys and heartbeat tokens, Pocket ID's operators heartbeat token and its DNS check's hash key and two heartbeat tokens, the heartbeat token of each app whose blueprint declares a heartbeat, Mercure JWT, RabbitMQ and Valkey passwords, Mbin's OAuth2 server keypair | created at `init`, never typed or seen |
 | **Pasted** | Cloudflare API token, SMTP password (`external.smtp_password`, or per app), the optional DNS members token (`external.dns_members_token`), an operator's address at the DNS provider when it is not their email (`operators.<operator>.dns_provider_email`) | issued elsewhere, supplied by a human |
-| **Captured** | OIDC client secrets | belong to a running service; recorded here, by `apply` or `oidc client create` for Pocket ID |
+| **Captured** | OIDC client secrets | belong to a running service; recorded here, by `deployment apply` or `oidc client create` for Pocket ID |
 
 **`init` never replaces a generated secret; `secrets rotate` does, on
 purpose.** A secret is held where it is checked and where it is used, so a new
@@ -2316,7 +2337,7 @@ visible to members: a new key signs out every API client at once, which is why
 `secrets rotate` asks before it does (*`secrets rotate` replaces a secret where
 it is checked and where it is used*).
 
-**It is also the one private key rendered 0644, on purpose.** `apply` writes
+**It is also the one private key rendered 0644, on purpose.** `deployment apply` writes
 every file as root, and Mbin reads the key as uid 1000 after its entrypoint
 drops privileges, so a 0600 key is a key Mbin cannot open. The key is
 encrypted, and the passphrase that opens it is only in the 0600 `.env`, so a
@@ -2329,7 +2350,7 @@ app needs the identical value; recording it here makes it reproducible instead
 of existing on exactly one host. Creating one is a privileged mutation, and
 for the deployment's own Pocket ID the approval is the declaration: an app in
 `paisans-stack.yaml` whose kind has a known client shape approves that client, so
-`apply --execute` creates it as part of setting the app up, and a dry run
+`deployment apply --execute` creates it as part of setting the app up, and a dry run
 prints every mutation first. For Pocket ID the value is not even captured.
 The toolkit generates it, records it here, and then hands it to Pocket ID,
 which accepts a caller supplied secret; see *`oidc client create` makes an
@@ -2347,7 +2368,7 @@ cluster:
   ...
 ```
 
-Every write of the file sets both, whether by `init`, `apply`, `secrets set` or
+Every write of the file sets both, whether by `init`, `deployment apply`, `secrets set` or
 `oidc client create`. A file with a newer `version` is refused, since a newer
 toolkit wrote it. A version 1 file is read as it is and written as version 2,
 the first with the backup section: a toolkit that reads only version 1 would
@@ -2363,7 +2384,7 @@ It holds another deployment's credentials and the state captured from its
 running services: OIDC client credentials and Pocket ID group IDs name objects
 at that deployment's Pocket ID, and used here they would quietly point at
 things this deployment does not have. To start this deployment fresh, move the
-file aside and run `paisans init`; `paisans apply` creates a new one as well. A
+file aside and run `paisans init`; `paisans deployment apply` creates a new one as well. A
 file without an `id` or a `version` is read, and has both from its next write.
 
 **Pasted and captured secrets go in through a pipe, or a prompt with echo
@@ -2387,11 +2408,11 @@ hand, Eg: a DNS token reissued before `paisans secrets rotate`.
 Given no key at a terminal, `paisans secrets set` asks for each secret still
 owed in turn, saying why each is owed, and reads the answer on the controlling
 terminal with echo off, which leaves no copy on the screen. The owed list is
-the one `init` and `apply` print, so the operator is asked for exactly what
+the one `init` and `deployment apply` print, so the operator is asked for exactly what
 they were told to supply. Each answer is written before the next is asked, so
 an interrupted walk keeps what was typed; an empty answer skips the key, which
 stays owed and is named at the end. A sign in client is never owed, so it is
-not asked for: it is pending, a client ID and a secret together that `apply
+not asked for: it is pending, a client ID and a secret together that `deployment apply
 --execute` creates at Pocket ID and records.
 With no key and a pipe on stdin it refuses, since one value could belong to
 any owed key. It accepts
@@ -2409,7 +2430,7 @@ rotate` take: whether the file holds a value there, which of the three kinds it
 is, and the path `secrets rotate` takes for it. It prints no value, no part of
 one and no length, because an operator looking for a path has no use for the
 value, and a value on a terminal is in its scrollback. The kind says who fills
-an unset one: `init`, `secrets set`, or `apply --execute`. See *`paisans
+an unset one: `init`, `secrets set`, or `deployment apply --execute`. See *`paisans
 secrets list`* in [docs/commands.md](docs/commands.md).
 
 **Secrets nothing declares are pruned.** A site or an app taken out of
@@ -2433,10 +2454,10 @@ does not lose its secrets. `/srv/paisans/<token>/.paisans/deployed.json` on ever
 gateway lists the names of the sites, apps and Pocket ID groups deployed, and
 nothing else. It is the deployment user's, in that user's mode 700 state
 directory, written under the deployment's one lock there and left 0644 by a
-rename. It is the deployment user's own file, read as that user, so `apply --site` of a
+rename. It is the deployment user's own file, read as that user, so `deployment apply --site` of a
 site that is not a gateway reads every gateway's record for its
-warnings without more than its ssh login. A gateway's `apply` adds every name the yaml declares and never
-takes one out, so an `apply` of a yaml mid-edit cannot shrink it. Only the
+warnings without more than its ssh login. A gateway's `deployment apply` adds every name the yaml declares and never
+takes one out, so an `deployment apply` of a yaml mid-edit cannot shrink it. Only the
 removal commands take names out, on every gateway: `site remove` in its stage
 2, `site remove --force` for a site no longer declared, and `app remove` for
 the app and each group no remaining Pocket ID app names. Cleaning a gateway's
@@ -2444,7 +2465,7 @@ host deletes its record.
 
 The gateways' records are kept in step, name by name. Every add of a name
 makes a new random tag, and a removal records the tags of the adds it saw; a
-name is deployed while it has an add no removal saw. A gateway's `apply` adds
+name is deployed while it has an add no removal saw. A gateway's `deployment apply` adds
 every declared name with a new tag, deployed or not, so an add made on a
 gateway that missed a removal survives that removal, and a gateway that missed
 a removal does not bring the name back. Every change merges the records of the
@@ -2456,15 +2477,15 @@ record another command changed meanwhile is warned about too, with "run this
 command again". The record also carries an `updated_at`, the writer's clock,
 for people reading the file; nothing compares it.
 
-| In `paisans-stack.yaml` | In a record | `init` and `apply` | `secrets prune` |
+| In `paisans-stack.yaml` | In a record | `init` and `deployment apply` | `secrets prune` |
 |---|---|---|---|
 | yes | either | nothing | keeps its secrets |
 | no | yes | warn that it is deployed but no longer declared, with what to do, whether or not it has secrets | keeps its secrets, and says why |
 | no | no | warn that its secrets are orphaned | removes them |
 
-`init` and `apply` warn by key and never by value, and never refuse: a gateway
+`init` and `deployment apply` warn by key and never by value, and never refuse: a gateway
 whose record cannot be read is a warning too, and one not applied since the
-record existed is silent. `apply` without `--site` reads each gateway's record
+record existed is silent. `deployment apply` without `--site` reads each gateway's record
 once, before its first step, and shows each of these warnings once, under
 `secrets`; the applies it runs as steps leave them to it. `paisans secrets prune` reads every gateway's record
 and refuses when one cannot be read or has none: apply the gateway first, or
@@ -2478,11 +2499,11 @@ delete the client at Pocket ID, which it says: delete it there by hand if that
 Pocket ID still runs. Pruning a backup destination's credentials does not delete
 its key at the provider either, which it says too. A removed site's WireGuard key is safe to prune once no
 site's mesh lists it, which is true after a full `site remove`, or after every
-remaining site's next `apply`. How to run it, and its flags, are under
+remaining site's next `deployment apply`. How to run it, and its flags, are under
 *`paisans secrets prune`* in [docs/commands.md](docs/commands.md).
 
 **A site running the toolkit's Caddy without its DNS token is refused at
-`render` and `apply`**: a gateway, or a monitor in `managed_by` `paisans`. `init`
+`render` and `deployment apply`**: a gateway, or a monitor in `managed_by` `paisans`. `init`
 lists `external.acme_dns_token` as owed rather than refusing, because an
 install is assembled in steps. Rendering without it is different: the gateway's
 Caddy starts, loads its configuration, and fails every DNS-01 challenge, so no
@@ -2500,7 +2521,7 @@ that names no field and no file. This check lives in `internal/secretsgen`
 as the exported `CheckGarageKeys(cfg, secrets)`, rather than in
 `internal/validate`: `validate.Check` takes only a `*config.Config` and never
 sees the secrets file, so it has nothing to check this against. `Fill` calls
-it for `init`, and `render` and `apply` both call it themselves right after
+it for `init`, and `render` and `deployment apply` both call it themselves right after
 `config.LoadSecrets`, because both load secrets directly and never call
 `Fill`: a key hand edited into the file after the last `init` has to be
 caught on every path that can reach a host, not only on the one that
@@ -2531,7 +2552,7 @@ is the approved design.
 |---|---|---|
 | 1. Next value | a new value generated on the workstation, or for a pasted secret the one its issuer gave, written to the secrets file under `rotations`, beside the current one | the file decrypts and holds it |
 | 2. Where it is checked | the side that verifies the secret learns the new value: `ALTER ROLE` on the Patroni leader or in a pinned app's own Postgres, `rabbitmqctl` in Mbin's broker; for the DNS token, a read only zone lookup at the provider with the next token; nothing, where the checking side reads the secret only from what stage 3 renders | the checking side accepts the new value |
-| 3. Where it is used | every stack that presents the secret, by scoped `apply`, one site at a time | each stack healthy before the next site |
+| 3. Where it is used | every stack that presents the secret, by scoped `deployment apply`, one site at a time | each stack healthy before the next site |
 | 4. Promote | the next value becomes the secret's own, and its entry under `rotations` is removed | the file decrypts and holds only the new value |
 
 **The checking side goes first** because some services read a secret only
@@ -2559,9 +2580,9 @@ rotation is pending, which has to finish first. Every write is encrypted to the
 recipients `.sops.yaml` names, so once the departed operator is out of it and the
 file is re-encrypted, a next value is never readable by them.
 
-**`apply` refuses while a rotation is pending**, with or without `--site`, and
+**`deployment apply` refuses while a rotation is pending**, with or without `--site`, and
 names the `secrets rotate` that finishes it: some hosts may already check or
-present the next value, and `apply` renders the old one and would hand it back
+present the next value, and `deployment apply` renders the old one and would hand it back
 to them. So does every other command that renders from the secrets file and
 reaches a host, for the same reason: `site add`, `site remove`, `storage add`,
 `storage rotate-key`, `app remove` and `mesh rekey`. The commands `secrets
@@ -2772,13 +2793,13 @@ hosts, or that cannot finish; and a pending `mesh rekey`.
 **The signed copies.** The applies a rotation runs hand each stack its next
 value and nothing else: they neither ask for the review nor publish a version,
 since nothing an operator declared changed. The rotated secrets file is a local
-edit like any other, so the next `apply --execute` publishes it, and `config
+edit like any other, so the next `deployment apply --execute` publishes it, and `deployment
 publish` can publish it sooner. A secrets merge refuses while either side has a
 rotation under way (*Secrets are merged key by key*).
 
 ### A rotation that cannot finish
 
-A rotation is pending until it is promoted, and while it is, `apply` and every
+A rotation is pending until it is promoted, and while it is, `deployment apply` and every
 other command that renders refuses (*`secrets rotate` replaces a secret where
 it is checked and where it is used*). Almost every pending rotation is
 finished by running `secrets rotate` again. A few cannot be: the secret's app
@@ -2807,7 +2828,7 @@ from the hosts first.
    `apps.<app>.oauth`, each of the four keys the next value lists). If it
    accepts the current value, or nothing checks it any more, delete the entry
    alone.
-3. **Run `paisans apply`**, which now renders the value the file names to
+3. **Run `paisans deployment apply`**, which now renders the value the file names to
    every host, and `paisans secrets rotate <path>` again when the secret
    still has to be replaced.
 
@@ -2927,19 +2948,19 @@ default (`AllowTcpForwarding`, sshd_config(5)); a host that refuses it says
 
 | Command | What it tries | On failure |
 |---|---|---|
-| `secrets set` an SMTP password | from this machine, logs in with the new password and sends one test message | refused; nothing is written. A server this machine cannot reach is a warning, and the password is written for `apply` to try |
+| `secrets set` an SMTP password | from this machine, logs in with the new password and sends one test message | refused; nothing is written. A server this machine cannot reach is a warning, and the password is written for `deployment apply` to try |
 | `secrets rotate` an SMTP password | from this machine, a pasted one logs in and sends one test message when pasted; one set with `secrets set` logs in when the run is planned; stage 2 logs in again from this machine, then from every site that will be handed it, before any is | refused before anything is written under `rotations`, or stopped at stage 2 before any site is handed it; a server this machine cannot reach is a warning, and the sites alone try it |
-| `apply`, with or without `--site` | every app it would start logs in, from each site it runs on; nothing is sent | refused before any host is changed, naming the app, where its settings are declared, and the server's reply |
+| `deployment apply`, with or without `--site` | every app it would start logs in, from each site it runs on; nothing is sent | refused before any host is changed, naming the app, where its settings are declared, and the server's reply |
 | `validate` | every app logs in, from each site it runs on; nothing is sent | a warning |
 
 A changed credential is the only thing that sends mail, because a login alone
 cannot tell whether the provider accepts the sender: a provider may take the
-login and still refuse a `from_address` the account does not own. `apply` and
+login and still refuse a `from_address` the account does not own. `deployment apply` and
 `validate` run often, against settings that already worked, so they only log
 in. A password `secrets set` wrote has sent its message already, so a rotation
 of it logs in and sends no second one.
 
-Apps with the same settings and password share a check. `apply` and `validate`
+Apps with the same settings and password share a check. `deployment apply` and `validate`
 make one per site, since each site has its own route to the server; `secrets
 set` and `secrets rotate` make one per sender, from the first site running one
 of its apps, since what they test is the credential and each sender gets one
@@ -2959,20 +2980,20 @@ password, since a message to nobody proves nothing.
 **What is not tried, and why it is a warning.** A host that only the app's own
 container resolves, a compose service name or a loopback address, is not one
 the site's host reaches, so its settings are listed as not checked. So are
-settings whose password is not set yet: `init` and `apply` already name that
+settings whose password is not set yet: `init` and `deployment apply` already name that
 secret as owed. An SMTP password no app logs in with, or whose apps run on no
 site, is written by `secrets set` with nothing to try.
 
 **`validate` works away from the hosts.** It judges the file, and a mail
 server is outside the file, so every mail failure is a warning there and
-`apply` is the gate that refuses. A site it cannot reach, or a secrets file it
+`deployment apply` is the gate that refuses. A site it cannot reach, or a secrets file it
 cannot read, skips the check with a warning rather than failing; `--offline`
 skips it without trying, for an editor's save hook or a machine with no route
 to the sites.
 
 ### Rendered configuration is a build artifact
 
-`paisans apply` renders it. Nobody edits it, and `apply` refuses to clobber a
+`paisans deployment apply` renders it. Nobody edits it, and `deployment apply` refuses to clobber a
 rendered file that has local modifications until the difference is resolved.
 
 ```
@@ -3042,7 +3063,7 @@ pasted can replace your rules. A recipient in the file's metadata that is not
 an age public key is never printed, and then no command is either.
 
 A plaintext `secrets.enc.yaml` is refused wherever a deployment reads it:
-`init`, `apply`, `validate`, publishing a version, pulling or recovering one,
+`init`, `deployment apply`, `validate`, publishing a version, pulling or recovering one,
 and every other command that opens the secrets. `doctor` reports it, and a
 missing `.sops.yaml`, as a failed check and runs the rest. The refusal names
 the fix, `sops --encrypt --in-place secrets.enc.yaml` with your age public key
@@ -3068,10 +3089,10 @@ Compose passes env at start. Changing a secret in an `.env` therefore means
 re-render plus `compose up -d` to **recreate**; a `restart` will not pick it up.
 A secret in a bind-mounted file is cheaper to change, for the reason below.
 
-#### A file `apply` no longer renders is left over, and stays recorded
+#### A file `deployment apply` no longer renders is left over, and stays recorded
 
 Taking an app out of `paisans-stack.yaml`, or moving it to another site, leaves its
-files and containers on the host. **`apply` never deletes them**, because
+files and containers on the host. **`deployment apply` never deletes them**, because
 stopping a stack and removing its data is a decision with member data in it,
 and an apply that only meant to change a configuration must not make it.
 
@@ -3086,7 +3107,7 @@ every entry outside what it writes exactly as it was.
 The dry run and the real one end with a `left over` section listing them:
 each such file, and each of this deployment's compose projects still on the
 host (by the deployment label with this id and a `paisans-<token>-<stack>`
-project) that the site no longer renders, saying that `apply` leaves them in
+project) that the site no longer renders, saying that `deployment apply` leaves them in
 place. `doctor` reports the same, as a warning (see *`paisans doctor` reports
 what is stuck and how to recover*). Both name `paisans app remove <app>` for
 each app the leftovers belong to, which is the command that takes them off
@@ -3136,7 +3157,7 @@ blueprints costs a deployment only the ones it runs.
 a release's author: a pin is a commit the operator chose, and moving it is
 reviewed. `catalog add` and `catalog update` show the release they read and,
 for each app, what it changes, and the grant review asks for approval before
-a moved pin renders on a site (see *`apply` and `site prepare` review what
+a moved pin renders on a site (see *`deployment apply` and `site prepare` review what
 `paisans-stack.yaml` grants*). The
 core catalog may be pinned to a release of its own or a mirror, like any other;
 unpinned, it moves to each new release it can read, and the grant review shows
@@ -3182,7 +3203,7 @@ heartbeat:
 ```
 
 Each app of it gets a token, `apps.<app>.heartbeat_token`, generated at
-`init` (and by `apply`'s dry run, with the other generated secrets) in the
+`init` (and by `deployment apply`'s dry run, with the other generated secrets) in the
 site heartbeat token's shape, and refused by `render` when it is missing or of
 any other shape, monitor or not, so a monitor added later never meets an app
 without one. Every monitor's seed gets one push monitor per app,
@@ -3217,7 +3238,7 @@ which documents neither. Synapse reads
 
 So the unit the toolkit ships per application is a **blueprint**: a directory
 holding a `blueprint.yaml`, which records what the toolkit knows about the
-application, and the templates `apply` renders, every one of them
+application, and the templates `deployment apply` renders, every one of them
 (`docs/specs/2026-10-12-blueprints-and-catalogs.md`). An app names its
 blueprint with `blueprint:`; elsewhere in this document and in the code
 (`internal/kinds`, `config.Kind`) the same thing is called the app's kind.
@@ -3241,7 +3262,7 @@ the application expects at a path inside its own image is bind-mounted there by
 that kind's `compose.yaml`. The name carries the rest: `.secret` before `.tmpl`
 is dropped from the rendered name and makes the file 0600, every other file is
 0644 so the container's own user can read it, and a `caddy.snippet.*` template
-is rendered onto the gateway under `infra/caddy/snippets/`, because that is
+is rendered onto the gateway under `infra/caddy/etc/snippets/`, because that is
 where Caddy reads it.
 
 Nothing in the secrets path is env-specific: every rule above holds file by
@@ -3259,7 +3280,7 @@ one**, and where an application accepts either, the file is preferred.
 Reload differs as well. A changed `.env` needs `compose up -d` to recreate the
 container, because Compose passes environment only at start. A changed
 bind-mounted file needs a restart at most, and the container keeps its identity.
-`apply` takes the narrower action rather than recreating a stack it does not
+`deployment apply` takes the narrower action rather than recreating a stack it does not
 have to, since a recreate is an outage however brief.
 
 #### The template set owns everything app-specific, routing and shims included
@@ -3331,7 +3352,7 @@ application runs; it receives the location from the inventory at render, which
 is what keeps a pinned app and a cluster app the same shape.
 
 One consequence follows from assembling a shared file out of per-app parts, and
-it takes a gate: **`apply` validates the assembled gateway configuration before
+it takes a gate: **`deployment apply` validates the assembled gateway configuration before
 reloading it, and refuses to reload one that does not validate.** A rendered
 snippet that is wrong should cost the operator an error message on the
 workstation, not the public address of every application at once.
@@ -3347,6 +3368,21 @@ Caddy `up -d` replaced started on the new routing and is not reloaded, and one
 is reloaded afterwards, told apart by its container ID. A stopped Caddy has
 nothing to reload and is started instead. The reload comes second so that it is
 never spent on a container about to be replaced.
+
+**Caddy mounts its configuration as one directory, never a file in it.** The
+Caddyfile and the snippets are rendered into `infra/caddy/etc/`, which the
+container mounts read only at `/etc/caddy`. `deployment apply` replaces a file
+by renaming a new one over it, and a bind mount of a single file keeps the
+inode it started with (moby/moby#15793), so a Caddy that mounted its Caddyfile
+on its own reloaded the file it was created with: the reload reported "config
+is unchanged", and a hostname added since had no site block, so its TLS
+handshake failed. A directory mount resolves each name when it is opened, so
+the reload reads what the apply wrote. Only the Caddyfile and snippets are in
+that directory, because the container sees all of it: `caddy.env`, `data` and
+`config` stay beside it. A gateway applied before the move keeps its old
+`infra/caddy/Caddyfile` and `infra/caddy/snippets/` as left over files, which
+nothing mounts any more: the first apply after it replaces the Caddy, since its
+compose file changed, and the files are the operator's to delete.
 
 #### An app may answer on more than one hostname
 
@@ -3385,10 +3421,10 @@ restored under a different `server_name` is, to its own history, a different
 server. Editing this key on a deployment that is already running is a rebuild
 and a migration of member data, not a configuration change, and nothing in this
 toolkit can undo it for you or warn you at the moment you do it, because
-`apply` compares the configuration against templates rather than against what
-some earlier `apply` already put on a host.
+`deployment apply` compares the configuration against templates rather than against what
+some earlier `deployment apply` already put on a host.
 
-Choose it once, before the first `apply`, and choose the name you want members
+Choose it once, before the first `deployment apply`, and choose the name you want members
 to have. Declaring no `wellknown` hostname is a legitimate choice with the same
 weight: `server_name` is then the app's own hostname, the homeserver serves its
 own delegation documents there, and that name is equally permanent.
@@ -3613,7 +3649,7 @@ change it. Nothing the toolkit does writes an app's database.
 
 * **`validate`** refuses a `config:` key the stack already writes
   (`config-key-already-rendered`), the same rule render applies, so a key that
-  gating has made redundant or contradictory is refused before `apply` touches
+  gating has made redundant or contradictory is refused before `deployment apply` touches
   a host. Whether a template writes a key can depend on the rest of the file,
   so `validate` renders the deployment to find out, with secrets it generates
   in memory and throws away: which keys a template writes never depends on a
@@ -3627,7 +3663,7 @@ See `docs/specs/2026-10-12-gate-settings.md`.
 
 ### `storage init` provisions object storage
 
-`apply` renders files and reconciles them against a manifest it wrote; that is
+`deployment apply` renders files and reconciles them against a manifest it wrote; that is
 what makes its refusal to clobber a locally edited file trustworthy. Garage's
 cluster layout, each app's S3 key, and each app's bucket are not files. They
 are state inside a running service that no manifest describes, so they are a
@@ -3637,21 +3673,21 @@ It checks what a site's Garage node already has and creates only what is
 missing, so running it again is safe. An app with `storage: local` keeps its
 files on its own disk and gets neither key nor bucket (see *A pinned app may
 keep its files on its own disk*). It assigns the cluster layout only when
-the site is the one Garage site; joining several is `storage add`, below. Like `apply`, it prints a plan and
+the site is the one Garage site; joining several is `storage add`, below. Like `deployment apply`, it prints a plan and
 writes nothing without `--execute`.
 
-The plan marks its lines the way `apply`'s dry run does: `○` and the step's
-title (`assign layout role`, `apply layout`, `import key for <app>`, `create bucket for
+The plan marks its lines the way `deployment apply`'s dry run does: `○` and the step's
+title (`assign layout role`, `deployment apply layout`, `import key for <app>`, `create bucket for
 <app>`, `grant key for <app>`, `allow website for <app>`) for what is still
 missing, its full sentence under it with `-v`; `✓` for what Garage already
 has, shown with `-v`. Piped output says `todo` and `ok` instead.
 
 It has to run after the infrastructure stack is up, because Garage has to be
-reachable to be asked what it already has. **`paisans apply --site` alone
+reachable to be asked what it already has. **`paisans deployment apply --site` alone
 leaves object storage unusable**: the containers come up, but no bucket exists and no
 application key can reach one, so the failure an adopter meets is an
 application error with no obvious cause, not a message naming a missing step.
-`storage init` is that missing step, and `paisans apply` without `--site` runs
+`storage init` is that missing step, and `paisans deployment apply` without `--site` runs
 it once every site is up, or `storage add` in its place when
 `storage.garage.sites` lists more than one site.
 
@@ -3669,7 +3705,7 @@ either fails (`layout apply` refuses fewer nodes than the replication factor)
 or, at replication 1, starts a second cluster that never meets the first.
 
 ```sh
-paisans apply --site home-b       # writes garage.toml, starts an isolated node
+paisans deployment apply --site home-b       # writes garage.toml, starts an isolated node
 paisans storage add               # dry run: every stage, read from live state
 paisans storage add --execute     # add --change-replication if the factor changes
 ```
@@ -3728,10 +3764,10 @@ validation warns on `dangerous` and on the two-site trade above. What
 `dangerous` risks: an upload exists on one disk until the other site catches
 up, uploads made during an outage are single copy until it returns, and a
 read can miss a recent change, including a delete, after a failover.
-Changing the mode is an ordinary `apply`.
+Changing the mode is an ordinary `deployment apply`.
 
 **Changing `replication` is not an ordinary apply.** Garage refuses to start
-when its stored layout was built at another factor, so `apply` refuses to
+when its stored layout was built at another factor, so `deployment apply` refuses to
 write such a `garage.toml`. `storage add --change-replication` runs the only
 procedure Garage documents, which it calls unsupported: every node at the old
 factor is stopped before any is changed (a node that meets a peer at a higher
@@ -3806,7 +3842,7 @@ by default and in gated stages, like `storage add`:
 |---|---|---|
 | 1. secrets | generates a new pair, the way `init` does, keeps the current one as `apps.<app>.s3_previous_access_key_id` and `s3_previous_secret_access_key`, and writes the file encrypted to its recipients | the file holds both pairs |
 | 2. Garage | imports the new key under the app's name and grants it read, write and owner on the app's bucket, beside the old key; website access is the bucket's and is left as it is | `bucket info` lists the new key ID with `RWO` |
-| 3. switch | applies the app alone, as `apply --site <site> --only <app>`, on every site running it | `apply --only` has nothing left to do, and the app passed apply's health gate |
+| 3. switch | applies the app alone, as `deployment apply --site <site> --only <app>`, on every site running it | `deployment apply --only` has nothing left to do, and the app passed apply's health gate |
 | 4. prove | from each of those sites, writes a probe with the new key through the S3 address the app is rendered with, reads it back, deletes it | byte for byte |
 | 5. retire | deletes the old key from Garage, then removes the previous pair from the secrets | Garage no longer holds the old key ID |
 
@@ -3889,7 +3925,7 @@ dns cloudflare
 ```
 
 **Any conflict refuses the whole run before a single record is written.** This
-is the same rule `apply` follows for a file it did not write: a record that
+is the same rule `deployment apply` follows for a file it did not write: a record that
 disagrees with the configuration is somebody's, and overwriting it would take
 down whatever they pointed it at. The whole run stops because half a set of
 records is a deployment some names reach and others do not, which is harder to
@@ -4080,7 +4116,7 @@ A record is deleted only when every one of these holds:
 own records: its SPF beside the toolkit's `v=spf1 -all` would be two SPF
 records, which a receiver ignores, and the null MX would turn its mail away.
 
-Until the prune has run, `dns init` refuses, and so does `apply` without
+Until the prune has run, `dns init` refuses, and so does `deployment apply` without
 `--site`, which runs it before any site is applied. At every name with mail under `community.domain` it looks for a
 no-mail record this deployment's `dns init` made (its comment, and exactly a
 no-mail content), and each one it finds is a conflict naming `dns prune
@@ -4227,7 +4263,7 @@ substitute: the encrypted file on a site is readable only with an age key, so
 losing every operator's key still loses every credential.
 
 The first two need no backup of their own beyond the sites, because every site
-keeps every signed version of them and `paisans config recover` writes them onto
+keeps every signed version of them and `paisans deployment recover` writes them onto
 an empty workstation. The sites are one failure domain's worth of copies,
 though: a copy outside them, in object storage, waits for the backup design,
 which is not built.
@@ -4245,7 +4281,7 @@ empty workstation can recover them from any host.
 
 The copies are recovery copies now and are built to become the deployment's
 shared source of truth: every version records its parent, two versions from one
-parent are a fork, and `apply` refuses to run from files older than the sites'
+parent are a fork, and `deployment apply` refuses to run from files older than the sites'
 newest version. The one loss this cannot protect is every operator losing their age
 key, which is why *Rendered configuration is a build artifact* tells every
 deployment to add a second recipient to `.sops.yaml`.
@@ -4303,8 +4339,8 @@ anchor's history is never trusted, for the same reason: only the anchor can say
 where the true history starts, so a second root written on a site is refused.
 
 **The head is the trusted version with the highest revision that no other
-trusted version builds on.** Two such versions are a fork, which stops `apply`
-until `paisans config publish --merge` resolves it.
+trusted version builds on.** Two such versions are a fork, which stops `deployment apply`
+until `paisans deployment publish --merge` resolves it.
 
 **Removing an operator who could decrypt the file** is also the operator's to
 finish by hand: take their age key out of `.sops.yaml` and re-encrypt the file
@@ -4323,8 +4359,8 @@ version is the newest, so three memories make an old one visible:
 | Memory | What it does | Why it is there |
 |--------|--------------|-----------------|
 | The workstation | `.paisans/config-seen` holds the newest revision seen; a head with a lower one is refused until the operator types `rollback`, which re-bases the record to the head chosen once the command commits its change. A run that stops, and every dry run, leaves the record as it was | the site the workstation reaches may be the one lying; a record nothing could lower would trap an operator restoring from an old backup, so the typed word lowers it deliberately |
-| A majority of sites | a pull, recovery, registration, the publish of a first version or `apply --execute` counts the sites it reached directly over ssh; with no more than half it asks for `partial` | a lying site can hide newer versions only from a workstation that reaches no honest site, which a majority makes unlikely. A version that arrived through another site's sync counts toward finding the newest, but never toward the majority, since "these peers answered" is that site's word |
-| The hosts | each host's grant record also holds the hash and revision of the version last applied to it, and `apply` refuses an older revision, or another version at the same revision, unless the operator types `rollback` | a host that has had a newer version is a witness a deleted ref cannot erase; the same revision under another hash is a version another operator applied there, which this apply would replace |
+| A majority of sites | a pull, recovery, registration, the publish of a first version or `deployment apply --execute` counts the sites it reached directly over ssh; with no more than half it asks for `partial` | a lying site can hide newer versions only from a workstation that reaches no honest site, which a majority makes unlikely. A version that arrived through another site's sync counts toward finding the newest, but never toward the majority, since "these peers answered" is that site's word |
+| The hosts | each host's grant record also holds the hash and revision of the version last applied to it, and `deployment apply` refuses an older revision, or another version at the same revision, unless the operator types `rollback` | a host that has had a newer version is a witness a deleted ref cannot erase; the same revision under another hash is a version another operator applied there, which this apply would replace |
 
 So a host attacker can roll back only the hosts they hold. What stays is a fresh
 workstation that reaches only sites the attacker controls: it can be served an
@@ -4367,12 +4403,12 @@ and nothing is pruned.
 
 ### Gathering, and why every site is asked
 
-`pull`, `recover` and `apply` gather the same way before they decide anything:
+`pull`, `recover` and `deployment apply` gather the same way before they decide anything:
 
 1. With `--execute`, every site reached starts its sync with its peers and the
    command waits, so a version only a site the operator cannot log in to holds
    (Eg: a site whose `ssh.keys` does not name them) arrives through one they can. A
-   dry run and `config log` start no sync, because a command changes a host only
+   dry run and `deployment log` start no sync, because a command changes a host only
    with `--execute`; they read what each site holds now.
 2. Every site is reached over ssh as the deployment's user, who owns the
    store: those the configuration names, or, for a recovery, those the trusted heads
@@ -4384,11 +4420,11 @@ and nothing is pruned.
 
 ```sh
 paisans operator register --execute   # sign an attestation, record your key
-paisans config publish --execute      # sign the local files, push to every site
-paisans config pull --execute         # move the files to the sites' newest
-paisans config log                    # every version, signer, holding sites
-paisans config publish --merge --execute   # one version on every head of a fork
-paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty workstation
+paisans deployment publish --execute      # sign the local files, push to every site
+paisans deployment pull --execute         # move the files to the sites' newest
+paisans deployment log                    # every version, signer, holding sites
+paisans deployment publish --merge --execute   # one version on every head of a fork
+paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # empty workstation
 ```
 
 * **`paisans operator register`** gives an operator who has never published an anchor
@@ -4396,24 +4432,24 @@ paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty
   ssh-agent that matches one listed under their entry in `operators` (or the one
   `--key` names), gathers, and signs an attestation: a version with the head's
   tree and the head as its only parent. It records the key in
-  `.paisans/signing-key`, and every later `publish` and `apply` signs with it.
+  `.paisans/signing-key`, and every later `publish` and `deployment apply` signs with it.
   It attests only a head whose files equal the operator's local files, since an
   attestation says "I hold this version"; otherwise it shows the difference. It
   changes only the sites' stores, and nothing without `--execute`. With
   `--execute` it asks for `partial` when no more than half the sites answered
   directly, since the attestation becomes the operator's anchor.
-* **`paisans config publish`** commits the files with the base as parent, signs,
+* **`paisans deployment publish`** commits the files with the base as parent, signs,
   and pushes to every site it reaches. It refuses when its base is not the
   sites' head, when no loaded key belongs to an operator the parent lists, and when
   no site answers; a site that missed it gets it from its peers. A first
   version, with no trusted head among the sites that answered, starts the
   history, so with no more than half the sites reached directly it asks for
   `partial`: an empty site must not start a second history silently.
-* **`paisans config pull`** moves files with no local edits to the head. Over
+* **`paisans deployment pull`** moves files with no local edits to the head. Over
   local edits on an older base it refuses, shows the difference, and with
   `--execute` writes the head's files to `.paisans/incoming/` to merge by hand
   before `publish --merge`.
-* **`paisans config recover`** onto a workstation with nothing gathers from the
+* **`paisans deployment recover`** onto a workstation with nothing gathers from the
   named hosts and every site the trusted heads name. It needs `--root` with the
   hash of a version the operator trusts, kept somewhere other than the
   workstation that was lost, because a history found only on the sites is
@@ -4421,13 +4457,59 @@ paisans config recover --from admin@203.0.113.9 --root <sha> --execute   # empty
   deployment when the logins' admission records name more than one. With a fork it writes
   each head to `.paisans/incoming/<sha>/` and refuses to choose, because which
   head wins is for an operator to decide, never an order.
-* **`apply`** gathers before the review, so a fork or files older than the
+* **`deployment apply`** gathers before the review, so a fork or files older than the
   sites' newest version are refused before the operator is asked anything; after
   the approval it publishes the very bytes it loaded and applies, so the store
   shows the declared state even when the apply stops part way, and each host
   records the version it was given. A version that reaches no site is refused,
   naming `site prepare` for a site with no store yet, because a version no site
   holds is not one the hosts can be checked against.
+
+`deployment` holds these commands and `apply` together because a configuration
+is a deployment: `deployment apply` puts the version on the hosts, and the rest
+publish, move and recover that same version.
+
+### This workstation keeps every deployment it applies
+
+A deployment's files sit in a directory the operator chose, often a git
+repository, and an operator who runs several deployments, or comes back to one
+after months, has to remember where each is. So the workstation keeps its own
+copy of each, in one place it can always find: the platform's data directory,
+`~/Library/Application Support/Paisans` on macOS, where an application keeps the
+data it makes, and `$XDG_DATA_HOME/paisans` elsewhere (`~/.local/share/paisans`
+when that is unset), by the XDG Base Directory convention. `$PAISANS_DATA_DIR`
+replaces either.
+
+```sh
+paisans deployment list                              # every saved deployment
+paisans deployment fetch --ssh admin@203.0.113.9     # save every deployment a host holds
+```
+
+* **`deployment apply --execute` and `deployment recover --execute` save** the
+  version they publish or recover. A copy that cannot be written is a warning,
+  not a failure: the version is on the sites already, and the copy is the
+  operator's convenience, not the store.
+* **Each copy is a workstation directory in its own right**,
+  `deployments/<id>/` with the three files and `.paisans/` beside them, so every
+  command takes it with `--config` and the trust rules above apply to it
+  unchanged. The secrets in it are encrypted as everywhere else, and the
+  directories are `0700`, since together they name every community the operator
+  runs.
+* **A copy is anchored on what signed it.** Saving records the key that signed
+  the version as the copy's signing key, and carries the pinned root, so a
+  later `deployment fetch` judges what a host serves from the operator's own
+  signature, as `deployment pull` does, and refuses a head older than the copy
+  has seen.
+* **`deployment fetch` reads a host's registry, through sudo,** and gathers every
+  deployment in it, changing nothing on the host. A deployment this
+  workstation never applied or recovered has no anchor, and a history found
+  only on a host is never trusted on its own, so its newest versions are set
+  aside in `.paisans/incoming/<sha>/` and listed `unverified`. Pinning one is a
+  recovery: `deployment recover --root <sha>`, with a hash checked with another
+  operator, after which the copy is saved and verified like any other.
+* **Ids from a host are checked before they become a path.** The registry is a
+  file anyone with root on the host can write, and an id names a directory
+  here.
 
 ### Secrets are merged key by key
 
@@ -4438,7 +4520,7 @@ and two changes to one key are refused, naming the key and never a value. The
 pull takes neither side's value by itself. To take the head's value, set that
 key locally to it and pull again. To keep the local value, take the head's value
 first so the pull can merge the rest, pull, then set the key back to your value
-with `paisans secrets set` and publish; a `pocket_id_groups` key, which `apply`
+with `paisans secrets set` and publish; a `pocket_id_groups` key, which `deployment apply`
 records and `secrets set` does not accept, is edited in the file with `sops`
 instead. A side with a `paisans mesh rekey` under way (a site with a next
 WireGuard key, or sites a `--all` run has left) is refused, naming its sites and
@@ -4479,8 +4561,8 @@ deletions pruning makes.
 
 **A deployment may run without backups, and is told so on every run.** No
 `backup` section, or `enabled: false`, warns `backups-off` from `validate` and
-`apply`, and nothing else about backups is checked. Adding the section later is
-an ordinary `apply`, with nothing to convert first; the spec's *Turning backups
+`deployment apply`, and nothing else about backups is checked. Adding the section later is
+an ordinary `deployment apply`, with nothing to convert first; the spec's *Turning backups
 on later* says what each part does when it does.
 
 While backups are on, `validate` refuses:
@@ -4548,7 +4630,7 @@ Backups that are off generate and owe nothing.
 
 ## Bootstrapping a site
 
-`apply` renders configuration on a workstation and pushes it over SSH — but the
+`deployment apply` renders configuration on a workstation and pushes it over SSH — but the
 WireGuard mesh those files create does not exist yet. First contact with any host
 has to happen over a path that is not the tunnel.
 
@@ -4711,7 +4793,7 @@ others; written once, rotating it is one edit and a `site prepare` of each site
 that names the operator.
 
 **At least two operators should reach the identity provider.** One lost
-workstation must not leave nobody able to run `apply`, sign a configuration
+workstation must not leave nobody able to run `deployment apply`, sign a configuration
 version or reach the identity provider's hosts. `validate` refuses a deployment
 with no operator whose keys are on every site that runs a `pocket-id` app
 (`operators-none`), since nobody could run it, and warns about one
@@ -4726,7 +4808,7 @@ every one of them. A deployment with no `pocket-id` app is not held to it.
 `email` is required so that every key in the file leads to somebody who can
 say whether it is still theirs. `name` is required because the operator's
 Pocket ID account is given it: apply splits it at its first space into the
-account's first and last name (see *`apply` makes the declared operators and hands each a login link*). The entry's own name is the operator's
+account's first and last name (see *`deployment apply` makes the declared operators and hands each a login link*). The entry's own name is the operator's
 Pocket ID username, which is fixed once the account exists. A key belongs to
 one operator: two operators sharing a key cannot be told apart on a host, and
 taking one of them off a site would leave the other's access resting on a key
@@ -4879,7 +4961,7 @@ A probe that never reached the host has not answered. Read as an answer, an
 ssh timeout on the command that sets the stored layout aside in `storage add`
 would say the aside name already exists from an earlier attempt, which nothing
 checked. Every command that asks a host a question (`storage add`, `site add`,
-`apply`) follows one rule: when the probe's own
+`deployment apply`) follows one rule: when the probe's own
 command fails to reach the host, the error says the host state could not be
 read, carries ssh's message, and the command stops there.
 
@@ -4903,7 +4985,7 @@ database app on the site.
 
 Every command that reaches only one site's host takes `--ssh <destination>`,
 the escape hatch for a route the section cannot describe. A command that
-reaches several sites (`site add`, `preflight`, `storage add`, `apply` without
+reaches several sites (`site add`, `preflight`, `storage add`, `deployment apply` without
 `--site`) takes none, because one destination cannot describe several. When it
 is given, it is passed to ssh
 verbatim, exactly as before the section existed, and the section's user, host,
@@ -5023,8 +5105,8 @@ skips sudo entirely, and with it everything above.
 
 ### The host check: what is already on a host decides how much is touched
 
-`apply` removes the images it superseded and `prune` removes every anonymous
-volume nothing mounted, and `site prepare`, `apply`, `site add` and `prune`
+`deployment apply` removes the images it superseded and `prune` removes every anonymous
+volume nothing mounted, and `site prepare`, `deployment apply`, `site add` and `prune`
 all bind ports. That is right on a dedicated host and wrong on one where
 somebody else runs a web server or a database. So before any of them changes
 anything, in a dry run as well as with `--execute`, it runs the **host
@@ -5132,7 +5214,7 @@ On a **shared** host:
   `paisans-<token>:` rules and never sets ufw's default policy, so nothing
   in this check, or in any command that runs as the deployment's user, reads
   or changes it.
-* **No image is removed**, as with `apply --keep-images`, and nothing is
+* **No image is removed**, as with `deployment apply --keep-images`, and nothing is
   swept, because an image the toolkit renders (`caddy`, `postgres`) may be
   what a foreign project runs.
 * **Docker is the deployment's own**: the check reads the user's rootless
@@ -5140,7 +5222,7 @@ On a **shared** host:
   its version, not its source*).
 
 The class is computed on every run and never stored: a host becomes shared
-the day someone installs something beside the deployment. `apply`'s manifest
+the day someone installs something beside the deployment. `deployment apply`'s manifest
 gate still refuses to overwrite a file it has no record of; the host check
 runs before it and covers what a manifest cannot see: ports, interfaces and
 other users' listeners.
@@ -5149,7 +5231,7 @@ other users' listeners.
 host's ruleset or another user's sockets, so a port taken after admission, and
 above all one taken by a DNAT rule with no listener, is invisible to the
 check. The gateway's Caddy serves `/.well-known/paisans/<token>`, answering
-with the deployment's token, and `apply` ends the gateway's step by fetching
+with the deployment's token, and `deployment apply` ends the gateway's step by fetching
 it through the community's public address on 443 (and on 80, expecting the
 redirect). Any other answer is a conflict: the step fails with "443 on <site>
 answers, but not as this deployment", whatever the host check saw. A gateway
@@ -5182,7 +5264,7 @@ version, so admit refuses, on any host and whatever its class:
   it, restarting the daemon and every container, on snapd's schedule rather
   than the owner's. A version number reveals neither.
 
-The host check, which `site prepare`, `apply` and the others run as the
+The host check, which `site prepare`, `deployment apply` and the others run as the
 deployment's user, reads the user's own daemon and refuses one older than
 engine 25.0.0 or compose 2.24.0, the first releases with
 `healthcheck.start_interval`, which the rendered stacks use; admit has
@@ -5194,7 +5276,7 @@ the owner runs, and that is a decision for whoever started them.
 
 ### `site prepare` keeps what is the deployment's user's
 
-`apply` assumes a host whose owner has admitted the deployment (see *A host's
+`deployment apply` assumes a host whose owner has admitted the deployment (see *A host's
 owner admits a site from a request*): the deployment's own user with its
 rootless Docker, the WireGuard tools, the firewall's rules, and on a data
 site a `/dev/watchdog` for Patroni. Those are root's, so `site admit` makes
@@ -5206,7 +5288,7 @@ it matters is a rebuild at the worst possible moment. So it is a command,
 prepare`* in [docs/commands.md](docs/commands.md).
 
 It reaches the host through the site's `ssh` section with the operator's own
-ssh, exactly as `apply` does, and so runs as the deployment's user: it
+ssh, exactly as `deployment apply` does, and so runs as the deployment's user: it
 installs nothing and writes nothing that is root's. It checks the admission
 record against the configuration first, refusing on any difference with the
 request line the owner needs; reads the watchdog `site admit` set up; and
@@ -5214,10 +5296,10 @@ keeps the user's `daemon.json`, the configuration store with its units, and
 the user's authorized keys. It probes read only, plans only what is missing,
 and changes nothing without `--execute`; a prepared host plans nothing, so
 re-running it after a failure resumes rather than restarts. It is not part of
-`apply --site` for the same reason `storage init` is not: the user's keys,
+`deployment apply --site` for the same reason `storage init` is not: the user's keys,
 store and daemon configuration are host state that no rendered manifest
-describes, so they are probed rather than compared. `apply` without `--site`
-runs each of them as a command of its own (see *`paisans apply` with no
+describes, so they are probed rather than compared. `deployment apply` without `--site`
+runs each of them as a command of its own (see *`paisans deployment apply` with no
 `--site` converges the whole deployment*).
 
 #### Operating systems are profiles
@@ -5301,7 +5383,7 @@ its network, so the site comes back with its app stacks down. `site admit`
 therefore writes a systemd drop-in for the user's manager,
 `user@<uid>.service`, with `Wants=` and `After=wg-quick@psns-<token>.service`,
 so the manager, its Docker daemon and its containers start after the mesh. A
-second drop-in on the mesh unit skips it, rather than failing it, until `apply`
+second drop-in on the mesh unit skips it, rather than failing it, until `deployment apply`
 writes its conf, so a fresh host shows no failed unit. A manager running when
 admit runs is not restarted: it takes the order at its next start. Each
 deployment on a host has its own, and `site evict` removes them.
@@ -5330,7 +5412,7 @@ own process, not a host bridge.
 
 A site cannot keep signed copies of the configuration (see *Every site keeps
 signed copies of the configuration*) until something exists on it to keep them
-in, and `apply` publishes a version before it changes anything else, so the
+in, and `deployment apply` publishes a version before it changes anything else, so the
 store has to exist first. `site prepare` therefore plans, under *configuration
 store* in its plan, only what the host lacks, all of it the deployment user's
 and under `/srv/paisans/<token>/.paisans/`: the bare repository at
@@ -5351,7 +5433,7 @@ host added carries that deployment's token, and is as foreign as an
 owner's. A later admit compares what the request derives with what `ufw show
 added` prints, and decides per rule.
 
-The plan marks its lines the way `apply`'s dry run does: `○` and the step's
+The plan marks its lines the way `deployment apply`'s dry run does: `○` and the step's
 title for a change still to make, its full sentence under it with `-v`; `✓`
 for what is already there, shown with `-v`; `!` for a warning. Piped output
 says `todo`, `ok` and `WARN` instead.
@@ -5486,7 +5568,7 @@ address lies in an on-link prefix.
 Rule 3 drops the deployment's dials to its own loopback too, so the
 deployment stays off loopback entirely. Every listener the toolkit renders
 for etcd, Patroni, Postgres, HAProxy and Garage binds the site's mesh address
-alone, and every command `apply`, `doctor`, `site add`, `site remove`,
+alone, and every command `deployment apply`, `doctor`, `site add`, `site remove`,
 `storage add` and `secrets rotate` run on a host dials a mesh address, which
 rule 1 accepts. Caddy serves its admin API on a unix socket inside its
 container, where `caddy reload` run in that container reaches it. A test
@@ -5641,7 +5723,7 @@ authorized key of the login user through someone else's run. That is a shell as
 the deployment's user, with its rootless Docker, and nothing the owner's
 machine has beyond it: the user is unprivileged and fenced off the owner's
 machine (see *A host's owner admits a site from a request*). The review (see
-*`apply` and `site prepare` review what `paisans-stack.yaml` grants*) shows
+*`deployment apply` and `site prepare` review what `paisans-stack.yaml` grants*) shows
 every key a run would add, with its operator and fingerprint, and an
 `--execute` run asks for `approve` at a terminal before anything changes, or
 prints each key `--yes` approves.
@@ -5667,14 +5749,14 @@ named on a command line does not apply the blacklist. This is the kind of
 difference a profile exists to hold: a distribution that does not blacklist
 `softdog` can use `modules-load.d`.
 
-### `apply` and `site prepare` review what `paisans-stack.yaml` grants
+### `deployment apply` and `site prepare` review what `paisans-stack.yaml` grants
 
 `paisans-stack.yaml` is one file every operator of a deployment edits and commits, and
-whoever runs `apply` runs it with their own access. So any operator can grant
+whoever runs `deployment apply` runs it with their own access. So any operator can grant
 themselves a host through someone else's run: by adding their name to a
 site's `ssh.keys`, or replacing the key under an operator it already names, which
 makes `site prepare` install their key for the deployment's user; or
-by pointing `apps.<name>.images` at an image they control, which `apply` pulls
+by pointing `apps.<name>.images` at an image they control, which `deployment apply` pulls
 and runs with whatever the template mounts. A plan line saying `○ authorize
 ssh key` is easy to miss, and with `--execute` it is not shown at all. So both
 commands show what changes and ask before it does.
@@ -5727,7 +5809,7 @@ from the configuration or from a host shows such a character as an escape
 mode 700 state directory. It holds fingerprints and image references, nothing
 secret. Each part is written by the command that applies it, once that
 command's steps for the site have all succeeded: the login and keys by `site
-prepare`, the images by `apply`. What the
+prepare`, the images by `deployment apply`. What the
 operator approves is written earlier, as soon as they type approve and before
 the first change, in the record's `approved` part: a run that fails part way
 leaves the applied parts as they were, and the next run applies what was
@@ -5824,10 +5906,10 @@ list stays readable. A host with no record of the parts a review covers counts i
 entries as new and says `first review` on its line, because there is no
 record yet: the first `--execute` on such a host asks once for the whole list,
 which is the record being made, and later runs show only what changes.
-`site prepare` reviews the login and the keys; `apply --site` the images,
+`site prepare` reviews the login and the keys; `deployment apply --site` the images,
 narrowed to the named stacks by `--only`; `site
 add` the new site's images, since its stage 4 applies that site's whole
-render, recording them once that stage's gate has passed; `apply` with no
+render, recording them once that stage's gate has passed; `deployment apply` with no
 `--site` every part of every site, since it runs them all.
 
 **The dry run shows the review and asks nothing.** It ends with what
@@ -5837,7 +5919,7 @@ render, recording them once that stage's gate has passed; `apply` with no
 operator to type `approve` at a terminal, through the same prompt `site remove
 --delete-data` uses, before its first change, so that an operator who does not approve leaves the host
 exactly as it was. Anything else, or end of input, stops the command with
-nothing changed. `apply` with no `--site` asks once for every site, before
+nothing changed. `deployment apply` with no `--site` asks once for every site, before
 its first step; each step it runs then checks that it applies what was
 approved, and refuses anything that changed since, rather than asking again. An `init` it runs comes first, since
 it changes no host and the images are rendered from the secrets it generates.
@@ -5921,10 +6003,10 @@ There is nothing to tunnel to yet.
 
 ```
 paisans init               # steps 1 and 2
-paisans apply --execute    # steps 3 to 6
+paisans deployment apply --execute    # steps 3 to 6
 ```
 
-`init` reaches a host only to read it. `apply` without `--site` runs `init`
+`init` reaches a host only to read it. `deployment apply` without `--site` runs `init`
 itself when it has work, so the second command alone does all six.
 
 1. Check the configuration, and the mesh subnet against every host. Refuse
@@ -5946,9 +6028,9 @@ reconfigured and no address changes.
 Same principle as running the cluster at one node: build the final shape
 immediately, then grow it.
 
-### `apply` brings the mesh interface up before anything binds to it
+### `deployment apply` brings the mesh interface up before anything binds to it
 
-Step 4 is `apply`'s job, and it runs after the files are written and before any
+Step 4 is `deployment apply`'s job, and it runs after the files are written and before any
 container is started, checked or restarted. A stack started first fails to bind
 its mesh address, and Docker restarts it in a loop rather than reporting it, so
 the apply would claim success over a site where nothing listens.
@@ -5957,12 +6039,12 @@ the apply would claim success over a site where nothing listens.
 cannot create an interface, write `/etc/wireguard` or start a system unit,
 so `site admit` installs one root-owned script per deployment,
 `/usr/local/libexec/paisans/wg-psns-<token>`, and one sudoers line that
-lets that user run it and nothing else as root. `apply` writes the mesh
+lets that user run it and nothing else as root. `deployment apply` writes the mesh
 file as `/srv/paisans/<token>/psns-<token>.conf`, its own copy, which it
 can read back and compare like any other file it renders, and hands it to
 the helper's `put` before every start, sync or restart; `put` installs it
 as `/etc/wireguard/psns-<token>.conf`, mode 600. `put` accepts only the
-keys `apply` renders, each value matching its pattern, the `ListenPort` the
+keys `deployment apply` renders, each value matching its pattern, the `ListenPort` the
 owner admitted, and an `Address` and `AllowedIPs` inside the mesh subnet,
 and refuses the whole file otherwise, because wg-quick runs a file's
 `PreUp`, `PostUp`, `PreDown` and `PostDown` as root and adds a route for
@@ -5999,7 +6081,7 @@ inside the mesh subnet, which the interface's own `Address` already routes
 **An up interface is read back even when its file did not change.**
 Writing the file and handing it over are separate commands, so a run that
 stopped between them leaves the file as rendered and the interface on what
-it ran before. `apply` reads the interface's addresses and MTU with `ip`,
+it ran before. `deployment apply` reads the interface's addresses and MTU with `ip`,
 and its key, `ListenPort`, peers, each peer's `AllowedIPs` and
 `PersistentKeepalive` with the helper's `show`. It restarts the interface
 when it lacks the file's `Address` or runs another `MTU`, which only
@@ -6016,7 +6098,7 @@ brought up by hand serves every service just as well, and starting the unit
 on top of it would fail on an interface that already exists.
 
 **The interface is read back before any stack starts.** After it starts,
-restarts or syncs the mesh, `apply` reads `ip -br addr show dev psns-<token>` and
+restarts or syncs the mesh, `deployment apply` reads `ip -br addr show dev psns-<token>` and
 carries on only when the interface exists, is not down and holds the site's
 `Address`. The unit's exit status alone is not enough: an etcd started over a
 missing interface crash loops on `bind: cannot assign requested address`, and
@@ -6025,7 +6107,7 @@ failed or the interface is simply absent, the apply stops with
 `mesh: wg-quick@psns-<token> did not come up` and explains it from the unit's
 journal, which the deployment's user reads with the helper's `log`
 (`sudo /usr/local/libexec/paisans/wg-psns-<token> log`, the unit's last 200
-lines, of which `apply` keeps 20): wg-quick's own error line by default,
+lines, of which `deployment apply` keeps 20): wg-quick's own error line by default,
 the last 20 lines with `-v`. A peer
 `Endpoint` whose name does not resolve from the site is the common case, and
 is said as such: create its DNS record with `paisans dns init` and apply again.
@@ -6034,7 +6116,7 @@ is said as such: create its DNS record with `paisans dns init` and apply again.
 `Endpoint` once and treats "not found" as final, and systemd-resolved keeps a
 "not found" for the zone's negative TTL, which can be many minutes. A site that
 looked a peer's name up before `dns init` created its record would fail
-wg-quick long after the record exists. So whenever `apply` is about to start,
+wg-quick long after the record exists. So whenever `deployment apply` is about to start,
 restart or sync the mesh and a peer's rendered `Endpoint` is a name rather
 than an address (a site with an `endpoint` name and no `public_address`), it
 first runs the step `resolve mesh endpoints`: it clears the site's
@@ -6046,9 +6128,63 @@ not resolve stops the apply before the interface is touched, with
 record with `paisans dns init` and apply again. A mesh with nothing to do, or
 whose peers are all addresses, resolves nothing.
 
-### `paisans apply` with no `--site` converges the whole deployment
+### `deployment apply` keeps the rootless namespace's `src_valid_mark` at 0
 
-`paisans apply` without `--site` takes `paisans-stack.yaml` to a complete, running
+The deployment user's rootless Docker keeps its bridges in a network namespace
+of RootlessKit's, and RootlessKit's port driver hands each connection to a
+published port into it with a transparent dial: a socket bound to the real
+client's address, so that an app sees the gateway's mesh address and trusts
+its `X-Forwarded-For`, which every app's trusted proxy range (the mesh subnet)
+depends on. The dial's replies come home by a mark, `0x64`, and a routing table
+of RootlessKit's own whose one route is local
+(rootless-containers/rootlesskit, `pkg/port/builtin/child/child.go`).
+
+**At `net.ipv4.conf.all.src_valid_mark` 1 that dial fails.** The kernel then
+checks a reply's source address with the reply's mark, finds the container's
+address in that local table, takes it for one of the namespace's own, and drops
+the reply (`ip_route_input_noref` returns `-EINVAL`). RootlessKit gives the dial
+one second and dials again without the client's address. So every new
+connection to every app waits a second, which a gateway's kept alive
+connections hide until a browser opens several at once, and the app sees the
+Docker bridge's gateway, outside the range it trusts a forwarded address from:
+Pocket ID's rate limit and audit log see one address for every member. A
+namespace copies the host's values when it is made, and Tailscale sets the
+host's to 1 for a reverse path workaround of its own
+(tailscale/tailscale, `wgengine/router/osrouter/router_linux.go`), so a host
+that runs Tailscale for its owner gives the deployment the wait.
+
+**`deployment apply` sets it to 0 in the namespace, as the deployment's user.**
+It writes 0 to every `/proc/sys/net/ipv4/conf/*/src_valid_mark` there: `all`,
+which the kernel ORs with each device's own value, each device's, and
+`default`, which a device made later starts with. The namespace belongs to
+that user's user namespace, so this needs no root, and the host's own value,
+which Tailscale needs, is not touched. A restart of the daemon makes the
+namespace afresh with the host's values, so `deployment apply` also installs
+`~/.config/systemd/user/docker.service.d/paisans-src-valid-mark.conf`, whose
+`ExecStartPost` writes them again at every start, and has the user's manager
+reload it. Its command starts with `-`, so a failure there never stops the
+daemon from starting: the daemon then runs with the wait, and `paisans doctor`
+says so.
+
+Before any stack moves, after the mesh, `deployment apply` reads the drop-in
+and the namespace's highest value. It installs the drop-in when it is absent
+or differs, then writes the values when one reads 1, and stops the apply if either
+fails, so no container is started into a namespace with the wait. A read that
+fails asks for nothing: it is not a gate, and `paisans doctor` reports a
+namespace it cannot read. An apply narrowed with `--only`, and a plan another
+command scopes to a few files, does not read it: each moves only what it names.
+The drop-in counts as missing when the user's manager has not loaded it, as
+after a reload that failed once the file was in place.
+
+`paisans doctor` reads the highest value with its rootless Docker check and
+fails a site whose namespace holds 1, naming Tailscale and
+`paisans deployment apply`. It warns when the namespace holds 0 but the host
+holds 1 and the user's manager has not loaded the drop-in, since the daemon's
+next start copies the 1 again.
+
+### `paisans deployment apply` with no `--site` converges the whole deployment
+
+`paisans deployment apply` without `--site` takes `paisans-stack.yaml` to a complete, running
 stack, and keeps it there. It reads whether `init` has work and which etcd
 members have been founded, plans the commands below in the order the
 deployment needs them, and with `--execute` runs them in the same process,
@@ -6063,14 +6199,14 @@ it:
 | hosts | `site prepare --site <s>` | every site; a prepared host plans nothing |
 | pull | each site's images (below) | every site; a host that has every image its apply needs pulls nothing |
 | dns | `dns init` | always; a record pointing elsewhere stops it, to be changed by hand |
-| founding | `apply --site <s>`: each witness in `etcd.members`, then `apply --site <g> --hold-apps` for each gateway outside it, then the other members | a member is still being founded (below); a witness that is founded already is applied here too while a data member is still being founded, since that member's apply refuses until a witness's etcd runs; each gateway outside `etcd.members` is applied with every app stack on it held back, its mesh, infrastructure and Caddy only, because the data members' apps fetch Pocket ID's discovery document through it as they start, and its Caddy starts before they answer. Its full apply comes among the other sites |
+| founding | `deployment apply --site <s>`: each witness in `etcd.members`, then `deployment apply --site <g> --hold-apps` for each gateway outside it, then the other members | a member is still being founded (below); a witness that is founded already is applied here too while a data member is still being founded, since that member's apply refuses until a witness's etcd runs; each gateway outside `etcd.members` is applied with every app stack on it held back, its mesh, infrastructure and Caddy only, because the data members' apps fetch Pocket ID's discovery document through it as they start, and its Caddy starts before they answer. Its full apply comes among the other sites |
 | joining | `site add <s>` | the cluster runs and a data member has not joined it; a joining witness is joined by that `site add`, and gets one of its own only when no data member joins, which stops the run |
-| other sites | `apply --site <s>`, monitor sites last | first each site that joined with `roles: [data, apps]`, which starts its apps, and then each gateway in `etcd.members`, so its routes gain the new apps site; then every site not in `etcd.members`, and then every Garage site no earlier step applies or joins, since storage works through Garage's container |
+| other sites | `deployment apply --site <s>`, monitor sites last | first each site that joined with `roles: [data, apps]`, which starts its apps, and then each gateway in `etcd.members`, so its routes gain the new apps site; then every site not in `etcd.members`, and then every Garage site no earlier step applies or joins, since storage works through Garage's container |
 | storage | `storage init --site <g>` for one Garage site, `storage add` for several | any Garage site |
-| pass two | `apply --site <s>` for every site, monitor sites last, a monitor in `etcd.members` too | always: it resumes a founding stop or a replica's wait for the databases, and moves what earlier steps changed |
+| pass two | `deployment apply --site <s>` for every site, monitor sites last, a monitor in `etcd.members` too | always: it resumes a founding stop or a replica's wait for the databases, and moves what earlier steps changed |
 | gateway | `gateway move` | a site without the gateway role still holds this deployment's gateway (see *Moving the gateway*) |
 
-**The configuration is published once the stores exist.** The version `apply`
+**The configuration is published once the stores exist.** The version `deployment apply`
 applies is gathered before the review, so a fork or files older than the sites'
 newest version are refused before anything is asked (see *Every site keeps
 signed copies of the configuration*). It is published after the `site prepare`
@@ -6081,14 +6217,14 @@ change keeps the store showing the declared state even if the run stops part
 way. A run that stops between prepare and publish has granted keys without
 publishing the version, and the next run publishes it. A version that reaches no
 site is refused, naming `site prepare`, because the hosts are checked against
-what the store holds. `apply --site` without a store refuses in the same words.
+what the store holds. `deployment apply --site` without a store refuses in the same words.
 An apply that records what it made at Pocket ID, a client's credentials or a
 signup group's ID, writes `secrets.enc.yaml` after the version was published.
 Before its host records the version applied, it publishes the bytes it wrote
-as the next revision, which the host records; as a step of `apply` without
+as the next revision, which the host records; as a step of `deployment apply` without
 `--site`, every later step applies that revision.
 Gathering reaches every site as the deployment's user and needs the standard file names
-beside `paisans-stack.yaml`, so a deployment with renamed files cannot use `apply`
+beside `paisans-stack.yaml`, so a deployment with renamed files cannot use `deployment apply`
 until they are renamed; and a dry run needs an operator's key in the ssh-agent too,
 because it checks the key `--execute` would sign with.
 
@@ -6105,14 +6241,14 @@ install, with nothing applied.
 installed.** The install applies one site at a time, and an apply pulls the
 images its stacks name as it recreates them, so on a first deployment each
 host's downloads, gigabytes each, would run in turn while every other host sat
-idle. The pull stage plans each site exactly as its `apply --site` would, and
+idle. The pull stage plans each site exactly as its `deployment apply --site` would, and
 pulls on the host the images that plan would pull: the rendered images the host
 does not have, of the stacks the apply will recreate. Each host pulls a few
 images at a time, every host at once. Each apply after it finds its images
 present. It needs only the user's Docker, so it follows prepare
 directly; ahead of `dns`, a host short of space stops the run before a record is published for a
 deployment that cannot start. The same plan carries the free space check (see
-*`apply` checks free space before it pulls*), so a host short of space is
+*`deployment apply` checks free space before it pulls*), so a host short of space is
 refused here, before any host has pulled a layer, with the words its apply
 would use, and `--min-free` reaches this check as it reaches each apply.
 Anything else that plan would refuse, such as a file edited on the host, is
@@ -6138,11 +6274,11 @@ host's admission and refuses as that command does. Then, before the
 first step that changes a host, it shows one review of what `paisans-stack.yaml`
 grants on every site, and asks once when anything outside the foundation is
 added or changed (see
-*`apply` and `site prepare` review what `paisans-stack.yaml` grants*); each step then
+*`deployment apply` and `site prepare` review what `paisans-stack.yaml` grants*); each step then
 applies what was approved, and refuses anything that changed since. An `init`
 with work to do runs ahead of the review: it writes only local files, and the
 images reviewed are rendered from the secrets it generates. `-v` reaches every step, and `--keep-images` and
-`--min-free` each `apply`; `--ssh`, `--overwrite`, `--only` and `--recreate`
+`--min-free` each `deployment apply`; `--ssh`, `--overwrite`, `--only` and `--recreate`
 are about one site, and are refused without `--site`. A stop names its step and how
 to carry on: usually by running it again, but a DNS record pointing elsewhere
 is first changed at the provider, and a `storage add` gate still waiting on
@@ -6155,10 +6291,10 @@ leader's site has created them. Still waiting then, it stops the run. It never t
 app the yaml no longer declares is reported by the deployment record's warning,
 with the command that removes it. Once Pocket ID runs, every operator the
 `operators` section declares is made a Pocket ID user and a community admin
-and handed a login link (see *`apply` makes the declared operators and hands each a login link*).
+and handed a login link (see *`deployment apply` makes the declared operators and hands each a login link*).
 What only the operator can decide is left to its own command: a credential
 the toolkit cannot generate (`secrets set`), and a DNS record pointing
-elsewhere. `apply --site <name>` is unchanged, for one site at a time.
+elsewhere. `deployment apply --site <name>` is unchanged, for one site at a time.
 `docs/specs/2026-10-09-apply-converge.md` is the approved specification.
 
 The output does not follow the phases. After `configuration` and
@@ -6176,7 +6312,7 @@ a passkey, what the run made otherwise, and in a dry run what it would make.
 Then, when an app is served behind the operator's own web
 server, a `web server` section: with `--execute` a line for each reference
 snippet written and a line per app for its web server check, and in a
-dry run a line per app, `checked with --execute` (see *The monitor has a site
+dry run a line per app, `--execute will check it` (see *The monitor has a site
 of its own*). Last, a note names `secrets set` for each credential still owed,
 since only the operator can supply it. A run with `--execute` ends
 `Deployment complete.`; one where an app failed its web server check, or its site
@@ -6219,7 +6355,11 @@ install
 
 The pull lines are drawn the same way, each ending with how many images its
 host pulled, or `nothing to pull`; `-v` lists each image under its site's line
-with the time it took.
+with the time it took. Under each line, at every verbosity, is every image whose
+build that site's apply moves, with the builds it goes between, as a dry run of
+the one site lists it. The install lines say only how long each site took, so
+this is where a run that brings an app a new release says which app, and to
+what.
 
 A host whose prepare fails does not stop the others: each is prepared, each
 failure is marked on its own line, and the run then stops before install with
@@ -6253,12 +6393,12 @@ that did not end are printed as waiting:
 ```
 install
   ✓ vm: 64.3s
-      ✓ apply --site vm: 22.0s
-      ✓ apply --site vm: 42.3s
+      ✓ deployment apply --site vm: 22.0s
+      ✓ deployment apply --site vm: 42.3s
   ✓ home-a: 89.5s
-      ✓ apply --site home-a: paused until home-b runs etcd
+      ✓ deployment apply --site home-a: paused until home-b runs etcd
         home-a is waiting on home-b to start etcd.
-      ✓ apply --site home-a: 58.5s
+      ✓ deployment apply --site home-a: 58.5s
   ...
 ```
 
@@ -6287,7 +6427,8 @@ work. `-v` lists each step under its line with its own status. Each pull line is
 the plan its site's apply would make: `○` with how many images it would pull and
 the free space they land in, `✓` `nothing to pull`, `✗` with the free space
 refusal `--execute` would stop at, or a dim `·` `after site prepare` while its
-site's prepare has work, since a host whose Docker cannot answer has no images to ask about:
+site's prepare has work, since a host whose Docker cannot answer has no images to ask about.
+Under a line that is not waiting is each image whose build its apply would move:
 
 ```
 configuration
@@ -6302,6 +6443,7 @@ prepare
 pull
   · home-a: after site prepare --site home-a
   ○ home-b: 3 images to pull, 12.4 GiB free
+       talk  app  ghcr.io/example-org/mbin:v1-fork  1.15.0-fork (sha256:1a2b3c4d5e6f) -> 1.16.0-fork (sha256:3c4d5e6f7a8b)
   ○ vm: 1 image to pull, 6.2 GiB free
   ✓ watch: nothing to pull
 
@@ -6328,7 +6470,7 @@ would written into `etcd.members` by hand.
 Operators admit sites one host at a time, and a deployment that works on fewer
 sites should not wait for all of them. So every run classifies every declared
 site, once, at its start, and every step of the run uses that classification.
-`apply` without `--site` and `apply --site` both do: the second reaches every
+`deployment apply` without `--site` and `deployment apply --site` both do: the second reaches every
 site's host too, so one site's files never disagree with another's about who is
 in the mesh.
 
@@ -6367,7 +6509,7 @@ drops a joined site from the mesh.
 **Pending sites are left out as if not yet added.** The run plans the
 **effective topology**, the declaration less its pending sites, and renders
 every ready site from it. A pending data site joins through the path `site
-add` takes once its host admits it; the next `apply` finds it ready, with no
+add` takes once its host admits it; the next `deployment apply` finds it ready, with no
 other command. A site whose only route into the mesh is a pending site's
 `endpoint` is pending too, with that reason. Garage with fewer ready nodes
 than its replication holds back storage, and the apps that need it, with a
@@ -6427,9 +6569,9 @@ cluster formed seconds after the witness was applied.
 The witness goes first because nothing waits on it: it runs no Patroni, so its
 apply finishes on its own and its etcd is running for the sites after it. Two
 gates enforce the rest, and both apply only while **this site's etcd member is
-being founded**, which `apply` reads as the absence of `/srv/paisans/<token>/infra/etcd-initial`:
+being founded**, which `deployment apply` reads as the absence of `/srv/paisans/<token>/infra/etcd-initial`:
 
-| Gate | When | What `apply` does |
+| Gate | When | What `deployment apply` does |
 |------|------|-------------------|
 | witness first | a data site's member is being founded and a witness in `etcd.members` runs no etcd | refuses to touch the infrastructure stack, and names the witness to apply |
 | founding stop | a data site's member is being founded and another member runs no etcd yet | brings the infrastructure stack up, so this site's etcd joins the set, then stops before the wait for a primary, naming the sites still to apply; the next apply resumes |
@@ -6454,7 +6596,7 @@ v3.5.16 a member waits to publish itself to the cluster before it serves, and
 publishing needs a quorum, so `member list`, `endpoint status` and `/health` all
 hang. So whether a member runs is asked of Docker (`compose ps --status running
 etcd`), not of etcd. The check against the live membership asks `member list` as
-always; when that fails on a member while this site is being founded, `apply`
+always; when that fails on a member while this site is being founded, `deployment apply`
 reads that member's own `etcd-initial`. If it records
 `initial-cluster-state=new`, the member belongs to exactly the cluster its
 `initial-cluster` names, so that list is compared with `etcd.members` as a live
@@ -6462,13 +6604,13 @@ membership would be. A member with no such record is an error, and so is one
 that answers nothing when this site is past founding: that is a cluster in
 trouble, not one being born.
 
-### `apply` creates each clustered app's role and database
+### `deployment apply` creates each clustered app's role and database
 
 Step 6 needs something step 5 does not provide. Patroni creates its superuser,
 its replication user and an `admin` role from `patroni.env`, but nothing creates
 `talk` or `docs`, and an app started without its role fails to authenticate and
 is restarted in a loop. So on a site in `cluster.sites`, after the
-infrastructure stack and before the first app stack, `apply`:
+infrastructure stack and before the first app stack, `deployment apply`:
 
 1. waits up to three minutes for Patroni's `GET /cluster` to name a running
    leader;
@@ -6531,7 +6673,7 @@ polled out like a missing leader: a running member's name does not change.
 `/primary` returns the same 503 to a replica as to a node still running initdb,
 while `/cluster` names the leader (Patroni v4.1.0, `docs/rest_api.rst`).
 
-### `apply` restarts only the infrastructure service whose file changed
+### `deployment apply` restarts only the infrastructure service whose file changed
 
 The infrastructure stack is one compose project holding etcd, Patroni, HAProxy,
 Garage, the toolkit's Caddy and the heartbeat pusher, each where the site's
@@ -6555,7 +6697,7 @@ changed; a bind mounted file is not configuration to Compose. So a
 `haproxy.cfg` changed in the same apply as a `patroni.env` left HAProxy running
 on the old file, and since `haproxy.cfg` is a single file bind mount that a new
 file is renamed over, the running container keeps the old inode
-(moby/moby#15793). After the `up -d`, `apply` restarts each service whose
+(moby/moby#15793). After the `up -d`, `deployment apply` restarts each service whose
 bind mounted file changed and whose container `up -d` left in place, and none
 it replaced. Which is which comes from the container IDs `docker compose ps`
 reports before and after, not from `up -d`'s progress lines, which are for
@@ -6584,7 +6726,7 @@ nothing schedules, so a tight quota is an alarm waiting on a burst.
 These are runtime flags, read on every start, unlike `--initial-cluster` and
 `--initial-cluster-state`, which etcd reads only on a member's first start and
 which `/srv/paisans/<token>/infra/etcd-initial` keeps fixed. Changing them is an ordinary
-change to the infrastructure compose file: `apply` recreates the `etcd`
+change to the infrastructure compose file: `deployment apply` recreates the `etcd`
 service on the site it is applying and leaves the record alone. On a live
 deployment that is one member at a time, one site per apply, and with three
 voters a member down for its recreate leaves the other two as quorum. Apply
@@ -6604,20 +6746,20 @@ So a stack the pending record still owes runs `docker compose up -d
 them. The record drops each stack as soon as its action finishes, so only the
 stack that stopped and the ones after it are forced, not the ones that were
 already fine. An operator who finds a stack in the same state with no record
-names it: `apply --recreate <stack>`, one stack per flag, refused for a stack
+names it: `deployment apply --recreate <stack>`, one stack per flag, refused for a stack
 the site does not render, and planned even when nothing changed. The ordering
 holds either way: the infrastructure stack first, the databases, then apps.
 
 **Only those stacks are forced**, because a forced recreate replaces every
 container of a stack, and a recreate is an outage however brief.
 
-### `apply` checks each stack before the next one moves
+### `deployment apply` checks each stack before the next one moves
 
 `docker compose up -d` and `restart` exit as soon as containers start. On a
 real host that let an apply report success while Mbin's app could not reach its
 database: the containers were up, and nothing was asking whether they worked.
 
-So after each stack's action `apply` waits, up to five minutes and polling
+So after each stack's action `deployment apply` waits, up to five minutes and polling
 every five seconds, until every container of that compose project is running
 and every one that defines a healthcheck reports `healthy`. It reads `docker
 compose ps --all --format json`, `--all` because an exited container is exactly
@@ -6625,7 +6767,7 @@ what the check is for (docker/compose, `cmd/compose/ps.go`). A container with
 no healthcheck counts once it runs: the toolkit cannot invent a check an image
 does not ship, and refusing such a stack would refuse most of them.
 
-| What `ps` shows | What `apply` does |
+| What `ps` shows | What `deployment apply` does |
 |-----------------|-------------------|
 | every container running, healthchecks `healthy` | moves on to the next stack |
 | a container still `created`, or a healthcheck `starting` | keeps polling |
@@ -6637,11 +6779,11 @@ from its last 30 log lines (`docker compose logs --tail 30`), and starts
 nothing after it:
 
 ```
-✗ apply stopped at apply --site site-b
+✗ apply stopped at deployment apply --site site-b
   site-b: stack infra is not healthy: etcd (restarting, exit code 0).
   etcd: listen tcp 10.45.0.1:2380: bind: cannot assign requested address
   Nothing after this stack was started; the next apply recreates it.
-  Run paisans apply --execute again to resume.
+  Run paisans deployment apply --execute again to resume.
 ```
 
 The cause is the newest line that reads as a failure: for a JSON log (etcd,
@@ -6672,7 +6814,7 @@ database gets one pointing at doctor's Patroni check:
 ```
 
 A TLS error on a hostname Paisans does not serve gets no referral. A site ssh
-cannot reach, in `apply` or in `init`'s read of every site, ends with `Run
+cannot reach, in `deployment apply` or in `init`'s read of every site, ends with `Run
 paisans doctor --site <site>`, whose reach check says what the deployment is
 without while it is gone. `gateway move` calls the DNS provider without the
 token check `dns init` makes, so a refusal there (Cloudflare's `9109` or
@@ -6686,7 +6828,7 @@ keep trying forever without telling anyone. A timeout stops the apply too, for
 the same reason the other gates refuse rather than warn: an apply
 that reports success over a broken stack is how this was found.
 
-### `apply` restarts the apps whose database path changed
+### `deployment apply` restarts the apps whose database path changed
 
 An app with `cluster` placement reaches the database through its own site's
 HAProxy (rule 2), so a restarted HAProxy, or a Patroni that is recreated and
@@ -6700,7 +6842,7 @@ nothing in the toolkit noticed. Pocket ID recovered on its own.
 
 The toolkit owns this (founder decision): whatever it does that changes the
 database path restarts the app stacks that depend on it, and says so in the
-plan. In `apply` that is a change to the infrastructure stack that moves
+plan. In `deployment apply` that is a change to the infrastructure stack that moves
 HAProxy or Patroni: `haproxy.cfg` or `patroni.env` changed, the `haproxy` or
 `patroni` service changed in `compose.yaml`, or the action restarts or force
 recreates either. Then every app on the site with `cluster` placement and a
@@ -6716,7 +6858,7 @@ The dry run lists the restart, and `-v` gives its reason under it:
 An app that already has its own restart or recreate keeps that one action,
 with the reason added; it is not acted on twice. A change that moves only etcd,
 Garage or Caddy restarts no app: a restart of the infrastructure stack is
-narrowed to the services whose files changed (see "`apply` restarts only the
+narrowed to the services whose files changed (see "`deployment apply` restarts only the
 infrastructure service whose file changed"), and a recreate replaces only the
 services whose configuration Compose sees changed. A pinned app has its own
 Postgres and is not affected. `--only` without `infra` moves nothing under the
@@ -6817,8 +6959,8 @@ not be put in front of an app that uses them.
 * **A consumer whose lock connection died** (idle cut, switchover) fails a
   lock until the planned reconnecting store reopens it. Without that wrapper
   it fails until the process restarts, which `--time-limit=3600`, a crash on
-  the scheduler poll, or the restarts `apply`, `site add` and `failover test`
-  make when they move the database path (see "`apply` restarts the apps whose
+  the scheduler poll, or the restarts `deployment apply`, `site add` and `failover test`
+  make when they move the database path (see "`deployment apply` restarts the apps whose
   database path changed") all bring about. The failed message is retried.
 
 ### Mbin's queues are in Postgres by default
@@ -6875,7 +7017,7 @@ RabbitMQ the default for one site, adding a second would change the backend,
 and `site add` would carry a queue drain: an addition would become a
 migration.
 
-**Switching an existing stack is not automated.** `apply` renders the new
+**Switching an existing stack is not automated.** `deployment apply` renders the new
 `.env` and compose file, but does not drain the old broker, and compose leaves
 the removed `rabbitmq` and `amqproxy` containers running as orphans. Run one
 consumer against the old AMQP DSN until `messenger:stats` reads nothing and the
@@ -6966,16 +7108,82 @@ apps:
       contact_email: admins@example.org
 ```
 
+**Every setting on Mbin's Meta, Instance and Federation admin pages is the
+configuration's.** Each is a key under `apps.<app>.settings`, rendered into the
+`.env` and locked, so a value left out takes the default below rather than
+whatever an admin last saved. Changing one is an edit to `paisans-stack.yaml`
+and `paisans deployment apply`. Admins keep the federation allow list's
+contents: which instances are allowed stays theirs to edit in Mbin. The
+General section's language, theme and JavaScript switch stay theirs as well.
+
+| Setting | Mbin setting | Default |
+|---|---|---|
+| `title` | `KBIN_TITLE` | the app's `display_name`, else the app's name |
+| `meta_title` | `KBIN_META_TITLE` | `<display name> · <community.name>`, or the display name alone with no community name |
+| `meta_description` | `KBIN_META_DESCRIPTION` | empty |
+| `meta_keywords` | `KBIN_META_KEYWORDS` | empty |
+| `downvotes_mode` | `MBIN_DOWNVOTES_MODE` | `enabled`; also `hidden` or `disabled` |
+| `header_logo` | `KBIN_HEADER_LOGO` | `false` |
+| `registrations` | `KBIN_REGISTRATIONS_ENABLED` | `false`: members join through the account service and the identity provider |
+| `sso_registrations` | `MBIN_SSO_REGISTRATIONS_ENABLED` | `true`: a member's first sign in makes their account |
+| `sso_show_first` | `MBIN_SSO_SHOW_FIRST` | `false` |
+| `avatar_override` | `MBIN_SSO_AVATAR_OVERRIDE` | `true` |
+| `captcha` | `KBIN_CAPTCHA_ENABLED` | `false` |
+| `mercure` | `KBIN_MERCURE_ENABLED` | `false` |
+| `admin_only_oauth_clients` | `KBIN_ADMIN_ONLY_OAUTH_CLIENTS` | `false` |
+| `federated_search_only_logged_in` | `KBIN_FEDERATED_SEARCH_ONLY_LOGGEDIN` | `true` |
+| `restrict_magazine_creation` | `MBIN_RESTRICT_MAGAZINE_CREATION` | `false` |
+| `sidebar_random_local_only` | `MBIN_SIDEBAR_SECTIONS_RANDOM_LOCAL_ONLY` | `false` |
+| `sidebar_users_local_only` | `MBIN_SIDEBAR_SECTIONS_USERS_LOCAL_ONLY` | `false` |
+| `new_users_need_approval` | `MBIN_NEW_USERS_NEED_APPROVAL` | `false`: the account service already vets them |
+| `private_instance` | `MBIN_PRIVATE_INSTANCE` | `true` when gated, which cannot be turned off; `false` otherwise |
+| `federation` | `KBIN_FEDERATION_ENABLED` | `true` |
+| `federation_page` | `KBIN_FEDERATION_PAGE_ENABLED` | `true` |
+| `federation_allow_list` | `MBIN_USE_FEDERATION_ALLOW_LIST` | `true` when gated, which cannot be turned off; `false` otherwise |
+
+The instance title sits beside the logo, and matches what the identity
+provider shows at sign in. The meta title is the browser tab, the feed title
+and nodeinfo's `nodeName`, what other servers and directories call the
+instance. A boolean written as anything but `true` or `false` is refused
+(`mbin-<setting>-not-a-boolean`, `avatar-override-not-a-boolean`), a title
+that is not text likewise, and so is an unknown `downvotes_mode`
+(`mbin-downvotes-mode-unknown`). A gated app that sets `private_instance` or
+`federation_allow_list` false is refused (`mbin-gated-needs-private-instance`,
+`mbin-gated-needs-federation-allow-list`).
+
+**`federation: false` turns federation off**, and the toolkit then treats the
+app as one that does not federate: authorized fetch is no longer required of
+it when gated, and the monitor runs no signed fetch check against it.
+
+**`avatar_override: false` keeps each member's picture the identity
+provider's.** The fork fetches the `picture` claim again on every sign in and
+replaces the avatar when the image has changed. With the default, `true`, a
+member may upload a picture of their own instead, which stops the refetch for
+them until they remove it. With `false` a member signed in through the
+provider cannot upload or remove an avatar.
+
+```yaml
+apps:
+  talk:
+    blueprint: mbin
+    display_name: Talk
+    settings:
+      meta_description: Where the community talks.
+      avatar_override: false
+```
+
+These need the fork at `v1.16.0+paisans` or later, the first that can lock
+every one of them.
+
 **These settings are the configuration's, and an admin cannot change them in
 Mbin.** Mbin keeps them, like most of its settings, as database rows once an
 admin saves its settings page, and from then on its `SettingsManager` reads
 the row and ignores the environment. The `.env` therefore also renders
 `MBIN_LOCKED_SETTINGS`, naming every Mbin database setting it sets:
-`KBIN_DOMAIN`, `KBIN_SENDER_EMAIL`, `KBIN_CONTACT_EMAIL` and
-`MBIN_AUTHORIZED_FETCH` always, `MBIN_SSO_ONLY_MODE` (rendered as
-`SSO_ONLY_MODE`) when the app has a client at the identity provider, and
-`MBIN_PRIVATE_INSTANCE` and `MBIN_USE_FEDERATION_ALLOW_LIST` when the app is
-gated. See *Mbin and WriteFreely lock what the toolkit renders*.
+`KBIN_DOMAIN`, `KBIN_SENDER_EMAIL`, `KBIN_CONTACT_EMAIL`,
+`MBIN_AUTHORIZED_FETCH`, `MBIN_SSO_ONLY_MODE` (rendered as `SSO_ONLY_MODE`,
+true when the app has a client at the identity provider) and every setting in
+the table above. See *Mbin and WriteFreely lock what the toolkit renders*.
 `MAILER_DSN` is not a database setting and always follows the configuration.
 
 ### Mbin and WriteFreely lock what the toolkit renders
@@ -7088,9 +7296,9 @@ its GraphQL API. So the blueprint runs a second service beside it, the
 bootstrap (`Paisans-Software/wikijs-bootstrap`, published as
 `ghcr.io/paisans-software/wikijs-bootstrap`), which sets them. It runs once per
 start of its container, then stays up and reports healthy once that run has
-converged, so `apply`'s health gate waits until Wiki.js is configured (an
+converged, so `deployment apply`'s health gate waits until Wiki.js is configured (an
 exited container counts as failed, whatever its status). A configuration
-change therefore reaches Wiki.js when `apply` recreates the stack. It reaches
+change therefore reaches Wiki.js when `deployment apply` recreates the stack. It reaches
 Wiki.js by service name on the stack's own network, never through the gateway,
 and holds no Pocket ID API key.
 
@@ -7164,10 +7372,10 @@ by hand in Wiki.js loses it at their next sign in, so every group a member
 should be in is a Pocket ID group and is listed in `synced_groups`, which
 defaults to the admin group and the member group. The bootstrap creates each
 one missing in Wiki.js, so a new wiki has its groups before anyone signs in,
-and `apply` creates each one missing at Pocket ID, empty, through the
+and `deployment apply` creates each one missing at Pocket ID, empty, through the
 blueprint's `oidc.extra_groups_setting`. Creating an identity provider group
 beyond an app's own takes explicit approval under
-`docs/deployment-agent-rules.md`, so `apply` lists those groups and asks for
+`docs/deployment-agent-rules.md`, so `deployment apply` lists those groups and asks for
 the word `create` at a terminal, or takes it from `--yes`; without either it
 holds the app back and sends Pocket ID nothing. They are never added to the client's allowed groups, so who
 may sign in is unchanged. Permissions and page rules are set by the
@@ -7205,7 +7413,7 @@ hostname follows it with room for the request's framing, because a limit lower
 at the edge than in the app fails an upload with no message a member can read.
 The one path the image declares as a volume, `/wiki/data/content`, is bound
 under the stack's directory like every other (*Every volume an image declares
-is mounted, and `apply` checks it*).
+is mounted, and `deployment apply` checks it*).
 
 **Cluster placement works from the first version.** Founder decision. Under
 `cluster` Wiki.js runs on every apps site against one database, with
@@ -7277,7 +7485,7 @@ whose admin group was lost), it needs no change to the wiki at all.
 4. Make the change, sign out, and drop the user agent override. Anything
    changed that the bootstrap sets (*Wiki.js is configured by its
    bootstrap*) is put back at its next run, which every restart of the app and
-   every `apply` that recreates the stack starts.
+   every `deployment apply` that recreates the stack starts.
 
 ### Pocket ID runs on every apps site, and one of them is active
 
@@ -7317,7 +7525,7 @@ entrypoint, with the image's own entrypoint and command as its arguments:
   reads as down rather than as a standby.
 
 The healthcheck becomes `[ -f /tmp/paisans-standby ] || /app/pocket-id
-healthcheck`, so a standby is healthy, and `apply`'s gate passes it like any
+healthcheck`, so a standby is healthy, and `deployment apply`'s gate passes it like any
 other stack. Whichever site starts first wins; when it stops cleanly, a
 standby takes over at its next retry, and when it dies, within the 90 s its
 registration takes to age plus a retry. Both were observed with two real
@@ -7330,12 +7538,12 @@ release that changes the text is a toolkit change, made when the next major
 is, and `validate` warns (`pocket-id-standby-marker-unknown`) for an
 operator's own image from another repository. **It fails safe**: a marker that stops matching makes the
 wrapper exit like any other failure, Docker's restart policy retries it more
-slowly, and the standby site's stack reads `restarting`, which `apply`'s gate
+slowly, and the standby site's stack reads `restarting`, which `deployment apply`'s gate
 reports. Nothing runs twice; francis refuses the second instance either way.
 
 **Exactly one is active, and the toolkit checks it.** No one stack can see
 that, and the gateway answers from whichever site is first, so after any
-`apply --execute` that acted on the stack, and in `failover test`'s preflight
+`deployment apply --execute` that acted on the stack, and in `failover test`'s preflight
 and after each switchover, the toolkit asks every apps site the app runs on:
 
 ```
@@ -7350,7 +7558,7 @@ otherwise, and `absent` before it has the stack. None active is waited for, up
 to three minutes, then fails: sign in is down. Two active fails at once,
 since waiting would leave both serving. A site that cannot be reached is shown
 and not counted. `operator magic-link` and `oidc client create` call the active
-site the same way unless `--site` names one, and so does `apply`'s client step.
+site the same way unless `--site` names one, and so does `deployment apply`'s client step.
 
 **The gateway needs nothing new.** The route lists every apps site in order
 under `upstream_failover`, as every multi site app does, with no active
@@ -7446,7 +7654,7 @@ Pocket ID, which starts alongside it), and holds them to four checks:
 taken out of the yaml.** That is a manual step by design: removing an operator
 from `operators:`, and their name from every site's `ssh.keys`, is how an
 operator is removed, and the next `site prepare` of each site takes their keys
-off it, which the reconciler cannot do and must not guess at. `apply` never deletes or disables a Pocket ID user, so the
+off it, which the reconciler cannot do and must not guess at. `deployment apply` never deletes or disables a Pocket ID user, so the
 person stays a member until the community removes them.
 
 `/healthz`, published on the site's mesh address at port 1412, serves the
@@ -7460,7 +7668,7 @@ uptime blueprint does not ask it directly: the active instance's
 Pocket ID disagree gets an incident from whichever site is active.
 The monitor's per site check asks `/livez`, which fails only when the pass
 loop has hung, and so does Docker's healthcheck: a new deployment has no
-operators at Pocket ID until `apply` makes them, and `apply`'s health gate
+operators at Pocket ID until `deployment apply` makes them, and `deployment apply`'s health gate
 must not hold the Pocket ID stack back on that.
 
 It reads what it checks from the rendered `.env`, and refuses to start
@@ -7542,7 +7750,7 @@ file, `operators.<operator>.dns_provider_email`, by the operator's key in
 `paisans-stack.yaml`, and set with `paisans secrets set
 operators.<operator>.dns_provider_email`. The configuration is copied to every site in plaintext,
 and the secrets file only encrypted, so the address stays where only a
-workstation reads it. No address reaches a host: `apply` renders each mapping
+workstation reads it. No address reaches a host: `deployment apply` renders each mapping
 as two HMAC-SHA256 hashes under `apps.<app>.dns_email_hash_key`, and the
 reconciler compares every address under the same key. `render` refuses a
 mapping that names no declared operator, or that would let one membership
@@ -7550,7 +7758,7 @@ count for two operators. A host taken over while the reconciler runs is not prot
 the token can list the account's members directly, which is why it reads and
 does nothing else.
 
-### `apply` checks free space before it pulls
+### `deployment apply` checks free space before it pulls
 
 A small host fills up with images. The first real host had a 10 GB root disk,
 and with the infrastructure stack and Mbin deployed it was 81% used with 1.8 GB
@@ -7562,9 +7770,9 @@ stopped, and a full disk takes the database and every log with it.
 So `Build` asks the host which of the site's rendered images it already has
 (`docker image inspect`, one round trip for all of them). When a stack that
 will be recreated names one it does not have, the action will pull it, and
-`apply` reads the free space on Docker's data root (`docker info --format
+`deployment apply` reads the free space on Docker's data root (`docker info --format
 '{{.DockerRootDir}}'`, then `df -B1 --output=avail`). Below the threshold,
-`apply` refuses before writing anything, says how much is free and how much it
+`deployment apply` refuses before writing anything, says how much is free and how much it
 needs, quotes what `docker system df` says is reclaimable, and names
 `--min-free`. The dry run shows the same numbers on its `disk space` step: the
 free space on the step's line, and under `--verbose` a `disk:` line with the
@@ -7572,7 +7780,7 @@ threshold and the images to pull. A
 `restart` pulls nothing and is not checked, and nor is a plan that moves no
 stack.
 
-The threshold is 3 GiB, one Mbin image and room beside it, and `apply
+The threshold is 3 GiB, one Mbin image and room beside it, and `deployment apply
 --min-free <size>` (Eg: `2G`; K, M, G and T are binary, as `df -h` means them)
 changes it for one run, for an operator who knows the pull fits.
 
@@ -7584,13 +7792,13 @@ the case that matters: a small disk nearly full. **It refuses** for the reason
 every other gate refuses: the failure it guards against happens with the old
 stack already stopped.
 
-### `apply` prunes the images it superseded
+### `deployment apply` prunes the images it superseded
 
 The free space check above refuses an upgrade on a full disk; this is what
 keeps the disk from filling. Every upgrade leaves the old image behind, and on
 a small host a second Mbin image is most of the space left.
 
-So after a stack's action passes the health gate, `apply` removes images that
+So after a stack's action passes the health gate, `deployment apply` removes images that
 are all three of:
 
 * from a repository that stack's compose file names,
@@ -7608,7 +7816,7 @@ as `repository:tag` (or `repository@id` when it has no tag left); `Execute`
 reads the host again
 after the gate, because the action has just moved containers off the old
 image. Waiting for the gate is the point: until the new image is healthy, the
-old one is what a rollback would run. `apply --keep-images` skips pruning for
+old one is what a rollback would run. `deployment apply --keep-images` skips pruning for
 one run, for an operator who wants to keep that image a while longer.
 
 **A whole apply ends by sweeping.** Pruning after a stack's gate reaches only
@@ -7620,7 +7828,7 @@ stack renders any more. So the site's manifest records every image repository
 its stacks have rendered, with each reference rendered from it, and each apply
 adds what it renders to that record and drops nothing: it is what the stack
 uses and has used. As its last step, once every stack is healthy and the
-manifest is written, every whole `apply` removes each image that is all three
+manifest is written, every whole `deployment apply` removes each image that is all three
 of:
 
 * from a repository in that record, or one the site renders now,
@@ -7661,7 +7869,7 @@ the host, since a site is one machine (*A deployment has an id, and a host
 knows every deployment on it*), so the sweep keeps what this site renders and
 nothing on behalf of other sites.
 
-### Every volume an image declares is mounted, and `apply` checks it
+### Every volume an image declares is mounted, and `deployment apply` checks it
 
 An image's `VOLUME` is a path Docker gives every new container an anonymous
 volume for, unless the container has a mount at exactly that path. Compose
@@ -7716,8 +7924,8 @@ Three things keep it from happening again:
   `-tags registry_integration`, resolves every track to the build it names
   today, reads what that build declares on every platform it is published
   for, and fails when a rendered service leaves a declared path unmounted.
-* **A refusal in `apply`.** A track moves, and an operator's own `images`
-  override is not the catalog's. So `apply` inspects every image
+* **A refusal in `deployment apply`.** A track moves, and an operator's own `images`
+  override is not the catalog's. So `deployment apply` inspects every image
   of every stack it acts on (`docker image inspect --format '{{json
   .Config.Volumes}}'`) and compares each declared path with the binds, named
   volumes and tmpfs mounts of that service's rendered compose file. An
@@ -7726,7 +7934,7 @@ Three things keep it from happening again:
   have yet is pulled first, after the free space check, which is the pull `up
   -d` would make anyway. The dry run reports it with the disk space check, and `--verbose` shows its
   detail (`volumes: 3 image(s) inspected: every declared path is mounted`).
-* **A cleanup after each recreate.** Before a recreate, `apply` records the
+* **A cleanup after each recreate.** Before a recreate, `deployment apply` records the
   anonymous volumes the stack's containers mount; once the stack passes its
   health gate, it removes those nothing mounts now. A failure is a warning, as
   for images, and a failed health gate removes nothing.
@@ -7741,7 +7949,7 @@ removes the ones that are this deployment's: those carrying the label
 `community.paisans.deployment` with this deployment's id. Every other volume is
 kept: one labelled with another id is another deployment's, and one with no
 such label, anonymous ones included, cannot be attributed to any deployment on
-a host that several may share. `apply` itself removes the anonymous volumes its
+a host that several may share. `deployment apply` itself removes the anonymous volumes its
 own recreates abandon, read from its own containers before they are replaced,
 so those do not wait for `prune`. The plan says what its verdicts rest on at
 the top, then marks each volume the way `site prepare` marks its plan: `○
@@ -7752,17 +7960,17 @@ instead. An anonymous volume's 64 character name is shortened to its first 12
 in the title.
 
 **`prune` lists first and removes only this deployment's volumes**, the same
-rule `apply` follows for images. **Every declared
+rule `deployment apply` follows for images. **Every declared
 volume is mounted** because each recreate otherwise costs a volume, and a
 throwaway path is not bound under the deployment's root because a shared cache directory
 between replicas is a race, not state.
 
-### `apply` makes the declared operators and hands each a login link
+### `deployment apply` makes the declared operators and hands each a login link
 
 A deployment that has just come up runs every app and lets nobody in: Pocket
 ID has no users, and its users sign in with passkeys, so there is no password
 to hand anyone. The `operators` section already says who runs the deployment,
-so a whole `apply --execute`, once Pocket ID runs, makes each of them a Pocket
+so a whole `deployment apply --execute`, once Pocket ID runs, makes each of them a Pocket
 ID user: **the operator's key is the Pocket ID username**, `email` is the
 address, marked verified for the reason *`operator magic-link` gives a
 declared operator a fresh sign-in link* gives, and `name` is split at its
@@ -7854,7 +8062,7 @@ specification of the login links.
 
 Pocket ID users sign in with passkeys, so there is no password to hand an
 operator, and an operator cannot sign in at all until they have registered
-one. `apply` makes every declared operator a user and gives each a one-time
+one. `deployment apply` makes every declared operator a user and gives each a one-time
 sign-in link until they register a passkey (see above). Two cases are left: a
 link that expired before it was used, when no apply is due, and an operator
 who lost their passkey, whom apply gives nothing more. Both are the same
@@ -7931,7 +8139,7 @@ as before. A value set in the admin page before the variable was rendered is
 ignored from the first start with it, not carried over: declare it here.
 
 **Changing a setting is a config edit and an apply.** Edit
-`apps.<app>.settings`, then `paisans apply --site <site>` for each site the app
+`apps.<app>.settings`, then `paisans deployment apply --site <site>` for each site the app
 runs on. The `.env` changes, so the apply recreates Pocket ID's containers,
 which is a restart of a few seconds during which nobody can sign in.
 
@@ -8002,7 +8210,7 @@ variable under `config`. A Pocket ID username is the identity other apps know
 a person by, such as their fediverse handle in Mbin, and those apps do not
 follow a rename: a renamed user signs in to them as somebody new. With editing
 off a user cannot change their email either, which keeps apply finding each
-declared operator's account (see *`apply` makes the declared operators and hands each a login link*). The setting stays in the table so that a configuration
+declared operator's account (see *`deployment apply` makes the declared operators and hands each a login link*). The setting stays in the table so that a configuration
 can say so where it is read. Pocket ID's own admin page can still edit any
 account, and that is the way to correct one; a username changed there breaks
 the same identities in the other apps.
@@ -8039,7 +8247,7 @@ puts a user in them when the user is created without groups of their own,
 whether by signing up or by an administrator (`service/user_service.go:337-345`,
 `:365-401`). It takes them as a JSON array of group IDs, and a group's ID
 exists only once the group does, on the running instance. So the names are
-declared and the IDs are found by `apply`, which records them in the secrets
+declared and the IDs are found by `deployment apply`, which records them in the secrets
 file under `pocket_id_groups.<name>`, beside the client IDs under
 `oidc_clients`, and `render` reads them from there. Recording rather than
 looking up at render time keeps `render` a function of the two files: every
@@ -8180,7 +8388,7 @@ app needs that client's ID and secret. The toolkit creates the client and
 records both in the secrets file, where `render` already reads them
 (`oidc_clients.<app>.client_id` and `.client_secret`).
 
-**`apply` does this itself, for every app it starts whose kind has a client
+**`deployment apply` does this itself, for every app it starts whose kind has a client
 shape** (`kinds.OIDCClient`, today `mbin`, `wikijs`, `writefreely`,
 `uptime`, `synapse` and `oauth2-proxy`). Creating an app's
 client at the deployment's own Pocket ID is part of setting the app up, and
@@ -8188,8 +8396,8 @@ declaring the app in `paisans-stack.yaml` is the approval for that client. Found
 decision, 2026-10-08. So a first apply of a site needs nothing run before it:
 
 ```sh
-paisans apply --site home-a             # shows the clients with the rest of the plan
-paisans apply --site home-a --execute   # creates, records and renders them
+paisans deployment apply --site home-a             # shows the clients with the rest of the plan
+paisans deployment apply --site home-a --execute   # creates, records and renders them
 ```
 
 The step is the command's own code, so everything below holds for both. On a
@@ -8225,7 +8433,7 @@ recorded is not held back by an unreachable Pocket ID: its client was right
 when it was made, and an outage elsewhere is no reason to stop an app that can
 already sign people in. An existing client that differs from what the app
 needs refuses that app alone, as the command does; the rest of the site is
-applied and `apply` exits non zero, because a person has to fix the client.
+applied and `deployment apply` exits non zero, because a person has to fix the client.
 Everything `--execute` would refuse before writing (a file edited on the host,
 too little disk for the pulls, an unmounted image volume) is checked on the
 whole site before the first pass, so a refusal still leaves the host and
@@ -8233,10 +8441,10 @@ Pocket ID untouched. The secrets file is written through the same recorder, re-e
 recipients in `.sops.yaml`, and a plan that would write an encrypted file with
 no recipient is refused before Pocket ID is sent anything.
 
-**`apply` creates a client when nothing is recorded for the app, or when what
+**`deployment apply` creates a client when nothing is recorded for the app, or when what
 is recorded is a client Pocket ID does not have.** If the secrets file holds a
 client ID and secret and Pocket ID has no client of that ID or the client's name, as after
-Pocket ID is started on a fresh database, `apply` creates the client and records
+Pocket ID is started on a fresh database, `deployment apply` creates the client and records
 its credentials over the stale ones, saying so in one line
 (`talk: recorded client <id> is not at Pocket ID; created a new one`); a dry
 run lists the create with the rest of the plan. Nothing can be signing in with a
@@ -8246,7 +8454,7 @@ re-records the client: credentials only partly recorded, and a client with
 the client's name under another ID than the recorded one. That client may be what a
 running app signs people in with, so replacing it is a decision, not a repair.
 
-`apply` never rotates a secret. The command stays for that and for running the
+`deployment apply` never rotates a secret. The command stays for that and for running the
 step alone. How to run it, and its flags, are under *`paisans oidc client
 create`* in [docs/commands.md](docs/commands.md).
 
@@ -8282,7 +8490,7 @@ declared in `paisans-stack.yaml` the declaration approves its client, and for th
 gate, which no file declares, so does setting `gated` or `auto_login` on an
 app; the plan is
 what lets an operator see what that approval does, in a dry run of either
-`apply` or the command, before `--execute`, and `--verbose` shows exactly what
+`deployment apply` or the command, before `--execute`, and `--verbose` shows exactly what
 each request sends. The same probe runs
 again on `--execute`, so what executes is what a fresh probe plans.
 
@@ -8410,7 +8618,7 @@ URL would be a second place to spell it, one that can disagree with
 
 **Pocket ID's consent screen is off for every client the toolkit makes.** The
 client is for the community's own app, so the screen would ask a member to
-approve something already theirs on their first sign in. `apply` and `oidc
+approve something already theirs on their first sign in. `deployment apply` and `oidc
 client create` therefore send `skipConsent: true`, and the gate's client
 likewise. An app that wants the screen sets `sso_consent: true`:
 
@@ -8469,7 +8677,7 @@ nothing.
 callback, PKCE and restriction is marked `✓`, and its secret is left alone
 unless `--rotate-secret` is given. A rotation adds a secret and leaves the old
 one valid, because Pocket ID allows several (`controller/oidc_controller.go:292`),
-so the app keeps signing people in until `apply` renders the new one. A client
+so the app keeps signing people in until `deployment apply` renders the new one. A client
 that differs from what the app needs is refused, with what differs, rather than
 reshaped: updating a client rewrites every field, and a client somebody shaped
 by hand is not this command's to change. **Differing in either direction is a
@@ -8499,7 +8707,7 @@ marked left over. The mark is the proof the command rests on: a whole apply
 marks the files of an app it no longer renders, so a site whose entries for
 the app are all marked has been applied since the app left, and on the gateway
 that apply took the app's routes out of the Caddyfile. An unmarked entry means
-the gateway may still route to the app, so the answer is `paisans apply` on the
+the gateway may still route to the app, so the answer is `paisans deployment apply` on the
 site named, then this command again. When nothing of the app is found
 anywhere it says so and exits 0.
 
@@ -8540,7 +8748,7 @@ networks, the files and then their manifest entries, the directory and, with
 database, then each bucket and the keys. Each step reads what is there when it
 runs and does nothing once it is done, and the first failure stops the run, so
 the same command run again resumes where it stopped. The manifest is read
-again just before it is written, and written as `apply` writes it, whole
+again just before it is written, and written as `deployment apply` writes it, whole
 through a temporary file moved into place, keeping every entry that is not
 the app's. An entry whose file is already gone is dropped, which is what a
 run stopped between the two leaves.
@@ -8552,7 +8760,7 @@ monitor deletes those checks (see *Topology commands reseed the monitor*).
 That is the one step `app remove` runs on a site the app never ran on, and it
 is planned from the render and the monitor's host rather than from the left
 over marks. A failure there comes after everything of the app's is gone and
-names the `apply` that finishes it.
+names the `deployment apply` that finishes it.
 
 **It leaves three things and says so.** The app's secrets stay in the secrets
 file, which it never edits, so they are listed for removal with `sops`; it does
@@ -8569,12 +8777,12 @@ The straightforward case, because the VM has a stable address and is the one
 thing everything else can dial. There is no command for joining it on its own:
 the VM is declared in `paisans-stack.yaml` like any other site, with its roles, its
 mesh address, its `public_address` and its `ssh` section, and the whole
-deployment is applied (see *`paisans apply` with no `--site` converges the
+deployment is applied (see *`paisans deployment apply` with no `--site` converges the
 whole deployment*):
 
 ```
-paisans apply             # every step it would run, and what each would change
-paisans apply --execute   # runs them, stopping at the first failure
+paisans deployment apply             # every step it would run, and what each would change
+paisans deployment apply --execute   # runs them, stopping at the first failure
 ```
 
 For a VM joining a running site, home-a, as `roles: [gateway]`, the whole
@@ -8592,14 +8800,14 @@ describes.
    any other host with images to pull, and home-a, which has them, pulls
    nothing.
 4. `dns init`, for any record the VM's names need.
-5. `apply --site vm`, among the sites outside `etcd.members`. The VM's mesh
+5. `deployment apply --site vm`, among the sites outside `etcd.members`. The VM's mesh
    interface lists home-a as a peer with no endpoint: home-a dials out.
-6. Pass two, `apply --site` on every site. Home-a's mesh interface gains the VM
+6. Pass two, `deployment apply --site` on every site. Home-a's mesh interface gains the VM
    as a peer **with** an endpoint, and `PersistentKeepalive` so the NAT mapping
    stays open, synced through the helper so nothing on home-a restarts (see
-   *`apply` brings the mesh interface up before anything binds to it*). Each
+   *`deployment apply` brings the mesh interface up before anything binds to it*). Each
    of these applies ends by sweeping the images its site's stacks no longer
-   use (see *`apply` prunes the images it superseded*).
+   use (see *`deployment apply` prunes the images it superseded*).
 
 The run ends `Deployment complete.`
 Each apply reads its mesh interface back before any stack starts. None waits
@@ -8695,7 +8903,7 @@ removing a site is `site remove`'s (below). Apps on
 the new site come after the join rather than in it, since no stage starts an
 app stack. A site declared `roles: [data, apps]` joins through the whole
 apply, in one run: its `site add` joins it with the data role alone and none of its apps, the
-site's own `apply` then starts its apps, and the gateway's apply follows,
+site's own `deployment apply` then starts its apps, and the gateway's apply follows,
 whose routes gain the site. `site add` typed alone refuses such a site and
 names that run.
 Pocket ID stands by there while another site's instance is active (see
@@ -8718,13 +8926,13 @@ skipped and why.
 
 | Stage | What runs | Gate |
 |-------|-----------|------|
-| 2. Mesh | each site's `psns-<token>.conf`, as a scoped `apply`, then the helper's `sync` (the new site's interface is started with its `up`) | a handshake younger than two minutes for every pair, read on both ends, and a ping of the new mesh address from every site |
+| 2. Mesh | each site's `psns-<token>.conf`, as a scoped `deployment apply`, then the helper's `sync` (the new site's interface is started with its `up`) | a handshake younger than two minutes for every pair, read on both ends, and a ping of the new mesh address from every site |
 | 3. etcd | for each joiner, every witness first: `member add --learner`, its compose file, record and every `env_file` its infrastructure stack names written (`patroni.env`, `caddy/caddy.env`, `heartbeat/heartbeat.env`), `up -d etcd` alone, `member promote` retried until etcd accepts it | `endpoint health --cluster` all healthy, and the voters are exactly `etcd.members` |
-| 4. Replica | the new site's remaining files by a whole `apply`, then `up -d`, which starts Patroni beside the running etcd | the member `streaming`, its replay lag zero or falling over three samples five seconds apart |
+| 4. Replica | the new site's remaining files by a whole `deployment apply`, then `up -d`, which starts Patroni beside the running etcd | the member `streaming`, its replay lag zero or falling over three samples five seconds apart |
 | 5. Cluster configuration | `patronictl edit-config --force -q -s synchronous_mode=true -s synchronous_mode_strict=<value>` when the live values differ | a member with the role `Sync Standby` |
-| 6. HAProxy | `haproxy.cfg` as a scoped `apply`; the site's cluster database apps stopped, HAProxy alone restarted, the apps started and each through `apply`'s health gate | the statistics list every cluster site, the leader `UP` and every replica `DOWN` |
-| 7. Replicas' `patroni.env` | on each existing replica, one at a time: `patroni.env` as a scoped `apply`, then `up -d --no-deps --force-recreate patroni`; nothing when the cluster had no replica | the replica runs with the new `ETCD3_HOSTS`, and its own Patroni, asked through its REST API from inside the container, answers `running` and `streaming` before the next is touched; `patronictl list` reads a member key the old process may have written, so it is not asked |
-| 8. Monitor | every monitor site's `uptime` stack applied on its own (`apply --only <app>`), so its `monitors.json` gains the new site's ping and direct checks and the monitor restarts on it; skipped when no site holds the monitor role (see *Topology commands reseed the monitor*) | the seed on the host matches the render and the stack is healthy; a failure here stops nothing of the join and names the `apply` that finishes it |
+| 6. HAProxy | `haproxy.cfg` as a scoped `deployment apply`; the site's cluster database apps stopped, HAProxy alone restarted, the apps started and each through `deployment apply`'s health gate | the statistics list every cluster site, the leader `UP` and every replica `DOWN` |
+| 7. Replicas' `patroni.env` | on each existing replica, one at a time: `patroni.env` as a scoped `deployment apply`, then `up -d --no-deps --force-recreate patroni`; nothing when the cluster had no replica | the replica runs with the new `ETCD3_HOSTS`, and its own Patroni, asked through its REST API from inside the container, answers `running` and `streaming` before the next is touched; `patronictl list` reads a member key the old process may have written, so it is not asked |
+| 8. Monitor | every monitor site's `uptime` stack applied on its own (`deployment apply --only <app>`), so its `monitors.json` gains the new site's ping and direct checks and the monitor restarts on it; skipped when no site holds the monitor role (see *Topology commands reseed the monitor*) | the seed on the host matches the render and the stack is healthy; a failure here stops nothing of the join and names the `deployment apply` that finishes it |
 
 **Learners, one at a time.** A full voter added to a cluster of one makes the
 quorum two before it has started; if it then fails to start, the cluster stops.
@@ -8738,7 +8946,7 @@ lasts one stage.
 **A member keeps the flags it was born with.** etcd reads
 `--initial-cluster` and `--initial-cluster-state` only on a member's first
 start and ignores them once its data directory exists. They are inert on a
-running member, so the only thing changing them can do is make `apply` see a
+running member, so the only thing changing them can do is make `deployment apply` see a
 new compose file and recreate a healthy member. Each etcd host therefore has
 `/srv/paisans/<token>/infra/etcd-initial`, a rendered file holding the two flags its member
 started with, which every later render repeats. A founder records `new` and the
@@ -8755,16 +8963,16 @@ the record never acts on a stack, because no container reads it.
 The specification named the file `etcd-founders` and gave every joiner all of
 `etcd.members`; both were corrected here for the reason above.
 
-**`apply` refuses a half grown cluster.** While the live membership (learners
-included) differs from `etcd.members`, `apply` on a site that is, or is
+**`deployment apply` refuses a half grown cluster.** While the live membership (learners
+included) differs from `etcd.members`, `deployment apply` on a site that is, or is
 configured to be, an etcd member refuses to write or act on its infrastructure
 stack, and says to run `site add`. An operator who edited the configuration
-and ran `apply` first would otherwise start an etcd the cluster never admitted.
+and ran `deployment apply` first would otherwise start an etcd the cluster never admitted.
 An app only change on the same site is let through.
 
-**Existing sites move one file each.** A whole `apply` of the primary's site
+**Existing sites move one file each.** A whole `deployment apply` of the primary's site
 would recreate its Patroni, because `patroni.env` now lists every etcd member:
-a failover in the middle of a join. So stages 2, 6 and 7 use a scoped `apply`,
+a failover in the middle of a join. So stages 2, 6 and 7 use a scoped `deployment apply`,
 which compares, refuses on conflict, writes and records exactly like a whole
 one, but only for the named file, and runs only the one command that file
 needs.
@@ -8779,14 +8987,14 @@ stage 7 recreates each existing replica's Patroni with its new file, one at a
 time, which is a replica restart HAProxy does not notice since it routes only
 to the primary, and waits for it to stream again before the next; a replica
 that leads by then is left alone. The primary's is left, and the plan says
-so: it is picked up at the leader's next restart, a later `apply` of that site
+so: it is picked up at the leader's next restart, a later `deployment apply` of that site
 when a failover is acceptable. `site remove` does the same with the same code.
 
 **HAProxy is restarted, not reloaded.** Its configuration is a single file bind
-mount, `apply` replaces a file by renaming a new one over it, and a bind mount
+mount, `deployment apply` replaces a file by renaming a new one over it, and a bind mount
 of a single file keeps the inode it started with (moby/moby#15793), so a
 reloaded HAProxy would read the old file. Restarting HAProxy alone remounts it,
-and is what `apply` itself does for a changed `haproxy.cfg` (see "`apply`
+and is what `deployment apply` itself does for a changed `haproxy.cfg` (see "`deployment apply`
 restarts only the infrastructure service whose file changed"). The gate
 reads HAProxy's statistics from a listener on the site's mesh address, port
 8404 (Eg: `10.44.0.1:8404`), as CSV. That listener is new in every rendered `haproxy.cfg`, so a deployment that applies
@@ -8802,12 +9010,12 @@ so the container stayed `healthy` throughout. Pocket ID recovered on its own.
 So on each site whose HAProxy restarts, stage 6 first stops every app stack
 there with `cluster` placement and a kind that uses Postgres (`docker compose
 -f /srv/paisans/<token>/<app>/compose.yaml stop`), restarts HAProxy, starts them again (`up
--d`), and holds each to `apply`'s health gate; a failure stops the join there
-with the cause read from the app's logs, as `apply` shows it, and the logs
+-d`), and holds each to `deployment apply`'s health gate; a failure stops the join there
+with the cause read from the app's logs, as `deployment apply` shows it, and the logs
 themselves with `-v`. The plan lists the outage: stop, restart, start, check. A
 pinned app has its own Postgres and is left alone. This is one instance of a
 rule the toolkit owns: whatever changes the database path restarts the apps
-that depend on it (see "`apply` restarts the apps whose database path
+that depend on it (see "`deployment apply` restarts the apps whose database path
 changed").
 
 ### `site remove` takes a site out
@@ -8835,12 +9043,12 @@ the approved specification. How to run it, and its flags, are under
 | one data site out of two and a witness, when the witness role is that site's only one and no app is pinned to it | it would be left with no role; give it another first, or `site remove` it afterwards |
 | one data site out of two and a witness, with either remaining voter unhealthy | going from two voters to one is a change both must commit |
 | any other etcd member unhealthy, or too few healthy members left for a quorum | a membership change on a limping cluster is how it stops |
-| a site in the end state's `etcd.members` that etcd does not list, or lists as a learner | its join never finished, so fewer voters would remain than the file says; finish its `apply` first. It counts as unhealthy in the quorum |
+| a site in the end state's `etcd.members` that etcd does not list, or lists as a learner | its join never finished, so fewer voters would remain than the file says; finish its `deployment apply` first. It counts as unhealthy in the quorum |
 | a remaining member whose etcd answers for a different cluster than the others', by the cluster ID in `etcdctl member list`, or its member IDs where no ID is given | Eg: its data directory was wiped and it founded a cluster of its own; every remaining member whose etcd runs is asked, and the odd one out is named. Run `doctor` on it |
 | any other Patroni member not running or streaming | the cluster changes under the stages below |
 | the site holds the leader and no member is a streaming `Sync Standby` | only a synchronous standby takes over without losing writes the leader acknowledged |
 | a host that does not answer over ssh | what is on it cannot be read; fix ssh, or say `--host-gone` |
-| `external.acme_dns_token` empty while a site runs the toolkit's Caddy | the same refusal as `render` and `apply`: stage 2 reloads the gateway's routes, and a Caddy without its token obtains no certificate |
+| `external.acme_dns_token` empty while a site runs the toolkit's Caddy | the same refusal as `render` and `deployment apply`: stage 2 reloads the gateway's routes, and a Caddy without its token obtains no certificate |
 | `--delete-data` without a terminal or `--yes`, or with `--host-gone` | the same rule as `app remove`; and nothing is deleted on a host that is not reached |
 
 **Six stages, each ending at a gate.** A removal with `--host-gone` runs its
@@ -8849,16 +9057,16 @@ reached: `--host-gone`*). Each is planned from live state, so a stage already
 done plans no steps, its gate is still checked, and a re-run after a fixed
 problem resumes at the first stage with anything left to do. The last one is
 the exception, since the stage before it is what makes a re-run impossible: a
-failure there names the `apply` that finishes it.
+failure there names the `deployment apply` that finishes it.
 
 | Stage | What runs | Gate |
 |-------|-----------|------|
 | 1. Data out of the site | the leader switched over to the `Sync Standby` when the site holds it; `synchronous_mode` turned off when one data site remains, since a leader waiting on a standby that is leaving stops taking writes; Patroni stopped on the site and its member key deleted from etcd; its Garage node removed from the layout and the layout applied | another site leads and `patronictl list` no longer lists the site, with a `Sync Standby` when the end state wants one; no layout row for the site, and every remaining node settled (one live layout version, an empty resync queue) within an hour, and a run that times out resumes at this gate while Garage carries on copying |
-| 2. Out of the cluster | `etcdctl member remove`, then the site's etcd stopped; with two data sites and a witness, the witness's member next (below); on every remaining site, the files whose render changes with the site gone, by scoped `apply`: `psns-<token>.conf` (the helper's `sync`), `haproxy.cfg` (HAProxy restarted with its database apps stopped around it, as `site add` does) and the gateway's routes (validated, then Caddy reloaded); then each remaining replica's `patroni.env`, one at a time, as `site add`'s stage 7 does; last, the site taken out of every remaining gateway's deployment record | the voters are exactly the end state's and all healthy; no remaining site has the site's key as a WireGuard peer; HAProxy lists exactly the end state's cluster sites with the leader `UP`; each replica streaming again before the next |
+| 2. Out of the cluster | `etcdctl member remove`, then the site's etcd stopped; with two data sites and a witness, the witness's member next (below); on every remaining site, the files whose render changes with the site gone, by scoped `deployment apply`: `psns-<token>.conf` (the helper's `sync`), `haproxy.cfg` (HAProxy restarted with its database apps stopped around it, as `site add` does) and the gateway's routes (validated, then Caddy reloaded); then each remaining replica's `patroni.env`, one at a time, as `site add`'s stage 7 does; last, the site taken out of every remaining gateway's deployment record | the voters are exactly the end state's and all healthy; no remaining site has the site's key as a WireGuard peer; HAProxy lists exactly the end state's cluster sites with the leader `UP`; each replica streaming again before the next |
 | 3. Clean the host | below. When the site holds the active Pocket ID instance, the plan says that once this stage stops it, sign in is unavailable for a few seconds while a standby takes over, up to about 90 seconds if the instance does not stop cleanly | checked last: nothing of this deployment's left but what the plan said it keeps |
 | 4. DNS | the address records this deployment's `dns init` made for the site, deleted at the provider (below, *The site's DNS records go with it*); skipped, saying why in one line, when `acme.provider` is not set, its token is not in the secrets, or the site has no public address | listing the zones again finds nothing left to delete |
 | 5. Config | the site taken out of `paisans-stack.yaml`: its block, its name in `cluster.sites`, `etcd.members` and `storage.garage.sites` where the file writes them, its capacity; with two data sites and a witness, the witness out of a written `etcd.members` and its `witness` role, in the same write; every other byte as it was | the file loads and no longer declares it |
-| 6. Monitor | every remaining monitor site's `uptime` stack applied on its own, so its `monitors.json`, rendered from the end state, no longer names the site and the restarted monitor deletes its ping and direct checks; skipped when no site holds the monitor role (see *Topology commands reseed the monitor*). The monitor site itself is never the one removed, since its app is pinned to it | the seed on the host matches the render and the stack is healthy; a failure here comes after the removal and names the `apply` that finishes it |
+| 6. Monitor | every remaining monitor site's `uptime` stack applied on its own, so its `monitors.json`, rendered from the end state, no longer names the site and the restarted monitor deletes its ping and direct checks; skipped when no site holds the monitor role (see *Topology commands reseed the monitor*). The monitor site itself is never the one removed, since its app is pinned to it | the seed on the host matches the render and the stack is healthy; a failure here comes after the removal and names the `deployment apply` that finishes it |
 
 **Two data sites and a witness go to one voter.** Taking one data site out of
 two and a witness would leave two etcd voters, and two are worse than one. With
@@ -8871,7 +9079,7 @@ etcd's voters are exactly the remaining data site and the witness, both
 healthy, the witness's member is removed, leaving one voter with a quorum of
 one, and the witness's etcd container is stopped. It is found by this
 deployment's label, the infrastructure project and the `etcd` service, since
-the witness's `infra/compose.yaml`, written by the same scoped `apply` as its
+the witness's `infra/compose.yaml`, written by the same scoped `deployment apply` as its
 mesh file, no longer declares it. Two voters going to one is a change both
 must commit, so it needs both healthy. A re-run reads which members are left,
 so one stopped between the two removals does only the second.
@@ -8880,7 +9088,7 @@ so one stopped between the two removals does only the second.
 recreating its Patroni would be a failover, and the out of date etcd hosts in
 it are harmless while it runs (see *A replica's `patroni.env` is applied; the
 leader's waits*). The report says it is picked up at the leader's next
-restart, with `paisans apply --site <site>` for when a failover is acceptable.
+restart, with `paisans deployment apply --site <site>` for when a failover is acceptable.
 Any other file whose render changes is listed the same way. etcd's
 `--initial-cluster` flags are not among them: each member's are rendered from
 what its host records (see *A member keeps the flags it was born with*).
@@ -8903,7 +9111,7 @@ is not this deployment's is left alone and not listed:
 | the deployment's directory | its path, `/srv/paisans/<token>`, the user's | empty directories removed; what apply did not write, the data in its bind mounts, is kept, and `--delete-data` empties it, through rootlesskit so the files a container's user owns go too, unless a file in it was edited. The directory itself stays, because its parent `/srv/paisans` is root's, for `site evict` |
 | the deployment record, on a gateway | `/srv/paisans/<token>/.paisans/deployed.json` | deleted |
 | the configuration store | `/srv/paisans/<token>/.paisans/config/<token>.git`, its `<token>.peers` and `<token>.sync.json`, a `<token>.incoming.bundle` a cut-off push left behind, and `/srv/paisans/<token>/.paisans/bin/`; the units that serve and sync it are the user's `paisans-<token>-*` and go with the units above | deleted after the units, so the daemon and the sync have stopped using them. The versions on this host go with it; every other site still holds them, which is what makes a site's removal not a loss of the configuration's history |
-| the grant record | `/srv/paisans/<token>/.paisans/granted.json` (see *`apply` and `site prepare` review what `paisans-stack.yaml` grants*) | deleted last: left behind, a later deployment with the same token would be reviewed against a baseline it never applied |
+| the grant record | `/srv/paisans/<token>/.paisans/granted.json` (see *`deployment apply` and `site prepare` review what `paisans-stack.yaml` grants*) | deleted last: left behind, a later deployment with the same token would be reviewed against a baseline it never applied |
 
 **What is root's is the owner's.** The mesh interface and its helper, the ufw
 rules, the deployment's user and its home, `/srv/paisans`, the
@@ -8928,17 +9136,17 @@ approved specification.
   (`upstream_unavailable`, `upstream_failover`, `upstream_single`) and `import
   /etc/caddy.d/*.caddy`, and no site block of the deployment's. A Caddyfile
   lacking any of these is refused, and nothing is changed.
-* **It goes first, and without a gap.** The reduced file is staged beside the
-  snippets, validated inside the running container and loaded with `caddy
+* **It goes first, and without a gap.** The reduced file is staged in the
+  snippets directory, validated inside the running container and loaded with `caddy
   reload`, which keeps the running configuration if it fails. Only then is it
   written over `Caddyfile`, in place, and read back. Any failure puts the
   original back, reloads it, and stops before anything else is removed. A
   Caddy that is not running is refused: start it and run again.
 * **What stays:** the container and its image, and under
-  `/srv/paisans/<token>/infra/` its `compose.yaml`, `caddy/Caddyfile`,
+  `/srv/paisans/<token>/infra/` its `compose.yaml`, `caddy/etc/Caddyfile`,
   `caddy/caddy.env` (the DNS token, for renewals), `caddy/data` and
-  `caddy/config` (the certificates) and the `caddy/snippets` directory it
-  mounts, emptied; and the ufw allows for 80 and 443, which are `site admit`'s. These stay with `--delete-data` too, and the plan says so.
+  `caddy/config` (the certificates) and the `caddy/etc/snippets` directory,
+  emptied; and the ufw allows for 80 and 443, which are `site admit`'s. These stay with `--delete-data` too, and the plan says so.
   The manifest stays, listing exactly those files. Everything else goes as in
   the table above.
 * **The admission and the registry entry stay**, still holding the gateway role
@@ -9031,7 +9239,7 @@ declared roles are used.
 **The site's own host asks first.** When the host is the declared site's own,
 its cluster still counts on it: its etcd member, its Patroni replica, its
 Garage node and its place in every other site's mesh stay until a full `site
-remove`, and its next `apply` deploys it again. The plan says so, and
+remove`, and its next `deployment apply` deploys it again. The plan says so, and
 `--execute` asks for the site's name at a terminal, as `--delete-data` does,
 and `--yes` types it for either question. Any other host is not asked about.
 
@@ -9054,8 +9262,8 @@ monitors survive on hosts that also run other people's services:
    deployment's goes; the owner's containers, images, Caddy and ufw rules stay.
 2. The destroyed sites stay declared, keeping their identity in the secrets
    file. Change their `ssh` sections and addresses to the new hosts, Eg:
-   `203.0.113.20`, and `apply` deploys them there. The new gateway's first
-   `apply` writes a fresh deployment record from the yaml, which no longer
+   `203.0.113.20`, and `deployment apply` deploys them there. The new gateway's first
+   `deployment apply` writes a fresh deployment record from the yaml, which no longer
    names the monitors.
 3. `paisans secrets prune --execute` reads that record and removes the
    monitors' and their apps' secrets.
@@ -9153,7 +9361,7 @@ either. So `--host-gone` orders the stages from the cut:
 
 | Stage | What runs | Gate |
 |---|---|---|
-| 1. Cut | on every remaining site at once, `psns-<token>.conf` without the site, by scoped `apply`, synced through the helper, and a gateway's routes without its upstreams, validated and reloaded | no remaining site lists the site's key as a peer, and the helper's `show` on each has no handshake with it |
+| 1. Cut | on every remaining site at once, `psns-<token>.conf` without the site, by scoped `deployment apply`, synced through the helper, and a gateway's routes without its upstreams, validated and reloaded | no remaining site lists the site's key as a peer, and the helper's `show` on each has no handshake with it |
 | 2. DNS | the site's address records deleted, as `site remove`'s DNS stage does, and also at names the configuration still wants (below) | listing the zones again finds nothing left to delete |
 | 3. Database | when the site leads, a wait for Patroni's own failover: the cut leader cannot renew its leader key, the key expires with Patroni's `ttl` (30 seconds by default), and a remaining member takes over; then `synchronous_mode` off when one data site remains, and the site's member key deleted from etcd, which it can no longer rewrite | a remaining site leads, and `patronictl list` no longer lists the site |
 | 4. etcd | `etcdctl member remove` from the remaining voters, and with two data sites and a witness the witness's member too, as `site remove` does | the voters are exactly the end state's and all healthy |
@@ -9184,7 +9392,7 @@ one whose session cookie it can read; a dead one answers nothing at those names
 either way. So rule 5 of *The site's DNS records go with it* is lifted: a
 record at a name the configuration without the site still wants is deleted as
 long as the other rules hold, which tie it to the cut-off host alone. That name
-answers nothing until the `apply` that brings up the replacement creates its
+answers nothing until the `deployment apply` that brings up the replacement creates its
 record at the new address.
 
 **Refused before anything changes**, besides `site remove`'s own refusals:
@@ -9235,7 +9443,7 @@ records and every host's records of it, so a new name keeps the old host and
 the new one apart in all of them and in every log. One edit of
 `paisans-stack.yaml` declares the new site with the roles it takes over and
 pins to it any app pinned to the old one; then `site remove <old> --host-gone
---execute`, then `paisans apply`, which prepares the new host, applies it and
+--execute`, then `paisans deployment apply`, which prepares the new host, applies it and
 creates its records. Cutting the old site off first means nothing waits on a
 site that will not answer, and the old host is out of the mesh before the new
 one joins. Founder decision.
@@ -9255,12 +9463,12 @@ one joins. Founder decision.
   changed after it was read is refused rather than overwritten, since the write
   is the whole file and would lose the change.
 * The cut is rendered without it. The cut must not wait on a host or a DNS
-  record that does not exist yet, and `apply` stops before the mesh is synced while
-  a peer's endpoint name does not resolve; the `apply` that brings it up adds
+  record that does not exist yet, and `deployment apply` stops before the mesh is synced while
+  a peer's endpoint name does not resolve; the `deployment apply` that brings it up adds
   it as a peer on every site.
 * The only gateway or the only apps site is not refused when the
   configuration declares its replacement. Between the cut and that
-  `apply` the community's names answer nothing, and the report says so. The
+  `deployment apply` the community's names answer nothing, and the report says so. The
   only data site and the etcd majority are refused: a replacement there is a
   restore, outside the toolkit.
 
@@ -9295,7 +9503,7 @@ Each site goes through four stages, each ending at a gate:
 | Stage | What runs | Gate |
 |---|---|---|
 | 1. New key | a private key generated on the workstation, as `init` generates one, and written to the secrets file as `sites.<site>.wireguard_next_private_key`, beside the current | the file decrypts and holds it |
-| 2. Swap | every peer's mesh file with the new public key in place of the old, then the site's own with the new private key, each by scoped `apply`, synced through the helper; the peers at once and the site last | every peer that lists the site has a handshake with it under the new key |
+| 2. Swap | every peer's mesh file with the new public key in place of the old, then the site's own with the new private key, each by scoped `deployment apply`, synced through the helper; the peers at once and the site last | every peer that lists the site has a handshake with it under the new key |
 | 3. Health | nothing | etcd healthy at every voter; exactly one Patroni member leading and `running`, and every other data site a member and `streaming` |
 | 4. Promote | the next key becomes `wireguard_private_key`, and the old one is deleted | the file decrypts and holds only the new key |
 
@@ -9312,9 +9520,9 @@ starts. An `--all` run records the sites it has left in the secrets file
 (`mesh_rekey_remaining`), each taken off as its key is promoted, so a stopped
 `--all` run resumes with the sites it had left and does not rekey again a site
 it finished. Until stage 4, render still reads `wireguard_private_key`, the
-old key, so `apply`, with or without `--site`, refuses while any site has a
+old key, so `deployment apply`, with or without `--site`, refuses while any site has a
 next key in the secrets file and names the `mesh rekey` that finishes it: an
-`apply` then would hand the old key back to every peer and cut the site's
+`deployment apply` then would hand the old key back to every peer and cut the site's
 tunnels, and a refusal costs nothing but the rekey's resume.
 
 **A relay's swap pauses Patroni.** A site with no dial endpoint routes
@@ -9440,7 +9648,7 @@ does not pass stops it where it is rather than switching back blind.
 1. **Checks.** Every member of `cluster.sites` is in the cluster, the leader
    is `running` and every other member `streaming` with lag zero; a Sync
    Standby exists when `cluster.synchronous` is true; every app stack is
-   healthy on every site it runs on, by the same judgement as `apply`'s health
+   healthy on every site it runs on, by the same judgement as `deployment apply`'s health
    gate; and every app answers through the gateway, an HTTPS request from the
    workstation to its hostname answering under 500 (a redirect to a login page
    counts). Pocket ID is asked for `/.well-known/openid-configuration`, the
@@ -9468,7 +9676,7 @@ does not pass stops it where it is rather than switching back blind.
    compose -f /srv/paisans/<token>/<app>/compose.yaml restart`), not only the old primary's:
    a leader change closes every client's connection to the old primary
    wherever the client runs, and an app whose workers never reconnect, as
-   Mbin's do not (see "`apply` restarts the apps whose database path
+   Mbin's do not (see "`deployment apply` restarts the apps whose database path
    changed"), answers 500 until restarted while its container stays
    `healthy`. A pinned app has its own Postgres and is left alone. A failed
    restart stops the test there.
@@ -9516,9 +9724,9 @@ the operator. A file the edit leaves unloadable is restored.
 A site that does not answer is itself a finding, never a crash: every other
 check runs with the sites that did. Whether it is pending, its host not yet
 having admitted the deployment, or down, having joined and gone quiet, is
-read from the deployment, never from the site, as `apply` reads it (see *A
+read from the deployment, never from the site, as `deployment apply` reads it (see *A
 deployment with sites missing*), and either is a `WARN`, since the deployment
-runs on the sites it has; a gateway is a `FAIL`, since `apply` refuses to run
+runs on the sites it has; a gateway is a `FAIL`, since `deployment apply` refuses to run
 without one. Nothing more is asked of that site, except the self-check,
 which asks from outside, since
 a read over a connection that already failed only fails again, and the checks
@@ -9573,20 +9781,21 @@ closing list is usually the cause of those after it:
 | User | `id -u`, `id -un`, `id -nG` and `id -G` | the user has uid 0, is in a group `site admit` refuses (`admitrules.PrivilegedGroups`), or is in a group of GID 0 under any name. Groups doctor cannot read are a `WARN` |
 | Docker | `docker version` and `docker info`'s security options, against the user's own socket | the daemon does not answer or is not rootless. When it does not answer, nothing that runs `docker` on the site is checked. An answer doctor cannot read is a `WARN` |
 | Docker engine | the version `docker version` read | older than 29.5 |
+| Docker source mark | the highest `src_valid_mark` under `/proc/sys/net/ipv4/conf` in RootlessKit's network namespace, read with the Docker check by entering the namespace as the user | it is 1, so every new connection to an app waits a second and the app sees the bridge's address: the recovery is `paisans deployment apply --execute`. See *`deployment apply` keeps the rootless namespace's `src_valid_mark` at 0*. A value doctor cannot read is a `WARN` |
 | Linger | `loginctl show-user <user> --property=Linger --value`, and whether the drop-in `/etc/systemd/system/user@<uid>.service.d/paisans-mesh.conf` exists | linger is off: the user's Docker stops when the last login ends and does not start at boot. Or the drop-in is missing, so the user's manager is not ordered after the mesh. An answer doctor cannot read, the mesh-order line included, is a `WARN` |
-| Sudo rights | `LC_ALL=C sudo -n -l` | sudo lets the user run anything but the WireGuard helper as root, carries a Defaults entry or runas line beyond admit's one rule, or does not let it run the helper. An answer doctor cannot read, such as a translated one, is a `WARN` |
+| Sudo rights | `LC_ALL=C sudo -n -l`, or `/usr/bin/sudo.ws -n -l` where sudo is sudo-rs | sudo lets the user run anything but the WireGuard helper as root, carries a Defaults entry or runas line beyond admit's one rule, or does not let it run the helper. An answer doctor cannot read, such as a translated one, is a `WARN` |
 | Mesh | `ip -j link show dev psns-<token>`, then the overlap test of *Two deployments on one host never share a mesh*: `ip -j route show table all`, `ip -j addr`, `docker network inspect` and the user's `~/.config/docker/daemon.json`, on every site that answered | the interface is missing or down, or anything outside it overlaps `mesh.subnet`, named with the subnet. The advice is that the subnet is fixed once deployed and the other network moves |
 | etcd quorum | `etcdctl endpoint health -w json` in the etcd container of the first member that answers, naming every member of `etcd.members` by its mesh address | fewer than half the members plus one are healthy. One member down with quorum intact is a `WARN` |
 | etcd version | `curl` on the host to the member's `http://<mesh address>:2379/version`; skipped, and said so, where the host has no `curl` | the cluster version is `3.0.0` under a 3.5 server |
-| Patroni | `/cluster` from every database site's Patroni, through `curl` in its container as `apply` asks it, and Patroni's `/sync` key from etcd | there is no running leader. A replica that is not `streaming`, or more than 16 MiB behind, is a `WARN`, and so is a leader with no Sync Standby while `cluster.synchronous` is true |
+| Patroni | `/cluster` from every database site's Patroni, through `curl` in its container as `deployment apply` asks it, and Patroni's `/sync` key from etcd | there is no running leader. A replica that is not `streaming`, or more than 16 MiB behind, is a `WARN`, and so is a leader with no Sync Standby while `cluster.synchronous` is true |
 | Containers | `docker ps -a --filter label=community.paisans.deployment=<id>` on every site, then `docker inspect` and the end of `docker logs` for each container not running or unhealthy | any container is not running, or runs while its healthcheck reports `unhealthy`, shown with the last lines its healthchecks printed. A healthcheck still `starting` is a `WARN`, since it has not failed but the container is not yet known to work; a container with no healthcheck is judged by running alone |
-| Settings | for each app setting `gated`, the read its kind records, run in the app's running container on each site it runs on: Mbin's environment and `MBIN_LOCKED_SETTINGS`, WriteFreely's `writefreely settings list` | a setting the gate leaves to the app (private instance mode, the allow list, authorized fetch, WriteFreely's private mode) is off or not locked. The advice is `paisans apply --site <site>`, which renders the file that writes and locks it and recreates the stack, or a newer image when the app does not honour the lock. See *The settings gating needs are checked on both sides* |
-| Pocket ID | the same question `apply` asks after acting on a Pocket ID stack on more than one site, asked once | no site, or more than one, has an active instance |
+| Settings | for each app setting `gated`, the read its kind records, run in the app's running container on each site it runs on: Mbin's environment and `MBIN_LOCKED_SETTINGS`, WriteFreely's `writefreely settings list` | a setting the gate leaves to the app (private instance mode, the allow list, authorized fetch, WriteFreely's private mode) is off or not locked. The advice is `paisans deployment apply --site <site>`, which renders the file that writes and locks it and recreates the stack, or a newer image when the app does not honour the lock. See *The settings gating needs are checked on both sides* |
+| Pocket ID | the same question `deployment apply` asks after acting on a Pocket ID stack on more than one site, asked once | no site, or more than one, has an active instance |
 | Clocks | `date +%s.%N` on each site, against the workstation's clock taken on either side of the call, less half the round trip | never; more than 1 s off is a `WARN` |
-| Leftovers | the host check's inventory (*The host check: what is already on a host decides how much is touched*) on every site that answered, and the manifest; read as the deployment's user, and skipped when the inventory cannot be read. A file is judged against the manifest's own view, which names the sites that were pending when it was rendered, so a file rendered without a pending site is not a leftover | never. Anything of this deployment's the site no longer renders (a compose project by label and name, a manifest entry marked left over) is a `WARN`, with the note that `apply` does not remove it. On the gateway, each `*.caddy` in `/srv/paisans/<token>/caddy.d` is listed as `info`: foreign, and served by this deployment's Caddy. That directory is the only way anything foreign is served by it, since the Caddyfile is this deployment's and Caddy runs in the host's network namespace |
-| Self-check | from this workstation, `/.well-known/paisans/<token>` through the public address of each site that runs Paisans' Caddy (the gateway, and a monitor with `web_server.managed_by: paisans`), on 443 and on 80, with the check `apply` runs at the end of the gateway's step. It asks once and never waits for a certificate, and needs no ssh | the site answers as something else, or does not answer on 443 or 80, naming the port and URL: something else on the host holds the port, which the deployment's user cannot see. A site with no `public_address` or no hostname of its own is a `WARN`, not asked from outside; so is a pending site, which is not asked since `apply` has not deployed its Caddy, and a down site's failure (a `FAIL` on the gateway), which points at its reach |
+| Leftovers | the host check's inventory (*The host check: what is already on a host decides how much is touched*) on every site that answered, and the manifest; read as the deployment's user, and skipped when the inventory cannot be read. A file is judged against the manifest's own view, which names the sites that were pending when it was rendered, so a file rendered without a pending site is not a leftover | never. Anything of this deployment's the site no longer renders (a compose project by label and name, a manifest entry marked left over) is a `WARN`, with the note that `deployment apply` does not remove it. On the gateway, each `*.caddy` in `/srv/paisans/<token>/caddy.d` is listed as `info`: foreign, and served by this deployment's Caddy. That directory is the only way anything foreign is served by it, since the Caddyfile is this deployment's and Caddy runs in the host's network namespace |
+| Self-check | from this workstation, `/.well-known/paisans/<token>` through the public address of each site that runs Paisans' Caddy (the gateway, and a monitor with `web_server.managed_by: paisans`), on 443 and on 80, with the check `deployment apply` runs at the end of the gateway's step. It asks once and never waits for a certificate, and needs no ssh | the site answers as something else, or does not answer on 443 or 80, naming the port and URL: something else on the host holds the port, which the deployment's user cannot see. A site with no `public_address` or no hostname of its own is a `WARN`, not asked from outside; so is a pending site, which is not asked since `deployment apply` has not deployed its Caddy, and a down site's failure (a `FAIL` on the gateway), which points at its reach |
 | Caddy certificates | the caddy container's log on every site that runs Paisans' Caddy, `docker compose logs caddy` from the container's start or the last hour, whichever is later, kept to Caddy's `tls.obtain` lines; for each hostname the site serves, the newest outcome | the newest outcome is a failure. Hostnames failing for one cause are one finding naming them all: the provider refusing the token from this server (Cloudflare's `9109`, with the address it judged), its lockout (`10502`), the certificate authority's rate limit with when to retry, or the error's own last clause. It reads no secret and calls no provider, so it runs for every provider |
-| DNS token | from each Caddy site, with the `ACME_DNS_TOKEN` in its `caddy.env`, read there as the site's ssh user and never sent anywhere; and from the workstation, with `external.acme_dns_token` from `--secrets` (`secrets.enc.yaml` beside the configuration by default), opened with the age key as `apply` opens it. Each asks the provider for the zone holding `community.domain`, then verifies the token | the provider refuses the token from that place, does not answer, sees no zone holding the domain, or reports the token not `active`. Secrets that cannot be opened, Eg: no age key on this workstation, skip the workstation's check and the records with the reason, and every other check runs |
+| DNS token | from each Caddy site, with the `ACME_DNS_TOKEN` in its `caddy.env`, read there as the site's ssh user and never sent anywhere; and from the workstation, with `external.acme_dns_token` from `--secrets` (`secrets.enc.yaml` beside the configuration by default), opened with the age key as `deployment apply` opens it. Each asks the provider for the zone holding `community.domain`, then verifies the token | the provider refuses the token from that place, does not answer, sees no zone holding the domain, or reports the token not `active`. Secrets that cannot be opened, Eg: no age key on this workstation, skip the workstation's check and the records with the reason, and every other check runs |
 | DNS records | the plan `dns init` builds, which reads and never writes, from the workstation once its token check passed | a hostname of the deployment holds a record pointing somewhere else (a visitor is sent there; delete it at the provider by hand, since `dns init` never updates a record and `dns prune` keeps one whose name is still wanted), or holds none (`paisans dns init --execute` creates it). A record waiting for `gateway move` is `info`, and a weak advisory record a `WARN`, as `dns init` shows them |
 
 The provider judges the address a call comes from (Cloudflare's Client IP
@@ -9625,7 +9834,7 @@ A container that failed with `cannot assign requested address` started before
 the mesh interface at boot: it publishes its port on the mesh address, which
 exists only once `wg-quick@psns-<token>` is up, and Docker does not retry a
 container whose network setup failed. The advice is `docker start <container>`
-on the site as the deployment's user, or `paisans apply --site <site>
+on the site as the deployment's user, or `paisans deployment apply --site <site>
 --recreate <stack> --execute`, and, if it happens at every boot, the Linger
 row, which says whether the user's manager is ordered after the mesh; see
 *The user's Docker starts after the mesh interface*. A container Docker
@@ -9633,7 +9842,7 @@ keeps restarting while its log says it
 cannot reach the database points at the Patroni finding when there is no
 primary: it comes back on its own once there is one. When there is a primary,
 it is not waiting on Patroni, and the advice is to check the site's HAProxy and
-to recreate the stack with `paisans apply --site <site> --only <stack>
+to recreate the stack with `paisans deployment apply --site <site> --only <stack>
 --recreate <stack> --execute`. A log saying `network is unreachable` gets the
 same recreate whatever Patroni says: the container's own network has no route
 to the mesh address, which a container whose network setup failed at boot and
@@ -9753,7 +9962,7 @@ to do. Like every command that changes a deployment it is a dry run until
 | 4 | dns remove | checks the new gateway again, then deletes the old one's records | no hostname the gateway serves points at the old gateway |
 | 5 | wait | sleeps out the longest TTL of the deleted records | that time has passed |
 | 6 | stop | checks the new gateway again, then stops and removes the old Caddy; on a site that keeps the monitor, removes the record and the marker and leaves Caddy running | the old site holds nothing of a gateway's; on a site that keeps the monitor, neither the record nor the marker |
-| 7 | hand off | only on a site that keeps the monitor: applies its `infra` stack, as `paisans apply --site <old> --only infra --execute` | the old site's Caddyfile names no hostname the gateway serves |
+| 7 | hand off | only on a site that keeps the monitor: applies its `infra` stack, as `paisans deployment apply --site <old> --only infra --execute` | the old site's Caddyfile names no hostname the gateway serves |
 
 **Answering** means: every hostname the gateway serves, each app's hostnames
 and media hostnames but never a monitor's, requested over HTTPS from the
@@ -9812,10 +10021,10 @@ refusal it would meet at stage 7, after DNS has moved, stops the move at the
 start instead; `--keep-images` and `--min-free` are passed to it. A run that
 stops between the two finds the site again by the gateway routes its
 Caddyfile still names, skips every stage before the hand-off, and hands it
-off; if the hand-off itself fails, `paisans apply --site <old> --only infra
+off; if the hand-off itself fails, `paisans deployment apply --site <old> --only infra
 --execute` finishes it directly. The host owner's sites in
 `/srv/paisans/<token>/caddy.d` stop stage 6 as they stop a plain move, since a monitor's
-Caddy does not serve them. `paisans apply` without `--site` asks such a site
+Caddy does not serve them. `paisans deployment apply` without `--site` asks such a site
 too, so it ends with the move.
 
 **The move needs the provider's API.** It adds and deletes through record
@@ -9858,7 +10067,7 @@ foundation's track on Caddy 2, `ghcr.io/paisans-software/caddy:2.*.*`.
 **The track moves, and what a host runs does not move with it unplanned.** The
 image is rebuilt whenever upstream Caddy or its base image ships a fix, and the
 track follows every release, so a security fix reaches a deployment without a
-toolkit release, and nothing crosses a major version unasked. `apply` asks the
+toolkit release, and nothing crosses a major version unasked. `deployment apply` asks the
 registry, while it plans, for the newest tag on the track and the build it
 names, and renders both in the gateway's compose file (Eg:
 `ghcr.io/paisans-software/caddy:2.11.7@sha256:...`). A new build is therefore a
@@ -9893,14 +10102,14 @@ and it is the only image a reference alone can be judged by.
 
 An `acme.image` may name a tag that moves, as the default does, because it is
 resolved the same way: `2`, `2.11` and `2.11.4` are each pinned to the build
-they name when `apply` plans, and a digest is taken as written. `latest`, or no
+they name when `deployment apply` plans, and a digest is taken as written. `latest`, or no
 tag at all, is **refused**: it moves to the next Caddy major version the day one
 ships, and a major version can change the Caddyfile syntax the gateway is
 rendered with. The gateway's validation gate would stop that apply before the
 new build replaced anything, and every apply after it, until the toolkit caught
 up with the new major version. Naming the major version is the fix.
 
-Everything else is checked at `apply`, by asking the binary which modules it has
+Everything else is checked at `deployment apply`, by asking the binary which modules it has
 rather than inferring it from a name.
 
 #### The token is checked from the server before Caddy uses it
@@ -9912,7 +10121,7 @@ gateway, and Caddy, refused, retries every hostname against every certificate
 authority until the provider locks the token out, a lockout that holds while
 the retries keep arriving.
 
-So on each site whose Caddy is about to start, reload or be recreated, `apply`
+So on each site whose Caddy is about to start, reload or be recreated, `deployment apply`
 first runs `check DNS token` there: after the gateway's files are written and
 its modules checked, before `validate gateway config`. It reads the token from
 the `caddy.env` it has just written, on the host, and hands it to curl through
@@ -9968,7 +10177,7 @@ directory read only at `/etc/caddy.d`, and the Caddyfile ends with `import
 so each file there is a whole site block and may import
 `upstream_unavailable`, `upstream_failover` or `upstream_single`.
 
-**paisans never touches what is in it.** `apply` creates the directory, the
+**paisans never touches what is in it.** `deployment apply` creates the directory, the
 deployment user's and 0755, when it is missing, and leaves an existing one as
 it is. The host's owner writes into it as the deployment's user, Eg: `sudo
 -u paisans-<token> tee /srv/paisans/<token>/caddy.d/blog.caddy`, never as
@@ -9995,11 +10204,11 @@ sites:
   vm:     { roles: [gateway, witness] }  # gateway added
 ```
 
-`paisans apply` without `--site` then performs the overlap above. Three things
+`paisans deployment apply` without `--site` then performs the overlap above. Three things
 make that hold across its steps:
 
 * **The old gateway stays open.** Its 80 and 443 allows are `site admit`'s,
-  and no `apply` step changes a firewall rule, so they stay until DNS has
+  and no `deployment apply` step changes a firewall rule, so they stay until DNS has
   moved. Once the Caddy has stopped, the old host's owner admits the site again
   without `--public-ports`, which removes them.
 * **`dns init` leaves a moving name to the move.** A hostname the gateway
@@ -10007,7 +10216,7 @@ make that hold across its steps:
   site is marked `moving`, shown as a note, and neither created nor counted as
   a conflict, so the run is not stopped before the new gateway is applied. A
   record pointing elsewhere that `dns init` did not make is still a conflict.
-* **The move runs last.** `apply` asks every site without the gateway role
+* **The move runs last.** `deployment apply` asks every site without the gateway role
   whether it still holds a gateway, and when one does, plans `gateway move`
   after pass two, in a `gateway` section of its own, waiting on the new
   gateway's apply. The new gateway is applied, comes up and obtains its

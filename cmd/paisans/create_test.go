@@ -97,7 +97,7 @@ func TestCreateWritesAFileThatValidates(t *testing.T) {
 	// with no key asks for each secret only the operator can give.
 	next := out.String()[strings.Index(out.String(), "Next:"):]
 	at := -1
-	for _, want := range []string{"  paisans init ", "  paisans site request ", "  paisans secrets set ", "  paisans apply "} {
+	for _, want := range []string{"  paisans init ", "  paisans site request ", "  paisans secrets set ", "  paisans deployment apply "} {
 		i := strings.Index(next, want)
 		if i < 0 {
 			t.Errorf("next steps lack %q:\n%s", want, next)

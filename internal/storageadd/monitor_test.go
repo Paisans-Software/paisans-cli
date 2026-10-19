@@ -68,7 +68,7 @@ func TestAFailedReseedNamesTheApply(t *testing.T) {
 	w.failOnce = "/srv/paisans/f2a9/health/compose.yaml restart"
 
 	err := storageadd.Execute(w.build(storageadd.Options{}))
-	if err == nil || !strings.Contains(err.Error(), "(monitor)") || !strings.Contains(err.Error(), "paisans apply --site watch --only health --execute") {
+	if err == nil || !strings.Contains(err.Error(), "(monitor)") || !strings.Contains(err.Error(), "paisans deployment apply --site watch --only health --execute") {
 		t.Fatalf("want the monitor stage to fail naming the apply, got %v", err)
 	}
 	if zoneOf(w.hosts["home-b"], w.hosts["home-b"]) != "home-b" {
@@ -94,7 +94,7 @@ func TestAnUnhealthyMonitorNamesItsCauseAndTheApply(t *testing.T) {
 	if err == nil {
 		t.Fatal("an unhealthy monitor passed")
 	}
-	shortAndVerbose(t, err, "(monitor)", "stack health is not healthy", "The join itself is done", "paisans apply --site watch --only health --execute", "run storage add again")
+	shortAndVerbose(t, err, "(monitor)", "stack health is not healthy", "The join itself is done", "paisans deployment apply --site watch --only health --execute", "run storage add again")
 }
 
 // A deployment with no monitor site skips the stage.

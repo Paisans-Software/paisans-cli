@@ -26,7 +26,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// convergeState is what decides the plan of `paisans apply` without --site:
+// convergeState is what decides the plan of `paisans deployment apply` without --site:
 // whether init has work, and each etcd member's infra/etcd-initial record,
 // for the members that hold one. See docs/specs/2026-10-09-apply-converge.md.
 type convergeState struct {
@@ -98,7 +98,7 @@ func step(st stage, args ...string) convergeStep {
 }
 
 func applyStep(st stage, site string) convergeStep {
-	return step(st, "apply", "--site", site)
+	return step(st, "deployment", "apply", "--site", site)
 }
 
 // initWhy is what init has to do, as its line says it.
@@ -184,7 +184,7 @@ func convergePlan(cfg *config.Config, st convergeState) []convergeStep {
 	if dataFounding {
 		for _, g := range cfg.GatewaySites() {
 			if !slices.Contains(members, g) {
-				steps = append(steps, step(stageOthers, "apply", "--site", g, "--hold-apps"))
+				steps = append(steps, step(stageOthers, "deployment", "apply", "--site", g, "--hold-apps"))
 			}
 		}
 	}
@@ -271,8 +271,8 @@ func convergePlan(cfg *config.Config, st convergeState) []convergeStep {
 	before := map[string]bool{}
 	for _, s := range steps {
 		switch {
-		case len(s.Args) == 3 && s.Args[0] == "apply" && s.Args[1] == "--site":
-			before[s.Args[2]] = true
+		case len(s.Args) == 4 && isApply(s.Args) && s.Args[2] == "--site":
+			before[s.Args[3]] = true
 		case len(s.Args) == 3 && s.Args[0] == "site" && s.Args[1] == "add":
 			before[s.Args[2]] = true
 		}
@@ -414,8 +414,8 @@ func runStep(args []string) error {
 		return runInit(args[1:], strings.NewReader(""), os.Stdout)
 	case isPrepare(args):
 		return runSitePrepare(args[2:])
-	case args[0] == "apply":
-		return runApply(args[1:], os.Stdin, os.Stdout)
+	case isApply(args):
+		return runApply(args[2:], os.Stdin, os.Stdout)
 	case args[0] == "site" && args[1] == "add":
 		return runSiteAdd(args[2:], os.Stdin, os.Stdout)
 	case args[0] == "storage" && args[1] == "init":
@@ -570,11 +570,11 @@ func convergeFlags(args []string, o convergeOptions) []string {
 	if o.Verbose {
 		out = append(out, "-v")
 	}
-	if o.answers.yes && (args[0] == "apply" || args[0] == "gateway") {
+	if o.answers.yes && (isApply(args) || args[0] == "gateway") {
 		out = append(out, "--yes")
 	}
 	// gateway move takes them for the apply its hand-off runs.
-	if args[0] == "apply" || args[0] == "gateway" {
+	if isApply(args) || args[0] == "gateway" {
 		if o.MinFree != "" {
 			out = append(out, "--min-free", o.MinFree)
 		}
@@ -681,7 +681,7 @@ func generateProblem(path string, err error) error {
 	}
 	return &ui.Problem{
 		Hint:    hint,
-		Explain: errLine(err) + ".\nNothing on a server changed. Once that is fixed, run paisans apply again.",
+		Explain: errLine(err) + ".\nNothing on a server changed. Once that is fixed, run paisans deployment apply again.",
 		Cause:   err,
 	}
 }
@@ -726,7 +726,7 @@ func missingID(path string) bool {
 	return yaml.Unmarshal(data, &doc) == nil && doc.ID == ""
 }
 
-// runConverge is `paisans apply` without --site: every step that takes
+// runConverge is `paisans deployment apply` without --site: every step that takes
 // paisans-stack.yaml to a complete, running stack, run in the order the deployment
 // needs them and stopped at the first failure. Run again, it reads live state
 // again and carries on. See docs/specs/2026-10-09-apply-converge.md.
@@ -750,7 +750,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		// init writes the id, the subnet and the secrets the rest is
 		// planned from, so the state is read again once it has run.
 		if err := convergeRun(convergeFlags([]string{"init"}, o)); err != nil {
-			return convergeStop("apply stopped at init", err, "Run paisans apply --execute again to resume.")
+			return convergeStop("apply stopped at init", err, "Run paisans deployment apply --execute again to resume.")
 		}
 		// init reported through its own reporter, and pointed the retries
 		// and holds at it; the reads below draw on r.
@@ -1050,6 +1050,9 @@ type stepStatus struct {
 	// that takes an earlier one's status.
 	explain, problem string
 	reports          []checkReport
+	// moves is each image a pull line's site moves to another build, shown
+	// under the line at every verbosity. See imageMoves.
+	moves []string
 }
 
 // convergeStatus is the dry run's plan: a prepare line per site, a pull
@@ -1268,6 +1271,9 @@ func endStatus(line ui.Line, st stepStatus) {
 		line.Note(n.Text, n.Detail)
 	}
 	line.Explain(st.explain)
+	for _, m := range st.moves {
+		line.Explain(m)
+	}
 	line.End(st.mark, st.result)
 }
 
@@ -1367,7 +1373,7 @@ func showNotes(r ui.Reporter, notes []checkReport) {
 }
 
 // resumeAdvice is what a stop says to do, but at a DNS conflict or a wait.
-const resumeAdvice = "Run paisans apply --execute again to resume."
+const resumeAdvice = "Run paisans deployment apply --execute again to resume."
 
 // convergeExecute runs every step but init, which runConverge has run: a
 // prepare line per site, as it runs; a pull line per site, likewise; dns init, which reports as typed by
@@ -1416,7 +1422,7 @@ func convergeExecute(r ui.Reporter, cfg *config.Config, steps []convergeStep, o 
 			insideApply = false
 			if err != nil {
 				if errors.Is(err, dns.ErrConflict) {
-					return convergeStop("apply stopped at "+s.Title, err, "Resolve each DNS conflict above as it says, then run paisans apply --execute again.")
+					return convergeStop("apply stopped at "+s.Title, err, "Resolve each DNS conflict above as it says, then run paisans deployment apply --execute again.")
 				}
 				return convergeStop("apply stopped at "+s.Title, err, resumeAdvice)
 			}
@@ -1559,7 +1565,7 @@ func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions) err
 		case errors.Is(err, storageadd.ErrWaiting):
 			// Not a failure, and main exits 75 for it as storage add does.
 			line.End(ui.Pending, "waiting on Garage")
-			return convergeStop("apply is waiting at "+s.Title, err, "Nothing failed: Garage is still moving data. Run paisans apply --execute again later.")
+			return convergeStop("apply is waiting at "+s.Title, err, "Nothing failed: Garage is still moving data. Run paisans deployment apply --execute again later.")
 		default:
 			line.Fail(err)
 			return convergeStop("apply stopped at "+s.Title, err, resumeAdvice)
@@ -1745,12 +1751,12 @@ func convergeWaits(cfg *config.Config, steps []convergeStep, i int) []string {
 	switch {
 	case s.Args[0] == "pull":
 		waits = append(waits, prepare(stepSite(s)))
-	case s.Args[0] == "apply" || s.Args[0] == "site":
+	case isApply(s.Args) || s.Args[0] == "site":
 		site := stepSite(s)
 		waits = append(waits, prepare(site))
 		if s.Stage == stageFounding && !cfg.Sites[site].Has(config.RoleWitness) {
 			for _, e := range earlier {
-				if e.Stage != stagePassTwo && e.Args[0] == "apply" && cfg.Sites[stepSite(e)].Has(config.RoleWitness) {
+				if e.Stage != stagePassTwo && isApply(e.Args) && cfg.Sites[stepSite(e)].Has(config.RoleWitness) {
 					waits = append(waits, e.Title)
 				}
 			}
@@ -1776,7 +1782,7 @@ func convergeWaits(cfg *config.Config, steps []convergeStep, i int) []string {
 		// gateway's applies.
 		for _, g := range cfg.GatewaySites() {
 			waits = append(waits, prepare(g))
-			waits = append(waits, "apply --site "+g)
+			waits = append(waits, "deployment apply --site "+g)
 		}
 	case s.Args[0] == "storage":
 		for _, g := range cfg.Storage.Garage.Sites {
@@ -1795,9 +1801,10 @@ func convergeWaits(cfg *config.Config, steps []convergeStep, i int) []string {
 // apply names it after --site, and each other step about a site names it
 // last.
 func stepSite(s convergeStep) string {
+	if isApply(s.Args) && len(s.Args) >= 4 && s.Args[2] == "--site" {
+		return s.Args[3]
+	}
 	switch strings.Join(s.Args[:min(2, len(s.Args))], " ") {
-	case "apply --site":
-		return s.Args[2]
 	case "pull --site", "site add", "site prepare", "storage init":
 		return s.Args[len(s.Args)-1]
 	}
@@ -1946,4 +1953,9 @@ func errLine(err error) string {
 // replace it.
 var convergeHost = func(name string, site config.Site) apply.Transport {
 	return siteTransport(name, site, "")
+}
+
+// isApply reports whether a step's args are paisans deployment apply.
+func isApply(args []string) bool {
+	return len(args) >= 2 && args[0] == "deployment" && args[1] == "apply"
 }

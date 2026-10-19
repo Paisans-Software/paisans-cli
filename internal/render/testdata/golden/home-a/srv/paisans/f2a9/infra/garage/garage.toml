@@ -1,4 +1,4 @@
-# Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+# Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
 #
 # Object storage ships from the first install, single node at init and
 # replicated once a site is added. Starting on local disk and moving later is a

@@ -163,7 +163,7 @@ func TestTheWitnessGoesFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = apply.WitnessFirstRefusal(cfg, p, true, map[string]bool{"home-b": true})
-	if err == nil || !strings.Contains(err.Error(), "paisans apply --site vm") {
+	if err == nil || !strings.Contains(err.Error(), "paisans deployment apply --site vm") {
 		t.Fatalf("a data site was founded before the witness: %v", err)
 	}
 	if err := apply.WitnessFirstRefusal(cfg, p, true, map[string]bool{"vm": true}); err != nil {
@@ -417,7 +417,7 @@ func TestEtcdRefusalsAreProblems(t *testing.T) {
 		t.Errorf("etcd refusal: %q\n%q", q.Hint, q.Explain)
 	}
 	q = problemOf(t, apply.WitnessFirstRefusal(cfg, p, true, map[string]bool{"home-b": true}))
-	if q.Hint != "home-a would found etcd while the witness vm runs none" || !strings.Contains(q.Explain, "paisans apply --site vm") {
+	if q.Hint != "home-a would found etcd while the witness vm runs none" || !strings.Contains(q.Explain, "paisans deployment apply --site vm") {
 		t.Errorf("witness first: %q\n%q", q.Hint, q.Explain)
 	}
 	for _, h := range []string{q.Hint} {

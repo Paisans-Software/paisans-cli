@@ -133,7 +133,7 @@ func TestAFailedReseedNamesTheApply(t *testing.T) {
 		}
 	}
 	var me *MonitorError
-	if !errors.As(err, &me) || !strings.Contains(err.Error(), "paisans apply --site watch --only health --execute") {
+	if !errors.As(err, &me) || !strings.Contains(err.Error(), "paisans deployment apply --site watch --only health --execute") {
 		t.Fatalf("want the monitor's failure naming the apply, got %v", err)
 	}
 	if _, ok := hosts["home-a"].files[blogEnv]; ok {
@@ -173,5 +173,5 @@ func TestAnUnhealthyMonitorNamesItsCauseAndTheApply(t *testing.T) {
 		t.Fatal("an unhealthy monitor passed")
 	}
 	// as the command wraps it
-	shortAndVerbose(t, fmt.Errorf("app remove: %w", err), "stack health is not healthy", "The app is removed", "paisans apply --site watch --only health --execute")
+	shortAndVerbose(t, fmt.Errorf("app remove: %w", err), "stack health is not healthy", "The app is removed", "paisans deployment apply --site watch --only health --execute")
 }

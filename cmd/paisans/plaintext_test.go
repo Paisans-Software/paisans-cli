@@ -137,11 +137,11 @@ func TestAPlaintextSecretsFileIsRefused(t *testing.T) {
 			fakeConverge(t, nil)
 			return runApply([]string{"--config", c}, strings.NewReader(""), io.Discard)
 		},
-		"apply --site": func(c, s string) error {
+		"deployment apply --site": func(c, s string) error {
 			return runApply([]string{"--config", c, "--site", "home-a"}, strings.NewReader(""), io.Discard)
 		},
-		"config publish": func(c, s string) error {
-			return runConfigPublish([]string{"--config", c, "--execute"}, strings.NewReader(""), io.Discard)
+		"deployment publish": func(c, s string) error {
+			return runDeploymentPublish([]string{"--config", c, "--execute"}, strings.NewReader(""), io.Discard)
 		},
 		"secrets list": func(c, s string) error { return runSecretsList([]string{"--config", c}, io.Discard) },
 		"init":         func(c, s string) error { return runInit([]string{"--config", c}, strings.NewReader(""), io.Discard) },

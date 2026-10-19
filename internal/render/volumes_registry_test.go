@@ -17,7 +17,7 @@ import (
 // pinned as well as clustered, so each blueprint's own database is rendered
 // too. Each track is resolved to the build apply would run today, and what it
 // declares is read from the registry for every platform it is published for.
-// `paisans apply` makes the same check against the host's copy of every
+// `paisans deployment apply` makes the same check against the host's copy of every
 // image before it writes anything; this one says so before a release.
 //
 //	go test -tags registry_integration -run TestEveryDeclaredImageVolumeIsMounted ./internal/render/

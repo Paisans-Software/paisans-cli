@@ -44,13 +44,13 @@ var takenMonitorNames = []string{"public", "gate", "signed fetch", "heartbeat", 
 
 // def checks a heartbeat and the generated token that goes with it.
 // apiVersion is the blueprint's, since heartbeat is read only from
-// APIVersion on; generated is the secrets the blueprint declares itself.
+// APIVersionV2 on; generated is the secrets the blueprint declares itself.
 func (h *heartbeatSpec) def(apiVersion string, generated []SecretSpec) (*Heartbeat, *SecretSpec, error) {
 	if h == nil {
 		return nil, nil, nil
 	}
-	if apiVersion != APIVersion {
-		return nil, nil, fmt.Errorf("heartbeat: needs apiVersion %s, the format that adds it, so a toolkit that cannot read it skips the release", APIVersion)
+	if apiVersion == APIVersionV1 {
+		return nil, nil, fmt.Errorf("heartbeat: needs apiVersion %s, the format that adds it, so a toolkit that cannot read it skips the release", APIVersionV2)
 	}
 	if len(h.Name) > 40 || !heartbeatName.MatchString(h.Name) {
 		return nil, nil, fmt.Errorf("heartbeat.name: is %q; it must be lowercase words of letters, digits and hyphens, at most 40 characters, since the monitor is named \"<app> — <name>\"", h.Name)

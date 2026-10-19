@@ -91,6 +91,7 @@ apps:
     placement: cluster
     settings:
       management: paisans
+      signup_default_groups: [members]
       file_backend: database
   health:
     blueprint: uptime

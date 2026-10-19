@@ -44,7 +44,7 @@ func secretsLeft(site string) string {
 }
 
 func ownedNote(site, owed string) string {
-	return fmt.Sprintf("%s: run `paisans apply --site %s` when that is acceptable. %s", site, site, owed)
+	return fmt.Sprintf("%s: `paisans deployment apply --site %s` when that is acceptable. %s", site, site, owed)
 }
 
 func caddyKept(site, container string, sites []string, sitesDir, dir string) string {

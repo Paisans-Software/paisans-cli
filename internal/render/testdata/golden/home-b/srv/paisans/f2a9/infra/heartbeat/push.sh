@@ -1,5 +1,5 @@
 #!/bin/sh
-# Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+# Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
 #
 # The heartbeat of site home-b: one request a minute to each URL in
 # HEARTBEAT_URLS, which heartbeat.env sets. A cycle is one minute from its

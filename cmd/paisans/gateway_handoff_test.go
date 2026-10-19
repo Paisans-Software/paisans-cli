@@ -48,7 +48,7 @@ func caddyfileOf(t *testing.T, cfg *config.Config, site string, opts []render.Op
 		t.Fatal(err)
 	}
 	for _, f := range plan.Files {
-		if strings.HasPrefix(f.Path, site+"/") && strings.HasSuffix(f.Path, "/infra/caddy/Caddyfile") {
+		if strings.HasPrefix(f.Path, site+"/") && strings.HasSuffix(f.Path, "/infra/caddy/etc/Caddyfile") {
 			return f.Content
 		}
 	}

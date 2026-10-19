@@ -135,7 +135,7 @@ func EtcdQuorum(cfg *config.Config, in Input) []Finding {
 			More: append(detail, fmt.Sprintf("Quorum holds, and one more loss ends it. Start %s.", strings.Join(down, ", ")))})
 	default:
 		more := append(detail,
-			fmt.Sprintf("Start the members that are not healthy: %s. A member whose host is up but whose etcd is not comes back with `paisans apply --site <site> --execute`.", strings.Join(down, ", ")),
+			fmt.Sprintf("Start the members that are not healthy: %s. A member whose host is up but whose etcd is not comes back with `paisans deployment apply --site <site> --execute`.", strings.Join(down, ", ")),
 			"Without quorum Patroni cannot renew its leader key, so the primary demotes itself and every write stops until quorum returns (Patroni v4.1.0, patroni/ha.py, _handle_dcs_error: \"demoting self because DCS is not accessible\").")
 		out = append(out, Finding{Section: SectionEtcd, Level: Fail, Line: strings.Replace(line, "quorum:", "no quorum:", 1), More: more})
 	}
@@ -184,7 +184,7 @@ func etcdVersion(p EtcdProbe, down []string) []Finding {
 	}
 	advice := "Apply each founding member whose etcd has not run yet"
 	if len(down) > 0 {
-		advice = fmt.Sprintf("Apply the members that are not running: %s, Eg: `paisans apply --site %s --execute`", strings.Join(down, ", "), down[0])
+		advice = fmt.Sprintf("Apply the members that are not running: %s, Eg: `paisans deployment apply --site %s --execute`", strings.Join(down, ", "), down[0])
 	}
 	return []Finding{{Section: SectionEtcd, Level: Fail, Line: line + ": the cluster version never settled",
 		More: []string{

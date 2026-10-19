@@ -170,7 +170,7 @@ func TestTheDegradedEnding(t *testing.T) {
 	}
 }
 
-// apply --site on a pending site is refused before anything is read.
+// deployment apply --site on a pending site is refused before anything is read.
 func TestApplySiteRefusesAPendingSite(t *testing.T) {
 	classified(t, degraded(t))
 	var err error
@@ -182,7 +182,7 @@ func TestApplySiteRefusesAPendingSite(t *testing.T) {
 	}
 }
 
-// apply --site alone classifies every site itself, and refuses a site that
+// deployment apply --site alone classifies every site itself, and refuses a site that
 // is pending.
 func TestApplySiteAloneClassifies(t *testing.T) {
 	classifyWith(t, classifyHosts([]string{"home-b"}))
@@ -310,7 +310,7 @@ func TestStorageWaitsForItsSites(t *testing.T) {
 	}
 }
 
-// apply --site alone ends degraded in one line, and --require-all fails it;
+// deployment apply --site alone ends degraded in one line, and --require-all fails it;
 // a warning it ends on is folded into that failure, never left to exit 0.
 func TestApplySiteEndsDegraded(t *testing.T) {
 	cfg := fixture(t)
@@ -337,7 +337,7 @@ func TestApplySiteEndsDegraded(t *testing.T) {
 	}
 }
 
-// apply --site naming a down site is refused, as a pending one is.
+// deployment apply --site naming a down site is refused, as a pending one is.
 func TestApplySiteRefusesADownSite(t *testing.T) {
 	c := degraded(t)
 	c.Sites["home-b"] = topology.Site{Name: "home-b", Class: topology.Down, Why: topology.DownLine("home-b")}
@@ -372,7 +372,7 @@ func TestSiteAddRefusesWithoutEverySite(t *testing.T) {
 
 // A dry run of a degraded deployment with --require-all exits 1 as the run
 // would, so automation that gates on a dry run does not pass on one: apply
-// without --site, and apply --site alone.
+// without --site, and deployment apply --site alone.
 func TestADryRunHonoursRequireAll(t *testing.T) {
 	fakeConverge(t, nil)
 	classifyWith(t, classifyHosts([]string{"home-b"}))
@@ -396,7 +396,7 @@ func TestADryRunHonoursRequireAll(t *testing.T) {
 		err = runApply([]string{"--config", path, "--secrets", fixtureSecretsPath(), "--site", "watch", "--require-all"}, strings.NewReader(""), io.Discard)
 	})
 	if err == nil || !strings.Contains(problemText(err), "--require-all") || !rec.Has("result", "Nothing changed") {
-		t.Errorf("apply --site: %v: %s\n%s", err, problemText(err), rec.Lines())
+		t.Errorf("deployment apply --site: %v: %s\n%s", err, problemText(err), rec.Lines())
 	}
 }
 

@@ -1,6 +1,6 @@
 # Rendered by paisans. Do not edit.
 #
-# A build artifact: `paisans apply` renders it and refuses to overwrite one
+# A build artifact: `paisans deployment apply` renders it and refuses to overwrite one
 # that has been modified locally. Change paisans-stack.yaml or secrets.enc.yaml.
 #
 # Matrix Authentication Service: the thing that actually logs a member in.
@@ -63,7 +63,7 @@ http:
           # /usr/local/share/mas-cli/.
           path: /usr/local/share/mas-cli/assets/
       binds:
-        - address: "[::]:8009"
+        - address: "[::]:18009"
       proxy_protocol: false
 
 database:
@@ -82,7 +82,7 @@ matrix:
   homeserver: "example.org"
   # The homeserver's own address, inside this stack. `app` is the compose
   # service, so this never leaves the host.
-  endpoint: "http://app:8008/"
+  endpoint: "http://app:18008/"
   # The same string as homeserver.yaml's matrix_authentication_service.secret.
   # It authenticates this service to the homeserver, which means it can perform
   # admin actions there, so it is high entropy and it is not shared with
@@ -140,7 +140,7 @@ upstream_oauth2:
   providers:
     # THE REDIRECT URI THE CLIENT AT THE IDENTITY PROVIDER ALLOWS IS
     # https://chat.example.org/upstream/callback/0F7E2P4F3W17YSR71ETCRS95ZY
-    # `paisans apply` creates the client with it, and `paisans init` names it
+    # `paisans deployment apply` creates the client with it, and `paisans init` names it
     # while the client is still owed, which is before this file exists.
     # The id below is part of that URL, which is why it is derived from the
     # app's name and stays the same every time this file is rendered rather

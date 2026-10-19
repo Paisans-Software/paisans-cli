@@ -1159,3 +1159,29 @@ func TestADaemonThatCannotBeAskedIsNotRestarted(t *testing.T) {
 		t.Errorf("warnings %+v", plan.Warnings)
 	}
 }
+
+// Prepare warns about a host with no swap on, reading /proc/swaps as the
+// deployment's user, and plans nothing for it: admit makes a swapfile.
+func TestPrepareWarnsWithoutSwap(t *testing.T) {
+	for _, c := range []struct {
+		name, swaps string
+		warns       bool
+	}{
+		{"none", "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n", true},
+		{"on", "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n/swapfile                               file\t\t8388604\t\t0\t\t-2\n", false},
+	} {
+		host := preparedHost(false)
+		host.files["/proc/swaps"] = c.swaps
+		plan, err := hostprep.Build("home-a", fixture(t), host, admitted(t, fixture(t), "home-a"))
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		warns := slices.ContainsFunc(plan.Warnings, func(w hostprep.Warning) bool { return strings.HasPrefix(w.Hint, "swap: none on") })
+		if warns != c.warns {
+			t.Errorf("%s: warned %v, want %v: %+v", c.name, warns, c.warns, plan.Warnings)
+		}
+		if slices.ContainsFunc(plan.Steps, func(s hostprep.Step) bool { return strings.Contains(s.Title, "swap") }) {
+			t.Errorf("%s: prepare planned a swap step", c.name)
+		}
+	}
+}

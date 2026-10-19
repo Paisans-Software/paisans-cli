@@ -31,7 +31,7 @@ func TestSettingsCheckEachRunningCopy(t *testing.T) {
 	if f.Level != Fail || !strings.Contains(f.Line, "2 gate setting(s)") {
 		t.Errorf("a copy with one setting off and one unlocked: %+v", f)
 	}
-	for _, want := range []string{"MBIN_PRIVATE_INSTANCE is false, and must be true", "MBIN_USE_FEDERATION_ALLOW_LIST is true but not locked", "`paisans apply --site home-b`"} {
+	for _, want := range []string{"MBIN_PRIVATE_INSTANCE is false, and must be true", "MBIN_USE_FEDERATION_ALLOW_LIST is true but not locked", "`paisans deployment apply --site home-b`"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the failure lacks %q:\n%s", want, text)
 		}

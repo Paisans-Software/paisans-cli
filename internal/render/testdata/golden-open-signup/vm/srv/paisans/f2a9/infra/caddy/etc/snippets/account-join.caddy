@@ -1,0 +1,31 @@
+# Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
+#
+# People with no account yet, on join.example.org, for account:
+# signup is open, so the registration page, GET and POST on / exactly, and
+# the static files, and nothing else.
+# Never gated, because nobody here has an account yet. Sign in, the home
+# page, a member's own account and /admin answer on the app's primary
+# hostname only, and the service registers them there only, so a session
+# cookie is never set on this origin.
+@register {
+	path /
+	method GET POST
+}
+handle @register {
+	reverse_proxy 10.44.0.1:8082 10.44.0.2:8082 {
+		# Failover across apps sites; see upstream_failover in the Caddyfile.
+		import upstream_failover
+		header_up X-Forwarded-Proto https
+	}
+}
+@static path /static/*
+handle @static {
+	reverse_proxy 10.44.0.1:8082 10.44.0.2:8082 {
+		# Failover across apps sites; see upstream_failover in the Caddyfile.
+		import upstream_failover
+		header_up X-Forwarded-Proto https
+	}
+}
+handle {
+	respond 404
+}

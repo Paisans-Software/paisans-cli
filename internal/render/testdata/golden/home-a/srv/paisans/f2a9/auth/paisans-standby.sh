@@ -1,5 +1,5 @@
 #!/bin/sh
-# Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+# Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
 #
 # The entrypoint of auth's app service, mounted read only at
 # /paisans/pocket-id-standby.sh. It runs the image's own entrypoint and command

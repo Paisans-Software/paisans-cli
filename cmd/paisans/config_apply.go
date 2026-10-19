@@ -27,7 +27,7 @@ import (
 // local files that are not based on the sites' newest version, since
 // applying them would undo whatever the newer version changed. After the
 // approval and before the first change: check each host's record, which
-// only reads. Then publish: apply --site before its first change, apply
+// only reads. Then publish: deployment apply --site before its first change, apply
 // without --site once its site prepare steps have made every site's store
 // and before any other step changes a host (see runConverge). What is
 // published is the bytes apply loaded and applies, never a second read.
@@ -81,7 +81,7 @@ type gathered struct {
 	answers answerer
 }
 
-// gatherForApply gathers as config publish does, without the side effects
+// gatherForApply gathers as deployment publish does, without the side effects
 // in a dry run: no site syncs. The seen record is written only when the
 // version is published, after the review's approval (configstore.PublishFiles).
 // loaded is the paisans-stack.yaml and secrets.enc.yaml the caller loaded and
@@ -149,7 +149,7 @@ func gatherForApply(r ui.Reporter, configPath, secretsPath string, loaded *confi
 			return nil, err
 		}
 	} else if !g.Majority {
-		r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), len(sites)), "--execute asks for the word "+partialWord+" at a terminal.")
+		r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), len(sites)), "--execute will ask for the word "+partialWord+" at a terminal.")
 	}
 	v := &gathered{l: l, g: g, sites: sites, key: key, files: files, parents: parents, revision: 1, answers: ans}
 	if len(parents) == 1 {
@@ -209,14 +209,26 @@ func (v *gathered) publish(r ui.Reporter, execute bool) (*appliedVersion, error)
 	}
 	s := r.Step("publish " + v.what())
 	sha, pushed, err := configstore.PublishFiles(v.l, v.g, v.files, v.sites, v.key, configSignWith(v.key), false, configNow())
-	return published(r, s, sha, pushed, err, v.revision, v.files)
+	return v.saved(r)(published(r, s, sha, pushed, err, v.revision, v.files))
 }
 
 func (v *gathered) next(r ui.Reporter, prev *appliedVersion, files configstore.Files) (*appliedVersion, error) {
 	s := r.Step(fmt.Sprintf("publish revision %d", prev.revision+1))
 	s.Detail("what this run recorded in secrets.enc.yaml, on %s", prev.sha[:12])
 	sha, pushed, err := configstore.PublishNext(v.l, v.g, prev.sha, prev.revision, files, v.sites, v.key, configSignWith(v.key), configNow())
-	return published(r, s, sha, pushed, err, prev.revision+1, files)
+	return v.saved(r)(published(r, s, sha, pushed, err, prev.revision+1, files))
+}
+
+// saved saves a version the run published to this workstation's deployments,
+// so every deployment applied from here is found again by deployment list
+// wherever its files were.
+func (v *gathered) saved(r ui.Reporter) func(*appliedVersion, error) (*appliedVersion, error) {
+	return func(a *appliedVersion, err error) (*appliedVersion, error) {
+		if err == nil && a != nil {
+			saveVersion(r, v.l, a.sha, a.revision, a.files, v.key, "applied from "+v.l.Dir)
+		}
+		return a, err
+	}
 }
 
 // published ends s, the step that published files as revision, from what
@@ -249,7 +261,7 @@ func published(r ui.Reporter, s ui.Step, sha string, pushed []string, err error,
 // with no store is named with the command that makes one.
 func pushFailure(site string, err error) string {
 	if errors.Is(err, configstore.ErrNoStore) {
-		return site + " has no configuration store yet; paisans site prepare --site " + site + " --execute makes it."
+		return site + " has no configuration store yet; paisans site prepare --site " + site + " --execute will make it."
 	}
 	if err == nil {
 		return site + " did not answer."
@@ -266,7 +278,7 @@ func noSiteTook(pe *configstore.PushError) error {
 	}
 	return &ui.Problem{
 		Hint:    "no site took the version to apply",
-		Explain: strings.Join(lines, "\n") + "\nA version no site holds is not one the hosts can be checked against, so nothing was applied. Once a site can take it, run paisans apply --execute again.",
+		Explain: strings.Join(lines, "\n") + "\nA version no site holds is not one the hosts can be checked against, so nothing was applied. Once a site can take it, run paisans deployment apply --execute again.",
 		Cause:   pe,
 	}
 }
@@ -302,7 +314,7 @@ func witness(r ui.Reporter, records map[string]grant.Record, revision int, hash,
 	hint := "a host holds another version than the one you are applying"
 	why := "This apply puts " + what + " on hosts whose record holds another version:\n" + strings.Join(other, "\n") + "\nA site that deleted the newer versions can serve an old one, and applying it would put back old secrets."
 	if !execute {
-		r.Warn(hint, why+" --execute asks for "+rollbackWord+".")
+		r.Warn(hint, why+" --execute will ask for "+rollbackWord+".")
 		return nil
 	}
 	if err := confirmWord(ans, stdin, stdout, rollbackWord, why+" Proceed only if you know why the host's version is gone from the sites."); err != nil {

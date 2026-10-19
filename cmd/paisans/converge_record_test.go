@@ -140,7 +140,7 @@ func TestConvergeInstallLinesDoNotRepeatTheSecretsCheck(t *testing.T) {
 	fakeConverge(t, nil)
 	fake := convergeRun
 	convergeRun = func(args []string) error {
-		if args[0] == "apply" {
+		if isApply(args) {
 			return runStep(args)
 		}
 		return fake(args)
@@ -170,7 +170,7 @@ func TestConvergeInstallLinesDoNotRepeatTheSecretsCheck(t *testing.T) {
 	}
 }
 
-// apply --site still reads the record and warns itself.
+// deployment apply --site still reads the record and warns itself.
 func TestApplySiteStillWarnsAboutAnOrphanedSecret(t *testing.T) {
 	configPath, secretsPath := orphanedDeployment(t)
 	reached := fakeGatewayReads(t)

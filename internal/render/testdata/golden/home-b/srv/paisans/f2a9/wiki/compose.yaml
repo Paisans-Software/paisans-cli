@@ -1,4 +1,4 @@
-# Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+# Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
 #
 # wiki has cluster placement: an instance on every apps site, no
 # Postgres service of its own, and a connection to the local HAProxy on

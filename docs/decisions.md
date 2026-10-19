@@ -164,12 +164,12 @@ they do not use, a few megabytes.
 ### Why the default is a digest
 
 Superseded on 2026-10-11: the default now follows the major version tag and
-`apply` resolves it to a digest while it plans. See *The gateway's Caddy follows
+`deployment apply` resolves it to a digest while it plans. See *The gateway's Caddy follows
 its major version, resolved to a digest when apply plans*, below.
 
 Every tag `caddy-dns` publishes moves, mirroring upstream, which rebuilds even a
 patch tag when its base image gets a security fix. A digest is the only
-reference that makes two runs of `apply` deploy the same bytes.
+reference that makes two runs of `deployment apply` deploy the same bytes.
 
 ### Why an unknown provider is allowed
 
@@ -271,13 +271,13 @@ kind.
 
 ### Provisioning is not apply
 
-`apply` renders files and reconciles them against a manifest it wrote itself,
+`deployment apply` renders files and reconciles them against a manifest it wrote itself,
 so every check it makes is "does this file match what was rendered". Garage's
 cluster layout, its S3 keys and its buckets are not files. They are state
 inside a running service that nothing on the workstation describes, reached
 only by asking Garage itself. That needed a different kind of planner, so it
 is a separate command, `paisans storage init --site <name>`, rather than a
-step folded into `apply`: check what a live command reports, and plan only
+step folded into `deployment apply`: check what a live command reports, and plan only
 what is missing, in the order Garage requires.
 
 ### One S3 key per app, not one shared key
@@ -492,7 +492,7 @@ and the blog can join the cluster like any other app.
 Nobody using this toolkit asked for that, and there is no way to opt out of
 it short of pinning an older release of the toolkit itself: the `writefreely`
 name did not change meaning for a new deployment only, it changed meaning for
-every existing one the next time `paisans apply` runs. That makes it a
+every existing one the next time `paisans deployment apply` runs. That makes it a
 breaking change, and because `paisans-stack` is public and handed to people
 we do not know, it is documented in the open, in `README.md`, in the section
 listing what each kind means, rather than left for an adopter to discover
@@ -518,7 +518,7 @@ only on its `develop` branch. The catalogue pins
 `ghcr.io/josephquigley/writefreely-wisp@sha256:4d21f45879bd98c8485eb8169ea57fbab925f0cbd5a38ac3c3bdd79901d809ea`
 rather than a tag, because `develop` is a moving branch and a tag that tracked
 it would silently change what an existing deployment runs on its next
-`apply`. The digest was resolved against ghcr.io on 2026-10-04 with `docker
+`deployment apply`. The digest was resolved against ghcr.io on 2026-10-04 with `docker
 manifest inspect`, which returned a multi architecture index covering
 linux/amd64 and linux/arm64, and confirmed by pulling the amd64 manifest and
 checking the binary with `strings` for the `s3_secret_access_key` ini tag and
@@ -548,7 +548,7 @@ Every value in `settings` works because some template asks for it by name. A
 key no template reads is silently ignored, so an adopter who wanted
 WriteFreely's `app.max_blogs` or one more variable in Mbin's environment had
 two options: fork the templates, or edit the rendered file on the host and have
-the next `apply` refuse the whole stack over a local modification. `config` is
+the next `deployment apply` refuse the whole stack over a local modification. `config` is
 a second per app map for exactly that gap. The toolkit places each key in the
 file the kind renders, in that file's syntax, and has no opinion about it.
 `settings` keeps meaning what it meant.
@@ -713,13 +713,13 @@ such as WriteFreely's `app.disable_password_auth`, and the README says so.
 
 ### An env key that would configure compose is refused
 
-`apply` runs `docker compose -f /srv/<app>/compose.yaml up -d`, so the stack's
+`deployment apply` runs `docker compose -f /srv/<app>/compose.yaml up -d`, so the stack's
 `.env` is also the file compose reads for its own settings. With `docker compose
 config` on Docker Compose v5.4.0, on the operator's Mac and with no container
 started, `COMPOSE_PROJECT_NAME=other` in that `.env` renamed the project from
 `probe` to `other`, and `COMPOSE_PROFILES=hidden` made a service behind that
-profile active. The run was made from another directory with `-f`, as `apply`
-does. That `apply` would then address different containers from the ones it
+profile active. The run was made from another directory with `-f`, as `deployment apply`
+does. That `deployment apply` would then address different containers from the ones it
 started before is reasoned from the renamed project, not run.
 
 `config-key-steers-compose` refuses an env kind's key starting `COMPOSE_` or
@@ -1171,7 +1171,7 @@ warned about, never written. `dns prune` may delete a TXT or MX record that
 holds exactly one of those no-mail contents, which widens a delete path that
 was address records only.
 
-Amended the same day, founder decision: `dns init`, and so `apply`, refuses
+Amended the same day, founder decision: `dns init`, and so `deployment apply`, refuses
 while a no-mail record this deployment made is still at a name that now has
 mail, naming `dns prune --execute` as the fix, so the prune cannot be skipped
 silently before a mail service's records are added.
@@ -1297,7 +1297,7 @@ request and a toolkit release before any deployment could take it. Following
 the major version takes a rebuild with no release, and keeps a major version,
 which can change the Caddyfile syntax, a deliberate step.
 
-A bare tag in the compose file would not do it alone: `apply` recreates a
+A bare tag in the compose file would not do it alone: `deployment apply` recreates a
 stack only when its compose file changes, so a tag that never changes in the
 file would never bring a new build to a host. Resolving at plan time makes a
 new build a changed compose file, which the dry run shows and the apply
@@ -1378,7 +1378,7 @@ machine they share.
   dialled at one endpoint (`sites-share-a-machine`). A public address shared
   by sites behind one router is accepted, since each is reached on ports of
   its own.
-* `apply` without `--site` prepares and pulls every site at once with no
+* `deployment apply` without `--site` prepares and pulls every site at once with no
   ordering between sites, and an apply's image sweep keeps only what its own
   site renders.
 
@@ -1590,8 +1590,8 @@ naming it, and stops when the lines rewritten differ from the count render
 reported. A digest is taken as written. An unreachable registry keeps the
 deployed build, with a warning, and refuses a stack that runs none.
 
-An app on several sites stays on one build. `apply` without `--site` resolves
-once for every site and moves them together. `apply --site` reads the app's
+An app on several sites stays on one build. `deployment apply` without `--site` resolves
+once for every site and moves them together. `deployment apply --site` reads the app's
 compose file on its other sites and keeps the app on the build they run,
 warning when the tag names a newer one. Sites that already disagree are
 refused, naming each site's build.
@@ -1662,9 +1662,9 @@ see every site of the app does not choose a build for it.
   the rest of the run, and a registry host that could not be reached fails
   every later reference on it at once.
 * **Only a run over every site skips the other sites' builds.** apply
-  without `--site` marks its run (`planningEverySite`); its `apply --site`
+  without `--site` marks its run (`planningEverySite`); its `deployment apply --site`
   steps then hold nothing, and every site moves through one cache. A run that
-  stops part way leaves the moved sites on the new build, an `apply --site`
+  stops part way leaves the moved sites on the new build, an `deployment apply --site`
   then refuses naming each, and the next whole apply moves the rest.
 
 ### What was weighed
@@ -1680,7 +1680,7 @@ see every site of the app does not choose a build for it.
   app would never move at all.
 * **Comparing a bare tag with the digest it names now.** The registry says
   what the tag names today, not what a host pulled under it earlier.
-* **Refusing an apply --site whenever another site of the app cannot be
+* **Refusing an deployment apply --site whenever another site of the app cannot be
   read.** That refuses the apply an operator runs to repair a surviving site
   while another is down, and the surviving site's own build is one the
   cluster already runs.
@@ -1785,7 +1785,7 @@ Mbin was refused with `OIDC login refused: <sub> is not in members`.
 
 ### What was decided
 
-`apply` puts each admin `paisans-stack.yaml` declares in every app's member group
+`deployment apply` puts each admin `paisans-stack.yaml` declares in every app's member group
 as well as every app's admin group. The member groups are read from the same
 keys `oidc client create` reads (`settings.member_group`, defaulting to
 `members`); one that is also an admin group is joined once. `app admin
@@ -1802,7 +1802,7 @@ reads no group relies on its client's restriction at Pocket ID, and joining
 the member groups makes every app admit its administrators without each one
 having to know about admin groups.
 
-This widens the standing approval for `apply`'s writes to Pocket ID: adding a
+This widens the standing approval for `deployment apply`'s writes to Pocket ID: adding a
 declared admin to the member groups is part of declaring them, like the admin
 groups before it.
 
@@ -1938,7 +1938,7 @@ Founder decisions. The design is `docs/specs/2026-10-12-gate-settings.md`.
   and authorized fetch, WriteFreely's private mode and authorized fetch.
   `doctor` reads every kind through that record and never branches on one.
 * `doctor` gains a `settings` section, which fails a running copy with one
-  of them off or not locked, and names `apply` as the fix.
+  of them off or not locked, and names `deployment apply` as the fix.
 * `doctor --execute` removes from `paisans-stack.yaml` a `config:` key that only
   repeats a value gating renders. It changes no host.
 * Only settings the toolkit writes and locks on disk are in scope. Nothing
@@ -1952,7 +1952,7 @@ ActivityPub, and for Mbin the API with a token, to the app, so those settings
 are part of the gate, and nothing read them from a running app. Keeping each
 kind's knowledge in its own record is what lets a new kind join without a
 branch in `doctor`. Keeping to settings locked on disk means a wrong value is
-always a file to render again, which `apply` already does and checks.
+always a file to render again, which `deployment apply` already does and checks.
 
 ### What was weighed
 
@@ -2231,7 +2231,7 @@ Founder decision, 2026-10-13.
 ### What was decided
 
 * Every admin declared under `admins` is an admin of every app that takes its
-  administrators from a Pocket ID group, which `apply` already makes so. No
+  administrators from a Pocket ID group, which `deployment apply` already makes so. No
   command makes an administrator outside that list.
 * `app admin create` is removed.
 * `paisans admin magic-link <admin>` gives a declared admin a one-time sign-in
@@ -2242,7 +2242,7 @@ Founder decision, 2026-10-13.
 ### Why
 
 An administrator made on the side holds every app's admin rights while
-`paisans-stack.yaml` does not show them. With `apply` making the declared
+`paisans-stack.yaml` does not show them. With `deployment apply` making the declared
 admins, the one thing it cannot do is help an admin who already registered a
 passkey and lost it, and a link is all that takes.
 
@@ -2262,7 +2262,7 @@ Founder decision, 2026-10-13. Spec: `docs/specs/2026-10-13-images-follow-tracks.
 ### What was decided
 
 * The binary names no image. The core catalog names a track for each, a
-  repository and a tag pattern, and `apply` and `init` run the newest tag on
+  repository and a tag pattern, and `deployment apply` and `init` run the newest tag on
   it at that moment.
 * The toolkit's own services take their tracks from `foundation.yaml` in the
   core catalog; there is no second repository.
@@ -2415,7 +2415,7 @@ Founder decision, 2026-10-13. It amends the grant review of
 
 ### What was decided
 
-An image needs no `approve` in `apply`'s grant review, when it is added or
+An image needs no `approve` in `deployment apply`'s grant review, when it is added or
 changed, only when all of these hold:
 
 1. The render itself took it from `foundation.yaml` for that service,
@@ -2651,7 +2651,7 @@ Founder decision. The design is
   admins included, at `/admin/members/<id>/groups` on `account.`. There is
   one tier of community admin.
 * `operators` is never changed there: `paisans-stack.yaml` decides who is in
-  it. An operator's other groups can be changed, and the next `apply` puts
+  it. An operator's other groups can be changed, and the next `deployment apply` puts
   the operator back in every group it gives operators.
 * The account service's writes at Pocket ID, all with the static API key, are
   creating a user at signup (Pocket ID puts them in the member group as its
@@ -2664,7 +2664,7 @@ Founder decision. The design is
   audit entry: who, whose groups, each group added and each removed, and
   when.
 * `docs/deployment-agent-rules.md` approves the account service under
-  *Services the deployment runs*, with these writes, and lets `apply` create
+  *Services the deployment runs*, with these writes, and lets `deployment apply` create
   a missing group only where the configuration names it: `operators`, the
   member group, each app's admin and member groups, and each group in the
   `pocket-id` app's `signup_default_groups` (founder decision, the same day).
@@ -2847,7 +2847,7 @@ has no check.
   2. `secrets set`, for an SMTP password, keyed or in the owed walk: logs in
      and sends one test message before the value is written; a failure
      writes nothing.
-  3. `apply`: logs in only, sending nothing; a failure refuses the apply
+  3. `deployment apply`: logs in only, sending nothing; a failure refuses the apply
      before any host is changed, naming the app, the setting and the
      server's reply, never the password.
   4. `validate`: logs in only; a failure warns.
@@ -2864,18 +2864,18 @@ has no check.
   not the one running the command: a changed mail credential concerns every
   operator, each can confirm the message arrived, and nothing in the
   configuration says reliably which operator is at the keyboard.
-* **One check per site and settings for `apply` and `validate`; one per
+* **One check per site and settings for `deployment apply` and `validate`; one per
   sender, from the first site running one of its apps, for `secrets set` and
   `secrets rotate`.** The first tests each host's own route, which is what
-  `apply` is about to depend on; the second tests a credential, and one
+  `deployment apply` is about to depend on; the second tests a credential, and one
   message per sender is enough to prove the provider takes it.
 * **A password `secrets set` wrote is only logged in with by a rotation.** It
   sent its test message when it was set, so the plan and stage 2 log in and
   send nothing, and a run's dry run sends no mail.
 * **`validate` keeps working offline.** A site it cannot reach, or a secrets
   file it cannot read, skips the check with a warning; `--offline` skips it
-  without trying. `apply` is the gate that refuses.
-* **`apply` checks in its dry run too**, before the host check: the plan is
+  without trying. `deployment apply` is the gate that refuses.
+* **`deployment apply` checks in its dry run too**, before the host check: the plan is
   what `--execute` would do, and a mail failure is where it would stop.
 * **Settings the site's host cannot reach are warned about, not tried**: a
   compose service name or a loopback address is the app's own network.
@@ -2888,7 +2888,7 @@ has no check.
 * **Running a mail client on the host** (`swaks`, `openssl s_client`, a
   container). Not chosen: it installs or runs something on a host for a
   check, and puts the password in a remote process.
-* **Sending the test message on every `apply`.** Not chosen: it mails the
+* **Sending the test message on every `deployment apply`.** Not chosen: it mails the
   operators on every run against settings that already worked.
 * **Mailing only the operator running the command.** Not chosen: nothing in
   the configuration names them reliably.
@@ -2952,7 +2952,7 @@ decides which one is right.
 * **Putting drifted settings back at once.** Not chosen: it hides that
   someone changed them, and fights an admin who has not yet been told why
   their change keeps disappearing.
-* **Reporting drift in `apply`.** Not chosen: `apply` recreates the stack and
+* **Reporting drift in `deployment apply`.** Not chosen: `deployment apply` recreates the stack and
   the bootstrap converges, so there is nothing left to report.
 * **The monitor checking the bootstrap's `/healthz` over the mesh.** Not
   chosen: it needs a published port on every apps site, a way to choose one
@@ -2961,8 +2961,8 @@ decides which one is right.
 * **A curl sidecar pushing for the bootstrap**, as for the operator
   reconciler. Not chosen: one more container per wiki, on hosts that may be
   short of memory, for a process that already runs and holds the state.
-* **Drift making the container unhealthy.** Not chosen: `apply`'s health gate
-  would then fail an `apply` that left a drifted bootstrap running.
+* **Drift making the container unhealthy.** Not chosen: `deployment apply`'s health gate
+  would then fail an `deployment apply` that left a drifted bootstrap running.
 
 ## 2026-10-15: A removal that keeps data keeps the registry entry
 
@@ -3313,3 +3313,78 @@ the refusal prints. Plaintext secrets under a name ending `.enc.yaml` are one
 ## 2026-10-17: Ubuntu 26.04 is supported, with the original sudo
 
 Founder request, 2026-10-17: `site admit`, `site prepare` and the rootless commands accept Ubuntu 26.04 through the shared `ubuntu` profile, checked in an `ubuntu:26.04` container (systemd 259 delegates cpu, memory and pids as 24.04's does, apparmor ships the rootlesskit profile, Docker publishes a `resolute` suite); 26.04 makes sudo-rs `sudo`, which honours `Defaults` env_keep and setenv for a user without listing them under `sudo -l`, so admit keeps refusing it and its refusal names `update-alternatives --set sudo /usr/bin/sudo.ws` where the original is installed.
+
+## 2026-10-17: Where sudo is sudo-rs, admit and doctor read sudo.ws's listing
+
+Founder decision, 2026-10-17: where `sudo` is sudo-rs, `site admit` and `doctor` read the rules and Defaults that apply to the deployment's user from `/usr/bin/sudo.ws -n -l`, the original sudo, which Ubuntu 26.04's `sudo` package installs beside sudo-rs and which reads the same sudoers files; with no `sudo.ws`, admit refuses and doctor warns. It rests on `sudo.ws` listing every Defaults entry sudo-rs applies, observed in an `ubuntu:26.04` container (sudo-rs 0.2.13): sudo-rs applied a user's `setenv` and `env_keep`, which `sudo.ws` listed, did not apply a command-specific `env_keep` of `LD_PRELOAD`, which `sudo.ws` also listed, and with the stock sudoers passed none of the variables a root shell script trusts. A probe integration test checks this against the image's sudo-rs. Owners no longer switch `sudo` with `update-alternatives`.
+
+## 2026-10-18: The uptime monitor's public status page is on, and shows only public checks
+
+Founder decision, 2026-10-18.
+
+### What was decided
+
+* The uptime blueprint serves the fork's public status page by default:
+  the seed sets `status_page_enabled` true and the edge passes `/status*`.
+* Only each app's check at its public hostname is shown. Every seed entry
+  names `status_page_excluded`, so a check that names a mesh address, a site
+  or a token is hidden at every boot.
+* A monitor made by hand starts hidden: the fork defaults
+  `status_page_excluded` to 1 wherever the maker does not say otherwise.
+* `settings.public_status_page: false` turns the page off in the monitor and
+  at the edge.
+
+### Why
+
+A community's members are the people who notice an app is down, and the page
+answers "is it just me" without an account or an operator. What made the
+page unsafe was its content, every monitor with its URL, mesh addresses
+included, not the page itself. Public checks request names already in public
+DNS. A hand made monitor can point anywhere, so it is hidden until an admin
+decides otherwise.
+
+### What was weighed
+
+* **Keep the page refused:** safe, but members learn of an outage only from
+  an operator.
+* **Show every monitor and leave hiding to the admins:** publishes the mesh
+  layout the moment the page is on, before anyone has hidden anything.
+
+## 2026-10-18: Apply keeps src_valid_mark at 0 in the rootless namespace
+
+Founder direction, 2026-10-18.
+
+### What was decided
+
+* `deployment apply` writes 0 to every `src_valid_mark` under
+  `/proc/sys/net/ipv4/conf` in RootlessKit's network namespace (`all`, each
+  device's and `default`), as the deployment's user, when one reads 1, before
+  any stack moves.
+* It installs a user drop-in for `docker.service` whose `ExecStartPost` writes
+  them again at every start of the daemon, prefixed `-` so it can never fail
+  the start.
+* `paisans doctor` fails a site whose namespace holds 1, with apply as the
+  recovery.
+
+### Why
+
+Observed on two hosts running Tailscale, which sets the host's value to 1. The
+namespace copies it, RootlessKit's transparent dial then loses every reply,
+and each new connection to a published port waited one second before a plain
+dial took over (traced with bpftrace: `ip_route_input_noref` returned
+`-EINVAL` for the marked SYN-ACK). The plain dial also hid the client, so apps
+saw the bridge's gateway and ignored `X-Forwarded-For`. Setting the value to 0
+in the namespace alone fixed both, from 1.003 s to 0.003 s per connection,
+and leaves the host's value, which Tailscale needs, as it is. The namespace is
+the user's, so no root and no admit is needed, and the apply the operators
+already run fixes a site.
+
+### What was weighed
+
+* **Raise the Docker floor to the release with RootlessKit 3.2:** tried on
+  the affected host; RootlessKit 3.3.0 waited the same second, since the
+  cause is the inherited value, not the firewall backend.
+* **Turn RootlessKit's transparent mode off:** ends the wait but leaves every
+  app seeing the bridge's address as every client.
+* **Have site admit write the drop-in:** needs the host's owner for a change
+  inside the deployment's own namespace.

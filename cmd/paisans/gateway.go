@@ -149,7 +149,7 @@ type handOffFlags struct {
 	minFree                  string
 }
 
-// handOffArgs is apply --site <site> --only infra with the move's own
+// handOffArgs is deployment apply --site <site> --only infra with the move's own
 // options, executed or as its dry run.
 func handOffArgs(site string, f handOffFlags, execute bool) []string {
 	args := []string{"--site", site, "--only", "infra", "--config", f.config}

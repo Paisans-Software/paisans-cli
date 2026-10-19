@@ -94,7 +94,7 @@ func (p *Plan) probeEtcd() error {
 	for _, site := range p.live(p.end.Etcd.Members) {
 		if !listed[site] {
 			missing = append(missing, site)
-			problems = append(problems, fmt.Sprintf("%s is in %s but is not an etcd member yet. Finish its install (paisans apply) first", site, p.cfg.EtcdMembersKey()))
+			problems = append(problems, fmt.Sprintf("%s is in %s but is not an etcd member yet. Finish its install (paisans deployment apply) first", site, p.cfg.EtcdMembersKey()))
 		}
 	}
 	healthy, err := p.etcdHealth(members)

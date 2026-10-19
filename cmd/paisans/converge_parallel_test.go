@@ -179,7 +179,7 @@ func TestOneFailedHostStopsAtItsPrepare(t *testing.T) {
 	}
 }
 
-// plainPrepare runs apply --execute on plain output, every host at once,
+// plainPrepare runs deployment apply --execute on plain output, every host at once,
 // each fake host saying things while it works, and returns the prepare
 // section's lines.
 func plainPrepare(t *testing.T, verbose bool) []string {

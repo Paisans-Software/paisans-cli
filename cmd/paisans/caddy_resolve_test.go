@@ -12,7 +12,7 @@ import (
 )
 
 // apply plans the gateway with Caddy's tag resolved to the build it names,
-// which is what a real `paisans apply` hands its plan, and the dry run says
+// which is what a real `paisans deployment apply` hands its plan, and the dry run says
 // which build that is.
 func TestApplyPlansCaddyAtTheResolvedBuild(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "paisans-stack.yaml")

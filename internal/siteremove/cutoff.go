@@ -56,7 +56,7 @@ var (
 type cutoffState struct {
 	// joining are the sites the configuration declares whose hosts hold no
 	// claim of this deployment yet: a replacement declared in the same edit,
-	// which the removal neither dials nor gates, and `apply` brings up.
+	// which the removal neither dials nor gates, and `deployment apply` brings up.
 	joining map[string]bool
 	// keys are the cut-off site's WireGuard public keys: its current one,
 	// and its next one when a rekey of it stopped part way, since a peer may
@@ -882,7 +882,7 @@ func (p *Plan) CutoffReport() []string {
 		out = append(out, fmt.Sprintf("dns: the DNS token was not checked; check it yourself. %s held the token it was rendered, and %s, so this command could not try the one in the secrets file. Revoke the old one at the provider", p.Site, p.cutoff.tokenUnchecked))
 	}
 	if joining := p.Joining(); len(joining) > 0 {
-		out = append(out, fmt.Sprintf("apply: run `paisans apply` to bring up %s. It prepares the new host, applies it, creates its DNS records, and adds it as a peer on every remaining site; until then it is in "+config.FileName+" and nowhere else", joinAnd(joining)))
+		out = append(out, fmt.Sprintf("apply: run `paisans deployment apply` to bring up %s. It prepares the new host, applies it, creates its DNS records, and adds it as a peer on every remaining site; until then it is in "+config.FileName+" and nowhere else", joinAnd(joining)))
 	}
 	if len(p.cutoff.dark) > 0 {
 		out = append(out, fmt.Sprintf("names: the community answers nothing until that apply. %s was the only remaining %s site", p.Site, strings.Join(p.cutoff.dark, " and ")))

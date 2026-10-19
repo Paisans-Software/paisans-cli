@@ -8,7 +8,10 @@ import (
 )
 
 // rootlessDocker is what DockerCommand prints for a rootless daemon.
-const rootlessDocker = "host unix:///run/user/1001/docker.sock\nengine 29.9.1\nsecurity [\"name=seccomp,profile=builtin\",\"name=rootless\",\"name=cgroupns\"]\n"
+const rootlessDocker = "host unix:///run/user/1001/docker.sock\nengine 29.9.1\nsecurity [\"name=seccomp,profile=builtin\",\"name=rootless\",\"name=cgroupns\"]\nsource-mark 0\n"
+
+// beforeSourceMark is rootlessDocker without its namespace line.
+var beforeSourceMark = strings.TrimSuffix(rootlessDocker, "source-mark 0\n")
 
 // A user in any group that reaches past it fails, naming each group; uid 0
 // fails on its own; a user in none passes; an answer that cannot be read
@@ -100,6 +103,52 @@ func TestDockerEngine(t *testing.T) {
 	}
 	if f := find(t, findings, SectionDocker, "vm: Docker Engine 29.5.0"); f.Level != OK {
 		t.Errorf("vm: level %v", f.Level)
+	}
+}
+
+// src_valid_mark 0 in the namespace passes, unless the host is at 1 and no
+// drop-in is loaded to keep it 0, which warns; 1 fails, with apply as the
+// recovery; a value the probe could not read, or none, is a warning; a
+// daemon that did not answer says nothing.
+func TestSourceMark(t *testing.T) {
+	findings := SourceMark([]DockerProbe{
+		{Site: "home-a", Out: rootlessDocker},
+		{Site: "home-b", Out: beforeSourceMark + "source-mark 1\n"},
+		{Site: "vm", Out: beforeSourceMark + "source-mark unknown\n"},
+		{Site: "edge", Out: beforeSourceMark},
+		{Site: "watch", Out: "source-mark 1\n", Err: "Cannot connect to the Docker daemon"},
+		{Site: "lab", Out: rootlessDocker + "source-mark-host 1\nsource-mark-dropin absent\n"},
+		{Site: "kept", Out: rootlessDocker + "source-mark-host 1\nsource-mark-dropin loaded\n"},
+	})
+	if len(findings) != 6 {
+		t.Fatalf("want 6 findings, watch's left out:\n%s", dump(findings))
+	}
+	l := find(t, findings, SectionDocker, "lab: src_valid_mark is 0 in its RootlessKit namespace, and goes back to 1 at the daemon's next start")
+	if l.Level != Warn || !strings.Contains(strings.Join(l.More, "\n"), "installs the drop-in") {
+		t.Errorf("lab: %+v", l)
+	}
+	if f := find(t, findings, SectionDocker, "kept: src_valid_mark is 0 in its RootlessKit namespace"); f.Level != OK {
+		t.Errorf("kept: level %v", f.Level)
+	}
+	if f := find(t, findings, SectionDocker, "home-a: src_valid_mark is 0 in its RootlessKit namespace"); f.Level != OK {
+		t.Errorf("home-a: level %v", f.Level)
+	}
+	b := find(t, findings, SectionDocker, "home-b: src_valid_mark is 1 in its RootlessKit namespace, so every new connection to an app waits a second")
+	if more := strings.Join(b.More, "\n"); b.Level != Fail || !strings.Contains(more, "Tailscale") || !strings.Contains(more, "`paisans deployment apply --execute`") {
+		t.Errorf("home-b: %+v", b)
+	}
+	for _, site := range []string{"vm", "edge"} {
+		if f := find(t, findings, SectionDocker, site+": src_valid_mark in its RootlessKit namespace could not be read"); f.Level != Warn {
+			t.Errorf("%s: level %v", site, f.Level)
+		}
+	}
+}
+
+// DockerCommand's read of the namespace never fails it: a daemon that
+// answers is still the daemon answering when the namespace cannot be read.
+func TestDockerCommandsSourceMarkReadCannotFailIt(t *testing.T) {
+	if !strings.Contains(DockerCommand, `2>/dev/null || echo unknown)"`) {
+		t.Errorf("the read can fail the command: %s", DockerCommand)
 	}
 }
 

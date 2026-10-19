@@ -143,7 +143,7 @@ func mustRun(t *testing.T, name string, args ...string) string {
 }
 
 // renderFor renders cfg and puts each named site's garage.toml on its host,
-// with the manifest apply would have left, as `paisans apply` would.
+// with the manifest apply would have left, as `paisans deployment apply` would.
 func renderFor(t *testing.T, cfg *config.Config, secrets *config.Secrets, hosts map[string]*dockerHost, sites ...string) *render.Plan {
 	t.Helper()
 	rendered, err := render.Build(cfg, secrets)
@@ -153,7 +153,7 @@ func renderFor(t *testing.T, cfg *config.Config, secrets *config.Secrets, hosts 
 	for _, site := range sites {
 		h := hosts[site]
 		for _, f := range rendered.Files {
-			if f.Path == site+"/"+"srv/paisans/f2a9/infra/garage/garage.toml" || (strings.HasPrefix(f.Path, site+"/srv/paisans/f2a9/infra/caddy/snippets/") && strings.HasSuffix(f.Path, "-media.caddy")) {
+			if f.Path == site+"/"+"srv/paisans/f2a9/infra/garage/garage.toml" || (strings.HasPrefix(f.Path, site+"/srv/paisans/f2a9/infra/caddy/etc/snippets/") && strings.HasSuffix(f.Path, "-media.caddy")) {
 				rel := strings.TrimPrefix(f.Path, site+"/")
 				if err := h.WriteFile("/"+rel, f.Content, 0o600); err != nil {
 					t.Fatal(err)

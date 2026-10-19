@@ -124,15 +124,15 @@ func TestConvergeDryRunInstallIsALinePerSite(t *testing.T) {
 		want  []string
 	}{
 		{"up to date", false, nil, each(func(s string) string { return "done " + s })},
-		{"work to do", false, map[string]any{"apply --site vm": "5 changes"}, each(pendingAfterVM(map[string]string{"vm": "pending vm: 5 changes"}))},
-		{"after prepare", false, map[string]any{"site prepare --site home-b": "docker", "apply --site vm": "5 changes"}, each(pendingAfterVM(map[string]string{
+		{"work to do", false, map[string]any{"deployment apply --site vm": "5 changes"}, each(pendingAfterVM(map[string]string{"vm": "pending vm: 5 changes"}))},
+		{"after prepare", false, map[string]any{"site prepare --site home-b": "docker", "deployment apply --site vm": "5 changes"}, each(pendingAfterVM(map[string]string{
 			"vm": "pending vm: 5 changes", "home-b": "waiting home-b: after prepare", "storage": "waiting storage: after prepare",
 		}))},
 		{"after init", true, nil, each(func(s string) string { return "waiting " + s + ": after init" })},
-		{"refusal", false, map[string]any{"apply --site vm": refusal}, slices.Insert(each(pendingAfterVM(map[string]string{
+		{"refusal", false, map[string]any{"deployment apply --site vm": refusal}, slices.Insert(each(pendingAfterVM(map[string]string{
 			"vm": "fail vm: vm's plan would remove a volume",
 		})), 2, "explain Mount it, then apply.")},
-		{"refusal while waiting", false, map[string]any{"site prepare --site home-b": "docker", "apply --site vm": refusal}, slices.Insert(each(pendingAfterVM(map[string]string{
+		{"refusal while waiting", false, map[string]any{"site prepare --site home-b": "docker", "deployment apply --site vm": refusal}, slices.Insert(each(pendingAfterVM(map[string]string{
 			"vm": "fail vm: vm's plan would remove a volume", "home-b": "waiting home-b: after prepare", "storage": "waiting storage: after prepare",
 		})), 2, "explain Mount it, then apply.")},
 	} {
@@ -174,7 +174,7 @@ func TestConvergeRunInstallIsALinePerSite(t *testing.T) {
 	if i, d := slices.Index(sections(rec), "install"), slices.Index(sections(rec), "dns"); d < 0 || i < d {
 		t.Errorf("sections %v", sections(rec))
 	}
-	if d, a := slices.Index(*ran, "dns init"), slices.Index(*ran, "apply --site vm"); d < 0 || a < d {
+	if d, a := slices.Index(*ran, "dns init"), slices.Index(*ran, "deployment apply --site vm"); d < 0 || a < d {
 		t.Errorf("dns init ran after the first install step: %v", *ran)
 	}
 }
@@ -198,10 +198,10 @@ func TestConvergeRunDNSConflictStopsBeforeInstall(t *testing.T) {
 // step's own problem and how to resume. A line it had visited and one it
 // had not reached are left waiting.
 func TestConvergeRunInstallFailureFailsItsSite(t *testing.T) {
-	ran := fakeConverge(t, map[string]error{"apply --site home-a": errors.New("home-a: boom")})
+	ran := fakeConverge(t, map[string]error{"deployment apply --site home-a": errors.New("home-a: boom")})
 	rec := recordConverge(t)
 	err := converge(t, "--execute")
-	if err == nil || !strings.Contains(err.Error(), "apply --site home-a") || !strings.Contains(err.Error(), "home-a: boom") || !strings.Contains(err.Error(), "Run paisans apply --execute again to resume") {
+	if err == nil || !strings.Contains(err.Error(), "deployment apply --site home-a") || !strings.Contains(err.Error(), "home-a: boom") || !strings.Contains(err.Error(), "Run paisans deployment apply --execute again to resume") {
 		t.Fatalf("err = %v", err)
 	}
 	sameLines(t, lines(inSection(rec, "install")), []string{
@@ -211,7 +211,7 @@ func TestConvergeRunInstallFailureFailsItsSite(t *testing.T) {
 		"step watch", "waiting watch",
 		"step storage", "waiting storage",
 	})
-	if (*ran)[len(*ran)-1] != "apply --site home-a" {
+	if (*ran)[len(*ran)-1] != "deployment apply --site home-a" {
 		t.Errorf("ran on past the failure: %v", *ran)
 	}
 }
@@ -334,7 +334,7 @@ func onATerminal(t *testing.T, verbose bool, at func(title string)) *screen {
 // the time it has taken and why, and ends once, with the time both visits
 // took together.
 func TestConvergeInstallRevisitsASiteOnATerminal(t *testing.T) {
-	fakeConverge(t, map[string]error{"apply --site home-a": foundingWait("home-a", "home-b")})
+	fakeConverge(t, map[string]error{"deployment apply --site home-a": foundingWait("home-a", "home-b")})
 	var atStorage, atPassTwo []string
 	visits := 0
 	var s *screen
@@ -343,7 +343,7 @@ func TestConvergeInstallRevisitsASiteOnATerminal(t *testing.T) {
 		case "storage add":
 			reporterOverride.Step("apply the layout")
 			atStorage = s.section("install")
-		case "apply --site home-a":
+		case "deployment apply --site home-a":
 			if visits++; visits == 2 {
 				reporterOverride.Step("wait for Patroni primary")
 				atPassTwo = s.section("install")
@@ -379,7 +379,7 @@ func TestConvergeInstallRevisitsASiteOnATerminal(t *testing.T) {
 // On a terminal a failure marks its site's row, and the rows it did not
 // reach, or will not come back to, are left as they stand.
 func TestConvergeInstallFailureOnATerminal(t *testing.T) {
-	fakeConverge(t, map[string]error{"apply --site home-b": errors.New("home-b: boom")})
+	fakeConverge(t, map[string]error{"deployment apply --site home-b": errors.New("home-b: boom")})
 	s := onATerminal(t, false, func(string) {})
 	if err := converge(t, "--execute"); err == nil {
 		t.Fatal("no error")
@@ -397,7 +397,7 @@ func TestConvergeInstallFailureOnATerminal(t *testing.T) {
 // site has created them, and a founding stop until every member it waits on
 // runs etcd.
 func TestAnInstallLinePausesUntilWhatItWaitsOn(t *testing.T) {
-	fakeConverge(t, map[string]error{"apply --site home-a": foundingWait("home-a", "home-b", "vm")})
+	fakeConverge(t, map[string]error{"deployment apply --site home-a": foundingWait("home-a", "home-b", "vm")})
 	waitsFor(t, "home-b", "home-a", 1)
 	var atStorage []string
 	var s *screen
@@ -458,7 +458,7 @@ func TestConvergeRunIsQuietAndKeepsDiagnosticsForVerbose(t *testing.T) {
 		fakeConverge(t, nil)
 		saved := convergeRun
 		convergeRun = func(args []string) error {
-			if args[0] == "apply" && args[2] == "vm" {
+			if isApply(args) && args[3] == "vm" {
 				r := reporterOverride
 				r.Section("vm (ubuntu@192.0.2.10)")
 				r.Step("write 8 files").Done("")
@@ -490,7 +490,7 @@ func TestConvergeRunIsQuietAndKeepsDiagnosticsForVerbose(t *testing.T) {
 			t.Errorf("verbose %t: hold %d, step %d, done %d, note %d:\n%s", verbose, hold, step, done, note, h.Lines())
 		}
 		inner := slices.IndexFunc(h.Events, func(e ui.Event) bool {
-			return e.Kind == "detail" && e.Extra == "vm" && strings.HasPrefix(e.Text, "✓ apply --site vm")
+			return e.Kind == "detail" && e.Extra == "vm" && strings.HasPrefix(e.Text, "✓ deployment apply --site vm")
 		})
 		output := slices.IndexFunc(h.Events, func(e ui.Event) bool {
 			return e.Kind == "detail" && e.Extra == "vm" && strings.Contains(e.Text, "write 8 files")
@@ -505,7 +505,7 @@ func TestConvergeRunIsQuietAndKeepsDiagnosticsForVerbose(t *testing.T) {
 // whose pass two applies every site again: it would read as a second line
 // for that site. The step's other notes still show after its line.
 func TestConvergeLeavesOutAppliesItsPassTwoMakes(t *testing.T) {
-	owed := "home-a: run `paisans apply --site home-a` when acceptable. Its apps are out of date in 1 file, /srv/paisans/f2a9/talk/.env: it differs from the render, and the apply brings it up to date and recreates its app"
+	owed := "home-a: run `paisans deployment apply --site home-a` when acceptable. Its apps are out of date in 1 file, /srv/paisans/f2a9/talk/.env: it differs from the render, and the apply brings it up to date and recreates its app"
 	kept := "smoke test skipped: no app serves objects publicly. There is no bucket to put a probe through"
 	report := func() {
 		r := reporterOverride
@@ -539,7 +539,7 @@ func TestConvergeLeavesOutAppliesItsPassTwoMakes(t *testing.T) {
 	// Run by hand, the command notes it.
 	alone := &ui.Recorder{}
 	reportOwedApplies(alone, []string{owed})
-	if !alone.Has("note", "home-a: run `paisans apply --site home-a` when acceptable") {
+	if !alone.Has("note", "home-a: run `paisans deployment apply --site home-a` when acceptable") {
 		t.Errorf("by hand:\n%s", alone.Lines())
 	}
 }
@@ -550,7 +550,7 @@ func TestConvergeLeavesOutAppliesItsPassTwoMakes(t *testing.T) {
 func TestConvergeInstallAsPrinted(t *testing.T) {
 	for _, verbose := range []bool{false, true} {
 		fakeConverge(t, nil)
-		fakeChecks(t, map[string]any{"apply --site vm": "5 changes"})
+		fakeChecks(t, map[string]any{"deployment apply --site vm": "5 changes"})
 		var b strings.Builder
 		saved := reporterOverride
 		reporterOverride = ui.NewPlain(&b, verbose)
@@ -565,13 +565,13 @@ func TestConvergeInstallAsPrinted(t *testing.T) {
 		out := b.String()
 		quiet := "\ninstall\n  todo vm: 5 changes\n  todo home-a\n  todo home-b\n  todo watch\n  todo storage\n"
 		listed := "\ninstall\n  todo vm: 5 changes\n" +
-			"      ○ apply --site vm: 5 changes\n" +
-			"      · apply --site vm: after the earlier apply --site vm\n" +
+			"      ○ deployment apply --site vm: 5 changes\n" +
+			"      · deployment apply --site vm: after the earlier deployment apply --site vm\n" +
 			"  todo home-a\n" +
-			"      · apply --site home-a: after apply --site vm\n" +
-			"      · apply --site home-a: after the earlier apply --site home-a\n" +
+			"      · deployment apply --site home-a: after deployment apply --site vm\n" +
+			"      · deployment apply --site home-a: after the earlier deployment apply --site home-a\n" +
 			"  todo home-b\n"
-		if strings.Contains(out, quiet) == verbose || strings.Contains(out, listed) != verbose || strings.Contains(out, "✓ apply --site watch") != verbose {
+		if strings.Contains(out, quiet) == verbose || strings.Contains(out, listed) != verbose || strings.Contains(out, "✓ deployment apply --site watch") != verbose {
 			t.Errorf("verbose %t:\n%s", verbose, out)
 		}
 	}
@@ -582,7 +582,7 @@ func TestConvergeInstallAsPrinted(t *testing.T) {
 // failure, and with -v it is listed under its site's line with its reason.
 func TestConvergeRunInstallAsPrinted(t *testing.T) {
 	for _, verbose := range []bool{false, true} {
-		fakeConverge(t, map[string]error{"apply --site home-a": foundingWait("home-a", "home-b")})
+		fakeConverge(t, map[string]error{"deployment apply --site home-a": foundingWait("home-a", "home-b")})
 		var b strings.Builder
 		saved := reporterOverride
 		reporterOverride = ui.NewPlain(&b, verbose)
@@ -597,9 +597,9 @@ func TestConvergeRunInstallAsPrinted(t *testing.T) {
 		out := b.String()
 		quiet := "\ninstall\n  ok   vm\n  ok   home-a\n  ok   home-b\n  ok   watch\n  ok   storage\n\npocket id\n"
 		listed := "  ok   home-a\n" +
-			"      ✓ apply --site home-a: paused until home-b runs etcd\n" +
+			"      ✓ deployment apply --site home-a: paused until home-b runs etcd\n" +
 			"        home-a is waiting on home-b to start etcd.\n" +
-			"      ✓ apply --site home-a\n" +
+			"      ✓ deployment apply --site home-a\n" +
 			"  ok   home-b\n"
 		if strings.Contains(out, quiet) == verbose || strings.Contains(out, listed) != verbose {
 			t.Errorf("verbose %t:\n%s", verbose, out)
@@ -626,7 +626,7 @@ func TestConvergeLinesShowTheirInnerStep(t *testing.T) {
 			outer := r.Step("install packages: wireguard-tools, ufw")
 			r.Step("start docker").Done("")
 			outer.Done("")
-		case args[0] == "apply" && siteOf(args) == "home-b":
+		case isApply(args) && siteOf(args) == "home-b":
 			r.Step("start talk")
 			r.Step("wait for Patroni primary").Done("")
 		}
@@ -667,13 +667,13 @@ func TestConvergeLinesShowTheirInnerStep(t *testing.T) {
 // A failed inner step lists its error under it, as a founding stop lists its
 // reason, so -v shows why the line failed where it failed.
 func TestAFailedInnerStepShowsItsError(t *testing.T) {
-	fakeConverge(t, map[string]error{"apply --site home-a": &ui.Problem{Hint: "the configuration changed after the run published it", Explain: "Nothing was changed on home-a by this step."}})
+	fakeConverge(t, map[string]error{"deployment apply --site home-a": &ui.Problem{Hint: "the configuration changed after the run published it", Explain: "Nothing was changed on home-a by this step."}})
 	rec := recordConverge(t)
 	if err := converge(t, "--execute"); err == nil {
 		t.Fatal("no error")
 	}
 	i := slices.IndexFunc(rec.Events, func(e ui.Event) bool {
-		return e.Kind == "detail" && e.Extra == "home-a" && strings.HasPrefix(e.Text, "✗ apply --site home-a")
+		return e.Kind == "detail" && e.Extra == "home-a" && strings.HasPrefix(e.Text, "✗ deployment apply --site home-a")
 	})
 	if i < 0 || rec.Events[i+1].Text != "  the configuration changed after the run published it.\n  Nothing was changed on home-a by this step." {
 		t.Errorf("the failure's error is not under its inner step:\n%s", rec.Lines())

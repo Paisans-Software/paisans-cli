@@ -10,7 +10,8 @@
       "follow_redirects": false,
       "interval_seconds": 60,
       "timeout_ms": 10000,
-      "failure_threshold": 2
+      "failure_threshold": 2,
+      "status_page_excluded": false
     },
     {
       "name": "account — direct (home-a)",
@@ -26,7 +27,8 @@
       },
       "interval_seconds": 60,
       "timeout_ms": 10000,
-      "failure_threshold": 2
+      "failure_threshold": 2,
+      "status_page_excluded": true
     },
     {
       "name": "account — direct (home-b)",
@@ -42,7 +44,8 @@
       },
       "interval_seconds": 60,
       "timeout_ms": 10000,
-      "failure_threshold": 2
+      "failure_threshold": 2,
+      "status_page_excluded": true
     },
     {
       "name": "auth — public",
@@ -54,7 +57,8 @@
       "follow_redirects": false,
       "interval_seconds": 60,
       "timeout_ms": 10000,
-      "failure_threshold": 2
+      "failure_threshold": 2,
+      "status_page_excluded": false
     },
     {
       "name": "auth — direct (home-a)",
@@ -70,7 +74,8 @@
       },
       "interval_seconds": 60,
       "timeout_ms": 10000,
-      "failure_threshold": 2
+      "failure_threshold": 2,
+      "status_page_excluded": true
     },
     {
       "name": "auth — operator reconciler (home-a)",
@@ -82,7 +87,8 @@
       "follow_redirects": false,
       "interval_seconds": 60,
       "timeout_ms": 10000,
-      "failure_threshold": 2
+      "failure_threshold": 2,
+      "status_page_excluded": true
     },
     {
       "name": "auth — direct (home-b)",
@@ -98,7 +104,8 @@
       },
       "interval_seconds": 60,
       "timeout_ms": 10000,
-      "failure_threshold": 2
+      "failure_threshold": 2,
+      "status_page_excluded": true
     },
     {
       "name": "auth — operator reconciler (home-b)",
@@ -110,7 +117,8 @@
       "follow_redirects": false,
       "interval_seconds": 60,
       "timeout_ms": 10000,
-      "failure_threshold": 2
+      "failure_threshold": 2,
+      "status_page_excluded": true
     },
     {
       "name": "blog — public",
@@ -122,7 +130,8 @@
       "follow_redirects": false,
       "interval_seconds": 60,
       "timeout_ms": 10000,
-      "failure_threshold": 2
+      "failure_threshold": 2,
+      "status_page_excluded": false
     },
     {
       "name": "blog — direct (home-a)",
@@ -138,7 +147,8 @@
       },
       "interval_seconds": 60,
       "timeout_ms": 10000,
-      "failure_threshold": 2
+      "failure_threshold": 2,
+      "status_page_excluded": true
     },
     {
       "name": "chat — public",
@@ -150,12 +160,13 @@
       "follow_redirects": false,
       "interval_seconds": 60,
       "timeout_ms": 10000,
-      "failure_threshold": 2
+      "failure_threshold": 2,
+      "status_page_excluded": false
     },
     {
       "name": "chat — direct (vm)",
       "monitor_type": "active",
-      "url": "http://10.44.0.3:8008/_matrix/client/versions",
+      "url": "http://10.44.0.3:18008/_matrix/client/versions",
       "method": "GET",
       "check_type": "status",
       "expected_status": "200",
@@ -166,7 +177,8 @@
       },
       "interval_seconds": 60,
       "timeout_ms": 10000,
-      "failure_threshold": 2
+      "failure_threshold": 2,
+      "status_page_excluded": true
     },
     {
       "name": "gate — public",
@@ -178,7 +190,8 @@
       "follow_redirects": false,
       "interval_seconds": 60,
       "timeout_ms": 10000,
-      "failure_threshold": 2
+      "failure_threshold": 2,
+      "status_page_excluded": false
     },
     {
       "name": "gate — direct (vm)",
@@ -194,7 +207,8 @@
       },
       "interval_seconds": 60,
       "timeout_ms": 10000,
-      "failure_threshold": 2
+      "failure_threshold": 2,
+      "status_page_excluded": true
     },
     {
       "name": "talk — public",
@@ -206,7 +220,8 @@
       "follow_redirects": false,
       "interval_seconds": 60,
       "timeout_ms": 10000,
-      "failure_threshold": 2
+      "failure_threshold": 2,
+      "status_page_excluded": false
     },
     {
       "name": "talk — gate",
@@ -218,7 +233,8 @@
       "follow_redirects": false,
       "interval_seconds": 60,
       "timeout_ms": 10000,
-      "failure_threshold": 2
+      "failure_threshold": 2,
+      "status_page_excluded": true
     },
     {
       "name": "talk — signed fetch",
@@ -233,7 +249,8 @@
       },
       "interval_seconds": 60,
       "timeout_ms": 10000,
-      "failure_threshold": 2
+      "failure_threshold": 2,
+      "status_page_excluded": true
     },
     {
       "name": "talk — direct (home-a)",
@@ -249,7 +266,8 @@
       },
       "interval_seconds": 60,
       "timeout_ms": 10000,
-      "failure_threshold": 2
+      "failure_threshold": 2,
+      "status_page_excluded": true
     },
     {
       "name": "talk — private API (home-a)",
@@ -265,7 +283,8 @@
       },
       "interval_seconds": 60,
       "timeout_ms": 10000,
-      "failure_threshold": 2
+      "failure_threshold": 2,
+      "status_page_excluded": true
     },
     {
       "name": "talk — direct (home-b)",
@@ -281,7 +300,8 @@
       },
       "interval_seconds": 60,
       "timeout_ms": 10000,
-      "failure_threshold": 2
+      "failure_threshold": 2,
+      "status_page_excluded": true
     },
     {
       "name": "talk — private API (home-b)",
@@ -297,7 +317,8 @@
       },
       "interval_seconds": 60,
       "timeout_ms": 10000,
-      "failure_threshold": 2
+      "failure_threshold": 2,
+      "status_page_excluded": true
     },
     {
       "name": "web — public",
@@ -309,7 +330,8 @@
       "follow_redirects": false,
       "interval_seconds": 60,
       "timeout_ms": 10000,
-      "failure_threshold": 2
+      "failure_threshold": 2,
+      "status_page_excluded": false
     },
     {
       "name": "web — direct (home-b)",
@@ -325,7 +347,8 @@
       },
       "interval_seconds": 60,
       "timeout_ms": 10000,
-      "failure_threshold": 2
+      "failure_threshold": 2,
+      "status_page_excluded": true
     },
     {
       "name": "wiki — public",
@@ -337,7 +360,8 @@
       "follow_redirects": false,
       "interval_seconds": 60,
       "timeout_ms": 10000,
-      "failure_threshold": 2
+      "failure_threshold": 2,
+      "status_page_excluded": false
     },
     {
       "name": "wiki — direct (home-a)",
@@ -353,7 +377,8 @@
       },
       "interval_seconds": 60,
       "timeout_ms": 10000,
-      "failure_threshold": 2
+      "failure_threshold": 2,
+      "status_page_excluded": true
     },
     {
       "name": "wiki — direct (home-b)",
@@ -369,7 +394,8 @@
       },
       "interval_seconds": 60,
       "timeout_ms": 10000,
-      "failure_threshold": 2
+      "failure_threshold": 2,
+      "status_page_excluded": true
     },
     {
       "name": "home-a — ping",
@@ -377,7 +403,8 @@
       "ping_host": "10.44.0.1",
       "interval_seconds": 60,
       "timeout_ms": 10000,
-      "failure_threshold": 2
+      "failure_threshold": 2,
+      "status_page_excluded": true
     },
     {
       "name": "home-b — ping",
@@ -385,7 +412,8 @@
       "ping_host": "10.44.0.2",
       "interval_seconds": 60,
       "timeout_ms": 10000,
-      "failure_threshold": 2
+      "failure_threshold": 2,
+      "status_page_excluded": true
     },
     {
       "name": "vm — ping",
@@ -393,7 +421,8 @@
       "ping_host": "10.44.0.3",
       "interval_seconds": 60,
       "timeout_ms": 10000,
-      "failure_threshold": 2
+      "failure_threshold": 2,
+      "status_page_excluded": true
     },
     {
       "name": "home-a — heartbeat",
@@ -403,7 +432,8 @@
       "failure_threshold": 2,
       "heartbeat_token": "0000000000000000000000000000aaaa",
       "heartbeat_schedule_kind": "interval",
-      "heartbeat_grace_seconds": 120
+      "heartbeat_grace_seconds": 120,
+      "status_page_excluded": true
     },
     {
       "name": "home-b — heartbeat",
@@ -413,7 +443,8 @@
       "failure_threshold": 2,
       "heartbeat_token": "1111111111111111111111111111bbbb",
       "heartbeat_schedule_kind": "interval",
-      "heartbeat_grace_seconds": 120
+      "heartbeat_grace_seconds": 120,
+      "status_page_excluded": true
     },
     {
       "name": "vm — heartbeat",
@@ -423,7 +454,8 @@
       "failure_threshold": 2,
       "heartbeat_token": "2222222222222222222222222222cccc",
       "heartbeat_schedule_kind": "interval",
-      "heartbeat_grace_seconds": 120
+      "heartbeat_grace_seconds": 120,
+      "status_page_excluded": true
     },
     {
       "name": "operator continuity",
@@ -433,7 +465,8 @@
       "failure_threshold": 2,
       "heartbeat_token": "9999999999999999999999999999abcd",
       "heartbeat_schedule_kind": "interval",
-      "heartbeat_grace_seconds": 120
+      "heartbeat_grace_seconds": 120,
+      "status_page_excluded": true
     },
     {
       "name": "wiki — settings",
@@ -443,7 +476,8 @@
       "failure_threshold": 2,
       "heartbeat_token": "7777777777777777777777777777abcd",
       "heartbeat_schedule_kind": "interval",
-      "heartbeat_grace_seconds": 120
+      "heartbeat_grace_seconds": 120,
+      "status_page_excluded": true
     }
   ],
   "settings": {
@@ -455,6 +489,6 @@
     "smtp_require_tls": true,
     "smtp_secure": false,
     "smtp_user": "robot@example.org",
-    "status_page_enabled": false
+    "status_page_enabled": true
   }
 }

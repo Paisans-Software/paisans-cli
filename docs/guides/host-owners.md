@@ -25,12 +25,13 @@ reach only over SSH is the one step here that can lock you out.
   site), it must have the same architecture as the deployment's other data
   sites, which the operators' `site add` checks; the Ubuntu release may
   differ.
-* **sudo, not sudo-rs.** Admit reads with `sudo -l` whether a `Defaults`
-  line passes the deployment user's environment to the WireGuard helper,
-  which runs as root, and sudo-rs does not list them, so admit refuses it.
-  Ubuntu 26.04 makes sudo-rs `sudo` and installs the original beside it as
-  `/usr/bin/sudo.ws`; make that `sudo` before admitting, with
-  `sudo update-alternatives --set sudo /usr/bin/sudo.ws`.
+* **The original sudo installed, if sudo is sudo-rs.** Admit reads with
+  `sudo -l` whether a `Defaults` line passes the deployment user's
+  environment to the WireGuard helper, which runs as root. sudo-rs's
+  `sudo -l` does not list them, so where sudo is sudo-rs, as Ubuntu 26.04
+  makes it, admit reads them from the original, which Ubuntu's `sudo`
+  package installs beside it as `/usr/bin/sudo.ws`. With sudo-rs and no
+  `sudo.ws`, admit refuses.
 * **ufw installed.** Admit adds the deployment's rules to ufw and never
   installs it. If ufw is installed and not active, see step 4.
 * **Docker Engine 29.5 or later from Docker's repository, or no Docker.**
@@ -133,6 +134,7 @@ three are yours to decide by your machine, not by the site.
 | `--data-dir <path>` | The deployment's Docker data (images, containers, volumes: the database on a data site, the stored objects on a storage site) goes under `<path>/paisans-<token>` instead of the user's home. | Nothing, if the disk has room. `<path>` must exist, be a directory and not a link, and be root's with no group or other write bit. With or without the flag, admit refuses to put the data on a filesystem Docker's storage cannot use (NFS, CIFS and SMB, FUSE, overlay, FAT, exFAT and NTFS), and the plan states the free space where it goes, warning below 20 GB for a data or storage site and 5 GB otherwise. |
 | `--bridge-netfilter` | Admit loads `br_netfilter`, which the deployment's Docker needs, on a machine with bridges of its own (libvirt's, LXD's, yours). | **Traffic across your own bridges then passes the firewall's FORWARD chain**, which it skipped before, and whose policy is often to drop. The refusal names each bridge and quotes the policy. Without the flag admit stops on such a machine; where the module is loaded already, or the only bridges are Docker's, it needs no flag. |
 | `--mesh-lan` | The deployment's sites may reach each other on your LAN, at the private prefix of your machine's default interface. | The deployment can send its mesh traffic to that LAN, and the plan says so. Admit refuses it where that interface is not on a private network of a /16 or narrower. Without it, sites on one LAN reach each other through their public addresses, which needs a router that loops them back. |
+| `--swapfile` | A swapfile at `/swapfile` of twice your machine's RAM, up to 16 GiB, turned on and added to `/etc/fstab`. Admit asks at a terminal with `--execute` when your machine has no swap, and `--yes` says yes. | Disk space the size of the swapfile. Admit offers it only where your machine has no swap in any form, `/` is ext4 or xfs, and 5 GB stays free beside it; swap you have that is not on is yours to turn on: admit warns about it and refuses `--swapfile`. |
 
 **Forwarding has no flag.** A site with an endpoint relays mesh traffic
 between sites that cannot dial each other, so admit turns on
@@ -325,10 +327,18 @@ it fires leaves ufw enabled, and you locked out.
 * **The operators' keys**, in the user's `~/.ssh/authorized_keys`. From then
   on the operators maintain them themselves, as that user.
 
+One thing changes later, on the operators' `deployment apply` and as the user,
+inside the deployment's own Docker: `net.ipv4.conf.all.src_valid_mark` is set
+to 0 in its RootlessKit network namespace, and a drop-in in the user's home,
+`~/.config/systemd/user/docker.service.d/paisans-src-valid-mark.conf`, sets it
+again at every start of that Docker. Tailscale sets your machine's value to 1,
+which the namespace copies, and at 1 every connection to the deployment's apps
+waits a second. Your machine's own value is left as it is.
+
 To see it afterwards, with your deployment's token in place of `1a2b`:
 
 ```sh
-sudo -l -U paisans-1a2b                       # the helper, and nothing else
+sudo -l -U paisans-1a2b                       # the helper, and nothing else (sudo.ws -l -U where sudo is sudo-rs)
 sudo nft list table inet paisans_1a2b
 sudo ufw status | grep paisans-1a2b
 cat /etc/paisans/admitted.1a2b.json

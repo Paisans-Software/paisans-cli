@@ -430,6 +430,45 @@ func TestRoleConflicts(t *testing.T) {
 		})
 	}
 
+	// A role clash beside a mesh subnet clash is advised on for the role
+	// alone, since no subnet clears it: moving the mesh would leave the host
+	// refused.
+	t.Run("a data site on an overlapping mesh", func(t *testing.T) {
+		e := roleEntry("f2a9", "example.org", 51821, "10.44.0.0/24", "apps,data")
+		_, err := Merge(base, ours, e)
+		var c Conflict
+		if !errors.As(err, &c) || len(c.Clashes) < 2 || !strings.HasPrefix(c.Clashes[0], "mesh subnet") {
+			t.Fatalf("Merge = %v, want a conflict on the mesh subnet first, then the data role", err)
+		}
+		refusal := refused(fakeHost{}, e, c)
+		if !errors.As(refusal, new(Conflict)) {
+			t.Errorf("the refusal %v does not unwrap to its Conflict", refusal)
+		}
+		msg := refusal.Error()
+		if !strings.Contains(msg, "Use another host for one of the data sites") || strings.Contains(msg, "paisans init") {
+			t.Errorf("the refusal %q does not advise on the data role alone", msg)
+		}
+	})
+
+	// Each clash is its own short sentence, naming the other deployment by
+	// its id and, with no domain in its entry, its site.
+	t.Run("each clash said on its own", func(t *testing.T) {
+		theirs := roleEntry("0c1d", "", 51820, "10.44.0.0/24", "apps,data")
+		theirs.Site = "tank"
+		e := roleEntry("f2a9", "", 51821, "10.44.0.0/24", "apps,data")
+		c := Conflict{ID: other, Entry: theirs, Clashes: clashes(theirs, e)}
+		want := "vm: mesh subnet 10.44.0.0/24 conflicts with deployment " + other + " (site tank). Deployment " + other + " (site tank) holds the data role on this host. Its Patroni holds the host's watchdog, which one deployment at a time can hold. Use another host for one of the data sites. Nothing was changed"
+		if got := refused(fakeHost{}, e, c).Error(); got != want {
+			t.Errorf("got:\n%s\nwant:\n%s", got, want)
+		}
+		theirs.Roles, theirs.Domain, theirs.Subnet = "apps", "example.net", "10.44.0.0/16"
+		c = Conflict{ID: other, Entry: theirs, Clashes: clashes(theirs, e)}
+		want = "vm: mesh subnet 10.44.0.0/24 conflicts with deployment " + other + " (example.net), whose mesh subnet is 10.44.0.0/16. Nothing was changed"
+		if got := refused(fakeHost{}, e, c).Error(); got != want {
+			t.Errorf("got:\n%s\nwant:\n%s", got, want)
+		}
+	})
+
 	for _, tc := range []struct {
 		name   string
 		theirs string

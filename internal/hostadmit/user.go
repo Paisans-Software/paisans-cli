@@ -62,12 +62,8 @@ func planUser(p *planner) error {
 		return fmt.Errorf("user %s", prob)
 	}
 	u := p.f.User
-	if u.SudoRS {
-		fix := ""
-		if u.SudoWS {
-			fix = " The original sudo is installed here as /usr/bin/sudo.ws: make it sudo with update-alternatives --set sudo /usr/bin/sudo.ws, and admit again."
-		}
-		return fmt.Errorf("sudo on this host is sudo-rs, whose sudo -l does not list the Defaults that apply to a user, so admit cannot tell whether one passes %s's environment to the WireGuard helper, which runs as root.%s Nothing was changed", req.User, fix)
+	if u.SudoRS && !u.SudoWS {
+		return fmt.Errorf("sudo on this host is sudo-rs, whose sudo -l does not list the Defaults that apply to a user, and the original sudo, which admit reads them from in its place, is not installed as /usr/bin/sudo.ws, so admit cannot tell whether one passes %s's environment to the WireGuard helper, which runs as root. Install Ubuntu's sudo package, which installs it, and admit again. Nothing was changed", req.User)
 	}
 	if u.HomeAbove == "link" || u.HomeAbove == "unsafe" {
 		what := map[string]string{"link": "a link", "unsafe": "a directory that is not root's, or that its group or others can write"}[u.HomeAbove]
@@ -288,11 +284,11 @@ func ours(f FileState, content string) bool {
 
 // meshCondConf is the mesh unit's drop-in that skips it while its conf
 // does not exist: the user's manager wants the unit from its first start,
-// and only paisans apply writes the conf, so without it the unit would
+// and only paisans deployment apply writes the conf, so without it the unit would
 // fail at every boot until then and show in systemctl --failed.
 func meshCondConf(p *planner) string {
 	return "# Written by paisans site admit for deployment " + p.d.Token() + "; paisans site evict\n" +
-		"# removes it. Until paisans apply writes the mesh's conf, wg-quick has\n" +
+		"# removes it. Until paisans deployment apply writes the mesh's conf, wg-quick has\n" +
 		"# nothing to bring up, so the unit is skipped rather than failed.\n" +
 		"[Unit]\nConditionPathExists=" + p.d.WireGuardInstalled() + "\n"
 }
@@ -321,7 +317,7 @@ func planMeshDropIn(p *planner) error {
 	default:
 		p.step(Step{
 			Title:    "skip the mesh until its conf exists",
-			Describe: "user: " + p.d.WireGuardUnit() + " is skipped, not failed, at boot until paisans apply writes " + p.d.WireGuardInstalled(),
+			Describe: "user: " + p.d.WireGuardUnit() + " is skipped, not failed, at boot until paisans deployment apply writes " + p.d.WireGuardInstalled(),
 			File:     &hostprep.File{Path: cond, Content: condContent, Mode: 0o644},
 			Command:  "systemctl daemon-reload",
 			Kinds:    []string{"user"},

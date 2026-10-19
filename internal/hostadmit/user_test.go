@@ -458,8 +458,9 @@ func TestTheRootEquivalentGroupsAreListed(t *testing.T) {
 // What useradd would trip over, or hand the new user, is refused before
 // anything runs: a group of the user's name, which useradd makes for it;
 // sudoers lines left naming the name, outside admit's own file; a home
-// below a link or a directory another user can write; and sudo-rs, whose
-// sudo -l lists no Defaults, so admit cannot read what reaches its helper.
+// below a link or a directory another user can write; and sudo-rs with no
+// sudo.ws beside it, since sudo-rs's sudo -l lists no Defaults, so admit
+// cannot read what reaches its helper.
 func TestWhatTheNewUserWouldInheritIsRefusedFirst(t *testing.T) {
 	for _, c := range []struct {
 		name string
@@ -472,7 +473,6 @@ func TestWhatTheNewUserWouldInheritIsRefusedFirst(t *testing.T) {
 		{"a home below another's directory", current().with("home-above", "unsafe"), "/home/paisans-f2a9 is below a directory"},
 		{"sudo-rs", current().with("sudo-kind", "rs"), "sudo-rs"},
 		{"sudo-rs for a user that exists", current().withUser().with("sudo-kind", "rs"), "sudo-rs"},
-		{"sudo-rs beside sudo.ws", current().with("sudo-kind", "rs").with("sudo-ws", "yes"), "update-alternatives --set sudo /usr/bin/sudo.ws"},
 		{"an existing user's home below a link", current().withUser().with("home-above", "link"), "/home/paisans-f2a9 is below a link"},
 	} {
 		h := c.host
@@ -555,7 +555,7 @@ func TestEverySudoProblemIsNamedAtOnce(t *testing.T) {
 const (
 	meshCondPath = "/etc/systemd/system/wg-quick@psns-f2a9.service.d/paisans-conf.conf"
 	meshCondConf = "# Written by paisans site admit for deployment f2a9; paisans site evict\n" +
-		"# removes it. Until paisans apply writes the mesh's conf, wg-quick has\n" +
+		"# removes it. Until paisans deployment apply writes the mesh's conf, wg-quick has\n" +
 		"# nothing to bring up, so the unit is skipped rather than failed.\n" +
 		"[Unit]\nConditionPathExists=/etc/wireguard/psns-f2a9.conf\n"
 )

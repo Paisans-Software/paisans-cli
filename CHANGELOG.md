@@ -10,6 +10,37 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+## [0.3.0-rc.5] - 2026-10-19
+
+### Added
+
+- `paisans operator grants --ssh <alias or user@host>` lists each site's grants and flags on a host, yes or no, and the `site admit` command that admitted it, read without sudo.
+- The mbin blueprint renders and locks every Meta, Instance and Federation setting from `apps.<app>.settings`, titling the instance from `display_name` and `community.name`; it needs Mbin `1.16.0+paisans`.
+- Blueprint format `paisans.blueprint/v3` gives templates `.DisplayName` and `.CommunityName`, so a catalog release using them is skipped by older binaries.
+- The uptime monitor's public status page is on by default, showing only each app's check at its public hostname; `settings.public_status_page: false` turns it off.
+- `site admit` and `site prepare` warn about a host with no swap, and `site admit --swapfile`, or a yes at a terminal with `--execute`, makes a swapfile of twice its RAM, up to 16 GiB.
+- `deployment apply --execute` and `deployment recover --execute` save the version to this workstation's data directory, `deployment list` lists saved deployments, and `deployment fetch --ssh` saves every deployment a host's registry holds.
+
+### Changed
+
+- Rendered files and the WireGuard boot drop-in name `paisans deployment apply` in their comments; the next apply rewrites each once, restarting containers that mount them as any change to those files does.
+- `apply` and the `config` subcommands moved under `deployment`: `paisans deployment apply`, `deployment publish`, `deployment pull`, `deployment log` and `deployment recover`; `paisans apply` and `paisans config` are gone.
+- Where sudo is sudo-rs, `site admit` and `doctor` read the sudoers Defaults from the original sudo installed beside it as `sudo.ws`, so a stock Ubuntu 26.04 host is admitted without switching sudo.
+- A dry run says what `--execute` will do in the future tense, so a note such as `ssh.user paisans-c111, --execute will record it` reads as yet to happen.
+
+### Fixed
+
+- `deployment apply` names, under each site's pull line in a dry run and with `--execute`, every image whose build the apply moves, with the versions and digests it goes between.
+- A first ssh connection to a host whose key is known runs in batch mode, so its spinner and timer show; only a login that needs a password or passphrase pauses them.
+- `deployment apply` sets `src_valid_mark` to 0 in the rootless Docker namespace, which copies Tailscale's 1, ending a one second wait per connection and the apps' wrong client addresses; `doctor` checks it.
+- Caddy mounts its Caddyfile and snippets as one directory, `infra/caddy/etc`, so a reload after `deployment apply` reads the new routes; the old files are left over, and the next apply replaces Caddy once.
+- Under `management: paisans`, `validate` refuses `signup_default_groups` without the account app's member group and `create` writes `[members]`, so an accepted invite makes a member rather than an account in no group.
+- `init` moves a never-applied mesh subnet clear of one `site admit` refused, admitting each site again on it instead of requiring evictions, and admit advises on a clashing role before the subnet.
+- `site admit` says each clash with another deployment on a host in one short sentence naming its id and domain or site, and `init`'s skip of that host omits admit commands.
+- `init` moves the mesh subnet clear of one `site admit` refused beside a role, skipping that site, instead of keeping the subnet until the role clash is fixed.
+- A command without `--execute`, such as `init` or `validate`, says nothing of what `--execute` records about a login user, since that flag belongs to other commands.
+- `create` writes `cluster.synchronous: true` for any layout with two or more data sites, a custom one included, instead of only the high availability shape, so a failover loses no acknowledged write.
+
 ## [0.3.0-rc.4] - 2026-10-17
 
 ### Added
@@ -194,7 +225,8 @@ changes share a bullet. Detailed notes are on the corresponding
 - The uptime monitor requires STARTTLS under `security: starttls`, so mail and SMTP credentials are never sent in plaintext when a relay does not offer it.
 - The gateway refuses any request to Pocket ID that carries an `X-API-Key` header with 403, so Pocket ID's API keys work only on the mesh.
 
-[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.4...develop
+[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.5...develop
+[0.3.0-rc.5]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.4...v0.3.0-rc.5
 [0.3.0-rc.4]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.3...v0.3.0-rc.4
 [0.3.0-rc.3]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.2...v0.3.0-rc.3
 [0.3.0-rc.2]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.1...v0.3.0-rc.2

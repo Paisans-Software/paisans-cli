@@ -19,9 +19,9 @@ const (
 	blogCompose = "/srv/paisans/f2a9/blog/compose.yaml"
 	blogUpload  = "/srv/paisans/f2a9/blog/data/upload-1"
 	talkEnv     = "/srv/paisans/f2a9/talk/.env"
-	blogRoute   = "/srv/paisans/f2a9/infra/caddy/snippets/blog.caddy"
-	blogMedia   = "/srv/paisans/f2a9/infra/caddy/snippets/blog-media.caddy"
-	talkRoute   = "/srv/paisans/f2a9/infra/caddy/snippets/talk.caddy"
+	blogRoute   = "/srv/paisans/f2a9/infra/caddy/etc/snippets/blog.caddy"
+	blogMedia   = "/srv/paisans/f2a9/infra/caddy/etc/snippets/blog-media.caddy"
+	talkRoute   = "/srv/paisans/f2a9/infra/caddy/etc/snippets/talk.caddy"
 )
 
 // world is blog taken out of the fixture's configuration and applied
@@ -102,7 +102,7 @@ func TestAnUnmarkedEntryRefuses(t *testing.T) {
 	vm := hosts["vm"]
 	vm.manifest(t, vm.entry(blogRoute, false), vm.entry(blogMedia, true), vm.entry(talkRoute, false))
 	_, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, false))
-	if err == nil || !strings.Contains(err.Error(), "vm: "+blogRoute) || !strings.Contains(err.Error(), "paisans apply") {
+	if err == nil || !strings.Contains(err.Error(), "vm: "+blogRoute) || !strings.Contains(err.Error(), "paisans deployment apply") {
 		t.Fatalf("Build = %v", err)
 	}
 	if strings.Contains(err.Error(), "talk") {

@@ -82,7 +82,7 @@ stricter one.
   the ones below
 * Deleting documentation
 
-The exception: **`paisans apply` creating the OIDC client an app declared in
+The exception: **`paisans deployment apply` creating the OIDC client an app declared in
 `paisans-stack.yaml` needs**, as part of setting that app up, takes no approval of its
 own. Every app in the stack signs in through the identity provider, so an app
 cannot run without its client, and approval to run the apply is approval for the
@@ -94,10 +94,10 @@ blueprint comes from a third party catalog is approved by being declared, the
 same as one from the toolkit's own. The exception covers
 creating a missing client, and restricting it to the app's group, only. Rotating
 a client's secret, deleting a client, and every other change to groups or
-users stay in the tier above, and `apply` never replaces a client it has
+users stay in the tier above, and `deployment apply` never replaces a client it has
 already recorded.
 
-The same holds for the deployment's own operators. **`paisans apply`
+The same holds for the deployment's own operators. **`paisans deployment apply`
 making each operator `paisans-stack.yaml` declares an account at the identity
 provider**, and handing each one who has no passkey yet a one-time login
 link valid for a day, takes no approval of its own: a deployment nobody can
@@ -107,11 +107,11 @@ verified, adding it to the group `operators`, the member group `members` and
 every app's admin and member groups, issuing the link and having the identity
 provider email it. It covers making the account an administrator of the
 identity provider only where the identity provider's app declares
-`management: pocket-id`; under `management: paisans` `apply` makes nobody one.
+`management: pocket-id`; under `management: paisans` `deployment apply` makes nobody one.
 Doing any of these by hand, and every other change to a user, stays in the
 tier above.
 
-**`paisans apply` creating a missing group** takes no approval of its own
+**`paisans deployment apply` creating a missing group** takes no approval of its own
 either, but only a group the deployment's configuration names: `operators`,
 the member group, each app's admin and member groups, and each group the
 `pocket-id` app's `signup_default_groups` lists. Those groups are what the
@@ -195,7 +195,7 @@ provider's static API key, and makes these writes and no others:
 
 * **Signup:** creating a user when a signup is accepted. It sends no group;
   the identity provider puts the new user in the member group, its signup
-  default group, as `apply` configured it.
+  default group, as `deployment apply` configured it.
 * **Bans:** disabling a user, and re-enabling them when the ban is lifted.
 * **A member's address and name:** setting a user's email address, marked
   verified, after an address change or a recovery, and setting a user's

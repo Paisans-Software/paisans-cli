@@ -17,9 +17,9 @@ type Resolver interface {
 }
 
 // Cache answers each reference with the first digest r resolved it to, for
-// as long as the Cache is kept: `paisans apply` keeps one for the whole run.
+// as long as the Cache is kept: `paisans deployment apply` keeps one for the whole run.
 //
-// A tag that moves can move during a run. `paisans apply` without --site
+// A tag that moves can move during a run. `paisans deployment apply` without --site
 // plans each site more than once (the pull stage, then each site's apply, and
 // pass two), and every one of those plans has to name the same build: the
 // pull stage pulls the build it resolved, and an apply that resolved the tag

@@ -296,7 +296,7 @@ func TestAccountIsRoutedToEveryAppsSiteUngated(t *testing.T) {
 		if strings.HasPrefix(path, "vm/") && strings.HasSuffix(path, "/account.caddy") {
 			snippet = content
 		}
-		if path == "vm/srv/paisans/f2a9/infra/caddy/Caddyfile" {
+		if path == "vm/srv/paisans/f2a9/infra/caddy/etc/Caddyfile" {
 			caddyfile = content
 		}
 	}
@@ -377,9 +377,9 @@ func TestAccountOperatorsAreSorted(t *testing.T) {
 
 // joinSnippet and the rest are the gateway's files for the account app.
 const (
-	joinSnippet    = "vm/srv/paisans/f2a9/infra/caddy/snippets/account-join.caddy"
-	primarySnippet = "vm/srv/paisans/f2a9/infra/caddy/snippets/account.caddy"
-	gatewayCaddy   = "vm/srv/paisans/f2a9/infra/caddy/Caddyfile"
+	joinSnippet    = "vm/srv/paisans/f2a9/infra/caddy/etc/snippets/account-join.caddy"
+	primarySnippet = "vm/srv/paisans/f2a9/infra/caddy/etc/snippets/account.caddy"
+	gatewayCaddy   = "vm/srv/paisans/f2a9/infra/caddy/etc/Caddyfile"
 )
 
 // In both modes join.<domain> exists, ungated, with its own snippet, and the

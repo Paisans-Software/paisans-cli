@@ -121,6 +121,21 @@ func (p *puller) plan(site string, mu *sync.Mutex, reports *[]checkReport) (*app
 	return plan, t, nil
 }
 
+// imageMoves is each image whose build site's apply changes, as a dry run
+// of that one site lists it (see listPlan): the configured reference and the
+// builds it goes between. The run's install lines say only how long each site
+// took, and a pull says only how many images landed, so without these a run
+// that moves an app to a new release never says which app, or to what. They
+// are read from the plan the pull already made, which resolved every tag
+// through the run's one cache, so they name the builds the install runs.
+func imageMoves(plan *apply.Plan) []string {
+	var out []string
+	for _, pin := range append(plan.Moved(), plan.FirstPins()...) {
+		out = append(out, pin.Describe())
+	}
+	return out
+}
+
 // shortDisk is the stop for a host with too little space for its images:
 // the refusal its apply would stop at, which says what could be freed.
 func shortDisk(plan *apply.Plan) error {
@@ -134,11 +149,14 @@ func shortDisk(plan *apply.Plan) error {
 
 // pullStatus is a dry run's pull line for s: how many images the site's
 // apply would pull and the free space they land in, nothing to pull, or the
-// refusal --execute would stop at.
+// refusal --execute would stop at, and under it each image that moves.
 func (p *puller) pullStatus(s convergeStep) stepStatus {
 	var st stepStatus
 	var mu sync.Mutex
 	plan, _, err := p.plan(stepSite(s), &mu, &st.reports)
+	if err == nil {
+		st.moves = imageMoves(plan)
+	}
 	if err == nil && plan.Disk.Short() {
 		err = shortDisk(plan)
 	}
@@ -157,17 +175,22 @@ func (p *puller) pullStatus(s convergeStep) stepStatus {
 	return st
 }
 
-// pullSite pulls the images s's site will need, a few at once, on line. It
-// returns what to show under the line and why it failed. Every image is
+// pullSite pulls the images s's site will need, a few at once, on line,
+// naming under it each image that moves. It returns what to show under the
+// line and why it failed. Every image is
 // tried, so a host that failed one has the others when the run resumes.
 func (p *puller) pullSite(line ui.Line, s convergeStep) ([]checkReport, error) {
 	site := stepSite(s)
 	var mu sync.Mutex
 	var reports []checkReport
 	plan, t, err := p.plan(site, &mu, &reports)
-	switch {
-	case err != nil:
+	if err != nil {
 		return reports, err
+	}
+	for _, m := range imageMoves(plan) {
+		line.Explain(m)
+	}
+	switch {
 	case plan.Disk == nil:
 		line.Done("nothing to pull")
 		return reports, nil

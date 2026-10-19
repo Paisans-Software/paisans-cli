@@ -12,10 +12,12 @@ services:
   # Both are tracks on their 1.x line, and a release candidate
   # (v1.161.0rc1, 1.25.0-rc.0) matches neither.
   - {name: "app", image: "ghcr.io/element-hq/synapse:v1.*.*", purpose: "the homeserver, which only serves the API"}
-  # MAS listens on 8009, one above the homeserver's 8008, and the gateway
+  # MAS listens on 18009, one above the homeserver's 18008. These ports
+  # leave the data role's Patroni and bg_mon listeners on 8008/8009 free
+  # when apps and data share a site. The gateway
   # reaches it directly: the three compatibility login paths are split off
   # to it in front of the homeserver. mas.yaml binds the port explicitly.
-  - {name: "mas", image: "ghcr.io/element-hq/matrix-authentication-service:1.*.*", purpose: "Matrix Authentication Service, which owns the login", port: 8009}
+  - {name: "mas", image: "ghcr.io/element-hq/matrix-authentication-service:1.*.*", purpose: "Matrix Authentication Service, which owns the login", port: 18009}
   - {name: "postgres", purpose: "its own database, when the app is pinned"}
 # MAS keeps its own database beside the homeserver's, <database>_mas, which
 # initdb.d creates.
@@ -29,7 +31,7 @@ provides:
     values:
       base_url: "'https://' + app.hostname"
       server_name: "'wellknown' in app.hostnames ? app.hostnames['wellknown'] : app.hostname"
-port: 8008
+port: 18008
 config:
   # It also renders a `.env`, but only for its Postgres container's
   # password. The application reads the file below, so that is where a

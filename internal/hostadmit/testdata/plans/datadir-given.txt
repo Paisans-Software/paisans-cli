@@ -86,10 +86,10 @@ step 3: record what admit installs
     | dir /etc/systemd/system/user@.service.d
 
 step 4: skip the mesh until its conf exists
-  user: wg-quick@psns-f2a9 is skipped, not failed, at boot until paisans apply writes /etc/wireguard/psns-f2a9.conf
+  user: wg-quick@psns-f2a9 is skipped, not failed, at boot until paisans deployment apply writes /etc/wireguard/psns-f2a9.conf
   write /etc/systemd/system/wg-quick@psns-f2a9.service.d/paisans-conf.conf mode 0644:
     | # Written by paisans site admit for deployment f2a9; paisans site evict
-    | # removes it. Until paisans apply writes the mesh's conf, wg-quick has
+    | # removes it. Until paisans deployment apply writes the mesh's conf, wg-quick has
     | # nothing to bring up, so the unit is skipped rather than failed.
     | [Unit]
     | ConditionPathExists=/etc/wireguard/psns-f2a9.conf
@@ -429,6 +429,7 @@ step 27: add the operators' keys
     | added SHA256:X75Mb3nqVpJG3UuCRMIO94EyEAtegd44QTYVIRv99HI bob
     | added SHA256:zpa+NMqw+6z5XIib6AyyKOtOnilzIda0f4kqtWRHm88 bob
 
+present: swap: on
 present: docker: Engine 29.9.1
 present: package: docker-ce-rootless-extras installed
 present: package: uidmap installed

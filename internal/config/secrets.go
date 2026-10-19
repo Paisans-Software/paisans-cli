@@ -295,7 +295,7 @@ func foreignSecretsProblem(path, theirs, ours string) error {
 	}
 	return &ui.Problem{
 		Hint:    fmt.Sprintf("%s belongs to deployment %s, not %s", ui.ShortPath(path), a, b),
-		Explain: "It holds another deployment's credentials and the state captured from its running services, such as OIDC clients and Pocket ID group IDs, so it is not read for this one. To start this deployment fresh, move that file aside and run paisans init; paisans apply creates a new one as well.",
+		Explain: "It holds another deployment's credentials and the state captured from its running services, such as OIDC clients and Pocket ID group IDs, so it is not read for this one. To start this deployment fresh, move that file aside and run paisans init; paisans deployment apply creates a new one as well.",
 		Cause:   fmt.Errorf("%s: id: %s, and the configuration's id is %s", path, theirs, ours),
 	}
 }

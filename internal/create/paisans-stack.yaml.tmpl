@@ -137,6 +137,10 @@ apps:
       # is a Pocket ID administrator. The toolkit renders Pocket ID's signup
       # and email-code settings for it.
       management: paisans
+      # The account service creates every account with no group, and Pocket
+      # ID puts it in these, so each new account is a member from its first
+      # sign in.
+      signup_default_groups: [members]
 {{- else}}
       # Pocket ID's own admin pages manage accounts, and every operator is
       # its administrator.

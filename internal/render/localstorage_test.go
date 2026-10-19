@@ -131,7 +131,7 @@ func TestLocalStorageRendersNoObjectStorage(t *testing.T) {
 			}
 		}
 	}
-	caddyfile := file("vm/srv/paisans/f2a9/infra/caddy/Caddyfile")
+	caddyfile := file("vm/srv/paisans/f2a9/infra/caddy/etc/Caddyfile")
 	for _, name := range localStorageApps {
 		if strings.Contains(caddyfile, name+"-media.example.org") {
 			t.Errorf("the gateway still routes %s-media.example.org", name)

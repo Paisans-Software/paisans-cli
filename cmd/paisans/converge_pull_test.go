@@ -325,7 +325,7 @@ func TestThePullAndTheInstallShareOneDigest(t *testing.T) {
 	}
 	run := convergeRun
 	convergeRun = func(args []string) error {
-		if args[0] == "apply" {
+		if isApply(args) {
 			resolve()
 		}
 		return run(args)
@@ -414,5 +414,67 @@ func TestAPullLineCountsTheImagesPulled(t *testing.T) {
 	want := []string{"0 of 4 images pulled", "1 of 4 images pulled", "2 of 4 images pulled", "3 of 4 images pulled", "4 of 4 images pulled"}
 	if !slices.Equal(line.progress, want) || line.result != "4 images pulled" {
 		t.Errorf("progress %q, result %q", line.progress, line.result)
+	}
+}
+
+// moving is a pin of app's image whose build the apply moves, from the
+// build behind old to the one behind new.
+func moving(app, old, new string) apply.ImagePin {
+	ref := "ghcr.io/example/" + app + ":1"
+	return apply.ImagePin{Stack: app, App: app, Services: []string{"app"}, Image: ref, Deployed: ref + "@sha256:" + strings.Repeat(old, 64), Reference: ref + "@sha256:" + strings.Repeat(new, 64), DeployedVersion: "1.0.0", Version: "1.1.0"}
+}
+
+// explainedAfter is what is explained under site's line in section: every
+// explain event after the line ends and before the next line's.
+func explainedAfter(rec *ui.Recorder, section, site string) []string {
+	var out []string
+	under := false
+	for _, e := range inSection(rec, section) {
+		switch e.Kind {
+		case "done", "fail", "pending", "waiting":
+			under = e.Text == site
+		case "explain":
+			if under {
+				out = append(out, e.Text)
+			}
+		}
+	}
+	return out
+}
+
+// Each image whose build a site's apply moves is named under the site's pull
+// line, with the builds it goes between, in a dry run and with --execute
+// alike, whether or not the host has the image to pull. A pin that stays on
+// its build is not named.
+func TestThePullLineNamesEachImageThatMoves(t *testing.T) {
+	for _, execute := range []bool{false, true} {
+		t.Run(map[bool]string{false: "dry run", true: "execute"}[execute], func(t *testing.T) {
+			fakeConverge(t, nil)
+			pullAtOnce(t)
+			rec := recordConverge(t)
+			pulling := toPull("home-a", gib(20), "ghcr.io/example/account:1")
+			pulling.Pins = []apply.ImagePin{moving("account", "a", "b")}
+			present := &apply.Plan{Site: "home-b", Pins: []apply.ImagePin{moving("talk", "c", "d")}}
+			still := moving("blog", "e", "e")
+			kept := &apply.Plan{Site: "vm", Pins: []apply.ImagePin{still}}
+			fakePulls(t, map[string]*apply.Plan{"home-a": pulling, "home-b": present, "vm": kept}, nil)
+			args := []string{}
+			if execute {
+				args = append(args, "--execute")
+			}
+			if err := converge(t, args...); err != nil {
+				t.Fatal(err)
+			}
+			want := map[string][]string{
+				"home-a": {"account  app  ghcr.io/example/account:1  1.0.0 (sha256:aaaaaaaaaaaa) -> 1.1.0 (sha256:bbbbbbbbbbbb)"},
+				"home-b": {"talk  app  ghcr.io/example/talk:1  1.0.0 (sha256:cccccccccccc) -> 1.1.0 (sha256:dddddddddddd)"},
+				"vm":     nil,
+			}
+			for site, w := range want {
+				if got := explainedAfter(rec, "pull", site); !slices.Equal(got, w) {
+					t.Errorf("%s's pull line explains %q, want %q\n%s", site, got, w, rec.Lines())
+				}
+			}
+		})
 	}
 }

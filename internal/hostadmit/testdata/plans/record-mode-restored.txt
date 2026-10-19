@@ -35,6 +35,7 @@ step 1: write the admission record
     | }
 
 present: registry: this host is claimed for deployment f2a9
+present: swap: on
 present: docker: Engine 29.9.1
 present: package: docker-ce-rootless-extras installed
 present: package: uidmap installed

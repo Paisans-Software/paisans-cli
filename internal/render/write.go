@@ -17,7 +17,7 @@ import (
 // ManifestName is the record of what was rendered and what it hashed to.
 const ManifestName = "manifest.json"
 
-// Manifest lets a later `apply` tell an unchanged artifact from one somebody
+// Manifest lets a later `deployment apply` tell an unchanged artifact from one somebody
 // edited on the host. A rendered .env is a build artifact and nothing edits it
 // in place, so a file whose hash no longer matches is a local modification and
 // must be resolved rather than clobbered.

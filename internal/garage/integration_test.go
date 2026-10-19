@@ -21,7 +21,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -30,6 +29,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/dockertest"
+	"github.com/paisans-software/paisans-cli/internal/imagedigest"
 	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
@@ -587,26 +587,43 @@ func waitForLog(t *testing.T, container string, within time.Duration, markers ..
 
 // renderedCaddyImage reads the gateway image out of the rendered infra
 // compose file rather than naming it here, so this test runs the image an
-// operator receives and cannot drift from it when the pin moves.
+// operator receives and cannot drift from it when the catalog moves.
+//
+// The rendered image is a track, such as caddy:2.*.*, which no daemon can
+// run. It is put on the newest tag matching it, as apply does, and the test
+// logs which tag that was.
 //
 // PAISANS_TEST_CADDY_IMAGE replaces it, and the test logs that it did. It
-// exists for a workstation that cannot pull the pinned image, which is
-// published to a registry that needs a login. Nothing the snippets under test
-// use comes from the modules that image adds, so a stock Caddy of the same
-// release exercises the same directives; it is still not the pinned bytes, and
-// a run that used it has to say so.
+// exists for a workstation that cannot read the rendered image's registry.
+// Nothing the snippets under test use comes from the modules that image adds,
+// so a stock Caddy of the same release exercises the same directives; it is
+// still not the rendered image, and a run that used it has to say so.
 func renderedCaddyImage(t *testing.T) string {
 	t.Helper()
 	if override := os.Getenv("PAISANS_TEST_CADDY_IMAGE"); override != "" {
-		t.Logf("PAISANS_TEST_CADDY_IMAGE is set: running %s rather than the rendered pin", override)
+		t.Logf("PAISANS_TEST_CADDY_IMAGE is set: running %s rather than the rendered image", override)
 		return override
 	}
 	compose := renderedFile(t, "vm/srv/paisans/f2a9/infra/compose.yaml")
-	match := regexp.MustCompile(`image:\s*(\S*/caddy:\S+)`).FindStringSubmatch(compose)
-	if match == nil {
+	var ref string
+	for _, line := range strings.Split(compose, "\n") {
+		if r, _, ok := render.ImageLine(strings.TrimSpace(line)); ok && strings.Contains(r, "/caddy:") {
+			ref = r
+			break
+		}
+	}
+	if ref == "" {
 		t.Fatalf("the rendered infra compose file names no Caddy image, so there is nothing to start:\n%s", compose)
 	}
-	return match[1]
+	if !imagedigest.IsTrack(ref) {
+		return ref
+	}
+	tagged, err := imagedigest.Registry{}.Track(ref)
+	if err != nil {
+		t.Fatalf("resolving the rendered track %s: %v", ref, err)
+	}
+	t.Logf("the rendered track %s is %s", ref, tagged)
+	return tagged
 }
 
 // startMediaCluster brings up the two Garage nodes and the gateway, joins the
@@ -712,7 +729,7 @@ func startMediaCluster(t *testing.T) *mediaCluster {
 	caddyfile := "{\n\tadmin off\n\tauto_https off\n}\n"
 	for _, app := range []string{"blog", "talk"} {
 		file := app + "-media.caddy"
-		snippet := renderedFile(t, "vm/srv/paisans/f2a9/infra/caddy/snippets/"+file)
+		snippet := renderedFile(t, "vm/srv/paisans/f2a9/infra/caddy/etc/snippets/"+file)
 		if err := os.WriteFile(filepath.Join(snippets, file), []byte(snippet), 0o644); err != nil {
 			t.Fatalf("writing the rendered %s: %v", file, err)
 		}

@@ -839,3 +839,48 @@ monitor with the site heartbeat's options, a 503 pushes `/fail` with the
 reason as plain text, and no answer or another status pushes nothing.
 `secretsgen`: a token per Pocket ID app in shape, kept on a second pass.
 Golden tree regenerated.
+
+## Amendment, 2026-10-18: a public status page of public checks
+
+Founder decision, 2026-10-18. The status page is on by default and shows
+each app's check at its public hostname and nothing else. This replaces the
+refusal of `/status*` in *Exposure and sign in* and `status_page_enabled`
+false in *Seeding*.
+
+**What is shown.** `<app> — public`, `<app> — public (no health route)`, and
+another monitor's `— public` check. Each requests `https://<hostname>`, a name
+already in public DNS. Everything else stays hidden: the direct, private API,
+operator reconciler, TCP and ping checks name a mesh address, the heartbeats
+name a site, and the gate and signed fetch checks test the gate rather than
+whether the app is up.
+
+**The file decides it.** Every seed entry names `status_page_excluded`,
+`false` for a public check and `true` for every other, so a reseed puts each
+managed monitor back where the file says. A new kind of check is hidden
+until its code marks it public.
+
+**A monitor made by hand starts hidden.** The fork defaults
+`status_page_excluded` to 1 for every monitor whose maker does not say
+otherwise: the new monitor form starts ticked, and a monitor created through
+the API, a backup import or the seed without the field, or copied from
+another, is hidden. An admin shows one by unticking **Hide from public
+status page**. Fork `1.1.0-oidc.6`.
+
+**The setting.** `settings.public_status_page`, a boolean the uptime
+blueprint declares with `admin_group`, default `true`. With `false` the seed
+sets `status_page_enabled` false and the Caddy snippet refuses `/status*`
+again, as do `web-server show`'s Caddy, nginx and Apache snippets.
+
+**Still refused.** `/badge/*`, `/metrics` and `/api/v1/*`, whatever the
+setting: `/metrics` is public while no API token exists, which here is
+always.
+
+### Tests
+
+Seed: `status_page_enabled` follows the setting; every entry names
+`status_page_excluded`, and only the public checks are shown, each at an
+`https://` URL. Render: the snippet leaves `/status*` out of `@refused` by
+default and refuses it with the setting false. `web-server show`: each
+snippet refuses the status page's paths in every form only with the setting
+false. Validate: a `public_status_page` that is not a boolean is refused
+(`blueprint-setting-invalid`). Golden tree regenerated.

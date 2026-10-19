@@ -17,8 +17,17 @@ const SectionSudo = "sudo rights"
 // SudoCommand lists what sudo lets the login user run, without asking for
 // a password, in the C locale: sudo translates its answer, and the reading
 // knows its English words. The transport returns stderr with stdout, so a
-// refusal is in the answer too.
-const SudoCommand = "LC_ALL=C sudo -n -l"
+// refusal is in the answer too. sudo-rs's -l lists no Defaults, so where
+// sudo is sudo-rs the original, installed beside it as sudo.ws, lists what
+// the same sudoers grant, as site admit reads them; with no sudo.ws it
+// prints sudoRSAlone.
+const SudoCommand = "if sudo -V 2>/dev/null | sed -n 1p | grep -q '^sudo-rs'; then " +
+	"if [ -x /usr/bin/sudo.ws ]; then LC_ALL=C /usr/bin/sudo.ws -n -l; else echo '" + sudoRSAlone + "'; fi; " +
+	"else LC_ALL=C sudo -n -l; fi"
+
+// sudoRSAlone is SudoCommand's answer on a host whose sudo is sudo-rs with
+// no sudo.ws beside it.
+const sudoRSAlone = "paisans: sudo is sudo-rs, and /usr/bin/sudo.ws is not installed"
 
 // SudoProbe is SudoCommand's answer on one site.
 type SudoProbe struct{ Site, Out, Err string }
@@ -57,6 +66,17 @@ func SudoRights(cfg *config.Config, probes []SudoProbe) []Finding {
 				}})
 			continue
 		}
+		if strings.Contains(p.Out, sudoRSAlone) {
+			out = append(out, Finding{Section: SectionSudo, Level: Warn,
+				Line: fmt.Sprintf("%s: sudo is sudo-rs, so what it lets %s run cannot be read", p.Site, user),
+				More: []string{
+					"sudo-rs's sudo -l lists no Defaults, so doctor reads them from the original sudo, installed beside it as /usr/bin/sudo.ws, which is missing here. A Defaults entry that hands the WireGuard helper the user's environment would make the user root on the host.",
+					"recover:",
+					"  1. The host's owner installs Ubuntu's sudo package, which installs /usr/bin/sudo.ws.",
+					fmt.Sprintf("  2. `paisans doctor --site %s` again.", p.Site),
+				}})
+			continue
+		}
 		if strings.Contains(p.Out, "a password is required") {
 			out = append(out, missing)
 			continue
@@ -65,7 +85,7 @@ func SudoRights(cfg *config.Config, probes []SudoProbe) []Finding {
 		if !ok {
 			more := append(lastLines(p.Out+"\n"+p.Err, 3),
 				"recover:",
-				fmt.Sprintf("  1. The host's owner runs `LC_ALL=C sudo -n -l` as %s on %s and reads the answer: a translated or unfamiliar sudo is the likely cause.", user, p.Site),
+				fmt.Sprintf("  1. The host's owner runs `LC_ALL=C sudo -n -l` (`/usr/bin/sudo.ws` in place of `sudo` where sudo is sudo-rs) as %s on %s and reads the answer: a translated or unfamiliar sudo is the likely cause.", user, p.Site),
 				fmt.Sprintf("  2. If it lists %s and nothing else, report that output as a doctor bug. If not, the host's owner checks the line site admit wrote in /etc/sudoers.d/%s with `visudo -c`, or runs `paisans site admit` for %s again.", admitrules.HelperRule(helper), d.Prefix(), p.Site),
 				fmt.Sprintf("  3. `paisans doctor --site %s` again.", p.Site),
 			)
@@ -83,7 +103,7 @@ func SudoRights(cfg *config.Config, probes []SudoProbe) []Finding {
 				More: []string{
 					fmt.Sprintf("Every operator of this deployment can log in as %s, so whatever sudo allows it is theirs too, and root on the host for anything past the helper. site admit writes one line, %s, in /etc/sudoers.d/%s; the rest comes from elsewhere in the host's sudoers.", user, admitrules.HelperRule(helper), d.Prefix()),
 					"recover:",
-					fmt.Sprintf("  1. The host's owner lists every rule and Defaults entry for the user with `sudo -l -U %s` and removes all but site admit's line with `visudo`, looking in /etc/sudoers and /etc/sudoers.d.", user),
+					fmt.Sprintf("  1. The host's owner lists every rule and Defaults entry for the user with `sudo -l -U %s` (`/usr/bin/sudo.ws -l -U` where sudo is sudo-rs) and removes all but site admit's line with `visudo`, looking in /etc/sudoers and /etc/sudoers.d.", user),
 					fmt.Sprintf("  2. `paisans doctor --site %s` again.", p.Site),
 				}})
 			continue

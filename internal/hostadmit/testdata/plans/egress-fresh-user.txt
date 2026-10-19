@@ -141,6 +141,7 @@ step 25: allow all inbound on psns-f2a9
 step 26: write the admission record
 step 27: add the operators' keys
 
+present: swap: on
 present: docker: Engine 29.9.1
 present: package: docker-ce-rootless-extras installed
 present: package: uidmap installed

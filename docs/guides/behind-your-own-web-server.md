@@ -69,11 +69,11 @@ is handed the monitor alone and nothing would route the other.
 paisans validate
 paisans site prepare --site health           # shows what it would do
 paisans site prepare --site health --execute
-paisans apply --site health                  # shows what would change
-paisans apply --site health --execute
+paisans deployment apply --site health                  # shows what would change
+paisans deployment apply --site health --execute
 ```
 
-`site prepare` and `apply` start with the host check. A web server on the host
+`site prepare` and `deployment apply` start with the host check. A web server on the host
 is fine here, whatever class the host check gives its listeners: the monitor
 claims neither 80 nor 443. The firewall is the host owner's: `site admit` leaves ufw's default
 policy alone and only adds the deployment's own rules, each commented
@@ -81,14 +81,14 @@ policy alone and only adds the deployment's own rules, each commented
 not open 80 or 443 with `managed_by: external`;
 your web server's rules are yours.
 
-Once the monitor's stacks are up, `apply --site health --execute` goes on to
+Once the monitor's stacks are up, `deployment apply --site health --execute` goes on to
 your web server: it writes the reference snippet of step 3 and runs the check
 of step 6. Until the check passes it ends on a warning, `!`, that names
 `paisans web-server show --app health`, with exit status 0.
 
 ## 3. Install the snippet
 
-`paisans apply --execute`, with or without `--site health`, writes the monitor's site,
+`paisans deployment apply --execute`, with or without `--site health`, writes the monitor's site,
 filled in for the web server `site admit` found, into
 `/srv/paisans/<token>/web-server/health.caddy` or `health.conf`. When admit
 found no server it knows, it writes `health.caddy`, `health.nginx.conf` and
@@ -233,7 +233,7 @@ cert_issuer acme {
 
 That gives the same DNS challenge to every site without an issuer of its own,
 but drops Caddy's default ZeroSSL fallback issuer for them. Admit does not
-record your global options, so neither `show` nor `apply` can tell you which
+record your global options, so neither `show` nor `deployment apply` can tell you which
 case you are in.
 
 This snippet is what apply writes to the reference file. Copy it into your web
@@ -275,14 +275,14 @@ over ssh, as `web-server show` does, and names the web server.
 |---|---|---|
 | `dns` | the hostname resolves to `public_address` (and `public_address6`), and to nothing else | create the records, step 5; delete any other record for the name by hand |
 | `certificate` | `https://<hostname>/healthz` answers 200 with a certificate valid for the hostname; prints the days left | the certificate lines, step 4, or the proxy if the answer is not 200 |
-| `sign in` | `/login/oidc` redirects to the identity provider with a callback under `https://<hostname>/` | a redirect back to `/login` means the app's client at Pocket ID is missing (`paisans oidc client create --app health`, then `paisans apply --site health`) or the identity provider is down; a wrong callback means apply has not reached the app, or the web server rewrites `Host` or `Location` |
+| `sign in` | `/login/oidc` redirects to the identity provider with a callback under `https://<hostname>/` | a redirect back to `/login` means the app's client at Pocket ID is missing (`paisans oidc client create --app health`, then `paisans deployment apply --site health`) or the identity provider is down; a wrong callback means apply has not reached the app, or the web server rewrites `Host` or `Location` |
 | `upstream` | a connection to `public_address` (and `public_address6`) on the `listen` port is refused or not answered | the app is reachable around your web server: use a loopback `listen`, or close the port in the host's firewall. Any other failure, such as no route from where you run it, says nothing: one conclusive answer still passes and names the family it could not reach, and with none the check is inconclusive, so run it from a machine that can reach the site |
 
 Run it again after every change until no check fails and it ends with
 `4 checks passed.`
 
-`paisans apply --execute` without `--site` runs the same checks for every app
-behind your own web server once every other step has run, and `paisans apply
+`paisans deployment apply --execute` without `--site` runs the same checks for every app
+behind your own web server once every other step has run, and `paisans deployment apply
 --site health --execute` runs them for the monitor's apps once its stacks are
 up, each app once and without waiting, in a `web server` section:
 
@@ -296,7 +296,7 @@ under it, an error several share said once, the web server it found, and the
 `paisans web-server show --app health` and `paisans web-server check --app
 health` commands that finish the hand-off. The run ends on a warning, `!
 Deployment complete, but 1 app failed its web server check: health`, rather
-than `Deployment complete.`, or `Applied <n> files to health.` for `apply
+than `Deployment complete.`, or `Applied <n> files to health.` for `deployment apply
 --site health`, since a visitor cannot use the app yet. Every step ran, so the
 exit status is still 0. What apply could not do on the host, such as reaching
 it over ssh or writing the reference file, is a failure instead, `✗`, and the

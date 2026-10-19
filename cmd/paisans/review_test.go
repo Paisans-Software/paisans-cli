@@ -364,7 +364,7 @@ func TestHostPrepareNotApprovedChangesNothing(t *testing.T) {
 	}
 }
 
-// apply --site, with something to approve and no terminal, is refused before
+// deployment apply --site, with something to approve and no terminal, is refused before
 // the host's admission is checked; with nothing to approve it goes on to the
 // check.
 func TestApplySiteReviewsBeforeTheAdmissionCheck(t *testing.T) {
@@ -455,7 +455,7 @@ func joinConfigAs(t *testing.T, roles string) string {
 }
 
 // site add applies the new site's whole render in its stage 4, so it
-// reviews the new site's images as apply --site does: with something to
+// reviews the new site's images as deployment apply --site does: with something to
 // approve and no terminal it is refused before any host's admission is checked, and the
 // dry run shows the review and asks nothing.
 func TestSiteAddReviewsBeforeTheAdmissionCheck(t *testing.T) {
@@ -541,7 +541,7 @@ func TestAResumedJoinKeepsTheApprovalsForItsApps(t *testing.T) {
 }
 
 // resumeJoin is a resumed run's join of home-b, declared [data, apps] in
-// full, through site add's review and record and then apply --site's
+// full, through site add's review and record and then deployment apply --site's
 // review, which fails t if it refuses.
 func resumeJoin(t *testing.T, full *config.Config) {
 	t.Helper()
@@ -597,8 +597,8 @@ func resumeJoin(t *testing.T, full *config.Config) {
 	if err := recordGrant(ui.Discard, s, d, by); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := stepReview(ui.Discard, answerer{}, noTerminalStdin(), io.Discard, full, "home-b", granted(full), grant.ApplyScope(), nil, true, "paisans apply --site home-b --execute"); err != nil {
-		t.Errorf("apply --site home-b after the join: %s", problemText(err))
+	if _, _, err := stepReview(ui.Discard, answerer{}, noTerminalStdin(), io.Discard, full, "home-b", granted(full), grant.ApplyScope(), nil, true, "paisans deployment apply --site home-b --execute"); err != nil {
+		t.Errorf("deployment apply --site home-b after the join: %s", problemText(err))
 	}
 }
 

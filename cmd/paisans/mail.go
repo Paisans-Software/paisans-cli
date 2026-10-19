@@ -191,7 +191,7 @@ func checkMailForValidate(r ui.Reporter, cfg *config.Config, secretsPath string)
 		case errors.As(err, &failed) && failed.Dialled():
 			step.End(ui.Warned, "does not log in")
 			_, explain := mailFailure(cfg, failed)
-			r.Explain(explain + " `paisans apply` refuses until it does.")
+			r.Explain(explain + " `paisans deployment apply` refuses until it does.")
 			warned++
 		default:
 			unreachable[c.Site] = true
@@ -229,7 +229,7 @@ func trySMTPPassword(r ui.Reporter, cfg *config.Config, secrets *config.Secrets,
 		step := r.Step(c.Title())
 		if c.Skip != "" {
 			step.End(ui.Warned, "not tried")
-			r.Explain(key + " is not tried for " + c.Whose() + ": " + c.Skip + ". `paisans apply` tries it from the site.")
+			r.Explain(key + " is not tried for " + c.Whose() + ": " + c.Skip + ". `paisans deployment apply` tries it from the site.")
 			continue
 		}
 		if to == nil {
@@ -258,7 +258,7 @@ func trySMTPPassword(r ui.Reporter, cfg *config.Config, secrets *config.Secrets,
 		if errors.As(err, &failed) {
 			why = failed.Reply()
 		}
-		r.Explain(fmt.Sprintf("%s could not be reached from %s (%s), so %s is written untried. `paisans apply` tries it from each site running %s before it changes anything.", c.Address(), c.From(), strings.TrimSuffix(ui.Redact(why), "."), key, appsOf(c)))
+		r.Explain(fmt.Sprintf("%s could not be reached from %s (%s), so %s is written untried. `paisans deployment apply` tries it from each site running %s before it changes anything.", c.Address(), c.From(), strings.TrimSuffix(ui.Redact(why), "."), key, appsOf(c)))
 	}
 	return nil
 }

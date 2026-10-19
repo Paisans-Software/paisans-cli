@@ -163,7 +163,7 @@ func admitHosts(t *testing.T, cfg *config.Config, hosts map[string]doctorHost) {
 		}
 		for command, answer := range map[string]string{
 			doctor.UserCommand:   "uid 1000\nuser " + s.SSHUser() + "\ngroups " + s.SSHUser() + "\ngids 1000\n",
-			doctor.DockerCommand: "host unix:///run/user/1000/docker.sock\nengine 29.9.1\nsecurity [\"name=seccomp,profile=builtin\",\"name=rootless\",\"name=cgroupns\"]\n",
+			doctor.DockerCommand: "host unix:///run/user/1000/docker.sock\nengine 29.9.1\nsecurity [\"name=seccomp,profile=builtin\",\"name=rootless\",\"name=cgroupns\"]\nsource-mark 0\n",
 			doctor.LingerCommand: "linger yes\nmesh-order yes\n",
 			doctor.SudoCommand:   sudoHelperOnly(s.SSHUser(), site, helper),
 		} {
@@ -500,7 +500,7 @@ func TestDoctorDiagnosesTheStuckReplicaAndOnlyReads(t *testing.T) {
 		"fail: check pocket-id auth no active instance, so sign in is down",
 		"home-b   unreachable did not answer ssh (see reach)",
 		"There is no database primary (see patroni)",
-		"Not checked because of this: admission, user, docker, docker engine, linger, sudo rights, mesh, patroni, containers, settings talk, clocks, leftovers on home-b.",
+		"Not checked because of this: admission, user, docker, docker engine, docker source mark, linger, sudo rights, mesh, patroni, containers, settings talk, clocks, leftovers on home-b.",
 		"done: check admission home-a admitted as ubuntu by paisans " + version.Current().String() + ", covering its roles",
 		"done: check user home-a ubuntu is in no privileged group",
 		"done: check docker home-a its rootless Docker answers at unix:///run/user/1000/docker.sock",
@@ -739,7 +739,7 @@ func TestDoctorExecuteRemovesOnlyRedundantGateConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const anchor = "      KBIN_META_TITLE: A place to talk\n"
+	const anchor = "      MBIN_DEFAULT_THEME: dark\n"
 	if !strings.Contains(string(data), anchor) {
 		t.Fatal("the fixture's talk config moved; update this test")
 	}

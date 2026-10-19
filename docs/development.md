@@ -47,7 +47,7 @@ saying to build from git or with the flag.
 
 [`docs/commands.md`](commands.md) is the operator's reference for every
 command: what it does, when it is run on its own rather than through the whole
-`apply`, its flags and defaults, and what it changes. This section is how the
+`deployment apply`, its flags and defaults, and what it changes. This section is how the
 code behind each one is laid out.
 
 render, `secrets list` and `site list` touch nothing outside the working
@@ -56,12 +56,15 @@ create writes one new file there. validate reads only the files, except that
 it tries each app's mail settings from a site running it, and `secrets set`
 tries an SMTP password from this machine before writing it; neither changes a site,
 and `validate --offline` reaches none. init writes only local files, and reads every site over ssh to settle the mesh subnet.
-`site prepare`, `apply`, `prune`, `site add`, `site remove`, `mesh rekey`,
+`site prepare`, `deployment apply`, `prune`, `site add`, `site remove`, `mesh rekey`,
 `secrets rotate`, `storage init`, `storage add`, `storage rotate-key`, `app
 admin create`, `app remove` and `oidc client create` reach a machine, and each
 changes it only with `--execute`. `preflight` and `doctor`
 reach every site and never change one, and `site deployments` reads the one
-host `--ssh` names, with no `paisans-stack.yaml`, and changes nothing. `secrets
+host `--ssh` names, with no `paisans-stack.yaml`, and changes nothing. `deployment
+fetch` reads the same host's registry and configuration stores through sudo,
+changes nothing there, and writes only the workstation's saved deployments;
+`deployment list` reads only those. `secrets
 prune` reads each gateway's deployment record and rewrites only the local
 secrets file, only with `--execute`. `failover test` changes which site
 is primary, only with `--execute`. `dns init` and `dns prune` reach no
@@ -77,14 +80,16 @@ monitor's public hostname as a visitor would, and in `managed_by` `external`
 both read the monitor's web server over ssh, `show` always and `check` when a
 check fails.
 
-`config publish`, `config pull`, `config log`, `config recover` and `operator
+`deployment publish`, `deployment pull`, `deployment log`, `deployment recover` and `operator
 register` read every site's configuration store over ssh and change a host only
 with `--execute`, and then only by starting each site's sync and, for `publish`
-and `register`, adding a version to its store; they claim nothing. `apply`
+and `register`, adding a version to its store; they claim nothing. `deployment apply`
 gathers and publishes through the same code. The commands are in
-`cmd/paisans/config.go` (`publish`, `pull`, `log`, `recover`),
+`cmd/paisans/deployment.go` (`publish`, `pull`, `log`, `recover`),
+`cmd/paisans/deploymentlocal.go` (`list`, `fetch`, and the copy `deployment apply` and
+`recover` save to this workstation's data directory, `internal/localstore`),
 `cmd/paisans/config_merge.go` (the secrets merge on a pull),
-`cmd/paisans/config_apply.go` (`apply`'s gather, publish and witness check) and
+`cmd/paisans/config_apply.go` (`deployment apply`'s gather, publish and witness check) and
 `cmd/paisans/operatorregister.go`. The rules that decide which version to trust are
 `internal/configstore/trust.go`, and are written against built histories, not
 against a host, so they are tested without one. `internal/grant` holds the
@@ -113,9 +118,9 @@ the `Address` line of `/srv/paisans/<token>/psns-<token>.conf`. The awk merge
 refuses the same thing under the lock, for two claims racing, and `Merge`
 mirrors it. `validate` refuses two sites with one mesh address
 (`duplicate-site-address`) and two at one ssh host and port or one dial
-endpoint (`sites-share-a-machine`), so `apply` without `--site` runs every
+endpoint (`sites-share-a-machine`), so `deployment apply` without `--site` runs every
 site's prepare and pull at once with no host shared between them.
-`apply` and `site prepare` also read the host's routes,
+`deployment apply` and `site prepare` also read the host's routes,
 addresses, Docker networks and Docker's address pools before their first change,
 and refuse an overlap with the mesh subnet; `internal/mesh` holds the parsing
 and the overlap test as pure functions, and the probe (`mesh.Probe`, over any
@@ -123,16 +128,16 @@ and the overlap test as pure functions, and the probe (`mesh.Probe`, over any
 (`checkMeshLive`). README.md "Two deployments on one host never share a mesh"
 has the reasoning.
 
-`apply`, `apply --site`, `site prepare` and `site add` review what
+`deployment apply`, `deployment apply --site`, `site prepare` and `site add` review what
 `paisans-stack.yaml` grants before their first change. `internal/grant` computes a site's grant from the
 configuration and the render (the login user, every key of the operators
 `ssh.keys` names, every rendered service's image), compares it with the host's record,
 `/srv/paisans/<token>/.paisans/granted.json`, and writes that record under the
 deployment's lock. `cmd/paisans/review.go` shows the review and asks for
 `approve` through `confirmWord`, refusing without a terminal;
-`cmd/paisans/converge_review.go` is `apply` with no `--site`'s one review for
+`cmd/paisans/converge_review.go` is `deployment apply` with no `--site`'s one review for
 every site, which its steps check against rather than asking again. README.md
-"`apply` and `site prepare` review what `paisans-stack.yaml` grants" has the
+"`deployment apply` and `site prepare` review what `paisans-stack.yaml` grants" has the
 reasoning.
 
 ```
@@ -141,8 +146,8 @@ paisans init     --config examples/paisans-stack.example.yaml
 paisans render   --config examples/paisans-stack.example.yaml \
                  --secrets secrets.enc.yaml --out ./out
 paisans site prepare --site home-a        # the host check, then what a blank host lacks
-paisans apply    --site home-a            # shows what would change
-paisans apply    --site home-a --execute  # does it
+paisans deployment apply    --site home-a            # shows what would change
+paisans deployment apply    --site home-a --execute  # does it
 paisans prune    --site home-a            # lists dangling volumes, and which go
 paisans preflight --site home-b           # site add's read only checks
 paisans storage add                       # every Garage stage, from live state
@@ -212,7 +217,7 @@ about it are load bearing:
   client lives at a running identity provider. None is invented or left
   silent, and `secretsgen.Result` sorts them by who acts. `Owed` is what only
   the operator can provide, each a warning with its reason. `Pending` is what
-  a running service of the deployment issues and `apply --execute` records
+  a running service of the deployment issues and `deployment apply --execute` records
   before the app that needs it starts: today the client of every kind with a
   client shape (`kinds.OIDCClient`), since declaring the app is the approval
   for its client. Pending clients are one line, not warnings, and `--verbose`
@@ -242,7 +247,7 @@ controlling terminal with echo off through `readOwedSecret`, which tests
 replace. Each answer is written before the next prompt, so an interruption
 keeps what was typed; an empty answer skips the key.
 
-A whole `apply --execute` does the same, once Pocket ID runs, for every
+A whole `deployment apply --execute` does the same, once Pocket ID runs, for every
 operator the `operators` section declares (`cmd/paisans/converge_operators.go`),
 through `appadmin` with `Request.Declared`: the account is also found by its
 email, its username is the operator's key and its name is split at the first
@@ -256,7 +261,7 @@ disables a user, because taking an operator out of `paisans-stack.yaml` is how
 an operator is removed. A 24 hour link is issued to each operator with no
 `PASSKEY_ADDED` audit event, and with mail Pocket ID emails one too
 (`Request.EmailLink`); its log is read for a failed send. Every link is printed
-after the run's result. See *`apply` makes the declared operators and hands
+after the run's result. See *`deployment apply` makes the declared operators and hands
 each a login link* in `README.md`.
 
 `operator magic-link <operator>` issues one declared operator a one-time sign-in link
@@ -281,7 +286,7 @@ secret under `oidc_clients.<app>`. Every step is printed with what it sends and
 nothing changes without `--execute`. The secret is generated on the
 workstation and written to the secrets file before Pocket ID is sent it, and is
 never printed. `--rotate-secret` adds a new secret, leaving the old one valid.
-`apply` runs the same step for every app it starts (see *`apply` creates each
+`deployment apply` runs the same step for every app it starts (see *`deployment apply` creates each
 app's OIDC client* below), so the command is for running it alone and for
 rotating. A client is made for every app whose blueprint declares `oidc`
 (`kinds.OIDCClient`), at the callback the blueprint gives, each cited there
@@ -347,7 +352,7 @@ there (Patroni, containers, settings, leftovers), and the nodes across sites
 try each admitted member in turn. Pending and down come from the run's classification, made once,
 the first time a site does not answer or its record does not cover it
 (`doctorClassify`), and each Caddy site's answer from outside from the same
-check `apply` runs, asked once and without waiting (`doctorSelfCheck`). `Graph.Run` starts every
+check `deployment apply` runs, asked once and without waiting (`doctorSelfCheck`). `Graph.Run` starts every
 node whose needs are met, records each
 node's probes into one `Input` as it ends, and prunes, transitively, every
 node a failed or skipped hard need leaves unable to run. It reports through
@@ -376,14 +381,14 @@ project, or a manifest entry. A stack that `render.SiteStacks` no longer names
 for the site, and a manifest entry marked left over, is a leftover; on the
 gateway, a `*.caddy` in `render.HostSitesDir` is foreign: the Caddyfile is
 this deployment's and Caddy runs in the host's network namespace, so that
-directory is the only way something foreign is served by it. `apply` prints the leftovers after
+directory is the only way something foreign is served by it. `deployment apply` prints the leftovers after
 its plan (`printLeftovers` in `cmd/paisans/leftover.go`); `doctor` runs
 `hostcheck.Inspect` on each site that answered and reports them as `WARN`,
 and the foreign users as `info`. Both name `paisans app remove <app>` for
 each app the leftovers belong to (`Report.Apps`). Its allow list takes the inventory's probes
 from `hostcheck.ReadCommands`.
 
-`render`, `apply`, `site add` and `site remove` refuse a site running the
+`render`, `deployment apply`, `site add` and `site remove` refuse a site running the
 toolkit's Caddy (a gateway, or a monitor in `managed_by` `paisans`) when
 `external.acme_dns_token` is empty. `init` lists it as owed, but rendering without it produced a Caddy that
 starts and then fails every DNS-01 challenge, which a visitor finds rather than
@@ -429,7 +434,7 @@ test touches real DNS or the network. README.md *The monitor has a site of
 its own* has the reasoning; `docs/guides/behind-your-own-web-server.md` is
 the walk-through.
 
-`apply` without `--site` uses the same package once every step has run:
+`deployment apply` without `--site` uses the same package once every step has run:
 `writeWebServerFiles` (`cmd/paisans/converge_webserver_files.go`) writes each
 app's reference snippet (`internal/webserver/reference.go`) under
 `/srv/paisans/<token>/web-server/`, as the deployment's user, and writes
@@ -438,7 +443,7 @@ nothing of the owner's; `convergeWebServer`
 failure alone ends the run on a `ui.Warning`, which exits 0.
 
 `render` validates, then writes per site artifacts under `--out`. It writes
-files and stops: pushing them to a host is `apply`'s work.
+files and stops: pushing them to a host is `deployment apply`'s work.
 
 The example validates with exactly two warnings, and both are deliberate. Its
 Synapse stack is pinned to the site that also holds the witness role, which the
@@ -447,7 +452,7 @@ two sites, so uploads stop while either is down, a trade its comment explains.
 
 ## The host check, before anything changes
 
-`site prepare`, `apply`, `site add` (on the site being added) and `prune`
+`site prepare`, `deployment apply`, `site add` (on the site being added) and `prune`
 each run `internal/hostcheck` first, and so do `storage rotate-key` (on every
 site the app runs on), `storage add` (every Garage site, the gateway and every
 monitor site), and `site add`, `site remove` and `app remove` on every monitor
@@ -507,7 +512,7 @@ What "shared" changes, and where:
 | Command | On a shared host |
 |---|---|
 | `site prepare` | nothing host-wide to hold back: it plans no firewall; the host check does not read the firewall, whose policy is the host owner's and whose rules for the deployment `site admit` adds |
-| `apply` | `apply.KeepImages()`, as `--keep-images`, which also skips the sweep |
+| `deployment apply` | `apply.KeepImages()`, as `--keep-images`, which also skips the sweep |
 | `site add` | `siteadd.Plan.KeepImages`, passed to the replica stage's whole apply; `siteadd.Plan.SharedSites`, the monitor sites, for the reseed's apply |
 | `site remove`, `app remove` | the monitor sites are host checked, and the reseed's apply there keeps nothing back: `apply.MonitorReseed.KeepImages` is there for a caller to set |
 | `storage rotate-key` | `apply.KeepImages()` in the switch's apply on that site |
@@ -518,20 +523,20 @@ A conflict is refused by `Report.Refusal` before anything else is asked of the
 host. A shared host is not refused: its firewall is `site admit`'s. There is
 no flag to skip the check.
 
-## `apply`, and the gates in it
+## `deployment apply`, and the gates in it
 
-`apply --site` is one site at a time, and a dry run unless `--execute` is given. Both
+`deployment apply --site` is one site at a time, and a dry run unless `--execute` is given. Both
 are deliberate: a staged change that half succeeds across three machines is
 worse than one that failed on one, and the difference between "show me" and "do
 it" should be a flag an operator typed rather than a habit they formed.
-`apply` without `--site` keeps both: it runs `apply --site` for each site in
+`deployment apply` without `--site` keeps both: it runs `deployment apply --site` for each site in
 turn, as one step among the others it runs (`cmd/paisans/converge.go`), and
 is a dry run unless `--execute` is given. Ahead of those steps it pulls every
 site's images on every host at once (`cmd/paisans/converge_pull.go`), from the
 plan `planSiteApply` makes for the site, with `Plan.Disk.Pulls` as the list
 and `apply.DiskRefusal` as the stop for a short disk; it reports straight to
 each site's line and never through `reporterOverride`, which is one command's
-at a time. Every plan of one `apply` resolves each image's tag through one
+at a time. Every plan of one `deployment apply` resolves each image's tag through one
 `imagedigest.Cache` (`cacheDigests`), so the pull and the steps after it name
 the same build, and every site of a clustered app moves to one build. That dry run changes nothing on the
 servers; the one file it may write is the local secrets file, with the
@@ -553,7 +558,7 @@ explanation on every step buries the one line that matters. With `-v` or
 `--verbose` the detail behind each step appears under it: reasons,
 configuration values, request bodies, ssh retries, and the raw output of the
 two commands whose output explains a step: what each site's Pocket ID said
-while `apply` waits for one active instance, and the `patronictl switchover`
+while `deployment apply` waits for one active instance, and the `patronictl switchover`
 of `failover test`. Compose and
 pull output is not streamed at either level; a command that fails carries its
 output in the error.
@@ -568,7 +573,7 @@ terminal the open step shows a spinner with the elapsed time. When output is
 piped, or `NO_COLOR` is set, or `TERM` is `dumb`, there is no colour, no cursor
 movement and no spinner, and the words `ok`, `FAIL` and `WARN` stand in for the
 glyphs, so a log from cron or CI reads cleanly. A step that works through
-several things, Eg: the install line of `apply` without `--site`, names the one
+several things, Eg: the install line of `deployment apply` without `--site`, names the one
 it has reached with `Step.Progress`: the text follows the title on the spinner
 line, is not part of the finished line, and prints nothing when output is
 piped, so a log gets one line for the step rather than one per change.
@@ -667,7 +672,7 @@ refuses any `wg`, `wg-quick`, `journalctl` or `systemctl` command written
 directly in the packages that touch the mesh, and exempts two strings in
 `internal/siteremove/host.go`: `removeUnitsCommand`, which removes the removed
 site's own units, and `wireguardCommand`, which stops its interface, neither
-of which a helper verb does. `README.md` has the table under "`apply` brings
+of which a helper verb does. `README.md` has the table under "`deployment apply` brings
 the mesh interface up before anything binds to it".
 
 **The DNS token is checked from the site before Caddy asks the provider.**
@@ -711,7 +716,7 @@ forced recreate replaces every container of a stack, an outage each time.
 
 **A stack that is not running is started.** An operator removed every
 container and image to free disk space and applied: every file matched the
-render, so `apply` planned nothing for the stacks it had not changed and
+render, so `deployment apply` planned nothing for the stacks it had not changed and
 reported the deployment complete with its apps down. `Build` now reads which
 containers exist, in one `docker ps --all` filtered on Compose's project label,
 and a stack with a declared service that has no container, or one `exited`,
@@ -727,7 +732,7 @@ before the apps that sign in through it.
 **Each stack must come up healthy before the next one moves.** An apply
 reported success while Mbin's app could not reach its database, because `up -d`
 and `restart` return as soon as containers start. After each stack's action,
-`apply` polls `docker compose ps --all --format json` every 5 seconds for up to
+`deployment apply` polls `docker compose ps --all --format json` every 5 seconds for up to
 5 minutes until every container of the project is running and every one with a
 healthcheck reports `healthy`; a container without one counts once running.
 A container exited, restarting or `unhealthy` stops the apply at once, a
@@ -749,8 +754,8 @@ When a recreated stack names an absent image, `Build` reads Docker's data root
 and its free space, and `Plan.Disk` carries the numbers; `Build` reports them
 on its `disk space` step, so a dry run shows them, and `Execute` refuses first,
 before the pending record.
-The default is 3 GiB, `apply --min-free <size>` overrides it for one run, and
-the refusal quotes `docker system df`. README.md "`apply` checks free space
+The default is 3 GiB, `deployment apply --min-free <size>` overrides it for one run, and
+the refusal quotes `docker system df`. README.md "`deployment apply` checks free space
 before it pulls" has the reasoning.
 
 **A healthy stack's superseded images are pruned.** After the health gate,
@@ -761,7 +766,7 @@ image from that stack's repositories that no stack of the site renders and no
 container uses. A failed removal is a warning (`<stack>: old images left in
 place`), since the stack is already healthy. `Build` lists the same
 candidates, without the container filter, as `Plan.Prunes`, which a dry run
-shows as a `prune old images` step under each stack. `apply --keep-images`
+shows as a `prune old images` step under each stack. `deployment apply --keep-images`
 skips both, and so does a host the host
 check found shared. IDs are compared by
 prefix with `sha256:` stripped, since Docker prints them full or 12
@@ -785,7 +790,7 @@ Another deployment's root on the host makes both read nothing to remove, with a
 note in the plan. Every failure is a warning or a note. The pull stage plans
 with `apply.SkipSweepRead()`, since it executes none of its plans. A no-op
 whole apply costs two extra round trips, one in `Build` and one in `Execute`,
-plus one per removed image. README.md "`apply` prunes the images it
+plus one per removed image. README.md "`deployment apply` prunes the images it
 superseded" has the reasoning.
 
 **An image's declared volume must be mounted at exactly its path.** Docker
@@ -819,7 +824,7 @@ volume with size and top level entries and removes, with `--execute`, only
 those labelled `community.paisans.deployment` with this deployment's id;
 another id's, an unlabelled one, an anonymous one and a named one are kept. The listing ends with an `end` marker, so a cut
 short answer is an error rather than a shorter list. README.md "Every volume
-an image declares is mounted, and `apply` checks it" has the audit table and
+an image declares is mounted, and `deployment apply` checks it" has the audit table and
 the reasoning.
 
 **A file no longer rendered stays recorded, marked left over.** A whole plan
@@ -903,7 +908,7 @@ above. A digest the configuration names is left alone. A registry that cannot
 be reached keeps the build the stack runs, read from its compose file, with a
 warning; a stack running none is refused. Execute records each service's build
 in the manifest's `pins`. `Plan.Moved` is what the dry run lists, with the
-version labels `imagedigest.Registry.Version` reads. `apply --site` passes
+version labels `imagedigest.Registry.Version` reads. `deployment apply --site` passes
 `apply.OtherSites`, the compose files of each clustered app on its other sites
 (`readPeers`), so the app stays on the build they run, and sites on different
 builds are refused; a step of apply without `--site` (`planningEverySite`)
@@ -932,9 +937,9 @@ is why `internal/acme` holds the exact lines for each provider rather than
 building one shared form (github.com/caddy-dns/cloudflare, README "Caddyfile"
 section; github.com/caddy-dns/desec, README "Caddyfile" section).
 
-**`apply` creates each app's OIDC client.** Declaring an app whose kind has a
+**`deployment apply` creates each app's OIDC client.** Declaring an app whose kind has a
 client shape (`kinds.OIDCClient`) is the approval for its client at the
-deployment's Pocket ID (founder decision, 2026-10-08), so `apply` ensures it
+deployment's Pocket ID (founder decision, 2026-10-08), so `deployment apply` ensures it
 before the app renders. `clientStep` in `cmd/paisans/clients.go` holds the
 step; `oidc client create` calls the same helpers there, and
 `internal/oidcclient` does the planning and sending, unchanged. The step plans
@@ -994,12 +999,12 @@ design. What the code relies on, and what is easy to undo:
   its files in the same manifest, keeping every other entry, so the next whole
   apply sees them as its own, and `apply.Rollback` restores what one updated.
 * **Every etcd host has `/srv/paisans/<token>/infra/etcd-initial`**, the flags its member was
-  born with. `apply` and `site add` read it (`apply.ReadEtcdInitial`, falling
+  born with. `deployment apply` and `site add` read it (`apply.ReadEtcdInitial`, falling
   back to the compose file's own flags) and hand it to `render.Build` with
   `render.WithEtcdInitial`; without it a member renders as a founder of
   `etcd.members`. `isRecord` in `internal/apply` keeps its write from acting on
   the stack.
-* **`apply` refuses a half grown etcd** (`apply.EtcdRefusal`), probing the
+* **`deployment apply` refuses a half grown etcd** (`apply.EtcdRefusal`), probing the
   site and then the other configured members.
 * **Every wait is a count of polls**, the wait over the interval, so the tests
   replace `sleep` with nothing (`SetFast` in `export_test.go`) and still end.
@@ -1042,20 +1047,20 @@ undo:
 * **Remaining sites move only what names the removed site.** Stage 2 renders
   the configuration with and without the site (each etcd member with the
   flags its host records) and diffs the two per site. The mesh file,
-  `haproxy.cfg` and Caddy's routing files go through a scoped `apply` and the
+  `haproxy.cfg` and Caddy's routing files go through a scoped `deployment apply` and the
   one command each needs. A replica's `patroni.env` goes through
-  `apply.ReplicaEnv`, which `site add`'s stage 7 shares: a scoped `apply`
+  `apply.ReplicaEnv`, which `site add`'s stage 7 shares: a scoped `deployment apply`
   built at the moment it runs, so it compares the file with the host as
   earlier stages left it, then Patroni recreated alone and gated on
   streaming. The leader's `patroni.env`, and every other changed file, is
-  reported for a later `apply`, except the monitor's own stack, which the
+  reported for a later `deployment apply`, except the monitor's own stack, which the
   last stage applies whole.
 * **The monitor is reseeded last, by `apply.MonitorReseed`**, which
   `site add`, `storage add` and `app remove` share: every monitor site's
   `uptime` stack as an `apply.Only` plan, built at the moment it runs for the
   same reason `ReplicaEnv` is, then gated on the seed read back and the
   stack healthy. It comes after the configuration edit, so its failure names
-  `paisans apply --site <monitor> --only <app> --execute` rather than a
+  `paisans deployment apply --site <monitor> --only <app> --execute` rather than a
   re-run. README.md's *Topology commands reseed the monitor* is the argument.
 * **Every host removal is selected by its proof, at the moment it runs.**
   Docker objects by the label filter, in the user's own daemon, files by
@@ -1133,8 +1138,8 @@ the design. The swap renders the configuration with the site's next key in
 place of its current one, and every other site with the key its host runs
 (`internal/meshkey`, which `site remove` uses too, so a peer part way through
 its own rekey keeps its new key), and moves only the mesh file, by scoped
-`apply`, on every peer and then the site; render never reads
-`wireguard_next_private_key`, so `apply` and `apply --site` refuse while the
+`deployment apply`, on every peer and then the site; render never reads
+`wireguard_next_private_key`, so `deployment apply` and `deployment apply --site` refuse while the
 secrets hold any next key (`refuseMidRekey` in `cmd/paisans/meshrekey.go`):
 they would put the old key back. Where a rekey stands is read
 from the secrets file and the WireGuard helper's `show public-key`, and
@@ -1159,7 +1164,7 @@ checks the secret (`postgres.go`, `rabbitmq.go`, `garage.go`, `uptime.go`,
 SMTP passwords) and for the OIDC and S3 rotations, which run `oidc client create --rotate-secret` and `storage
 rotate-key` in their place in the order. `cmd/paisans/secretsrotate.go` maps a
 path to its rotator, builds `--all`'s order, and hands the engine a scoped
-`apply` rendered from the secrets with the next value in place, never from the
+`deployment apply` rendered from the secrets with the next value in place, never from the
 file, so stage 3 presents what stage 2 taught. What is easy to undo by accident:
 
 * **The next value is written before any host is handed it**, and the file
@@ -1203,13 +1208,13 @@ file, so stage 3 presents what stage 2 taught. What is easy to undo by accident:
   both through `Env.Mail` (*Mail checks, from a site*), so the plan and stage
   2 send nothing.
 * **Passwords never reach `argv` or a log, except where upstream leaves no
-  other way in.** SQL goes on stdin with statement logging off, as `apply`'s
+  other way in.** SQL goes on stdin with statement logging off, as `deployment apply`'s
   bootstrap does; `rabbitmqctl` takes a password only as an argument, which
   `rabbitmq.go` says and accepts for the length of the call.
 
 ## Mail checks, from a site
 
-`internal/smtpcheck` tries an app's mail settings: `Logins` is what `apply`
+`internal/smtpcheck` tries an app's mail settings: `Logins` is what `deployment apply`
 and `validate` try (one check per site and set of settings), `ForPassword`
 what `secrets set` and `secrets rotate` try for a changed password (one per
 sender, dialled from this machine; an unreachable server is a warning, and
@@ -1239,7 +1244,7 @@ by accident:
   `net.Pipe`'s synchronous writes.
 * **Only a changed credential sends mail.** `TryPassword(..., send)` is
   called with send only where a value was just given; a check that sends on
-  `apply`, `validate` or a rotation's plan would mail the operators on every
+  `deployment apply`, `validate` or a rotation's plan would mail the operators on every
   run.
 * **A failure says the stage and the server's reply, never the password.**
   `smtpcheck.Error.Reply` quotes a `textproto.Error` as the server sent it, and
@@ -1268,10 +1273,10 @@ accident:
   Garage exits a node that meets a peer at a higher factor
   (`src/rpc/system.rs:583-587`), so stopping and rewriting one node at a time
   takes the others down mid-run. A unit test asserts the order.
-* **`garage.toml` is rewritten through `apply`, scoped, with
-  `apply.ReplicationChange()`**, which is the only way past `apply`'s refusal
+* **`garage.toml` is rewritten through `deployment apply`, scoped, with
+  `apply.ReplicationChange()`**, which is the only way past `deployment apply`'s refusal
   of another factor. Writing it any other way leaves the manifest stale and
-  makes the next `apply` call it somebody's edit.
+  makes the next `deployment apply` call it somebody's edit.
 * **The probe's key goes to curl on stdin** (`curl -K -`), never in a command
   line, and a failure is redacted. A unit test makes the fake host echo stdin
   into the error, which is the worst case.
@@ -1314,7 +1319,7 @@ by accident:
   (`src/model/key_table.rs`, `KeyFilter::MatchesAndNotDeleted`, at v1.0.1),
   so the code passes a full ID every time, and the grant check reads only the
   ID column of `bucket info`.
-* **The switch is `apply` itself.** `cmd/paisans` implements
+* **The switch is `deployment apply` itself.** `cmd/paisans` implements
   `rotatekey.Switch` with `planSiteApply`, the function `runApply` uses, and
   `apply.Only`. A second way of writing an app's `.env` would leave the
   manifest stale.
@@ -1332,7 +1337,7 @@ refusals.
 
 `dns init` is the one command that talks to something other than a host or the
 local disk: the DNS provider's API, from the workstation. It is a dry run unless
-`--execute` is given, like `apply` and `storage init`, and it takes no `--site`
+`--execute` is given, like `deployment apply` and `storage init`, and it takes no `--site`
 because it reaches no site.
 
 ```
@@ -1436,7 +1441,7 @@ it, from the site that still serves as the gateway, as the overlap README's
 *Moving the gateway* describes. It is a dry run unless `--execute` is given,
 takes no site, and is built the way `site remove` is: `internal/gatewaymove`
 plans six stages from live state, each ending at a gate, and every gate runs
-on every run, so a re-run after a fix resumes. `apply` without `--site` runs it
+on every run, so a re-run after a fix resumes. `deployment apply` without `--site` runs it
 last when a site without the gateway role still holds a gateway.
 `docs/specs/2026-10-11-gateway-move.md` is the specification.
 
@@ -1469,12 +1474,12 @@ Things about the code that are easy to undo by accident:
   run stopped part way finds the site again.
 * **`site prepare` keeps a former gateway's 80 and 443** while its Caddy is
   there (`hostprep.GatewayCaddyProbe`), with the gateway's own comments, so
-  `apply`'s first step does not cut the overlap short.
+  `deployment apply`'s first step does not cut the overlap short.
 * **`dns init`'s `moving` is not a conflict and not a create.** A wanted
   record at a gateway hostname that still holds the record `dns init` made for
   another declared site is left to the move (`Want.ViaGateway`,
   `Want.Former`). Turning it into a create would publish the new gateway
-  before it is verified; turning it into a conflict stops `apply` before the
+  before it is verified; turning it into a conflict stops `deployment apply` before the
   new gateway is applied.
 * **No test reaches a host or a provider.** `cmd/paisans`'s `TestMain` makes
   every site answer that it holds no gateway, and the move's own tests use
@@ -1612,8 +1617,11 @@ so it needs the network: ufw installed and not enabled reads as installed and
 not active, and enabled as both. On the blank image, which has no ufw, both
 read false. Another installs apparmor the same way, and reads whether it ships
 rootlesskit's profile: 24.04's and 26.04's do, 22.04's does not. Where
-installing sudo makes sudo-rs `sudo`, as on 26.04, the sudo test makes the
-original `sudo.ws` `sudo` first, and one more reads sudo-rs as sudo-rs.
+installing sudo makes sudo-rs `sudo`, as on 26.04, the sudo test reads the
+same rules and Defaults through `sudo.ws`; another reads sudo-rs as sudo-rs,
+and one more checks that `sudo.ws` lists the `env_keep` and `setenv` sudo-rs
+applies and that stock sudo-rs passes none of the variables a root script
+trusts.
 
 `PAISANS_PROBE_IMAGE` runs the same tests in another image, such as the other
 releases admit supports:
@@ -1653,7 +1661,7 @@ A plaintext secrets file is read and written only with
 `internal/config` and `internal/configstore` sets it, and a test about the
 refusal of plaintext unsets it with `t.Setenv`. Outside that mode
 `config.LoadDeploymentSecrets` refuses a plaintext file, `doctor` reports
-it as a FAIL, and `validate`, `init`, `apply` and publishing check the file with
+it as a FAIL, and `validate`, `init`, `deployment apply` and publishing check the file with
 `config.CheckSecretsFile` or `config.CheckSecretsBytes` before they change
 anything.
 
@@ -1676,7 +1684,7 @@ installed, on a workstation or anywhere else.
 | `internal/ui` | how every command reports to the operator: one line per step by default, and every detail with `--verbose` |
 | `internal/deployment` | a deployment's id and token, and every name, path and label derived from them |
 | `internal/registry` | a host's record of the deployments on it, root's, and the locked claim `site admit` makes |
-| `internal/deployrecord` | the gateway's record of the sites, apps and Pocket ID groups the deployment has deployed, which `apply` adds to and only a removal takes from |
+| `internal/deployrecord` | the gateway's record of the sites, apps and Pocket ID groups the deployment has deployed, which `deployment apply` adds to and only a removal takes from |
 | `internal/mesh` | reading a host's routes, addresses and Docker networks and pools, the overlap test, and `init`'s subnet roll |
 | `internal/validate` | the rules, and nothing else |
 | `internal/secretsgen` | what a deployment's secrets are, and which of them the toolkit may invent |
@@ -1693,7 +1701,7 @@ installed, on a workstation or anywhere else.
 | `internal/appadmin` | an app's first administrator: probe, plan, and the per kind API calls |
 | `internal/pocketidlog` | a deployed Pocket ID's container log, read for the failed login link email its API does not report. Pocket ID's REST API itself is `github.com/paisans-software/pocketid-go` |
 | `internal/oidcclient` | an app's client at Pocket ID: probe, plan, and record its credentials before sending its secret |
-| `internal/smtpcheck` | trying an app's mail settings from a site: which checks `apply`, `validate`, `secrets set` and `secrets rotate` make, the SMTP conversation, and the test message; `smtptest` is the in-process server the tests use |
+| `internal/smtpcheck` | trying an app's mail settings from a site: which checks `deployment apply`, `validate`, `secrets set` and `secrets rotate` make, the SMTP conversation, and the test message; `smtptest` is the in-process server the tests use |
 | `internal/webserver` | a monitor's web server: the hand-off sheet for an operator's own web server, and the read only checks run from the workstation |
 | `internal/hostarch` | a host's architecture (`dpkg --print-architecture`): which are supported, the refusal when a host contradicts the one recorded for its site, and whether an image's platforms include it |
 | `internal/hostcheck` | what a site claims on its host, what the host already runs, and whether that is clean, shared or a conflict |
@@ -1702,10 +1710,10 @@ installed, on a workstation or anywhere else.
 | `internal/preflight` | `site add`'s first stage: read only checks on the new site and every running one, as a report |
 | `internal/failover` | `failover test`: its checks, the switchover and its gates |
 | `internal/doctor` | `doctor`: the read commands it sends, and the findings and recovery advice made from their answers |
-| `internal/diagnosis` | the causes an error from `apply`, `init` or `dns` refers to `doctor` for: each a matcher over an error or a log line, the sentence, and the doctor check that names it. Its own package because `internal/doctor` imports `internal/apply` |
+| `internal/diagnosis` | the causes an error from `deployment apply`, `init` or `dns` refers to `doctor` for: each a matcher over an error or a log line, the sentence, and the doctor check that names it. Its own package because `internal/doctor` imports `internal/apply` |
 | `internal/patroni` | reading a Patroni cluster through the Spilo container: `/cluster`, the leader, lag, database size |
 | `internal/configstore` | the signed copies of the configuration: a version as a git commit and the bare repository holding it, the rules that choose which versions to trust and which is newest, gathering from every site, pushing to them, and the key by key merge of the secrets |
-| `internal/hostprep` | taking a blank host to what `apply` assumes; one profile per operating system, its shell under `profiles/<id>-<version>/` |
+| `internal/hostprep` | taking a blank host to what `deployment apply` assumes; one profile per operating system, its shell under `profiles/<id>-<version>/` |
 | `internal/hostadmit` | what runs on a host as its owner, as root, for one deployment: the local transport `site admit` and `site evict` use with `--request`, each command through `sh -c` and each file walked by descriptor without following a link. |
 | `internal/render/templates` | the infrastructure templates |
 
@@ -1737,11 +1745,16 @@ providing the role says of that hostname (`kinds.LinkValuesAt`).
 A change to the catalog that an older binary cannot read changes the
 `apiVersion` of what it changes, a blueprint's or the foundation's: an older
 binary then skips that release for the newest it reads. A new key counts,
-since both are decoded strictly. Blueprints are read in two formats,
-`paisans.blueprint/v1` and `paisans.blueprint/v2` (`blueprints.APIVersionV1`
-and `blueprints.APIVersion`); v2 adds `heartbeat`, and `Parse` refuses that key
-in a v1 blueprint, so a blueprint that declares one also names the format an
-older binary skips. A heartbeat adds `heartbeat_token` to the blueprint's
+since both are decoded strictly, and so does a new value a template reads.
+Blueprints are read in three formats, `paisans.blueprint/v1`,
+`paisans.blueprint/v2` and `paisans.blueprint/v3` (`blueprints.APIVersionV1`,
+`blueprints.APIVersionV2` and `blueprints.APIVersion`). v2 adds `heartbeat`,
+and `Parse` refuses that key in a v1 blueprint, so a blueprint that declares
+one also names the format an older binary skips. v3 adds two template values,
+`.DisplayName` (the app's client name at the identity provider,
+`Config.ClientName`) and `.CommunityName` (`community.name`), which an older
+binary's templates cannot read; a blueprint whose templates read either names
+v3. A heartbeat adds `heartbeat_token` to the blueprint's
 generated secrets in `Parse` (`internal/blueprints/heartbeat.go`), so `init`,
 `secrets list` and the replacement generator need nothing of their own for it;
 the seed, `.HeartbeatURLs` (`internal/render/appheartbeat.go`) and its
@@ -1790,7 +1803,7 @@ writefreely, configure their application by a file rather than environment at
 all.
 
 One file in a set is not rendered beside the app: `caddy.snippet.tmpl` lands on
-every gateway, at `/srv/paisans/<token>/infra/caddy/snippets/<app>.caddy`, because that is where
+every gateway, at `/srv/paisans/<token>/infra/caddy/etc/snippets/<app>.caddy`, because that is where
 it is read. An app pinned to a monitor site is the exception: its snippet
 lands on that monitor instead, with `managed_by: paisans`, and on no site at all
 with managed_by: external (`routesFor` in `internal/render/site.go`). The gateway's own `Caddyfile` keeps only what is cross cutting,
@@ -1882,7 +1895,7 @@ and uptime keeps its own SQLite file under `/data`. WriteFreely is not among
 them, because the `writefreely` kind is the writefreely-wisp fork, which
 connects to Postgres.
 
-`apply` creates the roles and databases for clustered apps, on a site in
+`deployment apply` creates the roles and databases for clustered apps, on a site in
 `cluster.sites`, after the infrastructure stack and before any app stack. It
 waits up to three minutes for Patroni's `/cluster` to name a running leader,
 then sends one psql script on stdin to the Spilo container: create the role if
@@ -1891,10 +1904,10 @@ applying), create the database owned by it if missing. A replica creates
 nothing and reads its own catalogue: it goes on to the app stacks only when
 every app database and role is there, and otherwise stops with
 `apply.ErrDatabasesWait`, naming the leader's site to apply first, which
-`paisans apply` treats as a pause. A leader that is not one of
+`paisans deployment apply` treats as a pause. A leader that is not one of
 `cluster.sites` is not a replica and stops the apply. A timeout or a psql
 failure stops it too, before any app starts, and the next apply resumes there. `README.md` has
-the reasoning under "`apply` creates each clustered app's role and database".
+the reasoning under "`deployment apply` creates each clustered app's role and database".
 A pinned app's own Postgres creates its role from the image's environment, as
 before.
 
@@ -1993,7 +2006,7 @@ before.
   with none of the listed keys is refused. Tests in
   `internal/hostprep/hostprep_test.go` cover add, adopt, forget, remove, a
   restricted key and that refusal.
-* **No flag answers the review.** `apply`, `site prepare` and `site add` ask for
+* **No flag answers the review.** `deployment apply`, `site prepare` and `site add` ask for
   `approve` at a terminal when what `paisans-stack.yaml` grants adds or changes
   something, and refuse without one, before the first change. A flag that answered
   it would end up in every script, and approving is the control. Tests in
@@ -2011,7 +2024,7 @@ changes the replication factor, sizes each node and can stop one to prove
 failover, and has run against containers; replacing a Garage node is not built,
 and removing one goes with its site, in `site remove`, where the node of a site
 removed with `--host-gone` is skipped as dead. `site add`'s first stage is
-`preflight`, and `failover test` exists; both are described above. `apply`
+`preflight`, and `failover test` exists; both are described above. `deployment apply`
 pushes files, brings up the mesh interface, creates clustered apps' roles and
 databases, and takes the narrowest action that makes the rest live. `site add`
 has never been run against a real host, so every command it sends is reasoned
@@ -2055,7 +2068,7 @@ against a real host, so the shell that creates the store, the daemon's reading
 of it as `nobody` (with `safe.directory` set for its one repository by
 environment) and the sync's fetch between real mesh addresses are reasoned from
 git's documentation, not observed; `git ls-remote` against a prepared host's
-daemon is the check to make first. Nor has `apply`'s publishing after the
+daemon is the check to make first. Nor has `deployment apply`'s publishing after the
 `site prepare` steps, or the witness refusal, run on a real deployment.
 
 Pocket ID on more than one apps site has run only in containers on one
@@ -2083,7 +2096,7 @@ first.
 Two claims used to live in this section and are corrected here rather than
 left to go on being read. **Secret generation exists**: `internal/secretsgen`
 and `paisans init` are implemented, described above under `init`. **The
-gateway validation gate did not land with `apply`, because it did not need
-to.** It is enforced today, described above under "`apply`, and the gates in
+gateway validation gate did not land with `deployment apply`, because it did not need
+to.** It is enforced today, described above under "`deployment apply`, and the gates in
 it": the assembled gateway configuration is validated before any reload, and
 a failure stops the reload rather than taking every hostname down with it.

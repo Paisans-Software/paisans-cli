@@ -44,7 +44,7 @@ func TestProblemErrorCarriesEverything(t *testing.T) {
 }
 
 func TestWrapBreaksAtSpacesOnly(t *testing.T) {
-	text := "Point SOPS_AGE_KEY_FILE at /home/someone/.config/sops/age/keys.txt and run `paisans apply --site home-a --execute` again."
+	text := "Point SOPS_AGE_KEY_FILE at /home/someone/.config/sops/age/keys.txt and run `paisans deployment apply --site home-a --execute` again."
 	lines := ui.Wrap(text, 30)
 	for _, l := range lines {
 		if len(l) > 30 && strings.Contains(l, " ") {

@@ -113,7 +113,7 @@ func runCreate(args []string, stdin io.Reader, stdout io.Writer) error {
 		p.Say("  paisans init          # checks the subnet, creates secrets.enc.yaml, generates every secret")
 		p.Say("  paisans site request  # per site: --site <name> > <name>.admit, for its owner's sudo paisans site admit")
 		p.Say("  paisans secrets set   # asks for each secret only you can give, such as the SMTP password")
-		p.Say("  paisans apply         # shows every step; --execute runs them")
+		p.Say("  paisans deployment apply         # shows every step; --execute runs them")
 		return nil
 	}
 }

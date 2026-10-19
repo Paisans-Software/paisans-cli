@@ -63,7 +63,8 @@ type view struct {
 	CodeOfConduct string
 	PocketID      PocketIDAccounts
 	Sites         []siteView
-	// Synchronous is the high availability shape's synchronous replication.
+	// Synchronous is synchronous replication, for every layout with two or
+	// more data sites.
 	Synchronous bool
 	// Voters is the number of etcd members the roles derive: every witness
 	// and every data site.
@@ -94,17 +95,16 @@ type appView struct {
 
 func build(a Answers, id string) view {
 	v := view{
-		ID:          id,
-		Subnet:      MeshSubnet,
-		Name:        a.Name,
-		Domain:      a.Domain,
-		Provider:    a.Provider,
-		Operators:   a.Operators,
-		Management:  a.Management,
-		Account:     a.Account,
-		PocketID:    a.PocketID,
-		Synchronous: a.Shape == ShapeHighAvailability,
-		SMTP:        a.SMTP,
+		ID:         id,
+		Subnet:     MeshSubnet,
+		Name:       a.Name,
+		Domain:     a.Domain,
+		Provider:   a.Provider,
+		Operators:  a.Operators,
+		Management: a.Management,
+		Account:    a.Account,
+		PocketID:   a.PocketID,
+		SMTP:       a.SMTP,
 	}
 	ids := make([]string, len(a.Operators))
 	for i, op := range a.Operators {
@@ -146,6 +146,7 @@ func build(a Answers, id string) view {
 			v.MonitorBesideGateway = s.Has(config.RoleGateway)
 		}
 	}
+	v.Synchronous = len(data) > 1
 	if pinTo == "" && len(sites) > 0 {
 		pinTo = sites[0].Name
 	}

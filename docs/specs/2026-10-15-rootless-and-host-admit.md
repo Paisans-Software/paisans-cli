@@ -98,7 +98,9 @@ also refuses, naming every problem it finds at once:
   working directory to that helper (`setenv`, `env_keep`, `!env_reset` and
   their kin), or one set for a runas user or a command alone; `env_delete`,
   which only takes variables away, passes;
-* sudo-rs, whose `sudo -l` lists no Defaults, so none can be read;
+* sudo-rs with no `/usr/bin/sudo.ws` beside it: sudo-rs's `sudo -l` lists
+  no Defaults, so admit reads them from `sudo.ws`, the original, and with
+  none they cannot be read;
 * a home that is a link, is not the user's, or lies below a link or a
   directory another user can write;
 * for a user it is about to create, a home already present, a group of its

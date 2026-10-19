@@ -149,6 +149,7 @@ func (c *checker) pocketIDManagement() {
 					"management: paisans needs an account app",
 					"is paisans, and no app has blueprint: account. Under paisans the account service manages signup, bans and recovery, and nobody else can: Pocket ID's signup is closed and nobody is its administrator. Declare an account app, or set management: pocket-id.")
 			}
+			c.pocketIDSignupGroupsHoldMemberGroups(name, accounts)
 			if !c.cfg.CanMail(name) {
 				c.refuse("pocket-id-paisans-without-smtp", key,
 					"management: paisans needs mail",
@@ -161,6 +162,31 @@ func (c *checker) pocketIDManagement() {
 					"is an account app, and %s declares management: pocket-id, where Pocket ID's own admin pages manage signup, bans and recovery. The account service would manage the same accounts from a second place. Remove the account app, or set %s's management to paisans.", key, name)
 			}
 		}
+	}
+}
+
+// pocketIDSignupGroupsHoldMemberGroups refuses, under management: paisans,
+// signup_default_groups without each account app's member group. The account
+// service creates every account with no group, and Pocket ID puts such an
+// account in its signup default groups, so without the member group nobody
+// the account service admits is a member of anything.
+func (c *checker) pocketIDSignupGroupsHoldMemberGroups(name string, accounts []string) {
+	signup := blueprints.PocketIDSignupGroups(c.cfg.Apps[name].Settings)
+	for _, a := range accounts {
+		app := c.cfg.Apps[a]
+		spec, ok := blueprints.OIDCClient(app.Blueprint, app.Hostname, a)
+		if !ok {
+			continue
+		}
+		_, member := spec.Groups(app)
+		if member == "" || slices.Contains(signup, member) {
+			continue
+		}
+		c.refuse("pocket-id-signup-groups-lack-member-group",
+			fmt.Sprintf("apps.%s.settings.%s", name, blueprints.PocketIDSignupGroupsSetting),
+			"new accounts would not be members",
+			"does not name %s, the member group of apps.%s. Under management: paisans the account service creates every account with no group, and Pocket ID puts it in these groups, so an accepted invite or application makes an account outside the community. Add %s to signup_default_groups.",
+			member, a, member)
 	}
 }
 

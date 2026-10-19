@@ -227,13 +227,18 @@ func TestAnUngatedMbinHasNoPrivateAPICheck(t *testing.T) {
 	}
 }
 
-// The health page is switched off from the seed, and SMTP is carried only
-// when a host resolves, with the app's own fields and password winning.
+// The public status page is on unless settings.public_status_page is false,
+// and SMTP is carried only when a host resolves, with the app's own fields
+// and password winning.
 func TestTheSeedCarriesSettings(t *testing.T) {
 	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
 	settings := renderSeed(t, cfg, secrets).Settings
-	if len(settings) != 1 || settings["status_page_enabled"] != false {
+	if len(settings) != 1 || settings["status_page_enabled"] != true {
 		t.Fatalf("with no smtp the settings are %v", settings)
+	}
+	cfg.Apps["health"].Settings["public_status_page"] = false
+	if settings := renderSeed(t, cfg, secrets).Settings; settings["status_page_enabled"] != false {
+		t.Fatalf("with public_status_page false the settings are %v", settings)
 	}
 
 	cfg, secrets = withMonitor(t,
@@ -242,12 +247,41 @@ func TestTheSeedCarriesSettings(t *testing.T) {
 	secrets.External["smtp_password"] = "shared"
 	secrets.Apps["health"]["smtp_password"] = "own"
 	settings = renderSeed(t, cfg, secrets).Settings
-	want := map[string]any{"status_page_enabled": false, "smtp_host": "smtp.example.org", "smtp_port": float64(465),
+	want := map[string]any{"status_page_enabled": true, "smtp_host": "smtp.example.org", "smtp_port": float64(465),
 		"smtp_secure": true, "smtp_require_tls": false, "smtp_user": "robot", "smtp_pass": "own", "smtp_from_address": "hello@example.org", "smtp_from_name": "Example Health"}
 	for k, v := range want {
 		if settings[k] != v {
 			t.Errorf("settings.%s = %v, want %v", k, settings[k], v)
 		}
+	}
+}
+
+// Only a check of an app at its public hostname is on the status page. Every
+// entry names the flag, so the file decides it rather than an admin's last
+// choice, and a check that names a mesh address or a site stays off it.
+func TestOnlyPublicChecksAreOnTheStatusPage(t *testing.T) {
+	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
+	shown := 0
+	for _, m := range renderSeed(t, cfg, secrets).Monitors {
+		name := m["name"].(string)
+		excluded, named := m["status_page_excluded"].(bool)
+		if !named {
+			t.Errorf("%s does not name status_page_excluded", name)
+			continue
+		}
+		public := strings.HasSuffix(name, " — public") || strings.HasSuffix(name, " — public (no health route)")
+		if excluded == public {
+			t.Errorf("%s has status_page_excluded %v", name, excluded)
+		}
+		if !excluded {
+			shown++
+			if url, _ := m["url"].(string); !strings.HasPrefix(url, "https://") {
+				t.Errorf("%s is shown and checks %q", name, url)
+			}
+		}
+	}
+	if shown == 0 {
+		t.Error("the status page shows nothing")
 	}
 }
 
@@ -283,7 +317,7 @@ func TestTheHomeserversChecksUseARouteTheGatewaySendsToSynapse(t *testing.T) {
 	if got := monitors["chat — public"]["url"]; got != "https://chat.example.org/_matrix/client/versions" {
 		t.Errorf("chat public url %v", got)
 	}
-	if got := monitors["chat — direct (vm)"]["url"]; got != "http://"+cfg.Sites["vm"].Address+":8008/_matrix/client/versions" {
+	if got := monitors["chat — direct (vm)"]["url"]; got != "http://"+cfg.Sites["vm"].Address+":18008/_matrix/client/versions" {
 		t.Errorf("chat direct url %v", got)
 	}
 }
@@ -300,7 +334,7 @@ func TestTheEdgeRefusesTheTokenAPIButNotTheUIsOwnJSON(t *testing.T) {
 	}
 	var snippet string
 	for _, f := range plan.Files {
-		if f.Path == "watch/srv/paisans/f2a9/infra/caddy/snippets/health.caddy" {
+		if f.Path == "watch/srv/paisans/f2a9/infra/caddy/etc/snippets/health.caddy" {
 			snippet = f.Content
 		}
 	}
@@ -310,7 +344,7 @@ func TestTheEdgeRefusesTheTokenAPIButNotTheUIsOwnJSON(t *testing.T) {
 			matcher = line
 		}
 	}
-	for _, want := range []string{"/api/v1/*", "/metrics", "/status*", "/badge/*"} {
+	for _, want := range []string{"/api/v1/*", "/metrics", "/badge/*"} {
 		if !strings.Contains(matcher, " "+want) {
 			t.Errorf("the edge does not refuse %s: %q", want, matcher)
 		}
@@ -318,6 +352,29 @@ func TestTheEdgeRefusesTheTokenAPIButNotTheUIsOwnJSON(t *testing.T) {
 	if strings.Contains(matcher, " /api/*") {
 		t.Errorf("the edge refuses the UI's own /api/sites JSON: %q", matcher)
 	}
+	if strings.Contains(matcher, " /status*") {
+		t.Errorf("the edge refuses the public status page: %q", matcher)
+	}
+}
+
+// With settings.public_status_page false the edge refuses /status* too,
+// whatever the monitor's own setting says.
+func TestTheEdgeRefusesTheStatusPageWhenItIsOff(t *testing.T) {
+	cfg, secrets := withMonitor(t, config.SMTP{}, nil)
+	cfg.Apps["health"].Settings["public_status_page"] = false
+	plan, err := render.Build(cfg, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range plan.Files {
+		if f.Path == "watch/srv/paisans/f2a9/infra/caddy/etc/snippets/health.caddy" {
+			if !strings.Contains(f.Content, "@refused path /status* /badge/* /metrics /metrics/ /api/v1/*") {
+				t.Fatalf("%s", f.Content)
+			}
+			return
+		}
+	}
+	t.Fatal("no snippet")
 }
 
 // Every site Pocket ID runs on gets a check on its operator reconciler, straight to
@@ -470,8 +527,8 @@ func TestTheEdgeRefusesMetricsWithATrailingSlash(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, f := range plan.Files {
-		if f.Path == "watch/srv/paisans/f2a9/infra/caddy/snippets/health.caddy" {
-			if !strings.Contains(f.Content, "@refused path /status* /badge/* /metrics /metrics/ /api/v1/*") {
+		if f.Path == "watch/srv/paisans/f2a9/infra/caddy/etc/snippets/health.caddy" {
+			if !strings.Contains(f.Content, "@refused path /badge/* /metrics /metrics/ /api/v1/*") {
 				t.Fatalf("%s", f.Content)
 			}
 			return

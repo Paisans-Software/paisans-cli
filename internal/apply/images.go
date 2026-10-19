@@ -33,7 +33,7 @@ type Versioner interface {
 // ResolveImages has Build resolve every image the configuration names by a
 // tag (render.Plan.Images: each app stack's images, and the gateway's Caddy)
 // to the build that tag names now, and render that digest beside the tag on
-// every line naming it. `paisans apply` passes it on every plan.
+// every line naming it. `paisans deployment apply` passes it on every plan.
 //
 // A tag in a compose file never changes, and apply recreates a stack only
 // when its file changes, so a new build behind a tag (a series tag moved to a
@@ -201,7 +201,7 @@ type PeerCompose struct {
 }
 
 // OtherSites tells Build what the other sites of an app this site runs hold,
-// when the apply does not plan them. `paisans apply --site` passes it for
+// when the apply does not plan them. `paisans deployment apply --site` passes it for
 // every app that runs on more than one site; an apply that plans every site
 // passes none, and its sites resolve together through the run's one resolver.
 //
@@ -618,7 +618,7 @@ func resolve(want string, r Resolver) (string, error) {
 
 // unresolved is the refusal for an image whose tag could not be resolved,
 // on a site that runs no build of that tag to keep. It names no site: the
-// line it is shown on (converge) or the section above it (`apply --site`)
+// line it is shown on (converge) or the section above it (`deployment apply --site`)
 // already does.
 //
 // apply stops rather than carry on, for two reasons the message leaves out
@@ -721,7 +721,7 @@ func holdImage(site string, image render.ComposeImage, services []string, host m
 		if len(mixed) > 1 {
 			return &ui.Problem{
 				Hint:    fmt.Sprintf("%s runs more than one build on %s", app, ui.Name(name)),
-				Explain: fmt.Sprintf("%s runs %s on %s, so this apply has no one build to keep. Run `paisans apply` without --site, which plans every site of %s and moves them to one build.", app, names(mixed, ", "), ui.Name(name), app),
+				Explain: fmt.Sprintf("%s runs %s on %s, so this apply has no one build to keep. Run `paisans deployment apply` without --site, which plans every site of %s and moves them to one build.", app, names(mixed, ", "), ui.Name(name), app),
 			}
 		}
 		if ref != "" {
@@ -749,7 +749,7 @@ func holdImage(site string, image render.ComposeImage, services []string, host m
 		if err != nil {
 			return "", nil, &ui.Problem{
 				Hint:    fmt.Sprintf("compose file of %s on %s is not readable", app, ui.Name(peer.Site)),
-				Explain: fmt.Sprintf("This apply cannot tell which build %s runs there. Fix the file on %s, or run `paisans apply` without --site, which plans every site of %s.", app, ui.Name(peer.Site), app),
+				Explain: fmt.Sprintf("This apply cannot tell which build %s runs there. Fix the file on %s, or run `paisans deployment apply` without --site, which plans every site of %s.", app, ui.Name(peer.Site), app),
 				Cause:   err,
 			}
 		}
@@ -768,7 +768,7 @@ func holdImage(site string, image render.ComposeImage, services []string, host m
 		// not at all, so an apply of some sites must not pick one.
 		return "", nil, &ui.Problem{
 			Hint:    fmt.Sprintf("the sites of %s run different builds", app),
-			Explain: fmt.Sprintf("%s. An apply of only some of them cannot choose one. Run `paisans apply` without --site, which plans every site of %s and moves them to one build.", strings.Join(each, "; "), app),
+			Explain: fmt.Sprintf("%s. An apply of only some of them cannot choose one. Run `paisans deployment apply` without --site, which plans every site of %s and moves them to one build.", strings.Join(each, "; "), app),
 		}
 	case len(builds) == 0 && len(unread) > 0:
 		return "", nil, &ui.Problem{
@@ -782,7 +782,7 @@ func holdImage(site string, image render.ComposeImage, services []string, host m
 
 	// Say so, and say it louder when the tag names a newer build than the
 	// one kept: that build is what the operator would have got.
-	text := fmt.Sprintf("%s also runs on %s, which this apply does not cover, so %s stays on %s, the build its sites run. Moving %s to a new build takes `paisans apply` without --site.", app, names(all, ", "), app, ui.Name(held), app)
+	text := fmt.Sprintf("%s also runs on %s, which this apply does not cover, so %s stays on %s, the build its sites run. Moving %s to a new build takes `paisans deployment apply` without --site.", app, names(all, ", "), app, ui.Name(held), app)
 	note := Note{Text: text}
 	if r != nil {
 		if digest, err := r.Digest(image.Image); err == nil && digest != digestOf(held) {

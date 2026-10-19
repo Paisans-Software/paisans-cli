@@ -351,14 +351,14 @@ func useTitle(u Use) string {
 func (r *Run) Show(w ui.Reporter) {
 	r.ShowResume(w)
 	if r.SignsOut() {
-		w.Note("this run signs members out", "--execute asks for `sign out` to be typed at a terminal before anything changes, and without a terminal it is refused")
+		w.Note("this run will sign members out", "--execute will ask for `sign out` to be typed at a terminal before anything changes, and without a terminal it is refused")
 	}
 	if asked := r.Asked(); len(asked) > 0 {
 		var paths []string
 		for _, a := range asked {
 			paths = append(paths, a.Path)
 		}
-		w.Note("this run asks for "+strings.Join(paths, ", "), "each is replaced at its issuer when --execute asks, and pasted at a terminal before anything changes; without a terminal it is refused")
+		w.Note("this run will ask for "+strings.Join(paths, ", "), "--execute will ask for each before anything changes: replace it at its issuer and paste it at a terminal; without a terminal it is refused")
 	}
 	for _, it := range r.Items {
 		path := it.Rotator.Path()

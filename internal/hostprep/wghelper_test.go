@@ -18,7 +18,7 @@ var meshDeployment = deployment.Deployment{ID: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d
 
 // goodConf is a mesh file as the renderer writes it for a dialled site on
 // port 51820 in 10.44.0.0/24, with one peer it dials and one relayed range.
-const goodConf = `# Rendered by paisans. Do not edit: ` + "`paisans apply`" + ` overwrites this file.
+const goodConf = `# Rendered by paisans. Do not edit: ` + "`paisans deployment apply`" + ` overwrites this file.
 [Interface]
 Address = 10.44.0.4/24
 # The port of this site's endpoint, which every other site dials.

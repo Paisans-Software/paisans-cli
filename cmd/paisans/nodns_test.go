@@ -19,6 +19,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/grant"
 	"github.com/paisans-software/paisans-cli/internal/keystore"
+	"github.com/paisans-software/paisans-cli/internal/localstore"
 	"github.com/paisans-software/paisans-cli/internal/secretsgen"
 	"github.com/paisans-software/paisans-cli/internal/selfcheck"
 	"github.com/paisans-software/paisans-cli/internal/smtpcheck"
@@ -116,7 +117,16 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	gitDirect(dir)
+	// No test saves to the operator's own deployments: every saved copy
+	// lands in a directory of the run's own.
+	dataDir, err := os.MkdirTemp("", "paisans-data-")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Setenv(localstore.DirVariable, dataDir)
 	code := m.Run()
+	os.RemoveAll(dataDir)
 	os.RemoveAll(dir)
 	os.Exit(code)
 }

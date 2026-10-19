@@ -219,6 +219,13 @@ type Plan struct {
 	// against what its service mounts, nil when no stack moves. Any uncovered
 	// path refuses the apply before anything is written. See VolumeCheck.
 	Volumes *VolumeCheck
+	// SourceMark is what the deployment user's rootless network namespace
+	// needs so that a connection to a published port waits for nothing and
+	// keeps the client's address. Execute runs it after the mesh and before
+	// any stack moves. Zero on a plan built with Scope or Only, whose caller
+	// moves only what it names; a plan built with Except, which holds a few
+	// stacks back from a site wide apply, still runs it. See sourcemark.go.
+	SourceMark SourceMarkStep
 	// HostSites is set when this site's Caddy mounts the host's own
 	// render.HostSitesDir. Execute creates the directory, the deployment
 	// user's and 0755, before the first container that mounts it, when it is
@@ -379,19 +386,16 @@ func HostSitesCommand(d deployment.Deployment) string {
 	return fmt.Sprintf("[ -d %[1]s ] || install -d -m 755 %[1]s", shellQuote(render.HostSitesDir(d)))
 }
 
-// gatewayCaddyfile and gatewayCompose are the two rendered files that say a
-// site runs the gateway and that its Caddy is about to be replaced, as paths
-// relative to the deployment's root.
+// render.Caddyfile and gatewayCompose are the two rendered files that say a
+// site runs the gateway and that its Caddy is about to be replaced;
+// gatewayCompose is relative to the deployment's root.
 //
 // gatewayCompose is the whole infrastructure stack's compose file rather than
 // a Caddy specific one: the gateway shares it with etcd and Patroni, so a
 // change to it may or may not be the Caddy image. The check is cheap and
 // wrongly running it costs one container start, while wrongly skipping it
 // costs the public address of every application.
-const (
-	gatewayCaddyfile = "infra/caddy/Caddyfile"
-	gatewayCompose   = "infra/compose.yaml"
-)
+const gatewayCompose = "infra/compose.yaml"
 
 // Option adjusts what Build plans, on the operator's word.
 type Option func(*options)
@@ -496,7 +500,7 @@ func Recreate(stacks ...string) Option {
 	return func(o *options) { o.recreate = append(o.recreate, stacks...) }
 }
 
-// Only restricts an apply to the named stacks, as `apply --only` does: their
+// Only restricts an apply to the named stacks, as `deployment apply --only` does: their
 // files are compared and written, their actions and health gates run, and
 // nothing else on the site moves. The first real `site add` needed it: its
 // HAProxy restart broke Mbin's database connections, and the only way to
@@ -697,7 +701,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 		}
 		remote := remoteRoot + rel
 
-		if rel == d.RelPath(gatewayCaddyfile) {
+		if rel == render.Caddyfile(d) {
 			isGateway = true
 		}
 
@@ -737,7 +741,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			if track := unresolvedTrack(content); track != "" && !leftAlone && !o.tolerateUnresolved {
 				err := &ui.Problem{
 					Hint:    fmt.Sprintf("%s would run %s, which runs nowhere on %s yet", rel, ui.Name(track), site),
-					Explain: "It follows a track, which a host cannot pull until `paisans apply` resolves it to a build. Run apply, then this command again.",
+					Explain: "It follows a track, which a host cannot pull until `paisans deployment apply` resolves it to a build. Run apply, then this command again.",
 				}
 				finish(done, err)
 				return nil, err
@@ -1070,6 +1074,9 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 		out.DNSToken = &dns.TokenCheck{Provider: plan.ACMEProvider, Domain: plan.Domain, Place: site, From: "this server"}
 	}
 	out.HostSites = out.GatewayChanging && plan.HostSites[site]
+	if !out.scoped && onlySet == nil {
+		out.SourceMark = sourceMarkStep(t)
+	}
 
 	if wireguard != nil {
 		step, err := wireguardStep(site, d, *wireguard, wireguardBefore, t)
@@ -1256,6 +1263,12 @@ func execute(plan *Plan, t Transport) error {
 		}
 	}
 
+	if plan.SourceMark.Needed() {
+		if err := fixSourceMark(plan, t); err != nil {
+			return err
+		}
+	}
+
 	// The gateway's configuration is assembled from per app snippets, so a
 	// wrong snippet is a wrong file for every hostname at once. Check the
 	// binary and the configuration before the gateway changes at all, and
@@ -1336,7 +1349,7 @@ func execute(plan *Plan, t Transport) error {
 		// `exec`. Nothing has started the infrastructure stack at this point:
 		// the Actions loop below is what does that, and on a first apply to a
 		// fresh host there is no container to exec into at all, so validating
-		// through exec made `apply` unable to complete a first install of a
+		// through exec made `deployment apply` unable to complete a first install of a
 		// gateway site. It also made recovery impossible after a gateway died,
 		// since every later apply would refuse at this step. `run` starts a
 		// throwaway container with the service's own image and bind mounts,

@@ -1,4 +1,4 @@
--- Rendered by paisans. Do not edit: `paisans apply` overwrites this file.
+-- Rendered by paisans. Do not edit: `paisans deployment apply` overwrites this file.
 --
 -- Matrix Authentication Service keeps its own database beside the
 -- homeserver's. They cannot share one: both define a `users` table.

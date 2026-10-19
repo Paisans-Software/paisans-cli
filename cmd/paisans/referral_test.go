@@ -16,7 +16,7 @@ const referHomeB = "Run paisans doctor --site home-b, which says what the deploy
 // doctor for that site, once, after what ssh said.
 func TestAnApplyStoppedByAnUnreachableSiteRefersToDoctor(t *testing.T) {
 	down := &ui.Problem{Hint: "ubuntu@home-b cannot be reached over ssh", Explain: "Check that the host is up.", Cause: &apply.UnreachableError{Site: "home-b", Err: apply.ErrUnreachable}}
-	fakeConverge(t, map[string]error{"apply --site vm": fmt.Errorf("reading home-b's compose files: %w", down)})
+	fakeConverge(t, map[string]error{"deployment apply --site vm": fmt.Errorf("reading home-b's compose files: %w", down)})
 	err := converge(t, "--execute")
 	_, explain := ui.Describe(err)
 	if n := strings.Count(explain, referHomeB); n != 1 {
@@ -37,7 +37,7 @@ func TestAnApplyStoppedByAnythingElseKeepsItsText(t *testing.T) {
 		errors.New("vm: boom"),
 		&ui.Problem{Hint: "ubuntu@203.0.113.10 cannot be reached over ssh", Explain: "Check that the host is up.", Cause: apply.ErrUnreachable},
 	} {
-		fakeConverge(t, map[string]error{"apply --site vm": stepErr})
+		fakeConverge(t, map[string]error{"deployment apply --site vm": stepErr})
 		err := converge(t, "--execute")
 		if strings.Contains(err.Error(), "paisans doctor") {
 			t.Errorf("%v: referred to doctor:\n%v", stepErr, err)

@@ -29,10 +29,13 @@ func runOperator(args []string, stdin io.Reader, stdout io.Writer) error {
 	if len(args) > 0 && args[0] == "magic-link" {
 		return runOperatorMagicLink(args[1:])
 	}
-	if len(args) == 0 {
-		return &ui.Problem{Hint: "operator takes one subcommand", Explain: "Use register or magic-link."}
+	if len(args) > 0 && args[0] == "grants" {
+		return runOperatorGrants(args[1:])
 	}
-	return &ui.Problem{Hint: fmt.Sprintf("operator has no subcommand %q", args[0]), Explain: "Use register or magic-link."}
+	if len(args) == 0 {
+		return &ui.Problem{Hint: "operator takes one subcommand", Explain: "Use register, magic-link or grants."}
+	}
+	return &ui.Problem{Hint: fmt.Sprintf("operator has no subcommand %q", args[0]), Explain: "Use register, magic-link or grants."}
 }
 
 func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error {
@@ -81,7 +84,7 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error
 	m := gatherMode{
 		execute:  *execute,
 		answers:  ans,
-		noAnchor: "Pin the first version you trust with --root <sha>; an operator who has one can read its hash from paisans config log.",
+		noAnchor: "Pin the first version you trust with --root <sha>; an operator who has one can read its hash from paisans deployment log.",
 	}
 	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, anchor, m, stdin, stdout)
 	if err != nil {
@@ -102,7 +105,7 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error
 		}
 		return &ui.Problem{
 			Hint:    "the local files differ from the sites' newest version",
-			Explain: fmt.Sprintf("The sites hold %s. An attestation says you hold that version's files, so it signs only a version equal to yours. Bring your files to it, Eg: with paisans config pull, or check the difference above with the operator who signed it, then run this again. Nothing was written.", describe(g, de.Head)),
+			Explain: fmt.Sprintf("The sites hold %s. An attestation says you hold that version's files, so it signs only a version equal to yours. Bring your files to it, Eg: with paisans deployment pull, or check the difference above with the operator who signed it, then run this again. Nothing was written.", describe(g, de.Head)),
 		}
 	case err != nil:
 		return err
@@ -121,10 +124,10 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error
 			r.Step("attest "+describe(g, head)).End(ui.Pending, fmt.Sprintf("revision %d, signed with %s", g.Versions[head].Revision+1, k.Fingerprint))
 		}
 		if write {
-			r.Step("write the files of "+describe(g, head)).End(ui.Pending, "--execute writes them")
+			r.Step("write the files of "+describe(g, head)).End(ui.Pending, "--execute will write them")
 		}
 		if !g.Majority {
-			r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), len(sites)), "--execute asks for the word "+partialWord+" at a terminal.")
+			r.Warn(fmt.Sprintf("only %d of %d sites answered directly", len(g.Direct()), len(sites)), "--execute will ask for the word "+partialWord+" at a terminal.")
 		}
 		return nil
 	}
@@ -169,7 +172,7 @@ func registerConfig(l configstore.Local, path, pin string) (*config.Config, erro
 		err = nil
 	}
 	if err != nil || len(g.Verdict.Heads) == 0 {
-		return nil, &ui.Problem{Hint: "the pinned root is not in this workstation's store", Explain: "With no files here, the sites are read from the version the pin leads to, which this workstation must have gathered before. Run paisans config recover --from <user@host> --root " + pin + ", which finds them from a host.", Cause: err}
+		return nil, &ui.Problem{Hint: "the pinned root is not in this workstation's store", Explain: "With no files here, the sites are read from the version the pin leads to, which this workstation must have gathered before. Run paisans deployment recover --from <user@host> --root " + pin + ", which finds them from a host.", Cause: err}
 	}
 	if g.Verdict.Fork {
 		return nil, forkProblem(g)

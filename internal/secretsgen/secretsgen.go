@@ -572,7 +572,7 @@ func pending(cfg *config.Config, secrets *config.Secrets) []Pending {
 		if spec.PKCE {
 			pkce = "PKCE enabled: the app always sends a code challenge"
 		}
-		why := "created at the deployment's Pocket ID by `paisans apply --execute` on a site that runs " + name +
+		why := "created at the deployment's Pocket ID by `paisans deployment apply --execute` on a site that runs " + name +
 			", which records the client ID and secret here itself before " + name + " starts; declaring the app is the approval. `paisans oidc client create --app " + name +
 			"` runs the same step alone. The client's redirect URI is " + spec.CallbackURL + ", with " + pkce
 		admin, member := spec.Groups(app)
@@ -759,7 +759,7 @@ func garageKeyIsMalformed(appName, key, value string) error {
 // checked: nothing reaches a host with it.
 //
 // Fill calls this itself, so `init` is covered. It is exported because `init`
-// is not the only path that reads a secrets file: `render` and `apply` both
+// is not the only path that reads a secrets file: `render` and `deployment apply` both
 // call config.LoadSecrets directly and never call Fill, so a key hand edited
 // into the file after the last `init` would otherwise reach a rendered
 // artifact, and from there a host, with nothing ever having looked at it.

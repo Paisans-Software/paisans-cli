@@ -253,7 +253,7 @@ func TestEtcdUnsettledVersionFails(t *testing.T) {
 		t.Fatalf("level %v", f.Level)
 	}
 	text := strings.Join(f.More, "\n")
-	for _, want := range []string{"decideClusterVersion", "/v3alpha", "patroni/dcs/etcd3.py", "`paisans apply --site vm --execute`"} {
+	for _, want := range []string{"decideClusterVersion", "/v3alpha", "patroni/dcs/etcd3.py", "`paisans deployment apply --site vm --execute`"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q:\n%s", want, text)
 		}
@@ -435,7 +435,7 @@ func TestContainerThatStartedBeforeWg0(t *testing.T) {
 		t.Fatalf("level %v", f.Level)
 	}
 	text := strings.Join(f.More, "\n")
-	for _, want := range []string{"Its Docker daemon started it before psns-f2a9 was up", "`docker start paisans-f2a9-talk-app-1` on home-b, as the deployment's user", "`paisans apply --site home-b --recreate talk --execute`", "`paisans doctor --site home-b`"} {
+	for _, want := range []string{"Its Docker daemon started it before psns-f2a9 was up", "`docker start paisans-f2a9-talk-app-1` on home-b, as the deployment's user", "`paisans deployment apply --site home-b --recreate talk --execute`", "`paisans doctor --site home-b`"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q:\n%s", want, text)
 		}

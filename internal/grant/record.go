@@ -260,7 +260,7 @@ func (rec Record) holds(s Scope) bool {
 // PrepareScope is site prepare's.
 var PrepareScope = Scope{Keys: true}
 
-// ApplyScope is apply --site's, narrowed to stacks when it names any.
+// ApplyScope is deployment apply --site's, narrowed to stacks when it names any.
 func ApplyScope(stacks ...string) Scope {
 	return Scope{Images: true, Stacks: stacks}
 }

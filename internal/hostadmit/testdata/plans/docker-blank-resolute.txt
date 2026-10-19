@@ -148,6 +148,7 @@ step 29: allow all inbound on psns-f2a9
 step 30: write the admission record
 step 31: add the operators' keys
 
+present: swap: on
 present: package: nftables installed
 present: apparmor: rootlesskit's profile is loaded
 present: egress: the host's on-link IPv6 prefixes, dropped: 2001:db8:1::/64

@@ -941,7 +941,7 @@ func (c *checker) imageServices() {
 
 // floatingImages refuses a reference that does not name one build.
 //
-// `latest` makes two runs of `apply` produce different deployments from
+// `latest` makes two runs of `deployment apply` produce different deployments from
 // identical inputs, which contradicts the premise that the configuration plus
 // the secrets reconstruct the stack. That is incoherent rather than risky, so
 // it is a refusal. A digest is accepted and is the stronger form.
@@ -975,7 +975,7 @@ func (c *checker) floatingImage(key, ref string) {
 	}
 	c.refuse("floating-image-tag", key,
 		"image tag is floating",
-		"is %q and %s. Two runs of `apply` would then deploy different builds from the same inputs, so the configuration and the secrets no longer reconstruct the stack. Name a version tag, or a digest, which is stronger.",
+		"is %q and %s. Two runs of `deployment apply` would then deploy different builds from the same inputs, so the configuration and the secrets no longer reconstruct the stack. Name a version tag, or a digest, which is stronger.",
 		ref, why)
 }
 

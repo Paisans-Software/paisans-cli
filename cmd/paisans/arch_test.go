@@ -179,7 +179,7 @@ func TestADryRunApplyReadsEverySitesArchitecture(t *testing.T) {
 	if a, e := r.Index("done", "read each site's architecture"), r.Index("section", "etcd members"); e >= 0 && e < a {
 		t.Errorf("read after the etcd records:\n%s", r.Lines())
 	}
-	if r.Index("note", "home-a: arch arm64, recorded in paisans-stack.yaml by --execute") < 0 {
+	if r.Index("note", "home-a: arch arm64, --execute will record it in paisans-stack.yaml") < 0 {
 		t.Errorf("no note of what --execute records:\n%s", r.Lines())
 	}
 	before, _ := os.ReadFile(path)
@@ -272,7 +272,7 @@ func TestAnExecutedApplyRecordsEveryArchBeforeItPublishes(t *testing.T) {
 	fake := convergeRun
 	var stepErrs []error
 	convergeRun = func(args []string) error {
-		if args[0] == "apply" {
+		if isApply(args) {
 			if err := runStep(args); err != nil {
 				stepErrs = append(stepErrs, err)
 			}
@@ -304,7 +304,7 @@ func TestAnExecutedApplyRecordsEveryArchBeforeItPublishes(t *testing.T) {
 	}
 }
 
-// apply --site on its own records its site's architecture, and the version
+// deployment apply --site on its own records its site's architecture, and the version
 // it publishes is the file as written, not as first loaded.
 func TestAnExecutedApplySitePublishesTheRecordedArch(t *testing.T) {
 	path := fixtureWithoutArch(t)

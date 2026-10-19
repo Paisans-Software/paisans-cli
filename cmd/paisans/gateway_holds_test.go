@@ -38,6 +38,10 @@ func (h probeHost) WriteFile(string, string, uint32) error { return errors.New("
 func TestHoldsGatewayOnAMonitorSiteCountsRoutesNotItsCaddy(t *testing.T) {
 	cfg := sharedFixture(t)
 	path := gatewaymove.CaddyfilePath(cfg.Deployment())
+	// Where a toolkit before the Caddyfile moved into infra/caddy/etc wrote
+	// it: read only while the new one is absent, since an apply leaves it
+	// behind.
+	legacy := cfg.Deployment().Path("infra", "caddy", "Caddyfile")
 	gateway := dns.GatewayHostnames(cfg)[0].Name + " {\n}\n"
 	for _, tc := range []struct {
 		name, site string
@@ -46,6 +50,8 @@ func TestHoldsGatewayOnAMonitorSiteCountsRoutesNotItsCaddy(t *testing.T) {
 	}{
 		{"a monitor's own Caddy", "watch", probeHost{caddy: true, files: map[string]string{path: "health.example.org {\n}\n"}}, false},
 		{"a monitor still serving the gateway", "watch", probeHost{caddy: true, files: map[string]string{path: gateway}}, true},
+		{"a monitor still serving the gateway, applied before the move", "watch", probeHost{caddy: true, files: map[string]string{legacy: gateway}}, true},
+		{"a monitor applied since, the old Caddyfile left over", "watch", probeHost{caddy: true, files: map[string]string{path: "health.example.org {\n}\n", legacy: gateway}}, false},
 		{"a plain site's Caddy", "home-a", probeHost{caddy: true, files: map[string]string{}}, true},
 	} {
 		got, err := holdsGatewayOn(cfg, tc.site, tc.host)

@@ -37,6 +37,10 @@ type Flags struct {
 	// and no rule of the owner's allows, the ports admit's refusal lists
 	// (UFWBlocksError). The plan names each one.
 	EnableUFWBlockListed bool
+	// Swapfile is --swapfile: make a swapfile at /swapfile, twice the
+	// host's RAM up to 16 GB, on a host with no swap in any form
+	// (planSwap).
+	Swapfile bool
 }
 
 // Grants are the grants the flags give.
@@ -178,6 +182,10 @@ type Plan struct {
 	// UFWBlocks is what enabling ufw blocks, as --enable-ufw-block-listed
 	// accepted it: each Blocked's Key.
 	UFWBlocks []string
+	// SwapOffer is the size in bytes of the swapfile --swapfile would make
+	// on this host, which has no swap; 0 when it has some, when --swapfile
+	// already makes one, or when admit cannot make one here.
+	SwapOffer int64
 	// list is the plan as ShowToRun drew it, whose rows Execute and
 	// RunSteps run; nil when it was not drawn to run.
 	list ui.List
@@ -245,6 +253,7 @@ type part struct {
 var parts = []part{
 	{"claim", planClaim}, // 1
 	{"admission directory", planAdmissionDir},
+	{"swap", planSwap},
 	{"sysctls before", planSysctlsBefore},
 	{"docker", planDocker},
 	{"apparmor", planAppArmor},

@@ -142,7 +142,7 @@ func TestASudoPromptIsNotErasedWithoutDrawing(t *testing.T) {
 		{"xterm-256color", "", true, true},
 		{"dumb", "", true, false},
 		{"xterm-256color", "1", true, false},
-		// Output piped (paisans apply | tee log) reaches the terminal
+		// Output piped (paisans deployment apply | tee log) reaches the terminal
 		// through another process, at its own pace, so the row the prompt
 		// took is not known.
 		{"xterm-256color", "", false, false},

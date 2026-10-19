@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/localstore"
 	"io"
 	"os"
 	"slices"
@@ -47,7 +48,7 @@ var groupSummary = map[string]string{
 	"storage":     "Provision object storage, join sites to it, replace keys.",
 	"failover":    "Switch the database primary to another site and back.",
 	"dns":         "Create the DNS records the configuration implies, or prune them.",
-	"config":      "Publish, pull, list and recover the sites' signed configuration.",
+	"deployment":  "Apply, list, fetch, publish, pull and recover deployments.",
 	"operator":    "Sign the sites' configuration, or give an operator a sign-in link.",
 	"secrets":     "List, set, prune and rotate secrets.",
 	"app":         "Take a removed app off hosts.",
@@ -59,11 +60,11 @@ var groupSummary = map[string]string{
 }
 
 var helpSections = []helpSection{
-	{"Most of the time", []string{"apply"}},
+	{"Most of the time", []string{"deployment"}},
 	{"Start a deployment", []string{"create", "validate", "init", "render"}},
 	{"Sites", []string{"site", "mesh", "gateway", "storage", "prune"}},
 	{"Check", []string{"doctor", "images", "preflight", "failover", "web-server", "version"}},
-	{"Configuration and secrets", []string{"config", "operator", "secrets", "dns"}},
+	{"Configuration and secrets", []string{"operator", "secrets", "dns"}},
 	{"Apps", []string{"app", "oidc", "catalog", "blueprint"}},
 }
 
@@ -147,15 +148,15 @@ var helpCommands = []helpCommand{
 		detail:  "Validate, then write per site artifacts to a local directory.",
 	},
 	{
-		name:    "apply",
+		name:    "deployment apply",
 		summary: "Take every site from " + config.FileName + " to a running stack.",
 		usage: []string{
-			"paisans apply [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n" +
-				"              [--min-free <size>] [--keep-images] [--require-all] [--execute] [--yes]",
-			"paisans apply --site <name> [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n" +
-				"              [--ssh <destination>] [--only <stack>]... [--overwrite <path>]...\n" +
-				"              [--recreate <stack>]... [--hold-apps] [--min-free <size>] [--keep-images]\n" +
-				"              [--require-all] [--execute] [--yes]",
+			"paisans deployment apply [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n" +
+				"                         [--min-free <size>] [--keep-images] [--require-all] [--execute] [--yes]",
+			"paisans deployment apply --site <name> [--config " + config.FileName + "] [--secrets secrets.enc.yaml]\n" +
+				"                         [--ssh <destination>] [--only <stack>]... [--overwrite <path>]...\n" +
+				"                         [--recreate <stack>]... [--hold-apps] [--min-free <size>] [--keep-images]\n" +
+				"                         [--require-all] [--execute] [--yes]",
 		},
 		detail: "Without --site: take every site from " + config.FileName + " to a running stack, running init, site prepare, apply, site add, storage and dns init in the order the deployment needs. " +
 			"With --site: compare that site's rendered artifacts with what is on its host and show what would change.\n\n" +
@@ -345,31 +346,49 @@ var helpCommands = []helpCommand{
 			"Lists every other record init marked, with why it is kept, and lists the zone again to confirm each delete. Writes nothing without --execute.",
 	},
 	{
-		name:    "config publish",
+		name:    "deployment publish",
 		summary: "Sign the local files and push them to every site.",
-		usage:   []string{"paisans config publish [--config " + config.FileName + "] [--merge] [--execute] [--yes]"},
+		usage:   []string{"paisans deployment publish [--config " + config.FileName + "] [--merge] [--execute] [--yes]"},
 		detail: "Sign the local " + config.FileName + ", secrets.enc.yaml and .sops.yaml as a version on the sites' newest and push it to every site; --merge builds on every head of a fork." +
 			configTrust,
 	},
 	{
-		name:    "config pull",
+		name:    "deployment pull",
 		summary: "Move the local files to the sites' newest version.",
-		usage:   []string{"paisans config pull [--config " + config.FileName + "] [--root <sha>] [--execute] [--yes]"},
+		usage:   []string{"paisans deployment pull [--config " + config.FileName + "] [--root <sha>] [--execute] [--yes]"},
 		detail: "Move the local files to the sites' newest version, or, over local edits, show the difference and put its files in .paisans/incoming/." +
 			configTrust,
 	},
 	{
-		name:    "config log",
+		name:    "deployment log",
 		summary: "List every version, its signer, and the sites holding it.",
-		usage:   []string{"paisans config log [--config " + config.FileName + "] [--root <sha>]"},
+		usage:   []string{"paisans deployment log [--config " + config.FileName + "] [--root <sha>]"},
 		detail:  "List every version of the configuration the sites keep, its signer, and the sites holding it." + configTrust,
 	},
 	{
-		name:    "config recover",
+		name:    "deployment recover",
 		summary: "Write the newest configuration onto an empty directory.",
-		usage:   []string{"paisans config recover --from <user@host[:port]>... [--root <sha>] [--id <id>]\n                       [--config " + config.FileName + "] [--execute] [--yes]"},
-		detail: "Onto an empty directory, gather from the --from hosts and every site the trusted heads name, and write the head's files, or each head's in .paisans/incoming/ with a fork." +
+		usage:   []string{"paisans deployment recover --from <user@host[:port]>... [--root <sha>] [--id <id>]\n                       [--config " + config.FileName + "] [--execute] [--yes]"},
+		detail: "Onto an empty directory, gather from the --from hosts and every site the trusted heads name, and write the head's files, or each head's in .paisans/incoming/ with a fork. " +
+			"With --execute, the recovered version is also saved to this workstation's saved deployments (see deployment list)." +
 			configTrust,
+	},
+	{
+		name:    "deployment list",
+		summary: "List the deployments saved on this workstation.",
+		usage:   []string{"paisans deployment list"},
+		detail: "List every deployment saved on this workstation: its id, domain, revision, version, whether it is verified, where it came from and when. " +
+			"deployment apply --execute and deployment recover --execute save the version they publish or recover; deployment fetch saves what a host holds. " +
+			"Saved deployments are kept in ~/Library/Application Support/Paisans on macOS, and in $XDG_DATA_HOME/paisans (~/.local/share/paisans) elsewhere, or in $" + localstore.DirVariable + " when set. " +
+			"Each is a directory holding " + config.FileName + ", secrets.enc.yaml and .sops.yaml, which any command takes with --config. Reads nothing else, and changes nothing.",
+	},
+	{
+		name:    "deployment fetch",
+		summary: "Save every deployment a host holds to this workstation.",
+		usage:   []string{"paisans deployment fetch --ssh <user@host[:port]>"},
+		detail: "Read, through sudo, the registry of the host --ssh names and, for each deployment in it, every version of its configuration the host keeps, and save the newest trusted one with the saved deployments (see deployment list). " +
+			"A deployment this workstation saved before is judged from the key that signed it, as deployment pull judges; one it never saved has nothing to trust from, so its newest versions are put in .paisans/incoming/<sha>/ and listed as unverified, " +
+			"for deployment recover --root <sha> to pin once the hash is checked with another operator. Needs no " + config.FileName + "; changes nothing on the host.",
 	},
 	{
 		name:    "operator magic-link",
@@ -380,12 +399,19 @@ var helpCommands = []helpCommand{
 			"Changes nothing else: apply makes the account and its groups, and an operator with no account yet is pointed there. Writes nothing without --execute.",
 	},
 	{
+		name:    "operator grants",
+		summary: "List the site admit flags each deployment on a host was admitted with.",
+		usage:   []string{"paisans operator grants --ssh <user@host[:port] or ssh alias>"},
+		detail: "Read each admission record on the host --ssh names, an alias of your ssh config or user@host[:port], and list each site's grants and flags, yes or no (--watchdog, --public-ports, --data-dir, --bridge-netfilter, --mesh-lan, --enable-ufw) and its web server, then the site admit command that admitted it. " +
+			"Admit takes the rest of a site's admission from the configuration, so add --ssh and anything new, such as --swapfile, and read the dry run before --execute. Needs no " + config.FileName + " and no sudo, since the records are readable by any user; changes nothing.",
+	},
+	{
 		name:    "operator register",
 		summary: "Sign the sites' newest version with your own key.",
 		usage:   []string{"paisans operator register [--config " + config.FileName + "] [--key <path.pub>] [--root <sha>]\n                          [--execute] [--yes]"},
 		detail: "Sign an attestation of the sites' newest version with your own key, so trust starts from your signature: the key in your ssh-agent listed under your entry in operators, or the one --key names. " +
 			"Signs only a version equal to your local files, or, with no files and a root pinned, the one the pin leads to, and then writes its files. " +
-			"Records the key in .paisans/signing-key, which config publish signs with from then on.\n\n" +
+			"Records the key in .paisans/signing-key, which deployment publish signs with from then on.\n\n" +
 			"Changes only the sites' configuration stores, and nothing without --execute. With --execute it asks for the word partial at a terminal when no more than half the sites answered directly, and for rollback when the newest version is older than one seen here before; --yes types either. " + yesTopic,
 	},
 	{

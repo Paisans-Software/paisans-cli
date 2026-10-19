@@ -72,13 +72,13 @@ func (v *runIdentity) report(r ui.Reporter) {
 	r.Step("paisans").End(ui.OK, version.Current().String())
 	id := r.Step("id")
 	if v.id == "" {
-		id.End(ui.Pending, "pending: init writes it")
+		id.End(ui.Pending, "pending: init will write it")
 	} else {
 		id.End(ui.OK, v.id)
 	}
 	version := r.Step("configuration")
 	if v.sha == "" {
-		version.End(ui.Pending, "pending: published by apply --execute")
+		version.End(ui.Pending, "pending: deployment apply --execute will publish it")
 	} else {
 		version.End(ui.OK, fmt.Sprintf("revision %d, %s", v.revision, v.sha[:12]))
 	}

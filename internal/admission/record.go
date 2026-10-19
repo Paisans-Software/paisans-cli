@@ -411,7 +411,7 @@ const mineCommand = `echo "user $(id -un)"; for f in ` + Dir + `/admitted.*.json
 
 // Mine is the admission record of the deployment the login belongs to: the
 // one whose user is the login's own name. A deployment's commands that run
-// without its configuration (config recover) learn the deployment from it.
+// without its configuration (deployment recover) learn the deployment from it.
 // A record that does not parse is skipped, since it cannot name the login.
 func Mine(t Runner) (Record, error) {
 	out, err := t.Run(mineCommand)

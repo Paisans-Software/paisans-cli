@@ -1,0 +1,1 @@
+refused: swap: --swapfile: admit could not read the host's RAM to size a swapfile. Make one yourself, and admit again without --swapfile. Nothing was changed

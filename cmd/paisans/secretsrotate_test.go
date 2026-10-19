@@ -954,7 +954,7 @@ func TestSecretsRotateDryRunSaysItAsks(t *testing.T) {
 		t.Errorf("a dry run asked %v", *asked)
 	}
 	for _, want := range []struct{ kind, text string }{
-		{"note", "this run asks for external.acme_dns_token, external.smtp_password"},
+		{"note", "this run will ask for external.acme_dns_token, external.smtp_password"},
 		{"pending", "stage 1, next value"},
 		{"pending", "replace it at desec when asked"},
 		{"pending", "replace it at the mail provider when asked"},

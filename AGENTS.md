@@ -12,7 +12,7 @@ A toolkit for installing and operating a paisans community stack, plus the
 design that toolkit follows. **The design leads and the code follows it.**
 `README.md` is the design; `cmd/` and `internal/` implement the parts of it that
 have been built: the `paisans` command, from `validate` and `render` through
-`site prepare`, `apply`, `site add` and the rest. `docs/development.md` lists what exists, under *Run*,
+`site prepare`, `deployment apply`, `site add` and the rest. `docs/development.md` lists what exists, under *Run*,
 and what does not, under *What is not here yet*. The commands reach hosts over
 SSH and drive Docker there, and each one that changes a host does so only with
 `--execute`. The toolkit's version is the constant in `internal/version`;
@@ -136,13 +136,13 @@ You are *authoring* the tool that other agents and operators will run against
 live deployments. You are not running it. The care goes into what the code
 permits, because the blast radius lands on someone else's stack.
 
-`apply` has run against a real host; `site add` and `site remove` have not, and
+`deployment apply` has run against a real host; `site add` and `site remove` have not, and
 *What is not here yet* in `docs/development.md` says what else is reasoned
 rather than observed. All of it holds:
 
 * **A pinned stack lays out under `/srv/paisans/<token>/<stack>/` with bind mounts**, not named
   volumes. `README.md` explains why (`app move` becomes one `tar`).
-* **`.env` files are build artifacts.** Nothing hand-edits them; `apply` renders
+* **`.env` files are build artifacts.** Nothing hand-edits them; `deployment apply` renders
   them and refuses to clobber local modifications.
 * **`sops`/`age` run on the workstation only.** No code path may put a
   decryption key on a host, and no code path may decrypt on a host, unless the
@@ -254,7 +254,7 @@ head commit's message with `kacl-skip:`.
    as a pull request titled `Release x.y.z`.
 2. A pull request from `develop` into `main`, titled `Release x.y.z to main`.
    Its body is the operator notes at the top of the GitHub Release: anything
-   an operator has to *do*, such as an `apply`, a configuration edit, or a
+   an operator has to *do*, such as an `deployment apply`, a configuration edit, or a
    change to an existing deployment's data or topology. A release that changes
    an existing deployment says so first, with what to do about it, because
    this toolkit's design premise is that additions must not become migrations.

@@ -41,6 +41,21 @@ type Taken struct {
 
 func (t Taken) String() string { return t.What }
 
+// OverlapError is site admit's refusal of a mesh subnet: the networks on
+// the host that it overlaps.
+type OverlapError struct {
+	Subnet string
+	Taken  []Taken
+}
+
+func (e *OverlapError) Error() string {
+	what := make([]string, len(e.Taken))
+	for i, c := range e.Taken {
+		what[i] = ui.Visible(c.What)
+	}
+	return fmt.Sprintf("the deployment's mesh subnet %s overlaps %s on this host, so its mesh would route that network's traffic. The operators move the subnet clear of it: admitting this site from `paisans init` rolls one, and admits again each site that has admitted the deployment. With a request, they send a new one. Nothing was changed", e.Subnet, strings.Join(what, ", "))
+}
+
 // ParsePrefix reads an IPv4 network or address, an address meaning a /32,
 // and returns it masked to its network.
 func ParsePrefix(s string) (netip.Prefix, error) {

@@ -397,7 +397,7 @@ func reachEverySite(r ui.Reporter, cfg *config.Config, transports map[string]app
 
 // rotateApply is a scoped apply of stacks on site, rendered from s, the
 // secrets with the next value promoted, and never from the file: the same
-// plan as `paisans apply --site <site> --only <stack>`, its refusal of a
+// plan as `paisans deployment apply --site <site> --only <stack>`, its refusal of a
 // file edited on the host and its health gate. A rotation rewrites
 // environments, not images, so every deployed build is kept.
 func rotateApply(r ui.Reporter, cfg *config.Config, t apply.Transport, site string, s *config.Secrets, stacks []string) error {
@@ -409,7 +409,7 @@ func rotateApply(r ui.Reporter, cfg *config.Config, t apply.Transport, site stri
 		return err
 	}
 	if c := plan.Conflicts(); len(c) > 0 {
-		return fmt.Errorf("%s's %s differs from what the last apply recorded, so somebody edited it on the host. Nothing was changed on %s. Restore it, or run `paisans apply --site %s --only %s --overwrite %s`, then run secrets rotate again", site, c[0].Path, site, site, strings.Join(stacks, " --only "), c[0].Path)
+		return fmt.Errorf("%s's %s differs from what the last apply recorded, so somebody edited it on the host. Nothing was changed on %s. Restore it, or run `paisans deployment apply --site %s --only %s --overwrite %s`, then run secrets rotate again", site, c[0].Path, site, site, strings.Join(stacks, " --only "), c[0].Path)
 	}
 	plan.Report = r
 	return apply.Execute(plan, t)

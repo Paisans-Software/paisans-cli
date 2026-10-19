@@ -41,6 +41,14 @@ type seedMonitor struct {
 	HeartbeatToken        string `json:"heartbeat_token,omitempty"`
 	HeartbeatScheduleKind string `json:"heartbeat_schedule_kind,omitempty"`
 	HeartbeatGraceSeconds int    `json:"heartbeat_grace_seconds,omitempty"`
+	// Whether the public status page leaves the monitor out. Every entry
+	// names it, so the file decides it rather than whatever an admin last
+	// chose, and only a check set public is shown.
+	StatusPageExcluded bool `json:"status_page_excluded"`
+
+	// public is a check of an app at its public hostname: the only kind the
+	// status page shows, as everything else names a mesh address or a site.
+	public bool
 }
 
 // Two consecutive failures before an incident, so one dropped packet on a
@@ -102,6 +110,7 @@ func (p *planner) fallbackChecks(name string, app config.App, sites []string) []
 		out = append(out, seedMonitor{
 			Name: PublicCheckName(name) + " (no health route)", MonitorType: "active", Method: "GET", CheckType: "status",
 			URL: "https://" + app.Hostname + "/", ExpectedStatus: unroutedStatuses, FollowRedirects: &noRedirects,
+			public:          true,
 			IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
 		})
 		if app.Gated {
@@ -158,6 +167,7 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 			monitors = append(monitors, seedMonitor{
 				Name: PublicCheckName(name), MonitorType: "active", Method: "GET", CheckType: "status",
 				URL: "https://" + app.Hostname + health.Path, ExpectedStatus: health.Expect,
+				public:          true,
 				FollowRedirects: &noRedirects,
 				IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
 			})
@@ -242,6 +252,7 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 			monitors = append(monitors, seedMonitor{
 				Name: PublicCheckName(name), MonitorType: "active", Method: "GET", CheckType: "status",
 				URL: "https://" + other.Hostname + health.Path, ExpectedStatus: health.Expect,
+				public:          true,
 				FollowRedirects: &noRedirects,
 				IntervalSeconds: seedInterval, TimeoutMS: seedTimeoutMS, FailureThreshold: seedThreshold,
 			})
@@ -337,7 +348,11 @@ func (p *planner) uptimeSeed(self string) (string, error) {
 		})
 	}
 
-	settings := map[string]any{"status_page_enabled": false}
+	for i := range monitors {
+		monitors[i].StatusPageExcluded = !monitors[i].public
+	}
+
+	settings := map[string]any{"status_page_enabled": blueprints.PublicStatusPage(p.cfg.Apps[self])}
 	if smtp := p.smtpFor(self); smtp.Host != "" {
 		settings["smtp_host"] = smtp.Host
 		settings["smtp_port"] = smtp.Port
