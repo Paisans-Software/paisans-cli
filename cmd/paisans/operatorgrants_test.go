@@ -70,7 +70,7 @@ func TestOperatorGrantsPrintsTheAdmitFlags(t *testing.T) {
 			t.Errorf("--ssh %s reached %q", ssh, reached)
 		}
 		for _, want := range []string{
-			"site home-a of " + neighbour + " (apps, data), as community: paisans site admit --site 'home-a' --watchdog --data-dir '/srv/my data' --bridge-netfilter --mesh-lan",
+			"site home-a of " + neighbour + " (apps, data), as community: paisans site admit --site 'home-a' --watchdog --data-dir '/srv/my data' --bridge-netfilter --mesh-lan --enable-ufw (--mesh-lan recorded 192.168.1.0/24; admit reads the LAN again from the host)",
 			"site vm of " + monitorID + " (gateway), as paisans-f2a9: paisans site admit --site 'vm' --public-ports",
 			"2 admission record(s) read",
 		} {
@@ -78,8 +78,8 @@ func TestOperatorGrantsPrintsTheAdmitFlags(t *testing.T) {
 				t.Errorf("--ssh %s: no %q in:\n%s", ssh, want, out)
 			}
 		}
-		if strings.Contains(out, "--enable-ufw") {
-			t.Errorf("--ssh %s: --enable-ufw for ufw that is on:\n%s", ssh, out)
+		if strings.Contains(out, "--public-ports --enable-ufw") {
+			t.Errorf("--ssh %s: --enable-ufw for a site whose admit did not enable ufw:\n%s", ssh, out)
 		}
 		if len(h.commands) != 1 || h.commands[0] != hostDeploymentsAdmitted || h.registryRead {
 			t.Errorf("--ssh %s: ran %q, read the registry %v", ssh, h.commands, h.registryRead)
@@ -124,5 +124,37 @@ func TestGrantsTransportIsPlainSSH(t *testing.T) {
 		if tr.Destination != dest || tr.Sudo || tr.Auth != nil || tr.Login != nil || tr.User != "" || tr.Host != "" {
 			t.Errorf("%s: %+v", dest, tr)
 		}
+	}
+}
+
+// A record with no grant or flag is the bare command, and a data directory
+// is quoted for the shell whatever it holds.
+func TestAdmitFlagsOfBareAndQuotedRecords(t *testing.T) {
+	if got := admitFlags(admission.Record{Site: "x"}); len(got) != 0 {
+		t.Errorf("bare record: %q", got)
+	}
+	got := strings.Join(admitFlags(admission.Record{DataDir: "/srv/o'brien/paisans-f2a9"}), " ")
+	if want := `--data-dir '/srv/o'\''brien'`; got != want {
+		t.Errorf("quoted: %s, want %s", got, want)
+	}
+}
+
+// Every flag admitFlags prints is one site admit takes, and means what the
+// record holds: site admit's own flag set reads them back.
+func TestAdmitFlagsAreSiteAdmitFlags(t *testing.T) {
+	rec := admission.Record{Grants: admission.Grants{Watchdog: true, PublicPorts: true}, DataDir: "/srv/data/paisans-f2a9",
+		BridgeNetfilter: true, MeshLAN: "192.168.1.0/24", UFWEnabled: true}
+	var args []string
+	for _, a := range admitFlags(rec) {
+		args = append(args, strings.Trim(a, "'"))
+	}
+	// --site with --request stops site admit once its flags are read, before
+	// any host is reached: a flag it does not take stops it at the parse.
+	err := runSiteAdmit(append(args, "--site", "vm", "--request", "x.admit"), strings.NewReader(""), new(strings.Builder))
+	if err == nil || !strings.Contains(err.Error(), "--request or --site, not both") {
+		t.Fatalf("site admit read %q as: %v", args, err)
+	}
+	if want := []string{"--watchdog", "--public-ports", "--data-dir", "/srv/data", "--bridge-netfilter", "--mesh-lan", "--enable-ufw"}; strings.Join(args, " ") != strings.Join(want, " ") {
+		t.Errorf("flags %q, want %q", args, want)
 	}
 }

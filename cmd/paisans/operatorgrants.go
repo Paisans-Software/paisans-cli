@@ -44,8 +44,11 @@ var reachGrantsHost = func(dest string) apply.Transport { return grantsTransport
 func grantsTransport(dest string) apply.SSHTransport { return apply.SSHTransport{Destination: dest} }
 
 // admitFlags are the site admit flags rec records, in the order site admit
-// lists them: what admitting the site again takes to plan nothing more.
-// --enable-ufw is never one: ufw admit enabled is on.
+// lists them: --watchdog and --public-ports as granted, --data-dir as the
+// directory given, --bridge-netfilter, --mesh-lan, and --enable-ufw where
+// admit enabled ufw, which changes nothing while ufw is active. The rest of
+// a site's admission, its roles, ports, mesh subnet and web server, comes
+// from the configuration's request, not a flag.
 func admitFlags(rec admission.Record) []string {
 	var flags []string
 	if rec.Grants.Watchdog {
@@ -62,6 +65,9 @@ func admitFlags(rec admission.Record) []string {
 	}
 	if rec.MeshLAN != "" {
 		flags = append(flags, "--mesh-lan")
+	}
+	if rec.UFWEnabled {
+		flags = append(flags, "--enable-ufw")
 	}
 	return flags
 }
@@ -113,13 +119,19 @@ func runOperatorGrants(args []string) error {
 			roles = "no role"
 		}
 		command := strings.Join(append([]string{"paisans site admit --site", apply.ShellQuote(rec.Site)}, admitFlags(rec)...), " ")
-		r.Step(fmt.Sprintf("site %s of %s (%s), as %s: %s", ui.Visible(rec.Site), rec.Deployment, roles, rec.User, ui.Visible(command))).End(ui.OK, "")
+		line := fmt.Sprintf("site %s of %s (%s), as %s: %s", ui.Visible(rec.Site), rec.Deployment, roles, rec.User, ui.Visible(command))
+		if rec.MeshLAN != "" {
+			// --mesh-lan takes the LAN the host is on when admit runs, so
+			// the one recorded is said beside it.
+			line += fmt.Sprintf(" (--mesh-lan recorded %s; admit reads the LAN again from the host)", ui.Visible(rec.MeshLAN))
+		}
+		r.Step(line).End(ui.OK, "")
 		read++
 	}
 	if len(records) == 0 {
 		r.Result("No admission record in %s: no deployment is admitted to %s.", admission.Dir, *sshFlag)
 		return nil
 	}
-	r.Result("%d admission record(s) read. Admit a site again with its command above, adding --ssh and anything new, such as --swapfile; its dry run plans nothing else.", read)
+	r.Result("%d admission record(s) read. Each command above carries its site's grants and flags; admit takes the rest from the configuration. Add --ssh and anything new, such as --swapfile, and read its dry run before --execute.", read)
 	return nil
 }

@@ -666,9 +666,11 @@ See *`operator magic-link` gives a declared operator a fresh sign-in link* in
 ### `paisans operator grants`
 
 Prints, for each deployment admitted to a host, the `site admit` command that
-admitted its site: its grants and the flags admit records. Admitting the site
-again with that command plans nothing more, so it is the base for adding
-something new, such as `--swapfile`.
+admitted its site: its grants and the flags admit records. Admit takes the
+rest of a site's admission (its roles, ports, mesh subnet and web server) from
+the configuration, so the command is the base for admitting the site again
+with something new, such as `--swapfile`: read its dry run before
+`--execute`.
 
 ```sh
 paisans operator grants --ssh home-a                 # an alias of your ssh config
@@ -682,9 +684,11 @@ paisans operator grants --ssh admin@203.0.113.9      # or user@host[:port]
   admission records in `/etc/paisans` are readable by any user.
 * **What it prints:** `--watchdog` and `--public-ports` as granted,
   `--data-dir` as the directory given (the record keeps
-  `<path>/paisans-<token>`), `--bridge-netfilter` and `--mesh-lan`.
-  `--enable-ufw` is never printed: ufw admit enabled is on. A record that does
-  not parse is a warning, and the rest are printed.
+  `<path>/paisans-<token>`), `--bridge-netfilter`, and `--enable-ufw` where
+  admit enabled ufw, which changes nothing while ufw is active. `--mesh-lan`
+  comes with the LAN prefix recorded, since admit reads the LAN again from
+  the host. A record that does not parse is a warning, and the rest are
+  printed.
 
 ### `paisans catalog`
 
