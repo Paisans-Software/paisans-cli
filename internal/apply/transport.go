@@ -20,6 +20,7 @@ import (
 	"os/exec"
 	pathpkg "path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -753,6 +754,9 @@ func (t SSHTransport) run(command string, stdin *string) (string, error) {
 	if t.once {
 		retries = nil
 	}
+	// interactive is a first contact whose login, tried in batch mode, was
+	// refused: ssh needs to ask for a password or a key's passphrase.
+	interactive := false
 	for attempt := 1; ; attempt++ {
 		cmd, cleanup, err := t.ssh(command)
 		if err != nil {
@@ -765,15 +769,32 @@ func (t SSHTransport) run(command string, stdin *string) (string, error) {
 		cmd.Stdout = &out
 		cmd.Stderr = &out
 		resume := func() {}
-		asks := false
+		asks, batch := false, false
 		if firstContact(t.Describe()) {
-			resume = promptHold()
 			asks = !hostKeyKnown(t)
+			// A host whose key is known is tried first in batch mode, where
+			// ssh asks nothing, so the spinner runs; only a login that
+			// needs a question holds the display.
+			if batch = !asks && !interactive; batch {
+				cmd.Args = slices.Insert(cmd.Args, 1, "-o", "BatchMode=yes")
+			} else {
+				resume = promptHold()
+			}
 		}
 		if asks {
 			AskMu.Lock()
 		}
 		err = runSSH(cmd)
+		if batch && err != nil && strings.Contains(out.String(), "Permission denied (") {
+			// Refused before any command ran, where a password or a key's
+			// passphrase might have let it in: the same attempt again, with
+			// the display held for ssh's question. Too many authentication
+			// failures is no question, and is reported as it stands.
+			cleanup()
+			interactive = true
+			attempt--
+			continue
+		}
 		if asks && (err == nil || !connectionFailed(err, out.String())) {
 			// ssh asked about the host's key and was answered. The blank
 			// line goes before the display resumes, so the spinner redraws

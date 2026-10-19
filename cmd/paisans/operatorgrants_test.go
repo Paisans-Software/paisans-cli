@@ -70,8 +70,17 @@ func TestOperatorGrantsPrintsTheAdmitFlags(t *testing.T) {
 			t.Errorf("--ssh %s reached %q", ssh, reached)
 		}
 		for _, want := range []string{
-			"site home-a of " + neighbour + " (apps, data), as community: paisans site admit --site 'home-a' --watchdog --data-dir '/srv/my data' --bridge-netfilter --mesh-lan --enable-ufw (--mesh-lan recorded 192.168.1.0/24; admit reads the LAN again from the host)",
-			"site vm of " + monitorID + " (gateway), as paisans-f2a9: paisans site admit --site 'vm' --public-ports",
+			"site home-a of " + neighbour + " (apps, data), as community, admitted 2026-10-15T00:00:00Z",
+			"watchdog: yes (--watchdog)\n",
+			"data directory: /srv/my data (--data-dir)\n",
+			"mesh LAN: yes, 192.168.1.0/24 recorded; admit reads the LAN again from the host (--mesh-lan)\n",
+			"ufw enabled by admit: yes (--enable-ufw)\n",
+			"admit again: paisans site admit --site 'home-a' --watchdog --data-dir '/srv/my data' --bridge-netfilter --mesh-lan --enable-ufw\n",
+			"site vm of " + monitorID + " (gateway), as paisans-f2a9, admitted 2026-10-15T00:00:00Z",
+			"watchdog: no (--watchdog)\n",
+			"public ports: yes (--public-ports)\n",
+			"data directory: the user's home (no --data-dir)\n",
+			"admit again: paisans site admit --site 'vm' --public-ports\n",
 			"2 admission record(s) read",
 		} {
 			if !strings.Contains(out, want) {
@@ -156,5 +165,36 @@ func TestAdmitFlagsAreSiteAdmitFlags(t *testing.T) {
 	}
 	if want := []string{"--watchdog", "--public-ports", "--data-dir", "/srv/data", "--bridge-netfilter", "--mesh-lan", "--enable-ufw"}; strings.Join(args, " ") != strings.Join(want, " ") {
 		t.Errorf("flags %q, want %q", args, want)
+	}
+}
+
+// A site admitted with no grant or flag lists each as no, and its web
+// server where the configuration handed it one, rather than printing
+// nothing.
+func TestOperatorGrantsListsEveryGrantOfABareSite(t *testing.T) {
+	rec := admission.Record{
+		Version: admission.RecordVersion, Deployment: monitorID, User: "paisans-f2a9", Site: "saw-gerrera", Roles: []string{"monitor"},
+		Ports: admission.Ports{SSH: 22, WireGuard: 51820}, AdmittedAt: "2026-10-18T02:17:18Z", MeshSubnet: "10.44.0.0/24",
+		WebServer: &admission.WebServer{Server: "caddy", Container: "caddy", Config: "/opt/beszel/Caddyfile", Main: "/etc/caddy/Caddyfile", Certs: "automatic", AdminTCP: "localhost:2019"},
+		Build:     version.Build{Version: "0.3.0-dev", Commit: "59ad52727c82242550899efd520b6007b56509ca"},
+	}
+	b, err := admission.EncodeRecord(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, _ := admission.Path("f2a9")
+	out, _, err := grantsHost(t, &listedHost{t: t, records: map[string]string{p: string(b)}}, "--ssh", "saw-gerrera")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"watchdog: no (--watchdog)", "public ports: no (--public-ports)", "data directory: the user's home (no --data-dir)",
+		"bridge netfilter: no (--bridge-netfilter)", "mesh LAN: no", "ufw enabled by admit: no (--enable-ufw)",
+		"web server: caddy, in container caddy, the owner's, from the configuration's web_server",
+		"admit again: paisans site admit --site 'saw-gerrera'\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("no %q in:\n%s", want, out)
+		}
 	}
 }

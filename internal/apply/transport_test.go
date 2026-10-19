@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -263,13 +264,15 @@ func TestOnlyAConnectionFailureIsRetried(t *testing.T) {
 	}
 }
 
-// ssh asks on the terminal itself on a first connection: a host key to
-// accept, or a key's passphrase. The progress display is held around every
-// attempt until the host has answered once, so the question stays readable,
-// and is not held again for that host, so the spinner runs for the rest.
+// ssh asks on the terminal itself on a first connection to a host whose
+// key it does not know. The progress display is held around every attempt
+// until the host has answered once, so the question stays readable, and is
+// not held again for that host, so the spinner runs for the rest.
 func TestTheFirstConnectionToAHostHoldsTheDisplay(t *testing.T) {
 	apply.ForgetContacts()
 	t.Cleanup(apply.ForgetContacts)
+	var blanks int
+	t.Cleanup(apply.FakeHostKeys(func(apply.SSHTransport) bool { return false }, &blanks))
 	held := false
 	apply.SetPromptHold(func() func() {
 		held = true
@@ -303,6 +306,57 @@ func TestTheFirstConnectionToAHostHoldsTheDisplay(t *testing.T) {
 	if held {
 		t.Error("the display was left held")
 	}
+}
+
+// A first connection to a host whose key is known is made in batch mode,
+// where ssh asks nothing, so the display is not held and the spinner runs.
+// A login refused there, which a password or a key's passphrase might have
+// let in, is tried once more with the display held so ssh can ask; too many
+// authentication failures is no question and is not tried again.
+func TestAKnownHostsFirstConnectionRunsInBatchMode(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		answers []sshAnswer
+		batch   []bool
+		held    []bool
+		ok      bool
+	}{
+		{"accepted", []sshAnswer{{"ok\n", 0}}, []bool{true}, []bool{false}, true},
+		{"asks", []sshAnswer{{"admin@home-a: Permission denied (publickey).\n", 255}, {"ok\n", 0}}, []bool{true, false}, []bool{false, true}, true},
+		{"too many", []sshAnswer{{"Received disconnect from 192.0.2.1 port 22:2: Too many authentication failures\n", 255}}, []bool{true}, []bool{false}, false},
+	} {
+		apply.ForgetContacts()
+		held := false
+		apply.SetPromptHold(func() func() {
+			held = true
+			return func() { held = false }
+		})
+		var blanks int
+		restoreKeys := apply.FakeHostKeys(func(apply.SSHTransport) bool { return true }, &blanks)
+		var batch, during []bool
+		calls := 0
+		restore := apply.FakeSSH(func(args []string, _ string) (string, int) {
+			batch = append(batch, slices.Contains(args, "BatchMode=yes"))
+			during = append(during, held)
+			a := c.answers[calls]
+			calls++
+			return a.out, a.exit
+		}, nil, func(time.Duration) {}, io.Discard)
+		_, err := (apply.SSHTransport{Destination: "home-a"}).Run("true")
+		restore()
+		restoreKeys()
+		apply.SetPromptHold(nil)
+		if (err == nil) != c.ok {
+			t.Errorf("%s: err = %v", c.name, err)
+		}
+		if !reflect.DeepEqual(batch, c.batch) || !reflect.DeepEqual(during, c.held) {
+			t.Errorf("%s: batch mode %v, held %v; want %v, %v", c.name, batch, during, c.batch, c.held)
+		}
+		if held {
+			t.Errorf("%s: the display was left held", c.name)
+		}
+	}
+	apply.ForgetContacts()
 }
 
 // ssh's question about a host key it does not know is followed by a blank
