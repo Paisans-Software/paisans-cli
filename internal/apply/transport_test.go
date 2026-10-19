@@ -308,22 +308,35 @@ func TestTheFirstConnectionToAHostHoldsTheDisplay(t *testing.T) {
 	}
 }
 
-// A first connection to a host whose key is known is made in batch mode,
-// where ssh asks nothing, so the display is not held and the spinner runs.
-// A login refused there, which a password or a key's passphrase might have
-// let in, is tried once more with the display held so ssh can ask; too many
-// authentication failures is no question and is not tried again.
+// A first connection to a host whose key is known, with nothing that may
+// ask behind BatchMode's back, is made in batch mode, so the display is not
+// held and the spinner runs. One that stopped at what ssh would have asked,
+// before any command ran, is made once more with the display held and the
+// terminal's lock taken: a refused login, where a password or a key's
+// passphrase might let it in, or a host key of another type. Everything
+// else is reported as it stands: too many authentication failures, a host
+// key that changed, a command that ran and failed whatever it printed, and
+// a refusal of declared keys, which have no passphrase to ask for.
 func TestAKnownHostsFirstConnectionRunsInBatchMode(t *testing.T) {
+	const denied = "admin@home-a: Permission denied (publickey).\n"
 	for _, c := range []struct {
 		name    string
+		tr      apply.SSHTransport
+		quiet   bool
 		answers []sshAnswer
 		batch   []bool
 		held    []bool
+		asked   []bool
 		ok      bool
 	}{
-		{"accepted", []sshAnswer{{"ok\n", 0}}, []bool{true}, []bool{false}, true},
-		{"asks", []sshAnswer{{"admin@home-a: Permission denied (publickey).\n", 255}, {"ok\n", 0}}, []bool{true, false}, []bool{false, true}, true},
-		{"too many", []sshAnswer{{"Received disconnect from 192.0.2.1 port 22:2: Too many authentication failures\n", 255}}, []bool{true}, []bool{false}, false},
+		{"accepted", apply.SSHTransport{Destination: "home-a"}, true, []sshAnswer{{"ok\n", 0}}, []bool{true}, []bool{false}, []bool{false}, true},
+		{"refused, asks", apply.SSHTransport{Destination: "home-a"}, true, []sshAnswer{{denied, 255}, {"ok\n", 0}}, []bool{true, false}, []bool{false, true}, []bool{false, true}, true},
+		{"host key of another type", apply.SSHTransport{Destination: "home-a"}, true, []sshAnswer{{"No ED25519 host key is known for home-a.\nHost key verification failed.\n", 255}, {"ok\n", 0}}, []bool{true, false}, []bool{false, true}, []bool{false, true}, true},
+		{"too many", apply.SSHTransport{Destination: "home-a"}, true, []sshAnswer{{"Received disconnect from 192.0.2.1 port 22:2: Too many authentication failures\n", 255}}, []bool{true}, []bool{false}, []bool{false}, false},
+		{"host key changed", apply.SSHTransport{Destination: "home-a"}, true, []sshAnswer{{"@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @\nHost key verification failed.\n", 255}}, []bool{true}, []bool{false}, []bool{false}, false},
+		{"command printed it", apply.SSHTransport{Destination: "home-a"}, true, []sshAnswer{{"git@example.org: Permission denied (publickey).\n", 1}}, []bool{true}, []bool{false}, []bool{false}, false},
+		{"declared keys", apply.SSHTransport{User: "paisans-f2a9", Host: "192.0.2.1", PublicKeys: []string{keyA}}, true, []sshAnswer{{denied, 255}}, []bool{true}, []bool{false}, []bool{false}, false},
+		{"may ask behind batch mode", apply.SSHTransport{Destination: "home-a"}, false, []sshAnswer{{"ok\n", 0}}, []bool{false}, []bool{true}, []bool{false}, true},
 	} {
 		apply.ForgetContacts()
 		held := false
@@ -333,30 +346,81 @@ func TestAKnownHostsFirstConnectionRunsInBatchMode(t *testing.T) {
 		})
 		var blanks int
 		restoreKeys := apply.FakeHostKeys(func(apply.SSHTransport) bool { return true }, &blanks)
-		var batch, during []bool
+		restoreQuiet := apply.FakeQuietLogin(func(apply.SSHTransport) bool { return c.quiet })
+		var batch, during, asked []bool
 		calls := 0
 		restore := apply.FakeSSH(func(args []string, _ string) (string, int) {
 			batch = append(batch, slices.Contains(args, "BatchMode=yes"))
 			during = append(during, held)
+			locked := !apply.AskMu.TryLock()
+			if !locked {
+				apply.AskMu.Unlock()
+			}
+			asked = append(asked, locked)
 			a := c.answers[calls]
 			calls++
 			return a.out, a.exit
 		}, nil, func(time.Duration) {}, io.Discard)
-		_, err := (apply.SSHTransport{Destination: "home-a"}).Run("true")
+		_, err := c.tr.Run("true")
 		restore()
+		restoreQuiet()
 		restoreKeys()
 		apply.SetPromptHold(nil)
 		if (err == nil) != c.ok {
 			t.Errorf("%s: err = %v", c.name, err)
 		}
-		if !reflect.DeepEqual(batch, c.batch) || !reflect.DeepEqual(during, c.held) {
-			t.Errorf("%s: batch mode %v, held %v; want %v, %v", c.name, batch, during, c.batch, c.held)
+		if !reflect.DeepEqual(batch, c.batch) || !reflect.DeepEqual(during, c.held) || !reflect.DeepEqual(asked, c.asked) {
+			t.Errorf("%s: batch mode %v, held %v, terminal locked %v; want %v, %v, %v", c.name, batch, during, asked, c.batch, c.held, c.asked)
 		}
 		if held {
 			t.Errorf("%s: the display was left held", c.name)
 		}
 	}
 	apply.ForgetContacts()
+}
+
+// The interactive attempt gets stdin afresh: the batch attempt may have
+// read it, and a sudo password goes there.
+func TestTheAskingAttemptGetsStdinAgain(t *testing.T) {
+	apply.ForgetContacts()
+	t.Cleanup(apply.ForgetContacts)
+	var blanks int
+	t.Cleanup(apply.FakeHostKeys(func(apply.SSHTransport) bool { return true }, &blanks))
+	t.Cleanup(apply.FakeQuietLogin(func(apply.SSHTransport) bool { return true }))
+	var stdins []string
+	answers := []sshAnswer{{"admin@home-a: Permission denied (publickey).\n", 255}, {"ok\n", 0}}
+	t.Cleanup(apply.FakeSSH(func(_ []string, stdin string) (string, int) {
+		stdins = append(stdins, stdin)
+		a := answers[len(stdins)-1]
+		return a.out, a.exit
+	}, nil, func(time.Duration) {}, io.Discard))
+	if _, err := (apply.SSHTransport{Destination: "home-a"}).RunInput("cat", "secret\n"); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(stdins, []string{"secret\n", "secret\n"}) {
+		t.Errorf("stdin on each attempt: %q", stdins)
+	}
+}
+
+// A security key's identity, found by its type or its default name, may
+// ask for a touch whatever the mode; another key does not.
+func TestASecurityKeyIsFound(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimSuffix(p, ".pub")
+	}
+	sk := write("work.pub", "sk-ssh-ed25519@openssh.com AAAA work\n")
+	plain := write("id_ed25519.pub", "ssh-ed25519 AAAA me\n")
+	named := write("id_ecdsa_sk", "-----BEGIN OPENSSH PRIVATE KEY-----\n")
+	for path, want := range map[string]bool{sk: true, plain: false, named: true, filepath.Join(dir, "absent"): false} {
+		if got := apply.SecurityKey(path); got != want {
+			t.Errorf("SecurityKey(%s) = %v, want %v", path, got, want)
+		}
+	}
 }
 
 // ssh's question about a host key it does not know is followed by a blank
