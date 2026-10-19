@@ -269,9 +269,14 @@ func TestALoginThatNeverConnectedTriesNoMore(t *testing.T) {
 }
 
 // A login that refused is not kept: a refusal is the host's answer to this
-// key, and a later command may offer one it accepts.
+// key, and a later command may offer one it accepts. Its first contact is
+// tried in batch mode and not again where ssh may ask: declared keys have no
+// passphrase to ask for.
 func TestALoginThatWasRefusedIsAskedAgain(t *testing.T) {
 	loginScript(t, "paisans-f2a9@203.0.113.10: Permission denied (publickey).\n", 255)
+	var blanks int
+	t.Cleanup(apply.FakeHostKeys(func(apply.SSHTransport) bool { return true }, &blanks))
+	t.Cleanup(apply.FakeQuietLogin(func(apply.SSHTransport) bool { return true }))
 	ran := 0
 	t.Cleanup(apply.FakeSSH(func([]string, string) (string, int) {
 		ran++

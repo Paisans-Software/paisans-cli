@@ -20,6 +20,7 @@ import (
 	"os/exec"
 	pathpkg "path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -448,7 +449,9 @@ func markContacted(destination string) {
 // hostKeyKnown reports whether ssh already knows t's host key, so connecting
 // asks nothing. It asks ssh -G where the host and its known_hosts files are,
 // then ssh-keygen -F in each file. Anything it cannot tell counts as known:
-// the cost of a wrong answer is one missing blank line. Tests replace it.
+// the first attempt is then made in batch mode, and one that fails at the
+// host key is made again with the display held (batchWouldAsk). Tests
+// replace it.
 var hostKeyKnown = func(t SSHTransport) bool {
 	args := t.SSHArgs(nil, "true")
 	out, err := exec.Command("ssh", append([]string{"-G"}, args[:len(args)-1]...)...).Output()
@@ -485,6 +488,74 @@ var hostKeyKnown = func(t SSHTransport) bool {
 		}
 	}
 	return false
+}
+
+// quietLogin reports whether ssh can reach t with nothing that asks on the
+// terminal behind BatchMode's back: no ProxyCommand or ProxyJump, whose own
+// ssh or command may ask, and no security key, whose touch or PIN ssh waits
+// for whatever the mode. It reads ssh -G, and anything it cannot read
+// counts as a login that may ask. Tests replace it.
+var quietLogin = func(t SSHTransport) bool {
+	args := t.SSHArgs(nil, "true")
+	out, err := exec.Command("ssh", append([]string{"-G"}, args[:len(args)-1]...)...).Output()
+	if err != nil {
+		return false
+	}
+	home, _ := os.UserHomeDir()
+	for _, line := range strings.Split(string(out), "\n") {
+		key, value, _ := strings.Cut(line, " ")
+		switch key {
+		case "proxycommand", "proxyjump":
+			if value != "" && value != "none" {
+				return false
+			}
+		case "identityfile", "certificatefile":
+			if strings.HasPrefix(value, "~/") && home != "" {
+				value = filepath.Join(home, value[2:])
+			}
+			if securityKey(value) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// securityKey reports whether path, an identity ssh may offer, is a FIDO
+// key that exists: by its type in the public half, sk-ssh-ed25519@openssh.com
+// or sk-ecdsa-sha2-nistp256@openssh.com, or by the _sk in its default name.
+func securityKey(path string) bool {
+	pub, err := os.ReadFile(path + ".pub")
+	if err != nil {
+		pub, err = os.ReadFile(path)
+	}
+	if err != nil {
+		return false
+	}
+	return strings.HasPrefix(strings.TrimSpace(string(pub)), "sk-") || strings.HasSuffix(path, "_sk")
+}
+
+// batchWouldAsk reports whether a batch-mode attempt failed at what ssh
+// would have asked about, before any command ran: ssh's own exit, 255, with
+// a login refused where a password or a key's passphrase might have let it
+// in, or a host key ssh would have asked to accept (one hostKeyKnown took
+// for known: a key of another type, say). A refusal is no question where
+// the transport offers declared keys alone, which have no passphrase to
+// ask for, nor is too many authentication failures, nor a host key that
+// changed, which ssh refuses whatever the mode.
+func batchWouldAsk(t SSHTransport, err error, out string) bool {
+	var exit interface{ ExitCode() int }
+	if !errors.As(err, &exit) || exit.ExitCode() != 255 {
+		return false
+	}
+	last := lastLine(out)
+	switch {
+	case strings.Contains(last, "Host key verification failed"):
+		return !strings.Contains(out, "REMOTE HOST IDENTIFICATION HAS CHANGED")
+	case len(t.PublicKeys) > 0 && t.Destination == "":
+		return false
+	}
+	return loginRefused(out) && strings.Contains(out, "Permission denied (")
 }
 
 // blankLineOnTerminal writes an empty line to the controlling terminal, after
@@ -753,6 +824,9 @@ func (t SSHTransport) run(command string, stdin *string) (string, error) {
 	if t.once {
 		retries = nil
 	}
+	// interactive is a first contact whose login, tried in batch mode, was
+	// refused: ssh needs to ask for a password or a key's passphrase.
+	interactive := false
 	for attempt := 1; ; attempt++ {
 		cmd, cleanup, err := t.ssh(command)
 		if err != nil {
@@ -765,22 +839,38 @@ func (t SSHTransport) run(command string, stdin *string) (string, error) {
 		cmd.Stdout = &out
 		cmd.Stderr = &out
 		resume := func() {}
-		asks := false
+		asks, batch := false, false
 		if firstContact(t.Describe()) {
-			resume = promptHold()
 			asks = !hostKeyKnown(t)
+			// A host whose key is known, reached with nothing else that may
+			// ask (quietLogin), is tried first in batch mode, where ssh asks
+			// nothing, so the spinner runs; only a login that needs a
+			// question holds the display.
+			if batch = !asks && !interactive && quietLogin(t); batch {
+				cmd.Args = slices.Insert(cmd.Args, 1, "-o", "BatchMode=yes")
+			} else {
+				resume = promptHold()
+			}
 		}
-		if asks {
+		if asks || interactive {
 			AskMu.Lock()
 		}
 		err = runSSH(cmd)
+		if batch && batchWouldAsk(t, err, out.String()) {
+			// Stopped before any command ran, at what ssh would have asked
+			// about: the same attempt again, with the display held.
+			cleanup()
+			interactive = true
+			attempt--
+			continue
+		}
 		if asks && (err == nil || !connectionFailed(err, out.String())) {
 			// ssh asked about the host's key and was answered. The blank
 			// line goes before the display resumes, so the spinner redraws
 			// below it rather than leaving a frame above it.
 			blankLineOnTerminal()
 		}
-		if asks {
+		if asks || interactive {
 			AskMu.Unlock()
 		}
 		resume()

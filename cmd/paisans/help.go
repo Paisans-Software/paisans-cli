@@ -402,7 +402,7 @@ var helpCommands = []helpCommand{
 		name:    "operator grants",
 		summary: "List the site admit flags each deployment on a host was admitted with.",
 		usage:   []string{"paisans operator grants --ssh <user@host[:port] or ssh alias>"},
-		detail: "Read each admission record on the host --ssh names, an alias of your ssh config or user@host[:port], and print the site admit command that admitted each site: its grants (--watchdog, --public-ports) and --data-dir, --bridge-netfilter, --mesh-lan and --enable-ufw. " +
+		detail: "Read each admission record on the host --ssh names, an alias of your ssh config or user@host[:port], and list each site's grants and flags, yes or no (--watchdog, --public-ports, --data-dir, --bridge-netfilter, --mesh-lan, --enable-ufw) and its web server, then the site admit command that admitted it. " +
 			"Admit takes the rest of a site's admission from the configuration, so add --ssh and anything new, such as --swapfile, and read the dry run before --execute. Needs no " + config.FileName + " and no sudo, since the records are readable by any user; changes nothing.",
 	},
 	{

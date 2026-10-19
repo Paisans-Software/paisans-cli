@@ -682,13 +682,14 @@ paisans operator grants --ssh admin@203.0.113.9      # or user@host[:port]
   resolves to its host, user and port, or `user@host[:port]`.
 * **Hosts:** the one `--ssh` names, through your own ssh, with no sudo: the
   admission records in `/etc/paisans` are readable by any user.
-* **What it prints:** `--watchdog` and `--public-ports` as granted,
-  `--data-dir` as the directory given (the record keeps
-  `<path>/paisans-<token>`), `--bridge-netfilter`, and `--enable-ufw` where
-  admit enabled ufw, which changes nothing while ufw is active. `--mesh-lan`
-  comes with the LAN prefix recorded, since admit reads the LAN again from
-  the host. A record that does not parse is a warning, and the rest are
-  printed.
+* **What it prints:** for each site, every grant and flag, yes or no:
+  `--watchdog`, `--public-ports`, `--data-dir` as the directory given (the
+  record keeps `<path>/paisans-<token>`), `--bridge-netfilter`, `--mesh-lan`
+  with the LAN prefix recorded, since admit reads the LAN again from the
+  host, and `--enable-ufw` where admit enabled ufw, which changes nothing
+  while ufw is active; the owner's web server, which comes from the
+  configuration; then the `site admit` command with the flags that are yes.
+  A record that does not parse is a warning, and the rest are printed.
 
 ### `paisans catalog`
 

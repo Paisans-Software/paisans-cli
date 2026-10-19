@@ -12,7 +12,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Added
 
-- `paisans operator grants --ssh <alias or user@host>` prints the `site admit` command, grants and flags, that admitted each site on a host, read without sudo or a configuration.
+- `paisans operator grants --ssh <alias or user@host>` lists each site's grants and flags on a host, yes or no, and the `site admit` command that admitted it, read without sudo.
 - The mbin blueprint renders and locks every Meta, Instance and Federation setting from `apps.<app>.settings`, titling the instance from `display_name` and `community.name`; it needs Mbin `1.16.0+paisans`.
 - Blueprint format `paisans.blueprint/v3` gives templates `.DisplayName` and `.CommunityName`, so a catalog release using them is skipped by older binaries.
 - The uptime monitor's public status page is on by default, showing only each app's check at its public hostname; `settings.public_status_page: false` turns it off.
@@ -28,6 +28,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Fixed
 
+- A first ssh connection to a host whose key is known runs in batch mode, so its spinner and timer show; only a login that needs a password or passphrase pauses them.
 - `deployment apply` sets `src_valid_mark` to 0 in the rootless Docker namespace, which copies Tailscale's 1, ending a one second wait per connection and the apps' wrong client addresses; `doctor` checks it.
 - Caddy mounts its Caddyfile and snippets as one directory, `infra/caddy/etc`, so a reload after `deployment apply` reads the new routes; the old files are left over, and the next apply replaces Caddy once.
 - Under `management: paisans`, `validate` refuses `signup_default_groups` without the account app's member group and `create` writes `[members]`, so an accepted invite makes a member rather than an account in no group.

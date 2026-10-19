@@ -232,3 +232,14 @@ func ListMembers(d deployment.Deployment, at Transport) ([]string, error) {
 	}
 	return out, err
 }
+
+// FakeQuietLogin replaces the check for what may ask behind BatchMode's
+// back with quiet. It returns a function restoring the real one.
+func FakeQuietLogin(quiet func(SSHTransport) bool) func() {
+	old := quietLogin
+	quietLogin = quiet
+	return func() { quietLogin = old }
+}
+
+// SecurityKey exposes the check for a FIDO identity.
+func SecurityKey(path string) bool { return securityKey(path) }

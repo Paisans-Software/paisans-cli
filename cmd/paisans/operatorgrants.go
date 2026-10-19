@@ -72,6 +72,38 @@ func admitFlags(rec admission.Record) []string {
 	return flags
 }
 
+// grantLines is each grant and flag rec records, granted or not, one line
+// each, so a site admitted with none says so rather than printing nothing.
+func grantLines(rec admission.Record) string {
+	dataDir := "the user's home (no --data-dir)"
+	if rec.DataDir != "" {
+		dataDir = ui.Visible(path.Dir(rec.DataDir)) + " (--data-dir)"
+	}
+	meshLAN := "no"
+	if rec.MeshLAN != "" {
+		// --mesh-lan takes the LAN the host is on when admit runs, so the
+		// one recorded is said beside it.
+		meshLAN = "yes, " + ui.Visible(rec.MeshLAN) + " recorded; admit reads the LAN again from the host (--mesh-lan)"
+	}
+	webServer := "none"
+	if w := rec.WebServer; w != nil {
+		webServer = ui.Visible(w.Server)
+		if w.Container != "" {
+			webServer += ", in container " + ui.Visible(w.Container)
+		}
+		webServer += ", the owner's, from the configuration's web_server"
+	}
+	return strings.Join([]string{
+		"watchdog: " + yesNo(rec.Grants.Watchdog) + " (--watchdog)",
+		"public ports: " + yesNo(rec.Grants.PublicPorts) + " (--public-ports)",
+		"data directory: " + dataDir,
+		"bridge netfilter: " + yesNo(rec.BridgeNetfilter) + " (--bridge-netfilter)",
+		"mesh LAN: " + meshLAN,
+		"ufw enabled by admit: " + yesNo(rec.UFWEnabled) + " (--enable-ufw)",
+		"web server: " + webServer,
+	}, "\n")
+}
+
 // runOperatorGrants is `paisans operator grants`: each admission record on
 // the host --ssh names, as the site admit flags that admitted it. It needs
 // no configuration and changes nothing.
@@ -119,19 +151,14 @@ func runOperatorGrants(args []string) error {
 			roles = "no role"
 		}
 		command := strings.Join(append([]string{"paisans site admit --site", apply.ShellQuote(rec.Site)}, admitFlags(rec)...), " ")
-		line := fmt.Sprintf("site %s of %s (%s), as %s: %s", ui.Visible(rec.Site), rec.Deployment, roles, rec.User, ui.Visible(command))
-		if rec.MeshLAN != "" {
-			// --mesh-lan takes the LAN the host is on when admit runs, so
-			// the one recorded is said beside it.
-			line += fmt.Sprintf(" (--mesh-lan recorded %s; admit reads the LAN again from the host)", ui.Visible(rec.MeshLAN))
-		}
-		r.Step(line).End(ui.OK, "")
+		r.Step(fmt.Sprintf("site %s of %s (%s), as %s, admitted %s", ui.Visible(rec.Site), rec.Deployment, roles, rec.User, rec.AdmittedAt)).End(ui.OK, "")
+		r.Explain(grantLines(rec) + "\nadmit again: " + ui.Visible(command))
 		read++
 	}
 	if len(records) == 0 {
 		r.Result("No admission record in %s: no deployment is admitted to %s.", admission.Dir, *sshFlag)
 		return nil
 	}
-	r.Result("%d admission record(s) read. Each command above carries its site's grants and flags; admit takes the rest from the configuration. Add --ssh and anything new, such as --swapfile, and read its dry run before --execute.", read)
+	r.Result("%d admission record(s) read. Each admit again command carries its site's grants and flags; admit takes the rest from the configuration. Add --ssh and anything new, such as --swapfile, and read its dry run before --execute.", read)
 	return nil
 }
