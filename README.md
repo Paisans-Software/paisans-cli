@@ -6355,7 +6355,11 @@ install
 
 The pull lines are drawn the same way, each ending with how many images its
 host pulled, or `nothing to pull`; `-v` lists each image under its site's line
-with the time it took.
+with the time it took. Under each line, at every verbosity, is every image whose
+build that site's apply moves, with the builds it goes between, as a dry run of
+the one site lists it. The install lines say only how long each site took, so
+this is where a run that brings an app a new release says which app, and to
+what.
 
 A host whose prepare fails does not stop the others: each is prepared, each
 failure is marked on its own line, and the run then stops before install with
@@ -6423,7 +6427,8 @@ work. `-v` lists each step under its line with its own status. Each pull line is
 the plan its site's apply would make: `○` with how many images it would pull and
 the free space they land in, `✓` `nothing to pull`, `✗` with the free space
 refusal `--execute` would stop at, or a dim `·` `after site prepare` while its
-site's prepare has work, since a host whose Docker cannot answer has no images to ask about:
+site's prepare has work, since a host whose Docker cannot answer has no images to ask about.
+Under a line that is not waiting is each image whose build its apply would move:
 
 ```
 configuration
@@ -6438,6 +6443,7 @@ prepare
 pull
   · home-a: after site prepare --site home-a
   ○ home-b: 3 images to pull, 12.4 GiB free
+       talk  app  ghcr.io/example-org/mbin:v1-fork  1.15.0-fork (sha256:1a2b3c4d5e6f) -> 1.16.0-fork (sha256:3c4d5e6f7a8b)
   ○ vm: 1 image to pull, 6.2 GiB free
   ✓ watch: nothing to pull
 

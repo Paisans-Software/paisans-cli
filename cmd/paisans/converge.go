@@ -1050,6 +1050,9 @@ type stepStatus struct {
 	// that takes an earlier one's status.
 	explain, problem string
 	reports          []checkReport
+	// moves is each image a pull line's site moves to another build, shown
+	// under the line at every verbosity. See imageMoves.
+	moves []string
 }
 
 // convergeStatus is the dry run's plan: a prepare line per site, a pull
@@ -1268,6 +1271,9 @@ func endStatus(line ui.Line, st stepStatus) {
 		line.Note(n.Text, n.Detail)
 	}
 	line.Explain(st.explain)
+	for _, m := range st.moves {
+		line.Explain(m)
+	}
 	line.End(st.mark, st.result)
 }
 
