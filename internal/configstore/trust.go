@@ -3,6 +3,7 @@ package configstore
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 )
 
@@ -14,10 +15,14 @@ type Graph struct {
 }
 
 // Anchor is what the operator holds that nobody else can forge: their own
-// signing key, a pinned root, or both.
+// signing keys, a pinned root, or both. Signers is a set of fingerprints:
+// the key .paisans/signing-key records, or, on a workstation that records
+// none, every key the operator's ssh-agent holds or the one --key names.
+// Only the operator can sign with a key they hold, so a version any of them
+// signed is one the operator made. Signers never come from the sites.
 type Anchor struct {
-	Signer string // the operator's key fingerprint, from .paisans/signing-key; may be empty
-	Root   string // a pinned root sha; may be empty
+	Signers []string // the operator's key fingerprints; may be empty
+	Root    string   // a pinned root sha; may be empty
 }
 
 // Verdict is what Judge decides about a Graph.
@@ -68,10 +73,14 @@ func (e *UnreadableOperatorsError) Unwrap() error { return e.Err }
 // Judge decides which versions to trust, starting from the operator's anchor,
 // by the spec's "Which versions the workstation trusts":
 //
-//   - The anchor is the operator's newest version that passes shape, or else
-//     the pinned root. With both, the signed anchor must descend from the
-//     pin. The anchor and every ancestor of it are trusted whatever their
-//     shape, because the operator signed after them.
+//   - The anchor is the operator's newest version that passes shape, signed
+//     by any of the anchor's keys, or else the pinned root. With both, the
+//     signed anchor must descend from the pin. The anchor and every ancestor
+//     of it are trusted whatever their shape, because the operator signed
+//     after them.
+//   - When the newest versions the anchor's keys signed are not on one line,
+//     the operator's own keys signed divergent heads: that is a fork, and
+//     each of those heads and its ancestors is trusted, nothing else.
 //   - Removals in that history always stand, and bar the versions signed by
 //     each removed key that are not ancestors of the removal.
 //   - Every other version is a candidate when it passes shape, is not a root,
@@ -96,10 +105,14 @@ func Judge(g Graph, a Anchor) (Verdict, error) {
 	j := &judgement{g: g, operators: map[string]operatorsResult{}, anc: map[string]map[string]bool{}}
 	order, cyclic := j.topo()
 
-	anchor, err := j.anchor(a, order)
+	tips, err := j.anchor(a, order)
 	if err != nil {
 		return Verdict{}, err
 	}
+	if len(tips) > 1 {
+		return j.signersFork(tips), nil
+	}
+	anchor := tips[0]
 	history := map[string]bool{anchor: true}
 	for sha := range j.ancestors(anchor) {
 		history[sha] = true
@@ -321,36 +334,86 @@ func (j *judgement) operatorsOf(sha string) operatorsResult {
 	return j.operators[sha]
 }
 
-// anchor picks where trust starts.
-func (j *judgement) anchor(a Anchor, order []string) (string, error) {
-	signed := ""
-	if a.Signer != "" {
-		for _, sha := range order {
-			v := j.g.Versions[sha]
-			if v.SignerFP != a.Signer || j.shape(sha) != "" {
-				continue
-			}
-			if signed == "" || v.Revision > j.g.Versions[signed].Revision ||
-				(v.Revision == j.g.Versions[signed].Revision && sha < signed) {
-				signed = sha
-			}
+// anchor picks where trust starts: one version, or, when the newest
+// versions the anchor's keys signed diverge, each of those heads, for a fork.
+func (j *judgement) anchor(a Anchor, order []string) ([]string, error) {
+	newest := map[string]string{} // signer -> its newest version
+	for _, sha := range order {
+		v := j.g.Versions[sha]
+		if !slices.Contains(a.Signers, v.SignerFP) || j.shape(sha) != "" {
+			continue
+		}
+		if n, ok := newest[v.SignerFP]; !ok || j.newer(sha, n) {
+			newest[v.SignerFP] = sha
 		}
 	}
+	// A key whose newest version is in another's history is on its line.
+	var tips []string
+	for _, sha := range newest {
+		if slices.Contains(tips, sha) {
+			continue
+		}
+		below := false
+		for _, other := range newest {
+			if other != sha && j.ancestors(other)[sha] {
+				below = true
+				break
+			}
+		}
+		if !below {
+			tips = append(tips, sha)
+		}
+	}
+	sort.Slice(tips, func(x, y int) bool { return j.newer(tips[x], tips[y]) })
 	if a.Root != "" {
 		if reason := j.goodRoot(a.Root); reason != "" {
-			return "", &anchorError{fmt.Sprintf("the pinned root %s %s", a.Root, reason)}
+			return nil, &anchorError{fmt.Sprintf("the pinned root %s %s", a.Root, reason)}
 		}
-		if signed == "" {
-			return a.Root, nil
+		if len(tips) == 0 {
+			return []string{a.Root}, nil
 		}
-		if a.Root != signed && !j.ancestors(signed)[a.Root] {
-			return "", &anchorError{fmt.Sprintf("your newest version %s does not descend from the pinned root %s", signed, a.Root)}
+		for _, tip := range tips {
+			if a.Root != tip && !j.ancestors(tip)[a.Root] {
+				return nil, &anchorError{fmt.Sprintf("your newest version %s does not descend from the pinned root %s", tip, a.Root)}
+			}
 		}
 	}
-	if signed != "" {
-		return signed, nil
+	if len(tips) == 0 {
+		return nil, ErrNoAnchor
 	}
-	return "", ErrNoAnchor
+	return tips, nil
+}
+
+// newer orders versions by revision, highest first, then by lowest hash.
+func (j *judgement) newer(x, y string) bool {
+	vx, vy := j.g.Versions[x], j.g.Versions[y]
+	if vx.Revision != vy.Revision {
+		return vx.Revision > vy.Revision
+	}
+	return x < y
+}
+
+// signersFork is the verdict when the operator's own keys signed divergent
+// heads, tips. Each is trusted with its ancestors, since the operator signed
+// it, and nothing outside them is: which line goes on is the operator's to
+// say, by merging them. A key the operator holds may be one a later version
+// removed, and someone else may hold it too, so no head outranks another by
+// its revision.
+func (j *judgement) signersFork(tips []string) Verdict {
+	out := Verdict{Trusted: map[string]bool{}, Reasons: map[string]string{}, Heads: tips, Fork: true}
+	for _, tip := range tips {
+		out.Trusted[tip] = true
+		for sha := range j.ancestors(tip) {
+			out.Trusted[sha] = true
+		}
+	}
+	for sha := range j.g.Versions {
+		if !out.Trusted[sha] {
+			out.Trusted[sha] = false
+			out.Reasons[sha] = "not in the history of a head your keys signed, and those heads diverge (anchor)"
+		}
+	}
+	return out
 }
 
 // goodRoot says why sha cannot anchor as a pinned root, or "" when it can.

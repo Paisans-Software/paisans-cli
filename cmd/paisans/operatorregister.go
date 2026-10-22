@@ -79,7 +79,7 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error
 
 	// Trust starts from the pin, and from any version this key signed
 	// before; with neither, the sites' history alone is never trusted.
-	anchor := configstore.Anchor{Root: pin, Signer: k.Fingerprint}
+	anchor := configstore.Anchor{Root: pin, Signers: []string{k.Fingerprint}}
 	sites := configTransports(cfg)
 	m := gatherMode{
 		execute:  *execute,

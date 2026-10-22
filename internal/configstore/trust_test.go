@@ -47,7 +47,7 @@ func judgeOK(t *testing.T, f *fake, a Anchor) Verdict {
 	return v
 }
 
-func alice() Anchor { return Anchor{Signer: "fp-alice"} }
+func alice() Anchor { return Anchor{Signers: []string{"fp-alice"}} }
 
 func wantHeads(t *testing.T, v Verdict, heads ...string) {
 	t.Helper()
@@ -124,7 +124,7 @@ func TestJudgeForgedRoot(t *testing.T) {
 }
 
 func TestJudgeNoAnchor(t *testing.T) {
-	_, err := Judge(chain().graph(), Anchor{Signer: "fp-zed"})
+	_, err := Judge(chain().graph(), Anchor{Signers: []string{"fp-zed"}})
 	if !errors.Is(err, ErrNoAnchor) {
 		t.Fatalf("err = %v, want ErrNoAnchor", err)
 	}
@@ -158,7 +158,7 @@ func TestJudgePinMustBeAGoodRoot(t *testing.T) {
 func TestJudgeSignerAnchorMustDescendFromPin(t *testing.T) {
 	f := chain()
 	f.add("m1", 1, "fp-mallory", nil, "mallory")
-	_, err := Judge(f.graph(), Anchor{Signer: "fp-alice", Root: "m1"})
+	_, err := Judge(f.graph(), Anchor{Signers: []string{"fp-alice"}, Root: "m1"})
 	if !errors.Is(err, ErrNoAnchor) {
 		t.Fatalf("err = %v, want ErrNoAnchor", err)
 	}
@@ -168,7 +168,7 @@ func TestJudgeSignerAnchorMustDescendFromPin(t *testing.T) {
 		}
 	}
 
-	v := judgeOK(t, f, Anchor{Signer: "fp-alice", Root: "v1"})
+	v := judgeOK(t, f, Anchor{Signers: []string{"fp-alice"}, Root: "v1"})
 	if v.AnchorAt != "v3" {
 		t.Fatalf("AnchorAt = %s, want v3", v.AnchorAt)
 	}
@@ -176,7 +176,7 @@ func TestJudgeSignerAnchorMustDescendFromPin(t *testing.T) {
 }
 
 func TestJudgeEmptyGraph(t *testing.T) {
-	for _, a := range []Anchor{{Root: "v1"}, {Signer: "fp-alice"}, {}} {
+	for _, a := range []Anchor{{Root: "v1"}, {Signers: []string{"fp-alice"}}, {}} {
 		if _, err := Judge(newFake().graph(), a); !errors.Is(err, ErrNoAnchor) {
 			t.Fatalf("anchor %+v: err = %v, want ErrNoAnchor", a, err)
 		}
@@ -204,7 +204,7 @@ func TestJudgeRemovalInHistoryStands(t *testing.T) {
 func TestJudgeMutualRemovalOutsideHistoryIsAConflict(t *testing.T) {
 	f := reviewAttack("fp-op")
 	for i := 0; i < 5; i++ {
-		_, err := Judge(f.graph(), Anchor{Signer: "fp-op"})
+		_, err := Judge(f.graph(), Anchor{Signers: []string{"fp-op"}})
 		var c *ConflictError
 		if !errors.As(err, &c) {
 			t.Fatalf("err = %v, want *ConflictError", err)
@@ -225,7 +225,7 @@ func TestJudgeUncontestedRemovalOutsideHistory(t *testing.T) {
 	f := reviewAttack("fp-op")
 	f.operators["b2"] = map[string]string{"fp-op": "op", "fp-alice": "alice", "fp-bob": "bob"}
 	f.add("b3", 3, "fp-alice", on("b2"), "op", "alice", "bob")
-	v := judgeOK(t, f, Anchor{Signer: "fp-op"})
+	v := judgeOK(t, f, Anchor{Signers: []string{"fp-op"}})
 	wantUntrusted(t, v, "b2", "removal")
 	wantUntrusted(t, v, "b3", "not trusted")
 	wantTrusted(t, v, "a2", "a3")
@@ -244,7 +244,7 @@ func TestJudgeKeyRotation(t *testing.T) {
 	f.operators["v3"] = map[string]string{"fp-new": "alice"}
 	f.add("x2", 2, "fp-old", on("v1"))
 	f.operators["x2"] = map[string]string{"fp-old": "alice"}
-	v := judgeOK(t, f, Anchor{Signer: "fp-new"})
+	v := judgeOK(t, f, Anchor{Signers: []string{"fp-new"}})
 	wantUntrusted(t, v, "x2", "removal")
 	wantHeads(t, v, "v3")
 }
@@ -405,7 +405,7 @@ func TestJudgeConflictChain(t *testing.T) {
 	f.add("ax", 2, "fp-a", on("v1"), "op", "a", "c")
 	f.add("by", 2, "fp-b", on("v1"), "op", "a", "b")
 	f.add("cz", 2, "fp-c", on("v1"), "op", "b", "c")
-	_, err := Judge(f.graph(), Anchor{Signer: "fp-op"})
+	_, err := Judge(f.graph(), Anchor{Signers: []string{"fp-op"}})
 	var c *ConflictError
 	if !errors.As(err, &c) {
 		t.Fatalf("err = %v, want *ConflictError", err)
@@ -448,7 +448,7 @@ func TestJudgeInvalidPinWithSignerAnchor(t *testing.T) {
 	f.add("e1", 1, "fp-eve", nil, "alice")
 	f.add("e2", 2, "fp-alice", on("e1"), "alice")
 	for _, pin := range []string{"elsewhere", "v2", "e1"} {
-		_, err := Judge(f.graph(), Anchor{Signer: "fp-alice", Root: pin})
+		_, err := Judge(f.graph(), Anchor{Signers: []string{"fp-alice"}, Root: pin})
 		if !errors.Is(err, ErrNoAnchor) {
 			t.Fatalf("pin %s: err = %v, want ErrNoAnchor", pin, err)
 		}
@@ -513,7 +513,7 @@ func TestJudgeKeyRotatedTwice(t *testing.T) {
 	keys("s2", "k1")
 	f.add("s3", 3, "k2", on("v2"))
 	keys("s3", "k2")
-	for _, a := range []Anchor{{Signer: "k3"}, {Root: "v1"}} {
+	for _, a := range []Anchor{{Signers: []string{"k3"}}, {Root: "v1"}} {
 		v := judgeOK(t, f, a)
 		wantUntrusted(t, v, "s2", "removal")
 		wantUntrusted(t, v, "s3", "removal")
@@ -566,5 +566,69 @@ func TestJudgeBuildReasons(t *testing.T) {
 	f.vs["v1"] = root
 	if _, err := Judge(f.graph(), Anchor{Root: "v1"}); err == nil || !strings.Contains(err.Error(), "`paisans deployment apply --execute` publishes a new first version") {
 		t.Errorf("root: %v", err)
+	}
+}
+
+// With several keys, the newest version any of them signed anchors, and keys
+// that signed nothing change nothing.
+func TestJudgeAnySignerAnchors(t *testing.T) {
+	f := chain()
+	f.add("v4", 4, "fp-bob", on("v3"), "alice", "bob")
+	f.operators["v3"] = map[string]string{"fp-alice": "alice", "fp-bob": "bob"}
+	v := judgeOK(t, f, Anchor{Signers: []string{"fp-zed", "fp-alice", "fp-bob"}})
+	if v.AnchorAt != "v4" {
+		t.Fatalf("AnchorAt = %s, want v4", v.AnchorAt)
+	}
+	wantHeads(t, v, "v4")
+
+	if _, err := Judge(f.graph(), Anchor{Signers: []string{"fp-zed", "fp-yan"}}); !errors.Is(err, ErrNoAnchor) {
+		t.Fatalf("err = %v, want ErrNoAnchor", err)
+	}
+}
+
+// Two keys whose newest versions diverge are a fork: neither is chosen,
+// even when one history removes the other's key, since an anchor that
+// picked by revision would let a stolen key outrank the removal of it.
+func TestJudgeSignersDivergeIsFork(t *testing.T) {
+	f := newFake()
+	f.add("v1", 1, "fp-alice", nil, "alice", "bob")
+	f.add("a2", 2, "fp-alice", on("v1"), "alice")
+	f.add("b2", 2, "fp-bob", on("v1"), "alice", "bob")
+	f.add("b3", 3, "fp-bob", on("b2"), "alice", "bob")
+	v := judgeOK(t, f, Anchor{Signers: []string{"fp-alice", "fp-bob"}})
+	wantHeads(t, v, "b3", "a2")
+	wantTrusted(t, v, "v1", "a2", "b2", "b3")
+	if v.AnchorAt != "" {
+		t.Fatalf("AnchorAt = %s, want none", v.AnchorAt)
+	}
+
+	// One key alone judges as before.
+	v = judgeOK(t, f, Anchor{Signers: []string{"fp-alice"}})
+	if v.AnchorAt != "a2" {
+		t.Fatalf("AnchorAt = %s, want a2", v.AnchorAt)
+	}
+}
+
+// A key whose newest version is in another key's history is on one line
+// with it, not a fork.
+func TestJudgeSignersOnOneLine(t *testing.T) {
+	f := chain()
+	f.add("v4", 4, "fp-bob", on("v3"), "alice", "bob")
+	f.operators["v3"] = map[string]string{"fp-alice": "alice", "fp-bob": "bob"}
+	v := judgeOK(t, f, Anchor{Signers: []string{"fp-bob", "fp-alice"}})
+	if v.AnchorAt != "v4" || v.Fork {
+		t.Fatalf("AnchorAt = %s, Fork = %v; want v4 without a fork", v.AnchorAt, v.Fork)
+	}
+}
+
+// A pinned root holds for every key: a held key's newest version outside
+// the pin's history is refused.
+func TestJudgeSignersMustDescendFromPin(t *testing.T) {
+	f := chain()
+	f.add("m1", 1, "fp-mallory", nil, "mallory")
+	f.add("o1", 1, "fp-bob", nil, "bob")
+	_, err := Judge(f.graph(), Anchor{Signers: []string{"fp-alice", "fp-bob"}, Root: "v1"})
+	if !errors.Is(err, ErrNoAnchor) || !strings.Contains(err.Error(), "o1") {
+		t.Fatalf("err = %v, want ErrNoAnchor naming o1", err)
 	}
 }

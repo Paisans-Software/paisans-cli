@@ -243,7 +243,7 @@ func (l Local) SetSigningKey(line string) error {
 }
 
 // Anchor is what this workstation starts trust from: the fingerprint of its
-// signing key and its pinned root, either of which may be empty.
+// recorded signing key and its pinned root, either of which may be empty.
 func (l Local) Anchor() (Anchor, error) {
 	var a Anchor
 	line, err := l.SigningKey()
@@ -252,7 +252,7 @@ func (l Local) Anchor() (Anchor, error) {
 	}
 	if line != "" {
 		k, _, _ := config.ParseKeyLine(line)
-		a.Signer = k.Fingerprint
+		a.Signers = []string{k.Fingerprint}
 	}
 	a.Root, err = l.Root()
 	return a, err
