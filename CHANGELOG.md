@@ -26,6 +26,10 @@ changes share a bullet. Detailed notes are on the corresponding
 - `deployment recover --from` takes any login that reaches the host, the owner's too, and reaches it again as the deployment's user its admission record names, so a recovery needs no name the lost workstation held.
 - `deployment recover`, `deployment pull`, `init --age-private-key-file` and the saved version's `applied from` note of `deployment apply` name the configuration's directory as a full path, not `.`.
 
+### Security
+
+- Pasted secrets holding a control character or line separator are refused when set or loaded, and the DNS tokens and OIDC client credentials are quoted in env files, so none can add a variable.
+
 ## [0.3.0-rc.5] - 2026-10-19
 
 ### Added
