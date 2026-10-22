@@ -7,6 +7,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployrecord"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // Orphan is a secret naming something the configuration no longer declares:
@@ -88,17 +89,17 @@ func Dropped(cfg *config.Config, deployed *deployrecord.Record) []Orphan {
 	var out []Orphan
 	for _, n := range deployed.Sites {
 		if !declared.Lists("sites", n) {
-			out = append(out, Orphan{Key: "sites." + n, Why: why, Leaves: "restore it, or take it out with `paisans site remove " + n + "`, or `paisans site remove " + n + " --force --ssh <its host>` if its host is gone"})
+			out = append(out, Orphan{Key: "sites." + n, Why: why, Leaves: "restore it, or take it out with `" + progname.Name() + " site remove " + n + "`, or `" + progname.Name() + " site remove " + n + " --force --ssh <its host>` if its host is gone"})
 		}
 	}
 	for _, n := range deployed.Apps {
 		if !declared.Lists("apps", n) {
-			out = append(out, Orphan{Key: "apps." + n, Why: why, Leaves: "restore it, or take it out with `paisans app remove " + n + "`"})
+			out = append(out, Orphan{Key: "apps." + n, Why: why, Leaves: "restore it, or take it out with `" + progname.Name() + " app remove " + n + "`"})
 		}
 	}
 	for _, n := range deployed.PocketIDGroups {
 		if !declared.Lists("pocket_id_groups", n) {
-			out = append(out, Orphan{Key: "pocket_id_groups." + n, Why: why, Leaves: "restore an app naming it in signup_default_groups, or `paisans app remove` the app that named it"})
+			out = append(out, Orphan{Key: "pocket_id_groups." + n, Why: why, Leaves: "restore an app naming it in signup_default_groups, or `" + progname.Name() + " app remove` the app that named it"})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })

@@ -7,6 +7,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
@@ -54,7 +55,7 @@ func (p *Plan) probeEtcd() ([]apply.EtcdMember, error) {
 		p.clusterID = cluster.ID
 		return members, nil
 	}
-	return nil, fmt.Errorf("site add %s: no etcd answers as a voter on any of %s. site add grows a running cluster; a deployment not started yet is started with `paisans deployment apply`", p.Site, strings.Join(order, ", "))
+	return nil, fmt.Errorf("site add %s: no etcd answers as a voter on any of %s. site add grows a running cluster; a deployment not started yet is started with `"+progname.Name()+" deployment apply`", p.Site, strings.Join(order, ", "))
 }
 
 // joiners are the configured members that are not yet voters: every witness

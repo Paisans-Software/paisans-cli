@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // patronictl runs inside a site's Patroni container, against the
@@ -125,7 +126,7 @@ func (p *Plan) buildReplica(members []patroniMember) *Stage {
 		return st
 	}
 	st.Steps = append(st.Steps,
-		Step{Site: p.Site, Verb: "apply", Title: "apply missing files on " + p.Site, Text: "any file of its own still missing, as `paisans deployment apply --site " + p.Site + "` would"},
+		Step{Site: p.Site, Verb: "apply", Title: "apply missing files on " + p.Site, Text: "any file of its own still missing, as `" + progname.Name() + " deployment apply --site " + p.Site + "` would"},
 		Step{Site: p.Site, Verb: "start", Title: "start Patroni on " + p.Site, Text: "Patroni, which clones the leader with pg_basebackup: " + p.startInfra()},
 	)
 	st.run = func() error {
