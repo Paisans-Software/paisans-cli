@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // CoreCatalog is the name the core catalog is declared under, to point it at
@@ -115,10 +117,10 @@ func (c *Config) catalogProblems() []string {
 			add("%s.url: %q is not a catalog's repository. A catalog's repository is named %s<name>, as in https://github.com/example/%sblueprints.", key, cat.URL, CatalogRepoPrefix, CatalogRepoPrefix)
 		}
 		if cat.Commit != "" && !fullCommit.MatchString(cat.Commit) {
-			add("%s.commit: %q is not a full 40 character lowercase commit id. A pin names exactly what renders; `paisans catalog add` writes it.", key, cat.Commit)
+			add("%s.commit: %q is not a full 40 character lowercase commit id. A pin names exactly what renders; `"+progname.Name()+" catalog add` writes it.", key, cat.Commit)
 		}
 		if cat.Commit == "" && name != CoreCatalog {
-			add("%s.commit: required, the commit the catalog is pinned to. `paisans catalog add` writes it.", key)
+			add("%s.commit: required, the commit the catalog is pinned to. `"+progname.Name()+" catalog add` writes it.", key)
 		}
 	}
 	for _, name := range c.AppNames() {
@@ -139,9 +141,9 @@ func (c *Config) catalogProblems() []string {
 			add("%s: %q names the core catalog, whose blueprints are written unqualified: %s.", key, blueprint, bp)
 		default:
 			if _, ok := c.Catalogs[catalog]; !ok {
-				how := "paisans catalog add " + catalog + " <url>"
+				how := progname.Name() + " catalog add " + catalog + " <url>"
 				if strings.Contains(catalog, "/") {
-					how = "paisans catalog add " + catalog + "`, which reads https://github.com/" + strings.Replace(catalog, "/", "/"+CatalogRepoPrefix, 1) + ", or `paisans catalog add " + catalog + " <url>"
+					how = progname.Name() + " catalog add " + catalog + "`, which reads https://github.com/" + strings.Replace(catalog, "/", "/"+CatalogRepoPrefix, 1) + ", or `" + progname.Name() + " catalog add " + catalog + " <url>"
 				}
 				add("%s: %q names the catalog %q, which catalogs does not declare. Add it with `%s`.", key, blueprint, catalog, how)
 			}

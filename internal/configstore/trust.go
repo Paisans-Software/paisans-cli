@@ -6,6 +6,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // Graph is every version the workstation holds, with a way to read each
@@ -595,9 +597,9 @@ func (j *judgement) shape(sha string) string {
 	case v.BuildNewer:
 		return fmt.Sprintf("it was published by paisans %q, a version this paisans cannot order, so a newer paisans may have published it; upgrade paisans (shape)", v.Build.Version)
 	case !v.BuildOK && len(v.Parents) == 0:
-		return "it is a root that does not say which build of paisans published it, so no version can be published on it and the sites keep it: redeploy, by each host's owner running `paisans site evict` and admitting the deployment again, then `paisans deployment apply --execute` publishes a new first version (shape)"
+		return "it is a root that does not say which build of paisans published it, so no version can be published on it and the sites keep it: redeploy, by each host's owner running `" + progname.Name() + " site evict` and admitting the deployment again, then `" + progname.Name() + " deployment apply --execute` publishes a new first version (shape)"
 	case !v.BuildOK:
-		return "it does not say which build of paisans published it; publish the configuration again, with `paisans deployment publish --execute` (shape)"
+		return "it does not say which build of paisans published it; publish the configuration again, with `" + progname.Name() + " deployment publish --execute` (shape)"
 	}
 	want := 1
 	for _, p := range v.Parents {

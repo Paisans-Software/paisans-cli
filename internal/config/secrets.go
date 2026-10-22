@@ -16,6 +16,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/keystore"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -211,7 +212,7 @@ func loadSecrets(path, id string) (*Secrets, error) {
 func loadSecretsBytes(path, id, replacing string) (*Secrets, []byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, nil, readProblem(path, "Run paisans init to create it, or name the file with --secrets.", err)
+		return nil, nil, readProblem(path, "Run "+progname.Name()+" init to create it, or name the file with --secrets.", err)
 	}
 	s, err := parseSecrets(data, path, id, replacing)
 	return s, data, err
@@ -314,7 +315,7 @@ func foreignSecretsProblem(path, theirs, ours string) error {
 	}
 	return &ui.Problem{
 		Hint:    fmt.Sprintf("%s belongs to deployment %s, not %s", ui.ShortPath(path), a, b),
-		Explain: "It holds another deployment's credentials and the state captured from its running services, such as OIDC clients and Pocket ID group IDs, so it is not read for this one. To start this deployment fresh, move that file aside and run paisans init; paisans deployment apply creates a new one as well.",
+		Explain: "It holds another deployment's credentials and the state captured from its running services, such as OIDC clients and Pocket ID group IDs, so it is not read for this one. To start this deployment fresh, move that file aside and run " + progname.Name() + " init; " + progname.Name() + " deployment apply creates a new one as well.",
 		Cause:   fmt.Errorf("%s: id: %s, and the configuration's id is %s", path, theirs, ours),
 	}
 }
