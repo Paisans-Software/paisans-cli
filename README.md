@@ -4437,9 +4437,11 @@ pins with `--root`. **A history found only on the sites is never trusted on its
 own, however consistent it looks**, because someone with root on those sites
 could have written it, signed with their own key and listing themselves as an
 operator. The operator's key is the one `.paisans/signing-key` records; on a
-workstation that records none, a pull or a recovery takes every key the
-operator's ssh-agent holds, or the public key `--key` names, because only the
-holder of a key can sign with it, and records the one that signed the anchor.
+workstation that records none, a pull, a log or a recovery takes every key the
+operator's ssh-agent holds, or the public key `--key` names, `--root` or not,
+because only the holder of a key can sign with it; with a root pinned, the
+version they anchor on must descend from it. A pull or a recovery records the
+key that signed the anchor.
 Those keys come from the workstation alone, never from a site. When two of them
 signed heads that diverge, neither anchors and it is a fork, since one may be a
 key a later version removed that someone else holds too. With neither an own

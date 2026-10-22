@@ -28,6 +28,7 @@ changes share a bullet. Detailed notes are on the corresponding
 - `deployment recover --from` takes any login that reaches the host, the owner's too, and reaches it again as the deployment's user its admission record names, so a recovery needs no name the lost workstation held.
 - `deployment recover`, `deployment pull`, `init --age-private-key-file` and the saved version's `applied from` note of `deployment apply` name the configuration's directory as a full path, not `.`.
 - `deployment recover` and `deployment pull` on a workstation recording no signing key start trust from any key the ssh-agent holds, or one `--key` names, so recovery needs no `--root`.
+- `deployment recover`, `pull` and `log` on a workstation recording no signing key start trust from any key the ssh-agent holds, or one `--key` names, so recovery needs no `--root`.
 
 ### Security
 

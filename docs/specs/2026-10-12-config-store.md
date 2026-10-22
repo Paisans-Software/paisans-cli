@@ -25,9 +25,13 @@ Founder decisions, 2026-10-12, in session:
 * **Sites hold recovery copies now and are the shared source of truth later**;
   the version history and fork detection are built from the start.
 * **The anchor is the operator's own signature, or a pinned root.** The
-  operator's own SSH key, recorded by `paisans admin register`, or a root hash
-  they pin, is where trust starts; a history found only on the sites is never
-  trusted on its own. Founder decision, 2026-10-12.
+  operator's own SSH key is where trust starts: the signing key the workstation
+  records, or, when it records none, any key the local ssh-agent holds or the
+  public key `--key` names. A root hash the operator pins constrains it: the
+  version the key anchors on must descend from the pin, and with no such
+  version the pin is the anchor. A history found only on the sites is never
+  trusted on its own. Founder decision, 2026-10-12; the agent's keys and
+  `--key`, founder decision, 2026-10-22.
 * **One signature, from any current admin.** Every admin is trusted with the
   whole deployment already (they hold the configuration and can decrypt the
   secrets); signatures are for telling an admin from someone who is not one, and
@@ -85,12 +89,12 @@ can forge.
 **The anchor** is the newest version signed by the operator's own SSH key, the
 one `paisans admin register` recorded (below), or a root hash the operator pins
 with `--root <hash>`. A workstation that has pulled before keeps both in
-`.paisans/`. On a workstation that records no key, a pull or recovery takes as
+`.paisans/`. On a workstation that records no key, a pull, log or recovery takes as
 the operator's keys every key their ssh-agent holds, or the one public key
-`--key <path.pub>` names: the anchor is then the newest version that passes
+`--key <path.pub>` names, whether or not a root is pinned: the anchor is then the newest version that passes
 shape and is signed by any of them. Nothing is chosen among them, so nothing is
-guessed, and with `--execute` the anchor's signer is recorded as the signing
-key. Someone with root on the sites cannot sign with a key only the operator
+guessed, and a pull or recovery with `--execute` records the anchor's signer
+as the signing key; a log records nothing. Someone with root on the sites cannot sign with a key only the operator
 holds, which is why these keys come from the workstation alone and never from
 the sites or a fetched version. A pinned root still holds: the anchor must
 descend from it. When the newest versions two of these keys signed diverge,

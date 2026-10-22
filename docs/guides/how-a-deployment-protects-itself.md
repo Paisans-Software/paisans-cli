@@ -275,8 +275,9 @@ newest version signed by a key the ssh-agent holds, or by the public key
 for the publishes that follow. Without the key, `--root <sha>` pins the hash of
 a version the operator trusts, as `paisans deployment log` prints it; keep that
 hash somewhere other than the workstation, or commit `.paisans/config-root`,
-which the operators may share. A pinned root still holds with the agent's keys:
-trust starts only from a version that descends from it. When the sites hold two
+which the operators may share. The agent's keys are used whenever no signing
+key is recorded, `--root` or not; with a root pinned, trust starts only from a
+version that descends from it. When the sites hold two
 heads, or two of the agent's keys signed heads that diverge, `recover` writes
 each to `.paisans/incoming/<sha>/` and leaves the choice to an operator.
 
