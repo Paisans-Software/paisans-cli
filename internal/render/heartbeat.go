@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // The per site heartbeat, the reverse of the per site ping. The monitor pings
@@ -70,10 +71,10 @@ func heartbeatTargets(cfg *config.Config, site string) []heartbeatTarget {
 func (p *planner) heartbeatToken(site string) (string, error) {
 	token := p.secrets.Sites[site].HeartbeatToken
 	if token == "" {
-		return "", fmt.Errorf("secrets sites.%s.heartbeat_token: required for a deployment with a monitor, which expects every other site to push a heartbeat. Run `paisans init` to generate it", site)
+		return "", fmt.Errorf("secrets sites.%s.heartbeat_token: required for a deployment with a monitor, which expects every other site to push a heartbeat. Run `"+progname.Name()+" init` to generate it", site)
 	}
 	if !heartbeatTokenShape.MatchString(token) {
-		return "", fmt.Errorf("secrets sites.%s.heartbeat_token: is not 32 lowercase hex characters, the one shape the monitor's seed accepts. It would replace it with a token of its own, and the host would push at a URL the monitor answers 404 to. Run `paisans init` after removing it, which generates one in the right shape", site)
+		return "", fmt.Errorf("secrets sites.%s.heartbeat_token: is not 32 lowercase hex characters, the one shape the monitor's seed accepts. It would replace it with a token of its own, and the host would push at a URL the monitor answers 404 to. Run `"+progname.Name()+" init` after removing it, which generates one in the right shape", site)
 	}
 	return token, nil
 }

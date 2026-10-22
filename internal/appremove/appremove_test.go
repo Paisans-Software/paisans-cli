@@ -518,7 +518,7 @@ func TestTheLeftForYouHintsStayShort(t *testing.T) {
 		databaseNotApps(long), databaseDeclared(long, long), databaseForeign(long, site, long), roleKept(long, site),
 		keyDeclared(uuid), bucketUnread(long), bucketGranted(long, keys), bucketAliases(long, 99, 99),
 		dirEdited(site, path), dirData(site, path, 99999, "999.9 GiB"), fileEdited(site, path),
-		secretsLeft(site, strings.Repeat("apps.x.y, ", 20)), dnsLeft, dataKept(site))
+		secretsLeft(site, strings.Repeat("apps.x.y, ", 20)), dnsLeft(), dataKept(site))
 	for _, line := range lines {
 		hint, _, _ := strings.Cut(line, ". ")
 		if len(hint) > 100 {

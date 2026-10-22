@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
@@ -116,8 +117,10 @@ func secretsLeft(app, keys string) string {
 	return fmt.Sprintf("secrets: remove %s's entries from the secrets file with sops. This command never edits it, so remove them once nothing needs them: %s", app, keys)
 }
 
-const dnsLeft = "DNS: its hostnames' records stay; `paisans dns prune --execute` deletes them. dns init made them"
+func dnsLeft() string {
+	return "DNS: its hostnames' records stay; `" + progname.Name() + " dns prune --execute` deletes them. dns init made them"
+}
 
 func dataKept(app string) string {
-	return "data: kept; `paisans app remove " + app + " --delete-data --execute` deletes it. Kept: its database, its Garage bucket and key, its named volumes and what it wrote under its stack directory"
+	return "data: kept; `" + progname.Name() + " app remove " + app + " --delete-data --execute` deletes it. Kept: its database, its Garage bucket and key, its named volumes and what it wrote under its stack directory"
 }

@@ -22,6 +22,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -231,7 +232,7 @@ func Build(site string, cfg *config.Config, secrets *config.Secrets, t Transport
 		// factor) or, at replication 1, starts a second cluster that never
 		// meets the first. Nothing after the layout can work without it:
 		// every key and bucket command needs a role to reach quorum.
-		return nil, fmt.Errorf("garage: %s has no role in the cluster layout, and storage.garage.sites lists %d sites. Joining a node is `paisans storage add`, which lays out every site at once; run it, then storage init has nothing left to do", site, len(cfg.Storage.Garage.Sites))
+		return nil, fmt.Errorf("garage: %s has no role in the cluster layout, and storage.garage.sites lists %d sites. Joining a node is `"+progname.Name()+" storage add`, which lays out every site at once; run it, then storage init has nothing left to do", site, len(cfg.Storage.Garage.Sites))
 	default:
 		capacity := cfg.Storage.Garage.CapacityFor(site)
 		plan.Steps = append(plan.Steps, Step{

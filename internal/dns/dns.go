@@ -41,6 +41,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -838,7 +839,7 @@ func (p *Plan) Show(r ui.Reporter) {
 				fmt.Sprintf("%s\n%s", e.Detail, wanted))
 		case Clear:
 		case Moving:
-			r.Note(fmt.Sprintf("%s %s waits for paisans gateway move", e.Type, e.Name), e.Detail)
+			r.Note(fmt.Sprintf("%s %s waits for "+progname.Name()+" gateway move", e.Type, e.Name), e.Detail)
 		case Covered:
 			if r.Verbose() {
 				r.Step(record+", "+e.Detail).End(ui.OK, "")

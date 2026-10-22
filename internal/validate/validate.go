@@ -24,6 +24,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/acme"
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/secretsgen"
 )
@@ -647,7 +648,7 @@ func (c *checker) evenVoters() {
 			}
 		}
 		if witnesses > 0 {
-			fix = fmt.Sprintf("Prefer %d: take the witness role off a site before the deployment is founded, or, once it runs, take a witness out with `paisans site remove`, which changes the live voters with the file; or write etcd.members with the %d voters wanted.", count-1, count-1)
+			fix = fmt.Sprintf("Prefer %d: take the witness role off a site before the deployment is founded, or, once it runs, take a witness out with `"+progname.Name()+" site remove`, which changes the live voters with the file; or write etcd.members with the %d voters wanted.", count-1, count-1)
 		} else {
 			fix = fmt.Sprintf("Give a site in a third location, one that fails independently, the witness role, which makes %d voters, or write etcd.members with the %d voters wanted.", count+1, count-1)
 		}
@@ -1733,7 +1734,7 @@ func (c *checker) configKeyAlreadyRendered() {
 	for _, col := range collisions {
 		detail := col.Detail
 		if redundant[blueprints.RedundantKey{App: col.App, Key: col.Key}] {
-			detail += " It repeats the value gating requires, so `paisans doctor --execute` removes it, and changes nothing else."
+			detail += " It repeats the value gating requires, so `" + progname.Name() + " doctor --execute` removes it, and changes nothing else."
 		}
 		c.refuse("config-key-already-rendered", col.ConfigKey(),
 			"config key is already rendered by the toolkit", "%s", detail)

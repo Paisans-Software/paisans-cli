@@ -39,6 +39,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/garage"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 	"github.com/paisans-software/paisans-cli/internal/ownership"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
@@ -61,7 +62,7 @@ func Refusal(cfg *config.Config, app string) error {
 		return fmt.Errorf("app remove: %s is the infrastructure stack (Patroni, HAProxy, Garage and the gateway's Caddy), not an app, and is never removed by this command", app)
 	}
 	if _, ok := cfg.Apps[app]; ok {
-		return fmt.Errorf("app remove: %s is still in "+config.FileName+". Take it out of "+config.FileName+" and run `paisans deployment apply --site <site> --execute` on every site first: that apply stops routing to it and marks its files left over, which is what this command checks", app)
+		return fmt.Errorf("app remove: %s is still in "+config.FileName+". Take it out of "+config.FileName+" and run `"+progname.Name()+" deployment apply --site <site> --execute` on every site first: that apply stops routing to it and marks its files left over, which is what this command checks", app)
 	}
 	for _, site := range cfg.SiteNames() {
 		stacks, err := render.SiteStacks(cfg, site)
@@ -373,7 +374,7 @@ func Build(cfg *config.Config, app string, in Input) (*Plan, error) {
 	}
 	sort.Slice(p.Sites, func(i, j int) bool { return p.Sites[i].Site < p.Sites[j].Site })
 	if len(unmarked) > 0 {
-		return nil, fmt.Errorf("app remove: %s still has rendered files that no whole apply has marked left over, so an apply may still route to it:\n  %s\nRun `paisans deployment apply --site <site> --execute` on each site named, then run this again. Nothing was changed", app, strings.Join(unmarked, "\n  "))
+		return nil, fmt.Errorf("app remove: %s still has rendered files that no whole apply has marked left over, so an apply may still route to it:\n  %s\nRun `"+progname.Name()+" deployment apply --site <site> --execute` on each site named, then run this again. Nothing was changed", app, strings.Join(unmarked, "\n  "))
 	}
 	p.Client = planClient(app, in.Client)
 	if in.DeleteData {

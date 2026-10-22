@@ -26,6 +26,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -53,7 +54,7 @@ func (e *OverlapError) Error() string {
 	for i, c := range e.Taken {
 		what[i] = ui.Visible(c.What)
 	}
-	return fmt.Sprintf("the deployment's mesh subnet %s overlaps %s on this host, so its mesh would route that network's traffic. The operators move the subnet clear of it: admitting this site from `paisans init` rolls one, and admits again each site that has admitted the deployment. With a request, they send a new one. Nothing was changed", e.Subnet, strings.Join(what, ", "))
+	return fmt.Sprintf("the deployment's mesh subnet %s overlaps %s on this host, so its mesh would route that network's traffic. The operators move the subnet clear of it: admitting this site from `"+progname.Name()+" init` rolls one, and admits again each site that has admitted the deployment. With a request, they send a new one. Nothing was changed", e.Subnet, strings.Join(what, ", "))
 }
 
 // ParsePrefix reads an IPv4 network or address, an address meaning a /32,
