@@ -81,7 +81,8 @@ type world struct {
 	// been started.
 	unhealthy string
 	// clusterID is the cluster ID every etcd's member list reports in its
-	// header, none when 0.
+	// header; every world sets one, as etcd always does, and a test clears
+	// it to model an answer without one.
 	clusterID uint64
 	// otherCluster is, by site, the ID of another cluster whose etcd runs on
 	// that host and answers for it.
@@ -573,7 +574,7 @@ func endState(t *testing.T) (*config.Config, *config.Secrets) {
 func newWorld(t *testing.T) *world {
 	t.Helper()
 	cfg, secrets := endState(t)
-	w := &world{t: t, cfg: cfg, secrets: secrets, hosts: map[string]*host{}, nextID: 1,
+	w := &world{t: t, cfg: cfg, secrets: secrets, hosts: map[string]*host{}, clusterID: 0xc1a5, nextID: 1,
 		running: map[string]bool{"home-a": true}, patroni: map[string]bool{"home-a": true},
 		served: map[string]string{}, syncMode: false, etcdHosts: map[string]string{}, starting: map[string]int{}}
 	for _, name := range cfg.SiteNames() {

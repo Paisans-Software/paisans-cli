@@ -8986,7 +8986,9 @@ so `--delete-data` does not govern it. A site that never ran etcd has nothing
 to delete. A voter, or a learner that has started, is never cleared. Before
 anything is removed, `site add` refuses a joiner whose host runs an etcd that
 answers for a different cluster than the voter it works through, naming both
-cluster IDs: that data is another cluster's, not a removed member's. The files are the etcd container's, which under rootless Docker
+cluster IDs: that data is another cluster's, not a removed member's. The
+check fails closed: when the voter's or the joiner's answer carries no cluster
+ID, the join is refused too, since the data could not be checked. The files are the etcd container's, which under rootless Docker
 are expected, not yet observed, to be owned by a subordinate UID, so each is
 deleted through `rootlesskit`, as `site remove` deletes its own. Such a joiner
 is also given the membership as it stands, not the flags its host records

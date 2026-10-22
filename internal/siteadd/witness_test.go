@@ -32,7 +32,7 @@ func newWitnessWorld(t *testing.T) *world {
 	cfg.Etcd.Members = []string{"home-a", "home-b", "wit"}
 	secrets.Sites["wit"] = config.SiteSecrets{WireGuardPrivateKey: "REREREREREREREREREREREREREREREREREREREREREQ=", HeartbeatToken: "4444444444444444444444444444eeee"}
 
-	w := &world{t: t, cfg: cfg, secrets: secrets, hosts: map[string]*host{}, nextID: 1,
+	w := &world{t: t, cfg: cfg, secrets: secrets, hosts: map[string]*host{}, clusterID: 0xc1a5, nextID: 1,
 		running: map[string]bool{"home-a": true}, patroni: map[string]bool{"home-a": true},
 		served: map[string]string{}, etcdHosts: map[string]string{}, starting: map[string]int{}}
 	for _, name := range cfg.SiteNames() {

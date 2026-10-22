@@ -236,7 +236,6 @@ func TestAVoterOrAStartedLearnerIsNeverCleared(t *testing.T) {
 func TestAJoinerRunningAnotherClustersEtcdIsRefused(t *testing.T) {
 	defer siteadd.SetFast()()
 	w := removedWitnessWorld(t)
-	w.clusterID = 0xc1a5
 	w.otherCluster = map[string]uint64{"vm": 0xbeef}
 	_, err := siteadd.Build(w.cfg, w.secrets, "home-b", w.transports())
 	if err == nil {
@@ -262,7 +261,6 @@ func TestAJoinerRunningAnotherClustersEtcdIsRefused(t *testing.T) {
 func TestAJoinerAnsweringForThisClusterIsCleared(t *testing.T) {
 	defer siteadd.SetFast()()
 	w := removedWitnessWorld(t)
-	w.clusterID = 0xc1a5
 	w.otherCluster = map[string]uint64{"vm": 0xc1a5}
 	p := build(t, w)
 	delete(w.otherCluster, "vm")
@@ -271,5 +269,46 @@ func TestAJoinerAnsweringForThisClusterIsCleared(t *testing.T) {
 	}
 	if got := strings.Join(w.voters(), ","); got != "home-a,home-b,vm" {
 		t.Errorf("voters %s", got)
+	}
+}
+
+// A control voter whose answer carries no cluster ID leaves nothing to
+// compare a joiner's etcd with, and the guard protects a deletion, so the
+// join is refused before any container is removed or data deleted.
+func TestAJoinIsRefusedWhenTheClusterIDCannotBeRead(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := removedWitnessWorld(t)
+	w.clusterID = 0
+	_, err := siteadd.Build(w.cfg, w.secrets, "home-b", w.transports())
+	if err == nil {
+		t.Fatal("a join was planned with no cluster ID to check the joiners against")
+	}
+	for _, want := range []string{"site add home-b", "vm", "home-a", "cluster ID could not be read"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal lacks %q: %v", want, err)
+		}
+	}
+	for name, h := range w.hosts {
+		if h.ran("rootlesskit rm -rf") != 0 || h.ran("docker stop") != 0 {
+			t.Errorf("%s had a container removed or data deleted", name)
+		}
+	}
+	if len(w.hosts["vm"].files[etcdDB]) == 0 {
+		t.Error("vm's etcd data is gone")
+	}
+}
+
+// A joiner's etcd that answers without a cluster ID is refused too: whether
+// its data is this cluster's is not known.
+func TestAJoinerAnsweringWithoutAClusterIDIsRefused(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := removedWitnessWorld(t)
+	w.otherCluster = map[string]uint64{"vm": 0}
+	_, err := siteadd.Build(w.cfg, w.secrets, "home-b", w.transports())
+	if err == nil || !strings.Contains(err.Error(), "vm's etcd answered without a cluster ID") {
+		t.Fatalf("err = %v", err)
+	}
+	if w.hosts["vm"].ran("rootlesskit rm -rf") != 0 || len(w.hosts["vm"].files[etcdDB]) == 0 {
+		t.Error("vm's etcd data was deleted")
 	}
 }

@@ -175,16 +175,26 @@ func (p *Plan) clearEtcdData() string {
 // which is this one, and one that does not answer, the crash loop this
 // clear exists for, is no evidence of another cluster. An unreachable host
 // stops the join, since nothing about it is known.
+//
+// It fails closed: with no cluster ID from the control voter there is
+// nothing to compare with, so the join is refused rather than the data
+// deleted unchecked. etcdctl's member list always carries the ID in its
+// header (etcd v3.5.16, etcdctl/ctlv3/command/printer_json.go), so a
+// missing one means an answer that cannot be trusted. A joiner's etcd that
+// answers without an ID is refused for the same reason.
 func (p *Plan) sameCluster(j string) error {
 	if p.clusterID == 0 {
-		return nil
+		return fmt.Errorf("site add %s: %s's etcd answered without a cluster ID, so the cluster ID could not be read, and %s's etcd data cannot be checked against it before it is cleared. Run paisans doctor on %s and run site add again. Nothing was changed", p.Site, p.control, j, p.control)
 	}
 	c, running, err := apply.ReadEtcdCluster(p.transports[j], p.dep(), p.cfg.Sites[j].Address)
 	if errors.Is(err, apply.ErrUnreachable) {
 		return fmt.Errorf("%s: %w", j, err)
 	}
-	if err != nil || !running || c.ID == 0 || c.ID == p.clusterID {
+	if err != nil || !running || c.ID == p.clusterID {
 		return nil
+	}
+	if c.ID == 0 {
+		return fmt.Errorf("site add %s: %s's etcd answered without a cluster ID, so the cluster ID could not be read, and whether its data is this cluster's is not known. Run paisans doctor on %s and run site add again. Nothing on %s was changed", p.Site, j, j, j)
 	}
 	return fmt.Errorf("site add %s: %s's etcd answers for cluster %x, and %s's for cluster %x, so %s runs an etcd of another cluster. site add clears a joiner's etcd data before adding it, and that would delete the other cluster's. Run paisans doctor on %s; stop that etcd, or move what it holds, then run site add again. Nothing on %s was changed", p.Site, j, c.ID, p.control, p.clusterID, j, j, j)
 }
