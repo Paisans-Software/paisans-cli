@@ -216,6 +216,9 @@ type planner struct {
 	// unit active and no network store, and whose units none enables or
 	// this run disables: it has no networks.
 	heldDocker bool
+	// swapMade is the swapfile this run's plan makes, 0 for none: it
+	// counts toward the memory floor as swap that is on (planMemory).
+	swapMade int64
 	// prev caches previous(): this deployment's record as the host holds it.
 	prev struct {
 		read bool
@@ -260,6 +263,7 @@ var parts = []part{
 	{"claim", planClaim}, // 1
 	{"admission directory", planAdmissionDir},
 	{"swap", planSwap},
+	{"memory", planMemory},
 	{"sysctls before", planSysctlsBefore},
 	{"docker", planDocker},
 	{"apparmor", planAppArmor},

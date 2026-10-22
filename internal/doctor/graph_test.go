@@ -353,6 +353,16 @@ func (f *fixtureReads) Linger(site string) LingerProbe {
 	return LingerProbe{Site: site, Out: "linger yes\nmesh-order yes\n"}
 }
 
+func (f *fixtureReads) Memory(site string) MemoryProbe {
+	f.asked("memory " + site)
+	for _, p := range f.in.Memory {
+		if p.Site == site {
+			return p
+		}
+	}
+	return MemoryProbe{Site: site, Out: memOut(gib4, gib2, true, "file")}
+}
+
 func (f *fixtureReads) Sudo(site string) SudoProbe {
 	f.asked("sudo " + site)
 	for _, p := range f.in.SudoRights {
@@ -460,7 +470,7 @@ func TestPruningIsReportedOnce(t *testing.T) {
 	if !reflect.DeepEqual(lines, []string{"check reach home-b"}) {
 		t.Errorf("home-b's lines are %v, want reach alone:\n%s", lines, rec.Lines())
 	}
-	want := "Not checked because of this: admission, user, docker, docker engine, docker source mark, linger, sudo rights, mesh, patroni, containers, settings talk, clocks, leftovers on home-b."
+	want := "Not checked because of this: admission, user, docker, docker engine, docker source mark, linger, sudo rights, swap, memory, mesh, patroni, containers, settings talk, clocks, leftovers on home-b."
 	if !rec.Has("explain", want) {
 		t.Errorf("reach home-b does not say what it kept from running, want %q:\n%s", want, rec.Lines())
 	}
@@ -472,7 +482,7 @@ func TestPruningIsReportedOnce(t *testing.T) {
 			listed += strings.Count(list, ",") + strings.Count(list, ";") + 1
 		}
 	}
-	if report.Pruned != 14 || listed != report.Pruned || report.Count(Skip) != 1 || !strings.Contains(report.Summary(), "15 skipped") {
+	if report.Pruned != 16 || listed != report.Pruned || report.Count(Skip) != 1 || !strings.Contains(report.Summary(), "17 skipped") {
 		t.Errorf("pruned %d, listed %d, summary %q", report.Pruned, listed, report.Summary())
 	}
 	for _, read := range reads.log.list {
@@ -500,7 +510,7 @@ func TestAPendingSiteIsCheckedNoFurther(t *testing.T) {
 	if f.Level != Warn || !strings.Contains(strings.Join(f.More, "\n"), "`paisans site request --site home-b > home-b.admit`") {
 		t.Errorf("home-b: %+v", f)
 	}
-	want := "Not checked because of this: user, docker, docker engine, docker source mark, linger, sudo rights, mesh, patroni, containers, settings talk, clocks, leftovers on home-b."
+	want := "Not checked because of this: user, docker, docker engine, docker source mark, linger, sudo rights, swap, memory, mesh, patroni, containers, settings talk, clocks, leftovers on home-b."
 	if !rec.Has("explain", want) {
 		t.Errorf("admission home-b does not say what it kept from running, want %q:\n%s", want, rec.Lines())
 	}
@@ -734,6 +744,7 @@ func TestBoundOfOneRunsInOrder(t *testing.T) {
 		"docker home-a", "docker home-b", "docker vm",
 		"linger home-a", "linger home-b", "linger vm",
 		"sudo home-a", "sudo home-b", "sudo vm",
+		"memory home-a", "memory home-b", "memory vm",
 		"mesh home-a", "mesh home-b", "mesh vm",
 		"etcd health home-a", "etcd version home-a",
 		"patroni home-a", "patroni home-b", "sync home-a",

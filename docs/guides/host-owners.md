@@ -51,6 +51,15 @@ reach only over SSH is the one step here that can lock you out.
   loaded, admit refuses, saying how to load the profile, or, where your
   release has none, what lifting the restriction for the whole machine
   costs, and leaves that choice to you.
+* **Enough memory for the site's roles.** Admit warns, and does not refuse,
+  when your machine's RAM is under what the roles in the request need: 768
+  MiB for a witness, 896 MiB for a monitor, 960 MiB for a gateway and
+  witness, 1216 MiB for a gateway, witness and monitor, 3072 MiB for a data
+  and apps site, and more for an apps site running several apps. Swap that
+  is on counts for up to a quarter of that, so a swapfile (`--swapfile`,
+  step 3) can bring a small VPS over it. *A host's memory is measured
+  against its roles* in the [README](../../README.md) lists what each role
+  runs and why.
 * **No Kubernetes.** The deployment marks its mesh traffic for the firewall
   with bits Kubernetes networking also uses. Admit does not check for it: a
   machine running Kubernetes is outside what it supports.

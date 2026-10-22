@@ -72,7 +72,7 @@ const (
 	SectionLeftovers  = "leftovers"
 )
 
-var sections = []string{SectionReach, SectionAdmission, SectionUser, SectionDocker, SectionLinger, SectionSudo, SectionMesh, SectionEtcd, SectionPatroni, SectionContainers, SectionSettings, SectionPocketID, SectionClocks, SectionLeftovers, SectionSelfCheck, SectionCaddy, SectionSecrets, SectionToken, SectionRecords}
+var sections = []string{SectionReach, SectionAdmission, SectionUser, SectionDocker, SectionLinger, SectionSudo, SectionSwap, SectionMemory, SectionMesh, SectionEtcd, SectionPatroni, SectionContainers, SectionSettings, SectionPocketID, SectionClocks, SectionLeftovers, SectionSelfCheck, SectionCaddy, SectionSecrets, SectionToken, SectionRecords}
 
 // Finding is one line of the report, with any explanation, recovery advice or
 // evidence under it.
@@ -227,6 +227,8 @@ type Input struct {
 	Docker     []DockerProbe
 	Linger     []LingerProbe
 	SudoRights []SudoProbe
+	// Memory is each site's RAM and swap (memory.go).
+	Memory     []MemoryProbe
 	Mesh       []MeshProbe
 	Etcd       EtcdProbe
 	Patroni    PatroniProbe
@@ -327,6 +329,8 @@ func Diagnose(cfg *config.Config, in Input) Report {
 	findings = append(findings, SourceMark(in.Docker)...)
 	findings = append(findings, Linger(cfg.Deployment(), in.Linger)...)
 	findings = append(findings, SudoRights(cfg, in.SudoRights)...)
+	findings = append(findings, Swap(in.Memory)...)
+	findings = append(findings, Memory(cfg, in.Memory)...)
 	findings = append(findings, Mesh(cfg, in.Mesh)...)
 	findings = append(findings, Etcd(cfg, in)...)
 	findings = append(findings, Patroni(cfg, in)...)
