@@ -8979,29 +8979,54 @@ joiner whose member has not started is added, its data directory is emptied,
 and the directory itself kept for the container to mount. A learner an earlier
 run added that never started may still have received a snapshot or log entries
 before it stopped, and the leader remembers how far it got, so it is not
-started again from empty data under the same ID: it is removed from etcd,
-its data emptied, and it is added again under a new ID.
+started again from empty data under the same ID: its container is removed,
+it is read again and, still unstarted, removed from etcd, its data emptied,
+and it is added again under a new ID. A learner that started meanwhile keeps
+its data and is carried on.
 
-The data is deleted only on evidence that it is this cluster's, read on disk
-whether or not an etcd runs there: no directory, an empty one, or one without
-etcd's member directory, which hold nothing to lose; or a write-ahead log
-whose metadata record names this cluster's ID, which `site add` reads from
-the first log file's head through `rootlesskit` and decodes, checksum and
-all. This cluster's data is deleted rather than kept because it holds only
+**The data is deleted only on evidence of whose it is.** `site add` reads the
+data path on disk through `rootlesskit`, after removing any etcd container of
+this deployment there (found by its labels, so stopping it loses nothing),
+and deletes it only when it is one of:
+
+| What the path holds | Why deleting it loses nothing |
+|---------------------|-------------------------------|
+| nothing, or an empty directory | there is nothing |
+| `member/snap/db` alone, no larger than a fresh one | what etcd leaves when it exits before reaching a peer: it opens its backend first and writes its log only once it has the cluster's membership. A fresh v3.5.16 database measured 16801792 bytes |
+| etcd's member layout, every write-ahead log in it decoding (framing, record, CRC-32C chain) to the same member and cluster, the cluster being this one and the member one this cluster removed for this site | a removed member's data, whose ID the cluster never accepts again |
+
+The cluster ID alone is not that evidence. etcd derives a founding member's
+ID from its peer URLs and the cluster token, and the cluster's ID from its
+founders' (etcd v3.5.16, `membership/member.go` and `cluster.go`), so two
+clusters founded on the same mesh addresses with the same token share both:
+a deployment founded again on the same addresses, or a copied configuration.
+So the member ID must also be one this cluster removed for this site: each
+`site remove` and each learner `site add` replaces records the removal, before
+making it, in `.paisans/etcd-removed` on the hosts of the members that stay,
+and `site add` reads those records from every host. A member ID the cluster
+has now is refused whatever is recorded. A cluster founded since founding
+tokens were recorded (below, *A member keeps the flags it was born with*) has
+founder IDs of its own. One founded before, on the fixed token `paisans`,
+does not, so a removed founder's data there is accepted on its recorded ID
+and the cluster ID, which another cluster of this deployment founded on the
+same addresses would also match; that is the risk that remains.
+
+This cluster's data is deleted rather than kept because it holds only
 Patroni's store, runtime state (the leader lock, sync state, the `initialize`
 key and the dynamic configuration) that every remaining member also holds; it
 is not operator data, so `--delete-data` does not govern it. Anything else is
-refused before any container is removed, naming the site and what was found:
-another cluster's ID, a member directory with no log, a log that does not
-decode, a directory that cannot be read, or a symbolic link. An etcd running
-there is asked as well, and one that answers for another cluster, answers
-without a cluster ID, or does not answer is refused; its answer is never what
-permits the delete. A refusal changes nothing: data of another cluster is its
-owner's to move off the host, or the site is taken out of this deployment.
-The check fails closed on its own side too: a voter whose answer carries no
-cluster ID refuses the join. It runs when the join is planned and again
-before each clear. A voter, or a learner that has started, is never cleared.
-A site that never ran etcd has nothing to delete. The files are the etcd container's, which under rootless Docker
+refused before anything is deleted, naming the site and what was found:
+another cluster's ID, a member this cluster has no record of removing for the
+site or has now, logs that disagree or do not decode, any name outside etcd's
+layout (Eg: a `member.bak` moved aside by hand), a symbolic link anywhere,
+a path that is not a directory or cannot be read. When the join is planned
+nothing is stopped, so an etcd running there is also asked, and one that
+answers for another cluster is refused then; its answer never permits the
+delete. A refusal deletes nothing: data of another cluster is its owner's to
+move off the host, or the site is taken out of this deployment. A voter whose
+answer carries no cluster ID refuses the join. The check runs when the join
+is planned and again before each clear. A voter, or a learner that has
+started, is never cleared. The files are the etcd container's, which under rootless Docker
 are expected, not yet observed, to be owned by a subordinate UID, so each is
 deleted through `rootlesskit`, as `site remove` deletes its own. Such a joiner
 is also given the membership as it stands, not the flags its host records
@@ -9012,8 +9037,14 @@ from its earlier join (below).
 start and ignores them once its data directory exists. They are inert on a
 running member, so the only thing changing them can do is make `deployment apply` see a
 new compose file and recreate a healthy member. Each etcd host therefore has
-`/srv/paisans/<token>/infra/etcd-initial`, a rendered file holding the two flags its member
-started with, which every later render repeats. A founder records `new` and the
+`/srv/paisans/<token>/infra/etcd-initial`, a rendered file holding the flags its member
+started with, which every later render repeats. A member founded now also
+records its `--initial-cluster-token`: chosen at random for each founding
+(the deployment's prefix and 64 random bits), taken by a later founder from
+the record of one that has it, so every founder of one cluster agrees, and
+giving the cluster IDs of its own (above). A member whose record has no token
+renders the fixed token `paisans` it was founded or joined with, so nothing
+running is rendered differently; a joiner's token is not read by etcd. A founder records `new` and the
 founding set. A joiner records `existing` and the membership **right after its
 own `member add`**, which etcd requires exactly: a joiner whose
 `--initial-cluster` counts a different number of members than the cluster has
@@ -9152,7 +9183,11 @@ mesh file, no longer declares it. Each leaving member's etcd data directory,
 the data site's and the witness's alike, and in any removal of an etcd member:
 the data is a removed member's, which etcd never accepts again, and holds
 nothing the remaining voters lack. A run resumed after a member was removed
-empties it too. With `--host-gone` the leaving host is not reached, so its etcd
+empties it too. Before each member is removed, the removal (site, cluster ID,
+member ID) is recorded in `.paisans/etcd-removed` on the hosts of the members
+that stay and of a witness that stays a site, which is the record `site add`
+needs before it deletes that site's data if it rejoins (see *A joiner starts
+from an empty data directory*). With `--host-gone` the leaving host is not reached, so its etcd
 data stays there and the report says so; `site add` clears a joiner's data
 for itself (see *A joiner starts from an empty data directory*) and does not
 depend on this. Two voters going to one is a change both

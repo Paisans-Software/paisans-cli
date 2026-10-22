@@ -127,7 +127,11 @@ kept. The data is a removed member's, which etcd never accepts again, and holds
 only Patroni's store, runtime state every remaining member also holds, so it is
 not operator data and `--delete-data` does not govern it. The plan names it.
 The step reads the configuration rather than etcd, so a run resumed after a
-member was removed empties its data too. `site add` clears a joiner's data
+member was removed empties its data too. Before each member is removed, the
+removal (site, cluster ID, member ID) is recorded in `.paisans/etcd-removed`
+on the hosts of the members that stay and of a witness that stays a site:
+`site add` deletes a rejoining site's old data only when its write-ahead log
+names a member so recorded. `site add` clears a joiner's data
 before adding it and does not depend on this.
 
 Going from two voters to one is a membership change both voters must commit,

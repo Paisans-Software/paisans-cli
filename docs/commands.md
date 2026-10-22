@@ -1325,10 +1325,11 @@ Refuses a witness given on its own: it joins through the `site add` of the
 data site joining with it. A joiner whose member has not started, such as a
 site whose member an earlier removal took out, has its old etcd data,
 `/srv/paisans/<token>/infra/etcd`, deleted before its etcd starts, and the
-plan names it: etcd refuses to rejoin with a removed member's data. It is
-deleted only when there is none or its write-ahead log names this cluster; a
-joiner whose data is another cluster's, or whose data cannot be shown to be
-this cluster's, is refused with nothing removed or deleted.
+plan names it: etcd refuses to rejoin with a removed member's data. Its etcd
+container is removed first, and the data is read on disk and deleted only
+when it is nothing, what a failed start leaves, or a member whose write-ahead
+logs name this cluster and a member this cluster recorded removing for the
+site; anything else refuses, and nothing is deleted.
 
 ```
 paisans site add home-b             # every stage, its steps and its gate
