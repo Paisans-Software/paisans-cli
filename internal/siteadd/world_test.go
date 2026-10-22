@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -99,6 +100,8 @@ type world struct {
 	// dataUnreadable is each site whose etcd data directory cannot be
 	// listed.
 	dataUnreadable map[string]bool
+	// dataLink is each site whose etcd data path is a symbolic link.
+	dataLink map[string]bool
 }
 
 type host struct {
@@ -111,6 +114,9 @@ type host struct {
 	// wgRun is the mesh file the running interface was last handed, by the
 	// helper's up, restart or sync, which is what its show answers from.
 	wgRun string
+	// dataDir is whether the host has an etcd data directory when no file
+	// is in it: an empty one rather than none.
+	dataDir bool
 }
 
 func (h *host) Describe() string { return h.name }
@@ -161,12 +167,13 @@ func (h *host) ran(sub string) int {
 }
 
 var (
-	memberAdd    = regexp.MustCompile(`member add (\S+) --peer-urls=(\S+) --learner`)
-	memberRemove = regexp.MustCompile(`member remove ([0-9a-f]+)`)
-	promote      = regexp.MustCompile(`member promote ([0-9a-f]+)`)
-	emptyLoop    = regexp.MustCompile(`for f in '([^']+)'/\*`)
-	initialRe    = regexp.MustCompile(`--initial-cluster=(\S+)`)
-	serverRe     = regexp.MustCompile(`(?m)^\s+server (\S+) `)
+	memberAdd       = regexp.MustCompile(`member add (\S+) --peer-urls=(\S+) --learner`)
+	memberRemove    = regexp.MustCompile(`member remove ([0-9a-f]+)`)
+	etcdRemovedLine = regexp.MustCompile(`grep -qxF '([^']+)'`)
+	promote         = regexp.MustCompile(`member promote ([0-9a-f]+)`)
+	emptyLoop       = regexp.MustCompile(`for f in '([^']+)'/\*`)
+	initialRe       = regexp.MustCompile(`--initial-cluster=(\S+)`)
+	serverRe        = regexp.MustCompile(`(?m)^\s+server (\S+) `)
 )
 
 func (h *host) Run(command string) (string, error) {
@@ -281,6 +288,18 @@ func (h *host) Run(command string) (string, error) {
 			return *w.handshakesFail, fmt.Errorf("exit status 1")
 		}
 		return w.handshakes(h), nil
+	case strings.Contains(command, "/.paisans/etcd-removed'; touch"):
+		line := etcdRemovedLine.FindStringSubmatch(command)[1]
+		f := "/srv/paisans/f2a9/.paisans/etcd-removed"
+		if !strings.Contains("\n"+h.files[f], "\n"+line+"\n") {
+			h.files[f] += line + "\n"
+		}
+		return "", nil
+	case strings.HasPrefix(command, "ids=$(docker ps -aq") && !strings.Contains(command, "rootlesskit"):
+		// The etcd container stopped and removed, alone.
+		w.running[h.name] = false
+		delete(w.restarting, h.name)
+		return "", nil
 	case strings.HasPrefix(command, "rootlesskit sh -c ") && strings.Contains(command, "paisans-etcd-data"):
 		return h.etcdDataAnswer(), nil
 	case strings.Contains(command, "--quiet etcd"):
@@ -453,47 +472,68 @@ func envLine(content, key string) string {
 }
 
 // etcdDataAnswer is what apply.EtcdDataProbe prints on this host, read from
-// its files: the state of its etcd data directory, and the head of its
-// first write-ahead log as od prints it.
+// its files: what its etcd data path is, every path under it with its type
+// and size, the directories those paths imply among them, and the head of
+// every write-ahead log as od prints it.
 func (h *host) etcdDataAnswer() string {
 	const mark = "paisans-etcd-data: "
-	if h.w.dataUnreadable[h.name] {
+	w := h.w
+	switch {
+	case w.dataLink[h.name]:
+		return mark + "link\n"
+	case w.dataUnreadable[h.name]:
 		return mark + "unreadable\n"
 	}
-	top := map[string]bool{}
-	var wals []string
-	for p := range h.files {
+	if _, ok := h.files[etcdData]; ok {
+		return mark + "notdir\n"
+	}
+	entries := map[string]string{}
+	for p, content := range h.files {
 		rest, ok := strings.CutPrefix(p, etcdData+"/")
 		if !ok {
 			continue
 		}
-		top[strings.SplitN(rest, "/", 2)[0]] = true
-		if name, ok := strings.CutPrefix(rest, "member/wal/"); ok && strings.HasSuffix(name, ".wal") && !strings.Contains(name, "/") {
-			wals = append(wals, name)
+		if link, ok := strings.CutPrefix(content, "symlink:"); ok && link != "" {
+			entries[rest] = "l 0 " + rest
+		} else {
+			entries[rest] = fmt.Sprintf("f %d %s", len(content), rest)
+		}
+		for d := path.Dir(rest); d != "."; d = path.Dir(d) {
+			entries[d] = "d 0 " + d
 		}
 	}
-	switch {
-	case len(top) == 0:
+	if len(entries) == 0 && !h.dataDir {
 		return mark + "absent\n"
-	case !top["member"]:
-		return mark + "nomember\n"
-	case len(wals) == 0:
-		return mark + "nowal\n"
 	}
-	sort.Strings(wals)
-	head := []byte(h.files[etcdData+"/member/wal/"+wals[0]])
-	if len(head) > 4096 {
-		head = head[:4096]
+	names := make([]string, 0, len(entries))
+	for n := range entries {
+		names = append(names, n)
 	}
+	sort.Strings(names)
 	var b strings.Builder
-	fmt.Fprintf(&b, "%swal %s\npaisans-wal-begin\n", mark, wals[0])
-	for i := 0; i < len(head); i += 16 {
-		for _, c := range head[i:min(i+16, len(head))] {
-			fmt.Fprintf(&b, " %02x", c)
-		}
-		b.WriteString("\n")
+	b.WriteString("[rootlesskit:parent] a line the probe ignores\n" + mark + "listing\npaisans-list-begin\n")
+	for _, n := range names {
+		b.WriteString(entries[n] + "\n")
 	}
-	b.WriteString("paisans-wal-end\n")
+	b.WriteString("paisans-list-end\n")
+	for _, n := range names {
+		name, ok := strings.CutPrefix(n, "member/wal/")
+		if !ok || !strings.HasSuffix(name, ".wal") || strings.HasPrefix(entries[n], "l ") {
+			continue
+		}
+		head := []byte(h.files[etcdData+"/"+n])
+		if len(head) > 4096 {
+			head = head[:4096]
+		}
+		fmt.Fprintf(&b, "paisans-wal-begin %s\n", name)
+		for i := 0; i < len(head); i += 16 {
+			for _, c := range head[i:min(i+16, len(head))] {
+				fmt.Fprintf(&b, " %02x", c)
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString("paisans-wal-end\n")
+	}
 	return b.String()
 }
 

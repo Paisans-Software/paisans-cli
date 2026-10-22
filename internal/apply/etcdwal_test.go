@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -89,27 +90,47 @@ func odHex(b []byte) string {
 	return strings.Join(lines, "\n")
 }
 
+const walA = "0000000000000000-0000000000000000.wal"
+const walB = "0000000000000001-0000000000000005.wal"
+
+func etcdListing(entries string, wals map[string][]byte) string {
+	var b strings.Builder
+	b.WriteString("[rootlesskit:parent] a warning\npaisans-etcd-data: listing\npaisans-list-begin\n" + entries + "paisans-list-end\n")
+	names := make([]string, 0, len(wals))
+	for n := range wals {
+		names = append(names, n)
+	}
+	slices.Sort(names)
+	for _, n := range names {
+		b.WriteString("paisans-wal-begin " + n + "\n" + odHex(wals[n]) + "\npaisans-wal-end\n")
+	}
+	return b.String()
+}
+
+const memberDirs = "d 0 member\nd 0 member/snap\nd 0 member/wal\nf 16801792 member/snap/db\n"
+
 func TestParseEtcdData(t *testing.T) {
-	wal := "paisans-etcd-data: wal 0000000000000000-0000000000000000.wal\npaisans-wal-begin\n" + odHex(fixtureWAL(t)) + "\npaisans-wal-end\n"
-	d, err := apply.ParseEtcdData("[rootlesskit:parent] some warning\n" + wal)
+	d, err := apply.ParseEtcdData(etcdListing(memberDirs+"f 64000000 member/wal/"+walA+"\n", map[string][]byte{walA: fixtureWAL(t)}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.State != apply.EtcdDataWAL || d.ClusterID != fixtureCluster || d.NodeID != fixtureMember || d.WAL != "0000000000000000-0000000000000000.wal" {
+	if d.State != apply.EtcdDataListing || len(d.Entries) != 5 || len(d.WALs[walA]) != 4096 {
 		t.Errorf("read %+v", d)
 	}
-	for _, s := range []string{"absent", "empty", "nomember", "nowal", "link", "unreadable"} {
+	for _, s := range []string{"absent", "link", "notdir", "unreadable"} {
 		if d, err := apply.ParseEtcdData("paisans-etcd-data: " + s + "\n"); err != nil || d.State != s {
 			t.Errorf("%s: %+v %v", s, d, err)
 		}
 	}
 	for name, out := range map[string]string{
-		"no answer":         "rootlesskit: command not found\n",
-		"unknown answer":    "paisans-etcd-data: maybe\n",
-		"cut before end":    strings.TrimSuffix(wal, "paisans-wal-end\n"),
-		"not a WAL":         "paisans-etcd-data: wal x.wal\npaisans-wal-begin\n 6d 65 6d\npaisans-wal-end\n",
-		"two answers":       "paisans-etcd-data: empty\npaisans-etcd-data: absent\n",
-		"wal with no bytes": "paisans-etcd-data: wal x.wal\npaisans-wal-begin\npaisans-wal-end\n",
+		"no answer":      "rootlesskit: command not found\n",
+		"unknown answer": "paisans-etcd-data: maybe\n",
+		"listing cut":    "paisans-etcd-data: listing\npaisans-list-begin\nd 0 member\n",
+		"bad listing":    "paisans-etcd-data: listing\npaisans-list-begin\nd member\npaisans-list-end\n",
+		"WAL cut":        "paisans-etcd-data: listing\npaisans-list-begin\npaisans-list-end\npaisans-wal-begin x.wal\n 04 00\n",
+		"WAL not hex":    "paisans-etcd-data: listing\npaisans-list-begin\npaisans-list-end\npaisans-wal-begin x.wal\n zz\npaisans-wal-end\n",
+		"two answers":    "paisans-etcd-data: absent\npaisans-etcd-data: link\n",
+		"one WAL twice":  "paisans-etcd-data: listing\npaisans-list-begin\npaisans-list-end\npaisans-wal-begin x.wal\npaisans-wal-end\npaisans-wal-begin x.wal\npaisans-wal-end\n",
 	} {
 		if d, err := apply.ParseEtcdData(out); err == nil {
 			t.Errorf("%s: read as %+v", name, d)
@@ -117,8 +138,55 @@ func TestParseEtcdData(t *testing.T) {
 	}
 }
 
+// Assess recognises nothing, a failed start and a member whose logs agree,
+// each exactly, and nothing else.
+func TestAssessEtcdData(t *testing.T) {
+	real := fixtureWAL(t)
+	other := etcdwaltest.Head(1, 2)
+	parse := func(out string) apply.EtcdData {
+		t.Helper()
+		d, err := apply.ParseEtcdData(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	walEntry := func(n string) string { return "f 64000000 member/wal/" + n + "\n" }
+	for name, c := range map[string]struct {
+		data      apply.EtcdData
+		kind, why string
+	}{
+		"absent":            {apply.EtcdData{State: apply.EtcdDataAbsent}, apply.EtcdDataNothing, ""},
+		"empty":             {parse(etcdListing("", nil)), apply.EtcdDataNothing, ""},
+		"failed start":      {parse(etcdListing("d 0 member\nd 0 member/snap\nf 16801792 member/snap/db\n", nil)), apply.EtcdDataFailedBootstrap, ""},
+		"a member":          {parse(etcdListing(memberDirs+walEntry(walA)+"f 64000000 member/wal/0.tmp\nf 9 member/snap/0000000000000002-0000000000000005.snap\nf 9 member/snap/0000000000000005.snap.db\n", map[string][]byte{walA: real})), apply.EtcdDataMember, ""},
+		"two agreeing":      {parse(etcdListing(memberDirs+walEntry(walA)+walEntry(walB), map[string][]byte{walA: real, walB: real})), apply.EtcdDataMember, ""},
+		"link":              {apply.EtcdData{State: apply.EtcdDataLink}, apply.EtcdDataUnknown, "symbolic link"},
+		"not a directory":   {apply.EtcdData{State: apply.EtcdDataNotDir}, apply.EtcdDataUnknown, "not a directory"},
+		"unreadable":        {apply.EtcdData{State: apply.EtcdDataUnreadable}, apply.EtcdDataUnknown, "could not be read"},
+		"a moved member":    {parse(etcdListing("d 0 member.bak\nd 0 member.bak/wal\nf 64000000 member.bak/wal/"+walA+"\n", nil)), apply.EtcdDataUnknown, "member.bak"},
+		"a stray file":      {parse(etcdListing("f 1 .lock\n", nil)), apply.EtcdDataUnknown, ".lock"},
+		"a linked member":   {parse(etcdListing("l 0 member\n", nil)), apply.EtcdDataUnknown, "symbolic link, member"},
+		"a linked wal":      {parse(etcdListing("d 0 member\nl 0 member/wal\n", nil)), apply.EtcdDataUnknown, "symbolic link, member/wal"},
+		"db too big":        {parse(etcdListing("d 0 member\nd 0 member/snap\nf 16801793 member/snap/db\n", nil)), apply.EtcdDataUnknown, "no write-ahead log"},
+		"db and a snap":     {parse(etcdListing("d 0 member\nd 0 member/snap\nf 16801792 member/snap/db\nf 9 member/snap/0000000000000002-0000000000000005.snap\n", nil)), apply.EtcdDataUnknown, "no write-ahead log"},
+		"a disagreeing log": {parse(etcdListing(memberDirs+walEntry(walA)+walEntry(walB), map[string][]byte{walA: real, walB: other})), apply.EtcdDataUnknown, "disagree"},
+		"an unread log":     {parse(etcdListing(memberDirs+walEntry(walA)+walEntry(walB), map[string][]byte{walA: real})), apply.EtcdDataUnknown, "not read"},
+		"a bad log":         {parse(etcdListing(memberDirs+walEntry(walA), map[string][]byte{walA: []byte("nope")})), apply.EtcdDataUnknown, "does not decode"},
+	} {
+		v := c.data.Assess()
+		if v.Kind != c.kind || !strings.Contains(v.Why, c.why) {
+			t.Errorf("%s: %+v, want %s with %q", name, v, c.kind, c.why)
+		}
+		if v.Kind == apply.EtcdDataMember && (v.ClusterID != fixtureCluster || v.NodeID != fixtureMember) {
+			t.Errorf("%s: %+v", name, v)
+		}
+	}
+}
+
 // The probe, run by a real shell against a tree under a temporary root,
-// answers each state, and the WAL it reads is the one parsed.
+// answers each state, lists everything without following links, and reads
+// every WAL file.
 func TestEtcdDataProbeUnderAShell(t *testing.T) {
 	dir := "srv/paisans/f2a9/infra/etcd"
 	read := func(base string) apply.EtcdData {
@@ -134,50 +202,98 @@ func TestEtcdDataProbeUnderAShell(t *testing.T) {
 		return d
 	}
 	base := t.TempDir()
-	if d := read(base); d.State != apply.EtcdDataAbsent {
-		t.Errorf("no directory: %+v", d)
+	if v := read(base).Assess(); v.Kind != apply.EtcdDataNothing {
+		t.Errorf("no directory: %+v", v)
 	}
 	if err := os.MkdirAll(filepath.Join(base, dir), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if d := read(base); d.State != apply.EtcdDataEmpty {
-		t.Errorf("empty directory: %+v", d)
+	if d := read(base); d.State != apply.EtcdDataListing || d.Assess().Kind != apply.EtcdDataNothing {
+		t.Errorf("an empty directory: %+v", d)
 	}
-	writeTree(t, base, dir+"/.lock")
-	if d := read(base); d.State != apply.EtcdDataNoMember {
-		t.Errorf("no member directory: %+v", d)
+	db := filepath.Join(base, dir, "member/snap/db")
+	if err := os.MkdirAll(filepath.Dir(db), 0o700); err != nil {
+		t.Fatal(err)
 	}
-	writeTree(t, base, dir+"/member/snap/db")
-	if d := read(base); d.State != apply.EtcdDataNoWAL {
-		t.Errorf("no WAL: %+v", d)
+	if err := os.WriteFile(db, make([]byte, 1000), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if v := read(base).Assess(); v.Kind != apply.EtcdDataFailedBootstrap {
+		t.Errorf("a failed start: %+v", v)
 	}
 	wal := filepath.Join(base, dir, "member/wal")
 	if err := os.MkdirAll(wal, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	full := append(fixtureWAL(t), make([]byte, 8192)...)
-	if err := os.WriteFile(filepath.Join(wal, "0000000000000001-0000000000000005.wal"), etcdwaltest.Head(1, 2), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(wal, walA), full, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(wal, "0000000000000000-0000000000000000.wal"), full, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(wal, "0.tmp"), make([]byte, 100), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if d := read(base); d.State != apply.EtcdDataWAL || d.ClusterID != fixtureCluster || d.WAL != "0000000000000000-0000000000000000.wal" {
-		t.Errorf("a WAL, the first by name: %+v", d)
+	d := read(base)
+	if v := d.Assess(); v.Kind != apply.EtcdDataMember || v.ClusterID != fixtureCluster || v.NodeID != fixtureMember {
+		t.Errorf("a member: %+v\n%+v", v, d.Entries)
+	}
+	// A newer WAL of another cluster behind this one is read too, and the
+	// logs disagree.
+	if err := os.WriteFile(filepath.Join(wal, walB), etcdwaltest.Head(1, 2), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if v := read(base).Assess(); v.Kind != apply.EtcdDataUnknown || !strings.Contains(v.Why, "disagree") {
+		t.Errorf("a second WAL of another cluster: %+v", v)
+	}
+	if err := os.Remove(filepath.Join(wal, walB)); err != nil {
+		t.Fatal(err)
+	}
+	// A member directory moved aside by hand, with another cluster's WAL.
+	moved := filepath.Join(base, dir, "member.bak/wal")
+	if err := os.MkdirAll(moved, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(moved, walA), etcdwaltest.Head(1, 2), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if v := read(base).Assess(); v.Kind != apply.EtcdDataUnknown || !strings.Contains(v.Why, "member.bak") {
+		t.Errorf("a moved member directory: %+v", v)
+	}
+	if err := os.RemoveAll(filepath.Join(base, dir, "member.bak")); err != nil {
+		t.Fatal(err)
 	}
 
 	if os.Geteuid() != 0 {
-		if err := os.Chmod(filepath.Join(base, dir), 0); err != nil {
+		if err := os.Chmod(wal, 0); err != nil {
 			t.Fatal(err)
 		}
 		if d := read(base); d.State != apply.EtcdDataUnreadable {
-			t.Errorf("a directory that cannot be listed: %+v", d)
+			t.Errorf("a directory that cannot be walked: %+v", d.State)
 		}
-		if err := os.Chmod(filepath.Join(base, dir), 0o700); err != nil {
+		if err := os.Chmod(wal, 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
 
+	// A symlinked WAL directory is listed as a link and not read through.
+	elsewhere := t.TempDir()
+	if err := os.WriteFile(filepath.Join(elsewhere, walA), etcdwaltest.Head(1, 2), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(wal); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(elsewhere, wal); err != nil {
+		t.Fatal(err)
+	}
+	if d := read(base); len(d.WALs) != 0 || !strings.Contains(d.Assess().Why, "symbolic link, member/wal") {
+		t.Errorf("a symlinked WAL directory: %+v %+v", d.Assess(), d.WALs)
+	}
+
+	notdir := t.TempDir()
+	writeTree(t, notdir, dir)
+	if d := read(notdir); d.State != apply.EtcdDataNotDir {
+		t.Errorf("a file at the data path: %+v", d)
+	}
 	other := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(other, "srv/paisans/f2a9/infra"), 0o755); err != nil {
 		t.Fatal(err)

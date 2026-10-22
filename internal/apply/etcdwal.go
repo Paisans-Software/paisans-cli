@@ -6,87 +6,121 @@ import (
 	"errors"
 	"fmt"
 	"hash/crc32"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"google.golang.org/protobuf/encoding/protowire"
 )
 
-// What a site's etcd data directory holds, as EtcdDataProbe reads it on the
-// host, offline, whether or not an etcd container runs there.
+// What EtcdDataProbe finds at a site's etcd data path, read on the host,
+// offline, whether or not an etcd container runs there.
 const (
-	// EtcdDataAbsent: no directory at all.
+	// EtcdDataAbsent: nothing at the path.
 	EtcdDataAbsent = "absent"
-	// EtcdDataEmpty: a directory with nothing in it.
-	EtcdDataEmpty = "empty"
-	// EtcdDataNoMember: entries, none of them etcd's member directory, so no
-	// member's data.
-	EtcdDataNoMember = "nomember"
-	// EtcdDataNoWAL: a member directory with no write-ahead log to say whose
-	// it is.
-	EtcdDataNoWAL = "nowal"
-	// EtcdDataLink: the directory is a symbolic link.
+	// EtcdDataLink: the path is a symbolic link.
 	EtcdDataLink = "link"
-	// EtcdDataUnreadable: the directory could not be listed.
+	// EtcdDataNotDir: the path is not a directory.
+	EtcdDataNotDir = "notdir"
+	// EtcdDataUnreadable: the directory could not be walked.
 	EtcdDataUnreadable = "unreadable"
-	// EtcdDataWAL: a member directory with a write-ahead log, whose metadata
-	// names the member and the cluster.
-	EtcdDataWAL = "wal"
+	// EtcdDataListing: a directory, with Entries and the WAL heads read.
+	EtcdDataListing = "listing"
 )
 
-// EtcdData is what a site's etcd data directory holds.
+// EtcdData is what a site's etcd data path holds.
 type EtcdData struct {
 	State string
-	// WAL is the write-ahead log file read, and NodeID and ClusterID the
-	// member and cluster its metadata record names, when State is
-	// EtcdDataWAL.
-	WAL       string
-	NodeID    uint64
-	ClusterID uint64
+	// Entries is everything under the directory, when State is
+	// EtcdDataListing.
+	Entries []EtcdDataEntry
+	// WALs is the head of every write-ahead log file under member/wal, by
+	// name, when State is EtcdDataListing.
+	WALs map[string][]byte
 }
 
-// etcdWALHead is how much of a write-ahead log file is read. Every WAL file
-// starts with a CRC record and then the metadata record (etcd v3.5.16,
-// server/storage/wal/wal.go, Create and cut), a few dozen bytes in.
-const etcdWALHead = 4096
+// EtcdDataEntry is one path under the directory: its type, f a regular
+// file, d a directory, l a symbolic link and o anything else; its size,
+// for a regular file; and its path relative to the directory.
+type EtcdDataEntry struct {
+	Type string
+	Size int64
+	Path string
+}
+
+// FreshEtcdDBSize is the size of member/snap/db as etcd v3.5.16 leaves it
+// when it exits before it reaches any peer: it opens its backend first and
+// creates its write-ahead log only once it has the cluster's membership
+// (server/etcdserver/server.go, NewServer). Measured, not derived: the
+// v3.5.16 image (linux/arm64) run with --initial-cluster-state=existing
+// and an --initial-cluster whose only other member does not answer exited
+// with "discovery failed" and left member/snap/db, 16801792 bytes, and
+// nothing else.
+const FreshEtcdDBSize = 16801792
 
 const (
 	etcdDataMark  = "paisans-etcd-data: "
-	etcdWALBegin  = "paisans-wal-begin"
+	etcdListBegin = "paisans-list-begin"
+	etcdListEnd   = "paisans-list-end"
+	etcdWALBegin  = "paisans-wal-begin "
 	etcdWALEnd    = "paisans-wal-end"
-	walMetadata   = 1 // walpb record type metadataType
-	walCRC        = 4 // walpb record type crcType
-	walMaxRecords = 16
+	// etcdWALHead is how much of each write-ahead log file is read. Every
+	// WAL file starts with a CRC record and then the metadata record (etcd
+	// v3.5.16, server/storage/wal/wal.go, Create and cut), a few dozen
+	// bytes in.
+	etcdWALHead = 4096
+	// etcdMaxWALs is the most WAL files read. etcd keeps five by default
+	// (--max-wals); more than this many is not a layout this reads.
+	etcdMaxWALs = 64
+	walMetadata = 1 // walpb record type metadataType
+	walCRC      = 4 // walpb record type crcType
+	walMaxRecs  = 16
 )
 
-// EtcdDataProbe reads a site's etcd data directory: whether it is there,
-// whether it holds etcd's member directory, and the head of its first
-// write-ahead log file as hex. It runs through rootlesskit, as root of the
+// EtcdDataProbe reads a site's etcd data path: what it is, every path under
+// it with its type and size, and the head of every write-ahead log file in
+// member/wal, as od prints it. It runs through rootlesskit, as root of the
 // user namespace rootless Docker runs containers in, because the files are
 // the etcd container's and are expected to be owned by a subordinate UID
-// that the deployment's user cannot read. Its answer is between marker
-// lines, so anything else the command prints is ignored. Every failure to
-// read leaves an answer that permits nothing: an unlisted directory is
-// unreadable, an unlisted WAL directory has no WAL, and an unread WAL file
-// has no metadata.
+// that the deployment's user cannot read. find does not follow symbolic
+// links and the WAL heads are not read through one. The answer is between
+// marker lines, so anything else the command prints is ignored, and a
+// failure to walk the directory is an answer of its own.
 func EtcdDataProbe(d deployment.Deployment) string {
 	script := fmt.Sprintf(`d=%s
 m=%s
 if [ -L "$d" ]; then echo "${m}link"; exit 0; fi
 if [ ! -e "$d" ]; then echo "${m}absent"; exit 0; fi
-n=$(ls -A "$d") || { echo "${m}unreadable"; exit 0; }
-if [ -z "$n" ]; then echo "${m}empty"; exit 0; fi
-if ! printf '%%s\n' "$n" | grep -qx member; then echo "${m}nomember"; exit 0; fi
-w=$(ls -1 "$d/member/wal" 2>/dev/null | grep '\.wal$' | sort | head -n 1)
-if [ -z "$w" ]; then echo "${m}nowal"; exit 0; fi
-echo "${m}wal $w"
+if [ ! -d "$d" ]; then echo "${m}notdir"; exit 0; fi
+l=$(find "$d" -mindepth 1) || { echo "${m}unreadable"; exit 0; }
+echo "${m}listing"
 echo %s
-head -c %d "$d/member/wal/$w" | od -An -v -tx1
-echo %s`, shellQuote(EtcdDataDir(d)), shellQuote(etcdDataMark), etcdWALBegin, etcdWALHead, etcdWALEnd)
+printf '%%s
+' "$l" | while IFS= read -r p; do
+  [ -n "$p" ] || continue
+  r=${p#"$d"/}
+  if [ -L "$p" ]; then echo "l 0 $r"
+  elif [ -d "$p" ]; then echo "d 0 $r"
+  elif [ -f "$p" ]; then echo "f $(wc -c < "$p" | tr -d ' ') $r"
+  else echo "o 0 $r"; fi
+done
+echo %s
+if [ ! -L "$d/member" ] && [ ! -L "$d/member/wal" ]; then
+  n=0
+  for f in "$d"/member/wal/*.wal; do
+    [ -f "$f" ] && [ ! -L "$f" ] || continue
+    n=$((n + 1)); [ "$n" -le %d ] || break
+    echo "%s${f##*/}"
+    head -c %d "$f" | od -An -v -tx1
+    echo %s
+  done
+fi`, shellQuote(EtcdDataDir(d)), shellQuote(etcdDataMark), etcdListBegin, etcdListEnd, etcdMaxWALs, etcdWALBegin, etcdWALHead, etcdWALEnd)
 	return "rootlesskit sh -c " + shellQuote(script)
 }
 
-// ReadEtcdData reads a site's etcd data directory with EtcdDataProbe.
+// ReadEtcdData reads a site's etcd data path with EtcdDataProbe.
 func ReadEtcdData(t Transport, d deployment.Deployment) (EtcdData, error) {
 	out, err := t.Run(EtcdDataProbe(d))
 	if err != nil {
@@ -95,50 +129,171 @@ func ReadEtcdData(t Transport, d deployment.Deployment) (EtcdData, error) {
 	return ParseEtcdData(out)
 }
 
-// ParseEtcdData reads EtcdDataProbe's answer. A WAL whose metadata cannot
-// be read is an error, never an answer.
+// ParseEtcdData reads EtcdDataProbe's answer. Anything it does not read
+// exactly is an error, never an answer.
 func ParseEtcdData(out string) (EtcdData, error) {
-	var state string
+	var data EtcdData
+	var listing, ended bool
+	var wal string
 	var hexed strings.Builder
-	in, ended := false, false
-	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimSpace(line)
+	for _, raw := range strings.Split(out, "\n") {
+		line := strings.TrimRight(raw, "\r")
 		switch {
+		case wal != "" && strings.TrimSpace(line) == etcdWALEnd:
+			head, err := hex.DecodeString(hexed.String())
+			if err != nil {
+				return EtcdData{}, fmt.Errorf("the head of %s is not hex: %w", wal, err)
+			}
+			data.WALs[wal] = head
+			wal = ""
+			hexed.Reset()
+		case wal != "":
+			hexed.WriteString(strings.ReplaceAll(strings.TrimSpace(line), " ", ""))
 		case strings.HasPrefix(line, etcdDataMark):
-			if state != "" {
+			if data.State != "" {
 				return EtcdData{}, errors.New("the etcd data probe answered twice")
 			}
-			state = strings.TrimPrefix(line, etcdDataMark)
-		case line == etcdWALBegin:
-			in = true
-		case line == etcdWALEnd:
-			in, ended = false, true
-		case in:
-			hexed.WriteString(strings.ReplaceAll(line, " ", ""))
+			data.State = strings.TrimPrefix(line, etcdDataMark)
+		case line == etcdListBegin:
+			listing = true
+		case line == etcdListEnd:
+			listing, ended = false, true
+		case listing:
+			f := strings.SplitN(line, " ", 3)
+			size, err := strconv.ParseInt(f[min(1, len(f)-1)], 10, 64)
+			if len(f) != 3 || len(f[0]) != 1 || err != nil || f[2] == "" {
+				return EtcdData{}, fmt.Errorf("the etcd data listing has a line it cannot read: %q", line)
+			}
+			data.Entries = append(data.Entries, EtcdDataEntry{Type: f[0], Size: size, Path: f[2]})
+		case ended && strings.HasPrefix(line, etcdWALBegin):
+			wal = strings.TrimPrefix(line, etcdWALBegin)
+			if data.WALs == nil {
+				data.WALs = map[string][]byte{}
+			}
+			if _, dup := data.WALs[wal]; dup || wal == "" {
+				return EtcdData{}, fmt.Errorf("the etcd data probe read %q twice", wal)
+			}
 		}
 	}
-	switch state {
-	case EtcdDataAbsent, EtcdDataEmpty, EtcdDataNoMember, EtcdDataNoWAL, EtcdDataLink, EtcdDataUnreadable:
-		return EtcdData{State: state}, nil
+	switch data.State {
+	case EtcdDataAbsent, EtcdDataLink, EtcdDataNotDir, EtcdDataUnreadable:
+		return EtcdData{State: data.State}, nil
+	case EtcdDataListing:
+		if !ended || wal != "" {
+			return EtcdData{}, errors.New("the etcd data probe's answer was cut short")
+		}
+		return data, nil
 	case "":
 		return EtcdData{}, fmt.Errorf("the etcd data probe gave no answer: %s", strings.TrimSpace(out))
 	}
-	name, ok := strings.CutPrefix(state, EtcdDataWAL+" ")
-	if !ok || name == "" {
-		return EtcdData{}, fmt.Errorf("the etcd data probe answered %q", state)
+	return EtcdData{}, fmt.Errorf("the etcd data probe answered %q", data.State)
+}
+
+// What EtcdData.Assess makes of what a path holds.
+const (
+	// EtcdDataNothing: no directory, or an empty one. Nothing to lose.
+	EtcdDataNothing = "nothing"
+	// EtcdDataFailedBootstrap: member/snap/db alone, no larger than a fresh
+	// one, which is what etcd leaves when it exits before it reaches a peer
+	// (FreshEtcdDBSize). It holds no member and no key.
+	EtcdDataFailedBootstrap = "failed-bootstrap"
+	// EtcdDataMember: etcd's member layout, with write-ahead logs that all
+	// name the same member and cluster.
+	EtcdDataMember = "member"
+	// EtcdDataUnknown: anything else. Why says what was found.
+	EtcdDataUnknown = "unknown"
+)
+
+// EtcdDataVerdict is what a path holds, as far as its files show.
+type EtcdDataVerdict struct {
+	Kind      string
+	NodeID    uint64
+	ClusterID uint64
+	Why       string
+}
+
+var (
+	walName    = regexp.MustCompile(`^member/wal/[0-9a-f]{16}-[0-9a-f]{16}\.wal$`)
+	walTmp     = regexp.MustCompile(`^member/wal/[0-9]+\.tmp$`)
+	snapName   = regexp.MustCompile(`^member/snap/[0-9a-f]{16}-[0-9a-f]{16}\.snap$`)
+	snapDBName = regexp.MustCompile(`^member/snap/[0-9a-f]{16}\.snap\.db$`)
+)
+
+// Assess says what d holds: nothing, a failed bootstrap, a member whose
+// write-ahead logs agree on its member and cluster IDs, or something else.
+// Only the first three are recognised, each exactly: etcd's member layout is
+// the directories member, member/snap and member/wal, and in them the
+// backend db, snapshots, received snapshot databases, WAL files and the WAL
+// files etcd preallocates (N.tmp), by etcd v3.5.16's names
+// (server/storage/wal/util.go walName, server/etcdserver/api/snap). A
+// symbolic link anywhere, any other name, or a WAL that does not decode is
+// unknown.
+func (d EtcdData) Assess() EtcdDataVerdict {
+	unknown := func(format string, a ...any) EtcdDataVerdict {
+		return EtcdDataVerdict{Kind: EtcdDataUnknown, Why: fmt.Sprintf(format, a...)}
 	}
-	if !ended {
-		return EtcdData{}, fmt.Errorf("the head of %s was not read to its end", name)
+	switch d.State {
+	case EtcdDataAbsent:
+		return EtcdDataVerdict{Kind: EtcdDataNothing}
+	case EtcdDataLink:
+		return unknown("is a symbolic link")
+	case EtcdDataNotDir:
+		return unknown("is not a directory")
+	case EtcdDataUnreadable:
+		return unknown("could not be read")
+	case EtcdDataListing:
+	default:
+		return unknown("was answered as %q", d.State)
 	}
-	head, err := hex.DecodeString(hexed.String())
-	if err != nil {
-		return EtcdData{}, fmt.Errorf("the head of %s is not hex: %w", name, err)
+	if len(d.Entries) == 0 {
+		return EtcdDataVerdict{Kind: EtcdDataNothing}
 	}
-	node, cluster, err := ParseEtcdWALMetadata(head)
-	if err != nil {
-		return EtcdData{}, fmt.Errorf("%s: %w", name, err)
+	var wals []string
+	paths := map[string]EtcdDataEntry{}
+	for _, e := range d.Entries {
+		paths[e.Path] = e
+		switch {
+		case e.Type == "l":
+			return unknown("holds a symbolic link, %s", e.Path)
+		case e.Type == "d" && (e.Path == "member" || e.Path == "member/snap" || e.Path == "member/wal"):
+		case e.Type == "f" && walName.MatchString(e.Path):
+			wals = append(wals, strings.TrimPrefix(e.Path, "member/wal/"))
+		case e.Type == "f" && (e.Path == "member/snap/db" || walTmp.MatchString(e.Path) || snapName.MatchString(e.Path) || snapDBName.MatchString(e.Path)):
+		default:
+			return unknown("holds %s, which is not etcd's member layout", e.Path)
+		}
 	}
-	return EtcdData{State: EtcdDataWAL, WAL: name, NodeID: node, ClusterID: cluster}, nil
+	if len(wals) == 0 {
+		db, ok := paths["member/snap/db"]
+		if len(d.Entries) == 3 && ok && paths["member"].Type == "d" && paths["member/snap"].Type == "d" && db.Size <= FreshEtcdDBSize {
+			return EtcdDataVerdict{Kind: EtcdDataFailedBootstrap}
+		}
+		return unknown("holds an etcd member directory with no write-ahead log and more than a failed start leaves, so whose it is cannot be read")
+	}
+	if len(wals) > etcdMaxWALs {
+		return unknown("holds %d write-ahead log files, more than are read", len(wals))
+	}
+	sort.Strings(wals)
+	var verdict EtcdDataVerdict
+	for i, name := range wals {
+		head, ok := d.WALs[name]
+		if !ok {
+			return unknown("holds a write-ahead log, %s, that was not read", name)
+		}
+		node, cluster, err := ParseEtcdWALMetadata(head)
+		if err != nil {
+			return unknown("holds a write-ahead log, %s, that does not decode: %v", name, err)
+		}
+		if i == 0 {
+			verdict = EtcdDataVerdict{Kind: EtcdDataMember, NodeID: node, ClusterID: cluster}
+		} else if node != verdict.NodeID || cluster != verdict.ClusterID {
+			return unknown("holds write-ahead logs that disagree: %s names member %x of cluster %x, and %s member %x of cluster %x", wals[0], verdict.NodeID, verdict.ClusterID, name, node, cluster)
+		}
+	}
+	if len(d.WALs) != len(wals) {
+		return unknown("had a write-ahead log read that its listing does not hold")
+	}
+	return verdict
 }
 
 // ParseEtcdWALMetadata finds the metadata record at the head of an etcd
@@ -159,7 +314,7 @@ func ParseEtcdWALMetadata(b []byte) (nodeID, clusterID uint64, err error) {
 	table := crc32.MakeTable(crc32.Castagnoli)
 	var running uint32
 	sawCRC := false
-	for i := 0; i < walMaxRecords; i++ {
+	for i := 0; i < walMaxRecs; i++ {
 		if len(b) < 8 {
 			return 0, 0, errors.New("no metadata record in the head of the WAL")
 		}
