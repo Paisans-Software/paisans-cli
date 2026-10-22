@@ -5,6 +5,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/topology"
 )
 
@@ -128,5 +129,5 @@ func absentLevel(cfg *config.Config, site string) Level {
 // requestAdvice is how a site's owner admits it, or admits it again, in
 // the words apply's refusal uses.
 func requestAdvice(site string) string {
-	return fmt.Sprintf("  1. `paisans site request --site %[1]s > %[1]s.admit` writes the request; its owner runs `sudo paisans site admit --request %[1]s.admit` on the host, granting what it asks for, and the next `paisans deployment apply` joins it.", site)
+	return fmt.Sprintf("  1. `"+progname.Name()+" site request --site %[1]s > %[1]s.admit` writes the request; its owner runs `sudo "+progname.Name()+" site admit --request %[1]s.admit` on the host, granting what it asks for, and the next `"+progname.Name()+" deployment apply` joins it.", site)
 }

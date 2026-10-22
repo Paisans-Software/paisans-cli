@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // ContainersCommand lists every container of deployment d on a host, running
@@ -271,15 +272,15 @@ func containerFinding(dep deployment.Deployment, site string, d ContainerProbe, 
 
 	switch {
 	case strings.Contains(in.State.Error, "cannot assign requested address"):
-		recreate := "`paisans deployment apply --site " + site + " --execute`"
+		recreate := "`" + progname.Name() + " deployment apply --site " + site + " --execute`"
 		if stack := d.Entry.Stack(dep); stack != "" {
-			recreate = "`paisans deployment apply --site " + site + " --recreate " + stack + " --execute`"
+			recreate = "`" + progname.Name() + " deployment apply --site " + site + " --recreate " + stack + " --execute`"
 		}
 		f.More = []string{
 			fmt.Sprintf("Its Docker daemon started it before %s was up. The container publishes its port on the site's mesh address, which exists only once %s has brought %s up, and Docker does not retry a container whose network setup failed.", dep.Interface(), dep.WireGuardUnit(), dep.Interface()),
 			"recover:",
 			fmt.Sprintf("  1. `docker start %s` on %s, as the deployment's user, or %s.", name, site, recreate),
-			fmt.Sprintf("  2. If it happens at every boot, `paisans doctor --site %s` says under linger whether the user's manager is ordered after the mesh.", site),
+			fmt.Sprintf("  2. If it happens at every boot, `"+progname.Name()+" doctor --site %s` says under linger whether the user's manager is ordered after the mesh.", site),
 		}
 	case restarting && anyMatch(logs, networkUnreachable):
 		f.More = []string{
@@ -372,7 +373,7 @@ func indent(lines []string) []string {
 // site, touching nothing else there.
 func recreateCommand(site, stack string) string {
 	if stack == "" {
-		return "`paisans deployment apply --site " + site + " --execute`"
+		return "`" + progname.Name() + " deployment apply --site " + site + " --execute`"
 	}
-	return "`paisans deployment apply --site " + site + " --only " + stack + " --recreate " + stack + " --execute`"
+	return "`" + progname.Name() + " deployment apply --site " + site + " --only " + stack + " --recreate " + stack + " --execute`"
 }

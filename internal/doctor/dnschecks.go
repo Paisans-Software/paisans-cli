@@ -13,6 +13,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/dns"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // The DNS checks ask whether Caddy can get its certificates, and whether
@@ -408,18 +409,18 @@ func Records(p RecordsProbe) []Finding {
 			switch {
 			case e.Parent:
 				wanted = fmt.Sprintf("this deployment's: %s -> %s (zone %s)", record, recordContent(e.Want), e.Zone)
-				advice = "Give each its own DMARC policy, or delete this one at the provider by hand; paisans dns init then gives each hostname its own."
+				advice = "Give each its own DMARC policy, or delete this one at the provider by hand; " + progname.Name() + " dns init then gives each hostname its own."
 			case e.Guard:
 				wanted = fmt.Sprintf("checked: %s holds no SPF record that lets a server send (zone %s)", e.Name, e.Zone)
 				advice = "If the hostname sends mail, list it in community.mail_domains; otherwise remove that record at the provider."
 			case e.Leftover || e.Advisory:
-				advice = "paisans dns prune --execute removes it."
+				advice = progname.Name() + " dns prune --execute removes it."
 			case strings.Contains(first, "proxied"):
 				advice = more
 			}
 			fails = append(fails, Finding{Section: SectionRecords, Level: Fail, Line: record + ": " + strings.TrimSuffix(first, "."), More: []string{wanted, advice}})
 		case dns.Create:
-			advice := "paisans dns init --execute creates it."
+			advice := progname.Name() + " dns init --execute creates it."
 			if e.Type == "A" || e.Type == "AAAA" {
 				advice = "Nothing can reach it there. " + advice
 			}
@@ -428,7 +429,7 @@ func Records(p RecordsProbe) []Finding {
 			fails = append(fails, Finding{Section: SectionRecords, Level: Fail, Line: fmt.Sprintf("%s points at an address this deployment no longer declares", record),
 				More: []string{wanted, e.Detail + ". paisans dns init --execute updates it."}})
 		case dns.Moving:
-			rest = append(rest, Finding{Section: SectionRecords, Level: Info, Line: record + " waits for paisans gateway move", More: []string{e.Detail}})
+			rest = append(rest, Finding{Section: SectionRecords, Level: Info, Line: record + " waits for " + progname.Name() + " gateway move", More: []string{e.Detail}})
 		case dns.Warn:
 			rest = append(rest, Finding{Section: SectionRecords, Level: Warn, Line: record + " is not this toolkit's to write, and is missing or weak",
 				More: []string{e.Detail, "expected at least: " + strings.TrimPrefix(wanted, "wanted: ")}})
