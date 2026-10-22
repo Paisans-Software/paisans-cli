@@ -8975,20 +8975,33 @@ remove` took out of etcd, a site taken out with `site remove --host-gone` whose
 host comes back, or a removal that stopped part way. Started from that data,
 its new learner would be the removed member, exit, and restart in a loop, and
 it stays in etcd's member list as a learner that never started. So before a
-joiner whose member has not started is added, or started when an earlier run
-added it, its data directory is emptied, and the directory itself kept for the
-container to mount. A learner that never started has never connected, so it
-holds nothing of its own. Its data is
-deleted rather than kept, because it holds only Patroni's store, runtime state
-(the leader lock, sync state, the `initialize` key and the dynamic
-configuration) that every remaining member also holds; it is not operator data,
-so `--delete-data` does not govern it. A site that never ran etcd has nothing
-to delete. A voter, or a learner that has started, is never cleared. Before
-anything is removed, `site add` refuses a joiner whose host runs an etcd that
-answers for a different cluster than the voter it works through, naming both
-cluster IDs: that data is another cluster's, not a removed member's. The
-check fails closed: when the voter's or the joiner's answer carries no cluster
-ID, the join is refused too, since the data could not be checked. The files are the etcd container's, which under rootless Docker
+joiner whose member has not started is added, its data directory is emptied,
+and the directory itself kept for the container to mount. A learner an earlier
+run added that never started may still have received a snapshot or log entries
+before it stopped, and the leader remembers how far it got, so it is not
+started again from empty data under the same ID: it is removed from etcd,
+its data emptied, and it is added again under a new ID.
+
+The data is deleted only on evidence that it is this cluster's, read on disk
+whether or not an etcd runs there: no directory, an empty one, or one without
+etcd's member directory, which hold nothing to lose; or a write-ahead log
+whose metadata record names this cluster's ID, which `site add` reads from
+the first log file's head through `rootlesskit` and decodes, checksum and
+all. This cluster's data is deleted rather than kept because it holds only
+Patroni's store, runtime state (the leader lock, sync state, the `initialize`
+key and the dynamic configuration) that every remaining member also holds; it
+is not operator data, so `--delete-data` does not govern it. Anything else is
+refused before any container is removed, naming the site and what was found:
+another cluster's ID, a member directory with no log, a log that does not
+decode, a directory that cannot be read, or a symbolic link. An etcd running
+there is asked as well, and one that answers for another cluster, answers
+without a cluster ID, or does not answer is refused; its answer is never what
+permits the delete. A refusal changes nothing: data of another cluster is its
+owner's to move off the host, or the site is taken out of this deployment.
+The check fails closed on its own side too: a voter whose answer carries no
+cluster ID refuses the join. It runs when the join is planned and again
+before each clear. A voter, or a learner that has started, is never cleared.
+A site that never ran etcd has nothing to delete. The files are the etcd container's, which under rootless Docker
 are expected, not yet observed, to be owned by a subordinate UID, so each is
 deleted through `rootlesskit`, as `site remove` deletes its own. Such a joiner
 is also given the membership as it stands, not the flags its host records
