@@ -125,7 +125,7 @@ func anchorFor(l configstore.Local, root string) (configstore.Anchor, error) {
 	return a, nil
 }
 
-// heldAnchor adds the operator's keys to a, for pull and recover, when the
+// heldAnchor adds the operator's keys to a, for pull, log and recover, when the
 // workstation records no signing key: the one keyPath names, a public key
 // file, or else every key the ssh-agent holds. Nothing is chosen among the
 // agent's keys, so nothing is guessed; the anchor's signer is recorded once
@@ -181,14 +181,19 @@ func recordAnchorKey(l configstore.Local, g configstore.Gathered, lines map[stri
 	return l.SetSigningKey(line)
 }
 
-// keyHelp is the --key flag's help for pull and recover.
+// keyHelp is the --key flag's help for pull, log and recover.
 const keyHelp = "a public key file (.pub) to start trust from, when .paisans/signing-key records none; the ssh-agent's keys are used without it"
 
-// noAnchorHeld is what a pull or recover refusal for a missing anchor says to
-// do, with otherwise added for a workstation that has files.
+// noAnchorHeld is what a pull, log or recover refusal for a missing anchor
+// says to do, with otherwise added for a workstation that has files.
 func noAnchorHeld(otherwise string) string {
 	return "Load the key that signed the deployment's versions with ssh-add, or name its public key with --key <path.pub>, or pin the first version you trust with --root <sha>" + otherwise + "."
 }
+
+// noAnchorPublish is what publish's refusal for a missing anchor says to do.
+// publish judges only from the recorded signing key, so the pull that
+// records one comes first.
+const noAnchorPublish = "Load the key that signed the deployment's versions with ssh-add and run paisans deployment pull, or name its public key with paisans deployment pull --key <path.pub>, or pin the first version you trust with paisans deployment pull --root <sha>, or run paisans operator register to sign the version you hold."
 
 func shaShape(s string) bool {
 	if len(s) != 40 && len(s) != 64 {
@@ -447,7 +452,7 @@ func runDeploymentPublish(args []string, stdin io.Reader, stdout io.Writer) erro
 		if err != nil {
 			return err
 		}
-		g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{}, stdin, stdout)
+		g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{noAnchor: noAnchorPublish}, stdin, stdout)
 		if err != nil {
 			return err
 		}
@@ -485,7 +490,7 @@ func runDeploymentPublish(args []string, stdin io.Reader, stdout io.Writer) erro
 	if err != nil {
 		return err
 	}
-	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{execute: true, answers: ans}, stdin, stdout)
+	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{execute: true, answers: ans, noAnchor: noAnchorPublish}, stdin, stdout)
 	if err != nil {
 		return err
 	}
@@ -517,7 +522,7 @@ func runDeploymentPublish(args []string, stdin io.Reader, stdout io.Writer) erro
 			return &ui.Problem{Hint: "the sites' newest version is older than one seen here", Explain: rb.Error() + ". Nothing was published: a version on it would build on an old one. Find out why the newer version is gone; paisans deployment log shows what each site holds.", Cause: err}
 		}
 		if errors.Is(err, configstore.ErrNoAnchor) {
-			return &ui.Problem{Hint: "no version to start trusting from", Explain: err.Error() + ". Run paisans deployment pull --root <sha>, or paisans operator register.", Cause: err}
+			return &ui.Problem{Hint: "no version to start trusting from", Explain: err.Error() + ". " + noAnchorPublish, Cause: err}
 		}
 		return err
 	default:
@@ -802,6 +807,7 @@ func runDeploymentLog(args []string, stdin io.Reader, stdout io.Writer) error {
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, configHelp)
 	root := fs.String("root", "", "judge from this root, as if pinned, without recording it")
+	keyPath := fs.String("key", "", keyHelp)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -820,10 +826,16 @@ func runDeploymentLog(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// log records nothing, so the keys heldAnchor adds are only judged from.
+	a, _, err = heldAnchor(a, *keyPath)
+	if err != nil {
+		return err
+	}
 	r := reporter()
 	r.Section("versions of " + *configPath)
 	sites := configTransports(cfg)
-	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{log: true}, stdin, stdout)
+	m := gatherMode{log: true, noAnchor: noAnchorHeld(", or run paisans operator register to sign the version you hold")}
+	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, m, stdin, stdout)
 	if err != nil {
 		return err
 	}

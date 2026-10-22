@@ -362,8 +362,8 @@ var helpCommands = []helpCommand{
 	{
 		name:    "deployment log",
 		summary: "List every version, its signer, and the sites holding it.",
-		usage:   []string{"paisans deployment log [--config " + config.FileName + "] [--root <sha>]"},
-		detail:  "List every version of the configuration the sites keep, its signer, and the sites holding it." + configTrust,
+		usage:   []string{"paisans deployment log [--config " + config.FileName + "] [--root <sha>] [--key <path.pub>]"},
+		detail:  "List every version of the configuration the sites keep, its signer, and the sites holding it." + configTrust + "\n\n" + agentTrust,
 	},
 	{
 		name:    "deployment recover",
@@ -503,11 +503,11 @@ const configTrust = "\n\n" +
 	"--yes types partial and rollback for each command but log, which asks nothing. " + yesTopic + " " +
 	"With --execute each site first syncs with its peers; without it, and in log, no site is changed and only .paisans/ here is written."
 
-// agentTrust is how pull and recover find the operator's key on a
+// agentTrust is how pull, log and recover find the operator's key on a
 // workstation that records none.
 const agentTrust = "With no key recorded in .paisans/signing-key, trust starts from the newest version signed by any key your ssh-agent holds, or by the public key --key names, which the agent need not hold. " +
-	"A pinned root still holds: that version must descend from it. Two of your keys that signed heads that diverge are a fork. " +
-	"With --execute the key that signed that version is recorded in .paisans/signing-key. With no such version and no root, load the key with ssh-add, name it with --key, or pin --root <sha>."
+	"This holds with --root too: a pinned root bounds those keys, and the version they anchor on must descend from it. Two of your keys that signed heads that diverge are a fork. " +
+	"pull and recover with --execute record the key that signed that version in .paisans/signing-key; log records nothing. With no such version and no root, load the key with ssh-add, name it with --key, or pin --root <sha>."
 
 // executeTopic is `paisans help execute`: which commands reach a host, and
 // what --execute lets each of them change.

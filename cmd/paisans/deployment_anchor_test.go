@@ -233,3 +233,79 @@ func TestConfigPullAnchorsOnTheAgentsKey(t *testing.T) {
 		t.Fatalf("signing key %q, want %q", k, pub)
 	}
 }
+
+// log, on a workstation with files and no anchor recorded, judges from the
+// agent's key as pull does, and records nothing; unrelated keys refuse with
+// the same advice.
+func TestConfigLogAnchorsOnTheAgentsKey(t *testing.T) {
+	shas, answer, files, _, pub := storedHistoryKey(t, 2, 0)
+	recoverHosts(t, answer)
+	allSitesUp(answer, nil)
+	l := configstore.Local{Dir: t.TempDir()}
+	if err := l.WriteFiles(files[0]); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(l.Dir, "paisans-stack.yaml")
+	_, unrelated := testKey(t)
+	agentHolding(t, unrelated)
+	var out bytes.Buffer
+	err := runDeployment([]string{"log", "--config", cfgPath}, noTerminalStdin(), &out)
+	text := problemText(err)
+	for _, want := range []string{"no version to start trusting from", "ssh-add", "--key", "--root <sha>"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("refusal %q does not say %q", text, want)
+		}
+	}
+	agentHolding(t, unrelated, pub)
+	var rep bytes.Buffer
+	reporterOverride = ui.NewPlain(&rep, false)
+	out.Reset()
+	if err := runDeployment([]string{"log", "--config", cfgPath}, noTerminalStdin(), &out); err != nil {
+		t.Fatal(problemText(err), err)
+	}
+	if !strings.Contains(rep.String(), "anchored on "+fingerprint(t, pub)) {
+		t.Fatalf("the gather does not name the key that anchored it:\n%s", rep.String())
+	}
+	if !strings.Contains(out.String(), shas[1][:12]+"  ") || !strings.Contains(out.String(), "valid, head") {
+		t.Fatalf("log:\n%s", out.String())
+	}
+	if k, _ := l.SigningKey(); k != "" {
+		t.Fatalf("log recorded the signing key %q", k)
+	}
+
+	// --key names the key in place of the agent's.
+	path := filepath.Join(t.TempDir(), "id.pub")
+	if err := os.WriteFile(path, []byte(pub+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	agentHolding(t)
+	if err := runDeployment([]string{"log", "--config", cfgPath, "--key", path}, noTerminalStdin(), &out); err != nil {
+		t.Fatal(problemText(err), err)
+	}
+}
+
+// publish, with no anchor, gives the advice pull gives, through pull, since
+// publish judges only from the recorded key.
+func TestConfigPublishWithoutAnchorAdvises(t *testing.T) {
+	key, pub := testKey(t)
+	s := newStore(t)
+	_, f := s.commit(t, fixtureAs(t, pub), "", nil, 1, key)
+	answer := s.answer(t)
+	recoverHosts(t, answer)
+	allSitesUp(answer, nil)
+	l := configstore.Local{Dir: t.TempDir()}
+	if err := l.WriteFiles(f); err != nil {
+		t.Fatal(err)
+	}
+	agentHolding(t, pub)
+	cfgPath := filepath.Join(l.Dir, "paisans-stack.yaml")
+	for _, args := range [][]string{{"publish", "--config", cfgPath}, {"publish", "--config", cfgPath, "--execute"}} {
+		var out bytes.Buffer
+		text := problemText(runDeployment(args, noTerminalStdin(), &out))
+		for _, want := range []string{"no version to start trusting from", "ssh-add", "paisans deployment pull --key <path.pub>", "--root <sha>", "paisans operator register"} {
+			if !strings.Contains(text, want) {
+				t.Fatalf("%v: refusal %q does not say %q", args, text, want)
+			}
+		}
+	}
+}
