@@ -303,15 +303,18 @@ func (p *Plan) removeWitness() error {
 	if err := p.etcdVoters(both); err != nil {
 		return fmt.Errorf("before taking %s out of etcd: %w", p.witness, err)
 	}
-	members, err := p.etcdMembers()
+	cluster, err := p.etcdCluster()
 	if err != nil {
 		return err
 	}
-	for _, m := range members {
+	for _, m := range cluster.Members {
 		if apply.EtcdMemberSite(p.cfg, m) != p.witness {
 			continue
 		}
 		p.work("remove witness " + p.witness + "'s etcd member")
+		if err := p.recordRemoved(cluster.ID, p.witness, m.ID); err != nil {
+			return err
+		}
 		if out, err := p.transports[p.etcd.control].Run(p.etcdctl("member remove " + m.HexID())); err != nil {
 			return fmt.Errorf("%s: etcdctl member remove %s: %w: %s", p.etcd.control, m.HexID(), err, lastLines(out, 3))
 		}
@@ -331,15 +334,18 @@ func renders(rendered *render.Plan, site, rel string) bool {
 // removeEtcdMember removes the site's member by its ID, read again first, so
 // a run that removed it and stopped finds nothing to do.
 func (p *Plan) removeEtcdMember() error {
-	members, err := p.etcdMembers()
+	cluster, err := p.etcdCluster()
 	if err != nil {
 		return err
 	}
-	for _, m := range members {
+	for _, m := range cluster.Members {
 		if apply.EtcdMemberSite(p.cfg, m) != p.Site {
 			continue
 		}
 		p.work("remove " + p.Site + "'s etcd member")
+		if err := p.recordRemoved(cluster.ID, p.Site, m.ID); err != nil {
+			return err
+		}
 		if out, err := p.transports[p.etcd.control].Run(p.etcdctl("member remove " + m.HexID())); err != nil {
 			return fmt.Errorf("%s: etcdctl member remove %s: %w: %s", p.etcd.control, m.HexID(), err, lastLines(out, 3))
 		}
@@ -348,11 +354,41 @@ func (p *Plan) removeEtcdMember() error {
 }
 
 func (p *Plan) etcdMembers() ([]apply.EtcdMember, error) {
+	c, err := p.etcdCluster()
+	return c.Members, err
+}
+
+func (p *Plan) etcdCluster() (apply.EtcdCluster, error) {
 	out, err := p.transports[p.etcd.control].Run(p.etcdctl("member list -w json"))
 	if err != nil {
-		return nil, fmt.Errorf("%s: etcd's member list: %w: %s", p.etcd.control, err, lastLines(out, 3))
+		return apply.EtcdCluster{}, fmt.Errorf("%s: etcd's member list: %w: %s", p.etcd.control, err, lastLines(out, 3))
 	}
-	return apply.ParseEtcdMembers(out)
+	return apply.ParseEtcdCluster(out)
+}
+
+// recordRemoved records, before a member is removed, that this cluster
+// removes site's member id: on the host of every etcd member that stays and
+// of the witness that leaves etcd and stays a site (apply.EtcdRemoved). site
+// add deletes a rejoining site's old etcd data only when its write-ahead log
+// names a member so recorded, so a removal it cannot record is not made.
+// An answer that carried no cluster ID, which etcdctl's never lacks, has
+// nothing to record it under: the removal goes ahead unrecorded, and site
+// add refuses that data rather than delete it.
+func (p *Plan) recordRemoved(cluster uint64, site string, id uint64) error {
+	if cluster == 0 {
+		return nil
+	}
+	hosts := p.live(p.end.Etcd.Members)
+	if p.witness != "" && p.witness != site {
+		hosts = append(hosts, p.witness)
+	}
+	r := apply.EtcdRemoved{Site: site, Cluster: cluster, Member: id}
+	for _, name := range hosts {
+		if err := apply.RecordEtcdRemoved(p.transports[name], p.dep(), r); err != nil {
+			return fmt.Errorf("%s: %w. Nothing was removed from etcd", name, err)
+		}
+	}
+	return nil
 }
 
 func (p *Plan) etcdGate() error { return p.etcdVoters(p.live(p.end.Etcd.Members)) }

@@ -210,3 +210,47 @@ func TestAWitnessRemovedItselfHasItsEtcdDataEmptied(t *testing.T) {
 		}
 	}
 }
+
+// Each member site remove takes out of etcd is recorded, before its removal,
+// on the host of every etcd member that stays and of a witness that stays a
+// site: site add deletes that site's old etcd data later only on such a
+// record.
+func TestEachRemovedMemberIsRecordedBeforeItsRemoval(t *testing.T) {
+	const list = root + "/.paisans/etcd-removed"
+	t.Run("a data site and the witness", func(t *testing.T) {
+		w := witnessWorld(t)
+		execute(t, w.mustBuild("home-b", siteremove.Options{}))
+		for _, site := range []string{"home-a", "vm"} {
+			if got := w.hosts[site].files[list]; !strings.Contains(got, "home-b c1a5 2222\n") {
+				t.Errorf("%s does not record home-b's removal:\n%s", site, got)
+			}
+		}
+		if got := w.hosts["home-a"].files[list]; !strings.Contains(got, "vm c1a5 3333\n") {
+			t.Errorf("home-a does not record the witness's removal:\n%s", got)
+		}
+		for _, c := range []struct{ line, id string }{{"home-b c1a5 2222", "2222"}, {"vm c1a5 3333", "3333"}} {
+			if recorded, removed := w.index("home-a: set -e; mkdir -p '"+root+"/.paisans'; f='"+list+"'; touch \"$f\"; grep -qxF '"+c.line+"'"), w.index("member remove "+c.id); recorded < 0 || removed < recorded {
+				t.Errorf("%s was recorded at %d and removed at %d", c.line, recorded, removed)
+			}
+		}
+	})
+	t.Run("a data site of three", func(t *testing.T) {
+		w := setup(t)
+		execute(t, w.mustBuild("home-b", siteremove.Options{}))
+		for _, site := range []string{"home-a", "home-c", "vm"} {
+			if got := w.hosts[site].files[list]; !strings.Contains(got, "home-b c1a5 2222\n") {
+				t.Errorf("%s does not record home-b's removal:\n%s", site, got)
+			}
+		}
+	})
+	t.Run("--host-gone", func(t *testing.T) {
+		w, zone := cutoffWorld(t, "home-b", twoAndAWitness...)
+		execute(t, w.mustBuild("home-b", cutoffOptions(zone)))
+		if got := w.hosts["home-a"].files[list]; !strings.Contains(got, "home-b c1a5 2222\n") || !strings.Contains(got, "vm c1a5 3333\n") {
+			t.Errorf("home-a does not record both removals:\n%s", got)
+		}
+		if _, ok := w.hosts["home-b"].files[list]; ok {
+			t.Error("the cut-off host was written")
+		}
+	})
+}

@@ -298,6 +298,8 @@ func (h *host) keptProbe(command string) string {
 // deleteBesideKept deletes what the loops over each directory above a kept
 // path delete: each entry of the directory whose name the loop does not
 // keep, judged in the deepest directory a loop names.
+var etcdRemovedLine = regexp.MustCompile(`grep -qxF '([^']+)'`)
+
 func (h *host) deleteBesideKept(command string) {
 	keep := map[string][]string{}
 	for _, m := range regexp.MustCompile(`for f in '([^']+)'/\*[^;]*; do [^;]*;( case "\$\{f##\*/\}" in ([^)]*)\))?`).FindAllStringSubmatch(command, -1) {
@@ -744,6 +746,14 @@ func (h *host) Run(command string) (string, error) {
 		return "", nil
 	case strings.Contains(command, "-prune -o") && strings.Contains(command, "-printf"):
 		return h.keptProbe(command), nil
+	case strings.Contains(command, "/.paisans/etcd-removed'; touch"):
+		// A removal recorded once in the host's list.
+		line := etcdRemovedLine.FindStringSubmatch(command)[1]
+		path := root + "/.paisans/etcd-removed"
+		if !strings.Contains("\n"+h.files[path], "\n"+line+"\n") {
+			h.files[path] += line + "\n"
+		}
+		return "", nil
 	case strings.Contains(command, `case "${f##*/}" in`), strings.Contains(command, `rootlesskit rm -rf -- "$f"; done`):
 		h.deleteBesideKept(command)
 		return "", nil
