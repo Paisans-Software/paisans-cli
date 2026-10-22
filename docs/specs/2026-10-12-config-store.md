@@ -85,10 +85,22 @@ can forge.
 **The anchor** is the newest version signed by the operator's own SSH key, the
 one `paisans admin register` recorded (below), or a root hash the operator pins
 with `--root <hash>`. A workstation that has pulled before keeps both in
-`.paisans/`. With neither, a pull or recovery is refused and asks for `--root`:
-a history found only on the sites, however consistent, is one someone with root
-on those sites could have written, signed with their own key and listing
-themselves as an admin.
+`.paisans/`. On a workstation that records no key, a pull or recovery takes as
+the operator's keys every key their ssh-agent holds, or the one public key
+`--key <path.pub>` names: the anchor is then the newest version that passes
+shape and is signed by any of them. Nothing is chosen among them, so nothing is
+guessed, and with `--execute` the anchor's signer is recorded as the signing
+key. Someone with root on the sites cannot sign with a key only the operator
+holds, which is why these keys come from the workstation alone and never from
+the sites or a fetched version. A pinned root still holds: the anchor must
+descend from it. When the newest versions two of these keys signed diverge,
+neither anchors: each is a head of a fork, trusted with its ancestors, and
+handled as any fork is, since one of the keys may be one a later version
+removed and someone else may hold too. With no anchor at all, a pull or
+recovery is refused and says to load the key with `ssh-add`, name it with
+`--key`, or pin `--root`: a history found only on the sites, however
+consistent, is one someone with root on those sites could have written, signed
+with their own key and listing themselves as an admin.
 
 **Trusted** versions are the anchor, every ancestor of it, and every version
 that passes all of these:
@@ -211,8 +223,9 @@ with the rest.
 Local state is four files beside `paisans-stack.yaml`, in `.paisans/`: `config-root`,
 the pinned root; `config-head`, the version the local files started from;
 `config-seen`, the newest revision this workstation has seen (see *Rollback*);
-and `signing-key`, the operator's public key that `admin register` recorded. The
-anchor is the newest version that key signed. A cache of the versions gathered
+and `signing-key`, the operator's public key that `admin register`, or a pull
+or recovery that anchored on the ssh-agent's key, recorded. The anchor is the
+newest version that key signed. A cache of the versions gathered
 (`store.git`) and the files a refused pull sets aside (`incoming/`) sit beside
 them.
 
@@ -258,7 +271,7 @@ could inflate it.
 | `paisans config pull` | gathers and verifies; with no local edits, moves the files to the head; with local edits on an older base, refuses, writes the head's files to `.paisans/incoming/` and shows the difference |
 | `paisans config publish --merge` | a version whose parents are every head, after the operator has merged by hand; it resolves a fork and an incoming change alike |
 | `paisans config log` | every version: revision, signer, date, and which sites hold it |
-| `paisans config recover --from <user@host>...` | onto a workstation with nothing: gathers from the named hosts and every site the trusted heads name, verifies, reports how many sites answered, and writes the three files and the state files. A host's registry may name more than one deployment; `--id` names the one to recover, and a recovery that finds several without it refuses and lists them |
+| `paisans config recover --from <user@host>...` | onto a workstation with nothing: gathers from the named hosts and every site the trusted heads name, verifies from the ssh-agent's keys, the key `--key` names or `--root`, reports how many sites answered and which key anchored the gather, and writes the three files and the state files, the anchor's signer among them. A host's registry may name more than one deployment; `--id` names the one to recover, and a recovery that finds several without it refuses and lists them |
 
 **Publishing in `apply`.** `apply` publishes the version it applies and refuses
 when the version reaches no site, naming `host prepare` for a site that has no
@@ -276,7 +289,8 @@ version it applies, pushed to the sites its gather reached, before its host
 records the version; the host records that revision, and as a step of the run
 so does every later step.
 
-**A fork on recovery.** `recover` never picks between two heads by order. With a
+**A fork on recovery.** `recover` never picks between two heads by order,
+including two heads that two of the ssh-agent's keys signed. With a
 fork it writes each head's files to `.paisans/incoming/<sha>/` and refuses, and
 the operator merges by hand and publishes with `--merge`.
 

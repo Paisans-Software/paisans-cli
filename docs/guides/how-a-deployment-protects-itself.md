@@ -237,7 +237,10 @@ The sites only store; the workstation decides what to trust, because someone
 with root on a site can write anything there:
 
 * **Trust starts from something only the operator holds:** the newest version
-  signed by their own SSH key, or a root hash they pin with `--root`. A history
+  signed by their own SSH key, or a root hash they pin with `--root`. Their key
+  is the one `.paisans/signing-key` records or, on a workstation that records
+  none, any key their ssh-agent holds: only the holder of a key can sign with
+  it, so a key from the sites never anchors. A history
   found only on the sites is never trusted, however consistent, because whoever
   holds those sites could have written it and listed themselves as an operator. An
   operator who has never published gets an anchor of their own with `paisans operator
@@ -265,13 +268,17 @@ an old one visible instead:
   asks for `rollback` before giving it an older one.
 
 When the workstation is gone, `paisans deployment recover --from <user@host>
---root <sha> --execute` in an empty directory gathers from the hosts named and
-then every site the trusted heads name, and writes the three files. The root is
-the hash of a version the operator trusts, as `paisans deployment log` prints it;
-an empty workstation holds no signature of its own, so keep that hash
-somewhere other than the workstation, or commit `.paisans/config-root`, which
-the operators may share. When the sites hold two heads, `recover` writes each to
-`.paisans/incoming/<sha>/` and leaves the choice to an operator.
+--execute` in an empty directory gathers from the hosts named and then every
+site the trusted heads name, and writes the three files. Trust starts from the
+newest version signed by a key the ssh-agent holds, or by the public key
+`--key <path.pub>` names, and that key is recorded in `.paisans/signing-key`
+for the publishes that follow. Without the key, `--root <sha>` pins the hash of
+a version the operator trusts, as `paisans deployment log` prints it; keep that
+hash somewhere other than the workstation, or commit `.paisans/config-root`,
+which the operators may share. A pinned root still holds with the agent's keys:
+trust starts only from a version that descends from it. When the sites hold two
+heads, or two of the agent's keys signed heads that diverge, `recover` writes
+each to `.paisans/incoming/<sha>/` and leaves the choice to an operator.
 
 **Does not protect.** A fresh workstation that reaches only sites an attacker
 holds can be served an old, genuine version, and applying it reaches only those
@@ -280,8 +287,8 @@ secrets file: that is the operator's step (see *A former recipient still has
 the secrets file*).
 
 **You do.** Keep the files in a repository with more than one copy anyway, keep
-each operator's age key backed up somewhere other than that repository, and keep a
-trusted root hash where a lost workstation does not take it.
+each operator's age key backed up somewhere other than that repository, keep
+your SSH key, or a trusted root hash, where a lost workstation does not take it.
 
 What no design can protect is losing every operator's age key. That is total loss:
 add a second recipient, another operator or an offline backup key, as soon as the
