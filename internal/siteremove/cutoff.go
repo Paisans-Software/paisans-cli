@@ -674,6 +674,7 @@ func (p *Plan) buildCutoffEtcd() *Stage {
 		if p.etcd.witnessContainer {
 			st.Steps = append(st.Steps, Step{Site: p.witness, Verb: "stop", Title: "stop and remove etcd on " + p.witness, Text: "its etcd container, which a removed member cannot rejoin: " + p.stopWitnessEtcd()})
 		}
+		st.Steps = append(st.Steps, p.emptyEtcdDataStep(p.witness))
 	}
 	st.Gate = fmt.Sprintf("etcd's voters are exactly %s and every member is healthy", strings.Join(sortedCopy(p.live(p.end.Etcd.Members)), ", "))
 	st.run = func() error {
@@ -692,6 +693,9 @@ func (p *Plan) buildCutoffEtcd() *Stage {
 			if out, err := p.transports[p.witness].Run(p.stopWitnessEtcd()); err != nil {
 				return fmt.Errorf("%s: stopping its etcd: %w: %s", p.witness, err, lastLines(out, 3))
 			}
+		}
+		if p.witness != "" {
+			return p.emptyEtcdData(p.witness)
 		}
 		return nil
 	}

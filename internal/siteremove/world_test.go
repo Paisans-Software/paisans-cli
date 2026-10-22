@@ -744,7 +744,7 @@ func (h *host) Run(command string) (string, error) {
 		return "", nil
 	case strings.Contains(command, "-prune -o") && strings.Contains(command, "-printf"):
 		return h.keptProbe(command), nil
-	case strings.Contains(command, `case "${f##*/}" in`):
+	case strings.Contains(command, `case "${f##*/}" in`), strings.Contains(command, `rootlesskit rm -rf -- "$f"; done`):
 		h.deleteBesideKept(command)
 		return "", nil
 	case strings.Contains(command, "-type d -empty !"):
