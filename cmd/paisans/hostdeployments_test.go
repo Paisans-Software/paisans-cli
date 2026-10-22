@@ -218,7 +218,8 @@ func TestHostDeploymentsRefusals(t *testing.T) {
 	noSiteHosts(t)
 	for args, want := range map[string]string{
 		"":                         "--ssh",
-		"--ssh myalias":            "not user@host",
+		"--ssh myalias":            "names no user",
+		"--ssh -oProxyCommand=x":   "alias of your ssh config",
 		"--ssh admin@192.0.2.30 x": "extra",
 	} {
 		err := runSiteDeployments(strings.Fields(args))
@@ -240,7 +241,8 @@ func TestSiteRemoveByIDRefusesBeforeReachingAHost(t *testing.T) {
 		"watch --force --ssh admin@192.0.2.30 --id f2a9":                       "names the site",
 		"--force --ssh admin@192.0.2.30 --id f2a":                              "Eg: --id f2a9",
 		"--force --ssh admin@192.0.2.30 --id F2A9":                             "Eg: --id f2a9",
-		"--force --ssh myalias --id f2a9":                                      "not user@host",
+		"--force --ssh myalias --id f2a9":                                      "names no user",
+		"--force --ssh -oProxyCommand=x --id f2a9":                             "alias of your ssh config",
 		"--force --ssh admin@192.0.2.30 --id f2a9 --host-gone":                 "--host-gone cleans no host",
 		"--force --ssh admin@192.0.2.30 --id f2a9 --execute":                   "terminal",
 		"--force --ssh admin@192.0.2.30 --id f2a9 --execute --delete-data":     "terminal",

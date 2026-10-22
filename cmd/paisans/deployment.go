@@ -796,7 +796,7 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, configHelp)
 	var from pathList
-	fs.Var(&from, "from", "a host of the deployment to recover from, user@host[:port] (repeatable)")
+	fs.Var(&from, "from", "a host of the deployment to recover from, user@host[:port] or an alias of your ssh config (repeatable)")
 	root := fs.String("root", "", "pin this version as the root, the version trust starts from")
 	id := fs.String("id", "", "the deployment's id, when the hosts' logins belong to more than one")
 	execute := fs.Bool("execute", false, "write the recovered files and state")
@@ -812,7 +812,7 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 		return err
 	}
 	if len(from) == 0 {
-		return &ui.Problem{Hint: "deployment recover needs --from", Explain: "Name a host of the deployment with --from user@host[:port], Eg: --from admin@203.0.113.9; every site the recovered configuration names is reached after it."}
+		return &ui.Problem{Hint: "deployment recover needs --from", Explain: "Name a host of the deployment with --from user@host[:port], or an alias of your ssh config, Eg: --from admin@203.0.113.9 or --from home-a; every site the recovered configuration names is reached after it."}
 	}
 	l, err := workstationOf(*configPath)
 	if err != nil {
@@ -829,7 +829,7 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 	r.Section("recover into " + l.Dir)
 	var dests []config.Destination
 	for _, f := range from {
-		dest, err := config.ParseDestination(f)
+		dest, err := parseDestination(f)
 		if err != nil {
 			return sshFlagProblem(f, err)
 		}

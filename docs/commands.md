@@ -112,6 +112,40 @@ refusal, and 2 when its command line cannot run. `storage add`
 also exits 75 when a stage is waiting on Garage. `doctor` and `web-server check`
 exit 1 on any `FAIL`.
 
+### Destinations: `user@host[:port]` or an ssh alias
+
+The flags that name a host by its login, `--ssh` of `deployment fetch`,
+`site deployments`, `site remove`, `site admit` and `site evict`, and
+`deployment recover --from`, take every form ssh takes: `user@host[:port]`,
+`user@[v6]:port`, or a `Host` alias of your own ssh config, alone or with a
+user, a port or both.
+
+```sh
+paisans deployment fetch --ssh home-a                        # alias
+paisans deployment recover --from home-a --from admin@home-b  # user@alias
+paisans site deployments --ssh admin@home-a:2222             # user@alias:port
+paisans site deployments --ssh admin@203.0.113.9             # user@host
+```
+
+* **Resolved by ssh.** A destination is read with `ssh -G`, so `Match`,
+  `Include` and wildcards decide it exactly as they decide a plain ssh. A user
+  or port given overrides the config's, as it does for ssh.
+* **Reached as the alias.** ssh is given the alias, with the user and port it
+  resolved to, so its `ProxyJump`, `IdentityFile` and every other option apply
+  to the connection, and host key checking is ssh's own, as before.
+* **Shown both ways.** Messages name an alias with what it resolved to,
+  `home-a -> admin@203.0.113.9:22`, and `deployment fetch` saves that line as
+  where each copy came from, since the alias means something only on this
+  workstation. Nothing is written into `paisans-stack.yaml`: `ssh.user` is
+  recorded only from a site's own ssh section, never from `--ssh`.
+* **A user is required.** A destination whose config sets no `User` is
+  refused rather than reached as your local name, which is what ssh falls back
+  to; `ssh -G` reports that name for an unconfigured host, so a config whose
+  `User` is your local name reads the same, and the refusal says to name the
+  user (`admin@home-a`).
+* **Never an option.** A destination starting with `-`, or holding a space or
+  a pattern character, is refused before ssh is run.
+
 ## Configuration and secrets
 
 ### `paisans validate`
@@ -491,7 +525,7 @@ paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # e
   | `--config <path>` | all | the deployment declaration, which must be named `paisans-stack.yaml` with `secrets.enc.yaml` and `.sops.yaml` beside it; `.paisans/` beside it holds this workstation's state |
   | `--merge` | `publish` | the version's parents are every head, after the operator has merged a fork or an incoming change by hand |
   | `--root <sha>` | `pull`, `log`, `recover` | trust starts from this version; `pull` and `recover` record it, `log` judges from it for the run only |
-  | `--from <user@host[:port]>` | `recover` (required, repeatable) | a host of the deployment to recover from; every site the trusted heads name is reached after it |
+  | `--from <user@host[:port] or ssh alias>` | `recover` (required, repeatable) | a host of the deployment to recover from; every site the trusted heads name is reached after it |
   | `--id <id>` | `recover` | the deployment, when the logins' admission records name more than one; it must be a deployment id |
   | `--execute` | `publish`, `pull`, `recover` | do it; `log` takes none |
   | `--yes` | `publish`, `pull`, `recover` | type `partial` and `rollback` when asked for; `log` asks nothing and takes none |
@@ -590,7 +624,8 @@ paisans deployment fetch --ssh admin@203.0.113.9
 
 * **Alone:** always, and without `paisans-stack.yaml`: on a new workstation, or
   to bring the saved copies up to date.
-* **Flags:** `--ssh <user@host[:port]>` (required).
+* **Flags:** `--ssh <user@host[:port] or ssh alias>` (required); see
+  *Destinations*.
 * **Hosts:** the one host named, as its owner, through sudo, since the registry
   and the configuration stores are root's. It asks no site to sync and changes
   nothing on the host.
@@ -827,7 +862,8 @@ paisans site deployments --ssh admin@203.0.113.9   # read only
 
 * **Alone:** always, and without `paisans-stack.yaml`: to see what a shared host
   holds, or to find the id `site remove --id` takes.
-* **Flags:** `--ssh <user@host[:port]>` (required), `--sudo`.
+* **Flags:** `--ssh <user@host[:port] or ssh alias>` (required), `--sudo`;
+  see *Destinations*.
 * **Hosts:** reads the one host named, as its owner: through sudo unless
   `--sudo=false`, which lists the admission records alone, since they are
   readable without sudo and the registry and the deployments' directories are
@@ -889,8 +925,8 @@ paisans site admit --site home-a --ssh owner@home-a.example.org --execute   # fr
   * from a request: `--request <file>`, on the host, as root;
   * from the configuration: `--site <name>` from a workstation, with
     `--config`, and `--ssh` as your login alone, for the site's declared ssh
-    host and port, or as `user@host[:port]`; left out, it is asked for at a
-    terminal;
+    host and port, or as `user@host[:port]` or an ssh alias (see
+    *Destinations*); left out, it is asked for at a terminal;
   * either way: the grants `--watchdog` and `--public-ports`;
     `--data-dir <path>`, `--bridge-netfilter`, `--mesh-lan`, `--enable-ufw`,
     `--enable-ufw-block-listed` (with `--enable-ufw` alone), `--swapfile`;
@@ -1066,7 +1102,8 @@ paisans site evict --site home-a --ssh owner@home-a.example.org --execute
 * **Flags:** `--request <file>`, or `--deployment <id> --user <name>` (both on
   the host, as root), or `--site <name>` with `--config`, and `--ssh` as
   your login alone, for the site's declared ssh host and port, or as
-  `user@host[:port]`; left out, it is asked for at a terminal;
+  `user@host[:port]` or an ssh alias (see *Destinations*); left out, it is
+  asked for at a terminal;
   `--data-dir <path>`, the one admit was given, needed only when the host
   holds no admission record; `--execute`; `--yes`, which types the user's name
   and, with `--site`, needs `--ssh`.
@@ -1439,7 +1476,7 @@ paisans site remove --force --ssh admin@203.0.113.9 --id f2a9 --execute --delete
   | `--host-gone` | off | the host is dead, or still runs and nobody else can reach it: cut it out of the mesh first and take it out of the cluster without reaching it; refuses `--force`, `--ssh`, `--id` and `--delete-data` |
   | `--delete-data` | off | also delete this deployment's data on the host; asks for the site's name at a terminal |
   | `--force` | off | clean this deployment off one host and nothing else; no cluster stage, and neither file edited |
-  | `--ssh <user@host[:port]>` | the site's `ssh` section | with `--force`: the host to clean |
+  | `--ssh <user@host[:port] or ssh alias>` | the site's `ssh` section | with `--force`: the host to clean |
   | `--id <id or token>` | none | with `--force` and `--ssh`, and no `paisans-stack.yaml`: the deployment to clean, found by the login's own admission record, as `site deployments` lists them |
 
   And the site as an argument, `--config`, `--secrets`, `--execute`, `--yes`.

@@ -33,7 +33,7 @@ func BuildForced(cfg *config.Config, secrets *config.Secrets, site string, dest 
 	}
 	declared, isDeclared := cfg.Sites[site]
 	p := &Plan{Site: site, Options: o, secrets: secrets, transports: map[string]apply.Transport{site: t}, forced: true, declared: isDeclared}
-	p.Current = isDeclared && declared.Destination() == dest
+	p.Current = isDeclared && declared.Destination().Same(dest)
 
 	if err := answers(site, dest, t); err != nil {
 		return nil, err

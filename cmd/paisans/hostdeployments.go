@@ -18,9 +18,31 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
+// operatorSSHConfig is the operator's own ssh config, which a destination
+// that names an alias is resolved through. Tests replace it with a stub, so
+// no test reads the workstation's ssh config.
+var operatorSSHConfig = config.OperatorSSHConfig
+
+// parseDestination is a destination flag's value in every form ssh takes:
+// user@host[:port], or a Host alias of the operator's ssh config with or
+// without a user and a port. See config.ResolveDestination.
+func parseDestination(s string) (config.Destination, error) {
+	return config.ResolveDestination(s, operatorSSHConfig())
+}
+
 // destinationArg is dest as ssh takes it: user@host, or an ssh:// URL for a
 // port other than 22, the one destination form that carries it.
+//
+// An alias is given to ssh as the alias, never as the host it resolves to,
+// so the connection takes its ProxyJump, IdentityFile and every other option
+// from the operator's ssh config exactly as a plain ssh to it does, with
+// host key checking unchanged. Its user and port are written out, as the
+// ssh:// URL, because they are the ones ssh -G reported for it, and so the
+// login is the one every message names.
 func destinationArg(dest config.Destination) string {
+	if dest.Alias != "" {
+		return "ssh://" + dest.User + "@" + net.JoinHostPort(dest.Alias, strconv.Itoa(dest.Port))
+	}
 	if dest.Port != 0 && dest.Port != config.DefaultSSHPort {
 		return "ssh://" + dest.User + "@" + net.JoinHostPort(dest.Host, strconv.Itoa(dest.Port))
 	}
@@ -150,18 +172,18 @@ func yesNo(b bool) string {
 func runSiteDeployments(args []string) error {
 	fs := newFlagSet("site deployments", flag.ContinueOnError)
 	reporter := commonFlags(fs)
-	sshFlag := fs.String("ssh", "", "the host to read, user@host[:port]")
+	sshFlag := fs.String("ssh", "", "the host to read, user@host[:port] or an alias of your ssh config, [user@]alias[:port]")
 	sudo := fs.Bool("sudo", true, "run remote commands through sudo, since the registry is root's; --sudo=false lists admission records only, which are readable without sudo")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return fmt.Errorf("site deployments takes no argument: paisans site deployments --ssh user@host[:port]. Got extra argument(s): %s", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("site deployments takes no argument: paisans site deployments --ssh <user@host[:port] or ssh alias>. Got extra argument(s): %s", strings.Join(fs.Args(), " "))
 	}
 	if *sshFlag == "" {
-		return fmt.Errorf("site deployments: name the host with --ssh user@host[:port], Eg: --ssh admin@203.0.113.9")
+		return fmt.Errorf("site deployments: name the host with --ssh user@host[:port], or an alias of your ssh config, Eg: --ssh admin@203.0.113.9 or --ssh home-a")
 	}
-	dest, err := config.ParseDestination(*sshFlag)
+	dest, err := parseDestination(*sshFlag)
 	if err != nil {
 		return fmt.Errorf("site deployments: --ssh: %w", err)
 	}

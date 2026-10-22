@@ -12,6 +12,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Added
 
+- `--ssh` and `--from` take an ssh config alias, `alias`, `user@alias`, `alias:port` or `user@alias:port`, resolved with `ssh -G` and reached through it, refusing one whose config gives no user.
 - `doctor` checks each host's swap, and `doctor` and `site admit` warn when a host's RAM, with swap counting up to a quarter, is under the floor its roles need.
 
 ### Changed

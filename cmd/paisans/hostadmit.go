@@ -53,7 +53,7 @@ func runSiteAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 	)
 	fs.StringVar(&request, "request", "", "the request file the operator sent, on this host, as root")
 	fs.StringVar(&site, "site", "", "the site to admit, from the configuration, from a workstation")
-	fs.StringVar(&sshFlag, "ssh", "", "your own login on the host, with --site: user, for the site's declared host, or user@host[:port]; asked for at a terminal when left out")
+	fs.StringVar(&sshFlag, "ssh", "", "your own login on the host, with --site: user, for the site's declared host, or user@host[:port] or an alias of your ssh config; asked for at a terminal when left out")
 	fs.StringVar(&configPath, "config", config.FileName, "path to the deployment declaration, with --site")
 	fs.BoolVar(&flags.Watchdog, "watchdog", false, "grant the host's watchdog, which can reboot it, to a data site's Patroni")
 	fs.BoolVar(&flags.PublicPorts, "public-ports", false, "let every local user bind ports 80 to 1023, and open 80 and 443, for the toolkit's Caddy")
@@ -373,7 +373,7 @@ func admit(r ui.Reporter, run admitRun, ans answerer, stdin io.Reader, stdout io
 		return err
 	}); err != nil {
 		where := ""
-		if h := declared.SSHHost(); h != dest.Host {
+		if h := declared.SSHHost(); h != dest.Host && h != dest.Alias {
 			where = fmt.Sprintf(" The login went to %s, the site's declared ssh host, and admit to %s: check that they are the same machine.", ui.Visible(h), ui.Visible(dest.Host))
 		}
 		return ufwFallbackNote(fmt.Errorf("site admit: %s is admitted and its Docker answers, but logging in as it failed: %w. Check that your key is one of sites.%s.ssh.keys.%s", user, err, site, where), plan, true)
@@ -391,7 +391,8 @@ func admit(r ui.Reporter, run admitRun, ans answerer, stdin io.Reader, stdout io
 
 // ownerDestination is where command (site admit or site evict) --site
 // logs in as the owner: --ssh as
-// user@host[:port], or a login alone for the site's declared ssh host and
+// user@host[:port] or an alias of the operator's ssh config (see
+// parseDestination), or a login alone for the site's declared ssh host and
 // port, or, with no --ssh, a login asked for at a terminal. Off a terminal
 // with no --ssh there is no one to ask, so it refuses.
 func ownerDestination(command, sshFlag, site string, declared config.Site, stdin io.Reader, stdout io.Writer) (config.Destination, error) {
@@ -414,7 +415,7 @@ func ownerDestination(command, sshFlag, site string, declared config.Site, stdin
 	if !strings.Contains(login, "@") {
 		login += "@" + net.JoinHostPort(host, strconv.Itoa(port))
 	}
-	dest, err := config.ParseDestination(login)
+	dest, err := parseDestination(login)
 	if err != nil {
 		return config.Destination{}, sshFlagProblem(login, err)
 	}
@@ -637,7 +638,7 @@ func runSiteEvict(args []string, stdin io.Reader, stdout io.Writer) error {
 	id := fs.String("deployment", "", "the deployment's id, with --user, on this host, as root")
 	user := fs.String("user", "", "the deployment's user, with --deployment")
 	site := fs.String("site", "", "the site to evict, from the configuration, with --ssh")
-	sshFlag := fs.String("ssh", "", "your own login on the host, with --site: user, for the site's declared host, or user@host[:port]; asked for at a terminal when left out")
+	sshFlag := fs.String("ssh", "", "your own login on the host, with --site: user, for the site's declared host, or user@host[:port] or an alias of your ssh config; asked for at a terminal when left out")
 	configPath := fs.String("config", config.FileName, "path to the deployment declaration, with --site")
 	dataDir := fs.String("data-dir", "", "the --data-dir admit was given, needed only when the host holds no admission record")
 	execute := fs.Bool("execute", false, "make the changes the plan shows")
