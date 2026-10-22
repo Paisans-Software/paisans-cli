@@ -166,6 +166,11 @@ type Plan struct {
 	// success. Checking only before a reload would leave exactly that path
 	// unchecked.
 	GatewayChanging bool
+	// LeaderMoved is set once Execute finds that Patroni's leader left this
+	// site during its infrastructure stack's action. See LeaderMove.
+	LeaderMoved *LeaderMove
+	// ledBefore is whether this site's Patroni led just before that action.
+	ledBefore bool
 	// GatewayReload is set when this site serves the public entry point and a
 	// routing file changed. It is the narrower of the two: a new image is
 	// picked up by the recreate, not by a reload.
@@ -1421,6 +1426,13 @@ func execute(plan *Plan, t Transport) error {
 		var previous []string
 		if action.Recreate && !action.Down {
 			previous = recordAnonymousVolumes(plan, action.Stack, t)
+		}
+		// Whether this site leads is read just before the infrastructure
+		// stack moves, so the wait for a primary after it can tell whether
+		// the leader left this site. See leaderMoved. A founding apply,
+		// which waits on another member's etcd, has no leader to lose.
+		if action.Stack == infraStack && plan.Bootstrap != nil && len(plan.Bootstrap.EtcdUnstarted) == 0 {
+			plan.ledBefore = ledBefore(plan, t)
 		}
 		done := plan.step(ActionTitle(action))
 		done.Detail("%s", action.Command(plan.Deployment))

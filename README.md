@@ -9120,6 +9120,17 @@ that leads by then is left alone. The primary's is left, and the plan says
 so: it is picked up at the leader's next restart, a later `deployment apply` of that site
 when a failover is acceptable. `site remove` does the same with the same code.
 
+**A leader that moves is reported, never left silent.** `deployment apply`
+without `--site` joins a site through `site add` and then, in pass two,
+applies every site, the leader's among them; that apply writes the leader's
+`patroni.env` and recreates its Patroni, and a standby takes the leader key
+while it restarts. Any apply whose infrastructure stack's action leaves another
+site leading says so as a warning naming both sites, the action and the files
+that changed, and the run repeats it once its steps are done, at every
+verbosity. Whether the site leads is asked of its own Patroni (`/patroni`)
+just before that action, and who leads is read from `/cluster` by the wait
+for a primary after it.
+
 **HAProxy is restarted, not reloaded.** Its configuration is a single file bind
 mount, `deployment apply` replaces a file by renaming a new one over it, and a bind mount
 of a single file keeps the inode it started with (moby/moby#15793), so a

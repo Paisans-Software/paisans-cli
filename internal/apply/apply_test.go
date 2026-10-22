@@ -78,6 +78,10 @@ type fakeHost struct {
 	// leader is the Patroni member /cluster reports as leader, empty for a
 	// cluster with none yet. newHost makes it home-a.
 	leader string
+	// leaderAfter, when set, becomes leader once the infrastructure stack's
+	// `up -d` runs: the leader's Patroni recreated, and a standby taking the
+	// leader key while it restarted.
+	leaderAfter string
 	// ps is what `docker compose ps --format json` prints, by stack. A stack
 	// not in it answers with one running container and no healthcheck.
 	ps map[string]string
@@ -150,6 +154,9 @@ func (h *fakeHost) Describe() string { return "fake" }
 
 func (h *fakeHost) Run(command string) (string, error) {
 	h.commands = append(h.commands, command)
+	if h.leaderAfter != "" && strings.Contains(command, "/infra/compose.yaml up -d") {
+		h.leader = h.leaderAfter
+	}
 	if command == apply.SourceMarkProbe {
 		return h.sourceMark, nil
 	}
@@ -246,6 +253,13 @@ func (h *fakeHost) Run(command string) (string, error) {
 	}
 	if strings.Contains(command, "psql") && strings.Contains(command, " -At") {
 		return strings.Join(h.replicaHas, "\n") + "\n", nil
+	}
+	if strings.Contains(command, ":8008/patroni") {
+		// This host's own Patroni, which is home-a's.
+		if h.leader == "home-a" {
+			return `{"state":"running","role":"primary"}`, nil
+		}
+		return `{"state":"running","role":"replica"}`, nil
 	}
 	if strings.Contains(command, ":8008/cluster") {
 		if h.leader == "" {

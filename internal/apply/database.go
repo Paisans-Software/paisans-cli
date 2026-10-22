@@ -333,6 +333,7 @@ func runBootstrap(plan *Plan, t Transport) error {
 	}
 	if err != nil {
 		if replica, ok := err.(errReplica); ok {
+			plan.leaderMoved(replica.leader)
 			return replicaDatabases(plan, t, replica.leader)
 		}
 		return err
