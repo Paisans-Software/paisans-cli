@@ -59,6 +59,9 @@ func TestADataSiteLeavingEtcdHasItsDataEmptied(t *testing.T) {
 	if stop, empty := w.index("home-b: if [ -f"), w.index("home-b: set -e; if [ -L '"+etcdData+"'"); empty < 0 || empty < stop {
 		t.Errorf("home-b's etcd data was emptied at %d, its etcd stopped at %d", empty, stop)
 	}
+	if removed, empty := w.index("member remove 2222"), w.index("home-b: set -e; if [ -L '"+etcdData+"'"); removed < 0 || empty < removed {
+		t.Errorf("home-b's etcd data was emptied at %d, its member removed at %d", empty, removed)
+	}
 }
 
 // A data site leaving two data sites and a witness takes the gateway's
@@ -87,6 +90,11 @@ func TestADataSiteLeavingWithTheWitnessEmptiesBoth(t *testing.T) {
 	}
 	if stop, empty := w.index("vm: ids=$(docker ps"), w.index("vm: set -e; if [ -L '"+etcdData+"'"); stop < 0 || empty < stop {
 		t.Errorf("vm's etcd data was emptied at %d, its container removed at %d", empty, stop)
+	}
+	for _, c := range []struct{ site, id string }{{"home-b", "2222"}, {"vm", "3333"}} {
+		if removed, empty := w.index("member remove "+c.id), w.index(c.site+": set -e; if [ -L '"+etcdData+"'"); removed < 0 || empty < removed {
+			t.Errorf("%s's etcd data was emptied at %d, its member removed at %d", c.site, empty, removed)
+		}
 	}
 }
 
@@ -146,6 +154,9 @@ func TestACutoffEmptiesTheWitnessesEtcdDataAndSaysWhatStays(t *testing.T) {
 	if left := etcdDataLeft(w.hosts["vm"]); len(left) > 0 {
 		t.Errorf("vm keeps etcd data: %v", left)
 	}
+	if removed, empty := w.index("member remove 3333"), w.index("vm: set -e; if [ -L '"+etcdData+"'"); removed < 0 || empty < removed {
+		t.Errorf("vm's etcd data was emptied at %d, its member removed at %d", empty, removed)
+	}
 	if len(etcdDataLeft(w.hosts["home-b"])) != 2 || len(etcdDataLeft(w.hosts["home-a"])) != 2 {
 		t.Error("the cut-off site's or the remaining voter's etcd data was touched")
 	}
@@ -189,6 +200,9 @@ func TestAWitnessRemovedItselfHasItsEtcdDataEmptied(t *testing.T) {
 	execute(t, p)
 	if left := etcdDataLeft(w.hosts["box"]); len(left) > 0 {
 		t.Errorf("box keeps etcd data: %v", left)
+	}
+	if removed, empty := w.index("member remove "), w.index("box: set -e; if [ -L '"+etcdData+"'"); removed < 0 || empty < removed {
+		t.Errorf("box's etcd data was emptied at %d, its member removed at %d", empty, removed)
 	}
 	for _, site := range []string{"home-a", "home-b", "home-c"} {
 		if len(etcdDataLeft(w.hosts[site])) != 2 {
