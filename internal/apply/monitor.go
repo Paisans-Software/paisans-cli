@@ -6,6 +6,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
@@ -154,7 +155,7 @@ func (m *MonitorReseed) Gate() error {
 // Command is the apply that does the same as the reseed, for a failure to
 // name: the one command that brings the monitor up to date on its own.
 func (m *MonitorReseed) Command() string {
-	return fmt.Sprintf("paisans deployment apply --site %s --only %s --execute", m.Site, m.App)
+	return fmt.Sprintf(progname.Name()+" deployment apply --site %s --only %s --execute", m.Site, m.App)
 }
 
 // MonitorCommands is every reseed's Command, joined for a message.

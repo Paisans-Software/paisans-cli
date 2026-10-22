@@ -12,6 +12,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -445,7 +446,7 @@ func EtcdRefusal(cfg *config.Config, plan *Plan, members []EtcdMember) error {
 	return &ui.Problem{
 		Hint: plan.Site + "'s etcd members differ from the running cluster's",
 		Explain: fmt.Sprintf(
-			"The running cluster's members are %s, and %s says %s, so this site's infrastructure stack was not touched: applying it now would start an etcd the cluster has not admitted. Growing the cluster is paisans site add <site>, which adds each member as a learner and promotes it once it has caught up. Run it for the site being added, then apply.",
+			"The running cluster's members are %s, and %s says %s, so this site's infrastructure stack was not touched: applying it now would start an etcd the cluster has not admitted. Growing the cluster is "+progname.Name()+" site add <site>, which adds each member as a learner and promotes it once it has caught up. Run it for the site being added, then apply.",
 			strings.Join(live, ", "), cfg.EtcdMembersKey(), strings.Join(want, ", ")),
 	}
 }
@@ -527,7 +528,7 @@ func WitnessFirstRefusal(cfg *config.Config, plan *Plan, founding bool, running 
 	}
 	var commands []string
 	for _, name := range waiting {
-		commands = append(commands, "paisans deployment apply --site "+name)
+		commands = append(commands, progname.Name()+" deployment apply --site "+name)
 	}
 	return &ui.Problem{
 		Hint: fmt.Sprintf("%s would found etcd while the witness %s runs none", plan.Site, strings.Join(waiting, ", ")),

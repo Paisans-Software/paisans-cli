@@ -11,6 +11,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostarch"
 	"github.com/paisans-software/paisans-cli/internal/imagedigest"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -721,7 +722,7 @@ func holdImage(site string, image render.ComposeImage, services []string, host m
 		if len(mixed) > 1 {
 			return &ui.Problem{
 				Hint:    fmt.Sprintf("%s runs more than one build on %s", app, ui.Name(name)),
-				Explain: fmt.Sprintf("%s runs %s on %s, so this apply has no one build to keep. Run `paisans deployment apply` without --site, which plans every site of %s and moves them to one build.", app, names(mixed, ", "), ui.Name(name), app),
+				Explain: fmt.Sprintf("%s runs %s on %s, so this apply has no one build to keep. Run `"+progname.Name()+" deployment apply` without --site, which plans every site of %s and moves them to one build.", app, names(mixed, ", "), ui.Name(name), app),
 			}
 		}
 		if ref != "" {
@@ -749,7 +750,7 @@ func holdImage(site string, image render.ComposeImage, services []string, host m
 		if err != nil {
 			return "", nil, &ui.Problem{
 				Hint:    fmt.Sprintf("compose file of %s on %s is not readable", app, ui.Name(peer.Site)),
-				Explain: fmt.Sprintf("This apply cannot tell which build %s runs there. Fix the file on %s, or run `paisans deployment apply` without --site, which plans every site of %s.", app, ui.Name(peer.Site), app),
+				Explain: fmt.Sprintf("This apply cannot tell which build %s runs there. Fix the file on %s, or run `"+progname.Name()+" deployment apply` without --site, which plans every site of %s.", app, ui.Name(peer.Site), app),
 				Cause:   err,
 			}
 		}
@@ -768,7 +769,7 @@ func holdImage(site string, image render.ComposeImage, services []string, host m
 		// not at all, so an apply of some sites must not pick one.
 		return "", nil, &ui.Problem{
 			Hint:    fmt.Sprintf("the sites of %s run different builds", app),
-			Explain: fmt.Sprintf("%s. An apply of only some of them cannot choose one. Run `paisans deployment apply` without --site, which plans every site of %s and moves them to one build.", strings.Join(each, "; "), app),
+			Explain: fmt.Sprintf("%s. An apply of only some of them cannot choose one. Run `"+progname.Name()+" deployment apply` without --site, which plans every site of %s and moves them to one build.", strings.Join(each, "; "), app),
 		}
 	case len(builds) == 0 && len(unread) > 0:
 		return "", nil, &ui.Problem{
@@ -782,7 +783,7 @@ func holdImage(site string, image render.ComposeImage, services []string, host m
 
 	// Say so, and say it louder when the tag names a newer build than the
 	// one kept: that build is what the operator would have got.
-	text := fmt.Sprintf("%s also runs on %s, which this apply does not cover, so %s stays on %s, the build its sites run. Moving %s to a new build takes `paisans deployment apply` without --site.", app, names(all, ", "), app, ui.Name(held), app)
+	text := fmt.Sprintf("%s also runs on %s, which this apply does not cover, so %s stays on %s, the build its sites run. Moving %s to a new build takes `"+progname.Name()+" deployment apply` without --site.", app, names(all, ", "), app, ui.Name(held), app)
 	note := Note{Text: text}
 	if r != nil {
 		if digest, err := r.Digest(image.Image); err == nil && digest != digestOf(held) {

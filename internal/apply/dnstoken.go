@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/dns"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -46,6 +47,6 @@ func checkDNSToken(plan *Plan, t Transport) error {
 	return &ui.Problem{
 		Hint: plan.Site + ": " + r.Finding,
 		Explain: lead + " " + r.Advice + " Then apply again. The gateway was not changed.\n" +
-			"`paisans doctor` checks the token from every place that uses it.",
+			"`" + progname.Name() + " doctor` checks the token from every place that uses it.",
 	}
 }
