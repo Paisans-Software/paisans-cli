@@ -10,6 +10,10 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+### Changed
+
+- `init` moves a never-applied site's WireGuard listen port, when another deployment on the host holds it and the endpoint is unset or a port alone, to a free one and says which port to open.
+
 ### Fixed
 
 - `doctor`'s self-check and `deployment apply`'s gateway step report a 443 answering in anything but TLS as another server holding the port, and doctor advises a refused connection apart from a timeout.

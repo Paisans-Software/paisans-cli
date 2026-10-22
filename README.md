@@ -1892,8 +1892,24 @@ paisans-stack.yaml: rolled mesh.subnet 10.212.37.0/24 (10.44.0.0/24 overlapped a
 A declared subnet that overlaps nothing is kept as it is. A site that cannot
 be reached makes `init` refuse with nothing written, secrets included, since an
 unchecked host is exactly where a collision would go unseen. A clash on the
-interface or listen port is reported the same way, before anything is
-written.
+interface is reported the same way, before anything is written.
+
+**`init` moves a listen port another deployment holds, when the port is
+its own.** When `site admit`, run from `init`, is refused for the site's
+WireGuard listen port and nothing else, and the site is dialled on its
+`public_address` with no `endpoint` or with `endpoint: ":<port>"`, admit tries
+the held port plus a random step of 2 to 10, then each later try a new step
+up from the last, up to 10 tries. A try fails when another deployment in the
+registry holds the port, a UDP socket on the host is bound to it (the
+registry knows only deployments), or it is above 65535. `init` writes the
+first free one as `endpoint: ":<port>"`, keeping comments as the subnet write
+does, says which port to open in any firewall in front of the host and to
+forward behind NAT, and admits the site again on it. An endpoint written as a
+host and a port names a router or a dynamic DNS name forwarding that exact
+port, so it is never moved; a clash on the gateway or data role is not freed
+by any port, so the refusal advises on the role alone; and once any site
+holds the manifest the port is in every other site's WireGuard file, so it is
+not moved either. In each of those cases the refusal stands.
 
 **Once any site holds this deployment's manifest, the subnet is fixed.**
 `init` never changes it again, and an unreachable site no longer stops it; it
