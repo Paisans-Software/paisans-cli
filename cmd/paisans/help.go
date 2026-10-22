@@ -48,7 +48,7 @@ var groupSummary = map[string]string{
 	"storage":     "Provision object storage, join sites to it, replace keys.",
 	"failover":    "Switch the database primary to another site and back.",
 	"dns":         "Create the DNS records the configuration implies, or prune them.",
-	"deployment":  "Apply, list, fetch, publish, pull and recover deployments.",
+	"deployment":  "Apply, list, check out, fetch, publish, pull and recover.",
 	"operator":    "Sign the sites' configuration, or give an operator a sign-in link.",
 	"secrets":     "List, set, prune and rotate secrets.",
 	"app":         "Take a removed app off hosts.",
@@ -381,6 +381,14 @@ var helpCommands = []helpCommand{
 			"deployment apply --execute and deployment recover --execute save the version they publish or recover; deployment fetch saves what a host holds. " +
 			"Saved deployments are kept in ~/Library/Application Support/Paisans on macOS, and in $XDG_DATA_HOME/paisans (~/.local/share/paisans) elsewhere, or in $" + localstore.DirVariable + " when set. " +
 			"Each is a directory holding " + config.FileName + ", secrets.enc.yaml and .sops.yaml, which any command takes with --config. Reads nothing else, and changes nothing.",
+	},
+	{
+		name:    "deployment checkout",
+		summary: "Copy a saved deployment into an empty directory to edit.",
+		usage:   []string{"paisans deployment checkout <id, start of id, or domain> [--config " + config.FileName + "] [--execute]"},
+		detail: "Copy a deployment saved on this workstation (see deployment list) into the empty directory of --config: " + config.FileName + ", secrets.enc.yaml and .sops.yaml, and in .paisans/ the store with every version and its signature, the signing key, the pinned root, the head and the highest revision seen, so deployment log, pull and publish trust there as they do in the saved copy. " +
+			"The saved copy is judged from its own anchor first, and the copy again once written; a copy that differs is removed. Refuses a directory with any of those files, and an unverified or forked saved copy, which deployment recover --root <sha> pins instead. " +
+			"Never overwrites a file, and reaches no host. The saved copy may be behind the sites; deployment pull brings it up to date. Writes nothing without --execute.",
 	},
 	{
 		name:    "deployment fetch",
