@@ -255,9 +255,10 @@ site's `public_address`, and at `public_address6` too when it is set. If you
 manage DNS by hand, create the same records.
 
 If the monitor's hostname already has a record pointing at the gateway, from
-before the monitor had a site of its own, `dns init` stops with a conflict:
-it never updates a record, and `dns prune` keeps one whose name is still
-wanted. Change that record by hand at the provider, then run `dns init`
+before the monitor had a site of its own, `dns init` updates it to the
+monitor's address when its own earlier run made it. A record there that it
+did not make stops it with a conflict, and `dns prune` keeps one whose name is
+still wanted. Change that record by hand at the provider, then run `dns init`
 again.
 
 ## 6. Check it from your machine

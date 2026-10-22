@@ -404,7 +404,7 @@ func Records(p RecordsProbe) []Finding {
 			present++
 		case dns.Conflict:
 			first, more, _ := strings.Cut(e.Detail, ". ")
-			advice := "A visitor is sent there. Delete it at the provider by hand, because paisans dns init never updates a record and paisans dns prune keeps one whose name is still wanted."
+			advice := "A visitor is sent there. Delete it at the provider by hand, because paisans dns init updates only a record it made itself and paisans dns prune keeps one whose name is still wanted."
 			switch {
 			case e.Parent:
 				wanted = fmt.Sprintf("this deployment's: %s -> %s (zone %s)", record, recordContent(e.Want), e.Zone)
@@ -424,6 +424,9 @@ func Records(p RecordsProbe) []Finding {
 				advice = "Nothing can reach it there. " + advice
 			}
 			fails = append(fails, Finding{Section: SectionRecords, Level: Fail, Line: fmt.Sprintf("%s has no %s record", e.Name, e.Type), More: []string{wanted, advice}})
+		case dns.Update:
+			fails = append(fails, Finding{Section: SectionRecords, Level: Fail, Line: fmt.Sprintf("%s points at an address this deployment no longer declares", record),
+				More: []string{wanted, e.Detail + ". paisans dns init --execute updates it."}})
 		case dns.Moving:
 			rest = append(rest, Finding{Section: SectionRecords, Level: Info, Line: record + " waits for paisans gateway move", More: []string{e.Detail}})
 		case dns.Warn:

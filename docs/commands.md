@@ -1631,20 +1631,23 @@ See *Replacing an app's key: `storage rotate-key`* in `README.md`.
 ### `paisans dns init`
 
 Creates the public DNS records the configuration implies, at the provider
-`acme.provider` names. Creates only what is missing, never updates or deletes,
-and refuses if a record conflicts. An app whose `storage` is `local` has no
+`acme.provider` names. Creates what is missing, updates the address of an A or
+AAAA record it made for this deployment (one carrying exactly this
+deployment's comment), never deletes, and refuses if any other record
+conflicts. An app whose `storage` is `local` has no
 media hostname, so it gets no media record.
 
 ```sh
-paisans dns init                # shows what it would create
-paisans dns init --execute      # creates it
+paisans dns init                # shows what it would create or update
+paisans dns init --execute      # creates and updates it
 ```
 
 * **Alone:** the whole apply runs it before any site is applied. Typed alone,
   it is for a change that only adds names.
 * **Flags:** `--config`, `--secrets`, `--execute`.
 * **Hosts:** none; the DNS provider's API only.
-* **`--execute`:** creates the records listed.
+* **`--execute`:** updates and creates the records listed, then reads each
+  back.
 
 See *`dns init` creates the records a deployment needs* in `README.md`.
 

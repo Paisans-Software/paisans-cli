@@ -306,6 +306,9 @@ func (l *zoneLookup) Records(context.Context, string, string) ([]Record, error) 
 func (l *zoneLookup) Create(context.Context, string, Record) error {
 	return errors.New("dns: the token check writes nothing")
 }
+func (l *zoneLookup) Update(context.Context, string, Record) error {
+	return errors.New("dns: the token check writes nothing")
+}
 func (l *zoneLookup) AllRecords(context.Context, string) ([]Record, error) {
 	return nil, errors.New("dns: the token check reads no records")
 }

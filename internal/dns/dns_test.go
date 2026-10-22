@@ -30,11 +30,13 @@ type fakeCloudflare struct {
 	zones   map[string]string     // zone name -> id
 	records map[string][]cfRecord // zone id -> records
 	posts   []cfRecord
-	deletes []string // record ids, in order
-	lookups []string // zone names asked about, in order
-	pages   []string // page numbers asked for by whole zone listings
+	patches []cfRecord // bodies of updates, each with the id it named
+	deletes []string   // record ids, in order
+	lookups []string   // zone names asked about, in order
+	pages   []string   // page numbers asked for by whole zone listings
 	nextID  int
-	// dropWrites accepts a POST and stores nothing, to prove the read-back.
+	// dropWrites accepts a POST or PATCH and stores nothing, to prove the
+	// read-back.
 	dropWrites bool
 	// dropDeletes answers a DELETE with success and removes nothing, to
 	// prove prune's confirming listing.
@@ -122,6 +124,26 @@ func (f *fakeCloudflare) handle(w http.ResponseWriter, r *http.Request) {
 			f.records[zoneID] = kept
 		}
 		writeEnvelope(w, http.StatusOK, map[string]string{"id": recordID})
+	case r.Method == http.MethodPatch && strings.HasPrefix(path, "/zones/") && strings.Contains(path, "/dns_records/"):
+		zoneID, recordID, _ := strings.Cut(strings.TrimPrefix(path, "/zones/"), "/dns_records/")
+		var rec cfRecord
+		if err := json.NewDecoder(r.Body).Decode(&rec); err != nil {
+			writeEnvelope(w, http.StatusBadRequest, nil, "bad body")
+			return
+		}
+		rec.ID = recordID
+		f.patches = append(f.patches, rec)
+		for i, existing := range f.records[zoneID] {
+			if existing.ID != recordID {
+				continue
+			}
+			if !f.dropWrites {
+				f.records[zoneID][i] = rec
+			}
+			writeEnvelope(w, http.StatusOK, rec)
+			return
+		}
+		writeEnvelope(w, http.StatusNotFound, nil, "Record does not exist.")
 	case strings.HasPrefix(path, "/zones/") && strings.HasSuffix(path, "/dns_records"):
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/zones/"), "/dns_records")
 		switch r.Method {

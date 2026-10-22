@@ -286,6 +286,7 @@ func (zoneLookup) Records(context.Context, string, string) ([]dns.Record, error)
 	return nil, errors.New("not read here")
 }
 func (zoneLookup) Create(context.Context, string, dns.Record) error { return errors.New("not here") }
+func (zoneLookup) Update(context.Context, string, dns.Record) error { return errors.New("not here") }
 func (zoneLookup) AllRecords(context.Context, string) ([]dns.Record, error) {
 	return nil, errors.New("not read here")
 }

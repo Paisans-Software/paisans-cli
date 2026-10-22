@@ -24,6 +24,9 @@ import (
 //     https://developers.cloudflare.com/api/resources/dns/subresources/records/methods/list/
 //   - create:       POST /zones/{zone_id}/dns_records
 //     https://developers.cloudflare.com/api/resources/dns/subresources/records/methods/create/
+//   - update:       PATCH /zones/{zone_id}/dns_records/{dns_record_id}, whose
+//     body for an A or AAAA record requires name, ttl and type
+//     https://developers.cloudflare.com/api/resources/dns/subresources/records/methods/edit/
 //   - delete:       DELETE /zones/{zone_id}/dns_records/{dns_record_id}, no
 //     body; the result is the deleted record's id
 //     https://developers.cloudflare.com/api/resources/dns/subresources/records/methods/delete/
@@ -203,6 +206,28 @@ func (c *cloudflare) Create(ctx context.Context, zoneID string, record Record) e
 	}
 	var created cfRecord
 	_, err := c.do(ctx, http.MethodPost, "/zones/"+url.PathEscape(zoneID)+"/dns_records", nil, body, &created)
+	return err
+}
+
+// Update writes the record with record.ID as Create writes a new one:
+// unproxied, automatic TTL, carrying the record's Comment. The whole record
+// is sent rather than only its content, because the endpoint requires name,
+// ttl and type, and a record left proxied or with another comment would read
+// back as somebody else's.
+func (c *cloudflare) Update(ctx context.Context, zoneID string, record Record) error {
+	if record.ID == "" {
+		return fmt.Errorf("cloudflare: updating %s %s: no record id", record.Type, record.Name)
+	}
+	body := cfRecord{
+		Type:    record.Type,
+		Name:    record.Name,
+		Content: record.Content,
+		TTL:     1,
+		Proxied: false,
+		Comment: record.Comment,
+	}
+	var updated cfRecord
+	_, err := c.do(ctx, http.MethodPatch, "/zones/"+url.PathEscape(zoneID)+"/dns_records/"+url.PathEscape(record.ID), nil, body, &updated)
 	return err
 }
 

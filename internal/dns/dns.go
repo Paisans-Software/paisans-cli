@@ -8,11 +8,12 @@
 // public_address. A second list of records in the configuration would be a
 // second source of truth for the same names, and the one that drifts.
 //
-// Init only ever creates. It never updates and never deletes, because a
-// record it did not create is somebody else's, exactly as a file on a host
-// that no apply wrote is somebody else's. A record that disagrees with what
-// the deployment needs is a conflict, and any conflict stops the whole run
-// before a single record is written.
+// Init creates what is missing and updates the address of a record it made
+// itself (ownStale). It never deletes, and never changes a record it did not
+// create, because that record is somebody else's, exactly as a file on a host
+// that no apply wrote is somebody else's. Any other record that disagrees
+// with what the deployment needs is a conflict, and any conflict stops the
+// whole run before a single record is written.
 //
 // Prune is the one path that deletes, and only a record that passes every
 // rule in prune.go: the toolkit's comment, a name that is this deployment's,
@@ -22,7 +23,7 @@
 // stage both plan through it. A gateway move (move.go) is the one other
 // path, and deletes only through ExecutePrune too: the old gateway's address
 // records at the gateway's hostnames, once every record of the new one's is
-// present. Nothing in this package updates a record.
+// present. Execute is the one caller of Update.
 //
 // It reaches no host. The only thing it talks to is the DNS provider's API,
 // from the workstation, with the token from the decrypted secrets.
@@ -121,8 +122,9 @@ type Want struct {
 }
 
 // Provider is a DNS provider's API, reduced to the things this package does
-// with it. There is no update here on purpose: a method that does not exist
-// cannot be called by mistake. Delete's only caller is ExecutePrune, which
+// with it. Update's only caller is Execute, which updates nothing but an
+// entry Build classed Update under ownStale's rules. Delete's only caller is
+// ExecutePrune, which
 // deletes nothing its plan did not pass through every rule of the builder
 // that made it: BuildPrune or BuildSiteRemoval under prune.go's rules, or
 // BuildMove under move.go's.
@@ -136,6 +138,10 @@ type Provider interface {
 	Records(ctx context.Context, zoneID, name string) ([]Record, error)
 	// Create adds one record. It must never replace an existing one.
 	Create(ctx context.Context, zoneID string, record Record) error
+	// Update changes the one record with record.ID to record's type, name,
+	// content and comment, unproxied, with the provider's automatic TTL, as
+	// Create writes a record.
+	Update(ctx context.Context, zoneID string, record Record) error
 	// AllRecords returns every record in the zone, every page of them. A
 	// partial list must be an error, never a short answer.
 	AllRecords(ctx context.Context, zoneID string) ([]Record, error)
@@ -409,6 +415,11 @@ const (
 	Present Action = "present"
 	// Create is a record that does not exist and will be created.
 	Create Action = "create"
+	// Update is an address record this deployment's dns init made at a name
+	// it still wants, pointing at an address the deployment no longer
+	// declares there. Its content is changed to the wanted address; see
+	// ownStale for exactly which record qualifies.
+	Update Action = "update"
 	// Conflict is a record whose name already holds something else.
 	Conflict Action = "conflict"
 	// Warn is an advisory record that is missing or too weak. Nothing is
@@ -442,6 +453,8 @@ type Entry struct {
 	// held are the records at the entry's name, for a DMARC entry another
 	// may be CoveredBy.
 	held []Record
+	// stale is the record an Update entry changes.
+	stale Record
 }
 
 // Plan is every wanted record, compared with the provider.
@@ -473,6 +486,9 @@ func (p *Plan) Moving() []Entry { return p.only(Moving) }
 
 // Creates returns the entries an execute will create.
 func (p *Plan) Creates() []Entry { return p.only(Create) }
+
+// Updates returns the entries an execute will update.
+func (p *Plan) Updates() []Entry { return p.only(Update) }
 
 func (p *Plan) only(a Action) []Entry {
 	var out []Entry
@@ -551,10 +567,17 @@ func Build(ctx context.Context, provider Provider, d deployment.Deployment, want
 				}
 			}
 		}
+		var stale Record
+		if action == Conflict {
+			if r, ok := ownStale(w, records, plan.comment, wantedTypes[w.Name]); ok {
+				stale = r
+				action, detail = Update, fmt.Sprintf("dns init made it for this deployment, pointing at %s, which the configuration no longer declares there", r.Content)
+			}
+		}
 		if w.Guard && action == Clear {
 			continue
 		}
-		plan.Entries = append(plan.Entries, Entry{Want: w, Zone: z.name, zoneID: z.id, Action: action, Detail: detail, held: records})
+		plan.Entries = append(plan.Entries, Entry{Want: w, Zone: z.name, zoneID: z.id, Action: action, Detail: detail, held: records, stale: stale})
 	}
 	if err := plan.addParent(ctx, provider, parent, zones, existing); err != nil {
 		return nil, err
@@ -589,6 +612,52 @@ func setAsideFormer(w Want, records []Record, comment string) ([]Record, []strin
 		rest = append(rest, r)
 	}
 	return rest, old
+}
+
+// ownStale finds the record at a want's name that dns init made for this
+// deployment and that only needs its address changed, which init then
+// updates rather than counting a conflict. A gateway that changes its
+// public_address leaves exactly such records behind, and each one would
+// otherwise have to be deleted by hand at the provider before init could
+// write the address the configuration declares.
+//
+// The record must be an A or AAAA, the only records whose content follows a
+// site's address; carry exactly this deployment's comment, since a record
+// with no comment, or another deployment's, is somebody else's; be
+// unproxied, as init writes it; be the only record of its type at the name,
+// so the update cannot leave two answers; and point at no former gateway,
+// whose record is `gateway move`'s to replace once the new gateway answers.
+// With its address changed the name must then hold exactly what is wanted,
+// so a CNAME or a stray record of the other family still stops the run.
+func ownStale(w Want, records []Record, comment string, wanted map[string]bool) (Record, bool) {
+	if w.Type != "A" && w.Type != "AAAA" {
+		return Record{}, false
+	}
+	var own Record
+	same := 0
+	for _, r := range records {
+		if strings.EqualFold(r.Type, w.Type) {
+			same++
+			own = r
+		}
+	}
+	if same != 1 || own.ID == "" || own.Comment != comment || own.Proxied || own.Content == w.Content {
+		return Record{}, false
+	}
+	if ip := canonical(own.Content); ip != "" && slices.Contains(w.Former, ip) {
+		return Record{}, false
+	}
+	updated := make([]Record, len(records))
+	for i, r := range records {
+		if r.ID == own.ID && strings.EqualFold(r.Type, w.Type) {
+			r.Content = w.Content
+		}
+		updated[i] = r
+	}
+	if action, _ := classify(w, updated, wanted); action != Present {
+		return Record{}, false
+	}
+	return own, true
 }
 
 // canonical is an address in net.IP's own spelling, or empty for one that is
@@ -672,15 +741,32 @@ func (e conflictError) Unwrap() error {
 	}
 }
 
-// Execute creates every missing record, then reads each back. It refuses to
-// write anything if the plan has a conflict.
+// Execute updates every record of this deployment's that points at an old
+// address, then creates every missing record, and reads each back. It
+// refuses to write anything if the plan has a conflict.
 //
-// It stops at the first failure. Records created before it stay, and a re-run
-// finds them present, so a run that failed partway resumes rather than
+// It stops at the first failure. Records written before it stay, and a
+// re-run finds them present, so a run that failed partway resumes rather than
 // starting over.
 func Execute(ctx context.Context, provider Provider, plan *Plan, r ui.Reporter) error {
 	if conflicts := plan.Conflicts(); len(conflicts) > 0 {
 		return conflictError{len(conflicts)}
+	}
+	for _, e := range plan.Updates() {
+		step := r.Step(fmt.Sprintf("update %s %s", e.Type, e.Name))
+		step.Detail("%s, was %s, zone %s", e.Content, e.stale.Content, e.Zone)
+		record := Record{ID: e.stale.ID, Type: e.Type, Name: e.Name, Content: e.Content, Comment: plan.comment}
+		if err := provider.Update(ctx, e.zoneID, record); err != nil {
+			err = fmt.Errorf("dns: updating %s %s: %w", e.Type, e.Name, err)
+			step.Fail(err)
+			return err
+		}
+		if err := readBack(ctx, provider, e, "updated"); err != nil {
+			step.Fail(err)
+			return err
+		}
+		step.Detail("read back as %s, unproxied", e.Content)
+		step.Done("")
 	}
 	// The registrable domain's policy is created last: whether it could be
 	// written rested on every other policy this plan creates being there,
@@ -697,14 +783,7 @@ func Execute(ctx context.Context, provider Provider, plan *Plan, r ui.Reporter) 
 			step.Fail(err)
 			return err
 		}
-		back, err := provider.Records(ctx, e.zoneID, e.Name)
-		if err != nil {
-			err = fmt.Errorf("dns: reading back %s %s: %w", e.Type, e.Name, err)
-			step.Fail(err)
-			return err
-		}
-		if action, _ := classify(e.Want, back, map[string]bool{e.Type: true, "A": true, "AAAA": true}); action != Present {
-			err := fmt.Errorf("dns: %s %s was created but does not read back as %s unproxied. Check it in the provider's console before re-running", e.Type, e.Name, display(e.Type, e.Content, e.Priority))
+		if err := readBack(ctx, provider, e, "created"); err != nil {
 			step.Fail(err)
 			return err
 		}
@@ -714,8 +793,21 @@ func Execute(ctx context.Context, provider Provider, plan *Plan, r ui.Reporter) 
 	return nil
 }
 
+// readBack reads the records at e's name and confirms the one just written
+// is there as wanted.
+func readBack(ctx context.Context, provider Provider, e Entry, written string) error {
+	back, err := provider.Records(ctx, e.zoneID, e.Name)
+	if err != nil {
+		return fmt.Errorf("dns: reading back %s %s: %w", e.Type, e.Name, err)
+	}
+	if action, _ := classify(e.Want, back, map[string]bool{e.Type: true, "A": true, "AAAA": true}); action != Present {
+		return fmt.Errorf("dns: %s %s was %s but does not read back as %s unproxied. Check it in the provider's console before re-running", e.Type, e.Name, written, display(e.Type, e.Content, e.Priority))
+	}
+	return nil
+}
+
 // Show reports a plan marked the way site prepare marks its plan: each
-// record to create as pending, under --verbose each one already present as
+// record to create or update as pending, under --verbose each one already present as
 // done, and a conflict as a refusal, since Execute will not create anything
 // while one stands. Each line names the record's type, name, address and
 // zone.
@@ -727,6 +819,8 @@ func (p *Plan) Show(r ui.Reporter) {
 		switch e.Action {
 		case Create:
 			r.Step("create "+record).End(ui.Pending, "")
+		case Update:
+			r.Step(fmt.Sprintf("update %s, from %s", record, e.stale.Content)).End(ui.Pending, "")
 		case Conflict:
 			wanted := fmt.Sprintf("wanted: %s -> %s (zone %s)", e.Name, content, e.Zone)
 			switch {

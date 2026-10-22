@@ -1553,7 +1553,8 @@ var insideApply bool
 // runDNSInit creates the public DNS records a deployment needs, at the
 // provider acme.provider names, using the token that already answers ACME
 // challenges. It is modelled on runStorageInit: a dry run by default, and
-// only what is missing is created.
+// only what is missing is created, or, for a record its own earlier run made,
+// updated to the address now declared.
 //
 // It reaches no host. The workstation talks to the provider's API and to
 // nothing else, so it takes no --site and no --ssh.
@@ -1583,12 +1584,15 @@ func runDNSInit(args []string) error {
 			r.Result("%s conflict with the provider's. Resolve %s before --execute, which creates nothing while one stands.", plural(n, "record"), map[bool]string{true: "it", false: "them"}[n == 1])
 			return nil
 		}
-		creates := ""
-		if n := len(plan.Creates()); n > 0 {
-			creates = plural(n, "record") + " to create"
+		var todo []string
+		if n := len(plan.Updates()); n > 0 {
+			todo = append(todo, plural(n, "record")+" to update")
 		}
-		dryRunFound(creates, nil)
-		if len(plan.Creates()) == 0 {
+		if n := len(plan.Creates()); n > 0 {
+			todo = append(todo, plural(n, "record")+" to create")
+		}
+		dryRunFound(strings.Join(todo, ", "), nil)
+		if len(todo) == 0 {
 			r.Result("Every record is present. Nothing to create.")
 			return nil
 		}
@@ -1599,7 +1603,11 @@ func runDNSInit(args []string) error {
 		return err
 	}
 	if !insideApply {
-		r.Result("Created %s at %s.", plural(len(plan.Creates()), "record"), plan.Provider)
+		if n := len(plan.Updates()); n > 0 {
+			r.Result("Updated %s and created %s at %s.", plural(n, "record"), plural(len(plan.Creates()), "record"), plan.Provider)
+		} else {
+			r.Result("Created %s at %s.", plural(len(plan.Creates()), "record"), plan.Provider)
+		}
 	}
 	return nil
 }
