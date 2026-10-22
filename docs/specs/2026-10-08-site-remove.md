@@ -85,7 +85,7 @@ evidence. Nothing after it runs.
 | Stage | Work | Gate |
 |---|---|---|
 | 1. Data out of the site | The site's Patroni leadership switched over to the Sync Standby; synchronous mode turned off when one cluster site remains; Patroni stopped on the site and its member key deleted from etcd; the site's Garage node removed from the layout and the layout applied | the new leader leads; `patronictl list` no longer lists the site; a Sync Standby exists when the end state wants one; no layout row for the site, and Garage settled (one live layout version, empty resync queue) on every remaining node, within a bounded wait |
-| 2. Out of the cluster | `etcdctl member remove`, then the site's etcd stopped, since a removed member cannot rejoin and would restart in a loop; with two data sites and a witness, the witness's member too (below); on every remaining site, the files whose render changes with the site taken out, by scoped applies: the mesh file (`wg syncconf`), HAProxy (restarted with its database apps stopped around it, as `site add` does) and the gateway's routes (validated, then Caddy reloaded); then every remaining replica's `patroni.env`, one replica at a time (below) | etcd's voters are exactly the end state's and every member is healthy; HAProxy lists exactly the end state's cluster sites with the leader `UP`; no remaining site has the removed site as a WireGuard peer; each replica streams again before the next is touched |
+| 2. Out of the cluster | `etcdctl member remove`, then the site's etcd stopped, since a removed member cannot rejoin and would restart in a loop, and its etcd data directory emptied (below); with two data sites and a witness, the witness's member too (below); on every remaining site, the files whose render changes with the site taken out, by scoped applies: the mesh file (`wg syncconf`), HAProxy (restarted with its database apps stopped around it, as `site add` does) and the gateway's routes (validated, then Caddy reloaded); then every remaining replica's `patroni.env`, one replica at a time (below) | etcd's voters are exactly the end state's and every member is healthy; HAProxy lists exactly the end state's cluster sites with the leader `UP`; no remaining site has the removed site as a WireGuard peer; each replica streams again before the next is touched |
 | 3. Clean the host | Below. Skipped with `--host-gone`. When the site holds the active Pocket ID instance, the plan says that once this stage stops it, sign in is unavailable for a few seconds while a standby on another site takes over, up to about 90 seconds if the instance does not stop cleanly. The stop is clean, so the standby takes over at its next retry; 90 seconds is how long a registration takes to age when an instance dies (`docs/specs/2026-10-07-pocket-id-standby.md`) | nothing of this deployment's is left on the host but what the plan said it keeps |
 | 4. DNS | The address records this deployment's `dns init` made for the site, deleted when the configuration without it wants none at their names and no remaining site shares their address (docs/specs/2026-10-09-site-remove-force.md); skipped, with one line, without a provider, a token or a public address | listing the zones again finds nothing left to delete |
 | 5. Config | The site taken out of `paisans-stack.yaml`, comments kept; with two data sites and a witness, in the same write, the witness out of `etcd.members` and the `witness` role off its site | the file loads without the site, and without the witness in etcd |
@@ -109,7 +109,7 @@ data site's member goes first and its etcd stops, as for any removal. A check
 follows: etcd's voters are exactly the remaining data site and the witness,
 both healthy. Then the witness's member is removed, which leaves the remaining
 data site the one voter with a quorum of one, and the witness's etcd container
-is stopped. It is found by this deployment's label, the infrastructure stack's
+is stopped and removed. It is found by this deployment's label, the infrastructure stack's
 compose project and the `etcd` service, so nothing else on the host can match,
 and not by the compose file, which no longer declares the service once it is
 written. The witness's `infra/compose.yaml`, rendered without etcd, is written
@@ -117,6 +117,18 @@ by the same scoped apply as its mesh file and routes. Its `etcd-initial`, no
 longer rendered, is reported for a whole `apply`, which marks it left over.
 The gate is then the ordinary one: the voters are exactly the remaining data
 site, and it is healthy.
+
+Every member that leaves etcd this way, the data site and the witness alike,
+has its etcd data directory, `/srv/paisans/<token>/infra/etcd`, emptied once
+its etcd is stopped: every entry in it deleted, dotfiles included, each through
+`rootlesskit rm -rf` since the files are the container's and under rootless
+Docker are expected to be owned by a subordinate UID, and the directory itself
+kept. The data is a removed member's, which etcd never accepts again, and holds
+only Patroni's store, runtime state every remaining member also holds, so it is
+not operator data and `--delete-data` does not govern it. The plan names it.
+The step reads the configuration rather than etcd, so a run resumed after a
+member was removed empties its data too. `site add` clears a joiner's data
+before adding it and does not depend on this.
 
 Going from two voters to one is a membership change both voters must commit,
 so it is safe only when both are healthy, and the removal is refused before
@@ -197,7 +209,10 @@ Stages 1, 2, 4 and 5 run; stage 3 is skipped and the report lists what a host
 that comes back still holds: this deployment's containers, files under
 `/srv/paisans/<token>`, its units, its ufw rules, its keys and record, its
 registry entry. Nothing it runs can reach the cluster again, because no
-remaining site has it as a WireGuard peer and its etcd member is gone.
+remaining site has it as a WireGuard peer and its etcd member is gone. Its
+etcd data stays on that host, and the report says so: `site add` clears it if
+the site joins again. A witness leaving in the same removal is reached, and its
+etcd data is emptied as above.
 
 ## What it reports at the end
 

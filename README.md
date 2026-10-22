@@ -8950,7 +8950,7 @@ skipped and why.
 | Stage | What runs | Gate |
 |-------|-----------|------|
 | 2. Mesh | each site's `psns-<token>.conf`, as a scoped `deployment apply`, then the helper's `sync` (the new site's interface is started with its `up`) | a handshake younger than two minutes for every pair, read on both ends, and a ping of the new mesh address from every site |
-| 3. etcd | for each joiner, every witness first: `member add --learner`, its compose file, record and every `env_file` its infrastructure stack names written (`patroni.env`, `caddy/caddy.env`, `heartbeat/heartbeat.env`), `up -d etcd` alone, `member promote` retried until etcd accepts it | `endpoint health --cluster` all healthy, and the voters are exactly `etcd.members` |
+| 3. etcd | for each joiner, every witness first: a joiner etcd does not list has any etcd container of the deployment removed and its data directory, `infra/etcd`, emptied (below, *A joiner starts from an empty data directory*); `member add --learner`, its compose file, record and every `env_file` its infrastructure stack names written (`patroni.env`, `caddy/caddy.env`, `heartbeat/heartbeat.env`), `up -d etcd` alone, `member promote` retried until etcd accepts it | `endpoint health --cluster` all healthy, and the voters are exactly `etcd.members` |
 | 4. Replica | the new site's remaining files by a whole `deployment apply`, then `up -d`, which starts Patroni beside the running etcd | the member `streaming`, its replay lag zero or falling over three samples five seconds apart |
 | 5. Cluster configuration | `patronictl edit-config --force -q -s synchronous_mode=true -s synchronous_mode_strict=<value>` when the live values differ | a member with the role `Sync Standby` |
 | 6. HAProxy | `haproxy.cfg` as a scoped `deployment apply`; the site's cluster database apps stopped, HAProxy alone restarted, the apps started and each through `deployment apply`'s health gate | the statistics list every cluster site, the leader `UP` and every replica `DOWN` |
@@ -8965,6 +8965,27 @@ v3.5.16), which is why the promotion is retried with a doubling delay rather
 than timed. Between the witness's promotion and the new site's, the
 cluster has two voters; that is the price of one learner at a time, and it
 lasts one stage.
+
+**A joiner starts from an empty data directory.** etcd starts from a data
+directory that holds a member as that member, and once a member is removed the
+cluster never accepts its ID again (etcd v3.5.16, `server/etcdmain/etcd.go`
+skips bootstrap when the member directory exists). A site whose member left
+keeps `/srv/paisans/<token>/infra/etcd` on its host: a witness that `site
+remove` took out of etcd, a site taken out with `site remove --host-gone` whose
+host comes back, or a removal that stopped part way. Started from that data,
+its new learner would be the removed member, exit, and restart in a loop. So
+before a joiner that etcd does not list is added, its data directory is
+emptied, and the directory itself kept for the container to mount. Its data is
+deleted rather than kept, because it holds only Patroni's store, runtime state
+(the leader lock, sync state, the `initialize` key and the dynamic
+configuration) that every remaining member also holds; it is not operator data,
+so `--delete-data` does not govern it. A site that never ran etcd has nothing
+to delete. A site etcd lists, a voter or a learner a stopped run added, is
+never cleared. The files are the etcd container's, which under rootless Docker
+are expected, not yet observed, to be owned by a subordinate UID, so each is
+deleted through `rootlesskit`, as `site remove` deletes its own. Such a joiner
+is also given the membership as it stands, not the flags its host records
+from its earlier join (below).
 
 **A member keeps the flags it was born with.** etcd reads
 `--initial-cluster` and `--initial-cluster-state` only on a member's first
@@ -8981,7 +9002,10 @@ is refused with "member count is unequal" (etcd v3.5.16,
 first, the new data site is not a member yet, so the two joiners' flags differ.
 A host applied before the record existed has its compose file's own flags read
 instead, so its first apply under this rule changes nothing it runs. Writing
-the record never acts on a stack, because no container reads it.
+the record never acts on a stack, because no container reads it. Only a member
+that has started keeps its record: a joiner that has not started is given the
+membership as it stands, since a record its host keeps from a member that left
+names a past membership.
 
 The specification named the file `etcd-founders` and gave every joiner all of
 `etcd.members`; both were corrected here for the reason above.
@@ -9085,7 +9109,7 @@ failure there names the `deployment apply` that finishes it.
 | Stage | What runs | Gate |
 |-------|-----------|------|
 | 1. Data out of the site | the leader switched over to the `Sync Standby` when the site holds it; `synchronous_mode` turned off when one data site remains, since a leader waiting on a standby that is leaving stops taking writes; Patroni stopped on the site and its member key deleted from etcd; its Garage node removed from the layout and the layout applied | another site leads and `patronictl list` no longer lists the site, with a `Sync Standby` when the end state wants one; no layout row for the site, and every remaining node settled (one live layout version, an empty resync queue) within an hour, and a run that times out resumes at this gate while Garage carries on copying |
-| 2. Out of the cluster | `etcdctl member remove`, then the site's etcd stopped; with two data sites and a witness, the witness's member next (below); on every remaining site, the files whose render changes with the site gone, by scoped `deployment apply`: `psns-<token>.conf` (the helper's `sync`), `haproxy.cfg` (HAProxy restarted with its database apps stopped around it, as `site add` does) and the gateway's routes (validated, then Caddy reloaded); then each remaining replica's `patroni.env`, one at a time, as `site add`'s stage 7 does; last, the site taken out of every remaining gateway's deployment record | the voters are exactly the end state's and all healthy; no remaining site has the site's key as a WireGuard peer; HAProxy lists exactly the end state's cluster sites with the leader `UP`; each replica streaming again before the next |
+| 2. Out of the cluster | `etcdctl member remove`, then the site's etcd stopped and its etcd data directory emptied (below); with two data sites and a witness, the witness's member next (below); on every remaining site, the files whose render changes with the site gone, by scoped `deployment apply`: `psns-<token>.conf` (the helper's `sync`), `haproxy.cfg` (HAProxy restarted with its database apps stopped around it, as `site add` does) and the gateway's routes (validated, then Caddy reloaded); then each remaining replica's `patroni.env`, one at a time, as `site add`'s stage 7 does; last, the site taken out of every remaining gateway's deployment record | the voters are exactly the end state's and all healthy; no remaining site has the site's key as a WireGuard peer; HAProxy lists exactly the end state's cluster sites with the leader `UP`; each replica streaming again before the next |
 | 3. Clean the host | below. When the site holds the active Pocket ID instance, the plan says that once this stage stops it, sign in is unavailable for a few seconds while a standby takes over, up to about 90 seconds if the instance does not stop cleanly | checked last: nothing of this deployment's left but what the plan said it keeps |
 | 4. DNS | the address records this deployment's `dns init` made for the site, deleted at the provider (below, *The site's DNS records go with it*); skipped, saying why in one line, when `acme.provider` is not set, its token is not in the secrets, or the site has no public address | listing the zones again finds nothing left to delete |
 | 5. Config | the site taken out of `paisans-stack.yaml`: its block, its name in `cluster.sites`, `etcd.members` and `storage.garage.sites` where the file writes them, its capacity; with two data sites and a witness, the witness out of a written `etcd.members` and its `witness` role, in the same write; every other byte as it was | the file loads and no longer declares it |
@@ -9100,10 +9124,18 @@ removal and loses the `witness` role, keeping its others; the end state must
 still validate. In stage 2 the leaving site's member goes first; then, once
 etcd's voters are exactly the remaining data site and the witness, both
 healthy, the witness's member is removed, leaving one voter with a quorum of
-one, and the witness's etcd container is stopped. It is found by this
+one, and the witness's etcd container is stopped and removed. It is found by this
 deployment's label, the infrastructure project and the `etcd` service, since
 the witness's `infra/compose.yaml`, written by the same scoped `deployment apply` as its
-mesh file, no longer declares it. Two voters going to one is a change both
+mesh file, no longer declares it. Each leaving member's etcd data directory,
+`infra/etcd`, is then emptied through `rootlesskit` and the directory kept,
+the data site's and the witness's alike, and in any removal of an etcd member:
+the data is a removed member's, which etcd never accepts again, and holds
+nothing the remaining voters lack. A run resumed after a member was removed
+empties it too. With `--host-gone` the leaving host is not reached, so its etcd
+data stays there and the report says so; `site add` clears a joiner's data
+for itself (see *A joiner starts from an empty data directory*) and does not
+depend on this. Two voters going to one is a change both
 must commit, so it needs both healthy. A re-run reads which members are left,
 so one stopped between the two removals does only the second.
 
@@ -9388,7 +9420,7 @@ either. So `--host-gone` orders the stages from the cut:
 | 1. Cut | on every remaining site at once, `psns-<token>.conf` without the site, by scoped `deployment apply`, synced through the helper, and a gateway's routes without its upstreams, validated and reloaded | no remaining site lists the site's key as a peer, and the helper's `show` on each has no handshake with it |
 | 2. DNS | the site's address records deleted, as `site remove`'s DNS stage does, and also at names the configuration still wants (below) | listing the zones again finds nothing left to delete |
 | 3. Database | when the site leads, a wait for Patroni's own failover: the cut leader cannot renew its leader key, the key expires with Patroni's `ttl` (30 seconds by default), and a remaining member takes over; then `synchronous_mode` off when one data site remains, and the site's member key deleted from etcd, which it can no longer rewrite | a remaining site leads, and `patronictl list` no longer lists the site |
-| 4. etcd | `etcdctl member remove` from the remaining voters, and with two data sites and a witness the witness's member too, as `site remove` does | the voters are exactly the end state's and all healthy |
+| 4. etcd | `etcdctl member remove` from the remaining voters, and with two data sites and a witness the witness's member too, its etcd container removed and its etcd data directory emptied, as `site remove` does | the voters are exactly the end state's and all healthy |
 | 5. Storage | the site's Garage node out of the layout, then `garage layout skip-dead-nodes` (below, *A cut-off Garage node is skipped as dead*) | no layout row for the site, and every remaining node settled |
 | 6. The rest of the cluster | HAProxy without its backend, each remaining replica's `patroni.env` one at a time, and the site out of every remaining gateway's deployment record, as `site remove`'s stage 2 does | HAProxy lists exactly the end state's cluster sites with the leader `UP`; each replica streams again |
 | 7. Config | the site taken out of `paisans-stack.yaml`, as `site remove`'s stage 5 | the file loads without it |
