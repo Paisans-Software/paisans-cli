@@ -1,11 +1,14 @@
 package apply
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
@@ -532,4 +535,29 @@ func WitnessFirstRefusal(cfg *config.Config, plan *Plan, founding bool, running 
 			"This site's infrastructure stack was not touched. A new etcd cluster settles its version only once every founding member answers, and until then Patroni cannot take the leader key on any data site. Apply the witness first with %s, then apply this site again.",
 			strings.Join(commands, ", then ")),
 	}
+}
+
+var (
+	foundingMu     sync.Mutex
+	foundingTokens = map[string]string{}
+)
+
+// EtcdFoundingToken is the --initial-cluster-token a deployment's etcd is
+// founded with when no founder of it has a record yet (see
+// render.WithEtcdFoundingToken): the deployment's token and 64 random bits.
+// It is chosen once per run, so every render of one run founds with the same
+// token; a later run reads it from the record of a founder that has one.
+func EtcdFoundingToken(d deployment.Deployment) (string, error) {
+	foundingMu.Lock()
+	defer foundingMu.Unlock()
+	if tok, ok := foundingTokens[d.ID]; ok {
+		return tok, nil
+	}
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("choosing etcd's cluster token: %w", err)
+	}
+	tok := d.Prefix() + "-" + hex.EncodeToString(b[:])
+	foundingTokens[d.ID] = tok
+	return tok, nil
 }

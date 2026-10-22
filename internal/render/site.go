@@ -329,6 +329,7 @@ func (p *planner) renderSite(site *siteView) ([]File, error) {
 		"Scope":                   p.scope(),
 		"EtcdInitialCluster":      initial.Cluster,
 		"EtcdInitialState":        initial.State,
+		"EtcdInitialToken":        initial.EtcdToken(),
 		"HeartbeatMS":             p.heartbeatMS(),
 		"ElectionTimeoutMS":       p.electionTimeoutMS(),
 		"PostgresVersion":         p.postgresVersion(),

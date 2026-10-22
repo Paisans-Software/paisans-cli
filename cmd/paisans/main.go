@@ -1191,6 +1191,12 @@ func siteRenderOptions(cfg *config.Config, site string, transport apply.Transpor
 		}
 		if found {
 			out = append(out, render.WithEtcdInitial(site, initial))
+		} else {
+			token, err := etcdFoundingToken(cfg, site)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, render.WithEtcdFoundingToken(token))
 		}
 	}
 	if s := cfg.Sites[site]; !s.Has(config.RoleGateway) && s.RunsCaddy() {
@@ -1203,6 +1209,29 @@ func siteRenderOptions(cfg *config.Config, site string, transport apply.Transpor
 		}
 	}
 	return out, nil
+}
+
+// etcdFoundingToken is the --initial-cluster-token a member with no record
+// founds with: the one another founder's record holds, so every founder of
+// one cluster agrees however many runs found it, PatroniScope when that
+// founder was founded before tokens were recorded, or, when no founder has a
+// record yet, a token chosen at random for this run (see
+// render.WithEtcdFoundingToken for why). A member that cannot be read stops
+// the apply rather than risk founders with different tokens.
+func etcdFoundingToken(cfg *config.Config, site string) (string, error) {
+	for _, m := range cfg.Etcd.Members {
+		if m == site {
+			continue
+		}
+		in, found, err := convergeReadInitial(cfg, m)
+		if err != nil {
+			return "", fmt.Errorf("%s: reading its etcd record, for the token %s founds etcd with: %w", m, site, err)
+		}
+		if found && in.State == render.EtcdStateNew {
+			return in.Token, nil
+		}
+	}
+	return apply.EtcdFoundingToken(cfg.Deployment())
 }
 
 func planSiteApply(cfg *config.Config, secrets *config.Secrets, site string, transport apply.Transport, options ...apply.Option) (*apply.Plan, error) {
