@@ -234,6 +234,14 @@ func Build(cfg *config.Config, secrets *config.Secrets, newSite string, transpor
 	if err != nil {
 		return nil, err
 	}
+	// A member that has not started is given the membership as it stands,
+	// so a record its host keeps from an earlier member is not rendered: see
+	// joinInitial.
+	for name := range p.initial {
+		if !startedMember(p.cfg, live, name) {
+			delete(p.initial, name)
+		}
+	}
 
 	// Preflight checks a blank host, and once stage 2 has run the new site is
 	// not one: its own mesh interface holds its endpoint's port, which the

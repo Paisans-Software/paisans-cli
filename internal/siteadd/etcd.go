@@ -87,7 +87,9 @@ func (p *Plan) joiners(live []apply.EtcdMember) []string {
 }
 
 // buildEtcd is stage 3: each joiner added as a learner, started with the
-// membership it joins, and promoted once it has caught up.
+// membership it joins, and promoted once it has caught up. A joiner not in
+// etcd's member list has its etcd data cleared before it is added; see
+// clearEtcdData.
 func (p *Plan) buildEtcd(live []apply.EtcdMember) *Stage {
 	st := &Stage{
 		Number: 3,
@@ -106,6 +108,7 @@ func (p *Plan) buildEtcd(live []apply.EtcdMember) *Stage {
 	for _, j := range joiners {
 		url := render.EtcdPeerURL(p.cfg.Sites[j].Address)
 		if !present[j] {
+			st.Steps = append(st.Steps, Step{Site: j, Verb: "clear", Title: "clear old etcd data on " + j, Text: fmt.Sprintf("%s's old etcd data, %s, if it holds any: a removed member's, which etcd refuses to rejoin with. Any etcd container of this deployment there is removed first: %s", j, apply.EtcdDataDir(p.dep()), p.clearEtcdData())})
 			st.Steps = append(st.Steps, Step{Site: j, Verb: "add", Title: "add etcd learner " + j, Text: fmt.Sprintf("an etcd learner %s with peer URL %s, through %s", j, url, p.control)})
 		}
 		predicted[j] = url
@@ -129,6 +132,53 @@ func (p *Plan) buildEtcd(live []apply.EtcdMember) *Stage {
 	}
 	st.gate = p.etcdGate
 	return st
+}
+
+// clearEtcdData empties a joiner's etcd data directory before it is added
+// as a learner, and removes any etcd container of this deployment on its
+// host first, so a container restarting in a loop does not write to the
+// directory while it is emptied. site add starts the container again,
+// alone, once the learner is added.
+//
+// It runs for every joiner not in etcd's member list, however its host came
+// to hold data: a member removed by site remove, one taken out with
+// --host-gone whose host comes back, or a removal that stopped part way.
+// Each would otherwise start as the removed member, which the cluster
+// refuses (apply.EmptyEtcdData says why deleting it loses nothing). On a site
+// that never ran etcd there is nothing to delete. A site in the member list,
+// a voter or a learner an earlier run added, is never cleared: its data is
+// its own.
+//
+// The delete goes through rootlesskit because the files are expected to be
+// owned by a subordinate UID under rootless Docker. That is expected, not
+// observed: it is confirmed on a host before this comment says otherwise.
+func (p *Plan) clearEtcdData() string {
+	return apply.RemoveEtcdContainers(p.dep()) + " && { " + apply.EmptyEtcdData(p.dep()) + "; }"
+}
+
+// joinInitial is the --initial-cluster-state and --initial-cluster a joiner
+// is started with. A member that has started keeps what its host records,
+// the flags it was first started with, so its compose file does not change.
+// Any other joiner starts from an empty data directory and is given cluster,
+// the membership as it stands with it added, which etcd requires to match
+// exactly; a record its host keeps from an earlier member names a membership
+// that has since changed.
+func joinInitial(recorded render.EtcdInitial, found, started bool, cluster string) render.EtcdInitial {
+	if found && started && recorded.State == render.EtcdStateExisting {
+		return recorded
+	}
+	return render.EtcdInitial{State: render.EtcdStateExisting, Cluster: cluster}
+}
+
+// startedMember reports whether site's etcd member is in the member list and
+// has started.
+func startedMember(cfg *config.Config, live []apply.EtcdMember, site string) bool {
+	for _, m := range live {
+		if apply.EtcdMemberSite(cfg, m) == site && m.Started() {
+			return true
+		}
+	}
+	return false
 }
 
 func peerURL(m apply.EtcdMember) string {
@@ -184,6 +234,10 @@ func (p *Plan) joinEtcd(j string) error {
 		return nil
 	}
 	if m == nil {
+		p.work("clear old etcd data on "+j).Detail("%s, on %s", apply.EtcdDataDir(p.dep()), j)
+		if out, err := t.Run(p.clearEtcdData()); err != nil {
+			return fmt.Errorf("%s: clearing its old etcd data, %s: %w: %s. It was not added to etcd", j, apply.EtcdDataDir(p.dep()), err, lastLines(out, 3))
+		}
 		url := render.EtcdPeerURL(p.cfg.Sites[j].Address)
 		p.work("add etcd learner "+j).Detail("%s as an etcd learner, through %s", j, p.control)
 		// etcd's strict reconfiguration check refuses a membership change
@@ -218,21 +272,16 @@ func (p *Plan) joinEtcd(j string) error {
 		}
 	}
 
-	// What the member is born with: what its host already records, when that
-	// is a join, or the membership as it now stands, which etcd requires to
-	// match exactly.
-	initial, found, err := apply.ReadEtcdInitial(t, p.dep())
+	// What the member is born with: see joinInitial.
+	recorded, found, err := apply.ReadEtcdInitial(t, p.dep())
 	if err != nil {
 		return fmt.Errorf("%s: %w", j, err)
 	}
-	if !found || initial.State != render.EtcdStateExisting {
-		current := map[string]string{}
-		for _, member := range members {
-			current[apply.EtcdMemberSite(p.cfg, member)] = peerURL(member)
-		}
-		initial = render.EtcdInitial{State: render.EtcdStateExisting, Cluster: clusterString(current)}
+	current := map[string]string{}
+	for _, member := range members {
+		current[apply.EtcdMemberSite(p.cfg, member)] = peerURL(member)
 	}
-	p.initial[j] = initial
+	p.initial[j] = joinInitial(recorded, found, m.Started(), clusterString(current))
 
 	p.work("write etcd files on " + j)
 	rendered, err := p.render()

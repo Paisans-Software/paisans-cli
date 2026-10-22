@@ -118,6 +118,13 @@ func (h *host) RunInput(command, stdin string) (string, error) {
 // wgHelper is the start of every command sent to the WireGuard helper for
 // the fixture's interface, and wgInstalled is where its put installs the
 // mesh file on a real host.
+// etcdData is a host's etcd data directory, and etcdDB a file etcd keeps
+// in it once its member has started.
+const (
+	etcdData = "/srv/paisans/f2a9/infra/etcd"
+	etcdDB   = etcdData + "/member/snap/db"
+)
+
 const (
 	wgHelper    = "sudo -n '/usr/local/libexec/paisans/wg-psns-f2a9' "
 	wgInstalled = "/etc/wireguard/psns-f2a9.conf"
@@ -136,6 +143,8 @@ func (h *host) ran(sub string) int {
 var (
 	memberAdd = regexp.MustCompile(`member add (\S+) --peer-urls=(\S+) --learner`)
 	promote   = regexp.MustCompile(`member promote ([0-9a-f]+)`)
+	emptyLoop = regexp.MustCompile(`for f in '([^']+)'/\*`)
+	initialRe = regexp.MustCompile(`--initial-cluster=(\S+)`)
 	serverRe  = regexp.MustCompile(`(?m)^\s+server (\S+) `)
 )
 
@@ -266,11 +275,39 @@ func (h *host) Run(command string) (string, error) {
 		w.nextID++
 		w.etcd = append(w.etcd, apply.EtcdMember{ID: w.nextID, PeerURLs: []string{m[2]}, IsLearner: true})
 		return "Member added\n", nil
+	case strings.Contains(command, `rootlesskit rm -rf -- "$f"`):
+		// The etcd container stopped and removed, when the command says
+		// so, and every file under each directory a loop empties deleted.
+		if strings.Contains(command, "docker stop $ids") {
+			w.running[h.name] = false
+		}
+		for _, m := range emptyLoop.FindAllStringSubmatch(command, -1) {
+			for p := range h.files {
+				if strings.HasPrefix(p, m[1]+"/") {
+					delete(h.files, p)
+				}
+			}
+		}
+		return "", nil
 	case strings.HasSuffix(command, "up -d etcd"):
 		w.running[h.name] = true
+		// etcd starts as the member its data records, and the cluster
+		// refuses one it removed: it exits and restarts in a loop, and the
+		// learner never starts. With no data it joins only when
+		// --initial-cluster is the membership as it stands.
+		if db, ok := h.files[etcdDB]; ok && db != w.memberRecord(h.name) {
+			return "", nil
+		}
+		if _, ok := h.files[etcdDB]; !ok {
+			m := initialRe.FindStringSubmatch(h.files["/srv/paisans/f2a9/infra/compose.yaml"])
+			if m == nil || m[1] != w.membership() {
+				return "", nil
+			}
+		}
 		for i := range w.etcd {
 			if w.etcd[i].PeerURLs[0] == render.EtcdPeerURL(w.cfg.Sites[h.name].Address) {
 				w.etcd[i].Name = h.name
+				h.files[etcdDB] = w.memberRecord(h.name)
 			}
 		}
 		return "", nil
@@ -367,6 +404,27 @@ func envLine(content, key string) string {
 		}
 	}
 	return ""
+}
+
+// memberRecord is what a site's etcd data holds once its member has
+// started: the ID etcd knows it by.
+func (w *world) memberRecord(site string) string {
+	for _, m := range w.etcd {
+		if apply.EtcdMemberSite(w.cfg, m) == site {
+			return "member " + m.HexID()
+		}
+	}
+	return ""
+}
+
+// membership is etcd's members as an --initial-cluster value.
+func (w *world) membership() string {
+	var parts []string
+	for _, m := range w.etcd {
+		parts = append(parts, apply.EtcdMemberSite(w.cfg, m)+"="+m.PeerURLs[0])
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, ",")
 }
 
 func (w *world) memberList() string {

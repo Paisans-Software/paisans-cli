@@ -312,18 +312,11 @@ func (p *Plan) deleteBesideKept() string {
 	sort.Strings(dirs)
 	var loops []string
 	for _, dir := range dirs {
-		q := quote(dir)
-		head := fmt.Sprintf(`for f in %[1]s/* %[1]s/.[!.]* %[1]s/..?*; do [ -e "$f" ] || [ -L "$f" ] || continue;`, q)
-		if len(keep[dir]) == 0 {
-			loops = append(loops, head+` rootlesskit rm -rf -- "$f"; done`)
-			continue
-		}
 		var names []string
 		for n := range keep[dir] {
-			names = append(names, quote(n))
+			names = append(names, n)
 		}
-		sort.Strings(names)
-		loops = append(loops, head+fmt.Sprintf(` case "${f##*/}" in %s) ;; *) rootlesskit rm -rf -- "$f";; esac; done`, strings.Join(names, "|")))
+		loops = append(loops, apply.RootlessDeleteLoop(dir, names))
 	}
 	// A directory walked that is a symbolic link would take the loop out of
 	// the root, Eg: snippets pointing at the owner's sites: nothing is

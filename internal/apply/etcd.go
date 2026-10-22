@@ -274,6 +274,43 @@ func EtcdInitialMembers(in render.EtcdInitial) ([]EtcdMember, bool) {
 	return members, len(members) > 0
 }
 
+// EtcdDataDir is a site's etcd data directory on its host, which the etcd
+// container mounts as its --data-dir (infra-compose.yaml.tmpl).
+func EtcdDataDir(d deployment.Deployment) string { return d.Dir(infraStack) + "/etcd" }
+
+// EtcdContainerIDs lists the etcd containers of this deployment on a host,
+// running or stopped: its label, the infrastructure stack's compose project
+// and the etcd service, so nothing else on the host can match. It finds them
+// by their labels, not by the compose file, because a compose file written
+// without etcd does not name the service.
+func EtcdContainerIDs(d deployment.Deployment) string {
+	return fmt.Sprintf("docker ps -aq --filter %s --filter %s --filter %s",
+		shellQuote(d.LabelFilter()), shellQuote("label=com.docker.compose.project="+d.Project(infraStack)), shellQuote("label=com.docker.compose.service=etcd"))
+}
+
+// RemoveEtcdContainers stops and removes them. A stopped one left behind is
+// started again by its restart policy. Its bind mounts stay.
+func RemoveEtcdContainers(d deployment.Deployment) string {
+	return fmt.Sprintf("ids=$(%s) && { [ -z \"$ids\" ] || { docker stop $ids >/dev/null && docker rm $ids >/dev/null; }; }", EtcdContainerIDs(d))
+}
+
+// EmptyEtcdData deletes everything in a site's etcd data directory and keeps
+// the directory.
+//
+// etcd starts from a data directory that holds a member as that member, and
+// ignores --initial-cluster then (etcd v3.5.16, server/etcdmain/etcd.go). A
+// removed member's ID is never accepted by the cluster again, so a site
+// whose member was removed and whose host kept the data cannot rejoin from
+// it: etcd exits and restarts in a loop. The data holds only Patroni's store,
+// runtime state every remaining member also holds, so deleting it loses
+// nothing.
+//
+// The files are the etcd container's, which under rootless Docker are
+// expected to be owned by a subordinate UID rather than the deployment's
+// user, so they go through rootlesskit (RootlessDeleteLoop). That ownership
+// is expected, not yet observed on a host.
+func EmptyEtcdData(d deployment.Deployment) string { return RootlessEmptyDir(EtcdDataDir(d)) }
+
 // EtcdContainerRunning reports whether this host's etcd container runs. It
 // asks Docker, not etcd, so it answers the same for a member with no leader.
 func EtcdContainerRunning(t Transport, d deployment.Deployment) (bool, error) {
