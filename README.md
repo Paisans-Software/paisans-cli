@@ -4438,14 +4438,16 @@ own, however consistent it looks**, because someone with root on those sites
 could have written it, signed with their own key and listing themselves as an
 operator. The operator's key is the one `.paisans/signing-key` records; on a
 workstation that records none, a pull, a log or a recovery takes every key the
-operator's ssh-agent holds, or the public key `--key` names, `--root` or not,
-because only the holder of a key can sign with it; with a root pinned, the
-version they anchor on must descend from it. A pull or a recovery records the
-key that signed the anchor.
-Those keys come from the workstation alone, never from a site. When two of them
-signed heads that diverge, neither anchors and it is a fork, since one may be a
-key a later version removed that someone else holds too. With neither an own
-signature nor a pin, a pull or a recovery is refused and asks for one.
+operator's ssh-agent holds, or the public key `--key` names, `--root` or not.
+Those keys come from the workstation alone, never from a site, but a key the
+operator can reach may be one a later version removed or one shared with
+someone else, so it anchors only on a version the rules below already trust,
+judged from that version's root; with a root pinned, that version must
+descend from it. When anchoring on different such versions gives different
+heads, it is a fork. A pull or a recovery records the key that signed the
+anchor when the agent holds it and an operator of the head lists it. With
+neither an own signature nor a pin, a pull or a recovery is refused and asks
+for one.
 
 From that anchor a version is trusted when it passes three rules, each of which
 closes a forgery:
@@ -4577,8 +4579,9 @@ paisans deployment recover --from admin@203.0.113.9 --execute   # empty workstat
   `--execute` writes the head's files to `.paisans/incoming/` to merge by hand
   before `publish --merge`.
 * **`paisans deployment recover`** onto a workstation with nothing gathers from the
-  named hosts and every site the trusted heads name. It anchors on the
-  operator's key in their ssh-agent, or the one `--key` names, or on `--root`
+  named hosts and every site the trusted heads name. It anchors on a version
+  the rules trust that the operator's key in their ssh-agent, or the one
+  `--key` names, signed, or on `--root`
   with the hash of a version the operator trusts, kept somewhere other than the
   workstation that was lost, because a history found only on the sites is
   never trusted on its own; a pinned root also bounds the key's anchor, which
