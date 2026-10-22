@@ -14,6 +14,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/apply/applytest"
+	"github.com/paisans-software/paisans-cli/internal/apply/etcdwaltest"
 	"github.com/paisans-software/paisans-cli/internal/apply/meshfake"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/patronitest"
@@ -87,6 +88,17 @@ type world struct {
 	// otherCluster is, by site, the ID of another cluster whose etcd runs on
 	// that host and answers for it.
 	otherCluster map[string]uint64
+	// probeOut is, by site, what asking that host's etcd for its member
+	// list prints, and the error it exits with when the second is set: Eg a
+	// warning line before the answer, or a timeout from an etcd without a
+	// quorum.
+	probeOut map[string][2]string
+	// restarting is each site whose etcd container restarts in a loop: it
+	// is never seen running, and removing it ends the loop.
+	restarting map[string]bool
+	// dataUnreadable is each site whose etcd data directory cannot be
+	// listed.
+	dataUnreadable map[string]bool
 }
 
 type host struct {
@@ -127,6 +139,7 @@ func (h *host) RunInput(command, stdin string) (string, error) {
 const (
 	etcdData = "/srv/paisans/f2a9/infra/etcd"
 	etcdDB   = etcdData + "/member/snap/db"
+	etcdWAL  = etcdData + "/member/wal/0000000000000000-0000000000000000.wal"
 )
 
 // wgHelper is the start of every command sent to the WireGuard helper for
@@ -148,11 +161,12 @@ func (h *host) ran(sub string) int {
 }
 
 var (
-	memberAdd = regexp.MustCompile(`member add (\S+) --peer-urls=(\S+) --learner`)
-	promote   = regexp.MustCompile(`member promote ([0-9a-f]+)`)
-	emptyLoop = regexp.MustCompile(`for f in '([^']+)'/\*`)
-	initialRe = regexp.MustCompile(`--initial-cluster=(\S+)`)
-	serverRe  = regexp.MustCompile(`(?m)^\s+server (\S+) `)
+	memberAdd    = regexp.MustCompile(`member add (\S+) --peer-urls=(\S+) --learner`)
+	memberRemove = regexp.MustCompile(`member remove ([0-9a-f]+)`)
+	promote      = regexp.MustCompile(`member promote ([0-9a-f]+)`)
+	emptyLoop    = regexp.MustCompile(`for f in '([^']+)'/\*`)
+	initialRe    = regexp.MustCompile(`--initial-cluster=(\S+)`)
+	serverRe     = regexp.MustCompile(`(?m)^\s+server (\S+) `)
 )
 
 func (h *host) Run(command string) (string, error) {
@@ -267,7 +281,15 @@ func (h *host) Run(command string) (string, error) {
 			return *w.handshakesFail, fmt.Errorf("exit status 1")
 		}
 		return w.handshakes(h), nil
+	case strings.HasPrefix(command, "rootlesskit sh -c ") && strings.Contains(command, "paisans-etcd-data"):
+		return h.etcdDataAnswer(), nil
 	case strings.Contains(command, "--quiet etcd"):
+		if r, ok := w.probeOut[h.name]; ok {
+			if r[1] != "" {
+				return r[0], fmt.Errorf("%s", r[1])
+			}
+			return r[0], nil
+		}
 		if id, ok := w.otherCluster[h.name]; ok {
 			data, _ := json.Marshal(map[string]any{"header": map[string]any{"cluster_id": id}, "members": []apply.EtcdMember{{ID: 0xabc, Name: h.name, PeerURLs: []string{render.EtcdPeerURL(w.cfg.Sites[h.name].Address)}}}})
 			return string(data), nil
@@ -281,6 +303,16 @@ func (h *host) Run(command string) (string, error) {
 	case memberAdd.MatchString(command) && w.addRefusals > 0:
 		w.addRefusals--
 		return "Error: etcdserver: unhealthy cluster", fmt.Errorf("exit status 1")
+	case memberRemove.MatchString(command):
+		id := memberRemove.FindStringSubmatch(command)[1]
+		kept := w.etcd[:0]
+		for _, m := range w.etcd {
+			if m.HexID() != id {
+				kept = append(kept, m)
+			}
+		}
+		w.etcd = kept
+		return "Member removed\n", nil
 	case memberAdd.MatchString(command):
 		m := memberAdd.FindStringSubmatch(command)
 		w.nextID++
@@ -291,6 +323,7 @@ func (h *host) Run(command string) (string, error) {
 		// so, and every file under each directory a loop empties deleted.
 		if strings.Contains(command, "docker stop $ids") {
 			w.running[h.name] = false
+			delete(w.restarting, h.name)
 		}
 		for _, m := range emptyLoop.FindAllStringSubmatch(command, -1) {
 			for p := range h.files {
@@ -318,7 +351,9 @@ func (h *host) Run(command string) (string, error) {
 		for i := range w.etcd {
 			if w.etcd[i].PeerURLs[0] == render.EtcdPeerURL(w.cfg.Sites[h.name].Address) {
 				w.etcd[i].Name = h.name
+				w.etcd[i].ClientURLs = []string{"http://" + w.cfg.Sites[h.name].Address + ":2379"}
 				h.files[etcdDB] = w.memberRecord(h.name)
+				h.files[etcdWAL] = string(etcdwaltest.Head(w.etcd[i].ID, w.clusterID))
 			}
 		}
 		return "", nil
@@ -415,6 +450,51 @@ func envLine(content, key string) string {
 		}
 	}
 	return ""
+}
+
+// etcdDataAnswer is what apply.EtcdDataProbe prints on this host, read from
+// its files: the state of its etcd data directory, and the head of its
+// first write-ahead log as od prints it.
+func (h *host) etcdDataAnswer() string {
+	const mark = "paisans-etcd-data: "
+	if h.w.dataUnreadable[h.name] {
+		return mark + "unreadable\n"
+	}
+	top := map[string]bool{}
+	var wals []string
+	for p := range h.files {
+		rest, ok := strings.CutPrefix(p, etcdData+"/")
+		if !ok {
+			continue
+		}
+		top[strings.SplitN(rest, "/", 2)[0]] = true
+		if name, ok := strings.CutPrefix(rest, "member/wal/"); ok && strings.HasSuffix(name, ".wal") && !strings.Contains(name, "/") {
+			wals = append(wals, name)
+		}
+	}
+	switch {
+	case len(top) == 0:
+		return mark + "absent\n"
+	case !top["member"]:
+		return mark + "nomember\n"
+	case len(wals) == 0:
+		return mark + "nowal\n"
+	}
+	sort.Strings(wals)
+	head := []byte(h.files[etcdData+"/member/wal/"+wals[0]])
+	if len(head) > 4096 {
+		head = head[:4096]
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%swal %s\npaisans-wal-begin\n", mark, wals[0])
+	for i := 0; i < len(head); i += 16 {
+		for _, c := range head[i:min(i+16, len(head))] {
+			fmt.Fprintf(&b, " %02x", c)
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("paisans-wal-end\n")
+	return b.String()
 }
 
 // memberRecord is what a site's etcd data holds once its member has

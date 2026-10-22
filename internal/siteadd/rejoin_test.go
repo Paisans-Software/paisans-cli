@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
+	"github.com/paisans-software/paisans-cli/internal/apply/etcdwaltest"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/siteadd"
 )
@@ -19,7 +20,7 @@ func removedWitnessWorld(t *testing.T) *world {
 	w := newWorld(t)
 	vm := w.hosts["vm"]
 	vm.files[etcdDB] = "member 7f3a, removed"
-	vm.files[etcdData+"/member/wal/0.wal"] = "wal"
+	vm.files[etcdWAL] = string(etcdwaltest.Head(0x7f3a, w.clusterID))
 	vm.files[etcdData+"/.lock"] = "lock"
 	// The record as that join's apply wrote it, in vm's manifest.
 	stale := render.EtcdInitial{
@@ -99,12 +100,15 @@ func TestARemovedMemberRejoinsFromClearedData(t *testing.T) {
 	}
 	vm := w.hosts["vm"]
 	for path, content := range vm.files {
-		if strings.HasPrefix(path, etcdData+"/") && path != etcdDB {
+		if strings.HasPrefix(path, etcdData+"/") && path != etcdDB && path != etcdWAL {
 			t.Errorf("%s is left from the removed member", path)
 		}
 		if path == etcdDB && strings.Contains(content, "removed") {
 			t.Error("vm's etcd still holds the removed member's data")
 		}
+	}
+	if string(etcdwaltest.Head(0x7f3a, w.clusterID)) == vm.files[etcdWAL] {
+		t.Error("vm's write-ahead log is still the removed member's")
 	}
 	cleared, started := ranIndex(vm, "rootlesskit rm -rf"), ranIndex(vm, "up -d etcd")
 	if cleared < 0 || started < cleared {
@@ -172,8 +176,14 @@ func TestAnUnstartedLearnerFromAnEarlierRunIsCleared(t *testing.T) {
 	w.nextID++
 	w.etcd = append(w.etcd, apply.EtcdMember{ID: w.nextID, PeerURLs: []string{"http://10.44.0.3:2380"}, IsLearner: true})
 	p := build(t, w)
-	if !hasStep(p, 3, "vm", "clear") || hasStep(p, 3, "vm", "add") {
-		t.Errorf("vm, an unstarted learner, is not cleared, or is added again: %v", steps(p, 3))
+	var order []string
+	for _, s := range steps(p, 3) {
+		if s.Title == "remove unstarted learner vm" || s.Site == "vm" {
+			order = append(order, s.Verb)
+		}
+	}
+	if strings.Join(order, ",") != "remove,clear,add,write,start,promote" {
+		t.Errorf("vm, an unstarted learner, is planned %v", order)
 	}
 	if err := siteadd.Execute(p); err != nil {
 		t.Fatal(err)
@@ -186,8 +196,16 @@ func TestAnUnstartedLearnerFromAnEarlierRunIsCleared(t *testing.T) {
 	if cleared < 0 || started < cleared {
 		t.Errorf("the data was cleared at %d and etcd started at %d", cleared, started)
 	}
-	if w.hosts["home-a"].ran("member add vm ") != 0 {
-		t.Error("vm was added to etcd again")
+	// A learner that received data before it failed cannot start again
+	// under its ID, so it is removed and added again under a new one.
+	removed, added := ranIndex(w.hosts["home-a"], "member remove 2"), ranIndex(w.hosts["home-a"], "member add vm ")
+	if removed < 0 || added < removed {
+		t.Errorf("vm's old learner was removed at %d and it was added again at %d", removed, added)
+	}
+	for _, m := range w.etcd {
+		if m.ID == 2 {
+			t.Errorf("vm's old learner, member 2, is still in etcd: %v", w.etcd)
+		}
 	}
 }
 
@@ -241,7 +259,7 @@ func TestAJoinerRunningAnotherClustersEtcdIsRefused(t *testing.T) {
 	if err == nil {
 		t.Fatal("a joiner on another cluster's etcd was planned")
 	}
-	for _, want := range []string{"vm's etcd answers for cluster beef", "home-a's for cluster c1a5", "paisans doctor on vm", "Nothing on vm was changed"} {
+	for _, want := range []string{"vm's etcd data, /srv/paisans/f2a9/infra/etcd, belongs to etcd cluster beef", "read on home-a, is cluster c1a5", "the host's owner moves it off the host", "Nothing on vm was changed"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the refusal lacks %q: %v", want, err)
 		}
@@ -305,10 +323,187 @@ func TestAJoinerAnsweringWithoutAClusterIDIsRefused(t *testing.T) {
 	w := removedWitnessWorld(t)
 	w.otherCluster = map[string]uint64{"vm": 0}
 	_, err := siteadd.Build(w.cfg, w.secrets, "home-b", w.transports())
-	if err == nil || !strings.Contains(err.Error(), "vm's etcd answered without a cluster ID") {
+	if err == nil || !strings.Contains(err.Error(), "answered without a cluster ID") || !strings.Contains(err.Error(), "vm's etcd data") {
 		t.Fatalf("err = %v", err)
 	}
 	if w.hosts["vm"].ran("rootlesskit rm -rf") != 0 || len(w.hosts["vm"].files[etcdDB]) == 0 {
 		t.Error("vm's etcd data was deleted")
+	}
+}
+
+// otherClusterData gives vm's host the data of a member of another etcd
+// cluster, beef, in place of the removed member's.
+func otherClusterData(w *world) {
+	w.hosts["vm"].files[etcdDB] = "other cluster's data"
+	w.hosts["vm"].files[etcdWAL] = string(etcdwaltest.Head(0xabc, 0xbeef))
+}
+
+// refusedUntouched checks that err refuses, that it says why with each of
+// want, and that nothing on any host was removed or deleted.
+func refusedUntouched(t *testing.T, w *world, err error, want ...string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("not refused")
+	}
+	for _, s := range want {
+		if !strings.Contains(err.Error(), s) {
+			t.Errorf("the refusal lacks %q: %v", s, err)
+		}
+	}
+	for name, h := range w.hosts {
+		if h.ran("rootlesskit rm -rf") != 0 || h.ran("docker stop") != 0 {
+			t.Errorf("%s had a container removed or data deleted", name)
+		}
+	}
+	if w.hosts["home-a"].ran("member remove") != 0 {
+		t.Error("a member was removed from etcd")
+	}
+}
+
+// Another cluster's etcd stopped on the joiner's host leaves nothing to ask,
+// and its data on disk is still found: an operator who stops it after a
+// refusal and runs site add again is refused again, by its write-ahead log.
+func TestAStoppedOtherClustersDataIsRefusedOnDisk(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := removedWitnessWorld(t)
+	otherClusterData(w)
+	w.otherCluster = map[string]uint64{"vm": 0xbeef}
+	_, err := siteadd.Build(w.cfg, w.secrets, "home-b", w.transports())
+	refusedUntouched(t, w, err, "belongs to etcd cluster beef (its running etcd answers for it)")
+
+	delete(w.otherCluster, "vm")
+	w.running["vm"] = false
+	_, err = siteadd.Build(w.cfg, w.secrets, "home-b", w.transports())
+	refusedUntouched(t, w, err, "belongs to etcd cluster beef (its write-ahead log, 0000000000000000-0000000000000000.wal, names it)", "the host's owner moves it off the host", "Nothing on vm was changed")
+	for _, bad := range []string{"stop that etcd", "every remaining member also holds"} {
+		if strings.Contains(err.Error(), bad) {
+			t.Errorf("the refusal says %q: %v", bad, err)
+		}
+	}
+	if w.hosts["vm"].files[etcdDB] != "other cluster's data" {
+		t.Error("vm's data changed")
+	}
+}
+
+// An etcd that runs and does not answer, Eg one of another cluster that
+// lost its quorum, whose client port hangs until etcdctl's timeout, is
+// refused: not answering is not evidence of anything.
+func TestAnEtcdThatTimesOutIsRefused(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := removedWitnessWorld(t)
+	otherClusterData(w)
+	w.probeOut = map[string][2]string{"vm": {`{"level":"warn","msg":"retrying of unary invoker failed","error":"context deadline exceeded"}` + "\nError: context deadline exceeded", "exit status 1"}}
+	_, err := siteadd.Build(w.cfg, w.secrets, "home-b", w.transports())
+	refusedUntouched(t, w, err, "did not say which cluster it is in", "Nothing on vm was changed")
+}
+
+// etcdctl's warning lines come first on the combined output; the answer
+// after them is still read, and another cluster's is refused.
+func TestAnAnswerAfterAWarningLineIsRead(t *testing.T) {
+	defer siteadd.SetFast()()
+	warn := `{"level":"warn","ts":"2026-10-22T00:00:00Z","logger":"etcd-client","caller":"v3/retry_interceptor.go:62","msg":"retrying of unary invoker failed"}` + "\n"
+	w := removedWitnessWorld(t)
+	otherClusterData(w)
+	w.probeOut = map[string][2]string{"vm": {warn + `{"header":{"cluster_id":48879},"members":[{"ID":2748,"name":"vm","peerURLs":["http://10.44.0.3:2380"]}]}`, ""}}
+	_, err := siteadd.Build(w.cfg, w.secrets, "home-b", w.transports())
+	refusedUntouched(t, w, err, "belongs to etcd cluster beef (its running etcd answers for it)")
+
+	// This cluster's answer after a warning, with this cluster's data,
+	// clears.
+	w = removedWitnessWorld(t)
+	w.probeOut = map[string][2]string{"vm": {warn + `{"header":{"cluster_id":49573},"members":[]}`, ""}}
+	p := build(t, w)
+	delete(w.probeOut, "vm")
+	if err := siteadd.Execute(p); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(w.voters(), ","); got != "home-a,home-b,vm" {
+		t.Errorf("voters %s", got)
+	}
+}
+
+// Data whose owner cannot be shown is refused, whatever else it is: a
+// member directory with no write-ahead log, a log that does not decode, a
+// directory that cannot be listed.
+func TestDataNotShownToBeThisClustersIsRefused(t *testing.T) {
+	defer siteadd.SetFast()()
+	for name, c := range map[string]struct {
+		setup func(*world)
+		want  string
+	}{
+		"no write-ahead log": {func(w *world) { delete(w.hosts["vm"].files, etcdWAL) }, "holds a member directory with no write-ahead log"},
+		"a log that does not decode": {func(w *world) {
+			w.hosts["vm"].files[etcdWAL] = "not a WAL"
+		}, "could not be read"},
+		"an unlistable directory": {func(w *world) { w.dataUnreadable = map[string]bool{"vm": true} }, "could not be listed"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := removedWitnessWorld(t)
+			c.setup(w)
+			_, err := siteadd.Build(w.cfg, w.secrets, "home-b", w.transports())
+			refusedUntouched(t, w, err, c.want, "is not shown to be this cluster's and is not deleted", "Nothing on vm was changed")
+		})
+	}
+}
+
+// A container restarting in a loop is never seen running, so the data is
+// read on disk; it is this cluster's, and the clear removes the container
+// before deleting it.
+func TestARestartingContainerIsRemovedAndItsDataCleared(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := removedWitnessWorld(t)
+	w.restarting = map[string]bool{"vm": true}
+	if err := siteadd.Execute(build(t, w)); err != nil {
+		t.Fatal(err)
+	}
+	if w.restarting["vm"] {
+		t.Error("vm's restarting container was not removed")
+	}
+	if got := strings.Join(w.voters(), ","); got != "home-a,home-b,vm" {
+		t.Errorf("voters %s", got)
+	}
+}
+
+// What is checked when the join is planned is checked again before the
+// clear runs: another cluster's etcd that appears on the host after
+// planning, or data that changes to another cluster's, stops stage 3 with
+// nothing on vm deleted.
+func TestTheCheckRunsAgainBeforeTheClear(t *testing.T) {
+	defer siteadd.SetFast()()
+	for name, change := range map[string]func(*world){
+		"a running etcd of another cluster": func(w *world) { w.otherCluster = map[string]uint64{"vm": 0xbeef} },
+		"another cluster's data on disk":    otherClusterData,
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := removedWitnessWorld(t)
+			p := build(t, w)
+			change(w)
+			err := siteadd.Execute(p)
+			if err == nil || !strings.Contains(err.Error(), "stage 3") || !strings.Contains(err.Error(), "belongs to etcd cluster beef") {
+				t.Fatalf("want a stage 3 refusal, got %v", err)
+			}
+			vm := w.hosts["vm"]
+			if vm.ran("rootlesskit rm -rf") != 0 || vm.ran("docker stop") != 0 {
+				t.Error("vm had a container removed or data deleted")
+			}
+			if w.hosts["home-a"].ran("member add vm ") != 0 {
+				t.Error("vm was added to etcd")
+			}
+		})
+	}
+}
+
+// Data that changes after planning to another member of this cluster is
+// still this cluster's, and is cleared at run time.
+func TestDataOfThisClusterFoundAtRunTimeIsCleared(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := removedWitnessWorld(t)
+	p := build(t, w)
+	w.hosts["vm"].files[etcdWAL] = string(etcdwaltest.Head(0x9999, w.clusterID))
+	if err := siteadd.Execute(p); err != nil {
+		t.Fatal(err)
+	}
+	if string(etcdwaltest.Head(0x9999, w.clusterID)) == w.hosts["vm"].files[etcdWAL] {
+		t.Error("vm's data was not cleared")
 	}
 }

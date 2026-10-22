@@ -245,11 +245,11 @@ func Build(cfg *config.Config, secrets *config.Secrets, newSite string, transpor
 			delete(p.initial, name)
 		}
 	}
-	// Stage 3 clears every joiner whose member has not started; a host whose
-	// etcd belongs to another cluster is refused before any stage runs.
+	// Stage 3 clears every joiner whose member has not started; data not
+	// shown to be this cluster's is refused before any stage runs.
 	for _, j := range p.joiners(live) {
 		if !startedMember(p.cfg, live, j) {
-			if err := p.sameCluster(j); err != nil {
+			if err := p.checkEtcdData(j); err != nil {
 				return nil, err
 			}
 		}

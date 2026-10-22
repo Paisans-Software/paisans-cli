@@ -175,8 +175,10 @@ func TestAJoinStoppedAtTheNewWitnessResumes(t *testing.T) {
 	if len(checked) != 0 {
 		t.Errorf("a started join ran preflight again: %v", checked)
 	}
-	if hasStep(p, 3, "wit", "add") || !hasStep(p, 3, "wit", "start") {
-		t.Errorf("the witness is added again, or not started: %v", steps(p, 3))
+	// The witness's learner never started, so it is removed and added
+	// again under a new ID rather than started under the old one.
+	if !hasStep(p, 3, "home-a", "remove") || !hasStep(p, 3, "wit", "add") || !hasStep(p, 3, "wit", "start") {
+		t.Errorf("the witness's unstarted learner is not removed, added again and started: %v", steps(p, 3))
 	}
 	if err := siteadd.Execute(p); err != nil {
 		t.Fatal(err)

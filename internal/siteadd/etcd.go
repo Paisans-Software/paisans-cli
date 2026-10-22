@@ -1,7 +1,6 @@
 package siteadd
 
 import (
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -109,13 +108,20 @@ func (p *Plan) buildEtcd(live []apply.EtcdMember) *Stage {
 		present[site] = true
 		started[site] = m.Started()
 	}
+	ids := map[string]string{}
+	for _, m := range live {
+		ids[apply.EtcdMemberSite(p.cfg, m)] = m.HexID()
+	}
 	joiners := p.joiners(live)
 	for _, j := range joiners {
 		url := render.EtcdPeerURL(p.cfg.Sites[j].Address)
-		if !started[j] {
-			st.Steps = append(st.Steps, Step{Site: j, Verb: "clear", Title: "clear old etcd data on " + j, Text: fmt.Sprintf("%s's old etcd data, %s, if it holds any: a removed member's, which etcd refuses to rejoin with. Any etcd container of this deployment there is removed first: %s", j, apply.EtcdDataDir(p.dep()), p.clearEtcdData())})
+		if present[j] && !started[j] {
+			st.Steps = append(st.Steps, Step{Site: p.control, Verb: "remove", Title: "remove unstarted learner " + j, Text: fmt.Sprintf("%s's learner %s, which an earlier run added and which never started: one that received data before it stopped cannot start again under its ID, so it is added again under a new one: %s", j, ids[j], apply.Etcdctl(p.dep(), p.cfg.Sites[p.control].Address, "member remove "+ids[j]))})
 		}
-		if !present[j] {
+		if !started[j] {
+			st.Steps = append(st.Steps, Step{Site: j, Verb: "clear", Title: "clear old etcd data on " + j, Text: fmt.Sprintf("%s's old etcd data, %s, if it holds any: a removed member's, which etcd refuses to rejoin with. It is deleted only when it is empty or its write-ahead log names this cluster, %x; anything else refuses. Any etcd container of this deployment there is removed first: %s", j, apply.EtcdDataDir(p.dep()), p.clusterID, p.clearEtcdData())})
+		}
+		if !started[j] {
 			st.Steps = append(st.Steps, Step{Site: j, Verb: "add", Title: "add etcd learner " + j, Text: fmt.Sprintf("an etcd learner %s with peer URL %s, through %s", j, url, p.control)})
 		}
 		predicted[j] = url
@@ -153,12 +159,14 @@ func (p *Plan) buildEtcd(live []apply.EtcdMember) *Stage {
 // that stopped part way), and a learner an earlier run added that never
 // started, whose host may still hold a removed member's data. Each would
 // otherwise start as the removed member, which the cluster refuses
-// (apply.EmptyEtcdData says why deleting it loses nothing). An unstarted
-// learner has never connected, so its directory holds nothing of its own.
-// On a site that never ran etcd there is nothing to delete. A voter or a
-// learner that has started is never cleared: its data is its own. Before
-// anything is removed, sameCluster refuses a host whose etcd answers for
-// another cluster.
+// (apply.EmptyEtcdData says why deleting it loses nothing). Such a learner
+// may have received a snapshot or log entries before it stopped, and the
+// leader then remembers its progress, so it is not restarted from empty
+// data under the same ID: it is removed from etcd first and added again
+// under a new one. On a site that never ran etcd there is nothing to
+// delete. A voter or a learner that has started is never cleared: its data
+// is its own. Before anything is removed, checkEtcdData refuses unless the
+// data is shown to be this cluster's.
 //
 // The delete goes through rootlesskit because the files are expected to be
 // owned by a subordinate UID under rootless Docker. That is expected, not
@@ -167,36 +175,69 @@ func (p *Plan) clearEtcdData() string {
 	return apply.RemoveEtcdContainers(p.dep()) + " && { " + apply.EmptyEtcdData(p.dep()) + "; }"
 }
 
-// sameCluster refuses a joiner whose host runs an etcd that answers for a
-// different cluster than the control voter's, before its container is
-// removed or its data deleted: that data would be another cluster's, not a
-// removed member's, and clearing it is not site add's to decide. A removed
-// member's etcd that still answers reports the cluster it was removed from,
-// which is this one, and one that does not answer, the crash loop this
-// clear exists for, is no evidence of another cluster. An unreachable host
-// stops the join, since nothing about it is known.
+// checkEtcdData decides whether a joiner's etcd data may be deleted, before
+// any container is removed or anything deleted, and refuses unless there is
+// positive evidence the data is this cluster's or there is nothing to lose:
+// no directory, an empty one, or one without etcd's member directory, or a
+// write-ahead log whose metadata names this cluster's ID. It reads the data
+// on disk (apply.ReadEtcdData), whether or not an etcd runs there, so an
+// etcd of another cluster that was stopped, or lost its quorum and does not
+// answer, is still found. Anything else refuses: another cluster's ID, a
+// member directory with no log, a symbolic link, a directory or log that
+// cannot be read.
 //
-// It fails closed: with no cluster ID from the control voter there is
-// nothing to compare with, so the join is refused rather than the data
-// deleted unchecked. etcdctl's member list always carries the ID in its
-// header (etcd v3.5.16, etcdctl/ctlv3/command/printer_json.go), so a
-// missing one means an answer that cannot be trusted. A joiner's etcd that
-// answers without an ID is refused for the same reason.
-func (p *Plan) sameCluster(j string) error {
+// An etcd that runs there is asked too, as one more signal and never as
+// the one that permits the delete: one that answers for another cluster is
+// refused, and one that runs and cannot say which cluster it is in is
+// refused, since nothing it might be is known. A removed member restarting
+// in a loop is mostly not running, so a rerun reads its data on disk.
+//
+// It fails closed on its own reference as well: with no cluster ID from
+// the control voter there is nothing to compare with. etcdctl's member list
+// always carries the ID in its header (etcd v3.5.16,
+// etcdctl/ctlv3/command/printer_json.go).
+func (p *Plan) checkEtcdData(j string) error {
+	dir := apply.EtcdDataDir(p.dep())
 	if p.clusterID == 0 {
 		return fmt.Errorf("site add %s: %s's etcd answered without a cluster ID, so the cluster ID could not be read, and %s's etcd data cannot be checked against it before it is cleared. Run paisans doctor on %s and run site add again. Nothing was changed", p.Site, p.control, j, p.control)
 	}
+	unknown := func(what string) error {
+		return fmt.Errorf("site add %s: %s's etcd data, %s, %s, so it is not shown to be this cluster's and is not deleted. site add deletes a joiner's old etcd data only when there is none or its write-ahead log names this cluster, %x, read on %s. Read it on %s: if it is another cluster's, the host's owner moves it off the host, or the site is taken out of this deployment. Nothing on %s was changed", p.Site, j, dir, what, p.clusterID, p.control, j, j)
+	}
+	other := func(id uint64, how string) error {
+		return fmt.Errorf("site add %s: %s's etcd data, %s, belongs to etcd cluster %x (%s), and this deployment's etcd, read on %s, is cluster %x. site add deletes a joiner's old etcd data only when it is this cluster's. That data is another cluster's: the host's owner moves it off the host, or the site is taken out of this deployment. Nothing on %s was changed", p.Site, j, dir, id, how, p.control, p.clusterID, j)
+	}
 	c, running, err := apply.ReadEtcdCluster(p.transports[j], p.dep(), p.cfg.Sites[j].Address)
-	if errors.Is(err, apply.ErrUnreachable) {
-		return fmt.Errorf("%s: %w", j, err)
+	if err != nil {
+		return unknown(fmt.Sprintf("is used by an etcd that runs there and did not say which cluster it is in (%v); a removed member of this deployment restarting in a loop is read on disk once it is not running, so run site add again", err))
 	}
-	if err != nil || !running || c.ID == p.clusterID {
+	if running {
+		if c.ID == 0 {
+			return unknown("is used by an etcd that runs there and answered without a cluster ID")
+		}
+		if c.ID != p.clusterID {
+			return other(c.ID, "its running etcd answers for it")
+		}
+	}
+	data, err := apply.ReadEtcdData(p.transports[j], p.dep())
+	if err != nil {
+		return unknown(fmt.Sprintf("could not be read (%v)", err))
+	}
+	switch data.State {
+	case apply.EtcdDataAbsent, apply.EtcdDataEmpty, apply.EtcdDataNoMember:
 		return nil
+	case apply.EtcdDataWAL:
+		if data.ClusterID == p.clusterID {
+			return nil
+		}
+		return other(data.ClusterID, "its write-ahead log, "+data.WAL+", names it")
+	case apply.EtcdDataNoWAL:
+		return unknown("holds a member directory with no write-ahead log to say whose it is")
+	case apply.EtcdDataLink:
+		return unknown("is a symbolic link")
+	default:
+		return unknown("could not be listed")
 	}
-	if c.ID == 0 {
-		return fmt.Errorf("site add %s: %s's etcd answered without a cluster ID, so the cluster ID could not be read, and whether its data is this cluster's is not known. Run paisans doctor on %s and run site add again. Nothing on %s was changed", p.Site, j, j, j)
-	}
-	return fmt.Errorf("site add %s: %s's etcd answers for cluster %x, and %s's for cluster %x, so %s runs an etcd of another cluster. site add clears a joiner's etcd data before adding it, and that would delete the other cluster's. Run paisans doctor on %s; stop that etcd, or move what it holds, then run site add again. Nothing on %s was changed", p.Site, j, c.ID, p.control, p.clusterID, j, j, j)
 }
 
 // joinInitial is the --initial-cluster-state and --initial-cluster a joiner
@@ -277,8 +318,15 @@ func (p *Plan) joinEtcd(j string) error {
 		return nil
 	}
 	if m == nil || !m.Started() {
-		if err := p.sameCluster(j); err != nil {
+		if err := p.checkEtcdData(j); err != nil {
 			return err
+		}
+		if m != nil {
+			p.work("remove unstarted learner "+j).Detail("%s's learner %s, through %s", j, m.HexID(), p.control)
+			if out, err := control.Run(apply.Etcdctl(p.dep(), p.cfg.Sites[p.control].Address, "member remove "+m.HexID())); err != nil {
+				return fmt.Errorf("%s: removing %s's unstarted learner %s: %s", p.control, j, m.HexID(), lastLines(out, 3))
+			}
+			m = nil
 		}
 		p.work("clear old etcd data on "+j).Detail("%s, on %s", apply.EtcdDataDir(p.dep()), j)
 		if out, err := t.Run(p.clearEtcdData()); err != nil {
