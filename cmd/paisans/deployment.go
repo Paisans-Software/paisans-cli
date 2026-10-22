@@ -125,6 +125,71 @@ func anchorFor(l configstore.Local, root string) (configstore.Anchor, error) {
 	return a, nil
 }
 
+// heldAnchor adds the operator's keys to a, for pull and recover, when the
+// workstation records no signing key: the one keyPath names, a public key
+// file, or else every key the ssh-agent holds. Nothing is chosen among the
+// agent's keys, so nothing is guessed; the anchor's signer is recorded once
+// the command commits (recordAnchorKey). Only someone holding a key can sign
+// with it, and these keys come from this workstation alone, never from the
+// sites, so a version one of them signed is the operator's own. The result
+// maps each added fingerprint to its key line, and is empty when the
+// recorded key anchors.
+func heldAnchor(a configstore.Anchor, keyPath string) (configstore.Anchor, map[string]string, error) {
+	lines := map[string]string{}
+	var named string
+	if keyPath != "" {
+		data, err := os.ReadFile(keyPath)
+		if err != nil {
+			return a, nil, &ui.Problem{Hint: "cannot read --key", Explain: errLine(err) + ".", Cause: err}
+		}
+		k, opts, err := config.ParseKeyLine(strings.TrimSpace(string(data)))
+		if err != nil || len(opts) > 0 {
+			return a, nil, &ui.Problem{Hint: "--key must name a public key file", Explain: "Give the .pub file of the key that signed the deployment's versions, Eg: ~/.ssh/id_ed25519.pub."}
+		}
+		named = k.Fingerprint
+		if len(a.Signers) > 0 && !slices.Contains(a.Signers, named) {
+			return a, nil, &ui.Problem{Hint: "--key differs from the recorded signing key", Explain: fmt.Sprintf("This workstation signs with %s, recorded in .paisans/signing-key, and trust starts from it. Drop --key, or remove that file if the record is wrong.", a.Signers[0])}
+		}
+		lines[named] = k.Line
+	}
+	if len(a.Signers) > 0 {
+		return a, nil, nil
+	}
+	if named == "" {
+		for _, line := range agentKeys() {
+			if k, opts, err := config.ParseKeyLine(line); err == nil && len(opts) == 0 {
+				lines[k.Fingerprint] = k.Line
+			}
+		}
+	}
+	a.Signers = slices.Sorted(maps.Keys(lines))
+	return a, lines, nil
+}
+
+// recordAnchorKey records, as the signing key, the key in lines (from
+// heldAnchor) that signed the version g's trust starts from, so later
+// publishes sign with the key that signed the history. A pinned root that
+// anchored alone, or a fork, records nothing.
+func recordAnchorKey(l configstore.Local, g configstore.Gathered, lines map[string]string) error {
+	if g.Verdict.AnchorAt == "" || len(lines) == 0 {
+		return nil
+	}
+	line, ok := lines[g.Versions[g.Verdict.AnchorAt].SignerFP]
+	if !ok {
+		return nil
+	}
+	return l.SetSigningKey(line)
+}
+
+// keyHelp is the --key flag's help for pull and recover.
+const keyHelp = "a public key file (.pub) to start trust from, when .paisans/signing-key records none; the ssh-agent's keys are used without it"
+
+// noAnchorHeld is what a pull or recover refusal for a missing anchor says to
+// do, with otherwise added for a workstation that has files.
+func noAnchorHeld(otherwise string) string {
+	return "Load the key that signed the deployment's versions with ssh-add, or name its public key with --key <path.pub>, or pin the first version you trust with --root <sha>" + otherwise + "."
+}
+
 func shaShape(s string) bool {
 	if len(s) != 40 && len(s) != 64 {
 		return false
@@ -196,7 +261,11 @@ func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transpo
 		}
 		return g, err
 	}
-	s.Done(fmt.Sprintf("%d of %d sites answered directly", len(g.Direct()), configured))
+	done := fmt.Sprintf("%d of %d sites answered directly", len(g.Direct()), configured)
+	if at := g.Verdict.AnchorAt; at != "" && slices.Contains(a.Signers, g.Versions[at].SignerFP) {
+		done += ", anchored on " + g.Versions[at].SignerFP
+	}
+	s.Done(done)
 	// A stack of one site has no peers, so a sync would bring nothing.
 	if !m.execute && configured > 1 {
 		r.Note("the sites were not asked to sync with their peers first", "A dry run changes no site. --execute will start each site's sync before reading it, so versions only its peers hold arrive too.")
@@ -463,6 +532,7 @@ func runDeploymentPull(args []string, stdin io.Reader, stdout io.Writer) error {
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, configHelp)
 	root := fs.String("root", "", "pin this version as the root, the version trust starts from")
+	keyPath := fs.String("key", "", keyHelp)
 	execute := fs.Bool("execute", false, "write the sites' newest version to the local files")
 	answers := yesFlag(fs)
 	if err := fs.Parse(args); err != nil {
@@ -487,10 +557,15 @@ func runDeploymentPull(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	a, held, err := heldAnchor(a, *keyPath)
+	if err != nil {
+		return err
+	}
 	r := reporter()
 	r.Section("pull into " + *configPath)
 	sites := configTransports(cfg)
-	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, gatherMode{execute: *execute, answers: ans}, stdin, stdout)
+	m := gatherMode{execute: *execute, answers: ans, noAnchor: noAnchorHeld(", or run paisans operator register to sign the version you hold")}
+	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, m, stdin, stdout)
 	if err != nil {
 		return err
 	}
@@ -530,7 +605,7 @@ func runDeploymentPull(args []string, stdin io.Reader, stdout io.Writer) error {
 	switch {
 	case base == head:
 		if *execute {
-			if err := recordPull(l, g, *root); err != nil {
+			if err := recordPull(l, g, *root, held); err != nil {
 				return err
 			}
 		}
@@ -541,7 +616,7 @@ func runDeploymentPull(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 		return nil
 	case edited:
-		if handled, err := pullMergingSecrets(r, l, g, cfg.ID, head, base, *root, len(sites), localFiles, headFiles, *execute, ans, stdin, stdout); handled {
+		if handled, err := pullMergingSecrets(r, l, g, cfg.ID, head, base, *root, held, len(sites), localFiles, headFiles, *execute, ans, stdin, stdout); handled {
 			return err
 		}
 		return pullOverEdits(r, l, g, head, base, localFiles, headFiles, *execute, stdout)
@@ -559,7 +634,7 @@ func runDeploymentPull(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err := l.Checkout(head); err != nil {
 		return err
 	}
-	if err := recordPull(l, g, *root); err != nil {
+	if err := recordPull(l, g, *root, held); err != nil {
 		return err
 	}
 	r.Result("moved the local files to %s", describe(g, head))
@@ -567,16 +642,19 @@ func runDeploymentPull(args []string, stdin io.Reader, stdout io.Writer) error {
 }
 
 // recordPull is what a pull with --execute records once it has passed its
-// last confirmation: the change to the seen record its gather carries, and
-// root, when given, as the pinned root.
-func recordPull(l configstore.Local, g configstore.Gathered, root string) error {
+// last confirmation: the change to the seen record its gather carries,
+// root, when given, as the pinned root, and the key of held (heldAnchor's)
+// that anchored the gather as the signing key.
+func recordPull(l configstore.Local, g configstore.Gathered, root string, held map[string]string) error {
 	if err := l.RecordSeen(g); err != nil {
 		return err
 	}
 	if root != "" {
-		return l.SetRoot(root)
+		if err := l.SetRoot(root); err != nil {
+			return err
+		}
 	}
-	return nil
+	return recordAnchorKey(l, g, held)
 }
 
 // pullOverEdits refuses a pull that would overwrite local edits made on an
@@ -798,6 +876,7 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 	var from pathList
 	fs.Var(&from, "from", "a host of the deployment to recover from, user@host[:port] or an alias of your ssh config (repeatable)")
 	root := fs.String("root", "", "pin this version as the root, the version trust starts from")
+	keyPath := fs.String("key", "", keyHelp)
 	id := fs.String("id", "", "the deployment's id, when the hosts' logins belong to more than one")
 	execute := fs.Bool("execute", false, "write the recovered files and state")
 	answers := yesFlag(fs)
@@ -825,6 +904,10 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 	if err != nil {
 		return err
 	}
+	a, held, err := heldAnchor(a, *keyPath)
+	if err != nil {
+		return err
+	}
 	r := reporter()
 	r.Section("recover into " + l.Dir)
 	var dests []config.Destination
@@ -839,7 +922,8 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 	if err != nil {
 		return err
 	}
-	g, err := gatherAt(r, l, hosts, len(hosts), deploymentID, a, gatherMode{execute: *execute, answers: ans}, stdin, stdout)
+	noAnchor := noAnchorHeld("")
+	g, err := gatherAt(r, l, hosts, len(hosts), deploymentID, a, gatherMode{execute: *execute, answers: ans, noAnchor: noAnchor}, stdin, stdout)
 	if err != nil {
 		return err
 	}
@@ -854,7 +938,7 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 		return err
 	}
 	r.Section("every site the newest versions name")
-	g, err = gatherAt(r, l, sites, len(sites), deploymentID, a, gatherMode{execute: *execute, accepted: g.Seen, answers: ans}, stdin, stdout)
+	g, err = gatherAt(r, l, sites, len(sites), deploymentID, a, gatherMode{execute: *execute, accepted: g.Seen, answers: ans, noAnchor: noAnchor}, stdin, stdout)
 	if err != nil {
 		return err
 	}
@@ -889,7 +973,7 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 	if err := l.Checkout(head); err != nil {
 		return err
 	}
-	if err := recordPull(l, g, pin); err != nil {
+	if err := recordPull(l, g, pin, held); err != nil {
 		return err
 	}
 	if files, err := l.Files(); err == nil {

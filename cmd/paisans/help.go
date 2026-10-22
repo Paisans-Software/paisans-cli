@@ -355,9 +355,9 @@ var helpCommands = []helpCommand{
 	{
 		name:    "deployment pull",
 		summary: "Move the local files to the sites' newest version.",
-		usage:   []string{"paisans deployment pull [--config " + config.FileName + "] [--root <sha>] [--execute] [--yes]"},
+		usage:   []string{"paisans deployment pull [--config " + config.FileName + "] [--root <sha>] [--key <path.pub>] [--execute] [--yes]"},
 		detail: "Move the local files to the sites' newest version, or, over local edits, show the difference and put its files in .paisans/incoming/." +
-			configTrust,
+			configTrust + "\n\n" + agentTrust,
 	},
 	{
 		name:    "deployment log",
@@ -368,10 +368,10 @@ var helpCommands = []helpCommand{
 	{
 		name:    "deployment recover",
 		summary: "Write the newest configuration onto an empty directory.",
-		usage:   []string{"paisans deployment recover --from <user@host[:port] or ssh alias>... [--root <sha>] [--id <id>]\n                       [--config " + config.FileName + "] [--execute] [--yes]"},
+		usage:   []string{"paisans deployment recover --from <user@host[:port] or ssh alias>... [--root <sha>] [--key <path.pub>] [--id <id>]\n                       [--config " + config.FileName + "] [--execute] [--yes]"},
 		detail: "Onto an empty directory, gather from the --from hosts and every site the trusted heads name, and write the head's files, or each head's in .paisans/incoming/ with a fork. " +
 			"With --execute, the recovered version is also saved to this workstation's saved deployments (see deployment list)." +
-			configTrust + "\n\n" + sshAliasTopic,
+			configTrust + "\n\n" + agentTrust + "\n\n" + sshAliasTopic,
 	},
 	{
 		name:    "deployment list",
@@ -502,6 +502,12 @@ const configTrust = "\n\n" +
 	"With --execute, pull, recover, a publish of the first version, apply and operator register ask for the word partial at a terminal when no more than half the sites answered directly; publish, pull, recover, apply and operator register ask for rollback when the newest version is older than one seen here before, and log only warns. " +
 	"--yes types partial and rollback for each command but log, which asks nothing. " + yesTopic + " " +
 	"With --execute each site first syncs with its peers; without it, and in log, no site is changed and only .paisans/ here is written."
+
+// agentTrust is how pull and recover find the operator's key on a
+// workstation that records none.
+const agentTrust = "With no key recorded in .paisans/signing-key, trust starts from the newest version signed by any key your ssh-agent holds, or by the public key --key names, which the agent need not hold. " +
+	"A pinned root still holds: that version must descend from it. Two of your keys that signed heads that diverge are a fork. " +
+	"With --execute the key that signed that version is recorded in .paisans/signing-key. With no such version and no root, load the key with ssh-add, name it with --key, or pin --root <sha>."
 
 // executeTopic is `paisans help execute`: which commands reach a host, and
 // what --execute lets each of them change.
