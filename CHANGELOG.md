@@ -12,6 +12,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Fixed
 
+- `doctor`'s self-check reports a 443 answering in plain HTTP or another protocol than TLS as another server holding the port, and advises a refused connection apart from a timeout.
 - `deployment recover --from` takes any login that reaches the host, the owner's too, and reaches it again as the deployment's user its admission record names, so a recovery needs no name the lost workstation held.
 
 ## [0.3.0-rc.5] - 2026-10-19

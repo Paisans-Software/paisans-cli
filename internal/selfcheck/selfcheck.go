@@ -127,12 +127,28 @@ func (c *Conflict) Error() string {
 	return fmt.Sprintf("%d on %s answers, but not as this deployment: %s", c.Port, c.Site, c.Detail)
 }
 
+// Silence is how a port gave no answer, which points its advice: a refusal
+// at whatever holds the address, a timeout at whatever lies on the way.
+type Silence int
+
+const (
+	// Unexplained is a failure the check cannot place.
+	Unexplained Silence = iota
+	// Refused is a connection refused: nothing listens on the port at that
+	// address, or something on the way rejects the connection.
+	Refused
+	// TimedOut is a request nothing answered in time: something on the way
+	// dropped the connection, or a listener accepted it and never spoke.
+	TimedOut
+)
+
 // Unanswered is a port that gave no answer at all: URL asked through
-// Address, and why the request failed.
+// Address, why the request failed, and how.
 type Unanswered struct {
 	Port               int
 	Site, URL, Address string
 	Err                error
+	Why                Silence
 }
 
 func (u *Unanswered) Error() string {
@@ -162,9 +178,37 @@ func notYet(err error) bool {
 	return errors.As(err, &ne) && ne.Timeout()
 }
 
+// silence is how err gave no answer.
+func silence(err error) Silence {
+	var ne net.Error
+	switch {
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return Refused
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &ne) && ne.Timeout():
+		return TimedOut
+	}
+	return Unexplained
+}
+
+// notTLS is what answered on the TLS port when it accepted the connection
+// and answered in something other than TLS: another server, since this
+// deployment's Caddy speaks TLS on 443 even before it holds a certificate.
+// net/http reports an HTTP answer as ErrSchemeMismatch, and crypto/tls any
+// other as a RecordHeaderError.
+func notTLS(err error) (string, bool) {
+	var header tls.RecordHeaderError
+	switch {
+	case errors.Is(err, http.ErrSchemeMismatch):
+		return "plain HTTP rather than TLS", true
+	case errors.As(err, &header):
+		return "a protocol other than TLS", true
+	}
+	return "", false
+}
+
 // Check asks t on 443 for the token, waiting up to p.Wait while nothing
 // answers, then on 80 for the redirect to the same URL on HTTPS. Any other
-// answer is a Conflict.
+// answer is a Conflict, and so is a 443 that answers in anything but TLS.
 func Check(ctx context.Context, p Probe, t Target) error {
 	path, want := Path(t.Deployment), Body(t.Deployment)
 	deadline := p.Now().Add(p.Wait)
@@ -177,15 +221,18 @@ func Check(ctx context.Context, p Probe, t Target) error {
 		}
 		p.Sleep(5 * time.Second)
 	}
+	if detail, ok := notTLS(err); ok {
+		return &Conflict{Port: 443, Site: t.Site, Detail: detail}
+	}
 	if err != nil {
-		return &Unanswered{Port: 443, Site: t.Site, URL: "https://" + t.Host + path, Address: t.Address, Err: err}
+		return &Unanswered{Port: 443, Site: t.Site, URL: "https://" + t.Host + path, Address: t.Address, Err: err, Why: silence(err)}
 	}
 	if a.Status != http.StatusOK || strings.TrimSpace(a.Body) != want {
 		return &Conflict{Port: 443, Site: t.Site, Detail: describe(a)}
 	}
 	a, err = p.Fetch(ctx, "http", t.Address, t.Host, path)
 	if err != nil {
-		return &Unanswered{Port: 80, Site: t.Site, URL: "http://" + t.Host + path, Address: t.Address, Err: err}
+		return &Unanswered{Port: 80, Site: t.Site, URL: "http://" + t.Host + path, Address: t.Address, Err: err, Why: silence(err)}
 	}
 	if a.Status < 300 || a.Status > 399 || a.Location != "https://"+t.Host+path {
 		return &Conflict{Port: 80, Site: t.Site, Detail: describe(a) + ", where this deployment's Caddy redirects to https://" + t.Host + path}
