@@ -163,43 +163,111 @@ func TestAFreshJoinerIsClearedHarmlessly(t *testing.T) {
 	}
 }
 
-// A site already in etcd's member list is never cleared: a voter, nor a
-// learner a stopped run added. Its data is its own.
-func TestAMemberInTheListIsNeverCleared(t *testing.T) {
+// A learner an earlier run added and that never started, the state a
+// rejoin left before site add cleared old data, is cleared before it is
+// started: it is not added again, and stage 3 passes.
+func TestAnUnstartedLearnerFromAnEarlierRunIsCleared(t *testing.T) {
 	defer siteadd.SetFast()()
 	w := removedWitnessWorld(t)
-	w.failOnce = "up -d etcd"
-	if err := siteadd.Execute(build(t, w)); err == nil || !strings.Contains(err.Error(), "stage 3") {
-		t.Fatalf("want a stage 3 failure, got %v", err)
+	w.nextID++
+	w.etcd = append(w.etcd, apply.EtcdMember{ID: w.nextID, PeerURLs: []string{"http://10.44.0.3:2380"}, IsLearner: true})
+	p := build(t, w)
+	if !hasStep(p, 3, "vm", "clear") || hasStep(p, 3, "vm", "add") {
+		t.Errorf("vm, an unstarted learner, is not cleared, or is added again: %v", steps(p, 3))
+	}
+	if err := siteadd.Execute(p); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(w.voters(), ","); got != "home-a,home-b,vm" {
+		t.Errorf("voters %s", got)
+	}
+	vm := w.hosts["vm"]
+	cleared, started := ranIndex(vm, "rootlesskit rm -rf"), ranIndex(vm, "up -d etcd")
+	if cleared < 0 || started < cleared {
+		t.Errorf("the data was cleared at %d and etcd started at %d", cleared, started)
+	}
+	if w.hosts["home-a"].ran("member add vm ") != 0 {
+		t.Error("vm was added to etcd again")
+	}
+}
+
+// A voter, and a learner that has started, are never cleared: their data is
+// their own. A run that stopped at the promotion resumes with vm a started
+// learner, and nothing in its data directory or home-a's is touched.
+func TestAVoterOrAStartedLearnerIsNeverCleared(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := newWorld(t)
+	w.promoteRefusals = siteadd.PromoteAttempts()
+	if err := siteadd.Execute(build(t, w)); err == nil || !strings.Contains(err.Error(), "promote") {
+		t.Fatalf("want a stop at the promotion, got %v", err)
 	}
 	vm := w.hosts["vm"]
 	if vm.ran("rootlesskit rm -rf") != 1 {
 		t.Fatalf("vm was cleared %d times before its add", vm.ran("rootlesskit rm -rf"))
 	}
-	// What the resumed run must leave alone: anything in the data directory
-	// of vm, a learner now, and home-a's, a voter's.
 	vm.files[etcdData+"/.marker"] = "kept"
 	w.hosts["home-a"].files[etcdData+"/.marker"] = "kept"
 
 	p := build(t, w)
 	for _, site := range []string{"home-a", "vm"} {
 		if hasStep(p, 3, site, "clear") {
-			t.Errorf("%s, in the member list, is planned a clear: %v", site, steps(p, 3))
+			t.Errorf("%s, a voter or a started learner, is planned a clear: %v", site, steps(p, 3))
 		}
-	}
-	if !hasStep(p, 3, "home-b", "clear") {
-		t.Errorf("home-b, not in the member list, has no clear: %v", steps(p, 3))
 	}
 	if err := siteadd.Execute(p); err != nil {
 		t.Fatal(err)
 	}
 	if vm.ran("rootlesskit rm -rf") != 1 {
-		t.Errorf("vm, a learner on the resumed run, was cleared again")
+		t.Error("vm, a started learner on the resumed run, was cleared again")
 	}
 	for _, site := range []string{"home-a", "vm"} {
 		if w.hosts[site].files[etcdData+"/.marker"] != "kept" {
 			t.Errorf("%s's etcd data was touched", site)
 		}
+	}
+	if got := strings.Join(w.voters(), ","); got != "home-a,home-b,vm" {
+		t.Errorf("voters %s", got)
+	}
+}
+
+// A joiner whose host runs an etcd answering for another cluster is refused
+// when the join is planned, naming both clusters, and nothing on any host is
+// removed or deleted.
+func TestAJoinerRunningAnotherClustersEtcdIsRefused(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := removedWitnessWorld(t)
+	w.clusterID = 0xc1a5
+	w.otherCluster = map[string]uint64{"vm": 0xbeef}
+	_, err := siteadd.Build(w.cfg, w.secrets, "home-b", w.transports())
+	if err == nil {
+		t.Fatal("a joiner on another cluster's etcd was planned")
+	}
+	for _, want := range []string{"vm's etcd answers for cluster beef", "home-a's for cluster c1a5", "paisans doctor on vm", "Nothing on vm was changed"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal lacks %q: %v", want, err)
+		}
+	}
+	for name, h := range w.hosts {
+		if h.ran("rootlesskit rm -rf") != 0 || h.ran("docker stop") != 0 {
+			t.Errorf("%s had a container removed or data deleted", name)
+		}
+	}
+	if len(w.hosts["vm"].files[etcdDB]) == 0 {
+		t.Error("vm's etcd data is gone")
+	}
+}
+
+// A removed member's etcd that still answers reports the cluster it was
+// removed from, this one, and is cleared as any other.
+func TestAJoinerAnsweringForThisClusterIsCleared(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := removedWitnessWorld(t)
+	w.clusterID = 0xc1a5
+	w.otherCluster = map[string]uint64{"vm": 0xc1a5}
+	p := build(t, w)
+	delete(w.otherCluster, "vm")
+	if err := siteadd.Execute(p); err != nil {
+		t.Fatal(err)
 	}
 	if got := strings.Join(w.voters(), ","); got != "home-a,home-b,vm" {
 		t.Errorf("voters %s", got)

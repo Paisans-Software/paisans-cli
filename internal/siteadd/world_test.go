@@ -80,6 +80,12 @@ type world struct {
 	// unhealthy names an app stack whose container has exited, once it has
 	// been started.
 	unhealthy string
+	// clusterID is the cluster ID every etcd's member list reports in its
+	// header, none when 0.
+	clusterID uint64
+	// otherCluster is, by site, the ID of another cluster whose etcd runs on
+	// that host and answers for it.
+	otherCluster map[string]uint64
 }
 
 type host struct {
@@ -115,9 +121,6 @@ func (h *host) RunInput(command, stdin string) (string, error) {
 	return out, err
 }
 
-// wgHelper is the start of every command sent to the WireGuard helper for
-// the fixture's interface, and wgInstalled is where its put installs the
-// mesh file on a real host.
 // etcdData is a host's etcd data directory, and etcdDB a file etcd keeps
 // in it once its member has started.
 const (
@@ -125,6 +128,9 @@ const (
 	etcdDB   = etcdData + "/member/snap/db"
 )
 
+// wgHelper is the start of every command sent to the WireGuard helper for
+// the fixture's interface, and wgInstalled is where its put installs the
+// mesh file on a real host.
 const (
 	wgHelper    = "sudo -n '/usr/local/libexec/paisans/wg-psns-f2a9' "
 	wgInstalled = "/etc/wireguard/psns-f2a9.conf"
@@ -261,6 +267,10 @@ func (h *host) Run(command string) (string, error) {
 		}
 		return w.handshakes(h), nil
 	case strings.Contains(command, "--quiet etcd"):
+		if id, ok := w.otherCluster[h.name]; ok {
+			data, _ := json.Marshal(map[string]any{"header": map[string]any{"cluster_id": id}, "members": []apply.EtcdMember{{ID: 0xabc, Name: h.name, PeerURLs: []string{render.EtcdPeerURL(w.cfg.Sites[h.name].Address)}}}})
+			return string(data), nil
+		}
 		if !w.running[h.name] {
 			return "__PAISANS_NO_ETCD__\n", nil
 		}
@@ -428,7 +438,11 @@ func (w *world) membership() string {
 }
 
 func (w *world) memberList() string {
-	data, _ := json.Marshal(map[string]any{"header": map[string]any{}, "members": w.etcd})
+	header := map[string]any{}
+	if w.clusterID != 0 {
+		header["cluster_id"] = w.clusterID
+	}
+	data, _ := json.Marshal(map[string]any{"header": header, "members": w.etcd})
 	return string(data)
 }
 

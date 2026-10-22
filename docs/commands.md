@@ -1322,10 +1322,12 @@ stack. A witness joining in the same change, whether an existing site gaining th
 role or a new host holding it, joins etcd first, as a learner, in the same
 stage, and preflight checks a new witness host as it checks the new site.
 Refuses a witness given on its own: it joins through the `site add` of the
-data site joining with it. A joiner etcd does not list, such as a site whose
-member an earlier removal took out, has its old etcd data,
-`/srv/paisans/<token>/infra/etcd`, deleted before it is added, and the plan
-names it: etcd refuses to rejoin with a removed member's data.
+data site joining with it. A joiner whose member has not started, such as a
+site whose member an earlier removal took out, has its old etcd data,
+`/srv/paisans/<token>/infra/etcd`, deleted before its etcd starts, and the
+plan names it: etcd refuses to rejoin with a removed member's data. A joiner
+whose host runs an etcd of another cluster is refused, and nothing is
+deleted.
 
 ```
 paisans site add home-b             # every stage, its steps and its gate

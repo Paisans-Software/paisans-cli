@@ -8950,7 +8950,7 @@ skipped and why.
 | Stage | What runs | Gate |
 |-------|-----------|------|
 | 2. Mesh | each site's `psns-<token>.conf`, as a scoped `deployment apply`, then the helper's `sync` (the new site's interface is started with its `up`) | a handshake younger than two minutes for every pair, read on both ends, and a ping of the new mesh address from every site |
-| 3. etcd | for each joiner, every witness first: a joiner etcd does not list has any etcd container of the deployment removed and its data directory, `infra/etcd`, emptied (below, *A joiner starts from an empty data directory*); `member add --learner`, its compose file, record and every `env_file` its infrastructure stack names written (`patroni.env`, `caddy/caddy.env`, `heartbeat/heartbeat.env`), `up -d etcd` alone, `member promote` retried until etcd accepts it | `endpoint health --cluster` all healthy, and the voters are exactly `etcd.members` |
+| 3. etcd | for each joiner, every witness first: a joiner whose member has not started, one etcd does not list or a learner that never started, has any etcd container of the deployment removed and its data directory, `infra/etcd`, emptied (below, *A joiner starts from an empty data directory*); `member add --learner` unless etcd lists it, its compose file, record and every `env_file` its infrastructure stack names written (`patroni.env`, `caddy/caddy.env`, `heartbeat/heartbeat.env`), `up -d etcd` alone, `member promote` retried until etcd accepts it | `endpoint health --cluster` all healthy, and the voters are exactly `etcd.members` |
 | 4. Replica | the new site's remaining files by a whole `deployment apply`, then `up -d`, which starts Patroni beside the running etcd | the member `streaming`, its replay lag zero or falling over three samples five seconds apart |
 | 5. Cluster configuration | `patronictl edit-config --force -q -s synchronous_mode=true -s synchronous_mode_strict=<value>` when the live values differ | a member with the role `Sync Standby` |
 | 6. HAProxy | `haproxy.cfg` as a scoped `deployment apply`; the site's cluster database apps stopped, HAProxy alone restarted, the apps started and each through `deployment apply`'s health gate | the statistics list every cluster site, the leader `UP` and every replica `DOWN` |
@@ -8973,15 +8973,20 @@ skips bootstrap when the member directory exists). A site whose member left
 keeps `/srv/paisans/<token>/infra/etcd` on its host: a witness that `site
 remove` took out of etcd, a site taken out with `site remove --host-gone` whose
 host comes back, or a removal that stopped part way. Started from that data,
-its new learner would be the removed member, exit, and restart in a loop. So
-before a joiner that etcd does not list is added, its data directory is
-emptied, and the directory itself kept for the container to mount. Its data is
+its new learner would be the removed member, exit, and restart in a loop, and
+it stays in etcd's member list as a learner that never started. So before a
+joiner whose member has not started is added, or started when an earlier run
+added it, its data directory is emptied, and the directory itself kept for the
+container to mount. A learner that never started has never connected, so it
+holds nothing of its own. Its data is
 deleted rather than kept, because it holds only Patroni's store, runtime state
 (the leader lock, sync state, the `initialize` key and the dynamic
 configuration) that every remaining member also holds; it is not operator data,
 so `--delete-data` does not govern it. A site that never ran etcd has nothing
-to delete. A site etcd lists, a voter or a learner a stopped run added, is
-never cleared. The files are the etcd container's, which under rootless Docker
+to delete. A voter, or a learner that has started, is never cleared. Before
+anything is removed, `site add` refuses a joiner whose host runs an etcd that
+answers for a different cluster than the voter it works through, naming both
+cluster IDs: that data is another cluster's, not a removed member's. The files are the etcd container's, which under rootless Docker
 are expected, not yet observed, to be owned by a subordinate UID, so each is
 deleted through `rootlesskit`, as `site remove` deletes its own. Such a joiner
 is also given the membership as it stands, not the flags its host records

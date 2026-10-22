@@ -1,6 +1,7 @@
 package siteadd
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -28,10 +29,11 @@ func (p *Plan) probeEtcd() ([]apply.EtcdMember, error) {
 	}
 	order = append(order, p.Site)
 	for _, name := range order {
-		members, running, err := apply.ReadEtcdMembers(p.transports[name], p.dep(), p.cfg.Sites[name].Address)
+		cluster, running, err := apply.ReadEtcdCluster(p.transports[name], p.dep(), p.cfg.Sites[name].Address)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}
+		members := cluster.Members
 		if !running {
 			continue
 		}
@@ -50,6 +52,7 @@ func (p *Plan) probeEtcd() ([]apply.EtcdMember, error) {
 			}
 		}
 		p.control = name
+		p.clusterID = cluster.ID
 		return members, nil
 	}
 	return nil, fmt.Errorf("site add %s: no etcd answers as a voter on any of %s. site add grows a running cluster; a deployment not started yet is started with `paisans deployment apply`", p.Site, strings.Join(order, ", "))
@@ -99,16 +102,20 @@ func (p *Plan) buildEtcd(live []apply.EtcdMember) *Stage {
 	}
 	predicted := map[string]string{}
 	present := map[string]bool{}
+	started := map[string]bool{}
 	for _, m := range live {
 		site := apply.EtcdMemberSite(p.cfg, m)
 		predicted[site] = peerURL(m)
 		present[site] = true
+		started[site] = m.Started()
 	}
 	joiners := p.joiners(live)
 	for _, j := range joiners {
 		url := render.EtcdPeerURL(p.cfg.Sites[j].Address)
-		if !present[j] {
+		if !started[j] {
 			st.Steps = append(st.Steps, Step{Site: j, Verb: "clear", Title: "clear old etcd data on " + j, Text: fmt.Sprintf("%s's old etcd data, %s, if it holds any: a removed member's, which etcd refuses to rejoin with. Any etcd container of this deployment there is removed first: %s", j, apply.EtcdDataDir(p.dep()), p.clearEtcdData())})
+		}
+		if !present[j] {
 			st.Steps = append(st.Steps, Step{Site: j, Verb: "add", Title: "add etcd learner " + j, Text: fmt.Sprintf("an etcd learner %s with peer URL %s, through %s", j, url, p.control)})
 		}
 		predicted[j] = url
@@ -140,20 +147,46 @@ func (p *Plan) buildEtcd(live []apply.EtcdMember) *Stage {
 // directory while it is emptied. site add starts the container again,
 // alone, once the learner is added.
 //
-// It runs for every joiner not in etcd's member list, however its host came
-// to hold data: a member removed by site remove, one taken out with
-// --host-gone whose host comes back, or a removal that stopped part way.
-// Each would otherwise start as the removed member, which the cluster
-// refuses (apply.EmptyEtcdData says why deleting it loses nothing). On a site
-// that never ran etcd there is nothing to delete. A site in the member list,
-// a voter or a learner an earlier run added, is never cleared: its data is
-// its own.
+// It runs for every joiner whose member has not started: one not in etcd's
+// member list, however its host came to hold data (a member removed by site
+// remove, one taken out with --host-gone whose host comes back, or a removal
+// that stopped part way), and a learner an earlier run added that never
+// started, whose host may still hold a removed member's data. Each would
+// otherwise start as the removed member, which the cluster refuses
+// (apply.EmptyEtcdData says why deleting it loses nothing). An unstarted
+// learner has never connected, so its directory holds nothing of its own.
+// On a site that never ran etcd there is nothing to delete. A voter or a
+// learner that has started is never cleared: its data is its own. Before
+// anything is removed, sameCluster refuses a host whose etcd answers for
+// another cluster.
 //
 // The delete goes through rootlesskit because the files are expected to be
 // owned by a subordinate UID under rootless Docker. That is expected, not
 // observed: it is confirmed on a host before this comment says otherwise.
 func (p *Plan) clearEtcdData() string {
 	return apply.RemoveEtcdContainers(p.dep()) + " && { " + apply.EmptyEtcdData(p.dep()) + "; }"
+}
+
+// sameCluster refuses a joiner whose host runs an etcd that answers for a
+// different cluster than the control voter's, before its container is
+// removed or its data deleted: that data would be another cluster's, not a
+// removed member's, and clearing it is not site add's to decide. A removed
+// member's etcd that still answers reports the cluster it was removed from,
+// which is this one, and one that does not answer, the crash loop this
+// clear exists for, is no evidence of another cluster. An unreachable host
+// stops the join, since nothing about it is known.
+func (p *Plan) sameCluster(j string) error {
+	if p.clusterID == 0 {
+		return nil
+	}
+	c, running, err := apply.ReadEtcdCluster(p.transports[j], p.dep(), p.cfg.Sites[j].Address)
+	if errors.Is(err, apply.ErrUnreachable) {
+		return fmt.Errorf("%s: %w", j, err)
+	}
+	if err != nil || !running || c.ID == 0 || c.ID == p.clusterID {
+		return nil
+	}
+	return fmt.Errorf("site add %s: %s's etcd answers for cluster %x, and %s's for cluster %x, so %s runs an etcd of another cluster. site add clears a joiner's etcd data before adding it, and that would delete the other cluster's. Run paisans doctor on %s; stop that etcd, or move what it holds, then run site add again. Nothing on %s was changed", p.Site, j, c.ID, p.control, p.clusterID, j, j, j)
 }
 
 // joinInitial is the --initial-cluster-state and --initial-cluster a joiner
@@ -233,11 +266,16 @@ func (p *Plan) joinEtcd(j string) error {
 	if m != nil && !m.IsLearner {
 		return nil
 	}
-	if m == nil {
+	if m == nil || !m.Started() {
+		if err := p.sameCluster(j); err != nil {
+			return err
+		}
 		p.work("clear old etcd data on "+j).Detail("%s, on %s", apply.EtcdDataDir(p.dep()), j)
 		if out, err := t.Run(p.clearEtcdData()); err != nil {
-			return fmt.Errorf("%s: clearing its old etcd data, %s: %w: %s. It was not added to etcd", j, apply.EtcdDataDir(p.dep()), err, lastLines(out, 3))
+			return fmt.Errorf("%s: clearing its old etcd data, %s: %w: %s. Its etcd was not started", j, apply.EtcdDataDir(p.dep()), err, lastLines(out, 3))
 		}
+	}
+	if m == nil {
 		url := render.EtcdPeerURL(p.cfg.Sites[j].Address)
 		p.work("add etcd learner "+j).Detail("%s as an etcd learner, through %s", j, p.control)
 		// etcd's strict reconfiguration check refuses a membership change

@@ -105,6 +105,9 @@ type Plan struct {
 	// control is a site whose etcd is a running voter, where every etcdctl
 	// command runs.
 	control string
+	// clusterID is the ID of the cluster control's etcd answers for, 0 when
+	// its answer carries none.
+	clusterID uint64
 	// patroni is a site whose Patroni answers, where every patronictl
 	// command runs.
 	patroni string
@@ -240,6 +243,15 @@ func Build(cfg *config.Config, secrets *config.Secrets, newSite string, transpor
 	for name := range p.initial {
 		if !startedMember(p.cfg, live, name) {
 			delete(p.initial, name)
+		}
+	}
+	// Stage 3 clears every joiner whose member has not started; a host whose
+	// etcd belongs to another cluster is refused before any stage runs.
+	for _, j := range p.joiners(live) {
+		if !startedMember(p.cfg, live, j) {
+			if err := p.sameCluster(j); err != nil {
+				return nil, err
+			}
 		}
 	}
 
