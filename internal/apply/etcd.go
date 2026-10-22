@@ -170,7 +170,10 @@ func ParseEtcdMembers(out string) ([]EtcdMember, error) {
 
 // ParseEtcdCluster reads `etcdctl member list -w json`, header and members
 // (etcd v3.5.16, etcdctl/ctlv3/command/printer_json.go, which marshals the
-// MemberListResponse whole: header.cluster_id is the cluster's ID).
+// MemberListResponse whole, on one line: header.cluster_id is the cluster's
+// ID). The transport carries stderr with stdout, and etcdctl's client logs
+// warnings there as JSON lines of their own (Eg: a retried request), so the
+// answer is the last line that starts as the response does.
 func ParseEtcdCluster(out string) (EtcdCluster, error) {
 	var list struct {
 		Header struct {
@@ -178,7 +181,15 @@ func ParseEtcdCluster(out string) (EtcdCluster, error) {
 		} `json:"header"`
 		Members []EtcdMember `json:"members"`
 	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &list); err != nil {
+	body := strings.TrimSpace(out)
+	lines := strings.Split(body, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if line := strings.TrimSpace(lines[i]); strings.HasPrefix(line, `{"header"`) {
+			body = line
+			break
+		}
+	}
+	if err := json.Unmarshal([]byte(body), &list); err != nil {
 		return EtcdCluster{}, fmt.Errorf("etcd's member list is not JSON: %w\n%s", err, out)
 	}
 	return EtcdCluster{ID: list.Header.ClusterID, Members: list.Members}, nil
@@ -301,9 +312,11 @@ func RemoveEtcdContainers(d deployment.Deployment) string {
 // ignores --initial-cluster then (etcd v3.5.16, server/etcdmain/etcd.go). A
 // removed member's ID is never accepted by the cluster again, so a site
 // whose member was removed and whose host kept the data cannot rejoin from
-// it: etcd exits and restarts in a loop. The data holds only Patroni's store,
-// runtime state every remaining member also holds, so deleting it loses
-// nothing.
+// it: etcd exits and restarts in a loop. Callers delete only this cluster's
+// data: a member site remove has just removed, or data site add has read on
+// disk (ReadEtcdData) and found to be this cluster's or nothing. That data
+// holds only Patroni's store, runtime state every remaining member also
+// holds, so deleting it loses nothing.
 //
 // The files are the etcd container's, which under rootless Docker are
 // expected to be owned by a subordinate UID rather than the deployment's
