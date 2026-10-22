@@ -16,12 +16,19 @@ type Graph struct {
 
 // Anchor is what the operator holds that nobody else can forge: their own
 // signing keys, a pinned root, or both. Signers is a set of fingerprints:
-// the key .paisans/signing-key records, or, on a workstation that records
-// none, every key the operator's ssh-agent holds or the one --key names.
-// Only the operator can sign with a key they hold, so a version any of them
-// signed is one the operator made. Signers never come from the sites.
+// the key .paisans/signing-key records, or, with Held, every key the
+// operator's ssh-agent holds or the one --key names, on a workstation that
+// records none. Signers never come from the sites.
+//
+// A recorded key is the operator's by their own choice, so its newest
+// version anchors whatever its history. A held key is only a key the
+// operator can reach: one a later version removed, or one shared with
+// someone else, signs as well as their own does. So a version a held key
+// signed anchors only where the trust rules, judged from a root, already
+// trust it.
 type Anchor struct {
 	Signers []string // the operator's key fingerprints; may be empty
+	Held    bool     // Signers are held, not recorded
 	Root    string   // a pinned root sha; may be empty
 }
 
@@ -78,9 +85,14 @@ func (e *UnreadableOperatorsError) Unwrap() error { return e.Err }
 //     signed anchor must descend from the pin. The anchor and every ancestor
 //     of it are trusted whatever their shape, because the operator signed
 //     after them.
-//   - When the newest versions the anchor's keys signed are not on one line,
-//     the operator's own keys signed divergent heads: that is a fork, and
-//     each of those heads and its ancestors is trusted, nothing else.
+//   - With held keys, each good root (only the pinned one, when one is
+//     pinned) that has a version a held key signed below it is judged by
+//     these rules as if pinned. The versions a held key signed that this
+//     trusts are the candidates, and the newest of those not in another's
+//     history is the anchor. Each such version is judged as the anchor in
+//     turn; when their heads differ, as with candidates under two roots, the
+//     verdict is a fork of every head any of them trusts. A candidate that
+//     does not descend from a pinned root is refused.
 //   - Removals in that history always stand, and bar the versions signed by
 //     each removed key that are not ancestors of the removal.
 //   - Every other version is a candidate when it passes shape, is not a root,
@@ -105,14 +117,19 @@ func Judge(g Graph, a Anchor) (Verdict, error) {
 	j := &judgement{g: g, operators: map[string]operatorsResult{}, anc: map[string]map[string]bool{}}
 	order, cyclic := j.topo()
 
-	tips, err := j.anchor(a, order)
+	if a.Held {
+		return j.held(a, order, cyclic)
+	}
+	anchor, err := j.anchor(a, order)
 	if err != nil {
 		return Verdict{}, err
 	}
-	if len(tips) > 1 {
-		return j.signersFork(tips), nil
-	}
-	anchor := tips[0]
+	return j.from(anchor, order, cyclic)
+}
+
+// from judges every version with trust starting at anchor.
+func (j *judgement) from(anchor string, order, cyclic []string) (Verdict, error) {
+	g := j.g
 	history := map[string]bool{anchor: true}
 	for sha := range j.ancestors(anchor) {
 		history[sha] = true
@@ -334,54 +351,126 @@ func (j *judgement) operatorsOf(sha string) operatorsResult {
 	return j.operators[sha]
 }
 
-// anchor picks where trust starts: one version, or, when the newest
-// versions the anchor's keys signed diverge, each of those heads, for a fork.
-func (j *judgement) anchor(a Anchor, order []string) ([]string, error) {
-	newest := map[string]string{} // signer -> its newest version
+// anchor picks where trust starts from a recorded key: the newest version
+// it signed that passes shape, or the pinned root.
+func (j *judgement) anchor(a Anchor, order []string) (string, error) {
+	signed := ""
 	for _, sha := range order {
 		v := j.g.Versions[sha]
 		if !slices.Contains(a.Signers, v.SignerFP) || j.shape(sha) != "" {
 			continue
 		}
-		if n, ok := newest[v.SignerFP]; !ok || j.newer(sha, n) {
-			newest[v.SignerFP] = sha
+		if signed == "" || j.newer(sha, signed) {
+			signed = sha
 		}
 	}
-	// A key whose newest version is in another's history is on its line.
-	var tips []string
-	for _, sha := range newest {
-		if slices.Contains(tips, sha) {
+	if a.Root != "" {
+		if reason := j.goodRoot(a.Root); reason != "" {
+			return "", &anchorError{fmt.Sprintf("the pinned root %s %s", a.Root, reason)}
+		}
+		if signed == "" {
+			return a.Root, nil
+		}
+		if a.Root != signed && !j.ancestors(signed)[a.Root] {
+			return "", &anchorError{fmt.Sprintf("your newest version %s does not descend from the pinned root %s", signed, a.Root)}
+		}
+	}
+	if signed != "" {
+		return signed, nil
+	}
+	return "", ErrNoAnchor
+}
+
+// held judges from keys the workstation holds but has not recorded, by the
+// rule in Judge's comment: a version they signed anchors only where the trust
+// rules, judged from its root, trust it already, so a removed key, or one
+// that was never an operator's, anchors nothing.
+func (j *judgement) held(a Anchor, order, cyclic []string) (Verdict, error) {
+	if a.Root != "" {
+		if reason := j.goodRoot(a.Root); reason != "" {
+			return Verdict{}, &anchorError{fmt.Sprintf("the pinned root %s %s", a.Root, reason)}
+		}
+	}
+	signedHeld := func(sha string) bool {
+		return slices.Contains(a.Signers, j.g.Versions[sha].SignerFP) && j.shape(sha) == ""
+	}
+	var cands []string
+	for _, root := range order {
+		if len(j.g.Versions[root].Parents) > 0 || j.goodRoot(root) != "" {
 			continue
 		}
 		below := false
-		for _, other := range newest {
+		for _, sha := range order {
+			if signedHeld(sha) && (sha == root || j.ancestors(sha)[root]) {
+				below = true
+				break
+			}
+		}
+		if !below {
+			continue
+		}
+		v, err := j.from(root, order, cyclic)
+		if err != nil {
+			return Verdict{}, err
+		}
+		for _, sha := range order {
+			if v.Trusted[sha] && signedHeld(sha) && !slices.Contains(cands, sha) {
+				cands = append(cands, sha)
+			}
+		}
+	}
+	tips := j.newest(cands)
+	if a.Root != "" {
+		for _, tip := range tips {
+			if a.Root != tip && !j.ancestors(tip)[a.Root] {
+				return Verdict{}, &anchorError{fmt.Sprintf("your newest version %s does not descend from the pinned root %s", tip, a.Root)}
+			}
+		}
+		if len(tips) == 0 {
+			return j.from(a.Root, order, cyclic)
+		}
+	}
+	if len(tips) == 0 {
+		return Verdict{}, ErrNoAnchor
+	}
+	first, err := j.from(tips[0], order, cyclic)
+	if err != nil {
+		return Verdict{}, err
+	}
+	verdicts := []Verdict{first}
+	agree := true
+	for _, tip := range tips[1:] {
+		v, err := j.from(tip, order, cyclic)
+		if err != nil {
+			return Verdict{}, err
+		}
+		verdicts = append(verdicts, v)
+		agree = agree && slices.Equal(v.Heads, first.Heads)
+	}
+	if agree {
+		return first, nil
+	}
+	return j.union(verdicts), nil
+}
+
+// newest is the versions among shas that are in no other's history, newest
+// first.
+func (j *judgement) newest(shas []string) []string {
+	var out []string
+	for _, sha := range shas {
+		below := false
+		for _, other := range shas {
 			if other != sha && j.ancestors(other)[sha] {
 				below = true
 				break
 			}
 		}
 		if !below {
-			tips = append(tips, sha)
+			out = append(out, sha)
 		}
 	}
-	sort.Slice(tips, func(x, y int) bool { return j.newer(tips[x], tips[y]) })
-	if a.Root != "" {
-		if reason := j.goodRoot(a.Root); reason != "" {
-			return nil, &anchorError{fmt.Sprintf("the pinned root %s %s", a.Root, reason)}
-		}
-		if len(tips) == 0 {
-			return []string{a.Root}, nil
-		}
-		for _, tip := range tips {
-			if a.Root != tip && !j.ancestors(tip)[a.Root] {
-				return nil, &anchorError{fmt.Sprintf("your newest version %s does not descend from the pinned root %s", tip, a.Root)}
-			}
-		}
-	}
-	if len(tips) == 0 {
-		return nil, ErrNoAnchor
-	}
-	return tips, nil
+	sort.Slice(out, func(x, y int) bool { return j.newer(out[x], out[y]) })
+	return out
 }
 
 // newer orders versions by revision, highest first, then by lowest hash.
@@ -393,26 +482,36 @@ func (j *judgement) newer(x, y string) bool {
 	return x < y
 }
 
-// signersFork is the verdict when the operator's own keys signed divergent
-// heads, tips. Each is trusted with its ancestors, since the operator signed
-// it, and nothing outside them is: which line goes on is the operator's to
-// say, by merging them. A key the operator holds may be one a later version
-// removed, and someone else may hold it too, so no head outranks another by
-// its revision.
-func (j *judgement) signersFork(tips []string) Verdict {
-	out := Verdict{Trusted: map[string]bool{}, Reasons: map[string]string{}, Heads: tips, Fork: true}
-	for _, tip := range tips {
-		out.Trusted[tip] = true
-		for sha := range j.ancestors(tip) {
-			out.Trusted[sha] = true
+// union is a fork of verdicts that disagree: every version any of them
+// trusts, and as heads those of their heads that are in no other's history.
+// Which line goes on is the operator's to say, by merging them.
+func (j *judgement) union(verdicts []Verdict) Verdict {
+	out := Verdict{Trusted: map[string]bool{}, Reasons: map[string]string{}, Fork: true}
+	var heads []string
+	for _, v := range verdicts {
+		for sha, ok := range v.Trusted {
+			out.Trusted[sha] = out.Trusted[sha] || ok
+		}
+		for _, h := range v.Heads {
+			if !slices.Contains(heads, h) {
+				heads = append(heads, h)
+			}
 		}
 	}
 	for sha := range j.g.Versions {
-		if !out.Trusted[sha] {
-			out.Trusted[sha] = false
-			out.Reasons[sha] = "not in the history of a head your keys signed, and those heads diverge (anchor)"
+		if out.Trusted[sha] {
+			continue
+		}
+		out.Trusted[sha] = false
+		for _, v := range verdicts {
+			if r := v.Reasons[sha]; r != "" {
+				out.Reasons[sha] = r
+				break
+			}
 		}
 	}
+	out.Heads = j.newest(heads)
+	out.Fork = len(out.Heads) > 1
 	return out
 }
 

@@ -102,8 +102,8 @@ func TestConfigRecoverWithUnrelatedAgentKeysRefuses(t *testing.T) {
 	}
 }
 
-// --key names a public key the agent does not hold, to anchor on it alone,
-// and --execute records it.
+// --key names a public key to anchor on alone. One the agent does not hold,
+// as a colleague's, anchors and is never recorded; one it holds is.
 func TestConfigRecoverAnchorsOnKeyFile(t *testing.T) {
 	shas, answer, _, _, pub := storedHistoryKey(t, 2, 0)
 	recoverHosts(t, answer)
@@ -121,15 +121,35 @@ func TestConfigRecoverAnchorsOnKeyFile(t *testing.T) {
 	if h, _ := l.Head(); h != shas[1] {
 		t.Fatalf("head %s, want %s", h, shas[1])
 	}
-	if k, _ := l.SigningKey(); k != pub {
+	if k, _ := l.SigningKey(); k != "" {
+		t.Fatalf("a key the agent does not hold was recorded: %q", k)
+	}
+
+	_, mine := testKey(t)
+	agentHolding(t, mine, pub)
+	dir = t.TempDir()
+	if err := runDeployment(recoverArgs(dir, "--key", path, "--execute"), noTerminalStdin(), &out); err != nil {
+		t.Fatal(problemText(err), err)
+	}
+	if k, _ := (configstore.Local{Dir: dir}).SigningKey(); k != pub {
 		t.Fatalf("signing key %q, want %q", k, pub)
+	}
+
+	// --key that differs from a recorded signing key is refused.
+	minePath := filepath.Join(t.TempDir(), "mine.pub")
+	if err := os.WriteFile(minePath, []byte(mine+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := runDeployment([]string{"log", "--config", filepath.Join(dir, "paisans-stack.yaml"), "--key", minePath}, noTerminalStdin(), &out)
+	if !strings.Contains(problemText(err), "--key differs from the recorded signing key") {
+		t.Fatalf("got %v", problemText(err))
 	}
 
 	// A private key, or a file that is no key, is refused.
 	if err := os.WriteFile(path, []byte("not a key\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := runDeployment(recoverArgs(t.TempDir(), "--key", path), noTerminalStdin(), &out)
+	err = runDeployment(recoverArgs(t.TempDir(), "--key", path), noTerminalStdin(), &out)
 	if !strings.Contains(problemText(err), "--key must name a public key file") {
 		t.Fatalf("got %v", err)
 	}
@@ -163,28 +183,46 @@ func TestConfigRecoverAgentKeyMustDescendFromTheRoot(t *testing.T) {
 	}
 }
 
-// Two keys the agent holds that signed divergent heads are a fork: neither
-// is chosen, each head's files go to incoming/<sha>, and no key is recorded.
-func TestConfigRecoverAgentKeysThatDivergeAreAFork(t *testing.T) {
-	akey, apub := testKey(t)
-	bkey, bpub := testKey(t)
+// operatorsAs is the fixture's paisans-stack.yaml with alice's key replaced by
+// alice and bob's by bob.
+func operatorsAs(t *testing.T, alice, bob string) string {
+	t.Helper()
 	cfg, err := config.Load(fixtureConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
-	yaml := strings.Replace(fixtureAs(t, apub), cfg.Operators["bob"].KeyLines()[0], bpub, 1)
+	return strings.Replace(fixtureAs(t, alice), cfg.Operators["bob"].KeyLines()[0], bob, 1)
+}
+
+// Two keys the agent holds whose histories diverge, here from two roots, are a
+// fork: neither is chosen, each head's files go to incoming/<sha>, and no key
+// is recorded. Either key alone recovers its own history.
+func TestConfigRecoverAgentKeysThatDivergeAreAFork(t *testing.T) {
+	akey, apub := testKey(t)
+	bkey, bpub := testKey(t)
+	_, cpub := testKey(t)
 	s := newStore(t)
-	root, _ := s.commit(t, yaml, "", nil, 1, akey)
-	a, fa := s.commit(t, yaml, "# a\n", []string{root}, 2, akey)
-	b, _ := s.commit(t, yaml, "# b\n", []string{root}, 2, bkey)
-	b3, fb := s.commit(t, yaml, "# b3\n", []string{b}, 3, bkey)
+	ra, _ := s.commit(t, operatorsAs(t, apub, cpub), "", nil, 1, akey)
+	a, fa := s.commit(t, operatorsAs(t, apub, cpub), "# a\n", []string{ra}, 2, akey)
+	rb, _ := s.commit(t, operatorsAs(t, bpub, cpub), "# b\n", nil, 1, bkey)
+	b, fb := s.commit(t, operatorsAs(t, bpub, cpub), "# b2\n", []string{rb}, 2, bkey)
 	answer := s.answer(t)
 	recoverHosts(t, answer)
 	allSitesUp(answer, nil)
+
+	agentHolding(t, apub)
+	one := t.TempDir()
+	var out bytes.Buffer
+	if err := runDeployment(recoverArgs(one, "--execute"), noTerminalStdin(), &out); err != nil {
+		t.Fatal(problemText(err), err)
+	}
+	if h, _ := (configstore.Local{Dir: one}).Head(); h != a {
+		t.Fatalf("one key: head %s, want %s", h, a)
+	}
+
 	agentHolding(t, apub, bpub)
 	dir := t.TempDir()
-	var out bytes.Buffer
-	err = runDeployment(recoverArgs(dir, "--execute"), noTerminalStdin(), &out)
+	err := runDeployment(recoverArgs(dir, "--execute"), noTerminalStdin(), &out)
 	if !strings.Contains(problemText(err), "the sites hold a fork") {
 		t.Fatalf("got %v", problemText(err))
 	}
@@ -195,10 +233,46 @@ func TestConfigRecoverAgentKeysThatDivergeAreAFork(t *testing.T) {
 	if k, _ := l.SigningKey(); k != "" {
 		t.Fatalf("a fork's recovery recorded the signing key %q", k)
 	}
-	for sha, want := range map[string]configstore.Files{a: fa, b3: fb} {
+	for sha, want := range map[string]configstore.Files{a: fa, b: fb} {
 		got, err := (configstore.Local{Dir: l.IncomingFor(sha)}).Files()
 		if err != nil || !got.Equal(want) {
 			t.Fatalf("incoming %s: %v", sha[:12], err)
+		}
+	}
+}
+
+// A key the agent holds that a version removed anchors nothing on or beside
+// the removal and is never recorded; the files are the removal's line.
+func TestConfigRecoverRemovedAgentKey(t *testing.T) {
+	oldKey, oldPub := testKey(t)
+	newKey, newPub := testKey(t)
+	_, cpub := testKey(t)
+	s := newStore(t)
+	both := operatorsAs(t, oldPub, newPub)
+	v1, _ := s.commit(t, both, "", nil, 1, oldKey)
+	v2, f2 := s.commit(t, operatorsAs(t, newPub, cpub), "# removes old\n", []string{v1}, 2, newKey)
+	s.commit(t, both, "# by the removed key\n", []string{v2}, 3, oldKey)
+	answer := s.answer(t)
+	recoverHosts(t, answer)
+	allSitesUp(answer, nil)
+
+	for _, keys := range [][]string{{oldPub}, {oldPub, newPub}} {
+		agentHolding(t, keys...)
+		dir := t.TempDir()
+		var out bytes.Buffer
+		if err := runDeployment(recoverArgs(dir, "--root", v1, "--execute"), noTerminalStdin(), &out); err != nil {
+			t.Fatal(problemText(err), err)
+		}
+		l := configstore.Local{Dir: dir}
+		if got, _ := l.Files(); !got.Equal(f2) {
+			t.Fatalf("%d keys: recover wrote another version's files", len(keys))
+		}
+		want := ""
+		if len(keys) == 2 {
+			want = newPub
+		}
+		if k, _ := l.SigningKey(); k != want {
+			t.Fatalf("%d keys: signing key %q, want %q", len(keys), k, want)
 		}
 	}
 }
