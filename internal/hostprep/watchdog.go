@@ -8,6 +8,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // softdogIdentity is the identity softdog reports in sysfs. Read from the
@@ -206,7 +207,7 @@ func planWatchdog(t Transport, d deployment.Deployment, profile Profile, site co
 // admitWatchdog is what fixes the watchdog on site when site prepare finds
 // it wrong: it is a root change, the host owner's.
 func admitWatchdog(site string) string {
-	return fmt.Sprintf("The host's owner runs sudo paisans site admit --request %[1]s.admit --watchdog again, from paisans site request --site %[1]s > %[1]s.admit.", site)
+	return fmt.Sprintf("The host's owner runs sudo "+progname.Name()+" site admit --request %[1]s.admit --watchdog again, from "+progname.Name()+" site request --site %[1]s > %[1]s.admit.", site)
 }
 
 // checkWatchdog reads what a data site's watchdog is, as the deployment's

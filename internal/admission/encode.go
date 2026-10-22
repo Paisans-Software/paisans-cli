@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"gopkg.in/yaml.v3"
 )
 
@@ -112,7 +113,7 @@ func Parse(data []byte) (Request, error) {
 		return refuse(fmt.Sprintf("it is not YAML (%s)", strconv.Quote(err.Error())))
 	}
 	if doc.Kind != yaml.DocumentNode || len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
-		return refuse("it is not a request: a request is one YAML mapping, as paisans site request writes it")
+		return refuse("it is not a request: a request is one YAML mapping, as " + progname.Name() + " site request writes it")
 	}
 	root := doc.Content[0]
 	if v := value(root, "version"); v == nil {
@@ -133,7 +134,7 @@ func Parse(data []byte) (Request, error) {
 		return refuse(problems...)
 	}
 	if !bytes.Equal(Encode(r), data) {
-		return refuse("it is not exactly as paisans site request wrote it: something changed it after it was written (a comment, spacing, quoting or line endings). Ask the operator to send the file again, as an attachment, and compare the digest again")
+		return refuse("it is not exactly as " + progname.Name() + " site request wrote it: something changed it after it was written (a comment, spacing, quoting or line endings). Ask the operator to send the file again, as an attachment, and compare the digest again")
 	}
 	return r, nil
 }

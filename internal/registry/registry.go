@@ -54,6 +54,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/mesh"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
@@ -224,7 +225,7 @@ func (e *NoBuildError) Error() string {
 	if len(e.IDs) > 1 {
 		which = "the entries of deployments " + strings.Join(e.IDs, ", ") + " do"
 	}
-	return fmt.Sprintf("%s: %s not say which build of paisans claimed the host (%s). The host's owner admits each again: `paisans site request`, then `paisans site admit`", Path, which, strings.Join(e.Why, "; "))
+	return fmt.Sprintf("%s: %s not say which build of paisans claimed the host (%s). The host's owner admits each again: `"+progname.Name()+" site request`, then `"+progname.Name()+" site admit`", Path, which, strings.Join(e.Why, "; "))
 }
 
 // Conflict is another deployment holding what a claim needs.

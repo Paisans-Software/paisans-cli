@@ -14,6 +14,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 	"github.com/paisans-software/paisans-cli/internal/version"
@@ -256,7 +257,7 @@ func BuildEvict(t apply.Transport, in EvictInput) (*Plan, error) {
 	if noBuild != nil {
 		for _, id := range noBuild.IDs {
 			if id != in.Deployment {
-				e.warn(ui.Visible("registry: deployment "+id+"'s entry does not say which build of paisans claimed this host; evict leaves it"), "Its deployment's owner admits it again (`paisans site request`, then `paisans site admit`), or this host's owner evicts it with `paisans site evict`.")
+				e.warn(ui.Visible("registry: deployment "+id+"'s entry does not say which build of paisans claimed this host; evict leaves it"), "Its deployment's owner admits it again (`"+progname.Name()+" site request`, then `"+progname.Name()+" site admit`), or this host's owner evicts it with `"+progname.Name()+" site evict`.")
 			}
 		}
 	}
