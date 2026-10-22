@@ -17,6 +17,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/hostadmit"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 	"github.com/paisans-software/paisans-cli/internal/validate"
 )
@@ -84,7 +85,7 @@ func runSiteAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 	case request != "" && sshFlag != "":
 		return fmt.Errorf("site admit: --request runs on the host itself and takes no --ssh")
 	case request != "" && !runningAsRootOnLinux():
-		return fmt.Errorf("site admit: --request runs as root on the host it admits to: copy the request there and run sudo paisans site admit --request <file>")
+		return fmt.Errorf("site admit: --request runs as root on the host it admits to: copy the request there and run sudo %s site admit --request <file>", progname.Name())
 	case request == "" && digestFlag != "":
 		return fmt.Errorf("site admit: --digest goes with --request: with --site admit builds the request itself from the configuration")
 	case flags.EnableUFWBlockListed && !flags.EnableUFW:
@@ -535,7 +536,7 @@ func unshown(keys []string, shown []hostadmit.Blocked) []string {
 // --execute off a terminal. Once ufw is on, only a person opening a new
 // SSH session shows that SSH gets through.
 func ufwNeedsAPerson() error {
-	return fmt.Errorf("site admit: with --request, enabling ufw needs a person at a terminal: once ufw is on, admit waits for you to open a new SSH session to this host and say it logged in, before it stops the timer that turns ufw off again, and neither --yes nor a pipe answers that. Run paisans site admit --site <site> --ssh <your login> from a workstation instead, whose own login as the deployment's user proves SSH gets through; or run this at a terminal without --yes. Nothing was changed")
+	return fmt.Errorf("site admit: with --request, enabling ufw needs a person at a terminal: once ufw is on, admit waits for you to open a new SSH session to this host and say it logged in, before it stops the timer that turns ufw off again, and neither --yes nor a pipe answers that. Run %s site admit --site <site> --ssh <your login> from a workstation instead, whose own login as the deployment's user proves SSH gets through; or run this at a terminal without --yes. Nothing was changed", progname.Name())
 }
 
 // ufwOffAt is the latest the fallback armed by now turns ufw off.
@@ -709,7 +710,7 @@ func runSiteEvict(args []string, stdin io.Reader, stdout io.Writer) error {
 	case *site == "" && *sshFlag != "":
 		return fmt.Errorf("site evict: --ssh goes with --site")
 	case *site == "" && !runningAsRootOnLinux():
-		return fmt.Errorf("site evict: --request and --deployment run as root on the host itself: run sudo paisans site evict there")
+		return fmt.Errorf("site evict: --request and --deployment run as root on the host itself: run sudo %s site evict there", progname.Name())
 	}
 	r := reporter()
 	in := hostadmit.EvictInput{DataDir: *dataDir}

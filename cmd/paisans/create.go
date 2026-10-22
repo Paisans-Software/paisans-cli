@@ -14,6 +14,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/create"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 	"github.com/paisans-software/paisans-cli/internal/validate"
 )
@@ -46,7 +47,7 @@ func runCreate(args []string, stdin io.Reader, stdout io.Writer) error {
 	if !stdinIsTerminal(stdin) {
 		return &ui.Problem{
 			Hint:    "create asks its questions at a terminal, and stdin is not one",
-			Explain: "Run paisans create from a terminal. Nothing was written.",
+			Explain: "Run " + progname.Name() + " create from a terminal. Nothing was written.",
 		}
 	}
 	id, err := deployment.NewID()
@@ -61,7 +62,7 @@ func runCreate(args []string, stdin io.Reader, stdout io.Writer) error {
 	if home, err := os.UserHomeDir(); err == nil {
 		w.LocalKeys = create.FindLocalKeys(os.DirFS(filepath.Join(home, ".ssh")), "~/.ssh")
 	}
-	p.Say("paisans create writes %s for a new deployment. Enter takes the answer in brackets; nothing is written until validate refuses nothing in the file, or you ask for it as it stands.", ui.ShortPath(path))
+	p.Say(progname.Name()+" create writes %s for a new deployment. Enter takes the answer in brackets; nothing is written until validate refuses nothing in the file, or you ask for it as it stands.", ui.ShortPath(path))
 	section := create.SectionAll
 	for {
 		if err := w.Ask(section); err != nil {
@@ -94,7 +95,7 @@ func runCreate(args []string, stdin io.Reader, stdout io.Writer) error {
 					return err
 				}
 				p.Say("")
-				r.Result("Wrote %s, which validate refuses. Fix what it names, then run paisans validate before paisans init.", path)
+				r.Result("Wrote %s, which validate refuses. Fix what it names, then run "+progname.Name()+" validate before "+progname.Name()+" init.", path)
 				return nil
 			}
 			section = next
@@ -110,10 +111,10 @@ func runCreate(args []string, stdin io.Reader, stdout io.Writer) error {
 		// It skips a site not admitted yet, which site admit checks as root.
 		// With no key, at a terminal, secrets set asks for each secret only
 		// the operator can give, whichever the file declares.
-		p.Say("  paisans init          # checks the subnet, creates secrets.enc.yaml, generates every secret")
-		p.Say("  paisans site request  # per site: --site <name> > <name>.admit, for its owner's sudo paisans site admit")
-		p.Say("  paisans secrets set   # asks for each secret only you can give, such as the SMTP password")
-		p.Say("  paisans deployment apply         # shows every step; --execute runs them")
+		p.Say("  %s init          # checks the subnet, creates secrets.enc.yaml, generates every secret", progname.Name())
+		p.Say("  %s site request  # per site: --site <name> > <name>.admit, for its owner's sudo %s site admit", progname.Name(), progname.Name())
+		p.Say("  %s secrets set   # asks for each secret only you can give, such as the SMTP password", progname.Name())
+		p.Say("  %s deployment apply         # shows every step; --execute runs them", progname.Name())
 		return nil
 	}
 }
@@ -219,10 +220,10 @@ func createAborted(err error) error {
 // unwritten. It is not a failure, so it is a result rather than a problem.
 func notWritten(r ui.Reporter, p *create.Prompter, path string) error {
 	p.Say("")
-	r.Result("%s not written. Run paisans create again to start over.", ui.ShortPath(path))
+	r.Result("%s not written. Run "+progname.Name()+" create again to start over.", ui.ShortPath(path))
 	return nil
 }
 
 func nothingWritten(why string) error {
-	return &ui.Problem{Hint: "nothing written: " + why, Explain: "Run paisans create again to start over."}
+	return &ui.Problem{Hint: "nothing written: " + why, Explain: "Run " + progname.Name() + " create again to start over."}
 }

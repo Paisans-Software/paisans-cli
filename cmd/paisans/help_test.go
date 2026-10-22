@@ -59,7 +59,7 @@ func TestResolveHelp(t *testing.T) {
 			printTopHelp(&b)
 			want = b.String()
 		case "execute":
-			want = executeTopic
+			want = executeTopic()
 		default:
 			var b strings.Builder
 			printGroupHelp(&b, tc.page)
@@ -162,7 +162,7 @@ func TestSiteHasNoAllowlistCommands(t *testing.T) {
 			t.Errorf("%s has a help page", name)
 		}
 	}
-	for what, text := range map[string]string{"the site group's summary": groupSummary["site"], "help execute": executeTopic} {
+	for what, text := range map[string]string{"the site group's summary": groupSummary["site"], "help execute": executeTopic()} {
 		if strings.Contains(text, "allowlist") || strings.Contains(text, "site allow") {
 			t.Errorf("%s still offers an allowlist:\n%s", what, text)
 		}

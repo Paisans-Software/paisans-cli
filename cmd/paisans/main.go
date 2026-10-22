@@ -36,6 +36,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/hostarch"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
 	"github.com/paisans-software/paisans-cli/internal/imagedigest"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/secretsgen"
@@ -46,6 +47,7 @@ import (
 )
 
 func main() {
+	progname.Set(os.Args[0])
 	page, asked, run := resolveHelp(os.Args[1:])
 	switch {
 	case page != nil && asked:
@@ -57,7 +59,7 @@ func main() {
 	}
 	os.Args = append(os.Args[:1], run...)
 	if err := buildGate(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "paisans: "+err.Error())
+		fmt.Fprintln(os.Stderr, progname.Name()+": "+err.Error())
 		os.Exit(2)
 	}
 	warnTestMode(os.Stderr)
@@ -367,7 +369,7 @@ func runInit(args []string, stdin io.Reader, stdout io.Writer) error {
 		r.Detail("%s already has every generated secret (%d)", *secretsPath, len(filled.Kept))
 		reportOwed(r, filled)
 		if len(filled.Owed) > 0 {
-			r.Result(setOwedNext)
+			r.Result(setOwedNext())
 			return nil
 		}
 		r.Result("Every generated secret is already present. Nothing written.")
@@ -397,7 +399,7 @@ func runInit(args []string, stdin io.Reader, stdout io.Writer) error {
 	}
 	reportOwed(r, filled)
 	if len(filled.Owed) > 0 {
-		r.Result(setOwedNext)
+		r.Result(setOwedNext())
 		return nil
 	}
 	r.Result("Secrets written.")
@@ -437,7 +439,7 @@ func (e *secretsWriteError) Unwrap() error { return e.err }
 
 // setOwedNext is init's result when a secret only the operator can provide
 // is unset: secrets set asks for each one at a terminal.
-const setOwedNext = "Next: run `paisans secrets set`."
+func setOwedNext() string { return "Next: run `" + progname.Name() + " secrets set`." }
 
 // reportOwed warns of each secret only the operator can provide. Leaving
 // these silent would let an operator believe an install is finished when
@@ -704,7 +706,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 		// Every step applies the run's current version, which a step that
 		// records at Pocket ID advances: files edited otherwise are not what
 		// the store holds.
-		return &ui.Problem{Hint: "the configuration changed after the run published it", Explain: config.FileName + " or secrets.enc.yaml is not what this run published as " + v.sha[:12] + ", so applying it would put on " + *site + " a version the store does not hold. Nothing was changed on " + *site + " by this step. Run paisans deployment apply --execute again, which publishes the files as they are now."}
+		return &ui.Problem{Hint: "the configuration changed after the run published it", Explain: config.FileName + " or secrets.enc.yaml is not what this run published as " + v.sha[:12] + ", so applying it would put on " + *site + " a version the store does not hold. Nothing was changed on " + *site + " by this step. Run " + progname.Name() + " deployment apply --execute again, which publishes the files as they are now."}
 	}
 
 	transport := siteTransport(*site, declared, *destination)
@@ -750,7 +752,7 @@ func applyCommand(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	review, approvedBy, err := stepReview(r, ans, stdin, stdout, cfg, *site, g, grant.ApplyScope(only...), transport, *execute, "paisans deployment apply --site "+*site+" --execute")
+	review, approvedBy, err := stepReview(r, ans, stdin, stdout, cfg, *site, g, grant.ApplyScope(only...), transport, *execute, progname.Name()+" deployment apply --site "+*site+" --execute")
 	if err != nil {
 		return err
 	}
@@ -1488,7 +1490,7 @@ func hostPrepare(env prepareEnv, o hostPrepareOptions) error {
 	if err != nil {
 		return err
 	}
-	review, approvedBy, err := stepReview(r, env.answers, env.stdin, env.stdout, cfg, o.site, g, grant.PrepareScope, transport, o.execute, "paisans site prepare --site "+o.site+" --execute")
+	review, approvedBy, err := stepReview(r, env.answers, env.stdin, env.stdout, cfg, o.site, g, grant.PrepareScope, transport, o.execute, progname.Name()+" site prepare --site "+o.site+" --execute")
 	if err != nil {
 		return err
 	}
@@ -1564,9 +1566,9 @@ func hostPrepareAll(env prepareEnv, o hostPrepareOptions) error {
 		site := o
 		site.all, site.site, site.shown = false, name, true
 		if err := hostPrepare(env, site); err != nil {
-			next := "Run paisans site prepare --all again to resume."
+			next := "Run " + progname.Name() + " site prepare --all again to resume."
 			if o.execute {
-				next = "Run paisans site prepare --all --execute again to resume; a prepared host plans nothing."
+				next = "Run " + progname.Name() + " site prepare --all --execute again to resume; a prepared host plans nothing."
 			}
 			return convergeStop("site prepare --all stopped at "+name, err, next)
 		}
@@ -1785,7 +1787,7 @@ func checkWorkstationToken(r ui.Reporter, cfg *config.Config, token string) erro
 	step.Fail(errors.New(result.Finding))
 	return &ui.Problem{
 		Hint:    result.Finding,
-		Explain: result.Advice + " No record was read or changed.\n`paisans doctor` checks the token from every place that uses it.",
+		Explain: result.Advice + " No record was read or changed.\n`" + progname.Name() + " doctor` checks the token from every place that uses it.",
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/doctor"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/topology"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -170,7 +171,7 @@ func showPending(r ui.Reporter, cfg *config.Config, c *topology.Classification) 
 		s := r.Step(name)
 		s.Detail("%s", c.Sites[name].Why)
 		if c.Sites[name].Request {
-			s.Detail("paisans site request --site %s > %s.admit", name, name)
+			s.Detail(progname.Name()+" site request --site %s > %s.admit", name, name)
 		}
 		if lost := doctor.Losses(cfg, name); lost != "" {
 			s.Detail("While it is pending the deployment is without %s.", lost)

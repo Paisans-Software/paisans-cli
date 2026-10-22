@@ -18,6 +18,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/deployrecord"
 	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/secretsgen"
 	"github.com/paisans-software/paisans-cli/internal/siteremove"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -91,7 +92,7 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 		return runSiteRemoveByID(r, site, byIDArgs{id: *idFlag, ssh: *sshFlag, force: *force, config: set["config"], secrets: set["secrets"], execute: *execute, deleteData: *deleteData, answers: ans}, stdin, stdout)
 	}
 	if site == "" {
-		return &ui.Problem{Hint: "site remove needs a site", Explain: "Name the site to remove, Eg: paisans site remove home-b"}
+		return &ui.Problem{Hint: "site remove needs a site", Explain: "Name the site to remove, Eg: " + progname.Name() + " site remove home-b"}
 	}
 	if *sshFlag != "" && !*force {
 		return &ui.Problem{Hint: "--ssh is only for --force", Explain: "--ssh names the host to clean, which only --force takes. A full removal reaches the site through its ssh section."}
@@ -213,7 +214,7 @@ func runSiteRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 		if *execute {
 			verb = "are generated before the site is cut off"
 		}
-		r.Note("secrets: "+strings.Join(filled.Generated, ", ")+" "+verb, "The configuration declares them and the secrets file does not hold them yet; paisans init generates them the same way")
+		r.Note("secrets: "+strings.Join(filled.Generated, ", ")+" "+verb, "The configuration declares them and the secrets file does not hold them yet; "+progname.Name()+" init generates them the same way")
 	}
 	if !*execute {
 		reportRemains(r, plan.Remains())
@@ -389,7 +390,7 @@ func runSiteRemoveByID(r ui.Reporter, site string, a byIDArgs, stdin io.Reader, 
 	case a.ssh == "":
 		return &ui.Problem{Hint: "--id needs --ssh", Explain: "With no configuration there is no ssh section to reach the host through, so name it with --ssh user@host[:port] or an alias of your ssh config."}
 	case !deployment.ValidID(a.id) && !tokenShape.MatchString(a.id):
-		return &ui.Problem{Hint: fmt.Sprintf("--id %q is not a deployment id or token", a.id), Explain: fmt.Sprintf("Give the full id or its %d hex digit token, as paisans site deployments lists them, Eg: --id f2a9", deployment.TokenLength)}
+		return &ui.Problem{Hint: fmt.Sprintf("--id %q is not a deployment id or token", a.id), Explain: fmt.Sprintf("Give the full id or its %d hex digit token, as "+progname.Name()+" site deployments lists them, Eg: --id f2a9", deployment.TokenLength)}
 	}
 	dest, err := parseDestination(a.ssh)
 	if err != nil {
@@ -579,7 +580,7 @@ func revokedQuestion(cfg *config.Config, site string) question {
 	if provider == "" {
 		provider = "the DNS provider"
 	}
-	return question{word: "revoked", what: fmt.Sprintf("%s holds the gateway, and the DNS token it was rendered can change the community's records from anywhere. Revoke that token at %s, and set a new one with `paisans secrets set external.acme_dns_token` before you proceed. This command cannot revoke it: it holds the token, not a credential that manages tokens.", site, provider)}
+	return question{word: "revoked", what: fmt.Sprintf("%s holds the gateway, and the DNS token it was rendered can change the community's records from anywhere. Revoke that token at %s, and set a new one with `"+progname.Name()+" secrets set external.acme_dns_token` before you proceed. This command cannot revoke it: it holds the token, not a credential that manages tokens.", site, provider)}
 }
 
 // terminal is where the questions of a removal with --host-gone are asked: one

@@ -3,12 +3,14 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/paisans-software/paisans-cli/internal/config"
-	"github.com/paisans-software/paisans-cli/internal/localstore"
 	"io"
 	"os"
 	"slices"
 	"strings"
+
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/localstore"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // Help comes in three levels, each a step further into one command, so that
@@ -226,7 +228,7 @@ var helpCommands = []helpCommand{
 		detail: "Take a site out of the running deployment in gated stages: its data out (the Patroni leader switched to the Sync Standby, its Garage node out of the layout and the objects moved), out of the cluster (its etcd member, and the mesh, HAProxy and gateway routes on every remaining site, and each replica's patroni.env, one at a time; one data site out of two and a witness takes the witness out of etcd too), its host cleaned of everything provably this deployment's (a gateway's Caddy kept, reduced to the host owner's sites in its caddy.d, /srv/paisans/<token>/caddy.d, while there are any), the A and AAAA records dns init made for its public address deleted at the DNS provider, and its entry out of " + config.FileName + ".\n\n" +
 			"Refuses the only gateway, data or apps site, a site an app is pinned to, and an unhealthy cluster. --host-gone never reaches the host, as below; --delete-data deletes its data after the site's name is typed at a terminal. Writes nothing without --execute.\n\n" +
 			"--force --ssh <host> --id <id or token>, with no " + config.FileName + ": clean that host of the deployment the login's own admission record names, as --force does, from that record alone, logging in as the deployment's user. DNS is not modified. --execute asks for the site's name at a terminal.\n\n" +
-			"The host stage runs as the deployment's user and ends with the sudo paisans site evict line the host's owner runs to remove the rest.\n\n" +
+			"The host stage runs as the deployment's user and ends with the site evict command line the host's owner runs with sudo to remove the rest.\n\n" +
 			"--host-gone is for a site whose host is not reached: dead, or still running but no longer the deployment's to reach. It never reaches that host, and cuts the site off in this order: the mesh first on every remaining site, then its DNS records, Patroni's own failover, its etcd member, its Garage node skipped as dead, then the rest as remove does. Refuses --force, --ssh, --id and --delete-data, which reach a host. " +
 			"Generates the secrets of a replacement declared in the same edit, which apply then brings up. --execute asks for the site's name, and for revoked, lose writes or lose objects when they apply.\n\n" +
 			yesTopic,
@@ -521,7 +523,8 @@ const keyTrust = "With no key recorded in .paisans/signing-key, name your own op
 
 // executeTopic is `paisans help execute`: which commands reach a host, and
 // what --execute lets each of them change.
-const executeTopic = `site prepare, site deployments, apply, prune, site add, site remove, mesh rekey,
+func executeTopic() string {
+	return `site prepare, site deployments, apply, prune, site add, site remove, mesh rekey,
 storage init, storage add, storage rotate-key, app admin create, app remove,
 oidc client create, secrets prune, secrets rotate, preflight, failover test,
 doctor, init, config, operator register, site admit and site evict
@@ -541,8 +544,8 @@ last. Every other command that writes to a host first reads the host's admission
 record for this deployment and refuses, with nothing changed, a host that has
 none, or whose record does not match the site: another site name, ssh user, SSH
 or WireGuard port, mesh subnet, forwarding, a grant its roles need, or, for
-an external web server, the owner's web server record. It names the two lines that fix it, paisans site request --site <site> >
-<site>.admit for the operator, and sudo paisans site admit --request
+an external web server, the owner's web server record. It names the two lines that fix it, ` + progname.Name() + ` site request --site <site> >
+<site>.admit for the operator, and sudo ` + progname.Name() + ` site admit --request
 <site>.admit for the host's owner. apply and site prepare also refuse when
 anything else on the host overlaps the mesh subnet. dns init and dns prune reach
 no host, only the DNS provider's API, and change it only with --execute; site
@@ -558,6 +561,7 @@ the reasons, values, request bodies and command output behind each step show
 too. A failure always says what went wrong and what to do; with -v, the
 underlying error shows under it too.
 `
+}
 
 // helpWidth is the column help text wraps at.
 const helpWidth = 80
@@ -589,8 +593,8 @@ func isGroup(name string) bool { return len(subcommands(name)) > 0 }
 
 // printTopHelp writes the first page: every command, one line each.
 func printTopHelp(w io.Writer) {
-	fmt.Fprint(w, "paisans installs and runs a community stack from "+config.FileName+".\n\n")
-	fmt.Fprint(w, "Usage: paisans <command> [flags]\n")
+	fmt.Fprint(w, progname.Name()+" installs and runs a community stack from "+config.FileName+".\n\n")
+	fmt.Fprint(w, "Usage: "+progname.Name()+" <command> [flags]\n")
 	for _, s := range helpSections {
 		fmt.Fprintf(w, "\n%s:\n", s.title)
 		for _, name := range s.names {
@@ -603,14 +607,14 @@ func printTopHelp(w io.Writer) {
 	}
 	fmt.Fprint(w, "\nA command that changes a host changes it only with --execute; without it, it\n"+
 		"shows what it would do. Every command takes -v or --verbose.\n\n"+
-		"Run 'paisans help <command>' for a command's details, and 'paisans help\n"+
+		"Run '"+progname.Name()+" help <command>' for a command's details, and '"+progname.Name()+" help\n"+
 		"execute' for which commands reach a host and what --execute changes.\n")
 }
 
 // printGroupHelp writes a group's page: its subcommands, one line each.
 func printGroupHelp(w io.Writer, group string) {
 	subs := subcommands(group)
-	fmt.Fprintf(w, "%s\n\nUsage: paisans %s <command> [flags]\n\nCommands:\n", groupSummary[group], group)
+	fmt.Fprintf(w, "%s\n\nUsage: %s %s <command> [flags]\n\nCommands:\n", groupSummary[group], progname.Name(), group)
 	width := 0
 	for _, c := range subs {
 		width = max(width, len(strings.TrimPrefix(c.name, group+" ")))
@@ -618,7 +622,7 @@ func printGroupHelp(w io.Writer, group string) {
 	for _, c := range subs {
 		fmt.Fprintf(w, "  %-*s  %s\n", width, strings.TrimPrefix(c.name, group+" "), c.summary)
 	}
-	fmt.Fprintf(w, "\nRun 'paisans %s <command> --help' for a command's usage, details and flags.\n", group)
+	fmt.Fprintf(w, "\nRun '%s %s <command> --help' for a command's usage, details and flags.\n", progname.Name(), group)
 }
 
 // printCommandHelp writes one command's page: its usage, what it does, and,
@@ -626,7 +630,7 @@ func printGroupHelp(w io.Writer, group string) {
 func printCommandHelp(w io.Writer, c *helpCommand, fs *flag.FlagSet) {
 	fmt.Fprint(w, "Usage:\n")
 	for _, u := range c.usage {
-		fmt.Fprintf(w, "  %s\n", u)
+		fmt.Fprintf(w, "  %s\n", invokedUsage(u))
 	}
 	for _, p := range strings.Split(c.detail, "\n\n") {
 		fmt.Fprintf(w, "\n%s\n", wrap(p, helpWidth))
@@ -639,6 +643,14 @@ func printCommandHelp(w io.Writer, c *helpCommand, fs *flag.FlagSet) {
 	fs.SetOutput(w)
 	fs.PrintDefaults()
 	fs.SetOutput(out)
+}
+
+// invokedUsage is a usage line from helpCommands, which names the command
+// paisans, with the command named as it was invoked and its continuation
+// lines moved by the difference, so they stay under its flags.
+func invokedUsage(u string) string {
+	u = strings.Replace(u, progname.Default, progname.Name(), 1)
+	return strings.ReplaceAll(u, "\n"+strings.Repeat(" ", len(progname.Default)), "\n"+strings.Repeat(" ", len(progname.Name())))
 }
 
 // wrap breaks text into lines of at most width columns, at spaces.
@@ -680,7 +692,7 @@ func newFlagSet(name string, handling flag.ErrorHandling) *flag.FlagSet {
 			printCommandHelp(os.Stdout, c, fs)
 			return
 		}
-		fmt.Fprintf(fs.Output(), "Run 'paisans %s --help' for its usage and flags.\n", name)
+		fmt.Fprintf(fs.Output(), "Run '%s %s --help' for its usage and flags.\n", progname.Name(), name)
 	}
 	return fs
 }
@@ -703,7 +715,7 @@ func resolveHelp(args []string) (page func(io.Writer), asked bool, run []string)
 		case len(topic) == 0:
 			return printTopHelp, true, nil
 		case len(topic) == 1 && topic[0] == "execute":
-			return func(w io.Writer) { fmt.Fprint(w, executeTopic) }, true, nil
+			return func(w io.Writer) { fmt.Fprint(w, executeTopic()) }, true, nil
 		default:
 			args = append(slices.Clone(topic), "--help")
 		}

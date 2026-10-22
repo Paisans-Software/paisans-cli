@@ -14,6 +14,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/pocketidlog"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -294,7 +295,7 @@ func convergeEmailResults(r ui.Reporter, cfg *config.Config, app string, o conve
 // failed with. The printed links are still there either way.
 func emailFailureFix(why string) string {
 	if strings.Contains(why, "missing SMTP password") {
-		return "Its smtp settings name a username and the secrets file holds no password for it. `paisans secrets list` names the unset smtp_password; set it with `paisans secrets set <path>`, then apply. Until then, pass each link below on yourself."
+		return "Its smtp settings name a username and the secrets file holds no password for it. `" + progname.Name() + " secrets list` names the unset smtp_password; set it with `" + progname.Name() + " secrets set <path>`, then apply. Until then, pass each link below on yourself."
 	}
 	return "Pass each link below on yourself."
 }

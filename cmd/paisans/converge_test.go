@@ -4,7 +4,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/paisans-software/paisans-cli/internal/grant"
 	"io"
 	"maps"
 	"os"
@@ -15,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/paisans-software/paisans-cli/internal/grant"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
@@ -1101,8 +1102,8 @@ func TestApplySiteUsageNamesEveryFlag(t *testing.T) {
 // `paisans help execute`'s list of the commands that reach a host names secrets prune,
 // which reads the gateways' deployment records over ssh.
 func TestUsageHostListNamesSecretsPrune(t *testing.T) {
-	start := strings.Index(executeTopic, "site prepare, site deployments, apply")
-	entry := strings.Join(strings.Fields(executeTopic[start:start+strings.Index(executeTopic[start:], "are the only commands that")]), " ")
+	start := strings.Index(executeTopic(), "site prepare, site deployments, apply")
+	entry := strings.Join(strings.Fields(executeTopic()[start:start+strings.Index(executeTopic()[start:], "are the only commands that")]), " ")
 	if !strings.Contains(entry, "secrets prune") {
 		t.Errorf("the commands that reach a host leave out secrets prune:\n%s", entry)
 	}

@@ -191,7 +191,7 @@ func TestAFailedPullLetsTheOthersFinishAndStopsBeforeDNS(t *testing.T) {
 	if hint != "apply stopped at pull on home-a, vm" {
 		t.Errorf("hint %q", hint)
 	}
-	for _, want := range []string{"ssh could not connect", "docker pull ghcr.io/example/vm:1 failed: Error response from daemon: manifest unknown.", resumeAdvice} {
+	for _, want := range []string{"ssh could not connect", "docker pull ghcr.io/example/vm:1 failed: Error response from daemon: manifest unknown.", resumeAdvice()} {
 		if !strings.Contains(explain, want) {
 			t.Errorf("explanation does not say %q:\n%s", want, explain)
 		}
@@ -214,7 +214,7 @@ func TestAShortDiskStopsThePullWithApplysRefusal(t *testing.T) {
 	if hint != "apply stopped at pull --site vm" {
 		t.Errorf("hint %q", hint)
 	}
-	for _, want := range []string{"too little free space to pull 2 images", "vm: 1.0 GiB free on /var/lib/docker, and this apply needs at least 3.0 GiB", "--min-free", resumeAdvice} {
+	for _, want := range []string{"too little free space to pull 2 images", "vm: 1.0 GiB free on /var/lib/docker, and this apply needs at least 3.0 GiB", "--min-free", resumeAdvice()} {
 		if !strings.Contains(explain, want) {
 			t.Errorf("explanation does not say %q:\n%s", want, explain)
 		}

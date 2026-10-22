@@ -19,6 +19,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 	"gopkg.in/yaml.v3"
 )
@@ -285,7 +286,7 @@ func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transpo
 		if errors.Is(err, configstore.ErrNoAnchor) {
 			todo := m.noAnchor
 			if todo == "" {
-				todo = "Pin the first version you trust with --root <sha>, or run paisans operator register to sign the version you hold."
+				todo = "Pin the first version you trust with --root <sha>, or run " + progname.Name() + " operator register to sign the version you hold."
 			}
 			return g, &ui.Problem{
 				Hint:    "no version to start trusting from",
@@ -335,7 +336,7 @@ func forkProblem(g configstore.Gathered, more ...string) error {
 	for _, h := range g.Verdict.Heads {
 		heads = append(heads, "- "+describe(g, h))
 	}
-	return &ui.Problem{Hint: "the sites hold a fork", Explain: "Two trusted versions build on one parent:\n" + strings.Join(heads, "\n") + "\nMerge their files by hand, then publish with paisans deployment publish --merge." + strings.Join(append([]string{""}, more...), " ")}
+	return &ui.Problem{Hint: "the sites hold a fork", Explain: "Two trusted versions build on one parent:\n" + strings.Join(heads, "\n") + "\nMerge their files by hand, then publish with " + progname.Name() + " deployment publish --merge." + strings.Join(append([]string{""}, more...), " ")}
 }
 
 // confirmPartial asks for partial when fewer than a majority of the
@@ -369,7 +370,7 @@ func signingKeyFor(l configstore.Local, local *config.Config) (string, error) {
 		}
 		f, err := cache.Files(head)
 		if err != nil {
-			return "", &ui.Problem{Hint: "the base version is not in the local store", Explain: "Run paisans deployment pull, which gathers it again.", Cause: err}
+			return "", &ui.Problem{Hint: "the base version is not in the local store", Explain: "Run " + progname.Name() + " deployment pull, which gathers it again.", Cause: err}
 		}
 		if base, err = config.LoadBytes(f.Paisans); err != nil {
 			return "", err
@@ -548,7 +549,7 @@ func runDeploymentPublish(args []string, stdin io.Reader, stdout io.Writer) erro
 		s.Fail(err)
 		var rb *configstore.RollbackError
 		if errors.As(err, &rb) {
-			return &ui.Problem{Hint: "the sites' newest version is older than one seen here", Explain: rb.Error() + ". Nothing was published: a version on it would build on an old one. Find out why the newer version is gone; paisans deployment log shows what each site holds.", Cause: err}
+			return &ui.Problem{Hint: "the sites' newest version is older than one seen here", Explain: rb.Error() + ". Nothing was published: a version on it would build on an old one. Find out why the newer version is gone; " + progname.Name() + " deployment log shows what each site holds.", Cause: err}
 		}
 		if errors.Is(err, configstore.ErrNoAnchor) {
 			return &ui.Problem{Hint: "no version to start trusting from", Explain: err.Error() + ". " + noAnchorPublish, Cause: err}
@@ -611,7 +612,7 @@ func runDeploymentPull(args []string, stdin io.Reader, stdout io.Writer) error {
 		return forkProblem(g)
 	}
 	if len(g.Verdict.Heads) == 0 {
-		r.Result("the sites hold no version yet; paisans deployment publish makes the first")
+		r.Result("the sites hold no version yet; " + progname.Name() + " deployment publish makes the first")
 		return nil
 	}
 	head := g.Verdict.Heads[0]
@@ -713,7 +714,7 @@ func pullOverEdits(r ui.Reporter, l configstore.Local, g configstore.Gathered, h
 	}
 	return &ui.Problem{
 		Hint:    "the local files have edits the sites' newest version lacks",
-		Explain: fmt.Sprintf("They were edited from %s, and the sites hold %s. %s Merge them by hand, then publish with paisans deployment publish --merge.", from, describe(g, head), where),
+		Explain: fmt.Sprintf("They were edited from %s, and the sites hold %s. %s Merge them by hand, then publish with "+progname.Name()+" deployment publish --merge.", from, describe(g, head), where),
 	}
 }
 
@@ -945,7 +946,7 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 		return err
 	}
 	if l.HasFiles() {
-		return &ui.Problem{Hint: "there are configuration files here already", Explain: "Recovery writes onto a workstation with nothing, so it never overwrites a file. Use paisans deployment pull where the files exist, or recover into an empty directory with --config."}
+		return &ui.Problem{Hint: "there are configuration files here already", Explain: "Recovery writes onto a workstation with nothing, so it never overwrites a file. Use " + progname.Name() + " deployment pull where the files exist, or recover into an empty directory with --config."}
 	}
 	a, err := anchorFor(l, *root)
 	if err != nil {
@@ -1085,7 +1086,7 @@ func recoverSites(l configstore.Local, g configstore.Gathered, id string) (map[s
 // record is kept as named, so the gather says what it holds.
 func recoverID(r ui.Reporter, dests []config.Destination, id string) (string, map[string]apply.Transport, error) {
 	if id != "" && !deployment.ValidID(id) {
-		return "", nil, &ui.Problem{Hint: fmt.Sprintf("--id %q is not a deployment id", id), Explain: "Give the full id, as paisans site deployments lists it."}
+		return "", nil, &ui.Problem{Hint: fmt.Sprintf("--id %q is not a deployment id", id), Explain: "Give the full id, as " + progname.Name() + " site deployments lists it."}
 	}
 	hosts := map[string]apply.Transport{}
 	listed := map[string][]admission.Record{}

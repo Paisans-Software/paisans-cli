@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 
 	"github.com/paisans-software/paisans-cli/internal/appadmin"
@@ -27,7 +28,7 @@ func runApp(args []string) error {
 	if len(args) >= 1 && args[0] == "remove" {
 		return runAppRemove(args[1:], os.Stdin, os.Stdout)
 	}
-	return fmt.Errorf("app takes one subcommand: paisans app remove <app>. An operator is declared under operators and made by apply; paisans operator magic-link gives one a fresh sign-in link")
+	return fmt.Errorf("app takes one subcommand: %s app remove <app>. An operator is declared under operators and made by apply; %s operator magic-link gives one a fresh sign-in link", progname.Name(), progname.Name())
 }
 
 // adminGroups is every admin group an app that signs in through Pocket ID
@@ -88,7 +89,7 @@ func pocketIDKey(cfg *config.Config, configPath, secretsPath, app string) (strin
 	}
 	key, _ := secrets.Apps[app]["static_api_key"].(string)
 	if key == "" {
-		return "", fmt.Errorf("secrets apps.%s.static_api_key is empty. Run `paisans init` to generate it and `paisans deployment apply` to render it into Pocket ID, then re-run", app)
+		return "", fmt.Errorf("secrets apps.%s.static_api_key is empty. Run `"+progname.Name()+" init` to generate it and `"+progname.Name()+" deployment apply` to render it into Pocket ID, then re-run", app)
 	}
 	return key, nil
 }

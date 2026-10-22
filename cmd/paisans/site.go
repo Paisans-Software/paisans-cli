@@ -13,6 +13,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/grant"
 	"github.com/paisans-software/paisans-cli/internal/hostarch"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/secretsgen"
 	"github.com/paisans-software/paisans-cli/internal/siteadd"
@@ -60,7 +61,7 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 		return fmt.Errorf("site add: one site at a time; %q is extra", fs.Arg(0))
 	}
 	if site == "" {
-		return fmt.Errorf("site add: name the site to add, Eg: paisans site add home-b")
+		return fmt.Errorf("site add: name the site to add, Eg: %s site add home-b", progname.Name())
 	}
 
 	cfg, err := config.Load(*configPath)
@@ -166,7 +167,7 @@ func runSiteAdd(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	review, approvedBy, err := stepReview(r, ans, stdin, stdout, cfg, site, g, scope, transports[site], *execute, "paisans site add "+site+" --execute")
+	review, approvedBy, err := stepReview(r, ans, stdin, stdout, cfg, site, g, scope, transports[site], *execute, progname.Name()+" site add "+site+" --execute")
 	if err != nil {
 		return err
 	}

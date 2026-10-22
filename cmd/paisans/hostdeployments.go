@@ -12,6 +12,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -264,7 +265,7 @@ func runSiteDeployments(args []string) error {
 		tokens[e.Token], roots[e.Root] = true, true
 		if noBuild != nil && slices.Contains(noBuild.IDs, id) {
 			line := strings.TrimSuffix(registryLine(id, e), ", claimed by paisans "+e.Build.String())
-			r.Warn(line+", in an entry that does not say which build of paisans claimed the host: its owner admits it again (`paisans site request`, then `paisans site admit`)", noBuild.Error())
+			r.Warn(line+", in an entry that does not say which build of paisans claimed the host: its owner admits it again (`"+progname.Name()+" site request`, then `"+progname.Name()+" site admit`)", noBuild.Error())
 			continue
 		}
 		r.Step(registryLine(id, e)).End(ui.OK, "")
@@ -291,7 +292,7 @@ func runSiteDeployments(args []string) error {
 
 	switch {
 	case len(ids) > 0:
-		r.Result("%d deployment(s) in the registry. paisans site remove --force --ssh <the deployment's user>@<host> --id <id or token> cleans one off this host.", len(ids))
+		r.Result("%d deployment(s) in the registry. "+progname.Name()+" site remove --force --ssh <the deployment's user>@<host> --id <id or token> cleans one off this host.", len(ids))
 	case len(left) > 0:
 		r.Result("No deployment in the registry; what is listed above is removed by hand.")
 	default:

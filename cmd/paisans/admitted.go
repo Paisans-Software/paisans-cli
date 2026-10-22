@@ -10,6 +10,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -70,7 +71,7 @@ func admittedSites(r ui.Reporter, cfg *config.Config, sites ...string) (map[stri
 // record that cannot be read is first moved aside by the owner, since site
 // admit refuses it too. token is the deployment's.
 func admissionProblem(site, token string, err error) error {
-	lines := fmt.Sprintf("Send the host's owner a new request:\n\n    paisans site request --site %[1]s > %[1]s.admit\n\nand ask them to run, on the host:\n\n    sudo paisans site admit --request %[1]s.admit", site)
+	lines := fmt.Sprintf("Send the host's owner a new request:\n\n    "+progname.Name()+" site request --site %[1]s > %[1]s.admit\n\nand ask them to run, on the host:\n\n    sudo "+progname.Name()+" site admit --request %[1]s.admit", site)
 	var se *admission.SiteError
 	var unreadable *admission.Error
 	switch {

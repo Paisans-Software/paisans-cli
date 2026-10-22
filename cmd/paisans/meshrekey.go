@@ -9,6 +9,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/meshrekey"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 	"github.com/paisans-software/paisans-cli/internal/validate"
 )
@@ -23,7 +24,7 @@ func runMesh(args []string) error {
 	if len(args) >= 1 && args[0] == "rekey" {
 		return runMeshRekey(args[1:])
 	}
-	return &ui.Problem{Hint: "mesh takes one subcommand, rekey", Explain: "Usage: paisans mesh rekey <site>... | --all [--execute]"}
+	return &ui.Problem{Hint: "mesh takes one subcommand, rekey", Explain: "Usage: " + progname.Name() + " mesh rekey <site>... | --all [--execute]"}
 }
 
 // secretsStore is the secrets file as meshrekey reads and writes it: loaded
@@ -70,7 +71,7 @@ func runMeshRekey(args []string) error {
 	case *all && len(sites) > 0:
 		return &ui.Problem{Hint: "--all takes no site", Explain: "Name the sites to rekey, or pass --all for every one. Got " + strings.Join(sites, " ") + " too."}
 	case !*all && len(sites) == 0:
-		return &ui.Problem{Hint: "mesh rekey needs a site", Explain: "Name the sites to rekey, Eg: paisans mesh rekey home-a, or pass --all for every one."}
+		return &ui.Problem{Hint: "mesh rekey needs a site", Explain: "Name the sites to rekey, Eg: " + progname.Name() + " mesh rekey home-a, or pass --all for every one."}
 	}
 	cfg, err := config.Load(*configPath)
 	if err != nil {
@@ -151,6 +152,6 @@ func refuseMidRekey(secrets *config.Secrets) error {
 	}
 	return &ui.Problem{
 		Hint:    "a mesh rekey is unfinished",
-		Explain: fmt.Sprintf("The secrets file holds a next WireGuard key for %s, so a mesh rekey stopped part way. Its host may already run that key, and apply renders the old one, which would cut its tunnels. Finish the rekey first: paisans mesh rekey %s --execute (or --all, when the run was --all), then apply. Nothing was changed.", strings.Join(pending, ", "), strings.Join(pending, " ")),
+		Explain: fmt.Sprintf("The secrets file holds a next WireGuard key for %s, so a mesh rekey stopped part way. Its host may already run that key, and apply renders the old one, which would cut its tunnels. Finish the rekey first: "+progname.Name()+" mesh rekey %s --execute (or --all, when the run was --all), then apply. Nothing was changed.", strings.Join(pending, ", "), strings.Join(pending, " ")),
 	}
 }
