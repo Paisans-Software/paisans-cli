@@ -201,22 +201,25 @@ func LoadSecrets(path string) (*Secrets, error) { return loadSecrets(path, "") }
 // loadSecrets is LoadSecrets for the deployment id, whose key decryption
 // looks for in the keystore. "" looks nowhere but where sops does.
 func loadSecrets(path, id string) (*Secrets, error) {
-	s, _, err := loadSecretsBytes(path, id)
+	s, _, err := loadSecretsBytes(path, id, "")
 	return s, err
 }
 
-// loadSecretsBytes is loadSecrets, and the bytes it read.
-func loadSecretsBytes(path, id string) (*Secrets, []byte, error) {
+// loadSecretsBytes is loadSecrets, and the bytes it read. replacing is a
+// pasted secret's key the pasted secrets check passes over (checkPasted),
+// "" for none.
+func loadSecretsBytes(path, id, replacing string) (*Secrets, []byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, nil, readProblem(path, "Run paisans init to create it, or name the file with --secrets.", err)
 	}
-	s, err := parseSecrets(data, path, id)
+	s, err := parseSecrets(data, path, id, replacing)
 	return s, data, err
 }
 
-// parseSecrets decrypts and decodes data, read from path.
-func parseSecrets(data []byte, path, id string) (*Secrets, error) {
+// parseSecrets decrypts and decodes data, read from path, and refuses a
+// pasted secret holding a control character, except the one at replacing.
+func parseSecrets(data []byte, path, id, replacing string) (*Secrets, error) {
 	var err error
 	plain := data
 	encrypted := looksEncrypted(data)
@@ -245,6 +248,9 @@ func parseSecrets(data []byte, path, id string) (*Secrets, error) {
 	if s.Version == 0 {
 		s.Version = SecretsVersion
 	}
+	if err := s.checkPasted(replacing); err != nil {
+		return nil, err
+	}
 	return &s, nil
 }
 
@@ -264,7 +270,20 @@ func LoadDeploymentSecrets(path, id string) (*Secrets, error) {
 // read, as they are on disk: what apply publishes as the version it applies
 // is then exactly what it loaded.
 func LoadDeploymentSecretsWithBytes(path, id string) (*Secrets, []byte, error) {
-	s, data, err := loadSecretsBytes(path, id)
+	return loadDeploymentSecrets(path, id, "")
+}
+
+// LoadDeploymentSecretsReplacing is LoadDeploymentSecrets for a command
+// about to replace the pasted secret at key: a control character in that
+// one value does not refuse the file, so `paisans secrets set` can repair
+// it. A control character in any other pasted secret still does.
+func LoadDeploymentSecretsReplacing(path, id, key string) (*Secrets, error) {
+	s, _, err := loadDeploymentSecrets(path, id, key)
+	return s, err
+}
+
+func loadDeploymentSecrets(path, id, replacing string) (*Secrets, []byte, error) {
+	s, data, err := loadSecretsBytes(path, id, replacing)
 	if err != nil {
 		return nil, nil, err
 	}

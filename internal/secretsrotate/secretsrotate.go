@@ -519,6 +519,9 @@ func (r *Run) Answer(e Env, path, value string) error {
 	if value == "" {
 		return fmt.Errorf("secrets rotate %s: nothing was pasted. Replace it at %s and run again to paste the new one; or set it first with `paisans secrets set %s`, and the run hands out the value the file holds; or, when it was replaced and applied before, pass --replaced %s. Nothing was changed", path, issuer, path, path)
 	}
+	if err := config.CheckPastedSecret(path, value); err != nil {
+		return fmt.Errorf("secrets rotate %s: %w. Nothing was changed", path, err)
+	}
 	s, err := e.Store.Load()
 	if err != nil {
 		return err

@@ -2381,6 +2381,20 @@ The toolkit generates it, records it here, and then hands it to Pocket ID,
 which accepts a caller supplied secret; see *`oidc client create` makes an
 app's client at Pocket ID*.
 
+**A pasted or captured secret is one line, and the file is refused otherwise.**
+Each is rendered onto one line of an env file (Eg: `ACME_DNS_TOKEN=` in
+Caddy's), so a line break inside one would start a line of its own that sets
+any other variable of that service, such as Pocket ID's `STATIC_API_KEY`. No
+token, password, ID or address any provider issues holds one, so a control
+character or a Unicode line or paragraph separator in one is a paste or a
+decryption gone wrong. `secrets set` and `secrets rotate` refuse such a value,
+and loading the file refuses one already in it, naming the key and never the
+value; `secrets set` on that key is the repair, and reads the file with that
+one value passed over. Generated secrets are not held to it, since a PEM key
+is several lines. The templates also write these values through the same
+quoting a passthrough key gets, so a `$` or `#` in a token reaches the service
+as it was issued.
+
 **The file names its format and its deployment.** Its first two keys are
 `version`, the secrets file's own format (currently 2, and independent of
 `paisans-stack.yaml`'s `version`), and `id`, the id of the deployment it belongs to,

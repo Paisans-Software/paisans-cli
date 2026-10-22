@@ -329,6 +329,11 @@ security find-generic-password -s acme -w | paisans secrets set external.acme_dn
 * **Alone:** always. The whole apply names it, in a note, for each credential
   still owed.
 
+A pasted or captured value holding a control character or a Unicode line or
+paragraph separator is refused with nothing written, by key. Setting a key is
+also how a file already holding such a value under that key is repaired (see
+*Three kinds of secret* in `README.md`).
+
 Given a key at a terminal, it asks for that key's value with echo off, saying
 whether the key is already set. An empty answer writes nothing.
 
