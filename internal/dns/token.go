@@ -545,7 +545,8 @@ func remoteGet(envFile, target string) string {
 		envTokenRead +
 		`if [ -z "$t" ]; then echo none; exit 0; fi; ` +
 		`case $t in cfat_*) echo account;; *) echo user;; esac; ` +
-		`o=$(printf 'header = "Authorization: Bearer %s"\n' "$t" | curl -sS --max-time 20 -w '\n%{http_code}' -K - ` + quote(target) + `); s=$?; ` +
+		curlQuoted +
+		`o=$(printf 'header = "Authorization: Bearer %s"\n' "$q" | curl -sS --max-time 20 -w '\n%{http_code}' -K - ` + quote(target) + `); s=$?; ` +
 		`r=; while :; do case $o in *"$t"*) r=$r${o%%"$t"*}'[redacted]'; o=${o#*"$t"};; *) break;; esac; done; ` +
 		`printf '%s\n' "$r$o"; exit $s`
 }
@@ -562,6 +563,15 @@ const envTokenRead = `t=$(sed -n 's/^ACME_DNS_TOKEN=//p' "$f"); ` +
 	`while [ -n "$t" ]; do r=${t#?}; c=${t%"$r"}; t=$r; ` +
 	`if [ "$c" = '\' ]; then r=${t#?}; c=${t%"$r"}; t=$r; if [ "$c" = n ]; then c='
 '; fi; fi; u=$u$c; done; t=$u;; esac; `
+
+// curlQuoted is the host's commands that set q to the token in t, escaped
+// for a double quoted string in curl's configuration, where a backslash
+// starts an escape and a double quote ends the string: each is written
+// behind a backslash, so curl sends the token as it was issued. It walks the
+// token one character at a time, as envTokenRead does, so the token is in no
+// argument list.
+const curlQuoted = `q=; r0=$t; while [ -n "$r0" ]; do r=${r0#?}; c=${r0%"$r"}; r0=$r; ` +
+	`case $c in \\|\") q=$q\\$c;; *) q=$q$c;; esac; done; `
 
 // curlCause is the line of a failed command that says why: curl's own
 // error when it printed one, the transport's error otherwise.

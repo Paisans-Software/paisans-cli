@@ -1,9 +1,13 @@
 package dns
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/configmerge"
@@ -52,6 +56,54 @@ func readsBack(t *testing.T, sh string) {
 		}
 		if got := string(out); got != token+"|" {
 			t.Errorf("rendered as %s, read back as %q, want %q", line, got, token+"|")
+		}
+	}
+}
+
+// The token reaches the provider as issued: remoteGet, run here in sh and in
+// dash against a local listener, sends the Authorization header curl builds
+// from its configuration on stdin, and a backslash or a double quote in the
+// token survives curl's own quoting.
+func TestTheHostSendsTheTokenItRead(t *testing.T) {
+	if _, err := exec.LookPath("curl"); err != nil {
+		t.Skip("no curl on this machine")
+	}
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("Authorization")
+		fmt.Fprint(w, `{"success":true}`)
+	}))
+	defer srv.Close()
+	shells := []string{"/bin/sh"}
+	if dash, err := exec.LookPath("dash"); err == nil {
+		shells = append(shells, dash)
+	}
+	for _, sh := range shells {
+		for _, token := range []string{
+			"cfat_Ab0-Cd1.Ef2_Gh3",
+			`back\slash`,
+			`say "hi"`,
+			`both \" and \\ "\"`,
+			`a$b #c`,
+			"  edge spaces  ",
+		} {
+			line, err := configmerge.EnvValue("acme_dns_token", token)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := filepath.Join(t.TempDir(), "caddy.env")
+			if err := os.WriteFile(f, []byte("ACME_DNS_TOKEN="+line+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			got = ""
+			out, err := exec.Command(sh, "-c", remoteGet(f, srv.URL+"/user/tokens/verify")).CombinedOutput()
+			if err != nil {
+				t.Fatalf("%s %q: %v\n%s", sh, token, err, out)
+			}
+			// A header value's trailing spaces are dropped by any server.
+			if want := "Bearer " + strings.TrimRight(token, " "); got != want {
+				t.Errorf("%s: %q arrived as %q, want %q", filepath.Base(sh), token, got, want)
+			}
 		}
 	}
 }
