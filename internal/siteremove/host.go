@@ -939,6 +939,10 @@ func (p *Plan) hostGoneLeft() string {
 	if p.cfg.Sites[p.Site].WebServerManagedBy() == config.ManagedByExternal {
 		web = fmt.Sprintf(" Its web server is its owner's: the host's owner removes the blocks apply's reference files in %s held, or it keeps routing this deployment's hostnames to apps that no longer run.", webserver.ReferenceDir(d))
 	}
-	return fmt.Sprintf("%s: host not reached (--host-gone). It keeps the deployment's user %s with its containers, volumes and units, %s, and its admission record until its owner runs the site evict line below. Nothing it runs can reach the cluster: no remaining site has it as a WireGuard peer, and its etcd member is gone",
-		p.Site, p.cfg.Sites[p.Site].SSHUser(), d.Root()) + web
+	etcd := ""
+	if p.leavesEtcd() {
+		etcd = fmt.Sprintf(" Its etcd data, %s, stays there with the rest: a removed member's, which etcd refuses to rejoin with, so site add clears it if the site joins again.", apply.EtcdDataDir(d))
+	}
+	return fmt.Sprintf("%s: host not reached (--host-gone). It keeps the deployment's user %s with its containers, volumes and units, %s, and its admission record until its owner runs the site evict line below. Nothing it runs can reach the cluster: no remaining site has it as a WireGuard peer, and its etcd member is gone.",
+		p.Site, p.cfg.Sites[p.Site].SSHUser(), d.Root()) + etcd + web
 }

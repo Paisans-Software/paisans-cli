@@ -1322,7 +1322,16 @@ stack. A witness joining in the same change, whether an existing site gaining th
 role or a new host holding it, joins etcd first, as a learner, in the same
 stage, and preflight checks a new witness host as it checks the new site.
 Refuses a witness given on its own: it joins through the `site add` of the
-data site joining with it.
+data site joining with it. A joiner whose member has not started, such as a
+site whose member an earlier removal took out, has its old etcd data,
+`/srv/paisans/<token>/infra/etcd`, deleted before its etcd starts, and the
+plan names it: etcd refuses to rejoin with a removed member's data. Its etcd
+container is removed first, and the data is read on disk and deleted only
+when it is nothing or a member whose write-ahead logs name this cluster and
+a member this cluster recorded removing for the site; anything else refuses,
+and nothing is deleted. A database with no write-ahead log, which a learner
+that never started can leave, is refused with the command that deletes it by
+hand once it is certain to be nothing to lose.
 
 ```
 paisans site add home-b             # every stage, its steps and its gate
@@ -1369,7 +1378,9 @@ See *Preflight* in `README.md`.
 ### `paisans site remove`
 
 Takes a site out of the running deployment in gated stages: its data out, out
-of the cluster, its host cleaned, as the deployment's user, of what is provably
+of the cluster (each leaving etcd member's data directory emptied once the
+member is removed, except on a host `--host-gone` does not reach), its host
+cleaned, as the deployment's user, of what is provably
 this deployment's and that user's to remove (on a
 monitor behind the operator's own web server, the reference files apply wrote
 under `/srv/paisans/<token>/web-server/` deleted, with the block the owner

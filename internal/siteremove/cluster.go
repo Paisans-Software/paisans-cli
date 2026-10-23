@@ -108,7 +108,10 @@ func (p *Plan) buildCluster() (*Stage, error) {
 	if p.etcd.control != "" {
 		if p.etcd.member != nil {
 			st.Steps = append(st.Steps, Step{Site: p.etcd.control, Verb: "remove", Title: "remove " + p.Site + "'s etcd member", Text: fmt.Sprintf("%s's etcd member %s: %s", p.Site, p.etcd.member.HexID(), p.etcdctl("member remove "+p.etcd.member.HexID()))})
+		}
+		if p.leavesEtcd() {
 			st.Steps = append(st.Steps, Step{Site: p.Site, Verb: "stop", Title: "stop etcd on " + p.Site, Text: "its etcd, which a removed member cannot rejoin, so it does not restart in a loop: " + p.stopService("etcd")})
+			st.Steps = append(st.Steps, p.emptyEtcdDataStep(p.Site))
 		}
 		if p.witness != "" {
 			if p.etcd.witness != nil {
@@ -118,6 +121,7 @@ func (p *Plan) buildCluster() (*Stage, error) {
 			if p.etcd.witnessContainer {
 				st.Steps = append(st.Steps, Step{Site: p.witness, Verb: "stop", Title: "stop and remove etcd on " + p.witness, Text: "its etcd container, which a removed member cannot rejoin, found by this deployment's label and the infrastructure project's etcd service: " + p.stopWitnessEtcd()})
 			}
+			st.Steps = append(st.Steps, p.emptyEtcdDataStep(p.witness))
 		}
 		gates = append(gates, fmt.Sprintf("etcd's voters are exactly %s and every member is healthy", strings.Join(sortedCopy(p.end.Etcd.Members), ", ")))
 	}
@@ -148,9 +152,14 @@ func (p *Plan) buildCluster() (*Stage, error) {
 			if err := p.removeEtcdMember(); err != nil {
 				return err
 			}
+		}
+		if p.leavesEtcd() {
 			p.work("stop etcd on " + p.Site)
 			if out, err := p.transports[p.Site].Run(p.stopService("etcd")); err != nil {
 				return fmt.Errorf("%s: stopping etcd: %w: %s", p.Site, err, lastLines(out, 3))
+			}
+			if err := p.emptyEtcdData(p.Site); err != nil {
+				return err
 			}
 		}
 		if p.etcd.witness != nil {
@@ -162,6 +171,11 @@ func (p *Plan) buildCluster() (*Stage, error) {
 			p.work("stop and remove etcd on " + p.witness)
 			if out, err := p.transports[p.witness].Run(p.stopWitnessEtcd()); err != nil {
 				return fmt.Errorf("%s: stopping its etcd: %w: %s", p.witness, err, lastLines(out, 3))
+			}
+		}
+		if p.etcd.control != "" && p.witness != "" {
+			if err := p.emptyEtcdData(p.witness); err != nil {
+				return err
 			}
 		}
 		for _, c := range changes {
@@ -246,23 +260,38 @@ func renderedContent(rendered *render.Plan, site, rel string) string {
 }
 
 // witnessEtcdIDs lists the etcd containers of this deployment on the leaving
-// witness's host, running or stopped: its label, the infrastructure stack's
-// compose project and the etcd service, so nothing else on the host can
-// match.
-func (p *Plan) witnessEtcdIDs() string {
-	d := p.dep()
-	return fmt.Sprintf("docker ps -aq --filter %s --filter %s --filter %s",
-		quote(d.LabelFilter()), quote("label=com.docker.compose.project="+d.Project("infra")), quote("label=com.docker.compose.service=etcd"))
-}
+// witness's host, running or stopped.
+func (p *Plan) witnessEtcdIDs() string { return apply.EtcdContainerIDs(p.dep()) }
 
 // stopWitnessEtcd stops and removes them, so the witness ends with no etcd
 // container: its compose file declares none, and a stopped one left behind
-// is started again by its restart policy and exits as a removed member. Its
-// volumes stay. It finds the container by its labels, not by the compose
-// file, because the compose file written without etcd does not name the
-// service.
-func (p *Plan) stopWitnessEtcd() string {
-	return fmt.Sprintf("ids=$(%s) && { [ -z \"$ids\" ] || { docker stop $ids >/dev/null && docker rm $ids >/dev/null; }; }", p.witnessEtcdIDs())
+// is started again by its restart policy and exits as a removed member.
+func (p *Plan) stopWitnessEtcd() string { return apply.RemoveEtcdContainers(p.dep()) }
+
+// leavesEtcd is whether the site leaving is an etcd member in the
+// configuration as it stands, so its host holds etcd data. It is read from
+// the configuration rather than from etcd, so a run resumed after its member
+// was removed still stops its etcd and empties its data.
+func (p *Plan) leavesEtcd() bool { return contains(p.cfg.Etcd.Members, p.Site) }
+
+// emptyEtcdDataStep and emptyEtcdData empty a leaving member's etcd data
+// directory once its member is removed and its etcd is stopped, every time
+// the stage runs, so a resumed run empties it too: emptying an empty
+// directory is nothing. The data is a removed member's, which the cluster
+// never accepts again, and holds only Patroni's store, which every remaining
+// member also holds (apply.EmptyEtcdData), so keeping it serves nothing. The
+// directory stays. site add clears a joiner's data itself and does not
+// depend on this, since a removal with --host-gone cannot reach the host.
+func (p *Plan) emptyEtcdDataStep(site string) Step {
+	return Step{Site: site, Verb: "empty", Title: "empty etcd data on " + site, Text: fmt.Sprintf("%s's etcd data, %s: a removed member's, which etcd refuses to rejoin with: %s", site, apply.EtcdDataDir(p.dep()), apply.EmptyEtcdData(p.dep()))}
+}
+
+func (p *Plan) emptyEtcdData(site string) error {
+	p.work("empty etcd data on " + site)
+	if out, err := p.transports[site].Run(apply.EmptyEtcdData(p.dep())); err != nil {
+		return fmt.Errorf("%s: emptying its etcd data, %s: %w: %s", site, apply.EtcdDataDir(p.dep()), err, lastLines(out, 3))
+	}
+	return nil
 }
 
 // removeWitness takes the witness out of etcd once the voters are exactly the
@@ -274,15 +303,18 @@ func (p *Plan) removeWitness() error {
 	if err := p.etcdVoters(both); err != nil {
 		return fmt.Errorf("before taking %s out of etcd: %w", p.witness, err)
 	}
-	members, err := p.etcdMembers()
+	cluster, err := p.etcdCluster()
 	if err != nil {
 		return err
 	}
-	for _, m := range members {
+	for _, m := range cluster.Members {
 		if apply.EtcdMemberSite(p.cfg, m) != p.witness {
 			continue
 		}
 		p.work("remove witness " + p.witness + "'s etcd member")
+		if err := p.recordRemoved(cluster.ID, p.witness, m.ID); err != nil {
+			return err
+		}
 		if out, err := p.transports[p.etcd.control].Run(p.etcdctl("member remove " + m.HexID())); err != nil {
 			return fmt.Errorf("%s: etcdctl member remove %s: %w: %s", p.etcd.control, m.HexID(), err, lastLines(out, 3))
 		}
@@ -302,15 +334,18 @@ func renders(rendered *render.Plan, site, rel string) bool {
 // removeEtcdMember removes the site's member by its ID, read again first, so
 // a run that removed it and stopped finds nothing to do.
 func (p *Plan) removeEtcdMember() error {
-	members, err := p.etcdMembers()
+	cluster, err := p.etcdCluster()
 	if err != nil {
 		return err
 	}
-	for _, m := range members {
+	for _, m := range cluster.Members {
 		if apply.EtcdMemberSite(p.cfg, m) != p.Site {
 			continue
 		}
 		p.work("remove " + p.Site + "'s etcd member")
+		if err := p.recordRemoved(cluster.ID, p.Site, m.ID); err != nil {
+			return err
+		}
 		if out, err := p.transports[p.etcd.control].Run(p.etcdctl("member remove " + m.HexID())); err != nil {
 			return fmt.Errorf("%s: etcdctl member remove %s: %w: %s", p.etcd.control, m.HexID(), err, lastLines(out, 3))
 		}
@@ -319,11 +354,41 @@ func (p *Plan) removeEtcdMember() error {
 }
 
 func (p *Plan) etcdMembers() ([]apply.EtcdMember, error) {
+	c, err := p.etcdCluster()
+	return c.Members, err
+}
+
+func (p *Plan) etcdCluster() (apply.EtcdCluster, error) {
 	out, err := p.transports[p.etcd.control].Run(p.etcdctl("member list -w json"))
 	if err != nil {
-		return nil, fmt.Errorf("%s: etcd's member list: %w: %s", p.etcd.control, err, lastLines(out, 3))
+		return apply.EtcdCluster{}, fmt.Errorf("%s: etcd's member list: %w: %s", p.etcd.control, err, lastLines(out, 3))
 	}
-	return apply.ParseEtcdMembers(out)
+	return apply.ParseEtcdCluster(out)
+}
+
+// recordRemoved records, before a member is removed, that this cluster
+// removes site's member id: on the host of every etcd member that stays and
+// of the witness that leaves etcd and stays a site (apply.EtcdRemoved). site
+// add deletes a rejoining site's old etcd data only when its write-ahead log
+// names a member so recorded, so a removal it cannot record is not made.
+// An answer that carried no cluster ID, which etcdctl's never lacks, has
+// nothing to record it under: the removal goes ahead unrecorded, and site
+// add refuses that data rather than delete it.
+func (p *Plan) recordRemoved(cluster uint64, site string, id uint64) error {
+	if cluster == 0 {
+		return nil
+	}
+	hosts := p.live(p.end.Etcd.Members)
+	if p.witness != "" && p.witness != site {
+		hosts = append(hosts, p.witness)
+	}
+	r := apply.EtcdRemoved{Site: site, Cluster: cluster, Member: id}
+	for _, name := range hosts {
+		if err := apply.RecordEtcdRemoved(p.transports[name], p.dep(), r); err != nil {
+			return fmt.Errorf("%s: %w. Nothing was removed from etcd", name, err)
+		}
+	}
+	return nil
 }
 
 func (p *Plan) etcdGate() error { return p.etcdVoters(p.live(p.end.Etcd.Members)) }

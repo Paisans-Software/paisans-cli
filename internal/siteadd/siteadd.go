@@ -105,6 +105,13 @@ type Plan struct {
 	// control is a site whose etcd is a running voter, where every etcdctl
 	// command runs.
 	control string
+	// removed is every etcd member removal this deployment's hosts record
+	// (apply.EtcdRemoved), read from every site's host when a joiner's data
+	// needs it.
+	removed []apply.EtcdRemoved
+	// clusterID is the ID of the cluster control's etcd answers for, 0 when
+	// its answer carries none.
+	clusterID uint64
 	// patroni is a site whose Patroni answers, where every patronictl
 	// command runs.
 	patroni string
@@ -233,6 +240,23 @@ func Build(cfg *config.Config, secrets *config.Secrets, newSite string, transpor
 	live, err := p.probeEtcd()
 	if err != nil {
 		return nil, err
+	}
+	// A member that has not started is given the membership as it stands,
+	// so a record its host keeps from an earlier member is not rendered: see
+	// joinInitial.
+	for name := range p.initial {
+		if !startedMember(p.cfg, live, name) {
+			delete(p.initial, name)
+		}
+	}
+	// Stage 3 clears every joiner whose member has not started; data not
+	// shown to be this cluster's is refused before any stage runs.
+	for _, j := range p.joiners(live) {
+		if !startedMember(p.cfg, live, j) {
+			if err := p.planEtcdData(j, live); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	// Preflight checks a blank host, and once stage 2 has run the new site is

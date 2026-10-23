@@ -210,8 +210,10 @@ func TestAStoppedEtcdJoinResumes(t *testing.T) {
 	if len(steps(p, 2)) != 0 {
 		t.Errorf("the mesh is planned again: %v", steps(p, 2))
 	}
-	if hasStep(p, 3, "vm", "add") || !hasStep(p, 3, "vm", "start") {
-		t.Errorf("the learner is added again, or not started: %v", steps(p, 3))
+	// The learner never started, so it is removed and added again under a
+	// new ID rather than started under the old one.
+	if !hasStep(p, 3, "home-a", "remove") || !hasStep(p, 3, "vm", "add") || !hasStep(p, 3, "vm", "start") {
+		t.Errorf("the unstarted learner is not removed, added again and started: %v", steps(p, 3))
 	}
 	if err := siteadd.Execute(p); err != nil {
 		t.Fatal(err)

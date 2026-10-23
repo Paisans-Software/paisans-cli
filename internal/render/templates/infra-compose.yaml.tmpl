@@ -34,7 +34,7 @@ services:
         recreates the stack for that. */}}
       - --initial-cluster={{ .EtcdInitialCluster }}
       - --initial-cluster-state={{ .EtcdInitialState }}
-      - --initial-cluster-token={{ .Scope }}
+      - --initial-cluster-token={{ .EtcdInitialToken }}
       # Measured from real round trip through the tunnel, not guessed. The
       # defaults assume one datacenter and produce phantom elections every
       # time a home connection hiccups.

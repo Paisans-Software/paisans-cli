@@ -447,3 +447,20 @@ func TestParseEtcdEndpointHealth(t *testing.T) {
 		}
 	}
 }
+
+// etcdctl's warnings come before its answer on the combined output, as JSON
+// lines of their own; the answer is still read, cluster ID and all.
+func TestParseEtcdClusterSkipsLogLines(t *testing.T) {
+	out := `{"level":"warn","ts":"2026-10-22T00:00:00Z","logger":"etcd-client","caller":"v3/retry_interceptor.go:62","msg":"retrying of unary invoker failed"}` + "\n" +
+		`{"header":{"cluster_id":48879,"member_id":1},"members":[{"ID":2748,"name":"vm","peerURLs":["http://10.44.0.3:2380"]}]}` + "\n"
+	c, err := apply.ParseEtcdCluster(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.ID != 48879 || len(c.Members) != 1 || c.Members[0].Name != "vm" {
+		t.Errorf("read %+v", c)
+	}
+	if _, err := apply.ParseEtcdCluster(`{"level":"warn","msg":"retrying"}` + "\nError: context deadline exceeded\n"); err == nil {
+		t.Error("an answer with no member list was read")
+	}
+}

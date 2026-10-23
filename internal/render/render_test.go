@@ -2548,6 +2548,57 @@ func TestEtcdRendersTheFlagsItWasBornWith(t *testing.T) {
 	}
 }
 
+// A member with no record founds with the token it is given and records it;
+// a record with a token renders it again; a record without one, and every
+// member rendered with no token given, renders PatroniScope and a record
+// without a token line, as every member founded before tokens did.
+func TestEtcdFoundsWithItsTokenAndKeepsIt(t *testing.T) {
+	cfg := fixture(t)
+	secrets := fixtureSecrets(t)
+	files := func(opts ...render.Option) map[string]string {
+		t.Helper()
+		plan, err := render.Build(cfg, secrets, opts...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]string{}
+		for _, f := range plan.Files {
+			out[f.Path] = f.Content
+		}
+		return out
+	}
+	const compose, record = "home-a/srv/paisans/f2a9/infra/compose.yaml", "home-a/srv/paisans/f2a9/infra/etcd-initial"
+
+	founding := files(render.WithEtcdFoundingToken("paisans-f2a9-0123456789abcdef"))
+	if !strings.Contains(founding[compose], "--initial-cluster-token=paisans-f2a9-0123456789abcdef\n") {
+		t.Errorf("a founder does not found with its token:\n%s", founding[compose])
+	}
+	in, ok := render.ParseEtcdInitial(founding[record])
+	if !ok || in.Token != "paisans-f2a9-0123456789abcdef" || in.State != render.EtcdStateNew {
+		t.Errorf("the founder's record does not keep its token: %+v\n%s", in, founding[record])
+	}
+
+	again := files(render.WithEtcdInitial("home-a", in), render.WithEtcdFoundingToken("another"))
+	if again[compose] != founding[compose] || again[record] != founding[record] {
+		t.Error("a recorded token is not rendered again")
+	}
+
+	legacy := files()
+	old := render.EtcdInitial{State: render.EtcdStateNew, Cluster: "home-a=http://10.44.0.1:2380"}
+	recorded := files(render.WithEtcdInitial("home-a", old), render.WithEtcdFoundingToken("another"))
+	for name, f := range map[string]map[string]string{"no token given": legacy, "a record without one": recorded} {
+		if !strings.Contains(f[compose], "--initial-cluster-token=paisans\n") || strings.Contains(f[record], "initial-cluster-token") {
+			t.Errorf("%s: not PatroniScope and an unchanged record:\n%s\n%s", name, f[compose], f[record])
+		}
+	}
+	if in, ok := render.ParseEtcdFlags(founding[compose]); !ok || in.Token != "paisans-f2a9-0123456789abcdef" {
+		t.Errorf("a compose file's own token is not read back: %+v", in)
+	}
+	if in, ok := render.ParseEtcdFlags(legacy[compose]); !ok || in.Token != "" {
+		t.Errorf("PatroniScope in a compose file reads as a token: %+v", in)
+	}
+}
+
 // Every etcd member compacts its history and states its backend quota.
 // Without compaction etcd keeps every revision of Patroni's leader key until
 // the quota raises NOSPACE and writes stop. Both are runtime flags, so a
