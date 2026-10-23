@@ -51,7 +51,7 @@ func newIDPFake() *idpFake {
 		"blog": {ID: "fixture-not-a-secret-blog-id", Name: "blog", CallbackURLs: []string{"https://blog.example.org/oauth/callback/generic"},
 			IsGroupRestricted: true, AllowedUserGroups: groups[:2], LaunchURL: launch("https://blog.example.org"), SkipConsent: true},
 		"account": {ID: "fixture-not-a-secret-account-id", Name: "account", CallbackURLs: []string{"https://account.example.org/auth/callback"},
-			PkceEnabled: true, IsGroupRestricted: true, AllowedUserGroups: groups[:2], LaunchURL: launch("https://account.example.org"), SkipConsent: true},
+			PkceEnabled: true, IsGroupRestricted: true, AllowedUserGroups: groups[:2], SkipConsent: true},
 	}}
 }
 

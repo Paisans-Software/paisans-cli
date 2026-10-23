@@ -37,6 +37,8 @@ mail: reads
 # from admins.
 oidc:
   callback: "/auth/callback"
+  # The account site linking to itself from the dashboard is noise.
+  no_launch: true
   pkce: true
   member_group_setting: "member_group"
   admin_group_setting: "admin_group"

@@ -13,6 +13,10 @@ type OIDCClientSpec struct {
 	// without one is not listed there. An app's sso_dashboard_link setting
 	// replaces the path; see LaunchURL.
 	LaunchURL string
+	// NoLaunch is whether the blueprint has no launch URL at all. LaunchURL
+	// is empty then, and an existing client holding a launch URL this toolkit
+	// set has it cleared.
+	NoLaunch bool
 	// PKCE is whether the app always sends a code challenge. A Pocket ID
 	// client with PKCE on refuses every request without one
 	// (oidc/authorization_service.go:750-755 at v2.14.0) and one with it off
@@ -102,6 +106,7 @@ func OIDCClient(blueprint config.Blueprint, hostname, app string) (OIDCClientSpe
 		ReadsGroups:        o.ReadsGroups,
 		ExtraGroupsSetting: o.ExtraGroupsSetting,
 	}
+	spec.NoLaunch = o.NoLaunch
 	if !o.NoLaunch {
 		spec.LaunchURL = LaunchURL(blueprint, hostname, "")
 	}

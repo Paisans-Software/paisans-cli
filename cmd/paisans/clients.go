@@ -51,6 +51,7 @@ func clientDesired(cfg *config.Config, name string, rotate bool) (oidcclient.Des
 		Name:              cfg.ClientName(name),
 		CallbackURL:       spec.CallbackURL,
 		LaunchURL:         spec.LaunchURL,
+		NoLaunch:          spec.NoLaunch,
 		ToolkitLaunchURLs: blueprints.ToolkitLaunchURLs(app.Blueprint, app.Hostname),
 		PKCE:              spec.PKCE,
 		AdminGroup:        adminGroup,

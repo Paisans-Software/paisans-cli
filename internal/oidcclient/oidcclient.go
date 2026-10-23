@@ -43,6 +43,10 @@ type Desired struct {
 	// LaunchURL is what the app's tile on Pocket ID's dashboard opens, and a
 	// client without one is not listed there. Empty plans nothing for it.
 	LaunchURL string
+	// NoLaunch is set for a blueprint with no launch URL. An existing client
+	// holding one of ToolkitLaunchURLs has it cleared; any other value is the
+	// operator's and is left as it is.
+	NoLaunch bool
 	// ToolkitLaunchURLs are the launch URLs this toolkit has set by default
 	// (blueprints.ToolkitLaunchURLs). An existing client holding one of them,
 	// or none, is moved to LaunchURL. Any other value is the operator's and is
@@ -157,6 +161,9 @@ const (
 	// SetName renames the client the secrets file records to the name the
 	// configuration gives it.
 	SetName
+	// ClearLaunchURL removes a launch URL the toolkit set from a client whose
+	// blueprint has none.
+	ClearLaunchURL
 )
 
 // Step is one mutation. Title is the short line an operator sees by
@@ -250,6 +257,15 @@ func Build(d Desired, rec Recorded, s State) (*Plan, error) {
 			line += fmt.Sprintf(". It replaces the recorded client %s, which Pocket ID does not have", rec.ClientID)
 		}
 		p.Steps = append(p.Steps, Step{Kind: CreateClient, Title: "create OIDC client " + d.App, Detail: line})
+	} else if d.NoLaunch {
+		if client.LaunchURL != nil && *client.LaunchURL != "" {
+			current := *client.LaunchURL
+			if d.setByToolkit(current) {
+				p.Steps = append(p.Steps, Step{Kind: ClearLaunchURL, Title: "clear launch URL for " + d.App, Detail: fmt.Sprintf("clear launch URL for client %s: PUT /api/oidc/clients/%s with launchURL %q and every other field sent back as it is now", d.App, client.ID, "")})
+			} else {
+				p.Present = append(p.Present, fmt.Sprintf("client %s launch URL %s, which this blueprint does not use; left as it is, since it may have been set deliberately", d.App, current))
+			}
+		}
 	} else if d.LaunchURL != "" {
 		current := ""
 		if client.LaunchURL != nil {
@@ -458,6 +474,8 @@ func Execute(ctx context.Context, p *Plan, c *pocketid.Client, rec Recorder, new
 			}
 		case SetLaunchURL:
 			err = c.SetLaunchURL(ctx, client.ID, d.LaunchURL)
+		case ClearLaunchURL:
+			err = c.SetLaunchURL(ctx, client.ID, "")
 		case SetSkipConsent:
 			err = c.SetSkipConsent(ctx, client.ID, d.SkipConsent)
 		case SetName:

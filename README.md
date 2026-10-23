@@ -8795,7 +8795,13 @@ Mbin client made with the bare host moves to the connect route on the next run:
   set launch URL for client talk: PUT /api/oidc/clients/<id> with launchURL "https://talk.example.org/oauth/oidc/connect" and every other field sent back as it is now
 ```
 
-Any other value is an operator's, is reported as already there with a note,
+A blueprint that has no launch URL (`no_launch: true` under its `oidc`
+block: the `account` and `oauth2-proxy` blueprints) is created without one, and
+an existing client holding one of those same toolkit values plans `clear launch
+URL for <app>`: a `PUT /api/oidc/clients/<id>` that sends `launchURL` as an
+empty string and every other field back as read.
+
+Any other value, either way, is an operator's, is reported as already there with a note,
 and is never overwritten. If `sso_dashboard_link` is set and the client holds a
 different custom value, the command also warns, naming both, and still changes
 nothing: clear the launch URL in Pocket ID's admin UI and re-run to use the
