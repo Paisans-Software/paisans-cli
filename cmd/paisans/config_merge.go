@@ -35,7 +35,7 @@ func secretsOnlyEdits(local, base, head configstore.Files) bool {
 //
 // handled is false when this is not that case, and the caller refuses as it
 // always has.
-func pullMergingSecrets(r ui.Reporter, l configstore.Local, g configstore.Gathered, id, head, base, root string, configured int, local, theirs configstore.Files, execute bool, ans answerer, stdin io.Reader, stdout io.Writer) (handled bool, err error) {
+func pullMergingSecrets(r ui.Reporter, l configstore.Local, g configstore.Gathered, id, head, base, root string, held map[string]string, configured int, local, theirs configstore.Files, execute bool, ans answerer, stdin io.Reader, stdout io.Writer) (handled bool, err error) {
 	if base == "" {
 		return false, nil
 	}
@@ -122,7 +122,7 @@ func pullMergingSecrets(r ui.Reporter, l configstore.Local, g configstore.Gather
 	if err := l.SetHead(head); err != nil {
 		return true, err
 	}
-	if err := recordPull(l, g, root); err != nil {
+	if err := recordPull(l, g, root, held); err != nil {
 		return true, err
 	}
 	r.Result("merged the local secrets into %s; paisans deployment publish makes the merge a version", describe(g, head))

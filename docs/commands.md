@@ -521,7 +521,10 @@ around it.
 The signed copies of `paisans-stack.yaml`, `secrets.enc.yaml` and `.sops.yaml` that
 every site keeps. Four subcommands of `deployment`, each gathering every site's versions first
 and trusting them only from the operator's own signature or a root pinned with
-`--root`.
+`--root`. The operator's signature is the key `.paisans/signing-key` records;
+on a workstation that records none, `pull`, `log` and `recover` anchor on the
+key the operator names with `--key`, only on a version the trust rules already
+trust (see *Trust* below). A pinned root anchors alone.
 
 ```sh
 paisans deployment publish                # what would be signed, with which key
@@ -529,8 +532,9 @@ paisans deployment publish --execute      # sign the local files, push to every 
 paisans deployment publish --merge --execute   # one version on every head of a fork
 paisans deployment pull                   # what would be written
 paisans deployment pull --execute         # move the files to the sites' newest
-paisans deployment log                    # every version, signer, build, holding sites
-paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # empty directory
+paisans deployment log                    # every version, signer, build, holding sites; a root's full hash
+paisans deployment recover --from admin@203.0.113.9 --key ~/.ssh/id_ed25519.pub --execute   # empty directory
+paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # or pin the root
 ```
 
 * **Alone:** always, except as `deployment apply` runs its part (below). Each is an
@@ -542,7 +546,8 @@ paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # e
   |------|----------|---------|
   | `--config <path>` | all | the deployment declaration, which must be named `paisans-stack.yaml` with `secrets.enc.yaml` and `.sops.yaml` beside it; `.paisans/` beside it holds this workstation's state |
   | `--merge` | `publish` | the version's parents are every head, after the operator has merged a fork or an incoming change by hand |
-  | `--root <sha>` | `pull`, `log`, `recover` | trust starts from this version; `pull` and `recover` record it, `log` judges from it for the run only |
+  | `--root <sha>` | `pull`, `log`, `recover` | trust starts from this root, its full hash as `log` prints it on a root's line or another operator's `.paisans/config-root` holds it; `pull` and `recover` record it, `log` judges from it for the run only. One that differs from a recorded pin is refused |
+  | `--key <path.pub>` | `pull`, `log`, `recover` | your own operator key's public key file, to start trust from when `.paisans/signing-key` records none and no root is pinned; the agent need not hold it, and it is recorded only when the agent does. `log` records nothing |
   | `--from <user@host[:port] or ssh alias>` | `recover` (required, repeatable) | a host of the deployment to recover from; every site the trusted heads name is reached after it |
   | `--id <id>` | `recover` | the deployment, when the logins' admission records name more than one; it must be a deployment id |
   | `--execute` | `publish`, `pull`, `recover` | do it; `log` takes none |
@@ -552,6 +557,32 @@ paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # e
 * **Hosts:** every site, over ssh as the site's ssh user, and each is
   reached, not only the ones named on the command line. `recover` has no
   `paisans-stack.yaml` to name them and so starts from `--from`.
+* **Trust:** the newest version signed by the key `.paisans/signing-key`
+  records is where trust starts. With no key recorded, it is the key `--key`
+  names, which anchors only on versions it signed itself, under one root,
+  that the trust rules trust from that root (signed by an operator its parent
+  lists and not barred by a removal). Every head must be signed by the named
+  key and list it under an operator, and every trusted version must declare
+  the deployment's id. A newer version by another operator, or the key's
+  versions under two roots, are refused and need `--root <sha>`: a key alone
+  cannot tell this deployment's history from one it signed before a redeploy
+  under the same id, where an operator since removed may still be listed. The
+  newest such version anchors, and the gather names its key. When every site
+  that answers serves an older incarnation, a `--key` recovery can land on a
+  genuine version the key signed there, so `recover --key` prints the full
+  hash of the root it pins: confirm it with another operator, against their
+  `.paisans/config-root` or a root's line of their `log`, before applying. A
+  pinned root anchors alone; `--key` is then ignored, and the run notes it.
+  With a root pinned, a gather whose sites serve none of its history is
+  refused, naming no root they served: either the pin is out of date, and the
+  way out is to get the current root from another operator and recover from
+  it into an empty directory with `deployment recover --root <sha>`, or a site
+  that answered holds a history it should not, such as a host never evicted.
+  With no
+  anchor, `pull`, `log` and `recover` say to name your own operator key with
+  `--key` (loaded with `ssh-add`, so it is recorded) or pin `--root <sha>`,
+  and `publish`, which judges only from the recorded key, says the same of
+  `deployment pull`; all but `recover` add `operator register`.
 * **Without `--execute`:** no site is changed and no site is asked to sync with
   its peers; it reads what each site holds now, which can be staler. Only the
   cache in `.paisans/` beside the configuration is written.
@@ -582,6 +613,10 @@ paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # e
   naming the paths, until `secrets rotate` finishes it. `recover` refuses to
   write over files, and with a fork writes each head to
   `.paisans/incoming/<sha>/` and refuses to choose. `pull` and `recover`
+  record, in `.paisans/signing-key`, the key that signed the version trust
+  started from when `--key` named it, the ssh-agent holds it and an operator
+  of the head lists it, so later publishes sign with it; a colleague's public
+  key named with `--key` anchors and is not recorded. `pull` and `recover`
   refuse a version whose `secrets.enc.yaml` is plaintext before they write
   any of its files or sign anything.
 * **Words typed at a terminal:** `partial` when fewer than a majority of sites

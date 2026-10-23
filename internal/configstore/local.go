@@ -243,7 +243,7 @@ func (l Local) SetSigningKey(line string) error {
 }
 
 // Anchor is what this workstation starts trust from: the fingerprint of its
-// signing key and its pinned root, either of which may be empty.
+// recorded signing key and its pinned root, either of which may be empty.
 func (l Local) Anchor() (Anchor, error) {
 	var a Anchor
 	line, err := l.SigningKey()
@@ -252,7 +252,7 @@ func (l Local) Anchor() (Anchor, error) {
 	}
 	if line != "" {
 		k, _, _ := config.ParseKeyLine(line)
-		a.Signer = k.Fingerprint
+		a.Signers = []string{k.Fingerprint}
 	}
 	a.Root, err = l.Root()
 	return a, err
@@ -577,9 +577,30 @@ func gather(l Local, sites map[string]apply.Transport, configured int, id string
 		g.Verdict = Verdict{Trusted: map[string]bool{}, Reasons: map[string]string{}}
 		return g, nil
 	}
-	g.Verdict, err = Judge(Graph{Versions: g.Versions, Operators: operators}, a)
+	served := map[string]bool{}
+	for sha := range g.Holders {
+		served[sha] = true
+	}
+	g.Verdict, err = Judge(Graph{Versions: g.Versions, Operators: operators, Served: served}, a)
 	if err != nil || len(g.Verdict.Heads) == 0 {
 		return g, err
+	}
+	// A key named with --key carries no pin of its own, so every version it
+	// leads to trusting must declare the deployment being gathered: a history
+	// the key signed for another deployment is never this one's.
+	if a.Named {
+		for _, sha := range slices.Sorted(maps.Keys(g.Verdict.Trusted)) {
+			if !g.Verdict.Trusted[sha] {
+				continue
+			}
+			cfg, err := configs(sha)
+			if err != nil {
+				return g, fmt.Errorf("version %s: %w", sha, err)
+			}
+			if cfg.ID != id {
+				return g, &anchorError{fmt.Sprintf("version %s, trusted from the key --key names, declares deployment %s, not %s", sha, cfg.ID, id)}
+			}
+		}
 	}
 	top := g.Verdict.Heads[0]
 	rev := g.Versions[top].Revision

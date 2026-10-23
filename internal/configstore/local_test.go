@@ -878,7 +878,7 @@ func attest(l Local, sites map[string]apply.Transport, keyLine, signWith string,
 	if err != nil {
 		return "", err
 	}
-	g, err := gather(l, sites, len(sites), local.ID, Anchor{Root: root, Signer: key.Fingerprint}, GatherOptions{Sync: true}, pull)
+	g, err := gather(l, sites, len(sites), local.ID, Anchor{Root: root, Signers: []string{key.Fingerprint}}, GatherOptions{Sync: true}, pull)
 	if err != nil {
 		return "", err
 	}

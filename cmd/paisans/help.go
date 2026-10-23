@@ -355,23 +355,23 @@ var helpCommands = []helpCommand{
 	{
 		name:    "deployment pull",
 		summary: "Move the local files to the sites' newest version.",
-		usage:   []string{"paisans deployment pull [--config " + config.FileName + "] [--root <sha>] [--execute] [--yes]"},
+		usage:   []string{"paisans deployment pull [--config " + config.FileName + "] [--root <sha>] [--key <path.pub>] [--execute] [--yes]"},
 		detail: "Move the local files to the sites' newest version, or, over local edits, show the difference and put its files in .paisans/incoming/." +
-			configTrust,
+			configTrust + "\n\n" + keyTrust,
 	},
 	{
 		name:    "deployment log",
 		summary: "List every version, its signer, and the sites holding it.",
-		usage:   []string{"paisans deployment log [--config " + config.FileName + "] [--root <sha>]"},
-		detail:  "List every version of the configuration the sites keep, its signer, and the sites holding it." + configTrust,
+		usage:   []string{"paisans deployment log [--config " + config.FileName + "] [--root <sha>] [--key <path.pub>]"},
+		detail:  "List every version of the configuration the sites keep, its signer, and the sites holding it." + configTrust + "\n\n" + keyTrust,
 	},
 	{
 		name:    "deployment recover",
 		summary: "Write the newest configuration onto an empty directory.",
-		usage:   []string{"paisans deployment recover --from <user@host[:port] or ssh alias>... [--root <sha>] [--id <id>]\n                       [--config " + config.FileName + "] [--execute] [--yes]"},
+		usage:   []string{"paisans deployment recover --from <user@host[:port] or ssh alias>... [--root <sha>] [--key <path.pub>] [--id <id>]\n                       [--config " + config.FileName + "] [--execute] [--yes]"},
 		detail: "Onto an empty directory, gather from the --from hosts and every site the trusted heads name, and write the head's files, or each head's in .paisans/incoming/ with a fork. " +
 			"With --execute, the recovered version is also saved to this workstation's saved deployments (see deployment list)." +
-			configTrust + "\n\n" + sshAliasTopic,
+			configTrust + "\n\n" + keyTrust + "\n\n" + sshAliasTopic,
 	},
 	{
 		name:    "deployment list",
@@ -502,6 +502,14 @@ const configTrust = "\n\n" +
 	"With --execute, pull, recover, a publish of the first version, apply and operator register ask for the word partial at a terminal when no more than half the sites answered directly; publish, pull, recover, apply and operator register ask for rollback when the newest version is older than one seen here before, and log only warns. " +
 	"--yes types partial and rollback for each command but log, which asks nothing. " + yesTopic + " " +
 	"With --execute each site first syncs with its peers; without it, and in log, no site is changed and only .paisans/ here is written."
+
+// keyTrust is how pull, log and recover start trust from --key on a
+// workstation that records no signing key.
+const keyTrust = "With no key recorded in .paisans/signing-key, name your own operator key with --key <path.pub>. It anchors only on versions it signed itself, under one root, that the trust rules trust from that root: every head must be signed by it and list it under an operator, and every trusted version must declare the deployment's id. " +
+	"A newer version by another operator, or the key's versions under two roots, need --root <sha>, the full hash deployment log prints on a root's line or another operator's .paisans/config-root holds, since a key alone cannot tell this deployment's history from one it signed before a redeploy under the same id. " +
+	"For the same reason, when every site that answers serves an older incarnation, a recovery with --key can land on a genuine version the key signed there: recover --key prints the full hash of the root it pins, to confirm with another operator before applying. " +
+	"A pinned root anchors alone, and --key is then ignored, with a note. With a root pinned, a gather whose sites serve none of its history is refused: the pin is out of date, and you recover from the current root into an empty directory, or a site that answered holds a history it should not. " +
+	"pull and recover with --execute record the named key in .paisans/signing-key when your ssh-agent holds it (load it with ssh-add) and an operator of the head lists it; log records nothing. With neither --key nor a root, they refuse and say so."
 
 // executeTopic is `paisans help execute`: which commands reach a host, and
 // what --execute lets each of them change.
