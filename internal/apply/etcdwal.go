@@ -211,7 +211,8 @@ var (
 	snapDBName = regexp.MustCompile(`^member/snap/[0-9a-f]{16}\.snap\.db$`)
 )
 
-// Assess says what d holds: nothing, a member whose write-ahead logs agree
+// Assess says what d holds: nothing (no directory, or directories with no
+// file in them), a member whose write-ahead logs agree
 // on its member and cluster IDs, or something else. Only the first two are
 // recognised, each exactly: etcd's member layout is
 // the directories member, member/snap and member/wal, and in them the
@@ -256,6 +257,15 @@ func (d EtcdData) Assess() EtcdDataVerdict {
 		}
 	}
 	if len(wals) == 0 {
+		// Directories with no file in them, Eg a bare member/, hold
+		// nothing to lose.
+		files := false
+		for _, e := range d.Entries {
+			files = files || e.Type != "d"
+		}
+		if !files {
+			return EtcdDataVerdict{Kind: EtcdDataNothing}
+		}
 		// Nothing in an etcd database alone says whose it is or whether it
 		// holds keys: a fresh one and one rewritten by a defrag look alike.
 		if _, ok := paths["member/snap/db"]; ok {

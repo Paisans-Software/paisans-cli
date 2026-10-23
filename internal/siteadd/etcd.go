@@ -119,7 +119,7 @@ func (p *Plan) buildEtcd(live []apply.EtcdMember) *Stage {
 			st.Steps = append(st.Steps, Step{Site: j, Verb: "stop", Title: "stop etcd on " + j, Text: "any etcd container of this deployment there, found by its labels, so nothing writes its data while it is read and cleared: " + apply.RemoveEtcdContainers(p.dep())})
 		}
 		if present[j] && !started[j] {
-			st.Steps = append(st.Steps, Step{Site: p.control, Verb: "remove", Title: "remove unstarted learner " + j, Text: fmt.Sprintf("%s's learner %s, which an earlier run added and which never started, read again first: one that received data before it stopped cannot start again under its ID, so it is added again under a new one. The removal is recorded first on the other members' hosts, in %s: %s", j, ids[j], apply.EtcdRemovedPath(p.dep()), apply.Etcdctl(p.dep(), p.cfg.Sites[p.control].Address, "member remove "+ids[j]))})
+			st.Steps = append(st.Steps, Step{Site: p.control, Verb: "remove", Title: "remove unstarted learner " + j, Text: fmt.Sprintf("%s's learner %s, which an earlier run added and which never started, read again first and removed only once its data is read and accepted: one that received data before it stopped cannot start again under its ID, so it is added again under a new one. The removal is recorded first on the other members' hosts, in %s: %s", j, ids[j], apply.EtcdRemovedPath(p.dep()), apply.Etcdctl(p.dep(), p.cfg.Sites[p.control].Address, "member remove "+ids[j]))})
 		}
 		if !started[j] {
 			st.Steps = append(st.Steps, Step{Site: j, Verb: "clear", Title: "clear old etcd data on " + j, Text: fmt.Sprintf("%s's old etcd data, %s, if it holds any: a removed member's, which etcd refuses to rejoin with. It is read on disk and deleted only when it is empty or a member whose write-ahead logs name this cluster, %x, and a member this cluster removed for %s; anything else refuses: %s", j, apply.EtcdDataDir(p.dep()), p.clusterID, j, p.clearEtcdData())})
@@ -403,10 +403,10 @@ func (p *Plan) find(members []apply.EtcdMember, site string) *apply.EtcdMember {
 // nothing runs there while its data is read and cleared and an unstarted
 // learner cannot start. An unstarted learner is then read again: one that
 // started before its container went is a started learner, whose data is its
-// own and is not touched. One still unstarted is removed from etcd, recorded
-// first, since it may have received a snapshot or log entries the leader
-// remembers. Only then is the data read on disk and, when checkEtcdData
-// accepts it, cleared.
+// own and is not touched. Then the data is read on disk, and only when
+// checkEtcdData accepts it is a learner still unstarted removed from etcd,
+// recorded first, since it may have received a snapshot or log entries the
+// leader remembers, and the data cleared.
 func (p *Plan) prepareJoiner(j string, m *apply.EtcdMember) (*apply.EtcdMember, error) {
 	t := p.transports[j]
 	if err := p.knowCluster(j); err != nil {
@@ -416,33 +416,35 @@ func (p *Plan) prepareJoiner(j string, m *apply.EtcdMember) (*apply.EtcdMember, 
 	if out, err := t.Run(apply.RemoveEtcdContainers(p.dep())); err != nil {
 		return nil, fmt.Errorf("%s: removing its etcd container: %w: %s. Its etcd data was not touched", j, err, lastLines(out, 3))
 	}
+	members, err := p.members()
+	if err != nil {
+		return nil, err
+	}
 	var learner uint64
 	if m != nil {
-		members, err := p.members()
-		if err != nil {
-			return nil, err
-		}
 		if m = p.find(members, j); m != nil && (!m.IsLearner || m.Started()) {
 			return m, nil
 		}
 		if m != nil {
 			learner = m.ID
-			p.work("remove unstarted learner "+j).Detail("%s's learner %s, through %s", j, m.HexID(), p.control)
-			if err := p.recordRemoved(j, m.ID); err != nil {
-				return nil, err
-			}
-			if out, err := p.transports[p.control].Run(apply.Etcdctl(p.dep(), p.cfg.Sites[p.control].Address, "member remove "+m.HexID())); err != nil {
-				return nil, fmt.Errorf("%s: removing %s's unstarted learner %s: %s", p.control, j, m.HexID(), lastLines(out, 3))
-			}
 		}
 	}
-	members, err := p.members()
-	if err != nil {
-		return nil, err
-	}
+	// The data is read before the learner is removed: with its container
+	// gone it can no longer start or write, so what is read is what the
+	// clear deletes, and a refusal leaves the learner in etcd.
 	p.work("clear old etcd data on "+j).Detail("%s, on %s", apply.EtcdDataDir(p.dep()), j)
 	if err := p.checkEtcdData(j, members, learner, "Its etcd container was removed; its etcd data was not touched"); err != nil {
 		return nil, err
+	}
+	if m != nil {
+		p.work("remove unstarted learner "+j).Detail("%s's learner %s, through %s", j, m.HexID(), p.control)
+		if err := p.recordRemoved(j, m.ID); err != nil {
+			return nil, err
+		}
+		if out, err := p.transports[p.control].Run(apply.Etcdctl(p.dep(), p.cfg.Sites[p.control].Address, "member remove "+m.HexID())); err != nil {
+			return nil, fmt.Errorf("%s: removing %s's unstarted learner %s: %s", p.control, j, m.HexID(), lastLines(out, 3))
+		}
+		p.work("clear old etcd data on " + j)
 	}
 	if out, err := t.Run(p.clearEtcdData()); err != nil {
 		return nil, fmt.Errorf("%s: clearing its old etcd data, %s: %w: %s. Its etcd was not started", j, apply.EtcdDataDir(p.dep()), err, lastLines(out, 3))

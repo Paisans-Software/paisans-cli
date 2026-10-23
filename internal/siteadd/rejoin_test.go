@@ -719,3 +719,33 @@ func TestUnreadableRecordsRefuseOnlyTheClearThatNeedsThem(t *testing.T) {
 		})
 	}
 }
+
+// A database alone that appears at stage 3 beside an unstarted learner is
+// read before the learner is removed: the run stops with the learner still
+// in etcd, and the next run, once the database is deleted by hand, removes
+// it and adds it again.
+func TestADatabaseAloneAtRunTimeKeepsTheUnstartedLearner(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := removedWitnessWorld(t)
+	w.nextID++
+	w.etcd = append(w.etcd, apply.EtcdMember{ID: w.nextID, PeerURLs: []string{"http://10.44.0.3:2380"}, IsLearner: true})
+	p := build(t, w)
+	dbAlone(w)
+	err := siteadd.Execute(p)
+	if err == nil || !strings.Contains(err.Error(), "rootlesskit rm -rf -- /srv/paisans/f2a9/infra/etcd/member") {
+		t.Fatalf("want the refusal, got %v", err)
+	}
+	if w.hosts["home-a"].ran("member remove") != 0 || len(w.etcd) != 2 {
+		t.Errorf("the learner was removed before its data was refused: %v", w.etcd)
+	}
+	if _, ok := w.hosts["home-a"].files[etcdRemovedFile]; ok && strings.Contains(w.hosts["home-a"].files[etcdRemovedFile], "vm c1a5 2\n") {
+		t.Error("the learner's removal was recorded though it was not made")
+	}
+	delete(w.hosts["vm"].files, etcdDB)
+	if err := siteadd.Execute(build(t, w)); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(w.voters(), ","); got != "home-a,home-b,vm" {
+		t.Errorf("voters %s", got)
+	}
+}

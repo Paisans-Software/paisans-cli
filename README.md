@@ -8991,7 +8991,7 @@ and deletes it only when it is one of:
 
 | What the path holds | Why deleting it loses nothing |
 |---------------------|-------------------------------|
-| nothing, or an empty directory | there is nothing |
+| nothing, an empty directory, or directories with no file in them (Eg a bare `member/`) | there is nothing |
 | etcd's member layout, every write-ahead log in it decoding (framing, record, CRC-32C chain) to the same member and cluster, the cluster being this one and the member one this cluster removed for this site | a removed member's data, whose ID the cluster never accepts again |
 
 The cluster ID alone is not that evidence. etcd derives a founding member's
