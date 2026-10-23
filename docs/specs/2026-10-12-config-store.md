@@ -105,17 +105,32 @@ by the named key and list it under an operator, and every trusted version
 must declare the deployment's id; otherwise the gather is refused and asks
 for `--root`. A host serving only an older incarnation can still offer a
 version the key itself signed there, and the root a recovery pins from it is
-not the current one. With a root pinned, a key that signed versions under
-another good root as well is refused, whatever the revisions, since a
-redeployed line starts again at revision 1: once the current line holds a
-version the key signed, a pull from an honest site refuses, and before then
-`paisans deployment log` lists the current line as a root outside the
-anchor's history. A pull or recovery with `--execute` records the named key
-as the signing key when the ssh-agent holds it and an operator of the head
-lists it; a log records nothing. With no anchor at all, a pull or recovery is
-refused and says to name your own operator key with `--key` or pin `--root`:
-a history found only on the sites, however consistent, is one someone with
-root on those sites could have written, signed with their own key and listing
+not the current one.
+
+Which incarnation is current is the operator's to say, never a revision's,
+since a redeployed line starts again at revision 1. The workstation's cache
+keeps every version any gather saw, so these checks read only the versions
+the sites serve in this gather. With a root pinned, a gather is refused when
+the sites serve no version of the pinned root's history, whoever signed what
+they serve, or when they serve a version the recorded key signed under
+another root. With no root pinned, a recorded key that signed versions under
+more than one root, the cache's included, is refused. The way out of each is
+the same: `paisans deployment pull --root <sha> --execute` with the current
+root, the full hash another operator's `.paisans/config-root` holds or
+`paisans deployment log` prints on a root's line. `--root` replaces the pin,
+the run judges from that root alone, and a seen record from another root's
+history moves to the new head without asking for `rollback`. While a site
+still serves the other incarnation, a pull without `--root` refuses again.
+When the sites serve the pinned line and also another root the key never
+signed under, the pull goes on from the pinned line, and `paisans deployment
+log` lists the other root as outside the anchor's history.
+
+A pull or recovery with `--execute` records the named key as the signing key
+when the ssh-agent holds it and an operator of the head lists it; a log
+records nothing. With no anchor at all, a pull or recovery is refused and
+says to name your own operator key with `--key` or pin `--root`: a history
+found only on the sites, however consistent, is one someone with root on
+those sites could have written, signed with their own key and listing
 themselves as an admin.
 
 **Trusted** versions are the anchor, every ancestor of it, and every version

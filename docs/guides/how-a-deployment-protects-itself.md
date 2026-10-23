@@ -290,13 +290,17 @@ operator.
 **Does not protect.** A fresh workstation that reaches only sites an attacker
 holds can be served an old, genuine version, and applying it reaches only those
 sites. With `--key` that includes a version the key signed in an incarnation of
-the deployment from before a redeploy under the same id. The root it pins
-differs from the current one: once the current line holds a version the key
-signed, a pull from an honest site refuses, whatever the two lines' revisions,
-and before then `paisans deployment log` lists the current line as a root
-outside the anchor's history. Nothing checks that a removed operator's age key
-was taken out of the secrets file: that is the operator's step (see *A former
-recipient still has the secrets file*).
+the deployment from before a redeploy under the same id, and the root it pins
+is that incarnation's. A later pull from sites that serve none of the pinned
+root's history, or serve a version your key signed under another root,
+refuses whatever the two lines' revisions; `paisans deployment pull --root
+<sha> --execute` with the current root, from another operator's
+`.paisans/config-root`, replaces the pin and moves the files to the current
+line. A pull whose sites serve the pinned line and also another root your key
+never signed under goes on from the pinned line, and `paisans deployment log`
+lists the other root as outside the anchor's history. Nothing checks that a
+removed operator's age key was taken out of the secrets file: that is the
+operator's step (see *A former recipient still has the secrets file*).
 
 **You do.** Keep the files in a repository with more than one copy anyway, keep
 each operator's age key backed up somewhere other than that repository, keep
