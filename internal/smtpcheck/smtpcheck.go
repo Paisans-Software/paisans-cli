@@ -339,8 +339,9 @@ func (e *Error) Reply() string {
 func (e *Error) Dialled() bool { return e.Stage != stageConnect }
 
 // Unanswered reports whether the dial reached the site and the site could
-// not open the connection to the address (Env.NotOpened): nothing answered
-// there. It is one of the failures Dialled reports false for.
+// not open the connection to the address (Env.NotOpened), Eg: nothing
+// answers there from the site, or the site's sshd does not forward TCP. It
+// is one of the failures Dialled reports false for.
 func (e *Error) Unanswered() bool { return e.closed }
 
 // stageConnect is opening the connection, from a site or from this machine.

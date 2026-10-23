@@ -2980,8 +2980,10 @@ or the site's private network can. The SMTP conversation runs on the
 workstation, so nothing is installed or run on a host for it, and the password
 crosses only the ssh connection and then the path the app's own mail takes. The
 forward needs the host's sshd to allow TCP forwarding, which is OpenSSH's
-default (`AllowTcpForwarding`, sshd_config(5)); a host that refuses it says
-`administratively prohibited`, and the check says so.
+default (`AllowTcpForwarding`, sshd_config(5)). Over the shared connection, a
+host that refuses it and an address the host cannot connect to both reach the
+check as ssh's `Session open refused by peer`, so the check says the site
+could not open a connection to the server and names both causes.
 
 **When, and how much:**
 
@@ -2989,7 +2991,7 @@ default (`AllowTcpForwarding`, sshd_config(5)); a host that refuses it says
 |---|---|---|
 | `secrets set` an SMTP password | from this machine, logs in with the new password and sends one test message | refused; nothing is written. A server this machine cannot reach is a warning, and the password is written for `deployment apply` to try |
 | `secrets rotate` an SMTP password | from this machine, a pasted one logs in and sends one test message when pasted; one set with `secrets set` logs in when the run is planned; stage 2 logs in again from this machine, then from every site that will be handed it, before any is | refused before anything is written under `rotations`, or stopped at stage 2 before any site is handed it; a server this machine cannot reach is a warning, and the sites alone try it |
-| `deployment apply`, with or without `--site` | every app it would start logs in, from each site it runs on; nothing is sent | refused before any host is changed, naming the app, where its settings are declared, and the server's reply, or that nothing answered at the server's address from the site |
+| `deployment apply`, with or without `--site` | every app it would start logs in, from each site it runs on; nothing is sent | refused before any host is changed, naming the app, where its settings are declared, and the server's reply, or that the site could not open a connection to the server |
 | `validate` | every app logs in, from each site it runs on; nothing is sent | a warning |
 
 **A mail server on the deployment's own mesh is tried once the mesh is up.**

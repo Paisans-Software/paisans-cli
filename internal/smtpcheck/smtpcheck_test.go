@@ -345,3 +345,40 @@ type closedConn struct {
 }
 
 func (c closedConn) Read([]byte) (int, error) { return 0, c.err }
+
+// A server that closes part way through its TLS handshake record answered:
+// the check is one whose connection was made, failed at TLS, and says the
+// server closed it during the handshake.
+func TestLoginClosedMidTLSRecordIsDialled(t *testing.T) {
+	env := smtpcheck.Env{Dial: func(string, string) (net.Conn, error) {
+		local, remote := net.Pipe()
+		go func() {
+			_, _ = io.Copy(io.Discard, remote)
+		}()
+		// A handshake record's header promising 64 bytes, and then the end.
+		return &partialConn{Conn: local, data: []byte{0x16, 0x03, 0x03, 0x00, 0x40, 0x02}}, nil
+	}}
+	err := smtpcheck.Login(env, check(config.SMTPTLS), password)
+	var failed *smtpcheck.Error
+	if !errors.As(err, &failed) || !failed.Dialled() || failed.Unanswered() {
+		t.Fatalf("err = %v, want a check whose connection was made", err)
+	}
+	if !strings.HasPrefix(failed.Reply(), "TLS: ") || !strings.Contains(failed.Reply(), "closed it during the TLS handshake") {
+		t.Errorf("reply = %q", failed.Reply())
+	}
+}
+
+// partialConn reads data, then io.EOF.
+type partialConn struct {
+	net.Conn
+	data []byte
+}
+
+func (c *partialConn) Read(p []byte) (int, error) {
+	if len(c.data) == 0 {
+		return 0, io.EOF
+	}
+	n := copy(p, c.data)
+	c.data = c.data[n:]
+	return n, nil
+}

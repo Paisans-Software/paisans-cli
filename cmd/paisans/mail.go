@@ -196,7 +196,7 @@ func tryMailFromSites(r ui.Reporter, cfg *config.Config, secrets *config.Secrets
 				return &ui.Problem{Hint: hint, Explain: explain + after, Cause: err}
 			}
 			if failed != nil && failed.Unanswered() {
-				return &ui.Problem{Hint: "nothing answered at " + c.Address() + " from " + c.From(), Explain: fmt.Sprintf("%s, declared by %s, sends through %s, and %s could not open a connection to it (%s). Every app's mail settings are tried from its site before anything there changes.%s", c.Whose(), c.Setting(cfg), c.Address(), c.From(), strings.TrimSuffix(failed.Reply(), "."), unreached), Cause: err}
+				return &ui.Problem{Hint: c.From() + " could not open a connection to " + c.Address(), Explain: fmt.Sprintf("%s, declared by %s, sends through %s, and %s could not open a connection to it (%s): either nothing answers at that address from there, or the host's sshd does not forward TCP (AllowTcpForwarding in sshd_config(5)), which the check rides on. Every app's mail settings are tried from its site before anything there changes.%s", c.Whose(), c.Setting(cfg), c.Address(), c.From(), strings.TrimSuffix(failed.Reply(), "."), unreached), Cause: err}
 			}
 			return &ui.Problem{Hint: c.From() + " could not be reached to try " + c.Whose(), Explain: "every app's mail settings are tried from its site before anything there changes." + unreached, Cause: err}
 		}
@@ -261,8 +261,8 @@ func checkMailForValidate(r ui.Reporter, cfg *config.Config, secretsPath string)
 			r.Explain(explain + " `" + progname.Cmd() + " deployment apply` refuses until it does.")
 			warned++
 		case errors.As(err, &failed) && failed.Unanswered():
-			step.End(ui.Warned, "not answered")
-			r.Explain(fmt.Sprintf("Nothing answered at %s from %s (%s), so %s was not checked. `%s deployment apply` refuses until it answers.", c.Address(), c.Site, strings.TrimSuffix(failed.Reply(), "."), c.Whose(), progname.Cmd()))
+			step.End(ui.Warned, "not opened")
+			r.Explain(fmt.Sprintf("%s could not open a connection to %s (%s): either nothing answers at that address from there, or the host's sshd does not forward TCP (AllowTcpForwarding in sshd_config(5)). %s was not checked, and `%s deployment apply` refuses until it can be.", c.Site, c.Address(), strings.TrimSuffix(failed.Reply(), "."), c.Whose(), progname.Cmd()))
 			warned++
 		default:
 			unreachable[c.Site] = true

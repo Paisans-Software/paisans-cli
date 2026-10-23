@@ -522,7 +522,7 @@ func TestApplySkipsMeshMailBeforeTheMeshIsUp(t *testing.T) {
 		rec := withRecorder(t, false)
 		err := runApply(append([]string{"--config", configPath, "--secrets", secretsPath, "--execute"}, extra...), strings.NewReader(""), io.Discard)
 		if err != nil {
-			for _, bad := range []string{"mail server", "nothing answered", "to try"} {
+			for _, bad := range []string{"mail server", "could not open a connection", "to try"} {
 				if strings.Contains(err.Error(), bad) {
 					t.Errorf("apply %v refused on mail: %v", extra, err)
 				}
@@ -626,7 +626,7 @@ func TestApplyRefusesMailThatDoesNotAnswer(t *testing.T) {
 	if err == nil {
 		t.Fatal("apply was not refused")
 	}
-	for _, want := range []string{"nothing answered at smtp.example.org:587 from home-a", "declared by smtp", "Nothing was changed"} {
+	for _, want := range []string{"home-a could not open a connection to smtp.example.org:587", "AllowTcpForwarding", "declared by smtp", "Nothing was changed"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("err %v lacks %q", err, want)
 		}
@@ -666,7 +666,7 @@ func TestValidateWarnsAboutMailThatDoesNotAnswer(t *testing.T) {
 	if err := runValidate([]string{"--config", configPath, "--secrets", secretsPath}); err != nil {
 		t.Fatalf("validate failed on a mail warning: %v", err)
 	}
-	if !rec.Has("warned", "from home-a") || rec.Index("explain", "Nothing answered at smtp.example.org:587 from home-a") < 0 {
+	if !rec.Has("warned", "from home-a") || rec.Index("explain", "home-a could not open a connection to smtp.example.org:587") < 0 {
 		t.Errorf("a server that does not answer is not a warning:\n%s", rec.Lines())
 	}
 	if rec.Index("explain", "home-a could not be reached") >= 0 {

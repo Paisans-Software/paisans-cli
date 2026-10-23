@@ -1339,7 +1339,7 @@ images it superseded* in `README.md`).
   mail server from each site it runs on, under `mail`, and nothing is sent;
   a dry run whose `init` still has work tries them once `init` has run. A failure refuses the run with every host as it was,
   naming the app, where its settings are declared and the server's reply, or
-  that nothing answered at the server's address. A mail server at an address
+  that the site could not open a connection to the server. A mail server at an address
   inside `mesh.subnet` is tried only once the mesh is up on the site and on
   the site holding the address; before then, as on a deployment's first
   apply, it is warned about and the run goes on. The
@@ -1401,8 +1401,8 @@ starts, restarts or recreates what changed.
   starts on the site (`--only` narrows it) logs in to its mail server from
   the site, through `--ssh` when given, under `mail`; nothing is sent. A
   failure refuses the apply before anything changes, naming the app, where
-  its settings are declared and the server's reply, or that nothing answered
-  at the server's address. A mail server at an address inside `mesh.subnet`
+  its settings are declared and the server's reply, or that the site could
+  not open a connection to the server. A mail server at an address inside `mesh.subnet`
   is tried only once the mesh is up on the site and on the site holding the
   address; before then it is warned about and the apply goes on.
 * **Review:** the images every rendered `compose.yaml` of the site runs, and
