@@ -532,7 +532,7 @@ paisans deployment publish --execute      # sign the local files, push to every 
 paisans deployment publish --merge --execute   # one version on every head of a fork
 paisans deployment pull                   # what would be written
 paisans deployment pull --execute         # move the files to the sites' newest
-paisans deployment log                    # every version, signer, build, holding sites
+paisans deployment log                    # every version, signer, build, holding sites; a root's full hash
 paisans deployment recover --from admin@203.0.113.9 --key ~/.ssh/id_ed25519.pub --execute   # empty directory
 paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # or pin the root
 ```
@@ -546,7 +546,7 @@ paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # o
   |------|----------|---------|
   | `--config <path>` | all | the deployment declaration, which must be named `paisans-stack.yaml` with `secrets.enc.yaml` and `.sops.yaml` beside it; `.paisans/` beside it holds this workstation's state |
   | `--merge` | `publish` | the version's parents are every head, after the operator has merged a fork or an incoming change by hand |
-  | `--root <sha>` | `pull`, `log`, `recover` | trust starts from this version; `pull` and `recover` record it, `log` judges from it for the run only |
+  | `--root <sha>` | `pull`, `log`, `recover` | trust starts from this root, its full hash as `log` prints it on a root's line or another operator's `.paisans/config-root` holds it; `pull` and `recover` record it, `log` judges from it for the run only. With a key recorded, a pin is refused when the key signed versions under another root as well |
   | `--key <path.pub>` | `pull`, `log`, `recover` | your own operator key's public key file, to start trust from when `.paisans/signing-key` records none and no root is pinned; the agent need not hold it, and it is recorded only when the agent does. `log` records nothing |
   | `--from <user@host[:port] or ssh alias>` | `recover` (required, repeatable) | a host of the deployment to recover from; every site the trusted heads name is reached after it |
   | `--id <id>` | `recover` | the deployment, when the logins' admission records name more than one; it must be a deployment id |

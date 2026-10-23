@@ -4444,9 +4444,10 @@ root, of this deployment's id. A key alone cannot tell this deployment's
 history from one it signed before a redeploy under the same id, where an
 operator since removed may still be listed, so a newer version by another
 operator, or the key's versions under two roots, need `--root`. A pinned root
-anchors alone, and `--key` is then ignored. A pull or a recovery records the named key
-when the agent holds it and an operator of the head lists it. With neither an
-own signature nor a pin, a pull or a recovery is refused and asks for one.
+anchors alone, and `--key` is then ignored. A pull or a recovery records the
+named key when the agent holds it and an operator of the head lists it. With
+neither an own signature nor a pin, a pull or a recovery is refused and asks
+for one.
 
 From that anchor a version is trusted when it passes three rules, each of which
 closes a forgery:
@@ -4583,10 +4584,11 @@ paisans deployment recover --from admin@203.0.113.9 --key ~/.ssh/id_ed25519.pub 
   `--root`
   with the hash of a version the operator trusts, kept somewhere other than the
   workstation that was lost, because a history found only on the sites is
-  never trusted on its own; a pinned root anchors alone. `--from` takes any login that reaches the host,
-  the owner's as well as the deployment's: the admission records under
-  `/etc/paisans` are readable by every login, so recover learns the deployment
-  and its user from them and reaches the host again as that user. `--id` names
+  never trusted on its own; a pinned root anchors alone. `--from` takes any
+  login that reaches the host, the owner's as well as the deployment's: the
+  admission records under `/etc/paisans` are readable by every login, so
+  recover learns the deployment and its user from them and reaches the host
+  again as that user. `--id` names
   the deployment when the records name more than one. With a fork it writes
   each head to `.paisans/incoming/<sha>/` and refuses to choose, because which
   head wins is for an operator to decide, never an order.

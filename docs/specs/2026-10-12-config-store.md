@@ -29,8 +29,8 @@ Founder decisions, 2026-10-12, in session:
   records, or, when it records none, the public key the operator names with
   `--key`, which anchors only on versions it signed itself, under one root,
   that the trust rules trust from that root, of this deployment's id. A root
-  hash the operator pins anchors alone. A history found only on the sites is never
-  trusted on its own. Founder decision, 2026-10-12; `--key`, founder
+  hash the operator pins anchors alone. A history found only on the sites is
+  never trusted on its own. Founder decision, 2026-10-12; `--key`, founder
   decision, 2026-10-22.
 * **One signature, from any current admin.** Every admin is trusted with the
   whole deployment already (they hold the configuration and can decrypt the
@@ -104,14 +104,19 @@ result is a fork of every head any of them trusts. Every head must be signed
 by the named key and list it under an operator, and every trusted version
 must declare the deployment's id; otherwise the gather is refused and asks
 for `--root`. A host serving only an older incarnation can still offer a
-version the key itself signed there; the root a recovery pins from it is not
-the current one, so the next pull from an honest site refuses. A pull or recovery with
-`--execute` records the named key as the signing key when the ssh-agent holds
-it and an operator of the head lists it; a log records nothing. With no
-anchor at all, a pull or recovery is refused and says to name your own
-operator key with `--key` or pin `--root`: a history found only on the sites, however
-consistent, is one someone with root on those sites could have written, signed
-with their own key and listing themselves as an admin.
+version the key itself signed there, and the root a recovery pins from it is
+not the current one. With a root pinned, a key that signed versions under
+another good root as well is refused, whatever the revisions, since a
+redeployed line starts again at revision 1: once the current line holds a
+version the key signed, a pull from an honest site refuses, and before then
+`paisans deployment log` lists the current line as a root outside the
+anchor's history. A pull or recovery with `--execute` records the named key
+as the signing key when the ssh-agent holds it and an operator of the head
+lists it; a log records nothing. With no anchor at all, a pull or recovery is
+refused and says to name your own operator key with `--key` or pin `--root`:
+a history found only on the sites, however consistent, is one someone with
+root on those sites could have written, signed with their own key and listing
+themselves as an admin.
 
 **Trusted** versions are the anchor, every ancestor of it, and every version
 that passes all of these:
@@ -235,8 +240,8 @@ Local state is four files beside `paisans-stack.yaml`, in `.paisans/`: `config-r
 the pinned root; `config-head`, the version the local files started from;
 `config-seen`, the newest revision this workstation has seen (see *Rollback*);
 and `signing-key`, the operator's public key that `operator register`, or a
-pull or recovery that anchored on the key `--key` named, recorded. The anchor is the
-newest version that key signed. A cache of the versions gathered
+pull or recovery that anchored on the key `--key` named, recorded. The anchor
+is the newest version that key signed. A cache of the versions gathered
 (`store.git`) and the files a refused pull sets aside (`incoming/`) sit beside
 them.
 
