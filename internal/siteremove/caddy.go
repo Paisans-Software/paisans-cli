@@ -12,6 +12,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
 	"github.com/paisans-software/paisans-cli/internal/ownership"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/version"
 )
@@ -136,7 +137,7 @@ func (p *Plan) planCaddy(t apply.Transport, inv *hostcheck.Inventory) (*caddyPla
 		// file bind mount, which only an in place write reaches. An apply
 		// moves it, so that is what to run.
 		if _, legacy, lerr := t.ReadFile(p.legacyCaddyfile()); lerr == nil && legacy {
-			return nil, fmt.Errorf("site remove %s: its Caddy serves the host owner's sites in %s, and still reads %s, where a toolkit before this one wrote it. Run `paisans deployment apply --site %s --execute` first, which moves it to %s, then run this again. Nothing was changed", p.Site, render.HostSitesDir(p.dep()), p.legacyCaddyfile(), p.Site, p.caddyfile())
+			return nil, fmt.Errorf("site remove %s: its Caddy serves the host owner's sites in %s, and still reads %s, where a toolkit before this one wrote it. Run `%s deployment apply --site %s --execute` first, which moves it to %s, then run this again. Nothing was changed", p.Site, render.HostSitesDir(p.dep()), p.legacyCaddyfile(), progname.Cmd(), p.Site, p.caddyfile())
 		}
 		return nil, fmt.Errorf("site remove %s: its Caddy serves the host owner's sites in %s, and %s is not there to reduce to them. Nothing was changed", p.Site, render.HostSitesDir(p.dep()), p.caddyfile())
 	}

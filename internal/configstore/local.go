@@ -15,6 +15,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // Local is an operator's workstation: the directory holding paisans-stack.yaml,
@@ -1001,24 +1002,24 @@ func Parents(g Gathered, head string, merge bool) ([]string, error) {
 	heads := g.Verdict.Heads
 	switch {
 	case len(heads) == 0 && head != "":
-		return nil, fmt.Errorf("your base %s is held by no site that answered and is not in the local store; run paisans deployment pull", head)
+		return nil, fmt.Errorf("your base %s is held by no site that answered and is not in the local store; run %s deployment pull", head, progname.Cmd())
 	case len(heads) == 0 && merge:
 		return nil, errors.New("there is nothing to merge: no site holds a version")
 	case len(heads) == 0:
 		return nil, nil
 	case merge && (head == "" || !g.Verdict.Trusted[head]):
-		return nil, fmt.Errorf("a merge needs a trusted base, and your base %q is not one; run paisans deployment pull", head)
+		return nil, fmt.Errorf("a merge needs a trusted base, and your base %q is not one; run %s deployment pull", head, progname.Cmd())
 	case merge:
 		return heads, nil
 	case g.Verdict.Fork:
-		return nil, fmt.Errorf("the sites hold a fork, %s; merge the heads' files by hand and publish with paisans deployment publish --merge", strings.Join(heads, " and "))
+		return nil, fmt.Errorf("the sites hold a fork, %s; merge the heads' files by hand and publish with %s deployment publish --merge", strings.Join(heads, " and "), progname.Cmd())
 	case head != heads[0]:
 		v := g.Versions[heads[0]]
 		signer := g.Signers[heads[0]]
 		if signer == "" {
 			signer = v.SignerFP
 		}
-		return nil, fmt.Errorf("stale: the sites hold %s (revision %d, signed by %s); run paisans deployment pull", heads[0], v.Revision, signer)
+		return nil, fmt.Errorf("stale: the sites hold %s (revision %d, signed by %s); run %s deployment pull", heads[0], v.Revision, signer, progname.Cmd())
 	}
 	return heads[:1], nil
 }
@@ -1059,9 +1060,9 @@ func AttestTarget(l Local, g Gathered, pin string) (head string, write bool, err
 	heads := g.Verdict.Heads
 	switch {
 	case len(heads) == 0:
-		return "", false, errors.New("the sites hold no version to attest; paisans deployment publish makes the first")
+		return "", false, errors.New("the sites hold no version to attest; " + progname.Cmd() + " deployment publish makes the first")
 	case g.Verdict.Fork:
-		return "", false, fmt.Errorf("the sites hold a fork, %s; merge the heads' files by hand and publish with paisans deployment publish --merge", strings.Join(heads, " and "))
+		return "", false, fmt.Errorf("the sites hold a fork, %s; merge the heads' files by hand and publish with %s deployment publish --merge", strings.Join(heads, " and "), progname.Cmd())
 	}
 	head = heads[0]
 	if !l.HasFiles() {

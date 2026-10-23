@@ -27,6 +27,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/garage"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -152,14 +153,14 @@ type Waiting struct {
 }
 
 func (w *Waiting) Error() string {
-	return fmt.Sprintf("storage add is waiting at stage %d (%s): %s. Nothing failed. Run paisans storage add to look again, or with --execute to carry on; --wait <duration> polls instead of exiting", w.Stage.Number, w.Stage.Name, w.Detail)
+	return fmt.Sprintf("storage add is waiting at stage %d (%s): %s. Nothing failed. Run %s storage add to look again, or with --execute to carry on; --wait <duration> polls instead of exiting", w.Stage.Number, w.Stage.Name, w.Detail, progname.Cmd())
 }
 
 // Unwrap is the wait as an operator reads it, which in turn is ErrWaiting.
 func (w *Waiting) Unwrap() error {
 	return &ui.Problem{
 		Hint:    w.Hint(),
-		Explain: strings.TrimSuffix(w.Detail, ".") + ".\nNothing failed. Run paisans storage add to look again, or with --execute to carry on; --wait <duration> polls instead of exiting.",
+		Explain: strings.TrimSuffix(w.Detail, ".") + ".\nNothing failed. Run " + progname.Cmd() + " storage add to look again, or with --execute to carry on; --wait <duration> polls instead of exiting.",
 		Cause:   ErrWaiting,
 	}
 }
@@ -430,7 +431,7 @@ func appConfigNote(site string, files []string) string {
 		last := len(files) - 1
 		what = fmt.Sprintf("%d files, %s and %s: they differ from the render, and the apply brings them up to date and recreates their apps", len(files), strings.Join(files[:last], ", "), files[last])
 	}
-	return fmt.Sprintf("%s: run `paisans deployment apply --site %s` when acceptable. Its apps are out of date in %s", site, site, what)
+	return fmt.Sprintf("%s: run `%s deployment apply --site %s` when acceptable. Its apps are out of date in %s", site, progname.Cmd(), site, what)
 }
 
 // appEnvFiles is every app .env the render places on site.

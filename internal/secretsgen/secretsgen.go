@@ -33,6 +33,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // garageKeyIDPattern and garageSecretPattern are the only shapes Garage
@@ -572,8 +573,8 @@ func pending(cfg *config.Config, secrets *config.Secrets) []Pending {
 		if spec.PKCE {
 			pkce = "PKCE enabled: the app always sends a code challenge"
 		}
-		why := "created at the deployment's Pocket ID by `paisans deployment apply --execute` on a site that runs " + name +
-			", which records the client ID and secret here itself before " + name + " starts; declaring the app is the approval. `paisans oidc client create --app " + name +
+		why := "created at the deployment's Pocket ID by `" + progname.Cmd() + " deployment apply --execute` on a site that runs " + name +
+			", which records the client ID and secret here itself before " + name + " starts; declaring the app is the approval. `" + progname.Cmd() + " oidc client create --app " + name +
 			"` runs the same step alone. The client's redirect URI is " + spec.CallbackURL + ", with " + pkce
 		admin, member := spec.Groups(app)
 		switch {

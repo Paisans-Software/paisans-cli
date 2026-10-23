@@ -12,6 +12,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/keystore"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -99,7 +100,7 @@ func ensureAgeKey(r ui.Reporter, id, configPath, secretsPath, keyFile string) er
 	case keyFile != "":
 		// paisans does not look for a key file on its own, so without this
 		// line the next command cannot decrypt.
-		r.Note("set this before running paisans or sops", "export "+export)
+		r.Note("set this before running "+progname.Cmd()+" or sops", "export "+export)
 	case export != "":
 		r.Detail("paisans finds the key on its own. To run sops by hand: export %s", export)
 	}

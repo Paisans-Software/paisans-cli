@@ -38,6 +38,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/dns"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/smtpcheck"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -216,7 +217,7 @@ func plan(e Env, rs []Rotator, all, restart bool) (*Run, error) {
 		}
 	}
 	if restart && len(pending) > 0 {
-		return nil, fmt.Errorf("secrets rotate --all --restart: %s has a rotation under way, and starting the list again would leave it unfinished. Finish it first with paisans secrets rotate %s --execute. Nothing was changed", strings.Join(pending, ", "), strings.Join(pending, " "))
+		return nil, fmt.Errorf("secrets rotate --all --restart: %s has a rotation under way, and starting the list again would leave it unfinished. Finish it first with %s secrets rotate %s --execute. Nothing was changed", strings.Join(pending, ", "), progname.Cmd(), strings.Join(pending, " "))
 	}
 	resume := all && !restart && len(s.RotateRemaining) > 0
 	if resume {
@@ -224,7 +225,7 @@ func plan(e Env, rs []Rotator, all, restart bool) (*Run, error) {
 		// off the list, and every later --all would stop short of it.
 		for _, path := range s.RotateRemaining {
 			if _, ok := byPath[path]; !ok {
-				return nil, fmt.Errorf("secrets rotate --all: the earlier --all run left %s to rotate, and this deployment has no rotation of it any more, Eg: the app that held it is gone. Run paisans secrets rotate --all --restart to discard what that run left and start the full list again. Nothing was changed", path)
+				return nil, fmt.Errorf("secrets rotate --all: the earlier --all run left %s to rotate, and this deployment has no rotation of it any more, Eg: the app that held it is gone. Run %s secrets rotate --all --restart to discard what that run left and start the full list again. Nothing was changed", path, progname.Cmd())
 			}
 		}
 	}
@@ -286,7 +287,7 @@ func plan(e Env, rs []Rotator, all, restart bool) (*Run, error) {
 						if err == nil {
 							err = errors.New("it is not accepted")
 						}
-						return nil, fmt.Errorf("secrets rotate %s: the value `paisans secrets set` put in the secrets file does not pass where it is checked: %w. Set the right one with `paisans secrets set %s`. Nothing was changed", path, err, path)
+						return nil, fmt.Errorf("secrets rotate %s: the value `%s secrets set` put in the secrets file does not pass where it is checked: %w. Set the right one with `%s secrets set %s`. Nothing was changed", path, progname.Cmd(), err, progname.Cmd(), path)
 					}
 				}
 			}
@@ -381,7 +382,7 @@ func (r *Run) Show(w ui.Reporter) {
 			w.Detail("every host using it runs the value the secrets file holds, so the new one is pasted at a terminal before any host is claimed, and written under rotations before any host is handed it")
 		case isAsker:
 			w.Step("stage 1, next value").End(ui.Pending, "")
-			w.Detail("the value `paisans secrets set` put in the secrets file, written under rotations before any host is handed it")
+			w.Detail("the value `%s secrets set` put in the secrets file, written under rotations before any host is handed it", progname.Cmd())
 		default:
 			w.Step("stage 1, next value").End(ui.Pending, "")
 			w.Detail("generated on the workstation and written to the secrets file under rotations, before any host is handed it")
@@ -419,7 +420,7 @@ func (r *Run) ShowResume(w ui.Reporter) {
 	switch {
 	case r.Resumed:
 		w.Note(fmt.Sprintf("resuming the --all run the secrets file records as left: %d rotations", len(r.Items)),
-			"the secrets that run finished are not rotated again. To rotate every secret once more, run paisans secrets rotate --all --restart")
+			"the secrets that run finished are not rotated again. To rotate every secret once more, run "+progname.Cmd()+" secrets rotate --all --restart")
 	case r.Restarted:
 		w.Note("starting --all again", "what an earlier --all run left is discarded, and every secret in scope is rotated, including those it finished")
 	}
@@ -517,7 +518,7 @@ func (r *Run) Answer(e Env, path, value string) error {
 	issuer := rot.(Asker).Issuer(e.Cfg)
 	ui.Secret(value)
 	if value == "" {
-		return fmt.Errorf("secrets rotate %s: nothing was pasted. Replace it at %s and run again to paste the new one; or set it first with `paisans secrets set %s`, and the run hands out the value the file holds; or, when it was replaced and applied before, pass --replaced %s. Nothing was changed", path, issuer, path, path)
+		return fmt.Errorf("secrets rotate %s: nothing was pasted. Replace it at %s and run again to paste the new one; or set it first with `%s secrets set %s`, and the run hands out the value the file holds; or, when it was replaced and applied before, pass --replaced %s. Nothing was changed", path, issuer, progname.Cmd(), path, path)
 	}
 	if err := config.CheckPastedSecret(path, value); err != nil {
 		return fmt.Errorf("secrets rotate %s: %w. Nothing was changed", path, err)

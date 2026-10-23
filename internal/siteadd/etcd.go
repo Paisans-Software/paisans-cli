@@ -7,6 +7,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
@@ -54,7 +55,7 @@ func (p *Plan) probeEtcd() ([]apply.EtcdMember, error) {
 		p.clusterID = cluster.ID
 		return members, nil
 	}
-	return nil, fmt.Errorf("site add %s: no etcd answers as a voter on any of %s. site add grows a running cluster; a deployment not started yet is started with `paisans deployment apply`", p.Site, strings.Join(order, ", "))
+	return nil, fmt.Errorf("site add %s: no etcd answers as a voter on any of %s. site add grows a running cluster; a deployment not started yet is started with `%s deployment apply`", p.Site, strings.Join(order, ", "), progname.Cmd())
 }
 
 // joiners are the configured members that are not yet voters: every witness
@@ -206,7 +207,7 @@ func (p *Plan) planEtcdData(j string, live []apply.EtcdMember) error {
 // etcdctl/ctlv3/command/printer_json.go).
 func (p *Plan) knowCluster(j string) error {
 	if p.clusterID == 0 {
-		return fmt.Errorf("site add %s: %s's etcd answered without a cluster ID, so the cluster ID could not be read, and %s's etcd data cannot be checked against it before it is cleared. Run paisans doctor on %s and run site add again. Nothing was changed", p.Site, p.control, j, p.control)
+		return fmt.Errorf("site add %s: %s's etcd answered without a cluster ID, so the cluster ID could not be read, and %s's etcd data cannot be checked against it before it is cleared. Run %s doctor on %s and run site add again. Nothing was changed", p.Site, p.control, j, progname.Cmd(), p.control)
 	}
 	return nil
 }

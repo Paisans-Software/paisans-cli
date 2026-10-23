@@ -165,7 +165,7 @@ func Remains(p *Plan, secrets *config.Secrets, kept []string) []string {
 			out = append(out, secretsLeft(p.App, strings.Join(keys, ", ")))
 		}
 	}
-	out = append(out, dnsLeft)
+	out = append(out, dnsLeft())
 	if !p.DeleteData {
 		out = append(out, dataKept(p.App))
 	}

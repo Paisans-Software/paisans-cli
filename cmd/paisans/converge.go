@@ -17,6 +17,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/gatewaymove"
 	"github.com/paisans-software/paisans-cli/internal/hostarch"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/secretsgen"
@@ -469,7 +470,7 @@ func convergeGatewayMove(cfg *config.Config) (bool, error) {
 		}
 		held, err := convergeHoldsGateway(cfg, site)
 		if err != nil {
-			return false, convergeStop("apply could not read "+site, err, "A site that was the gateway keeps serving until paisans gateway move stops it, so every site is asked. Make it reachable and run again.")
+			return false, convergeStop("apply could not read "+site, err, "A site that was the gateway keeps serving until "+progname.Cmd()+" gateway move stops it, so every site is asked. Make it reachable and run again.")
 		}
 		if held {
 			return true, nil
@@ -681,7 +682,7 @@ func generateProblem(path string, err error) error {
 	}
 	return &ui.Problem{
 		Hint:    hint,
-		Explain: errLine(err) + ".\nNothing on a server changed. Once that is fixed, run paisans deployment apply again.",
+		Explain: errLine(err) + ".\nNothing on a server changed. Once that is fixed, run " + progname.Cmd() + " deployment apply again.",
 		Cause:   err,
 	}
 }
@@ -750,7 +751,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 		// init writes the id, the subnet and the secrets the rest is
 		// planned from, so the state is read again once it has run.
 		if err := convergeRun(convergeFlags([]string{"init"}, o)); err != nil {
-			return convergeStop("apply stopped at init", err, "Run paisans deployment apply --execute again to resume.")
+			return convergeStop("apply stopped at init", err, "Run "+progname.Cmd()+" deployment apply --execute again to resume.")
 		}
 		// init reported through its own reporter, and pointed the retries
 		// and holds at it; the reads below draw on r.
@@ -769,7 +770,7 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	if cfg == nil {
 		r.Section("configuration")
 		r.Step("init").End(ui.Pending, "the deployment id, the mesh subnet and every generated secret")
-		r.Result("Nothing changed. %s has no deployment id yet, so the rest is planned once init has run: re-run with --execute, or run paisans init.", configPath)
+		r.Result("Nothing changed. %s has no deployment id yet, so the rest is planned once init has run: re-run with --execute, or run %s init.", configPath, progname.Cmd())
 		return nil
 	}
 	// A configuration validate refuses reaches no host: a typo in
@@ -1379,7 +1380,9 @@ func showNotes(r ui.Reporter, notes []checkReport) {
 }
 
 // resumeAdvice is what a stop says to do, but at a DNS conflict or a wait.
-const resumeAdvice = "Run paisans deployment apply --execute again to resume."
+func resumeAdvice() string {
+	return "Run " + progname.Cmd() + " deployment apply --execute again to resume."
+}
 
 // convergeExecute runs every step but init, which runConverge has run: a
 // prepare line per site, as it runs; a pull line per site, likewise; dns init, which reports as typed by
@@ -1428,9 +1431,9 @@ func convergeExecute(r ui.Reporter, cfg *config.Config, steps []convergeStep, o 
 			insideApply = false
 			if err != nil {
 				if errors.Is(err, dns.ErrConflict) {
-					return convergeStop("apply stopped at "+s.Title, err, "Resolve each DNS conflict above as it says, then run paisans deployment apply --execute again.")
+					return convergeStop("apply stopped at "+s.Title, err, "Resolve each DNS conflict above as it says, then run "+progname.Cmd()+" deployment apply --execute again.")
 				}
-				return convergeStop("apply stopped at "+s.Title, err, resumeAdvice)
+				return convergeStop("apply stopped at "+s.Title, err, resumeAdvice())
 			}
 			i++
 		}
@@ -1483,7 +1486,7 @@ func groupStop(what string, steps []convergeStep, errs []error) error {
 	case 0:
 		return nil
 	case 1:
-		return convergeStop("apply stopped at "+steps[failed[0]].Title, errs[failed[0]], resumeAdvice)
+		return convergeStop("apply stopped at "+steps[failed[0]].Title, errs[failed[0]], resumeAdvice())
 	}
 	var sites, explain []string
 	var causes []error
@@ -1495,7 +1498,7 @@ func groupStop(what string, steps []convergeStep, errs []error) error {
 	}
 	return &ui.Problem{
 		Hint:    "apply stopped at " + what + " on " + strings.Join(sites, ", "),
-		Explain: strings.Join(append(explain, resumeAdvice), "\n"),
+		Explain: strings.Join(append(explain, resumeAdvice()), "\n"),
 		Cause:   errors.Join(causes...),
 	}
 }
@@ -1567,14 +1570,14 @@ func convergeInstall(r ui.Reporter, steps []convergeStep, o convergeOptions) err
 		case errors.Is(err, apply.ErrFoundingWait):
 			// A pause only on a founding apply, which pass two resumes.
 			line.Fail(err)
-			return convergeStop("apply stopped at "+s.Title, laterFounding(err), resumeAdvice)
+			return convergeStop("apply stopped at "+s.Title, laterFounding(err), resumeAdvice())
 		case errors.Is(err, storageadd.ErrWaiting):
 			// Not a failure, and main exits 75 for it as storage add does.
 			line.End(ui.Pending, "waiting on Garage")
-			return convergeStop("apply is waiting at "+s.Title, err, "Nothing failed: Garage is still moving data. Run paisans deployment apply --execute again later.")
+			return convergeStop("apply is waiting at "+s.Title, err, "Nothing failed: Garage is still moving data. Run "+progname.Cmd()+" deployment apply --execute again later.")
 		default:
 			line.Fail(err)
-			return convergeStop("apply stopped at "+s.Title, err, resumeAdvice)
+			return convergeStop("apply stopped at "+s.Title, err, resumeAdvice())
 		}
 		return nil
 	}
@@ -1943,7 +1946,7 @@ func convergeLeft(r ui.Reporter, cfg *config.Config, secretsPath, configPath str
 	}
 	if secrets, err := config.LoadDeploymentSecrets(secretsPath, cfg.ID); err == nil {
 		for _, key := range secretsgen.OwedNames(cfg, secrets) {
-			r.Note("secrets: "+key+" is owed and only you can provide it", "paisans secrets set "+key+" < value")
+			r.Note("secrets: "+key+" is owed and only you can provide it", progname.Cmd()+" secrets set "+key+" < value")
 		}
 	}
 }

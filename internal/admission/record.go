@@ -14,6 +14,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/version"
 )
 
@@ -294,7 +295,7 @@ func ParseRecord(data []byte, token string) (Record, error) {
 	case version.IsNewer(err):
 		problems = append(problems, err.Error())
 	case err != nil:
-		problems = append(problems, err.Error()+". The host's owner admits the deployment again: `paisans site request`, then `paisans site admit`")
+		problems = append(problems, err.Error()+". The host's owner admits the deployment again: `"+progname.Cmd()+" site request`, then `"+progname.Default+" site admit`")
 	}
 	if len(problems) > 0 {
 		return refuse(problems...)

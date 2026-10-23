@@ -7,6 +7,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/blueprints"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // SettingsProbe is what one app's container on one site said when asked for
@@ -92,7 +93,7 @@ func Settings(cfg *config.Config, probes []SettingsProbe) []Finding {
 			continue
 		}
 		more := append(wrong,
-			fmt.Sprintf("Each is written and locked by the file the toolkit renders for %s. `paisans deployment apply --site %s` renders it and recreates the stack; if the setting is still unlocked afterwards, the image predates the lock and needs a newer one (apps.%s.images).", p.App, p.Site, p.App))
+			fmt.Sprintf("Each is written and locked by the file the toolkit renders for %s. `%s deployment apply --site %s` renders it and recreates the stack; if the setting is still unlocked afterwards, the image predates the lock and needs a newer one (apps.%s.images).", p.App, progname.Cmd(), p.Site, p.App))
 		out = append(out, Finding{Section: SectionSettings, Level: Fail, Line: fmt.Sprintf("%s: %d gate setting(s) not enforced", where, len(wrong)), More: more})
 	}
 	return out

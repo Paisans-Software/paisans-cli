@@ -3,7 +3,6 @@ package configstore
 import (
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,6 +10,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // emptyMark is what the gather command prints for a site that holds no
@@ -25,7 +25,15 @@ const noStoreMark = "__PAISANS_NO_STORE__"
 
 // ErrNoStore is a site with no configuration store yet: one site prepare
 // has not run on since the store was added. paisans site prepare makes it.
-var ErrNoStore = errors.New("no configuration store; paisans site prepare makes it")
+var ErrNoStore error = noStore{}
+
+// noStore is ErrNoStore's type, so that its advice names the command as it
+// was invoked, which is known only once main has run.
+type noStore struct{}
+
+func (noStore) Error() string {
+	return "no configuration store; " + progname.Cmd() + " site prepare makes it"
+}
 
 // SyncReport is what a site's last sync reached, as the sync script logged it.
 type SyncReport struct {

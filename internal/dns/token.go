@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/deployment"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // The DNS token check asks the provider, from one place, whether it accepts
@@ -330,7 +331,7 @@ func (c TokenCheck) unanswered(caller tokenCaller, err error) TokenResult {
 	if errors.Is(err, errLineBreak) {
 		return c.fail(TokenResult{
 			Finding: "caddy.env on " + c.from() + " holds an ACME_DNS_TOKEN with a line break in it",
-			Advice:  "Nothing was sent to the provider. No token holds one, and curl would read the rest of it as another option. Set the token again with `paisans secrets set external.acme_dns_token` and apply.",
+			Advice:  "Nothing was sent to the provider. No token holds one, and curl would read the rest of it as another option. Set the token again with `" + progname.Cmd() + " secrets set external.acme_dns_token` and apply.",
 		})
 	}
 	var unreadable unreadableEnv

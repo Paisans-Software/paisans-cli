@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -104,8 +105,8 @@ func unresolvedProblem(plan *Plan, missing []string) error {
 	}
 	return &ui.Problem{
 		Hint: "mesh: " + plan.Deployment.WireGuardUnit() + " was not started",
-		Explain: fmt.Sprintf("%s not resolve from %s; create %s (paisans dns init) and apply again.\nNothing that binds the mesh address was started.",
-			subject, plan.Site, record),
+		Explain: fmt.Sprintf("%s not resolve from %s; create %s (%s dns init) and apply again.\nNothing that binds the mesh address was started.",
+			subject, plan.Site, record, progname.Cmd()),
 		Cause: fmt.Errorf("getent ahosts found no address for %s on %s after %s, with the DNS cache flushed before each try",
 			strings.Join(missing, ", "), plan.Site, resolveWait),
 	}

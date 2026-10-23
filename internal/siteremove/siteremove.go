@@ -37,6 +37,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/dns"
 	"github.com/paisans-software/paisans-cli/internal/meshkey"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 	"github.com/paisans-software/paisans-cli/internal/validate"
@@ -140,7 +141,7 @@ func (st *Stage) skipTitle() string {
 // EvictLine is how the host's owner removes what a site remove left for
 // them, without the request file.
 func EvictLine(d deployment.Deployment, user string) string {
-	return fmt.Sprintf("sudo paisans site evict --deployment %s --user %s --execute", d.ID, user)
+	return fmt.Sprintf("sudo %s site evict --deployment %s --user %s --execute", progname.Default, d.ID, user)
 }
 
 // Plan is a whole removal, decided from the live deployment.
@@ -354,7 +355,7 @@ func Refusal(cfg *config.Config, site string, o Options) error {
 		if o.HostGone {
 			return refuse(site+" is the only data site", "Nothing remains to fail over to, so the database cannot be taken off it. Recovery is a restore from backup onto a new host.")
 		}
-		return refuse(site+" is the only data site", "The database would have nowhere to live. Add another data site first (paisans site add).")
+		return refuse(site+" is the only data site", "The database would have nowhere to live. Add another data site first ("+progname.Cmd()+" site add).")
 	}
 	if len(cfg.Storage.Garage.Sites) > 0 && cfg.Storage.Garage.Sites[0] == site && len(cfg.AppNames()) > 0 {
 		return refuse(site+" is first in storage.garage.sites", "It is the Garage node every app writes its objects through, and the apps would lose it the moment its node stops. Move another Garage site to the front of the list and apply every site running an app first, then run this again.")
@@ -362,7 +363,7 @@ func Refusal(cfg *config.Config, site string, o Options) error {
 	if contains(cfg.Storage.Garage.Sites, site) {
 		left := len(cfg.Storage.Garage.Sites) - 1
 		if left < cfg.Storage.Garage.Replication {
-			return refuse("too few Garage nodes would be left without "+site, fmt.Sprintf("Without it %d node(s) would hold objects at storage.garage.replication %d, so the data on it would have nowhere to go. Add a Garage site, or lower the replication factor, with paisans storage add first.", left, cfg.Storage.Garage.Replication))
+			return refuse("too few Garage nodes would be left without "+site, fmt.Sprintf("Without it %d node(s) would hold objects at storage.garage.replication %d, so the data on it would have nowhere to go. Add a Garage site, or lower the replication factor, with %s storage add first.", left, cfg.Storage.Garage.Replication, progname.Cmd()))
 		}
 	}
 	end, _, err := EndState(cfg, site)
@@ -424,7 +425,7 @@ func EndState(cfg *config.Config, site string) (*config.Config, string, error) {
 		}
 	}
 	if len(roles) == 0 && len(end.PinnedTo(witness)) == 0 {
-		return nil, "", fmt.Errorf("site remove %s: without it, %s and the witness %s would be two etcd voters, so %s leaves etcd and loses the witness role in the same removal. Witness is its only role, and a site with none is allowed only when an app is pinned to it. Give %s another role and apply it first, or run `paisans site remove %s` once this removal is done", site, data, witness, witness, witness, witness)
+		return nil, "", fmt.Errorf("site remove %s: without it, %s and the witness %s would be two etcd voters, so %s leaves etcd and loses the witness role in the same removal. Witness is its only role, and a site with none is allowed only when an app is pinned to it. Give %s another role and apply it first, or run `%s site remove %s` once this removal is done", site, data, witness, witness, witness, progname.Cmd(), witness)
 	}
 	w.Roles = roles
 	end.Sites[witness] = w

@@ -5,6 +5,8 @@ import (
 	"io"
 	"net"
 	"strings"
+
+	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // certificateMarker is the line in each snippet where the operator's own
@@ -22,7 +24,7 @@ func Show(w io.Writer, t Target, ws WebServer) {
 	if !t.External() {
 		fmt.Fprintf(w, "%s is served by the toolkit's own Caddy on %s (managed_by: paisans): nothing to hand off.\n", t.App, t.Site)
 		fmt.Fprintf(w, "Its certificate for %s is obtained over DNS-01 through acme.provider, and %s points at %s.\n", t.Hostname, t.Hostname, addresses(t))
-		fmt.Fprintf(w, "`paisans web-server check --app %s` checks the name and the certificate from this machine.\n", t.App)
+		fmt.Fprintf(w, "`%s web-server check --app %s` checks the name and the certificate from this machine.\n", progname.Cmd(), t.App)
 		return
 	}
 
@@ -79,7 +81,7 @@ func Show(w io.Writer, t Target, ws WebServer) {
 		fmt.Fprintln(w)
 		apache()
 	}
-	fmt.Fprintf(w, "\nThen run `paisans web-server check --app %s` from this machine.\n", t.App)
+	fmt.Fprintf(w, "\nThen run `%s web-server check --app %s` from this machine.\n", progname.Cmd(), t.App)
 }
 
 // ListenWarning is the warning for a listen address that is not loopback. It

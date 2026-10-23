@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/grant"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/ui"
@@ -99,7 +100,7 @@ func convergeReview(r ui.Reporter, cfg *config.Config, o convergeOptions) (map[s
 	if !o.Execute {
 		return out, pending, nil
 	}
-	if err := approveReviews(r, o.answers, o.stdin, o.stdout, all, "paisans deployment apply --execute"); err != nil {
+	if err := approveReviews(r, o.answers, o.stdin, o.stdout, all, progname.Cmd()+" deployment apply --execute"); err != nil {
 		return nil, 0, err
 	}
 	run := &runReview{approved: map[string]grant.Review{}}

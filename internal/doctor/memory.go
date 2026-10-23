@@ -6,6 +6,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/hostmem"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // Sections of the host's memory checks, read right after sudo: the host's
@@ -65,15 +66,15 @@ func Swap(probes []MemoryProbe) []Finding {
 		case len(configured) > 0:
 			out = append(out, Finding{Section: SectionSwap, Level: Warn,
 				Line: fmt.Sprintf("%s: configured but not on (%s)", p.Site, strings.Join(configured, ", ")),
-				More: []string{hostmem.SwapNeeded, "The host's owner turns it on (swapon -a), or removes it and runs `paisans site admit` again to be offered a swapfile."}})
+				More: []string{hostmem.SwapNeeded, "The host's owner turns it on (swapon -a), or removes it and runs `" + progname.Default + " site admit` again to be offered a swapfile."}})
 		case f.HasZRAM():
 			out = append(out, Finding{Section: SectionSwap, Level: Warn,
 				Line: fmt.Sprintf("%s: only zram on this host", p.Site),
-				More: []string{hostmem.SwapNeeded, "zram swap compresses what it holds into RAM, so it stretches the host's memory rather than adding to it.", "The host's owner runs `paisans site admit` again, which offers a swapfile beside it where it can make one (`--swapfile`)."}})
+				More: []string{hostmem.SwapNeeded, "zram swap compresses what it holds into RAM, so it stretches the host's memory rather than adding to it.", "The host's owner runs `" + progname.Default + " site admit` again, which offers a swapfile beside it where it can make one (`--swapfile`)."}})
 		default:
 			out = append(out, Finding{Section: SectionSwap, Level: Warn,
 				Line: fmt.Sprintf("%s: none on this host", p.Site),
-				More: []string{hostmem.SwapNeeded, "The host's owner runs `paisans site admit` again, which offers a swapfile where it can make one (`--swapfile`)."}})
+				More: []string{hostmem.SwapNeeded, "The host's owner runs `" + progname.Default + " site admit` again, which offers a swapfile where it can make one (`--swapfile`)."}})
 		}
 	}
 	return out
@@ -101,7 +102,7 @@ func Memory(cfg *config.Config, probes []MemoryProbe) []Finding {
 			continue
 		}
 		out = append(out, Finding{Section: SectionMemory, Level: Warn, Line: p.Site + ": " + v.Line(),
-			More: append(v.Explain(), "Give the host more RAM, turn on or add swap (`paisans site admit --swapfile` on a host with none), or move a role to another host.")})
+			More: append(v.Explain(), "Give the host more RAM, turn on or add swap (`"+progname.Default+" site admit --swapfile` on a host with none), or move a role to another host.")})
 	}
 	return out
 }

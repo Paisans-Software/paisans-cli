@@ -6,6 +6,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // Graph is every version the workstation holds, with a way to read each
@@ -451,7 +453,7 @@ func (j *judgement) named(a Anchor, order, cyclic []string) (Verdict, error) {
 		return Verdict{}, &anchorError{fmt.Sprintf("no version the trust rules trust is signed by the key --key names, %s, and no root is pinned", key)}
 	case 1:
 	default:
-		return Verdict{}, &anchorError{fmt.Sprintf("the key --key names, %s, signed versions under more than one root, and which is this deployment's is not for a key to say: get the current root from another operator, the full hash in their .paisans/config-root or on a root's line of their paisans deployment log, and recover with --root <sha>. A root may be held only in this workstation's own cache, .paisans/store.git, from an earlier run; on a workstation recovering from nothing, removing .paisans/ clears it", key)}
+		return Verdict{}, &anchorError{fmt.Sprintf("the key --key names, %s, signed versions under more than one root, and which is this deployment's is not for a key to say: get the current root from another operator, the full hash in their .paisans/config-root or on a root's line of their %s deployment log, and recover with --root <sha>. A root may be held only in this workstation's own cache, .paisans/store.git, from an earlier run; on a workstation recovering from nothing, removing .paisans/ clears it", key, progname.Cmd())}
 	}
 	v, err := j.from(roots[0], order, cyclic)
 	if err != nil {
@@ -493,7 +495,7 @@ func (j *judgement) named(a Anchor, order, cyclic []string) (Verdict, error) {
 			return Verdict{}, &anchorError{fmt.Sprintf("the key --key names, %s, is not a key of an operator the newest version %s lists", key, h)}
 		}
 		if !slices.Contains(a.Signers, j.g.Versions[h].SignerFP) {
-			return Verdict{}, &anchorError{fmt.Sprintf("the newest version %s is signed by %s, not by the key --key names, %s; a key alone cannot tell this deployment's history from one it signed before a redeploy, so it trusts only versions it signed: get the current root from another operator, the full hash in their .paisans/config-root or on a root's line of their paisans deployment log, and pin it with --root <sha>", h, j.g.Versions[h].SignerFP, key)}
+			return Verdict{}, &anchorError{fmt.Sprintf("the newest version %s is signed by %s, not by the key --key names, %s; a key alone cannot tell this deployment's history from one it signed before a redeploy, so it trusts only versions it signed: get the current root from another operator, the full hash in their .paisans/config-root or on a root's line of their %s deployment log, and pin it with --root <sha>", h, j.g.Versions[h].SignerFP, key, progname.Cmd())}
 		}
 	}
 	return out, nil
@@ -595,9 +597,9 @@ func (j *judgement) shape(sha string) string {
 	case v.BuildNewer:
 		return fmt.Sprintf("it was published by paisans %q, a version this paisans cannot order, so a newer paisans may have published it; upgrade paisans (shape)", v.Build.Version)
 	case !v.BuildOK && len(v.Parents) == 0:
-		return "it is a root that does not say which build of paisans published it, so no version can be published on it and the sites keep it: redeploy, by each host's owner running `paisans site evict` and admitting the deployment again, then `paisans deployment apply --execute` publishes a new first version (shape)"
+		return "it is a root that does not say which build of paisans published it, so no version can be published on it and the sites keep it: redeploy, by each host's owner running `" + progname.Default + " site evict` and admitting the deployment again, then `" + progname.Cmd() + " deployment apply --execute` publishes a new first version (shape)"
 	case !v.BuildOK:
-		return "it does not say which build of paisans published it; publish the configuration again, with `paisans deployment publish --execute` (shape)"
+		return "it does not say which build of paisans published it; publish the configuration again, with `" + progname.Cmd() + " deployment publish --execute` (shape)"
 	}
 	want := 1
 	for _, p := range v.Parents {

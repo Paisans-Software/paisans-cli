@@ -10,6 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -151,7 +152,7 @@ func noRecipientPlainProblem(path string) error {
 	name := ui.ShortPath(path)
 	return &ui.Problem{
 		Hint:    "no " + SOPSConfigName + " beside " + name + " names an age recipient",
-		Explain: fmt.Sprintf("Secrets are written only encrypted, and %s names who they are encrypted to, so nothing was written. Name your age public key in %s, or run paisans init in a directory with neither file to have a key made.", SOPSConfigName, quotePath(filepath.Join(filepath.Dir(path), SOPSConfigName))),
+		Explain: fmt.Sprintf("Secrets are written only encrypted, and %s names who they are encrypted to, so nothing was written. Name your age public key in %s, or run %s init in a directory with neither file to have a key made.", SOPSConfigName, quotePath(filepath.Join(filepath.Dir(path), SOPSConfigName)), progname.Cmd()),
 		Cause:   fmt.Errorf("%s: no age recipient to encrypt to", path),
 	}
 }

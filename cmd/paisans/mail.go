@@ -9,6 +9,7 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/smtpcheck"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -66,7 +67,7 @@ func mailFailure(cfg *config.Config, failed *smtpcheck.Error) (hint, explain str
 	explain = fmt.Sprintf("%s, declared by %s, sends through %s with %s and %s. From %s the server answered: %s.",
 		c.Whose(), c.Setting(cfg), c.Address(), c.Security(), login, c.Site, failed.Reply())
 	if c.PasswordPath != "" {
-		explain += fmt.Sprintf(" Fix the setting, or set the password the mail provider issued with `paisans secrets set %s`.", c.PasswordPath)
+		explain += fmt.Sprintf(" Fix the setting, or set the password the mail provider issued with `%s secrets set %s`.", progname.Cmd(), c.PasswordPath)
 	} else {
 		explain += " Fix the setting."
 	}
@@ -191,7 +192,7 @@ func checkMailForValidate(r ui.Reporter, cfg *config.Config, secretsPath string)
 		case errors.As(err, &failed) && failed.Dialled():
 			step.End(ui.Warned, "does not log in")
 			_, explain := mailFailure(cfg, failed)
-			r.Explain(explain + " `paisans deployment apply` refuses until it does.")
+			r.Explain(explain + " `" + progname.Cmd() + " deployment apply` refuses until it does.")
 			warned++
 		default:
 			unreachable[c.Site] = true
@@ -229,7 +230,7 @@ func trySMTPPassword(r ui.Reporter, cfg *config.Config, secrets *config.Secrets,
 		step := r.Step(c.Title())
 		if c.Skip != "" {
 			step.End(ui.Warned, "not tried")
-			r.Explain(key + " is not tried for " + c.Whose() + ": " + c.Skip + ". `paisans deployment apply` tries it from the site.")
+			r.Explain(key + " is not tried for " + c.Whose() + ": " + c.Skip + ". `" + progname.Cmd() + " deployment apply` tries it from the site.")
 			continue
 		}
 		if to == nil {
@@ -239,7 +240,7 @@ func trySMTPPassword(r ui.Reporter, cfg *config.Config, secrets *config.Secrets,
 				return &ui.Problem{Hint: "no one to send the test message to", Explain: fmt.Sprintf("%s is tried by sending a test message, and %s. %s.", key, err, done)}
 			}
 		}
-		err := smtpcheck.Send(env, c, value, smtpcheck.TestMail(cfg, c, key, "paisans secrets set", to))
+		err := smtpcheck.Send(env, c, value, smtpcheck.TestMail(cfg, c, key, progname.Cmd()+" secrets set", to))
 		if err == nil {
 			step.Done("logs in; test message sent to " + strings.Join(to, ", "))
 			continue
@@ -258,7 +259,7 @@ func trySMTPPassword(r ui.Reporter, cfg *config.Config, secrets *config.Secrets,
 		if errors.As(err, &failed) {
 			why = failed.Reply()
 		}
-		r.Explain(fmt.Sprintf("%s could not be reached from %s (%s), so %s is written untried. `paisans deployment apply` tries it from each site running %s before it changes anything.", c.Address(), c.From(), strings.TrimSuffix(ui.Redact(why), "."), key, appsOf(c)))
+		r.Explain(fmt.Sprintf("%s could not be reached from %s (%s), so %s is written untried. `%s deployment apply` tries it from each site running %s before it changes anything.", c.Address(), c.From(), strings.TrimSuffix(ui.Redact(why), "."), key, progname.Cmd(), appsOf(c)))
 	}
 	return nil
 }

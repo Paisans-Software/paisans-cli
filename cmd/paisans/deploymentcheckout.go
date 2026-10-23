@@ -15,6 +15,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/localstore"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -52,7 +53,7 @@ func runDeploymentCheckout(args []string) error {
 		return err
 	}
 	if len(pos) != 1 {
-		return &ui.Problem{Hint: "deployment checkout takes one deployment", Explain: "Name it by its id, a unique start of the id, or its domain, as paisans deployment list prints them."}
+		return &ui.Problem{Hint: "deployment checkout takes one deployment", Explain: "Name it by its id, a unique start of the id, or its domain, as " + progname.Cmd() + " deployment list prints them."}
 	}
 	path, err := filepath.Abs(*configPath)
 	if err != nil {
@@ -63,7 +64,7 @@ func runDeploymentCheckout(args []string) error {
 		return err
 	}
 	if dst.HasFiles() {
-		return &ui.Problem{Hint: "there are configuration files here already", Explain: "Checkout writes onto a workstation with nothing, so it never overwrites a file. Use paisans deployment pull where the files exist, or check out into an empty directory with --config."}
+		return &ui.Problem{Hint: "there are configuration files here already", Explain: "Checkout writes onto a workstation with nothing, so it never overwrites a file. Use " + progname.Cmd() + " deployment pull where the files exist, or check out into an empty directory with --config."}
 	}
 	if held := heldState(dst.Dir); len(held) > 0 {
 		return &ui.Problem{Hint: "there is store state here already", Explain: "Checkout writes onto a workstation with nothing, so it never overwrites a file, and " + strings.Join(held, ", ") + " would be replaced. Check out into an empty directory with --config."}
@@ -98,10 +99,10 @@ func runDeploymentCheckout(args []string) error {
 		return &ui.Problem{Hint: "the copy does not judge as the saved copy does", Explain: errLine(err) + ". What was written is removed; the saved copy is as it was.", Cause: err}
 	} else if err != nil {
 		s.Fail(err)
-		return &ui.Problem{Hint: "the checkout could not be written", Explain: errLine(err) + ". What was written is removed; the saved copy is as it was. Fix the cause and run paisans deployment checkout again, or check out into another empty directory with --config.", Cause: err}
+		return &ui.Problem{Hint: "the checkout could not be written", Explain: errLine(err) + ". What was written is removed; the saved copy is as it was. Fix the cause and run " + progname.Cmd() + " deployment checkout again, or check out into another empty directory with --config.", Cause: err}
 	}
 	s.Done(shortSHA(saved.SHA) + " trusted, as in the saved copy")
-	r.Note("the saved copy may be behind the sites", "Run paisans deployment pull --config "+path+" to bring any newer version the sites hold.")
+	r.Note("the saved copy may be behind the sites", "Run "+progname.Cmd()+" deployment pull --config "+path+" to bring any newer version the sites hold.")
 	r.Result("checked out %s of %s into %s", what, saved.ID, dst.Dir)
 	return nil
 }
@@ -124,7 +125,7 @@ func heldState(dir string) []string {
 // starts with it, or the one deployment with it as its domain.
 func findSaved(st localstore.Store, what string) (localstore.Listed, error) {
 	if what == "" {
-		return localstore.Listed{}, &ui.Problem{Hint: "deployment checkout was given an empty name", Explain: "Name the deployment by its id, a unique start of the id, or its domain, as paisans deployment list prints them."}
+		return localstore.Listed{}, &ui.Problem{Hint: "deployment checkout was given an empty name", Explain: "Name the deployment by its id, a unique start of the id, or its domain, as " + progname.Cmd() + " deployment list prints them."}
 	}
 	listed, err := st.List()
 	if err != nil {
@@ -142,20 +143,20 @@ func findSaved(st localstore.Store, what string) (localstore.Listed, error) {
 	}
 	switch len(found) {
 	case 0:
-		return localstore.Listed{}, &ui.Problem{Hint: fmt.Sprintf("no saved deployment is %q", what), Explain: "Name one by its id, a unique start of the id, or its domain, as paisans deployment list prints them. deployment fetch --ssh <user@host> saves every deployment a host holds."}
+		return localstore.Listed{}, &ui.Problem{Hint: fmt.Sprintf("no saved deployment is %q", what), Explain: "Name one by its id, a unique start of the id, or its domain, as " + progname.Cmd() + " deployment list prints them. deployment fetch --ssh <user@host> saves every deployment a host holds."}
 	case 1:
 	default:
 		var ids []string
 		for _, l := range found {
 			ids = append(ids, l.ID)
 		}
-		return localstore.Listed{}, &ui.Problem{Hint: fmt.Sprintf("%q names more than one saved deployment", what), Explain: "Give more of the id: " + strings.Join(ids, ", ") + ". paisans deployment list prints them."}
+		return localstore.Listed{}, &ui.Problem{Hint: fmt.Sprintf("%q names more than one saved deployment", what), Explain: "Give more of the id: " + strings.Join(ids, ", ") + ". " + progname.Cmd() + " deployment list prints them."}
 	}
 	l := found[0]
 	if l.Err != nil {
 		return l, &ui.Problem{Hint: "the saved copy of " + l.ID + " cannot be read", Explain: errLine(l.Err) + ", in " + l.Dir + ". deployment fetch --ssh <user@host> saves it again from a host that holds it.", Cause: l.Err}
 	}
-	recoverLine := "paisans deployment recover --from <user@host> --id " + l.ID + " --root <sha> --config <empty directory>/" + config.FileName + " --execute"
+	recoverLine := progname.Cmd() + " deployment recover --from <user@host> --id " + l.ID + " --root <sha> --config <empty directory>/" + config.FileName + " --execute"
 	switch l.Status {
 	case localstore.Verified:
 		return l, nil
@@ -200,13 +201,13 @@ func judgeSaved(src configstore.Local, rec localstore.Saved) (savedTrust, error)
 	}
 	t, err := judge(src, rec.ID)
 	if errors.Is(err, configstore.ErrNoAnchor) {
-		return t, &ui.Problem{Hint: "the saved copy of " + rec.ID + " has no version to start trusting from", Explain: err.Error() + ". Check the root's hash with another operator, then pin it: paisans deployment recover --from <user@host> --id " + rec.ID + " --root <sha> --config <empty directory>/" + config.FileName + " --execute.", Cause: err}
+		return t, &ui.Problem{Hint: "the saved copy of " + rec.ID + " has no version to start trusting from", Explain: err.Error() + ". Check the root's hash with another operator, then pin it: " + progname.Cmd() + " deployment recover --from <user@host> --id " + rec.ID + " --root <sha> --config <empty directory>/" + config.FileName + " --execute.", Cause: err}
 	}
 	if err != nil {
 		return t, err
 	}
 	if t.fork {
-		return t, &ui.Problem{Hint: "the saved copy of " + rec.ID + " holds a fork", Explain: "Its store holds two trusted versions on one parent, so the version it records is not the one to start editing from. Recover the deployment into an empty directory instead: paisans deployment recover --from <user@host> --id " + rec.ID + " --root <sha> --config <empty directory>/" + config.FileName + " --execute."}
+		return t, &ui.Problem{Hint: "the saved copy of " + rec.ID + " holds a fork", Explain: "Its store holds two trusted versions on one parent, so the version it records is not the one to start editing from. Recover the deployment into an empty directory instead: " + progname.Cmd() + " deployment recover --from <user@host> --id " + rec.ID + " --root <sha> --config <empty directory>/" + config.FileName + " --execute."}
 	}
 	if t.head != head || t.revision != rec.Revision {
 		return t, &ui.Problem{Hint: "the saved copy of " + rec.ID + " is not trusted from its own anchor", Explain: fmt.Sprintf("Its record names revision %d, %s, and its store does not hold that as a trusted version. %s", rec.Revision, rec.SHA, again)}

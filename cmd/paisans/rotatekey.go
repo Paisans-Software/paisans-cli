@@ -9,6 +9,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/render"
 	"github.com/paisans-software/paisans-cli/internal/rotatekey"
 	"github.com/paisans-software/paisans-cli/internal/secretsgen"
@@ -156,7 +157,7 @@ func (a applySwitch) plan(site string, secrets *config.Secrets) (*apply.Plan, er
 		return nil, err
 	}
 	if c := plan.Conflicts(); len(c) > 0 {
-		return nil, fmt.Errorf("%s's %s differs from what the last apply recorded, so somebody edited it on the host. Nothing was changed on %s. Restore it, or run `paisans deployment apply --site %s --only %s --overwrite %s`, then run rotate-key again", site, c[0].Path, site, site, a.app, c[0].Path)
+		return nil, fmt.Errorf("%s's %s differs from what the last apply recorded, so somebody edited it on the host. Nothing was changed on %s. Restore it, or run `%s deployment apply --site %s --only %s --overwrite %s`, then run rotate-key again", site, c[0].Path, site, progname.Cmd(), site, a.app, c[0].Path)
 	}
 	return plan, nil
 }

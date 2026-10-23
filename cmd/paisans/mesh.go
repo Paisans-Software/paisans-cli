@@ -15,6 +15,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/deployment"
 	"github.com/paisans-software/paisans-cli/internal/diagnosis"
 	"github.com/paisans-software/paisans-cli/internal/mesh"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
@@ -56,7 +57,7 @@ func checkMeshLive(cfg *config.Config, site string, h mesh.Host) error {
 	}
 	return &ui.Problem{
 		Hint:    "mesh subnet " + cfg.Mesh.Subnet + " is in use" + holder(clash),
-		Explain: "Remove it if not in use or run paisans init to pick a free subnet.",
+		Explain: "Remove it if not in use or run " + progname.Cmd() + " init to pick a free subnet.",
 		Cause:   fmt.Errorf("%s: the mesh subnet %s overlaps %s, so nothing was changed", h.Describe(), cfg.Mesh.Subnet, strings.Join(what, ", ")),
 	}
 }
@@ -552,7 +553,7 @@ func admitCommands(path, site string) string {
 	if path != config.FileName {
 		withConfig = " --config " + shellQuote(path)
 	}
-	return fmt.Sprintf("site admit checks the mesh subnet against the host as root, and refuses one that overlaps anything there. Each command below shows its plan before it changes anything, and takes the flags init cannot pass, such as --data-dir and --bridge-netfilter. If the host is yours, admit the site from this machine, with your own login on the host, which runs admit through sudo:\n\n    paisans site admit --site %[1]s%[2]s --ssh <your login> --execute\n\nIf someone else owns the host, send them a request:\n\n    paisans site request --site %[1]s%[2]s > %[1]s.admit\n\nand ask them to run, on the host:\n\n    sudo paisans site admit --request %[1]s.admit --execute", site, withConfig)
+	return fmt.Sprintf("site admit checks the mesh subnet against the host as root, and refuses one that overlaps anything there. Each command below shows its plan before it changes anything, and takes the flags init cannot pass, such as --data-dir and --bridge-netfilter. If the host is yours, admit the site from this machine, with your own login on the host, which runs admit through sudo:\n\n    %[3]s site admit --site %[1]s%[2]s --ssh <your login> --execute\n\nIf someone else owns the host, send them a request:\n\n    %[4]s site request --site %[1]s%[2]s > %[1]s.admit\n\nand ask them to run, on the host:\n\n    sudo %[5]s site admit --request %[1]s.admit --execute", site, withConfig, progname.Cmd(), progname.Cmd(), progname.Default)
 }
 
 // settleMesh is init's subnet decision, over the admitted sites and the
@@ -669,7 +670,7 @@ func chooseMesh(s ui.Step, cfg *config.Config, path string, hosts map[string]reg
 		}
 		return false, "", &ui.Problem{
 			Hint:    "mesh.subnet " + cfg.Mesh.Subnet + " overlaps " + overlaps + ", and is not rolled",
-			Explain: fmt.Sprintf("%s admitted this deployment with mesh.subnet %s, which site admit built the host's firewall and Docker address pools around, so a new one means admitting each again. Run paisans init at a terminal, without --yes, which moves the subnet and admits each site again, or free the overlapping network on the host. Nothing was written.", strings.Join(admitted, ", "), cfg.Mesh.Subnet),
+			Explain: fmt.Sprintf("%s admitted this deployment with mesh.subnet %s, which site admit built the host's firewall and Docker address pools around, so a new one means admitting each again. Run %s init at a terminal, without --yes, which moves the subnet and admits each site again, or free the overlapping network on the host. Nothing was written.", strings.Join(admitted, ", "), cfg.Mesh.Subnet, progname.Cmd()),
 			Cause:   fmt.Errorf("%s: %s", path, strings.Join(choice.Why, "; ")),
 		}
 	}
