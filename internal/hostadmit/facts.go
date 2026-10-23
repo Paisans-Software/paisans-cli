@@ -85,7 +85,13 @@ type Facts struct {
 	WatchdogRules []string
 	// WatchdogDevs is each watchdog node's owner, by path.
 	WatchdogDevs map[string]int
-	Records      []string
+	// WatchdogState is /sys/class/watchdog/watchdog0/state, "none" when the
+	// driver reports none there, as a legacy one does.
+	WatchdogState string
+	// WatchdogNowayout is whether watchdog0's driver has nowayout set, so
+	// nothing stops its timer once it runs.
+	WatchdogNowayout bool
+	Records          []string
 	// OrphanDropIns are the deployment's mesh drop-ins the probe found by
 	// the deployment they name while the user does not exist: a user
 	// deleted by hand leaves its own.
@@ -556,6 +562,10 @@ func parseFacts(out, user string) (Facts, error) {
 				return f, fmt.Errorf("unreadable watchdog-dev line %q", v)
 			}
 			f.WatchdogDevs[dev] = uid
+		case "watchdog-state":
+			f.WatchdogState = v
+		case "watchdog-nowayout":
+			f.WatchdogNowayout = v == "yes"
 		case "record":
 			f.Records = append(f.Records, v)
 		case "mesh-unit":
