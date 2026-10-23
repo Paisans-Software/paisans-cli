@@ -325,7 +325,7 @@ func TestHostDeploymentsFailsRatherThanListingPartly(t *testing.T) {
 // owner, through sudo.
 func TestReachDestinationUsesTheOperatorsSSH(t *testing.T) {
 	for in, want := range map[string]string{
-		"ubuntu@192.0.2.10":         "ubuntu@192.0.2.10",
+		"ubuntu@192.0.2.10":         "ssh://ubuntu@192.0.2.10:22",
 		"ubuntu@192.0.2.10:2222":    "ssh://ubuntu@192.0.2.10:2222",
 		"ubuntu@[2001:db8::1]:2222": "ssh://ubuntu@[2001:db8::1]:2222",
 	} {

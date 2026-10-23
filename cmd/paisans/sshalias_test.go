@@ -16,8 +16,8 @@ import (
 )
 
 // stubAlias is one Host block of a stub ssh config: its HostName, and the
-// User and Port it sets, empty for none.
-type stubAlias struct{ hostname, user, port string }
+// User, Port and HostKeyAlias it sets, empty for none.
+type stubAlias struct{ hostname, user, port, hostKeyAlias string }
 
 // stubLocalUser is the operator's local login to a stub ssh -G, which it
 // reports as the user of a host no User applies to, as ssh does.
@@ -50,7 +50,11 @@ func stubSSHConfig(aliases map[string]stubAlias) config.SSHConfig {
 		if a.port == "" {
 			a.port = "22"
 		}
-		return fmt.Sprintf("user %s\nhostname %s\nport %s\n", a.user, a.hostname, a.port), nil
+		out := fmt.Sprintf("user %s\nhostname %s\nport %s\n", a.user, a.hostname, a.port)
+		if a.hostKeyAlias != "" {
+			out += "hostkeyalias " + a.hostKeyAlias + "\n"
+		}
+		return out, nil
 	}}
 }
 
@@ -64,6 +68,13 @@ func withSSHAliases(t *testing.T) {
 	aliases := map[string]stubAlias{
 		"myalias": {hostname: "203.0.113.9", user: "admin", port: "2222"},
 		"other":   {hostname: "203.0.113.10"},
+		// A plain host whose config sets its Port.
+		"gw.example.org": {hostname: "gw.example.org", port: "2222"},
+		// A Host block with no HostName: the word is itself.
+		"plainblock": {hostname: "plainblock", user: "admin"},
+		// The declared host's own alias, and one with a HostKeyAlias.
+		"home-a": {hostname: "203.0.113.20", user: "admin"},
+		"keyed":  {hostname: "keyed", user: "admin", hostKeyAlias: "keyed-key"},
 	}
 	operatorSSHConfig = func() config.SSHConfig { return stubSSHConfig(aliases) }
 }
@@ -79,7 +90,7 @@ func TestADestinationGivesSSHTheAlias(t *testing.T) {
 		"myalias:2200":              "ssh://admin@myalias:2200",
 		"root@other:22":             "ssh://root@other:22",
 		"other":                     "ssh://" + stubLocalUser + "@other:22",
-		"ubuntu@192.0.2.10":         "ubuntu@192.0.2.10",
+		"ubuntu@192.0.2.10":         "ssh://ubuntu@192.0.2.10:22",
 		"ubuntu@192.0.2.10:2222":    "ssh://ubuntu@192.0.2.10:2222",
 		"ubuntu@[2001:db8::1]:2222": "ssh://ubuntu@[2001:db8::1]:2222",
 	} {
@@ -200,21 +211,27 @@ func TestAnAliasTransportKnowsItsKnownHostsName(t *testing.T) {
 	if tr := ownerTransport(dest, true); tr.KnownHost != "[203.0.113.9]:2222" {
 		t.Errorf("ownerTransport KnownHost = %q", tr.KnownHost)
 	}
-	plain, _ := parseDestination("admin@192.0.2.10")
-	if tr := ownerTransport(plain, true); tr.KnownHost != "" {
-		t.Errorf("a plain host's KnownHost = %q, want none", tr.KnownHost)
+	for in, want := range map[string]string{"admin@192.0.2.10": "192.0.2.10", "admin@192.0.2.10:2222": "[192.0.2.10]:2222", "admin@keyed": "keyed-key"} {
+		plain, err := parseDestination(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tr := ownerTransport(plain, true); tr.KnownHost != want {
+			t.Errorf("%s: KnownHost = %q, want %q", in, tr.KnownHost, want)
+		}
 	}
 }
 
 // site admit and evict with --site take --ssh as a login for the declared
-// host, or as an alias: a word ssh config maps to another HostName, or one
-// with a port. A login alone keeps the Port a declared alias's ssh config
-// gives it unless the declared port is not 22.
+// host, on the declared port, or as an alias: user@alias, alias:port, or a
+// word alone that ssh config maps to the declared host and port. A word
+// mapped to another host is refused rather than guessed, as is a word that
+// is no login.
 func TestOwnerDestinationTellsAnAliasFromALogin(t *testing.T) {
 	withSSHAliases(t)
 	byIP := config.Site{SSH: config.SSH{Host: "203.0.113.20"}}
 	byAlias := config.Site{SSH: config.SSH{Host: "myalias"}}
-	byAliasPort := config.Site{SSH: config.SSH{Host: "myalias", Port: 2200}}
+	byAliasPort := config.Site{SSH: config.SSH{Host: "myalias", Port: 2222}}
 	byV6 := config.Site{SSH: config.SSH{Host: "2001:db8::1"}}
 	for _, c := range []struct {
 		ssh      string
@@ -222,12 +239,13 @@ func TestOwnerDestinationTellsAnAliasFromALogin(t *testing.T) {
 		want     string
 	}{
 		{"alice", byIP, "alice@203.0.113.20:22"},
-		{"myalias", byIP, "myalias -> admin@203.0.113.9:2222"},
+		{"home-a", byIP, "home-a -> admin@203.0.113.20:22"},
+		{"plainblock", byIP, "plainblock@203.0.113.20:22"},
+		{"myalias", byAliasPort, "myalias -> admin@203.0.113.9:2222"},
 		{"myalias:2200", byIP, "myalias -> admin@203.0.113.9:2200"},
-		{"other:22", byIP, "other -> " + stubLocalUser + "@203.0.113.10:22"},
 		{"alice@other", byIP, "other -> alice@203.0.113.10:22"},
-		{"alice", byAlias, "myalias -> alice@203.0.113.9:2222"},
-		{"alice", byAliasPort, "myalias -> alice@203.0.113.9:2200"},
+		{"alice", byAlias, "myalias -> alice@203.0.113.9:22"},
+		{"alice", byAliasPort, "myalias -> alice@203.0.113.9:2222"},
 		{"alice", byV6, "alice@[2001:db8::1]:22"},
 	} {
 		dest, err := ownerDestination("site admit", c.ssh, "home-a", c.declared, strings.NewReader(""), &bytes.Buffer{})
@@ -235,14 +253,54 @@ func TestOwnerDestinationTellsAnAliasFromALogin(t *testing.T) {
 			t.Errorf("--ssh %s on %s: got %s, %v; want %s", c.ssh, c.declared.SSH.Host, dest, err, c.want)
 		}
 	}
-	if _, err := ownerDestination("site evict", "-oProxyCommand=x", "home-a", byIP, strings.NewReader(""), &bytes.Buffer{}); err == nil {
-		t.Error("an option was taken as a login")
+	for _, c := range []struct {
+		ssh      string
+		declared config.Site
+		want     string
+	}{
+		// myalias is another host, or the declared one on another port.
+		{"myalias", byIP, "Write --ssh user@myalias for that alias, or --ssh myalias@203.0.113.20:22"},
+		{"myalias", byAlias, "which is not myalias:22"},
+		{"gw.example.org", byIP, "not a login"},
+		{"-oProxyCommand=x", byIP, "alias of your ssh config"},
+	} {
+		_, err := ownerDestination("site evict", c.ssh, "home-a", c.declared, strings.NewReader(""), &bytes.Buffer{})
+		if text := problemText(err); err == nil || !strings.Contains(text, c.want) {
+			t.Errorf("--ssh %s on %s: %q, want %q", c.ssh, c.declared.SSH.Host, text, c.want)
+		}
 	}
 }
 
-// A host named twice, by its alias and by the address it resolves to, is
-// read once.
-func TestRecoverReadsAHostNamedTwiceOnce(t *testing.T) {
+// A config that expands short names (Host * with HostName %h.corp.example)
+// maps every word to a host. A login meant for the declared host is then
+// refused, naming both spellings, never taken as that other host.
+func TestOwnerDestinationRefusesAShortNameExpansion(t *testing.T) {
+	saved := operatorSSHConfig
+	t.Cleanup(func() { operatorSSHConfig = saved })
+	operatorSSHConfig = func() config.SSHConfig {
+		return config.SSHConfig{G: func(args []string) (string, error) {
+			host, user := args[len(args)-1], stubLocalUser
+			for i := 0; i < len(args)-2; i++ {
+				if args[i] == "-l" {
+					user = args[i+1]
+				}
+			}
+			if !strings.Contains(host, ".") && !strings.Contains(host, ":") {
+				host += ".corp.example"
+			}
+			return fmt.Sprintf("user %s\nhostname %s\nport 22\n", user, host), nil
+		}}
+	}
+	declared := config.Site{SSH: config.SSH{Host: "203.0.113.20"}}
+	_, err := ownerDestination("site admit", "admin", "home-a", declared, strings.NewReader(""), &bytes.Buffer{})
+	if text := problemText(err); err == nil || !strings.Contains(text, "admin.corp.example") || !strings.Contains(text, "--ssh admin@203.0.113.20:22") {
+		t.Errorf("a short name expanded to another host: %q", text)
+	}
+}
+
+// A login named twice is read once; an alias and the address it resolves to
+// stay apart, since the alias may take another route there.
+func TestRecoverReadsALoginNamedTwiceOnce(t *testing.T) {
 	withSSHAliases(t)
 	saved := reachDestination
 	t.Cleanup(func() { reachDestination = saved })
@@ -262,7 +320,26 @@ func TestRecoverReadsAHostNamedTwiceOnce(t *testing.T) {
 	}
 	var b bytes.Buffer
 	_, hosts, err := recoverID(ui.NewPlain(&b, false), dests, "")
-	if err != nil || len(hosts) != 1 || len(reached) != 2 {
-		t.Errorf("hosts %v, reached %v, %v: want one host, read once and reached again as the deployment's user", slices.Sorted(maps.Keys(hosts)), reached, err)
+	want := []string{"admin@203.0.113.9:2222", "myalias -> admin@203.0.113.9:2222"}
+	if err != nil || len(hosts) != 2 || !slices.Equal(reached[:2], want) || len(reached) != 4 {
+		t.Errorf("hosts %v, reached %v, %v: want the alias and the address, each read once and reached again as the deployment's user", slices.Sorted(maps.Keys(hosts)), reached, err)
+	}
+}
+
+// A port written goes to ssh ahead of the config's Port, and one not written
+// is the config's.
+func TestADestinationsPortGoesToSSH(t *testing.T) {
+	withSSHAliases(t)
+	for in, want := range map[string]string{
+		"bob@gw.example.org:22": "ssh://bob@gw.example.org:22",
+		"bob@gw.example.org":    "ssh://bob@gw.example.org:2222",
+	} {
+		dest, err := parseDestination(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := ownerTransport(dest, false).Destination; got != want {
+			t.Errorf("%s: ssh is given %s, want %s", in, got, want)
+		}
 	}
 }

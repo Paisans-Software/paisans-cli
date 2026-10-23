@@ -130,7 +130,8 @@ paisans site deployments --ssh admin@203.0.113.9             # user@host
 * **Resolved by ssh.** A destination is read with `ssh -G`, so `Match`,
   `Include` and wildcards decide it exactly as they decide a plain ssh. A user
   or port given overrides the config's, as it does for ssh, and one not given
-  is the config's, for an address as for an alias.
+  is the config's, for an address as for an alias. ssh is then given the
+  user and port explicitly, so the login is the one messages name.
 * **Resolved once.** The lookup is made when the command starts. A config
   whose `HostName` depends on where the workstation is when ssh connects
   (`Match exec`, `Match localnetwork`) can make the address a message names
@@ -138,7 +139,9 @@ paisans site deployments --ssh admin@203.0.113.9             # user@host
   config, since ssh is given the alias.
 * **Reached as the alias.** ssh is given the alias, with the user and port it
   resolved to, so its `ProxyJump`, `IdentityFile` and every other option apply
-  to the connection, and host key checking is ssh's own, as before.
+  to the connection, and host key checking is ssh's own, as before. Advice
+  about a changed host key names the entry known_hosts holds: the
+  `HostKeyAlias`, or the resolved host, as `[host]:port` off port 22.
 * **Shown both ways.** Messages name an alias with what it resolved to,
   `home-a -> admin@203.0.113.9:22`, and `deployment fetch` saves that line as
   where each copy came from, since the alias means something only on this
@@ -153,9 +156,13 @@ paisans site deployments --ssh admin@203.0.113.9             # user@host
   host name, such as one with an underscore, is a destination only as an
   alias with a `HostName`.
 * **`site admit` and `site evict` with `--site`.** There `--ssh` may also be a
-  login alone, for the site's declared host. A word alone is an alias when
-  your ssh config maps it to another `HostName`, or when it carries a port
-  (`home-a:2222`), and a login otherwise.
+  login alone, which reaches the site's declared host on its declared port,
+  `ssh.port` or 22, as every command reaches a site. A word alone is never
+  guessed: it is an alias when it carries a port (`home-a:2222`), or when
+  your ssh config maps it to the declared host and port; a word your config
+  maps to any other host is refused, naming both spellings (`user@word` for
+  the alias, `word@host` for a login), since a config that expands short
+  names maps every word somewhere; any other word is a login.
 
 ## Configuration and secrets
 

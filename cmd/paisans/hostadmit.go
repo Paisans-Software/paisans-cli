@@ -396,17 +396,20 @@ func admit(r ui.Reporter, run admitRun, ans answerer, stdin io.Reader, stdout io
 // port, or, with no --ssh, a login asked for at a terminal. Off a terminal
 // with no --ssh there is no one to ask, so it refuses.
 //
-// A word alone, with no @, is a login or an alias. It is an alias when it
-// carries a port (alias:port), which no login does, or when ssh -G maps it
-// to another HostName, as a Host block with HostName does; otherwise it is a
-// login. A typed answer at the terminal is always a login, as the question
-// asks for one.
+// A word alone, with no @, is a login or an alias, and is never guessed: an
+// ssh config that expands short names (Host * with HostName %h.example.org)
+// maps every word to some host. With a port (alias:port), which no login
+// carries, it is an alias. Otherwise it is an alias only where ssh -G maps
+// it to the site's declared host and port, as ssh -G resolves those; a word
+// mapped to any other host is refused, naming both spellings; a word mapped
+// to none is a login. A typed answer at the terminal is always a login, as
+// the question asks for one.
 //
-// A login alone goes to the declared host with the declared port only when
-// that port is not 22, so a declared host that is itself an alias keeps the
-// Port its ssh config gives it, as ssh would.
+// A login alone goes to the declared host on the declared port, written, as
+// every command reaches a site: ssh.port, or 22.
 func ownerDestination(command, sshFlag, site string, declared config.Site, stdin io.Reader, stdout io.Writer) (config.Destination, error) {
 	host, port := declared.SSHHost(), declared.SSH.PortOrDefault()
+	declaredAt := net.JoinHostPort(host, strconv.Itoa(port))
 	if sshFlag != "" && !strings.Contains(sshFlag, "@") {
 		if strings.Contains(sshFlag, ":") {
 			dest, err := parseDestination(sshFlag)
@@ -416,7 +419,20 @@ func ownerDestination(command, sshFlag, site string, declared config.Site, stdin
 			return dest, nil
 		}
 		if dest, err := parseDestination(sshFlag); err == nil && dest.Alias != "" {
-			return dest, nil
+			target, err := parseDestination("root@" + declaredAt)
+			if err == nil && strings.EqualFold(dest.Host, target.Host) && dest.Port == target.Port {
+				return dest, nil
+			}
+			return config.Destination{}, &ui.Problem{
+				Hint:    fmt.Sprintf("--ssh %s is an alias or a login", sshFlag),
+				Explain: fmt.Sprintf("Your ssh config maps %s to %s, which is not %s, site %s's declared ssh host and port. Write --ssh user@%s for that alias, or --ssh %s@%s for a login on the declared host. Nothing was read or changed.", ui.Visible(sshFlag), ui.Visible(dest.Host+":"+strconv.Itoa(dest.Port)), ui.Visible(declaredAt), site, ui.Visible(sshFlag), ui.Visible(sshFlag), ui.Visible(declaredAt)),
+			}
+		}
+		if !config.ValidLogin(sshFlag) {
+			return config.Destination{}, &ui.Problem{
+				Hint:    fmt.Sprintf("--ssh %s is not a login", sshFlag),
+				Explain: fmt.Sprintf("A word alone is your login on site %s's declared host, %s, or an alias of your ssh config for that host. Write --ssh user@%s to reach %s as a host. Nothing was read or changed.", site, ui.Visible(declaredAt), ui.Visible(sshFlag), ui.Visible(sshFlag)),
+			}
 		}
 	}
 	verb := strings.TrimPrefix(command, "host ")
@@ -435,14 +451,7 @@ func ownerDestination(command, sshFlag, site string, declared config.Site, stdin
 		}
 	}
 	if !strings.Contains(login, "@") {
-		switch {
-		case port != config.DefaultSSHPort:
-			login += "@" + net.JoinHostPort(host, strconv.Itoa(port))
-		case strings.Contains(host, ":"):
-			login += "@[" + host + "]"
-		default:
-			login += "@" + host
-		}
+		login += "@" + declaredAt
 	}
 	dest, err := parseDestination(login)
 	if err != nil {

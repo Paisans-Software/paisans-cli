@@ -245,6 +245,7 @@ func TestDestinationSSHHostAndKnownHostsName(t *testing.T) {
 		{config.Destination{User: "admin", Host: "203.0.113.9", Port: 22, Alias: "home-a"}, "home-a", "203.0.113.9"},
 		{config.Destination{User: "admin", Host: "203.0.113.9", Port: 2222, Alias: "home-a"}, "home-a", "[203.0.113.9]:2222"},
 		{config.Destination{User: "admin", Host: "2001:db8::1", Port: 2222}, "2001:db8::1", "[2001:db8::1]:2222"},
+		{config.Destination{User: "admin", Host: "203.0.113.9", Port: 2222, Alias: "home-a", HostKeyAlias: "home-a-key"}, "home-a", "home-a-key"},
 	} {
 		if c.d.SSHHost() != c.ssh || c.d.KnownHostsName() != c.knownHosts {
 			t.Errorf("%+v: %q, %q; want %q, %q", c.d, c.d.SSHHost(), c.d.KnownHostsName(), c.ssh, c.knownHosts)

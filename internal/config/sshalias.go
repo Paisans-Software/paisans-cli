@@ -142,12 +142,23 @@ func ResolveDestination(s string, c SSHConfig) (Destination, error) {
 		if !bracketed && ip == nil && !isHostname(host) {
 			return Destination{}, fmt.Errorf("%q: %s is not a host name, and your ssh config gives it no HostName to make it an alias", s, host)
 		}
-		return Destination{User: login, Host: host, Port: port}, nil
+		return Destination{User: login, Host: host, Port: port, HostKeyAlias: hostKeyAlias(got)}, nil
 	}
 	if net.ParseIP(resolved) == nil && !isHostname(resolved) {
 		return Destination{}, fmt.Errorf("%q: your ssh config gives it HostName %q, which is not a host name or address", s, resolved)
 	}
-	return Destination{User: login, Host: resolved, Port: port, Alias: host}, nil
+	return Destination{User: login, Host: resolved, Port: port, Alias: host, HostKeyAlias: hostKeyAlias(got)}, nil
+}
+
+// hostKeyAlias is the HostKeyAlias ssh -G printed, if any. It is only ever
+// named in advice, quoted, and one holding a control character is dropped
+// rather than printed.
+func hostKeyAlias(got map[string]string) string {
+	a := got["hostkeyalias"]
+	if _, bad := ControlRune(a); bad || strings.EqualFold(a, "none") {
+		return ""
+	}
+	return a
 }
 
 // splitHostPort is rest, the part of s after any user, as its host and port,

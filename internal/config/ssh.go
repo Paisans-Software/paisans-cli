@@ -274,6 +274,10 @@ func (s SSH) AuthorizedKeys() ([]AuthorizedKey, []string) {
 // a command line and a file name on the host without quoting surprises.
 var unixUser = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 
+// ValidLogin reports whether s is a login name the toolkit puts in a command
+// line, as a destination's user must be.
+func ValidLogin(s string) bool { return unixUser.MatchString(s) }
+
 // hostLabel is one label of a DNS name.
 var hostLabel = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`)
 
@@ -470,6 +474,10 @@ type Destination struct {
 	// alias rather than Host, so its ProxyJump, IdentityFile and every
 	// other option apply to the connection as they do to a plain ssh.
 	Alias string
+	// HostKeyAlias, when set, is the HostKeyAlias the operator's ssh config
+	// gives the destination: the name ssh records its host key under in
+	// known_hosts, in place of the host.
+	HostKeyAlias string
 }
 
 func (d Destination) String() string {
@@ -496,10 +504,14 @@ func (d Destination) SSHHost() string {
 	return d.Host
 }
 
-// KnownHostsName is d's host as ssh records it in known_hosts: the host ssh
-// connects to, which for an alias is its HostName, in brackets with the port
-// when the port is not 22.
+// KnownHostsName is d's host as ssh records it in known_hosts: its
+// HostKeyAlias when the ssh config gives one, which ssh records alone, or
+// else the host ssh connects to, which for an alias is its HostName, in
+// brackets with the port when the port is not 22.
 func (d Destination) KnownHostsName() string {
+	if d.HostKeyAlias != "" {
+		return d.HostKeyAlias
+	}
 	if d.Port != 0 && d.Port != DefaultSSHPort {
 		return "[" + d.Host + "]:" + strconv.Itoa(d.Port)
 	}

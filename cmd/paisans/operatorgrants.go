@@ -26,7 +26,12 @@ func grantsDestination(s string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return destinationArg(dest), nil
+		// As ssh is given it with no port forced: user@host, or an ssh://
+		// URL for a port other than 22.
+		if dest.Port != config.DefaultSSHPort {
+			return "ssh://" + dest.String(), nil
+		}
+		return dest.User + "@" + dest.Host, nil
 	}
 	if !sshAlias.MatchString(s) {
 		return "", fmt.Errorf("%q is neither user@host[:port] nor an alias of your ssh config, Eg: admin@203.0.113.9 or home-a", s)

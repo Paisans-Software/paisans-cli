@@ -30,23 +30,22 @@ func parseDestination(s string) (config.Destination, error) {
 	return config.ResolveDestination(s, operatorSSHConfig())
 }
 
-// destinationArg is dest as ssh takes it: user@host, or an ssh:// URL for a
-// port other than 22, the one destination form that carries it.
+// destinationArg is dest as ssh takes it: an ssh:// URL, the one
+// destination form that carries a port, with the user and port always
+// written. A destination's port is the one written or the one ssh -G
+// reported, so writing it keeps a port given on the command line ahead of
+// the ssh config's Port, as ssh does.
 //
 // An alias is given to ssh as the alias, never as the host it resolves to,
 // so the connection takes its ProxyJump, IdentityFile and every other option
 // from the operator's ssh config exactly as a plain ssh to it does, with
-// host key checking unchanged. Its user and port are written out, as the
-// ssh:// URL, because they are the ones ssh -G reported for it, and so the
-// login is the one every message names.
+// host key checking unchanged.
 func destinationArg(dest config.Destination) string {
-	if dest.Alias != "" {
-		return "ssh://" + dest.User + "@" + net.JoinHostPort(dest.Alias, strconv.Itoa(dest.Port))
+	port := dest.Port
+	if port == 0 {
+		port = config.DefaultSSHPort
 	}
-	if dest.Port != 0 && dest.Port != config.DefaultSSHPort {
-		return "ssh://" + dest.User + "@" + net.JoinHostPort(dest.Host, strconv.Itoa(dest.Port))
-	}
-	return dest.User + "@" + dest.Host
+	return "ssh://" + dest.User + "@" + net.JoinHostPort(dest.SSHHost(), strconv.Itoa(port))
 }
 
 // reachDestination is how a command with no configuration reaches the host
@@ -59,15 +58,9 @@ var reachDestination = func(dest config.Destination) apply.Transport {
 	return t
 }
 
-// knownHost is the KnownHost of a transport to dest: for an alias, the
-// HostName it resolved to as known_hosts names it, and nothing otherwise,
-// since then the destination ssh is given is that name.
-func knownHost(dest config.Destination) string {
-	if dest.Alias == "" {
-		return ""
-	}
-	return dest.KnownHostsName()
-}
+// knownHost is the KnownHost of a transport to dest: the name its host key
+// is recorded under in known_hosts (config.Destination.KnownHostsName).
+func knownHost(dest config.Destination) string { return dest.KnownHostsName() }
 
 // ownerTransport is how site deployments reaches a host as its owner: the
 // operator's own ssh to the destination --ssh names, through sudo unless
@@ -318,13 +311,17 @@ func registryLine(id string, e registry.Entry) string {
 	return fmt.Sprintf("%s: token %s, %s, site %s, roles %s, root %s, claimed by paisans %s", id, e.Token, e.Domain, e.Site, roles, e.Root, e.Build)
 }
 
-// distinctLogins is dests with each login once, the first of any that are
-// the same login (config.Destination.Same), such as an alias and the address
-// it resolves to, so a host named twice is read once.
+// distinctLogins is dests with each login once: the same user and port to
+// the same host as ssh is given it, which for an alias is the alias. Two
+// aliases of one address, or an alias and its address, stay apart, since
+// each may take another route there (ProxyJump, ProxyCommand), and each is
+// tried.
 func distinctLogins(dests []config.Destination) []config.Destination {
 	var out []config.Destination
 	for _, d := range dests {
-		if !slices.ContainsFunc(out, d.Same) {
+		if !slices.ContainsFunc(out, func(o config.Destination) bool {
+			return o.User == d.User && o.Port == d.Port && strings.EqualFold(o.SSHHost(), d.SSHHost())
+		}) {
 			out = append(out, d)
 		}
 	}
