@@ -64,8 +64,15 @@ func destinationForm(s string) error {
 // Each is looked up with `ssh -G` through c. A host ssh maps to another
 // HostName is an alias: the result carries the alias, which is what ssh is
 // given to reach it (see Destination), and the user, host name and port ssh
-// would use. A host ssh maps to itself is a plain host, and keeps the user
-// and port written, so user@host[:port] reads as it always has.
+// would use. A host ssh maps to itself is a plain host, reached by its name.
+// Either way a user or port written is kept, and one not written is the one
+// ssh -G reports, so the destination recorded is the login ssh makes.
+//
+// The lookup is made once, here. A config whose HostName depends on where
+// the workstation is when ssh connects (Match exec, Match localnetwork) can
+// make the address recorded differ from the one a later connection reaches;
+// the connection itself always follows the config, since ssh is given the
+// alias.
 //
 // A destination with no user written takes the user `ssh -G` reports for
 // it: the User its ssh config gives it, or, where none applies, the
@@ -112,36 +119,35 @@ func ResolveDestination(s string, c SSHConfig) (Destination, error) {
 	}
 	got := sshGOptions(out)
 	resolved := got["hostname"]
-	alias := !strings.EqualFold(resolved, host)
-	if !alias {
-		// A plain host: as written, with the defaults ParseDestination
-		// gives, and the user the config gives when none is written.
-		if !bracketed && ip == nil && !isHostname(host) {
-			return Destination{}, form
-		}
-		if port == 0 {
-			port = DefaultSSHPort
-		}
-		if login == "" {
-			if login, err = resolvedUser(s, got); err != nil {
-				return Destination{}, err
-			}
-		}
-		return Destination{User: login, Host: host, Port: port}, nil
+	if resolved == "" {
+		return Destination{}, fmt.Errorf("%q: ssh -G printed no hostname for it", s)
 	}
-	if net.ParseIP(resolved) == nil && !isHostname(resolved) {
-		return Destination{}, fmt.Errorf("%q: your ssh config gives it HostName %q, which is not a host name or address", s, resolved)
+	if port == 0 {
+		// The port ssh would use: the config's Port, or 22.
+		n, err := strconv.Atoi(got["port"])
+		if err != nil || n < 1 || n > 65535 {
+			return Destination{}, fmt.Errorf("%q: ssh resolves its port to %q, not a number from 1 to 65535", s, got["port"])
+		}
+		port = n
 	}
 	if login == "" {
 		if login, err = resolvedUser(s, got); err != nil {
 			return Destination{}, err
 		}
 	}
-	n, err := strconv.Atoi(got["port"])
-	if err != nil || n < 1 || n > 65535 {
-		return Destination{}, fmt.Errorf("%q: your ssh config gives it Port %q, not a number from 1 to 65535", s, got["port"])
+	if strings.EqualFold(resolved, host) {
+		// A plain host, as written. A name that is not a host name, such
+		// as one with an underscore, is a destination only as an alias,
+		// through a HostName.
+		if !bracketed && ip == nil && !isHostname(host) {
+			return Destination{}, fmt.Errorf("%q: %s is not a host name, and your ssh config gives it no HostName to make it an alias", s, host)
+		}
+		return Destination{User: login, Host: host, Port: port}, nil
 	}
-	return Destination{User: login, Host: resolved, Port: n, Alias: host}, nil
+	if net.ParseIP(resolved) == nil && !isHostname(resolved) {
+		return Destination{}, fmt.Errorf("%q: your ssh config gives it HostName %q, which is not a host name or address", s, resolved)
+	}
+	return Destination{User: login, Host: resolved, Port: port, Alias: host}, nil
 }
 
 // splitHostPort is rest, the part of s after any user, as its host and port,

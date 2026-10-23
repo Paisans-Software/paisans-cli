@@ -185,3 +185,84 @@ func TestADeclaredAliasIsTheSameHost(t *testing.T) {
 		t.Errorf("%s is not the declared %s", dest, declared.Destination())
 	}
 }
+
+// A transport to an alias names, in a changed host key's advice, the host
+// known_hosts records: the HostName it resolved to.
+func TestAnAliasTransportKnowsItsKnownHostsName(t *testing.T) {
+	withSSHAliases(t)
+	dest, err := parseDestination("myalias")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr := reachDestination(dest).(apply.SSHTransport); tr.KnownHost != "[203.0.113.9]:2222" {
+		t.Errorf("reachDestination KnownHost = %q", tr.KnownHost)
+	}
+	if tr := ownerTransport(dest, true); tr.KnownHost != "[203.0.113.9]:2222" {
+		t.Errorf("ownerTransport KnownHost = %q", tr.KnownHost)
+	}
+	plain, _ := parseDestination("admin@192.0.2.10")
+	if tr := ownerTransport(plain, true); tr.KnownHost != "" {
+		t.Errorf("a plain host's KnownHost = %q, want none", tr.KnownHost)
+	}
+}
+
+// site admit and evict with --site take --ssh as a login for the declared
+// host, or as an alias: a word ssh config maps to another HostName, or one
+// with a port. A login alone keeps the Port a declared alias's ssh config
+// gives it unless the declared port is not 22.
+func TestOwnerDestinationTellsAnAliasFromALogin(t *testing.T) {
+	withSSHAliases(t)
+	byIP := config.Site{SSH: config.SSH{Host: "203.0.113.20"}}
+	byAlias := config.Site{SSH: config.SSH{Host: "myalias"}}
+	byAliasPort := config.Site{SSH: config.SSH{Host: "myalias", Port: 2200}}
+	byV6 := config.Site{SSH: config.SSH{Host: "2001:db8::1"}}
+	for _, c := range []struct {
+		ssh      string
+		declared config.Site
+		want     string
+	}{
+		{"alice", byIP, "alice@203.0.113.20:22"},
+		{"myalias", byIP, "myalias -> admin@203.0.113.9:2222"},
+		{"myalias:2200", byIP, "myalias -> admin@203.0.113.9:2200"},
+		{"other:22", byIP, "other -> " + stubLocalUser + "@203.0.113.10:22"},
+		{"alice@other", byIP, "other -> alice@203.0.113.10:22"},
+		{"alice", byAlias, "myalias -> alice@203.0.113.9:2222"},
+		{"alice", byAliasPort, "myalias -> alice@203.0.113.9:2200"},
+		{"alice", byV6, "alice@[2001:db8::1]:22"},
+	} {
+		dest, err := ownerDestination("site admit", c.ssh, "home-a", c.declared, strings.NewReader(""), &bytes.Buffer{})
+		if err != nil || dest.String() != c.want {
+			t.Errorf("--ssh %s on %s: got %s, %v; want %s", c.ssh, c.declared.SSH.Host, dest, err, c.want)
+		}
+	}
+	if _, err := ownerDestination("site evict", "-oProxyCommand=x", "home-a", byIP, strings.NewReader(""), &bytes.Buffer{}); err == nil {
+		t.Error("an option was taken as a login")
+	}
+}
+
+// A host named twice, by its alias and by the address it resolves to, is
+// read once.
+func TestRecoverReadsAHostNamedTwiceOnce(t *testing.T) {
+	withSSHAliases(t)
+	saved := reachDestination
+	t.Cleanup(func() { reachDestination = saved })
+	files := ownRecord(t)
+	var reached []string
+	reachDestination = func(dest config.Destination) apply.Transport {
+		reached = append(reached, dest.String())
+		return &storeHost{name: dest.String(), login: dest.User, files: files}
+	}
+	var dests []config.Destination
+	for _, from := range []string{"myalias", "admin@203.0.113.9:2222", "myalias"} {
+		d, err := parseDestination(from)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dests = append(dests, d)
+	}
+	var b bytes.Buffer
+	_, hosts, err := recoverID(ui.NewPlain(&b, false), dests, "")
+	if err != nil || len(hosts) != 1 || len(reached) != 2 {
+		t.Errorf("hosts %v, reached %v, %v: want one host, read once and reached again as the deployment's user", slices.Sorted(maps.Keys(hosts)), reached, err)
+	}
+}

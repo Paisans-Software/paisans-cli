@@ -54,7 +54,19 @@ func destinationArg(dest config.Destination) string {
 // reaches it, with their agent, keys and ssh config, since there are no
 // declared keys to offer. Tests replace it.
 var reachDestination = func(dest config.Destination) apply.Transport {
-	return siteTransport("", config.Site{}, destinationArg(dest))
+	t := siteTransport("", config.Site{}, destinationArg(dest))
+	t.KnownHost = knownHost(dest)
+	return t
+}
+
+// knownHost is the KnownHost of a transport to dest: for an alias, the
+// HostName it resolved to as known_hosts names it, and nothing otherwise,
+// since then the destination ssh is given is that name.
+func knownHost(dest config.Destination) string {
+	if dest.Alias == "" {
+		return ""
+	}
+	return dest.KnownHostsName()
 }
 
 // ownerTransport is how site deployments reaches a host as its owner: the
@@ -63,7 +75,7 @@ var reachDestination = func(dest config.Destination) apply.Transport {
 // root's. It is the one transport the CLI gives sudo: every other command
 // logs in as the deployment's user, which has none.
 func ownerTransport(dest config.Destination, sudo bool) apply.SSHTransport {
-	t := apply.SSHTransport{Destination: destinationArg(dest), Sudo: sudo}
+	t := apply.SSHTransport{Destination: destinationArg(dest), KnownHost: knownHost(dest), Sudo: sudo}
 	if sudo {
 		t.Auth = sudoAuthFor(t.Describe())
 	}
@@ -304,4 +316,17 @@ func registryLine(id string, e registry.Entry) string {
 		roles = "none"
 	}
 	return fmt.Sprintf("%s: token %s, %s, site %s, roles %s, root %s, claimed by paisans %s", id, e.Token, e.Domain, e.Site, roles, e.Root, e.Build)
+}
+
+// distinctLogins is dests with each login once, the first of any that are
+// the same login (config.Destination.Same), such as an alias and the address
+// it resolves to, so a host named twice is read once.
+func distinctLogins(dests []config.Destination) []config.Destination {
+	var out []config.Destination
+	for _, d := range dests {
+		if !slices.ContainsFunc(out, d.Same) {
+			out = append(out, d)
+		}
+	}
+	return out
 }

@@ -484,11 +484,26 @@ func (d Destination) String() string {
 // so that a command a message suggests keeps the alias's ssh options, and
 // user@host:port otherwise.
 func (d Destination) Arg() string {
-	host := d.Host
+	return d.User + "@" + net.JoinHostPort(d.SSHHost(), strconv.Itoa(d.Port))
+}
+
+// SSHHost is the host ssh is given for d: the alias, when d has one, so the
+// alias's ssh config applies to the connection, or the host.
+func (d Destination) SSHHost() string {
 	if d.Alias != "" {
-		host = d.Alias
+		return d.Alias
 	}
-	return d.User + "@" + net.JoinHostPort(host, strconv.Itoa(d.Port))
+	return d.Host
+}
+
+// KnownHostsName is d's host as ssh records it in known_hosts: the host ssh
+// connects to, which for an alias is its HostName, in brackets with the port
+// when the port is not 22.
+func (d Destination) KnownHostsName() string {
+	if d.Port != 0 && d.Port != DefaultSSHPort {
+		return "[" + d.Host + "]:" + strconv.Itoa(d.Port)
+	}
+	return d.Host
 }
 
 // Same reports whether d and o are one login: the same user and port on the

@@ -59,11 +59,13 @@ func (s *stubSSH) config() config.SSHConfig {
 
 func aliases() *stubSSH {
 	return &stubSSH{hosts: map[string][3]string{
-		"myalias": {"203.0.113.9", "admin", "2222"},
-		"nouser":  {"203.0.113.10", "", ""},
-		"local":   {"203.0.113.11", "localme", ""},
-		"v6":      {"2001:db8::1", "admin", ""},
-		"badname": {"bad host", "admin", ""},
+		"myalias":        {"203.0.113.9", "admin", "2222"},
+		"nouser":         {"203.0.113.10", "", ""},
+		"local":          {"203.0.113.11", "localme", ""},
+		"v6":             {"2001:db8::1", "admin", ""},
+		"badname":        {"bad host", "admin", ""},
+		"gw.example.org": {"gw.example.org", "", "2222"},
+		"my_box":         {"203.0.113.12", "admin", ""},
 	}}
 }
 
@@ -78,6 +80,7 @@ func TestResolveDestinationReadsAliases(t *testing.T) {
 		"root@myalias:2200": {User: "root", Host: "203.0.113.9", Port: 2200, Alias: "myalias"},
 		"admin@nouser":      {User: "admin", Host: "203.0.113.10", Port: 22, Alias: "nouser"},
 		"v6":                {User: "admin", Host: "2001:db8::1", Port: 22, Alias: "v6"},
+		"my_box":            {User: "admin", Host: "203.0.113.12", Port: 22, Alias: "my_box"},
 	} {
 		got, err := config.ResolveDestination(in, aliases().config())
 		if err != nil || got != want {
@@ -155,7 +158,8 @@ func TestResolveDestinationTakesTheUserSSHReports(t *testing.T) {
 func TestResolveDestinationRefusesBeforeRunningSSH(t *testing.T) {
 	for _, bad := range []string{"-oProxyCommand=x", "-G", "admin@-oProxyCommand=x", "-l@h", "", "@host", "admin@",
 		"admin@h:0", "admin@h:x", "Admin@h", "a b@h", "admin@a@b", "my alias", "host*", "a;b", "%h",
-		"admin@2001:db8::5:2222", "admin@[nothost]:22", "admin@[203.0.113.9]"} {
+		"admin@2001:db8::5:2222", "admin@[nothost]:22", "admin@[203.0.113.9]",
+		"a\nb", "host\n", "admin@host\n", "admin\n@host", "admin@host:22\n", "\nhost"} {
 		s := aliases()
 		if got, err := config.ResolveDestination(bad, s.config()); err == nil {
 			t.Errorf("%q: accepted as %+v", bad, got)
@@ -201,6 +205,49 @@ func TestDestinationSame(t *testing.T) {
 	} {
 		if alias.Same(o) {
 			t.Errorf("%+v is the same as %+v", o, alias)
+		}
+	}
+}
+
+// A plain host takes the Port its ssh config gives it when none is written,
+// as ssh does, and a port written still overrides it.
+func TestResolveDestinationTakesAPlainHostsConfigPort(t *testing.T) {
+	for in, want := range map[string]config.Destination{
+		"bob@gw.example.org":    {User: "bob", Host: "gw.example.org", Port: 2222},
+		"bob@gw.example.org:22": {User: "bob", Host: "gw.example.org", Port: 22},
+	} {
+		got, err := config.ResolveDestination(in, aliases().config())
+		if err != nil || got != want {
+			t.Errorf("%s: got %+v, %v; want %+v", in, got, err, want)
+		}
+	}
+}
+
+// A name that is not a host name is a destination only as an alias with a
+// HostName, and ssh -G output with no hostname is refused, not taken for a
+// host.
+func TestResolveDestinationRefusesWhatIsNoHost(t *testing.T) {
+	if _, err := config.ResolveDestination("admin@no_such_box", aliases().config()); err == nil || !strings.Contains(err.Error(), "no HostName") {
+		t.Errorf("an underscore name with no HostName: %v", err)
+	}
+	c := config.SSHConfig{G: func([]string) (string, error) { return "user admin\nport 22\n", nil }}
+	if _, err := config.ResolveDestination("myalias", c); err == nil || !strings.Contains(err.Error(), "no hostname") {
+		t.Errorf("no hostname line: %v", err)
+	}
+}
+
+// ssh is given an alias, and known_hosts names the host it resolved to.
+func TestDestinationSSHHostAndKnownHostsName(t *testing.T) {
+	for _, c := range []struct {
+		d               config.Destination
+		ssh, knownHosts string
+	}{
+		{config.Destination{User: "admin", Host: "203.0.113.9", Port: 22, Alias: "home-a"}, "home-a", "203.0.113.9"},
+		{config.Destination{User: "admin", Host: "203.0.113.9", Port: 2222, Alias: "home-a"}, "home-a", "[203.0.113.9]:2222"},
+		{config.Destination{User: "admin", Host: "2001:db8::1", Port: 2222}, "2001:db8::1", "[2001:db8::1]:2222"},
+	} {
+		if c.d.SSHHost() != c.ssh || c.d.KnownHostsName() != c.knownHosts {
+			t.Errorf("%+v: %q, %q; want %q, %q", c.d, c.d.SSHHost(), c.d.KnownHostsName(), c.ssh, c.knownHosts)
 		}
 	}
 }

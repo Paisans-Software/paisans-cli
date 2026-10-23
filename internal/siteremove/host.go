@@ -552,7 +552,7 @@ func (p *Plan) checkLogin(t apply.Transport) error {
 		}
 		dest := p.cfg.Sites[p.Site].Destination()
 		dest.User = rec.User
-		return fmt.Errorf("site remove %s: %s logs in as %s, not the deployment's user %s that %s names, and site remove cleans a host only as that user, so that nothing the user planted under %s can steer a deletion past what that user may delete. Nothing was changed. Run it again with --ssh %s; the host's owner then removes what is root's with %s", p.Site, t.Describe(), who, rec.User, recordPath, d.Root(), dest, EvictLine(d, rec.User))
+		return fmt.Errorf("site remove %s: %s logs in as %s, not the deployment's user %s that %s names, and site remove cleans a host only as that user, so that nothing the user planted under %s can steer a deletion past what that user may delete. Nothing was changed. Run it again with --ssh %s; the host's owner then removes what is root's with %s", p.Site, t.Describe(), who, rec.User, recordPath, d.Root(), dest.Arg(), EvictLine(d, rec.User))
 	}
 	p.home, p.loginUser = account.Home, rec.User
 	return nil

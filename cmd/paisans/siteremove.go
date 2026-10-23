@@ -298,15 +298,15 @@ func runSiteRemoveForced(r ui.Reporter, site string, a forcedArgs, stdin io.Read
 		warnUnencrypted(r, a.secrets)
 	}
 	// The declared entry's public keys, if any, still say which key the
-	// operator logs in with; only where is dest.
-	// An alias stays the host ssh is given, so its ProxyJump and the rest of
-	// its ssh config still apply.
+	// operator logs in with; only where is dest. An alias stays the host ssh
+	// is given, so its ProxyJump and the rest of its ssh config still apply.
 	reach := declared
-	reach.SSH.User, reach.SSH.Host, reach.SSH.Port = dest.User, dest.Host, dest.Port
-	if dest.Alias != "" {
-		reach.SSH.Host = dest.Alias
-	}
+	reach.SSH.User, reach.SSH.Host, reach.SSH.Port = dest.User, dest.SSHHost(), dest.Port
 	t := removeSiteHost(site, reach)
+	if st, ok := t.(apply.SSHTransport); ok {
+		st.KnownHost = knownHost(dest)
+		t = st
+	}
 	opts := siteremove.Options{DeleteData: a.deleteData, ConfigPath: a.config, DNSProvider: dnsProviderFor}
 	plan, err := ui.Get(r, "read "+dest.String(), func() (*siteremove.Plan, error) {
 		return siteremove.BuildForced(cfg, secrets, site, dest, t, opts)

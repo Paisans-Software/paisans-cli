@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	pathpkg "path"
@@ -75,6 +76,11 @@ type SSHTransport struct {
 	// Destination, when set, is whatever ssh accepts (a host, a user@host,
 	// or an alias from the operator's config), passed as given.
 	Destination string
+	// KnownHost, when set, is the host as known_hosts names it, for a
+	// Destination or Host that is an alias of the operator's ssh config:
+	// its HostName, with the port in brackets when it is not 22. A changed
+	// host key's advice names it, since the alias is not what ssh records.
+	KnownHost string
 	// User and Host make the destination when Destination is empty.
 	User string
 	Host string
@@ -725,12 +731,24 @@ func (t SSHTransport) connectCommand() string {
 
 // knownHostsName is the host as known_hosts names it.
 func (t SSHTransport) knownHostsName() string {
+	if t.KnownHost != "" {
+		return t.KnownHost
+	}
 	if t.Destination != "" {
-		_, host, found := strings.Cut(t.Destination, "@")
-		if !found {
-			return t.Destination
+		dest, uri := strings.CutPrefix(t.Destination, "ssh://")
+		if _, host, found := strings.Cut(dest, "@"); found {
+			dest = host
 		}
-		return host
+		if uri {
+			// ssh://[user@]host[:port], the one form with a port.
+			if h, p, err := net.SplitHostPort(dest); err == nil {
+				if p == "22" {
+					return h
+				}
+				return "[" + h + "]:" + p
+			}
+		}
+		return dest
 	}
 	if p := t.port(); p != 22 {
 		return fmt.Sprintf("[%s]:%d", t.Host, p)

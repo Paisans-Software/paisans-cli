@@ -12,7 +12,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Added
 
-- `--ssh` and `--from` take an ssh config alias, `alias`, `user@alias`, `alias:port` or `user@alias:port`, resolved with `ssh -G` and reached through the alias, so its ProxyJump and IdentityFile apply.
+- `--ssh` and `--from` take ssh config aliases, `[user@]alias[:port]`, reached through the alias; a destination without a user, an address too, logs in as its config `User` or your local login.
 - `doctor` checks each host's swap, and `doctor` and `site admit` warn when a host's RAM, with swap counting up to a quarter, is under the floor its roles need.
 
 ### Changed

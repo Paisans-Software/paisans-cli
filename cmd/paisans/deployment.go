@@ -955,6 +955,7 @@ func recoverID(r ui.Reporter, dests []config.Destination, id string) (string, ma
 	var errs []error
 	var why []string
 	slices.SortFunc(dests, func(a, b config.Destination) int { return strings.Compare(a.String(), b.String()) })
+	dests = distinctLogins(dests)
 	for _, dest := range dests {
 		name := dest.String()
 		hosts[name] = reachDestination(dest)

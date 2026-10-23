@@ -129,7 +129,13 @@ paisans site deployments --ssh admin@203.0.113.9             # user@host
 
 * **Resolved by ssh.** A destination is read with `ssh -G`, so `Match`,
   `Include` and wildcards decide it exactly as they decide a plain ssh. A user
-  or port given overrides the config's, as it does for ssh.
+  or port given overrides the config's, as it does for ssh, and one not given
+  is the config's, for an address as for an alias.
+* **Resolved once.** The lookup is made when the command starts. A config
+  whose `HostName` depends on where the workstation is when ssh connects
+  (`Match exec`, `Match localnetwork`) can make the address a message names
+  differ from the one a later connection reaches; the connection follows the
+  config, since ssh is given the alias.
 * **Reached as the alias.** ssh is given the alias, with the user and port it
   resolved to, so its `ProxyJump`, `IdentityFile` and every other option apply
   to the connection, and host key checking is ssh's own, as before.
@@ -143,7 +149,13 @@ paisans site deployments --ssh admin@203.0.113.9             # user@host
   applies, as a plain ssh logs in. Messages name that user, so the login is
   always shown.
 * **Never an option.** A destination starting with `-`, or holding a space or
-  a pattern character, is refused before ssh is run.
+  a pattern character, is refused before ssh is run. A name that is not a
+  host name, such as one with an underscore, is a destination only as an
+  alias with a `HostName`.
+* **`site admit` and `site evict` with `--site`.** There `--ssh` may also be a
+  login alone, for the site's declared host. A word alone is an alias when
+  your ssh config maps it to another `HostName`, or when it carries a port
+  (`home-a:2222`), and a login otherwise.
 
 ## Configuration and secrets
 
