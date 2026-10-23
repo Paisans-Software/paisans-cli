@@ -48,7 +48,7 @@ func CheckPastedSecret(key, value string) error {
 		return nil
 	}
 	for _, r := range value {
-		if unicode.IsControl(r) || r == ' ' || r == ' ' {
+		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' {
 			return fmt.Errorf("secrets %s: holds a control character (%U). Each pasted secret is rendered onto one line of an env file, where a line break would add a line setting another variable, so it is refused. Set it again without one: paisans secrets set %s < value", key, r, key)
 		}
 	}

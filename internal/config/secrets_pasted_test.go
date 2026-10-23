@@ -18,8 +18,8 @@ var lineBreakers = []struct{ name, yaml, raw string }{
 	{"a newline", `\n`, "\n"},
 	{"a carriage return", `\r`, "\r"},
 	{"NUL", `\0`, "\x00"},
-	{"a line separator", ` `, " "},
-	{"a paragraph separator", ` `, " "},
+	{"a line separator", `\u2028`, "\u2028"},
+	{"a paragraph separator", `\u2029`, "\u2029"},
 }
 
 // writeSecrets writes a plaintext secrets file and returns its path.

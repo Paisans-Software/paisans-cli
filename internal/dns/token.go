@@ -542,13 +542,26 @@ func (r *remoteCaller) get(_ context.Context, path string, query url.Values) (in
 func remoteGet(envFile, target string) string {
 	return "f=" + quote(envFile) + "; " +
 		`e=$(sed -n 1p "$f" 2>&1 >/dev/null); if [ $? -ne 0 ]; then printf 'unreadable %s\n' "$e" | head -n 1; exit 0; fi; ` +
-		`t=$(sed -n 's/^ACME_DNS_TOKEN=//p' "$f"); ` +
+		envTokenRead +
 		`if [ -z "$t" ]; then echo none; exit 0; fi; ` +
 		`case $t in cfat_*) echo account;; *) echo user;; esac; ` +
 		`o=$(printf 'header = "Authorization: Bearer %s"\n' "$t" | curl -sS --max-time 20 -w '\n%{http_code}' -K - ` + quote(target) + `); s=$?; ` +
 		`r=; while :; do case $o in *"$t"*) r=$r${o%%"$t"*}'[redacted]'; o=${o#*"$t"};; *) break;; esac; done; ` +
 		`printf '%s\n' "$r$o"; exit $s`
 }
+
+// envTokenRead is the host's commands that set t to ACME_DNS_TOKEN's value
+// in the file "$f" names, as docker compose hands it to Caddy. Render writes
+// it with configmerge.EnvValue: bare, or double quoted with backslash,
+// double quote, dollar and newline escaped, and this undoes that quoting
+// exactly, in the shell, one character at a time. Decoding it there rather
+// than on the workstation keeps the token on the host and out of every
+// argument list: [ is a shell builtin, as printf is.
+const envTokenRead = `t=$(sed -n 's/^ACME_DNS_TOKEN=//p' "$f"); ` +
+	`case $t in \"*\") t=${t#\"}; t=${t%\"}; u=; ` +
+	`while [ -n "$t" ]; do r=${t#?}; c=${t%"$r"}; t=$r; ` +
+	`if [ "$c" = '\' ]; then r=${t#?}; c=${t%"$r"}; t=$r; if [ "$c" = n ]; then c='
+'; fi; fi; u=$u$c; done; t=$u;; esac; `
 
 // curlCause is the line of a failed command that says why: curl's own
 // error when it printed one, the transport's error otherwise.

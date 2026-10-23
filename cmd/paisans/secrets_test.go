@@ -744,7 +744,7 @@ func TestSecretsSetWithAKeyAtATerminalRefusesBeforeAsking(t *testing.T) {
 // break in it would add a line that sets another variable.
 func TestSecretsSetRefusesAControlCharacter(t *testing.T) {
 	configPath, secretsPath := secretsDir(t, "version: 1\n")
-	for name, c := range map[string]string{"a newline": "\n", "a carriage return": "\r", "NUL": "\x00", "a line separator": " ", "a paragraph separator": " "} {
+	for name, c := range map[string]string{"a newline": "\n", "a carriage return": "\r", "NUL": "\x00", "a line separator": "\u2028", "a paragraph separator": "\u2029"} {
 		t.Run(name, func(t *testing.T) {
 			printed, err := set(t, configPath, secretsPath, "external.acme_dns_token", "tok"+c+"STATIC_API_KEY=x\n")
 			if err == nil || !strings.Contains(err.Error(), "external.acme_dns_token") || !strings.Contains(err.Error(), "control character") {
