@@ -543,7 +543,7 @@ func (e *evictor) watchdog() error {
 	rule, unit := watchdogRulePath(e.d), e.d.Prefix()+"-watchdog.service"
 	if e.f.Files[rule].Present && e.hasWatchdogDev() && e.f.WatchdogNowayout {
 		e.warn("watchdog: its driver has nowayout set",
-			"Nothing can stop its timer once it runs, so a Patroni killed while it led reboots the host part way through evict. Have the operators stop the deployment's database first.")
+			"Once its Patroni has armed it, nothing stops its timer: the host reboots within the watchdog's timeout after Patroni stops, however it stops. Expect a reboot.")
 	}
 	if e.f.Files[rule].Present && e.hasWatchdogDev() && e.f.WatchdogState == "none" {
 		e.warn("watchdog: evict cannot tell whether it runs",
