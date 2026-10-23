@@ -546,7 +546,7 @@ paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # o
   |------|----------|---------|
   | `--config <path>` | all | the deployment declaration, which must be named `paisans-stack.yaml` with `secrets.enc.yaml` and `.sops.yaml` beside it; `.paisans/` beside it holds this workstation's state |
   | `--merge` | `publish` | the version's parents are every head, after the operator has merged a fork or an incoming change by hand |
-  | `--root <sha>` | `pull`, `log`, `recover` | trust starts from this root, its full hash as `log` prints it on a root's line or another operator's `.paisans/config-root` holds it; `pull` and `recover` record it, replacing a recorded pin, and `log` judges from it for the run only. A recorded pin is refused when the sites serve none of its history or serve a version the recorded key signed under another root; `pull --root` with the current root is the way out |
+  | `--root <sha>` | `pull`, `log`, `recover` | trust starts from this root, its full hash as `log` prints it on a root's line or another operator's `.paisans/config-root` holds it; `pull` and `recover` record it, `log` judges from it for the run only. One that differs from a recorded pin is refused |
   | `--key <path.pub>` | `pull`, `log`, `recover` | your own operator key's public key file, to start trust from when `.paisans/signing-key` records none and no root is pinned; the agent need not hold it, and it is recorded only when the agent does. `log` records nothing |
   | `--from <user@host[:port] or ssh alias>` | `recover` (required, repeatable) | a host of the deployment to recover from; every site the trusted heads name is reached after it |
   | `--id <id>` | `recover` | the deployment, when the logins' admission records name more than one; it must be a deployment id |
@@ -567,8 +567,16 @@ paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # o
   versions under two roots, are refused and need `--root <sha>`: a key alone
   cannot tell this deployment's history from one it signed before a redeploy
   under the same id, where an operator since removed may still be listed. The
-  newest such version anchors, and the gather names its key. A pinned root
-  anchors alone; `--key` is then ignored, and the run notes it. With no
+  newest such version anchors, and the gather names its key. When every site
+  that answers serves an older incarnation, a `--key` recovery can land on a
+  genuine version the key signed there, so `recover --key` prints the full
+  hash of the root it pins: confirm it with another operator, against their
+  `.paisans/config-root` or a root's line of their `log`, before applying. A
+  pinned root anchors alone; `--key` is then ignored, and the run notes it.
+  With a root pinned, a gather whose sites serve none of its history is
+  refused, naming no root they served, and says to get the current root from
+  another operator and recover from it into an empty directory with
+  `deployment recover --root <sha>`. With no
   anchor, `pull`, `log` and `recover` say to name your own operator key with
   `--key` (loaded with `ssh-add`, so it is recorded) or pin `--root <sha>`,
   and `publish`, which judges only from the recorded key, says the same of

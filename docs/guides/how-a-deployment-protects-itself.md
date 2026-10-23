@@ -289,16 +289,13 @@ operator.
 
 **Does not protect.** A fresh workstation that reaches only sites an attacker
 holds can be served an old, genuine version, and applying it reaches only those
-sites. With `--key` that includes a version the key signed in an incarnation of
-the deployment from before a redeploy under the same id, and the root it pins
-is that incarnation's. A later pull from sites that serve none of the pinned
-root's history, or serve a version your key signed under another root,
-refuses whatever the two lines' revisions; `paisans deployment pull --root
-<sha> --execute` with the current root, from another operator's
-`.paisans/config-root`, replaces the pin and moves the files to the current
-line. A pull whose sites serve the pinned line and also another root your key
-never signed under goes on from the pinned line, and `paisans deployment log`
-lists the other root as outside the anchor's history. Nothing checks that a
+sites. With `--key` that includes a genuine version the key signed in an
+incarnation of the deployment from before a redeploy under the same id, when
+every site that answers serves that incarnation, and the root it pins is that
+incarnation's: confirm the full root hash the recovery prints with another
+operator before applying. A later pull from sites that serve none of the
+pinned root's history refuses, and says to recover from the current root.
+Nothing checks that a
 removed operator's age key was taken out of the secrets file: that is the
 operator's step (see *A former recipient still has the secrets file*).
 
