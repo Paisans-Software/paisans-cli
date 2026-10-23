@@ -106,7 +106,8 @@ type Plan struct {
 	// command runs.
 	control string
 	// removed is every etcd member removal this deployment's hosts record
-	// (apply.EtcdRemoved), read from every site's host.
+	// (apply.EtcdRemoved), read from every site's host when a joiner's data
+	// needs it.
 	removed []apply.EtcdRemoved
 	// clusterID is the ID of the cluster control's etcd answers for, 0 when
 	// its answer carries none.
@@ -250,9 +251,6 @@ func Build(cfg *config.Config, secrets *config.Secrets, newSite string, transpor
 	}
 	// Stage 3 clears every joiner whose member has not started; data not
 	// shown to be this cluster's is refused before any stage runs.
-	if err := p.readRemoved(); err != nil {
-		return nil, err
-	}
 	for _, j := range p.joiners(live) {
 		if !startedMember(p.cfg, live, j) {
 			if err := p.planEtcdData(j, live); err != nil {

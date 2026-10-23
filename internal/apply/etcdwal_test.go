@@ -2,6 +2,7 @@ package apply_test
 
 import (
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -107,6 +108,53 @@ func etcdListing(entries string, wals map[string][]byte) string {
 	return b.String()
 }
 
+// withDB adds the head of member/snap/db to a probe answer.
+func withDB(out string, db []byte) string {
+	return out + "paisans-db-begin\n" + odHex(db) + "\npaisans-db-end\n"
+}
+
+// testdata/etcd-v3.5.16-fresh-db-head.bin is the first two pages of the
+// member/snap/db the v3.5.16 image left when run as a joiner whose only
+// other member does not answer, and etcd-v3.5.16-used-db-head.bin those of
+// the fixture member's after one key was put. Both files are 16801792 bytes.
+func dbHead(t *testing.T, name string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("testdata", "etcd-v3.5.16-"+name+"-db-head.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func TestParseBoltTxid(t *testing.T) {
+	if txid, err := apply.ParseBoltTxid(dbHead(t, "fresh")); err != nil || txid != apply.FreshEtcdDBTxid {
+		t.Errorf("a fresh database: txid %d %v, want %d", txid, err, apply.FreshEtcdDBTxid)
+	}
+	if txid, err := apply.ParseBoltTxid(dbHead(t, "used")); err != nil || txid != 9 {
+		t.Errorf("a used database: txid %d %v, want 9", txid, err)
+	}
+	fresh := dbHead(t, "fresh")
+	flipped := append([]byte(nil), fresh...)
+	flipped[4096+16+48] ^= 0x01 // page 1's txid, under its checksum
+	for name, b := range map[string][]byte{
+		"a flipped txid": flipped,
+		"one page":       fresh[:4096],
+		"zeros":          make([]byte, 8192),
+	} {
+		if _, err := apply.ParseBoltTxid(b); err == nil {
+			t.Errorf("%s: read", name)
+		}
+	}
+}
+
+func manyWALs(n int) string {
+	var b strings.Builder
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&b, "f 64000000 member/wal/%016x-%016x.wal\n", i, i)
+	}
+	return b.String()
+}
+
 const memberDirs = "d 0 member\nd 0 member/snap\nd 0 member/wal\nf 16801792 member/snap/db\n"
 
 func TestParseEtcdData(t *testing.T) {
@@ -123,14 +171,17 @@ func TestParseEtcdData(t *testing.T) {
 		}
 	}
 	for name, out := range map[string]string{
-		"no answer":      "rootlesskit: command not found\n",
-		"unknown answer": "paisans-etcd-data: maybe\n",
-		"listing cut":    "paisans-etcd-data: listing\npaisans-list-begin\nd 0 member\n",
-		"bad listing":    "paisans-etcd-data: listing\npaisans-list-begin\nd member\npaisans-list-end\n",
-		"WAL cut":        "paisans-etcd-data: listing\npaisans-list-begin\npaisans-list-end\npaisans-wal-begin x.wal\n 04 00\n",
-		"WAL not hex":    "paisans-etcd-data: listing\npaisans-list-begin\npaisans-list-end\npaisans-wal-begin x.wal\n zz\npaisans-wal-end\n",
-		"two answers":    "paisans-etcd-data: absent\npaisans-etcd-data: link\n",
-		"one WAL twice":  "paisans-etcd-data: listing\npaisans-list-begin\npaisans-list-end\npaisans-wal-begin x.wal\npaisans-wal-end\npaisans-wal-begin x.wal\npaisans-wal-end\n",
+		"no answer":         "rootlesskit: command not found\n",
+		"unknown answer":    "paisans-etcd-data: maybe\n",
+		"listing cut":       "paisans-etcd-data: listing\npaisans-list-begin\nd 0 member\n",
+		"bad listing":       "paisans-etcd-data: listing\npaisans-list-begin\nd member\npaisans-list-end\n",
+		"WAL cut":           "paisans-etcd-data: listing\npaisans-list-begin\npaisans-list-end\npaisans-wal-begin x.wal\n 04 00\n",
+		"WAL not hex":       "paisans-etcd-data: listing\npaisans-list-begin\npaisans-list-end\npaisans-wal-begin x.wal\n zz\npaisans-wal-end\n",
+		"two answers":       "paisans-etcd-data: absent\npaisans-etcd-data: link\n",
+		"a path twice":      "paisans-etcd-data: listing\npaisans-list-begin\nd 0 member\nd 0 member\npaisans-list-end\n",
+		"a carriage return": "paisans-etcd-data: listing\r\npaisans-list-begin\npaisans-list-end\n",
+		"db cut":            "paisans-etcd-data: listing\npaisans-list-begin\npaisans-list-end\npaisans-db-begin\n 00\n",
+		"one WAL twice":     "paisans-etcd-data: listing\npaisans-list-begin\npaisans-list-end\npaisans-wal-begin x.wal\npaisans-wal-end\npaisans-wal-begin x.wal\npaisans-wal-end\n",
 	} {
 		if d, err := apply.ParseEtcdData(out); err == nil {
 			t.Errorf("%s: read as %+v", name, d)
@@ -158,7 +209,11 @@ func TestAssessEtcdData(t *testing.T) {
 	}{
 		"absent":            {apply.EtcdData{State: apply.EtcdDataAbsent}, apply.EtcdDataNothing, ""},
 		"empty":             {parse(etcdListing("", nil)), apply.EtcdDataNothing, ""},
-		"failed start":      {parse(etcdListing("d 0 member\nd 0 member/snap\nf 16801792 member/snap/db\n", nil)), apply.EtcdDataFailedBootstrap, ""},
+		"failed start":      {parse(withDB(etcdListing("d 0 member\nd 0 member/snap\nf 16801792 member/snap/db\n", nil), dbHead(t, "fresh"))), apply.EtcdDataFailedBootstrap, ""},
+		"a used db alone":   {parse(withDB(etcdListing("d 0 member\nd 0 member/snap\nf 16801792 member/snap/db\n", nil), dbHead(t, "used"))), apply.EtcdDataUnknown, "committed transaction 9"},
+		"an unread db":      {parse(etcdListing("d 0 member\nd 0 member/snap\nf 16801792 member/snap/db\n", nil)), apply.EtcdDataUnknown, "meta pages cannot be read"},
+		"too many logs":     {parse(etcdListing(memberDirs+manyWALs(65), nil)), apply.EtcdDataUnknown, "65 write-ahead log files"},
+		"a log not listed":  {parse(etcdListing(memberDirs+walEntry(walA), map[string][]byte{walA: real, walB: real})), apply.EtcdDataUnknown, "listing does not hold"},
 		"a member":          {parse(etcdListing(memberDirs+walEntry(walA)+"f 64000000 member/wal/0.tmp\nf 9 member/snap/0000000000000002-0000000000000005.snap\nf 9 member/snap/0000000000000005.snap.db\n", map[string][]byte{walA: real})), apply.EtcdDataMember, ""},
 		"two agreeing":      {parse(etcdListing(memberDirs+walEntry(walA)+walEntry(walB), map[string][]byte{walA: real, walB: real})), apply.EtcdDataMember, ""},
 		"link":              {apply.EtcdData{State: apply.EtcdDataLink}, apply.EtcdDataUnknown, "symbolic link"},
@@ -215,7 +270,7 @@ func TestEtcdDataProbeUnderAShell(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(db), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(db, make([]byte, 1000), 0o600); err != nil {
+	if err := os.WriteFile(db, dbHead(t, "fresh"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if v := read(base).Assess(); v.Kind != apply.EtcdDataFailedBootstrap {

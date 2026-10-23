@@ -254,3 +254,41 @@ func TestEachRemovedMemberIsRecordedBeforeItsRemoval(t *testing.T) {
 		}
 	})
 }
+
+// A removal whose record cannot be written is not made: the leaving site's
+// member, or the witness's, stays in etcd and the run stops.
+func TestAFailedRecordStopsTheRemoval(t *testing.T) {
+	for _, c := range []struct{ line, id, kept string }{
+		{"home-b c1a5 2222", "2222", "home-b"},
+		{"vm c1a5 3333", "3333", "vm"},
+	} {
+		t.Run(c.kept, func(t *testing.T) {
+			w := witnessWorld(t)
+			w.failOnce = "grep -qxF '" + c.line + "'"
+			err := siteremove.Execute(w.mustBuild("home-b", siteremove.Options{}))
+			if err == nil || !strings.Contains(err.Error(), "recording the removal of "+c.kept+"'s etcd member") || !strings.Contains(err.Error(), "Nothing was removed from etcd") {
+				t.Fatalf("err = %v", err)
+			}
+			if w.index("member remove "+c.id) >= 0 {
+				t.Errorf("%s's member was removed though its removal was not recorded", c.kept)
+			}
+		})
+	}
+}
+
+// A member list without a cluster ID, which etcdctl's never lacks, leaves
+// nothing to record a removal under: it is made unrecorded, and site add
+// refuses that data later rather than delete it.
+func TestARemovalWithoutAClusterIDIsMadeUnrecorded(t *testing.T) {
+	w := setup(t)
+	w.clusterID = 0
+	execute(t, w.mustBuild("home-b", siteremove.Options{}))
+	for name, h := range w.hosts {
+		if _, ok := h.files[root+"/.paisans/etcd-removed"]; ok {
+			t.Errorf("%s records a removal with no cluster ID", name)
+		}
+	}
+	if w.index("member remove 2222") < 0 {
+		t.Error("home-b's member was not removed")
+	}
+}

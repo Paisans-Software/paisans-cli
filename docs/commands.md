@@ -1327,7 +1327,8 @@ site whose member an earlier removal took out, has its old etcd data,
 `/srv/paisans/<token>/infra/etcd`, deleted before its etcd starts, and the
 plan names it: etcd refuses to rejoin with a removed member's data. Its etcd
 container is removed first, and the data is read on disk and deleted only
-when it is nothing, what a failed start leaves, or a member whose write-ahead
+when it is nothing, what a failed start leaves (a database alone that
+records no transaction past a fresh bootstrap's), or a member whose write-ahead
 logs name this cluster and a member this cluster recorded removing for the
 site; anything else refuses, and nothing is deleted.
 

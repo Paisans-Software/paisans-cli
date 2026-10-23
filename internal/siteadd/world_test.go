@@ -102,6 +102,8 @@ type world struct {
 	dataUnreadable map[string]bool
 	// dataLink is each site whose etcd data path is a symbolic link.
 	dataLink map[string]bool
+	// unreadable is, by site, a file reading it fails on.
+	unreadable map[string]string
 }
 
 type host struct {
@@ -122,6 +124,9 @@ type host struct {
 func (h *host) Describe() string { return h.name }
 
 func (h *host) ReadFile(path string) (string, bool, error) {
+	if h.w.unreadable[h.name] == path {
+		return "", false, fmt.Errorf("%s: cat: %s: Permission denied", h.name, path)
+	}
 	c, ok := h.files[path]
 	return c, ok, nil
 }
@@ -533,6 +538,20 @@ func (h *host) etcdDataAnswer() string {
 			b.WriteString("\n")
 		}
 		b.WriteString("paisans-wal-end\n")
+	}
+	if e, ok := entries["member/snap/db"]; ok && strings.HasPrefix(e, "f ") && !strings.HasPrefix(entries["member"], "l ") && !strings.HasPrefix(entries["member/snap"], "l ") {
+		head := []byte(h.files[etcdDB])
+		if len(head) > 8192 {
+			head = head[:8192]
+		}
+		b.WriteString("paisans-db-begin\n")
+		for i := 0; i < len(head); i += 16 {
+			for _, c := range head[i:min(i+16, len(head))] {
+				fmt.Fprintf(&b, " %02x", c)
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString("paisans-db-end\n")
 	}
 	return b.String()
 }

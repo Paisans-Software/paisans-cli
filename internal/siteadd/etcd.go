@@ -217,8 +217,10 @@ func (p *Plan) knowCluster(j string) error {
 // data is a member this cluster removed for this site:
 //
 //   - nothing: no directory, or an empty one;
-//   - a failed start: member/snap/db alone, no larger than a fresh one
-//     (apply.FreshEtcdDBSize), which holds no member and no key;
+//   - a failed start: member/snap/db alone, no larger than a fresh one, its
+//     bbolt meta pages valid and recording no transaction after the ones a
+//     fresh bootstrap commits (apply.FreshEtcdDBTxid): nothing was committed
+//     to it after its buckets were created;
 //   - a member: etcd's member layout whose write-ahead logs all name this
 //     cluster's ID and one member ID, which is the learner being replaced or
 //     a member this cluster removed for this site and recorded
@@ -264,6 +266,12 @@ func (p *Plan) checkEtcdData(j string, members []apply.EtcdMember, learner uint6
 	}
 	if learner != 0 && v.NodeID == learner {
 		return nil
+	}
+	// The records are read only here, where a member's data needs them, and
+	// read again each time: a host or list that cannot be read refuses this
+	// clear and no other join.
+	if err := p.readRemoved(); err != nil {
+		return p.unknownEtcdData(j, fmt.Sprintf("is etcd member %x's of this cluster, and the records of removed members could not be read (%v)", v.NodeID, err), changed)
 	}
 	for _, r := range p.removed {
 		if r.Site == j && r.Cluster == p.clusterID && r.Member == v.NodeID {
@@ -421,9 +429,6 @@ func (p *Plan) prepareJoiner(j string, m *apply.EtcdMember) (*apply.EtcdMember, 
 	}
 	members, err := p.members()
 	if err != nil {
-		return nil, err
-	}
-	if err := p.readRemoved(); err != nil {
 		return nil, err
 	}
 	p.work("clear old etcd data on "+j).Detail("%s, on %s", apply.EtcdDataDir(p.dep()), j)

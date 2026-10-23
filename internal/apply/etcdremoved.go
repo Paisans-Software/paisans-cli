@@ -31,10 +31,11 @@ type EtcdRemoved struct {
 func EtcdRemovedPath(d deployment.Deployment) string { return d.StatePath("etcd-removed") }
 
 // RecordEtcdRemovedCommand adds r to a host's list once, creating the state
-// directory and the file if they are not there.
+// directory and the file if they are not there, and ending a last line that
+// has no newline first so the new line is a line of its own.
 func RecordEtcdRemovedCommand(d deployment.Deployment, r EtcdRemoved) string {
 	line := fmt.Sprintf("%s %x %x", r.Site, r.Cluster, r.Member)
-	return fmt.Sprintf(`set -e; mkdir -p %s; f=%s; touch "$f"; grep -qxF %s "$f" || printf '%%s\n' %s >> "$f"`,
+	return fmt.Sprintf(`set -e; mkdir -p %s; f=%s; touch "$f"; grep -qxF %s "$f" && exit 0; if [ -s "$f" ] && [ -n "$(tail -c 1 "$f")" ]; then printf '\n' >> "$f"; fi; printf '%%s\n' %s >> "$f"`,
 		shellQuote(d.StateDir()), shellQuote(EtcdRemovedPath(d)), shellQuote(line), shellQuote(line))
 }
 

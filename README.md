@@ -8992,7 +8992,7 @@ and deletes it only when it is one of:
 | What the path holds | Why deleting it loses nothing |
 |---------------------|-------------------------------|
 | nothing, or an empty directory | there is nothing |
-| `member/snap/db` alone, no larger than a fresh one | what etcd leaves when it exits before reaching a peer: it opens its backend first and writes its log only once it has the cluster's membership. A fresh v3.5.16 database measured 16801792 bytes |
+| `member/snap/db` alone, no larger than a fresh one, both its bbolt meta pages valid (magic, version, page size 4096, checksum) and recording no transaction after the two a fresh bootstrap commits | what etcd leaves when it exits before reaching a peer: it opens its backend first and writes its log only once it has the cluster's membership, so nothing was committed to it after its buckets were created. Measured on a fresh v3.5.16 database: 16801792 bytes, transaction 2. The size alone is not the evidence: bbolt grows the file in 16 MiB steps, and a member that held a key measured the same size at transaction 9 |
 | etcd's member layout, every write-ahead log in it decoding (framing, record, CRC-32C chain) to the same member and cluster, the cluster being this one and the member one this cluster removed for this site | a removed member's data, whose ID the cluster never accepts again |
 
 The cluster ID alone is not that evidence. etcd derives a founding member's
@@ -9042,7 +9042,10 @@ started with, which every later render repeats. A member founded now also
 records its `--initial-cluster-token`: chosen at random for each founding
 (the deployment's prefix and 64 random bits), taken by a later founder from
 the record of one that has it, so every founder of one cluster agrees, and
-giving the cluster IDs of its own (above). A member whose record has no token
+giving the cluster IDs of its own (above). Run one `deployment apply` of a
+deployment at a time while its etcd is being founded: two runs founding at
+once each choose a token before either is recorded, and founders with
+different tokens do not form one cluster. A member whose record has no token
 renders the fixed token `paisans` it was founded or joined with, so nothing
 running is rendered differently; a joiner's token is not read by etcd. A founder records `new` and the
 founding set. A joiner records `existing` and the membership **right after its

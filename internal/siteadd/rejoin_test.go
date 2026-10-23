@@ -1,6 +1,8 @@
 package siteadd_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -494,13 +496,38 @@ func TestAFailedStartsDataIsCleared(t *testing.T) {
 	vm := w.hosts["vm"]
 	delete(vm.files, etcdWAL)
 	delete(vm.files, etcdData+"/member/wal/0.tmp")
-	vm.files[etcdDB] = strings.Repeat("\x00", 1024)
+	vm.files[etcdDB] = string(dbFixture(t, "fresh"))
 	if err := siteadd.Execute(build(t, w)); err != nil {
 		t.Fatal(err)
 	}
 	if vm.ran("rootlesskit rm -rf") != 1 {
 		t.Error("the failed start's data was not cleared")
 	}
+}
+
+// A database alone that has committed more than a fresh bootstrap does is
+// not a failed start, whatever its size: a member that held keys and whose
+// write-ahead log was moved aside has a file of the same size.
+func TestAUsedDatabaseAloneIsRefused(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := removedWitnessWorld(t)
+	vm := w.hosts["vm"]
+	delete(vm.files, etcdWAL)
+	delete(vm.files, etcdData+"/member/wal/0.tmp")
+	vm.files[etcdDB] = string(dbFixture(t, "used"))
+	_, err := siteadd.Build(w.cfg, w.secrets, "home-b", w.transports())
+	refusedUntouched(t, w, err, "has committed transaction 9", "Nothing was changed")
+}
+
+// dbFixture is the head of a real etcd v3.5.16 database: see
+// internal/apply's tests.
+func dbFixture(t *testing.T, name string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("..", "apply", "testdata", "etcd-v3.5.16-"+name+"-db-head.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }
 
 // A data directory that exists and is empty is nothing to lose.
@@ -608,5 +635,52 @@ func TestALearnerThatStartsBeforeTheRunIsKept(t *testing.T) {
 	}
 	if got := strings.Join(w.voters(), ","); got != "home-a,home-b,vm" {
 		t.Errorf("voters %s", got)
+	}
+}
+
+// The removal of an unstarted learner is recorded before it is made, and a
+// record that cannot be written stops the join with the learner still in
+// etcd and its data untouched.
+func TestAFailedRecordStopsTheLearnerRemoval(t *testing.T) {
+	defer siteadd.SetFast()()
+	w := removedWitnessWorld(t)
+	w.nextID++
+	w.etcd = append(w.etcd, apply.EtcdMember{ID: w.nextID, PeerURLs: []string{"http://10.44.0.3:2380"}, IsLearner: true})
+	p := build(t, w)
+	w.failOnce = "/.paisans/etcd-removed'; touch"
+	err := siteadd.Execute(p)
+	if err == nil || !strings.Contains(err.Error(), "recording the removal of vm's etcd member") {
+		t.Fatalf("want a stop at the record, got %v", err)
+	}
+	if w.hosts["home-a"].ran("member remove") != 0 {
+		t.Error("the learner was removed though its removal was not recorded")
+	}
+	if len(w.etcd) != 2 || w.hosts["vm"].ran("rootlesskit rm -rf") != 0 {
+		t.Errorf("etcd %v, or vm's data deleted", w.etcd)
+	}
+}
+
+// The records are read only when a joiner's data needs them, and refuse
+// only that clear when they cannot be read: a list with a line it cannot
+// read, or a host whose list cannot be read. A join whose joiners need no
+// record goes ahead.
+func TestUnreadableRecordsRefuseOnlyTheClearThatNeedsThem(t *testing.T) {
+	defer siteadd.SetFast()()
+	for name, setup := range map[string]func(*world){
+		"a line it cannot read": func(w *world) { w.hosts["home-a"].files[etcdRemovedFile] += "vm c1a5\n" },
+		"a host it cannot read": func(w *world) { w.unreadable = map[string]string{"watch": etcdRemovedFile} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := removedWitnessWorld(t)
+			setup(w)
+			_, err := siteadd.Build(w.cfg, w.secrets, "home-b", w.transports())
+			refusedUntouched(t, w, err, "the records of removed members could not be read", "Nothing was changed")
+
+			fresh := newWorld(t)
+			setup(fresh)
+			if err := siteadd.Execute(build(t, fresh)); err != nil {
+				t.Fatalf("a join that needs no record: %v", err)
+			}
+		})
 	}
 }

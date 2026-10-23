@@ -34,6 +34,20 @@ func TestRecordEtcdRemovedUnderAShell(t *testing.T) {
 	if err != nil || len(got) != 2 || got[0] != a || got[1] != b {
 		t.Errorf("read %+v %v from:\n%s", got, err, content)
 	}
+	// A list whose last line has no newline gains the next on a line of
+	// its own.
+	file := filepath.Join(base, strings.TrimPrefix(apply.EtcdRemovedPath(rmDeployment), "/"))
+	if err := os.WriteFile(file, []byte("vm c1a5 3333"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(b)
+	content, err = os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "vm c1a5 3333\nhome-b c1a5 2222\n" {
+		t.Errorf("appended after a line with no newline:\n%q", content)
+	}
 	for _, bad := range []string{"vm c1a5\n", "vm zz 1\n", "vm 0 1\n", "vm c1a5 3333 extra\n"} {
 		if _, err := apply.ParseEtcdRemoved(bad); err == nil {
 			t.Errorf("%q was read", bad)
