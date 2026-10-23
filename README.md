@@ -2995,9 +2995,8 @@ default (`AllowTcpForwarding`, sshd_config(5)); a host that refuses it says
 **A mail server on the deployment's own mesh is tried once the mesh is up.**
 A `host` that is an address inside `mesh.subnet`, Eg: a relay run on one of
 the sites, is reached only across the mesh: until `deployment apply` has
-brought the mesh up, the address is on no interface, and the deployment's
-egress table drops its user's traffic to private addresses outside the mesh.
-So before each such check, apply and `validate` read whether the
+brought the mesh up, the address is on no interface and no site has a route
+to it. So before each such check, apply and `validate` read whether the
 deployment's WireGuard interface is up on the site the check is made from
 and on the site that holds the address. While either is not, the check is
 not made, with a warning that it cannot be tried before the mesh exists, and

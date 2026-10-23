@@ -18,12 +18,16 @@ import (
 // smtpEnv is how the mail checks reach a mail server: from a site, through
 // the site's own ssh (apply.SSHTransport.Dial), or through ssh[site] when
 // the command was given --ssh for it. The SMTP conversation runs here; the
-// site only carries the connection. Tests replace it, since none may reach a
-// real site or mail server.
+// site only carries the connection, and a forward the host could not open
+// is a check whose connection was not made (apply.ErrForwardNotOpened).
+// Tests replace it, since none may reach a real site or mail server.
 var smtpEnv = func(cfg *config.Config, ssh map[string]string) smtpcheck.Env {
-	return smtpcheck.Env{Dial: func(site, address string) (net.Conn, error) {
-		return siteTransport(site, cfg.Sites[site], ssh[site]).Dial(address)
-	}}
+	return smtpcheck.Env{
+		Dial: func(site, address string) (net.Conn, error) {
+			return siteTransport(site, cfg.Sites[site], ssh[site]).Dial(address)
+		},
+		NotOpened: func(err error) bool { return errors.Is(err, apply.ErrForwardNotOpened) },
+	}
 }
 
 // localSMTPEnv is how a credential is tried before it is written or handed
@@ -54,9 +58,8 @@ var meshLinkUp = func(cfg *config.Config, site, destination string) (bool, error
 // mesh.subnet as not made while the mesh is not up on the check's site, or
 // on the site that holds the address, Eg: a relay on another site's mesh
 // address before the first apply has brought the mesh up. Until it is,
-// the address is on no interface, the site has no route to it, and the
-// deployment's egress table drops its user's traffic to private addresses
-// outside the mesh, so a dial from there learns nothing about the server.
+// the address is on no interface and the site has no route to it, so a
+// dial from there learns nothing about the server.
 // apply brings the mesh up, and the apply after it tries the check. Each
 // site's mesh is read once; a site whose mesh cannot be read counts as up,
 // so its checks are made and their dial says why. A server named by host
@@ -193,7 +196,7 @@ func tryMailFromSites(r ui.Reporter, cfg *config.Config, secrets *config.Secrets
 				return &ui.Problem{Hint: hint, Explain: explain + after, Cause: err}
 			}
 			if failed != nil && failed.Unanswered() {
-				return &ui.Problem{Hint: "nothing answered at " + c.Address() + " from " + c.From(), Explain: fmt.Sprintf("%s, declared by %s, sends through %s, and from %s the connection closed before the server said anything (%s). Every app's mail settings are tried from its site before anything there changes.%s", c.Whose(), c.Setting(cfg), c.Address(), c.From(), strings.TrimSuffix(failed.Reply(), "."), unreached), Cause: err}
+				return &ui.Problem{Hint: "nothing answered at " + c.Address() + " from " + c.From(), Explain: fmt.Sprintf("%s, declared by %s, sends through %s, and %s could not open a connection to it (%s). Every app's mail settings are tried from its site before anything there changes.%s", c.Whose(), c.Setting(cfg), c.Address(), c.From(), strings.TrimSuffix(failed.Reply(), "."), unreached), Cause: err}
 			}
 			return &ui.Problem{Hint: c.From() + " could not be reached to try " + c.Whose(), Explain: "every app's mail settings are tried from its site before anything there changes." + unreached, Cause: err}
 		}

@@ -7,12 +7,14 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/mesh"
 	"github.com/paisans-software/paisans-cli/internal/secretsgen"
 	"github.com/paisans-software/paisans-cli/internal/smtpcheck"
 	"github.com/paisans-software/paisans-cli/internal/smtpcheck/smtptest"
@@ -609,17 +611,12 @@ func TestBeforeMeshKeepsTheCheckWhenTheMeshCannotBeRead(t *testing.T) {
 	}
 }
 
-// A connection the site's ssh opens and then closes before the server says
-// anything, as a forward the host could not open is, refuses as a server
-// that did not answer, not as one that answered and refused the login.
+// A forward the site's host could not open refuses as a server that did not
+// answer, not as one that answered and refused the login.
 func TestApplyRefusesMailThatDoesNotAnswer(t *testing.T) {
 	saved := smtpEnv
 	smtpEnv = func(*config.Config, map[string]string) smtpcheck.Env {
-		return smtpcheck.Env{Dial: func(site, address string) (net.Conn, error) {
-			local, remote := net.Pipe()
-			remote.Close()
-			return local, nil
-		}}
+		return notOpenedEnv()
 	}
 	t.Cleanup(func() { smtpEnv = saved })
 	configPath, secretsPath := rotateDeployment(t, nil)
@@ -661,11 +658,7 @@ func TestValidateSkipsMeshMailBeforeTheMeshIsUp(t *testing.T) {
 func TestValidateWarnsAboutMailThatDoesNotAnswer(t *testing.T) {
 	saved := smtpEnv
 	smtpEnv = func(*config.Config, map[string]string) smtpcheck.Env {
-		return smtpcheck.Env{Dial: func(string, string) (net.Conn, error) {
-			local, remote := net.Pipe()
-			remote.Close()
-			return local, nil
-		}}
+		return notOpenedEnv()
 	}
 	t.Cleanup(func() { smtpEnv = saved })
 	configPath, secretsPath := rotateDeployment(t, nil)
@@ -678,5 +671,82 @@ func TestValidateWarnsAboutMailThatDoesNotAnswer(t *testing.T) {
 	}
 	if rec.Index("explain", "home-a could not be reached") >= 0 {
 		t.Errorf("a server that does not answer is called an unreachable site:\n%s", rec.Lines())
+	}
+}
+
+// notOpenedEnv is the site transport's Env with every forward refused by the
+// host, as ssh reports it: the dial returns, and the first read ends with
+// ssh's reason.
+func notOpenedEnv() smtpcheck.Env {
+	why := fmt.Errorf("ssh: Stdio forwarding request failed: Session open refused by peer: %w", apply.ErrForwardNotOpened)
+	return smtpcheck.Env{
+		Dial: func(string, string) (net.Conn, error) {
+			local, remote := net.Pipe()
+			go func() { _, _ = io.Copy(io.Discard, remote) }()
+			return failingConn{Conn: local, err: why}, nil
+		},
+		NotOpened: func(err error) bool { return errors.Is(err, apply.ErrForwardNotOpened) },
+	}
+}
+
+// failingConn is a connection whose every read fails with err.
+type failingConn struct {
+	net.Conn
+	err error
+}
+
+func (c failingConn) Read([]byte) (int, error) { return 0, c.err }
+
+// A mail server that takes the connection from this machine and closes it
+// before it greets answered: secrets set refuses, and writes nothing, rather
+// than writing the password untried.
+func TestSecretsSetRefusesAServerThatClosesBeforeItGreets(t *testing.T) {
+	saved := localSMTPEnv
+	localSMTPEnv = func() smtpcheck.Env {
+		return smtpcheck.Env{Dial: func(string, string) (net.Conn, error) {
+			local, remote := net.Pipe()
+			remote.Close()
+			return local, nil
+		}}
+	}
+	t.Cleanup(func() { localSMTPEnv = saved })
+	configPath, secretsPath := rotateDeployment(t, nil)
+	withRecorder(t, false)
+	before, _ := os.ReadFile(secretsPath)
+	_, err := set(t, configPath, secretsPath, "external.smtp_password", "not-a-real-smtp-password-0009")
+	if err == nil || !strings.Contains(err.Error(), "does not work for") || !strings.Contains(err.Error(), "closed it before it greeted") {
+		t.Fatalf("err = %v, want the server's close as a refusal", err)
+	}
+	if after, _ := os.ReadFile(secretsPath); !bytes.Equal(before, after) {
+		t.Error("the secrets file changed")
+	}
+}
+
+// meshLinkUp reads the deployment's interface through the site's ssh: an
+// interface that is up, one that is absent, and one that exists but is down.
+func TestMeshLinkUpReadsTheInterface(t *testing.T) {
+	cfg := mustLoad(t, fixtureConfig())
+	iface := cfg.Deployment().Interface()
+	for _, tc := range []struct {
+		out  string
+		want bool
+	}{
+		{`[{"ifname":"` + iface + `","flags":["POINTOPOINT","NOARP","UP","LOWER_UP"]}]`, true},
+		{"absent", false},
+		{`[{"ifname":"` + iface + `","flags":["POINTOPOINT","NOARP"]}]`, false},
+	} {
+		log := filepath.Join(t.TempDir(), "ssh.log")
+		sshAnswering(t, "#!/bin/sh\nfor last; do :; done\nb=${last#*printf %s }\nb=${b%% |*}\nprintf %s \"$b\" | base64 -d >> "+log+"\nprintf '%s\\n' '"+tc.out+"'\n")
+		up, err := meshLinkUp(cfg, "home-a", "")
+		if err != nil {
+			t.Fatalf("%s: %v", tc.out, err)
+		}
+		if up != tc.want {
+			t.Errorf("%s: up = %v, want %v", tc.out, up, tc.want)
+		}
+		ran, _ := os.ReadFile(log)
+		if !strings.Contains(string(ran), mesh.LinkCommand(iface)) {
+			t.Errorf("ran %q, want %q", ran, mesh.LinkCommand(iface))
+		}
 	}
 }

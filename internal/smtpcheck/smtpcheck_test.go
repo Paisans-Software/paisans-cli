@@ -277,36 +277,65 @@ func TestSendRefusedSender(t *testing.T) {
 	}
 }
 
-// A connection that closes before the server sends a byte learned nothing
-// about the server: ssh's stdio forward opens, then reports at the first
-// read that the host could not open the connection. The check is one whose
-// connection was not made, not a server that answered and refused.
-func TestLoginClosedBeforeAnyReplyIsNotDialled(t *testing.T) {
-	why := fmt.Errorf("home-b to 10.44.0.1:587: ssh: Stdio forwarding request failed: Session open refused by peer: %w", io.EOF)
+// A dial whose first read is the dialler's own report that the connection
+// was never opened (Env.NotOpened), as ssh's stdio forward reports a host
+// that could not open it, learned nothing about the server: the check is
+// one whose connection was not made, not a server that answered and
+// refused.
+func TestLoginNotOpenedIsNotDialled(t *testing.T) {
+	notOpened := errors.New("the host did not open the forwarded connection")
+	why := fmt.Errorf("home-b to 10.44.0.1:587: ssh: Stdio forwarding request failed: Session open refused by peer: %w", notOpened)
 	for _, security := range []string{config.SMTPStartTLS, config.SMTPTLS, config.SMTPNone} {
-		for _, readErr := range []error{io.EOF, why} {
-			t.Run(security, func(t *testing.T) {
-				env := smtpcheck.Env{Dial: func(string, string) (net.Conn, error) {
-					local, remote := net.Pipe()
-					go func() {
-						_, _ = io.Copy(io.Discard, remote)
-					}()
-					return closedConn{Conn: local, err: readErr}, nil
-				}}
-				err := smtpcheck.Login(env, check(security), password)
-				var failed *smtpcheck.Error
-				if !errors.As(err, &failed) || failed.Dialled() || !failed.Unanswered() {
-					t.Fatalf("err = %v, want a check whose connection was not made", err)
-				}
-				if !strings.HasPrefix(failed.Reply(), "connect: ") {
-					t.Errorf("reply = %q", failed.Reply())
-				}
-				if readErr == why && !strings.Contains(failed.Reply(), "Session open refused by peer") {
-					t.Errorf("reply %q drops ssh's reason", failed.Reply())
-				}
-			})
+		t.Run(security, func(t *testing.T) {
+			env := closingEnv(why)
+			env.NotOpened = func(err error) bool { return errors.Is(err, notOpened) }
+			err := smtpcheck.Login(env, check(security), password)
+			var failed *smtpcheck.Error
+			if !errors.As(err, &failed) || failed.Dialled() || !failed.Unanswered() {
+				t.Fatalf("err = %v, want a check whose connection was not made", err)
+			}
+			if !strings.HasPrefix(failed.Reply(), "connect: ") || !strings.Contains(failed.Reply(), "Session open refused by peer") {
+				t.Errorf("reply = %q", failed.Reply())
+			}
+		})
+	}
+}
+
+// A connection that opened and closed before the server sent a byte reached
+// something at the address, Eg: a server at its connection limit, so the
+// check is one whose connection was made, whether the dial was direct (no
+// Env.NotOpened) or a forward ending for another reason.
+func TestLoginClosedAfterOpeningIsDialled(t *testing.T) {
+	other := errors.New("not the dialler's")
+	for _, security := range []string{config.SMTPStartTLS, config.SMTPTLS, config.SMTPNone} {
+		for name, readErr := range map[string]error{"EOF": io.EOF, "wrapped EOF": fmt.Errorf("ssh: closed: %w", io.EOF)} {
+			for _, notOpened := range []func(error) bool{nil, func(err error) bool { return errors.Is(err, other) }} {
+				t.Run(fmt.Sprintf("%s/%s/NotOpened %v", security, name, notOpened != nil), func(t *testing.T) {
+					env := closingEnv(readErr)
+					env.NotOpened = notOpened
+					err := smtpcheck.Login(env, check(security), password)
+					var failed *smtpcheck.Error
+					if !errors.As(err, &failed) || !failed.Dialled() || failed.Unanswered() {
+						t.Fatalf("err = %v, want a check whose connection was made", err)
+					}
+					if readErr == io.EOF && !strings.Contains(failed.Reply(), "the server took the connection and closed it") {
+						t.Errorf("reply = %q", failed.Reply())
+					}
+				})
+			}
 		}
 	}
+}
+
+// closingEnv dials a connection whose every read fails with err.
+func closingEnv(err error) smtpcheck.Env {
+	return smtpcheck.Env{Dial: func(string, string) (net.Conn, error) {
+		local, remote := net.Pipe()
+		go func() {
+			_, _ = io.Copy(io.Discard, remote)
+		}()
+		return closedConn{Conn: local, err: err}, nil
+	}}
 }
 
 // closedConn is a connection whose every read fails with err.

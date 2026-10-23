@@ -122,14 +122,48 @@ func forward(cmd *exec.Cmd, where string) (*forwardConn, error) {
 	return c, nil
 }
 
+// ErrForwardNotOpened is a forward whose connection the host never opened:
+// ssh reported that the channel failed to open, Eg: "channel 0: open
+// failed: connect failed: Connection refused" or "Stdio forwarding request
+// failed: Session open refused by peer". ssh starts the forward before the
+// host tries the address, so the dial succeeds and the connection's first
+// read is where it fails. Nothing at the address answered.
+var ErrForwardNotOpened = errors.New("the host did not open the forwarded connection")
+
+// notOpened is what ssh prints when the host could not open the forward's
+// channel: the address refused or was unroutable, or sshd refused to
+// forward at all.
+var notOpened = []string{"open failed", "forwarding request failed"}
+
+// forwardEnd is the end of a forward ssh gave a reason for: io.EOF, and
+// ErrForwardNotOpened when the reason is that the channel never opened.
+type forwardEnd struct {
+	msg       string
+	notOpened bool
+}
+
+func (e *forwardEnd) Error() string { return e.msg }
+
+func (e *forwardEnd) Unwrap() []error {
+	if e.notOpened {
+		return []error{ErrForwardNotOpened, io.EOF}
+	}
+	return []error{io.EOF}
+}
+
 // Read is the forwarded connection's, and at its end says why ssh ended it,
-// when ssh said: Eg: that the host could not connect to the address.
+// when ssh said: Eg: that the host could not connect to the address, which
+// is ErrForwardNotOpened.
 func (c *forwardConn) Read(p []byte) (int, error) {
 	n, err := c.Conn.Read(p)
 	if errors.Is(err, io.EOF) {
 		<-c.done
 		if why := lastLine(c.stderr.String()); why != "" {
-			return n, fmt.Errorf("%s: ssh: %s: %w", c.where, why, io.EOF)
+			end := &forwardEnd{msg: fmt.Sprintf("%s: ssh: %s: %v", c.where, why, io.EOF)}
+			for _, s := range notOpened {
+				end.notOpened = end.notOpened || strings.Contains(why, s)
+			}
+			return n, end
 		}
 	}
 	return n, err

@@ -1,6 +1,7 @@
 package apply
 
 import (
+	"errors"
 	"io"
 	"os/exec"
 	"slices"
@@ -56,6 +57,38 @@ func TestForwardEndSaysWhy(t *testing.T) {
 	_, err = c.Read(make([]byte, 1))
 	if err == nil || !strings.Contains(err.Error(), "Connection refused") || !strings.Contains(err.Error(), "smtp.example.org:587") {
 		t.Errorf("err = %v", err)
+	}
+	if !errors.Is(err, ErrForwardNotOpened) || !errors.Is(err, io.EOF) {
+		t.Errorf("err = %v, want ErrForwardNotOpened and io.EOF", err)
+	}
+}
+
+// A forward that opened and then ended, with nothing from ssh or with a
+// reason that is not the channel failing to open, is not ErrForwardNotOpened:
+// something at the address answered the connection.
+func TestForwardEndAfterOpenIsNotNotOpened(t *testing.T) {
+	for _, script := range []string{`exit 0`, `echo "Connection to home-a closed by remote host." >&2; exit 0`} {
+		c, err := forward(exec.Command("sh", "-c", script), "deploy@home-a to smtp.example.org:587")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = c.Read(make([]byte, 1))
+		c.Close()
+		if !errors.Is(err, io.EOF) || errors.Is(err, ErrForwardNotOpened) {
+			t.Errorf("%s: err = %v, want io.EOF alone", script, err)
+		}
+	}
+}
+
+// ssh's own words for a forward the host refused to open.
+func TestForwardSessionRefusedIsNotOpened(t *testing.T) {
+	c, err := forward(exec.Command("sh", "-c", `echo "Stdio forwarding request failed: Session open refused by peer" >&2; exit 255`), "deploy@home-b to 10.44.0.1:25")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if _, err = c.Read(make([]byte, 1)); !errors.Is(err, ErrForwardNotOpened) {
+		t.Errorf("err = %v, want ErrForwardNotOpened", err)
 	}
 }
 
