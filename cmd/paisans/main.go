@@ -1559,7 +1559,7 @@ var insideApply bool
 // It reaches no host. The workstation talks to the provider's API and to
 // nothing else, so it takes no --site and no --ssh.
 func runDNSInit(args []string) error {
-	r, cfg, wants, provider, execute, err := dnsSetup("dns init", "actually create the missing records", args)
+	r, cfg, wants, provider, execute, err := dnsSetup("dns init", "actually create the missing records and update this deployment's own", args)
 	if err != nil {
 		return err
 	}
@@ -1593,7 +1593,7 @@ func runDNSInit(args []string) error {
 		}
 		dryRunFound(strings.Join(todo, ", "), nil)
 		if len(todo) == 0 {
-			r.Result("Every record is present. Nothing to create.")
+			r.Result("Every record is present. Nothing to create or update.")
 			return nil
 		}
 		r.Result("Nothing changed. Re-run with --execute to apply.")
@@ -1603,13 +1603,23 @@ func runDNSInit(args []string) error {
 		return err
 	}
 	if !insideApply {
-		if n := len(plan.Updates()); n > 0 {
-			r.Result("Updated %s and created %s at %s.", plural(n, "record"), plural(len(plan.Creates()), "record"), plan.Provider)
-		} else {
-			r.Result("Created %s at %s.", plural(len(plan.Creates()), "record"), plan.Provider)
-		}
+		r.Result("%s", dnsInitResult(len(plan.Updates()), len(plan.Creates()), plan.Provider))
 	}
 	return nil
+}
+
+// dnsInitResult is dns init's closing line after --execute, naming only the
+// counts that are not zero, and the creates when nothing was written.
+func dnsInitResult(updates, creates int, provider string) string {
+	var done []string
+	if updates > 0 {
+		done = append(done, "updated "+plural(updates, "record"))
+	}
+	if creates > 0 || updates == 0 {
+		done = append(done, "created "+plural(creates, "record"))
+	}
+	summary := strings.Join(done, " and ")
+	return fmt.Sprintf("%s at %s.", strings.ToUpper(summary[:1])+summary[1:], provider)
 }
 
 // runDNSPrune deletes the address records dns init created that the

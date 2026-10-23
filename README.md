@@ -3925,7 +3925,8 @@ one. The record updated carries exactly this deployment's comment,
 `paisans-<token>: created by paisans dns init`, is unproxied, and is the only
 record of its type at the name; with its address changed, the name holds
 exactly what is wanted. A record with no comment, another deployment's, two
-records of the type, or a CNAME or stray record beside it, is a conflict. A record pointing at a former gateway is not updated: it waits for
+records of the type, or a CNAME or stray record beside it, is a conflict. A
+record pointing at another declared site is not updated: it waits for
 `gateway move`, below.
 
 Each line names the record whole, its type, name, address and zone. Piped
@@ -10236,6 +10237,9 @@ make that hold across its steps:
   site is marked `moving`, shown as a note, and neither created nor counted as
   a conflict, so the run is not stopped before the new gateway is applied. A
   record pointing elsewhere that `dns init` did not make is still a conflict.
+  An app moving from a monitor site to the gateway is marked the same way,
+  since `dns init` cannot tell that site from a former gateway; no move
+  follows, so its note says to change the record by hand at the provider.
 * **The move runs last.** `deployment apply` asks every site without the gateway role
   whether it still holds a gateway, and when one does, plans `gateway move`
   after pass two, in a `gateway` section of its own, waiting on the new

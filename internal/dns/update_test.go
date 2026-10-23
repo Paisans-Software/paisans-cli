@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -178,5 +179,57 @@ func TestReadBackCatchesAnUpdateThatDidNotLand(t *testing.T) {
 	}
 	if len(fake.patches) != 1 || len(fake.posts) != 0 {
 		t.Fatalf("execute should stop at the first failure: %d PATCH, %d POST", len(fake.patches), len(fake.posts))
+	}
+}
+
+// ownStale never takes a record pointing at a former gateway, even for a
+// caller that has not classed it Moving first.
+func TestOwnStaleLeavesAFormerGatewayToTheMove(t *testing.T) {
+	w := Want{Type: "A", Name: "talk.example.org", Content: "203.0.113.10", Former: []string{oldGW}}
+	records := []Record{{ID: "old-talk", Type: "A", Name: "talk.example.org", Content: oldGW, Comment: recordComment}}
+	if _, ok := ownStale(w, records, recordComment, map[string]bool{"A": true}); ok {
+		t.Fatal("a former gateway's record was taken for an update")
+	}
+	w.Former = nil
+	if _, ok := ownStale(w, records, recordComment, map[string]bool{"A": true}); !ok {
+		t.Fatal("the same record at an address no site declares should be updated")
+	}
+}
+
+// An app moving from a monitor site back to the gateway leaves its record
+// pointing at the monitor. dns init cannot tell that site from a former
+// gateway, so the name is moving, and the note says that with no gateway
+// move to follow the record is changed by hand. Nothing is written.
+func TestAnAppLeavingAMonitorSiteIsMovingWithAnAccurateNote(t *testing.T) {
+	cfg := declared()
+	cfg.Sites["watch"] = config.Site{Roles: []config.Role{config.RoleMonitor}, Address: "10.44.0.4", PublicAddress: "203.0.113.20"}
+	cfg.Apps["health"] = config.App{Blueprint: config.BlueprintUptime, Hostname: "health.example.org"}
+
+	fake := newFake()
+	fake.zones["example.org"] = "zone-1"
+	fake.records["zone-1"] = []cfRecord{
+		{ID: "own-health", Type: "A", Name: "health.example.org", Content: "203.0.113.20", Comment: recordComment},
+	}
+	c := fake.serve(t)
+	p := plan(t, c, cfg)
+	var health *Entry
+	for i, e := range p.Entries {
+		if e.Type == "A" && e.Name == "health.example.org" {
+			health = &p.Entries[i]
+		}
+	}
+	if health == nil || health.Action != Moving {
+		t.Fatalf("A health.example.org: %+v", health)
+	}
+	if !strings.Contains(health.Detail, "If the hostname's app left a monitor site there, no move follows: change the record to 203.0.113.10 by hand") {
+		t.Errorf("detail: %s", health.Detail)
+	}
+	if err := Execute(context.Background(), c, p, ui.Discard); err != nil {
+		t.Fatal(err)
+	}
+	for _, rec := range fake.patches {
+		if rec.ID == "own-health" {
+			t.Errorf("the monitor's record was updated: %+v", rec)
+		}
 	}
 }

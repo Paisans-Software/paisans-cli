@@ -388,7 +388,7 @@ func TestConflictRefusesBeforeAnyWrite(t *testing.T) {
 			if err == nil {
 				t.Fatal("execute should refuse a plan with a conflict")
 			}
-			if !errors.Is(err, ErrConflict) || err.Error() != fmt.Sprintf("dns: %d conflicting record(s), listed above. Nothing was created: a partial set of records is a deployment some names reach and others do not", 1) {
+			if !errors.Is(err, ErrConflict) || err.Error() != fmt.Sprintf("dns: %d conflicting record(s), listed above. Nothing was written: a partial set of records is a deployment some names reach and others do not", 1) {
 				t.Errorf("err = %v, want ErrConflict with its message unchanged", err)
 			}
 			hint := "1 DNS record conflicts with the configuration"

@@ -124,10 +124,9 @@ type Want struct {
 // Provider is a DNS provider's API, reduced to the things this package does
 // with it. Update's only caller is Execute, which updates nothing but an
 // entry Build classed Update under ownStale's rules. Delete's only caller is
-// ExecutePrune, which
-// deletes nothing its plan did not pass through every rule of the builder
-// that made it: BuildPrune or BuildSiteRemoval under prune.go's rules, or
-// BuildMove under move.go's.
+// ExecutePrune, which deletes nothing its plan did not pass through every
+// rule of the builder that made it: BuildPrune or BuildSiteRemoval under
+// prune.go's rules, or BuildMove under move.go's.
 type Provider interface {
 	// Name is the provider's name as acme.provider spells it, for messages.
 	Name() string
@@ -428,12 +427,14 @@ const (
 	// Clear is a leftover record that is not there. It is not shown.
 	Clear Action = "clear"
 	// Moving is an address record for a hostname the gateway serves, at a
-	// name that still holds the record this deployment's dns init made for
-	// the gateway before this one. Set that record aside and the name is
-	// fine. Nothing is written for it here: `gateway move` adds the new
-	// gateway's record once that gateway answers, and deletes the old one
-	// once it is verified, so a move is never a conflict and never a
-	// cutover.
+	// name that still holds a record this deployment's dns init made
+	// pointing at another declared site: the gateway before this one, or a
+	// monitor site the hostname's app has left. Set that record aside and
+	// the name is fine. Nothing is written for it here. After a gateway
+	// move, `gateway move` adds the new gateway's record once that gateway
+	// answers, and deletes the old one once it is verified, so a move is
+	// never a conflict and never a cutover. An app that left a monitor site
+	// has no move to wait for, and the record is changed by hand.
 	Moving Action = "moving"
 	// Covered is a no-mail DMARC policy at a name below the registrable
 	// domain, missing there, where the registrable domain's policy rejects
@@ -563,7 +564,7 @@ func Build(ctx context.Context, provider Provider, d deployment.Deployment, want
 		if action == Conflict && w.ViaGateway {
 			if rest, old := setAsideFormer(w, records, plan.comment); len(old) > 0 {
 				if a, _ := classify(w, rest, wantedTypes[w.Name]); a != Conflict {
-					action, detail = Moving, fmt.Sprintf("%s still points at %s, the gateway before this one; paisans gateway move adds %s beside it once the new gateway answers, and deletes it once every hostname is verified", w.Name, strings.Join(old, ", "), w.Content)
+					action, detail = Moving, fmt.Sprintf("%s still points at %s, another declared site, through a record this deployment's dns init made. If that site held the gateway, paisans gateway move adds %s beside it once the new gateway answers, and deletes it once every hostname is verified. If the hostname's app left a monitor site there, no move follows: change the record to %s by hand at the provider", w.Name, strings.Join(old, ", "), w.Content, w.Content)
 				}
 			}
 		}
@@ -644,6 +645,8 @@ func ownStale(w Want, records []Record, comment string, wanted map[string]bool) 
 	if same != 1 || own.ID == "" || own.Comment != comment || own.Proxied || own.Content == w.Content {
 		return Record{}, false
 	}
+	// Build classes such a record Moving before it asks here, so this only
+	// guards a caller that does not.
 	if ip := canonical(own.Content); ip != "" && slices.Contains(w.Former, ip) {
 		return Record{}, false
 	}
@@ -724,7 +727,7 @@ var ErrConflict = errors.New("dns: conflicting records")
 type conflictError struct{ n int }
 
 func (e conflictError) Error() string {
-	return fmt.Sprintf("dns: %d conflicting record(s), listed above. Nothing was created: a partial set of records is a deployment some names reach and others do not", e.n)
+	return fmt.Sprintf("dns: %d conflicting record(s), listed above. Nothing was written: a partial set of records is a deployment some names reach and others do not", e.n)
 }
 
 // Unwrap is the refusal as an operator reads it, which in turn is
@@ -736,7 +739,7 @@ func (e conflictError) Unwrap() error {
 	}
 	return &ui.Problem{
 		Hint:    hint,
-		Explain: "Each is listed above. Nothing was created: a partial set of records is a deployment some names reach and others do not. Change each at your DNS provider, or run paisans dns prune --execute for one that says so, then run again.",
+		Explain: "Each is listed above. Nothing was written: a partial set of records is a deployment some names reach and others do not. Change each at your DNS provider, or run paisans dns prune --execute for one that says so, then run again.",
 		Cause:   ErrConflict,
 	}
 }
@@ -850,6 +853,6 @@ func (p *Plan) Show(r ui.Reporter) {
 		}
 	}
 	if n := len(p.Conflicts()); n > 0 {
-		r.Detail("%d record(s) conflict with what the provider already holds. Nothing will be created until that is resolved.", n)
+		r.Detail("%d record(s) conflict with what the provider already holds. Nothing will be created or updated until that is resolved.", n)
 	}
 }
