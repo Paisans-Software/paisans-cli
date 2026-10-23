@@ -192,7 +192,9 @@ paisans validate --offline   # the file alone; no site is reached
 * **Hosts:** reaches each site running an app that sends mail, over ssh, and
   through it the app's mail server. Changes none. A site that cannot be
   reached, or a secrets file that cannot be read, skips the mail check with a
-  warning, so it works away from the hosts.
+  warning, so it works away from the hosts. A mail server at an address inside
+  `mesh.subnet` is checked only once the mesh is up on the site and on the
+  site holding the address; before then the check is skipped with a warning.
 * **Secrets:** with `--offline` too, refuses a `secrets.enc.yaml` that is
   plaintext, or encrypted with no recipient in the `.sops.yaml` beside it,
   naming the fix. It reads the file without decrypting it, so it needs no age
@@ -1336,7 +1338,11 @@ images it superseded* in `README.md`).
 * **Mail:** before the first step, every app that sends mail logs in to its
   mail server from each site it runs on, under `mail`, and nothing is sent;
   a dry run whose `init` still has work tries them once `init` has run. A failure refuses the run with every host as it was,
-  naming the app, where its settings are declared and the server's reply. The
+  naming the app, where its settings are declared and the server's reply, or
+  that nothing answered at the server's address. A mail server at an address
+  inside `mesh.subnet` is tried only once the mesh is up on the site and on
+  the site holding the address; before then, as on a deployment's first
+  apply, it is warned about and the run goes on. The
   `deployment apply` steps it runs do not try again. See *Mail settings are tried before
   they are used* in `README.md`.
 * **`--execute`:** runs the steps, stopping at the first failure; run again,
@@ -1395,7 +1401,10 @@ starts, restarts or recreates what changed.
   starts on the site (`--only` narrows it) logs in to its mail server from
   the site, through `--ssh` when given, under `mail`; nothing is sent. A
   failure refuses the apply before anything changes, naming the app, where
-  its settings are declared and the server's reply.
+  its settings are declared and the server's reply, or that nothing answered
+  at the server's address. A mail server at an address inside `mesh.subnet`
+  is tried only once the mesh is up on the site and on the site holding the
+  address; before then it is warned about and the apply goes on.
 * **Review:** the images every rendered `compose.yaml` of the site runs, and
   against what the host last recorded, under
   `review what paisans-stack.yaml grants`; `--only` narrows the images to its

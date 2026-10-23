@@ -2989,8 +2989,23 @@ default (`AllowTcpForwarding`, sshd_config(5)); a host that refuses it says
 |---|---|---|
 | `secrets set` an SMTP password | from this machine, logs in with the new password and sends one test message | refused; nothing is written. A server this machine cannot reach is a warning, and the password is written for `deployment apply` to try |
 | `secrets rotate` an SMTP password | from this machine, a pasted one logs in and sends one test message when pasted; one set with `secrets set` logs in when the run is planned; stage 2 logs in again from this machine, then from every site that will be handed it, before any is | refused before anything is written under `rotations`, or stopped at stage 2 before any site is handed it; a server this machine cannot reach is a warning, and the sites alone try it |
-| `deployment apply`, with or without `--site` | every app it would start logs in, from each site it runs on; nothing is sent | refused before any host is changed, naming the app, where its settings are declared, and the server's reply |
+| `deployment apply`, with or without `--site` | every app it would start logs in, from each site it runs on; nothing is sent | refused before any host is changed, naming the app, where its settings are declared, and the server's reply, or that nothing answered at the server's address from the site |
 | `validate` | every app logs in, from each site it runs on; nothing is sent | a warning |
+
+**A mail server on the deployment's own mesh is tried once the mesh is up.**
+A `host` that is an address inside `mesh.subnet`, Eg: a relay run on one of
+the sites, is reached only across the mesh: until `deployment apply` has
+brought the mesh up, the address is on no interface, and the deployment's
+egress table drops its user's traffic to private addresses outside the mesh.
+So before each such check, apply and `validate` read whether the
+deployment's WireGuard interface is up on the site the check is made from
+and on the site that holds the address. While either is not, the check is
+not made, with a warning that it cannot be tried before the mesh exists, and
+the apply goes on: the first apply of a deployment whose mail server is on
+its own mesh founds it, and the apply after it tries the server. A mail
+server reached any other way is tried before anything changes, mesh or not,
+and on a running deployment, whose mesh is up, a mesh server is tried the
+same way.
 
 A changed credential is the only thing that sends mail, because a login alone
 cannot tell whether the provider accepts the sender: a provider may take the

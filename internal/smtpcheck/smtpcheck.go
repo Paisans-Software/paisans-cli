@@ -303,6 +303,9 @@ type Error struct {
 	// Stage is what failed, Eg: "log in".
 	Stage string
 	Err   error
+	// closed is a connection that opened and closed before the server sent
+	// anything.
+	closed bool
 }
 
 func (e *Error) Error() string {
@@ -325,8 +328,15 @@ func (e *Error) Reply() string {
 
 // Dialled reports whether the connection to the mail server was made:
 // false when it could not be opened from where the check is dialled, a site
-// or this machine, so nothing about the mail server was learned.
+// or this machine, or closed before the server sent anything, so nothing
+// about the mail server was learned.
 func (e *Error) Dialled() bool { return e.Stage != stageConnect }
+
+// Unanswered reports whether the connection opened and then closed before
+// the server sent anything: nothing answered at the address from where the
+// check is dialled, Eg: a host whose ssh could not open the forward. It is
+// one of the failures Dialled reports false for.
+func (e *Error) Unanswered() bool { return e.closed }
 
 // stageConnect is opening the connection, from a site or from this machine.
 const stageConnect = "connect"
@@ -362,13 +372,19 @@ func converse(e Env, c Check, password string, m *Mail) error {
 	if security == config.SMTPTLS {
 		tc := tls.Client(conn, tlsConfig)
 		if err := tc.Handshake(); err != nil {
+			if unanswered(err) {
+				return &Error{Check: c, Stage: stageConnect, Err: explainConnect(err, security), closed: true}
+			}
 			return fail("TLS", explainTLS(err))
 		}
 		conn = tc
 	}
 	client, err := smtp.NewClient(conn, host)
 	if err != nil {
-		return fail("greeting", explainConnect(err))
+		if unanswered(err) {
+			return &Error{Check: c, Stage: stageConnect, Err: explainConnect(err, security), closed: true}
+		}
+		return fail("greeting", explainConnect(err, security))
 	}
 	defer client.Close()
 	if err := client.Hello("localhost"); err != nil {
@@ -471,12 +487,27 @@ func explainTLS(err error) error {
 	return err
 }
 
+// unanswered reports whether err is the connection ending before the server
+// sent a byte: nothing answered at the address, which is how ssh's stdio
+// forward reports a host that could not open the connection, Eg: "Stdio
+// forwarding request failed: Session open refused by peer". The forward
+// itself opens before the host tries the address, so the dial succeeds and
+// the first read is where it fails. Nothing about the mail server was
+// learned, so the check is one whose connection was not made (Dialled).
+func unanswered(err error) bool {
+	return errors.Is(err, io.EOF)
+}
+
 // explainConnect says what a connection that closed before the greeting
 // means, when nothing said why. When ssh said why, Eg: that the host could
 // not connect to the address, its reason is the error's own.
-func explainConnect(err error) error {
+func explainConnect(err error, security string) error {
 	if err == io.EOF || err == io.ErrUnexpectedEOF {
-		return errors.New("the connection closed before the server greeted, so nothing answers at that address from the site, or the port expects TLS from the first byte (security: tls)")
+		why := "the connection closed before the server greeted, so nothing answers at that address from the site"
+		if security != config.SMTPTLS {
+			why += ", or the port expects TLS from the first byte (security: tls)"
+		}
+		return errors.New(why)
 	}
 	return err
 }

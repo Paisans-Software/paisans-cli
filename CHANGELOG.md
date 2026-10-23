@@ -28,6 +28,7 @@ changes share a bullet. Detailed notes are on the corresponding
 - `doctor`'s self-check and `deployment apply`'s gateway step report a 443 answering in anything but TLS as another server holding the port, and doctor advises a refused connection apart from a timeout.
 - `dns init` updates an A or AAAA record it made for this deployment to the address now declared, so a gateway whose public address changed needs no records deleted by hand.
 - `site add` deletes a rejoining site's old etcd data before adding its learner, so a site an earlier removal took out of etcd rejoins instead of crash-looping; `site remove` empties a leaving member's too.
+- `deployment apply` and `validate` try a mail server on the deployment's own mesh once the mesh is up, warning until then, and report a server that never answered as unreachable rather than refusing a login.
 - `deployment apply` keeps Patroni's leader through a join by writing a `patroni.env` whose only change is `ETCD3_HOSTS` without recreating Patroni, and warns whenever a recreate may move, or has moved, the leader.
 - `app remove` looks for an app's Pocket ID client by the name in the newest stored version declaring the app, so a client named by its `display_name` is deleted after the app left `paisans-stack.yaml`.
 - `app remove` and `site remove` read and delete a deployment's directories under rootlesskit, so they reach files a container's non-root user wrote, such as FreshRSS's `data/`.

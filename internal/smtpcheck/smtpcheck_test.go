@@ -2,6 +2,9 @@ package smtpcheck_test
 
 import (
 	"errors"
+	"fmt"
+	"io"
+	"net"
 	"slices"
 	"strings"
 	"testing"
@@ -273,3 +276,43 @@ func TestSendRefusedSender(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// A connection that closes before the server sends a byte learned nothing
+// about the server: ssh's stdio forward opens, then reports at the first
+// read that the host could not open the connection. The check is one whose
+// connection was not made, not a server that answered and refused.
+func TestLoginClosedBeforeAnyReplyIsNotDialled(t *testing.T) {
+	why := fmt.Errorf("home-b to 10.44.0.1:587: ssh: Stdio forwarding request failed: Session open refused by peer: %w", io.EOF)
+	for _, security := range []string{config.SMTPStartTLS, config.SMTPTLS, config.SMTPNone} {
+		for _, readErr := range []error{io.EOF, why} {
+			t.Run(security, func(t *testing.T) {
+				env := smtpcheck.Env{Dial: func(string, string) (net.Conn, error) {
+					local, remote := net.Pipe()
+					go func() {
+						_, _ = io.Copy(io.Discard, remote)
+					}()
+					return closedConn{Conn: local, err: readErr}, nil
+				}}
+				err := smtpcheck.Login(env, check(security), password)
+				var failed *smtpcheck.Error
+				if !errors.As(err, &failed) || failed.Dialled() || !failed.Unanswered() {
+					t.Fatalf("err = %v, want a check whose connection was not made", err)
+				}
+				if !strings.HasPrefix(failed.Reply(), "connect: ") {
+					t.Errorf("reply = %q", failed.Reply())
+				}
+				if readErr == why && !strings.Contains(failed.Reply(), "Session open refused by peer") {
+					t.Errorf("reply %q drops ssh's reason", failed.Reply())
+				}
+			})
+		}
+	}
+}
+
+// closedConn is a connection whose every read fails with err.
+type closedConn struct {
+	net.Conn
+	err error
+}
+
+func (c closedConn) Read([]byte) (int, error) { return 0, c.err }
