@@ -122,21 +122,36 @@ func DirsOf(top string, paths []string) []string {
 // EmptyDirsCommand removes each of dirs, all below top, that is empty, in
 // order, so a directory emptied by removing the one before it goes too, and
 // leaves one that holds anything, with all it holds. find examines each
-// directory itself and never descends into it. A directory with a symbolic
-// link anywhere from top down to it, top included, is left alone: the link
-// would take find out of top, Eg: a container that replaced a directory it
-// mounts with a link to one of the user's own. The shell enters the
-// directory's parent with cd -P and compares where it is with where the
-// parent should be, then find takes the directory by its name there, which
-// it does not follow if it is a link, so a link put in place after the
-// check changes nothing. It runs under rootlesskit, as DirCommandFor's
-// does, in a subshell whose status is the first find's that failed.
+// directory itself and never descends into it, and a directory underTop
+// skips is left alone. It runs under rootlesskit, as DirCommandFor's does,
+// from the directory's parent, which rootlesskit keeps as its working
+// directory (observed with rootlesskit 3.3.0: cd X && rootlesskit pwd
+// prints X), in a subshell whose status is the first find's that failed.
 func EmptyDirsCommand(top string, dirs []string) string {
+	return underTop(top, dirs, `rootlesskit find "./$n" -maxdepth 0 -type d -empty -delete`)
+}
+
+// EmptyDirsProbe names each of dirs, all below top, that is empty and that
+// EmptyDirsCommand would remove, so a plan never lists a directory the
+// command would leave.
+func EmptyDirsProbe(top string, dirs []string) string {
+	return underTop(top, dirs, `if [ ! -L "./$n" ] && [ -z "$(ls -A -- "./$n")" ]; then echo "$d"; fi`)
+}
+
+// underTop runs body for each of dirs, all below top, in a subshell in the
+// directory's parent, with d the directory and n its name. A directory
+// with a symbolic link anywhere from top down to it, top included, is
+// skipped: the link would take body out of top, Eg: a container that
+// replaced a directory it mounts with a link to one of the user's own. The
+// shell enters the parent with cd -P and compares where it is with where
+// the parent should be, and body takes the directory by its name there, so
+// a link put in place above it after the check changes nothing.
+func underTop(top string, dirs []string, body string) string {
 	quoted := make([]string, len(dirs))
 	for i, d := range dirs {
 		quoted[i] = quote(d)
 	}
-	return fmt.Sprintf(`(t=%s; T=$(cd -P -- "${t%%/*}" 2>/dev/null && pwd -P) || exit 0; T=$T/${t##*/}; for d in %s; do p=${d%%/*}; ( cd -P -- "$p" 2>/dev/null && [ "$(pwd -P)" = "$T${p#"$t"}" ] && [ -d "./${d##*/}" ] || exit 0; rootlesskit find "./${d##*/}" -maxdepth 0 -type d -empty -delete ) || exit 1; done)`, quote(top), strings.Join(quoted, " "))
+	return fmt.Sprintf(`(t=%s; T=$(cd -P -- "${t%%/*}" 2>/dev/null && pwd -P) || exit 0; T=$T/${t##*/}; for d in %s; do p=${d%%/*}; n=${d##*/}; ( cd -P -- "$p" 2>/dev/null && [ "$(pwd -P)" = "$T${p#"$t"}" ] && [ -d "./$n" ] || exit 0; %s ) || exit 1; done)`, quote(top), strings.Join(quoted, " "), body)
 }
 
 // Executor runs a plan.

@@ -234,3 +234,42 @@ func TestKeptProbeListsWhatIsNotCaddys(t *testing.T) {
 		}
 	}
 }
+
+// The probe of the state directories names only what the sweep removes: an
+// empty one under a root that is a symbolic link is skipped by both, so a
+// plan that lists it never finishes.
+func TestTheStateProbeAgreesWithTheSweep(t *testing.T) {
+	dirs := []string{"/" + r + ".paisans/config", "/" + r + ".paisans"}
+	probe := func(base string) string {
+		t.Helper()
+		command := strings.ReplaceAll(appremove.EmptyDirsProbe("/srv/paisans/f2a9", dirs), "'/srv/paisans/", "'"+base+"/srv/paisans/")
+		out, err := shell(t, command).CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+		return strings.ReplaceAll(string(out), base, "")
+	}
+	sweep := appremove.EmptyDirsCommand("/srv/paisans/f2a9", dirs)
+
+	base := shellTree(t, nil, []string{r + ".paisans/config"}, nil)
+	if got := probe(base); got != "/"+r+".paisans/config\n" {
+		t.Errorf("the probe named %q", got)
+	}
+	if err := runUnder(t, base, sweep); err != nil {
+		t.Fatal(err)
+	}
+	if exists(base, r+".paisans") {
+		t.Error("the sweep left .paisans")
+	}
+
+	linked := shellTree(t, nil, []string{"srv/real/.paisans/config"}, []string{"srv/paisans/f2a9", "srv/real"})
+	if got := probe(linked); got != "" {
+		t.Errorf("the probe named %q under a linked root", got)
+	}
+	if err := runUnder(t, linked, sweep); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(linked, "srv/real/.paisans/config") {
+		t.Error("the sweep removed a directory under a linked root")
+	}
+}

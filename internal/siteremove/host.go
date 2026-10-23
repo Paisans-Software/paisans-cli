@@ -143,17 +143,6 @@ func emptyRootCommand(d deployment.Deployment) string {
 	return fmt.Sprintf("if [ -d %[1]s ]; then rootlesskit find %[1]s -mindepth 1 -delete; fi", quote(d.Root()))
 }
 
-// emptyDirsProbe names each of dirs that is a directory, not a link, and
-// holds nothing. They are the toolkit's own, which no container writes, so
-// it runs as the user.
-func emptyDirsProbe(dirs []string) string {
-	quoted := make([]string, len(dirs))
-	for i, d := range dirs {
-		quoted[i] = quote(d)
-	}
-	return fmt.Sprintf(`for d in %s; do if [ -d "$d" ] && [ ! -L "$d" ] && [ -z "$(ls -A -- "$d")" ]; then echo "$d"; fi; done`, strings.Join(quoted, " "))
-}
-
 // dirsOf is the directories under the root that paths are in, deepest
 // first, but with a kept Caddy never one it mounts.
 func (p *Plan) dirsOf(paths []string, caddyKept bool) []string {
@@ -557,7 +546,7 @@ func (p *Plan) buildHost() (*Stage, error) {
 	}
 	fixed := []string{hostprep.ConfigDir(d), d.StateDir()}
 	if len(state) == 0 {
-		out, err := t.Run(emptyDirsProbe(fixed))
+		out, err := t.Run(appremove.EmptyDirsProbe(d.Root(), fixed))
 		if err != nil {
 			return nil, fmt.Errorf("site remove %s: reading %s: %w: %s", p.Site, d.StateDir(), err, lastLines(out, 2))
 		}

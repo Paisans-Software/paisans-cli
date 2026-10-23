@@ -784,9 +784,9 @@ func (h *host) Run(command string) (string, error) {
 			}
 		}
 		return "", nil
-	case strings.HasPrefix(command, "for d in '") && strings.Contains(command, `[ -z "$(ls -A -- "$d")" ]`):
+	case strings.HasPrefix(command, "(t='") && strings.Contains(command, `ls -A --`):
 		var b strings.Builder
-		for _, d := range quoted(command) {
+		for _, d := range quoted(command)[1:] {
 			if h.dirs[d] && !h.holds(d) {
 				b.WriteString(d + "\n")
 			}
