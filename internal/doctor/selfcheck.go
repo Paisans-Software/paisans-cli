@@ -106,7 +106,8 @@ const hairpin = "When the site is at home behind NAT and doctor runs from the sa
 // silenceAdvice is where to look for a port that gave no answer. A refusal
 // came from whatever holds the address, so it points first at the site's
 // own listener; a timeout means something on the way dropped the
-// connection, so it points at the router and the firewall.
+// connection or a listener accepted it and never answered, so it points at
+// the router, the firewall and a hung Caddy.
 func (p SelfCheckProbe) silenceAdvice() []string {
 	port := p.Silent
 	if port == 0 {
@@ -115,12 +116,12 @@ func (p SelfCheckProbe) silenceAdvice() []string {
 	switch p.Why {
 	case selfcheck.Refused:
 		return []string{
-			fmt.Sprintf("A refusal means nothing listens on %d at %s, or something on the way rejects the connection: check that %s's Caddy runs (containers %s), and that the router or the provider's firewall forwards 80 and 443 to %s.", port, p.Address, p.Site, p.Site, p.Site),
+			fmt.Sprintf("A refusal means nothing listens on %d at %s, or something on the way rejects the connection: check that %s's Caddy runs (containers %s), that the router or the provider's firewall forwards 80 and 443 to %s, and that public_address is the address they arrive on.", port, p.Address, p.Site, p.Site, p.Site),
 			hairpin,
 		}
 	case selfcheck.TimedOut:
 		return []string{
-			fmt.Sprintf("A timeout means something on the way dropped the connection: check that the router or the provider's firewall forwards 80 and 443 to %s, and that public_address is the address they arrive on.", p.Site),
+			fmt.Sprintf("A timeout means something on the way dropped the connection, or a listener accepted it and never answered: check that the router or the provider's firewall forwards 80 and 443 to %s, that public_address is the address they arrive on, and that %s's Caddy is not hung (containers %s).", p.Site, p.Site, p.Site),
 			hairpin,
 		}
 	}

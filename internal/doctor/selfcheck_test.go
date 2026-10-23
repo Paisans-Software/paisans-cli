@@ -69,10 +69,10 @@ func TestSelfCheckAdvisesByHowThePortWasSilent(t *testing.T) {
 		want, not []string
 	}{
 		"refused": {selfcheck.Refused,
-			[]string{"203.0.113.20 for https://health.example.org/.well-known/paisans/f2a9 from this workstation, once, and the connection was refused", "nothing listens on 443", "containers watch"},
+			[]string{"203.0.113.20 for https://health.example.org/.well-known/paisans/f2a9 from this workstation, once, and the connection was refused", "nothing listens on 443", "containers watch", "public_address is the address they arrive on"},
 			[]string{"nothing answered"}},
 		"timed out": {selfcheck.TimedOut,
-			[]string{"203.0.113.20 for https://health.example.org/.well-known/paisans/f2a9 from this workstation, once, and nothing answered before it timed out", "dropped", "hairpin NAT", "forwards 80 and 443 to watch"},
+			[]string{"203.0.113.20 for https://health.example.org/.well-known/paisans/f2a9 from this workstation, once, and nothing answered before it timed out", "dropped", "accepted it and never answered", "Caddy is not hung", "hairpin NAT", "forwards 80 and 443 to watch"},
 			nil},
 		"unexplained": {selfcheck.Unexplained,
 			[]string{"once, and nothing answered.", "hairpin NAT"},
