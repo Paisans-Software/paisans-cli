@@ -1113,3 +1113,96 @@ func TestJudgeHeldWritesNothing(t *testing.T) {
 		t.Errorf("seen %d was recorded", rev)
 	}
 }
+
+// Declaring finds the newest version in the head's history that declares
+// an app, after the app has left paisans-stack.yaml: a re-added app's newest
+// declaration wins, and a version that does not load is passed over.
+func TestDeclaringIsTheNewestVersionThatDeclaresTheApp(t *testing.T) {
+	needTools(t, "git", "ssh-keygen")
+	alice := newOperator(t)
+	ops := map[string]string{"alice": alice.pub}
+	news := func(note, name string) Files {
+		f := edit(testFiles(), note, ops)
+		if name != "" {
+			f.Paisans = append(f.Paisans, "apps:\n  news:\n    blueprint: writefreely\n    hostname: news.example.org\n    display_name: "+name+"\n"...)
+		}
+		return f
+	}
+	l := workstation(t, news("0", ""))
+	if d, err := l.Declaring("news"); d.History || d.Config != nil || err != nil {
+		t.Fatalf("with no head: %+v, %v", d, err)
+	}
+	if err := l.SetHead(strings.Repeat("a", 40)); err != nil {
+		t.Fatal(err)
+	}
+	if d, err := l.Declaring("news"); d.History || err != nil {
+		t.Fatalf("with a head and no store: %+v, %v", d, err)
+	}
+	if _, err := os.Stat(l.state(cacheDir)); !os.IsNotExist(err) {
+		t.Fatalf("Declaring made a store: %v", err)
+	}
+	cache, err := l.Cache()
+	if err != nil {
+		t.Fatal(err)
+	}
+	unloadable := news("x", "")
+	unloadable.Paisans = []byte("version: 1\nnot_a_field: true\n")
+	var shas []string
+	for i, f := range []Files{news("1", "Old News"), news("2", "Test News"), news("3", ""), news("4", "Back News"), news("5", ""), unloadable} {
+		sha, err := cache.Commit(f, shas[max(len(shas)-1, 0):], i+1, alice.key, testNow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		shas = append(shas, sha)
+	}
+	for _, tc := range []struct {
+		head       int
+		want       string
+		unreadable int
+	}{{2, "Test News", 0}, {5, "Back News", 1}} {
+		if err := l.SetHead(shas[tc.head]); err != nil {
+			t.Fatal(err)
+		}
+		d, err := l.Declaring("news")
+		if err != nil || d.Config == nil || !d.History {
+			t.Fatalf("head %d: %+v, %v", tc.head, d, err)
+		}
+		if got := d.Config.ClientName("news"); got != tc.want || len(d.Unreadable) != tc.unreadable {
+			t.Errorf("head %d: news's client is %q, passed over %v", tc.head, got, d.Unreadable)
+		}
+	}
+	if d, err := l.Declaring("talk"); d.Config != nil || d.SHA != "" || !d.History || len(d.Unreadable) != 1 || err != nil {
+		t.Errorf("an app no version declares: %+v, %v", d, err)
+	}
+}
+
+// paisansFiles leaves out a version without a paisans-stack.yaml and reads
+// the versions after it in the same answer.
+func TestPaisansFilesLeavesOutAVersionWithoutOne(t *testing.T) {
+	needTools(t, "git", "ssh-keygen")
+	key, _ := testSSHKey(t)
+	cache, err := InitRepo(filepath.Join(t.TempDir(), "c.git"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	held, err := cache.Commit(testFiles(), nil, 1, key, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree, err := cache.git(strings.NewReader(""), nil, "mktree")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := cache.git(nil, []string{"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.org", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.org"}, "commit-tree", "-m", "empty", strings.TrimSpace(string(tree)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty := strings.TrimSpace(string(out))
+	files, err := cache.paisansFiles([]string{empty, held, empty})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := files[empty]; ok || string(files[held]) != "p\n" || len(files) != 1 {
+		t.Errorf("files %q", files)
+	}
+}
