@@ -489,10 +489,9 @@ helper and its sudoers line, the watchdog rule, the egress table and its
 unit, the deployment's ufw rules but one, the record and the registry entry.
 It deletes a user only when it is the deployment's: the record's, or, with
 no record, `paisans-<token>`. With no record, pass `--data-dir` if you gave
-admit one, so evict finds the Docker data. On a data site the plan warns that
-a Patroni that outlasts Docker's stop timeout is killed with the watchdog
-armed, which reboots the machine: have the operators stop the deployment
-first, or expect a reboot.
+admit one, so evict finds the Docker data. On a data site, once the
+deployment's processes have stopped, evict disarms the watchdog its Patroni
+held, so a Patroni killed while it led does not reboot the machine.
 
 **On a gateway, copy your own site blocks out of
 `/srv/paisans/<token>/caddy.d` before you evict.** Evict stops the

@@ -449,19 +449,6 @@ func TestEvictChecksTheHomeItDeletes(t *testing.T) {
 	}
 }
 
-// Stopping the manager of a data site stops Patroni, and one that does not
-// stop in time is killed with the watchdog armed, which reboots the host:
-// the plan says so.
-func TestEvictOfADataSiteWarnsOfTheWatchdog(t *testing.T) {
-	plan, err := hostadmit.BuildEvict(withEntries(evicted("home-a", gateway)()), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(plan.Text(), "warning: watchdog: stopping") {
-		t.Errorf("no watchdog warning:\n%s", plan.Text())
-	}
-}
-
 // A host-wide file that is not as admit wrote it is the owner's, kept, and
 // the plan says so.
 func TestEvictKeepsAHostWideFileItDidNotWrite(t *testing.T) {
@@ -794,5 +781,47 @@ func TestEvictGoesOnPastAnotherEntryWithNoBuild(t *testing.T) {
 	}
 	if len(plan.Steps) == 0 {
 		t.Error("nothing was planned")
+	}
+}
+
+// On a data site, stopping the user's manager stops Patroni, and Docker
+// kills one that outlasts its stop timeout with the watchdog armed. The
+// manager's step then disarms the watchdog as root, once nothing holds it,
+// so the host does not reboot.
+func TestEvictDisarmsTheWatchdogAfterTheManagerStops(t *testing.T) {
+	plan, err := hostadmit.BuildEvict(withEntries(evicted("home-a", gateway)()), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manager *hostadmit.Step
+	for i, s := range plan.Steps {
+		if s.Title == "stop paisans-f2a9's manager" {
+			manager = &plan.Steps[i]
+		}
+	}
+	if manager == nil {
+		t.Fatalf("no manager step:\n%s", plan.Text())
+	}
+	stop, disarm := strings.Index(manager.Command, "systemctl stop user@1001.service"), strings.Index(manager.Command, "printf V > /dev/watchdog")
+	if stop < 0 || disarm < stop {
+		t.Errorf("the manager step does not disarm the watchdog after the manager stops: %s", manager.Command)
+	}
+	for _, w := range plan.Warnings {
+		if strings.Contains(w.Hint, "manager stops its Patroni") {
+			t.Errorf("still warns about a reboot: %s", w.Hint)
+		}
+	}
+}
+
+// A site without this deployment's watchdog leaves the device alone.
+func TestEvictOfASiteWithoutTheWatchdogDoesNotTouchIt(t *testing.T) {
+	plan, err := hostadmit.BuildEvict(withEntries(evicted("watch", hostadmit.Flags{PublicPorts: true})()), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range plan.Steps {
+		if strings.Contains(s.Title, "manager") && strings.Contains(s.Command, "/dev/watchdog") {
+			t.Errorf("the manager step touches the watchdog on a site without one: %s", s.Command)
+		}
 	}
 }

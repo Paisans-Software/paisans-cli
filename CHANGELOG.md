@@ -24,6 +24,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Fixed
 
+- `site evict` disarms a data site's watchdog once the deployment's processes have stopped, so a Patroni killed while it led does not reboot the host part way through the evict.
 - `deployment apply` and `oidc client create` delete the secret Pocket ID gives a new client, so a client holds only the one the toolkit set, and updates keep a client's back-channel logout URL.
 - `site remove` and `app remove` without `--delete-data` remove only the directories their own files were in, once empty, so kept data keeps its empty directories and PostgreSQL starts when the site returns.
 - `site prepare` warns about a host whose only swap is zram, as `site admit` and `doctor` do, rather than reporting its swap as on.

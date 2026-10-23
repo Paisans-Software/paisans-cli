@@ -282,20 +282,31 @@ func (e *evictor) remove(title, describe, command string) {
 // every container, and ends its sessions. The account is expired first, so
 // no login, by key or otherwise, starts the manager again before userdel.
 // On a data site that stops Patroni, which Docker kills if it outlasts its
-// stop timeout, with the watchdog still armed.
+// stop timeout, with the watchdog still armed. Once the manager has stopped
+// nothing holds the device, so the same step disarms it as root
+// (disarmWatchdog) and the host does not reboot.
 func (e *evictor) manager() error {
 	u, user := e.f.User, e.in.Request.User
 	if !u.Exists || !u.Linger && !u.ManagerActive {
 		return nil
 	}
+	stop := fmt.Sprintf("systemctl stop user@%d.service", u.UID)
+	describe := fmt.Sprintf("expire %s so no login starts it again, disable linger, and stop user@%d.service, which stops its Docker daemon and every container", user, u.UID)
 	if e.f.Files[watchdogRulePath(e.d)].Present {
-		e.warn("watchdog: stopping "+user+"'s manager stops its Patroni, which holds the watchdog",
-			"A Patroni that does not stop within Docker's stop timeout is killed with the watchdog armed, and the host reboots. Have the operators stop the deployment's stacks first, or expect a reboot.")
+		stop += " && " + disarmWatchdog
+		describe += ", then disarm the watchdog its Patroni held, so a Patroni killed while it led does not reboot the host"
 	}
-	e.remove("stop "+user+"'s manager", fmt.Sprintf("expire %s so no login starts it again, disable linger, and stop user@%d.service, which stops its Docker daemon and every container", user, u.UID),
-		fmt.Sprintf("usermod --expiredate 1 %s && loginctl disable-linger %s && systemctl stop user@%d.service && { loginctl terminate-user %s 2>/dev/null || true; }", user, user, u.UID, user))
+	e.remove("stop "+user+"'s manager", describe,
+		fmt.Sprintf("usermod --expiredate 1 %s && loginctl disable-linger %s && %s && { loginctl terminate-user %s 2>/dev/null || true; }", user, user, stop, user))
 	return nil
 }
+
+// disarmWatchdog writes the magic close to /dev/watchdog, which stops a
+// timer Patroni left armed (Linux, Documentation/watchdog/watchdog-api.rst,
+// "Magic Close feature"). Only one process may hold the device, so it tries
+// for up to 5 s while another does. A kernel built with nowayout ignores the
+// close; Ubuntu's softdog is not built that way.
+const disarmWatchdog = `{ if [ -e /dev/watchdog ]; then i=0; until { printf V > /dev/watchdog; } 2>/dev/null; do i=$((i+1)); if [ "$i" -ge 5 ]; then echo '/dev/watchdog is held by another process, so it could not be disarmed' >&2; exit 1; fi; sleep 1; done; fi; }`
 
 // processes kills every process of the user and checks that none is
 // left, whenever the user exists: one the manager's stop missed, started

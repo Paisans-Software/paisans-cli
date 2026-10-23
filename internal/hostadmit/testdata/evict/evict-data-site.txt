@@ -1,9 +1,9 @@
 evict f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01 as paisans-f2a9 on fake (ubuntu 24.04)
 
 step 1: stop paisans-f2a9's manager
-  evict: expire paisans-f2a9 so no login starts it again, disable linger, and stop user@1001.service, which stops its Docker daemon and every container
+  evict: expire paisans-f2a9 so no login starts it again, disable linger, and stop user@1001.service, which stops its Docker daemon and every container, then disarm the watchdog its Patroni held, so a Patroni killed while it led does not reboot the host
   run:
-    $ usermod --expiredate 1 paisans-f2a9 && loginctl disable-linger paisans-f2a9 && systemctl stop user@1001.service && { loginctl terminate-user paisans-f2a9 2>/dev/null || true; }
+    $ usermod --expiredate 1 paisans-f2a9 && loginctl disable-linger paisans-f2a9 && systemctl stop user@1001.service && { if [ -e /dev/watchdog ]; then i=0; until { printf V > /dev/watchdog; } 2>/dev/null; do i=$((i+1)); if [ "$i" -ge 5 ]; then echo '/dev/watchdog is held by another process, so it could not be disarmed' >&2; exit 1; fi; sleep 1; done; fi; } && { loginctl terminate-user paisans-f2a9 2>/dev/null || true; }
 
 step 2: kill paisans-f2a9's processes
   evict: expire paisans-f2a9, kill every process of uid 1001 or of its subordinate range and check that none is left, before anything that fences it goes
@@ -157,8 +157,6 @@ step 27: remove the registry entry
     $ }
     $ ' /var/lib/paisans/registry.json > "$tmp"; chmod 600 "$tmp"; mv "$tmp" /var/lib/paisans/registry.json
 
-warning: watchdog: stopping paisans-f2a9's manager stops its Patroni, which holds the watchdog
-  A Patroni that does not stop within Docker's stop timeout is killed with the watchdog armed, and the host reboots. Have the operators stop the deployment's stacks first, or expect a reboot.
 warning: firewall: the deployment's SSH allow on 22 is kept
   It may be the rule your own login arrives by. Delete it yourself once nothing else needs it.
 warning: br_netfilter: stays loaded until the next boot
