@@ -546,7 +546,36 @@ func gather(l Local, sites map[string]apply.Transport, configured int, id string
 		direct++
 	}
 	g.Majority = configured > 0 && 2*direct > configured
+	return judgeHeld(l, cache, g, id, a)
+}
 
+// HeldStore is the workstation's store as it is on disk, opened without
+// creating or configuring anything, and false when there is none. Cache
+// makes the store it opens; this is for reading a workstation that is not
+// the command's own, which the read must leave as it was.
+func (l Local) HeldStore() (Repo, bool, error) {
+	dir := l.state(cacheDir)
+	if _, err := os.Stat(filepath.Join(dir, "HEAD")); os.IsNotExist(err) {
+		return Repo{}, false, nil
+	} else if err != nil {
+		return Repo{}, false, err
+	}
+	return Repo{Dir: dir}, true, nil
+}
+
+// JudgeHeld judges the versions cache, l's store as HeldStore opens it,
+// already holds for deployment id, from the anchor a, as a gather that
+// reaches no site does. It writes nothing to l: no site is pulled and no
+// seen record is written. With no site, no version is served, so a pinned
+// root is judged from the history the store holds, as Judge judges an
+// empty Served.
+func JudgeHeld(l Local, cache Repo, id string, a Anchor) (Gathered, error) {
+	return judgeHeld(l, cache, Gathered{Holders: map[string][]string{}, Signers: map[string]string{}}, id, a)
+}
+
+// judgeHeld is the half of a gather after the sites are pulled: every version
+// in cache, judged from a, with the seen record checked.
+func judgeHeld(l Local, cache Repo, g Gathered, id string, a Anchor) (Gathered, error) {
 	shas, err := cache.versionRefs()
 	if err != nil {
 		return g, err

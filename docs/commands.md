@@ -39,7 +39,7 @@ deleting DNS records, making an administrator) or a read (`doctor`,
 | Flag | Default | Taken by | Meaning |
 |------|---------|----------|---------|
 | `-v`, `--verbose` | off | every command | the reasons, values, request bodies and command output behind each step; with it, a failure also shows the underlying error |
-| `--config <path>` | `paisans-stack.yaml` | every command except `site deployments`, `deployment list` and `deployment fetch` | the deployment declaration |
+| `--config <path>` | `paisans-stack.yaml` | every command except `site deployments`, `deployment list` and `deployment fetch` | the deployment declaration; for `deployment checkout`, where to write it |
 | `--secrets <path>` | `secrets.enc.yaml` beside the config | every command that reads secrets | the sops encrypted secrets file. A plaintext one is refused (see *`secrets.enc.yaml` exists only encrypted* in `README.md`) |
 | `--execute` | off | every command that changes something, as each entry says | without it, the command plans and prints and changes nothing |
 | `--yes` | off | every command that asks for a confirmation, as each entry says | answers each confirmation as typing it would; needs `PAISANS_ALLOW_YES=1` (see *`--yes` answers confirmations* below) |
@@ -665,6 +665,47 @@ paisans deployment list
 * **Hosts:** none. Changes nothing.
 
 See *This workstation keeps every deployment it applies* in `README.md`.
+
+### `paisans deployment checkout`
+
+Copies a deployment saved on this workstation into an empty directory, so its
+files can be edited and published from there.
+
+```sh
+paisans deployment checkout f2a9 --config ~/work/example/paisans-stack.yaml            # what would be written
+paisans deployment checkout example.org --config ~/work/example/paisans-stack.yaml --execute
+```
+
+* **Alone:** always, when a saved deployment is to be edited somewhere of the
+  operator's choosing.
+* **Flags:** the deployment, by its id, a unique start of the id, or its
+  domain, as `deployment list` prints them; `--config <path>`, where to write
+  `paisans-stack.yaml` (in the current directory when left out); `--execute`.
+* **What it writes:** `paisans-stack.yaml`, `secrets.enc.yaml` and
+  `.sops.yaml`, and in `.paisans/` the store (`store.git`, every version with
+  its signature), `signing-key`, `config-root`, `config-head` and
+  `config-seen` where the saved copy has them, and `.paisans/.gitignore`. Not
+  `saved.json` or `.paisans/incoming/`. Each file keeps the saved copy's mode,
+  so `secrets.enc.yaml` stays `0600`. `deployment log`, `pull` and `publish`
+  then trust in the new directory as they do in the saved copy, with no root
+  to pin again.
+* **Trust:** the saved copy is judged from its own anchor before anything is
+  written, as `deployment log` judges, and refused when its head is not a
+  trusted version at the revision it records or its files are not that
+  version's. The new directory is judged again once written and must judge the
+  same, seen record included. On any failure, that one included, what was
+  written is removed, with the directories the run made.
+* **Refuses:** a directory holding any of the three files, any of that
+  `.paisans/` state or a `.paisans/incoming/`, with the same rule as
+  `deployment recover`, so it never overwrites a file; a name that matches no
+  saved deployment, or more than one; and an `unverified` or `fork` saved
+  copy, or one whose store holds a fork, which has no one trusted version to
+  check out and is pinned with `deployment recover --root <sha>` instead.
+* **Without `--execute`:** prints every path it would write, in full, and the
+  version and revision. Writes nothing.
+* **After:** the saved copy may be behind the sites; `deployment pull` in the
+  new directory brings any newer version.
+* **Hosts:** none.
 
 ### `paisans deployment fetch`
 

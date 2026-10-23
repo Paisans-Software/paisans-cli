@@ -54,13 +54,15 @@ var configNow = time.Now
 
 func runDeployment(args []string, stdin io.Reader, stdout io.Writer) error {
 	if len(args) == 0 {
-		return &ui.Problem{Hint: "deployment takes one subcommand", Explain: "Use apply, list, fetch, publish, pull, log or recover."}
+		return &ui.Problem{Hint: "deployment takes one subcommand", Explain: "Use apply, list, checkout, fetch, publish, pull, log or recover."}
 	}
 	switch args[0] {
 	case "apply":
 		return runApply(args[1:], stdin, stdout)
 	case "list":
 		return runDeploymentList(args[1:], stdout)
+	case "checkout":
+		return runDeploymentCheckout(args[1:])
 	case "fetch":
 		return runDeploymentFetch(args[1:])
 	case "publish":
@@ -72,7 +74,7 @@ func runDeployment(args []string, stdin io.Reader, stdout io.Writer) error {
 	case "recover":
 		return runDeploymentRecover(args[1:], stdin, stdout)
 	}
-	return &ui.Problem{Hint: fmt.Sprintf("deployment has no subcommand %q", args[0]), Explain: "Use apply, list, fetch, publish, pull, log or recover."}
+	return &ui.Problem{Hint: fmt.Sprintf("deployment has no subcommand %q", args[0]), Explain: "Use apply, list, checkout, fetch, publish, pull, log or recover."}
 }
 
 // configHelp is the --config flag's help, the same for every subcommand.

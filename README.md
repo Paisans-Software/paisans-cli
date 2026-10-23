@@ -4618,6 +4618,7 @@ replaces either.
 ```sh
 paisans deployment list                              # every saved deployment
 paisans deployment fetch --ssh admin@203.0.113.9     # save every deployment a host holds
+paisans deployment checkout example.org --execute    # copy one into this empty directory
 ```
 
 * **`deployment apply --execute` and `deployment recover --execute` save** the
@@ -4642,6 +4643,12 @@ paisans deployment fetch --ssh admin@203.0.113.9     # save every deployment a h
   aside in `.paisans/incoming/<sha>/` and listed `unverified`. Pinning one is a
   recovery: `deployment recover --root <sha>`, with a hash checked with another
   operator, after which the copy is saved and verified like any other.
+* **`deployment checkout` copies a saved copy out to edit**, into an empty
+  directory, with its store and trust state, since a directory with the three
+  files and no `.paisans/` has nothing to trust from and `pull` and `publish`
+  would treat it as a new workstation. The copy must judge from its own anchor
+  exactly as the saved copy does, or it is removed. An `unverified` or `fork`
+  copy has no trusted version to check out, so it is refused.
 * **Ids from a host are checked before they become a path.** The registry is a
   file anyone with root on the host can write, and an id names a directory
   here.

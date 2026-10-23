@@ -1004,3 +1004,112 @@ func TestAPlaintextVersionIsNeverWrittenToDisk(t *testing.T) {
 		t.Errorf("a refused attestation moved the head to %s", head)
 	}
 }
+
+// stateTree is every path under l's .paisans/ with its mode, modification
+// time and contents.
+func stateTree(t *testing.T, l Local) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	err := filepath.WalkDir(filepath.Join(l.Dir, stateDir), func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		v := fmt.Sprintf("%v %d", info.Mode(), info.ModTime().UnixNano())
+		if info.Mode().IsRegular() {
+			b, err := os.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			v += " " + string(b)
+		}
+		out[p] = v
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// HeldStore opens only a store that is there, and creates nothing when none
+// is.
+func TestHeldStoreCreatesNothing(t *testing.T) {
+	needTools(t, "git")
+	l := Local{Dir: t.TempDir()}
+	if _, ok, err := l.HeldStore(); ok || err != nil {
+		t.Fatalf("HeldStore with no store: %v, %v", ok, err)
+	}
+	if _, err := os.Lstat(filepath.Join(l.Dir, stateDir)); !os.IsNotExist(err) {
+		t.Fatalf(".paisans/ was created: %v", err)
+	}
+	if _, err := l.Cache(); err != nil {
+		t.Fatal(err)
+	}
+	r, ok, err := l.HeldStore()
+	if !ok || err != nil || r.Dir != filepath.Join(l.Dir, stateDir, cacheDir) {
+		t.Fatalf("HeldStore of a store: %+v, %v, %v", r, ok, err)
+	}
+}
+
+// JudgeHeld judges what the store holds as a gather reaching no site would,
+// and writes nothing in .paisans/: no .gitignore put back, no store setting,
+// no seen record.
+func TestJudgeHeldWritesNothing(t *testing.T) {
+	needTools(t, "git", "ssh-keygen")
+	alice := newOperator(t)
+	operators := map[string]string{"alice": alice.pub}
+	sites := storeSites(t, "home-a")
+	l := workstation(t, edit(testFiles(), "1", operators))
+	v1, _, err := alice.publish(t, l, reach(sites, "home-a"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.WriteFiles(edit(testFiles(), "2", operators))
+	v2, _, err := alice.publish(t, l, reach(sites, "home-a"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _ := l.Cache()
+	bundle, err := src.Bundle()
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := Local{Dir: t.TempDir()}
+	to, _ := other.Cache()
+	if err := to.FetchBundle(bundle); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(other.Dir, stateDir, ".gitignore")); err != nil {
+		t.Fatal(err)
+	}
+	before := stateTree(t, other)
+	r, ok, err := other.HeldStore()
+	if !ok || err != nil {
+		t.Fatalf("HeldStore: %v, %v", ok, err)
+	}
+	g, err := JudgeHeld(other, r, testID, Anchor{Root: v1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(g.Verdict.Heads) != 1 || g.Verdict.Heads[0] != v2 || !g.Verdict.Trusted[v1] || g.Versions[v2].Revision != 2 {
+		t.Fatalf("verdict %+v", g.Verdict)
+	}
+	if g.Seen == nil || g.Seen.Revision != 2 || len(g.Reached) != 0 {
+		t.Fatalf("carried %+v, reached %+v", g.Seen, g.Reached)
+	}
+	after := stateTree(t, other)
+	if !maps.Equal(before, after) {
+		for p, v := range after {
+			if before[p] != v {
+				t.Errorf("%s was written", p)
+			}
+		}
+	}
+	if rev, _, _ := other.Seen(); rev != 0 {
+		t.Errorf("seen %d was recorded", rev)
+	}
+}
