@@ -46,7 +46,18 @@ func planClaim(p *planner) error {
 			runs, ui.Visible(mine.Address), ui.Visible(e.Site), e.Address)
 	}
 	if c := registry.Conflicts(r, id, e); len(c) > 0 {
-		return shown(registry.Refused(p.t, e, c[0]))
+		refusal := shown(registry.Refused(p.t, e, c[0]))
+		if p.in.MovePort == nil || e.ListenPort == 0 || !portAlone(c) {
+			return refusal
+		}
+		free, err := freePort(p, r, id, e, p.in.MovePort)
+		if err != nil {
+			return fmt.Errorf("%w. Admit looked for another port, and %v", refusal, err)
+		}
+		if free == 0 {
+			return refusal
+		}
+		return &PortMoveError{Refusal: refusal, Held: e.ListenPort, Free: free}
 	}
 	if claimed {
 		mine.ClaimedAt = e.ClaimedAt

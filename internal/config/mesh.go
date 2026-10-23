@@ -199,6 +199,22 @@ func (s Site) ListenPort() int {
 	return port
 }
 
+// ListenPortMovable reports whether the site's listen port is one paisans
+// init may move: the site is dialled on its public_address, with no
+// endpoint or an endpoint written as a port alone. An endpoint naming a
+// host or an address is usually a router or a dynamic DNS name forwarding
+// that exact port, which a new port would break.
+func (s Site) ListenPortMovable() bool {
+	if s.PublicAddress == "" {
+		return false
+	}
+	if s.Endpoint == "" {
+		return true
+	}
+	host, _, err := net.SplitHostPort(s.Endpoint)
+	return err == nil && host == ""
+}
+
 // PeersDirectly reports whether this site and another exchange WireGuard
 // traffic without a relay: one of them is dialled (DialEndpoint), so the
 // other dials it. Two sites that are never dialled never peer at all; their
@@ -227,6 +243,58 @@ func SetMesh(path, subnet string, addresses map[string]string) error {
 		return fmt.Errorf("%s: %w", path, err)
 	}
 	return replaceFile(path, out)
+}
+
+// SetEndpoint writes sites.<site>.endpoint into the declaration at path as
+// endpoint, and leaves every other byte as it was, as SetMesh does: an
+// endpoint is replaced where it stands, in its quoting, and a missing one
+// is added, double quoted, on the line after the site's public_address. It
+// is how paisans init moves a listen port another deployment holds.
+func SetEndpoint(path, site, endpoint string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", path, err)
+	}
+	out, err := setEndpoint(data, site, endpoint)
+	if err != nil {
+		return fmt.Errorf("%s: sites.%s.endpoint: %w", path, site, err)
+	}
+	return replaceFile(path, out)
+}
+
+func setEndpoint(data []byte, site, endpoint string) ([]byte, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, err
+	}
+	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("the top level is not a mapping")
+	}
+	_, sites := lookup(doc.Content[0], "sites")
+	_, s := lookup(sites, site)
+	if s == nil || s.Kind != yaml.MappingNode || s.Style&yaml.FlowStyle != 0 {
+		return nil, fmt.Errorf("the site is not written as a block this command can edit in place")
+	}
+	lines := lineStarts(data)
+	var e edit
+	if _, value := lookup(s, "endpoint"); value != nil {
+		var err error
+		if e, err = replaceScalar(data, lines, value, endpoint); err != nil {
+			return nil, err
+		}
+	} else {
+		key, value := lookup(s, "public_address")
+		if key == nil || value.Kind != yaml.ScalarNode || value.Line != key.Line {
+			return nil, fmt.Errorf("not found, and no public_address on a line of its own to write it after")
+		}
+		at := lines.next(key.Line)
+		e = edit{at, at, strings.Repeat(" ", key.Column-1) + "endpoint: " + strconv.Quote(endpoint) + "\n"}
+	}
+	var b bytes.Buffer
+	b.Write(data[:e.start])
+	b.WriteString(e.text)
+	b.Write(data[e.end:])
+	return b.Bytes(), nil
 }
 
 // edit replaces data[start:end] with text.

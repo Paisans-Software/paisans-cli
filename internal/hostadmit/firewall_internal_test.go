@@ -85,6 +85,35 @@ func TestANegatedPortHoldsWhatItDoesNotName(t *testing.T) {
 	}
 }
 
+// A NAT rule with no destination port match forwards every port, 80 and
+// 443 among them, in nft's form and in iptables'.
+func TestAPortlessRuleHoldsEveryPort(t *testing.T) {
+	for _, rule := range []string{
+		`iifname "eth1" dnat to 10.0.0.2`,
+		"meta l4proto tcp redirect to :8080",
+		"-A PREROUTING -i eth1 -j DNAT --to-destination 10.0.0.2",
+		"-A PREROUTING -p tcp -j REDIRECT --to-ports 8080",
+	} {
+		if holds, unresolved := ruleHoldsLow(rule); !holds || unresolved {
+			t.Errorf("%q: holds %v, unresolved %v", rule, holds, unresolved)
+		}
+	}
+}
+
+// The probe prints a translating nft rule with no port match, which
+// forwards every port.
+func TestThePortsProbeReadsAPortlessRule(t *testing.T) {
+	out := runPortsProbe(t, map[string]string{"nft": `table ip nat {
+	chain PREROUTING {
+		iifname "eth1" dnat to 10.0.0.2
+	}
+}
+`})
+	if !strings.Contains(out, `dnat table ip nat chain PREROUTING: iifname "eth1" dnat to 10.0.0.2`) {
+		t.Errorf("the probe printed:\n%s", out)
+	}
+}
+
 // A port operand that yields no port admit can read, a named set, a map
 // or a concatenation, may hold 80 or 443, and does, unresolved, so the
 // refusal can say so.

@@ -2,6 +2,7 @@ package hostadmit
 
 import (
 	"fmt"
+	"io"
 	"path"
 	"slices"
 	"sort"
@@ -56,6 +57,11 @@ type Input struct {
 	Digest  string
 	Flags   Flags
 	Now     time.Time
+	// MovePort, when set, is the random source for a WireGuard listen port
+	// another deployment holds: a claim refused for that port alone is a
+	// PortMoveError naming a free one (see freePort). paisans init sets it
+	// for a site whose port it may move; nil refuses the claim as found.
+	MovePort io.Reader
 	// enabledUFW is set by Execute when it reads the host again after this
 	// run's own `ufw --force enable` ran, so the plan it rebuilds records
 	// that admit enabled ufw although ufw is active by then.

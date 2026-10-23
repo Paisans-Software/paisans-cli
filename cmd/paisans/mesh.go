@@ -209,7 +209,8 @@ func offerAdmissions(r ui.Reporter, cfg *config.Config, path string, hosts map[s
 			if yes {
 				var b *blockedSite
 				var ok bool
-				if cfg, ok, b, why, err = admitSite(r, cfg, path, hosts, n.site, stdin, stdout); err != nil {
+				applied := func() (bool, error) { return appliedOn(cfg, hosts, admitted) }
+				if cfg, ok, b, why, err = admitSite(r, cfg, path, hosts, n.site, applied, stdin, stdout); err != nil {
 					return nil, nil, nil, err
 				}
 				if ok {
@@ -271,8 +272,31 @@ func skipNote(r ui.Reporter, path, site string, why admitStop) {
 // admit refused the mesh subnet, or why it stopped, for the skip. An
 // admit that fails once its plan runs, or whose admission does not read
 // back, is the error.
-func admitSite(r ui.Reporter, cfg *config.Config, path string, hosts map[string]registry.Runner, site string, stdin io.Reader, stdout io.Writer) (*config.Config, bool, *blockedSite, admitStop, error) {
-	err := admitFromInit(r, path, site, stdin, stdout)
+//
+// A site whose WireGuard listen port another deployment on the host holds,
+// and nothing else, has its port moved to a free one admit found, when the
+// port is init's to move (config.Site.ListenPortMovable) and applied says
+// the deployment has never been applied, since the port is in every other
+// site's WireGuard file from then on: see moveListenPort. The site is then
+// admitted again on it, once. A site applied could not read leaves the
+// port where it is, with a note naming it.
+func admitSite(r ui.Reporter, cfg *config.Config, path string, hosts map[string]registry.Runner, site string, applied func() (bool, error), stdin io.Reader, stdout io.Writer) (*config.Config, bool, *blockedSite, admitStop, error) {
+	var random io.Reader
+	if cfg.Sites[site].ListenPortMovable() {
+		random = meshRandom
+	}
+	err := admitFromInit(r, path, site, random, stdin, stdout)
+	var moved *portMoved
+	if random != nil && errors.As(err, &moved) && movable(r, site, applied) {
+		if err := moveListenPort(r, path, site, moved); err != nil {
+			return cfg, false, nil, admitStop{}, err
+		}
+		if cfg, err = config.LoadForInit(path); err != nil {
+			return cfg, false, nil, admitStop{}, err
+		}
+		hosts[site] = initHost(site, cfg.Sites[site])
+		err = admitFromInit(r, path, site, nil, stdin, stdout)
+	}
 	if err != nil {
 		if !admitStopped(err) {
 			return cfg, false, nil, admitStop{}, err
@@ -294,6 +318,60 @@ func admitSite(r ui.Reporter, cfg *config.Config, path string, hosts map[string]
 	}
 	s.End(ui.OK, "admitted")
 	return cfg, true, nil, admitStop{}, nil
+}
+
+// moveListenPort writes the free port admit found for site into its
+// endpoint in paisans-stack.yaml, as a port alone beside public_address,
+// keeping every comment, and says so as one step: the port is the one
+// every other site dials, so whatever is in front of the host has to let
+// it in.
+func moveListenPort(r ui.Reporter, path, site string, moved *portMoved) error {
+	s := r.Step("move " + site + "'s WireGuard listen port")
+	endpoint := fmt.Sprintf(":%d", moved.Free)
+	if err := config.SetEndpoint(path, site, endpoint); err != nil {
+		s.Fail(err)
+		return err
+	}
+	holder := "another deployment"
+	var c registry.Conflict
+	if errors.As(moved, &c) {
+		holder = "deployment " + c.ID
+	}
+	s.Detail("sites.%s.endpoint: %d/udp is held by %s; moved to %s. Open %d/udp in any firewall in front of the host, and forward it where the host is behind NAT.", site, moved.Held, holder, endpoint, moved.Free)
+	s.Done("moved to " + endpoint)
+	return nil
+}
+
+// movable reports whether applied says the deployment has never been
+// applied, so site's listen port may move. A site applied could not read
+// is a note naming it, since the refusal init then skips the site with
+// says nothing of why its port stayed.
+func movable(r ui.Reporter, site string, applied func() (bool, error)) bool {
+	done, err := applied()
+	if err != nil {
+		r.Note(site+"'s WireGuard listen port was not moved", fmt.Sprintf("init could not read %v, so it cannot tell whether this deployment has been applied, and once it has, the port is in every other site's WireGuard file. Fix the read and run init again, or give %s's endpoint another port in the configuration.", err, site))
+		return false
+	}
+	return !done
+}
+
+// appliedOn reports whether any of sites holds this deployment's manifest.
+// Every site is asked, so one that holds it answers before one that could
+// not be asked, which is the error, naming it.
+func appliedOn(cfg *config.Config, hosts map[string]registry.Runner, sites []string) (bool, error) {
+	manifest := cfg.Deployment().Manifest()
+	var unread error
+	for _, name := range sites {
+		_, found, err := hosts[name].ReadFile(manifest)
+		switch {
+		case found && err == nil:
+			return true, nil
+		case err != nil && unread == nil:
+			hint, _ := ui.Describe(err)
+			unread = fmt.Errorf("%s (%s)", name, hint)
+		}
+	}
+	return unread != nil, unread
 }
 
 // subnetBlocked is what admit refused the mesh subnet for on site's host,
@@ -427,7 +505,9 @@ func settleAndReadmit(r ui.Reporter, cfg *config.Config, path string, hosts map[
 			var ok bool
 			var b *blockedSite
 			var why admitStop
-			if cfg, ok, b, why, err = admitSite(r, cfg, path, hosts, site, stdin, stdout); err != nil {
+			// The subnet moved, which it does only before the first
+			// apply, so a listen port is init's to move too.
+			if cfg, ok, b, why, err = admitSite(r, cfg, path, hosts, site, func() (bool, error) { return false, nil }, stdin, stdout); err != nil {
 				return nil, nil, false, err
 			}
 			_, wasAdmitted := stale[site]

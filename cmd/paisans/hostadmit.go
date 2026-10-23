@@ -118,7 +118,17 @@ type admitRun struct {
 	// anything but a yes. init sets it when it admits a site at the
 	// operator's word (see admitFromInit).
 	approve bool
+	// movePort, when set, lets a claim refused for the site's WireGuard
+	// listen port alone stop with a free port instead (see
+	// hostadmit.PortMoveError), for init to move the endpoint to. init sets
+	// it for a site whose port it may move (see admitSite).
+	movePort io.Reader
 }
+
+// portMoved is admit's refusal of a WireGuard listen port another
+// deployment holds, with a free port it found (see admitRun.movePort). It
+// is named here because only this file reaches the hostadmit package.
+type portMoved = hostadmit.PortMoveError
 
 // errAdmitDeclined is a plan the owner did not approve (admitRun.approve).
 var errAdmitDeclined = errors.New("site admit: the plan was not approved. Nothing was changed")
@@ -143,9 +153,9 @@ func admitStopped(err error) bool {
 // for each grant the site's roles need, then showing the plan and asking
 // before it runs. A plan the operator declines is errAdmitDeclined, and any
 // other stop before the plan runs is an admitStoppedError (see
-// admitStopped). A test replaces it.
-var admitFromInit = func(r ui.Reporter, configPath, site string, stdin io.Reader, stdout io.Writer) error {
-	return admit(r, admitRun{site: site, configPath: configPath, execute: true, approve: true}, answerer{}, stdin, stdout)
+// admitStopped). movePort is admitRun.movePort. A test replaces it.
+var admitFromInit = func(r ui.Reporter, configPath, site string, movePort io.Reader, stdin io.Reader, stdout io.Writer) error {
+	return admit(r, admitRun{site: site, configPath: configPath, execute: true, approve: true, movePort: movePort}, answerer{}, stdin, stdout)
 }
 
 // admit is site admit once its flags are checked: from a request on the
@@ -189,6 +199,7 @@ func admit(r ui.Reporter, run admitRun, ans answerer, stdin io.Reader, stdout io
 			return fmt.Errorf("site admit: %w", err)
 		}
 		declared = cfg.Sites[site]
+		in.MovePort = run.movePort
 	}
 	// The grants first, before any transport exists: the owner's decision
 	// needs nothing from the host. At a terminal, a grant the site's roles

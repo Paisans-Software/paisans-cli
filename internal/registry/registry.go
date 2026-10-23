@@ -600,7 +600,9 @@ func refused(t Runner, e Entry, why error) error {
 
 // clashError is a Conflict over what two deployments cannot share on a
 // host, the listen port, the mesh subnet or a role, said one short sentence
-// a clash: a role or a port with what frees it, the mesh subnet alone.
+// a clash: a role or a port with what frees it, the mesh subnet alone. A
+// role clash leaves the listen port unsaid, since no port frees the host
+// while the role is held.
 type clashError struct {
 	c    Conflict
 	ours Entry
@@ -608,8 +610,12 @@ type clashError struct {
 
 func (r clashError) Error() string {
 	who := "deployment " + r.c.who()
+	role := r.c.Holds("the gateway role") || r.c.Holds("the data role")
 	out := make([]string, 0, len(r.c.Clashes))
 	for _, clash := range r.c.Clashes {
+		if role && strings.HasPrefix(clash, "WireGuard listen port") {
+			continue
+		}
 		var s string
 		switch {
 		case strings.HasPrefix(clash, "mesh subnet"):

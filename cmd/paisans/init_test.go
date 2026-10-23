@@ -917,19 +917,29 @@ func TestAdmitStopReasonKeepsTheExplanationsLines(t *testing.T) {
 // scriptAdmitFromInit makes site admit, run from init, answer each site
 // from its script in turn: nil admits it, marking its fake admitted, and an
 // error stops admit with nothing changed, as a host refusing the claim
-// does. It returns the sites admit ran for, in order.
+// does. A scripted portMoved is the refusal it carries when
+// init gives admit no random source, as admit itself refuses then. It
+// returns the sites admit ran for, in order, each marked "+port" when init
+// let admit move its listen port.
 func scriptAdmitFromInit(t *testing.T, sites map[string]*initFake, script map[string][]error) *[]string {
 	t.Helper()
 	saved := admitFromInit
 	t.Cleanup(func() { admitFromInit = saved })
 	ran := new([]string)
-	admitFromInit = func(_ ui.Reporter, _, site string, _ io.Reader, _ io.Writer) error {
-		*ran = append(*ran, site)
+	admitFromInit = func(_ ui.Reporter, _, site string, movePort io.Reader, _ io.Reader, _ io.Writer) error {
+		if movePort != nil {
+			*ran = append(*ran, site+"+port")
+		} else {
+			*ran = append(*ran, site)
+		}
 		if len(script[site]) == 0 {
 			t.Fatalf("site admit ran for %s once more than scripted", site)
 		}
 		err := script[site][0]
 		script[site] = script[site][1:]
+		if moved, ok := err.(*portMoved); ok && movePort == nil {
+			err = moved.Refusal
+		}
 		if err != nil {
 			return &admitStoppedError{err}
 		}
