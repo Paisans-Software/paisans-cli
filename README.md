@@ -9126,18 +9126,33 @@ writes and records the file and leaves Patroni running, and its plan says so.
 The rendered file sets no proxy, so Spilo configures Patroni with `use_proxies`
 off (Spilo `configure_spilo.py`, `get_dcs_config`; Patroni v4.1.0,
 `patroni/dcs/etcd.py`, `get_etcd_client`), and Patroni uses the list only to
-fill its members at start or after every member it knows has failed, refreshing
-them from etcd's member list otherwise (`_load_machines_cache`,
+fill its members when it starts or after every member it knows has failed,
+refreshing them from etcd's member list otherwise (`_load_machines_cache`,
 `_refresh_machines_cache`). The leader therefore keeps the leader key through a
 join: `deployment apply` without `--site` joins a site through `site add` and
-then, in pass two, applies every site, the leader's among them, and that apply
-moves no stack for this file. Its next start reads the file as written.
+then, in pass two, applies every site, the leader's among them.
 
-**A leader that moves is reported, never left silent.** Any other change to
-`patroni.env`, and a forced recreate of the infrastructure stack, still
-replaces Patroni's container, and on the leader a standby takes the leader key
-while it restarts. The plan says so before it runs, at every verbosity. After
-it runs, an apply whose infrastructure stack's action leaves another site
+**A running Patroni is left out of an `up -d` that has no reason to replace
+it.** Compose replaces a container whose `env_file` content changed, so once
+`patroni.env` holds etcd hosts the running Patroni was not created with, a
+plain `up -d` of the infrastructure stack for any other reason (a changed
+compose file or environment file, a stopped Garage to start) would replace
+Patroni too. So `deployment apply` asks the running container which hosts it
+has (`printenv ETCD3_HOSTS`), and when Patroni runs and nothing it reads
+changed (`patroni.env` beyond `ETCD3_HOSTS`, its service in the compose file,
+a file it mounts), the stack's `up -d` names every other service, with
+`--no-deps`. A `docker restart`, a reboot or the restart policy keeps the
+container, and with it the hosts it was created with, so the plan says when
+they differ from the file. They are enough while they name one current etcd
+member, from which Patroni learns the rest; once they name none, Patroni could
+not reach etcd after its next restart, and the plan recreates it.
+
+**A leader that moves is reported, never left silent.** A change Patroni reads
+only in a new container, a forced recreate of the infrastructure stack, a
+restart that includes Patroni and a running list that names no current member
+all replace or restart Patroni, and on the leader a standby takes the leader
+key while it restarts. The plan says so before it runs, at every verbosity.
+After it runs, an apply whose infrastructure stack's action leaves another site
 leading warns, naming both sites, the action and the files that changed, and
 `deployment apply` without `--site` repeats each warning once its steps are
 done. Whether the site leads is asked of its own Patroni (`/patroni`) just

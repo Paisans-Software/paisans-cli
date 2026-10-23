@@ -82,6 +82,9 @@ type fakeHost struct {
 	// `up -d` runs: the leader's Patroni recreated, and a standby taking the
 	// leader key while it restarted.
 	leaderAfter string
+	// etcdHosts is ETCD3_HOSTS as the running Patroni container has it,
+	// empty for a host where Patroni does not answer.
+	etcdHosts string
 	// ps is what `docker compose ps --format json` prints, by stack. A stack
 	// not in it answers with one running container and no healthcheck.
 	ps map[string]string
@@ -253,6 +256,12 @@ func (h *fakeHost) Run(command string) (string, error) {
 	}
 	if strings.Contains(command, "psql") && strings.Contains(command, " -At") {
 		return strings.Join(h.replicaHas, "\n") + "\n", nil
+	}
+	if strings.HasSuffix(command, "exec -T patroni printenv ETCD3_HOSTS") {
+		if h.etcdHosts == "" {
+			return "service \"patroni\" is not running", fmt.Errorf("exit status 1")
+		}
+		return h.etcdHosts + "\n", nil
 	}
 	if strings.Contains(command, ":8008/patroni") {
 		// This host's own Patroni, which is home-a's.
@@ -1084,8 +1093,9 @@ func TestPlanningOnlyProbesTheMesh(t *testing.T) {
 	for _, command := range host.commands {
 		// The sweep's read of the host's images, the read of which
 		// containers run and the read of the rootless namespace's
-		// src_valid_mark are the other probes a plan makes.
-		if !strings.HasPrefix(command, "ip -br addr show dev psns-f2a9") && !strings.Contains(command, "echo paisans-sweep-end") && !strings.Contains(command, "--filter label=com.docker.compose.project") && command != apply.SourceMarkProbe {
+		// src_valid_mark and the read of the etcd hosts Patroni runs with
+		// are the other probes a plan makes.
+		if !strings.HasPrefix(command, "ip -br addr show dev psns-f2a9") && !strings.HasSuffix(command, "exec -T patroni printenv ETCD3_HOSTS") && !strings.Contains(command, "echo paisans-sweep-end") && !strings.Contains(command, "--filter label=com.docker.compose.project") && command != apply.SourceMarkProbe {
 			t.Errorf("building a plan ran %q, which is more than a probe", command)
 		}
 	}

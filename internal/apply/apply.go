@@ -105,6 +105,13 @@ type Action struct {
 	// for a new garage.toml restarted Patroni, which on the primary is a
 	// failover, and HAProxy, which drops every app's database connection.
 	Services []string
+	// Up narrows a recreate that is not forced to these compose services,
+	// with --no-deps, empty for every service of the stack. Only the
+	// infrastructure stack sets it, to leave a running Patroni out of an
+	// `up -d` that has no reason to replace it: Compose replaces a container
+	// whose env_file content changed, and a patroni.env written with new
+	// etcd hosts alone is such a file. See planPatroni.
+	Up []string
 	// Refresh names the infrastructure services whose bind mounted files
 	// changed, for an `up -d` that was not forced. `up -d` replaces only a
 	// container whose configuration changed, and a bind mounted file is not
@@ -120,6 +127,12 @@ func (a Action) Command(d deployment.Deployment) string {
 	switch {
 	case a.Force:
 		return compose + " up -d --force-recreate"
+	case a.Recreate && len(a.Up) > 0:
+		services := make([]string, len(a.Up))
+		for i, name := range a.Up {
+			services[i] = shellQuote(name)
+		}
+		return compose + " up -d --no-deps " + strings.Join(services, " ")
 	case a.Recreate:
 		return compose + " up -d"
 	case len(a.Services) > 0:
@@ -166,6 +179,12 @@ type Plan struct {
 	// success. Checking only before a reload would leave exactly that path
 	// unchecked.
 	GatewayChanging bool
+	// patroniKept is set when patroni.env is written with new etcd hosts
+	// alone, which moves no container. See etcdHostsOnly.
+	patroniKept bool
+	// patroniRecreates is set when the plan replaces or restarts a running
+	// Patroni. See planPatroni.
+	patroniRecreates bool
 	// LeaderMoved is set once Execute finds that Patroni's leader left this
 	// site during its infrastructure stack's action. See LeaderMove.
 	LeaderMoved *LeaderMove
@@ -687,9 +706,9 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 	// whether its change can be applied in place.
 	var wireguard *Change
 	var wireguardBefore string
-	// Whether patroni.env changed in a way only a new Patroni container
-	// reads, which recreates Patroni on a site already running it.
-	var patroniRecreated bool
+	// What decides whether this apply recreates Patroni on a site already
+	// running it. See planPatroni.
+	var patroni patroniFacts
 	reading := len(out.rendered)
 	if out.scoped {
 		reading = len(inScope)
@@ -807,6 +826,13 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			used[remote] = true
 		}
 
+		if rel == PatroniEnv(d) {
+			patroni.file, patroni.onHost = content, found
+		}
+		if rel == d.RelPath(infraStack, "compose.yaml") && change.Kind == Update {
+			patroni.composeBefore, patroni.composeAfter = current, content
+		}
+
 		if rel == d.WireGuardConf() {
 			copied := change
 			wireguard = &copied
@@ -843,10 +869,11 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 		// leader hands the leader key to a standby.
 		if rel == PatroniEnv(d) && change.Kind == Update {
 			if before, after, ok := etcdHostsOnly(current, content); ok {
-				out.Notes = append(out.Notes, Note{Text: fmt.Sprintf("patroni.env changes only ETCD3_HOSTS (%s, was %s), so it is written and Patroni is not recreated. Patroni reads that list only to reach etcd as it starts and asks etcd for its members from then on, so the running Patroni needs none of it until its next start, which reads the new file", after, before)})
+				out.Notes = append(out.Notes, Note{Text: fmt.Sprintf("patroni.env changes only ETCD3_HOSTS (%s, was %s), so it is written and Patroni is not recreated for it. Patroni uses that list to reach etcd when its container is created and asks etcd for its members from then on; a restart of the same container keeps the list it was created with, and the next recreate reads the new file", after, before)})
+				out.patroniKept = true
 				continue
 			}
-			patroniRecreated = true
+			patroni.envRecreate = true
 		}
 		// The gateway's routing files are the reload's alone. Making them an
 		// infrastructure action as well restarted Caddy after reloading it:
@@ -1027,12 +1054,9 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 		}
 		out.Actions = append(out.Actions, action)
 	}
-	for _, a := range out.Actions {
-		if a.Stack == infraStack && a.Recreate && (patroniRecreated || (a.Force && rendered[infraStack] && out.rendered[PatroniEnv(d)])) {
-			out.Notes = append(out.Notes, Note{
-				Hint: "this apply recreates Patroni on " + site + ", so if it leads, a standby takes the leader key",
-				Text: fmt.Sprintf("the infrastructure stack's action (%s) replaces Patroni's container on %s. When it leads, a standby takes the leader key while it restarts, every app's database connections end, and the leader stays on the other site; the apply says so if it does", ActionTitle(a), site),
-			})
+	if onlySet == nil || onlySet[infraStack] {
+		if err := out.planPatroni(patroni, refresh, t); err != nil {
+			return nil, fmt.Errorf("%s: %w", site, err)
 		}
 	}
 	var dbApps []string

@@ -107,7 +107,7 @@ func TestTwoDataSitesAndAWitnessShrinkToOneVoter(t *testing.T) {
 		t.Error("the edit lost a comment")
 	}
 	remains := strings.Join(p.Remains(), "\n")
-	for _, want := range []string{"home-a leads", "next restart", "etcd-initial is no longer rendered"} {
+	for _, want := range []string{"home-a leads", "next recreated", "etcd-initial is no longer rendered"} {
 		if !strings.Contains(remains, want) {
 			t.Errorf("the report does not say %q:\n%s", want, remains)
 		}
@@ -267,7 +267,7 @@ func TestReplicasTakePatroniEnvOneAtATime(t *testing.T) {
 	if !strings.Contains(w.hosts["home-a"].etcdHosts, "10.44.0.2:") {
 		t.Error("the leader's Patroni was recreated")
 	}
-	if remains := strings.Join(p.Remains(), "\n"); !strings.Contains(remains, "home-a leads") || !strings.Contains(remains, "next restart") {
+	if remains := strings.Join(p.Remains(), "\n"); !strings.Contains(remains, "home-a leads") || !strings.Contains(remains, "next recreated") {
 		t.Errorf("the leader's patroni.env is not noted:\n%s", remains)
 	}
 
