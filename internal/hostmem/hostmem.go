@@ -27,9 +27,9 @@ const SwapNeeded = "Without swap, a host that runs short of memory has the kerne
 // on or not. Every file it reads is readable by any user.
 const Probe = `say mem-total "$(awk '$1 == "MemTotal:" { printf "%.0f", $2 * 1024 }' /proc/meminfo)"
 say swap-total "$(awk '$1 == "SwapTotal:" { printf "%.0f", $2 * 1024 }' /proc/meminfo)"
-say zram-on "$(awk 'NR > 1 && $1 ~ /^\/dev\/zram/ { s += $3 } END { printf "%.0f", s * 1024 }' /proc/swaps 2>/dev/null)"
+say zram-on "$(awk '` + ZRAMOnAwk + `' /proc/swaps 2>/dev/null)"
 if [ "$(awk 'NR > 1' /proc/swaps 2>/dev/null | wc -l)" -gt 0 ]; then say swap-active yes; else say swap-active no; fi
-if command -v lsblk >/dev/null 2>&1 && lsblk -nro FSTYPE 2>/dev/null | grep -qx swap; then say swap-partition yes; else say swap-partition no; fi
+if command -v lsblk >/dev/null 2>&1 && lsblk -nro NAME,FSTYPE 2>/dev/null | awk '` + PartitionAwk + `' | grep -q .; then say swap-partition yes; else say swap-partition no; fi
 if awk '$1 !~ /^#/ && $3 == "swap"' /etc/fstab 2>/dev/null | grep -q .; then say swap-fstab yes; else say swap-fstab no; fi
 z=no
 for f in /etc/systemd/zram-generator.conf /usr/lib/systemd/zram-generator.conf /run/systemd/zram-generator.conf \
@@ -39,6 +39,17 @@ done
 say swap-zram "$z"
 if [ -e ` + Swapfile + ` ] || [ -L ` + Swapfile + ` ]; then say swapfile present; else say swapfile absent; fi
 `
+
+// ZRAMOnAwk sums the sizes /proc/swaps lists for zram devices, in bytes:
+// after its header, one line per swap area, its name first and its size in
+// KiB third. A name with a space in it is written with \040, so it stays
+// one field.
+const ZRAMOnAwk = `NR > 1 && $1 ~ /^\/dev\/zram[0-9]+$/ { s += $3 } END { printf "%.0f", s * 1024 }`
+
+// PartitionAwk prints the block devices formatted as swap that are not
+// zram devices, from lsblk -nro NAME,FSTYPE: a zram device is formatted
+// as swap too, and is not a partition.
+const PartitionAwk = `$2 == "swap" && $1 !~ /^zram[0-9]+$/`
 
 // Command is Probe on its own, for a caller with no probe script to put it
 // in.
@@ -115,23 +126,35 @@ func Parse(out string) (Facts, error) {
 	return f, nil
 }
 
-// Configured is the swap the host has and has not turned on, each form
-// named; nil when swap is on, or when the host has none.
+// CountsOn reports whether swap that counts toward memory is on: any swap
+// on beyond zram's. Swap on whose size was not read counts.
+func (f Facts) CountsOn() bool {
+	return f.Active && (f.SwapTotal == 0 || f.SwapTotal > f.ZRAMOn)
+}
+
+// Configured is the swap the host has that would count toward memory and
+// has not turned on, each form named; nil when such swap is on, or when
+// the host has none. zram is left out, configured or on: it keeps what it
+// holds in RAM, so it is no reason to hold back a swapfile, and turning it
+// on adds nothing to the host's memory.
 func (f Facts) Configured() []string {
-	if f.Active {
+	if f.CountsOn() {
 		return nil
 	}
 	var out []string
 	for _, c := range []struct {
 		has  bool
 		what string
-	}{{f.Partition, "a swap partition"}, {f.FSTab, "a swap line in /etc/fstab"}, {f.ZRAM, "a zram-generator configuration"}, {f.File, Swapfile + " exists"}} {
+	}{{f.Partition, "a swap partition"}, {f.FSTab, "a swap line in /etc/fstab"}, {f.File, Swapfile + " exists"}} {
 		if c.has {
 			out = append(out, c.what)
 		}
 	}
 	return out
 }
+
+// HasZRAM reports whether the host has zram swap, on or configured.
+func (f Facts) HasZRAM() bool { return f.ZRAM || f.ZRAMOn > 0 }
 
 const mib = 1 << 20
 
@@ -185,6 +208,9 @@ type Part struct {
 // and a monitor beside the gateway is served by the gateway's Caddy.
 type Runs struct {
 	Etcd, Postgres, Garage, Caddy, Gate, Uptime, Apps bool
+	// ByRole is set by ForRoles: the parts are what the roles usually
+	// run, not what a configuration places, and the words say so.
+	ByRole bool
 }
 
 // ForRoles is what a host with roles runs, as far as its roles say, which
@@ -204,6 +230,7 @@ func ForRoles(roles []config.Role, runsCaddy bool) Runs {
 		Gate:     has(config.RoleGateway),
 		Uptime:   has(config.RoleMonitor),
 		Apps:     has(config.RoleApps),
+		ByRole:   true,
 	}
 }
 
@@ -304,10 +331,14 @@ func (v Verdict) Line() string {
 	case v.ZRAM > 0:
 		swap = Size(v.ZRAM) + " of zram and no other swap"
 	}
-	if v.Short() {
-		return fmt.Sprintf("%s of RAM and %s, under the %s its roles need", Size(v.RAM), swap, Size(v.Floor))
+	what := "what it runs"
+	if v.Runs.ByRole {
+		what = "its roles"
 	}
-	return fmt.Sprintf("%s of RAM and %s, at least the %s its roles need", Size(v.RAM), swap, Size(v.Floor))
+	if v.Short() {
+		return fmt.Sprintf("%s of RAM and %s, under its %s floor for %s", Size(v.RAM), swap, Size(v.Floor), what)
+	}
+	return fmt.Sprintf("%s of RAM and %s, at least its %s floor for %s", Size(v.RAM), swap, Size(v.Floor), what)
 }
 
 // Explain is where the floor comes from and the swap rule, in the words of
@@ -334,8 +365,12 @@ func (v Verdict) Explain() []string {
 	case 2:
 		why = strings.Join(slow, " and ") + " slow to the speed of the disk when what they use is swapped out"
 	}
+	need := fmt.Sprintf("What it runs as %s needs %s: %s.", strings.Join(names, ", "), Size(v.Floor), strings.Join(parts, ", "))
+	if v.Runs.ByRole {
+		need = fmt.Sprintf("Its roles (%s) need %s: %s.", strings.Join(names, ", "), Size(v.Floor), strings.Join(parts, ", "))
+	}
 	out := []string{
-		fmt.Sprintf("Its roles (%s) need %s: %s.", strings.Join(names, ", "), Size(v.Floor), strings.Join(parts, ", ")),
+		need,
 		fmt.Sprintf("Swap counts toward it up to a quarter of it, %s here: %s, so the rest must be RAM.", Size(v.Floor/SwapShare), why),
 	}
 	if v.ZRAM > 0 {

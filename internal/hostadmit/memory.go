@@ -36,7 +36,7 @@ func planMemory(p *planner) error {
 	advice := "Give the host more RAM, or move a role to another host."
 	switch {
 	case len(p.f.Swap.Configured()) > 0:
-		advice = "Give the host more RAM, turn on the swap it has (swapon -a, or the zram service; zram does not count), or move a role to another host."
+		advice = "Give the host more RAM, turn on the swap it has (swapon -a), or move a role to another host."
 	case p.plan.SwapOffer > 0:
 		advice = "Give the host more RAM, make a swapfile with --swapfile (swap makes up a quarter of the floor at most), or move a role to another host."
 	}

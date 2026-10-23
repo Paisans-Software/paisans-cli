@@ -43,9 +43,10 @@ func (p MemoryProbe) Answered() bool {
 	return why == ""
 }
 
-// Swap warns about a host with no swap on, in the words site admit uses:
-// swap the host has and has not turned on is its owner's to turn on, and
-// a host with none in any form is offered a swapfile by admit. A probe
+// Swap warns about a host with no swap on beyond zram, in the words site
+// admit uses: swap the host has and has not turned on is its owner's to
+// turn on, and a host with none, or zram alone, which keeps what it holds
+// in RAM, is offered a swapfile by admit. A probe
 // doctor could not read is a warning here, and the memory check is not
 // made.
 func Swap(probes []MemoryProbe) []Finding {
@@ -55,7 +56,7 @@ func Swap(probes []MemoryProbe) []Finding {
 		switch configured := f.Configured(); {
 		case why != "":
 			out = append(out, Finding{Section: SectionSwap, Level: Warn, Line: fmt.Sprintf("%s: could not read the host's memory and swap", p.Site), More: []string{why}})
-		case f.Active:
+		case f.CountsOn():
 			line := fmt.Sprintf("%s: on, %s", p.Site, hostmem.Size(f.SwapTotal))
 			if f.ZRAMOn > 0 {
 				line += fmt.Sprintf(", %s of it zram", hostmem.Size(f.ZRAMOn))
@@ -64,7 +65,11 @@ func Swap(probes []MemoryProbe) []Finding {
 		case len(configured) > 0:
 			out = append(out, Finding{Section: SectionSwap, Level: Warn,
 				Line: fmt.Sprintf("%s: configured but not on (%s)", p.Site, strings.Join(configured, ", ")),
-				More: []string{hostmem.SwapNeeded, "The host's owner turns it on (swapon -a, or the zram service), or removes it and runs `paisans site admit` again to be offered a swapfile."}})
+				More: []string{hostmem.SwapNeeded, "The host's owner turns it on (swapon -a), or removes it and runs `paisans site admit` again to be offered a swapfile."}})
+		case f.HasZRAM():
+			out = append(out, Finding{Section: SectionSwap, Level: Warn,
+				Line: fmt.Sprintf("%s: only zram on this host", p.Site),
+				More: []string{hostmem.SwapNeeded, "zram swap compresses what it holds into RAM, so it stretches the host's memory rather than adding to it.", "The host's owner runs `paisans site admit` again, which offers a swapfile beside it where it can make one (`--swapfile`)."}})
 		default:
 			out = append(out, Finding{Section: SectionSwap, Level: Warn,
 				Line: fmt.Sprintf("%s: none on this host", p.Site),
@@ -87,7 +92,7 @@ func Memory(cfg *config.Config, probes []MemoryProbe) []Finding {
 		}
 		if f.MemTotal == 0 {
 			out = append(out, Finding{Section: SectionMemory, Level: Warn, Line: fmt.Sprintf("%s: could not read the host's RAM", p.Site),
-				More: []string{"/proc/meminfo gave no MemTotal, so nothing says the host has the memory its roles need."}})
+				More: []string{"/proc/meminfo gave no MemTotal, so nothing says the host has the memory what it runs needs."}})
 			continue
 		}
 		v := hostmem.Judge(f, cfg.Sites[p.Site].Roles, hostmem.ForSite(cfg, p.Site))

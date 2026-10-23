@@ -61,6 +61,10 @@ func TestSwap(t *testing.T) {
 		{"garbled", MemoryProbe{Site: "vm", Out: "mem-total 4G\n"}, Warn, "vm: could not read the host's memory and swap", []string{`unreadable mem-total line "4G"`}},
 		{"empty", MemoryProbe{Site: "vm", Out: ""}, Warn, "vm: could not read the host's memory and swap", []string{"no mem-total line"}},
 		{"cut short", MemoryProbe{Site: "vm", Out: "mem-total 4113297408\n"}, Warn, "vm: could not read the host's memory and swap", []string{"no swap-active line"}},
+		{"zram alone, on", MemoryProbe{Site: "vm", Out: memOut(gib1, gib2, true, "zram") + "zram-on " + gib2 + "\n"}, Warn, "vm: only zram on this host",
+			[]string{"stretches the host's memory rather than adding to it", "offers a swapfile beside it"}},
+		{"zram alone, configured, not on", MemoryProbe{Site: "vm", Out: memOut(gib1, "0", false, "zram")}, Warn, "vm: only zram on this host",
+			[]string{"offers a swapfile beside it"}},
 		{"on, partly zram", MemoryProbe{Site: "home-a", Out: memOut(gib4, gib2, true, "zram") + "zram-on 1073741824\n"}, OK, "home-a: on, 2.0 GiB, 1.0 GiB of it zram", nil},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -95,20 +99,20 @@ func TestMemory(t *testing.T) {
 		line  string
 	}{
 		{"data and apps, 4 GB", MemoryProbe{Site: "home-a", Out: memOut(gib4, gib2, true, "file")}, OK,
-			"home-a: 3.8 GiB of RAM and 2.0 GiB of swap, at least the 3.0 GiB its roles need"},
+			"home-a: 3.8 GiB of RAM and 2.0 GiB of swap, at least its 3.0 GiB floor for what it runs"},
 		{"data and apps, 2 GiB and swap", MemoryProbe{Site: "home-b", Out: memOut("2147483648", "4294967296", true, "file")}, Warn,
-			"home-b: 2.0 GiB of RAM and 4.0 GiB of swap, under the 3.0 GiB its roles need"},
+			"home-b: 2.0 GiB of RAM and 4.0 GiB of swap, under its 3.0 GiB floor for what it runs"},
 		{"gateway and witness, 458 MiB, no swap", MemoryProbe{Site: "vm", Out: memOut(mib458, "0", false)}, Warn,
-			"vm: 458 MiB of RAM and no swap on, under the 960 MiB its roles need"},
+			"vm: 458 MiB of RAM and no swap on, under its 960 MiB floor for what it runs"},
 		{"gateway and witness, 1 GiB, swap on", MemoryProbe{Site: "vm", Out: memOut(gib1, gib2, true, "file")}, OK,
-			"vm: 957 MiB of RAM and 2.0 GiB of swap, at least the 960 MiB its roles need"},
+			"vm: 957 MiB of RAM and 2.0 GiB of swap, at least its 960 MiB floor for what it runs"},
 		{"gateway and witness, 1 GiB, swap not on", MemoryProbe{Site: "vm", Out: memOut(gib1, "0", false, "file")}, Warn,
-			"vm: 957 MiB of RAM and no swap on, under the 960 MiB its roles need"},
+			"vm: 957 MiB of RAM and no swap on, under its 960 MiB floor for what it runs"},
 		{"monitor, 1 GiB, no swap", MemoryProbe{Site: "watch", Out: memOut(gib1, "0", false)}, OK,
-			"watch: 957 MiB of RAM and no swap on, at least the 896 MiB its roles need"},
+			"watch: 957 MiB of RAM and no swap on, at least its 896 MiB floor for what it runs"},
 		{"RAM unread", MemoryProbe{Site: "vm", Out: memOut("", "0", false)}, Warn, "vm: could not read the host's RAM"},
 		{"data and apps, zram does not count", MemoryProbe{Site: "home-a", Out: memOut("3006477107", gib2, true, "zram") + "zram-on " + gib2 + "\n"}, Warn,
-			"home-a: 2.8 GiB of RAM and 2.0 GiB of zram and no other swap, under the 3.0 GiB its roles need"},
+			"home-a: 2.8 GiB of RAM and 2.0 GiB of zram and no other swap, under its 3.0 GiB floor for what it runs"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			fs := Memory(cfg, []MemoryProbe{c.probe})
@@ -121,7 +125,7 @@ func TestMemory(t *testing.T) {
 			}
 			if f.Level == Warn && f.Line != "vm: could not read the host's RAM" {
 				text := strings.Join(f.More, "\n")
-				for _, want := range []string{"Its roles (", "Swap counts toward it up to a quarter", "more RAM"} {
+				for _, want := range []string{"What it runs as ", "Swap counts toward it up to a quarter", "more RAM"} {
 					if !strings.Contains(text, want) {
 						t.Errorf("lacks %q:\n%s", want, text)
 					}
@@ -144,7 +148,7 @@ func TestMemoryFollowsPlacement(t *testing.T) {
 	cfg.Storage.Garage.Sites = []string{"home-a"}
 	// home-b is a data site outside storage.garage.sites: 2.8 GiB.
 	f := Memory(cfg, []MemoryProbe{{Site: "home-b", Out: memOut("2952790016", "0", false)}})
-	if len(f) != 1 || f[0].Level != OK || f[0].Line != "home-b: 2.8 GiB of RAM and no swap on, at least the 2.8 GiB its roles need" {
+	if len(f) != 1 || f[0].Level != OK || f[0].Line != "home-b: 2.8 GiB of RAM and no swap on, at least its 2.8 GiB floor for what it runs" {
 		t.Errorf("data site outside garage sites:\n%s", dump(f))
 	}
 	// An apps site storage.garage.sites names is counted with Garage.
@@ -152,7 +156,7 @@ func TestMemoryFollowsPlacement(t *testing.T) {
 	cfg.Sites["apps-only"] = config.Site{Roles: []config.Role{config.RoleApps}}
 	cfg.Storage.Garage.Sites = append(cfg.Storage.Garage.Sites, "apps-only")
 	f = Memory(cfg, []MemoryProbe{{Site: "apps-only", Out: memOut(gib1, "0", false)}})
-	if len(f) != 1 || f[0].Level != Warn || !strings.Contains(f[0].Line, "under the 1.8 GiB its roles need") || !strings.Contains(strings.Join(f[0].More, "\n"), "256 MiB for Garage") {
+	if len(f) != 1 || f[0].Level != Warn || !strings.Contains(f[0].Line, "under its 1.8 GiB floor for what it runs") || !strings.Contains(strings.Join(f[0].More, "\n"), "256 MiB for Garage") {
 		t.Errorf("apps site in garage sites:\n%s", dump(f))
 	}
 	// A monitor behind its owner's web server runs no Caddy: 768 MiB.
@@ -161,14 +165,14 @@ func TestMemoryFollowsPlacement(t *testing.T) {
 	watch.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal}
 	cfg.Sites["watch"] = watch
 	f = Memory(cfg, []MemoryProbe{{Site: "watch", Out: memOut(gib3, "0", false)}})
-	if len(f) != 1 || !strings.Contains(f[0].Line, "at least the 768 MiB its roles need") {
+	if len(f) != 1 || !strings.Contains(f[0].Line, "at least its 768 MiB floor for what it runs") {
 		t.Errorf("monitor behind its owner's web server:\n%s", dump(f))
 	}
 	// A gateway with no gated app runs no oauth2-proxy: 896 MiB.
 	cfg = fixture(t)
 	delete(cfg.Apps, config.GateApp)
 	f = Memory(cfg, []MemoryProbe{{Site: "vm", Out: memOut(gib1, "0", false)}})
-	if len(f) != 1 || f[0].Level != OK || !strings.Contains(f[0].Line, "at least the 896 MiB its roles need") {
+	if len(f) != 1 || f[0].Level != OK || !strings.Contains(f[0].Line, "at least its 896 MiB floor for what it runs") {
 		t.Errorf("gateway without the gate:\n%s", dump(f))
 	}
 }

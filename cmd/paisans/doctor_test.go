@@ -511,7 +511,7 @@ func TestDoctorDiagnosesTheStuckReplicaAndOnlyReads(t *testing.T) {
 		"done: check linger home-a its manager starts after the mesh at boot",
 		"done: check sudo rights home-a sudo lets ubuntu run the WireGuard helper and nothing else",
 		"done: check swap home-a on, 2.0 GiB",
-		"done: check memory home-a 3.8 GiB of RAM and 2.0 GiB of swap, at least the 3.0 GiB its roles need",
+		"done: check memory home-a 3.8 GiB of RAM and 2.0 GiB of swap, at least its 3.0 GiB floor for what it runs",
 		"section: failed, deepest first:",
 		"doctor changes nothing",
 		"done: check self-check watch answers as this deployment on 443 and 80, asked for health.example.org through 203.0.113.20",

@@ -895,20 +895,21 @@ paisans site admit --site home-a --ssh owner@home-a.example.org --execute   # fr
     before the host is reached.
 * **Hosts:** the one it runs on, or the one `--ssh` names, through sudo. The
   host needs ufw installed; admit never installs it.
-* **Swap:** a host with no swap in any form, on or not, is warned about.
-  `--swapfile`, or with `--execute` a yes at a terminal, where admit asks,
+* **Swap:** a host with no swap in any form, on or not, or with zram
+  alone, is warned about. `--swapfile`, or with `--execute` a yes at a terminal, where admit asks,
   or `--yes`, makes a swapfile at `/swapfile` of twice the host's RAM, to
   the nearest GiB, up to 16 GiB, before Docker's packages: it adds it to
   `/etc/fstab`, then turns it on. Swap the host has but has not turned on
-  (a swap partition, a swap line in `/etc/fstab`, a zram-generator
-  configuration or a `/swapfile`) is warned about and left alone, never
-  sized. Admit makes a swapfile only where `/` is ext4 or xfs and keeps
+  (a swap partition, a swap line in `/etc/fstab` or a `/swapfile`) is
+  warned about and left alone, never sized. zram is not such swap: it
+  keeps what it holds in RAM, so admit offers a swapfile beside it. Admit makes a swapfile only where `/` is ext4 or xfs and keeps
   5 GB free beside it. Where it makes none, it warns, and `--swapfile`
   refuses.
 * **Memory:** a host whose RAM is under the floor of the request's roles
   is warned about, never refused; swap that is on, zram excepted, and the
-  swapfile `--swapfile` makes, count for up to a quarter of the floor. *A host's
-  memory is measured against its roles* in `README.md` gives the floors.
+  swapfile `--swapfile` makes, count for up to a quarter of the floor. *A
+  host's memory is measured against its roles* in `README.md` gives the
+  floors.
 * **ufw not active:** `--enable-ufw`, or a yes at a terminal, where admit
   asks, adds these steps after the deployment's own rules, in this order:
   an allow for every TCP port sshd listens on (read from its sockets with

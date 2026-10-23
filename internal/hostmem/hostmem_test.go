@@ -39,12 +39,89 @@ func TestConfigured(t *testing.T) {
 		t.Errorf("on: %q", got)
 	}
 	got := Facts{Partition: true, FSTab: true, ZRAM: true, File: true}.Configured()
-	want := []string{"a swap partition", "a swap line in /etc/fstab", "a zram-generator configuration", "/swapfile exists"}
+	want := []string{"a swap partition", "a swap line in /etc/fstab", "/swapfile exists"}
 	if !slices.Equal(got, want) {
 		t.Errorf("got %q", got)
 	}
 	if got := (Facts{}).Configured(); got != nil {
 		t.Errorf("none: %q", got)
+	}
+	// zram, on or configured, is not swap that counts: a host with zram
+	// alone has nothing configured to turn on, and nothing counting on.
+	for _, f := range []Facts{
+		{ZRAM: true},
+		{Active: true, SwapTotal: 1 << 30, ZRAMOn: 1 << 30, ZRAM: true},
+	} {
+		if f.CountsOn() || f.Configured() != nil || !f.HasZRAM() {
+			t.Errorf("zram alone %+v: CountsOn %v, Configured %q, HasZRAM %v", f, f.CountsOn(), f.Configured(), f.HasZRAM())
+		}
+	}
+	// A swapfile not on beside zram that is on is configured swap.
+	if got := (Facts{Active: true, SwapTotal: 1 << 30, ZRAMOn: 1 << 30, File: true}).Configured(); !slices.Equal(got, []string{"/swapfile exists"}) {
+		t.Errorf("swapfile beside zram: %q", got)
+	}
+	// Swap on beyond zram counts, and so does swap on of unread size.
+	for _, f := range []Facts{{Active: true, SwapTotal: 2 << 30, ZRAMOn: 1 << 30}, {Active: true}} {
+		if !f.CountsOn() {
+			t.Errorf("%+v does not count", f)
+		}
+	}
+}
+
+// ZRAMOnAwk sums the zram devices of a real /proc/swaps, whatever else it
+// lists: a partition, a file, and a file whose name holds a space, which
+// the kernel writes as \040.
+func TestZRAMOnAwk(t *testing.T) {
+	if _, err := exec.LookPath("awk"); err != nil {
+		t.Skip("no awk")
+	}
+	const swaps = "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n" +
+		"/dev/sda2                               partition\t2097148\t\t0\t\t-2\n" +
+		"/swapfile                               file\t\t1048572\t\t0\t\t-3\n" +
+		"/srv/swap\\040space                     file\t\t524284\t\t0\t\t-4\n" +
+		"/dev/zram0                              partition\t4019196\t\t1024\t\t100\n" +
+		"/dev/zram1                              partition\t1000000\t\t0\t\t100\n"
+	for _, c := range []struct{ in, want string }{
+		{swaps, "5139656704"}, // (4019196 + 1000000) KiB
+		{"Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n/dev/zram0 partition 4019196 0 100\n", "4115656704"},
+		{"Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n/dev/sda2 partition 2097148 0 -2\n", "0"},
+		{"Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n", "0"},
+	} {
+		cmd := exec.Command("awk", ZRAMOnAwk)
+		cmd.Stdin = strings.NewReader(c.in)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+		if string(out) != c.want {
+			t.Errorf("got %q, want %q for:\n%s", out, c.want, c.in)
+		}
+	}
+}
+
+// PartitionAwk finds a swap partition in lsblk's list and leaves out a
+// zram device, which is formatted as swap too.
+func TestPartitionAwk(t *testing.T) {
+	if _, err := exec.LookPath("awk"); err != nil {
+		t.Skip("no awk")
+	}
+	for _, c := range []struct {
+		in   string
+		want bool
+	}{
+		{"sda \nsda1 ext4\nsda2 swap\nzram0 swap\n", true},
+		{"sda \nsda1 ext4\nzram0 swap\n", false},
+		{"vda \nvda1 ext4\n", false},
+	} {
+		cmd := exec.Command("awk", PartitionAwk)
+		cmd.Stdin = strings.NewReader(c.in)
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.TrimSpace(string(out)) != ""; got != c.want {
+			t.Errorf("%q: found %v, want %v", c.in, got, c.want)
+		}
 	}
 }
 
@@ -193,7 +270,7 @@ func TestJudge(t *testing.T) {
 func TestVerdictWords(t *testing.T) {
 	edge := roles(config.RoleGateway, config.RoleWitness, config.RoleMonitor)
 	v := Judge(Facts{MemTotal: 458 << 20}, edge, byRoles(edge...))
-	if got, want := v.Line(), "458 MiB of RAM and no swap on, under the 1.2 GiB its roles need"; got != want {
+	if got, want := v.Line(), "458 MiB of RAM and no swap on, under its 1.2 GiB floor for its roles"; got != want {
 		t.Errorf("line %q, want %q", got, want)
 	}
 	text := strings.Join(v.Explain(), "\n")
@@ -207,7 +284,7 @@ func TestVerdictWords(t *testing.T) {
 	}
 	both := roles(config.RoleData, config.RoleApps)
 	v = Judge(Facts{MemTotal: 4113297408, SwapTotal: 2 << 30, Active: true}, both, byRoles(both...))
-	if got, want := v.Line(), "3.8 GiB of RAM and 2.0 GiB of swap, at least the 3.0 GiB its roles need"; got != want {
+	if got, want := v.Line(), "3.8 GiB of RAM and 2.0 GiB of swap, at least its 3.0 GiB floor for its roles"; got != want {
 		t.Errorf("line %q, want %q", got, want)
 	}
 	if text := strings.Join(v.Explain(), "\n"); !strings.Contains(text, "etcd and PostgreSQL slow") {
@@ -215,7 +292,7 @@ func TestVerdictWords(t *testing.T) {
 	}
 	monitor := roles(config.RoleMonitor)
 	v = Judge(Facts{MemTotal: 512 << 20, SwapTotal: 1 << 30, ZRAMOn: 1 << 30, Active: true}, monitor, byRoles(monitor...))
-	if got, want := v.Line(), "512 MiB of RAM and 1.0 GiB of zram and no other swap, under the 896 MiB its roles need"; got != want {
+	if got, want := v.Line(), "512 MiB of RAM and 1.0 GiB of zram and no other swap, under its 896 MiB floor for its roles"; got != want {
 		t.Errorf("line %q, want %q", got, want)
 	}
 	text = strings.Join(v.Explain(), "\n")

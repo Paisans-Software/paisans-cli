@@ -64,6 +64,7 @@ func TestMemoryAdvice(t *testing.T) {
 	}{
 		{"configured, not on", noSwap(vmAdmitted()).with("mem-total", "536870912").with("swap-fstab", "yes"), "turn on the swap it has (swapon -a"},
 		{"none, offered", noSwap(vmAdmitted()).with("mem-total", "536870912"), "make a swapfile with --swapfile"},
+		{"zram alone, offered", noSwap(vmAdmitted()).with("mem-total", "536870912").with("swap-active", "yes").with("swap-zram", "yes").with("swap-total", "1073741824").with("zram-on", "1073741824"), "make a swapfile with --swapfile"},
 	} {
 		plan, err := hostadmit.Build(c.host, input(t, "vm", hostadmit.Flags{}))
 		if err != nil {
