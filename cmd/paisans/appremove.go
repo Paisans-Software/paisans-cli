@@ -133,8 +133,12 @@ func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 		clients = removeClients(cfg, where, key)
 		if in.Client, err = ui.Get(r, "read "+app+"'s client", func() (appremove.ClientState, error) {
+			name, err := removedClientName(*configPath, cfg, app)
+			if err != nil {
+				return appremove.ClientState{}, err
+			}
 			ctx := context.Background()
-			return appremove.ProbeClient(ctx, clients, app, cfg.ClientName(app), idp, where, secrets.OIDCClients[app].ClientID)
+			return appremove.ProbeClient(ctx, clients, app, name, idp, where, secrets.OIDCClients[app].ClientID)
 		}); err != nil {
 			return fmt.Errorf("app remove: %w. Nothing was changed", err)
 		}
@@ -250,6 +254,26 @@ func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	reportRemains(r, appremove.Remains(plan, secrets, runner.Kept))
 	r.Result("%s is removed.", app)
 	return nil
+}
+
+// removedClientName is the name apply last gave app's client
+// (config.Config.ClientName). app has left paisans-stack.yaml, and its
+// display_name with it, so the name is read from the newest version in this
+// workstation's history of the configuration that declares app. With no such
+// version, it is the name cfg gives app.
+func removedClientName(configPath string, cfg *config.Config, app string) (string, error) {
+	l, err := workstationOf(configPath)
+	if err != nil {
+		return cfg.ClientName(app), nil
+	}
+	last, err := l.Declaring(app)
+	if err != nil {
+		return "", fmt.Errorf("reading the configuration %s was last applied from: %w", app, err)
+	}
+	if last == nil {
+		return cfg.ClientName(app), nil
+	}
+	return last.ClientName(app), nil
 }
 
 // confirmName asks for the app's name at the terminal and refuses anything

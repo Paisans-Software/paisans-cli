@@ -1113,3 +1113,50 @@ func TestJudgeHeldWritesNothing(t *testing.T) {
 		t.Errorf("seen %d was recorded", rev)
 	}
 }
+
+// Declaring reads the configuration an app was last applied from, out of
+// the head's history, after the app has left paisans-stack.yaml.
+func TestDeclaringIsTheLastVersionThatDeclaresTheApp(t *testing.T) {
+	needTools(t, "git", "ssh-keygen")
+	alice := newOperator(t)
+	sites := storeSites(t, "home-a")
+	all := reach(sites, "home-a")
+	ops := map[string]string{"alice": alice.pub}
+	news := func(name string) string {
+		return "apps:\n  news:\n    blueprint: writefreely\n    hostname: news.example.org\n    display_name: " + name + "\n"
+	}
+	first := edit(testFiles(), "1", ops)
+	first.Paisans = append(first.Paisans, news("Old News")...)
+	l := workstation(t, first)
+	if cfg, err := l.Declaring("news"); cfg != nil || err != nil {
+		t.Fatalf("with no head: %v, %v", cfg, err)
+	}
+	g, err := gather(l, all, 1, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := publishOpts{keyLine: alice.pub, signWith: alice.key, now: testNow}
+	v1, _, err := publishFiles(l, g, first, all, o, fakePush)
+	if err != nil {
+		t.Fatal(err)
+	}
+	renamed := edit(testFiles(), "2", ops)
+	renamed.Paisans = append(renamed.Paisans, news("Test News")...)
+	v2, _, err := publishNext(l, g, v1, 1, renamed, all, o, fakePush)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := publishNext(l, g, v2, 2, edit(testFiles(), "3", ops), all, o, fakePush); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := l.Declaring("news")
+	if err != nil || cfg == nil {
+		t.Fatalf("Declaring = %v, %v", cfg, err)
+	}
+	if got := cfg.ClientName("news"); got != "Test News" {
+		t.Errorf("news's client is %q, want the last applied display_name", got)
+	}
+	if cfg, err := l.Declaring("talk"); cfg != nil || err != nil {
+		t.Errorf("an app no version declares: %v, %v", cfg, err)
+	}
+}

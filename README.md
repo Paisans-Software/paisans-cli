@@ -8871,7 +8871,7 @@ different place:
 | rendered files | a manifest entry marked left over, under the app's stack directory or named for one of its routes | deleted when the content still hashes to the entry, which is then dropped; a file edited on the host is kept with its entry | the same |
 | the stack directory | its path, `/srv/paisans/<token>/<app>` | removed only once empty; what the app wrote there is kept | deleted, unless it holds a file edited on the host |
 | named volumes | the label and the project | kept | deleted |
-| its client at Pocket ID | the ID recorded under `oidc_clients.<app>`, held by a client with the client's name (the app's, or the community's for the gate) | deleted | deleted |
+| its client at Pocket ID | the ID recorded under `oidc_clients.<app>`, held by a client with the name apply last gave it, read from the newest version in the workstation's configuration history that declares the app: its `display_name`, else the app's, or the community's for the gate | deleted | deleted |
 | its database and role | named `render.DBIdentifier(<app>)` on the cluster's leader, the database owned by that role | kept | dropped |
 | its Garage buckets and keys | the key IDs recorded under `apps.<app>`, and a bucket only those keys are granted on | kept | the bucket emptied and deleted, then the keys |
 

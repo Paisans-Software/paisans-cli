@@ -161,8 +161,10 @@ type ClientState struct {
 	// none, and Site where it was asked.
 	Provider string
 	Site     string
-	// Name is the name apply gives the app's client
-	// (config.Config.ClientName): the app's, or the community's for the gate.
+	// Name is the name apply last gave the app's client
+	// (config.Config.ClientName, as the last configuration that declared the
+	// app reads it): its display_name, else the app's, or the community's for
+	// the gate.
 	Name string
 	// RecordedID is oidc_clients.<app>.client_id in the secrets file.
 	RecordedID string

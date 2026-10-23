@@ -295,6 +295,38 @@ func (l Local) Current() (sha string, revision int, err error) {
 	return head, cache.revision(head), nil
 }
 
+// Declaring is the paisans-stack.yaml of the newest version in the history of
+// this workstation's head that declares app: the configuration the
+// deployment last applied it from. It is nil when there is no head, or when
+// no version in the head's history declares app. It reaches no site.
+func (l Local) Declaring(app string) (*config.Config, error) {
+	head, err := l.Head()
+	if err != nil || head == "" {
+		return nil, err
+	}
+	cache, err := l.Cache()
+	if err != nil {
+		return nil, err
+	}
+	// --topo-order lists every version before its parents, so the first
+	// that declares app has no descendant that does.
+	out, err := cache.git(nil, nil, "rev-list", "--topo-order", head)
+	if err != nil {
+		return nil, err
+	}
+	configs := versionConfigs(cache)
+	for _, sha := range strings.Fields(string(out)) {
+		cfg, err := configs(sha)
+		if err != nil {
+			return nil, fmt.Errorf("reading version %s: %w", sha, err)
+		}
+		if _, ok := cfg.Apps[app]; ok {
+			return cfg, nil
+		}
+	}
+	return nil, nil
+}
+
 func (l Local) path(name string) string { return filepath.Join(l.Dir, name) }
 
 // Files reads the three files beside paisans-stack.yaml.

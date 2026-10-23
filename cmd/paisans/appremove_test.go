@@ -3,11 +3,14 @@ package main
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/appremove"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -84,5 +87,44 @@ func TestRemainsShowTheirObjectWithoutVerbose(t *testing.T) {
 	want := "  WARN a client kept; delete it in Pocket ID if it served only talk\n       It is talk (id 0123) at pocket-id on home-a: unrecorded\n"
 	if b.String() != want {
 		t.Errorf("got\n%q\nwant\n%q", b.String(), want)
+	}
+}
+
+// The client of an app gone from paisans-stack.yaml is looked for by the
+// name apply last gave it, which is its display_name when the version it was
+// last applied from sets one.
+func TestRemovedClientNameIsTheLastAppliedOne(t *testing.T) {
+	key, pub := testKey(t)
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// With no store to read, the name is the one the configuration gives.
+	if name, err := removedClientName(fixtureConfig(), cfg, "talk"); name != "talk" || err != nil {
+		t.Errorf("with no store: %q, %v", name, err)
+	}
+	body := strings.Replace(fixtureAs(t, pub), "    blueprint: mbin\n", "    blueprint: mbin\n    display_name: Test Talk\n", 1)
+	files := snapshotted(configstore.Files{Paisans: []byte(body), Secrets: []byte("s\n"), SOPS: []byte("creation_rules: []\n")})
+	l := configstore.Local{Dir: t.TempDir()}
+	if err := l.WriteFiles(files); err != nil {
+		t.Fatal(err)
+	}
+	cache, err := l.Cache()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sha, err := cache.Commit(files, nil, 1, key, time.Unix(1_800_000_000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.SetHead(sha); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(l.Dir, config.FileName)
+	if name, err := removedClientName(path, cfg, "talk"); name != "Test Talk" || err != nil {
+		t.Errorf("talk's client: %q, %v", name, err)
+	}
+	if name, err := removedClientName(path, cfg, "gone"); name != "gone" || err != nil {
+		t.Errorf("an app no version declares: %q, %v", name, err)
 	}
 }
