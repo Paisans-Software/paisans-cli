@@ -1248,7 +1248,7 @@ starts, restarts or recreates what changed.
   asking for `/.well-known/paisans/<token>` through the community's public
   address, on 443 and on 80 (expecting the redirect), and fails the step
   with "443 on <site> answers, but not as this deployment" when anything
-  else answers there. With no `public_address` it warns "not checked"; a gateway
+  else answers there, plain HTTP or another protocol than TLS on 443 included. With no `public_address` it warns "not checked"; a gateway
   that does not answer fails with an account of hairpin NAT. `--require-all` is as for the whole apply.
 * **Mail:** before the host check, dry run or not, every app the apply
   starts on the site (`--only` narrows it) logs in to its mail server from

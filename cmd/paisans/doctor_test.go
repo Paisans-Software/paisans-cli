@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -855,5 +856,28 @@ func TestDoctorBoundsCommandsPerSiteOnly(t *testing.T) {
 	}
 	if busiest < 2 || top <= 2 {
 		t.Errorf("the checks did not run at once: at most %d on one site, %d in all", busiest, top)
+	}
+}
+
+// How the port was silent reaches doctor's finding, and a 443 that answers
+// in plain HTTP is another server holding it.
+func TestDoctorSelfCheckCarriesHowThePortWasSilent(t *testing.T) {
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := doctorSelfCheck
+	t.Cleanup(func() { doctorSelfCheck = saved })
+	doctorSelfCheck = func(_ context.Context, target selfcheck.Target) error {
+		return &selfcheck.Unanswered{Port: 443, Site: target.Site, URL: "https://" + target.Host, Address: target.Address, Err: syscall.ECONNREFUSED, Why: selfcheck.Refused}
+	}
+	if p := (doctorReads{cfg: cfg}).SelfCheck("watch"); p.Silent != 443 || p.Why != selfcheck.Refused {
+		t.Errorf("a refused 443: %+v", p)
+	}
+	doctorSelfCheck = func(_ context.Context, target selfcheck.Target) error {
+		return &selfcheck.Conflict{Port: 443, Site: target.Site, Detail: "plain HTTP rather than TLS"}
+	}
+	if p := (doctorReads{cfg: cfg}).SelfCheck("watch"); p.Conflict != 443 || p.Silent != 0 {
+		t.Errorf("plain HTTP on 443: %+v", p)
 	}
 }
