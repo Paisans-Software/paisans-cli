@@ -157,7 +157,7 @@ func (a applySwitch) plan(site string, secrets *config.Secrets) (*apply.Plan, er
 		return nil, err
 	}
 	if c := plan.Conflicts(); len(c) > 0 {
-		return nil, fmt.Errorf("%s's %s differs from what the last apply recorded, so somebody edited it on the host. Nothing was changed on %s. Restore it, or run `"+progname.Name()+" deployment apply --site %s --only %s --overwrite %s`, then run rotate-key again", site, c[0].Path, site, site, a.app, c[0].Path)
+		return nil, fmt.Errorf("%s's %s differs from what the last apply recorded, so somebody edited it on the host. Nothing was changed on %s. Restore it, or run `%s deployment apply --site %s --only %s --overwrite %s`, then run rotate-key again", site, c[0].Path, site, progname.Cmd(), site, a.app, c[0].Path)
 	}
 	return plan, nil
 }

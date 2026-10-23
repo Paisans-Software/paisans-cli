@@ -118,9 +118,9 @@ func secretsLeft(app, keys string) string {
 }
 
 func dnsLeft() string {
-	return "DNS: its hostnames' records stay; `" + progname.Name() + " dns prune --execute` deletes them. dns init made them"
+	return "DNS: its hostnames' records stay; `" + progname.Cmd() + " dns prune --execute` deletes them. dns init made them"
 }
 
 func dataKept(app string) string {
-	return "data: kept; `" + progname.Name() + " app remove " + app + " --delete-data --execute` deletes it. Kept: its database, its Garage bucket and key, its named volumes and what it wrote under its stack directory"
+	return "data: kept; `" + progname.Cmd() + " app remove " + app + " --delete-data --execute` deletes it. Kept: its database, its Garage bucket and key, its named volumes and what it wrote under its stack directory"
 }

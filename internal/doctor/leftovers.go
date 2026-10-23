@@ -47,7 +47,7 @@ func Leftovers(probes []LeftoverProbe) []Finding {
 			more := append([]string{}, lines...)
 			more = append(more, "These are this deployment's and are no longer rendered for this site. apply leaves them in place.")
 			for _, app := range p.Report.Apps() {
-				more = append(more, fmt.Sprintf("`"+progname.Name()+" app remove %s` takes %s's off every site, once a whole apply has run on each; it keeps its data unless given --delete-data.", app, app))
+				more = append(more, fmt.Sprintf("`%s app remove %s` takes %s's off every site, once a whole apply has run on each; it keeps its data unless given --delete-data.", progname.Cmd(), app, app))
 			}
 			out = append(out, Finding{Section: SectionLeftovers, Level: Warn, Line: fmt.Sprintf("%s: %d thing(s) of this deployment left over", p.Site, len(lines)), More: more})
 		} else {

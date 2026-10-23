@@ -102,6 +102,6 @@ func (p *Plan) infraReason(to string) string {
 	if len(changed) > 0 {
 		why = "changed " + strings.Join(changed, ", ") + "; " + why
 	}
-	return fmt.Sprintf("this apply ran `%s` on %s (%s), which stopped Patroni there while it led, and %s took the leader key. %s leads from now on, and %s follows it as a replica; nothing moves the leader back on its own. `"+progname.Name()+" doctor` shows the cluster as it is now",
-		ActionTitle(action), p.Site, why, to, to, p.Site)
+	return fmt.Sprintf("this apply ran `%s` on %s (%s), which stopped Patroni there while it led, and %s took the leader key. %s leads from now on, and %s follows it as a replica; nothing moves the leader back on its own. `%s doctor` shows the cluster as it is now",
+		ActionTitle(action), p.Site, why, to, to, p.Site, progname.Cmd())
 }

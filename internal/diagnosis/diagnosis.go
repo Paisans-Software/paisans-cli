@@ -78,7 +78,7 @@ func noCertificate(line string, served Served) (Referral, bool) {
 		if site, ok := served[host]; ok {
 			return Referral{
 				Check:    "caddy certificates " + site,
-				Sentence: fmt.Sprintf("Caddy on %s has no certificate for %s, so it refuses TLS for it. Run "+progname.Name()+" doctor to see why it could not get one.", site, host),
+				Sentence: fmt.Sprintf("Caddy on %s has no certificate for %s, so it refuses TLS for it. Run %s doctor to see why it could not get one.", site, host, progname.Cmd()),
 			}, true
 		}
 	}
@@ -99,7 +99,7 @@ func noDatabase(line string, _ Served) (Referral, bool) {
 	}
 	return Referral{
 		Check:    "patroni",
-		Sentence: "It cannot reach its database. Run " + progname.Name() + " doctor, whose Patroni check says whether there is a primary.",
+		Sentence: "It cannot reach its database. Run " + progname.Cmd() + " doctor, whose Patroni check says whether there is a primary.",
 	}, true
 }
 
@@ -109,7 +109,7 @@ func noDatabase(line string, _ Served) (Referral, bool) {
 func Unreachable(site string) Referral {
 	return Referral{
 		Check:    "reach " + site,
-		Sentence: fmt.Sprintf("Run "+progname.Name()+" doctor --site %s, which says what the deployment is without while it is gone.", site),
+		Sentence: fmt.Sprintf("Run %s doctor --site %s, which says what the deployment is without while it is gone.", progname.Cmd(), site),
 	}
 }
 
@@ -132,7 +132,7 @@ var (
 // tokenReferral is how each provider referral ends: doctor checks the token
 // from the workstation and from each Caddy site.
 func tokenReferral() string {
-	return "Run " + progname.Name() + " doctor, which checks the token from every place that uses it."
+	return "Run " + progname.Cmd() + " doctor, which checks the token from every place that uses it."
 }
 
 // Provider is the referral for a DNS provider's refusal of the token, worded
@@ -165,5 +165,5 @@ func Provider(err error, site string) (Referral, bool) {
 // Mentions reports whether text already refers to doctor, so a referral is
 // added once however many layers an error passes through.
 func Mentions(text string) bool {
-	return strings.Contains(text, progname.Name()+" doctor")
+	return strings.Contains(text, progname.Cmd()+" doctor")
 }

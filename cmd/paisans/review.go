@@ -351,7 +351,7 @@ func stepReview(r ui.Reporter, a answerer, stdin io.Reader, stdout io.Writer, cf
 			}
 			return nil, "", &ui.Problem{
 				Hint:    "what " + config.FileName + " grants on " + site + " changed after it was approved",
-				Explain: strings.Join(lines, "\n") + "\nThese were not in the review the run asked you to approve. Nothing was changed on " + site + " by this step. Run " + progname.Name() + " deployment apply --execute again to review them.",
+				Explain: strings.Join(lines, "\n") + "\nThese were not in the review the run asked you to approve. Nothing was changed on " + site + " by this step. Run " + progname.Cmd() + " deployment apply --execute again to review them.",
 			}
 		}
 		return s, run.approvedBy, nil

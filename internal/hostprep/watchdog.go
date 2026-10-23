@@ -207,7 +207,7 @@ func planWatchdog(t Transport, d deployment.Deployment, profile Profile, site co
 // admitWatchdog is what fixes the watchdog on site when site prepare finds
 // it wrong: it is a root change, the host owner's.
 func admitWatchdog(site string) string {
-	return fmt.Sprintf("The host's owner runs sudo "+progname.Default+" site admit --request %[1]s.admit --watchdog again, from "+progname.Name()+" site request --site %[1]s > %[1]s.admit.", site)
+	return fmt.Sprintf("The host's owner runs sudo %[2]s site admit --request %[1]s.admit --watchdog again, from %[3]s site request --site %[1]s > %[1]s.admit.", site, progname.Default, progname.Cmd())
 }
 
 // checkWatchdog reads what a data site's watchdog is, as the deployment's

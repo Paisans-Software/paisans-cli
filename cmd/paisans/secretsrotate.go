@@ -51,7 +51,7 @@ var readRotateSecret = func(path, issuer string) (string, error) {
 }
 
 func rotateUsage() string {
-	return "Usage: " + progname.Name() + " secrets rotate <path>... | --all [--restart] [--replaced <path>]... [--execute]"
+	return "Usage: " + progname.Cmd() + " secrets rotate <path>... | --all [--restart] [--replaced <path>]... [--execute]"
 }
 
 // replacedEarlier is how the plan lists a pasted secret named with
@@ -60,7 +60,7 @@ const replacedEarlier = "replaced earlier, hosts already run it: the value the s
 
 // wireguardKept is why secrets rotate leaves the WireGuard keys alone.
 func wireguardKept() string {
-	return "a WireGuard key is replaced by `" + progname.Name() + " mesh rekey`, which moves it without dropping a tunnel"
+	return "a WireGuard key is replaced by `" + progname.Cmd() + " mesh rekey`, which moves it without dropping a tunnel"
 }
 
 // backupKeyKept is why the restic password and WAL-G's key are kept. restic
@@ -70,7 +70,7 @@ const backupKeyKept = "it encrypts every backup already taken, and a new one wou
 
 // destinationKept is why a backup destination's credentials are kept.
 func destinationKept() string {
-	return "it is issued by the provider behind the destination: issue a new key there, pipe it in with `" + progname.Name() + " secrets set`, apply, then delete the old key at the provider"
+	return "it is issued by the provider behind the destination: issue a new key there, pipe it in with `" + progname.Cmd() + " secrets set`, apply, then delete the old key at the provider"
 }
 
 // rotateStopped is what a failed health gate inside secrets rotate tells the
@@ -125,7 +125,7 @@ func runSecretsRotate(args []string, stdin io.Reader, stdout io.Writer) error {
 	case *restart && !*all:
 		return &ui.Problem{Hint: "--restart takes --all", Explain: "--restart starts an --all run's full list again, discarding what an earlier --all run left. " + rotateUsage()}
 	case !*all && len(named) == 0:
-		return &ui.Problem{Hint: "secrets rotate needs a secret", Explain: "It names the secrets to rotate by their paths in the secrets file, Eg: " + progname.Name() + " secrets rotate cluster.standby_password, or apps.<app>.<unit> for a unit of secrets an app's blueprint groups, such as apps.talk.oauth; or --all for every one. " + rotateUsage()}
+		return &ui.Problem{Hint: "secrets rotate needs a secret", Explain: "It names the secrets to rotate by their paths in the secrets file, Eg: " + progname.Cmd() + " secrets rotate cluster.standby_password, or apps.<app>.<unit> for a unit of secrets an app's blueprint groups, such as apps.talk.oauth; or --all for every one. " + rotateUsage()}
 	}
 	cfg, err := config.Load(*configPath)
 	if err != nil {
@@ -322,7 +322,7 @@ func askPasted(env secretsrotate.Env, run *secretsrotate.Run, stdin io.Reader) e
 		var paths, steps []string
 		for _, a := range asked {
 			paths = append(paths, a.Path)
-			steps = append(steps, fmt.Sprintf("replace %s at %s and set it with `"+progname.Name()+" secrets set %s < file`", a.Path, a.Issuer, a.Path))
+			steps = append(steps, fmt.Sprintf("replace %s at %s and set it with `%s secrets set %s < file`", a.Path, a.Issuer, progname.Cmd(), a.Path))
 		}
 		return fmt.Errorf("secrets rotate: every host using %s runs the value the secrets file holds, so the new value is asked for at a terminal, and stdin is not one. Without one, %s, then run secrets rotate again, which hands out the value the file holds. Nothing was changed", strings.Join(paths, ", "), strings.Join(steps, "; "))
 	}
@@ -416,7 +416,7 @@ func rotateApply(r ui.Reporter, cfg *config.Config, t apply.Transport, site stri
 		return err
 	}
 	if c := plan.Conflicts(); len(c) > 0 {
-		return fmt.Errorf("%s's %s differs from what the last apply recorded, so somebody edited it on the host. Nothing was changed on %s. Restore it, or run `"+progname.Name()+" deployment apply --site %s --only %s --overwrite %s`, then run secrets rotate again", site, c[0].Path, site, site, strings.Join(stacks, " --only "), c[0].Path)
+		return fmt.Errorf("%s's %s differs from what the last apply recorded, so somebody edited it on the host. Nothing was changed on %s. Restore it, or run `%s deployment apply --site %s --only %s --overwrite %s`, then run secrets rotate again", site, c[0].Path, site, progname.Cmd(), site, strings.Join(stacks, " --only "), c[0].Path)
 	}
 	plan.Report = r
 	return apply.Execute(plan, t)
@@ -454,7 +454,7 @@ func planRotation(e secretsrotate.Env, rs []secretsrotate.Rotator, all, restart 
 func refuseReplacedPending(s *config.Secrets, replaced []string) error {
 	for _, path := range replaced {
 		if slices.Contains(s.RotationPending(), path) {
-			return fmt.Errorf("secrets rotate: --replaced %s, but a rotation of it is under way, so its hosts may run either value. Finish it with "+progname.Name()+" secrets rotate %s --execute. Nothing was changed", path, path)
+			return fmt.Errorf("secrets rotate: --replaced %s, but a rotation of it is under way, so its hosts may run either value. Finish it with %s secrets rotate %s --execute. Nothing was changed", path, progname.Cmd(), path)
 		}
 	}
 	return nil
@@ -657,7 +657,7 @@ func refuseUnfilled(cfg *config.Config, store secretsrotate.Store, path string) 
 		return fmt.Errorf("secrets rotate: reading which secrets %s lacks: %w", path, err)
 	}
 	if filled.Changed() {
-		return fmt.Errorf("secrets rotate --all: %s lacks %s, which `"+progname.Name()+" init` generates. Run it, and apply, first. Nothing was changed", path, strings.Join(filled.Generated, ", "))
+		return fmt.Errorf("secrets rotate --all: %s lacks %s, which `%s init` generates. Run it, and apply, first. Nothing was changed", path, strings.Join(filled.Generated, ", "), progname.Cmd())
 	}
 	return nil
 }
@@ -837,10 +837,10 @@ func rotationNotes(cfg *config.Config, path string) []string {
 	switch {
 	case len(parts) == 3 && parts[0] == "oidc_clients":
 		app := parts[1]
-		return []string{fmt.Sprintf("as `"+progname.Name()+" oidc client create --app %s --rotate-secret --execute`, then each site running %s applied in turn, each healthy before the next; the old client secrets are deleted at Pocket ID only after every site runs the new one", app, app)}
+		return []string{fmt.Sprintf("as `%s oidc client create --app %s --rotate-secret --execute`, then each site running %s applied in turn, each healthy before the next; the old client secrets are deleted at Pocket ID only after every site runs the new one", progname.Cmd(), app, app)}
 	case len(parts) == 3 && parts[0] == "apps" && parts[2] == "s3_secret_access_key":
 		app := parts[1]
-		return []string{fmt.Sprintf("as `"+progname.Name()+" storage rotate-key --app %s --execute`: the new key is imported beside the old one, every site running %s is switched and healthy, and only then is the old key deleted from Garage", app, app)}
+		return []string{fmt.Sprintf("as `%s storage rotate-key --app %s --execute`: the new key is imported beside the old one, every site running %s is switched and healthy, and only then is the old key deleted from Garage", progname.Cmd(), app, app)}
 	case len(parts) == 2 && parts[0] == "cluster" && len(cfg.Cluster.Sites) == 1:
 		return []string{fmt.Sprintf("the cluster has one data member, %s, so there is no replica to switch the leader to: its Patroni is started again in place, and the database is unavailable for that restart", cfg.Cluster.Sites[0])}
 	case path == "storage.garage.rpc_secret":
@@ -864,7 +864,7 @@ func refuseRotateMidRekey(secrets *config.Secrets) error {
 	}
 	return &ui.Problem{
 		Hint:    "a mesh rekey is unfinished",
-		Explain: fmt.Sprintf("The secrets file holds a next WireGuard key for %s, so a mesh rekey stopped part way, and a rotation's applies would render the old key back to its peers. Finish the rekey first: "+progname.Name()+" mesh rekey %s --execute (or --all, when the run was --all), then secrets rotate. Nothing was changed.", strings.Join(pending, ", "), strings.Join(pending, " ")),
+		Explain: fmt.Sprintf("The secrets file holds a next WireGuard key for %s, so a mesh rekey stopped part way, and a rotation's applies would render the old key back to its peers. Finish the rekey first: %s mesh rekey %s --execute (or --all, when the run was --all), then secrets rotate. Nothing was changed.", strings.Join(pending, ", "), progname.Cmd(), strings.Join(pending, " ")),
 	}
 }
 
@@ -885,7 +885,7 @@ func refuseMidRotation(secrets *config.Secrets, command string) error {
 	}
 	return &ui.Problem{
 		Hint:    "a secret's rotation is unfinished",
-		Explain: fmt.Sprintf("The secrets file holds a next value for %s, so a secrets rotate stopped part way. Some hosts may already check or present that value, and %s renders the old one. Finish the rotation first: "+progname.Name()+" secrets rotate %s --execute (or --all --execute, when the run was --all), then %s. %s Nothing was changed.", strings.Join(pending, ", "), command, strings.Join(pending, " "), command, cannotFinish),
+		Explain: fmt.Sprintf("The secrets file holds a next value for %s, so a secrets rotate stopped part way. Some hosts may already check or present that value, and %s renders the old one. Finish the rotation first: %s secrets rotate %s --execute (or --all --execute, when the run was --all), then %s. %s Nothing was changed.", strings.Join(pending, ", "), command, progname.Cmd(), strings.Join(pending, " "), command, cannotFinish),
 	}
 }
 

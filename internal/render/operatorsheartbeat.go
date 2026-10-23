@@ -73,10 +73,10 @@ func (p *planner) operatorsHeartbeatToken(app string) (string, error) {
 func (p *planner) appHeartbeatToken(app, key string) (string, error) {
 	token := p.appSecret(app, key)
 	if token == "" {
-		return "", fmt.Errorf("secrets apps.%s.%s: required, since every monitor expects every instance of %s to push with it. Run `"+progname.Name()+" init` to generate it", app, key, app)
+		return "", fmt.Errorf("secrets apps.%s.%s: required, since every monitor expects every instance of %s to push with it. Run `%s init` to generate it", app, key, app, progname.Cmd())
 	}
 	if !heartbeatTokenShape.MatchString(token) {
-		return "", fmt.Errorf("secrets apps.%s.%s: is not 32 lowercase hex characters, the one shape the monitor's seed accepts. It would replace it with a token of its own, and every instance would push at a URL the monitor answers 404 to. Run `"+progname.Name()+" init` after removing it, which generates one in the right shape", app, key)
+		return "", fmt.Errorf("secrets apps.%s.%s: is not 32 lowercase hex characters, the one shape the monitor's seed accepts. It would replace it with a token of its own, and every instance would push at a URL the monitor answers 404 to. Run `%s init` after removing it, which generates one in the right shape", app, key, progname.Cmd())
 	}
 	return token, nil
 }

@@ -543,7 +543,7 @@ last. Every other command that writes to a host first reads the host's admission
 record for this deployment and refuses, with nothing changed, a host that has
 none, or whose record does not match the site: another site name, ssh user, SSH
 or WireGuard port, mesh subnet, forwarding, a grant its roles need, or, for
-an external web server, the owner's web server record. It names the two lines that fix it, ` + progname.Name() + ` site request --site <site> >
+an external web server, the owner's web server record. It names the two lines that fix it, ` + progname.Cmd() + ` site request --site <site> >
 <site>.admit for the operator, and sudo ` + progname.Default + ` site admit --request
 <site>.admit for the host's owner. apply and site prepare also refuse when
 anything else on the host overlaps the mesh subnet. dns init and dns prune reach
@@ -593,7 +593,7 @@ func isGroup(name string) bool { return len(subcommands(name)) > 0 }
 // printTopHelp writes the first page: every command, one line each.
 func printTopHelp(w io.Writer) {
 	fmt.Fprint(w, progname.Name()+" installs and runs a community stack from "+config.FileName+".\n\n")
-	fmt.Fprint(w, "Usage: "+progname.Name()+" <command> [flags]\n")
+	fmt.Fprint(w, "Usage: "+progname.Cmd()+" <command> [flags]\n")
 	for _, s := range helpSections {
 		fmt.Fprintf(w, "\n%s:\n", s.title)
 		for _, name := range s.names {
@@ -606,14 +606,14 @@ func printTopHelp(w io.Writer) {
 	}
 	fmt.Fprint(w, "\nA command that changes a host changes it only with --execute; without it, it\n"+
 		"shows what it would do. Every command takes -v or --verbose.\n\n"+
-		"Run '"+progname.Name()+" help <command>' for a command's details, and '"+progname.Name()+" help\n"+
+		"Run '"+progname.Cmd()+" help <command>' for a command's details, and '"+progname.Cmd()+" help\n"+
 		"execute' for which commands reach a host and what --execute changes.\n")
 }
 
 // printGroupHelp writes a group's page: its subcommands, one line each.
 func printGroupHelp(w io.Writer, group string) {
 	subs := subcommands(group)
-	fmt.Fprintf(w, "%s\n\nUsage: %s %s <command> [flags]\n\nCommands:\n", groupSummary[group], progname.Name(), group)
+	fmt.Fprintf(w, "%s\n\nUsage: %s %s <command> [flags]\n\nCommands:\n", groupSummary[group], progname.Cmd(), group)
 	width := 0
 	for _, c := range subs {
 		width = max(width, len(strings.TrimPrefix(c.name, group+" ")))
@@ -621,7 +621,7 @@ func printGroupHelp(w io.Writer, group string) {
 	for _, c := range subs {
 		fmt.Fprintf(w, "  %-*s  %s\n", width, strings.TrimPrefix(c.name, group+" "), c.summary)
 	}
-	fmt.Fprintf(w, "\nRun '%s %s <command> --help' for a command's usage, details and flags.\n", progname.Name(), group)
+	fmt.Fprintf(w, "\nRun '%s %s <command> --help' for a command's usage, details and flags.\n", progname.Cmd(), group)
 }
 
 // printCommandHelp writes one command's page: its usage, what it does, and,
@@ -646,10 +646,14 @@ func printCommandHelp(w io.Writer, c *helpCommand, fs *flag.FlagSet) {
 
 // invokedUsage is a usage line from helpCommands, which names the command
 // paisans, with the command named as it was invoked and its continuation
-// lines moved by the difference, so they stay under its flags.
+// lines moved by the difference, so they stay under its flags. A line run
+// with sudo is the host's owner's, on the host, and keeps paisans.
 func invokedUsage(u string) string {
-	u = strings.Replace(u, progname.Default, progname.Name(), 1)
-	return strings.ReplaceAll(u, "\n"+strings.Repeat(" ", len(progname.Default)), "\n"+strings.Repeat(" ", len(progname.Name())))
+	if strings.HasPrefix(u, "sudo ") {
+		return u
+	}
+	u = strings.Replace(u, progname.Default, progname.Cmd(), 1)
+	return strings.ReplaceAll(u, "\n"+strings.Repeat(" ", len(progname.Default)), "\n"+strings.Repeat(" ", len(progname.Cmd())))
 }
 
 // wrap breaks text into lines of at most width columns, at spaces.
@@ -691,7 +695,7 @@ func newFlagSet(name string, handling flag.ErrorHandling) *flag.FlagSet {
 			printCommandHelp(os.Stdout, c, fs)
 			return
 		}
-		fmt.Fprintf(fs.Output(), "Run '%s %s --help' for its usage and flags.\n", progname.Name(), name)
+		fmt.Fprintf(fs.Output(), "Run '%s %s --help' for its usage and flags.\n", progname.Cmd(), name)
 	}
 	return fs
 }

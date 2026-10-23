@@ -103,7 +103,7 @@ func warnSecrets(r ui.Reporter, cfg *config.Config, secrets *config.Secrets, dep
 		r.Warn(o.Key+" "+o.Why, o.Leaves+".")
 	}
 	for _, o := range secretsgen.Orphans(cfg, secrets, deployed) {
-		r.Warn("secrets: "+o.Key+" "+o.Why, "`"+progname.Name()+" secrets prune` removes it.")
+		r.Warn("secrets: "+o.Key+" "+o.Why, "`"+progname.Cmd()+" secrets prune` removes it.")
 	}
 }
 

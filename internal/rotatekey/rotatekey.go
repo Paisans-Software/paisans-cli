@@ -210,7 +210,7 @@ func Build(opts Options) (*Plan, error) {
 	prevID, _ := garage.SecretString(secrets, opts.App, previousID)
 	prevSecret, _ := garage.SecretString(secrets, opts.App, previousKey)
 	if curID == "" || curSecret == "" {
-		return nil, fmt.Errorf("storage rotate-key: apps.%s has no S3 key in the secrets. `"+progname.Name()+" init` generates one and `"+progname.Name()+" storage init` imports it; there is nothing to rotate yet", opts.App)
+		return nil, fmt.Errorf("storage rotate-key: apps.%s has no S3 key in the secrets. `%s init` generates one and `%s storage init` imports it; there is nothing to rotate yet", opts.App, progname.Cmd(), progname.Cmd())
 	}
 	switch {
 	case prevID == "" && prevSecret == "":
@@ -237,17 +237,17 @@ func Build(opts Options) (*Plan, error) {
 		}
 	}
 	if !oldPresent && !p.InProgress {
-		return nil, fmt.Errorf("storage rotate-key: %s's key %s is not in Garage, so there is no key to retire. Nothing was changed. `"+progname.Name()+" storage init` imports the key the secrets hold", opts.App, p.OldKeyID)
+		return nil, fmt.Errorf("storage rotate-key: %s's key %s is not in Garage, so there is no key to retire. Nothing was changed. `%s storage init` imports the key the secrets hold", opts.App, p.OldKeyID, progname.Cmd())
 	}
 	if !oldPresent && !newPresent {
-		return nil, fmt.Errorf("storage rotate-key: neither %s's retiring key %s nor its new key %s is in Garage, so the app has no key at all. Nothing was changed. `"+progname.Name()+" storage init` imports and grants the new key the secrets hold; run it, then run rotate-key again to clear the previous pair", opts.App, p.OldKeyID, p.NewKeyID)
+		return nil, fmt.Errorf("storage rotate-key: neither %s's retiring key %s nor its new key %s is in Garage, so the app has no key at all. Nothing was changed. `%s storage init` imports and grants the new key the secrets hold; run it, then run rotate-key again to clear the previous pair", opts.App, p.OldKeyID, p.NewKeyID, progname.Cmd())
 	}
 	bucket, err := garage.ReadBucket(p.garage, p.opts.Config.Deployment(), p.Bucket)
 	if err != nil {
 		return nil, err
 	}
 	if bucket.Absent {
-		return nil, fmt.Errorf("storage rotate-key: %s's bucket %s does not exist. Nothing was changed. `"+progname.Name()+" storage init` creates it", opts.App, p.Bucket)
+		return nil, fmt.Errorf("storage rotate-key: %s's bucket %s does not exist. Nothing was changed. `%s storage init` creates it", opts.App, p.Bucket, progname.Cmd())
 	}
 
 	p.Stages = append(p.Stages, p.buildSecrets())
@@ -281,7 +281,7 @@ func (p *Plan) buildSecrets() *Stage {
 	if !p.InProgress {
 		const title = "write the new key to the secrets"
 		st.Steps = []Step{
-			{title, fmt.Sprintf("generate a new key ID and secret for %s, the way `"+progname.Name()+" init` does", p.App)},
+			{title, fmt.Sprintf("generate a new key ID and secret for %s, the way `%s init` does", p.App, progname.Cmd())},
 			{title, fmt.Sprintf("keep %s as apps.%s.%s and %s", p.OldKeyID, p.App, previousID, previousKey)},
 			{title, "write the secrets file, encrypted to its recipients"},
 		}
@@ -396,7 +396,7 @@ func (p *Plan) buildSwitch() (*Stage, error) {
 		if !p.InProgress {
 			// The .env changes once stage 1 has run; with the secrets as
 			// they are, apply would find nothing to do.
-			st.Steps = append(st.Steps, Step{"switch " + p.App + " on " + site, fmt.Sprintf("%s: as `"+progname.Name()+" deployment apply --site %s --only %s`: write its .env with %s, recreate it, health gate", site, site, p.App, p.newName())})
+			st.Steps = append(st.Steps, Step{"switch " + p.App + " on " + site, fmt.Sprintf("%s: as `%s deployment apply --site %s --only %s`: write its .env with %s, recreate it, health gate", site, progname.Cmd(), site, p.App, p.newName())})
 			todo = append(todo, site)
 			continue
 		}
@@ -405,7 +405,7 @@ func (p *Plan) buildSwitch() (*Stage, error) {
 			return nil, err
 		}
 		if len(pending) > 0 {
-			st.Steps = append(st.Steps, Step{"switch " + p.App + " on " + site, fmt.Sprintf("%s: as `"+progname.Name()+" deployment apply --site %s --only %s`: %s", site, site, p.App, strings.Join(pending, "; "))})
+			st.Steps = append(st.Steps, Step{"switch " + p.App + " on " + site, fmt.Sprintf("%s: as `%s deployment apply --site %s --only %s`: %s", site, progname.Cmd(), site, p.App, strings.Join(pending, "; "))})
 			todo = append(todo, site)
 		}
 	}

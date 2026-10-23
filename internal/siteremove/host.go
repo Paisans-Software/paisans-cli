@@ -542,7 +542,7 @@ func (p *Plan) checkLogin(t apply.Transport) error {
 	recordPath, _ := admission.Path(d.Token())
 	switch {
 	case errors.Is(err, admission.ErrNotAdmitted):
-		return fmt.Errorf("site remove %s: %s has no admission record for this deployment (%s), so nothing says who its user is, and site remove cleans a host only as that user. Nothing was changed. If the deployment's user is still there, the host's owner removes it and everything root's with sudo "+progname.Default+" site evict --deployment %s --user <the deployment's user> --execute", p.Site, t.Describe(), recordPath, d.ID)
+		return fmt.Errorf("site remove %s: %s has no admission record for this deployment (%s), so nothing says who its user is, and site remove cleans a host only as that user. Nothing was changed. If the deployment's user is still there, the host's owner removes it and everything root's with sudo %s site evict --deployment %s --user <the deployment's user> --execute", p.Site, t.Describe(), recordPath, progname.Default, d.ID)
 	case err != nil:
 		return fmt.Errorf("site remove %s: %w. Nothing was changed", p.Site, err)
 	}

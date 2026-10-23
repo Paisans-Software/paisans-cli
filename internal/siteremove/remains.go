@@ -38,15 +38,15 @@ func recordMissed(gw, why string) string {
 }
 
 func recordRaced(gw, site, why string) string {
-	return fmt.Sprintf("%s: deployment record changed meanwhile; take the site out again. Another command wrote it between the read and the write, so it may still list %s: run "+progname.Name()+" site remove %s --force --ssh <its host> once this removal is done. %s", gw, site, site, why)
+	return fmt.Sprintf("%s: deployment record changed meanwhile; take the site out again. Another command wrote it between the read and the write, so it may still list %s: run %s site remove %s --force --ssh <its host> once this removal is done. %s", gw, site, progname.Cmd(), site, why)
 }
 
 func secretsLeft(site string) string {
-	return fmt.Sprintf("secrets: run `"+progname.Name()+" secrets prune` once nothing needs sites.%s. It holds its WireGuard key and heartbeat token, and this command never edits the secrets file", site)
+	return fmt.Sprintf("secrets: run `%s secrets prune` once nothing needs sites.%s. It holds its WireGuard key and heartbeat token, and this command never edits the secrets file", progname.Cmd(), site)
 }
 
 func ownedNote(site, owed string) string {
-	return fmt.Sprintf("%s: `"+progname.Name()+" deployment apply --site %s` when that is acceptable. %s", site, site, owed)
+	return fmt.Sprintf("%s: `%s deployment apply --site %s` when that is acceptable. %s", site, progname.Cmd(), site, owed)
 }
 
 func caddyKept(site, container string, sites []string, sitesDir, dir string) string {

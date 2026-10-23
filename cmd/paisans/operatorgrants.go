@@ -127,7 +127,7 @@ func runOperatorGrants(args []string) error {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return fmt.Errorf("operator grants takes no argument: "+progname.Name()+" operator grants --ssh <user@host[:port] or alias>. Got extra argument(s): %s", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("operator grants takes no argument: %s operator grants --ssh <user@host[:port] or alias>. Got extra argument(s): %s", progname.Cmd(), strings.Join(fs.Args(), " "))
 	}
 	if *sshFlag == "" {
 		return fmt.Errorf("operator grants: name the host with --ssh user@host[:port], or an alias of your ssh config, Eg: --ssh admin@203.0.113.9")
@@ -162,7 +162,7 @@ func runOperatorGrants(args []string) error {
 		if roles == "" {
 			roles = "no role"
 		}
-		command := strings.Join(append([]string{progname.Name() + " site admit --site", apply.ShellQuote(rec.Site)}, admitFlags(rec)...), " ")
+		command := strings.Join(append([]string{progname.Cmd() + " site admit --site", apply.ShellQuote(rec.Site)}, admitFlags(rec)...), " ")
 		r.Step(fmt.Sprintf("site %s of %s (%s), as %s, admitted %s", ui.Visible(rec.Site), rec.Deployment, roles, rec.User, rec.AdmittedAt)).End(ui.OK, "")
 		r.Explain(grantLines(rec) + "\nadmit again: " + ui.Visible(command))
 		read++

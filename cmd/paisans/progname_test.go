@@ -51,6 +51,11 @@ func TestHelpNamesTheInvokedCommand(t *testing.T) {
 	if m := namesPaisans.FindAllString(page, -1); len(m) > 0 {
 		t.Errorf("help names paisans rather than paisans-test: %q", m)
 	}
+	for _, owners := range []string{"sudo paisans site admit --request <file>", "sudo paisans site evict --request <file>", "sudo paisans site evict --deployment <id>"} {
+		if !strings.Contains(b.String(), owners) {
+			t.Errorf("help does not keep the owner's %q", owners)
+		}
+	}
 	if !strings.Contains(page, "Usage: paisans-test <command> [flags]") {
 		t.Errorf("top help has no usage line for paisans-test")
 	}
@@ -91,5 +96,24 @@ func TestOwnersAdviceNamesPaisans(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("admission problem lacks %q:\n%s", want, got)
 		}
+	}
+}
+
+// ufw's refusal is printed on the host to its owner, and names the
+// workstation command as paisans, since the owner cannot know what the
+// operator's build is called.
+func TestUFWRefusalNamesPaisans(t *testing.T) {
+	invokedAs(t)
+	if got := ufwNeedsAPerson().Error(); !strings.Contains(got, "Run paisans site admit --site <site>") {
+		t.Errorf("ufwNeedsAPerson() = %q, want paisans site admit", got)
+	}
+}
+
+// A name a shell would split is quoted in a command line to copy.
+func TestAdviceQuotesANameAShellWouldSplit(t *testing.T) {
+	progname.Set("/opt/my bin/paisans test")
+	t.Cleanup(func() { progname.Set(progname.Default) })
+	if got := resumeAdvice(); got != "Run 'paisans test' deployment apply --execute again to resume." {
+		t.Errorf("resumeAdvice() = %q", got)
 	}
 }

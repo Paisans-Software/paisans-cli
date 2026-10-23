@@ -74,10 +74,10 @@ func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	// the reporter and the login recording take --execute and -v from them.
 	r := reporter()
 	if fs.NArg() > 0 {
-		return fmt.Errorf("app remove takes one app: "+progname.Name()+" app remove <app> [--execute] [--delete-data]. Got extra argument(s): %s", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("app remove takes one app: %s app remove <app> [--execute] [--delete-data]. Got extra argument(s): %s", progname.Cmd(), strings.Join(fs.Args(), " "))
 	}
 	if app == "" {
-		return fmt.Errorf("app remove: name the app: %s app remove <app> [--execute] [--delete-data]", progname.Name())
+		return fmt.Errorf("app remove: name the app: %s app remove <app> [--execute] [--delete-data]", progname.Cmd())
 	}
 
 	cfg, err := config.Load(*configPath)

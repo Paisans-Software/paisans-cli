@@ -329,7 +329,7 @@ func Wizard() ([]WizardEntry, error) {
 	core.Lock()
 	defer core.Unlock()
 	if len(core.wizard) == 0 {
-		return nil, fmt.Errorf("the core catalog at %s offers nothing to `"+progname.Name()+" create`", core.release.Tag)
+		return nil, fmt.Errorf("the core catalog at %s offers nothing to `%s create`", core.release.Tag, progname.Cmd())
 	}
 	return append([]WizardEntry(nil), core.wizard...), nil
 }

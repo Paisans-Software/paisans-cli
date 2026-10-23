@@ -182,7 +182,7 @@ func runSiteDeployments(args []string) error {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return fmt.Errorf("site deployments takes no argument: "+progname.Name()+" site deployments --ssh <user@host[:port] or ssh alias>. Got extra argument(s): %s", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("site deployments takes no argument: %s site deployments --ssh <user@host[:port] or ssh alias>. Got extra argument(s): %s", progname.Cmd(), strings.Join(fs.Args(), " "))
 	}
 	if *sshFlag == "" {
 		return fmt.Errorf("site deployments: name the host with --ssh user@host[:port], or an alias of your ssh config, Eg: --ssh admin@203.0.113.9 or --ssh home-a")
@@ -265,7 +265,7 @@ func runSiteDeployments(args []string) error {
 		tokens[e.Token], roots[e.Root] = true, true
 		if noBuild != nil && slices.Contains(noBuild.IDs, id) {
 			line := strings.TrimSuffix(registryLine(id, e), ", claimed by paisans "+e.Build.String())
-			r.Warn(line+", in an entry that does not say which build of paisans claimed the host: its owner admits it again (`"+progname.Name()+" site request`, then `"+progname.Default+" site admit`)", noBuild.Error())
+			r.Warn(line+", in an entry that does not say which build of paisans claimed the host: its owner admits it again (`"+progname.Cmd()+" site request`, then `"+progname.Default+" site admit`)", noBuild.Error())
 			continue
 		}
 		r.Step(registryLine(id, e)).End(ui.OK, "")
@@ -292,7 +292,7 @@ func runSiteDeployments(args []string) error {
 
 	switch {
 	case len(ids) > 0:
-		r.Result("%d deployment(s) in the registry. "+progname.Name()+" site remove --force --ssh <the deployment's user>@<host> --id <id or token> cleans one off this host.", len(ids))
+		r.Result("%d deployment(s) in the registry. %s site remove --force --ssh <the deployment's user>@<host> --id <id or token> cleans one off this host.", len(ids), progname.Cmd())
 	case len(left) > 0:
 		r.Result("No deployment in the registry; what is listed above is removed by hand.")
 	default:

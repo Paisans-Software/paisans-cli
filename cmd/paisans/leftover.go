@@ -49,7 +49,7 @@ func printLeftovers(r ui.Reporter, cfg *config.Config, site string, inv *hostche
 		if app == "" {
 			return "left over: " + what
 		}
-		return fmt.Sprintf("left over: %s (`"+progname.Name()+" app remove %s`)", what, app)
+		return fmt.Sprintf("left over: %s (`%s app remove %s`)", what, progname.Cmd(), app)
 	}
 	for i, s := range report.Stacks {
 		app := s.Name
@@ -72,7 +72,7 @@ func printLeftovers(r ui.Reporter, cfg *config.Config, site string, inv *hostche
 func removeAdvice(report ownership.Report) []string {
 	var out []string
 	for _, app := range report.Apps() {
-		out = append(out, fmt.Sprintf("`"+progname.Name()+" app remove %s` takes %s's off every site, once a whole apply has run on each; it keeps its data unless given --delete-data", app, app))
+		out = append(out, fmt.Sprintf("`%s app remove %s` takes %s's off every site, once a whole apply has run on each; it keeps its data unless given --delete-data", progname.Cmd(), app, app))
 	}
 	return out
 }

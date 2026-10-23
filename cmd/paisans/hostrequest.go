@@ -24,10 +24,10 @@ func runSiteRequest(args []string) error {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return fmt.Errorf("site request takes no argument: "+progname.Name()+" site request --site <name> > <name>.admit. Got extra argument(s): %s", quoteAll(fs.Args()))
+		return fmt.Errorf("site request takes no argument: %s site request --site <name> > <name>.admit. Got extra argument(s): %s", progname.Cmd(), quoteAll(fs.Args()))
 	}
 	if *site == "" {
-		return fmt.Errorf("site request: name the site with --site, Eg: %s site request --site <name> > <name>.admit", progname.Name())
+		return fmt.Errorf("site request: name the site with --site, Eg: %s site request --site <name> > <name>.admit", progname.Cmd())
 	}
 	// The request goes to stdout and nothing else does.
 	r := errReporter(reporter())

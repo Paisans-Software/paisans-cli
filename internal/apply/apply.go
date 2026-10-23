@@ -781,7 +781,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			if track := unresolvedTrack(content); track != "" && !leftAlone && !o.tolerateUnresolved {
 				err := &ui.Problem{
 					Hint:    fmt.Sprintf("%s would run %s, which runs nowhere on %s yet", rel, ui.Name(track), site),
-					Explain: "It follows a track, which a host cannot pull until `" + progname.Name() + " deployment apply` resolves it to a build. Run apply, then this command again.",
+					Explain: "It follows a track, which a host cannot pull until `" + progname.Cmd() + " deployment apply` resolves it to a build. Run apply, then this command again.",
 				}
 				finish(done, err)
 				return nil, err
@@ -1912,7 +1912,7 @@ func garageReplicationGuard(site, deployed, rendered string) error {
 	if !ok || have == want {
 		return nil
 	}
-	return fmt.Errorf("%s: Garage there runs at replication %d and the configuration says %d. Garage refuses to start when its stored layout disagrees with its configuration, so apply will not write this file. Change the factor with `"+progname.Name()+" storage add --change-replication`, which stops every Garage node and rebuilds the layout, then run apply again. Nothing was changed", site, have, want)
+	return fmt.Errorf("%s: Garage there runs at replication %d and the configuration says %d. Garage refuses to start when its stored layout disagrees with its configuration, so apply will not write this file. Change the factor with `%s storage add --change-replication`, which stops every Garage node and rebuilds the layout, then run apply again. Nothing was changed", site, have, want, progname.Cmd())
 }
 
 // moduleName is a Caddy module identifier as `caddy list-modules` prints one

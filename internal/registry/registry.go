@@ -225,7 +225,7 @@ func (e *NoBuildError) Error() string {
 	if len(e.IDs) > 1 {
 		which = "the entries of deployments " + strings.Join(e.IDs, ", ") + " do"
 	}
-	return fmt.Sprintf("%s: %s not say which build of paisans claimed the host (%s). The host's owner admits each again: `"+progname.Name()+" site request`, then `"+progname.Default+" site admit`", Path, which, strings.Join(e.Why, "; "))
+	return fmt.Sprintf("%s: %s not say which build of paisans claimed the host (%s). The host's owner admits each again: `%s site request`, then `%s site admit`", Path, which, strings.Join(e.Why, "; "), progname.Cmd(), progname.Default)
 }
 
 // Conflict is another deployment holding what a claim needs.

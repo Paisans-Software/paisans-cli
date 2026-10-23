@@ -109,7 +109,7 @@ type Classification struct {
 // DownLine is a down site's line. It cannot say whether the host is down or
 // its owner evicted the deployment, so it says both.
 func DownLine(site string) string {
-	return fmt.Sprintf("%[1]s: its login is refused or it does not answer: the host is down, or its owner evicted this deployment. "+progname.Name()+" site remove --site %[1]s --host-gone removes it from the deployment.", site)
+	return fmt.Sprintf("%[1]s: its login is refused or it does not answer: the host is down, or its owner evicted this deployment. %[2]s site remove --site %[1]s --host-gone removes it from the deployment.", site, progname.Cmd())
 }
 
 // Classify judges ev. It refuses only where a site's class cannot be told
@@ -170,7 +170,7 @@ func Classify(cfg *config.Config, ev Evidence) (*Classification, error) {
 		case why == "":
 			c.Sites[name] = Site{Name: name, Class: Ready}
 		case joined[name]:
-			return nil, fmt.Errorf("%s has joined this deployment, and %s. The host's owner admits it again (sudo "+progname.Default+" site admit --request %s.admit, from "+progname.Name()+" site request --site %s > %s.admit) before the run goes on", name, why, name, name, name)
+			return nil, fmt.Errorf("%s has joined this deployment, and %s. The host's owner admits it again (sudo %s site admit --request %s.admit, from %s site request --site %s > %s.admit) before the run goes on", name, why, progname.Default, name, progname.Cmd(), name, name)
 		default:
 			if err := pending(name, name+": "+why, true); err != nil {
 				return nil, err

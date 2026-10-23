@@ -321,7 +321,7 @@ func setMesh(data []byte, subnet string, addresses map[string]string) ([]byte, e
 	case mesh == nil:
 		_, id := lookup(top, "id")
 		if id == nil {
-			return nil, fmt.Errorf("no top level `id:` line to write mesh.subnet after. Run `%s init` on a file with `version: 1` as its first key", progname.Name())
+			return nil, fmt.Errorf("no top level `id:` line to write mesh.subnet after. Run `%s init` on a file with `version: 1` as its first key", progname.Cmd())
 		}
 		at := lines.next(id.Line)
 		edits = append(edits, edit{at, at, "mesh:\n  subnet: " + subnet + "\n"})

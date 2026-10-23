@@ -155,7 +155,7 @@ func (m *MonitorReseed) Gate() error {
 // Command is the apply that does the same as the reseed, for a failure to
 // name: the one command that brings the monitor up to date on its own.
 func (m *MonitorReseed) Command() string {
-	return fmt.Sprintf(progname.Name()+" deployment apply --site %s --only %s --execute", m.Site, m.App)
+	return fmt.Sprintf("%s deployment apply --site %s --only %s --execute", progname.Cmd(), m.Site, m.App)
 }
 
 // MonitorCommands is every reseed's Command, joined for a message.

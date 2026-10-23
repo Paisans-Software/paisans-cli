@@ -536,7 +536,7 @@ func unshown(keys []string, shown []hostadmit.Blocked) []string {
 // --execute off a terminal. Once ufw is on, only a person opening a new
 // SSH session shows that SSH gets through.
 func ufwNeedsAPerson() error {
-	return fmt.Errorf("site admit: with --request, enabling ufw needs a person at a terminal: once ufw is on, admit waits for you to open a new SSH session to this host and say it logged in, before it stops the timer that turns ufw off again, and neither --yes nor a pipe answers that. Run %s site admit --site <site> --ssh <your login> from a workstation instead, whose own login as the deployment's user proves SSH gets through; or run this at a terminal without --yes. Nothing was changed", progname.Name())
+	return fmt.Errorf("site admit: with --request, enabling ufw needs a person at a terminal: once ufw is on, admit waits for you to open a new SSH session to this host and say it logged in, before it stops the timer that turns ufw off again, and neither --yes nor a pipe answers that. Run %s site admit --site <site> --ssh <your login> from a workstation instead, whose own login as the deployment's user proves SSH gets through; or run this at a terminal without --yes. Nothing was changed", progname.Default)
 }
 
 // ufwOffAt is the latest the fallback armed by now turns ufw off.

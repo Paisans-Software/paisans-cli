@@ -54,7 +54,7 @@ func (e *OverlapError) Error() string {
 	for i, c := range e.Taken {
 		what[i] = ui.Visible(c.What)
 	}
-	return fmt.Sprintf("the deployment's mesh subnet %s overlaps %s on this host, so its mesh would route that network's traffic. The operators move the subnet clear of it: admitting this site from `"+progname.Default+" init` rolls one, and admits again each site that has admitted the deployment. With a request, they send a new one. Nothing was changed", e.Subnet, strings.Join(what, ", "))
+	return fmt.Sprintf("the deployment's mesh subnet %s overlaps %s on this host, so its mesh would route that network's traffic. The operators move the subnet clear of it: admitting this site from `%s init` rolls one, and admits again each site that has admitted the deployment. With a request, they send a new one. Nothing was changed", e.Subnet, strings.Join(what, ", "), progname.Default)
 }
 
 // ParsePrefix reads an IPv4 network or address, an address meaning a /32,

@@ -85,7 +85,7 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error
 	m := gatherMode{
 		execute:  *execute,
 		answers:  ans,
-		noAnchor: "Pin the first version you trust with --root <sha>; an operator who has one can read its hash from " + progname.Name() + " deployment log.",
+		noAnchor: "Pin the first version you trust with --root <sha>; an operator who has one can read its hash from " + progname.Cmd() + " deployment log.",
 	}
 	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, anchor, m, stdin, stdout)
 	if err != nil {
@@ -106,7 +106,7 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error
 		}
 		return &ui.Problem{
 			Hint:    "the local files differ from the sites' newest version",
-			Explain: fmt.Sprintf("The sites hold %s. An attestation says you hold that version's files, so it signs only a version equal to yours. Bring your files to it, Eg: with "+progname.Name()+" deployment pull, or check the difference above with the operator who signed it, then run this again. Nothing was written.", describe(g, de.Head)),
+			Explain: fmt.Sprintf("The sites hold %s. An attestation says you hold that version's files, so it signs only a version equal to yours. Bring your files to it, Eg: with %s deployment pull, or check the difference above with the operator who signed it, then run this again. Nothing was written.", describe(g, de.Head), progname.Cmd()),
 		}
 	case err != nil:
 		return err
@@ -173,7 +173,7 @@ func registerConfig(l configstore.Local, path, pin string) (*config.Config, erro
 		err = nil
 	}
 	if err != nil || len(g.Verdict.Heads) == 0 {
-		return nil, &ui.Problem{Hint: "the pinned root is not in this workstation's store", Explain: "With no files here, the sites are read from the version the pin leads to, which this workstation must have gathered before. Run " + progname.Name() + " deployment recover --from <user@host> --root " + pin + ", which finds them from a host.", Cause: err}
+		return nil, &ui.Problem{Hint: "the pinned root is not in this workstation's store", Explain: "With no files here, the sites are read from the version the pin leads to, which this workstation must have gathered before. Run " + progname.Cmd() + " deployment recover --from <user@host> --root " + pin + ", which finds them from a host.", Cause: err}
 	}
 	if g.Verdict.Fork {
 		return nil, forkProblem(g)

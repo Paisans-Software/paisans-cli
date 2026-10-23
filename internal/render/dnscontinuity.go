@@ -58,7 +58,7 @@ func (p *planner) dnsValuesFor(app string) (dnsValues, error) {
 	key := p.appSecret(app, "dns_email_hash_key")
 	raw, err := hex.DecodeString(key)
 	if err != nil || len(raw) < 32 {
-		return dnsValues{}, fmt.Errorf("secrets apps.%s.dns_email_hash_key: required, as 32 bytes of hex, for a deployment with external.%s. Run `"+progname.Name()+" init` to generate it", app, dnsMembersToken)
+		return dnsValues{}, fmt.Errorf("secrets apps.%s.dns_email_hash_key: required, as 32 bytes of hex, for a deployment with external.%s. Run `%s init` to generate it", app, dnsMembersToken, progname.Cmd())
 	}
 	if err := p.checkDNSMapping(); err != nil {
 		return dnsValues{}, err

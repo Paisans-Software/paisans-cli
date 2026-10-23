@@ -153,9 +153,9 @@ func convergeWebServer(r ui.Reporter, cfg *config.Config, files webServerFiles, 
 // rewrote the reference file.
 func ownerAdvice(app string, sf *siteFile) string {
 	if sf != nil && sf.changed {
-		return fmt.Sprintf("apply rewrote %s, so the host's owner replaces their copy with what "+progname.Name()+" web-server show --app %s prints, then run "+progname.Name()+" web-server check --app %s.", sf.path, app, app)
+		return fmt.Sprintf("apply rewrote %s, so the host's owner replaces their copy with what %s web-server show --app %s prints, then run %s web-server check --app %s.", sf.path, progname.Cmd(), app, progname.Cmd(), app)
 	}
-	return fmt.Sprintf("The host's owner installs what "+progname.Name()+" web-server show --app %s prints in their web server, then run "+progname.Name()+" web-server check --app %s.", app, app)
+	return fmt.Sprintf("The host's owner installs what %s web-server show --app %s prints in their web server, then run %s web-server check --app %s.", progname.Cmd(), app, progname.Cmd(), app)
 }
 
 // passed reports whether every check passed.
@@ -234,7 +234,7 @@ func webServerFailed(checked []string, files webServerFiles, degraded bool) *ui.
 func webServerBroken(steps []string) *ui.Problem {
 	return &ui.Problem{
 		Hint:    fmt.Sprintf("Deployment not complete: %s failed: %s", plural(len(steps), "web server step"), andList(steps)),
-		Explain: "Every other step ran. Fix what is noted above, then run " + progname.Name() + " deployment apply --execute again.",
+		Explain: "Every other step ran. Fix what is noted above, then run " + progname.Cmd() + " deployment apply --execute again.",
 	}
 }
 

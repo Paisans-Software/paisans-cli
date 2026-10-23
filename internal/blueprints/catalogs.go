@@ -302,7 +302,7 @@ func checkTag(dir string, cat config.Catalog) error {
 		return err
 	}
 	if got != cat.Commit {
-		return fmt.Errorf("%s's tag %s names %s, not the pinned %s. A tag that moved is refused; `"+progname.Name()+" catalog update` moves a pin on purpose", cat.URL, cat.Tag, got, cat.Commit)
+		return fmt.Errorf("%s's tag %s names %s, not the pinned %s. A tag that moved is refused; `%s catalog update` moves a pin on purpose", cat.URL, cat.Tag, got, cat.Commit, progname.Cmd())
 	}
 	if err := os.MkdirAll(filepath.Dir(mark), 0o755); err != nil {
 		return err

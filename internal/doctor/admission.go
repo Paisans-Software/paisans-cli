@@ -129,5 +129,5 @@ func absentLevel(cfg *config.Config, site string) Level {
 // requestAdvice is how a site's owner admits it, or admits it again, in
 // the words apply's refusal uses.
 func requestAdvice(site string) string {
-	return fmt.Sprintf("  1. `"+progname.Name()+" site request --site %[1]s > %[1]s.admit` writes the request; its owner runs `sudo "+progname.Default+" site admit --request %[1]s.admit` on the host, granting what it asks for, and the next `"+progname.Name()+" deployment apply` joins it.", site)
+	return fmt.Sprintf("  1. `%[2]s site request --site %[1]s > %[1]s.admit` writes the request; its owner runs `sudo %[3]s site admit --request %[1]s.admit` on the host, granting what it asks for, and the next `%[4]s deployment apply` joins it.", site, progname.Cmd(), progname.Default, progname.Cmd())
 }

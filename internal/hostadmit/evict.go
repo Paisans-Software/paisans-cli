@@ -257,7 +257,7 @@ func BuildEvict(t apply.Transport, in EvictInput) (*Plan, error) {
 	if noBuild != nil {
 		for _, id := range noBuild.IDs {
 			if id != in.Deployment {
-				e.warn(ui.Visible("registry: deployment "+id+"'s entry does not say which build of paisans claimed this host; evict leaves it"), "Its deployment's owner admits it again (`"+progname.Default+" site request`, then `"+progname.Name()+" site admit`), or this host's owner evicts it with `"+progname.Name()+" site evict`.")
+				e.warn(ui.Visible("registry: deployment "+id+"'s entry does not say which build of paisans claimed this host; evict leaves it"), noBuildAdvice())
 			}
 		}
 	}
@@ -823,4 +823,11 @@ func RunSteps(t apply.Transport, plan *Plan, r ui.Reporter) error {
 		}
 	}
 	return nil
+}
+
+// noBuildAdvice is what evict says of another deployment's entry that names
+// no build: its operator sends a request, from their workstation, and the
+// host's owner runs admit or evict on the host, as paisans.
+func noBuildAdvice() string {
+	return "Its deployment's owner admits it again (`" + progname.Cmd() + " site request`, then `" + progname.Default + " site admit`), or this host's owner evicts it with `" + progname.Default + " site evict`."
 }

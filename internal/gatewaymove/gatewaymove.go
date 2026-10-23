@@ -984,18 +984,18 @@ func (p *Plan) checkHandOff() error {
 		return nil
 	}
 	if err := p.checkSite(p.From); err != nil {
-		return fmt.Errorf("the hand-off's apply of %s would be refused, so nothing was changed: %w\nFix that, then run "+progname.Name()+" gateway move --execute again", p.From, err)
+		return fmt.Errorf("the hand-off's apply of %s would be refused, so nothing was changed: %w\nFix that, then run %s gateway move --execute again", p.From, err, progname.Cmd())
 	}
 	return nil
 }
 
 func (p *Plan) fail(st *Stage, err error) error {
 	head := fmt.Sprintf("gateway move stopped at stage %d (%s)", st.Number, st.Name)
-	next := "Fix the cause and run " + progname.Name() + " gateway move --execute again: it resumes at the first stage with anything left to do"
+	next := "Fix the cause and run " + progname.Cmd() + " gateway move --execute again: it resumes at the first stage with anything left to do"
 	if st.Number == stageHandOff {
 		// The record and the marker are gone by now, so the old site applies
 		// like any other, with whatever flags its own refusal asks for.
-		next = fmt.Sprintf("Fix the cause, then apply %s directly: "+progname.Name()+" deployment apply --site %s --only infra --execute (add the --overwrite it names if a file was edited on the host). "+progname.Name()+" gateway move --execute also resumes here", p.From, p.From)
+		next = fmt.Sprintf("Fix the cause, then apply %s directly: %s deployment apply --site %s --only infra --execute (add the --overwrite it names if a file was edited on the host). %s gateway move --execute also resumes here", p.From, progname.Cmd(), p.From, progname.Cmd())
 	}
 	if pr := ui.Around(head, err, "Nothing after it ran.\n"+next); pr != nil {
 		return pr

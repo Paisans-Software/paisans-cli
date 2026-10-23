@@ -54,7 +54,7 @@ func SudoRights(cfg *config.Config, probes []SudoProbe) []Finding {
 			More: []string{
 				"Every change to the mesh (its file, bringing it up, syncing its peers) runs the helper with sudo -n, so apply cannot manage the mesh on this site.",
 				"recover:",
-				fmt.Sprintf("  1. The host's owner runs `"+progname.Default+" site admit` for %s again, which installs %s and its line in /etc/sudoers.d/%s.", p.Site, helper, d.Prefix()),
+				fmt.Sprintf("  1. The host's owner runs `%s site admit` for %s again, which installs %s and its line in /etc/sudoers.d/%s.", progname.Default, p.Site, helper, d.Prefix()),
 			}}
 		if helperErr != nil {
 			out = append(out, Finding{Section: SectionSudo, Level: Fail,
@@ -63,7 +63,7 @@ func SudoRights(cfg *config.Config, probes []SudoProbe) []Finding {
 					"The helper is named after the deployment's WireGuard interface, which comes from the `id` in its configuration file, so this is the configuration, not the host.",
 					"recover:",
 					"  1. Restore the `id` this deployment was created with in its configuration file; every name on its hosts is derived from it.",
-					fmt.Sprintf("  2. `"+progname.Name()+" doctor --site %s` again.", p.Site),
+					fmt.Sprintf("  2. `%s doctor --site %s` again.", progname.Cmd(), p.Site),
 				}})
 			continue
 		}
@@ -74,7 +74,7 @@ func SudoRights(cfg *config.Config, probes []SudoProbe) []Finding {
 					"sudo-rs's sudo -l lists no Defaults, so doctor reads them from the original sudo, installed beside it as /usr/bin/sudo.ws, which is missing here. A Defaults entry that hands the WireGuard helper the user's environment would make the user root on the host.",
 					"recover:",
 					"  1. The host's owner installs Ubuntu's sudo package, which installs /usr/bin/sudo.ws.",
-					fmt.Sprintf("  2. `"+progname.Name()+" doctor --site %s` again.", p.Site),
+					fmt.Sprintf("  2. `%s doctor --site %s` again.", progname.Cmd(), p.Site),
 				}})
 			continue
 		}
@@ -87,8 +87,8 @@ func SudoRights(cfg *config.Config, probes []SudoProbe) []Finding {
 			more := append(lastLines(p.Out+"\n"+p.Err, 3),
 				"recover:",
 				fmt.Sprintf("  1. The host's owner runs `LC_ALL=C sudo -n -l` (`/usr/bin/sudo.ws` in place of `sudo` where sudo is sudo-rs) as %s on %s and reads the answer: a translated or unfamiliar sudo is the likely cause.", user, p.Site),
-				fmt.Sprintf("  2. If it lists %s and nothing else, report that output as a doctor bug. If not, the host's owner checks the line site admit wrote in /etc/sudoers.d/%s with `visudo -c`, or runs `"+progname.Default+" site admit` for %s again.", admitrules.HelperRule(helper), d.Prefix(), p.Site),
-				fmt.Sprintf("  3. `"+progname.Name()+" doctor --site %s` again.", p.Site),
+				fmt.Sprintf("  2. If it lists %s and nothing else, report that output as a doctor bug. If not, the host's owner checks the line site admit wrote in /etc/sudoers.d/%s with `visudo -c`, or runs `%s site admit` for %s again.", admitrules.HelperRule(helper), d.Prefix(), progname.Default, p.Site),
+				fmt.Sprintf("  3. `%s doctor --site %s` again.", progname.Cmd(), p.Site),
 			)
 			out = append(out, Finding{Section: SectionSudo, Level: Warn, Line: fmt.Sprintf("%s: could not read what sudo lets %s run", p.Site, user), More: more})
 			continue
@@ -105,7 +105,7 @@ func SudoRights(cfg *config.Config, probes []SudoProbe) []Finding {
 					fmt.Sprintf("Every operator of this deployment can log in as %s, so whatever sudo allows it is theirs too, and root on the host for anything past the helper. site admit writes one line, %s, in /etc/sudoers.d/%s; the rest comes from elsewhere in the host's sudoers.", user, admitrules.HelperRule(helper), d.Prefix()),
 					"recover:",
 					fmt.Sprintf("  1. The host's owner lists every rule and Defaults entry for the user with `sudo -l -U %s` (`/usr/bin/sudo.ws -l -U` where sudo is sudo-rs) and removes all but site admit's line with `visudo`, looking in /etc/sudoers and /etc/sudoers.d.", user),
-					fmt.Sprintf("  2. `"+progname.Name()+" doctor --site %s` again.", p.Site),
+					fmt.Sprintf("  2. `%s doctor --site %s` again.", progname.Cmd(), p.Site),
 				}})
 			continue
 		}

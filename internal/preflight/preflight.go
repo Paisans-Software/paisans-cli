@@ -318,7 +318,7 @@ func (r *runner) hostPrepare(t apply.Transport) {
 	for _, s := range plan.Steps {
 		steps = append(steps, s.Describe)
 	}
-	r.refuse(r.newSite, "prepared", "site prepare still has %d step(s): %s. Run `"+progname.Name()+" site prepare --site %s --execute` first", len(steps), strings.Join(steps, "; "), r.newSite)
+	r.refuse(r.newSite, "prepared", "site prepare still has %d step(s): %s. Run `%s site prepare --site %s --execute` first", len(steps), strings.Join(steps, "; "), progname.Cmd(), r.newSite)
 }
 
 // archMatch compares the new data site's architecture with every existing
@@ -381,7 +381,7 @@ func (r *runner) watchdog(t apply.Transport) {
 	}
 	mode := r.site.WatchdogMode()
 	if out, err := t.Run("test -e /dev/watchdog"); err != nil {
-		r.refuse(r.newSite, "watchdog", "mode %s, and there is no /dev/watchdog: %s. Run `"+progname.Name()+" site prepare --site %s`", mode, firstLine(errText(out, "absent")), r.newSite)
+		r.refuse(r.newSite, "watchdog", "mode %s, and there is no /dev/watchdog: %s. Run `%s site prepare --site %s`", mode, firstLine(errText(out, "absent")), progname.Cmd(), r.newSite)
 		return
 	}
 	r.pass(r.newSite, "watchdog", "mode %s, /dev/watchdog present", mode)
@@ -498,7 +498,7 @@ func (r *runner) routes(t apply.Transport) {
 func (r *runner) admission(t apply.Transport) {
 	rec, err := admission.ForSite(t, r.cfg, r.newSite)
 	if err != nil {
-		r.refuse(r.newSite, "admission", "%v. Send the host's owner `"+progname.Name()+" site request --site %s > %s.admit`", err, r.newSite, r.newSite)
+		r.refuse(r.newSite, "admission", "%v. Send the host's owner `%s site request --site %s > %s.admit`", err, progname.Cmd(), r.newSite, r.newSite)
 		return
 	}
 	r.record = &rec

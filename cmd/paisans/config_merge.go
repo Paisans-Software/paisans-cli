@@ -126,7 +126,7 @@ func pullMergingSecrets(r ui.Reporter, l configstore.Local, g configstore.Gather
 	if err := recordPull(l, g, root, held); err != nil {
 		return true, err
 	}
-	r.Result("merged the local secrets into %s; "+progname.Name()+" deployment publish makes the merge a version", describe(g, head))
+	r.Result("merged the local secrets into %s; %s deployment publish makes the merge a version", describe(g, head), progname.Cmd())
 	return true, nil
 }
 
@@ -180,10 +180,10 @@ func secretsConflictAdvice(conflicts []string) string {
 		"To take the head's value, set that key locally to the head's value and pull again.",
 		"To keep the local value, take the head's first so the pull can merge the rest, pull, then set the key back to your value and publish."}
 	if settable {
-		out = append(out, progname.Name()+" secrets set sets a key it accepts.")
+		out = append(out, progname.Cmd()+" secrets set sets a key it accepts.")
 	}
 	if recorded {
-		out = append(out, "A pocket_id_groups key is recorded by apply, and "+progname.Name()+" secrets set does not accept it; edit the file with sops.")
+		out = append(out, "A pocket_id_groups key is recorded by apply, and "+progname.Cmd()+" secrets set does not accept it; edit the file with sops.")
 	}
 	return strings.Join(out, " ")
 }

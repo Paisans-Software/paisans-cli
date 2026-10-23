@@ -218,7 +218,7 @@ func build(cfg *config.Config, store Store, sites []string, all bool, transports
 	// the partial swap may be what is unhealthy.
 	if len(pending) == 0 && len(sites) > 0 {
 		if err := p.ready(); err != nil {
-			return nil, fmt.Errorf("mesh rekey: %v. A rekey takes each site's tunnels down for a moment, which a cluster already short of a member may not survive. Fix it (`"+progname.Name()+" doctor` says how) and run again. Nothing was changed", err)
+			return nil, fmt.Errorf("mesh rekey: %v. A rekey takes each site's tunnels down for a moment, which a cluster already short of a member may not survive. Fix it (`%s doctor` says how) and run again. Nothing was changed", err, progname.Cmd())
 		}
 	}
 	for _, name := range sites {
@@ -399,7 +399,7 @@ func (p *Plan) rekey(s Site) error {
 		step := r.Step("check the cluster before " + s.Name + "'s rekey")
 		if err := p.ready(); err != nil {
 			step.Fail(err)
-			return fmt.Errorf("%v. A rekey takes the site's tunnels down for a moment, which a cluster already short of a member may not survive; nothing of %s's rekey has started. Fix it (`"+progname.Name()+" doctor` says how)", err, s.Name)
+			return fmt.Errorf("%v. A rekey takes the site's tunnels down for a moment, which a cluster already short of a member may not survive; nothing of %s's rekey has started. Fix it (`%s doctor` says how)", err, s.Name, progname.Cmd())
 		}
 		step.Done("healthy")
 		step = r.Step("new key for " + s.Name)

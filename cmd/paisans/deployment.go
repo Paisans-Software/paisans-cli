@@ -119,7 +119,7 @@ func anchorFor(l configstore.Local, root string) (configstore.Anchor, error) {
 		return a, nil
 	}
 	if !shaShape(root) {
-		return a, &ui.Problem{Hint: fmt.Sprintf("--root %q is not a commit id", root), Explain: "Give the full hash of the root to pin, as " + progname.Name() + " deployment log prints it on a root's line, or as another operator's .paisans/config-root holds it."}
+		return a, &ui.Problem{Hint: fmt.Sprintf("--root %q is not a commit id", root), Explain: "Give the full hash of the root to pin, as " + progname.Cmd() + " deployment log prints it on a root's line, or as another operator's .paisans/config-root holds it."}
 	}
 	if a.Root != "" && a.Root != root {
 		return a, &ui.Problem{Hint: "--root differs from the pinned root", Explain: fmt.Sprintf("This workstation pinned %s in .paisans/config-root. Drop --root, or remove that file if the pin is wrong.", a.Root)}
@@ -220,7 +220,7 @@ func noAnchorNamed(otherwise string) string {
 // publish judges only from the recorded signing key, so the pull that
 // records one comes first.
 func noAnchorPublish() string {
-	return "Name your own operator key's public key file with " + progname.Name() + " deployment pull --key <path.pub>, loaded with ssh-add so it is recorded as this workstation's signing key, or pin the first version you trust with " + progname.Name() + " deployment pull --root <sha>, or run " + progname.Name() + " operator register to sign the version you hold."
+	return "Name your own operator key's public key file with " + progname.Cmd() + " deployment pull --key <path.pub>, loaded with ssh-add so it is recorded as this workstation's signing key, or pin the first version you trust with " + progname.Cmd() + " deployment pull --root <sha>, or run " + progname.Cmd() + " operator register to sign the version you hold."
 }
 
 func shaShape(s string) bool {
@@ -283,12 +283,12 @@ func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transpo
 		s.Fail(err)
 		var ns *configstore.PinNotServedError
 		if errors.As(err, &ns) {
-			return g, &ui.Problem{Hint: "the sites serve none of the pinned root's history", Explain: ns.Error() + ". Either this workstation's pin is out of date, the deployment having been redeployed under the same id since it was pinned, or a site that answered holds a history it should not, such as a host that was never evicted. Check which sites answered, above. If the pin is out of date, get the current root from another operator, the full hash in their .paisans/config-root or on a root's line of their " + progname.Name() + " deployment log, and recover from it into an empty directory: " + progname.Name() + " deployment recover --from <user@host> --root <sha> --config <empty directory>/paisans-stack.yaml.", Cause: err}
+			return g, &ui.Problem{Hint: "the sites serve none of the pinned root's history", Explain: ns.Error() + ". Either this workstation's pin is out of date, the deployment having been redeployed under the same id since it was pinned, or a site that answered holds a history it should not, such as a host that was never evicted. Check which sites answered, above. If the pin is out of date, get the current root from another operator, the full hash in their .paisans/config-root or on a root's line of their " + progname.Cmd() + " deployment log, and recover from it into an empty directory: " + progname.Cmd() + " deployment recover --from <user@host> --root <sha> --config <empty directory>/paisans-stack.yaml.", Cause: err}
 		}
 		if errors.Is(err, configstore.ErrNoAnchor) {
 			todo := m.noAnchor
 			if todo == "" {
-				todo = "Pin the first version you trust with --root <sha>, or run " + progname.Name() + " operator register to sign the version you hold."
+				todo = "Pin the first version you trust with --root <sha>, or run " + progname.Cmd() + " operator register to sign the version you hold."
 			}
 			return g, &ui.Problem{
 				Hint:    "no version to start trusting from",
@@ -338,7 +338,7 @@ func forkProblem(g configstore.Gathered, more ...string) error {
 	for _, h := range g.Verdict.Heads {
 		heads = append(heads, "- "+describe(g, h))
 	}
-	return &ui.Problem{Hint: "the sites hold a fork", Explain: "Two trusted versions build on one parent:\n" + strings.Join(heads, "\n") + "\nMerge their files by hand, then publish with " + progname.Name() + " deployment publish --merge." + strings.Join(append([]string{""}, more...), " ")}
+	return &ui.Problem{Hint: "the sites hold a fork", Explain: "Two trusted versions build on one parent:\n" + strings.Join(heads, "\n") + "\nMerge their files by hand, then publish with " + progname.Cmd() + " deployment publish --merge." + strings.Join(append([]string{""}, more...), " ")}
 }
 
 // confirmPartial asks for partial when fewer than a majority of the
@@ -372,7 +372,7 @@ func signingKeyFor(l configstore.Local, local *config.Config) (string, error) {
 		}
 		f, err := cache.Files(head)
 		if err != nil {
-			return "", &ui.Problem{Hint: "the base version is not in the local store", Explain: "Run " + progname.Name() + " deployment pull, which gathers it again.", Cause: err}
+			return "", &ui.Problem{Hint: "the base version is not in the local store", Explain: "Run " + progname.Cmd() + " deployment pull, which gathers it again.", Cause: err}
 		}
 		if base, err = config.LoadBytes(f.Paisans); err != nil {
 			return "", err
@@ -551,7 +551,7 @@ func runDeploymentPublish(args []string, stdin io.Reader, stdout io.Writer) erro
 		s.Fail(err)
 		var rb *configstore.RollbackError
 		if errors.As(err, &rb) {
-			return &ui.Problem{Hint: "the sites' newest version is older than one seen here", Explain: rb.Error() + ". Nothing was published: a version on it would build on an old one. Find out why the newer version is gone; " + progname.Name() + " deployment log shows what each site holds.", Cause: err}
+			return &ui.Problem{Hint: "the sites' newest version is older than one seen here", Explain: rb.Error() + ". Nothing was published: a version on it would build on an old one. Find out why the newer version is gone; " + progname.Cmd() + " deployment log shows what each site holds.", Cause: err}
 		}
 		if errors.Is(err, configstore.ErrNoAnchor) {
 			return &ui.Problem{Hint: "no version to start trusting from", Explain: err.Error() + ". " + noAnchorPublish(), Cause: err}
@@ -602,7 +602,7 @@ func runDeploymentPull(args []string, stdin io.Reader, stdout io.Writer) error {
 	r.Section("pull into " + *configPath)
 	noteKeyIgnored(r, ignored)
 	sites := configTransports(cfg)
-	m := gatherMode{execute: *execute, answers: ans, noAnchor: noAnchorNamed(", or run " + progname.Name() + " operator register to sign the version you hold")}
+	m := gatherMode{execute: *execute, answers: ans, noAnchor: noAnchorNamed(", or run " + progname.Cmd() + " operator register to sign the version you hold")}
 	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, m, stdin, stdout)
 	if err != nil {
 		return err
@@ -614,7 +614,7 @@ func runDeploymentPull(args []string, stdin io.Reader, stdout io.Writer) error {
 		return forkProblem(g)
 	}
 	if len(g.Verdict.Heads) == 0 {
-		r.Result("the sites hold no version yet; " + progname.Name() + " deployment publish makes the first")
+		r.Result("the sites hold no version yet; %s deployment publish makes the first", progname.Cmd())
 		return nil
 	}
 	head := g.Verdict.Heads[0]
@@ -716,7 +716,7 @@ func pullOverEdits(r ui.Reporter, l configstore.Local, g configstore.Gathered, h
 	}
 	return &ui.Problem{
 		Hint:    "the local files have edits the sites' newest version lacks",
-		Explain: fmt.Sprintf("They were edited from %s, and the sites hold %s. %s Merge them by hand, then publish with "+progname.Name()+" deployment publish --merge.", from, describe(g, head), where),
+		Explain: fmt.Sprintf("They were edited from %s, and the sites hold %s. %s Merge them by hand, then publish with %s deployment publish --merge.", from, describe(g, head), where, progname.Cmd()),
 	}
 }
 
@@ -868,7 +868,7 @@ func runDeploymentLog(args []string, stdin io.Reader, stdout io.Writer) error {
 	r.Section("versions of " + *configPath)
 	noteKeyIgnored(r, ignored)
 	sites := configTransports(cfg)
-	m := gatherMode{log: true, noAnchor: noAnchorNamed(", or run " + progname.Name() + " operator register to sign the version you hold")}
+	m := gatherMode{log: true, noAnchor: noAnchorNamed(", or run " + progname.Cmd() + " operator register to sign the version you hold")}
 	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, m, stdin, stdout)
 	if err != nil {
 		return err
@@ -948,7 +948,7 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 		return err
 	}
 	if l.HasFiles() {
-		return &ui.Problem{Hint: "there are configuration files here already", Explain: "Recovery writes onto a workstation with nothing, so it never overwrites a file. Use " + progname.Name() + " deployment pull where the files exist, or recover into an empty directory with --config."}
+		return &ui.Problem{Hint: "there are configuration files here already", Explain: "Recovery writes onto a workstation with nothing, so it never overwrites a file. Use " + progname.Cmd() + " deployment pull where the files exist, or recover into an empty directory with --config."}
 	}
 	a, err := anchorFor(l, *root)
 	if err != nil {
@@ -1015,7 +1015,7 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 	// incarnation every answering site serves, so the root it leads to is
 	// the operator's to confirm, by its full hash.
 	if a.Named && pin != "" {
-		r.Warn("confirm the root "+pin+" with another operator before applying", "--key trusted the history it leads to, and a key alone cannot tell this deployment's history from an older incarnation every site that answered serves. Compare it with their .paisans/config-root, or a root's line of their "+progname.Name()+" deployment log.")
+		r.Warn("confirm the root "+pin+" with another operator before applying", "--key trusted the history it leads to, and a key alone cannot tell this deployment's history from an older incarnation every site that answered serves. Compare it with their .paisans/config-root, or a root's line of their "+progname.Cmd()+" deployment log.")
 	}
 	if !*execute {
 		r.Step("write the files of "+describe(g, head)).End(ui.Pending, "--execute will write them")
@@ -1088,7 +1088,7 @@ func recoverSites(l configstore.Local, g configstore.Gathered, id string) (map[s
 // record is kept as named, so the gather says what it holds.
 func recoverID(r ui.Reporter, dests []config.Destination, id string) (string, map[string]apply.Transport, error) {
 	if id != "" && !deployment.ValidID(id) {
-		return "", nil, &ui.Problem{Hint: fmt.Sprintf("--id %q is not a deployment id", id), Explain: "Give the full id, as " + progname.Name() + " site deployments lists it."}
+		return "", nil, &ui.Problem{Hint: fmt.Sprintf("--id %q is not a deployment id", id), Explain: "Give the full id, as " + progname.Cmd() + " site deployments lists it."}
 	}
 	hosts := map[string]apply.Transport{}
 	listed := map[string][]admission.Record{}

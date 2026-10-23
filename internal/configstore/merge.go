@@ -92,8 +92,8 @@ func rekeyUnderway(ours, theirs *config.Secrets) error {
 		name, finish string
 		s            *config.Secrets
 	}{
-		{"the local secrets", "run " + progname.Name() + " mesh rekey here to finish it, then pull", ours},
-		{"the sites' newest version of the secrets", "finish it with " + progname.Name() + " mesh rekey on the workstation that started it and publish, then pull", theirs},
+		{"the local secrets", "run " + progname.Cmd() + " mesh rekey here to finish it, then pull", ours},
+		{"the sites' newest version of the secrets", "finish it with " + progname.Cmd() + " mesh rekey on the workstation that started it and publish, then pull", theirs},
 	} {
 		sites := side.s.RekeyPending()
 		for _, name := range side.s.MeshRekeyRemaining {
@@ -122,8 +122,8 @@ func rotationUnderway(ours, theirs *config.Secrets) error {
 		name, finish string
 		s            *config.Secrets
 	}{
-		{"the local secrets", "run " + progname.Name() + " secrets rotate here to finish it (with --all when the run was --all), then pull", ours},
-		{"the sites' newest version of the secrets", "finish it with " + progname.Name() + " secrets rotate on the workstation that started it and publish, then pull", theirs},
+		{"the local secrets", "run " + progname.Cmd() + " secrets rotate here to finish it (with --all when the run was --all), then pull", ours},
+		{"the sites' newest version of the secrets", "finish it with " + progname.Cmd() + " secrets rotate on the workstation that started it and publish, then pull", theirs},
 	} {
 		paths := side.s.RotationPending()
 		for _, p := range side.s.RotateRemaining {

@@ -11,7 +11,10 @@
 // into a record: it outlives the run, and another operator's paisans reads it.
 package progname
 
-import "path/filepath"
+import (
+	"path/filepath"
+	"strings"
+)
 
 // Default is the name a release installs the command under: the name in
 // advice for anyone but the person who invoked the command, and the name
@@ -32,6 +35,19 @@ func Set(argv0 string) {
 	}
 }
 
-// Name is the name the command was invoked by, to put before a subcommand in
-// advice: Name() + " deployment apply".
+// Name is the name the command was invoked by, for prose. A command line to
+// copy takes Cmd.
 func Name() string { return name }
+
+// Cmd is Name as it goes in a command line to copy: Name itself, or Name in
+// single quotes when it holds anything but letters, digits, dots,
+// underscores and hyphens, so a pasted line runs the command it names.
+func Cmd() string {
+	safe := name != "" && strings.IndexFunc(name, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-')
+	}) < 0
+	if safe {
+		return name
+	}
+	return "'" + strings.ReplaceAll(name, "'", `'\''`) + "'"
+}

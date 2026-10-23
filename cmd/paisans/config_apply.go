@@ -262,7 +262,7 @@ func published(r ui.Reporter, s ui.Step, sha string, pushed []string, err error,
 // with no store is named with the command that makes one.
 func pushFailure(site string, err error) string {
 	if errors.Is(err, configstore.ErrNoStore) {
-		return site + " has no configuration store yet; " + progname.Name() + " site prepare --site " + site + " --execute will make it."
+		return site + " has no configuration store yet; " + progname.Cmd() + " site prepare --site " + site + " --execute will make it."
 	}
 	if err == nil {
 		return site + " did not answer."
@@ -279,7 +279,7 @@ func noSiteTook(pe *configstore.PushError) error {
 	}
 	return &ui.Problem{
 		Hint:    "no site took the version to apply",
-		Explain: strings.Join(lines, "\n") + "\nA version no site holds is not one the hosts can be checked against, so nothing was applied. Once a site can take it, run " + progname.Name() + " deployment apply --execute again.",
+		Explain: strings.Join(lines, "\n") + "\nA version no site holds is not one the hosts can be checked against, so nothing was applied. Once a site can take it, run " + progname.Cmd() + " deployment apply --execute again.",
 		Cause:   pe,
 	}
 }

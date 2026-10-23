@@ -51,7 +51,7 @@ func CheckPastedSecret(key, value string) error {
 	}
 	for _, r := range value {
 		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' {
-			return fmt.Errorf("secrets %s: holds a control character (%U). Each pasted secret is rendered onto one line of an env file, where a line break would add a line setting another variable, so it is refused. Set it again without one: "+progname.Name()+" secrets set %s < value", key, r, key)
+			return fmt.Errorf("secrets %s: holds a control character (%U). Each pasted secret is rendered onto one line of an env file, where a line break would add a line setting another variable, so it is refused. Set it again without one: %s secrets set %s < value", key, r, progname.Cmd(), key)
 		}
 	}
 	return nil
@@ -124,9 +124,9 @@ func pastedProblem(path, key string, err error) error {
 	if path != "" {
 		name = ui.ShortPath(path)
 	}
-	fix := "Replace it with `" + progname.Name() + " secrets set " + key + " < value`, which reads the file with this one value passed over."
+	fix := "Replace it with `" + progname.Cmd() + " secrets set " + key + " < value`, which reads the file with this one value passed over."
 	if strings.HasPrefix(key, "rotations.") {
-		fix = "It is the next value of a `" + progname.Name() + " secrets rotate` under way. Edit it out with `sops " + ui.ShortPath(path) + "` and run the rotation again."
+		fix = "It is the next value of a `" + progname.Cmd() + " secrets rotate` under way. Edit it out with `sops " + ui.ShortPath(path) + "` and run the rotation again."
 	}
 	return &ui.Problem{
 		Hint:    fmt.Sprintf("%s: %s holds a control character", name, key),

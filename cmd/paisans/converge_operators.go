@@ -295,7 +295,7 @@ func convergeEmailResults(r ui.Reporter, cfg *config.Config, app string, o conve
 // failed with. The printed links are still there either way.
 func emailFailureFix(why string) string {
 	if strings.Contains(why, "missing SMTP password") {
-		return "Its smtp settings name a username and the secrets file holds no password for it. `" + progname.Name() + " secrets list` names the unset smtp_password; set it with `" + progname.Name() + " secrets set <path>`, then apply. Until then, pass each link below on yourself."
+		return "Its smtp settings name a username and the secrets file holds no password for it. `" + progname.Cmd() + " secrets list` names the unset smtp_password; set it with `" + progname.Cmd() + " secrets set <path>`, then apply. Until then, pass each link below on yourself."
 	}
 	return "Pass each link below on yourself."
 }

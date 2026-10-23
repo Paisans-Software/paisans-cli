@@ -65,7 +65,7 @@ func (p *Plan) probeEtcd() error {
 		}
 	}
 	if p.etcd.control == "" {
-		return fmt.Errorf("site remove %s: no etcd answers as a voter on any of %s, so the cluster cannot be changed. Run `"+progname.Name()+" doctor` to see why", p.Site, strings.Join(p.live(p.end.Etcd.Members), ", "))
+		return fmt.Errorf("site remove %s: no etcd answers as a voter on any of %s, so the cluster cannot be changed. Run `%s doctor` to see why", p.Site, strings.Join(p.live(p.end.Etcd.Members), ", "), progname.Cmd())
 	}
 	var problems []string
 	for i, m := range members {
@@ -95,7 +95,7 @@ func (p *Plan) probeEtcd() error {
 	for _, site := range p.live(p.end.Etcd.Members) {
 		if !listed[site] {
 			missing = append(missing, site)
-			problems = append(problems, fmt.Sprintf("%s is in %s but is not an etcd member yet. Finish its install ("+progname.Name()+" deployment apply) first", site, p.cfg.EtcdMembersKey()))
+			problems = append(problems, fmt.Sprintf("%s is in %s but is not an etcd member yet. Finish its install (%s deployment apply) first", site, p.cfg.EtcdMembersKey(), progname.Cmd()))
 		}
 	}
 	healthy, err := p.etcdHealth(members)
@@ -139,7 +139,7 @@ func (p *Plan) probeEtcd() error {
 		p.etcd.witnessContainer = strings.TrimSpace(out) != ""
 	}
 	if len(problems) > 0 {
-		return fmt.Errorf("site remove %s: etcd is not healthy enough to change its membership:\n  %s\nFix the members named (`"+progname.Name()+" doctor` says how) and run again. Nothing was changed", p.Site, strings.Join(problems, "\n  "))
+		return fmt.Errorf("site remove %s: etcd is not healthy enough to change its membership:\n  %s\nFix the members named (`%s doctor` says how) and run again. Nothing was changed", p.Site, strings.Join(problems, "\n  "), progname.Cmd())
 	}
 	return nil
 }
@@ -219,7 +219,7 @@ func (p *Plan) oneEtcdCluster(views []etcdView) ([]etcdView, error) {
 		for _, v := range views {
 			sites = append(sites, v.site)
 		}
-		return nil, fmt.Errorf("site remove %s: the etcds on %s belong to different clusters, so their membership cannot be changed safely. Run "+progname.Name()+" doctor on %s. Nothing was changed", p.Site, joinAnd(sites), joinAnd(sites))
+		return nil, fmt.Errorf("site remove %s: the etcds on %s belong to different clusters, so their membership cannot be changed safely. Run %s doctor on %s. Nothing was changed", p.Site, joinAnd(sites), progname.Cmd(), joinAnd(sites))
 	}
 	var odd, agree []string
 	for _, v := range views {
@@ -234,9 +234,9 @@ func (p *Plan) oneEtcdCluster(views []etcdView) ([]etcdView, error) {
 		possessive = append(possessive, site+"'s")
 	}
 	if len(odd) == 1 {
-		return nil, fmt.Errorf("site remove %s: %s etcd belongs to a different cluster than %s, so its membership cannot be changed safely. Run "+progname.Name()+" doctor on %s. Nothing was changed", p.Site, possessive[0], joinAnd(agree), odd[0])
+		return nil, fmt.Errorf("site remove %s: %s etcd belongs to a different cluster than %s, so its membership cannot be changed safely. Run %s doctor on %s. Nothing was changed", p.Site, possessive[0], joinAnd(agree), progname.Cmd(), odd[0])
 	}
-	return nil, fmt.Errorf("site remove %s: %s etcds belong to a different cluster than %s, so their membership cannot be changed safely. Run "+progname.Name()+" doctor on %s. Nothing was changed", p.Site, joinAnd(possessive), joinAnd(agree), joinAnd(odd))
+	return nil, fmt.Errorf("site remove %s: %s etcds belong to a different cluster than %s, so their membership cannot be changed safely. Run %s doctor on %s. Nothing was changed", p.Site, joinAnd(possessive), joinAnd(agree), progname.Cmd(), joinAnd(odd))
 }
 
 // joinAnd joins a list as prose: "a", "a and b", "a, b and c".
@@ -350,7 +350,7 @@ func (p *Plan) probePatroni() error {
 		break
 	}
 	if p.patroni.at == "" {
-		return fmt.Errorf("site remove %s: no Patroni runs on any of %s, so the cluster cannot be changed. Run `"+progname.Name()+" doctor` to see why", p.Site, strings.Join(p.live(p.end.Cluster.Sites), ", "))
+		return fmt.Errorf("site remove %s: no Patroni runs on any of %s, so the cluster cannot be changed. Run `%s doctor` to see why", p.Site, strings.Join(p.live(p.end.Cluster.Sites), ", "), progname.Cmd())
 	}
 	// A cut-off leader decides what its replicas do: a hostile one can stop
 	// them streaming, and would block its own cutoff if that were refused.
@@ -395,7 +395,7 @@ func (p *Plan) probePatroni() error {
 		problems = nil
 	}
 	if len(problems) > 0 {
-		return fmt.Errorf("site remove %s: the Patroni cluster is not healthy enough to change:\n  %s\nFix the members named (`"+progname.Name()+" doctor` says how) and run again. Nothing was changed", p.Site, strings.Join(problems, "\n  "))
+		return fmt.Errorf("site remove %s: the Patroni cluster is not healthy enough to change:\n  %s\nFix the members named (`%s doctor` says how) and run again. Nothing was changed", p.Site, strings.Join(problems, "\n  "), progname.Cmd())
 	}
 	if p.patroni.leader == p.Site && p.Options.HostGone {
 		p.cutoffLeader()
@@ -468,7 +468,7 @@ func (p *Plan) probeGarage() error {
 	// removal, staged by a run stopped before its apply, is the one change a
 	// resumed run carries on with.
 	if staged := storageadd.LayoutStaged(out); staged.Any() && (p.garage.node == "" || !staged.Only(p.garage.node)) {
-		return fmt.Errorf("site remove %s: Garage has staged layout changes that site remove would apply along with its own. Apply them with "+progname.Name()+" storage add, or revert them with garage layout revert --yes, first. Nothing was changed", p.Site)
+		return fmt.Errorf("site remove %s: Garage has staged layout changes that site remove would apply along with its own. Apply them with %s storage add, or revert them with garage layout revert --yes, first. Nothing was changed", p.Site, progname.Cmd())
 	}
 	// Every Garage site that stays needs a node in the layout, and enough
 	// nodes have to stay for the replication factor: otherwise `garage layout
@@ -482,7 +482,7 @@ func (p *Plan) probeGarage() error {
 		}
 	}
 	if nodes < p.cfg.Storage.Garage.Replication {
-		return fmt.Errorf("site remove %s: %d node(s) in Garage's layout would stay without %s, fewer than storage.garage.replication %d, so Garage would refuse the new layout. Run "+progname.Name()+" storage add for the sites missing from it first. Nothing was changed", p.Site, nodes, p.Site, p.cfg.Storage.Garage.Replication)
+		return fmt.Errorf("site remove %s: %d node(s) in Garage's layout would stay without %s, fewer than storage.garage.replication %d, so Garage would refuse the new layout. Run %s storage add for the sites missing from it first. Nothing was changed", p.Site, nodes, p.Site, p.cfg.Storage.Garage.Replication, progname.Cmd())
 	}
 	if p.Options.HostGone {
 		if err := p.probeDeadNode(t, nodes); err != nil {
@@ -500,7 +500,7 @@ func (p *Plan) probeGarage() error {
 		if len(missing) > 1 {
 			verb = "are"
 		}
-		return fmt.Errorf("site remove %s: %s %s in storage.garage.sites but not in Garage's layout yet. Run "+progname.Name()+" storage add first. Nothing was changed", p.Site, strings.Join(missing, ", "), verb)
+		return fmt.Errorf("site remove %s: %s %s in storage.garage.sites but not in Garage's layout yet. Run %s storage add first. Nothing was changed", p.Site, strings.Join(missing, ", "), verb, progname.Cmd())
 	}
 	status, err := t.Run(gcmd(p, "status"))
 	if err != nil {

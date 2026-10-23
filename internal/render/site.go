@@ -433,7 +433,7 @@ func (p *planner) renderSite(site *siteView) ([]File, error) {
 		// `paisans init`, which generates one in the right shape.
 		rpcSecret := p.secrets.Storage.Garage.RPCSecret
 		if rpcSecret == "" {
-			return nil, fmt.Errorf("secrets storage.garage.rpc_secret: required for a site with a Garage role, and there is no fallback. Garage parses it as 64 hex characters and will not start without one. Run `%s init` to generate it", progname.Name())
+			return nil, fmt.Errorf("secrets storage.garage.rpc_secret: required for a site with a Garage role, and there is no fallback. Garage parses it as 64 hex characters and will not start without one. Run `%s init` to generate it", progname.Cmd())
 		}
 		toml, err := p.renderTemplate("garage.toml.tmpl", map[string]any{
 			"Site":        site,

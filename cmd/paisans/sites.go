@@ -171,7 +171,7 @@ func showPending(r ui.Reporter, cfg *config.Config, c *topology.Classification) 
 		s := r.Step(name)
 		s.Detail("%s", c.Sites[name].Why)
 		if c.Sites[name].Request {
-			s.Detail(progname.Name()+" site request --site %s > %s.admit", name, name)
+			s.Detail("%s site request --site %s > %s.admit", progname.Cmd(), name, name)
 		}
 		if lost := doctor.Losses(cfg, name); lost != "" {
 			s.Detail("While it is pending the deployment is without %s.", lost)

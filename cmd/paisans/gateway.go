@@ -28,7 +28,7 @@ var gatewayTransport = func(name string, site config.Site) apply.Transport {
 // runGateway dispatches `paisans gateway move`.
 func runGateway(args []string) error {
 	if len(args) < 1 || args[0] != "move" {
-		return fmt.Errorf("gateway takes one subcommand, move: %s gateway move [--execute]", progname.Name())
+		return fmt.Errorf("gateway takes one subcommand, move: %s gateway move [--execute]", progname.Cmd())
 	}
 	return runGatewayMove(args[1:])
 }

@@ -357,7 +357,7 @@ func meshProblem(plan *Plan, t Transport, cause error) error {
 	problem.Cause = fmt.Errorf("%w\n%s:\n%s", cause, logCommand, journal)
 	line := wgQuickError(journal)
 	if name := unresolvedName(line); name != "" {
-		problem.Explain = fmt.Sprintf("%s does not resolve from %s; create its DNS record ("+progname.Name()+" dns init) and apply again.\n%s", name, plan.Site, stopped)
+		problem.Explain = fmt.Sprintf("%s does not resolve from %s; create its DNS record (%s dns init) and apply again.\n%s", name, plan.Site, progname.Cmd(), stopped)
 		return problem
 	}
 	if line != "" {

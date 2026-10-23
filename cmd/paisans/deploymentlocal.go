@@ -177,7 +177,7 @@ func runDeploymentFetch(args []string) error {
 			failed++
 		}
 	}
-	r.Result("%d saved, %d set aside unverified, %d not fetched, in %s. "+progname.Name()+" deployment list shows them.", saved, unverified, failed, st.Base)
+	r.Result("%d saved, %d set aside unverified, %d not fetched, in %s. %s deployment list shows them.", saved, unverified, failed, st.Base, progname.Cmd())
 	if failed > 0 {
 		return &ui.Problem{Hint: fmt.Sprintf("%d deployment(s) were not fetched", failed), Explain: "Each is listed above with why. The others were saved."}
 	}
@@ -229,7 +229,7 @@ func fetchOne(r ui.Reporter, st localstore.Store, host string, t apply.Transport
 				return ""
 			}
 		}
-		r.Warn("a fork", fmt.Sprintf("Each head's files are in %s/<sha>/. Merge them in the deployment's own directory and publish with "+progname.Name()+" deployment publish --merge.", l.Incoming()))
+		r.Warn("a fork", fmt.Sprintf("Each head's files are in %s/<sha>/. Merge them in the deployment's own directory and publish with %s deployment publish --merge.", l.Incoming(), progname.Cmd()))
 		head := g.Verdict.Heads[0]
 		if err := st.Record(localstore.Saved{ID: id, Domain: domain, SHA: head, Revision: g.Versions[head].Revision, Status: localstore.Fork, Source: source, SavedAt: configNow().UTC()}); err != nil {
 			r.Warn("not recorded", errLine(err))
@@ -284,8 +284,7 @@ func setAsideUnverified(r ui.Reporter, st localstore.Store, l configstore.Local,
 		}
 	}
 	r.Warn(fmt.Sprintf("unverified: revision %d, %s", top, strings.Join(newest, ", ")),
-		fmt.Sprintf("This workstation never applied or recovered this deployment, so it holds no key or root to judge what %s serves, and anyone with root there could have written it. Its files are in %s/<sha>/ only. "+
-			"Check the hash with another operator, then pin it: "+progname.Name()+" deployment recover --from %s --id %s --root <sha> --config <empty directory>/%s --execute.", host, l.Incoming(), host, id, config.FileName))
+		fmt.Sprintf("This workstation never applied or recovered this deployment, so it holds no key or root to judge what %s serves, and anyone with root there could have written it. Its files are in %s/<sha>/ only. Check the hash with another operator, then pin it: %s deployment recover --from %s --id %s --root <sha> --config <empty directory>/%s --execute.", host, l.Incoming(), progname.Cmd(), host, id, config.FileName))
 	if err := st.Record(localstore.Saved{ID: id, Domain: domain, SHA: newest[0], Revision: top, Status: localstore.Unverified, Source: source, SavedAt: configNow().UTC()}); err != nil {
 		r.Warn("not recorded", errLine(err))
 	}

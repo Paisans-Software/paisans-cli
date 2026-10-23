@@ -36,7 +36,7 @@ func runOperatorMagicLink(args []string) error {
 		return err
 	}
 	if len(pos) != 1 {
-		return &ui.Problem{Hint: "operator magic-link takes one operator", Explain: progname.Name() + " operator magic-link <operator>, by their key under operators."}
+		return &ui.Problem{Hint: "operator magic-link takes one operator", Explain: progname.Cmd() + " operator magic-link <operator>, by their key under operators."}
 	}
 	id := pos[0]
 	// The link goes to stdout and nothing else does, so a script can read it.

@@ -32,7 +32,7 @@ var ErrNoStore error = noStore{}
 type noStore struct{}
 
 func (noStore) Error() string {
-	return "no configuration store; " + progname.Name() + " site prepare makes it"
+	return "no configuration store; " + progname.Cmd() + " site prepare makes it"
 }
 
 // SyncReport is what a site's last sync reached, as the sync script logged it.

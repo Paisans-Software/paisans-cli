@@ -336,7 +336,7 @@ func (c *clientStep) ensure(execute, waiting bool) error {
 	key, _ := c.secrets.Apps[c.idp]["static_api_key"].(string)
 	if key == "" {
 		sites := render.AppSites(c.cfg)[c.idp]
-		why := fmt.Sprintf("secrets apps.%s.static_api_key is missing, so Pocket ID's API cannot be called. Run `"+progname.Name()+" init` to generate it, apply %s (where %s runs) so Pocket ID has it, then apply this site again", c.idp, strings.Join(sites, " and "), c.idp)
+		why := fmt.Sprintf("secrets apps.%s.static_api_key is missing, so Pocket ID's API cannot be called. Run `%s init` to generate it, apply %s (where %s runs) so Pocket ID has it, then apply this site again", c.idp, progname.Cmd(), strings.Join(sites, " and "), c.idp)
 		c.cannotAsk(c.apps, why, false)
 		c.groupsCannotAsk(c.signupGroups, why, false)
 		return nil
@@ -485,7 +485,7 @@ func keepsRecorded(app string, rec oidcclient.Recorded, state oidcclient.State) 
 	default:
 		return nil
 	}
-	return fmt.Errorf("%s. apply does not replace these credentials: run `"+progname.Name()+" oidc client create --app %s` to create or re-record the client, then apply again", why, app)
+	return fmt.Errorf("%s. apply does not replace these credentials: run `%s oidc client create --app %s` to create or re-record the client, then apply again", why, progname.Cmd(), app)
 }
 
 // replacing is the line that says app's recorded client is not at Pocket ID
