@@ -205,7 +205,9 @@ func runSecretsSet(args []string, stdin io.Reader) error {
 	if *secretsPath == "" {
 		*secretsPath = filepath.Join(filepath.Dir(*configPath), "secrets.enc.yaml")
 	}
-	secrets, err := config.LoadDeploymentSecrets(*secretsPath, cfg.ID)
+	// With a key, a control character already in that key's value does not
+	// refuse the file, since setting the key is how it is repaired.
+	secrets, err := config.LoadDeploymentSecretsReplacing(*secretsPath, cfg.ID, key)
 	if err != nil {
 		return err
 	}
@@ -259,6 +261,9 @@ func runSecretsSet(args []string, stdin io.Reader) error {
 	}
 	if value == "" {
 		return fmt.Errorf("secrets set: %s: nothing on stdin. An empty value is refused rather than written, since it reads as set and renders as missing", key)
+	}
+	if err := config.CheckPastedSecret(key, value); err != nil {
+		return fmt.Errorf("secrets set: %w. Nothing was written", err)
 	}
 
 	if err := secrets.Set(key, value); err != nil {
@@ -318,6 +323,9 @@ func setOwedSecrets(r ui.Reporter, cfg *config.Config, secrets *config.Secrets, 
 		ui.Secret(value)
 		if len(value) > maxSecret {
 			return fmt.Errorf("secrets set: %s: more than %d bytes, which is not a credential this file holds. %s", o.Name, maxSecret, setSoFar(done))
+		}
+		if err := config.CheckPastedSecret(o.Name, value); err != nil {
+			return fmt.Errorf("secrets set: %w. %s", err, setSoFar(done))
 		}
 		if err := secrets.Set(o.Name, value); err != nil {
 			return err
