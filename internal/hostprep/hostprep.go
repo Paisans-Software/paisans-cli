@@ -305,7 +305,7 @@ func Build(site string, cfg *config.Config, t Transport, rec admission.Record) (
 		return nil, err
 	}
 	plan.add(watchdog)
-	swap, err := checkSwap(t)
+	swap, err := checkSwap(site, t)
 	if err != nil {
 		return nil, err
 	}

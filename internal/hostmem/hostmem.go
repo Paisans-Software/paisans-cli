@@ -25,8 +25,13 @@ const SwapNeeded = "Without swap, a host that runs short of memory has the kerne
 // ZRAMNotEnough is why zram swap does not count as swap.
 const ZRAMNotEnough = "zram swap compresses what it holds into RAM, so it stretches the host's memory rather than adding to it."
 
+// zramName is a zram device's name under /dev, as lsblk prints it; Probe's
+// awk and ZRAMDevice both match it, so prepare, admit and doctor tell zram
+// apart the same way.
+const zramName = `zram[0-9]+`
+
 // ZRAMDevice matches the name /proc/swaps gives a zram device.
-var ZRAMDevice = regexp.MustCompile(`^/dev/zram[0-9]+$`)
+var ZRAMDevice = regexp.MustCompile(`^/dev/` + zramName + `$`)
 
 // Probe is shell that prints one "key value" line per fact through a
 // function say, which the script it is part of defines: the host's RAM and
@@ -51,12 +56,12 @@ if [ -e ` + Swapfile + ` ] || [ -L ` + Swapfile + ` ]; then say swapfile present
 // after its header, one line per swap area, its name first and its size in
 // KiB third. A name with a space in it is written with \040, so it stays
 // one field.
-const ZRAMOnAwk = `NR > 1 && $1 ~ /^\/dev\/zram[0-9]+$/ { s += $3 } END { printf "%.0f", s * 1024 }`
+const ZRAMOnAwk = `NR > 1 && $1 ~ /^\/dev\/` + zramName + `$/ { s += $3 } END { printf "%.0f", s * 1024 }`
 
 // PartitionAwk prints the block devices formatted as swap that are not
 // zram devices, from lsblk -nro NAME,FSTYPE: a zram device is formatted
 // as swap too, and is not a partition.
-const PartitionAwk = `$2 == "swap" && $1 !~ /^zram[0-9]+$/`
+const PartitionAwk = `$2 == "swap" && $1 !~ /^` + zramName + `$/`
 
 // Command is Probe on its own, for a caller with no probe script to put it
 // in.
