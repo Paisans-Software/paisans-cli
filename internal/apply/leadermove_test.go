@@ -438,7 +438,7 @@ func TestPatroniRunningWithoutItsOwnEtcdMember(t *testing.T) {
 		if len(p.Actions) == 0 || p.Actions[0].Stack != "infra" {
 			t.Fatalf("plans %+v", p.Actions)
 		}
-		want := "docker compose -f /srv/paisans/f2a9/infra/compose.yaml up -d --no-deps --force-recreate 'haproxy' 'patroni'"
+		want := "docker compose -f /srv/paisans/f2a9/infra/compose.yaml up -d --no-deps --force-recreate --timeout 60 'haproxy' 'patroni'"
 		if got := p.Actions[0].Command(apply.Fixture); got != want {
 			t.Errorf("runs %q, want %q", got, want)
 		}
@@ -461,7 +461,7 @@ func TestAnOwedNarrowedUpStaysNarrowed(t *testing.T) {
 	if len(p.Actions) == 0 || p.Actions[0].Stack != "infra" {
 		t.Fatalf("plans %+v", p.Actions)
 	}
-	want := "docker compose -f /srv/paisans/f2a9/infra/compose.yaml up -d --no-deps --force-recreate 'etcd' 'haproxy'"
+	want := "docker compose -f /srv/paisans/f2a9/infra/compose.yaml up -d --no-deps --force-recreate --timeout 60 'etcd' 'haproxy'"
 	if got := p.Actions[0].Command(apply.Fixture); got != want {
 		t.Errorf("runs %q, want %q", got, want)
 	}

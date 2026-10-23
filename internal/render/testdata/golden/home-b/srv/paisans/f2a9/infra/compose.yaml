@@ -37,12 +37,12 @@ services:
       community.paisans.deployment: "f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01"
     image: "ghcr.io/zalando/spilo-18:4.1-p*"
     restart: unless-stopped
-    # A Patroni that leads disarms the watchdog only when it shuts down
-    # cleanly; one Docker kills for outlasting its stop timeout, 10 s by
-    # default, leaves it armed and the host reboots. Postgres's fast shutdown
-    # and checkpoint can take longer than that on a slow or busy host. 60 s
-    # stays under systemd's 90 s for the user's units, and a stop that ends
-    # sooner returns sooner.
+    # A Patroni that leads disarms the watchdog when its Postgres reaches the
+    # shutdown's safepoint, once the clients are gone; one Docker kills before
+    # then, at its default 10 s, leaves it armed and the host reboots. The
+    # rest of the 60 s lets the shutdown finish and hand the leader key over.
+    # It stays under the 120 s systemd gives user@.service to stop, and a stop
+    # that ends sooner returns sooner.
     stop_grace_period: 60s
     network_mode: host
     env_file:

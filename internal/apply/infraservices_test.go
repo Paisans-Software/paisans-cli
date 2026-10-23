@@ -110,15 +110,15 @@ func newContainerHost(h *fakeHost, recreates ...string) *containerHost {
 
 func (c *containerHost) Run(command string) (string, error) {
 	const compose = "docker compose -f /srv/paisans/f2a9/infra/compose.yaml "
-	switch command {
-	case compose + "ps --all --format json":
+	switch {
+	case command == compose+"ps --all --format json":
 		c.commands = append(c.commands, command)
 		var b strings.Builder
 		for _, s := range []string{"caddy", "etcd", "garage", "haproxy", "patroni"} {
 			fmt.Fprintf(&b, `{"ID":%q,"Service":%q,"State":"running","Health":""}`+"\n", c.ids[s], s)
 		}
 		return b.String(), nil
-	case compose + "up -d":
+	case strings.HasPrefix(command, compose+"up -d"):
 		c.gen++
 		for s := range c.recreates {
 			c.ids[s] = fmt.Sprintf("%s-%d", s, c.gen)

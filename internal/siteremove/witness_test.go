@@ -251,7 +251,7 @@ func TestReplicasTakePatroniEnvOneAtATime(t *testing.T) {
 	if strings.Join(w.recreated, ",") != "home-c,home-d" {
 		t.Errorf("recreated %v", w.recreated)
 	}
-	c, d := w.index("home-c: docker compose -f "+root+"/infra/compose.yaml up -d --no-deps --force-recreate patroni"), w.index("home-d: docker compose -f "+root+"/infra/compose.yaml up -d --no-deps --force-recreate patroni")
+	c, d := w.index("home-c: docker compose -f "+root+"/infra/compose.yaml up -d --no-deps --force-recreate --timeout 60 patroni"), w.index("home-d: docker compose -f "+root+"/infra/compose.yaml up -d --no-deps --force-recreate --timeout 60 patroni")
 	gated := false
 	for _, line := range w.log[c+1 : d] {
 		gated = gated || strings.HasPrefix(line, "home-c: ") && strings.Contains(line, "python3 -c") && strings.Contains(line, "http://10.44.0.5:8008/patroni")

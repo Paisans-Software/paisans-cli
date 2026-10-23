@@ -417,7 +417,7 @@ func (h *host) Run(command string) (string, error) {
 			return "service \"patroni\" is not running", fmt.Errorf("exit status 1")
 		}
 		return w.etcdHosts[h.name] + "\n", nil
-	case strings.HasSuffix(command, "up -d --no-deps --force-recreate patroni"):
+	case strings.HasSuffix(command, "up -d --no-deps --force-recreate --timeout 60 patroni"):
 		w.recreated = append(w.recreated, h.name)
 		w.etcdHosts[h.name] = envLine(h.files["/srv/paisans/f2a9/infra/patroni.env"], "ETCD3_HOSTS")
 		// The member key keeps what the old process wrote until it expires,

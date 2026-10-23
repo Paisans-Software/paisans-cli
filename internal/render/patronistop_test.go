@@ -7,9 +7,9 @@ import (
 )
 
 // A data site's Patroni has 60 s to stop. Docker kills a container that
-// outlasts its stop timeout, 10 s by default, and a Patroni killed while it
-// leads leaves the host's watchdog armed, so the host reboots: an apply that
-// recreates Patroni on a slow or busy host would reboot the leader.
+// outlasts its stop timeout, 10 s by default, and a Patroni killed before
+// its Postgres reaches the shutdown's safepoint leaves the host's watchdog
+// armed, so the host reboots.
 func TestPatroniHasTimeToStop(t *testing.T) {
 	plan := build(t)
 	content := map[string]string{}
