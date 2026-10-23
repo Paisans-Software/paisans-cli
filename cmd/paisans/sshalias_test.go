@@ -19,15 +19,15 @@ import (
 // User and Port it sets, empty for none.
 type stubAlias struct{ hostname, user, port string }
 
-// stubLocalUser is the operator's local name to a stub ssh -G, which it
-// reports as the user of a host no User applies to.
+// stubLocalUser is the operator's local login to a stub ssh -G, which it
+// reports as the user of a host no User applies to, as ssh does.
 const stubLocalUser = "test-local"
 
 // stubSSHConfig is an ssh config read through a stub ssh -G that knows the
 // aliases given: any other host resolves to itself on port 22, as ssh
 // resolves a host no Host block names. -l and -p override, as for ssh.
 func stubSSHConfig(aliases map[string]stubAlias) config.SSHConfig {
-	return config.SSHConfig{LocalUser: stubLocalUser, G: func(args []string) (string, error) {
+	return config.SSHConfig{G: func(args []string) (string, error) {
 		if len(args) < 2 || args[len(args)-2] != "--" {
 			return "", errors.New("stub ssh -G: the host is not after --")
 		}
@@ -55,7 +55,8 @@ func stubSSHConfig(aliases map[string]stubAlias) config.SSHConfig {
 }
 
 // withSSHAliases makes the operator's ssh config, for this test, one that
-// defines myalias (admin, port 2222) and other (no User).
+// defines myalias (admin, port 2222) and other (no User, so ssh -G reports
+// the local login).
 func withSSHAliases(t *testing.T) {
 	t.Helper()
 	saved := operatorSSHConfig
@@ -77,6 +78,7 @@ func TestADestinationGivesSSHTheAlias(t *testing.T) {
 		"root@myalias":              "ssh://root@myalias:2222",
 		"myalias:2200":              "ssh://admin@myalias:2200",
 		"root@other:22":             "ssh://root@other:22",
+		"other":                     "ssh://" + stubLocalUser + "@other:22",
 		"ubuntu@192.0.2.10":         "ubuntu@192.0.2.10",
 		"ubuntu@192.0.2.10:2222":    "ssh://ubuntu@192.0.2.10:2222",
 		"ubuntu@[2001:db8::1]:2222": "ssh://ubuntu@[2001:db8::1]:2222",
@@ -151,19 +153,16 @@ func TestRecoverTakesSSHAliases(t *testing.T) {
 	}
 }
 
-// A destination whose ssh config gives no user is refused, naming the user
-// it lacks, never reached as the operator's local name; one that could be
-// an ssh option is refused before ssh -G sees it. The refusal mentions
-// aliases.
-func TestDestinationFlagsRefuseNoUserAndOptions(t *testing.T) {
+// A destination that could be an ssh option, or is no destination, is
+// refused before ssh -G sees it, and the refusal mentions aliases.
+func TestDestinationFlagsRefuseOptions(t *testing.T) {
 	withSSHAliases(t)
 	ownStore(t)
 	fetchFrom(t, "", "")
 	for in, want := range map[string]string{
-		"other":            "names no user",
-		"203.0.113.9":      "names no user",
 		"-oProxyCommand=x": "alias of your ssh config",
 		"my alias":         "alias of your ssh config",
+		"host*":            "alias of your ssh config",
 	} {
 		err := runDeploymentFetch([]string{"--ssh", in})
 		if text := problemText(err); err == nil || !strings.Contains(text, "--ssh is not a destination") || !strings.Contains(text, want) {

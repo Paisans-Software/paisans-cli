@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
-	"os/user"
 	"regexp"
 	"strconv"
 	"strings"
@@ -22,21 +21,12 @@ type SSHConfig struct {
 	// G runs ssh with -G and args and returns what it prints. args never
 	// reach a shell; the real one execs ssh with them as its argv.
 	G func(args []string) (string, error)
-	// LocalUser is the login ssh falls back to when no User applies to a
-	// host. `ssh -G` prints a user for every host, this one where nothing
-	// configures one, so a destination whose user resolves to it is taken
-	// as one that names no user (see ResolveDestination).
-	LocalUser string
 }
 
 // OperatorSSHConfig is the SSHConfig of the ssh on this workstation's PATH,
 // for the user running the toolkit.
 func OperatorSSHConfig() SSHConfig {
-	local := ""
-	if u, err := user.Current(); err == nil {
-		local = u.Username
-	}
-	return SSHConfig{G: runSSHG, LocalUser: local}
+	return SSHConfig{G: runSSHG}
 }
 
 // runSSHG execs `ssh -G args...`, with no shell between.
@@ -77,12 +67,11 @@ func destinationForm(s string) error {
 // would use. A host ssh maps to itself is a plain host, and keeps the user
 // and port written, so user@host[:port] reads as it always has.
 //
-// The user is required, because it is whose authorized keys a command reads
-// and the toolkit never guesses one. A destination with no user takes the
-// User its ssh config gives it; one whose config gives none fails, rather
-// than log in as the operator's local name, which `ssh -G` reports when
-// nothing configures a user. A config whose User is that same local name is
-// indistinguishable from none, and the error says to name the user.
+// A destination with no user written takes the user `ssh -G` reports for
+// it: the User its ssh config gives it, or, where none applies, the
+// operator's local login, which is the user a plain ssh logs in as. Every
+// message names the user the destination resolved to, so the login is never
+// one the operator cannot see. Founder decision.
 //
 // The user and host ssh resolves are held to the rules a declared ssh
 // section is, since both go into command lines.
@@ -134,18 +123,17 @@ func ResolveDestination(s string, c SSHConfig) (Destination, error) {
 			port = DefaultSSHPort
 		}
 		if login == "" {
-			if login, err = configuredUser(s, s, got, c); err != nil {
+			if login, err = resolvedUser(s, got); err != nil {
 				return Destination{}, err
 			}
 		}
 		return Destination{User: login, Host: host, Port: port}, nil
 	}
-	shown := s + " -> " + resolved
 	if net.ParseIP(resolved) == nil && !isHostname(resolved) {
 		return Destination{}, fmt.Errorf("%q: your ssh config gives it HostName %q, which is not a host name or address", s, resolved)
 	}
 	if login == "" {
-		if login, err = configuredUser(s, shown, got, c); err != nil {
+		if login, err = resolvedUser(s, got); err != nil {
 			return Destination{}, err
 		}
 	}
@@ -181,15 +169,15 @@ func splitHostPort(s, rest string) (host string, port int, bracketed bool, err e
 	return rest, 0, false, nil
 }
 
-// configuredUser is the User ssh config gives a destination written with
-// none, or the refusal naming the user it lacks.
-func configuredUser(s, shown string, got map[string]string, c SSHConfig) (string, error) {
+// resolvedUser is the user `ssh -G` reports for a destination written with
+// none, held to the rules a declared ssh section's user is.
+func resolvedUser(s string, got map[string]string) (string, error) {
 	u := got["user"]
-	if u == "" || u == c.LocalUser {
-		return "", fmt.Errorf("%q names no user and your ssh config gives %s none, so ssh would log in as your local name. Name the user, Eg: admin@%s", s, shown, s)
+	if u == "" {
+		return "", fmt.Errorf("%q: ssh -G reports no user for it. Name the user, Eg: admin@%s", s, s)
 	}
 	if !unixUser.MatchString(u) {
-		return "", fmt.Errorf("%q: your ssh config gives it User %q, which is not a login name the toolkit puts in a command line", s, u)
+		return "", fmt.Errorf("%q: ssh resolves its user to %q, which is not a login name the toolkit puts in a command line. Name the user, Eg: admin@%s", s, u, s)
 	}
 	return u, nil
 }

@@ -491,7 +491,7 @@ var helpCommands = []helpCommand{
 // operator's ssh config.
 const sshAliasTopic = "A destination is user@host[:port], or a Host alias of your ssh config: alias, user@alias, alias:port or user@alias:port, a user or port given overriding the config's. " +
 	"The alias is resolved with ssh -G, so Match, Include and wildcards apply as they do for ssh, and ssh is given the alias, so its ProxyJump, IdentityFile and other options apply to the connection. " +
-	"Messages show it as alias -> user@host:port. A destination whose config gives no User is refused rather than reached as your local name."
+	"Messages show it as alias -> user@host:port. A destination with no user takes the one ssh -G reports: its config's User, or your local login where none applies, as ssh does."
 
 const yesTopic = "--yes answers each confirmation as typing it would, with no terminal, and prints approved by --yes: and what it approved, a line for each. It needs PAISANS_ALLOW_YES=1 in the environment, so a command line copied alone never approves anything."
 

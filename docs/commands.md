@@ -138,11 +138,10 @@ paisans site deployments --ssh admin@203.0.113.9             # user@host
   where each copy came from, since the alias means something only on this
   workstation. Nothing is written into `paisans-stack.yaml`: `ssh.user` is
   recorded only from a site's own ssh section, never from `--ssh`.
-* **A user is required.** A destination whose config sets no `User` is
-  refused rather than reached as your local name, which is what ssh falls back
-  to; `ssh -G` reports that name for an unconfigured host, so a config whose
-  `User` is your local name reads the same, and the refusal says to name the
-  user (`admin@home-a`).
+* **The user ssh would use.** A destination with no user takes the user
+  `ssh -G` reports: its config's `User`, or your local login where none
+  applies, as a plain ssh logs in. Messages name that user, so the login is
+  always shown.
 * **Never an option.** A destination starting with `-`, or holding a space or
   a pattern character, is refused before ssh is run.
 

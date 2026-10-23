@@ -13,7 +13,8 @@ import (
 // stubSSH is an ssh config read through a stub `ssh -G`, never the real one:
 // hosts maps a Host alias to the HostName, User and Port it sets (User or
 // Port empty for none). Any other host resolves to itself, port 22, as ssh
-// resolves a host no Host block names. Its local user is "localme". calls
+// resolves a host no Host block names, and a host no User applies to resolves
+// to the local login, "localme", as ssh -G reports it. calls
 // records every argv the stub was given.
 type stubSSH struct {
 	hosts map[string][3]string
@@ -21,7 +22,7 @@ type stubSSH struct {
 }
 
 func (s *stubSSH) config() config.SSHConfig {
-	return config.SSHConfig{LocalUser: "localme", G: func(args []string) (string, error) {
+	return config.SSHConfig{G: func(args []string) (string, error) {
 		s.calls = append(s.calls, args)
 		var user, port string
 		for i := 0; i < len(args)-1; i++ {
@@ -117,19 +118,35 @@ func TestResolveDestinationKeepsTheExistingForms(t *testing.T) {
 	}
 }
 
-// A destination with no user, whose ssh config gives none, is refused
-// rather than reached as the operator's local name, which is what ssh -G
-// reports when no User applies.
-func TestResolveDestinationRefusesNoUser(t *testing.T) {
-	for _, in := range []string{"nouser", "nouser:2200", "local", "203.0.113.9", "host.example.org"} {
-		_, err := config.ResolveDestination(in, aliases().config())
-		if err == nil || !strings.Contains(err.Error(), "names no user") || !strings.Contains(err.Error(), "Eg: admin@"+in) {
-			t.Errorf("%s: %v, want the refusal of no user", in, err)
+// A destination with no user takes the user ssh -G reports: the config's
+// User, the operator's local login among them, or the local login where no
+// User applies, as a plain ssh logs in. A user ssh reports that the toolkit
+// would not put in a command line is refused.
+func TestResolveDestinationTakesTheUserSSHReports(t *testing.T) {
+	for in, want := range map[string]config.Destination{
+		"nouser":           {User: "localme", Host: "203.0.113.10", Port: 22, Alias: "nouser"},
+		"nouser:2200":      {User: "localme", Host: "203.0.113.10", Port: 2200, Alias: "nouser"},
+		"local":            {User: "localme", Host: "203.0.113.11", Port: 22, Alias: "local"},
+		"203.0.113.9":      {User: "localme", Host: "203.0.113.9", Port: 22},
+		"host.example.org": {User: "localme", Host: "host.example.org", Port: 22},
+	} {
+		got, err := config.ResolveDestination(in, aliases().config())
+		if err != nil || got != want {
+			t.Errorf("%s: got %+v, %v; want %+v", in, got, err, want)
 		}
 	}
-	_, err := config.ResolveDestination("nouser", aliases().config())
-	if !strings.Contains(err.Error(), "nouser -> 203.0.113.10") {
-		t.Errorf("the refusal does not show what the alias resolved to: %v", err)
+	d, _ := config.ResolveDestination("nouser", aliases().config())
+	if d.String() != "nouser -> localme@203.0.113.10:22" {
+		t.Errorf("the user it resolved to is not shown: %q", d.String())
+	}
+	for out, want := range map[string]string{
+		"user Bad User\nhostname 203.0.113.9\nport 22\n": "not a login name",
+		"hostname 203.0.113.9\nport 22\n":                "reports no user",
+	} {
+		c := config.SSHConfig{G: func([]string) (string, error) { return out, nil }}
+		if _, err := config.ResolveDestination("myalias", c); err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "Eg: admin@myalias") {
+			t.Errorf("%q: %v, want %q", out, err, want)
+		}
 	}
 }
 
@@ -159,7 +176,7 @@ func TestResolveDestinationRefusesWhatSSHResolvesBadly(t *testing.T) {
 	if _, err := config.ResolveDestination("badname", aliases().config()); err == nil || !strings.Contains(err.Error(), "HostName") {
 		t.Errorf("a HostName with a space: %v", err)
 	}
-	broken := config.SSHConfig{LocalUser: "localme", G: func([]string) (string, error) { return "", errors.New("ssh -G: line 3: Bad configuration option") }}
+	broken := config.SSHConfig{G: func([]string) (string, error) { return "", errors.New("ssh -G: line 3: Bad configuration option") }}
 	if _, err := config.ResolveDestination("myalias", broken); err == nil || !strings.Contains(err.Error(), "Bad configuration option") {
 		t.Errorf("ssh -G failing: %v", err)
 	}
