@@ -4437,17 +4437,15 @@ pins with `--root`. **A history found only on the sites is never trusted on its
 own, however consistent it looks**, because someone with root on those sites
 could have written it, signed with their own key and listing themselves as an
 operator. The operator's key is the one `.paisans/signing-key` records; on a
-workstation that records none, a pull, a log or a recovery takes every key the
-operator's ssh-agent holds, or the public key `--key` names, `--root` or not.
-Those keys come from the workstation alone, never from a site, but a key the
-operator can reach may be one a later version removed or one shared with
-someone else, so it anchors only on a version the rules below already trust,
-judged from that version's root; with a root pinned, that version must
-descend from it. When anchoring on different such versions gives different
-heads, it is a fork. A pull or a recovery records the key that signed the
-anchor when the agent holds it and an operator of the head lists it. With
-neither an own signature nor a pin, a pull or a recovery is refused and asks
-for one.
+workstation that records none, a pull, a log or a recovery anchors on the
+public key the operator names with `--key`, and never on a key merely because
+the ssh-agent holds it. A named key may be one a later version removed, so it
+anchors only on a version the rules below already trust, judged from that
+version's root, and only while an operator of the newest version lists it.
+A pinned root anchors alone. When the named key's versions lead to
+different heads, it is a fork. A pull or a recovery records the named key
+when the agent holds it and an operator of the head lists it. With neither an
+own signature nor a pin, a pull or a recovery is refused and asks for one.
 
 From that anchor a version is trusted when it passes three rules, each of which
 closes a forgery:
@@ -4553,7 +4551,7 @@ paisans deployment publish --execute      # sign the local files, push to every 
 paisans deployment pull --execute         # move the files to the sites' newest
 paisans deployment log                    # every version, signer, holding sites
 paisans deployment publish --merge --execute   # one version on every head of a fork
-paisans deployment recover --from admin@203.0.113.9 --execute   # empty workstation, your key in the agent
+paisans deployment recover --from admin@203.0.113.9 --key ~/.ssh/id_ed25519.pub --execute   # empty workstation
 ```
 
 * **`paisans operator register`** gives an operator who has never published an anchor
@@ -4580,12 +4578,11 @@ paisans deployment recover --from admin@203.0.113.9 --execute   # empty workstat
   before `publish --merge`.
 * **`paisans deployment recover`** onto a workstation with nothing gathers from the
   named hosts and every site the trusted heads name. It anchors on a version
-  the rules trust that the operator's key in their ssh-agent, or the one
-  `--key` names, signed, or on `--root`
+  the rules trust that the operator's key named with `--key` signed, or on
+  `--root`
   with the hash of a version the operator trusts, kept somewhere other than the
   workstation that was lost, because a history found only on the sites is
-  never trusted on its own; a pinned root also bounds the key's anchor, which
-  must descend from it. `--from` takes any login that reaches the host,
+  never trusted on its own; a pinned root anchors alone. `--from` takes any login that reaches the host,
   the owner's as well as the deployment's: the admission records under
   `/etc/paisans` are readable by every login, so recover learns the deployment
   and its user from them and reaches the host again as that user. `--id` names

@@ -29,6 +29,7 @@ changes share a bullet. Detailed notes are on the corresponding
 - `deployment recover`, `deployment pull`, `init --age-private-key-file` and the saved version's `applied from` note of `deployment apply` name the configuration's directory as a full path, not `.`.
 - `deployment recover` and `deployment pull` on a workstation recording no signing key start trust from any key the ssh-agent holds, or one `--key` names, so recovery needs no `--root`.
 - `deployment recover`, `pull` and `log` on a workstation recording no signing key start trust from any key the ssh-agent holds, or one `--key` names, so recovery needs no `--root`.
+- `deployment recover`, `pull` and `log` take `--key <path.pub>`, an operator key that anchors trust where none is recorded, so recovering onto an empty workstation needs no `--root`.
 
 ### Security
 

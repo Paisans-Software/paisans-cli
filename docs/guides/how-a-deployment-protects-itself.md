@@ -239,10 +239,10 @@ with root on a site can write anything there:
 * **Trust starts from something only the operator holds:** the newest version
   signed by their own SSH key, or a root hash they pin with `--root`. Their key
   is the one `.paisans/signing-key` records or, on a workstation that records
-  none, any key their ssh-agent holds; a key from the sites never anchors. A
-  key in the agent may be one a later version removed, or one shared with
-  someone else, so it anchors only on a version the rules below already trust
-  from its root. A history
+  none, the one they name with `--key`; a key from the sites, or one the
+  ssh-agent merely holds, never anchors. A named key may be one a later version
+  removed, so it anchors only on a version the rules below already trust from
+  its root, and only while the newest version lists it. A history
   found only on the sites is never trusted, however consistent, because whoever
   holds those sites could have written it and listed themselves as an operator. An
   operator who has never published gets an anchor of their own with `paisans operator
@@ -270,20 +270,19 @@ an old one visible instead:
   asks for `rollback` before giving it an older one.
 
 When the workstation is gone, `paisans deployment recover --from <user@host>
---execute` in an empty directory gathers from the hosts named and then every
-site the trusted heads name, and writes the three files. Trust starts from the
-newest version, among those the rules trust from its root, signed by a key the
-ssh-agent holds or by a public key you trust that `--key <path.pub>` names.
-The key is recorded in `.paisans/signing-key` for the publishes that follow
-when the agent holds it and an operator of the head lists it. Without the key, `--root <sha>` pins the hash of
-a version the operator trusts, as `paisans deployment log` prints it; keep that
-hash somewhere other than the workstation, or commit `.paisans/config-root`,
-which the operators may share. The agent's keys are used whenever no signing
-key is recorded, `--root` or not; with a root pinned, trust starts only from a
-version that descends from it. When the sites hold two
-trusted heads, or the agent's keys anchor in histories with different heads,
-`recover` writes each head to `.paisans/incoming/<sha>/` and leaves the choice
-to an operator.
+--key <path.pub> --execute` in an empty directory gathers from the hosts named
+and then every site the trusted heads name, and writes the three files. Trust
+starts from the newest version, among those the rules trust from its root,
+signed by your operator key that `--key` names; a key no operator of the newest
+version lists is refused. The key is recorded in `.paisans/signing-key` for the
+publishes that follow when the ssh-agent holds it and an operator of the head
+lists it. Without the key, `--root <sha>` pins the hash of a version the
+operator trusts, as `paisans deployment log` prints it; keep that hash
+somewhere other than the workstation, or commit `.paisans/config-root`, which
+the operators may share. A pinned root anchors alone. When the sites hold two
+trusted heads, or the named key's versions lead to different heads, `recover`
+writes each head to `.paisans/incoming/<sha>/` and leaves the choice to an
+operator.
 
 **Does not protect.** A fresh workstation that reaches only sites an attacker
 holds can be served an old, genuine version, and applying it reaches only those
