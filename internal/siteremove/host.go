@@ -900,32 +900,59 @@ func (p *Plan) runHost() error {
 	return nil
 }
 
-// meshUnitCommand asks systemd, as the deployment's user, whether the mesh
-// unit is enabled or active: systemctl answers both for a system unit
-// without root. /etc/wireguard is root's alone, so the conf cannot be
+// meshUnitCommand asks systemd, as the deployment's user, what the mesh
+// unit's enablement and activity are: systemctl answers both for a system
+// unit without root. /etc/wireguard is root's alone, so the conf cannot be
 // looked for; a unit enabled at boot is what brings the interface back
-// from it, as one that failed to start at the last boot still is.
+// from it, as one that failed to start at the last boot still is. Each
+// answer is printed whole, with what systemctl wrote to stderr, and not
+// judged by its exit status: is-enabled and is-active exit non-zero for a
+// disabled or inactive unit and for a systemctl that could not answer
+// alike, and only the words tell them apart.
 func (p *Plan) meshUnitCommand() string {
-	u := quote(p.dep().WireGuardUnit())
-	return fmt.Sprintf("if systemctl is-enabled --quiet %[1]s; then echo enabled; fi; if systemctl is-active --quiet %[1]s; then echo active; fi; true", u)
+	return fmt.Sprintf(`u=%s; e=$(systemctl is-enabled "$u" 2>&1); a=$(systemctl is-active "$u" 2>&1); printf 'is-enabled %%s\nis-active %%s\n' "$e" "$a"`, quote(p.dep().WireGuardUnit()))
 }
 
+// unitEnabled and unitActive are every state systemctl's is-enabled and
+// is-active print (systemctl(1)), each marked whether it is a unit the
+// helper's down has left to take away: one enabled at boot, or one running.
+// Any other answer is systemctl failing to say, and is an error.
+var (
+	unitEnabled = map[string]bool{
+		"enabled": true, "enabled-runtime": true, "linked": true, "linked-runtime": true,
+		"disabled": false, "static": false, "masked": false, "masked-runtime": false, "not-found": false,
+		"indirect": false, "generated": false, "transient": false, "alias": false, "bad": false,
+	}
+	unitActive = map[string]bool{
+		"active": true, "activating": true, "deactivating": true, "reloading": true, "refreshing": true,
+		"inactive": false, "failed": false, "maintenance": false, "unknown": false,
+	}
+)
+
 // meshLeft reports whether the deployment's mesh is on the host: its
-// interface up, or its unit enabled or active.
+// interface up, or its unit enabled or active. An answer from systemctl
+// that is not one of its states is an error, never a unit that is not
+// there.
 func (p *Plan) meshLeft(t apply.Transport, inv *hostcheck.Inventory) (bool, error) {
 	if contains(inv.Links, p.dep().Interface()) {
 		return true, nil
 	}
+	unit := p.dep().WireGuardUnit()
 	out, err := t.Run(p.meshUnitCommand())
 	if err != nil {
-		return false, fmt.Errorf("site remove %s: reading %s: %w: %s", p.Site, p.dep().WireGuardUnit(), err, lastLines(out, 2))
+		return false, fmt.Errorf("site remove %s: reading %s: %w: %s", p.Site, unit, err, lastLines(out, 2))
 	}
-	for _, line := range strings.Split(out, "\n") {
-		if l := strings.TrimSpace(line); l == "enabled" || l == "active" {
-			return true, nil
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) == 2 {
+		e, isE := strings.CutPrefix(lines[0], "is-enabled ")
+		a, isA := strings.CutPrefix(lines[1], "is-active ")
+		enabled, knownE := unitEnabled[e]
+		active, knownA := unitActive[a]
+		if isE && isA && knownE && knownA {
+			return enabled || active, nil
 		}
 	}
-	return false, nil
+	return false, fmt.Errorf("site remove %s: systemctl did not say whether %s is enabled and active, so nothing shows the mesh is gone: %s", p.Site, unit, lastLines(out, 3))
 }
 
 // meshDown takes the deployment's mesh interface down through its WireGuard

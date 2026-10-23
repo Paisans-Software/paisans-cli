@@ -82,7 +82,7 @@ func TestTheHostStageIsTheUsersOwn(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range w.hosts["home-b"].commands {
-		if c == wgHelper+"down" || strings.HasPrefix(c, "if systemctl is-enabled --quiet 'wg-quick@") {
+		if c == wgHelper+"down" || strings.HasPrefix(c, "u='wg-quick@") {
 			// The helper's down, and reading whether the mesh unit is
 			// enabled or active, which needs no root.
 			continue
@@ -500,5 +500,56 @@ func TestTheHostGateFindsTheMeshUnitEnabled(t *testing.T) {
 	err := siteremove.Execute(p)
 	if err == nil || !strings.Contains(err.Error(), "wg-quick@psns-f2a9 enabled or active") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// systemctl that cannot say what the mesh unit is, such as one with no bus
+// to ask, is an error, never a unit that is gone: the plan refuses, and so
+// does the gate, so an enabled unit and its conf are never passed over.
+func TestAnUnknownMeshUnitAnswerIsAnError(t *testing.T) {
+	for _, answer := range []string{
+		"is-enabled Failed to connect to bus: No such file or directory\nis-active Failed to connect to bus: No such file or directory\n",
+		"is-enabled disabled\nis-active \n",
+		"is-enabled \nis-active inactive\n",
+		"is-enabled disabled\nSystem has not been booted with systemd as init system (PID 1). Can't operate.\nis-active inactive\n",
+		"\n",
+	} {
+		w := setup(t)
+		b := w.hosts["home-b"]
+		b.wgUp = false
+		w.unitAnswer = answer
+		if _, err := w.build("home-b", siteremove.Options{}); err == nil || !strings.Contains(err.Error(), "systemctl did not say whether wg-quick@psns-f2a9 is enabled and active") {
+			t.Errorf("answer %q: build err = %v", answer, err)
+		}
+		w.unitAnswer = ""
+		p := w.mustBuild("home-b", siteremove.Options{})
+		w.unitAnswer = answer
+		if err := siteremove.Execute(p); err == nil || !strings.Contains(err.Error(), "systemctl did not say") {
+			t.Errorf("answer %q: the gate passed: %v", answer, err)
+		}
+	}
+}
+
+// Every state systemctl names is read, and only an enabled or running unit
+// is one down has left to take away.
+func TestEveryKnownMeshUnitStateIsRead(t *testing.T) {
+	for answer, left := range map[string]bool{
+		"is-enabled disabled\nis-active inactive\n":        false,
+		"is-enabled not-found\nis-active inactive\n":       false,
+		"is-enabled static\nis-active failed\n":            false,
+		"is-enabled enabled\nis-active failed\n":           true,
+		"is-enabled enabled-runtime\nis-active inactive\n": true,
+		"is-enabled disabled\nis-active activating\n":      true,
+	} {
+		w := setup(t)
+		w.hosts["home-b"].wgUp = false
+		w.unitAnswer = answer
+		p, err := w.build("home-b", siteremove.Options{})
+		if err != nil {
+			t.Fatalf("answer %q: %v", answer, err)
+		}
+		if got := hasStepIn(stageNamed(p, "clean the host"), "home-b", "stop", dep.Interface()); got != left {
+			t.Errorf("answer %q: down planned %v, want %v", answer, got, left)
+		}
 	}
 }

@@ -121,8 +121,11 @@ type world struct {
 	// downLeavesUp makes the WireGuard helper's down answer and leave the
 	// interface up.
 	downLeavesUp bool
-	unreachable  map[string]bool
-	caddyBroken  bool
+	// unitAnswer, when set, is what systemctl answers about the mesh unit
+	// on every host, in place of its state.
+	unitAnswer  string
+	unreachable map[string]bool
+	caddyBroken bool
 	// neverStreams is a site whose recreated Patroni never streams again,
 	// while its member key in etcd, which the old process wrote, still says
 	// streaming.
@@ -693,15 +696,18 @@ func (h *host) Run(command string) (string, error) {
 			h.wgUp = true
 		}
 		return "", nil
-	case strings.HasPrefix(command, "if systemctl is-enabled --quiet 'wg-quick@psns-f2a9'; then echo enabled; fi; if systemctl is-active --quiet 'wg-quick@psns-f2a9'"):
-		out := ""
+	case strings.HasPrefix(command, "u='wg-quick@psns-f2a9'; e=$(systemctl is-enabled \"$u\" 2>&1); a=$(systemctl is-active \"$u\" 2>&1)"):
+		if w.unitAnswer != "" {
+			return w.unitAnswer, nil
+		}
+		enabled, active := "disabled", "inactive"
 		if h.wgUp || h.wgEnabled {
-			out += "enabled\n"
+			enabled = "enabled"
 		}
 		if h.wgUp {
-			out += "active\n"
+			active = "active"
 		}
-		return out, nil
+		return "is-enabled " + enabled + "\nis-active " + active + "\n", nil
 	case command == wgHelper+"down":
 		if w.downLeavesUp {
 			return "", nil
