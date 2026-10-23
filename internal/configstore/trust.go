@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 )
 
 // Graph is every version the workstation holds, with a way to read each
@@ -16,19 +17,18 @@ type Graph struct {
 
 // Anchor is what the operator holds that nobody else can forge: their own
 // signing keys, a pinned root, or both. Signers is a set of fingerprints:
-// the key .paisans/signing-key records, or, with Held, every key the
-// operator's ssh-agent holds or the one --key names, on a workstation that
-// records none. Signers never come from the sites.
+// the key .paisans/signing-key records, or, with Named, the key the operator
+// names with --key on a workstation that records none. Signers never come
+// from the sites or the ssh-agent.
 //
 // A recorded key is the operator's by their own choice, so its newest
-// version anchors whatever its history. A held key is only a key the
-// operator can reach: one a later version removed, or one shared with
-// someone else, signs as well as their own does. So a version a held key
-// signed anchors only where the trust rules, judged from a root, already
-// trust it.
+// version anchors whatever its history. A named key is one the operator
+// chose for this run only, and it may be one a later version removed, so a
+// version it signed anchors only where the trust rules, judged from its
+// root, trust it already, and only while an operator of the heads lists it.
 type Anchor struct {
 	Signers []string // the operator's key fingerprints; may be empty
-	Held    bool     // Signers are held, not recorded
+	Named   bool     // Signers is the key --key names, not a recorded one
 	Root    string   // a pinned root sha; may be empty
 }
 
@@ -85,14 +85,15 @@ func (e *UnreadableOperatorsError) Unwrap() error { return e.Err }
 //     signed anchor must descend from the pin. The anchor and every ancestor
 //     of it are trusted whatever their shape, because the operator signed
 //     after them.
-//   - With held keys, each good root (only the pinned one, when one is
-//     pinned) that has a version a held key signed below it is judged by
-//     these rules as if pinned. The versions a held key signed that this
-//     trusts are the candidates, and the newest of those not in another's
-//     history is the anchor. Each such version is judged as the anchor in
-//     turn; when their heads differ, as with candidates under two roots, the
-//     verdict is a fork of every head any of them trusts. A candidate that
-//     does not descend from a pinned root is refused.
+//   - With a named key and a pinned root, the pinned root is the anchor and
+//     the key is not consulted. With a named key alone, each good root that
+//     has a version the key signed below it is judged by these rules as if
+//     pinned. The versions the key signed that this trusts are the
+//     candidates, and the newest of those not in another's history is the
+//     anchor. Each such version is judged as the anchor in turn; when their
+//     heads differ, as with candidates under two roots, the verdict is a fork
+//     of every head any of them trusts. A key that no operator of every head
+//     lists, removed or never listed, is refused.
 //   - Removals in that history always stand, and bar the versions signed by
 //     each removed key that are not ancestors of the removal.
 //   - Every other version is a candidate when it passes shape, is not a root,
@@ -117,8 +118,8 @@ func Judge(g Graph, a Anchor) (Verdict, error) {
 	j := &judgement{g: g, operators: map[string]operatorsResult{}, anc: map[string]map[string]bool{}}
 	order, cyclic := j.topo()
 
-	if a.Held {
-		return j.held(a, order, cyclic)
+	if a.Named {
+		return j.named(a, order, cyclic)
 	}
 	anchor, err := j.anchor(a, order)
 	if err != nil {
@@ -381,17 +382,18 @@ func (j *judgement) anchor(a Anchor, order []string) (string, error) {
 	return "", ErrNoAnchor
 }
 
-// held judges from keys the workstation holds but has not recorded, by the
-// rule in Judge's comment: a version they signed anchors only where the trust
-// rules, judged from its root, trust it already, so a removed key, or one
-// that was never an operator's, anchors nothing.
-func (j *judgement) held(a Anchor, order, cyclic []string) (Verdict, error) {
+// named judges from the key --key names, by the rule in Judge's comment: a
+// pinned root wins, and otherwise a version the key signed anchors only where
+// the trust rules, judged from its root, trust it already, and only while an
+// operator of every head lists the key.
+func (j *judgement) named(a Anchor, order, cyclic []string) (Verdict, error) {
 	if a.Root != "" {
 		if reason := j.goodRoot(a.Root); reason != "" {
 			return Verdict{}, &anchorError{fmt.Sprintf("the pinned root %s %s", a.Root, reason)}
 		}
+		return j.from(a.Root, order, cyclic)
 	}
-	signedHeld := func(sha string) bool {
+	signed := func(sha string) bool {
 		return slices.Contains(a.Signers, j.g.Versions[sha].SignerFP) && j.shape(sha) == ""
 	}
 	var cands []string
@@ -401,7 +403,7 @@ func (j *judgement) held(a Anchor, order, cyclic []string) (Verdict, error) {
 		}
 		below := false
 		for _, sha := range order {
-			if signedHeld(sha) && (sha == root || j.ancestors(sha)[root]) {
+			if signed(sha) && (sha == root || j.ancestors(sha)[root]) {
 				below = true
 				break
 			}
@@ -414,43 +416,42 @@ func (j *judgement) held(a Anchor, order, cyclic []string) (Verdict, error) {
 			return Verdict{}, err
 		}
 		for _, sha := range order {
-			if v.Trusted[sha] && signedHeld(sha) && !slices.Contains(cands, sha) {
+			if v.Trusted[sha] && signed(sha) && !slices.Contains(cands, sha) {
 				cands = append(cands, sha)
 			}
 		}
 	}
 	tips := j.newest(cands)
-	if a.Root != "" {
-		for _, tip := range tips {
-			if a.Root != tip && !j.ancestors(tip)[a.Root] {
-				return Verdict{}, &anchorError{fmt.Sprintf("your newest version %s does not descend from the pinned root %s", tip, a.Root)}
-			}
-		}
-		if len(tips) == 0 {
-			return j.from(a.Root, order, cyclic)
-		}
-	}
 	if len(tips) == 0 {
-		return Verdict{}, ErrNoAnchor
+		return Verdict{}, &anchorError{fmt.Sprintf("no version the trust rules trust is signed by the key --key names, %s, and no root is pinned", strings.Join(a.Signers, ", "))}
 	}
-	first, err := j.from(tips[0], order, cyclic)
-	if err != nil {
-		return Verdict{}, err
-	}
-	verdicts := []Verdict{first}
+	verdicts := make([]Verdict, 0, len(tips))
 	agree := true
-	for _, tip := range tips[1:] {
+	for _, tip := range tips {
 		v, err := j.from(tip, order, cyclic)
 		if err != nil {
 			return Verdict{}, err
 		}
 		verdicts = append(verdicts, v)
-		agree = agree && slices.Equal(v.Heads, first.Heads)
+		agree = agree && slices.Equal(v.Heads, verdicts[0].Heads)
 	}
-	if agree {
-		return first, nil
+	out := verdicts[0]
+	if !agree {
+		out = j.union(verdicts)
 	}
-	return j.union(verdicts), nil
+	for _, h := range out.Heads {
+		ops := j.operatorsOf(h)
+		listed := ops.err == nil
+		for _, fp := range a.Signers {
+			if _, ok := ops.m[fp]; !ok {
+				listed = false
+			}
+		}
+		if !listed {
+			return Verdict{}, &anchorError{fmt.Sprintf("the key --key names, %s, is not a key of an operator the newest version %s lists", strings.Join(a.Signers, ", "), h)}
+		}
+	}
+	return out, nil
 }
 
 // newest is the versions among shas that are in no other's history, newest

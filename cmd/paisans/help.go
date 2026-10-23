@@ -505,9 +505,9 @@ const configTrust = "\n\n" +
 
 // agentTrust is how pull, log and recover find the operator's key on a
 // workstation that records none.
-const agentTrust = "With no key recorded in .paisans/signing-key, trust starts from the newest version signed by any key your ssh-agent holds, or by a public key you trust that --key names, which the agent need not hold, among the versions the trust rules trust from their root: a removed key, or one no operator lists, anchors nothing. " +
-	"This holds with --root too: the version they anchor on must descend from the pinned root. Keys that anchor in histories with different heads are a fork. " +
-	"pull and recover with --execute record the key that signed that version in .paisans/signing-key when your ssh-agent holds it and an operator of the head lists it; log records nothing. With no such version and no root, load your own operator key with ssh-add, name a public key you trust with --key, or pin --root <sha>."
+const agentTrust = "With no key recorded in .paisans/signing-key, name your own operator key with --key <path.pub>: trust starts from the newest version it signed among the versions the trust rules trust from their root, and a key no operator of the newest version lists, removed or never listed, is refused. No key is tried because your ssh-agent holds it. " +
+	"A pinned root anchors alone, and --key does not change it. A named key whose versions lead to different heads is a fork. " +
+	"pull and recover with --execute record the named key in .paisans/signing-key when your ssh-agent holds it (load it with ssh-add) and an operator of the head lists it; log records nothing. With neither --key nor a root, they refuse and say so."
 
 // executeTopic is `paisans help execute`: which commands reach a host, and
 // what --execute lets each of them change.

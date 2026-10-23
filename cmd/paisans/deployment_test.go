@@ -315,7 +315,7 @@ func TestConfigRecoverRefusals(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
 	err := runDeployment([]string{"recover", "--from", "ubuntu@203.0.113.9", "--config", filepath.Join(dir, "paisans-stack.yaml")}, noTerminalStdin(), &out)
-	if err == nil || !strings.Contains(problemText(err), "--root") || !strings.Contains(problemText(err), "ssh-add") {
+	if err == nil || !strings.Contains(problemText(err), "--root") || !strings.Contains(problemText(err), "--key") {
 		t.Fatalf("no anchor: %v", problemText(err))
 	}
 	os.WriteFile(filepath.Join(dir, "paisans-stack.yaml"), []byte("x"), 0o644)

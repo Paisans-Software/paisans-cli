@@ -125,57 +125,45 @@ func anchorFor(l configstore.Local, root string) (configstore.Anchor, error) {
 	return a, nil
 }
 
-// heldAnchor adds the operator's keys to a, for pull, log and recover, when the
-// workstation records no signing key: the one keyPath names, a public key
-// file, or else every key the ssh-agent holds. Nothing is chosen among them,
-// so nothing is guessed. They come from this workstation alone, never from
-// the sites, and are marked Held: a held key may be one a later version
-// removed or one shared with someone else, so configstore.Judge lets a
-// version it signed anchor only where the trust rules trust it already.
+// namedAnchor adds the key keyPath names, a public key file, to a, for pull,
+// log and recover, when the workstation records no signing key. The operator
+// names it: no key is taken from the ssh-agent or the sites on their own,
+// so a key the agent happens to hold never decides what is trusted. It is
+// marked Named, so configstore.Judge lets a version it signed anchor only
+// where the trust rules trust it already, refuses a key no operator of the
+// heads lists, and leaves a pinned root to anchor alone.
 //
-// The result maps each added key the agent holds, by fingerprint, to its key
-// line: the keys recordAnchorKey may record. A key --key names that the agent
-// does not hold anchors and is never recorded, since it may be a colleague's.
-func heldAnchor(a configstore.Anchor, keyPath string) (configstore.Anchor, map[string]string, error) {
-	held := agentKeys()
-	lines := map[string]string{}
-	var named string
-	if keyPath != "" {
-		data, err := os.ReadFile(keyPath)
-		if err != nil {
-			return a, nil, &ui.Problem{Hint: "cannot read --key", Explain: errLine(err) + ".", Cause: err}
-		}
-		k, opts, err := config.ParseKeyLine(strings.TrimSpace(string(data)))
-		if err != nil || len(opts) > 0 {
-			return a, nil, &ui.Problem{Hint: "--key must name a public key file", Explain: "Give the .pub file of a key you trust to have signed the deployment's versions, Eg: ~/.ssh/id_ed25519.pub."}
-		}
-		named = k.Fingerprint
-		if len(a.Signers) > 0 && !slices.Contains(a.Signers, named) {
-			return a, nil, &ui.Problem{Hint: "--key differs from the recorded signing key", Explain: fmt.Sprintf("This workstation signs with %s, recorded in .paisans/signing-key, and trust starts from it. Drop --key, or remove that file if the record is wrong.", a.Signers[0])}
-		}
-		if len(a.Signers) > 0 {
-			return a, nil, nil
-		}
-		a.Signers, a.Held = []string{named}, true
-		if agentHolds(held, named) {
-			lines[named] = k.Line
-		}
-		return a, lines, nil
-	}
-	if len(a.Signers) > 0 {
+// The result maps the key, by fingerprint, to its line when the ssh-agent
+// holds it: the key recordAnchorKey may record. A key the agent does not
+// hold anchors and is never recorded, since it may be a colleague's.
+func namedAnchor(a configstore.Anchor, keyPath string) (configstore.Anchor, map[string]string, error) {
+	if keyPath == "" {
 		return a, nil, nil
 	}
-	for _, line := range held {
-		if k, opts, err := config.ParseKeyLine(line); err == nil && len(opts) == 0 {
-			lines[k.Fingerprint] = k.Line
-		}
+	data, err := os.ReadFile(keyPath)
+	if err != nil {
+		return a, nil, &ui.Problem{Hint: "cannot read --key", Explain: errLine(err) + ".", Cause: err}
 	}
-	a.Signers, a.Held = slices.Sorted(maps.Keys(lines)), true
+	k, opts, err := config.ParseKeyLine(strings.TrimSpace(string(data)))
+	if err != nil || len(opts) > 0 {
+		return a, nil, &ui.Problem{Hint: "--key must name a public key file", Explain: "Give the .pub file of a key you trust to have signed the deployment's versions, Eg: ~/.ssh/id_ed25519.pub."}
+	}
+	if len(a.Signers) > 0 {
+		if !slices.Contains(a.Signers, k.Fingerprint) {
+			return a, nil, &ui.Problem{Hint: "--key differs from the recorded signing key", Explain: fmt.Sprintf("This workstation signs with %s, recorded in .paisans/signing-key, and trust starts from it. Drop --key, or remove that file if the record is wrong.", a.Signers[0])}
+		}
+		return a, nil, nil
+	}
+	a.Signers, a.Named = []string{k.Fingerprint}, true
+	lines := map[string]string{}
+	if agentHolds(agentKeys(), k.Fingerprint) {
+		lines[k.Fingerprint] = k.Line
+	}
 	return a, lines, nil
 }
 
 // recordAnchorKey records, as the signing key, the key in held (from
-// heldAnchor) that signed the version g's trust starts from, so later
+// namedAnchor) that signed the version g's trust starts from, so later
 // publishes sign with it. It records it only when the agent holds it and it
 // is a key of an operator the head lists: a removed key, or a colleague's
 // public key named with --key, anchors and is not recorded. A pinned root
@@ -208,18 +196,18 @@ func recordAnchorKey(l configstore.Local, g configstore.Gathered, held map[strin
 }
 
 // keyHelp is the --key flag's help for pull, log and recover.
-const keyHelp = "a public key file (.pub) you trust to start trust from, when .paisans/signing-key records none; the ssh-agent's keys are used without it"
+const keyHelp = "a public key file (.pub) you trust, to start trust from when .paisans/signing-key records none; recorded as the signing key when your ssh-agent holds it"
 
-// noAnchorHeld is what a pull, log or recover refusal for a missing anchor
+// noAnchorNamed is what a pull, log or recover refusal for a missing anchor
 // says to do, with otherwise added for a workstation that has files.
-func noAnchorHeld(otherwise string) string {
-	return "Load your own operator key with ssh-add, or name a public key you trust with --key <path.pub>, or pin the first version you trust with --root <sha>" + otherwise + "."
+func noAnchorNamed(otherwise string) string {
+	return "Name your own operator key's public key file with --key <path.pub>, loaded with ssh-add so it is recorded as this workstation's signing key, or pin the first version you trust with --root <sha>" + otherwise + "."
 }
 
 // noAnchorPublish is what publish's refusal for a missing anchor says to do.
 // publish judges only from the recorded signing key, so the pull that
 // records one comes first.
-const noAnchorPublish = "Load your own operator key with ssh-add and run paisans deployment pull, or name a public key you trust with paisans deployment pull --key <path.pub>, or pin the first version you trust with paisans deployment pull --root <sha>, or run paisans operator register to sign the version you hold."
+const noAnchorPublish = "Name your own operator key's public key file with paisans deployment pull --key <path.pub>, loaded with ssh-add so it is recorded as this workstation's signing key, or pin the first version you trust with paisans deployment pull --root <sha>, or run paisans operator register to sign the version you hold."
 
 func shaShape(s string) bool {
 	if len(s) != 40 && len(s) != 64 {
@@ -588,14 +576,14 @@ func runDeploymentPull(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	a, held, err := heldAnchor(a, *keyPath)
+	a, held, err := namedAnchor(a, *keyPath)
 	if err != nil {
 		return err
 	}
 	r := reporter()
 	r.Section("pull into " + *configPath)
 	sites := configTransports(cfg)
-	m := gatherMode{execute: *execute, answers: ans, noAnchor: noAnchorHeld(", or run paisans operator register to sign the version you hold")}
+	m := gatherMode{execute: *execute, answers: ans, noAnchor: noAnchorNamed(", or run paisans operator register to sign the version you hold")}
 	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, m, stdin, stdout)
 	if err != nil {
 		return err
@@ -674,7 +662,7 @@ func runDeploymentPull(args []string, stdin io.Reader, stdout io.Writer) error {
 
 // recordPull is what a pull with --execute records once it has passed its
 // last confirmation: the change to the seen record its gather carries,
-// root, when given, as the pinned root, and the key of held (heldAnchor's)
+// root, when given, as the pinned root, and the key of held (namedAnchor's)
 // that anchored the gather as the signing key.
 func recordPull(l configstore.Local, g configstore.Gathered, root string, held map[string]string) error {
 	if err := l.RecordSeen(g); err != nil {
@@ -852,15 +840,15 @@ func runDeploymentLog(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	// log records nothing, so the keys heldAnchor adds are only judged from.
-	a, _, err = heldAnchor(a, *keyPath)
+	// log records nothing, so the key namedAnchor adds is only judged from.
+	a, _, err = namedAnchor(a, *keyPath)
 	if err != nil {
 		return err
 	}
 	r := reporter()
 	r.Section("versions of " + *configPath)
 	sites := configTransports(cfg)
-	m := gatherMode{log: true, noAnchor: noAnchorHeld(", or run paisans operator register to sign the version you hold")}
+	m := gatherMode{log: true, noAnchor: noAnchorNamed(", or run paisans operator register to sign the version you hold")}
 	g, err := gatherAt(r, l, sites, len(sites), cfg.ID, a, m, stdin, stdout)
 	if err != nil {
 		return err
@@ -942,7 +930,7 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 	if err != nil {
 		return err
 	}
-	a, held, err := heldAnchor(a, *keyPath)
+	a, held, err := namedAnchor(a, *keyPath)
 	if err != nil {
 		return err
 	}
@@ -960,7 +948,7 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 	if err != nil {
 		return err
 	}
-	noAnchor := noAnchorHeld("")
+	noAnchor := noAnchorNamed("")
 	g, err := gatherAt(r, l, hosts, len(hosts), deploymentID, a, gatherMode{execute: *execute, answers: ans, noAnchor: noAnchor}, stdin, stdout)
 	if err != nil {
 		return err

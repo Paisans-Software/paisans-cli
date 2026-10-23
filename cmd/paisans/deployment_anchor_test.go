@@ -30,15 +30,48 @@ func fingerprint(t *testing.T, line string) string {
 	return k.Fingerprint
 }
 
+// pubFile writes a public key line to a .pub file and returns its path.
+func pubFile(t *testing.T, line string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "id.pub")
+	if err := os.WriteFile(path, []byte(line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 // recoverArgs is a recovery from the fixture's host into dir, with more.
 func recoverArgs(dir string, more ...string) []string {
 	return append([]string{"recover", "--from", "ubuntu@203.0.113.9", "--config", filepath.Join(dir, "paisans-stack.yaml")}, more...)
 }
 
-// On an empty workstation, with no root pinned, a version signed by a key
-// the ssh-agent holds anchors, and --execute records that key as the
-// signing key, beside the files and the history's root.
-func TestConfigRecoverAnchorsOnTheAgentsKey(t *testing.T) {
+// operatorsAs is the fixture's paisans-stack.yaml with alice's key replaced by
+// alice and bob's by bob.
+func operatorsAs(t *testing.T, alice, bob string) string {
+	t.Helper()
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Replace(fixtureAs(t, alice), cfg.Operators["bob"].KeyLines()[0], bob, 1)
+}
+
+// wantAdvice fails unless the refusal err is the missing anchor's, with the
+// advice an empty workstation can follow.
+func wantAdvice(t *testing.T, err error) {
+	t.Helper()
+	text := problemText(err)
+	for _, want := range []string{"no version to start trusting from", "--key <path.pub>", "ssh-add", "--root <sha>"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("refusal %q does not say %q", text, want)
+		}
+	}
+}
+
+// On an empty workstation, with no root pinned, the key --key names anchors
+// on the newest version it signed, the gather names it, and --execute
+// records it, since the agent holds it and an operator of the head lists it.
+func TestConfigRecoverAnchorsOnTheNamedKey(t *testing.T) {
 	shas, answer, files, _, pub := storedHistoryKey(t, 2, 1)
 	recoverHosts(t, answer)
 	allSitesUp(answer, nil)
@@ -47,8 +80,9 @@ func TestConfigRecoverAnchorsOnTheAgentsKey(t *testing.T) {
 	var rep bytes.Buffer
 	reporterOverride = ui.NewPlain(&rep, false)
 	dir := t.TempDir()
+	key := pubFile(t, pub)
 	var out bytes.Buffer
-	if err := runDeployment(recoverArgs(dir), noTerminalStdin(), &out); err != nil {
+	if err := runDeployment(recoverArgs(dir, "--key", key), noTerminalStdin(), &out); err != nil {
 		t.Fatalf("dry run: %v", problemText(err))
 	}
 	if !strings.Contains(rep.String(), "anchored on "+fingerprint(t, pub)) {
@@ -58,10 +92,7 @@ func TestConfigRecoverAnchorsOnTheAgentsKey(t *testing.T) {
 	if l.HasFiles() {
 		t.Fatal("a dry run wrote the files")
 	}
-	if k, _ := l.SigningKey(); k != "" {
-		t.Fatalf("a dry run recorded the signing key %q", k)
-	}
-	if err := runDeployment(recoverArgs(dir, "--execute"), noTerminalStdin(), &out); err != nil {
+	if err := runDeployment(recoverArgs(dir, "--key", key, "--execute"), noTerminalStdin(), &out); err != nil {
 		t.Fatal(problemText(err), err)
 	}
 	if got, _ := l.Files(); !got.Equal(files[1]) {
@@ -78,40 +109,33 @@ func TestConfigRecoverAnchorsOnTheAgentsKey(t *testing.T) {
 	}
 }
 
-// An agent holding no key that signed a version is no anchor, and the
-// refusal says how to give one on a workstation that has no files.
-func TestConfigRecoverWithUnrelatedAgentKeysRefuses(t *testing.T) {
-	_, answer, _ := storedVersion(t)
+// Without --key, no key in the agent is tried, even one that signed every
+// version: a recovery needs --key or --root, and says so.
+func TestConfigRecoverWithoutKeyIgnoresTheAgent(t *testing.T) {
+	_, answer, _, _, pub := storedHistoryKey(t, 1, 0)
 	recoverHosts(t, answer)
-	_, unrelated := testKey(t)
-	agentHolding(t, unrelated)
+	_, attacker := testKey(t)
+	agentHolding(t, attacker, pub)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	err := runDeployment(recoverArgs(dir, "--execute"), noTerminalStdin(), &out)
-	text := problemText(err)
-	for _, want := range []string{"no version to start trusting from", "ssh-add", "--key", "--root <sha>"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("refusal %q does not say %q", text, want)
-		}
-	}
-	if strings.Contains(text, "operator register") {
-		t.Fatalf("refusal %q suggests operator register, which needs the files", text)
+	wantAdvice(t, err)
+	if strings.Contains(problemText(err), "operator register") {
+		t.Fatalf("refusal %q suggests operator register, which needs the files", problemText(err))
 	}
 	if (configstore.Local{Dir: dir}).HasFiles() {
 		t.Fatal("a refused recovery wrote the files")
 	}
 }
 
-// --key names a public key to anchor on alone. One the agent does not hold,
-// as a colleague's, anchors and is never recorded; one it holds is.
+// --key with a public key the agent does not hold, as a colleague's,
+// anchors and is never recorded; --key that differs from a recorded key is
+// refused, and a file that is no public key is refused.
 func TestConfigRecoverAnchorsOnKeyFile(t *testing.T) {
 	shas, answer, _, _, pub := storedHistoryKey(t, 2, 0)
 	recoverHosts(t, answer)
 	allSitesUp(answer, nil)
-	path := filepath.Join(t.TempDir(), "id.pub")
-	if err := os.WriteFile(path, []byte(pub+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	path := pubFile(t, pub)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	if err := runDeployment(recoverArgs(dir, "--key", path, "--execute"), noTerminalStdin(), &out); err != nil {
@@ -126,26 +150,14 @@ func TestConfigRecoverAnchorsOnKeyFile(t *testing.T) {
 	}
 
 	_, mine := testKey(t)
-	agentHolding(t, mine, pub)
-	dir = t.TempDir()
-	if err := runDeployment(recoverArgs(dir, "--key", path, "--execute"), noTerminalStdin(), &out); err != nil {
-		t.Fatal(problemText(err), err)
-	}
-	if k, _ := (configstore.Local{Dir: dir}).SigningKey(); k != pub {
-		t.Fatalf("signing key %q, want %q", k, pub)
-	}
-
-	// --key that differs from a recorded signing key is refused.
-	minePath := filepath.Join(t.TempDir(), "mine.pub")
-	if err := os.WriteFile(minePath, []byte(mine+"\n"), 0o644); err != nil {
+	if err := l.SetSigningKey(mine); err != nil {
 		t.Fatal(err)
 	}
-	err := runDeployment([]string{"log", "--config", filepath.Join(dir, "paisans-stack.yaml"), "--key", minePath}, noTerminalStdin(), &out)
+	err := runDeployment([]string{"log", "--config", filepath.Join(dir, "paisans-stack.yaml"), "--key", path}, noTerminalStdin(), &out)
 	if !strings.Contains(problemText(err), "--key differs from the recorded signing key") {
 		t.Fatalf("got %v", problemText(err))
 	}
 
-	// A private key, or a file that is no key, is refused.
 	if err := os.WriteFile(path, []byte("not a key\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -155,13 +167,13 @@ func TestConfigRecoverAnchorsOnKeyFile(t *testing.T) {
 	}
 }
 
-// A pinned root still applies: an agent key whose newest version does not
-// descend from it is refused, not trusted beside it.
-func TestConfigRecoverAgentKeyMustDescendFromTheRoot(t *testing.T) {
+// A pinned root anchors alone: a named key whose versions are under another
+// root neither blocks nor overrides it, and is not recorded.
+func TestConfigRecoverPinnedRootWins(t *testing.T) {
 	key, pub := testKey(t)
 	okey, opub := testKey(t)
 	s := newStore(t)
-	other, _ := s.commit(t, fixtureAs(t, opub), "# other\n", nil, 1, okey)
+	other, f := s.commit(t, fixtureAs(t, opub), "# other\n", nil, 1, okey)
 	root, _ := s.commit(t, fixtureAs(t, pub), "", nil, 1, key)
 	s.commit(t, fixtureAs(t, pub), "# edited\n", []string{root}, 2, key)
 	answer := s.answer(t)
@@ -170,59 +182,37 @@ func TestConfigRecoverAgentKeyMustDescendFromTheRoot(t *testing.T) {
 	agentHolding(t, pub)
 	dir := t.TempDir()
 	var out bytes.Buffer
-	err := runDeployment(recoverArgs(dir, "--root", other, "--execute"), noTerminalStdin(), &out)
-	if !strings.Contains(problemText(err), "does not descend from the pinned root "+other) {
-		t.Fatalf("got %v", problemText(err))
+	if err := runDeployment(recoverArgs(dir, "--root", other, "--key", pubFile(t, pub), "--execute"), noTerminalStdin(), &out); err != nil {
+		t.Fatal(problemText(err), err)
 	}
 	l := configstore.Local{Dir: dir}
-	if l.HasFiles() {
-		t.Fatal("a refused recovery wrote the files")
+	if got, _ := l.Files(); !got.Equal(f) {
+		t.Fatal("recover did not write the pinned root's files")
 	}
 	if k, _ := l.SigningKey(); k != "" {
-		t.Fatalf("a refused recovery recorded the signing key %q", k)
+		t.Fatalf("the named key was recorded under another root's pin: %q", k)
 	}
 }
 
-// operatorsAs is the fixture's paisans-stack.yaml with alice's key replaced by
-// alice and bob's by bob.
-func operatorsAs(t *testing.T, alice, bob string) string {
-	t.Helper()
-	cfg, err := config.Load(fixtureConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return strings.Replace(fixtureAs(t, alice), cfg.Operators["bob"].KeyLines()[0], bob, 1)
-}
-
-// Two keys the agent holds whose histories diverge, here from two roots, are a
-// fork: neither is chosen, each head's files go to incoming/<sha>, and no key
-// is recorded. Either key alone recovers its own history.
-func TestConfigRecoverAgentKeysThatDivergeAreAFork(t *testing.T) {
+// A named key that signed two histories, here from two roots, anchors in
+// each, and their heads differ: a fork, each head's files go to
+// incoming/<sha>, and no key is recorded.
+func TestConfigRecoverNamedKeyUnderTwoRootsIsAFork(t *testing.T) {
 	akey, apub := testKey(t)
-	bkey, bpub := testKey(t)
+	_, bpub := testKey(t)
 	_, cpub := testKey(t)
 	s := newStore(t)
 	ra, _ := s.commit(t, operatorsAs(t, apub, cpub), "", nil, 1, akey)
 	a, fa := s.commit(t, operatorsAs(t, apub, cpub), "# a\n", []string{ra}, 2, akey)
-	rb, _ := s.commit(t, operatorsAs(t, bpub, cpub), "# b\n", nil, 1, bkey)
-	b, fb := s.commit(t, operatorsAs(t, bpub, cpub), "# b2\n", []string{rb}, 2, bkey)
+	rb, _ := s.commit(t, operatorsAs(t, apub, bpub), "# b\n", nil, 1, akey)
+	b, fb := s.commit(t, operatorsAs(t, apub, bpub), "# b2\n", []string{rb}, 2, akey)
 	answer := s.answer(t)
 	recoverHosts(t, answer)
 	allSitesUp(answer, nil)
-
 	agentHolding(t, apub)
-	one := t.TempDir()
-	var out bytes.Buffer
-	if err := runDeployment(recoverArgs(one, "--execute"), noTerminalStdin(), &out); err != nil {
-		t.Fatal(problemText(err), err)
-	}
-	if h, _ := (configstore.Local{Dir: one}).Head(); h != a {
-		t.Fatalf("one key: head %s, want %s", h, a)
-	}
-
-	agentHolding(t, apub, bpub)
 	dir := t.TempDir()
-	err := runDeployment(recoverArgs(dir, "--execute"), noTerminalStdin(), &out)
+	var out bytes.Buffer
+	err := runDeployment(recoverArgs(dir, "--key", pubFile(t, apub), "--execute"), noTerminalStdin(), &out)
 	if !strings.Contains(problemText(err), "the sites hold a fork") {
 		t.Fatalf("got %v", problemText(err))
 	}
@@ -241,9 +231,10 @@ func TestConfigRecoverAgentKeysThatDivergeAreAFork(t *testing.T) {
 	}
 }
 
-// A key the agent holds that a version removed anchors nothing on or beside
-// the removal and is never recorded; the files are the removal's line.
-func TestConfigRecoverRemovedAgentKey(t *testing.T) {
+// --key naming a key a version removed is refused, even though the agent
+// holds it and the removed key signed a version on the removal; the current
+// key recovers the removal's line and is recorded.
+func TestConfigRecoverNamedRemovedKeyIsRefused(t *testing.T) {
 	oldKey, oldPub := testKey(t)
 	newKey, newPub := testKey(t)
 	_, cpub := testKey(t)
@@ -255,34 +246,43 @@ func TestConfigRecoverRemovedAgentKey(t *testing.T) {
 	answer := s.answer(t)
 	recoverHosts(t, answer)
 	allSitesUp(answer, nil)
+	agentHolding(t, oldPub, newPub)
 
-	for _, keys := range [][]string{{oldPub}, {oldPub, newPub}} {
-		agentHolding(t, keys...)
-		dir := t.TempDir()
-		var out bytes.Buffer
-		if err := runDeployment(recoverArgs(dir, "--root", v1, "--execute"), noTerminalStdin(), &out); err != nil {
-			t.Fatal(problemText(err), err)
-		}
-		l := configstore.Local{Dir: dir}
-		if got, _ := l.Files(); !got.Equal(f2) {
-			t.Fatalf("%d keys: recover wrote another version's files", len(keys))
-		}
-		want := ""
-		if len(keys) == 2 {
-			want = newPub
-		}
-		if k, _ := l.SigningKey(); k != want {
-			t.Fatalf("%d keys: signing key %q, want %q", len(keys), k, want)
-		}
+	dir := t.TempDir()
+	var out bytes.Buffer
+	err := runDeployment(recoverArgs(dir, "--key", pubFile(t, oldPub), "--execute"), noTerminalStdin(), &out)
+	if !strings.Contains(problemText(err), "is not a key of an operator") {
+		t.Fatalf("got %v", problemText(err))
+	}
+	l := configstore.Local{Dir: dir}
+	if l.HasFiles() {
+		t.Fatal("a refused recovery wrote the files")
+	}
+	if k, _ := l.SigningKey(); k != "" {
+		t.Fatalf("a refused recovery recorded the signing key %q", k)
+	}
+
+	dir = t.TempDir()
+	if err := runDeployment(recoverArgs(dir, "--key", pubFile(t, newPub), "--execute"), noTerminalStdin(), &out); err != nil {
+		t.Fatal(problemText(err), err)
+	}
+	l = configstore.Local{Dir: dir}
+	if got, _ := l.Files(); !got.Equal(f2) {
+		t.Fatal("recover wrote another version's files")
+	}
+	if k, _ := l.SigningKey(); k != newPub {
+		t.Fatalf("signing key %q, want %q", k, newPub)
 	}
 }
 
-// pull, on a workstation with files and no anchor recorded, anchors on the
-// agent's key too, and records it with --execute.
-func TestConfigPullAnchorsOnTheAgentsKey(t *testing.T) {
+// pull, on a workstation with files and no anchor recorded, refuses without
+// --key or --root, whatever the agent holds, and with --key anchors on it
+// and records it.
+func TestConfigPullAnchorsOnTheNamedKey(t *testing.T) {
 	shas, answer, files, _, pub := storedHistoryKey(t, 2, 0)
 	recoverHosts(t, answer)
 	allSitesUp(answer, nil)
+	agentHolding(t, pub)
 	l := configstore.Local{Dir: t.TempDir()}
 	if err := l.WriteFiles(files[0]); err != nil {
 		t.Fatal(err)
@@ -292,12 +292,8 @@ func TestConfigPullAnchorsOnTheAgentsKey(t *testing.T) {
 	}
 	cfgPath := filepath.Join(l.Dir, "paisans-stack.yaml")
 	var out bytes.Buffer
-	err := runDeployment([]string{"pull", "--config", cfgPath, "--execute"}, noTerminalStdin(), &out)
-	if !strings.Contains(problemText(err), "ssh-add") {
-		t.Fatalf("no key held: %v", problemText(err))
-	}
-	agentHolding(t, pub)
-	if err := runDeployment([]string{"pull", "--config", cfgPath, "--execute"}, noTerminalStdin(), &out); err != nil {
+	wantAdvice(t, runDeployment([]string{"pull", "--config", cfgPath, "--execute"}, noTerminalStdin(), &out))
+	if err := runDeployment([]string{"pull", "--config", cfgPath, "--key", pubFile(t, pub), "--execute"}, noTerminalStdin(), &out); err != nil {
 		t.Fatal(problemText(err), err)
 	}
 	if h, _ := l.Head(); h != shas[1] {
@@ -308,33 +304,25 @@ func TestConfigPullAnchorsOnTheAgentsKey(t *testing.T) {
 	}
 }
 
-// log, on a workstation with files and no anchor recorded, judges from the
-// agent's key as pull does, and records nothing; unrelated keys refuse with
-// the same advice.
-func TestConfigLogAnchorsOnTheAgentsKey(t *testing.T) {
+// log, on a workstation with files and no anchor recorded, refuses without
+// --key or --root, and with --key judges from it, names it, and records
+// nothing.
+func TestConfigLogAnchorsOnTheNamedKey(t *testing.T) {
 	shas, answer, files, _, pub := storedHistoryKey(t, 2, 0)
 	recoverHosts(t, answer)
 	allSitesUp(answer, nil)
+	agentHolding(t, pub)
 	l := configstore.Local{Dir: t.TempDir()}
 	if err := l.WriteFiles(files[0]); err != nil {
 		t.Fatal(err)
 	}
 	cfgPath := filepath.Join(l.Dir, "paisans-stack.yaml")
-	_, unrelated := testKey(t)
-	agentHolding(t, unrelated)
 	var out bytes.Buffer
-	err := runDeployment([]string{"log", "--config", cfgPath}, noTerminalStdin(), &out)
-	text := problemText(err)
-	for _, want := range []string{"no version to start trusting from", "ssh-add", "--key", "--root <sha>"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("refusal %q does not say %q", text, want)
-		}
-	}
-	agentHolding(t, unrelated, pub)
+	wantAdvice(t, runDeployment([]string{"log", "--config", cfgPath}, noTerminalStdin(), &out))
 	var rep bytes.Buffer
 	reporterOverride = ui.NewPlain(&rep, false)
 	out.Reset()
-	if err := runDeployment([]string{"log", "--config", cfgPath}, noTerminalStdin(), &out); err != nil {
+	if err := runDeployment([]string{"log", "--config", cfgPath, "--key", pubFile(t, pub)}, noTerminalStdin(), &out); err != nil {
 		t.Fatal(problemText(err), err)
 	}
 	if !strings.Contains(rep.String(), "anchored on "+fingerprint(t, pub)) {
@@ -345,16 +333,6 @@ func TestConfigLogAnchorsOnTheAgentsKey(t *testing.T) {
 	}
 	if k, _ := l.SigningKey(); k != "" {
 		t.Fatalf("log recorded the signing key %q", k)
-	}
-
-	// --key names the key in place of the agent's.
-	path := filepath.Join(t.TempDir(), "id.pub")
-	if err := os.WriteFile(path, []byte(pub+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	agentHolding(t)
-	if err := runDeployment([]string{"log", "--config", cfgPath, "--key", path}, noTerminalStdin(), &out); err != nil {
-		t.Fatal(problemText(err), err)
 	}
 }
 
@@ -376,7 +354,7 @@ func TestConfigPublishWithoutAnchorAdvises(t *testing.T) {
 	for _, args := range [][]string{{"publish", "--config", cfgPath}, {"publish", "--config", cfgPath, "--execute"}} {
 		var out bytes.Buffer
 		text := problemText(runDeployment(args, noTerminalStdin(), &out))
-		for _, want := range []string{"no version to start trusting from", "ssh-add", "paisans deployment pull --key <path.pub>", "--root <sha>", "paisans operator register"} {
+		for _, want := range []string{"no version to start trusting from", "paisans deployment pull --key <path.pub>", "ssh-add", "paisans deployment pull --root <sha>", "paisans operator register"} {
 			if !strings.Contains(text, want) {
 				t.Fatalf("%v: refusal %q does not say %q", args, text, want)
 			}

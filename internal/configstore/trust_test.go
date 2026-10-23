@@ -569,101 +569,86 @@ func TestJudgeBuildReasons(t *testing.T) {
 	}
 }
 
-// heldKeys is an anchor of keys the workstation holds but has not recorded.
-func heldKeys(root string, fps ...string) Anchor { return Anchor{Signers: fps, Held: true, Root: root} }
+// named is an anchor of the key --key names.
+func named(root, fp string) Anchor { return Anchor{Signers: []string{fp}, Named: true, Root: root} }
 
-// With held keys, the newest version any of them signed that the rules trust
-// anchors, and keys that signed nothing change nothing.
-func TestJudgeAnyHeldKeyAnchors(t *testing.T) {
+// A named key's newest version that the rules trust anchors; a key that
+// signed nothing is no anchor.
+func TestJudgeNamedKeyAnchors(t *testing.T) {
 	f := chain()
 	f.add("v4", 4, "fp-bob", on("v3"), "alice", "bob")
 	f.operators["v3"] = map[string]string{"fp-alice": "alice", "fp-bob": "bob"}
-	v := judgeOK(t, f, heldKeys("", "fp-zed", "fp-alice", "fp-bob"))
+	v := judgeOK(t, f, named("", "fp-bob"))
 	if v.AnchorAt != "v4" {
 		t.Fatalf("AnchorAt = %s, want v4", v.AnchorAt)
 	}
 	wantHeads(t, v, "v4")
-
-	if _, err := Judge(f.graph(), heldKeys("", "fp-zed", "fp-yan")); !errors.Is(err, ErrNoAnchor) {
+	v = judgeOK(t, f, named("", "fp-alice"))
+	if v.AnchorAt != "v3" {
+		t.Fatalf("AnchorAt = %s, want v3", v.AnchorAt)
+	}
+	wantHeads(t, v, "v4")
+	if _, err := Judge(f.graph(), named("", "fp-zed")); !errors.Is(err, ErrNoAnchor) {
 		t.Fatalf("err = %v, want ErrNoAnchor", err)
 	}
 }
 
-// A held key that a version removed signs nothing trusted on that version,
-// with or without a pin: the removal stands, and the removed key's version
-// anchors nothing.
-func TestJudgeHeldRemovedKeyOnTheRemovalAnchorsNothing(t *testing.T) {
+// A named key a version removed is refused, whether its last version is on
+// the removal or beside it; the removed key's versions are never trusted.
+func TestJudgeNamedRemovedKeyIsRefused(t *testing.T) {
 	f := newFake()
 	f.add("v1", 1, "fp-old", nil, "old", "new")
 	f.add("v2", 2, "fp-new", on("v1"), "new") // removes old
 	f.add("x3", 3, "fp-old", on("v2"), "new", "old")
-	for _, a := range []Anchor{heldKeys("", "fp-new", "fp-old"), heldKeys("v1", "fp-new", "fp-old"), heldKeys("v1", "fp-old")} {
-		v := judgeOK(t, f, a)
-		if v.AnchorAt == "x3" {
-			t.Fatalf("%+v: the removed key's version anchors", a)
-		}
-		wantUntrusted(t, v, "x3", "signer")
-		wantHeads(t, v, "v2")
+	f.add("y2", 2, "fp-old", on("v1"), "old", "new")
+	_, err := Judge(f.graph(), named("", "fp-old"))
+	if !errors.Is(err, ErrNoAnchor) || !strings.Contains(err.Error(), "fp-old") {
+		t.Fatalf("err = %v, want ErrNoAnchor naming fp-old", err)
 	}
+	v := judgeOK(t, f, named("", "fp-new"))
+	wantUntrusted(t, v, "x3", "signer")
+	wantUntrusted(t, v, "y2", "removal")
+	wantHeads(t, v, "v2")
 }
 
-// A held key that no version lists as an operator's, as a key shared with
-// someone else may be, signs nothing trusted.
-func TestJudgeHeldKeyNeverAnOperatorAnchorsNothing(t *testing.T) {
+// A named key no version lists as an operator's anchors nothing.
+func TestJudgeNamedKeyNeverAnOperatorIsRefused(t *testing.T) {
 	f := chain()
 	f.add("x4", 4, "fp-shared", on("v3"), "shared")
-	for _, a := range []Anchor{heldKeys("v1", "fp-alice", "fp-shared"), heldKeys("", "fp-alice", "fp-shared")} {
-		v := judgeOK(t, f, a)
-		if v.AnchorAt != "v3" {
-			t.Fatalf("%+v: AnchorAt = %s, want v3", a, v.AnchorAt)
+	if _, err := Judge(f.graph(), named("", "fp-shared")); !errors.Is(err, ErrNoAnchor) {
+		t.Fatalf("err = %v, want ErrNoAnchor", err)
+	}
+}
+
+// A pinned root anchors alone: the named key neither blocks nor overrides
+// it, wherever the key signed.
+func TestJudgeNamedKeyPinnedRootWins(t *testing.T) {
+	f := chain()
+	f.add("o1", 1, "fp-bob", nil, "bob")
+	f.add("o2", 2, "fp-bob", on("o1"), "bob")
+	for _, fp := range []string{"fp-bob", "fp-alice", "fp-zed"} {
+		v := judgeOK(t, f, named("v1", fp))
+		if v.AnchorAt != "v1" {
+			t.Fatalf("%s: AnchorAt = %s, want v1", fp, v.AnchorAt)
 		}
-		wantUntrusted(t, v, "x4", "signer")
 		wantHeads(t, v, "v3")
-	}
-	// A root of the shared key's own is a second history: a fork, never
-	// trusted over the operator's by revision.
-	f.add("s1", 1, "fp-shared", nil, "shared")
-	f.add("s2", 2, "fp-shared", on("s1"), "shared")
-	v := judgeOK(t, f, heldKeys("", "fp-alice", "fp-shared"))
-	wantHeads(t, v, "v3", "s2")
-	if _, err := Judge(f.graph(), heldKeys("v1", "fp-alice", "fp-shared")); !errors.Is(err, ErrNoAnchor) {
-		t.Fatalf("pinned: err = %v, want ErrNoAnchor", err)
+		wantUntrusted(t, v, "o2", "not trusted")
 	}
 }
 
-// A version a removed held key signed beside the removal is barred by it,
-// not trusted as a head of a fork.
-func TestJudgeHeldRemovedKeyBesideTheRemovalIsBarred(t *testing.T) {
-	f := newFake()
-	f.add("v1", 1, "fp-old", nil, "old", "new")
-	f.add("v2", 2, "fp-new", on("v1"), "new") // removes old
-	f.add("x2", 2, "fp-old", on("v1"), "old", "new")
-	f.add("x3", 3, "fp-old", on("x2"), "old", "new")
-	v := judgeOK(t, f, heldKeys("", "fp-new", "fp-old"))
-	wantUntrusted(t, v, "x2", "removal")
-	wantUntrusted(t, v, "x3", "not trusted")
-	wantHeads(t, v, "v2")
-	if v.AnchorAt != "v2" {
-		t.Fatalf("AnchorAt = %s, want v2", v.AnchorAt)
-	}
-}
-
-// Two held keys' heads that a co-operator merged are one line, not a fork.
-func TestJudgeHeldKeysMergedByAnotherOperator(t *testing.T) {
+// A co-operator's merge on a named key's head is one line, not a fork.
+func TestJudgeNamedKeyMergedByAnotherOperator(t *testing.T) {
 	f := newFake()
 	f.add("v1", 1, "fp-k1", nil, "k1", "k2", "carol")
 	f.add("a2", 2, "fp-k1", on("v1"), "k1", "k2", "carol")
 	f.add("b2", 2, "fp-k2", on("v1"), "k1", "k2", "carol")
 	f.add("m3", 3, "fp-carol", on("a2", "b2"), "k1", "k2", "carol")
-	v := judgeOK(t, f, heldKeys("", "fp-k1", "fp-k2"))
-	wantTrusted(t, v, "m3")
+	v := judgeOK(t, f, named("", "fp-k1"))
 	wantHeads(t, v, "m3")
 }
 
-// The heads are the rules' heads, whichever key signed what: a version on
-// another operator's line is not dropped for being older than a held key's
-// newest.
-func TestJudgeHeldKeysHeadsAreTheRulesHeads(t *testing.T) {
+// The heads are the rules' heads, as a recorded key's are.
+func TestJudgeNamedKeyHeadsAreTheRulesHeads(t *testing.T) {
 	f := newFake()
 	f.add("v1", 1, "fp-alice", nil, "alice", "bob")
 	f.add("c2", 2, "fp-bob", on("v1"), "alice", "bob")
@@ -672,35 +657,17 @@ func TestJudgeHeldKeysHeadsAreTheRulesHeads(t *testing.T) {
 	f.add("b3", 3, "fp-alice", on("b2"), "alice", "bob")
 	f.add("b4", 4, "fp-alice", on("b3"), "alice", "bob")
 	want := judgeOK(t, f, Anchor{Signers: []string{"fp-alice"}})
-	v := judgeOK(t, f, heldKeys("", "fp-alice", "fp-bob"))
+	v := judgeOK(t, f, named("", "fp-alice"))
 	wantHeads(t, v, want.Heads...)
 	wantHeads(t, v, "b4", "a3")
 }
 
-// Two held keys that signed heads the rules both trust are a fork, as any
-// two trusted heads are.
-func TestJudgeHeldKeysDivergeIsFork(t *testing.T) {
-	f := newFake()
-	f.add("v1", 1, "fp-alice", nil, "alice", "bob")
-	f.add("a2", 2, "fp-alice", on("v1"), "alice", "bob")
-	f.add("b2", 2, "fp-bob", on("v1"), "alice", "bob")
-	f.add("b3", 3, "fp-bob", on("b2"), "alice", "bob")
-	v := judgeOK(t, f, heldKeys("", "fp-alice", "fp-bob"))
-	wantHeads(t, v, "b3", "a2")
-}
-
-// A held key's version that does not descend from a pinned root is refused.
-func TestJudgeHeldKeysMustDescendFromPin(t *testing.T) {
+// A named key that signed two roots' histories anchors in each, and their
+// heads differ: a fork, never chosen by revision.
+func TestJudgeNamedKeyUnderTwoRootsIsFork(t *testing.T) {
 	f := chain()
-	f.add("m1", 1, "fp-mallory", nil, "mallory")
-	f.add("o1", 1, "fp-bob", nil, "bob")
-	_, err := Judge(f.graph(), heldKeys("v1", "fp-alice", "fp-bob"))
-	if !errors.Is(err, ErrNoAnchor) || !strings.Contains(err.Error(), "o1") {
-		t.Fatalf("err = %v, want ErrNoAnchor naming o1", err)
-	}
-	// A pin with no held key's version below it anchors alone.
-	v := judgeOK(t, f, heldKeys("m1", "fp-zed"))
-	if v.AnchorAt != "m1" {
-		t.Fatalf("AnchorAt = %s, want m1", v.AnchorAt)
-	}
+	f.add("o1", 1, "fp-alice", nil, "alice")
+	f.add("o2", 2, "fp-alice", on("o1"), "alice")
+	v := judgeOK(t, f, named("", "fp-alice"))
+	wantHeads(t, v, "v3", "o2")
 }
