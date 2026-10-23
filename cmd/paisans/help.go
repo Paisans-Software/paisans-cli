@@ -336,7 +336,7 @@ var helpCommands = []helpCommand{
 		summary: "Create the public DNS records the configuration implies.",
 		usage:   []string{"paisans dns init [--config " + config.FileName + "] [--secrets secrets.enc.yaml] [--execute]"},
 		detail: "Create the public DNS records the configuration implies, at the provider named by acme.provider: addresses, and records saying every name without mail (community.mail_domains, smtp senders) sends and receives none.\n\n" +
-			"Creates only what is missing, never updates or deletes, and refuses if any record conflicts. Writes nothing without --execute.",
+			"Creates only what is missing, updates the address of an A or AAAA record it made for this deployment, never deletes, and refuses if any other record conflicts. Writes nothing without --execute.",
 	},
 	{
 		name:    "dns prune",

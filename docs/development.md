@@ -1341,8 +1341,8 @@ local disk: the DNS provider's API, from the workstation. It is a dry run unless
 because it reaches no site.
 
 ```
-paisans dns init                 # shows present, create and conflict per record
-paisans dns init --execute       # creates what is missing, then reads each back
+paisans dns init                 # shows present, create, update and conflict per record
+paisans dns init --execute       # updates its own stale records and creates what is missing, then reads each back
 paisans dns prune                # shows remove and keep per toolkit record
 paisans dns prune --execute      # deletes the removes, then lists the zone again
 ```

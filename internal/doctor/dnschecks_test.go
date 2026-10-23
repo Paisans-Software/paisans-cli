@@ -467,3 +467,15 @@ func TestRecordsHostnameSPFCheck(t *testing.T) {
 		t.Errorf("got %+v", got)
 	}
 }
+
+// A record dns init made that points at an old address fails, and says that
+// dns init updates it.
+func TestRecordsOwnRecordAtAnOldAddress(t *testing.T) {
+	e := dns.Entry{Want: dns.Want{Type: "A", Name: "talk.example.org", Content: "203.0.113.10"}, Zone: "example.org", Action: dns.Update,
+		Detail: "dns init made it for this deployment, pointing at 198.51.100.7, which the configuration no longer declares there"}
+	got := Records(RecordsProbe{Asked: true, Entries: []dns.Entry{e}})
+	if len(got) == 0 || got[0].Level != Fail || got[0].Line != "A talk.example.org points at an address this deployment no longer declares" || len(got[0].More) != 2 ||
+		!strings.Contains(got[0].More[1], "198.51.100.7") || !strings.Contains(got[0].More[1], "paisans dns init --execute updates it") {
+		t.Errorf("got %+v", got)
+	}
+}

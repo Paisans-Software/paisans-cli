@@ -1047,11 +1047,12 @@ names it, so the fix lands on the right configuration; a passing check reaches
 no host. In `managed_by: paisans` there is nothing to hand off, and `check`
 runs only the first two.
 
-**Moving an existing monitor.** A deployment whose uptime hostname already has
-an A record pointing at the gateway gets a `conflict` from `dns init` once the
-app moves to a monitor site, because `dns init` never updates a record, and
-`dns prune` keeps it too, since the name is still wanted. Change that record
-by hand at the provider, then run `dns init` again.
+**Moving an existing monitor.** Once the uptime app moves to a monitor site,
+`dns init` updates the A record its own earlier run made at the uptime
+hostname from the gateway's address to the monitor's. A record there that it
+did not make is a `conflict`, and `dns prune` keeps it too, since the name is
+still wanted. Change that one by hand at the provider, then run `dns init`
+again.
 
 **What it checks is generated, never typed.** `deployment apply` renders `monitors.json`
 from this configuration and the fork reconciles it at every start:
@@ -3905,15 +3906,31 @@ address inside `mesh.subnet`. A missing `public_address` is not refused by
 `validate`, because a deployment may manage its DNS some other way. `dns init`
 refuses it, naming the site, wherever a record would need it.
 
-**`dns init` only creates. It never updates and never deletes.** Removing a
-record the configuration no longer implies is `dns prune`, below, under rules
-of its own. For each record it needs, the provider holds one of three things:
+**`dns init` creates, and updates only its own address records. It never
+deletes.** Removing a record the configuration no longer implies is `dns
+prune`, below, under rules of its own. For each record it needs, the provider
+holds one of four things:
 
 | Provider holds | Plan |
 |----------------|------|
 | the same record, unproxied | `✓`, shown with `-v` |
 | nothing at that name of that type | `○ create` |
+| the A or AAAA record `dns init` made for this deployment, pointing at an address it no longer declares there | `○ update`, naming the old address |
 | a different address, a CNAME, a proxied copy, or an A or AAAA the deployment does not declare | `✗`, a conflict |
+
+**An update touches only what this deployment's `dns init` wrote.** A site's
+`public_address` can change, and each record pointing at the old one would
+otherwise have to be deleted by hand before `dns init` could write the new
+one. The record updated carries exactly this deployment's comment,
+`paisans-<token>: created by paisans dns init`, is unproxied, and is the only
+record of its type at the name; with its address changed, the name holds
+exactly what is wanted. A record with no comment, another deployment's, two
+records of the type, or a CNAME or stray record beside it, is a conflict. A
+record pointing at another declared site is not updated: it waits for
+`gateway move`, below. That is why a gateway role move keeps the old site
+declared, with its `public_address`, until `paisans gateway move` finishes:
+an address no declared site holds reads as the gateway's own changed address,
+and `dns init` updates the record to the new gateway at once.
 
 Each line names the record whole, its type, name, address and zone. Piped
 output says `ok`, `todo` and `FAIL` instead:
@@ -3926,12 +3943,13 @@ dns cloudflare
 
 **Any conflict refuses the whole run before a single record is written.** This
 is the same rule `deployment apply` follows for a file it did not write: a record that
-disagrees with the configuration is somebody's, and overwriting it would take
+disagrees with the configuration, and that this deployment's `dns init` did not
+make, is somebody's, and overwriting it would take
 down whatever they pointed it at. The whole run stops because half a set of
 records is a deployment some names reach and others do not, which is harder to
 diagnose than a refusal. A stray AAAA is a conflict because clients on IPv6 would reach
-it instead of the gateway, silently. After `--execute`, every record created is
-read back and compared.
+it instead of the gateway, silently. After `--execute`, every record created or
+updated is read back and compared.
 
 **Records are DNS only, never proxied through a provider's CDN.** A proxied
 name resolves to the CDN's addresses rather than the gateway's, so a WireGuard
@@ -3942,10 +3960,11 @@ conflict, not a match.
 
 **One gateway only, for now.** With several gateway sites, which address a
 hostname should resolve to is a design that does not exist yet. `dns init`
-refuses rather than picking one. The same reasoning covers moving the gateway:
-the old records point at the old gateway, so they are conflicts, and repointing
-them is the human step in *Make it an overlap, not a cutover*, not something
-this command does behind an operator's back.
+refuses rather than picking one. Moving the gateway role to another site is
+not an update either: the records `dns init` made for the old gateway wait for
+`gateway move`, which adds the new gateway's records beside them and deletes
+them only once the new gateway is verified, the overlap in *Make it an
+overlap, not a cutover*.
 
 **It reaches no host.** It talks to the DNS provider's API from the
 workstation, using `external.acme_dns_token`, the same zone scoped token the
@@ -9271,10 +9290,11 @@ monitors survive on hosts that also run other people's services:
    names the monitors.
 3. `paisans secrets prune --execute` reads that record and removes the
    monitors' and their apps' secrets.
-4. Change DNS at the provider by hand. `paisans dns` never updates a record,
-   so each name still wanted that points at a lost address is reported as a
-   conflict until it is changed; the monitors' records, whose addresses are no
-   longer declared, are deleted by hand too.
+4. Run `paisans dns init --execute`. It updates each record it made for this
+   deployment at a name still wanted to the address now declared; a record
+   it did not make that points at a lost address is a conflict, changed by
+   hand at the provider. The monitors' records at names no longer wanted are
+   deleted by hand too.
 
 #### `--id` cleans a host when `paisans-stack.yaml` is lost
 
@@ -9800,7 +9820,7 @@ closing list is usually the cause of those after it:
 | Self-check | from this workstation, `/.well-known/paisans/<token>` through the public address of each site that runs Paisans' Caddy (the gateway, and a monitor with `web_server.managed_by: paisans`), on 443 and on 80, with the check `deployment apply` runs at the end of the gateway's step. It asks once and never waits for a certificate, and needs no ssh | the site answers as something else, a 443 answering in plain HTTP or another protocol than TLS among them, or does not answer on 443 or 80, naming the port and URL: something else on the host holds the port, which the deployment's user cannot see. A port that gives no answer says how: a refused connection points at the site's Caddy and the forwarding to it, a timeout at the router or firewall on the way. A site with no `public_address` or no hostname of its own is a `WARN`, not asked from outside; so is a pending site, which is not asked since `deployment apply` has not deployed its Caddy, and a down site's failure (a `FAIL` on the gateway), which points at its reach |
 | Caddy certificates | the caddy container's log on every site that runs Paisans' Caddy, `docker compose logs caddy` from the container's start or the last hour, whichever is later, kept to Caddy's `tls.obtain` lines; for each hostname the site serves, the newest outcome | the newest outcome is a failure. Hostnames failing for one cause are one finding naming them all: the provider refusing the token from this server (Cloudflare's `9109`, with the address it judged), its lockout (`10502`), the certificate authority's rate limit with when to retry, or the error's own last clause. It reads no secret and calls no provider, so it runs for every provider |
 | DNS token | from each Caddy site, with the `ACME_DNS_TOKEN` in its `caddy.env`, read there as the site's ssh user and never sent anywhere; and from the workstation, with `external.acme_dns_token` from `--secrets` (`secrets.enc.yaml` beside the configuration by default), opened with the age key as `deployment apply` opens it. Each asks the provider for the zone holding `community.domain`, then verifies the token | the provider refuses the token from that place, does not answer, sees no zone holding the domain, or reports the token not `active`. Secrets that cannot be opened, Eg: no age key on this workstation, skip the workstation's check and the records with the reason, and every other check runs |
-| DNS records | the plan `dns init` builds, which reads and never writes, from the workstation once its token check passed | a hostname of the deployment holds a record pointing somewhere else (a visitor is sent there; delete it at the provider by hand, since `dns init` never updates a record and `dns prune` keeps one whose name is still wanted), or holds none (`paisans dns init --execute` creates it). A record waiting for `gateway move` is `info`, and a weak advisory record a `WARN`, as `dns init` shows them |
+| DNS records | the plan `dns init` builds, which reads and never writes, from the workstation once its token check passed | a hostname of the deployment holds a record pointing somewhere else (a visitor is sent there; `paisans dns init --execute` updates a record it made for this deployment, and any other is deleted at the provider by hand, since `dns prune` keeps one whose name is still wanted), or holds none (`paisans dns init --execute` creates it). A record waiting for `gateway move` is `info`, and a weak advisory record a `WARN`, as `dns init` shows them |
 
 The provider judges the address a call comes from (Cloudflare's Client IP
 Address Filtering), so the token is checked from every place that uses it: a
@@ -10220,6 +10240,15 @@ make that hold across its steps:
   site is marked `moving`, shown as a note, and neither created nor counted as
   a conflict, so the run is not stopped before the new gateway is applied. A
   record pointing elsewhere that `dns init` did not make is still a conflict.
+  An app moving from a monitor site to the gateway is marked the same way,
+  since `dns init` cannot tell that site from a former gateway; no move
+  follows, so its note says to change the record by hand at the provider.
+  **Keep the old site declared, with its `public_address`, until `paisans
+  gateway move` finishes.** `dns init` knows a former gateway only as another
+  declared site's address. Once the old site's address is gone from the
+  configuration, or the site itself, `dns init` cannot tell a moved role from
+  a changed address, and updates its own records at the gateway's hostnames
+  to the new gateway: a cutover before the new gateway is applied.
 * **The move runs last.** `deployment apply` asks every site without the gateway role
   whether it still holds a gateway, and when one does, plans `gateway move`
   after pass two, in a `gateway` section of its own, waiting on the new
