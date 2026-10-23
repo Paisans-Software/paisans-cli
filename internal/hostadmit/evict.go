@@ -826,8 +826,8 @@ func RunSteps(t apply.Transport, plan *Plan, r ui.Reporter) error {
 }
 
 // noBuildAdvice is what evict says of another deployment's entry that names
-// no build: its operator sends a request, from their workstation, and the
-// host's owner runs admit or evict on the host, as paisans.
+// no build. Every command in it is someone else's — that deployment's
+// operator and the host's owner — so each names paisans.
 func noBuildAdvice() string {
-	return "Its deployment's owner admits it again (`" + progname.Cmd() + " site request`, then `" + progname.Default + " site admit`), or this host's owner evicts it with `" + progname.Default + " site evict`."
+	return "Its deployment's owner admits it again (`" + progname.Default + " site request`, then `" + progname.Default + " site admit`), or this host's owner evicts it with `" + progname.Default + " site evict`."
 }
