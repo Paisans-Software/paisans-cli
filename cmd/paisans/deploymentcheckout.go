@@ -212,9 +212,17 @@ func judgeSaved(src configstore.Local, rec localstore.Saved) (savedTrust, error)
 // judge is l's head as its own anchor judges it: the head, trusted, with its
 // revision and files, and every version l's store holds. A head older than
 // one l has seen is kept, as l has it; deployment pull asks about it there
-// as it would here.
+// as it would here. It reads l and writes nothing to it, so a dry run leaves
+// the saved copy as it was.
 func judge(l configstore.Local, id string) (savedTrust, error) {
 	var t savedTrust
+	cache, ok, err := l.HeldStore()
+	if err != nil {
+		return t, err
+	}
+	if !ok {
+		return t, fmt.Errorf("%s holds no store", filepath.Join(l.Dir, ".paisans"))
+	}
 	head, err := l.Head()
 	if err != nil {
 		return t, err
@@ -222,7 +230,7 @@ func judge(l configstore.Local, id string) (savedTrust, error) {
 	if t.anchor, err = l.Anchor(); err != nil {
 		return t, err
 	}
-	g, err := configstore.GatherAnchored(l, nil, 0, id, t.anchor, configstore.GatherOptions{})
+	g, err := configstore.JudgeHeld(l, cache, id, t.anchor)
 	var rb *configstore.RollbackError
 	if errors.As(err, &rb) {
 		err = nil
@@ -235,10 +243,6 @@ func judge(l configstore.Local, id string) (savedTrust, error) {
 		return t, nil
 	}
 	t.head, t.revision = head, g.Versions[head].Revision
-	cache, err := l.Cache()
-	if err != nil {
-		return t, err
-	}
 	t.files, err = cache.Files(head)
 	return t, err
 }
@@ -337,9 +341,12 @@ func copyCheckout(src, dst configstore.Local, id string, t savedTrust) (err erro
 			os.RemoveAll(filepath.Join(dst.Dir, ".paisans"))
 		}
 	}()
-	from, err := src.Cache()
+	from, ok, err := src.HeldStore()
 	if err != nil {
 		return err
+	}
+	if !ok {
+		return fmt.Errorf("%s holds no store", filepath.Join(src.Dir, ".paisans"))
 	}
 	bundle, err := from.Bundle()
 	if err != nil {

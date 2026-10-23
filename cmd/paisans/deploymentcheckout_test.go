@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -180,6 +182,63 @@ func TestCheckoutDryRunWritesNothing(t *testing.T) {
 	for _, want := range []string{"revision 1", c.shas[0][:12], filepath.Join(abs, config.FileName), filepath.Join(abs, ".paisans", "store.git"), filepath.Join(abs, ".paisans", "signing-key"), "--execute"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("dry run lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+// tree is every path under dir with its mode, modification time and
+// contents, to tell whether anything there was written.
+func tree(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		v := fmt.Sprintf("%v %d", info.Mode(), info.ModTime().UnixNano())
+		if info.Mode().IsRegular() {
+			b, err := os.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			v += " " + string(b)
+		}
+		out[p] = v
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// Checking a saved copy out reads it and writes nothing to it, not even the
+// .gitignore or the store's settings opening a workstation's store for
+// writing would put back: neither a dry run nor --execute.
+func TestCheckoutLeavesTheSavedCopyAsItWas(t *testing.T) {
+	c := newSavedCopy(t)
+	if err := os.Remove(filepath.Join(c.l.Dir, ".paisans", ".gitignore")); err != nil {
+		t.Fatal(err)
+	}
+	before := tree(t, c.st.Base)
+	for _, more := range [][]string{nil, {"--execute"}} {
+		if err := checkout(t.TempDir(), fixtureID(t), more...); err != nil {
+			t.Fatal(problemText(err))
+		}
+		after := tree(t, c.st.Base)
+		for p, v := range after {
+			if before[p] != v {
+				t.Errorf("%v: %s was written", more, p)
+			}
+		}
+		for p := range before {
+			if _, ok := after[p]; !ok {
+				t.Errorf("%v: %s was removed", more, p)
+			}
 		}
 	}
 }
