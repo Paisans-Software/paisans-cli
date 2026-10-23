@@ -513,6 +513,9 @@ func TestAnUnknownMeshUnitAnswerIsAnError(t *testing.T) {
 		"is-enabled \nis-active inactive\n",
 		"is-enabled disabled\nSystem has not been booted with systemd as init system (PID 1). Can't operate.\nis-active inactive\n",
 		"\n",
+		// The systemd 249 line, but for another unit or another failure.
+		"is-enabled Failed to get unit file state for wg-quick@psns-0c1d.service: No such file or directory\nis-active inactive\n",
+		"is-enabled Failed to get unit file state for wg-quick@psns-f2a9.service: Permission denied\nis-active inactive\n",
 	} {
 		w := setup(t)
 		b := w.hosts["home-b"]
@@ -540,6 +543,8 @@ func TestEveryKnownMeshUnitStateIsRead(t *testing.T) {
 		"is-enabled enabled\nis-active failed\n":           true,
 		"is-enabled enabled-runtime\nis-active inactive\n": true,
 		"is-enabled disabled\nis-active activating\n":      true,
+		// systemd 249, on Ubuntu 22.04, for a unit with no unit file.
+		"is-enabled Failed to get unit file state for wg-quick@psns-f2a9.service: No such file or directory\nis-active inactive\n": false,
 	} {
 		w := setup(t)
 		w.hosts["home-b"].wgUp = false

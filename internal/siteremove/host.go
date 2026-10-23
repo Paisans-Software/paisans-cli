@@ -946,6 +946,11 @@ func (p *Plan) meshLeft(t apply.Transport, inv *hostcheck.Inventory) (bool, erro
 	if len(lines) == 2 {
 		e, isE := strings.CutPrefix(lines[0], "is-enabled ")
 		a, isA := strings.CutPrefix(lines[1], "is-active ")
+		// systemd 249 (Ubuntu 22.04) prints this, not not-found, for a unit
+		// with no unit file, as when wireguard-tools is not installed.
+		if e == "Failed to get unit file state for "+unit+".service: No such file or directory" {
+			e = "not-found"
+		}
 		enabled, knownE := unitEnabled[e]
 		active, knownA := unitActive[a]
 		if isE && isA && knownE && knownA {
