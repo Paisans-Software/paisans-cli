@@ -289,6 +289,25 @@ func TestConfigRecoverDryRunAndWrongWordWriteNothing(t *testing.T) {
 	}
 }
 
+// A recovery names the directory it writes into as a full path, even when
+// --config is relative: "recover into ." does not say where the files went.
+func TestConfigRecoverPrintsTheDirectoryInFull(t *testing.T) {
+	sha, answer, _ := storedVersion(t)
+	recoverHosts(t, answer)
+	t.Chdir(t.TempDir())
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := plainReporter(t)
+	if err := runDeployment([]string{"recover", "--from", "ubuntu@203.0.113.9", "--root", sha}, noTerminalStdin(), &bytes.Buffer{}); err != nil {
+		t.Fatal(problemText(err))
+	}
+	if !strings.Contains(out.String(), "recover into "+dir+"\n") {
+		t.Fatalf("want recover into %s:\n%s", dir, out.String())
+	}
+}
+
 // Recovery is onto a workstation with nothing, and needs an anchor.
 func TestConfigRecoverRefusals(t *testing.T) {
 	sha, answer, _ := storedVersion(t)

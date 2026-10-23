@@ -81,11 +81,17 @@ const configHelp = "path to the deployment declaration; the store's state is kep
 // workstationOf is the workstation whose paisans-stack.yaml is at path. The three
 // files of a version have fixed names, so the configuration must be named
 // paisans-stack.yaml for the files on disk to be the ones a version holds.
+// Dir is absolute, so every message naming it or what is under it says where
+// the files are when read later or elsewhere, not ".".
 func workstationOf(path string) (configstore.Local, error) {
 	if filepath.Base(path) != config.FileName {
 		return configstore.Local{}, &ui.Problem{Hint: "--config must name a file called " + config.FileName, Explain: "A stored version holds " + config.FileName + ", secrets.enc.yaml and .sops.yaml by those names, so the files beside --config must carry them. Got " + path + "."}
 	}
-	return configstore.Local{Dir: filepath.Dir(path)}, nil
+	dir, err := filepath.Abs(filepath.Dir(path))
+	if err != nil {
+		return configstore.Local{}, &ui.Problem{Hint: "the directory of --config cannot be resolved", Explain: errLine(err) + ".", Cause: err}
+	}
+	return configstore.Local{Dir: dir}, nil
 }
 
 // configTransports reaches every site cfg declares.

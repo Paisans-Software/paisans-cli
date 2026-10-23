@@ -14,6 +14,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 - `doctor`'s self-check and `deployment apply`'s gateway step report a 443 answering in anything but TLS as another server holding the port, and doctor advises a refused connection apart from a timeout.
 - `deployment recover --from` takes any login that reaches the host, the owner's too, and reaches it again as the deployment's user its admission record names, so a recovery needs no name the lost workstation held.
+- `deployment recover`, `deployment pull`, `init --age-private-key-file` and the saved version's `applied from` note of `deployment apply` name the configuration's directory as a full path, not `.`.
 
 ## [0.3.0-rc.5] - 2026-10-19
 

@@ -179,9 +179,15 @@ func writeKeyFile(id, configPath, path, key string) (string, error) {
 		return "", err
 	}
 	if inside(filepath.Dir(configPath), abs) {
+		// The directory is named in full: shortened relative to the
+		// current directory it is often ".", which says nothing.
+		dir := filepath.Dir(configPath)
+		if a, err := filepath.Abs(dir); err == nil {
+			dir = a
+		}
 		return "", &ui.Problem{
 			Hint:    "the age key file would sit beside " + config.FileName,
-			Explain: fmt.Sprintf("%s is inside %s, which is usually a git repository, so the key would be one git add from being committed. Name a path in an existing directory outside it, Eg: ~/.config/paisans/%s.key once ~/.config/paisans exists.", ui.ShortPath(abs), ui.ShortPath(filepath.Dir(configPath)), deployment.Deployment{ID: id}.Token()),
+			Explain: fmt.Sprintf("%s is inside %s, which is usually a git repository, so the key would be one git add from being committed. Name a path in an existing directory outside it, Eg: ~/.config/paisans/%s.key once ~/.config/paisans exists.", ui.ShortPath(abs), dir, deployment.Deployment{ID: id}.Token()),
 		}
 	}
 	f, err := os.OpenFile(abs, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
