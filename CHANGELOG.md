@@ -18,6 +18,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Changed
 
+- `deployment apply` and `oidc client create` clear a toolkit-set launch URL from the client of any `no_launch` blueprint, now `account` and the gate's `oauth2-proxy`, and leave one an operator set.
 - Advice, errors and help name the command as it was invoked, so a build installed as `paisans-test` says `paisans-test deployment apply`; advice for a host's owner and files written onto hosts still name `paisans`.
 - `init` moves a never-applied site's WireGuard listen port, when another deployment on the host holds it and the endpoint is unset or a port alone, to a free one and says which port to open.
 

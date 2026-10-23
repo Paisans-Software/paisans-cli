@@ -1017,3 +1017,87 @@ func TestAGroupAnotherPlanMadeIsFound(t *testing.T) {
 		}
 	}
 }
+
+func noLaunchTalk() Desired {
+	d := talk()
+	d.LaunchURL = ""
+	d.NoLaunch = true
+	d.MemberGroup = "members"
+	return d
+}
+
+// A blueprint with no launch URL clears one this toolkit set, and a second run
+// plans nothing. The update sends every other field back as it was.
+func TestANoLaunchClientHoldingAToolkitLaunchURLIsCleared(t *testing.T) {
+	for _, held := range []string{bare, connect} {
+		f := newFake()
+		rec := &memRecorder{}
+		if err := Execute(context.Background(), plan(t, f, noLaunchTalk(), Recorded{}), api(f), rec, secretSource("clear-secret-not-real-0001")); err != nil {
+			t.Fatal(err)
+		}
+		h := held
+		f.clients[0].LaunchURL = &h
+		p := plan(t, f, noLaunchTalk(), rec.rec)
+		if fmt.Sprint(kinds(p)) != fmt.Sprint([]StepKind{ClearLaunchURL}) {
+			t.Fatalf("planned %v", kinds(p))
+		}
+		if p.Steps[0].Title != "clear launch URL for talk" {
+			t.Errorf("title %q", p.Steps[0].Title)
+		}
+		want := `clear launch URL for client talk: PUT /api/oidc/clients/c-1 with launchURL "" and every other field sent back as it is now`
+		if p.Steps[0].Detail != want {
+			t.Errorf("line %q", p.Steps[0].Detail)
+		}
+		f.mutations = nil
+		f.updates = nil
+		if err := Execute(context.Background(), p, api(f), rec, func() (string, error) { return "", errors.New("must not generate") }); err != nil {
+			t.Fatal(err)
+		}
+		var sent map[string]any
+		if err := json.Unmarshal([]byte(f.updates[0]), &sent); err != nil {
+			t.Fatal(err)
+		}
+		if v, ok := sent["launchURL"]; !ok || v != "" {
+			t.Errorf("sent launchURL %v (present %v), want an empty string", v, ok)
+		}
+		if sent["isGroupRestricted"] != true || sent["pkceEnabled"] != true {
+			t.Errorf("sent %v", sent)
+		}
+		if again := plan(t, f, noLaunchTalk(), rec.rec); len(again.Steps) != 0 {
+			t.Errorf("a second run plans %v", kinds(again))
+		}
+	}
+}
+
+// A launch URL an operator set is theirs, whatever the blueprint says.
+func TestANoLaunchClientHoldingAnOperatorLaunchURLIsLeftAlone(t *testing.T) {
+	f := newFake()
+	rec := &memRecorder{}
+	if err := Execute(context.Background(), plan(t, f, noLaunchTalk(), Recorded{}), api(f), rec, secretSource("keep-secret-not-real-0001")); err != nil {
+		t.Fatal(err)
+	}
+	mine := "https://talk.example.org/magazines"
+	f.clients[0].LaunchURL = &mine
+	p := plan(t, f, noLaunchTalk(), rec.rec)
+	if len(p.Steps) != 0 {
+		t.Fatalf("planned %v", kinds(p))
+	}
+	if !strings.Contains(strings.Join(p.Present, "\n"), "client talk launch URL https://talk.example.org/magazines, which this blueprint does not use; left as it is, since it may have been set deliberately") {
+		t.Errorf("present %v", p.Present)
+	}
+}
+
+// A no-launch client with no launch URL needs nothing.
+func TestANoLaunchClientWithoutALaunchURLNeedsNothing(t *testing.T) {
+	f := newFake()
+	rec := &memRecorder{}
+	if err := Execute(context.Background(), plan(t, f, noLaunchTalk(), Recorded{}), api(f), rec, secretSource("none-secret-not-real-0001")); err != nil {
+		t.Fatal(err)
+	}
+	if f.clients[0].LaunchURL != nil && *f.clients[0].LaunchURL != "" {
+		t.Fatalf("created with launch URL %s", *f.clients[0].LaunchURL)
+	}
+	if p := plan(t, f, noLaunchTalk(), rec.rec); len(p.Steps) != 0 {
+		t.Errorf("planned %v", kinds(p))
+	}
+}
