@@ -50,8 +50,11 @@ type hostPlan struct {
 	// and so are the empty directories in it, which PostgreSQL's data
 	// directory cannot start without.
 	dirs []string
-	// stateDirs are the directories the records and the configuration store
-	// this run deletes were in, removed the same way once they are gone.
+	// stateDirs are the state directory and the configuration store's,
+	// with the directories of the records this run deletes, removed the
+	// same way once they are gone. They are planned when a record goes or
+	// one of the two is there and empty, so a run stopped before removing
+	// them finds them again.
 	stateDirs []string
 	// webServer are the reference files for the host owner's web server
 	// the manifest records.
@@ -138,6 +141,17 @@ func (p *Plan) removeUserUnitsCommand(home string) string {
 // /srv/paisans is root's, and site evict removes it.
 func emptyRootCommand(d deployment.Deployment) string {
 	return fmt.Sprintf("if [ -d %[1]s ]; then rootlesskit find %[1]s -mindepth 1 -delete; fi", quote(d.Root()))
+}
+
+// emptyDirsProbe names each of dirs that is a directory, not a link, and
+// holds nothing. They are the toolkit's own, which no container writes, so
+// it runs as the user.
+func emptyDirsProbe(dirs []string) string {
+	quoted := make([]string, len(dirs))
+	for i, d := range dirs {
+		quoted[i] = quote(d)
+	}
+	return fmt.Sprintf(`for d in %s; do if [ -d "$d" ] && [ ! -L "$d" ] && [ -z "$(ls -A -- "$d")" ]; then echo "$d"; fi; done`, strings.Join(quoted, " "))
 }
 
 // dirsOf is the directories under the root that paths are in, deepest
@@ -541,6 +555,23 @@ func (p *Plan) buildHost() (*Stage, error) {
 	for _, r := range hp.store {
 		state = append(state, r.path)
 	}
+	fixed := []string{hostprep.ConfigDir(d), d.StateDir()}
+	if len(state) == 0 {
+		out, err := t.Run(emptyDirsProbe(fixed))
+		if err != nil {
+			return nil, fmt.Errorf("site remove %s: reading %s: %w: %s", p.Site, d.StateDir(), err, lastLines(out, 2))
+		}
+		named := false
+		for _, line := range strings.Split(out, "\n") {
+			named = named || contains(fixed, strings.TrimSpace(line))
+		}
+		if !named {
+			fixed = nil
+		}
+	}
+	for _, dir := range fixed {
+		state = append(state, dir+"/")
+	}
 	hp.stateDirs = p.dirsOf(state, cp != nil)
 
 	p.hostSteps(st)
@@ -756,7 +787,7 @@ func (p *Plan) hostSteps(st *Stage) {
 		add("delete", "delete the grant record", "%s, the keys and images this deployment last granted here", grant.Path(d))
 	}
 	if !hp.deleteRoot && len(hp.stateDirs) > 0 {
-		add("remove", "remove empty directories", "the directories under %s that the records and the configuration store were in, each once it is empty", d.Root())
+		add("remove", "remove empty directories", "%s and %s, and the other directories under %s that the records and the configuration store were in, each once it is empty", hostprep.ConfigDir(d), d.StateDir(), d.Root())
 	}
 }
 

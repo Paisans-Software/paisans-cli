@@ -82,7 +82,7 @@ func DirCommandFor(dir string, files []File, deleteData bool) string {
 	}
 	empty := ""
 	if dirs := RenderedDirs(dir, files); len(dirs) > 0 {
-		empty = EmptyDirsCommand(dir, dirs) + "; "
+		empty = EmptyDirsCommand(dir, dirs) + " && "
 	}
 	return fmt.Sprintf(`if [ -d %[1]s ]; then %[2]s{ rmdir %[1]s 2>/dev/null || true; }; fi`, quote(dir), empty)
 }
@@ -125,14 +125,18 @@ func DirsOf(top string, paths []string) []string {
 // directory itself and never descends into it. A directory with a symbolic
 // link anywhere from top down to it, top included, is left alone: the link
 // would take find out of top, Eg: a container that replaced a directory it
-// mounts with a link to one of the user's own. It runs under rootlesskit,
-// as DirCommandFor's does.
+// mounts with a link to one of the user's own. The shell enters the
+// directory's parent with cd -P and compares where it is with where the
+// parent should be, then find takes the directory by its name there, which
+// it does not follow if it is a link, so a link put in place after the
+// check changes nothing. It runs under rootlesskit, as DirCommandFor's
+// does, in a subshell whose status is the first find's that failed.
 func EmptyDirsCommand(top string, dirs []string) string {
 	quoted := make([]string, len(dirs))
 	for i, d := range dirs {
 		quoted[i] = quote(d)
 	}
-	return fmt.Sprintf(`t=%s; for d in %s; do p=$d; while [ ! -L "$p" ] && [ "$p" != "$t" ] && [ -n "$p" ]; do p=${p%%/*}; done; if [ "$p" = "$t" ] && [ ! -L "$p" ] && [ -d "$d" ]; then rootlesskit find "$d" -maxdepth 0 -type d -empty -delete || exit 1; fi; done`, quote(top), strings.Join(quoted, " "))
+	return fmt.Sprintf(`(t=%s; T=$(cd -P -- "${t%%/*}" 2>/dev/null && pwd -P) || exit 0; T=$T/${t##*/}; for d in %s; do p=${d%%/*}; ( cd -P -- "$p" 2>/dev/null && [ "$(pwd -P)" = "$T${p#"$t"}" ] && [ -d "./${d##*/}" ] || exit 0; rootlesskit find "./${d##*/}" -maxdepth 0 -type d -empty -delete ) || exit 1; done)`, quote(top), strings.Join(quoted, " "))
 }
 
 // Executor runs a plan.

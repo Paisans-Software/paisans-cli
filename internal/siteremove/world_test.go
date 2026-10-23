@@ -136,9 +136,12 @@ type world struct {
 }
 
 type host struct {
-	w        *world
-	name     string
-	files    map[string]string
+	w     *world
+	name  string
+	files map[string]string
+	// dirs are directories the host holds beside those its files are in,
+	// each empty unless a file is under it.
+	dirs     map[string]bool
 	commands []string
 	wgUp     bool
 	// wgRun is the mesh file the running interface was last handed by the
@@ -335,6 +338,21 @@ func (h *host) hostSites() []string {
 		}
 	}
 	return out
+}
+
+// holds reports whether a file or another of dirs is under dir.
+func (h *host) holds(dir string) bool {
+	for p := range h.files {
+		if strings.HasPrefix(p, dir+"/") {
+			return true
+		}
+	}
+	for d := range h.dirs {
+		if strings.HasPrefix(d, dir+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *host) ran(sub string) int {
@@ -757,9 +775,23 @@ func (h *host) Run(command string) (string, error) {
 	case strings.Contains(command, `case "${f##*/}" in`), strings.Contains(command, `rootlesskit rm -rf -- "$f"; done`):
 		h.deleteBesideKept(command)
 		return "", nil
-	case strings.HasPrefix(command, "t='") && strings.Contains(command, "-maxdepth 0 -type d -empty -delete"):
-		// Files hold the directories, so the fake has none to remove.
+	case strings.HasPrefix(command, "(t='") && strings.Contains(command, "-maxdepth 0 -type d -empty -delete"):
+		// Files hold the other directories, so only an empty one of dirs
+		// goes.
+		for _, d := range quoted(command)[1:] {
+			if h.dirs[d] && !h.holds(d) {
+				delete(h.dirs, d)
+			}
+		}
 		return "", nil
+	case strings.HasPrefix(command, "for d in '") && strings.Contains(command, `[ -z "$(ls -A -- "$d")" ]`):
+		var b strings.Builder
+		for _, d := range quoted(command) {
+			if h.dirs[d] && !h.holds(d) {
+				b.WriteString(d + "\n")
+			}
+		}
+		return b.String(), nil
 	case strings.Contains(command, "caddy validate"), strings.Contains(command, "caddy reload"):
 		return "", nil
 
@@ -1447,7 +1479,7 @@ func newWorld(t *testing.T, edits ...func(string) string) *world {
 		t.Fatal(err)
 	}
 	for _, name := range cfg.SiteNames() {
-		h := &host{w: w, name: name, files: map[string]string{}, wgUp: true, images: map[string]bool{"sha256:etcd": true}}
+		h := &host{w: w, name: name, files: map[string]string{}, dirs: map[string]bool{}, wgUp: true, images: map[string]bool{"sha256:etcd": true}}
 		w.hosts[name] = h
 		var entries []render.ManifestFile
 		for _, f := range rendered.Files {
