@@ -562,3 +562,47 @@ func TestTheDataDirectoryIsReadAndRemovedInTheUserNamespace(t *testing.T) {
 		}
 	}
 }
+
+// heldClients is a Pocket ID holding the clients given, found by ID or name.
+type heldClients []*pocketid.OIDCClient
+
+func (h heldClients) OIDCClientByID(_ context.Context, id string) (*pocketid.OIDCClient, error) {
+	for _, c := range h {
+		if c.ID == id {
+			return c, nil
+		}
+	}
+	return nil, nil
+}
+func (h heldClients) FindOIDCClient(_ context.Context, name string) (*pocketid.OIDCClient, error) {
+	for _, c := range h {
+		if c.Name == name {
+			return c, nil
+		}
+	}
+	return nil, nil
+}
+func (h heldClients) DeleteOIDCClient(context.Context, string) error { return nil }
+
+// An app declared with a display_name has a client of that name. Looked for
+// by it, the client is deleted; looked for by the app's name, it is kept and
+// the reason says where the name looked for came from.
+func TestAClientNamedByItsDisplayNameIsDeletedByThatName(t *testing.T) {
+	pocket := heldClients{{ID: "c-1", Name: "Test News"}}
+	st, err := ProbeClient(context.Background(), pocket, "news", "Test News", "auth", "home-a", "c-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cp := planClient("news", st); cp.Delete == nil || cp.Delete.ID != "c-1" || len(cp.Kept) != 0 {
+		t.Errorf("by its display_name: delete %v kept %v", cp.Delete, cp.Kept)
+	}
+	st, err = ProbeClient(context.Background(), pocket, "news", "news", "auth", "home-a", "c-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.NameFrom = "the name the current configuration gives it"
+	cp := planClient("news", st)
+	if cp.Delete != nil || len(cp.Kept) != 1 || !strings.Contains(cp.Kept[0], "its name is not news, the name the current configuration gives it") {
+		t.Errorf("by the app's name: delete %v kept %v", cp.Delete, cp.Kept)
+	}
+}

@@ -161,11 +161,12 @@ type ClientState struct {
 	// none, and Site where it was asked.
 	Provider string
 	Site     string
-	// Name is the name apply last gave the app's client
-	// (config.Config.ClientName, as the last configuration that declared the
-	// app reads it): its display_name, else the app's, or the community's for
-	// the gate.
-	Name string
+	// Name is the client's expected name (config.Config.ClientName): the
+	// name in the newest version of this workstation's configuration history
+	// that declares the app, else the name the current configuration gives
+	// it. NameFrom says which, for an operator reading why a client was kept.
+	Name     string
+	NameFrom string
 	// RecordedID is oidc_clients.<app>.client_id in the secrets file.
 	RecordedID string
 	// ByID is the client with RecordedID, ByName the client with Name.
@@ -473,7 +474,7 @@ func planClient(app string, st ClientState) ClientPlan {
 	case st.ByID != nil && st.ByID.Name == st.Name:
 		cp.Delete = st.ByID
 	case st.ByID != nil:
-		cp.Kept = append(cp.Kept, byHand(st.ByID, fmt.Sprintf("its ID is the one recorded under oidc_clients.%s, and its name is not %s", app, st.Name)))
+		cp.Kept = append(cp.Kept, byHand(st.ByID, fmt.Sprintf("its ID is the one recorded under oidc_clients.%s, and its name is not %s%s", app, st.Name, nameFrom(st.NameFrom))))
 	}
 	if st.ByName != nil && (cp.Delete == nil || st.ByName.ID != cp.Delete.ID) && (st.ByID == nil || st.ByName.ID != st.ByID.ID) {
 		why := "no ID is recorded for it under oidc_clients." + app + ", so nothing proves this deployment made it"
@@ -483,6 +484,14 @@ func planClient(app string, st ClientState) ClientPlan {
 		cp.Kept = append(cp.Kept, byHand(st.ByName, why))
 	}
 	return cp
+}
+
+// nameFrom is from as a clause after the expected name, "" when from is.
+func nameFrom(from string) string {
+	if from == "" {
+		return ""
+	}
+	return ", " + from
 }
 
 // reservedRoles are the roles the rendered Patroni defines for itself, never

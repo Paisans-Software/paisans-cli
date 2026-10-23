@@ -91,17 +91,23 @@ func TestRemainsShowTheirObjectWithoutVerbose(t *testing.T) {
 }
 
 // The client of an app gone from paisans-stack.yaml is looked for by the
-// name apply last gave it, which is its display_name when the version it was
-// last applied from sets one.
-func TestRemovedClientNameIsTheLastAppliedOne(t *testing.T) {
+// name in the newest version of the workstation's configuration history that
+// declares the app, which is its display_name when that version sets one.
+// Without one, it is the name the current configuration gives, and a
+// recorded client makes that a warning.
+func TestRemovedClientNameIsTheLastDeclaredOne(t *testing.T) {
 	key, pub := testKey(t)
 	cfg, err := config.Load(fixtureConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
-	// With no store to read, the name is the one the configuration gives.
-	if name, err := removedClientName(fixtureConfig(), cfg, "talk"); name != "talk" || err != nil {
-		t.Errorf("with no store: %q, %v", name, err)
+	rec := &ui.Recorder{}
+	name, from, err := removedClientName(rec, fixtureConfig(), cfg, "talk", "c-1")
+	if name != "talk" || !strings.Contains(from, "holds no configuration history") || err != nil {
+		t.Errorf("with no store: %q, %q, %v", name, from, err)
+	}
+	if rec.Index("warn", "the name the current configuration gives it") < 0 {
+		t.Errorf("no warning with no store: %+v", rec.Events)
 	}
 	body := strings.Replace(fixtureAs(t, pub), "    blueprint: mbin\n", "    blueprint: mbin\n    display_name: Test Talk\n", 1)
 	files := snapshotted(configstore.Files{Paisans: []byte(body), Secrets: []byte("s\n"), SOPS: []byte("creation_rules: []\n")})
@@ -121,10 +127,19 @@ func TestRemovedClientNameIsTheLastAppliedOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(l.Dir, config.FileName)
-	if name, err := removedClientName(path, cfg, "talk"); name != "Test Talk" || err != nil {
-		t.Errorf("talk's client: %q, %v", name, err)
+	rec = &ui.Recorder{}
+	name, from, err = removedClientName(rec, path, cfg, "talk", "c-1")
+	if name != "Test Talk" || !strings.Contains(from, sha[:12]) || err != nil {
+		t.Errorf("talk's client: %q, %q, %v", name, from, err)
 	}
-	if name, err := removedClientName(path, cfg, "gone"); name != "gone" || err != nil {
+	if len(rec.Events) != 0 {
+		t.Errorf("warned with a declaring version: %+v", rec.Events)
+	}
+	name, _, err = removedClientName(rec, path, cfg, "gone", "")
+	if name != "gone" || err != nil {
 		t.Errorf("an app no version declares: %q, %v", name, err)
+	}
+	if len(rec.Events) != 0 {
+		t.Errorf("warned with no client recorded: %+v", rec.Events)
 	}
 }

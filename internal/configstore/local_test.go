@@ -1114,49 +1114,64 @@ func TestJudgeHeldWritesNothing(t *testing.T) {
 	}
 }
 
-// Declaring reads the configuration an app was last applied from, out of
-// the head's history, after the app has left paisans-stack.yaml.
-func TestDeclaringIsTheLastVersionThatDeclaresTheApp(t *testing.T) {
+// Declaring finds the newest version in the head's history that declares
+// an app, after the app has left paisans-stack.yaml: a re-added app's newest
+// declaration wins, and a version that does not load is passed over.
+func TestDeclaringIsTheNewestVersionThatDeclaresTheApp(t *testing.T) {
 	needTools(t, "git", "ssh-keygen")
 	alice := newOperator(t)
-	sites := storeSites(t, "home-a")
-	all := reach(sites, "home-a")
 	ops := map[string]string{"alice": alice.pub}
-	news := func(name string) string {
-		return "apps:\n  news:\n    blueprint: writefreely\n    hostname: news.example.org\n    display_name: " + name + "\n"
+	news := func(note, name string) Files {
+		f := edit(testFiles(), note, ops)
+		if name != "" {
+			f.Paisans = append(f.Paisans, "apps:\n  news:\n    blueprint: writefreely\n    hostname: news.example.org\n    display_name: "+name+"\n"...)
+		}
+		return f
 	}
-	first := edit(testFiles(), "1", ops)
-	first.Paisans = append(first.Paisans, news("Old News")...)
-	l := workstation(t, first)
-	if cfg, err := l.Declaring("news"); cfg != nil || err != nil {
-		t.Fatalf("with no head: %v, %v", cfg, err)
+	l := workstation(t, news("0", ""))
+	if d, err := l.Declaring("news"); d.History || d.Config != nil || err != nil {
+		t.Fatalf("with no head: %+v, %v", d, err)
 	}
-	g, err := gather(l, all, 1, testID, mustAnchor(t, l), GatherOptions{Sync: true}, fakePull)
+	if err := l.SetHead(strings.Repeat("a", 40)); err != nil {
+		t.Fatal(err)
+	}
+	if d, err := l.Declaring("news"); d.History || err != nil {
+		t.Fatalf("with a head and no store: %+v, %v", d, err)
+	}
+	if _, err := os.Stat(l.state(cacheDir)); !os.IsNotExist(err) {
+		t.Fatalf("Declaring made a store: %v", err)
+	}
+	cache, err := l.Cache()
 	if err != nil {
 		t.Fatal(err)
 	}
-	o := publishOpts{keyLine: alice.pub, signWith: alice.key, now: testNow}
-	v1, _, err := publishFiles(l, g, first, all, o, fakePush)
-	if err != nil {
-		t.Fatal(err)
+	unloadable := news("x", "")
+	unloadable.Paisans = []byte("version: 1\nnot_a_field: true\n")
+	var shas []string
+	for i, f := range []Files{news("1", "Old News"), news("2", "Test News"), news("3", ""), news("4", "Back News"), news("5", ""), unloadable} {
+		sha, err := cache.Commit(f, shas[max(len(shas)-1, 0):], i+1, alice.key, testNow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		shas = append(shas, sha)
 	}
-	renamed := edit(testFiles(), "2", ops)
-	renamed.Paisans = append(renamed.Paisans, news("Test News")...)
-	v2, _, err := publishNext(l, g, v1, 1, renamed, all, o, fakePush)
-	if err != nil {
-		t.Fatal(err)
+	for _, tc := range []struct {
+		head       int
+		want       string
+		unreadable int
+	}{{2, "Test News", 0}, {5, "Back News", 1}} {
+		if err := l.SetHead(shas[tc.head]); err != nil {
+			t.Fatal(err)
+		}
+		d, err := l.Declaring("news")
+		if err != nil || d.Config == nil || !d.History {
+			t.Fatalf("head %d: %+v, %v", tc.head, d, err)
+		}
+		if got := d.Config.ClientName("news"); got != tc.want || len(d.Unreadable) != tc.unreadable {
+			t.Errorf("head %d: news's client is %q, passed over %v", tc.head, got, d.Unreadable)
+		}
 	}
-	if _, _, err := publishNext(l, g, v2, 2, edit(testFiles(), "3", ops), all, o, fakePush); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := l.Declaring("news")
-	if err != nil || cfg == nil {
-		t.Fatalf("Declaring = %v, %v", cfg, err)
-	}
-	if got := cfg.ClientName("news"); got != "Test News" {
-		t.Errorf("news's client is %q, want the last applied display_name", got)
-	}
-	if cfg, err := l.Declaring("talk"); cfg != nil || err != nil {
-		t.Errorf("an app no version declares: %v, %v", cfg, err)
+	if d, err := l.Declaring("talk"); d.Config != nil || d.SHA != "" || !d.History || len(d.Unreadable) != 1 || err != nil {
+		t.Errorf("an app no version declares: %+v, %v", d, err)
 	}
 }

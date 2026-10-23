@@ -295,36 +295,61 @@ func (l Local) Current() (sha string, revision int, err error) {
 	return head, cache.revision(head), nil
 }
 
-// Declaring is the paisans-stack.yaml of the newest version in the history of
-// this workstation's head that declares app: the configuration the
-// deployment last applied it from. It is nil when there is no head, or when
-// no version in the head's history declares app. It reaches no site.
-func (l Local) Declaring(app string) (*config.Config, error) {
+// Declaration is the newest version in the history of a workstation's head
+// whose paisans-stack.yaml declares an app.
+type Declaration struct {
+	// History is false when the workstation holds no head or no store, so
+	// there was no history to read.
+	History bool
+	// SHA is the version, "" when none in the history declares the app, and
+	// Config its paisans-stack.yaml.
+	SHA    string
+	Config *config.Config
+	// Unreadable is each version passed over because this paisans does not
+	// load its paisans-stack.yaml: every one newer than SHA, or in the whole
+	// history when no version declares the app.
+	Unreadable []string
+}
+
+// Declaring finds the newest version in the history of this workstation's
+// head that declares app. It reaches no site, and changes nothing on the
+// workstation.
+func (l Local) Declaring(app string) (Declaration, error) {
 	head, err := l.Head()
 	if err != nil || head == "" {
-		return nil, err
+		return Declaration{}, err
 	}
-	cache, err := l.Cache()
-	if err != nil {
-		return nil, err
+	dir := l.state(cacheDir)
+	if _, err := os.Stat(filepath.Join(dir, "HEAD")); os.IsNotExist(err) {
+		return Declaration{}, nil
+	} else if err != nil {
+		return Declaration{}, err
 	}
+	cache := Repo{Dir: dir}
 	// --topo-order lists every version before its parents, so the first
 	// that declares app has no descendant that does.
 	out, err := cache.git(nil, nil, "rev-list", "--topo-order", head)
 	if err != nil {
-		return nil, err
+		return Declaration{}, err
 	}
-	configs := versionConfigs(cache)
-	for _, sha := range strings.Fields(string(out)) {
-		cfg, err := configs(sha)
+	shas := strings.Fields(string(out))
+	files, err := cache.paisansFiles(shas)
+	if err != nil {
+		return Declaration{}, err
+	}
+	d := Declaration{History: true}
+	for _, sha := range shas {
+		cfg, err := config.LoadBytes(files[sha])
 		if err != nil {
-			return nil, fmt.Errorf("reading version %s: %w", sha, err)
+			d.Unreadable = append(d.Unreadable, sha)
+			continue
 		}
 		if _, ok := cfg.Apps[app]; ok {
-			return cfg, nil
+			d.SHA, d.Config = sha, cfg
+			return d, nil
 		}
 	}
-	return nil, nil
+	return d, nil
 }
 
 func (l Local) path(name string) string { return filepath.Join(l.Dir, name) }
