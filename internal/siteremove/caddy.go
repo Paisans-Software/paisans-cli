@@ -250,13 +250,15 @@ func (p *Plan) keptManifest(entries []render.ManifestFile, proven map[string]boo
 }
 
 // keptProbe lists every path under the root that no kept path covers, each
-// as find's type letter and the path, an empty directory as e.
+// as find's type letter and the path, an empty directory as e. find runs
+// under rootlesskit, as appremove.DirCommand's does, so it reads what a
+// container's user wrote.
 func (p *Plan) keptProbe() string {
 	var prune []string
 	for _, k := range p.keptPaths() {
 		prune = append(prune, "-path "+quote(k))
 	}
-	return fmt.Sprintf(`d=%s; if [ -d "$d" ]; then find "$d" -mindepth 1 \( %s \) -prune -o \( -type d -empty -printf 'e %%p\n' \) -o -printf '%%y %%p\n'; fi`, quote(p.dep().Root()), strings.Join(prune, " -o "))
+	return fmt.Sprintf(`d=%s; if [ -d "$d" ]; then rootlesskit find "$d" -mindepth 1 \( %s \) -prune -o \( -type d -empty -printf 'e %%p\n' \) -o -printf '%%y %%p\n'; fi`, quote(p.dep().Root()), strings.Join(prune, " -o "))
 }
 
 // parseKeptProbe reads keptProbe's answer: the paths that are not Caddy's,

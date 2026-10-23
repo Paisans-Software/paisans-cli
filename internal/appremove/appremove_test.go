@@ -534,8 +534,12 @@ func TestTheLeftForYouHintsStayShort(t *testing.T) {
 // there, and app remove stopped before reaching any site.
 func TestTheDataDirectoryIsReadAndRemovedInTheUserNamespace(t *testing.T) {
 	const dir = "/srv/paisans/f2a9/blog"
+	if probe := DirCommand(dir); !strings.Contains(probe, "rootlesskit sh -c ") || !strings.Contains(probe, "du -sb") {
+		t.Errorf("the probe reads outside rootlesskit: %s", probe)
+	}
+	// rmdir is left out: it removes the stack directory, the user's own
+	// entry in the deployment's root, and needs no namespace.
 	for name, command := range map[string]string{
-		"probe":       DirCommand(dir),
 		"delete data": DirCommandFor(dir, true),
 		"empty dirs":  DirCommandFor(dir, false),
 	} {

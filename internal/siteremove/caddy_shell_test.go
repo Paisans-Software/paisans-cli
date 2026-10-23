@@ -48,20 +48,25 @@ func shellTree(t *testing.T, files map[string]string, dirs, links []string) (bas
 func runUnder(t *testing.T, base, command string) error {
 	t.Helper()
 	command = strings.ReplaceAll(command, "'/srv/paisans/", "'"+base+"/srv/paisans/")
-	// rootlesskit, which a host has and this machine may not, stands in as
-	// a script that runs its arguments: the namespace changes whose files
-	// may be removed, not which.
+	out, err := shell(t, command).CombinedOutput()
+	if err != nil {
+		t.Logf("%s: %v: %s", command, err, out)
+	}
+	return err
+}
+
+// shell runs command under sh with rootlesskit, which a host has and this
+// machine may not, standing in as a script that runs its arguments: the
+// namespace changes whose files may be read or removed, not which.
+func shell(t *testing.T, command string) *exec.Cmd {
+	t.Helper()
 	bin := t.TempDir()
 	if err := os.WriteFile(filepath.Join(bin, "rootlesskit"), []byte("#!/bin/sh\nexec \"$@\"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.Command("sh", "-c", command)
 	cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Logf("%s: %v: %s", command, err, out)
-	}
-	return err
+	return cmd
 }
 
 func exists(base, rel string) bool {
@@ -163,7 +168,10 @@ func TestKeptProbeListsWhatIsNotCaddys(t *testing.T) {
 	}, []string{r + "postgres/empty"}, nil)
 	p := shellPlan()
 	command := strings.ReplaceAll(p.keptProbe(), "'/srv/paisans/", "'"+base+"/srv/paisans/")
-	out, err := exec.Command("sh", "-c", command).CombinedOutput()
+	if !strings.Contains(command, "rootlesskit find ") {
+		t.Errorf("the probe reads the root outside rootlesskit: %s", command)
+	}
+	out, err := shell(t, command).CombinedOutput()
 	if err != nil {
 		t.Fatalf("%v: %s", err, out)
 	}
