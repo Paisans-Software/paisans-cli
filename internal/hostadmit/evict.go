@@ -332,8 +332,8 @@ const disarmWait = 20
 // while /sys/class/watchdog/watchdog0/state reads active, since opening a
 // stopped timer starts it. The loop ends with the shell that started it, and
 // after ten minutes at most. Once command returns it keeps trying for wait
-// half seconds; a timer still running then, held by something else or on a
-// driver with nowayout set, is reported on stderr and left as it is.
+// half seconds. A timer still running then is held by something that keeps
+// it, or on a driver with nowayout set, which the plan warns about.
 func disarmAround(command string, wait int) string {
 	return fmt.Sprintf(`{ w=/sys/class/watchdog/watchdog0; `+
 		`armed() { [ "$(cat $w/state 2>/dev/null)" = active ]; }; `+
@@ -341,8 +341,7 @@ func disarmAround(command string, wait int) string {
 		`p=$$; ( n=0; while kill -0 $p 2>/dev/null && [ $n -lt 1200 ]; do disarm; sleep 0.5; n=$((n+1)); done ) & d=$!; `+
 		`trap 'kill $d 2>/dev/null' EXIT INT TERM HUP; `+
 		`%s; s=$?; `+
-		`i=0; while armed && [ $i -lt %d ]; do disarm; sleep 0.5; i=$((i+1)); done; kill $d 2>/dev/null; `+
-		`if armed; then if [ "$(cat $w/nowayout 2>/dev/null)" = 1 ]; then echo 'the watchdog is still running: its driver has nowayout set, so nothing can stop it and the host reboots within its timeout' >&2; else echo 'the watchdog is still running, held by another process' >&2; fi; fi; `+
+		`i=0; while armed && [ $i -lt %d ]; do disarm; sleep 0.5; i=$((i+1)); done; kill $d 2>/dev/null; trap - EXIT INT TERM HUP; `+
 		`[ $s -eq 0 ]; }`, command, wait)
 }
 
@@ -362,8 +361,11 @@ func (e *evictor) processes() error {
 		return nil
 	}
 	user := e.in.Request.User
-	e.remove("kill "+user+"'s processes", "expire "+user+", kill every process of uid "+fmt.Sprint(e.f.User.UID)+" or of its subordinate range and check that none is left, before anything that fences it goes",
-		e.guarded(e.killCommand()))
+	describe := "expire " + user + ", kill every process of uid " + fmt.Sprint(e.f.User.UID) + " or of its subordinate range and check that none is left, before anything that fences it goes"
+	if e.holdsWatchdog() {
+		describe += ", disarming the watchdog a Patroni among them held as soon as it lets go"
+	}
+	e.remove("kill "+user+"'s processes", describe, e.guarded(e.killCommand()))
 	return nil
 }
 
@@ -539,6 +541,10 @@ func (e *evictor) helper() error {
 // site that is no longer a data site, and stops loading its module at boot.
 func (e *evictor) watchdog() error {
 	rule, unit := watchdogRulePath(e.d), e.d.Prefix()+"-watchdog.service"
+	if e.f.Files[rule].Present && e.hasWatchdogDev() && e.f.WatchdogNowayout {
+		e.warn("watchdog: its driver has nowayout set",
+			"Nothing can stop its timer once it runs, so a Patroni killed while it led reboots the host part way through evict. Have the operators stop the deployment's database first.")
+	}
 	if e.f.Files[rule].Present && e.hasWatchdogDev() && e.f.WatchdogState == "none" {
 		e.warn("watchdog: evict cannot tell whether it runs",
 			"The watchdog's driver reports no state in /sys/class/watchdog, as a legacy driver such as ipmi_watchdog does, so evict does not disarm it. A Patroni killed while it led reboots the host.")

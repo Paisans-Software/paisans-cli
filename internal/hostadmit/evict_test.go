@@ -848,6 +848,13 @@ func TestEvictResumedKillsInsideTheDisarm(t *testing.T) {
 	if !strings.Contains(legacy.Text(), "watchdog: evict cannot tell whether it runs") {
 		t.Errorf("no warning for a watchdog without state:\n%s", legacy.Text())
 	}
+	nowayout, err := hostadmit.BuildEvict(withEntries(evicted("home-a", gateway)().add("watchdog-dev", "1001 /dev/watchdog").with("watchdog-state", "active").with("watchdog-nowayout", "yes")), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(nowayout.Text(), "watchdog: its driver has nowayout set") {
+		t.Errorf("no warning for nowayout:\n%s", nowayout.Text())
+	}
 }
 
 // titleIndex is the index of the step titled title, or -1.

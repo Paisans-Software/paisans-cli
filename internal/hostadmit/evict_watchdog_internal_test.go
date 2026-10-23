@@ -115,13 +115,12 @@ func TestDisarmAroundKeepsTheStopsFailure(t *testing.T) {
 	}
 }
 
-// A timer that cannot be stopped, here a driver with nowayout set, is
-// reported and left as it is: evict carries on, since failing would not
-// stop it either.
-func TestDisarmAroundNamesNowayout(t *testing.T) {
+// A timer that cannot be stopped, here a driver with nowayout set, is left
+// as it is and the command carries on, since failing would not stop it
+// either; the plan warns about it beforehand.
+func TestDisarmAroundCarriesOnPastNowayout(t *testing.T) {
 	w := newFakeWatchdog(t, "active", true)
-	out, err := w.run("true")
-	if err != nil || !strings.Contains(out, "nowayout") {
+	if out, err := w.run("true"); err != nil {
 		t.Errorf("%v: %s", err, out)
 	}
 }

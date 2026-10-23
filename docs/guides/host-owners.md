@@ -491,10 +491,10 @@ It deletes a user only when it is the deployment's: the record's, or, with
 no record, `paisans-<token>`. With no record, pass `--data-dir` if you gave
 admit one, so evict finds the Docker data. On a data site, while it stops
 the deployment's processes, evict disarms the watchdog as soon as Patroni lets
-go of it, so a Patroni killed while it led does not reboot the machine. A
-watchdog driver with `nowayout` set cannot be stopped, and evict says so; a
-driver that reports no state in `/sys/class/watchdog`, such as
-`ipmi_watchdog`, is not disarmed, and the plan warns about it.
+go of it, so a Patroni killed while it led does not reboot the machine. The
+plan warns when it cannot: a watchdog driver with `nowayout` set, which
+nothing stops, or one that reports no state in `/sys/class/watchdog`, such as
+`ipmi_watchdog`, which evict does not disarm.
 
 **On a gateway, copy your own site blocks out of
 `/srv/paisans/<token>/caddy.d` before you evict.** Evict stops the
