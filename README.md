@@ -9105,7 +9105,7 @@ skipped and why.
 | 4. Replica | the new site's remaining files by a whole `deployment apply`, then `up -d`, which starts Patroni beside the running etcd | the member `streaming`, its replay lag zero or falling over three samples five seconds apart |
 | 5. Cluster configuration | `patronictl edit-config --force -q -s synchronous_mode=true -s synchronous_mode_strict=<value>` when the live values differ | a member with the role `Sync Standby` |
 | 6. HAProxy | `haproxy.cfg` as a scoped `deployment apply`; the site's cluster database apps stopped, HAProxy alone restarted, the apps started and each through `deployment apply`'s health gate | the statistics list every cluster site, the leader `UP` and every replica `DOWN` |
-| 7. Replicas' `patroni.env` | on each existing replica, one at a time: `patroni.env` as a scoped `deployment apply`, then `up -d --no-deps --force-recreate patroni`; nothing when the cluster had no replica | the replica runs with the new `ETCD3_HOSTS`, and its own Patroni, asked through its REST API from inside the container, answers `running` and `streaming` before the next is touched; `patronictl list` reads a member key the old process may have written, so it is not asked |
+| 7. Replicas' `patroni.env` | on each existing replica, one at a time: `patroni.env` as a scoped `deployment apply`, then `up -d --no-deps --force-recreate --timeout 60 patroni`; nothing when the cluster had no replica | the replica runs with the new `ETCD3_HOSTS`, and its own Patroni, asked through its REST API from inside the container, answers `running` and `streaming` before the next is touched; `patronictl list` reads a member key the old process may have written, so it is not asked |
 | 8. Monitor | every monitor site's `uptime` stack applied on its own (`deployment apply --only <app>`), so its `monitors.json` gains the new site's ping and direct checks and the monitor restarts on it; skipped when no site holds the monitor role (see *Topology commands reseed the monitor*) | the seed on the host matches the render and the stack is healthy; a failure here stops nothing of the join and names the `deployment apply` that finishes it |
 
 **Learners, one at a time.** A full voter added to a cluster of one makes the
@@ -9279,7 +9279,7 @@ hosts it was created with, so the plan says when they differ from the file,
 compared as sets. They are enough while they name the site's own etcd member,
 which starts with Patroni after a reboot and from which Patroni learns the
 rest; once they do not, the plan recreates Patroni alone
-(`up -d --no-deps --force-recreate patroni`).
+(`up -d --no-deps --force-recreate --timeout 60 patroni`).
 
 **A leader that moves is reported, never left silent.** A change Patroni reads
 only in a new container, a forced recreate of the infrastructure stack, a

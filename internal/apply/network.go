@@ -192,7 +192,7 @@ func (p *Plan) probeStaleNetworks(t Transport) error {
 		if a.Stack == infraStack {
 			p.Notes = append(p.Notes, Note{
 				Hint: "infra network differs from its compose file: run infra down, then apply --recreate infra",
-				Text: fmt.Sprintf("the infrastructure stack's network %s does not match its compose file: %s. It was left as it is, because taking that stack down stops the database and the gateway on this site. At a time this site can be out, run `%s down`, then apply again with `--recreate infra`, which starts it on a network created as declared", name, why, p.Deployment.ComposeCmd(a.Stack)),
+				Text: fmt.Sprintf("the infrastructure stack's network %s does not match its compose file: %s. It was left as it is, because taking that stack down stops the database and the gateway on this site. At a time this site can be out, run `%s down%s`, then apply again with `--recreate infra`, which starts it on a network created as declared", name, why, p.Deployment.ComposeCmd(a.Stack), infraStopTimeout),
 			})
 			continue
 		}

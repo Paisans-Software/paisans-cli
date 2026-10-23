@@ -116,7 +116,7 @@ func TestAJoinCompletesAndLeavesNothingToDo(t *testing.T) {
 		t.Errorf("synchronous mode %v, HAProxy serves:\n%s", w.syncMode, w.served["home-a"])
 	}
 	for _, c := range w.hosts["home-a"].commands {
-		if strings.HasSuffix(c, "/srv/paisans/f2a9/infra/compose.yaml restart") || strings.Contains(c, "/srv/paisans/f2a9/infra/compose.yaml up -d") {
+		if strings.HasSuffix(c, "/srv/paisans/f2a9/infra/compose.yaml restart") || strings.HasSuffix(c, "/srv/paisans/f2a9/infra/compose.yaml restart --timeout 60") || strings.Contains(c, "/srv/paisans/f2a9/infra/compose.yaml up -d") {
 			t.Errorf("the primary's whole stack was acted on: %s", c)
 		}
 	}
