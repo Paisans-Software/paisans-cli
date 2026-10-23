@@ -116,7 +116,7 @@ func anchorFor(l configstore.Local, root string) (configstore.Anchor, error) {
 		return a, nil
 	}
 	if !shaShape(root) {
-		return a, &ui.Problem{Hint: fmt.Sprintf("--root %q is not a commit id", root), Explain: "Give the full hash of the version to pin, as paisans deployment log prints it on a workstation that has it."}
+		return a, &ui.Problem{Hint: fmt.Sprintf("--root %q is not a commit id", root), Explain: "Give the full hash of the root to pin, as paisans deployment log prints it on a root's line, or as another operator's .paisans/config-root holds it."}
 	}
 	if a.Root != "" && a.Root != root {
 		return a, &ui.Problem{Hint: "--root differs from the pinned root", Explain: fmt.Sprintf("This workstation pinned %s in .paisans/config-root. Drop --root, or remove that file if the pin is wrong.", a.Root)}
@@ -887,6 +887,10 @@ func runDeploymentLog(args []string, stdin io.Reader, stdout io.Writer) error {
 		}
 		if slices.Contains(g.Verdict.Heads, sha) {
 			state += ", head"
+		}
+		// A root's full hash is what --root takes.
+		if len(v.Parents) == 0 {
+			state += ", root " + sha
 		}
 		holders := strings.Join(g.Holders[sha], ", ")
 		if holders == "" {

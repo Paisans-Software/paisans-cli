@@ -85,9 +85,11 @@ func (e *UnreadableOperatorsError) Unwrap() error { return e.Err }
 //
 //   - The anchor is the operator's newest version that passes shape, signed
 //     by any of the anchor's keys, or else the pinned root. With both, the
-//     signed anchor must descend from the pin. The anchor and every ancestor
-//     of it are trusted whatever their shape, because the operator signed
-//     after them.
+//     signed anchor must descend from the pin, and the keys must have signed
+//     nothing under another good root, since which incarnation is current is
+//     the operator's to say, never a revision's. The anchor and every
+//     ancestor of it are trusted whatever their shape, because the operator
+//     signed after them.
 //   - With a named key and a pinned root, the pinned root is the anchor and
 //     the key is not consulted. With a named key alone, the key must have
 //     signed versions under exactly one good root, which is judged by these
@@ -372,6 +374,9 @@ func (j *judgement) anchor(a Anchor, order []string) (string, error) {
 		if reason := j.goodRoot(a.Root); reason != "" {
 			return "", &anchorError{fmt.Sprintf("the pinned root %s %s", a.Root, reason)}
 		}
+		if err := j.otherRoot(a, order); err != nil {
+			return "", err
+		}
 		if signed == "" {
 			return a.Root, nil
 		}
@@ -383,6 +388,34 @@ func (j *judgement) anchor(a Anchor, order []string) (string, error) {
 		return signed, nil
 	}
 	return "", ErrNoAnchor
+}
+
+// otherRoot refuses a pin when the anchor's keys signed versions under
+// another good root as well: an older incarnation of the deployment, or a
+// newer one after a redeploy under the same id. Which is current is the
+// operator's to say, never a revision's, since a redeployed line starts
+// again at revision 1.
+func (j *judgement) otherRoot(a Anchor, order []string) error {
+	if len(a.Signers) == 0 {
+		return nil
+	}
+	for _, root := range order {
+		if root == a.Root || len(j.g.Versions[root].Parents) > 0 || j.goodRoot(root) != "" {
+			continue
+		}
+		newest := ""
+		for _, sha := range order {
+			if (sha == root || j.ancestors(sha)[root]) && slices.Contains(a.Signers, j.g.Versions[sha].SignerFP) && j.shape(sha) == "" {
+				if newest == "" || j.newer(sha, newest) {
+					newest = sha
+				}
+			}
+		}
+		if newest != "" {
+			return &anchorError{fmt.Sprintf("versions signed by your key, the newest %s, descend from root %s, not from the pinned root %s: one is an older incarnation of the deployment, the other a newer one after a redeploy under the same id. Ask another operator for the current root, the hash in their .paisans/config-root; if it is not the one pinned here, remove .paisans/config-root and pull again with --root <sha>", newest, root, a.Root)}
+		}
+	}
+	return nil
 }
 
 // named judges from the key --key names, by the rule in Judge's comment: a
@@ -416,7 +449,7 @@ func (j *judgement) named(a Anchor, order, cyclic []string) (Verdict, error) {
 		return Verdict{}, &anchorError{fmt.Sprintf("no version the trust rules trust is signed by the key --key names, %s, and no root is pinned", key)}
 	case 1:
 	default:
-		return Verdict{}, &anchorError{fmt.Sprintf("the key --key names, %s, signed versions under more than one root, %s, and which is this deployment's is not for a key to say: pin it with --root <sha>", key, strings.Join(roots, " and "))}
+		return Verdict{}, &anchorError{fmt.Sprintf("the key --key names, %s, signed versions under more than one root, %s, and which is this deployment's is not for a key to say: pin it with --root <sha>. A root may be held only in this workstation's own cache, .paisans/store.git, from an earlier run; on a workstation recovering from nothing, removing .paisans/ clears it", key, strings.Join(roots, " and "))}
 	}
 	v, err := j.from(roots[0], order, cyclic)
 	if err != nil {
@@ -458,7 +491,7 @@ func (j *judgement) named(a Anchor, order, cyclic []string) (Verdict, error) {
 			return Verdict{}, &anchorError{fmt.Sprintf("the key --key names, %s, is not a key of an operator the newest version %s lists", key, h)}
 		}
 		if !slices.Contains(a.Signers, j.g.Versions[h].SignerFP) {
-			return Verdict{}, &anchorError{fmt.Sprintf("the newest version %s is signed by %s, not by the key --key names, %s; a key alone cannot tell this deployment's history from one it signed before a redeploy, so it trusts only versions it signed: pin the root with --root <sha>, which another operator can read from paisans deployment log", h, j.g.Versions[h].SignerFP, key)}
+			return Verdict{}, &anchorError{fmt.Sprintf("the newest version %s is signed by %s, not by the key --key names, %s; a key alone cannot tell this deployment's history from one it signed before a redeploy, so it trusts only versions it signed: pin the root with --root <sha>, which another operator can read from paisans deployment log or their .paisans/config-root", h, j.g.Versions[h].SignerFP, key)}
 		}
 	}
 	return out, nil

@@ -687,3 +687,35 @@ func TestJudgeNamedKeyUnderTwoRootsIsRefused(t *testing.T) {
 	}
 	wantHeads(t, judgeOK(t, f, named("v1", "fp-alice")), "v3")
 }
+
+// After a recovery from a host replaying an older incarnation, the pin is the
+// old root. When the sites then serve the current line, which a redeploy
+// started again at revision 1, versions the key signed under another root
+// refuse the pull whatever their revisions, rather than leaving it on the
+// old line.
+func TestJudgePinnedKeyRefusesItsVersionsUnderAnotherRoot(t *testing.T) {
+	for _, newRev := range []int{2, 9} {
+		f := newFake()
+		f.add("o1", 1, "fp-alice", nil, "alice", "mallory")
+		f.add("o2", 2, "fp-alice", on("o1"), "alice", "mallory")
+		f.add("o3", 3, "fp-alice", on("o2"), "alice", "mallory")
+		f.add("o4", 4, "fp-alice", on("o3"), "alice", "mallory")
+		f.add("n1", 1, "fp-alice", nil, "alice")
+		prev := "n1"
+		for r := 2; r <= newRev; r++ {
+			sha := "n" + string(rune('0'+r))
+			f.add(sha, r, "fp-alice", on(prev), "alice")
+			prev = sha
+		}
+		for _, a := range []Anchor{{Signers: []string{"fp-alice"}, Root: "o1"}, {Signers: []string{"fp-alice"}, Root: "n1"}} {
+			_, err := Judge(f.graph(), a)
+			if !errors.Is(err, ErrNoAnchor) || !strings.Contains(err.Error(), "--root") {
+				t.Fatalf("new line at revision %d, pin %s: err = %v, want a refusal asking for --root", newRev, a.Root, err)
+			}
+		}
+	}
+	// Another operator's root, which the key never signed under, does not.
+	f := chain()
+	f.add("m1", 1, "fp-mallory", nil, "mallory")
+	wantHeads(t, judgeOK(t, f, Anchor{Signers: []string{"fp-alice"}, Root: "v1"}), "v3")
+}

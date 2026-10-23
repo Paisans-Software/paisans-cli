@@ -422,3 +422,42 @@ func TestConfigPublishWithoutAnchorAdvises(t *testing.T) {
 		}
 	}
 }
+
+// log prints a root's full hash, which --root takes.
+func TestConfigLogPrintsTheRootsFullHash(t *testing.T) {
+	shas, answer, files := storedHistory(t, 2, 0)
+	l := pullWorkstation(t, answer, shas[0], shas[0], files[0])
+	var out bytes.Buffer
+	if err := runDeployment([]string{"log", "--config", filepath.Join(l.Dir, "paisans-stack.yaml")}, noTerminalStdin(), &out); err != nil {
+		t.Fatal(problemText(err), err)
+	}
+	if !strings.Contains(out.String(), "root "+shas[0]) || strings.Contains(out.String(), "root "+shas[1]) {
+		t.Fatalf("log:\n%s", out.String())
+	}
+}
+
+// After a recovery pinned an older incarnation's root, a pull from sites
+// serving the current line, which the same key signed and which starts again
+// at revision 1, refuses rather than staying on the old line.
+func TestConfigPullRefusesWhenTheKeySignedUnderAnotherRoot(t *testing.T) {
+	key, pub := testKey(t)
+	s := newStore(t)
+	yaml := fixtureAs(t, pub)
+	o1, _ := s.commit(t, yaml, "# old\n", nil, 1, key)
+	o2, _ := s.commit(t, yaml, "# old 2\n", []string{o1}, 2, key)
+	o3, f3 := s.commit(t, yaml, "# old 3\n", []string{o2}, 3, key)
+	n1, _ := s.commit(t, yaml, "# new\n", nil, 1, key)
+	s.commit(t, yaml, "# new 2\n", []string{n1}, 2, key)
+	l := pullWorkstation(t, s.answer(t), o1, o3, f3)
+	if err := l.SetSigningKey(pub); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	err := runDeployment([]string{"pull", "--config", filepath.Join(l.Dir, "paisans-stack.yaml"), "--execute"}, noTerminalStdin(), &out)
+	if !strings.Contains(problemText(err), "not from the pinned root "+o1) {
+		t.Fatalf("got %v", problemText(err))
+	}
+	if h, _ := l.Head(); h != o3 {
+		t.Fatalf("head moved to %s", h)
+	}
+}
