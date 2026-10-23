@@ -5341,9 +5341,11 @@ it equals the mesh subnet or a pinned one, or lies inside it, because the
 kernel picks the longest matching prefix and it would take that traffic. A
 route broader than the mesh (a
 provider's 10.0.0.0/8 private network) is shorter than the one `psns-<token>`
-adds, so the mesh still wins; it is printed as a note. A `psns-<token>` the
-toolkit did not write conflicts, because nothing says what it runs; the line
-names its WireGuard helper's `down`, which takes it away.
+adds, so the mesh still wins; it is printed as a note. A `psns-<token>` no
+manifest records conflicts, and so does the WireGuard socket on its listen
+port: the interface carries the deployment's name, but nothing says what it
+runs. The line names the deployment's WireGuard helper's `down`, which takes
+it away.
 
 A conflict line names the resource, the `paisans-stack.yaml` key that claims it, and
 what holds it (a container and its compose project, or a process and its PID).
@@ -9405,7 +9407,7 @@ is not this deployment's is left alone and not listed:
 | authorized keys | nothing can prove one: a key `site admit` or `site prepare` added is a key the operator logs in with | never removed. A key may be the only way into the host, and nothing on it says whether another exists; the operator deletes one by hand once it is no longer needed. This deployment's record of which keys it added, `/srv/paisans/<token>/.paisans/authorized_keys.owned`, is its own file, so that is deleted |
 | the deployment's directory | its path, `/srv/paisans/<token>`, the user's | empty directories removed; what apply did not write, the data in its bind mounts, is kept, and `--delete-data` empties it, through rootlesskit so the files a container's user owns go too, unless a file in it was edited. The directory itself stays, because its parent `/srv/paisans` is root's, for `site evict` |
 | the deployment record, on a gateway | `/srv/paisans/<token>/.paisans/deployed.json` | deleted |
-| the mesh interface | its name, `psns-<token>`, which `site admit` gives the deployment's helper and nothing else | after the containers, taken down by the WireGuard helper's `down`, which stops and disables `wg-quick@psns-<token>` and deletes `/etc/wireguard/psns-<token>.conf`, the site's private key. Left up, it holds the site's listen port and interface name, and a `site add` of the same site refuses both. The helper and its sudoers line stay for `site evict` |
+| the mesh interface | its name, `psns-<token>`, which `site admit` gives the deployment's helper and nothing else | when the interface is up, or `systemctl is-enabled` or `is-active` (which need no root) says its unit is, as one whose start failed at the last boot still is: after the containers, taken down by the WireGuard helper's `down`, which stops and disables `wg-quick@psns-<token>` and deletes `/etc/wireguard/psns-<token>.conf`, the site's private key. Left up, or enabled to come back at boot, it holds the site's listen port and interface name, and a `site add` of the same site refuses both. The helper and its sudoers line stay for `site evict` |
 | the configuration store | `/srv/paisans/<token>/.paisans/config/<token>.git`, its `<token>.peers` and `<token>.sync.json`, a `<token>.incoming.bundle` a cut-off push left behind, and `/srv/paisans/<token>/.paisans/bin/`; the units that serve and sync it are the user's `paisans-<token>-*` and go with the units above | deleted after the units, so the daemon and the sync have stopped using them. The versions on this host go with it; every other site still holds them, which is what makes a site's removal not a loss of the configuration's history |
 | the grant record | `/srv/paisans/<token>/.paisans/granted.json` (see *`deployment apply` and `site prepare` review what `paisans-stack.yaml` grants*) | deleted last: left behind, a later deployment with the same token would be reviewed against a baseline it never applied |
 

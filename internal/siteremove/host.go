@@ -44,9 +44,10 @@ type hostPlan struct {
 	// run, sorted.
 	images []string
 	files  []appremove.File
-	// mesh is whether the deployment's mesh interface is on the host. The
-	// WireGuard helper takes it down, so the site's listen port and
-	// interface name are free when it is added back.
+	// mesh is whether the deployment's mesh interface is on the host, or
+	// its unit is enabled or active, which brings it back at the next boot
+	// from the conf it left. The WireGuard helper takes it down, so the
+	// site's listen port and interface name are free when it is added back.
 	mesh bool
 	// webServer are the reference files for the host owner's web server
 	// the manifest records.
@@ -353,7 +354,9 @@ func (p *Plan) buildHost() (*Stage, error) {
 	}
 	hp.dockerPresent = inv.Docker.Present
 	hp.manifest = inv.Manifest
-	hp.mesh = contains(inv.Links, d.Interface())
+	if hp.mesh, err = p.meshLeft(t, inv); err != nil {
+		return nil, err
+	}
 	for _, e := range inv.ManifestWebServer {
 		// The manifest is the user's own file: an entry that is not one of
 		// the deployment's reference files is never read or deleted.
@@ -897,11 +900,39 @@ func (p *Plan) runHost() error {
 	return nil
 }
 
+// meshUnitCommand asks systemd, as the deployment's user, whether the mesh
+// unit is enabled or active: systemctl answers both for a system unit
+// without root. /etc/wireguard is root's alone, so the conf cannot be
+// looked for; a unit enabled at boot is what brings the interface back
+// from it, as one that failed to start at the last boot still is.
+func (p *Plan) meshUnitCommand() string {
+	u := quote(p.dep().WireGuardUnit())
+	return fmt.Sprintf("if systemctl is-enabled --quiet %[1]s; then echo enabled; fi; if systemctl is-active --quiet %[1]s; then echo active; fi; true", u)
+}
+
+// meshLeft reports whether the deployment's mesh is on the host: its
+// interface up, or its unit enabled or active.
+func (p *Plan) meshLeft(t apply.Transport, inv *hostcheck.Inventory) (bool, error) {
+	if contains(inv.Links, p.dep().Interface()) {
+		return true, nil
+	}
+	out, err := t.Run(p.meshUnitCommand())
+	if err != nil {
+		return false, fmt.Errorf("site remove %s: reading %s: %w: %s", p.Site, p.dep().WireGuardUnit(), err, lastLines(out, 2))
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if l := strings.TrimSpace(line); l == "enabled" || l == "active" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // meshDown takes the deployment's mesh interface down through its WireGuard
 // helper, the one command the deployment's user may run as root. A helper
-// whose usage lists no down is one site admit installed before the verb
-// existed: the host's owner admits the deployment again, which installs the
-// current one.
+// whose usage lists no down is one an older paisans on the host installed:
+// the host's owner upgrades paisans there and admits the deployment again,
+// which installs the current one.
 func (p *Plan) meshDown(t apply.Transport) error {
 	h := apply.WGHelper{T: t, Iface: p.dep().Interface()}
 	err := h.Down()
@@ -914,7 +945,7 @@ func (p *Plan) meshDown(t apply.Transport) error {
 	if strings.Contains(err.Error(), "usage:") {
 		return &ui.Problem{
 			Hint:    fmt.Sprintf("%s: the WireGuard helper has no down, so %s is still up", p.Site, h.Iface),
-			Explain: fmt.Sprintf("Site admit installed the helper before it could take the interface down. The host's owner runs `sudo %s site admit --request %s.admit` again, which installs the current helper, then run site remove again: it resumes here.", progname.Default, p.Site),
+			Explain: fmt.Sprintf("Site admit installs the helper from the paisans on the host, and that one predates down. The host's owner upgrades paisans on the host to this release or later, then runs `sudo %[1]s site admit --request %[2]s.admit` again, from `%[3]s site request --site %[2]s > %[2]s.admit`, which installs the current helper. Then run site remove again: it resumes here.", progname.Default, p.Site, progname.Cmd()),
 			Cause:   err,
 		}
 	}
@@ -951,8 +982,12 @@ func (p *Plan) verifyHost(t apply.Transport) error {
 	if inv.Manifest && cp == nil {
 		left = append(left, d.Manifest())
 	}
-	if contains(inv.Links, d.Interface()) {
-		left = append(left, "interface "+d.Interface())
+	mesh, err := p.meshLeft(t, inv)
+	if err != nil {
+		return err
+	}
+	if mesh {
+		left = append(left, "interface "+d.Interface()+", or its unit "+d.WireGuardUnit()+" enabled or active")
 	}
 	for _, r := range p.storeRoots() {
 		_, found, err := t.ReadFile(r.probe)

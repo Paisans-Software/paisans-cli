@@ -144,6 +144,10 @@ type host struct {
 	files    map[string]string
 	commands []string
 	wgUp     bool
+	// wgEnabled is a mesh unit enabled at boot with its interface down, as
+	// one whose start failed at the last boot is. An up interface's unit is
+	// enabled and active whatever it holds.
+	wgEnabled bool
 	// wgRun is the mesh file the running interface was last handed by the
 	// WireGuard helper, nil while it runs the file on disk.
 	wgRun     *string
@@ -689,11 +693,20 @@ func (h *host) Run(command string) (string, error) {
 			h.wgUp = true
 		}
 		return "", nil
+	case strings.HasPrefix(command, "if systemctl is-enabled --quiet 'wg-quick@psns-f2a9'; then echo enabled; fi; if systemctl is-active --quiet 'wg-quick@psns-f2a9'"):
+		out := ""
+		if h.wgUp || h.wgEnabled {
+			out += "enabled\n"
+		}
+		if h.wgUp {
+			out += "active\n"
+		}
+		return out, nil
 	case command == wgHelper+"down":
 		if w.downLeavesUp {
 			return "", nil
 		}
-		h.wgUp, h.wgRun = false, nil
+		h.wgUp, h.wgEnabled, h.wgRun = false, false, nil
 		delete(h.files, wgInstalled)
 		return "", nil
 	case strings.Contains(command, "getent ahosts"):

@@ -47,6 +47,9 @@ net='{{.Network}}'
 prefix='{{.Prefix}}'
 # The uid that must own the conf directory: root on a host.
 owner='{{.Owner}}'
+# The systemctl that up, restart and down run: systemctl, from the PATH
+# above, on a host.
+systemctl='{{.Systemctl}}'
 # The mark put adds to every conf it installs: the egress table drops what
 # a socket with it sends to this host, loopback, link-local, multicast and
 # the private ranges, after wg has resolved each Endpoint as root.
@@ -309,16 +312,16 @@ put)
 	;;
 up)
 	[ $# -eq 1 ] || usage
-	exec systemctl enable --now "$unit"
+	exec "$systemctl" enable --now "$unit"
 	;;
 restart)
 	[ $# -eq 1 ] || usage
-	exec systemctl restart "$unit"
+	exec "$systemctl" restart "$unit"
 	;;
 down)
 	[ $# -eq 1 ] || usage
 	# Stopped before the conf goes: wg-quick down reads it.
-	systemctl disable --now "$unit"
+	"$systemctl" disable --now "$unit"
 	rm -f "$conf"
 	;;
 sync)

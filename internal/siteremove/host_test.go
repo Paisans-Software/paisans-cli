@@ -73,7 +73,8 @@ func TestCleaningAHostDeletesItsConfigurationStore(t *testing.T) {
 // The host stage reaches only what the deployment's user owns: no ufw, no
 // registry, no system unit, no WireGuard unit, and no path outside its root
 // or its user's home. Its one root action is the WireGuard helper's down,
-// the command site admit lets the user run.
+// the command site admit lets the user run; it reads the mesh unit's state,
+// which needs no root.
 func TestTheHostStageIsTheUsersOwn(t *testing.T) {
 	w := setup(t)
 	p := w.mustBuild("home-b", siteremove.Options{DeleteData: true})
@@ -81,7 +82,9 @@ func TestTheHostStageIsTheUsersOwn(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range w.hosts["home-b"].commands {
-		if c == wgHelper+"down" {
+		if c == wgHelper+"down" || strings.HasPrefix(c, "if systemctl is-enabled --quiet 'wg-quick@") {
+			// The helper's down, and reading whether the mesh unit is
+			// enabled or active, which needs no root.
 			continue
 		}
 		for _, root := range []string{"ufw ", "registry.json", "/etc/systemd/system", "wg-quick@", "sudo "} {
@@ -426,8 +429,9 @@ func TestCleaningAHostTakesTheMeshDown(t *testing.T) {
 }
 
 // A helper site admit installed before it had down answers with its usage.
-// The stage stops there and says the host's owner admits the deployment
-// again, which installs the current helper; the interface stays up and the
+// The stage stops there and says the host's owner upgrades paisans there
+// and admits the deployment again, from a new request, which installs the
+// current helper; the interface stays up and the
 // gate does not pass.
 func TestAHelperWithoutDownStopsTheHostStage(t *testing.T) {
 	w := setup(t)
@@ -439,7 +443,7 @@ func TestAHelperWithoutDownStopsTheHostStage(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 	var problem *ui.Problem
-	if !errors.As(err, &problem) || !strings.Contains(err.Error(), "has no down") || !strings.Contains(err.Error(), "sudo paisans site admit --request home-b.admit") {
+	if !errors.As(err, &problem) || !strings.Contains(err.Error(), "has no down") || !strings.Contains(err.Error(), "upgrades paisans on the host") || !strings.Contains(err.Error(), "sudo paisans site admit --request home-b.admit") || !strings.Contains(err.Error(), "site request --site home-b > home-b.admit") {
 		t.Errorf("err = %v; want the problem naming site admit", err)
 	}
 	if !b.wgUp {
@@ -463,6 +467,38 @@ func TestTheHostGateFindsTheMeshUp(t *testing.T) {
 	w.downLeavesUp = true
 	err := siteremove.Execute(w.mustBuild("home-b", siteremove.Options{}))
 	if err == nil || !strings.Contains(err.Error(), "still on the host: interface "+dep.Interface()) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// A mesh unit enabled at boot with its interface down, as one whose start
+// failed at the last boot is, still holds the conf and comes back at the
+// next boot: it is taken down too, and the gate checks the unit.
+func TestCleaningAHostTakesAnEnabledMeshDownWhileItIsDown(t *testing.T) {
+	w := setup(t)
+	b := w.hosts["home-b"]
+	b.wgUp, b.wgEnabled = false, true
+	again := w.mustBuild("home-b", siteremove.Options{})
+	if !hasStepIn(stageNamed(again, "clean the host"), "home-b", "stop", dep.Interface()) {
+		t.Fatalf("no step takes the enabled unit down:\n%s", printed(again))
+	}
+	if err := siteremove.Execute(again); err != nil {
+		t.Fatal(err)
+	}
+	if b.wgEnabled || b.ran(wgHelper+"down") != 1 {
+		t.Errorf("the unit is enabled (%v) after %d down(s)", b.wgEnabled, b.ran(wgHelper+"down"))
+	}
+}
+
+// The gate finds a mesh unit the down left enabled.
+func TestTheHostGateFindsTheMeshUnitEnabled(t *testing.T) {
+	w := setup(t)
+	w.downLeavesUp = true
+	b := w.hosts["home-b"]
+	p := w.mustBuild("home-b", siteremove.Options{})
+	b.wgUp, b.wgEnabled = false, true
+	err := siteremove.Execute(p)
+	if err == nil || !strings.Contains(err.Error(), "wg-quick@psns-f2a9 enabled or active") {
 		t.Fatalf("err = %v", err)
 	}
 }

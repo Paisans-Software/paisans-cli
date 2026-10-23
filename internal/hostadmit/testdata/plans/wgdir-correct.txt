@@ -20,7 +20,7 @@ step 16: create /usr/local/libexec/paisans
 step 17: install the WireGuard helper
   wireguard: the one command paisans-f2a9 may run as root: it checks each conf before wg-quick sees it, and adds the mesh's mark
   write /usr/local/libexec/paisans/wg-psns-f2a9 mode 0755:
-    | <the WireGuard helper hostprep renders, sha256 c4f9c8b177c916b3f569fa88b5fa942f3ea3c7901f70c28cd3463728ab50b06a>
+    | <the WireGuard helper hostprep renders, sha256 941b3d11e9f0db7d719e92c05b8b8f395a6b1173f7954e232ead247747764ff8>
 
 step 18: install the helper's sudoers line
 step 19: allow 22/tcp
