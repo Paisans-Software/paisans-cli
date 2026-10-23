@@ -325,20 +325,20 @@ func TestHostDeploymentsFailsRatherThanListingPartly(t *testing.T) {
 // owner, through sudo.
 func TestReachDestinationUsesTheOperatorsSSH(t *testing.T) {
 	for in, want := range map[string]string{
-		"ubuntu@192.0.2.10":         "ssh://ubuntu@192.0.2.10:22",
-		"ubuntu@192.0.2.10:2222":    "ssh://ubuntu@192.0.2.10:2222",
-		"ubuntu@[2001:db8::1]:2222": "ssh://ubuntu@[2001:db8::1]:2222",
+		"ubuntu@192.0.2.10":         "-p 22 -- ubuntu@192.0.2.10",
+		"ubuntu@192.0.2.10:2222":    "-p 2222 -- ubuntu@192.0.2.10",
+		"ubuntu@[2001:db8::1]:2222": "-p 2222 -- ubuntu@2001:db8::1",
 	} {
 		dest, err := config.ParseDestination(in)
 		if err != nil {
 			t.Fatal(err)
 		}
 		tr, ok := reachDestination(dest).(apply.SSHTransport)
-		if !ok || tr.Destination != want || tr.Sudo || tr.Auth != nil {
+		if !ok || sshTail(tr) != want || tr.Sudo || tr.Auth != nil {
 			t.Errorf("%s: %+v, want destination %s without sudo", in, tr, want)
 		}
 		owner := ownerTransport(dest, true)
-		if owner.Destination != want || !owner.Sudo || owner.Auth == nil {
+		if sshTail(owner) != want || !owner.Sudo || owner.Auth == nil {
 			t.Errorf("%s: owner %+v, want destination %s with sudo", in, owner, want)
 		}
 		if tr.Login == nil {

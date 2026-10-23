@@ -91,7 +91,8 @@ func TestCloseConnectionsExitsEveryMasterAndRemovesTheDirectory(t *testing.T) {
 	(&sshScript{answers: []sshAnswer{{out: "ok\n"}}}).install(t)
 	section := apply.SSHTransport{User: "ubuntu", Host: "203.0.113.10", Port: 2222, PublicKeys: []string{keyA}}
 	escape := apply.SSHTransport{Destination: "ssh://admin@[2001:db8::1]:2200"}
-	for _, tr := range []apply.SSHTransport{section, escape, section} {
+	ported := apply.SSHTransport{Destination: "admin@2001:db8::1", DestinationPort: 2200}
+	for _, tr := range []apply.SSHTransport{section, escape, ported, section} {
 		if _, err := tr.Run("true"); err != nil {
 			t.Fatal(err)
 		}
@@ -103,6 +104,7 @@ func TestCloseConnectionsExitsEveryMasterAndRemovesTheDirectory(t *testing.T) {
 	want := map[string]bool{
 		strings.Join(append(append([]string(nil), mux...), "-T", "-p", "2222", "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=10", "-O", "exit", "ubuntu@203.0.113.10"), " "): true,
 		strings.Join(append(append([]string(nil), mux...), "-T", "-O", "exit", "ssh://admin@[2001:db8::1]:2200"), " "):                                                           true,
+		strings.Join(append(append([]string(nil), mux...), "-T", "-p", "2200", "-O", "exit", "--", "admin@2001:db8::1"), " "):                                                    true,
 	}
 	if len(exits) != len(want) {
 		t.Fatalf("want %d exits, got %q", len(want), exits)

@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -85,24 +88,24 @@ func withSSHAliases(t *testing.T) {
 func TestADestinationGivesSSHTheAlias(t *testing.T) {
 	withSSHAliases(t)
 	for in, want := range map[string]string{
-		"myalias":                   "ssh://admin@myalias:2222",
-		"root@myalias":              "ssh://root@myalias:2222",
-		"myalias:2200":              "ssh://admin@myalias:2200",
-		"root@other:22":             "ssh://root@other:22",
-		"other":                     "ssh://" + stubLocalUser + "@other:22",
-		"ubuntu@192.0.2.10":         "ssh://ubuntu@192.0.2.10:22",
-		"ubuntu@192.0.2.10:2222":    "ssh://ubuntu@192.0.2.10:2222",
-		"ubuntu@[2001:db8::1]:2222": "ssh://ubuntu@[2001:db8::1]:2222",
+		"myalias":                   "-p 2222 -- admin@myalias",
+		"root@myalias":              "-p 2222 -- root@myalias",
+		"myalias:2200":              "-p 2200 -- admin@myalias",
+		"root@other:22":             "-p 22 -- root@other",
+		"other":                     "-p 22 -- " + stubLocalUser + "@other",
+		"ubuntu@192.0.2.10":         "-p 22 -- ubuntu@192.0.2.10",
+		"ubuntu@192.0.2.10:2222":    "-p 2222 -- ubuntu@192.0.2.10",
+		"ubuntu@[2001:db8::1]:2222": "-p 2222 -- ubuntu@2001:db8::1",
 	} {
 		dest, err := parseDestination(in)
 		if err != nil {
 			t.Fatalf("%s: %v", in, err)
 		}
-		if tr, ok := reachDestination(dest).(apply.SSHTransport); !ok || tr.Destination != want {
+		if tr, ok := reachDestination(dest).(apply.SSHTransport); !ok || sshTail(tr) != want {
 			t.Errorf("%s: reached as %+v, want %s", in, tr, want)
 		}
-		if owner := ownerTransport(dest, true); owner.Destination != want {
-			t.Errorf("%s: owner reached as %s, want %s", in, owner.Destination, want)
+		if owner := ownerTransport(dest, true); sshTail(owner) != want {
+			t.Errorf("%s: owner reached as %s, want %s", in, sshTail(owner), want)
 		}
 	}
 }
@@ -331,15 +334,67 @@ func TestRecoverReadsALoginNamedTwiceOnce(t *testing.T) {
 func TestADestinationsPortGoesToSSH(t *testing.T) {
 	withSSHAliases(t)
 	for in, want := range map[string]string{
-		"bob@gw.example.org:22": "ssh://bob@gw.example.org:22",
-		"bob@gw.example.org":    "ssh://bob@gw.example.org:2222",
+		"bob@gw.example.org:22": "-p 22 -- bob@gw.example.org",
+		"bob@gw.example.org":    "-p 2222 -- bob@gw.example.org",
 	} {
 		dest, err := parseDestination(in)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := ownerTransport(dest, false).Destination; got != want {
+		if got := sshTail(ownerTransport(dest, false)); got != want {
 			t.Errorf("%s: ssh is given %s, want %s", in, got, want)
+		}
+	}
+}
+
+// sshTail is what tr gives ssh after -T and before the command: the port and
+// the destination.
+func sshTail(tr apply.SSHTransport) string {
+	args := tr.SSHArgs(nil, "true")
+	i := slices.Index(args, "-T")
+	return strings.Join(args[i+1:len(args)-1], " ")
+}
+
+// What a destination gives ssh is what ssh itself reads as that login: the
+// real ssh -G, with a scratch config standing in for the operator's, reads
+// the arguments for an IPv4 and an IPv6 address and an alias, and reports
+// the user, host and port the destination names.
+func TestRealSSHReadsADestinationsArgs(t *testing.T) {
+	if _, err := exec.LookPath("ssh"); err != nil {
+		t.Skip("no ssh on PATH")
+	}
+	cfg := filepath.Join(t.TempDir(), "config")
+	if err := os.WriteFile(cfg, []byte("Host myalias\n  HostName 203.0.113.9\n  Port 2200\n  ProxyJump jump.example.org\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		dest                 config.Destination
+		user, hostname, port string
+	}{
+		{config.Destination{User: "admin", Host: "203.0.113.9", Port: 22}, "admin", "203.0.113.9", "22"},
+		{config.Destination{User: "admin", Host: "2001:db8::1", Port: 2222}, "admin", "2001:db8::1", "2222"},
+		{config.Destination{User: "admin", Host: "2001:db8::1", Port: 22}, "admin", "2001:db8::1", "22"},
+		{config.Destination{User: "root", Host: "203.0.113.9", Port: 2222, Alias: "myalias"}, "root", "203.0.113.9", "2222"},
+	} {
+		args := destinationTransport(c.dest).SSHArgs(nil, "true")
+		i := slices.Index(args, "-T")
+		g := append([]string{"-F", cfg, "-G"}, args[i+1:len(args)-1]...)
+		out, err := exec.Command("ssh", g...).Output()
+		if err != nil {
+			t.Fatalf("ssh %q: %v", g, err)
+		}
+		got := map[string]string{}
+		for _, line := range strings.Split(string(out), "\n") {
+			k, v, _ := strings.Cut(line, " ")
+			if _, seen := got[k]; !seen {
+				got[k] = v
+			}
+		}
+		if got["user"] != c.user || got["hostname"] != c.hostname || got["port"] != c.port {
+			t.Errorf("%s: ssh reads %s@%s port %s, want %s@%s port %s", c.dest, got["user"], got["hostname"], got["port"], c.user, c.hostname, c.port)
+		}
+		if c.dest.Alias != "" && got["proxyjump"] != "jump.example.org" {
+			t.Errorf("%s: the alias's ProxyJump is %q", c.dest, got["proxyjump"])
 		}
 	}
 }

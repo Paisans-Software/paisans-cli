@@ -304,7 +304,7 @@ func runSiteRemoveForced(r ui.Reporter, site string, a forcedArgs, stdin io.Read
 	reach.SSH.User, reach.SSH.Host, reach.SSH.Port = dest.User, dest.SSHHost(), dest.Port
 	t := removeSiteHost(site, reach)
 	if st, ok := t.(apply.SSHTransport); ok {
-		st.KnownHost = knownHost(dest)
+		st.KnownHost = dest.KnownHostsName()
 		t = st
 	}
 	opts := siteremove.Options{DeleteData: a.deleteData, ConfigPath: a.config, DNSProvider: dnsProviderFor}
