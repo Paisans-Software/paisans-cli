@@ -4438,12 +4438,13 @@ own, however consistent it looks**, because someone with root on those sites
 could have written it, signed with their own key and listing themselves as an
 operator. The operator's key is the one `.paisans/signing-key` records; on a
 workstation that records none, a pull, a log or a recovery anchors on the
-public key the operator names with `--key`, and never on a key merely because
-the ssh-agent holds it. A named key may be one a later version removed, so it
-anchors only on a version the rules below already trust, judged from that
-version's root, and only while an operator of the newest version lists it.
-A pinned root anchors alone. When the named key's versions lead to
-different heads, it is a fork. A pull or a recovery records the named key
+public key the operator names with `--key`, which anchors only on versions it
+signed itself, under one root, that the rules below already trust from that
+root, of this deployment's id. A key alone cannot tell this deployment's
+history from one it signed before a redeploy under the same id, where an
+operator since removed may still be listed, so a newer version by another
+operator, or the key's versions under two roots, need `--root`. A pinned root
+anchors alone, and `--key` is then ignored. A pull or a recovery records the named key
 when the agent holds it and an operator of the head lists it. With neither an
 own signature nor a pin, a pull or a recovery is refused and asks for one.
 

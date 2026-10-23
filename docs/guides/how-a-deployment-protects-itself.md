@@ -239,10 +239,9 @@ with root on a site can write anything there:
 * **Trust starts from something only the operator holds:** the newest version
   signed by their own SSH key, or a root hash they pin with `--root`. Their key
   is the one `.paisans/signing-key` records or, on a workstation that records
-  none, the one they name with `--key`; a key from the sites, or one the
-  ssh-agent merely holds, never anchors. A named key may be one a later version
-  removed, so it anchors only on a version the rules below already trust from
-  its root, and only while the newest version lists it. A history
+  none, the one they name with `--key`, which anchors only on versions it
+  signed itself, under one root, that the rules below already trust from that
+  root. A history
   found only on the sites is never trusted, however consistent, because whoever
   holds those sites could have written it and listed themselves as an operator. An
   operator who has never published gets an anchor of their own with `paisans operator
@@ -272,9 +271,13 @@ an old one visible instead:
 When the workstation is gone, `paisans deployment recover --from <user@host>
 --key <path.pub> --execute` in an empty directory gathers from the hosts named
 and then every site the trusted heads name, and writes the three files. Trust
-starts from the newest version, among those the rules trust from its root,
-signed by your operator key that `--key` names; a key no operator of the newest
-version lists is refused. The key is recorded in `.paisans/signing-key` for the
+starts from the newest version your operator key, named with `--key`, signed
+under one root, among those the rules trust from that root. Every head must be
+signed by that key and list it, and every trusted version must declare the
+deployment's id: a key alone cannot tell this deployment's history from one it
+signed before a redeploy under the same id, so a newer version by another
+operator, or the key's versions under two roots, need `--root`. The key is
+recorded in `.paisans/signing-key` for the
 publishes that follow when the ssh-agent holds it and an operator of the head
 lists it. Without the key, `--root <sha>` pins the hash of a version the
 operator trusts, as `paisans deployment log` prints it; keep that hash
@@ -286,7 +289,9 @@ operator.
 
 **Does not protect.** A fresh workstation that reaches only sites an attacker
 holds can be served an old, genuine version, and applying it reaches only those
-sites. Nothing checks that a removed operator's age key was taken out of the
+sites. With `--key` that includes a version the key signed in an incarnation of
+the deployment from before a redeploy under the same id; the root it pins
+differs from the current one, so the next pull from an honest site refuses. Nothing checks that a removed operator's age key was taken out of the
 secrets file: that is the operator's step (see *A former recipient still has
 the secrets file*).
 

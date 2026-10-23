@@ -27,9 +27,9 @@ Founder decisions, 2026-10-12, in session:
 * **The anchor is the operator's own signature, or a pinned root.** The
   operator's own SSH key is where trust starts: the signing key the workstation
   records, or, when it records none, the public key the operator names with
-  `--key`, which anchors only on a version the trust rules trust from its
-  root and only while an operator of the newest version lists it. A root hash
-  the operator pins anchors alone. A history found only on the sites is never
+  `--key`, which anchors only on versions it signed itself, under one root,
+  that the trust rules trust from that root, of this deployment's id. A root
+  hash the operator pins anchors alone. A history found only on the sites is never
   trusted on its own. Founder decision, 2026-10-12; `--key`, founder
   decision, 2026-10-22.
 * **One signature, from any current admin.** Every admin is trusted with the
@@ -90,17 +90,22 @@ can forge.
 one `paisans admin register` recorded (below), or a root hash the operator pins
 with `--root <hash>`. A workstation that has pulled before keeps both in
 `.paisans/`. On a workstation that records no key, a pull, log or recovery
-anchors on the public key the operator names with `--key <path.pub>`, and on
-no key merely because the ssh-agent holds it: an agent may hold a key someone
-else holds too. A pinned root anchors alone, and `--key` does not change it.
-A named key may be one a later version removed, so a version it signed
-anchors only where the rules below already trust it: each good root with such
-a version below it is judged by the rules as if pinned, the versions the key
-signed that it trusts are the candidates, and the newest candidate in no
-other's history is the anchor. Each such candidate is judged as the anchor in
-turn; when their heads differ, as with candidates under two roots, the result
-is a fork of every head any of them trusts. A key no operator of every head
-lists, removed or never listed, is refused. A pull or recovery with
+anchors on the public key the operator names with `--key <path.pub>`. A
+pinned root anchors alone; `--key` is then ignored, and the run notes it. A
+named key carries no pin: it may be one a later version removed, and an empty
+workstation cannot tell this deployment's history from one the key signed
+before a redeploy under the same id, where an operator since removed may
+still be listed and may have signed more. So the key must have signed
+versions under exactly one good root, which is judged by the rules below as
+if pinned; the versions the key signed that it trusts are the candidates, and
+the newest candidate in no other's history is the anchor. Each such
+candidate is judged as the anchor in turn; when their heads differ, the
+result is a fork of every head any of them trusts. Every head must be signed
+by the named key and list it under an operator, and every trusted version
+must declare the deployment's id; otherwise the gather is refused and asks
+for `--root`. A host serving only an older incarnation can still offer a
+version the key itself signed there; the root a recovery pins from it is not
+the current one, so the next pull from an honest site refuses. A pull or recovery with
 `--execute` records the named key as the signing key when the ssh-agent holds
 it and an operator of the head lists it; a log records nothing. With no
 anchor at all, a pull or recovery is refused and says to name your own
@@ -296,7 +301,7 @@ records the version; the host records that revision, and as a step of the run
 so does every later step.
 
 **A fork on recovery.** `recover` never picks between two heads by order,
-including heads that a named key's versions under two roots lead to. With a
+including heads a named key's versions lead to. With a
 fork it writes each head's files to `.paisans/incoming/<sha>/` and refuses, and
 the operator merges by hand and publishes with `--merge`.
 

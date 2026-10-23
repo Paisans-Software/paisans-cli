@@ -559,15 +559,16 @@ paisans deployment recover --from admin@203.0.113.9 --root <sha> --execute   # o
   `paisans-stack.yaml` to name them and so starts from `--from`.
 * **Trust:** the newest version signed by the key `.paisans/signing-key`
   records is where trust starts. With no key recorded, it is the key `--key`
-  names; no key is tried because the ssh-agent holds it, so a key someone
-  else also holds never decides what is trusted unasked. A named key may be
-  one a later version removed, so it anchors only on a version the trust rules
-  already trust, judged from that version's root (signed by an operator its
-  parent lists and not barred by a removal), and is refused unless an operator
-  of the newest version lists it. The newest such version anchors, and the
-  gather names its key. When the named key's versions lead to different
-  heads, as with versions under two roots, it is a fork, refused as any fork
-  is. A pinned root anchors alone, and `--key` does not change it. With no
+  names, which anchors only on versions it signed itself, under one root,
+  that the trust rules trust from that root (signed by an operator its parent
+  lists and not barred by a removal). Every head must be signed by the named
+  key and list it under an operator, and every trusted version must declare
+  the deployment's id. A newer version by another operator, or the key's
+  versions under two roots, are refused and need `--root <sha>`: a key alone
+  cannot tell this deployment's history from one it signed before a redeploy
+  under the same id, where an operator since removed may still be listed. The
+  newest such version anchors, and the gather names its key. A pinned root
+  anchors alone; `--key` is then ignored, and the run notes it. With no
   anchor, `pull`, `log` and `recover` say to name your own operator key with
   `--key` (loaded with `ssh-add`, so it is recorded) or pin `--root <sha>`,
   and `publish`, which judges only from the recorded key, says the same of
