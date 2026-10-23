@@ -220,6 +220,49 @@ func TestRemovalResumesAndRepeats(t *testing.T) {
 	}
 }
 
+// A run stopped at the directories, after the files went, keeps their
+// entries: the next run finds the directories they were in from them and
+// removes those, and only then drops the entries.
+func TestARemovalStoppedAtTheDirectoriesResumes(t *testing.T) {
+	cfg, hosts := world(t)
+	a := hosts["home-a"]
+	const blogConf = "/srv/paisans/f2a9/blog/etc/app.ini"
+	a.files[blogConf] = "conf\n"
+	a.manifest(t, a.entry(blogEnv, true), a.entry(blogCompose, true), a.entry(blogConf, true), a.entry(talkEnv, false))
+	a.fail = "{ rmdir '"
+	p, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := executor(hosts).Execute(p); err == nil {
+		t.Fatal("the failed directory step did not stop the run")
+	}
+	if _, ok := a.files[blogConf]; ok {
+		t.Fatal("the run stopped before the files went")
+	}
+	if got := a.manifestFiles(t); len(got) != 4 {
+		t.Errorf("home-a's manifest = %+v, want every entry kept until the directories are gone", got)
+	}
+	again, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sent := len(a.sent)
+	if err := executor(hosts).Execute(again); err != nil {
+		t.Fatal(err)
+	}
+	swept := false
+	for _, c := range a.sent[sent:] {
+		swept = swept || strings.Contains(c, "{ rmdir '") && strings.Contains(c, "'/srv/paisans/f2a9/blog/etc'")
+	}
+	if !swept {
+		t.Errorf("the resumed run did not remove blog/etc:\n%s", strings.Join(a.sent[sent:], "\n"))
+	}
+	if got := a.manifestFiles(t); len(got) != 1 || got[0].Path != strings.TrimPrefix(talkEnv, "/") {
+		t.Errorf("home-a's manifest = %+v, want talk's entry alone", got)
+	}
+}
+
 // An interrupted file step leaves files removed and their entries still
 // recorded. The next run drops those entries as gone.
 func TestAnEntryWhoseFileIsGoneIsDropped(t *testing.T) {

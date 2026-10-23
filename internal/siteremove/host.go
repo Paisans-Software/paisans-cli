@@ -43,12 +43,16 @@ type hostPlan struct {
 	// run, sorted.
 	images []string
 	files  []appremove.File
-	// dirs are the directories the files were rendered in, deepest first,
-	// which the run removes once they are empty, but never one the kept
-	// Caddy mounts. Every other directory under the root stays: one a
-	// container wrote is its data, and so are the empty directories in it,
-	// which PostgreSQL's data directory cannot start without.
+	// dirs are the directories the files and the reference files were
+	// rendered in, deepest first, which the run removes once they are
+	// empty, but never one the kept Caddy mounts. Every other directory
+	// under the root but stateDirs stays: one a container wrote is its data,
+	// and so are the empty directories in it, which PostgreSQL's data
+	// directory cannot start without.
 	dirs []string
+	// stateDirs are the directories the records and the configuration store
+	// this run deletes were in, removed the same way once they are gone.
+	stateDirs []string
 	// webServer are the reference files for the host owner's web server
 	// the manifest records.
 	webServer []render.ManifestWebServer
@@ -136,11 +140,11 @@ func emptyRootCommand(d deployment.Deployment) string {
 	return fmt.Sprintf("if [ -d %[1]s ]; then rootlesskit find %[1]s -mindepth 1 -delete; fi", quote(d.Root()))
 }
 
-// renderedDirs is the directories under the root that files were rendered
-// in, deepest first, but with a kept Caddy never one it mounts.
-func (p *Plan) renderedDirs(files []appremove.File, caddyKept bool) []string {
+// dirsOf is the directories under the root that paths are in, deepest
+// first, but with a kept Caddy never one it mounts.
+func (p *Plan) dirsOf(paths []string, caddyKept bool) []string {
 	var dirs []string
-	for _, dir := range appremove.RenderedDirs(p.dep().Root(), files) {
+	for _, dir := range appremove.DirsOf(p.dep().Root(), paths) {
 		if !caddyKept || !p.underKept(dir) {
 			dirs = append(dirs, dir)
 		}
@@ -468,7 +472,14 @@ func (p *Plan) buildHost() (*Stage, error) {
 		}
 	}
 	sort.Slice(hp.files, func(i, j int) bool { return hp.files[i].Entry.Path < hp.files[j].Entry.Path })
-	hp.dirs = p.renderedDirs(hp.files, cp != nil)
+	var rendered []string
+	for _, f := range hp.files {
+		rendered = append(rendered, "/"+f.Entry.Path)
+	}
+	for _, f := range hp.webServer {
+		rendered = append(rendered, f.Path)
+	}
+	hp.dirs = p.dirsOf(rendered, cp != nil)
 	if err := p.planImages(t, hp, inv, refs); err != nil {
 		return nil, err
 	}
@@ -518,6 +529,19 @@ func (p *Plan) buildHost() (*Stage, error) {
 	if cp != nil {
 		p.Kept = append(p.Kept, fmt.Sprintf("%s: its Caddy keeps serving the host owner's sites in %s; site evict stops it and deletes that directory, so the owner moves those sites first", p.Site, render.HostSitesDir(d)))
 	}
+
+	var state []string
+	if hp.record {
+		state = append(state, deployrecord.Path(d))
+	}
+	if hp.granted {
+		state = append(state, grant.Path(d))
+	}
+	state = append(state, hp.keyRecords...)
+	for _, r := range hp.store {
+		state = append(state, r.path)
+	}
+	hp.stateDirs = p.dirsOf(state, cp != nil)
 
 	p.hostSteps(st)
 	st.Gate = "no container, network, unit or file of this deployment's left that its user can remove, and the root empty but for what is kept"
@@ -731,6 +755,9 @@ func (p *Plan) hostSteps(st *Stage) {
 	if hp.granted {
 		add("delete", "delete the grant record", "%s, the keys and images this deployment last granted here", grant.Path(d))
 	}
+	if !hp.deleteRoot && len(hp.stateDirs) > 0 {
+		add("remove", "remove empty directories", "the directories under %s that the records and the configuration store were in, each once it is empty", d.Root())
+	}
 }
 
 // runHost cleans the host, in the order the plan lists, each step reading
@@ -813,7 +840,7 @@ func (p *Plan) runHost() error {
 	// stops here finds them again.
 	if !hp.deleteRoot && len(hp.dirs) > 0 {
 		p.work("remove empty directories")
-		if err := run("removing the empty directories under "+d.Root(), appremove.EmptyDirsCommand(hp.dirs)); err != nil {
+		if err := run("removing the empty directories under "+d.Root(), appremove.EmptyDirsCommand(d.Root(), hp.dirs)); err != nil {
 			return err
 		}
 	}
@@ -876,6 +903,12 @@ func (p *Plan) runHost() error {
 	if hp.granted {
 		p.work("delete the grant record")
 		if err := run("deleting the grant record", grant.RemoveCommand(d)); err != nil {
+			return err
+		}
+	}
+	if !hp.deleteRoot && len(hp.stateDirs) > 0 {
+		p.work("remove empty directories")
+		if err := run("removing the empty directories under "+d.Root(), appremove.EmptyDirsCommand(d.Root(), hp.stateDirs)); err != nil {
 			return err
 		}
 	}

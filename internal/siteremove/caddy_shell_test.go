@@ -9,7 +9,6 @@ import (
 
 	"github.com/paisans-software/paisans-cli/internal/appremove"
 	"github.com/paisans-software/paisans-cli/internal/config"
-	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
 // The commands that clean around a kept Caddy, run by a real shell against
@@ -142,8 +141,8 @@ func TestEmptyDirsKeepCaddysEmptyDirectories(t *testing.T) {
 		r + "postgres/PG_VERSION":       "18",
 	}, []string{r + "infra/caddy/config", r + "infra/caddy/etc/snippets", r + "infra/caddy/data/caddy/locks", r + "talk/oauth"}, nil)
 	p := shellPlan()
-	dirs := p.renderedDirs(rendered("infra/caddy/etc/snippets/talk.caddy", "talk/oauth/client.json", "talk/compose.yaml"), true)
-	if err := runUnder(t, base, appremove.EmptyDirsCommand(dirs)); err != nil {
+	dirs := p.dirsOf(rendered("infra/caddy/etc/snippets/talk.caddy", "talk/oauth/client.json", "talk/compose.yaml"), true)
+	if err := runUnder(t, base, appremove.EmptyDirsCommand("/srv/paisans/f2a9", dirs)); err != nil {
 		t.Fatal(err)
 	}
 	for _, rel := range []string{"infra/caddy/config", "infra/caddy/etc/snippets", "infra/caddy/data/caddy/locks", "postgres/PG_VERSION"} {
@@ -170,11 +169,11 @@ func TestEmptyDirsKeepTheEmptyDirectoriesInData(t *testing.T) {
 	}, []string{
 		r + pgdata + "pg_notify", r + pgdata + "pg_serial", r + pgdata + "pg_twophase", r + pgdata + "pg_tblspc",
 		r + "infra/etcd", r + "infra/garage/data", r + "infra/haproxy", r + "talk/oauth", r + "blog/data/cache",
-		"srv/paisans/elsewhere",
-	}, []string{r + "account", "srv/paisans/elsewhere"})
+		"srv/paisans/elsewhere/conf",
+	}, []string{r + "account", "srv/paisans/elsewhere", r + "wiki", "srv/paisans/elsewhere"})
 	p := shellPlan()
-	dirs := p.renderedDirs(rendered("infra/compose.yaml", "infra/patroni.env", "infra/haproxy/haproxy.cfg", "infra/garage/garage.toml", "talk/oauth/client.json", "talk/compose.yaml", "blog/compose.yaml", "account/compose.yaml"), false)
-	if err := runUnder(t, base, appremove.EmptyDirsCommand(dirs)); err != nil {
+	dirs := p.dirsOf(rendered("infra/compose.yaml", "infra/patroni.env", "infra/haproxy/haproxy.cfg", "infra/garage/garage.toml", "talk/oauth/client.json", "talk/compose.yaml", "blog/compose.yaml", "account/compose.yaml", "wiki/conf/wiki.ini"), false)
+	if err := runUnder(t, base, appremove.EmptyDirsCommand("/srv/paisans/f2a9", dirs)); err != nil {
 		t.Fatal(err)
 	}
 	for _, rel := range []string{pgdata + "pg_notify", pgdata + "pg_serial", pgdata + "pg_twophase", pgdata + "pg_tblspc", "infra/etcd", "infra/garage/data", "infra/garage/meta/db", "blog/data/cache", "account"} {
@@ -187,17 +186,17 @@ func TestEmptyDirsKeepTheEmptyDirectoriesInData(t *testing.T) {
 			t.Errorf("%s is left", rel)
 		}
 	}
-	if !exists(base, "srv/paisans/elsewhere") {
-		t.Error("an empty directory was deleted through a link")
+	if !exists(base, "srv/paisans/elsewhere/conf") {
+		t.Error("an empty directory was deleted through a link above it")
 	}
 }
 
-func rendered(paths ...string) []appremove.File {
-	var files []appremove.File
+func rendered(paths ...string) []string {
+	var abs []string
 	for _, p := range paths {
-		files = append(files, appremove.File{Entry: render.ManifestFile{Path: r + p}})
+		abs = append(abs, "/"+r+p)
 	}
-	return files
+	return abs
 }
 
 // keptProbe needs GNU find's -printf, which a host has; it is skipped where
