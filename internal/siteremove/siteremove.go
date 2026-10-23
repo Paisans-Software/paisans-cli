@@ -17,8 +17,10 @@
 // that user's to remove: a Docker object with the deployment label carrying
 // this id, a file the manifest names by a clean path under its root whose
 // hash matches, a unit in its user's systemd directory named for its token,
-// and its own records. Everything else found is reported as kept. What is root's,
-// the user itself, the root directory, WireGuard, the firewall and the
+// and its own records. Its one root action is the WireGuard helper's down,
+// which takes the deployment's mesh interface down and deletes its conf.
+// Everything else found is reported as kept. What is root's, the user
+// itself, the root directory, the WireGuard helper, the firewall and the
 // registry entry, is site evict's: the plan ends with the line the host's
 // owner runs for it. docs/specs/2026-10-08-site-remove.md is the approved
 // design.
@@ -165,8 +167,9 @@ type Plan struct {
 	// --delete-data was not given.
 	DataKept bool
 	// Evict is the line the host's owner runs to finish: what is root's
-	// (the user, its home, the root directory, WireGuard, the firewall, the
-	// registry entry and the admission record) only site evict removes.
+	// (the user, its home, the root directory, the WireGuard helper, the
+	// firewall, the registry entry and the admission record) only site
+	// evict removes.
 	// Empty when the plan reaches no host.
 	Evict string
 	// forced is a plan BuildForced or BuildForcedByID made, and declared

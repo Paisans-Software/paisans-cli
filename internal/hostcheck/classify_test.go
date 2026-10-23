@@ -261,16 +261,21 @@ func TestAForeignPublishedPortConflictsWithoutAListener(t *testing.T) {
 	wantLine(t, r, "*:443/tcp (Caddy): claimed by sites.edge.roles (gateway), held by container proxy-nginx-1 (compose project proxy)")
 }
 
-// A psns-f2a9 the toolkit's manifest does not record is somebody else's VPN, and
-// so is the udp socket on 51820 that comes with it.
+// A psns-f2a9 the toolkit's manifest does not record conflicts, and so does
+// the udp socket on 51820 that comes with it: nothing says what it runs. It
+// carries the deployment's name, so the line says so, and names the helper's
+// down that takes it away, as site remove does.
 func TestAWireGuardTheToolkitDidNotWriteConflicts(t *testing.T) {
 	h := cleanHost()
 	h.answers["ip -o link"] += "4: psns-f2a9: <POINTOPOINT,NOARP,UP,LOWER_UP> mtu 1420\\    link/none\n"
 	h.answers["ss -Hltnue"] = baseSockets + "udp UNCONN 0 0 0.0.0.0:51820 0.0.0.0:* ino:0 sk:20 <->\n"
 	r := check(t, "home-a", h)
 	wantClass(t, r, hostcheck.Conflicted)
-	wantLine(t, r, "interface psns-f2a9: claimed by mesh, held by an interface this deployment did not write")
-	wantLine(t, r, "*:51820/udp (WireGuard): claimed by mesh, held by a listener of root's")
+	wantLine(t, r, "interface psns-f2a9: claimed by mesh, held by an interface named for this deployment that no manifest records (/srv/paisans/f2a9/.paisans-manifest.json records no srv/paisans/f2a9/psns-f2a9.conf); take it down as the deployment's user with `sudo /usr/local/libexec/paisans/wg-psns-f2a9 down`, and run again")
+	wantLine(t, r, "*:51820/udp (WireGuard): claimed by mesh, held by WireGuard on psns-f2a9, the interface named below")
+	if strings.Contains(r.Refusal().Error(), "did not write") {
+		t.Errorf("the refusal calls the deployment's own interface one it did not write:\n%v", r.Refusal())
+	}
 }
 
 // A foreign Docker network or a route over the mesh subnet would capture

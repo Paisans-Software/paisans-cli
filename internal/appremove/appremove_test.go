@@ -12,6 +12,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/garage"
 	"github.com/paisans-software/paisans-cli/internal/hostcheck"
+	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
 const (
@@ -216,6 +217,49 @@ func TestRemovalResumesAndRepeats(t *testing.T) {
 		if s.Site == "vm" && !s.Empty() {
 			t.Errorf("second plan on vm: %+v", s)
 		}
+	}
+}
+
+// A run stopped at the directories, after the files went, keeps their
+// entries: the next run finds the directories they were in from them and
+// removes those, and only then drops the entries.
+func TestARemovalStoppedAtTheDirectoriesResumes(t *testing.T) {
+	cfg, hosts := world(t)
+	a := hosts["home-a"]
+	const blogConf = "/srv/paisans/f2a9/blog/etc/app.ini"
+	a.files[blogConf] = "conf\n"
+	a.manifest(t, a.entry(blogEnv, true), a.entry(blogCompose, true), a.entry(blogConf, true), a.entry(talkEnv, false))
+	a.fail = "{ rmdir '"
+	p, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := executor(hosts).Execute(p); err == nil {
+		t.Fatal("the failed directory step did not stop the run")
+	}
+	if _, ok := a.files[blogConf]; ok {
+		t.Fatal("the run stopped before the files went")
+	}
+	if got := a.manifestFiles(t); len(got) != 4 {
+		t.Errorf("home-a's manifest = %+v, want every entry kept until the directories are gone", got)
+	}
+	again, err := Build(cfg, "blog", probe(t, cfg, "blog", hosts, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sent := len(a.sent)
+	if err := executor(hosts).Execute(again); err != nil {
+		t.Fatal(err)
+	}
+	swept := false
+	for _, c := range a.sent[sent:] {
+		swept = swept || strings.Contains(c, "{ rmdir '") && strings.Contains(c, "'/srv/paisans/f2a9/blog/etc'")
+	}
+	if !swept {
+		t.Errorf("the resumed run did not remove blog/etc:\n%s", strings.Join(a.sent[sent:], "\n"))
+	}
+	if got := a.manifestFiles(t); len(got) != 1 || got[0].Path != strings.TrimPrefix(talkEnv, "/") {
+		t.Errorf("home-a's manifest = %+v, want talk's entry alone", got)
 	}
 }
 
@@ -540,8 +584,8 @@ func TestTheDataDirectoryIsReadAndRemovedInTheUserNamespace(t *testing.T) {
 	// rmdir is left out: it removes the stack directory, the user's own
 	// entry in the deployment's root, and needs no namespace.
 	for name, command := range map[string]string{
-		"delete data": DirCommandFor(dir, true),
-		"empty dirs":  DirCommandFor(dir, false),
+		"delete data": DirCommandFor(dir, nil, true),
+		"empty dirs":  DirCommandFor(dir, []File{{Entry: render.ManifestFile{Path: "srv/paisans/f2a9/blog/etc/config.ini"}}}, false),
 	} {
 		for _, tool := range []string{"du ", "find ", "rm "} {
 			for i := 0; ; {
@@ -560,5 +604,49 @@ func TestTheDataDirectoryIsReadAndRemovedInTheUserNamespace(t *testing.T) {
 				i = at + len(tool)
 			}
 		}
+	}
+}
+
+// heldClients is a Pocket ID holding the clients given, found by ID or name.
+type heldClients []*pocketid.OIDCClient
+
+func (h heldClients) OIDCClientByID(_ context.Context, id string) (*pocketid.OIDCClient, error) {
+	for _, c := range h {
+		if c.ID == id {
+			return c, nil
+		}
+	}
+	return nil, nil
+}
+func (h heldClients) FindOIDCClient(_ context.Context, name string) (*pocketid.OIDCClient, error) {
+	for _, c := range h {
+		if c.Name == name {
+			return c, nil
+		}
+	}
+	return nil, nil
+}
+func (h heldClients) DeleteOIDCClient(context.Context, string) error { return nil }
+
+// An app declared with a display_name has a client of that name. Looked for
+// by it, the client is deleted; looked for by the app's name, it is kept and
+// the reason says where the name looked for came from.
+func TestAClientNamedByItsDisplayNameIsDeletedByThatName(t *testing.T) {
+	pocket := heldClients{{ID: "c-1", Name: "Test News"}}
+	st, err := ProbeClient(context.Background(), pocket, "news", "Test News", "auth", "home-a", "c-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cp := planClient("news", st); cp.Delete == nil || cp.Delete.ID != "c-1" || len(cp.Kept) != 0 {
+		t.Errorf("by its display_name: delete %v kept %v", cp.Delete, cp.Kept)
+	}
+	st, err = ProbeClient(context.Background(), pocket, "news", "news", "auth", "home-a", "c-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.NameFrom = "the name the current configuration gives it"
+	cp := planClient("news", st)
+	if cp.Delete != nil || len(cp.Kept) != 1 || !strings.Contains(cp.Kept[0], "its name is not news, the name the current configuration gives it") {
+		t.Errorf("by the app's name: delete %v kept %v", cp.Delete, cp.Kept)
 	}
 }

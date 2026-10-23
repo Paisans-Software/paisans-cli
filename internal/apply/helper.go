@@ -69,6 +69,13 @@ func (h WGHelper) Restart() error {
 	return h.run("restart")
 }
 
+// Down stops the interface, disables it at boot and deletes its installed
+// conf, which holds the site's private key: site remove's, for a site
+// leaving the deployment.
+func (h WGHelper) Down() error {
+	return h.run("down")
+}
+
 // Sync applies the installed conf's peers to the running interface without
 // restarting it.
 func (h WGHelper) Sync() error {

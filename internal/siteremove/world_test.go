@@ -117,7 +117,13 @@ type world struct {
 	// Knobs that break one thing.
 	failOnce string
 	// failOut is what the command failOnce fails prints, when set.
-	failOut     string
+	failOut string
+	// downLeavesUp makes the WireGuard helper's down answer and leave the
+	// interface up.
+	downLeavesUp bool
+	// unitAnswer, when set, is what systemctl answers about the mesh unit
+	// on every host, in place of its state.
+	unitAnswer  string
 	unreachable map[string]bool
 	caddyBroken bool
 	// neverStreams is a site whose recreated Patroni never streams again,
@@ -136,11 +142,18 @@ type world struct {
 }
 
 type host struct {
-	w        *world
-	name     string
-	files    map[string]string
+	w     *world
+	name  string
+	files map[string]string
+	// dirs are directories the host holds beside those its files are in,
+	// each empty unless a file is under it.
+	dirs     map[string]bool
 	commands []string
 	wgUp     bool
+	// wgEnabled is a mesh unit enabled at boot with its interface down, as
+	// one whose start failed at the last boot is. An up interface's unit is
+	// enabled and active whatever it holds.
+	wgEnabled bool
 	// wgRun is the mesh file the running interface was last handed by the
 	// WireGuard helper, nil while it runs the file on disk.
 	wgRun     *string
@@ -335,6 +348,21 @@ func (h *host) hostSites() []string {
 		}
 	}
 	return out
+}
+
+// holds reports whether a file or another of dirs is under dir.
+func (h *host) holds(dir string) bool {
+	for p := range h.files {
+		if strings.HasPrefix(p, dir+"/") {
+			return true
+		}
+	}
+	for d := range h.dirs {
+		if strings.HasPrefix(d, dir+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *host) ran(sub string) int {
@@ -686,6 +714,25 @@ func (h *host) Run(command string) (string, error) {
 			h.wgUp = true
 		}
 		return "", nil
+	case strings.HasPrefix(command, "u='wg-quick@psns-f2a9'; e=$(systemctl is-enabled \"$u\" 2>&1); a=$(systemctl is-active \"$u\" 2>&1)"):
+		if w.unitAnswer != "" {
+			return w.unitAnswer, nil
+		}
+		enabled, active := "disabled", "inactive"
+		if h.wgUp || h.wgEnabled {
+			enabled = "enabled"
+		}
+		if h.wgUp {
+			active = "active"
+		}
+		return "is-enabled " + enabled + "\nis-active " + active + "\n", nil
+	case command == wgHelper+"down":
+		if w.downLeavesUp {
+			return "", nil
+		}
+		h.wgUp, h.wgEnabled, h.wgRun = false, false, nil
+		delete(h.files, wgInstalled)
+		return "", nil
 	case strings.Contains(command, "getent ahosts"):
 		// Every peer's endpoint name resolves.
 		return "", nil
@@ -757,8 +804,23 @@ func (h *host) Run(command string) (string, error) {
 	case strings.Contains(command, `case "${f##*/}" in`), strings.Contains(command, `rootlesskit rm -rf -- "$f"; done`):
 		h.deleteBesideKept(command)
 		return "", nil
-	case strings.Contains(command, "-type d -empty !"):
+	case strings.HasPrefix(command, "(t='") && strings.Contains(command, "-maxdepth 0 -type d -empty -delete"):
+		// Files hold the other directories, so only an empty one of dirs
+		// goes.
+		for _, d := range quoted(command)[1:] {
+			if h.dirs[d] && !h.holds(d) {
+				delete(h.dirs, d)
+			}
+		}
 		return "", nil
+	case strings.HasPrefix(command, "(t='") && strings.Contains(command, `ls -A --`):
+		var b strings.Builder
+		for _, d := range quoted(command)[1:] {
+			if h.dirs[d] && !h.holds(d) {
+				b.WriteString(d + "\n")
+			}
+		}
+		return b.String(), nil
 	case strings.Contains(command, "caddy validate"), strings.Contains(command, "caddy reload"):
 		return "", nil
 
@@ -787,14 +849,10 @@ func (h *host) Run(command string) (string, error) {
 		}
 		return "", nil
 	case strings.HasPrefix(command, "if [ -d '") && strings.Contains(command, "rootlesskit find '"):
-		// Files hold the directories, so the empty-directories form has
-		// nothing to delete.
-		if !strings.Contains(command, "-type d -empty") {
-			dir := quoted(command)[0]
-			for p := range h.files {
-				if strings.HasPrefix(p, dir+"/") {
-					delete(h.files, p)
-				}
+		dir := quoted(command)[0]
+		for p := range h.files {
+			if strings.HasPrefix(p, dir+"/") {
+				delete(h.files, p)
 			}
 		}
 		return "", nil
@@ -1450,7 +1508,7 @@ func newWorld(t *testing.T, edits ...func(string) string) *world {
 		t.Fatal(err)
 	}
 	for _, name := range cfg.SiteNames() {
-		h := &host{w: w, name: name, files: map[string]string{}, wgUp: true, images: map[string]bool{"sha256:etcd": true}}
+		h := &host{w: w, name: name, files: map[string]string{}, dirs: map[string]bool{}, wgUp: true, images: map[string]bool{"sha256:etcd": true}}
 		w.hosts[name] = h
 		var entries []render.ManifestFile
 		for _, f := range rendered.Files {

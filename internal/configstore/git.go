@@ -499,6 +499,43 @@ func (r Repo) Files(sha string) (Files, error) {
 	return f, nil
 }
 
+// paisansFiles reads the paisans-stack.yaml of each version in shas, in one
+// git process. A version without one has none in the map.
+func (r Repo) paisansFiles(shas []string) (map[string][]byte, error) {
+	var in strings.Builder
+	for _, sha := range shas {
+		if err := checkSHA(sha); err != nil {
+			return nil, err
+		}
+		in.WriteString(sha + ":" + namePaisans + "\n")
+	}
+	out, err := r.git(strings.NewReader(in.String()), nil, "cat-file", "--batch")
+	if err != nil {
+		return nil, err
+	}
+	files := map[string][]byte{}
+	for _, sha := range shas {
+		header, rest, ok := bytes.Cut(out, []byte("\n"))
+		if !ok {
+			return nil, fmt.Errorf("git cat-file: a cut short answer for %s", sha)
+		}
+		fields := strings.Fields(string(header))
+		if len(fields) == 2 && fields[1] == "missing" {
+			out = rest
+			continue
+		}
+		if len(fields) != 3 || fields[1] != "blob" {
+			return nil, fmt.Errorf("git cat-file: %s:%s is not a file: %s", sha, namePaisans, header)
+		}
+		size, err := strconv.Atoi(fields[2])
+		if err != nil || size < 0 || len(rest) < size+1 {
+			return nil, fmt.Errorf("git cat-file: a cut short answer for %s", sha)
+		}
+		files[sha], out = rest[:size], rest[size+1:]
+	}
+	return files, nil
+}
+
 // Bundle packs every version the repository holds, by the rule versionRefs
 // lists them by; it is nil when there are none. A misnamed ref is never
 // packed, so it cannot travel to another store.

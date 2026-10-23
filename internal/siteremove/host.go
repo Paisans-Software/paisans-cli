@@ -21,6 +21,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
 	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 	"github.com/paisans-software/paisans-cli/internal/version"
 	"github.com/paisans-software/paisans-cli/internal/webserver"
 )
@@ -43,6 +44,24 @@ type hostPlan struct {
 	// run, sorted.
 	images []string
 	files  []appremove.File
+	// dirs are the directories the files and the reference files were
+	// rendered in, deepest first, which the run removes once they are
+	// empty, but never one the kept Caddy mounts. Every other directory
+	// under the root but stateDirs stays: one a container wrote is its data,
+	// and so are the empty directories in it, which PostgreSQL's data
+	// directory cannot start without.
+	dirs []string
+	// stateDirs are the state directory and the configuration store's,
+	// with the directories of the records this run deletes, removed the
+	// same way once they are gone. They are planned when a record goes or
+	// one of the two is there and empty, so a run stopped before removing
+	// them finds them again.
+	stateDirs []string
+	// mesh is whether the deployment's mesh interface is on the host, or
+	// its unit is enabled or active, which brings it back at the next boot
+	// from the conf it left. The WireGuard helper takes it down, so the
+	// site's listen port and interface name are free when it is added back.
+	mesh bool
 	// webServer are the reference files for the host owner's web server
 	// the manifest records.
 	webServer []render.ManifestWebServer
@@ -120,19 +139,26 @@ func (p *Plan) removeUserUnitsCommand(home string) string {
 	return fmt.Sprintf(`for f in %[1]s/%[2]s-*; do [ -e "$f" ] || continue; %[3]s disable --now "$(basename "$f")" >/dev/null 2>&1 || true; rm -f -- "$f"; done; %[3]s daemon-reload`, hostprep.UserUnitDir(home), p.dep().Prefix(), hostprep.UserSystemctl)
 }
 
-// emptyRootCommand empties the deployment's root, as root of a new user
-// namespace that maps the user's subordinate range, which is what rootlesskit
-// runs a command as (Docker's rootless documentation, Uninstall: rootlesskit
-// rm -rf ~/.local/share/docker): a file a container's user owns is the
-// user's to remove there. With deleteData everything goes; without, only
-// the empty directories. The root itself stays: /srv/paisans is root's, and
-// site evict removes it.
-func emptyRootCommand(d deployment.Deployment, deleteData bool) string {
-	root := quote(d.Root())
-	if deleteData {
-		return fmt.Sprintf("if [ -d %[1]s ]; then rootlesskit find %[1]s -mindepth 1 -delete; fi", root)
+// emptyRootCommand empties the deployment's root, for --delete-data, as root
+// of a new user namespace that maps the user's subordinate range, which is
+// what rootlesskit runs a command as (Docker's rootless documentation,
+// Uninstall: rootlesskit rm -rf ~/.local/share/docker): a file a container's
+// user owns is the user's to remove there. The root itself stays:
+// /srv/paisans is root's, and site evict removes it.
+func emptyRootCommand(d deployment.Deployment) string {
+	return fmt.Sprintf("if [ -d %[1]s ]; then rootlesskit find %[1]s -mindepth 1 -delete; fi", quote(d.Root()))
+}
+
+// dirsOf is the directories under the root that paths are in, deepest
+// first, but with a kept Caddy never one it mounts.
+func (p *Plan) dirsOf(paths []string, caddyKept bool) []string {
+	var dirs []string
+	for _, dir := range appremove.DirsOf(p.dep().Root(), paths) {
+		if !caddyKept || !p.underKept(dir) {
+			dirs = append(dirs, dir)
+		}
 	}
-	return fmt.Sprintf("if [ -d %[1]s ]; then rootlesskit find %[1]s -mindepth 1 -depth -type d -empty -delete; fi", root)
+	return dirs
 }
 
 // containersCommand stops and removes every container and network carrying
@@ -348,6 +374,9 @@ func (p *Plan) buildHost() (*Stage, error) {
 	}
 	hp.dockerPresent = inv.Docker.Present
 	hp.manifest = inv.Manifest
+	if hp.mesh, err = p.meshLeft(t, inv); err != nil {
+		return nil, err
+	}
 	for _, e := range inv.ManifestWebServer {
 		// The manifest is the user's own file: an entry that is not one of
 		// the deployment's reference files is never read or deleted.
@@ -455,6 +484,14 @@ func (p *Plan) buildHost() (*Stage, error) {
 		}
 	}
 	sort.Slice(hp.files, func(i, j int) bool { return hp.files[i].Entry.Path < hp.files[j].Entry.Path })
+	var rendered []string
+	for _, f := range hp.files {
+		rendered = append(rendered, "/"+f.Entry.Path)
+	}
+	for _, f := range hp.webServer {
+		rendered = append(rendered, f.Path)
+	}
+	hp.dirs = p.dirsOf(rendered, cp != nil)
 	if err := p.planImages(t, hp, inv, refs); err != nil {
 		return nil, err
 	}
@@ -504,6 +541,39 @@ func (p *Plan) buildHost() (*Stage, error) {
 	if cp != nil {
 		p.Kept = append(p.Kept, fmt.Sprintf("%s: its Caddy keeps serving the host owner's sites in %s; site evict stops it and deletes that directory, so the owner moves those sites first", p.Site, render.HostSitesDir(d)))
 	}
+
+	var state []string
+	if hp.record {
+		state = append(state, deployrecord.Path(d))
+	}
+	if hp.granted {
+		state = append(state, grant.Path(d))
+	}
+	state = append(state, hp.keyRecords...)
+	for _, r := range hp.store {
+		state = append(state, r.path)
+	}
+	fixed := []string{hostprep.ConfigDir(d), d.StateDir()}
+	if len(state) == 0 {
+		out, err := t.Run(appremove.EmptyDirsProbe(d.Root(), fixed))
+		if err != nil {
+			return nil, fmt.Errorf("site remove %s: reading %s: %w: %s", p.Site, d.StateDir(), err, lastLines(out, 2))
+		}
+		named := false
+		for _, line := range strings.Split(out, "\n") {
+			named = named || contains(fixed, strings.TrimSpace(line))
+		}
+		if !named {
+			fixed = nil
+		}
+	}
+	for _, dir := range fixed {
+		state = append(state, dir+"/")
+	}
+	hp.stateDirs = p.dirsOf(state, cp != nil)
+	// The host stays admitted until its owner runs site evict, so the site
+	// can join again, from site prepare, which site add's preflight asks for.
+	p.Notes = append(p.Notes, addBack(p.Site))
 
 	p.hostSteps(st)
 	st.Gate = "no container, network, unit or file of this deployment's left that its user can remove, and the root empty but for what is kept"
@@ -574,8 +644,8 @@ func cleanRel(p string) bool {
 	return true
 }
 
-// planRoot plans the deployment's directory: its empty directories, or with
-// --delete-data all of it unless a file in it was edited.
+// planRoot plans the deployment's directory: with --delete-data all of it
+// unless a file in it was edited, and without it the data it keeps.
 func (p *Plan) planRoot(t apply.Transport, hp *hostPlan, inv *hostcheck.Inventory, edited bool) error {
 	d := p.dep()
 	out, err := t.Run(appremove.DirCommand(d.Root()))
@@ -610,15 +680,15 @@ func (p *Plan) planRoot(t apply.Transport, hp *hostPlan, inv *hostcheck.Inventor
 
 // planKeptRoot plans the deployment's directory around a kept Caddy: with
 // --delete-data everything but Caddy's paths, unless a file was edited;
-// without it, the empty directories once the files are gone.
+// without it, the data it keeps.
 func (p *Plan) planKeptRoot(t apply.Transport, hp *hostPlan, edited bool) error {
 	d, cp := p.dep(), hp.caddy
 	out, err := t.Run(p.keptProbe())
 	if err != nil {
 		return fmt.Errorf("site remove %s: reading %s: %w: %s", p.Site, d.Root(), err, lastLines(out, 2))
 	}
-	others, empty, files := p.parseKeptProbe(out)
-	cp.others, cp.empty = others, empty
+	others, files := p.parseKeptProbe(out)
+	cp.others = others
 	hp.deleteRoot = p.DeleteData && !edited
 	switch {
 	case p.DeleteData && edited:
@@ -682,6 +752,9 @@ func (p *Plan) hostSteps(st *Stage) {
 	if len(hp.images) > 0 {
 		add("remove", "remove images", "images %s, which only this deployment's containers ran, by ID and without -f, so Docker refuses one in use", strings.Join(hp.images, ", "))
 	}
+	if hp.mesh {
+		add("stop", "stop the mesh", "%s, through the WireGuard helper's down: stopped, disabled at boot, and %s, which holds the site's private key, deleted. The helper and its sudoers line stay for site evict", d.Interface(), d.WireGuardInstalled())
+	}
 	for _, f := range hp.files {
 		switch f.State {
 		case appremove.Remove:
@@ -689,6 +762,9 @@ func (p *Plan) hostSteps(st *Stage) {
 		case appremove.Edited:
 			add("keep", "keep edited files", "/%s: edited on the host since apply wrote it", f.Entry.Path)
 		}
+	}
+	if !hp.deleteRoot && len(hp.dirs) > 0 {
+		add("remove", "remove empty directories", "the directories under %s that apply's files were in, each once it is empty; every other directory stays, the empty ones in the data too", d.Root())
 	}
 	if hp.manifest {
 		add("delete", "delete the manifest", "%s, the manifest", d.Manifest())
@@ -708,16 +784,14 @@ func (p *Plan) hostSteps(st *Stage) {
 	switch {
 	case cp != nil && hp.deleteRoot && len(cp.others) > 0:
 		add("delete", "delete "+d.Root()+" but Caddy's files", "everything in %s but the kept Caddy's files, which are kept with --delete-data, through rootlesskit: %s", d.Root(), strings.Join(cp.others, ", "))
-	case cp != nil && !p.DeleteData && (len(cp.empty) > 0 || len(hp.files) > 0):
-		add("remove", "remove empty directories", "the empty directories under %s, but never one the kept Caddy mounts", d.Root())
-	case cp != nil:
-	case hp.root.exists && hp.deleteRoot:
+	case cp == nil && hp.root.exists && hp.deleteRoot:
 		add("delete", "empty "+d.Root(), "everything in %s, through rootlesskit: %d file(s), %d bytes; %s itself stays for site evict", d.Root(), hp.root.files, hp.root.bytes, d.Root())
-	case hp.root.exists:
-		add("remove", "remove empty directories", "the empty directories under %s, which itself stays for site evict", d.Root())
 	}
 	if hp.granted {
 		add("delete", "delete the grant record", "%s, the keys and images this deployment last granted here", grant.Path(d))
+	}
+	if !hp.deleteRoot && len(hp.stateDirs) > 0 {
+		add("remove", "remove empty directories", "%s and %s, and the other directories under %s that the records and the configuration store were in, each once it is empty", hostprep.ConfigDir(d), d.StateDir(), d.Root())
 	}
 }
 
@@ -779,6 +853,13 @@ func (p *Plan) runHost() error {
 			}
 		}
 	}
+	// After the containers, so nothing that binds the mesh address runs.
+	if hp.mesh {
+		p.work("stop the mesh")
+		if err := p.meshDown(t); err != nil {
+			return err
+		}
+	}
 	if len(hp.files) > 0 {
 		p.work("delete files")
 		out, err := t.Run(appremove.FilesCommand(hp.files))
@@ -795,6 +876,14 @@ func (p *Plan) runHost() error {
 			if !answered[f.Entry.Path] {
 				return fmt.Errorf("%s: removing files: no answer for /%s, so the manifest is kept", p.Site, f.Entry.Path)
 			}
+		}
+	}
+	// Before the manifest goes: it names the directories, so a run that
+	// stops here finds them again.
+	if !hp.deleteRoot && len(hp.dirs) > 0 {
+		p.work("remove empty directories")
+		if err := run("removing the empty directories under "+d.Root(), appremove.EmptyDirsCommand(d.Root(), hp.dirs)); err != nil {
+			return err
 		}
 	}
 	if cp != nil && cp.manifest != "" {
@@ -845,19 +934,9 @@ func (p *Plan) runHost() error {
 		if err := run("removing "+d.Root()+" but Caddy's files", p.deleteBesideKept()); err != nil {
 			return err
 		}
-	case cp != nil && !p.DeleteData && (len(cp.empty) > 0 || len(hp.files) > 0):
-		p.work("remove empty directories")
-		if err := run("removing the empty directories under "+d.Root(), p.emptyBesideKept()); err != nil {
-			return err
-		}
-	case cp != nil:
-	case hp.root.exists:
-		if hp.deleteRoot {
-			p.work("empty " + d.Root())
-		} else {
-			p.work("remove empty directories")
-		}
-		if err := run("emptying "+d.Root(), emptyRootCommand(d, hp.deleteRoot)); err != nil {
+	case cp == nil && hp.root.exists && hp.deleteRoot:
+		p.work("empty " + d.Root())
+		if err := run("emptying "+d.Root(), emptyRootCommand(d)); err != nil {
 			return err
 		}
 	}
@@ -869,12 +948,102 @@ func (p *Plan) runHost() error {
 			return err
 		}
 	}
+	if !hp.deleteRoot && len(hp.stateDirs) > 0 {
+		p.work("remove empty directories")
+		if err := run("removing the empty directories under "+d.Root(), appremove.EmptyDirsCommand(d.Root(), hp.stateDirs)); err != nil {
+			return err
+		}
+	}
 	p.work("check the host")
 	if err := p.verifyHost(t); err != nil {
 		return fmt.Errorf("%s: %w", p.Site, err)
 	}
 	hp.verified = true
 	return nil
+}
+
+// meshUnitCommand asks systemd, as the deployment's user, what the mesh
+// unit's enablement and activity are: systemctl answers both for a system
+// unit without root. /etc/wireguard is root's alone, so the conf cannot be
+// looked for; a unit enabled at boot is what brings the interface back
+// from it, as one that failed to start at the last boot still is. Each
+// answer is printed whole, with what systemctl wrote to stderr, and not
+// judged by its exit status: is-enabled and is-active exit non-zero for a
+// disabled or inactive unit and for a systemctl that could not answer
+// alike, and only the words tell them apart.
+func (p *Plan) meshUnitCommand() string {
+	return fmt.Sprintf(`u=%s; e=$(systemctl is-enabled "$u" 2>&1); a=$(systemctl is-active "$u" 2>&1); printf 'is-enabled %%s\nis-active %%s\n' "$e" "$a"`, quote(p.dep().WireGuardUnit()))
+}
+
+// unitEnabled and unitActive are every state systemctl's is-enabled and
+// is-active print (systemctl(1)), each marked whether it is a unit the
+// helper's down has left to take away: one enabled at boot, or one running.
+// Any other answer is systemctl failing to say, and is an error.
+var (
+	unitEnabled = map[string]bool{
+		"enabled": true, "enabled-runtime": true, "linked": true, "linked-runtime": true,
+		"disabled": false, "static": false, "masked": false, "masked-runtime": false, "not-found": false,
+		"indirect": false, "generated": false, "transient": false, "alias": false, "bad": false,
+	}
+	unitActive = map[string]bool{
+		"active": true, "activating": true, "deactivating": true, "reloading": true, "refreshing": true,
+		"inactive": false, "failed": false, "maintenance": false, "unknown": false,
+	}
+)
+
+// meshLeft reports whether the deployment's mesh is on the host: its
+// interface up, or its unit enabled or active. An answer from systemctl
+// that is not one of its states is an error, never a unit that is not
+// there.
+func (p *Plan) meshLeft(t apply.Transport, inv *hostcheck.Inventory) (bool, error) {
+	if contains(inv.Links, p.dep().Interface()) {
+		return true, nil
+	}
+	unit := p.dep().WireGuardUnit()
+	out, err := t.Run(p.meshUnitCommand())
+	if err != nil {
+		return false, fmt.Errorf("site remove %s: reading %s: %w: %s", p.Site, unit, err, lastLines(out, 2))
+	}
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) == 2 {
+		e, isE := strings.CutPrefix(lines[0], "is-enabled ")
+		a, isA := strings.CutPrefix(lines[1], "is-active ")
+		// systemd 249 (Ubuntu 22.04) prints this, not not-found, for a unit
+		// with no unit file, as when wireguard-tools is not installed.
+		if e == "Failed to get unit file state for "+unit+".service: No such file or directory" {
+			e = "not-found"
+		}
+		enabled, knownE := unitEnabled[e]
+		active, knownA := unitActive[a]
+		if isE && isA && knownE && knownA {
+			return enabled || active, nil
+		}
+	}
+	return false, fmt.Errorf("site remove %s: systemctl did not say whether %s is enabled and active, so nothing shows the mesh is gone: %s", p.Site, unit, lastLines(out, 3))
+}
+
+// meshDown takes the deployment's mesh interface down through its WireGuard
+// helper, the one command the deployment's user may run as root. A helper
+// whose usage lists no down is one an older paisans on the host installed:
+// the host's owner upgrades paisans there and admits the deployment again,
+// which installs the current one.
+func (p *Plan) meshDown(t apply.Transport) error {
+	h := apply.WGHelper{T: t, Iface: p.dep().Interface()}
+	err := h.Down()
+	if err == nil {
+		return nil
+	}
+	if refused := apply.HelperReadProblem(p.Site, h, err); refused != nil {
+		return refused
+	}
+	if strings.Contains(err.Error(), "usage:") {
+		return &ui.Problem{
+			Hint:    fmt.Sprintf("%s: the WireGuard helper has no down, so %s is still up", p.Site, h.Iface),
+			Explain: fmt.Sprintf("Site admit installs the helper from the paisans on the host, and that one predates down. The host's owner upgrades paisans on the host to this release or later, then runs `sudo %[1]s site admit --request %[2]s.admit` again, from `%[3]s site request --site %[2]s > %[2]s.admit`, which installs the current helper. Then run site remove again: it resumes here.", progname.Default, p.Site, progname.Cmd()),
+			Cause:   err,
+		}
+	}
+	return fmt.Errorf("%s: stopping %s: %w", p.Site, h.Iface, err)
 }
 
 // verifyHost is the host stage's gate: nothing of this deployment's is left
@@ -906,6 +1075,13 @@ func (p *Plan) verifyHost(t apply.Transport) error {
 	}
 	if inv.Manifest && cp == nil {
 		left = append(left, d.Manifest())
+	}
+	mesh, err := p.meshLeft(t, inv)
+	if err != nil {
+		return err
+	}
+	if mesh {
+		left = append(left, "interface "+d.Interface()+", or its unit "+d.WireGuardUnit()+" enabled or active")
 	}
 	for _, r := range p.storeRoots() {
 		_, found, err := t.ReadFile(r.probe)

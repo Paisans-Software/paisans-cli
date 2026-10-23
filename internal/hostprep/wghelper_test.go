@@ -2,6 +2,7 @@ package hostprep_test
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -431,7 +432,7 @@ func TestPutRefusesAConfDirectoryRootDoesNotHoldAlone(t *testing.T) {
 // 64 before running a command or touching the directory.
 func TestTheHelperTakesOnlyItsVerbs(t *testing.T) {
 	for _, args := range [][]string{
-		{}, {"bogus"}, {"put", "extra"}, {"up", "now"}, {"restart", "-f"}, {"sync", "x"},
+		{}, {"bogus"}, {"put", "extra"}, {"up", "now"}, {"restart", "-f"}, {"down", "now"}, {"sync", "x"},
 		{"show"}, {"show", "dump"}, {"show", "private-key"}, {"show", "endpoints"}, {"show", "preshared-keys"}, {"show", "peers", "extra"}, {"log", "-n", "1000"},
 	} {
 		for _, shell := range shells() {
@@ -443,6 +444,79 @@ func TestTheHelperTakesOnlyItsVerbs(t *testing.T) {
 			if names := entries(t, dir); len(names) != 0 {
 				t.Errorf("%s %v: left %v", shell, args, names)
 			}
+		}
+	}
+}
+
+// fakeSystemctl writes a systemctl for the helper to run in a test: it
+// records its arguments and whether conf exists when it runs, one line per
+// call in the log it returns, and exits with code. No test runs the
+// machine's own systemctl.
+func fakeSystemctl(t *testing.T, conf string, code int) (path, log string) {
+	t.Helper()
+	dir := t.TempDir()
+	path, log = filepath.Join(dir, "systemctl"), filepath.Join(dir, "log")
+	script := fmt.Sprintf("#!/bin/sh\nif [ -e '%s' ]; then c=present; else c=gone; fi\necho \"$* conf=$c\" >> '%s'\nexit %d\n", conf, log, code)
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path, log
+}
+
+// down stops and disables the unit while the conf is still there, since
+// wg-quick down reads it, then deletes the conf. A stop that fails keeps the
+// conf, so the interface it may still run keeps its file.
+func TestTheHelperTakesTheInterfaceDown(t *testing.T) {
+	for _, tc := range []struct {
+		code int
+		kept bool
+	}{{0, false}, {1, true}} {
+		for _, shell := range shells() {
+			dir := t.TempDir()
+			conf := filepath.Join(dir, "psns-f2a9.conf")
+			if err := os.WriteFile(conf, []byte(marked(goodConf)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			systemctl, log := fakeSystemctl(t, conf, tc.code)
+			text, err := hostprep.WGHelperScriptWith(dir, systemctl, meshDeployment, 51820, "10.44.0.0/24")
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := filepath.Join(t.TempDir(), "wg-psns-f2a9")
+			if err := os.WriteFile(script, []byte(text), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			out, code := runHelper(t, shell, script, "", "down")
+			if (code == 0) != (tc.code == 0) {
+				t.Errorf("%s down with systemctl exiting %d: exit %d, %q", shell, tc.code, code, out)
+			}
+			ran, err := os.ReadFile(log)
+			if err != nil {
+				t.Fatalf("%s: systemctl did not run: %v", shell, err)
+			}
+			if got := string(ran); got != "disable --now wg-quick@psns-f2a9 conf=present\n" {
+				t.Errorf("%s: systemctl ran %q; want one disable --now while the conf is there", shell, got)
+			}
+			if _, err := os.Stat(conf); (err == nil) != tc.kept {
+				t.Errorf("%s down with systemctl exiting %d: conf kept is %v, want %v", shell, tc.code, err == nil, tc.kept)
+			}
+		}
+	}
+}
+
+// The helper runs the systemctl it was rendered with, which is systemctl
+// itself, from its own PATH, on a host; a test's must be an absolute path.
+func TestTheHelperRunsTheSystemctlItWasRenderedWith(t *testing.T) {
+	text, err := hostprep.WGHelperScript(meshDeployment, 51820, "10.44.0.0/24")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, "\nsystemctl='systemctl'\n") || strings.Count(text, `"$systemctl" `) != 3 {
+		t.Error("the helper does not run systemctl through its one variable")
+	}
+	for _, bad := range []string{"bin/systemctl", "/tmp/x'y", "/tmp/x\ny"} {
+		if _, err := hostprep.WGHelperScriptWith(t.TempDir(), bad, meshDeployment, 51820, "10.44.0.0/24"); err == nil {
+			t.Errorf("rendered with systemctl %q", bad)
 		}
 	}
 }

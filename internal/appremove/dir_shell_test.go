@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/paisans-software/paisans-cli/internal/render"
 )
 
 // answered is a Host whose Run answers out; it is used for nothing else.
@@ -68,4 +70,60 @@ func TestDirCommandOnADirectory(t *testing.T) {
 	if out, err := run(dir); err == nil || strings.Contains(out, "present") {
 		t.Errorf("an unreadable directory answered %q, %v", out, err)
 	}
+}
+
+// DirCommandFor without --delete-data, run by a shell on a real directory
+// whose rendered files are gone: the directories they were in go, and the
+// stack directory once it is empty, while the app's data keeps every empty
+// directory in it.
+func TestDirCommandForKeepsTheEmptyDirectoriesInData(t *testing.T) {
+	bin, base := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "rootlesskit"), []byte("#!/bin/sh\nexec \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run := func(dir string, files []File) {
+		t.Helper()
+		cmd := exec.Command("sh", "-c", DirCommandFor(dir, files, false))
+		cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+	}
+	rendered := func(dir string, rels ...string) []File {
+		var files []File
+		for _, rel := range rels {
+			files = append(files, File{Entry: render.ManifestFile{Path: strings.TrimPrefix(filepath.Join(dir, rel), "/")}})
+		}
+		return files
+	}
+	exists := func(p string) bool { _, err := os.Lstat(p); return err == nil }
+
+	db := filepath.Join(base, "db")
+	for _, rel := range []string{"etc", "pgdata/pg_notify", "pgdata/pg_twophase", "cache"} {
+		if err := os.MkdirAll(filepath.Join(db, rel), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(db, "pgdata/PG_VERSION"), []byte("18"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(db, rendered(db, "compose.yaml", "etc/app.conf"))
+	for _, rel := range []string{"pgdata/pg_notify", "pgdata/pg_twophase", "cache"} {
+		if !exists(filepath.Join(db, rel)) {
+			t.Errorf("%s was deleted", rel)
+		}
+	}
+	if exists(filepath.Join(db, "etc")) {
+		t.Error("etc, which held a rendered file, is left")
+	}
+
+	gone := filepath.Join(base, "gone")
+	if err := os.MkdirAll(filepath.Join(gone, "etc/conf.d"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run(gone, rendered(gone, "compose.yaml", "etc/conf.d/app.conf"))
+	if exists(gone) {
+		t.Error("a stack directory holding only rendered directories is left")
+	}
+	run(filepath.Join(base, "missing"), rendered(filepath.Join(base, "missing"), "etc/app.conf"))
 }

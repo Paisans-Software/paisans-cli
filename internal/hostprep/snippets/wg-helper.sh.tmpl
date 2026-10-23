@@ -19,6 +19,9 @@
 #                 root may write
 #   up            systemctl enable --now {{.Unit}}
 #   restart       systemctl restart {{.Unit}}
+#   down          systemctl disable --now {{.Unit}}, then delete
+#                 {{.Conf}}, so the user's manager, which wants the unit
+#                 at boot, finds it skipped until a put installs a conf
 #   sync          wg-quick strip the installed conf, then wg syncconf
 #   show FIELD    wg show {{.Interface}} FIELD: peers, latest-handshakes,
 #                 public-key, allowed-ips, persistent-keepalive or listen-port,
@@ -44,6 +47,9 @@ net='{{.Network}}'
 prefix='{{.Prefix}}'
 # The uid that must own the conf directory: root on a host.
 owner='{{.Owner}}'
+# The systemctl that up, restart and down run: systemctl, from the PATH
+# above, on a host.
+systemctl='{{.Systemctl}}'
 # The mark put adds to every conf it installs: the egress table drops what
 # a socket with it sends to this host, loopback, link-local, multicast and
 # the private ranges, after wg has resolved each Endpoint as root.
@@ -52,7 +58,7 @@ fwmark='{{.FwMark}}'
 max=65536
 
 usage() {
-	echo "usage: $0 put | up | restart | sync | show peers|latest-handshakes|public-key|allowed-ips|persistent-keepalive|listen-port | log" >&2
+	echo "usage: $0 put | up | restart | down | sync | show peers|latest-handshakes|public-key|allowed-ips|persistent-keepalive|listen-port | log" >&2
 	exit 64
 }
 
@@ -306,11 +312,17 @@ put)
 	;;
 up)
 	[ $# -eq 1 ] || usage
-	exec systemctl enable --now "$unit"
+	exec "$systemctl" enable --now "$unit"
 	;;
 restart)
 	[ $# -eq 1 ] || usage
-	exec systemctl restart "$unit"
+	exec "$systemctl" restart "$unit"
+	;;
+down)
+	[ $# -eq 1 ] || usage
+	# Stopped before the conf goes: wg-quick down reads it.
+	"$systemctl" disable --now "$unit"
+	rm -f "$conf"
 	;;
 sync)
 	[ $# -eq 1 ] || usage

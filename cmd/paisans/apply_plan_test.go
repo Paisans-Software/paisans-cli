@@ -28,6 +28,10 @@ func (emptyHost) Run(command string) (string, error) {
 	if out, ok := absentNetworks(command); ok {
 		return out, nil
 	}
+	// site remove's read of the mesh unit: none enabled or running.
+	if strings.Contains(command, `e=$(systemctl is-enabled "$u" 2>&1)`) {
+		return "is-enabled disabled\nis-active inactive\n", nil
+	}
 	// The mesh comes up when it is started, with home-a's address in
 	// freshSite.
 	if strings.HasPrefix(command, "ip -br addr show dev psns-") {

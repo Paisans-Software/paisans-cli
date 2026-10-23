@@ -1232,8 +1232,10 @@ The connection comes from `Env.Dial`. The command wires it to
 so the connection is made, retried and its host key asked about as every
 other command's is, then `ssh -W host:port` over the shared master, its stdin
 and stdout joined to one end of a `net.Pipe` so deadlines work. When ssh ends
-the forward, the connection's last read carries ssh's last line, Eg:
-`administratively prohibited` or `Connection refused`. What is easy to undo
+the forward, the connection's last read carries ssh's reason, Eg:
+`Session open refused by peer` or `Connection refused`, and a reason saying
+the channel did not open is `apply.ErrForwardNotOpened`, which the
+command's `Env.NotOpened` reports as a connection not made. What is easy to undo
 by accident:
 
 * **No test reaches a site or a mail server.** `cmd/paisans`'s `TestMain`

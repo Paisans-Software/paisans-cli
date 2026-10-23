@@ -19,7 +19,7 @@ step 15: create /srv/paisans/f2a9
 step 16: restore: install the WireGuard helper
   wireguard: the one command paisans-f2a9 may run as root: it checks each conf before wg-quick sees it, and adds the mesh's mark (found changed: its content)
   write /usr/local/libexec/paisans/wg-psns-f2a9 mode 0755:
-    | <the WireGuard helper hostprep renders, sha256 bcde8952e1b19492ab3fcc82fc9879afc43a19ac98edf81a01d9d23a6b56abde>
+    | <the WireGuard helper hostprep renders, sha256 941b3d11e9f0db7d719e92c05b8b8f395a6b1173f7954e232ead247747764ff8>
 
 step 17: allow 22/tcp
 step 18: allow 51820/udp

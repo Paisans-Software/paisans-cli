@@ -2980,8 +2980,10 @@ or the site's private network can. The SMTP conversation runs on the
 workstation, so nothing is installed or run on a host for it, and the password
 crosses only the ssh connection and then the path the app's own mail takes. The
 forward needs the host's sshd to allow TCP forwarding, which is OpenSSH's
-default (`AllowTcpForwarding`, sshd_config(5)); a host that refuses it says
-`administratively prohibited`, and the check says so.
+default (`AllowTcpForwarding`, sshd_config(5)). Over the shared connection, a
+host that refuses it and an address the host cannot connect to both reach the
+check as ssh's `Session open refused by peer`, so the check says the site
+could not open a connection to the server and names both causes.
 
 **When, and how much:**
 
@@ -2989,8 +2991,22 @@ default (`AllowTcpForwarding`, sshd_config(5)); a host that refuses it says
 |---|---|---|
 | `secrets set` an SMTP password | from this machine, logs in with the new password and sends one test message | refused; nothing is written. A server this machine cannot reach is a warning, and the password is written for `deployment apply` to try |
 | `secrets rotate` an SMTP password | from this machine, a pasted one logs in and sends one test message when pasted; one set with `secrets set` logs in when the run is planned; stage 2 logs in again from this machine, then from every site that will be handed it, before any is | refused before anything is written under `rotations`, or stopped at stage 2 before any site is handed it; a server this machine cannot reach is a warning, and the sites alone try it |
-| `deployment apply`, with or without `--site` | every app it would start logs in, from each site it runs on; nothing is sent | refused before any host is changed, naming the app, where its settings are declared, and the server's reply |
+| `deployment apply`, with or without `--site` | every app it would start logs in, from each site it runs on; nothing is sent | refused before any host is changed, naming the app, where its settings are declared, and the server's reply, or that the site could not open a connection to the server |
 | `validate` | every app logs in, from each site it runs on; nothing is sent | a warning |
+
+**A mail server on the deployment's own mesh is tried once the mesh is up.**
+A `host` that is an address inside `mesh.subnet`, Eg: a relay run on one of
+the sites, is reached only across the mesh: until `deployment apply` has
+brought the mesh up, the address is on no interface and no site has a route
+to it. So before each such check, apply and `validate` read whether the
+deployment's WireGuard interface is up on the site the check is made from
+and on the site that holds the address. While either is not, the check is
+not made, with a warning that it cannot be tried before the mesh exists, and
+the apply goes on: the first apply of a deployment whose mail server is on
+its own mesh founds it, and the apply after it tries the server. A mail
+server reached any other way is tried before anything changes, mesh or not,
+and on a running deployment, whose mesh is up, a mesh server is tried the
+same way.
 
 A changed credential is the only thing that sends mail, because a login alone
 cannot tell whether the provider accepts the sender: a provider may take the
@@ -5341,8 +5357,11 @@ it equals the mesh subnet or a pinned one, or lies inside it, because the
 kernel picks the longest matching prefix and it would take that traffic. A
 route broader than the mesh (a
 provider's 10.0.0.0/8 private network) is shorter than the one `psns-<token>`
-adds, so the mesh still wins; it is printed as a note. A `psns-<token>` the
-toolkit did not write conflicts.
+adds, so the mesh still wins; it is printed as a note. A `psns-<token>` no
+manifest records conflicts, and so does the WireGuard socket on its listen
+port: the interface carries the deployment's name, but nothing says what it
+runs. The line names the deployment's WireGuard helper's `down`, which takes
+it away.
 
 A conflict line names the resource, the `paisans-stack.yaml` key that claims it, and
 what holds it (a container and its compose project, or a process and its PID).
@@ -6186,8 +6205,9 @@ lets that user run it and nothing else as root. `deployment apply` writes the me
 file as `/srv/paisans/<token>/psns-<token>.conf`, its own copy, which it
 can read back and compare like any other file it renders, and hands it to
 the helper's `put` before every start, sync or restart; `put` installs it
-as `/etc/wireguard/psns-<token>.conf`, mode 600. `put` accepts only the
-keys `deployment apply` renders, each value matching its pattern, the `ListenPort` the
+as `/etc/wireguard/psns-<token>.conf`, mode 600. Its `down`, which `site
+remove` runs, stops and disables the interface and deletes that file. `put`
+accepts only the keys `deployment apply` renders, each value matching its pattern, the `ListenPort` the
 owner admitted, and an `Address` and `AllowedIPs` inside the mesh subnet,
 and refuses the whole file otherwise, because wg-quick runs a file's
 `PreUp`, `PostUp`, `PreDown` and `PostDown` as root and adds a route for
@@ -8869,9 +8889,9 @@ different place:
 |---|---|---|---|
 | containers and networks | this deployment's label and the `paisans-<token>-<app>` compose project, both | stopped and removed | the same, with the containers' anonymous volumes |
 | rendered files | a manifest entry marked left over, under the app's stack directory or named for one of its routes | deleted when the content still hashes to the entry, which is then dropped; a file edited on the host is kept with its entry | the same |
-| the stack directory | its path, `/srv/paisans/<token>/<app>` | removed only once empty; what the app wrote there is kept | deleted, unless it holds a file edited on the host |
+| the stack directory | its path, `/srv/paisans/<token>/<app>` | the directories rendered files were in removed once empty, and the stack directory with them; what the app wrote there is kept, with the empty directories in it, which a database's data directory needs | deleted, unless it holds a file edited on the host |
 | named volumes | the label and the project | kept | deleted |
-| its client at Pocket ID | the ID recorded under `oidc_clients.<app>`, held by a client with the client's name (the app's, or the community's for the gate) | deleted | deleted |
+| its client at Pocket ID | the ID recorded under `oidc_clients.<app>`, held by a client with the expected name: the name in the newest version of this workstation's configuration history that declares the app, else the name the current configuration gives it (its `display_name`, else the app's, or the community's for the gate) | deleted | deleted |
 | its database and role | named `render.DBIdentifier(<app>)` on the cluster's leader, the database owned by that role | kept | dropped |
 | its Garage buckets and keys | the key IDs recorded under `apps.<app>`, and a bucket only those keys are granted on | kept | the bucket emptied and deleted, then the keys |
 
@@ -8882,7 +8902,11 @@ so it is kept and named for an administrator to delete; nothing is deleted at
 Pocket ID by name alone. A database whose owner is another role, a name a
 declared app still uses, and a bucket another key can reach are kept the same
 way, each with the reason. The client step runs once, from the site `oidc
-client create` calls.
+client create` calls. When a client ID is recorded for the app and the
+expected name comes from the current configuration, because the workstation
+holds no configuration history or no version in it declares the app, it
+warns, and `paisans deployment pull --execute` fetches the history the sites
+hold.
 
 **Deleting member data needs a person at a terminal, or `--yes`.**
 `--delete-data` plans the deletions, and on `--execute` asks for the app's
@@ -9401,16 +9425,20 @@ is not this deployment's is left alone and not listed:
 | rendered files | an entry in this deployment's manifest whose hash the file still has | deleted, then the manifest; a file edited on the host is kept and named |
 | units | named `paisans-<token>-*` in the user's own systemd directory, `~/.config/systemd/user` | disabled, stopped, deleted; the user's manager reloaded |
 | authorized keys | nothing can prove one: a key `site admit` or `site prepare` added is a key the operator logs in with | never removed. A key may be the only way into the host, and nothing on it says whether another exists; the operator deletes one by hand once it is no longer needed. This deployment's record of which keys it added, `/srv/paisans/<token>/.paisans/authorized_keys.owned`, is its own file, so that is deleted |
-| the deployment's directory | its path, `/srv/paisans/<token>`, the user's | empty directories removed; what apply did not write, the data in its bind mounts, is kept, and `--delete-data` empties it, through rootlesskit so the files a container's user owns go too, unless a file in it was edited. The directory itself stays, because its parent `/srv/paisans` is root's, for `site evict` |
+| the deployment's directory | its path, `/srv/paisans/<token>`, the user's | the directories rendered files were in removed once empty; what apply did not write, the data in its bind mounts with every empty directory in it (PostgreSQL's data directory needs its own), is kept, and `--delete-data` empties it, through rootlesskit so the files a container's user owns go too, unless a file in it was edited. The directory itself stays, because its parent `/srv/paisans` is root's, for `site evict` |
 | the deployment record, on a gateway | `/srv/paisans/<token>/.paisans/deployed.json` | deleted |
+| the mesh interface | its name, `psns-<token>`, which `site admit` gives the deployment's helper and nothing else | when the interface is up, or `systemctl is-enabled` or `is-active` (which need no root) says its unit is, as one whose start failed at the last boot still is; an answer that is not one of systemctl's states stops the plan and the gate rather than reading as a unit that is gone: after the containers, taken down by the WireGuard helper's `down`, which stops and disables `wg-quick@psns-<token>` and deletes `/etc/wireguard/psns-<token>.conf`, the site's private key. Left up, or enabled to come back at boot, it holds the site's listen port and interface name, and a `site add` of the same site refuses both. The helper and its sudoers line stay for `site evict` |
 | the configuration store | `/srv/paisans/<token>/.paisans/config/<token>.git`, its `<token>.peers` and `<token>.sync.json`, a `<token>.incoming.bundle` a cut-off push left behind, and `/srv/paisans/<token>/.paisans/bin/`; the units that serve and sync it are the user's `paisans-<token>-*` and go with the units above | deleted after the units, so the daemon and the sync have stopped using them. The versions on this host go with it; every other site still holds them, which is what makes a site's removal not a loss of the configuration's history |
 | the grant record | `/srv/paisans/<token>/.paisans/granted.json` (see *`deployment apply` and `site prepare` review what `paisans-stack.yaml` grants*) | deleted last: left behind, a later deployment with the same token would be reviewed against a baseline it never applied |
 
-**What is root's is the owner's.** The mesh interface and its helper, the ufw
-rules, the deployment's user and its home, `/srv/paisans`, the
+**What is root's is the owner's.** The WireGuard helper and its sudoers line,
+the ufw rules, the deployment's user and its home, `/srv/paisans`, the
 admission record and the registry entry are not touched. The plan ends with
 the line the host's owner runs to remove them,
-`sudo paisans site evict --deployment <id> --user <user> --execute`.
+`sudo paisans site evict --deployment <id> --user <user> --execute`. Until
+they do, the host is still admitted, and the site can be added back:
+`paisans site prepare --site <site> --execute` first, since its
+configuration store and units went with the removal, then `site add`.
 
 The check that nothing of this deployment's that its user can remove is left
 comes last.
