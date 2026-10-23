@@ -78,6 +78,7 @@ func (p *Plan) probeStopped(t Transport) (map[string]string, error) {
 		}
 	}
 	owed := map[string]string{}
+	p.containers = map[string]bool{}
 	for stack, services := range declared {
 		project := p.Deployment.Project(stack)
 		var missing, stopped []string
@@ -88,6 +89,8 @@ func (p *Plan) probeStopped(t Transport) (map[string]string, error) {
 				stopped = append(stopped, service)
 			case !seen[key]:
 				missing = append(missing, service)
+			default:
+				p.containers[stack+"/"+service] = true
 			}
 		}
 		var why []string

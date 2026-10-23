@@ -121,18 +121,27 @@ type Action struct {
 	Refresh []string
 }
 
+// quoteAll is names shell quoted, space separated.
+func quoteAll(names []string) string {
+	quoted := make([]string, len(names))
+	for i, name := range names {
+		quoted[i] = shellQuote(name)
+	}
+	return strings.Join(quoted, " ")
+}
+
 // Command is what the action runs on the host, for deployment d.
 func (a Action) Command(d deployment.Deployment) string {
 	compose := d.ComposeCmd(a.Stack)
 	switch {
+	case a.Stack == infraStack && a.Force && len(a.Up) == 1 && a.Up[0] == "patroni":
+		return RecreatePatroni(d)
+	case a.Force && len(a.Up) > 0:
+		return compose + " up -d --no-deps --force-recreate " + quoteAll(a.Up)
 	case a.Force:
 		return compose + " up -d --force-recreate"
 	case a.Recreate && len(a.Up) > 0:
-		services := make([]string, len(a.Up))
-		for i, name := range a.Up {
-			services[i] = shellQuote(name)
-		}
-		return compose + " up -d --no-deps " + strings.Join(services, " ")
+		return compose + " up -d --no-deps " + quoteAll(a.Up)
 	case a.Recreate:
 		return compose + " up -d"
 	case len(a.Services) > 0:
@@ -179,6 +188,9 @@ type Plan struct {
 	// success. Checking only before a reload would leave exactly that path
 	// unchecked.
 	GatewayChanging bool
+	// containers is each "<stack>/<service>" with a container that is not
+	// stopped, from probeStopped's read of which containers run.
+	containers map[string]bool
 	// patroniKept is set when patroni.env is written with new etcd hosts
 	// alone, which moves no container. See etcdHostsOnly.
 	patroniKept bool
@@ -952,6 +964,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 	// A restart an earlier pass held back while the database path moved is
 	// owed as a restart, not as a half built stack. See heldOwed.
 	dbOwed := map[string]bool{}
+	owedUp := map[string][]string{}
 	var live []pendingAction
 	for _, action := range resumed.Actions {
 		// An app removed from the configuration renders no stack here, and
@@ -965,6 +978,9 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			dbOwed[action.Stack] = true
 		} else {
 			owed[action.Stack] = true
+			if len(action.Up) > 0 {
+				owedUp[action.Stack] = action.Up
+			}
 		}
 		stacks[action.Stack] = true
 	}
@@ -1018,8 +1034,11 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 	for _, stack := range stackOrder(stacks) {
 		action := Action{Stack: stack}
 		if owed[stack] {
-			action.Recreate, action.Force = true, true
+			action.Recreate, action.Force, action.Up = true, true, owedUp[stack]
 			action.Reason = "a previous apply stopped before this stack's action finished, so its containers may be half built and are replaced outright"
+			if len(action.Up) > 0 {
+				action.Reason += "; only " + strings.Join(action.Up, ", ") + ", which that `up -d` named"
+			}
 		} else if forced[stack] {
 			action.Recreate, action.Force = true, true
 			action.Reason = "named with --recreate, so every container is replaced whether or not anything changed"
@@ -1569,6 +1588,10 @@ type pending struct {
 type pendingAction struct {
 	Stack    string `json:"stack"`
 	Recreate bool   `json:"recreate,omitempty"`
+	// Up is the services an `up -d` named, empty for the whole stack (see
+	// Action.Up). An owed action force-recreates those services alone, so
+	// a running Patroni an `up -d` left out stays out.
+	Up []string `json:"up,omitempty"`
 	// DatabasePath marks a restart a held stack owes because HAProxy or
 	// Patroni moved while it was held, rather than an action that stopped
 	// part way. It is a restart when released, not a forced recreate.
@@ -1601,7 +1624,7 @@ func readPending(t Transport, d deployment.Deployment) (pending, error) {
 func writePending(plan *Plan, actions []Action, t Transport) error {
 	p := pending{Version: 1, GatewayChanging: plan.GatewayChanging, GatewayReload: plan.GatewayReload}
 	for _, action := range actions {
-		p.Actions = append(p.Actions, pendingAction{Stack: action.Stack, Recreate: action.Recreate})
+		p.Actions = append(p.Actions, pendingAction{Stack: action.Stack, Recreate: action.Recreate, Up: action.Up})
 	}
 	p.Actions = append(p.Actions, plan.heldOwed...)
 	data, err := json.MarshalIndent(p, "", "  ")

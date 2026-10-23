@@ -347,7 +347,7 @@ func TestPatroniRunningWithOldEtcdHosts(t *testing.T) {
 		if len(p.Actions) == 0 || p.Actions[0].Stack != "infra" {
 			t.Fatalf("plans %+v, want Patroni recreated", p.Actions)
 		}
-		if got := p.Actions[0].Command(apply.Fixture); !strings.HasSuffix(got, " up -d --no-deps 'patroni'") {
+		if got := p.Actions[0].Command(apply.Fixture); got != apply.RecreatePatroni(apply.Fixture) {
 			t.Errorf("recreates with %q", got)
 		}
 		if !hinted(p, "recreates Patroni on home-a") {
@@ -356,8 +356,131 @@ func TestPatroniRunningWithOldEtcdHosts(t *testing.T) {
 		if err := apply.Execute(p, host); err != nil {
 			t.Fatal(err)
 		}
-		if !host.ran("/srv/paisans/f2a9/infra/compose.yaml up -d --no-deps 'patroni'") {
+		if !host.ran(apply.RecreatePatroni(apply.Fixture)) {
 			t.Errorf("Patroni was not recreated: %v", host.commands)
 		}
 	})
+}
+
+// A running Patroni that does not say which etcd hosts it has may be
+// replaced by the stack's `up -d`, so the `up -d` names every service and the
+// plan warns. A stopped one is left to the `up -d`, which starts it and
+// loses no leader.
+func TestPatroniWhoseEtcdHostsCannotBeRead(t *testing.T) {
+	t.Run("running", func(t *testing.T) {
+		host := applied(t, "home-a")
+		host.etcdHosts = ""
+		p, err := apply.Build("home-a", withInfra(t, moreEtcdHosts, graceFor("haproxy")), acmeModule(t), host)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(p.Actions) == 0 || p.Actions[0].Stack != "infra" || len(p.Actions[0].Up) != 0 || !p.Actions[0].Recreate {
+			t.Fatalf("plans %+v, want the whole infra stack's up -d", p.Actions)
+		}
+		var why string
+		for _, n := range p.Notes {
+			if strings.Contains(n.Hint, "recreates Patroni on home-a") {
+				why = n.Text
+			}
+		}
+		if !strings.Contains(why, "could not read the etcd hosts Patroni runs with") {
+			t.Errorf("the plan does not warn why: %+v", p.Notes)
+		}
+	})
+	t.Run("stopped", func(t *testing.T) {
+		host := applied(t, "home-a")
+		host.etcdHosts = ""
+		host.stopped = map[string]string{"infra/patroni": "exited"}
+		p, err := apply.Build("home-a", withPatroniEnv(t, moreEtcdHosts), acmeModule(t), host)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(p.Actions) == 0 || p.Actions[0].Stack != "infra" || len(p.Actions[0].Up) != 0 {
+			t.Fatalf("plans %+v, want the whole infra stack's up -d to start Patroni", p.Actions)
+		}
+		if hinted(p, "recreates Patroni") {
+			t.Errorf("a stopped Patroni is warned of: %+v", p.Notes)
+		}
+	})
+}
+
+// The running hosts are compared as a set, and they must still name this
+// site's own etcd member: it starts with Patroni after a reboot, while any
+// other may be down. A restart planned for another file becomes a forced
+// recreate of the services it named and Patroni.
+func TestPatroniRunningWithoutItsOwnEtcdMember(t *testing.T) {
+	t.Run("reordered", func(t *testing.T) {
+		host := applied(t, "home-a")
+		host.etcdHosts = "10.44.0.3:2379,10.44.0.1:2379,10.44.0.2:2379"
+		p, err := apply.Build("home-a", plan(t), acmeModule(t), host)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(p.Actions) != 0 || hinted(p, "etcd hosts") || hinted(p, "Patroni") {
+			t.Errorf("plans %+v, notes %+v", p.Actions, p.Notes)
+		}
+	})
+	t.Run("restart becomes a recreate", func(t *testing.T) {
+		host := applied(t, "home-a")
+		host.etcdHosts = "10.44.0.2:2379,10.44.0.3:2379"
+		changed := plan(t)
+		for i, file := range changed.Files {
+			if file.Path == "home-a/srv/paisans/f2a9/infra/haproxy/haproxy.cfg" {
+				changed.Files[i].Content = file.Content + "# a later change\n"
+			}
+		}
+		p, err := apply.Build("home-a", changed, acmeModule(t), host)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(p.Actions) == 0 || p.Actions[0].Stack != "infra" {
+			t.Fatalf("plans %+v", p.Actions)
+		}
+		want := "docker compose -f /srv/paisans/f2a9/infra/compose.yaml up -d --no-deps --force-recreate 'haproxy' 'patroni'"
+		if got := p.Actions[0].Command(apply.Fixture); got != want {
+			t.Errorf("runs %q, want %q", got, want)
+		}
+		if !hinted(p, "recreates Patroni on home-a") {
+			t.Errorf("the plan does not warn: %+v", p.Notes)
+		}
+	})
+}
+
+// An `up -d` that named the other services and stopped part way is owed as
+// a forced recreate of those services alone, so the next apply does not
+// replace the running Patroni it left out.
+func TestAnOwedNarrowedUpStaysNarrowed(t *testing.T) {
+	host := applied(t, "home-a")
+	host.files["/srv/paisans/f2a9/.paisans-pending.json"] = `{"version":1,"actions":[{"stack":"infra","recreate":true,"up":["etcd","haproxy"]}]}`
+	p, err := apply.Build("home-a", plan(t), acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Actions) == 0 || p.Actions[0].Stack != "infra" {
+		t.Fatalf("plans %+v", p.Actions)
+	}
+	want := "docker compose -f /srv/paisans/f2a9/infra/compose.yaml up -d --no-deps --force-recreate 'etcd' 'haproxy'"
+	if got := p.Actions[0].Command(apply.Fixture); got != want {
+		t.Errorf("runs %q, want %q", got, want)
+	}
+	if hinted(p, "recreates Patroni") {
+		t.Errorf("the plan warns of a recreate it does not make: %+v", p.Notes)
+	}
+}
+
+// A narrowed `up -d` is recorded as owed with the services it names.
+func TestANarrowedUpIsOwedNarrowed(t *testing.T) {
+	host := applied(t, "home-a")
+	host.fail = "/infra/compose.yaml up -d"
+	p, err := apply.Build("home-a", withInfra(t, moreEtcdHosts, graceFor("haproxy")), acmeModule(t), host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := apply.Execute(p, host); err == nil {
+		t.Fatal("the failing up -d did not stop the apply")
+	}
+	record := host.files["/srv/paisans/f2a9/.paisans-pending.json"]
+	if !strings.Contains(record, `"up"`) || strings.Contains(record, "patroni") {
+		t.Errorf("owed record %s", record)
+	}
 }

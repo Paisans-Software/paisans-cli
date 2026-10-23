@@ -9137,21 +9137,29 @@ it.** Compose replaces a container whose `env_file` content changed, so once
 `patroni.env` holds etcd hosts the running Patroni was not created with, a
 plain `up -d` of the infrastructure stack for any other reason (a changed
 compose file or environment file, a stopped Garage to start) would replace
-Patroni too. So `deployment apply` asks the running container which hosts it
-has (`printenv ETCD3_HOSTS`), and when Patroni runs and nothing it reads
-changed (`patroni.env` beyond `ETCD3_HOSTS`, its service in the compose file,
-a file it mounts), the stack's `up -d` names every other service, with
-`--no-deps`. A `docker restart`, a reboot or the restart policy keeps the
-container, and with it the hosts it was created with, so the plan says when
-they differ from the file. They are enough while they name one current etcd
-member, from which Patroni learns the rest; once they name none, Patroni could
-not reach etcd after its next restart, and the plan recreates it.
+Patroni too. So `deployment apply` takes whether Patroni runs from its read of
+which containers run, and asks a running one which etcd hosts it has
+(`printenv ETCD3_HOSTS`; nothing else in the container is compared with the
+file). When nothing Patroni reads changed (`patroni.env` beyond
+`ETCD3_HOSTS`, its service in the compose file, a file it mounts), the stack's
+`up -d` names every other service, with `--no-deps`, and an apply that stops
+part way owes a forced recreate of those services alone. A running Patroni
+that does not answer is planned as one the `up -d` replaces, with the warning
+below, since leaving it out would rest on an answer the apply does not have.
+A stopped one is started by the `up -d` from the file as written. A `docker
+restart`, a reboot or the restart policy keeps the container, and with it the
+hosts it was created with, so the plan says when they differ from the file,
+compared as sets. They are enough while they name the site's own etcd member,
+which starts with Patroni after a reboot and from which Patroni learns the
+rest; once they do not, the plan recreates Patroni alone
+(`up -d --no-deps --force-recreate patroni`).
 
 **A leader that moves is reported, never left silent.** A change Patroni reads
 only in a new container, a forced recreate of the infrastructure stack, a
-restart that includes Patroni and a running list that names no current member
-all replace or restart Patroni, and on the leader a standby takes the leader
-key while it restarts. The plan says so before it runs, at every verbosity.
+restart that includes Patroni, a running Patroni that does not say its etcd
+hosts and a running list without the site's own etcd member all replace or
+restart Patroni, and on the leader a standby takes the leader key while it
+restarts. The plan says so before it runs, at every verbosity.
 After it runs, an apply whose infrastructure stack's action leaves another site
 leading warns, naming both sites, the action and the files that changed, and
 `deployment apply` without `--site` repeats each warning once its steps are

@@ -83,7 +83,7 @@ type fakeHost struct {
 	// leader key while it restarted.
 	leaderAfter string
 	// etcdHosts is ETCD3_HOSTS as the running Patroni container has it,
-	// empty for a host where Patroni does not answer.
+	// empty for one that does not answer. newHost makes it the fixture's.
 	etcdHosts string
 	// ps is what `docker compose ps --format json` prints, by stack. A stack
 	// not in it answers with one running container and no healthcheck.
@@ -140,7 +140,9 @@ type fakeHost struct {
 	sourceMark string
 }
 
-func newHost() *fakeHost { return &fakeHost{files: map[string]string{}, leader: "home-a"} }
+func newHost() *fakeHost {
+	return &fakeHost{files: map[string]string{}, leader: "home-a", etcdHosts: "10.44.0.1:2379,10.44.0.2:2379,10.44.0.3:2379"}
+}
 
 func (h *fakeHost) RunInput(command, stdin string) (string, error) {
 	h.inputs = append(h.inputs, stdin)
