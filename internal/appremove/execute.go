@@ -61,11 +61,19 @@ func FilesCommand(files []File) string {
 // DirCommandFor empties what can go of the stack directory. Without
 // deleteData it removes only empty directories, the stack directory last,
 // so whatever the app wrote stays. With it, the whole directory goes.
+//
+// Both run under rootlesskit, for the reason DirCommand does: a file or
+// directory a container's non-root user wrote is the namespace root's to
+// remove, and not the user's (Docker's rootless documentation, Uninstall:
+// rootlesskit rm -rf ~/.local/share/docker). dir is always d.Dir(app), and
+// app has passed nameShape, so it is one segment under the deployment's
+// root. A find that fails fails the command. rmdir runs as the user: the stack directory is the deployment
+// root's entry, and the user owns the root.
 func DirCommandFor(dir string, deleteData bool) string {
 	if deleteData {
-		return "rm -rf -- " + quote(dir)
+		return "rootlesskit rm -rf -- " + quote(dir)
 	}
-	return fmt.Sprintf(`d=%s; if [ -d "$d" ]; then find "$d" -mindepth 1 -depth -type d -empty -delete; rmdir "$d" 2>/dev/null || true; fi`, quote(dir))
+	return fmt.Sprintf(`d=%s; if [ -d "$d" ]; then rootlesskit find "$d" -mindepth 1 -depth -type d -empty -delete && { rmdir "$d" 2>/dev/null || true; }; fi`, quote(dir))
 }
 
 // Executor runs a plan.
