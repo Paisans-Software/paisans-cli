@@ -27,6 +27,7 @@ const SwapNeeded = "Without swap, a host that runs short of memory has the kerne
 // on or not. Every file it reads is readable by any user.
 const Probe = `say mem-total "$(awk '$1 == "MemTotal:" { printf "%.0f", $2 * 1024 }' /proc/meminfo)"
 say swap-total "$(awk '$1 == "SwapTotal:" { printf "%.0f", $2 * 1024 }' /proc/meminfo)"
+say zram-on "$(awk 'NR > 1 && $1 ~ /^\/dev\/zram/ { s += $3 } END { printf "%.0f", s * 1024 }' /proc/swaps 2>/dev/null)"
 if [ "$(awk 'NR > 1' /proc/swaps 2>/dev/null | wc -l)" -gt 0 ]; then say swap-active yes; else say swap-active no; fi
 if command -v lsblk >/dev/null 2>&1 && lsblk -nro FSTYPE 2>/dev/null | grep -qx swap; then say swap-partition yes; else say swap-partition no; fi
 if awk '$1 !~ /^#/ && $3 == "swap"' /etc/fstab 2>/dev/null | grep -q .; then say swap-fstab yes; else say swap-fstab no; fi
@@ -43,13 +44,16 @@ if [ -e ` + Swapfile + ` ] || [ -L ` + Swapfile + ` ]; then say swapfile present
 // in.
 const Command = "say() { printf '%s %s\\n' \"$1\" \"$2\"; }\n" + Probe
 
-// Facts are what Probe found. MemTotal is the host's RAM and SwapTotal the
-// swap it has on, in bytes, each 0 when unread. Active is any entry in
+// Facts are what Probe found. MemTotal is the host's RAM, SwapTotal the
+// swap it has on and ZRAMOn the part of that on a zram device, in bytes,
+// each 0 when unread. Inside a container, MemTotal is the machine's RAM,
+// not the container's limit, unless something like lxcfs presents the
+// limit as /proc/meminfo. Active is any entry in
 // /proc/swaps; Partition a block device formatted as swap, FSTab a swap
 // line in /etc/fstab, ZRAM a zram-generator configuration and File
 // something at /swapfile, each whether it is on or not.
 type Facts struct {
-	MemTotal, SwapTotal                  int64
+	MemTotal, SwapTotal, ZRAMOn          int64
 	Active, Partition, FSTab, ZRAM, File bool
 }
 
@@ -58,7 +62,7 @@ type Facts struct {
 // number is refused, so RAM never reads as none.
 func (f *Facts) Read(key, value string) (bool, error) {
 	switch key {
-	case "mem-total", "swap-total":
+	case "mem-total", "swap-total", "zram-on":
 		var n int64
 		if value != "" {
 			var err error
@@ -66,10 +70,13 @@ func (f *Facts) Read(key, value string) (bool, error) {
 				return true, fmt.Errorf("unreadable %s line %q", key, value)
 			}
 		}
-		if key == "mem-total" {
+		switch key {
+		case "mem-total":
 			f.MemTotal = n
-		} else {
+		case "swap-total":
 			f.SwapTotal = n
+		default:
+			f.ZRAMOn = n
 		}
 	case "swap-active":
 		f.Active = value == "yes"
@@ -87,13 +94,22 @@ func (f *Facts) Read(key, value string) (bool, error) {
 	return true, nil
 }
 
-// Parse reads Command's output. A line it does not know is left out.
+// Parse reads Command's output. A line it does not know is left out, and
+// an answer without the mem-total and swap-active lines is refused, so an
+// empty or cut short answer never reads as a host with no swap.
 func Parse(out string) (Facts, error) {
 	var f Facts
+	seen := map[string]bool{}
 	for _, line := range strings.Split(out, "\n") {
 		key, value, _ := strings.Cut(strings.TrimRight(line, "\r"), " ")
 		if _, err := f.Read(key, strings.TrimSpace(value)); err != nil {
 			return f, err
+		}
+		seen[key] = true
+	}
+	for _, key := range []string{"mem-total", "swap-active"} {
+		if !seen[key] {
+			return f, fmt.Errorf("the answer has no %s line", key)
 		}
 	}
 	return f, nil
@@ -164,46 +180,77 @@ type Part struct {
 	Bytes int64
 }
 
-var (
-	partEtcd     = Part{"etcd", FloorEtcd}
-	partPostgres = Part{"PostgreSQL, Patroni and HAProxy", FloorPostgres}
-	partGarage   = Part{"Garage", FloorGarage}
-	partCaddy    = Part{"Caddy", FloorCaddy}
-	partGate     = Part{"oauth2-proxy", FloorGate}
-	partUptime   = Part{"the uptime monitor", FloorUptime}
-	partApps     = Part{"Pocket ID and an app", FloorApps}
-)
-
-// roleParts is what each role runs. A part two roles run is counted once
-// on a host that holds both: a witness on a data site runs one etcd, and a
-// monitor beside the gateway is served by the gateway's Caddy.
-var roleParts = map[config.Role][]Part{
-	config.RoleData:    {partEtcd, partPostgres, partGarage},
-	config.RoleWitness: {partEtcd},
-	config.RoleStorage: {partGarage},
-	config.RoleGateway: {partCaddy, partGate},
-	config.RoleMonitor: {partCaddy, partUptime},
-	config.RoleApps:    {partApps},
+// Runs is what a host runs, as its floor counts it. Each part is counted
+// once however many roles run it: a witness on a data site runs one etcd,
+// and a monitor beside the gateway is served by the gateway's Caddy.
+type Runs struct {
+	Etcd, Postgres, Garage, Caddy, Gate, Uptime, Apps bool
 }
 
-// Parts is everything a host with roles runs, the host itself first, each
-// part once.
-func Parts(roles []config.Role) []Part {
+// ForRoles is what a host with roles runs, as far as its roles say, which
+// is all site admit knows: a data site is counted with Garage, which
+// storage.garage.sites usually places there, and a gateway with
+// oauth2-proxy, which runs there when an app is gated. RunsCaddy is
+// whether the site runs the toolkit's Caddy: the gateway, and a monitor
+// that serves its own hostname rather than sitting behind its owner's web
+// server.
+func ForRoles(roles []config.Role, runsCaddy bool) Runs {
+	has := func(r config.Role) bool { return slices.Contains(roles, r) }
+	return Runs{
+		Etcd:     has(config.RoleData) || has(config.RoleWitness),
+		Postgres: has(config.RoleData),
+		Garage:   has(config.RoleData) || has(config.RoleStorage),
+		Caddy:    runsCaddy,
+		Gate:     has(config.RoleGateway),
+		Uptime:   has(config.RoleMonitor),
+		Apps:     has(config.RoleApps),
+	}
+}
+
+// ForSite is what site runs in cfg: etcd on the members of etcd.members,
+// the database on cluster.sites, Garage on storage.garage.sites, Caddy
+// where Site.RunsCaddy says, oauth2-proxy where the gate app is pinned,
+// the uptime monitor on a monitor and the apps on an apps site.
+func ForSite(cfg *config.Config, site string) Runs {
+	s := cfg.Sites[site]
+	gate, gated := cfg.Apps[config.GateApp]
+	return Runs{
+		Etcd:     slices.Contains(cfg.Etcd.Members, site),
+		Postgres: slices.Contains(cfg.Cluster.Sites, site),
+		Garage:   slices.Contains(cfg.Storage.Garage.Sites, site),
+		Caddy:    s.RunsCaddy(),
+		Gate:     gated && gate.Blueprint == config.BlueprintOAuth2Proxy && gate.Placement.Site == site,
+		Uptime:   s.Has(config.RoleMonitor),
+		Apps:     s.Has(config.RoleApps),
+	}
+}
+
+// Parts is everything r counts, the host itself first.
+func (r Runs) Parts() []Part {
 	out := []Part{{"the host and its Docker", FloorBase}}
-	for _, r := range roles {
-		for _, p := range roleParts[r] {
-			if !slices.Contains(out, p) {
-				out = append(out, p)
-			}
+	for _, c := range []struct {
+		runs bool
+		part Part
+	}{
+		{r.Etcd, Part{"etcd", FloorEtcd}},
+		{r.Postgres, Part{"PostgreSQL, Patroni and HAProxy", FloorPostgres}},
+		{r.Garage, Part{"Garage", FloorGarage}},
+		{r.Caddy, Part{"Caddy", FloorCaddy}},
+		{r.Gate, Part{"oauth2-proxy", FloorGate}},
+		{r.Uptime, Part{"the uptime monitor", FloorUptime}},
+		{r.Apps, Part{"Pocket ID and an app", FloorApps}},
+	} {
+		if c.runs {
+			out = append(out, c.part)
 		}
 	}
 	return out
 }
 
-// Floor is the least memory a host with roles needs: the sum of Parts.
-func Floor(roles []config.Role) int64 {
+// Floor is the least memory a host running r needs: the sum of its Parts.
+func (r Runs) Floor() int64 {
 	var n int64
-	for _, p := range Parts(roles) {
+	for _, p := range r.Parts() {
 		n += p.Bytes
 	}
 	return n
@@ -211,39 +258,51 @@ func Floor(roles []config.Role) int64 {
 
 // SwapShare is the most of a floor swap may make up: a quarter. Swap holds
 // what a host keeps and rarely touches, which is what lets it ride out an
-// apt run, but etcd and PostgreSQL slow to the speed of the disk when
-// what they use is swapped out, so the rest must be RAM.
+// apt run, but a process whose working memory is swapped out slows to the
+// speed of the disk, etcd and PostgreSQL above all, so the rest must be
+// RAM.
 const SwapShare = 4
 
-// Verdict is a host's memory against its roles' floor.
+// Verdict is a host's memory against its floor.
 type Verdict struct {
-	Roles     []config.Role
-	Parts     []Part
-	Floor     int64
-	RAM, Swap int64
+	Roles []config.Role
+	Runs  Runs
+	Parts []Part
+	Floor int64
+	// RAM is MemTotal; Swap the swap on that is not zram, which counts
+	// toward the floor; ZRAM the zram swap on, which does not, since it
+	// keeps what it holds in RAM.
+	RAM, Swap, ZRAM int64
 	// Counted is RAM and the swap that counts toward the floor.
 	Counted int64
 }
 
-// Judge is f against the floor of roles. Only swap that is on counts, and
-// it counts up to a quarter of the floor.
-func Judge(f Facts, roles []config.Role) Verdict {
-	v := Verdict{Roles: roles, Parts: Parts(roles), Floor: Floor(roles), RAM: f.MemTotal}
+// Judge is f against the floor of what a host with roles runs. Only swap
+// that is on counts, and not zram's, and it counts up to a quarter of the
+// floor.
+func Judge(f Facts, roles []config.Role, runs Runs) Verdict {
+	v := Verdict{Roles: roles, Runs: runs, Parts: runs.Parts(), Floor: runs.Floor(), RAM: f.MemTotal}
 	if f.Active {
-		v.Swap = f.SwapTotal
+		v.ZRAM = min(f.ZRAMOn, f.SwapTotal)
+		v.Swap = f.SwapTotal - v.ZRAM
 	}
 	v.Counted = v.RAM + min(v.Swap, v.Floor/SwapShare)
 	return v
 }
 
-// Short reports whether the host has less than its roles need.
+// Short reports whether the host has less than its floor.
 func (v Verdict) Short() bool { return v.Counted < v.Floor }
 
 // Line is the verdict in a line.
 func (v Verdict) Line() string {
 	swap := "no swap on"
-	if v.Swap > 0 {
+	switch {
+	case v.Swap > 0 && v.ZRAM > 0:
+		swap = fmt.Sprintf("%s of swap and %s of zram", Size(v.Swap), Size(v.ZRAM))
+	case v.Swap > 0:
 		swap = Size(v.Swap) + " of swap"
+	case v.ZRAM > 0:
+		swap = Size(v.ZRAM) + " of zram and no other swap"
 	}
 	if v.Short() {
 		return fmt.Sprintf("%s of RAM and %s, under the %s its roles need", Size(v.RAM), swap, Size(v.Floor))
@@ -251,7 +310,8 @@ func (v Verdict) Line() string {
 	return fmt.Sprintf("%s of RAM and %s, at least the %s its roles need", Size(v.RAM), swap, Size(v.Floor))
 }
 
-// Explain is where the floor comes from, and the swap rule.
+// Explain is where the floor comes from and the swap rule, in the words of
+// what the host runs.
 func (v Verdict) Explain() []string {
 	var names, parts []string
 	for _, r := range v.Roles {
@@ -260,11 +320,31 @@ func (v Verdict) Explain() []string {
 	for _, p := range v.Parts {
 		parts = append(parts, Size(p.Bytes)+" for "+p.Name)
 	}
-	return []string{
-		fmt.Sprintf("Its roles (%s) need %s: %s.", strings.Join(names, ", "), Size(v.Floor), strings.Join(parts, ", ")),
-		fmt.Sprintf("Swap counts toward it up to a quarter of it, %s here: etcd and PostgreSQL slow to the speed of the disk when what they use is swapped out, so the rest must be RAM.", Size(v.Floor/SwapShare)),
-		"Short of memory, the kernel kills processes, and an etcd member that stalls answers Patroni late and costs the cluster a vote.",
+	var slow []string
+	if v.Runs.Etcd {
+		slow = append(slow, "etcd")
 	}
+	if v.Runs.Postgres {
+		slow = append(slow, "PostgreSQL")
+	}
+	why := "a process whose working memory is swapped out slows to the speed of the disk"
+	switch len(slow) {
+	case 1:
+		why = slow[0] + " slows to the speed of the disk when what it uses is swapped out"
+	case 2:
+		why = strings.Join(slow, " and ") + " slow to the speed of the disk when what they use is swapped out"
+	}
+	out := []string{
+		fmt.Sprintf("Its roles (%s) need %s: %s.", strings.Join(names, ", "), Size(v.Floor), strings.Join(parts, ", ")),
+		fmt.Sprintf("Swap counts toward it up to a quarter of it, %s here: %s, so the rest must be RAM.", Size(v.Floor/SwapShare), why),
+	}
+	if v.ZRAM > 0 {
+		out = append(out, "zram swap does not count: it keeps what it holds in RAM.")
+	}
+	if v.Runs.Etcd {
+		return append(out, "Short of memory, the kernel kills processes, and an etcd member that stalls answers Patroni late and costs the cluster a vote.")
+	}
+	return append(out, "Short of memory, the kernel kills processes.")
 }
 
 // Size is n bytes for a message: MiB under a GiB, GiB to one place above.

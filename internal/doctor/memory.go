@@ -56,7 +56,11 @@ func Swap(probes []MemoryProbe) []Finding {
 		case why != "":
 			out = append(out, Finding{Section: SectionSwap, Level: Warn, Line: fmt.Sprintf("%s: could not read the host's memory and swap", p.Site), More: []string{why}})
 		case f.Active:
-			out = append(out, Finding{Section: SectionSwap, Level: OK, Line: fmt.Sprintf("%s: on, %s", p.Site, hostmem.Size(f.SwapTotal))})
+			line := fmt.Sprintf("%s: on, %s", p.Site, hostmem.Size(f.SwapTotal))
+			if f.ZRAMOn > 0 {
+				line += fmt.Sprintf(", %s of it zram", hostmem.Size(f.ZRAMOn))
+			}
+			out = append(out, Finding{Section: SectionSwap, Level: OK, Line: line})
 		case len(configured) > 0:
 			out = append(out, Finding{Section: SectionSwap, Level: Warn,
 				Line: fmt.Sprintf("%s: configured but not on (%s)", p.Site, strings.Join(configured, ", ")),
@@ -71,7 +75,7 @@ func Swap(probes []MemoryProbe) []Finding {
 }
 
 // Memory compares each site's RAM, and the swap it has on, with the least
-// its roles need (hostmem.Floor): under it is a warning, since the site
+// what the site runs in cfg needs (hostmem.ForSite): under it is a warning, since the site
 // runs, but it is where the kernel starts killing processes. A probe
 // doctor could not read has its warning under Swap and nothing here.
 func Memory(cfg *config.Config, probes []MemoryProbe) []Finding {
@@ -86,7 +90,7 @@ func Memory(cfg *config.Config, probes []MemoryProbe) []Finding {
 				More: []string{"/proc/meminfo gave no MemTotal, so nothing says the host has the memory its roles need."}})
 			continue
 		}
-		v := hostmem.Judge(f, cfg.Sites[p.Site].Roles)
+		v := hostmem.Judge(f, cfg.Sites[p.Site].Roles, hostmem.ForSite(cfg, p.Site))
 		if !v.Short() {
 			out = append(out, Finding{Section: SectionMemory, Level: OK, Line: p.Site + ": " + v.Line()})
 			continue

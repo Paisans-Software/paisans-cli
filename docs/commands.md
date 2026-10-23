@@ -906,8 +906,8 @@ paisans site admit --site home-a --ssh owner@home-a.example.org --execute   # fr
   5 GB free beside it. Where it makes none, it warns, and `--swapfile`
   refuses.
 * **Memory:** a host whose RAM is under the floor of the request's roles
-  is warned about, never refused; swap that is on, and the swapfile
-  `--swapfile` makes, count for up to a quarter of the floor. *A host's
+  is warned about, never refused; swap that is on, zram excepted, and the
+  swapfile `--swapfile` makes, count for up to a quarter of the floor. *A host's
   memory is measured against its roles* in `README.md` gives the floors.
 * **ufw not active:** `--enable-ufw`, or a yes at a terminal, where admit
   asks, adds these steps after the deployment's own rules, in this order:

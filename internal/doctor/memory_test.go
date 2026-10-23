@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-cli/internal/config"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -58,6 +59,9 @@ func TestSwap(t *testing.T) {
 			[]string{"kernel kill a process", "swapon -a"}},
 		{"unreadable", MemoryProbe{Site: "vm", Err: "Permission denied"}, Warn, "vm: could not read the host's memory and swap", []string{"Permission denied"}},
 		{"garbled", MemoryProbe{Site: "vm", Out: "mem-total 4G\n"}, Warn, "vm: could not read the host's memory and swap", []string{`unreadable mem-total line "4G"`}},
+		{"empty", MemoryProbe{Site: "vm", Out: ""}, Warn, "vm: could not read the host's memory and swap", []string{"no mem-total line"}},
+		{"cut short", MemoryProbe{Site: "vm", Out: "mem-total 4113297408\n"}, Warn, "vm: could not read the host's memory and swap", []string{"no swap-active line"}},
+		{"on, partly zram", MemoryProbe{Site: "home-a", Out: memOut(gib4, gib2, true, "zram") + "zram-on 1073741824\n"}, OK, "home-a: on, 2.0 GiB, 1.0 GiB of it zram", nil},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			fs := Swap([]MemoryProbe{c.probe})
@@ -103,6 +107,8 @@ func TestMemory(t *testing.T) {
 		{"monitor, 1 GiB, no swap", MemoryProbe{Site: "watch", Out: memOut(gib1, "0", false)}, OK,
 			"watch: 957 MiB of RAM and no swap on, at least the 896 MiB its roles need"},
 		{"RAM unread", MemoryProbe{Site: "vm", Out: memOut("", "0", false)}, Warn, "vm: could not read the host's RAM"},
+		{"data and apps, zram does not count", MemoryProbe{Site: "home-a", Out: memOut("3006477107", gib2, true, "zram") + "zram-on " + gib2 + "\n"}, Warn,
+			"home-a: 2.8 GiB of RAM and 2.0 GiB of zram and no other swap, under the 3.0 GiB its roles need"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			fs := Memory(cfg, []MemoryProbe{c.probe})
@@ -126,6 +132,44 @@ func TestMemory(t *testing.T) {
 	// A probe doctor could not read has its warning under swap alone.
 	if fs := Memory(cfg, []MemoryProbe{{Site: "vm", Err: "Permission denied"}}); len(fs) != 0 {
 		t.Errorf("an unread probe judged twice:\n%s", dump(fs))
+	}
+}
+
+// The floor doctor judges by follows the configuration, not the roles
+// alone: Garage where storage.garage.sites places it, Caddy on a monitor
+// only when it serves its own hostname.
+func TestMemoryFollowsPlacement(t *testing.T) {
+	const gib3 = "3221225472"
+	cfg := fixture(t)
+	cfg.Storage.Garage.Sites = []string{"home-a"}
+	// home-b is a data site outside storage.garage.sites: 2.8 GiB.
+	f := Memory(cfg, []MemoryProbe{{Site: "home-b", Out: memOut("2952790016", "0", false)}})
+	if len(f) != 1 || f[0].Level != OK || f[0].Line != "home-b: 2.8 GiB of RAM and no swap on, at least the 2.8 GiB its roles need" {
+		t.Errorf("data site outside garage sites:\n%s", dump(f))
+	}
+	// An apps site storage.garage.sites names is counted with Garage.
+	cfg = fixture(t)
+	cfg.Sites["apps-only"] = config.Site{Roles: []config.Role{config.RoleApps}}
+	cfg.Storage.Garage.Sites = append(cfg.Storage.Garage.Sites, "apps-only")
+	f = Memory(cfg, []MemoryProbe{{Site: "apps-only", Out: memOut(gib1, "0", false)}})
+	if len(f) != 1 || f[0].Level != Warn || !strings.Contains(f[0].Line, "under the 1.8 GiB its roles need") || !strings.Contains(strings.Join(f[0].More, "\n"), "256 MiB for Garage") {
+		t.Errorf("apps site in garage sites:\n%s", dump(f))
+	}
+	// A monitor behind its owner's web server runs no Caddy: 768 MiB.
+	cfg = fixture(t)
+	watch := cfg.Sites["watch"]
+	watch.WebServer = &config.WebServer{ManagedBy: config.ManagedByExternal}
+	cfg.Sites["watch"] = watch
+	f = Memory(cfg, []MemoryProbe{{Site: "watch", Out: memOut(gib3, "0", false)}})
+	if len(f) != 1 || !strings.Contains(f[0].Line, "at least the 768 MiB its roles need") {
+		t.Errorf("monitor behind its owner's web server:\n%s", dump(f))
+	}
+	// A gateway with no gated app runs no oauth2-proxy: 896 MiB.
+	cfg = fixture(t)
+	delete(cfg.Apps, config.GateApp)
+	f = Memory(cfg, []MemoryProbe{{Site: "vm", Out: memOut(gib1, "0", false)}})
+	if len(f) != 1 || f[0].Level != OK || !strings.Contains(f[0].Line, "at least the 896 MiB its roles need") {
+		t.Errorf("gateway without the gate:\n%s", dump(f))
 	}
 }
 

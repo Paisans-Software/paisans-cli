@@ -591,7 +591,7 @@ func parseFacts(out, user string) (Facts, error) {
 				return f, fmt.Errorf("unreadable data-avail line %q", v)
 			}
 			f.Data.Avail = n
-		case "mem-total", "swap-total", "swap-active", "swap-partition", "swap-fstab", "swap-zram", "swapfile":
+		case "mem-total", "swap-total", "zram-on", "swap-active", "swap-partition", "swap-fstab", "swap-zram", "swapfile":
 			if _, err := f.Swap.Read(key, v); err != nil {
 				return f, err
 			}
