@@ -786,8 +786,8 @@ func TestEvictGoesOnPastAnotherEntryWithNoBuild(t *testing.T) {
 
 // On a data site, stopping the user's manager stops Patroni, and Docker
 // kills one that outlasts its stop timeout with the watchdog armed. The
-// manager's step then disarms the watchdog as root, once nothing holds it,
-// so the host does not reboot.
+// manager's step disarms the watchdog as root the moment Patroni lets go of
+// it, so the host does not reboot.
 func TestEvictDisarmsTheWatchdogAfterTheManagerStops(t *testing.T) {
 	plan, err := hostadmit.BuildEvict(withEntries(evicted("home-a", gateway)()), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
 	if err != nil {
@@ -802,9 +802,14 @@ func TestEvictDisarmsTheWatchdogAfterTheManagerStops(t *testing.T) {
 	if manager == nil {
 		t.Fatalf("no manager step:\n%s", plan.Text())
 	}
-	stop, disarm := strings.Index(manager.Command, "systemctl stop user@1001.service"), strings.Index(manager.Command, "printf V > /dev/watchdog")
-	if stop < 0 || disarm < stop {
-		t.Errorf("the manager step does not disarm the watchdog after the manager stops: %s", manager.Command)
+	// The disarm loop starts before the stop and runs beside it, so a
+	// Patroni killed while slower containers still stop is disarmed in time.
+	loop, stop := strings.Index(manager.Command, "while :; do disarm"), strings.Index(manager.Command, "systemctl stop user@1001.service")
+	if loop < 0 || stop < loop || !strings.Contains(manager.Command, "printf V > /dev/watchdog") {
+		t.Errorf("the manager step does not disarm the watchdog around the stop: %s", manager.Command)
+	}
+	if titleIndex(plan, "disarm the watchdog") >= 0 {
+		t.Errorf("a separate disarm step beside the manager's:\n%s", plan.Text())
 	}
 	for _, w := range plan.Warnings {
 		if strings.Contains(w.Hint, "manager stops its Patroni") {
@@ -824,4 +829,37 @@ func TestEvictOfASiteWithoutTheWatchdogDoesNotTouchIt(t *testing.T) {
 			t.Errorf("the manager step touches the watchdog on a site without one: %s", s.Command)
 		}
 	}
+}
+
+// An evict resumed after its manager stopped, with the watchdog still
+// running, disarms it in a step of its own; one with the timer stopped, as
+// after a reboot, plans none.
+func TestEvictResumedDisarmsAWatchdogStillRunning(t *testing.T) {
+	for _, c := range []struct {
+		state string
+		want  bool
+	}{{"active", true}, {"inactive", false}} {
+		h := evicted("home-a", gateway)().with("linger", "no").with("manager", "inactive").with("watchdog-state", c.state)
+		plan, err := hostadmit.BuildEvict(withEntries(h), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		at := titleIndex(plan, "disarm the watchdog")
+		if (at >= 0) != c.want {
+			t.Errorf("watchdog %s: disarm step planned %v, want %v:\n%s", c.state, at >= 0, c.want, plan.Text())
+		}
+		if c.want && at > titleIndex(plan, "give the watchdog back to root") {
+			t.Errorf("the disarm runs after the device goes back to root")
+		}
+	}
+}
+
+// titleIndex is the index of the step titled title, or -1.
+func titleIndex(plan *hostadmit.Plan, title string) int {
+	for i, s := range plan.Steps {
+		if s.Title == title {
+			return i
+		}
+	}
+	return -1
 }

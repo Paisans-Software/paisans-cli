@@ -43,6 +43,9 @@ type evictor struct {
 	// recordless are the tokens of the other deployments the registry
 	// claims the host for that have no admission record here.
 	recordless []string
+	// disarms is whether the manager's stop disarms the watchdog, so no
+	// step of its own does.
+	disarms    bool
 	beforeGone bool
 	// installedGone is whether the plan removes /etc/paisans/installed,
 	// and installedKept whether it keeps it with the packages it names.
@@ -282,9 +285,9 @@ func (e *evictor) remove(title, describe, command string) {
 // every container, and ends its sessions. The account is expired first, so
 // no login, by key or otherwise, starts the manager again before userdel.
 // On a data site that stops Patroni, which Docker kills if it outlasts its
-// stop timeout, with the watchdog still armed. Once the manager has stopped
-// nothing holds the device, so the same step disarms it as root
-// (disarmWatchdog) and the host does not reboot.
+// stop timeout, with the watchdog still armed, while slower containers keep
+// the stop going past the watchdog's timeout. So the stop runs inside
+// disarmAround, which disarms the watchdog the moment Patroni lets go of it.
 func (e *evictor) manager() error {
 	u, user := e.f.User, e.in.Request.User
 	if !u.Exists || !u.Linger && !u.ManagerActive {
@@ -293,20 +296,34 @@ func (e *evictor) manager() error {
 	stop := fmt.Sprintf("systemctl stop user@%d.service", u.UID)
 	describe := fmt.Sprintf("expire %s so no login starts it again, disable linger, and stop user@%d.service, which stops its Docker daemon and every container", user, u.UID)
 	if e.f.Files[watchdogRulePath(e.d)].Present {
-		stop += " && " + disarmWatchdog
-		describe += ", then disarm the watchdog its Patroni held, so a Patroni killed while it led does not reboot the host"
+		stop = disarmAround(stop)
+		describe += ", disarming the watchdog its Patroni held as soon as it lets go, so a Patroni killed while it led does not reboot the host"
+		e.disarms = true
 	}
 	e.remove("stop "+user+"'s manager", describe,
 		fmt.Sprintf("usermod --expiredate 1 %s && loginctl disable-linger %s && %s && { loginctl terminate-user %s 2>/dev/null || true; }", user, user, stop, user))
 	return nil
 }
 
-// disarmWatchdog writes the magic close to /dev/watchdog, which stops a
-// timer Patroni left armed (Linux, Documentation/watchdog/watchdog-api.rst,
-// "Magic Close feature"). Only one process may hold the device, so it tries
-// for up to 5 s while another does. A kernel built with nowayout ignores the
-// close; Ubuntu's softdog is not built that way.
-const disarmWatchdog = `{ if [ -e /dev/watchdog ]; then i=0; until { printf V > /dev/watchdog; } 2>/dev/null; do i=$((i+1)); if [ "$i" -ge 5 ]; then echo '/dev/watchdog is held by another process, so it could not be disarmed' >&2; exit 1; fi; sleep 1; done; fi; }`
+// disarmAround runs stop, as root, while a loop beside it writes the magic
+// close to /dev/watchdog whenever the timer runs, which stops a timer
+// Patroni left armed (Linux, Documentation/watchdog/watchdog-api.rst, "Magic
+// Close feature"). Only one process may hold the device, so the write fails
+// while Patroni holds it and lands within half a second of Patroni letting
+// go, however long the rest of stop takes. The device is opened only while
+// the timer runs, since opening a stopped one starts it. Once stop returns
+// the timer must be stopped within 10 s, or the command fails; a driver with
+// nowayout set cannot be stopped, and the command says so.
+func disarmAround(stop string) string {
+	return `{ w=/sys/class/watchdog/watchdog0; ` +
+		`armed() { [ "$(cat $w/state 2>/dev/null)" = active ]; }; ` +
+		`disarm() { if armed; then { printf V > /dev/watchdog; } 2>/dev/null; fi; true; }; ` +
+		`( while :; do disarm; sleep 0.5; done ) & d=$!; ` +
+		stop + `; s=$?; ` +
+		`i=0; while armed && [ $i -lt 20 ]; do disarm; sleep 0.5; i=$((i+1)); done; kill $d 2>/dev/null; ` +
+		`[ $s -eq 0 ] || exit $s; ` +
+		`if armed; then if [ "$(cat $w/nowayout 2>/dev/null)" = 1 ]; then echo 'the watchdog is still running: its driver has nowayout set, so nothing can stop it and the host reboots within its timeout' >&2; else echo 'the watchdog is still running: /dev/watchdog is held by another process, so it could not be disarmed' >&2; fi; exit 1; fi; }`
+}
 
 // processes kills every process of the user and checks that none is
 // left, whenever the user exists: one the manager's stop missed, started
@@ -501,6 +518,9 @@ func (e *evictor) helper() error {
 // site that is no longer a data site, and stops loading its module at boot.
 func (e *evictor) watchdog() error {
 	rule, unit := watchdogRulePath(e.d), e.d.Prefix()+"-watchdog.service"
+	if e.f.Files[rule].Present && e.f.WatchdogActive && !e.disarms {
+		e.remove("disarm the watchdog", "its timer runs with nothing of this deployment left to keep it, so it would reboot the host: write the magic close to /dev/watchdog", disarmAround("true"))
+	}
 	if e.f.Files[rule].Present {
 		e.remove("give the watchdog back to root", "remove "+rule+" and make the device root's again", "rm -f "+rule+" && "+udevTrigger+" && "+giveBack)
 	}

@@ -85,7 +85,10 @@ type Facts struct {
 	WatchdogRules []string
 	// WatchdogDevs is each watchdog node's owner, by path.
 	WatchdogDevs map[string]int
-	Records      []string
+	// WatchdogActive is whether /dev/watchdog's timer is running, as
+	// /sys/class/watchdog/watchdog0/state says.
+	WatchdogActive bool
+	Records        []string
 	// OrphanDropIns are the deployment's mesh drop-ins the probe found by
 	// the deployment they name while the user does not exist: a user
 	// deleted by hand leaves its own.
@@ -556,6 +559,8 @@ func parseFacts(out, user string) (Facts, error) {
 				return f, fmt.Errorf("unreadable watchdog-dev line %q", v)
 			}
 			f.WatchdogDevs[dev] = uid
+		case "watchdog-state":
+			f.WatchdogActive = v == "active"
 		case "record":
 			f.Records = append(f.Records, v)
 		case "mesh-unit":

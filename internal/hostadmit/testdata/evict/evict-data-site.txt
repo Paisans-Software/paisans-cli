@@ -1,9 +1,9 @@
 evict f2a9c4e1-0b7d-4c3a-9e2f-5a6b7c8d9e01 as paisans-f2a9 on fake (ubuntu 24.04)
 
 step 1: stop paisans-f2a9's manager
-  evict: expire paisans-f2a9 so no login starts it again, disable linger, and stop user@1001.service, which stops its Docker daemon and every container, then disarm the watchdog its Patroni held, so a Patroni killed while it led does not reboot the host
+  evict: expire paisans-f2a9 so no login starts it again, disable linger, and stop user@1001.service, which stops its Docker daemon and every container, disarming the watchdog its Patroni held as soon as it lets go, so a Patroni killed while it led does not reboot the host
   run:
-    $ usermod --expiredate 1 paisans-f2a9 && loginctl disable-linger paisans-f2a9 && systemctl stop user@1001.service && { if [ -e /dev/watchdog ]; then i=0; until { printf V > /dev/watchdog; } 2>/dev/null; do i=$((i+1)); if [ "$i" -ge 5 ]; then echo '/dev/watchdog is held by another process, so it could not be disarmed' >&2; exit 1; fi; sleep 1; done; fi; } && { loginctl terminate-user paisans-f2a9 2>/dev/null || true; }
+    $ usermod --expiredate 1 paisans-f2a9 && loginctl disable-linger paisans-f2a9 && { w=/sys/class/watchdog/watchdog0; armed() { [ "$(cat $w/state 2>/dev/null)" = active ]; }; disarm() { if armed; then { printf V > /dev/watchdog; } 2>/dev/null; fi; true; }; ( while :; do disarm; sleep 0.5; done ) & d=$!; systemctl stop user@1001.service; s=$?; i=0; while armed && [ $i -lt 20 ]; do disarm; sleep 0.5; i=$((i+1)); done; kill $d 2>/dev/null; [ $s -eq 0 ] || exit $s; if armed; then if [ "$(cat $w/nowayout 2>/dev/null)" = 1 ]; then echo 'the watchdog is still running: its driver has nowayout set, so nothing can stop it and the host reboots within its timeout' >&2; else echo 'the watchdog is still running: /dev/watchdog is held by another process, so it could not be disarmed' >&2; fi; exit 1; fi; } && { loginctl terminate-user paisans-f2a9 2>/dev/null || true; }
 
 step 2: kill paisans-f2a9's processes
   evict: expire paisans-f2a9, kill every process of uid 1001 or of its subordinate range and check that none is left, before anything that fences it goes
