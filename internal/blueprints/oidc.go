@@ -105,8 +105,8 @@ func OIDCClient(blueprint config.Blueprint, hostname, app string) (OIDCClientSpe
 		DefaultMemberGroup: o.DefaultMemberGroup,
 		ReadsGroups:        o.ReadsGroups,
 		ExtraGroupsSetting: o.ExtraGroupsSetting,
+		NoLaunch:           o.NoLaunch,
 	}
-	spec.NoLaunch = o.NoLaunch
 	if !o.NoLaunch {
 		spec.LaunchURL = LaunchURL(blueprint, hostname, "")
 	}

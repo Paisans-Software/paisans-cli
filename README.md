@@ -8801,8 +8801,9 @@ an existing client holding one of those same toolkit values plans `clear launch
 URL for <app>`: a `PUT /api/oidc/clients/<id>` that sends `launchURL` as an
 empty string and every other field back as read.
 
-Any other value, either way, is an operator's, is reported as already there with a note,
-and is never overwritten. If `sso_dashboard_link` is set and the client holds a
+Any other value is an operator's and is never overwritten. With a launch URL
+the plan reports it as already there, not the one wanted; without one, it says
+the blueprint does not use it and leaves it as it is. If `sso_dashboard_link` is set and the client holds a
 different custom value, the command also warns, naming both, and still changes
 nothing: clear the launch URL in Pocket ID's admin UI and re-run to use the
 setting, or remove the setting or make it match to keep the client's. The list

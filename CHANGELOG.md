@@ -18,7 +18,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Changed
 
-- The `account` blueprint's client has no launch URL, and `deployment apply` and `oidc client create` clear one the toolkit set on an existing client, leaving any an operator set.
+- `deployment apply` and `oidc client create` clear a toolkit-set launch URL from the client of any `no_launch` blueprint, now `account` and the gate's `oauth2-proxy`, and leave one an operator set.
 - `init` moves a never-applied site's WireGuard listen port, when another deployment on the host holds it and the endpoint is unset or a port alone, to a free one and says which port to open.
 
 ### Fixed

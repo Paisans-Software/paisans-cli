@@ -696,6 +696,33 @@ func TestApplyReportsAnOverwriteItHeldBack(t *testing.T) {
 	}
 }
 
+// An account client holding a launch URL the toolkit set has it cleared by
+// deployment apply, since the account blueprint has none.
+func TestApplyClearsTheAccountClientsToolkitLaunchURL(t *testing.T) {
+	fake := withIDPFake(t)
+	held := "https://account.example.org"
+	fake.others["account"].LaunchURL = &held
+	c := stepFor(t, "home-a", secretsWithout(t, "talk"))
+	rec := &ui.Recorder{}
+	c.report = rec
+	planFor := func([]string) (*apply.Plan, error) { return &apply.Plan{Site: "home-a"}, nil }
+	var err error
+	captureOutput(t, func() {
+		if _, err = planWithClients(c, planFor, true); err == nil {
+			err = c.ensure(true, false)
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rec.Has("done", "clear launch URL for account") {
+		t.Errorf("the launch URL was not cleared as a step:\n%s", rec.Lines())
+	}
+	if got := fake.others["account"].LaunchURL; got != nil && *got != "" {
+		t.Errorf("the account client still holds launch URL %s", *got)
+	}
+}
+
 // deployment apply --execute does not list the client plan: the read only planning call
 // lists nothing without --verbose, the executing call reports its mutations
 // as steps, and a plan warning shows once although both calls plan.
