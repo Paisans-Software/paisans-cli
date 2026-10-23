@@ -45,6 +45,9 @@ func TestSiteRemoveNamesTheBlockTheOwnerRemoves(t *testing.T) {
 	if !strings.Contains(ran, "rm -f -- '"+referenceFile+"'") {
 		t.Errorf("the reference file was not removed:\n%s", ran)
 	}
+	if !strings.Contains(ran, "-maxdepth 0 -type d -empty -delete") || !strings.Contains(ran, "'/srv/paisans/f2a9/web-server'") {
+		t.Errorf("the reference directory was not removed once empty:\n%s", ran)
+	}
 	for _, c := range h.commands {
 		for _, server := range []string{"caddy reload", "caddy validate", "nginx -", "apachectl", "docker exec", "systemctl reload", "/etc/caddy"} {
 			if strings.Contains(c, server) {

@@ -24,6 +24,7 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ### Fixed
 
+- `site remove` and `app remove` without `--delete-data` remove only the directories their own files were in, once empty, so kept data keeps its empty directories and PostgreSQL starts when the site returns.
 - `site prepare` warns about a host whose only swap is zram, as `site admit` and `doctor` do, rather than reporting its swap as on.
 - `doctor`'s self-check and `deployment apply`'s gateway step report a 443 answering in anything but TLS as another server holding the port, and doctor advises a refused connection apart from a timeout.
 - `dns init` updates an A or AAAA record it made for this deployment to the address now declared, so a gateway whose public address changed needs no records deleted by hand.
