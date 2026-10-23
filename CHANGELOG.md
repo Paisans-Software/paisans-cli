@@ -10,6 +10,8 @@ changes share a bullet. Detailed notes are on the corresponding
 
 ## [Unreleased]
 
+## [0.3.0-rc.6] - 2026-10-23
+
 ### Added
 
 - `--ssh` and `--from` accept ssh config aliases, `[user@]alias[:port]`, and connect through them; a destination given without a user logs in as its ssh config `User`, or your local login.
@@ -260,7 +262,8 @@ changes share a bullet. Detailed notes are on the corresponding
 - The uptime monitor requires STARTTLS under `security: starttls`, so mail and SMTP credentials are never sent in plaintext when a relay does not offer it.
 - The gateway refuses any request to Pocket ID that carries an `X-API-Key` header with 403, so Pocket ID's API keys work only on the mesh.
 
-[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.5...develop
+[Unreleased]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.6...develop
+[0.3.0-rc.6]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.5...v0.3.0-rc.6
 [0.3.0-rc.5]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.4...v0.3.0-rc.5
 [0.3.0-rc.4]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.3...v0.3.0-rc.4
 [0.3.0-rc.3]: https://github.com/Paisans-Software/paisans-cli/compare/v0.3.0-rc.2...v0.3.0-rc.3
