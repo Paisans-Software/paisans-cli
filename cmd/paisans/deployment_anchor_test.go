@@ -89,6 +89,9 @@ func TestConfigRecoverAnchorsOnTheNamedKey(t *testing.T) {
 	if !strings.Contains(rep.String(), "anchored on "+fingerprint(t, pub)) {
 		t.Fatalf("the gather does not name the key that anchored it:\n%s", rep.String())
 	}
+	if !strings.Contains(rep.String(), "confirm the root "+shas[0]+" with another operator") {
+		t.Fatalf("recover does not ask to confirm the full root hash:\n%s", rep.String())
+	}
 	l := configstore.Local{Dir: dir}
 	if l.HasFiles() {
 		t.Fatal("a dry run wrote the files")
@@ -493,96 +496,112 @@ func onOldIncarnation(t *testing.T, in incarnations) (configstore.Local, string)
 	return l, cfg
 }
 
-// wantOn fails unless the workstation's files, head, pin and seen record
-// are the newer incarnation's.
-func wantOn(t *testing.T, l configstore.Local, in incarnations) {
-	t.Helper()
-	if got, _ := l.Files(); !got.Equal(in.fn2) {
-		t.Fatal("the files are not the current line's head")
-	}
-	if h, _ := l.Head(); h != in.n2 {
-		t.Fatalf("head %s, want %s", h, in.n2)
-	}
-	if r, _ := l.Root(); r != in.n1 {
-		t.Fatalf("root %s, want %s", r, in.n1)
-	}
-	if rev, sha, _ := l.Seen(); rev != 2 || sha != in.n2 {
-		t.Fatalf("seen %d %s, want 2 %s", rev, sha, in.n2)
-	}
-}
-
-// After a legitimate redeploy the sites serve only the newer incarnation,
-// which starts again at revision 1. A workstation pinned to the older one
-// refuses rather than staying on its cache, and following the refusal,
-// pull --root with the current root, moves it onto the current line; plain
-// pulls then work.
-func TestConfigPullAfterARedeployFollowsTheRefusal(t *testing.T) {
+// A workstation pinned to the older incarnation, whose sites now serve only
+// the newer one after a redeploy, refuses rather than judge from its cache,
+// names no root the sites served, and says to recover from the current root.
+// A different --root is refused against the pin, and no refusal lowers the
+// seen record. Following the advice recovers the current line.
+func TestConfigPullWhenTheSitesServeNoneOfThePin(t *testing.T) {
 	in := newIncarnations(t)
 	l, cfg := onOldIncarnation(t, in)
 	sitesServe(in.newAnswer, in.newAnswer)
 	var out bytes.Buffer
 	err := runDeployment([]string{"pull", "--config", cfg, "--execute"}, noTerminalStdin(), &out)
 	text := problemText(err)
-	if !strings.Contains(text, "serve no version of the pinned root "+in.o1) || !strings.Contains(text, "paisans deployment pull --root <sha>") || strings.Contains(text, "--key") {
-		t.Fatalf("got %q", text)
+	for _, want := range []string{"serve no version of the pinned root " + in.o1, "another operator", "deployment recover", "--root <sha>"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("refusal %q does not say %q", text, want)
+		}
+	}
+	if strings.Contains(text, in.n1) || strings.Contains(text, in.n2) || strings.Contains(text, "--key") {
+		t.Fatalf("refusal %q names what the sites served, or --key", text)
+	}
+	err = runDeployment([]string{"pull", "--config", cfg, "--root", in.n1, "--execute"}, noTerminalStdin(), &out)
+	if !strings.Contains(problemText(err), "--root differs from the pinned root") {
+		t.Fatalf("got %q", problemText(err))
 	}
 	if h, _ := l.Head(); h != in.o3 {
 		t.Fatalf("a refused pull moved the head to %s", h)
 	}
-	if err := runDeployment([]string{"pull", "--config", cfg, "--root", in.n1, "--execute"}, noTerminalStdin(), &out); err != nil {
+	if rev, sha, _ := l.Seen(); rev != 3 || sha != in.o3 {
+		t.Fatalf("seen %d %s, want 3 %s", rev, sha, in.o3)
+	}
+	recoverHosts(t, in.newAnswer)
+	sitesServe(in.newAnswer, in.newAnswer)
+	dir := t.TempDir()
+	if err := runDeployment(recoverArgs(dir, "--root", in.n1, "--execute"), noTerminalStdin(), &out); err != nil {
 		t.Fatal(problemText(err), err)
 	}
-	wantOn(t, l, in)
-	if err := runDeployment([]string{"pull", "--config", cfg, "--execute"}, noTerminalStdin(), &out); err != nil {
-		t.Fatal(problemText(err), err)
+	fresh := configstore.Local{Dir: dir}
+	if got, _ := fresh.Files(); !got.Equal(in.fn2) {
+		t.Fatal("recover did not write the current line's head")
 	}
-	wantOn(t, l, in)
-
-	// Without a pin, a key that signed under two roots, here one held only
-	// in the cache, refuses rather than taking the higher revision.
-	if err := os.Remove(filepath.Join(l.Dir, ".paisans", "config-root")); err != nil {
-		t.Fatal(err)
-	}
-	err = runDeployment([]string{"pull", "--config", cfg, "--execute"}, noTerminalStdin(), &out)
-	if !strings.Contains(problemText(err), "more than one root") {
-		t.Fatalf("got %q", problemText(err))
-	}
-	if err := runDeployment([]string{"pull", "--config", cfg, "--root", in.n1, "--execute"}, noTerminalStdin(), &out); err != nil {
-		t.Fatal(problemText(err), err)
-	}
-	wantOn(t, l, in)
 }
 
-// A site serving the older incarnation, which the recorded key signed,
-// refuses a pull pinned to either root, naming the version, and never
-// moves it by revision. Following the refusal moves the workstation onto the
-// current line; while the site still serves the old one a plain pull
-// refuses again, --root with the current root goes on, and once no site
-// serves it plain pulls work.
-func TestConfigPullWithASiteServingAnotherIncarnation(t *testing.T) {
-	in := newIncarnations(t)
-	l, cfg := onOldIncarnation(t, in)
-	sitesServe(in.oldAnswer, in.newAnswer)
+// A site serving only a root of its own, the only one answering, refuses a
+// pinned pull without naming that root, and --root with it is refused
+// against the pin.
+func TestConfigPullRefusalNamesNoServedRoot(t *testing.T) {
+	key, pub := testKey(t)
+	mkey, mpub := testKey(t)
+	cur, evil := newStore(t), newStore(t)
+	n1, f1 := cur.commit(t, fixtureAs(t, pub), "# new\n", nil, 1, key)
+	m1, _ := evil.commit(t, fixtureAs(t, mpub), "# evil\n", nil, 1, mkey)
+	evil.commit(t, fixtureAs(t, mpub), "# evil 2\n", []string{m1}, 2, mkey)
+	l := pullWorkstation(t, cur.answer(t), n1, n1, f1)
+	if err := l.SetSigningKey(pub); err != nil {
+		t.Fatal(err)
+	}
+	cfg := filepath.Join(l.Dir, "paisans-stack.yaml")
+	sitesServe(evil.answer(t), evil.answer(t))
 	var out bytes.Buffer
 	err := runDeployment([]string{"pull", "--config", cfg, "--execute"}, noTerminalStdin(), &out)
-	text := problemText(err)
-	if !strings.Contains(text, "signed by your key under root "+in.n1+", not under the pinned root "+in.o1) || !strings.Contains(text, "paisans deployment pull --root <sha>") || strings.Contains(text, "--key") {
-		t.Fatalf("got %q", text)
-	}
-	if err := runDeployment([]string{"pull", "--config", cfg, "--root", in.n1, "--execute"}, noTerminalStdin(), &out); err != nil {
-		t.Fatal(problemText(err), err)
-	}
-	wantOn(t, l, in)
-	err = runDeployment([]string{"pull", "--config", cfg, "--execute"}, noTerminalStdin(), &out)
-	if !strings.Contains(problemText(err), "under root "+in.o1+", not under the pinned root "+in.n1) {
+	if !strings.Contains(problemText(err), "serve no version of the pinned root") || strings.Contains(problemText(err), m1) {
 		t.Fatalf("got %q", problemText(err))
 	}
-	if err := runDeployment([]string{"pull", "--config", cfg, "--root", in.n1, "--execute"}, noTerminalStdin(), &out); err != nil {
-		t.Fatal(problemText(err), err)
+	err = runDeployment([]string{"pull", "--config", cfg, "--root", m1, "--execute"}, noTerminalStdin(), &out)
+	if !strings.Contains(problemText(err), "--root differs from the pinned root") {
+		t.Fatalf("got %q", problemText(err))
 	}
-	sitesServe(in.newAnswer, in.newAnswer)
+	if r, _ := l.Root(); r != n1 {
+		t.Fatalf("root %s, want %s", r, n1)
+	}
+}
+
+// A site withholding the newest version while serving the pinned line and an
+// older incarnation does not lower the seen record: the same --root as the
+// pin judges as a plain pull does.
+func TestConfigPullNeverLowersSeenSilently(t *testing.T) {
+	key, pub := testKey(t)
+	yaml := fixtureAs(t, pub)
+	full, part, old := newStore(t), newStore(t), newStore(t)
+	n1, _ := full.commit(t, yaml, "# new\n", nil, 1, key)
+	n2, _ := full.commit(t, yaml, "# new 2\n", []string{n1}, 2, key)
+	n3, f3 := full.commit(t, yaml, "# new 3\n", []string{n2}, 3, key)
+	part.commit(t, yaml, "# new\n", nil, 1, key)
+	part.commit(t, yaml, "# new 2\n", []string{n1}, 2, key)
+	o1, _ := old.commit(t, yaml, "# old\n", nil, 1, key)
+	old.commit(t, yaml, "# old 2\n", []string{o1}, 2, key)
+	l := pullWorkstation(t, full.answer(t), n1, n3, f3)
+	if err := l.SetSigningKey(pub); err != nil {
+		t.Fatal(err)
+	}
+	cfg := filepath.Join(l.Dir, "paisans-stack.yaml")
+	var out bytes.Buffer
 	if err := runDeployment([]string{"pull", "--config", cfg, "--execute"}, noTerminalStdin(), &out); err != nil {
 		t.Fatal(problemText(err), err)
 	}
-	wantOn(t, l, in)
+	sitesServe(old.answer(t), part.answer(t))
+	for _, args := range [][]string{{"pull", "--config", cfg, "--execute"}, {"pull", "--config", cfg, "--root", n1, "--execute"}, {"pull", "--config", cfg, "--root", o1, "--execute"}} {
+		_ = runDeployment(args, noTerminalStdin(), &out)
+		if h, _ := l.Head(); h != n3 {
+			t.Fatalf("%v: head %s, want %s", args, h, n3)
+		}
+		if rev, sha, _ := l.Seen(); rev != 3 || sha != n3 {
+			t.Fatalf("%v: seen %d %s, want 3 %s", args, rev, sha, n3)
+		}
+		if r, _ := l.Root(); r != n1 {
+			t.Fatalf("%v: root %s, want %s", args, r, n1)
+		}
+	}
 }

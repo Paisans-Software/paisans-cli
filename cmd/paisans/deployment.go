@@ -103,12 +103,11 @@ func configTransports(cfg *config.Config) map[string]apply.Transport {
 	return out
 }
 
-// anchorFor is the workstation's anchor, with root, when given, as the pin
-// the operator chose for this run. With replace, a root that differs from
-// the recorded pin replaces it, since typing --root is the same choice that
-// pinned it first, and the run that records it says so; without replace it
-// is refused.
-func anchorFor(l configstore.Local, root string, replace bool) (configstore.Anchor, error) {
+// anchorFor is the workstation's anchor, with root pinned in place of a
+// recorded one. A root that differs from the recorded pin is refused: the
+// pin is what the operator trusted before, and replacing it is not a pull's
+// side effect.
+func anchorFor(l configstore.Local, root string) (configstore.Anchor, error) {
 	a, err := l.Anchor()
 	if err != nil {
 		return a, err
@@ -119,10 +118,10 @@ func anchorFor(l configstore.Local, root string, replace bool) (configstore.Anch
 	if !shaShape(root) {
 		return a, &ui.Problem{Hint: fmt.Sprintf("--root %q is not a commit id", root), Explain: "Give the full hash of the root to pin, as paisans deployment log prints it on a root's line, or as another operator's .paisans/config-root holds it."}
 	}
-	if a.Root != "" && a.Root != root && !replace {
-		return a, &ui.Problem{Hint: "--root differs from the pinned root", Explain: fmt.Sprintf("This workstation pinned %s in .paisans/config-root. Drop --root, or run paisans deployment pull --root %s, which replaces the pin.", a.Root, root)}
+	if a.Root != "" && a.Root != root {
+		return a, &ui.Problem{Hint: "--root differs from the pinned root", Explain: fmt.Sprintf("This workstation pinned %s in .paisans/config-root. Drop --root, or remove that file if the pin is wrong.", a.Root)}
 	}
-	a.Root, a.Chosen = root, true
+	a.Root = root
 	return a, nil
 }
 
@@ -277,9 +276,9 @@ func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transpo
 	}
 	if err != nil {
 		s.Fail(err)
-		var re *configstore.RootError
-		if errors.As(err, &re) {
-			return g, &ui.Problem{Hint: "which root is this deployment's is yours to say", Explain: re.Error() + ".", Cause: err}
+		var ns *configstore.PinNotServedError
+		if errors.As(err, &ns) {
+			return g, &ui.Problem{Hint: "the sites serve none of the pinned root's history", Explain: ns.Error() + ". They hold another incarnation of the deployment, after a redeploy under the same id or from before one, or a site serves one it should not, and this workstation does not judge from what only its cache holds. Get the current root from another operator, the full hash in their .paisans/config-root or on a root's line of their paisans deployment log. Then recover from it into an empty directory, paisans deployment recover --from <user@host> --root <sha> --config <empty directory>/paisans-stack.yaml, or here once .paisans/ and the three files are moved aside.", Cause: err}
 		}
 		if errors.Is(err, configstore.ErrNoAnchor) {
 			todo := m.noAnchor
@@ -564,7 +563,7 @@ func runDeploymentPull(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("deployment pull", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, configHelp)
-	root := fs.String("root", "", "pin this root, the version trust starts from, replacing a recorded pin; the way out when the sites hold another incarnation")
+	root := fs.String("root", "", "pin this version as the root, the version trust starts from")
 	keyPath := fs.String("key", "", keyHelp)
 	execute := fs.Bool("execute", false, "write the sites' newest version to the local files")
 	answers := yesFlag(fs)
@@ -586,7 +585,7 @@ func runDeploymentPull(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	a, err := anchorFor(l, *root, true)
+	a, err := anchorFor(l, *root)
 	if err != nil {
 		return err
 	}
@@ -851,7 +850,7 @@ func runDeploymentLog(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	a, err := anchorFor(l, *root, true)
+	a, err := anchorFor(l, *root)
 	if err != nil {
 		return err
 	}
@@ -946,7 +945,7 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 	if l.HasFiles() {
 		return &ui.Problem{Hint: "there are configuration files here already", Explain: "Recovery writes onto a workstation with nothing, so it never overwrites a file. Use paisans deployment pull where the files exist, or recover into an empty directory with --config."}
 	}
-	a, err := anchorFor(l, *root, true)
+	a, err := anchorFor(l, *root)
 	if err != nil {
 		return err
 	}
@@ -1006,6 +1005,12 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 		if roots := g.Roots(head); len(roots) == 1 {
 			pin = roots[0]
 		}
+	}
+	// A key alone cannot tell this deployment's history from an older
+	// incarnation every answering site serves, so the root it leads to is
+	// the operator's to confirm, by its full hash.
+	if a.Named && pin != "" {
+		r.Warn("confirm the root "+pin+" with another operator before applying", "--key trusted the history it leads to, and a key alone cannot tell this deployment's history from an older incarnation every site that answered serves. Compare it with their .paisans/config-root, or a root's line of their paisans deployment log.")
 	}
 	if !*execute {
 		r.Step("write the files of "+describe(g, head)).End(ui.Pending, "--execute will write them")

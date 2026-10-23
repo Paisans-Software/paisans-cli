@@ -608,13 +608,6 @@ func gather(l Local, sites map[string]apply.Transport, configured int, id string
 	if err != nil {
 		return g, err
 	}
-	// A seen record from another root's history is another incarnation's:
-	// the pin says which history this is, and its revisions start again at
-	// 1. The record moves to this history's head once the command commits.
-	if _, held := g.Versions[seenSHA]; held && a.Root != "" && seenSHA != a.Root && !slices.Contains(g.Roots(seenSHA), a.Root) {
-		g.Seen = &SeenChange{Revision: rev, SHA: top, Lower: rev < seenRev}
-		return g, nil
-	}
 	if rev < seenRev {
 		return g, &RollbackError{SeenRevision: seenRev, SeenSHA: seenSHA, Revision: rev, SHA: top}
 	}

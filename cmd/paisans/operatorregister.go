@@ -60,7 +60,7 @@ func runOperatorRegister(args []string, stdin io.Reader, stdout io.Writer) error
 	if err != nil {
 		return err
 	}
-	a, err := anchorFor(l, *root, false)
+	a, err := anchorFor(l, *root)
 	if err != nil {
 		return err
 	}

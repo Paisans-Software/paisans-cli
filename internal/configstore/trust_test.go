@@ -159,9 +159,8 @@ func TestJudgeSignerAnchorMustDescendFromPin(t *testing.T) {
 	f := chain()
 	f.add("m1", 1, "fp-mallory", nil, "mallory")
 	_, err := Judge(f.graph(), Anchor{Signers: []string{"fp-alice"}, Root: "m1"})
-	var re *RootError
-	if !errors.As(err, &re) {
-		t.Fatalf("err = %v, want a *RootError", err)
+	if !errors.Is(err, ErrNoAnchor) {
+		t.Fatalf("err = %v, want ErrNoAnchor", err)
 	}
 	for _, s := range []string{"v3", "m1"} {
 		if !strings.Contains(err.Error(), s) {
@@ -720,57 +719,26 @@ func serving(f *fake, prefix string) Graph {
 	return g
 }
 
-// A recorded key pinned to one incarnation refuses when the sites serve a
-// version it signed under another root, whatever the revisions; a root the
-// operator gives for the run judges from it alone; and a version held only in
-// the cache, which never forgets, refuses nothing.
-func TestJudgePinnedKeyAndAnotherRoot(t *testing.T) {
-	alice := []string{"fp-alice"}
-	for _, newRev := range []int{2, 9} {
-		f := oldAndNew(newRev)
-		for _, pin := range []string{"o1", "n1"} {
-			var re *RootError
-			if _, err := Judge(f.graph(), Anchor{Signers: alice, Root: pin}); !errors.As(err, &re) || !strings.Contains(err.Error(), "--root") {
-				t.Fatalf("new line at revision %d, pin %s: err = %v, want a *RootError asking for --root", newRev, pin, err)
-			}
-		}
-		v, err := Judge(f.graph(), Anchor{Signers: alice, Root: "n1", Chosen: true})
-		if err != nil {
-			t.Fatalf("chosen n1: %v", err)
-		}
-		wantHeads(t, v, "n"+string(rune('0'+newRev)))
-		v, err = Judge(serving(f, "n"), Anchor{Signers: alice, Root: "n1"})
-		if err != nil {
-			t.Fatalf("pinned n1, the sites serving only its line: %v", err)
-		}
-		wantHeads(t, v, "n"+string(rune('0'+newRev)))
-	}
-	// Another operator's root, which the key never signed under, refuses
-	// nothing.
-	f := chain()
-	f.add("m1", 1, "fp-mallory", nil, "mallory")
-	wantHeads(t, judgeOK(t, f, Anchor{Signers: alice, Root: "v1"}), "v3")
-}
-
 // A pin the sites serve nothing of refuses rather than staying on the cache,
-// whoever signed what they serve; a pin given for the run as well.
+// whoever signed what they serve, and names no root they served. A pin whose
+// history any site serves, if only a tip, judges as before, whatever else
+// they serve.
 func TestJudgePinTheSitesDoNotServe(t *testing.T) {
 	f := oldAndNew(2)
-	for _, a := range []Anchor{{Root: "o1"}, {Root: "o1", Signers: []string{"fp-alice"}}, {Root: "o1", Chosen: true}} {
-		var re *RootError
-		if _, err := Judge(serving(f, "n"), a); !errors.As(err, &re) || !strings.Contains(err.Error(), "serve no version of the pinned root o1") {
+	for _, a := range []Anchor{{Root: "o1"}, {Root: "o1", Signers: []string{"fp-alice"}}} {
+		var ns *PinNotServedError
+		_, err := Judge(serving(f, "n"), a)
+		if !errors.As(err, &ns) || strings.Contains(err.Error(), "n1") {
 			t.Fatalf("%+v: err = %v", a, err)
 		}
 	}
-}
-
-// A recorded key with no pin that signed under two roots refuses, whatever
-// the revisions, rather than picking the higher one.
-func TestJudgeUnpinnedKeyUnderTwoRoots(t *testing.T) {
-	for _, newRev := range []int{2, 9} {
-		var re *RootError
-		if _, err := Judge(serving(oldAndNew(newRev), "n"), Anchor{Signers: []string{"fp-alice"}}); !errors.As(err, &re) || !strings.Contains(err.Error(), "more than one root") {
-			t.Fatalf("new line at revision %d: err = %v", newRev, err)
-		}
+	g := f.graph()
+	g.Served = map[string]bool{"o4": true, "n2": true}
+	v, err := Judge(g, Anchor{Root: "o1"})
+	if err != nil {
+		t.Fatal(err)
 	}
+	wantHeads(t, v, "o4")
+	g.Served = map[string]bool{}
+	wantHeads(t, judgeOK(t, f, Anchor{Root: "o1"}), "o4")
 }

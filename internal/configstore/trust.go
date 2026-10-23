@@ -3,7 +3,6 @@ package configstore
 import (
 	"errors"
 	"fmt"
-	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -15,8 +14,9 @@ type Graph struct {
 	Versions  map[string]Version
 	Operators func(sha string) (map[string]string, error) // fingerprint -> operator id, from that version's paisans-stack.yaml
 	// Served is the versions the sites answered with in this gather. The
-	// cache keeps every version any gather saw, so which roots the sites
-	// hold now is read from Served alone. Nil counts every version.
+	// cache keeps every version any gather saw, so whether the sites hold a
+	// pinned root's history is read from Served alone. Nil or empty is no
+	// evidence either way.
 	Served map[string]bool
 }
 
@@ -38,22 +38,17 @@ type Anchor struct {
 	Signers []string // the operator's key fingerprints; may be empty
 	Named   bool     // Signers is the key --key names, not a recorded one
 	Root    string   // a pinned root sha; may be empty
-	// Chosen is a Root the operator gave for this run with --root: they have
-	// chosen among roots, so another root the sites serve does not refuse it.
-	Chosen bool
 }
 
-// RootError is a gather whose root is the operator's to choose: a pinned
-// root the sites serve nothing of, a recorded key that signed versions under
-// another root the sites serve, or a recorded key with no pin that signed
-// under more than one root. Running again with --root <sha>, the current
-// root, replaces the pin and judges from it.
-type RootError struct{ msg string }
+// PinNotServedError is a gather from a pinned root none of whose history the
+// sites serve: they hold another incarnation of the deployment, or a site
+// serves one it should not. It names no root the sites served, since a hash
+// from them is not one to pin.
+type PinNotServedError struct{ Root string }
 
-func (e *RootError) Error() string { return e.msg }
-
-// rootAdvice is how a RootError is resolved.
-const rootAdvice = "Ask another operator for the current root, the full hash in their .paisans/config-root or on a root's line of paisans deployment log, and run paisans deployment pull --root <sha> with it: --root replaces the pin, and a run with it judges from that root alone"
+func (e *PinNotServedError) Error() string {
+	return fmt.Sprintf("the sites serve no version of the pinned root %s's history", e.Root)
+}
 
 // Verdict is what Judge decides about a Graph.
 type Verdict struct {
@@ -105,13 +100,10 @@ func (e *UnreadableOperatorsError) Unwrap() error { return e.Err }
 //
 //   - The anchor is the operator's newest version that passes shape, signed
 //     by any of the anchor's keys, or else the pinned root. With both, the
-//     signed anchor is the newest that descends from the pin. A pin the
-//     sites serve nothing of, or a key that signed a version under another
-//     root the sites serve, is a *RootError unless the operator gave the pin
-//     for this run; so is a key with no pin that signed under more than one
-//     root. Which incarnation is current is the operator's to say, never a
-//     revision's. The anchor and every ancestor of it are trusted whatever
-//     their shape, because the operator signed after them.
+//     signed anchor must descend from the pin. A pin the sites serve none
+//     of the history of, when they serve anything, is a *PinNotServedError.
+//     The anchor and every ancestor of it are trusted whatever their shape,
+//     because the operator signed after them.
 //   - With a named key and a pinned root, the pinned root is the anchor and
 //     the key is not consulted. With a named key alone, the key must have
 //     signed versions under exactly one good root, which is judged by these
@@ -384,57 +376,29 @@ func (j *judgement) operatorsOf(sha string) operatorsResult {
 	return j.operators[sha]
 }
 
-// anchor picks where trust starts from a recorded key. With a pinned root
-// it is the newest version the key signed that passes shape and is the pin
-// or descends from it, else the pin; a version the key signed under another
-// root the sites serve refuses the pin, unless the operator chose it for this
-// run. With no pin it is the key's newest version, and the key must have
-// signed under one root only: which root is current is the operator's to
-// say, never a revision's, since a redeployed line starts again at
-// revision 1.
+// anchor picks where trust starts from a recorded key: the newest version
+// it signed that passes shape, or the pinned root.
 func (j *judgement) anchor(a Anchor, order []string) (string, error) {
-	signedBy := func(sha string) bool {
-		return slices.Contains(a.Signers, j.g.Versions[sha].SignerFP) && j.shape(sha) == ""
+	signed := ""
+	for _, sha := range order {
+		v := j.g.Versions[sha]
+		if !slices.Contains(a.Signers, v.SignerFP) || j.shape(sha) != "" {
+			continue
+		}
+		if signed == "" || j.newer(sha, signed) {
+			signed = sha
+		}
 	}
 	if a.Root != "" {
 		if reason := j.goodRoot(a.Root); reason != "" {
 			return "", &anchorError{fmt.Sprintf("the pinned root %s %s", a.Root, reason)}
 		}
-		if !a.Chosen {
-			other := ""
-			for _, sha := range order {
-				if j.served(sha) && signedBy(sha) && sha != a.Root && !j.ancestors(sha)[a.Root] && (other == "" || j.newer(sha, other)) {
-					other = sha
-				}
-			}
-			if other != "" {
-				return "", &RootError{fmt.Sprintf("the sites serve version %s, signed by your key under root %s, not under the pinned root %s: one is an older incarnation of the deployment, the other a newer one after a redeploy under the same id, or a site serves an incarnation it should not. %s. If the current root is the pinned one, paisans deployment log shows which sites serve the other", other, j.rootOf(other), a.Root, rootAdvice)}
-			}
-		}
-		signed := ""
-		for _, sha := range order {
-			if signedBy(sha) && (sha == a.Root || j.ancestors(sha)[a.Root]) && (signed == "" || j.newer(sha, signed)) {
-				signed = sha
-			}
-		}
 		if signed == "" {
 			return a.Root, nil
 		}
-		return signed, nil
-	}
-	signed := ""
-	roots := map[string]bool{}
-	for _, sha := range order {
-		if !signedBy(sha) {
-			continue
+		if a.Root != signed && !j.ancestors(signed)[a.Root] {
+			return "", &anchorError{fmt.Sprintf("your newest version %s does not descend from the pinned root %s", signed, a.Root)}
 		}
-		roots[j.rootOf(sha)] = true
-		if signed == "" || j.newer(sha, signed) {
-			signed = sha
-		}
-	}
-	if len(roots) > 1 {
-		return "", &RootError{fmt.Sprintf("your key signed versions under more than one root, %s, and no root is pinned. %s", strings.Join(slices.Sorted(maps.Keys(roots)), " and "), rootAdvice)}
 	}
 	if signed != "" {
 		return signed, nil
@@ -443,48 +407,18 @@ func (j *judgement) anchor(a Anchor, order []string) (string, error) {
 }
 
 // pinServed refuses a pinned root none of whose history the sites serve in
-// this gather, when they serve anything: they hold another incarnation, or
-// a site serves one it should not, and a pull would otherwise stay on what
-// this workstation's cache holds.
+// this gather, when they serve anything, rather than judge from what this
+// workstation's cache holds.
 func (j *judgement) pinServed(a Anchor, order []string) error {
-	if j.g.Served == nil || len(j.g.Served) == 0 {
+	if len(j.g.Served) == 0 {
 		return nil
 	}
-	var others []string
 	for _, sha := range order {
-		if !j.g.Served[sha] {
-			continue
-		}
-		if sha == a.Root || j.ancestors(sha)[a.Root] {
+		if j.g.Served[sha] && (sha == a.Root || j.ancestors(sha)[a.Root]) {
 			return nil
 		}
-		if r := j.rootOf(sha); r != "" && !slices.Contains(others, r) {
-			others = append(others, r)
-		}
 	}
-	return &RootError{fmt.Sprintf("the sites serve no version of the pinned root %s's history, only of %s. %s", a.Root, strings.Join(others, " and "), rootAdvice)}
-}
-
-// served reports whether the sites answered with sha in this gather.
-func (j *judgement) served(sha string) bool {
-	return j.g.Served == nil || j.g.Served[sha]
-}
-
-// rootOf is the lowest-hash root among sha and its ancestors, "" for none.
-func (j *judgement) rootOf(sha string) string {
-	var roots []string
-	if len(j.g.Versions[sha].Parents) == 0 {
-		roots = append(roots, sha)
-	}
-	for p := range j.ancestors(sha) {
-		if len(j.g.Versions[p].Parents) == 0 {
-			roots = append(roots, p)
-		}
-	}
-	if len(roots) == 0 {
-		return ""
-	}
-	return slices.Min(roots)
+	return &PinNotServedError{Root: a.Root}
 }
 
 // named judges from the key --key names, by the rule in Judge's comment: a
@@ -518,7 +452,7 @@ func (j *judgement) named(a Anchor, order, cyclic []string) (Verdict, error) {
 		return Verdict{}, &anchorError{fmt.Sprintf("no version the trust rules trust is signed by the key --key names, %s, and no root is pinned", key)}
 	case 1:
 	default:
-		return Verdict{}, &anchorError{fmt.Sprintf("the key --key names, %s, signed versions under more than one root, %s, and which is this deployment's is not for a key to say: pin it with --root <sha>. A root may be held only in this workstation's own cache, .paisans/store.git, from an earlier run; on a workstation recovering from nothing, removing .paisans/ clears it", key, strings.Join(roots, " and "))}
+		return Verdict{}, &anchorError{fmt.Sprintf("the key --key names, %s, signed versions under more than one root, and which is this deployment's is not for a key to say: get the current root from another operator, the full hash in their .paisans/config-root or on a root's line of their paisans deployment log, and recover with --root <sha>. A root may be held only in this workstation's own cache, .paisans/store.git, from an earlier run; on a workstation recovering from nothing, removing .paisans/ clears it", key)}
 	}
 	v, err := j.from(roots[0], order, cyclic)
 	if err != nil {
@@ -560,7 +494,7 @@ func (j *judgement) named(a Anchor, order, cyclic []string) (Verdict, error) {
 			return Verdict{}, &anchorError{fmt.Sprintf("the key --key names, %s, is not a key of an operator the newest version %s lists", key, h)}
 		}
 		if !slices.Contains(a.Signers, j.g.Versions[h].SignerFP) {
-			return Verdict{}, &anchorError{fmt.Sprintf("the newest version %s is signed by %s, not by the key --key names, %s; a key alone cannot tell this deployment's history from one it signed before a redeploy, so it trusts only versions it signed: pin the root with --root <sha>, which another operator can read from paisans deployment log or their .paisans/config-root", h, j.g.Versions[h].SignerFP, key)}
+			return Verdict{}, &anchorError{fmt.Sprintf("the newest version %s is signed by %s, not by the key --key names, %s; a key alone cannot tell this deployment's history from one it signed before a redeploy, so it trusts only versions it signed: get the current root from another operator, the full hash in their .paisans/config-root or on a root's line of their paisans deployment log, and pin it with --root <sha>", h, j.g.Versions[h].SignerFP, key)}
 		}
 	}
 	return out, nil
