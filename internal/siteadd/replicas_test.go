@@ -74,7 +74,7 @@ func withReplica(t *testing.T) *world {
 }
 
 // An existing replica's patroni.env is applied and its Patroni recreated,
-// gated on it streaming again; the leader's is noted for its next restart.
+// gated on it streaming again; the leader's is noted for when it is next recreated.
 func TestAJoinBringsAReplicasPatroniEnvUpToDate(t *testing.T) {
 	defer siteadd.SetFast()()
 	w := withReplica(t)
@@ -88,7 +88,7 @@ func TestAJoinBringsAReplicasPatroniEnvUpToDate(t *testing.T) {
 		}
 	}
 	notes := strings.Join(p.Owed, "\n")
-	if !strings.Contains(notes, "home-a leads") || !strings.Contains(notes, "next restart") {
+	if !strings.Contains(notes, "home-a leads") || !strings.Contains(notes, "next recreated") {
 		t.Errorf("the leader's patroni.env is not noted:\n%s", notes)
 	}
 	rec := &ui.Recorder{}

@@ -962,7 +962,13 @@ func runConverge(r ui.Reporter, o convergeOptions) error {
 	// A step that records what it made at Pocket ID publishes the next
 	// version through the run's store (siteReview.publishWritten).
 	reviewedByRun.store, reviewedByRun.identity = store, identity
-	if err := convergeExecute(r, cfg, steps, o, publish); err != nil {
+	// A step's apply that moved Patroni's leader says so under its install
+	// line, which shows only with -v. The run says it again, at every
+	// verbosity, once its steps are done or one has stopped it.
+	moved := watchLeaderMoves()
+	err = convergeExecute(r, cfg, steps, o, publish)
+	reportLeaderMoves(r, moved())
+	if err != nil {
 		return err
 	}
 	// Each step pointed the retries, holds and login notes at its own
@@ -1958,4 +1964,45 @@ var convergeHost = func(name string, site config.Site) apply.Transport {
 // isApply reports whether a step's args are paisans deployment apply.
 func isApply(args []string) bool {
 	return len(args) >= 2 && args[0] == "deployment" && args[1] == "apply"
+}
+
+// leaderMoves is every move of Patroni's leader an apply of the running
+// command found, in order. See watchLeaderMoves.
+var (
+	leaderMovesMu sync.Mutex
+	leaderMoves   []apply.LeaderMove
+)
+
+// noteLeaderMove keeps m for the run's report.
+func noteLeaderMove(m apply.LeaderMove) {
+	leaderMovesMu.Lock()
+	defer leaderMovesMu.Unlock()
+	leaderMoves = append(leaderMoves, m)
+}
+
+// watchLeaderMoves starts keeping every move of Patroni's leader an apply
+// finds, and returns the function that stops keeping them and hands back
+// what was kept.
+func watchLeaderMoves() func() []apply.LeaderMove {
+	leaderMovesMu.Lock()
+	leaderMoves = nil
+	leaderMovesMu.Unlock()
+	restore := apply.OnLeaderMove(noteLeaderMove)
+	return func() []apply.LeaderMove {
+		restore()
+		leaderMovesMu.Lock()
+		defer leaderMovesMu.Unlock()
+		out := leaderMoves
+		leaderMoves = nil
+		return out
+	}
+}
+
+// reportLeaderMoves warns of each move of Patroni's leader: a switchover
+// nobody asked for, which ends every app's database connections and leaves
+// the primary on another site, is never left for -v.
+func reportLeaderMoves(r ui.Reporter, moves []apply.LeaderMove) {
+	for _, m := range moves {
+		r.Warn(fmt.Sprintf("Patroni's leader moved from %s to %s", m.From, m.To), m.Reason)
+	}
 }

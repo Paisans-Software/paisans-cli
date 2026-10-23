@@ -105,6 +105,13 @@ type Action struct {
 	// for a new garage.toml restarted Patroni, which on the primary is a
 	// failover, and HAProxy, which drops every app's database connection.
 	Services []string
+	// Up narrows a recreate that is not forced to these compose services,
+	// with --no-deps, empty for every service of the stack. Only the
+	// infrastructure stack sets it, to leave a running Patroni out of an
+	// `up -d` that has no reason to replace it: Compose replaces a container
+	// whose env_file content changed, and a patroni.env written with new
+	// etcd hosts alone is such a file. See planPatroni.
+	Up []string
 	// Refresh names the infrastructure services whose bind mounted files
 	// changed, for an `up -d` that was not forced. `up -d` replaces only a
 	// container whose configuration changed, and a bind mounted file is not
@@ -114,12 +121,27 @@ type Action struct {
 	Refresh []string
 }
 
+// quoteAll is names shell quoted, space separated.
+func quoteAll(names []string) string {
+	quoted := make([]string, len(names))
+	for i, name := range names {
+		quoted[i] = shellQuote(name)
+	}
+	return strings.Join(quoted, " ")
+}
+
 // Command is what the action runs on the host, for deployment d.
 func (a Action) Command(d deployment.Deployment) string {
 	compose := d.ComposeCmd(a.Stack)
 	switch {
+	case a.Stack == infraStack && a.Force && len(a.Up) == 1 && a.Up[0] == "patroni":
+		return RecreatePatroni(d)
+	case a.Force && len(a.Up) > 0:
+		return compose + " up -d --no-deps --force-recreate " + quoteAll(a.Up)
 	case a.Force:
 		return compose + " up -d --force-recreate"
+	case a.Recreate && len(a.Up) > 0:
+		return compose + " up -d --no-deps " + quoteAll(a.Up)
 	case a.Recreate:
 		return compose + " up -d"
 	case len(a.Services) > 0:
@@ -166,6 +188,20 @@ type Plan struct {
 	// success. Checking only before a reload would leave exactly that path
 	// unchecked.
 	GatewayChanging bool
+	// containers is each "<stack>/<service>" with a container that is not
+	// stopped, from probeStopped's read of which containers run.
+	containers map[string]bool
+	// patroniKept is set when patroni.env is written with new etcd hosts
+	// alone, which moves no container. See etcdHostsOnly.
+	patroniKept bool
+	// patroniRecreates is set when the plan replaces or restarts a running
+	// Patroni. See planPatroni.
+	patroniRecreates bool
+	// LeaderMoved is set once Execute finds that Patroni's leader left this
+	// site during its infrastructure stack's action. See LeaderMove.
+	LeaderMoved *LeaderMove
+	// ledBefore is whether this site's Patroni led just before that action.
+	ledBefore bool
 	// GatewayReload is set when this site serves the public entry point and a
 	// routing file changed. It is the narrower of the two: a new image is
 	// picked up by the recreate, not by a reload.
@@ -682,6 +718,9 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 	// whether its change can be applied in place.
 	var wireguard *Change
 	var wireguardBefore string
+	// What decides whether this apply recreates Patroni on a site already
+	// running it. See planPatroni.
+	var patroni patroniFacts
 	reading := len(out.rendered)
 	if out.scoped {
 		reading = len(inScope)
@@ -799,6 +838,13 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			used[remote] = true
 		}
 
+		if rel == PatroniEnv(d) {
+			patroni.file, patroni.onHost = content, found
+		}
+		if rel == d.RelPath(infraStack, "compose.yaml") && change.Kind == Update {
+			patroni.composeBefore, patroni.composeAfter = current, content
+		}
+
 		if rel == d.WireGuardConf() {
 			copied := change
 			wireguard = &copied
@@ -829,6 +875,18 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			continue
 		}
 		out.Changes = append(out.Changes, change)
+		// patroni.env with only its etcd hosts changed is written and
+		// recorded, and moves no stack: Patroni needs that list only to reach
+		// etcd as it starts (see etcdHostsOnly), and recreating it on the
+		// leader hands the leader key to a standby.
+		if rel == PatroniEnv(d) && change.Kind == Update {
+			if before, after, ok := etcdHostsOnly(current, content); ok {
+				out.Notes = append(out.Notes, Note{Text: fmt.Sprintf("patroni.env changes only ETCD3_HOSTS (%s, was %s), so it is written and Patroni is not recreated for it. Patroni uses that list to reach etcd when its container is created and asks etcd for its members from then on; a restart of the same container keeps the list it was created with, and the next recreate reads the new file", after, before)})
+				out.patroniKept = true
+				continue
+			}
+			patroni.envRecreate = true
+		}
 		// The gateway's routing files are the reload's alone. Making them an
 		// infrastructure action as well restarted Caddy after reloading it:
 		// two actions for one change, and the restart is the one that drops
@@ -906,6 +964,7 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 	// A restart an earlier pass held back while the database path moved is
 	// owed as a restart, not as a half built stack. See heldOwed.
 	dbOwed := map[string]bool{}
+	owedUp := map[string][]string{}
 	var live []pendingAction
 	for _, action := range resumed.Actions {
 		// An app removed from the configuration renders no stack here, and
@@ -919,6 +978,9 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			dbOwed[action.Stack] = true
 		} else {
 			owed[action.Stack] = true
+			if len(action.Up) > 0 {
+				owedUp[action.Stack] = action.Up
+			}
 		}
 		stacks[action.Stack] = true
 	}
@@ -972,8 +1034,11 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 	for _, stack := range stackOrder(stacks) {
 		action := Action{Stack: stack}
 		if owed[stack] {
-			action.Recreate, action.Force = true, true
+			action.Recreate, action.Force, action.Up = true, true, owedUp[stack]
 			action.Reason = "a previous apply stopped before this stack's action finished, so its containers may be half built and are replaced outright"
+			if len(action.Up) > 0 {
+				action.Reason += "; only " + strings.Join(action.Up, ", ") + ", which that `up -d` named"
+			}
 		} else if forced[stack] {
 			action.Recreate, action.Force = true, true
 			action.Reason = "named with --recreate, so every container is replaced whether or not anything changed"
@@ -1007,6 +1072,11 @@ func Build(site string, plan *render.Plan, acmeModule string, t Transport, opts 
 			}
 		}
 		out.Actions = append(out.Actions, action)
+	}
+	if onlySet == nil || onlySet[infraStack] {
+		if err := out.planPatroni(patroni, refresh, t); err != nil {
+			return nil, fmt.Errorf("%s: %w", site, err)
+		}
 	}
 	var dbApps []string
 	for _, app := range o.dbApps {
@@ -1422,6 +1492,13 @@ func execute(plan *Plan, t Transport) error {
 		if action.Recreate && !action.Down {
 			previous = recordAnonymousVolumes(plan, action.Stack, t)
 		}
+		// Whether this site leads is read just before the infrastructure
+		// stack moves, so the wait for a primary after it can tell whether
+		// the leader left this site. See leaderMoved. A founding apply,
+		// which waits on another member's etcd, has no leader to lose.
+		if action.Stack == infraStack && plan.Bootstrap != nil && len(plan.Bootstrap.EtcdUnstarted) == 0 {
+			plan.ledBefore = ledBefore(plan, t)
+		}
 		done := plan.step(ActionTitle(action))
 		done.Detail("%s", action.Command(plan.Deployment))
 		if action.Reason != "" {
@@ -1511,6 +1588,10 @@ type pending struct {
 type pendingAction struct {
 	Stack    string `json:"stack"`
 	Recreate bool   `json:"recreate,omitempty"`
+	// Up is the services an `up -d` named, empty for the whole stack (see
+	// Action.Up). An owed action force-recreates those services alone, so
+	// a running Patroni an `up -d` left out stays out.
+	Up []string `json:"up,omitempty"`
 	// DatabasePath marks a restart a held stack owes because HAProxy or
 	// Patroni moved while it was held, rather than an action that stopped
 	// part way. It is a restart when released, not a forced recreate.
@@ -1543,7 +1624,7 @@ func readPending(t Transport, d deployment.Deployment) (pending, error) {
 func writePending(plan *Plan, actions []Action, t Transport) error {
 	p := pending{Version: 1, GatewayChanging: plan.GatewayChanging, GatewayReload: plan.GatewayReload}
 	for _, action := range actions {
-		p.Actions = append(p.Actions, pendingAction{Stack: action.Stack, Recreate: action.Recreate})
+		p.Actions = append(p.Actions, pendingAction{Stack: action.Stack, Recreate: action.Recreate, Up: action.Up})
 	}
 	p.Actions = append(p.Actions, plan.heldOwed...)
 	data, err := json.MarshalIndent(p, "", "  ")

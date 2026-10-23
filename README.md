@@ -9193,8 +9193,55 @@ stage 7 recreates each existing replica's Patroni with its new file, one at a
 time, which is a replica restart HAProxy does not notice since it routes only
 to the primary, and waits for it to stream again before the next; a replica
 that leads by then is left alone. The primary's is left, and the plan says
-so: it is picked up at the leader's next restart, a later `deployment apply` of that site
-when a failover is acceptable. `site remove` does the same with the same code.
+so: `deployment apply` of that site writes it. `site remove` does the same
+with the same code.
+
+**An etcd hosts change alone does not recreate Patroni.** When the only
+difference in a site's `patroni.env` is `ETCD3_HOSTS`, `deployment apply`
+writes and records the file and leaves Patroni running, and its plan says so.
+The rendered file sets no proxy, so Spilo configures Patroni with `use_proxies`
+off (Spilo `configure_spilo.py`, `get_dcs_config`; Patroni v4.1.0,
+`patroni/dcs/etcd.py`, `get_etcd_client`), and Patroni uses the list only to
+fill its members when it starts or after every member it knows has failed,
+refreshing them from etcd's member list otherwise (`_load_machines_cache`,
+`_refresh_machines_cache`). The leader therefore keeps the leader key through a
+join: `deployment apply` without `--site` joins a site through `site add` and
+then, in pass two, applies every site, the leader's among them.
+
+**A running Patroni is left out of an `up -d` that has no reason to replace
+it.** Compose replaces a container whose `env_file` content changed, so once
+`patroni.env` holds etcd hosts the running Patroni was not created with, a
+plain `up -d` of the infrastructure stack for any other reason (a changed
+compose file or environment file, a stopped Garage to start) would replace
+Patroni too. So `deployment apply` takes whether Patroni runs from its read of
+which containers run, and asks a running one which etcd hosts it has
+(`printenv ETCD3_HOSTS`; nothing else in the container is compared with the
+file). When nothing Patroni reads changed (`patroni.env` beyond
+`ETCD3_HOSTS`, its service in the compose file, a file it mounts), the stack's
+`up -d` names every other service, with `--no-deps`, and an apply that stops
+part way owes a forced recreate of those services alone. A running Patroni
+that does not answer is planned as one the `up -d` replaces, with the warning
+below, since leaving it out would rest on an answer the apply does not have.
+A stopped one is started by the `up -d` from the file as written. A `docker
+restart`, a reboot or the restart policy keeps the container, and with it the
+hosts it was created with, so the plan says when they differ from the file,
+compared as sets. They are enough while they name the site's own etcd member,
+which starts with Patroni after a reboot and from which Patroni learns the
+rest; once they do not, the plan recreates Patroni alone
+(`up -d --no-deps --force-recreate patroni`).
+
+**A leader that moves is reported, never left silent.** A change Patroni reads
+only in a new container, a forced recreate of the infrastructure stack, a
+restart that includes Patroni, a running Patroni that does not say its etcd
+hosts and a running list without the site's own etcd member all replace or
+restart Patroni, and on the leader a standby takes the leader key while it
+restarts. The plan says so before it runs, at every verbosity.
+After it runs, an apply whose infrastructure stack's action leaves another site
+leading warns, naming both sites, the action and the files that changed, and
+`deployment apply` without `--site` repeats each warning once its steps are
+done. Whether the site leads is asked of its own Patroni (`/patroni`) just
+before that action, and who leads is read from `/cluster` by the wait for a
+primary after it.
 
 **HAProxy is restarted, not reloaded.** Its configuration is a single file bind
 mount, `deployment apply` replaces a file by renaming a new one over it, and a bind mount
@@ -9305,8 +9352,9 @@ so one stopped between the two removals does only the second.
 **What stage 2 does not move.** The leader's `patroni.env`, as in `site add`:
 recreating its Patroni would be a failover, and the out of date etcd hosts in
 it are harmless while it runs (see *A replica's `patroni.env` is applied; the
-leader's waits*). The report says it is picked up at the leader's next
-restart, with `paisans deployment apply --site <site>` for when a failover is acceptable.
+leader's waits*). The report names `paisans deployment apply --site <site>`,
+which writes it without recreating Patroni when `ETCD3_HOSTS` is its only
+change (see *An etcd hosts change alone does not recreate Patroni*).
 Any other file whose render changes is listed the same way. etcd's
 `--initial-cluster` flags are not among them: each member's are rendered from
 what its host records (see *A member keeps the flags it was born with*).

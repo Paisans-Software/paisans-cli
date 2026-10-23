@@ -83,6 +83,9 @@ func (p *Plan) databasePathMoves() bool {
 		return false
 	}
 	infra := p.Actions[0]
+	if p.patroniRecreates {
+		return true
+	}
 	runs := map[string]bool{}
 	for _, c := range p.Changes {
 		switch c.Path {
@@ -100,8 +103,13 @@ func (p *Plan) databasePathMoves() bool {
 			continue
 		}
 		switch c.Path {
-		case p.Deployment.Path(haproxyConfig), p.Deployment.Path(patroniEnv):
+		case p.Deployment.Path(haproxyConfig):
 			return true
+		case p.Deployment.Path(patroniEnv):
+			// New etcd hosts alone leave Patroni running (patroniKept).
+			if !p.patroniKept {
+				return true
+			}
 		case p.Deployment.Path(gatewayCompose):
 			if servicesDiffer(c.before, c.content, "haproxy", "patroni") {
 				return true
