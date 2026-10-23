@@ -67,13 +67,13 @@ func FilesCommand(files []File) string {
 // remove, and not the user's (Docker's rootless documentation, Uninstall:
 // rootlesskit rm -rf ~/.local/share/docker). dir is always d.Dir(app), and
 // app has passed nameShape, so it is one segment under the deployment's
-// root. rmdir runs as the user: the stack directory is the deployment
+// root. A find that fails fails the command. rmdir runs as the user: the stack directory is the deployment
 // root's entry, and the user owns the root.
 func DirCommandFor(dir string, deleteData bool) string {
 	if deleteData {
 		return "rootlesskit rm -rf -- " + quote(dir)
 	}
-	return fmt.Sprintf(`d=%s; if [ -d "$d" ]; then rootlesskit find "$d" -mindepth 1 -depth -type d -empty -delete; rmdir "$d" 2>/dev/null || true; fi`, quote(dir))
+	return fmt.Sprintf(`d=%s; if [ -d "$d" ]; then rootlesskit find "$d" -mindepth 1 -depth -type d -empty -delete && { rmdir "$d" 2>/dev/null || true; }; fi`, quote(dir))
 }
 
 // Executor runs a plan.
