@@ -56,7 +56,7 @@ func newFakeWatchdog(t *testing.T, state string, nowayout bool) fakeWatchdog {
 }
 
 func (w fakeWatchdog) run(stop string) (string, error) {
-	cmd := disarmAround(stop)
+	cmd := disarmAround(stop, 4)
 	cmd = strings.ReplaceAll(cmd, "/sys/class/watchdog/watchdog0", w.sys)
 	cmd = strings.ReplaceAll(cmd, "/dev/watchdog", w.dev)
 	out, err := exec.Command("sh", "-c", cmd).CombinedOutput()
@@ -115,14 +115,35 @@ func TestDisarmAroundKeepsTheStopsFailure(t *testing.T) {
 	}
 }
 
-// A driver with nowayout set cannot be stopped, and the command says so.
+// A timer that cannot be stopped, here a driver with nowayout set, is
+// reported and left as it is: evict carries on, since failing would not
+// stop it either.
 func TestDisarmAroundNamesNowayout(t *testing.T) {
-	if testing.Short() {
-		t.Skip("waits the 10 s the command allows")
-	}
 	w := newFakeWatchdog(t, "active", true)
 	out, err := w.run("true")
-	if err == nil || !strings.Contains(out, "nowayout") {
+	if err != nil || !strings.Contains(out, "nowayout") {
 		t.Errorf("%v: %s", err, out)
+	}
+}
+
+// The loop beside the command ends with the shell that started it, so an
+// evict interrupted part way leaves nothing running as root.
+func TestDisarmAroundEndsWithItsShell(t *testing.T) {
+	w := newFakeWatchdog(t, "inactive", false)
+	cmd := strings.ReplaceAll(strings.ReplaceAll(disarmAround("sleep 30", 4), "/sys/class/watchdog/watchdog0", w.sys), "/dev/watchdog", w.dev)
+	c := exec.Command("sh", "-c", cmd)
+	if err := c.Start(); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	c.Process.Kill()
+	c.Wait()
+	// The loop checks its parent every half second; after that nothing of
+	// the command but the orphaned sleep 30 may hold the state file open or
+	// run the loop.
+	time.Sleep(1500 * time.Millisecond)
+	out, _ := exec.Command("sh", "-c", "ps -eo args= | grep -F -- "+w.sys+" | grep -v grep").Output()
+	if strings.TrimSpace(string(out)) != "" {
+		t.Errorf("the loop outlived its shell:\n%s", out)
 	}
 }

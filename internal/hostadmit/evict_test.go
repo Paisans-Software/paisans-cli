@@ -804,12 +804,9 @@ func TestEvictDisarmsTheWatchdogAfterTheManagerStops(t *testing.T) {
 	}
 	// The disarm loop starts before the stop and runs beside it, so a
 	// Patroni killed while slower containers still stop is disarmed in time.
-	loop, stop := strings.Index(manager.Command, "while :; do disarm"), strings.Index(manager.Command, "systemctl stop user@1001.service")
+	loop, stop := strings.Index(manager.Command, "do disarm; sleep 0.5"), strings.Index(manager.Command, "systemctl stop user@1001.service")
 	if loop < 0 || stop < loop || !strings.Contains(manager.Command, "printf V > /dev/watchdog") {
 		t.Errorf("the manager step does not disarm the watchdog around the stop: %s", manager.Command)
-	}
-	if titleIndex(plan, "disarm the watchdog") >= 0 {
-		t.Errorf("a separate disarm step beside the manager's:\n%s", plan.Text())
 	}
 	for _, w := range plan.Warnings {
 		if strings.Contains(w.Hint, "manager stops its Patroni") {
@@ -831,26 +828,25 @@ func TestEvictOfASiteWithoutTheWatchdogDoesNotTouchIt(t *testing.T) {
 	}
 }
 
-// An evict resumed after its manager stopped, with the watchdog still
-// running, disarms it in a step of its own; one with the timer stopped, as
-// after a reboot, plans none.
-func TestEvictResumedDisarmsAWatchdogStillRunning(t *testing.T) {
-	for _, c := range []struct {
-		state string
-		want  bool
-	}{{"active", true}, {"inactive", false}} {
-		h := evicted("home-a", gateway)().with("linger", "no").with("manager", "inactive").with("watchdog-state", c.state)
-		plan, err := hostadmit.BuildEvict(withEntries(h), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		at := titleIndex(plan, "disarm the watchdog")
-		if (at >= 0) != c.want {
-			t.Errorf("watchdog %s: disarm step planned %v, want %v:\n%s", c.state, at >= 0, c.want, plan.Text())
-		}
-		if c.want && at > titleIndex(plan, "give the watchdog back to root") {
-			t.Errorf("the disarm runs after the device goes back to root")
-		}
+// An evict resumed after its manager stopped still kills the user's
+// processes inside the disarm, since a Patroni left running outside the
+// manager may lead; a host whose watchdog reports no state is warned about.
+func TestEvictResumedKillsInsideTheDisarm(t *testing.T) {
+	h := evicted("home-a", gateway)().with("linger", "no").with("manager", "inactive")
+	plan, err := hostadmit.BuildEvict(withEntries(h), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := titleIndex(plan, "kill paisans-f2a9's processes")
+	if at < 0 || !strings.Contains(plan.Steps[at].Command, "printf V > /dev/watchdog") {
+		t.Errorf("the kill does not run inside the disarm:\n%s", plan.Text())
+	}
+	legacy, err := hostadmit.BuildEvict(withEntries(evicted("home-a", gateway)().add("watchdog-dev", "1001 /dev/watchdog").with("watchdog-state", "none")), hostadmit.EvictInput{Deployment: id, User: "paisans-f2a9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(legacy.Text(), "watchdog: evict cannot tell whether it runs") {
+		t.Errorf("no warning for a watchdog without state:\n%s", legacy.Text())
 	}
 }
 

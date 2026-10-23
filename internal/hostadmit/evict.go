@@ -286,43 +286,64 @@ func (e *evictor) remove(title, describe, command string) {
 // no login, by key or otherwise, starts the manager again before userdel.
 // On a data site that stops Patroni, which Docker kills if it outlasts its
 // stop timeout, with the watchdog still armed, while slower containers keep
-// the stop going past the watchdog's timeout. So the stop runs inside
-// disarmAround, which disarms the watchdog the moment Patroni lets go of it.
+// the stop going past the watchdog's timeout; e.guarded runs the stop inside
+// disarmAround.
 func (e *evictor) manager() error {
 	u, user := e.f.User, e.in.Request.User
 	if !u.Exists || !u.Linger && !u.ManagerActive {
 		return nil
 	}
-	stop := fmt.Sprintf("systemctl stop user@%d.service", u.UID)
 	describe := fmt.Sprintf("expire %s so no login starts it again, disable linger, and stop user@%d.service, which stops its Docker daemon and every container", user, u.UID)
-	if e.f.Files[watchdogRulePath(e.d)].Present {
-		stop = disarmAround(stop)
-		describe += ", disarming the watchdog its Patroni held as soon as it lets go, so a Patroni killed while it led does not reboot the host"
-		e.disarms = true
+	if e.holdsWatchdog() {
+		describe += ", disarming the watchdog its Patroni held as soon as it lets go"
 	}
 	e.remove("stop "+user+"'s manager", describe,
-		fmt.Sprintf("usermod --expiredate 1 %s && loginctl disable-linger %s && %s && { loginctl terminate-user %s 2>/dev/null || true; }", user, user, stop, user))
+		fmt.Sprintf("usermod --expiredate 1 %s && loginctl disable-linger %s && %s && { loginctl terminate-user %s 2>/dev/null || true; }", user, user, e.guarded(fmt.Sprintf("systemctl stop user@%d.service", u.UID)), user))
 	return nil
 }
 
-// disarmAround runs stop, as root, while a loop beside it writes the magic
-// close to /dev/watchdog whenever the timer runs, which stops a timer
+// hasWatchdogDev is whether the host has /dev/watchdog.
+func (e *evictor) hasWatchdogDev() bool { _, ok := e.f.WatchdogDevs["/dev/watchdog"]; return ok }
+
+// holdsWatchdog is whether this deployment holds the host's watchdog: its
+// rule gives the device to the user, for Patroni.
+func (e *evictor) holdsWatchdog() bool { return e.f.Files[watchdogRulePath(e.d)].Present }
+
+// guarded is command, run inside disarmAround where this deployment holds
+// the watchdog, so a Patroni it stops or kills while it leads does not
+// reboot the host.
+func (e *evictor) guarded(command string) string {
+	if !e.holdsWatchdog() {
+		return command
+	}
+	return disarmAround(command, disarmWait)
+}
+
+// disarmWait is how many half seconds disarmAround keeps trying once its
+// command has returned.
+const disarmWait = 20
+
+// disarmAround runs command, as root, while a loop beside it writes the
+// magic close to /dev/watchdog whenever the timer runs, which stops a timer
 // Patroni left armed (Linux, Documentation/watchdog/watchdog-api.rst, "Magic
 // Close feature"). Only one process may hold the device, so the write fails
 // while Patroni holds it and lands within half a second of Patroni letting
-// go, however long the rest of stop takes. The device is opened only while
-// the timer runs, since opening a stopped one starts it. Once stop returns
-// the timer must be stopped within 10 s, or the command fails; a driver with
-// nowayout set cannot be stopped, and the command says so.
-func disarmAround(stop string) string {
-	return `{ w=/sys/class/watchdog/watchdog0; ` +
-		`armed() { [ "$(cat $w/state 2>/dev/null)" = active ]; }; ` +
-		`disarm() { if armed; then { printf V > /dev/watchdog; } 2>/dev/null; fi; true; }; ` +
-		`( while :; do disarm; sleep 0.5; done ) & d=$!; ` +
-		stop + `; s=$?; ` +
-		`i=0; while armed && [ $i -lt 20 ]; do disarm; sleep 0.5; i=$((i+1)); done; kill $d 2>/dev/null; ` +
-		`[ $s -eq 0 ] || exit $s; ` +
-		`if armed; then if [ "$(cat $w/nowayout 2>/dev/null)" = 1 ]; then echo 'the watchdog is still running: its driver has nowayout set, so nothing can stop it and the host reboots within its timeout' >&2; else echo 'the watchdog is still running: /dev/watchdog is held by another process, so it could not be disarmed' >&2; fi; exit 1; fi; }`
+// go, however long the rest of command takes. The device is opened only
+// while /sys/class/watchdog/watchdog0/state reads active, since opening a
+// stopped timer starts it. The loop ends with the shell that started it, and
+// after ten minutes at most. Once command returns it keeps trying for wait
+// half seconds; a timer still running then, held by something else or on a
+// driver with nowayout set, is reported on stderr and left as it is.
+func disarmAround(command string, wait int) string {
+	return fmt.Sprintf(`{ w=/sys/class/watchdog/watchdog0; `+
+		`armed() { [ "$(cat $w/state 2>/dev/null)" = active ]; }; `+
+		`disarm() { if armed; then { printf V > /dev/watchdog; } 2>/dev/null; fi; true; }; `+
+		`p=$$; ( n=0; while kill -0 $p 2>/dev/null && [ $n -lt 1200 ]; do disarm; sleep 0.5; n=$((n+1)); done ) & d=$!; `+
+		`trap 'kill $d 2>/dev/null' EXIT INT TERM HUP; `+
+		`%s; s=$?; `+
+		`i=0; while armed && [ $i -lt %d ]; do disarm; sleep 0.5; i=$((i+1)); done; kill $d 2>/dev/null; `+
+		`if armed; then if [ "$(cat $w/nowayout 2>/dev/null)" = 1 ]; then echo 'the watchdog is still running: its driver has nowayout set, so nothing can stop it and the host reboots within its timeout' >&2; else echo 'the watchdog is still running, held by another process' >&2; fi; fi; `+
+		`[ $s -eq 0 ]; }`, command, wait)
 }
 
 // processes kills every process of the user and checks that none is
@@ -342,7 +363,7 @@ func (e *evictor) processes() error {
 	}
 	user := e.in.Request.User
 	e.remove("kill "+user+"'s processes", "expire "+user+", kill every process of uid "+fmt.Sprint(e.f.User.UID)+" or of its subordinate range and check that none is left, before anything that fences it goes",
-		e.killCommand())
+		e.guarded(e.killCommand()))
 	return nil
 }
 
@@ -518,8 +539,9 @@ func (e *evictor) helper() error {
 // site that is no longer a data site, and stops loading its module at boot.
 func (e *evictor) watchdog() error {
 	rule, unit := watchdogRulePath(e.d), e.d.Prefix()+"-watchdog.service"
-	if e.f.Files[rule].Present && e.f.WatchdogActive && !e.disarms {
-		e.remove("disarm the watchdog", "its timer runs with nothing of this deployment left to keep it, so it would reboot the host: write the magic close to /dev/watchdog", disarmAround("true"))
+	if e.f.Files[rule].Present && e.hasWatchdogDev() && e.f.WatchdogState == "none" {
+		e.warn("watchdog: evict cannot tell whether it runs",
+			"The watchdog's driver reports no state in /sys/class/watchdog, as a legacy driver such as ipmi_watchdog does, so evict does not disarm it. A Patroni killed while it led reboots the host.")
 	}
 	if e.f.Files[rule].Present {
 		e.remove("give the watchdog back to root", "remove "+rule+" and make the device root's again", "rm -f "+rule+" && "+udevTrigger+" && "+giveBack)
