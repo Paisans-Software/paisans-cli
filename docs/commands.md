@@ -1634,7 +1634,10 @@ Creates the public DNS records the configuration implies, at the provider
 `acme.provider` names. Creates what is missing, updates the address of an A or
 AAAA record it made for this deployment (one carrying exactly this
 deployment's comment), never deletes, and refuses if any other record
-conflicts. An app whose `storage` is `local` has no
+conflicts. A record pointing at another declared site waits for `gateway
+move`; when moving the gateway role, keep the old site declared with its
+`public_address` until `paisans gateway move` finishes, or `dns init` updates
+the records to the new gateway at once. An app whose `storage` is `local` has no
 media hostname, so it gets no media record.
 
 ```sh

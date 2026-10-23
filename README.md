@@ -3927,7 +3927,10 @@ record of its type at the name; with its address changed, the name holds
 exactly what is wanted. A record with no comment, another deployment's, two
 records of the type, or a CNAME or stray record beside it, is a conflict. A
 record pointing at another declared site is not updated: it waits for
-`gateway move`, below.
+`gateway move`, below. That is why a gateway role move keeps the old site
+declared, with its `public_address`, until `paisans gateway move` finishes:
+an address no declared site holds reads as the gateway's own changed address,
+and `dns init` updates the record to the new gateway at once.
 
 Each line names the record whole, its type, name, address and zone. Piped
 output says `ok`, `todo` and `FAIL` instead:
@@ -10240,6 +10243,12 @@ make that hold across its steps:
   An app moving from a monitor site to the gateway is marked the same way,
   since `dns init` cannot tell that site from a former gateway; no move
   follows, so its note says to change the record by hand at the provider.
+  **Keep the old site declared, with its `public_address`, until `paisans
+  gateway move` finishes.** `dns init` knows a former gateway only as another
+  declared site's address. Once the old site's address is gone from the
+  configuration, or the site itself, `dns init` cannot tell a moved role from
+  a changed address, and updates its own records at the gateway's hostnames
+  to the new gateway: a cutover before the new gateway is applied.
 * **The move runs last.** `deployment apply` asks every site without the gateway role
   whether it still holds a gateway, and when one does, plans `gateway move`
   after pass two, in a `gateway` section of its own, waiting on the new

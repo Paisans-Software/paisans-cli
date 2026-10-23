@@ -3408,7 +3408,13 @@ Founder direction, 2026-10-22 (issue #399).
   the record switches from the gateway's address to the monitor's in the
   apply that runs `dns init`.
 * Records for a gateway role that moves to another site still wait for
-  `gateway move`, which overlaps the two gateways.
+  `gateway move`, which overlaps the two gateways, as long as the old site
+  stays declared with its `public_address` until the move finishes. `dns
+  init` knows a former gateway only by a declared site's address; once the
+  old site's address, or the site, is gone from the configuration, a moved
+  role reads exactly as a changed address, and `dns init` updates its records
+  to the new gateway before that gateway is applied. The README says so where
+  it describes the move, and a test pins the behaviour.
 
 ### Why
 

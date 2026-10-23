@@ -278,7 +278,7 @@ func TestDNSInitResultOmitsZeroCounts(t *testing.T) {
 		{0, 3, "Created 3 records at cloudflare."},
 		{2, 0, "Updated 2 records at cloudflare."},
 		{1, 1, "Updated 1 record and created 1 record at cloudflare."},
-		{0, 0, "Created 0 records at cloudflare."},
+		{0, 0, "Nothing was written."},
 	} {
 		if got := dnsInitResult(c.updates, c.creates, "cloudflare"); got != c.want {
 			t.Errorf("%d updates, %d creates: %q, want %q", c.updates, c.creates, got, c.want)

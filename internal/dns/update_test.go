@@ -233,3 +233,53 @@ func TestAnAppLeavingAMonitorSiteIsMovingWithAnAccurateNote(t *testing.T) {
 		}
 	}
 }
+
+// The limit of telling a moved gateway role from a changed address: home-a
+// held the gateway and vm takes it, and in the same edit home-a loses its
+// public_address, or is removed. Its address is then no declared site's, so
+// dns init reads the records it made for home-a as the gateway's own changed
+// address and updates them to vm at once, rather than leaving them to
+// gateway move. The README tells operators to keep the old site declared
+// with its address until the move finishes. This pins the behaviour so that
+// changing it is deliberate.
+func TestAMovedGatewayWhoseOldSiteLostItsAddressIsUpdated(t *testing.T) {
+	for name, edit := range map[string]func(*config.Config){
+		"address dropped": func(cfg *config.Config) {
+			a := cfg.Sites["home-a"]
+			a.PublicAddress, a.PublicAddress6 = "", ""
+			cfg.Sites["home-a"] = a
+		},
+		"site removed": func(cfg *config.Config) {
+			delete(cfg.Sites, "home-a")
+			cfg.Storage.Garage.Sites = []string{"vm"}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := moved()
+			edit(cfg)
+			fake := newFake()
+			fake.zones["example.org"] = "zone-1"
+			fake.records["zone-1"] = []cfRecord{
+				{ID: "old-talk", Type: "A", Name: "talk.example.org", Content: oldGW, Comment: recordComment},
+			}
+			c := fake.serve(t)
+			wants, err := Desired(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			p, err := Build(context.Background(), c, cfg.Deployment(), wants)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := len(p.Updates()); got != 1 || p.Updates()[0].Name != "talk.example.org" || p.Updates()[0].Type != "A" {
+				t.Fatalf("want A talk.example.org updated, as the documented limit says: %+v", p.Updates())
+			}
+			// With home-a declared with its address, the same record waits
+			// for the move.
+			kept := plan(t, c, moved())
+			if got := kept.Moving(); len(got) != 1 || got[0].Name != "talk.example.org" || len(kept.Updates()) != 0 {
+				t.Fatalf("with home-a's address declared, A talk.example.org should be moving: %+v", kept.Entries)
+			}
+		})
+	}
+}

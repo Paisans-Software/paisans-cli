@@ -1609,14 +1609,17 @@ func runDNSInit(args []string) error {
 }
 
 // dnsInitResult is dns init's closing line after --execute, naming only the
-// counts that are not zero, and the creates when nothing was written.
+// counts that are not zero.
 func dnsInitResult(updates, creates int, provider string) string {
 	var done []string
 	if updates > 0 {
 		done = append(done, "updated "+plural(updates, "record"))
 	}
-	if creates > 0 || updates == 0 {
+	if creates > 0 {
 		done = append(done, "created "+plural(creates, "record"))
+	}
+	if len(done) == 0 {
+		return "Nothing was written."
 	}
 	summary := strings.Join(done, " and ")
 	return fmt.Sprintf("%s at %s.", strings.ToUpper(summary[:1])+summary[1:], provider)
