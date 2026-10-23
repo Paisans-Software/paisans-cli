@@ -173,7 +173,7 @@ func byRef(dest config.Destination, t apply.Transport, ref string, notMine error
 	rec, err := admission.Read(t, token)
 	switch {
 	case errors.Is(err, admission.ErrNotAdmitted):
-		return rec, fmt.Errorf("%s: %v, and none is for %s, so nothing says who the deployment's user is, and site remove cleans a host only as that user. Nothing was changed. If the deployment's user is still there, the host's owner removes it and everything root's with sudo "+progname.Name()+" site evict --deployment %s --user <the deployment's user> --execute", dest, notMine, ref, evictID)
+		return rec, fmt.Errorf("%s: %v, and none is for %s, so nothing says who the deployment's user is, and site remove cleans a host only as that user. Nothing was changed. If the deployment's user is still there, the host's owner removes it and everything root's with sudo "+progname.Default+" site evict --deployment %s --user <the deployment's user> --execute", dest, notMine, ref, evictID)
 	case err != nil:
 		return rec, fmt.Errorf("%s: %w. Nothing was changed", dest, err)
 	}

@@ -318,7 +318,7 @@ func planMeshDropIn(p *planner) error {
 	default:
 		p.step(Step{
 			Title:    "skip the mesh until its conf exists",
-			Describe: "user: " + p.d.WireGuardUnit() + " is skipped, not failed, at boot until " + progname.Name() + " deployment apply writes " + p.d.WireGuardInstalled(),
+			Describe: "user: " + p.d.WireGuardUnit() + " is skipped, not failed, at boot until " + progname.Default + " deployment apply writes " + p.d.WireGuardInstalled(),
 			File:     &hostprep.File{Path: cond, Content: condContent, Mode: 0o644},
 			Command:  "systemctl daemon-reload",
 			Kinds:    []string{"user"},

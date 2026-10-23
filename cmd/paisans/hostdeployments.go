@@ -265,7 +265,7 @@ func runSiteDeployments(args []string) error {
 		tokens[e.Token], roots[e.Root] = true, true
 		if noBuild != nil && slices.Contains(noBuild.IDs, id) {
 			line := strings.TrimSuffix(registryLine(id, e), ", claimed by paisans "+e.Build.String())
-			r.Warn(line+", in an entry that does not say which build of paisans claimed the host: its owner admits it again (`"+progname.Name()+" site request`, then `"+progname.Name()+" site admit`)", noBuild.Error())
+			r.Warn(line+", in an entry that does not say which build of paisans claimed the host: its owner admits it again (`"+progname.Name()+" site request`, then `"+progname.Default+" site admit`)", noBuild.Error())
 			continue
 		}
 		r.Step(registryLine(id, e)).End(ui.OK, "")

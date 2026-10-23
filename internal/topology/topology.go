@@ -170,7 +170,7 @@ func Classify(cfg *config.Config, ev Evidence) (*Classification, error) {
 		case why == "":
 			c.Sites[name] = Site{Name: name, Class: Ready}
 		case joined[name]:
-			return nil, fmt.Errorf("%s has joined this deployment, and %s. The host's owner admits it again (sudo "+progname.Name()+" site admit --request %s.admit, from "+progname.Name()+" site request --site %s > %s.admit) before the run goes on", name, why, name, name, name)
+			return nil, fmt.Errorf("%s has joined this deployment, and %s. The host's owner admits it again (sudo "+progname.Default+" site admit --request %s.admit, from "+progname.Name()+" site request --site %s > %s.admit) before the run goes on", name, why, name, name, name)
 		default:
 			if err := pending(name, name+": "+why, true); err != nil {
 				return nil, err

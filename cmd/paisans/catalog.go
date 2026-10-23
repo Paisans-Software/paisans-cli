@@ -130,7 +130,7 @@ func runCatalogAdd(args []string) error {
 // github.com/<owner>/paisans-<name>, as `brew tap user/repo` is
 // github.com/user/homebrew-repo.
 func catalogAddArgs(pos []string) (string, string, error) {
-	usage := &ui.Problem{Hint: "catalog add takes a URL, or <owner>/<name>, with a name before it if you want another", Explain: progname.Name() + " catalog add https://github.com/example/paisans-blueprints\npaisans catalog add example/blueprints\npaisans catalog add notes https://github.com/example/paisans-blueprints"}
+	usage := &ui.Problem{Hint: "catalog add takes a URL, or <owner>/<name>, with a name before it if you want another", Explain: progname.Name() + " catalog add https://github.com/example/paisans-blueprints\n" + progname.Name() + " catalog add example/blueprints\n" + progname.Name() + " catalog add notes https://github.com/example/paisans-blueprints"}
 	switch len(pos) {
 	case 2:
 		if !config.ValidCatalogName(pos[0]) {

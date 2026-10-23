@@ -4,14 +4,17 @@
 // under another name (Eg: paisans-test), and advice that names paisans would
 // send the operator to the other build.
 //
-// Text written onto a host or into a record names the product, not the
-// invoking binary, and keeps paisans: it outlives the run, and another
-// operator's paisans reads it.
+// Only text for the person who invoked the command, naming a command they
+// run here, names it so. A command to be run on a host names Default, the
+// release's name installed there, whoever reads it; so does advice addressed
+// to someone else, such as the host's owner, and text written onto a host or
+// into a record: it outlives the run, and another operator's paisans reads it.
 package progname
 
 import "path/filepath"
 
-// Default is the name a release installs the command under, and the name
+// Default is the name a release installs the command under: the name in
+// advice for anyone but the person who invoked the command, and the name
 // until Set is called, as in tests.
 const Default = "paisans"
 

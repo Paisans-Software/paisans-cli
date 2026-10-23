@@ -257,7 +257,7 @@ func BuildEvict(t apply.Transport, in EvictInput) (*Plan, error) {
 	if noBuild != nil {
 		for _, id := range noBuild.IDs {
 			if id != in.Deployment {
-				e.warn(ui.Visible("registry: deployment "+id+"'s entry does not say which build of paisans claimed this host; evict leaves it"), "Its deployment's owner admits it again (`"+progname.Name()+" site request`, then `"+progname.Name()+" site admit`), or this host's owner evicts it with `"+progname.Name()+" site evict`.")
+				e.warn(ui.Visible("registry: deployment "+id+"'s entry does not say which build of paisans claimed this host; evict leaves it"), "Its deployment's owner admits it again (`"+progname.Default+" site request`, then `"+progname.Name()+" site admit`), or this host's owner evicts it with `"+progname.Name()+" site evict`.")
 			}
 		}
 	}

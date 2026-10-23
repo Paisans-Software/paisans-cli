@@ -112,7 +112,7 @@ func runCreate(args []string, stdin io.Reader, stdout io.Writer) error {
 		// With no key, at a terminal, secrets set asks for each secret only
 		// the operator can give, whichever the file declares.
 		p.Say("  %s init          # checks the subnet, creates secrets.enc.yaml, generates every secret", progname.Name())
-		p.Say("  %s site request  # per site: --site <name> > <name>.admit, for its owner's sudo %s site admit", progname.Name(), progname.Name())
+		p.Say("  %s site request  # per site: --site <name> > <name>.admit, for its owner's sudo %s site admit", progname.Name(), progname.Default)
 		p.Say("  %s secrets set   # asks for each secret only you can give, such as the SMTP password", progname.Name())
 		p.Say("  %s deployment apply         # shows every step; --execute runs them", progname.Name())
 		return nil

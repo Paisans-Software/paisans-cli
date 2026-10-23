@@ -553,7 +553,7 @@ func admitCommands(path, site string) string {
 	if path != config.FileName {
 		withConfig = " --config " + shellQuote(path)
 	}
-	return fmt.Sprintf("site admit checks the mesh subnet against the host as root, and refuses one that overlaps anything there. Each command below shows its plan before it changes anything, and takes the flags init cannot pass, such as --data-dir and --bridge-netfilter. If the host is yours, admit the site from this machine, with your own login on the host, which runs admit through sudo:\n\n    "+progname.Name()+" site admit --site %[1]s%[2]s --ssh <your login> --execute\n\nIf someone else owns the host, send them a request:\n\n    "+progname.Name()+" site request --site %[1]s%[2]s > %[1]s.admit\n\nand ask them to run, on the host:\n\n    sudo "+progname.Name()+" site admit --request %[1]s.admit --execute", site, withConfig)
+	return fmt.Sprintf("site admit checks the mesh subnet against the host as root, and refuses one that overlaps anything there. Each command below shows its plan before it changes anything, and takes the flags init cannot pass, such as --data-dir and --bridge-netfilter. If the host is yours, admit the site from this machine, with your own login on the host, which runs admit through sudo:\n\n    "+progname.Name()+" site admit --site %[1]s%[2]s --ssh <your login> --execute\n\nIf someone else owns the host, send them a request:\n\n    "+progname.Name()+" site request --site %[1]s%[2]s > %[1]s.admit\n\nand ask them to run, on the host:\n\n    sudo "+progname.Default+" site admit --request %[1]s.admit --execute", site, withConfig)
 }
 
 // settleMesh is init's subnet decision, over the admitted sites and the

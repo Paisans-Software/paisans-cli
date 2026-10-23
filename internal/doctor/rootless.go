@@ -182,7 +182,7 @@ func DockerSocket(probes []DockerProbe) []Finding {
 				More: []string{
 					"It runs as root, and a daemon running as root is root on the host to anyone who can reach its socket, which undoes what admitting the deployment to a user of its own draws.",
 					"recover:",
-					fmt.Sprintf("  1. The host's owner finds what runs a root daemon at that socket and stops it, then runs `"+progname.Name()+" site admit` for %s again, which sets up the user's own rootless daemon.", p.Site),
+					fmt.Sprintf("  1. The host's owner finds what runs a root daemon at that socket and stops it, then runs `"+progname.Default+" site admit` for %s again, which sets up the user's own rootless daemon.", p.Site),
 				}})
 		default:
 			out = append(out, Finding{Section: SectionDocker, Level: OK, Line: fmt.Sprintf("%s: its rootless Docker answers at %s", p.Site, at)})
@@ -281,7 +281,7 @@ func Linger(d deployment.Deployment, probes []LingerProbe) []Finding {
 				More: []string{
 					"Without it the user's systemd instance, and with it its Docker daemon and every container, stops when the last login to the user ends, and nothing of the deployment starts at boot.",
 					"recover:",
-					fmt.Sprintf("  1. The host's owner runs `"+progname.Name()+" site admit` for %s again, which turns it on.", p.Site),
+					fmt.Sprintf("  1. The host's owner runs `"+progname.Default+" site admit` for %s again, which turns it on.", p.Site),
 				}})
 		default:
 			why := p.Err
@@ -300,7 +300,7 @@ func Linger(d deployment.Deployment, probes []LingerProbe) []Finding {
 				More: []string{
 					fmt.Sprintf("site admit's drop-in, which starts the user's manager after %s, is missing. At boot its Docker daemon can then start a container before %s is up, and one that publishes on the mesh address fails with cannot assign requested address, which Docker does not retry.", d.WireGuardUnit(), d.Interface()),
 					"recover:",
-					fmt.Sprintf("  1. The host's owner runs `"+progname.Name()+" site admit` for %s again, which writes it; it takes effect at the next boot.", p.Site),
+					fmt.Sprintf("  1. The host's owner runs `"+progname.Default+" site admit` for %s again, which writes it; it takes effect at the next boot.", p.Site),
 				}})
 		default:
 			why := "the answer has no mesh-order line"

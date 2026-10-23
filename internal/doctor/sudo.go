@@ -54,7 +54,7 @@ func SudoRights(cfg *config.Config, probes []SudoProbe) []Finding {
 			More: []string{
 				"Every change to the mesh (its file, bringing it up, syncing its peers) runs the helper with sudo -n, so apply cannot manage the mesh on this site.",
 				"recover:",
-				fmt.Sprintf("  1. The host's owner runs `"+progname.Name()+" site admit` for %s again, which installs %s and its line in /etc/sudoers.d/%s.", p.Site, helper, d.Prefix()),
+				fmt.Sprintf("  1. The host's owner runs `"+progname.Default+" site admit` for %s again, which installs %s and its line in /etc/sudoers.d/%s.", p.Site, helper, d.Prefix()),
 			}}
 		if helperErr != nil {
 			out = append(out, Finding{Section: SectionSudo, Level: Fail,
@@ -87,7 +87,7 @@ func SudoRights(cfg *config.Config, probes []SudoProbe) []Finding {
 			more := append(lastLines(p.Out+"\n"+p.Err, 3),
 				"recover:",
 				fmt.Sprintf("  1. The host's owner runs `LC_ALL=C sudo -n -l` (`/usr/bin/sudo.ws` in place of `sudo` where sudo is sudo-rs) as %s on %s and reads the answer: a translated or unfamiliar sudo is the likely cause.", user, p.Site),
-				fmt.Sprintf("  2. If it lists %s and nothing else, report that output as a doctor bug. If not, the host's owner checks the line site admit wrote in /etc/sudoers.d/%s with `visudo -c`, or runs `"+progname.Name()+" site admit` for %s again.", admitrules.HelperRule(helper), d.Prefix(), p.Site),
+				fmt.Sprintf("  2. If it lists %s and nothing else, report that output as a doctor bug. If not, the host's owner checks the line site admit wrote in /etc/sudoers.d/%s with `visudo -c`, or runs `"+progname.Default+" site admit` for %s again.", admitrules.HelperRule(helper), d.Prefix(), p.Site),
 				fmt.Sprintf("  3. `"+progname.Name()+" doctor --site %s` again.", p.Site),
 			)
 			out = append(out, Finding{Section: SectionSudo, Level: Warn, Line: fmt.Sprintf("%s: could not read what sudo lets %s run", p.Site, user), More: more})

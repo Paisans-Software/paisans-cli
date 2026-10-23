@@ -28,6 +28,6 @@ func checkSwap(t Transport) (Section, error) {
 		return out, nil
 	}
 	out.Warnings = append(out.Warnings, Warning{Hint: "swap: none on " + t.Describe(),
-		Detail: "Without swap, a host that runs short of memory has the kernel kill a process, which may be the database, instead of slowing down. The host's owner turns on the swap it has, or, where it has none, runs " + progname.Name() + " site admit again, which offers a swapfile where it can make one."})
+		Detail: "Without swap, a host that runs short of memory has the kernel kill a process, which may be the database, instead of slowing down. The host's owner turns on the swap it has, or, where it has none, runs " + progname.Default + " site admit again, which offers a swapfile where it can make one."})
 	return out, nil
 }

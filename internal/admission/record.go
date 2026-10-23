@@ -295,7 +295,7 @@ func ParseRecord(data []byte, token string) (Record, error) {
 	case version.IsNewer(err):
 		problems = append(problems, err.Error())
 	case err != nil:
-		problems = append(problems, err.Error()+". The host's owner admits the deployment again: `"+progname.Name()+" site request`, then `"+progname.Name()+" site admit`")
+		problems = append(problems, err.Error()+". The host's owner admits the deployment again: `"+progname.Name()+" site request`, then `"+progname.Default+" site admit`")
 	}
 	if len(problems) > 0 {
 		return refuse(problems...)

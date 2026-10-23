@@ -85,7 +85,7 @@ func runSiteAdmit(args []string, stdin io.Reader, stdout io.Writer) error {
 	case request != "" && sshFlag != "":
 		return fmt.Errorf("site admit: --request runs on the host itself and takes no --ssh")
 	case request != "" && !runningAsRootOnLinux():
-		return fmt.Errorf("site admit: --request runs as root on the host it admits to: copy the request there and run sudo %s site admit --request <file>", progname.Name())
+		return fmt.Errorf("site admit: --request runs as root on the host it admits to: copy the request there and run sudo %s site admit --request <file>", progname.Default)
 	case request == "" && digestFlag != "":
 		return fmt.Errorf("site admit: --digest goes with --request: with --site admit builds the request itself from the configuration")
 	case flags.EnableUFWBlockListed && !flags.EnableUFW:
@@ -710,7 +710,7 @@ func runSiteEvict(args []string, stdin io.Reader, stdout io.Writer) error {
 	case *site == "" && *sshFlag != "":
 		return fmt.Errorf("site evict: --ssh goes with --site")
 	case *site == "" && !runningAsRootOnLinux():
-		return fmt.Errorf("site evict: --request and --deployment run as root on the host itself: run sudo %s site evict there", progname.Name())
+		return fmt.Errorf("site evict: --request and --deployment run as root on the host itself: run sudo %s site evict there", progname.Default)
 	}
 	r := reporter()
 	in := hostadmit.EvictInput{DataDir: *dataDir}

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paisans-software/paisans-cli/internal/admission"
 	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
@@ -15,6 +16,10 @@ const commandWords = `(help|validate|create|init|render|site|mesh|gateway|deploy
 // namesPaisans matches a command line run as paisans, in text that should
 // name the command as it was invoked.
 var namesPaisans = regexp.MustCompile(`(^|[^\w/.-])paisans ` + commandWords + `([^\w-]|$)`)
+
+// ownersCommand matches the commands the host's owner runs on the host,
+// which name the release's paisans whatever this command was invoked as.
+var ownersCommand = regexp.MustCompile(`sudo\s+paisans\s+site\s+(admit|evict)`)
 
 // invokedAs runs the rest of the test as though the command were invoked as
 // /opt/bin/paisans-test.
@@ -42,7 +47,7 @@ func TestHelpNamesTheInvokedCommand(t *testing.T) {
 		}
 	}
 	b.WriteString(executeTopic())
-	page := b.String()
+	page := ownersCommand.ReplaceAllString(b.String(), "")
 	if m := namesPaisans.FindAllString(page, -1); len(m) > 0 {
 		t.Errorf("help names paisans rather than paisans-test: %q", m)
 	}
@@ -68,5 +73,17 @@ func TestAdviceNamesTheInvokedCommand(t *testing.T) {
 	}
 	if got := resumeAdvice(); got != "Run paisans-test deployment apply --execute again to resume." {
 		t.Errorf("resumeAdvice() = %q", got)
+	}
+}
+
+// Advice for the host's owner, who runs the release on another machine,
+// names paisans; the line the operator runs names the command as invoked.
+func TestOwnersAdviceNamesPaisans(t *testing.T) {
+	invokedAs(t)
+	got := admissionProblem("home-b", "f2a9", admission.ErrNotAdmitted).Error()
+	for _, want := range []string{"    paisans-test site request --site home-b > home-b.admit", "    sudo paisans site admit --request home-b.admit"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("admission problem lacks %q:\n%s", want, got)
+		}
 	}
 }

@@ -228,7 +228,7 @@ var helpCommands = []helpCommand{
 		detail: "Take a site out of the running deployment in gated stages: its data out (the Patroni leader switched to the Sync Standby, its Garage node out of the layout and the objects moved), out of the cluster (its etcd member, and the mesh, HAProxy and gateway routes on every remaining site, and each replica's patroni.env, one at a time; one data site out of two and a witness takes the witness out of etcd too), its host cleaned of everything provably this deployment's (a gateway's Caddy kept, reduced to the host owner's sites in its caddy.d, /srv/paisans/<token>/caddy.d, while there are any), the A and AAAA records dns init made for its public address deleted at the DNS provider, and its entry out of " + config.FileName + ".\n\n" +
 			"Refuses the only gateway, data or apps site, a site an app is pinned to, and an unhealthy cluster. --host-gone never reaches the host, as below; --delete-data deletes its data after the site's name is typed at a terminal. Writes nothing without --execute.\n\n" +
 			"--force --ssh <host> --id <id or token>, with no " + config.FileName + ": clean that host of the deployment the login's own admission record names, as --force does, from that record alone, logging in as the deployment's user. DNS is not modified. --execute asks for the site's name at a terminal.\n\n" +
-			"The host stage runs as the deployment's user and ends with the site evict command line the host's owner runs with sudo to remove the rest.\n\n" +
+			"The host stage runs as the deployment's user and ends with the sudo paisans site evict line the host's owner runs to remove the rest.\n\n" +
 			"--host-gone is for a site whose host is not reached: dead, or still running but no longer the deployment's to reach. It never reaches that host, and cuts the site off in this order: the mesh first on every remaining site, then its DNS records, Patroni's own failover, its etcd member, its Garage node skipped as dead, then the rest as remove does. Refuses --force, --ssh, --id and --delete-data, which reach a host. " +
 			"Generates the secrets of a replacement declared in the same edit, which apply then brings up. --execute asks for the site's name, and for revoked, lose writes or lose objects when they apply.\n\n" +
 			yesTopic,
@@ -545,7 +545,7 @@ record for this deployment and refuses, with nothing changed, a host that has
 none, or whose record does not match the site: another site name, ssh user, SSH
 or WireGuard port, mesh subnet, forwarding, a grant its roles need, or, for
 an external web server, the owner's web server record. It names the two lines that fix it, ` + progname.Name() + ` site request --site <site> >
-<site>.admit for the operator, and sudo ` + progname.Name() + ` site admit --request
+<site>.admit for the operator, and sudo ` + progname.Default + ` site admit --request
 <site>.admit for the host's owner. apply and site prepare also refuse when
 anything else on the host overlaps the mesh subnet. dns init and dns prune reach
 no host, only the DNS provider's API, and change it only with --execute; site

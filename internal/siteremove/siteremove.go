@@ -141,7 +141,7 @@ func (st *Stage) skipTitle() string {
 // EvictLine is how the host's owner removes what a site remove left for
 // them, without the request file.
 func EvictLine(d deployment.Deployment, user string) string {
-	return fmt.Sprintf("sudo "+progname.Name()+" site evict --deployment %s --user %s --execute", d.ID, user)
+	return fmt.Sprintf("sudo "+progname.Default+" site evict --deployment %s --user %s --execute", d.ID, user)
 }
 
 // Plan is a whole removal, decided from the live deployment.
