@@ -86,6 +86,36 @@ func TestAListenPortSkipsAPortAnotherProcessHolds(t *testing.T) {
 	}
 }
 
+// A UDP port with no socket of its own is held too: one a container
+// publishes, one a stopped container with restart: always takes again,
+// and one a DNAT rule forwards. A TCP publish is not.
+func TestAListenPortSkipsPublishedAndForwardedPorts(t *testing.T) {
+	udp := "container vpn\t0.0.0.0:51822->1194/udp, 0.0.0.0:51830->80/tcp\tedge\n" +
+		"stopped /relay always {\"3478/udp\":[{\"HostIp\":\"\",\"HostPort\":\"51824\"}]}\n" +
+		"dnat table ip nat chain PREROUTING: udp dport 51826 dnat to 192.168.1.30:51820\n" +
+		"end\n"
+	err, _, _ := buildMoving(t, portHolders("apps", 51820), udp, 0, []byte{0, 0, 0, 2})
+	var moved *hostadmit.PortMoveError
+	if !errors.As(err, &moved) || moved.Free != 51830 {
+		t.Fatalf("Build = %v, want a move to 51830 past the publishes and the rule", err)
+	}
+}
+
+// A negated rule holds every port it does not name, and a rule whose
+// ports admit cannot read stops the search with the reason.
+func TestAListenPortStopsAtWhatItCannotRead(t *testing.T) {
+	negated := "dnat table ip nat chain PREROUTING: udp dport != 22 dnat to 192.168.1.30\nend\n"
+	err, _, _ := buildMoving(t, portHolders("apps", 51820), negated, 0, make([]byte, 10))
+	if err == nil || errors.As(err, new(*hostadmit.PortMoveError)) {
+		t.Errorf("Build = %v, want the refusal past a negated rule", err)
+	}
+	unread := "dnat table ip nat chain PREROUTING: udp dport @forwarded dnat to 192.168.1.30\nend\n"
+	err, _, _ = buildMoving(t, portHolders("apps", 51820), unread, 0, []byte{3})
+	if err == nil || errors.As(err, new(*hostadmit.PortMoveError)) || !strings.Contains(err.Error(), "could not read the ports of a NAT rule") || !strings.Contains(err.Error(), "WireGuard listen port 51820/udp") {
+		t.Errorf("Build = %v, want the refusal and why no port was looked for", err)
+	}
+}
+
 // Ten held candidates in a row give up with the refusal as it was.
 func TestAListenPortGivesUpAfterTenTries(t *testing.T) {
 	ports := []int{51820}

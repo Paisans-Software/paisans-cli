@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -131,5 +132,28 @@ func TestInitDoesNotMoveAListenPortHeldBesideARole(t *testing.T) {
 	i := rec.Index("note", "health has not admitted this deployment yet, so init skipped it")
 	if i < 0 || !strings.Contains(rec.Events[i].Extra, "holds the gateway role") || strings.Contains(rec.Events[i].Extra, "another port") {
 		t.Errorf("init did not skip health with the gateway advice alone:\n%s", rec.Lines())
+	}
+}
+
+// An admitted site init cannot read may hold the manifest, so the port
+// stays, and a note names the site, since the refusal says nothing of why.
+func TestInitSaysWhichSiteKeptAListenPort(t *testing.T) {
+	sites := fakeSites()
+	sites["health"].unadmitted = true
+	sites["home-a"].broken = errors.New("permission denied")
+	path, rec := initWorld(t, healthOnItsAddress, sites, nil)
+	ran := scriptAdmitFromInit(t, sites, map[string][]error{"health": {portHeld(51827)}})
+	// init then stops at the subnet, which it cannot settle unread.
+	_, _ = runInitAt(t, path, true, "y\n")
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Sites["health"].Endpoint != "" || strings.Join(*ran, ",") != "health+port" {
+		t.Errorf("health's endpoint %q, admit ran %v: want the port kept", cfg.Sites["health"].Endpoint, *ran)
+	}
+	i := rec.Index("note", "health's WireGuard listen port was not moved")
+	if i < 0 || !strings.Contains(rec.Events[i].Extra, "init could not read home-a (") || !strings.Contains(rec.Events[i].Extra, "permission denied") {
+		t.Errorf("init did not name the site it could not read:\n%s", rec.Lines())
 	}
 }

@@ -1900,8 +1900,14 @@ WireGuard listen port and nothing else, and the site is dialled on its
 `public_address` with no `endpoint` or with `endpoint: ":<port>"`, admit tries
 the held port plus a random step of 2 to 10, then each later try a new step
 up from the last, up to 10 tries. A try fails when another deployment in the
-registry holds the port, a UDP socket on the host is bound to it (the
-registry knows only deployments), or it is above 65535. `init` writes the
+registry holds the port, something else on the host holds it (the registry
+knows only deployments), or it is above 65535. Something else is a bound UDP
+socket, a UDP port the system Docker publishes, running or for a stopped
+container with `restart: always`, or a port a DNAT or redirect rule matches,
+since a forwarded port has no socket of its own. A negated rule holds every
+port it does not name, and a listener, ruleset or rule admit cannot read
+stops the search, with the refusal and why. An admitted site `init` cannot
+read for the manifest leaves the port as it is, with a note naming the site. `init` writes the
 first free one as `endpoint: ":<port>"`, keeping comments as the subnet write
 does, says which port to open in any firewall in front of the host and to
 forward behind NAT, and admits the site again on it. An endpoint written as a

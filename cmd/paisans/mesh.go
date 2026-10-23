@@ -209,7 +209,7 @@ func offerAdmissions(r ui.Reporter, cfg *config.Config, path string, hosts map[s
 			if yes {
 				var b *blockedSite
 				var ok bool
-				applied := func() bool { return appliedOn(cfg, hosts, admitted) }
+				applied := func() (bool, error) { return appliedOn(cfg, hosts, admitted) }
 				if cfg, ok, b, why, err = admitSite(r, cfg, path, hosts, n.site, applied, stdin, stdout); err != nil {
 					return nil, nil, nil, err
 				}
@@ -278,15 +278,16 @@ func skipNote(r ui.Reporter, path, site string, why admitStop) {
 // port is init's to move (config.Site.ListenPortMovable) and applied says
 // the deployment has never been applied, since the port is in every other
 // site's WireGuard file from then on: see moveListenPort. The site is then
-// admitted again on it, once.
-func admitSite(r ui.Reporter, cfg *config.Config, path string, hosts map[string]registry.Runner, site string, applied func() bool, stdin io.Reader, stdout io.Writer) (*config.Config, bool, *blockedSite, admitStop, error) {
+// admitted again on it, once. A site applied could not read leaves the
+// port where it is, with a note naming it.
+func admitSite(r ui.Reporter, cfg *config.Config, path string, hosts map[string]registry.Runner, site string, applied func() (bool, error), stdin io.Reader, stdout io.Writer) (*config.Config, bool, *blockedSite, admitStop, error) {
 	var random io.Reader
 	if cfg.Sites[site].ListenPortMovable() {
 		random = meshRandom
 	}
 	err := admitFromInit(r, path, site, random, stdin, stdout)
 	var moved *portMoved
-	if random != nil && errors.As(err, &moved) && !applied() {
+	if random != nil && errors.As(err, &moved) && movable(r, site, applied) {
 		if err := moveListenPort(r, path, site, moved); err != nil {
 			return cfg, false, nil, admitStop{}, err
 		}
@@ -341,16 +342,34 @@ func moveListenPort(r ui.Reporter, path, site string, moved *portMoved) error {
 	return nil
 }
 
-// appliedOn reports whether any of sites holds this deployment's manifest,
-// or could not be asked: either way init does not move a listen port.
-func appliedOn(cfg *config.Config, hosts map[string]registry.Runner, sites []string) bool {
+// movable reports whether applied says the deployment has never been
+// applied, so site's listen port may move. A site applied could not read
+// is a note naming it, since the refusal init then skips the site with
+// says nothing of why its port stayed.
+func movable(r ui.Reporter, site string, applied func() (bool, error)) bool {
+	done, err := applied()
+	if err != nil {
+		r.Note(site+"'s WireGuard listen port was not moved", fmt.Sprintf("init could not read %v, so it cannot tell whether this deployment has been applied, and once it has, the port is in every other site's WireGuard file. Fix the read and run init again, or give %s's endpoint another port in the configuration.", err, site))
+		return false
+	}
+	return !done
+}
+
+// appliedOn reports whether any of sites holds this deployment's manifest.
+// A site that could not be asked is the error, naming it.
+func appliedOn(cfg *config.Config, hosts map[string]registry.Runner, sites []string) (bool, error) {
 	manifest := cfg.Deployment().Manifest()
 	for _, name := range sites {
-		if _, found, err := hosts[name].ReadFile(manifest); err != nil || found {
-			return true
+		_, found, err := hosts[name].ReadFile(manifest)
+		if err != nil {
+			hint, _ := ui.Describe(err)
+			return true, fmt.Errorf("%s (%s)", name, hint)
+		}
+		if found {
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // subnetBlocked is what admit refused the mesh subnet for on site's host,
@@ -486,7 +505,7 @@ func settleAndReadmit(r ui.Reporter, cfg *config.Config, path string, hosts map[
 			var why admitStop
 			// The subnet moved, which it does only before the first
 			// apply, so a listen port is init's to move too.
-			if cfg, ok, b, why, err = admitSite(r, cfg, path, hosts, site, func() bool { return false }, stdin, stdout); err != nil {
+			if cfg, ok, b, why, err = admitSite(r, cfg, path, hosts, site, func() (bool, error) { return false, nil }, stdin, stdout); err != nil {
 				return nil, nil, false, err
 			}
 			_, wasAdmitted := stale[site]
