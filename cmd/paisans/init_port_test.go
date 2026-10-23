@@ -157,3 +157,23 @@ func TestInitSaysWhichSiteKeptAListenPort(t *testing.T) {
 		t.Errorf("init did not name the site it could not read:\n%s", rec.Lines())
 	}
 }
+
+// A site that holds the manifest answers before one init cannot read,
+// whichever comes first: the deployment is applied, and no note blames an
+// unread site.
+func TestInitKeepsAListenPortAppliedPastAnUnreadSite(t *testing.T) {
+	example, err := config.Load(filepath.Join("..", "..", "examples", "paisans-stack.example.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, rec, ran := initHealthHeld(t, healthOnItsAddress, []error{portHeld(51827)}, func(sites map[string]*initFake) {
+		sites["home-a"].broken = errors.New("permission denied")
+		sites["home-b"].files = map[string]string{example.Deployment().Manifest(): "{}"}
+	})
+	if strings.Join(*ran, ",") != "health+port" || rec.Has("done", "move health's WireGuard listen port") {
+		t.Errorf("init moved the port of an applied deployment: admit ran %v\n%s", *ran, rec.Lines())
+	}
+	if rec.Has("note", "health's WireGuard listen port was not moved") {
+		t.Errorf("init blamed an unread site for a deployment home-b shows applied:\n%s", rec.Lines())
+	}
+}

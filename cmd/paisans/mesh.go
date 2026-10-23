@@ -356,20 +356,22 @@ func movable(r ui.Reporter, site string, applied func() (bool, error)) bool {
 }
 
 // appliedOn reports whether any of sites holds this deployment's manifest.
-// A site that could not be asked is the error, naming it.
+// Every site is asked, so one that holds it answers before one that could
+// not be asked, which is the error, naming it.
 func appliedOn(cfg *config.Config, hosts map[string]registry.Runner, sites []string) (bool, error) {
 	manifest := cfg.Deployment().Manifest()
+	var unread error
 	for _, name := range sites {
 		_, found, err := hosts[name].ReadFile(manifest)
-		if err != nil {
-			hint, _ := ui.Describe(err)
-			return true, fmt.Errorf("%s (%s)", name, hint)
-		}
-		if found {
+		switch {
+		case found && err == nil:
 			return true, nil
+		case err != nil && unread == nil:
+			hint, _ := ui.Describe(err)
+			unread = fmt.Errorf("%s (%s)", name, hint)
 		}
 	}
-	return false, nil
+	return unread != nil, unread
 }
 
 // subnetBlocked is what admit refused the mesh subnet for on site's host,

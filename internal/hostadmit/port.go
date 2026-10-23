@@ -87,7 +87,9 @@ func freePort(p *planner, r registry.Registry, id string, e registry.Entry, rand
 // publishes, or one a stopped container with restart: always takes again,
 // and any port a DNAT or redirect rule matches, of either protocol, since
 // a rule's protocol is not read. A negated rule holds every port it does
-// not name. Anything admit cannot read (a listener or ruleset read that
+// not name, and a rule with no port match holds every port. A host with
+// neither nft nor iptables-save has a ruleset admit cannot read, so its
+// port is never moved: no reader is no proof of no rules. Anything admit cannot read (a listener or ruleset read that
 // failed, a rule's ports or a stopped container's bindings it cannot
 // parse) is an error: a port chosen past it may be held.
 func udpPorts(p *planner) (func(int) bool, error) {
@@ -125,7 +127,12 @@ func udpPorts(p *planner) (func(int) bool, error) {
 			}
 			spans = append(spans, udpOnly(list)...)
 		case "dnat":
-			for _, m := range rulePorts(rest) {
+			matches := rulePorts(rest)
+			if len(matches) == 0 {
+				// No port match: the rule forwards every port.
+				negated = append(negated, nil)
+			}
+			for _, m := range matches {
 				switch {
 				case m.unread:
 					return nil, fmt.Errorf("reading what holds UDP ports on the host: admit could not read the ports of a NAT rule in %s", hostText(withoutCounters(rest)))

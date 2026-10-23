@@ -161,7 +161,7 @@ if [ -S /var/run/docker.sock ]; then
 fi
 if command -v nft >/dev/null 2>&1; then
   if out=$(nft list ruleset 2>/dev/null); then
-    printf '%s\n' "$out" | awk '/^table / { t = $2 " " $3 } /^[ \t]*chain / { c = $2 } { l = $0; gsub(/ct status dnat/, "", l) } (l ~ /dnat/ || l ~ /redirect/) && l ~ /dport/ { sub(/^[ \t]+/, ""); print "dnat table " t " chain " c ": " $0 }'
+    printf '%s\n' "$out" | awk '/^table / { t = $2 " " $3 } /^[ \t]*chain / { c = $2 } { l = $0; gsub(/ct status dnat/, "", l) } (l ~ /dnat/ || l ~ /redirect/) { sub(/^[ \t]+/, ""); print "dnat table " t " chain " c ": " $0 }'
     printf '%s\n' "$out" | awk '/^table / { t = $2 " " $3 } /^[ \t]*chain / { c = $2 } t == "ip filter" && c == "FORWARD" && /jump DOCKER-(USER|FORWARD)/ { print "docker-chains nft"; exit }'
   else echo 'unread ruleset (nft list ruleset)'; fi
   for save in iptables-legacy-save ip6tables-legacy-save; do
@@ -402,7 +402,8 @@ type portMatch struct {
 // rulePorts is every destination port match of a DNAT or redirect rule:
 // one port, a set, a range (nft's 1-1000, iptables' 1:1000), or a
 // negation (nft's !=, iptables' ! --dport), which matches every port it
-// does not name.
+// does not name. A rule with none matches every port, of whatever
+// protocol it names or of every one.
 func rulePorts(rule string) []portMatch {
 	var out []portMatch
 	for _, m := range dport.FindAllStringSubmatch(rule, -1) {
@@ -429,10 +430,14 @@ func rulePorts(rule string) []portMatch {
 
 // ruleHoldsLow reports whether a DNAT or redirect rule matches 80 or 443
 // as its destination port (rulePorts). A negation holds 80 or 443 unless
-// it names both. A match admit cannot read is taken to hold them,
-// unresolved.
+// it names both, and a rule with no port match holds every port. A match
+// admit cannot read is taken to hold them, unresolved.
 func ruleHoldsLow(rule string) (holds, unresolved bool) {
-	for _, m := range rulePorts(rule) {
+	matches := rulePorts(rule)
+	if len(matches) == 0 {
+		return true, false
+	}
+	for _, m := range matches {
 		if m.unread {
 			return true, true
 		}

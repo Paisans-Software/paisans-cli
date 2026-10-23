@@ -116,6 +116,53 @@ func TestAListenPortStopsAtWhatItCannotRead(t *testing.T) {
 	}
 }
 
+// A range publish holds every port in it, an IPv6 publish holds its
+// port as an IPv4 one does, and an iptables DNAT rule is read as nft's.
+func TestAListenPortReadsRangesIPv6AndIptablesRules(t *testing.T) {
+	udp := "container relay\t0.0.0.0:51821-51823->51821-51823/udp\t\n" +
+		"container vpn6\t[::]:51824->1194/udp\t\n" +
+		"dnat iptables-save -t nat: -A PREROUTING -i eth0 -p udp -m udp --dport 51826 -j DNAT --to-destination 192.168.1.30:51820\n" +
+		"end\n"
+	err, _, _ := buildMoving(t, portHolders("apps", 51820), udp, 0, []byte{0, 0, 0, 0})
+	var moved *hostadmit.PortMoveError
+	if !errors.As(err, &moved) || moved.Free != 51828 {
+		t.Fatalf("Build = %v, want a move to 51828 past the range, the IPv6 publish and the rule", err)
+	}
+}
+
+// A NAT rule with no port match forwards every port, in nft's form and
+// in iptables', so no candidate is free past it.
+func TestAListenPortIsHeldByAPortlessRule(t *testing.T) {
+	for _, rule := range []string{
+		"dnat table ip nat chain PREROUTING: iifname \"eth1\" dnat to 192.168.1.30",
+		"dnat table ip nat chain PREROUTING: meta l4proto udp redirect to :1194",
+		"dnat iptables-save -t nat: -A PREROUTING -i eth1 -j DNAT --to-destination 192.168.1.30",
+		"dnat iptables-save -t nat: -A PREROUTING -p udp -j DNAT --to-destination 192.168.1.30",
+	} {
+		err, _, _ := buildMoving(t, portHolders("apps", 51820), rule+"\nend\n", 0, make([]byte, 10))
+		if err == nil || errors.As(err, new(*hostadmit.PortMoveError)) || !strings.Contains(err.Error(), "WireGuard listen port 51820/udp") {
+			t.Errorf("%s: Build = %v, want the refusal", rule, err)
+		}
+	}
+}
+
+// What the probe could not read stops the search with the refusal and
+// why: a stopped container's bindings it cannot parse, the containers,
+// and the ruleset, on a host with neither nft nor iptables-save too.
+func TestAListenPortStopsAtAnUnreadProbe(t *testing.T) {
+	for answer, why := range map[string]string{
+		"stopped /relay always {not json\n":             "could not read the ports your Docker's stopped container relay binds",
+		"unread containers (ps of the system Docker)\n": "could not read the containers (ps of the system Docker)",
+		"unread ruleset (nft list ruleset)\n":           "could not read the ruleset (nft list ruleset)",
+		"unread ruleset (no nft or iptables-save)\n":    "could not read the ruleset (no nft or iptables-save)",
+	} {
+		err, _, _ := buildMoving(t, portHolders("apps", 51820), answer+"end\n", 0, []byte{3})
+		if err == nil || errors.As(err, new(*hostadmit.PortMoveError)) || !strings.Contains(err.Error(), why) || !strings.Contains(err.Error(), "WireGuard listen port 51820/udp") {
+			t.Errorf("%q: Build = %v, want the refusal and %q", answer, err, why)
+		}
+	}
+}
+
 // Ten held candidates in a row give up with the refusal as it was.
 func TestAListenPortGivesUpAfterTenTries(t *testing.T) {
 	ports := []int{51820}
