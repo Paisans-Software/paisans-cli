@@ -103,11 +103,12 @@ func configTransports(cfg *config.Config) map[string]apply.Transport {
 	return out
 }
 
-// anchorFor is the workstation's anchor, with root pinned in place of a
-// recorded one. A root that differs from the recorded pin is refused: the
-// pin is what the operator trusted before, and replacing it is not a pull's
-// side effect.
-func anchorFor(l configstore.Local, root string) (configstore.Anchor, error) {
+// anchorFor is the workstation's anchor, with root, when given, as the pin
+// the operator chose for this run. With replace, a root that differs from
+// the recorded pin replaces it, since typing --root is the same choice that
+// pinned it first, and the run that records it says so; without replace it
+// is refused.
+func anchorFor(l configstore.Local, root string, replace bool) (configstore.Anchor, error) {
 	a, err := l.Anchor()
 	if err != nil {
 		return a, err
@@ -118,10 +119,10 @@ func anchorFor(l configstore.Local, root string) (configstore.Anchor, error) {
 	if !shaShape(root) {
 		return a, &ui.Problem{Hint: fmt.Sprintf("--root %q is not a commit id", root), Explain: "Give the full hash of the root to pin, as paisans deployment log prints it on a root's line, or as another operator's .paisans/config-root holds it."}
 	}
-	if a.Root != "" && a.Root != root {
-		return a, &ui.Problem{Hint: "--root differs from the pinned root", Explain: fmt.Sprintf("This workstation pinned %s in .paisans/config-root. Drop --root, or remove that file if the pin is wrong.", a.Root)}
+	if a.Root != "" && a.Root != root && !replace {
+		return a, &ui.Problem{Hint: "--root differs from the pinned root", Explain: fmt.Sprintf("This workstation pinned %s in .paisans/config-root. Drop --root, or run paisans deployment pull --root %s, which replaces the pin.", a.Root, root)}
 	}
-	a.Root = root
+	a.Root, a.Chosen = root, true
 	return a, nil
 }
 
@@ -276,6 +277,10 @@ func gatherAt(r ui.Reporter, l configstore.Local, sites map[string]apply.Transpo
 	}
 	if err != nil {
 		s.Fail(err)
+		var re *configstore.RootError
+		if errors.As(err, &re) {
+			return g, &ui.Problem{Hint: "which root is this deployment's is yours to say", Explain: re.Error() + ".", Cause: err}
+		}
 		if errors.Is(err, configstore.ErrNoAnchor) {
 			todo := m.noAnchor
 			if todo == "" {
@@ -559,7 +564,7 @@ func runDeploymentPull(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := newFlagSet("deployment pull", flag.ExitOnError)
 	reporter := commonFlags(fs)
 	configPath := fs.String("config", config.FileName, configHelp)
-	root := fs.String("root", "", "pin this version as the root, the version trust starts from")
+	root := fs.String("root", "", "pin this root, the version trust starts from, replacing a recorded pin; the way out when the sites hold another incarnation")
 	keyPath := fs.String("key", "", keyHelp)
 	execute := fs.Bool("execute", false, "write the sites' newest version to the local files")
 	answers := yesFlag(fs)
@@ -581,7 +586,7 @@ func runDeploymentPull(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	a, err := anchorFor(l, *root)
+	a, err := anchorFor(l, *root, true)
 	if err != nil {
 		return err
 	}
@@ -846,7 +851,7 @@ func runDeploymentLog(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	a, err := anchorFor(l, *root)
+	a, err := anchorFor(l, *root, true)
 	if err != nil {
 		return err
 	}
@@ -941,7 +946,7 @@ func runDeploymentRecover(args []string, stdin io.Reader, stdout io.Writer) erro
 	if l.HasFiles() {
 		return &ui.Problem{Hint: "there are configuration files here already", Explain: "Recovery writes onto a workstation with nothing, so it never overwrites a file. Use paisans deployment pull where the files exist, or recover into an empty directory with --config."}
 	}
-	a, err := anchorFor(l, *root)
+	a, err := anchorFor(l, *root, true)
 	if err != nil {
 		return err
 	}

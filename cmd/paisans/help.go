@@ -507,7 +507,8 @@ const configTrust = "\n\n" +
 // workstation that records no signing key.
 const keyTrust = "With no key recorded in .paisans/signing-key, name your own operator key with --key <path.pub>. It anchors only on versions it signed itself, under one root, that the trust rules trust from that root: every head must be signed by it and list it under an operator, and every trusted version must declare the deployment's id. " +
 	"A newer version by another operator, or the key's versions under two roots, need --root <sha>, the full hash deployment log prints on a root's line or another operator's .paisans/config-root holds, since a key alone cannot tell this deployment's history from one it signed before a redeploy under the same id. " +
-	"A pinned root anchors alone, and --key is then ignored, with a note. pull and recover with --execute record the named key in .paisans/signing-key when your ssh-agent holds it (load it with ssh-add) and an operator of the head lists it; log records nothing. With neither --key nor a root, they refuse and say so."
+	"A pinned root anchors alone, and --key is then ignored, with a note. A recorded pin is refused when the sites serve none of its history or serve a version your recorded key signed under another root, and a recorded key with no pin that signed under two roots is refused: pull --root <sha> with the current root replaces the pin and goes on. " +
+	"pull and recover with --execute record the named key in .paisans/signing-key when your ssh-agent holds it (load it with ssh-add) and an operator of the head lists it; log records nothing. With neither --key nor a root, they refuse and say so."
 
 // executeTopic is `paisans help execute`: which commands reach a host, and
 // what --execute lets each of them change.
