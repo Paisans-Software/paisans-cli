@@ -19,7 +19,7 @@ type wgHelperData struct {
 // WGHelperScript is the WireGuard helper site admit installs for d at
 // apply.WGHelper's Path, mode 755: a POSIX sh script whose put checks a conf
 // and installs it as d.WireGuardInstalled, and whose other verbs start,
-// restart, sync, show and read the journal of d's interface. The interface,
+// restart, stop, sync, show and read the journal of d's interface. The interface,
 // the listen port the owner admits (0 for a site nothing dials) and the mesh
 // subnet are built in, so nothing the deployment's user passes it can widen
 // them. put adds d.FwMark to every conf it installs and refuses one that sets

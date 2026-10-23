@@ -431,7 +431,7 @@ func TestPutRefusesAConfDirectoryRootDoesNotHoldAlone(t *testing.T) {
 // 64 before running a command or touching the directory.
 func TestTheHelperTakesOnlyItsVerbs(t *testing.T) {
 	for _, args := range [][]string{
-		{}, {"bogus"}, {"put", "extra"}, {"up", "now"}, {"restart", "-f"}, {"sync", "x"},
+		{}, {"bogus"}, {"put", "extra"}, {"up", "now"}, {"restart", "-f"}, {"down", "now"}, {"sync", "x"},
 		{"show"}, {"show", "dump"}, {"show", "private-key"}, {"show", "endpoints"}, {"show", "preshared-keys"}, {"show", "peers", "extra"}, {"log", "-n", "1000"},
 	} {
 		for _, shell := range shells() {
@@ -443,6 +443,33 @@ func TestTheHelperTakesOnlyItsVerbs(t *testing.T) {
 			if names := entries(t, dir); len(names) != 0 {
 				t.Errorf("%s %v: left %v", shell, args, names)
 			}
+		}
+	}
+}
+
+// down is a verb of its own: it stops and disables the unit before it
+// deletes the installed conf, since wg-quick down reads the conf, and it
+// deletes nothing else.
+func TestTheHelperTakesTheInterfaceDown(t *testing.T) {
+	text, err := hostprep.WGHelperScript(meshDeployment, 51820, "10.44.0.0/24")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, verb, ok := strings.Cut(text, "\ndown)\n")
+	if !ok {
+		t.Fatal("the helper has no down verb")
+	}
+	verb, _, _ = strings.Cut(verb, ";;")
+	stop, remove := strings.Index(verb, `systemctl disable --now "$unit"`), strings.Index(verb, `rm -f "$conf"`)
+	if stop < 0 || remove < 0 || stop > remove || strings.Count(verb, "rm ") != 1 {
+		t.Errorf("down is not a stop then the conf's deletion:\n%s", verb)
+	}
+	for _, shell := range shells() {
+		script, _ := helperIn(t, 51820, "10.44.0.0/24")
+		// systemctl is absent or refuses here: either way the helper ran
+		// it rather than refusing the verb.
+		if out, code := runHelper(t, shell, script, "", "down"); code == 64 || strings.Contains(out, "usage:") {
+			t.Errorf("%s down: exit %d, %q; the verb was refused", shell, code, out)
 		}
 	}
 }

@@ -5342,7 +5342,8 @@ kernel picks the longest matching prefix and it would take that traffic. A
 route broader than the mesh (a
 provider's 10.0.0.0/8 private network) is shorter than the one `psns-<token>`
 adds, so the mesh still wins; it is printed as a note. A `psns-<token>` the
-toolkit did not write conflicts.
+toolkit did not write conflicts, because nothing says what it runs; the line
+names its WireGuard helper's `down`, which takes it away.
 
 A conflict line names the resource, the `paisans-stack.yaml` key that claims it, and
 what holds it (a container and its compose project, or a process and its PID).
@@ -6186,8 +6187,9 @@ lets that user run it and nothing else as root. `deployment apply` writes the me
 file as `/srv/paisans/<token>/psns-<token>.conf`, its own copy, which it
 can read back and compare like any other file it renders, and hands it to
 the helper's `put` before every start, sync or restart; `put` installs it
-as `/etc/wireguard/psns-<token>.conf`, mode 600. `put` accepts only the
-keys `deployment apply` renders, each value matching its pattern, the `ListenPort` the
+as `/etc/wireguard/psns-<token>.conf`, mode 600. Its `down`, which `site
+remove` runs, stops and disables the interface and deletes that file. `put`
+accepts only the keys `deployment apply` renders, each value matching its pattern, the `ListenPort` the
 owner admitted, and an `Address` and `AllowedIPs` inside the mesh subnet,
 and refuses the whole file otherwise, because wg-quick runs a file's
 `PreUp`, `PostUp`, `PreDown` and `PostDown` as root and adds a route for
@@ -9403,14 +9405,18 @@ is not this deployment's is left alone and not listed:
 | authorized keys | nothing can prove one: a key `site admit` or `site prepare` added is a key the operator logs in with | never removed. A key may be the only way into the host, and nothing on it says whether another exists; the operator deletes one by hand once it is no longer needed. This deployment's record of which keys it added, `/srv/paisans/<token>/.paisans/authorized_keys.owned`, is its own file, so that is deleted |
 | the deployment's directory | its path, `/srv/paisans/<token>`, the user's | empty directories removed; what apply did not write, the data in its bind mounts, is kept, and `--delete-data` empties it, through rootlesskit so the files a container's user owns go too, unless a file in it was edited. The directory itself stays, because its parent `/srv/paisans` is root's, for `site evict` |
 | the deployment record, on a gateway | `/srv/paisans/<token>/.paisans/deployed.json` | deleted |
+| the mesh interface | its name, `psns-<token>`, which `site admit` gives the deployment's helper and nothing else | after the containers, taken down by the WireGuard helper's `down`, which stops and disables `wg-quick@psns-<token>` and deletes `/etc/wireguard/psns-<token>.conf`, the site's private key. Left up, it holds the site's listen port and interface name, and a `site add` of the same site refuses both. The helper and its sudoers line stay for `site evict` |
 | the configuration store | `/srv/paisans/<token>/.paisans/config/<token>.git`, its `<token>.peers` and `<token>.sync.json`, a `<token>.incoming.bundle` a cut-off push left behind, and `/srv/paisans/<token>/.paisans/bin/`; the units that serve and sync it are the user's `paisans-<token>-*` and go with the units above | deleted after the units, so the daemon and the sync have stopped using them. The versions on this host go with it; every other site still holds them, which is what makes a site's removal not a loss of the configuration's history |
 | the grant record | `/srv/paisans/<token>/.paisans/granted.json` (see *`deployment apply` and `site prepare` review what `paisans-stack.yaml` grants*) | deleted last: left behind, a later deployment with the same token would be reviewed against a baseline it never applied |
 
-**What is root's is the owner's.** The mesh interface and its helper, the ufw
-rules, the deployment's user and its home, `/srv/paisans`, the
+**What is root's is the owner's.** The WireGuard helper and its sudoers line,
+the ufw rules, the deployment's user and its home, `/srv/paisans`, the
 admission record and the registry entry are not touched. The plan ends with
 the line the host's owner runs to remove them,
-`sudo paisans site evict --deployment <id> --user <user> --execute`.
+`sudo paisans site evict --deployment <id> --user <user> --execute`. Until
+they do, the host is still admitted, and the site can be added back:
+`paisans site prepare --site <site> --execute` first, since its
+configuration store and units went with the removal, then `site add`.
 
 The check that nothing of this deployment's that its user can remove is left
 comes last.

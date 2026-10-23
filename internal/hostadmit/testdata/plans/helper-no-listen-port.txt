@@ -332,6 +332,9 @@ step 18: install the WireGuard helper
     | #                 root may write
     | #   up            systemctl enable --now wg-quick@psns-f2a9
     | #   restart       systemctl restart wg-quick@psns-f2a9
+    | #   down          systemctl disable --now wg-quick@psns-f2a9, then delete
+    | #                 /etc/wireguard/psns-f2a9.conf, so the user's manager, which wants the unit
+    | #                 at boot, finds it skipped until a put installs a conf
     | #   sync          wg-quick strip the installed conf, then wg syncconf
     | #   show FIELD    wg show psns-f2a9 FIELD: peers, latest-handshakes,
     | #                 public-key, allowed-ips, persistent-keepalive or listen-port,
@@ -365,7 +368,7 @@ step 18: install the WireGuard helper
     | max=65536
     | 
     | usage() {
-    | 	echo "usage: $0 put | up | restart | sync | show peers|latest-handshakes|public-key|allowed-ips|persistent-keepalive|listen-port | log" >&2
+    | 	echo "usage: $0 put | up | restart | down | sync | show peers|latest-handshakes|public-key|allowed-ips|persistent-keepalive|listen-port | log" >&2
     | 	exit 64
     | }
     | 
@@ -624,6 +627,12 @@ step 18: install the WireGuard helper
     | restart)
     | 	[ $# -eq 1 ] || usage
     | 	exec systemctl restart "$unit"
+    | 	;;
+    | down)
+    | 	[ $# -eq 1 ] || usage
+    | 	# Stopped before the conf goes: wg-quick down reads it.
+    | 	systemctl disable --now "$unit"
+    | 	rm -f "$conf"
     | 	;;
     | sync)
     | 	[ $# -eq 1 ] || usage

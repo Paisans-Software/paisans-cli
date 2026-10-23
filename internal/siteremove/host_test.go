@@ -1,6 +1,7 @@
 package siteremove_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
 	"github.com/paisans-software/paisans-cli/internal/registry"
 	"github.com/paisans-software/paisans-cli/internal/siteremove"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
 // Cleaning a host deletes the deployment's configuration store: the
@@ -70,7 +72,8 @@ func TestCleaningAHostDeletesItsConfigurationStore(t *testing.T) {
 
 // The host stage reaches only what the deployment's user owns: no ufw, no
 // registry, no system unit, no WireGuard unit, and no path outside its root
-// or its user's home.
+// or its user's home. Its one root action is the WireGuard helper's down,
+// the command site admit lets the user run.
 func TestTheHostStageIsTheUsersOwn(t *testing.T) {
 	w := setup(t)
 	p := w.mustBuild("home-b", siteremove.Options{DeleteData: true})
@@ -78,6 +81,9 @@ func TestTheHostStageIsTheUsersOwn(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range w.hosts["home-b"].commands {
+		if c == wgHelper+"down" {
+			continue
+		}
 		for _, root := range []string{"ufw ", "registry.json", "/etc/systemd/system", "wg-quick@", "sudo "} {
 			if strings.Contains(c, root) {
 				t.Errorf("site remove ran %q: %s", root, c)
@@ -387,5 +393,76 @@ func TestThePlanCarriesTheEvictLine(t *testing.T) {
 	dest, _ := config.ParseDestination("ubuntu@192.0.2.12")
 	if p := forced(t, w, w.cfg, "home-b", dest, siteremove.Options{}); p.Evict != siteremove.EvictLine(dep, "ubuntu") {
 		t.Errorf("--force: Evict = %q", p.Evict)
+	}
+}
+
+// Cleaning a host takes the deployment's mesh interface down through the
+// WireGuard helper, once, which deletes the installed conf too, so a site
+// added back later finds its listen port and interface name free. A run
+// that resumes after it plans no second down.
+func TestCleaningAHostTakesTheMeshDown(t *testing.T) {
+	w := setup(t)
+	b := w.hosts["home-b"]
+	p := w.mustBuild("home-b", siteremove.Options{})
+	if !hasStepIn(stageNamed(p, "clean the host"), "home-b", "stop", dep.Interface()) {
+		t.Fatalf("no step takes %s down:\n%s", dep.Interface(), printed(p))
+	}
+	if err := siteremove.Execute(p); err != nil {
+		t.Fatal(err)
+	}
+	if b.wgUp || b.ran(wgHelper+"down") != 1 {
+		t.Errorf("the mesh is up (%v) after %d down(s)", b.wgUp, b.ran(wgHelper+"down"))
+	}
+	if _, ok := b.files[wgInstalled]; ok {
+		t.Errorf("%s is still on the host", wgInstalled)
+	}
+	again := w.mustBuild("home-b", siteremove.Options{})
+	if hasStepIn(stageNamed(again, "clean the host"), "home-b", "stop", dep.Interface()) {
+		t.Errorf("a second run takes the mesh down again:\n%s", printed(again))
+	}
+	if remains := strings.Join(p.Remains(), "\n"); !strings.Contains(remains, "paisans site prepare --site home-b --execute") {
+		t.Errorf("the report does not say how the site is added back:\n%s", remains)
+	}
+}
+
+// A helper site admit installed before it had down answers with its usage.
+// The stage stops there and says the host's owner admits the deployment
+// again, which installs the current helper; the interface stays up and the
+// gate does not pass.
+func TestAHelperWithoutDownStopsTheHostStage(t *testing.T) {
+	w := setup(t)
+	b := w.hosts["home-b"]
+	w.failOnce = wgHelper + "down"
+	w.failOut = "usage: /usr/local/libexec/paisans/wg-psns-f2a9 put | up | restart | sync | show peers|latest-handshakes|public-key|allowed-ips|persistent-keepalive|listen-port | log\n"
+	err := siteremove.Execute(w.mustBuild("home-b", siteremove.Options{}))
+	if err == nil || !strings.Contains(err.Error(), "stopped at stage 3") {
+		t.Fatalf("err = %v", err)
+	}
+	var problem *ui.Problem
+	if !errors.As(err, &problem) || !strings.Contains(err.Error(), "has no down") || !strings.Contains(err.Error(), "sudo paisans site admit --request home-b.admit") {
+		t.Errorf("err = %v; want the problem naming site admit", err)
+	}
+	if !b.wgUp {
+		t.Error("the mesh went down")
+	}
+	again := w.mustBuild("home-b", siteremove.Options{})
+	if !hasStepIn(stageNamed(again, "clean the host"), "home-b", "stop", dep.Interface()) {
+		t.Errorf("the resumed plan does not take the mesh down:\n%s", printed(again))
+	}
+	if err := siteremove.Execute(again); err != nil {
+		t.Fatal(err)
+	}
+	if b.wgUp {
+		t.Error("the resumed run left the mesh up")
+	}
+}
+
+// The gate finds an interface the down left up.
+func TestTheHostGateFindsTheMeshUp(t *testing.T) {
+	w := setup(t)
+	w.downLeavesUp = true
+	err := siteremove.Execute(w.mustBuild("home-b", siteremove.Options{}))
+	if err == nil || !strings.Contains(err.Error(), "still on the host: interface "+dep.Interface()) {
+		t.Fatalf("err = %v", err)
 	}
 }

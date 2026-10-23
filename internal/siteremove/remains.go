@@ -52,3 +52,7 @@ func ownedNote(site, owed string) string {
 func caddyKept(site, container string, sites []string, sitesDir, dir string) string {
 	return fmt.Sprintf("%s: Caddy kept; it serves the host owner's sites in %s. It is %s, serving %s; its compose file, Caddyfile, caddy.env, certificates and state stay in %s, with --delete-data too. Run this again once those sites have moved, and it goes", site, sitesDir, container, strings.Join(sites, ", "), dir)
 }
+
+func addBack(site string) string {
+	return fmt.Sprintf("%s: to add it back, run site prepare first, then site add. `%s site prepare --site %s --execute` makes its configuration store and units again, which this removal deletes", site, progname.Cmd(), site)
+}

@@ -117,9 +117,12 @@ type world struct {
 	// Knobs that break one thing.
 	failOnce string
 	// failOut is what the command failOnce fails prints, when set.
-	failOut     string
-	unreachable map[string]bool
-	caddyBroken bool
+	failOut string
+	// downLeavesUp makes the WireGuard helper's down answer and leave the
+	// interface up.
+	downLeavesUp bool
+	unreachable  map[string]bool
+	caddyBroken  bool
 	// neverStreams is a site whose recreated Patroni never streams again,
 	// while its member key in etcd, which the old process wrote, still says
 	// streaming.
@@ -685,6 +688,13 @@ func (h *host) Run(command string) (string, error) {
 		if command != wgHelper+"sync" {
 			h.wgUp = true
 		}
+		return "", nil
+	case command == wgHelper+"down":
+		if w.downLeavesUp {
+			return "", nil
+		}
+		h.wgUp, h.wgRun = false, nil
+		delete(h.files, wgInstalled)
 		return "", nil
 	case strings.Contains(command, "getent ahosts"):
 		// Every peer's endpoint name resolves.

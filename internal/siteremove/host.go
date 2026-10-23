@@ -21,6 +21,7 @@ import (
 	"github.com/paisans-software/paisans-cli/internal/hostprep"
 	"github.com/paisans-software/paisans-cli/internal/progname"
 	"github.com/paisans-software/paisans-cli/internal/render"
+	"github.com/paisans-software/paisans-cli/internal/ui"
 	"github.com/paisans-software/paisans-cli/internal/version"
 	"github.com/paisans-software/paisans-cli/internal/webserver"
 )
@@ -43,6 +44,10 @@ type hostPlan struct {
 	// run, sorted.
 	images []string
 	files  []appremove.File
+	// mesh is whether the deployment's mesh interface is on the host. The
+	// WireGuard helper takes it down, so the site's listen port and
+	// interface name are free when it is added back.
+	mesh bool
 	// webServer are the reference files for the host owner's web server
 	// the manifest records.
 	webServer []render.ManifestWebServer
@@ -348,6 +353,7 @@ func (p *Plan) buildHost() (*Stage, error) {
 	}
 	hp.dockerPresent = inv.Docker.Present
 	hp.manifest = inv.Manifest
+	hp.mesh = contains(inv.Links, d.Interface())
 	for _, e := range inv.ManifestWebServer {
 		// The manifest is the user's own file: an entry that is not one of
 		// the deployment's reference files is never read or deleted.
@@ -504,6 +510,10 @@ func (p *Plan) buildHost() (*Stage, error) {
 	if cp != nil {
 		p.Kept = append(p.Kept, fmt.Sprintf("%s: its Caddy keeps serving the host owner's sites in %s; site evict stops it and deletes that directory, so the owner moves those sites first", p.Site, render.HostSitesDir(d)))
 	}
+
+	// The host stays admitted until its owner runs site evict, so the site
+	// can join again, from site prepare, which site add's preflight asks for.
+	p.Notes = append(p.Notes, addBack(p.Site))
 
 	p.hostSteps(st)
 	st.Gate = "no container, network, unit or file of this deployment's left that its user can remove, and the root empty but for what is kept"
@@ -682,6 +692,9 @@ func (p *Plan) hostSteps(st *Stage) {
 	if len(hp.images) > 0 {
 		add("remove", "remove images", "images %s, which only this deployment's containers ran, by ID and without -f, so Docker refuses one in use", strings.Join(hp.images, ", "))
 	}
+	if hp.mesh {
+		add("stop", "stop the mesh", "%s, through the WireGuard helper's down: stopped, disabled at boot, and %s, which holds the site's private key, deleted. The helper and its sudoers line stay for site evict", d.Interface(), d.WireGuardInstalled())
+	}
 	for _, f := range hp.files {
 		switch f.State {
 		case appremove.Remove:
@@ -777,6 +790,13 @@ func (p *Plan) runHost() error {
 					p.Kept = append(p.Kept, imageKept(p.Site, id, "Docker refused: "+why))
 				}
 			}
+		}
+	}
+	// After the containers, so nothing that binds the mesh address runs.
+	if hp.mesh {
+		p.work("stop the mesh")
+		if err := p.meshDown(t); err != nil {
+			return err
 		}
 	}
 	if len(hp.files) > 0 {
@@ -877,6 +897,30 @@ func (p *Plan) runHost() error {
 	return nil
 }
 
+// meshDown takes the deployment's mesh interface down through its WireGuard
+// helper, the one command the deployment's user may run as root. A helper
+// whose usage lists no down is one site admit installed before the verb
+// existed: the host's owner admits the deployment again, which installs the
+// current one.
+func (p *Plan) meshDown(t apply.Transport) error {
+	h := apply.WGHelper{T: t, Iface: p.dep().Interface()}
+	err := h.Down()
+	if err == nil {
+		return nil
+	}
+	if refused := apply.HelperReadProblem(p.Site, h, err); refused != nil {
+		return refused
+	}
+	if strings.Contains(err.Error(), "usage:") {
+		return &ui.Problem{
+			Hint:    fmt.Sprintf("%s: the WireGuard helper has no down, so %s is still up", p.Site, h.Iface),
+			Explain: fmt.Sprintf("Site admit installed the helper before it could take the interface down. The host's owner runs `sudo %s site admit --request %s.admit` again, which installs the current helper, then run site remove again: it resumes here.", progname.Default, p.Site),
+			Cause:   err,
+		}
+	}
+	return fmt.Errorf("%s: stopping %s: %w", p.Site, h.Iface, err)
+}
+
 // verifyHost is the host stage's gate: nothing of this deployment's is left
 // on the host.
 func (p *Plan) verifyHost(t apply.Transport) error {
@@ -906,6 +950,9 @@ func (p *Plan) verifyHost(t apply.Transport) error {
 	}
 	if inv.Manifest && cp == nil {
 		left = append(left, d.Manifest())
+	}
+	if contains(inv.Links, d.Interface()) {
+		left = append(left, "interface "+d.Interface())
 	}
 	for _, r := range p.storeRoots() {
 		_, found, err := t.ReadFile(r.probe)
