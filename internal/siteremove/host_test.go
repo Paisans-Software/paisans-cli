@@ -65,6 +65,10 @@ func TestCleaningAHostDeletesItsConfigurationStore(t *testing.T) {
 			t.Errorf("another deployment's %s was deleted", path)
 		}
 	}
+	// The directories the store was in go once empty: nothing else names them.
+	if !hasStepIn(stageNamed(p, "clean the host"), "vm", "remove", "the configuration store were in") || vm.ran("'"+hostprep.ConfigDir(dep)+"'") == 0 || vm.ran("'"+dep.StateDir()+"'") == 0 {
+		t.Errorf("the store's directories were not removed once empty:\n%s", strings.Join(vm.commands, "\n"))
+	}
 	if vm.ran(hostprep.UserSystemctl+" disable --now") != 1 || vm.ran(hostprep.UserSystemctl+" daemon-reload") != 1 {
 		t.Errorf("the units were not stopped through the user's manager:\n%s", strings.Join(vm.commands, "\n"))
 	}

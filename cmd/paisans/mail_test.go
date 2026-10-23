@@ -7,12 +7,14 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/mesh"
 	"github.com/paisans-software/paisans-cli/internal/secretsgen"
 	"github.com/paisans-software/paisans-cli/internal/smtpcheck"
 	"github.com/paisans-software/paisans-cli/internal/smtpcheck/smtptest"
@@ -466,5 +468,285 @@ func TestValidateMailOfflineAndWithoutSecrets(t *testing.T) {
 	}
 	if !rec.Has("note", "the mail settings were not checked") || len(server.Dials()) != 0 {
 		t.Errorf("an unreadable secrets file:\n%s", rec.Lines())
+	}
+}
+
+// meshMailDeployment is the fixture with its mail server on home-b's mesh
+// address: plaintext with no login, as a relay run on a site's own mesh
+// address for testing is, or, when not plaintext, starttls with the
+// fixture's login.
+func meshMailDeployment(t *testing.T, plaintext bool) (configPath, secretsPath string) {
+	t.Helper()
+	configPath, secretsPath = rotateDeployment(t, nil)
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mesh := "  host: 10.44.0.2\n  security: starttls\n  username: robot@example.org\n"
+	if plaintext {
+		mesh = "  host: 10.44.0.2\n  security: none\n"
+	}
+	text := strings.Replace(string(data), "  host: smtp.example.org\n  security: starttls\n  username: robot@example.org\n", mesh, 1)
+	if text == string(data) {
+		t.Fatal("the fixture's smtp block moved")
+	}
+	if err := os.WriteFile(configPath, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return configPath, secretsPath
+}
+
+// stubMeshLink answers meshLinkUp with up, by site, and returns the sites
+// it was asked about.
+func stubMeshLink(t *testing.T, up map[string]bool) *[]string {
+	t.Helper()
+	var asked []string
+	saved := meshLinkUp
+	meshLinkUp = func(_ *config.Config, site, _ string) (bool, error) {
+		asked = append(asked, site)
+		return up[site], nil
+	}
+	t.Cleanup(func() { meshLinkUp = saved })
+	return &asked
+}
+
+// A mail server on the deployment's own mesh cannot be tried before the
+// mesh is up, so the first apply warns and goes on rather than refusing a
+// deployment it alone can found.
+func TestApplySkipsMeshMailBeforeTheMeshIsUp(t *testing.T) {
+	server := fakeSMTP(t, map[string]string{"robot@example.org": "the-right-one"})
+	configPath, secretsPath := meshMailDeployment(t, true)
+	stubMeshLink(t, nil)
+	failingSSH(t)
+	for _, extra := range [][]string{{"--site", "home-a"}, nil} {
+		rec := withRecorder(t, false)
+		err := runApply(append([]string{"--config", configPath, "--secrets", secretsPath, "--execute"}, extra...), strings.NewReader(""), io.Discard)
+		if err != nil {
+			for _, bad := range []string{"mail server", "could not open a connection", "to try"} {
+				if strings.Contains(err.Error(), bad) {
+					t.Errorf("apply %v refused on mail: %v", extra, err)
+				}
+			}
+		}
+		if !rec.Has("warned", "from home-a") || rec.Index("explain", "10.44.0.2 is on the mesh, 10.44.0.0/24, and psns-") < 0 || rec.Index("explain", "before the mesh exists") < 0 {
+			t.Errorf("apply %v did not warn that mesh mail waits for the mesh: %v\n%s", extra, err, rec.Lines())
+		}
+	}
+	if len(server.Dials()) != 0 {
+		t.Errorf("mail was dialled before the mesh was up: %+v", server.Dials())
+	}
+}
+
+// Once the mesh is up, as on a running deployment, mesh mail is tried, and
+// a login the server refuses still refuses the apply.
+func TestApplyTriesMeshMailOnceTheMeshIsUp(t *testing.T) {
+	server := fakeSMTP(t, map[string]string{"robot@example.org": "the-right-one"})
+	server.CertName = "10.44.0.2"
+	configPath, secretsPath := meshMailDeployment(t, false)
+	stubMeshLink(t, map[string]bool{"home-a": true, "home-b": true, "vm": true, "watch": true})
+	failingSSH(t)
+	withRecorder(t, false)
+	for _, extra := range [][]string{{"--site", "home-a"}, nil} {
+		err := runApply(append([]string{"--config", configPath, "--secrets", secretsPath, "--execute"}, extra...), strings.NewReader(""), io.Discard)
+		if err == nil || !strings.Contains(err.Error(), "does not log in to its mail server") || !strings.Contains(err.Error(), "10.44.0.2") {
+			t.Errorf("apply %v: err = %v, want the refused login", extra, err)
+		}
+	}
+	if len(server.Dials()) == 0 {
+		t.Error("mesh mail was not dialled with the mesh up")
+	}
+}
+
+// The mesh must be up on the site holding the mail server's address too:
+// with home-b's down, home-a's dial would reach nothing. An external relay
+// reads no mesh at all.
+func TestBeforeMeshReadsTheDiallingAndHoldingSites(t *testing.T) {
+	configPath, secretsPath := meshMailDeployment(t, true)
+	cfg := mustLoad(t, configPath)
+	secrets := mustSecrets(t, secretsPath)
+	asked := stubMeshLink(t, map[string]bool{"home-a": true})
+	checks := beforeMesh(cfg, mailChecks(cfg, secrets, []string{"home-a"}, nil), nil)
+	if len(checks) == 0 {
+		t.Fatal("home-a has no mail check")
+	}
+	for _, c := range checks {
+		if !strings.Contains(c.Skip, "not up on home-b yet, so it cannot be tried from home-a") {
+			t.Errorf("skip = %q", c.Skip)
+		}
+	}
+	if !slices.Equal(*asked, []string{"home-a", "home-b"}) {
+		t.Errorf("read the mesh on %v, want home-a and home-b, once each", *asked)
+	}
+
+	stubMeshLink(t, map[string]bool{"home-a": true, "home-b": true})
+	for _, c := range beforeMesh(cfg, mailChecks(cfg, secrets, []string{"home-a"}, nil), nil) {
+		if c.Skip != "" {
+			t.Errorf("skipped with the mesh up: %q", c.Skip)
+		}
+	}
+
+	external := mustLoad(t, fixtureConfig())
+	asked = stubMeshLink(t, nil)
+	for _, c := range beforeMesh(external, mailChecks(external, secrets, nil, nil), nil) {
+		if c.Skip != "" {
+			t.Errorf("an external relay is skipped: %q", c.Skip)
+		}
+	}
+	if len(*asked) != 0 {
+		t.Errorf("an external relay read the mesh on %v", *asked)
+	}
+}
+
+// A site whose mesh cannot be read keeps its check, so its dial says why.
+func TestBeforeMeshKeepsTheCheckWhenTheMeshCannotBeRead(t *testing.T) {
+	configPath, secretsPath := meshMailDeployment(t, true)
+	cfg := mustLoad(t, configPath)
+	saved := meshLinkUp
+	meshLinkUp = func(*config.Config, string, string) (bool, error) { return false, apply.ErrUnreachable }
+	t.Cleanup(func() { meshLinkUp = saved })
+	for _, c := range beforeMesh(cfg, mailChecks(cfg, mustSecrets(t, secretsPath), nil, nil), nil) {
+		if c.Skip != "" {
+			t.Errorf("skipped on an unread mesh: %q", c.Skip)
+		}
+	}
+}
+
+// A forward the site's host could not open refuses as a server that did not
+// answer, not as one that answered and refused the login.
+func TestApplyRefusesMailThatDoesNotAnswer(t *testing.T) {
+	saved := smtpEnv
+	smtpEnv = func(*config.Config, map[string]string) smtpcheck.Env {
+		return notOpenedEnv()
+	}
+	t.Cleanup(func() { smtpEnv = saved })
+	configPath, secretsPath := rotateDeployment(t, nil)
+	failingSSH(t)
+	withRecorder(t, false)
+	err := runApply([]string{"--config", configPath, "--secrets", secretsPath, "--execute", "--site", "home-a"}, strings.NewReader(""), io.Discard)
+	if err == nil {
+		t.Fatal("apply was not refused")
+	}
+	for _, want := range []string{"home-a could not open a connection to smtp.example.org:587", "AllowTcpForwarding", "declared by smtp", "Nothing was changed"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err %v lacks %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "does not log in") {
+		t.Errorf("a server that did not answer is one that refused: %v", err)
+	}
+}
+
+// validate warns, as apply does, that mesh mail waits for the mesh.
+func TestValidateSkipsMeshMailBeforeTheMeshIsUp(t *testing.T) {
+	server := fakeSMTP(t, nil)
+	configPath, secretsPath := meshMailDeployment(t, true)
+	stubMeshLink(t, nil)
+	rec := withRecorder(t, false)
+	if err := runValidate([]string{"--config", configPath, "--secrets", secretsPath}); err != nil {
+		t.Fatalf("validate failed: %v", err)
+	}
+	if rec.Index("explain", "before the mesh exists") < 0 {
+		t.Errorf("no warning that mesh mail waits for the mesh:\n%s", rec.Lines())
+	}
+	if len(server.Dials()) != 0 {
+		t.Errorf("mail was dialled before the mesh was up: %+v", server.Dials())
+	}
+}
+
+// validate warns about a server that does not answer from a site, and goes
+// on to the site's other checks, since the site itself was reached.
+func TestValidateWarnsAboutMailThatDoesNotAnswer(t *testing.T) {
+	saved := smtpEnv
+	smtpEnv = func(*config.Config, map[string]string) smtpcheck.Env {
+		return notOpenedEnv()
+	}
+	t.Cleanup(func() { smtpEnv = saved })
+	configPath, secretsPath := rotateDeployment(t, nil)
+	rec := withRecorder(t, false)
+	if err := runValidate([]string{"--config", configPath, "--secrets", secretsPath}); err != nil {
+		t.Fatalf("validate failed on a mail warning: %v", err)
+	}
+	if !rec.Has("warned", "from home-a") || rec.Index("explain", "home-a could not open a connection to smtp.example.org:587") < 0 {
+		t.Errorf("a server that does not answer is not a warning:\n%s", rec.Lines())
+	}
+	if rec.Index("explain", "home-a could not be reached") >= 0 {
+		t.Errorf("a server that does not answer is called an unreachable site:\n%s", rec.Lines())
+	}
+}
+
+// notOpenedEnv is the site transport's Env with every forward refused by the
+// host, as ssh reports it: the dial returns, and the first read ends with
+// ssh's reason.
+func notOpenedEnv() smtpcheck.Env {
+	why := fmt.Errorf("ssh: Stdio forwarding request failed: Session open refused by peer: %w", apply.ErrForwardNotOpened)
+	return smtpcheck.Env{
+		Dial: func(string, string) (net.Conn, error) {
+			local, remote := net.Pipe()
+			go func() { _, _ = io.Copy(io.Discard, remote) }()
+			return failingConn{Conn: local, err: why}, nil
+		},
+		NotOpened: func(err error) bool { return errors.Is(err, apply.ErrForwardNotOpened) },
+	}
+}
+
+// failingConn is a connection whose every read fails with err.
+type failingConn struct {
+	net.Conn
+	err error
+}
+
+func (c failingConn) Read([]byte) (int, error) { return 0, c.err }
+
+// A mail server that takes the connection from this machine and closes it
+// before it greets answered: secrets set refuses, and writes nothing, rather
+// than writing the password untried.
+func TestSecretsSetRefusesAServerThatClosesBeforeItGreets(t *testing.T) {
+	saved := localSMTPEnv
+	localSMTPEnv = func() smtpcheck.Env {
+		return smtpcheck.Env{Dial: func(string, string) (net.Conn, error) {
+			local, remote := net.Pipe()
+			remote.Close()
+			return local, nil
+		}}
+	}
+	t.Cleanup(func() { localSMTPEnv = saved })
+	configPath, secretsPath := rotateDeployment(t, nil)
+	withRecorder(t, false)
+	before, _ := os.ReadFile(secretsPath)
+	_, err := set(t, configPath, secretsPath, "external.smtp_password", "not-a-real-smtp-password-0009")
+	if err == nil || !strings.Contains(err.Error(), "does not work for") || !strings.Contains(err.Error(), "closed it before it greeted") {
+		t.Fatalf("err = %v, want the server's close as a refusal", err)
+	}
+	if after, _ := os.ReadFile(secretsPath); !bytes.Equal(before, after) {
+		t.Error("the secrets file changed")
+	}
+}
+
+// meshLinkUp reads the deployment's interface through the site's ssh: an
+// interface that is up, one that is absent, and one that exists but is down.
+func TestMeshLinkUpReadsTheInterface(t *testing.T) {
+	cfg := mustLoad(t, fixtureConfig())
+	iface := cfg.Deployment().Interface()
+	for _, tc := range []struct {
+		out  string
+		want bool
+	}{
+		{`[{"ifname":"` + iface + `","flags":["POINTOPOINT","NOARP","UP","LOWER_UP"]}]`, true},
+		{"absent", false},
+		{`[{"ifname":"` + iface + `","flags":["POINTOPOINT","NOARP"]}]`, false},
+	} {
+		log := filepath.Join(t.TempDir(), "ssh.log")
+		sshAnswering(t, "#!/bin/sh\nfor last; do :; done\nb=${last#*printf %s }\nb=${b%% |*}\nprintf %s \"$b\" | base64 -d >> "+log+"\nprintf '%s\\n' '"+tc.out+"'\n")
+		up, err := meshLinkUp(cfg, "home-a", "")
+		if err != nil {
+			t.Fatalf("%s: %v", tc.out, err)
+		}
+		if up != tc.want {
+			t.Errorf("%s: up = %v, want %v", tc.out, up, tc.want)
+		}
+		ran, _ := os.ReadFile(log)
+		if !strings.Contains(string(ran), mesh.LinkCommand(iface)) {
+			t.Errorf("ran %q, want %q", ran, mesh.LinkCommand(iface))
+		}
 	}
 }

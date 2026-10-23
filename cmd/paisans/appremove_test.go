@@ -3,11 +3,14 @@ package main
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/paisans-software/paisans-cli/internal/appremove"
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/configstore"
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )
 
@@ -84,5 +87,81 @@ func TestRemainsShowTheirObjectWithoutVerbose(t *testing.T) {
 	want := "  WARN a client kept; delete it in Pocket ID if it served only talk\n       It is talk (id 0123) at pocket-id on home-a: unrecorded\n"
 	if b.String() != want {
 		t.Errorf("got\n%q\nwant\n%q", b.String(), want)
+	}
+}
+
+// The client of an app gone from paisans-stack.yaml is looked for by the
+// name in the newest version of the workstation's configuration history that
+// declares the app, which is its display_name when that version sets one.
+// Without one, it is the name the current configuration gives, and a
+// recorded client makes that a warning.
+func TestRemovedClientNameIsTheLastDeclaredOne(t *testing.T) {
+	key, pub := testKey(t)
+	cfg, err := config.Load(fixtureConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &ui.Recorder{}
+	name, from, err := removedClientName(rec, fixtureConfig(), cfg, "talk", "c-1")
+	if name != "talk" || !strings.Contains(from, "holds no configuration history") || err != nil {
+		t.Errorf("with no store: %q, %q, %v", name, from, err)
+	}
+	if rec.Index("warn", "the name the current configuration gives it") < 0 {
+		t.Errorf("no warning with no store: %+v", rec.Events)
+	}
+	body := strings.Replace(fixtureAs(t, pub), "    blueprint: mbin\n", "    blueprint: mbin\n    display_name: Test Talk\n", 1)
+	files := snapshotted(configstore.Files{Paisans: []byte(body), Secrets: []byte("s\n"), SOPS: []byte("creation_rules: []\n")})
+	l := configstore.Local{Dir: t.TempDir()}
+	if err := l.WriteFiles(files); err != nil {
+		t.Fatal(err)
+	}
+	cache, err := l.Cache()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sha, err := cache.Commit(files, nil, 1, key, time.Unix(1_800_000_000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.SetHead(sha); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(l.Dir, config.FileName)
+	rec = &ui.Recorder{}
+	name, from, err = removedClientName(rec, path, cfg, "talk", "c-1")
+	if name != "Test Talk" || !strings.Contains(from, sha[:12]) || err != nil {
+		t.Errorf("talk's client: %q, %q, %v", name, from, err)
+	}
+	if len(rec.Events) != 0 {
+		t.Errorf("warned with a declaring version: %+v", rec.Events)
+	}
+
+	// Versions newer than the declaring one that do not load are passed
+	// over, counted, and the first few named.
+	head := sha
+	for range shownVersions + 1 {
+		bad := files
+		bad.Paisans = []byte("version: 1\nnot_a_field: true\n")
+		if head, err = cache.Commit(bad, []string{head}, 2, key, time.Unix(1_800_000_000, 0)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := l.SetHead(head); err != nil {
+		t.Fatal(err)
+	}
+	name, _, err = removedClientName(rec, path, cfg, "talk", "c-1")
+	if name != "Test Talk" || err != nil {
+		t.Errorf("past unloadable versions: %q, %v", name, err)
+	}
+	if i := rec.Index("warn", "4 version(s)"); i < 0 || !strings.Contains(rec.Events[i].Extra, head[:12]) || !strings.HasSuffix(rec.Events[i].Extra, " and 1 more.") {
+		t.Errorf("passed over versions: %+v", rec.Events)
+	}
+	rec = &ui.Recorder{}
+	name, _, err = removedClientName(rec, path, cfg, "gone", "")
+	if name != "gone" || err != nil {
+		t.Errorf("an app no version declares: %q, %v", name, err)
+	}
+	if len(rec.Events) != 0 {
+		t.Errorf("warned with no client recorded: %+v", rec.Events)
 	}
 }

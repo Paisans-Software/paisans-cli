@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/hostprep"
 	"github.com/paisans-software/paisans-cli/internal/siteremove"
 )
 
@@ -29,10 +30,10 @@ func TestARemovalResumesFromEachStage(t *testing.T) {
 			stage            int
 			site, verb, text string
 		}{{1, "home-a", "remove", "bbbbbbbbbbbbbbbb"}, {2, "home-a", "remove", "etcd member"}, {2, "home-a", "update", "haproxy.cfg"}}},
-		{3, "-type d -empty -delete; fi", []struct {
+		{3, "-maxdepth 0 -type d -empty -delete", []struct {
 			stage            int
 			site, verb, text string
-		}{{2, "home-a", "remove", "etcd member"}, {3, "home-b", "remove", "every container"}, {3, "home-b", "delete", "the manifest"}}},
+		}{{2, "home-a", "remove", "etcd member"}, {3, "home-b", "remove", "every container"}, {3, "home-b", "delete", "/srv/paisans/f2a9/infra/compose.yaml"}}},
 	} {
 		t.Run(tc.fail, func(t *testing.T) {
 			w := setup(t)
@@ -47,6 +48,10 @@ func TestARemovalResumesFromEachStage(t *testing.T) {
 					t.Errorf("the resumed plan does %s %s %q again:\n%s", d.verb, d.site, d.text, printed(again))
 				}
 			}
+			// The manifest still names the directories its files were in.
+			if tc.stage == 3 && !hasStep(again, 3, "home-b", "remove", "apply's files were in") {
+				t.Errorf("the resumed plan does not remove the empty directories:\n%s", printed(again))
+			}
 			if !again.Pending() {
 				t.Error("a stopped removal has nothing left to do")
 			}
@@ -55,7 +60,7 @@ func TestARemovalResumesFromEachStage(t *testing.T) {
 			if err := siteremove.Execute(again); err != nil {
 				t.Fatalf("resuming: %v\n%s", err, rec.Lines())
 			}
-			if _, manifest := w.hosts["home-b"].files[dep.Manifest()]; w.member("home-b") != nil || manifest || w.hosts["home-b"].ran("-type d -empty -delete; fi") == 0 {
+			if _, manifest := w.hosts["home-b"].files[dep.Manifest()]; w.member("home-b") != nil || manifest || w.hosts["home-b"].ran("-maxdepth 0 -type d -empty -delete") == 0 {
 				t.Error("the resumed removal did not finish")
 			}
 		})
@@ -224,5 +229,37 @@ func TestSSHKeysAreNeverRemoved(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A run stopped after the configuration store went and before the
+// directories it was in did finds them again: the next plan removes them
+// once it reads them there and empty.
+func TestARemovalResumesAtTheStateDirectories(t *testing.T) {
+	w := setup(t)
+	b := w.hosts["home-b"]
+	config := hostprep.ConfigDir(dep)
+	b.files[hostprep.ConfigRepo(dep)+"/HEAD"] = "ref: refs/heads/main\n"
+	b.dirs[config] = true
+	p := w.mustBuild("home-b", siteremove.Options{})
+	w.failOnce = "'" + config + "' '"
+	if err := siteremove.Execute(p); err == nil || !strings.Contains(err.Error(), "failed by the test") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, ok := b.files[hostprep.ConfigRepo(dep)+"/HEAD"]; ok || !b.dirs[config] {
+		t.Fatalf("the run did not stop between the store and its directory: store left %v, directory %v", ok, b.dirs[config])
+	}
+	again := w.mustBuild("home-b", siteremove.Options{})
+	if !hasStep(again, 3, "home-b", "remove", config) {
+		t.Fatalf("the resumed plan does not remove %s:\n%s", config, printed(again))
+	}
+	if err := siteremove.Execute(again); err != nil {
+		t.Fatal(err)
+	}
+	if b.dirs[config] {
+		t.Errorf("%s is left", config)
+	}
+	if done := w.mustBuild("home-b", siteremove.Options{}); hasStep(done, 3, "home-b", "remove", config) {
+		t.Errorf("a removal with %s gone plans it again:\n%s", config, printed(done))
 	}
 }
