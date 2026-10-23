@@ -3388,3 +3388,45 @@ already run fixes a site.
   app seeing the bridge's address as every client.
 * **Have site admit write the drop-in:** needs the host's owner for a change
   inside the deployment's own namespace.
+
+## 2026-10-22: dns init updates the address records it made for this deployment
+
+Founder direction, 2026-10-22 (issue #399).
+
+### What was decided
+
+* `dns init` updates an A or AAAA record to the address the configuration
+  declares at its name when the record carries exactly this deployment's
+  comment, is unproxied, is the only record of its type at the name, points
+  at no former gateway, and leaves the name holding exactly what is wanted
+  once changed. Every other record that disagrees is a conflict, and any
+  conflict stops every write, updates included.
+* The update writes the record as a create does: unproxied, with the
+  provider's automatic TTL, and the deployment's comment. A TTL set by hand
+  on such a record is reset.
+* A hostname moving to a monitor site is updated in place, with no overlap:
+  the record switches from the gateway's address to the monitor's in the
+  apply that runs `dns init`.
+* Records for a gateway role that moves to another site still wait for
+  `gateway move`, which overlaps the two gateways.
+
+### Why
+
+A gateway whose `public_address` changed left every record `dns init` had
+made for it pointing at the old address. Each was a conflict, so the run
+created nothing until the operator deleted the deployment's own records by
+hand at the provider. The comment says whose a record is; requiring it
+exactly, and requiring the name to end up holding only what is wanted, keeps
+every record someone else made, or another deployment made, untouched. An
+address change on one site has no second machine to overlap with, and a
+monitor's hostname is served by the monitor from the apply that moves it, so
+the switch is the change the operator asked for.
+
+### What was weighed
+
+* **Keep `dns init` create-only:** every address change became a manual
+  deletion of the deployment's own records at the provider.
+* **Keep the record's TTL:** Cloudflare's update requires a TTL, and its
+  automatic setting reads back as 300 seconds, so the record's own setting
+  cannot be told apart from automatic; `dns init` writes automatic
+  everywhere else.
