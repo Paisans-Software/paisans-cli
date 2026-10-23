@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"github.com/paisans-software/paisans-cli/internal/grant"
 	"regexp"
 	"slices"
 	"strings"
@@ -10,8 +11,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/paisans-software/paisans-cli/internal/grant"
 
 	"github.com/paisans-software/paisans-cli/internal/ui"
 )

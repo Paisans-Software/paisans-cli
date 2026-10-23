@@ -77,6 +77,9 @@ func TestAdviceNamesTheInvokedCommand(t *testing.T) {
 	if got := noAnchorPublish(); !strings.Contains(got, "with paisans-test deployment pull --key <path.pub>") || !strings.Contains(got, "run paisans-test operator register") {
 		t.Errorf("noAnchorPublish() = %q", got)
 	}
+	if err := runDeploymentCheckout(nil); err == nil || !strings.Contains(err.Error(), "as paisans-test deployment list prints them") {
+		t.Errorf("deployment checkout with no deployment: %v, want advice naming paisans-test", err)
+	}
 }
 
 // Advice for the host's owner, who runs the release on another machine,

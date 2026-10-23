@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/paisans-software/paisans-cli/internal/grant"
 	"io"
 	"maps"
 	"os"
@@ -14,8 +15,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/paisans-software/paisans-cli/internal/grant"
 
 	"github.com/paisans-software/paisans-cli/internal/apply"
 	"github.com/paisans-software/paisans-cli/internal/config"

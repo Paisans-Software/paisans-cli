@@ -3,14 +3,13 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/paisans-software/paisans-cli/internal/config"
+	"github.com/paisans-software/paisans-cli/internal/localstore"
+	"github.com/paisans-software/paisans-cli/internal/progname"
 	"io"
 	"os"
 	"slices"
 	"strings"
-
-	"github.com/paisans-software/paisans-cli/internal/config"
-	"github.com/paisans-software/paisans-cli/internal/localstore"
-	"github.com/paisans-software/paisans-cli/internal/progname"
 )
 
 // Help comes in three levels, each a step further into one command, so that
