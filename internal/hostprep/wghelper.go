@@ -12,25 +12,30 @@ import (
 
 // wgHelperData is what snippets/wg-helper.sh.tmpl is rendered with.
 type wgHelperData struct {
-	Interface, Path, Conf, Unit, Dir, Network, FwMark string
-	ListenPort, Prefix, Owner                         int
+	Interface, Path, Conf, Unit, Dir, Network, FwMark, Systemctl string
+	ListenPort, Prefix, Owner                                    int
 }
 
 // WGHelperScript is the WireGuard helper site admit installs for d at
 // apply.WGHelper's Path, mode 755: a POSIX sh script whose put checks a conf
-// and installs it as d.WireGuardInstalled, and whose other verbs start,
-// restart, sync, show and read the journal of d's interface. The interface,
+// and installs it as d.WireGuardInstalled, and whose other verbs start and
+// restart d's interface, take it down (stopped, disabled at boot and its
+// installed conf deleted), sync its peers, show its fields and read its
+// unit's journal. The interface,
 // the listen port the owner admits (0 for a site nothing dials) and the mesh
 // subnet are built in, so nothing the deployment's user passes it can widen
 // them. put adds d.FwMark to every conf it installs and refuses one that sets
 // FwMark itself, so the egress table's mark chain sees the mesh's own packets.
 func WGHelperScript(d deployment.Deployment, listenPort int, subnet string) (string, error) {
-	return wgHelperScript(path.Dir(d.WireGuardInstalled()), 0, d, listenPort, subnet)
+	return wgHelperScript(path.Dir(d.WireGuardInstalled()), 0, "systemctl", d, listenPort, subnet)
 }
 
 // wgHelperScript renders the helper with its conf directory at dir, which
-// put expects owner, a uid, to hold: root (0) on a host.
-func wgHelperScript(dir string, owner int, d deployment.Deployment, listenPort int, subnet string) (string, error) {
+// put expects owner, a uid, to hold: root (0) on a host. systemctl is the
+// command its up, restart and down run: systemctl itself on a host, which
+// the helper finds on the PATH it sets, and a test's own script in a test,
+// so no test ever changes a unit on the machine it runs on.
+func wgHelperScript(dir string, owner int, systemctl string, d deployment.Deployment, listenPort int, subnet string) (string, error) {
 	iface := d.Interface()
 	helper, err := apply.WGHelper{Iface: iface}.Path()
 	if err != nil {
@@ -52,6 +57,9 @@ func wgHelperScript(dir string, owner int, d deployment.Deployment, listenPort i
 	if !path.IsAbs(dir) || strings.ContainsAny(dir, "'\n") {
 		return "", fmt.Errorf("the WireGuard helper for %s: %q cannot be its conf directory", iface, dir)
 	}
+	if systemctl != "systemctl" && (!path.IsAbs(systemctl) || strings.ContainsAny(systemctl, "'\n")) {
+		return "", fmt.Errorf("the WireGuard helper for %s: %q cannot be its systemctl", iface, systemctl)
+	}
 	mark, err := d.FwMark()
 	if err != nil {
 		return "", fmt.Errorf("the WireGuard helper for %s: %w", iface, err)
@@ -67,5 +75,6 @@ func wgHelperScript(dir string, owner int, d deployment.Deployment, listenPort i
 		Prefix:     prefix,
 		Owner:      owner,
 		FwMark:     fmt.Sprintf("%#08x", mark),
+		Systemctl:  systemctl,
 	})
 }

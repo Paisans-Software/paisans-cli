@@ -1598,8 +1598,10 @@ paisans site remove --force --ssh admin@203.0.113.9 --id f2a9 --execute --delete
   3 deletes the record of what the deployment granted on the host,
   `/srv/paisans/<token>/.paisans/granted.json`, last. It deletes the host's
   configuration store too, `/srv/paisans/<token>/.paisans/config/` and the
-  user's units that serve it; the other sites still hold every version. What
-  is root's stays: the mesh interface and its helper, the ufw rules, the
+  user's units that serve it; the other sites still hold every version. It
+  takes the mesh interface down through the WireGuard helper's `down`, which
+  deletes its conf too, so the site can be added back: `site prepare` first,
+  then `site add`. What is root's stays: the helper, the ufw rules, the
   user, its home, `/srv/paisans`, the admission record and the
   registry entry. The plan ends with the line the host's owner runs for them,
   `sudo paisans site evict --deployment <id> --user <user> --execute`, and

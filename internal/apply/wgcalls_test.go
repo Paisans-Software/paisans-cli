@@ -63,7 +63,11 @@ func directMeshCommand(s string) bool {
 
 // exemptLiterals are, by file, the exact strings that may run a mesh
 // command directly, and why.
-var exemptLiterals = map[string]map[string]string{}
+var exemptLiterals = map[string]map[string]string{
+	"../siteremove/host.go": {
+		`u=%s; e=$(systemctl is-enabled "$u" 2>&1); a=$(systemctl is-active "$u" 2>&1); printf 'is-enabled %%s\nis-active %%s\n' "$e" "$a"`: "site remove reads whether the mesh unit is enabled or active, which systemctl answers without root and changes nothing; taking it down goes through the helper's down",
+	},
+}
 
 // Every command that reaches the mesh interface goes through the WireGuard
 // helper, because it is the one thing the deployment's user may run as

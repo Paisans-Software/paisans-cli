@@ -117,7 +117,13 @@ type world struct {
 	// Knobs that break one thing.
 	failOnce string
 	// failOut is what the command failOnce fails prints, when set.
-	failOut     string
+	failOut string
+	// downLeavesUp makes the WireGuard helper's down answer and leave the
+	// interface up.
+	downLeavesUp bool
+	// unitAnswer, when set, is what systemctl answers about the mesh unit
+	// on every host, in place of its state.
+	unitAnswer  string
 	unreachable map[string]bool
 	caddyBroken bool
 	// neverStreams is a site whose recreated Patroni never streams again,
@@ -144,6 +150,10 @@ type host struct {
 	dirs     map[string]bool
 	commands []string
 	wgUp     bool
+	// wgEnabled is a mesh unit enabled at boot with its interface down, as
+	// one whose start failed at the last boot is. An up interface's unit is
+	// enabled and active whatever it holds.
+	wgEnabled bool
 	// wgRun is the mesh file the running interface was last handed by the
 	// WireGuard helper, nil while it runs the file on disk.
 	wgRun     *string
@@ -703,6 +713,25 @@ func (h *host) Run(command string) (string, error) {
 		if command != wgHelper+"sync" {
 			h.wgUp = true
 		}
+		return "", nil
+	case strings.HasPrefix(command, "u='wg-quick@psns-f2a9'; e=$(systemctl is-enabled \"$u\" 2>&1); a=$(systemctl is-active \"$u\" 2>&1)"):
+		if w.unitAnswer != "" {
+			return w.unitAnswer, nil
+		}
+		enabled, active := "disabled", "inactive"
+		if h.wgUp || h.wgEnabled {
+			enabled = "enabled"
+		}
+		if h.wgUp {
+			active = "active"
+		}
+		return "is-enabled " + enabled + "\nis-active " + active + "\n", nil
+	case command == wgHelper+"down":
+		if w.downLeavesUp {
+			return "", nil
+		}
+		h.wgUp, h.wgEnabled, h.wgRun = false, false, nil
+		delete(h.files, wgInstalled)
 		return "", nil
 	case strings.Contains(command, "getent ahosts"):
 		// Every peer's endpoint name resolves.
