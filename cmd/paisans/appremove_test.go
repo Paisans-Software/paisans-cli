@@ -135,6 +135,28 @@ func TestRemovedClientNameIsTheLastDeclaredOne(t *testing.T) {
 	if len(rec.Events) != 0 {
 		t.Errorf("warned with a declaring version: %+v", rec.Events)
 	}
+
+	// Versions newer than the declaring one that do not load are passed
+	// over, counted, and the first few named.
+	head := sha
+	for range shownVersions + 1 {
+		bad := files
+		bad.Paisans = []byte("version: 1\nnot_a_field: true\n")
+		if head, err = cache.Commit(bad, []string{head}, 2, key, time.Unix(1_800_000_000, 0)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := l.SetHead(head); err != nil {
+		t.Fatal(err)
+	}
+	name, _, err = removedClientName(rec, path, cfg, "talk", "c-1")
+	if name != "Test Talk" || err != nil {
+		t.Errorf("past unloadable versions: %q, %v", name, err)
+	}
+	if i := rec.Index("warn", "4 version(s)"); i < 0 || !strings.Contains(rec.Events[i].Extra, head[:12]) || !strings.HasSuffix(rec.Events[i].Extra, " and 1 more.") {
+		t.Errorf("passed over versions: %+v", rec.Events)
+	}
+	rec = &ui.Recorder{}
 	name, _, err = removedClientName(rec, path, cfg, "gone", "")
 	if name != "gone" || err != nil {
 		t.Errorf("an app no version declares: %q, %v", name, err)

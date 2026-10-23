@@ -259,13 +259,16 @@ func runAppRemove(args []string, stdin io.Reader, stdout io.Writer) error {
 	return nil
 }
 
+// shownVersions is how many passed over versions removedClientName names.
+const shownVersions = 3
+
 // removedClientName is the name app's client is looked for by, and where it
 // came from: the name in the newest version of this workstation's
 // configuration history that declares app, else the name cfg gives app. app
 // has left paisans-stack.yaml, and its display_name with it, so cfg alone
-// names the client after the app. It warns when the name is cfg's and a
-// client ID is recorded for app, and for each version passed over because it
-// does not load.
+// names the client after the app. When a client ID is recorded for app, it
+// warns that the name is cfg's, and of the versions passed over because they
+// do not load.
 func removedClientName(r ui.Reporter, configPath string, cfg *config.Config, app, recordedID string) (name, from string, err error) {
 	var found configstore.Declaration
 	if l, err := workstationOf(configPath); err == nil {
@@ -273,12 +276,16 @@ func removedClientName(r ui.Reporter, configPath string, cfg *config.Config, app
 			return "", "", fmt.Errorf("reading this workstation's configuration history for %s: %w", app, err)
 		}
 	}
-	if len(found.Unreadable) > 0 {
-		short := make([]string, len(found.Unreadable))
-		for i, sha := range found.Unreadable {
-			short[i] = sha[:12]
+	if recordedID != "" && len(found.Unreadable) > 0 {
+		var short []string
+		for _, sha := range found.Unreadable[:min(len(found.Unreadable), shownVersions)] {
+			short = append(short, sha[:12])
 		}
-		r.Warn(fmt.Sprintf("%d version(s) of this workstation's configuration history do not load, so the search for %s's client name passed over them", len(short), app), "Their paisans-stack.yaml is not one this "+progname.Cmd()+" reads: "+strings.Join(short, ", ")+".")
+		list := strings.Join(short, ", ")
+		if more := len(found.Unreadable) - len(short); more > 0 {
+			list += fmt.Sprintf(" and %d more", more)
+		}
+		r.Warn(fmt.Sprintf("%d version(s) of this workstation's configuration history do not load, so the search for %s's client name passed over them", len(found.Unreadable), app), "Their paisans-stack.yaml is not one this "+progname.Cmd()+" reads: "+list+".")
 	}
 	if found.Config != nil {
 		return found.Config.ClientName(app), "the name in version " + found.SHA[:12] + ", the newest of this workstation's configuration history that declares " + app + "; `" + progname.Cmd() + " deployment pull --execute` fetches a newer one", nil

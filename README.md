@@ -8882,9 +8882,11 @@ so it is kept and named for an administrator to delete; nothing is deleted at
 Pocket ID by name alone. A database whose owner is another role, a name a
 declared app still uses, and a bucket another key can reach are kept the same
 way, each with the reason. The client step runs once, from the site `oidc
-client create` calls. When the expected name comes from the current configuration, because the
-workstation's history holds no version declaring the app, it warns, and
-`paisans deployment pull --execute` fetches the history the sites hold.
+client create` calls. When a client ID is recorded for the app and the
+expected name comes from the current configuration, because the workstation
+holds no configuration history or no version in it declares the app, it
+warns, and `paisans deployment pull --execute` fetches the history the sites
+hold.
 
 **Deleting member data needs a person at a terminal, or `--yes`.**
 `--delete-data` plans the deletions, and on `--execute` asks for the app's

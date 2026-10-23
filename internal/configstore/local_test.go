@@ -1175,3 +1175,34 @@ func TestDeclaringIsTheNewestVersionThatDeclaresTheApp(t *testing.T) {
 		t.Errorf("an app no version declares: %+v, %v", d, err)
 	}
 }
+
+// paisansFiles leaves out a version without a paisans-stack.yaml and reads
+// the versions after it in the same answer.
+func TestPaisansFilesLeavesOutAVersionWithoutOne(t *testing.T) {
+	needTools(t, "git", "ssh-keygen")
+	key, _ := testSSHKey(t)
+	cache, err := InitRepo(filepath.Join(t.TempDir(), "c.git"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	held, err := cache.Commit(testFiles(), nil, 1, key, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree, err := cache.git(strings.NewReader(""), nil, "mktree")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := cache.git(nil, []string{"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.org", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.org"}, "commit-tree", "-m", "empty", strings.TrimSpace(string(tree)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty := strings.TrimSpace(string(out))
+	files, err := cache.paisansFiles([]string{empty, held, empty})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := files[empty]; ok || string(files[held]) != "p\n" || len(files) != 1 {
+		t.Errorf("files %q", files)
+	}
+}
